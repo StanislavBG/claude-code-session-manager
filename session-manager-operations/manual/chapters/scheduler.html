@@ -40,12 +40,32 @@ there is no such thing as a free-floating PRD.</p>
   </tbody>
 </table>
 
-<h2>Concurrency: one pool, machine-wide</h2>
+<h2>Concurrency: one pool, machine-wide — with three inner gates</h2>
 
 <p>Scheduler jobs and Chat runs draw from the <em>same</em> pool of concurrent <code>claude -p</code>
-sessions (default 5, adjustable from the Home tab). On top of that sits a memory gate: a job won't
-start if the machine doesn't have headroom for it. That gate is machine-aware rather than a
-hardcoded job count, which is what makes running five parallel agents on a laptop survivable.</p>
+sessions (default 5, adjustable from the Home tab). Underneath that outer pool sit three more
+predicates that decide, tick by tick, which pending jobs actually launch — none of them add a
+second pool; they only withhold launches from the one that exists:</p>
+
+<ul>
+  <li><strong>Memory gate.</strong> A job won't start if the machine doesn't have headroom for it.
+  Machine-aware rather than a hardcoded job count, which is what makes running five parallel
+  agents on a laptop survivable.</li>
+  <li><strong>Per-project cap.</strong> No single project can claim the whole pool — by default
+  each project gets at most 2 concurrently running jobs, so one busy project can't starve every
+  other open project of a slot.</li>
+  <li><strong>CPU-load gate.</strong> A job is held back when the 1-minute load average per core
+  exceeds a threshold (default 0.85), even if slots and memory are free. This catches contention a
+  memory gate can't see — e.g. several CPU-heavy test batteries running at once slowly starving
+  each other of wall-clock, each one then overrunning its own timeout.</li>
+</ul>
+
+<p>On top of the per-project cap, the scheduler also enforces <strong>cross-project fairness</strong>:
+when there's more pending work than free slots, slots are handed out round-robin across projects
+that have pending jobs — one job per project per pass — so a single project can never drain every
+free slot in one tick while another project with eligible work gets none. If a project's oldest
+pending job has waited past a threshold while some other project keeps getting slots, that project
+is flagged as starved so it gets attention rather than silently waiting indefinitely.</p>
 
 <h2>Writing a PRD that actually finishes</h2>
 

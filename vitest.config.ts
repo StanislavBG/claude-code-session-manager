@@ -113,6 +113,7 @@ export default defineConfig({
       'src/main/__tests__/promptSessionsCreateEpicHandler.test.cjs',
       'src/main/__tests__/agentModelResolve.test.cjs',
       'src/main/__tests__/projectPages.test.cjs',
+      'src/main/__tests__/projectHomeAdminRoutes.test.cjs',
       'src/main/__tests__/scheduler-verify-prd-path.test.cjs',
       'src/main/__tests__/scheduler-fix-plan-path.test.cjs',
       'src/main/lib/__tests__/jobWorktree.test.cjs',

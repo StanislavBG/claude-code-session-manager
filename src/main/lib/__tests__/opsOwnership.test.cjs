@@ -27,6 +27,12 @@ test('the owner of a namespace may write it', () => {
   assert.equal(checkOpsWrite(`${P}/prompt-sessions/active-index.json`, 'epics').ok, true);
   assert.equal(checkOpsWrite(`${P}/scheduler/state/queue.json`, 'scheduler').ok, true);
   assert.equal(checkOpsWrite(`${P}/project-brief/brief.json`, 'project-home').ok, true);
+  // project-pages: declared owner is 'project-home', same as project-brief —
+  // this governs only the app's own /admin/project-home/render write path
+  // (config.cjs), NOT a project-home-builder Epic's own Write-tool authoring
+  // of summary.json/picks.json, which never goes through config.cjs at all
+  // and so is unaffected by this table either way (see project-pages/README.md).
+  assert.equal(checkOpsWrite(`${P}/project-pages/output/manifest.json`, 'project-home').ok, true);
 });
 
 test('a non-owner is refused, and the error names the owner', () => {
@@ -36,6 +42,7 @@ test('a non-owner is refused, and the error names the owner', () => {
   // The exact cross-write this law exists to prevent: another surface
   // rewriting the Epic store out from under Epics.
   assert.equal(checkOpsWrite(`${P}/prompt-sessions/psess-1.json`, 'scheduler').ok, false);
+  assert.equal(checkOpsWrite(`${P}/project-pages/output/manifest.json`, 'scheduler').ok, false);
 });
 
 test('an undeclared writer is refused (fail-closed)', () => {

@@ -148,6 +148,9 @@ function validateWrite(realAbs) {
       //                    (PRD 825; scheduler.cjs remote.writePrd)
       //   project-brief    projectBrief.cjs's brief.json (PRD 837)
       //   bilko-host       bilkoHost.cjs's bundle prep
+      //   project-pages    projectHomeAdminRoutes.cjs's app-side render path
+      //                    (summary.json/picks.json/output/*; PRD:
+      //                    project-home-admin-routes)
       // Paths come from opsOwnership.opsPath (PRD 1082) — the one ops-root
       // resolver — which THROWS for an ephemeral root (a linked worktree that
       // pty.cjs registered as an allowed root for its spawn cwd, or
@@ -155,7 +158,7 @@ function validateWrite(realAbs) {
       // never a writable destination, so its exemptions simply do not exist.
       let opsSubs;
       try {
-        opsSubs = ['prompt-sessions', 'scheduler', 'project-brief', 'bilko-host'].map((ns) => opsPath(realRoot, ns));
+        opsSubs = ['prompt-sessions', 'scheduler', 'project-brief', 'bilko-host', 'project-pages'].map((ns) => opsPath(realRoot, ns));
       } catch {
         opsSubs = [];
       }

@@ -79,20 +79,19 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   an undeclared writer throws. Adding a namespace or writer is a deliberate edit to that file. Build ops
   paths only via its `opsPath()`. Read its `README.md` first.
   - **Owned** (in `OWNERS`, app-owned runtime state): `prompt-sessions` → epics · `scheduler` → scheduler ·
-    `project-brief` → project-home · `logs` → logs · `bilko-host` → bilko-host.
+    `project-brief` → project-home · `logs` → logs · `bilko-host` → bilko-host · `project-pages` →
+    project-home (app's admin render route only; a Builder Epic's own Write-tool authoring stays ungoverned —
+    see `project-pages/README.md`).
   - **Deliberately NOT owned** (skill-authored docs/artifacts, no concurrent-write hazard — this is the
-    correct split, not a gap): `architecture`, `design-mocks`, `HUMAN_LEARN`, `manual`, `reviews`,
-    `project-pages`. `feedback` is **retired** (2026-08-02). `browser` is a leftover artifact folder, safe
-    to delete on sight.
+    correct split, not a gap): `architecture`, `design-mocks`, `HUMAN_LEARN`, `manual`, `reviews`.
+    `feedback` **retired** (2026-08-02). `browser` is a leftover artifact folder, safe to delete on sight.
   - **Any new top-level folder under `session-manager-operations/` must land in this enumeration or in
     `OWNERS` in the same PR that creates it** — `scripts/ops-sweep.cjs` greps this list and reports an
     unlisted namespace as `UNDOCUMENTED`. Don't add a speculative `general` namespace.
-- **Open-core: the APP is free and stays free.** The Field Manual is the only paid artifact. Never add a
-  license check, entitlement gate, trial limit, nag, or "pro" tier to the app, and never move an existing app
-  feature behind a purchase.
-- **The bilko.run relay is intentionally still live** even though the desktop half of the web remote was
-  removed 2026-08-06 (restore from `b014cc2`). Do NOT delete or decommission the relay, its routes, or its
-  product-page copy in `~/Projects/Bilko/`.
+- **Open-core: the APP is free and stays free.** Field Manual is the only paid artifact. Never add a license
+  check, entitlement gate, trial limit, nag, or "pro" tier, and never move an app feature behind a purchase.
+- **The bilko.run relay stays live** — desktop half of web remote removed 2026-08-06 (restore `b014cc2`). Do
+  NOT delete/decommission the relay, its routes, or the product-page copy in `~/Projects/Bilko/`.
 
 ## Scheduler
 
@@ -108,8 +107,8 @@ Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/
   rules from two real stuck-job incidents + a pre-queue checklist (§10).
 - **PRD-write guard: adopt by REFERENCE, never vendor** — other repos point at THIS repo's absolute
   `scripts/hooks/guard-prd-writes.cjs`; New Epic's readiness banner installs it (`installPrdWriteGuard`).
-- A job parked in `needs_review` is a **question**, routed back to the Epic that authored the PRD. It never
-  creates work on its own.
+- A job parked in `needs_review` is a **question**, routed back to the authoring Epic — it never creates
+  work on its own.
 - The Scheduler nav row is **PROJECT-face only** — every route it renders is cwd-derived.
 
 ## Conventions
@@ -119,13 +118,12 @@ Full list + the incident behind each: [`conventions.md`](session-manager-operati
 - **Tab ID = claudeSessionId** by design (`--session-id` pass-through + JSONL lookup).
 - **No CommonJS in renderer, no ES modules in main** — `.cjs` for main/preload bypasses `type: module`.
 - **No backwards-compat shims** — single-author project; just rename and refactor.
-- **Privacy invariant**: `RecordingStatus` MUST be mounted whenever `isRecording === true`, on the TOP rung
-  of the z-ladder.
+- **Privacy invariant**: `RecordingStatus` MUST be mounted on the TOP z-ladder rung whenever `isRecording === true`.
 - **One global z-ladder, `lib/zLayers.ts`** — values are class-name string literals, never interpolated
   (Tailwind JIT scans source text). Guarded by `lib/__tests__/zLayers.test.ts`.
-- **No per-OS UI chrome** — native frame on every platform; no layering value branches on `process.platform`.
-- **Toast is the user-facing error channel** — `useToast().show('error', msg)`; don't swallow errors.
-- **Renderer stores are islands** — no cross-store subscription; compose selectors in components.
+- **No per-OS UI chrome** — native frame on every platform; no layering branches on `process.platform`.
+- **Toast is the user-facing error channel** — `useToast().show('error', msg)`; never swallow errors.
+- **Renderer stores are islands** — no cross-store subscription; compose selectors per component.
 - **`--model` must be pinned explicitly** on every `claude -p` / `claude --print` call site. Unpinned calls
   inherit a drifting CLI default and silently multiply automation cost.
 
@@ -134,8 +132,8 @@ Full list + the incident behind each: [`conventions.md`](session-manager-operati
 Each of these is a real incident, with the post-mortem in
 [`conventions.md`](session-manager-operations/architecture/conventions.md) — read it before working around one.
 
-- Launching a `claude -p` process **without acquiring a slot from `lib/sessionSlots.cjs`**. That pool is the
-  single machine-wide concurrency limit. Do not reintroduce a private per-consumer cap.
+- Launching a `claude -p` process **without acquiring a slot from `lib/sessionSlots.cjs`** — the single
+  machine-wide concurrency limit — never reintroduce a private cap.
 - Gating scheduler batches on **`parallelGroup`** — it's a unique-per-PRD display hint, never a barrier.
   `dependsOn` is the sole ordering primitive.
 - **Returning a freshly-built value from a zustand selector** (`?? []`, `.map(...)`, `Object.values(...)`) —
@@ -144,15 +142,15 @@ Each of these is a real incident, with the post-mortem in
   boundary. `npm run lint:hooks`.
 - Adding `shell: true` to `child_process.spawn` outside `watchers.cjs` / `app:test-fire-hook`.
 - Re-implementing tmp+rename atomic writes — use `config.cjs`'s `writeJson` / `writeTextAtomic`.
-- Reading remote URLs in production — `createWindow` hard-fails if `dist/index.html` is missing.
-- Adding a new LeftNav tab before checking whether an existing surface already owns that data. The nav was
-  pruned once already after growing to ~31 destinations with real overlap.
+- Reading remote URLs in prod — `createWindow` hard-fails if `dist/index.html` is missing.
+- Adding a new LeftNav tab before checking whether an existing surface owns that data — pruned once already
+  after growing to ~31 destinations with real overlap.
 - Adding pane-specific state to parent tabs, or importing design primitives via wildcard.
 
 ## Distribution
 
 Published as `claude-code-session-manager` on npm (`npx claude-code-session-manager@latest`). `bin/cli.cjs`
-spawns the bundled Electron binary; `postinstall` runs `electron-rebuild` for `node-pty`. Linux + darwin only.
+spawns the bundled Electron binary; `postinstall` runs `electron-rebuild` for `node-pty`. Linux+darwin only.
 
 **Simple mode**: `--simple` boots a chrome-free single-terminal cockpit (`app:launch-mode` IPC →
 `SimpleShell.tsx`, `DEFAULT_PRESETS[0]`; no persisted-tab hydration).

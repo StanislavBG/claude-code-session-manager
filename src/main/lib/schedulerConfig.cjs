@@ -72,6 +72,15 @@ module.exports = {
   // SM_QUARANTINE_ESCALATE_HOURS for testing/tuning.
   QUARANTINE_ESCALATE_MS: 24 * 60 * 60_000,
 
+  // A project with pending work, nothing of its own running, and an oldest
+  // pending job older than this — while some OTHER project is dispatching —
+  // is STARVED (findStarvedProjects, schedulerBatch.cjs; PRD 1087). Written
+  // against 2026-09-01: social-signals-trader (8 pending) got zero starts
+  // for 3.5 h while starry-night-ships took every freed slot, because the
+  // cross-project sort key was the per-project PRD number (fixed by PRD
+  // 1086). Escalation only — warn + audit, never dispatch.
+  STARVATION_ESCALATE_MS: 45 * 60_000,
+
   // A RUNNING job that has overrun its own PRD's `estimateMinutes` by this
   // factor is escalated. Distinct from MAX_JOB_DURATION_MS (4h), which is a
   // deadman kill: a 20-minute PRD still running at 3h is 9x over estimate but

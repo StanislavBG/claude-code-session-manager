@@ -81,6 +81,7 @@ const {
   JOB_OVERRUN_FLOOR_MS: JOB_OVERRUN_FLOOR_MS_DEFAULT,
   PIDLESS_SPAWN_GRACE_MS,
   INVESTIGATION_MAX_MS,
+  STARVATION_ESCALATE_MS,
 } = require('./lib/schedulerConfig.cjs');
 const QUARANTINE_ESCALATE_MS = process.env.SM_QUARANTINE_ESCALATE_HOURS
   ? Number(process.env.SM_QUARANTINE_ESCALATE_HOURS) * 60 * 60_000
@@ -91,7 +92,7 @@ const JOB_OVERRUN_FACTOR = process.env.SM_JOB_OVERRUN_FACTOR
 const JOB_OVERRUN_FLOOR_MS = process.env.SM_JOB_OVERRUN_FLOOR_MINUTES
   ? Number(process.env.SM_JOB_OVERRUN_FLOOR_MINUTES) * 60_000
   : JOB_OVERRUN_FLOOR_MS_DEFAULT;
-const { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD } = require('./lib/schedulerBatch.cjs');
+const { pickForProject, pickNextBatch, findStarvedProjects, DEFAULT_PROJECT_CWD } = require('./lib/schedulerBatch.cjs');
 const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
 const { writeRcaReport, extractRcaBlock } = require('./lib/rcaReport.cjs');
 const queueHistory = require('./lib/queueHistory.cjs');
@@ -1796,6 +1797,10 @@ async function reconcile(state) {
       originSessionId: resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       status: 'pending',
+      // Enqueue time (PRD 1086/1087): the cross-project fairness tiebreak and
+      // the starvation escalation both need a provable age for a pending row;
+      // before this stamp a freshly minted row carried no timestamp at all.
+      queuedAt: new Date().toISOString(),
       runId: null,
       startedAt: null,
       finishedAt: null,
@@ -5549,6 +5554,20 @@ async function init() {
       })
         .then(() => broadcast({ flush: true }))
         .catch(() => {});
+    }
+
+    // Per-project starvation (PRD 1087): a project with pending work that has
+    // been passed over on every tick while OTHER projects dispatch. Nothing
+    // else distinguishes "no pending work" from "pending work, never
+    // started" — the 2026-09-01 NN-ordering starvation ran 3.5 h unnoticed.
+    // Escalation only, same shape as the quarantine/overrun warnings above.
+    for (const sp of findStarvedProjects(s.jobs, Date.now(), STARVATION_ESCALATE_MS)) {
+      console.warn(
+        `[scheduler] PROJECT STARVED: project=${sp.cwd} pending=${sp.pendingCount} oldest=${sp.oldestPendingSlug} `
+        + `waiting=${Math.round(sp.ageMs / 60_000)}m (>= ${Math.round(STARVATION_ESCALATE_MS / 60_000)}m threshold) `
+        + `while other projects are running — check the cross-project fairness rule in pickNextBatch`,
+      );
+      appendAuditEvent('project_starved', { cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs });
     }
   }, 10 * 60_000);
 

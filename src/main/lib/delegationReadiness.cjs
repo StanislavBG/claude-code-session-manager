@@ -28,6 +28,8 @@ const DEV_PLUGIN_ENABLED_KEY = 'session-manager-dev@session-manager';
 const SCHEDULER_MCP_SERVER_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'scheduler-mcp-server.cjs');
 const PRD_WRITE_GUARD_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'hooks', 'guard-prd-writes.cjs');
 const PRD_WRITE_GUARD_MATCHER = 'Write|Edit|NotebookEdit';
+const DESTRUCTIVE_GIT_GUARD_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'hooks', 'guard-destructive-git.cjs');
+const DESTRUCTIVE_GIT_GUARD_MATCHER = 'Bash';
 const LIVE_PROBE_TIMEOUT_MS = 10_000;
 const LIVE_PROBE_TTL_MS = 60_000;
 const REQUIRED_LIVE_TOOLS = ['scheduler_create_prd', 'session_manager_help'];
@@ -341,13 +343,15 @@ function checkAgentPersonas({ cwd, homeDir }) {
 }
 
 /**
- * Pull the guard script's path out of a hook `command` string.
+ * Pull a guard script's path out of a hook `command` string.
  *
- * Commands are `node <script>` (optionally quoted). We only care about the
- * token naming guard-prd-writes — anything else is not this hook.
+ * Commands are `node <script>` (optionally quoted). `scriptBasename` names
+ * the exact guard file we're looking for — anything else is not that hook.
  */
-function extractGuardScriptPath(command) {
-  const match = String(command).match(/(?:"([^"]*guard-prd-writes\.cjs)"|'([^']*guard-prd-writes\.cjs)'|(\S*guard-prd-writes\.cjs))/);
+function extractGuardScriptPath(command, scriptBasename) {
+  const esc = scriptBasename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(?:"([^"]*${esc})"|'([^']*${esc})'|(\\S*${esc}))`);
+  const match = String(command).match(re);
   if (!match) return null;
   return match[1] || match[2] || match[3] || null;
 }
@@ -375,7 +379,7 @@ function checkPrdWriteGuard({ cwd }) {
     for (const h of matcher.hooks) {
       if (typeof h?.command !== 'string' || !h.command.includes('guard-prd-writes')) continue;
       mentioned = true;
-      const raw = extractGuardScriptPath(h.command);
+      const raw = extractGuardScriptPath(h.command, 'guard-prd-writes.cjs');
       if (!raw) continue;
       const abs = path.isAbsolute(raw) ? raw : path.resolve(cwd, raw);
       if (fs.existsSync(abs)) { resolvedScript = abs; break; }
@@ -483,7 +487,105 @@ async function installPrdWriteGuard({ cwd }) {
 }
 
 /**
- * Runs all six delegation-readiness checks for `cwd`. Every filesystem read
+ * `ok` must mean "a hook that will actually run", not "the settings file
+ * mentions guard-destructive-git somewhere" — same rationale as
+ * checkPrdWriteGuard above (a PreToolUse command pointing at a script that
+ * doesn't exist in this project exits non-zero WITHOUT code 2, a
+ * non-blocking error that silently guards nothing).
+ */
+function checkDestructiveGitGuard({ cwd }) {
+  const settings = readJsonSafe(path.join(cwd, '.claude', 'settings.json'), null);
+  const preToolUse = Array.isArray(settings?.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
+
+  let mentioned = false;
+  let resolvedScript = null;
+  for (const matcher of preToolUse) {
+    if (!Array.isArray(matcher?.hooks)) continue;
+    for (const h of matcher.hooks) {
+      if (typeof h?.command !== 'string' || !h.command.includes('guard-destructive-git')) continue;
+      mentioned = true;
+      const raw = extractGuardScriptPath(h.command, 'guard-destructive-git.cjs');
+      if (!raw) continue;
+      const abs = path.isAbsolute(raw) ? raw : path.resolve(cwd, raw);
+      if (fs.existsSync(abs)) { resolvedScript = abs; break; }
+    }
+    if (resolvedScript) break;
+  }
+
+  const ok = !!resolvedScript;
+  let detail;
+  if (ok) detail = `guard-destructive-git PreToolUse hook found in ${cwd}/.claude/settings.json, resolving to ${resolvedScript}`;
+  else if (mentioned) detail = `guard-destructive-git PreToolUse hook in ${cwd}/.claude/settings.json names a script that does not exist — it would silently guard nothing`;
+  else detail = `no guard-destructive-git PreToolUse hook in ${cwd}/.claude/settings.json`;
+
+  return {
+    id: 'destructive-git-guard',
+    label: 'Destructive-git guard hook installed',
+    ok,
+    detail,
+    fix: ok
+      ? null
+      : `Add a PreToolUse hook to ${cwd}/.claude/settings.json matching Bash that runs node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}`,
+    fixAction: ok ? null : 'install-destructive-git-guard',
+  };
+}
+
+/**
+ * Install the destructive-git guard into `<cwd>/.claude/settings.json`.
+ * Same reference-not-vendor rationale, and the same merge-into-existing-
+ * hooks-block / repair-in-place / idempotent behaviour as installPrdWriteGuard
+ * above — see that function's header. The one difference is the matcher
+ * (`Bash`, not `Write|Edit|NotebookEdit`), so this lands as its own
+ * `PreToolUse` entry rather than sharing installPrdWriteGuard's.
+ */
+async function installDestructiveGitGuard({ cwd }) {
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  addAllowedRoot(cwd);
+
+  const existing = fs.existsSync(settingsPath) ? readJsonSafe(settingsPath, undefined) : {};
+  if (existing === undefined) {
+    return { ok: false, action: 'error', error: `${settingsPath} is not valid JSON — fix it by hand before installing the guard` };
+  }
+  const settings = (existing && typeof existing === 'object' && !Array.isArray(existing)) ? existing : {};
+
+  const command = `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}`;
+  const hooks = (settings.hooks && typeof settings.hooks === 'object') ? settings.hooks : {};
+  const preToolUse = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse.slice() : [];
+
+  if (checkDestructiveGitGuard({ cwd }).ok) {
+    return { ok: true, action: 'already-installed', settingsPath, command };
+  }
+
+  let repaired = false;
+  for (const matcher of preToolUse) {
+    if (!Array.isArray(matcher?.hooks)) continue;
+    for (const h of matcher.hooks) {
+      if (typeof h?.command === 'string' && h.command.includes('guard-destructive-git')) {
+        h.command = command;
+        h.type = 'command';
+        repaired = true;
+      }
+    }
+  }
+
+  if (!repaired) {
+    const target = preToolUse.find((m) => m?.matcher === DESTRUCTIVE_GIT_GUARD_MATCHER);
+    if (target) {
+      target.hooks = Array.isArray(target.hooks) ? target.hooks : [];
+      target.hooks.push({ type: 'command', command });
+    } else {
+      preToolUse.push({ matcher: DESTRUCTIVE_GIT_GUARD_MATCHER, hooks: [{ type: 'command', command }] });
+    }
+  }
+
+  const next = { ...settings, hooks: { ...hooks, PreToolUse: preToolUse } };
+  await writeJson(settingsPath, next);
+
+  return { ok: true, action: repaired ? 'repaired' : 'installed', settingsPath, command };
+}
+
+/**
+ * Runs all seven delegation-readiness checks for `cwd`. Every filesystem read
  * is wrapped (readJsonSafe / try-catch) so a missing or unparseable file
  * yields ok:false with a detail, never a thrown exception. Async because
  * scheduler-mcp-live genuinely spawns a process and waits on it (bounded by
@@ -496,8 +598,8 @@ async function checkDelegationReadiness({ cwd, homeDir = os.homedir() }) {
   const schedulerMcpLiveCheck = await checkSchedulerMcpLive({ cwd, homeDir, schedulerMcpCheck });
 
   // `fixAction: null` / `warn: false` are the defaults — only a check with a
-  // sanctioned one-press installer overrides fixAction (today: prd-write-guard),
-  // and only scheduler-mcp-project-duplicate ever sets warn.
+  // sanctioned one-press installer overrides fixAction (today: prd-write-guard,
+  // destructive-git-guard), and only scheduler-mcp-project-duplicate ever sets warn.
   const checks = [
     schedulerMcpCheck,
     schedulerMcpLiveCheck,
@@ -505,6 +607,7 @@ async function checkDelegationReadiness({ cwd, homeDir = os.homedir() }) {
     checkDevPlugin({ homeDir }),
     checkAgentPersonas({ cwd, homeDir }),
     checkPrdWriteGuard({ cwd }),
+    checkDestructiveGitGuard({ cwd }),
   ].map((c) => ({ fixAction: null, warn: false, ...c }));
 
   return {
@@ -516,8 +619,11 @@ async function checkDelegationReadiness({ cwd, homeDir = os.homedir() }) {
 module.exports = {
   checkDelegationReadiness,
   installPrdWriteGuard,
+  installDestructiveGitGuard,
   probeSchedulerMcpLive,
   clearLiveProbeCache,
   PRD_WRITE_GUARD_SCRIPT,
   PRD_WRITE_GUARD_MATCHER,
+  DESTRUCTIVE_GIT_GUARD_SCRIPT,
+  DESTRUCTIVE_GIT_GUARD_MATCHER,
 };

@@ -14,9 +14,11 @@ const path = require('node:path');
 const {
   checkDelegationReadiness,
   installPrdWriteGuard,
+  installDestructiveGitGuard,
   probeSchedulerMcpLive,
   clearLiveProbeCache,
   PRD_WRITE_GUARD_SCRIPT,
+  DESTRUCTIVE_GIT_GUARD_SCRIPT,
 } = require('../delegationReadiness.cjs');
 
 const REQUIRED_TOOLS = ['scheduler_create_prd', 'session_manager_help'];
@@ -97,6 +99,10 @@ async function makeGreenFixtures() {
           matcher: 'Write|Edit|NotebookEdit',
           hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }],
         },
+        {
+          matcher: 'Bash',
+          hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }],
+        },
       ],
     },
   });
@@ -104,12 +110,12 @@ async function makeGreenFixtures() {
   return { homeDir, cwd, scriptPath };
 }
 
-test('all six checks pass on a fully-configured project', async () => {
+test('all seven checks pass on a fully-configured project', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
   const result = await checkDelegationReadiness({ cwd, homeDir });
 
   expect(result.ok).toBe(true);
-  expect(result.checks).toHaveLength(6);
+  expect(result.checks).toHaveLength(7);
   expect(result.checks.every((c) => c.ok)).toBe(true);
   expect(result.checks.map((c) => c.id)).toEqual([
     'scheduler-mcp',
@@ -118,6 +124,7 @@ test('all six checks pass on a fully-configured project', async () => {
     'dev-plugin',
     'agent-personas',
     'prd-write-guard',
+    'destructive-git-guard',
   ]);
 }, 15_000);
 
@@ -380,5 +387,148 @@ test('the installed command actually DENIES a scheduler PRD write and allows a n
   expect(denied.hookSpecificOutput?.permissionDecision).toBe('deny');
 
   const allowed = run({ file_path: path.join(cwd, 'src', 'x.ts'), content: 'x' });
+  expect(allowed.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+});
+
+// ─────────────────────────────── destructive-git-guard / installDestructiveGitGuard
+
+test('destructive-git-guard: fails independently when the hook is missing', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: 'Write|Edit|NotebookEdit',
+          hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }],
+        },
+      ],
+    },
+  });
+
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const check = result.checks.find((c) => c.id === 'destructive-git-guard');
+  expect(check.ok).toBe(false);
+  expect(result.ok).toBe(false);
+  // the other checks still pass independently
+  expect(result.checks.filter((c) => c.id !== 'destructive-git-guard').every((c) => c.ok)).toBe(true);
+}, 15_000);
+
+test('destructive-git-guard: fails when the hook names a script that does not exist', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: 'Write|Edit|NotebookEdit',
+          hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }],
+        },
+        {
+          matcher: 'Bash',
+          hooks: [{ type: 'command', command: 'node /does/not/exist/guard-destructive-git.cjs' }],
+        },
+      ],
+    },
+  });
+
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const check = result.checks.find((c) => c.id === 'destructive-git-guard');
+  expect(check.ok).toBe(false);
+  expect(check.detail).toMatch(/does not exist/);
+}, 15_000);
+
+test('installDestructiveGitGuard: writes the canonical ABSOLUTE-path entry and turns the check green', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: 'Write|Edit|NotebookEdit',
+          hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }],
+        },
+      ],
+    },
+  });
+
+  const r = await installDestructiveGitGuard({ cwd });
+  expect(r.ok).toBe(true);
+  expect(r.action).toBe('installed');
+  expect(r.command).toBe(`node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}`);
+
+  const written = JSON.parse(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'));
+  // The pre-existing Write|Edit|NotebookEdit matcher (and its hook) survives untouched.
+  expect(written.hooks.PreToolUse).toContainEqual(
+    { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] },
+  );
+  expect(written.hooks.PreToolUse).toContainEqual(
+    { matcher: 'Bash', hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }] },
+  );
+
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  expect(result.checks.find((c) => c.id === 'destructive-git-guard').ok).toBe(true);
+  expect(result.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
+}, 15_000);
+
+test('installDestructiveGitGuard: is idempotent — a healthy guard is a no-op', async () => {
+  const { cwd } = await makeGreenFixtures();
+  const before = fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8');
+
+  const again = await installDestructiveGitGuard({ cwd });
+  expect(again.action).toBe('already-installed');
+  expect(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8')).toBe(before);
+});
+
+test('installDestructiveGitGuard: repairs a broken entry in place rather than duplicating it', async () => {
+  const { cwd } = await makeGreenFixtures();
+  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: 'Write|Edit|NotebookEdit',
+          hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }],
+        },
+        {
+          matcher: 'Bash',
+          hooks: [{ type: 'command', command: 'node /does/not/exist/guard-destructive-git.cjs' }],
+        },
+      ],
+    },
+  });
+
+  const r = await installDestructiveGitGuard({ cwd });
+  expect(r.action).toBe('repaired');
+
+  const written = JSON.parse(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'));
+  const bashMatchers = written.hooks.PreToolUse.filter((m) => m.matcher === 'Bash');
+  expect(bashMatchers).toHaveLength(1);
+  expect(bashMatchers[0].hooks).toEqual([{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }]);
+});
+
+test('installDestructiveGitGuard: refuses on unparseable settings rather than discarding them', async () => {
+  const { cwd } = await makeGreenFixtures();
+  await fsp.writeFile(path.join(cwd, '.claude', 'settings.json'), '{ not valid json', 'utf8');
+
+  const r = await installDestructiveGitGuard({ cwd });
+  expect(r.ok).toBe(false);
+  expect(r.action).toBe('error');
+  expect(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8')).toBe('{ not valid json');
+});
+
+// The guard script is EXERCISED here too, same rationale as the
+// installPrdWriteGuard end-to-end test above.
+test('the installed destructive-git command actually DENIES a shared-tree stash and allows it inside an sm-job/ worktree', async () => {
+  const { cwd } = await makeGreenFixtures();
+  const { execFileSync } = require('node:child_process');
+  const os2 = require('node:os');
+
+  const run = (command, runCwd) => JSON.parse(execFileSync('node', [DESTRUCTIVE_GIT_GUARD_SCRIPT], {
+    input: JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: runCwd }),
+    encoding: 'utf8',
+  }));
+
+  const denied = run('git stash', cwd);
+  expect(denied.hookSpecificOutput?.permissionDecision).toBe('deny');
+
+  const worktreeCwd = path.join(os2.tmpdir(), 'session-manager-job-worktrees', 'somehash', 'some-slug');
+  const allowed = run('git stash', worktreeCwd);
   expect(allowed.hookSpecificOutput?.permissionDecision).not.toBe('deny');
 });

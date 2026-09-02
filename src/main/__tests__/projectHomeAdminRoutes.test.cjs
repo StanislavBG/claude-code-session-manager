@@ -9,7 +9,7 @@
 
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
@@ -307,6 +307,100 @@ test('GET routes (contract, status) never widen the write boundary — only rend
   await expect(config.writeJson(probePath, { a: 1 }, { writer: 'project-home' })).rejects.toThrow(
     /Write outside allowed write boundaries/,
   );
+});
+
+test('render: two concurrent renders for the same cwd are serialized, not interleaved', async () => {
+  const cwd = await mkProjectCwd();
+  const fake = makeFakeAdminHttp();
+  registerAdminRoute(fake);
+
+  const contract = await fake.call('GET', '/admin/project-home/contract', { query: new URLSearchParams({ cwd }) });
+  const picks = picksFromCatalog(contract.body.catalog);
+
+  // Distinct summaries so writes for render A vs render B can be told apart
+  // by content — identity.oneLine is echoed into every lens's html output
+  // (see renderer.cjs's htmlDocument/proj.oneLine usage).
+  const summaryA = validSummary({ identity: { ...validSummary().identity, oneLine: 'MARKER_RENDER_A' } });
+  const summaryB = validSummary({ identity: { ...validSummary().identity, oneLine: 'MARKER_RENDER_B' } });
+
+  const events = [];
+  let releaseGate;
+  const gate = new Promise((resolve) => { releaseGate = resolve; });
+  let gateArmed = false;
+
+  function labelForArgs(args) {
+    const text = typeof args[1] === 'string' ? args[1] : JSON.stringify(args[1]);
+    if (text.includes('MARKER_RENDER_A')) return 'A';
+    if (text.includes('MARKER_RENDER_B')) return 'B';
+    return 'unknown';
+  }
+
+  const realWriteJson = config.writeJson.bind(config);
+  const realWriteTextAtomic = config.writeTextAtomic.bind(config);
+
+  async function instrumented(real, args) {
+    const label = labelForArgs(args);
+    events.push({ label, phase: 'start' });
+    // Only the very first write of the whole test is gated — this is render
+    // A's first write, deep inside its own Promise.all of writes. Holding it
+    // open gives render B a real window to start writing if serialization
+    // were absent; every other write (A's remaining writes, all of B's
+    // writes) proceeds unblocked.
+    if (!gateArmed) {
+      gateArmed = true;
+      await gate;
+    }
+    const result = await real(...args);
+    events.push({ label, phase: 'end' });
+    return result;
+  }
+
+  const writeJsonSpy = vi.spyOn(config, 'writeJson').mockImplementation((...args) => instrumented(realWriteJson, args));
+  const writeTextAtomicSpy = vi
+    .spyOn(config, 'writeTextAtomic')
+    .mockImplementation((...args) => instrumented(realWriteTextAtomic, args));
+
+  try {
+    const renderA = fake.call('POST', '/admin/project-home/render', { body: { cwd, summary: summaryA, picks } });
+    const renderB = fake.call('POST', '/admin/project-home/render', { body: { cwd, summary: summaryB, picks } });
+
+    // Yield microtasks (no wall-clock wait) until render A's first write has
+    // registered, then release it.
+    for (let i = 0; i < 1000 && events.length === 0; i += 1) {
+      await Promise.resolve();
+    }
+    expect(events.length).toBeGreaterThan(0);
+    releaseGate();
+
+    const [resA, resB] = await Promise.all([renderA, renderB]);
+    expect(resA.status).toBe(200);
+    expect(resB.status).toBe(200);
+
+    const labels = events.map((e) => e.label);
+    const firstA = labels.indexOf('A');
+    const lastA = labels.lastIndexOf('A');
+    const firstB = labels.indexOf('B');
+    const lastB = labels.lastIndexOf('B');
+    expect(firstA).toBeGreaterThanOrEqual(0);
+    expect(firstB).toBeGreaterThanOrEqual(0);
+    // Serialized means one render's entire write span is fully outside the
+    // other's — never interleaved.
+    expect(lastA < firstB || lastB < firstA).toBe(true);
+
+    const dir = path.join(cwd, 'session-manager-operations', 'project-pages');
+    const outputFiles = fs.readdirSync(path.join(dir, 'output')).sort();
+    expect(outputFiles).toEqual([
+      'architecture.html',
+      'brief.html',
+      'feature.html',
+      'home.html',
+      'manifest.json',
+      'marketing.html',
+    ]);
+  } finally {
+    writeJsonSpy.mockRestore();
+    writeTextAtomicSpy.mockRestore();
+  }
 });
 
 // ─── status ────────────────────────────────────────────────────────────

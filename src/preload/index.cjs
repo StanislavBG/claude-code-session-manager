@@ -304,6 +304,13 @@ contextBridge.exposeInMainWorld('api', {
   },
   projectPages: {
     get: (cwd) => ipcRenderer.invoke('project-pages:get', { cwd }),
+    watch: (cwd) => ipcRenderer.invoke('project-pages:watch', { cwd }),
+    unwatch: (cwd) => ipcRenderer.invoke('project-pages:unwatch', { cwd }),
+    onChanged: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('project-pages:changed', listener);
+      return () => ipcRenderer.removeListener('project-pages:changed', listener);
+    },
   },
   bilkoHost: {
     get: (cwd) => ipcRenderer.invoke('bilko-host:get', { cwd }),

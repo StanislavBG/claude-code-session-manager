@@ -18,7 +18,16 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const config = require('../config.cjs');
-const { get, DEFAULT_HOME_PATH, readDefaultHomeHtml } = require('../projectPages.cjs');
+const {
+  get,
+  DEFAULT_HOME_PATH,
+  readDefaultHomeHtml,
+  attachWindow,
+  watchOutput,
+  unwatchOutput,
+  closeAllOutputWatchers,
+  _outputWatchers,
+} = require('../projectPages.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -149,3 +158,66 @@ test('the shipped default is honest: no fabricated project-specific content, and
   expect(html).toContain('Generate My Project Home');
   expect(html.toLowerCase()).not.toContain('lorem ipsum');
 });
+
+// ── ephemeral cwd: get() must fall back, never throw/reject ────────────────
+test('get() with an ephemeral cwd (os.tmpdir() itself) returns the shipped default instead of throwing', async () => {
+  config.addAllowedRoot(os.tmpdir());
+  const result = await get({ cwd: os.tmpdir() });
+  expect(result.output).not.toBeNull();
+  expect(result.output.isDefault).toBe(true);
+});
+
+// ── watcher ──────────────────────────────────────────────────────────────
+afterEach(() => {
+  closeAllOutputWatchers();
+});
+
+test('watchOutput() on an ephemeral cwd refuses instead of crashing', async () => {
+  config.addAllowedRoot(os.tmpdir());
+  const result = await watchOutput(os.tmpdir());
+  expect(result).toEqual({ ok: false, reason: 'ephemeral' });
+  expect(_outputWatchers.size).toBe(0);
+});
+
+test('watchOutput() pushes project-pages:changed when manifest.json appears, and unwatchOutput() tears it down', async () => {
+  const cwd = await mkTmpCwd();
+  const sent = [];
+  const fakeWindow = {
+    isDestroyed: () => false,
+    webContents: {
+      isDestroyed: () => false,
+      isCrashed: () => false,
+      send: (channel, payload) => sent.push({ channel, payload }),
+    },
+  };
+  attachWindow(fakeWindow);
+
+  const watchResult = await watchOutput(cwd);
+  expect(watchResult).toEqual({ ok: true });
+  expect(_outputWatchers.size).toBe(1);
+
+  writeOutput(cwd, {
+    home: 'HOME',
+    marketing: 'MARKETING',
+    feature: 'FEATURE',
+    architecture: 'ARCHITECTURE',
+  });
+
+  // Bounded poll for the debounced (awaitWriteFinish) push instead of a bare
+  // sleep — chokidar's stability window is 50ms, so this gives it generous
+  // headroom without hanging the suite on a broken watcher.
+  const deadline = Date.now() + 5000;
+  while (sent.length === 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  expect(sent.length).toBeGreaterThan(0);
+  const last = sent[sent.length - 1];
+  expect(last.channel).toBe('project-pages:changed');
+  expect(last.payload.cwd).toBe(fs.realpathSync(cwd));
+  expect(last.payload.output.isDefault).toBe(false);
+  expect(last.payload.output.home).toBe('HOME');
+
+  unwatchOutput(cwd);
+  expect(_outputWatchers.size).toBe(0);
+}, 10_000);

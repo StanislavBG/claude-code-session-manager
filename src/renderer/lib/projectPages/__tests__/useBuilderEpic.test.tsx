@@ -7,6 +7,7 @@ import * as path from 'node:path'
 import { useBuilderEpic, BUILDER_AGENT_NAME } from '../useBuilderEpic'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { useChat } from '../../../state/chat'
+import { useToast } from '../../../state/toast'
 import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsCreate'
 
 const CWD = '/home/bilko/Projects/alpha'
@@ -36,6 +37,7 @@ async function flush() {
 
 const BUILDER_PERSONA = { name: 'project-home-builder', description: 'Generates Project Pages.' }
 const listPersonasMock = vi.fn().mockResolvedValue([BUILDER_PERSONA])
+const READY = { ok: true, checks: [] }
 
 function Harness({ cwd }: { cwd: string }) {
   const { generate } = useBuilderEpic(cwd)
@@ -61,6 +63,7 @@ afterEach(() => {
   container = null
   root = null
   vi.restoreAllMocks()
+  useToast.setState({ toasts: [], history: [], unreadCount: 0 })
 })
 
 describe('useBuilderEpic', () => {
@@ -72,6 +75,7 @@ describe('useBuilderEpic', () => {
   it('creates a project-home-builder Epic and sends the opening prompt when none is active', async () => {
     ;(globalThis as any).window.api = {
       agents: { listPersonas: listPersonasMock },
+      app: { delegationReadiness: vi.fn().mockResolvedValue(READY) },
       promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
     }
     const el = mount(<Harness cwd={CWD} />)
@@ -90,8 +94,63 @@ describe('useBuilderEpic', () => {
     expect(sendSpy).toHaveBeenCalled()
   })
 
+  it('refuses and creates NO Epic when the project-home-builder persona is not installed', async () => {
+    ;(globalThis as any).window.api = {
+      agents: { listPersonas: vi.fn().mockResolvedValue([]) },
+      app: { delegationReadiness: vi.fn().mockResolvedValue(READY) },
+      promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
+    }
+    const el = mount(<Harness cwd={CWD} />)
+    await flush()
+    const btn = el.querySelector('button') as HTMLButtonElement
+    act(() => btn.click())
+    await flush()
+    expect(createPromptSessionSpy).not.toHaveBeenCalled()
+    expect(approveProposedSpy).not.toHaveBeenCalled()
+    expect(sendSpy).not.toHaveBeenCalled()
+    expect(
+      useToast.getState().toasts.some((t) => t.kind === 'error' && t.message.includes(BUILDER_AGENT_NAME)),
+    ).toBe(true)
+  })
+
+  it('refuses and creates NO Epic when delegation readiness reports unavailable', async () => {
+    const notReady = {
+      ok: false,
+      checks: [
+        {
+          id: 'scheduler-mcp-live',
+          label: 'Scheduler MCP server answers tools/list',
+          ok: false,
+          detail: 'timeout',
+          fix: null,
+        },
+      ],
+    }
+    ;(globalThis as any).window.api = {
+      agents: { listPersonas: listPersonasMock },
+      app: { delegationReadiness: vi.fn().mockResolvedValue(notReady) },
+      promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
+    }
+    const el = mount(<Harness cwd={CWD} />)
+    await flush()
+    const btn = el.querySelector('button') as HTMLButtonElement
+    act(() => btn.click())
+    await flush()
+    expect(createPromptSessionSpy).not.toHaveBeenCalled()
+    expect(approveProposedSpy).not.toHaveBeenCalled()
+    expect(sendSpy).not.toHaveBeenCalled()
+    expect(
+      useToast
+        .getState()
+        .toasts.some((t) => t.kind === 'error' && t.message.includes('Scheduler MCP server answers tools/list')),
+    ).toBe(true)
+  })
+
   it('navigates to an already-active project-home-builder Epic instead of creating a second one', async () => {
-    ;(globalThis as any).window.api = { agents: { listPersonas: listPersonasMock } }
+    ;(globalThis as any).window.api = {
+      agents: { listPersonas: listPersonasMock },
+      app: { delegationReadiness: vi.fn().mockResolvedValue(READY) },
+    }
     usePromptSessions.setState({
       sessions: {
         'existing-epic': {

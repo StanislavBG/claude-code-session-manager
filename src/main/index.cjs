@@ -71,7 +71,7 @@ const schedulerConfig = require('./lib/schedulerConfig.cjs');
 const memoryTool = require('./memoryTool.cjs');
 const { registerMemoryAggregateIpc } = require('./memoryAggregate.cjs');
 const { registerProjectBriefIpc } = require('./projectBrief.cjs');
-const { registerProjectPagesIpc } = require('./projectPages.cjs');
+const { registerProjectPagesIpc, attachWindow: attachProjectPagesWindow, closeAllOutputWatchers: closeAllProjectPagesWatchers } = require('./projectPages.cjs');
 const { registerBilkoHostIpc } = require('./bilkoHost.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { computeEpicDelegationStats } = require('./lib/epicDelegationStats.cjs');
@@ -302,6 +302,7 @@ function relaunchViaNpx() {
 async function rebootApp() {
   ptyManager.killAll();
   configMgr.closeAllWatchers();
+  closeAllProjectPagesWatchers();
   transcripts.closeAll();
   watchers.manager.killAll();
 
@@ -328,6 +329,7 @@ async function rebootApp() {
     chatRunner.attachWindow(mainWindow);
     promptSessionEvents.attachWindow(mainWindow);
     attachDocEditWindow(mainWindow);
+    attachProjectPagesWindow(mainWindow);
     rebooting = false;
     return;
   }
@@ -1170,6 +1172,7 @@ app.whenReady().then(async () => {
   chatRunner.attachWindow(mainWindow);
   promptSessionEvents.attachWindow(mainWindow);
   attachDocEditWindow(mainWindow);
+  attachProjectPagesWindow(mainWindow);
   // Scheduler ownership (PRD 834): exactly one instance machine-wide runs
   // scheduler mutation (boot reconciliation, ticking, sweep, supervisor) and
   // the admin API. Electron's own single-instance lock is keyed by userData
@@ -1346,6 +1349,7 @@ app.on('window-all-closed', () => {
   if (rebooting) return; // new window is about to be created
   ptyManager.killAll();
   configMgr.closeAllWatchers();
+  closeAllProjectPagesWatchers();
   transcripts.closeAll();
   watchers.manager.killAll();
   if (process.platform !== 'darwin') app.quit();
@@ -1360,6 +1364,7 @@ app.on('before-quit', () => {
   supervisor.stopSupervisor();
   ptyManager.killAll();
   configMgr.closeAllWatchers();
+  closeAllProjectPagesWatchers();
   transcripts.closeAll();
   watchers.manager.killAll();
   adminHttp.stop().catch(() => {});

@@ -4,6 +4,16 @@
  * + provenance line) and ProjectPagesSection.tsx (the marketing/feature/
  * architecture/brief lens tabs), so there is one IPC call and one source of
  * truth for `output` rather than two divergent fetch effects.
+ *
+ * Also subscribes to the main process's per-cwd output-dir watcher
+ * (projectPages.cjs's watchOutput/onChanged 'project-pages:changed') so a
+ * builder Epic finishing (or a hand-edit landing) updates `output` live —
+ * no tab switch or app restart needed. `watch`/`unwatch` are refcounted in
+ * main, so mounting this hook twice for the same cwd (ProjectHome +
+ * ProjectPagesSection both read it via one shared call site today) is safe;
+ * watch/unwatch are still paired 1:1 per mount here. A cwd the main process
+ * can't watch (worktree/tmpdir root) resolves `{ok:false}` — silently no-op,
+ * not a toast, since a stale/ephemeral cwd has no user-actionable fix here.
  */
 import { useEffect, useState } from 'react'
 import { toast } from '../../state/toast'
@@ -31,6 +41,20 @@ export function useProjectPagesOutput(cwd: string | null): { output: ProjectPage
       })
     return () => {
       cancelled = true
+    }
+  }, [cwd])
+
+  useEffect(() => {
+    if (!cwd) return
+    void window.api.projectPages.watch(cwd)
+    const unsubscribe = window.api.projectPages.onChanged((payload) => {
+      if (payload.cwd !== cwd) return
+      setOutput(payload.output)
+      setLoaded(true)
+    })
+    return () => {
+      unsubscribe()
+      void window.api.projectPages.unwatch(cwd)
     }
   }, [cwd])
 

@@ -9,6 +9,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { usePromptSessions, type PromptSession } from '../../state/promptSessions'
 import { useChat } from '../../state/chat'
+import { useToast } from '../../state/toast'
 import { composeEpicIntake } from '../epicIntake'
 import { setPendingPromptSessionId } from '../promptSessionDeepLink'
 
@@ -68,6 +69,42 @@ export function useBuilderEpic(cwd: string | null) {
       navigateToBuilderEpic(existingBuilderEpic.id)
       return
     }
+
+    // Preflight — the whole reason this function used to be able to mint an
+    // Epic with no Actor and no reachable delegation path (the "runs forever,
+    // UI never changes" bug this Epic was filed for). No Epic is created on
+    // refusal.
+    if (!builderPersona) {
+      useToast.getState().show(
+        'error',
+        `Cannot generate Project Home — the "${BUILDER_AGENT_NAME}" persona is not installed. `
+          + 'Add it in the Agent Library (or re-run the seed step), then try again.',
+      )
+      return
+    }
+    let readiness: Awaited<ReturnType<typeof window.api.app.delegationReadiness>>
+    try {
+      readiness = await window.api.app.delegationReadiness(cwd)
+    } catch (err) {
+      useToast.getState().show(
+        'error',
+        `Cannot generate Project Home — could not check delegation readiness: ${err instanceof Error ? err.message : String(err)}`,
+      )
+      return
+    }
+    if (!readiness.ok) {
+      const reasons = readiness.checks
+        .filter((c) => !c.ok)
+        .map((c) => c.label)
+        .join('; ')
+      useToast.getState().show(
+        'error',
+        `Cannot generate Project Home — delegation isn't ready (${reasons || 'unknown reason'}). `
+          + 'Fix this in the New Epic readiness banner, then try again.',
+      )
+      return
+    }
+
     // Same create-and-start path New Epic uses (NewEpicCard.tsx): goalText
     // and openingPrompt come from the one composer so the Epic's stored
     // identity and what the agent reads can't drift; createPromptSession is
@@ -77,12 +114,10 @@ export function useBuilderEpic(cwd: string | null) {
       title: '',
       goal: GENERATE_GOAL,
       tag: BUILDER_TAG,
-      agentName: builderPersona?.name,
-      agentDescription: builderPersona?.description ?? undefined,
+      agentName: builderPersona.name,
+      agentDescription: builderPersona.description ?? undefined,
     })
-    const session = builderPersona
-      ? await createPromptSession(cwd, goalText, BUILDER_TAG, 'ProjectHome', builderPersona.name)
-      : await createPromptSession(cwd, goalText, BUILDER_TAG, 'ProjectHome')
+    const session = await createPromptSession(cwd, goalText, BUILDER_TAG, 'ProjectHome', builderPersona.name)
     approveProposed(session.id, 'ProjectHome')
     useChat.getState().send({
       tabId: session.id,

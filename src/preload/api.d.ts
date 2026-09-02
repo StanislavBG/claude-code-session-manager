@@ -1647,6 +1647,12 @@ export interface SessionManagerAPI {
   projectPages: {
     /** Read output/*.html + manifest.json (or `{output: null}` if none exist yet). Never fires an LLM call. */
     get: (cwd: string) => Promise<ProjectPagesGetResult>;
+    /** Start pushing `onChanged` events for this cwd's output dir. Refcounted per cwd; `ok:false` (reason 'ephemeral'|'invalid-cwd') means no live updates are possible, not an error. */
+    watch: (cwd: string) => Promise<{ ok: boolean; reason?: 'ephemeral' | 'invalid-cwd' }>;
+    /** Stop pushing `onChanged` events for this cwd — must be paired 1:1 with a prior `watch` call. */
+    unwatch: (cwd: string) => Promise<{ ok: boolean }>;
+    /** Fires whenever a watched cwd's project-pages output dir changes, carrying the freshly recomputed output. */
+    onChanged: (handler: (payload: { cwd: string; output: ProjectPagesOutput | null }) => void) => () => void;
   };
   bilkoHost: {
     /** Read compatibility-gate inputs + any existing bundle/publish state. Never fires an LLM call. */

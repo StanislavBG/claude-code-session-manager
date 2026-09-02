@@ -692,6 +692,77 @@ test('createPrd with neither cwd nor a resolvable Epic fails with a clear cwd-re
   expect(result.error).toMatch(/cwd is required/);
 });
 
+// ──────────────────────────────────────────── PRD 1113: fix-chain depth guard
+// at the authoring boundary. lib/prdCreate.cjs's createPrd() is the shared
+// write path behind both scheduler_create_prd (MCP) and chat:create-prd
+// (IPC) — enforcing here covers both callers with one check.
+
+test('createPrd refuses a depth-2 fix-chain slug (fix-of-a-fix) with a distinct, human-escalation error and writes no file', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const writePrdSpy = vi.fn(remote.writePrd);
+  remote.writePrd = writePrdSpy;
+
+  const result = await createPrd(validCreateBody({ slug: 'fix-fix-widget-frobnication' }), remote);
+
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe(409);
+  // Distinct from the provenance/validation error text elsewhere in this
+  // file ('cwd rejected', 'invalid PRD payload', 'already exists') and
+  // explicitly states escalation, not another attempt, is correct.
+  expect(result.error).toMatch(/fix-chain depth cap/i);
+  expect(result.error).toMatch(/not the correct response/i);
+  expect(result.error).toMatch(/human/i);
+  expect(writePrdSpy).not.toHaveBeenCalled();
+  const entries = await fsp.readdir(prdsDir);
+  expect(entries.filter((f) => f.endsWith('.md')).length).toBe(0);
+});
+
+test('createPrd refuses a depth-3 fix-chain slug the same way as depth-2', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+  const result = await createPrd(validCreateBody({ slug: 'fix-fix-fix-widget-frobnication' }), remote);
+
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe(409);
+  const entries = await fsp.readdir(prdsDir);
+  expect(entries.filter((f) => f.endsWith('.md')).length).toBe(0);
+});
+
+test('createPrd allows a depth-1 fix slug through the same code path that rejects depth 2 (matches MAX_INVESTIGATION_DEPTH=1)', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+  const result = await createPrd(validCreateBody({ slug: 'fix-widget-frobnication' }), remote);
+
+  expect(result.ok).toBe(true);
+  expect(result.filename).toMatch(/^\d+-fix-widget-frobnication\.md$/);
+  const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
+  expect(written).toMatch(/title: Add widget frobnication/);
+});
+
+test('createPrd is unaffected by the fix-chain guard for an ordinary slug with no fix chain at all', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+  const result = await createPrd(validCreateBody(), remote);
+
+  expect(result.ok).toBe(true);
+  const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
+  expect(written).toMatch(/title: Add widget frobnication/);
+});
+
+test('createPrd is not fooled by a slug where a later segment merely reads "fix" (false-positive bait)', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+  const result = await createPrd(validCreateBody({ slug: 'fix-loop-extraction-and-round-trip' }), remote);
+
+  expect(result.ok).toBe(true);
+  expect(result.filename).toMatch(/^\d+-fix-loop-extraction-and-round-trip\.md$/);
+});
+
 test('createPrd leaves sourcePromptId unset when originClaudeSessionId matches no known Epic (plain SessionTab chat)', async () => {
   const root = await fsp.mkdtemp(path.join(os.homedir(), '.sm-origin-session-no-match-'));
   config.addAllowedRoot(root);

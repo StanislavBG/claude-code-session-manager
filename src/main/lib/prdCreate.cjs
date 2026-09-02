@@ -26,6 +26,17 @@ const { readBody, sendJson } = require('./localAdminHttp.cjs');
 const { readActiveIndex } = require('./epicMint.cjs');
 const { appendAuditEvent } = require('./auditLog.cjs');
 const { resolveProjectContext } = require('./projectRootResolve.cjs');
+const { fixChainDepthOf, baseSlugOf } = require('./fixChainDepth.cjs');
+
+// Fix-chain depth cap (PRD 1113): a fix-of-a-fix (depth >= 2) is refused at
+// this shared write path rather than caught later — scheduler.cjs's
+// MAX_INVESTIGATION_DEPTH=1 caps the auto-fix loop's OWN recursion the same
+// way, so the two limits must stay numerically consistent (depth 1 allowed,
+// depth 2 refused). This guard exists because that auto-fix cap only ever
+// sees PRDs `spawnInvestigation` itself authors; a human or planner session
+// authoring a `*-fix-fix-*` slug through this API bypasses it entirely —
+// which is exactly what happened on starry-night-ships (see PRD 1113's Goal).
+const FIX_CHAIN_DEPTH_CAP = 1;
 
 const STANDARDS_PATH = path.join(
   __dirname, '..', '..', '..',
@@ -222,6 +233,23 @@ async function createPrd(input, remote) {
   }
   const nn = await remote.allocateParallelGroup(input.cwd);
   const filenameSlug = `${nn}-${slug}`;
+
+  // Fix-chain depth guard (PRD 1113): refuse a fix-of-a-fix before it's ever
+  // written. depth 0/1 pass through unchanged (an ordinary PRD, or a first
+  // fix-plan, is never blocked); depth >= 2 means the base job has already
+  // failed to close via at least one prior fix attempt for reasons a repeat
+  // attempt won't resolve.
+  const chainDepth = fixChainDepthOf(filenameSlug);
+  if (chainDepth > FIX_CHAIN_DEPTH_CAP) {
+    const base = baseSlugOf(filenameSlug);
+    return {
+      ok: false,
+      status: 409,
+      error: `Fix-chain depth cap exceeded: "${base}" has already failed to close ${chainDepth} time(s) for ` +
+        `infrastructure reasons (refusing to write "${filenameSlug}.md" at depth ${chainDepth}). Authoring a ` +
+        'deeper fix PRD is not the correct response — stop and surface this to a human instead of retrying again.',
+    };
+  }
 
   // An explicit `parallelGroup` bypasses allocateParallelGroup()'s
   // collision-proof reservation, so re-check for an existing file at

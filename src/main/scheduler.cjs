@@ -303,6 +303,156 @@ function gitHead(cwd) {
   });
 }
 
+// Return the current `git stash list` entries in cwd as raw lines
+// "<hash> <ref> <subject>" (hash is stable even as ref indices shift when a
+// new entry is pushed on top), or null when the guard does not apply (cwd is
+// not a git work tree, git is missing, or the call errors). Never throws.
+function stashList(cwd) {
+  return new Promise((resolve) => {
+    if (!cwd) { resolve(null); return; }
+    execFile(
+      'git',
+      ['-C', cwd, 'stash', 'list', '--format=%H %gd %gs'],
+      { timeout: 10_000, windowsHide: true },
+      (err, stdout) => {
+        if (err) { resolve(null); return; }
+        resolve(String(stdout || '').split('\n').filter(Boolean));
+      },
+    );
+  });
+}
+
+// Parse one `stashList()` line into { hash, ref, subject }. Pure, exported
+// for unit testing. Returns null for a malformed line.
+function parseStashLine(line) {
+  const m = /^(\S+)\s+(\S+)\s+(.*)$/.exec(String(line || ''));
+  return m ? { hash: m[1], ref: m[2], subject: m[3] } : null;
+}
+
+// Paths touched by any commit landed in cwd strictly between headBefore and
+// headAfter. Returns [] when no commit landed (headBefore === headAfter, or
+// either is missing) — used by the shared-tree guard below to tell a path
+// the job legitimately committed apart from a path that just silently went
+// quiet with nothing to explain it. Never throws.
+function pathsChangedSince(cwd, headBefore, headAfter) {
+  return new Promise((resolve) => {
+    if (!cwd || !headBefore || !headAfter || headBefore === headAfter) { resolve([]); return; }
+    execFile(
+      'git',
+      ['-C', cwd, 'diff', '--name-only', `${headBefore}..${headAfter}`],
+      { timeout: 10_000, windowsHide: true },
+      (err, stdout) => { resolve(err ? [] : String(stdout || '').split('\n').filter(Boolean)); },
+    );
+  });
+}
+
+// Restore ONE specific stash ref (never a blanket pop of "whatever is on
+// top") into cwd: apply, then drop only on a clean apply. On conflict the
+// entry is left in place — never dropped, never forced — so the operator's
+// own `git stash pop`/`apply` still works afterward. Never throws.
+function restoreSpecificStash(cwd, ref) {
+  return new Promise((resolve) => {
+    execFile('git', ['-C', cwd, 'stash', 'apply', ref], { timeout: 10_000, windowsHide: true }, (applyErr, _stdout, applyStderr) => {
+      if (applyErr) {
+        resolve({ ok: false, error: String(applyStderr || applyErr.message || applyErr).trim().split('\n')[0] });
+        return;
+      }
+      execFile('git', ['-C', cwd, 'stash', 'drop', ref], { timeout: 10_000, windowsHide: true }, () => {
+        resolve({ ok: true });
+      });
+    });
+  });
+}
+
+// Diff a before/after `stashList()` pair plus a before/after dirty-path pair
+// to find what an in-place job silently discarded from a tree it shares with
+// something else (Incident: social-signals-trader 2026-09-01, a blanket
+// `git stash` reverted a live operator config edit with no error anywhere).
+// Two independent signals, either of which means the job discarded state it
+// did not create:
+//   - newStashes: a stash entry now present that wasn't in the baseline —
+//     the job ran `git stash` itself.
+//   - reverted: a path that was dirty in the baseline, is clean now, and was
+//     not touched by any commit landed during the run — the job reset/
+//     checked-out over pre-existing uncommitted work without stashing it.
+// Pure/no I/O — the guard's git calls happen at the call site
+// (checkSharedTreeGuard). Exported for unit testing.
+function evaluateSharedTreeGuard({ stashBefore, stashAfter, dirtyBefore, dirtyAfter, pathsCommittedDuringRun }) {
+  const beforeHashes = new Set((stashBefore || []).map((l) => parseStashLine(l)?.hash).filter(Boolean));
+  const newStashes = (stashAfter || [])
+    .map(parseStashLine)
+    .filter((e) => e && !beforeHashes.has(e.hash));
+  const dirtyAfterSet = new Set(dirtyAfter || []);
+  const committedSet = new Set(pathsCommittedDuringRun || []);
+  const reverted = (dirtyBefore || []).filter((p) => !dirtyAfterSet.has(p) && !committedSet.has(p));
+  return { newStashes, reverted };
+}
+
+// Post-run shared-tree guard for an IN-PLACE job (worktree.ok === false —
+// callers must gate on that; a worktree-isolated run's git state can never
+// leak into guardCwd, so there is nothing here to check). Best-effort: never
+// throws, never changes the job's exit code. Restores exactly one
+// executor-created stash (never guesses when there are 2+); reports anything
+// it can't safely resolve on the returned object so the caller can surface it
+// on the job row instead of finishing silently green.
+async function checkSharedTreeGuard({ cwd, stashBaseline, dirtyBaseline, headBefore, slug }) {
+  try {
+    const [stashAfter, headAfter] = await Promise.all([
+      module.exports.stashList(cwd),
+      module.exports.gitHead(cwd),
+    ]);
+    const pathsCommittedDuringRun = await module.exports.pathsChangedSince(cwd, headBefore, headAfter);
+    // First pass: which stashes are new. Decided before charging anything
+    // against dirtyBaseline — a path this run's own stash covers must not be
+    // judged "reverted" using dirty state captured before the restore below
+    // has had a chance to bring it back.
+    const { newStashes } = module.exports.evaluateSharedTreeGuard({
+      stashBefore: stashBaseline,
+      stashAfter,
+      dirtyBefore: [],
+      dirtyAfter: [],
+      pathsCommittedDuringRun,
+    });
+
+    const result = {};
+    if (newStashes.length === 1) {
+      const [entry] = newStashes;
+      const restore = await module.exports.restoreSpecificStash(cwd, entry.ref);
+      if (restore.ok) {
+        result.restoredStash = entry.ref;
+        console.log(`[scheduler] ${slug}: restored a stash the job created in the shared tree (${entry.ref})`);
+      } else {
+        result.restoreFailed = `${entry.ref}: ${restore.error || 'apply failed'}`;
+        console.error(`[scheduler] ${slug}: shared-tree guard could not restore ${entry.ref}: ${restore.error}`);
+      }
+    } else if (newStashes.length > 1) {
+      result.ambiguousStashes = newStashes.map((e) => e.ref);
+      console.error(`[scheduler] ${slug}: shared-tree guard found ${newStashes.length} stashes the job created — ambiguous, not auto-restoring (${result.ambiguousStashes.join(', ')})`);
+    }
+
+    // Second pass: recompute "reverted" against the tree's dirty state AFTER
+    // any restore attempt above, so a path that came back via a successfully
+    // restored stash is not ALSO reported as an unexplained revert (it was
+    // explained — by the stash this guard just restored).
+    const dirtyAfter = await module.exports.uncommittedChanges(cwd);
+    const { reverted } = module.exports.evaluateSharedTreeGuard({
+      stashBefore: stashBaseline,
+      stashAfter,
+      dirtyBefore: dirtyBaseline,
+      dirtyAfter,
+      pathsCommittedDuringRun,
+    });
+    if (reverted.length) {
+      result.reverted = reverted;
+      console.error(`[scheduler] ${slug}: shared-tree guard: ${reverted.length} path(s) reverted in the shared tree with no commit to explain it (${reverted.slice(0, 3).join(', ')})`);
+    }
+    return (result.restoredStash || result.restoreFailed || result.ambiguousStashes || result.reverted) ? result : null;
+  } catch (e) {
+    console.error(`[scheduler] ${slug}: shared-tree guard error`, e);
+    return null;
+  }
+}
+
 // True when cwd is inside a git repository. Used to keep a non-git cwd (e.g.
 // a scratch dir like /tmp) from ever being handed to an investigation's
 // fix-plan as its cwd — the commit guard, worktree isolation, and
@@ -3573,6 +3723,11 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     const guardCwd = job.cwd || defaultCwd;
     const guardBaseline = await uncommittedChanges(guardCwd);
     const guardHeadBefore = await gitHead(guardCwd);
+    // Shared-tree stash guard baseline (incident 2026-09-01): captured
+    // unconditionally, before worktree isolation is even attempted, so an
+    // in-place run always has a true pre-run snapshot to diff against. See
+    // checkSharedTreeGuard below, gated to in-place runs only.
+    const stashBaseline = await stashList(guardCwd);
 
     // Worktree isolation (PRD 994): give this job its own linked `git worktree`
     // checkout so its edits/tests/commit never collide with a sibling job or
@@ -3699,6 +3854,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     // pass it back into verifyRun as priorLandedCommit (see the
     // pass_no_commit_prior_run_verified exemption in runVerify.cjs).
     let jobLandedCommitThisRun = null;
+    let sharedTreeGuard = null;
     if (res.exitCode === 0 && !res.rateLimited) {
       // Detect whether the job self-committed by comparing HEAD before/after.
       // Used by the sentinel override: SCHEDULER_VERDICT: PASS + a landed
@@ -3823,6 +3979,36 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       };
     }
 
+    // Shared-tree stash guard (incident 2026-09-01): only meaningful for an
+    // IN-PLACE run — worktree.ok isolates the job's git state into its own
+    // checkout, so nothing there can leak into guardCwd. Best-effort and run
+    // regardless of exit code: a job can discard shared state on its way to
+    // a non-zero exit just as easily as on a clean one.
+    if (!worktree.ok) {
+      sharedTreeGuard = await module.exports.checkSharedTreeGuard({
+        cwd: guardCwd,
+        stashBaseline,
+        dirtyBaseline: guardBaseline,
+        headBefore: guardHeadBefore,
+        slug: job.slug,
+      });
+      // A restored stash alone isn't silence — it's logged loudly above and
+      // surfaced on the job row below — but a path that's still missing
+      // (restore failed, or two-plus stashes we refused to guess between, or
+      // a revert with no stash to restore at all) must not finish green.
+      if (sharedTreeGuard && (sharedTreeGuard.restoreFailed || sharedTreeGuard.ambiguousStashes || sharedTreeGuard.reverted)) {
+        verifyResult = {
+          verdict: 'shared_tree_reverted',
+          reason: sharedTreeGuard.reverted
+            ? `job discarded pre-existing state in the shared tree: ${sharedTreeGuard.reverted.length} path(s) reverted with no commit to explain it (${sharedTreeGuard.reverted.slice(0, 3).join(', ')})`
+            : sharedTreeGuard.restoreFailed
+              ? `job stashed the shared tree and the stash could not be auto-restored: ${sharedTreeGuard.restoreFailed}`
+              : `job created ${sharedTreeGuard.ambiguousStashes.length} stashes in the shared tree — ambiguous, not auto-restored (${sharedTreeGuard.ambiguousStashes.join(', ')})`,
+          downgradeTo: 'needs_review',
+        };
+      }
+    }
+
     // SIGTERM commit check: reuse the same commit-window scan the exit=0
     // guard uses above (one commit-detection path, not two) to see whether a
     // 143 (SIGTERM) run still landed a deliverable before it died. Scoped
@@ -3927,6 +4113,14 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             );
           } else {
             delete s.jobs[i2].verifierAnnotations;
+          }
+          // Shared-tree guard outcome (restored stash / unresolved revert /
+          // ambiguous stashes) — visible on the row even when a restored
+          // stash left the run otherwise green, so it's never silent.
+          if (sharedTreeGuard) {
+            s.jobs[i2].sharedTreeGuard = sharedTreeGuard;
+          } else {
+            delete s.jobs[i2].sharedTreeGuard;
           }
           delete s.jobs[i2].runtime;
 
@@ -6191,4 +6385,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead };

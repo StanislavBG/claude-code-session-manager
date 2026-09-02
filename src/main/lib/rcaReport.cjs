@@ -74,9 +74,12 @@ const FAILURE_CLASSES = {
 
 // ─── Recovery actions — one per failure class, machine-readable ────────────
 // Closed set the scheduler routes on: 'archive' (stale re-run, do not
-// re-queue), 'resume-and-commit' (PRD 1111's --resume dispatch owns this),
-// 'verify-and-close' (the work likely landed, just missing its sentinel),
-// 'investigate' (the only class that still buys a fix-plan investigation).
+// re-queue — also the closest fit for BLOCKED_BY_FOREIGN_WIP: there is
+// nothing to investigate, and re-queuing is already owned by
+// reconcile()'s requeueForeignWipBlockedJobs, not this action), 'resume-and-commit'
+// (PRD 1111's --resume dispatch owns this), 'verify-and-close' (the work
+// likely landed, just missing its sentinel), 'investigate' (the only class
+// that still buys a fix-plan investigation).
 const RECOVERY_ACTIONS = {
   [FAILURE_CLASSES.ALREADY_SHIPPED]: 'archive',
   [FAILURE_CLASSES.SELF_QUEUE]: 'investigate',
@@ -85,6 +88,7 @@ const RECOVERY_ACTIONS = {
   [FAILURE_CLASSES.NO_SENTINEL]: 'verify-and-close',
   [FAILURE_CLASSES.UNCOMMITTED]: 'resume-and-commit',
   [FAILURE_CLASSES.TRANSCRIPT_ERRORS]: 'investigate',
+  [FAILURE_CLASSES.BLOCKED_BY_FOREIGN_WIP]: 'archive',
   [FAILURE_CLASSES.UNKNOWN]: 'investigate',
 };
 

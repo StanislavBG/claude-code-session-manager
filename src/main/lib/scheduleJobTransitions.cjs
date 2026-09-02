@@ -55,7 +55,11 @@ const STATUS_HISTORY_CAP = 20;
  *    (admin reset can target a job mid-investigation)
  *  - failed->investigating (spawn a probe), failed->pending (admin reset /
  *    transient retry), failed->completed (auto-promote a fix-plan's healed
- *    original)
+ *    original), failed->needs_review (reverifyNeedsReview's looksDone pass,
+ *    PRD 1102: an unverified-shaped failed row — no sentinel, no result
+ *    event — with a commit landed after its run window that touches its own
+ *    declared paths is surfaced to a human as needs_review, never silently
+ *    auto-completed)
  *  - needs_review->investigating, needs_review->pending, needs_review->completed
  *    (heal on reverify, or auto-promote) — same shape as `failed`
  *  - completed->pending (force-only reset, gated separately by
@@ -80,7 +84,7 @@ const LEGAL_TRANSITIONS = {
   pending: ['running', 'completed', 'failed', 'skipped'],
   running: ['completed', 'failed', 'needs_review', 'skipped', 'pending'],
   investigating: ['failed', 'needs_review', 'completed', 'pending', 'skipped'],
-  failed: ['investigating', 'pending', 'completed'],
+  failed: ['investigating', 'pending', 'completed', 'needs_review'],
   needs_review: ['investigating', 'pending', 'completed', 'skipped'],
   completed: ['pending'],
   skipped: ['pending'],

@@ -4250,6 +4250,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
               orig.exitCode = 0;
               orig.error = null;
               orig.completedBy = job.slug;
+              delete orig.looksDone;
               if (priorStatus === 'needs_review') {
                 delete orig.verifierVerdict;
               }
@@ -5232,6 +5233,7 @@ async function reverifyNeedsReview() {
           transitionJob(j, 'completed', { reason: 'boot reverify: stale needs_review healed', source: 'reverifyNeedsReview:heal' });
           j.error = null;
           delete j.verifierVerdict;
+          delete j.looksDone;
           healedPrds.push({ slug: j.slug, cwd: j.cwd });
         }
       }
@@ -5271,6 +5273,7 @@ async function reverifyNeedsReview() {
       orig.exitCode = 0;
       orig.error = null;
       orig.completedBy = job.slug;
+      delete orig.looksDone;
       if (priorStatus === 'needs_review') delete orig.verifierVerdict;
       promoted.push(`${orig.slug} (was ${priorStatus}, via ${job.slug})`);
       promotedPrds.push({ slug: orig.slug, cwd: orig.cwd });

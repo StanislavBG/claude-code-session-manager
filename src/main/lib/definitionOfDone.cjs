@@ -328,7 +328,7 @@ const RISK_HEURISTICS = [
  * @param {string} headingText  Case-insensitive heading to find.
  * @returns {string}
  */
-function _extractSection(body, headingText) {
+function extractSection(body, headingText) {
   const escapedHeading = headingText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const headingRe = new RegExp(`^#+\\s+${escapedHeading}`, 'i');
   const lines = body.split('\n');
@@ -398,7 +398,7 @@ function flagRiskySurfaces(jobs, { prdsDir, gitTimeoutMs = 10_000 } = {}) {
       try {
         const raw = fs.readFileSync(path.join(resolvedPrdsDir, `${job.slug}.md`), 'utf8');
         const body = splitFrontmatter(raw).body;
-        candidateText = _extractSection(body, 'Implementation notes');
+        candidateText = extractSection(body, 'Implementation notes');
       } catch { /* no candidate text — skip */ }
     }
 
@@ -573,6 +573,7 @@ module.exports = {
   reportPathFor,
   reportExists,
   extractAcCommand,
+  extractSection,
   reverifyAc,
   reverifyBatch,
   flagRiskySurfaces,

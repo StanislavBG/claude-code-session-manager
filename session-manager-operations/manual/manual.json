@@ -14,8 +14,8 @@
     },
     {
       "slug": "epics-and-sessions",
-      "title": "Epics & Sessions — Terminal and Chat are one session",
-      "blurb": "Why an Epic is a tagged Claude session, how Agent + Mission ground it, and why switching between Terminal and Chat never loses your context.",
+      "title": "Sessions — Terminal and Chat are one session",
+      "blurb": "Why a Session is a tagged Claude session, how Agent + Mission ground it, and why switching between Terminal and Chat never loses your context.",
       "file": "epics-and-sessions.html"
     },
     {
@@ -33,7 +33,7 @@
     {
       "slug": "settings-and-scopes",
       "title": "Settings & Scopes — editing the substrate, not the conversation",
-      "blurb": "The User/Project/Local scope model, why a Settings edit changes every Epic in scope rather than just the one you're in, and when to reach for a Tag or Agent instead.",
+      "blurb": "The User/Project/Local scope model, why a Settings edit changes every Session in scope rather than just the one you're in, and when to reach for a Tag or Agent instead.",
       "file": "settings-and-scopes.html"
     },
     {
@@ -50,7 +50,7 @@
     },
     {
       "slug": "agent-library",
-      "title": "Agent Library — authoring the \"who\" of an Epic",
+      "title": "Agent Library — authoring the \"who\" of a Session",
       "blurb": "Building focused personas instead of repeating instructions in every prompt, how a persona's model field picks --model, and the project-override mistake that makes an edit look like it did nothing.",
       "file": "agent-library.html"
     },
@@ -86,8 +86,8 @@
     },
     {
       "slug": "tag-library",
-      "title": "Tag Library — the mission that ships with every Epic",
-      "blurb": "How a tag's opening framing and /develop eagerness shape every Epic that carries it, and the one relationship on this page you can actually edit.",
+      "title": "Tag Library — the mission that ships with every Session",
+      "blurb": "How a tag's opening framing and /develop eagerness shape every Session that carries it, and the one relationship on this page you can actually edit.",
       "file": "tag-library.html"
     },
     {
@@ -129,7 +129,7 @@
     {
       "slug": "simple-mode",
       "title": "Simple Mode — the chrome-free single-terminal cockpit",
-      "blurb": "What --simple actually boots (one skip-perms terminal, no nav or config surface), why persisted tabs and Epics never appear there, and when to reach for it instead of the full app.",
+      "blurb": "What --simple actually boots (one skip-perms terminal, no nav or config surface), why persisted tabs and Sessions never appear there, and when to reach for it instead of the full app.",
       "file": "simple-mode.html"
     }
   ],

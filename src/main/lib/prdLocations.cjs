@@ -19,8 +19,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { activeProjectCwds, allProjectCwds } = require('../../../scripts/lib/activeSessions.cjs');
 
-const PRD_SUBPATH = ['session-manager-operations', 'scheduler', 'prds'];
-const EPICS_SUBPATH = ['session-manager-operations', 'scheduler', 'epics'];
+const { opsPath, OPS_ROOT_DIR } = require('./opsOwnership.cjs');
+
+// Segments UNDER the ops root; the ops root itself is resolved by
+// opsOwnership.opsPath (PRD 1082) — never joined onto a raw cwd here.
+const PRD_SUBPATH = ['scheduler', 'prds'];
+const EPICS_SUBPATH = ['scheduler', 'epics'];
+// Segment count from a project root to an epic's own dir: <ops-root> + EPICS_SUBPATH.
+const EPICS_DEPTH_FROM_PROJECT = 1 + EPICS_SUBPATH.length;
 
 /**
  * resolveEpicsRoot(cwd) → `<cwd>/session-manager-operations/scheduler/epics`
@@ -30,7 +36,7 @@ function resolveEpicsRoot(cwd) {
   if (!cwd || typeof cwd !== 'string') {
     throw new Error('resolveEpicsRoot: cwd is required');
   }
-  return path.join(cwd, ...EPICS_SUBPATH);
+  return opsPath(cwd, ...EPICS_SUBPATH);
 }
 
 /**
@@ -69,7 +75,8 @@ function listEpicPrdDirs(cwd) {
  * its Epic (the layout every new PRD uses) is still found.
  */
 function listArchivedPrdDirs(cwd) {
-  const dirs = [path.join(cwd, ...PRD_SUBPATH, '..', 'prds-archived')];
+  let dirs;
+  try { dirs = [opsPath(cwd, ...PRD_SUBPATH, '..', 'prds-archived')]; } catch { return []; }
   let root;
   try { root = resolveEpicsRoot(cwd); } catch { return dirs; }
   let entries;
@@ -91,7 +98,7 @@ function resolvePrdWriteDir(cwd) {
   if (!cwd || typeof cwd !== 'string') {
     throw new Error('resolvePrdWriteDir: cwd is required');
   }
-  return path.join(cwd, ...PRD_SUBPATH);
+  return opsPath(cwd, ...PRD_SUBPATH);
 }
 
 /**
@@ -202,7 +209,7 @@ function deriveEpicIdFromPrdPath(filePath) {
   const epicId = path.basename(epicDir);
   if (!epicId || epicId === '.' || epicId === path.sep) return null;
   let projectCwd = path.dirname(epicDir); // epicsRoot (.../scheduler/epics)
-  for (let i = 0; i < EPICS_SUBPATH.length; i++) projectCwd = path.dirname(projectCwd);
+  for (let i = 0; i < EPICS_DEPTH_FROM_PROJECT; i++) projectCwd = path.dirname(projectCwd);
   let epicsRoot;
   try { epicsRoot = resolveEpicsRoot(projectCwd); } catch { return null; }
   if (path.join(epicsRoot, epicId, dirName) !== prdsDir) return null;

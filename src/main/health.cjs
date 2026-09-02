@@ -10,6 +10,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const { POLL_INTERVAL_MS, loadGateThreshold } = require('./lib/schedulerConfig.cjs');
+const { opsPath } = require('./lib/opsOwnership.cjs');
 const { checkPersonaImports } = require('./lib/personaImportHealth.cjs');
 const { checkDelegationReadiness } = require('./lib/delegationReadiness.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
@@ -251,7 +252,12 @@ function evaluateDelegationChainHealth(delegationResult) {
 // aborting the whole health check (matches evaluatePrdMigrationHealth's
 // fail-open-on-read spirit).
 function computeEpicIndexDrift(cwd) {
-  const dir = path.join(cwd, 'session-manager-operations', 'prompt-sessions');
+  let dir;
+  try {
+    dir = opsPath(cwd, 'prompt-sessions');
+  } catch {
+    return { orphan_rows: 0, orphan_files: 0, unmirrored: 0 }; // unusable cwd degrades to empty, same as an unreadable index below
+  }
   const indexPath = path.join(dir, 'active-index.json');
   let sessions = {};
   let tombstones = {};

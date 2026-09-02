@@ -20,7 +20,8 @@ const path = require('node:path');
 const { activeIndexPath, readActiveIndex, writeActiveIndex, withPathLock } = require('./epicMint.cjs');
 
 function promptSessionsDir(cwd) {
-  return path.join(cwd, 'session-manager-operations', 'prompt-sessions');
+  const { opsPath } = require('./opsOwnership.cjs');
+  return opsPath(cwd, 'prompt-sessions');
 }
 
 function hasOwn(obj, key) {

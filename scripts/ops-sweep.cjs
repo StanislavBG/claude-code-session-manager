@@ -229,11 +229,48 @@ for (const entry of namespaceDirs) {
   findings.push(...nsFindings.map((f) => ({ namespace: name, ...f })));
 }
 
+// Source lint (PRD 1082): every path inside the ops root must be built by
+// opsOwnership.cjs's opsPath/resolveOpsRoot — the one place that normalizes
+// a worktree or ops-internal cwd and refuses an ephemeral one. Any other file
+// under src/main/ spelling the ops-root literal is a regression of that choke
+// point and is reported as OPS_PATH_LITERAL. Only meaningful when the target
+// IS the session-manager repo (the module has to exist to be bypassed).
+const opsPathLint = (() => {
+  const resolverPath = path.join(targetCwd, 'src', 'main', 'lib', 'opsOwnership.cjs');
+  if (!fs.existsSync(resolverPath)) return { applicable: false, violations: [] };
+  const srcMain = path.join(targetCwd, 'src', 'main');
+  const violations = [];
+  const walk = (dir) => {
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) { if (e.name !== '__tests__' && e.name !== 'node_modules') walk(p); continue; }
+      if (!e.name.endsWith('.cjs') || p === resolverPath) continue;
+      const lines = fs.readFileSync(p, 'utf8').split('\n');
+      lines.forEach((line, i) => {
+        if (line.includes("'session-manager-operations'") || line.includes('"session-manager-operations"')) {
+          violations.push({ file: path.relative(targetCwd, p), line: i + 1, text: line.trim().slice(0, 140) });
+        }
+      });
+    }
+  };
+  walk(srcMain);
+  return { applicable: true, violations };
+})();
+for (const v of opsPathLint.violations) {
+  findings.push({
+    type: 'OPS_PATH_LITERAL',
+    file: v.file,
+    line: v.line,
+    detail: `ops-root literal outside lib/opsOwnership.cjs — build the path with opsPath()/resolveOpsRoot() instead: ${v.text}`,
+  });
+}
+
 process.stdout.write(JSON.stringify({
   targetCwd,
   opsRoot: OPS_ROOT,
   hasClaudeMd: !!claudeMd,
   claudeMdSize,
+  opsPathLint,
   epicIndexDrift: {
     orphan_rows: epicIndexDrift.orphan_rows,
     orphan_files: epicIndexDrift.orphan_files,

@@ -26,9 +26,10 @@ const { ipcMain } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const config = require('./config.cjs');
+const { opsPath } = require('./lib/opsOwnership.cjs');
 
 function outputDir(cwd) {
-  return path.join(cwd, 'session-manager-operations', 'project-pages', 'output');
+  return opsPath(cwd, 'project-pages', 'output');
 }
 
 // Shipped build-time asset (see PRD "project-home-hosted-html-spec"'s

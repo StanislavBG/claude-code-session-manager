@@ -30,7 +30,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const BUILD_TARGET_SUBPATH = ['session-manager-operations', 'architecture', 'build-target.json'];
+const BUILD_TARGET_SUBPATH = ['architecture', 'build-target.json']; // joined under opsOwnership.opsPath
 
 function readJson(filePath) {
   try {
@@ -48,7 +48,8 @@ function readJson(filePath) {
 function resolveBuildTarget(cwd) {
   if (!cwd || typeof cwd !== 'string') return null;
 
-  const configPath = path.join(cwd, ...BUILD_TARGET_SUBPATH);
+  const { opsPath } = require('./opsOwnership.cjs');
+  const configPath = opsPath(cwd, ...BUILD_TARGET_SUBPATH);
   const explicit = readJson(configPath);
   if (explicit && typeof explicit === 'object' && !Array.isArray(explicit) && typeof explicit.packageName === 'string') {
     return explicit;

@@ -32,7 +32,8 @@ function sanitizeMeta(meta) {
 }
 
 function logsDir(cwd) {
-  return path.join(cwd, 'session-manager-operations', 'logs');
+  const { opsPath } = require('./opsOwnership.cjs');
+  return opsPath(cwd, 'logs');
 }
 
 function todayFile(cwd) {

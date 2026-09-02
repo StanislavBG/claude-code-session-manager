@@ -19,7 +19,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { assertOpsWrite } = require('./lib/opsOwnership.cjs');
+const { assertOpsWrite, opsPath } = require('./lib/opsOwnership.cjs');
 const chokidar = require('chokidar');
 const logs = require('./logs.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
@@ -139,39 +139,28 @@ function validateWrite(realAbs) {
       if (realAbs === claudeSub || realAbs.startsWith(claudeSub + path.sep)) {
         return;
       }
-      // PromptSession persistence (active-index.json + per-session archives,
-      // promptSessions.ts) and the scheduler's own read-modify-write of that
-      // same active index (promptSessionEvents.cjs, PRD 814) — narrowly
-      // scoped to session-manager-operations/prompt-sessions/, this repo's
-      // existing per-project artifact-store convention.
-      const promptSessionsSub = path.join(realRoot, 'session-manager-operations', 'prompt-sessions');
-      if (realAbs === promptSessionsSub || realAbs.startsWith(promptSessionsSub + path.sep)) {
-        return;
+      // Writable ops namespaces under a registered project root — this
+      // repo's per-project artifact-store convention:
+      //   prompt-sessions  PromptSession persistence (promptSessions.ts) and
+      //                    the scheduler's read-modify-write of active-index
+      //                    (promptSessionEvents.cjs, PRD 814)
+      //   scheduler        PRD sources + Epic PRD dirs + state shards
+      //                    (PRD 825; scheduler.cjs remote.writePrd)
+      //   project-brief    projectBrief.cjs's brief.json (PRD 837)
+      //   bilko-host       bilkoHost.cjs's bundle prep
+      // Paths come from opsOwnership.opsPath (PRD 1082) — the one ops-root
+      // resolver — which THROWS for an ephemeral root (a linked worktree that
+      // pty.cjs registered as an allowed root for its spawn cwd, or
+      // os.tmpdir()). That throw is the point: a worktree's ops subtree is
+      // never a writable destination, so its exemptions simply do not exist.
+      let opsSubs;
+      try {
+        opsSubs = ['prompt-sessions', 'scheduler', 'project-brief', 'bilko-host'].map((ns) => opsPath(realRoot, ns));
+      } catch {
+        opsSubs = [];
       }
-      // Scheduler PRD sources (PRD 825 — per-project Epic PRD dirs under
-      // scheduler/epics/<id>/prds/, plus the legacy flat scheduler/prds/ and
-      // scheduler/state/ shards): narrowly scoped to
-      // session-manager-operations/scheduler/, this repo's existing
-      // per-project artifact-store convention (scheduler.cjs's remote.writePrd
-      // writes here via config.writeTextAtomic).
-      const schedulerSub = path.join(realRoot, 'session-manager-operations', 'scheduler');
-      if (realAbs === schedulerSub || realAbs.startsWith(schedulerSub + path.sep)) {
-        return;
-      }
-      // Project Brief persistence (PRD 837 — projectBrief.cjs's writeJson of
-      // brief.json): narrowly scoped to session-manager-operations/project-brief/,
-      // this repo's existing per-project artifact-store convention.
-      const briefSub = path.join(realRoot, 'session-manager-operations', 'project-brief');
-      if (realAbs === briefSub || realAbs.startsWith(briefSub + path.sep)) {
-        return;
-      }
-      // Host on Bilko.run bundle prep (bilkoHost.cjs's prepareBundle/
-      // addDocument/removeDocument): narrowly scoped to
-      // session-manager-operations/bilko-host/, this repo's existing
-      // per-project artifact-store convention.
-      const bilkoHostSub = path.join(realRoot, 'session-manager-operations', 'bilko-host');
-      if (realAbs === bilkoHostSub || realAbs.startsWith(bilkoHostSub + path.sep)) {
-        return;
+      for (const sub of opsSubs) {
+        if (realAbs === sub || realAbs.startsWith(sub + path.sep)) return;
       }
     }
   }

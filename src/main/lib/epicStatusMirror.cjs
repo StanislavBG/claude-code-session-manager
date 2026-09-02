@@ -26,10 +26,10 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { assertOpsWrite } = require('./opsOwnership.cjs');
+const { assertOpsWrite, opsPath } = require('./opsOwnership.cjs');
 
 function epicMirrorPath(cwd, epicId) {
-  return path.join(cwd, 'session-manager-operations', 'prompt-sessions', `${epicId}.json`);
+  return opsPath(cwd, 'prompt-sessions', `${epicId}.json`);
 }
 
 function readExistingMirror(file) {

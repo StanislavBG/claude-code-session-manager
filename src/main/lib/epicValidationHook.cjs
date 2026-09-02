@@ -62,7 +62,8 @@ function pairKey(epicId, prdSlug) {
  */
 function defaultReadActiveIndex(cwd) {
   try {
-    const p = path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
+    const { opsPath } = require('./opsOwnership.cjs');
+    const p = opsPath(cwd, 'prompt-sessions', 'active-index.json');
     return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch {
     return null;

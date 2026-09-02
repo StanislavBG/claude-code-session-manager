@@ -158,6 +158,97 @@ function checkOpsWrite(absPath, writer) {
 function assertOpsWrite(absPath, writer) {
   const verdict = checkOpsWrite(absPath, writer);
   if (!verdict.ok) throw new Error(verdict.error);
+  // Ownership is one question; WHERE the ops root lives is another. A writer
+  // that bypasses the path helpers below and builds its own absolute path can
+  // still aim at an ephemeral project root (a worktree, os.tmpdir()) — refuse
+  // that here too so the single-writer gate is also the last line against the
+  // worktree-cwd hazard (PRD 1082; incidents 2026-08-30, 2026-09-01).
+  const { inOps } = parseOpsPath(absPath);
+  if (inOps) {
+    const segs = absPath.split(path.sep);
+    const idx = segs.lastIndexOf(OPS_ROOT_DIR);
+    const projectRoot = segs.slice(0, idx).join(path.sep) || path.sep;
+    const { isEphemeralCwd } = require('./ephemeralCwd.cjs');
+    if (isEphemeralCwd(projectRoot)) {
+      const err = new Error(
+        `refusing to write ${OPS_ROOT_DIR}/ state under an ephemeral project root `
+        + `(tmpdir or linked git worktree): "${projectRoot}" — see lib/opsOwnership.cjs resolveProjectRoot`,
+      );
+      err.ephemeral = true;
+      throw err;
+    }
+  }
+}
+
+// ─── THE ONE ops-root resolver (PRD 1082) ─────────────────────────────────
+//
+// Every namespace used to compute its own path with a bare
+// `path.join(cwd, 'session-manager-operations', ...)`, each one independently
+// trusting its `cwd`. The worktree / ops-internal cwd hazard therefore had to
+// be fixed one call site at a time (activeSessions 2026-08-30, PRDs 1073,
+// 1074, 1081). This is the single choke point every reader and writer of the
+// ops root goes through instead — normalize what can be normalized, refuse
+// what cannot — so the next stray cwd is caught by construction, not by
+// incident. `scripts/ops-sweep.cjs` lints that no other file in src/main/
+// spells the ops-root literal.
+//
+// Normalization is `activeSessions.projectRootOf`: an ops-internal path is
+// truncated to the project above it, a linked git worktree is mapped to its
+// main tree via the `.git` file's `gitdir:` pointer, and a subdirectory of a
+// git repo resolves to that repo's root. A plain directory with no enclosing
+// `.git` is returned unchanged (byte-identical to the old join). A nested
+// project that IS its own git repo (e.g. Apple/01-Shapes-Foundation) keeps its
+// own root — the walk stops at the first `.git` it meets.
+
+/**
+ * resolveProjectRoot(cwd, { opsInternal }) → absolute project root.
+ *
+ * Throws on a missing/non-string/relative cwd (a caller that cannot name an
+ * absolute project has no business touching that project's state), and
+ * throws a tagged `err.ephemeral = true` when the normalized root is still
+ * inside os.tmpdir() or is a linked worktree root (ephemeralCwd.cjs).
+ *
+ * `opsInternal` — 'normalize' (default): a cwd inside session-manager-
+ * operations/ is truncated up to its project, the reader-friendly behaviour
+ * activeSessions already has. 'refuse': throw instead — the fail-closed
+ * posture a WRITER wants (queueStore.projectStateDir), since silently
+ * redirecting a write target is riskier than refusing it.
+ */
+function resolveProjectRoot(cwd, { opsInternal = 'normalize' } = {}) {
+  if (!cwd || typeof cwd !== 'string') throw new Error('resolveProjectRoot: cwd is required');
+  if (!path.isAbsolute(cwd)) {
+    throw new Error(`resolveProjectRoot: cwd must be an absolute path, got "${cwd}"`);
+  }
+  if (opsInternal === 'refuse' && cwd.split(path.sep).includes(OPS_ROOT_DIR)) {
+    throw new Error(
+      `resolveProjectRoot: cwd must be a project root, not a path inside ${OPS_ROOT_DIR}/, got "${cwd}"`,
+    );
+  }
+  // Lazy: activeSessions → gitWorktree → (lazily) config.cjs → this module.
+  const { projectRootOf } = require('../../../scripts/lib/activeSessions.cjs');
+  const { isEphemeralCwd } = require('./ephemeralCwd.cjs');
+  const root = projectRootOf(cwd);
+  if (isEphemeralCwd(root)) {
+    const err = new Error(
+      `resolveProjectRoot: refusing ephemeral cwd (tmpdir or linked git worktree), got "${cwd}"`,
+    );
+    err.ephemeral = true;
+    throw err;
+  }
+  return root;
+}
+
+/** resolveOpsRoot(cwd, opts) → `<projectRoot>/session-manager-operations`. */
+function resolveOpsRoot(cwd, opts) {
+  return path.join(resolveProjectRoot(cwd, opts), OPS_ROOT_DIR);
+}
+
+/**
+ * opsPath(cwd, ...segments) → `<projectRoot>/session-manager-operations/<segments>`.
+ * The only sanctioned way to build a path inside a project's ops root.
+ */
+function opsPath(cwd, ...segments) {
+  return path.join(resolveOpsRoot(cwd), ...segments);
 }
 
 module.exports = {
@@ -167,4 +258,7 @@ module.exports = {
   parseOpsPath,
   checkOpsWrite,
   assertOpsWrite,
+  resolveProjectRoot,
+  resolveOpsRoot,
+  opsPath,
 };

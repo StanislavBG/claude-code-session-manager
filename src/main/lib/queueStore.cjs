@@ -33,14 +33,13 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { allProjectCwds, activeProjectCwds } = require('../../../scripts/lib/activeSessions.cjs');
-const { assertOpsWrite } = require('./opsOwnership.cjs');
-const { isEphemeralCwd } = require('./ephemeralCwd.cjs');
+const { assertOpsWrite, resolveOpsRoot, OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 const { ScheduleJobSchema } = require('./scheduleJobSchema.cjs');
 
 const MACHINE_STATE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduler-machine.json');
 const LEGACY_QUEUE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'queue.json');
-const OPS_DIRNAME = 'session-manager-operations';
-const STATE_SUBPATH = [OPS_DIRNAME, 'scheduler', 'state'];
+const OPS_DIRNAME = OPS_ROOT_DIR;
+const STATE_SUBPATH = ['scheduler', 'state'];
 
 /**
  * A project's `session-manager-operations/scheduler/state/` directory.
@@ -77,18 +76,28 @@ function projectStateDir(cwd) {
     );
   }
   // ...and it must not be an EPHEMERAL cwd (inside os.tmpdir(), or a linked
-  // git worktree root). A worktree is torn down when its Epic/job ends, so
-  // any state written there is silently destroyed — verified live 2026-09-01
+  // git worktree root) — a worktree is torn down when its Epic/job ends, so
+  // any state written there is silently destroyed (verified live 2026-09-01
   // as a scheduler shard rewritten every reconcile pass inside a since-deleted
-  // epic worktree. See ephemeralCwd.cjs for the two conditions this covers.
-  if (isEphemeralCwd(cwd)) {
-    const err = new Error(
-      `projectStateDir: refusing ephemeral cwd (tmpdir or linked git worktree), got "${cwd}"`,
-    );
-    err.ephemeral = true;
-    throw err;
+  // epic worktree). That check, and the worktree → main-tree normalization,
+  // live in opsOwnership.resolveOpsRoot (PRD 1082) — the one resolver every
+  // ops-root reader/writer goes through. `opsInternal: 'refuse'` keeps this
+  // WRITER fail-closed on an ops-internal cwd (the guard above shapes the
+  // message; the resolver is the backstop).
+  let opsRoot;
+  try {
+    opsRoot = resolveOpsRoot(cwd, { opsInternal: 'refuse' });
+  } catch (e) {
+    if (e?.ephemeral) {
+      const err = new Error(
+        `projectStateDir: refusing ephemeral cwd (tmpdir or linked git worktree), got "${cwd}"`,
+      );
+      err.ephemeral = true;
+      throw err;
+    }
+    throw e;
   }
-  return path.join(cwd, ...STATE_SUBPATH);
+  return path.join(opsRoot, ...STATE_SUBPATH);
 }
 
 function projectQueuePath(cwd) {

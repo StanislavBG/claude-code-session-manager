@@ -29,6 +29,7 @@
  */
 
 const { ipcMain } = require('electron');
+const { opsPath } = require('./lib/opsOwnership.cjs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -46,7 +47,7 @@ const WRITER = 'bilko-host';
 const PROJECT_PAGE_LENSES = new Set(['home', 'marketing', 'feature', 'architecture']);
 
 function bilkoHostDir(cwd) {
-  return path.join(cwd, 'session-manager-operations', 'bilko-host');
+  return opsPath(cwd, 'bilko-host');
 }
 
 function distDir(cwd) {
@@ -103,7 +104,7 @@ async function get({ cwd }) {
   const realCwd = config.validatePath(cwd);
 
   const marketingResult = await config.readText(
-    path.join(realCwd, 'session-manager-operations', 'project-pages', 'output', 'marketing.html'),
+    opsPath(realCwd, 'project-pages', 'output', 'marketing.html'),
   );
   const pkgResult = await config.readJson(path.join(realCwd, 'package.json'));
   const pkg = pkgResult.exists && !pkgResult.parseError ? pkgResult.data : null;
@@ -215,7 +216,7 @@ async function removeDocument({ cwd, id }) {
 async function resolveDocumentHtml(cwd, doc) {
   if (doc.source.kind === 'project-page-lens') {
     const result = await config.readText(
-      path.join(cwd, 'session-manager-operations', 'project-pages', 'output', `${doc.source.lens}.html`),
+      opsPath(cwd, 'project-pages', 'output', `${doc.source.lens}.html`),
     );
     if (!result.exists) {
       throw new Error(`document "${doc.title}" points at the ${doc.source.lens} Project Page, but it hasn't been generated yet`);

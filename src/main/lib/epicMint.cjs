@@ -75,7 +75,10 @@ const MINT_AUTHORITIES = Object.freeze([
 ]);
 
 function activeIndexPath(cwd) {
-  return path.join(cwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
+  // Lazy: opsOwnership → ephemeralCwd → activeSessions; this module is
+  // required early by several of those neighbours.
+  const { opsPath } = require('./opsOwnership.cjs');
+  return opsPath(cwd, 'prompt-sessions', 'active-index.json');
 }
 
 function readActiveIndex(cwd) {

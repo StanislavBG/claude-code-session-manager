@@ -40,7 +40,8 @@ const APPLICATION_SOURCE_PREFIXES = ['src/', 'scripts/', 'plugins/', 'bin/'];
 function countPrdsQueued(cwd, epicId, deps = {}) {
   const readdirSync = deps.readdirSync || fs.readdirSync;
   try {
-    const dir = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', epicId, 'prds');
+    const { opsPath } = require('./opsOwnership.cjs');
+    const dir = opsPath(cwd, 'scheduler', 'epics', epicId, 'prds');
     return readdirSync(dir).filter((name) => name.endsWith('.md')).length;
   } catch {
     return 0;

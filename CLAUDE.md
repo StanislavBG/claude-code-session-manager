@@ -76,8 +76,8 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   field carved out per-Epic (persona frontmatter wins over the Settings default).
 - **SINGLE-WRITER LAW over the operations root** (`src/main/lib/opsOwnership.cjs`). Every
   `session-manager-operations/<namespace>/` has exactly ONE owning writer; everyone else reads. Fail-closed —
-  an undeclared writer throws. Adding a namespace or writer is a deliberate edit to that file. Read a
-  namespace's own `README.md` before writing code that touches it.
+  an undeclared writer throws. Adding a namespace or writer is a deliberate edit to that file. Build ops
+  paths only via its `opsPath()`. Read its `README.md` first.
   - **Owned** (in `OWNERS`, app-owned runtime state): `prompt-sessions` → epics · `scheduler` → scheduler ·
     `project-brief` → project-home · `logs` → logs · `bilko-host` → bilko-host.
   - **Deliberately NOT owned** (skill-authored docs/artifacts, no concurrent-write hazard — this is the

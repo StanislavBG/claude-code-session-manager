@@ -647,8 +647,29 @@ export interface ScheduleStateSnapshot {
   pollHealth?: SchedulePollHealth;
   /** Effective concurrency cap and whether it's env-pinned or config-driven. */
   effectiveConcurrency: ScheduleEffectiveConcurrency;
+  /**
+   * CPU-load launch gate (PRD 1085): why nothing is launching when the box
+   * is saturated. Null before the first tick that evaluated it.
+   */
+  loadGate?: ScheduleLoadGate | null;
   /** Returned only by the initial state() call, not the broadcast event. */
   paths?: SchedulePaths;
+}
+
+export interface ScheduleLoadGate {
+  /** True when this tick's launches were withheld because of load. */
+  gated: boolean;
+  /** True when load would have gated but an explicit Run now bypassed it. */
+  bypassed: boolean;
+  /** 1-minute load average divided by core count. */
+  ratio: number;
+  /** LOAD_GATE_PER_CORE (or SM_LOAD_GATE_PER_CORE); 0 means disabled. */
+  threshold: number;
+  loadavg1: number | null;
+  cores: number;
+  /** How long the current gated stretch has lasted, 0 when not gated. */
+  gatedSinceMs: number;
+  at: string;
 }
 
 export interface HistoryAggregateRequest {

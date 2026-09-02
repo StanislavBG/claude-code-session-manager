@@ -9,7 +9,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
-const { POLL_INTERVAL_MS } = require('./lib/schedulerConfig.cjs');
+const { POLL_INTERVAL_MS, loadGateThreshold } = require('./lib/schedulerConfig.cjs');
 const { checkPersonaImports } = require('./lib/personaImportHealth.cjs');
 const { checkDelegationReadiness } = require('./lib/delegationReadiness.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
@@ -444,6 +444,15 @@ async function check() {
       byProject: computeProjectProblemCounts(queueState.jobs),
       perProjectStall,
       tickLiveness: liveness.reason,
+      // Informational only (PRD 1085): current 1-min loadavg per core vs the
+      // launch-gate threshold, so a "nothing is launching" report can be
+      // read next to the reason without opening the app.
+      loadRatio: (() => {
+        const cores = (os.cpus() || []).length;
+        const l1 = os.loadavg()[0];
+        return cores > 0 && Number.isFinite(l1) ? Number((l1 / cores).toFixed(3)) : null;
+      })(),
+      loadGateThreshold: loadGateThreshold(),
     };
     if (liveness.stalled) {
       const ageMin = Math.round(liveness.tickAgeMs / 60_000);

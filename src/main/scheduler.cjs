@@ -56,6 +56,7 @@ const supervisor = require('./supervisor.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
 const { claudePidAlive, classifyRunOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs } = require('./lib/reaperHelpers.cjs');
+const { createLoadGate, topCpuConsumers } = require('./lib/loadGate.cjs');
 const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { createBroadcastCoalescer } = require('./lib/broadcastCoalescer.cjs');
@@ -1982,6 +1983,9 @@ function drainDeferredInvestigation() {
 let cancelToken = { cancelled: false };
 // Last memory-gate observation; included in snapshot for renderer visibility.
 let lastMemGate = null;
+// CPU-load launch gate (PRD 1085, lib/loadGate.cjs) — innermost launch
+// predicate after pool → project cap → memory. Withholds launches only.
+const loadGate = createLoadGate();
 
 // Last tickQueue outcome, kept for the UI. tickQueue already computes a precise
 // reason for every way a batch can come back empty (dependency holds, slot
@@ -2050,6 +2054,8 @@ function buildScheduleStatePayload(state, { withPaths = false } = {}) {
       lastFailureKind,
     },
     memGate: lastMemGate,
+    // Why nothing is launching when the box is CPU-saturated (PRD 1085).
+    loadGate: loadGate.snapshot(),
     lastTick,
     // The machine-wide slot pool IS the concurrency limit — there is no
     // separate scheduler cap any more. `source` distinguishes the
@@ -4114,7 +4120,10 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
 // is synchronous and spawnJob is fire-and-forget.
 let tickTail = Promise.resolve();
 
-function tickQueue() {
+// `bypassLoadGate` is set only by the explicit human run-now / force-tick
+// paths (via runDueJobs): the human is asking, so the CPU-load gate yields
+// and logs that it did. Every automatic caller leaves it false.
+function tickQueue({ bypassLoadGate = false } = {}) {
   const next = tickTail.then(async () => {
     const state = await readQueue();
     // Never reconcile against an unreadable queue: reconcile() would see zero
@@ -4202,6 +4211,35 @@ function tickQueue() {
       lastMemGate = null;
     }
 
+    // Load gate (PRD 1085) — the INNERMOST launch predicate, evaluated only
+    // once every outer gate (sessionSlots pool → per-project cap inside
+    // pickNextBatch → memory above) has already admitted `gatedBatch`. It
+    // never touches running jobs and never becomes a second pool: it only
+    // withholds this tick's launches while the 1-minute loadavg per core is
+    // over LOAD_GATE_PER_CORE. An explicit human Run now bypasses it.
+    const load = loadGate.evaluate({ bypass: bypassLoadGate });
+    if (load.bypassed) {
+      console.log(`[scheduler] load gate: BYPASSED by run-now (loadavg1=${load.loadavg1} cores=${load.cores} ratio=${load.ratio} > ${load.threshold})`);
+    } else if (load.gated) {
+      const line = `[scheduler] load gate: loadavg1=${load.loadavg1} cores=${load.cores} ratio=${load.ratio} > ${load.threshold} — holding ${gatedBatch.length} eligible job(s)`;
+      if (load.escalate) {
+        const top = topCpuConsumers(3);
+        console.warn(`${line} for ${Math.round(load.gatedSinceMs / 60_000)}m; top CPU: ${top.length ? top.join(' | ') : 'n/a'}`);
+      } else {
+        console.log(line);
+      }
+      if (load.shouldAudit) {
+        appendAuditEvent('launch_load_gated', {
+          loadavg1: load.loadavg1, cores: load.cores, ratio: load.ratio, threshold: load.threshold,
+          held: gatedBatch.map((j) => j.slug), gatedSinceMs: load.gatedSinceMs,
+        });
+      }
+      return recordTick(
+        { fired: false, reason: 'load-deferred', deferredCount: gatedBatch.length, ratio: load.ratio, threshold: load.threshold },
+        { detail: `load gate: ${load.loadavg1} / ${load.cores} cores = ${load.ratio} > ${load.threshold}`, holds },
+      );
+    }
+
     await mutate((s) => { s.lastRunAt = new Date().toISOString(); });
     await broadcast();
 
@@ -4249,7 +4287,7 @@ function forceTickOutcome(result) {
   }
 }
 
-async function runDueJobs() {
+async function runDueJobs({ bypassLoadGate = false } = {}) {
   const state = await readQueue();
   if (state.unreadable) {
     console.error('[scheduler] runDueJobs skipped: queue.json unreadable');
@@ -4260,7 +4298,7 @@ async function runDueJobs() {
     return { fired: false, reason: 'paused' };
   }
   cancelToken = { cancelled: false };
-  const result = await tickQueue();
+  const result = await tickQueue({ bypassLoadGate });
   // Clear the one-shot scheduledFor without waiting for jobs to settle.
   await mutate((s) => { s.scheduledFor = null; });
   await broadcast();
@@ -5038,7 +5076,7 @@ function registerScheduleHandlers() {
     // Clears any existing pause first (same semantics as run-now).
     await clearPause('run-now');
     try {
-      const result = await runDueJobs();
+      const result = await runDueJobs({ bypassLoadGate: true });
       return forceTickOutcome(result);
     } catch (e) {
       logs.writeLine({ level: 'error', scope: 'scheduler', message: 'runDueJobs error (force-tick)', meta: { error: e?.message } });
@@ -5114,7 +5152,7 @@ function registerScheduleHandlers() {
   ipcMain.handle('schedule:run-now', async () => {
     // Manual run-now overrides any auto-pause. Clear it first.
     await clearPause('run-now');
-    runDueJobs().catch((e) => logs.writeLine({ level: 'error', scope: 'scheduler', message: 'runDueJobs error (run-now)', meta: { error: e?.message } }));
+    runDueJobs({ bypassLoadGate: true }).catch((e) => logs.writeLine({ level: 'error', scope: 'scheduler', message: 'runDueJobs error (run-now)', meta: { error: e?.message } }));
     return { ok: true };
   });
 

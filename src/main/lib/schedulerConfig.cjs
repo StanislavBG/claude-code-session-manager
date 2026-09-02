@@ -109,4 +109,24 @@ module.exports = {
   // for 1653 minutes (27.5h) after its probe had already finished and
   // recorded finishedAt+exitCode.
   INVESTIGATION_MAX_MS: 60 * 60_000,
+
+  // CPU-load launch gate (loadGate.cjs): no NEW executor is launched while
+  // the 1-minute load average per core exceeds this. The dynamic complement
+  // to DEFAULT_PROJECT_JOB_CAP above — that cap is static and project-local;
+  // this sees the machine. Observed 2026-09-01: 4 Godot test batteries under
+  // Xvfb, loadavg 12.95 / 14 cores = 0.93, every battery stretching past its
+  // executor's own timeout and spawning fix-chain reruns. 0.85 leaves one
+  // core's worth of headroom on a saturated box; override with
+  // SM_LOAD_GATE_PER_CORE (float, clamped to [0.25, 4]; 0 disables).
+  LOAD_GATE_PER_CORE: 0.85,
+  loadGateThreshold,
 };
+
+function loadGateThreshold() {
+  const raw = process.env.SM_LOAD_GATE_PER_CORE;
+  if (raw === undefined || raw === '') return module.exports.LOAD_GATE_PER_CORE;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return module.exports.LOAD_GATE_PER_CORE;
+  if (parsed <= 0) return 0; // explicit disable
+  return Math.min(4, Math.max(0.25, parsed));
+}

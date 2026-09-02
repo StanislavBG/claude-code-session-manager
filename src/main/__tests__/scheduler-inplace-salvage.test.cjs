@@ -144,6 +144,15 @@ test('an in-place job killed (exit 137) mid-run salvages a delta-scoped patch th
     expect(row.salvagePatch).toBeTruthy();
     expect(fs.existsSync(row.salvagePatch)).toBe(true);
 
+    // Leftover-attribution fields: this job's own delta (README.md +
+    // job-output.txt), never the human's pre-existing baseline WIP.
+    expect(row.leftoverCount).toBe(2);
+    expect(new Set(row.leftoverPaths)).toEqual(new Set(['README.md', 'job-output.txt']));
+    // The pre-run baseline is cleared once the run has finalized — it was
+    // only ever needed to compute the delta above.
+    expect(row.guardBaseline).toBeUndefined();
+    expect(row.guardHeadBefore).toBeUndefined();
+
     const patch = fs.readFileSync(row.salvagePatch, 'utf8');
     expect(patch).toContain('README.md');
     expect(patch).toContain('edited by job');
@@ -173,6 +182,59 @@ test('an in-place job killed (exit 137) mid-run salvages a delta-scoped patch th
     const humanWipContent = fs.readFileSync(path.join(projectCwd, 'human-wip.txt'), 'utf8');
     expect(humanWipContent).toBe('human work in progress\nmore human edits\n');
     void statusBefore; // baseline captured for readability of intent above
+  } finally {
+    fs.rmSync(projectCwd, { recursive: true, force: true });
+    fs.rmSync(runDir, { recursive: true, force: true });
+  }
+}, 30_000);
+
+// Stub `claude` binary: touches nothing, emits a success result, and exits 0
+// — a job whose only working-tree dirt is pre-existing human/sibling WIP
+// present before the run even started.
+function writeNoopClaudeStub() {
+  const stubPath = path.join(os.tmpdir(), `sm-claude-stub-noop-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
+  const body = `
+    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'nothing to do', is_error: false }) + '\\n');
+    process.exit(0);
+  `;
+  fs.writeFileSync(stubPath, `#!${process.execPath}\n${body}\n`, { mode: 0o755 });
+  return stubPath;
+}
+
+test('a job whose tree is dirty only from pre-existing baseline WIP (human/sibling), and which itself dirties/commits nothing, gets no leftover attribution', async () => {
+  const projectCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-inplace-salvage-project-'));
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+
+  // Pre-existing WIP present BEFORE the run — must never be attributed to
+  // this job, even though it's still dirty at exit.
+  fs.writeFileSync(path.join(projectCwd, 'human-wip.txt'), 'human work in progress\n', 'utf8');
+
+  const slug = `1098-test-inplace-noop-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
+  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'prds');
+  fs.mkdirSync(prdsDir, { recursive: true });
+  fs.writeFileSync(path.join(prdsDir, `${slug}.md`), 'Do nothing.', 'utf8');
+
+  const queuePath = writeProjectQueue(projectCwd, [
+    { slug, status: 'pending', cwd: projectCwd },
+  ]);
+
+  process.env.SM_CLAUDE_BIN = writeNoopClaudeStub();
+
+  const runId = `run-${slug}`;
+  const runDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId);
+  fs.mkdirSync(runDir, { recursive: true });
+
+  try {
+    await spawnJob({ slug, cwd: projectCwd }, runId, runDir, projectCwd);
+
+    const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+    const row = jobs.find((j) => j.slug === slug);
+    expect(row).toBeTruthy();
+    expect(row.exitCode).toBe(0);
+    // No leftover attribution: the only dirt is baseline WIP, not this job's.
+    expect(row.leftoverPaths).toBeUndefined();
+    expect(row.leftoverCount).toBeUndefined();
   } finally {
     fs.rmSync(projectCwd, { recursive: true, force: true });
     fs.rmSync(runDir, { recursive: true, force: true });

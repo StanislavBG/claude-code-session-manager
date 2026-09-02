@@ -100,6 +100,23 @@ const ScheduleJobSchema = z
     // quietMachineWaitMs without the machine going quiet — tells a reader the
     // job's measurements ran under contention, not on a quiet machine.
     quietLeaseDegraded: z.boolean().optional(),
+    // Salvaged uncommitted diff patch path (PRD 1098).
+    salvagePatch: z.string().nullable().optional(),
+    // Leftover-attribution fields: the newly-dirty paths a terminal run left
+    // uncommitted, diffed against the persisted pre-run baseline
+    // (guardBaseline/guardHeadBefore below). Set on EVERY terminal outcome
+    // that left dirt (completed/failed/needs_review alike), not just the
+    // exit=0 commit-guard path — deleted when the run left nothing. Capped
+    // at LEFTOVER_PATHS_CAP paths (leftoverCount carries the true total).
+    leftoverPaths: z.array(z.string()).optional(),
+    leftoverCount: z.number().optional(),
+    leftoverPathsTruncated: z.boolean().optional(),
+    // Pre-run working-tree snapshot, persisted at dispatch so a finalizer
+    // that never reaches spawnJob's own completion path (reapDeadRunningJobs)
+    // can still compute a truthful newly-dirty delta. Cleared once the run
+    // finalizes — never meant to outlive one run.
+    guardBaseline: z.array(z.string()).optional(),
+    guardHeadBefore: z.string().nullable().optional(),
   })
   .passthrough();
 

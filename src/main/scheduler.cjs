@@ -2423,6 +2423,15 @@ function resetJobFields(job, errorMsg, opts = {}) {
   // Like exitCode: this run's outcome, not durable across a reset — a stale
   // leak badge from a prior attempt must not linger once the job re-fires.
   delete job.leakedDescendants;
+  // A pending row is about to re-run fresh — a stale leftover badge or a
+  // stale pre-run baseline from the attempt that just ended must not linger
+  // and be mistaken for THIS (not-yet-run) attempt's own output. spawnJob
+  // persists a brand-new guardBaseline at the next dispatch.
+  delete job.guardBaseline;
+  delete job.guardHeadBefore;
+  delete job.leftoverPaths;
+  delete job.leftoverCount;
+  delete job.leftoverPathsTruncated;
   // Deliberately NOT deleting job.landedCommit: it must outlive a reset so a
   // re-fired run of this same slug can pass it to verifyRun as
   // priorLandedCommit (pass_no_commit_prior_run_verified exemption).
@@ -2974,6 +2983,42 @@ function commitGuardVerdict({ newlyDirty, siblingRunning, ranInWorktree, jobSelf
     downgradeTo: 'needs_review',
     annotations: carried.length ? carried : undefined,
   };
+}
+
+// Every path list this job leaves attributed on the row is capped here so a
+// pathological run (thousands of newly-dirty files) never bloats queue.json
+// or history.jsonl — the count is still recorded in full via leftoverCount,
+// only the displayed sample is capped.
+const LEFTOVER_PATHS_CAP = 50;
+
+/**
+ * Pure: turn a newly-dirty path list (or null, meaning "couldn't tell" —
+ * never "left nothing") into the `leftoverPaths`/`leftoverCount`/
+ * `leftoverPathsTruncated` triple stamped on a terminal job row, or null when
+ * there is nothing to attribute (empty list, or the list itself is
+ * unavailable). One shape for both the worktree-leftover path and the
+ * in-place baseline-delta path — see this function's callers in spawnJob and
+ * reapDeadRunningJobs, both of which diff against a persisted pre-run
+ * baseline so a human's or a sibling's pre-existing WIP is never
+ * misattributed to this job.
+ */
+function leftoverFieldsFrom(paths) {
+  if (!Array.isArray(paths) || paths.length === 0) return null;
+  const fields = {
+    leftoverPaths: paths.slice(0, LEFTOVER_PATHS_CAP),
+    leftoverCount: paths.length,
+  };
+  if (paths.length > LEFTOVER_PATHS_CAP) fields.leftoverPathsTruncated = true;
+  return fields;
+}
+
+/** Stamps (or clears) the leftover-attribution fields on a job row in place. */
+function applyLeftoverFields(row, paths) {
+  delete row.leftoverPaths;
+  delete row.leftoverCount;
+  delete row.leftoverPathsTruncated;
+  const fields = leftoverFieldsFrom(paths);
+  if (fields) Object.assign(row, fields);
 }
 
 // ---------- execution ----------
@@ -3832,6 +3877,20 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     // checkSharedTreeGuard below, gated to in-place runs only.
     const stashBaseline = await stashList(guardCwd);
 
+    // Persist the pre-run baseline onto the row itself (not just the local
+    // variable) so a finalizer that never reaches the rest of THIS function
+    // — namely reapDeadRunningJobs, when the process vanishes mid-run — can
+    // still compute a truthful newly-dirty delta instead of having no
+    // baseline at all. `runtime` (unlike this) is deleted on finalize; this
+    // survives until the finalize mutate below explicitly clears it.
+    await mutate((s) => {
+      const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+      if (idx >= 0) {
+        s.jobs[idx].guardBaseline = guardBaseline || [];
+        s.jobs[idx].guardHeadBefore = guardHeadBefore || null;
+      }
+    });
+
     // Worktree isolation (PRD 994): give this job its own linked `git worktree`
     // checkout so its edits/tests/commit never collide with a sibling job or
     // an interactive session in the SAME repo. `worktree.ok` is false (with a
@@ -3966,6 +4025,26 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       }
     }
 
+    // Newly-dirty leftover computation — hoisted OUT of the exit===0 branch
+    // (below) so it runs for every terminal outcome: exit 0, any non-zero
+    // exit including 137/143, and the rate-limited/halt path alike. This is
+    // the exact same shape the exit=0 commit-guard and the transient-failure
+    // classifier each used to compute independently (guardCwd's own
+    // baseline-delta UNION worktreeLeftoverDirty, which is already
+    // inherently-new since it came from a fresh worktree checkout with no
+    // baseline to diff against) — computed once here and reused by both
+    // below, plus by the terminal-finalize mutate for leftoverPaths/
+    // leftoverCount. null only when git-status itself is unavailable
+    // (non-git cwd / git errored) — NEVER treated as "left nothing", exactly
+    // like every other best-effort git-state check in this function.
+    const afterGuardCwd = await uncommittedChanges(guardCwd);
+    const newlyDirtyAll = afterGuardCwd === null
+      ? null
+      : [...new Set([
+          ...afterGuardCwd.filter((p) => !new Set(guardBaseline || []).has(p)),
+          ...worktreeLeftoverDirty,
+        ])];
+
     if (res.rateLimited) {
       const resetIso = await refreshNextReset().catch(() => cachedNextReset);
       await setPaused('rate_limit', resetIso);
@@ -4080,20 +4159,12 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     const guardWillRefire = verifyResult && verifyResult.downgradeTo === 'pending';
     const guardIsLegitimateNoOp = verifyResult && COMPLETED_EQUIVALENT_VERDICTS.has(verifyResult.verdict);
     if (res.exitCode === 0 && !res.rateLimited && !guardWillRefire && !guardIsLegitimateNoOp) {
-      const after = await uncommittedChanges(guardCwd);
-      // after === null means non-git cwd (or git errored) — best-effort skip,
-      // same as always; only a git-status result (even an empty one) counts
-      // as evidence for the zero-edit path.
-      if (after !== null) {
-        const baseSet = new Set(guardBaseline || []);
-        // worktreeLeftoverDirty was captured from a FRESH checkout (no baseline
-        // to diff against — every path in it is inherently new) right before
-        // the worktree was torn down, so it must be counted here or a job's
-        // uncommitted leftovers silently vanish with the worktree.
-        const newlyDirty = [...new Set([
-          ...after.filter((p) => !baseSet.has(p)),
-          ...worktreeLeftoverDirty,
-        ])];
+      // afterGuardCwd === null means non-git cwd (or git errored) —
+      // best-effort skip, same as always; only a git-status result (even an
+      // empty one) counts as evidence for the zero-edit path. newlyDirtyAll
+      // was computed once, above, right after the try/finally.
+      if (afterGuardCwd !== null) {
+        const newlyDirty = newlyDirtyAll;
         const guardState = await readQueue().catch(() => ({ jobs: [] }));
         const siblingRunning = (guardState.jobs || []).some(
           (j) => j.slug !== job.slug && j.status === 'running' && (j.cwd || defaultCwd) === guardCwd,
@@ -4277,6 +4348,20 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             delete s.jobs[i2].sharedTreeGuard;
           }
           delete s.jobs[i2].runtime;
+          // Pre-run baseline no longer needed once this run has finalized —
+          // its whole purpose (letting THIS finalize compute a truthful
+          // delta) is done; a fresh one is captured at the next dispatch.
+          delete s.jobs[i2].guardBaseline;
+          delete s.jobs[i2].guardHeadBefore;
+          // Leftover-attribution fields (PRD: capture+surface uncommitted
+          // work on every terminal path, not just exit=0) — set for EVERY
+          // terminal outcome above (completed/failed/needs_review alike),
+          // not just the exit=0 commit-guard branch, so a bare `failed` row
+          // is visually distinguishable from one that quietly left work
+          // behind. newlyDirtyAll is null when git-status was unavailable
+          // (non-git cwd) — applyLeftoverFields treats null like "nothing to
+          // attribute" via its Array.isArray guard, same as an empty array.
+          applyLeftoverFields(s.jobs[i2], newlyDirtyAll);
 
           if (isNotifiableTerminalStatus(effectiveStatus)) {
             terminalNotifySnapshot = { ...s.jobs[i2] };
@@ -4385,25 +4470,11 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
       // the threshold and still fall through to investigation.
       const ec = failedJobSnapshot.exitCode;
       const retries = failedJobSnapshot.transientRetries ?? 0;
-      // Only pay for the extra git status call when the failure is plausibly
-      // transient — a real code failure never needs the dirty-tree check.
       const maybeTransient = (ec === 143 || ec === 137) || res.networkError === true;
-      let newlyDirtyCount = 0;
-      let dirtySample = '';
-      if (maybeTransient) {
-        const afterFailure = await uncommittedChanges(guardCwd);
-        const baseSet = new Set(guardBaseline || []);
-        // See the commit-guard block above: worktreeLeftoverDirty was captured
-        // (and the checkout already torn down) before this point, so it must
-        // be folded in here too or a transiently-killed job's leftover WIP
-        // silently disappears with its worktree.
-        const newlyDirty = [...new Set([
-          ...(afterFailure || []).filter((p) => !baseSet.has(p)),
-          ...worktreeLeftoverDirty,
-        ])];
-        newlyDirtyCount = newlyDirty.length;
-        dirtySample = newlyDirty.slice(0, 3).join(', ');
-      }
+      // newlyDirtyAll was computed once, above, right after the try/finally —
+      // reused here rather than re-querying git status a third time.
+      const newlyDirtyCount = maybeTransient ? (newlyDirtyAll || []).length : 0;
+      const dirtySample = maybeTransient ? (newlyDirtyAll || []).slice(0, 3).join(', ') : '';
       const decision = classifyFailureOutcome({
         exitCode: ec,
         networkError: res.networkError,
@@ -4763,24 +4834,24 @@ async function reapDeadRunningJobs() {
         const idx = s.jobs.findIndex((x) => x.slug === slug);
         if (idx < 0 || s.jobs[idx].status !== 'running') continue; // race guard
         const success = outcome === 'success';
-        const transitionReason = pidless ? reason : `reaped: process gone (outcome=${outcome})`;
 
-        // Best-effort in-place salvage: a job whose owning process vanished
-        // without spawnJob()'s own finally block ever running (the exact
-        // case this reaper exists for) never got THAT block's salvage pass
-        // either. Only attempted when the row itself carries a persisted
-        // pre-run baseline (guardBaseline — spawnJob currently keeps this as
-        // a local variable, not yet written to the row; a sibling PRD wires
-        // that persistence). With no baseline there is no safe way to tell
-        // this job's own dirt from a human's or a sibling's pre-existing
-        // WIP, so this skips rather than ever dumping the whole tree.
+        // Best-effort in-place leftover computation: a job whose owning
+        // process vanished without spawnJob()'s own finally block ever
+        // running (the exact case this reaper exists for) never got that
+        // block's salvage OR leftover-attribution pass either. Only
+        // attempted when the row carries a persisted pre-run baseline
+        // (guardBaseline, persisted by spawnJob at dispatch — see there).
+        // With no baseline there is no safe way to tell this job's own dirt
+        // from a human's or a sibling's pre-existing WIP, so this skips
+        // rather than ever dumping/attributing the whole tree.
+        let deltaPaths = null;
         if (Array.isArray(s.jobs[idx].guardBaseline) && s.jobs[idx].runId) {
           try {
             const rowCwd = s.jobs[idx].cwd || s.config?.defaultCwd || DEFAULT_PROJECT_CWD;
             const after = await uncommittedChanges(rowCwd);
             if (after) {
               const baseSet = new Set(s.jobs[idx].guardBaseline);
-              const deltaPaths = after.filter((p) => !baseSet.has(p));
+              deltaPaths = after.filter((p) => !baseSet.has(p));
               if (deltaPaths.length) {
                 const salvagePath = path.join(RUNS_DIR, s.jobs[idx].runId, `${slug}.uncommitted.patch`);
                 const salvage = await jobWorktree.salvageJobDirtyDelta({ cwd: rowCwd, paths: deltaPaths, outFile: salvagePath });
@@ -4794,6 +4865,10 @@ async function reapDeadRunningJobs() {
             console.error(`[scheduler] reapDeadRunningJobs: in-place salvage failed for ${slug}`, e);
           }
         }
+        const leftoverSuffix = deltaPaths && deltaPaths.length
+          ? ` — left ${deltaPaths.length} files uncommitted`
+          : '';
+        const transitionReason = (pidless ? reason : `reaped: process gone (outcome=${outcome})`) + leftoverSuffix;
 
         transitionJob(s.jobs[idx], success ? 'completed' : 'failed', { reason: transitionReason, source: 'reapDeadRunningJobs' });
         s.jobs[idx].exitCode = success ? 0 : (s.jobs[idx].exitCode ?? 1);
@@ -4801,6 +4876,9 @@ async function reapDeadRunningJobs() {
         s.jobs[idx].error = success ? null : `${transitionReason} (outcome=${outcome})`;
         s.jobs[idx].gateOutcome = gateOutcome;
         delete s.jobs[idx].runtime;
+        delete s.jobs[idx].guardBaseline;
+        delete s.jobs[idx].guardHeadBefore;
+        applyLeftoverFields(s.jobs[idx], deltaPaths);
         runningSet.delete(slug);
         // A dead job reaped here never reached spawnJob's own finally block
         // (that's this reaper's whole reason to exist — see its header
@@ -6717,4 +6795,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead };

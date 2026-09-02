@@ -87,6 +87,32 @@ export function LeakBadge({ leaked }: { leaked?: LeakedDescendant[] }) {
   )
 }
 
+// ─── LeftoverBadge ───────────────────────────────────────────────────────────
+// A `failed` row that left uncommitted work is a very different triage case
+// from one that left nothing — this badge makes that visually distinct
+// regardless of status (completed/failed/needs_review can all carry
+// leftovers; see the commit-guard's own consequence, which this never
+// changes — only what's displayed).
+
+export function LeftoverBadge({ count, truncated, salvagePatch }: {
+  count?: number
+  truncated?: boolean
+  salvagePatch?: string | null
+}) {
+  if (!count || count <= 0) return null
+  const label = `left ${count}${truncated ? '+' : ''} file${count === 1 ? '' : 's'} uncommitted`
+  const salvageHint = salvagePatch ? ` — recoverable from salvage patch ${salvagePatch}` : ''
+  return (
+    <Badge
+      tone="warn"
+      className="shrink-0 normal-case"
+      title={`${label}${salvageHint}`}
+    >
+      <span data-testid="leftover-badge">{label}</span>
+    </Badge>
+  )
+}
+
 // ─── ProjectTag ──────────────────────────────────────────────────────────────
 export function ProjectTag({ cwd, name }: { cwd?: string | null; name?: string }) {
   const label = name ?? (cwd ? projectNameFromCwd(cwd) ?? cwd : '—')

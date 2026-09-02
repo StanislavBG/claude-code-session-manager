@@ -202,7 +202,12 @@ test('reapDeadRunningJobs salvages a delta-scoped in-place patch (PRD 1098) when
       cwd: projectCwd,
       runId,
       runtime: { pid: 999999 }, // guaranteed-dead pid
-      guardBaseline: ['human-wip.txt'],
+      // Includes the untracked session-manager-operations/ dir itself (git
+      // status --porcelain reports an untracked DIRECTORY, not the file
+      // inside it) — writeProjectQueue below writes queue.json INSIDE this
+      // same git repo, so it's part of the true pre-run baseline exactly
+      // like human-wip.txt.
+      guardBaseline: ['human-wip.txt', 'session-manager-operations/'],
     },
   ]);
   const runDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId);
@@ -226,6 +231,44 @@ test('reapDeadRunningJobs salvages a delta-scoped in-place patch (PRD 1098) when
   assert.match(patch, /edited by job/);
   assert.match(patch, /job-output\.txt/);
   assert.doesNotMatch(patch, /human wip/, 'baseline WIP must never leak into the salvaged patch');
+  assert.equal(row.leftoverCount, 2, 'the reaper must attribute the job\'s own delta (README.md + job-output.txt), never the baseline WIP');
+  assert.deepEqual(new Set(row.leftoverPaths), new Set(['README.md', 'job-output.txt']));
+});
+
+test('reapDeadRunningJobs: a failed reap with a persisted guardBaseline names the leftover count in its transition reason and error', async () => {
+  const projectCwd = path.join(tmpHome, 'g-project');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+
+  const runId = 'run-vanished-failed';
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug: 'vanished-failed',
+      status: 'running',
+      cwd: projectCwd,
+      runId,
+      runtime: { pid: 999999 },
+      // Includes the untracked session-manager-operations/ dir itself — see
+      // the comment on the salvage test above for why.
+      guardBaseline: ['session-manager-operations/'],
+    },
+  ]);
+  // Empty run dir → classifyRunOutcome finds no result event → 'no_result' → failed.
+  fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId), { recursive: true });
+
+  fs.writeFileSync(path.join(projectCwd, 'partial-work.txt'), 'unfinished\n', 'utf8');
+
+  bustCwdCache();
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === 'vanished-failed');
+  assert.equal(row.status, 'failed');
+  assert.equal(row.leftoverCount, 1);
+  assert.deepEqual(row.leftoverPaths, ['partial-work.txt']);
+  assert.match(row.error, /left 1 files uncommitted/, 'the leftover count must be visible in the error string, not just a separate field');
+  const lastTransition = row.statusHistory[row.statusHistory.length - 1];
+  assert.match(lastTransition.reason, /left 1 files uncommitted/);
 });
 
 test('reapDeadRunningJobs skips in-place salvage (no whole-tree dump) when the row has no persisted guardBaseline', async () => {
@@ -244,9 +287,10 @@ test('reapDeadRunningJobs skips in-place salvage (no whole-tree dump) when the r
       cwd: projectCwd,
       runId,
       runtime: { pid: 999999 },
-      // No guardBaseline field — this PRD's sibling hasn't landed persistence
-      // yet, so there's no safe way to distinguish this job's own dirt from
-      // the human's pre-existing WIP above.
+      // No guardBaseline field — simulates a row whose owning process
+      // vanished before spawnJob's dispatch-time persist-mutate ever ran, so
+      // there's no safe way to distinguish this job's own dirt from the
+      // human's pre-existing WIP above.
     },
   ]);
   const runDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId);
@@ -260,4 +304,6 @@ test('reapDeadRunningJobs skips in-place salvage (no whole-tree dump) when the r
   const row = jobs.find((j) => j.slug === 'vanished-no-baseline');
   assert.equal(row.status, 'completed');
   assert.equal(row.salvagePatch, undefined, 'must skip salvage entirely rather than ever dumping the whole tree');
+  assert.equal(row.leftoverPaths, undefined, 'no baseline means no safe attribution — must not guess');
+  assert.equal(row.leftoverCount, undefined);
 });

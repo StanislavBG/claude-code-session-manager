@@ -10,7 +10,7 @@ import { getLintQueueCached } from '../lib/lintQueueCache'
 import { RunLogViewer } from './tabs/plans/RunLogViewer'
 import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
-import { SchBadge, LeakBadge, formatLeakedDescendants, ProjectTag, EpicTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
+import { SchBadge, LeakBadge, LeftoverBadge, formatLeakedDescendants, ProjectTag, EpicTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
 import { resolveEpicRef } from '../lib/epicProvenance'
 import { usePanelFocus } from '../lib/panelFocus'
 import type { NavKey } from './LeftNav'
@@ -975,6 +975,7 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
             {prdNumber(job.slug) && <PrdNumberBadge n={prdNumber(job.slug)!} />}
             {job.title}
             <LeakBadge leaked={job.leakedDescendants} />
+            <LeftoverBadge count={job.leftoverCount} truncated={job.leftoverPathsTruncated} salvagePatch={job.salvagePatch} />
           </div>
           {note && (
             <div className={`text-[12.5px] mt-0.5 ${isFailed ? 'text-accent/80' : 'text-fg-faint'}`}>
@@ -1027,6 +1028,13 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
             )}
             {job.leakedDescendants && job.leakedDescendants.length > 0 && (
               <DetailLine k="leaked" v={formatLeakedDescendants(job.leakedDescendants)} wrap />
+            )}
+            {job.leftoverCount != null && job.leftoverCount > 0 && (
+              <DetailLine
+                k="uncommitted"
+                v={`${job.leftoverCount} file${job.leftoverCount === 1 ? '' : 's'}${job.leftoverPathsTruncated ? '+' : ''}: ${(job.leftoverPaths ?? []).join(', ')}${job.salvagePatch ? ` — salvaged to ${job.salvagePatch}` : ''}`}
+                wrap
+              />
             )}
             {errorText && (
               <DetailLine k="error" v={errorText.split('\n')[0]} wrap />

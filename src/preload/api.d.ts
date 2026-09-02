@@ -520,6 +520,22 @@ export interface ScheduleJob {
    *  case — a non-empty array means the job backgrounded work that outlived
    *  it and had to be reaped; the job's `status` is unaffected. */
   leakedDescendants?: LeakedDescendant[];
+  /** Path to a patch file (`<slug>.uncommitted.patch` in the run dir)
+   *  salvaging this job's uncommitted worktree/in-place diff before it was
+   *  lost — set whenever the commit-guard's worktree or in-place salvage
+   *  pass produced one (PRD 1098). */
+  salvagePatch?: string | null;
+  /** The newly-dirty paths a terminal run left uncommitted, diffed against
+   *  the pre-run baseline — set on EVERY terminal outcome that left dirt
+   *  (completed/failed/needs_review alike, not just the exit=0 commit-guard
+   *  path), deleted when the run left nothing. Capped at 50 entries;
+   *  `leftoverCount` carries the true total and `leftoverPathsTruncated` is
+   *  set when the list was cut. Lets the queue row show e.g. "left 4 files
+   *  uncommitted" on a bare `failed` row, distinguishing it from one that
+   *  left nothing. */
+  leftoverPaths?: string[];
+  leftoverCount?: number;
+  leftoverPathsTruncated?: boolean;
 }
 
 export interface LeakedDescendant {

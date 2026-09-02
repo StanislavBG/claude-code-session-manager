@@ -168,6 +168,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-stranded-investigation.test.cjs',
       'src/main/lib/__tests__/mcpToolCatalog.test.cjs',
       'src/main/lib/__tests__/schedulerMcpServerHelp.test.cjs',
+      'src/main/lib/__tests__/schedulerMcpServerProjectHome.test.cjs',
     ],
     globals: true,
   },

@@ -83,6 +83,7 @@ test('MCP_RECIPES covers queue-work, unstick-needs-review, and hand-off-to-anoth
   expect(ids).toContain('queue-work-via-develop');
   expect(ids).toContain('unstick-needs-review-job');
   expect(ids).toContain('hand-finding-to-another-project');
+  expect(ids).toContain('generate-project-home');
   for (const recipe of MCP_RECIPES) {
     expect(recipe.title).toBeTruthy();
     expect(Array.isArray(recipe.steps)).toBe(true);

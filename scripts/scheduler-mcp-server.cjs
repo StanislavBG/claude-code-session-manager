@@ -169,7 +169,11 @@ const TOOLS = [
         tag: {
           type: 'string',
           enum: PRD_WORK_TYPES,
-          description: 'Optional: the work type of THIS PRD — independent of the parent Epic\'s own tag. An Epic is the plan; a PRD is one unit of work inside it, and a single plan may legitimately contain several different work types. Never derived or inherited from the Epic.',
+          description: 'Optional: the WORK TYPE of THIS PRD — independent of the parent Epic\'s own tag. An Epic is the plan; a PRD is one unit of work inside it, and a single plan may legitimately contain several different work types. Never derived or inherited from the Epic.',
+        },
+        agentType: {
+          type: 'string',
+          description: 'Optional: WHO executes this PRD — the persona name (a file at ~/.claude/agents/<name>.md, e.g. "dev-lead") the executor should adopt. Distinct from `tag` (what kind of work); this is who does it. Defaults to "dev-lead" when omitted. Rejected at write time if the name does not resolve to a readable persona file.',
         },
         quietMachine: {
           type: 'boolean',
@@ -225,6 +229,7 @@ const TOOLS = [
             sourcePromptId: { type: 'string' },
             sourceTabId: { type: 'string' },
             tag: { type: 'string', enum: PRD_WORK_TYPES },
+            agentType: { type: 'string', description: 'WHO executes this PRD (persona name) — patchable after creation too, see scheduler_create_prd' },
             quietMachine: { type: 'boolean', description: 'Optional: the exclusive machine-wide quiet lease flag (see scheduler_create_prd) — patchable after creation too' },
           },
         },

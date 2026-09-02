@@ -10,6 +10,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { PromptSessionSchema, EpicTagSchema, EpicSourceSchema, EpicIntakeSectionSchema } = require('./lib/promptSessionSchema.cjs');
 const { PrdWorkTypeSchema } = require('./lib/workTypeLibrary.cjs');
+const { PERSONA_NAME_RE } = require('./agentLibrary.cjs');
 const { AgentPersonaSaveSchema } = require('./lib/agentPersonaSchema.cjs');
 
 // ──────────────────────────────────────────── PTY
@@ -305,6 +306,13 @@ const PRD_CREATE_SLUG_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 // frontmatter-shaped lines into the body. Block newlines at the boundary
 // instead of trying to escape them later.
 const NO_NEWLINE_RE = /^[^\r\n]*$/;
+// WHO executes a PRD — a persona name (agentLibrary.cjs's PERSONA_NAME_RE),
+// distinct from `tag` (the WORK TYPE, above). Not a closed enum here: the
+// Agent Library is user-editable, so the actual FK check (does this name
+// resolve to a readable persona file) happens at write time in
+// prdCreate.cjs's createPrd via prdAgentType.cjs's assertAgentTypeWritable —
+// this schema only enforces the name SHAPE.
+const PrdAgentTypeSchema = z.string().regex(PERSONA_NAME_RE, 'agent name must be lowercase, hyphenated (e.g. "dev-lead")');
 const schedulerCreatePrd = z.object({
   title: z.string().min(1).max(200).regex(NO_NEWLINE_RE, 'must not contain newlines'),
   // Optional (PRD: worktree-cwd Epic-lookup hazard) — when omitted, prdCreate.cjs's
@@ -358,6 +366,10 @@ const schedulerCreatePrd = z.object({
   // excluded here for the same reason adminPrdFrontmatterPatch excludes it
   // below — a discussion-tagged Epic never reaches PRD authoring.
   tag: PrdWorkTypeSchema.optional(),
+  // WHO executes this PRD (persona name, `~/.claude/agents/<name>.md`) —
+  // independent of `tag` above. Optional: prdCreate.cjs's buildPrdBody fills
+  // in DEFAULT_PRD_AGENT_TYPE ('dev-lead') when omitted.
+  agentType: PrdAgentTypeSchema.optional(),
   // Opt-in exclusive-lease flag (PRD 1107): the scheduler dispatches this PRD
   // only once zero other jobs are running machine-wide, and holds every other
   // job off the whole session-slot pool while it runs — for a PRD whose
@@ -432,6 +444,8 @@ const adminPrdFrontmatterPatch = z.object({
   // discussion-tagged Epic never reaches PRD authoring) — see
   // workTypeLibrary.cjs's PrdWorkTypeSchema.
   tag: PrdWorkTypeSchema.optional(),
+  // WHO executes this PRD — patchable after creation too, same as `tag`.
+  agentType: PrdAgentTypeSchema.optional(),
   // Provenance stamp (PRD-authoring lockdown). Free-text rather than an enum
   // — 'scheduler-api' (create-time) and 'legacy-adopted' (migration/manual
   // adopt) are the two values this codebase writes today, but the field

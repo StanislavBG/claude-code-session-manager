@@ -19,6 +19,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
 const { deriveEpicIdFromPrdPath } = require('../lib/prdLocations.cjs');
+const { reportDanglingAgentTypeOnce } = require('../lib/prdAgentType.cjs');
 
 /**
  * Expand a PRD `cwd` value to an absolute path.
@@ -57,12 +58,19 @@ async function parsePrdRaw(filePath) {
     const m = base.match(/^(\d+)-/);
     return m ? Number(m[1]) : null;
   })();
+  const cwd = expandCwd(fm.cwd || null);
+
+  // Read-time tolerance for the agentType FK (throw on write, report on
+  // read — prdAgentType.cjs's header): a persona renamed/deleted after this
+  // PRD was written must not stop the PRD from loading. Best-effort only —
+  // never lets a logging failure affect parsing.
+  if (fm.agentType && cwd) reportDanglingAgentTypeOnce(cwd, fm.agentType);
 
   return {
     slug: base,
     path: filePath,
     title: fm.title || base,
-    cwd: expandCwd(fm.cwd || null),
+    cwd,
     estimateMinutes: fm.estimateMinutes ? Number(fm.estimateMinutes) || null : null,
     parallelGroup: (fm.parallelGroup ? Number(fm.parallelGroup) || null : null) ?? groupFromName ?? 99,
     // Optional traceability back to the PromptTicket.id (PRD 748) that was
@@ -99,6 +107,11 @@ async function parsePrdRaw(filePath) {
     // quarantines it instead of queuing it to run.
     createdVia: fm.createdVia || null,
     issuedAt: fm.issuedAt || null,
+    // WHO executes this PRD (persona name) — distinct from `tag` (work
+    // type). Absent on every PRD authored before this field existed; the
+    // dependent follow-up PRD (scheduler-launch-as-persona) resolves this
+    // into a launch decision, which this module does not do.
+    agentType: fm.agentType || null,
     // Opt-in exclusive-lease flag (PRD 1107, quietMachineLease.cjs +
     // schedulerBatch.cjs's pickNextBatch). Only a literal `true` opts in —
     // matches prdFrontmatter.cjs's applyKey semantics for this field.

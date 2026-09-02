@@ -71,7 +71,11 @@ const MCP_TOOL_CATALOG = [
       + '`cwd` is OPTIONAL when called from inside an Epic session (chat or terminal, '
       + 'including from inside that Epic\'s own git worktree pwd): the server resolves '
       + 'the real project from the calling session\'s sourcePromptId/originClaudeSessionId, '
-      + 'never from a worktree\'s own possibly-stale active-index.json snapshot.',
+      + 'never from a worktree\'s own possibly-stale active-index.json snapshot. '
+      + '`tag` and `agentType` are two DIFFERENT, independent fields — `tag` is WHAT KIND '
+      + 'of work this PRD is (feature/bug/build/...); `agentType` is WHO executes it (a '
+      + 'persona name, e.g. "dev-lead"). `agentType` defaults to "dev-lead" when omitted, '
+      + 'and is rejected at write time if it does not name a real persona file.',
     whenToUse: 'Use whenever new work should be queued into an already-approved Epic — this is the /develop path.',
     whenNotToUse: 'TWO DISTINCT FAILURE MODES if this tool is not usable — do not conflate them: '
       + '(a) this tool call is PRESENT in your tool list but ERRORS as app-not-running / admin '

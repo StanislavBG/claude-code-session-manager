@@ -80,6 +80,23 @@ test('buildPrdBody emits required frontmatter keys and body sections in order', 
   expect(body.includes('Lay out hot data contiguously')).toBeFalsy();
 });
 
+test('buildPrdBody emits agentType: dev-lead by default when omitted (PRD 1114)', () => {
+  const body = buildPrdBody({
+    title: 't', cwd: '~/x', estimateMinutes: 5, goal: 'g',
+    acceptanceCriteria: ['a'], implementationNotes: 'n',
+  });
+  expect(body).toMatch(/^agentType: dev-lead$/m);
+});
+
+test('buildPrdBody emits the supplied agentType instead of the default', () => {
+  const body = buildPrdBody({
+    title: 't', cwd: '~/x', estimateMinutes: 5, goal: 'g',
+    acceptanceCriteria: ['a'], implementationNotes: 'n',
+    agentType: 'architect',
+  });
+  expect(body).toMatch(/^agentType: architect$/m);
+});
+
 test('buildPrdBody omits parallelGroup frontmatter key when not supplied', () => {
   const body = buildPrdBody({
     title: 't', cwd: '~/x', estimateMinutes: 5, goal: 'g',
@@ -528,6 +545,56 @@ test('POST /admin/scheduler/create-prd with tag writes it into the created PRD f
   } finally {
     await admin.stop();
   }
+});
+
+// ──────────────────────────────────────────── PRD 1114: agentType (WHO
+// executes a PRD) — throw on write for an unresolvable persona, default to
+// dev-lead when omitted.
+
+test('createPrd rejects an unknown agentType at write time, naming available personas, and writes no file', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const writePrdSpy = vi.fn(remote.writePrd);
+  remote.writePrd = writePrdSpy;
+
+  const result = await createPrd(
+    validCreateBody({ agentType: 'zzz-definitely-not-a-real-persona-12345' }),
+    remote,
+  );
+
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe(400);
+  expect(result.error).toMatch(/does not resolve to a readable persona file/);
+  expect(result.error).toMatch(/Available personas/);
+  expect(writePrdSpy).not.toHaveBeenCalled();
+  const entries = await fsp.readdir(prdsDir);
+  expect(entries.filter((f) => f.endsWith('.md')).length).toBe(0);
+});
+
+test('createPrd accepts a caller-supplied agentType that resolves to a project-overlay persona file', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const cwd = path.dirname(path.dirname(prdsDir)); // mkTmpPrdsDir's root (prdsDir = root/.claude/prds)
+  const agentsDir = path.join(cwd, '.claude', 'agents');
+  await fsp.mkdir(agentsDir, { recursive: true });
+  await fsp.writeFile(path.join(agentsDir, 'my-persona.md'), '---\nname: my-persona\n---\nbody\n', 'utf8');
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+  const result = await createPrd(validCreateBody({ cwd, slug: 'with-agent-type', agentType: 'my-persona' }), remote);
+
+  expect(result.ok).toBe(true);
+  const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
+  expect(written).toMatch(/^agentType: my-persona$/m);
+});
+
+test('createPrd defaults agentType to dev-lead when omitted, without any persona-existence check', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+  const result = await createPrd(validCreateBody({ slug: 'no-agent-type-supplied' }), remote);
+
+  expect(result.ok).toBe(true);
+  const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
+  expect(written).toMatch(/^agentType: dev-lead$/m);
 });
 
 // ──────────────────────────────────────────── originClaudeSessionId fallback

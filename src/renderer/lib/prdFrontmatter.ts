@@ -21,6 +21,9 @@
  *     before this field existed. A 'discussion' ticket never reaches PRD
  *     authoring, so that value is never parsed here even if present in a
  *     hand-edited file.
+ *   - agentType: string (optional) — the persona (`~/.claude/agents/<name>.md`)
+ *     that executes this PRD, distinct from `tag` (the work type). Additive
+ *     only; absent on every PRD authored before this field existed.
  *
  * Round-trip invariant: keys not in `PrdFrontmatter` are preserved verbatim
  * in their original line range via `extras`. Edits only touch lines that own
@@ -42,6 +45,7 @@ export type PrdFrontmatter = {
   sourcePromptId?: string
   sourceTabId?: string
   tag?: EpicTag
+  agentType?: string
   // Unrecognized keys round-trip via `extras`.
   extras?: Record<string, RawValue>
   // Original raw line per recognized key. Used to preserve quote style and
@@ -70,6 +74,7 @@ const RECOGNIZED_KEYS = new Set<keyof PrdFrontmatter>([
   'sourcePromptId',
   'sourceTabId',
   'tag',
+  'agentType',
 ])
 
 // Emit order is stable so opening+saving without edits is byte-identical.
@@ -81,6 +86,7 @@ const EMIT_ORDER: Array<keyof PrdFrontmatter> = [
   'sourcePromptId',
   'sourceTabId',
   'tag',
+  'agentType',
 ]
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
@@ -200,6 +206,12 @@ function applyKey(fm: PrdFrontmatter, key: string, after: string): void {
       return
     case 'tag':
       if (typeof v === 'string' && PRD_TAG_VALUES.has(v as EpicTag)) fm.tag = v as EpicTag
+      return
+    case 'agentType':
+      // WHO executes this PRD — a persona name, not a closed enum (the
+      // Agent Library is user-editable). FK resolution happens server-side
+      // (main-process prdAgentType.cjs), not in this pure parser.
+      fm.agentType = String(v)
       return
   }
 }

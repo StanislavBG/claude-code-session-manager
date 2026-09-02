@@ -27,6 +27,7 @@ const { readActiveIndex } = require('./epicMint.cjs');
 const { appendAuditEvent } = require('./auditLog.cjs');
 const { resolveProjectContext } = require('./projectRootResolve.cjs');
 const { fixChainDepthOf, baseSlugOf } = require('./fixChainDepth.cjs');
+const { DEFAULT_PRD_AGENT_TYPE, assertAgentTypeWritable } = require('./prdAgentType.cjs');
 
 // Fix-chain depth cap (PRD 1113): a fix-of-a-fix (depth >= 2) is refused at
 // this shared write path rather than caught later — scheduler.cjs's
@@ -62,7 +63,7 @@ function deriveSlugFromTitle(title) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, dependsOn, quietMachine,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine,
   } = input;
 
   // No `parallelGroup` frontmatter key by convention (SKILL.md) — the NN-
@@ -87,6 +88,13 @@ function buildPrdBody(input) {
   // Optional, additive: the user-selected Feature/Bug tag (PRD 774) carried
   // through from the originating PromptTicket — deterministic, never LLM-classified.
   if (tag) fmLines.push(`tag: ${tag}`);
+  // WHO executes this PRD — distinct from `tag` (the WORK TYPE, above).
+  // Always emitted (unlike tag): a PRD with no agentType is ambiguous about
+  // who runs it, so createPrd() fills in DEFAULT_PRD_AGENT_TYPE ('dev-lead')
+  // before calling this function when the caller omitted one. Validated at
+  // write time by createPrd() via prdAgentType.cjs's assertAgentTypeWritable
+  // — this function only serializes, it never validates.
+  fmLines.push(`agentType: ${agentType || DEFAULT_PRD_AGENT_TYPE}`);
   // Explicit ordering (PRD 832): replaces the retired shared-NN convention.
   if (dependsOn && dependsOn.length) fmLines.push(`dependsOn: [${dependsOn.join(', ')}]`);
   // Opt-in exclusive-lease flag (PRD 1107): serializes this job against
@@ -260,6 +268,20 @@ async function createPrd(input, remote) {
   const existing = await remote.readPrd(filenameSlug, input.cwd);
   if (existing?.ok) {
     return { ok: false, status: 409, error: `PRD already exists: ${filenameSlug}.md` };
+  }
+
+  // Write-time FK check (throw on write, report on read — see
+  // prdAgentType.cjs's header): a caller-supplied agentType that doesn't
+  // resolve to a readable persona file is rejected before anything is
+  // written, naming the available personas. A no-op when agentType is
+  // omitted — buildPrdBody fills in DEFAULT_PRD_AGENT_TYPE for that case,
+  // and the default persona is trusted without a lookup.
+  if (input.agentType) {
+    try {
+      await assertAgentTypeWritable(input.cwd, input.agentType);
+    } catch (e) {
+      return { ok: false, status: 400, error: e?.message ?? 'invalid agentType' };
+    }
   }
 
   const body = buildPrdBody(input);

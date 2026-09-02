@@ -62,7 +62,7 @@ function splitFrontmatter(raw) {
  * either surface never reorders or drops a key it didn't touch. Recognized
  * key set intentionally mirrors the TS module exactly (title, cwd,
  * estimateMinutes, parallelGroup, sourcePromptId, sourceTabId, tag,
- * createdVia, issuedAt); every other frontmatter key (e.g. dependsOn)
+ * agentType, createdVia, issuedAt); every other frontmatter key (e.g. dependsOn)
  * round-trips via `extras`, same as the renderer's editor today.
  *
  * `createdVia`/`issuedAt` (PRD provenance-lockdown) are recognized here so
@@ -72,8 +72,8 @@ function splitFrontmatter(raw) {
  * into `extras`.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'createdVia', 'issuedAt', 'quietMachine']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'createdVia', 'issuedAt', 'quietMachine'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'quietMachine']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'quietMachine'];
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 function indentOf(line) {
@@ -124,6 +124,13 @@ function applyKey(fm, key, after) {
     case 'tag':
       // Matches the TS source's applyKey exactly — see PRD_TAG_VALUES above.
       if (PRD_TAG_VALUES.has(v)) fm.tag = v;
+      return;
+    case 'agentType':
+      // WHO executes this PRD — a persona name, not a closed enum (the
+      // Agent Library is user-editable). FK resolution against the Agent
+      // Library happens in prdAgentType.cjs, not here — this parser only
+      // round-trips the string.
+      fm.agentType = String(v);
       return;
     case 'createdVia':
       fm.createdVia = String(v);

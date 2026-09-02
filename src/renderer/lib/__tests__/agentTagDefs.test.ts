@@ -14,3 +14,26 @@ describe('AGENT_TAG_DEFS feature/bug templates', () => {
     }
   })
 })
+
+// Regression guard: this template must work on a machine that only has the
+// npm package installed (no session-manager source repo on disk) — it must
+// drive the MCP contract, never a repo-relative path, and must never fall
+// back to hand-rolling the pipeline via /develop.
+const FORBIDDEN_REPO_PATH_SUBSTRINGS = [
+  'session-manager-operations/architecture/',
+  '.claude/agents/',
+  'session-manager-operations/design-mocks/',
+  'scripts/',
+  'npm run build:project-pages',
+]
+
+describe('AGENT_TAG_DEFS project-home-builder template', () => {
+  it('names only the MCP contract, no repo-relative paths, and never falls back to /develop', () => {
+    const template = AGENT_TAG_DEFS['project-home-builder'].initialPromptTemplate
+    for (const forbidden of FORBIDDEN_REPO_PATH_SUBSTRINGS) {
+      expect(template).not.toContain(forbidden)
+    }
+    expect(template).not.toContain('/develop')
+    expect(template).toContain('project_home_get_contract')
+  })
+})

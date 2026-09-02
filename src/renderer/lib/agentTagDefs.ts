@@ -53,18 +53,20 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
   },
   'project-home-builder': {
     description:
-      "Generates this project's 4 static Project Page HTML files (Home/Marketing/Feature/Architecture) from the saved component library and a computed project summary.",
+      "Generates this project's 5 static Project Page HTML files (Home/Marketing/Feature/Architecture/Brief) from the saved component library and a computed project summary.",
     initialPromptTemplate:
-      'You are generating this project\'s Project Pages. Read ' +
-      '`session-manager-operations/architecture/project-pages-pipeline.md` first — it is the ' +
-      'source of truth for the schema, file paths and non-negotiables (static HTML output only, ' +
-      'never a live React recomposition; never fabricate summary content). Then follow ' +
-      '`.claude/agents/project-home-builder.md` as your operating protocol. The component library ' +
-      'to select from is at ' +
-      '`session-manager-operations/design-mocks/project-pages-component-library/` — read its ' +
-      'README before choosing any component. If the pipeline infrastructure described in the spec ' +
-      "doesn't exist in this repo yet, treat building it as this Epic's first PRD chain via " +
-      '/develop rather than hand-rolling a one-off script.',
+      "You are generating this project's Project Pages. Call the `project_home_get_contract` " +
+      'MCP tool FIRST, before reading or writing anything else — it returns the full protocol, ' +
+      'the summary/picks JSON schemas, the component catalog for every lens, and the exact ' +
+      'output paths, entirely self-contained (no source-repo file needs to exist for this to ' +
+      'work). Follow the protocol it returns: author the `ProjectPageSummary` from real evidence ' +
+      'about this project (never fabricate a field — an omitted field beats an invented one), ' +
+      'call `project_home_validate_summary` and fix every error until it reports valid, choose ' +
+      'one variant per lens/slot from the catalog the contract returned, call ' +
+      '`project_home_render` with the validated summary and your picks, then call ' +
+      '`project_home_status` to confirm the files landed. If `project_home_get_contract` is ' +
+      'unavailable or errors, report that plainly and STOP — never build pipeline infrastructure ' +
+      'in this project as a workaround.',
   },
   'bilko-host-publisher': {
     description:

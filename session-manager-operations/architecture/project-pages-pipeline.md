@@ -4,11 +4,31 @@ Canonical design for the "Project Page" feature: Project Home generates 5
 static HTML pages per project (**Home**, Marketing Landing, Feature
 Description, Architecture Overview, **Brief**) from a fixed component
 library, plus a never-generated "About these templates" view explaining the
-five lenses and where to hand-edit them. This is the single source of truth
-both the `project-home-builder` local agent
-(`.claude/agents/project-home-builder.md`) and the `project-home-builder`
-Epic tag's grounding prompt (`src/renderer/lib/agentTagDefs.ts`) point at —
-edit here, not in either of those, when the design changes.
+five lenses and where to hand-edit them. This is the design source of truth
+for the four `project_home_*` MCP tools (`project_home_get_contract`,
+`project_home_validate_summary`, `project_home_render`, `project_home_status`,
+served over the app's admin routes, PRD 1089) that actually drive a
+`project-home-builder` Epic's session — edit here, not in the tool
+implementations, when the design changes.
+
+**Correction, PRD "project-home-portable-persona":** generation is no longer
+grounded by pointing a session at this file (or any other repo-relative
+path) directly. This spec stopped being something a builder Epic reads —
+neither the seeded `project-home-builder` persona
+(`src/seed/agents/project-home-builder.md`, delivered to
+`~/.claude/agents/`) nor the `project-home-builder` Epic tag's grounding
+prompt (`src/renderer/lib/agentTagDefs.ts`) names a repo path anymore, because
+a builder Epic can run against a project that never had this repo checked
+out (the npm-installed case). Instead, both now point a session at the
+`project_home_get_contract` MCP tool as the FIRST call of the run — its
+response is a fully self-contained protocol + schema + catalog payload
+computed from this spec (see "Epic tag" below). This file remains the
+design source of truth for whoever implements or changes the MCP tools
+themselves; it is no longer read at generation time by the builder Epic.
+session-manager's own repo keeps a lean project-local overlay,
+`.claude/agents/project-home-builder.md`, that adds only session-manager-
+specific historical context (the saved design-mock library) on top of the
+seeded persona's real protocol — see that file.
 
 **Correction, 2026-08-02:** the original spec shipped 3 lenses
 (marketing/feature/architecture) only, with Project Home's own live Brief
@@ -167,11 +187,14 @@ Written to `session-manager-operations/project-pages/summary.json`.
 `projectBrief.refresh`-style main-process-orchestrated `claude -p` spawn.
 Per the human's explicit instruction, generation runs as a
 `project-home-builder`-tagged **Epic** — an ordinary Chat/Terminal claude
-session grounded by that tag's `initialPromptTemplate` (`agentTagDefs.ts`)
-and `.claude/agents/project-home-builder.md`'s protocol. That session reads
-`brief.json` and the repo directly (Read/Grep/Bash tools) and composes
-`summary.json` itself, then writes it with its own Write tool. There is no
-separate nested `claude -p` call and no new main-process IPC for synthesis.
+session grounded by that tag's `initialPromptTemplate` (`agentTagDefs.ts`),
+which drives the session to call the `project_home_get_contract` MCP tool
+first and follow the protocol it returns (see the correction note at the top
+of this file). That session reads `brief.json` and the repo directly
+(Read/Grep/Bash tools) and composes `summary.json` itself, then writes it
+via `project_home_render` (not a raw Write-tool file write — see Stage 3).
+There is no separate nested `claude -p` call and no new main-process IPC for
+synthesis beyond the four `project_home_*` admin-routed tools themselves.
 Cost-gating is inherent: it only runs when a human clicks **"Generate My
 Project Home"** (which creates/resumes the Epic), same discipline as any
 other Epic. `brief.json` itself is still produced by
@@ -186,15 +209,17 @@ subsection.
 
 **Reversed 2026-08-03 (Epic "Project Home Layout"): there is no separate
 deterministic selection stage.** The `project-home-builder` agent itself
-picks each slot's variant, by reasoning over `summary.json` against the
-component library's own variant notes — the same class of step as Stage 1's
-`summary.json` authoring, not a distinct machine-checkable predicate scorer.
-Concretely: for each lens, for each slot, the agent reads the candidate
-variants' prose `note`/description in
-`src/renderer/lib/projectPages/library/*.tsx` (e.g. "Needs a real quote.",
-"Needs a strong screenshot.") and judges which variant genuinely fits this
-project's `summary.json` content, then writes the picks directly with its
-own Write tool — no intermediate predicate language, no scorer script.
+picks each slot's variant, by reasoning over its composed summary against
+the component library's own variant notes — the same class of step as
+Stage 1's summary authoring, not a distinct machine-checkable predicate
+scorer. Concretely: for each lens, for each slot, the agent reads the
+candidate variants' prose `note`/description — served to it directly in
+`project_home_get_contract`'s catalog response, sourced server-side from
+`src/renderer/lib/projectPages/library/*.tsx` so the agent never needs to
+read that source itself (e.g. "Needs a real quote.", "Needs a strong
+screenshot.") — and judges which variant genuinely fits this project's
+summary content, then passes the resulting picks to `project_home_render` —
+no intermediate predicate language, no scorer script.
 
 Output persisted to `session-manager-operations/project-pages/picks.json`
 in the same shape as before (`Record<lensId, Record<slotId, variantId>>`),
@@ -324,18 +349,19 @@ separate mechanism.
 
 ## Storage / ownership
 
-**Correction vs. an earlier draft:** `project-pages/` is **NOT** an
-`OWNERS` namespace. `OWNERS`'s `assertOpsWrite` fail-closed check
-(`src/main/lib/opsOwnership.cjs`) only guards `config.cjs`'s own write
-helpers plus two raw-`fs` main-process modules — it has no way to intercept
-a claude session's own `Write` tool calls, and per the corrected Stage 1
-above, that's exactly how `summary.json`/`picks.json`/`output/*.html` get
-written (by the `project-home-builder` Epic's session, not by main-process
-code going through `config.cjs`). This makes `project-pages/` the same
-class as `design-mocks/`/`HUMAN_LEARN/` — **agent-authored artifact
-output**, single author per invocation, no app-enforceable concurrent-write
-hazard — not the same class as `brief.json` (main-process-orchestrated,
-enforceable). Do **not** add a `project-pages` entry to `OWNERS`.
+**Correction, PRD 1089/1090 (`project_home_*` MCP tools):** the write path
+described in an earlier draft of this section — a builder Epic's own `Write`
+tool writing `summary.json`/`picks.json`/`output/*.html` directly, with no
+`OWNERS` entry needed because no main-process code was involved — is
+superseded. `project_home_render` now writes those files via the app's
+admin API, which IS main-process code going through `config.cjs`'s write
+helpers. `project-pages` is therefore now listed in `OWNERS`
+(`src/main/lib/opsOwnership.cjs`), owned by `project-home`, scoped to the
+app's admin render route only (per CLAUDE.md's domain-model law) — see
+`project-pages/README.md` for the exact split. A builder Epic's own direct
+Write-tool authoring of anything under `project-pages/` (as opposed to going
+through `project_home_render`) stays ungoverned/unsupported; the sanctioned
+path for a builder Epic is always the MCP tool, never a raw file write.
 
 The concurrency concern is real but bounded a different way: "Generate My
 Project Home" must check for an already-active `project-home-builder` Epic
@@ -359,10 +385,15 @@ file lands, documenting the shape (matching `design-mocks/`'s and
 
 Added to `src/renderer/lib/tagLibrary.ts` (`EpicTag` union + `TAG_LIBRARY`
 entry) and `src/renderer/lib/agentTagDefs.ts` (`AGENT_TAG_DEFS` entry with
-an `initialPromptTemplate` that grounds the session: read this spec, read
-the saved component library, follow `.claude/agents/project-home-builder.md`
-as the operating protocol, and the output contract (the exact file paths
-under `session-manager-operations/project-pages/`). Deliberately **not**
+an `initialPromptTemplate` that grounds the session): call
+`project_home_get_contract` first — its response IS the protocol, the
+schemas, and the catalog, entirely self-contained — then follow it through
+`project_home_validate_summary` → `project_home_render` →
+`project_home_status`. The template names no repo-relative path (this is
+what makes generation work on a machine with only the npm package
+installed) and explicitly instructs the session to report and stop, never
+build pipeline infrastructure, if the contract tool is unavailable or
+errors. Deliberately **not**
 added to `AGENT_TAG_DEFS`'s `AGENT_TAG_ORDER` yet — same precedent as the
 existing `build` tag ("no UI surface to create a build-tagged Epic exists
 yet"): the creation surface (the "Generate My Project Home" button) is

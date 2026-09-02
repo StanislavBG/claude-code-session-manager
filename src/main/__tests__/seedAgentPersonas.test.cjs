@@ -54,22 +54,20 @@ function silentLogger() {
   return { log: () => {}, warn: () => {} };
 }
 
-test('fresh seed writes both persona files', async () => {
+const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder'];
+
+test('fresh seed writes every persona file', async () => {
   await seedAgentPersonas({ logger: silentLogger() });
 
-  const architect = path.join(agentsDir(), 'architect.md');
-  const devLead = path.join(agentsDir(), 'dev-lead.md');
-  expect(fs.existsSync(architect)).toBe(true);
-  expect(fs.existsSync(devLead)).toBe(true);
-
-  const bundledArchitect = fs.readFileSync(
-    path.join(__dirname, '..', '..', 'seed', 'agents', 'architect.md'),
-    'utf8'
-  );
-  expect(fs.readFileSync(architect, 'utf8')).toBe(bundledArchitect);
+  for (const name of ALL_PERSONAS) {
+    const dest = path.join(agentsDir(), `${name}.md`);
+    expect(fs.existsSync(dest)).toBe(true);
+    const bundled = fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', `${name}.md`), 'utf8');
+    expect(fs.readFileSync(dest, 'utf8')).toBe(bundled);
+  }
 
   const marker = JSON.parse(fs.readFileSync(markerPath(), 'utf8'));
-  expect(marker.done).toBe(true);
+  expect(marker.seeded.sort()).toEqual([...ALL_PERSONAS].sort());
 });
 
 test('a pre-existing persona file is left byte-identical', async () => {
@@ -81,18 +79,81 @@ test('a pre-existing persona file is left byte-identical', async () => {
   await seedAgentPersonas({ logger: silentLogger() });
 
   expect(fs.readFileSync(architect, 'utf8')).toBe(customContent);
-  // dev-lead had no pre-existing file, so it should still be seeded.
+  // dev-lead and project-home-builder had no pre-existing file, so they should still be seeded.
   expect(fs.existsSync(path.join(agentsDir(), 'dev-lead.md'))).toBe(true);
+  expect(fs.existsSync(path.join(agentsDir(), 'project-home-builder.md'))).toBe(true);
 });
 
-test('done:true marker short-circuits without touching agents dir', async () => {
+test('a machine already fully seeded under the old done:true marker only picks up a newly added persona', async () => {
   const mPath = markerPath();
   fs.mkdirSync(path.dirname(mPath), { recursive: true });
+  // Legacy marker shape from before the seeded-set change — no `seeded` array.
   fs.writeFileSync(mPath, JSON.stringify({ done: true, attempts: 1, ts: '2026-01-01T00:00:00.000Z' }));
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  fs.writeFileSync(path.join(agentsDir(), 'architect.md'), 'old architect content\n');
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), 'old dev-lead content\n');
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  // Pre-existing files from the old run are untouched...
+  expect(fs.readFileSync(path.join(agentsDir(), 'architect.md'), 'utf8')).toBe('old architect content\n');
+  expect(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8')).toBe('old dev-lead content\n');
+  // ...but the newly added persona is delivered.
+  expect(fs.existsSync(path.join(agentsDir(), 'project-home-builder.md'))).toBe(true);
+
+  const marker = JSON.parse(fs.readFileSync(mPath, 'utf8'));
+  expect(marker.seeded.sort()).toEqual([...ALL_PERSONAS].sort());
+});
+
+test('a machine already seeded under the new seeded-set marker picks up a newly added persona', async () => {
+  const mPath = markerPath();
+  fs.mkdirSync(path.dirname(mPath), { recursive: true });
+  fs.writeFileSync(mPath, JSON.stringify({ seeded: ['architect', 'dev-lead'], attempts: 0, ts: '2026-01-01T00:00:00.000Z' }));
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  expect(fs.existsSync(path.join(agentsDir(), 'project-home-builder.md'))).toBe(true);
+  const marker = JSON.parse(fs.readFileSync(mPath, 'utf8'));
+  expect(marker.seeded.sort()).toEqual([...ALL_PERSONAS].sort());
+});
+
+test('a machine with every known persona already in the seeded set short-circuits without touching agents dir', async () => {
+  const mPath = markerPath();
+  fs.mkdirSync(path.dirname(mPath), { recursive: true });
+  fs.writeFileSync(mPath, JSON.stringify({ seeded: ALL_PERSONAS, attempts: 0, ts: '2026-01-01T00:00:00.000Z' }));
 
   await seedAgentPersonas({ logger: silentLogger() });
 
   expect(fs.existsSync(agentsDir())).toBe(false);
+});
+
+test('a corrupt/unparseable marker file still seeds correctly', async () => {
+  const mPath = markerPath();
+  fs.mkdirSync(path.dirname(mPath), { recursive: true });
+  fs.writeFileSync(mPath, '{ not valid json');
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  for (const name of ALL_PERSONAS) {
+    expect(fs.existsSync(path.join(agentsDir(), `${name}.md`))).toBe(true);
+  }
+});
+
+test('the bundled project-home-builder persona contains no session-manager-repo paths', () => {
+  const content = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'seed', 'agents', 'project-home-builder.md'),
+    'utf8'
+  );
+  const forbidden = [
+    'session-manager-operations/architecture/',
+    '.claude/agents/',
+    'session-manager-operations/design-mocks/',
+    'scripts/',
+    'npm run build:project-pages',
+  ];
+  for (const substr of forbidden) {
+    expect(content).not.toContain(substr);
+  }
 });
 
 test('SM_SEED_AGENT_PERSONAS_DISABLE=1 short-circuits', async () => {

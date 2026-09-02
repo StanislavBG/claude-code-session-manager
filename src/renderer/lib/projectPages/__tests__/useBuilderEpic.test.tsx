@@ -2,7 +2,9 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { useBuilderEpic } from '../useBuilderEpic'
+import * as fs from 'node:fs'
+import * as path from 'node:path'
+import { useBuilderEpic, BUILDER_AGENT_NAME } from '../useBuilderEpic'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { useChat } from '../../../state/chat'
 import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsCreate'
@@ -62,6 +64,11 @@ afterEach(() => {
 })
 
 describe('useBuilderEpic', () => {
+  it('resolves the persona seeded on a fresh install (src/seed/agents/<BUILDER_AGENT_NAME>.md exists)', () => {
+    const seededPath = path.join(__dirname, '..', '..', '..', '..', 'seed', 'agents', `${BUILDER_AGENT_NAME}.md`)
+    expect(fs.existsSync(seededPath)).toBe(true)
+  })
+
   it('creates a project-home-builder Epic and sends the opening prompt when none is active', async () => {
     ;(globalThis as any).window.api = {
       agents: { listPersonas: listPersonasMock },

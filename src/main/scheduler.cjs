@@ -184,6 +184,21 @@ const RESULT_TEXT_TAIL_BYTES = 64 * 1024;
 const IDLE_OUTPUT_KILL_MS = 20 * 60_000;
 const IDLE_CHECK_INTERVAL_MS = 60_000;
 
+// Foreground Bash budget for every spawned `claude -p` job (executor +
+// investigation). The Claude Code harness auto-backgrounds any foreground
+// Bash command past its own default (120s) or max (600s) timeout and returns
+// a tool result promising a later notification — but a headless single-shot
+// run has no later turn, so that notification can never arrive and the run
+// dead-ends mid-verification with no commit and no verdict. Raising these
+// via the child's env moves that trap out of reach of normal gate commands
+// (test suites, builds). BASH_MAX_TIMEOUT_MS MUST stay strictly below
+// IDLE_OUTPUT_KILL_MS with real margin: a long foreground Bash emits no
+// stream-json events while it runs, so the log mtime stalls and the
+// idle-tail watchdog above would SIGTERM the job mid-gate if the two ever
+// crossed — trading one silent failure for another.
+const BASH_DEFAULT_TIMEOUT_MS = 600_000; // 10 min
+const BASH_MAX_TIMEOUT_MS = 900_000; // 15 min — must stay below IDLE_OUTPUT_KILL_MS
+
 // Boot reconciliation: a job left 'running' by an app restart/crash whose log
 // shows neither success nor a real failure result was merely interrupted — the
 // host died, the PRD didn't. Re-queue it up to this many times before giving up
@@ -216,10 +231,12 @@ for it to return. Never start a verification command as a background task
 (no background Bash) and then call Monitor, TaskOutput, or ScheduleWakeup to
 pick up its result later — a headless \`claude -p\` run has no later turn, so
 nothing ever delivers that notification and the run dies mid-verification with
-no commit and no verdict. For a long-running command, bound it yourself with
-the shell (e.g. \`timeout 300 npm test\`) and a matching foreground tool
-timeout; if it still cannot finish inside budget, stop and emit
-SCHEDULER_VERDICT: FAIL with the reason instead of deferring it.
+no commit and no verdict. Your foreground Bash budget for this run is
+${BASH_DEFAULT_TIMEOUT_MS / 1000}s by default, up to ${BASH_MAX_TIMEOUT_MS / 1000}s max
+— size your own \`timeout <n>\` wrapper (e.g. \`timeout ${Math.floor(BASH_MAX_TIMEOUT_MS / 1000)} npm test\`)
+to fit inside that ceiling; if a gate command still cannot finish inside
+budget, stop and emit SCHEDULER_VERDICT: FAIL with the reason instead of
+deferring it.
 
 1. CODE REVIEW — run \`/code-review --fix\` on your changes and apply the fixes it
    surfaces (correctness first). For any finding you judge a false positive, say
@@ -3104,7 +3121,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
     // originProjectRoot so a job running inside its own worktree can still
     // resolve the real project for create-prd/open-session/readiness. See
     // projectRootResolve.cjs.
-    const childEnv = cleanChildEnv({ PATH: pathWithUserBins(), SM_PROJECT_ROOT: cwd });
+    const childEnv = cleanChildEnv({
+      PATH: pathWithUserBins(),
+      SM_PROJECT_ROOT: cwd,
+      BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
+      BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
+    });
 
     // Track whether the agent has emitted a `result` event in its JSONL stream.
     // null until seen; then one of "success" | "error_max_turns" | … per the
@@ -3568,7 +3590,11 @@ async function spawnInvestigation(failedJob, runDir) {
   await broadcast({ flush: true });
 
   const claudeBin = resolveClaudeBin();
-  const childEnv = cleanChildEnv({ PATH: pathWithUserBins() }); // Homebrew/user bins for macOS
+  const childEnv = cleanChildEnv({
+    PATH: pathWithUserBins(), // Homebrew/user bins for macOS
+    BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
+    BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
+  });
 
   // Investigation needs only a deadman watchdog — no idle-tail or result-tail
   // since investigations are short-running Opus probes with a hard ceiling.
@@ -6385,4 +6411,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead };

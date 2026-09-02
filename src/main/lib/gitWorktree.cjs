@@ -131,10 +131,25 @@ function isWorktreeDisabled(kind, cwd) {
   return false;
 }
 
+/**
+ * The job-kind default alone is floored at sessionSlots' machine-wide `claude
+ * -p` cap (lazily required to avoid a load-order cycle): a job that fails to
+ * get session-slot capacity already waits for a slot to free up rather than
+ * degrading, so the worktree cap below it must never be tighter than the
+ * slot pool — otherwise raising slots to 10 in the UI silently strands 6 jobs
+ * without isolation, running in-place instead of waiting (the exact bug this
+ * PRD fixes). An explicit SM_JOB_WORKTREE_MAX still wins verbatim — a
+ * deliberate operator override, not a value this floor should touch.
+ */
 function getMaxConcurrentWorktrees(kind) {
   const cfg = configFor(kind);
   const raw = Number(process.env[cfg.maxEnv]);
-  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : cfg.defaultMax;
+  if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+  if (kind === 'job') {
+    const sessionSlots = require('./sessionSlots.cjs');
+    return Math.max(cfg.defaultMax, sessionSlots.totalSlots());
+  }
+  return cfg.defaultMax;
 }
 
 function getStaleSweepAgeMs(kind) {

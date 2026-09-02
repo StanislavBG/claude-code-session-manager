@@ -3773,10 +3773,32 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
   // silently.
   const quietLeaseAcquired = job.quietMachine === true && quietMachineLease.acquire(job.slug);
   try {
+    // Worktree isolation cap check (PRD 1112) — probed BEFORE the job is
+    // marked 'running', so a job that can't get isolation right now is a
+    // DEFERRAL, not a fallback: it stays 'pending' and is retried on the
+    // next dispatch pass, exactly like the sessionSlots miss above, instead
+    // of degrading into an in-place run in a tree a sibling job may be
+    // actively writing to (the shared-tree collision this cap exists to
+    // prevent). Every OTHER worktree.ok===false reason (not a git repo,
+    // disabled, carry-over failure) keeps the existing in-place fallback —
+    // only the cap-reached reason is a deferral, checked here via
+    // createJobWorktree's own reason string so the two paths never
+    // silently drift out of sync with gitWorktree.cjs's actual wording.
+    const preflightWorktree = await jobWorktree.createJobWorktree({ cwd: job.cwd || defaultCwd, slug: job.slug });
+    if (!preflightWorktree.ok && /^worktree cap reached\b/.test(preflightWorktree.reason || '')) {
+      console.log(`[scheduler] ${job.slug}: deferring — ${preflightWorktree.reason}`);
+      await mutate((s) => {
+        const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+        if (idx >= 0) s.jobs[idx].heldReason = preflightWorktree.reason;
+      });
+      await broadcast({ flush: true });
+      return;
+    }
     await mutate((s) => {
       const idx = s.jobs.findIndex((x) => x.slug === job.slug);
       if (idx >= 0) {
         transitionJob(s.jobs[idx], 'running', { reason: 'dispatched for execution', source: 'spawnJob:dispatch' });
+        delete s.jobs[idx].heldReason;
         s.jobs[idx].runId = runId;
         s.jobs[idx].startedAt = new Date().toISOString();
         if (job.quietMachine === true) {
@@ -3801,11 +3823,17 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     // Worktree isolation (PRD 994): give this job its own linked `git worktree`
     // checkout so its edits/tests/commit never collide with a sibling job or
     // an interactive session in the SAME repo. `worktree.ok` is false (with a
-    // logged reason) for a non-git cwd, a dirty base tree, the cap being hit,
-    // or SM_JOB_WORKTREE_DISABLE=1 — every case falls back to running in place,
-    // never a hard failure. See jobWorktree.cjs's header comment for why
-    // job.cwd (guardCwd) itself is NEVER repointed at the worktree dir.
-    const worktree = await jobWorktree.createJobWorktree({ cwd: guardCwd, slug: job.slug });
+    // logged reason) for a non-git cwd, a dirty base tree, or
+    // SM_JOB_WORKTREE_DISABLE=1 — every case falls back to running in place,
+    // never a hard failure. (The cap-reached reason was already handled above
+    // as a pre-dispatch DEFERRAL — a job never reaches this point with that
+    // reason.) See jobWorktree.cjs's header comment for why job.cwd
+    // (guardCwd) itself is NEVER repointed at the worktree dir. Reuses
+    // `preflightWorktree` computed above the 'running' transition — it
+    // already IS this job's worktree attempt (or already-created checkout),
+    // so calling createJobWorktree a second time here would double-create
+    // (or double-count the cap) for the exact same job.
+    const worktree = preflightWorktree;
     if (worktree.ok) {
       console.log(`[scheduler] ${job.slug}: isolated in worktree ${worktree.dir} (branch ${worktree.branch})`);
     } else {

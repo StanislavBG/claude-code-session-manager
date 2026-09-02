@@ -311,6 +311,46 @@ test('[job] falls back once the concurrency cap is reached, and recovers after c
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: third.dir, branch: third.branch });
 });
 
+test('[job] getMaxConcurrentWorktrees floors the job cap at the sessionSlots pool size (PRD 1112)', () => {
+  const originalSlots = process.env.SM_SESSION_SLOTS;
+  try {
+    process.env.SM_SESSION_SLOTS = '10';
+    expect(gitWorktree.getMaxConcurrentWorktrees('job')).toBe(10);
+
+    // The floor never drops BELOW the existing default (4) even when the
+    // slot pool is smaller — this cap only ever widens for isolation, never
+    // narrows it below what already shipped.
+    process.env.SM_SESSION_SLOTS = '3';
+    expect(gitWorktree.getMaxConcurrentWorktrees('job')).toBe(4);
+  } finally {
+    if (originalSlots === undefined) delete process.env.SM_SESSION_SLOTS;
+    else process.env.SM_SESSION_SLOTS = originalSlots;
+  }
+});
+
+test('[job] an explicit SM_JOB_WORKTREE_MAX wins verbatim over the sessionSlots floor', () => {
+  const originalSlots = process.env.SM_SESSION_SLOTS;
+  try {
+    process.env.SM_SESSION_SLOTS = '10';
+    process.env.SM_JOB_WORKTREE_MAX = '2';
+    expect(gitWorktree.getMaxConcurrentWorktrees('job')).toBe(2);
+  } finally {
+    if (originalSlots === undefined) delete process.env.SM_SESSION_SLOTS;
+    else process.env.SM_SESSION_SLOTS = originalSlots;
+  }
+});
+
+test('[epic] getMaxConcurrentWorktrees is unaffected by the sessionSlots pool size', () => {
+  const originalSlots = process.env.SM_SESSION_SLOTS;
+  try {
+    process.env.SM_SESSION_SLOTS = '10';
+    expect(gitWorktree.getMaxConcurrentWorktrees('epic')).toBe(50);
+  } finally {
+    if (originalSlots === undefined) delete process.env.SM_SESSION_SLOTS;
+    else process.env.SM_SESSION_SLOTS = originalSlots;
+  }
+});
+
 test('[job] SM_JOB_WORKTREE_DISABLE=1 restores in-place behaviour', async () => {
   process.env.SM_JOB_WORKTREE_DISABLE = '1';
   const result = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'x' });

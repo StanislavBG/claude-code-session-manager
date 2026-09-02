@@ -64,6 +64,23 @@ function classifyRunOutcome(logPath) {
   }
 }
 
+/**
+ * Map classifyRunOutcome()'s four-way result onto the smaller, persisted
+ * `gateOutcome` a job row carries. 'no_result' really means the verdict gate
+ * never fired — the process died or was killed before it could emit one —
+ * a different fact from 'failed' (a verdict event exists and says error,
+ * i.e. the gate ran and went red). Collapsing both behind the same free-text
+ * `error` string is exactly the ambiguity this field exists to remove.
+ */
+function mapOutcomeToGateOutcome(outcome) {
+  switch (outcome) {
+    case 'success': return 'passed';
+    case 'failed': return 'failed';
+    case 'no_result': return 'never_ran';
+    default: return 'unknown';
+  }
+}
+
 // Max times an orphaned job may be re-queued before giving up (marking failed).
 // Single source of truth: both the in-app reaper (scheduler.cjs) and the external
 // offline watchdog (watchdogHelpers.cjs) import this so their give-up budgets can
@@ -116,4 +133,4 @@ function selectReapableJobs(jobs, now, { pidAlive, grace } = {}) {
   return { reapable, warnings };
 }
 
-module.exports = { claudePidAlive, classifyRunOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs };
+module.exports = { claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs };

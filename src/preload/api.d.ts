@@ -461,6 +461,11 @@ export interface ScheduleJob {
   finishedAt: string | null;
   exitCode: number | null;
   error: string | null;
+  /** Structured terminal-outcome label set alongside `error` (never replacing
+   *  it) so a reader can tell "the gate ran and went red" (failed) apart from
+   *  "the gate never got to run" (never_ran) — reaperHelpers.cjs's
+   *  mapOutcomeToGateOutcome (PRD 1109). */
+  gateOutcome?: 'passed' | 'failed' | 'never_ran' | 'unknown';
   /** Claude session UUID passed via `--session-id`. Set when the job spawns
    *  and persisted across queue reloads so the renderer can find the JSONL
    *  transcript even after restart. */

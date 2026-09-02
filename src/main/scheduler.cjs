@@ -55,7 +55,8 @@ const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const supervisor = require('./supervisor.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
-const { claudePidAlive, classifyRunOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs } = require('./lib/reaperHelpers.cjs');
+const { claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs } = require('./lib/reaperHelpers.cjs');
+const { computeQueueHealth } = require('./lib/queueHealth.cjs');
 const { createLoadGate, topCpuConsumers } = require('./lib/loadGate.cjs');
 const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
@@ -4636,6 +4637,30 @@ async function maybeLaunchWhenAvailable(state) {
 
 // ---------- dead-process reaper ----------
 
+// Queue-health sweep cadence: hangs off reapDeadRunningJobs's own cycle
+// counter (it already runs once per poll tick) rather than a second timer,
+// so its cadence can never drift from the poll cadence or double-fire
+// across a backoff reset.
+let queueHealthSweepCycle = 0;
+const QUEUE_HEALTH_SWEEP_EVERY_N_CYCLES = 20;
+
+/**
+ * runQueueHealthSweep(jobs) — read-only reporting pass over the queue
+ * snapshot reapDeadRunningJobs already read this cycle. Never transitions a
+ * job, never archives a PRD, never spawns anything; only logs and appends
+ * an audit event for any project with drift worth a human glance.
+ */
+function runQueueHealthSweep(jobs) {
+  try {
+    for (const { cwd, neverRan, looksDone, stuck } of computeQueueHealth(jobs)) {
+      console.log(`[scheduler] queue-health ${cwd}: ${neverRan} never_ran, ${looksDone} looks-done, ${stuck} stuck`);
+      appendAuditEvent('scheduler_queue_health', { cwd, neverRan, looksDone, stuck });
+    }
+  } catch (e) {
+    console.warn('[scheduler] queue-health sweep error', e?.message);
+  }
+}
+
 /**
  * Scan running jobs, identify those whose claude process is provably dead OR
  * whose spawn never got far enough to record a runtime.pid in the first
@@ -4670,12 +4695,22 @@ async function reapDeadRunningJobs() {
       // Absent/empty run dir → classifyRunOutcome finds no result event →
       // 'no_result' → non-success below → filed as failed, never completed.
       const outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
-      dead.push({ slug, pid, outcome, pidless, reason });
+      // A pidless reap means the spawn never got far enough to record a
+      // pid — the gate could not possibly have run, regardless of what
+      // classifyRunOutcome makes of an absent/empty log.
+      const gateOutcome = pidless ? 'never_ran' : mapOutcomeToGateOutcome(outcome);
+      dead.push({ slug, pid, outcome, gateOutcome, pidless, reason });
     }
+
+    queueHealthSweepCycle += 1;
+    if (queueHealthSweepCycle % QUEUE_HEALTH_SWEEP_EVERY_N_CYCLES === 0) {
+      runQueueHealthSweep(state.jobs);
+    }
+
     if (dead.length === 0) return;
 
     await mutate(async (s) => {
-      for (const { slug, pid, outcome, pidless, reason } of dead) {
+      for (const { slug, pid, outcome, gateOutcome, pidless, reason } of dead) {
         const idx = s.jobs.findIndex((x) => x.slug === slug);
         if (idx < 0 || s.jobs[idx].status !== 'running') continue; // race guard
         const success = outcome === 'success';
@@ -4715,6 +4750,7 @@ async function reapDeadRunningJobs() {
         s.jobs[idx].exitCode = success ? 0 : (s.jobs[idx].exitCode ?? 1);
         s.jobs[idx].finishedAt = new Date().toISOString();
         s.jobs[idx].error = success ? null : `${transitionReason} (outcome=${outcome})`;
+        s.jobs[idx].gateOutcome = gateOutcome;
         delete s.jobs[idx].runtime;
         runningSet.delete(slug);
         if (pidless) {

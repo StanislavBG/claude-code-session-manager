@@ -16,7 +16,7 @@
 // vitest, NOT node:test — this repo's suite is vitest-only (CLAUDE.md).
 import { test } from 'vitest';
 const assert = require('node:assert/strict');
-const { selectReapableJobs } = require('../reaperHelpers.cjs');
+const { selectReapableJobs, mapOutcomeToGateOutcome } = require('../reaperHelpers.cjs');
 
 const NOW = Date.parse('2026-09-01T12:00:00.000Z');
 const agoMin = (m) => new Date(NOW - m * 60_000).toISOString();
@@ -109,4 +109,25 @@ test('mixed batch: each row classified independently', () => {
   const { reapable, warnings } = selectReapableJobs(jobs, NOW, { pidAlive, grace: GRACE });
   assert.deepStrictEqual(reapable.map((r) => r.slug).sort(), ['dead', 'zombie']);
   assert.deepStrictEqual(warnings.map((w) => w.slug), ['bad-started-at']);
+});
+
+// mapOutcomeToGateOutcome — classifyRunOutcome's four-way result collapsed
+// onto the persisted `gateOutcome` field (PRD 1109). 'no_result' -> 'never_ran'
+// is the one non-obvious mapping: a missing verdict event means the gate
+// never fired, a distinct fact from 'failed' (a verdict event exists and
+// says error).
+test('mapOutcomeToGateOutcome: success -> passed', () => {
+  assert.strictEqual(mapOutcomeToGateOutcome('success'), 'passed');
+});
+
+test('mapOutcomeToGateOutcome: failed -> failed', () => {
+  assert.strictEqual(mapOutcomeToGateOutcome('failed'), 'failed');
+});
+
+test('mapOutcomeToGateOutcome: no_result -> never_ran', () => {
+  assert.strictEqual(mapOutcomeToGateOutcome('no_result'), 'never_ran');
+});
+
+test('mapOutcomeToGateOutcome: unknown -> unknown', () => {
+  assert.strictEqual(mapOutcomeToGateOutcome('unknown'), 'unknown');
 });

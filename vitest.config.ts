@@ -171,6 +171,7 @@ export default defineConfig({
       'src/main/lib/__tests__/ephemeralCwd.test.cjs',
       'src/main/lib/__tests__/projectRootResolve.test.cjs',
       'src/main/lib/__tests__/reaperHelpers.test.cjs',
+      'src/main/lib/__tests__/queueHealth.test.cjs',
       'src/main/lib/__tests__/loadGate.test.cjs',
       'src/main/lib/__tests__/opsRootResolve.test.cjs',
       'src/main/lib/__tests__/schedulerBatchFairness.test.cjs',

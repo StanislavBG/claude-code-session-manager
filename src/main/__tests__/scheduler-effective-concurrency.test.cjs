@@ -69,3 +69,13 @@ test('free is net of held slots — a chat run shrinks it without changing cap',
   expect(payload.effectiveConcurrency).toEqual({ cap: 5, free: 4, source: 'env' });
   sessionSlots.release(token);
 });
+
+test('a row-level gateOutcome field survives the payload build unchanged (pass-through only, PRD 1109)', () => {
+  const state = fakeState();
+  state.jobs = [
+    { slug: 'a', status: 'failed', gateOutcome: 'never_ran' },
+    { slug: 'b', status: 'completed', gateOutcome: 'passed' },
+  ];
+  const payload = buildScheduleStatePayload(state);
+  expect(payload.jobs.map((j) => j.gateOutcome)).toEqual(['never_ran', 'passed']);
+});

@@ -108,6 +108,7 @@ test('reapDeadRunningJobs reconciles a queue.json row stuck at status:running wi
   assert.equal(jobs[0].status, 'completed', 'job must be reconciled from disk state, not skipped via the runningSet gate');
   assert.equal(jobs[0].exitCode, 0);
   assert.equal(jobs[0].runtime, undefined);
+  assert.equal(jobs[0].gateOutcome, 'passed', 'a success result event maps to gateOutcome:passed');
 });
 
 test('reapDeadRunningJobs reaps a pidless row older than PIDLESS_SPAWN_GRACE_MS with an empty run dir as failed, not completed, and audits it', async () => {
@@ -139,6 +140,7 @@ test('reapDeadRunningJobs reaps a pidless row older than PIDLESS_SPAWN_GRACE_MS 
   assert.equal(jobs[0].status, 'failed', 'an empty run dir must never be reaped as completed');
   assert.match(jobs[0].error, /no runtime\.pid recorded/);
   assert.equal(jobs[0].runtime, undefined);
+  assert.equal(jobs[0].gateOutcome, 'never_ran', 'a pidless reap means the gate never had a chance to run');
 
   const auditText = fs.readFileSync(AUDIT_LOG_PATH, 'utf8').slice(auditSizeBefore);
   const auditLines = auditText.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));

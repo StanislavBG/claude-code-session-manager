@@ -77,6 +77,11 @@ const ScheduleJobSchema = z
     finishedAt: z.string().nullable().optional(),
     exitCode: z.number().nullable().optional(),
     error: z.string().nullable().optional(),
+    // Structured terminal-outcome label set alongside the free-text `error`
+    // (never replacing it) so a queue reader can tell "the gate ran and went
+    // red" (failed) apart from "the gate never got to run" (never_ran) —
+    // see reaperHelpers.cjs's mapOutcomeToGateOutcome (PRD 1109).
+    gateOutcome: z.enum(['passed', 'failed', 'never_ran', 'unknown']).optional(),
     sessionId: z.string().optional(),
     runtime: ScheduleJobRuntimeSchema.optional(),
     verifierVerdict: z.string().optional(),

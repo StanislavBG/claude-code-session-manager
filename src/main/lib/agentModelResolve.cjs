@@ -120,9 +120,67 @@ function resolveEpicModel({ cwd, claudeSessionId, fallbackModel = FALLBACK_MODEL
   }
 }
 
+/** Mirrors epicIntake.ts's AGENT_BODY_CHAR_CAP — a runaway persona file must
+ *  not be able to dominate a spawned job's system prompt either. Duplicated
+ *  rather than imported: epicIntake.ts is a renderer module (no ES modules
+ *  in main). */
+const AGENT_BODY_CHAR_CAP = 6000;
+
+/** Trims a persona's frontmatter-stripped body and caps it at
+ *  AGENT_BODY_CHAR_CAP, appending a truncation notice naming `personaPath`
+ *  — same shape as epicIntake.ts's buildPersonaBodyText. Returns null for an
+ *  empty body. */
+function buildPersonaBodyText(rawBody, personaPath) {
+  const body = (rawBody || '').trim();
+  if (!body) return null;
+  if (body.length <= AGENT_BODY_CHAR_CAP) return body;
+  const truncated = body.slice(0, AGENT_BODY_CHAR_CAP);
+  const pathLabel = personaPath || 'the persona file';
+  return `${truncated}\n\n[Truncated — ${pathLabel} exceeds ${AGENT_BODY_CHAR_CAP} characters; see the file for the full body.]`;
+}
+
+/**
+ * Resolves the persona system-prompt + model a scheduled PRD's `agentType`
+ * should launch its headless `claude -p` spawn with. Never throws — a
+ * missing agentType, or one that no longer resolves to a readable persona
+ * file (renamed/deleted), falls back to `{ systemPrompt: null, model:
+ * fallbackModel, personaPath: null }` and logs once via prdAgentType.cjs's
+ * reportDanglingAgentTypeOnce (the PRD-frontmatter FK's own dangling-read
+ * convention) — a dangling persona must never park or fail the job.
+ *
+ * Reuses agentLibrary.cjs's getPersonaBody (project-overlay-then-global
+ * read, same precedence resolvePersonaPaths documents) rather than a second
+ * persona-file reader, and this module's own frontmatter-stripped-body cap
+ * (mirroring epicIntake.ts's Epic-path treatment) so the PRD path gets the
+ * same runaway-file protection.
+ *
+ * @param {{ cwd: string, agentType: string|null, fallbackModel?: string, deps?: object }} opts
+ * @returns {Promise<{ model: string, systemPrompt: string|null, personaPath: string|null }>}
+ */
+async function resolvePrdPersonaForSpawn({ cwd, agentType, fallbackModel = FALLBACK_MODEL, deps = {} } = {}) {
+  const miss = { model: fallbackModel, systemPrompt: null, personaPath: null };
+  if (!agentType) return miss;
+  try {
+    const getBody = deps.getPersonaBody || require('../agentLibrary.cjs').getPersonaBody;
+    const persona = await getBody({ cwd, name: agentType });
+    if (!persona) {
+      const reportOnce = deps.reportDanglingAgentTypeOnce || require('./prdAgentType.cjs').reportDanglingAgentTypeOnce;
+      reportOnce(cwd, agentType, deps);
+      return miss;
+    }
+    const { fm, body } = splitFrontmatter(persona.text);
+    const model = fm.model && fm.model !== 'inherit' ? fm.model : fallbackModel;
+    const systemPrompt = buildPersonaBodyText(body, persona.path);
+    return { model, systemPrompt, personaPath: persona.path };
+  } catch {
+    return miss;
+  }
+}
+
 module.exports = {
   FALLBACK_MODEL,
   resolveEpicModel,
   findAgentTypeByClaudeSessionId,
   readPersonaModel,
+  resolvePrdPersonaForSpawn,
 };

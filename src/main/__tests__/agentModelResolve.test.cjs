@@ -18,6 +18,7 @@ const {
   resolveEpicModel,
   findAgentTypeByClaudeSessionId,
   readPersonaModel,
+  resolvePrdPersonaForSpawn,
 } = require('../lib/agentModelResolve.cjs');
 
 const tmpDirs = [];
@@ -135,4 +136,69 @@ test('readPersonaModel returns null (does not throw) for a persona deleted after
   // Logged once despite two readPersonaModel calls above — dedup key is (cwd, agentType).
   expect(matches).toHaveLength(1);
   expect(matches[0].level).toBe('warn');
+});
+
+// resolvePrdPersonaForSpawn — the PRD-path resolver scheduler.cjs's executeJob
+// calls to turn a job's agentType into a --append-system-prompt body and a
+// --model value (PRD 1115).
+
+test('resolvePrdPersonaForSpawn returns the persona body and its own model, overriding the fallback', async () => {
+  const result = await resolvePrdPersonaForSpawn({
+    cwd: '/irrelevant',
+    agentType: 'dev-lead',
+    deps: {
+      getPersonaBody: async ({ name }) => {
+        expect(name).toBe('dev-lead');
+        return { path: '/home/user/.claude/agents/dev-lead.md', text: '---\nmodel: opus\n---\nOperate methodically.' };
+      },
+    },
+  });
+  expect(result.model).toBe('opus');
+  expect(result.systemPrompt).toBe('Operate methodically.');
+  expect(result.personaPath).toBe('/home/user/.claude/agents/dev-lead.md');
+});
+
+test("resolvePrdPersonaForSpawn falls back to the fallback model when the persona's model is 'inherit'", async () => {
+  const result = await resolvePrdPersonaForSpawn({
+    cwd: '/irrelevant',
+    agentType: 'dev-lead',
+    deps: { getPersonaBody: async () => ({ path: '/x/dev-lead.md', text: '---\nmodel: inherit\n---\nBody text.' }) },
+  });
+  expect(result.model).toBe(FALLBACK_MODEL);
+});
+
+test('resolvePrdPersonaForSpawn falls back without throwing when agentType no longer resolves to a persona file, and logs it once', async () => {
+  const cwd = await mkTmpDir('sm-agentmodel-cwd-');
+  const call = () => resolvePrdPersonaForSpawn({
+    cwd,
+    agentType: 'ghost-persona',
+    deps: { getPersonaBody: async () => null },
+  });
+  await expect(call()).resolves.toEqual({ model: FALLBACK_MODEL, systemPrompt: null, personaPath: null });
+  await call(); // second call must not log a second line (dedup)
+
+  const { todayFile } = require('../lib/opsErrorLog.cjs');
+  const lines = fs.readFileSync(todayFile(cwd), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const matches = lines.filter((l) => l.message.includes('ghost-persona'));
+  expect(matches).toHaveLength(1);
+  expect(matches[0].level).toBe('warn');
+});
+
+test('resolvePrdPersonaForSpawn returns the fallback (no persona applied) when agentType is absent, without touching getPersonaBody', async () => {
+  const getPersonaBody = async () => { throw new Error('must not be called'); };
+  const result = await resolvePrdPersonaForSpawn({ cwd: '/irrelevant', agentType: null, deps: { getPersonaBody } });
+  expect(result).toEqual({ model: FALLBACK_MODEL, systemPrompt: null, personaPath: null });
+});
+
+test('resolvePrdPersonaForSpawn caps the persona body at 6000 characters with a truncation notice naming the persona path', async () => {
+  const longBody = 'x'.repeat(6500);
+  const result = await resolvePrdPersonaForSpawn({
+    cwd: '/irrelevant',
+    agentType: 'dev-lead',
+    deps: { getPersonaBody: async () => ({ path: '/home/user/.claude/agents/dev-lead.md', text: longBody }) },
+  });
+  expect(result.systemPrompt.startsWith('x'.repeat(6000))).toBe(true);
+  expect(result.systemPrompt.length).toBeLessThan(longBody.length);
+  expect(result.systemPrompt.toLowerCase()).toContain('truncat');
+  expect(result.systemPrompt).toContain('/home/user/.claude/agents/dev-lead.md');
 });

@@ -107,6 +107,7 @@ const queueOps = require('./queueOps.cjs');
 // home-dir layout.
 const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
+const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduleJobTransitions.cjs');
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epicContextDigest.cjs');
 const { JOB_STATUSES } = require('./lib/scheduleJobSchema.cjs');
@@ -1738,6 +1739,7 @@ async function reconcile(state) {
       originSessionId: job.originSessionId
         ?? resolveOriginSessionId(p.cwd, p.epicId ?? reconcileSourcePromptId(job, p.sourcePromptId)),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
+      agentType: p.agentType ?? job.agentType ?? null,
     };
     // Adopt path: a row parked 'quarantined' (no createdVia provenance when
     // discovered) whose PRD file now carries a stamp — written via the
@@ -1849,6 +1851,7 @@ async function reconcile(state) {
       quietMachine: p.quietMachine === true,
       originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
+      agentType: p.agentType ?? inv.row?.agentType ?? null,
     };
     const reason = `reconcile: repaired invalid status ${JSON.stringify(oldStatus)}`;
     // A repair is not a lifecycle transition — the corrupted `status` was
@@ -1970,6 +1973,7 @@ async function reconcile(state) {
       quietMachine: p.quietMachine === true,
       originSessionId: resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
+      agentType: p.agentType ?? null,
       status: 'pending',
       // Enqueue time (PRD 1086/1087): the cross-project fairness tiebreak and
       // the starvation escalation both need a provable age for a pending row;
@@ -3133,6 +3137,13 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
     return { exitCode: -1, durationMs: 0, error: promptCheck.error, sessionId };
   }
 
+  // PRD agentType → persona + model (PRD 1115): resolved off job.agentType
+  // (persisted on the queue row by reconcile()). Never throws; a
+  // dangling/absent agentType falls back to no persona + FALLBACK_MODEL and
+  // is logged once by resolvePrdPersonaForSpawn itself.
+  const personaResolution = await agentModelResolve.resolvePrdPersonaForSpawn({ cwd, agentType: job.agentType });
+  safeLog(`[scheduler] agentType=${job.agentType || '(none)'} persona=${personaResolution.personaPath || '(fallback — no persona applied)'} model=${personaResolution.model}\n`);
+
   return await new Promise((resolve) => {
     const claudeBin = resolveClaudeBin();
     // Strip Claude Code env and secrets that leak in when session-manager is
@@ -3259,7 +3270,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
         command: claudeBin,
         args: [
           '-p', prompt,
-          '--model', 'sonnet',
+          '--model', personaResolution.model,
+          ...(personaResolution.systemPrompt ? ['--append-system-prompt', personaResolution.systemPrompt] : []),
           '--dangerously-skip-permissions',
           '--output-format', 'stream-json',
           '--verbose',
@@ -6208,8 +6220,8 @@ async function init() {
 // there" (parallelGroup/estimateMinutes/sourcePromptId/epicId/
 // archivedStatus); `fields=full` restores them.
 function toCompactPrdEntry(entry) {
-  const { slug, title, cwd, mtimeMs, archived, status } = entry;
-  return { slug, title, cwd, mtimeMs, archived, status };
+  const { slug, title, cwd, mtimeMs, archived, status, agentType } = entry;
+  return { slug, title, cwd, mtimeMs, archived, status, agentType };
 }
 
 /**
@@ -6256,6 +6268,7 @@ async function listPrdsInternal() {
           estimateMinutes: parsed.estimateMinutes,
           sourcePromptId: parsed.sourcePromptId,
           epicId: parsed.epicId ?? null,
+          agentType: parsed.agentType ?? null,
           mtimeMs: stat.mtimeMs,
           archived,
         };
@@ -6465,7 +6478,7 @@ const remote = {
 
   async listJobs() {
     const state = await readQueue();
-    return state.jobs.map((j) => ({ slug: j.slug, title: j.title, status: j.status, cwd: j.cwd }));
+    return state.jobs.map((j) => ({ slug: j.slug, title: j.title, status: j.status, cwd: j.cwd, agentType: j.agentType ?? null }));
   },
 
   // Single queue row lookup, used by cancelJob/updatePrd's status guards and

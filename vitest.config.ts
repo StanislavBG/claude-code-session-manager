@@ -131,6 +131,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-worktree-exec-cwd.test.cjs',
       'src/main/__tests__/scheduler-worktree-cap-defer.test.cjs',
       'src/main/__tests__/scheduler-bash-timeout-env.test.cjs',
+      'src/main/__tests__/scheduler-prd-persona-spawn.test.cjs',
       'src/main/lib/__tests__/epicSpawnCwd.test.cjs',
       'src/main/lib/__tests__/epicWorktreeMint.test.cjs',
       'src/main/lib/__tests__/epicWorktreeBoot.test.cjs',

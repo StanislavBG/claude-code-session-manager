@@ -35,6 +35,16 @@ governed by `PRD_AUTHORING.md` — read
 [`~/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md`](file:///home/bilko/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md)
 before authoring a new PRD by hand. This README does not duplicate that contract.
 
+A PRD's `agentType` frontmatter field (who executes it — a persona name, default `dev-lead`)
+drives the spawn, not just the prompt: `executeJob` (`scheduler.cjs`) resolves it via
+`agentModelResolve.cjs`'s `resolvePrdPersonaForSpawn` to the persona's frontmatter-stripped,
+6000-char-capped body, passed to the `claude -p` child as `--append-system-prompt`, and to the
+persona's own `model` field (falling back to `sonnet` when unset or `inherit`), passed as
+`--model` — `--model` is never omitted. An `agentType` that no longer resolves to a persona file
+(renamed/deleted) falls back to no persona + `sonnet` and logs once via `opsErrorLog`; it never
+parks or fails the job. The resolved `agentType` is recorded on the job row and returned by
+`scheduler_list_jobs`/`scheduler_list_prds`, so persona routing is queryable.
+
 ### `state/queue.json`
 
 ```ts

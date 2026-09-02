@@ -68,6 +68,8 @@ const { maybeEnqueueValidationPrompt } = require('./lib/epicValidationHook.cjs')
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { verifyRun } = require('./runVerify.cjs');
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/terminalRunOutcome.cjs');
+const { landedSinceRun } = require('./lib/landedSinceRun.cjs');
+const { declaredPathsForPrd } = require('./lib/prdDeclaredPaths.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated, SCHEDULE_SLUG_RE } = require('./ipcSchemas.cjs');
 const { readBody, sendJson } = require('./lib/localAdminHttp.cjs');
@@ -3805,7 +3807,11 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     let res;
     let worktreeLeftoverDirty = [];
     let worktreeIntegrationFailure = null;
-    let worktreeSalvagePatch = null;
+    // A job's uncommitted-work patch, whichever isolation mode produced it —
+    // set by EITHER branch below, never both (worktree.ok picks exactly one
+    // shape for the whole run). Named generically (not "worktree...") because
+    // an in-place run salvages one too (PRD 1098).
+    let salvagePatch = null;
     try {
       res = await executeJob(job, runDir, defaultCwd, async (pid, sessionId, cwd) => {
         await mutate((s) => {
@@ -3829,7 +3835,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           const salvagePath = path.join(runDir, `${job.slug}.uncommitted.patch`);
           const salvage = await jobWorktree.salvageJobWorktreeDiff({ dir: worktree.dir, outFile: salvagePath });
           if (salvage && salvage.ok) {
-            worktreeSalvagePatch = salvagePath;
+            salvagePatch = salvagePath;
             console.log(`[scheduler] ${job.slug}: salvaged ${salvage.bytes} byte(s) of uncommitted worktree diff to ${salvagePath}`);
           }
         }
@@ -3849,6 +3855,33 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           branch: worktree.branch,
           keepBranch: !integration.ok,
         });
+      } else {
+        // In-place run (non-git cwd, cap reached, env-disabled, or a carry-over
+        // failure) — there is no throwaway checkout to diff, so salvage only
+        // the DELTA this job itself dirtied: paths in guardBaseline are a
+        // human's or a sibling job's pre-existing WIP and must never appear in
+        // this job's patch. Runs for every exit code (finally always fires
+        // once `res` resolves, success or not) including signal deaths and the
+        // rate-limited/halt path — a killed in-place run is exactly the case
+        // this exists to cover. Never mutates guardCwd's index or stashes:
+        // salvageDirtyDelta is read-only (git status + git diff only).
+        try {
+          const after = await uncommittedChanges(guardCwd);
+          if (after) {
+            const baseSet = new Set(guardBaseline || []);
+            const deltaPaths = after.filter((p) => !baseSet.has(p));
+            if (deltaPaths.length) {
+              const salvagePath = path.join(runDir, `${job.slug}.uncommitted.patch`);
+              const salvage = await jobWorktree.salvageJobDirtyDelta({ cwd: guardCwd, paths: deltaPaths, outFile: salvagePath });
+              if (salvage && salvage.ok) {
+                salvagePatch = salvagePath;
+                console.log(`[scheduler] ${job.slug}: salvaged ${salvage.bytes} byte(s) of uncommitted in-place diff (${deltaPaths.length} path(s)) to ${salvagePath}`);
+              }
+            }
+          }
+        } catch (e) {
+          console.error(`[scheduler] ${job.slug}: in-place salvage failed`, e);
+        }
       }
     }
 
@@ -3994,7 +4027,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           legitimateNoOp: guardIsLegitimateNoOp,
           isFixPlanJob: isFixPlanSlug(job.slug),
           verifyResult,
-          salvagePatch: worktreeSalvagePatch,
+          salvagePatch,
         });
         if (guardVerdict) {
           verifyResult = guardVerdict;
@@ -4116,10 +4149,10 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           transitionJob(s.jobs[i2], effectiveStatus, { reason: sigtermOverrideReason ?? `run finished with exit ${res.exitCode}`, source: 'spawnJob:finalize' });
           s.jobs[i2].finishedAt = new Date().toISOString();
           s.jobs[i2].exitCode = res.exitCode;
-          if (worktreeSalvagePatch) {
-            s.jobs[i2].worktreeSalvagePatch = worktreeSalvagePatch;
+          if (salvagePatch) {
+            s.jobs[i2].salvagePatch = salvagePatch;
           } else {
-            delete s.jobs[i2].worktreeSalvagePatch;
+            delete s.jobs[i2].salvagePatch;
           }
           s.jobs[i2].error = effectiveStatus === 'needs_review'
             ? (verifyResult?.reason ?? sigtermOverrideReason ?? null)
@@ -4307,7 +4340,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         });
         await broadcast({ flush: true });
       } else if (decision.action === 'fail-dirty') {
-        const salvageNote = worktreeSalvagePatch ? ` — recoverable from salvage patch ${worktreeSalvagePatch}` : '';
+        const salvageNote = salvagePatch ? ` — recoverable from salvage patch ${salvagePatch}` : '';
         console.log(`[scheduler] transient failure (${decision.transientKind}) for ${job.slug} left ${newlyDirtyCount} uncommitted file(s) (e.g. ${dirtySample})${salvageNote} — not auto-requeuing`);
         await mutate((s) => {
           const i = s.jobs.findIndex((x) => x.slug === job.slug);
@@ -4599,12 +4632,43 @@ async function reapDeadRunningJobs() {
     }
     if (dead.length === 0) return;
 
-    await mutate((s) => {
+    await mutate(async (s) => {
       for (const { slug, pid, outcome, pidless, reason } of dead) {
         const idx = s.jobs.findIndex((x) => x.slug === slug);
         if (idx < 0 || s.jobs[idx].status !== 'running') continue; // race guard
         const success = outcome === 'success';
         const transitionReason = pidless ? reason : `reaped: process gone (outcome=${outcome})`;
+
+        // Best-effort in-place salvage: a job whose owning process vanished
+        // without spawnJob()'s own finally block ever running (the exact
+        // case this reaper exists for) never got THAT block's salvage pass
+        // either. Only attempted when the row itself carries a persisted
+        // pre-run baseline (guardBaseline — spawnJob currently keeps this as
+        // a local variable, not yet written to the row; a sibling PRD wires
+        // that persistence). With no baseline there is no safe way to tell
+        // this job's own dirt from a human's or a sibling's pre-existing
+        // WIP, so this skips rather than ever dumping the whole tree.
+        if (Array.isArray(s.jobs[idx].guardBaseline) && s.jobs[idx].runId) {
+          try {
+            const rowCwd = s.jobs[idx].cwd || s.config?.defaultCwd || DEFAULT_PROJECT_CWD;
+            const after = await uncommittedChanges(rowCwd);
+            if (after) {
+              const baseSet = new Set(s.jobs[idx].guardBaseline);
+              const deltaPaths = after.filter((p) => !baseSet.has(p));
+              if (deltaPaths.length) {
+                const salvagePath = path.join(RUNS_DIR, s.jobs[idx].runId, `${slug}.uncommitted.patch`);
+                const salvage = await jobWorktree.salvageJobDirtyDelta({ cwd: rowCwd, paths: deltaPaths, outFile: salvagePath });
+                if (salvage && salvage.ok) {
+                  s.jobs[idx].salvagePatch = salvagePath;
+                  console.log(`[scheduler] reapDeadRunningJobs: salvaged ${salvage.bytes} byte(s) of uncommitted in-place diff for ${slug} to ${salvagePath}`);
+                }
+              }
+            }
+          } catch (e) {
+            console.error(`[scheduler] reapDeadRunningJobs: in-place salvage failed for ${slug}`, e);
+          }
+        }
+
         transitionJob(s.jobs[idx], success ? 'completed' : 'failed', { reason: transitionReason, source: 'reapDeadRunningJobs' });
         s.jobs[idx].exitCode = success ? 0 : (s.jobs[idx].exitCode ?? 1);
         s.jobs[idx].finishedAt = new Date().toISOString();
@@ -4951,11 +5015,30 @@ function healRefusalReason(job, verdict, committedDuringRun) {
     + ` (committedInWindow=${committedDuringRun === true} is repo-wide, not proof this job delivered)`;
 }
 
+/**
+ * True when a `failed` job's failure is unverified-shaped — no result event
+ * was ever recorded for its run (classifyRunOutcome === 'no_result'), so no
+ * SCHEDULER_VERDICT sentinel could have been parsed either, OR it already
+ * carries a RESCANNABLE_VERDICTS verifierVerdict. A row that failed with a
+ * real result event (classifyRunOutcome === 'failed', i.e. a genuine red
+ * gate or a real non-zero-exit error) is excluded — that failure is
+ * evidence, not silence, and must never become a heal candidate (PRD 1102).
+ */
+function isFailedUnverifiedShaped(job) {
+  if (!job || job.status !== 'failed') return false;
+  if (job.verifierVerdict && RESCANNABLE_VERDICTS.has(job.verifierVerdict)) return true;
+  const runId = job.runId || resolveRunId(job);
+  if (!runId) return false;
+  const logPath = path.join(RUNS_DIR, runId, `${job.slug}.log`);
+  return classifyRunOutcome(logPath) === 'no_result';
+}
+
 function isRescanCandidate(job) {
-  return !!job
-    && job.status === 'needs_review'
-    && !!(job.runId || resolveRunId(job))
-    && RESCANNABLE_VERDICTS.has(job.verifierVerdict);
+  if (!job) return false;
+  if (!(job.runId || resolveRunId(job))) return false;
+  if (job.status === 'needs_review') return RESCANNABLE_VERDICTS.has(job.verifierVerdict);
+  if (job.status === 'failed') return isFailedUnverifiedShaped(job);
+  return false;
 }
 
 /**
@@ -5028,12 +5111,52 @@ function isEligibleForImmediateAutoFix(job, allJobs, fixSlugExists) {
   return targets.some((t) => t.slug === job.slug);
 }
 
+/**
+ * Widened evidence check (PRD 1102): does at least one commit land AFTER
+ * this job's run window that touches a path the PRD itself declares? Scoped
+ * to the PRD's own declared paths (never the whole repo) so a sibling job's
+ * unrelated commit is not credited to this one — see healRefusalReason's own
+ * rationale for why unscoped, repo-wide evidence is not attribution.
+ *
+ * Returns null (no annotation, never fabricated) when the PRD names no
+ * paths — the caller then has only the existing, already-computed
+ * committedInWindow signal to go on, same as before this PRD.
+ *
+ * @returns {Promise<{commits: string[], paths: string[], detectedAt: string} | null>}
+ */
+async function computeLooksDone(job) {
+  const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
+  const paths = declaredPathsForPrd(prdPath);
+  if (!paths.length) return null;
+  await fetchAllRefs(job.cwd);
+  const commits = await landedSinceRun(job.cwd, job.startedAt, paths);
+  if (!commits.length) return null;
+  return { commits, paths, detectedAt: new Date().toISOString() };
+}
+
 async function reverifyNeedsReview() {
   const snap = await readQueue();
   const candidates = snap.jobs.filter(isRescanCandidate);
   const healed = [];
   const leftForReview = [];
+  const looksDoneUpdates = [];
   for (const job of candidates) {
+    if (job.status === 'failed') {
+      // A failed row never runs the transcript-verifier rescan below — that
+      // machinery (verifyRun/COMPLETED_EQUIVALENT_VERDICTS) exists to
+      // auto-COMPLETE a stale needs_review row, and a failed row must never
+      // auto-complete through this pass (see the AC's conservative-in-the-
+      // completing-direction constraint). The only thing a failed candidate
+      // can gain here is a looksDone annotation + a failed → needs_review
+      // transition, for a human to confirm.
+      const looksDone = await computeLooksDone(job);
+      if (looksDone) {
+        looksDoneUpdates.push({ slug: job.slug, cwd: job.cwd, looksDone, fromFailed: true });
+      } else {
+        leftForReview.push({ slug: job.slug, reason: 'failed, unverified-shaped run — no post-window evidence on declared paths' });
+      }
+      continue;
+    }
     const runDir = path.join(RUNS_DIR, job.runId || resolveRunId(job));
     const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
     // Derive committedDuringRun from the recorded run window. The live
@@ -5060,13 +5183,45 @@ async function reverifyNeedsReview() {
       });
     } catch { leftForReview.push({ slug: job.slug, reason: 'verifyRun threw' }); continue; }
     const refusal = healRefusalReason(job, v, committedDuringRun);
+    let stillOpen = true;
     if (refusal) {
       leftForReview.push({ slug: job.slug, reason: refusal });
     } else if (v && COMPLETED_EQUIVALENT_VERDICTS.has(v.verdict)) {
       healed.push(job.slug);
+      stillOpen = false;
     } else {
       leftForReview.push({ slug: job.slug, reason: v ? `${v.verdict}: ${v.reason}` : 'null verdict' });
     }
+    // Still needs_review after the existing heal pass — widen the evidence
+    // window before giving up on it entirely (unchanged heal semantics for
+    // rows that already qualified above; this only adds an annotation).
+    if (stillOpen) {
+      const looksDone = await computeLooksDone(job);
+      if (looksDone) {
+        looksDoneUpdates.push({ slug: job.slug, cwd: job.cwd, looksDone, fromFailed: false });
+      }
+    }
+  }
+  if (looksDoneUpdates.length) {
+    const bySlug = new Map(looksDoneUpdates.map((u) => [u.slug, u]));
+    await mutate((s) => {
+      for (const j of s.jobs) {
+        const u = bySlug.get(j.slug);
+        if (!u) continue;
+        if (u.fromFailed) {
+          transitionJob(j, 'needs_review', {
+            reason: 'looks done — commit(s) since this run touch this PRD\'s declared paths; confirm before archiving',
+            source: 'reverifyNeedsReview:looksDone',
+          });
+        }
+        if (j.status !== 'needs_review') continue;
+        j.looksDone = u.looksDone;
+        const shaList = u.looksDone.commits.slice(0, 5).map((c) => c.slice(0, 7)).join(', ');
+        j.error = `looks done — ${u.looksDone.commits.length} commit(s) since this run touch this PRD's paths (${shaList}); confirm before archiving`;
+      }
+    });
+    console.log(`[scheduler] boot reverify: looksDone annotated for ${looksDoneUpdates.length} row(s): ${looksDoneUpdates.map((u) => u.slug).join(', ')}`);
+    await broadcast();
   }
   if (healed.length) {
     const healSet = new Set(healed);
@@ -5218,7 +5373,7 @@ async function reverifyNeedsReview() {
     }
   }
 
-  return { rescanned: candidates.length, healed, leftForReview };
+  return { rescanned: candidates.length, healed, leftForReview, looksDone: looksDoneUpdates.map((u) => u.slug) };
 }
 
 /**
@@ -6424,4 +6579,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead };

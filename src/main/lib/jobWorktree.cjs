@@ -63,6 +63,7 @@ module.exports = {
   integrateJobBranch: gitWorktree.integrateJobBranch,
   cleanupJobWorktree: gitWorktree.cleanupJobWorktree,
   salvageJobWorktreeDiff: gitWorktree.salvageJobWorktreeDiff,
+  salvageJobDirtyDelta: gitWorktree.salvageJobDirtyDelta,
   parseWorktreeListPorcelain: gitWorktree.parseWorktreeListPorcelain,
   reconcileWorktreesOnBoot: (cwds) => gitWorktree.reconcileWorktreesOnBoot(cwds, { kind: KIND }),
   // Test-only escape hatch for the in-memory concurrency counter.

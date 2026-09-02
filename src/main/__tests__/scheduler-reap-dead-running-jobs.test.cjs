@@ -32,12 +32,34 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'reap-dead-running-jobs-test-'));
 process.env.HOME = tmpHome;
 
 const { reapDeadRunningJobs, PIDLESS_SPAWN_GRACE_MS } = require('../scheduler.cjs');
 const { AUDIT_LOG_PATH } = require('../lib/auditLog.cjs');
+// queueStore's cwd discovery is cached for 30s (queueStore.cjs's CACHE_MS) —
+// a project registered by THIS test after an earlier test already populated
+// that cache (and didn't itself bust it, e.g. because it found nothing
+// reapable and returned before ever calling writeQueue) would otherwise be
+// invisible to readQueue() for the rest of that window. Bust explicitly
+// after registering a new project so each test sees its own fixture.
+const { bustCwdCache } = require('../lib/queueStore.cjs');
+
+function git(args, cwd) {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' });
+}
+
+function initRepo(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  git(['init', '-q'], dir);
+  git(['config', 'user.email', 'test@example.com'], dir);
+  git(['config', 'user.name', 'Test'], dir);
+  fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n', 'utf8');
+  git(['add', '-A'], dir);
+  git(['commit', '-q', '-m', 'initial'], dir);
+}
 
 function registerActiveProject(cwd) {
   const projectsDir = path.join(tmpHome, '.claude', 'projects');
@@ -159,4 +181,81 @@ test('reapDeadRunningJobs is a no-op when no job is actually running in queue.js
   const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
   assert.equal(jobs.length, 1);
   assert.equal(jobs[0].status, 'completed');
+});
+
+test('reapDeadRunningJobs salvages a delta-scoped in-place patch (PRD 1098) when the row carries a persisted guardBaseline', async () => {
+  const projectCwd = path.join(tmpHome, 'e-project');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+
+  // Pre-existing WIP present at the recorded pre-run baseline — must never
+  // appear in the salvaged patch.
+  fs.writeFileSync(path.join(projectCwd, 'human-wip.txt'), 'human wip\n', 'utf8');
+
+  const runId = 'run-vanished-inplace';
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug: 'vanished-inplace',
+      status: 'running',
+      cwd: projectCwd,
+      runId,
+      runtime: { pid: 999999 }, // guaranteed-dead pid
+      guardBaseline: ['human-wip.txt'],
+    },
+  ]);
+  const runDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId);
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, 'vanished-inplace.log'), '{"type":"result","subtype":"success","result":"done","is_error":false}\n');
+
+  // The job's own delta, dirtied before its process vanished.
+  fs.writeFileSync(path.join(projectCwd, 'README.md'), 'hello\nedited by job\n', 'utf8');
+  fs.writeFileSync(path.join(projectCwd, 'job-output.txt'), 'job work\n', 'utf8');
+
+  bustCwdCache();
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === 'vanished-inplace');
+  assert.equal(row.status, 'completed');
+  assert.ok(row.salvagePatch, 'a salvage patch must be recorded on the row');
+  assert.ok(fs.existsSync(row.salvagePatch));
+  const patch = fs.readFileSync(row.salvagePatch, 'utf8');
+  assert.match(patch, /README\.md/);
+  assert.match(patch, /edited by job/);
+  assert.match(patch, /job-output\.txt/);
+  assert.doesNotMatch(patch, /human wip/, 'baseline WIP must never leak into the salvaged patch');
+});
+
+test('reapDeadRunningJobs skips in-place salvage (no whole-tree dump) when the row has no persisted guardBaseline', async () => {
+  const projectCwd = path.join(tmpHome, 'f-project');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+
+  fs.writeFileSync(path.join(projectCwd, 'human-wip.txt'), 'human wip\n', 'utf8');
+  fs.writeFileSync(path.join(projectCwd, 'README.md'), 'hello\nedited by job\n', 'utf8');
+
+  const runId = 'run-vanished-no-baseline';
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug: 'vanished-no-baseline',
+      status: 'running',
+      cwd: projectCwd,
+      runId,
+      runtime: { pid: 999999 },
+      // No guardBaseline field — this PRD's sibling hasn't landed persistence
+      // yet, so there's no safe way to distinguish this job's own dirt from
+      // the human's pre-existing WIP above.
+    },
+  ]);
+  const runDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId);
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(path.join(runDir, 'vanished-no-baseline.log'), '{"type":"result","subtype":"success","result":"done","is_error":false}\n');
+
+  bustCwdCache();
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === 'vanished-no-baseline');
+  assert.equal(row.status, 'completed');
+  assert.equal(row.salvagePatch, undefined, 'must skip salvage entirely rather than ever dumping the whole tree');
 });

@@ -139,6 +139,11 @@ function execGit(args, { cwd, timeout = 20_000 } = {}) {
     execFile('git', args, { cwd, timeout, windowsHide: true, encoding: 'utf8' }, (err, stdout, stderr) => {
       if (err) {
         err.stderrText = stderr;
+        // Some git subcommands (e.g. `diff --no-index`) exit non-zero to mean
+        // "found a difference", not "failed" — stdout still carries the real
+        // result in that case, so callers that need it can recover it off
+        // the rejected error rather than losing it.
+        err.stdoutText = stdout;
         reject(err);
         return;
       }
@@ -364,18 +369,19 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
       const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
       if (changed.length && changed.every((p) => carriedPaths.includes(p))) {
         // Path membership alone is NOT enough: a job that legitimately edits
-        // the SAME file the base tree had carried-in WIP on would otherwise
-        // have its real commit misclassified as "just the carried WIP" and
-        // dropped — the caller treats `integrated: false` as safe-to-delete
-        // the branch, so that commit would be gone for good, worse than the
-        // ordinary merge-conflict path (branch kept, flagged for manual
-        // recovery) this shortcut is supposed to be a safe subset of.
-        // Content-verify: only when every changed path's committed blob on
-        // `branch` is byte-identical to what's STILL sitting dirty in `cwd`
-        // right now proves the job committed exactly the carried WIP and
-        // nothing more. Any mismatch (including a read failure — fail
-        // toward the safer default) falls through to the normal merge
-        // attempt below instead of skipping.
+        // the SAME file the base tree had carried-in WIP on (e.g. this
+        // repo's own scheduler.cjs churns queue.json/active-index.json while
+        // jobs run) would otherwise have its real commit misclassified as
+        // "just the carried WIP" and dropped — the caller treats
+        // `integrated: false` as safe-to-delete-the-branch, so that commit
+        // would be gone for good, worse than the ordinary merge-conflict
+        // path (branch kept, flagged for manual recovery) this shortcut is
+        // supposed to be a safe subset of. Content-verify: only when every
+        // changed path's committed blob on `branch` is byte-identical to
+        // what's STILL sitting dirty in `cwd` right now proves the job
+        // committed exactly the carried WIP and nothing more. Any mismatch
+        // (including a read failure — fail toward the safer default) falls
+        // through to the normal merge attempt below instead of skipping.
         let allIdentical = true;
         for (const p of changed) {
           try {
@@ -474,6 +480,83 @@ async function salvageWorktreeDiff({ cwd, outFile }) {
   }
 }
 
+/**
+ * Best-effort dump of a caller-supplied DELTA of paths — never the whole
+ * tree — to `outFile`. This is the shared-tree counterpart to
+ * salvageWorktreeDiff above: a job that ran IN PLACE (no throwaway worktree
+ * checkout to diff and discard) shares `cwd` with a human's own WIP and any
+ * sibling job, so it must never touch anything outside the exact paths the
+ * caller says this job itself dirtied (typically: `git status` at exit,
+ * minus a pre-run baseline snapshot).
+ *
+ * Deliberately does NOT reuse salvageWorktreeDiff's `git add -A
+ * --intent-to-add` — that stages the ENTIRE tree's untracked files into the
+ * shared index, which is exactly the kind of blanket mutation this function
+ * exists to avoid. Instead: tracked/modified delta paths are read via `git
+ * diff HEAD --binary -- <paths>` (never stages anything), and untracked
+ * delta paths are read individually via `git diff --no-index --binary --
+ * /dev/null <path>` (also never touches the index) — `--no-index` exits
+ * non-zero to mean "found a difference", which execGit rejects, so its
+ * stdout is recovered off the rejected error via `err.stdoutText`.
+ *
+ * Never throws, and never mutates `cwd` in any way (no add/stash/reset/
+ * checkout/clean) — a caller running this against a tree shared with a
+ * human or a sibling job must be able to trust `git status --porcelain` and
+ * the stash list are byte-identical before and after. Writes nothing (and
+ * returns `{ ok: false }`) when none of the given paths are actually dirty,
+ * or on any git failure, so a run with nothing to salvage never leaves a
+ * 0-byte artifact behind.
+ */
+async function salvageDirtyDelta({ cwd, paths, outFile }) {
+  try {
+    const list = Array.isArray(paths) ? [...new Set(paths.filter(Boolean))] : [];
+    if (!list.length) return { ok: false };
+
+    const statusOut = await execGit(['status', '--porcelain', '--', ...list], { cwd, timeout: 15_000 }).catch(() => '');
+    const trackedPaths = [];
+    const untrackedPaths = [];
+    for (const line of String(statusOut || '').split('\n')) {
+      if (!line) continue;
+      const code = line.slice(0, 2);
+      const p = line.slice(3);
+      if (!p) continue;
+      if (code === '??') untrackedPaths.push(p);
+      else trackedPaths.push(p);
+    }
+    // Any requested path `git status` didn't report on (already clean by the
+    // time this runs — e.g. a race with a concurrent write) is simply
+    // skipped, never guessed at.
+
+    let patch = '';
+    if (trackedPaths.length) {
+      try {
+        const d = await execGit(['diff', 'HEAD', '--binary', '--', ...trackedPaths], { cwd, timeout: 30_000 });
+        if (d) patch += d;
+      } catch {
+        // Best-effort — a diff failure for the tracked set must not block
+        // salvaging the untracked set below.
+      }
+    }
+    for (const p of untrackedPaths) {
+      try {
+        const d = await execGit(['diff', '--no-index', '--binary', '--', '/dev/null', p], { cwd, timeout: 15_000 });
+        if (d) patch += d;
+      } catch (e) {
+        // git diff --no-index exits 1 (not an error) whenever it finds a
+        // difference, which is the expected outcome here every time — the
+        // real diff text is on stdout despite the non-zero exit.
+        if (e && typeof e.stdoutText === 'string' && e.stdoutText) patch += e.stdoutText;
+      }
+    }
+    if (!patch.trim()) return { ok: false };
+    const { writeTextAtomic } = require('../config.cjs');
+    await writeTextAtomic(outFile, patch);
+    return { ok: true, bytes: Buffer.byteLength(patch, 'utf8') };
+  } catch {
+    return { ok: false };
+  }
+}
+
 /** Parse `git worktree list --porcelain` into `[{ worktree, branch }]`. */
 function parseWorktreeListPorcelain(text) {
   const entries = [];
@@ -560,6 +643,9 @@ async function cleanupJobWorktree({ cwd, dir, branch, keepBranch }) {
 async function salvageJobWorktreeDiff({ dir, outFile }) {
   return salvageWorktreeDiff({ cwd: dir, outFile });
 }
+async function salvageJobDirtyDelta({ cwd, paths, outFile }) {
+  return salvageDirtyDelta({ cwd, paths, outFile });
+}
 
 async function createEpicWorktree({ cwd, epicId }) {
   return createWorktree({ kind: 'epic', cwd, key: epicId });
@@ -586,6 +672,7 @@ module.exports = {
   integrateBranch,
   cleanupWorktree,
   salvageWorktreeDiff,
+  salvageDirtyDelta,
   parseWorktreeListPorcelain,
   reconcileWorktreesOnBoot,
   // Job-kind convenience wrappers — same call shape jobWorktree.cjs has
@@ -594,6 +681,7 @@ module.exports = {
   integrateJobBranch,
   cleanupJobWorktree,
   salvageJobWorktreeDiff,
+  salvageJobDirtyDelta,
   // Epic-kind convenience wrappers.
   createEpicWorktree,
   integrateEpicBranch,

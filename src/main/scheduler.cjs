@@ -2420,6 +2420,8 @@ function resetJobFields(job, errorMsg, opts = {}) {
   job.error = errorMsg ?? null;
   delete job.runtime;
   delete job.verifierVerdict;
+  delete job.uncommittedPaths;
+  delete job.resumeRecoveryAttempted;
   // Like exitCode: this run's outcome, not durable across a reset — a stale
   // leak badge from a prior attempt must not linger once the job re-fires.
   delete job.leakedDescendants;
@@ -2432,6 +2434,7 @@ function resetJobFields(job, errorMsg, opts = {}) {
   delete job.leftoverPaths;
   delete job.leftoverCount;
   delete job.leftoverPathsTruncated;
+  delete job.preRunDirtyPaths;
   // Deliberately NOT deleting job.landedCommit: it must outlive a reset so a
   // re-fired run of this same slug can pass it to verifyRun as
   // priorLandedCommit (pass_no_commit_prior_run_verified exemption).
@@ -2982,6 +2985,11 @@ function commitGuardVerdict({ newlyDirty, siblingRunning, ranInWorktree, jobSelf
     reason: `finish protocol incomplete: ${dirty.length} uncommitted file(s) left in working tree (e.g. ${sample})${salvageNote}`,
     downgradeTo: 'needs_review',
     annotations: carried.length ? carried : undefined,
+    // The exact dirty-path list, persisted on the job row (see the
+    // commit-guard call site) so a later resume-recovery attempt
+    // (selectResumeRecoveryTarget) can name these paths without re-running
+    // `git status` against a tree that may have moved on since.
+    dirtyPaths: dirty,
   };
 }
 
@@ -3021,6 +3029,148 @@ function applyLeftoverFields(row, paths) {
   if (fields) Object.assign(row, fields);
 }
 
+// Same bloat concern as LEFTOVER_PATHS_CAP, applied to the PRE-run dirty
+// snapshot (foreign WIP the job did not create) instead of the post-run
+// leftover delta.
+const PRE_RUN_DIRTY_PATHS_CAP = 200;
+
+/**
+ * Pure: cap a dirty-path list at PRE_RUN_DIRTY_PATHS_CAP, appending a
+ * `+N more` marker entry when truncated, so queue.json/history.jsonl never
+ * take on an unbounded row for a pathologically dirty shared tree. Returns
+ * [] for null/empty input (never null) — callers gate storage/prompt
+ * injection on `.length` the same way carriedPaths already does.
+ */
+function capDirtyPaths(paths, cap = PRE_RUN_DIRTY_PATHS_CAP) {
+  if (!Array.isArray(paths) || paths.length === 0) return [];
+  if (paths.length <= cap) return paths.slice();
+  return [...paths.slice(0, cap), `+${paths.length - cap} more`];
+}
+
+// Stable, machine-greppable delimiter — a downstream PRD (verifier scoring
+// foreign-WIP test failures separately) greps the executor log for this
+// exact marker, so its text must never be reworded casually.
+const FOREIGN_WIP_DELIMITER = '--- FOREIGN WORKING-TREE STATE (not your work) ---';
+const FOREIGN_WIP_END_DELIMITER = '--- END FOREIGN WORKING-TREE STATE ---';
+
+/**
+ * Pure: build the executor-prompt section warning about pre-existing dirty
+ * paths this job does not own — either base WIP carried into an isolated
+ * worktree (PRD 1094's carriedPaths, checked first since it's the more
+ * specific/authoritative case) or the raw pre-run dirty snapshot of a shared
+ * (non-isolated) tree. Returns '' when both lists are empty so a clean spawn
+ * produces a byte-identical prompt to before this section existed.
+ */
+function buildForeignWipSection({ preRunDirtyPaths, carriedPaths } = {}) {
+  const carried = Array.isArray(carriedPaths) ? carriedPaths.filter(Boolean) : [];
+  if (carried.length) {
+    return [
+      FOREIGN_WIP_DELIMITER,
+      'This job is running in an isolated git worktree, but the following paths carry uncommitted base-tree work-in-progress that was carried into this checkout so the tree is self-consistent. The authoritative copy of these files lives in the MAIN tree, not this worktree.',
+      'These files were already modified before this job started. They are NOT this job\'s work:',
+      ...carried.map((p) => `  ${p}`),
+      'Do not stage, commit, revert, or stash these paths. A test failure confined to these paths is not this job\'s regression.',
+      FOREIGN_WIP_END_DELIMITER,
+    ].join('\n');
+  }
+  const dirty = Array.isArray(preRunDirtyPaths) ? preRunDirtyPaths.filter(Boolean) : [];
+  if (dirty.length) {
+    return [
+      FOREIGN_WIP_DELIMITER,
+      'This job is running in a SHARED working tree (not isolated in its own worktree). The following paths were already modified when this job started:',
+      ...dirty.map((p) => `  ${p}`),
+      'These files are NOT this job\'s work. Do not stage, commit, revert, or stash them. A test failure confined to these paths is not this job\'s regression.',
+      FOREIGN_WIP_END_DELIMITER,
+    ].join('\n');
+  }
+  return '';
+}
+
+/**
+ * Resume-first recovery (PRD 1111). A job parked in needs_review with verdict
+ * 'uncommitted_changes' has a live claude session (job.sessionId, minted by
+ * spawnJob's `--session-id`) that already has full context of the work it
+ * left uncommitted — resuming it via `claude -p --resume <sessionId>` lets it
+ * finish its own finish-protocol COMMIT step, instead of spawnInvestigation
+ * cold-reading the log to author a fix-plan PRD that a FRESH session then has
+ * to re-derive that same context for. Pure/no I/O so the eligibility rule can
+ * be unit-tested directly, matching classifyFailureOutcome/commitGuardVerdict.
+ *
+ * Bounded to exactly one attempt via job.resumeRecoveryAttempted, stamped
+ * atomically with the 'running' transition inside spawnJob's own dispatch
+ * mutate (see spawnJob) — never here — so a crash between this function
+ * returning a target and the resume child actually spawning cannot leave the
+ * job re-eligible.
+ *
+ * Kill-switch: SM_RESUME_RECOVERY_DISABLE=1 restores today's behaviour
+ * exactly (always returns null), mirroring SM_RCA_DISABLE/SM_DOD_DISABLE.
+ */
+function selectResumeRecoveryTarget(job) {
+  if (process.env.SM_RESUME_RECOVERY_DISABLE === '1') return null;
+  if (!job || job.status !== 'needs_review') return null;
+  if (job.verifierVerdict !== 'uncommitted_changes') return null;
+  if (typeof job.sessionId !== 'string' || job.sessionId.length === 0) return null;
+  if (job.resumeRecoveryAttempted === true) return null;
+  const dirtyPaths = Array.isArray(job.uncommittedPaths)
+    ? job.uncommittedPaths.filter((p) => typeof p === 'string' && p.length > 0)
+    : [];
+  if (!dirtyPaths.length) return null;
+  return { slug: job.slug, sessionId: job.sessionId, dirtyPaths, salvagePatch: job.salvagePatch || null };
+}
+
+/**
+ * Short deterministic preamble for a resume-recovery dispatch — NEVER the
+ * original PRD body (the resumed session already has that in its own
+ * conversation history; re-embedding it would just waste context and risk
+ * contradicting whatever state the session actually left behind). Names the
+ * exact paths recorded on the parked job row so the resumed run can verify
+ * them on disk before trusting them, rather than re-deriving them itself.
+ */
+function buildResumeRecoveryPreamble({ dirtyPaths, salvagePatch }) {
+  const pathList = dirtyPaths.map((p) => `- ${p}`).join('\n');
+  const salvageLine = salvagePatch
+    ? `\nA salvage patch of this work was also captured at: ${salvagePatch} — apply it if any of the paths above are missing from the working tree.\n`
+    : '';
+  return `RESUME RECOVERY: your previous run in this same session left uncommitted work on disk and exited before the finish protocol's COMMIT step ran. This is a continuation of that same session, not a new task — do not restart from scratch.
+
+The following path(s) were recorded as uncommitted when this job was parked for review:
+${pathList}
+${salvageLine}
+Do the following now:
+1. Run \`git status\` and verify each path above is present on disk and reflects your intended work. If a path is missing, investigate before recreating it — don't blindly redo work that may already be committed or salvaged elsewhere.
+2. Run the project's verification gate (typecheck/lint/tests) in the FOREGROUND — wait for it to finish and read its real exit code before proceeding. Do not background it.
+3. If the gate is green, stage exactly the paths you created or modified for this work and commit them: \`git add <path> [<path>...] && git commit -m "<type>(<scope>): <summary>"\`.
+4. If the gate is red, fix it, then commit.
+
+As the LAST LINE of your final result text, emit exactly one of:
+  SCHEDULER_VERDICT: PASS
+  SCHEDULER_VERDICT: FAIL <one-line reason>
+Print PASS only once the commit above has actually landed.`;
+}
+
+/**
+ * Pure argv builder for a `claude -p` child spawn, shared so the
+ * resume-vs-fresh-session choice is made in exactly one place. `resume`
+ * selects `--resume <sessionId>` (reconnect) INSTEAD of `--session-id
+ * <sessionId>` (mint) — the two flags are mutually exclusive, never both.
+ * `--model` is always explicit (never left to the CLI's drifting default —
+ * see conventions.md). `systemPrompt`, when given (the PRD's `agentType`
+ * persona body, resolved by agentModelResolve.cjs's resolvePrdPersonaForSpawn),
+ * is passed as `--append-system-prompt` so the executor IS that persona at
+ * launch rather than being asked in prose to adopt one.
+ */
+function buildClaudeSpawnArgs({ prompt, model, sessionId, resume, systemPrompt }) {
+  return [
+    '-p', prompt,
+    '--model', model,
+    ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
+    '--dangerously-skip-permissions',
+    '--output-format', 'stream-json',
+    '--verbose',
+    ...(resume ? ['--resume', sessionId] : ['--session-id', sessionId]),
+  ];
+}
+
 // ---------- execution ----------
 
 function pickRunDir() {
@@ -3039,7 +3189,7 @@ function pickRunDir() {
  * Watchdogs are declared as an array; the result-tailer's exit-code mapping
  * (success+killedBySignal → 0) is scheduler-specific and lives in onExit.
  */
-async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
+async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget = null, foreignWip = null) {
   const logPath = path.join(runDir, `${job.slug}.log`);
   const metaPath = path.join(runDir, `${job.slug}.meta.json`);
   // `cwd` stays the MAIN tree throughout — PRD lookup (findPrdDir/prdPathForJob)
@@ -3049,7 +3199,10 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
   const cwd = job.cwd || defaultCwd;
   const spawnCwd = execCwd || cwd;
   const startedAt = Date.now();
-  const sessionId = randomUUID();
+  // Resume mode (PRD 1111) reconnects to the SAME session that left the
+  // uncommitted work — reusing its id via `--resume` instead of minting a
+  // fresh one via `--session-id` is the entire point of the recovery.
+  const sessionId = resumeTarget ? resumeTarget.sessionId : randomUUID();
 
   // Phase 1: open log fd so we can emit pre-spawn diagnostics (early-exit
   // error paths) before the child is created. withChildAndLog takes ownership
@@ -3074,14 +3227,23 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
     return { exitCode: -1, durationMs: 0, error: errMsg, sessionId };
   }
 
+  let prompt;
+  let prdPath = null;
+  if (resumeTarget) {
+    // Resume mode (PRD 1111): a short deterministic preamble naming the
+    // recorded dirty paths, NEVER the original PRD body — the resumed
+    // session already has that in its own conversation history via
+    // --resume, and re-embedding it here would just contradict whatever
+    // state the session actually left on disk.
+    prompt = buildResumeRecoveryPreamble({ dirtyPaths: resumeTarget.dirtyPaths, salvagePatch: resumeTarget.salvagePatch });
+  } else {
   // Read full PRD body fresh from disk (queue stored only the preview).
   // Resolve through findPrdDir's full candidate search (legacy flat dir +
   // every project's Epic-scoped dirs) first, so the common case — a live
   // Epic-scoped PRD — is a first-try hit instead of probing the retired flat
   // dir and only then falling back.
-  let prompt;
   const resolvedDir = await findPrdDir(job.slug);
-  let prdPath = resolvedDir ? path.join(resolvedDir, `${job.slug}.md`) : prdPathForJob(job);
+  prdPath = resolvedDir ? path.join(resolvedDir, `${job.slug}.md`) : prdPathForJob(job);
   try {
     const parsed = await parsePrd(prdPath);
     // The review → security-review → verify → commit finish sequence is
@@ -3137,14 +3299,17 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
       return { exitCode: -1, durationMs: 0, error: e?.message };
     }
   }
+  } // end resumeTarget ? preamble : normal-PRD-read
 
+  let contextDigestApplied = false;
+  let originSessionId = null;
+  if (!resumeTarget) {
   // Prepend the Epic's own session digest (PRD 950/958) when this job traces
   // back to a known Epic — additive only, never mutates the PRD body itself.
   // A missing/unresolved epicId or a digest build failure is a silent no-op:
   // the PRD's own body must remain sufficient to complete the job on its own.
   const digestEpicId = job.epicId ?? job.sourcePromptId ?? null;
-  const originSessionId = resolveOriginSessionId(cwd, digestEpicId);
-  let contextDigestApplied = false;
+  originSessionId = resolveOriginSessionId(cwd, digestEpicId);
   let digestText = '';
   if (originSessionId) {
     try {
@@ -3174,7 +3339,20 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
   // after any digest fence rather than concatenated ahead of it.
   prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: FINISH_PROTOCOL });
 
-  const promptCheck = validatePromptForSpawn(prompt, prdPath);
+  // Foreign-WIP manifest (starry-night-ships PRD 148 postmortem): the
+  // scheduler already knows, at spawn time, which dirty paths this job did
+  // not create — either a shared tree's pre-existing dirty set or worktree
+  // WIP carried in from the base tree (PRD 1094). Telling the executor
+  // explicitly here means it never has to bisect by content to prove a test
+  // failure isn't its own regression. '' (clean spawn) leaves prompt
+  // byte-identical to before this section existed.
+  const foreignWipSection = buildForeignWipSection(foreignWip || {});
+  if (foreignWipSection) {
+    prompt = `${prompt}\n\n${foreignWipSection}`;
+  }
+  } // end !resumeTarget digest/finish-protocol composition
+
+  const promptCheck = validatePromptForSpawn(prompt, resumeTarget ? `<resume recovery preamble for ${job.slug}>` : prdPath);
   if (!promptCheck.ok) {
     safeLog(`[scheduler] ${promptCheck.error}\n`);
     closeFd();
@@ -3182,10 +3360,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
     return { exitCode: -1, durationMs: 0, error: promptCheck.error, sessionId };
   }
 
-  // PRD agentType → persona + model (PRD 1115): resolved off job.agentType
-  // (persisted on the queue row by reconcile()). Never throws; a
-  // dangling/absent agentType falls back to no persona + FALLBACK_MODEL and
-  // is logged once by resolvePrdPersonaForSpawn itself.
+  // PRD agentType → persona + model (PRD 1115): resolved for both fresh and
+  // resume dispatches, keyed off job.agentType (persisted on the queue row
+  // by reconcile()) rather than re-reading the PRD file — a resumed session
+  // must keep launching as the SAME persona it started as. Never throws;
+  // a dangling/absent agentType falls back to no persona + FALLBACK_MODEL
+  // and is logged once by resolvePrdPersonaForSpawn itself.
   const personaResolution = await agentModelResolve.resolvePrdPersonaForSpawn({ cwd, agentType: job.agentType });
   safeLog(`[scheduler] agentType=${job.agentType || '(none)'} persona=${personaResolution.personaPath || '(fallback — no persona applied)'} model=${personaResolution.model}\n`);
 
@@ -3313,15 +3493,16 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
       closeFd,
       spawn: {
         command: claudeBin,
-        args: [
-          '-p', prompt,
-          '--model', personaResolution.model,
-          ...(personaResolution.systemPrompt ? ['--append-system-prompt', personaResolution.systemPrompt] : []),
-          '--dangerously-skip-permissions',
-          '--output-format', 'stream-json',
-          '--verbose',
-          '--session-id', sessionId,
-        ],
+        // Resume mode passes `--resume <sessionId>` (reconnect to the SAME
+        // session) INSTEAD of `--session-id <sessionId>` (mint a new one) —
+        // never both, see buildClaudeSpawnArgs.
+        args: buildClaudeSpawnArgs({
+          prompt,
+          model: personaResolution.model,
+          sessionId,
+          resume: !!resumeTarget,
+          systemPrompt: personaResolution.systemPrompt,
+        }),
         options: {
           cwd: spawnCwd,
           env: childEnv,
@@ -3567,6 +3748,16 @@ function readRunOutcomeSidecars(runDir, slug) {
  * see shouldSkipInvestigationForCleanRun).
  */
 async function spawnInvestigation(failedJob, runDir) {
+  // Resume-first recovery (PRD 1111) always gets first refusal — a job
+  // eligible for a bounded `--resume` dispatch must never also get a
+  // cold-read fix-plan PRD authored in the same pass. selectResumeRecoveryTarget
+  // returns null for every job shape spawnInvestigation is normally called
+  // with (e.g. plain 'failed' jobs never carry verifierVerdict
+  // 'uncommitted_changes'), so this is a no-op for the common case.
+  if (selectResumeRecoveryTarget(failedJob)) {
+    console.log(`[scheduler] skip investigation: ${failedJob.slug} is resume-recovery eligible`);
+    return { deferred: false };
+  }
   if (isFixPlanBeyondDepthCap(failedJob.slug, failedJob.investigationDepth)) {
     console.log(`[scheduler] skip investigation: ${failedJob.slug} is a fix plan at/beyond depth cap (depth=${failedJob.investigationDepth ?? 'none'})`);
     return { deferred: false };
@@ -3809,7 +4000,7 @@ async function spawnInvestigation(failedJob, runDir) {
   }
 }
 
-async function spawnJob(job, runId, runDir, defaultCwd) {
+async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
   // Session-Manager owns the machine-wide `claude -p` pool (sessionSlots.cjs)
   // — the scheduler REQUESTS capacity, it doesn't own a private cap. A miss
   // leaves the job pending; the next tick retries when a slot frees up.
@@ -3841,7 +4032,9 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     // only the cap-reached reason is a deferral, checked here via
     // createJobWorktree's own reason string so the two paths never
     // silently drift out of sync with gitWorktree.cjs's actual wording.
-    const preflightWorktree = await jobWorktree.createJobWorktree({ cwd: job.cwd || defaultCwd, slug: job.slug });
+    const preflightWorktree = resumeTarget
+      ? { ok: false, reason: 'resume-recovery: running in place to reuse the session\'s prior working tree' }
+      : await jobWorktree.createJobWorktree({ cwd: job.cwd || defaultCwd, slug: job.slug });
     if (!preflightWorktree.ok && /^worktree cap reached\b/.test(preflightWorktree.reason || '')) {
       console.log(`[scheduler] ${job.slug}: deferring — ${preflightWorktree.reason}`);
       await mutate((s) => {
@@ -3854,13 +4047,24 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     await mutate((s) => {
       const idx = s.jobs.findIndex((x) => x.slug === job.slug);
       if (idx >= 0) {
-        transitionJob(s.jobs[idx], 'running', { reason: 'dispatched for execution', source: 'spawnJob:dispatch' });
+        transitionJob(s.jobs[idx], 'running', {
+          reason: resumeTarget ? 'dispatched for resume-recovery' : 'dispatched for execution',
+          source: 'spawnJob:dispatch',
+        });
         delete s.jobs[idx].heldReason;
         s.jobs[idx].runId = runId;
         s.jobs[idx].startedAt = new Date().toISOString();
         if (job.quietMachine === true) {
           s.jobs[idx].quietMachine = true;
           s.jobs[idx].quietLeaseDegraded = job.quietLeaseDegraded === true;
+        }
+        // Stamp the bounded one-attempt marker BEFORE the resume spawn, in
+        // the SAME mutate as the 'running' transition, so an app crash
+        // between here and the child actually spawning still leaves this
+        // job un-retriable (selectResumeRecoveryTarget returns null once
+        // this is true) rather than silently re-firing forever.
+        if (resumeTarget) {
+          s.jobs[idx].resumeRecoveryAttempted = true;
         }
       }
     });
@@ -3883,11 +4087,21 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     // still compute a truthful newly-dirty delta instead of having no
     // baseline at all. `runtime` (unlike this) is deleted on finalize; this
     // survives until the finalize mutate below explicitly clears it.
+    //
+    // preRunDirtyPaths is the SAME snapshot, capped and reworked into the
+    // executor-facing manifest (buildForeignWipSection) telling the job which
+    // paths it does not own — unlike guardBaseline/guardHeadBefore, it is
+    // deliberately left on the row through to history.jsonl (not deleted at
+    // finalize) so a post-hoc reader can tell whether a completed job ran
+    // against foreign WIP.
+    const preRunDirtyPaths = capDirtyPaths(guardBaseline);
     await mutate((s) => {
       const idx = s.jobs.findIndex((x) => x.slug === job.slug);
       if (idx >= 0) {
         s.jobs[idx].guardBaseline = guardBaseline || [];
         s.jobs[idx].guardHeadBefore = guardHeadBefore || null;
+        if (preRunDirtyPaths.length) s.jobs[idx].preRunDirtyPaths = preRunDirtyPaths;
+        else delete s.jobs[idx].preRunDirtyPaths;
       }
     });
 
@@ -3952,6 +4166,12 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     // shape for the whole run). Named generically (not "worktree...") because
     // an in-place run salvages one too (PRD 1098).
     let salvagePatch = null;
+    // Which foreign-WIP shape applies to THIS run: an isolated worktree only
+    // ever needs to disclose carriedPaths (its checkout starts clean apart
+    // from those carried paths); an in-place/shared-tree run discloses the
+    // raw pre-run dirty snapshot instead. Never both — see
+    // buildForeignWipSection.
+    const foreignWip = worktree.ok ? { carriedPaths } : { preRunDirtyPaths };
     try {
       res = await executeJob(job, runDir, defaultCwd, async (pid, sessionId, cwd) => {
         await mutate((s) => {
@@ -3962,7 +4182,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           }
         });
         await broadcast({ flush: true });
-      }, worktree.ok ? worktree.dir : undefined);
+      }, worktree.ok ? worktree.dir : undefined, resumeTarget, foreignWip);
     } finally {
       if (worktree.ok) {
         worktreeLeftoverDirty = (await uncommittedChanges(worktree.dir)) || [];
@@ -4255,6 +4475,8 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     let needsInvestigationNow = false;
     let investigationJobSnapshot = null;
     let needsReviewRcaSnapshot = null;
+    let resumeRecoveryJob = null;
+    let resumeRecoveryTarget = null;
     let terminalNotifySnapshot = null;
     const newlyCompletedPrds = [];
     await mutate((s) => {
@@ -4329,6 +4551,15 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           } else {
             delete s.jobs[i2].verifierVerdict;
           }
+          // Persist the commit-guard's exact dirty-path list (verdict
+          // 'uncommitted_changes' only) so a later resume-recovery attempt
+          // (selectResumeRecoveryTarget) can name these paths without
+          // re-running `git status` against a tree that may have moved on.
+          if (verifyResult?.verdict === 'uncommitted_changes' && Array.isArray(verifyResult.dirtyPaths)) {
+            s.jobs[i2].uncommittedPaths = verifyResult.dirtyPaths;
+          } else {
+            delete s.jobs[i2].uncommittedPaths;
+          }
           // Non-blocking notes (e.g. a recovered missing-dependency probe, or a
           // pattern hit demoted because a materially-checkable verdict outranked
           // it) — surfaced even on completed jobs so the signal isn't lost.
@@ -4379,6 +4610,19 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
             // takes the treatAsPending branch above and never reaches here).
             needsReviewRcaSnapshot = { ...s.jobs[i2] };
 
+            // Resume-first recovery (PRD 1111): evaluated BEFORE the auto-fix
+            // eligibility check below — a job whose verdict is
+            // 'uncommitted_changes' with a live sessionId gets one bounded
+            // `--resume` dispatch instead of a cold-read fix-plan
+            // investigation. Snapshot only (no I/O inside mutate()); the
+            // actual dispatch happens outside mutate(), below. Never sets
+            // needsInvestigationNow — the two are mutually exclusive for the
+            // same tick, mirroring the `else if` used outside mutate().
+            const target = selectResumeRecoveryTarget(s.jobs[i2]);
+            if (target) {
+              resumeRecoveryJob = { ...s.jobs[i2] };
+              resumeRecoveryTarget = target;
+            } else {
             // Same-tick auto-fix (feedback 2026-07-12): rather than waiting up to
             // 10 min for reverifyNeedsReview()'s periodic pass, check right here
             // whether this job qualifies for auto-fix (same eligibility rule
@@ -4401,6 +4645,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
               }
               needsInvestigationNow = true;
               investigationJobSnapshot = { ...s.jobs[i2] };
+            }
             }
           }
           // Auto-promote: when a fix-* PRD completes successfully, the original
@@ -4447,10 +4692,26 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
         verdict: needsReviewRcaSnapshot.verifierVerdict,
         annotations: needsReviewRcaSnapshot.verifierAnnotations,
       })
-        .then((report) => notifyNeedsReview(needsReviewRcaSnapshot, report))
+        .then(async (report) => {
+          // Persist the classification onto the parked job row so the scheduler
+          // can route on it (e.g. selectAutoFixTargets excluding 'archive')
+          // without re-parsing the RCA markdown on every pass.
+          await mutate((s) => {
+            const j = s.jobs.find((x) => x.slug === needsReviewRcaSnapshot.slug);
+            applyRcaClassification(j, report);
+          }).catch(() => {});
+          return notifyNeedsReview(needsReviewRcaSnapshot, report);
+        })
         .catch((e) => {
           console.error('[scheduler] writeRcaReport error', job.slug, e);
         });
+    }
+
+    if (resumeRecoveryJob && resumeRecoveryTarget) {
+      console.log(`[scheduler] needs_review ${job.slug} → resume-recovery (session ${resumeRecoveryTarget.sessionId}, ${resumeRecoveryTarget.dirtyPaths.length} dirty path(s))`);
+      spawnResumeRecovery(resumeRecoveryJob, resumeRecoveryTarget).catch((e) => {
+        console.error('[scheduler] spawnResumeRecovery error', job.slug, e);
+      });
     }
 
     if (actuallyFailed && failedJobSnapshot) {
@@ -4543,6 +4804,22 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
     // Each job completion is a signal to advance the queue.
     tickQueue().catch(() => {});
   }
+}
+
+/**
+ * Dispatch a resume-recovery attempt (PRD 1111) for a job already found
+ * eligible by selectResumeRecoveryTarget. Thin wrapper around spawnJob —
+ * reuses its entire slot-acquire/worktree/verify/commit-guard/finalize
+ * machinery unchanged, so a resume run that itself parks or fails falls
+ * through to the SAME spawnInvestigation fallback any other run would, with
+ * zero special-casing. `job` and `resumeTarget` must be snapshots taken
+ * BEFORE this call (this function does no eligibility re-check — spawnJob's
+ * own dispatch mutate is what stamps resumeRecoveryAttempted, atomically
+ * with the 'running' transition).
+ */
+async function spawnResumeRecovery(job, resumeTarget) {
+  const { runId, dir: runDir } = pickRunDir();
+  await spawnJob(job, runId, runDir, job.cwd || DEFAULT_PROJECT_CWD, resumeTarget);
 }
 
 // Serialized ticker: prevents two concurrent tickQueue() calls from racing
@@ -5285,10 +5562,36 @@ function isRescanCandidate(job) {
  *     exhausted retry is excluded
  *   - no fix sibling on disk (fixSlugExists) or already in the queue
  */
+/**
+ * Persist a writeRcaReport() result onto its job row — job.rcaFailureClass /
+ * job.rcaRecoveryAction — so selectAutoFixTargets and future routing can read
+ * the classification straight off the queue row instead of re-parsing the RCA
+ * markdown. Pure mutation of the passed-in job object; no I/O. A no-op when
+ * the job is missing, has moved off needs_review (e.g. resumed and completed
+ * before this async write landed), or the report was never filed (disabled,
+ * error, etc). Returns whether it applied, for callers/tests that want to
+ * assert on it.
+ */
+function applyRcaClassification(job, report) {
+  if (!job || job.status !== 'needs_review' || !report?.filed) return false;
+  job.rcaFailureClass = report.failureClass;
+  job.rcaRecoveryAction = report.recoveryAction;
+  return true;
+}
+
 function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRunId }) {
   const slugsInQueue = new Set(jobs.map((j) => j.slug));
   return jobs.filter((job) => {
     if (job.status !== 'needs_review') return false;
+    // A stale re-run whose work already shipped (rcaReport's 'already-shipped'
+    // class) must never buy a fix-plan PRD — there is nothing to fix, and the
+    // correct recovery (archiving the PRD) is a human/reconcile action, not
+    // an investigation.
+    if (job.rcaRecoveryAction === 'archive') return false;
+    // Resume-first recovery (PRD 1111): a job still eligible for its one
+    // bounded `--resume` attempt must never also become a fix-plan target
+    // in the same pass — see spawnInvestigation's own identical guard.
+    if (selectResumeRecoveryTarget(job)) return false;
     const runId = job.runId || resolveJobRunId(job);
     if (!runId) return false;
     if (isFixPlanBeyondDepthCap(job.slug, job.investigationDepth)) return false;
@@ -5550,6 +5853,25 @@ async function reverifyNeedsReview() {
       }
     }
     await broadcast();
+  }
+
+  // Resume-first recovery (PRD 1111): before any fix-plan investigation is
+  // authored below, offer the bounded one-attempt `--resume` dispatch to any
+  // needs_review job this periodic pass finds still eligible — e.g. one the
+  // same-tick check in spawnJob missed because the app restarted between
+  // that job parking and this pass running. selectAutoFixTargets below
+  // already excludes every job this loop dispatches, so a resumable job
+  // never also gets a fix-plan PRD authored in the same pass.
+  {
+    const afterHealForResume = await readQueue();
+    for (const job of afterHealForResume.jobs) {
+      const target = selectResumeRecoveryTarget(job);
+      if (!target) continue;
+      console.log(`[scheduler] resume-recovery: needs_review ${job.slug} → resuming session ${target.sessionId}`);
+      spawnResumeRecovery(job, target).catch((e) => {
+        console.error('[scheduler] spawnResumeRecovery error', job.slug, e);
+      });
+    }
   }
 
   // Auto-fix: spawn a fix-plan investigation for each job still in
@@ -6795,4 +7117,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation };

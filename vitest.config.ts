@@ -89,6 +89,7 @@ export default defineConfig({
       'src/main/__tests__/runVerify.test.cjs',
       'src/main/__tests__/runVerify-transcript-commit-evidence.test.cjs',
       'src/main/__tests__/runVerify-blocked-by-foreign-wip.test.cjs',
+      'src/main/__tests__/runVerify-policy-denial.test.cjs',
       'src/main/__tests__/scheduler-blocked-by-foreign-wip.test.cjs',
       'src/main/__tests__/scheduler-meta-code-sha.test.cjs',
       'src/main/__tests__/scheduler-reset-job-fields-guard.test.cjs',

@@ -67,6 +67,19 @@ function isHarnessToolError(content) {
     || /\bNo such tool available\b/.test(content);
 }
 
+/**
+ * A PreToolUse hook denial (`guard-destructive-git.cjs`, `guard-prd-writes.cjs`,
+ * `guard-inline-implementation.cjs`, or the harness's own `Blocked: sleep N
+ * followed by: ...` form) never executed the tool it names — it says nothing
+ * about whether the task succeeded, and the model is expected to adapt and
+ * retry. (Incident: PRD 1106, 2026-09-02 — four guard-destructive-git denials
+ * in a fully-implemented, correctly-isolated run.)
+ */
+function isPolicyDenial(content) {
+  if (typeof content !== 'string' || !content) return false;
+  return /^(?:Error:\s*)?Blocked:/.test(content);
+}
+
 function detectPattern(content) {
   if (typeof content !== 'string' || !content) return null;
 
@@ -867,6 +880,20 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
       // seen in 58-web-remote-correctness-batch, 2026-06-10).
       if (isHarnessToolError(ev.content)) continue;
 
+      // A PreToolUse policy denial (a guard hook blocked the call before it
+      // ran) is exempt from both the is_error scan and the content-pattern
+      // scan for the same reason as a harness tool error above — the denied
+      // call never executed. Unlike a harness tool error, record it as an
+      // annotation so the denial stays visible in the verdict record instead
+      // of vanishing silently.
+      if (isPolicyDenial(ev.content)) {
+        annotations.push({
+          verdict: 'policy_denial',
+          reason: `PreToolUse policy denial at event ${i}: ${ev.content.slice(0, 200)}`,
+        });
+        continue;
+      }
+
       // A tool_result carrying a non-null parent_tool_use_id happened INSIDE a Task
       // subagent's own execution, not in the main agent's. Subagents do ordinary
       // exploratory work (greps that exit 1 on no-match, ls on a path that may not
@@ -1146,6 +1173,7 @@ module.exports = {
   // Exposed for unit tests.
   detectPattern,
   isHarnessToolError,
+  isPolicyDenial,
   isSelfRecovered,
   normalizeDescForRecovery,
   toolUseName,

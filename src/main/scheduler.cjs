@@ -2422,6 +2422,14 @@ function resetJobFields(job, errorMsg, opts = {}) {
   delete job.verifierVerdict;
   delete job.uncommittedPaths;
   delete job.resumeRecoveryAttempted;
+  // Same "this run's outcome, not durable across a reset" category as the
+  // fields above — a stale 'archive' recoveryAction from a prior life of this
+  // slug must never survive a reset and silently exclude a genuinely-new
+  // needs_review episode from selectAutoFixTargets (applyRcaClassification
+  // only overwrites these on a successful RCA write, so without this they
+  // can otherwise linger forever when RCA is disabled or errors).
+  delete job.rcaFailureClass;
+  delete job.rcaRecoveryAction;
   // Like exitCode: this run's outcome, not durable across a reset — a stale
   // leak badge from a prior attempt must not linger once the job re-fires.
   delete job.leakedDescendants;
@@ -4556,7 +4564,11 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           // (selectResumeRecoveryTarget) can name these paths without
           // re-running `git status` against a tree that may have moved on.
           if (verifyResult?.verdict === 'uncommitted_changes' && Array.isArray(verifyResult.dirtyPaths)) {
-            s.jobs[i2].uncommittedPaths = verifyResult.dirtyPaths;
+            // Capped the same way preRunDirtyPaths/leftoverPaths are — an
+            // uncapped list here would let a pathologically dirty tree bloat
+            // queue.json/history.jsonl and the resume-recovery prompt built
+            // from it (buildResumeRecoveryPreamble/selectResumeRecoveryTarget).
+            s.jobs[i2].uncommittedPaths = capDirtyPaths(verifyResult.dirtyPaths);
           } else {
             delete s.jobs[i2].uncommittedPaths;
           }
@@ -5855,6 +5867,15 @@ async function reverifyNeedsReview() {
     await broadcast();
   }
 
+  // The annotate mutate above only runs conditionally — when it didn't fire,
+  // afterHealForAnnotate is still the current on-disk state, so reuse it
+  // instead of re-reading queue.json twice more back-to-back for the
+  // resume-recovery and auto-fix passes below (neither of which mutates
+  // synchronously: spawnResumeRecovery/spawnJob's own writes land later).
+  const queueForResumeAndAutofix = (unresolvable.length || exhaustedAutoFix.length || planUnqueued.length)
+    ? await readQueue()
+    : afterHealForAnnotate;
+
   // Resume-first recovery (PRD 1111): before any fix-plan investigation is
   // authored below, offer the bounded one-attempt `--resume` dispatch to any
   // needs_review job this periodic pass finds still eligible — e.g. one the
@@ -5863,8 +5884,7 @@ async function reverifyNeedsReview() {
   // already excludes every job this loop dispatches, so a resumable job
   // never also gets a fix-plan PRD authored in the same pass.
   {
-    const afterHealForResume = await readQueue();
-    for (const job of afterHealForResume.jobs) {
+    for (const job of queueForResumeAndAutofix.jobs) {
       const target = selectResumeRecoveryTarget(job);
       if (!target) continue;
       console.log(`[scheduler] resume-recovery: needs_review ${job.slug} → resuming session ${target.sessionId}`);
@@ -5880,8 +5900,7 @@ async function reverifyNeedsReview() {
   // MAX_CONCURRENT_INVESTIGATIONS (queues the rest for retry), so this loop
   // cannot fan out past the cap regardless of how many targets are selected.
   if (process.env.SM_AUTOFIX_DISABLE !== '1') {
-    const afterHeal = await readQueue();
-    const targets = selectAutoFixTargets(afterHeal.jobs, {
+    const targets = selectAutoFixTargets(queueForResumeAndAutofix.jobs, {
       fixSlugExists: (s) => candidatePrdsDirs().some((dir) => fs.existsSync(path.join(dir, `${s}.md`))),
     });
     for (const job of targets) {

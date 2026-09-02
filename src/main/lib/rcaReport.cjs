@@ -70,6 +70,27 @@ const FAILURE_CLASSES = {
   UNKNOWN: 'unknown',
 };
 
+// ─── Recovery actions — one per failure class, machine-readable ────────────
+// Closed set the scheduler routes on: 'archive' (stale re-run, do not
+// re-queue), 'resume-and-commit' (PRD 1111's --resume dispatch owns this),
+// 'verify-and-close' (the work likely landed, just missing its sentinel),
+// 'investigate' (the only class that still buys a fix-plan investigation).
+const RECOVERY_ACTIONS = {
+  [FAILURE_CLASSES.ALREADY_SHIPPED]: 'archive',
+  [FAILURE_CLASSES.SELF_QUEUE]: 'investigate',
+  [FAILURE_CLASSES.STUCK_LOOP]: 'investigate',
+  [FAILURE_CLASSES.POST_AC_OVERRUN]: 'investigate',
+  [FAILURE_CLASSES.NO_SENTINEL]: 'verify-and-close',
+  [FAILURE_CLASSES.UNCOMMITTED]: 'resume-and-commit',
+  [FAILURE_CLASSES.TRANSCRIPT_ERRORS]: 'investigate',
+  [FAILURE_CLASSES.UNKNOWN]: 'investigate',
+};
+
+/** Pure — returns the closed-set recovery action for a failure class, defaulting to 'investigate'. */
+function recoveryActionFor(failureClass) {
+  return RECOVERY_ACTIONS[failureClass] ?? 'investigate';
+}
+
 const PREVENTION_HINTS = {
   [FAILURE_CLASSES.ALREADY_SHIPPED]:
     "This run found its acceptance criteria already satisfied by a prior commit and correctly made no change, so no commit landed and the verifier returned `pass_no_commit`. This is a stale re-run, not an execution failure — the PRD's `.md` was never moved out of `session-manager-operations/scheduler/prds/` after the work shipped. Archive the PRD into `session-manager-operations/scheduler/prds-archived/` instead of re-queuing or re-running it.",
@@ -226,7 +247,8 @@ function readPrdBody(cwd, slug) {
  */
 function buildRcaMarkdown({ job, verdict, meta, logTail, acText, failureClass, investigationText }) {
   const title = `Root cause: ${job.slug} → needs_review (${humanVerdict(verdict)})`;
-  const fm = ['---', `title: ${title}`, 'source: scheduler-rca', 'type: rca', 'severity: normal', `prdSlug: ${job.slug}`, `runId: ${job.runId}`, `verdict: ${verdict}`, '---'].join('\n');
+  const recoveryAction = recoveryActionFor(failureClass);
+  const fm = ['---', `title: ${title}`, 'source: scheduler-rca', 'type: rca', 'severity: normal', `prdSlug: ${job.slug}`, `runId: ${job.runId}`, `verdict: ${verdict}`, `failure-class: ${failureClass}`, `recovery-action: ${recoveryAction}`, '---'].join('\n');
 
   const last60 = lastNLines(logTail, 60);
   const exitCode = meta?.exitCode ?? job.exitCode ?? 'unknown';
@@ -315,8 +337,9 @@ async function writeRcaReport({ job, runDir, verdict, annotations, investigation
     fs.renameSync(tmp, reportPath);
 
     const summary = rcaSummaryLine(job, verdict);
-    console.log(`[rca] wrote ${reportPath} (${failureClass})`);
-    return { filed: true, path: reportPath, summary, failureClass };
+    const recoveryAction = recoveryActionFor(failureClass);
+    console.log(`[rca] wrote ${reportPath} (${failureClass} → ${recoveryAction})`);
+    return { filed: true, path: reportPath, summary, failureClass, recoveryAction };
   } catch (e) {
     console.error('[rca] error writing RCA report', e?.message ?? String(e));
     return { filed: false, reason: 'error', error: e?.message ?? String(e) };
@@ -334,4 +357,6 @@ module.exports = {
   buildRcaMarkdown,
   FAILURE_CLASSES,
   VERDICT_LABELS,
+  RECOVERY_ACTIONS,
+  recoveryActionFor,
 };

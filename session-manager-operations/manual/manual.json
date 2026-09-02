@@ -1,5 +1,5 @@
 {
-  "version": "1.7.0",
+  "version": "1.7.1",
   "title": "The Session Manager Field Manual",
   "summary": "A tab-by-tab operator's guide to Claude Code Session Manager — what each surface is for, the one thing people get wrong about it, and the workflow that makes it pay for itself.",
   "documentsAppVersion": "0.77.0",
@@ -137,13 +137,13 @@
     {
       "id": "offline-html",
       "label": "Offline HTML edition",
-      "file": "field-manual-1.4.0.html",
+      "file": "field-manual-{version}.html",
       "mime": "text/html"
     },
     {
       "id": "pdf",
       "label": "PDF edition",
-      "file": "field-manual-1.4.0.pdf",
+      "file": "field-manual-{version}.pdf",
       "mime": "application/pdf"
     }
   ]

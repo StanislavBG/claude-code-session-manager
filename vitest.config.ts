@@ -166,6 +166,7 @@ export default defineConfig({
       'src/main/__tests__/crossProjectFeedback.test.cjs',
       'src/main/__tests__/crossProjectFeedbackRoutes.test.cjs',
       'scripts/__tests__/manual-figure-captures.test.cjs',
+      'scripts/__tests__/manual-chapter-links.test.cjs',
       'scripts/__tests__/package-files.test.cjs',
       'scripts/__tests__/project-pages-publish-gate.test.cjs',
       'src/main/__tests__/seedAgentPersonas.test.cjs',

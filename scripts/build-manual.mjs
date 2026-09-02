@@ -85,8 +85,12 @@ pre code{background:none;padding:0}
 .manual-steps li{margin:.5em 0}
 .manual-figure{margin:1.6em 0;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#111}
 .manual-figure img{display:block;width:100%}
-.manual-figure__frame{min-height:180px;display:flex;align-items:center;justify-content:center;color:#666;font-size:.85em;background:repeating-linear-gradient(45deg,#141414,#141414 10px,#181818 10px,#181818 20px)}
-.manual-figure__frame::after{content:"figure pending capture: " attr(data-capture)}
+/* An uncaptured slot is a production note, not content — the reader sees no
+   figure rather than a hatched "pending capture" box. Inert once
+   npm run manual:figures swaps the frame for an <img>. Mirrored in Bilko's
+   src/index.css. */
+.manual-figure:has(.manual-figure__frame){display:none}
+.manual-figure__frame{display:none}
 figcaption{padding:12px 16px;color:var(--muted);font-size:.88em;display:flex;flex-wrap:wrap;gap:14px}
 .callout{display:inline-flex;align-items:center;justify-content:center;width:1.5em;height:1.5em;border-radius:50%;background:var(--accent);color:#000;font-weight:700;font-size:.8em;margin-right:.4em}
 .toc{border:1px solid var(--line);border-radius:8px;padding:16px 24px;background:#111}
@@ -155,7 +159,11 @@ async function main() {
   }
 
   const assets = [];
-  for (const a of src.assets ?? []) {
+  for (const a0 of src.assets ?? []) {
+    // Buyers always get the newest release, so a downloaded file whose name is
+    // frozen at whatever version it was first declared under actively misleads
+    // them. Declare `field-manual-{version}.pdf` and let the build fill it in.
+    const a = { ...a0, file: a0.file.replaceAll('{version}', src.version) };
     if (a.id === 'offline-html') {
       writeFileSync(join(outDir, a.file), offlineHtml, 'utf-8');
     } else if (a.id === 'pdf') {

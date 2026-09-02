@@ -438,6 +438,9 @@ const adminPrdFrontmatterPatch = z.object({
   // itself is descriptive, not a closed set.
   createdVia: z.string().min(1).max(64).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
   issuedAt: z.string().min(1).max(64).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
+  // Opt-in exclusive-lease flag (PRD 1107) — patchable after creation too,
+  // same as every other recognized key here.
+  quietMachine: z.boolean().optional(),
 });
 
 const adminUpdatePrd = z.object({

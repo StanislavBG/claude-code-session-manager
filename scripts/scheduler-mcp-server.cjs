@@ -225,6 +225,7 @@ const TOOLS = [
             sourcePromptId: { type: 'string' },
             sourceTabId: { type: 'string' },
             tag: { type: 'string', enum: PRD_WORK_TYPES },
+            quietMachine: { type: 'boolean', description: 'Optional: the exclusive machine-wide quiet lease flag (see scheduler_create_prd) — patchable after creation too' },
           },
         },
         body: { type: 'string', description: 'Optional: full replacement body (everything after the frontmatter)' },

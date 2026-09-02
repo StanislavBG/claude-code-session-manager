@@ -77,13 +77,15 @@ function writeKilledClaudeStub() {
   return stubPath;
 }
 
+let reapDeadRunningJobs;
+
 beforeAll(() => {
   originalHome = process.env.HOME;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-quiet-lease-'));
   process.env.HOME = tmpHome;
   originalDisable = process.env.SM_JOB_WORKTREE_DISABLE;
   process.env.SM_JOB_WORKTREE_DISABLE = '1';
-  ({ spawnJob } = require('../scheduler.cjs'));
+  ({ spawnJob, reapDeadRunningJobs } = require('../scheduler.cjs'));
   ({ pickNextBatch } = require('../lib/schedulerBatch.cjs'));
   quietMachineLease = require('../lib/quietMachineLease.cjs');
 });
@@ -172,3 +174,49 @@ test('a killed quietMachine job releases the exclusive lease, and an ordinary jo
     fs.rmSync(runDir, { recursive: true, force: true });
   }
 }, 30_000);
+
+test('reapDeadRunningJobs releases a quietMachine job\'s lease too — the process vanished without spawnJob\'s own finally ever running', async () => {
+  // This reaper exists exactly for the case spawnJob's own finally never
+  // runs (the process dies without the completion mutate() finishing) — see
+  // reapDeadRunningJobs's header comment. A quietMachine row reaped through
+  // THIS path must release the lease itself, or it stays wedged forever.
+  const projectCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-quiet-lease-reap-project-'));
+  registerActiveProject(projectCwd);
+
+  const slug = `1107-test-reaped-quiet-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug,
+      status: 'running',
+      cwd: projectCwd,
+      quietMachine: true,
+      runId: `run-${slug}`,
+      runtime: { pid: 999999 }, // guaranteed-dead pid (see reaperHelpers tests)
+    },
+  ]);
+  const runDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', `run-${slug}`);
+  fs.mkdirSync(runDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(runDir, `${slug}.log`),
+    '{"type":"result","subtype":"success","result":"done","is_error":false}\n',
+  );
+
+  // Simulate the lease as held by this row, exactly as it would be if
+  // spawnJob's own acquire ran but its finally never got the chance to.
+  expect(quietMachineLease.acquire(slug)).toBe(true);
+
+  try {
+    await reapDeadRunningJobs();
+
+    const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+    const row = jobs.find((j) => j.slug === slug);
+    expect(row).toBeTruthy();
+    expect(row.status).toBe('completed');
+
+    // The lease must be released here too, not just in spawnJob's finally.
+    expect(quietMachineLease.isHeld()).toBe(false);
+  } finally {
+    fs.rmSync(projectCwd, { recursive: true, force: true });
+    fs.rmSync(runDir, { recursive: true, force: true });
+  }
+});

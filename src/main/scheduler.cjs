@@ -4753,6 +4753,14 @@ async function reapDeadRunningJobs() {
         s.jobs[idx].gateOutcome = gateOutcome;
         delete s.jobs[idx].runtime;
         runningSet.delete(slug);
+        // A dead job reaped here never reached spawnJob's own finally block
+        // (that's this reaper's whole reason to exist — see its header
+        // comment) — so if it held the quiet-machine lease, spawnJob never
+        // got the chance to release it. Release it here too, or a
+        // quietMachine job whose process silently vanished (OOM, a crash
+        // with no exit event) wedges the lease held forever and stalls
+        // dispatch for every project until the app restarts.
+        if (s.jobs[idx].quietMachine === true) quietMachineLease.release(slug);
         if (pidless) {
           console.log(`[scheduler] reaped pidless zombie job slug=${slug} outcome=${outcome}`);
           appendAuditEvent('job_reaped_pidless', { slug, cwd: s.jobs[idx].cwd ?? null, outcome, graceMs: PIDLESS_SPAWN_GRACE_MS });

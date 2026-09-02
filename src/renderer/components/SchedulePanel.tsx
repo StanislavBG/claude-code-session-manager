@@ -10,7 +10,7 @@ import { getLintQueueCached } from '../lib/lintQueueCache'
 import { RunLogViewer } from './tabs/plans/RunLogViewer'
 import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
-import { SchBadge, ProjectTag, EpicTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
+import { SchBadge, LeakBadge, formatLeakedDescendants, ProjectTag, EpicTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
 import { resolveEpicRef } from '../lib/epicProvenance'
 import { usePanelFocus } from '../lib/panelFocus'
 import type { NavKey } from './LeftNav'
@@ -974,6 +974,7 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
           <div className="flex items-baseline gap-2 text-[14.5px] font-medium text-fg leading-snug">
             {prdNumber(job.slug) && <PrdNumberBadge n={prdNumber(job.slug)!} />}
             {job.title}
+            <LeakBadge leaked={job.leakedDescendants} />
           </div>
           {note && (
             <div className={`text-[12.5px] mt-0.5 ${isFailed ? 'text-accent/80' : 'text-fg-faint'}`}>
@@ -1023,6 +1024,9 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
             <DetailLine k="state" v={job.status.replace(/_/g, ' ')} />
             {job.verifierVerdict && (
               <DetailLine k="verdict" v={verdictLabel(job.verifierVerdict)} />
+            )}
+            {job.leakedDescendants && job.leakedDescendants.length > 0 && (
+              <DetailLine k="leaked" v={formatLeakedDescendants(job.leakedDescendants)} wrap />
             )}
             {errorText && (
               <DetailLine k="error" v={errorText.split('\n')[0]} wrap />

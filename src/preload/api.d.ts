@@ -515,6 +515,18 @@ export interface ScheduleJob {
    *  the configurable quiet-wait interval without the machine going quiet —
    *  tells a reader its measurements ran under contention. */
   quietLeaseDegraded?: boolean;
+  /** Process-group survivors childWithLog.cjs's sweepChildProcessGroup found
+   *  still alive right before sweeping them (PRD 1110). [] in the normal
+   *  case — a non-empty array means the job backgrounded work that outlived
+   *  it and had to be reaped; the job's `status` is unaffected. */
+  leakedDescendants?: LeakedDescendant[];
+}
+
+export interface LeakedDescendant {
+  pid: number;
+  pcpu: number;
+  etimes: number;
+  comm: string;
 }
 
 export interface ScheduleJobStatusHistoryEntry {

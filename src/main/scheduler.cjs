@@ -2416,6 +2416,9 @@ function resetJobFields(job, errorMsg, opts = {}) {
   job.error = errorMsg ?? null;
   delete job.runtime;
   delete job.verifierVerdict;
+  // Like exitCode: this run's outcome, not durable across a reset — a stale
+  // leak badge from a prior attempt must not linger once the job re-fires.
+  delete job.leakedDescendants;
   // Deliberately NOT deleting job.landedCommit: it must outlive a reset so a
   // re-fired run of this same slug can pass it to verifyRun as
   // priorLandedCommit (pass_no_commit_prior_run_verified exemption).
@@ -3274,8 +3277,13 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
         },
       },
       watchdogs: [resultTailWatchdog, deadmanWatchdog, idleTailWatchdog],
-      onExit({ exitCode, signal, killedByWatchdog: _kbw, error, spawnFailed, safeLog: sl }) {
+      onExit({ exitCode, signal, killedByWatchdog: _kbw, error, spawnFailed, leakedDescendants, safeLog: sl }) {
         const durationMs = Date.now() - startedAt;
+        const leaked = leakedDescendants ?? [];
+        if (leaked.length > 0) {
+          sl(`\n[scheduler] leaked ${leaked.length} descendant(s) swept from job process group: ` +
+            `${leaked.map((p) => `pid=${p.pid} comm=${p.comm} pcpu=${p.pcpu} etimes=${p.etimes}s`).join(', ')}\n`);
+        }
 
         if (error) {
           // Covers both synchronous spawn failure and child 'error' events.
@@ -3285,8 +3293,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
           sl(`\n[scheduler] ${errMsg}\n`);
           // Sync write: inside a Promise executor callback; must flush meta
           // before resolve() so the spawnJob mutate() that follows sees it.
-          config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, schedulerBootedAt: SCHEDULER_BOOTED_AT, schedulerCodeSha: SCHEDULER_CODE_SHA, originSessionId, contextDigestApplied });
-          resolve({ exitCode: -1, durationMs, error: errMsg, sessionId });
+          config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked, schedulerBootedAt: SCHEDULER_BOOTED_AT, schedulerCodeSha: SCHEDULER_CODE_SHA, originSessionId, contextDigestApplied });
+          resolve({ exitCode: -1, durationMs, error: errMsg, leakedDescendants: leaked, sessionId });
           return;
         }
 
@@ -3313,12 +3321,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd) {
         // so the spawnJob mutate() that follows sees the persisted exit code.
         config.writeJsonSync(metaPath, {
           slug: job.slug, cwd, sessionId, exitCode: effectiveCode, rateLimited, networkError,
-          startedAt, finishedAt: Date.now(), durationMs,
+          startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked,
           agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${exitCode}` : null,
           schedulerBootedAt: SCHEDULER_BOOTED_AT, schedulerCodeSha: SCHEDULER_CODE_SHA,
           originSessionId, contextDigestApplied,
         });
-        resolve({ exitCode: effectiveCode, durationMs, rateLimited, networkError, sessionId });
+        resolve({ exitCode: effectiveCode, durationMs, rateLimited, networkError, leakedDescendants: leaked, sessionId });
       },
     });
 
@@ -4182,6 +4190,7 @@ async function spawnJob(job, runId, runDir, defaultCwd) {
           transitionJob(s.jobs[i2], effectiveStatus, { reason: sigtermOverrideReason ?? `run finished with exit ${res.exitCode}`, source: 'spawnJob:finalize' });
           s.jobs[i2].finishedAt = new Date().toISOString();
           s.jobs[i2].exitCode = res.exitCode;
+          s.jobs[i2].leakedDescendants = res.leakedDescendants ?? [];
           if (salvagePatch) {
             s.jobs[i2].salvagePatch = salvagePatch;
           } else {

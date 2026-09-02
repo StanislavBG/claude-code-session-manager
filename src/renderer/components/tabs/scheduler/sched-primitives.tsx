@@ -3,7 +3,8 @@
  * Single source of truth consumed by Queue / PRDs / History restyle PRDs (20-group).
  */
 import type { ReactNode } from 'react'
-import type { ScheduleJobStatus } from '../../../../preload/api'
+import type { ScheduleJobStatus, LeakedDescendant } from '../../../../preload/api'
+import { Badge } from '../../ui/Badge'
 import { projectColorFor } from '../../../lib/projectColor'
 import { shortEpicId } from '../../../lib/epicProvenance'
 
@@ -59,6 +60,30 @@ export function SchBadge({ status }: { status: ScheduleJobStatus }) {
       )}
       {status.replace('_', ' ')}
     </span>
+  )
+}
+
+// ─── LeakBadge ───────────────────────────────────────────────────────────────
+// A job's `completed` status is never changed by a leak (PRD 1110) — this is
+// purely an annotation that childWithLog.cjs's sweepChildProcessGroup had to
+// reap process-group survivors the job left running past its own exit.
+
+/** Single source for "pid + comm, comma-joined" — the tooltip and the
+ *  expanded-detail row must never drift into two different formats. */
+export function formatLeakedDescendants(leaked: LeakedDescendant[]): string {
+  return leaked.map((p) => `${p.comm} (pid ${p.pid})`).join(', ')
+}
+
+export function LeakBadge({ leaked }: { leaked?: LeakedDescendant[] }) {
+  if (!leaked || leaked.length === 0) return null
+  return (
+    <Badge
+      tone="warn"
+      className="shrink-0 normal-case"
+      title={`Leaked ${leaked.length} descendant process${leaked.length === 1 ? '' : 'es'} — swept after exit: ${formatLeakedDescendants(leaked)}`}
+    >
+      <span data-testid="leak-badge">⚠ {leaked.length}</span>
+    </Badge>
   )
 }
 

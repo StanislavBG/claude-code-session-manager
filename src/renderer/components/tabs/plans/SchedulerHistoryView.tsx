@@ -4,7 +4,7 @@ import { EmptyState } from '../../ui/EmptyState'
 import { formatTimingLabel } from '../../../lib/formatTime'
 import { FilterPills } from '../../ui/FilterPills'
 import { RunLogViewer } from './RunLogViewer'
-import { SchBadge, ProjectTag, EpicTag, DetailBlock, DetailLine, projectNameFromCwd, verdictLabel } from '../scheduler/sched-primitives'
+import { SchBadge, LeakBadge, formatLeakedDescendants, ProjectTag, EpicTag, DetailBlock, DetailLine, projectNameFromCwd, verdictLabel } from '../scheduler/sched-primitives'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { resolveEpicRef } from '../../../lib/epicProvenance'
 import { setPendingPromptSessionId } from '../../../lib/promptSessionDeepLink'
@@ -195,7 +195,10 @@ function HistoryRow({ job }: { job: ScheduleJob }) {
       >
         <SchBadge status={job.status} />
         <div className="min-w-0">
-          <div className="text-[14.5px] font-medium text-fg leading-snug text-pretty">{job.title}</div>
+          <div className="flex items-baseline gap-2 text-[14.5px] font-medium text-fg leading-snug text-pretty">
+            {job.title}
+            <LeakBadge leaked={job.leakedDescendants} />
+          </div>
           {job.error && !expanded && (job.status === 'failed' || job.status === 'needs_review') && (
             <div className="text-[12.5px] mt-0.5 text-accent/80 truncate">{job.error}</div>
           )}
@@ -227,6 +230,9 @@ function HistoryRow({ job }: { job: ScheduleJob }) {
             <DetailLine k="result" v={exitStr} />
             <DetailLine k="state" v={job.status.replace('_', ' ')} />
             {job.verifierVerdict && <DetailLine k="verifier" v={verdictLabel(job.verifierVerdict)} />}
+            {job.leakedDescendants && job.leakedDescendants.length > 0 && (
+              <DetailLine k="leaked" v={formatLeakedDescendants(job.leakedDescendants)} wrap />
+            )}
           </DetailBlock>
           <DetailBlock label="Timing">
             <DetailLine k="started" v={startedStr} />

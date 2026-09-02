@@ -40,6 +40,10 @@
  *   killedByWatchdog — string | null
  *   error         — Error | undefined (child 'error' event or sync spawn throw)
  *   spawnFailed   — boolean, true when the error came from a synchronous spawn throw
+ *   leakedDescendants — { pid, pcpu, etimes, comm }[], the process-group survivors
+ *                       sweepChildProcessGroup found still alive right before it
+ *                       swept them. [] in the normal case (nothing leaked, or
+ *                       non-Linux, or enumeration failed). See sweepChildProcessGroup.
  *   safeLog       — same safeLog (usable inside onExit for final log lines)
  *
  * Returns { child, cancel } where cancel() clears all timers + SIGKILLs.
@@ -47,7 +51,7 @@
  */
 
 const fs = require('node:fs');
-const { spawn } = require('node:child_process');
+const { spawn, execFileSync } = require('node:child_process');
 
 // Grace period between the post-exit SIGTERM sweep and the follow-up SIGKILL
 // sweep of a detached child's process group. See sweepChildProcessGroup below.
@@ -136,11 +140,39 @@ function openLog(logPath) {
 // a job's descendants must not outlive the job. Killing the job's own process
 // group at the job's own exit is ownership-based and needs no /proc heuristics
 // to distinguish an abandoned descendant from a live one.
+// Enumerate the still-alive members of process group `pgid` (Linux only).
+// Read-only — never throws, never blocks the caller's exit path. Used to
+// report what sweepChildProcessGroup is about to kill, since the kill itself
+// is silent (ESRCH on the normal empty-group case).
+function enumerateProcessGroupSurvivors(pgid) {
+  if (process.platform !== 'linux') return [];
+  if (!pgid || pgid <= 1) return [];
+  try {
+    const out = execFileSync('ps', ['-eo', 'pid,pgrp,pcpu,etimes,comm'], { encoding: 'utf8', timeout: 2000 });
+    const survivors = [];
+    for (const line of out.split('\n').slice(1)) {
+      const m = line.trim().match(/^(\d+)\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(.+)$/);
+      if (!m) continue;
+      const [, pidStr, pgrpStr, pcpuStr, etimesStr, comm] = m;
+      if (Number(pgrpStr) !== pgid) continue;
+      survivors.push({ pid: Number(pidStr), pcpu: Number(pcpuStr), etimes: Number(etimesStr), comm });
+    }
+    return survivors;
+  } catch {
+    return [];
+  }
+}
+
+// Returns the leaked descendants found (see enumerateProcessGroupSurvivors),
+// having enumerated them BEFORE issuing SIGTERM so the report reflects what
+// was actually swept, not what happened to still be running afterward.
 function sweepChildProcessGroup(child, detached) {
-  if (!detached) return;
-  if (!child || !child.pid || child.pid <= 1) return;
+  if (!detached) return [];
+  if (!child || !child.pid || child.pid <= 1) return [];
   // Defensive: never target the Session Manager process's own group.
-  if (child.pid === process.pid) return;
+  if (child.pid === process.pid) return [];
+
+  const leaked = enumerateProcessGroupSurvivors(child.pid).filter((p) => p.pid !== child.pid);
 
   try { process.kill(-child.pid, 'SIGTERM'); } catch { /* ESRCH: empty group, the normal case */ }
 
@@ -148,6 +180,8 @@ function sweepChildProcessGroup(child, detached) {
     try { process.kill(-child.pid, 'SIGKILL'); } catch { /* ESRCH: empty group, the normal case */ }
   }, POST_EXIT_GROUP_SWEEP_GRACE_MS);
   if (t.unref) t.unref();
+
+  return leaked;
 }
 
 function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watchdogs = [], onExit }) {
@@ -204,6 +238,7 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
   // calls onExit (caller may still safeLog inside), then closes the fd.
   const handleDone = (exitCode, signal, error, spawnFailed) => {
     clearAllTimers();
+    const leakedDescendants = sweepChildProcessGroup(ctx.child, !!spawnSpec.options?.detached);
     if (onExit) {
       onExit({
         exitCode,
@@ -211,10 +246,10 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
         killedByWatchdog: ctx.killedByWatchdog,
         error,
         spawnFailed: spawnFailed ?? false,
+        leakedDescendants,
         safeLog,
       });
     }
-    sweepChildProcessGroup(ctx.child, !!spawnSpec.options?.detached);
     closeFd();
   };
 

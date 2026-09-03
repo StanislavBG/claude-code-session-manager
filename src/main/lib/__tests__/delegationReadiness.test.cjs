@@ -468,6 +468,56 @@ test('installDestructiveGitGuard: writes the canonical ABSOLUTE-path entry and t
   expect(result.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
 }, 15_000);
 
+// The scenario app:install-destructive-git-guard (index.cjs) serves: a project
+// that got the first guard via the New Session "Fix it" button and never the
+// second (the starry-night-ships reproduction). The handler is a pass-through
+// to this function under the shared { cwd } schema, so this is its contract.
+test('installDestructiveGitGuard: flips destructive-git-guard FAIL -> PASS on a cwd seeded with only the prd-write-guard hook, by reference, idempotently', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  await writeJson(settingsPath, {
+    hooks: {
+      PreToolUse: [
+        { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] },
+      ],
+    },
+  });
+
+  const before = await checkDelegationReadiness({ cwd, homeDir });
+  expect(before.checks.find((c) => c.id === 'destructive-git-guard')).toMatchObject({
+    ok: false,
+    fixAction: 'install-destructive-git-guard',
+    detail: `no guard-destructive-git PreToolUse hook in ${cwd}/.claude/settings.json`,
+  });
+
+  const first = await installDestructiveGitGuard({ cwd });
+  expect(first).toMatchObject({ ok: true, action: 'installed', settingsPath });
+
+  const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  const bash = written.hooks.PreToolUse.filter((m) => m.matcher === 'Bash');
+  expect(bash).toHaveLength(1);
+  const [hook] = bash[0].hooks;
+  expect(hook.type).toBe('command');
+  const scriptPath = hook.command.replace(/^node /, '');
+  // By reference to THIS repo's absolute script — never a copy inside the target cwd.
+  expect(path.isAbsolute(scriptPath)).toBe(true);
+  expect(scriptPath).toBe(path.resolve(__dirname, '..', '..', '..', '..', 'scripts', 'hooks', 'guard-destructive-git.cjs'));
+  expect(scriptPath.endsWith(path.join('scripts', 'hooks', 'guard-destructive-git.cjs'))).toBe(true);
+  expect(scriptPath.startsWith(cwd + path.sep)).toBe(false);
+  expect(fs.existsSync(scriptPath)).toBe(true);
+  expect(fs.existsSync(path.join(cwd, 'scripts'))).toBe(false);
+
+  const after = await checkDelegationReadiness({ cwd, homeDir });
+  expect(after.checks.find((c) => c.id === 'destructive-git-guard').ok).toBe(true);
+  expect(after.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
+
+  // Second press: no-op, byte-identical file.
+  const snapshot = fs.readFileSync(settingsPath, 'utf8');
+  const second = await installDestructiveGitGuard({ cwd });
+  expect(second).toMatchObject({ ok: true, action: 'already-installed', settingsPath });
+  expect(fs.readFileSync(settingsPath, 'utf8')).toBe(snapshot);
+}, 15_000);
+
 test('installDestructiveGitGuard: is idempotent — a healthy guard is a no-op', async () => {
   const { cwd } = await makeGreenFixtures();
   const before = fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8');

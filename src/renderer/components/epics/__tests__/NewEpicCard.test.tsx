@@ -64,6 +64,8 @@ beforeEach(() => {
       homeDir: vi.fn().mockResolvedValue('/home/bilko'),
       gitBranch: vi.fn().mockResolvedValue('main'),
       delegationReadiness: vi.fn().mockResolvedValue({ ok: true, checks: [] }),
+      installPrdWriteGuard: vi.fn().mockResolvedValue({ ok: true, action: 'installed', settingsPath: '/p/.claude/settings.json' }),
+      installDestructiveGitGuard: vi.fn().mockResolvedValue({ ok: true, action: 'installed', settingsPath: '/p/.claude/settings.json' }),
     },
     config: {
       readText: vi.fn().mockResolvedValue({ exists: false, text: '', mtimeMs: 0, error: null }),
@@ -676,6 +678,66 @@ describe('NewEpicCard', () => {
 
       expect(readinessSpy).toHaveBeenLastCalledWith('/home/bilko/Projects/beta')
       expect(el.querySelector('[data-testid="delegation-readiness-warning"]')).toBeNull()
+    })
+
+    it('renders a Fix it button for a failing destructive-git-guard check; pressing it installs into the effective cwd and re-probes', async () => {
+      const readinessSpy = window.api.app.delegationReadiness as ReturnType<typeof vi.fn>
+      const installSpy = window.api.app.installDestructiveGitGuard as ReturnType<typeof vi.fn>
+      const prdInstallSpy = window.api.app.installPrdWriteGuard as ReturnType<typeof vi.fn>
+      const failing = {
+        ok: false,
+        checks: [
+          { id: 'prd-write-guard', label: 'PRD-write guard hook installed', ok: true, detail: 'found', fix: null, fixAction: null },
+          {
+            id: 'destructive-git-guard', label: 'Destructive-git guard hook installed', ok: false,
+            detail: 'no guard-destructive-git PreToolUse hook in /home/bilko/Projects/starry-night-ships/.claude/settings.json',
+            fix: 'Add a PreToolUse hook matching Bash', fixAction: 'install-destructive-git-guard',
+          },
+        ],
+      }
+      readinessSpy.mockResolvedValue(failing)
+      useSessions.setState({ tabs: [{ id: 't1', cwd: '/home/bilko/Projects/starry-night-ships' } as never], activeTabId: 't1' })
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await act(async () => {})
+
+      const btn = el.querySelector('[data-testid="delegation-readiness-fix-destructive-git-guard"]') as HTMLButtonElement
+      expect(btn).not.toBeNull()
+      expect(btn.textContent).toBe('Fix it')
+      // Only the failing check gets a button — the passing prd-write-guard does not.
+      expect(el.querySelector('[data-testid="delegation-readiness-fix-prd-write-guard"]')).toBeNull()
+
+      // After the install, the re-probe reports green and the banner clears.
+      readinessSpy.mockResolvedValue({ ok: true, checks: [] })
+      act(() => btn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+      await act(async () => {})
+
+      expect(installSpy).toHaveBeenCalledTimes(1)
+      expect(installSpy).toHaveBeenCalledWith('/home/bilko/Projects/starry-night-ships')
+      expect(prdInstallSpy).not.toHaveBeenCalled()
+      // Initial probe + the post-install re-probe, both against the effective cwd.
+      expect(readinessSpy).toHaveBeenCalledTimes(2)
+      expect(readinessSpy).toHaveBeenLastCalledWith('/home/bilko/Projects/starry-night-ships')
+      expect(el.querySelector('[data-testid="delegation-readiness-warning"]')).toBeNull()
+    })
+
+    it('routes a failing prd-write-guard check through the same installer path to installPrdWriteGuard', async () => {
+      const readinessSpy = window.api.app.delegationReadiness as ReturnType<typeof vi.fn>
+      const installSpy = window.api.app.installPrdWriteGuard as ReturnType<typeof vi.fn>
+      readinessSpy.mockResolvedValue({
+        ok: false,
+        checks: [{ id: 'prd-write-guard', label: 'PRD-write guard hook installed', ok: false, detail: 'missing', fix: 'Add it', fixAction: 'install-prd-write-guard' }],
+      })
+      useSessions.setState({ tabs: [{ id: 't1', cwd: '/home/bilko/Projects/beta' } as never], activeTabId: 't1' })
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await act(async () => {})
+
+      const btn = el.querySelector('[data-testid="delegation-readiness-fix-prd-write-guard"]') as HTMLButtonElement
+      expect(btn).not.toBeNull()
+      expect(el.querySelector('[data-testid="delegation-readiness-fix-destructive-git-guard"]')).toBeNull()
+      act(() => btn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+      await act(async () => {})
+      expect(installSpy).toHaveBeenCalledWith('/home/bilko/Projects/beta')
+      expect(window.api.app.installDestructiveGitGuard).not.toHaveBeenCalled()
     })
 
     it('fires the probe with the active tab cwd once one is set, after starting with no tabs', async () => {

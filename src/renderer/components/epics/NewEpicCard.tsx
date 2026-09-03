@@ -13,11 +13,33 @@ import { agentTagDef } from '../../lib/agentTagDefs'
 import { tagLibraryEntry, TAG_GROUP_ORDER, type EpicTag } from '../../lib/tagLibrary'
 import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, type ContextInjectionKey } from '../../lib/contextInjections'
 import { Badge } from '../ui/Badge'
-import type { AgentPersona, DelegationReadiness } from '../../../preload/api'
+import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallPrdWriteGuardResult } from '../../../preload/api'
 
 /** Missions offered when the selected persona declares no `tags:` of its own
  *  (or the Agent Library is empty) — the three general-purpose ones. */
 const FALLBACK_MISSION_TAGS: EpicTag[] = ['feature', 'bug', 'discussion']
+
+// The readiness checks Session Manager can close itself, one press each. Keyed
+// by the check's fixAction; the two installers share one result shape and one
+// renderer path (installGuard below) — only the api method and the hook's
+// user-facing name differ.
+type GuardFixAction = NonNullable<DelegationReadinessCheck['fixAction']>
+const GUARD_INSTALLERS: Record<GuardFixAction, {
+  name: string
+  testId: string
+  install: (cwd: string) => Promise<InstallPrdWriteGuardResult | undefined>
+}> = {
+  'install-prd-write-guard': {
+    name: 'PRD-write guard',
+    testId: 'delegation-readiness-fix-prd-write-guard',
+    install: (cwd) => Promise.resolve(window.api.app?.installPrdWriteGuard?.(cwd)),
+  },
+  'install-destructive-git-guard': {
+    name: 'Destructive-git guard',
+    testId: 'delegation-readiness-fix-destructive-git-guard',
+    install: (cwd) => Promise.resolve(window.api.app?.installDestructiveGitGuard?.(cwd)),
+  },
+}
 
 /**
  * Default on/off state for every Context Injection, given the currently
@@ -260,27 +282,29 @@ export function NewEpicCard({
     // stale reading can never be shown against the wrong project.
   }, [effectiveCwd])
 
-  // One-press install for the one readiness check Session Manager can close
+  // One-press install for the readiness checks Session Manager can close
   // itself. The main process owns WHICH approach gets installed (reference,
   // never vendored — installPrdWriteGuard's header) so every project on the
   // machine gets the same entry instead of re-litigating it; the renderer only
-  // fires it and re-probes.
-  async function installGuard() {
+  // fires it and re-probes. One installer for both guards: they differ only in
+  // which api method runs and how the toast names the hook.
+  async function installGuard(fixAction: GuardFixAction) {
     if (!effectiveCwd || fixing) return
+    const { install, name } = GUARD_INSTALLERS[fixAction]
     setFixing(true)
     try {
-      const r = await window.api.app?.installPrdWriteGuard?.(effectiveCwd)
+      const r = await install(effectiveCwd)
       if (!r?.ok) {
-        toast.error(r?.error || 'Could not install the PRD-write guard hook')
+        toast.error(r?.error || `Could not install the ${name} hook`)
         return
       }
       toast.info(r.action === 'already-installed'
-        ? 'PRD-write guard was already installed'
-        : `PRD-write guard ${r.action} in ${r.settingsPath}`)
+        ? `${name} was already installed`
+        : `${name} ${r.action} in ${r.settingsPath}`)
       const next = await window.api.app?.delegationReadiness?.(effectiveCwd)
       if (next) setReadiness(next)
     } catch (e) {
-      toast.error(`Could not install the PRD-write guard hook: ${String(e)}`)
+      toast.error(`Could not install the ${name} hook: ${String(e)}`)
     } finally {
       setFixing(false)
     }
@@ -494,12 +518,12 @@ export function NewEpicCard({
                     <li key={c.id} data-testid={`delegation-readiness-check-${c.id}`}>
                       <span className="font-medium text-fg">{c.label}</span>
                       {c.fix && <span className="text-fg-faint"> — {c.fix}</span>}
-                      {c.fixAction === 'install-prd-write-guard' && (
+                      {c.fixAction && (
                         <button
                           type="button"
-                          data-testid="delegation-readiness-fix-prd-write-guard"
+                          data-testid={GUARD_INSTALLERS[c.fixAction].testId}
                           disabled={fixing}
-                          onClick={installGuard}
+                          onClick={() => installGuard(c.fixAction as GuardFixAction)}
                           className="ml-1.5 rounded border border-line px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg hover:bg-bg-elev disabled:opacity-50"
                         >
                           {fixing ? 'Installing…' : 'Fix it'}

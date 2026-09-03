@@ -354,13 +354,14 @@ export interface DelegationReadinessCheck {
     | 'scheduler-mcp-project-duplicate'
     | 'dev-plugin'
     | 'agent-personas'
-    | 'prd-write-guard';
+    | 'prd-write-guard'
+    | 'destructive-git-guard';
   label: string;
   ok: boolean;
   detail: string;
   fix: string | null;
   /** Non-null when Session Manager can install this fix itself, one press. */
-  fixAction: 'install-prd-write-guard' | null;
+  fixAction: 'install-prd-write-guard' | 'install-destructive-git-guard' | null;
   /** True when ok:true is a WARNING (still passing, but worth a human's attention) — today only scheduler-mcp-project-duplicate. */
   warn?: boolean;
   /** True when this check didn't run because a precondition (another check) already failed — reported ok:true, not a failure. */
@@ -374,6 +375,10 @@ export interface InstallPrdWriteGuardResult {
   command?: string;
   error?: string;
 }
+
+/** installDestructiveGitGuard returns the exact same shape as installPrdWriteGuard
+ *  (delegationReadiness.cjs) — one alias, so the two never drift apart. */
+export type InstallDestructiveGitGuardResult = InstallPrdWriteGuardResult;
 
 export interface DelegationReadiness {
   ok: boolean;
@@ -1473,6 +1478,7 @@ export interface SessionManagerAPI {
      *  scheduler_create_prd being in an agent's tool list at all. */
     delegationReadiness: (cwd: string) => Promise<DelegationReadiness>;
     installPrdWriteGuard: (cwd: string) => Promise<InstallPrdWriteGuardResult>;
+    installDestructiveGitGuard: (cwd: string) => Promise<InstallDestructiveGitGuardResult>;
     onNewSession: (handler: () => void) => () => void;
     onRebootSession: (handler: () => void) => () => void;
     archiveProject: (encoded: string) => Promise<{ ok: boolean; error?: string }>;

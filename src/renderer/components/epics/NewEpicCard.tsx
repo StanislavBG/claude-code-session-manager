@@ -13,7 +13,7 @@ import { agentTagDef } from '../../lib/agentTagDefs'
 import { tagLibraryEntry, TAG_GROUP_ORDER, type EpicTag } from '../../lib/tagLibrary'
 import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, type ContextInjectionKey } from '../../lib/contextInjections'
 import { Badge } from '../ui/Badge'
-import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallPrdWriteGuardResult } from '../../../preload/api'
+import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallGuardResult } from '../../../preload/api'
 
 /** Missions offered when the selected persona declares no `tags:` of its own
  *  (or the Agent Library is empty) — the three general-purpose ones. */
@@ -24,20 +24,21 @@ const FALLBACK_MISSION_TAGS: EpicTag[] = ['feature', 'bug', 'discussion']
 // renderer path (installGuard below) — only the api method and the hook's
 // user-facing name differ.
 type GuardFixAction = NonNullable<DelegationReadinessCheck['fixAction']>
-const GUARD_INSTALLERS: Record<GuardFixAction, {
+interface GuardInstaller {
   name: string
   testId: string
-  install: (cwd: string) => Promise<InstallPrdWriteGuardResult | undefined>
-}> = {
+  install: (cwd: string) => Promise<InstallGuardResult>
+}
+const GUARD_INSTALLERS: Record<GuardFixAction, GuardInstaller> = {
   'install-prd-write-guard': {
     name: 'PRD-write guard',
     testId: 'delegation-readiness-fix-prd-write-guard',
-    install: (cwd) => Promise.resolve(window.api.app?.installPrdWriteGuard?.(cwd)),
+    install: (cwd) => window.api.app.installPrdWriteGuard(cwd),
   },
   'install-destructive-git-guard': {
     name: 'Destructive-git guard',
     testId: 'delegation-readiness-fix-destructive-git-guard',
-    install: (cwd) => Promise.resolve(window.api.app?.installDestructiveGitGuard?.(cwd)),
+    install: (cwd) => window.api.app.installDestructiveGitGuard(cwd),
   },
 }
 
@@ -194,7 +195,13 @@ export function NewEpicCard({
   // surface or a mid-flight cwd switch just renders no indicator rather than
   // a broken or wrong-project card.
   const [readiness, setReadiness] = useState<DelegationReadiness | null>(null)
-  const [fixing, setFixing] = useState(false)
+  // Which guard is mid-install (null = none) — keyed so a second failing
+  // guard's button doesn't read "Installing…" for work it isn't doing.
+  const [fixing, setFixing] = useState<GuardFixAction | null>(null)
+  // Latest resolved project, read after an install's await so a re-probe that
+  // lands after the user switched tabs can't stamp the old project's checks
+  // onto the new one (the useEffect probe below has the same cancel guard).
+  const effectiveCwdRef = useRef<string | null>(null)
   // Context Injections (contextInjections.ts) — Session-Manager-authored
   // text, independent of Actor/Input/Mission, each its own on/off toggle.
   // Only an explicit human toggle is stored; the displayed/used value is
@@ -267,6 +274,7 @@ export function NewEpicCard({
   })
   const trimmedGoal = goal.trim()
   const canCreate = Boolean(effectiveCwd && trimmedGoal)
+  effectiveCwdRef.current = effectiveCwd
 
   useEffect(() => {
     setReadiness(null)
@@ -290,23 +298,24 @@ export function NewEpicCard({
   // which api method runs and how the toast names the hook.
   async function installGuard(fixAction: GuardFixAction) {
     if (!effectiveCwd || fixing) return
+    const cwd = effectiveCwd
     const { install, name } = GUARD_INSTALLERS[fixAction]
-    setFixing(true)
+    setFixing(fixAction)
     try {
-      const r = await install(effectiveCwd)
-      if (!r?.ok) {
-        toast.error(r?.error || `Could not install the ${name} hook`)
+      const r = await install(cwd)
+      if (!r.ok) {
+        toast.error(r.error || `Could not install the ${name} hook`)
         return
       }
       toast.info(r.action === 'already-installed'
         ? `${name} was already installed`
         : `${name} ${r.action} in ${r.settingsPath}`)
-      const next = await window.api.app?.delegationReadiness?.(effectiveCwd)
-      if (next) setReadiness(next)
+      const next = await window.api.app.delegationReadiness(cwd)
+      if (next && effectiveCwdRef.current === cwd) setReadiness(next)
     } catch (e) {
       toast.error(`Could not install the ${name} hook: ${String(e)}`)
     } finally {
-      setFixing(false)
+      setFixing(null)
     }
   }
 
@@ -514,23 +523,28 @@ export function NewEpicCard({
               >
                 <Badge tone="warn">Delegation not ready</Badge>
                 <ul className="mt-1.5 list-disc pl-4 text-fg-dim">
-                  {readiness.checks.filter((c) => !c.ok).map((c) => (
-                    <li key={c.id} data-testid={`delegation-readiness-check-${c.id}`}>
-                      <span className="font-medium text-fg">{c.label}</span>
-                      {c.fix && <span className="text-fg-faint"> — {c.fix}</span>}
-                      {c.fixAction && (
-                        <button
-                          type="button"
-                          data-testid={GUARD_INSTALLERS[c.fixAction].testId}
-                          disabled={fixing}
-                          onClick={() => installGuard(c.fixAction as GuardFixAction)}
-                          className="ml-1.5 rounded border border-line px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg hover:bg-bg-elev disabled:opacity-50"
-                        >
-                          {fixing ? 'Installing…' : 'Fix it'}
-                        </button>
-                      )}
-                    </li>
-                  ))}
+                  {readiness.checks.filter((c) => !c.ok).map((c) => {
+                    // A fixAction this renderer doesn't know (main ahead of the
+                    // bundle) gets no button, never a render-time throw.
+                    const fixAction = c.fixAction && c.fixAction in GUARD_INSTALLERS ? c.fixAction : null
+                    return (
+                      <li key={c.id} data-testid={`delegation-readiness-check-${c.id}`}>
+                        <span className="font-medium text-fg">{c.label}</span>
+                        {c.fix && <span className="text-fg-faint"> — {c.fix}</span>}
+                        {fixAction && (
+                          <button
+                            type="button"
+                            data-testid={GUARD_INSTALLERS[fixAction].testId}
+                            disabled={fixing !== null}
+                            onClick={() => installGuard(fixAction)}
+                            className="ml-1.5 rounded border border-line px-1.5 py-0.5 font-mono text-[10.5px] uppercase tracking-[0.06em] text-fg hover:bg-bg-elev disabled:opacity-50"
+                          >
+                            {fixing === fixAction ? 'Installing…' : 'Fix it'}
+                          </button>
+                        )}
+                      </li>
+                    )
+                  })}
                 </ul>
               </div>
             )}

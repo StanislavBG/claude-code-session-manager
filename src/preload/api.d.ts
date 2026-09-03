@@ -368,17 +368,15 @@ export interface DelegationReadinessCheck {
   skipped?: boolean;
 }
 
-export interface InstallPrdWriteGuardResult {
+/** Result of installPrdWriteGuard and installDestructiveGitGuard alike
+ *  (delegationReadiness.cjs) — the two installers share one contract. */
+export interface InstallGuardResult {
   ok: boolean;
   action: 'installed' | 'repaired' | 'already-installed' | 'error';
   settingsPath?: string;
   command?: string;
   error?: string;
 }
-
-/** installDestructiveGitGuard returns the exact same shape as installPrdWriteGuard
- *  (delegationReadiness.cjs) — one alias, so the two never drift apart. */
-export type InstallDestructiveGitGuardResult = InstallPrdWriteGuardResult;
 
 export interface DelegationReadiness {
   ok: boolean;
@@ -1477,8 +1475,8 @@ export interface SessionManagerAPI {
     /** "Can this project actually delegate?" — the 4 preconditions for
      *  scheduler_create_prd being in an agent's tool list at all. */
     delegationReadiness: (cwd: string) => Promise<DelegationReadiness>;
-    installPrdWriteGuard: (cwd: string) => Promise<InstallPrdWriteGuardResult>;
-    installDestructiveGitGuard: (cwd: string) => Promise<InstallDestructiveGitGuardResult>;
+    installPrdWriteGuard: (cwd: string) => Promise<InstallGuardResult>;
+    installDestructiveGitGuard: (cwd: string) => Promise<InstallGuardResult>;
     onNewSession: (handler: () => void) => () => void;
     onRebootSession: (handler: () => void) => () => void;
     archiveProject: (encoded: string) => Promise<{ ok: boolean; error?: string }>;

@@ -720,6 +720,18 @@ describe('NewEpicCard', () => {
       expect(el.querySelector('[data-testid="delegation-readiness-warning"]')).toBeNull()
     })
 
+    it('renders no Fix it button for a fixAction this renderer does not know, instead of throwing at render', async () => {
+      ;(window.api.app.delegationReadiness as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: false,
+        checks: [{ id: 'prd-write-guard', label: 'PRD-write guard hook installed', ok: false, detail: 'missing', fix: 'Add it', fixAction: 'install-something-newer' }],
+      })
+      useSessions.setState({ tabs: [{ id: 't1', cwd: '/home/bilko/Projects/beta' } as never], activeTabId: 't1' })
+      const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      await act(async () => {})
+      expect(el.querySelector('[data-testid="delegation-readiness-check-prd-write-guard"]')).not.toBeNull()
+      expect(el.querySelectorAll('[data-testid^="delegation-readiness-fix-"]')).toHaveLength(0)
+    })
+
     it('routes a failing prd-write-guard check through the same installer path to installPrdWriteGuard', async () => {
       const readinessSpy = window.api.app.delegationReadiness as ReturnType<typeof vi.fn>
       const installSpy = window.api.app.installPrdWriteGuard as ReturnType<typeof vi.fn>

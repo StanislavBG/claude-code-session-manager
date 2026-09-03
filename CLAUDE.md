@@ -105,8 +105,8 @@ Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/
 - Before writing a PRD, read
   [`PRD_AUTHORING.md`](file:///home/bilko/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md) —
   rules from two real stuck-job incidents + a pre-queue checklist (§10).
-- **PRD-write guard: adopt by REFERENCE, never vendor** — other repos point at THIS repo's absolute
-  `scripts/hooks/guard-prd-writes.cjs`; New Epic's readiness banner installs it (`installPrdWriteGuard`).
+- **PRD-write + destructive-git guards: adopt by REFERENCE, never vendor** — other repos point at THIS
+  repo's absolute `scripts/hooks/guard-*.cjs`; New Epic's readiness banner installs both.
 - A job parked in `needs_review` is a **question**, routed back to the authoring Epic — it never creates
   work on its own.
 - The Scheduler nav row is **PROJECT-face only** — every route it renders is cwd-derived.

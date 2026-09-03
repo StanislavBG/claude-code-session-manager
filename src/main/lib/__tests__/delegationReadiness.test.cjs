@@ -496,15 +496,10 @@ test('installDestructiveGitGuard: flips destructive-git-guard FAIL -> PASS on a 
   const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   const bash = written.hooks.PreToolUse.filter((m) => m.matcher === 'Bash');
   expect(bash).toHaveLength(1);
-  const [hook] = bash[0].hooks;
-  expect(hook.type).toBe('command');
-  const scriptPath = hook.command.replace(/^node /, '');
   // By reference to THIS repo's absolute script — never a copy inside the target cwd.
-  expect(path.isAbsolute(scriptPath)).toBe(true);
-  expect(scriptPath).toBe(path.resolve(__dirname, '..', '..', '..', '..', 'scripts', 'hooks', 'guard-destructive-git.cjs'));
-  expect(scriptPath.endsWith(path.join('scripts', 'hooks', 'guard-destructive-git.cjs'))).toBe(true);
-  expect(scriptPath.startsWith(cwd + path.sep)).toBe(false);
-  expect(fs.existsSync(scriptPath)).toBe(true);
+  expect(bash[0].hooks).toEqual([{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }]);
+  expect(path.isAbsolute(DESTRUCTIVE_GIT_GUARD_SCRIPT)).toBe(true);
+  expect(DESTRUCTIVE_GIT_GUARD_SCRIPT.startsWith(cwd + path.sep)).toBe(false);
   expect(fs.existsSync(path.join(cwd, 'scripts'))).toBe(false);
 
   const after = await checkDelegationReadiness({ cwd, homeDir });

@@ -5515,8 +5515,22 @@ async function reapDeadRunningJobs() {
       const resetIso = await refreshNextReset().catch(() => cachedNextReset);
       const triggering = dead.find((d) => d.outcome === 'rate_limited');
       const triggeringRow = triggering ? state.jobs.find((x) => x.slug === triggering.slug) : null;
-      const observedAt = triggeringRow?.startedAt ? Date.parse(triggeringRow.startedAt) : null;
-      await setPaused('rate_limit', resetIso, { observedAt });
+      const observedAtMs = triggeringRow?.startedAt ? Date.parse(triggeringRow.startedAt) : null;
+      // Same rapid-repeat circuit breaker spawnJob's own res.rateLimited
+      // branch drives (see consecutiveRapidRateLimitsBySlug above) — a
+      // process that gets rate-limited and then dies without spawnJob's own
+      // branch ever running is reconciled HERE instead, and must feed the
+      // same counter or a stale/wrong resumeAt could keep re-clearing this
+      // path's "fresh" pause every reap cycle with no hard cap ever engaging.
+      const durationMs = Number.isFinite(observedAtMs) ? Date.now() - observedAtMs : Infinity;
+      const prevCount = consecutiveRapidRateLimitsBySlug.get(triggering.slug) || 0;
+      const nextCount = nextRapidRateLimitCount(prevCount, { rateLimited: true, durationMs });
+      consecutiveRapidRateLimitsBySlug.set(triggering.slug, nextCount);
+      const forceHardPause = nextCount >= CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD;
+      if (forceHardPause) {
+        console.log(`[scheduler] ${triggering.slug}: ${nextCount} consecutive rate-limited dispatches under ${RAPID_RATE_LIMIT_WINDOW_MS / 1000}s each (reaped) — engaging hard pause`);
+      }
+      await setPaused('rate_limit', resetIso, { observedAt: observedAtMs, force: forceHardPause });
     }
 
     await mutate(async (s) => {
@@ -5525,6 +5539,7 @@ async function reapDeadRunningJobs() {
         if (idx < 0 || s.jobs[idx].status !== 'running') continue; // race guard
         const rateLimited = outcome === 'rate_limited';
         const success = outcome === 'success';
+        if (!rateLimited) consecutiveRapidRateLimitsBySlug.delete(slug);
 
         // Best-effort in-place leftover computation: a job whose owning
         // process vanished without spawnJob()'s own finally block ever

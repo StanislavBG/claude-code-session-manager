@@ -20,6 +20,7 @@ const {
   isRetentionEnabled,
   applyRetention,
   liveKeysFromJobs,
+  runningRunIdsFromJobs,
   isLiveJob,
   runBootSweep,
 } = require('../lib/runLogRetention.cjs');
@@ -405,6 +406,64 @@ test('runBootSweep: a deletion failure (permission error) is caught, logged in r
     fs.unlinkSync = originalUnlink;
     queueStore.readMergedSync = original;
   }
+});
+
+// ─── orphan pass: empty run directories (PRD 1120) ─────────────────────────
+
+test('runningRunIdsFromJobs: only status===running jobs with a runId are protected', () => {
+  const ids = runningRunIdsFromJobs([
+    { slug: 'a', status: 'running', runId: 'run-a' },
+    { slug: 'b', status: 'pending', runId: 'run-b' },
+    { slug: 'c', status: 'running', runId: null },
+    null,
+  ]);
+  expect(ids.has('run-a')).toBe(true);
+  expect(ids.has('run-b')).toBe(false);
+  expect(ids.size).toBe(1);
+});
+
+test('applyRetention orphan pass: an empty run directory 1 minute old is removed while a directory with a .log is retained', () => {
+  const now = Date.now();
+  // Orphan: minted by pickRunDir but the dispatch aborted before executeJob
+  // ever wrote into it — no meta.json, so scanRunEntries never sees it.
+  const orphanDir = path.join(runsDir, '2026-09-05T14-00-00-000Z');
+  fs.mkdirSync(orphanDir, { recursive: true });
+  const orphanTime = (now - 60_000) / 1000;
+  fs.utimesSync(orphanDir, orphanTime, orphanTime);
+
+  // Real run: has a .log, must survive regardless of the orphan pass.
+  makeRun('2026-09-05T15-00-00-000Z', 'real-slug', { finishedAt: now - 60_000 });
+
+  const settings = { schedulerRunLogRetention: { enabled: true, policy: { maxAgeDays: 7, keepPerSlug: 1 } } };
+  const result = applyRetention(runsDir, settings, { now, jobs: [] });
+
+  expect(result.orphanDirsRemoved).toBe(1);
+  expect(fs.existsSync(orphanDir)).toBe(false);
+  expect(fs.existsSync(path.join(runsDir, '2026-09-05T15-00-00-000Z', 'real-slug.log'))).toBe(true);
+});
+
+test('applyRetention orphan pass: skips an empty directory whose runId belongs to a currently-running job (spawn in flight)', () => {
+  const now = Date.now();
+  const inFlightRunId = '2026-09-05T16-00-00-000Z';
+  const inFlightDir = path.join(runsDir, inFlightRunId);
+  fs.mkdirSync(inFlightDir, { recursive: true });
+
+  const settings = { schedulerRunLogRetention: { enabled: true, policy: { maxAgeDays: 7, keepPerSlug: 1 } } };
+  const jobs = [{ slug: 'mid-dispatch', status: 'running', runId: inFlightRunId }];
+  const result = applyRetention(runsDir, settings, { now, jobs });
+
+  expect(result.orphanDirsRemoved).toBe(0);
+  expect(fs.existsSync(inFlightDir)).toBe(true);
+});
+
+test('applyRetention orphan pass: never runs when retention is not opted in (dry-run)', () => {
+  const now = Date.now();
+  const orphanDir = path.join(runsDir, '2020-01-01T00-00-00-000Z');
+  fs.mkdirSync(orphanDir, { recursive: true });
+
+  const result = applyRetention(runsDir, undefined, { now, jobs: [] });
+  expect(result.deleted).toBe(false);
+  expect(fs.existsSync(orphanDir)).toBe(true);
 });
 
 test('applyRetention: dry-run path (enabled=false) never reads queueStore for live protection', () => {

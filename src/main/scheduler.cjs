@@ -3244,10 +3244,17 @@ function buildClaudeSpawnArgs({ prompt, model, sessionId, resume, systemPrompt }
 
 // ---------- execution ----------
 
+// Allocates the runId/dir pair at dispatch time WITHOUT creating the
+// directory — a dispatch that aborts inside spawnJob before executeJob's
+// openLog() call (slot-acquire miss, worktree-cap deferral, launch-gate
+// block, ...) must leave no trace on disk. The directory is materialised
+// lazily, the first time something actually needs to write into it (see
+// openLog's mkdirSync in executeJob below). Because tickQueue hands ONE
+// shared batch dir to every spawnJob in the batch, several jobs may race to
+// create it — `recursive: true` makes that race safe.
 function pickRunDir() {
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const dir = path.join(RUNS_DIR, ts);
-  fs.mkdirSync(dir, { recursive: true });
   return { runId: ts, dir };
 }
 
@@ -3274,6 +3281,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // uncommitted work — reusing its id via `--resume` instead of minting a
   // fresh one via `--session-id` is the entire point of the recovery.
   const sessionId = resumeTarget ? resumeTarget.sessionId : randomUUID();
+
+  // Materialise the (possibly shared-batch) run dir lazily, right before the
+  // first write into it — see pickRunDir's comment for why this is deferred
+  // this far. recursive:true makes it safe if a sibling job in the same
+  // batch dir already created it.
+  fs.mkdirSync(runDir, { recursive: true });
 
   // Phase 1: open log fd so we can emit pre-spawn diagnostics (early-exit
   // error paths) before the child is created. withChildAndLog takes ownership
@@ -7573,4 +7586,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation, computeLaunchHolds, handleLaunchFailure, applyLaunchFailure, setPaused, clearPause, tickQueue, runDueJobs, isCooldownSuppressed, nextRapidRateLimitCount, CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD, RAPID_RATE_LIMIT_WINDOW_MS, MANUAL_PAUSE_COOLDOWN_MS, RUNS_DIR };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation, computeLaunchHolds, handleLaunchFailure, applyLaunchFailure, setPaused, clearPause, tickQueue, runDueJobs, isCooldownSuppressed, nextRapidRateLimitCount, CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD, RAPID_RATE_LIMIT_WINDOW_MS, MANUAL_PAUSE_COOLDOWN_MS, RUNS_DIR, pickRunDir };

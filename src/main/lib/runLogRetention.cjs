@@ -297,10 +297,83 @@ function resolveLiveKeysForApply(runsDir, opts, enabled) {
 }
 
 /**
+ * Build the set of runIds currently claimed by a job in status 'running' —
+ * used by the orphan pass below to skip a directory whose spawn may be
+ * mid-flight right now (scheduler.cjs's pickRunDir mints the runId/dir pair
+ * before the child process is spawned; the directory itself is only
+ * mkdir'd, and files only start landing in it, once execution actually
+ * commits — see executeJob). Deliberately keyed by runId alone, not
+ * `${slug}|${runId}` like liveKeysFromJobs: a shared batch dir (tickQueue
+ * hands ONE runId to several jobs at once) is in flight if ANY job dispatched
+ * into it is still running, regardless of which slug.
+ */
+function runningRunIdsFromJobs(jobs) {
+  const ids = new Set();
+  for (const job of jobs || []) {
+    if (job && job.status === 'running' && job.runId) ids.add(job.runId);
+  }
+  return ids;
+}
+
+/**
+ * Resolve the running-runId protection set for applyRetention's orphan pass,
+ * mirroring resolveLiveKeysForApply's precedence: explicit opts win, then
+ * opts.jobs, then (only when deletion is actually about to happen) a direct
+ * read of the real scheduler queue.
+ */
+function resolveRunningRunIdsForApply(opts, enabled) {
+  if (opts && opts.runningRunIds) return opts.runningRunIds;
+  if (opts && opts.jobs) return runningRunIdsFromJobs(opts.jobs);
+  if (!enabled) return new Set();
+  try {
+    const queueStore = require('./queueStore.cjs');
+    const state = queueStore.readMergedSync();
+    return runningRunIdsFromJobs(state.jobs || []);
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * Remove every EMPTY directory directly under runsDir, at any age, except
+ * one whose runId is in runningRunIds. These are orphans left behind by a
+ * dispatch that minted a runId/dir pair (pickRunDir) but aborted before
+ * spawnJob's executeJob ever wrote into it (slot-acquire miss, worktree-cap
+ * deferral, launch-gate block, ...) — scanRunEntries never sees them (no
+ * meta.json), so the age/count policy above can't reach them either.
+ * Returns the count of directories removed.
+ */
+function sweepOrphanDirs(runsDir, runningRunIds, errors) {
+  let dirNames;
+  try {
+    dirNames = fs.readdirSync(runsDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return 0;
+  }
+
+  let removed = 0;
+  for (const runId of dirNames) {
+    if (runningRunIds.has(runId)) continue;
+    const dir = path.join(runsDir, runId);
+    try {
+      if (fs.readdirSync(dir).length !== 0) continue;
+      fs.rmdirSync(dir);
+      removed += 1;
+    } catch (e) {
+      if (e && e.code !== 'ENOENT') errors.push({ path: dir, error: e.message });
+    }
+  }
+  return removed;
+}
+
+/**
  * Compute the report, and — ONLY when isRetentionEnabled(settings) — delete
- * the eligible files and rmdir any directory left fully empty. With no
- * opt-in (the default), this is exactly computeReport(): read-only,
- * `deleted: false`, nothing removed.
+ * the eligible files, rmdir any directory left fully empty, and sweep any
+ * orphan empty run directory (see sweepOrphanDirs). With no opt-in (the
+ * default), this is exactly computeReport(): read-only, `deleted: false`,
+ * nothing removed.
  */
 function applyRetention(runsDir, settings, opts) {
   const cfg = (settings && settings.schedulerRunLogRetention) || null;
@@ -342,7 +415,10 @@ function applyRetention(runsDir, settings, opts) {
     }
   }
 
-  return { deleted: true, removedFiles, freedBytes, errors, report };
+  const runningRunIds = resolveRunningRunIdsForApply(opts, enabled);
+  const orphanDirsRemoved = sweepOrphanDirs(runsDir, runningRunIds, errors);
+
+  return { deleted: true, removedFiles, freedBytes, orphanDirsRemoved, errors, report };
 }
 
 /**
@@ -370,6 +446,8 @@ module.exports = {
   LIVE_STATUSES,
   isLiveJob,
   liveKeysFromJobs,
+  runningRunIdsFromJobs,
+  sweepOrphanDirs,
   scanRunEntries,
   computeEligibility,
   computeReport,

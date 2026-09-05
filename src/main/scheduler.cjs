@@ -2120,6 +2120,9 @@ let firstFailureAt = null;
 let firstNon429FailureAt = null; // tracks only transient/config failures; 429s don't count toward network-pause threshold
 let lastFailureKind = null; // 'transient' | 'meter_rate_limited' | 'auth' | null
 let pauseClearedManuallyAt = null;
+// PRD 1119: consecutive-rapid-rate-limit hard-pause tracking, keyed per slug.
+// See isCooldownSuppressed/nextRapidRateLimitCount below for the pure rules.
+const consecutiveRapidRateLimitsBySlug = new Map();
 
 // ---------- timer ----------
 
@@ -2338,12 +2341,70 @@ async function rescheduleTimer() {
 
 // ---------- pause / resume ----------
 
-async function setPaused(reason, resumeAtIso) {
+const MANUAL_PAUSE_COOLDOWN_MS = 300_000;
+// PRD 1119: after this many consecutive rate-limited dispatches of the SAME
+// slug that EACH also finished in under RAPID_RATE_LIMIT_WINDOW_MS, the rate
+// limit is not a stale/flaky auto-detection any more — it's real and
+// persistent for this job. Engage a hard pause the manual-clear cooldown
+// cannot suppress at all. This exists because the freshness check alone
+// (isCooldownSuppressed) is not sufficient: if the computed resumeAt is
+// itself wrong or stale (e.g. a failed usage-API fetch), the resume timer
+// can keep re-clearing the pause every ~30s, and every SUBSEQUENT dispatch
+// is genuinely "fresh" (it started after that re-clear) — so freshness alone
+// would let the spin continue indefinitely within the same 5-minute cooldown
+// window. The rapid-repeat count is an independent circuit breaker of last
+// resort for exactly that case.
+const CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD = 3;
+const RAPID_RATE_LIMIT_WINDOW_MS = 30_000;
+
+/**
+ * Pure: should setPaused()'s manual-override cooldown suppress WRITING this
+ * pause? `force` (the rapid-repeat hard pause) always answers no — that path
+ * exists precisely to bypass the cooldown. Otherwise, suppress only while
+ * inside the cooldown window AND the triggering observation is stale, i.e.
+ * it was NOT produced by a run that started after the human's manual clear.
+ * A run that started after the clear is fresh evidence the human's fix (if
+ * any) did not hold, and must be allowed to re-engage the pause regardless
+ * of the cooldown — the cooldown's job is to ignore STALE auto-detections,
+ * never to ignore new evidence.
+ */
+function isCooldownSuppressed({ pauseClearedManuallyAt: clearedAt, now, observedAt, force }) {
+  if (force) return false;
+  if (!clearedAt) return false;
+  if (now - clearedAt >= MANUAL_PAUSE_COOLDOWN_MS) return false;
+  const isFresh = typeof observedAt === 'number' && observedAt > clearedAt;
+  return !isFresh;
+}
+
+/**
+ * Pure: the next consecutive-rapid-rate-limit count for a slug, given its
+ * previous count and this run's outcome. Increments only on a rate-limited
+ * run that ALSO ran under RAPID_RATE_LIMIT_WINDOW_MS (a genuine "dispatch,
+ * 429, die" cycle — not a job that ran for a while before hitting the
+ * limit). Resets to 0 on any non-rate-limited outcome. A rate-limited-but-
+ * slow run leaves the count unchanged: still a rate limit, just not the
+ * rapid-spin shape this cap exists to catch.
+ */
+function nextRapidRateLimitCount(prevCount, { rateLimited, durationMs }) {
+  if (!rateLimited) return 0;
+  if (durationMs < RAPID_RATE_LIMIT_WINDOW_MS) return (prevCount || 0) + 1;
+  return prevCount || 0;
+}
+
+async function setPaused(reason, resumeAtIso, opts = {}) {
+  const { observedAt = null, force = false } = opts;
   // Honor manual-override cooldown: if the user cleared a pause within the
-  // last 5 minutes, suppress auto-pause re-engagement on the same condition.
-  if (pauseClearedManuallyAt && Date.now() - pauseClearedManuallyAt < 300_000) {
+  // last 5 minutes, suppress auto-pause re-engagement UNLESS this pause is
+  // backed by a fresh observation (a run that started after the clear) or is
+  // forced (the rapid-repeat hard pause, which the cooldown cannot suppress).
+  if (isCooldownSuppressed({ pauseClearedManuallyAt, now: Date.now(), observedAt, force })) {
     console.log(`[scheduler] setPaused(${reason}) suppressed by manual override cooldown`);
     return;
+  }
+  if (force) {
+    console.log(`[scheduler] setPaused(${reason}) forced past manual override cooldown — rapid-repeat rate-limit cap engaged`);
+  } else if (pauseClearedManuallyAt && Date.now() - pauseClearedManuallyAt < MANUAL_PAUSE_COOLDOWN_MS) {
+    console.log(`[scheduler] setPaused(${reason}) engaging despite manual override cooldown — triggering run started after the manual clear`);
   }
 
   // For 'network' with no explicit resumeAt, auto-resume after 30 minutes.
@@ -4303,6 +4364,13 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       console.log(`[scheduler] ${job.slug}: dispatching as launch probe for '${launchKey}'${launchEnv ? ` with mitigation ${JSON.stringify(launchEnv)}` : ''}`);
     }
 
+    // Captured here (not read back off `job`, a pre-dispatch snapshot that
+    // mutate()'s fresh-from-disk read never touches) so the rate-limited
+    // branch below has this run's OWN start time — the freshness check
+    // (isCooldownSuppressed) needs to know whether this specific dispatch
+    // started after the manual clear, not whatever startedAt this row
+    // carried from a prior run.
+    let dispatchStartedAtMs = null;
     await mutate((s) => {
       const idx = s.jobs.findIndex((x) => x.slug === job.slug);
       if (idx >= 0) {
@@ -4313,6 +4381,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
         delete s.jobs[idx].heldReason;
         s.jobs[idx].runId = runId;
         s.jobs[idx].startedAt = new Date().toISOString();
+        dispatchStartedAtMs = Date.parse(s.jobs[idx].startedAt);
         if (job.quietMachine === true) {
           s.jobs[idx].quietMachine = true;
           s.jobs[idx].quietLeaseDegraded = job.quietLeaseDegraded === true;
@@ -4556,7 +4625,17 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
 
     if (res.rateLimited) {
       const resetIso = await refreshNextReset().catch(() => cachedNextReset);
-      await setPaused('rate_limit', resetIso);
+      const observedAt = dispatchStartedAtMs;
+      const prevCount = consecutiveRapidRateLimitsBySlug.get(job.slug) || 0;
+      const nextCount = nextRapidRateLimitCount(prevCount, { rateLimited: true, durationMs: res.durationMs });
+      consecutiveRapidRateLimitsBySlug.set(job.slug, nextCount);
+      const forceHardPause = nextCount >= CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD;
+      if (forceHardPause) {
+        console.log(`[scheduler] ${job.slug}: ${nextCount} consecutive rate-limited dispatches under ${RAPID_RATE_LIMIT_WINDOW_MS / 1000}s each — engaging hard pause`);
+      }
+      await setPaused('rate_limit', resetIso, { observedAt, force: forceHardPause });
+    } else {
+      consecutiveRapidRateLimitsBySlug.delete(job.slug);
     }
 
     // Stale queue entry: the PRD was archived (already shipped) or is gone
@@ -5434,7 +5513,10 @@ async function reapDeadRunningJobs() {
     // stop. Done once, outside mutate(), before finalizing any row below.
     if (dead.some((d) => d.outcome === 'rate_limited')) {
       const resetIso = await refreshNextReset().catch(() => cachedNextReset);
-      await setPaused('rate_limit', resetIso);
+      const triggering = dead.find((d) => d.outcome === 'rate_limited');
+      const triggeringRow = triggering ? state.jobs.find((x) => x.slug === triggering.slug) : null;
+      const observedAt = triggeringRow?.startedAt ? Date.parse(triggeringRow.startedAt) : null;
+      await setPaused('rate_limit', resetIso, { observedAt });
     }
 
     await mutate(async (s) => {
@@ -7476,4 +7558,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation, computeLaunchHolds, handleLaunchFailure, applyLaunchFailure };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation, computeLaunchHolds, handleLaunchFailure, applyLaunchFailure, setPaused, clearPause, tickQueue, runDueJobs, isCooldownSuppressed, nextRapidRateLimitCount, CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD, RAPID_RATE_LIMIT_WINDOW_MS, MANUAL_PAUSE_COOLDOWN_MS, RUNS_DIR };

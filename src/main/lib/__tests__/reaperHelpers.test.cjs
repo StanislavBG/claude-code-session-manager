@@ -187,6 +187,35 @@ test('classifyRunOutcome: a genuine error with no rate-limit signal still classi
   assert.strictEqual(classifyRunOutcome(p), 'failed');
 });
 
+// REGRESSION GUARD (2026-09-05). The rate-limit check originally ran as the
+// FIRST statement of classifyRunOutcome, before the result event was parsed.
+// Because the CLI emits an informational rate_limit_event with
+// status:"allowed_warning" on nearly every run once utilization is non-zero,
+// that misclassified genuinely successful runs as 'rate_limited' — which in
+// reapDeadRunningJobs re-queues finished work and spuriously pauses the whole
+// machine. The fixture below is the shape of a REAL successful run log, not a
+// synthetic one-liner: the allowed_warning event that every run carries, then
+// a clean result. If someone moves the check back to the top, this goes red.
+test('classifyRunOutcome: a SUCCESSFUL run whose tail carries an allowed_warning rate_limit_event is still success', () => {
+  const p = writeTmpLog([
+    '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1788643800,"rateLimitType":"five_hour","utilization":0.42,"isUsingOverage":false}}',
+    '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","resetsAt":1789059600,"rateLimitType":"seven_day","utilization":0.59,"isUsingOverage":false}}',
+    '{"type":"result","subtype":"success","is_error":false,"num_turns":55,"result":"SCHEDULER_VERDICT: PASS"}',
+  ].join('\n') + '\n');
+  assert.strictEqual(classifyRunOutcome(p), 'success');
+  assert.strictEqual(mapOutcomeToGateOutcome(classifyRunOutcome(p)), 'passed');
+});
+
+// The same tail, but the run actually errored: NOW the rate-limit signal is
+// what it claims to be, and the outcome must be the retryable one.
+test('classifyRunOutcome: the same allowed_warning tail on an ERRORED run classifies as rate_limited', () => {
+  const p = writeTmpLog([
+    '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed_warning","rateLimitType":"seven_day","utilization":0.59}}',
+    '{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"result":"You\'ve reached your Fable limit."}',
+  ].join('\n') + '\n');
+  assert.strictEqual(classifyRunOutcome(p), 'rate_limited');
+});
+
 test('classifyRunOutcome: a clean success log still classifies as success', () => {
   const p = writeTmpLog('{"type":"result","subtype":"success","is_error":false,"result":"done"}\n');
   assert.strictEqual(classifyRunOutcome(p), 'success');

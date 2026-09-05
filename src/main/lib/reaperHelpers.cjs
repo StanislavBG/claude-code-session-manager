@@ -52,7 +52,6 @@ function claudePidAlive(pid) {
  */
 function classifyRunOutcome(logPath) {
   try {
-    if (detectRateLimitInLog(logPath)) return 'rate_limited';
     const text = readTail(logPath, 65536);
     let lastResult = null;
     for (const line of text.split('\n')) {
@@ -63,8 +62,27 @@ function classifyRunOutcome(logPath) {
         if (obj && obj.type === 'result') lastResult = obj;
       } catch { /* partial line at tail boundary or non-JSON scheduler log line */ }
     }
+    // ORDER IS LOAD-BEARING. The rate-limit check must come AFTER the success
+    // determination, never before it. The CLI emits an informational
+    // `rate_limit_event` with status:"allowed_warning" on essentially every
+    // run once utilization is non-zero, and detectRateLimitInLog matches its
+    // "rateLimitType" field — so checking first classified genuinely
+    // SUCCESSFUL runs as rate_limited. Measured on 2026-09-05 against the
+    // eight most recent runs whose own meta.json recorded exitCode:0 and
+    // rateLimited:false, four came back 'rate_limited' (e.g.
+    // 200-campaign-toolkit-weak-points-and-stuns: 55 turns, is_error:false,
+    // terminalReasonFromHarness:'completed', landed commit 7fd05f7 — matched
+    // purely on an allowed_warning five_hour event). In reapDeadRunningJobs
+    // that resets a finished job to 'pending' to re-run shipped work AND
+    // engages setPaused('rate_limit') with no rate limit in effect — strictly
+    // worse than the terminal-'failed' bug the rate_limit branch was added to
+    // fix. See the guard test in this file's __tests__ sibling.
+    if (lastResult && lastResult.subtype === 'success' && lastResult.is_error !== true) return 'success';
+    // Still checked ahead of 'no_result': a run killed mid-flight by a rate
+    // limit may never emit a result event at all, and that is a rate-limited
+    // death, not silence.
+    if (detectRateLimitInLog(logPath)) return 'rate_limited';
     if (!lastResult) return 'no_result';
-    if (lastResult.subtype === 'success' && lastResult.is_error !== true) return 'success';
     return 'failed';
   } catch {
     return 'unknown';

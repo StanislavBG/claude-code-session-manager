@@ -59,6 +59,7 @@ const { appendError } = require('./lib/opsErrorLog.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
 const { claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs } = require('./lib/reaperHelpers.cjs');
 const { detectRateLimitInLog } = require('./lib/rateLimitDetect.cjs');
+const { stripAppOwnedChurn } = require('./lib/jobDirtFilter.cjs');
 const { computeQueueHealth } = require('./lib/queueHealth.cjs');
 const { createLoadGate, topCpuConsumers } = require('./lib/loadGate.cjs');
 const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
@@ -1251,6 +1252,89 @@ function computeStallSummary(state) {
     counts.stalled = projTotal > 0 && projRunning === 0 && projPending === 0 && !state?.paused;
   }
   return { stalled, total, running, pending, byProject };
+}
+
+/**
+ * computeBlockedChains(jobs) → [{ cwd, blockedBy, blocked }]
+ *
+ * Pure, no IO. The gap computeStallSummary above cannot see.
+ *
+ * `stalled` is defined as `running === 0 && pending === 0`, which encodes an
+ * assumption that a PENDING row is healthy in-progress work. It is not: a
+ * pending row whose `dependsOn` chain terminates in a TERMINAL non-completed
+ * status (`failed`/`skipped`) can never be dispatched by pickForProject, and
+ * never will be, but it still counts toward `pending` and so reads as a
+ * healthy queue to every monitor in the app.
+ *
+ * On 2026-09-05 starry-night-ships held 42 such rows behind one `failed`
+ * job for three hours. Machine-wide `stalled` was false (42 pending),
+ * per-project `stalled` was false (42 pending), the queue-health sweep
+ * doesn't count `failed` at all, and the supervisor only probes `running` —
+ * so nothing anywhere reported a problem while nothing could ever run.
+ *
+ * Reported per project as { blockedBy: [terminal slugs], blocked: count }.
+ * Transitive by construction: a row blocked by a row that is itself blocked
+ * resolves through the same walk.
+ */
+function computeBlockedChains(jobs) {
+  const rows = (Array.isArray(jobs) ? jobs : []).filter(Boolean);
+  const byCwd = new Map();
+  for (const j of rows) {
+    const key = j.cwd || '(unknown)';
+    if (!byCwd.has(key)) byCwd.set(key, []);
+    byCwd.get(key).push(j);
+  }
+
+  const out = [];
+  for (const [cwd, projectJobs] of byCwd) {
+    // Reuse the picker's OWN dep resolution so this can never disagree with
+    // what the scheduler will actually dispatch (bare-name fallback included).
+    const rowBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
+    const rowsByBareSlug = new Map();
+    for (const j of projectJobs) {
+      const bare = String(j.slug ?? '').replace(/^\d+-/, '');
+      if (!rowsByBareSlug.has(bare)) rowsByBareSlug.set(bare, []);
+      rowsByBareSlug.get(bare).push(j);
+    }
+    const rowsForDep = (slug) => {
+      const exact = rowBySlug.get(slug);
+      if (exact) return [exact];
+      return rowsByBareSlug.get(String(slug ?? '').replace(/^\d+-/, '')) ?? [];
+    };
+
+    // Memoised walk: does this row's dep closure hit a terminally-stuck row?
+    const TERMINAL_STUCK = new Set(['failed', 'skipped']);
+    const verdicts = new Map(); // slug -> Set of terminal blocker slugs
+    const visiting = new Set();
+    const blockersFor = (job) => {
+      if (!job) return new Set();
+      if (verdicts.has(job.slug)) return verdicts.get(job.slug);
+      if (visiting.has(job.slug)) return new Set(); // dependsOn cycle — not our problem here
+      visiting.add(job.slug);
+      const found = new Set();
+      for (const depSlug of job.dependsOn ?? []) {
+        for (const dep of rowsForDep(depSlug)) {
+          if (TERMINAL_STUCK.has(dep.status)) found.add(dep.slug);
+          else if (dep.status !== 'completed') for (const b of blockersFor(dep)) found.add(b);
+        }
+      }
+      visiting.delete(job.slug);
+      verdicts.set(job.slug, found);
+      return found;
+    };
+
+    const blockedBy = new Set();
+    let blocked = 0;
+    for (const j of projectJobs) {
+      if (j.status !== 'pending') continue;
+      const bs = blockersFor(j);
+      if (bs.size === 0) continue;
+      blocked += 1;
+      for (const b of bs) blockedBy.add(b);
+    }
+    if (blocked > 0) out.push({ cwd, blockedBy: [...blockedBy].sort(), blocked });
+  }
+  return out;
 }
 
 /**
@@ -4599,12 +4683,18 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     // (non-git cwd / git errored) — NEVER treated as "left nothing", exactly
     // like every other best-effort git-state check in this function.
     const afterGuardCwd = await uncommittedChanges(guardCwd);
+    // stripAppOwnedChurn: the app writes session-manager-operations/ (queue.json,
+    // history.jsonl, active-index.json, transcripts) DURING this job's own guard
+    // window, so those land in the delta and get blamed on the job. A job can
+    // never be responsible for them — see jobDirtFilter.cjs. Applied here, at
+    // the single place the delta is computed, so the commit guard, the
+    // transient-retry dirty check and leftoverPaths all agree.
     const newlyDirtyAll = afterGuardCwd === null
       ? null
-      : [...new Set([
+      : stripAppOwnedChurn([...new Set([
           ...afterGuardCwd.filter((p) => !new Set(guardBaseline || []).has(p)),
           ...worktreeLeftoverDirty,
-        ])];
+        ])]);
 
     if (res.launchFailure) {
       await handleLaunchFailure({ job, res, runId, runDir, launchKey, launchEnv, claudeVersion: claudeVersionNow });
@@ -5442,6 +5532,109 @@ async function maybeLaunchWhenAvailable(state) {
   }
   console.log(`[scheduler] when-available: util=${cachedUtilization}%, ${pending.length} pending, ${runningSet.size} running — ticking`);
   tickQueue().catch((e) => console.error('[scheduler] tickQueue error', e));
+}
+
+/** How long a queue may hold ready work with nothing running before the
+ *  starvation watchdog forces a tick. Deliberately longer than the poll
+ *  loop's own cadence + backoff, so this only ever fires when the normal
+ *  path has genuinely stopped driving the queue — it is a safety net, not a
+ *  second scheduler. */
+const QUEUE_STARVATION_MS = 10 * 60_000;
+
+/**
+ * classifyQueueStarvation({ jobs, paused, runningCount, lastRunAtMs, now, thresholdMs })
+ *   → null | { kind: 'starved' | 'blocked', pending, dispatchable, blockedChains, idleMs }
+ *
+ * Pure, no IO. Answers the one question the user's invariant reduces to:
+ * "there are PRDs in a queue — is anything actually going to run them?"
+ *
+ * Every stall this codebase has seen was a DIFFERENT cause with the SAME
+ * shape: ready rows, nothing running, nobody ticking. A rate-limited exit
+ * stamped terminal `failed` (2026-09-05, 42 rows); a spin loop past the
+ * manual-clear cooldown; a worktree merge-back that left the project on a
+ * job branch; a job parked `needs_review` with no fix plan; app churn
+ * counted as unfinished work. Guarding each cause individually will always
+ * lag the next one, so this guards the SHAPE instead.
+ *
+ * Two outcomes, deliberately distinguished — they need opposite responses:
+ *   'starved' — at least one pending row is dispatchable RIGHT NOW and
+ *               nothing is running. Whatever should have ticked, didn't.
+ *               Forcing a tick is safe and fixes it.
+ *   'blocked' — every pending row is behind a terminal/parked dependency.
+ *               A tick cannot help; this needs a human (or a heal pass) to
+ *               resolve the blocker, and must be reported as such rather
+ *               than silently re-ticking forever.
+ *
+ * Returns null when the queue is healthy (work running, nothing pending,
+ * paused on purpose, or simply not idle long enough yet).
+ */
+function classifyQueueStarvation({ jobs, paused, runningCount, lastRunAtMs, now, thresholdMs = QUEUE_STARVATION_MS } = {}) {
+  if (paused) return null;                      // paused is a DECISION, not a stall
+  if (runningCount > 0) return null;            // work is flowing
+  const rows = Array.isArray(jobs) ? jobs : [];
+  const pending = rows.filter((j) => j && j.status === 'pending');
+  if (pending.length === 0) return null;        // nothing to run — not a stall
+
+  const idleMs = Number.isFinite(lastRunAtMs) ? now - lastRunAtMs : Infinity;
+  if (idleMs < thresholdMs) return null;        // give the normal path its chance first
+
+  // Which pending rows could actually dispatch? Anything NOT named by a
+  // blocked chain. computeBlockedChains already walks dependsOn with the
+  // picker's own resolution, so the two can never disagree.
+  const blockedChains = computeBlockedChains(rows);
+  const blockedTotal = blockedChains.reduce((n, c) => n + c.blocked, 0);
+  const dispatchable = pending.length - blockedTotal;
+
+  return {
+    kind: dispatchable > 0 ? 'starved' : 'blocked',
+    pending: pending.length,
+    dispatchable,
+    blockedChains,
+    idleMs,
+  };
+}
+
+/**
+ * The watchdog half: acts on classifyQueueStarvation. Called from the
+ * heartbeat, which already runs on its own timer independent of the billing
+ * poll loop — so a wedged or never-succeeding poll (the /api/oauth/usage
+ * endpoint was itself 429ing all of 2026-09-05) can no longer leave a queue
+ * with ready work idle indefinitely.
+ */
+async function runQueueStarvationWatchdog(state, { now = Date.now(), thresholdMs = QUEUE_STARVATION_MS } = {}) {
+  const verdict = classifyQueueStarvation({
+    jobs: state?.jobs,
+    paused: state?.paused,
+    runningCount: runningSet.size,
+    lastRunAtMs: Date.parse(state?.lastRunAt ?? ''),
+    now,
+    thresholdMs,
+  });
+  if (!verdict) return null;
+
+  const mins = Math.round(verdict.idleMs / 60_000);
+  if (verdict.kind === 'blocked') {
+    console.warn(
+      `[scheduler] QUEUE BLOCKED: ${verdict.pending} pending job(s), 0 running, idle ${mins}m — every ready row is behind a `
+      + `terminal or parked dependency, so ticking cannot help. Blockers: `
+      + verdict.blockedChains.map((c) => `${c.cwd} [${c.blockedBy.join(', ')}]`).join(' · '),
+    );
+    appendAuditEvent('queue_blocked_stall', { pending: verdict.pending, idleMs: verdict.idleMs, chains: verdict.blockedChains });
+    return verdict;
+  }
+
+  console.warn(
+    `[scheduler] QUEUE STARVED: ${verdict.dispatchable} dispatchable job(s) of ${verdict.pending} pending, 0 running, `
+    + `idle ${mins}m (>= ${Math.round(thresholdMs / 60_000)}m) — forcing a tick`,
+  );
+  appendAuditEvent('queue_starvation_forced_tick', { pending: verdict.pending, dispatchable: verdict.dispatchable, idleMs: verdict.idleMs });
+  // A never-populated utilization reading is itself one of the ways the
+  // when-available path silently never fires (maybeLaunchWhenAvailable
+  // returns early on null). Treat unknown as safe here, exactly as the
+  // billing meter's own 429 fallback already does.
+  if (cachedUtilization === null || cachedUtilization === undefined) cachedUtilization = 0;
+  await tickQueue({ bypassLoadGate: false }).catch((e) => console.error('[scheduler] starvation tick error', e));
+  return verdict;
 }
 
 // ---------- dead-process reaper ----------
@@ -6986,6 +7179,14 @@ async function init() {
   if (heartbeatInterval) clearInterval(heartbeatInterval);
   heartbeatInterval = setInterval(() => {
     const s = readQueueSync();
+    // NEVER-STOP INVARIANT: if a queue holds ready PRDs and nothing is
+    // running, something must drive it. This is the only driver that does
+    // not depend on the billing poll loop, a pause timer, or a completing
+    // job to schedule the next tick — every one of which has failed at
+    // least once. See classifyQueueStarvation.
+    if (!s.unreadable) {
+      runQueueStarvationWatchdog(s).catch((e) => console.error('[scheduler] starvation watchdog error', e));
+    }
     // Initialise from the real status union (scheduleJobSchema.cjs) rather
     // than a hand-maintained subset — the old `{ pending, running, completed,
     // failed }` literal silently minted a NEW key for any other value
@@ -7586,4 +7787,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation, computeLaunchHolds, handleLaunchFailure, applyLaunchFailure, setPaused, clearPause, tickQueue, runDueJobs, isCooldownSuppressed, nextRapidRateLimitCount, CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD, RAPID_RATE_LIMIT_WINDOW_MS, MANUAL_PAUSE_COOLDOWN_MS, RUNS_DIR, pickRunDir };
+module.exports = { classifyQueueStarvation, runQueueStarvationWatchdog, QUEUE_STARVATION_MS, computeBlockedChains, stripAppOwnedChurn, findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation, computeLaunchHolds, handleLaunchFailure, applyLaunchFailure, setPaused, clearPause, tickQueue, runDueJobs, isCooldownSuppressed, nextRapidRateLimitCount, CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD, RAPID_RATE_LIMIT_WINDOW_MS, MANUAL_PAUSE_COOLDOWN_MS, RUNS_DIR, pickRunDir };

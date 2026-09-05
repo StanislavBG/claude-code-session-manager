@@ -180,6 +180,7 @@ export default defineConfig({
       'src/main/lib/__tests__/ephemeralCwd.test.cjs',
       'src/main/lib/__tests__/projectRootResolve.test.cjs',
       'src/main/lib/__tests__/reaperHelpers.test.cjs',
+      'src/main/__tests__/scheduler-never-stop.test.cjs',
       'src/main/__tests__/scheduler-rate-limit-spin-guard.test.cjs',
       'src/main/__tests__/scheduler-rate-limit-cooldown-freshness.test.cjs',
       'src/main/lib/__tests__/queueHealth.test.cjs',

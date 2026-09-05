@@ -59,6 +59,7 @@ const { appendError } = require('./lib/opsErrorLog.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
 const { claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs } = require('./lib/reaperHelpers.cjs');
 const { detectRateLimitInLog } = require('./lib/rateLimitDetect.cjs');
+const { resolveBindingRateLimitReset } = require('./lib/rateLimitWindow.cjs');
 const { computeQueueHealth } = require('./lib/queueHealth.cjs');
 const { createLoadGate, topCpuConsumers } = require('./lib/loadGate.cjs');
 const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
@@ -2108,6 +2109,20 @@ function getNextResetCached() {
   return cachedNextReset;
 }
 
+/**
+ * Pure: picks the reset to pause against for a rate-limited run (PRD 1118).
+ * Prefers the BINDING window read off the run's own log — refreshNextReset()
+ * only ever reports five_hour, which is the wrong clock when a
+ * seven_day/seven_day_overage_included window is what actually 429'd
+ * (five_hour can read 0% utilization at the very same moment). Falls back
+ * to the billing-endpoint-derived reset only when the log yields nothing.
+ */
+function resolveRateLimitPauseReset(logPath, billingResetIso) {
+  const logReset = resolveBindingRateLimitReset(logPath);
+  if (logReset != null) return new Date(logReset * 1000).toISOString();
+  return billingResetIso ?? null;
+}
+
 // ---------- health / poll state ----------
 
 let bootedAt = Date.now();
@@ -2338,6 +2353,33 @@ async function rescheduleTimer() {
 
 // ---------- pause / resume ----------
 
+/**
+ * Pure: decides the resumeAt actually armed for a pause. 'network' and
+ * 'rate_limit' (PRD 1118) both get a bounded 30-minute fallback when no
+ * explicit resumeAt is supplied — the live rate_limit failure mode is the
+ * billing usage endpoint itself 429ing while the log yields no binding
+ * window either, which used to leave an indefinite pause with no resume
+ * timer at all (a queue that never comes back on its own).
+ */
+function computeEffectiveResumeAt(reason, resumeAtIso, nowMs = Date.now()) {
+  if (resumeAtIso) return resumeAtIso;
+  if (reason === 'network' || reason === 'rate_limit') {
+    return new Date(nowMs + 30 * 60_000).toISOString();
+  }
+  return null;
+}
+
+/**
+ * Pure: the setTimeout delay for a resume timer, plus whether it overflows
+ * setTimeout's signed-32-bit max (~24.8 days) and must not be armed.
+ * Resume fires 30s after the reset to give the auth/billing endpoint time
+ * to flip.
+ */
+function computeResumeDelay(effectiveResumeAtIso, nowMs = Date.now()) {
+  const delayMs = Math.max(30_000, new Date(effectiveResumeAtIso).getTime() - nowMs + 30_000);
+  return { delayMs, tooFar: delayMs > 0x7fffffff };
+}
+
 async function setPaused(reason, resumeAtIso) {
   // Honor manual-override cooldown: if the user cleared a pause within the
   // last 5 minutes, suppress auto-pause re-engagement on the same condition.
@@ -2346,11 +2388,7 @@ async function setPaused(reason, resumeAtIso) {
     return;
   }
 
-  // For 'network' with no explicit resumeAt, auto-resume after 30 minutes.
-  let effectiveResumeAt = resumeAtIso;
-  if (reason === 'network' && !resumeAtIso) {
-    effectiveResumeAt = new Date(Date.now() + 30 * 60_000).toISOString();
-  }
+  const effectiveResumeAt = computeEffectiveResumeAt(reason, resumeAtIso);
 
   await mutate((s) => {
     if (s.paused && s.paused.reason === reason) {
@@ -2364,9 +2402,8 @@ async function setPaused(reason, resumeAtIso) {
   if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
   if (!effectiveResumeAt) return;
 
-  // Resume 30s after the reset to give the auth/billing endpoint time to flip.
-  const delay = Math.max(30_000, new Date(effectiveResumeAt).getTime() - Date.now() + 30_000);
-  if (delay > 0x7fffffff) {
+  const { delayMs: delay, tooFar } = computeResumeDelay(effectiveResumeAt);
+  if (tooFar) {
     console.warn(`[scheduler] paused (${reason}); resumeAt too far for setTimeout (${delay}ms)`);
     return;
   }
@@ -4555,7 +4592,9 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     }
 
     if (res.rateLimited) {
-      const resetIso = await refreshNextReset().catch(() => cachedNextReset);
+      const logPath = path.join(runDir, `${job.slug}.log`);
+      const billingResetIso = await refreshNextReset().catch(() => cachedNextReset);
+      const resetIso = resolveRateLimitPauseReset(logPath, billingResetIso);
       await setPaused('rate_limit', resetIso);
     }
 
@@ -5416,7 +5455,7 @@ async function reapDeadRunningJobs() {
       // pid — the gate could not possibly have run, regardless of what
       // classifyRunOutcome makes of an absent/empty log.
       const gateOutcome = pidless ? 'never_ran' : mapOutcomeToGateOutcome(outcome);
-      dead.push({ slug, pid, outcome, gateOutcome, pidless, reason });
+      dead.push({ slug, pid, outcome, gateOutcome, pidless, reason, logPath });
     }
 
     queueHealthSweepCycle += 1;
@@ -5432,8 +5471,10 @@ async function reapDeadRunningJobs() {
     // leave dispatch unpaused, so the next tick immediately re-fires it into
     // the same still-active rate limit — the spin loop this PRD exists to
     // stop. Done once, outside mutate(), before finalizing any row below.
-    if (dead.some((d) => d.outcome === 'rate_limited')) {
-      const resetIso = await refreshNextReset().catch(() => cachedNextReset);
+    const deadRateLimited = dead.find((d) => d.outcome === 'rate_limited');
+    if (deadRateLimited) {
+      const billingResetIso = await refreshNextReset().catch(() => cachedNextReset);
+      const resetIso = resolveRateLimitPauseReset(deadRateLimited.logPath, billingResetIso);
       await setPaused('rate_limit', resetIso);
     }
 
@@ -7476,4 +7517,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation, computeLaunchHolds, handleLaunchFailure, applyLaunchFailure };
+module.exports = { findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation, computeLaunchHolds, handleLaunchFailure, applyLaunchFailure, resolveRateLimitPauseReset, computeEffectiveResumeAt, computeResumeDelay };

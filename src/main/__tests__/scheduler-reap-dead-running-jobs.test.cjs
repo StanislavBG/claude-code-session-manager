@@ -271,6 +271,36 @@ test('reapDeadRunningJobs: a failed reap with a persisted guardBaseline names th
   assert.match(lastTransition.reason, /left 1 files uncommitted/);
 });
 
+test('reapDeadRunningJobs: a rate-limited death (api_error_status:429) is reset to pending, not stamped failed, and the reason names the rate limit (PRD 1117)', async () => {
+  const projectCwd = path.join(tmpHome, 'h-project');
+  fs.mkdirSync(projectCwd, { recursive: true });
+  registerActiveProject(projectCwd);
+
+  const runId = 'run-rate-limited';
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug: 'rate-limited-job',
+      status: 'running',
+      cwd: projectCwd,
+      runId,
+      runtime: { pid: 999999 }, // guaranteed-dead pid — the reaper won the race
+    },
+  ]);
+  // Real-shape tail: a 429 result event, the exact signal the reaper
+  // previously had no branch for and stamped terminal 'failed'.
+  writeRunLog(runId, 'rate-limited-job', [
+    '{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"rateLimitType":"seven_day","result":"You\'ve reached your Fable limit.","uuid":"x"}',
+  ]);
+
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === 'rate-limited-job');
+  assert.equal(row.status, 'pending', 'a rate-limited reap must be retryable, never terminal failed');
+  assert.match(row.error, /rate limit/i, 'the reset reason must name the rate limit, not read as a generic reap failure');
+  assert.equal(row.runtime, undefined);
+});
+
 test('reapDeadRunningJobs skips in-place salvage (no whole-tree dump) when the row has no persisted guardBaseline', async () => {
   const projectCwd = path.join(tmpHome, 'f-project');
   initRepo(projectCwd);

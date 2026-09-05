@@ -16,7 +16,11 @@
 // vitest, NOT node:test — this repo's suite is vitest-only (CLAUDE.md).
 import { test } from 'vitest';
 const assert = require('node:assert/strict');
-const { selectReapableJobs, mapOutcomeToGateOutcome } = require('../reaperHelpers.cjs');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { selectReapableJobs, mapOutcomeToGateOutcome, classifyRunOutcome } = require('../reaperHelpers.cjs');
+const { detectRateLimitInLog } = require('../rateLimitDetect.cjs');
 
 const NOW = Date.parse('2026-09-01T12:00:00.000Z');
 const agoMin = (m) => new Date(NOW - m * 60_000).toISOString();
@@ -130,4 +134,60 @@ test('mapOutcomeToGateOutcome: no_result -> never_ran', () => {
 
 test('mapOutcomeToGateOutcome: unknown -> unknown', () => {
   assert.strictEqual(mapOutcomeToGateOutcome('unknown'), 'unknown');
+});
+
+// detectRateLimitInLog / classifyRunOutcome — PRD 1117: the reaper's
+// rate-limit detection must be the SAME single source of truth spawnJob
+// uses (detectRateLimitInLog, shared via lib/rateLimitDetect.cjs), and a
+// rate-limited death must classify as a NEW, distinct 'rate_limited'
+// outcome — never collapsed into 'failed', and never re-labelling
+// 'success'/'failed'/'no_result' (which keep their prior meanings, per the
+// mapOutcomeToGateOutcome tests above, unmodified).
+
+function writeTmpLog(contents) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-reaper-rate-limit-test-'));
+  const p = path.join(dir, 'run.log');
+  fs.writeFileSync(p, contents);
+  return p;
+}
+
+test('detectRateLimitInLog: rateLimitType":"five_hour" variant', () => {
+  const p = writeTmpLog('{"type":"result","rate_limit_info":{"rateLimitType":"five_hour"}}\n');
+  assert.strictEqual(detectRateLimitInLog(p), true);
+});
+
+test('detectRateLimitInLog: rateLimitType":"seven_day" variant (missed pre-PRD-1117)', () => {
+  const p = writeTmpLog('{"type":"rate_limit_event","rate_limit_info":{"rateLimitType":"seven_day","unifiedWindows":{"five_hour":{"utilization":0}}}}\n');
+  assert.strictEqual(detectRateLimitInLog(p), true);
+});
+
+test('detectRateLimitInLog: api_error_status":429 variant', () => {
+  const p = writeTmpLog('{"type":"result","is_error":true,"api_error_status":429,"result":"nope"}\n');
+  assert.strictEqual(detectRateLimitInLog(p), true);
+});
+
+test('detectRateLimitInLog: "You\'ve reached your <model> limit" variant (missed pre-PRD-1117)', () => {
+  const p = writeTmpLog('{"type":"result","result":"You\'ve reached your Fable limit. Switch to another model."}\n');
+  assert.strictEqual(detectRateLimitInLog(p), true);
+});
+
+test('detectRateLimitInLog: real evidence log (2026-09-05 204-mercury-steam-horse 429)', () => {
+  const evidencePath = '/home/bilko/.claude/session-manager/scheduled-plans/runs/2026-09-05T16-32-18-381Z/204-mercury-steam-horse.log';
+  if (!fs.existsSync(evidencePath)) return; // machine-local fixture; skip elsewhere
+  assert.strictEqual(detectRateLimitInLog(evidencePath), true);
+});
+
+test('classifyRunOutcome: a 429 log tail classifies as the new distinct rate_limited outcome, not failed', () => {
+  const p = writeTmpLog('{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"rateLimitType":"seven_day","result":"You\'ve reached your Fable limit."}\n');
+  assert.strictEqual(classifyRunOutcome(p), 'rate_limited');
+});
+
+test('classifyRunOutcome: a genuine error with no rate-limit signal still classifies as failed', () => {
+  const p = writeTmpLog('{"type":"result","subtype":"error","is_error":true,"result":"Error: expected 2 but got 3"}\n');
+  assert.strictEqual(classifyRunOutcome(p), 'failed');
+});
+
+test('classifyRunOutcome: a clean success log still classifies as success', () => {
+  const p = writeTmpLog('{"type":"result","subtype":"success","is_error":false,"result":"done"}\n');
+  assert.strictEqual(classifyRunOutcome(p), 'success');
 });

@@ -58,6 +58,7 @@ const launchFailure = require('./lib/launchFailure.cjs');
 const { appendError } = require('./lib/opsErrorLog.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
 const { claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs } = require('./lib/reaperHelpers.cjs');
+const { detectRateLimitInLog } = require('./lib/rateLimitDetect.cjs');
 const { computeQueueHealth } = require('./lib/queueHealth.cjs');
 const { createLoadGate, topCpuConsumers } = require('./lib/loadGate.cjs');
 const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
@@ -2862,21 +2863,6 @@ async function notifyNeedsReview(job, report, {
   }
 }
 
-/** Scan the tail of a job's log for the canonical rate-limit signal. We look
- *  at the last 16 KB — final result event always lands at the end.
- *  Uses readTail() so no raw fd lifecycle is needed here. */
-function detectRateLimitInLog(logPath) {
-  try {
-    const text = readTail(logPath, 16384);
-    if (!text) return false;
-    return /"rateLimitType":"five_hour"/.test(text)
-      || /"api_error_status":429/.test(text)
-      || /You'?ve hit your limit/.test(text);
-  } catch {
-    return false;
-  }
-}
-
 /** Scan the tail of a job's log for a network-outage signal: the structured
  *  `terminal_reason":"api_error"` field alongside a network-class error
  *  string. This is NOT a real code defect — spawning an auto-fix
@@ -5440,10 +5426,22 @@ async function reapDeadRunningJobs() {
 
     if (dead.length === 0) return;
 
+    // A rate-limited death is retryable, not terminal — mirror spawnJob's own
+    // live-process handling (PRD 1117) exactly: engage the SAME setPaused
+    // pause here too. Skipping this would reset the row to 'pending' but
+    // leave dispatch unpaused, so the next tick immediately re-fires it into
+    // the same still-active rate limit — the spin loop this PRD exists to
+    // stop. Done once, outside mutate(), before finalizing any row below.
+    if (dead.some((d) => d.outcome === 'rate_limited')) {
+      const resetIso = await refreshNextReset().catch(() => cachedNextReset);
+      await setPaused('rate_limit', resetIso);
+    }
+
     await mutate(async (s) => {
       for (const { slug, pid, outcome, gateOutcome, pidless, reason } of dead) {
         const idx = s.jobs.findIndex((x) => x.slug === slug);
         if (idx < 0 || s.jobs[idx].status !== 'running') continue; // race guard
+        const rateLimited = outcome === 'rate_limited';
         const success = outcome === 'success';
 
         // Best-effort in-place leftover computation: a job whose owning
@@ -5479,13 +5477,23 @@ async function reapDeadRunningJobs() {
         const leftoverSuffix = deltaPaths && deltaPaths.length
           ? ` — left ${deltaPaths.length} files uncommitted`
           : '';
-        const transitionReason = (pidless ? reason : `reaped: process gone (outcome=${outcome})`) + leftoverSuffix;
+        const transitionReason = rateLimited
+          ? `reaped: rate limit detected — reset to pending, not failed (outcome=${outcome})${leftoverSuffix}`
+          : (pidless ? reason : `reaped: process gone (outcome=${outcome})`) + leftoverSuffix;
 
-        transitionJob(s.jobs[idx], success ? 'completed' : 'failed', { reason: transitionReason, source: 'reapDeadRunningJobs' });
-        s.jobs[idx].exitCode = success ? 0 : (s.jobs[idx].exitCode ?? 1);
-        s.jobs[idx].finishedAt = new Date().toISOString();
-        s.jobs[idx].error = success ? null : `${transitionReason} (outcome=${outcome})`;
-        s.jobs[idx].gateOutcome = gateOutcome;
+        if (rateLimited) {
+          // Retryable, never terminal (PRD 1117) — same resetJobFields path
+          // spawnJob's own rateLimited branch uses (see ~4797's
+          // treatAsPending), so the row comes back exactly like any other
+          // paused-for-rate-limit reset: fresh runId/startedAt/exitCode.
+          resetJobFields(s.jobs[idx], transitionReason, { source: 'reapDeadRunningJobs:rate-limit' });
+        } else {
+          transitionJob(s.jobs[idx], success ? 'completed' : 'failed', { reason: transitionReason, source: 'reapDeadRunningJobs' });
+          s.jobs[idx].exitCode = success ? 0 : (s.jobs[idx].exitCode ?? 1);
+          s.jobs[idx].finishedAt = new Date().toISOString();
+          s.jobs[idx].error = success ? null : `${transitionReason} (outcome=${outcome})`;
+          s.jobs[idx].gateOutcome = gateOutcome;
+        }
         delete s.jobs[idx].runtime;
         delete s.jobs[idx].guardBaseline;
         delete s.jobs[idx].guardHeadBefore;
@@ -5499,7 +5507,10 @@ async function reapDeadRunningJobs() {
         // with no exit event) wedges the lease held forever and stalls
         // dispatch for every project until the app restarts.
         if (s.jobs[idx].quietMachine === true) quietMachineLease.release(slug);
-        if (pidless) {
+        if (rateLimited) {
+          console.log(`[scheduler] reaped rate-limited job slug=${slug} — reset to pending, pause engaged`);
+          appendAuditEvent('job_reaped_rate_limited', { slug, cwd: s.jobs[idx].cwd ?? null });
+        } else if (pidless) {
           console.log(`[scheduler] reaped pidless zombie job slug=${slug} outcome=${outcome}`);
           appendAuditEvent('job_reaped_pidless', { slug, cwd: s.jobs[idx].cwd ?? null, outcome, graceMs: PIDLESS_SPAWN_GRACE_MS });
         } else {

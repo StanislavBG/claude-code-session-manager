@@ -9,6 +9,7 @@
 
 const fs = require('node:fs');
 const { readTail } = require('./fileTail.cjs');
+const { detectRateLimitInLog } = require('./rateLimitDetect.cjs');
 
 /**
  * Return true if pid is alive AND its cmdline looks like a claude process.
@@ -38,14 +39,20 @@ function claudePidAlive(pid) {
  * of its log file and scanning for the LAST `{"type":"result"}` JSONL event.
  *
  * Returns:
- *   'success'   — last result event has subtype=success and is_error !== true
- *   'failed'    — last result event exists but indicates an error
- *   'no_result' — no result event found in the tail (process may have been killed
- *                 before emitting one, or the log is absent/empty)
- *   'unknown'   — unexpected error reading/parsing (outer catch)
+ *   'success'      — last result event has subtype=success and is_error !== true
+ *   'rate_limited' — the log tail shows the same rate-limit signal spawnJob's own
+ *                    live-process check uses (detectRateLimitInLog, the shared
+ *                    single source of truth) — a NEW, distinct outcome from
+ *                    'failed' (PRD 1117): a rate-limited death is retryable, not
+ *                    a genuine gate failure, and must never collapse into 'failed'
+ *   'failed'       — last result event exists but indicates a genuine error
+ *   'no_result'    — no result event found in the tail (process may have been killed
+ *                    before emitting one, or the log is absent/empty)
+ *   'unknown'      — unexpected error reading/parsing (outer catch)
  */
 function classifyRunOutcome(logPath) {
   try {
+    if (detectRateLimitInLog(logPath)) return 'rate_limited';
     const text = readTail(logPath, 65536);
     let lastResult = null;
     for (const line of text.split('\n')) {

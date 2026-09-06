@@ -288,15 +288,26 @@ async function completedSlugsForCwd(cwd) {
     if (e.code === 'ENOENT') return new Set();
     throw e;
   }
-  const slugs = new Set();
+  // Last-line-wins per slug (file is append-only chronological) — same
+  // pattern as historyTerminalBySlug above. A slug can legitimately appear
+  // more than once (scheduler_reset_job resets a completed row back to
+  // pending, it runs again, and eventually re-retires to history) — unioning
+  // every 'completed' line ever seen, without letting a LATER 'failed' line
+  // for the same slug revoke it, would keep a since-refailed dep permanently
+  // satisfied for its dependents.
+  const statusBySlug = new Map();
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     try {
       const j = JSON.parse(line);
-      if (j?.slug && j.status === 'completed') slugs.add(j.slug);
+      if (j?.slug) statusBySlug.set(j.slug, j.status);
     } catch {
       // corrupt/partial line — ignore
     }
+  }
+  const slugs = new Set();
+  for (const [slug, status] of statusBySlug) {
+    if (status === 'completed') slugs.add(slug);
   }
   return slugs;
 }

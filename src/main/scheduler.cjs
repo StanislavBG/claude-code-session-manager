@@ -64,6 +64,7 @@ const {
 const { sweepStrandedJobBranches } = require('./lib/branchSweep.cjs');
 const { detectRateLimitInLog } = require('./lib/rateLimitDetect.cjs');
 const { stripAppOwnedChurn } = require('./lib/jobDirtFilter.cjs');
+const { resolveBindingRateLimitReset } = require('./lib/rateLimitWindow.cjs');
 const { computeQueueHealth } = require('./lib/queueHealth.cjs');
 const { createLoadGate, topCpuConsumers } = require('./lib/loadGate.cjs');
 const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
@@ -2361,6 +2362,20 @@ function getNextResetCached() {
   return cachedNextReset;
 }
 
+/**
+ * Pure: picks the reset to pause against for a rate-limited run (PRD 1118).
+ * Prefers the BINDING window read off the run's own log — refreshNextReset()
+ * only ever reports five_hour, which is the wrong clock when a
+ * seven_day/seven_day_overage_included window is what actually 429'd
+ * (five_hour can read 0% utilization at the very same moment). Falls back
+ * to the billing-endpoint-derived reset only when the log yields nothing.
+ */
+function resolveRateLimitPauseReset(logPath, billingResetIso) {
+  const logReset = resolveBindingRateLimitReset(logPath);
+  if (logReset != null) return new Date(logReset * 1000).toISOString();
+  return billingResetIso ?? null;
+}
+
 // ---------- health / poll state ----------
 
 let bootedAt = Date.now();
@@ -2644,6 +2659,33 @@ function nextRapidRateLimitCount(prevCount, { rateLimited, durationMs }) {
   return prevCount || 0;
 }
 
+/**
+ * Pure: decides the resumeAt actually armed for a pause. 'network' and
+ * 'rate_limit' (PRD 1118) both get a bounded 30-minute fallback when no
+ * explicit resumeAt is supplied — the live rate_limit failure mode is the
+ * billing usage endpoint itself 429ing while the log yields no binding
+ * window either, which used to leave an indefinite pause with no resume
+ * timer at all (a queue that never comes back on its own).
+ */
+function computeEffectiveResumeAt(reason, resumeAtIso, nowMs = Date.now()) {
+  if (resumeAtIso) return resumeAtIso;
+  if (reason === 'network' || reason === 'rate_limit') {
+    return new Date(nowMs + 30 * 60_000).toISOString();
+  }
+  return null;
+}
+
+/**
+ * Pure: the setTimeout delay for a resume timer, plus whether it overflows
+ * setTimeout's signed-32-bit max (~24.8 days) and must not be armed.
+ * Resume fires 30s after the reset to give the auth/billing endpoint time
+ * to flip.
+ */
+function computeResumeDelay(effectiveResumeAtIso, nowMs = Date.now()) {
+  const delayMs = Math.max(30_000, new Date(effectiveResumeAtIso).getTime() - nowMs + 30_000);
+  return { delayMs, tooFar: delayMs > 0x7fffffff };
+}
+
 async function setPaused(reason, resumeAtIso, opts = {}) {
   const { observedAt = null, force = false } = opts;
   // Honor manual-override cooldown: if the user cleared a pause within the
@@ -2660,11 +2702,7 @@ async function setPaused(reason, resumeAtIso, opts = {}) {
     console.log(`[scheduler] setPaused(${reason}) engaging despite manual override cooldown — triggering run started after the manual clear`);
   }
 
-  // For 'network' with no explicit resumeAt, auto-resume after 30 minutes.
-  let effectiveResumeAt = resumeAtIso;
-  if (reason === 'network' && !resumeAtIso) {
-    effectiveResumeAt = new Date(Date.now() + 30 * 60_000).toISOString();
-  }
+  const effectiveResumeAt = computeEffectiveResumeAt(reason, resumeAtIso);
 
   await mutate((s) => {
     if (s.paused && s.paused.reason === reason) {
@@ -2678,9 +2716,8 @@ async function setPaused(reason, resumeAtIso, opts = {}) {
   if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
   if (!effectiveResumeAt) return;
 
-  // Resume 30s after the reset to give the auth/billing endpoint time to flip.
-  const delay = Math.max(30_000, new Date(effectiveResumeAt).getTime() - Date.now() + 30_000);
-  if (delay > 0x7fffffff) {
+  const { delayMs: delay, tooFar } = computeResumeDelay(effectiveResumeAt);
+  if (tooFar) {
     console.warn(`[scheduler] paused (${reason}); resumeAt too far for setTimeout (${delay}ms)`);
     return;
   }
@@ -5378,7 +5415,9 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     }
 
     if (res.rateLimited) {
-      const resetIso = await refreshNextReset().catch(() => cachedNextReset);
+      const logPath = path.join(runDir, `${job.slug}.log`);
+      const billingResetIso = await refreshNextReset().catch(() => cachedNextReset);
+      const resetIso = resolveRateLimitPauseReset(logPath, billingResetIso);
       const observedAt = dispatchStartedAtMs;
       const prevCount = consecutiveRapidRateLimitsBySlug.get(job.slug) || 0;
       const nextCount = nextRapidRateLimitCount(prevCount, { rateLimited: true, durationMs: res.durationMs });
@@ -6527,7 +6566,7 @@ async function reapDeadRunningJobs() {
       // with real content proves the job DID run (see
       // resolvePidlessGateOutcome's header).
       const gateOutcome = pidless ? resolvePidlessGateOutcome(outcome, logHasOutput(logPath)) : mapOutcomeToGateOutcome(outcome);
-      dead.push({ slug, pid, outcome, gateOutcome, pidless, reason });
+      dead.push({ slug, pid, outcome, gateOutcome, pidless, reason, logPath });
     }
 
     queueHealthSweepCycle += 1;
@@ -6545,8 +6584,9 @@ async function reapDeadRunningJobs() {
     // the same still-active rate limit — the spin loop this PRD exists to
     // stop. Done once, outside mutate(), before finalizing any row below.
     if (dead.some((d) => d.outcome === 'rate_limited')) {
-      const resetIso = await refreshNextReset().catch(() => cachedNextReset);
       const triggering = dead.find((d) => d.outcome === 'rate_limited');
+      const billingResetIso = await refreshNextReset().catch(() => cachedNextReset);
+      const resetIso = resolveRateLimitPauseReset(triggering.logPath, billingResetIso);
       const triggeringRow = triggering ? state.jobs.find((x) => x.slug === triggering.slug) : null;
       const observedAtMs = triggeringRow?.startedAt ? Date.parse(triggeringRow.startedAt) : null;
       // Same rapid-repeat circuit breaker spawnJob's own res.rateLimited
@@ -8981,4 +9021,7 @@ module.exports = {
   MANUAL_PAUSE_COOLDOWN_MS,
   RUNS_DIR,
   pickRunDir,
+  resolveRateLimitPauseReset,
+  computeEffectiveResumeAt,
+  computeResumeDelay,
 };

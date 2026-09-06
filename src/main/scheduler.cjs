@@ -57,7 +57,11 @@ const { resolveClaudeBin, probeClaudeVersion } = require('./lib/claudeBin.cjs');
 const launchFailure = require('./lib/launchFailure.cjs');
 const { appendError } = require('./lib/opsErrorLog.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
-const { claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs } = require('./lib/reaperHelpers.cjs');
+const {
+  claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs,
+  findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome,
+} = require('./lib/reaperHelpers.cjs');
+const { sweepStrandedJobBranches } = require('./lib/branchSweep.cjs');
 const { detectRateLimitInLog } = require('./lib/rateLimitDetect.cjs');
 const { stripAppOwnedChurn } = require('./lib/jobDirtFilter.cjs');
 const { computeQueueHealth } = require('./lib/queueHealth.cjs');
@@ -6212,6 +6216,55 @@ function runQueueHealthSweep(jobs) {
   }
 }
 
+// Cross-cycle "already attempted" memory for the branch sweep (PRD 1135) —
+// in-memory only, keyed `"<cwd>::<branch>"`. Resets on restart, same as
+// consecutiveRapidRateLimitsBySlug above; the goal is "don't retry a
+// permanently-conflicting branch every cycle forever" while the process
+// stays up, not durability across a restart.
+const branchSweepAttempted = new Set();
+
+/**
+ * Recover any `sm-job/*` branch left stranded (unmerged, owning row terminal
+ * or gone) across every known project — the other half of PRD 1135's
+ * invariant alongside the reaper's liveness check above: that check stops
+ * NEW stranding, this sweep recovers anything stranded before it (or by a
+ * crash the liveness check can't cover). Read-only reporting plus AT MOST one
+ * bounded integrateBranch attempt per branch per process lifetime (see
+ * branchSweepAttempted) — never forces anything, never deletes a branch.
+ * Hangs off the same cadence as runQueueHealthSweep. Never throws.
+ */
+async function runBranchSweep(jobs) {
+  if (process.env.SM_BRANCH_SWEEP_DISABLE === '1') return;
+  try {
+    for (const cwd of allProjectCwds()) {
+      let sweep;
+      try {
+        sweep = await sweepStrandedJobBranches({ cwd, jobs, attemptedBranches: branchSweepAttempted });
+      } catch (e) {
+        console.warn(`[scheduler] branch sweep error for ${cwd}`, e?.message);
+        continue;
+      }
+      for (const r of sweep.results) {
+        if (r.action === 'integrated') {
+          console.log(`[scheduler] branch-sweep: merged stranded branch ${r.branch} into ${cwd} HEAD`);
+          appendAuditEvent('branch_sweep_integrated', { cwd, branch: r.branch, slug: r.slug });
+        } else if (r.action === 'conflict') {
+          console.warn(`[scheduler] branch-sweep: ${r.branch} could not be integrated: ${r.integration?.reason}`);
+          appendAuditEvent('branch_sweep_conflict', { cwd, branch: r.branch, slug: r.slug, reason: r.integration?.reason });
+          if (r.slug) {
+            await mutate((s) => {
+              const j = s.jobs.find((x) => x.slug === r.slug);
+              if (j) j.strandedBranch = r.branch;
+            });
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[scheduler] branch sweep error', e?.message);
+  }
+}
+
 /**
  * Scan running jobs, identify those whose claude process is provably dead OR
  * whose spawn never got far enough to record a runtime.pid in the first
@@ -6229,12 +6282,33 @@ async function reapDeadRunningJobs() {
     // status:"running" with no slug left in runningSet to trigger reconciliation.
     // queue.json is the source of truth for which jobs are actually running.
     const state = await readQueue();
-    const { reapable, warnings } = selectReapableJobs(state.jobs, Date.now(), {
+    const { reapable, warnings, recovered } = selectReapableJobs(state.jobs, Date.now(), {
       pidAlive: claudePidAlive,
       grace: PIDLESS_SPAWN_GRACE_MS,
+      findLiveProcess: (j) => findLiveProcessForJob(j, {
+        worktreeDir: jobWorktree.worktreeDirFor(j.cwd || state.config?.defaultCwd || DEFAULT_PROJECT_CWD, j.slug),
+      }),
     });
     for (const w of warnings) {
       console.warn(`[scheduler] reapDeadRunningJobs: ${w.reason} slug=${w.slug} — leaving row alone`);
+    }
+
+    // A pidless row whose process was proven alive by the /proc liveness
+    // scan must never be terminalized (2026-09-06 incident — see
+    // findLiveProcessForJob's header). Re-stamp the recovered pid so future
+    // cycles see it as an ordinary live-pid row, and stop here for it.
+    if (recovered.length) {
+      await mutate(async (s) => {
+        for (const r of recovered) {
+          const idx = s.jobs.findIndex((x) => x.slug === r.slug);
+          if (idx < 0 || s.jobs[idx].status !== 'running') continue;
+          s.jobs[idx].runtime = { ...(s.jobs[idx].runtime || {}), pid: r.pid };
+        }
+      });
+      for (const r of recovered) {
+        console.log(`[scheduler] reapDeadRunningJobs: pid=${r.pid} recovered by /proc liveness scan for slug=${r.slug} — row stays running`);
+        appendAuditEvent('job_pid_recovered_by_liveness_scan', { slug: r.slug, pid: r.pid });
+      }
     }
 
     const dead = [];
@@ -6247,15 +6321,18 @@ async function reapDeadRunningJobs() {
       // 'no_result' → non-success below → filed as failed, never completed.
       const outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
       // A pidless reap means the spawn never got far enough to record a
-      // pid — the gate could not possibly have run, regardless of what
-      // classifyRunOutcome makes of an absent/empty log.
-      const gateOutcome = pidless ? 'never_ran' : mapOutcomeToGateOutcome(outcome);
+      // pid — the gate could not possibly have run. But `never_ran` is only
+      // a true claim when the run dir produced no log output at all; a log
+      // with real content proves the job DID run (see
+      // resolvePidlessGateOutcome's header).
+      const gateOutcome = pidless ? resolvePidlessGateOutcome(outcome, logHasOutput(logPath)) : mapOutcomeToGateOutcome(outcome);
       dead.push({ slug, pid, outcome, gateOutcome, pidless, reason });
     }
 
     queueHealthSweepCycle += 1;
     if (queueHealthSweepCycle % QUEUE_HEALTH_SWEEP_EVERY_N_CYCLES === 0) {
       runQueueHealthSweep(state.jobs);
+      await runBranchSweep(state.jobs);
     }
 
     if (dead.length === 0) return;
@@ -8581,6 +8658,7 @@ module.exports = {
   pickNextBatch,
   pickForProject,
   reapDeadRunningJobs,
+  runBranchSweep,
   pollRecoveryClearSource,
   memoryLimitedBatchSize,
   availableForJobs,

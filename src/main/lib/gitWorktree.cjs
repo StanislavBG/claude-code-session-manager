@@ -859,6 +859,25 @@ async function salvageDirtyDelta({ cwd, paths, outFile }) {
   }
 }
 
+/**
+ * True when every commit on `branch` is already an ancestor of (or equal to)
+ * `cwd`'s current HEAD — i.e. the branch holds no work that isn't already
+ * landed. Used by the stranded-branch sweep (branchSweep.cjs) to tell a
+ * genuinely stranded `sm-job/*` branch from one that's already a no-op.
+ * Never throws; a branch that doesn't exist, or any other git failure, is
+ * conservatively reported as NOT merged so a caller never treats an
+ * unreadable branch as safe to skip.
+ */
+async function isBranchMergedIntoHead(cwd, branch) {
+  try {
+    const branchHead = (await execGit(['rev-parse', '--verify', branch], { cwd, timeout: 10_000 })).trim();
+    const mergeBase = (await execGit(['merge-base', 'HEAD', branch], { cwd, timeout: 10_000 })).trim();
+    return mergeBase !== '' && mergeBase === branchHead;
+  } catch {
+    return false;
+  }
+}
+
 /** Parse `git worktree list --porcelain` into `[{ worktree, branch }]`. */
 function parseWorktreeListPorcelain(text) {
   const entries = [];
@@ -1003,6 +1022,7 @@ module.exports = {
   cleanupWorktree,
   salvageWorktreeDiff,
   salvageDirtyDelta,
+  isBranchMergedIntoHead,
   parseWorktreeListPorcelain,
   reconcileWorktreesOnBoot,
   sweepStaleWorktreeCheckouts,

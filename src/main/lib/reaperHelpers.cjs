@@ -8,6 +8,7 @@
  */
 
 const fs = require('node:fs');
+const path = require('node:path');
 const { readTail } = require('./fileTail.cjs');
 const { detectRateLimitInLog } = require('./rateLimitDetect.cjs');
 
@@ -32,6 +33,90 @@ function claudePidAlive(pid) {
     // Can't read cmdline (macOS, permission denied) → assume alive.
     return true;
   }
+}
+
+/**
+ * findLiveProcessForJob(job, { worktreeDir }) → pid | null
+ *
+ * Positive liveness scan for a 'running' row whose `runtime.pid` is missing —
+ * the case a missing pid must NOT be read as "the process is gone" (2026-09-06
+ * incident: 234-uranus-eight-tails-ox marked failed/never_ran while PID
+ * 2174739 was a live `claude -p` still writing to that job's own worktree).
+ *
+ * Linux-`/proc` only. Scans every numeric `/proc/<pid>` entry and matches
+ * either: `/proc/<pid>/cwd` resolves to `worktreeDir` (or a path nested under
+ * it), or `/proc/<pid>/cmdline` contains both `claude` and the job's slug
+ * (fallback for a worktree-disabled/in-place run, where there is no dedicated
+ * worktreeDir to match against). Returns the first matching pid, or null if
+ * none is found.
+ *
+ * Safe fallback by construction: on any platform without `/proc` (macOS,
+ * Windows) `fs.readdirSync('/proc')` throws and this returns null immediately
+ * — i.e. exactly today's behaviour (fail toward terminalizing), never a hang
+ * or a thrown error propagating to the caller.
+ */
+function findLiveProcessForJob(job, { worktreeDir } = {}) {
+  const slug = job?.slug;
+  let entries;
+  try {
+    entries = fs.readdirSync('/proc');
+  } catch {
+    return null;
+  }
+  for (const name of entries) {
+    if (!/^\d+$/.test(name)) continue;
+    const pid = Number(name);
+    if (!pid || pid <= 1) continue;
+    if (worktreeDir) {
+      try {
+        const cwdLink = fs.readlinkSync(`/proc/${pid}/cwd`);
+        if (cwdLink === worktreeDir || cwdLink.startsWith(worktreeDir + path.sep)) return pid;
+      } catch {
+        // Process exited mid-scan, or permission denied — try the argv
+        // fallback below before giving up on this pid.
+      }
+    }
+    if (slug) {
+      try {
+        const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
+        if (/\bclaude\b/.test(cmd) && cmd.includes(slug)) return pid;
+      } catch {
+        // Same as above — process gone or unreadable, keep scanning.
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * True when `logPath` exists and has non-zero content — the literal "did the
+ * run dir produce any log output" check that gates whether a pidless reap may
+ * assert `gateOutcome: 'never_ran'`. A run whose log has real bytes in it DID
+ * run, regardless of whether classifyRunOutcome found a clean result event in
+ * it — asserting never_ran in that case would be a false claim (see
+ * resolvePidlessGateOutcome below).
+ */
+function logHasOutput(logPath) {
+  if (!logPath) return false;
+  try {
+    return fs.statSync(logPath).size > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Gate-outcome for a pidless reap, once no live process was found for it.
+ * `never_ran` is asserted ONLY when the run dir produced no log output at
+ * all — mapOutcomeToGateOutcome's own 'no_result' → 'never_ran' mapping is
+ * otherwise too broad here: a log with real content but no clean result event
+ * (e.g. killed mid-turn) proves the job DID run, so that case is reported as
+ * 'failed' instead of the false 'never_ran'.
+ */
+function resolvePidlessGateOutcome(outcome, hasOutput) {
+  if (!hasOutput) return 'never_ran';
+  const mapped = mapOutcomeToGateOutcome(outcome);
+  return mapped === 'never_ran' ? 'failed' : mapped;
 }
 
 /**
@@ -129,10 +214,21 @@ const ORPHAN_REQUEUE_CAP = 5;
  * A pidless row whose `startedAt` is missing or unparseable is neither
  * reaped nor skipped silently — age can't be proven, so it is surfaced in
  * `warnings` instead (the caller logs it) and left alone.
+ *
+ * `findLiveProcess` (optional, `(job) → pid | null`) is consulted for a
+ * pidless row ONLY once its age clears `grace` — i.e. right before it would
+ * otherwise be terminalized. A pid it finds means the process is actually
+ * alive despite the missing runtime.pid record: the row is diverted into
+ * `recovered` (never `reapable`) so the caller can re-stamp the pid and leave
+ * the row `running`, instead of terminalizing a job that is still doing real
+ * work (2026-09-06 incident — see findLiveProcessForJob's header). Omitting
+ * `findLiveProcess` (existing callers/tests) preserves prior behaviour
+ * exactly: every pidless row past grace reaps, none are ever recovered.
  */
-function selectReapableJobs(jobs, now, { pidAlive, grace } = {}) {
+function selectReapableJobs(jobs, now, { pidAlive, grace, findLiveProcess } = {}) {
   const reapable = [];
   const warnings = [];
+  const recovered = [];
   for (const j of jobs ?? []) {
     if (j.status !== 'running') continue;
     const pid = j.runtime?.pid;
@@ -148,6 +244,11 @@ function selectReapableJobs(jobs, now, { pidAlive, grace } = {}) {
     }
     const ageMs = now - startedAt;
     if (ageMs < grace) continue; // spawn may still be mid-flight
+    const livePid = typeof findLiveProcess === 'function' ? findLiveProcess(j) : null;
+    if (livePid) {
+      recovered.push({ slug: j.slug, pid: livePid });
+      continue;
+    }
     reapable.push({
       slug: j.slug,
       pid: null,
@@ -155,7 +256,16 @@ function selectReapableJobs(jobs, now, { pidAlive, grace } = {}) {
       reason: `reaped: no runtime.pid recorded after ${Math.round(grace / 60_000)}m — spawn never completed`,
     });
   }
-  return { reapable, warnings };
+  return { reapable, warnings, recovered };
 }
 
-module.exports = { claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs };
+module.exports = {
+  claudePidAlive,
+  classifyRunOutcome,
+  mapOutcomeToGateOutcome,
+  ORPHAN_REQUEUE_CAP,
+  selectReapableJobs,
+  findLiveProcessForJob,
+  logHasOutput,
+  resolvePidlessGateOutcome,
+};

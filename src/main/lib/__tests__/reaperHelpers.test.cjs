@@ -19,7 +19,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { selectReapableJobs, mapOutcomeToGateOutcome, classifyRunOutcome } = require('../reaperHelpers.cjs');
+const { spawn } = require('node:child_process');
+const {
+  selectReapableJobs, mapOutcomeToGateOutcome, classifyRunOutcome,
+  findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome,
+} = require('../reaperHelpers.cjs');
 const { detectRateLimitInLog } = require('../rateLimitDetect.cjs');
 
 const NOW = Date.parse('2026-09-01T12:00:00.000Z');
@@ -99,6 +103,33 @@ test('non-running rows are never considered, pidless or not', () => {
   const { reapable, warnings } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysDead, grace: GRACE });
   assert.deepStrictEqual(reapable, []);
   assert.deepStrictEqual(warnings, []);
+});
+
+test('pidless + past grace + findLiveProcess finds a pid → recovered, never reaped', () => {
+  const jobs = [{ slug: 'zombie-alive', status: 'running', startedAt: agoMin(464) }];
+  const findLiveProcess = () => 2174739;
+  const { reapable, recovered, warnings } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE, findLiveProcess });
+  assert.deepStrictEqual(reapable, []);
+  assert.deepStrictEqual(warnings, []);
+  assert.strictEqual(recovered.length, 1);
+  assert.strictEqual(recovered[0].slug, 'zombie-alive');
+  assert.strictEqual(recovered[0].pid, 2174739);
+});
+
+test('pidless + past grace + findLiveProcess finds nothing → reaped exactly as today', () => {
+  const jobs = [{ slug: 'zombie-dead', status: 'running', startedAt: agoMin(464) }];
+  const findLiveProcess = () => null;
+  const { reapable, recovered } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE, findLiveProcess });
+  assert.deepStrictEqual(recovered, []);
+  assert.strictEqual(reapable.length, 1);
+  assert.strictEqual(reapable[0].pidless, true);
+});
+
+test('pidless + past grace + no findLiveProcess supplied → reaped exactly as before this PRD', () => {
+  const jobs = [{ slug: 'zombie', status: 'running', startedAt: agoMin(464) }];
+  const { reapable, recovered } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE });
+  assert.strictEqual(reapable.length, 1);
+  assert.deepStrictEqual(recovered, []);
 });
 
 test('mixed batch: each row classified independently', () => {
@@ -219,4 +250,74 @@ test('classifyRunOutcome: the same allowed_warning tail on an ERRORED run classi
 test('classifyRunOutcome: a clean success log still classifies as success', () => {
   const p = writeTmpLog('{"type":"result","subtype":"success","is_error":false,"result":"done"}\n');
   assert.strictEqual(classifyRunOutcome(p), 'success');
+});
+
+// findLiveProcessForJob — the /proc positive liveness scan behind the
+// 2026-09-06 stranded-branch incident (234-uranus-eight-tails-ox: marked
+// failed/never_ran while its process was alive and still writing to its
+// worktree). Linux-only, and a safe no-op everywhere else per its own header.
+
+test('findLiveProcessForJob: finds a live process via /proc/<pid>/cwd match', async () => {
+  if (process.platform !== 'linux' || !fs.existsSync('/proc')) return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-reaper-liveness-'));
+  const child = spawn('sleep', ['5'], { cwd: dir, stdio: 'ignore' });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const pid = findLiveProcessForJob({ slug: 'irrelevant-slug' }, { worktreeDir: dir });
+    assert.strictEqual(pid, child.pid);
+  } finally {
+    child.kill('SIGKILL');
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('findLiveProcessForJob: no live process anywhere → null', () => {
+  if (process.platform !== 'linux' || !fs.existsSync('/proc')) return;
+  const pid = findLiveProcessForJob(
+    { slug: 'definitely-not-a-real-running-slug-xyz123' },
+    { worktreeDir: '/nonexistent/worktree/dir/xyz123' },
+  );
+  assert.strictEqual(pid, null);
+});
+
+// logHasOutput — the literal "did the run dir produce any log output" check
+// that gates whether a pidless reap may assert gateOutcome: 'never_ran'.
+
+test('logHasOutput: missing file → false', () => {
+  assert.strictEqual(logHasOutput('/nonexistent/path/does-not-exist.log'), false);
+});
+
+test('logHasOutput: empty file → false', () => {
+  const p = writeTmpLog('');
+  assert.strictEqual(logHasOutput(p), false);
+});
+
+test('logHasOutput: file with content → true', () => {
+  const p = writeTmpLog('some real log output\n');
+  assert.strictEqual(logHasOutput(p), true);
+});
+
+test('logHasOutput: null path → false', () => {
+  assert.strictEqual(logHasOutput(null), false);
+});
+
+// resolvePidlessGateOutcome — never_ran is asserted ONLY when the run dir has
+// no log output; a run dir WITH output must not claim never_ran even if no
+// clean result event was found in it.
+
+test('resolvePidlessGateOutcome: no output → never_ran, regardless of raw outcome (terminalizes as today)', () => {
+  assert.strictEqual(resolvePidlessGateOutcome('no_result', false), 'never_ran');
+  assert.strictEqual(resolvePidlessGateOutcome('success', false), 'never_ran');
+});
+
+test('resolvePidlessGateOutcome: output present + no_result → failed, never never_ran', () => {
+  assert.strictEqual(resolvePidlessGateOutcome('no_result', true), 'failed');
+});
+
+test('resolvePidlessGateOutcome: output present + success → passed', () => {
+  assert.strictEqual(resolvePidlessGateOutcome('success', true), 'passed');
+});
+
+test('resolvePidlessGateOutcome: output present + failed → failed', () => {
+  assert.strictEqual(resolvePidlessGateOutcome('failed', true), 'failed');
 });

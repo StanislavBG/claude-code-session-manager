@@ -5910,9 +5910,12 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
             s.jobs[i2].landedCommit = jobLandedCommitThisRun;
           }
           // Persist the verifier's verdict string so the renderer can show it.
+          // 'blocked_by_foreign_wip_streak' is set above from the sigterm/
+          // exit-code path, never from verifyResult (which stays null on a
+          // non-zero exit) — never clobber it here.
           if (verifyResult?.verdict && verifyResult.verdict !== 'clean') {
             s.jobs[i2].verifierVerdict = verifyResult.verdict;
-          } else {
+          } else if (s.jobs[i2].verifierVerdict !== 'blocked_by_foreign_wip_streak') {
             delete s.jobs[i2].verifierVerdict;
           }
           // Closed-set outcome taxonomy (issue #11 list A2) so a queue row

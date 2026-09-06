@@ -572,6 +572,52 @@ async function computeCommittedDuringRun(cwd, headBefore, headAfter, startedAt, 
 }
 
 /**
+ * Read-only check: is a job's `sm-job/<slug>` worktree branch already fully
+ * integrated into `cwd`'s current HEAD — i.e. every commit on the branch is
+ * an ancestor of (or equal to) HEAD? Mirrors gitWorktree.cjs's own
+ * integrateBranch() no-op detection (`mergeBase === branchHead`) exactly, but
+ * deliberately never calls integrateBranch itself: this is used by
+ * reapDeadRunningJobs to PROVE a dead job's work already landed, never to
+ * perform the landing — attempting a real merge from an audit check is a
+ * mutating action with its own conflict/timing risk, and "land the still-
+ * stranded branch" is explicitly a separate, later decision (mechanical
+ * recovery, or a human), not something a reap pass should do on its own
+ * initiative. See reapDeadRunningJobs's own header comment for why the
+ * conservative failure direction here is needs_review, never a silent merge.
+ *
+ * Returns:
+ *  - true  — branch exists and is fully contained in HEAD (already
+ *    integrated by a prior pass, or a genuine no-op branch that never
+ *    diverged from its base — both cases legitimately "landed").
+ *  - false — branch exists and still holds commits not in HEAD (a real
+ *    stranded deliverable, e.g. the PRD 1118 shape).
+ *  - null  — branch does not exist at all (never a worktree run — an
+ *    in-place run, or SM_JOB_WORKTREE_DISABLE), or the git calls errored.
+ * Never throws.
+ */
+function isBranchAlreadyIntegrated(cwd, branch) {
+  return new Promise((resolve) => {
+    if (!cwd || !branch) { resolve(null); return; }
+    execFile(
+      'git', ['-C', cwd, 'rev-parse', '--verify', branch],
+      { timeout: 10_000, windowsHide: true },
+      (err, branchHeadOut) => {
+        if (err) { resolve(null); return; } // branch doesn't exist — not a worktree run
+        const branchHead = String(branchHeadOut || '').trim();
+        execFile(
+          'git', ['-C', cwd, 'merge-base', 'HEAD', branch],
+          { timeout: 10_000, windowsHide: true },
+          (mbErr, mbOut) => {
+            const mergeBase = mbErr ? '' : String(mbOut || '').trim();
+            resolve(mergeBase !== '' && mergeBase === branchHead);
+          },
+        );
+      },
+    );
+  });
+}
+
+/**
  * Override for a SIGTERM'd (143) run when a commit landed in its window.
  * Exit 143 alone doesn't prove the deliverable is missing — the 776/779
  * incidents (2026-07-30) both died on a headless-incompatible interactive
@@ -6242,6 +6288,64 @@ async function reapDeadRunningJobs() {
       await setPaused('rate_limit', resetIso, { observedAt: observedAtMs, force: forceHardPause });
     }
 
+    // Prove integration BEFORE entering mutate() (PRD 1133): the check below
+    // shells out to git — including a full `git fetch --all --prune` (up to
+    // 20s) via computeCommittedDuringRun's committedInWindow, plus up to two
+    // 2s retry sleeps when nothing landed — for every dead job that needs the
+    // in-place fallback. mutate() serializes through ONE global mutateTail
+    // promise chain shared by every project's dispatch/admin/cancel mutation,
+    // same reason the rate-limit handling above already runs outside it — so
+    // doing this git work inside the mutate() callback would stall the whole
+    // scheduler's queue writes for the sum of these calls across every dead
+    // job in the batch (e.g. an app-restart reap that dead-letters several
+    // running jobs at once).
+    const integrationResults = new Map();
+    for (const d of dead) {
+      if (d.outcome !== 'success') continue;
+      const row = state.jobs.find((x) => x.slug === d.slug);
+      if (!row) continue;
+      const rowCwd = row.cwd || state.config?.defaultCwd || DEFAULT_PROJECT_CWD;
+      if (!isGitRepoSync(rowCwd)) continue;
+      const branch = jobWorktree.branchNameFor(d.slug);
+      const integrated = await isBranchAlreadyIntegrated(rowCwd, branch);
+      const headNow = await gitHead(rowCwd);
+      const guardHeadBeforeVal = row.guardHeadBefore || null;
+      let landedCommit = null;
+      let notLandedInfo = null;
+      let effectiveSuccess = true;
+      if (integrated === null) {
+        // No sm-job/<slug> branch — an in-place run (or worktree isolation
+        // disabled). Prove landing via the exact same HEAD-advance evidence
+        // the live commit-guard already uses — reused, not re-derived.
+        const committed = await computeCommittedDuringRun(
+          rowCwd, guardHeadBeforeVal, headNow, row.startedAt, new Date().toISOString(),
+        );
+        if (committed) {
+          if (guardHeadBeforeVal && headNow && headNow !== guardHeadBeforeVal) landedCommit = headNow;
+        } else {
+          effectiveSuccess = false;
+          notLandedInfo = {
+            verdict: 'reaped_without_integration',
+            reason: 'no commit landed during the run window — HEAD never advanced',
+          };
+        }
+      } else if (integrated === true) {
+        if (guardHeadBeforeVal && headNow && headNow !== guardHeadBeforeVal) landedCommit = headNow;
+      } else {
+        // Branch exists and still holds commits never merged into rowCwd's
+        // HEAD — the exact PRD 1118 shape. Never merge it here (see
+        // isBranchAlreadyIntegrated's header comment); park for review
+        // instead, naming the branch so the work is easy to find and land by
+        // hand or via mechanical recovery.
+        effectiveSuccess = false;
+        notLandedInfo = {
+          verdict: 'reaped_without_integration',
+          reason: `worktree branch ${branch} still holds unintegrated work — never merged into ${rowCwd}`,
+        };
+      }
+      integrationResults.set(d.slug, { effectiveSuccess, landedCommit, notLandedInfo });
+    }
+
     await mutate(async (s) => {
       for (const { slug, pid, outcome, gateOutcome, pidless, reason } of dead) {
         const idx = s.jobs.findIndex((x) => x.slug === slug);
@@ -6280,12 +6384,38 @@ async function reapDeadRunningJobs() {
             console.error(`[scheduler] reapDeadRunningJobs: in-place salvage failed for ${slug}`, e);
           }
         }
+        // Prove integration before this reap is allowed to say 'completed'
+        // (PRD 1133): a reaped job's owning process vanished before
+        // spawnJob's own post-run integration/commit-guard ever ran, so
+        // 'outcome=success' alone (a clean result event in the log) is not
+        // proof anything actually landed — the two live incidents this PRD
+        // exists for (1118, starry-night-ships 224) both had exactly that
+        // shape. Only evaluated for a genuinely successful, non-rate-limited
+        // outcome; a non-git cwd (isGitRepoSync false) skips this entirely,
+        // preserving today's behaviour exactly. The actual git work already
+        // ran ABOVE, before this mutate() call, into integrationResults — see
+        // that block's own header comment for why it must not run in here.
+        let effectiveSuccess = success;
+        let landedCommit = null;
+        let notLandedInfo = null;
+        if (success && !rateLimited) {
+          const ir = integrationResults.get(slug);
+          if (ir) {
+            effectiveSuccess = ir.effectiveSuccess;
+            landedCommit = ir.landedCommit;
+            notLandedInfo = ir.notLandedInfo;
+          }
+        }
+
         const leftoverSuffix = deltaPaths && deltaPaths.length
           ? ` — left ${deltaPaths.length} files uncommitted`
           : '';
+        const baseReason = notLandedInfo
+          ? `reaped: ${notLandedInfo.reason}`
+          : (pidless ? reason : `reaped: process gone (outcome=${outcome})`);
         const transitionReason = rateLimited
           ? `reaped: rate limit detected — reset to pending, not failed (outcome=${outcome})${leftoverSuffix}`
-          : (pidless ? reason : `reaped: process gone (outcome=${outcome})`) + leftoverSuffix;
+          : baseReason + leftoverSuffix;
 
         if (rateLimited) {
           // Retryable, never terminal (PRD 1117) — same resetJobFields path
@@ -6294,11 +6424,18 @@ async function reapDeadRunningJobs() {
           // paused-for-rate-limit reset: fresh runId/startedAt/exitCode.
           resetJobFields(s.jobs[idx], transitionReason, { source: 'reapDeadRunningJobs:rate-limit' });
         } else {
-          transitionJob(s.jobs[idx], success ? 'completed' : 'failed', { reason: transitionReason, source: 'reapDeadRunningJobs' });
-          s.jobs[idx].exitCode = success ? 0 : (s.jobs[idx].exitCode ?? 1);
+          const targetStatus = effectiveSuccess ? 'completed' : (notLandedInfo ? 'needs_review' : 'failed');
+          transitionJob(s.jobs[idx], targetStatus, { reason: transitionReason, source: 'reapDeadRunningJobs' });
+          s.jobs[idx].exitCode = effectiveSuccess ? 0 : (s.jobs[idx].exitCode ?? 1);
           s.jobs[idx].finishedAt = new Date().toISOString();
-          s.jobs[idx].error = success ? null : `${transitionReason} (outcome=${outcome})`;
+          s.jobs[idx].error = effectiveSuccess ? null : `${transitionReason} (outcome=${outcome})`;
           s.jobs[idx].gateOutcome = gateOutcome;
+          if (notLandedInfo) {
+            s.jobs[idx].verifierVerdict = notLandedInfo.verdict;
+          } else {
+            delete s.jobs[idx].verifierVerdict;
+          }
+          if (landedCommit) s.jobs[idx].landedCommit = landedCommit;
         }
         delete s.jobs[idx].runtime;
         delete s.jobs[idx].guardBaseline;
@@ -8534,6 +8671,7 @@ module.exports = {
   checkSharedTreeGuard,
   uncommittedChanges,
   gitHead,
+  isBranchAlreadyIntegrated,
   selectResumeRecoveryTarget,
   buildResumeRecoveryPreamble,
   buildClaudeSpawnArgs,

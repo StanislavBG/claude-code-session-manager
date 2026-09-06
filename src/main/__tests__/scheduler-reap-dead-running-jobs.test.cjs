@@ -223,7 +223,11 @@ test('reapDeadRunningJobs salvages a delta-scoped in-place patch (PRD 1098) when
 
   const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
   const row = jobs.find((j) => j.slug === 'vanished-inplace');
-  assert.equal(row.status, 'completed');
+  // PRD 1133: a successful-looking reap that left everything uncommitted
+  // (no branch, HEAD never moved) must never read as 'completed' — this is
+  // exactly the dangerous shape the reaper now proves against.
+  assert.equal(row.status, 'needs_review');
+  assert.equal(row.verifierVerdict, 'reaped_without_integration');
   assert.ok(row.salvagePatch, 'a salvage patch must be recorded on the row');
   assert.ok(fs.existsSync(row.salvagePatch));
   const patch = fs.readFileSync(row.salvagePatch, 'utf8');
@@ -332,8 +336,207 @@ test('reapDeadRunningJobs skips in-place salvage (no whole-tree dump) when the r
 
   const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
   const row = jobs.find((j) => j.slug === 'vanished-no-baseline');
-  assert.equal(row.status, 'completed');
+  // PRD 1133: no commit landed (HEAD never moved) — must not read as 'completed'
+  // just because the log's own result event looked clean.
+  assert.equal(row.status, 'needs_review');
+  assert.equal(row.verifierVerdict, 'reaped_without_integration');
   assert.equal(row.salvagePatch, undefined, 'must skip salvage entirely rather than ever dumping the whole tree');
   assert.equal(row.leftoverPaths, undefined, 'no baseline means no safe attribution — must not guess');
   assert.equal(row.leftoverCount, undefined);
+});
+
+// ---------- PRD 1133: reaper must prove integration before 'completed' ----------
+
+test('reapDeadRunningJobs: a worktree job shaped like PRD 1118 (branch un-integrated, landedCommit absent) comes out needs_review, naming the branch, and never merges it', async () => {
+  const projectCwd = path.join(tmpHome, 'i-project-1118-shape');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+
+  const headBefore = git(['rev-parse', 'HEAD'], projectCwd).trim();
+  const slug = '1118-pause-until-the-binding-rate-limit-window';
+  const branch = `sm-job/${slug}`;
+  // Simulate the job's own worktree branch: one real commit, never merged
+  // back into the main tree (exactly the live 1118 shape — "one real commit,
+  // +301", stranded on sm-job/1118-... with landedCommit undefined).
+  git(['checkout', '-b', branch], projectCwd);
+  fs.writeFileSync(path.join(projectCwd, 'rateLimitWindow.cjs'), 'module.exports = {};\n', 'utf8');
+  git(['add', '-A'], projectCwd);
+  git(['commit', '-q', '-m', 'add rateLimitWindow.cjs'], projectCwd);
+  // Back to the original tip (detached is fine — reap only reads guardCwd's
+  // current HEAD, it never needs a named branch checked out).
+  git(['checkout', headBefore], projectCwd);
+
+  const runId = `run-${slug}`;
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug,
+      status: 'running',
+      cwd: projectCwd,
+      runId,
+      runtime: { pid: 999999 }, // guaranteed-dead pid
+      guardHeadBefore: headBefore,
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+    },
+  ]);
+  writeRunLog(runId, slug, ['{"type":"result","subtype":"success","result":"done","is_error":false}']);
+
+  bustCwdCache();
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === slug);
+  assert.equal(row.status, 'needs_review', 'a successful-looking result event must not be enough on its own');
+  assert.equal(row.verifierVerdict, 'reaped_without_integration');
+  assert.match(row.error, new RegExp(branch.replace('/', '\\/')), 'the parked reason must name the branch that still holds the work');
+  assert.equal(row.landedCommit, undefined, 'nothing was actually merged, so landedCommit must stay unset');
+
+  // The branch itself must survive untouched — this reap must never attempt
+  // (let alone perform) the merge.
+  const branchStillExists = git(['rev-parse', '--verify', branch], projectCwd).trim();
+  assert.ok(branchStillExists, 'the un-integrated branch must be preserved, not merged or deleted, by a mere reap');
+  assert.equal(git(['rev-parse', 'HEAD'], projectCwd).trim(), headBefore, 'guardCwd HEAD must not have moved — no merge was performed');
+});
+
+test('reapDeadRunningJobs: a worktree job whose branch is already fully integrated into HEAD comes out completed, with landedCommit stamped', async () => {
+  const projectCwd = path.join(tmpHome, 'j-project-real-success');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+
+  const headBefore = git(['rev-parse', 'HEAD'], projectCwd).trim();
+  const slug = 'real-successful-worktree-run';
+  const branch = `sm-job/${slug}`;
+  git(['checkout', '-b', branch], projectCwd);
+  fs.writeFileSync(path.join(projectCwd, 'feature.txt'), 'shipped\n', 'utf8');
+  git(['add', '-A'], projectCwd);
+  git(['commit', '-q', '-m', 'ship feature'], projectCwd);
+  git(['checkout', headBefore], projectCwd); // back to the pre-branch tip (detached)
+  // Simulate a normal completion pass having already integrated the branch
+  // (integrateJobBranch's own fast-forward path) BEFORE the process vanished
+  // between that merge and the queue write landing.
+  git(['merge', '--ff-only', branch], projectCwd);
+  const headAfterMerge = git(['rev-parse', 'HEAD'], projectCwd).trim();
+
+  const runId = `run-${slug}`;
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug,
+      status: 'running',
+      cwd: projectCwd,
+      runId,
+      runtime: { pid: 999999 },
+      guardHeadBefore: headBefore,
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+    },
+  ]);
+  writeRunLog(runId, slug, ['{"type":"result","subtype":"success","result":"done","is_error":false}']);
+
+  bustCwdCache();
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === slug);
+  assert.equal(row.status, 'completed', 'the branch is already an ancestor of HEAD — the work genuinely landed');
+  assert.equal(row.verifierVerdict, undefined);
+  assert.equal(row.landedCommit, headAfterMerge, 'HEAD advanced during the run window — landedCommit must be stamped');
+});
+
+test('reapDeadRunningJobs: a worktree job whose branch never diverged from its base (legitimate no-op) still completes, not punished', async () => {
+  const projectCwd = path.join(tmpHome, 'k-project-noop-worktree');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+
+  const headBefore = git(['rev-parse', 'HEAD'], projectCwd).trim();
+  const slug = 'noop-worktree-job';
+  const branch = `sm-job/${slug}`;
+  // Branch created but nothing ever committed on it — a genuine no-op run.
+  git(['branch', branch], projectCwd);
+
+  const runId = `run-${slug}`;
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug,
+      status: 'running',
+      cwd: projectCwd,
+      runId,
+      runtime: { pid: 999999 },
+      guardHeadBefore: headBefore,
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+    },
+  ]);
+  writeRunLog(runId, slug, ['{"type":"result","subtype":"success","result":"done","is_error":false}']);
+
+  bustCwdCache();
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === slug);
+  assert.equal(row.status, 'completed', 'a branch with no new commits is a legitimate no-op, not a finish-protocol violation');
+  assert.equal(row.verifierVerdict, undefined);
+  assert.equal(row.landedCommit, undefined, 'HEAD never moved — nothing to stamp');
+});
+
+test('reapDeadRunningJobs: an in-place run in a git repo whose HEAD genuinely advanced during the run window completes, with landedCommit stamped', async () => {
+  const projectCwd = path.join(tmpHome, 'l-project-inplace-success');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+
+  const headBefore = git(['rev-parse', 'HEAD'], projectCwd).trim();
+  const startedAt = new Date(Date.now() - 60_000).toISOString();
+  fs.writeFileSync(path.join(projectCwd, 'shipped.txt'), 'done\n', 'utf8');
+  git(['add', '-A'], projectCwd);
+  git(['commit', '-q', '-m', 'in-place job commit'], projectCwd);
+  const headAfter = git(['rev-parse', 'HEAD'], projectCwd).trim();
+
+  const slug = 'inplace-job-real-commit';
+  const runId = `run-${slug}`;
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug,
+      status: 'running',
+      cwd: projectCwd,
+      runId,
+      runtime: { pid: 999999 },
+      guardHeadBefore: headBefore,
+      startedAt,
+    },
+  ]);
+  writeRunLog(runId, slug, ['{"type":"result","subtype":"success","result":"done","is_error":false}']);
+
+  bustCwdCache();
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === slug);
+  assert.equal(row.status, 'completed');
+  assert.equal(row.verifierVerdict, undefined);
+  assert.equal(row.landedCommit, headAfter);
+});
+
+test('reapDeadRunningJobs: a non-git cwd skips the integration check entirely, preserving today\'s behaviour', async () => {
+  const projectCwd = path.join(tmpHome, 'm-project-non-git');
+  fs.mkdirSync(projectCwd, { recursive: true });
+  registerActiveProject(projectCwd);
+
+  const slug = 'non-git-cwd-job';
+  const runId = `run-${slug}`;
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug,
+      status: 'running',
+      cwd: projectCwd,
+      runId,
+      runtime: { pid: 999999 },
+      // No git repo at all — the integration/HEAD-advance check must be
+      // skipped, never treated as a failure to prove landing.
+    },
+  ]);
+  writeRunLog(runId, slug, ['{"type":"result","subtype":"success","result":"done","is_error":false}']);
+
+  bustCwdCache();
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === slug);
+  assert.equal(row.status, 'completed', 'a non-git cwd must keep today\'s behaviour — the check is meaningless there');
+  assert.equal(row.verifierVerdict, undefined);
 });

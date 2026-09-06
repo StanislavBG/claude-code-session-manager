@@ -47,7 +47,14 @@ const STATUS_HISTORY_CAP = 20;
  *    running->skipped (spawnJob:skip-archived's 'prd-missing' case — no
  *    executor ever ran; kept distinct from 'completed' so unrun work can't
  *    read as shipped), running->pending (halt/rate-limit reset,
- *    transient-failure retry)
+ *    transient-failure retry). Also reached with verdict
+ *    'reaped_without_integration' (source 'reapDeadRunningJobs', PRD 1133): a
+ *    reaped job whose result event looked successful but whose work cannot
+ *    be shown to have landed — a worktree branch still holding unmerged
+ *    commits, or an in-place run whose HEAD never advanced during the run
+ *    window — is parked here instead of 'completed', naming the branch (or
+ *    the lack of any commit) so the stranded work is never silently treated
+ *    as shipped.
  *  - investigating->failed|needs_review (restore prior status once the
  *    investigation probe exits), investigating->completed (defensive: the
  *    restored prior status could in principle be 'completed' if a caller

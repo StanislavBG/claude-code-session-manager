@@ -642,6 +642,74 @@ function classifySigtermWithCommit(exitCode, commitFoundInWindow) {
   };
 }
 
+/**
+ * Pure decision for spawnJob's finalize mutate (2026-09-06 incident): given
+ * the row this run is trying to finalize (or its absence) and this run's own
+ * identity, decide whether the finalize must be DROPPED instead of applied.
+ * Never mutates anything itself — callers apply `stampLandedCommit` and emit
+ * the audit event/log line.
+ *
+ *  - row missing entirely (i2 === -1 upstream): always drop, nothing to
+ *    stamp — there is no row left to carry the fact.
+ *  - row present but not 'running': drop the STATUS change (a cancelled row,
+ *    PRD 1024, must never be re-legalized to completed/needs_review by a
+ *    stale exit handler) but still let a genuinely-landed commit be stamped
+ *    as a fact — never a transition — when this run owns the row's current
+ *    runId, or the row doesn't already carry a newer one of its own.
+ *  - row present and 'running': not a drop; caller proceeds to finalize.
+ */
+function evaluateFinalizeDrop({ rowExists, rowStatus, rowRunId, rowLandedCommit, runId, landedCommit }) {
+  if (!rowExists) {
+    return { drop: true, reason: 'row-missing', stampLandedCommit: null };
+  }
+  if (rowStatus !== 'running') {
+    const stampLandedCommit = landedCommit && (rowRunId === runId || !rowLandedCommit) ? landedCommit : null;
+    return { drop: true, reason: 'row-not-running', stampLandedCommit };
+  }
+  return { drop: false, reason: null, stampLandedCommit: null };
+}
+
+/**
+ * Pure decision for spawnJob's dispatch mutate: given a PENDING row about to
+ * be dispatched and the newest terminalRunOutcome sidecar result for its
+ * slug, decide whether this dispatch should be SKIPPED because a prior run
+ * already completed this exact slug — the gap left by reconcile()'s own
+ * anti-resurrection guard, which only ever sees a slug BEFORE it first lands
+ * in s.jobs (2026-09-06 incident: an existing pending row was re-dispatched
+ * three times against already-shipped work).
+ *
+ * Compares the sidecar's finishedAt against THIS row's own last pending
+ * transition (or queuedAt, when the row has never been reset) rather than
+ * merely "a completed sidecar exists somewhere" — so a deliberate human
+ * re-queue of the same slug in a LATER episode (whose queuedAt/pending
+ * transition postdates the earlier completion) still runs.
+ */
+function evaluateDispatchSidecarReconcile({ rowStatus, rowRunId, statusHistory, queuedAt, outcome }) {
+  if (rowStatus !== 'pending') return { skip: false };
+  if (!outcome || outcome.status !== 'completed') return { skip: false };
+  if (outcome.runId === rowRunId) return { skip: false };
+  const lastPendingEntry = Array.isArray(statusHistory)
+    ? [...statusHistory].reverse().find((h) => h.to === 'pending')
+    : null;
+  const lastPendingAt = lastPendingEntry?.at ?? queuedAt ?? null;
+  if (lastPendingAt && (!outcome.finishedAt || outcome.finishedAt < lastPendingAt)) {
+    return { skip: false };
+  }
+  return { skip: true, runId: outcome.runId, finishedAt: outcome.finishedAt };
+}
+
+/**
+ * Pure detector for mutate()'s write-path regression check: transitionJob
+ * only ever APPENDS to statusHistory (capped at STATUS_HISTORY_CAP, never
+ * shrunk below it once reached) — so a running->pending change whose
+ * statusHistory got SHORTER is not a real transition, it's evidence this
+ * row's prior state was lost (e.g. a finalize mutate working off a stale
+ * in-memory snapshot).
+ */
+function isQueueRowRegression({ statusBefore, statusAfter, historyLenBefore, historyLenAfter }) {
+  return statusBefore === 'running' && statusAfter === 'pending' && historyLenAfter < historyLenBefore;
+}
+
 const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
 const PRDS_DIR = path.join(ROOT, 'prds');
 const RUNS_DIR = path.join(ROOT, 'runs');
@@ -1615,7 +1683,42 @@ function mutate(fn) {
     if (state.unreadable) {
       throw new Error(`queue mutation skipped: queue.json unreadable (${state.unreadable})`);
     }
+    const beforeBySlug = new Map(
+      (state.jobs || []).map((j) => [
+        j.slug,
+        { status: j.status, historyLen: Array.isArray(j.statusHistory) ? j.statusHistory.length : 0 },
+      ]),
+    );
     const ret = await fn(state);
+    // Detection-only regression check: transitionJob only ever APPENDS to
+    // statusHistory (capped at STATUS_HISTORY_CAP, never shrunk below it) —
+    // so a running->pending change whose statusHistory got SHORTER is not a
+    // real transition, it's evidence this row's prior state was lost (e.g. a
+    // finalize mutate working off a stale in-memory snapshot). Never
+    // repaired here — mutate()'s job is to persist, not reconcile.
+    for (const j of state.jobs || []) {
+      const prior = beforeBySlug.get(j.slug);
+      if (!prior) continue;
+      const afterLen = Array.isArray(j.statusHistory) ? j.statusHistory.length : 0;
+      if (isQueueRowRegression({
+        statusBefore: prior.status,
+        statusAfter: j.status,
+        historyLenBefore: prior.historyLen,
+        historyLenAfter: afterLen,
+      })) {
+        console.error(
+          `[scheduler] queue row regressed: slug=${j.slug} running->pending with `
+          + `statusHistory ${prior.historyLen} -> ${afterLen}`,
+        );
+        appendAuditEvent('queue_row_regressed', {
+          slug: j.slug,
+          from: 'running',
+          to: 'pending',
+          historyBefore: prior.historyLen,
+          historyAfter: afterLen,
+        });
+      }
+    }
     await writeQueue(state);
     return ret;
   });
@@ -4347,6 +4450,11 @@ function readRunOutcomeSidecars(runDir, slug) {
   return {
     meta: readJson(path.join(runDir, `${slug}.meta.json`)),
     verdicts: readJson(path.join(runDir, `${slug}.verdicts.json`)),
+    // outcome.json (launchFailure.writeOutcomeSidecar) is the one sidecar
+    // that carries landedCommit — reused by the dispatch-time sidecar-
+    // reconcile guard and the pre-dispatch landedCommit backfill below,
+    // rather than growing a second reader for the same directory.
+    outcome: readJson(path.join(runDir, `${slug}.outcome.json`)),
   };
 }
 
@@ -4945,9 +5053,64 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     // started after the manual clear, not whatever startedAt this row
     // carried from a prior run.
     let dispatchStartedAtMs = null;
+    let dispatchSkippedAlreadyCompleted = false;
     await mutate((s) => {
       const idx = s.jobs.findIndex((x) => x.slug === job.slug);
       if (idx >= 0) {
+        // Anti-resurrection guard for an EXISTING pending row (the gap left
+        // by reconcile()'s own guard, which only ever sees a slug BEFORE it
+        // first lands in s.jobs — 2026-09-06 incident: a finalize dropped
+        // silently three times over left this same slug 'pending' and the
+        // dispatcher re-fired it three more times against work that had
+        // already shipped). Skipped for a resume-recovery dispatch (that
+        // targets a specific prior session on purpose) and for anything not
+        // currently 'pending' (e.g. a needs_review->running recovery row).
+        if (!resumeTarget && s.jobs[idx].status === 'pending') {
+          const outcome = latestTerminalOutcomeForSlug(job.slug, { runsDir: RUNS_DIR });
+          const reconcileDecision = evaluateDispatchSidecarReconcile({
+            rowStatus: s.jobs[idx].status,
+            rowRunId: s.jobs[idx].runId ?? null,
+            statusHistory: s.jobs[idx].statusHistory,
+            queuedAt: s.jobs[idx].queuedAt ?? null,
+            outcome,
+          });
+          if (reconcileDecision.skip) {
+            const sidecar = readRunOutcomeSidecars(path.join(RUNS_DIR, reconcileDecision.runId), job.slug);
+            transitionJob(s.jobs[idx], 'completed', {
+              reason: `prior run ${reconcileDecision.runId} already completed this slug (sidecar-reconciled)`,
+              source: 'spawnJob:dispatch-sidecar-reconcile',
+            });
+            s.jobs[idx].runId = reconcileDecision.runId;
+            s.jobs[idx].finishedAt = reconcileDecision.finishedAt;
+            s.jobs[idx].exitCode = 0;
+            if (sidecar.outcome?.landedCommit) {
+              s.jobs[idx].landedCommit = sidecar.outcome.landedCommit;
+            }
+            appendAuditEvent('job_dispatch_skipped_already_completed', {
+              slug: job.slug,
+              priorRunId: reconcileDecision.runId,
+              cwd: job.cwd || defaultCwd,
+            });
+            console.warn(
+              `[scheduler] ${job.slug}: dispatch skipped — prior run ${reconcileDecision.runId} already `
+              + 'completed this slug (sidecar-reconciled)',
+            );
+            dispatchSkippedAlreadyCompleted = true;
+            return;
+          }
+          // Belt-and-braces (PRD fix-plan step 3): a row about to dispatch
+          // with no landedCommit of its own, whose newest sidecar for this
+          // slug DOES record one, gets it backfilled before spawn so
+          // verifyRun receives a real priorLandedCommit and the
+          // pass_no_commit_prior_run_verified exemption can fire on this
+          // run if it turns out to be another no-op re-verification.
+          if (!s.jobs[idx].landedCommit && outcome?.runId) {
+            const sidecar = readRunOutcomeSidecars(path.join(RUNS_DIR, outcome.runId), job.slug);
+            if (sidecar.outcome?.landedCommit) {
+              s.jobs[idx].landedCommit = sidecar.outcome.landedCommit;
+            }
+          }
+        }
         transitionJob(s.jobs[idx], 'running', {
           reason: resumeTarget ? 'dispatched for resume-recovery' : 'dispatched for execution',
           source: 'spawnJob:dispatch',
@@ -4971,6 +5134,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       }
     });
     await broadcast({ flush: true });
+    if (dispatchSkippedAlreadyCompleted) return;
 
     // Commit-guard baseline: snapshot the working tree BEFORE the run so the
     // post-run check flags only paths THIS job left dirty, not pre-existing WIP.
@@ -5452,7 +5616,44 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       // scheduleJobTransitions.cjs's LEGAL_TRANSITIONS) and silently
       // undo the cancellation. Skip — the row already reflects its real
       // terminal state.
-      if (i2 >= 0 && s.jobs[i2].status !== 'running') return;
+      const finalizeDrop = evaluateFinalizeDrop({
+        rowExists: i2 >= 0,
+        rowStatus: i2 >= 0 ? s.jobs[i2].status : null,
+        rowRunId: i2 >= 0 ? (s.jobs[i2].runId ?? null) : null,
+        rowLandedCommit: i2 >= 0 ? (s.jobs[i2].landedCommit ?? null) : null,
+        runId,
+        landedCommit: jobLandedCommitThisRun ?? null,
+      });
+      if (finalizeDrop.drop) {
+        // Never silent (2026-09-06 incident: a bare early-return here dropped
+        // three legitimate no-op verifications of an already-shipped PRD with
+        // no trace at all, leaving the row stuck 'pending' so the dispatcher
+        // re-fired it three more times). 'row-not-running' covers a job
+        // already moved off 'running' by someone else (namely
+        // remote.cancelJob, PRD 1024) — re-finalizing anyway could
+        // re-legalize the row via a legal failed->completed/needs_review edge
+        // and silently undo the cancellation, so the STATUS change is still
+        // skipped; only a genuinely-landed commit is stamped as a fact.
+        const logFn = finalizeDrop.reason === 'row-missing' ? console.error : console.warn;
+        logFn(
+          `[scheduler] finalize dropped: slug=${job.slug} runId=${runId} reason=${finalizeDrop.reason} `
+          + `actualStatus=${i2 >= 0 ? s.jobs[i2].status : '(row-missing)'} `
+          + `rowRunId=${i2 >= 0 ? (s.jobs[i2].runId ?? '(none)') : '(none)'}`,
+        );
+        appendAuditEvent('job_finalize_dropped', {
+          slug: job.slug,
+          runId,
+          reason: finalizeDrop.reason,
+          actualStatus: i2 >= 0 ? s.jobs[i2].status : null,
+          rowRunId: i2 >= 0 ? (s.jobs[i2].runId ?? null) : null,
+          landedCommit: jobLandedCommitThisRun ?? null,
+          exitCode: res.exitCode,
+        });
+        if (finalizeDrop.stampLandedCommit) {
+          s.jobs[i2].landedCommit = finalizeDrop.stampLandedCommit;
+        }
+        return;
+      }
       if (i2 >= 0) {
         const treatAsPending = res.rateLimited || (s.paused && s.paused.reason === 'rate_limit');
         if (treatAsPending) {
@@ -8682,6 +8883,10 @@ module.exports = {
   committedInWindow,
   computeCommittedDuringRun,
   classifySigtermWithCommit,
+  evaluateFinalizeDrop,
+  evaluateDispatchSidecarReconcile,
+  isQueueRowRegression,
+  readRunOutcomeSidecars,
   isFixPlanSlug,
   classifyDiscoveredFixPlan,
   resolveIsFixPlan,

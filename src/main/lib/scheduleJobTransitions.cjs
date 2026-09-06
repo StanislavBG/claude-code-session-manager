@@ -41,8 +41,14 @@ const STATUS_HISTORY_CAP = 20;
  * Explicit from->to edges. Every real assignment site in scheduler.cjs maps
  * onto one of these (verified against the 16 sites this module replaces):
  *  - pending->running (dispatch), pending->completed (archived-PRD skip,
- *    manual archive of an already-shipped PRD), pending->failed (admin
- *    cancelJob on a not-yet-started job)
+ *    manual archive of an already-shipped PRD; also source
+ *    'spawnJob:dispatch-sidecar-reconcile' — a pending row about to
+ *    dispatch whose newest run-sidecar already shows a completed-equivalent
+ *    outcome finished at/after this row's own last pending transition is
+ *    finalized from that sidecar instead of spawning a redundant re-run;
+ *    2026-09-06 incident: a silently-dropped finalize left a slug 'pending'
+ *    forever and the dispatcher re-fired it three times), pending->failed
+ *    (admin cancelJob on a not-yet-started job)
  *  - running->completed|failed|needs_review (normal run outcomes, reaper),
  *    running->skipped (spawnJob:skip-archived's 'prd-missing' case — no
  *    executor ever ran; kept distinct from 'completed' so unrun work can't

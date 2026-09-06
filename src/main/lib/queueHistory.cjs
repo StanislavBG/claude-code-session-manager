@@ -15,6 +15,7 @@ const path = require('path');
 const fsp = require('fs').promises;
 const { HISTORY_RETENTION_MS } = require('./schedulerConfig.cjs');
 const { projectHistoryPath, stateCwds } = require('./queueStore.cjs');
+const { resolveIsFixPlan } = require('./fixPlanSlug.cjs');
 
 // Legacy global sidecar — READ-ONLY since 2026-07-31 (federated per-project
 // history under <cwd>/session-manager-operations/scheduler/state/history.jsonl,
@@ -52,10 +53,6 @@ function historyPathFor(entry) {
   return HISTORY_PATH;
 }
 
-function isFixPlanSlug(slug) {
-  return /^\d+-fix-/.test(slug);
-}
-
 function jobKey(job) {
   return `${job?.slug ?? ''}|${job?.runId ?? ''}`;
 }
@@ -79,9 +76,13 @@ function partitionJobs(jobs, nowMs, opts = {}) {
 
   // Slugs of jobs that a still-pending/running fix-plan is going to try to
   // heal (see healTargetForFix in scheduler.cjs — same regex, kept in sync).
+  // Honors the job's own persisted `isFixPlan` provenance stamp (PRD 1131)
+  // over the slug shape, same as every other fix-plan consumer in
+  // scheduler.cjs — a slug that merely starts with "fix-" but was classified
+  // isFixPlan:false must not get treated as a real fix-plan here either.
   const protectedSlugs = new Set();
   for (const j of list) {
-    if (!j || !isFixPlanSlug(j.slug)) continue;
+    if (!j || !resolveIsFixPlan(j.slug, j.isFixPlan)) continue;
     if (j.status !== 'pending' && j.status !== 'running') continue;
     protectedSlugs.add(j.slug.replace(/^(\d+)-fix-/, '$1-'));
   }

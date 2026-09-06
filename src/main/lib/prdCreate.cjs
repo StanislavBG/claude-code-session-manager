@@ -29,6 +29,7 @@ const { resolveProjectContext } = require('./projectRootResolve.cjs');
 const { fixChainDepthOf, baseSlugOf } = require('./fixChainDepth.cjs');
 const { DEFAULT_PRD_AGENT_TYPE, assertAgentTypeWritable } = require('./prdAgentType.cjs');
 const { resolveDepSlug, findNearMatches } = require('./depSlugResolve.cjs');
+const { isFixPlanSlug } = require('./fixPlanSlug.cjs');
 
 // A caller-supplied slug that already starts with its own `NN-` (e.g.
 // "254-perf-x") used to silently become the double-prefixed row
@@ -265,10 +266,10 @@ async function createPrd(input, remote) {
   const filenameSlug = `${nn}-${slug}`;
 
   // Fix-chain depth guard (PRD 1113): refuse a fix-of-a-fix before it's ever
-  // written. depth 0/1 pass through unchanged (an ordinary PRD, or a first
-  // fix-plan, is never blocked); depth >= 2 means the base job has already
-  // failed to close via at least one prior fix attempt for reasons a repeat
-  // attempt won't resolve.
+  // written. depth >= 2 means the base job has already failed to close via
+  // at least one prior fix attempt for reasons a repeat attempt won't
+  // resolve — checked first so this distinct, human-escalation error still
+  // wins over the more general fix-plan-slug guard below for that shape.
   const chainDepth = fixChainDepthOf(filenameSlug);
   if (chainDepth > FIX_CHAIN_DEPTH_CAP) {
     const base = baseSlugOf(filenameSlug);
@@ -278,6 +279,29 @@ async function createPrd(input, remote) {
       error: `Fix-chain depth cap exceeded: "${base}" has already failed to close ${chainDepth} time(s) for ` +
         `infrastructure reasons (refusing to write "${filenameSlug}.md" at depth ${chainDepth}). Authoring a ` +
         'deeper fix PRD is not the correct response — stop and surface this to a human instead of retrying again.',
+    };
+  }
+
+  // Fix-plan-slug collision guard (PRD 1131): a caller-supplied or
+  // title-derived slug that happens to start with "fix-" collides with the
+  // scheduler's own NN-fix-... naming convention for fix plans it authors
+  // itself (spawnInvestigation) — and that shape carries real special-case
+  // semantics (depth-capped auto-investigation eligibility,
+  // commitGuardVerdict's zero-edit exemption) that a PRD authored through
+  // this API never asked for. Refused outright, not silently renamed, same
+  // fail-closed posture as the SLUG_HAS_NN_PREFIX_RE check above (PRD 1126:
+  // "126-fix-plan-death-reopens-parent" was wrongly stamped
+  // investigationDepth before it ever ran and had to be withdrawn). This
+  // subsumes the depth-1 case the chain-depth guard above deliberately let
+  // through (MAX_INVESTIGATION_DEPTH=1 means a first fix-plan is legitimate
+  // — but only when spawnInvestigation authors it, never through this API).
+  if (isFixPlanSlug(filenameSlug)) {
+    return {
+      ok: false,
+      status: 400,
+      error: `slug "${filenameSlug}" collides with the reserved NN-fix-... fix-plan naming convention ` +
+        '(reserved for PRDs the scheduler\'s own investigation loop authors itself). Reword the title/slug ' +
+        'so it does not start with "fix-" — e.g. "resolve-x" or "repair-x" instead of "fix-x".',
     };
   }
 

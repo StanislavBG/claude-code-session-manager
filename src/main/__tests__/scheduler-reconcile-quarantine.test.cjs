@@ -146,6 +146,57 @@ test('reconcile() exempts a fix-plan PRD (NN-fix-*) from quarantine even with no
   }
 });
 
+test('reconcile() does NOT stamp investigationDepth for a createdVia-stamped PRD whose slug merely starts with "fix-" (PRD 1126/1131 regression)', async () => {
+  const { cwd, prdsDir, stateDir } = makeFixtureProject('sm-quarantine-fake-fixplan-');
+  try {
+    // Mirrors PRD 1126: authored via scheduler_create_prd (createdVia stamped),
+    // slug happens to kebab-case into "fix-..." — must NOT be treated as a
+    // genuine scheduler-authored fix plan just because the name matches.
+    fs.writeFileSync(
+      path.join(prdsDir, '9005-fix-plan-death-reopens-parent.md'),
+      `---\ntitle: Fix plan death reopens parent\ncwd: ${cwd}\nestimateMinutes: 15\ncreatedVia: scheduler-api\nissuedAt: 2026-08-07T00:00:00.000Z\n---\n\n# Goal\nDo the thing.\n`,
+      'utf8',
+    );
+    fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({ jobs: [] }, null, 2), 'utf8');
+
+    queueStore.bustCwdCache();
+    const state = { jobs: [], invalidJobs: [], paused: null };
+    await scheduler.reconcile(state);
+
+    const row = state.jobs.find((j) => j.slug === '9005-fix-plan-death-reopens-parent');
+    expect(row).toBeDefined();
+    expect(row.status).toBe('pending');
+    expect(row.isFixPlan).toBe(false);
+    expect(row.investigationDepth).toBeUndefined();
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('reconcile() stamps isFixPlan + investigationDepth for a genuine spawnInvestigation-authored fix plan (explicit isFixPlan:true, no createdVia)', async () => {
+  const { cwd, prdsDir, stateDir } = makeFixtureProject('sm-quarantine-genuine-fixplan-');
+  try {
+    fs.writeFileSync(
+      path.join(prdsDir, '9006-fix-something.md'),
+      `---\ntitle: Fix something\ncwd: ${cwd}\nestimateMinutes: 15\nisFixPlan: true\n---\n\n# Goal\nHeal it.\n`,
+      'utf8',
+    );
+    fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({ jobs: [] }, null, 2), 'utf8');
+
+    queueStore.bustCwdCache();
+    const state = { jobs: [], invalidJobs: [], paused: null };
+    await scheduler.reconcile(state);
+
+    const row = state.jobs.find((j) => j.slug === '9006-fix-something');
+    expect(row).toBeDefined();
+    expect(row.status).toBe('pending');
+    expect(row.isFixPlan).toBe(true);
+    expect(row.investigationDepth).toBe(2);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
 test('reconcile() adopts a quarantined row to pending once its PRD file is stamped', async () => {
   const { cwd, prdsDir, stateDir } = makeFixtureProject('sm-quarantine-adopt-');
   try {

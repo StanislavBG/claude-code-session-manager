@@ -3484,13 +3484,20 @@ async function quarantineLeftovers({ cwd, slug, paths, headBefore }) {
  * diagnostic is appended — the job row's dirt-describing fields are left as
  * they were, since the tree itself was left untouched (or, for a
  * restore-only failure, the salvage ref is still named in the note).
+ *
+ * `headBefore`, when the caller has it fresh (spawnJob's own finalize still
+ * has the local `guardHeadBefore` in scope for the run that just parked —
+ * the same value is deleted off the job ROW earlier in that same finalize),
+ * is used as the salvage ref's baseline commit; otherwise (the periodic
+ * reverifyNeedsReview pass, re-discovering an already-parked row) this falls
+ * back to the current HEAD inside quarantineLeftovers itself.
  */
-async function performLeftoverQuarantine(job, paths) {
+async function performLeftoverQuarantine(job, paths, headBefore = null) {
   const result = await quarantineLeftovers({
     cwd: job.cwd || DEFAULT_PROJECT_CWD,
     slug: job.slug,
     paths,
-    headBefore: job.guardHeadBefore || null,
+    headBefore: headBefore || job.guardHeadBefore || null,
   });
   await mutate((s) => {
     const j = s.jobs.find((x) => x.slug === job.slug);
@@ -5463,7 +5470,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
 
     if (quarantineJob && quarantinePaths) {
       console.log(`[scheduler] needs_review ${job.slug} → quarantining ${quarantinePaths.length} leftover path(s) (resume recovery already spent)`);
-      performLeftoverQuarantine(quarantineJob, quarantinePaths).catch((e) => {
+      performLeftoverQuarantine(quarantineJob, quarantinePaths, guardHeadBefore).catch((e) => {
         console.error('[scheduler] performLeftoverQuarantine error', job.slug, e);
       });
     }

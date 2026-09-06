@@ -2585,6 +2585,10 @@ function resetJobFields(job, errorMsg, opts = {}) {
   delete job.verifierVerdict;
   delete job.uncommittedPaths;
   delete job.resumeRecoveryAttempted;
+  // Same one-attempt-per-episode category as resumeRecoveryAttempted above —
+  // a re-fired row must be able to earn a fresh mechanical-recovery attempt
+  // if it parks needs_review again (PRD 1130).
+  delete job.mechanicalRecoveryAttempted;
   // Quarantine (PRD 1128) is scoped to THIS run's episode exactly like
   // resumeRecoveryAttempted above — a re-fired row must be able to earn a
   // fresh quarantine attempt if it parks needs_review again.
@@ -3313,6 +3317,95 @@ As the LAST LINE of your final result text, emit exactly one of:
   SCHEDULER_VERDICT: PASS
   SCHEDULER_VERDICT: FAIL <one-line reason>
 Print PASS only once the commit above has actually landed.`;
+}
+
+/**
+ * Mechanical recovery (PRD 1130). isFixPlanBeyondDepthCap (below) is the
+ * ONLY gate on re-investigating a fix-plan job at investigationDepth >= 2 —
+ * correct for open-ended "author another plan" recursion, but it also
+ * strands a depth-capped job whose failure was fully mechanical (no
+ * judgement required) with no other ladder rung, since resume-first recovery
+ * (selectResumeRecoveryTarget above) is hard-gated on verdict
+ * 'uncommitted_changes'. This rung is evaluated INDEPENDENTLY of
+ * isFixPlanBeyondDepthCap — depth never disqualifies it, because unlike
+ * auto-fix it authors no plan and spawns no model; it is pure git.
+ *
+ * The closed set of mechanically-resolvable verdicts starts at exactly
+ * 'worktree_integration_failed': PRD 1125 already taught integrateBranch to
+ * parse git's "would be overwritten by merge" stderr, verify the blocking
+ * paths are byte-identical to the branch, discard the proven duplicates, and
+ * retry the merge once. A job parked with this verdict has its `sm-job/
+ * <slug>` branch preserved (integrateJobBranch never deletes the branch on
+ * failure — see cleanupJobWorktree's `keepBranch: !integration.ok`), so a
+ * plain re-call of integrateBranch against that same branch inherits PRD
+ * 1125's auto-resolution for free — no re-implementation needed here.
+ *
+ * Bounded to exactly one attempt via job.mechanicalRecoveryAttempted,
+ * stamped in the SAME mutate as the outcome (performMechanicalRecovery,
+ * below) — never here — so this selector alone can be unit-tested exactly
+ * like selectResumeRecoveryTarget/selectLeftoverQuarantineTarget.
+ *
+ * Kill-switch: SM_MECHANICAL_RECOVERY_DISABLE=1 restores today's behaviour
+ * exactly (always returns null), mirroring SM_RESUME_RECOVERY_DISABLE.
+ */
+const MECHANICALLY_RESOLVABLE_VERDICTS = new Set(['worktree_integration_failed']);
+
+function selectMechanicalRecoveryTarget(job) {
+  if (process.env.SM_MECHANICAL_RECOVERY_DISABLE === '1') return null;
+  if (!job || job.status !== 'needs_review') return null;
+  if (!MECHANICALLY_RESOLVABLE_VERDICTS.has(job.verifierVerdict)) return null;
+  if (job.mechanicalRecoveryAttempted === true) return null;
+  const cwd = job.cwd || DEFAULT_PROJECT_CWD;
+  return { slug: job.slug, cwd, branch: jobWorktree.branchNameFor(job.slug), carriedPaths: job.carriedPaths || [] };
+}
+
+/**
+ * Perform an already-selected mechanical recovery (selectMechanicalRecoveryTarget
+ * above) — a direct re-attempt of integrateBranch against the job's preserved
+ * branch, never a fresh `claude -p` dispatch. On success the job transitions
+ * needs_review -> completed and its verifierVerdict is cleared; the branch,
+ * now merged, is deleted like any other successfully-integrated job branch.
+ * On failure (including a branch that no longer exists — already deleted or
+ * already merged) the job stays needs_review, mechanicalRecoveryAttempted is
+ * stamped, and the retry's own failure text is appended to `error`. Either
+ * way mechanicalRecoveryAttempted is stamped in this SAME mutate, so a crash
+ * between the git call returning and this mutate landing simply repeats an
+ * idempotent git operation on the next pass rather than leaving the job
+ * re-eligible forever.
+ */
+async function performMechanicalRecovery(job, target) {
+  const integration = await jobWorktree.integrateJobBranch({
+    cwd: target.cwd, branch: target.branch, slug: target.slug, carriedPaths: target.carriedPaths,
+  });
+  if (integration.ok) {
+    await jobWorktree.cleanupJobWorktree({ cwd: target.cwd, dir: undefined, branch: target.branch, keepBranch: false });
+  }
+  let becameCompleted = false;
+  await mutate((s) => {
+    const j = s.jobs.find((x) => x.slug === job.slug);
+    if (!j) return;
+    j.mechanicalRecoveryAttempted = true;
+    if (integration.ok) {
+      if (transitionJob(j, 'completed', {
+        reason: `mechanical recovery: ${target.branch} re-integrated successfully`,
+        source: 'scheduler:mechanicalRecovery',
+      })) {
+        delete j.verifierVerdict;
+        j.exitCode = 0;
+        j.error = null;
+        becameCompleted = true;
+      }
+    } else {
+      const pointer = `Mechanical recovery retry failed: ${integration.reason}`;
+      j.error = j.error ? `${j.error}\n${pointer}` : pointer;
+    }
+  });
+  if (integration.ok) {
+    console.log(`[scheduler] mechanical-recovery: ${job.slug} → completed (branch ${target.branch} re-integrated)`);
+    if (becameCompleted) await archiveCompletedPrd(job.slug, job.cwd);
+  } else {
+    console.error(`[scheduler] mechanical-recovery: ${job.slug} → retry failed: ${integration.reason}`);
+  }
 }
 
 /**
@@ -4232,6 +4325,13 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   // 'uncommitted_changes'), so this is a no-op for the common case.
   if (selectResumeRecoveryTarget(failedJob)) {
     console.log(`[scheduler] skip investigation: ${failedJob.slug} is resume-recovery eligible`);
+    return { deferred: false };
+  }
+  // Mechanical recovery (PRD 1130): same first-refusal treatment — a job
+  // eligible for a pure-git retry must never also get a cold-read fix-plan
+  // PRD authored in the same pass.
+  if (selectMechanicalRecoveryTarget(failedJob)) {
+    console.log(`[scheduler] skip investigation: ${failedJob.slug} is mechanical-recovery eligible`);
     return { deferred: false };
   }
   if (isFixPlanBeyondDepthCap(failedJob.slug, failedJob.investigationDepth)) {
@@ -5272,6 +5372,8 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     let resumeRecoveryTarget = null;
     let quarantineJob = null;
     let quarantinePaths = null;
+    let mechanicalRecoveryJob = null;
+    let mechanicalRecoveryTarget = null;
     let terminalNotifySnapshot = null;
     const newlyCompletedPrds = [];
     await mutate((s) => {
@@ -5427,6 +5529,18 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
             // takes the treatAsPending branch above and never reaches here).
             needsReviewRcaSnapshot = { ...s.jobs[i2] };
 
+            // Mechanical recovery (PRD 1130): evaluated FIRST, ahead of both
+            // resume-first recovery and auto-fix — a job parked with a
+            // mechanically-resolvable verdict (see
+            // selectMechanicalRecoveryTarget) needs no model, no plan, and no
+            // depth-cap check, so it must never fall through to either.
+            // Snapshot only (no I/O inside mutate()); the actual git retry
+            // happens outside mutate(), below.
+            const mTarget = selectMechanicalRecoveryTarget(s.jobs[i2]);
+            if (mTarget) {
+              mechanicalRecoveryJob = { ...s.jobs[i2] };
+              mechanicalRecoveryTarget = mTarget;
+            } else {
             // Resume-first recovery (PRD 1111): evaluated BEFORE the auto-fix
             // eligibility check below — a job whose verdict is
             // 'uncommitted_changes' with a live sessionId gets one bounded
@@ -5483,6 +5597,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
               }
               needsInvestigationNow = true;
               investigationJobSnapshot = { ...s.jobs[i2] };
+            }
             }
             }
           }
@@ -5561,6 +5676,13 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
         .catch((e) => {
           console.error('[scheduler] writeRcaReport error', job.slug, e);
         });
+    }
+
+    if (mechanicalRecoveryJob && mechanicalRecoveryTarget) {
+      console.log(`[scheduler] needs_review ${job.slug} → mechanical-recovery (re-integrating ${mechanicalRecoveryTarget.branch})`);
+      performMechanicalRecovery(mechanicalRecoveryJob, mechanicalRecoveryTarget).catch((e) => {
+        console.error('[scheduler] performMechanicalRecovery error', job.slug, e);
+      });
     }
 
     if (resumeRecoveryJob && resumeRecoveryTarget) {
@@ -6643,6 +6765,12 @@ function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRu
     // bounded `--resume` attempt must never also become a fix-plan target
     // in the same pass — see spawnInvestigation's own identical guard.
     if (selectResumeRecoveryTarget(job)) return false;
+    // Mechanical recovery (PRD 1130): a job eligible for a pure-git retry
+    // must never also become a fix-plan target — it needs no plan and no
+    // model. Defensive: today's single mechanically-resolvable verdict
+    // (worktree_integration_failed) is already excluded below via the depth
+    // cap, but this must hold even if that stops being true.
+    if (selectMechanicalRecoveryTarget(job)) return false;
     const runId = job.runId || resolveJobRunId(job);
     if (!runId) return false;
     if (isFixPlanBeyondDepthCap(job.slug, job.investigationDepth)) return false;
@@ -6922,6 +7050,23 @@ async function reverifyNeedsReview() {
   const queueForResumeAndAutofix = (unresolvable.length || exhaustedAutoFix.length || planUnqueued.length)
     ? await readQueue()
     : afterHealForAnnotate;
+
+  // Mechanical recovery (PRD 1130): evaluated first, ahead of both
+  // resume-first recovery and auto-fix below — catches a job whose
+  // mechanically-resolvable verdict this periodic pass finds still eligible
+  // (e.g. one already parked before this rung shipped, or one the same-tick
+  // check in spawnJob missed because the app restarted in between). Depth
+  // never disqualifies it, so it runs regardless of investigationDepth.
+  {
+    for (const job of queueForResumeAndAutofix.jobs) {
+      const target = selectMechanicalRecoveryTarget(job);
+      if (!target) continue;
+      console.log(`[scheduler] mechanical-recovery: needs_review ${job.slug} → re-integrating ${target.branch}`);
+      performMechanicalRecovery(job, target).catch((e) => {
+        console.error('[scheduler] performMechanicalRecovery error', job.slug, e);
+      });
+    }
+  }
 
   // Resume-first recovery (PRD 1111): before any fix-plan investigation is
   // authored below, offer the bounded one-attempt `--resume` dispatch to any
@@ -8369,6 +8514,9 @@ module.exports = {
   buildResumeRecoveryPreamble,
   buildClaudeSpawnArgs,
   spawnResumeRecovery,
+  selectMechanicalRecoveryTarget,
+  performMechanicalRecovery,
+  MECHANICALLY_RESOLVABLE_VERDICTS,
   selectLeftoverQuarantineTarget,
   quarantineLeftovers,
   performLeftoverQuarantine,

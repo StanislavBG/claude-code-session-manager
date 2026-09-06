@@ -97,6 +97,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-commit-guard-noop.test.cjs',
       'src/main/__tests__/scheduler-resume-recovery.test.cjs',
       'src/main/__tests__/scheduler-leftover-quarantine.test.cjs',
+      'src/main/__tests__/scheduler-mechanical-recovery.test.cjs',
       'src/main/__tests__/scheduler-shared-tree-guard.test.cjs',
       'src/main/__tests__/scheduler-reap-dead-running-jobs.test.cjs',
       'src/main/__tests__/scheduler-unreadable-queue-guard.test.cjs',

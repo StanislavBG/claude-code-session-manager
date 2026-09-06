@@ -10,6 +10,13 @@
  * coverage in scheduler-autofix-select.test.cjs (node --test) exercises the
  * same helpers in more granular detail.
  *
+ * PRD 1129 added one sub-shape to case (d): "outcome 'plan' WITH a queue
+ * row is neither retried nor annotated" only holds while that queue row
+ * (the fix-plan child) is still alive. Once the child itself reaches a
+ * terminal, non-completed status, isFixPlanDead makes the parent eligible
+ * for exactly one further attempt (stamped autoFixReopened: true), after
+ * which it is permanently excluded and annotated again.
+ *
  * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-autofix-outcome.test.cjs
  */
 
@@ -17,7 +24,7 @@
 
 import { test, expect } from 'vitest';
 const {
-  selectAutoFixTargets, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor,
+  selectAutoFixTargets, isExhaustedAutoFix, isPlanUnqueued, isFixPlanDead, fixSlugFor,
 } = require('../scheduler.cjs');
 
 const noSiblingOnDisk = () => false;
@@ -80,6 +87,71 @@ test("(d) outcome 'plan' with the fix slug present in the queue is neither retri
   const queuedSlugs = new Set([fixSlugFor(job)]);
   expect(isTarget(job)).toBe(false);
   expect(isAnnotatable(job, queuedSlugs)).toBe(false);
+});
+
+// (e) dead fix-plan child: outcome 'plan' whose fix-plan row itself died —
+// the parent is eligible again, exactly once.
+test('(e) a dead fix-plan child makes the parent eligible for one further attempt', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'plan', autoFixRetries: 0 });
+  const deadChild = { slug: fixSlugFor(job), status: 'needs_review', parallelGroup: job.parallelGroup };
+  const jobs = [job, deadChild];
+  expect(isFixPlanDead(job, jobs)).toBe(true);
+  expect(selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk }).some((j) => j.slug === job.slug)).toBe(true);
+  expect(isAnnotatable(job, new Set(jobs.map((j) => j.slug)))).toBe(false);
+});
+
+test('(e) a failed, quarantined, or skipped fix-plan child also counts as dead', () => {
+  for (const status of ['failed', 'quarantined', 'skipped']) {
+    const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'plan', autoFixRetries: 0 });
+    const deadChild = { slug: fixSlugFor(job), status, parallelGroup: job.parallelGroup };
+    expect(isFixPlanDead(job, [job, deadChild])).toBe(true);
+  }
+});
+
+test('(e) an already-reopened parent is annotated, never eligible again — even with another dead child', () => {
+  const job = makeJob({
+    autoFixAttempted: true, autoFixOutcome: 'plan', autoFixRetries: 1, autoFixReopened: true,
+  });
+  const deadChild = { slug: fixSlugFor(job), status: 'needs_review', parallelGroup: job.parallelGroup };
+  const jobs = [job, deadChild];
+  expect(isFixPlanDead(job, jobs)).toBe(false);
+  expect(selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk }).some((j) => j.slug === job.slug)).toBe(false);
+  expect(isExhaustedAutoFix(job)).toBe(true);
+  expect(isAnnotatable(job, new Set(jobs.map((j) => j.slug)))).toBe(true);
+});
+
+test('(e) a reopened parent whose second attempt is still in flight (outcome cleared) is untouched — not re-eligible, not yet annotated', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixRetries: 1, autoFixReopened: true });
+  expect(isFixPlanDead(job, [job])).toBe(false);
+  expect(selectAutoFixTargets([job], { fixSlugExists: noSiblingOnDisk }).some((j) => j.slug === job.slug)).toBe(false);
+  expect(isExhaustedAutoFix(job)).toBe(false);
+});
+
+test('(e) a fix-plan child that is still pending leaves the parent untouched', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'plan', autoFixRetries: 0 });
+  const pendingChild = { slug: fixSlugFor(job), status: 'pending', parallelGroup: job.parallelGroup };
+  const jobs = [job, pendingChild];
+  expect(isFixPlanDead(job, jobs)).toBe(false);
+  expect(selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk }).some((j) => j.slug === job.slug)).toBe(false);
+  expect(isAnnotatable(job, new Set(jobs.map((j) => j.slug)))).toBe(false);
+});
+
+test('(e) a fix-plan child that is still running leaves the parent untouched', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'plan', autoFixRetries: 0 });
+  const runningChild = { slug: fixSlugFor(job), status: 'running', parallelGroup: job.parallelGroup };
+  const jobs = [job, runningChild];
+  expect(isFixPlanDead(job, jobs)).toBe(false);
+  expect(selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk }).some((j) => j.slug === job.slug)).toBe(false);
+  expect(isAnnotatable(job, new Set(jobs.map((j) => j.slug)))).toBe(false);
+});
+
+test('(e) a fix-plan child that completed leaves the parent untouched (unchanged from today)', () => {
+  const job = makeJob({ autoFixAttempted: true, autoFixOutcome: 'plan', autoFixRetries: 0 });
+  const completedChild = { slug: fixSlugFor(job), status: 'completed', parallelGroup: job.parallelGroup };
+  const jobs = [job, completedChild];
+  expect(isFixPlanDead(job, jobs)).toBe(false);
+  expect(selectAutoFixTargets(jobs, { fixSlugExists: noSiblingOnDisk }).some((j) => j.slug === job.slug)).toBe(false);
+  expect(isAnnotatable(job, new Set(jobs.map((j) => j.slug)))).toBe(false);
 });
 
 // (invariant) every needs_review job is either an auto-fix target or

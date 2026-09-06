@@ -2600,6 +2600,10 @@ function resetJobFields(job, errorMsg, opts = {}) {
   // can otherwise linger forever when RCA is disabled or errors).
   delete job.rcaFailureClass;
   delete job.rcaRecoveryAction;
+  // Same "this run's outcome, not durable across a reset" category — a
+  // human-driven reset must genuinely start the auto-fix budget over,
+  // including the one-time dead-fix-plan-child reopen (PRD 1129).
+  delete job.autoFixReopened;
   // Like exitCode: this run's outcome, not durable across a reset — a stale
   // leak badge from a prior attempt must not linger once the job re-fires.
   delete job.leakedDescendants;
@@ -4042,7 +4046,25 @@ function healTargetForFix(fixSlug, jobs) {
  * unit-tested (no spawn, no fs). Inputs are the already-resolved values that
  * spawnInvestigation computes.
  */
-function buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group }) {
+function buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group, deadChild = null }) {
+  const deadFixChildNote = deadChild ? `
+
+# This is a REOPENED investigation — your own prior fix plan died
+You already investigated this job once and produced a fix-plan PRD, \`${deadChild.slug}\`, which was
+supposed to heal it. That fix-plan job itself reached a terminal, non-completed status
+(\`${deadChild.status}\`) without ever fixing the original failure — so the parent job you are now
+investigating is stuck again with nothing left to retry it automatically. This is the ONE reopen
+this parent gets; do not cold-read the log and re-derive the plan that already failed.
+
+Dead fix-plan child's own outcome:
+- Slug: ${deadChild.slug}
+- Status: ${deadChild.status}
+- Verifier verdict: ${deadChild.verifierVerdict ?? '(none recorded)'}
+- Error: ${deadChild.error ?? '(none recorded)'}
+
+Read why THAT job died (its own run log, if any, under the runs directory) before writing a new
+fix-plan PRD, and make sure your new plan is genuinely different from — not a repeat of — whatever
+that dead child attempted.` : '';
   const abandonedBackgroundTaskNote = failedJob.verifierVerdict === 'abandoned_background_task' ? `
 
 # Known failure class: abandoned background task
@@ -4063,7 +4085,7 @@ The fix-plan PRD you write for this MUST instruct its executor to, in order:
 1. Check for a salvage patch (named \`<slug>.uncommitted.patch\` in the run directory${failedJob.salvagePatch ? `, e.g. \`${failedJob.salvagePatch}\`` : ''}) and, if found, apply it to the working tree BEFORE inspecting \`git status\`/\`git diff\` in ${cwd} for uncommitted changes matching the original PRD's acceptance criteria.
 2. If the work is present (via the applied patch or already in the tree) and satisfies the acceptance criteria, run the project's verify commands and COMMIT it — do not re-implement or re-plan the PRD from scratch.
 3. Only fall back to re-implementing whatever acceptance criteria are genuinely missing after applying any salvage patch, not the whole PRD.` : '';
-  return `You are investigating a failed scheduled job in the session-manager queue. Your ONLY job is to write a fix-plan PRD file. Do NOT attempt the fix yourself.${abandonedBackgroundTaskNote}
+  return `You are investigating a failed scheduled job in the session-manager queue. Your ONLY job is to write a fix-plan PRD file. Do NOT attempt the fix yourself.${deadFixChildNote}${abandonedBackgroundTaskNote}
 
 # Failed job
 - Slug: ${failedJob.slug}
@@ -4183,7 +4205,7 @@ function readRunOutcomeSidecars(runDir, slug) {
  */
 const INVESTIGATION_LAUNCH_KEY = 'investigation';
 
-async function spawnInvestigation(failedJob, runDir) {
+async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) {
   // The probe launches with the same CLI as the job it diagnoses. While
   // that CLI cannot launch at all (launch circuit breaker, issue #11 list
   // B1: probes e4f82da2/d374e6bf died on the same HTTP 400 as the runs
@@ -4269,7 +4291,13 @@ async function spawnInvestigation(failedJob, runDir) {
 
   const logTail = readTail(failedLogPath, 16 * 1024) || '(failed to read log)';
 
-  if (fs.existsSync(fixPath)) {
+  // A dead-fix-plan reopen (PRD 1129) targets the SAME fixPath its dead
+  // child was originally authored at, by construction (fixSlugFor is a pure
+  // function of the parent) — the file existing is not staleness here, it's
+  // the whole reason a reopen was offered. Skip the guard in that one case
+  // so the second investigation can overwrite the dead plan; every other
+  // caller keeps the original protection against clobbering a live sibling.
+  if (fs.existsSync(fixPath) && !deadChild) {
     console.log(`[scheduler] skip investigation: fix plan already exists at ${fixPath}`);
     releaseSlot();
     return { deferred: false };
@@ -4295,7 +4323,7 @@ async function spawnInvestigation(failedJob, runDir) {
     console.warn(`[scheduler] investigation cwd is not a git repo (${cwd}); falling back to ${DEFAULT_PROJECT_CWD}`);
     cwd = DEFAULT_PROJECT_CWD;
   }
-  const prompt = buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group });
+  const prompt = buildInvestigationPrompt({ failedJob, cwd, failedLogPath, originalBody, logTail, fixPath, group, deadChild });
 
   // Phase 1: open log fd for pre-spawn diagnostics.
   const { fd, safeLog, closeFd } = openLog(investigationLogPath);
@@ -4424,6 +4452,22 @@ async function spawnInvestigation(failedJob, runDir) {
         mutate((s) => {
           const j = s.jobs.find((x) => x.slug === failedJob.slug);
           if (j) j.autoFixOutcome = 'plan';
+          // Dead-fix-plan reopen (PRD 1129): fixSlugFor is a pure function of
+          // the parent, so the freshly-authored plan landed at the SAME slug
+          // as the dead child — reconcile() sees an already-known slug and
+          // will never re-mint a pending row for it. Explicitly reset the
+          // dead child's own row here so the overwritten plan actually gets
+          // a chance to run, rather than sitting inert behind a permanently
+          // terminal queue row. force:true because 'skipped' (a valid dead
+          // status here) is otherwise reset-refused by design.
+          if (deadChild) {
+            const child = s.jobs.find((x) => x.slug === deadChild.slug);
+            if (child) {
+              resetJobFields(child, 'reset by dead-fix-plan reopen: parent investigation authored a new plan', {
+                force: true, source: 'spawnInvestigation:dead-fix-plan-reopen',
+              });
+            }
+          }
         }).catch(() => {});
       } else {
         console.log(`[scheduler] investigation finished WITHOUT producing fix plan (slug=${failedJob.slug}, code=${exitCode})`);
@@ -5222,6 +5266,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     let failedJobSnapshot = null;
     let needsInvestigationNow = false;
     let investigationJobSnapshot = null;
+    let investigationDeadChildSnapshot = null;
     let needsReviewRcaSnapshot = null;
     let resumeRecoveryJob = null;
     let resumeRecoveryTarget = null;
@@ -5425,8 +5470,13 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
               isEligibleForImmediateAutoFix(s.jobs[i2], s.jobs, fixSlugExists)
             ) {
               const isRetryAttempt = s.jobs[i2].autoFixAttempted === true;
+              const isDeadFixPlanReopen = isFixPlanDead(s.jobs[i2], s.jobs);
+              if (isDeadFixPlanReopen) {
+                investigationDeadChildSnapshot = s.jobs.find((x) => x.slug === fixSlugFor(s.jobs[i2])) || null;
+              }
               s.jobs[i2].autoFixAttempted = true;
               if (!s.jobs[i2].runId) s.jobs[i2].runId = runId;
+              if (isDeadFixPlanReopen) s.jobs[i2].autoFixReopened = true;
               if (isRetryAttempt) {
                 s.jobs[i2].autoFixRetries = (s.jobs[i2].autoFixRetries ?? 0) + 1;
                 delete s.jobs[i2].autoFixOutcome;
@@ -5599,7 +5649,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       }
     } else if (needsInvestigationNow && investigationJobSnapshot) {
       console.log(`[scheduler] needs_review ${job.slug} → immediate auto-fix investigation (not waiting for periodic reverify)`);
-      spawnInvestigation(investigationJobSnapshot, runDir).catch((e) => {
+      spawnInvestigation(investigationJobSnapshot, runDir, { deadChild: investigationDeadChildSnapshot }).catch((e) => {
         console.error('[scheduler] spawnInvestigation error', job.slug, e);
       });
     }
@@ -6396,12 +6446,18 @@ function isUnresolvableNeedsReview(job, { hasRunDir }) {
  * ('no-plan', 'error', and unstamped/undefined) — mirrors the retry
  * eligibility rule in selectAutoFixTargets so a job can never be retry-
  * eligible there and simultaneously un-annotatable here.
+ *
+ * A parent stamped `autoFixReopened: true` (its dead fix-plan child earned
+ * it exactly one further attempt — see isFixPlanDead) is a separate
+ * exhaustion path: it is spent as soon as that second investigation
+ * concludes with ANY outcome, including another 'plan' — a reopened parent
+ * never gets a third attempt, so unlike the fresh case a 'plan' outcome does
+ * not exempt it here.
  */
 function isExhaustedAutoFix(job) {
-  return !!job && job.status === 'needs_review'
-    && job.autoFixAttempted === true
-    && job.autoFixOutcome !== 'plan'
-    && (job.autoFixRetries ?? 0) >= 1;
+  if (!job || job.status !== 'needs_review' || job.autoFixAttempted !== true) return false;
+  if (job.autoFixReopened === true) return job.autoFixOutcome != null;
+  return job.autoFixOutcome !== 'plan' && (job.autoFixRetries ?? 0) >= 1;
 }
 
 /**
@@ -6415,6 +6471,31 @@ function isPlanUnqueued(job, queuedSlugs) {
   if (!job || job.status !== 'needs_review') return false;
   if (job.autoFixOutcome !== 'plan') return false;
   return !queuedSlugs.has(fixSlugFor(job));
+}
+
+// Terminal-and-not-completed statuses a fix-plan child can die in — see
+// isFixPlanDead.
+const DEAD_FIX_CHILD_STATUSES = new Set(['needs_review', 'failed', 'quarantined', 'skipped']);
+
+/**
+ * Pure predicate: a parent stuck at outcome 'plan' whose own fix-plan child
+ * (fixSlugFor(job)) has ITSELF died — reached a terminal non-completed
+ * status — with nothing left in the ladder that will ever revisit either
+ * row again (selectAutoFixTargets skips a 'plan' outcome outright, and
+ * isPlanUnqueued only fires when the child never reached the queue at all,
+ * which isn't true once a dead child row exists). `job.autoFixReopened`
+ * gates this to exactly once per parent — once stamped, this always returns
+ * false so the parent can never be reopened a second time. Exported for
+ * tests.
+ */
+function isFixPlanDead(job, jobsInProject) {
+  if (!job || job.status !== 'needs_review') return false;
+  if (job.autoFixOutcome !== 'plan') return false;
+  if (job.autoFixReopened === true) return false;
+  const fixSlug = fixSlugFor(job);
+  const child = (jobsInProject || []).find((j) => j.slug === fixSlug);
+  if (!child) return false;
+  return DEAD_FIX_CHILD_STATUSES.has(child.status);
 }
 
 /**
@@ -6565,13 +6646,21 @@ function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRu
     const runId = job.runId || resolveJobRunId(job);
     if (!runId) return false;
     if (isFixPlanBeyondDepthCap(job.slug, job.investigationDepth)) return false;
+    // A dead fix-plan child (PRD 1129) earns its parent exactly one further
+    // attempt, bypassing the normal 'plan' exclusion and the fix-slug/queue
+    // membership checks below — those checks exist to stop a FRESH
+    // investigation from clobbering a live sibling, but here the sibling is
+    // dead and reusing its slug is the whole point of the reopen.
+    const dead = isFixPlanDead(job, jobs);
     if (job.autoFixAttempted) {
-      const retryEligible = job.autoFixOutcome === 'no-plan'
+      const retryEligible = dead
+        || job.autoFixOutcome === 'no-plan'
         || job.autoFixOutcome === 'error'
         || job.autoFixOutcome == null;
       if (!retryEligible) return false;
-      if ((job.autoFixRetries ?? 0) >= 1) return false;
+      if (!dead && (job.autoFixRetries ?? 0) >= 1) return false;
     }
+    if (dead) return true;
     const fixSlug = fixSlugFor(job);
     if (fixSlugExists(fixSlug)) return false;
     if (slugsInQueue.has(fixSlug)) return false;
@@ -6885,23 +6974,30 @@ async function reverifyNeedsReview() {
       const runId = job.runId || resolveRunId(job);
       const runDir = path.join(RUNS_DIR, runId);
       const isRetryAttempt = job.autoFixAttempted === true;
+      const isDeadFixPlanReopen = isFixPlanDead(job, queueForResumeAndAutofix.jobs);
+      const deadChild = isDeadFixPlanReopen
+        ? queueForResumeAndAutofix.jobs.find((j) => j.slug === fixSlugFor(job))
+        : null;
       // Persist the attempt BEFORE spawning — a crash mid-investigation still
       // counts it (mirrors orphanRetries). Safe even when the slot is busy: the
       // investigation is queued and drained as slots free, so it is genuinely
-      // attempted rather than silently dropped.
+      // attempted rather than silently dropped. autoFixReopened is stamped in
+      // this SAME mutate so a crash between selection and dispatch can never
+      // leave the parent re-eligible for a second reopen (PRD 1129).
       await mutate((s) => {
         const j = s.jobs.find((x) => x.slug === job.slug);
         if (j) {
           j.autoFixAttempted = true;
           if (!j.runId && runId) j.runId = runId;
+          if (isDeadFixPlanReopen) j.autoFixReopened = true;
           if (isRetryAttempt) {
             j.autoFixRetries = (j.autoFixRetries ?? 0) + 1;
             delete j.autoFixOutcome;
           }
         }
       });
-      console.log(`[scheduler] auto-fix: needs_review ${job.slug} → authoring fix-plan (${isRetryAttempt ? 'retry' : '1/1'})`);
-      spawnInvestigation(job, runDir).catch((e) => {
+      console.log(`[scheduler] auto-fix: needs_review ${job.slug} → authoring fix-plan (${isRetryAttempt ? 'retry' : '1/1'}${isDeadFixPlanReopen ? ', dead fix-plan child reopen' : ''})`);
+      spawnInvestigation(job, runDir, { deadChild }).catch((e) => {
         console.error('[scheduler] auto-fix spawnInvestigation error', job.slug, e);
       });
     }
@@ -8152,4 +8248,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { classifyQueueStarvation, runQueueStarvationWatchdog, QUEUE_STARVATION_MS, computeBlockedChains, stripAppOwnedChurn, findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, selectLeftoverQuarantineTarget, quarantineLeftovers, performLeftoverQuarantine, spawnInvestigation, computeLaunchHolds, computeDepHistorySatisfaction, handleLaunchFailure, applyLaunchFailure, setPaused, clearPause, tickQueue, runDueJobs, isCooldownSuppressed, nextRapidRateLimitCount, CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD, RAPID_RATE_LIMIT_WINDOW_MS, MANUAL_PAUSE_COOLDOWN_MS, RUNS_DIR, pickRunDir };
+module.exports = { classifyQueueStarvation, runQueueStarvationWatchdog, QUEUE_STARVATION_MS, computeBlockedChains, stripAppOwnedChurn, findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, isFixPlanDead, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, selectLeftoverQuarantineTarget, quarantineLeftovers, performLeftoverQuarantine, spawnInvestigation, computeLaunchHolds, computeDepHistorySatisfaction, handleLaunchFailure, applyLaunchFailure, setPaused, clearPause, tickQueue, runDueJobs, isCooldownSuppressed, nextRapidRateLimitCount, CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD, RAPID_RATE_LIMIT_WINDOW_MS, MANUAL_PAUSE_COOLDOWN_MS, RUNS_DIR, pickRunDir };

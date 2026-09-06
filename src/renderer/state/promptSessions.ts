@@ -114,6 +114,13 @@ export interface PromptSession {
      *  it) still has real data to show, never a placeholder. Cleared
      *  (omitted) whenever status moves off `needs_merge_resolution`. */
     conflictReason?: string
+    /** Base-tree WIP paths carried into this worktree at creation time
+     *  (gitWorktree.cjs's createWorktree, PRD 1094) — threaded back into
+     *  mergeToMain so integrateEpicBranch can skip a doomed merge attempt
+     *  when the branch's only committed changes are exactly this carried
+     *  WIP. Absent when the base tree was clean when this worktree was
+     *  created. */
+    carriedPaths?: string[]
   }
 }
 
@@ -399,6 +406,7 @@ async function attemptMergeToMainInternal(
       epicId: session.id,
       branch: worktree.branch,
       dir: worktree.dir,
+      carriedPaths: worktree.carriedPaths,
     })
     return {
       worktree: {

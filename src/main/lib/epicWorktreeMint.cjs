@@ -30,10 +30,10 @@ const { validatePath } = require('../config.cjs');
 /**
  * createEpicWorktreeViaIpc(cwd, epicId) → Promise<EpicWorktree | null>
  *
- * Returns the `worktree` field shape (`{ dir, branch, baseCwd, status }`)
- * ready to persist onto the Epic record on success, or `null` on any
- * failure — createEpicWorktree/createWorktree never throw, so this never
- * does either.
+ * Returns the `worktree` field shape (`{ dir, branch, baseCwd, status,
+ * carriedPaths }`) ready to persist onto the Epic record on success, or
+ * `null` on any failure — createEpicWorktree/createWorktree never throw, so
+ * this never does either.
  */
 async function createEpicWorktreeViaIpc(cwd, epicId) {
   validatePath(cwd);
@@ -42,7 +42,19 @@ async function createEpicWorktreeViaIpc(cwd, epicId) {
     console.log(`[epicWorktreeMint] ${epicId}: not isolated (${result.reason})`);
     return null;
   }
-  return { dir: result.dir, branch: result.branch, baseCwd: result.baseCwd, status: 'active' };
+  // carriedPaths (base-tree WIP carried into this worktree — PRD 1094) MUST
+  // survive onto the persisted record: it's the only way integrateEpicBranch
+  // (via epicWorktreeMerge.cjs) can later apply the carried-wip-only skip
+  // instead of attempting a doomed merge against the base tree's still-dirty
+  // paths. Dropping it here silently (as this used to) meant that skip never
+  // fired for Epics, only for scheduler jobs.
+  return {
+    dir: result.dir,
+    branch: result.branch,
+    baseCwd: result.baseCwd,
+    status: 'active',
+    ...(Array.isArray(result.carriedPaths) && result.carriedPaths.length ? { carriedPaths: result.carriedPaths } : {}),
+  };
 }
 
 function registerEpicWorktreeMintHandlers() {

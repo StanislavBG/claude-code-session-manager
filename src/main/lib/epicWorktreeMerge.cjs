@@ -37,9 +37,9 @@ const { validatePath } = require('../config.cjs');
  * real conflict — never throws (integrateEpicBranch/cleanupEpicWorktree
  * never do either).
  */
-async function mergeEpicToMainViaIpc(cwd, epicId, branch, dir) {
+async function mergeEpicToMainViaIpc(cwd, epicId, branch, dir, carriedPaths) {
   validatePath(cwd);
-  const outcome = await integrateEpicBranch({ cwd, branch, epicId });
+  const outcome = await integrateEpicBranch({ cwd, branch, epicId, carriedPaths });
   if (!outcome.ok) {
     console.log(`[epicWorktreeMerge] ${epicId}: needs manual resolution (${outcome.reason})`);
     return { ok: false, status: 'needs_merge_resolution', reason: outcome.reason };
@@ -56,7 +56,7 @@ function registerEpicWorktreeMergeHandlers() {
   const { schemas: s, validated: v } = require('../ipcSchemas.cjs');
   ipcMain.handle(
     'promptSessions:merge-to-main',
-    v(s.promptSessionsMergeToMain, ({ cwd, epicId, branch, dir }) => mergeEpicToMainViaIpc(cwd, epicId, branch, dir)),
+    v(s.promptSessionsMergeToMain, ({ cwd, epicId, branch, dir, carriedPaths }) => mergeEpicToMainViaIpc(cwd, epicId, branch, dir, carriedPaths)),
   );
 }
 

@@ -120,6 +120,7 @@ test('LEGAL_TRANSITIONS covers every real scheduler.cjs edge', () => {
     ['needs_review', 'investigating'],
     ['needs_review', 'pending'],
     ['needs_review', 'completed'],
+    ['needs_review', 'running'],
     ['completed', 'pending'],
     ['skipped', 'pending'],
   ];

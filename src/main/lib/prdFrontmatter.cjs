@@ -62,7 +62,7 @@ function splitFrontmatter(raw) {
  * either surface never reorders or drops a key it didn't touch. Recognized
  * key set intentionally mirrors the TS module exactly (title, cwd,
  * estimateMinutes, parallelGroup, sourcePromptId, sourceTabId, tag,
- * agentType, createdVia, issuedAt); every other frontmatter key (e.g. dependsOn)
+ * agentType, createdVia, issuedAt, dependsOn); every other frontmatter key
  * round-trips via `extras`, same as the renderer's editor today.
  *
  * `createdVia`/`issuedAt` (PRD provenance-lockdown) are recognized here so
@@ -70,10 +70,15 @@ function splitFrontmatter(raw) {
  * after creation — see prdCreate.cjs's buildPrdBody for the create-time
  * stamp) round-trips them like any other known key rather than shunting them
  * into `extras`.
+ *
+ * `dependsOn` (PRD 1124) is the first ARRAY-valued recognized key — parsed/
+ * emitted only in its inline `[a, b]` list form (the sole form prdCreate.cjs
+ * ever writes; block-style YAML lists are out of scope). An empty array is
+ * never emitted, which is how `scheduler_update_prd` clears a dependency.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'quietMachine']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'quietMachine'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine'];
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 function indentOf(line) {
@@ -97,6 +102,28 @@ function parseScalar(raw) {
     return v.slice(1, -1);
   }
   return v;
+}
+
+/**
+ * Parse the inline `[a, b]` list form used by `dependsOn` — the sole form
+ * prdCreate.cjs's buildPrdBody ever writes. Returns null (not recognized as
+ * a list) when `raw` isn't bracketed, so a hand-edited non-list value is
+ * left unset rather than mis-parsed.
+ */
+function parseInlineList(raw) {
+  const v = raw.trim();
+  if (!v.startsWith('[') || !v.endsWith(']')) return null;
+  const inner = v.slice(1, -1).trim();
+  if (inner === '') return [];
+  return inner
+    .split(',')
+    .map((s) => s.trim().replace(/^(['"])(.*)\1$/, '$2'))
+    .filter((s) => s.length > 0);
+}
+
+function arraysEqual(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  return a.length === b.length && a.every((v, i) => v === b[i]);
 }
 
 function applyKey(fm, key, after) {
@@ -138,6 +165,13 @@ function applyKey(fm, key, after) {
     case 'issuedAt':
       fm.issuedAt = String(v);
       return;
+    case 'dependsOn': {
+      // Only the inline `[a, b]` list form is recognized (see parseInlineList's
+      // header) — a malformed/hand-edited non-list value is left unset.
+      const list = parseInlineList(after);
+      if (list) fm.dependsOn = list;
+      return;
+    }
     case 'quietMachine':
       // Opt-in exclusive-lease flag (PRD 1107) — only a literal `true`
       // frontmatter value opts in; anything else (including an explicit
@@ -180,10 +214,17 @@ function parsePrdFile(text) {
 
     if (RECOGNIZED_KEYS.has(key)) {
       applyKey(fm, key, after);
-      const parsed = parseScalar(after);
-      if (parsed !== null && (typeof parsed === 'string' || typeof parsed === 'number')) {
-        if (!fm._raw) fm._raw = {};
-        fm._raw[key] = { line, parsed };
+      if (key === 'dependsOn') {
+        if (fm.dependsOn) {
+          if (!fm._raw) fm._raw = {};
+          fm._raw[key] = { line, parsed: fm.dependsOn };
+        }
+      } else {
+        const parsed = parseScalar(after);
+        if (parsed !== null && (typeof parsed === 'string' || typeof parsed === 'number')) {
+          if (!fm._raw) fm._raw = {};
+          fm._raw[key] = { line, parsed };
+        }
       }
     } else {
       extras[key] = { lines: band };
@@ -218,13 +259,20 @@ function serializePrdFile(fm, body) {
   for (const key of EMIT_ORDER) {
     const v = fm[key];
     if (v === undefined || v === null || v === '') continue;
+    // An empty dependsOn array is how scheduler_update_prd CLEARS the
+    // dependency — never emitted, same as an absent key.
+    if (Array.isArray(v) && v.length === 0) continue;
     const cached = fm._raw?.[key];
-    if (cached && cached.parsed === v) {
+    if (cached && (Array.isArray(v) ? arraysEqual(cached.parsed, v) : cached.parsed === v)) {
       out.push(cached.line);
       continue;
     }
     if (typeof v === 'number') {
       out.push(`${key}: ${v}`);
+      continue;
+    }
+    if (Array.isArray(v)) {
+      out.push(`${key}: [${v.join(', ')}]`);
       continue;
     }
     out.push(`${key}: ${serializeScalar(v)}`);

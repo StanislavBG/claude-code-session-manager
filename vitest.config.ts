@@ -70,6 +70,8 @@ export default defineConfig({
       'src/main/__tests__/scheduler-quiet-machine-lease.test.cjs',
       'src/main/__tests__/prdFrontmatterQuietMachine.test.cjs',
       'src/main/__tests__/prdFrontmatterAgentType.test.cjs',
+      'src/main/__tests__/prdFrontmatterDependsOn.test.cjs',
+      'src/main/__tests__/prdUpdateDependsOn.test.cjs',
       'src/main/__tests__/prdAgentType.test.cjs',
       'src/main/lib/__tests__/terminalRunOutcome.test.cjs',
       'src/main/lib/__tests__/importReferences.spec.cjs',

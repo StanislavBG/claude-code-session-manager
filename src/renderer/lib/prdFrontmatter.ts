@@ -46,13 +46,17 @@ export type PrdFrontmatter = {
   sourceTabId?: string
   tag?: EpicTag
   agentType?: string
+  // Explicit cross-PRD ordering (PRD 832), promoted to a recognized,
+  // patchable key by PRD 1124 — see this module's header. Parsed/emitted
+  // only in the inline `[a, b]` list form; an empty array clears it.
+  dependsOn?: string[]
   // Unrecognized keys round-trip via `extras`.
   extras?: Record<string, RawValue>
   // Original raw line per recognized key. Used to preserve quote style and
   // spacing on round-trip when the in-memory value still parses to the same
   // thing. The form editor never sets this — it's only populated by
   // parsePrdFile. The serializer prefers _raw when the cached value matches.
-  _raw?: Record<string, { line: string; parsed: string | number | null }>
+  _raw?: Record<string, { line: string; parsed: string | number | string[] | null }>
 }
 
 // Raw value preserves the original text band so we can round-trip without
@@ -75,6 +79,7 @@ const RECOGNIZED_KEYS = new Set<keyof PrdFrontmatter>([
   'sourceTabId',
   'tag',
   'agentType',
+  'dependsOn',
 ])
 
 // Emit order is stable so opening+saving without edits is byte-identical.
@@ -87,6 +92,7 @@ const EMIT_ORDER: Array<keyof PrdFrontmatter> = [
   'sourceTabId',
   'tag',
   'agentType',
+  'dependsOn',
 ]
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
@@ -116,6 +122,28 @@ function parseScalar(raw: string): string | number | boolean | null {
     return v.slice(1, -1)
   }
   return v
+}
+
+/**
+ * Parse the inline `[a, b]` list form used by `dependsOn` — the sole form
+ * prdCreate.cjs's buildPrdBody ever writes. Returns null (not recognized as
+ * a list) when `raw` isn't bracketed, so a hand-edited non-list value is
+ * left unset rather than mis-parsed. Mirrors prdFrontmatter.cjs's parseInlineList.
+ */
+function parseInlineList(raw: string): string[] | null {
+  const v = raw.trim()
+  if (!v.startsWith('[') || !v.endsWith(']')) return null
+  const inner = v.slice(1, -1).trim()
+  if (inner === '') return []
+  return inner
+    .split(',')
+    .map((s) => s.trim().replace(/^(['"])(.*)\1$/, '$2'))
+    .filter((s) => s.length > 0)
+}
+
+function arraysEqual(a: unknown, b: unknown): boolean {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false
+  return a.length === b.length && a.every((v, i) => v === b[i])
 }
 
 export function parsePrdFile(text: string): ParsedPrdFile {
@@ -167,10 +195,17 @@ export function parsePrdFile(text: string): ParsedPrdFile {
       applyKey(fm, key, after)
       // Cache the original line + parsed value so the serializer can prefer
       // the original verbatim text when the in-memory value still matches.
-      const parsed = parseScalar(after)
-      if (parsed !== null && (typeof parsed === 'string' || typeof parsed === 'number')) {
-        if (!fm._raw) fm._raw = {}
-        fm._raw[key] = { line, parsed }
+      if (key === 'dependsOn') {
+        if (fm.dependsOn) {
+          if (!fm._raw) fm._raw = {}
+          fm._raw[key] = { line, parsed: fm.dependsOn }
+        }
+      } else {
+        const parsed = parseScalar(after)
+        if (parsed !== null && (typeof parsed === 'string' || typeof parsed === 'number')) {
+          if (!fm._raw) fm._raw = {}
+          fm._raw[key] = { line, parsed }
+        }
       }
     } else {
       extras[key] = { lines: band }
@@ -213,6 +248,14 @@ function applyKey(fm: PrdFrontmatter, key: string, after: string): void {
       // (main-process prdAgentType.cjs), not in this pure parser.
       fm.agentType = String(v)
       return
+    case 'dependsOn': {
+      // Only the inline `[a, b]` list form is recognized (see
+      // parseInlineList's header) — a malformed/hand-edited non-list value
+      // is left unset.
+      const list = parseInlineList(after)
+      if (list) fm.dependsOn = list
+      return
+    }
   }
 }
 
@@ -251,16 +294,23 @@ export function serializePrdFile(fm: PrdFrontmatter, body: string): string {
   for (const key of EMIT_ORDER) {
     const v = fm[key]
     if (v === undefined || v === null || v === '') continue
+    // An empty dependsOn array is how scheduler_update_prd CLEARS the
+    // dependency — never emitted, same as an absent key.
+    if (Array.isArray(v) && v.length === 0) continue
     // Prefer the original line verbatim when the cached parsed value still
     // matches the in-memory value. This preserves quote style and spacing so
     // an open-then-save without edits produces a byte-identical file.
     const cached = fm._raw?.[key]
-    if (cached && cached.parsed === v) {
+    if (cached && (Array.isArray(v) ? arraysEqual(cached.parsed, v) : cached.parsed === v)) {
       out.push(cached.line)
       continue
     }
     if (typeof v === 'number') {
       out.push(`${key}: ${v}`)
+      continue
+    }
+    if (Array.isArray(v)) {
+      out.push(`${key}: [${v.join(', ')}]`)
       continue
     }
     out.push(`${key}: ${serializeScalar(v as string)}`)

@@ -133,7 +133,10 @@ const MCP_TOOL_CATALOG = [
       + 'app\'s admin API. Refuses once a queue row exists for the slug and its status is anything but "pending" '
       + '(running/completed/failed/needs_review) — editing the spec under a live or already-finished executor is refused, '
       + 'not silently applied. Only recognized frontmatter keys (title, cwd, estimateMinutes, parallelGroup, '
-      + 'sourcePromptId, sourceTabId, tag) may be patched; unrecognized keys (e.g. dependsOn) round-trip unchanged.',
+      + 'sourcePromptId, sourceTabId, tag, dependsOn) may be patched; unrecognized keys round-trip unchanged. '
+      + 'Patching dependsOn to a non-empty array replaces it wholesale (validated against existing PRD slugs, '
+      + 'same resolver scheduler_create_prd uses); patching it to an explicit empty array CLEARS the dependency — '
+      + 'the safe way to fix a wrong dependsOn without archiving (which marks the PRD completed and wrongly frees its dependents).',
     whenToUse: 'Use to correct a PRD scope/estimate/tag before it starts running — e.g. before resetting a needs_review job whose spec needs to change.',
     whenNotToUse: 'Do not use once the job is running or terminal (completed/failed/needs_review) without first resetting it back to pending — the route refuses the edit.',
     exampleArgs: { slug: 'add-mcp-tool-catalog', frontmatter: { estimateMinutes: 45 } },

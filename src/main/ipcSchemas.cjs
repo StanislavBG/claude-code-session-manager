@@ -313,6 +313,13 @@ const NO_NEWLINE_RE = /^[^\r\n]*$/;
 // prdCreate.cjs's createPrd via prdAgentType.cjs's assertAgentTypeWritable —
 // this schema only enforces the name SHAPE.
 const PrdAgentTypeSchema = z.string().regex(PERSONA_NAME_RE, 'agent name must be lowercase, hyphenated (e.g. "dev-lead")');
+// Shared shape for a `dependsOn` slug entry — schedulerCreatePrd and
+// adminUpdatePrd (scheduler_update_prd, PRD 1124) must accept the exact same
+// slug shape or an update could write a dependsOn value create would have
+// rejected. Array-level constraints (`.max(20)`, `.optional()`) stay at each
+// call site since update also allows an explicit empty array to CLEAR the
+// dependency, which create has no reason to accept.
+const DepSlugSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9][\w.-]*$/);
 const schedulerCreatePrd = z.object({
   title: z.string().min(1).max(200).regex(NO_NEWLINE_RE, 'must not contain newlines'),
   // Optional (PRD: worktree-cwd Epic-lookup hazard) — when omitted, prdCreate.cjs's
@@ -332,7 +339,7 @@ const schedulerCreatePrd = z.object({
   parallelGroup: z.number().int().min(1).max(999999).optional(),
   // Explicit ordering (PRD 832): slugs that must complete before this PRD
   // becomes eligible. Written to frontmatter as `dependsOn: [a, b]`.
-  dependsOn: z.array(z.string().min(1).max(160).regex(/^[A-Za-z0-9][\w.-]*$/)).max(20).optional(),
+  dependsOn: z.array(DepSlugSchema).max(20).optional(),
   // An EXISTING Epic's promptSessionId (PRD 748) — NOT a PromptTicket.id.
   // ensureEpic() (epicMint.cjs) joins the Epic whose active-index.json
   // sessions key literally equals this value; the renderer only ever sends
@@ -455,6 +462,13 @@ const adminPrdFrontmatterPatch = z.object({
   // Opt-in exclusive-lease flag (PRD 1107) — patchable after creation too,
   // same as every other recognized key here.
   quietMachine: z.boolean().optional(),
+  // Explicit ordering (PRD 832), promoted to patchable by PRD 1124 — see
+  // prdFrontmatter.cjs's header. An explicit `[]` CLEARS the dependency
+  // (updatePrd's array-emptiness check skips writing the key at all); a
+  // non-empty array is validated write-time against the SAME resolver
+  // (depSlugResolve.cjs) scheduler_create_prd uses, so update and create
+  // can never disagree about what a dependsOn entry resolves to.
+  dependsOn: z.array(DepSlugSchema).max(20).optional(),
 });
 
 const adminUpdatePrd = z.object({

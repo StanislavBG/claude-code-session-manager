@@ -140,6 +140,7 @@ const jobWorktree = require('./lib/jobWorktree.cjs');
 const { reconcileEpicWorktreesOnBoot } = require('./lib/epicWorktreeBoot.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdFrontmatter.cjs');
+const { resolveDepSlug, findNearMatches } = require('./lib/depSlugResolve.cjs');
 const { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds } = require('./lib/prdMigration.cjs');
 const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
 
@@ -7676,6 +7677,36 @@ const remote = {
     // here would make quarantine irreversible through the API.
     if (job && job.status !== 'pending' && job.status !== 'quarantined') {
       return { ok: false, error: `job status is "${job.status}" — only a not-yet-running PRD (status "pending"/"quarantined", or no queue row yet) may be edited` };
+    }
+
+    // Write-time FK check for a patched dependsOn (PRD 1124), reusing the
+    // SAME resolution rule scheduler_create_prd's prdCreate.cjs applies (exact
+    // slug, else bare-name after stripping one leading `NN-`) so update and
+    // create can never disagree about what a dependsOn entry resolves to. An
+    // explicit empty array CLEARS the dependency and skips validation — there
+    // is nothing to resolve. A listPrds() read failure is skipped-with-a-
+    // warning, matching createPrd's tolerance for an I/O hiccup.
+    if (frontmatter && Array.isArray(frontmatter.dependsOn) && frontmatter.dependsOn.length) {
+      let listing;
+      try {
+        listing = await this.listPrds({ cwd, limit: Number.MAX_SAFE_INTEGER });
+      } catch (e) {
+        console.warn(`[scheduler] updatePrd: dependsOn validation skipped (listPrds failed): ${e?.message ?? e}`);
+        listing = null;
+      }
+      if (listing) {
+        const candidateSlugs = (listing.prds ?? []).map((p) => p.slug);
+        for (const dep of frontmatter.dependsOn) {
+          if (resolveDepSlug(dep, candidateSlugs).length > 0) continue;
+          const near = findNearMatches(dep, candidateSlugs);
+          const suggestion = near.length ? ` Closest existing slug(s): ${near.join(', ')}.` : '';
+          return {
+            ok: false,
+            error: `dependsOn entry "${dep}" does not resolve to any existing PRD in this project.${suggestion} ` +
+              'Pass the bare name (preferred) or the exact NN-prefixed slug of an existing PRD.',
+          };
+        }
+      }
     }
 
     let dir = null;

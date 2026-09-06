@@ -4586,6 +4586,11 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     let res;
     let worktreeLeftoverDirty = [];
     let worktreeIntegrationFailure = null;
+    // Set only when integrateJobBranch's stderr-parsing auto-resolve fired
+    // (PRD 1125) — surfaced on the job row so the Queue UI can say the merge
+    // self-healed rather than silently looking like an ordinary merge.
+    let mergeAutoResolved = null;
+    let mergeAutoResolvedPaths = null;
     // A job's uncommitted-work patch, whichever isolation mode produced it —
     // set by EITHER branch below, never both (worktree.ok picks exactly one
     // shape for the whole run). Named generically (not "worktree...") because
@@ -4633,6 +4638,11 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           console.error(`[scheduler] ${job.slug}: worktree branch integration FAILED (${integration.reason}) — branch ${worktree.branch} preserved in ${guardCwd} for manual recovery`);
         } else if (integration.integrated) {
           console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} integrated into ${guardCwd}${integration.mergeCommit ? ' (merge commit)' : ' (fast-forward)'}`);
+          if (integration.autoResolved) {
+            mergeAutoResolved = integration.autoResolved;
+            mergeAutoResolvedPaths = integration.resolvedPaths || [];
+            console.log(`[scheduler] ${job.slug}: merge auto-resolved (${integration.autoResolved}) — discarded ${mergeAutoResolvedPaths.length} identical working-tree duplicate(s): ${mergeAutoResolvedPaths.join(', ')}`);
+          }
         }
         await jobWorktree.cleanupJobWorktree({
           cwd: guardCwd,
@@ -5041,6 +5051,17 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
             s.jobs[i2].uncommittedPaths = capDirtyPaths(verifyResult.dirtyPaths);
           } else {
             delete s.jobs[i2].uncommittedPaths;
+          }
+          // Worktree merge self-healed (PRD 1125) — every blocking path was
+          // proven byte-identical to the branch, so the duplicate was
+          // discarded and the merge retried once, successfully. Surfaced so
+          // the Queue UI shows a self-heal instead of an ordinary merge.
+          if (mergeAutoResolved) {
+            s.jobs[i2].mergeAutoResolved = mergeAutoResolved;
+            s.jobs[i2].mergeAutoResolvedPaths = capDirtyPaths(mergeAutoResolvedPaths);
+          } else {
+            delete s.jobs[i2].mergeAutoResolved;
+            delete s.jobs[i2].mergeAutoResolvedPaths;
           }
           // Non-blocking notes (e.g. a recovered missing-dependency probe, or a
           // pattern hit demoted because a materially-checkable verdict outranked

@@ -545,6 +545,69 @@ async function createWorktree({ kind, cwd, key }) {
 }
 
 /**
+ * True iff every path in `paths` has working-tree content in `cwd`
+ * byte-identical to its committed blob on `branch`. Used both by the
+ * carried-wip-only shortcut above and by integrateBranch's auto-resolve of a
+ * "would be overwritten by merge" refusal below — in both cases discarding a
+ * working-tree copy is only safe BECAUSE identity with the incoming commit is
+ * proven, never assumed. Fails toward false (not identical) on ANY read
+ * error — a `git show` failure or an unreadable working-tree file is never
+ * proof of identity.
+ */
+async function pathsIdenticalToBranch({ cwd, branch, paths }) {
+  if (!Array.isArray(paths) || !paths.length) return false;
+  for (const p of paths) {
+    try {
+      const branchContent = await execGit(['show', `${branch}:${p}`], { cwd, timeout: 10_000 });
+      const baseContent = await fsp.readFile(path.join(cwd, p), 'utf8');
+      if (branchContent !== baseContent) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Parses the path lists out of git's refusal to merge over dirty working-tree
+ * files. Git emits up to two distinct blocks — tracked paths under "local
+ * changes ... would be overwritten" (restorable via `git checkout --`, which
+ * needs an index entry) and untracked paths under "untracked working tree
+ * files ... would be overwritten" (no index entry, so `git checkout --`
+ * cannot touch them — they must be removed instead). Each block is a run of
+ * TAB-indented path lines terminated by the next non-indented line (a
+ * "Please ..." sentence or the next block's own header). Returns null when
+ * neither block is present — stderr from a genuine content conflict has no
+ * such block.
+ */
+function parseBlockingMergePaths(stderrText) {
+  if (!stderrText) return null;
+  const tracked = [];
+  const untracked = [];
+  let mode = null;
+  for (const rawLine of stderrText.split('\n')) {
+    if (/would be overwritten by merge:\s*$/.test(rawLine) && /local changes/.test(rawLine)) {
+      mode = 'tracked';
+      continue;
+    }
+    if (/would be overwritten by merge:\s*$/.test(rawLine) && /untracked working tree files/.test(rawLine)) {
+      mode = 'untracked';
+      continue;
+    }
+    if (mode) {
+      if (/^\t/.test(rawLine)) {
+        const p = rawLine.trim();
+        if (p) (mode === 'tracked' ? tracked : untracked).push(p);
+        continue;
+      }
+      mode = null;
+    }
+  }
+  if (!tracked.length && !untracked.length) return null;
+  return { tracked: Array.from(new Set(tracked)), untracked: Array.from(new Set(untracked)) };
+}
+
+/**
  * Integrate a branch back into `cwd`'s current HEAD — fast-forward when
  * possible, a real merge commit when the main tree advanced underneath (a
  * sibling job/Epic merged first) since the worktree was created. Returns
@@ -600,17 +663,7 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
         // committed exactly the carried WIP and nothing more. Any mismatch
         // (including a read failure — fail toward the safer default) falls
         // through to the normal merge attempt below instead of skipping.
-        let allIdentical = true;
-        for (const p of changed) {
-          try {
-            const branchContent = await execGit(['show', `${branch}:${p}`], { cwd, timeout: 10_000 });
-            const baseContent = await fsp.readFile(path.join(cwd, p), 'utf8');
-            if (branchContent !== baseContent) { allIdentical = false; break; }
-          } catch {
-            allIdentical = false;
-            break;
-          }
-        }
+        const allIdentical = await pathsIdenticalToBranch({ cwd, branch, paths: changed });
         if (allIdentical) {
           return { ok: true, integrated: false, reason: 'carried-wip-only' };
         }
@@ -637,9 +690,40 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
     await execGit(['merge', '--no-ff', '--no-edit', '-m', mergeMessage, branch], { cwd, timeout: 30_000 });
     return { ok: true, integrated: true, mergeCommit: true };
   } catch (e) {
+    const stderrText = (e && (e.stderrText || e.message)) || String(e);
+    // git refuses this class of merge before ever touching MERGE_HEAD, so
+    // there is nothing yet to abort here — only the retry below (if it also
+    // fails) can leave a half-applied merge behind.
+    const blocking = parseBlockingMergePaths(stderrText);
+    if (blocking) {
+      const allPaths = [...blocking.tracked, ...blocking.untracked];
+      const identical = await pathsIdenticalToBranch({ cwd, branch, paths: allPaths });
+      if (identical) {
+        try {
+          if (blocking.tracked.length) {
+            await execGit(['checkout', '--', ...blocking.tracked], { cwd, timeout: 30_000 });
+          }
+          for (const p of blocking.untracked) {
+            await fsp.rm(path.join(cwd, p), { force: true });
+          }
+          await execGit(['merge', '--no-ff', '--no-edit', '-m', mergeMessage, branch], { cwd, timeout: 30_000 });
+          return {
+            ok: true,
+            integrated: true,
+            mergeCommit: true,
+            autoResolved: 'identical_working_tree_duplicates',
+            resolvedPaths: allPaths,
+          };
+        } catch (retryErr) {
+          try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
+          const retryText = (retryErr && (retryErr.stderrText || retryErr.message)) || String(retryErr);
+          return { ok: false, reason: `merge failed (likely a real content conflict): ${retryText}` };
+        }
+      }
+    }
     // Abort a half-applied merge so `cwd` isn't left in a mid-merge state.
     try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
-    return { ok: false, reason: `merge failed (likely a real content conflict): ${(e && (e.stderrText || e.message)) || e}` };
+    return { ok: false, reason: `merge failed (likely a real content conflict): ${stderrText}` };
   }
 }
 
@@ -914,6 +998,7 @@ module.exports = {
   keyFromBranch,
   createWorktree,
   captureAndCarryBaseDiff,
+  pathsIdenticalToBranch,
   integrateBranch,
   cleanupWorktree,
   salvageWorktreeDiff,

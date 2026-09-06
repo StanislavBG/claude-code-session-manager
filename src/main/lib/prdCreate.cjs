@@ -28,6 +28,16 @@ const { appendAuditEvent } = require('./auditLog.cjs');
 const { resolveProjectContext } = require('./projectRootResolve.cjs');
 const { fixChainDepthOf, baseSlugOf } = require('./fixChainDepth.cjs');
 const { DEFAULT_PRD_AGENT_TYPE, assertAgentTypeWritable } = require('./prdAgentType.cjs');
+const { resolveDepSlug, findNearMatches } = require('./depSlugResolve.cjs');
+
+// A caller-supplied slug that already starts with its own `NN-` (e.g.
+// "254-perf-x") used to silently become the double-prefixed row
+// "254-254-perf-x" once allocateParallelGroup() prepended the REAL
+// allocated NN — PRD_CREATE_SLUG_RE only enforces kebab-case shape, so it
+// never caught this. Refused outright rather than auto-stripped: silently
+// rewriting the caller's slug would hide the same mistake the old behavior
+// hid, just one layer further down.
+const SLUG_HAS_NN_PREFIX_RE = /^(\d+)-/;
 
 // Fix-chain depth cap (PRD 1113): a fix-of-a-fix (depth >= 2) is refused at
 // this shared write path rather than caught later — scheduler.cjs's
@@ -157,7 +167,7 @@ function resolveSourcePromptIdFromClaudeSession(cwd, claudeSessionId) {
  * the renderer-facing IPC handler (chat:create-prd, index.cjs) so the
  * validation/write logic lives in exactly one place (API-reuse standard).
  * `input` must already be schema-validated by the caller (schemas.schedulerCreatePrd).
- * `remote` is scheduler.cjs's remote object (allocateParallelGroup/readPrd/writePrd).
+ * `remote` is scheduler.cjs's remote object (allocateParallelGroup/readPrd/writePrd/listPrds).
  *
  * Returns `{ ok: true, nn, filename }` on success, or `{ ok: false, status, error }`
  * on failure — `status` is the HTTP status code the caller should map errors to
@@ -226,6 +236,18 @@ async function createPrd(input, remote) {
     if (fallback) input = { ...input, sourcePromptId: fallback };
   }
 
+  if (input.slug) {
+    const nnMatch = SLUG_HAS_NN_PREFIX_RE.exec(input.slug);
+    if (nnMatch) {
+      return {
+        ok: false,
+        status: 400,
+        error: `slug "${input.slug}" already starts with a numeric prefix "${nnMatch[1]}-" — the allocator ` +
+          `owns the NN- prefix, not the caller. Pass the bare name instead (e.g. "${input.slug.slice(nnMatch[0].length)}").`,
+      };
+    }
+  }
+
   const slug = input.slug || deriveSlugFromTitle(input.title);
   if (!slug || !PRD_CREATE_SLUG_RE.test(slug)) {
     return { ok: false, status: 400, error: 'could not derive a valid kebab-case slug from title; supply "slug" explicitly' };
@@ -281,6 +303,39 @@ async function createPrd(input, remote) {
       await assertAgentTypeWritable(input.cwd, input.agentType);
     } catch (e) {
       return { ok: false, status: 400, error: e?.message ?? 'invalid agentType' };
+    }
+  }
+
+  // Write-time FK check for dependsOn (report on read / throw on write — see
+  // prdAgentType.cjs's header): every entry must resolve to a PRD that
+  // actually exists in this project, using the SAME resolution rule
+  // schedulerBatch.cjs's findBlockingDep applies at run time (exact slug,
+  // else bare-name after stripping one leading `NN-`) — a dep that
+  // validates here is guaranteed to be a dep findBlockingDep can actually
+  // see later. A listPrds() read failure is skipped-with-a-warning, never a
+  // write outage: an I/O hiccup on the read side must not block every PRD
+  // write in the project.
+  if (input.dependsOn && input.dependsOn.length) {
+    let listing;
+    try {
+      listing = await remote.listPrds({ cwd: input.cwd, limit: Number.MAX_SAFE_INTEGER });
+    } catch (e) {
+      console.warn(`[prdCreate] dependsOn validation skipped (listPrds failed): ${e?.message ?? e}`);
+      listing = null;
+    }
+    if (listing) {
+      const candidateSlugs = (listing.prds ?? []).map((p) => p.slug);
+      for (const dep of input.dependsOn) {
+        if (resolveDepSlug(dep, candidateSlugs).length > 0) continue;
+        const near = findNearMatches(dep, candidateSlugs);
+        const suggestion = near.length ? ` Closest existing slug(s): ${near.join(', ')}.` : '';
+        return {
+          ok: false,
+          status: 400,
+          error: `dependsOn entry "${dep}" does not resolve to any existing PRD in this project.${suggestion} ` +
+            'Pass the bare name (preferred) or the exact NN-prefixed slug of an existing PRD.',
+        };
+      }
     }
   }
 

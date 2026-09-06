@@ -196,7 +196,23 @@ function makeFakeRemoteWithPrdsDir(prdsDir) {
         return { ok: false, error: e?.message };
       }
     },
+    // Minimal stand-in for scheduler.cjs's real remote.listPrds: every
+    // `<slug>.md` under the fake project's prdsDir, as a `{ slug }` row —
+    // enough for prdCreate.cjs's dependsOn-existence validation, which only
+    // ever reads `.slug` off each entry.
+    async listPrds() {
+      const entries = await fsp.readdir(prdsDir);
+      const prds = entries
+        .filter((f) => f.endsWith('.md'))
+        .map((f) => ({ slug: f.slice(0, -3) }));
+      return { prds, total: prds.length, limit: prds.length, offset: 0, hasMore: false };
+    },
   };
+}
+
+/** Pre-seed the fake project's prdsDir with an existing (empty-body) PRD file at `slug`. */
+async function seedExistingPrd(prdsDir, slug) {
+  await fsp.writeFile(path.join(prdsDir, `${slug}.md`), '---\ntitle: seed\n---\n# Goal\n');
 }
 
 function validCreateBody(overrides = {}) {
@@ -848,5 +864,109 @@ test('createPrd leaves sourcePromptId unset when originClaudeSessionId matches n
     expect(!/sourcePromptId:/.test(written)).toBeTruthy();
   } finally {
     await fsp.rm(root, { recursive: true, force: true });
+  }
+});
+
+// ──────────────────────────────────────────── PRD 1121: reject double-prefixed
+// slugs, validate dependsOn against existing PRDs at write time
+
+test('createPrd refuses a caller-supplied slug already starting with a numeric prefix', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+  const result = await createPrd(validCreateBody({ slug: '254-perf-x' }), remote);
+
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe(400);
+  expect(result.error).toMatch(/254-/);
+  expect(result.error).toMatch(/bare name/);
+  const entries = await fsp.readdir(prdsDir);
+  expect(entries.filter((f) => f.endsWith('.md')).length).toBe(0);
+});
+
+test('createPrd still accepts a bare (non-prefixed) caller-supplied slug', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+  const result = await createPrd(validCreateBody({ slug: 'perf-x' }), remote);
+
+  expect(result.ok).toBe(true);
+  expect(result.filename).toMatch(/^\d+-perf-x\.md$/);
+});
+
+test('createPrd accepts dependsOn naming an existing bare slug', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  await seedExistingPrd(prdsDir, '3-widget-base');
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+  const result = await createPrd(validCreateBody({ slug: 'widget-follow-up', dependsOn: ['widget-base'] }), remote);
+
+  expect(result.ok).toBe(true);
+  const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
+  expect(written).toMatch(/^dependsOn: \[widget-base\]$/m);
+});
+
+test('createPrd accepts dependsOn naming an existing full NN-prefixed slug', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  await seedExistingPrd(prdsDir, '3-widget-base');
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+  const result = await createPrd(validCreateBody({ slug: 'widget-follow-up-2', dependsOn: ['3-widget-base'] }), remote);
+
+  expect(result.ok).toBe(true);
+});
+
+test('createPrd refuses dependsOn naming nothing, listing near-matches in the message, and writes no file', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  await seedExistingPrd(prdsDir, '3-widget-base');
+  await seedExistingPrd(prdsDir, '4-widget-basics');
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+
+  const result = await createPrd(validCreateBody({ slug: 'widget-follow-up-3', dependsOn: ['wigdet-bsae'] }), remote);
+
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe(400);
+  expect(result.error).toMatch(/wigdet-bsae/);
+  expect(result.error).toMatch(/widget-base/);
+  const entries = await fsp.readdir(prdsDir);
+  expect(entries.filter((f) => f.endsWith('.md') && f.includes('widget-follow-up-3')).length).toBe(0);
+});
+
+test('createPrd treats an empty dependsOn array as a no-op (no listPrds call, no rejection)', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const listPrdsSpy = vi.fn(remote.listPrds);
+  remote.listPrds = listPrdsSpy;
+
+  const result = await createPrd(validCreateBody({ slug: 'no-deps-here', dependsOn: [] }), remote);
+
+  expect(result.ok).toBe(true);
+  expect(listPrdsSpy).not.toHaveBeenCalled();
+});
+
+test('createPrd treats an absent dependsOn as a no-op (no listPrds call, no rejection)', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const listPrdsSpy = vi.fn(remote.listPrds);
+  remote.listPrds = listPrdsSpy;
+
+  const result = await createPrd(validCreateBody({ slug: 'no-deps-field' }), remote);
+
+  expect(result.ok).toBe(true);
+  expect(listPrdsSpy).not.toHaveBeenCalled();
+});
+
+test('createPrd warns and skips dependsOn validation (never fails the write) when listPrds throws', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  remote.listPrds = async () => { throw new Error('simulated I/O failure'); };
+  const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+  try {
+    const result = await createPrd(validCreateBody({ slug: 'deps-during-outage', dependsOn: ['anything-at-all'] }), remote);
+    expect(result.ok).toBe(true);
+    expect(warnSpy).toHaveBeenCalled();
+  } finally {
+    warnSpy.mockRestore();
   }
 });

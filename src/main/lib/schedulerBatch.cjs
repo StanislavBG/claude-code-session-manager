@@ -15,6 +15,7 @@
 const path = require('node:path');
 const os = require('node:os');
 const { projectJobCap, quietMachineWaitMs } = require('./schedulerConfig.cjs');
+const { bareSlug } = require('./depSlugResolve.cjs');
 
 const DEFAULT_PROJECT_CWD = path.join(os.homedir(), 'Projects', 'session-manager');
 
@@ -34,14 +35,14 @@ function findBlockingDep(job, projectJobs) {
   const rowBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
   const rowsByBareSlug = new Map();
   for (const j of projectJobs) {
-    const bare = String(j.slug ?? '').replace(/^\d+-/, '');
+    const bare = bareSlug(j.slug);
     if (!rowsByBareSlug.has(bare)) rowsByBareSlug.set(bare, []);
     rowsByBareSlug.get(bare).push(j);
   }
   const rowsForDep = (slug) => {
     const exact = rowBySlug.get(slug);
     if (exact) return [exact];
-    return rowsByBareSlug.get(String(slug ?? '').replace(/^\d+-/, '')) ?? [];
+    return rowsByBareSlug.get(bareSlug(slug)) ?? [];
   };
   return (job.dependsOn ?? []).find((slug) => (
     rowsForDep(slug).some((dep) => dep.status !== 'completed')

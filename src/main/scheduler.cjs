@@ -2585,6 +2585,13 @@ function resetJobFields(job, errorMsg, opts = {}) {
   delete job.verifierVerdict;
   delete job.uncommittedPaths;
   delete job.resumeRecoveryAttempted;
+  // Quarantine (PRD 1128) is scoped to THIS run's episode exactly like
+  // resumeRecoveryAttempted above — a re-fired row must be able to earn a
+  // fresh quarantine attempt if it parks needs_review again.
+  delete job.leftoverQuarantineAttempted;
+  delete job.quarantinedTo;
+  delete job.quarantinedCommit;
+  delete job.quarantinedPaths;
   // Same "this run's outcome, not durable across a reset" category as the
   // fields above — a stale 'archive' recoveryAction from a prior life of this
   // slug must never survive a reset and silently exclude a genuinely-new
@@ -3302,6 +3309,206 @@ As the LAST LINE of your final result text, emit exactly one of:
   SCHEDULER_VERDICT: PASS
   SCHEDULER_VERDICT: FAIL <one-line reason>
 Print PASS only once the commit above has actually landed.`;
+}
+
+/**
+ * Leftover quarantine (PRD 1128). Resume-first recovery gets exactly one
+ * `--resume` attempt (selectResumeRecoveryTarget above); when that attempt
+ * ALSO parks needs_review with 'uncommitted_changes', the leftovers are
+ * about to sit dirty in the SHARED tree forever — git then refuses any later
+ * worktree merge for this cwd that would overwrite them, turning one parked
+ * job into a project-wide stall (216-jupiter-sand-kazekage, 2026-09-06).
+ * Pure/no I/O, mirroring selectResumeRecoveryTarget so the eligibility rule
+ * is unit-testable directly.
+ *
+ * Bounded to exactly one attempt via job.leftoverQuarantineAttempted, stamped
+ * synchronously by the caller in the SAME mutate as this decision (never
+ * here) — see spawnJob's finalize and reverifyNeedsReview's periodic pass.
+ *
+ * Kill-switch: SM_LEFTOVER_QUARANTINE_DISABLE=1 restores today's behaviour
+ * exactly (always returns null), mirroring SM_RESUME_RECOVERY_DISABLE.
+ */
+function selectLeftoverQuarantineTarget(job) {
+  if (process.env.SM_LEFTOVER_QUARANTINE_DISABLE === '1') return null;
+  if (!job || job.status !== 'needs_review') return null;
+  if (job.verifierVerdict !== 'uncommitted_changes') return null;
+  if (job.resumeRecoveryAttempted !== true) return null;
+  if (job.leftoverQuarantineAttempted === true) return null;
+  const uncommittedPaths = Array.isArray(job.uncommittedPaths)
+    ? job.uncommittedPaths.filter((p) => typeof p === 'string' && p.length > 0)
+    : [];
+  if (!uncommittedPaths.length) return null;
+  // The single most important constraint: never touch a path that was
+  // ALREADY dirty at this run's own dispatch time (preRunDirtyPaths) — that
+  // is foreign WIP (a human's or a sibling's), not this job's own leftover.
+  const preRunDirty = new Set(Array.isArray(job.preRunDirtyPaths) ? job.preRunDirtyPaths : []);
+  const paths = uncommittedPaths.filter((p) => !preRunDirty.has(p));
+  if (!paths.length) return null;
+  return { slug: job.slug, cwd: job.cwd, paths };
+}
+
+function execGitAt(cwd, args, { env, timeout = 20_000 } = {}) {
+  return new Promise((resolve, reject) => {
+    execFile(
+      'git',
+      ['-C', cwd, ...args],
+      { timeout, windowsHide: true, encoding: 'utf8', env: env ? { ...process.env, ...env } : process.env },
+      (err, stdout, stderr) => {
+        if (err) {
+          err.stderrText = stderr;
+          reject(err);
+          return;
+        }
+        resolve(stdout || '');
+      },
+    );
+  });
+}
+
+async function pathExistsInTree(cwd, treeish, p) {
+  try {
+    await execGitAt(cwd, ['cat-file', '-e', `${treeish}:${p}`]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Commit exactly `paths` (must already be dirty on disk) onto a dedicated
+ * `sm-salvage/<slug>` ref, built from `headBefore` (or current HEAD when
+ * unavailable) via a THROWAWAY `GIT_INDEX_FILE` — never touches the live
+ * index, never moves the checked-out branch — then restores those paths to
+ * match that baseline commit's tree, so the shared working tree returns to
+ * its pre-run state. This is deliberately NOT `git stash` (the destructive-
+ * git guard blocks stash on a shared tree, and a stash nobody restores
+ * strands the work invisibly — see standards.md).
+ *
+ * Never throws: any git failure, or a non-git cwd, aborts the WHOLE attempt
+ * with the tree untouched (no partial restore) — restore only ever runs
+ * after the salvage ref/commit has safely landed, so a failure there leaves
+ * the data recoverable from the ref even though the tree stayed dirty.
+ * A path no longer dirty on disk (already committed, or reverted since) is
+ * skipped, never force-restored.
+ */
+async function quarantineLeftovers({ cwd, slug, paths, headBefore }) {
+  if (!cwd || !slug || !Array.isArray(paths) || paths.length === 0) {
+    return { ok: false, reason: 'no cwd/slug/paths given' };
+  }
+  let baseline = headBefore || null;
+  try {
+    if (!baseline) {
+      baseline = (await execGitAt(cwd, ['rev-parse', 'HEAD'])).trim();
+    }
+    if (!baseline) return { ok: false, reason: 'could not resolve a baseline commit (non-git cwd?)' };
+
+    const dirtyNowRaw = await execGitAt(cwd, ['status', '--porcelain', '--', ...paths]);
+    const dirtyNow = new Set(parsePorcelain(dirtyNowRaw));
+    const toQuarantine = paths.filter((p) => dirtyNow.has(p));
+    const skippedPaths = paths.filter((p) => !dirtyNow.has(p));
+    if (!toQuarantine.length) {
+      return { ok: true, ref: null, commit: null, quarantinedPaths: [], skippedPaths };
+    }
+
+    const tmpIndex = path.join(os.tmpdir(), `sm-salvage-index-${slug}-${process.pid}-${Date.now()}`);
+    const env = { GIT_INDEX_FILE: tmpIndex };
+    let treeSha;
+    let commitSha;
+    try {
+      await execGitAt(cwd, ['read-tree', baseline], { env });
+      for (const p of toQuarantine) {
+        if (fs.existsSync(path.join(cwd, p))) {
+          await execGitAt(cwd, ['add', '--', p], { env });
+        } else {
+          await execGitAt(cwd, ['rm', '--cached', '--ignore-unmatch', '--', p], { env });
+        }
+      }
+      treeSha = (await execGitAt(cwd, ['write-tree'], { env })).trim();
+      commitSha = (await execGitAt(cwd, ['commit-tree', treeSha, '-p', baseline, '-m', `salvage: leftover changes from ${slug}`], { env })).trim();
+    } catch (e) {
+      return { ok: false, reason: `git command failed while building the salvage commit: ${(e && (e.stderrText || e.message)) || e}` };
+    } finally {
+      await fsp.rm(tmpIndex, { force: true }).catch(() => {});
+    }
+
+    const ref = `sm-salvage/${slug}`;
+    try {
+      await execGitAt(cwd, ['update-ref', `refs/heads/${ref}`, commitSha]);
+    } catch (e) {
+      return { ok: false, reason: `git command failed updating ${ref}: ${(e && (e.stderrText || e.message)) || e}` };
+    }
+
+    // The salvage commit is safely landed at this point — a failure from here
+    // on is reported with the ref/commit still attached so nothing looks lost
+    // even if the tree itself couldn't be fully restored.
+    try {
+      const inBaseline = [];
+      const notInBaseline = [];
+      for (const p of toQuarantine) {
+        // eslint-disable-next-line no-await-in-loop
+        if (await pathExistsInTree(cwd, baseline, p)) inBaseline.push(p); else notInBaseline.push(p);
+      }
+      if (inBaseline.length) {
+        await execGitAt(cwd, ['checkout', baseline, '--', ...inBaseline]);
+      }
+      if (notInBaseline.length) {
+        await execGitAt(cwd, ['reset', '--', ...notInBaseline]).catch(() => {});
+        for (const p of notInBaseline) {
+          // eslint-disable-next-line no-await-in-loop
+          await fsp.rm(path.join(cwd, p), { force: true });
+        }
+      }
+    } catch (e) {
+      return {
+        ok: false,
+        ref,
+        commit: commitSha,
+        reason: `salvage commit landed at ${ref} (${commitSha}) but restoring the working tree failed: ${(e && (e.stderrText || e.message)) || e}`,
+      };
+    }
+
+    return { ok: true, ref, commit: commitSha, quarantinedPaths: toQuarantine, skippedPaths };
+  } catch (e) {
+    return { ok: false, reason: `git command failed: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+}
+
+/**
+ * Perform an already-selected quarantine (job.leftoverQuarantineAttempted
+ * must already be true, stamped by the caller) and persist the outcome onto
+ * the job row: `quarantinedTo`/`quarantinedCommit`/`quarantinedPaths` on
+ * success, plus a one-line pointer appended to `error` naming the ref so a
+ * human can recover with a single named command
+ * (`git show sm-salvage/<slug>`). The belt-and-braces `salvagePatch` (when
+ * present) is referenced alongside it, never removed. On failure, only a
+ * diagnostic is appended — the job row's dirt-describing fields are left as
+ * they were, since the tree itself was left untouched (or, for a
+ * restore-only failure, the salvage ref is still named in the note).
+ */
+async function performLeftoverQuarantine(job, paths) {
+  const result = await quarantineLeftovers({
+    cwd: job.cwd || DEFAULT_PROJECT_CWD,
+    slug: job.slug,
+    paths,
+    headBefore: job.guardHeadBefore || null,
+  });
+  await mutate((s) => {
+    const j = s.jobs.find((x) => x.slug === job.slug);
+    if (!j) return;
+    if (result.ok && Array.isArray(result.quarantinedPaths) && result.quarantinedPaths.length) {
+      j.quarantinedTo = result.ref;
+      j.quarantinedCommit = result.commit;
+      j.quarantinedPaths = capDirtyPaths(result.quarantinedPaths);
+      const salvageNote = j.salvagePatch ? `; salvage patch also at ${j.salvagePatch}` : '';
+      const pointer = `Leftovers quarantined to ${result.ref} (commit ${result.commit}) — recover via \`git show ${result.ref}\`${salvageNote}`;
+      j.error = j.error ? `${j.error}\n${pointer}` : pointer;
+      console.log(`[scheduler] ${job.slug}: quarantined ${result.quarantinedPaths.length} leftover path(s) to ${result.ref} (${result.commit})`);
+    } else if (!result.ok) {
+      const pointer = `Leftover quarantine failed: ${result.reason}`;
+      j.error = j.error ? `${j.error}\n${pointer}` : pointer;
+      console.error(`[scheduler] ${job.slug}: leftover quarantine failed: ${result.reason}`);
+    }
+  });
 }
 
 /**
@@ -4959,6 +5166,8 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     let needsReviewRcaSnapshot = null;
     let resumeRecoveryJob = null;
     let resumeRecoveryTarget = null;
+    let quarantineJob = null;
+    let quarantinePaths = null;
     let terminalNotifySnapshot = null;
     const newlyCompletedPrds = [];
     await mutate((s) => {
@@ -5127,6 +5336,22 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
               resumeRecoveryJob = { ...s.jobs[i2] };
               resumeRecoveryTarget = target;
             } else {
+            // Leftover quarantine (PRD 1128): resume recovery is spent
+            // (resumeRecoveryAttempted already true) and this run STILL parked
+            // needs_review with uncommitted_changes — the leftovers are about
+            // to sit dirty in the shared tree forever, poisoning every later
+            // worktree merge for this cwd. Stamp the one-attempt marker HERE,
+            // synchronously in the same mutate as this decision (mirrors
+            // resumeRecoveryAttempted's own stamp-before-acting rule above),
+            // so a concurrent reverifyNeedsReview pass can never double-fire
+            // this. The actual git work is async and runs outside mutate(),
+            // below (performLeftoverQuarantine).
+            const quarantineTarget = selectLeftoverQuarantineTarget(s.jobs[i2]);
+            if (quarantineTarget) {
+              s.jobs[i2].leftoverQuarantineAttempted = true;
+              quarantineJob = { ...s.jobs[i2] };
+              quarantinePaths = quarantineTarget.paths;
+            }
             // Same-tick auto-fix (feedback 2026-07-12): rather than waiting up to
             // 10 min for reverifyNeedsReview()'s periodic pass, check right here
             // whether this job qualifies for auto-fix (same eligibility rule
@@ -5233,6 +5458,13 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       console.log(`[scheduler] needs_review ${job.slug} → resume-recovery (session ${resumeRecoveryTarget.sessionId}, ${resumeRecoveryTarget.dirtyPaths.length} dirty path(s))`);
       spawnResumeRecovery(resumeRecoveryJob, resumeRecoveryTarget).catch((e) => {
         console.error('[scheduler] spawnResumeRecovery error', job.slug, e);
+      });
+    }
+
+    if (quarantineJob && quarantinePaths) {
+      console.log(`[scheduler] needs_review ${job.slug} → quarantining ${quarantinePaths.length} leftover path(s) (resume recovery already spent)`);
+      performLeftoverQuarantine(quarantineJob, quarantinePaths).catch((e) => {
+        console.error('[scheduler] performLeftoverQuarantine error', job.slug, e);
       });
     }
 
@@ -6559,6 +6791,26 @@ async function reverifyNeedsReview() {
     }
   }
 
+  // Leftover quarantine (PRD 1128), periodic pass: catches a job parked
+  // needs_review with resume recovery already spent BEFORE this feature
+  // shipped, or one the same-tick check in spawnJob missed because the app
+  // restarted in between. Stamps the one-attempt marker in its own mutate
+  // BEFORE the async git work starts (same race-closing rule as the resume
+  // loop above and spawnJob's own dispatch stamp).
+  {
+    for (const job of queueForResumeAndAutofix.jobs) {
+      const quarantineTarget = selectLeftoverQuarantineTarget(job);
+      if (!quarantineTarget) continue;
+      console.log(`[scheduler] leftover-quarantine: needs_review ${job.slug} → quarantining ${quarantineTarget.paths.length} leftover path(s)`);
+      mutate((s) => {
+        const j = s.jobs.find((x) => x.slug === job.slug);
+        if (j) j.leftoverQuarantineAttempted = true;
+      }).then(() => performLeftoverQuarantine(job, quarantineTarget.paths)).catch((e) => {
+        console.error('[scheduler] performLeftoverQuarantine error', job.slug, e);
+      });
+    }
+  }
+
   // Auto-fix: spawn a fix-plan investigation for each job still in
   // needs_review after the heal pass (kill-switch: SM_AUTOFIX_DISABLE=1).
   // spawnInvestigation early-returns once investigationsInFlight reaches
@@ -7839,4 +8091,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { classifyQueueStarvation, runQueueStarvationWatchdog, QUEUE_STARVATION_MS, computeBlockedChains, stripAppOwnedChurn, findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation, computeLaunchHolds, handleLaunchFailure, applyLaunchFailure, setPaused, clearPause, tickQueue, runDueJobs, isCooldownSuppressed, nextRapidRateLimitCount, CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD, RAPID_RATE_LIMIT_WINDOW_MS, MANUAL_PAUSE_COOLDOWN_MS, RUNS_DIR, pickRunDir };
+module.exports = { classifyQueueStarvation, runQueueStarvationWatchdog, QUEUE_STARVATION_MS, computeBlockedChains, stripAppOwnedChurn, findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, selectLeftoverQuarantineTarget, quarantineLeftovers, performLeftoverQuarantine, spawnInvestigation, computeLaunchHolds, handleLaunchFailure, applyLaunchFailure, setPaused, clearPause, tickQueue, runDueJobs, isCooldownSuppressed, nextRapidRateLimitCount, CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD, RAPID_RATE_LIMIT_WINDOW_MS, MANUAL_PAUSE_COOLDOWN_MS, RUNS_DIR, pickRunDir };

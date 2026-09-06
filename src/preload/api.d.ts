@@ -557,6 +557,14 @@ export interface ScheduleJob {
   leftoverPaths?: string[];
   leftoverCount?: number;
   leftoverPathsTruncated?: boolean;
+  /** PRD 1128: once resume-first recovery is spent and the job STILL parked
+   *  needs_review with 'uncommitted_changes', its recorded leftover paths are
+   *  quarantined onto this dedicated `sm-salvage/<slug>` branch (never moving
+   *  the checked-out branch) so the shared tree returns to its pre-run
+   *  baseline instead of poisoning every later worktree merge for this cwd. */
+  quarantinedTo?: string;
+  quarantinedCommit?: string;
+  quarantinedPaths?: string[];
 }
 
 export interface LeakedDescendant {

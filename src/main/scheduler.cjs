@@ -76,7 +76,7 @@ const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { appendResponseEventIfKnown } = require('./promptSessionEvents.cjs');
 const { maybeEnqueueValidationPrompt } = require('./lib/epicValidationHook.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
-const { verifyRun } = require('./runVerify.cjs');
+const { verifyRun, parseLog, scanSentinel, scanForeignWipPathsClaim } = require('./runVerify.cjs');
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/terminalRunOutcome.cjs');
 const { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan } = require('./lib/fixPlanSlug.cjs');
 const { landedSinceRun } = require('./lib/landedSinceRun.cjs');
@@ -273,9 +273,10 @@ deferring it.
    Your own work must still never be left uncommitted — this only changes
    which paths get staged, never whether you commit.
 5. VERDICT SENTINEL — as the LAST LINE of your final result text, emit exactly
-   one of these two lines (no trailing text after it):
+   one of these lines (no trailing text after it):
      SCHEDULER_VERDICT: PASS
      SCHEDULER_VERDICT: FAIL <one-line reason>
+     SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP
    Print PASS only when the AC gate is green AND the commit from step 4 landed.
    Print FAIL (and exit 1) if the AC gate was red or the commit could not land.
    NEVER print PASS on a red AC gate — a lying PASS turns the verifier from a
@@ -283,6 +284,22 @@ deferring it.
    landed commit lets the verifier override incidental transcript noise (grep
    results containing "Error", a TDD red-test run early in the session, debug
    Tracebacks) so those do not false-trip a needs_review downgrade.
+   Print BLOCKED_BY_FOREIGN_WIP (and exit 1) ONLY when your own AC gate failed
+   because it ran against a SIBLING job's in-flight, uncommitted file — never
+   because of your own regression — AND every failing path is one this prompt
+   already disclosed to you as foreign (see the "FOREIGN WORKING-TREE STATE"
+   section above, if present). It MUST be accompanied by a second line naming
+   every such path:
+     FOREIGN_WIP_PATHS: <path1>, <path2>, ...
+   The scheduler independently validates every listed path against the exact
+   foreign-WIP manifest it disclosed to you. Only list a path that (a) this
+   prompt already told you is foreign WIP, not yours, AND (b) is why your own
+   AC gate failed — never a path you own, and never a path that failed for
+   some other reason of your own making. Any listed path NOT in that manifest
+   downgrades this whole verdict back to FAIL, with your claim rejected. This
+   is not an escape hatch for your own broken code: claiming it for a
+   regression you introduced, or for a path you never received as foreign
+   WIP, is a lying verdict exactly like a false PASS.
 
 A job that exits with uncommitted changes is treated as INCOMPLETE and flagged
 for review. Do NOT add work beyond the acceptance criteria — this protocol is the
@@ -2320,6 +2337,12 @@ async function reconcile(state) {
     state.jobs = sorted;
   }
 
+  // Auto-requeue any job parked 'skipped' over a validated BLOCKED_BY_FOREIGN_WIP
+  // verdict once the paths that blocked it are no longer dirty in its own cwd —
+  // the only place this check runs, so a sibling landing its commit resumes the
+  // blocked job with no human action, on the very next reconcile() pass.
+  await requeueForeignWipBlockedJobs(state.jobs);
+
   // Auto-archive completed PRDs' .md files out of the live prds/ dir. Runs
   // AFTER the history append above (which is awaited) so a job's queue row
   // is always durably in history.jsonl before its file can be moved — a
@@ -2826,6 +2849,13 @@ function resetJobFields(job, errorMsg, opts = {}) {
   delete job.leftoverCount;
   delete job.leftoverPathsTruncated;
   delete job.preRunDirtyPaths;
+  // A manual/force reset (e.g. a human clearing a 3-strikes needs_review
+  // park) must not leave the row permanently excluded from the auto-fix
+  // chain (selectAutoFixTargets checks job.blockedByForeignWip) — this run's
+  // BLOCKED_BY_FOREIGN_WIP history is done, the human is taking over.
+  delete job.blockedByForeignWip;
+  delete job.foreignWipBlockedPaths;
+  delete job.foreignWipBlockCount;
   // Deliberately NOT deleting job.landedCommit: it must outlive a reset so a
   // re-fired run of this same slug can pass it to verifyRun as
   // priorLandedCommit (pass_no_commit_prior_run_verified exemption).
@@ -3460,6 +3490,73 @@ function buildForeignWipSection({ preRunDirtyPaths, carriedPaths } = {}) {
     ].join('\n');
   }
   return '';
+}
+
+// A job whose validated BLOCKED_BY_FOREIGN_WIP claim keeps recurring against
+// the same sibling WIP is not making progress by re-firing forever — cap the
+// auto-requeue cycle and hand it to a human instead, naming the paths that
+// never went clean. Matches TRANSIENT_RETRY_CAP's "bounded self-heal, then
+// escalate" shape.
+const FOREIGN_WIP_BLOCK_STREAK_LIMIT = 3;
+
+/**
+ * Pure: validate an executor's BLOCKED_BY_FOREIGN_WIP claim against the exact
+ * foreign-WIP manifest THIS job was disclosed at dispatch time
+ * (preRunDirtyPaths / carriedPaths — PRD 1105). Every claimed path must be a
+ * member of that manifest; a path the job was never told was foreign cannot
+ * be laundered into a block, whether that's a genuine regression the
+ * executor is trying to dodge or an honest mistake. `job` is any object
+ * carrying those two array fields (the live queue row at finalize time).
+ *
+ * Returns `ok: false` for an empty claim too — a BLOCKED_BY_FOREIGN_WIP
+ * verdict with no FOREIGN_WIP_PATHS evidence at all is exactly as
+ * unsubstantiated as one naming an unlisted path.
+ */
+function validateForeignWipBlockClaim(claimedPaths, job) {
+  const manifest = new Set([
+    ...(Array.isArray(job?.preRunDirtyPaths) ? job.preRunDirtyPaths : []),
+    ...(Array.isArray(job?.carriedPaths) ? job.carriedPaths : []),
+  ]);
+  const claimed = Array.isArray(claimedPaths) ? claimedPaths.filter(Boolean) : [];
+  const validPaths = claimed.filter((p) => manifest.has(p));
+  const invalidPaths = claimed.filter((p) => !manifest.has(p));
+  return { ok: claimed.length > 0 && invalidPaths.length === 0, validPaths, invalidPaths };
+}
+
+/**
+ * Auto-requeue jobs parked 'skipped' with a validated BLOCKED_BY_FOREIGN_WIP
+ * verdict once none of the paths that blocked them are still dirty in their
+ * own `cwd` — so a sibling job landing its commit (or a human resolving their
+ * own WIP) resumes the blocked job with no human action needed, on the very
+ * next reconcile() pass. `getDirtyPaths` is injectable (defaults to the real
+ * `uncommittedChanges` git-status wrapper) so this is unit-testable without a
+ * real git repo. Mutates eligible jobs in place via transitionJob; returns
+ * nothing.
+ */
+async function requeueForeignWipBlockedJobs(jobs, { getDirtyPaths = uncommittedChanges } = {}) {
+  const candidates = (Array.isArray(jobs) ? jobs : []).filter(
+    (j) => j && j.status === 'skipped' && j.blockedByForeignWip === true,
+  );
+  for (const job of candidates) {
+    const blockedPaths = Array.isArray(job.foreignWipBlockedPaths) ? job.foreignWipBlockedPaths : [];
+    if (!blockedPaths.length) continue;
+    const dirty = await getDirtyPaths(job.cwd);
+    if (dirty === null) continue; // non-git cwd or git error — best-effort, leave parked
+    const dirtySet = new Set(dirty);
+    const stillDirty = blockedPaths.filter((p) => dirtySet.has(p));
+    if (stillDirty.length === 0) {
+      // resetJobFields (not a bare transitionJob) so the row re-enters
+      // 'pending' with none of the blocked run's stale exitCode/error/
+      // verifierVerdict/finishedAt/leftoverPaths left on it for a viewer to
+      // misread against the new 'pending' status — same reasoning as every
+      // other terminal->pending path in this file. force:true is required
+      // here: resetJobFields refuses skipped->pending without it.
+      resetJobFields(job, `foreign WIP cleared (was blocked on: ${blockedPaths.join(', ')}) — auto-requeued`, {
+        source: 'reconcile-foreign-wip-clear',
+        force: true,
+      });
+    }
+  }
 }
 
 /**
@@ -5631,6 +5728,25 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       );
     }
 
+    // BLOCKED_BY_FOREIGN_WIP claim scan: the executor exits non-zero for this
+    // outcome (same as FAIL — see FINISH_PROTOCOL), so it is never seen by the
+    // exit=0-only verifyRun call above; scanned here, against THIS run's own
+    // log, before the generic non-zero-exit -> 'failed' classification below.
+    // Read outside mutate() (I/O); actual manifest validation happens inside
+    // mutate(), against the LIVE row's preRunDirtyPaths/carriedPaths, so a
+    // stale local `job` snapshot can never be the source of truth for it.
+    let foreignWipClaimedPaths = null;
+    if (res.exitCode !== 0 && !res.rateLimited) {
+      try {
+        const { resultEvent, events } = parseLog(path.join(runDir, `${job.slug}.log`));
+        if (scanSentinel(resultEvent, events) === 'blocked_by_foreign_wip') {
+          foreignWipClaimedPaths = scanForeignWipPathsClaim(resultEvent, events);
+        }
+      } catch (e) {
+        console.warn(`[scheduler] ${job.slug}: foreign-WIP verdict scan failed, falling through to ordinary failed classification`, e?.message);
+      }
+    }
+
     let actuallyFailed = false;
     let failedJobSnapshot = null;
     let needsInvestigationNow = false;
@@ -5704,9 +5820,54 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           const sigtermOverride = res.exitCode !== 0
             ? classifySigtermWithCommit(res.exitCode, sigtermCommitFound)
             : null;
+          // Validated against the LIVE row's own foreign-WIP manifest — never
+          // the stale outer `job` snapshot — so an unlisted path cannot
+          // launder a real regression into a block (PRD: give the executor a
+          // first-class verdict for "the gate failed on a sibling's in-flight
+          // file", but VALIDATE the claim rather than trust it).
+          const foreignWipValidation = (!sigtermOverride && foreignWipClaimedPaths !== null)
+            ? validateForeignWipBlockClaim(foreignWipClaimedPaths, s.jobs[i2])
+            : null;
+          // Consecutive-block streak: cleared by default on every outcome and
+          // only re-established below inside the validated-block branch —
+          // so a completed run, an ordinary failure, or any other outcome
+          // between two blocks always resets "in a row" back to zero.
+          const priorForeignWipBlockCount = s.jobs[i2].foreignWipBlockCount ?? 0;
+          delete s.jobs[i2].foreignWipBlockCount;
           if (sigtermOverride) {
             effectiveStatus = sigtermOverride.status;
             sigtermOverrideReason = sigtermOverride.reason;
+          } else if (foreignWipValidation && foreignWipValidation.ok) {
+            const blockCount = priorForeignWipBlockCount + 1;
+            s.jobs[i2].foreignWipBlockCount = blockCount;
+            s.jobs[i2].blockedByForeignWip = true;
+            s.jobs[i2].foreignWipBlockedPaths = foreignWipValidation.validPaths;
+            if (blockCount >= FOREIGN_WIP_BLOCK_STREAK_LIMIT) {
+              // Blocked FOREIGN_WIP_BLOCK_STREAK_LIMIT times in a row on the
+              // same tree: auto-requeuing again would spin forever against
+              // paths that never go clean. Park for a human instead — never
+              // routed through the auto-fix chain (selectAutoFixTargets
+              // excludes any job.blockedByForeignWip row), since there is no
+              // fix-plan to author against another job's WIP.
+              effectiveStatus = 'needs_review';
+              s.jobs[i2].verifierVerdict = 'blocked_by_foreign_wip_streak';
+              sigtermOverrideReason = `blocked by foreign WIP ${blockCount} times in a row on persistently-dirty path(s): ${foreignWipValidation.validPaths.join(', ')} — auto-requeue exhausted, parked for human review`;
+            } else {
+              // Terminal-but-retryable, same shape as the existing 'skipped'
+              // status (never counts as failed, never enters the auto-fix
+              // chain, reconcile()'s requeueForeignWipBlockedJobs promotes it
+              // straight back to 'pending' once these exact paths go clean).
+              effectiveStatus = 'skipped';
+              sigtermOverrideReason = `blocked by foreign WIP (attempt ${blockCount}/${FOREIGN_WIP_BLOCK_STREAK_LIMIT}): ${foreignWipValidation.validPaths.join(', ')} — will auto-requeue once these path(s) are no longer dirty`;
+            }
+          } else if (foreignWipValidation && !foreignWipValidation.ok) {
+            // Claimed BLOCKED_BY_FOREIGN_WIP but named a path outside this
+            // job's own disclosed manifest (or named none at all) — downgrade
+            // to an ordinary failure and log the offending paths loudly so the
+            // rejection is never silent.
+            console.warn(`[scheduler] ${job.slug}: SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP downgraded to FAIL — claimed path(s) not in this job's foreign-WIP manifest: ${foreignWipValidation.invalidPaths.join(', ') || '(no FOREIGN_WIP_PATHS line)'}`);
+            effectiveStatus = 'failed';
+            sigtermOverrideReason = `SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP rejected — unlisted path(s) not in the disclosed foreign-WIP manifest: ${foreignWipValidation.invalidPaths.join(', ') || '(no FOREIGN_WIP_PATHS line)'}`;
           } else if (res.exitCode !== 0) {
             effectiveStatus = 'failed';
           } else if (
@@ -5732,7 +5893,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           } else {
             delete s.jobs[i2].salvagePatch;
           }
-          s.jobs[i2].error = effectiveStatus === 'needs_review'
+          s.jobs[i2].error = (effectiveStatus === 'needs_review' || s.jobs[i2].blockedByForeignWip === true)
             ? (verifyResult?.reason ?? sigtermOverrideReason ?? null)
             // A failed job (non-zero exit) never consults verifyResult above,
             // but a worktree integration failure is still worth surfacing on
@@ -7233,6 +7394,11 @@ function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRu
   const slugsInQueue = new Set(jobs.map((j) => j.slug));
   return jobs.filter((job) => {
     if (job.status !== 'needs_review') return false;
+    // A job parked here because it was blocked by a sibling's foreign WIP
+    // three times in a row (never its own regression) has nothing for a
+    // fix-plan investigation to diagnose — there is no code defect to
+    // author a PRD against, only another job's still-uncommitted tree.
+    if (job.blockedByForeignWip === true) return false;
     // A stale re-run whose work already shipped (rcaReport's 'already-shipped'
     // class) must never buy a fix-plan PRD — there is nothing to fix, and the
     // correct recovery (archiving the PRD) is a human/reconcile action, not
@@ -9024,4 +9190,7 @@ module.exports = {
   resolveRateLimitPauseReset,
   computeEffectiveResumeAt,
   computeResumeDelay,
+  FOREIGN_WIP_BLOCK_STREAK_LIMIT,
+  validateForeignWipBlockClaim,
+  requeueForeignWipBlockedJobs,
 };

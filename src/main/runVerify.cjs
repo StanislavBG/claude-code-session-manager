@@ -70,6 +70,19 @@ function isHarnessToolError(content) {
     || /\bNo such tool available\b/.test(content);
 }
 
+/**
+ * A PreToolUse hook denial (`guard-destructive-git.cjs`, `guard-prd-writes.cjs`,
+ * `guard-inline-implementation.cjs`, or the harness's own `Blocked: sleep N
+ * followed by: ...` form) never executed the tool it names — it says nothing
+ * about whether the task succeeded, and the model is expected to adapt and
+ * retry. (Incident: PRD 1106, 2026-09-02 — four guard-destructive-git denials
+ * in a fully-implemented, correctly-isolated run.)
+ */
+function isPolicyDenial(content) {
+  if (typeof content !== 'string' || !content) return false;
+  return /^(?:Error:\s*)?Blocked:/.test(content);
+}
+
 function detectPattern(content) {
   if (typeof content !== 'string' || !content) return null;
 
@@ -506,16 +519,17 @@ function checkDeps(queueEntry, allJobs, prdBody) {
 // ─── sentinel scanner ─────────────────────────────────────────────────────────
 
 /**
- * Scan for a `SCHEDULER_VERDICT: PASS|FAIL` sentinel line in the run output.
+ * Scan for a `SCHEDULER_VERDICT: PASS|FAIL|BLOCKED_BY_FOREIGN_WIP` sentinel
+ * line in the run output.
  *
  * Checks `resultEvent.resultText` first (the agent's final message), then the
  * last tool_result content. Anchored to line-start so prose mentioning the
  * string in mid-sentence does not match.
  *
- * Returns 'pass', 'fail', or null.
+ * Returns 'pass', 'fail', 'blocked_by_foreign_wip', or null.
  */
 function scanSentinel(resultEvent, events) {
-  const RE = /^SCHEDULER_VERDICT:\s*(PASS|FAIL)\b/m;
+  const RE = /^SCHEDULER_VERDICT:\s*(PASS|FAIL|BLOCKED_BY_FOREIGN_WIP)\b/m;
 
   if (resultEvent) {
     const m = resultEvent.resultText.match(RE);
@@ -532,6 +546,44 @@ function scanSentinel(resultEvent, events) {
   }
 
   return null;
+}
+
+/**
+ * Scan for a `FOREIGN_WIP_PATHS: <comma-separated paths>` evidence line —
+ * the mandatory companion to a `SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP`
+ * sentinel (see FINISH_PROTOCOL in scheduler.cjs). Same two-source scan order
+ * as scanSentinel (resultEvent.resultText, then the last tool_result) so the
+ * two scanners always agree on which "final say" they're reading from.
+ *
+ * Returns a deduplicated array of trimmed path strings (possibly empty — an
+ * executor that emits the verdict with no paths line, or an empty one, gives
+ * the caller nothing to validate, which the caller must treat as an invalid
+ * claim, not an empty-but-valid one).
+ */
+function scanForeignWipPathsClaim(resultEvent, events) {
+  const RE = /^FOREIGN_WIP_PATHS:\s*(.+)$/m;
+
+  const parse = (text) => {
+    const m = typeof text === 'string' ? text.match(RE) : null;
+    if (!m) return null;
+    return [...new Set(m[1].split(',').map((p) => p.trim()).filter(Boolean))];
+  };
+
+  if (resultEvent) {
+    const paths = parse(resultEvent.resultText);
+    if (paths) return paths;
+  }
+
+  let lastToolResult = null;
+  for (const ev of events) {
+    if (ev.kind === 'tool_result') lastToolResult = ev;
+  }
+  if (lastToolResult) {
+    const paths = parse(lastToolResult.content);
+    if (paths) return paths;
+  }
+
+  return [];
 }
 
 // ─── merge-main postcondition exemption ──────────────────────────────────────
@@ -853,6 +905,20 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
       // seen in 58-web-remote-correctness-batch, 2026-06-10).
       if (isHarnessToolError(ev.content)) continue;
 
+      // A PreToolUse policy denial (a guard hook blocked the call before it
+      // ran) is exempt from both the is_error scan and the content-pattern
+      // scan for the same reason as a harness tool error above — the denied
+      // call never executed. Unlike a harness tool error, record it as an
+      // annotation so the denial stays visible in the verdict record instead
+      // of vanishing silently.
+      if (isPolicyDenial(ev.content)) {
+        annotations.push({
+          verdict: 'policy_denial',
+          reason: `PreToolUse policy denial at event ${i}: ${ev.content.slice(0, 200)}`,
+        });
+        continue;
+      }
+
       // A tool_result carrying a non-null parent_tool_use_id happened INSIDE a Task
       // subagent's own execution, not in the main agent's. Subagents do ordinary
       // exploratory work (greps that exit 1 on no-match, ls on a path that may not
@@ -1147,6 +1213,7 @@ module.exports = {
   // Exposed for unit tests.
   detectPattern,
   isHarnessToolError,
+  isPolicyDenial,
   isSelfRecovered,
   normalizeDescForRecovery,
   toolUseName,
@@ -1155,6 +1222,7 @@ module.exports = {
   checkDeps,
   parseLog,
   scanSentinel,
+  scanForeignWipPathsClaim,
   isMergeMainSlug,
   extractMergeMainPrNumber,
   checkMergeablePr,

@@ -52,6 +52,7 @@ const VERDICT_LABELS = {
   pass_no_commit_already_shipped: 'PASS with no commit — deliverables already shipped',
   pass_no_commit_prior_run_verified: 'PASS with no commit — prior run of this slug already landed the work',
   silent_no_op: 'no commit, clean tree — no evidence of work',
+  blocked_by_foreign_wip_streak: 'blocked by a sibling job\'s foreign WIP 3x in a row',
 };
 
 function humanVerdict(verdict) {
@@ -69,14 +70,18 @@ const FAILURE_CLASSES = {
   UNCOMMITTED: 'uncommitted-changes',
   TRANSCRIPT_ERRORS: 'transcript-errors',
   ABANDONED_BACKGROUND_TASK: 'abandoned-background-task',
+  BLOCKED_BY_FOREIGN_WIP: 'blocked-by-foreign-wip',
   UNKNOWN: 'unknown',
 };
 
 // ─── Recovery actions — one per failure class, machine-readable ────────────
 // Closed set the scheduler routes on: 'archive' (stale re-run, do not
-// re-queue), 'resume-and-commit' (PRD 1111's --resume dispatch owns this),
-// 'verify-and-close' (the work likely landed, just missing its sentinel),
-// 'investigate' (the only class that still buys a fix-plan investigation).
+// re-queue — also the closest fit for BLOCKED_BY_FOREIGN_WIP: there is
+// nothing to investigate, and re-queuing is already owned by
+// reconcile()'s requeueForeignWipBlockedJobs, not this action), 'resume-and-commit'
+// (PRD 1111's --resume dispatch owns this), 'verify-and-close' (the work
+// likely landed, just missing its sentinel), 'investigate' (the only class
+// that still buys a fix-plan investigation).
 const RECOVERY_ACTIONS = {
   [FAILURE_CLASSES.ALREADY_SHIPPED]: 'archive',
   [FAILURE_CLASSES.SELF_QUEUE]: 'investigate',
@@ -96,6 +101,7 @@ const RECOVERY_ACTIONS = {
   // carries the "check for salvaged work, commit before re-implementing"
   // guidance into that cold-read investigation.
   [FAILURE_CLASSES.ABANDONED_BACKGROUND_TASK]: 'investigate',
+  [FAILURE_CLASSES.BLOCKED_BY_FOREIGN_WIP]: 'archive',
   [FAILURE_CLASSES.UNKNOWN]: 'investigate',
 };
 
@@ -121,6 +127,8 @@ const PREVENTION_HINTS = {
     'Recover or annotate every error within ~10 lines (e.g. `# expected/handled: <why>`) instead of leaving a bare Traceback near the end of the transcript.',
   [FAILURE_CLASSES.ABANDONED_BACKGROUND_TASK]:
     'A headless run cannot receive a background-task completion notification — never let a long Bash command auto-background past its foreground timeout and then wait for it. Run long commands with an explicit bound (`timeout <N> <cmd>`) so they finish in the foreground, or poll their output file directly instead of waiting on Monitor/notification.',
+  [FAILURE_CLASSES.BLOCKED_BY_FOREIGN_WIP]:
+    'This job correctly reported `SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP` against a sibling job\'s in-flight, uncommitted files three times in a row — auto-requeue is exhausted (reconcile() only clears this once the blocked paths go clean). This is not a defect in this PRD\'s own work: check on the sibling job/human that owns the still-dirty path(s) named on the job row, and either wait for them to commit or manually reset this job to `pending` once the tree is clear. Do not author a fix-plan PRD against it.',
   [FAILURE_CLASSES.UNKNOWN]:
     'Re-run the acceptance criteria gate locally against the failure log to pin down the specific break before re-queuing.',
 };
@@ -158,6 +166,13 @@ const POST_AC_OVERRUN_MIN_TAIL_FRACTION = 0.3;
  */
 function classifyFailure({ verdict, logTail }) {
   const lines = (logTail || '').split('\n');
+
+  // Checked before every other rule: an unambiguous, materially-checked
+  // verdict (the scheduler itself validated the executor's claimed paths
+  // against the job's disclosed foreign-WIP manifest before ever landing
+  // this verdict — see validateForeignWipBlockClaim in scheduler.cjs) needs
+  // no log-tail heuristics to classify.
+  if (verdict === 'blocked_by_foreign_wip_streak') return FAILURE_CLASSES.BLOCKED_BY_FOREIGN_WIP;
 
   // Checked first, before SELF_QUEUE/STUCK_LOOP: a correct executor that finds
   // its acceptance criteria already satisfied by a prior commit makes no

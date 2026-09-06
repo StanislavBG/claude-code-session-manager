@@ -189,12 +189,21 @@ test('allows a chain with no destructive git command at all', () => {
 
 // ─────────────────────────────── fail-closed on ambiguous parsing
 
-test('fails closed (denies) on an unterminated quote mentioning git', () => {
-  expectDenied(`git commit -m "unterminated`);
+test('fails closed (denies) on an unterminated quote mentioning a policed verb (git stash)', () => {
+  expectDenied(`git stash -m "unterminated`);
 });
 
 test('does not fail closed on an unterminated quote with no git mention', () => {
   expectAllowed(`echo "unterminated`);
+});
+
+test('does not fail closed on an unterminated quote mentioning git but no policed verb (plain commit -m)', () => {
+  // Narrowed per PRD 1106: `git commit -m` alone is never destructive (only
+  // `git commit -a`/`--all` is policed), so an unparsable command that merely
+  // mentions "git commit" must not be blanket-blocked — a real incident
+  // (a heredoc `git commit -m "$(cat <<'EOF' ... EOF)"`) was killed by the
+  // old blanket rule.
+  expectAllowed(`git commit -m "unterminated`);
 });
 
 // ─────────────────────────────── non-Bash / malformed payloads never block
@@ -213,4 +222,27 @@ test('fails open on malformed stdin JSON', () => {
 test('fails open when tool_input.command is missing', () => {
   const { parsed } = runHook({ tool_name: 'Bash', cwd: SHARED_CWD, tool_input: {} });
   expect(parsed?.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+});
+
+// ─────────────────────────────── effective-cwd resolution (PRD 1106)
+
+test('allows `cd <sm-job worktree> && git stash` from a shared-tree payload.cwd', () => {
+  expectAllowed(`cd ${JOB_WORKTREE_CWD} && git stash`, SHARED_CWD);
+});
+
+test('allows `git -C <sm-job worktree> <destructive op>` from a shared-tree payload.cwd', () => {
+  expectAllowed(`git -C ${JOB_WORKTREE_CWD} reset --hard HEAD~1`, SHARED_CWD);
+});
+
+test('still denies the same destructive command with no cd prefix on a shared-tree cwd (no regression)', () => {
+  expectDenied('git stash', SHARED_CWD);
+});
+
+test('allows a heredoc git commit -m "$(cat <<\'EOF\' ... EOF)"', () => {
+  const command = 'git commit -m "$(cat <<\'EOF\'\nsome commit body\nEOF\n)"';
+  expectAllowed(command);
+});
+
+test('denies an unparsable command containing git stash', () => {
+  expectDenied(`git stash push -m "unterminated`);
 });

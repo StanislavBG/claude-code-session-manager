@@ -223,6 +223,32 @@ function subcommandOf(args) {
   return null;
 }
 
+/** Extract an explicit `git -C <dir>` argument (or `git -C=<dir>`), if present, from the tokens AFTER `git`. */
+function gitDashCDirOf(args) {
+  for (let i = 0; i < args.length; i++) {
+    const t = args[i];
+    if (t === '-C' && args[i + 1] != null) return args[i + 1];
+    if (t.startsWith('-C') && t.length > 2) return t.slice(2);
+    if (!t.startsWith('-')) break; // reached the subcommand — no more global opts
+  }
+  return null;
+}
+
+/**
+ * Text-level check for whether an UNPARSABLE segment mentions a verb this
+ * guard actually polices. Used only to narrow the unparsable-command fallback
+ * — an unparsable command that mentions none of these is allowed through
+ * rather than blanket-blocked, since blocking every command merely containing
+ * the substring "git" (e.g. a heredoc `git commit -m "$(cat <<'EOF' ...)"`)
+ * was itself a false-positive incident.
+ */
+function mentionsPolicedDestructiveToken(text) {
+  if (/\b(stash|reset|checkout|restore|clean)\b/.test(text)) return true;
+  if (/\badd\s+(-A\b|--all\b|\.(?:\s|$))/.test(text)) return true;
+  if (/\bcommit\b.*(-a\b|--all\b)/.test(text)) return true;
+  return false;
+}
+
 /**
  * Evaluate one `git <...>` invocation (args = tokens AFTER `git`). Returns
  * `{ verb, alt }` when destructive, or null when this invocation is fine
@@ -333,22 +359,32 @@ function evaluateGit(args) {
 
 const SH_WRAPPERS = new Set(['sh', 'bash', 'zsh', 'dash']);
 
-/** Returns the first destructive verdict found anywhere in `command`, or null. */
-function findDestructiveVerdict(command, depth = 0) {
+/**
+ * Returns the first destructive verdict found anywhere in `command`, or null.
+ * `baseCwd` is the shell's starting cwd; a `cd <dir>` segment updates the
+ * EFFECTIVE cwd for every subsequent segment in the same top-level command
+ * (segments share one shell), and an explicit `git -C <dir>` overrides it for
+ * that one invocation only. The returned verdict carries the effective cwd at
+ * the point the destructive call was found, so the caller checks exemption
+ * against where the command actually runs, not just `payload.cwd`.
+ */
+function findDestructiveVerdict(command, baseCwd, depth = 0) {
   if (depth > MAX_SH_C_DEPTH) return null;
   const { parts, unterminatedQuote } = splitTopLevel(command);
   if (unterminatedQuote) {
-    if (/\bgit\b/i.test(command)) {
-      return { verb: 'an unparsable command mentioning git', alt: 'this hook could not confidently parse this command\'s quoting to confirm it is safe — split it into a plain, simply-quoted git invocation, or stop and report' };
+    if (mentionsPolicedDestructiveToken(command)) {
+      return { verb: 'an unparsable command mentioning git', alt: 'this hook could not confidently parse this command\'s quoting to confirm it is safe — split it into a plain, simply-quoted git invocation, or stop and report', cwd: baseCwd };
     }
     return null;
   }
 
+  let effectiveCwd = baseCwd;
+
   for (const segment of parts) {
     const tokens = tokenize(segment);
     if (tokens === null) {
-      if (/\bgit\b/i.test(segment)) {
-        return { verb: 'an unparsable command mentioning git', alt: 'this hook could not confidently parse this command\'s quoting to confirm it is safe — split it into a plain, simply-quoted git invocation, or stop and report' };
+      if (mentionsPolicedDestructiveToken(segment)) {
+        return { verb: 'an unparsable command mentioning git', alt: 'this hook could not confidently parse this command\'s quoting to confirm it is safe — split it into a plain, simply-quoted git invocation, or stop and report', cwd: effectiveCwd };
       }
       continue;
     }
@@ -362,18 +398,31 @@ function findDestructiveVerdict(command, depth = 0) {
 
     const head = path.basename(cmdTokens[0]);
 
+    if (head === 'cd' && cmdTokens[1] != null) {
+      const target = cmdTokens[1];
+      effectiveCwd = path.isAbsolute(target) ? target : path.resolve(effectiveCwd || process.cwd(), target);
+      continue;
+    }
+
     if (SH_WRAPPERS.has(head)) {
       const cIdx = cmdTokens.indexOf('-c');
       if (cIdx !== -1 && cmdTokens[cIdx + 1] != null) {
-        const nested = findDestructiveVerdict(cmdTokens[cIdx + 1], depth + 1);
+        const nested = findDestructiveVerdict(cmdTokens[cIdx + 1], effectiveCwd, depth + 1);
         if (nested) return nested;
       }
       continue;
     }
 
     if (head === 'git') {
-      const verdict = evaluateGit(cmdTokens.slice(1));
-      if (verdict) return verdict;
+      const gitArgs = cmdTokens.slice(1);
+      const verdict = evaluateGit(gitArgs);
+      if (verdict) {
+        const dashC = gitDashCDirOf(gitArgs);
+        const invocationCwd = dashC
+          ? (path.isAbsolute(dashC) ? dashC : path.resolve(effectiveCwd || process.cwd(), dashC))
+          : effectiveCwd;
+        return { ...verdict, cwd: invocationCwd };
+      }
     }
   }
   return null;
@@ -440,14 +489,15 @@ async function main() {
     const command = payload?.tool_input?.command;
     if (!command || typeof command !== 'string') return allow();
 
-    const verdict = findDestructiveVerdict(command);
+    const cwd = typeof payload.cwd === 'string' && payload.cwd ? payload.cwd : process.cwd();
+    const verdict = findDestructiveVerdict(command, cwd);
     if (!verdict) return allow();
 
-    const cwd = typeof payload.cwd === 'string' && payload.cwd ? payload.cwd : process.cwd();
-    if (isExemptSharedTree(cwd)) return allow();
+    const effectiveCwd = verdict.cwd || cwd;
+    if (isExemptSharedTree(effectiveCwd)) return allow();
 
     const reason = [
-      `Blocked: \`${verdict.verb}\` in what this hook believes is a SHARED working tree (${cwd}).`,
+      `Blocked: \`${verdict.verb}\` in what this hook believes is a SHARED working tree (${effectiveCwd}).`,
       verdict.alt,
       'You are normally inside your own sm-job/<slug> or sm-epic/<epicId> worktree for this kind of operation — run `git rev-parse --git-common-dir` to check; this guard permits the same command there.',
     ].join(' ');

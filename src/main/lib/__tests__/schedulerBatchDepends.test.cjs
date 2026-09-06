@@ -255,7 +255,7 @@ test('reports a per-job hold record naming the blocking dep and its status', () 
   const { batch, holds } = pick(jobs, new Set(), 5);
   assert.deepEqual(batch.map((j) => j.slug), ['985-foundation']);
   assert.deepEqual(holds, [
-    { slug: '986-dependent', dep: 'foundation', depStatus: 'pending' },
+    { slug: '986-dependent', dep: 'foundation', depStatus: 'pending', rootSlug: '985-foundation', rootStatus: 'pending' },
   ]);
 });
 
@@ -266,7 +266,7 @@ test('hold record carries a running dep status', () => {
   ];
   const { holds } = pick(jobs, new Set(['985-foundation']), 5);
   assert.deepEqual(holds, [
-    { slug: '986-dependent', dep: 'foundation', depStatus: 'running' },
+    { slug: '986-dependent', dep: 'foundation', depStatus: 'running', rootSlug: '985-foundation', rootStatus: 'running' },
   ]);
 });
 
@@ -279,7 +279,7 @@ test('hold record carries a failed dep status alongside the depends-gate reason'
   assert.deepEqual(batch, []);
   assert.match(reason, /depends-gate/);
   assert.deepEqual(holds, [
-    { slug: '986-dependent', dep: 'foundation', depStatus: 'failed' },
+    { slug: '986-dependent', dep: 'foundation', depStatus: 'failed', rootSlug: '985-foundation', rootStatus: 'failed' },
   ]);
 });
 
@@ -293,7 +293,7 @@ test('hold record carries a skipped dep status alongside the depends-gate reason
   assert.match(reason, /depends-gate/);
   assert.match(reason, /never-ran dependencies/);
   assert.deepEqual(holds, [
-    { slug: '986-dependent', dep: 'foundation', depStatus: 'skipped' },
+    { slug: '986-dependent', dep: 'foundation', depStatus: 'skipped', rootSlug: '985-foundation', rootStatus: 'skipped' },
   ]);
 });
 

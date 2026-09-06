@@ -56,6 +56,25 @@ const DEP_HISTORY_FAIL_OPEN = Symbol('dep-history-fail-open');
  * quiet-machine dispatch check (PRD 1107), so the two can never disagree
  * about whether a job is eligible.
  */
+/**
+ * De-duplicate dependsOn-cycle reports (PRD 1123). Two jobs sitting in the
+ * same 2-node cycle each independently discover it while walking upward from
+ * their own row, so without this the same cycle would surface once per
+ * member instead of once per distinct cycle.
+ */
+function dedupeCycles(cycles) {
+  const seen = new Set();
+  const out = [];
+  for (const members of cycles) {
+    const uniq = [...new Set(members)].sort();
+    const key = uniq.join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(uniq);
+  }
+  return out;
+}
+
 function findBlockingDep(job, projectJobs, satisfiedSlugs = new Set()) {
   const rowBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
   const rowsByBareSlug = new Map();
@@ -164,6 +183,31 @@ function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = n
     return projectJobs.filter((j) => String(j.slug ?? '').replace(/^\d+-/, '') === bare);
   };
   const blockingDep = (j) => findBlockingDep(j, projectJobs, satisfiedSlugs);
+  const depStatusOf = (rows) => (rows.length === 0 ? 'unresolved' : (rows.find((d) => d.status !== 'completed')?.status ?? 'unknown'));
+
+  // Root-blocker walk (PRD 1123): follows dependsOn upward from a held job
+  // until it reaches a row with no blocking dep of its own — the ACTUAL
+  // cause of a stalled chain, not just the immediate link the held job
+  // names (which is very often just another `pending` row, not the reason
+  // the chain isn't moving). Bounded by `visited`, which doubles as the
+  // cycle guard: a dependsOn cycle can never grow `visited` past
+  // `projectJobs.length` without revisiting a node, so this always
+  // terminates instead of recursing forever.
+  function findRootBlocker(startJob) {
+    const visited = new Set([startJob.slug]);
+    let current = startJob;
+    for (let hops = 0; hops <= projectJobs.length; hops += 1) {
+      const dep = blockingDep(current);
+      if (!dep) return { rootSlug: current.slug, rootStatus: current.status, cycle: false };
+      const rows = rowsForDep(dep);
+      if (rows.length === 0) return { rootSlug: dep, rootStatus: 'unresolved', cycle: false };
+      const nextRow = rows.find((r) => r.status !== 'completed') ?? rows[0];
+      if (visited.has(nextRow.slug)) return { cycle: true, members: [...visited, nextRow.slug] };
+      visited.add(nextRow.slug);
+      current = nextRow;
+    }
+    return { cycle: true, members: [...visited] }; // unreachable given the bound above; never hang.
+  }
 
   // quietMachine jobs (PRD 1107) never dispatch through the ordinary
   // per-project picker — pickNextBatch's dedicated quiet-machine check
@@ -197,6 +241,16 @@ function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = n
   // 1122) — a typo'd or double-prefixed dependsOn entry, indistinguishable
   // at write time from a dep that finished and aged out, until now.
   const heldByUnresolvedDep = [];
+  // Deeper root causes the shallow (immediate-dep) buckets above can't see —
+  // PRD 1123. A job's own immediate dep is very often just another `pending`
+  // row; the ROOT is the transitive ancestor that isn't blocked by anything
+  // itself. Keyed by that root's slug so the reason names ONE row and the
+  // count of everything transitively held behind it, rather than restating
+  // "held by a pending dep" once per link in the chain (which is exactly how
+  // a stalled needs_review row several hops down used to read as generic
+  // starvation instead of a named, actionable blocker).
+  const heldByRoot = new Map(); // rootSlug -> { rootStatus, slugs: Set<string> }
+  const cycles = [];
   // Per-job hold records, surfaced to the UI so a `pending` row can say WHICH
   // dep is holding it instead of leaving the reason in console.log.
   const holds = [...launchHolds];
@@ -204,21 +258,34 @@ function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = n
     const dep = blockingDep(j);
     if (!dep) { pending.push(j); continue; }
     const depRows = rowsForDep(dep);
+    const root = findRootBlocker(j);
+    if (root.cycle) {
+      cycles.push(root.members);
+      holds.push({ slug: j.slug, dep, depStatus: depStatusOf(depRows), rootSlug: null, rootStatus: 'cycle' });
+      continue;
+    }
     if (depRows.length === 0) {
       heldByUnresolvedDep.push({ job: j, dep });
-      holds.push({ slug: j.slug, dep, depStatus: 'unresolved' });
+      holds.push({ slug: j.slug, dep, depStatus: 'unresolved', rootSlug: root.rootSlug, rootStatus: root.rootStatus });
       continue;
     }
     const failed = depRows.some((d) => d.status === 'failed');
     const skipped = depRows.some((d) => d.status === 'skipped');
     if (failed) heldByFailedDep.push({ job: j, dep });
     else if (skipped) heldBySkippedDep.push({ job: j, dep });
+    else if (['failed', 'skipped', 'needs_review', 'unresolved'].includes(root.rootStatus)) {
+      if (!heldByRoot.has(root.rootSlug)) heldByRoot.set(root.rootSlug, { rootStatus: root.rootStatus, slugs: new Set() });
+      heldByRoot.get(root.rootSlug).slugs.add(j.slug);
+    }
     holds.push({
       slug: j.slug,
       dep,
-      depStatus: depRows.find((d) => d.status !== 'completed')?.status ?? 'unknown',
+      depStatus: depStatusOf(depRows),
+      rootSlug: root.rootSlug,
+      rootStatus: root.rootStatus,
     });
-    // running/pending/needs_review dep — simply not eligible this tick.
+    // running/pending dep with a running/pending root — simply not eligible
+    // this tick; expected to clear on its own, not a stall worth naming.
   }
   if (pending.length === 0) {
     const reasons = [];
@@ -233,6 +300,21 @@ function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = n
     if (heldByUnresolvedDep.length > 0) {
       const detail = heldByUnresolvedDep.map(({ job, dep }) => `${job.slug} <- ${dep}`).join(', ');
       reasons.push(`holding ${heldByUnresolvedDep.length} job(s) behind unresolvable dependencies [${detail}]. The dep slug matches no live queue row and no completion record in history/archive — fix the dependsOn entry or archive the dependent.`);
+    }
+    for (const [rootSlug, { rootStatus, slugs }] of heldByRoot) {
+      const names = [...slugs].sort().join(', ');
+      if (rootStatus === 'needs_review') {
+        reasons.push(`holding ${slugs.size} job(s) transitively behind root blocker ${rootSlug} (needs_review) [${names}]. ${rootSlug} is a QUESTION awaiting a human — the chain resumes once it is retired or reset; it will not clear on its own.`);
+      } else if (rootStatus === 'failed') {
+        reasons.push(`holding ${slugs.size} job(s) transitively behind root blocker ${rootSlug} (failed) [${names}]. Reset or archive ${rootSlug} to unblock the chain.`);
+      } else if (rootStatus === 'skipped') {
+        reasons.push(`holding ${slugs.size} job(s) transitively behind root blocker ${rootSlug} (skipped) [${names}]. ${rootSlug}'s PRD source is gone — author a fresh PRD for that work to unblock the chain.`);
+      } else {
+        reasons.push(`holding ${slugs.size} job(s) transitively behind unresolvable root blocker ${rootSlug} (status: ${rootStatus}) [${names}]. Fix the dependsOn chain or archive the dependent(s).`);
+      }
+    }
+    for (const members of dedupeCycles(cycles)) {
+      reasons.push(`dependsOn CYCLE detected among [${members.join(' -> ')}] — these jobs can never become eligible; break the cycle by editing one PRD's dependsOn.`);
     }
     if (reasons.length > 0) {
       const reason = `[scheduler] depends-gate [${projectCwd}]: ${reasons.join(' ')}`;

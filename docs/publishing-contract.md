@@ -43,3 +43,18 @@ npm publish --provenance
 ```
 
 This embeds a signed SLSA attestation linking the npm artifact to the exact commit + workflow run.
+
+## npm write-path 2FA gate (discovered 2026-08-21/22)
+
+`npm publish` can 403 (`Two-factor authentication or granular access token with bypass 2fa
+enabled is required to publish packages`) even when `npm whoami` succeeds — a separate gate
+from login. A legacy "classic" publish token (the kind `npm token create` makes) cannot
+satisfy it; only an account with 2FA enabled (interactive OTP at publish time) or a
+**granular access token with "bypass 2FA for write actions"** (npmjs.com web UI only — the
+CLI cannot create one) can. npm is deprecating the bypass-2FA token path itself
+(https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/):
+it loses publish capability entirely around Jan 2027. The durable fix, once the `release.yml`
+workflow above exists, is **npm Trusted Publishing (OIDC)** — no token/2FA at all, since npm
+verifies the GitHub Actions run's own short-lived identity. Until that workflow is built, this
+repo has no fully unattended publish path; `/builder`'s local-worktree publish needs either a
+live human OTP or a (temporary, pre-2027) bypass-2FA token per release.

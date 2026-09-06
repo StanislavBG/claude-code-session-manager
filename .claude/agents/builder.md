@@ -57,6 +57,37 @@ the mechanics, don't re-describe them here. Once the decision to publish is made
 sequence straight through without pausing for confirmation at each step — the pause point is the
 *decision*, not the mechanics.
 
+## Publish auth: check this BEFORE assuming a plain login problem
+
+`npm publish` can 403 with `Two-factor authentication or granular access token with bypass
+2fa enabled is required to publish packages` even when `npm whoami` succeeds — this is a
+**separate write-path gate**, not a stale-login problem. Don't loop on `npm login`/re-auth.
+
+1. Check `npm profile get` (2FA status) and `npm token list` (token type) first.
+2. If 2FA is disabled and the token is a legacy "classic" publish token (created via
+   `npm token create`), publish is structurally blocked — classic tokens can't satisfy this
+   requirement, and the CLI cannot create a granular access token (`npm token create` only
+   makes classic tokens; granular/bypass-2FA tokens are npmjs.com-web-UI-only, confirmed via
+   `npm help token`, 2026-08-22).
+3. **Do not treat a bypass-2FA granular token as a durable automation fix.** npm is
+   deprecating it (https://github.blog/changelog/2026-07-08-npm-install-time-security-and-gat-bypass2fa-deprecation/):
+   Phase 1 (early Aug 2026) already strips sensitive-op capability; Phase 2 (~Jan 2027) strips
+   publish capability entirely, leaving only staged-publish-pending-human-2FA. A bypass token
+   set up now is a several-month bridge, not a permanent unblock.
+4. There is currently **no way for this agent to publish fully unattended** end-to-end on
+   this machine — either a human enables 2FA and supplies a live OTP at publish time, or a
+   human mints a bypass-2FA granular token via the npmjs.com web UI and drops it in
+   `~/.npmrc` (bridge only, see above). The durable fix is moving the publish step into a
+   GitHub Actions workflow using npm Trusted Publishing (OIDC), triggered on `v*` tag push —
+   that eliminates the token/2FA problem entirely by running the publish inside CI, which can
+   present npm with its own short-lived OIDC identity instead of any stored credential. That
+   workflow does not exist yet in this repo (only local worktree-based publish does) — file
+   it as its own PRD when the human wants unattended `/builder` restored; don't attempt to
+   build it as a side effect of a release run.
+5. When blocked here: stop, do NOT retry `npm login` or `npm publish` repeatedly, report the
+   exact 403 output and the `npm profile get`/`npm token list` findings, and ask the human to
+   either supply an OTP-based interactive publish or a bypass-2FA token for this release.
+
 ## Known one-time exceptions logged here so they aren't re-litigated
 
 - **v0.45.1** through **v0.47.1** below all landed the same day (2026-08-01), each a real npm

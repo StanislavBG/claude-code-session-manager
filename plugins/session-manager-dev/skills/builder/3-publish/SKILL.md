@@ -62,6 +62,16 @@ to ask for reconfirmation once `builder:gate` has passed.
    This is the entire reason the worktree exists: it decouples "what's uncommitted in my
    editor right now" from "what gets built and shipped."
 
+   **If this 403s with `Two-factor authentication or granular access token with bypass 2fa
+   enabled is required to publish packages`**, this is NOT a login/auth-token problem (`npm
+   whoami` can succeed while this still fails) — it's npm's separate write-path 2FA gate. Do
+   not retry `npm login`. Run `npm profile get` and `npm token list` to confirm (2FA disabled
+   + a legacy "classic" token = structurally blocked, and the CLI cannot mint a
+   granular/bypass-2FA token — that's npmjs.com-web-UI-only). Stop here and report; see the
+   `builder` agent persona's "Publish auth" section for the full decision tree and why a
+   bypass-2FA token is a bridge, not a durable fix (npm is deprecating it — Phase 2 ~Jan 2027
+   removes its publish capability entirely).
+
 8. **Back in the main repo, push:**
    ```
    cd <main repo path>

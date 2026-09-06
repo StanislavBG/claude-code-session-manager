@@ -107,6 +107,13 @@ async function parsePrdRaw(filePath) {
     // quarantines it instead of queuing it to run.
     createdVia: fm.createdVia || null,
     issuedAt: fm.issuedAt || null,
+    // Explicit fix-plan provenance stamp (PRD 1131) — written only by
+    // spawnInvestigation's own prompt template (see scheduler.cjs's
+    // buildInvestigationPrompt). Only a literal `true` opts in, matching
+    // quietMachine's parse semantics below; reconcile() is the sole reader
+    // that turns this (plus createdVia's absence) into a fix-plan verdict —
+    // see lib/fixPlanSlug.cjs's classifyDiscoveredFixPlan.
+    isFixPlan: fm.isFixPlan === 'true',
     // WHO executes this PRD (persona name) — distinct from `tag` (work
     // type). Absent on every PRD authored before this field existed; the
     // dependent follow-up PRD (scheduler-launch-as-persona) resolves this

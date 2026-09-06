@@ -813,16 +813,20 @@ test('createPrd refuses a depth-3 fix-chain slug the same way as depth-2', async
   expect(entries.filter((f) => f.endsWith('.md')).length).toBe(0);
 });
 
-test('createPrd allows a depth-1 fix slug through the same code path that rejects depth 2 (matches MAX_INVESTIGATION_DEPTH=1)', async () => {
+test('createPrd refuses a depth-1 fix slug too (PRD 1131) — that shape is reserved for spawnInvestigation-authored fix plans, not this API', async () => {
   const prdsDir = await mkTmpPrdsDir();
   const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const writePrdSpy = vi.fn(remote.writePrd);
+  remote.writePrd = writePrdSpy;
 
   const result = await createPrd(validCreateBody({ slug: 'fix-widget-frobnication' }), remote);
 
-  expect(result.ok).toBe(true);
-  expect(result.filename).toMatch(/^\d+-fix-widget-frobnication\.md$/);
-  const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
-  expect(written).toMatch(/title: Add widget frobnication/);
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe(400);
+  expect(result.error).toMatch(/reserved NN-fix-\.\.\. fix-plan naming convention/i);
+  expect(writePrdSpy).not.toHaveBeenCalled();
+  const entries = await fsp.readdir(prdsDir);
+  expect(entries.filter((f) => f.endsWith('.md')).length).toBe(0);
 });
 
 test('createPrd is unaffected by the fix-chain guard for an ordinary slug with no fix chain at all', async () => {
@@ -836,14 +840,15 @@ test('createPrd is unaffected by the fix-chain guard for an ordinary slug with n
   expect(written).toMatch(/title: Add widget frobnication/);
 });
 
-test('createPrd is not fooled by a slug where a later segment merely reads "fix" (false-positive bait)', async () => {
+test('createPrd refuses a slug starting with "fix-" even when a later segment merely reads "fix" (isFixPlanSlug matches on the leading segment alone, unlike fixChainDepthOf)', async () => {
   const prdsDir = await mkTmpPrdsDir();
   const remote = makeFakeRemoteWithPrdsDir(prdsDir);
 
   const result = await createPrd(validCreateBody({ slug: 'fix-loop-extraction-and-round-trip' }), remote);
 
-  expect(result.ok).toBe(true);
-  expect(result.filename).toMatch(/^\d+-fix-loop-extraction-and-round-trip\.md$/);
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe(400);
+  expect(result.error).toMatch(/reserved NN-fix-\.\.\. fix-plan naming convention/i);
 });
 
 test('createPrd leaves sourcePromptId unset when originClaudeSessionId matches no known Epic (plain SessionTab chat)', async () => {

@@ -73,6 +73,7 @@ const { maybeEnqueueValidationPrompt } = require('./lib/epicValidationHook.cjs')
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { verifyRun } = require('./runVerify.cjs');
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/terminalRunOutcome.cjs');
+const { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan } = require('./lib/fixPlanSlug.cjs');
 const { landedSinceRun } = require('./lib/landedSinceRun.cjs');
 const { declaredPathsForPrd } = require('./lib/prdDeclaredPaths.cjs');
 const logs = require('./logs.cjs');
@@ -2073,11 +2074,24 @@ async function reconcile(state) {
       exitCode: null,
       error: null,
     };
-    // Newly-discovered fix-plan PRD: stamp its investigationDepth relative to
-    // the original job it heals, so selectAutoFixTargets/spawnInvestigation
-    // can bound the fix-of-a-fix recursion (see MAX_INVESTIGATION_DEPTH).
-    // Non-fix-plan jobs get no explicit field — they read as depth 1 via `?? 1`.
-    if (isFixPlanSlug(slug)) {
+    // Fix-plan classification (PRD 1131): a freshly-discovered PRD is a
+    // genuine scheduler-authored fix plan only when its OWN provenance says
+    // so — an explicit isFixPlan:true stamp (spawnInvestigation's prompt
+    // template) or the absence of any createdVia stamp at all (legacy
+    // fallback, matching the "no provenance = trust the name" rule the
+    // quarantine gate below already applies) — never merely because the
+    // slug looks like one. See lib/fixPlanSlug.cjs's header for why (PRD
+    // 1126: a scheduler_create_prd-authored PRD whose slug happened to start
+    // with "fix-" was wrongly stamped investigationDepth before it ever ran).
+    // Persisted onto the queue row so every later consumer
+    // (commitGuardVerdict, isFixPlanBeyondDepthCap, the fix-plan-completion
+    // checks) reads this stamp instead of re-deriving it from the name.
+    entry.isFixPlan = classifyDiscoveredFixPlan(p, slug);
+    // Stamp investigationDepth relative to the original job it heals, so
+    // selectAutoFixTargets/spawnInvestigation can bound the fix-of-a-fix
+    // recursion (see MAX_INVESTIGATION_DEPTH). Non-fix-plan jobs get no
+    // explicit field — they read as depth 1 via `?? 1`.
+    if (entry.isFixPlan) {
       const parent = healTargetForFix(slug, state.jobs);
       entry.investigationDepth = parent ? (parent.investigationDepth ?? 1) + 1 : 2;
     }
@@ -2089,8 +2103,9 @@ async function reconcile(state) {
     // guard-prd-writes.cjs PreToolUse hook should have denied. Fix-plan PRDs
     // are exempt: spawnInvestigation's own probe writes them directly by
     // design (a trusted, scheduler-spawned internal loop, not an
-    // agent/human authoring a PRD), matching the isFixPlanSlug convention
-    // used everywhere else this distinction matters.
+    // agent/human authoring a PRD) — entry.isFixPlan (just classified above)
+    // is the provenance-aware verdict for that exemption now, not a raw
+    // isFixPlanSlug name check.
     //
     // Quarantine is loud and reversible, never a silent skip (see the
     // 2026-08-01 23-PRD outage this file's header references for what a
@@ -2099,7 +2114,7 @@ async function reconcile(state) {
     // (schedule:adopt-prd) that stamps the file via the same update-prd API
     // route the MCP tool uses — reconcile()'s adopt path above promotes it
     // to 'pending' on the very next pass, within one tick of being stamped.
-    if (!p.createdVia && !isFixPlanSlug(slug)) {
+    if (!p.createdVia && !entry.isFixPlan) {
       entry.status = 'quarantined';
       // Stamped at creation (not via transitionJob, since this is a
       // brand-new row minted directly at 'quarantined' rather than
@@ -3997,13 +4012,9 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
 // project (keyed by cwd) so jobs in different repos run concurrently up to
 // the cap; within one project, sequential-group semantics are preserved.
 
-/**
- * Recognize fix-plan slugs (NN-fix-...) so we don't recurse on a fix-plan that
- * itself failed. The pattern matches the slug we generate in spawnInvestigation.
- */
-function isFixPlanSlug(slug) {
-  return /^\d+-fix-/.test(slug);
-}
+// isFixPlanSlug/classifyDiscoveredFixPlan/resolveIsFixPlan now live in
+// lib/fixPlanSlug.cjs (PRD 1131) — see that module's header for why slug
+// shape alone is no longer sufficient to classify a fix plan.
 
 /**
  * The fix-plan slug spawnInvestigation authors for a given failed job —
@@ -4108,8 +4119,13 @@ ${logTail}
    cwd: ${cwd}
    parallelGroup: ${group}
    estimateMinutes: <your time estimate>
+   isFixPlan: true
    ---
    \`\`\`
+   \`isFixPlan: true\` is REQUIRED — it is the scheduler's provenance signal that this PRD is a
+   genuine auto-authored fix plan (not a human/agent PRD whose slug merely happens to start with
+   "fix-"); omitting it means this fix plan will not get its depth-cap/zero-edit-commit-guard
+   exemptions.
    \`cwd\` must be the git repo root where the fix will actually land. If the failed job's cwd is
    not that repo (e.g. a scratch dir like \`/tmp\`), set \`cwd:\` to the correct repo root instead —
    the scheduler's commit guard and post-run verifier read git state from this path, and a
@@ -4212,7 +4228,7 @@ async function spawnInvestigation(failedJob, runDir) {
     console.log(`[scheduler] skip investigation: ${failedJob.slug} is resume-recovery eligible`);
     return { deferred: false };
   }
-  if (isFixPlanBeyondDepthCap(failedJob.slug, failedJob.investigationDepth)) {
+  if (isFixPlanBeyondDepthCap(failedJob.slug, failedJob.investigationDepth, failedJob.isFixPlan)) {
     console.log(`[scheduler] skip investigation: ${failedJob.slug} is a fix plan at/beyond depth cap (depth=${failedJob.investigationDepth ?? 'none'})`);
     return { deferred: false };
   }
@@ -5145,7 +5161,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           ranInWorktree: worktree.ok,
           jobSelfCommitted,
           legitimateNoOp: guardIsLegitimateNoOp,
-          isFixPlanJob: isFixPlanSlug(job.slug),
+          isFixPlanJob: resolveIsFixPlan(job.slug, job.isFixPlan),
           verifyResult,
           salvagePatch,
         });
@@ -5441,7 +5457,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           // so the cross-group failure gate in pickNextBatch releases. Without
           // this, the queue stalls indefinitely behind a stale failure even
           // though the auto-recovery did its job.
-          if (effectiveStatus === 'completed' && isFixPlanSlug(job.slug)) {
+          if (effectiveStatus === 'completed' && resolveIsFixPlan(job.slug, job.isFixPlan)) {
             const orig = healTargetForFix(job.slug, s.jobs);
             if (orig) {
               const priorStatus = orig.status;
@@ -6340,10 +6356,16 @@ const MAX_INVESTIGATION_DEPTH = 1;
  * no recorded investigationDepth (a job already in the queue before this
  * depth tracking shipped) is treated as excluded too, preserving the
  * pre-existing blanket-exclusion behavior for legacy jobs — no retroactive
- * migration. Non-fix-plan slugs are never capped here. Exported for tests.
+ * migration. Non-fix-plan jobs are never capped here.
+ *
+ * `isFixPlan` (PRD 1131) is the job's own persisted classification stamp
+ * (see lib/fixPlanSlug.cjs's resolveIsFixPlan) — an explicit true/false wins
+ * over the slug; only a row with the field entirely absent (persisted
+ * before this change shipped) falls back to the legacy slug-only heuristic.
+ * Exported for tests.
  */
-function isFixPlanBeyondDepthCap(slug, investigationDepth) {
-  if (!isFixPlanSlug(slug)) return false;
+function isFixPlanBeyondDepthCap(slug, investigationDepth, isFixPlan) {
+  if (!resolveIsFixPlan(slug, isFixPlan)) return false;
   if (investigationDepth == null) return true;
   return investigationDepth >= MAX_INVESTIGATION_DEPTH + 1;
 }
@@ -6564,7 +6586,7 @@ function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRu
     if (selectResumeRecoveryTarget(job)) return false;
     const runId = job.runId || resolveJobRunId(job);
     if (!runId) return false;
-    if (isFixPlanBeyondDepthCap(job.slug, job.investigationDepth)) return false;
+    if (isFixPlanBeyondDepthCap(job.slug, job.investigationDepth, job.isFixPlan)) return false;
     if (job.autoFixAttempted) {
       const retryEligible = job.autoFixOutcome === 'no-plan'
         || job.autoFixOutcome === 'error'
@@ -6750,7 +6772,7 @@ async function reverifyNeedsReview() {
   const promotedPrds = [];
   await mutate((s) => {
     for (const job of s.jobs) {
-      if (job.status !== 'completed' || !isFixPlanSlug(job.slug)) continue;
+      if (job.status !== 'completed' || !resolveIsFixPlan(job.slug, job.isFixPlan)) continue;
       const orig = healTargetForFix(job.slug, s.jobs);
       if (!orig) continue;
       const priorStatus = orig.status;
@@ -8152,4 +8174,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { classifyQueueStarvation, runQueueStarvationWatchdog, QUEUE_STARVATION_MS, computeBlockedChains, stripAppOwnedChurn, findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, selectLeftoverQuarantineTarget, quarantineLeftovers, performLeftoverQuarantine, spawnInvestigation, computeLaunchHolds, computeDepHistorySatisfaction, handleLaunchFailure, applyLaunchFailure, setPaused, clearPause, tickQueue, runDueJobs, isCooldownSuppressed, nextRapidRateLimitCount, CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD, RAPID_RATE_LIMIT_WINDOW_MS, MANUAL_PAUSE_COOLDOWN_MS, RUNS_DIR, pickRunDir };
+module.exports = { classifyQueueStarvation, runQueueStarvationWatchdog, QUEUE_STARVATION_MS, computeBlockedChains, stripAppOwnedChurn, findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, selectLeftoverQuarantineTarget, quarantineLeftovers, performLeftoverQuarantine, spawnInvestigation, computeLaunchHolds, computeDepHistorySatisfaction, handleLaunchFailure, applyLaunchFailure, setPaused, clearPause, tickQueue, runDueJobs, isCooldownSuppressed, nextRapidRateLimitCount, CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD, RAPID_RATE_LIMIT_WINDOW_MS, MANUAL_PAUSE_COOLDOWN_MS, RUNS_DIR, pickRunDir };

@@ -24,6 +24,7 @@
 
 import { test, expect } from 'vitest';
 const { commitGuardVerdict } = require('../scheduler.cjs');
+const { resolveIsFixPlan } = require('../lib/fixPlanSlug.cjs');
 
 test('commitGuardVerdict: legitimate no-op verdict (pass_no_commit_already_shipped) + concurrent dirt → no flag (655 incident)', () => {
   const verifyResult = {
@@ -100,6 +101,25 @@ test('commitGuardVerdict: fix-plan job (523-fix-bounded-fix-plan-retry incident)
     verifyResult: { verdict: 'clean', reason: null, downgradeTo: null },
   });
   expect(verdict).toBeNull();
+});
+
+test('commitGuardVerdict: a zero-edit run of a human-authored PRD whose slug merely starts with "fix-" still yields silent_no_op (PRD 1131 — not exempted by name alone)', () => {
+  // Mirrors PRD 1126: authored via scheduler_create_prd (isFixPlan stamped
+  // false at reconcile time), slug happens to read "fix-...". Feeding the
+  // job's own persisted isFixPlan through resolveIsFixPlan (the same call
+  // spawnJob makes) must NOT exempt this zero-edit run from the guard.
+  const job = { slug: '126-fix-plan-death-reopens-parent', isFixPlan: false };
+  const verdict = commitGuardVerdict({
+    newlyDirty: [],
+    siblingRunning: false,
+    jobSelfCommitted: false,
+    legitimateNoOp: false,
+    isFixPlanJob: resolveIsFixPlan(job.slug, job.isFixPlan),
+    verifyResult: null,
+  });
+  expect(verdict).not.toBeNull();
+  expect(verdict.verdict).toBe('silent_no_op');
+  expect(verdict.downgradeTo).toBe('needs_review');
 });
 
 test('commitGuardVerdict: fix-plan job that DID leave real dirt behind is still flagged (isFixPlanJob only exempts the zero-edit case)', () => {

@@ -308,6 +308,23 @@ test('isFixPlanBeyondDepthCap: fix-plan at depth 1 is not capped, depth 2 is', (
   assert.strictEqual(isFixPlanBeyondDepthCap('05-fix-foo', MAX_INVESTIGATION_DEPTH + 1), true);
 });
 
+// PRD 1131: classification is now provenance-aware (isFixPlan), not slug-only.
+// A legacy row with no `isFixPlan` argument at all still falls back to the
+// slug-only heuristic above (no re-classification of live history).
+
+test('isFixPlanBeyondDepthCap: a scheduler-authored fix plan (isFixPlan:true) is still classified as one and capped at the same depth', () => {
+  assert.strictEqual(isFixPlanBeyondDepthCap('05-fix-foo', MAX_INVESTIGATION_DEPTH, true), false);
+  assert.strictEqual(isFixPlanBeyondDepthCap('05-fix-foo', MAX_INVESTIGATION_DEPTH + 1, true), true);
+});
+
+test('isFixPlanBeyondDepthCap: a human-authored PRD (isFixPlan:false) whose slug merely matches "fix-" is never capped, even with no investigationDepth (PRD 1126 regression)', () => {
+  assert.strictEqual(isFixPlanBeyondDepthCap('126-fix-plan-death-reopens-parent', undefined, false), false);
+});
+
+test('isFixPlanBeyondDepthCap: a legacy row (isFixPlan argument omitted/undefined) with a fix- slug and no depth field is still treated as a fix plan via the slug fallback', () => {
+  assert.strictEqual(isFixPlanBeyondDepthCap('05-fix-foo', undefined, undefined), true);
+});
+
 test('healTargetForFix: depth-2 fix-of-a-fix slug resolves back to the depth-1 fix job (521-fix-recorder-export-footer-redesign)', () => {
   // Depth-1 fix job: originally authored to fix job 521, itself in needs_review.
   const depth1FixJob = {

@@ -61,7 +61,17 @@ const STATUS_HISTORY_CAP = 20;
  *    declared paths is surfaced to a human as needs_review, never silently
  *    auto-completed)
  *  - needs_review->investigating, needs_review->pending, needs_review->completed
- *    (heal on reverify, or auto-promote) — same shape as `failed`
+ *    (heal on reverify, or auto-promote) — same shape as `failed`. Also
+ *    reached by source 'scheduler:mechanicalRecovery' (PRD 1130): a job
+ *    parked with a mechanically-resolvable verdict (starting with exactly
+ *    'worktree_integration_failed') gets one bounded, model-free re-attempt
+ *    of its worktree branch integration; success lands here exactly like any
+ *    other completion.
+ *  - needs_review->running (resume-first recovery, PRD 1111: a job parked
+ *    needs_review with verdict 'uncommitted_changes' gets one bounded
+ *    `claude -p --resume` dispatch through spawnJob before any fix-plan
+ *    investigation is authored — spawnJob's own dispatch mutate transitions
+ *    straight to 'running', same as any pending job)
  *  - completed->pending (force-only reset, gated separately by
  *    resetJobFields' own guard — this table only says the edge is
  *    structurally legal, not that every caller may take it unconditionally)
@@ -85,7 +95,7 @@ const LEGAL_TRANSITIONS = {
   running: ['completed', 'failed', 'needs_review', 'skipped', 'pending'],
   investigating: ['failed', 'needs_review', 'completed', 'pending', 'skipped'],
   failed: ['investigating', 'pending', 'completed', 'needs_review'],
-  needs_review: ['investigating', 'pending', 'completed', 'skipped'],
+  needs_review: ['investigating', 'pending', 'completed', 'skipped', 'running'],
   completed: ['pending'],
   skipped: ['pending'],
   quarantined: ['pending', 'skipped'],

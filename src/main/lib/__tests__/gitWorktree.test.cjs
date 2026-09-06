@@ -186,7 +186,7 @@ test('[job] integration is skipped (carried-wip-only) when the branch only commi
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: !outcome.ok });
 });
 
-test('[job] a branch that commits carried paths ALONGSIDE its own work still attempts integration normally (no silent drop)', async () => {
+test('[job] a branch that commits carried paths ALONGSIDE its own work auto-resolves the merge (PRD 1125: carried path is byte-identical duplicate, real work still lands)', async () => {
   const slug = 'test-slug-carried-plus-own-work';
   fs.writeFileSync(path.join(repoCwd, 'README.md'), 'uncommitted tracked edit\n', 'utf8');
   const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
@@ -198,16 +198,20 @@ test('[job] a branch that commits carried paths ALONGSIDE its own work still att
   git(['commit', '-q', '-m', 'job commit touching carried path + own work'], worktree.dir);
 
   const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug, carriedPaths: worktree.carriedPaths });
-  // The base tree still holds README.md dirty, so a real merge attempt here
-  // is expected to fail exactly like the existing worktreeIntegrationFailure
-  // path — branch preserved, not merged, not silently discarded.
-  expect(outcome.ok).toBe(false);
-  expect(outcome.reason).toBeTruthy();
+  // The base tree still holds README.md dirty, but its content is BYTE
+  // IDENTICAL to the branch's committed copy (the branch never edited it,
+  // only carried it through) — this is exactly the shape PRD 1125 teaches
+  // integrateBranch to auto-resolve: discard the duplicate, retry once, land
+  // the job's real new-file.txt commit too. Not the carried-wip-only
+  // shortcut (that only fires when the branch's ONLY changes are carried
+  // paths) — here the merge itself is what resolves.
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(outcome.autoResolved).toBe('identical_working_tree_duplicates');
+  expect(outcome.resolvedPaths).toEqual(['README.md']);
+  expect(fs.existsSync(path.join(repoCwd, 'new-file.txt'))).toBe(true);
 
-  const branches = git(['branch', '--list', worktree.branch], repoCwd);
-  expect(branches).toContain(worktree.branch.replace('sm-job/', ''));
-
-  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: !outcome.ok });
 });
 
 test('[job] a branch that ADDS its own edit on top of the carried content on the SAME path is never classified carried-wip-only (content-verify, not path-only)', async () => {
@@ -682,4 +686,119 @@ test('[job] reconcileWorktreesOnBoot logs a one-shot report line with reclaimed 
   } finally {
     logSpy.mockRestore();
   }
+});
+
+// ──────────────────────────────────────────── PRD 1125: auto-resolve identical-duplicate merge blocks
+
+test('[job] integrateBranch auto-resolves when every blocking path (tracked + untracked) is byte-identical to the branch', async () => {
+  const slug = 'test-slug-identical-duplicates';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+
+  // The job's own real work, committed on its branch.
+  fs.writeFileSync(path.join(worktree.dir, 'fileA'), 'shared-value\n', 'utf8');
+  fs.mkdirSync(path.join(worktree.dir, 'newdir'), { recursive: true });
+  fs.writeFileSync(path.join(worktree.dir, 'newdir', 'fileU'), 'untracked-shared-value\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  // The shared main tree independently ends up with the SAME bytes on both
+  // a tracked path (dirty, uncommitted) and an untracked path — exactly the
+  // 2026-09-06 starry-night-ships incident shape: a prior in-place run left
+  // these duplicates behind uncommitted.
+  fs.writeFileSync(path.join(repoCwd, 'fileA'), 'shared-value\n', 'utf8');
+  fs.mkdirSync(path.join(repoCwd, 'newdir'), { recursive: true });
+  fs.writeFileSync(path.join(repoCwd, 'newdir', 'fileU'), 'untracked-shared-value\n', 'utf8');
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(outcome.mergeCommit ?? outcome.fastForward).toBeTruthy();
+  expect(outcome.autoResolved).toBe('identical_working_tree_duplicates');
+  expect(outcome.resolvedPaths.sort()).toEqual(['fileA', 'newdir/fileU'].sort());
+
+  expect(fs.readFileSync(path.join(repoCwd, 'fileA'), 'utf8')).toBe('shared-value\n');
+  expect(fs.readFileSync(path.join(repoCwd, 'newdir', 'fileU'), 'utf8')).toBe('untracked-shared-value\n');
+  expect(git(['status', '--porcelain'], repoCwd).trim()).toBe('');
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: !outcome.ok });
+});
+
+test('[job] integrateBranch does NOT auto-resolve when one blocking path differs from the branch — same reason as today', async () => {
+  const slug = 'test-slug-one-differing-path';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+
+  fs.writeFileSync(path.join(worktree.dir, 'fileA'), 'branch-value\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  // Main tree's dirty copy diverges from the branch's committed content —
+  // real information is at risk, so this must NOT be discarded.
+  fs.writeFileSync(path.join(repoCwd, 'fileA'), 'different-local-value\n', 'utf8');
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toMatch(/merge failed \(likely a real content conflict\)/);
+  expect(fs.readFileSync(path.join(repoCwd, 'fileA'), 'utf8')).toBe('different-local-value\n');
+  expect(git(['status', '--porcelain'], repoCwd).trim()).not.toBe('');
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[job] integrateBranch falls through to today\'s failure when stderr has no parseable blocking-path block (a genuine content conflict)', async () => {
+  const slug = 'test-slug-unparseable-stderr';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+
+  fs.writeFileSync(path.join(worktree.dir, 'README.md'), 'job edit\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job edits README'], worktree.dir);
+
+  // A committed (not dirty) diverging edit on the main tree produces git's
+  // ordinary "CONFLICT (content)" stderr shape, not the "would be
+  // overwritten" block parseBlockingMergePaths looks for.
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'main tree edit\n', 'utf8');
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'main tree edits README'], repoCwd);
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toMatch(/merge failed \(likely a real content conflict\)/);
+  expect(git(['status', '--porcelain'], repoCwd).trim()).toBe('');
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[job] integrateBranch aborts cleanly when the single retry also fails on a genuine conflict elsewhere', async () => {
+  const slug = 'test-slug-retry-fails';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+
+  // The branch's own real work: extends fileA (existing, tracked since
+  // initRepo's README.md commit doesn't cover it — add it fresh here) and
+  // ADDS a brand-new fileB.txt.
+  fs.writeFileSync(path.join(worktree.dir, 'fileA'), 'shared-value\n', 'utf8');
+  fs.writeFileSync(path.join(worktree.dir, 'fileB.txt'), 'branch B change\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit: fileA + fileB'], worktree.dir);
+
+  // Main tree independently ADDS the SAME path with DIFFERENT content — a
+  // genuine "both added, diverging content" conflict on fileB.txt.
+  fs.writeFileSync(path.join(repoCwd, 'fileB.txt'), 'base B change\n', 'utf8');
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'main tree diverges fileB'], repoCwd);
+  // ...and ALSO leaves fileA dirty with content byte-identical to the branch
+  // — the one blocking path the initial merge attempt refuses on, and the
+  // one the auto-resolve retry successfully discards.
+  fs.writeFileSync(path.join(repoCwd, 'fileA'), 'shared-value\n', 'utf8');
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toMatch(/merge failed \(likely a real content conflict\)/);
+  // The retry's half-applied merge must be aborted, not left mid-merge.
+  expect(git(['status', '--porcelain'], repoCwd).trim()).toBe('');
+  expect(fs.existsSync(path.join(repoCwd, '.git', 'MERGE_HEAD'))).toBe(false);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
 });

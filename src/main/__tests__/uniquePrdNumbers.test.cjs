@@ -79,10 +79,22 @@ describe('pickForProject dependsOn eligibility (PRD 832)', () => {
     expect(res.batch.map((j) => j.slug)).toContain('851-next');
   });
 
-  it('a dep slug with NO queue row counts as done (retired to history)', () => {
+  it('a dep slug with NO queue row counts as done when found in history/archive (PRD 1122)', () => {
+    const dependent = job('853-next', 'pending', 853, { dependsOn: ['852-archived-long-ago'] });
+    // Caller (scheduler.cjs's computeDepHistorySatisfaction) precomputes this
+    // Set from history.jsonl/prds-archived — pickForProject never does I/O.
+    const satisfiedSlugs = new Set(['852-archived-long-ago']);
+    const res = pickForProject([dependent], new Set(), 3, new Map(), satisfiedSlugs);
+    expect(res.batch.map((j) => j.slug)).toContain('853-next');
+  });
+
+  it('a dep slug with NO queue row and NO history/archive record HOLDS as unresolved (PRD 1122)', () => {
     const dependent = job('853-next', 'pending', 853, { dependsOn: ['852-archived-long-ago'] });
     const res = pickForProject([dependent], new Set(), 3);
-    expect(res.batch.map((j) => j.slug)).toContain('853-next');
+    expect(res.batch).toEqual([]);
+    expect(res.reason).toMatch(/unresolvable/);
+    expect(res.reason).toContain('853-next');
+    expect(res.reason).toContain('852-archived-long-ago');
   });
 
   it('a FAILED dep holds the dependent with an explicit depends-gate reason', () => {

@@ -11,7 +11,7 @@
 
 // vitest globals (test) — same convention as the other .cjs tests.
 const assert = require('node:assert/strict');
-const { pickForProject, DEFAULT_PROJECT_CWD } = require('../schedulerBatch.cjs');
+const { pickForProject, findBlockingDep, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('../schedulerBatch.cjs');
 
 const CWD = DEFAULT_PROJECT_CWD;
 
@@ -74,12 +74,64 @@ test('still resolves an exact-slug dep (dep written WITH the NN- prefix)', () =>
   assert.deepEqual(batch.map((j) => j.slug), ['873-leftnav-two-face-framework']);
 });
 
-test('a dep with no row at all is treated as already done (archived/retired)', () => {
+// PRD 1122 — a dep slug with no live row is no longer auto-satisfied by
+// absence alone. It must show up in the caller's precomputed
+// history/archive Set (5th arg, built once per tick by
+// scheduler.cjs's computeDepHistorySatisfaction) or it HOLDS as
+// 'unresolved'. Observed live on starry-night-ships: a typo'd/format-
+// mismatched dep slug used to be silently indistinguishable from one
+// genuinely retired to history.
+test('a dep with no row IS treated as done when the caller supplies it as history/archive-satisfied', () => {
   const jobs = [
     job('874-nav-face-project-home', 'pending', { dependsOn: ['some-long-archived-prd'] }),
   ];
-  const { batch } = pick(jobs);
+  const { batch } = pickForProject(jobs, new Set(), 3, new Map(), new Set(['some-long-archived-prd']));
   assert.deepEqual(batch.map((j) => j.slug), ['874-nav-face-project-home']);
+});
+
+test('a dep with no row and NOT in the history/archive set HOLDS as unresolved, with a named actionable reason', () => {
+  const jobs = [
+    job('874-nav-face-project-home', 'pending', { dependsOn: ['some-typo-d-prd'] }),
+  ];
+  const { batch, reason, holds } = pick(jobs);
+  assert.deepEqual(batch, []);
+  assert.match(reason, /depends-gate/);
+  assert.match(reason, /unresolvable dependencies/);
+  assert.match(reason, /874-nav-face-project-home <- some-typo-d-prd/);
+  assert.match(reason, /fix the dependsOn entry or archive the dependent/);
+  const hold = holds.find((h) => h.slug === '874-nav-face-project-home');
+  assert.equal(hold.depStatus, 'unresolved');
+});
+
+test('the double-prefixed-row regression: a row named 253-253-x referenced as bare x holds as unresolved', () => {
+  // bareSlug strips exactly ONE leading `NN-` run, so '253-253-x' bares to
+  // '253-x' — it does NOT bare-match dependsOn's 'x'. The double-prefixed row
+  // is therefore genuinely invisible to both exact and bare matching, the
+  // same as a typo — this is the exact 2026-09-06 starry-night-ships report.
+  const jobs = [
+    job('253-253-x', 'running'),
+    job('254-next', 'pending', { dependsOn: ['x'] }),
+  ];
+  const { batch, holds, reason } = pick(jobs);
+  assert.deepEqual(batch.map((j) => j.slug), []);
+  assert.match(reason, /unresolvable dependencies/);
+  const hold = holds.find((h) => h.slug === '254-next');
+  assert.equal(hold.dep, 'x');
+  assert.equal(hold.depStatus, 'unresolved');
+});
+
+test('DEP_HISTORY_FAIL_OPEN preserves the pre-1122 fail-open behaviour for a read failure', () => {
+  const jobs = [
+    job('874-nav-face-project-home', 'pending', { dependsOn: ['some-long-archived-prd'] }),
+  ];
+  const { batch } = pickForProject(jobs, new Set(), 3, new Map(), DEP_HISTORY_FAIL_OPEN);
+  assert.deepEqual(batch.map((j) => j.slug), ['874-nav-face-project-home']);
+});
+
+test('findBlockingDep: bare-name resolution against satisfiedSlugs matches the live-row bare-name rule', () => {
+  const dependent = job('254-next', 'pending', { dependsOn: ['x'] });
+  assert.equal(findBlockingDep(dependent, [dependent], new Set(['253-x'])), undefined);
+  assert.equal(findBlockingDep(dependent, [dependent], new Set()), 'x');
 });
 
 test('a FAILED bare-named dep holds the dependent and reports an explicit reason', () => {

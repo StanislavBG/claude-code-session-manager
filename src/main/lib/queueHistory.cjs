@@ -269,10 +269,43 @@ async function historyTerminalBySlug() {
   return map;
 }
 
+/**
+ * completedSlugsForCwd(cwd) → Set<string> of every slug whose most recent
+ * appended record in THIS project's own history shard
+ * (`<cwd>/session-manager-operations/scheduler/state/history.jsonl`, via
+ * projectHistoryPath) has status 'completed'. Scoped to one project's shard
+ * — unlike historyTerminalBySlug's federated, machine-wide map — because
+ * this feeds PRD 1122's dependsOn history lookup, where a same-named PRD in
+ * an unrelated project must never count as satisfying a dep. Missing file
+ * (ENOENT) returns an empty Set, not an error — a project with no history
+ * yet is not a read failure.
+ */
+async function completedSlugsForCwd(cwd) {
+  let text = '';
+  try {
+    text = await fsp.readFile(projectHistoryPath(cwd), 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return new Set();
+    throw e;
+  }
+  const slugs = new Set();
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const j = JSON.parse(line);
+      if (j?.slug && j.status === 'completed') slugs.add(j.slug);
+    } catch {
+      // corrupt/partial line — ignore
+    }
+  }
+  return slugs;
+}
+
 module.exports = {
   HISTORY_PATH,
   partitionJobs,
   appendHistory,
   readHistory,
   historyTerminalBySlug,
+  completedSlugsForCwd,
 };

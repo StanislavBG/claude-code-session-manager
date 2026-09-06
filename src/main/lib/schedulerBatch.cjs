@@ -20,18 +20,43 @@ const { bareSlug } = require('./depSlugResolve.cjs');
 const DEFAULT_PROJECT_CWD = path.join(os.homedir(), 'Projects', 'session-manager');
 
 /**
+ * Sentinel passed as `satisfiedSlugs` when the caller's history/archive
+ * lookup itself failed this tick (PRD 1122's fail-open-on-read-failure
+ * clause) — every dep with no live row is treated as satisfied, exactly
+ * today's pre-1122 behaviour, rather than holding the whole queue hostage to
+ * a transient fs error. Never returned BY this module — only ever supplied
+ * by a caller (scheduler.cjs's computeDepHistorySatisfaction) that caught an
+ * I/O error building the real Set.
+ */
+const DEP_HISTORY_FAIL_OPEN = Symbol('dep-history-fail-open');
+
+/**
  * The dep slug (if any) blocking `job` from running, per PRD 832's
- * dependsOn semantics — a dep is blocking while a queue row for it exists
- * in a non-completed state; a slug with no row is treated as already done
- * (completed rows are retired to history shards). Resolves a dep by exact
- * slug first, then by bare-name match (a human-authored `dependsOn:` can't
- * know the `NN-` prefix the allocator will hand a sibling PRD — see
- * pickForProject's own comment on this for the incident it fixes).
+ * dependsOn semantics, refined by PRD 1122: a dep is blocking while a queue
+ * row for it exists in a non-completed state. A dep slug with NO live row is
+ * NOT automatically treated as done — it is checked against `satisfiedSlugs`
+ * (built ONCE per tick by the caller from scheduler `state/history.jsonl`
+ * and/or `prds-archived/`, per PRD 1122's once-per-tick requirement; pass
+ * `DEP_HISTORY_FAIL_OPEN` to fall back to the old blanket-satisfied
+ * behaviour when that lookup itself failed). A dep absent from BOTH live
+ * rows and `satisfiedSlugs` blocks — pickForProject surfaces this as a
+ * distinct 'unresolved' hold rather than silently dispatching the dependent
+ * (see PRD 1122: a typo'd or double-prefixed dependsOn entry used to be
+ * indistinguishable from a dep that genuinely finished and aged out to
+ * history).
+ *
+ * Resolves a dep by exact slug first, then by bare-name match (a
+ * human-authored `dependsOn:` can't know the `NN-` prefix the allocator will
+ * hand a sibling PRD — see pickForProject's own comment on this for the
+ * incident it fixes) — the SAME rule applies when matching against
+ * `satisfiedSlugs`, so a bare-named dep resolves against a prefixed history
+ * slug the same way it would against a live row.
+ *
  * Shared by pickForProject (per-project gating) and pickNextBatch's
  * quiet-machine dispatch check (PRD 1107), so the two can never disagree
  * about whether a job is eligible.
  */
-function findBlockingDep(job, projectJobs) {
+function findBlockingDep(job, projectJobs, satisfiedSlugs = new Set()) {
   const rowBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
   const rowsByBareSlug = new Map();
   for (const j of projectJobs) {
@@ -44,9 +69,25 @@ function findBlockingDep(job, projectJobs) {
     if (exact) return [exact];
     return rowsByBareSlug.get(bareSlug(slug)) ?? [];
   };
-  return (job.dependsOn ?? []).find((slug) => (
-    rowsForDep(slug).some((dep) => dep.status !== 'completed')
-  ));
+  // Bare-name fallback applies here too: a satisfiedSlugs entry is almost
+  // always the FULL NN-prefixed slug (a history.jsonl row or an archived
+  // `<slug>.md` filename), but a human-authored dependsOn: writes the bare
+  // name — same asymmetry findBlockingDep already resolves for live rows.
+  let satisfiedBareSlugs = null;
+  const isKnownSatisfied = (slug) => {
+    if (satisfiedSlugs === DEP_HISTORY_FAIL_OPEN) return true;
+    if (satisfiedSlugs.has(slug)) return true;
+    if (satisfiedBareSlugs === null) {
+      satisfiedBareSlugs = new Set();
+      for (const s of satisfiedSlugs) satisfiedBareSlugs.add(bareSlug(s));
+    }
+    return satisfiedBareSlugs.has(bareSlug(slug));
+  };
+  return (job.dependsOn ?? []).find((slug) => {
+    const rows = rowsForDep(slug);
+    if (rows.length > 0) return rows.some((dep) => dep.status !== 'completed');
+    return !isKnownSatisfied(slug);
+  });
 }
 
 /**
@@ -79,18 +120,28 @@ function findBlockingDep(job, projectJobs) {
  *   runningSet that belong to this project.
  * @param {number} slots - Maximum jobs to return (global remaining slots;
  *   caller enforces the global cap across projects).
+ * @param {Map<string,string>} [heldSlugs] - Launch-gate holds, see below.
+ * @param {Set<string>|symbol} [satisfiedSlugs] - Dep slugs with no live queue
+ *   row that are nonetheless known-satisfied (found in scheduler
+ *   `state/history.jsonl` and/or `prds-archived/`), built ONCE per tick by
+ *   the caller (PRD 1122) — or `DEP_HISTORY_FAIL_OPEN` when that lookup
+ *   itself failed this tick. Defaults to an empty Set (fail CLOSED: a dep
+ *   with no live row and nothing in this set is genuinely unresolved).
  * @returns {{ batch: object[], reason: string | null }} Jobs to spawn for this
  *   project this tick, plus (when batch is empty because a gate held it) the
  *   human-readable reason text that would otherwise only reach console.log.
  */
-function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = new Map()) {
+function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = new Map(), satisfiedSlugs = new Set()) {
   const projectCwd = (projectJobs.find((j) => j.cwd) || {}).cwd || DEFAULT_PROJECT_CWD;
 
-  // Explicit dependsOn eligibility (PRD 832). A dep slug is BLOCKING while a
-  // queue row for it exists in a non-completed state; a slug with no row is
-  // treated as already done (completed rows are retired to history shards,
-  // so absence is the normal end-state of a finished dep). A FAILED dep
-  // holds the dependent with an explicit reason, mirroring the failure gate.
+  // Explicit dependsOn eligibility (PRD 832, refined by PRD 1122). A dep slug
+  // is BLOCKING while a queue row for it exists in a non-completed state. A
+  // slug with NO row is only treated as done when `satisfiedSlugs` (this
+  // tick's precomputed history/archive lookup — see findBlockingDep's own
+  // doc) says so; otherwise it HOLDS as 'unresolved' — see PRD 1122: a typo
+  // or a double-prefixed slug used to be silently indistinguishable from a
+  // dep that genuinely finished and aged out to history. A FAILED dep holds
+  // the dependent with an explicit reason, mirroring the failure gate.
   // Legacy jobs without dependsOn keep the shared-NN group semantics below
   // unchanged (lowest-number-first waves), so an in-flight mixed queue keeps
   // its order without migration.
@@ -112,7 +163,7 @@ function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = n
     const bare = String(slug ?? '').replace(/^\d+-/, '');
     return projectJobs.filter((j) => String(j.slug ?? '').replace(/^\d+-/, '') === bare);
   };
-  const blockingDep = (j) => findBlockingDep(j, projectJobs);
+  const blockingDep = (j) => findBlockingDep(j, projectJobs, satisfiedSlugs);
 
   // quietMachine jobs (PRD 1107) never dispatch through the ordinary
   // per-project picker — pickNextBatch's dedicated quiet-machine check
@@ -142,6 +193,10 @@ function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = n
   // the generic `holds` bucket — resetting won't help here (the source file
   // is gone), so the guidance differs from the failed-dep case.
   const heldBySkippedDep = [];
+  // A dep with NO live row anywhere and no completion record either (PRD
+  // 1122) — a typo'd or double-prefixed dependsOn entry, indistinguishable
+  // at write time from a dep that finished and aged out, until now.
+  const heldByUnresolvedDep = [];
   // Per-job hold records, surfaced to the UI so a `pending` row can say WHICH
   // dep is holding it instead of leaving the reason in console.log.
   const holds = [...launchHolds];
@@ -149,6 +204,11 @@ function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = n
     const dep = blockingDep(j);
     if (!dep) { pending.push(j); continue; }
     const depRows = rowsForDep(dep);
+    if (depRows.length === 0) {
+      heldByUnresolvedDep.push({ job: j, dep });
+      holds.push({ slug: j.slug, dep, depStatus: 'unresolved' });
+      continue;
+    }
     const failed = depRows.some((d) => d.status === 'failed');
     const skipped = depRows.some((d) => d.status === 'skipped');
     if (failed) heldByFailedDep.push({ job: j, dep });
@@ -169,6 +229,10 @@ function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = n
     if (heldBySkippedDep.length > 0) {
       const detail = heldBySkippedDep.map(({ job, dep }) => `${job.slug} <- ${dep}`).join(', ');
       reasons.push(`holding ${heldBySkippedDep.length} job(s) behind never-ran dependencies [${detail}]. The dep's PRD source is gone — author a fresh PRD for that work to unblock.`);
+    }
+    if (heldByUnresolvedDep.length > 0) {
+      const detail = heldByUnresolvedDep.map(({ job, dep }) => `${job.slug} <- ${dep}`).join(', ');
+      reasons.push(`holding ${heldByUnresolvedDep.length} job(s) behind unresolvable dependencies [${detail}]. The dep slug matches no live queue row and no completion record in history/archive — fix the dependsOn entry or archive the dependent.`);
     }
     if (reasons.length > 0) {
       const reason = `[scheduler] depends-gate [${projectCwd}]: ${reasons.join(' ')}`;
@@ -294,6 +358,14 @@ function enqueueTimestamp(job) {
  *     NOW (scheduler jobs AND chat runs). A quiet-machine job only dispatches
  *     when this is 0, unless it has waited past quietMachineWaitMs().
  *   - now: ms epoch, defaults to Date.now() (injectable for tests).
+ *   - satisfiedSlugsByCwd: `Map<cwd, Set<string>|symbol>` — this tick's
+ *     precomputed dependsOn history/archive lookup (PRD 1122), built ONCE by
+ *     the caller (scheduler.cjs's computeDepHistorySatisfaction) before this
+ *     function runs, never inside it. Per-cwd value is either a Set of
+ *     satisfied slugs or `DEP_HISTORY_FAIL_OPEN` when that project's lookup
+ *     itself failed this tick. Missing entry for a cwd defaults to an empty
+ *     Set (fail closed). Threaded to findBlockingDep everywhere it's called
+ *     below — pickForProject and the quiet-machine check both need it.
  * @returns {{ batch: object[], reason: string | null, holds: object[] }} Jobs
  *   to spawn this tick, plus (when batch is empty because a gate held it) the
  *   human-readable hold reason that would otherwise only reach console.log.
@@ -304,6 +376,8 @@ function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
   // this tick (scheduler.cjs computes it from state.launchBlocks). Held rows
   // are invisible to every pick below but still surface as holds.
   const heldSlugs = quietOpts.heldSlugs instanceof Map ? quietOpts.heldSlugs : new Map();
+  const satisfiedSlugsByCwd = quietOpts.satisfiedSlugsByCwd instanceof Map ? quietOpts.satisfiedSlugsByCwd : new Map();
+  const satisfiedSlugsFor = (cwd) => satisfiedSlugsByCwd.get(cwd || DEFAULT_PROJECT_CWD) ?? new Set();
   const pickable = (j) => j.status === 'pending' && !running.has(j.slug) && !heldSlugs.has(j.slug);
 
   // Exclusive lease (PRD 1107): while a quiet-machine job is running, it
@@ -362,7 +436,7 @@ function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
     const quietPending = allJobs.filter((j) => pickable(j) && j.quietMachine === true);
     for (const job of quietPending) {
       const projectJobs = projectMap.get(job.cwd || DEFAULT_PROJECT_CWD) || [job];
-      if (findBlockingDep(job, projectJobs)) continue; // blocked — try the next quiet candidate
+      if (findBlockingDep(job, projectJobs, satisfiedSlugsFor(job.cwd))) continue; // blocked — try the next quiet candidate
       const machineQuiet = machineInUse === 0;
       const waitedMs = now - enqueueTimestamp(job);
       const degraded = !machineQuiet && waitedMs >= quietWaitMs;
@@ -409,7 +483,7 @@ function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
     for (const c of candidates) {
       if (slots <= 0) break;
       if (!c.active) continue;
-      const result = pickForProject(c.view, c.runningSlugsInProject, 1, heldSlugs);
+      const result = pickForProject(c.view, c.runningSlugsInProject, 1, heldSlugs, satisfiedSlugsFor(c.cwd));
       for (const h of result.holds ?? []) if (!holdsBySlug.has(h.slug)) holdsBySlug.set(h.slug, h);
       if (result.batch.length === 0) {
         if (heldReason === null && result.reason) heldReason = result.reason;
@@ -492,4 +566,5 @@ function findStarvedProjects(jobs, now, thresholdMs) {
 
 module.exports = {
   pickForProject, pickNextBatch, enqueueTimestamp, findStarvedProjects, findBlockingDep, DEFAULT_PROJECT_CWD,
+  DEP_HISTORY_FAIL_OPEN,
 };

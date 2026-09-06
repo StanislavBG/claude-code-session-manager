@@ -99,7 +99,7 @@ const JOB_OVERRUN_FACTOR = process.env.SM_JOB_OVERRUN_FACTOR
 const JOB_OVERRUN_FLOOR_MS = process.env.SM_JOB_OVERRUN_FLOOR_MINUTES
   ? Number(process.env.SM_JOB_OVERRUN_FLOOR_MINUTES) * 60_000
   : JOB_OVERRUN_FLOOR_MS_DEFAULT;
-const { pickForProject, pickNextBatch, findStarvedProjects, DEFAULT_PROJECT_CWD } = require('./lib/schedulerBatch.cjs');
+const { pickForProject, pickNextBatch, findStarvedProjects, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/schedulerBatch.cjs');
 const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
 const { writeRcaReport, extractRcaBlock } = require('./lib/rcaReport.cjs');
 const queueHistory = require('./lib/queueHistory.cjs');
@@ -4293,6 +4293,58 @@ async function computeLaunchHolds(state, { now = Date.now(), claudeVersion } = {
 }
 
 /**
+ * computeDepHistorySatisfaction(state) → Map<cwd, Set<string>|symbol>
+ *
+ * PRD 1122's once-per-tick dependsOn history/archive lookup: for every
+ * distinct project cwd with jobs this tick, builds the set of dep slugs that
+ * have no live queue row but are nonetheless known-satisfied — a completed
+ * record in that project's own `state/history.jsonl` shard
+ * (queueHistory.completedSlugsForCwd, scoped per-project so a same-named PRD
+ * in an unrelated project can never satisfy a dep here), or a `.md` file
+ * under any of that project's `prds-archived/` dirs (listArchivedPrdDirs —
+ * covers both the retired flat layout and every Epic's own sibling archive).
+ * findBlockingDep (schedulerBatch.cjs) treats a dep slug as blocking
+ * whenever it has no live row AND is absent from this set, so a typo or a
+ * double-prefixed slug (the exact 2026-09-06 starry-night-ships incident)
+ * HOLDS its dependent instead of silently dispatching it.
+ *
+ * Fails OPEN per project, never queue-wide: a history-shard or archive-scan
+ * read error for one cwd degrades that cwd's value to
+ * `DEP_HISTORY_FAIL_OPEN` (findBlockingDep then treats every rowless dep in
+ * that project as satisfied, exactly today's pre-1122 behaviour) with a
+ * logged warning — it never throws out of this function and never blocks
+ * every OTHER project's dispatch for one project's bad fs state.
+ *
+ * Computed ONCE here, before pickNextBatch runs, and threaded down as pure
+ * data (quietOpts.satisfiedSlugsByCwd) — schedulerBatch.cjs itself does no
+ * I/O, so this is the only fs read this gate costs per tick, not one per job
+ * per dep.
+ */
+async function computeDepHistorySatisfaction(state) {
+  const byCwd = new Map();
+  const cwds = new Set((state?.jobs || []).map((j) => j.cwd || DEFAULT_PROJECT_CWD));
+  for (const cwd of cwds) {
+    const satisfied = new Set();
+    try {
+      for (const slug of await queueHistory.completedSlugsForCwd(cwd)) satisfied.add(slug);
+      for (const dir of listArchivedPrdDirs(cwd)) {
+        let entries;
+        try { entries = await fsp.readdir(dir); } catch { continue; }
+        for (const name of entries) {
+          if (name.endsWith('.md')) satisfied.add(name.slice(0, -3));
+        }
+      }
+    } catch (e) {
+      console.warn(`[scheduler] depHistorySatisfaction: history/archive lookup failed for ${cwd} (${e?.message}) — falling back to fail-open dep resolution for this project this tick`);
+      byCwd.set(cwd, DEP_HISTORY_FAIL_OPEN);
+      continue;
+    }
+    byCwd.set(cwd, satisfied);
+  }
+  return byCwd;
+}
+
+/**
  * A run that never got a turn (res.launchFailure — see executeJob's onExit)
  * is routed here instead of the failed/investigation path (issue #11 lists
  * A1–A3, B1): the row goes back to `pending` carrying the API's own message
@@ -5378,11 +5430,13 @@ function tickQueue({ bypassLoadGate = false } = {}) {
     // ceilinged the queue at 3 while the pool the user configured said 5.
     const freeSlots = sessionSlots.available();
     const heldSlugs = await computeLaunchHolds(state);
+    const satisfiedSlugsByCwd = await computeDepHistorySatisfaction(state);
     const { batch, reason: holdReason, holds } = pickNextBatch(state.jobs, runningSet, freeSlots, {
       leaseHeld: quietMachineLease.isHeld(),
       machineInUse: sessionSlots.inUse(),
       now: Date.now(),
       heldSlugs,
+      satisfiedSlugsByCwd,
     });
     if (batch.length === 0 && freeSlots === 0) {
       const snap = sessionSlots.snapshot();
@@ -7839,4 +7893,4 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 }
 
-module.exports = { classifyQueueStarvation, runQueueStarvationWatchdog, QUEUE_STARVATION_MS, computeBlockedChains, stripAppOwnedChurn, findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation, computeLaunchHolds, handleLaunchFailure, applyLaunchFailure, setPaused, clearPause, tickQueue, runDueJobs, isCooldownSuppressed, nextRapidRateLimitCount, CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD, RAPID_RATE_LIMIT_WINDOW_MS, MANUAL_PAUSE_COOLDOWN_MS, RUNS_DIR, pickRunDir };
+module.exports = { classifyQueueStarvation, runQueueStarvationWatchdog, QUEUE_STARVATION_MS, computeBlockedChains, stripAppOwnedChurn, findOverrunningJobs, JOB_OVERRUN_FACTOR, JOB_OVERRUN_FLOOR_MS, registerScheduleHandlers, attachWindow, init, ROOT, PRDS_DIR, healRefusalReason, writeQueue, reconcile, reconcileSourcePromptId, allocateParallelGroup, selectHistoryJobs, parsePorcelain, FINISH_PROTOCOL, IDLE_OUTPUT_KILL_MS, BASH_DEFAULT_TIMEOUT_MS, BASH_MAX_TIMEOUT_MS, remote, pickNextBatch, pickForProject, reapDeadRunningJobs, pollRecoveryClearSource, memoryLimitedBatchSize, availableForJobs, reverifyNeedsReview, isRescanCandidate, isFailedUnverifiedShaped, computeLooksDone, isPromotableOriginal, selectAutoFixTargets, applyRcaClassification, isEligibleForImmediateAutoFix, resolveRunId, isUnresolvableNeedsReview, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor, healTargetForFix, buildInvestigationPrompt, isGitRepoSync, committedInWindow, computeCommittedDuringRun, classifySigtermWithCommit, isFixPlanSlug, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, forceTickOutcome, applyPauseCleared, detectNetworkErrorInLog, detectRateLimitInLog, classifyFailureOutcome, commitGuardVerdict, leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP, capDirtyPaths, buildForeignWipSection, PRE_RUN_DIRTY_PATHS_CAP, FOREIGN_WIP_DELIMITER, FOREIGN_WIP_END_DELIMITER, TRANSIENT_RETRY_CAP, buildScheduleStatePayload, partitionBootOrphans, applyOrphanOutcome, BOOT_ORPHAN_KILL_GRACE_MS, registerAdminRoutes, notifyOriginatingTab, notifyNeedsReview, isNotifiableTerminalStatus, extractResultTextFromLog, candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus, prdDirForCwd, prdPathForJob, archivedPrdPathForJob, archivedTwinExists, findPrdDir, resolveVerifyPrdPath, resolveFixPlanPath, resolveNotifyPrd, runPrdMigration, consolidateAllFlatPrds, shouldSkipInvestigationForCleanRun, archiveCompletedPrd, retireCompletedSlugs, SCHEDULER_BOOTED_AT, SCHEDULER_CODE_SHA, resetJobFields, executeJob, prdArchivedSkipResult, spawnJob, listPrdsInternal, computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS, applyClearQueueVictims, PIDLESS_SPAWN_GRACE_MS, findStrandedInvestigations, INVESTIGATION_MAX_MS, stashList, parseStashLine, pathsChangedSince, restoreSpecificStash, evaluateSharedTreeGuard, checkSharedTreeGuard, uncommittedChanges, gitHead, selectResumeRecoveryTarget, buildResumeRecoveryPreamble, buildClaudeSpawnArgs, spawnResumeRecovery, spawnInvestigation, computeLaunchHolds, computeDepHistorySatisfaction, handleLaunchFailure, applyLaunchFailure, setPaused, clearPause, tickQueue, runDueJobs, isCooldownSuppressed, nextRapidRateLimitCount, CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD, RAPID_RATE_LIMIT_WINDOW_MS, MANUAL_PAUSE_COOLDOWN_MS, RUNS_DIR, pickRunDir };

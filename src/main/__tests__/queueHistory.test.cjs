@@ -257,3 +257,36 @@ test('historyTerminalBySlug: cache invalidates after a new appendHistory call (m
   expect(second.has('cache-1')).toBe(true);
   expect(second.has('cache-2')).toBe(true);
 });
+
+// ---------- completedSlugsForCwd (PRD 1122) ----------
+//
+// Feeds scheduler.cjs's computeDepHistorySatisfaction: a dependsOn slug with
+// no live queue row is only satisfied when it shows up here (or in
+// prds-archived/) — scoped to ONE project's own history shard so a
+// same-named PRD in an unrelated project can never satisfy a dep.
+
+test('completedSlugsForCwd: returns slugs completed in this project\'s own shard only', async () => {
+  const projectCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-1122-projA-'));
+  const otherCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-1122-projB-'));
+  await queueHistory.appendHistory([
+    old({ slug: '900-base', status: 'completed', runId: 'ra', cwd: projectCwd }),
+    old({ slug: '901-failed', status: 'failed', runId: 'rb', cwd: projectCwd }),
+    old({ slug: '900-base', status: 'completed', runId: 'rc', cwd: otherCwd }),
+  ]);
+
+  const slugs = await queueHistory.completedSlugsForCwd(projectCwd);
+  expect(slugs.has('900-base')).toBe(true);
+  expect(slugs.has('901-failed')).toBe(false);
+
+  // Same slug completed in a DIFFERENT project must not leak across.
+  const otherSlugs = await queueHistory.completedSlugsForCwd(otherCwd);
+  expect(otherSlugs.has('900-base')).toBe(true);
+  const unrelatedCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-1122-projC-'));
+  expect((await queueHistory.completedSlugsForCwd(unrelatedCwd)).size).toBe(0);
+});
+
+test('completedSlugsForCwd: returns an empty Set when the project has no history shard yet', async () => {
+  const freshCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-1122-fresh-'));
+  const slugs = await queueHistory.completedSlugsForCwd(freshCwd);
+  expect(slugs.size).toBe(0);
+});

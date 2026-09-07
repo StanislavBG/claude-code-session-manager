@@ -59,7 +59,7 @@ const { appendError } = require('./lib/opsErrorLog.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
 const {
   claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs,
-  findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome,
+  findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome, resolveCommitGuardOutcome,
 } = require('./lib/reaperHelpers.cjs');
 const { sweepStrandedJobBranches } = require('./lib/branchSweep.cjs');
 const { detectRateLimitInLog } = require('./lib/rateLimitDetect.cjs');
@@ -79,7 +79,7 @@ const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { verifyRun, parseLog, scanSentinel, scanForeignWipPathsClaim } = require('./runVerify.cjs');
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/terminalRunOutcome.cjs');
 const { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan } = require('./lib/fixPlanSlug.cjs');
-const { landedSinceRun } = require('./lib/landedSinceRun.cjs');
+const { landedSinceRun, landedOnMainSince } = require('./lib/landedSinceRun.cjs');
 const { declaredPathsForPrd } = require('./lib/prdDeclaredPaths.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated, SCHEDULE_SLUG_RE } = require('./ipcSchemas.cjs');
@@ -3323,6 +3323,44 @@ function classifyFailureOutcome({ exitCode, networkError, durationMs, transientR
 }
 
 /**
+ * Evidence gathering for the commit-guard's already-satisfied-on-main
+ * exemption (PRD 1136): does a commit reachable from `main`, landed AFTER
+ * this job's `queuedAt`, touch a path this PRD itself declares? Scoped to
+ * the PRD's own declared paths via declaredPathsForPrd — the same
+ * path-extraction computeLooksDone already uses — so an unrelated commit
+ * elsewhere in the repo is never credited to this job. Returns `[]` (never
+ * fabricates evidence) when the PRD names no paths or has no `queuedAt`.
+ *
+ * Requires EVERY declared path to have landed, not just one — declaredPathsForPrd's
+ * regex matches any backtick-quoted path in the PRD's Implementation notes or
+ * Acceptance criteria, including a path cited only as context (e.g.
+ * `` `src/main/scheduler.cjs:1234` `` pointing at a call site, not a file this
+ * PRD's own work touches). Unlike computeLooksDone's identical path-overlap
+ * heuristic — which only ever annotates a still-needs_review row for a human
+ * to confirm — this check drives an UNATTENDED transition straight to
+ * 'completed', so a single incidental hot-file citation must never be
+ * sufficient evidence on its own (code-review finding, 2026-09-07: a PRD
+ * that cites both its real target file and one hot file purely as context
+ * would auto-complete off any unrelated commit touching that hot file).
+ * Requiring full coverage of the declared-path set trades recall for safety
+ * exactly as this PRD's own constraint demands — a PRD that fails this
+ * stricter check still falls back to the existing needs_review park, never
+ * a false 'completed'.
+ *
+ * @returns {Promise<string[]>} full commit SHAs reachable from main, newest first
+ */
+async function findSatisfyingCommitOnMain(job) {
+  if (!job?.queuedAt) return [];
+  const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
+  const paths = declaredPathsForPrd(prdPath);
+  if (!paths.length) return [];
+  await fetchAllRefs(job.cwd);
+  const perPathCommits = await Promise.all(paths.map((p) => landedOnMainSince(job.cwd, job.queuedAt, [p])));
+  if (perPathCommits.some((commits) => commits.length === 0)) return [];
+  return landedOnMainSince(job.cwd, job.queuedAt, paths);
+}
+
+/**
  * Commit-guard verdict decision. Pure/no I/O so the false-positive defenses
  * can be unit-tested directly rather than only through a live spawnJob run.
  * Returns the flagged verifyResult replacement, or null if the guard should
@@ -5660,9 +5698,22 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           salvagePatch,
         });
         if (guardVerdict) {
-          verifyResult = guardVerdict;
-          const what = newlyDirty.length > 0 ? `left ${newlyDirty.length} files uncommitted` : 'made no commit on an already-clean tree';
-          console.log(`[scheduler] commit-guard: ${job.slug} ${what} → needs_review`);
+          // Already-satisfied-on-main exemption (PRD 1136): resolveCommitGuardOutcome
+          // only ever touches the clean-tree/no-commit shape ('silent_no_op') —
+          // a job that left dirty files behind is a genuine finish-protocol
+          // violation regardless of what already landed on main, so it is
+          // never routed through this check (see that function's own doc).
+          const satisfyingCommits = guardVerdict.verdict === 'silent_no_op'
+            ? await findSatisfyingCommitOnMain(job)
+            : [];
+          const finalVerdict = resolveCommitGuardOutcome(guardVerdict, satisfyingCommits);
+          verifyResult = finalVerdict;
+          if (finalVerdict.verdict === 'already_satisfied_on_main') {
+            console.log(`[scheduler] already-satisfied-on-main: ${job.slug} → completed (${finalVerdict.satisfyingSha})`);
+          } else {
+            const what = newlyDirty.length > 0 ? `left ${newlyDirty.length} files uncommitted` : 'made no commit on an already-clean tree';
+            console.log(`[scheduler] commit-guard: ${job.slug} ${what} → needs_review`);
+          }
         }
       }
     }
@@ -5873,6 +5924,13 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           } else if (
             !verifyResult
             || COMPLETED_EQUIVALENT_VERDICTS.has(verifyResult.verdict)
+            // Already-satisfied-on-main (PRD 1136): a second, independently-
+            // evidenced route to 'completed' alongside COMPLETED_EQUIVALENT_
+            // VERDICTS above — kept as its own explicit check rather than
+            // folded into that shared Set so it can never leak into
+            // reverifyNeedsReview's or runVerify.cjs's unrelated healing
+            // decisions, which consult that Set for a different purpose.
+            || verifyResult.verdict === 'already_satisfied_on_main'
           ) {
             effectiveStatus = 'completed';
           } else if (verifyResult.downgradeTo === 'pending') {
@@ -5884,7 +5942,14 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
             effectiveStatus = 'needs_review';
           }
 
-          transitionJob(s.jobs[i2], effectiveStatus, { reason: sigtermOverrideReason ?? `run finished with exit ${res.exitCode}`, source: 'spawnJob:finalize' });
+          // already_satisfied_on_main names the satisfying sha in its own
+          // reason — surface that on the completed row's statusHistory
+          // instead of the generic "run finished with exit 0" every other
+          // completed run gets.
+          const finalizeReason = (effectiveStatus === 'completed' && verifyResult?.verdict === 'already_satisfied_on_main')
+            ? verifyResult.reason
+            : (sigtermOverrideReason ?? `run finished with exit ${res.exitCode}`);
+          transitionJob(s.jobs[i2], effectiveStatus, { reason: finalizeReason, source: 'spawnJob:finalize' });
           s.jobs[i2].finishedAt = new Date().toISOString();
           s.jobs[i2].exitCode = res.exitCode;
           s.jobs[i2].leakedDescendants = res.leakedDescendants ?? [];
@@ -7544,7 +7609,15 @@ async function reverifyNeedsReview() {
     // Still needs_review after the existing heal pass — widen the evidence
     // window before giving up on it entirely (unchanged heal semantics for
     // rows that already qualified above; this only adds an annotation).
-    if (stillOpen) {
+    // Skipped when a fix-plan investigation was already minted for this row
+    // (job.autoFixAttempted) — PRD 1136: 'looks done, confirm before
+    // archiving' and 'a -fix- child is already investigating this' are two
+    // different claims about the SAME evidence, and stamping both leaves a
+    // human reading two contradictory signals off one row. autoFixAttempted
+    // is stamped synchronously in spawnJob's same-tick auto-fix branch,
+    // always before this periodic/boot pass can run against the same row, so
+    // this check reliably catches the only order that can occur.
+    if (stillOpen && job.autoFixAttempted !== true) {
       const looksDone = await computeLooksDone(job);
       if (looksDone) {
         looksDoneUpdates.push({ slug: job.slug, cwd: job.cwd, looksDone, fromFailed: false });
@@ -9107,6 +9180,7 @@ module.exports = {
   detectRateLimitInLog,
   classifyFailureOutcome,
   commitGuardVerdict,
+  findSatisfyingCommitOnMain,
   leftoverFieldsFrom,
   applyLeftoverFields,
   LEFTOVER_PATHS_CAP,

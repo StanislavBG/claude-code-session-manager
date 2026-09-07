@@ -212,6 +212,7 @@ export default defineConfig({
       'src/main/lib/__tests__/schedulerBatchLaunchHold.test.cjs',
       'src/main/lib/__tests__/schedulerMcpServerHeadlessRefusal.test.cjs',
       'src/main/__tests__/scheduler-launch-failure.test.cjs',
+      'src/main/__tests__/scheduler-already-satisfied-on-main.test.cjs',
     ],
     globals: true,
   },

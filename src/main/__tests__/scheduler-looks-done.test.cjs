@@ -33,7 +33,7 @@ const { execFileSync } = require('node:child_process');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'looks-done-test-'));
 process.env.HOME = tmpHome;
 
-const { reverifyNeedsReview, computeLooksDone } = require('../scheduler.cjs');
+const { reverifyNeedsReview, computeLooksDone, findSatisfyingCommitOnMain } = require('../scheduler.cjs');
 const { resolvePrdWriteDir } = require('../lib/prdLocations.cjs');
 const { bustCwdCache } = require('../lib/queueStore.cjs');
 
@@ -44,6 +44,18 @@ function git(args, cwd) {
 function initRepo(dir) {
   fs.mkdirSync(dir, { recursive: true });
   git(['init', '-q'], dir);
+  git(['config', 'user.email', 'test@example.com'], dir);
+  git(['config', 'user.name', 'Test'], dir);
+  fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n', 'utf8');
+  git(['add', '-A'], dir);
+  git(['commit', '-q', '-m', 'initial'], dir);
+}
+
+// -b main pins the branch name regardless of the host's init.defaultBranch
+// config — findSatisfyingCommitOnMain's tests need a deterministic 'main' ref.
+function initRepoOnMain(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  git(['init', '-q', '-b', 'main'], dir);
   git(['config', 'user.email', 'test@example.com'], dir);
   git(['config', 'user.name', 'Test'], dir);
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n', 'utf8');
@@ -226,6 +238,134 @@ test('computeLooksDone: no declared paths on the PRD → null, never fabricates 
   const job = { slug: '09-no-paths', cwd: projectCwd, startedAt };
   const looksDone = await computeLooksDone(job);
   assert.equal(looksDone, null);
+});
+
+test('needs_review row with autoFixAttempted:true is never also stamped looksDone (PRD 1136 — mutually exclusive)', async () => {
+  const projectCwd = path.join(tmpHome, 'proj-already-fix-planned');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd, 'proj-already-fix-planned-slug');
+  writePrd(projectCwd, '30-example', [
+    '# Implementation notes',
+    'Edit `src/thing.js`.',
+  ].join('\n'));
+
+  // startedAt/finishedAt are fixed well in the past so the real-time commit
+  // below lands outside committedInWindow's [startedAt, finishedAt+60s]
+  // window — otherwise the pre-existing heal pass would auto-complete the
+  // row before ever reaching the stillOpen/looksDone branch this test
+  // targets (committedInWindow, unlike computeLooksDone's landedSinceRun,
+  // has no upper bound skip).
+  const startedAt = '2020-01-01T00:00:00.000Z';
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug: '30-example',
+      status: 'needs_review',
+      cwd: projectCwd,
+      runId: 'run-30',
+      startedAt,
+      finishedAt: '2020-01-01T00:05:00.000Z',
+      verifierVerdict: 'transcript_errors',
+      error: 'transcript_errors: stale verdict',
+      // A fix-plan child was already minted for this row at finalize time —
+      // the exact ordering that always precedes a later reverifyNeedsReview
+      // pass, since autoFixAttempted is stamped synchronously in the same
+      // mutate() as the needs_review transition itself.
+      autoFixAttempted: true,
+    },
+  ]);
+  writeRunLog('run-30', '30-example', [
+    '[scheduler] starting 30-example',
+    JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'still broken' }),
+  ]);
+
+  commitFile(projectCwd, 'src/thing.js', 'hello', 'later commit touching the declared path');
+
+  await reverifyNeedsReview();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  assert.equal(jobs.length, 1);
+  assert.equal(jobs[0].status, 'needs_review');
+  assert.equal(jobs[0].looksDone, undefined, 'a row already fix-planned must never also be stamped looksDone');
+  assert.equal(jobs[0].error, 'transcript_errors: stale verdict', 'the looksDone annotation must not overwrite the original error');
+});
+
+// findSatisfyingCommitOnMain — PRD 1136's already-satisfied-on-main evidence
+// query. Requires EVERY declared path to have landed on main since
+// queuedAt, not just one — a code-review finding (2026-09-07) confirmed
+// that a PRD citing both its real target file and a second file purely as
+// context (e.g. a `path/to/file.js:123` reference) would otherwise
+// auto-complete unattended off any unrelated commit touching only that
+// second, incidental file.
+
+test('findSatisfyingCommitOnMain: single declared path, satisfying commit lands on main → returns the sha', async () => {
+  const projectCwd = path.join(tmpHome, 'proj-satisfied-single-path');
+  initRepoOnMain(projectCwd);
+  registerActiveProject(projectCwd, 'proj-satisfied-single-path-slug');
+  writePrd(projectCwd, '40-single-path', [
+    '# Implementation notes',
+    'Edit `src/real-work.js`.',
+  ].join('\n'));
+
+  const queuedAt = new Date().toISOString();
+  await wait(1100);
+  commitFile(projectCwd, 'src/real-work.js', 'hello', 'fix real-work');
+
+  const job = { slug: '40-single-path', cwd: projectCwd, queuedAt };
+  const commits = await findSatisfyingCommitOnMain(job);
+  assert.equal(commits.length, 1);
+});
+
+test('findSatisfyingCommitOnMain: two declared paths but only ONE lands → [] (not satisfied — no false completion off an incidental context citation)', async () => {
+  const projectCwd = path.join(tmpHome, 'proj-satisfied-partial-path');
+  initRepoOnMain(projectCwd);
+  registerActiveProject(projectCwd, 'proj-satisfied-partial-path-slug');
+  writePrd(projectCwd, '41-partial-path', [
+    '# Implementation notes',
+    'Edit `src/real-work.js`. See `src/main/hotfile.js:123` for context.',
+  ].join('\n'));
+
+  const queuedAt = new Date().toISOString();
+  await wait(1100);
+  // Only the incidentally-cited context file gets a later, UNRELATED commit
+  // — the actual target path (src/real-work.js) never lands.
+  commitFile(projectCwd, 'src/main/hotfile.js', 'unrelated change', 'unrelated commit');
+
+  const job = { slug: '41-partial-path', cwd: projectCwd, queuedAt };
+  const commits = await findSatisfyingCommitOnMain(job);
+  assert.deepEqual(commits, [], 'partial path coverage must never be treated as satisfied');
+});
+
+test('findSatisfyingCommitOnMain: two declared paths, BOTH land → returns satisfying commits', async () => {
+  const projectCwd = path.join(tmpHome, 'proj-satisfied-both-paths');
+  initRepoOnMain(projectCwd);
+  registerActiveProject(projectCwd, 'proj-satisfied-both-paths-slug');
+  writePrd(projectCwd, '42-both-paths', [
+    '# Implementation notes',
+    'Edit `src/real-work.js` and `src/main/hotfile.js`.',
+  ].join('\n'));
+
+  const queuedAt = new Date().toISOString();
+  await wait(1100);
+  commitFile(projectCwd, 'src/real-work.js', 'hello', 'fix real-work');
+  commitFile(projectCwd, 'src/main/hotfile.js', 'hello', 'fix hotfile too');
+
+  const job = { slug: '42-both-paths', cwd: projectCwd, queuedAt };
+  const commits = await findSatisfyingCommitOnMain(job);
+  assert.ok(commits.length >= 1, 'full path coverage must be treated as satisfied');
+});
+
+test('findSatisfyingCommitOnMain: no queuedAt on the job → [] without querying git', async () => {
+  const projectCwd = path.join(tmpHome, 'proj-no-queued-at');
+  initRepoOnMain(projectCwd);
+  registerActiveProject(projectCwd, 'proj-no-queued-at-slug');
+  writePrd(projectCwd, '43-no-queued-at', [
+    '# Implementation notes',
+    'Edit `src/thing.js`.',
+  ].join('\n'));
+
+  const job = { slug: '43-no-queued-at', cwd: projectCwd };
+  const commits = await findSatisfyingCommitOnMain(job);
+  assert.deepEqual(commits, []);
 });
 
 test('computeLooksDone: non-git cwd → null without throwing (git-unavailable)', async () => {

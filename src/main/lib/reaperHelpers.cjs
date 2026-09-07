@@ -259,6 +259,60 @@ function selectReapableJobs(jobs, now, { pidAlive, grace, findLiveProcess } = {}
   return { reapable, warnings, recovered };
 }
 
+/**
+ * isAlreadySatisfiedOnMain(commits) → { sha, verdict, reason } | null
+ *
+ * Pure decision layer for the finish-protocol commit-guard's second,
+ * independently-evidenced route to 'completed' (PRD 1136). The commit-guard
+ * in scheduler.cjs parks a clean exit / no-commit / clean-tree run as
+ * `needs_review` ("finish protocol incomplete") because that shape is
+ * normally the strongest signal that nothing happened — but it is also
+ * exactly the shape a run produces when its PRD's work was ALREADY merged to
+ * main before the run dispatched (2026-09-06: 1133-reaper-must-verify-
+ * integration-before-completed and 1134-land-stranded-sm-job-branches, both
+ * false-negatived this way and then auto-fix-minted a redundant `-fix-`
+ * child against a codebase where the change was already present).
+ *
+ * Takes the already-git-queried list of commit SHAs (newest first, caller's
+ * job — see scheduler.cjs's findSatisfyingCommitOnMain) that are reachable
+ * from `main`, newer than the job's `queuedAt`, and touch the PRD's own
+ * declared paths. Returns the winning verdict naming the satisfying sha, or
+ * `null` when there is no such commit — the caller must then leave the
+ * existing 'finish protocol incomplete' → needs_review verdict untouched.
+ * This function never widens what counts as evidence; it only decides what
+ * to do once the caller's git query has already proven a satisfying commit
+ * exists, so it can never turn a genuine no-op into a false 'completed'.
+ */
+function isAlreadySatisfiedOnMain(commits) {
+  if (!Array.isArray(commits) || commits.length === 0) return null;
+  const sha = commits[0];
+  return {
+    sha,
+    verdict: 'already_satisfied_on_main',
+    reason: `already satisfied by ${sha} — a commit on main newer than this run's queuedAt already touches this PRD's declared paths`,
+  };
+}
+
+/**
+ * resolveCommitGuardOutcome(guardVerdict, satisfyingCommits) → verdict | null
+ *
+ * The full finalize-time decision this PRD adds: takes commitGuardVerdict's
+ * own output (scheduler.cjs) plus the already-git-queried satisfying-commit
+ * list (scheduler.cjs's findSatisfyingCommitOnMain) and decides which verdict
+ * actually wins. Only ever touches the 'silent_no_op' shape — a guardVerdict
+ * of null (no violation) or 'uncommitted_changes' (real dirt left behind)
+ * passes through completely untouched, so this can never weaken the
+ * uncommitted-changes guarantee PRD 1133 introduced. Pure — no I/O, no git —
+ * so the whole finalize decision is directly unit-testable without spawning
+ * a real job.
+ */
+function resolveCommitGuardOutcome(guardVerdict, satisfyingCommits) {
+  if (!guardVerdict || guardVerdict.verdict !== 'silent_no_op') return guardVerdict ?? null;
+  const satisfied = isAlreadySatisfiedOnMain(satisfyingCommits);
+  if (!satisfied) return guardVerdict;
+  return { verdict: satisfied.verdict, reason: satisfied.reason, satisfyingSha: satisfied.sha };
+}
+
 module.exports = {
   claudePidAlive,
   classifyRunOutcome,
@@ -268,4 +322,6 @@ module.exports = {
   findLiveProcessForJob,
   logHasOutput,
   resolvePidlessGateOutcome,
+  isAlreadySatisfiedOnMain,
+  resolveCommitGuardOutcome,
 };

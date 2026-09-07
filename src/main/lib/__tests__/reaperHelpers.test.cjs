@@ -23,6 +23,7 @@ const { spawn } = require('node:child_process');
 const {
   selectReapableJobs, mapOutcomeToGateOutcome, classifyRunOutcome,
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome,
+  isAlreadySatisfiedOnMain,
 } = require('../reaperHelpers.cjs');
 const { detectRateLimitInLog } = require('../rateLimitDetect.cjs');
 
@@ -320,4 +321,21 @@ test('resolvePidlessGateOutcome: output present + success → passed', () => {
 
 test('resolvePidlessGateOutcome: output present + failed → failed', () => {
   assert.strictEqual(resolvePidlessGateOutcome('failed', true), 'failed');
+});
+
+// isAlreadySatisfiedOnMain — PRD 1136. Pure decision layer: given the
+// already-git-queried list of satisfying commits, decide whether the
+// commit-guard's 'silent_no_op' verdict should be overridden to 'completed'.
+
+test('isAlreadySatisfiedOnMain: a satisfying commit → completed-shaped verdict naming the sha', () => {
+  const verdict = isAlreadySatisfiedOnMain(['5de4134abc123', 'a96de98def456']);
+  assert.strictEqual(verdict.sha, '5de4134abc123');
+  assert.strictEqual(verdict.verdict, 'already_satisfied_on_main');
+  assert.match(verdict.reason, /5de4134abc123/);
+});
+
+test('isAlreadySatisfiedOnMain: no satisfying commits → null — the gate must not be weakened into always-passing', () => {
+  assert.strictEqual(isAlreadySatisfiedOnMain([]), null);
+  assert.strictEqual(isAlreadySatisfiedOnMain(null), null);
+  assert.strictEqual(isAlreadySatisfiedOnMain(undefined), null);
 });

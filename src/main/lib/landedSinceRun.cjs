@@ -52,4 +52,44 @@ function landedSinceRun(cwd, sinceIso, paths, { timeoutMs = LANDED_SINCE_RUN_TIM
   });
 }
 
-module.exports = { landedSinceRun, LANDED_SINCE_RUN_TIMEOUT_MS };
+/**
+ * Commits reachable from `main` in `cwd` since `sinceIso` that touch any of
+ * `paths` — the evidence query behind PRD 1136's already-satisfied-on-main
+ * commit-guard exemption. Deliberately narrower than landedSinceRun in one
+ * axis (scoped to `main`, not `--all` — a commit on a stray branch is not
+ * "satisfied") and identical in the other (path-scoped, so an unrelated
+ * commit elsewhere in the repo is never credited to this job).
+ *
+ * Falls back from local `main` to `origin/main` when the local branch ref
+ * doesn't exist (a worktree/CI checkout that never checked main out
+ * locally) — never throws either way; git-unavailable, a non-repo cwd, an
+ * unresolvable ref, or an empty `paths` list all resolve to `[]`.
+ *
+ * @param {string} cwd
+ * @param {string} sinceIso
+ * @param {string[]} paths
+ * @param {{ timeoutMs?: number }} [opts]
+ * @returns {Promise<string[]>} full commit SHAs, newest first
+ */
+function landedOnMainSince(cwd, sinceIso, paths, { timeoutMs = LANDED_SINCE_RUN_TIMEOUT_MS } = {}) {
+  const runLog = (ref) => new Promise((resolve) => {
+    execFile(
+      'git',
+      ['-C', cwd, 'log', ref, `--since=${sinceIso}`, '--format=%H', '--', ...paths],
+      { timeout: timeoutMs, windowsHide: true },
+      (err, stdout) => {
+        if (err) { resolve(null); return; }
+        resolve(String(stdout || '').trim().split('\n').filter(Boolean));
+      },
+    );
+  });
+  return (async () => {
+    if (!cwd || !sinceIso || !Array.isArray(paths) || paths.length === 0) return [];
+    const viaLocal = await runLog('main');
+    if (viaLocal !== null) return viaLocal;
+    const viaRemote = await runLog('origin/main');
+    return viaRemote ?? [];
+  })();
+}
+
+module.exports = { landedSinceRun, landedOnMainSince, LANDED_SINCE_RUN_TIMEOUT_MS };

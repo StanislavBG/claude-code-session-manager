@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Session Manager — Usage Dashboard</title>
+<meta name="description" content="Admin-only usage and issue dashboard for Session Manager telemetry." />
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page-plane:      #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --border:         rgba(11,11,11,0.10);
+    --series-1:       #2a78d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page-plane:      #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --border:         rgba(255,255,255,0.10);
+      --series-1:       #3987e5;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page-plane:      #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --border:         rgba(255,255,255,0.10);
+    --series-1:       #3987e5;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page-plane);
+    color: var(--text-primary);
+  }
+  #app {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 24px 20px 64px;
+  }
+  .page-header h1 { font-size: 22px; margin: 0 0 4px; }
+  .muted { color: var(--text-secondary); font-size: 13px; }
+  .panel {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px;
+    margin-top: 20px;
+  }
+  .panel h2 { margin: 0 0 12px; font-size: 16px; }
+  .panel h3 { margin: 16px 0 8px; font-size: 13px; color: var(--text-secondary); }
+  .stat-row { display: flex; flex-wrap: wrap; gap: 12px; }
+  .stat-tile {
+    flex: 1 1 140px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px 14px;
+  }
+  .stat-tile__label { font-size: 12px; color: var(--text-secondary); }
+  .stat-tile__value { font-size: 24px; font-weight: 600; margin-top: 4px; }
+  .two-col { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 8px; }
+  .two-col > div { flex: 1 1 320px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--gridline); }
+  th { color: var(--text-secondary); font-weight: 500; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  code { font-size: 12px; }
+  .sparkbars {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 72px;
+    margin-bottom: 16px;
+  }
+  .bar {
+    flex: 1;
+    background: var(--series-1);
+    border-radius: 4px 4px 0 0;
+    min-width: 6px;
+  }
+  .state-card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 40px 24px;
+    margin-top: 40px;
+    text-align: center;
+  }
+  .state-card h2 { margin: 0 0 8px; font-size: 18px; }
+  .state-card p { margin: 4px 0; }
+</style>
+</head>
+<body>
+<div id="app" role="main">
+  <div class="state-card" data-state="loading"><h2>Loading…</h2></div>
+</div>
+<script src="dashboard.js"></script>
+</body>
+</html>

@@ -1,0 +1,100 @@
+{
+  "generatedAt": 1789060000,
+  "windowDays": 30,
+  "installs": {
+    "total": 214,
+    "active7": 96,
+    "active30": 168,
+    "new7": 12,
+    "byVersion": [
+      { "version": "0.81.0", "installs": 120, "active7": 60 },
+      { "version": "0.80.2", "installs": 70, "active7": 28 },
+      { "version": "0.79.1", "installs": 24, "active7": 8 }
+    ],
+    "byPlatform": [
+      { "platform": "darwin", "arch": "arm64", "installs": 130 },
+      { "platform": "linux", "arch": "x64", "installs": 68 },
+      { "platform": "darwin", "arch": "x64", "installs": 16 }
+    ],
+    "specs": { "medianTotalMemMb": 16384, "medianCpuCount": 8 }
+  },
+  "usage": {
+    "daily": [
+      { "date": "2026-08-12", "launches": 140, "sessions": 58, "epics": 21, "installsSeen": 62 },
+      { "date": "2026-08-13", "launches": 156, "sessions": 63, "epics": 24, "installsSeen": 67 },
+      { "date": "2026-08-14", "launches": 132, "sessions": 55, "epics": 19, "installsSeen": 59 },
+      { "date": "2026-08-15", "launches": 98, "sessions": 40, "epics": 14, "installsSeen": 45 },
+      { "date": "2026-08-16", "launches": 84, "sessions": 33, "epics": 11, "installsSeen": 39 },
+      { "date": "2026-08-17", "launches": 172, "sessions": 71, "epics": 27, "installsSeen": 74 },
+      { "date": "2026-08-18", "launches": 189, "sessions": 80, "epics": 30, "installsSeen": 81 },
+      { "date": "2026-08-19", "launches": 165, "sessions": 68, "epics": 22, "installsSeen": 70 },
+      { "date": "2026-08-20", "launches": 143, "sessions": 59, "epics": 20, "installsSeen": 64 },
+      { "date": "2026-08-21", "launches": 158, "sessions": 64, "epics": 23, "installsSeen": 68 }
+    ],
+    "byVersion": [
+      { "version": "0.81.0", "launches": 820, "sessions": 340 },
+      { "version": "0.80.2", "launches": 410, "sessions": 172 },
+      { "version": "0.79.1", "launches": 96, "sessions": 41 }
+    ]
+  },
+  "issues": [
+    {
+      "signature": "crash.oom|renderer",
+      "name": "crash.oom",
+      "msg": "Renderer process ran out of memory while restoring a large scrollback buffer",
+      "occurrences": 400,
+      "installsAffected": 1,
+      "firstSeen": 1788600000,
+      "lastSeen": 1789050000,
+      "versions": ["0.80.2"],
+      "topPlatform": "linux"
+    },
+    {
+      "signature": "ipc.timeout|scheduler-bridge",
+      "name": "IpcTimeoutError",
+      "msg": "IPC call scheduler:list-jobs did not respond within 8000ms — likely a stalled main-process event loop",
+      "occurrences": 12,
+      "installsAffected": 9,
+      "firstSeen": 1788400000,
+      "lastSeen": 1789040000,
+      "versions": ["0.81.0", "0.80.2"],
+      "topPlatform": "darwin"
+    },
+    {
+      "signature": "pty.spawn-failed|node-pty",
+      "name": "PtySpawnError",
+      "msg": "spawn ENOENT: unable to locate the bundled pty helper binary after an electron-rebuild mismatch",
+      "occurrences": 34,
+      "installsAffected": 6,
+      "firstSeen": 1788300000,
+      "lastSeen": 1788990000,
+      "versions": ["0.79.1"],
+      "topPlatform": "linux"
+    },
+    {
+      "signature": "config.write-failed|writeJson",
+      "name": "ConfigWriteError",
+      "msg": "EACCES: permission denied writing session-manager-operations/scheduler/state/queue.json",
+      "occurrences": 5,
+      "installsAffected": 3,
+      "firstSeen": 1788800000,
+      "lastSeen": 1789020000,
+      "versions": ["0.81.0"],
+      "topPlatform": "darwin"
+    }
+  ],
+  "errors": {
+    "byVersion": [
+      { "version": "0.81.0", "errors": 41, "warns": 130, "installsAffected": 22 },
+      { "version": "0.80.2", "errors": 460, "warns": 88, "installsAffected": 9 },
+      { "version": "0.79.1", "errors": 39, "warns": 21, "installsAffected": 6 }
+    ],
+    "daily": [
+      { "date": "2026-08-17", "errors": 44, "warns": 20 },
+      { "date": "2026-08-18", "errors": 61, "warns": 24 },
+      { "date": "2026-08-19", "errors": 38, "warns": 17 },
+      { "date": "2026-08-20", "errors": 29, "warns": 15 },
+      { "date": "2026-08-21", "errors": 33, "warns": 19 }
+    ]
+  }
+}

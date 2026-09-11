@@ -134,6 +134,7 @@ export default defineConfig({
       'src/main/__tests__/telemetrySettings.test.cjs',
       'src/main/__tests__/machineProfile.test.cjs',
       'src/main/__tests__/telemetryClient.test.cjs',
+      'src/main/__tests__/telemetryContract.test.cjs',
       'src/main/lib/__tests__/telemetryConsent.test.cjs',
       'src/main/__tests__/projectPages.test.cjs',
       'src/main/__tests__/projectHomeAdminRoutes.test.cjs',

@@ -407,6 +407,16 @@ async function check() {
   try {
     queueState = queueStore.readMergedSync();
     if (queueState.unreadable) throw new Error(queueState.unreadable);
+    // A torn scheduler-machine.json is now recovered rather than halting
+    // dispatch (queueStore.cjs's findLongestValidJsonPrefix) — but recovery
+    // happening at all means the file failed to parse moments ago, which is
+    // exactly the "machine-runtime file fails to parse" signal health must
+    // surface as non-GREEN even though scheduling itself kept running.
+    if (queueState.machineStateRecovered) {
+      status.issues.push(
+        `scheduler-machine.json failed to parse and was recovered (mode=${queueState.machineStateRecoveryMode}) — see logs scope=scheduler`
+      );
+    }
     const runningCount = Object.values(queueState.jobs || {}).filter(
       (j) => j.status === 'running'
     ).length;
@@ -440,7 +450,7 @@ async function check() {
       .map(([cwd]) => cwd);
 
     status.components.scheduler_queue = {
-      ok: !liveness.stalled && projectsPastThreshold.length === 0,
+      ok: !liveness.stalled && projectsPastThreshold.length === 0 && !queueState.machineStateRecovered,
       path: queuePath,
       jobs: Object.keys(queueState.jobs || {}).length,
       running: runningCount,
@@ -450,6 +460,8 @@ async function check() {
       byProject: computeProjectProblemCounts(queueState.jobs),
       perProjectStall,
       tickLiveness: liveness.reason,
+      machineStateRecovered: queueState.machineStateRecovered ?? false,
+      machineStateRecoveryMode: queueState.machineStateRecoveryMode ?? null,
       // Informational only (PRD 1085): current 1-min loadavg per core vs the
       // launch-gate threshold, so a "nothing is launching" report can be
       // read next to the reason without opening the app.

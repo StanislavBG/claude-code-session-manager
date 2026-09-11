@@ -1629,14 +1629,16 @@ function findStrandedInvestigations(jobs, now, maxMs, isAlive = claudePidAlive) 
 // (The single-file EMPTY_QUEUE/shapeQueue readers were retired with the
 // global queue.json — queueStore.cjs's merged readers own the shape now.)
 
-// Quarantine a corrupt shard alongside itself (once per process — the first
-// copy is the one that matters; later ticks would just overwrite it with the
-// same bytes) so a human can diff it against the .bak-* snapshots.
-let quarantined = false;
+// Quarantine a corrupt shard alongside itself (once per PATH, not once per
+// process — a module-level boolean let one file's tear consume the latch and
+// silently swallow every other file's `.corrupt-*` copy for the rest of the
+// process's life, observed live 2026-09-11) so a human can diff it against
+// the .bak-* snapshots.
+const quarantinedPaths = new Set();
 function flagUnreadable(state) {
   if (!state.unreadable) return state;
-  if (!quarantined && state.unreadablePath) {
-    quarantined = true;
+  if (state.unreadablePath && !quarantinedPaths.has(state.unreadablePath)) {
+    quarantinedPaths.add(state.unreadablePath);
     try {
       fs.copyFileSync(state.unreadablePath, `${state.unreadablePath}.corrupt-${Date.now()}`);
     } catch { /* best-effort: the read already failed, the copy may too */ }

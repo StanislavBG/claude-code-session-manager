@@ -1,0 +1,34 @@
+{
+  "config": {
+    "offsetMinutes": 15,
+    "defaultCwd": "/home/bilko/Projects/session-manager",
+    "firePolicy": "when-available",
+    "utilizationThreshold": 90,
+    "schemaVersion": 1,
+    "supervisor": {
+      "enabled": true,
+      "intervalMinutes": 15,
+      "maxConcurrentProbes": 2,
+      "probeStaleThresholdMinutes": 10
+    },
+    "concurrencyCap": 4,
+    "enabled": true,
+    "schedulerRunLogRetention": {
+      "enabled": true,
+      "policy": {
+        "maxAgeDays": 7,
+        "keepPerSlug": 1
+      }
+    }
+  },
+  "scheduledFor": null,
+  "lastRunAt": "2026-09-11T10:00:14.441Z",
+  "paused": null,
+  "launchBlocks": {},
+  "launchMitigations": {}
+}00:22.043Z",
+    "resumeAt": "2026-09-11T10:30:18.819Z"
+  },
+  "launchBlocks": {},
+  "launchMitigations": {}
+}

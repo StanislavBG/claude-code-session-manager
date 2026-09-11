@@ -32,6 +32,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
+const crypto = require('node:crypto');
 const { allProjectCwds, activeProjectCwds } = require('../../../scripts/lib/activeSessions.cjs');
 const { assertOpsWrite, resolveOpsRoot, OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 const { ScheduleJobSchema } = require('./scheduleJobSchema.cjs');
@@ -128,20 +129,58 @@ function queuePathOrSkip(cwd, context) {
   }
 }
 
+/**
+ * Unique tmp path PER CALL, not per process — matches the pid-ts-rand house
+ * style seen elsewhere in this tree (e.g. `admin-api.json.tmp-1065370-
+ * 1784409837234-vbz3fd`). A pid-only tmp name lets two overlapping writes in
+ * the SAME process share one tmp path: write A (long doc) is mid-flight when
+ * write B (short doc) opens the same tmp with O_TRUNC and completes first —
+ * A's still-buffered remainder then lands past B's EOF at its own advanced fd
+ * offset, and the rename publishes the interleaved bytes (rename is atomic;
+ * the shared tmp file never was). This is the exact shape of the
+ * `scheduler-machine.json.corrupt-*` tears observed 2026-09-07/10/11: a
+ * complete valid object followed by the orphaned tail of a longer one.
+ */
+function uniqueTmpPath(file) {
+  return `${file}.tmp-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+}
+
 function writeJsonAtomicSync(file, value) {
   assertOpsWrite(file, 'scheduler');
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2));
-  fs.renameSync(tmp, file);
+  const tmp = uniqueTmpPath(file);
+  try {
+    const fd = fs.openSync(tmp, 'w');
+    try {
+      fs.writeSync(fd, JSON.stringify(value, null, 2));
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    try { fs.unlinkSync(tmp); } catch { /* tmp may not exist, or rename already consumed it */ }
+    throw e;
+  }
 }
 
 async function writeJsonAtomic(file, value) {
   assertOpsWrite(file, 'scheduler');
   await fsp.mkdir(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  await fsp.writeFile(tmp, JSON.stringify(value, null, 2));
-  await fsp.rename(tmp, file);
+  const tmp = uniqueTmpPath(file);
+  try {
+    const handle = await fsp.open(tmp, 'w');
+    try {
+      await handle.writeFile(JSON.stringify(value, null, 2));
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fsp.rename(tmp, file);
+  } catch (e) {
+    await fsp.unlink(tmp).catch(() => {}); // tmp may not exist, or rename already consumed it
+    throw e;
+  }
 }
 
 // ---------- project-cwd enumeration (cached) ----------
@@ -176,8 +215,7 @@ function bustCwdCache() {
 
 // ---------- merged read ----------
 
-function shapeMachine(raw) {
-  const data = raw ? JSON.parse(raw) : {};
+function shapeMachine(data) {
   return {
     config: data.config || {},
     scheduledFor: data.scheduledFor ?? null,
@@ -189,6 +227,174 @@ function shapeMachine(raw) {
     launchBlocks: data.launchBlocks && typeof data.launchBlocks === 'object' ? data.launchBlocks : {},
     launchMitigations: data.launchMitigations && typeof data.launchMitigations === 'object' ? data.launchMitigations : {},
   };
+}
+
+// ---------- torn machine-state recovery ----------
+//
+// scheduler-machine.json has torn 4 times (Sep 7/10/11 `.corrupt-*`, plus a
+// `.bak-*`) from the pid-only tmp-path bug fixed above. A pre-existing tear
+// (from before this fix, or from any other future writer bug) must not keep
+// poisoning every read with `unreadable` — readMergedSync/readMerged recover
+// what they can and keep the engine dispatching instead.
+
+/**
+ * findLongestValidJsonPrefix(raw) → { value, prefixLength } for the LONGEST
+ * leading substring of `raw` that is itself a complete, valid JSON document,
+ * or null if none exists. Scans char-by-char tracking object/array nesting
+ * depth (skipping over string contents and escapes so a brace inside a
+ * string value never miscounts) and attempts JSON.parse every time depth
+ * returns to zero. This is exactly the shape of the observed corruption: a
+ * complete, valid object followed by the orphaned tail of a longer one — the
+ * tail never balances back to depth 0, so it can never win over the real
+ * prefix. O(n) in the length of raw.
+ */
+function findLongestValidJsonPrefix(raw) {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  let best = null;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') { inString = true; continue; }
+    if (ch === '{' || ch === '[') { depth++; continue; }
+    if (ch === '}' || ch === ']') {
+      depth--;
+      if (depth === 0) {
+        try {
+          best = { value: JSON.parse(raw.slice(0, i + 1)), prefixLength: i + 1 };
+        } catch { /* balanced at this boundary but not valid JSON — keep scanning */ }
+      }
+    }
+  }
+  return best;
+}
+
+// Machine state (config/paused/lastRunAt/...) has no owning project cwd of
+// its own — it's a Session-Manager runtime concern (see this file's header).
+// opsErrorLog.appendError requires a cwd to attribute the line to; this
+// project's own ops root is the natural home for a machine-level log entry,
+// mirroring scheduler.cjs's own `job.cwd || DEFAULT_PROJECT_CWD` fallback for
+// cwd-less machine errors (schedulerBatch.cjs's DEFAULT_PROJECT_CWD).
+const MACHINE_STATE_LOG_CWD = path.join(os.homedir(), 'Projects', 'session-manager');
+
+// The truncated tail in the real 2026-09-11 tear contained an orphaned
+// `resumeAt` fragment with no way to reconstruct the `paused` object it
+// belonged to (the fragment starts mid-string, missing its own `"paused":`
+// key and opening brace). That data is genuinely unrecoverable — but silently
+// dropping it is what makes recovery unsafe (an active pause could vanish).
+// This can't rebuild the lost value, so instead it makes the loss loud: any
+// discarded tail that still mentions paused/resumeAt gets called out in the
+// log line so a human verifies pause status instead of trusting recovery blindly.
+const PAUSED_HINT_RE = /"paused"|resumeAt/;
+
+function logMachineStateRecovery({ level, message, meta }) {
+  try {
+    const { appendError } = require('./opsErrorLog.cjs');
+    appendError({ cwd: MACHINE_STATE_LOG_CWD, scope: 'scheduler', level, message, meta });
+  } catch { /* durable logging must never block recovery */ }
+  console.error(`[queueStore] ${message}`);
+}
+
+/**
+ * buildMachineStateRecovery(raw, parseError) → the recovered plain object
+ * (never shaped yet) plus what to log. Pure — callers persist it and log it.
+ */
+function buildMachineStateRecovery(raw, parseError) {
+  const prefix = findLongestValidJsonPrefix(raw);
+  if (prefix) {
+    const trailing = raw.slice(prefix.prefixLength).trim();
+    const pausedHint = Boolean(trailing) && PAUSED_HINT_RE.test(trailing);
+    return {
+      value: prefix.value,
+      mode: 'prefix',
+      level: 'warn',
+      message:
+        `scheduler-machine.json was torn (${parseError?.message}) — recovered the longest valid `
+        + `JSON prefix (${prefix.prefixLength}/${raw.length} bytes)`
+        + (pausedHint
+          ? '; the discarded tail looks like it contained paused/resumeAt data that could not '
+            + 'be reconstructed — verify pause status manually'
+          : ''),
+      meta: { path: MACHINE_STATE_PATH, prefixLength: prefix.prefixLength, totalLength: raw.length, pausedHint },
+    };
+  }
+  // No valid JSON prefix at all: fall back to defaults (shapeMachine({}) —
+  // callers merge DEFAULT_CONFIG on top) rather than marking `unreadable`,
+  // which would halt tickQueue/runDueJobs machine-wide until a human notices.
+  return {
+    value: {},
+    mode: 'default',
+    level: 'error',
+    message:
+      `scheduler-machine.json unrecoverable (${parseError?.message}) — falling back to defaults `
+      + 'so dispatch does not silently halt',
+    meta: { path: MACHINE_STATE_PATH, totalLength: raw.length },
+  };
+}
+
+function recoverTornMachineStateSync(raw, parseError) {
+  const recovery = buildMachineStateRecovery(raw, parseError);
+  logMachineStateRecovery(recovery);
+  try {
+    writeJsonAtomicSync(MACHINE_STATE_PATH, recovery.value);
+  } catch (e) {
+    console.error(`[queueStore] failed to persist recovered machine state: ${e?.message}`);
+  }
+  return recovery;
+}
+
+async function recoverTornMachineState(raw, parseError) {
+  const recovery = buildMachineStateRecovery(raw, parseError);
+  logMachineStateRecovery(recovery);
+  try {
+    await writeJsonAtomic(MACHINE_STATE_PATH, recovery.value);
+  } catch (e) {
+    console.error(`[queueStore] failed to persist recovered machine state: ${e?.message}`);
+  }
+  return recovery;
+}
+
+/**
+ * loadMachineStateSync/loadMachineState → { shaped, recovered?, recoveryMode? }
+ * or { unreadable, unreadablePath } (ENOENT is neither — first-boot empty).
+ * A parse failure recovers instead of poisoning the whole merged read.
+ */
+function loadMachineStateSync() {
+  let raw;
+  try {
+    raw = fs.readFileSync(MACHINE_STATE_PATH, 'utf8');
+  } catch (e) {
+    if (e?.code === 'ENOENT') return {};
+    return { unreadable: `machine state unreadable: ${e?.message}`, unreadablePath: MACHINE_STATE_PATH };
+  }
+  try {
+    return { shaped: shapeMachine(JSON.parse(raw)) };
+  } catch (parseErr) {
+    const recovery = recoverTornMachineStateSync(raw, parseErr);
+    return { shaped: shapeMachine(recovery.value), recovered: true, recoveryMode: recovery.mode };
+  }
+}
+
+async function loadMachineState() {
+  let raw;
+  try {
+    raw = await fsp.readFile(MACHINE_STATE_PATH, 'utf8');
+  } catch (e) {
+    if (e?.code === 'ENOENT') return {};
+    return { unreadable: `machine state unreadable: ${e?.message}`, unreadablePath: MACHINE_STATE_PATH };
+  }
+  try {
+    return { shaped: shapeMachine(JSON.parse(raw)) };
+  } catch (parseErr) {
+    const recovery = await recoverTornMachineState(raw, parseErr);
+    return { shaped: shapeMachine(recovery.value), recovered: true, recoveryMode: recovery.mode };
+  }
 }
 
 /**
@@ -236,13 +442,16 @@ function shapeJobs(raw, file) {
 function readMergedSync(opts) {
   const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [] };
   const sourceCwds = [];
-  try {
-    Object.assign(out, shapeMachine(fs.readFileSync(MACHINE_STATE_PATH, 'utf8')));
-  } catch (e) {
-    if (e?.code !== 'ENOENT') {
-      out.unreadable = `machine state unreadable: ${e?.message}`;
-      out.unreadablePath = MACHINE_STATE_PATH;
+  const machine = loadMachineStateSync();
+  if (machine.shaped) {
+    Object.assign(out, machine.shaped);
+    if (machine.recovered) {
+      out.machineStateRecovered = true;
+      out.machineStateRecoveryMode = machine.recoveryMode;
     }
+  } else if (machine.unreadable) {
+    out.unreadable = machine.unreadable;
+    out.unreadablePath = machine.unreadablePath;
   }
   for (const cwd of stateCwds(opts)) {
     const file = queuePathOrSkip(cwd, 'read');
@@ -266,13 +475,16 @@ function readMergedSync(opts) {
 async function readMerged(opts) {
   const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [] };
   const sourceCwds = [];
-  try {
-    Object.assign(out, shapeMachine(await fsp.readFile(MACHINE_STATE_PATH, 'utf8')));
-  } catch (e) {
-    if (e?.code !== 'ENOENT') {
-      out.unreadable = `machine state unreadable: ${e?.message}`;
-      out.unreadablePath = MACHINE_STATE_PATH;
+  const machine = await loadMachineState();
+  if (machine.shaped) {
+    Object.assign(out, machine.shaped);
+    if (machine.recovered) {
+      out.machineStateRecovered = true;
+      out.machineStateRecoveryMode = machine.recoveryMode;
     }
+  } else if (machine.unreadable) {
+    out.unreadable = machine.unreadable;
+    out.unreadablePath = machine.unreadablePath;
   }
   for (const cwd of stateCwds(opts)) {
     const file = queuePathOrSkip(cwd, 'read');
@@ -420,4 +632,5 @@ module.exports = {
   migrateLegacyGlobalQueue,
   writeJsonAtomic,
   writeJsonAtomicSync,
+  findLongestValidJsonPrefix,
 };

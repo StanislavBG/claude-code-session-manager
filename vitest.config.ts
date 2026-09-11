@@ -218,6 +218,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-launch-failure.test.cjs',
       'src/main/__tests__/scheduler-already-satisfied-on-main.test.cjs',
       'src/main/lib/__tests__/telemetryBoot.test.cjs',
+      'src/main/lib/__tests__/telemetryBacklog.test.cjs',
       'src/main/lib/__tests__/crashTelemetry.test.cjs',
       'src/main/lib/__tests__/telemetryCounters.test.cjs',
       'src/main/lib/__tests__/telemetryCountersMetadataColumn.test.cjs',

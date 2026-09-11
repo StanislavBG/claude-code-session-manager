@@ -7411,6 +7411,27 @@ function isRescanCandidate(job) {
 }
 
 /**
+ * Cheap-guard for the 10-minute periodic reverify tick. MUST be expressed in
+ * terms of isRescanCandidate — not a hand-written status test — because the
+ * two drifted once already: the guard only looked for a `needs_review` row
+ * while isRescanCandidate had grown a `failed`/isFailedUnverifiedShaped arm,
+ * so reverifyNeedsReview's failed → needs_review looksDone branch was
+ * unreachable from the periodic path on any queue holding zero needs_review
+ * rows. A `failed` row with no run log sat wedged for five days with the
+ * self-heal that exists to inspect it never firing (only an app restart, via
+ * the unguarded boot call, could reach it). Reported 2026-09-10 from
+ * social-signals-trader.
+ *
+ * Cost: one extra classifyRunOutcome() log stat per `failed` row, and only
+ * for rows that reach isFailedUnverifiedShaped's log check — bounded by the
+ * failed-row count, and strictly cheaper than firing the whole pass (which
+ * does git fetches via computeLooksDone) on every tick.
+ */
+function shouldRunPeriodicReverify(jobs) {
+  return Array.isArray(jobs) && jobs.some((j) => isRescanCandidate(j));
+}
+
+/**
  * Self-healing pass over needs_review jobs. The verifier runs in-process, so a
  * fix to runVerify.cjs only takes effect for jobs verified AFTER an app
  * restart — jobs flagged by the old (buggy) verifier stay stuck in needs_review
@@ -8356,14 +8377,16 @@ async function init() {
     const s = readQueueSync();
     // Periodic self-heal: re-run the verifier over stale needs_review jobs so a
     // job whose work actually landed (committed in-window, no FAIL sentinel)
-    // auto-clears WITHOUT waiting for the next app restart. Cheap-guarded — the
-    // log scan only runs when something is actually flagged. Kill-switch:
+    // auto-clears WITHOUT waiting for the next app restart. Cheap-guarded by
+    // shouldRunPeriodicReverify, which reuses isRescanCandidate so the guard
+    // and the candidate filter can never drift apart again (they did once —
+    // see that function's comment). Kill-switch:
     // SM_REVERIFY_PERIODIC_DISABLE=1 (boot reverify above stays always-on).
     // reverifyNeedsReview's auto-fix loop is capped downstream by
     // MAX_CONCURRENT_INVESTIGATIONS (spawnInvestigation queues/early-returns
     // past it), so this interval firing cannot fan out investigations.
     if (process.env.SM_REVERIFY_PERIODIC_DISABLE !== '1') {
-      if (s.jobs.some((j) => j.status === 'needs_review')) {
+      if (shouldRunPeriodicReverify(s.jobs)) {
         reverifyNeedsReview().catch(() => {});
       }
       // A quarantined row only ever promotes to 'pending' through
@@ -9146,6 +9169,7 @@ module.exports = {
   memoryLimitedBatchSize,
   availableForJobs,
   reverifyNeedsReview,
+  shouldRunPeriodicReverify,
   isRescanCandidate,
   isFailedUnverifiedShaped,
   computeLooksDone,

@@ -209,6 +209,7 @@ export default defineConfig({
       'src/main/lib/__tests__/landedSinceRun.test.cjs',
       'src/main/lib/__tests__/prdDeclaredPaths.test.cjs',
       'src/main/__tests__/scheduler-looks-done.test.cjs',
+      'src/main/__tests__/scheduler-periodic-reverify-guard.test.cjs',
       'src/main/lib/__tests__/fixChainDepth.test.cjs',
       'src/main/lib/__tests__/launchFailure.test.cjs',
       'src/main/lib/__tests__/schedulerBatchLaunchHold.test.cjs',

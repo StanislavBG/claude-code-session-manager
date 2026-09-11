@@ -35,6 +35,7 @@ const { resolveEpicPrdWriteDir } = require('./prdLocations.cjs');
 const { assertOpsWrite } = require('./opsOwnership.cjs');
 const { appendAuditEvent } = require('./auditLog.cjs');
 const { mirrorEpicStatus, removeEpicMirror } = require('./epicStatusMirror.cjs');
+const telemetryCounters = require('./telemetryCounters.cjs');
 // Required as the module object (not destructured) so a test can
 // monkeypatch promptSessionSchema.assertValidPromptSession in place to
 // simulate a corrupted construction — the real construction below is
@@ -380,6 +381,7 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
 
     const prdDir = resolveEpicPrdWriteDir(cwd, epicId);
     fs.mkdirSync(prdDir, { recursive: true });
+    telemetryCounters.trackEpicCreate();
     return { epicId, prdDir, created: true };
   });
 }

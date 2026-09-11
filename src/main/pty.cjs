@@ -22,6 +22,7 @@ const { checkInsideHome } = require('./lib/insideHome.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const opsErrorLog = require('./lib/opsErrorLog.cjs');
 const { resolveEpicSpawnCwd } = require('./lib/epicSpawnCwd.cjs');
+const telemetryCounters = require('./lib/telemetryCounters.cjs');
 
 // Absolute path to the installed package root (src/main/ -> ../../), shown in
 // the remediation message so the user can cd there and rebuild.
@@ -200,6 +201,7 @@ class PtyManager {
       return { pid: null, cwd, reattached: false, error: String(err?.message || 'spawn-failed') };
     }
     console.log('[pty] spawned pid=', proc.pid, 'for tabId=', tabId);
+    telemetryCounters.trackSessionOpen();
 
     const spawnedAt = Date.now();
     let gotData = false;

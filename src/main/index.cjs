@@ -1019,12 +1019,30 @@ app.whenReady().then(async () => {
   }
 
   process.on('uncaughtException', (err) => {
+    try {
+      require('./lib/telemetryClient.cjs').reportError({ name: 'uncaughtException', msg: err?.message, stack: err?.stack });
+    } catch { /* telemetry must never break the existing handling below */ }
     logs.writeLine({ scope: 'main', level: 'error', message: 'uncaughtException', meta: { error: err?.message, stack: err?.stack } });
   });
   process.on('unhandledRejection', (reason) => {
     const r = reason instanceof Error ? { error: reason.message, stack: reason.stack } : { reason: String(reason) };
+    try {
+      require('./lib/telemetryClient.cjs').reportError({ name: 'unhandledRejection', msg: r.error || r.reason, stack: r.stack });
+    } catch { /* telemetry must never break the existing handling below */ }
     logs.writeLine({ scope: 'main', level: 'error', message: 'unhandledRejection', meta: r });
   });
+
+  // Telemetry boot sequence: flush('boot') always, flush('version-change')
+  // when detected, and the once-per-machine install.machine profile when due
+  // (version bump or 30-day liveness heartbeat). See telemetryBoot.cjs.
+  require('./lib/telemetryBoot.cjs')
+    .bootSequence({
+      appVersion: app.getVersion(),
+      installChannel: require('./lib/machineProfile.cjs').resolveInstallChannel({ appPath: app.getAppPath() }),
+    })
+    .catch((e) => {
+      logs.writeLine({ scope: 'telemetry', level: 'warn', message: 'bootSequence failed', meta: { error: e?.message } });
+    });
 
   // Inject Content-Security-Policy for all renderer responses.
   // frame-src / frame-ancestors locked to 'none' — the app is a top-level
@@ -1376,4 +1394,8 @@ app.on('before-quit', () => {
   // Best-effort flush of any pending OTEL spans. shutdown() has its own 2s
   // ceiling so a wedged exporter can't hold quit.
   otel.shutdown().catch(() => {});
+  // Best-effort delivery attempt for whatever telemetry accumulated this run.
+  // flush() only removes records it actually delivered — an interrupted or
+  // failed attempt leaves the queue file intact for the next boot's flush.
+  require('./lib/telemetryClient.cjs').flush('quit').catch(() => {});
 });

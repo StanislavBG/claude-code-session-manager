@@ -31,6 +31,13 @@
 'use strict';
 
 const { appendAuditEvent } = require('./auditLog.cjs');
+const telemetryCounters = require('./telemetryCounters.cjs');
+
+// A run genuinely finished when it leaves 'running' for one of these —
+// distinct from every other legal edge in LEGAL_TRANSITIONS (retries,
+// investigation probes, admin resets), which don't represent a completed
+// execution attempt.
+const FINISH_STATUSES = new Set(['completed', 'failed', 'skipped', 'needs_review']);
 
 // Bounded so queue.json (mutation cost, broadcast payload, pickNextBatch
 // scan) stays small — same rationale as lib/queueHistory.cjs's retention
@@ -183,6 +190,11 @@ function transitionJob(job, toStatus, { reason, source, allowAnyFrom = false } =
     source: source ?? null,
     cwd: job.cwd ?? null,
   });
+
+  if (from === 'running' && FINISH_STATUSES.has(toStatus)) {
+    telemetryCounters.trackSchedulerJobFinish({ status: toStatus });
+  }
+
   return true;
 }
 

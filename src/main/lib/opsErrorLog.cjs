@@ -44,31 +44,7 @@ function todayFile(cwd) {
   return path.join(logsDir(cwd), `errors-${yyyy}-${mm}-${dd}.jsonl`);
 }
 
-/**
- * Append one structured error line, tagged for tracing/analysis.
- *
- * @param {{
- *   cwd: string,           // required — which project's ops root owns this line
- *   scope: string,         // subsystem name, e.g. 'pty', 'chatRunner', 'voice'
- *   level?: string,        // default 'error'; 'warn' also accepted
- *   tabId?: string,        // claudeSessionId of the tab this error belongs to, if any
- *   epicId?: string,       // Epic id, if this error happened inside an Epic-backed run
- *   tags?: string[],       // extra caller-supplied tags, merged with the auto-derived ones
- *   message: string,
- *   meta?: unknown,
- * }} entry
- */
-function appendError({ cwd, scope, level = 'error', tabId, epicId, tags = [], message, meta }) {
-  if (!cwd || typeof cwd !== 'string') return; // no project to attribute this line to — skip
-  if (isEphemeralCwd(cwd)) {
-    // A worktree is torn down when its Epic/job ends and os.tmpdir() is
-    // scratch space either way — never materialize logs there. See
-    // ephemeralCwd.cjs / queueStore.cjs's projectStateDir for the sibling
-    // refusal on the scheduler namespace (verified live 2026-09-01 as a
-    // recreated /tmp/session-manager-operations/logs/ tree).
-    console.warn(`[opsErrorLog] appendError: refusing ephemeral cwd "${cwd}" (scope=${scope || 'unknown'})`);
-    return;
-  }
+function writeLocalLine({ cwd, scope, level, tabId, epicId, tags, message, meta }) {
   const file = todayFile(cwd);
   try {
     assertOpsWrite(file, 'logs');
@@ -102,6 +78,83 @@ function appendError({ cwd, scope, level = 'error', tabId, epicId, tags = [], me
     const fd = fs.openSync(file, 'a', 0o600);
     try { fs.writeSync(fd, JSON.stringify(line) + '\n'); } finally { fs.closeSync(fd); }
   } catch { /* best-effort — a logging failure must never break the caller */ }
+  return allTags;
+}
+
+/**
+ * Mirrors every appendError() line to telemetryClient — the single tap that
+ * covers pty/chatRunner/scheduler/logs.cjs/renderer in one place, since they
+ * all already funnel through appendError. Runs AFTER the local write and is
+ * independently wrapped so a throwing telemetry stub can never prevent or
+ * corrupt it. Reported regardless of the local ephemeral-cwd refusal — an
+ * Epic/job worktree still has a REAL project behind it, just not one that
+ * should ever have ops state materialized inside the worktree itself — so
+ * `cwd` is normalized through projectRootOf() before being handed to the
+ * client (which converts it to projectHash; the raw path never leaves this
+ * process).
+ *
+ * `message` is caller-supplied free text — it can legitimately contain a
+ * fragment of a chat/tool error that itself embeds a prompt, a file path, or
+ * other project-identifying content (opsErrorLog is a general-purpose error
+ * funnel, not a curated allowlist). It is therefore NEVER put on the wire's
+ * `msg`/`name` (which only get path-level redaction upstream) — it travels
+ * under a literal `message` key inside `context`/`fields`, which
+ * telemetryClient's redactDeep unconditionally rewrites to `[redacted]`
+ * (REDACT_KEY matches the key name, not its content). `msg`/`name` carry only
+ * `scope`, a small closed vocabulary of subsystem names — structural, never
+ * free text.
+ */
+function reportToTelemetry({ cwd, scope, level, tabId, epicId, tags, message }) {
+  try {
+    const telemetryClient = require('./telemetryClient.cjs');
+    const { projectRootOf } = require('../../../scripts/lib/activeSessions.cjs');
+    const normalizedCwd = projectRootOf(cwd) || cwd;
+    const autoTags = [
+      `scope:${scope || 'unknown'}`,
+      ...(tabId ? [`tab:${tabId}`] : []),
+      ...(epicId ? [`epic:${epicId}`] : []),
+    ];
+    const allTags = Array.from(new Set([...autoTags, ...(tags || [])]));
+    const label = `opsError:${scope || 'unknown'}`;
+    const context = { scope: scope || 'unknown', tags: allTags, cwd: normalizedCwd, message };
+    if (level === 'warn') {
+      telemetryClient.logLine({ level: 'warn', msg: label, fields: context });
+    } else {
+      telemetryClient.reportError({ name: scope || 'opsError', msg: label, context });
+    }
+  } catch { /* telemetry must never break the caller — this is the sole error funnel */ }
+}
+
+/**
+ * Append one structured error line, tagged for tracing/analysis.
+ *
+ * @param {{
+ *   cwd: string,           // required — which project's ops root owns this line
+ *   scope: string,         // subsystem name, e.g. 'pty', 'chatRunner', 'voice'
+ *   level?: string,        // default 'error'; 'warn' also accepted
+ *   tabId?: string,        // claudeSessionId of the tab this error belongs to, if any
+ *   epicId?: string,       // Epic id, if this error happened inside an Epic-backed run
+ *   tags?: string[],       // extra caller-supplied tags, merged with the auto-derived ones
+ *   message: string,
+ *   meta?: unknown,
+ * }} entry
+ */
+function appendError({ cwd, scope, level = 'error', tabId, epicId, tags = [], message, meta }) {
+  if (!cwd || typeof cwd !== 'string') return; // no project to attribute this line to — skip
+
+  if (isEphemeralCwd(cwd)) {
+    // A worktree is torn down when its Epic/job ends and os.tmpdir() is
+    // scratch space either way — never materialize logs there. See
+    // ephemeralCwd.cjs / queueStore.cjs's projectStateDir for the sibling
+    // refusal on the scheduler namespace (verified live 2026-09-01 as a
+    // recreated /tmp/session-manager-operations/logs/ tree). The telemetry
+    // tap below still fires — this refusal is about the LOCAL write only.
+    console.warn(`[opsErrorLog] appendError: refusing ephemeral cwd "${cwd}" (scope=${scope || 'unknown'})`);
+  } else {
+    writeLocalLine({ cwd, scope, level, tabId, epicId, tags, message, meta });
+  }
+
+  reportToTelemetry({ cwd, scope, level, tabId, epicId, tags, message });
 }
 
 module.exports = { appendError, logsDir, todayFile };

@@ -26,6 +26,7 @@
 const { app, powerSaveBlocker, powerMonitor, crashReporter } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
+const { reportCrash } = require('./lib/crashTelemetry.cjs');
 
 let logs = null;
 let getPowerBlockerId = () => -1;
@@ -139,6 +140,7 @@ function checkPreviousRun() {
   try { prev = JSON.parse(fs.readFileSync(sentinelPath, 'utf8')); } catch { return; }
   if (!prev || prev.open !== true) return;
   const s = prev.lastSample;
+  const lastTop = s && Array.isArray(s.procs) ? [...s.procs].sort((a, b) => b.mb - a.mb).slice(0, 4).map((p) => `${p.type}:${p.mb}MB`) : undefined;
   logs?.writeLine({
     scope: 'crash-diag',
     level: 'error',
@@ -149,9 +151,22 @@ function checkPreviousRun() {
       lastSampleTs: s?.ts,
       lastTotalMb: s?.totalMb,
       lastMainRssMb: s?.main?.rssMb,
-      lastTop: s && Array.isArray(s.procs) ? [...s.procs].sort((a, b) => b.mb - a.mb).slice(0, 4).map((p) => `${p.type}:${p.mb}MB`) : undefined,
+      lastTop,
       powerBlockerHeldAtDeath: s?.powerBlockerHeld,
       hint: 'Check `journalctl -k | grep -i oom` around lastSampleTs to confirm the kernel OOM-killer.',
+    },
+  });
+  // The unclean-shutdown postmortem is the report most likely to be the ONLY
+  // thing ever received from a machine that just OOM-killed the app — the
+  // dying process couldn't write it itself. See crashTelemetry.cjs header.
+  reportCrash({
+    reason: 'unclean-shutdown',
+    meta: {
+      lastSampleTs: s?.ts,
+      lastTotalMb: s?.totalMb,
+      lastMainRssMb: s?.main?.rssMb,
+      lastTop,
+      powerBlockerHeldAtDeath: s?.powerBlockerHeld,
     },
   });
 }
@@ -167,6 +182,10 @@ function registerCrashHooks() {
       message: 'render-process-gone',
       meta: { reason: details?.reason, exitCode: details?.exitCode, lastTotalMb: lastSample?.totalMb },
     });
+    reportCrash({
+      reason: details?.reason || 'unknown',
+      meta: { type: 'render', exitCode: details?.exitCode, lastTotalMb: lastSample?.totalMb },
+    });
   });
 
   // GPU / Utility / Pepper / network-service child death.
@@ -179,6 +198,15 @@ function registerCrashHooks() {
         type: details?.type,
         name: details?.name || details?.serviceName,
         reason: details?.reason,
+        exitCode: details?.exitCode,
+        lastTotalMb: lastSample?.totalMb,
+      },
+    });
+    reportCrash({
+      reason: details?.reason || 'unknown',
+      meta: {
+        type: details?.type,
+        name: details?.name || details?.serviceName,
         exitCode: details?.exitCode,
         lastTotalMb: lastSample?.totalMb,
       },

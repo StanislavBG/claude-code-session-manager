@@ -63,6 +63,10 @@ const { seedSchedulerMcp } = require('./seedSchedulerMcp.cjs');
 const { getSeedStatus } = require('./seedStatus.cjs');
 const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
+const telemetrySettings = require('./lib/telemetrySettings.cjs');
+const telemetryClient = require('./lib/telemetryClient.cjs');
+const telemetryBacklog = require('./lib/telemetryBacklog.cjs');
+const telemetryConsent = require('./lib/telemetryConsent.cjs');
 const { registerHistoryAggregatorHandlers, finalizeClosedDays, refreshIntradayToday } = require('./historyAggregator.cjs');
 const runLogRetention = require('./lib/runLogRetention.cjs');
 const { registerHistoryDashboardHandlers } = require('./historyDashboard.cjs');
@@ -905,6 +909,23 @@ ipcMain.handle('otel:set-config', async (_e, cfg) => {
 });
 ipcMain.handle('otel:status', () => otel.status());
 ipcMain.handle('otel:config-path', () => otelSettings.storePath());
+
+// Product telemetry (bilko.run) — anonymous, on-by-default, opt-out consent
+// UX + inspector over the client PRDs above wired. Settings > Telemetry's
+// "Product telemetry" section is the sole UI surface for this; see
+// session-manager-operations/architecture/telemetry.md for the data model.
+ipcMain.handle('telemetry:get-config', async () => telemetrySettings.load());
+ipcMain.handle('telemetry:set-config', validated(schemas.telemetrySetConfig, async (cfg) => {
+  const saved = await telemetryConsent.applyConsentUpdate(cfg, { telemetrySettings, telemetryClient });
+  return { ok: true, config: saved, status: telemetryClient.status() };
+}));
+ipcMain.handle('telemetry:status', () => ({
+  ...telemetryClient.status(),
+  backlog: telemetryBacklog.lastRunSummary(),
+}));
+ipcMain.handle('telemetry:config-path', () => telemetrySettings.storePath());
+ipcMain.handle('telemetry:recent-records', () => telemetryClient.recentRecords());
+ipcMain.handle('telemetry:flush-now', () => telemetryClient.flush('manual'));
 
 // Diagnostic-only renderer heap snapshot. No-op unless SM_HEAP_SNAPSHOT=1 —
 // see heapSnapshot.cjs for why this stays off by default.

@@ -78,6 +78,13 @@ const RETENTION_MS = RETENTION_DAYS * 24 * 60 * 60 * 1000;
 const FILE_DATE_RE = /^errors-(\d{4})-(\d{2})-(\d{2})\.jsonl$/;
 const NEWLINE = 0x0a;
 
+/** Module-singleton cache of the most recent drainBacklog() summary, for the Settings inspector. */
+let lastSummary = null;
+
+function lastRunSummary() {
+  return lastSummary ? { ...lastSummary } : null;
+}
+
 function watermarksPath() {
   return path.join(os.homedir(), '.config', 'session-manager', 'telemetry-watermarks.json');
 }
@@ -453,6 +460,7 @@ async function drainBacklog({ now = Date.now(), limit = DEFAULT_LIMIT, deps: dep
     }
   }
 
+  lastSummary = { ...summary, ranAt: new Date(now).toISOString() };
   return summary;
 }
 
@@ -585,6 +593,7 @@ module.exports = {
   reconcileWatermarks,
   bootDrain,
   watermarksPath,
+  lastRunSummary,
   // exported for unit tests only
   _projectHashOf: projectHashOf,
   _recordIdFor: recordIdFor,

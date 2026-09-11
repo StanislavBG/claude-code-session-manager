@@ -975,6 +975,21 @@ const pluginsAbort = z.object({
   slug: z.string().regex(PLUGIN_SLUG_RE).min(1).max(128),
 }).passthrough();
 
+// ──────────────────────────────────────────── Product telemetry (bilko.run)
+// Mirrors telemetrySettings.cjs's own isValid() shape — the renderer always
+// round-trips a full config object it got from telemetry:get-config, same
+// pattern as otel:set-config / OtelConfig.
+const telemetrySetConfig = z.object({
+  enabled: z.boolean(),
+  installId: z.string().max(200),
+  endpoint: z.string().min(1).max(2048),
+  noticeAckedAt: z.string().max(64).nullable(),
+  lastMachineReportAt: z.string().max(64).nullable(),
+  lastMachineReportVersion: z.string().max(64),
+  lastDailyFlushAt: z.string().max(64).nullable(),
+  schemaVersion: z.literal(1),
+});
+
 /**
  * Wrap an IPC handler with schema validation. Returns a new handler that
  * parses the payload before calling the original. On invalid payload throws
@@ -1093,6 +1108,7 @@ module.exports = {
     agentsSavePersona,
     agentsGetPersonaBody,
     delegationReadinessCwd,
+    telemetrySetConfig,
   },
   validated,
 };

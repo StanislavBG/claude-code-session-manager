@@ -183,6 +183,14 @@ contextBridge.exposeInMainWorld('api', {
     status: () => ipcRenderer.invoke('otel:status'),
     configPath: () => ipcRenderer.invoke('otel:config-path'),
   },
+  telemetry: {
+    getConfig: () => ipcRenderer.invoke('telemetry:get-config'),
+    setConfig: (cfg) => ipcRenderer.invoke('telemetry:set-config', cfg),
+    status: () => ipcRenderer.invoke('telemetry:status'),
+    configPath: () => ipcRenderer.invoke('telemetry:config-path'),
+    recentRecords: () => ipcRenderer.invoke('telemetry:recent-records'),
+    flushNow: () => ipcRenderer.invoke('telemetry:flush-now'),
+  },
   // Diagnostic only — no handler is registered unless the main process was
   // launched with SM_HEAP_SNAPSHOT=1, so this rejects by default.
   diagnostics: {

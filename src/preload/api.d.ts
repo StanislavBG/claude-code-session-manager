@@ -415,6 +415,70 @@ export interface OtelSetConfigResult {
   status: OtelStatus;
 }
 
+// Product telemetry (bilko.run) — anonymous, on-by-default, opt-out. See
+// session-manager-operations/architecture/telemetry.md for the data model.
+export interface TelemetryConfig {
+  enabled: boolean;
+  installId: string;
+  endpoint: string;
+  noticeAckedAt: string | null;
+  lastMachineReportAt: string | null;
+  lastMachineReportVersion: string;
+  lastDailyFlushAt: string | null;
+  schemaVersion: 1;
+}
+
+export interface TelemetryLastError {
+  status: number;
+  message: string;
+  at: number;
+}
+
+export interface TelemetryBacklogSummary {
+  projectsScanned: number;
+  filesScanned: number;
+  linesEnqueued: number;
+  linesConfirmed: number;
+  linesSkipped: number;
+  filesCompleted: number;
+  watermarksRewound: number;
+  reason: string;
+  ranAt: string;
+}
+
+export interface TelemetryStatus {
+  pendingCount: number;
+  sentCount: number;
+  dedupedAppends: number;
+  evictedCount: number;
+  disabledForProcess: boolean;
+  consecutiveFailures: number;
+  backoffUntil: number;
+  profileBuildCount: number;
+  lastError: TelemetryLastError | null;
+  lastFlushAt: number | null;
+  lastFlushReason: string | null;
+  backlog: TelemetryBacklogSummary | null;
+}
+
+export interface TelemetrySetConfigResult {
+  ok: boolean;
+  config: TelemetryConfig;
+  status: TelemetryStatus;
+}
+
+export interface TelemetryRecentRecord {
+  recordId: string;
+  channel: 'event' | 'log' | 'error';
+  wire: Record<string, unknown>;
+}
+
+export interface TelemetryFlushResult {
+  sent: string[];
+  failed: string[];
+  reason: string;
+}
+
 export type ScheduleFirePolicy = 'manual' | 'on-reset' | 'when-available';
 
 export interface ScheduleConfig {
@@ -1608,6 +1672,14 @@ export interface SessionManagerAPI {
     setConfig: (cfg: OtelConfig) => Promise<OtelSetConfigResult>;
     status: () => Promise<OtelStatus>;
     configPath: () => Promise<string>;
+  };
+  telemetry: {
+    getConfig: () => Promise<TelemetryConfig>;
+    setConfig: (cfg: TelemetryConfig) => Promise<TelemetrySetConfigResult>;
+    status: () => Promise<TelemetryStatus>;
+    configPath: () => Promise<string>;
+    recentRecords: () => Promise<TelemetryRecentRecord[]>;
+    flushNow: () => Promise<TelemetryFlushResult>;
   };
   diagnostics: {
     /** Rejects unless the main process has SM_HEAP_SNAPSHOT=1 set. */

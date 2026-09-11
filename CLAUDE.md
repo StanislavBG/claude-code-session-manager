@@ -119,13 +119,12 @@ Full list + the incident behind each: [`conventions.md`](session-manager-operati
 - **No CommonJS in renderer, no ES modules in main** — `.cjs` for main/preload bypasses `type: module`.
 - **No backwards-compat shims** — single-author project; just rename and refactor.
 - **Privacy invariant**: `RecordingStatus` MUST be mounted on the TOP z-ladder rung whenever `isRecording === true`.
-- **One global z-ladder, `lib/zLayers.ts`** — values are class-name string literals, never interpolated
-  (Tailwind JIT scans source text). Guarded by `lib/__tests__/zLayers.test.ts`.
+- **One global z-ladder, `lib/zLayers.ts`** — values are class-name literals, never interpolated (Tailwind JIT).
+- **Telemetry is anonymous, on by default, opt-out** (`SM_TELEMETRY=0`) — see [telemetry.md](session-manager-operations/architecture/telemetry.md).
 - **No per-OS UI chrome** — native frame on every platform; no layering branches on `process.platform`.
 - **Toast is the user-facing error channel** — `useToast().show('error', msg)`; never swallow errors.
 - **Renderer stores are islands** — no cross-store subscription; compose selectors per component.
-- **`--model` must be pinned explicitly** on every `claude -p` / `claude --print` call site. Unpinned calls
-  inherit a drifting CLI default and silently multiply automation cost.
+- **`--model` must be pinned explicitly** on every `claude -p`/`claude --print` call site — unpinned drifts cost.
 
 ## Avoid
 

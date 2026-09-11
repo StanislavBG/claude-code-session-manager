@@ -742,3 +742,69 @@ test('the default path uses global fetch when no injection is made', async () =>
   expect(globalFetch).toHaveBeenCalledTimes(1);
   client.shutdown();
 });
+
+// ─── status(): lastError / lastFlushAt / lastFlushReason (PRD 1142) ──────
+
+test('status() exposes the last error and clears it on a subsequent successful flush', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  vi.useFakeTimers();
+  await client.track('evt', { a: 1 });
+  client._setFetchImpl(fetchStub(async () => statusResponse(500)));
+  await client.flush('manual');
+  let st = client.status();
+  expect(st.lastError).toEqual(expect.objectContaining({ status: 500, message: 'HTTP 500' }));
+  expect(st.lastFlushAt).toBeGreaterThan(0);
+  expect(st.lastFlushReason).toBe('manual');
+
+  // Past the backoff window this failure armed, so the next flush actually attempts delivery.
+  vi.advanceTimersByTime(6 * 60 * 1000 + 1000);
+  client._setFetchImpl(fetchStub(async () => okResponse()));
+  await client.flush('boot');
+  st = client.status();
+  expect(st.lastError).toBeNull();
+  expect(st.lastFlushReason).toBe('boot');
+  client.shutdown();
+});
+
+test('status() reports a network error (fetch throw / status 0) with a plain-language message', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  await client.track('evt', { a: 1 });
+  client._setFetchImpl(vi.fn(async () => { throw new Error('ECONNREFUSED'); }));
+  await client.flush('manual');
+  const st = client.status();
+  expect(st.lastError).toEqual(expect.objectContaining({ status: 0, message: 'network error' }));
+  client.shutdown();
+});
+
+// ─── clearQueue (opt-out side effect, PRD 1142) ──────────────────────────
+
+test('clearQueue() empties the in-memory queue and truncates the on-disk queue file', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  await client.track('evt', { a: 1 });
+  await client.track('evt', { a: 2 });
+  expect(client.status().pendingCount).toBe(2);
+
+  await client.clearQueue();
+  expect(client.status().pendingCount).toBe(0);
+  const raw = await fsp.readFile(client.queuePath(), 'utf8');
+  expect(raw.trim()).toBe('');
+  client.shutdown();
+});
+
+test('clearQueue() never touches telemetry-sent.json', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  client._setFetchImpl(fetchStub(async () => okResponse()));
+  await client.track('evt', { a: 1 });
+  await client.flush('manual');
+  const sentBefore = await fsp.readFile(client.sentPath(), 'utf8');
+
+  await client.track('evt', { a: 2 });
+  await client.clearQueue();
+  const sentAfter = await fsp.readFile(client.sentPath(), 'utf8');
+  expect(sentAfter).toBe(sentBefore);
+  client.shutdown();
+});

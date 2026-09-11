@@ -596,3 +596,25 @@ test('drainBacklog resolves (never rejects) when readdir fails, telemetryClient 
   expect(summary.projectsScanned).toBe(1);
   expect(summary.filesScanned).toBe(0); // readdirSync throws -> no files found, no throw
 });
+
+// ─── lastRunSummary (Settings inspector, PRD 1142) ──────────────────────
+
+test('lastRunSummary() is null before any drain, then reflects the most recent drainBacklog() call including watermarksRewound', async () => {
+  const home = await mkHome();
+  const project = await mkProject('last-run-summary');
+  const { telemetryClient, config } = freshTelemetry(home);
+  telemetryClient._setFetchImpl(okAlways());
+  const backlog = reloadBacklog();
+  expect(backlog.lastRunSummary()).toBeNull();
+
+  writeErrorsFile(project, recentDateStr(), [errLine(1), errLine(2)]);
+  const deps = makeDeps({ home, telemetryClient, config, tabCwds: [project] });
+  const summary = await backlog.drainBacklog({ now: Date.now(), deps, reason: 'boot' });
+
+  const last = backlog.lastRunSummary();
+  expect(last).not.toBeNull();
+  expect(last.reason).toBe('boot');
+  expect(last.linesEnqueued).toBe(summary.linesEnqueued);
+  expect(last.watermarksRewound).toBe(summary.watermarksRewound);
+  expect(typeof last.ranAt).toBe('string');
+});

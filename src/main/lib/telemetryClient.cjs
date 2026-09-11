@@ -83,6 +83,9 @@ const S = {
   errSeen: new Map(),
   dailyTimer: null,
   flushChain: Promise.resolve(),
+  lastError: null,
+  lastFlushAt: null,
+  lastFlushReason: null,
 };
 
 function queuePath() {
@@ -493,16 +496,22 @@ async function sendBatch(channel, wireBatch) {
   }
 }
 
+function describeFailureStatus(status) {
+  return status === 0 ? 'network error' : `HTTP ${status}`;
+}
+
 function applyFailureBackoff(status) {
   if (status === 429 || status === 0 || status >= 500) {
     S.consecutiveFailures += 1;
     const ms = Math.min(BACKOFF_BASE_MS * (2 ** (S.consecutiveFailures - 1)), BACKOFF_MAX_MS);
     S.backoffUntil = Date.now() + ms;
+    S.lastError = { status, message: describeFailureStatus(status), at: Date.now() };
     return;
   }
   if (status >= 400 && status < 500) {
     // Malformed-contract circuit breaker (includes 401) — not retried.
     S.disabledForProcess = true;
+    S.lastError = { status, message: describeFailureStatus(status), at: Date.now() };
   }
 }
 
@@ -543,6 +552,7 @@ async function flushImpl(reason) {
         if (res.ok) {
           S.consecutiveFailures = 0;
           S.backoffUntil = 0;
+          S.lastError = null;
           for (const r of batch) {
             removeFromQueue(r.recordId);
             addToSent(r.recordId);
@@ -564,6 +574,8 @@ async function flushImpl(reason) {
       S.settings = await telemetrySettings.save({ ...S.settings, lastDailyFlushAt: new Date().toISOString() });
     }
   } catch { /* fail-inert */ }
+  S.lastFlushAt = Date.now();
+  S.lastFlushReason = safeReason;
   return result;
 }
 
@@ -584,11 +596,29 @@ function status() {
     consecutiveFailures: S.consecutiveFailures,
     backoffUntil: S.backoffUntil,
     profileBuildCount: S.profileBuildCount,
+    lastError: S.lastError,
+    lastFlushAt: S.lastFlushAt,
+    lastFlushReason: S.lastFlushReason,
   };
 }
 
 function recentRecords() {
   return S.recent.slice();
+}
+
+/**
+ * Opt-out side effect: drops every not-yet-sent record from disk + memory so
+ * a re-enable later never resends a payload that was only ever queued while
+ * the user was opted out. Does NOT touch telemetry-sent.json or the backlog
+ * watermarks — those describe history that already left the machine, and
+ * clearing them would make a re-enable resend it. Never throws.
+ */
+async function clearQueue() {
+  S.queue = [];
+  S.queueIds = new Set();
+  try {
+    await config.writeTextAtomic(queuePath(), '', { mode: 0o600 });
+  } catch { /* best-effort */ }
 }
 
 async function isPending(recordId) {
@@ -615,6 +645,7 @@ module.exports = {
   status,
   recentRecords,
   isPending,
+  clearQueue,
   queuePath,
   sentPath,
   _setFetchImpl,

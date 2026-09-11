@@ -1294,6 +1294,7 @@ function loadSchedulerState() {
     if (typeof s.backoffMs === 'number') backoffMs = s.backoffMs;
     if (typeof s.pauseClearedManuallyAt === 'number') pauseClearedManuallyAt = s.pauseClearedManuallyAt;
     if (typeof s.lastPollAt === 'number') lastPollAt = s.lastPollAt;
+    if (typeof s.failureStreakWarned === 'boolean') failureStreakWarned = s.failureStreakWarned;
   } catch { /* first boot or corrupt — start fresh */ }
 }
 
@@ -1313,6 +1314,7 @@ function persistSchedulerState() {
       pausedReason: null,
       pausedSince: null,
       pauseClearedManuallyAt,
+      failureStreakWarned,
     });
   } catch (e) {
     console.warn('[scheduler] failed to persist scheduler state', e?.message);
@@ -2413,6 +2415,48 @@ let firstFailureAt = null;
 let firstNon429FailureAt = null; // tracks only transient/config failures; 429s don't count toward network-pause threshold
 let lastFailureKind = null; // 'transient' | 'meter_rate_limited' | 'auth' | null
 let pauseClearedManuallyAt = null;
+// PRD: the usage-poller silent-failure-streak WARN is emitted once per streak,
+// not once per failure (57 failures must produce ONE opsErrorLog line, not 57).
+// Reset alongside consecutiveFailures everywhere that resets to 0.
+let failureStreakWarned = false;
+// Ceiling on pollLoop's exponential poll backoff (both the 'transient'/'config'
+// branch and the 'meter_rate_limited' branch below share this cap — a single
+// constant so the two never drift to different ceilings).
+const BACKOFF_MAX_MS = 480_000; // 8 minutes
+// Threshold past which a growing consecutiveFailures streak stops being normal
+// jitter and becomes worth a human's attention. health.cjs imports this so the
+// WARN and the `npm run health` non-GREEN trip at the exact same count.
+const FAILURE_STREAK_WARN_THRESHOLD = 5;
+
+/** Pure: exponential backoff with a cap, shared by every pollLoop failure branch. Exported for unit testing. */
+function nextBackoffMs(prevBackoffMs) {
+  return prevBackoffMs ? Math.min(prevBackoffMs * 2, BACKOFF_MAX_MS) : 30_000;
+}
+
+/**
+ * Pure: should this failure count trigger the one-time streak WARN? Exported
+ * for unit testing. `alreadyWarned` is the current streak's warned flag —
+ * true for every failure after the threshold-crossing one, so this returns
+ * true exactly once per streak.
+ */
+function shouldWarnFailureStreak(consecutiveFailures, alreadyWarned, threshold = FAILURE_STREAK_WARN_THRESHOLD) {
+  return consecutiveFailures >= threshold && !alreadyWarned;
+}
+
+/** Emits the one-time opsErrorLog WARN for a failure streak crossing the threshold, if not already warned this streak. */
+function warnFailureStreakIfNeeded() {
+  if (!shouldWarnFailureStreak(consecutiveFailures, failureStreakWarned)) return;
+  failureStreakWarned = true;
+  try {
+    appendError({
+      cwd: DEFAULT_PROJECT_CWD,
+      scope: 'scheduler',
+      level: 'warn',
+      message: `usage/rate-limit poller has failed ${consecutiveFailures} consecutive times (kind=${lastFailureKind}, backoffMs=${backoffMs}) — see ${SCHEDULER_STATE_PATH}`,
+      meta: { consecutiveFailures, backoffMs, lastFailureKind },
+    });
+  } catch { /* durable logging must never break the poll loop */ }
+}
 // PRD 1119: consecutive-rapid-rate-limit hard-pause tracking, keyed per slug.
 // See isCooldownSuppressed/nextRapidRateLimitCount below for the pure rules.
 const consecutiveRapidRateLimitsBySlug = new Map();
@@ -2785,6 +2829,7 @@ async function clearPause(source) {
     firstFailureAt = null;
     firstNon429FailureAt = null;
     lastFailureKind = null;
+    failureStreakWarned = false;
     persistSchedulerState();
   }
   if (wasPaused) await broadcast({ flush: true });
@@ -7077,6 +7122,7 @@ async function pollLoop() {
       firstFailureAt = null;
       firstNon429FailureAt = null;
       lastFailureKind = null;
+      failureStreakWarned = false;
       lastPollAt = Date.now();
       lastPollOk = true;
       persistSchedulerState();
@@ -7103,6 +7149,7 @@ async function pollLoop() {
       firstFailureAt = null;
       firstNon429FailureAt = null;
       lastFailureKind = null;
+      failureStreakWarned = false;
       lastPollAt = Date.now();
       lastPollOk = true;
       persistSchedulerState();
@@ -7120,13 +7167,23 @@ async function pollLoop() {
     } else if (r.kind === 'meter_rate_limited') {
       // Billing meter is itself being rate-limited. Treat as "utilization unknown but safe":
       // fire available jobs anyway at utilization=0 rather than pausing the queue.
+      // Still back off the POLL cadence itself (same curve/cap as the transient
+      // branch) and persist state every cycle — without this, a sustained 429
+      // streak hammered the already-rate-limited endpoint every POLL_INTERVAL_MS
+      // forever AND never wrote lastPollAt/consecutiveFailures back to
+      // scheduler-state.json, so the sidecar froze stale while the loop kept
+      // failing silently underneath it (the 57-consecutive-failure incident).
       lastPollAt = Date.now();
       lastPollOk = false;
       consecutiveFailures++;
       lastFailureKind = 'meter_rate_limited';
       // Don't update firstNon429FailureAt — 429s don't count toward the 30-min network-pause threshold.
+      backoffMs = nextBackoffMs(backoffMs);
+      backoffNextAt = Date.now() + backoffMs;
       cachedUtilization = 0; // assume safe; fire any pending work
-      console.log(`[scheduler] billing meter rate-limited (HTTP 429) — firing on heuristic (failure #${consecutiveFailures})`);
+      console.log(`[scheduler] billing meter rate-limited (HTTP 429) — firing on heuristic (failure #${consecutiveFailures}); retry in ${backoffMs / 1000}s`);
+      warnFailureStreakIfNeeded();
+      persistSchedulerState();
       const cur = await readQueue();
       await maybeLaunchWhenAvailable(cur);
       await broadcast();
@@ -7144,7 +7201,7 @@ async function pollLoop() {
         // transient or config — apply exponential backoff and count toward 30-min threshold.
         lastFailureKind = 'transient';
         if (!firstNon429FailureAt) firstNon429FailureAt = Date.now();
-        backoffMs = backoffMs ? Math.min(backoffMs * 2, 480_000) : 30_000;
+        backoffMs = nextBackoffMs(backoffMs);
         const totalNon429FailureMs = Date.now() - firstNon429FailureAt;
         console.log(`[scheduler] transient failure #${consecutiveFailures}: ${r.kind} ${r.message ?? ''}; retry in ${backoffMs / 1000}s`);
 
@@ -7158,6 +7215,7 @@ async function pollLoop() {
       }
 
       backoffNextAt = Date.now() + backoffMs;
+      warnFailureStreakIfNeeded();
       persistSchedulerState();
     }
   } catch (e) {
@@ -7168,8 +7226,9 @@ async function pollLoop() {
     lastFailureKind = 'transient';
     if (!firstFailureAt) firstFailureAt = Date.now();
     if (!firstNon429FailureAt) firstNon429FailureAt = Date.now();
-    backoffMs = backoffMs ? Math.min(backoffMs * 2, 480_000) : 30_000;
+    backoffMs = nextBackoffMs(backoffMs);
     backoffNextAt = Date.now() + backoffMs;
+    warnFailureStreakIfNeeded();
     persistSchedulerState();
   } finally {
     const delay = backoffMs || POLL_INTERVAL_MS;
@@ -9180,6 +9239,11 @@ module.exports = {
   init,
   ROOT,
   PRDS_DIR,
+  SCHEDULER_STATE_PATH,
+  BACKOFF_MAX_MS,
+  FAILURE_STREAK_WARN_THRESHOLD,
+  nextBackoffMs,
+  shouldWarnFailureStreak,
   healRefusalReason,
   writeQueue,
   reconcile,

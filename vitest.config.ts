@@ -123,6 +123,8 @@ export default defineConfig({
       'src/main/__tests__/promptSessionTranscript.test.cjs',
       'src/main/__tests__/scheduler-notify-originating-tab-transcript.test.cjs',
       'src/main/__tests__/opsErrorLog.test.cjs',
+      'src/main/__tests__/rateLimitPollerStreak.test.cjs',
+      'src/main/__tests__/health-usage-poller.test.cjs',
       'src/main/__tests__/agentLibrary.test.cjs',
       'src/main/__tests__/bilkoHost-deriveSlug.test.cjs',
       'src/main/__tests__/bilkoHostCore.test.cjs',

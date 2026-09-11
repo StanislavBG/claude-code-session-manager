@@ -16,7 +16,7 @@ const { checkDelegationReadiness } = require('./lib/delegationReadiness.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
 const { migratePrds } = require('./lib/prdMigration.cjs');
 const queueStore = require('./lib/queueStore.cjs');
-const { computeStallSummary } = require('./scheduler.cjs');
+const { computeStallSummary, SCHEDULER_STATE_PATH, FAILURE_STREAK_WARN_THRESHOLD } = require('./scheduler.cjs');
 const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
 const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
 
@@ -335,6 +335,61 @@ function evaluateEpicIndexHealth(cwds) {
   return { component: { ok: !anyOrphanRows, byProject }, issues };
 }
 
+// Pure evaluator over ~/.claude/session-manager/scheduler-state.json's parsed
+// content (the sidecar scheduler.cjs's pollLoop maintains for the billing
+// usage-meter / rate-limit-window poller — see rateLimitPollerStreak tests).
+// `state` null/missing means the poller has never run yet (fresh install) —
+// not a failure, matches evaluatePrdMigrationHealth's fail-open-on-absence
+// spirit. Kept separate from the fs-touching check() call site, same pattern
+// as every other evaluate* helper in this file.
+function evaluateUsagePollerHealth(state, threshold = FAILURE_STREAK_WARN_THRESHOLD) {
+  if (!state || typeof state !== 'object') return { ok: true, applicable: false };
+  const consecutiveFailures = typeof state.consecutiveFailures === 'number' ? state.consecutiveFailures : 0;
+  const backoffMs = typeof state.backoffMs === 'number' ? state.backoffMs : null;
+  const lastPollAt = typeof state.lastPollAt === 'number' ? state.lastPollAt : null;
+  // Trips at the SAME count as scheduler.cjs's shouldWarnFailureStreak
+  // (`consecutiveFailures >= threshold`) — the WARN and this non-GREEN must
+  // fire together, not one failure apart, or an operator sees the log line
+  // while the health dashboard still reads green.
+  const ok = consecutiveFailures < threshold;
+  return {
+    ok,
+    applicable: true,
+    consecutiveFailures,
+    backoffMs,
+    lastPollAt,
+    threshold,
+    ...(ok ? {} : {
+      message: `usage/rate-limit poller has ${consecutiveFailures} consecutive failures `
+        + `(threshold ${threshold}), backoffMs=${backoffMs} — see logs scope=scheduler`,
+    }),
+  };
+}
+
+// Reads + parses a scheduler-state.json-shaped sidecar at `statePath`,
+// classifying the outcome into exactly one of three shapes so the caller
+// never has to distinguish "absent" from "corrupt" itself:
+//   { missing: true }                — ENOENT: never run yet, not a failure
+//   { errorMessage: string }         — unreadable OR unparseable (corrupt)
+//   { state: object }                — parsed successfully
+// Takes an explicit path (rather than reading SCHEDULER_STATE_PATH directly)
+// so it's unit-testable against a real temp file instead of mocking global
+// fs or exercising the full (slow, machine-coupled) check().
+function loadUsagePollerState(statePath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(statePath, 'utf8');
+  } catch (e) {
+    if (e.code === 'ENOENT') return { missing: true };
+    return { errorMessage: `cannot read scheduler-state.json: ${e.message}` };
+  }
+  try {
+    return { state: JSON.parse(raw) };
+  } catch (parseErr) {
+    return { errorMessage: `scheduler-state.json is corrupt: ${parseErr.message}` };
+  }
+}
+
 async function check() {
   const start = Date.now();
   const status = {
@@ -507,6 +562,25 @@ async function check() {
       exists: false,
       error: e.code === 'ENOENT' ? 'not yet created' : e.message,
     };
+  }
+
+  // 3.5. Usage/rate-limit poller (scheduler.cjs pollLoop) — a distinct
+  // subsystem from scheduler_queue above: it can be alive (lastPollAt keeps
+  // advancing) while failing every single poll, silently, with nothing else
+  // surfacing it (the 57-consecutive-failure incident this check exists to
+  // catch). Missing state file means the poller hasn't run yet — not a
+  // failure. A CORRUPT file (the torn-write class fixed for the sibling
+  // scheduler-machine.json in f56bdc0) is NOT the same as missing — surfaced
+  // as non-GREEN rather than fail-open, via loadUsagePollerState below.
+  const loaded = loadUsagePollerState(SCHEDULER_STATE_PATH);
+  if (loaded.missing) {
+    status.components.usage_poller = { ok: true, applicable: false };
+  } else if (loaded.errorMessage) {
+    status.components.usage_poller = { ok: false, applicable: true, error: loaded.errorMessage };
+    status.issues.push(`Usage/rate-limit poller: ${loaded.errorMessage}`);
+  } else {
+    status.components.usage_poller = evaluateUsagePollerHealth(loaded.state);
+    if (status.components.usage_poller.message) status.issues.push(status.components.usage_poller.message);
   }
 
   // 4. Check PRDs directories — one per active project
@@ -700,7 +774,7 @@ async function check() {
   // Critical: nodejs, config dir, typescript, build artifact, test infrastructure.
   // Non-fatal: scheduler/transcripts dirs may not exist on fresh install.
   // Informational: app log age (shows if app is running, but not blocking).
-  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'prd_migration', 'claude_md_budget', 'delegation_chain'];
+  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'usage_poller', 'prd_migration', 'claude_md_budget', 'delegation_chain'];
   status.ok = criticalComponents.every((c) => status.components[c]?.ok !== false);
 
   status.elapsedMs = Date.now() - start;
@@ -728,6 +802,8 @@ module.exports = {
   evaluatePerProjectStall,
   parseClaudeMdBudget,
   evaluateClaudeMdBudget,
+  evaluateUsagePollerHealth,
+  loadUsagePollerState,
   TICK_STALL_THRESHOLD_MS,
   HEARTBEAT_STALE_MS,
 };

@@ -573,6 +573,26 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const setMode = useEpicTerminal((s) => s.setMode)
   const setAttached = useEpicTerminal((s) => s.setAttached)
 
+  // captureTerminalHandoffTurns previously ran ONLY on the explicit "Return
+  // to Chat" click — an Epic left open in Terminal mode (app closed while
+  // attached, or the user browses to a different Epic without ever toggling
+  // back) silently dropped those turns from the durable transcript. Periodic
+  // flush while attached, plus a flush on the effect's own cleanup (mode
+  // change, epicId change, or unmount — the closure still holds the OLD
+  // epicId/sessionId at that point), closes the gap without a capture on
+  // every keystroke. Best-effort, same posture as the handoff call site.
+  useEffect(() => {
+    if (mode !== 'terminal') return
+    const flush = () => {
+      void captureTerminalHandoffTurns(cwd, epicId, sessionId)
+    }
+    const interval = window.setInterval(flush, 30_000)
+    return () => {
+      window.clearInterval(interval)
+      flush()
+    }
+  }, [mode, cwd, epicId, sessionId])
+
   const [view, setView] = useState<ViewKey>('discussion')
   const prds = useScheduledPrds()
   const [markingCompleted, setMarkingCompleted] = useState(false)

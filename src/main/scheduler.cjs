@@ -3140,6 +3140,7 @@ async function notifyOriginatingTab(job, {
         await appendTranscriptTurn(job.cwd, epicIdForTranscript, {
           role: 'assistant',
           text: resultText || message,
+          eventId: `prd-result:${job.slug}:${job.runId || ''}`,
         });
       } catch (e) {
         console.error('[scheduler] notifyOriginatingTab transcript append error', job?.slug, e);
@@ -4049,6 +4050,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
 
   let prompt;
   let prdPath = null;
+  // Captured on a successful parsePrd() so the raw, untruncated PRD body can
+  // be recorded as a 'user' turn in the durable per-Epic transcript below —
+  // the durable store must see the actual prompt the executor ran, not just
+  // the scheduler's own short status chip (that's notifyOriginatingTab's job
+  // for the assistant side).
+  let parsedPrdMeta = null;
   if (resumeTarget) {
     // Resume mode (PRD 1111): a short deterministic preamble naming the
     // recorded dirty paths, NEVER the original PRD body — the resumed
@@ -4071,6 +4078,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // resolved — never concatenated here, so it can't end up ahead of the
     // digest in the composed prompt (PRD 992).
     prompt = parsed.body;
+    parsedPrdMeta = parsed;
   } catch (e) {
     // The project-scoped dir isn't the only place a PRD source can live — a
     // writer that hasn't migrated to prdLocations.cjs yet (or a not-yet-run
@@ -4084,6 +4092,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         const parsed = await parsePrd(fallbackPath);
         prompt = parsed.body;
         prdPath = fallbackPath;
+        parsedPrdMeta = parsed;
       } catch (e2) {
         // Found the dir a moment ago but the read still failed. Case A: the
         // source has since been archived — stale-skip as usual. Case B: it
@@ -4120,6 +4129,26 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     }
   }
   } // end resumeTarget ? preamble : normal-PRD-read
+
+  // Record the raw, untruncated PRD body as a 'user' turn before any digest/
+  // finish-protocol boilerplate is concatenated onto `prompt` below — mirrors
+  // notifyOriginatingTab's epicId resolution order (sourcePromptId, then
+  // sourceTabId, then job.epicId) so the same Epic's user/assistant turns
+  // land in the same transcript file. Best-effort: never blocks a spawn.
+  if (!resumeTarget && parsedPrdMeta) {
+    const epicIdForPromptTurn = parsedPrdMeta.sourcePromptId || parsedPrdMeta.sourceTabId || job.epicId || null;
+    if (epicIdForPromptTurn && cwd) {
+      try {
+        await promptSessionTranscript.appendTurn(cwd, epicIdForPromptTurn, {
+          role: 'user',
+          text: prompt,
+          eventId: `prd:${job.slug}`,
+        });
+      } catch (e) {
+        safeLog(`[scheduler] transcript append (PRD prompt) failed: ${e?.message ?? e}\n`);
+      }
+    }
+  }
 
   let contextDigestApplied = false;
   let originSessionId = null;

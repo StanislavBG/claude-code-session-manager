@@ -133,6 +133,7 @@ export default defineConfig({
       'src/main/__tests__/agentModelResolve.test.cjs',
       'src/main/__tests__/telemetrySettings.test.cjs',
       'src/main/__tests__/machineProfile.test.cjs',
+      'src/main/__tests__/telemetryClient.test.cjs',
       'src/main/__tests__/projectPages.test.cjs',
       'src/main/__tests__/projectHomeAdminRoutes.test.cjs',
       'src/main/__tests__/scheduler-verify-prd-path.test.cjs',

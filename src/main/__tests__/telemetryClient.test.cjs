@@ -1,0 +1,744 @@
+/**
+ * telemetryClient.test.cjs — unit tests for the telemetry egress client.
+ *
+ * Run: timeout 300 npx vitest run src/main/__tests__/telemetryClient.test.cjs
+ */
+'use strict';
+
+import { test, expect, beforeEach, afterEach, vi } from 'vitest';
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
+const crypto = require('node:crypto');
+
+const tmpDirs = [];
+let originalHome;
+let originalSmTelemetry;
+let originalSmTelemetryEndpoint;
+let originalSmBeaconKey;
+
+beforeEach(() => {
+  originalHome = process.env.HOME;
+  originalSmTelemetry = process.env.SM_TELEMETRY;
+  originalSmTelemetryEndpoint = process.env.SM_TELEMETRY_ENDPOINT;
+  originalSmBeaconKey = process.env.SM_BEACON_KEY;
+});
+
+afterEach(async () => {
+  if (originalHome !== undefined) process.env.HOME = originalHome;
+  if (originalSmTelemetry === undefined) delete process.env.SM_TELEMETRY; else process.env.SM_TELEMETRY = originalSmTelemetry;
+  if (originalSmTelemetryEndpoint === undefined) delete process.env.SM_TELEMETRY_ENDPOINT; else process.env.SM_TELEMETRY_ENDPOINT = originalSmTelemetryEndpoint;
+  if (originalSmBeaconKey === undefined) delete process.env.SM_BEACON_KEY; else process.env.SM_BEACON_KEY = originalSmBeaconKey;
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+  while (tmpDirs.length) {
+    const d = tmpDirs.pop();
+    await fsp.rm(d, { recursive: true, force: true });
+  }
+});
+
+async function mkHome() {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-telemetry-client-home-'));
+  tmpDirs.push(dir);
+  return dir;
+}
+
+function fakeProfile(overrides = {}) {
+  return {
+    appVersion: '0.81.0',
+    platform: 'linux',
+    arch: 'x64',
+    machineDigest: 'deadbeefcafe',
+    installChannel: 'dev',
+    ...overrides,
+  };
+}
+
+/**
+ * Loads a fresh telemetryClient module instance bound to `home`, with its
+ * config.cjs/telemetrySettings.cjs deps also reloaded (config.cjs computes
+ * its allowedRoots from os.homedir() at require time, so it must be
+ * reloaded whenever HOME changes — same pattern telemetrySettings.test.cjs
+ * uses). Injects a stub machine-profile builder so tests never spawn the
+ * real claude CLI probe.
+ */
+function freshClient(home, profileOverrides) {
+  process.env.HOME = home;
+  for (const p of ['../lib/telemetryClient.cjs', '../config.cjs', '../lib/telemetrySettings.cjs', '../lib/machineProfile.cjs']) {
+    const resolved = require.resolve(p);
+    delete require.cache[resolved];
+  }
+  const client = require('../lib/telemetryClient.cjs');
+  const profile = fakeProfile(profileOverrides);
+  client._setMachineProfileBuilder(async () => profile);
+  return client;
+}
+
+function fetchStub(responder) {
+  const calls = [];
+  const fn = vi.fn(async (url, opts) => {
+    const rec = { url, opts, body: JSON.parse(opts.body) };
+    calls.push(rec);
+    const res = await responder(rec, calls.length);
+    return res;
+  });
+  fn.calls = calls;
+  return fn;
+}
+
+function okResponse() {
+  return { ok: true, status: 200 };
+}
+
+function statusResponse(status) {
+  return { ok: false, status };
+}
+
+async function readQueueLines(client) {
+  try {
+    const raw = await fsp.readFile(client.queuePath(), 'utf8');
+    return raw.split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  } catch (e) {
+    if (e.code === 'ENOENT') return [];
+    throw e;
+  }
+}
+
+// ─── exports ────────────────────────────────────────────────────────────
+
+test('exports the full contract', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  for (const fn of ['track', 'logLine', 'reportError', 'flush', 'shutdown', 'status', 'recentRecords', 'isPending']) {
+    expect(typeof client[fn]).toBe('function');
+  }
+  client.shutdown();
+});
+
+// ─── never throws ──────────────────────────────────────────────────────
+
+test('ingress functions never throw on hostile inputs', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  client._setFetchImpl(fetchStub(async () => okResponse()));
+  const circular = { a: 1 };
+  circular.self = circular;
+  const huge = 'x'.repeat(2 * 1024 * 1024);
+
+  for (const bad of [null, undefined, circular, huge]) {
+    await expect(client.track(bad, bad)).resolves.toBeDefined();
+    await expect(client.logLine(bad)).resolves.toBeDefined();
+    await expect(client.reportError(bad)).resolves.toBeDefined();
+  }
+  client.shutdown();
+});
+
+// ─── disabled at ingress ───────────────────────────────────────────────
+
+test('when telemetry is disabled, ingress drops at the point of entry', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  const fetchFn = fetchStub(async () => okResponse());
+  client._setFetchImpl(fetchFn);
+  process.env.SM_TELEMETRY = '0';
+
+  await client.track('evt', { a: 1 });
+  await client.logLine({ level: 'info', msg: 'hi' });
+  await client.reportError({ name: 'E', msg: 'boom', stack: 'at x' });
+
+  expect(client.status().pendingCount).toBe(0);
+  expect(await readQueueLines(client)).toEqual([]);
+  expect(fetchFn).not.toHaveBeenCalled();
+  client.shutdown();
+});
+
+// ─── version stamp ─────────────────────────────────────────────────────
+
+test('every record on all three channels carries the four attribution fields', async () => {
+  const home = await mkHome();
+  const client = freshClient(home, { appVersion: '0.81.0', platform: 'linux', arch: 'x64', machineDigest: 'deadbeefcafe' });
+
+  await client.track('evt', { a: 1 });
+  await client.logLine({ level: 'info', msg: 'hi' });
+  await client.reportError({ name: 'E', msg: 'boom', stack: 'Error: boom\n    at fn (x.js:1:1)' });
+
+  const [eventRec, logRec, errorRec] = await readQueueLines(client);
+
+  for (const f of ['appVersion', 'platform', 'arch', 'machineDigest']) {
+    expect(eventRec.wire.props[f]).toBeTruthy();
+  }
+  expect(logRec.wire.version).toBe('0.81.0');
+  for (const f of ['platform', 'arch', 'machineDigest']) expect(logRec.wire.fields[f]).toBeTruthy();
+  expect(errorRec.wire.version).toBe('0.81.0');
+  for (const f of ['platform', 'arch', 'machineDigest']) expect(errorRec.wire.context[f]).toBeTruthy();
+
+  client.shutdown();
+});
+
+test('event channel nests all four attribution fields in props because funnel_events has no version column', async () => {
+  const home = await mkHome();
+  const client = freshClient(home, { appVersion: '0.81.0' });
+  await client.track('evt', { a: 1 });
+  const [rec] = await readQueueLines(client);
+  // Simulate exactly what the deployed INSERT persists: event, tool, metadata, session_id, visitor_id, path.
+  const persisted = {
+    event: rec.wire.name,
+    tool: rec.wire.app,
+    metadata: JSON.stringify(rec.wire.props),
+    session_id: rec.wire.session_id,
+    visitor_id: rec.wire.visitor_id,
+  };
+  const recoveredMeta = JSON.parse(persisted.metadata);
+  expect(recoveredMeta.appVersion).toBe('0.81.0');
+  expect(recoveredMeta.platform).toBeTruthy();
+  expect(recoveredMeta.arch).toBeTruthy();
+  expect(recoveredMeta.machineDigest).toBeTruthy();
+  client.shutdown();
+});
+
+test('log/error channels put version in the top-level field the route reads, and the rest in fields/context', async () => {
+  const home = await mkHome();
+  const client = freshClient(home, { appVersion: '0.81.0' });
+  await client.logLine({ level: 'warn', msg: 'careful' });
+  await client.reportError({ name: 'E', msg: 'boom', stack: 'Error: boom\n    at f (a.js:1:1)' });
+  const [logRec, errRec] = await readQueueLines(client);
+
+  // app_logs INSERT reads l.version directly (no join needed).
+  expect(logRec.wire.version).toBe('0.81.0');
+  const recoveredLogFields = JSON.parse(JSON.stringify(logRec.wire.fields));
+  expect(recoveredLogFields.platform).toBeTruthy();
+  expect(recoveredLogFields.arch).toBeTruthy();
+  expect(recoveredLogFields.machineDigest).toBeTruthy();
+
+  expect(errRec.wire.version).toBe('0.81.0');
+  const recoveredCtx = JSON.parse(JSON.stringify(errRec.wire.context));
+  expect(recoveredCtx.platform).toBeTruthy();
+  expect(recoveredCtx.arch).toBeTruthy();
+  expect(recoveredCtx.machineDigest).toBeTruthy();
+  client.shutdown();
+});
+
+// ─── profile resolved once ─────────────────────────────────────────────
+
+test('buildMachineProfile is invoked at most once across 100 ingress calls', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  let calls = 0;
+  client._setMachineProfileBuilder(async () => {
+    calls += 1;
+    return fakeProfile();
+  });
+  for (let i = 0; i < 100; i++) {
+    await client.track('evt', { i });
+  }
+  expect(calls).toBeLessThanOrEqual(1);
+  expect(client.status().profileBuildCount).toBeLessThanOrEqual(1);
+  client.shutdown();
+});
+
+// ─── attribution survives redaction + clamps ───────────────────────────
+
+test('attribution fields are exempt from redaction/clamping and arrive byte-identical, even when user content is truncated', async () => {
+  const home = await mkHome();
+  const client = freshClient(home, { appVersion: '0.81.0-exact', machineDigest: 'cafebabe0001' });
+  const bigProps = {};
+  for (let i = 0; i < 60; i++) bigProps[`k${i}`] = 'y'.repeat(500);
+  await client.track('evt', bigProps);
+  const [rec] = await readQueueLines(client);
+  expect(rec.wire.props.appVersion).toBe('0.81.0-exact');
+  expect(rec.wire.props.machineDigest).toBe('cafebabe0001');
+  expect(rec.wire.props._truncated).toBe(true);
+  client.shutdown();
+});
+
+// ─── queue is the accumulator, survives restart ────────────────────────
+
+test('a record survives a simulated process restart and is still pending', async () => {
+  const home = await mkHome();
+  const clientA = freshClient(home);
+  const { recordId } = await clientA.track('evt', { a: 1 });
+  expect(await clientA.isPending(recordId)).toBe(true);
+  clientA.shutdown();
+
+  const clientB = freshClient(home);
+  expect(await clientB.isPending(recordId)).toBe(true);
+  expect(clientB.status().pendingCount).toBe(1);
+  clientB.shutdown();
+});
+
+// ─── version frozen at creation ────────────────────────────────────────
+
+test('a record accumulated on one version and flushed after an upgrade still carries the original version', async () => {
+  const home = await mkHome();
+  const clientA = freshClient(home, { appVersion: '0.81.0' });
+  await clientA.track('evt', { a: 1 });
+  clientA.shutdown();
+
+  const clientB = freshClient(home, { appVersion: '0.82.0' });
+  const fetchFn = fetchStub(async () => okResponse());
+  clientB._setFetchImpl(fetchFn);
+  const result = await clientB.flush('manual');
+
+  expect(result.sent.length).toBe(1);
+  const sentBody = fetchFn.calls[0].body;
+  expect(sentBody.batch[0].props.appVersion).toBe('0.81.0');
+  clientB.shutdown();
+});
+
+// ─── recordId ───────────────────────────────────────────────────────────
+
+test('a caller-supplied recordId is preserved verbatim onto the wire', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  const result = await client.track('evt', { recordId: 'drainer-fixed-id-1', a: 1 });
+  expect(result.recordId).toBe('drainer-fixed-id-1');
+  const [rec] = await readQueueLines(client);
+  expect(rec.recordId).toBe('drainer-fixed-id-1');
+  expect(rec.wire.props.recordId).toBe('drainer-fixed-id-1');
+  client.shutdown();
+});
+
+// ─── idempotent append / over-traffic guard ────────────────────────────
+
+test('appending the same recordId three times across a restart results in exactly one POST', async () => {
+  const home = await mkHome();
+  const id = 'over-traffic-id-1';
+
+  const clientA = freshClient(home);
+  const r1 = await clientA.track('evt', { recordId: id });
+  const r2 = await clientA.track('evt', { recordId: id });
+  expect(r1.accepted).toBe(true);
+  expect(r2.accepted).toBe(false);
+  expect(clientA.status().dedupedAppends).toBe(1);
+
+  const fetchFnA = fetchStub(async () => okResponse());
+  clientA._setFetchImpl(fetchFnA);
+  await clientA.flush('manual');
+  expect(fetchFnA).toHaveBeenCalledTimes(1);
+  clientA.shutdown();
+
+  const clientB = freshClient(home);
+  const r3 = await clientB.track('evt', { recordId: id });
+  expect(r3.accepted).toBe(false);
+  expect(clientB.status().dedupedAppends).toBe(1);
+
+  const fetchFnB = fetchStub(async () => okResponse());
+  clientB._setFetchImpl(fetchFnB);
+  await clientB.flush('manual');
+  expect(fetchFnB).not.toHaveBeenCalled();
+  clientB.shutdown();
+});
+
+// ─── recently-sent set persistence ──────────────────────────────────────
+
+test('the recently-sent set persists across a restart', async () => {
+  const home = await mkHome();
+  const clientA = freshClient(home);
+  const { recordId } = await clientA.track('evt', { a: 1 });
+  const fetchFn = fetchStub(async () => okResponse());
+  clientA._setFetchImpl(fetchFn);
+  const result = await clientA.flush('manual');
+  expect(result.sent).toEqual([recordId]);
+  clientA.shutdown();
+
+  const raw = JSON.parse(fs.readFileSync(clientA.sentPath(), 'utf8'));
+  expect(raw.ids).toContain(recordId);
+
+  const clientB = freshClient(home);
+  expect(await clientB.isPending(recordId)).toBe(false);
+  const r2 = await clientB.track('evt', { recordId });
+  expect(r2.accepted).toBe(false);
+  clientB.shutdown();
+});
+
+test('the recently-sent set FIFO-evicts at its 5000 cap', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  const fetchFn = fetchStub(async () => okResponse());
+  client._setFetchImpl(fetchFn);
+
+  const firstId = 'sent-cap-0';
+  for (let i = 0; i < 5001; i++) {
+    await client.track('evt', { recordId: `sent-cap-${i}` });
+  }
+  await client.flush('manual');
+
+  const raw = JSON.parse(fs.readFileSync(client.sentPath(), 'utf8'));
+  expect(raw.ids.length).toBe(5000);
+  expect(raw.ids).not.toContain(firstId);
+
+  const reAppend = await client.track('evt', { recordId: firstId });
+  expect(reAppend.accepted).toBe(true);
+  client.shutdown();
+}, 60000);
+
+// ─── delivery confirmation ──────────────────────────────────────────────
+
+test('flush reports a partial failure precisely: batch 1 sent, batch 2 failed, batch 3 untouched', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  const ids = [];
+  for (let i = 0; i < 150; i++) {
+    const r = await client.track('evt', { recordId: `part-${i}`, i });
+    ids.push(r.recordId);
+  }
+  const batch1Ids = ids.slice(0, 50);
+  const batch2Ids = ids.slice(50, 100);
+  const batch3Ids = ids.slice(100, 150);
+
+  let call = 0;
+  const fetchFn = fetchStub(async () => {
+    call += 1;
+    if (call === 1) return okResponse();
+    return statusResponse(500);
+  });
+  client._setFetchImpl(fetchFn);
+
+  const result = await client.flush('manual');
+  expect(fetchFn).toHaveBeenCalledTimes(2);
+  expect(result.sent.sort()).toEqual([...batch1Ids].sort());
+  expect(result.failed.sort()).toEqual([...batch2Ids].sort());
+  for (const id of batch3Ids) {
+    expect(result.sent).not.toContain(id);
+    expect(result.failed).not.toContain(id);
+    expect(await client.isPending(id)).toBe(true);
+  }
+  client.shutdown();
+}, 30000);
+
+// ─── cadence ─────────────────────────────────────────────────────────────
+
+test('cadence: 23h of hourly ticks send nothing, the tick past 24h sends once and re-arms', async () => {
+  const home = await mkHome();
+
+  // Seed lastDailyFlushAt = now, simulating a boot flush that already ran.
+  process.env.HOME = home;
+  delete require.cache[require.resolve('../lib/telemetrySettings.cjs')];
+  delete require.cache[require.resolve('../config.cjs')];
+  const telemetrySettings = require('../lib/telemetrySettings.cjs');
+  const seedNow = Date.now();
+  await telemetrySettings.save({
+    ...telemetrySettings.DEFAULTS,
+    installId: crypto.randomUUID(),
+    enabled: true,
+    lastDailyFlushAt: new Date(seedNow).toISOString(),
+  });
+
+  vi.useFakeTimers();
+  vi.setSystemTime(seedNow);
+
+  const client = freshClient(home);
+  const fetchFn = fetchStub(async () => okResponse());
+  client._setFetchImpl(fetchFn);
+  await client.track('evt', { a: 1 });
+
+  await vi.advanceTimersByTimeAsync(23 * 60 * 60 * 1000);
+  expect(fetchFn).not.toHaveBeenCalled();
+
+  await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000);
+  client.shutdown();
+  // The hourly tick's flush() does real (unfaked) fs I/O that can still be
+  // in flight when advanceTimersByTimeAsync returns — settle it under real
+  // timers before asserting, so this test doesn't race the next test's HOME
+  // reset in afterEach.
+  vi.useRealTimers();
+  await new Promise((resolve) => { setTimeout(resolve, 200); });
+
+  expect(fetchFn).toHaveBeenCalledTimes(1);
+  const persisted = await telemetrySettings.load();
+  expect(telemetrySettings.isDailyFlushDue(persisted, Date.now())).toBe(false);
+}, 30000);
+
+// ─── mark-done + concurrent append ──────────────────────────────────────
+
+test('mark-done removes only sent records; a record appended mid-flight is not lost', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  const { recordId: firstId } = await client.track('evt', { a: 1 });
+
+  let midflightId = null;
+  const fetchFn = fetchStub(async () => {
+    const r = await client.track('evt', { recordId: 'midflight-1' });
+    midflightId = r.recordId;
+    return okResponse();
+  });
+  client._setFetchImpl(fetchFn);
+
+  const result = await client.flush('manual');
+  expect(result.sent).toEqual([firstId]);
+  expect(midflightId).toBe('midflight-1');
+  expect(await client.isPending('midflight-1')).toBe(true);
+
+  const lines = await readQueueLines(client);
+  expect(lines.map((l) => l.recordId)).toEqual(['midflight-1']);
+  client.shutdown();
+});
+
+// ─── batch shape ─────────────────────────────────────────────────────────
+
+test('120 queued records drain in 3 POSTs of <=50 within one flush', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  for (let i = 0; i < 120; i++) {
+    await client.track('evt', { recordId: `batch-${i}`, i });
+  }
+  const fetchFn = fetchStub(async () => okResponse());
+  client._setFetchImpl(fetchFn);
+  const result = await client.flush('manual');
+
+  expect(fetchFn).toHaveBeenCalledTimes(3);
+  expect(fetchFn.calls[0].body.batch.length).toBe(50);
+  expect(fetchFn.calls[1].body.batch.length).toBe(50);
+  expect(fetchFn.calls[2].body.batch.length).toBe(20);
+  expect(result.sent.length).toBe(120);
+  expect(client.status().pendingCount).toBe(0);
+  client.shutdown();
+}, 30000);
+
+// ─── field names match server contract exactly ──────────────────────────
+
+test('wire field names match server/routes/telemetry.ts exactly', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  await client.track('evt-name', { a: 1 });
+  await client.logLine({ level: 'warn', msg: 'm', fields: { b: 2 } });
+  await client.reportError({ name: 'E', msg: 'm', stack: 'Error: m\n    at f (a.js:1:1)', context: { c: 3 } });
+
+  const fetchFn = fetchStub(async () => okResponse());
+  client._setFetchImpl(fetchFn);
+  await client.flush('manual');
+
+  const eventCall = fetchFn.calls.find((c) => c.url.endsWith('/event'));
+  const logCall = fetchFn.calls.find((c) => c.url.endsWith('/log'));
+  const errorCall = fetchFn.calls.find((c) => c.url.endsWith('/error'));
+
+  expect(Object.keys(eventCall.body.batch[0]).sort()).toEqual(['app', 'name', 'props', 'session_id', 'visitor_id'].sort());
+  expect(Object.keys(logCall.body.batch[0]).sort()).toEqual(['app', 'version', 'level', 'msg', 'visitor_id', 'session_id', 'fields', 'ts'].sort());
+  expect(Object.keys(errorCall.body.batch[0]).sort()).toEqual(['app', 'version', 'name', 'msg', 'stack', 'url', 'ua', 'visitor_id', 'session_id', 'context', 'ts'].sort());
+  client.shutdown();
+});
+
+// ─── beacon auth header ──────────────────────────────────────────────────
+
+test('every request carries the X-SM-Beacon header with the resolved appVersion', async () => {
+  const home = await mkHome();
+  const client = freshClient(home, { appVersion: '0.81.0' });
+  await client.track('evt', { a: 1 });
+  const fetchFn = fetchStub(async () => okResponse());
+  client._setFetchImpl(fetchFn);
+  await client.flush('manual');
+  expect(fetchFn.calls[0].opts.headers['X-SM-Beacon']).toBe('session-manager/0.81.0');
+  expect(fetchFn.calls[0].opts.headers['X-SM-Beacon-Key']).toBeTruthy();
+  client.shutdown();
+});
+
+test('a 401 disables the client for the rest of the process instead of retrying forever', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  await client.track('evt', { a: 1 });
+  const fetchFn = fetchStub(async () => statusResponse(401));
+  client._setFetchImpl(fetchFn);
+
+  await client.flush('manual');
+  expect(client.status().disabledForProcess).toBe(true);
+
+  await client.flush('manual');
+  expect(fetchFn).toHaveBeenCalledTimes(1);
+  client.shutdown();
+});
+
+// ─── redaction ───────────────────────────────────────────────────────────
+
+test('redaction: homedir -> ~, absolute paths -> basename, REDACT_KEY keys -> [redacted], strings clamped', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  const longMsg = 'm'.repeat(600);
+  const longStack = 's'.repeat(20000);
+  await client.reportError({
+    name: 'E',
+    msg: longMsg,
+    stack: longStack,
+    context: {
+      token: 'super-secret-value',
+      note: `${home}/projects/app/file.js and /tmp/other/dir/leaf.txt`,
+    },
+  });
+  const [rec] = await readQueueLines(client);
+  expect(rec.wire.msg.length).toBeLessThanOrEqual(500);
+  expect(rec.wire.stack.length).toBeLessThanOrEqual(16000);
+  expect(rec.wire.context.token).toBe('[redacted]');
+  expect(rec.wire.context.note).not.toContain(home);
+  expect(rec.wire.context.note).toContain('~/projects/app/file.js');
+  expect(rec.wire.context.note).toContain('leaf.txt');
+  expect(rec.wire.context.note).not.toContain('/tmp/other/dir/leaf.txt');
+  client.shutdown();
+});
+
+// ─── cwd -> projectHash ──────────────────────────────────────────────────
+
+test('a project cwd is never sent verbatim; only projectHash is emitted', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  const cwd = '/home/bilko/Projects/super-secret-client-project';
+  await client.track('evt', { cwd, other: 'x' });
+  const [rec] = await readQueueLines(client);
+  const serialized = JSON.stringify(rec);
+  expect(serialized).not.toContain(cwd);
+  expect(rec.wire.props.projectHash).toMatch(/^[0-9a-f]{12}$/);
+  expect(rec.wire.props.cwd).toBeUndefined();
+  client.shutdown();
+});
+
+// ─── error dedup ─────────────────────────────────────────────────────────
+
+test('error de-duplication allows at most 3 identical signatures per 60s window', async () => {
+  const home = await mkHome();
+  vi.useFakeTimers();
+  const client = freshClient(home);
+  const errArgs = { name: 'BoomError', msg: 'x', stack: 'BoomError: x\n    at f (a.js:1:1)' };
+
+  const results = [];
+  for (let i = 0; i < 5; i++) {
+    results.push(await client.reportError(errArgs));
+  }
+  expect(results.filter((r) => r.accepted).length).toBe(3);
+  expect(client.status().pendingCount).toBe(3);
+
+  await vi.advanceTimersByTimeAsync(61 * 1000);
+  const after = await client.reportError(errArgs);
+  expect(after.accepted).toBe(true);
+
+  client.shutdown();
+  vi.useRealTimers();
+});
+
+// ─── queue cap + counters ────────────────────────────────────────────────
+
+test('queue file is capped at 5000 records with oldest-first eviction; status() reports evictedCount', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  for (let i = 0; i < 5010; i++) {
+    await client.track('evt', { recordId: `cap-${i}`, i });
+  }
+  const st = client.status();
+  expect(st.pendingCount).toBe(5000);
+  expect(st.evictedCount).toBe(10);
+  expect(await client.isPending('cap-0')).toBe(false);
+  expect(await client.isPending('cap-5009')).toBe(true);
+  const lines = await readQueueLines(client);
+  expect(lines.length).toBe(5000);
+  client.shutdown();
+}, 60000);
+
+test('dedupedAppends is visible on status()', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  await client.track('evt', { recordId: 'dd-1' });
+  await client.track('evt', { recordId: 'dd-1' });
+  await client.track('evt', { recordId: 'dd-1' });
+  expect(client.status().dedupedAppends).toBe(2);
+  client.shutdown();
+});
+
+// ─── failure backoff ─────────────────────────────────────────────────────
+
+test('backoff: consecutive 5xx/429 failures back off exponentially and leave the queue intact', async () => {
+  const home = await mkHome();
+  vi.useFakeTimers();
+  const client = freshClient(home);
+  await client.track('evt', { a: 1 });
+
+  const fetchFn = fetchStub(async () => statusResponse(500));
+  client._setFetchImpl(fetchFn);
+
+  const r1 = await client.flush('manual');
+  expect(r1.failed.length).toBe(1);
+  expect(client.status().pendingCount).toBe(1);
+  const backoff1 = client.status().backoffUntil - Date.now();
+  expect(backoff1).toBeGreaterThanOrEqual(60 * 1000 - 10);
+
+  // Still backed off: a flush attempted before the window elapses does nothing.
+  const r2 = await client.flush('manual');
+  expect(fetchFn).toHaveBeenCalledTimes(1);
+  expect(r2.sent).toEqual([]);
+  expect(r2.failed).toEqual([]);
+
+  await vi.advanceTimersByTimeAsync(backoff1 + 10);
+  await client.flush('manual');
+  expect(fetchFn).toHaveBeenCalledTimes(2);
+  const backoff2 = client.status().backoffUntil - Date.now();
+  expect(backoff2).toBeGreaterThan(backoff1);
+
+  client.shutdown();
+  vi.useRealTimers();
+}, 30000);
+
+test('backoff ceiling: exponential growth caps at 6h', async () => {
+  const home = await mkHome();
+  vi.useFakeTimers();
+  const client = freshClient(home);
+  await client.track('evt', { a: 1 });
+  client._setFetchImpl(fetchStub(async () => statusResponse(503)));
+
+  for (let i = 0; i < 12; i++) {
+    await client.flush('manual');
+    const remaining = client.status().backoffUntil - Date.now();
+    if (remaining > 0) await vi.advanceTimersByTimeAsync(remaining + 10);
+  }
+  expect(client.status().backoffUntil - Date.now()).toBeLessThanOrEqual(6 * 60 * 60 * 1000);
+
+  client.shutdown();
+  vi.useRealTimers();
+}, 30000);
+
+test('a non-429 4xx disables the client (malformed-contract circuit breaker), not backoff', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  await client.track('evt', { a: 1 });
+  client._setFetchImpl(fetchStub(async () => statusResponse(400)));
+  await client.flush('manual');
+  const st = client.status();
+  expect(st.disabledForProcess).toBe(true);
+  expect(st.pendingCount).toBe(1);
+  client.shutdown();
+});
+
+test('429 backs off rather than disabling', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  await client.track('evt', { a: 1 });
+  client._setFetchImpl(fetchStub(async () => statusResponse(429)));
+  await client.flush('manual');
+  const st = client.status();
+  expect(st.disabledForProcess).toBe(false);
+  expect(st.backoffUntil).toBeGreaterThan(Date.now() - 1);
+  client.shutdown();
+});
+
+// ─── recentRecords ring buffer ───────────────────────────────────────────
+
+test('recentRecords() is a bounded ring buffer of at most 20', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  for (let i = 0; i < 25; i++) {
+    await client.track('evt', { recordId: `ring-${i}`, i });
+  }
+  const recent = client.recentRecords();
+  expect(recent.length).toBe(20);
+  expect(recent[recent.length - 1].recordId).toBe('ring-24');
+  client.shutdown();
+});
+
+// ─── fetch injectability ─────────────────────────────────────────────────
+
+test('the default path uses global fetch when no injection is made', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  await client.track('evt', { a: 1 });
+  const globalFetch = vi.fn(async () => ({ ok: true, status: 200 }));
+  vi.stubGlobal('fetch', globalFetch);
+  await client.flush('manual');
+  expect(globalFetch).toHaveBeenCalledTimes(1);
+  client.shutdown();
+});

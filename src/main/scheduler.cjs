@@ -7698,13 +7698,32 @@ function isRescanCandidate(job) {
  * the unguarded boot call, could reach it). Reported 2026-09-10 from
  * social-signals-trader.
  *
- * Cost: one extra classifyRunOutcome() log stat per `failed` row, and only
- * for rows that reach isFailedUnverifiedShaped's log check — bounded by the
- * failed-row count, and strictly cheaper than firing the whole pass (which
- * does git fetches via computeLooksDone) on every tick.
+ * Reopened through a different door 2026-09-12 (starry-night-ships
+ * 231-saturn-record-and-docs / 243-neptune-kurama-mode): the guard above only
+ * covered isRescanCandidate (re-verification), but reverifyNeedsReview's auto-
+ * fix loop ALSO lives behind this same guard, and a `needs_review` row whose
+ * mechanical recovery already ran and failed (mechanicalRecoveryAttempted:
+ * true, verdict still 'worktree_integration_failed', not itself a
+ * RESCANNABLE_VERDICTS member) is invisible to isRescanCandidate — so the
+ * next rung (a fix-plan investigation via selectAutoFixTargets) never got a
+ * chance to fire either. Widened to OR in every live target of the recovery
+ * ladder the periodic pass actually drives (selectMechanicalRecoveryTarget /
+ * selectResumeRecoveryTarget / selectAutoFixTargets) so the guard can never
+ * again be narrower than the work reverifyNeedsReview performs.
+ *
+ * Cost: selectMechanicalRecoveryTarget/selectResumeRecoveryTarget are pure
+ * (no I/O). selectAutoFixTargets is called with an injected fixSlugExists
+ * that always returns false — cheap and deliberately over-inclusive (a false
+ * positive here just means one extra periodic pass, never a missed one) so
+ * this guard never pays selectAutoFixTargets's production fs.existsSync scan
+ * per tick. resolveRunId's IO only fires for rows missing job.runId, same as
+ * isRescanCandidate already incurs above.
  */
 function shouldRunPeriodicReverify(jobs) {
-  return Array.isArray(jobs) && jobs.some((j) => isRescanCandidate(j));
+  if (!Array.isArray(jobs)) return false;
+  if (jobs.some((j) => isRescanCandidate(j))) return true;
+  if (jobs.some((j) => selectMechanicalRecoveryTarget(j) || selectResumeRecoveryTarget(j))) return true;
+  return selectAutoFixTargets(jobs, { fixSlugExists: () => false }).length > 0;
 }
 
 // Default 24h, overridable via SM_STUCK_FAILED_ESCALATE_HOURS — same

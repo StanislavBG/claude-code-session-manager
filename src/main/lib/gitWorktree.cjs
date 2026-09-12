@@ -172,7 +172,30 @@ function isUnderRoot(p, root) {
 // versa). Reset to 0 per kind on every restart by design — a crash can never
 // leave either counter permanently wedged above its cap; reconcileWorktreesOnBoot
 // cleans up any leaked ON-DISK checkouts separately (see below).
+//
+// This counter can still drift UPWARD of reality (a missed decrement —
+// cleanupWorktree never ran because the owning process crashed, was
+// reaped, or SIGTERM'd before teardown) for as long as the app keeps
+// running. `reserveWorktreeSlot` below is what makes that drift
+// self-healing: instead of trusting this counter forever once it reaches
+// the cap, a rejection is verified against OBSERVED on-disk reality
+// (`getObservedWorktreeCount`) before being honored, and the counter is
+// corrected down to match reality when it's proven to have leaked.
 const activeWorktreeCount = { job: 0, epic: 0 };
+
+// Per-kind promise chain used as a simple async mutex (see `withKindLock`)
+// so the cap-check-and-reserve decision in `reserveWorktreeSlot` — which now
+// sometimes needs to `await` a fresh on-disk observation — stays a single
+// atomic step across concurrent callers, the same guarantee the old
+// purely-synchronous check+increment gave for free.
+const worktreeCapLockChain = { job: Promise.resolve(), epic: Promise.resolve() };
+
+// Short-TTL memo of `getObservedWorktreeCount`'s result, per kind, so a burst
+// of callers hitting the cap in quick succession (e.g. several scheduler
+// ticks in a row while the machine is genuinely full) doesn't turn into a
+// `git worktree list` storm. Cleared per-kind by the test hook below.
+const observedWorktreeCountCache = { job: { count: null, at: 0 }, epic: { count: null, at: 0 } };
+const OBSERVED_WORKTREE_COUNT_TTL_MS = 2000;
 
 function execGit(args, { cwd, timeout = 20_000 } = {}) {
   return new Promise((resolve, reject) => {
@@ -466,6 +489,133 @@ async function captureAndCarryBaseDiff({ cwd, dir }) {
 }
 
 /**
+ * Counts how many worktrees of `kind` genuinely exist on disk RIGHT NOW,
+ * machine-wide — not limited to any one project's cwd, since the in-memory
+ * cap (`activeWorktreeCount`) is itself shared across every project using
+ * this kind. Walks the kind's own root directory (same enumeration
+ * `sweepStaleWorktreeCheckouts` uses) to find candidate checkouts, resolves
+ * each to its owning main tree via `mainTreeFromWorktreeGitFile` (never
+ * trusting a directory's mere presence — a half-created or already-removed
+ * checkout must not count), then asks EACH distinct main tree's own `git
+ * worktree list --porcelain` (the same invocation `reconcileWorktreesOnBoot`
+ * already uses, via `execGit`/`parseWorktreeListPorcelain` — no second
+ * git-invocation style) which of its registered worktrees still live under
+ * this kind's root. Never throws; an unreadable root or a git failure for a
+ * given main tree simply contributes 0 from that tree rather than aborting
+ * the whole count.
+ */
+async function computeObservedWorktreeCount(kind) {
+  const root = worktreeRootFor(kind);
+  let hashEntries;
+  try {
+    hashEntries = await fsp.readdir(root, { withFileTypes: true });
+  } catch {
+    return 0; // root doesn't exist (or unreadable) — nothing on disk
+  }
+
+  const checkoutDirs = [];
+  for (const hashEntry of hashEntries) {
+    if (!hashEntry.isDirectory()) continue;
+    const hashDir = path.join(root, hashEntry.name);
+    if (!isUnderRoot(hashDir, root)) continue;
+    let keyEntries;
+    try {
+      keyEntries = await fsp.readdir(hashDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const keyEntry of keyEntries) {
+      if (!keyEntry.isDirectory()) continue;
+      const checkoutDir = path.join(hashDir, keyEntry.name);
+      if (isUnderRoot(checkoutDir, root)) checkoutDirs.push(checkoutDir);
+    }
+  }
+  if (!checkoutDirs.length) return 0;
+
+  const mainTrees = new Set();
+  for (const dir of checkoutDirs) {
+    const mainTree = await mainTreeFromWorktreeGitFile(dir);
+    if (mainTree) mainTrees.add(mainTree);
+  }
+
+  const liveWorktreePaths = new Set();
+  for (const mainTree of mainTrees) {
+    let out = '';
+    try {
+      out = await execGit(['worktree', 'list', '--porcelain'], { cwd: mainTree, timeout: 15_000 });
+    } catch {
+      continue; // that main tree is unreadable right now — its worktrees simply don't count this pass
+    }
+    for (const entry of parseWorktreeListPorcelain(out)) {
+      if (entry.worktree && isUnderRoot(entry.worktree, root)) {
+        liveWorktreePaths.add(path.resolve(entry.worktree));
+      }
+    }
+  }
+  return liveWorktreePaths.size;
+}
+
+/** TTL-memoized wrapper over `computeObservedWorktreeCount` — see the cache header above. */
+async function getObservedWorktreeCount(kind, ttlMs = OBSERVED_WORKTREE_COUNT_TTL_MS) {
+  const cache = observedWorktreeCountCache[kind];
+  const now = Date.now();
+  if (cache.count !== null && now - cache.at < ttlMs) return cache.count;
+  const count = await computeObservedWorktreeCount(kind);
+  cache.count = count;
+  cache.at = now;
+  return count;
+}
+
+/**
+ * Serializes `fn` per kind via a promise chain, so the cap-check-and-reserve
+ * decision below stays a single atomic step across concurrent callers even
+ * though it now sometimes needs to `await` a fresh on-disk observation.
+ * `worktreeCapLockChain[kind]` is deliberately kept always-resolving (its
+ * own rejection is swallowed) so one caller's failure can never wedge every
+ * later caller behind it.
+ */
+function withKindLock(kind, fn) {
+  const previous = worktreeCapLockChain[kind];
+  const result = previous.then(fn, fn);
+  worktreeCapLockChain[kind] = result.then(() => {}, () => {});
+  return result;
+}
+
+/**
+ * Decides whether a new worktree of `kind` may be created right now, and if
+ * so reserves the slot — the single choke point `createWorktree` calls
+ * before doing any actual git work. Replaces the old bare
+ * `if (activeWorktreeCount[kind] >= cap) reject; else activeWorktreeCount[kind]++`
+ * with the same fast path when comfortably under cap (no await at all, same
+ * as before), but when the in-memory counter is AT OR OVER the cap, verifies
+ * that against observed on-disk reality before honoring the rejection —
+ * self-healing a leaked (never-decremented) counter instead of wedging the
+ * cap at a stale high-water mark for the rest of the process's life.
+ *
+ * TOCTOU safety for concurrent callers: the entire decision (including the
+ * observed-count await) runs inside `withKindLock`, so only one caller per
+ * kind is ever mid-decision at a time — a strictly stronger guarantee than
+ * the old purely-synchronous check+increment, which only protected callers
+ * that happened to land in the same tick.
+ */
+async function reserveWorktreeSlot(kind) {
+  return withKindLock(kind, async () => {
+    const cap = getMaxConcurrentWorktrees(kind);
+    if (activeWorktreeCount[kind] >= cap) {
+      const observed = await getObservedWorktreeCount(kind);
+      if (observed < activeWorktreeCount[kind]) {
+        activeWorktreeCount[kind] = observed;
+      }
+      if (activeWorktreeCount[kind] >= cap) {
+        return { ok: false, reason: `worktree cap reached (${cap} concurrent)` };
+      }
+    }
+    activeWorktreeCount[kind]++;
+    return { ok: true };
+  });
+}
+
+/**
  * Create a linked worktree on a fresh branch checked out from the main
  * tree's current HEAD. Returns `{ ok: true, dir, branch, baseCwd,
  * carriedPaths }` on success, or `{ ok: false, reason }` — the reason is
@@ -500,16 +650,11 @@ async function createWorktree({ kind, cwd, key }) {
 
   const baseWasClean = await isBaseTreeClean(cwd);
 
-  if (activeWorktreeCount[kind] >= getMaxConcurrentWorktrees(kind)) {
-    return { ok: false, reason: `worktree cap reached (${getMaxConcurrentWorktrees(kind)} concurrent)` };
-  }
-  // Reserve the slot SYNCHRONOUSLY (before any `await` below) so two callers
-  // invoked in the same tick can't both pass the check above and both
-  // proceed — without this, the cap is a TOCTOU race: N concurrent callers
-  // all read the pre-increment count before either increments it. Released
-  // again below on any failure path so a failed create never permanently
-  // shrinks capacity.
-  activeWorktreeCount[kind]++;
+  // Cap check + slot reservation as a single atomic step, per kind — see
+  // reserveWorktreeSlot's header. Released again below on any failure path
+  // so a failed create never permanently shrinks capacity.
+  const reservation = await reserveWorktreeSlot(kind);
+  if (!reservation.ok) return reservation;
 
   const dir = worktreeDirFor(kind, cwd, key);
   const branch = branchNameFor(kind, key);
@@ -902,6 +1047,77 @@ function keyFromBranch(kind, branch) {
 }
 
 /**
+ * Reclaims a job-kind worktree checkout whose OWNING QUEUE ROW is already
+ * terminal (`completed`/`failed`/`skipped` — passed in via `terminalSlugs`)
+ * without waiting for either the stale-age sweep (`sweepStaleWorktreeCheckouts`,
+ * gated on `staleSweepAgeMs`, default 24h) or the next app boot
+ * (`reconcileWorktreesOnBoot` only runs once, at startup). A job whose run
+ * ended without ever reaching `cleanupWorktree` (crash, reap, SIGTERM, an
+ * exception before teardown) otherwise leaves its checkout on disk
+ * indefinitely even though the row itself already resolved.
+ *
+ * Never assumes it's safe to delete — proves it, two ways, for each
+ * candidate:
+ *   1. `isBranchMergedIntoHead`: the branch holds ZERO commits that aren't
+ *      already on `cwd`'s HEAD (equivalently, zero commits ahead of main) —
+ *      so integrating it again could add nothing, and removing it loses no
+ *      committed work.
+ *   2. Every path still dirty in the checkout itself (`git status
+ *      --porcelain` run with cwd = the checkout dir) lives under
+ *      `session-manager-operations/` — i.e. it's carried-over ops-folder
+ *      noise (queue.json/history.jsonl churn picked up by
+ *      `captureAndCarryBaseDiff` when the worktree was created), never real
+ *      uncommitted job output.
+ *
+ * A candidate failing either check is left alone for a human/the stale-age
+ * sweep to deal with. Returns the list of slugs actually reclaimed. Never
+ * throws.
+ */
+async function reclaimTerminalJobOrphans({ cwd, terminalSlugs }) {
+  const kind = 'job';
+  const root = worktreeRootFor(kind);
+  const reclaimed = [];
+  if (!cwd || !(terminalSlugs instanceof Set) || terminalSlugs.size === 0) return reclaimed;
+  if (!(await isGitRepo(cwd))) return reclaimed;
+
+  let out = '';
+  try {
+    out = await execGit(['worktree', 'list', '--porcelain'], { cwd, timeout: 15_000 });
+  } catch {
+    return reclaimed;
+  }
+
+  for (const entry of parseWorktreeListPorcelain(out)) {
+    if (!entry.worktree || !isUnderRoot(entry.worktree, root)) continue;
+    const slug = keyFromBranch(kind, entry.branch);
+    if (!slug || !terminalSlugs.has(slug)) continue;
+
+    const merged = await isBranchMergedIntoHead(cwd, entry.branch);
+    if (!merged) continue; // real un-landed work — never touch
+
+    let statusOut = '';
+    try {
+      statusOut = await execGit(['status', '--porcelain'], { cwd: entry.worktree, timeout: 15_000 });
+    } catch {
+      continue; // can't prove the checkout is clean-of-real-work — never assume
+    }
+    const dirtyPaths = statusOut.split('\n').map((l) => l.slice(3).trim()).filter(Boolean);
+    const opsOnly = dirtyPaths.every(
+      (p) => p === 'session-manager-operations' || p.startsWith('session-manager-operations/')
+    );
+    if (!opsOnly) continue; // real non-ops dirty content present — leave for a human
+
+    await removeWorktreeDir(cwd, entry.worktree);
+    if (entry.branch) {
+      try { await execGit(['branch', '-D', entry.branch], { cwd, timeout: 10_000 }); } catch { /* already gone */ }
+    }
+    reclaimed.push(slug);
+  }
+  try { await execGit(['worktree', 'prune'], { cwd, timeout: 10_000 }); } catch { /* best-effort */ }
+  return reclaimed;
+}
+
+/**
  * Boot reconciliation: a worktree that survives a process crash (app killed
  * mid-run, host reboot) leaks disk and a dangling branch forever unless
  * something cleans it up — this is that something. For each known project
@@ -1027,6 +1243,9 @@ module.exports = {
   reconcileWorktreesOnBoot,
   sweepStaleWorktreeCheckouts,
   mainTreeFromWorktreeGitFile,
+  getObservedWorktreeCount,
+  reserveWorktreeSlot,
+  reclaimTerminalJobOrphans,
   // Job-kind convenience wrappers — same call shape jobWorktree.cjs has
   // always exposed.
   createJobWorktree,
@@ -1046,5 +1265,17 @@ module.exports = {
   _getActiveWorktreeCountForTests(kind) {
     configFor(kind);
     return activeWorktreeCount[kind];
+  },
+  // Test-only escape hatch for the observed-worktree-count TTL cache, so a
+  // test simulating a leak-then-recover sequence isn't at the mercy of a
+  // stale count left behind by an earlier test in the same process.
+  _resetObservedWorktreeCountCacheForTests(kind) {
+    if (kind) {
+      configFor(kind);
+      observedWorktreeCountCache[kind] = { count: null, at: 0 };
+    } else {
+      observedWorktreeCountCache.job = { count: null, at: 0 };
+      observedWorktreeCountCache.epic = { count: null, at: 0 };
+    }
   },
 };

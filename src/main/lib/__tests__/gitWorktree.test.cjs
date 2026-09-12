@@ -53,6 +53,7 @@ beforeEach(() => {
   delete process.env.SM_EPIC_WORKTREE_MAX;
   gitWorktree._resetActiveWorktreeCountForTests('job', 0);
   gitWorktree._resetActiveWorktreeCountForTests('epic', 0);
+  gitWorktree._resetObservedWorktreeCountCacheForTests();
 });
 
 afterEach(async () => {
@@ -313,6 +314,97 @@ test('[job] falls back once the concurrency cap is reached, and recovers after c
   const third = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'cap-3' });
   expect(third.ok).toBe(true);
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: third.dir, branch: third.branch });
+});
+
+test('[job] a leaked cap count (checkout removed from disk without cleanupWorktree) self-heals on the next createWorktree', async () => {
+  process.env.SM_JOB_WORKTREE_MAX = '1';
+  const first = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'leak-1' });
+  expect(first.ok).toBe(true);
+
+  // Simulate the crash/reap path: the checkout is torn off disk directly
+  // (not via cleanupJobWorktree), exactly like a job that got SIGTERM'd or
+  // reaped before its own teardown ran — activeWorktreeCount never gets
+  // decremented, so the in-memory counter is now permanently stuck at the
+  // cap even though nothing real is holding it.
+  await execFileSync('git', ['worktree', 'remove', '--force', first.dir], { cwd: repoCwd, encoding: 'utf8' });
+  fs.rmSync(first.dir, { recursive: true, force: true });
+  expect(gitWorktree._getActiveWorktreeCountForTests('job')).toBe(1);
+
+  // Against unpatched main this next call stays wedged forever: the counter
+  // never reflects that nothing is actually checked out anymore.
+  const second = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'leak-2' });
+  expect(second.ok).toBe(true);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: second.dir, branch: second.branch });
+});
+
+test('[job] reclaimTerminalJobOrphans removes a completed row\'s clean-of-real-work orphan checkout', async () => {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'orphan-clean' });
+  expect(worktree.ok).toBe(true);
+  // Zero commits ahead of main and nothing dirty at all in the checkout —
+  // the simplest "safe to reclaim" shape.
+  const reclaimed = await gitWorktree.reclaimTerminalJobOrphans({
+    cwd: repoCwd,
+    terminalSlugs: new Set(['orphan-clean']),
+  });
+  expect(reclaimed).toEqual(['orphan-clean']);
+  expect(fs.existsSync(worktree.dir)).toBe(false);
+});
+
+test('[job] reclaimTerminalJobOrphans reclaims a checkout carrying only ops-folder dirty noise', async () => {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'orphan-ops-noise' });
+  expect(worktree.ok).toBe(true);
+  fs.mkdirSync(path.join(worktree.dir, 'session-manager-operations'), { recursive: true });
+  fs.writeFileSync(path.join(worktree.dir, 'session-manager-operations', 'queue.json'), '{}\n', 'utf8');
+
+  const reclaimed = await gitWorktree.reclaimTerminalJobOrphans({
+    cwd: repoCwd,
+    terminalSlugs: new Set(['orphan-ops-noise']),
+  });
+  expect(reclaimed).toEqual(['orphan-ops-noise']);
+  expect(fs.existsSync(worktree.dir)).toBe(false);
+});
+
+test('[job] reclaimTerminalJobOrphans leaves a checkout with real (non-ops) dirty content alone', async () => {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'orphan-real-work' });
+  expect(worktree.ok).toBe(true);
+  fs.writeFileSync(path.join(worktree.dir, 'real-output.txt'), 'not ops noise\n', 'utf8');
+
+  const reclaimed = await gitWorktree.reclaimTerminalJobOrphans({
+    cwd: repoCwd,
+    terminalSlugs: new Set(['orphan-real-work']),
+  });
+  expect(reclaimed).toEqual([]);
+  expect(fs.existsSync(worktree.dir)).toBe(true);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[job] reclaimTerminalJobOrphans leaves a checkout with unmerged commits alone', async () => {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'orphan-unmerged' });
+  expect(worktree.ok).toBe(true);
+  fs.writeFileSync(path.join(worktree.dir, 'new-file.txt'), 'real committed work\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'unmerged job commit'], worktree.dir);
+
+  const reclaimed = await gitWorktree.reclaimTerminalJobOrphans({
+    cwd: repoCwd,
+    terminalSlugs: new Set(['orphan-unmerged']),
+  });
+  expect(reclaimed).toEqual([]);
+  expect(fs.existsSync(worktree.dir)).toBe(true);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[job] reclaimTerminalJobOrphans ignores a worktree whose slug is not in terminalSlugs', async () => {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'not-terminal' });
+  expect(worktree.ok).toBe(true);
+
+  const reclaimed = await gitWorktree.reclaimTerminalJobOrphans({
+    cwd: repoCwd,
+    terminalSlugs: new Set(['some-other-slug']),
+  });
+  expect(reclaimed).toEqual([]);
+  expect(fs.existsSync(worktree.dir)).toBe(true);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
 });
 
 test('[job] getMaxConcurrentWorktrees floors the job cap at the sessionSlots pool size (PRD 1112)', () => {

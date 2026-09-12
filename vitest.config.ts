@@ -128,6 +128,7 @@ export default defineConfig({
       'src/main/__tests__/queue-starvation-dispatch-driver.test.cjs',
       'src/main/__tests__/health-usage-poller.test.cjs',
       'src/main/__tests__/health-queue-dispatch.test.cjs',
+      'src/main/__tests__/health-worktree-cap-blocked.test.cjs',
       'src/main/__tests__/agentLibrary.test.cjs',
       'src/main/__tests__/bilkoHost-deriveSlug.test.cjs',
       'src/main/__tests__/bilkoHostCore.test.cjs',

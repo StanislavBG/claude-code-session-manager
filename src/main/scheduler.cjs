@@ -5241,10 +5241,30 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       : await jobWorktree.createJobWorktree({ cwd: job.cwd || defaultCwd, slug: job.slug });
     if (!preflightWorktree.ok && /^worktree cap reached\b/.test(preflightWorktree.reason || '')) {
       console.log(`[scheduler] ${job.slug}: deferring — ${preflightWorktree.reason}`);
-      await mutate((s) => {
+      // A leaked worktree cap count used to strand a job silently — nothing
+      // but this console.log + a heldReason field the human had to go
+      // looking for (see gitWorktree.cjs's reserveWorktreeSlot: the cap
+      // itself now self-heals, but a GENUINE block, while it lasts, must
+      // still reach a durable, visible channel). Fired only the first time
+      // THIS slug gets held on this exact reason — a job stuck for hours
+      // must not flood opsErrorLog with one line per dispatch attempt.
+      const wasAlreadyFlaggedForThisReason = await mutate((s) => {
         const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+        const already = idx >= 0 && s.jobs[idx].heldReason === preflightWorktree.reason;
         if (idx >= 0) s.jobs[idx].heldReason = preflightWorktree.reason;
+        return already;
       });
+      if (!wasAlreadyFlaggedForThisReason) {
+        try {
+          appendError({
+            cwd: job.cwd || defaultCwd,
+            scope: 'scheduler',
+            level: 'error',
+            message: `${job.slug}: dispatch blocked — ${preflightWorktree.reason}`,
+            meta: { slug: job.slug, reason: preflightWorktree.reason },
+          });
+        } catch { /* durable logging must never break the queue */ }
+      }
       await broadcast({ flush: true });
       return;
     }
@@ -6402,6 +6422,43 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
   }
 }
 
+// Throttle for reclaimTerminalJobOrphansThrottled below — a `git worktree
+// list` + per-candidate `status`/`merge-base` call per known project cwd is
+// cheap once, but tickQueue can fire every few seconds; there is no value in
+// re-running this on every single tick.
+const TERMINAL_ORPHAN_RECLAIM_INTERVAL_MS = 10 * 60_000; // 10 minutes
+let lastTerminalOrphanReclaimAt = 0;
+
+/**
+ * Fire-and-forget, throttled sweep for job-kind worktrees whose owning queue
+ * row has already resolved (completed/failed/skipped) but whose checkout is
+ * still on disk — see gitWorktree.cjs's reclaimTerminalJobOrphans header for
+ * the two independent safety proofs it requires before deleting anything.
+ * Runs once per TERMINAL_ORPHAN_RECLAIM_INTERVAL_MS across every project cwd
+ * this tick's queue state knows about. Never throws (each per-cwd call is
+ * itself never-throws; this wrapper is just the throttle + fan-out).
+ */
+async function reclaimTerminalJobOrphansThrottled(state) {
+  const now = Date.now();
+  if (now - lastTerminalOrphanReclaimAt < TERMINAL_ORPHAN_RECLAIM_INTERVAL_MS) return;
+  lastTerminalOrphanReclaimAt = now;
+
+  const terminalSlugsByCwd = new Map();
+  for (const j of state.jobs || []) {
+    if (j.status !== 'completed' && j.status !== 'failed' && j.status !== 'skipped') continue;
+    const cwd = j.cwd || DEFAULT_PROJECT_CWD;
+    if (!terminalSlugsByCwd.has(cwd)) terminalSlugsByCwd.set(cwd, new Set());
+    terminalSlugsByCwd.get(cwd).add(j.slug);
+  }
+
+  for (const [cwd, terminalSlugs] of terminalSlugsByCwd) {
+    const reclaimed = await jobWorktree.reclaimTerminalJobOrphans({ cwd, terminalSlugs });
+    if (reclaimed.length) {
+      console.log(`[scheduler] reclaimed ${reclaimed.length} terminal job-worktree orphan(s) in ${cwd}: ${reclaimed.join(', ')}`);
+    }
+  }
+}
+
 /**
  * Dispatch a resume-recovery attempt (PRD 1111) for a job already found
  * eligible by selectResumeRecoveryTarget. Thin wrapper around spawnJob —
@@ -6453,6 +6510,17 @@ function tickQueue({ bypassLoadGate = false } = {}) {
     // own comment) so every caller of reconcile — not just this tick — gets
     // the guarantee.
     await reconcile(state);
+    // Reclaim any job-kind worktree whose owning row already resolved
+    // (completed/failed/skipped) without the run ever reaching
+    // cleanupWorktree — a leaked checkout that would otherwise sit until the
+    // stale-age sweep (default 24h) or the next app restart
+    // (reconcileWorktreesOnBoot only runs once, at boot). Throttled to once
+    // per interval (not every tick) since it's a `git worktree list` +
+    // per-candidate git call per known project cwd. Best-effort and
+    // fire-and-forget: must never hold up dispatch.
+    reclaimTerminalJobOrphansThrottled(state).catch((e) => {
+      console.warn('[scheduler] terminal job-worktree orphan reclaim failed', e?.message);
+    });
     // Session-Manager's machine-wide slot pool is the ONLY concurrency limit
     // the picker answers to (plus the memory gate below). The scheduler used
     // to also carry a private `concurrencyCap` of 3 — the exact per-consumer

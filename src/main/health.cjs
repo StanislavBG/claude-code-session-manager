@@ -154,6 +154,37 @@ function computeProjectProblemCounts(jobs) {
   return byProject;
 }
 
+// evaluateWorktreeCapBlocked(jobs, runningCount) → { ok, blocked, capBlockedSlugs? }
+//
+// The worktree cap (gitWorktree.cjs) can genuinely, correctly block every
+// pending job at once — a real out-of-capacity condition, not a bug — but
+// before this check existed that state was invisible to `npm run health`:
+// nothing but a console.log line and a `heldReason` field on the row (see
+// scheduler.cjs's spawnJob preflight). Rows in four separate project queues
+// carried heldReason 'worktree cap reached (5 concurrent)' for 16 hours with
+// zero entries in session-manager-operations/logs/ and nothing non-GREEN
+// here. `runningCount === 0` is the load-bearing condition: while at least
+// one job is running, the cap is doing its job as designed (bounding
+// concurrency), not starving the queue.
+function evaluateWorktreeCapBlocked(jobs, runningCount) {
+  // queueStore.readMergedSync() hands back jobs as an object map (merged
+  // across projects); other callers (tests, scheduler.cjs's own in-memory
+  // state) pass a plain array — accept either rather than forcing every
+  // caller to know this module's federated-storage detail.
+  const jobList = Array.isArray(jobs) ? jobs : Object.values(jobs || {});
+  const capBlocked = jobList.filter(
+    (j) => j.status === 'pending' && /^worktree cap reached\b/.test(j.heldReason || '')
+  );
+  if ((runningCount ?? 0) === 0 && capBlocked.length > 0) {
+    return {
+      ok: false,
+      blocked: true,
+      capBlockedSlugs: capBlocked.map((j) => j.slug),
+    };
+  }
+  return { ok: true, blocked: false };
+}
+
 // evaluatePerProjectStall(stallSummary, lastRunAtIso, now, thresholdMs) →
 // { [cwd]: { stalled, pastThreshold?, ageMs?, caveat? } }
 //
@@ -608,6 +639,21 @@ async function check() {
     if (!status.components.queue_dispatch.ok || status.components.queue_dispatch.blocked) {
       status.issues.push(`Queue dispatch: ${status.components.queue_dispatch.message}`);
     }
+
+    // Worktree cap blocking every dispatchable pending job with nothing
+    // running (see evaluateWorktreeCapBlocked's header) — a distinct
+    // condition from generic tick/dispatch staleness above, since a leaked
+    // cap count can hold a row `pending` with a fresh heldReason on every
+    // single tick (tickQueue keeps reaching spawnJob, per PRD 1141/1144's
+    // live evidence), never tripping evaluateTickLiveness's staleness check.
+    const worktreeCapBlocked = evaluateWorktreeCapBlocked(queueState.jobs, runningCount);
+    status.components.scheduler_queue.worktreeCapBlocked = worktreeCapBlocked;
+    if (!worktreeCapBlocked.ok) {
+      status.components.scheduler_queue.ok = false;
+      status.issues.push(
+        `Worktree cap is blocking dispatch with 0 jobs running: ${worktreeCapBlocked.capBlockedSlugs.join(', ')}`
+      );
+    }
   } catch (e) {
     if (e.code !== 'ENOENT') {
       status.issues.push(`Scheduler queue unreadable: ${e.message}`);
@@ -856,6 +902,7 @@ module.exports = {
   computeEpicIndexDrift,
   evaluateEpicIndexHealth,
   computeProjectProblemCounts,
+  evaluateWorktreeCapBlocked,
   evaluatePerProjectStall,
   parseClaudeMdBudget,
   evaluateClaudeMdBudget,

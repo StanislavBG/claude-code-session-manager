@@ -22,6 +22,8 @@ import { useBilling, getBillingData } from '../../state/billing'
 import { useScheduleState } from '../../state/scheduleState'
 import { useBranch } from '../../lib/useBranch'
 import { usageTitle, utilPercent } from '../../lib/usageWindow'
+import { useSessionSlots } from '../../lib/useSessionSlots'
+import { SlotDots } from '../ui/SlotDots'
 import type { NavKey } from '../LeftNav'
 
 interface AlmanacFooterProps {
@@ -37,6 +39,7 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
   const billing = useBilling((s) => s.data)
   const schedPaused = useScheduleState((s) => s.snapshot?.paused ?? null)
   const branch = useBranch(tab?.cwd ?? null)
+  const slots = useSessionSlots()
   // Force re-render every 60s so the "X min ago" + remaining tick.
   const [, tick] = useState(0)
   useEffect(() => {
@@ -67,6 +70,14 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
   const isConnected = billing?.kind === 'ok' || billing?.kind === 'ok-stale'
 
   const lastTxt = lastEventAt > 0 ? relSeconds(Date.now() - lastEventAt) : '—'
+
+  const slotTotal = slots?.total ?? 5
+  const slotInUse = slots ? Math.min(Math.max(slots.inUse, 0), slots.total) : 0
+  const slotCountTxt = slots ? `${slotInUse} / ${slotTotal}` : `— / ${slotTotal}`
+  const holderLines = slots && slots.holders.length > 0
+    ? '\n' + slots.holders.slice(0, 5).map((h) => h.owner).join('\n')
+    : ''
+  const slotsTitle = `${slotCountTxt} Claude sessions running${holderLines}`
 
   return (
     <div
@@ -134,6 +145,19 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
       )}
 
       <span className="flex-1" />
+
+      <button
+        onClick={() => onNavigate?.('overview')}
+        className="flex items-center gap-1 hover:text-fg transition-colors"
+        title={slotsTitle}
+        data-testid="footer-active-sessions"
+      >
+        {slots && slots.total === 0 ? (
+          <span className="text-fg-faint">pool paused</span>
+        ) : (
+          <SlotDots total={slotTotal} inUse={slots?.inUse ?? 0} size="sm" />
+        )}
+      </button>
 
       <span className="text-fg-faint">v{__APP_VERSION__}</span>
     </div>

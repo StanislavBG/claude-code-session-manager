@@ -63,7 +63,10 @@ function stopPolling() {
  * Shared session-slots snapshot, polled at most once per interval across
  * every consumer. Polling runs only while at least one consumer is mounted
  * in a focused panel (per usePanelFocus); the last focused consumer going
- * away (unmount or losing focus) stops the poller entirely.
+ * away (unmount or losing focus) stops the poller entirely. AlmanacFooter is
+ * mounted outside any PanelFocusProvider, so usePanelFocus() always reports
+ * it focused — its footer indicator keeps this poll alive for the app's
+ * whole lifetime, which is accepted rather than worth a second cadence.
  */
 export function useSessionSlots(panelId?: string): SlotSnapshot | null {
   const focused = usePanelFocus(panelId)

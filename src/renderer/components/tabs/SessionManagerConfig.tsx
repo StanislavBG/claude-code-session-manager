@@ -4,6 +4,7 @@ import { Toggle } from '../ui/Toggle'
 import { readAppPrefs, writeAppPrefs } from '../../lib/appPrefs'
 import { toast } from '../../state/toast'
 import { useSessionSlots } from '../../lib/useSessionSlots'
+import { SlotDots } from '../ui/SlotDots'
 import type { NavKey } from '../LeftNav'
 
 /**
@@ -66,14 +67,7 @@ export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
           <code className="font-mono text-[12px]">SM_SESSION_SLOTS</code> (clamped 0–10).
         </p>
         <div className="flex items-center gap-2">
-          {Array.from({ length: slots?.total ?? 5 }, (_, i) => (
-            <span
-              key={i}
-              className={`w-3.5 h-3.5 rounded-full border ${
-                i < (slots?.inUse ?? 0) ? 'bg-accent border-accent' : 'bg-bg border-line'
-              }`}
-            />
-          ))}
+          <SlotDots total={slots?.total ?? 5} inUse={slots?.inUse ?? 0} size="md" />
           <span className="ml-2 font-mono text-[12.5px] text-fg-faint">
             {slots ? `${slots.inUse} / ${slots.total} in use` : 'loading…'}
           </span>

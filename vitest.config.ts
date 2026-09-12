@@ -126,6 +126,7 @@ export default defineConfig({
       'src/main/__tests__/rateLimitPollerStreak.test.cjs',
       'src/main/__tests__/pollLoop-dispatch-on-failure.test.cjs',
       'src/main/__tests__/queue-starvation-dispatch-driver.test.cjs',
+      'src/main/__tests__/queue-starvation-per-project.test.cjs',
       'src/main/__tests__/health-usage-poller.test.cjs',
       'src/main/__tests__/health-queue-dispatch.test.cjs',
       'src/main/__tests__/health-worktree-cap-blocked.test.cjs',

@@ -448,6 +448,12 @@ async function installPrdWriteGuard({ cwd }) {
     // the human has in there.
     return { ok: false, action: 'error', error: `${settingsPath} is not valid JSON — fix it by hand before installing the guard` };
   }
+  if (!fs.existsSync(PRD_WRITE_GUARD_SCRIPT)) {
+    // Writing a hook that points at a script that doesn't exist would report
+    // installed while silently guarding nothing (a non-zero-without-2 exit is
+    // a non-blocking error to the harness) — refuse instead of lying.
+    return { ok: false, action: 'error', error: `${PRD_WRITE_GUARD_SCRIPT} does not exist — cannot install a guard hook that points at a missing script` };
+  }
   const settings = (existing && typeof existing === 'object' && !Array.isArray(existing)) ? existing : {};
 
   const command = `node ${PRD_WRITE_GUARD_SCRIPT}`;
@@ -548,6 +554,9 @@ async function installDestructiveGitGuard({ cwd }) {
   if (existing === undefined) {
     return { ok: false, action: 'error', error: `${settingsPath} is not valid JSON — fix it by hand before installing the guard` };
   }
+  if (!fs.existsSync(DESTRUCTIVE_GIT_GUARD_SCRIPT)) {
+    return { ok: false, action: 'error', error: `${DESTRUCTIVE_GIT_GUARD_SCRIPT} does not exist — cannot install a guard hook that points at a missing script` };
+  }
   const settings = (existing && typeof existing === 'object' && !Array.isArray(existing)) ? existing : {};
 
   const command = `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}`;
@@ -647,6 +656,9 @@ async function installInlineImplementationGuard({ cwd }) {
   const existing = fs.existsSync(settingsPath) ? readJsonSafe(settingsPath, undefined) : {};
   if (existing === undefined) {
     return { ok: false, action: 'error', error: `${settingsPath} is not valid JSON — fix it by hand before installing the guard` };
+  }
+  if (!fs.existsSync(INLINE_IMPLEMENTATION_GUARD_SCRIPT)) {
+    return { ok: false, action: 'error', error: `${INLINE_IMPLEMENTATION_GUARD_SCRIPT} does not exist — cannot install a guard hook that points at a missing script` };
   }
   const settings = (existing && typeof existing === 'object' && !Array.isArray(existing)) ? existing : {};
 

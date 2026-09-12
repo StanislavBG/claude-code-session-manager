@@ -761,6 +761,108 @@ test('installInlineImplementationGuard: refuses on unparseable settings rather t
   expect(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8')).toBe('{ not valid json');
 });
 
+// ─────────────────────────────── missing-guard-script refusal (no lying success)
+
+// Renames the real guard script aside for the duration of `fn`, then restores
+// it — never deletes a real guard script from the working tree.
+async function withGuardScriptMissing(scriptPath, fn) {
+  const movedTo = `${scriptPath}.moved-for-test`;
+  await fsp.rename(scriptPath, movedTo);
+  try {
+    await fn();
+  } finally {
+    await fsp.rename(movedTo, scriptPath);
+  }
+}
+
+test('all three *_GUARD_SCRIPT constants name a script that exists in this repo', () => {
+  expect(fs.existsSync(PRD_WRITE_GUARD_SCRIPT)).toBe(true);
+  expect(fs.existsSync(DESTRUCTIVE_GIT_GUARD_SCRIPT)).toBe(true);
+  expect(fs.existsSync(INLINE_IMPLEMENTATION_GUARD_SCRIPT)).toBe(true);
+});
+
+test('installPrdWriteGuard: refuses when its guard script is missing, and leaves settings.json byte-identical', async () => {
+  const { cwd } = await makeGreenFixtures();
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  await fsp.rm(settingsPath);
+
+  await withGuardScriptMissing(PRD_WRITE_GUARD_SCRIPT, async () => {
+    const r = await installPrdWriteGuard({ cwd });
+    expect(r.ok).toBe(false);
+    expect(r.action).toBe('error');
+    expect(r.error).toContain(PRD_WRITE_GUARD_SCRIPT);
+    // Nothing was written — the file must still not exist.
+    expect(fs.existsSync(settingsPath)).toBe(false);
+  });
+});
+
+test('installPrdWriteGuard: refuses when its guard script is missing, leaving an EXISTING settings.json byte-identical', async () => {
+  const { cwd } = await makeGreenFixtures();
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  const before = fs.readFileSync(settingsPath);
+
+  await withGuardScriptMissing(PRD_WRITE_GUARD_SCRIPT, async () => {
+    const r = await installPrdWriteGuard({ cwd });
+    expect(r.ok).toBe(false);
+    expect(r.action).toBe('error');
+    expect(fs.readFileSync(settingsPath).equals(before)).toBe(true);
+  });
+});
+
+test('installDestructiveGitGuard: refuses when its guard script is missing, and leaves settings.json byte-identical', async () => {
+  const { cwd } = await makeGreenFixtures();
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  await fsp.rm(settingsPath);
+
+  await withGuardScriptMissing(DESTRUCTIVE_GIT_GUARD_SCRIPT, async () => {
+    const r = await installDestructiveGitGuard({ cwd });
+    expect(r.ok).toBe(false);
+    expect(r.action).toBe('error');
+    expect(r.error).toContain(DESTRUCTIVE_GIT_GUARD_SCRIPT);
+    expect(fs.existsSync(settingsPath)).toBe(false);
+  });
+});
+
+test('installDestructiveGitGuard: refuses when its guard script is missing, leaving an EXISTING settings.json byte-identical', async () => {
+  const { cwd } = await makeGreenFixtures();
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  const before = fs.readFileSync(settingsPath);
+
+  await withGuardScriptMissing(DESTRUCTIVE_GIT_GUARD_SCRIPT, async () => {
+    const r = await installDestructiveGitGuard({ cwd });
+    expect(r.ok).toBe(false);
+    expect(r.action).toBe('error');
+    expect(fs.readFileSync(settingsPath).equals(before)).toBe(true);
+  });
+});
+
+test('installInlineImplementationGuard: refuses when its guard script is missing, and leaves settings.json byte-identical', async () => {
+  const { cwd } = await makeGreenFixtures();
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  await fsp.rm(settingsPath);
+
+  await withGuardScriptMissing(INLINE_IMPLEMENTATION_GUARD_SCRIPT, async () => {
+    const r = await installInlineImplementationGuard({ cwd });
+    expect(r.ok).toBe(false);
+    expect(r.action).toBe('error');
+    expect(r.error).toContain(INLINE_IMPLEMENTATION_GUARD_SCRIPT);
+    expect(fs.existsSync(settingsPath)).toBe(false);
+  });
+});
+
+test('installInlineImplementationGuard: refuses when its guard script is missing, leaving an EXISTING settings.json byte-identical', async () => {
+  const { cwd } = await makeGreenFixtures();
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  const before = fs.readFileSync(settingsPath);
+
+  await withGuardScriptMissing(INLINE_IMPLEMENTATION_GUARD_SCRIPT, async () => {
+    const r = await installInlineImplementationGuard({ cwd });
+    expect(r.ok).toBe(false);
+    expect(r.action).toBe('error');
+    expect(fs.readFileSync(settingsPath).equals(before)).toBe(true);
+  });
+});
+
 test('installInlineImplementationGuard: uses the ABSOLUTE reference path, never a vendored copy', async () => {
   const { cwd } = await makeGreenFixtures();
   await writeJson(path.join(cwd, '.claude', 'settings.json'), {

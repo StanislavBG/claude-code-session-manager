@@ -146,6 +146,18 @@ function getBeaconToken() {
   return process.env.SM_BEACON_KEY || FALLBACK_BEACON_KEY;
 }
 
+/**
+ * The wire-level `env` discriminator for the currently-running process,
+ * resolved from real signals (never from an appVersion string — see
+ * machineProfile.cjs's resolveEnv header comment for why that matters).
+ */
+function currentEnv() {
+  return machineProfile.resolveEnv({
+    isTestRunner: isTestEnvironment(),
+    installChannel: S.profile && S.profile.installChannel,
+  });
+}
+
 // ─── safe coercion helpers (never throw, regardless of input shape) ───────
 
 function safeObj(v) {
@@ -452,6 +464,7 @@ async function track(name, props) {
       props: meta,
       session_id: S.sessionId,
       visitor_id: S.settings.installId,
+      env: currentEnv(),
     };
     return await appendRecord('event', wire, recordId);
   } catch {
@@ -481,6 +494,7 @@ async function logLine(opts) {
       session_id: S.sessionId,
       fields: meta,
       ts: Date.now(),
+      env: currentEnv(),
     };
     return await appendRecord('log', wire, recordId);
   } catch {
@@ -517,6 +531,7 @@ async function reportError(opts) {
       session_id: S.sessionId,
       context: meta,
       ts: Date.now(),
+      env: currentEnv(),
     };
     return await appendRecord('error', wire, recordId);
   } catch {
@@ -543,6 +558,11 @@ function buildInstallWire(profile, installId) {
     // the numeric UTC offset (see machineProfile.cjs) — so that is what maps
     // onto the server's `timezone` column.
     timezone: safeStr(p.timezoneOffsetMinutes, 20),
+    // Resolved from this passed-in profile's own installChannel (never
+    // S.profile — reportInstall() is always given a freshly-built profile,
+    // not the module-singleton one) plus the current process's test-runner
+    // signal, same three-value contract as the other three channels.
+    env: machineProfile.resolveEnv({ isTestRunner: isTestEnvironment(), installChannel: p.installChannel }),
   };
 }
 

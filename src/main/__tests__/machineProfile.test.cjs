@@ -7,7 +7,7 @@
 
 import { test, expect } from 'vitest';
 const os = require('node:os');
-const { buildMachineProfile, computeMachineDigest, resolveInstallChannel } = require('../lib/machineProfile.cjs');
+const { buildMachineProfile, computeMachineDigest, resolveInstallChannel, resolveEnv } = require('../lib/machineProfile.cjs');
 
 function fakeOs(overrides = {}) {
   return {
@@ -131,4 +131,22 @@ test('resolveInstallChannel: dev when SM_DEV flag is set, regardless of app path
 
 test('resolveInstallChannel: unknown otherwise', () => {
   expect(resolveInstallChannel({ appPath: '/opt/some/app', devFlag: false })).toBe('unknown');
+});
+
+// ─── resolveEnv (wire-level env discriminator) ──────────────────────────
+
+test('resolveEnv: test when running under a test runner, regardless of installChannel', () => {
+  expect(resolveEnv({ isTestRunner: true, installChannel: 'dev' })).toBe('test');
+  expect(resolveEnv({ isTestRunner: true, installChannel: 'npx' })).toBe('test');
+  expect(resolveEnv({ isTestRunner: true, installChannel: 'unknown' })).toBe('test');
+});
+
+test('resolveEnv: dev when installChannel is dev and not under a test runner', () => {
+  expect(resolveEnv({ isTestRunner: false, installChannel: 'dev' })).toBe('dev');
+});
+
+test('resolveEnv: prod for every other installChannel (npx, unknown) when not under a test runner', () => {
+  expect(resolveEnv({ isTestRunner: false, installChannel: 'npx' })).toBe('prod');
+  expect(resolveEnv({ isTestRunner: false, installChannel: 'unknown' })).toBe('prod');
+  expect(resolveEnv({ isTestRunner: false, installChannel: undefined })).toBe('prod');
 });

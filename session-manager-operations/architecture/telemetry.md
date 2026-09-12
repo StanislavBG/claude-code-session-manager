@@ -172,6 +172,40 @@ Three independent mechanisms, each covering a different failure mode:
    Settings inspector surfaces. **Prevents**: a record silently vanishing forever because it was
    evicted from the queue before ever being confirmed sent.
 
+## The `env` discriminator (prod / dev / test)
+
+Every outgoing wire record on all four channels (`event`, `log`, `error`, `install`) carries an
+`env: 'prod' | 'dev' | 'test'` field, resolved **client-side, at wire-build time**, from real
+process signals — never inferred later from an `appVersion` string. `machineProfile.cjs`'s
+`resolveEnv({ isTestRunner, installChannel })` is the single implementation (`telemetryClient.cjs`
+calls it once per wire build, via its own `currentEnv()` helper for `track`/`logLine`/`reportError`,
+and inline in `buildInstallWire()` for `reportInstall()` since that call is given a freshly-built
+profile rather than the module-singleton one):
+
+- **`test`** — `isTestRunner` is true (`VITEST` or `NODE_ENV=test` set, no `SM_TELEMETRY_SPOOL`
+  override — the exact same signal `isTestEnvironment()` already uses to block real-spool writes).
+  Takes priority over everything else.
+- **`dev`** — not a test runner, and `installChannel === 'dev'` (`SM_DEV` set, or running unpackaged
+  — see `resolveInstallChannel()`).
+- **`prod`** — everything else (a packaged/npx install with no `SM_DEV`).
+
+**Why this exists**: the one-shot purge in commit `351d171` only dropped records carrying
+`machineDigest: 'deadbeefcafe'` or a foreign `visitor_id` — it could not distinguish a genuine
+production record from a pre-release `vitest` run that happened to write into the REAL machine's
+spool (the `ensureEpic()`-under-vitest bug that commit's own message describes). Every test-origin
+record that used the real machine profile survived that purge and was later delivered — 1,526
+`epic.create` records stamped `appVersion: "0.83.0"` (a version whose tree predates
+`telemetryCounters.cjs` ever existing) are exactly that leak. **The 351d171 purge criteria are
+INSUFFICIENT and must not be reused as-is for a future purge**: any future purge needs `env` (once
+enough records carry it) or another signal that survives a shared machine profile, not just
+`machineDigest`/`visitor_id`. No purge is run as part of adding this field — existing rows are
+untouched; this only makes *future* non-production records self-identifying on the wire.
+
+**Backwards-safety**: confirmed live against `https://bilko.run/api/telemetry/<channel>` — a probe
+POST per channel carrying `env` alongside the existing shape returned `200` on `event`, `log`,
+`error`, and `install`. The routes ignore/clamp unknown keys today, so an `env`-aware server column
+can be added on bilko.run's side without a client/server release ordering constraint.
+
 ## The reused bilko.run beacon contract
 
 `telemetryClient.cjs` POSTs to `<endpoint>/api/telemetry/<event|log|error|install>` — the exact
@@ -269,6 +303,42 @@ dismissible in-app banner, never a startup-blocking modal.
 - **Manual**: the Settings "Send now" button calls `flush('manual')` directly, so a user reporting
   a problem can push their queue immediately instead of waiting for the daily window.
 - **Quit**: a best-effort `flush('quit')` on app shutdown.
+
+## The four usage counters (`telemetryCounters.cjs`)
+
+`epic.create` (`epicMint.cjs`), `scheduler.job.finish` (`scheduleJobTransitions.cjs`), `app.launch`
+and `session.open` (below) are the only four counter events emitted. As of this doc's last audit,
+the real install (`installId` `9c6b8ecd-b3da-400d-b795-0c0c32504731`) had never delivered a single
+`app.launch` or `session.open` record, despite real terminal use — both gaps are now explained and
+one is fixed:
+
+- **`app.launch`** — `telemetryBoot.cjs`'s `bootSequence()` calls `telemetryCounters.trackAppLaunch()`
+  as its unconditional last step. Commit `b13104f` (this repo, landing PRD 1176) fixed the two real
+  defects upstream of it: `reportInstall()`'s bare `catch` swallowing the failure reason silently,
+  and `bootSequence()` unconditionally stamping `lastMachineReportAt`/`lastMachineReportVersion`
+  even when the upsert failed (so a real failure looked identical to success on the next boot,
+  suppressing retries). Neither defect could throw past `bootSequence()` and block step 4, but both
+  masked *why* the install upsert wasn't landing, which was the loudest visible symptom. A scripted,
+  isolated (`HOME`/`SM_TELEMETRY_SPOOL` pointed at a scratch dir) boot-path invocation against the
+  live `https://bilko.run` endpoint, run after that fix, produced both an `install` record and an
+  `app.launch` (`event`-channel) record, both accepted for delivery (`flush()` reported them `sent`,
+  none `failed`) — the tap fires correctly today. The remaining gap in the real install's historical
+  data is a boot cadence + timing question (this machine's Electron app has not been launched fresh
+  since the fix landed), not a code defect.
+- **`session.open`** (`pty.cjs:204`, `trackSessionOpen()`) — fires only on a **fresh** PTY spawn,
+  deliberately not on a reattach (`pty.cjs`'s `spawn()` returns early for an already-registered
+  `tabId` — a renderer HMR reload, or switching back to an Epic's Terminal pane that's already
+  running in this same Electron process). This is intentional, not a bug: Tab = claudeSessionId is a
+  1:1 mapping (`CLAUDE.md` domain model), so a reattach is the SAME session process still running —
+  counting it again would inflate `session.open` every time a user merely revisits an already-open
+  Terminal pane, which is a much more common interaction than opening a brand-new one. `session.open`
+  therefore answers "how many terminal sessions were actually spawned", not "how many times was a
+  Terminal pane viewed". Covered by `pty-session-open-telemetry.test.cjs`: a fresh spawn fires the
+  counter exactly once; a subsequent reattach to the same `tabId` does not fire it again. The
+  historical zero is plausible without any defect: this machine's real usage is dominated by the
+  Chat view (`chatRunner.cjs`, a separate headless path that never touches `pty.cjs`) and the
+  scheduler, both of which never spawn a PTY at all — the Terminal view specifically may simply not
+  have been opened yet on this install.
 
 ## Why log files are never mutated
 

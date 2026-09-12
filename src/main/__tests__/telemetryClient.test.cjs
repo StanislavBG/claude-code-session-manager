@@ -289,6 +289,55 @@ test('attribution fields are exempt from redaction/clamping and arrive byte-iden
   client.shutdown();
 });
 
+// ─── env discriminator (wire-level, all four channels) ─────────────────
+
+test('every channel carries env:"dev" when SM_DEV drives installChannel, and it survives the queue round-trip through flush', async () => {
+  const home = await mkHome();
+  const client = freshClient(home, { installChannel: 'dev' });
+  const fetchFn = fetchStub(async () => okResponse());
+  client._setFetchImpl(fetchFn);
+
+  await client.track('evt', { a: 1 });
+  await client.logLine({ level: 'info', msg: 'hi' });
+  await client.reportError({ name: 'E', msg: 'boom', stack: 'at x' });
+  await client.reportInstall(fakeProfile({ installChannel: 'dev' }));
+
+  // Present the instant it's appended to telemetry-queue.jsonl, before any flush.
+  const queued = await readQueueLines(client);
+  expect(queued).toHaveLength(4);
+  for (const rec of queued) expect(rec.wire.env).toBe('dev');
+
+  // Still present in the exact body flush() POSTs.
+  await client.flush('manual');
+  expect(fetchFn.calls.length).toBeGreaterThan(0);
+  for (const call of fetchFn.calls) {
+    const bodies = Array.isArray(call.body.batch) ? call.body.batch : [call.body];
+    for (const wire of bodies) expect(wire.env).toBe('dev');
+  }
+  client.shutdown();
+});
+
+test('every channel carries env:"prod" for a non-dev installChannel', async () => {
+  const home = await mkHome();
+  const client = freshClient(home, { installChannel: 'npx' });
+
+  await client.track('evt', { a: 1 });
+  await client.logLine({ level: 'info', msg: 'hi' });
+  await client.reportError({ name: 'E', msg: 'boom', stack: 'at x' });
+  await client.reportInstall(fakeProfile({ installChannel: 'npx' }));
+
+  const queued = await readQueueLines(client);
+  expect(queued).toHaveLength(4);
+  for (const rec of queued) expect(rec.wire.env).toBe('prod');
+  client.shutdown();
+});
+
+test('env resolves to "test" under a real test-runner environment, independent of installChannel', () => {
+  const machineProfile = require('../lib/machineProfile.cjs');
+  expect(machineProfile.resolveEnv({ isTestRunner: true, installChannel: 'dev' })).toBe('test');
+  expect(machineProfile.resolveEnv({ isTestRunner: true, installChannel: 'npx' })).toBe('test');
+});
+
 // ─── queue is the accumulator, survives restart ────────────────────────
 
 test('a record survives a simulated process restart and is still pending', async () => {
@@ -552,11 +601,11 @@ test('wire field names match server/routes/telemetry.ts exactly', async () => {
   const errorCall = fetchFn.calls.find((c) => c.url.endsWith('/error'));
   const installCall = fetchFn.calls.find((c) => c.url.endsWith('/install'));
 
-  expect(Object.keys(eventCall.body.batch[0]).sort()).toEqual(['app', 'name', 'props', 'session_id', 'visitor_id'].sort());
-  expect(Object.keys(logCall.body.batch[0]).sort()).toEqual(['app', 'version', 'level', 'msg', 'visitor_id', 'session_id', 'fields', 'ts'].sort());
-  expect(Object.keys(errorCall.body.batch[0]).sort()).toEqual(['app', 'version', 'name', 'msg', 'stack', 'url', 'ua', 'visitor_id', 'session_id', 'context', 'ts'].sort());
+  expect(Object.keys(eventCall.body.batch[0]).sort()).toEqual(['app', 'env', 'name', 'props', 'session_id', 'visitor_id'].sort());
+  expect(Object.keys(logCall.body.batch[0]).sort()).toEqual(['app', 'env', 'version', 'level', 'msg', 'visitor_id', 'session_id', 'fields', 'ts'].sort());
+  expect(Object.keys(errorCall.body.batch[0]).sort()).toEqual(['app', 'env', 'version', 'name', 'msg', 'stack', 'url', 'ua', 'visitor_id', 'session_id', 'context', 'ts'].sort());
   expect(Object.keys(installCall.body).sort()).toEqual([
-    'app', 'app_version', 'arch', 'cpu_count', 'electron_version',
+    'app', 'app_version', 'arch', 'cpu_count', 'electron_version', 'env',
     'install_channel', 'install_id', 'locale', 'node_version',
     'os_release', 'platform', 'timezone', 'total_mem_mb',
   ].sort());
@@ -874,7 +923,7 @@ test('reportInstall() maps buildMachineProfile()\'s camelCase onto the exact sna
 
   expect(rec.channel).toBe('install');
   expect(Object.keys(rec.wire).sort()).toEqual([
-    'app', 'app_version', 'arch', 'cpu_count', 'electron_version',
+    'app', 'app_version', 'arch', 'cpu_count', 'electron_version', 'env',
     'install_channel', 'install_id', 'locale', 'node_version',
     'os_release', 'platform', 'timezone', 'total_mem_mb',
   ].sort());
@@ -982,6 +1031,7 @@ test('a stub server bound to 127.0.0.1 receives exactly one well-formed install 
       install_channel: profile.installChannel,
       locale: profile.locale,
       timezone: String(profile.timezoneOffsetMinutes),
+      env: 'dev',
     });
     client.shutdown();
   } finally {

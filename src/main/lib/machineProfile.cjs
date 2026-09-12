@@ -51,6 +51,20 @@ function resolveInstallChannel({ appPath = null, devFlag = !!process.env.SM_DEV 
   return 'unknown';
 }
 
+/**
+ * Resolves the wire-level `env` discriminator ('prod' | 'dev' | 'test') from
+ * the real signals the caller already has — never inferred downstream from
+ * an appVersion string, which is how 1,526 pre-release/test `epic.create`
+ * records ended up misread as production usage (see telemetry.md). `test`
+ * takes priority: a vitest run that happens to report a `dev` installChannel
+ * (SM_DEV set in the test env) is still test traffic, not dev usage.
+ */
+function resolveEnv({ isTestRunner = false, installChannel } = {}) {
+  if (isTestRunner) return 'test';
+  if (installChannel === 'dev') return 'dev';
+  return 'prod';
+}
+
 /** sha256 of the concatenated stable spec fields, truncated to 12 hex chars. */
 function computeMachineDigest(specs) {
   const material = [
@@ -141,4 +155,5 @@ module.exports = {
   buildMachineProfile,
   computeMachineDigest,
   resolveInstallChannel,
+  resolveEnv,
 };

@@ -109,6 +109,15 @@ class PtyManager {
     // renderer will re-register its data/exit listeners on the same IPC
     // channels. The data stream is live; pre-reattach output is lost, which
     // is acceptable for a dev reload.
+    //
+    // Telemetry: this branch deliberately does NOT call
+    // telemetryCounters.trackSessionOpen() (see below, after the real spawn).
+    // Tab = claudeSessionId is a 1:1 mapping (CLAUDE.md domain model) — a
+    // reattach is the SAME session process still running, not a new one, so
+    // counting it here would double-count every renderer reload and every
+    // switch back to an already-open Epic's Terminal pane within the same
+    // Electron process. `session.open` counts fresh PTY spawns only; see
+    // telemetry.md for the full rationale and its trade-off.
     const existing = this.sessions.get(tabId);
     if (existing) {
       console.log('[pty] reattach to existing session tabId=', tabId, 'pid=', existing.proc.pid);

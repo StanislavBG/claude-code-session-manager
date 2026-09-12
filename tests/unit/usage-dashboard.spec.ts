@@ -178,6 +178,58 @@ describe('usage dashboard — states', () => {
   })
 })
 
+describe('usage dashboard — charts', () => {
+  it('renders at least two inline SVG charts for the fixture data', async () => {
+    const Dashboard = await loadDashboard()
+    document.body.innerHTML = '<div id="app"></div>'
+    const root = document.getElementById('app') as HTMLElement
+    const data = fixtureData()
+
+    Dashboard.renderDashboard(root, data)
+
+    const svgCount = (root.innerHTML.match(/<svg/g) || []).length
+    expect(svgCount).toBeGreaterThanOrEqual(2)
+  })
+
+  it('colors chart marks with the --series CSS custom properties, never a hard-coded hex', async () => {
+    const Dashboard = await loadDashboard()
+    document.body.innerHTML = '<div id="app"></div>'
+    const root = document.getElementById('app') as HTMLElement
+    const data = fixtureData()
+
+    Dashboard.renderDashboard(root, data)
+
+    const svgHtml = Array.from(root.querySelectorAll('svg')).map((s) => s.outerHTML).join('\n')
+    expect(svgHtml).toMatch(/var\(--series-1\)/)
+    expect(svgHtml).toMatch(/var\(--series-2\)/)
+    expect(svgHtml).not.toMatch(/#[0-9a-fA-F]{3,6}/)
+  })
+
+  it('degrades cleanly with a zero-length daily array — no NaN in the markup, no throw', async () => {
+    const Dashboard = await loadDashboard()
+    document.body.innerHTML = '<div id="app"></div>'
+    const root = document.getElementById('app') as HTMLElement
+    const data = fixtureData()
+    data.usage.daily = []
+    data.errors.daily = []
+
+    expect(() => Dashboard.renderDashboard(root, data)).not.toThrow()
+    expect(root.innerHTML).not.toMatch(/NaN/)
+  })
+
+  it('degrades cleanly with a single-element daily array — no NaN in the markup, no throw', async () => {
+    const Dashboard = await loadDashboard()
+    document.body.innerHTML = '<div id="app"></div>'
+    const root = document.getElementById('app') as HTMLElement
+    const data = fixtureData()
+    data.usage.daily = [data.usage.daily[0]]
+    data.errors.daily = [data.errors.daily[0]]
+
+    expect(() => Dashboard.renderDashboard(root, data)).not.toThrow()
+    expect(root.innerHTML).not.toMatch(/NaN/)
+  })
+})
+
 describe('usage dashboard — no PII', () => {
   it('the rendered fixture output contains no @-bearing token and no email/user/host field', async () => {
     const Dashboard = await loadDashboard()

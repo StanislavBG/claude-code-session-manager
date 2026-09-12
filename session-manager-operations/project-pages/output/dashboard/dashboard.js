@@ -65,6 +65,106 @@
     return String(n);
   }
 
+  // Trend charts share a single y-scale per chart (never dual-axis) and stay
+  // in the LA timezone by reusing formatDateTimeLA for axis labels — the date
+  // string is normalized to noon UTC first so the local-day boundary can't
+  // shift it to the adjacent calendar day.
+  var CHART_W = 640;
+  var CHART_H = 160;
+  var CHART_PAD_L = 8;
+  var CHART_PAD_R = 8;
+  var CHART_PAD_T = 14;
+  var CHART_PAD_B = 22;
+
+  function shortDateLabel(dateStr) {
+    if (!dateStr) return '';
+    var t = Date.parse(String(dateStr) + 'T12:00:00Z');
+    if (isNaN(t)) return String(dateStr);
+    var full = formatDateTimeLA(Math.floor(t / 1000));
+    var m = full.match(/^[A-Za-z]{3,9}\s\d{1,2}/);
+    return m ? m[0] : full;
+  }
+
+  function chartX(i, n) {
+    var usable = CHART_W - CHART_PAD_L - CHART_PAD_R;
+    if (n <= 1) return CHART_PAD_L + usable / 2;
+    return CHART_PAD_L + (i / (n - 1)) * usable;
+  }
+
+  function chartY(v, max) {
+    var usable = CHART_H - CHART_PAD_T - CHART_PAD_B;
+    return CHART_H - CHART_PAD_B - (v / max) * usable;
+  }
+
+  // rows: array of daily records. series: [{ key, label, color }] sharing one
+  // y-scale. Degrades to a flat/centered layout for n===0 or n===1 rather
+  // than dividing by zero.
+  function buildTimeSeriesChart(rows, series, ariaLabel) {
+    rows = rows || [];
+    var n = rows.length;
+
+    var overallMax = 0;
+    series.forEach(function (s) {
+      rows.forEach(function (r) {
+        var v = Number(r[s.key]) || 0;
+        if (v > overallMax) overallMax = v;
+      });
+    });
+    if (overallMax <= 0) overallMax = 1;
+
+    var baselineY = chartY(0, overallMax).toFixed(1);
+    var gridline =
+      '<line x1="' + CHART_PAD_L + '" y1="' + baselineY + '" x2="' + (CHART_W - CHART_PAD_R) +
+      '" y2="' + baselineY + '" stroke="var(--gridline)" stroke-width="1" />';
+
+    var marks = series.map(function (s) {
+      if (n === 0) return '';
+      if (n === 1) {
+        var v0 = Number(rows[0][s.key]) || 0;
+        return '<circle cx="' + chartX(0, n).toFixed(1) + '" cy="' + chartY(v0, overallMax).toFixed(1) +
+          '" r="3" fill="' + s.color + '" />';
+      }
+      var pts = rows.map(function (r, i) {
+        var v = Number(r[s.key]) || 0;
+        return chartX(i, n).toFixed(1) + ',' + chartY(v, overallMax).toFixed(1);
+      }).join(' ');
+      return '<polyline points="' + pts + '" fill="none" stroke="' + s.color +
+        '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />';
+    }).join('');
+
+    var xLabels = '';
+    if (n > 0) {
+      // n>=3 always yields three distinct indices; n===2 is the one case
+      // where the midpoint formula would collide with an endpoint.
+      var idxs = n === 1 ? [0] : n === 2 ? [0, 1] : [0, Math.floor((n - 1) / 2), n - 1];
+      xLabels = idxs.map(function (i) {
+        return '<text x="' + chartX(i, n).toFixed(1) + '" y="' + (CHART_H - 6) +
+          '" font-size="10" fill="var(--text-muted)" text-anchor="middle">' +
+          escapeHtml(shortDateLabel(rows[i].date)) + '</text>';
+      }).join('');
+    }
+
+    var yLabel = '<text x="' + CHART_PAD_L + '" y="' + (CHART_PAD_T - 3) +
+      '" font-size="10" fill="var(--text-muted)" text-anchor="start">' +
+      escapeHtml(compactNumber(overallMax)) + '</text>';
+
+    var legend = series.map(function (s) {
+      return '<span class="chart-legend__item"><span class="chart-legend__swatch" style="background:' +
+        s.color + '"></span>' + escapeHtml(s.label) + '</span>';
+    }).join('');
+
+    return (
+      '<div class="chart">' +
+        '<svg viewBox="0 0 ' + CHART_W + ' ' + CHART_H + '" role="img" aria-label="' + escapeHtml(ariaLabel) +
+          '" preserveAspectRatio="none" class="chart__svg">' +
+          '<title>' + escapeHtml(ariaLabel) + '</title>' +
+          gridline + marks + xLabels + yLabel +
+        '</svg>' +
+        '<div class="chart-legend">' + legend + '</div>' +
+      '</div>'
+    );
+  }
+
   function isEmptyPayload(data) {
     var installsTotal = data && data.installs ? data.installs.total : 0;
     var issuesCount = data && Array.isArray(data.issues) ? data.issues.length : 0;
@@ -154,9 +254,15 @@
       );
     }).join('');
 
+    var dailyChart = buildTimeSeriesChart(daily, [
+      { key: 'launches', label: 'Launches', color: 'var(--series-1)' },
+      { key: 'sessions', label: 'Sessions', color: 'var(--series-2)' },
+    ], 'Daily launches and sessions over the window');
+
     return (
       '<section class="panel" aria-labelledby="usage-heading">' +
         '<h2 id="usage-heading">Usage</h2>' +
+        dailyChart +
         '<div class="sparkbars" role="img" aria-label="Daily launches over the window">' + bars + '</div>' +
         '<table><thead><tr><th>Version</th><th class="num">Launches</th><th class="num">Sessions</th></tr></thead><tbody>' +
           (versionRows || '<tr><td colspan="3" class="muted">No data</td></tr>') +
@@ -200,6 +306,7 @@
   function renderErrors(errors) {
     errors = errors || {};
     var byVersion = errors.byVersion || [];
+    var daily = errors.daily || [];
     var rows = byVersion.map(function (v) {
       return (
         '<tr><td>' + escapeHtml(v.version) + '</td>' +
@@ -209,9 +316,15 @@
       );
     }).join('');
 
+    var dailyChart = buildTimeSeriesChart(daily, [
+      { key: 'errors', label: 'Errors', color: 'var(--series-1)' },
+      { key: 'warns', label: 'Warnings', color: 'var(--series-2)' },
+    ], 'Daily errors and warnings over the window');
+
     return (
       '<section class="panel" aria-labelledby="errors-heading">' +
         '<h2 id="errors-heading">Errors by version</h2>' +
+        dailyChart +
         '<table><thead><tr><th>Version</th><th class="num">Errors</th><th class="num">Warnings</th><th class="num">Installs affected</th></tr></thead><tbody>' +
           (rows || '<tr><td colspan="4" class="muted">No data</td></tr>') +
         '</tbody></table>' +
@@ -358,6 +471,8 @@
     formatWindow: formatWindow,
     compactNumber: compactNumber,
     isEmptyPayload: isEmptyPayload,
+    buildTimeSeriesChart: buildTimeSeriesChart,
+    shortDateLabel: shortDateLabel,
     renderDashboard: renderDashboard,
     renderLoading: renderLoading,
     renderEmpty: renderEmpty,

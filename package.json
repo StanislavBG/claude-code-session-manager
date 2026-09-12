@@ -56,7 +56,8 @@
     "manual:figures": "xvfb-run -a node scripts/capture-manual-figures.mjs",
     "lint:selectors": "node scripts/check-unstable-selectors.cjs",
     "lint:hooks": "node scripts/check-conditional-hooks.cjs",
-    "lint": "npm run lint:selectors && npm run lint:hooks"
+    "lint:unregistered-tests": "node scripts/check-unregistered-tests.cjs",
+    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:unregistered-tests"
   },
   "keywords": [
     "claude",

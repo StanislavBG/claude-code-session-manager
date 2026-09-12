@@ -15,7 +15,7 @@ import { test, expect, beforeEach, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 const gitWorktree = require('../gitWorktree.cjs');
 
 let tmpRoot;
@@ -480,6 +480,104 @@ test('[job] reconcileWorktreesOnBoot never touches a worktree outside WORKTREE_R
   await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job' });
   expect(fs.existsSync(humanWorktreeDir)).toBe(true);
   git(['worktree', 'remove', '--force', humanWorktreeDir], repoCwd);
+});
+
+// ──────────────────────────────────────────── PRD 1162: job-kind isLive gate
+// (a job survives an app restart via detached:true, so a worktree found at
+// boot is not by itself proof its run already died — see scheduler.cjs's
+// boot sweep + jobWorktreeBootLive.cjs, exercised here at the
+// reconcileWorktreesOnBoot layer with a fully injected isLive predicate).
+
+test('[job] reconcileWorktreesOnBoot removes a job worktree with no live holder and no running row', async () => {
+  const slug = 'test-slug-dead';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  gitWorktree._resetActiveWorktreeCountForTests('job', 0);
+
+  const isLive = vi.fn(() => false);
+  await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job', isLive });
+
+  expect(fs.existsSync(worktree.dir)).toBe(false);
+  expect(isLive).toHaveBeenCalledWith(slug, expect.objectContaining({ worktree: worktree.dir }));
+});
+
+test('[job] reconcileWorktreesOnBoot SKIPS a worktree whose row is running with a live pid', async () => {
+  const slug = 'test-slug-running-live';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  gitWorktree._resetActiveWorktreeCountForTests('job', 0);
+
+  const isLive = (key) => key === slug;
+  const result = await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job', isLive });
+
+  expect(fs.existsSync(worktree.dir)).toBe(true);
+  expect(result.checkoutsRemoved).toBe(0);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[job] reconcileWorktreesOnBoot SKIPS a worktree whose row is absent/terminal but a live cwd holder is reported', async () => {
+  const slug = 'test-slug-terminal-holder';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  gitWorktree._resetActiveWorktreeCountForTests('job', 0);
+
+  // Row is absent from the caller's bookkeeping entirely (as if the queue row
+  // already went terminal) — only the injected cwd-holder signal says live.
+  const isLive = (key, entry) => entry.worktree === worktree.dir;
+  const result = await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job', isLive });
+
+  expect(fs.existsSync(worktree.dir)).toBe(true);
+  expect(result.checkoutsRemoved).toBe(0);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+// ──────────────────────────────────────────── PRD 1162: hasLiveHolder / listCwdHolders
+
+test('hasLiveHolder returns true for the current process own cwd', () => {
+  if (process.platform !== 'linux') return; // darwin has no /proc — covered by the pid-based gate instead
+  expect(gitWorktree.hasLiveHolder(process.cwd())).toBe(true);
+});
+
+test('hasLiveHolder returns false for a freshly-created empty temp dir nothing holds as cwd', () => {
+  const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-hasLiveHolder-empty-'));
+  try {
+    expect(gitWorktree.hasLiveHolder(emptyDir)).toBe(false);
+  } finally {
+    fs.rmSync(emptyDir, { recursive: true, force: true });
+  }
+});
+
+test('hasLiveHolder never throws for a non-existent path', () => {
+  expect(() => gitWorktree.hasLiveHolder('/definitely/does/not/exist/anywhere')).not.toThrow();
+  expect(gitWorktree.hasLiveHolder('/definitely/does/not/exist/anywhere')).toBe(false);
+});
+
+test('hasLiveHolder still matches a checkout dir whose /proc readlink shows the "(deleted)" suffix (unlinked while a process still held it as cwd)', async () => {
+  if (process.platform !== 'linux') return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-hasLiveHolder-deleted-'));
+  const child = spawn('sleep', ['5'], { cwd: dir, stdio: 'ignore' });
+  try {
+    // Give the child a moment to actually chdir before the dir is unlinked.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    fs.rmSync(dir, { recursive: true, force: true });
+    expect(gitWorktree.hasLiveHolder(dir)).toBe(true);
+  } finally {
+    child.kill();
+  }
+});
+
+test('hasLiveHolder accepts a precomputed holders Set from listCwdHolders() and matches a path nested under a holder', () => {
+  if (process.platform !== 'linux') return; // darwin: hasLiveHolder always false, per its own contract
+  const holders = new Set(['/tmp/some-worktree-checkout']);
+  expect(gitWorktree.hasLiveHolder('/tmp/some-worktree-checkout/nested/deep', holders)).toBe(false);
+  expect(gitWorktree.hasLiveHolder('/tmp/some-worktree-checkout', holders)).toBe(true);
+});
+
+test('listCwdHolders returns a Set and includes the current process own cwd on linux', () => {
+  const holders = gitWorktree.listCwdHolders();
+  expect(holders).toBeInstanceOf(Set);
+  if (process.platform === 'linux') {
+    expect(holders.has(path.resolve(process.cwd()))).toBe(true);
+  } else {
+    expect(holders.size).toBe(0);
+  }
 });
 
 // ──────────────────────────────────────────── epic kind (new)

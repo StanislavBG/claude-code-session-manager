@@ -555,6 +555,72 @@ async function computeObservedWorktreeCount(kind) {
   return liveWorktreePaths.size;
 }
 
+/**
+ * Enumerates every process on the machine currently holding some directory as
+ * its cwd, as a Set of resolved absolute paths (never throws). Linux-only —
+ * walks `/proc/*\/cwd` via `readlinkSync`, tolerating a per-pid `EACCES`
+ * (owned by another user) or `ENOENT`/`ESRCH` (process exited between the
+ * `readdir` and the `readlink`) by simply skipping that pid rather than
+ * aborting the whole scan. On darwin (no `/proc`) returns an empty Set with
+ * no log line — `hasLiveHolder`'s caller is expected to also gate on a live
+ * `runtime.pid`, which is the darwin-covering half of that check.
+ *
+ * A readlink target ending in ` (deleted)` (the kernel's marker for a cwd
+ * whose directory entry was unlinked while still held open) has that suffix
+ * stripped before being added, so a holder of an already-unlinked directory
+ * still counts as a holder of the original path.
+ */
+function listCwdHolders() {
+  const holders = new Set();
+  if (process.platform !== 'linux') return holders;
+  let pids;
+  try {
+    pids = fs.readdirSync('/proc').filter((name) => /^\d+$/.test(name));
+  } catch {
+    return holders;
+  }
+  const DELETED_SUFFIX = ' (deleted)';
+  for (const pid of pids) {
+    try {
+      const target = fs.readlinkSync(`/proc/${pid}/cwd`);
+      const clean = target.endsWith(DELETED_SUFFIX) ? target.slice(0, -DELETED_SUFFIX.length) : target;
+      holders.add(path.resolve(clean));
+    } catch {
+      // EACCES (not our process), ENOENT/ESRCH (pid exited mid-scan) — skip.
+    }
+  }
+  return holders;
+}
+
+/**
+ * True when any process on the machine holds `dir` (or a path nested under
+ * it) as its cwd — the liveness signal that lets boot reconciliation tell a
+ * worktree still backing a running `claude -p` executor (survives an Electron
+ * restart via `detached: true`) apart from a genuinely abandoned one. Never
+ * throws.
+ *
+ * `holders`, when supplied, must be a `Set` already produced by
+ * `listCwdHolders()` — this lets a caller sweeping N candidate worktrees
+ * compute the `/proc` scan once and reuse it, rather than paying a full
+ * `readdir` + per-pid `readlink` pass for every candidate. When omitted, this
+ * computes its own (a single-candidate convenience, and what the bare
+ * `hasLiveHolder(dir)` contract in the AC exercises directly).
+ */
+function hasLiveHolder(dir, holders) {
+  try {
+    if (!dir || typeof dir !== 'string') return false;
+    if (process.platform !== 'linux') return false;
+    const resolvedDir = path.resolve(dir);
+    const set = holders instanceof Set ? holders : listCwdHolders();
+    for (const holder of set) {
+      if (holder === resolvedDir || holder.startsWith(resolvedDir + path.sep)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 /** TTL-memoized wrapper over `computeObservedWorktreeCount` — see the cache header above. */
 async function getObservedWorktreeCount(kind, ttlMs = OBSERVED_WORKTREE_COUNT_TTL_MS) {
   const cache = observedWorktreeCountCache[kind];
@@ -1196,9 +1262,14 @@ async function reclaimTerminalJobOrphans({ cwd, terminalSlugs }) {
  * what lets the epic kind skip a worktree whose owning Epic is still
  * `active` in the project's active-index.json (the caller supplies that
  * check; this module has no active-index.json knowledge of its own — see
- * this chain's next PRD for the real wiring). Job-kind reconciliation has no
- * equivalent concept (a job worktree found at boot is, by definition, from a
- * run that didn't finish) and typically omits `isLive`.
+ * this chain's next PRD for the real wiring). The job kind uses the same
+ * mechanism for a different signal: a job is spawned `detached: true`
+ * (scheduler.cjs), so its `claude -p` executor can survive an app restart —
+ * scheduler.cjs's own `isLive` treats a worktree as live when its owning
+ * queue row is still `running` with a live pid, OR `hasLiveHolder` finds a
+ * process whose cwd is still the checkout itself (see jobWorktreeBootLive.cjs).
+ * A caller that omits `isLive` entirely (e.g. an ad hoc test) still gets the
+ * old unconditional-reap behavior for that kind.
  *
  * After the per-cwd pass, this also runs `sweepStaleWorktreeCheckouts` —
  * a second, root-directory-driven pass that is NOT limited to `cwds`, so a
@@ -1306,6 +1377,8 @@ module.exports = {
   salvageDirtyDelta,
   isBranchMergedIntoHead,
   parseWorktreeListPorcelain,
+  listCwdHolders,
+  hasLiveHolder,
   reconcileWorktreesOnBoot,
   sweepStaleWorktreeCheckouts,
   mainTreeFromWorktreeGitFile,

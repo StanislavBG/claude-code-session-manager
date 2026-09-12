@@ -143,6 +143,8 @@ function resolveOriginSessionId(cwd, epicId) {
 const sessionSlots = require('./lib/sessionSlots.cjs');
 const quietMachineLease = require('./lib/quietMachineLease.cjs');
 const jobWorktree = require('./lib/jobWorktree.cjs');
+const gitWorktree = require('./lib/gitWorktree.cjs');
+const { buildJobWorktreeIsLive } = require('./lib/jobWorktreeBootLive.cjs');
 const { reconcileEpicWorktreesOnBoot } = require('./lib/epicWorktreeBoot.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdFrontmatter.cjs');
@@ -8617,7 +8619,18 @@ async function init() {
     try {
       const worktreeCwds = new Set(bootSnap.jobs.map((j) => j.cwd).filter(Boolean));
       worktreeCwds.add(DEFAULT_PROJECT_CWD);
-      await jobWorktree.reconcileWorktreesOnBoot([...worktreeCwds]);
+      // A job is spawned `detached: true`, so its `claude -p` executor can
+      // survive this very app restart — a worktree found at boot is NOT, by
+      // itself, proof its run already died. isLive checks the already-read
+      // bootSnap (no extra queue read) for a live running-row pid, OR a live
+      // /proc cwd holder under the checkout itself. See jobWorktreeBootLive.cjs.
+      const isLive = buildJobWorktreeIsLive({
+        bootJobs: bootSnap.jobs,
+        claudePidAlive,
+        hasLiveHolder: gitWorktree.hasLiveHolder,
+        cwdHolders: gitWorktree.listCwdHolders(),
+      });
+      await jobWorktree.reconcileWorktreesOnBoot([...worktreeCwds], { isLive });
     } catch (e) {
       console.error('[scheduler] boot worktree reconciliation failed', e?.message);
     }

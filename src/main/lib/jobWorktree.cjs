@@ -65,7 +65,7 @@ module.exports = {
   salvageJobWorktreeDiff: gitWorktree.salvageJobWorktreeDiff,
   salvageJobDirtyDelta: gitWorktree.salvageJobDirtyDelta,
   parseWorktreeListPorcelain: gitWorktree.parseWorktreeListPorcelain,
-  reconcileWorktreesOnBoot: (cwds) => gitWorktree.reconcileWorktreesOnBoot(cwds, { kind: KIND }),
+  reconcileWorktreesOnBoot: (cwds, opts = {}) => gitWorktree.reconcileWorktreesOnBoot(cwds, { kind: KIND, isLive: opts.isLive }),
   reclaimTerminalJobOrphans: gitWorktree.reclaimTerminalJobOrphans,
   // Test-only escape hatch for the in-memory concurrency counter.
   _resetActiveWorktreeCountForTests(n = 0) { gitWorktree._resetActiveWorktreeCountForTests(KIND, n); },

@@ -145,6 +145,7 @@ const quietMachineLease = require('./lib/quietMachineLease.cjs');
 const jobWorktree = require('./lib/jobWorktree.cjs');
 const gitWorktree = require('./lib/gitWorktree.cjs');
 const { buildJobWorktreeIsLive } = require('./lib/jobWorktreeBootLive.cjs');
+const { buildTerminalOrphanIsLive } = require('./lib/jobWorktreeTerminalOrphanLive.cjs');
 const { reconcileEpicWorktreesOnBoot } = require('./lib/epicWorktreeBoot.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdFrontmatter.cjs');
@@ -6488,29 +6489,64 @@ let lastTerminalOrphanReclaimAt = 0;
  * Fire-and-forget, throttled sweep for job-kind worktrees whose owning queue
  * row has already resolved (completed/failed/skipped) but whose checkout is
  * still on disk — see gitWorktree.cjs's reclaimTerminalJobOrphans header for
- * the two independent safety proofs it requires before deleting anything.
+ * the two independent safety proofs it requires before deleting anything,
+ * and jobWorktreeTerminalOrphanLive.cjs for the liveness gate checked BEFORE
+ * those proofs (PRD 1163: neither proof is itself a liveness check, so a
+ * still-running executor behind a prematurely-terminal row could otherwise
+ * satisfy both).
+ *
  * Runs once per TERMINAL_ORPHAN_RECLAIM_INTERVAL_MS across every project cwd
- * this tick's queue state knows about. Never throws (each per-cwd call is
- * itself never-throws; this wrapper is just the throttle + fan-out).
+ * this tick's queue state knows about. The `/proc` holder scan
+ * (`listCwdHolders`) is computed ONCE per sweep here and reused for every
+ * candidate across every cwd, rather than re-scanning `/proc` per candidate.
+ * Never throws (each per-cwd call is itself never-throws; this wrapper is
+ * just the throttle + fan-out + queue-row stamping).
  */
 async function reclaimTerminalJobOrphansThrottled(state) {
   const now = Date.now();
   if (now - lastTerminalOrphanReclaimAt < TERMINAL_ORPHAN_RECLAIM_INTERVAL_MS) return;
   lastTerminalOrphanReclaimAt = now;
 
-  const terminalSlugsByCwd = new Map();
+  const terminalJobsByCwd = new Map();
   for (const j of state.jobs || []) {
     if (j.status !== 'completed' && j.status !== 'failed' && j.status !== 'skipped') continue;
     const cwd = j.cwd || DEFAULT_PROJECT_CWD;
-    if (!terminalSlugsByCwd.has(cwd)) terminalSlugsByCwd.set(cwd, new Set());
-    terminalSlugsByCwd.get(cwd).add(j.slug);
+    if (!terminalJobsByCwd.has(cwd)) terminalJobsByCwd.set(cwd, []);
+    terminalJobsByCwd.get(cwd).push(j);
   }
 
-  for (const [cwd, terminalSlugs] of terminalSlugsByCwd) {
-    const reclaimed = await jobWorktree.reclaimTerminalJobOrphans({ cwd, terminalSlugs });
+  const cwdHolders = gitWorktree.listCwdHolders();
+  // { slug -> reason }, collected across every cwd this sweep touches, so a
+  // single mutate() at the end can stamp every blocked-live row at once.
+  const blockedLive = new Map();
+
+  for (const [cwd, terminalJobs] of terminalJobsByCwd) {
+    const terminalSlugs = new Set(terminalJobs.map((j) => j.slug));
+    const isLive = buildTerminalOrphanIsLive({
+      terminalJobs,
+      claudePidAlive,
+      hasLiveHolder: gitWorktree.hasLiveHolder,
+      cwdHolders,
+      onLive: (slug, reason) => blockedLive.set(slug, reason),
+    });
+    const reclaimed = await jobWorktree.reclaimTerminalJobOrphans({ cwd, terminalSlugs, isLive });
     if (reclaimed.length) {
       console.log(`[scheduler] reclaimed ${reclaimed.length} terminal job-worktree orphan(s) in ${cwd}: ${reclaimed.join(', ')}`);
     }
+  }
+
+  if (blockedLive.size > 0) {
+    const stampedAt = new Date().toISOString();
+    await mutate((s) => {
+      for (const j of s.jobs || []) {
+        if (!blockedLive.has(j.slug)) continue;
+        j.worktreeReclaimBlockedLive = true;
+        j.worktreeReclaimBlockedLiveAt = stampedAt;
+        j.worktreeReclaimBlockedLiveReason = blockedLive.get(j.slug);
+      }
+    }).catch((e) => {
+      console.warn('[scheduler] failed to stamp worktreeReclaimBlockedLive', e?.message);
+    });
   }
 }
 

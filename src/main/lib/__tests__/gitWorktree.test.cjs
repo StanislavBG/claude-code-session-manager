@@ -407,6 +407,98 @@ test('[job] reclaimTerminalJobOrphans ignores a worktree whose slug is not in te
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
 });
 
+// ──────────────────────────────────────────── PRD 1163: liveness gate in front of reclaimTerminalJobOrphans
+
+test('[job] reclaimTerminalJobOrphans does NOT remove a checkout when an injected isLive predicate reports it live', async () => {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'terminal-but-live' });
+  expect(worktree.ok).toBe(true);
+  // Clean-of-real-work shape (zero commits ahead, nothing dirty) — would be
+  // reclaimed by the existing two proofs alone. The liveness gate must be
+  // checked BEFORE those proofs and override them.
+  const isLive = vi.fn(async () => true);
+
+  const reclaimed = await gitWorktree.reclaimTerminalJobOrphans({
+    cwd: repoCwd,
+    terminalSlugs: new Set(['terminal-but-live']),
+    isLive,
+  });
+
+  expect(reclaimed).toEqual([]);
+  expect(fs.existsSync(worktree.dir)).toBe(true);
+  expect(isLive).toHaveBeenCalledWith('terminal-but-live', expect.objectContaining({ worktree: worktree.dir }));
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[job] reclaimTerminalJobOrphans still removes a terminal, dead, merged, ops-only-dirty checkout when isLive reports it not live', async () => {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'terminal-and-dead' });
+  expect(worktree.ok).toBe(true);
+  const isLive = vi.fn(async () => false);
+
+  const reclaimed = await gitWorktree.reclaimTerminalJobOrphans({
+    cwd: repoCwd,
+    terminalSlugs: new Set(['terminal-and-dead']),
+    isLive,
+  });
+
+  expect(reclaimed).toEqual(['terminal-and-dead']);
+  expect(fs.existsSync(worktree.dir)).toBe(false);
+  expect(isLive).toHaveBeenCalled();
+});
+
+test('[job] reclaimTerminalJobOrphans treats an isLive that throws as fail-safe (assume live, do not delete)', async () => {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'isLive-throws' });
+  expect(worktree.ok).toBe(true);
+  const isLive = vi.fn(async () => { throw new Error('boom'); });
+
+  const reclaimed = await gitWorktree.reclaimTerminalJobOrphans({
+    cwd: repoCwd,
+    terminalSlugs: new Set(['isLive-throws']),
+    isLive,
+  });
+
+  expect(reclaimed).toEqual([]);
+  expect(fs.existsSync(worktree.dir)).toBe(true);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[job] jobWorktreeTerminalOrphanLive.buildTerminalOrphanIsLive skips on a live cwd holder BEFORE checking pid, and reports the reason via onLive', async () => {
+  const { buildTerminalOrphanIsLive } = require('../jobWorktreeTerminalOrphanLive.cjs');
+  const claudePidAlive = vi.fn(() => false); // pid check must never even matter here
+  const hasLiveHolder = vi.fn(() => true);
+  const onLive = vi.fn();
+  const isLive = buildTerminalOrphanIsLive({
+    terminalJobs: [{ slug: 'held-slug', runtime: { pid: 4242 } }],
+    claudePidAlive,
+    hasLiveHolder,
+    cwdHolders: new Set(['/tmp/fake']),
+    onLive,
+  });
+
+  const result = await isLive('held-slug', { worktree: '/tmp/fake/checkout' });
+
+  expect(result).toBe(true);
+  expect(hasLiveHolder).toHaveBeenCalledWith('/tmp/fake/checkout', expect.any(Set));
+  expect(onLive).toHaveBeenCalledWith('held-slug', expect.stringContaining('live cwd holder'));
+});
+
+test('[job] jobWorktreeTerminalOrphanLive.buildTerminalOrphanIsLive falls back to the recorded pid when there is no live holder', async () => {
+  const { buildTerminalOrphanIsLive } = require('../jobWorktreeTerminalOrphanLive.cjs');
+  const claudePidAlive = vi.fn((pid) => pid === 4242);
+  const hasLiveHolder = vi.fn(() => false);
+  const onLive = vi.fn();
+  const isLive = buildTerminalOrphanIsLive({
+    terminalJobs: [{ slug: 'pid-slug', runtime: { pid: 4242 } }],
+    claudePidAlive,
+    hasLiveHolder,
+    onLive,
+  });
+
+  expect(await isLive('pid-slug', { worktree: '/tmp/whatever' })).toBe(true);
+  expect(onLive).toHaveBeenCalledWith('pid-slug', expect.stringContaining('pid=4242'));
+
+  expect(await isLive('unknown-slug', { worktree: '/tmp/whatever' })).toBe(false);
+});
+
 test('[job] getMaxConcurrentWorktrees floors the job cap at the sessionSlots pool size (PRD 1112)', () => {
   const originalSlots = process.env.SM_SESSION_SLOTS;
   try {
@@ -842,6 +934,29 @@ test('[job] sweepStaleWorktreeCheckouts treats staleAgeMs: 0 as "reclaim immedia
   gitWorktree._resetActiveWorktreeCountForTests('job', 0);
 
   const result = await gitWorktree.sweepStaleWorktreeCheckouts('job', { staleAgeMs: 0 });
+
+  expect(result.checkoutsRemoved).toBe(1);
+  expect(fs.existsSync(worktree.dir)).toBe(false);
+});
+
+test('[job] sweepStaleWorktreeCheckouts does NOT remove an old-mtime checkout with a live holder, regardless of age', async () => {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'stale-but-live' });
+  expect(worktree.ok).toBe(true);
+  const holders = new Set([path.resolve(worktree.dir)]);
+
+  const result = await gitWorktree.sweepStaleWorktreeCheckouts('job', { staleAgeMs: 0, holders });
+
+  expect(result.checkoutsRemoved).toBe(0);
+  expect(fs.existsSync(worktree.dir)).toBe(true);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[job] sweepStaleWorktreeCheckouts removes an old-mtime checkout when there is no live holder', async () => {
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'stale-and-dead' });
+  expect(worktree.ok).toBe(true);
+  const holders = new Set(); // nothing holds it
+
+  const result = await gitWorktree.sweepStaleWorktreeCheckouts('job', { staleAgeMs: 0, holders });
 
   expect(result.checkoutsRemoved).toBe(1);
   expect(fs.existsSync(worktree.dir)).toBe(false);

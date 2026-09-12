@@ -373,15 +373,27 @@ async function teardownOrphanedCheckout(dir) {
  *
  * A checkout younger than `staleAgeMs` (mtime-based) is NEVER touched — this
  * is what keeps an in-progress job or Epic safe from a concurrent boot sweep.
- * This intentionally does NOT accept an `isLive` predicate the way
+ * This intentionally does NOT accept a queue-aware `isLive` predicate the way
  * `reconcileWorktreesOnBoot`'s per-cwd pass does: that predicate is scoped to
  * ONE project's own active-index.json per call, but this sweep walks EVERY
  * project's checkouts under the shared kind root in one pass — applying one
  * project's liveness answer to another project's checkout would be worse
  * than no answer at all (a false "not live" for a foreign key would tear
  * down a genuinely active Epic before its own project's turn ever runs this
- * sweep). The age threshold (7 days for epics, by default) is the only
- * safety margin here, deliberately.
+ * sweep).
+ *
+ * It DOES, however, check `hasLiveHolder` on every candidate that clears the
+ * age threshold: unlike a queue-derived `isLive`, a live `/proc` cwd holder
+ * is project-agnostic and machine-global — a directory's mtime does NOT
+ * advance when a long-running process only writes into subdirectories of it
+ * (exactly the "starry-night-ships"-class workload), so an old mtime is not
+ * proof of abandonment. A process still holding the checkout as its cwd is
+ * authoritative over any timer and is never reaped, regardless of age.
+ * `holders` may be supplied precomputed (one `/proc` scan reused across many
+ * candidates/kinds); when omitted this computes its own. On darwin (no
+ * `/proc`) `listCwdHolders`/`hasLiveHolder` always report no holder, so the
+ * age threshold alone gates darwin — same accepted tradeoff as
+ * `reclaimTerminalJobOrphans`'s `isLive`.
  *
  * Every path visited is verified (`isUnderRoot`) to be nested under this
  * kind's own root before any read or delete, so a maliciously-shaped on-disk
@@ -394,6 +406,7 @@ async function sweepStaleWorktreeCheckouts(kind, opts = {}) {
   const staleAgeMs = Number.isFinite(opts.staleAgeMs) && opts.staleAgeMs >= 0
     ? opts.staleAgeMs
     : getStaleSweepAgeMs(kind);
+  const holders = opts.holders instanceof Set ? opts.holders : listCwdHolders();
   const result = { checkoutsRemoved: 0, emptyRootsRemoved: 0 };
 
   let hashEntries;
@@ -427,6 +440,11 @@ async function sweepStaleWorktreeCheckouts(kind, opts = {}) {
         continue;
       }
       if (Date.now() - stat.mtimeMs < staleAgeMs) continue; // still fresh — never touched
+
+      if (hasLiveHolder(checkoutDir, holders)) {
+        console.log(`[gitWorktree] stale-age sweep (kind:${kind}): skipping ${checkoutDir} — live cwd holder outlasts the age threshold`);
+        continue;
+      }
 
       try {
         await teardownOrphanedCheckout(checkoutDir);
@@ -1202,8 +1220,20 @@ function keyFromBranch(kind, branch) {
  * A candidate failing either check is left alone for a human/the stale-age
  * sweep to deal with. Returns the list of slugs actually reclaimed. Never
  * throws.
+ *
+ * Neither proof above is a liveness check: a still-running executor that
+ * hasn't committed yet trivially satisfies proof 1 (zero commits ahead), and
+ * satisfies proof 2 whenever its in-progress output is gitignored. So an
+ * optional `isLive(slug, entry)` predicate — supplied by the caller, which
+ * alone knows the owning queue row's recorded pid; this module keeps no
+ * queue knowledge of its own — is checked FIRST, before either proof, since
+ * it is the cheapest and most decisive gate. A candidate it reports live is
+ * skipped and logged once, without ever reaching (or affecting) the
+ * merge/status proofs below. `isLive` throwing is treated fail-SAFE: assume
+ * live (skip), never assume dead — leaking a checkout one more sweep cycle
+ * is far cheaper than deleting a running job's worktree out from under it.
  */
-async function reclaimTerminalJobOrphans({ cwd, terminalSlugs }) {
+async function reclaimTerminalJobOrphans({ cwd, terminalSlugs, isLive }) {
   const kind = 'job';
   const root = worktreeRootFor(kind);
   const reclaimed = [];
@@ -1221,6 +1251,16 @@ async function reclaimTerminalJobOrphans({ cwd, terminalSlugs }) {
     if (!entry.worktree || !isUnderRoot(entry.worktree, root)) continue;
     const slug = keyFromBranch(kind, entry.branch);
     if (!slug || !terminalSlugs.has(slug)) continue;
+
+    if (typeof isLive === 'function') {
+      let live;
+      try {
+        live = await isLive(slug, entry);
+      } catch {
+        live = true; // fail-safe: an isLive that throws must never be read as "dead"
+      }
+      if (live) continue;
+    }
 
     const merged = await isBranchMergedIntoHead(cwd, entry.branch);
     if (!merged) continue; // real un-landed work — never touch
@@ -1312,7 +1352,7 @@ async function reconcileWorktreesOnBoot(cwds, opts = {}) {
 
   let sweep = { checkoutsRemoved: 0, emptyRootsRemoved: 0 };
   try {
-    sweep = await sweepStaleWorktreeCheckouts(kind, { staleAgeMs: opts.staleAgeMs });
+    sweep = await sweepStaleWorktreeCheckouts(kind, { staleAgeMs: opts.staleAgeMs, holders: opts.holders });
   } catch {
     /* never let the orphan sweep take down boot reconciliation */
   }

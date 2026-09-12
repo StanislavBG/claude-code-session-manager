@@ -95,6 +95,7 @@ const {
   PIDLESS_SPAWN_GRACE_MS,
   INVESTIGATION_MAX_MS,
   STARVATION_ESCALATE_MS,
+  STARVE_ESCALATION_MS,
 } = require('./lib/schedulerConfig.cjs');
 const QUARANTINE_ESCALATE_MS = process.env.SM_QUARANTINE_ESCALATE_HOURS
   ? Number(process.env.SM_QUARANTINE_ESCALATE_HOURS) * 60 * 60_000
@@ -6995,6 +6996,71 @@ async function runQueueStarvationWatchdog(state, { now = Date.now(), thresholdMs
   return primary;
 }
 
+// One-shot latch, keyed per cwd, for the starve-escalation consequence below —
+// never escalate the same starve stretch twice. Cleared the moment that cwd
+// stops appearing in findStarvedProjects at all (dispatched, or the machine
+// went idle/paused), mirroring the heartbeat's stallSince/stallToasted pair.
+const starveEscalated = new Set();
+
+/**
+ * selectStarveEscalations(starvedProjects, escalatedCwds, thresholdMs)
+ *   → { toEscalate: [...sp], toClear: [cwd, ...] }
+ *
+ * Pure. `starvedProjects` is this sweep's findStarvedProjects() output (the
+ * per-cwd STARVED verdict — cwd, pendingCount, oldestPendingSlug, ageMs);
+ * `escalatedCwds` is the Set already latched from a prior sweep.
+ *
+ * toEscalate: rows crossing thresholdMs for the FIRST time this stretch —
+ * i.e. old enough AND not already latched.
+ * toClear: previously-latched cwds no longer reported as starved at all this
+ * sweep, so a LATER starve on that project escalates again instead of being
+ * silently suppressed forever by a stale latch.
+ */
+function selectStarveEscalations(starvedProjects, escalatedCwds, thresholdMs = STARVE_ESCALATION_MS) {
+  const stillStarved = new Set(starvedProjects.map((sp) => sp.cwd));
+  const toClear = [...escalatedCwds].filter((cwd) => !stillStarved.has(cwd));
+  const toEscalate = starvedProjects.filter((sp) => sp.ageMs >= thresholdMs && !escalatedCwds.has(sp.cwd));
+  return { toEscalate, toClear };
+}
+
+/**
+ * runStarveEscalationSweep(starvedProjects) — acts on selectStarveEscalations'
+ * verdict: audits a DISTINCT 'project_starve_escalated' event (once per starve
+ * stretch, per cwd) and pushes the same toast-channel error the heartbeat's
+ * stall detector already uses ('schedule:stall' → renderer toast.error), so a
+ * starve that has gone on long enough to matter is visible without grepping
+ * the audit log. The hold reason is read from `lastTick` (recordTick's own
+ * last-computed outcome) — never re-evaluated here, so this can never
+ * disagree with what actually happened on the last tick.
+ *
+ * Escalation only: never mutates a job, never dispatches, never bypasses a
+ * gate. Exported for direct unit testing (attach a fake window via
+ * attachWindow() first to assert the toast send).
+ */
+function runStarveEscalationSweep(starvedProjects) {
+  const { toEscalate, toClear } = selectStarveEscalations(starvedProjects, starveEscalated, STARVE_ESCALATION_MS);
+  for (const cwd of toClear) starveEscalated.delete(cwd);
+  for (const sp of toEscalate) {
+    starveEscalated.add(sp.cwd);
+    const holdReason = lastTick?.reason ?? 'unknown';
+    const mins = Math.round(sp.ageMs / 60_000);
+    console.error(
+      `[scheduler] PROJECT STARVE ESCALATED: project=${sp.cwd} pending=${sp.pendingCount} oldest=${sp.oldestPendingSlug} `
+      + `waiting=${mins}m (>= ${Math.round(STARVE_ESCALATION_MS / 60_000)}m escalation threshold), hold reason=${holdReason} — `
+      + 'a bounded escalation only; nothing was auto-reset, cancelled, or dispatched',
+    );
+    appendAuditEvent('project_starve_escalated', {
+      cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs, holdReason,
+    });
+    sendIfAlive(mainWindow, 'schedule:stall', {
+      message: `Project starved: ${sp.cwd} has ${sp.pendingCount} pending PRD(s), oldest waiting ~${mins}m `
+        + `(hold reason: ${holdReason}) — check the Scheduler tab.`,
+      total: sp.pendingCount,
+      byProject: { [sp.cwd]: { starved: sp.pendingCount } },
+    });
+  }
+}
+
 // ---------- dead-process reaper ----------
 
 // Queue-health sweep cadence: hangs off reapDeadRunningJobs's own cycle
@@ -7977,6 +8043,123 @@ function findStuckFailedJobs(jobs, now, thresholdMs) {
     if (ageMs >= thresholdMs) stuck.push({ slug: j.slug, cwd: j.cwd ?? null, ageMs });
   }
   return stuck;
+}
+
+// Bounded automatic terminal decision for an EXHAUSTED needs_review row
+// (isExhaustedAutoFix === true — auto-fix attempted, no plan produced,
+// retries spent): up to NEEDS_REVIEW_RESOLVE_CAP requeue attempts (a
+// needs_review -> pending -> ... -> needs_review round trip counts as one
+// spent attempt), each gated on having sat exhausted-needs_review for
+// NEEDS_REVIEW_RESOLVE_MS, before the row is auto-skipped so a `dependsOn`
+// chain behind it always drains without an operator. Same env-override
+// shape as FAILED_AUTORESET_MS above.
+const NEEDS_REVIEW_RESOLVE_CAP = 2;
+const NEEDS_REVIEW_RESOLVE_MS = process.env.SM_NEEDS_REVIEW_RESOLVE_MINUTES
+  ? Number(process.env.SM_NEEDS_REVIEW_RESOLVE_MINUTES) * 60_000
+  : 30 * 60_000;
+
+/**
+ * Kill-switch gate for the needs_review auto-resolve pass below
+ * (SM_NEEDS_REVIEW_AUTORESOLVE_DISABLE=1), same shape as
+ * failedAutoResetDisabled/stuckFailedEscalationDisabled above.
+ */
+function needsReviewAutoResolveDisabled() {
+  return process.env.SM_NEEDS_REVIEW_AUTORESOLVE_DISABLE === '1';
+}
+
+/**
+ * selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) →
+ *   [{ slug, cwd, ageMs, attempts }]
+ *
+ * Pure selector — no IO. Selects `needs_review` rows whose auto-fix path is
+ * genuinely spent (isExhaustedAutoFix), whose newest statusHistory entry
+ * with `to === 'needs_review'` is older than `thresholdMs`, and whose
+ * exhaustedResolveAttempts counter has not yet spent its cap.
+ *
+ * The inclusion bound is inclusive of the cap itself (`<= CAP`, not `<
+ * CAP`): NEEDS_REVIEW_RESOLVE_CAP counts REQUEUE attempts already spent, and
+ * the pass that observes attempts === CAP is exactly the one that must fire
+ * the terminal skip (see the interval body's branch below) — excluding that
+ * row here would mean the cap-exhausted row is never selected again and the
+ * dependsOn chain behind it never drains, defeating this PRD's own purpose.
+ */
+function selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) {
+  const targets = [];
+  for (const j of jobs ?? []) {
+    if (j.status !== 'needs_review') continue;
+    if (!isExhaustedAutoFix(j)) continue;
+    if ((j.exhaustedResolveAttempts ?? 0) > NEEDS_REVIEW_RESOLVE_CAP) continue;
+    const history = j.statusHistory || [];
+    let entry = null;
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].to === 'needs_review') { entry = history[i]; break; }
+    }
+    if (!entry) continue;
+    const since = Date.parse(entry.at);
+    if (Number.isNaN(since)) continue;
+    const ageMs = now - since;
+    if (ageMs < thresholdMs) continue;
+    targets.push({ slug: j.slug, cwd: j.cwd ?? null, ageMs, attempts: j.exhaustedResolveAttempts ?? 0 });
+  }
+  return targets;
+}
+
+/**
+ * Applies the needs_review auto-resolve decision to a single job (mutates in
+ * place; calls transitionJob + appendAuditEvent). Extracted from the
+ * interval body so the three branches are unit-testable without going
+ * through mutate()/queue.json IO. Order of decision:
+ *   1. job.looksDone (the annotation reverifyNeedsReview writes when a
+ *      later commit touches the PRD's declared paths) -> 'completed'.
+ *   2. otherwise, one more bounded requeue -> 'pending', incrementing
+ *      exhaustedResolveAttempts.
+ *   3. once NEEDS_REVIEW_RESOLVE_CAP requeue attempts are spent -> 'skipped',
+ *      with job.error naming the exhausted path so the Queue UI still shows
+ *      why, and a marker (needsReviewAutoResolvedSkip) that findBlockingDep
+ *      reads to stop treating this SPECIFIC skip as a permanent dependsOn
+ *      block — unlike a generic "PRD source vanished" skip, this row was
+ *      given every bounded chance to resolve itself.
+ * Re-validates status/exhaustion/cap itself (same race-guard shape as the
+ * failed-autoreset loop above) so a stale target computed before this
+ * mutate() pass can never double-apply. Returns the outcome, or null if the
+ * race guard rejected it.
+ */
+function applyNeedsReviewAutoResolve(j) {
+  if (!j || j.status !== 'needs_review' || !isExhaustedAutoFix(j)) return null;
+  if ((j.exhaustedResolveAttempts ?? 0) > NEEDS_REVIEW_RESOLVE_CAP) return null;
+
+  if (j.looksDone) {
+    const attempt = j.exhaustedResolveAttempts ?? 0;
+    transitionJob(j, 'completed', {
+      reason: `needs_review auto-resolve: verifier annotation shows work landed (${j.looksDone.commits.length} commit(s) since this run touch the PRD's declared paths)`,
+      source: 'needsReviewAutoResolve',
+    });
+    appendAuditEvent('needs_review_auto_resolved', { slug: j.slug, cwd: j.cwd ?? null, outcome: 'completed', attempt });
+    return 'completed';
+  }
+
+  const attemptsSoFar = j.exhaustedResolveAttempts ?? 0;
+  if (attemptsSoFar < NEEDS_REVIEW_RESOLVE_CAP) {
+    const attempt = attemptsSoFar + 1;
+    j.exhaustedResolveAttempts = attempt;
+    transitionJob(j, 'pending', {
+      reason: `needs_review auto-resolve: exhausted auto-fix, no completion evidence — requeued for one more run (attempt ${attempt}/${NEEDS_REVIEW_RESOLVE_CAP})`,
+      source: 'needsReviewAutoResolve',
+    });
+    appendAuditEvent('needs_review_auto_resolved', { slug: j.slug, cwd: j.cwd ?? null, outcome: 'requeued', attempt });
+    return 'requeued';
+  }
+
+  j.needsReviewAutoResolvedSkip = true;
+  j.error = `needs_review auto-resolve: exhausted auto-fix path (autoFixOutcome=${j.autoFixOutcome ?? 'none'}, `
+    + `autoFixRetries=${j.autoFixRetries ?? 0}) with no completion evidence after ${NEEDS_REVIEW_RESOLVE_CAP} `
+    + `requeue attempt(s) — auto-skipped to unblock downstream dependsOn rows`;
+  transitionJob(j, 'skipped', {
+    reason: `needs_review auto-resolve: cap exhausted (${NEEDS_REVIEW_RESOLVE_CAP}/${NEEDS_REVIEW_RESOLVE_CAP} requeue attempts) — auto-skipped`,
+    source: 'needsReviewAutoResolve',
+  });
+  appendAuditEvent('needs_review_auto_resolved', { slug: j.slug, cwd: j.cwd ?? null, outcome: 'skipped', attempt: attemptsSoFar });
+  return 'skipped';
 }
 
 /**
@@ -9036,7 +9219,8 @@ async function init() {
     // else distinguishes "no pending work" from "pending work, never
     // started" — the 2026-09-01 NN-ordering starvation ran 3.5 h unnoticed.
     // Escalation only, same shape as the quarantine/overrun warnings above.
-    for (const sp of findStarvedProjects(s.jobs, Date.now(), STARVATION_ESCALATE_MS)) {
+    const starvedProjects = findStarvedProjects(s.jobs, Date.now(), STARVATION_ESCALATE_MS);
+    for (const sp of starvedProjects) {
       console.warn(
         `[scheduler] PROJECT STARVED: project=${sp.cwd} pending=${sp.pendingCount} oldest=${sp.oldestPendingSlug} `
         + `waiting=${Math.round(sp.ageMs / 60_000)}m (>= ${Math.round(STARVATION_ESCALATE_MS / 60_000)}m threshold) `
@@ -9044,6 +9228,13 @@ async function init() {
       );
       appendAuditEvent('project_starved', { cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs });
     }
+    // Bounded, automated consequence for a starve that outlives the WARN
+    // above (PRD: the 2026-09-12 19h Bilko starve had ~115 identical
+    // project_starved rows and zero consequence). STARVE_ESCALATION_MS is
+    // strictly later than STARVATION_ESCALATE_MS, so this only ever fires on
+    // a subset of the rows already reported above — same verdict, no
+    // re-derivation.
+    runStarveEscalationSweep(starvedProjects);
 
     // Bounded failed -> pending auto-reset (PRD 1151), plus the stuck-failed
     // escalation now narrowed to only the rows that auto-reset gave up on.
@@ -9058,7 +9249,15 @@ async function init() {
     const stuckFailed = stuckFailedEscalationDisabled()
       ? []
       : findStuckFailedJobs(s.jobs, Date.now(), STUCK_FAILED_ESCALATE_MS);
-    if (autoResetTargets.length > 0 || stuckFailed.length > 0) {
+    // Bounded automatic terminal decision for exhausted needs_review rows
+    // (this PRD): computed alongside the failed-row passes above and acted
+    // on in the SAME mutate(...) pass below, for the same race-guard reason
+    // — a row's exhaustedResolveAttempts counter must never be read from one
+    // snapshot and written from another. Kill-switch: SM_NEEDS_REVIEW_AUTORESOLVE_DISABLE=1.
+    const exhaustedNeedsReviewTargets = needsReviewAutoResolveDisabled()
+      ? []
+      : selectExhaustedNeedsReviewTargets(s.jobs, Date.now(), NEEDS_REVIEW_RESOLVE_MS);
+    if (autoResetTargets.length > 0 || stuckFailed.length > 0 || exhaustedNeedsReviewTargets.length > 0) {
       mutate((ms) => {
         for (const target of autoResetTargets) {
           const j = ms.jobs.find((x) => x.slug === target.slug);
@@ -9094,6 +9293,16 @@ async function init() {
             + `auto-reset cap exhausted (${FAILED_AUTORESET_CAP}/${FAILED_AUTORESET_CAP} attempts); reset it by hand via scheduler_reset_job`,
           );
           appendAuditEvent('job_stuck_failed', { slug: stuck.slug, cwd: stuck.cwd, ageMs: stuck.ageMs });
+        }
+        for (const target of exhaustedNeedsReviewTargets) {
+          const j = ms.jobs.find((x) => x.slug === target.slug);
+          const outcome = applyNeedsReviewAutoResolve(j);
+          if (outcome) {
+            console.warn(
+              `[scheduler] NEEDS_REVIEW AUTO-RESOLVE: project=${j.cwd ?? '(unknown)'} slug=${j.slug} `
+              + `exhausted=${Math.round(target.ageMs / 60_000)}m (>= ${Math.round(NEEDS_REVIEW_RESOLVE_MS / 60_000)}m threshold) — outcome=${outcome}`,
+            );
+          }
         }
       }).catch(() => {});
     }
@@ -9763,6 +9972,9 @@ module.exports = {
   classifyQueueStarvationByProject,
   runQueueStarvationWatchdog,
   QUEUE_STARVATION_MS,
+  selectStarveEscalations,
+  runStarveEscalationSweep,
+  STARVE_ESCALATION_MS,
   computeBlockedChains,
   stripAppOwnedChurn,
   findOverrunningJobs,
@@ -9806,6 +10018,11 @@ module.exports = {
   FAILED_AUTORESET_CAP,
   FAILED_AUTORESET_MS,
   failedAutoResetDisabled,
+  selectExhaustedNeedsReviewTargets,
+  applyNeedsReviewAutoResolve,
+  NEEDS_REVIEW_RESOLVE_CAP,
+  NEEDS_REVIEW_RESOLVE_MS,
+  needsReviewAutoResolveDisabled,
   isRescanCandidate,
   isFailedUnverifiedShaped,
   computeLooksDone,

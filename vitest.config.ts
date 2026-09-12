@@ -239,6 +239,7 @@ export default defineConfig({
       'src/main/__tests__/opsErrorLogTelemetryTap.test.cjs',
       'src/main/__tests__/scheduleJobTransitionsTelemetryTap.test.cjs',
       'src/main/__tests__/epicMintTelemetryTap.test.cjs',
+      'src/main/__tests__/scheduler-needs-review-autoresolve.test.cjs',
     ],
     globals: true,
   },

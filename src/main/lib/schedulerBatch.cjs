@@ -102,9 +102,20 @@ function findBlockingDep(job, projectJobs, satisfiedSlugs = new Set()) {
     }
     return satisfiedBareSlugs.has(bareSlug(slug));
   };
+  // A dep row is blocking unless it's 'completed', OR it's a 'skipped' row
+  // stamped `needsReviewAutoResolvedSkip` — the bounded needs_review
+  // auto-resolve terminal decision (scheduler.cjs's
+  // applyNeedsReviewAutoResolve). That skip is deliberately NOT the
+  // "PRD source vanished, a human must author a fresh PRD" skip the
+  // heldBySkippedDep messaging above describes — it already got every
+  // bounded chance to resolve itself, so treating it as a permanent
+  // dependsOn block would defeat the whole point of that auto-resolve pass
+  // (a chain that never drains without an operator).
+  const isSatisfiedRow = (dep) => dep.status === 'completed'
+    || (dep.status === 'skipped' && dep.needsReviewAutoResolvedSkip === true);
   return (job.dependsOn ?? []).find((slug) => {
     const rows = rowsForDep(slug);
-    if (rows.length > 0) return rows.some((dep) => dep.status !== 'completed');
+    if (rows.length > 0) return rows.some((dep) => !isSatisfiedRow(dep));
     return !isKnownSatisfied(slug);
   });
 }

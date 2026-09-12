@@ -16,7 +16,7 @@ const { checkDelegationReadiness } = require('./lib/delegationReadiness.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
 const { migratePrds } = require('./lib/prdMigration.cjs');
 const queueStore = require('./lib/queueStore.cjs');
-const { computeStallSummary, SCHEDULER_STATE_PATH, FAILURE_STREAK_WARN_THRESHOLD } = require('./scheduler.cjs');
+const { computeStallSummary, SCHEDULER_STATE_PATH, FAILURE_STREAK_WARN_THRESHOLD, classifyQueueStarvation } = require('./scheduler.cjs');
 const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
 const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
 
@@ -375,6 +375,58 @@ function evaluateUsagePollerHealth(state, threshold = FAILURE_STREAK_WARN_THRESH
 // Takes an explicit path (rather than reading SCHEDULER_STATE_PATH directly)
 // so it's unit-testable against a real temp file instead of mocking global
 // fs or exercising the full (slow, machine-coupled) check().
+// A DISPATCHABLE pending job (not merely pending) with 0 running and no
+// dispatch attempt in this long is the exact shape of the 2026-09-11
+// incident (27 pending across two projects, 0 running, for days, every
+// other surface reporting healthy). Deliberately much longer than
+// scheduler.cjs's own QUEUE_STARVATION_MS (10 min) — that's the watchdog's
+// OWN forcing threshold; this is the "even the watchdog isn't helping
+// anymore" signal a human needs to see.
+const DISPATCH_STALL_THRESHOLD_MS = 2 * 60 * 60_000;
+
+/**
+ * evaluateQueueDispatchHealth(queueState, runningCount, now, thresholdMs) →
+ * { ok, blocked?, starved?, pending?, dispatchable?, idleMs?, message? }
+ *
+ * Reuses classifyQueueStarvation's own verdict rather than re-deriving a
+ * second "is the queue stuck" heuristic — evaluateTickLiveness above already
+ * has one, but it does not distinguish a genuinely blocked dependsOn chain
+ * (which no amount of ticking can fix) from real dispatchable starvation, so
+ * reusing it here would report a dependency-blocked project as unhealthy
+ * dispatch even though nothing is actually wrong with dispatch itself. A
+ * `blocked` verdict therefore stays `ok: true` (never trips the health gate)
+ * but is still reported by name so it isn't silently invisible either.
+ */
+function evaluateQueueDispatchHealth(queueState, runningCount, now, thresholdMs = DISPATCH_STALL_THRESHOLD_MS) {
+  const verdict = classifyQueueStarvation({
+    jobs: queueState?.jobs,
+    paused: queueState?.paused,
+    runningCount,
+    lastRunAtMs: Date.parse(queueState?.lastDispatchAttemptAt ?? ''),
+    now,
+    thresholdMs,
+  });
+  if (!verdict) return { ok: true };
+  if (verdict.kind === 'blocked') {
+    return {
+      ok: true,
+      blocked: true,
+      pending: verdict.pending,
+      message: `${verdict.pending} pending job(s) behind a blocked dependsOn chain — dispatch cannot help, needs a human`,
+    };
+  }
+  const ageMin = Math.round(verdict.idleMs / 60_000);
+  return {
+    ok: false,
+    starved: true,
+    pending: verdict.pending,
+    dispatchable: verdict.dispatchable,
+    idleMs: verdict.idleMs,
+    message: `${verdict.dispatchable} dispatchable pending job(s), 0 running, no dispatch attempt in ~${ageMin}m `
+      + `(threshold ${Math.round(thresholdMs / 60_000)}m) — dispatch appears stuck`,
+  };
+}
+
 function loadUsagePollerState(statePath) {
   let raw;
   try {
@@ -552,6 +604,10 @@ async function check() {
         );
       }
     }
+    status.components.queue_dispatch = evaluateQueueDispatchHealth(queueState, runningCount, now);
+    if (!status.components.queue_dispatch.ok || status.components.queue_dispatch.blocked) {
+      status.issues.push(`Queue dispatch: ${status.components.queue_dispatch.message}`);
+    }
   } catch (e) {
     if (e.code !== 'ENOENT') {
       status.issues.push(`Scheduler queue unreadable: ${e.message}`);
@@ -562,6 +618,7 @@ async function check() {
       exists: false,
       error: e.code === 'ENOENT' ? 'not yet created' : e.message,
     };
+    status.components.queue_dispatch = { ok: true };
   }
 
   // 3.5. Usage/rate-limit poller (scheduler.cjs pollLoop) — a distinct
@@ -774,7 +831,7 @@ async function check() {
   // Critical: nodejs, config dir, typescript, build artifact, test infrastructure.
   // Non-fatal: scheduler/transcripts dirs may not exist on fresh install.
   // Informational: app log age (shows if app is running, but not blocking).
-  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'usage_poller', 'prd_migration', 'claude_md_budget', 'delegation_chain'];
+  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'queue_dispatch', 'usage_poller', 'prd_migration', 'claude_md_budget', 'delegation_chain'];
   status.ok = criticalComponents.every((c) => status.components[c]?.ok !== false);
 
   status.elapsedMs = Date.now() - start;
@@ -804,6 +861,8 @@ module.exports = {
   evaluateClaudeMdBudget,
   evaluateUsagePollerHealth,
   loadUsagePollerState,
+  evaluateQueueDispatchHealth,
+  DISPATCH_STALL_THRESHOLD_MS,
   TICK_STALL_THRESHOLD_MS,
   HEARTBEAT_STALE_MS,
 };

@@ -6441,6 +6441,14 @@ function tickQueue({ bypassLoadGate = false } = {}) {
     }
     if (cancelToken.cancelled) return { fired: false, reason: 'cancelled' };
 
+    // Stamped here — the moment tickQueue actually reaches the picker,
+    // regardless of whether this pass ends in a launch — so
+    // classifyQueueStarvation can tell "the engine keeps evaluating the
+    // queue" apart from "nothing has invoked tickQueue in a long time".
+    // Distinct from `lastRunAt` below, which stays true to its existing
+    // meaning (a batch actually launched) since other readers depend on that.
+    await mutate((s) => { s.lastDispatchAttemptAt = new Date().toISOString(); });
+
     // The retired-flat-dir sweep now lives inside reconcile() itself (see its
     // own comment) so every caller of reconcile — not just this tick — gets
     // the guarantee.
@@ -6700,11 +6708,15 @@ function classifyQueueStarvation({ jobs, paused, runningCount, lastRunAtMs, now,
  * with ready work idle indefinitely.
  */
 async function runQueueStarvationWatchdog(state, { now = Date.now(), thresholdMs = QUEUE_STARVATION_MS } = {}) {
+  // lastDispatchAttemptAt, not lastRunAt: the latter only advances when a
+  // batch actually launches, so a poll that keeps succeeding while dispatch
+  // itself never gets invoked would otherwise mask a stall behind a fresh-
+  // looking timestamp that was never actually tracking dispatch liveness.
   const verdict = classifyQueueStarvation({
     jobs: state?.jobs,
     paused: state?.paused,
     runningCount: runningSet.size,
-    lastRunAtMs: Date.parse(state?.lastRunAt ?? ''),
+    lastRunAtMs: Date.parse(state?.lastDispatchAttemptAt ?? ''),
     now,
     thresholdMs,
   });
@@ -6731,6 +6743,15 @@ async function runQueueStarvationWatchdog(state, { now = Date.now(), thresholdMs
   // returns early on null). Treat unknown as safe here, exactly as the
   // billing meter's own 429 fallback already does.
   if (cachedUtilization === null || cachedUtilization === undefined) cachedUtilization = 0;
+  // The in-process cancelToken is only ever reset by runDueJobs() (force-tick
+  // / run-now / resume-timer) — every other path that clears a pause
+  // (clearPause(), the poll loop's own auto-recovery) leaves it untouched
+  // (see applyPauseCleared's header for the 2026-07-14 incident this caused).
+  // A watchdog that fires but doesn't clear a stuck cancelToken would forever
+  // hit tickQueue's very first guard and report a forced tick that never
+  // actually ticked. The watchdog is the last line of defence against a
+  // wedged dispatcher, so it must be able to un-wedge this too.
+  cancelToken.cancelled = false;
   await tickQueue({ bypassLoadGate: false }).catch((e) => console.error('[scheduler] starvation tick error', e));
   return verdict;
 }
@@ -7238,6 +7259,19 @@ async function pollLoop() {
       backoffNextAt = Date.now() + backoffMs;
       warnFailureStreakIfNeeded();
       persistSchedulerState();
+      // A failed billing poll must not silently stop dispatch — only the
+      // 'ok' and 'meter_rate_limited' branches used to reach
+      // maybeLaunchWhenAvailable, so auth/transient failures left ready
+      // pending work untouched until either the queue-starvation watchdog's
+      // 10-minute safety net fired or the poll itself recovered. Utilization
+      // is unknown during a failed poll, not unsafe — treated the same way
+      // the meter_rate_limited branch above already treats a 429 as safe to
+      // fire through. maybeLaunchWhenAvailable itself still honors an
+      // 'auth'/'network' pause (state.paused), so this is a no-op whenever
+      // setPaused() above actually engaged one.
+      if (cachedUtilization === null || cachedUtilization === undefined) cachedUtilization = 0;
+      await maybeLaunchWhenAvailable(await readQueue());
+      await broadcast();
     }
   } catch (e) {
     // Unexpected error (e.g., IPC transport failure)
@@ -7251,6 +7285,13 @@ async function pollLoop() {
     backoffNextAt = Date.now() + backoffMs;
     warnFailureStreakIfNeeded();
     persistSchedulerState();
+    // Same rationale as the auth/transient branch above: the outer catch
+    // must not be a silent dispatch dead-end either.
+    try {
+      if (cachedUtilization === null || cachedUtilization === undefined) cachedUtilization = 0;
+      await maybeLaunchWhenAvailable(await readQueue());
+      await broadcast();
+    } catch { /* best-effort — the poll loop must still re-arm below */ }
   } finally {
     const delay = backoffMs || POLL_INTERVAL_MS;
     pollLoopTimer = setTimeout(() => { pollLoop().catch(() => {}); }, delay);
@@ -9483,6 +9524,8 @@ module.exports = {
   clearPause,
   tickQueue,
   runDueJobs,
+  pollLoop,
+  maybeLaunchWhenAvailable,
   isCooldownSuppressed,
   nextRapidRateLimitCount,
   CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD,

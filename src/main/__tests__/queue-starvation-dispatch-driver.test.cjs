@@ -30,13 +30,32 @@ const path = require('node:path');
 
 let tmpHome;
 let originalHome;
+let originalClaudeBin;
 let scheduler;
 let queueStore;
 
+// A forced tick actually dispatches the one pending job it finds. Without a
+// stub, that spawns the real `claude` binary (or fails trying to), leaving
+// scheduler.cjs's module-scoped runningSet non-empty by the time the next
+// test in this file runs — classifyQueueStarvation's `runningCount > 0`
+// guard then makes runQueueStarvationWatchdog return null for a reason that
+// has nothing to do with what that test is actually checking.
+function writeClaudeStub() {
+  const stubPath = path.join(os.tmpdir(), `sm-claude-stub-starve-driver-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
+  const body = `
+    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok\\nSCHEDULER_VERDICT: PASS' }) + '\\n');
+    process.exit(0);
+  `;
+  fs.writeFileSync(stubPath, `#!${process.execPath}\n${body}\n`, { mode: 0o755 });
+  return stubPath;
+}
+
 beforeAll(() => {
   originalHome = process.env.HOME;
+  originalClaudeBin = process.env.SM_CLAUDE_BIN;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-starve-driver-'));
   process.env.HOME = tmpHome;
+  process.env.SM_CLAUDE_BIN = writeClaudeStub();
   fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager'), { recursive: true });
   fs.mkdirSync(path.join(tmpHome, '.claude', 'projects'), { recursive: true });
   scheduler = require('../scheduler.cjs');
@@ -45,6 +64,8 @@ beforeAll(() => {
 
 afterAll(() => {
   process.env.HOME = originalHome;
+  if (originalClaudeBin === undefined) delete process.env.SM_CLAUDE_BIN;
+  else process.env.SM_CLAUDE_BIN = originalClaudeBin;
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 

@@ -610,8 +610,9 @@ const projectBriefCwd = z.object({
 }).strict();
 
 // ──────────────────────────────────────────── Delegation readiness
-// Shared by app:delegation-readiness, app:install-prd-write-guard and
-// app:install-destructive-git-guard — all three take exactly { cwd }.
+// Shared by app:delegation-readiness, app:install-prd-write-guard,
+// app:install-destructive-git-guard and app:install-inline-implementation-guard
+// — all four take exactly { cwd }.
 const delegationReadinessCwd = z.object({
   cwd: z.string().min(1).max(4096),
 }).strict();

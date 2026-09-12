@@ -30,6 +30,8 @@ const PRD_WRITE_GUARD_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'script
 const PRD_WRITE_GUARD_MATCHER = 'Write|Edit|NotebookEdit';
 const DESTRUCTIVE_GIT_GUARD_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'hooks', 'guard-destructive-git.cjs');
 const DESTRUCTIVE_GIT_GUARD_MATCHER = 'Bash';
+const INLINE_IMPLEMENTATION_GUARD_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'hooks', 'guard-inline-implementation.cjs');
+const INLINE_IMPLEMENTATION_GUARD_MATCHER = 'Write|Edit|NotebookEdit';
 const LIVE_PROBE_TIMEOUT_MS = 10_000;
 const LIVE_PROBE_TTL_MS = 60_000;
 const REQUIRED_LIVE_TOOLS = ['scheduler_create_prd', 'session_manager_help'];
@@ -585,7 +587,107 @@ async function installDestructiveGitGuard({ cwd }) {
 }
 
 /**
- * Runs all seven delegation-readiness checks for `cwd`. Every filesystem read
+ * `ok` must mean "a hook that will actually run", not "the settings file
+ * mentions guard-inline-implementation somewhere" — same rationale as
+ * checkPrdWriteGuard above. Note this guard is deliberately a NUDGE that
+ * fails OPEN twice over (see guard-inline-implementation.cjs's header), not
+ * an ownership law like guard-prd-writes — this check's label/detail must
+ * not imply it's a hard gate.
+ */
+function checkInlineImplementationGuard({ cwd }) {
+  const settings = readJsonSafe(path.join(cwd, '.claude', 'settings.json'), null);
+  const preToolUse = Array.isArray(settings?.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
+
+  let mentioned = false;
+  let resolvedScript = null;
+  for (const matcher of preToolUse) {
+    if (!Array.isArray(matcher?.hooks)) continue;
+    for (const h of matcher.hooks) {
+      if (typeof h?.command !== 'string' || !h.command.includes('guard-inline-implementation')) continue;
+      mentioned = true;
+      const raw = extractGuardScriptPath(h.command, 'guard-inline-implementation.cjs');
+      if (!raw) continue;
+      const abs = path.isAbsolute(raw) ? raw : path.resolve(cwd, raw);
+      if (fs.existsSync(abs)) { resolvedScript = abs; break; }
+    }
+    if (resolvedScript) break;
+  }
+
+  const ok = !!resolvedScript;
+  let detail;
+  if (ok) detail = `guard-inline-implementation PreToolUse hook found in ${cwd}/.claude/settings.json, resolving to ${resolvedScript}`;
+  else if (mentioned) detail = `guard-inline-implementation PreToolUse hook in ${cwd}/.claude/settings.json names a script that does not exist — it would silently guard nothing`;
+  else detail = `no guard-inline-implementation PreToolUse hook in ${cwd}/.claude/settings.json — this is a nudge, not a hard gate`;
+
+  return {
+    id: 'inline-implementation-guard',
+    label: 'Inline-implementation guard hook installed',
+    ok,
+    detail,
+    fix: ok
+      ? null
+      : `Add a PreToolUse hook to ${cwd}/.claude/settings.json matching Write|Edit|NotebookEdit that runs node ${INLINE_IMPLEMENTATION_GUARD_SCRIPT} (a nudge, not a hard gate)`,
+    fixAction: ok ? null : 'install-inline-implementation-guard',
+  };
+}
+
+/**
+ * Install the inline-implementation guard into `<cwd>/.claude/settings.json`.
+ * Same reference-not-vendor rationale and merge/repair/idempotence behaviour
+ * as installPrdWriteGuard above — see that function's header. Unlike
+ * installDestructiveGitGuard, this guard shares installPrdWriteGuard's
+ * matcher (`Write|Edit|NotebookEdit`), so this appends into that SAME
+ * matcher's `hooks` array when it already exists, rather than pushing a new
+ * matcher entry.
+ */
+async function installInlineImplementationGuard({ cwd }) {
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  addAllowedRoot(cwd);
+
+  const existing = fs.existsSync(settingsPath) ? readJsonSafe(settingsPath, undefined) : {};
+  if (existing === undefined) {
+    return { ok: false, action: 'error', error: `${settingsPath} is not valid JSON — fix it by hand before installing the guard` };
+  }
+  const settings = (existing && typeof existing === 'object' && !Array.isArray(existing)) ? existing : {};
+
+  const command = `node ${INLINE_IMPLEMENTATION_GUARD_SCRIPT}`;
+  const hooks = (settings.hooks && typeof settings.hooks === 'object') ? settings.hooks : {};
+  const preToolUse = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse.slice() : [];
+
+  if (checkInlineImplementationGuard({ cwd }).ok) {
+    return { ok: true, action: 'already-installed', settingsPath, command };
+  }
+
+  let repaired = false;
+  for (const matcher of preToolUse) {
+    if (!Array.isArray(matcher?.hooks)) continue;
+    for (const h of matcher.hooks) {
+      if (typeof h?.command === 'string' && h.command.includes('guard-inline-implementation')) {
+        h.command = command;
+        h.type = 'command';
+        repaired = true;
+      }
+    }
+  }
+
+  if (!repaired) {
+    const target = preToolUse.find((m) => m?.matcher === INLINE_IMPLEMENTATION_GUARD_MATCHER);
+    if (target) {
+      target.hooks = Array.isArray(target.hooks) ? target.hooks : [];
+      target.hooks.push({ type: 'command', command });
+    } else {
+      preToolUse.push({ matcher: INLINE_IMPLEMENTATION_GUARD_MATCHER, hooks: [{ type: 'command', command }] });
+    }
+  }
+
+  const next = { ...settings, hooks: { ...hooks, PreToolUse: preToolUse } };
+  await writeJson(settingsPath, next);
+
+  return { ok: true, action: repaired ? 'repaired' : 'installed', settingsPath, command };
+}
+
+/**
+ * Runs all eight delegation-readiness checks for `cwd`. Every filesystem read
  * is wrapped (readJsonSafe / try-catch) so a missing or unparseable file
  * yields ok:false with a detail, never a thrown exception. Async because
  * scheduler-mcp-live genuinely spawns a process and waits on it (bounded by
@@ -608,6 +710,7 @@ async function checkDelegationReadiness({ cwd, homeDir = os.homedir() }) {
     checkAgentPersonas({ cwd, homeDir }),
     checkPrdWriteGuard({ cwd }),
     checkDestructiveGitGuard({ cwd }),
+    checkInlineImplementationGuard({ cwd }),
   ].map((c) => ({ fixAction: null, warn: false, ...c }));
 
   return {
@@ -620,10 +723,13 @@ module.exports = {
   checkDelegationReadiness,
   installPrdWriteGuard,
   installDestructiveGitGuard,
+  installInlineImplementationGuard,
   probeSchedulerMcpLive,
   clearLiveProbeCache,
   PRD_WRITE_GUARD_SCRIPT,
   PRD_WRITE_GUARD_MATCHER,
   DESTRUCTIVE_GIT_GUARD_SCRIPT,
   DESTRUCTIVE_GIT_GUARD_MATCHER,
+  INLINE_IMPLEMENTATION_GUARD_SCRIPT,
+  INLINE_IMPLEMENTATION_GUARD_MATCHER,
 };

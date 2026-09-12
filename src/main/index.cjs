@@ -37,7 +37,7 @@ const epicWorktreeMint = require('./lib/epicWorktreeMint.cjs');
 const epicWorktreeMerge = require('./lib/epicWorktreeMerge.cjs');
 const epicWorktreeProjectConfig = require('./lib/epicWorktreeProjectConfig.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
-const { checkDelegationReadiness, installPrdWriteGuard, installDestructiveGitGuard } = require('./lib/delegationReadiness.cjs');
+const { checkDelegationReadiness, installPrdWriteGuard, installDestructiveGitGuard, installInlineImplementationGuard } = require('./lib/delegationReadiness.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES } = require('./lib/mcpToolCatalog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { resolveBuildTarget } = require('./lib/buildTarget.cjs');
@@ -527,16 +527,22 @@ ipcMain.handle('app:delegation-readiness', validated(schemas.delegationReadiness
   checkDelegationReadiness(payload)
 ));
 
-// The two readiness checks with a sanctioned one-press install. Session Manager
-// standardizes on the REFERENCE approach (absolute path to this repo's guard
-// script, never a vendored copy) — see installPrdWriteGuard's header. They stay
-// two handlers (and two PreToolUse entries) because the hooks have different
-// matchers: Write|Edit|NotebookEdit vs Bash — installDestructiveGitGuard's header.
+// The three readiness checks with a sanctioned one-press install. Session
+// Manager standardizes on the REFERENCE approach (absolute path to this
+// repo's guard script, never a vendored copy) — see installPrdWriteGuard's
+// header. prd-write-guard and destructive-git-guard stay separate handlers
+// (and separate PreToolUse entries) because those two hooks have different
+// matchers: Write|Edit|NotebookEdit vs Bash — installDestructiveGitGuard's
+// header. inline-implementation-guard shares prd-write-guard's matcher, so
+// its installer appends into that SAME matcher's `hooks` array instead.
 ipcMain.handle('app:install-prd-write-guard', validated(schemas.delegationReadinessCwd, (payload) =>
   installPrdWriteGuard(payload)
 ));
 ipcMain.handle('app:install-destructive-git-guard', validated(schemas.delegationReadinessCwd, (payload) =>
   installDestructiveGitGuard(payload)
+));
+ipcMain.handle('app:install-inline-implementation-guard', validated(schemas.delegationReadinessCwd, (payload) =>
+  installInlineImplementationGuard(payload)
 ));
 
 ipcMain.handle('app:engage-rules-path', () => process.env.SESSION_MANAGER_ENGAGE_RULES || null);

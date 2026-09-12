@@ -40,6 +40,11 @@ const GUARD_INSTALLERS: Record<GuardFixAction, GuardInstaller> = {
     testId: 'delegation-readiness-fix-destructive-git-guard',
     install: (cwd) => window.api.app.installDestructiveGitGuard(cwd),
   },
+  'install-inline-implementation-guard': {
+    name: 'Inline-implementation guard',
+    testId: 'delegation-readiness-fix-inline-implementation-guard',
+    install: (cwd) => window.api.app.installInlineImplementationGuard(cwd),
+  },
 }
 
 /**

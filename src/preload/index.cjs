@@ -25,6 +25,7 @@ contextBridge.exposeInMainWorld('api', {
     delegationReadiness: (cwd) => ipcRenderer.invoke('app:delegation-readiness', { cwd }),
     installPrdWriteGuard: (cwd) => ipcRenderer.invoke('app:install-prd-write-guard', { cwd }),
     installDestructiveGitGuard: (cwd) => ipcRenderer.invoke('app:install-destructive-git-guard', { cwd }),
+    installInlineImplementationGuard: (cwd) => ipcRenderer.invoke('app:install-inline-implementation-guard', { cwd }),
     onNewSession: (handler) => {
       const listener = () => handler();
       ipcRenderer.on('app:new-session', listener);

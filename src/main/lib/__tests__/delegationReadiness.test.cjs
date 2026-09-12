@@ -15,10 +15,12 @@ const {
   checkDelegationReadiness,
   installPrdWriteGuard,
   installDestructiveGitGuard,
+  installInlineImplementationGuard,
   probeSchedulerMcpLive,
   clearLiveProbeCache,
   PRD_WRITE_GUARD_SCRIPT,
   DESTRUCTIVE_GIT_GUARD_SCRIPT,
+  INLINE_IMPLEMENTATION_GUARD_SCRIPT,
 } = require('../delegationReadiness.cjs');
 
 const REQUIRED_TOOLS = ['scheduler_create_prd', 'session_manager_help'];
@@ -97,7 +99,10 @@ async function makeGreenFixtures() {
       PreToolUse: [
         {
           matcher: 'Write|Edit|NotebookEdit',
-          hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }],
+          hooks: [
+            { type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` },
+            { type: 'command', command: `node ${INLINE_IMPLEMENTATION_GUARD_SCRIPT}` },
+          ],
         },
         {
           matcher: 'Bash',
@@ -110,12 +115,12 @@ async function makeGreenFixtures() {
   return { homeDir, cwd, scriptPath };
 }
 
-test('all seven checks pass on a fully-configured project', async () => {
+test('all eight checks pass on a fully-configured project', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
   const result = await checkDelegationReadiness({ cwd, homeDir });
 
   expect(result.ok).toBe(true);
-  expect(result.checks).toHaveLength(7);
+  expect(result.checks).toHaveLength(8);
   expect(result.checks.every((c) => c.ok)).toBe(true);
   expect(result.checks.map((c) => c.id)).toEqual([
     'scheduler-mcp',
@@ -125,6 +130,7 @@ test('all seven checks pass on a fully-configured project', async () => {
     'agent-personas',
     'prd-write-guard',
     'destructive-git-guard',
+    'inline-implementation-guard',
   ]);
 }, 15_000);
 
@@ -399,7 +405,10 @@ test('destructive-git-guard: fails independently when the hook is missing', asyn
       PreToolUse: [
         {
           matcher: 'Write|Edit|NotebookEdit',
-          hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }],
+          hooks: [
+            { type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` },
+            { type: 'command', command: `node ${INLINE_IMPLEMENTATION_GUARD_SCRIPT}` },
+          ],
         },
       ],
     },
@@ -576,4 +585,191 @@ test('the installed destructive-git command actually DENIES a shared-tree stash 
   const worktreeCwd = path.join(os2.tmpdir(), 'session-manager-job-worktrees', 'somehash', 'some-slug');
   const allowed = run('git stash', worktreeCwd);
   expect(allowed.hookSpecificOutput?.permissionDecision).not.toBe('deny');
+});
+
+// ─────────────────────────────── inline-implementation-guard / installInlineImplementationGuard
+
+test('inline-implementation-guard: fails independently when the hook is missing (not-installed detail)', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: 'Write|Edit|NotebookEdit',
+          hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }],
+        },
+        {
+          matcher: 'Bash',
+          hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }],
+        },
+      ],
+    },
+  });
+
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const check = result.checks.find((c) => c.id === 'inline-implementation-guard');
+  expect(check.ok).toBe(false);
+  expect(check.fixAction).toBe('install-inline-implementation-guard');
+  expect(check.detail).toBe(`no guard-inline-implementation PreToolUse hook in ${cwd}/.claude/settings.json — this is a nudge, not a hard gate`);
+  expect(result.ok).toBe(false);
+  // the other checks still pass independently
+  expect(result.checks.filter((c) => c.id !== 'inline-implementation-guard').every((c) => c.ok)).toBe(true);
+}, 15_000);
+
+test('inline-implementation-guard: fails with the "would silently guard nothing" detail when the hook names a script that does not exist', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: 'Write|Edit|NotebookEdit',
+          hooks: [
+            { type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` },
+            { type: 'command', command: 'node /does/not/exist/guard-inline-implementation.cjs' },
+          ],
+        },
+        {
+          matcher: 'Bash',
+          hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }],
+        },
+      ],
+    },
+  });
+
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const check = result.checks.find((c) => c.id === 'inline-implementation-guard');
+  expect(check.ok).toBe(false);
+  expect(check.detail).toBe(`guard-inline-implementation PreToolUse hook in ${cwd}/.claude/settings.json names a script that does not exist — it would silently guard nothing`);
+}, 15_000);
+
+test('inline-implementation-guard: ok when the hook resolves to an existing script file', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  const check = result.checks.find((c) => c.id === 'inline-implementation-guard');
+  expect(check.ok).toBe(true);
+  expect(check.fixAction).toBeNull();
+  expect(check.detail).toBe(`guard-inline-implementation PreToolUse hook found in ${cwd}/.claude/settings.json, resolving to ${INLINE_IMPLEMENTATION_GUARD_SCRIPT}`);
+}, 15_000);
+
+// installInlineImplementationGuard shares installPrdWriteGuard's matcher
+// (Write|Edit|NotebookEdit), so its interesting merge path is APPENDING into
+// an existing matcher's hooks array — the branch destructive-git-guard's own
+// installer (a different matcher, Bash) never exercises. This is the scenario
+// a project that adopted only the PRD-write guard hits.
+test('installInlineImplementationGuard: appends into the EXISTING Write|Edit|NotebookEdit matcher rather than pushing a new one, preserving unrelated keys byte-for-byte', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  const seeded = {
+    someUnrelatedTopLevelKey: { nested: [1, 2, 3], note: 'do not touch' },
+    hooks: {
+      PreToolUse: [
+        { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] },
+        { matcher: 'Bash', hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }] },
+      ],
+    },
+  };
+  await writeJson(settingsPath, seeded);
+
+  const before = await checkDelegationReadiness({ cwd, homeDir });
+  expect(before.checks.find((c) => c.id === 'inline-implementation-guard')).toMatchObject({
+    ok: false,
+    fixAction: 'install-inline-implementation-guard',
+  });
+
+  const r = await installInlineImplementationGuard({ cwd });
+  expect(r).toMatchObject({ ok: true, action: 'installed', settingsPath, command: `node ${INLINE_IMPLEMENTATION_GUARD_SCRIPT}` });
+
+  const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  // Exactly ONE Write|Edit|NotebookEdit matcher entry, now carrying BOTH commands.
+  const writeMatchers = written.hooks.PreToolUse.filter((m) => m.matcher === 'Write|Edit|NotebookEdit');
+  expect(writeMatchers).toHaveLength(1);
+  expect(writeMatchers[0].hooks).toEqual([
+    { type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` },
+    { type: 'command', command: `node ${INLINE_IMPLEMENTATION_GUARD_SCRIPT}` },
+  ]);
+  // The unrelated Bash matcher and every unrelated top-level key survive untouched.
+  expect(written.hooks.PreToolUse).toContainEqual(
+    { matcher: 'Bash', hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }] },
+  );
+  expect(written.someUnrelatedTopLevelKey).toEqual(seeded.someUnrelatedTopLevelKey);
+
+  const after = await checkDelegationReadiness({ cwd, homeDir });
+  expect(after.checks.find((c) => c.id === 'inline-implementation-guard').ok).toBe(true);
+  expect(after.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
+  expect(after.checks.find((c) => c.id === 'destructive-git-guard').ok).toBe(true);
+}, 15_000);
+
+test('installInlineImplementationGuard: is idempotent — running it twice leaves exactly one entry, byte-identical file on the second press', async () => {
+  const { cwd } = await makeGreenFixtures();
+  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
+    hooks: {
+      PreToolUse: [
+        { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] },
+      ],
+    },
+  });
+
+  const first = await installInlineImplementationGuard({ cwd });
+  expect(first.action).toBe('installed');
+  const snapshot = fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8');
+
+  const second = await installInlineImplementationGuard({ cwd });
+  expect(second.action).toBe('already-installed');
+  expect(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8')).toBe(snapshot);
+
+  const written = JSON.parse(snapshot);
+  const writeMatchers = written.hooks.PreToolUse.filter((m) => m.matcher === 'Write|Edit|NotebookEdit');
+  expect(writeMatchers).toHaveLength(1);
+  expect(writeMatchers[0].hooks.filter((h) => h.command.includes('guard-inline-implementation'))).toHaveLength(1);
+});
+
+test('installInlineImplementationGuard: repairs an entry pointing at a now-nonexistent path in place rather than appending a duplicate', async () => {
+  const { cwd } = await makeGreenFixtures();
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  await writeJson(settingsPath, {
+    hooks: {
+      PreToolUse: [
+        {
+          matcher: 'Write|Edit|NotebookEdit',
+          hooks: [
+            { type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` },
+            { type: 'command', command: 'node /does/not/exist/guard-inline-implementation.cjs' },
+          ],
+        },
+      ],
+    },
+  });
+
+  const r = await installInlineImplementationGuard({ cwd });
+  expect(r.action).toBe('repaired');
+
+  const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  const writeMatchers = written.hooks.PreToolUse.filter((m) => m.matcher === 'Write|Edit|NotebookEdit');
+  expect(writeMatchers).toHaveLength(1);
+  const inlineHooks = writeMatchers[0].hooks.filter((h) => h.command.includes('guard-inline-implementation'));
+  expect(inlineHooks).toHaveLength(1);
+  expect(inlineHooks[0].command).toBe(`node ${INLINE_IMPLEMENTATION_GUARD_SCRIPT}`);
+});
+
+test('installInlineImplementationGuard: refuses on unparseable settings rather than discarding them', async () => {
+  const { cwd } = await makeGreenFixtures();
+  await fsp.writeFile(path.join(cwd, '.claude', 'settings.json'), '{ not valid json', 'utf8');
+
+  const r = await installInlineImplementationGuard({ cwd });
+  expect(r.ok).toBe(false);
+  expect(r.action).toBe('error');
+  expect(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8')).toBe('{ not valid json');
+});
+
+test('installInlineImplementationGuard: uses the ABSOLUTE reference path, never a vendored copy', async () => {
+  const { cwd } = await makeGreenFixtures();
+  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
+    hooks: { PreToolUse: [{ matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] }] },
+  });
+
+  const r = await installInlineImplementationGuard({ cwd });
+  expect(path.isAbsolute(INLINE_IMPLEMENTATION_GUARD_SCRIPT)).toBe(true);
+  expect(r.command).toContain(INLINE_IMPLEMENTATION_GUARD_SCRIPT);
+  expect(INLINE_IMPLEMENTATION_GUARD_SCRIPT.startsWith(cwd + path.sep)).toBe(false);
+  expect(fs.existsSync(path.join(cwd, 'scripts'))).toBe(false);
 });

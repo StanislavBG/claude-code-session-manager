@@ -35,6 +35,17 @@ const REQUIRED_PATHS = [
   'src/seed/agents/project-home-builder.md',
 ];
 
+// The three PreToolUse guard scripts delegationReadiness.cjs resolves via
+// path.resolve(__dirname,'..','..','..','scripts','hooks','guard-*.cjs'). If
+// these are missing from "files", every remote npx install has all guards
+// silently dead (delegationReadiness.cjs reports EXISTS: false) even though
+// delegationReadiness.cjs itself ships fine.
+const GUARD_SCRIPT_PATHS = [
+  'scripts/hooks/guard-prd-writes.cjs',
+  'scripts/hooks/guard-destructive-git.cjs',
+  'scripts/hooks/guard-inline-implementation.cjs',
+];
+
 // The two esbuild bundles are gitignored build artifacts (`dist` in
 // .gitignore) produced by prepublishOnly, so they may not exist in a fresh
 // checkout and `npm pack --dry-run` would not list them. Asserting that the
@@ -55,7 +66,7 @@ test('package.json "files" covers the Project Pages build artifacts', () => {
 });
 
 test(
-  'npm pack --dry-run includes every file required by the scheduler MCP server and Project Pages CLIs',
+  'npm pack --dry-run includes every file required by the scheduler MCP server, Project Pages CLIs, and the delegation-readiness guard scripts',
   () => {
     const raw = execFileSync(
       'npm',
@@ -65,15 +76,37 @@ test(
     const [{ files }] = JSON.parse(raw);
     const packedPaths = new Set(files.map((f) => f.path));
 
-    const missing = REQUIRED_PATHS.filter((p) => !packedPaths.has(p));
+    const missing = [...REQUIRED_PATHS, ...GUARD_SCRIPT_PATHS].filter((p) => !packedPaths.has(p));
     expect(
       missing,
       `npm pack is missing required file(s): ${missing.join(', ')}. ` +
         `Add them to package.json's "files" array.`,
     ).toEqual([]);
+
+    // The guards ship; their test fixtures do not — a directory entry for
+    // "scripts/hooks/" would drag __tests__/ in too, so "files" must list
+    // the three guard scripts individually (see the entries above).
+    const draggedInTests = [...packedPaths].filter((p) => p.startsWith('scripts/hooks/__tests__/'));
+    expect(draggedInTests, `npm pack must not ship guard test fixtures: ${draggedInTests.join(', ')}`).toEqual([]);
   },
   240000,
 );
+
+test('package.json "files" would fail this same check if scripts/hooks were dropped from it — proving the check above is load-bearing', () => {
+  const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
+  const covers = (entry, p) => (entry.endsWith('/') ? p.startsWith(entry) : p === entry);
+
+  // Simulate the regression this PRD fixes: strip every "files" entry that
+  // covers a guard script (as if "scripts/hooks/*" had never been added).
+  const filesWithoutGuards = pkg.files.filter((entry) => !GUARD_SCRIPT_PATHS.some((p) => covers(entry, p)));
+  const missingUnderRegression = GUARD_SCRIPT_PATHS.filter(
+    (p) => !filesWithoutGuards.some((entry) => covers(entry, p)),
+  );
+  expect(
+    missingUnderRegression,
+    'sanity check failed: removing the guard entries from "files" should have made all three guard scripts unpacked',
+  ).toEqual(GUARD_SCRIPT_PATHS);
+});
 
 // ---------------------------------------------------------------------------
 // Real-tarball, real-unpack, real-render end-to-end proof.
@@ -173,6 +206,13 @@ test(
     // Both bundles actually reached the real tarball (not just "covered" by
     // a files-array prefix match, as the dry-run test above checks).
     for (const rel of BUILD_ARTIFACT_PATHS) {
+      expect(fs.existsSync(path.join(pkgDir, rel)), `${rel} missing from the unpacked tarball`).toBe(true);
+    }
+
+    // The delegation-readiness guard scripts must also survive a real
+    // (non-dry-run) pack + unpack — this is the exact simulated-install
+    // proof for the "guards are dead on every npx install" regression.
+    for (const rel of GUARD_SCRIPT_PATHS) {
       expect(fs.existsSync(path.join(pkgDir, rel)), `${rel} missing from the unpacked tarball`).toBe(true);
     }
 

@@ -3,7 +3,7 @@
  * Single source of truth consumed by Queue / PRDs / History restyle PRDs (20-group).
  */
 import type { ReactNode } from 'react'
-import type { ScheduleJobStatus, LeakedDescendant } from '../../../../preload/api'
+import type { ScheduleJobStatus, LeakedDescendant, ScheduleJob } from '../../../../preload/api'
 import { Badge } from '../../ui/Badge'
 import { projectColorFor } from '../../../lib/projectColor'
 import { shortEpicId } from '../../../lib/epicProvenance'
@@ -109,6 +109,29 @@ export function LeftoverBadge({ count, truncated, salvagePatch }: {
       title={`${label}${salvageHint}`}
     >
       <span data-testid="leftover-badge">{label}</span>
+    </Badge>
+  )
+}
+
+// ─── OverrunBadge ────────────────────────────────────────────────────────────
+// job.overrun is stamped by scheduler.cjs's findOverrunningJobs escalation
+// while status stays 'running', and cleared on finish/reap/reset — read the
+// decision straight off the row, never recompute JOB_OVERRUN_FACTOR here
+// (that threshold is main-process-only; the renderer never mirrors it).
+
+export function OverrunBadge({ status, overrun }: {
+  status: ScheduleJobStatus
+  overrun?: ScheduleJob['overrun']
+}) {
+  if (status !== 'running' || !overrun) return null
+  const label = `${overrun.ratio.toFixed(1)}x over ${overrun.estimateMinutes}m est`
+  return (
+    <Badge
+      tone="warn"
+      className="shrink-0 normal-case"
+      title={`Running ${Math.round(overrun.ranMs / 60_000)}m against a ${overrun.estimateMinutes}m estimate — check the run log, then let it finish or cancel it via scheduler_cancel_job`}
+    >
+      <span data-testid="overrun-badge">{label}</span>
     </Badge>
   )
 }

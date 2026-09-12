@@ -629,6 +629,11 @@ export interface ScheduleJob {
   quarantinedTo?: string;
   quarantinedCommit?: string;
   quarantinedPaths?: string[];
+  /** Stamped by findOverrunningJobs' escalation while status is 'running' —
+   *  a running job whose elapsed time exceeds JOB_OVERRUN_FACTOR × its own
+   *  PRD's estimateMinutes. Advisory only; re-stamped in place every sweep,
+   *  cleared on finish/reap/reset (scheduler.cjs). */
+  overrun?: { ratio: number; ranMs: number; estimateMinutes: number; at: string };
 }
 
 export interface LeakedDescendant {

@@ -10,7 +10,7 @@ import { getLintQueueCached } from '../lib/lintQueueCache'
 import { RunLogViewer } from './tabs/plans/RunLogViewer'
 import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
-import { SchBadge, LeakBadge, LeftoverBadge, formatLeakedDescendants, ProjectTag, EpicTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
+import { SchBadge, LeakBadge, LeftoverBadge, OverrunBadge, formatLeakedDescendants, ProjectTag, EpicTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
 import { resolveEpicRef } from '../lib/epicProvenance'
 import { usePanelFocus } from '../lib/panelFocus'
 import type { NavKey } from './LeftNav'
@@ -1004,6 +1004,7 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
         </div>
         <ProjectTag cwd={job.cwd} />
         <span className="inline-flex items-center gap-2.5 font-mono text-xs text-fg-faint shrink-0">
+          <OverrunBadge status={job.status} overrun={job.overrun} />
           {trailingLabel}
           <span
             className={`text-fg-faint inline-flex transition-transform duration-150 ${open ? 'rotate-90' : ''}`}

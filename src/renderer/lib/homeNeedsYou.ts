@@ -47,7 +47,7 @@ export interface ScheduleJobLite {
   overrun?: { ratio: number; ranMs: number; estimateMinutes: number; at: string }
 }
 
-export type NeedsYouKind = 'proposed-epic' | 'needs-input' | 'job-failed' | 'job-quarantined'
+export type NeedsYouKind = 'proposed-epic' | 'needs-input' | 'job-failed' | 'job-quarantined' | 'job-overrunning'
 
 export interface NeedsYouRow {
   id: string
@@ -143,6 +143,24 @@ export function buildNeedsYouRows(
         epicId: null,
         jobSlug: job.slug,
         escalated,
+      })
+      continue
+    }
+    // Overrun is stamped only while status stays 'running' and cleared on
+    // finish/reap/reset (scheduler.cjs) — but gate on status here too in case
+    // a stale field ever survives on a terminal row on disk.
+    if (job.status === 'running' && job.overrun) {
+      const { ratio, ranMs, estimateMinutes } = job.overrun
+      rows.push({
+        id: `job:${job.slug}`,
+        kind: 'job-overrunning',
+        label: 'Scheduler job running over its own estimate',
+        detail: job.title || job.slug,
+        meta: `Ran ${Math.round(ranMs / 60_000)}m vs ${estimateMinutes}m estimate (${ratio.toFixed(1)}x). `
+          + 'Check the run log, then let it finish or cancel it via scheduler_cancel_job.',
+        project: job.cwd ? projectNameFromCwd(job.cwd) : null,
+        epicId: null,
+        jobSlug: job.slug,
       })
       continue
     }

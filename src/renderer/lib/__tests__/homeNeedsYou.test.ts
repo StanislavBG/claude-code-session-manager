@@ -127,4 +127,45 @@ describe('buildNeedsYouRows', () => {
     expect(row.escalated).toBe(false)
     expect(row.meta).toBe('No createdVia provenance. Adopt it to run, or archive from the Scheduler tab.')
   })
+
+  it('surfaces a running job stamped with overrun', () => {
+    const jobs = [{
+      slug: '900-slow-thing',
+      title: 'The slow thing',
+      cwd: '/home/bilko/Projects/starry-night-ships',
+      status: 'running',
+      error: null,
+      overrun: { ratio: 4.9, ranMs: 108 * 60_000, estimateMinutes: 22, at: '2026-09-11T00:00:00.000Z' },
+    }]
+    const rows = buildNeedsYouRows({}, {}, jobs)
+    expect(rows).toEqual([
+      {
+        id: 'job:900-slow-thing',
+        kind: 'job-overrunning',
+        label: 'Scheduler job running over its own estimate',
+        detail: 'The slow thing',
+        meta: 'Ran 108m vs 22m estimate (4.9x). Check the run log, then let it finish or cancel it via scheduler_cancel_job.',
+        project: 'starry-night-ships',
+        epicId: null,
+        jobSlug: '900-slow-thing',
+      },
+    ])
+  })
+
+  it('ignores an unstamped running job', () => {
+    const jobs = [{ slug: '901-ok', title: 't', cwd: '/p', status: 'running', error: null }]
+    expect(buildNeedsYouRows({}, {}, jobs)).toEqual([])
+  })
+
+  it('ignores a completed job with a stale overrun field', () => {
+    const jobs = [{
+      slug: '902-done',
+      title: 't',
+      cwd: '/p',
+      status: 'completed',
+      error: null,
+      overrun: { ratio: 5, ranMs: 100_000, estimateMinutes: 10, at: '2026-09-11T00:00:00.000Z' },
+    }]
+    expect(buildNeedsYouRows({}, {}, jobs)).toEqual([])
+  })
 })

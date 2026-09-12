@@ -113,6 +113,17 @@ test('with no version change, flush("version-change") does NOT run', async () =>
   expect(flushCalls).toEqual(['boot']);
 });
 
+test('a rejected reportInstall leaves lastMachineReportAt unset so the next boot retries', async () => {
+  const now = Date.now();
+  const { deps, state } = fakeDeps({ settings: { lastMachineReportVersion: '', lastMachineReportAt: null } });
+  deps.telemetryClient.reportInstall = async () => ({ accepted: false, reason: 'error' });
+
+  await bootSequence({ now, appVersion: '1.0.0', deps });
+
+  expect(state().lastMachineReportAt).toBe(null);
+  expect(state().lastMachineReportVersion).toBe('');
+});
+
 test('fires app.launch via telemetryCounters with installChannel + appVersion', async () => {
   const now = Date.now();
   const { deps } = fakeDeps({ settings: { lastMachineReportVersion: '1.0.0', lastMachineReportAt: new Date(now).toISOString() } });

@@ -168,6 +168,38 @@ test('isMachineReportDue: true when lastMachineReportAt is more than 30 days bef
   expect(telemetrySettings.isMachineReportDue(cfg, { now, appVersion: '0.81.0' })).toBe(true);
 });
 
+test('save() merges a partial patch onto a fresh disk read — concurrent savers do not clobber each other', async () => {
+  const home = await mkHome();
+  const telemetrySettings = await freshModule(home);
+  const base = await telemetrySettings.load(); // mints + persists installId
+  expect(base.installId).not.toBe('');
+
+  // Two independent writers, each stamping a DIFFERENT field, racing each
+  // other — mirrors telemetryBoot's install-report stamp landing around the
+  // same time as telemetryClient's own daily-flush stamp. Neither holds the
+  // other's snapshot; each passes only the field it intends to change.
+  await Promise.all([
+    telemetrySettings.save({ lastMachineReportAt: '2026-01-01T00:00:00.000Z', lastMachineReportVersion: '2.0.0' }),
+    telemetrySettings.save({ lastDailyFlushAt: '2026-01-01T01:00:00.000Z' }),
+  ]);
+
+  const onDisk = await telemetrySettings.load();
+  expect(onDisk.lastMachineReportAt).toBe('2026-01-01T00:00:00.000Z');
+  expect(onDisk.lastMachineReportVersion).toBe('2.0.0');
+  expect(onDisk.lastDailyFlushAt).toBe('2026-01-01T01:00:00.000Z');
+  // Neither save touched installId/enabled/endpoint — they must survive too.
+  expect(onDisk.installId).toBe(base.installId);
+  expect(onDisk.enabled).toBe(base.enabled);
+  expect(onDisk.endpoint).toBe(base.endpoint);
+});
+
+test('save() rejects an unknown key without touching disk', async () => {
+  const home = await mkHome();
+  const telemetrySettings = await freshModule(home);
+  await telemetrySettings.load();
+  await expect(telemetrySettings.save({ notARealField: 'x' })).rejects.toThrow('Invalid telemetry config');
+});
+
 test('isMachineReportDue: false when same version and reported less than 30 days ago', async () => {
   const home = await mkHome();
   const telemetrySettings = await freshModule(home);

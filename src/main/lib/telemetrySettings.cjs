@@ -78,11 +78,28 @@ function normalize(cfg) {
   };
 }
 
+/**
+ * Persists `patch` merged onto a FRESHLY-READ copy of the on-disk config —
+ * never onto a caller-held snapshot. Two independent modules (telemetryBoot's
+ * install-report stamp, telemetryClient's own daily-flush stamp) each keep
+ * their own in-memory copy of settings loaded at different times; if save()
+ * blindly wrote a caller's full snapshot, whichever call landed last would
+ * silently revert every field the OTHER caller had just written (a lost
+ * update — the root cause behind lastMachineReportAt never sticking). Calls
+ * are still serialized through the existing writeQueue chain, so the fresh
+ * read for call N+1 always observes call N's write.
+ */
 let writeQueue = Promise.resolve();
-async function save(cfg) {
-  if (!isValid(cfg)) throw new Error('Invalid telemetry config');
-  const next = normalize(cfg);
+async function save(patch) {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Invalid telemetry config');
+  for (const k of Object.keys(patch)) {
+    if (!KNOWN_KEYS.has(k)) throw new Error('Invalid telemetry config');
+  }
   const run = async () => {
+    const current = await readRaw();
+    const merged = { ...current, ...patch };
+    if (!isValid(merged)) throw new Error('Invalid telemetry config');
+    const next = normalize(merged);
     await config.writeTextAtomic(storePath(), JSON.stringify(next, null, 2) + '\n', { mode: 0o600 });
     return next;
   };

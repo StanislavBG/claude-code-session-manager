@@ -150,6 +150,26 @@ test('ingress functions never throw on hostile inputs', async () => {
   client.shutdown();
 });
 
+// ─── reportInstall failure visibility ──────────────────────────────────
+
+test('reportInstall logs a warn line naming the thrown error instead of swallowing it silently', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  client._setMachineProfileBuilder(() => { throw new Error('boom-profile'); });
+  const warnLines = [];
+  client._setLogger((payload) => warnLines.push(payload));
+
+  const result = await client.reportInstall(fakeProfile());
+
+  expect(result).toEqual({ accepted: false, reason: 'error' });
+  expect(warnLines).toHaveLength(1);
+  expect(warnLines[0].scope).toBe('telemetry');
+  expect(warnLines[0].level).toBe('warn');
+  expect(warnLines[0].message).toBe('reportInstall failed');
+  expect(warnLines[0].meta.error).toContain('boom-profile');
+  client.shutdown();
+});
+
 // ─── disabled at ingress ───────────────────────────────────────────────
 
 test('when telemetry is disabled, ingress drops at the point of entry', async () => {

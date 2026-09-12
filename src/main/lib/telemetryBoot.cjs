@@ -38,8 +38,10 @@ function resolveDeps(deps = {}) {
  *     signal that also gates the machine-profile heartbeat below).
  *  3. install upsert — sent once via telemetryClient.reportInstall(profile)
  *     when telemetrySettings.isMachineReportDue() is true (a version bump, OR
- *     the 30-day liveness heartbeat), then lastMachineReportAt/Version are
- *     persisted so a same-version reboot within the window sends nothing.
+ *     the 30-day liveness heartbeat). lastMachineReportAt/Version are only
+ *     persisted when reportInstall() reports success — a failed/dropped
+ *     upsert stays due so the next boot retries, rather than being marked
+ *     done regardless of outcome.
  *     This lands in bilko.run's app_installs table (the sole source for
  *     every install-shaped number on the site). It replaces the former
  *     track('install.machine', profile) call, which duplicated the same
@@ -62,12 +64,13 @@ async function bootSequence({ now = Date.now(), appVersion, installChannel, deps
 
   if (telemetrySettings.isMachineReportDue(settings, { now, appVersion })) {
     const profile = await buildMachineProfile();
-    await telemetryClient.reportInstall(profile);
-    await telemetrySettings.save({
-      ...settings,
-      lastMachineReportAt: new Date(now).toISOString(),
-      lastMachineReportVersion: appVersion,
-    });
+    const reportResult = await telemetryClient.reportInstall(profile);
+    if (reportResult && reportResult.accepted) {
+      await telemetrySettings.save({
+        lastMachineReportAt: new Date(now).toISOString(),
+        lastMachineReportVersion: appVersion,
+      });
+    }
   }
 
   telemetryCounters.trackAppLaunch({ installChannel, appVersion });

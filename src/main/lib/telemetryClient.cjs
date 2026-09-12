@@ -91,7 +91,23 @@ const S = {
   lastError: null,
   lastFlushAt: null,
   lastFlushReason: null,
+  logger: null,
 };
+
+/**
+ * Best-effort warn logger for failures this module would otherwise swallow
+ * (e.g. reportInstall()'s bare catch). Lazily requires logs.cjs — which
+ * requires('electron') at module scope — so this stays a no-op under plain
+ * vitest with no Electron runtime, exactly like machineProfile.cjs's
+ * resolveElectronApp(). Injectable via _setLogger so tests can observe it
+ * without an Electron runtime.
+ */
+function logWarn(message, meta) {
+  try {
+    const fn = S.logger || require('../logs.cjs').writeLine;
+    fn({ scope: 'telemetry', level: 'warn', message, meta });
+  } catch { /* logs unavailable outside an Electron runtime */ }
+}
 
 /**
  * SM_TELEMETRY_SPOOL, when set, overrides the spool directory in place of
@@ -544,7 +560,8 @@ async function reportInstall(profile) {
     const recordId = crypto.randomUUID();
     const wire = buildInstallWire(profile, S.settings.installId);
     return await appendRecord('install', wire, recordId);
-  } catch {
+  } catch (e) {
+    logWarn('reportInstall failed', { error: e && e.message ? e.message : String(e) });
     return { accepted: false, reason: 'error' };
   }
 }
@@ -684,7 +701,7 @@ async function flushImpl(reason) {
     await persistSent();
 
     if (safeReason === 'daily' && result.failed.length === 0) {
-      S.settings = await telemetrySettings.save({ ...S.settings, lastDailyFlushAt: new Date().toISOString() });
+      S.settings = await telemetrySettings.save({ lastDailyFlushAt: new Date().toISOString() });
     }
   } catch { /* fail-inert */ }
   S.lastFlushAt = Date.now();
@@ -749,6 +766,10 @@ function _setMachineProfileBuilder(fn) {
   S.profileBuilder = typeof fn === 'function' ? fn : machineProfile.buildMachineProfile;
 }
 
+function _setLogger(fn) {
+  S.logger = typeof fn === 'function' ? fn : null;
+}
+
 module.exports = {
   track,
   logLine,
@@ -764,4 +785,5 @@ module.exports = {
   sentPath,
   _setFetchImpl,
   _setMachineProfileBuilder,
+  _setLogger,
 };

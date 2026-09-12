@@ -225,6 +225,27 @@ const ORPHAN_REQUEUE_CAP = 5;
  * `findLiveProcess` (existing callers/tests) preserves prior behaviour
  * exactly: every pidless row past grace reaps, none are ever recovered.
  */
+/**
+ * Pure, never-throws formatter for the dispatch-phase breadcrumb appended to
+ * a pidless reap's reason string. Returns '' when the row carries no
+ * breadcrumb at all (an older-build row, or one that never reached the
+ * running-stamped mutate) so that case's message stays byte-identical to
+ * the pre-breadcrumb text — nothing downstream that matches on it breaks.
+ * A present `dispatchPhase` with a missing/unparseable `dispatchPhaseAt`
+ * still names the phase, just without the `at <ts>` clause — the reaper
+ * must stay a pure decision layer that cannot crash the tick over a
+ * malformed timestamp.
+ */
+function formatDispatchPhaseSuffix(j) {
+  if (!j || typeof j.dispatchPhase !== 'string' || !j.dispatchPhase) return '';
+  const at = typeof j.dispatchPhaseAt === 'string' && !Number.isNaN(Date.parse(j.dispatchPhaseAt))
+    ? j.dispatchPhaseAt
+    : null;
+  return at
+    ? ` (last dispatch phase: ${j.dispatchPhase} at ${at})`
+    : ` (last dispatch phase: ${j.dispatchPhase})`;
+}
+
 function selectReapableJobs(jobs, now, { pidAlive, grace, findLiveProcess } = {}) {
   const reapable = [];
   const warnings = [];
@@ -253,7 +274,7 @@ function selectReapableJobs(jobs, now, { pidAlive, grace, findLiveProcess } = {}
       slug: j.slug,
       pid: null,
       pidless: true,
-      reason: `reaped: no runtime.pid recorded after ${Math.round(grace / 60_000)}m — spawn never completed`,
+      reason: `reaped: no runtime.pid recorded after ${Math.round(grace / 60_000)}m — spawn never completed${formatDispatchPhaseSuffix(j)}`,
     });
   }
   return { reapable, warnings, recovered };
@@ -324,4 +345,5 @@ module.exports = {
   resolvePidlessGateOutcome,
   isAlreadySatisfiedOnMain,
   resolveCommitGuardOutcome,
+  formatDispatchPhaseSuffix,
 };

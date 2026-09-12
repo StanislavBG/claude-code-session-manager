@@ -4048,13 +4048,20 @@ function pickRunDir() {
 /**
  * Execute a single PRD job. Writes stdout/stderr to a log file and a meta
  * JSON sidecar. Accepts an optional onPid(pid) callback called synchronously
- * after spawn so callers can persist the pid before the job finishes.
+ * after spawn so callers can persist the pid before the job finishes, and an
+ * optional onPhase(phase) callback invoked at the top of this function (see
+ * spawnJob's dispatchPhase breadcrumb) — this function has no access to
+ * `mutate`, so the caller injects the stamping side effect instead.
  *
  * Uses withChildAndLog for the child lifecycle (fd open/close, watchdog timers).
  * Watchdogs are declared as an array; the result-tailer's exit-code mapping
  * (success+killedBySignal → 0) is scheduler-specific and lives in onExit.
  */
-async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget = null, foreignWip = null, launchEnv = null) {
+async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget = null, foreignWip = null, launchEnv = null, onPhase = null) {
+  // First statement — stamps the 'exec-entered' dispatch-phase breadcrumb
+  // before openLog below, so a hang inside openLog/spawn itself still shows
+  // execution reached this function (see spawnJob's dispatchPhase comment).
+  if (onPhase) await onPhase('exec-entered');
   const logPath = path.join(runDir, `${job.slug}.log`);
   const metaPath = path.join(runDir, `${job.slug}.meta.json`);
   // `cwd` stays the MAIN tree throughout — PRD lookup (findPrdDir/prdPathForJob)
@@ -5389,6 +5396,14 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
         delete s.jobs[idx].heldReason;
         s.jobs[idx].runId = runId;
         s.jobs[idx].startedAt = new Date().toISOString();
+        // Dispatch-phase breadcrumb (PRD: dispatch-region diagnostic
+        // breadcrumb) — a transient marker of how far THIS dispatch got,
+        // exactly like heldReason: stamped at each step of the
+        // running-transition → executeJob → onPid region and deleted at
+        // finalize (see the two finalize mutates below) so a
+        // completed/failed row never carries a stale one.
+        s.jobs[idx].dispatchPhase = 'running-stamped';
+        s.jobs[idx].dispatchPhaseAt = s.jobs[idx].startedAt;
         dispatchStartedAtMs = Date.parse(s.jobs[idx].startedAt);
         if (job.quietMachine === true) {
           s.jobs[idx].quietMachine = true;
@@ -5406,6 +5421,14 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     });
     await broadcast({ flush: true });
     if (dispatchSkippedAlreadyCompleted) return;
+
+    await mutate((s) => {
+      const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+      if (idx >= 0) {
+        s.jobs[idx].dispatchPhase = 'pre-run-git-snapshot';
+        s.jobs[idx].dispatchPhaseAt = new Date().toISOString();
+      }
+    });
 
     // Commit-guard baseline: snapshot the working tree BEFORE the run so the
     // post-run check flags only paths THIS job left dirty, not pre-existing WIP.
@@ -5439,6 +5462,8 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
         s.jobs[idx].guardHeadBefore = guardHeadBefore || null;
         if (preRunDirtyPaths.length) s.jobs[idx].preRunDirtyPaths = preRunDirtyPaths;
         else delete s.jobs[idx].preRunDirtyPaths;
+        s.jobs[idx].dispatchPhase = 'baseline-persisted';
+        s.jobs[idx].dispatchPhaseAt = new Date().toISOString();
       }
     });
 
@@ -5460,17 +5485,21 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       console.log(`[scheduler] ${job.slug}: isolated in worktree ${worktree.dir} (branch ${worktree.branch})`);
     } else {
       console.log(`[scheduler] ${job.slug}: running in main tree (worktree not used: ${worktree.reason})`);
-      // Surface any degraded-isolation fallback on the job row itself so it's
-      // queryable from the queue instead of console-only — except the
-      // deliberate env-disable flag, which is an intentional opt-out, not a
-      // degradation worth flagging.
-      if (!jobWorktree.isWorktreeDisabled()) {
-        await mutate((s) => {
-          const idx = s.jobs.findIndex((x) => x.slug === job.slug);
-          if (idx >= 0) s.jobs[idx].worktreeFallbackReason = worktree.reason;
-        });
-      }
     }
+    // dispatchPhase stamp folded into a single unconditional mutate covering
+    // both branches above — the degraded-isolation fallback flag (skipped
+    // for the deliberate env-disable opt-out) rides along in the SAME
+    // mutate rather than a second one.
+    await mutate((s) => {
+      const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+      if (idx >= 0) {
+        s.jobs[idx].dispatchPhase = 'worktree-resolved';
+        s.jobs[idx].dispatchPhaseAt = new Date().toISOString();
+        if (!worktree.ok && !jobWorktree.isWorktreeDisabled()) {
+          s.jobs[idx].worktreeFallbackReason = worktree.reason;
+        }
+      }
+    });
     // Base-tree WIP carried into the worktree (createWorktree, PRD 1094) —
     // recorded on the job row so integration can exclude these paths from
     // the branch diff below, and so it's queryable from the queue.
@@ -5521,10 +5550,20 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           if (idx >= 0) {
             s.jobs[idx].sessionId = sessionId;
             s.jobs[idx].runtime = { pid, runId, startedAt: s.jobs[idx].startedAt, sessionId, cwd };
+            s.jobs[idx].dispatchPhase = 'spawned';
+            s.jobs[idx].dispatchPhaseAt = new Date().toISOString();
           }
         });
         await broadcast({ flush: true });
-      }, worktree.ok ? worktree.dir : undefined, resumeTarget, foreignWip, launchEnv);
+      }, worktree.ok ? worktree.dir : undefined, resumeTarget, foreignWip, launchEnv, async (phase) => {
+        await mutate((s) => {
+          const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+          if (idx >= 0) {
+            s.jobs[idx].dispatchPhase = phase;
+            s.jobs[idx].dispatchPhaseAt = new Date().toISOString();
+          }
+        });
+      });
     } finally {
       if (worktree.ok) {
         worktreeLeftoverDirty = (await uncommittedChanges(worktree.dir)) || [];
@@ -6132,6 +6171,13 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
             delete s.jobs[i2].sharedTreeGuard;
           }
           delete s.jobs[i2].runtime;
+          // Dispatch-phase breadcrumb was only ever meant to cover THIS
+          // dispatch's pre-spawn/spawn region — a terminal row must not
+          // carry a stale one into its next dispatch (unlike guardBaseline's
+          // preRunDirtyPaths sibling, which deliberately survives to
+          // history.jsonl — this has no such carry-forward use).
+          delete s.jobs[i2].dispatchPhase;
+          delete s.jobs[i2].dispatchPhaseAt;
           // A completed/failed/needs_review row is no longer running — its
           // overrun badge (if any) was this run's outcome and must not
           // linger onto whatever the next dispatch of this slug does.
@@ -7178,6 +7224,8 @@ async function reapDeadRunningJobs() {
           s.jobs[idx].runId = null;
         }
         delete s.jobs[idx].runtime;
+        delete s.jobs[idx].dispatchPhase;
+        delete s.jobs[idx].dispatchPhaseAt;
         delete s.jobs[idx].overrun;
         delete s.jobs[idx].guardBaseline;
         delete s.jobs[idx].guardHeadBefore;

@@ -63,6 +63,64 @@ test('live pid → skipped regardless of age', () => {
   assert.deepStrictEqual(reapable, []);
 });
 
+// ---------- dispatchPhase breadcrumb (PRD: dispatch-region diagnostic) ----------
+
+test('pidless + dispatchPhase present → reason names the phase and timestamp', () => {
+  const jobs = [{
+    slug: 'zombie-phase',
+    status: 'running',
+    startedAt: agoMin(464),
+    dispatchPhase: 'baseline-persisted',
+    dispatchPhaseAt: '2026-09-12T02:46:10.000Z',
+  }];
+  const { reapable } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE });
+  assert.strictEqual(reapable.length, 1);
+  assert.strictEqual(
+    reapable[0].reason,
+    'reaped: no runtime.pid recorded after 10m — spawn never completed '
+    + '(last dispatch phase: baseline-persisted at 2026-09-12T02:46:10.000Z)',
+  );
+});
+
+test('pidless + no dispatchPhase (older-build row) → reason byte-identical to the pre-breadcrumb message', () => {
+  const jobs = [{ slug: 'zombie-noph', status: 'running', startedAt: agoMin(464) }];
+  const { reapable } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE });
+  assert.strictEqual(reapable.length, 1);
+  assert.strictEqual(
+    reapable[0].reason,
+    'reaped: no runtime.pid recorded after 10m — spawn never completed',
+  );
+});
+
+test('pidless + dispatchPhase present but dispatchPhaseAt missing/unparseable → phase named, no "at" clause, never throws', () => {
+  const jobs = [
+    { slug: 'zombie-noat', status: 'running', startedAt: agoMin(464), dispatchPhase: 'exec-entered' },
+    { slug: 'zombie-badat', status: 'running', startedAt: agoMin(464), dispatchPhase: 'exec-entered', dispatchPhaseAt: 'not-a-date' },
+  ];
+  const { reapable } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE });
+  assert.strictEqual(reapable.length, 2);
+  for (const r of reapable) {
+    assert.strictEqual(
+      r.reason,
+      'reaped: no runtime.pid recorded after 10m — spawn never completed (last dispatch phase: exec-entered)',
+    );
+  }
+});
+
+test('pidless + dispatchPhase === "spawned" with no pid → still reapable, breadcrumb changes message only', () => {
+  const jobs = [{
+    slug: 'torn-write',
+    status: 'running',
+    startedAt: agoMin(464),
+    dispatchPhase: 'spawned',
+    dispatchPhaseAt: agoMin(465),
+  }];
+  const { reapable } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE });
+  assert.strictEqual(reapable.length, 1);
+  assert.strictEqual(reapable[0].pidless, true);
+  assert.match(reapable[0].reason, /last dispatch phase: spawned/);
+});
+
 test('dead pid → reaped exactly as before (pidless: false, no reason string)', () => {
   const jobs = [{ slug: 'dead', status: 'running', runtime: { pid: 4242 }, startedAt: agoMin(500) }];
   const { reapable } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysDead, grace: GRACE });

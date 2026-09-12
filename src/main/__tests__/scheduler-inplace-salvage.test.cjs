@@ -201,6 +201,80 @@ function writeNoopClaudeStub() {
   return stubPath;
 }
 
+// Stub `claude` binary that blocks until a `go` marker file appears in its
+// cwd (polled), THEN emits a success result and exits 0 — gives the test a
+// window to read the queue row's intermediate dispatchPhase before the run
+// finalizes and deletes it.
+function writeGatedClaudeStub() {
+  const stubPath = path.join(os.tmpdir(), `sm-claude-stub-gated-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
+  const body = `
+    const fs = require('fs');
+    const path = require('path');
+    const { execFileSync } = require('child_process');
+    const goFile = path.join(process.cwd(), 'go.marker');
+    const deadline = Date.now() + 10_000;
+    while (!fs.existsSync(goFile) && Date.now() < deadline) {
+      try { execFileSync('sleep', ['0.02']); } catch {}
+    }
+    process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok', is_error: false }) + '\\n');
+    process.exit(0);
+  `;
+  fs.writeFileSync(stubPath, `#!${process.execPath}\n${body}\n`, { mode: 0o755 });
+  return stubPath;
+}
+
+test('dispatchPhase breadcrumb advances to "spawned" mid-run and is gone after finalize', async () => {
+  const projectCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-inplace-salvage-project-'));
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+
+  const slug = `1163-test-dispatchphase-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
+  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'prds');
+  fs.mkdirSync(prdsDir, { recursive: true });
+  fs.writeFileSync(path.join(prdsDir, `${slug}.md`), 'Do a thing, gated on a marker file.', 'utf8');
+
+  const queuePath = writeProjectQueue(projectCwd, [
+    { slug, status: 'pending', cwd: projectCwd },
+  ]);
+
+  process.env.SM_CLAUDE_BIN = writeGatedClaudeStub();
+
+  const runId = `run-${slug}`;
+  const runDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId);
+  fs.mkdirSync(runDir, { recursive: true });
+
+  const readRow = () => JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs.find((j) => j.slug === slug);
+
+  try {
+    const spawnPromise = spawnJob({ slug, cwd: projectCwd }, runId, runDir, projectCwd);
+
+    // Poll the row until dispatchPhase reaches 'spawned' (the onPid mutate),
+    // proving the breadcrumb advanced through the dispatch region while the
+    // stub is deliberately blocked mid-run.
+    const pollDeadline = Date.now() + 8_000;
+    let row = readRow();
+    while (row?.dispatchPhase !== 'spawned' && Date.now() < pollDeadline) {
+      await new Promise((r) => setTimeout(r, 25));
+      row = readRow();
+    }
+    expect(row?.dispatchPhase).toBe('spawned');
+    expect(typeof row.dispatchPhaseAt).toBe('string');
+    expect(Number.isNaN(Date.parse(row.dispatchPhaseAt))).toBe(false);
+
+    // Let the gated stub finish.
+    fs.writeFileSync(path.join(projectCwd, 'go.marker'), 'go\n', 'utf8');
+    await spawnPromise;
+
+    const finalRow = readRow();
+    expect(finalRow.exitCode).toBe(0);
+    expect(finalRow.dispatchPhase).toBeUndefined();
+    expect(finalRow.dispatchPhaseAt).toBeUndefined();
+  } finally {
+    fs.rmSync(projectCwd, { recursive: true, force: true });
+    fs.rmSync(runDir, { recursive: true, force: true });
+  }
+}, 30_000);
+
 test('a job whose tree is dirty only from pre-existing baseline WIP (human/sibling), and which itself dirties/commits nothing, gets no leftover attribution', async () => {
   const projectCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-inplace-salvage-project-'));
   initRepo(projectCwd);

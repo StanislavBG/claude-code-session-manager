@@ -117,6 +117,13 @@ const ScheduleJobSchema = z
     // finalizes — never meant to outlive one run.
     guardBaseline: z.array(z.string()).optional(),
     guardHeadBefore: z.string().nullable().optional(),
+    // Dispatch-phase breadcrumb: how far a 'running' row's own dispatch got
+    // through the running-transition → executeJob → onPid region, so a
+    // pidless reap can name the step that hung instead of just the symptom.
+    // Same lifecycle as heldReason — stamped at each step, deleted at
+    // finalize (both the normal completion path and reapDeadRunningJobs).
+    dispatchPhase: z.string().optional(),
+    dispatchPhaseAt: z.string().optional(),
   })
   .passthrough();
 

@@ -7891,6 +7891,15 @@ function failedAutoResetDisabled() {
  * can have failed more than once across its lifetime (an earlier auto-reset
  * attempt that itself failed again) — only the most recent failed-since
  * timestamp should gate the next attempt.
+ *
+ * Excludes a row whose newest failed-entry came from spawnJob:fail-dirty —
+ * that source means a transient failure left genuinely uncommitted work in
+ * the job's worktree and the system already decided once, deliberately, not
+ * to auto-requeue it (see that call site's own comment: "could discard
+ * uncommitted work left by the failed run"). This bounded auto-reset is a
+ * different, slower mechanism and must not quietly override that decision
+ * 10 minutes later — a human should look at a dirty worktree before it gets
+ * re-driven.
  */
 function selectFailedAutoResetTargets(jobs, now, thresholdMs) {
   const targets = [];
@@ -7904,6 +7913,7 @@ function selectFailedAutoResetTargets(jobs, now, thresholdMs) {
       if (history[i].to === 'failed') { entry = history[i]; break; }
     }
     if (!entry) continue;
+    if (entry.source === 'spawnJob:fail-dirty') continue;
     const since = Date.parse(entry.at);
     if (Number.isNaN(since)) continue;
     const ageMs = now - since;
@@ -7948,7 +7958,18 @@ function findStuckFailedJobs(jobs, now, thresholdMs) {
     if (j.status !== 'failed') continue;
     if (j.stuckFailedNotified === true) continue;
     if (!isRescanCandidate(j)) continue;
-    const entry = (j.statusHistory || []).find((h) => h.to === 'failed');
+    // Newest (not first) to === 'failed' entry — same rationale as
+    // selectFailedAutoResetTargets above: a row can have failed more than
+    // once across its lifetime (an earlier auto-reset attempt that itself
+    // failed again), and only the CURRENT failure episode's age should gate
+    // escalation. Using the first/oldest entry would report a stale age
+    // (and become instantly escalation-eligible) for a row that failed
+    // months ago, recovered, and has only just failed again.
+    const history = j.statusHistory || [];
+    let entry = null;
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].to === 'failed') { entry = history[i]; break; }
+    }
     if (!entry) continue;
     const since = Date.parse(entry.at);
     if (Number.isNaN(since)) continue;

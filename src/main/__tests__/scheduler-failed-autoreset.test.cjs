@@ -95,6 +95,18 @@ test('the newest failed entry gates the threshold, not the first one', () => {
   assert.equal(selectFailedAutoResetTargets([job], now, THRESHOLD_MS).length, 0, 'the old failed entry must not be used to gate this row');
 });
 
+test('a row whose newest failed entry came from spawnJob:fail-dirty is never selected — that source is a deliberate do-not-auto-requeue decision', () => {
+  const now = Date.now();
+  const job = {
+    slug: 'dirty-worktree',
+    status: 'failed',
+    statusHistory: [
+      { to: 'failed', at: new Date(now - 15 * MIN_MS).toISOString(), source: 'spawnJob:fail-dirty' },
+    ],
+  };
+  assert.equal(selectFailedAutoResetTargets([job], now, THRESHOLD_MS).length, 0);
+});
+
 test('failedAutoResetDisabled reflects SM_FAILED_AUTORESET_DISABLE', () => {
   const saved = process.env.SM_FAILED_AUTORESET_DISABLE;
   try {

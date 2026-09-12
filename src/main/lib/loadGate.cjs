@@ -32,6 +32,15 @@ const { loadGateThreshold, JOB_OVERRUN_FLOOR_MS } = require('./schedulerConfig.c
 // every tick would bury the signal in its own noise.
 const AUDIT_INTERVAL_MS = 10 * 60_000;
 
+// Default hysteresis release window for the gated stretch (PRD: boundary-
+// hovering load). A box sitting right at the threshold oscillates above/below
+// it tick to tick; clearing `gatedSince` on the first sub-threshold sample
+// reset the stretch counter every time, so `escalate` (and the warn-log with
+// topCpuConsumers()) never fired even after 80+ minutes of effectively
+// continuous gating. The stretch now only clears once load has stayed below
+// threshold continuously for this long.
+const RELEASE_WINDOW_MS = 2 * 60_000;
+
 /**
  * isLoadGated(loadavg1, cores, threshold) → boolean
  *
@@ -82,9 +91,11 @@ function createLoadGate({
   threshold = loadGateThreshold,
   auditIntervalMs = AUDIT_INTERVAL_MS,
   escalateAfterMs = JOB_OVERRUN_FLOOR_MS,
+  releaseWindowMs = RELEASE_WINDOW_MS,
 } = {}) {
   let lastAuditAt = null; // null = never audited; the first gated tick always audits
   let gatedSince = null;
+  let belowSince = null; // start of the current continuous sub-threshold run, while a stretch is open
   let last = null;
 
   function evaluate({ bypass = false } = {}) {
@@ -95,10 +106,21 @@ function createLoadGate({
     const ratio = c > 0 && Number.isFinite(l1) ? l1 / c : 0;
     const wouldGate = isLoadGated(l1, c, th);
 
+    // Hysteresis: the STRETCH (gatedSince) only clears after load has stayed
+    // below threshold continuously for releaseWindowMs. This never affects
+    // `gated` itself below — a sub-threshold tick still returns gated:false
+    // immediately; only the bookkeeping/escalation lags behind.
     if (wouldGate) {
       if (gatedSince === null) gatedSince = t;
+      belowSince = null;
+    } else if (gatedSince !== null) {
+      if (belowSince === null) belowSince = t;
+      if (t - belowSince >= releaseWindowMs) {
+        gatedSince = null;
+        belowSince = null;
+      }
     } else {
-      gatedSince = null;
+      belowSince = null;
     }
     const gated = wouldGate && !bypass;
     const bypassed = wouldGate && bypass;

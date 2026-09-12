@@ -125,7 +125,7 @@ test('an ungated tick never audits', () => {
   assert.equal(g.evaluate().shouldAudit, false);
 });
 
-test('escalates once the gated stretch exceeds the escalation window, and the stretch resets when load drops', () => {
+test('escalates once the gated stretch exceeds the escalation window, and the stretch only resets once load has stayed sub-threshold past the release window', () => {
   let l1 = 12.95;
   let t = 0;
   const g = createLoadGate({
@@ -134,6 +134,7 @@ test('escalates once the gated stretch exceeds the escalation window, and the st
     now: () => t,
     threshold: 0.85,
     escalateAfterMs: 45 * 60_000,
+    releaseWindowMs: 2 * 60_000,
   });
   assert.equal(g.evaluate().escalate, false);
   t += 44 * 60_000;
@@ -142,10 +143,41 @@ test('escalates once the gated stretch exceeds the escalation window, and the st
   const r = g.evaluate();
   assert.equal(r.escalate, true, 'at 45m: escalates');
   assert.equal(r.gatedSinceMs, 45 * 60_000);
+  // A single sub-threshold sample must NOT reset the stretch (the boundary-
+  // hovering bug this PRD fixes) — gatedSinceMs keeps growing.
   l1 = 1; t += 60_000;
-  assert.equal(g.evaluate().gatedSinceMs, 0, 'load dropped: stretch resets');
+  const oneMinBelow = g.evaluate();
+  assert.equal(oneMinBelow.gated, false, 'gate decision is immediate');
+  assert.equal(oneMinBelow.gatedSinceMs, 46 * 60_000, 'stretch not yet released');
+  // Load climbs back above threshold before the release window elapses: the
+  // stretch was never actually cleared, so it just keeps accumulating.
+  l1 = 12.95; t += 30_000;
+  assert.equal(g.evaluate().gatedSinceMs, 46 * 60_000 + 30_000, 'stretch survived the brief dip');
+  // Now hold sub-threshold continuously past the release window (the window
+  // is measured from the first sub-threshold sample of this sustained drop,
+  // so it takes a tick to mark that start, then another once the window has
+  // actually elapsed).
+  l1 = 1; t += 1;
+  g.evaluate();
+  t += 2 * 60_000;
+  assert.equal(g.evaluate().gatedSinceMs, 0, 'sustained sub-threshold load past the release window clears the stretch');
   l1 = 12.95; t += 60_000;
   assert.equal(g.evaluate().gatedSinceMs, 0, 'a fresh stretch starts from zero');
+});
+
+test('the gate decision itself is unaffected by hysteresis: a sub-threshold tick is never gated, even mid-stretch', () => {
+  let l1 = 12.95;
+  let t = 0;
+  const g = createLoadGate({
+    loadavg: () => [l1, 0, 0],
+    cores: () => 14,
+    now: () => t,
+    threshold: 0.85,
+    releaseWindowMs: 5 * 60_000,
+  });
+  assert.equal(g.evaluate().gated, true);
+  l1 = 1; t += 60_000;
+  assert.equal(g.evaluate().gated, false, 'below threshold: gated:false immediately, hysteresis notwithstanding');
 });
 
 test('snapshot() reflects the last evaluation and is null before any', () => {
@@ -156,4 +188,73 @@ test('snapshot() reflects the last evaluation and is null before any', () => {
   assert.equal(s.gated, true);
   assert.equal(typeof s.at, 'string');
   assert.equal('shouldAudit' in s, false, 'per-tick flags are not part of the persisted snapshot');
+});
+
+test('snapshot() exposes gated, ratio, threshold, loadavg1, cores and gatedSinceMs (what buildScheduleStatePayload surfaces as loadGate)', () => {
+  const { g } = gateWith({});
+  g.evaluate();
+  const s = g.snapshot();
+  assert.equal(typeof s.gated, 'boolean');
+  assert.equal(typeof s.ratio, 'number');
+  assert.equal(typeof s.threshold, 'number');
+  assert.equal(typeof s.loadavg1, 'number');
+  assert.equal(typeof s.cores, 'number');
+  assert.equal(typeof s.gatedSinceMs, 'number');
+});
+
+// ─── hysteresis: the real observed boundary-hovering sequence ──────────────
+
+test('a boundary-hovering box (real observed sequence, alternating above/below threshold) grows gatedSinceMs monotonically across 50 simulated minutes and eventually escalates', () => {
+  // 14 cores, 0.85/core = 11.9 threshold; loadavg1 observed 2026-09-12
+  // oscillating 11.07 - 13.31, straddling the threshold every tick. Before
+  // this PRD, the immediate reset on ANY sub-threshold sample meant every
+  // one of these ticks reset gatedSince to null and escalate never fired.
+  const CORES = 14;
+  const THRESHOLD = 0.85;
+  const SEQUENCE = [11.07, 13.31, 11.51, 12.8];
+  let l1 = SEQUENCE[0];
+  let t = 0;
+  const g = createLoadGate({
+    loadavg: () => [l1, 0, 0],
+    cores: () => CORES,
+    now: () => t,
+    threshold: THRESHOLD,
+    escalateAfterMs: 20 * 60_000, // shorter than the 45m default so 50 sim-minutes crosses it
+  });
+
+  const TICK_MS = 60_000;
+  const TOTAL_MS = 50 * 60_000;
+  let prevGatedSinceMs = -1;
+  let sawEscalate = false;
+  let i = 0;
+  for (let elapsed = 0; elapsed < TOTAL_MS; elapsed += TICK_MS) {
+    l1 = SEQUENCE[i % SEQUENCE.length];
+    i += 1;
+    const r = g.evaluate();
+    assert.ok(r.gatedSinceMs >= prevGatedSinceMs, `gatedSinceMs must not shrink (was ${prevGatedSinceMs}, now ${r.gatedSinceMs})`);
+    prevGatedSinceMs = r.gatedSinceMs;
+    if (r.escalate) sawEscalate = true;
+    t += TICK_MS;
+  }
+  assert.equal(sawEscalate, true, 'escalate must fire once the (never-reset) stretch exceeds escalateAfterMs');
+});
+
+test('the release window actually releases: sustained sub-threshold load past the window reports gated:false and gatedSinceMs:0 on the next tick', () => {
+  let l1 = 13.31;
+  let t = 0;
+  const g = createLoadGate({
+    loadavg: () => [l1, 0, 0],
+    cores: () => 14,
+    now: () => t,
+    threshold: 0.85,
+    releaseWindowMs: 2 * 60_000,
+  });
+  assert.equal(g.evaluate().gated, true);
+  l1 = 5;
+  t += 1;
+  g.evaluate(); // marks the start of the sustained sub-threshold run
+  t += 2 * 60_000;
+  const r = g.evaluate();
+  assert.equal(r.gated, false);
+  assert.equal(r.gatedSinceMs, 0);
 });

@@ -6870,8 +6870,17 @@ async function reapDeadRunningJobs() {
       // a true claim when the run dir produced no log output at all; a log
       // with real content proves the job DID run (see
       // resolvePidlessGateOutcome's header).
-      const gateOutcome = pidless ? resolvePidlessGateOutcome(outcome, logHasOutput(logPath)) : mapOutcomeToGateOutcome(outcome);
-      dead.push({ slug, pid, outcome, gateOutcome, pidless, reason, logPath });
+      // A pidless row was stamped with the runId of whatever batch dir
+      // tickQueue handed its dispatch (pickRunDir's header: "tickQueue hands
+      // ONE shared batch dir to every spawnJob in the batch") BEFORE the
+      // spawn that never completed — so that dir may hold nothing of this
+      // slug's own, or only a sibling's `<other-slug>.log` from the same
+      // batch. logHasOutput's own existsSync+size check is exactly "does
+      // THIS slug have any artifact in there" — reused rather than
+      // re-derived so a phantom link never survives the reap.
+      const hasOwnArtifact = pidless ? logHasOutput(logPath) : true;
+      const gateOutcome = pidless ? resolvePidlessGateOutcome(outcome, hasOwnArtifact) : mapOutcomeToGateOutcome(outcome);
+      dead.push({ slug, pid, outcome, gateOutcome, pidless, reason, logPath, noOwnArtifact: pidless && !hasOwnArtifact });
     }
 
     queueHealthSweepCycle += 1;
@@ -6970,7 +6979,7 @@ async function reapDeadRunningJobs() {
     }
 
     await mutate(async (s) => {
-      for (const { slug, pid, outcome, gateOutcome, pidless, reason } of dead) {
+      for (const { slug, pid, outcome, gateOutcome, pidless, reason, noOwnArtifact } of dead) {
         const idx = s.jobs.findIndex((x) => x.slug === slug);
         if (idx < 0 || s.jobs[idx].status !== 'running') continue; // race guard
         const rateLimited = outcome === 'rate_limited';
@@ -7059,6 +7068,18 @@ async function reapDeadRunningJobs() {
             delete s.jobs[idx].verifierVerdict;
           }
           if (landedCommit) s.jobs[idx].landedCommit = landedCommit;
+        }
+        // A pidless spawn that never wrote its own '<slug>.log' into the
+        // batch runId dir it was stamped with must not keep that runId —
+        // it points at a directory with no artifacts for THIS slug (at best
+        // empty, at worst only a sibling's log from the same batch — see the
+        // 'dead' push above). resolveRunId's own backfill scan
+        // (existsSync-per-dir on '<slug>.log') would find nothing here
+        // either, so clearing this makes job.runId and resolveRunId(job)
+        // agree: both null, rather than one falsely pointing at a run this
+        // slug never produced.
+        if (!rateLimited && noOwnArtifact) {
+          s.jobs[idx].runId = null;
         }
         delete s.jobs[idx].runtime;
         delete s.jobs[idx].guardBaseline;
@@ -7519,6 +7540,64 @@ function isRescanCandidate(job) {
  */
 function shouldRunPeriodicReverify(jobs) {
   return Array.isArray(jobs) && jobs.some((j) => isRescanCandidate(j));
+}
+
+// Default 24h, overridable via SM_STUCK_FAILED_ESCALATE_HOURS — same
+// env-override shape as QUARANTINE_ESCALATE_MS above.
+const STUCK_FAILED_ESCALATE_MS = process.env.SM_STUCK_FAILED_ESCALATE_HOURS
+  ? Number(process.env.SM_STUCK_FAILED_ESCALATE_HOURS) * 60 * 60_000
+  : 24 * 60 * 60_000;
+
+/**
+ * Kill-switch gate for the stuck-failed escalation below
+ * (SM_STUCK_FAILED_ESCALATE_DISABLE=1), mirroring the
+ * SM_REVERIFY_PERIODIC_DISABLE / SM_RCA_DISABLE convention. A tiny wrapper
+ * so the disable path is unit-testable without invoking the 10-minute
+ * setInterval body directly.
+ */
+function stuckFailedEscalationDisabled() {
+  return process.env.SM_STUCK_FAILED_ESCALATE_DISABLE === '1';
+}
+
+/**
+ * findStuckFailedJobs(jobs, now, thresholdMs) → [{ slug, cwd, ageMs }]
+ *
+ * Pure predicate (isRescanCandidate's own resolveRunId/classifyRunOutcome log
+ * read is the only IO, gated per-job exactly like shouldRunPeriodicReverify
+ * above). `failed` is a fully terminal state for every automated recovery
+ * path — selectResumeRecoveryTarget/selectAutoFixTargets both require
+ * needs_review, reapDeadRunningJobs only ever writes running → failed, and
+ * reconcile-repair's to-pending is for structurally invalid rows. Only a
+ * human's scheduler_reset_job ever takes failed → pending (LEGAL_TRANSITIONS).
+ * A rescan candidate (isRescanCandidate) that has sat failed longer than
+ * `thresholdMs` can therefore go silently stuck forever — job
+ * 4056-outcome-stats sat `failed` for five days with no operator signal
+ * (reported 2026-09-10, social-signals-trader) even though the periodic
+ * reverify pass (once shouldRunPeriodicReverify's guard was fixed) WAS firing
+ * on it — reverifyNeedsReview's failed branch can annotate looksDone but can
+ * never resolve a failed row itself (see its own header). This is the
+ * visibility half that guard fix was missing: escalate once, never requeue.
+ *
+ * `stuckFailedNotified` gates this to exactly once per row — once the caller
+ * stamps it, this always excludes that row so a human is never re-paged on
+ * every 10-minute tick for the same stuck job. A row with no recoverable
+ * 'failed' timestamp is skipped rather than guessed at (mirrors
+ * findStaleQuarantinedJobs above).
+ */
+function findStuckFailedJobs(jobs, now, thresholdMs) {
+  const stuck = [];
+  for (const j of jobs ?? []) {
+    if (j.status !== 'failed') continue;
+    if (j.stuckFailedNotified === true) continue;
+    if (!isRescanCandidate(j)) continue;
+    const entry = (j.statusHistory || []).find((h) => h.to === 'failed');
+    if (!entry) continue;
+    const since = Date.parse(entry.at);
+    if (Number.isNaN(since)) continue;
+    const ageMs = now - since;
+    if (ageMs >= thresholdMs) stuck.push({ slug: j.slug, cwd: j.cwd ?? null, ageMs });
+  }
+  return stuck;
 }
 
 /**
@@ -8564,6 +8643,31 @@ async function init() {
       );
       appendAuditEvent('project_starved', { cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs });
     }
+
+    // Stuck-failed escalation (2026-09-10, social-signals-trader): see
+    // findStuckFailedJobs' header for why `failed` has no automated way
+    // back to pending. Escalation only, same shape as the three warnings
+    // above — never an automatic failed → pending requeue (that could
+    // discard uncommitted work left by the failed run; see
+    // spawnJob:fail-dirty). Kill-switch: SM_STUCK_FAILED_ESCALATE_DISABLE=1.
+    if (!stuckFailedEscalationDisabled()) {
+      const stuckFailed = findStuckFailedJobs(s.jobs, Date.now(), STUCK_FAILED_ESCALATE_MS);
+      if (stuckFailed.length > 0) {
+        mutate((ms) => {
+          for (const stuck of stuckFailed) {
+            const j = ms.jobs.find((x) => x.slug === stuck.slug);
+            if (!j || j.status !== 'failed' || j.stuckFailedNotified === true) continue; // race guard
+            j.stuckFailedNotified = true;
+            console.warn(
+              `[scheduler] FAILED PRD STUCK: project=${stuck.cwd ?? '(unknown)'} slug=${stuck.slug} `
+              + `failed=${Math.round(stuck.ageMs / 3_600_000)}h (>= ${Math.round(STUCK_FAILED_ESCALATE_MS / 3_600_000)}h threshold) — `
+              + `no automated recovery reaches a failed row; reset it by hand via scheduler_reset_job`,
+            );
+            appendAuditEvent('job_stuck_failed', { slug: stuck.slug, cwd: stuck.cwd, ageMs: stuck.ageMs });
+          }
+        }).catch(() => {});
+      }
+    }
   }, 10 * 60_000);
 
   // Self-rescheduling poll loop with exponential backoff. Replaces the
@@ -9265,6 +9369,9 @@ module.exports = {
   availableForJobs,
   reverifyNeedsReview,
   shouldRunPeriodicReverify,
+  findStuckFailedJobs,
+  STUCK_FAILED_ESCALATE_MS,
+  stuckFailedEscalationDisabled,
   isRescanCandidate,
   isFailedUnverifiedShaped,
   computeLooksDone,

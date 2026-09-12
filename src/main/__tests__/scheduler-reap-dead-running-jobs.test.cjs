@@ -148,6 +148,39 @@ test('reapDeadRunningJobs reaps a pidless row older than PIDLESS_SPAWN_GRACE_MS 
   assert.ok(pidlessEvent, 'reaping a pidless row must leave an audit trace');
 });
 
+test('reapDeadRunningJobs clears runId on a pidless reap whose run dir holds only a sibling slug\'s files', async () => {
+  const projectCwd = path.join(tmpHome, 'c2-project-batch-sibling');
+  fs.mkdirSync(projectCwd, { recursive: true });
+  registerActiveProject(projectCwd);
+
+  const staleStartedAt = new Date(Date.now() - PIDLESS_SPAWN_GRACE_MS - 60_000).toISOString();
+  // Both jobs were dispatched into the SAME batch runId dir (pickRunDir's
+  // header: "tickQueue hands ONE shared batch dir to every spawnJob in the
+  // batch"). 'sibling-that-ran' actually spawned and wrote its own log;
+  // 'never-spawned' never got a pid and never wrote anything of its own.
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug: 'zzq8712-pidless-batch-row',
+      status: 'running',
+      cwd: projectCwd,
+      runId: 'run-shared-batch',
+      startedAt: staleStartedAt,
+      // no runtime key at all — the spawn never got far enough to record one
+    },
+  ]);
+  // Only the sibling's log exists in the shared batch dir.
+  writeRunLog('run-shared-batch', 'zzq8712-sibling-that-ran', [
+    '{"type":"result","subtype":"success","result":"done","is_error":false}',
+  ]);
+
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === 'zzq8712-pidless-batch-row');
+  assert.equal(row.status, 'failed');
+  assert.equal(row.runId, null, 'a runId whose dir holds no artifact for this slug must not survive the reap');
+});
+
 test('reapDeadRunningJobs leaves a pidless row alone while it is still within the grace window', async () => {
   const projectCwd = path.join(tmpHome, 'd-project');
   fs.mkdirSync(projectCwd, { recursive: true });

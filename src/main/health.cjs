@@ -16,7 +16,9 @@ const { checkDelegationReadiness } = require('./lib/delegationReadiness.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
 const { migratePrds } = require('./lib/prdMigration.cjs');
 const queueStore = require('./lib/queueStore.cjs');
-const { computeStallSummary, SCHEDULER_STATE_PATH, FAILURE_STREAK_WARN_THRESHOLD, classifyQueueStarvation } = require('./scheduler.cjs');
+const { computeStallSummary, SCHEDULER_STATE_PATH, FAILURE_STREAK_WARN_THRESHOLD, classifyQueueStarvation, STARVE_ESCALATION_MS } = require('./scheduler.cjs');
+const { findStarvedProjects } = require('./lib/schedulerBatch.cjs');
+const { AUDIT_LOG_PATH } = require('./lib/auditLog.cjs');
 const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
 const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
 
@@ -458,6 +460,63 @@ function evaluateQueueDispatchHealth(queueState, runningCount, now, thresholdMs 
   };
 }
 
+/**
+ * latestStarveEscalationReasons(auditLogPath) → { [cwd]: holdReason }
+ *
+ * health.cjs runs as its own cold process (`npm run health`), so it has no
+ * access to the live scheduler's in-memory `lastTick` — the durable
+ * audit-log.jsonl trail (auditLog.cjs) is the only place the hold reason a
+ * 'project_starve_escalated' event already recorded (scheduler.cjs's
+ * runStarveEscalationSweep) survives to be read from here. Reads the SAME
+ * recorded value rather than re-deriving it; the last record per cwd wins.
+ * Missing/unreadable log → {} (no reasons known yet), never a throw.
+ */
+function latestStarveEscalationReasons(auditLogPath) {
+  let lines;
+  try {
+    lines = fs.readFileSync(auditLogPath, 'utf8').split('\n').filter(Boolean);
+  } catch {
+    return {};
+  }
+  const byCwd = {};
+  for (const line of lines) {
+    let rec;
+    try {
+      rec = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (rec?.kind === 'project_starve_escalated' && rec.cwd) byCwd[rec.cwd] = rec.holdReason ?? 'unknown';
+  }
+  return byCwd;
+}
+
+/**
+ * evaluateStarveEscalationHealth(jobs, now, thresholdMs, escalationReasons)
+ *   → { ok, projects?, message? }
+ *
+ * Pure over its inputs. Reuses findStarvedProjects — the exact per-cwd
+ * STARVED verdict the live escalation (scheduler.cjs) acts on — so health
+ * reports the identical set of starved-past-threshold projects, never a
+ * re-derived one. `escalationReasons` supplies the hold reason per cwd (see
+ * latestStarveEscalationReasons); a cwd with no recorded reason yet reports
+ * 'unknown' rather than failing.
+ */
+function evaluateStarveEscalationHealth(jobs, now, thresholdMs, escalationReasons = {}) {
+  const starved = findStarvedProjects(jobs, now, thresholdMs);
+  if (starved.length === 0) return { ok: true };
+  const projects = starved.map((sp) => ({
+    cwd: sp.cwd,
+    pendingCount: sp.pendingCount,
+    ageMs: sp.ageMs,
+    holdReason: escalationReasons[sp.cwd] ?? 'unknown',
+  }));
+  const message = `Project(s) starved past the ${Math.round(thresholdMs / 60_000)}m escalation threshold: ${
+    projects.map((p) => `${p.cwd} (${Math.round(p.ageMs / 60_000)}m, ${p.pendingCount} pending, hold=${p.holdReason})`).join('; ')
+  }`;
+  return { ok: false, projects, message };
+}
+
 function loadUsagePollerState(statePath) {
   let raw;
   try {
@@ -638,6 +697,18 @@ async function check() {
     status.components.queue_dispatch = evaluateQueueDispatchHealth(queueState, runningCount, now);
     if (!status.components.queue_dispatch.ok || status.components.queue_dispatch.blocked) {
       status.issues.push(`Queue dispatch: ${status.components.queue_dispatch.message}`);
+    }
+
+    // Per-project starve escalation (bounded consequence for project_starved
+    // — see runStarveEscalationSweep in scheduler.cjs). Distinct from
+    // queue_dispatch above: that's machine-wide dispatch liveness, this is
+    // "has any ONE project been starved past the LATER escalation threshold",
+    // the exact condition the 2026-09-12 19h Bilko starve went unreported by.
+    status.components.project_starve_escalation = evaluateStarveEscalationHealth(
+      queueState.jobs, now, STARVE_ESCALATION_MS, latestStarveEscalationReasons(AUDIT_LOG_PATH),
+    );
+    if (!status.components.project_starve_escalation.ok) {
+      status.issues.push(status.components.project_starve_escalation.message);
     }
 
     // Worktree cap blocking every dispatchable pending job with nothing
@@ -877,7 +948,7 @@ async function check() {
   // Critical: nodejs, config dir, typescript, build artifact, test infrastructure.
   // Non-fatal: scheduler/transcripts dirs may not exist on fresh install.
   // Informational: app log age (shows if app is running, but not blocking).
-  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'queue_dispatch', 'usage_poller', 'prd_migration', 'claude_md_budget', 'delegation_chain'];
+  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'queue_dispatch', 'project_starve_escalation', 'usage_poller', 'prd_migration', 'claude_md_budget', 'delegation_chain'];
   status.ok = criticalComponents.every((c) => status.components[c]?.ok !== false);
 
   status.elapsedMs = Date.now() - start;
@@ -909,6 +980,8 @@ module.exports = {
   evaluateUsagePollerHealth,
   loadUsagePollerState,
   evaluateQueueDispatchHealth,
+  evaluateStarveEscalationHealth,
+  latestStarveEscalationReasons,
   DISPATCH_STALL_THRESHOLD_MS,
   TICK_STALL_THRESHOLD_MS,
   HEARTBEAT_STALE_MS,

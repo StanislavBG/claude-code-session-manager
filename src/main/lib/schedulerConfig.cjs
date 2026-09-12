@@ -81,6 +81,19 @@ module.exports = {
   // 1086). Escalation only — warn + audit, never dispatch.
   STARVATION_ESCALATE_MS: 45 * 60_000,
 
+  // A project still meeting findStarvedProjects' STARVED verdict past THIS
+  // (later) threshold gets a bounded, automated consequence beyond the
+  // repeating project_starved WARN above: a one-shot 'project_starve_escalated'
+  // audit event + a user-facing toast naming the project and the last tick's
+  // hold reason (scheduler.cjs's `lastTick`). Escalation only — never
+  // auto-resets, auto-cancels, or bypasses a gate; the queue's own state is
+  // untouched. The 2026-09-12 audit log showed /home/bilko/Projects/Bilko
+  // emit project_starved for 19h straight (ageMs 60.5M → 68.9M) with zero
+  // consequence and no toast — this is the fix. Latched per-cwd so the SAME
+  // starve stretch escalates exactly once; the latch resets the moment that
+  // cwd stops appearing in findStarvedProjects.
+  STARVE_ESCALATION_MS: 60 * 60_000,
+
   // A RUNNING job that has overrun its own PRD's `estimateMinutes` by this
   // factor is escalated. Distinct from MAX_JOB_DURATION_MS (4h), which is a
   // deadman kill: a 20-minute PRD still running at 3h is 9x over estimate but

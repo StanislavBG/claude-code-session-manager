@@ -95,6 +95,7 @@ const {
   PIDLESS_SPAWN_GRACE_MS,
   INVESTIGATION_MAX_MS,
   STARVATION_ESCALATE_MS,
+  STARVE_ESCALATION_MS,
 } = require('./lib/schedulerConfig.cjs');
 const QUARANTINE_ESCALATE_MS = process.env.SM_QUARANTINE_ESCALATE_HOURS
   ? Number(process.env.SM_QUARANTINE_ESCALATE_HOURS) * 60 * 60_000
@@ -6995,6 +6996,71 @@ async function runQueueStarvationWatchdog(state, { now = Date.now(), thresholdMs
   return primary;
 }
 
+// One-shot latch, keyed per cwd, for the starve-escalation consequence below —
+// never escalate the same starve stretch twice. Cleared the moment that cwd
+// stops appearing in findStarvedProjects at all (dispatched, or the machine
+// went idle/paused), mirroring the heartbeat's stallSince/stallToasted pair.
+const starveEscalated = new Set();
+
+/**
+ * selectStarveEscalations(starvedProjects, escalatedCwds, thresholdMs)
+ *   → { toEscalate: [...sp], toClear: [cwd, ...] }
+ *
+ * Pure. `starvedProjects` is this sweep's findStarvedProjects() output (the
+ * per-cwd STARVED verdict — cwd, pendingCount, oldestPendingSlug, ageMs);
+ * `escalatedCwds` is the Set already latched from a prior sweep.
+ *
+ * toEscalate: rows crossing thresholdMs for the FIRST time this stretch —
+ * i.e. old enough AND not already latched.
+ * toClear: previously-latched cwds no longer reported as starved at all this
+ * sweep, so a LATER starve on that project escalates again instead of being
+ * silently suppressed forever by a stale latch.
+ */
+function selectStarveEscalations(starvedProjects, escalatedCwds, thresholdMs = STARVE_ESCALATION_MS) {
+  const stillStarved = new Set(starvedProjects.map((sp) => sp.cwd));
+  const toClear = [...escalatedCwds].filter((cwd) => !stillStarved.has(cwd));
+  const toEscalate = starvedProjects.filter((sp) => sp.ageMs >= thresholdMs && !escalatedCwds.has(sp.cwd));
+  return { toEscalate, toClear };
+}
+
+/**
+ * runStarveEscalationSweep(starvedProjects) — acts on selectStarveEscalations'
+ * verdict: audits a DISTINCT 'project_starve_escalated' event (once per starve
+ * stretch, per cwd) and pushes the same toast-channel error the heartbeat's
+ * stall detector already uses ('schedule:stall' → renderer toast.error), so a
+ * starve that has gone on long enough to matter is visible without grepping
+ * the audit log. The hold reason is read from `lastTick` (recordTick's own
+ * last-computed outcome) — never re-evaluated here, so this can never
+ * disagree with what actually happened on the last tick.
+ *
+ * Escalation only: never mutates a job, never dispatches, never bypasses a
+ * gate. Exported for direct unit testing (attach a fake window via
+ * attachWindow() first to assert the toast send).
+ */
+function runStarveEscalationSweep(starvedProjects) {
+  const { toEscalate, toClear } = selectStarveEscalations(starvedProjects, starveEscalated, STARVE_ESCALATION_MS);
+  for (const cwd of toClear) starveEscalated.delete(cwd);
+  for (const sp of toEscalate) {
+    starveEscalated.add(sp.cwd);
+    const holdReason = lastTick?.reason ?? 'unknown';
+    const mins = Math.round(sp.ageMs / 60_000);
+    console.error(
+      `[scheduler] PROJECT STARVE ESCALATED: project=${sp.cwd} pending=${sp.pendingCount} oldest=${sp.oldestPendingSlug} `
+      + `waiting=${mins}m (>= ${Math.round(STARVE_ESCALATION_MS / 60_000)}m escalation threshold), hold reason=${holdReason} — `
+      + 'a bounded escalation only; nothing was auto-reset, cancelled, or dispatched',
+    );
+    appendAuditEvent('project_starve_escalated', {
+      cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs, holdReason,
+    });
+    sendIfAlive(mainWindow, 'schedule:stall', {
+      message: `Project starved: ${sp.cwd} has ${sp.pendingCount} pending PRD(s), oldest waiting ~${mins}m `
+        + `(hold reason: ${holdReason}) — check the Scheduler tab.`,
+      total: sp.pendingCount,
+      byProject: { [sp.cwd]: { starved: sp.pendingCount } },
+    });
+  }
+}
+
 // ---------- dead-process reaper ----------
 
 // Queue-health sweep cadence: hangs off reapDeadRunningJobs's own cycle
@@ -9153,7 +9219,8 @@ async function init() {
     // else distinguishes "no pending work" from "pending work, never
     // started" — the 2026-09-01 NN-ordering starvation ran 3.5 h unnoticed.
     // Escalation only, same shape as the quarantine/overrun warnings above.
-    for (const sp of findStarvedProjects(s.jobs, Date.now(), STARVATION_ESCALATE_MS)) {
+    const starvedProjects = findStarvedProjects(s.jobs, Date.now(), STARVATION_ESCALATE_MS);
+    for (const sp of starvedProjects) {
       console.warn(
         `[scheduler] PROJECT STARVED: project=${sp.cwd} pending=${sp.pendingCount} oldest=${sp.oldestPendingSlug} `
         + `waiting=${Math.round(sp.ageMs / 60_000)}m (>= ${Math.round(STARVATION_ESCALATE_MS / 60_000)}m threshold) `
@@ -9161,6 +9228,13 @@ async function init() {
       );
       appendAuditEvent('project_starved', { cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs });
     }
+    // Bounded, automated consequence for a starve that outlives the WARN
+    // above (PRD: the 2026-09-12 19h Bilko starve had ~115 identical
+    // project_starved rows and zero consequence). STARVE_ESCALATION_MS is
+    // strictly later than STARVATION_ESCALATE_MS, so this only ever fires on
+    // a subset of the rows already reported above — same verdict, no
+    // re-derivation.
+    runStarveEscalationSweep(starvedProjects);
 
     // Bounded failed -> pending auto-reset (PRD 1151), plus the stuck-failed
     // escalation now narrowed to only the rows that auto-reset gave up on.
@@ -9898,6 +9972,9 @@ module.exports = {
   classifyQueueStarvationByProject,
   runQueueStarvationWatchdog,
   QUEUE_STARVATION_MS,
+  selectStarveEscalations,
+  runStarveEscalationSweep,
+  STARVE_ESCALATION_MS,
   computeBlockedChains,
   stripAppOwnedChurn,
   findOverrunningJobs,

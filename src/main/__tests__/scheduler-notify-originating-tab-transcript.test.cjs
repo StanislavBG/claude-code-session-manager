@@ -32,6 +32,7 @@ test('appends the job result text to the transcript store when sourcePromptId is
   expect(appendTranscriptTurn).toHaveBeenCalledWith('/some/cwd', 'psess-abc', {
     role: 'assistant',
     text: 'the real agent result text',
+    eventId: 'prd-result:863-transcript:run-1',
   });
 });
 

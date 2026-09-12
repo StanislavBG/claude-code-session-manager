@@ -58,6 +58,12 @@ function installWindowApiMock() {
       status: vi.fn().mockResolvedValue({ running: false }),
       configPath: vi.fn().mockResolvedValue('/home/bilko/.config/session-manager/otel.json'),
     },
+    telemetry: {
+      getConfig: vi.fn().mockResolvedValue({ enabled: false, installId: 'install-uuid', endpoint: '' }),
+      setConfig: vi.fn().mockResolvedValue({ ok: true, config: { enabled: false } }),
+      status: vi.fn().mockResolvedValue({ pendingCount: 0, sentCount: 0, dedupedAppends: 0, evictedCount: 0 }),
+      configPath: vi.fn().mockResolvedValue('/home/bilko/.config/session-manager/telemetry.json'),
+    },
   }
   ;(window as unknown as { api: typeof api }).api = api
   return api

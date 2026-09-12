@@ -242,6 +242,8 @@ export default defineConfig({
       'src/main/__tests__/scheduleJobTransitionsTelemetryTap.test.cjs',
       'src/main/__tests__/epicMintTelemetryTap.test.cjs',
       'src/main/__tests__/scheduler-needs-review-autoresolve.test.cjs',
+      'src/main/__tests__/scheduler-quarantine-autoresolve.test.cjs',
+      'src/main/__tests__/scheduler-no-dead-end-status.test.cjs',
     ],
     globals: true,
   },

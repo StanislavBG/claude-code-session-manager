@@ -27,6 +27,7 @@ Before writing a new PRD for `<cwd>/session-manager-operations/scheduler/epics/<
 - **Renderer state stores** (zustand): separate concerns: `config.ts` (file-backed, dirty-tracked), `live.ts` (per-tab derived from transcripts), `voice.ts` (voice UI), `scheduleState.ts` (queue + history), `toast.ts` (toast messages). Stores do NOT cross-subscribe; use composed selectors in components for multi-store queries.
 - **Modular pane pattern**: extracted panes (SchedulePanel: Queue/PRDs/History tabs) are reusable by multiple parent tabs. Panes own local filter state + filtering logic; parents own scope/context state.
 - **Design primitive extraction**: when a design system (Almanac) is shared across components, extract `*-primitives.tsx` with explicit exports (SchBadge, ProjectTag, etc.). Import primitives explicitly by name, not as wildcard — prevents cross-system pollution.
+- **No scheduler status may be a dead end reachable only by a human `scheduler_reset_job`.** Every `JOB_STATUSES` value must either be genuinely final (`completed`/`skipped`) or have an automated selector that can move a parked row out — `quarantined`'s own exit (`autoResolveQuarantine`, this PRD) was the last gap, since `reconcile()`'s adopt path can only fire once a `createdVia` stamp appears, which never happens on its own. `scheduler-no-dead-end-status.test.cjs` iterates the real `JOB_STATUSES` array and fails if a new status ships with no wired automated exit.
 
 ## Avoid
 

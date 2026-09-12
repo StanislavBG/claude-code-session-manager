@@ -1485,14 +1485,15 @@ function computeBlockedChains(jobs) {
  * findStaleQuarantinedJobs(jobs, now, thresholdMs) → [{ slug, cwd, ageMs }]
  *
  * Pure, no IO. A 'quarantined' row (no createdVia provenance) can otherwise
- * sit forever with nothing looking at it — quarantine only ever clears via a
- * human adopting or archiving it. This is the escalation half of that gate:
- * any quarantined row whose recorded quarantine timestamp (statusHistory's
- * `to === 'quarantined'` entry — stamped at creation, or backfilled from the
- * PRD file's mtime by reconcile() for rows quarantined before that stamp
- * existed) is older than `thresholdMs` is reported so the caller can
- * warn-log and surface it distinctly. A row with no recoverable timestamp is
- * skipped rather than guessed at.
+ * sit forever with nothing looking at it — quarantine used to clear only via
+ * a human adopting or archiving it; autoResolveQuarantine below now gives it
+ * a bounded automatic exit too. This function stays the escalation/warn half
+ * of that gate: any quarantined row whose recorded quarantine timestamp
+ * (statusHistory's `to === 'quarantined'` entry — stamped at creation, or
+ * backfilled from the PRD file's mtime by reconcile() for rows quarantined
+ * before that stamp existed) is older than `thresholdMs` is reported so the
+ * caller can warn-log and surface it distinctly. A row with no recoverable
+ * timestamp is skipped rather than guessed at.
  */
 function findStaleQuarantinedJobs(jobs, now, thresholdMs) {
   const stale = [];
@@ -1506,6 +1507,106 @@ function findStaleQuarantinedJobs(jobs, now, thresholdMs) {
     if (ageMs >= thresholdMs) stale.push({ slug: j.slug, cwd: j.cwd ?? null, ageMs });
   }
   return stale;
+}
+
+// Bounded automatic exit for a quarantined row (this PRD): up to
+// QUARANTINE_RESOLVE_CAP auto-resolve attempts, each gated on having sat
+// `quarantined` for QUARANTINE_ESCALATE_MS, before autoResolveQuarantine
+// below settles the row to 'skipped' rather than leaving it as a dead end
+// only a human `scheduler_reset_job`/adopt action could ever clear. A single
+// attempt is enough in practice — the outcome is terminal — but the counter
+// still guards against two overlapping ticks both trying to resolve the
+// same row.
+const QUARANTINE_RESOLVE_CAP = 1;
+
+/**
+ * Kill-switch gate for the quarantine auto-resolve pass below
+ * (SM_QUARANTINE_AUTORESOLVE_DISABLE=1), same shape as
+ * failedAutoResetDisabled/needsReviewAutoResolveDisabled.
+ */
+function quarantineAutoResolveDisabled() {
+  return process.env.SM_QUARANTINE_AUTORESOLVE_DISABLE === '1';
+}
+
+/**
+ * selectQuarantineAutoResolveTargets(jobs, now, thresholdMs) →
+ *   [{ slug, cwd, ageMs }]
+ *
+ * Pure selector — no IO. Same age computation as findStaleQuarantinedJobs
+ * above, bounded additionally by quarantineResolveAttempts so a row already
+ * auto-resolved (or mid-resolve on a race) is never re-selected. Deliberately
+ * does NOT check createdVia here — that requires a disk read of the PRD
+ * file, and doing it at selection time would let this pass act on a
+ * snapshot that's gone stale by the time the mutate() pass actually runs.
+ * autoResolveQuarantine below re-reads createdVia fresh, immediately before
+ * transitioning, inside the same mutate() callback that applies this
+ * selector's targets — see that function's own header for why.
+ */
+function selectQuarantineAutoResolveTargets(jobs, now, thresholdMs) {
+  const targets = [];
+  for (const j of jobs ?? []) {
+    if (j.status !== 'quarantined') continue;
+    if ((j.quarantineResolveAttempts ?? 0) >= QUARANTINE_RESOLVE_CAP) continue;
+    const entry = (j.statusHistory || []).find((h) => h.to === 'quarantined');
+    if (!entry) continue;
+    const since = Date.parse(entry.at);
+    if (Number.isNaN(since)) continue;
+    const ageMs = now - since;
+    if (ageMs < thresholdMs) continue;
+    targets.push({ slug: j.slug, cwd: j.cwd ?? null, ageMs });
+  }
+  return targets;
+}
+
+/**
+ * autoResolveQuarantine(job, ageMs) → Promise<'skipped'|null>
+ *
+ * Applies the bounded automatic exit to a single quarantined row (mutates in
+ * place; calls transitionJob + appendAuditEvent) — extracted so it's
+ * unit-testable without going through mutate()/queue.json IO, same shape as
+ * applyNeedsReviewAutoResolve above.
+ *
+ * Re-validates status + the attempts cap itself (race guard, mirrors the
+ * other auto-resolve loops in the 10-minute interval body), THEN re-reads the
+ * PRD file's createdVia frontmatter fresh from disk before doing anything
+ * else. That ordering is load-bearing: reconcile()'s adopt path (the only
+ * OTHER route off 'quarantined') promotes a row to 'pending' the instant it
+ * observes a createdVia stamp, on its own independent pass — if this
+ * function trusted a snapshot taken before its own turn to run, it could
+ * transition a row to 'skipped' the same tick reconcile() already adopted it
+ * to 'pending', silently discarding a PRD a human just fixed. Checking here,
+ * immediately before the transition, inside the caller's mutate() callback,
+ * closes that window.
+ *
+ * A PRD file that cannot be found or parsed at all is treated as still
+ * lacking provenance — there is no proof it has one, and stalling forever on
+ * an unreadable file would defeat the point of a bounded exit (same
+ * can't-prove-it/don't-guess-but-don't-stall posture as the rest of this
+ * file's stale-row detectors).
+ */
+async function autoResolveQuarantine(job, ageMs) {
+  if (!job || job.status !== 'quarantined') return null;
+  if ((job.quarantineResolveAttempts ?? 0) >= QUARANTINE_RESOLVE_CAP) return null;
+
+  let createdVia = null;
+  try {
+    const resolvedDir = await findPrdDir(job.slug);
+    const prdPath = resolvedDir ? path.join(resolvedDir, `${job.slug}.md`) : prdPathForJob(job);
+    const parsed = await parsePrd(prdPath);
+    createdVia = parsed.createdVia ?? null;
+  } catch { /* unreadable/gone — no provenance found, so it stays "lacking" */ }
+  if (createdVia) return null; // reconcile()'s own adopt path owns this row now
+
+  const attempt = (job.quarantineResolveAttempts ?? 0) + 1;
+  job.quarantineResolveAttempts = attempt;
+  job.error = `quarantined without createdVia provenance past the ${Math.round(QUARANTINE_ESCALATE_MS / 3_600_000)}h `
+    + 'escalation window — auto-resolved to skipped';
+  transitionJob(job, 'skipped', {
+    reason: 'quarantined without createdVia provenance past escalation window',
+    source: 'autoResolveQuarantine',
+  });
+  appendAuditEvent('quarantine_auto_resolved', { slug: job.slug, cwd: job.cwd ?? null, ageMs: ageMs ?? null, attempt });
+  return 'skipped';
 }
 
 /**
@@ -9257,8 +9358,18 @@ async function init() {
     const exhaustedNeedsReviewTargets = needsReviewAutoResolveDisabled()
       ? []
       : selectExhaustedNeedsReviewTargets(s.jobs, Date.now(), NEEDS_REVIEW_RESOLVE_MS);
-    if (autoResetTargets.length > 0 || stuckFailed.length > 0 || exhaustedNeedsReviewTargets.length > 0) {
-      mutate((ms) => {
+    // Bounded automatic exit for quarantined rows (this PRD): computed
+    // alongside the passes above and acted on in the SAME mutate(...) pass
+    // below, for the same race-guard reason — quarantineResolveAttempts must
+    // never be read from one snapshot and written from another, and the
+    // createdVia re-check inside autoResolveQuarantine must happen in the
+    // same turn as the transition it gates. Kill-switch:
+    // SM_QUARANTINE_AUTORESOLVE_DISABLE=1.
+    const quarantineTargets = quarantineAutoResolveDisabled()
+      ? []
+      : selectQuarantineAutoResolveTargets(s.jobs, Date.now(), QUARANTINE_ESCALATE_MS);
+    if (autoResetTargets.length > 0 || stuckFailed.length > 0 || exhaustedNeedsReviewTargets.length > 0 || quarantineTargets.length > 0) {
+      mutate(async (ms) => {
         for (const target of autoResetTargets) {
           const j = ms.jobs.find((x) => x.slug === target.slug);
           if (!j || j.status !== 'failed' || (j.failedAutoResetAttempts ?? 0) >= FAILED_AUTORESET_CAP) continue; // race guard
@@ -9301,6 +9412,17 @@ async function init() {
             console.warn(
               `[scheduler] NEEDS_REVIEW AUTO-RESOLVE: project=${j.cwd ?? '(unknown)'} slug=${j.slug} `
               + `exhausted=${Math.round(target.ageMs / 60_000)}m (>= ${Math.round(NEEDS_REVIEW_RESOLVE_MS / 60_000)}m threshold) — outcome=${outcome}`,
+            );
+          }
+        }
+        for (const target of quarantineTargets) {
+          const j = ms.jobs.find((x) => x.slug === target.slug);
+          if (!j || j.status !== 'quarantined' || (j.quarantineResolveAttempts ?? 0) >= QUARANTINE_RESOLVE_CAP) continue; // race guard
+          const outcome = await autoResolveQuarantine(j, target.ageMs);
+          if (outcome) {
+            console.warn(
+              `[scheduler] QUARANTINED PRD AUTO-RESOLVE: project=${j.cwd ?? '(unknown)'} slug=${j.slug} `
+              + `age=${Math.round(target.ageMs / 3_600_000)}h (>= ${Math.round(QUARANTINE_ESCALATE_MS / 3_600_000)}h threshold) — outcome=${outcome}`,
             );
           }
         }
@@ -10103,6 +10225,10 @@ module.exports = {
   computeStallSummary,
   findStaleQuarantinedJobs,
   QUARANTINE_ESCALATE_MS,
+  selectQuarantineAutoResolveTargets,
+  autoResolveQuarantine,
+  QUARANTINE_RESOLVE_CAP,
+  quarantineAutoResolveDisabled,
   applyClearQueueVictims,
   PIDLESS_SPAWN_GRACE_MS,
   findStrandedInvestigations,

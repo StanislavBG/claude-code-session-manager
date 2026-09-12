@@ -411,11 +411,25 @@ function ProductTelemetrySection() {
         {saveError && <div className="text-red-400 text-xs">{saveError}</div>}
       </section>
 
+      {status.pendingCount > 0 && status.sentCount === 0 && (
+        <section
+          data-testid="telemetry-never-delivered-warning"
+          className="border border-red-400 rounded p-3 text-xs space-y-1 text-red-400"
+        >
+          <div className="font-medium">Never delivered</div>
+          <div className="leading-relaxed">
+            {status.pendingCount} record{status.pendingCount === 1 ? '' : 's'} queued but none have ever
+            been sent to bilko.run on this install. Check the endpoint/network, or click "Send now" below.
+          </div>
+        </section>
+      )}
+
       <section className="border border-line rounded p-3 text-xs space-y-1.5">
         <div className="text-fg-dim">Runtime status</div>
         <div><span className="text-fg-faint">last send:</span> {fmtWhenMs(status.lastFlushAt)}</div>
         <div><span className="text-fg-faint">next daily send due:</span> {fmtWhen(nextDailyDueAt ? new Date(nextDailyDueAt).toISOString() : null)}</div>
         <div><span className="text-fg-faint">queued records:</span> {status.pendingCount}</div>
+        <div><span className="text-fg-faint">delivered so far:</span> {status.sentCount}</div>
         <div><span className="text-fg-faint">de-duplicated:</span> {status.dedupedAppends}</div>
         <div><span className="text-fg-faint">evicted:</span> {status.evictedCount}</div>
         {status.backlog && (

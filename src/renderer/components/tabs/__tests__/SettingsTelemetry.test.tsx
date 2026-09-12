@@ -173,6 +173,40 @@ describe('SettingsTelemetry — product telemetry section (PRD 1142)', () => {
     expect(el.textContent).toMatch(/5 watermarks rewound/)
   })
 
+  it('shows the delivered (sentCount) count alongside pending', async () => {
+    installWindowApiMock({ telemetryStatusOverrides: { pendingCount: 3, sentCount: 12 } })
+    const el = mount(createElement(SettingsTelemetry))
+    await act(async () => { await flushAsync() })
+
+    expect(el.textContent).toMatch(/delivered[^0-9]*12/i)
+  })
+
+  it('flags never-delivered as a problem when records are pending but sentCount is 0', async () => {
+    installWindowApiMock({ telemetryStatusOverrides: { pendingCount: 5, sentCount: 0 } })
+    const el = mount(createElement(SettingsTelemetry))
+    await act(async () => { await flushAsync() })
+
+    const warning = el.querySelector('[data-testid="telemetry-never-delivered-warning"]')
+    expect(warning).toBeTruthy()
+    expect(warning?.textContent).toMatch(/never delivered/i)
+  })
+
+  it('does not show the never-delivered warning once at least one record has been sent', async () => {
+    installWindowApiMock({ telemetryStatusOverrides: { pendingCount: 5, sentCount: 1 } })
+    const el = mount(createElement(SettingsTelemetry))
+    await act(async () => { await flushAsync() })
+
+    expect(el.querySelector('[data-testid="telemetry-never-delivered-warning"]')).toBeNull()
+  })
+
+  it('does not show the never-delivered warning when nothing is pending (delivered, nothing pending is normal)', async () => {
+    installWindowApiMock({ telemetryStatusOverrides: { pendingCount: 0, sentCount: 0 } })
+    const el = mount(createElement(SettingsTelemetry))
+    await act(async () => { await flushAsync() })
+
+    expect(el.querySelector('[data-testid="telemetry-never-delivered-warning"]')).toBeNull()
+  })
+
   it('shows the last error from status when present', async () => {
     installWindowApiMock({
       telemetryStatusOverrides: { lastError: { status: 500, message: 'HTTP 500', at: Date.now() } },

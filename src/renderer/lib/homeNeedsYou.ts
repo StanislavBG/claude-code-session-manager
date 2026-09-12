@@ -43,6 +43,8 @@ export interface ScheduleJobLite {
    *  only the `to === 'quarantined'` entry's `at` is read here, to compute
    *  how long a quarantined row has sat un-adopted. */
   statusHistory?: { to: string; at: string }[]
+  /** Set by findOverrunningJobs' escalation stamp while status is 'running'; cleared on finish/reap/reset. */
+  overrun?: { ratio: number; ranMs: number; estimateMinutes: number; at: string }
 }
 
 export type NeedsYouKind = 'proposed-epic' | 'needs-input' | 'job-failed' | 'job-quarantined'

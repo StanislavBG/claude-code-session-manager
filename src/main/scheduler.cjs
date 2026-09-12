@@ -2883,6 +2883,9 @@ function resetJobFields(job, errorMsg, opts = {}) {
   // human-driven reset must genuinely start the auto-fix budget over,
   // including the one-time dead-fix-plan-child reopen (PRD 1129).
   delete job.autoFixReopened;
+  // Same category — an overrun badge is this run's outcome (see
+  // findOverrunningJobs's header), never durable across a reset.
+  delete job.overrun;
   // Like exitCode: this run's outcome, not durable across a reset — a stale
   // leak badge from a prior attempt must not linger once the job re-fires.
   delete job.leakedDescendants;
@@ -6129,6 +6132,10 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
             delete s.jobs[i2].sharedTreeGuard;
           }
           delete s.jobs[i2].runtime;
+          // A completed/failed/needs_review row is no longer running — its
+          // overrun badge (if any) was this run's outcome and must not
+          // linger onto whatever the next dispatch of this slug does.
+          delete s.jobs[i2].overrun;
           // Pre-run baseline no longer needed once this run has finalized —
           // its whole purpose (letting THIS finalize compute a truthful
           // delta) is done; a fresh one is captured at the next dispatch.
@@ -7171,6 +7178,7 @@ async function reapDeadRunningJobs() {
           s.jobs[idx].runId = null;
         }
         delete s.jobs[idx].runtime;
+        delete s.jobs[idx].overrun;
         delete s.jobs[idx].guardBaseline;
         delete s.jobs[idx].guardHeadBefore;
         applyLeftoverFields(s.jobs[idx], deltaPaths);
@@ -8708,6 +8716,17 @@ async function init() {
       appendAuditEvent('job_overrunning_estimate', {
         slug: over.slug, cwd: over.cwd, estimateMinutes: over.estimateMinutes, ranMs: over.ranMs, ratio: over.ratio,
       });
+      // Durable stamp so schedule:state (and therefore the renderer) can see
+      // this without re-deriving it — the console.warn/audit event above are
+      // visible only in the log, never on the row itself. Display-only
+      // advisory field; re-stamped in place every sweep, never appended.
+      mutate((state) => {
+        const j = state.jobs.find((x) => x.slug === over.slug);
+        if (!j) return;
+        j.overrun = {
+          ratio: over.ratio, ranMs: over.ranMs, estimateMinutes: over.estimateMinutes, at: new Date().toISOString(),
+        };
+      }).catch((e) => console.warn('[scheduler] overrun stamp failed', e?.message));
     }
 
     // Stranded-investigation restore. Unlike the two escalations above, this

@@ -12,6 +12,8 @@ export interface ScheduleJobLite {
   slug: string
   cwd: string | null
   sourcePromptId?: string | null
+  /** Set by findOverrunningJobs' escalation stamp while status is 'running'; cleared on finish/reap/reset. */
+  overrun?: { ratio: number; ranMs: number; estimateMinutes: number; at: string }
 }
 
 export interface ChatSignalLite {

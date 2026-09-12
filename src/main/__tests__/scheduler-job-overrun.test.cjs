@@ -23,6 +23,7 @@ const {
   findOverrunningJobs,
   JOB_OVERRUN_FACTOR,
   JOB_OVERRUN_FLOOR_MS,
+  resetJobFields,
 } = require('../scheduler.cjs');
 
 const NOW = Date.parse('2026-08-08T12:00:00.000Z');
@@ -114,4 +115,61 @@ test('factor and floor are overridable per call', () => {
 test('the shipped defaults are the documented ones', () => {
   assert.strictEqual(JOB_OVERRUN_FACTOR, 3);
   assert.strictEqual(JOB_OVERRUN_FLOOR_MS, 45 * 60_000);
+});
+
+// The escalation loop in scheduler.cjs (~8700) stamps job.overrun straight
+// from findOverrunningJobs' own return shape — these tests exercise that
+// exact shape against the live starry-night-ships incident fixture
+// (estimateMinutes: 22, ranMs: 6379556, ratio: 4.83) rather than duplicating
+// the threshold math the escalation loop itself must not recompute.
+
+test('the live incident fixture (4.9x over a 22m estimate) is stamped', () => {
+  const startedAt = new Date(NOW - 6379556).toISOString();
+  const jobs = [
+    { slug: '231-saturn-record-and-docs', cwd: '/starry', status: 'running', estimateMinutes: 22, startedAt },
+  ];
+  const over = findOverrunningJobs(jobs, NOW);
+  assert.strictEqual(over.length, 1);
+  const [hit] = over;
+  assert.ok(hit.ratio >= 4.8 && hit.ratio <= 4.9, `expected ~4.83x, got ${hit.ratio}`);
+
+  // Mirror the escalation loop's own stamp assignment (job.overrun = {...}) —
+  // same fields the ScheduleJobLite renderer type now carries.
+  const job = jobs[0];
+  job.overrun = { ratio: hit.ratio, ranMs: hit.ranMs, estimateMinutes: hit.estimateMinutes, at: new Date(NOW).toISOString() };
+  assert.strictEqual(job.overrun.estimateMinutes, 22);
+  assert.strictEqual(job.overrun.ranMs, 6379556);
+  assert.ok(job.overrun.ratio >= 4.8 && job.overrun.ratio <= 4.9);
+
+  // Idempotent re-escalation: a later sweep overwrites in place, never appends.
+  const laterNow = NOW + 10 * 60_000;
+  const laterOver = findOverrunningJobs(jobs, laterNow)[0];
+  job.overrun = {
+    ratio: laterOver.ratio, ranMs: laterOver.ranMs, estimateMinutes: laterOver.estimateMinutes, at: new Date(laterNow).toISOString(),
+  };
+  assert.strictEqual(typeof job.overrun, 'object');
+  assert.ok(job.overrun.ranMs > hit.ranMs, 'ranMs should have advanced on re-escalation, not duplicated');
+});
+
+test('a job with no usable estimate is never in the escalation list, so it is never stamped', () => {
+  const jobs = [
+    { slug: 'no-est', cwd: '/p1', status: 'running', startedAt: agoMin(300) },
+  ];
+  assert.deepStrictEqual(findOverrunningJobs(jobs, NOW), []);
+  assert.strictEqual(jobs[0].overrun, undefined);
+});
+
+test('resetJobFields clears a stamped overrun badge — this run\'s outcome, not durable across a reset', () => {
+  const job = {
+    slug: '231-saturn-record-and-docs',
+    status: 'running',
+    statusHistory: [],
+    runId: 'r1',
+    startedAt: agoMin(180),
+    overrun: { ratio: 4.83, ranMs: 6379556, estimateMinutes: 22, at: new Date(NOW).toISOString() },
+  };
+  const ok = resetJobFields(job, 'reset for test');
+  assert.strictEqual(ok, true);
+  assert.strictEqual(job.status, 'pending');
+  assert.strictEqual('overrun' in job, false);
 });

@@ -220,6 +220,11 @@ function shapeMachine(data) {
     config: data.config || {},
     scheduledFor: data.scheduledFor ?? null,
     lastRunAt: data.lastRunAt ?? null,
+    // Distinct from lastRunAt (stamped only when tickQueue actually launches a
+    // job): this is stamped every time tickQueue gets far enough to evaluate
+    // the queue at all, whether or not that evaluation ends in a launch. See
+    // classifyQueueStarvation's header for why the two must never merge.
+    lastDispatchAttemptAt: data.lastDispatchAttemptAt ?? null,
     paused: data.paused ?? null,
     // Launch circuit breaker (lib/launchFailure.cjs): per-persona blocks and
     // the degraded-mode env a persona is currently launching with. Machine
@@ -440,7 +445,7 @@ function shapeJobs(raw, file) {
  * consulted so writeSplit can persist "this project now has zero jobs".
  */
 function readMergedSync(opts) {
-  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [] };
+  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, lastDispatchAttemptAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [] };
   const sourceCwds = [];
   const machine = loadMachineStateSync();
   if (machine.shaped) {
@@ -473,7 +478,7 @@ function readMergedSync(opts) {
 
 /** Async twin of readMergedSync for IPC hot paths. */
 async function readMerged(opts) {
-  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [] };
+  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, lastDispatchAttemptAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [] };
   const sourceCwds = [];
   const machine = await loadMachineState();
   if (machine.shaped) {
@@ -525,6 +530,7 @@ async function writeSplit(state, defaultCwd) {
     config: state.config,
     scheduledFor: state.scheduledFor ?? null,
     lastRunAt: state.lastRunAt ?? null,
+    lastDispatchAttemptAt: state.lastDispatchAttemptAt ?? null,
     paused: state.paused ?? null,
     launchBlocks: state.launchBlocks ?? {},
     launchMitigations: state.launchMitigations ?? {},

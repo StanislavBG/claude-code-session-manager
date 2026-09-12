@@ -136,12 +136,30 @@ otherwise, and there's currently no per-Session escape hatch for them the way th
 machine-wide with no cwd or scope input:</p>
 
 <ul>
-  <li><strong>Telemetry</strong> (<code>SettingsTelemetry.tsx</code>) — opt-in OTEL export of
-  classified transcript events, persisted to <code>~/.config/session-manager/otel.json</code>. Not a
-  Claude Code file at all; this is Session Manager's own instrumentation, off by default. An
-  "Include content" toggle controls whether tool inputs/plan text/agent prompts are exported, mirroring
-  upstream Claude Code's own <code>OTEL_LOG_USER_PROMPTS</code> opt-in — structural metadata (tool
-  names, todo counts, usage tokens) goes out either way.</li>
+  <li><strong>Telemetry</strong> (<code>SettingsTelemetry.tsx</code>) — one pane, two unrelated data
+  paths. Read both before deciding what this machine sends.
+    <ul>
+      <li><strong>OpenTelemetry export</strong> — opt-in export of classified transcript events,
+      persisted to <code>~/.config/session-manager/otel.json</code>. Not a Claude Code file at all;
+      this is Session Manager's own instrumentation, <strong>off by default</strong>. An "Include
+      content" toggle controls whether tool inputs/plan text/agent prompts are exported, mirroring
+      upstream Claude Code's own <code>OTEL_LOG_USER_PROMPTS</code> opt-in — structural metadata
+      (tool names, todo counts, usage tokens) goes out either way.</li>
+      <li><strong>Product telemetry</strong> — an anonymous phone-home to bilko.run, and unlike the
+      OTEL export it is <strong>on by default</strong>. Turn it off with the toggle in this pane, or
+      machine-wide with <code>SM_TELEMETRY=0</code>, which overrides the saved setting either way.
+      It carries four counters (app launch, session open, Session created, scheduler job finished),
+      a once-per-version machine profile, and error/warning reports — never a prompt, a transcript,
+      a project name, or a file path. The only identity it sends is a random
+      <code>installId</code> UUID minted on first run and stored in
+      <code>~/.config/session-manager/telemetry.json</code>; there is deliberately no field beyond
+      it that could identify a person. Records spool to disk and are sent on a deliberate cadence
+      (launch, daily, version change, quit), so nothing leaves the machine while you are working.
+      The pane shows how many records are queued and how many have ever been delivered, and warns
+      explicitly when records are piling up with none delivered — that combination means the beacon
+      is failing, not that the feature is idle.</li>
+    </ul>
+  </li>
   <li><strong>Session Manager</strong> (<code>SettingsAppPrefs.tsx</code>) — native app preferences
   stored in <code>localStorage</code>, applied immediately with no save/revert cycle. Today this is
   one setting: the default model for a <em>raw</em> interactive session (one opened without going

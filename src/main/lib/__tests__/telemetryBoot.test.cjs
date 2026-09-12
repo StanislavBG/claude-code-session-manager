@@ -27,7 +27,7 @@ function fakeDeps({ settings } = {}) {
       },
       telemetryClient: {
         flush: async (reason) => { flushCalls.push(reason); return { sent: [], failed: [], reason }; },
-        track: async (name, props) => ({ accepted: true, name, props }),
+        reportInstall: async (profile) => ({ accepted: true, profile }),
       },
       buildMachineProfile: async () => ({ appVersion: '1.0.0', platform: 'linux', arch: 'x64', machineDigest: 'abc123' }),
       telemetryCounters: { trackAppLaunch: () => {} },
@@ -42,11 +42,11 @@ test('a second boot at the same version within 30 days sends nothing', async () 
     settings: { lastMachineReportAt: priorReportAt, lastMachineReportVersion: '1.0.0' },
   });
   const seen = [];
-  deps.telemetryClient.track = async (name, props) => { seen.push({ name, props }); return { accepted: true }; };
+  deps.telemetryClient.reportInstall = async (profile) => { seen.push(profile); return { accepted: true }; };
 
   await bootSequence({ now, appVersion: '1.0.0', deps });
 
-  expect(seen.filter((e) => e.name === 'install.machine')).toHaveLength(0);
+  expect(seen).toHaveLength(0);
   expect(state().lastMachineReportAt).toBe(priorReportAt);
 });
 
@@ -56,12 +56,11 @@ test('a version bump sends the machine profile exactly once', async () => {
     settings: { lastMachineReportAt: new Date(now - DAY_MS).toISOString(), lastMachineReportVersion: '1.0.0' },
   });
   const seen = [];
-  deps.telemetryClient.track = async (name, props) => { seen.push({ name, props }); return { accepted: true }; };
+  deps.telemetryClient.reportInstall = async (profile) => { seen.push(profile); return { accepted: true }; };
 
   await bootSequence({ now, appVersion: '2.0.0', deps });
 
-  const installEvents = seen.filter((e) => e.name === 'install.machine');
-  expect(installEvents.length).toBe(1);
+  expect(seen.length).toBe(1);
   expect(state().lastMachineReportVersion).toBe('2.0.0');
 });
 
@@ -71,27 +70,26 @@ test('31 days on an unchanged version sends the machine profile exactly once (li
     settings: { lastMachineReportAt: new Date(now - 31 * DAY_MS).toISOString(), lastMachineReportVersion: '1.0.0' },
   });
   const seen = [];
-  deps.telemetryClient.track = async (name, props) => { seen.push({ name, props }); return { accepted: true }; };
+  deps.telemetryClient.reportInstall = async (profile) => { seen.push(profile); return { accepted: true }; };
 
   await bootSequence({ now, appVersion: '1.0.0', deps });
 
-  const installEvents = seen.filter((e) => e.name === 'install.machine');
-  expect(installEvents.length).toBe(1);
+  expect(seen.length).toBe(1);
   expect(state().lastMachineReportAt).toBe(new Date(now).toISOString());
 });
 
-test('the install.machine event appVersion prop equals the appVersion stamped on a sibling error record', async () => {
+test('the install report appVersion equals the appVersion stamped on a sibling error record', async () => {
   const now = Date.now();
   const { deps } = fakeDeps({ settings: { lastMachineReportVersion: '', lastMachineReportAt: null } });
   const seen = [];
-  deps.telemetryClient.track = async (name, props) => { seen.push({ name, props }); return { accepted: true }; };
+  deps.telemetryClient.reportInstall = async (profile) => { seen.push(profile); return { accepted: true }; };
   // Sibling error record stamped by the SAME process's telemetryClient with the same appVersion.
   const siblingErrorStampAppVersion = '1.0.0';
 
   await bootSequence({ now, appVersion: '1.0.0', deps });
 
-  const [install] = seen.filter((e) => e.name === 'install.machine');
-  expect(install.props.appVersion).toBe(siblingErrorStampAppVersion);
+  const [install] = seen;
+  expect(install.appVersion).toBe(siblingErrorStampAppVersion);
 });
 
 test('on app ready, flush("boot") always runs', async () => {

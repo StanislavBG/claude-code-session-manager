@@ -1,6 +1,11 @@
 /**
  * telemetryClient — the single egress module that ships telemetry to
- * bilko.run's beacon endpoints (POST /api/telemetry/event, /log, /error).
+ * bilko.run's beacon endpoints (POST /api/telemetry/event, /log, /error,
+ * /install). The `install` channel is a durable upsert keyed on install_id
+ * (app_installs), not an append like the other three — its wire body is a
+ * single flat snake_case object, never `{batch:[...]}` — so it is routed
+ * through the same queue/dedup/backoff machinery but sent one record at a
+ * time via sendSingle() rather than sendBatch().
  *
  * Records accumulate durably in ~/.config/session-manager/telemetry-queue.jsonl
  * the instant they're accepted, and are only ever sent by flush(reason) — on
@@ -503,6 +508,47 @@ async function reportError(opts) {
   }
 }
 
+function buildInstallWire(profile, installId) {
+  const p = safeObj(profile);
+  return {
+    install_id: safeStr(installId, 80),
+    app: 'session-manager',
+    app_version: safeStr(p.appVersion, 20),
+    platform: safeStr(p.platform, 20),
+    os_release: safeStr(p.osRelease, 80),
+    arch: safeStr(p.arch, 20),
+    cpu_count: typeof p.cpuCount === 'number' ? p.cpuCount : 0,
+    total_mem_mb: typeof p.totalMemMb === 'number' ? p.totalMemMb : 0,
+    node_version: safeStr(p.nodeVersion, 20),
+    electron_version: safeStr(p.electronVersion, 20),
+    install_channel: safeStr(p.installChannel, 20),
+    locale: safeStr(p.locale, 20),
+    // machineProfile deliberately never carries an IANA timezone name — only
+    // the numeric UTC offset (see machineProfile.cjs) — so that is what maps
+    // onto the server's `timezone` column.
+    timezone: safeStr(p.timezoneOffsetMinutes, 20),
+  };
+}
+
+/**
+ * Reports the once-per-cadence install/liveness record. Unlike track/logLine/
+ * reportError this isn't arbitrary user content, so it skips redactDeep() —
+ * every field already comes from machineProfile's own anonymity contract —
+ * and it never merges an attribution block onto the body, since the server's
+ * app_installs upsert doesn't read a recordId.
+ */
+async function reportInstall(profile) {
+  try {
+    await ensureInit();
+    if (!telemetrySettings.isEnabled(S.settings)) return { accepted: false, reason: 'disabled' };
+    const recordId = crypto.randomUUID();
+    const wire = buildInstallWire(profile, S.settings.installId);
+    return await appendRecord('install', wire, recordId);
+  } catch {
+    return { accepted: false, reason: 'error' };
+  }
+}
+
 // ─── egress ────────────────────────────────────────────────────────────
 
 async function sendBatch(channel, wireBatch) {
@@ -517,6 +563,26 @@ async function sendBatch(channel, wireBatch) {
   };
   try {
     const res = await fetchFn(url, { method: 'POST', headers, body: JSON.stringify({ batch: wireBatch }) });
+    if (res && res.ok) return { ok: true };
+    return { ok: false, status: res ? res.status : 0 };
+  } catch {
+    return { ok: false, status: 0 };
+  }
+}
+
+/** Like sendBatch(), but posts `wire` as a flat body — the install route takes one upsert, never a `{batch:[...]}` envelope. */
+async function sendSingle(channel, wire) {
+  const fetchFn = S.fetchImpl || (typeof fetch === 'function' ? fetch : null);
+  if (typeof fetchFn !== 'function') return { ok: false, status: 0 };
+  const base = telemetrySettings.resolveEndpoint(S.settings);
+  const url = `${base}/api/telemetry/${channel}`;
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-SM-Beacon': `session-manager/${S.profile.appVersion}`,
+    'X-SM-Beacon-Key': getBeaconToken(),
+  };
+  try {
+    const res = await fetchFn(url, { method: 'POST', headers, body: JSON.stringify(wire) });
     if (res && res.ok) return { ok: true };
     return { ok: false, status: res ? res.status : 0 };
   } catch {
@@ -565,15 +631,34 @@ async function flushImpl(reason) {
     if (S.disabledForProcess) return result;
     if (Date.now() < S.backoffUntil) return result;
 
-    const byChannel = { event: [], log: [], error: [] };
+    const byChannel = { event: [], log: [], error: [], install: [] };
     for (const r of S.queue) {
       if (byChannel[r.channel]) byChannel[r.channel].push(r);
     }
 
     let sawFailure = false;
-    for (const channel of ['event', 'log', 'error']) {
+    for (const channel of ['event', 'log', 'error', 'install']) {
       if (sawFailure) break;
       const records = byChannel[channel];
+      if (channel === 'install') {
+        for (const r of records) {
+          const res = await sendSingle('install', r.wire);
+          if (res.ok) {
+            S.consecutiveFailures = 0;
+            S.backoffUntil = 0;
+            S.lastError = null;
+            removeFromQueue(r.recordId);
+            addToSent(r.recordId);
+            result.sent.push(r.recordId);
+          } else {
+            result.failed.push(r.recordId);
+            applyFailureBackoff(res.status);
+            sawFailure = true;
+            break;
+          }
+        }
+        continue;
+      }
       for (let i = 0; i < records.length; i += MAX_BATCH) {
         const batch = records.slice(i, i + MAX_BATCH);
         const res = await sendBatch(channel, batch.map((r) => r.wire));
@@ -668,6 +753,7 @@ module.exports = {
   track,
   logLine,
   reportError,
+  reportInstall,
   flush,
   shutdown,
   status,

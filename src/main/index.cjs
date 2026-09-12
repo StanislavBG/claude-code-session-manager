@@ -1070,8 +1070,8 @@ app.whenReady().then(async () => {
   });
 
   // Telemetry boot sequence: flush('boot') always, flush('version-change')
-  // when detected, and the once-per-machine install.machine profile when due
-  // (version bump or 30-day liveness heartbeat). See telemetryBoot.cjs.
+  // when detected, and the once-per-machine install upsert (app_installs) when
+  // due (version bump or 30-day liveness heartbeat). See telemetryBoot.cjs.
   require('./lib/telemetryBoot.cjs')
     .bootSequence({
       appVersion: app.getVersion(),

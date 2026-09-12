@@ -174,13 +174,38 @@ Three independent mechanisms, each covering a different failure mode:
 
 ## The reused bilko.run beacon contract
 
-`telemetryClient.cjs` POSTs batches to `<endpoint>/api/telemetry/<event|log|error>` — the exact
+`telemetryClient.cjs` POSTs to `<endpoint>/api/telemetry/<event|log|error|install>` — the exact
 same beacon endpoints and wire shape (`app`, `visitor_id`, `session_id`, plus channel-specific
 fields) that bilko.run's own product page already exposes for its own analytics. No new protocol
 was designed for this feature: the app is just another beacon client, authenticated the same
 anti-noise way (`X-SM-Beacon-Key`, a public non-secret tag shipped in the npm package, not a
 credential). The server-side schema (`app_errors`/`app_logs`/`app_installs`) is bilko.run's own
 ERD and is intentionally **not duplicated here** — see that repo's docs.
+
+**The `install` channel is not batch-shaped.** `event`/`log`/`error` are appends, POSTed as
+`{batch:[...]}` (up to `MAX_BATCH` per request). `install` is a durable **upsert** keyed on
+`install_id` (a desktop install is a slowly-changing dimension, not an event stream) and the
+server route takes one flat snake_case object per request — never a batch envelope. It still
+flows through the same queue/dedup/backoff machinery as the other three (accumulates in
+`telemetry-queue.jsonl`, drains on the same `flush(reason)` cadence, same
+`applyFailureBackoff()`), but `flushImpl()` sends its records one at a time via `sendSingle()`
+rather than `sendBatch()`.
+
+`telemetryClient.reportInstall(profile)` builds the wire body directly from
+`buildMachineProfile()`'s camelCase fields (`machineProfile.cjs`) plus `settings.installId` as
+`install_id` and the literal `'session-manager'` as `app` — mapped to the exact snake_case keys
+`app_installs` expects: `install_id, app, app_version, platform, os_release, arch, cpu_count,
+total_mem_mb, node_version, electron_version, install_channel, locale, timezone` (`timezone` is
+`String(timezoneOffsetMinutes)` — machineProfile's anonymity contract already forbids an IANA
+zone name). Unlike `track`/`logLine`/`reportError`, this body isn't arbitrary user content, so it
+skips `redactDeep()` and never merges an attribution/`recordId` block onto the wire — the server's
+upsert has no use for one.
+
+`telemetryBoot.cjs`'s machine-profile heartbeat (version-change OR 30-day liveness) now calls
+`telemetryClient.reportInstall(profile)` instead of the former `track('install.machine', profile)`.
+That `track()` call is **retired**, not kept alongside it — sending both would duplicate the same
+facts into `funnel_events` (which nothing reads them from) and `app_installs` (the actual source
+of every install-shaped number on bilko.run) for no benefit.
 
 ## Privacy model
 

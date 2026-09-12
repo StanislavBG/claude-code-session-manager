@@ -78,8 +78,9 @@ async function createStubServer() {
     events: [], // { event, tool, metadata, session_id, visitor_id, path, version }
     logs: [], // { app, version, level, msg, visitor_id, session_id, fields_json, created_at }
     errors: [], // { app, version, name, msg, stack, url, ua, visitor_id, session_id, context_json, created_at }
+    installsById: new Map(), // install_id -> materialised app_installs row (upsert, mirrors the deployed route)
     allRequests: [], // { path, headers, rawBody, parsedBody, channel }
-    overrides: { event: [], log: [], error: [] },
+    overrides: { event: [], log: [], error: [], install: [] },
   };
 
   function nextOverride(channel) {
@@ -95,6 +96,7 @@ async function createStubServer() {
     const channel = urlPath.endsWith('/event') ? 'event'
       : urlPath.endsWith('/log') ? 'log'
       : urlPath.endsWith('/error') ? 'error'
+      : urlPath.endsWith('/install') ? 'install'
       : null;
     state.allRequests.push({ path: urlPath, headers: req.headers, rawBody, parsedBody, channel });
 
@@ -108,6 +110,41 @@ async function createStubServer() {
     if (!channel || !parsedBody) {
       res.writeHead(400, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'bad_request' }));
+      return;
+    }
+
+    if (channel === 'install') {
+      // Flat body (never {batch:[...]}) — mirrors the real route's upsert
+      // keyed on install_id: first_seen_at preserved, everything else overwritten.
+      const b = parsedBody;
+      const installId = clamp(b.install_id, 80);
+      if (!installId) {
+        res.writeHead(400, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'install_id_required' }));
+        return;
+      }
+      const now = Math.floor(Date.now() / 1000);
+      const existing = state.installsById.get(installId);
+      state.installsById.set(installId, {
+        install_id: installId,
+        app: clamp(b.app, 60),
+        app_version: clamp(b.app_version, 20),
+        platform: clamp(b.platform, 20),
+        os_release: clamp(b.os_release, 80),
+        arch: clamp(b.arch, 20),
+        cpu_count: Number(b.cpu_count) || 0,
+        total_mem_mb: Number(b.total_mem_mb) || 0,
+        node_version: clamp(b.node_version, 20),
+        electron_version: clamp(b.electron_version, 20),
+        install_channel: clamp(b.install_channel, 20),
+        locale: clamp(b.locale, 20),
+        timezone: clamp(b.timezone, 20),
+        first_seen_at: existing ? existing.first_seen_at : now,
+        last_seen_at: now,
+        seen_count: existing ? existing.seen_count + 1 : 1,
+      });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
       return;
     }
 
@@ -496,30 +533,30 @@ test('an emitted event, log, and error each map to non-NULL values for every col
 // AC: machine-profile record survives redaction + clamping intact
 // ═══════════════════════════════════════════════════════════════════════
 
-test('the machine-profile record arrives with every buildMachineProfile() field present after redaction/clamping, cpuModel verbatim', async () => {
+test('the install record arrives at app_installs with every mapped field present, snake_case, cpu_count/total_mem_mb numeric', async () => {
   const home = await mkHome();
   const client = freshClient(home);
   const profile = fakeProfile();
-  const before = stubServer.state.events.length;
 
-  await client.track('install.machine', profile);
+  await client.reportInstall(profile);
   await client.flush('manual');
 
-  const row = stubServer.state.events[before];
-  expect(row.event).toBe('install.machine');
-  const meta = JSON.parse(row.metadata);
-
-  const expectedFields = [
-    'appVersion', 'installChannel', 'machineDigest', 'platform', 'osRelease', 'arch',
-    'cpuModel', 'cpuCount', 'cpuSpeedMhz', 'totalMemMb', 'nodeVersion', 'electronVersion',
-    'chromeVersion', 'v8Version', 'claudeCliVersion', 'locale', 'timezoneOffsetMinutes', 'firstSeenAt',
-  ];
-  for (const f of expectedFields) {
-    expect(meta[f]).not.toBeUndefined();
-    expect(meta[f]).not.toBeNull();
-  }
-  // The over-eager-sanitiser casualty: a CPU model string containing spaces and '@'.
-  expect(meta.cpuModel).toBe('Intel(R) Xeon(R) CPU @ 2.20GHz');
+  const settings = require('../lib/telemetrySettings.cjs');
+  const persisted = await settings.load();
+  const row = stubServer.state.installsById.get(persisted.installId);
+  expect(row).toBeDefined();
+  expect(row.app).toBe('session-manager');
+  expect(row.app_version).toBe(profile.appVersion);
+  expect(row.platform).toBe(profile.platform);
+  expect(row.os_release).toBe(profile.osRelease);
+  expect(row.arch).toBe(profile.arch);
+  expect(row.cpu_count).toBe(profile.cpuCount);
+  expect(row.total_mem_mb).toBe(profile.totalMemMb);
+  expect(row.node_version).toBe(profile.nodeVersion);
+  expect(row.electron_version).toBe(profile.electronVersion);
+  expect(row.install_channel).toBe(profile.installChannel);
+  expect(row.locale).toBe(profile.locale);
+  expect(row.timezone).toBe(String(profile.timezoneOffsetMinutes));
 
   client.shutdown();
 });
@@ -528,23 +565,27 @@ test('the machine-profile record arrives with every buildMachineProfile() field 
 // AC: machine profile sent once per version + once per 30-day heartbeat
 // ═══════════════════════════════════════════════════════════════════════
 
-test('install.machine fires once per app version and once per 30-day heartbeat, not once per launch', async () => {
+test('the install upsert fires once per app version and once per 30-day heartbeat, not once per launch', async () => {
   const home = await mkHome();
-  const before = stubServer.state.events.length;
+  let installId = null;
 
-  function countInstallMachine() {
-    return stubServer.state.events.slice(before).filter((r) => r.event === 'install.machine').length;
+  function seenCount() {
+    if (!installId) return 0;
+    const row = stubServer.state.installsById.get(installId);
+    return row ? row.seen_count : 0;
   }
 
   async function simulatedLaunch({ now, appVersion }) {
     const client = freshClient(home, { appVersion });
     const boot = freshBoot();
+    const telemetrySettings = require('../lib/telemetrySettings.cjs');
+    if (!installId) installId = (await telemetrySettings.load()).installId;
     await boot.bootSequence({
       now,
       appVersion,
       installChannel: 'dev',
       deps: {
-        telemetrySettings: require('../lib/telemetrySettings.cjs'),
+        telemetrySettings,
         telemetryClient: client,
         buildMachineProfile: async () => fakeProfile({ appVersion }),
         telemetryCounters: { trackAppLaunch: () => {} },
@@ -563,15 +604,15 @@ test('install.machine fires once per app version and once per 30-day heartbeat, 
   await simulatedLaunch({ now: t0 + 2 * ONE_DAY, appVersion: '1.0.0' });
   await simulatedLaunch({ now: t0 + 3 * ONE_DAY, appVersion: '1.0.0' });
   await simulatedLaunch({ now: t0 + 4 * ONE_DAY, appVersion: '1.0.0' });
-  expect(countInstallMachine()).toBe(1);
+  expect(seenCount()).toBe(1);
 
   // Launch 6: version bump.
   await simulatedLaunch({ now: t0 + 5 * ONE_DAY, appVersion: '1.1.0' });
-  expect(countInstallMachine()).toBe(2);
+  expect(seenCount()).toBe(2);
 
   // Launch 7: 31 days after the version-bump report, same version -> heartbeat due.
   await simulatedLaunch({ now: t0 + 5 * ONE_DAY + 31 * ONE_DAY, appVersion: '1.1.0' });
-  expect(countInstallMachine()).toBe(3);
+  expect(seenCount()).toBe(3);
 });
 
 // ═══════════════════════════════════════════════════════════════════════

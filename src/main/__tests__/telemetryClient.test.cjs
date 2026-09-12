@@ -54,6 +54,13 @@ function fakeProfile(overrides = {}) {
     arch: 'x64',
     machineDigest: 'deadbeefcafe',
     installChannel: 'dev',
+    osRelease: '6.1.0',
+    cpuCount: 8,
+    totalMemMb: 16384,
+    nodeVersion: '20.11.0',
+    electronVersion: '33.0.0',
+    locale: 'en-US',
+    timezoneOffsetMinutes: 420,
     ...overrides,
   };
 }
@@ -118,7 +125,7 @@ async function readQueueLines(client) {
 test('exports the full contract', async () => {
   const home = await mkHome();
   const client = freshClient(home);
-  for (const fn of ['track', 'logLine', 'reportError', 'flush', 'shutdown', 'status', 'recentRecords', 'isPending']) {
+  for (const fn of ['track', 'logLine', 'reportError', 'reportInstall', 'flush', 'shutdown', 'status', 'recentRecords', 'isPending']) {
     expect(typeof client[fn]).toBe('function');
   }
   client.shutdown();
@@ -138,6 +145,7 @@ test('ingress functions never throw on hostile inputs', async () => {
     await expect(client.track(bad, bad)).resolves.toBeDefined();
     await expect(client.logLine(bad)).resolves.toBeDefined();
     await expect(client.reportError(bad)).resolves.toBeDefined();
+    await expect(client.reportInstall(bad)).resolves.toBeDefined();
   }
   client.shutdown();
 });
@@ -154,6 +162,7 @@ test('when telemetry is disabled, ingress drops at the point of entry', async ()
   await client.track('evt', { a: 1 });
   await client.logLine({ level: 'info', msg: 'hi' });
   await client.reportError({ name: 'E', msg: 'boom', stack: 'at x' });
+  await client.reportInstall(fakeProfile());
 
   expect(client.status().pendingCount).toBe(0);
   expect(await readQueueLines(client)).toEqual([]);
@@ -512,6 +521,7 @@ test('wire field names match server/routes/telemetry.ts exactly', async () => {
   await client.track('evt-name', { a: 1 });
   await client.logLine({ level: 'warn', msg: 'm', fields: { b: 2 } });
   await client.reportError({ name: 'E', msg: 'm', stack: 'Error: m\n    at f (a.js:1:1)', context: { c: 3 } });
+  await client.reportInstall(fakeProfile());
 
   const fetchFn = fetchStub(async () => okResponse());
   client._setFetchImpl(fetchFn);
@@ -520,10 +530,16 @@ test('wire field names match server/routes/telemetry.ts exactly', async () => {
   const eventCall = fetchFn.calls.find((c) => c.url.endsWith('/event'));
   const logCall = fetchFn.calls.find((c) => c.url.endsWith('/log'));
   const errorCall = fetchFn.calls.find((c) => c.url.endsWith('/error'));
+  const installCall = fetchFn.calls.find((c) => c.url.endsWith('/install'));
 
   expect(Object.keys(eventCall.body.batch[0]).sort()).toEqual(['app', 'name', 'props', 'session_id', 'visitor_id'].sort());
   expect(Object.keys(logCall.body.batch[0]).sort()).toEqual(['app', 'version', 'level', 'msg', 'visitor_id', 'session_id', 'fields', 'ts'].sort());
   expect(Object.keys(errorCall.body.batch[0]).sort()).toEqual(['app', 'version', 'name', 'msg', 'stack', 'url', 'ua', 'visitor_id', 'session_id', 'context', 'ts'].sort());
+  expect(Object.keys(installCall.body).sort()).toEqual([
+    'app', 'app_version', 'arch', 'cpu_count', 'electron_version',
+    'install_channel', 'install_id', 'locale', 'node_version',
+    'os_release', 'platform', 'timezone', 'total_mem_mb',
+  ].sort());
   client.shutdown();
 });
 
@@ -826,6 +842,132 @@ test('clearQueue() empties the in-memory queue and truncates the on-disk queue f
   expect(raw.trim()).toBe('');
   client.shutdown();
 });
+
+// ─── install channel (PRD: bilko.run app_installs) ──────────────────────
+
+test('reportInstall() maps buildMachineProfile()\'s camelCase onto the exact snake_case key set app_installs expects', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  const profile = fakeProfile();
+  await client.reportInstall(profile);
+  const [rec] = await readQueueLines(client);
+
+  expect(rec.channel).toBe('install');
+  expect(Object.keys(rec.wire).sort()).toEqual([
+    'app', 'app_version', 'arch', 'cpu_count', 'electron_version',
+    'install_channel', 'install_id', 'locale', 'node_version',
+    'os_release', 'platform', 'timezone', 'total_mem_mb',
+  ].sort());
+  expect(rec.wire.app).toBe('session-manager');
+  expect(rec.wire.app_version).toBe(profile.appVersion);
+  expect(rec.wire.platform).toBe(profile.platform);
+  expect(rec.wire.os_release).toBe(profile.osRelease);
+  expect(rec.wire.arch).toBe(profile.arch);
+  expect(rec.wire.cpu_count).toBe(profile.cpuCount);
+  expect(rec.wire.total_mem_mb).toBe(profile.totalMemMb);
+  expect(rec.wire.node_version).toBe(profile.nodeVersion);
+  expect(rec.wire.electron_version).toBe(profile.electronVersion);
+  expect(rec.wire.install_channel).toBe(profile.installChannel);
+  expect(rec.wire.locale).toBe(profile.locale);
+  expect(rec.wire.timezone).toBe(String(profile.timezoneOffsetMinutes));
+  expect(typeof rec.wire.install_id).toBe('string');
+  expect(rec.wire.install_id).toBeTruthy();
+  client.shutdown();
+});
+
+test('the install channel POSTs a flat body, never a {batch:[...]} envelope', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  await client.reportInstall(fakeProfile());
+  const fetchFn = fetchStub(async () => okResponse());
+  client._setFetchImpl(fetchFn);
+  const result = await client.flush('manual');
+
+  expect(result.sent.length).toBe(1);
+  expect(fetchFn).toHaveBeenCalledTimes(1);
+  expect(fetchFn.calls[0].url.endsWith('/api/telemetry/install')).toBe(true);
+  expect(fetchFn.calls[0].body.batch).toBeUndefined();
+  expect(fetchFn.calls[0].body.install_id).toBeTruthy();
+  client.shutdown();
+});
+
+test('a 400 on the install channel disables the client like any other malformed-contract 4xx', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  await client.reportInstall(fakeProfile());
+  client._setFetchImpl(fetchStub(async () => statusResponse(400)));
+  await client.flush('manual');
+  const st = client.status();
+  expect(st.disabledForProcess).toBe(true);
+  expect(st.pendingCount).toBe(1);
+  client.shutdown();
+});
+
+test('a 429 on the install channel backs off rather than disabling, same as event/log/error', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  await client.reportInstall(fakeProfile());
+  client._setFetchImpl(fetchStub(async () => statusResponse(429)));
+  await client.flush('manual');
+  const st = client.status();
+  expect(st.disabledForProcess).toBe(false);
+  expect(st.backoffUntil).toBeGreaterThan(Date.now() - 1);
+  expect(st.pendingCount).toBe(1);
+  client.shutdown();
+});
+
+test('a stub server bound to 127.0.0.1 receives exactly one well-formed install POST during a simulated boot', async () => {
+  const http = require('node:http');
+  const home = await mkHome();
+  let received = null;
+  let requestCount = 0;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/api/telemetry/install') {
+      requestCount += 1;
+      let raw = '';
+      req.on('data', (chunk) => { raw += chunk; });
+      req.on('end', () => {
+        received = JSON.parse(raw);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+      });
+    } else {
+      res.writeHead(404);
+      res.end();
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  process.env.SM_TELEMETRY_ENDPOINT = `http://127.0.0.1:${port}`;
+
+  try {
+    const client = freshClient(home);
+    // No _setFetchImpl — exercises the real global fetch path against the local stub.
+    const profile = fakeProfile();
+    await client.reportInstall(profile);
+    await client.flush('boot');
+
+    expect(requestCount).toBe(1);
+    expect(received).toEqual({
+      install_id: expect.any(String),
+      app: 'session-manager',
+      app_version: profile.appVersion,
+      platform: profile.platform,
+      os_release: profile.osRelease,
+      arch: profile.arch,
+      cpu_count: profile.cpuCount,
+      total_mem_mb: profile.totalMemMb,
+      node_version: profile.nodeVersion,
+      electron_version: profile.electronVersion,
+      install_channel: profile.installChannel,
+      locale: profile.locale,
+      timezone: String(profile.timezoneOffsetMinutes),
+    });
+    client.shutdown();
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}, 15000);
 
 test('clearQueue() never touches telemetry-sent.json', async () => {
   const home = await mkHome();

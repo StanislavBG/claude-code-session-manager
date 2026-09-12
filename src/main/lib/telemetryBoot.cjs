@@ -36,10 +36,15 @@ function resolveDeps(deps = {}) {
  *  2. flush('version-change') — only when this install's persisted
  *     lastMachineReportVersion differs from the running appVersion (the same
  *     signal that also gates the machine-profile heartbeat below).
- *  3. install.machine — sent once as track('install.machine', profile) when
- *     telemetrySettings.isMachineReportDue() is true (a version bump, OR the
- *     30-day liveness heartbeat), then lastMachineReportAt/Version are
+ *  3. install upsert — sent once via telemetryClient.reportInstall(profile)
+ *     when telemetrySettings.isMachineReportDue() is true (a version bump, OR
+ *     the 30-day liveness heartbeat), then lastMachineReportAt/Version are
  *     persisted so a same-version reboot within the window sends nothing.
+ *     This lands in bilko.run's app_installs table (the sole source for
+ *     every install-shaped number on the site). It replaces the former
+ *     track('install.machine', profile) call, which duplicated the same
+ *     facts into funnel_events for no reader — app_installs is now the only
+ *     destination for a machine profile.
  *  4. app.launch — one counter event per boot, via telemetryCounters so the
  *     shape lives in exactly one place across every counter this PRD adds.
  */
@@ -57,7 +62,7 @@ async function bootSequence({ now = Date.now(), appVersion, installChannel, deps
 
   if (telemetrySettings.isMachineReportDue(settings, { now, appVersion })) {
     const profile = await buildMachineProfile();
-    await telemetryClient.track('install.machine', profile);
+    await telemetryClient.reportInstall(profile);
     await telemetrySettings.save({
       ...settings,
       lastMachineReportAt: new Date(now).toISOString(),

@@ -2559,6 +2559,19 @@ function applyPauseCleared(wasPaused, token) {
   return token;
 }
 
+/**
+ * Human-readable explanation for a `reason: 'load-deferred'` tick, surfaced
+ * to the renderer via lastTick.detail. Names the gate, the measured ratio,
+ * the threshold and how long the stretch has been held — the box could sit
+ * gated for 80+ minutes with nothing in the UI naming why (PRD: load gate
+ * hysteresis). Pure so it's unit-testable without driving tickQueue's full
+ * fs/worktree machinery.
+ */
+function formatLoadGateDetail(load) {
+  const heldMinutes = Math.round(load.gatedSinceMs / 60_000);
+  return `CPU load gate: loadavg1 ${load.loadavg1} / ${load.cores} cores = ${load.ratio} > threshold ${load.threshold}, held for ${heldMinutes}m`;
+}
+
 function attachWindow(w) { mainWindow = w; }
 
 /**
@@ -6714,7 +6727,7 @@ function tickQueue({ bypassLoadGate = false } = {}) {
       }
       return recordTick(
         { fired: false, reason: 'load-deferred', deferredCount: gatedBatch.length, ratio: load.ratio, threshold: load.threshold },
-        { detail: `load gate: ${load.loadavg1} / ${load.cores} cores = ${load.ratio} > ${load.threshold}`, holds },
+        { detail: formatLoadGateDetail(load), holds },
       );
     }
 
@@ -6860,43 +6873,107 @@ function classifyQueueStarvation({ jobs, paused, runningCount, lastRunAtMs, now,
 }
 
 /**
- * The watchdog half: acts on classifyQueueStarvation. Called from the
- * heartbeat, which already runs on its own timer independent of the billing
- * poll loop — so a wedged or never-succeeding poll (the /api/oauth/usage
- * endpoint was itself 429ing all of 2026-09-05) can no longer leave a queue
- * with ready work idle indefinitely.
+ * classifyQueueStarvationByProject({ jobs, paused, runningSet, lastRunAtMs, now, thresholdMs })
+ *   → [{ cwd, kind: 'starved' | 'blocked', pending, dispatchable, blockedChains, idleMs }]
+ *
+ * Per-project driver around classifyQueueStarvation's pure single-project
+ * core. `runningCount > 0` inside that core used to be fed the MACHINE-WIDE
+ * `runningSet.size`, which meant one long-lived job in ANY project disarmed
+ * the watchdog for EVERY other project on the box — observed live
+ * 2026-09-12: a job in starry-night-ships ran 80+ minutes while two other
+ * projects sat starved/blocked for hours, and the watchdog never fired once
+ * because "work is flowing" was true somewhere else. Partitioning by cwd
+ * (the same grouping computeBlockedChains already does) fixes DETECTION only
+ * — the idle clock (`lastRunAtMs`) stays machine-wide, since
+ * `lastDispatchAttemptAt` is machine-level state, and only one tick is ever
+ * forced per watchdog pass regardless of how many cwds are starved.
+ *
+ * Pure, no IO. Returns [] when paused (a DECISION, not a stall) or when no
+ * project has a verdict.
+ */
+function classifyQueueStarvationByProject({ jobs, paused, runningSet: runningSlugs, lastRunAtMs, now, thresholdMs = QUEUE_STARVATION_MS } = {}) {
+  if (paused) return [];
+  const rows = (Array.isArray(jobs) ? jobs : []).filter(Boolean);
+  const byCwd = new Map();
+  for (const j of rows) {
+    const key = j.cwd || '(unknown)';
+    if (!byCwd.has(key)) byCwd.set(key, []);
+    byCwd.get(key).push(j);
+  }
+
+  const verdicts = [];
+  for (const [cwd, projectJobs] of byCwd) {
+    // Same source of truth tickQueue itself uses for "is anything running":
+    // the in-process runningSet OR a row already stamped status:'running'.
+    const projRunningCount = projectJobs.filter(
+      (j) => j.status === 'running' || runningSlugs?.has?.(j.slug),
+    ).length;
+    const verdict = classifyQueueStarvation({
+      jobs: projectJobs,
+      paused: false,
+      runningCount: projRunningCount,
+      lastRunAtMs,
+      now,
+      thresholdMs,
+    });
+    if (verdict) verdicts.push({ cwd, ...verdict });
+  }
+  return verdicts;
+}
+
+/**
+ * The watchdog half: acts on classifyQueueStarvationByProject. Called from
+ * the heartbeat, which already runs on its own timer independent of the
+ * billing poll loop — so a wedged or never-succeeding poll (the
+ * /api/oauth/usage endpoint was itself 429ing all of 2026-09-05) can no
+ * longer leave a queue with ready work idle indefinitely.
+ *
+ * Logs and audits one event PER starved/blocked cwd (each carrying that
+ * cwd), but still forces at most one machine-wide tickQueue() per pass —
+ * the tick itself is machine-wide (it drives whatever the picker finds
+ * across every project), only the DETECTION is per-project.
  */
 async function runQueueStarvationWatchdog(state, { now = Date.now(), thresholdMs = QUEUE_STARVATION_MS } = {}) {
   // lastDispatchAttemptAt, not lastRunAt: the latter only advances when a
   // batch actually launches, so a poll that keeps succeeding while dispatch
   // itself never gets invoked would otherwise mask a stall behind a fresh-
   // looking timestamp that was never actually tracking dispatch liveness.
-  const verdict = classifyQueueStarvation({
+  const verdicts = classifyQueueStarvationByProject({
     jobs: state?.jobs,
     paused: state?.paused,
-    runningCount: runningSet.size,
+    runningSet,
     lastRunAtMs: Date.parse(state?.lastDispatchAttemptAt ?? ''),
     now,
     thresholdMs,
   });
-  if (!verdict) return null;
+  if (verdicts.length === 0) return null;
 
-  const mins = Math.round(verdict.idleMs / 60_000);
-  if (verdict.kind === 'blocked') {
+  let anyStarved = false;
+  let primary = null;
+  for (const verdict of verdicts) {
+    const mins = Math.round(verdict.idleMs / 60_000);
+    if (verdict.kind === 'blocked') {
+      console.warn(
+        `[scheduler] QUEUE BLOCKED (${verdict.cwd}): ${verdict.pending} pending job(s), 0 running, idle ${mins}m — every ready row is behind a `
+        + `terminal or parked dependency, so ticking cannot help. Blockers: `
+        + verdict.blockedChains.map((c) => `${c.cwd} [${c.blockedBy.join(', ')}]`).join(' · '),
+      );
+      appendAuditEvent('queue_blocked_stall', { cwd: verdict.cwd, pending: verdict.pending, idleMs: verdict.idleMs, chains: verdict.blockedChains });
+      if (!primary) primary = verdict;
+      continue;
+    }
+
     console.warn(
-      `[scheduler] QUEUE BLOCKED: ${verdict.pending} pending job(s), 0 running, idle ${mins}m — every ready row is behind a `
-      + `terminal or parked dependency, so ticking cannot help. Blockers: `
-      + verdict.blockedChains.map((c) => `${c.cwd} [${c.blockedBy.join(', ')}]`).join(' · '),
+      `[scheduler] QUEUE STARVED (${verdict.cwd}): ${verdict.dispatchable} dispatchable job(s) of ${verdict.pending} pending, 0 running, `
+      + `idle ${mins}m (>= ${Math.round(thresholdMs / 60_000)}m) — forcing a tick`,
     );
-    appendAuditEvent('queue_blocked_stall', { pending: verdict.pending, idleMs: verdict.idleMs, chains: verdict.blockedChains });
-    return verdict;
+    appendAuditEvent('queue_starvation_forced_tick', { cwd: verdict.cwd, pending: verdict.pending, dispatchable: verdict.dispatchable, idleMs: verdict.idleMs });
+    anyStarved = true;
+    primary = verdict;
   }
 
-  console.warn(
-    `[scheduler] QUEUE STARVED: ${verdict.dispatchable} dispatchable job(s) of ${verdict.pending} pending, 0 running, `
-    + `idle ${mins}m (>= ${Math.round(thresholdMs / 60_000)}m) — forcing a tick`,
-  );
-  appendAuditEvent('queue_starvation_forced_tick', { pending: verdict.pending, dispatchable: verdict.dispatchable, idleMs: verdict.idleMs });
+  if (!anyStarved) return primary;
+
   // A never-populated utilization reading is itself one of the ways the
   // when-available path silently never fires (maybeLaunchWhenAvailable
   // returns early on null). Treat unknown as safe here, exactly as the
@@ -6911,8 +6988,11 @@ async function runQueueStarvationWatchdog(state, { now = Date.now(), thresholdMs
   // actually ticked. The watchdog is the last line of defence against a
   // wedged dispatcher, so it must be able to un-wedge this too.
   cancelToken.cancelled = false;
+  // A forced tick is machine-wide by construction (the picker considers
+  // every project's rows) — one call here services every starved cwd found
+  // this pass, not one call per cwd.
   await tickQueue({ bypassLoadGate: false }).catch((e) => console.error('[scheduler] starvation tick error', e));
-  return verdict;
+  return primary;
 }
 
 // ---------- dead-process reaper ----------
@@ -7781,24 +7861,80 @@ function stuckFailedEscalationDisabled() {
   return process.env.SM_STUCK_FAILED_ESCALATE_DISABLE === '1';
 }
 
+// Bounded automatic failed -> pending recovery (PRD 1151): a failed row gets
+// up to FAILED_AUTORESET_CAP auto-reset attempts, each gated on having sat
+// `failed` for FAILED_AUTORESET_MS, before the stuck-failed escalation below
+// is allowed to page a human. Same env-override shape as
+// STUCK_FAILED_ESCALATE_MS/QUARANTINE_ESCALATE_MS above.
+const FAILED_AUTORESET_CAP = 3;
+const FAILED_AUTORESET_MS = process.env.SM_FAILED_AUTORESET_MINUTES
+  ? Number(process.env.SM_FAILED_AUTORESET_MINUTES) * 60_000
+  : 10 * 60_000;
+
+/**
+ * Kill-switch gate for the failed-autoreset pass below
+ * (SM_FAILED_AUTORESET_DISABLE=1), same shape as stuckFailedEscalationDisabled
+ * above.
+ */
+function failedAutoResetDisabled() {
+  return process.env.SM_FAILED_AUTORESET_DISABLE === '1';
+}
+
+/**
+ * selectFailedAutoResetTargets(jobs, now, thresholdMs) →
+ *   [{ slug, cwd, ageMs, attempts }]
+ *
+ * Pure selector — no IO, no `require` inside the function. Selects `failed`
+ * rows whose newest statusHistory entry with `to === 'failed'` is older than
+ * `thresholdMs` and whose failedAutoResetAttempts counter hasn't yet spent
+ * FAILED_AUTORESET_CAP attempts. "Newest" (not first) matters because a row
+ * can have failed more than once across its lifetime (an earlier auto-reset
+ * attempt that itself failed again) — only the most recent failed-since
+ * timestamp should gate the next attempt.
+ */
+function selectFailedAutoResetTargets(jobs, now, thresholdMs) {
+  const targets = [];
+  for (const j of jobs ?? []) {
+    if (j.status !== 'failed') continue;
+    const attempts = j.failedAutoResetAttempts ?? 0;
+    if (attempts >= FAILED_AUTORESET_CAP) continue;
+    const history = j.statusHistory || [];
+    let entry = null;
+    for (let i = history.length - 1; i >= 0; i--) {
+      if (history[i].to === 'failed') { entry = history[i]; break; }
+    }
+    if (!entry) continue;
+    const since = Date.parse(entry.at);
+    if (Number.isNaN(since)) continue;
+    const ageMs = now - since;
+    if (ageMs < thresholdMs) continue;
+    targets.push({ slug: j.slug, cwd: j.cwd ?? null, ageMs, attempts });
+  }
+  return targets;
+}
+
 /**
  * findStuckFailedJobs(jobs, now, thresholdMs) → [{ slug, cwd, ageMs }]
  *
  * Pure predicate (isRescanCandidate's own resolveRunId/classifyRunOutcome log
  * read is the only IO, gated per-job exactly like shouldRunPeriodicReverify
- * above). `failed` is a fully terminal state for every automated recovery
- * path — selectResumeRecoveryTarget/selectAutoFixTargets both require
- * needs_review, reapDeadRunningJobs only ever writes running → failed, and
- * reconcile-repair's to-pending is for structurally invalid rows. Only a
- * human's scheduler_reset_job ever takes failed → pending (LEGAL_TRANSITIONS).
- * A rescan candidate (isRescanCandidate) that has sat failed longer than
- * `thresholdMs` can therefore go silently stuck forever — job
- * 4056-outcome-stats sat `failed` for five days with no operator signal
- * (reported 2026-09-10, social-signals-trader) even though the periodic
- * reverify pass (once shouldRunPeriodicReverify's guard was fixed) WAS firing
- * on it — reverifyNeedsReview's failed branch can annotate looksDone but can
- * never resolve a failed row itself (see its own header). This is the
- * visibility half that guard fix was missing: escalate once, never requeue.
+ * above). `failed` used to be a fully terminal state for every automated
+ * recovery path — selectResumeRecoveryTarget/selectAutoFixTargets both
+ * require needs_review, reapDeadRunningJobs only ever writes running →
+ * failed, and reconcile-repair's to-pending is for structurally invalid rows.
+ * That is no longer true: selectFailedAutoResetTargets above now drives a
+ * bounded failed → pending auto-reset (LEGAL_TRANSITIONS already allowed the
+ * edge). This escalation now only fires once that auto-reset budget is
+ * genuinely spent (see the interval body's filter on failedAutoResetAttempts)
+ * — a rescan candidate (isRescanCandidate) that has sat failed longer than
+ * `thresholdMs` AND exhausted its auto-reset attempts can therefore go
+ * silently stuck forever — job 4056-outcome-stats sat `failed` for five days
+ * with no operator signal (reported 2026-09-10, social-signals-trader) even
+ * though the periodic reverify pass (once shouldRunPeriodicReverify's guard
+ * was fixed) WAS firing on it — reverifyNeedsReview's failed branch can
+ * annotate looksDone but can never resolve a failed row itself (see its own
+ * header). This is the visibility half that guard fix was missing: escalate
+ * once per exhausted row, never requeue from here.
  *
  * `stuckFailedNotified` gates this to exactly once per row — once the caller
  * stamps it, this always excludes that row so a human is never re-paged on
@@ -8888,29 +9024,57 @@ async function init() {
       appendAuditEvent('project_starved', { cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs });
     }
 
-    // Stuck-failed escalation (2026-09-10, social-signals-trader): see
-    // findStuckFailedJobs' header for why `failed` has no automated way
-    // back to pending. Escalation only, same shape as the three warnings
-    // above — never an automatic failed → pending requeue (that could
-    // discard uncommitted work left by the failed run; see
-    // spawnJob:fail-dirty). Kill-switch: SM_STUCK_FAILED_ESCALATE_DISABLE=1.
-    if (!stuckFailedEscalationDisabled()) {
-      const stuckFailed = findStuckFailedJobs(s.jobs, Date.now(), STUCK_FAILED_ESCALATE_MS);
-      if (stuckFailed.length > 0) {
-        mutate((ms) => {
-          for (const stuck of stuckFailed) {
-            const j = ms.jobs.find((x) => x.slug === stuck.slug);
-            if (!j || j.status !== 'failed' || j.stuckFailedNotified === true) continue; // race guard
-            j.stuckFailedNotified = true;
-            console.warn(
-              `[scheduler] FAILED PRD STUCK: project=${stuck.cwd ?? '(unknown)'} slug=${stuck.slug} `
-              + `failed=${Math.round(stuck.ageMs / 3_600_000)}h (>= ${Math.round(STUCK_FAILED_ESCALATE_MS / 3_600_000)}h threshold) — `
-              + `no automated recovery reaches a failed row; reset it by hand via scheduler_reset_job`,
-            );
-            appendAuditEvent('job_stuck_failed', { slug: stuck.slug, cwd: stuck.cwd, ageMs: stuck.ageMs });
-          }
-        }).catch(() => {});
-      }
+    // Bounded failed -> pending auto-reset (PRD 1151), plus the stuck-failed
+    // escalation now narrowed to only the rows that auto-reset gave up on.
+    // See selectFailedAutoResetTargets' + findStuckFailedJobs' headers.
+    // Computed together, acted on in the SAME mutate(...) pass, so the
+    // stuckFailedNotified race guard below and the auto-reset race guard
+    // above it can never observe two different snapshots of the same row.
+    // Kill-switches: SM_FAILED_AUTORESET_DISABLE=1 / SM_STUCK_FAILED_ESCALATE_DISABLE=1.
+    const autoResetTargets = failedAutoResetDisabled()
+      ? []
+      : selectFailedAutoResetTargets(s.jobs, Date.now(), FAILED_AUTORESET_MS);
+    const stuckFailed = stuckFailedEscalationDisabled()
+      ? []
+      : findStuckFailedJobs(s.jobs, Date.now(), STUCK_FAILED_ESCALATE_MS);
+    if (autoResetTargets.length > 0 || stuckFailed.length > 0) {
+      mutate((ms) => {
+        for (const target of autoResetTargets) {
+          const j = ms.jobs.find((x) => x.slug === target.slug);
+          if (!j || j.status !== 'failed' || (j.failedAutoResetAttempts ?? 0) >= FAILED_AUTORESET_CAP) continue; // race guard
+          const attempt = (j.failedAutoResetAttempts ?? 0) + 1;
+          j.failedAutoResetAttempts = attempt;
+          const reason = `auto-reset after ${Math.round(FAILED_AUTORESET_MS / 60_000)}m failed (attempt ${attempt}/${FAILED_AUTORESET_CAP})`;
+          // resetJobFields is the same field-clearing list the admin
+          // scheduler_reset_job handler uses (ipc:schedule:reset-job) — reuse
+          // it rather than inventing a second list. It also sets job.error to
+          // the reason text passed in; we clear that back to null right
+          // after since this is a clean auto-reset, not a recorded error.
+          if (!resetJobFields(j, reason, { source: 'autoResetFailed' })) continue;
+          j.error = null;
+          delete j.stuckFailedNotified;
+          console.warn(
+            `[scheduler] FAILED PRD AUTO-RESET: project=${j.cwd ?? '(unknown)'} slug=${j.slug} `
+            + `failed=${Math.round(target.ageMs / 60_000)}m (>= ${Math.round(FAILED_AUTORESET_MS / 60_000)}m threshold) — ${reason}`,
+          );
+          appendAuditEvent('job_auto_reset_failed', { slug: j.slug, cwd: j.cwd, ageMs: target.ageMs, attempt });
+        }
+        for (const stuck of stuckFailed) {
+          const j = ms.jobs.find((x) => x.slug === stuck.slug);
+          if (!j || j.status !== 'failed' || j.stuckFailedNotified === true) continue; // race guard
+          // Still has auto-reset attempts left — it will be (or already was,
+          // earlier this same pass) picked up by the loop above instead.
+          // Never log "reset it by hand" for a row that isn't actually stuck.
+          if ((j.failedAutoResetAttempts ?? 0) < FAILED_AUTORESET_CAP) continue;
+          j.stuckFailedNotified = true;
+          console.warn(
+            `[scheduler] FAILED PRD STUCK: project=${stuck.cwd ?? '(unknown)'} slug=${stuck.slug} `
+            + `failed=${Math.round(stuck.ageMs / 3_600_000)}h (>= ${Math.round(STUCK_FAILED_ESCALATE_MS / 3_600_000)}h threshold) — `
+            + `auto-reset cap exhausted (${FAILED_AUTORESET_CAP}/${FAILED_AUTORESET_CAP} attempts); reset it by hand via scheduler_reset_job`,
+          );
+          appendAuditEvent('job_stuck_failed', { slug: stuck.slug, cwd: stuck.cwd, ageMs: stuck.ageMs });
+        }
+      }).catch(() => {});
     }
   }, 10 * 60_000);
 
@@ -9575,6 +9739,7 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
 
 module.exports = {
   classifyQueueStarvation,
+  classifyQueueStarvationByProject,
   runQueueStarvationWatchdog,
   QUEUE_STARVATION_MS,
   computeBlockedChains,
@@ -9616,6 +9781,10 @@ module.exports = {
   findStuckFailedJobs,
   STUCK_FAILED_ESCALATE_MS,
   stuckFailedEscalationDisabled,
+  selectFailedAutoResetTargets,
+  FAILED_AUTORESET_CAP,
+  FAILED_AUTORESET_MS,
+  failedAutoResetDisabled,
   isRescanCandidate,
   isFailedUnverifiedShaped,
   computeLooksDone,
@@ -9646,6 +9815,7 @@ module.exports = {
   MAX_INVESTIGATION_DEPTH,
   forceTickOutcome,
   applyPauseCleared,
+  formatLoadGateDetail,
   detectNetworkErrorInLog,
   detectRateLimitInLog,
   classifyFailureOutcome,

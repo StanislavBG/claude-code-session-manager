@@ -228,6 +228,7 @@ let originalHome;
 let originalSmTelemetry;
 let originalSmTelemetryEndpoint;
 let originalSmBeaconKey;
+let originalSmTelemetrySpool;
 let stubServer;
 
 beforeAll(async () => {
@@ -247,6 +248,7 @@ beforeEach(() => {
   originalSmTelemetry = process.env.SM_TELEMETRY;
   originalSmTelemetryEndpoint = process.env.SM_TELEMETRY_ENDPOINT;
   originalSmBeaconKey = process.env.SM_BEACON_KEY;
+  originalSmTelemetrySpool = process.env.SM_TELEMETRY_SPOOL;
   process.env.SM_TELEMETRY_ENDPOINT = stubServer.url;
   delete process.env.SM_TELEMETRY;
 });
@@ -256,6 +258,7 @@ afterEach(async () => {
   if (originalSmTelemetry === undefined) delete process.env.SM_TELEMETRY; else process.env.SM_TELEMETRY = originalSmTelemetry;
   if (originalSmTelemetryEndpoint === undefined) delete process.env.SM_TELEMETRY_ENDPOINT; else process.env.SM_TELEMETRY_ENDPOINT = originalSmTelemetryEndpoint;
   if (originalSmBeaconKey === undefined) delete process.env.SM_BEACON_KEY; else process.env.SM_BEACON_KEY = originalSmBeaconKey;
+  if (originalSmTelemetrySpool === undefined) delete process.env.SM_TELEMETRY_SPOOL; else process.env.SM_TELEMETRY_SPOOL = originalSmTelemetrySpool;
   vi.useRealTimers();
   while (tmpDirs.length) {
     const d = tmpDirs.pop();
@@ -306,6 +309,9 @@ const HOME_DEPENDENT_MODULES = ['../lib/telemetryClient.cjs', '../config.cjs', '
 /** A fresh telemetryClient bound to `home`, simulating a real relaunch: only on-disk state carries over. */
 function freshClient(home, profileOverrides) {
   process.env.HOME = home;
+  // Explicit opt-in: overrides the test-environment no-op guard so this
+  // suite's real telemetryClient calls actually persist into an isolated dir.
+  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.config', 'session-manager');
   for (const p of HOME_DEPENDENT_MODULES) {
     const resolved = require.resolve(p);
     delete require.cache[resolved];

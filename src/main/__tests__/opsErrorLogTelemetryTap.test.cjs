@@ -17,9 +17,11 @@ const opsErrorLog = require('../lib/opsErrorLog.cjs');
 
 const tmpDirs = [];
 let originalHome;
+let originalSmTelemetrySpool;
 
 afterEach(async () => {
   if (originalHome !== undefined) process.env.HOME = originalHome;
+  if (originalSmTelemetrySpool === undefined) delete process.env.SM_TELEMETRY_SPOOL; else process.env.SM_TELEMETRY_SPOOL = originalSmTelemetrySpool;
   const telemetryPath = require.resolve('../lib/telemetryClient.cjs');
   delete require.cache[telemetryPath];
   const activeSessionsPath = require.resolve('../../../scripts/lib/activeSessions.cjs');
@@ -111,9 +113,13 @@ test('an ephemeral cwd yields zero local lines but one telemetry record, with a 
 
 test('a realistic error with an absolute path and a prompt-like string never reaches the telemetry payload verbatim', async () => {
   originalHome = process.env.HOME;
+  originalSmTelemetrySpool = process.env.SM_TELEMETRY_SPOOL;
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-opslog-telemetry-home-'));
   tmpDirs.push(home);
   process.env.HOME = home;
+  // Explicit opt-in: overrides the test-environment no-op guard so this
+  // test's real telemetryClient call actually persists into an isolated dir.
+  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.config', 'session-manager');
 
   for (const p of ['../lib/telemetryClient.cjs', '../config.cjs', '../lib/telemetrySettings.cjs', '../lib/machineProfile.cjs']) {
     const resolved = require.resolve(p);

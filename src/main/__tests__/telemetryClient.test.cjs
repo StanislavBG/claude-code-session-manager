@@ -17,12 +17,14 @@ let originalHome;
 let originalSmTelemetry;
 let originalSmTelemetryEndpoint;
 let originalSmBeaconKey;
+let originalSmTelemetrySpool;
 
 beforeEach(() => {
   originalHome = process.env.HOME;
   originalSmTelemetry = process.env.SM_TELEMETRY;
   originalSmTelemetryEndpoint = process.env.SM_TELEMETRY_ENDPOINT;
   originalSmBeaconKey = process.env.SM_BEACON_KEY;
+  originalSmTelemetrySpool = process.env.SM_TELEMETRY_SPOOL;
 });
 
 afterEach(async () => {
@@ -30,6 +32,7 @@ afterEach(async () => {
   if (originalSmTelemetry === undefined) delete process.env.SM_TELEMETRY; else process.env.SM_TELEMETRY = originalSmTelemetry;
   if (originalSmTelemetryEndpoint === undefined) delete process.env.SM_TELEMETRY_ENDPOINT; else process.env.SM_TELEMETRY_ENDPOINT = originalSmTelemetryEndpoint;
   if (originalSmBeaconKey === undefined) delete process.env.SM_BEACON_KEY; else process.env.SM_BEACON_KEY = originalSmBeaconKey;
+  if (originalSmTelemetrySpool === undefined) delete process.env.SM_TELEMETRY_SPOOL; else process.env.SM_TELEMETRY_SPOOL = originalSmTelemetrySpool;
   vi.useRealTimers();
   vi.unstubAllGlobals();
   while (tmpDirs.length) {
@@ -65,6 +68,11 @@ function fakeProfile(overrides = {}) {
  */
 function freshClient(home, profileOverrides) {
   process.env.HOME = home;
+  // Explicit opt-in: this suite deliberately exercises telemetryClient's real
+  // queue/sent-file I/O, so it must override the test-environment no-op guard
+  // by pointing the spool at this test's own isolated tmp dir (never a real
+  // user's ~/.config/session-manager).
+  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.config', 'session-manager');
   for (const p of ['../lib/telemetryClient.cjs', '../config.cjs', '../lib/telemetrySettings.cjs', '../lib/machineProfile.cjs']) {
     const resolved = require.resolve(p);
     delete require.cache[resolved];
@@ -775,6 +783,31 @@ test('status() reports a network error (fetch throw / status 0) with a plain-lan
   await client.flush('manual');
   const st = client.status();
   expect(st.lastError).toEqual(expect.objectContaining({ status: 0, message: 'network error' }));
+  client.shutdown();
+});
+
+// ─── test-environment guard (poisoned-spool prevention) ─────────────────
+
+test('appendRecord() is a no-op under a test runner unless SM_TELEMETRY_SPOOL is explicitly set', async () => {
+  const home = await mkHome();
+  process.env.HOME = home;
+  delete process.env.SM_TELEMETRY_SPOOL;
+  for (const p of ['../lib/telemetryClient.cjs', '../config.cjs', '../lib/telemetrySettings.cjs', '../lib/machineProfile.cjs']) {
+    delete require.cache[require.resolve(p)];
+  }
+  const client = require('../lib/telemetryClient.cjs');
+  client._setMachineProfileBuilder(async () => fakeProfile());
+
+  expect(process.env.VITEST).toBeTruthy();
+  const trackResult = await client.track('evt', { a: 1 });
+  const logResult = await client.logLine({ level: 'info', msg: 'hi' });
+  const errorResult = await client.reportError({ name: 'E', msg: 'boom', stack: 'at x' });
+
+  expect(trackResult).toEqual({ accepted: false, reason: 'test-environment', recordId: expect.any(String) });
+  expect(logResult.accepted).toBe(false);
+  expect(errorResult.accepted).toBe(false);
+  expect(client.status().pendingCount).toBe(0);
+  await expect(fsp.access(client.queuePath())).rejects.toThrow();
   client.shutdown();
 });
 

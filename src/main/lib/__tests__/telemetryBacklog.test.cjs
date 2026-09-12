@@ -18,13 +18,16 @@ const { resolveProjectContext } = require('../projectRootResolve.cjs');
 
 const tmpDirs = [];
 let originalHome;
+let originalSmTelemetrySpool;
 
 beforeEach(() => {
   originalHome = process.env.HOME;
+  originalSmTelemetrySpool = process.env.SM_TELEMETRY_SPOOL;
 });
 
 afterEach(async () => {
   if (originalHome !== undefined) process.env.HOME = originalHome;
+  if (originalSmTelemetrySpool === undefined) delete process.env.SM_TELEMETRY_SPOOL; else process.env.SM_TELEMETRY_SPOOL = originalSmTelemetrySpool;
   vi.unstubAllGlobals();
   while (tmpDirs.length) {
     const d = tmpDirs.pop();
@@ -51,6 +54,9 @@ function fakeProfile(overrides = {}) {
 /** Reloads the HOME-dependent modules (config.cjs computes allowedRoots from os.homedir() at require time). */
 function freshTelemetry(home) {
   process.env.HOME = home;
+  // Explicit opt-in: overrides the test-environment no-op guard so this
+  // suite's real telemetryClient calls actually persist into an isolated dir.
+  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.config', 'session-manager');
   for (const p of ['../telemetryClient.cjs', '../../config.cjs', '../telemetrySettings.cjs', '../machineProfile.cjs']) {
     const resolved = require.resolve(p);
     delete require.cache[resolved];

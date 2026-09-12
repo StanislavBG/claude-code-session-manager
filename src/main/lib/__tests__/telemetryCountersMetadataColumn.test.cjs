@@ -18,9 +18,11 @@ const counters = require('../telemetryCounters.cjs');
 
 const tmpDirs = [];
 let originalHome;
+let originalSmTelemetrySpool;
 
 afterEach(async () => {
   if (originalHome !== undefined) process.env.HOME = originalHome;
+  if (originalSmTelemetrySpool === undefined) delete process.env.SM_TELEMETRY_SPOOL; else process.env.SM_TELEMETRY_SPOOL = originalSmTelemetrySpool;
   while (tmpDirs.length) {
     const d = tmpDirs.pop();
     await fsp.rm(d, { recursive: true, force: true });
@@ -29,9 +31,13 @@ afterEach(async () => {
 
 async function mkHome() {
   originalHome = process.env.HOME;
+  originalSmTelemetrySpool = process.env.SM_TELEMETRY_SPOOL;
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-telemetry-counters-home-'));
   tmpDirs.push(dir);
   process.env.HOME = dir;
+  // Explicit opt-in: overrides the test-environment no-op guard so this
+  // suite's real telemetryClient calls actually persist into an isolated dir.
+  process.env.SM_TELEMETRY_SPOOL = path.join(dir, '.config', 'session-manager');
   return dir;
 }
 

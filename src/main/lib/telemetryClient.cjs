@@ -88,12 +88,37 @@ const S = {
   lastFlushReason: null,
 };
 
+/**
+ * SM_TELEMETRY_SPOOL, when set, overrides the spool directory in place of
+ * `~/.config/session-manager` — the explicit opt-in a test that genuinely
+ * needs to exercise real queue/sent-file I/O uses to prove it isn't about to
+ * write into a real user's spool (see isTestEnvironment() below).
+ */
+function spoolDir() {
+  return process.env.SM_TELEMETRY_SPOOL || path.join(os.homedir(), '.config', 'session-manager');
+}
+
 function queuePath() {
-  return path.join(os.homedir(), '.config', 'session-manager', 'telemetry-queue.jsonl');
+  return path.join(spoolDir(), 'telemetry-queue.jsonl');
 }
 
 function sentPath() {
-  return path.join(os.homedir(), '.config', 'session-manager', 'telemetry-sent.json');
+  return path.join(spoolDir(), 'telemetry-sent.json');
+}
+
+/**
+ * True when running under a test runner (VITEST, NODE_ENV=test) with no
+ * explicit SM_TELEMETRY_SPOOL override. Gates appendRecord() below so a test
+ * that merely exercises epicMint/scheduler/etc. code paths — without itself
+ * setting up an isolated spool — can never accumulate fake records into a
+ * real user's telemetry-queue.jsonl. A test that deliberately wants to
+ * exercise real persistence (telemetryClient's own suite) sets
+ * SM_TELEMETRY_SPOOL to an isolated directory, which counts as an explicit
+ * opt-in and disables this guard.
+ */
+function isTestEnvironment() {
+  if (process.env.SM_TELEMETRY_SPOOL) return false;
+  return !!process.env.VITEST || process.env.NODE_ENV === 'test';
 }
 
 function getBeaconToken() {
@@ -368,6 +393,9 @@ function pushRecent(rec) {
 }
 
 async function appendRecord(channel, wire, recordId) {
+  if (isTestEnvironment()) {
+    return { accepted: false, reason: 'test-environment', recordId };
+  }
   if (S.queueIds.has(recordId) || S.sentIds.has(recordId)) {
     S.dedupedAppends += 1;
     return { accepted: false, reason: 'duplicate', recordId };

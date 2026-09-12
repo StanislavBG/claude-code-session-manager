@@ -13,13 +13,16 @@ const path = require('node:path');
 
 const tmpDirs = [];
 let originalHome;
+let originalSmTelemetrySpool;
 
 beforeEach(() => {
   originalHome = process.env.HOME;
+  originalSmTelemetrySpool = process.env.SM_TELEMETRY_SPOOL;
 });
 
 afterEach(async () => {
   if (originalHome !== undefined) process.env.HOME = originalHome; else delete process.env.HOME;
+  if (originalSmTelemetrySpool === undefined) delete process.env.SM_TELEMETRY_SPOOL; else process.env.SM_TELEMETRY_SPOOL = originalSmTelemetrySpool;
   vi.unstubAllGlobals();
   while (tmpDirs.length) {
     const d = tmpDirs.pop();
@@ -35,6 +38,9 @@ async function mkHome() {
 
 function freshModules(home) {
   process.env.HOME = home;
+  // Explicit opt-in: overrides the test-environment no-op guard so this
+  // suite's real telemetryClient calls actually persist into an isolated dir.
+  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.config', 'session-manager');
   for (const p of ['../telemetryConsent.cjs', '../telemetryClient.cjs', '../telemetrySettings.cjs', '../machineProfile.cjs', '../../config.cjs']) {
     const resolved = require.resolve(p);
     delete require.cache[resolved];

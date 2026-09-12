@@ -753,6 +753,49 @@ function parseBlockingMergePaths(stderrText) {
 }
 
 /**
+ * Resolves `cwd`'s default branch, without ever hardcoding `main`: prefers
+ * the remote-tracked default (`origin/HEAD`, set by `git clone`/`git remote
+ * set-head`), falls back to the repo's own `init.defaultBranch` config, then
+ * to whichever of a local `main`/`master` branch actually exists, and only
+ * as a last resort assumes `main`. Never throws — every git failure along
+ * this chain (no remote, no config, no matching local branch) simply falls
+ * through to the next source.
+ */
+async function resolveDefaultBranch(cwd) {
+  try {
+    const out = (await execGit(['symbolic-ref', 'refs/remotes/origin/HEAD'], { cwd, timeout: 10_000 })).trim();
+    const match = out.match(/^refs\/remotes\/origin\/(.+)$/);
+    if (match && match[1]) return match[1];
+  } catch { /* no remote, or origin/HEAD not set — fall through */ }
+  try {
+    const out = (await execGit(['config', '--get', 'init.defaultBranch'], { cwd, timeout: 10_000 })).trim();
+    if (out) return out;
+  } catch { /* not configured — fall through */ }
+  try {
+    await execGit(['show-ref', '--verify', '--quiet', 'refs/heads/main'], { cwd, timeout: 10_000 });
+    return 'main';
+  } catch { /* no local main — fall through */ }
+  try {
+    await execGit(['show-ref', '--verify', '--quiet', 'refs/heads/master'], { cwd, timeout: 10_000 });
+    return 'master';
+  } catch { /* no local master either — fall through */ }
+  return 'main';
+}
+
+/**
+ * `cwd`'s current branch name, or `null` on a detached HEAD (or any other
+ * state `git symbolic-ref` can't resolve to a branch). Never throws.
+ */
+async function getCurrentBranch(cwd) {
+  try {
+    const out = (await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd, timeout: 10_000 })).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Integrate a branch back into `cwd`'s current HEAD — fast-forward when
  * possible, a real merge commit when the main tree advanced underneath (a
  * sibling job/Epic merged first) since the worktree was created. Returns
@@ -770,9 +813,30 @@ function parseBlockingMergePaths(stderrText) {
  * job's own work — landing such a commit would just re-apply the human's
  * uncommitted edit back onto itself via a merge, and could conflict with
  * the base tree still holding that same path dirty.
+ *
+ * Refuses outright — before touching any other git state — when `cwd`'s
+ * HEAD is not on the repo's own default branch (resolved via
+ * `resolveDefaultBranch`, never hardcoded to `main`) or is detached. A
+ * stray checkout onto some other branch (e.g. a leftover `sm-job/*` branch
+ * from a prior run) would otherwise make every subsequent merge-base/merge
+ * silently target the WRONG tree, producing merge "conflicts" that are
+ * really just wrong-base artifacts (RCA: starry-night-ships, 2026-09-12).
+ * This refusal never checks out, resets, or switches anything — it only
+ * reports; a human fixes the checkout.
  */
 async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
   if (!cwd || !branch) return { ok: false, reason: 'missing cwd/branch' };
+
+  const defaultBranch = await resolveDefaultBranch(cwd);
+  const currentBranch = await getCurrentBranch(cwd);
+  if (currentBranch !== defaultBranch) {
+    const actual = currentBranch === null ? 'detached HEAD' : currentBranch;
+    return {
+      ok: false,
+      reason: `refusing to integrate: HEAD is on "${actual}", not the repo's default branch "${defaultBranch}" — a stray checkout must be fixed before integration can proceed`,
+    };
+  }
+
   let branchHead;
   try {
     branchHead = (await execGit(['rev-parse', branch], { cwd, timeout: 10_000 })).trim();
@@ -1234,6 +1298,8 @@ module.exports = {
   createWorktree,
   captureAndCarryBaseDiff,
   pathsIdenticalToBranch,
+  resolveDefaultBranch,
+  getCurrentBranch,
   integrateBranch,
   cleanupWorktree,
   salvageWorktreeDiff,

@@ -894,3 +894,110 @@ test('[job] integrateBranch aborts cleanly when the single retry also fails on a
 
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
 });
+
+// ──────────────────────────────────────────── default-branch integration guard (PRD: starry-night-ships wrong-base merges)
+
+test('[guard] integrateBranch proceeds normally when HEAD is on the repo default branch', async () => {
+  const slug = 'test-slug-guard-default-ok';
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+
+  fs.writeFileSync(path.join(worktree.dir, 'guard-ok.txt'), 'job output\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  expect(await gitWorktree.getCurrentBranch(repoCwd)).toBe(defaultBranch);
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[guard] integrateBranch refuses when HEAD is on a stray sm-job/* branch, naming both branches in the reason, and mutates nothing', async () => {
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  const slugB = 'test-slug-guard-stray-b';
+  const strayBranch = 'sm-job/leftover-from-a-prior-run';
+  const worktreeB = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: slugB });
+  fs.writeFileSync(path.join(worktreeB.dir, 'guard-stray.txt'), 'branch b output\n', 'utf8');
+  git(['add', '-A'], worktreeB.dir);
+  git(['commit', '-q', '-m', 'job commit b'], worktreeB.dir);
+
+  // Simulate the live incident: the SHARED tree's own HEAD got checked out
+  // onto a leftover job branch instead of staying on the default branch.
+  git(['checkout', '-b', strayBranch], repoCwd);
+  const headBefore = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  const statusBefore = git(['status', '--porcelain'], repoCwd);
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktreeB.branch, slug: slugB });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toContain(defaultBranch);
+  expect(outcome.reason).toContain(strayBranch);
+
+  // Refusing must not touch git state: no checkout/reset/switch performed.
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(headBefore);
+  expect(git(['status', '--porcelain'], repoCwd)).toBe(statusBefore);
+
+  git(['checkout', defaultBranch], repoCwd);
+  git(['branch', '-D', strayBranch], repoCwd);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktreeB.dir, branch: worktreeB.branch, keepBranch: true });
+  try { git(['branch', '-D', worktreeB.branch], repoCwd); } catch { /* best-effort */ }
+});
+
+test('[guard] integrateBranch refuses on a detached HEAD, reporting "detached HEAD" rather than treating it as a branch', async () => {
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  const slug = 'test-slug-guard-detached';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'guard-detached.txt'), 'output\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  const headSha = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  git(['checkout', '--detach', headSha], repoCwd);
+  expect(await gitWorktree.getCurrentBranch(repoCwd)).toBeNull();
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toContain('detached HEAD');
+  expect(outcome.reason).toContain(defaultBranch);
+
+  git(['checkout', defaultBranch], repoCwd);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+  try { git(['branch', '-D', worktree.branch], repoCwd); } catch { /* best-effort */ }
+});
+
+test('[guard] resolveDefaultBranch resolves a sensible default (the sole local branch) for a repo with no remote, and integration still proceeds', async () => {
+  const remoteOut = execFileSync('git', ['remote'], { cwd: repoCwd, encoding: 'utf8' }).trim();
+  expect(remoteOut).toBe('');
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  expect(await gitWorktree.resolveDefaultBranch(repoCwd)).toBe(defaultBranch);
+
+  const slug = 'test-slug-guard-no-remote';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'guard-no-remote.txt'), 'output\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[guard][epic] integrateEpicBranch inherits the same guard and still merges cleanly when HEAD is on the default branch', async () => {
+  const epicId = 'test-epic-guard-ok';
+  const worktree = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId });
+  expect(worktree.ok).toBe(true);
+
+  fs.writeFileSync(path.join(worktree.dir, 'epic-guard.txt'), 'epic output\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'epic commit'], worktree.dir);
+
+  const outcome = await gitWorktree.integrateEpicBranch({ cwd: repoCwd, branch: worktree.branch, epicId });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+
+  await gitWorktree.cleanupEpicWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});

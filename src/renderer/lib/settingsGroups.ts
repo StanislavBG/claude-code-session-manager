@@ -63,6 +63,10 @@ export const SETTINGS_GROUPS: SettingGroup[] = [
       'fastMode',
       'fastModePerSessionOptIn',
       'alwaysThinkingEnabled',
+      'fallbackModel',
+      'enforceAvailableModels',
+      'teammateDefaultModel',
+      'advisorModel',
     ],
   },
   {

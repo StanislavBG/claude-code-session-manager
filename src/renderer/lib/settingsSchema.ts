@@ -1,9 +1,11 @@
 /**
  * Bundled Claude Code settings.json schema + a shared resolver instance.
  *
- * The schema lives in src/renderer/data/claude-settings-schema.json (copied
- * from schemastore Apr 2026). Refresh it by re-fetching from
- * https://www.schemastore.org/claude-code-settings.json.
+ * The schema lives in src/renderer/data/claude-settings-schema.json, with
+ * provenance recorded in the sibling claude-settings-schema.meta.json.
+ * Refresh both via `npm run sync:settings-schema`
+ * (scripts/sync-settings-schema.cjs); check for drift without writing via
+ * `node scripts/sync-settings-schema.cjs --check`.
  */
 
 import rawSchema from '../data/claude-settings-schema.json'

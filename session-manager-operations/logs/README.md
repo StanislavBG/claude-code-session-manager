@@ -17,6 +17,10 @@ One file per calendar day (local time), newline-delimited JSON, append-only. Not
 or rotates these files today — pruning old days (if ever needed) is a future concern, not
 handled by the writer.
 
+Current policy: only the first two shards (`errors-2026-08-01.jsonl`, `errors-2026-08-02.jsonl`)
+are committed to git — every shard after 2026-08-02 is untracked. This is a stated policy, not
+drift: git tracking is not part of the retention answer for this namespace.
+
 ## Line shape
 
 Each line is one JSON object:
@@ -61,8 +65,12 @@ renderer `log.error(scope, msg, meta, { cwd, tabId, ... })` call supplies a `cwd
 error with no `cwd` in its call site only reaches the machine-global mirror, not this folder —
 enriching more call sites with `{ cwd, tabId }` is an incremental, ongoing effort (see call
 sites already wired: `pty.cjs` spawn failure + immediate-exit, `chatRunner.cjs`'s single
-`emitTerminal` chokepoint, `GlobalSearchModal.tsx` + `QuickOpenModal.tsx`'s search/pty-write
-failures).
+`emitTerminal` chokepoint).
+
+Every `appendError()` line is also mirrored off-process by `opsErrorLog.cjs`'s
+`reportToTelemetry` (fire-and-forget, never blocks or throws for the caller) — see
+[`architecture/telemetry.md`](../architecture/telemetry.md) for what leaves the machine and what
+gets redacted first.
 
 ## Reading these logs
 

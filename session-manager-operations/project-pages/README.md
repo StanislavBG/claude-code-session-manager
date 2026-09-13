@@ -19,6 +19,8 @@ session-manager-operations/project-pages/
     architecture.html
     brief.html
     manifest.json   — { generatedAt, ... }
+    dashboard/      — hand-authored sibling artifact, see its own README
+                      (output/dashboard/README.md)
 ```
 
 ## Who writes this folder
@@ -85,12 +87,16 @@ Two equivalent ways to run the same `validateProjectPageSummary` check
 shipped compiled bundle so neither needs a build step:
 
 - Locally, with this repo checked out:
-  `scripts/validate-project-pages-summary.cjs <path to summary.json>`.
+  `node web/project-pages/validate-summary.cjs <path to summary.json>`.
 - From a foreign machine with no repo checked out (or from the app itself):
   `POST /admin/project-home/validate-summary` with `{cwd, summary}` —
   see `GET /admin/project-home/contract?cwd=<abs>` for the full protocol,
   schema and catalog this needs, with zero repo knowledge required.
 
-`.claude/agents/project-home-builder.md`'s protocol uses whichever is
-available and catches a malformed or placeholder-filled summary before it
-reaches Stage 2 selection or the Stage 3 renderer.
+Neither path goes through `.claude/agents/project-home-builder.md` — that
+persona holds no operating protocol and is MCP-only. The portable seeded
+persona (`src/seed/agents/project-home-builder.md`, seeded to
+`~/.claude/agents/project-home-builder.md`) validates via the
+`project_home_validate_summary` MCP tool, which catches a malformed or
+placeholder-filled summary before it reaches Stage 2 selection or the
+Stage 3 renderer.

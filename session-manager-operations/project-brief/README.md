@@ -24,8 +24,8 @@ Path helper: `briefPath(cwd)` in `projectBrief.cjs` — `<cwd>/session-manager-o
   model: string,                // pinned model alias used for synthesis (currently 'sonnet')
   purpose: string,
   what: string[],
-  areas: string[],
-  scope: string[],
+  areas: { name: string, files: number, note: string, epic: string | null, heat: number }[],
+  scope: { when: string, kind: 'added' | 'narrowed' | 'decided', text: string, src: string }[],
   conventions: string[],
   pins: { what: boolean, conventions: boolean },
   pinned: { what: string[] | null, conventions: string[] | null },

@@ -8,13 +8,27 @@ documents what's on disk; the spec is the source of truth for the pipeline.
 
 ```
 session-manager-operations/bilko-host/
-  dist/
-    index.html      — this project's Marketing Project Page, verbatim
-    manifest.json    — host-contract manifest (schemaVersion, slug, version,
-                        gitSha/gitBranch, golden.path/expect, bundle size)
-  publish-state.json — { status, slug, url?, lastAttemptAt?, lastError? }
-  tests/              — (only if a golden-path gate needed one) a minimal
-                        Playwright spec the bilko-host-publisher Epic authored
+  documents.json      — the hosted document list (root doc + any sub-path
+                         docs); source of truth for dist/ — seeded with a
+                         single root document on first prepare
+  dist/                — fully rebuilt on every Prepare Bundle run (rm -rf
+                         then rewrite from documents.json); NOT tracked by
+                         git — swallowed by the bare `dist` pattern in the
+                         root .gitignore, same as any other `dist/` in this
+                         repo. Disposable regenerated output, no retention
+                         obligation.
+    <subpath>/index.html — one HTML file per document in documents.json
+                         (the root document lands at dist/index.html)
+    manifest.json      — host-contract manifest (schemaVersion, slug,
+                         version, gitSha/gitBranch, golden.path/expect,
+                         bundle size, documentCount/documents[])
+    assets/, dashboard/, _headers — present on disk today but NOT written
+                         by prepareBundle itself; the next Prepare Bundle
+                         run's rm -rf removes them along with everything
+                         else under dist/
+  publish-state.json  — { status, slug, url?, lastAttemptAt?, lastError? }
+  tests/               — (only if a golden-path gate needed one) a minimal
+                         Playwright spec the bilko-host-publisher Epic authored
 ```
 
 ## Who writes what — split ownership, unlike most ops folders
@@ -22,11 +36,14 @@ session-manager-operations/bilko-host/
 Unlike a normal single-writer `OWNERS` namespace, this folder has **two**
 legitimate writers for different files:
 
-- **`dist/index.html` + `dist/manifest.json`** — written by this app's own
-  main process (`src/main/bilkoHost.cjs`'s `prepareBundle`, IPC `bilko-host:
-  prepare-bundle`), through `config.cjs`'s write helpers with writer id
-  `bilko-host`. This part IS `OWNERS`-enforceable (`src/main/lib/
-  opsOwnership.cjs`) — a second writer here would be refused.
+- **`documents.json` + everything under `dist/`** — written by this app's
+  own main process (`src/main/bilkoHost.cjs`'s `prepareBundle`, IPC
+  `bilko-host:prepare-bundle`), through `config.cjs`'s write helpers with
+  writer id `bilko-host`. `prepareBundle` `rm -rf`'s the whole `dist/` tree
+  before rewriting it (one `index.html` per document, plus
+  `dist/manifest.json`) so it can never drift from `documents.json`. This
+  part IS `OWNERS`-enforceable (`src/main/lib/opsOwnership.cjs`) — a second
+  writer here would be refused.
 - **`publish-state.json` and anything under `tests/`** — written by the
   `bilko-host-publisher` Epic's own claude session, directly, with its own
   `Write` tool. There is no IPC call for these, so `assertOpsWrite` cannot

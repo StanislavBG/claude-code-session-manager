@@ -3,10 +3,14 @@
 This folder was the intake queue for improvement requests, bug reports, and enhancement ideas for
 **claude-code-session-manager**, processed via a now-retired `/process-feedback` triage pass.
 
-**As of 2026-08-02 this folder is fully retired.** It is no longer an `OWNERS` namespace
-(`src/main/lib/opsOwnership.cjs`) and has no write grant in `config.cjs`. Nothing writes here any
-more — a scheduler job parked in `needs_review` writes `lib/rcaReport.cjs`'s root-cause report into
-its own run directory and surfaces it on the Epic that authored the PRD.
+**As of 2026-08-02 this folder is retired as a code-owned namespace.** It is no longer an
+`OWNERS` namespace (`src/main/lib/opsOwnership.cjs`) and has no write grant in `config.cjs`, so no
+app code path writes here any more — a scheduler job parked in `needs_review` writes
+`lib/rcaReport.cjs`'s root-cause report into its own run directory and surfaces it on the Epic
+that authored the PRD. That claim covers code paths only: nothing stops an agent's `Write` tool
+from dropping a file here by hand, and one did — a late inbound report from the Burrow project
+landed at this folder's top level on 2026-08-08, six days after retirement. It has since been
+moved into `archived-2026-08-02/archived-inbound/` (see below) rather than left loose.
 
 If you want work done on this project — a bug report, an enhancement idea — open an Epic in the
 app (New Epic). That is the only place an Epic is created; the interim `/propose-epic` channel that
@@ -16,7 +20,8 @@ in exactly ONE place" section.
 The 69 historical items this folder accumulated (2026-06-10 through 2026-07-31, all already
 triaged and dispositioned) are preserved for reference in `archived-2026-08-02/` — the original
 `processed/` and `evidence/` directories plus the final `README.md` (with its full status log and
-"Lessons for submitters" history) as `archived-2026-08-02/README-2026-08-02.md`.
+"Lessons for submitters" history) as `archived-2026-08-02/README-2026-08-02.md`, plus one late
+inbound item under `archived-2026-08-02/archived-inbound/` (see above).
 
 See `session-manager-operations/architecture/ops-maintenance-protocol.md` Pattern A for the audit
 that found this folder's retirement status contradicted across code/CLAUDE.md/README, and the
@@ -24,7 +29,7 @@ decision (full retirement) that resolved it.
 
 ## Retention policy for `archived-2026-08-02/`
 
-**Keep indefinitely.** This is the sole historical record of the 71 feedback items dispositioned
+**Keep indefinitely.** This is the sole historical record of the 69 feedback items dispositioned
 before this folder's retirement (2026-06-10 through 2026-07-31) — nothing else preserves that
 triage/status log. There is no automatic pruning: no code, cron, or skill deletes files here
 (this folder is not an `OWNERS` namespace, so `assertOpsWrite` doesn't cover it either — see

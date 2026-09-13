@@ -9,7 +9,7 @@ into the sibling `~/Projects/Bilko/` repo; nothing in this folder is served dire
 Not an `OWNERS` namespace (`src/main/lib/opsOwnership.cjs`). Like `HUMAN_LEARN/` and `reviews/`,
 this is skill-authored documentation written with the `Write` tool, not app-owned runtime state
 read back through `config.cjs`. There is no concurrent-write hazard to guard: one skill invocation
-authors a release, a human reviews it, `scripts/build-manual.mjs` emits it. Enumerated in the root
+authors a release, a human reviews it, `web/manual/build.mjs` emits it. Enumerated in the root
 `CLAUDE.md` alongside the other non-`OWNERS` folders.
 
 ## Shape
@@ -18,9 +18,12 @@ authors a release, a human reviews it, `scripts/build-manual.mjs` emits it. Enum
 manual/
 ├── manual.json              # source manifest — version, chapters, downloadable assets
 ├── chapters/<slug>.html     # one file per chapter; plain HTML fragments, no <html> wrapper
-├── figures/                 # annotated screenshots (copied verbatim into the release)
-└── assets/                  # pre-built downloadables (e.g. a PDF); the offline HTML is generated
+└── figures/                 # annotated screenshots (copied verbatim into the release)
 ```
+
+No `assets/` directory exists yet — not present, both declared downloadables (`offline-html`,
+`pdf`) are build-generated. Create `assets/` only if you add a genuinely pre-built file (e.g. a
+hand-made PDF).
 
 `manual.json` fields:
 
@@ -76,7 +79,7 @@ A chapter declares a figure slot as:
 
 Until a real screenshot lands in `figures/`, the slot carries no image. It never renders a broken
 image and never fakes a screenshot, and as of 2026-09-02 it renders **nothing at all** to a reader:
-the `.manual-figure:has(.manual-figure__frame){display:none}` rule (in `build-manual.mjs`'s
+the `.manual-figure:has(.manual-figure__frame){display:none}` rule (in `web/manual/build.mjs`'s
 `OFFLINE_CSS` and, mirrored, in Bilko's `src/index.css`) hides the whole figure, caption included,
 rather than showing a paying reader a hatched "figure pending capture" box. The rule goes inert the
 moment `npm run manual:figures` swaps the frame for an `<img>` — it is a floor under the product's
@@ -84,7 +87,7 @@ finish, not a substitute for capturing the figure.
 
 ### Capturing figures
 
-`npm run manual:figures` (script: `scripts/capture-manual-figures.mjs`) drives the real app under
+`npm run manual:figures` (script: `web/manual/capture-figures.mjs`) drives the real app under
 the same Playwright-Electron + xvfb pattern as `npm run test:e2e`, navigates to each figure's
 declared surface, and composites numbered arrow callouts onto a real screenshot with `sharp`.
 
@@ -103,5 +106,5 @@ job. An idle queue is not sufficient on its own: a second Electron instance rewr
 job the live instance starts mid-capture becomes a running job that the second instance's boot
 reconciliation would SIGTERM. **Quit the app before running this.**
 
-`scripts/build-manual.mjs` copies `figures/` verbatim into the release bundle, so re-run
+`web/manual/build.mjs` copies `figures/` verbatim into the release bundle, so re-run
 `npm run manual:figures` before `npm run manual:build` whenever a captured surface's UI changes.

@@ -21,7 +21,7 @@
 
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
@@ -149,4 +149,46 @@ test('scheduler.cjs exports candidateArchivedPrdsDirs alongside candidatePrdsDir
   // the opts-injectable prdLocations functions directly.
   expect(Array.isArray(candidatePrdsDirs())).toBe(true);
   expect(Array.isArray(candidateArchivedPrdsDirs())).toBe(true);
+});
+
+test('resolveArchivedPrdsDirs: a prds-archived/ dir created inside an ALREADY-EXISTING Epic (the archiveCompletedPrd shape — does not bump the Epics root mtime) is bounded-stale, not stale forever', async () => {
+  // archiveCompletedPrd (scheduler.cjs) creates `epics/<id>/prds-archived/`
+  // as a new entry INSIDE an already-existing `epics/<id>/` dir — unlike a
+  // brand-new Epic's `prds/` (created in the same mkdirSync call as
+  // `epics/<id>/` itself), this does NOT bump the Epics root's own mtime,
+  // so the mtime-keyed freshness key alone would never invalidate. The
+  // short TTL backstop (same idiom as activeSessions.cjs's cwdScanCache)
+  // bounds that blind spot instead of leaving it stale indefinitely.
+  vi.useFakeTimers();
+  try {
+    const projectsDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-blindspot-projects-'));
+    tmpDirs.push(projectsDir);
+    const projectCwd = await mkEpicProject();
+    tmpDirs.push(projectCwd);
+
+    const epicId = `blindspot-epic-${process.pid}`;
+    const epicPrdsDir = resolveEpicPrdWriteDir(projectCwd, epicId);
+    fs.mkdirSync(epicPrdsDir, { recursive: true }); // Epic already exists, well before archiving.
+
+    const projDir = path.join(projectsDir, 'blindspot-project');
+    fs.mkdirSync(projDir, { recursive: true });
+    fs.writeFileSync(path.join(projDir, 'session1.jsonl'), `${JSON.stringify({ cwd: projectCwd })}\n`);
+
+    // Prime the cache — no prds-archived/ dir exists yet.
+    const before = resolveArchivedPrdsDirs(90, { projectsDir });
+    const epicArchiveDir = path.join(epicPrdsDir, '..', 'prds-archived');
+    expect(before).not.toContain(path.resolve(epicArchiveDir));
+
+    // The archiveCompletedPrd shape: a NEW prds-archived/ dir appears inside
+    // the ALREADY-EXISTING epic dir. This does not change the Epics root's
+    // own mtime.
+    fs.mkdirSync(epicArchiveDir, { recursive: true });
+
+    // Bounded staleness is acceptable — but it must actually be bounded.
+    vi.advanceTimersByTime(31_000);
+    const after = resolveArchivedPrdsDirs(90, { projectsDir });
+    expect(after.map((d) => path.resolve(d))).toContain(path.resolve(epicArchiveDir));
+  } finally {
+    vi.useRealTimers();
+  }
 });

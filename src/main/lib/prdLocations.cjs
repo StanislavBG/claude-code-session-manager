@@ -155,7 +155,26 @@ function resolvePrdWriteDir(cwd) {
 // cache hit still costs O(projects) stats but skips the expensive walk
 // entirely — "one filesystem walk" per reconcile() pass, not the full
 // listEpicPrdDirs cost N times over.
-const assembledPrdsDirsCache = new Map(); // callerKey -> { freshnessKey, result }
+//
+// The Epics-root mtime alone has a real blind spot: `prds-archived/` is
+// created (archiveCompletedPrd, scheduler.cjs) as a NEW entry INSIDE an
+// ALREADY-EXISTING `epics/<id>/` dir — unlike a brand-new Epic's `prds/`,
+// which is always created in the SAME mkdirSync call as `epics/<id>/`
+// itself (see listEpicPrdDirs's header), that does not bump the Epics
+// root's own mtime. Re-stating every Epic subdirectory's own mtime on every
+// call to close that gap would cost about what the walk itself costs,
+// defeating the cache — so this cache pairs the mtime key (instant
+// invalidation for the case the non-negotiable freshness test covers: a
+// brand-new Epic's `prds/` dir) with the SAME short TTL backstop
+// scripts/lib/activeSessions.cjs's cwdScanCache already established for
+// this exact module chain, bounding the archived-dir blind spot to one
+// TTL window instead of leaving it stale indefinitely. Nothing reads
+// resolveArchivedPrdsDirs off the dispatch-correctness path — the
+// archived-twin stale-queue-row guard (scheduler.cjs's archivedTwinExists)
+// calls listArchivedPrdDirs directly, uncached — so this is purely a
+// reporting-freshness bound (schedule:list-prds's per-Epic PRD/run counts).
+const ASSEMBLED_DIRS_CACHE_TTL_MS = 30_000;
+const assembledPrdsDirsCache = new Map(); // callerKey -> { freshnessKey, cachedAt, result }
 const assembledArchivedPrdsDirsCache = new Map();
 
 // Sorted-keys JSON.stringify: a plain JSON.stringify(opts) would key
@@ -191,10 +210,12 @@ function memoizedAssembledDirs(cache, maxAgeMin, opts, compute) {
   const freshnessKey = `${allCwds.join(',')}#${activeCwds.join(',')}#${epicsRootsFreshnessKey(cwdUnion)}`;
 
   const cached = cache.get(callerKey);
-  if (cached && cached.freshnessKey === freshnessKey) return cached.result;
+  if (cached && cached.freshnessKey === freshnessKey && Date.now() - cached.cachedAt < ASSEMBLED_DIRS_CACHE_TTL_MS) {
+    return cached.result;
+  }
 
   const result = compute(allCwds, activeCwds);
-  cache.set(callerKey, { freshnessKey, result });
+  cache.set(callerKey, { freshnessKey, cachedAt: Date.now(), result });
   return result;
 }
 

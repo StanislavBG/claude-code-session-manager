@@ -75,9 +75,8 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
       'You are publishing this project to bilko.run. Read ' +
       '`session-manager-operations/architecture/bilko-host-integration.md` first — it is the ' +
       'source of truth for the pipeline, the bundle path, and the non-negotiables (ship the ' +
-      'Marketing Project Page verbatim; never bypass a failing gate on your own initiative; treat ' +
-      'a `content-grade` remote push failure from the bilko-host tool as expected noise, not a ' +
-      'publish failure). Call `bilko-host__get_host_contract` and read ' +
+      'Marketing Project Page verbatim; never bypass a failing gate on your own initiative). ' +
+      'Call `bilko-host__get_host_contract` and read ' +
       '`~/Projects/Bilko/mcp-host-server/src/gates/*.ts` live before publishing — never assume a ' +
       "cached understanding of the gates, they can change independently of this app's release " +
       'cycle. Then follow `.claude/agents/bilko-host-publisher.md` as your operating protocol.',

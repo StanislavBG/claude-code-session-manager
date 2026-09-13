@@ -27,8 +27,13 @@
  * must still park.
  */
 
-/** The one app-owned root. Matches at any depth, and only as a path segment. */
-const OPS_ROOT_SEGMENT = 'session-manager-operations';
+/**
+ * The one app-owned root. Matches at any depth, and only as a path segment.
+ * Sourced from opsOwnership.cjs (the single-writer law's own root name)
+ * rather than a second hardcoded literal — this file matches git-porcelain
+ * RELATIVE paths, never builds an fs path, so opsPath() itself doesn't apply.
+ */
+const { OPS_ROOT_DIR: OPS_ROOT_SEGMENT } = require('./opsOwnership.cjs');
 
 /** True when `p` lives under an app-owned operations root. Pure. */
 function isAppOwnedChurn(p) {

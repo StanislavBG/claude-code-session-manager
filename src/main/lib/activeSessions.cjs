@@ -12,6 +12,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { KIND_CONFIG: WORKTREE_KIND_CONFIG } = require('./gitWorktree.cjs');
+const { OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 
 const HOME = os.homedir();
 const TMPDIR = os.tmpdir();
@@ -76,7 +77,7 @@ function bustProjectCwdCache() {
 // Truncating at the segment is strictly better than dropping the row: the
 // ancestor IS the project the agent was working in, so the active-project
 // signal survives instead of being silently lost.
-const OPS_DIRNAME = 'session-manager-operations';
+const OPS_DIRNAME = OPS_ROOT_DIR;
 
 // Bound on the ancestor walk in worktreeMainRootOf — well past any real
 // filesystem depth, purely to guarantee termination without relying on

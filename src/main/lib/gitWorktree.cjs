@@ -54,6 +54,7 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
+const { OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 
 // Per-kind configuration. Roots are kept OUTSIDE any project's own tree
 // (os.tmpdir(), not `<cwd>/.git/...`) so a managed worktree never shows up in
@@ -1302,7 +1303,7 @@ async function reclaimTerminalJobOrphans({ cwd, terminalSlugs, isLive }) {
     }
     const dirtyPaths = statusOut.split('\n').map((l) => l.slice(3).trim()).filter(Boolean);
     const opsOnly = dirtyPaths.every(
-      (p) => p === 'session-manager-operations' || p.startsWith('session-manager-operations/')
+      (p) => p === OPS_ROOT_DIR || p.startsWith(`${OPS_ROOT_DIR}/`)
     );
     if (!opsOnly) continue; // real non-ops dirty content present — leave for a human
 

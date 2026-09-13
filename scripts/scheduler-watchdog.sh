@@ -6,7 +6,7 @@
 # Mirrors the cron+flock pattern from /home/bilko/Projects/burrow/scripts/mcp-keepalive.sh.
 #
 # Install example (systemd user timer — see PRD 103):
-#   systemctl --user start sm-scheduler-watchdog.timer
+#   systemctl --user start scheduler-watchdog.timer
 
 set -e
 
@@ -18,7 +18,7 @@ export PATH="/home/bilko/.local/bin:/home/bilko/.npm-global/bin:/home/bilko/.loc
 # with no cwd assumption.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-LOCK="/tmp/sm-scheduler-watchdog.lock"
+LOCK="/tmp/scheduler-watchdog.lock"
 
 (
     exec 200>"$LOCK"

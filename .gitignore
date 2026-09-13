@@ -24,7 +24,9 @@ playwright-report
 # Generated scheduler skill-discovery output (not source)
 skill-proposals/
 .playwright-mcp/
-# Root-only: the stale scheduler-watchdog.log dir. MUST stay anchored —
-# a bare `logs/` also matches session-manager-operations/logs/, hiding the
-# owned ops error-log namespace from git (incident: PRD 1181, 2026-09-12).
+# Root-only: kept for stale pre-2026-09-13 installs whose systemd unit still
+# points here — the watchdog now logs under ~/.claude/session-manager/logs/,
+# never a repo dir anything can delete out from under a running timer. MUST
+# stay anchored — a bare `logs/` also matches session-manager-operations/logs/,
+# hiding the owned ops error-log namespace from git (incident: PRD 1181, 2026-09-12).
 /logs/

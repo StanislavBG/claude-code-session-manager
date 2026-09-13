@@ -19,7 +19,11 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 WATCHDOG_SH="$REPO_DIR/scripts/scheduler-watchdog.sh"
-WATCHDOG_LOG="$REPO_DIR/logs/scheduler-watchdog.log"
+# ~/.claude/session-manager/ is the log home for every cron on this machine —
+# never the repo's gitignored logs/, which anything can delete out from under
+# a running timer (incident: watchdog failed every 2min tick 2026-09-12
+# 20:43 through 2026-09-13 until a manual `mkdir -p logs`).
+WATCHDOG_LOG="$HOME/.claude/session-manager/logs/scheduler-watchdog.log"
 
 if [ ! -f "$WATCHDOG_SH" ]; then
     echo "ERROR: $WATCHDOG_SH not found. PRDs 99–102 must be merged first." >&2
@@ -42,6 +46,7 @@ After=network.target
 
 [Service]
 Type=oneshot
+ExecStartPre=/bin/mkdir -p $(dirname ${WATCHDOG_LOG})
 ExecStart=/bin/bash ${WATCHDOG_SH}
 StandardOutput=append:${WATCHDOG_LOG}
 StandardError=append:${WATCHDOG_LOG}

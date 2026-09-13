@@ -7284,7 +7284,7 @@ async function reapDeadRunningJobs() {
     }
 
     const dead = [];
-    for (const { slug, pid, pidless, reason } of reapable) {
+    for (const { slug, pid, pidless, reason, failureOverride } of reapable) {
       const j = state.jobs.find((x) => x.slug === slug);
       const logPath = j?.runId
         ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`)
@@ -7307,7 +7307,7 @@ async function reapDeadRunningJobs() {
       // re-derived so a phantom link never survives the reap.
       const hasOwnArtifact = pidless ? logHasOutput(logPath) : true;
       const gateOutcome = pidless ? resolvePidlessGateOutcome(outcome, hasOwnArtifact) : mapOutcomeToGateOutcome(outcome);
-      dead.push({ slug, pid, outcome, gateOutcome, pidless, reason, logPath, noOwnArtifact: pidless && !hasOwnArtifact });
+      dead.push({ slug, pid, outcome, gateOutcome, pidless, reason, logPath, noOwnArtifact: pidless && !hasOwnArtifact, failureOverride });
     }
 
     queueHealthSweepCycle += 1;
@@ -7406,7 +7406,7 @@ async function reapDeadRunningJobs() {
     }
 
     await mutate(async (s) => {
-      for (const { slug, pid, outcome, gateOutcome, pidless, reason, noOwnArtifact } of dead) {
+      for (const { slug, pid, outcome, gateOutcome, pidless, reason, noOwnArtifact, failureOverride } of dead) {
         const idx = s.jobs.findIndex((x) => x.slug === slug);
         if (idx < 0 || s.jobs[idx].status !== 'running') continue; // race guard
         const rateLimited = outcome === 'rate_limited';
@@ -7464,6 +7464,20 @@ async function reapDeadRunningJobs() {
             landedCommit = ir.landedCommit;
             notLandedInfo = ir.notLandedInfo;
           }
+        }
+        // Evidence-before-failure guard for the pidless-reap path (PRD 1173):
+        // a pidless reap about to stamp 'failed' purely because runtime.pid
+        // was never recorded must first check whether this row already
+        // carries a landedCommit from an earlier dispatch of the same slug
+        // (landedCommit survives a reset — see the comment near
+        // resetJobFields). Diverted to needs_review, never silently
+        // 'completed' — see resolvePidlessFailureOverride's header in
+        // reaperHelpers.cjs for why needs_review is the correct destination.
+        // Scoped strictly to the pidless branch: dead-pid and rate-limited
+        // rows are untouched, and a pidless row that already resolved to
+        // effectiveSuccess/notLandedInfo above is left alone too.
+        if (pidless && !effectiveSuccess && !rateLimited && !notLandedInfo && failureOverride) {
+          notLandedInfo = { verdict: failureOverride.verdict, reason: failureOverride.reason };
         }
 
         const leftoverSuffix = deltaPaths && deltaPaths.length
@@ -7529,7 +7543,14 @@ async function reapDeadRunningJobs() {
           appendAuditEvent('job_reaped_rate_limited', { slug, cwd: s.jobs[idx].cwd ?? null });
         } else if (pidless) {
           console.log(`[scheduler] reaped pidless zombie job slug=${slug} outcome=${outcome}`);
-          appendAuditEvent('job_reaped_pidless', { slug, cwd: s.jobs[idx].cwd ?? null, outcome, graceMs: PIDLESS_SPAWN_GRACE_MS });
+          appendAuditEvent('job_reaped_pidless', {
+            slug,
+            cwd: s.jobs[idx].cwd ?? null,
+            outcome,
+            graceMs: PIDLESS_SPAWN_GRACE_MS,
+            landedCommit: s.jobs[idx].landedCommit ?? null,
+            verifierVerdict: s.jobs[idx].verifierVerdict ?? null,
+          });
         } else {
           console.log(`[scheduler] reaped dead job slug=${slug} pid=${pid} outcome=${outcome}`);
         }

@@ -23,7 +23,7 @@ const { spawn } = require('node:child_process');
 const {
   selectReapableJobs, mapOutcomeToGateOutcome, classifyRunOutcome,
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome,
-  isAlreadySatisfiedOnMain,
+  isAlreadySatisfiedOnMain, resolvePidlessFailureOverride,
 } = require('../reaperHelpers.cjs');
 const { detectRateLimitInLog } = require('../rateLimitDetect.cjs');
 
@@ -396,4 +396,49 @@ test('isAlreadySatisfiedOnMain: no satisfying commits → null — the gate must
   assert.strictEqual(isAlreadySatisfiedOnMain([]), null);
   assert.strictEqual(isAlreadySatisfiedOnMain(null), null);
   assert.strictEqual(isAlreadySatisfiedOnMain(undefined), null);
+});
+
+// resolvePidlessFailureOverride — PRD 1173. A pidless reap must never stamp
+// 'failed' on a row that already carries proof (landedCommit) that its work
+// shipped, purely because reproting bookkeeping (runtime.pid) was lost.
+
+test('resolvePidlessFailureOverride: row with a landedCommit → override naming the recorded commit sha', () => {
+  const override = resolvePidlessFailureOverride({ slug: 'shipped-but-pidless', landedCommit: 'f3e35a7f9e49f13a9eb8c338b0d086160e32a87f' });
+  assert.ok(override, 'a row with landedCommit must produce a failure override');
+  assert.strictEqual(override.verdict, 'pidless_reap_with_landed_commit');
+  assert.strictEqual(override.landedCommit, 'f3e35a7f9e49f13a9eb8c338b0d086160e32a87f');
+  assert.match(override.reason, /f3e35a7f9e49f13a9eb8c338b0d086160e32a87f/, 'the reason string must name the recorded commit sha so a human can go straight to `git show <sha>`');
+});
+
+test('resolvePidlessFailureOverride: row with no landedCommit → null, existing failed transition untouched', () => {
+  assert.strictEqual(resolvePidlessFailureOverride({ slug: 'genuinely-never-ran' }), null);
+  assert.strictEqual(resolvePidlessFailureOverride({ slug: 'genuinely-never-ran', landedCommit: null }), null);
+  assert.strictEqual(resolvePidlessFailureOverride({ slug: 'genuinely-never-ran', landedCommit: '' }), null);
+});
+
+test('selectReapableJobs: pidless + past grace + landedCommit on the row → reapable entry carries a failureOverride', () => {
+  const jobs = [{
+    slug: 'shipped-but-pidless',
+    status: 'running',
+    startedAt: agoMin(464),
+    landedCommit: 'f3e35a7f9e49f13a9eb8c338b0d086160e32a87f',
+  }];
+  const { reapable } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE });
+  assert.strictEqual(reapable.length, 1);
+  assert.strictEqual(reapable[0].pidless, true);
+  assert.ok(reapable[0].failureOverride, 'the reapable entry must carry the evidence-based override');
+  assert.strictEqual(reapable[0].failureOverride.landedCommit, 'f3e35a7f9e49f13a9eb8c338b0d086160e32a87f');
+  // The existing byte-for-byte reason string is untouched by this PRD — the
+  // override is carried as a separate field, not folded into `reason`.
+  assert.strictEqual(
+    reapable[0].reason,
+    'reaped: no runtime.pid recorded after 10m — spawn never completed',
+  );
+});
+
+test('selectReapableJobs: pidless + past grace + NO landedCommit on the row → failureOverride is null, unchanged from today', () => {
+  const jobs = [{ slug: 'genuinely-never-ran', status: 'running', startedAt: agoMin(464) }];
+  const { reapable } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE });
+  assert.strictEqual(reapable.length, 1);
+  assert.strictEqual(reapable[0].failureOverride, null);
 });

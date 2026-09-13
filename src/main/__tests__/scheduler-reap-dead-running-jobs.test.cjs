@@ -148,6 +148,48 @@ test('reapDeadRunningJobs reaps a pidless row older than PIDLESS_SPAWN_GRACE_MS 
   assert.ok(pidlessEvent, 'reaping a pidless row must leave an audit trace');
 });
 
+test('reapDeadRunningJobs: a pidless row past grace with a landedCommit already recorded is routed to needs_review, not failed, naming the commit sha (PRD 1173)', async () => {
+  const projectCwd = path.join(tmpHome, 'c3-project-pidless-with-landed-commit');
+  fs.mkdirSync(projectCwd, { recursive: true });
+  registerActiveProject(projectCwd);
+
+  const staleStartedAt = new Date(Date.now() - PIDLESS_SPAWN_GRACE_MS - 60_000).toISOString();
+  const landedSha = 'f3e35a7f9e49f13a9eb8c338b0d086160e32a87f';
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug: 'shipped-but-pidless',
+      status: 'running',
+      cwd: projectCwd,
+      runId: 'run-shipped-but-pidless',
+      startedAt: staleStartedAt,
+      landedCommit: landedSha,
+      // no runtime key at all — the spawn never got far enough to record one
+    },
+  ]);
+  // Empty run dir, same shape as the sibling 'failed' test below — the
+  // landedCommit evidence must be what changes the outcome, not the log.
+  fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', 'run-shipped-but-pidless'), { recursive: true });
+
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === 'shipped-but-pidless');
+  assert.equal(row.status, 'needs_review', 'a row with proof of landed work must never be transitioned to failed by the pidless branch');
+  assert.equal(row.landedCommit, landedSha, 'the pre-existing landedCommit must be preserved on the row');
+  assert.match(row.error, new RegExp(landedSha), 'the reason must name the recorded commit sha');
+  assert.equal(row.verifierVerdict, 'pidless_reap_with_landed_commit');
+
+  // Scan the whole audit log for THIS slug's event rather than slicing by a
+  // byte offset from statSync — a prior test's audit entries can contain
+  // multi-byte characters (e.g. an em dash in a reaper reason string), and
+  // slicing a utf8-decoded JS string (UTF-16 code units) at a byte offset
+  // then silently corrupts the boundary. The slug is unique to this test.
+  const auditLines = fs.readFileSync(AUDIT_LOG_PATH, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const pidlessEvent = auditLines.find((e) => e.kind === 'job_reaped_pidless' && e.slug === 'shipped-but-pidless');
+  assert.ok(pidlessEvent, 'reaping this row must still leave an audit trace');
+  assert.equal(pidlessEvent.landedCommit, landedSha, 'the audit event must carry the landed-commit evidence so the decision is reconstructable from the audit log alone');
+});
+
 test('reapDeadRunningJobs clears runId on a pidless reap whose run dir holds only a sibling slug\'s files', async () => {
   const projectCwd = path.join(tmpHome, 'c2-project-batch-sibling');
   fs.mkdirSync(projectCwd, { recursive: true });

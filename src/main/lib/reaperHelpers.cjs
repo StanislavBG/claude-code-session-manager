@@ -246,6 +246,44 @@ function formatDispatchPhaseSuffix(j) {
     : ` (last dispatch phase: ${j.dispatchPhase})`;
 }
 
+/**
+ * resolvePidlessFailureOverride(job) → { verdict, landedCommit, reason } | null
+ *
+ * The evidence-before-failure guard this PRD adds (1173): a pidless reap
+ * about to stamp 'failed' purely because `runtime.pid` was never recorded
+ * must first check whether THIS ROW already carries a `landedCommit` — proof
+ * (from an earlier dispatch of the same slug, since `landedCommit` is
+ * deliberately never cleared by a reset — see scheduler.cjs's comment near
+ * resetJobFields) that a real commit landed on the branch. Returns null when
+ * there is no such evidence, leaving the existing 'failed' transition for a
+ * genuinely-never-spawned row completely untouched.
+ *
+ * DESTINATION CHOICE — needs_review, never completed. `landedCommit` is
+ * real git evidence (it is only ever stamped from an actual HEAD advance or
+ * a proven branch-integration — see jobLandedCommitThisRun / the dead-pid
+ * reap's own isBranchAlreadyIntegrated+computeCommittedDuringRun proof in
+ * scheduler.cjs), so it is never speculative in the sense of "guessed before
+ * the work ran". But the pidless-reap path performs NO fresh integration
+ * check of its own for the CURRENT run (that proof only runs for the dead-pid
+ * branch's `dead` entries with outcome==='success' — see
+ * scheduler.cjs's integrationResults loop) — so at this call site there is no
+ * re-verified guarantee that the recorded commit corresponds to *this*
+ * dispatch rather than surviving, unreaped, from an earlier one. Real
+ * evidence that under-specifies correspondence to the current run is exactly
+ * the needs_review shape, not completed: a human (or the finish-protocol
+ * commit-guard on the next dispatch) can resolve it conclusively with
+ * `git show <sha>`, but this pure predicate must not guess.
+ */
+function resolvePidlessFailureOverride(job) {
+  const landedCommit = job?.landedCommit || null;
+  if (!landedCommit) return null;
+  return {
+    verdict: 'pidless_reap_with_landed_commit',
+    landedCommit,
+    reason: `pidless reap found no runtime.pid, but this row already carries landedCommit ${landedCommit} — routing to needs_review instead of failed; verify with \`git show ${landedCommit}\``,
+  };
+}
+
 function selectReapableJobs(jobs, now, { pidAlive, grace, findLiveProcess } = {}) {
   const reapable = [];
   const warnings = [];
@@ -275,6 +313,7 @@ function selectReapableJobs(jobs, now, { pidAlive, grace, findLiveProcess } = {}
       pid: null,
       pidless: true,
       reason: `reaped: no runtime.pid recorded after ${Math.round(grace / 60_000)}m — spawn never completed${formatDispatchPhaseSuffix(j)}`,
+      failureOverride: resolvePidlessFailureOverride(j),
     });
   }
   return { reapable, warnings, recovered };
@@ -343,6 +382,7 @@ module.exports = {
   findLiveProcessForJob,
   logHasOutput,
   resolvePidlessGateOutcome,
+  resolvePidlessFailureOverride,
   isAlreadySatisfiedOnMain,
   resolveCommitGuardOutcome,
   formatDispatchPhaseSuffix,

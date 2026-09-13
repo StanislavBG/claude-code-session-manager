@@ -7955,57 +7955,6 @@ function isExhaustedAutoFix(job) {
 }
 
 /**
- * Verdicts from the POST-RUN GUARDS (commit-guard / shared-tree guard) that a
- * later, independently-checkable commit/looksDone signal can meaningfully
- * confirm or refute. Auto-fix investigations only ever launch for FAILING
- * runs (see isExhaustedAutoFix above and selectAutoFixTargets) — a job parked
- * by one of these GUARD verdicts exits 0 and never has autoFixAttempted set,
- * so it is invisible to isExhaustedAutoFix and can sit in needs_review
- * forever with nothing to spend and nothing to exhaust (PRD 1181, 2026-09-12:
- * exit 0, commit aff5607 landed, parked on a shared-tree verdict, cleared
- * only by a human).
- *
- * 'worktree_integration_failed' is deliberately EXCLUDED — its damage IS a
- * commit: one stranded on an unmerged `sm-job/<slug>` branch. A `landedCommit`
- * existing is not evidence against that verdict, it is a restatement of it,
- * so admitting it here would auto-complete a row whose work never actually
- * reached the target branch. It already has its own dedicated, git-native
- * resolution path (selectMechanicalRecoveryTarget / performMechanicalRecovery
- * — a real re-attempted merge) and must never be pulled into this ladder.
- */
-const GUARD_VERDICT_EVIDENCE_ELIGIBLE = new Set(['silent_no_op', 'shared_tree_reverted']);
-
-/**
- * Pure predicate, no I/O: a needs_review row parked directly by one of the
- * GUARD_VERDICT_EVIDENCE_ELIGIBLE verdicts, that never went through an
- * auto-fix investigation at all (autoFixAttempted is not true) — the
- * structural gap this PRD closes, distinct from isExhaustedAutoFix's "went
- * through auto-fix and spent it" case. A job that DID get an auto-fix
- * investigation is left to isExhaustedAutoFix's own ladder rather than this
- * one, even if its verifierVerdict happens to also be in the eligible set.
- * Exported for tests.
- */
-function isGuardParkedWithoutAutoFix(job) {
-  if (!job || job.status !== 'needs_review') return false;
-  if (job.autoFixAttempted === true) return false;
-  return GUARD_VERDICT_EVIDENCE_ELIGIBLE.has(job.verifierVerdict);
-}
-
-/**
- * Pure predicate, no I/O: is this needs_review row eligible for the bounded
- * auto-resolve ladder at all — either because its auto-fix path is genuinely
- * spent (isExhaustedAutoFix), or because it was parked by a GUARD verdict
- * that never entered auto-fix in the first place (isGuardParkedWithoutAutoFix).
- * Both classes share ONE ladder (applyNeedsReviewAutoResolve) rather than a
- * duplicated one — the ladder itself doesn't care which door a row came
- * through, only whether it now carries completion evidence (job.looksDone).
- * Exported for tests.
- */
-function isEligibleForNeedsReviewAutoResolve(job) {
-  return isExhaustedAutoFix(job) || isGuardParkedWithoutAutoFix(job);
-}
-
-/**
  * Pure predicate: an investigation produced a fix plan (autoFixOutcome ===
  * 'plan') but its fix-plan slug is not present among `queuedSlugs` — the
  * plan file failed to become a queue row (write failure, or some other
@@ -8152,26 +8101,17 @@ function isRescanCandidate(job) {
  * selectResumeRecoveryTarget / selectAutoFixTargets) so the guard can never
  * again be narrower than the work reverifyNeedsReview performs.
  *
- * Widened again (this PRD): a `needs_review` row parked directly by a GUARD
- * verdict with no auto-fix history (isGuardParkedWithoutAutoFix) is not an
- * isRescanCandidate either — RESCANNABLE_VERDICTS covers transcript-verifier
- * verdicts, not commit-guard/shared-tree-guard verdicts — but
- * reverifyNeedsReview's looksDone-annotation pass now runs for it too (see
- * that function). Same rule as always: never let this guard be narrower than
- * the work reverifyNeedsReview actually performs.
- *
- * Cost: selectMechanicalRecoveryTarget/selectResumeRecoveryTarget and
- * isGuardParkedWithoutAutoFix are pure (no I/O). selectAutoFixTargets is
- * called with an injected fixSlugExists that always returns false — cheap
- * and deliberately over-inclusive (a false positive here just means one
- * extra periodic pass, never a missed one) so this guard never pays
- * selectAutoFixTargets's production fs.existsSync scan per tick.
- * resolveRunId's IO only fires for rows missing job.runId, same as
+ * Cost: selectMechanicalRecoveryTarget/selectResumeRecoveryTarget are pure
+ * (no I/O). selectAutoFixTargets is called with an injected fixSlugExists
+ * that always returns false — cheap and deliberately over-inclusive (a false
+ * positive here just means one extra periodic pass, never a missed one) so
+ * this guard never pays selectAutoFixTargets's production fs.existsSync scan
+ * per tick. resolveRunId's IO only fires for rows missing job.runId, same as
  * isRescanCandidate already incurs above.
  */
 function shouldRunPeriodicReverify(jobs) {
   if (!Array.isArray(jobs)) return false;
-  if (jobs.some((j) => isRescanCandidate(j) || isGuardParkedWithoutAutoFix(j))) return true;
+  if (jobs.some((j) => isRescanCandidate(j))) return true;
   if (jobs.some((j) => selectMechanicalRecoveryTarget(j) || selectResumeRecoveryTarget(j))) return true;
   return selectAutoFixTargets(jobs, { fixSlugExists: () => false }).length > 0;
 }
@@ -8337,11 +8277,9 @@ function needsReviewAutoResolveDisabled() {
  * selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) →
  *   [{ slug, cwd, ageMs, attempts }]
  *
- * Pure selector — no IO. Selects `needs_review` rows eligible for the
- * bounded auto-resolve ladder (isEligibleForNeedsReviewAutoResolve — either
- * auto-fix genuinely spent, or parked by a GUARD verdict that never entered
- * auto-fix at all), whose newest statusHistory entry with `to ===
- * 'needs_review'` is older than `thresholdMs`, and whose
+ * Pure selector — no IO. Selects `needs_review` rows whose auto-fix path is
+ * genuinely spent (isExhaustedAutoFix), whose newest statusHistory entry
+ * with `to === 'needs_review'` is older than `thresholdMs`, and whose
  * exhaustedResolveAttempts counter has not yet spent its cap.
  *
  * The inclusion bound is inclusive of the cap itself (`<= CAP`, not `<
@@ -8355,7 +8293,7 @@ function selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) {
   const targets = [];
   for (const j of jobs ?? []) {
     if (j.status !== 'needs_review') continue;
-    if (!isEligibleForNeedsReviewAutoResolve(j)) continue;
+    if (!isExhaustedAutoFix(j)) continue;
     if ((j.exhaustedResolveAttempts ?? 0) > NEEDS_REVIEW_RESOLVE_CAP) continue;
     const history = j.statusHistory || [];
     let entry = null;
@@ -8391,26 +8329,17 @@ function selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) {
  * failed-autoreset loop above) so a stale target computed before this
  * mutate() pass can never double-apply. Returns the outcome, or null if the
  * race guard rejected it.
- *
- * A row can reach here through either door (isEligibleForNeedsReviewAutoResolve):
- * auto-fix genuinely exhausted, or parked directly by a GUARD_VERDICT_EVIDENCE_
- * ELIGIBLE verdict with no auto-fix history at all. `originIsGuardParked` picks
- * which door this particular row came through, purely to make the requeue/skip
- * reason text (and the Queue UI's job.error) name the RIGHT evidence — a
- * guard-parked row was never "exhausted auto-fix" and must never claim to be.
  */
 function applyNeedsReviewAutoResolve(j) {
-  if (!j || j.status !== 'needs_review' || !isEligibleForNeedsReviewAutoResolve(j)) return null;
+  if (!j || j.status !== 'needs_review' || !isExhaustedAutoFix(j)) return null;
   if ((j.exhaustedResolveAttempts ?? 0) > NEEDS_REVIEW_RESOLVE_CAP) return null;
-  const originIsGuardParked = !isExhaustedAutoFix(j) && isGuardParkedWithoutAutoFix(j);
 
   if (j.looksDone) {
     const attempt = j.exhaustedResolveAttempts ?? 0;
-    const reason = originIsGuardParked
-      ? `needs_review auto-resolve: guard verdict '${j.verifierVerdict}' with landed commit and looksDone evidence — `
-        + `${j.looksDone.commits.length} commit(s) since this run touch the PRD's declared paths, work landed`
-      : `needs_review auto-resolve: verifier annotation shows work landed (${j.looksDone.commits.length} commit(s) since this run touch the PRD's declared paths)`;
-    transitionJob(j, 'completed', { reason, source: 'needsReviewAutoResolve' });
+    transitionJob(j, 'completed', {
+      reason: `needs_review auto-resolve: verifier annotation shows work landed (${j.looksDone.commits.length} commit(s) since this run touch the PRD's declared paths)`,
+      source: 'needsReviewAutoResolve',
+    });
     appendAuditEvent('needs_review_auto_resolved', { slug: j.slug, cwd: j.cwd ?? null, outcome: 'completed', attempt });
     return 'completed';
   }
@@ -8419,22 +8348,18 @@ function applyNeedsReviewAutoResolve(j) {
   if (attemptsSoFar < NEEDS_REVIEW_RESOLVE_CAP) {
     const attempt = attemptsSoFar + 1;
     j.exhaustedResolveAttempts = attempt;
-    const reason = originIsGuardParked
-      ? `needs_review auto-resolve: guard verdict '${j.verifierVerdict}' with no completion evidence yet — `
-        + `requeued for one more run (attempt ${attempt}/${NEEDS_REVIEW_RESOLVE_CAP})`
-      : `needs_review auto-resolve: exhausted auto-fix, no completion evidence — requeued for one more run (attempt ${attempt}/${NEEDS_REVIEW_RESOLVE_CAP})`;
-    transitionJob(j, 'pending', { reason, source: 'needsReviewAutoResolve' });
+    transitionJob(j, 'pending', {
+      reason: `needs_review auto-resolve: exhausted auto-fix, no completion evidence — requeued for one more run (attempt ${attempt}/${NEEDS_REVIEW_RESOLVE_CAP})`,
+      source: 'needsReviewAutoResolve',
+    });
     appendAuditEvent('needs_review_auto_resolved', { slug: j.slug, cwd: j.cwd ?? null, outcome: 'requeued', attempt });
     return 'requeued';
   }
 
   j.needsReviewAutoResolvedSkip = true;
-  j.error = originIsGuardParked
-    ? `needs_review auto-resolve: guard verdict '${j.verifierVerdict}' with no completion evidence after `
-      + `${NEEDS_REVIEW_RESOLVE_CAP} requeue attempt(s) — auto-skipped to unblock downstream dependsOn rows`
-    : `needs_review auto-resolve: exhausted auto-fix path (autoFixOutcome=${j.autoFixOutcome ?? 'none'}, `
-      + `autoFixRetries=${j.autoFixRetries ?? 0}) with no completion evidence after ${NEEDS_REVIEW_RESOLVE_CAP} `
-      + `requeue attempt(s) — auto-skipped to unblock downstream dependsOn rows`;
+  j.error = `needs_review auto-resolve: exhausted auto-fix path (autoFixOutcome=${j.autoFixOutcome ?? 'none'}, `
+    + `autoFixRetries=${j.autoFixRetries ?? 0}) with no completion evidence after ${NEEDS_REVIEW_RESOLVE_CAP} `
+    + `requeue attempt(s) — auto-skipped to unblock downstream dependsOn rows`;
   transitionJob(j, 'skipped', {
     reason: `needs_review auto-resolve: cap exhausted (${NEEDS_REVIEW_RESOLVE_CAP}/${NEEDS_REVIEW_RESOLVE_CAP} requeue attempts) — auto-skipped`,
     source: 'needsReviewAutoResolve',
@@ -8583,29 +8508,11 @@ async function computeLooksDone(job) {
 
 async function reverifyNeedsReview() {
   const snap = await readQueue();
-  // isGuardParkedWithoutAutoFix rows are NOT isRescanCandidate (their
-  // verifierVerdict is a commit-guard/shared-tree-guard verdict, not a
-  // RESCANNABLE_VERDICTS transcript-verifier one) — included here so this
-  // pass also computes their looksDone evidence, the widened half of the
-  // guard-verdict auto-resolve gap this PRD closes. Handled in its own
-  // branch below (no transcript rescan — there is no transcript verdict to
-  // rescan) rather than through the isRescanCandidate machinery.
-  const candidates = snap.jobs.filter((j) => isRescanCandidate(j) || isGuardParkedWithoutAutoFix(j));
+  const candidates = snap.jobs.filter(isRescanCandidate);
   const healed = [];
   const leftForReview = [];
   const looksDoneUpdates = [];
   for (const job of candidates) {
-    if (!isRescanCandidate(job) && isGuardParkedWithoutAutoFix(job)) {
-      // Guard-verdict park, never auto-fixed: only evidence gathering, never
-      // a transcript rescan (there was never a transcript-verifier verdict
-      // here) and never a direct heal — applyNeedsReviewAutoResolve is the
-      // sole place that turns this annotation into a status change.
-      const looksDone = await computeLooksDone(job);
-      if (looksDone) {
-        looksDoneUpdates.push({ slug: job.slug, cwd: job.cwd, looksDone, fromFailed: false });
-      }
-      continue;
-    }
     if (job.status === 'failed') {
       // A failed row never runs the transcript-verifier rescan below — that
       // machinery (verifyRun/COMPLETED_EQUIVALENT_VERDICTS) exists to
@@ -10354,9 +10261,6 @@ module.exports = {
   resolveRunId,
   isUnresolvableNeedsReview,
   isExhaustedAutoFix,
-  GUARD_VERDICT_EVIDENCE_ELIGIBLE,
-  isGuardParkedWithoutAutoFix,
-  isEligibleForNeedsReviewAutoResolve,
   isPlanUnqueued,
   isFixPlanDead,
   fixSlugFor,

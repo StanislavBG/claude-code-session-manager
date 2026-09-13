@@ -38,7 +38,8 @@ const epicWorktreeMerge = require('./lib/epicWorktreeMerge.cjs');
 const epicWorktreeProjectConfig = require('./lib/epicWorktreeProjectConfig.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
-const { checkDelegationReadiness, installPrdWriteGuard, installDestructiveGitGuard, installInlineImplementationGuard } = require('./lib/delegationReadiness.cjs');
+const { checkDelegationReadiness, ensureGuardsInstalled, installPrdWriteGuard, installDestructiveGitGuard, installInlineImplementationGuard } = require('./lib/delegationReadiness.cjs');
+const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
 const { writeGuardShims } = require('./lib/guardShims.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES } = require('./lib/mcpToolCatalog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
@@ -534,9 +535,27 @@ ipcMain.handle('agents:resolve-epic-model', validated(schemas.agentsResolveEpicM
 // "Can this project actually delegate?" probe (PRD: delegation-readiness).
 // Structured data over the preconditions for scheduler_create_prd being in an
 // agent's tool list at all — surfacing it in the UI is a sibling PRD.
-ipcMain.handle('app:delegation-readiness', validated(schemas.delegationReadinessCwd, async (payload) =>
-  checkDelegationReadiness(payload)
-));
+//
+// Self-heals BEFORE computing the checks (PRD: guards-auto-install) — Fix It
+// used to be the only call site for the three guard installers, so every
+// project the human opened started red and demanded three manual clicks.
+// ensureGuardsInstalled never rejects on its own, but it is still awaited
+// inside a try/catch here so a future change to it can never turn this into
+// a rejected IPC handler.
+//
+// `cwd` is normalized to its real project root via the SAME resolver
+// prdAdminRoutes.cjs's session_manager_help readiness route already uses
+// (projectRootResolve.cjs's resolveProjectContext) before either the install
+// or the read-back check runs, so a worktree/ops-internal cwd can't install
+// into one path while the banner reads another.
+ipcMain.handle('app:delegation-readiness', validated(schemas.delegationReadinessCwd, async (payload) => {
+  const resolved = resolveProjectContext({ cwd: payload.cwd });
+  const cwd = resolved.cwd || payload.cwd;
+  try {
+    await ensureGuardsInstalled(cwd);
+  } catch { /* auto-install must never block the readiness probe itself */ }
+  return checkDelegationReadiness({ ...payload, cwd });
+}));
 
 // Every guard-install attempt is logged from MAIN, not the renderer — a
 // press that never reaches this process (e.g. a renderer talking to an

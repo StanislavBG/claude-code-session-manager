@@ -23,6 +23,7 @@ const { spawn } = require('node:child_process');
 const { writeJson, addAllowedRoot } = require('../config.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./cleanEnv.cjs');
 const { shimPath: guardShimPath, resolveShimTarget, ensureGuardShimsOrError } = require('./guardShims.cjs');
+const { resolveProjectRoot } = require('./opsOwnership.cjs');
 
 const SCHEDULER_MCP_NAME = 'session-manager-scheduler';
 const DEV_PLUGIN_ENABLED_KEY = 'session-manager-dev@session-manager';
@@ -360,8 +361,54 @@ function extractGuardScriptPath(command, scriptBasename) {
 }
 
 /**
+ * Per-guard config for the three sanctioned PreToolUse guards. `checkGuard`/
+ * `installGuard` below are the ONE implementation of the "resolve the hook
+ * command's script, validate a stable shim's pointer, merge/repair into
+ * .claude/settings.json" logic that used to be copy-pasted three times (one
+ * per guard) — a change to that logic (e.g. a new decay case) used to need
+ * three edits kept in lockstep by hand. `checkPrdWriteGuard`/`installPrdWriteGuard`/
+ * etc. below are thin, name-preserving wrappers so every existing caller/test/
+ * export keeps working unchanged.
+ */
+const GUARD_DEFS = {
+  prdWrite: {
+    id: 'prd-write-guard',
+    label: 'PRD-write guard hook installed',
+    guardName: 'guard-prd-writes',
+    scriptBasename: 'guard-prd-writes.cjs',
+    script: PRD_WRITE_GUARD_SCRIPT,
+    matcher: PRD_WRITE_GUARD_MATCHER,
+    fixActionId: 'install-prd-write-guard',
+    nudge: false,
+  },
+  destructiveGit: {
+    id: 'destructive-git-guard',
+    label: 'Destructive-git guard hook installed',
+    guardName: 'guard-destructive-git',
+    scriptBasename: 'guard-destructive-git.cjs',
+    script: DESTRUCTIVE_GIT_GUARD_SCRIPT,
+    matcher: DESTRUCTIVE_GIT_GUARD_MATCHER,
+    fixActionId: 'install-destructive-git-guard',
+    nudge: false,
+  },
+  inlineImplementation: {
+    id: 'inline-implementation-guard',
+    label: 'Inline-implementation guard hook installed',
+    guardName: 'guard-inline-implementation',
+    scriptBasename: 'guard-inline-implementation.cjs',
+    script: INLINE_IMPLEMENTATION_GUARD_SCRIPT,
+    matcher: INLINE_IMPLEMENTATION_GUARD_MATCHER,
+    fixActionId: 'install-inline-implementation-guard',
+    // Deliberately a NUDGE that fails OPEN twice over (see
+    // guard-inline-implementation.cjs's header), not an ownership law like
+    // guard-prd-writes — label/detail/fix text must not imply a hard gate.
+    nudge: true,
+  },
+};
+
+/**
  * `ok` must mean "a hook that will actually run", not "the settings file
- * mentions guard-prd-writes somewhere".
+ * mentions this guard somewhere".
  *
  * The failure mode this guards against: a PreToolUse command that exits
  * non-zero WITHOUT exit code 2 is a non-blocking error, so a hook pointing at
@@ -376,7 +423,7 @@ function extractGuardScriptPath(command, scriptBasename) {
  * moves, only its pointer does — this is the same "silently guards nothing
  * while reporting green" failure mode, one hop downstream of the hook command.
  */
-function checkPrdWriteGuard({ cwd, homeDir = os.homedir() }) {
+function checkGuard(def, { cwd, homeDir = os.homedir() }) {
   const settings = readJsonSafe(path.join(cwd, '.claude', 'settings.json'), null);
   const preToolUse = Array.isArray(settings?.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
 
@@ -386,9 +433,9 @@ function checkPrdWriteGuard({ cwd, homeDir = os.homedir() }) {
   for (const matcher of preToolUse) {
     if (!Array.isArray(matcher?.hooks)) continue;
     for (const h of matcher.hooks) {
-      if (typeof h?.command !== 'string' || !h.command.includes('guard-prd-writes')) continue;
+      if (typeof h?.command !== 'string' || !h.command.includes(def.guardName)) continue;
       mentioned = true;
-      const raw = extractGuardScriptPath(h.command, 'guard-prd-writes.cjs');
+      const raw = extractGuardScriptPath(h.command, def.scriptBasename);
       if (!raw) continue;
       const abs = path.isAbsolute(raw) ? raw : path.resolve(cwd, raw);
       if (!fs.existsSync(abs)) continue;
@@ -405,31 +452,29 @@ function checkPrdWriteGuard({ cwd, homeDir = os.homedir() }) {
 
   const ok = !!resolvedScript;
   let detail;
-  if (ok) detail = `guard-prd-writes PreToolUse hook found in ${cwd}/.claude/settings.json, resolving to ${resolvedScript}`;
-  else if (decayError) detail = `guard-prd-writes PreToolUse hook in ${cwd}/.claude/settings.json points at a stable shim whose pointer has decayed — it would silently guard nothing: ${decayError}`;
-  else if (mentioned) detail = `guard-prd-writes PreToolUse hook in ${cwd}/.claude/settings.json names a script that does not exist — it would silently guard nothing`;
-  else detail = `no guard-prd-writes PreToolUse hook in ${cwd}/.claude/settings.json`;
+  if (ok) detail = `${def.guardName} PreToolUse hook found in ${cwd}/.claude/settings.json, resolving to ${resolvedScript}`;
+  else if (decayError) detail = `${def.guardName} PreToolUse hook in ${cwd}/.claude/settings.json points at a stable shim whose pointer has decayed — it would silently guard nothing: ${decayError}`;
+  else if (mentioned) detail = `${def.guardName} PreToolUse hook in ${cwd}/.claude/settings.json names a script that does not exist — it would silently guard nothing`;
+  else detail = `no ${def.guardName} PreToolUse hook in ${cwd}/.claude/settings.json${def.nudge ? ' — this is a nudge, not a hard gate' : ''}`;
 
   return {
-    id: 'prd-write-guard',
-    label: 'PRD-write guard hook installed',
+    id: def.id,
+    label: def.label,
     ok,
     detail,
     fix: ok
       ? null
-      : `Add a PreToolUse hook to ${cwd}/.claude/settings.json matching Write|Edit|NotebookEdit that runs node ${guardShimPath('guard-prd-writes.cjs', homeDir)}`,
-    // The one check with a sanctioned one-press install (installPrdWriteGuard).
-    fixAction: ok ? null : 'install-prd-write-guard',
+      : `Add a PreToolUse hook to ${cwd}/.claude/settings.json matching ${def.matcher} that runs node ${guardShimPath(def.scriptBasename, homeDir)}${def.nudge ? ' (a nudge, not a hard gate)' : ''}`,
+    fixAction: ok ? null : def.fixActionId,
   };
 }
 
-
 /**
- * Install the PRD-write guard into `<cwd>/.claude/settings.json`.
+ * Install `def`'s guard into `<cwd>/.claude/settings.json`.
  *
  * ── The standardized approach is REFERENCE, not vendor ────────────────────
- * The hook command points at session-manager's own copy of
- * scripts/hooks/guard-prd-writes.cjs by ABSOLUTE path. We deliberately do NOT
+ * The hook command points at session-manager's own copy of the guard script
+ * by ABSOLUTE path (via the stable shim, see below). We deliberately do NOT
  * copy the script into the adopting repo:
  *
  *  - Vendoring drifts. It already did, with exactly one adopter
@@ -441,25 +486,29 @@ function checkPrdWriteGuard({ cwd, homeDir = os.homedir() }) {
  *    absolute path is the entire dependency.
  *
  * The liability of reference — a silently-no-op hook if the script ever moves
- * — is closed by checkPrdWriteGuard() above, which resolves the command's
- * script path and fails the check when the file is gone.
+ * — is closed by checkGuard() above, which resolves the command's script path
+ * and fails the check when the file is gone.
  *
  * Merges into any existing hooks block rather than clobbering it: other
  * PreToolUse matchers, other hooks under the same matcher, and every unrelated
  * settings key are preserved. Idempotent — a healthy guard is a no-op, and a
- * guard entry pointing at a missing script is repaired in place.
+ * guard entry pointing at a missing script is repaired in place. Two guards
+ * sharing the same matcher string (prd-write and inline-implementation both
+ * use `Write|Edit|NotebookEdit`) fall into the SAME PreToolUse entry's hooks
+ * array automatically — nothing here special-cases that, it falls out of
+ * "find the matcher, else push a new one".
  *
  * ── Stable shim, not the raw app path ─────────────────────────────────────
  * The hook command written below points at
- * `~/.claude/session-manager/hooks/guard-prd-writes.cjs` (guardShims.cjs), a
- * tiny shim that re-requires THIS script through a pointer file rewritten on
- * every boot — not at `PRD_WRITE_GUARD_SCRIPT` directly. Run via
- * `npx claude-code-session-manager@latest`, `PRD_WRITE_GUARD_SCRIPT` resolves
- * under an ephemeral `~/.npm/_npx/<hash>/...` directory that the next `npx
- * ...@latest` or npm cache prune deletes — the shim survives every app
- * upgrade because only its pointer file changes, never its own path.
+ * `~/.claude/session-manager/hooks/<guard>.cjs` (guardShims.cjs), a tiny shim
+ * that re-requires the real script through a pointer file rewritten on every
+ * boot — not at `def.script` directly. Run via
+ * `npx claude-code-session-manager@latest`, `def.script` resolves under an
+ * ephemeral `~/.npm/_npx/<hash>/...` directory that the next `npx ...@latest`
+ * or npm cache prune deletes — the shim survives every app upgrade because
+ * only its pointer file changes, never its own path.
  */
-async function installPrdWriteGuard({ cwd, homeDir = os.homedir() }) {
+async function installGuard(def, { cwd, homeDir = os.homedir(), skipShimEnsure = false }) {
   const settingsPath = path.join(cwd, '.claude', 'settings.json');
   // config.cjs's validateWrite only permits `<registered project root>/.claude/**`,
   // and a project the user is merely *pointing* the New Epic dialog at may
@@ -473,24 +522,27 @@ async function installPrdWriteGuard({ cwd, homeDir = os.homedir() }) {
     // the human has in there.
     return { ok: false, action: 'error', error: `${settingsPath} is not valid JSON — fix it by hand before installing the guard` };
   }
-  if (!fs.existsSync(PRD_WRITE_GUARD_SCRIPT)) {
+  if (!fs.existsSync(def.script)) {
     // Writing a hook that points at a script that doesn't exist would report
     // installed while silently guarding nothing (a non-zero-without-2 exit is
     // a non-blocking error to the harness) — refuse instead of lying.
-    return { ok: false, action: 'error', error: `${PRD_WRITE_GUARD_SCRIPT} does not exist — cannot install a guard hook that points at a missing script` };
+    return { ok: false, action: 'error', error: `${def.script} does not exist — cannot install a guard hook that points at a missing script` };
   }
   // Same refusal principle as above: never write a hook command pointing at
-  // a shim that does not exist on disk.
-  const shimError = await ensureGuardShimsOrError(homeDir);
-  if (shimError) return shimError;
+  // a shim that does not exist on disk. Skipped when the caller (installAllGuards)
+  // already ensured it once for this whole pass — see that function's comment.
+  if (!skipShimEnsure) {
+    const shimError = await ensureGuardShimsOrError(homeDir);
+    if (shimError) return shimError;
+  }
   const settings = (existing && typeof existing === 'object' && !Array.isArray(existing)) ? existing : {};
 
-  const command = `node ${guardShimPath('guard-prd-writes.cjs', homeDir)}`;
+  const command = `node ${guardShimPath(def.scriptBasename, homeDir)}`;
   const hooks = (settings.hooks && typeof settings.hooks === 'object') ? settings.hooks : {};
   const preToolUse = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse.slice() : [];
 
   // Already healthy? Nothing to do.
-  if (checkPrdWriteGuard({ cwd, homeDir }).ok) {
+  if (checkGuard(def, { cwd, homeDir }).ok) {
     return { ok: true, action: 'already-installed', settingsPath, command };
   }
 
@@ -499,7 +551,7 @@ async function installPrdWriteGuard({ cwd, homeDir = os.homedir() }) {
   for (const matcher of preToolUse) {
     if (!Array.isArray(matcher?.hooks)) continue;
     for (const h of matcher.hooks) {
-      if (typeof h?.command === 'string' && h.command.includes('guard-prd-writes')) {
+      if (typeof h?.command === 'string' && h.command.includes(def.guardName)) {
         h.command = command;
         h.type = 'command';
         repaired = true;
@@ -508,12 +560,12 @@ async function installPrdWriteGuard({ cwd, homeDir = os.homedir() }) {
   }
 
   if (!repaired) {
-    const target = preToolUse.find((m) => m?.matcher === PRD_WRITE_GUARD_MATCHER);
+    const target = preToolUse.find((m) => m?.matcher === def.matcher);
     if (target) {
       target.hooks = Array.isArray(target.hooks) ? target.hooks : [];
       target.hooks.push({ type: 'command', command });
     } else {
-      preToolUse.push({ matcher: PRD_WRITE_GUARD_MATCHER, hooks: [{ type: 'command', command }] });
+      preToolUse.push({ matcher: def.matcher, hooks: [{ type: 'command', command }] });
     }
   }
 
@@ -523,236 +575,28 @@ async function installPrdWriteGuard({ cwd, homeDir = os.homedir() }) {
   return { ok: true, action: repaired ? 'repaired' : 'installed', settingsPath, command };
 }
 
-/**
- * `ok` must mean "a hook that will actually run", not "the settings file
- * mentions guard-destructive-git somewhere" — same rationale as
- * checkPrdWriteGuard above, including validating a stable shim's pointer
- * (resolveShimTarget), not just the shim file's own existence.
- */
-function checkDestructiveGitGuard({ cwd, homeDir = os.homedir() }) {
-  const settings = readJsonSafe(path.join(cwd, '.claude', 'settings.json'), null);
-  const preToolUse = Array.isArray(settings?.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
-
-  let mentioned = false;
-  let resolvedScript = null;
-  let decayError = null;
-  for (const matcher of preToolUse) {
-    if (!Array.isArray(matcher?.hooks)) continue;
-    for (const h of matcher.hooks) {
-      if (typeof h?.command !== 'string' || !h.command.includes('guard-destructive-git')) continue;
-      mentioned = true;
-      const raw = extractGuardScriptPath(h.command, 'guard-destructive-git.cjs');
-      if (!raw) continue;
-      const abs = path.isAbsolute(raw) ? raw : path.resolve(cwd, raw);
-      if (!fs.existsSync(abs)) continue;
-      try {
-        resolveShimTarget(abs);
-        resolvedScript = abs;
-        break;
-      } catch (err) {
-        decayError = err.message;
-      }
-    }
-    if (resolvedScript) break;
-  }
-
-  const ok = !!resolvedScript;
-  let detail;
-  if (ok) detail = `guard-destructive-git PreToolUse hook found in ${cwd}/.claude/settings.json, resolving to ${resolvedScript}`;
-  else if (decayError) detail = `guard-destructive-git PreToolUse hook in ${cwd}/.claude/settings.json points at a stable shim whose pointer has decayed — it would silently guard nothing: ${decayError}`;
-  else if (mentioned) detail = `guard-destructive-git PreToolUse hook in ${cwd}/.claude/settings.json names a script that does not exist — it would silently guard nothing`;
-  else detail = `no guard-destructive-git PreToolUse hook in ${cwd}/.claude/settings.json`;
-
-  return {
-    id: 'destructive-git-guard',
-    label: 'Destructive-git guard hook installed',
-    ok,
-    detail,
-    fix: ok
-      ? null
-      : `Add a PreToolUse hook to ${cwd}/.claude/settings.json matching Bash that runs node ${guardShimPath('guard-destructive-git.cjs', homeDir)}`,
-    fixAction: ok ? null : 'install-destructive-git-guard',
-  };
+function checkPrdWriteGuard({ cwd, homeDir = os.homedir() } = {}) {
+  return checkGuard(GUARD_DEFS.prdWrite, { cwd, homeDir });
 }
 
-/**
- * Install the destructive-git guard into `<cwd>/.claude/settings.json`.
- * Same reference-not-vendor rationale, and the same merge-into-existing-
- * hooks-block / repair-in-place / idempotent behaviour as installPrdWriteGuard
- * above — see that function's header, including the stable-shim rationale
- * (guardShims.cjs) for why the written command points at
- * `~/.claude/session-manager/hooks/guard-destructive-git.cjs`, not at
- * `DESTRUCTIVE_GIT_GUARD_SCRIPT` directly. The one difference from
- * installPrdWriteGuard is the matcher (`Bash`, not `Write|Edit|NotebookEdit`),
- * so this lands as its own `PreToolUse` entry rather than sharing it.
- */
-async function installDestructiveGitGuard({ cwd, homeDir = os.homedir() }) {
-  const settingsPath = path.join(cwd, '.claude', 'settings.json');
-  addAllowedRoot(cwd);
-
-  const existing = fs.existsSync(settingsPath) ? readJsonSafe(settingsPath, undefined) : {};
-  if (existing === undefined) {
-    return { ok: false, action: 'error', error: `${settingsPath} is not valid JSON — fix it by hand before installing the guard` };
-  }
-  if (!fs.existsSync(DESTRUCTIVE_GIT_GUARD_SCRIPT)) {
-    return { ok: false, action: 'error', error: `${DESTRUCTIVE_GIT_GUARD_SCRIPT} does not exist — cannot install a guard hook that points at a missing script` };
-  }
-  const shimError = await ensureGuardShimsOrError(homeDir);
-  if (shimError) return shimError;
-  const settings = (existing && typeof existing === 'object' && !Array.isArray(existing)) ? existing : {};
-
-  const command = `node ${guardShimPath('guard-destructive-git.cjs', homeDir)}`;
-  const hooks = (settings.hooks && typeof settings.hooks === 'object') ? settings.hooks : {};
-  const preToolUse = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse.slice() : [];
-
-  if (checkDestructiveGitGuard({ cwd, homeDir }).ok) {
-    return { ok: true, action: 'already-installed', settingsPath, command };
-  }
-
-  let repaired = false;
-  for (const matcher of preToolUse) {
-    if (!Array.isArray(matcher?.hooks)) continue;
-    for (const h of matcher.hooks) {
-      if (typeof h?.command === 'string' && h.command.includes('guard-destructive-git')) {
-        h.command = command;
-        h.type = 'command';
-        repaired = true;
-      }
-    }
-  }
-
-  if (!repaired) {
-    const target = preToolUse.find((m) => m?.matcher === DESTRUCTIVE_GIT_GUARD_MATCHER);
-    if (target) {
-      target.hooks = Array.isArray(target.hooks) ? target.hooks : [];
-      target.hooks.push({ type: 'command', command });
-    } else {
-      preToolUse.push({ matcher: DESTRUCTIVE_GIT_GUARD_MATCHER, hooks: [{ type: 'command', command }] });
-    }
-  }
-
-  const next = { ...settings, hooks: { ...hooks, PreToolUse: preToolUse } };
-  await writeJson(settingsPath, next);
-
-  return { ok: true, action: repaired ? 'repaired' : 'installed', settingsPath, command };
+async function installPrdWriteGuard({ cwd, homeDir = os.homedir(), skipShimEnsure = false } = {}) {
+  return installGuard(GUARD_DEFS.prdWrite, { cwd, homeDir, skipShimEnsure });
 }
 
-/**
- * `ok` must mean "a hook that will actually run", not "the settings file
- * mentions guard-inline-implementation somewhere" — same rationale as
- * checkPrdWriteGuard above. Note this guard is deliberately a NUDGE that
- * fails OPEN twice over (see guard-inline-implementation.cjs's header), not
- * an ownership law like guard-prd-writes — this check's label/detail must
- * not imply it's a hard gate. Same stable-shim pointer validation
- * (resolveShimTarget) as checkPrdWriteGuard above.
- */
-function checkInlineImplementationGuard({ cwd, homeDir = os.homedir() }) {
-  const settings = readJsonSafe(path.join(cwd, '.claude', 'settings.json'), null);
-  const preToolUse = Array.isArray(settings?.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
-
-  let mentioned = false;
-  let resolvedScript = null;
-  let decayError = null;
-  for (const matcher of preToolUse) {
-    if (!Array.isArray(matcher?.hooks)) continue;
-    for (const h of matcher.hooks) {
-      if (typeof h?.command !== 'string' || !h.command.includes('guard-inline-implementation')) continue;
-      mentioned = true;
-      const raw = extractGuardScriptPath(h.command, 'guard-inline-implementation.cjs');
-      if (!raw) continue;
-      const abs = path.isAbsolute(raw) ? raw : path.resolve(cwd, raw);
-      if (!fs.existsSync(abs)) continue;
-      try {
-        resolveShimTarget(abs);
-        resolvedScript = abs;
-        break;
-      } catch (err) {
-        decayError = err.message;
-      }
-    }
-    if (resolvedScript) break;
-  }
-
-  const ok = !!resolvedScript;
-  let detail;
-  if (ok) detail = `guard-inline-implementation PreToolUse hook found in ${cwd}/.claude/settings.json, resolving to ${resolvedScript}`;
-  else if (decayError) detail = `guard-inline-implementation PreToolUse hook in ${cwd}/.claude/settings.json points at a stable shim whose pointer has decayed — it would silently guard nothing: ${decayError}`;
-  else if (mentioned) detail = `guard-inline-implementation PreToolUse hook in ${cwd}/.claude/settings.json names a script that does not exist — it would silently guard nothing`;
-  else detail = `no guard-inline-implementation PreToolUse hook in ${cwd}/.claude/settings.json — this is a nudge, not a hard gate`;
-
-  return {
-    id: 'inline-implementation-guard',
-    label: 'Inline-implementation guard hook installed',
-    ok,
-    detail,
-    fix: ok
-      ? null
-      : `Add a PreToolUse hook to ${cwd}/.claude/settings.json matching Write|Edit|NotebookEdit that runs node ${guardShimPath('guard-inline-implementation.cjs', homeDir)} (a nudge, not a hard gate)`,
-    fixAction: ok ? null : 'install-inline-implementation-guard',
-  };
+function checkDestructiveGitGuard({ cwd, homeDir = os.homedir() } = {}) {
+  return checkGuard(GUARD_DEFS.destructiveGit, { cwd, homeDir });
 }
 
-/**
- * Install the inline-implementation guard into `<cwd>/.claude/settings.json`.
- * Same reference-not-vendor rationale and merge/repair/idempotence behaviour
- * as installPrdWriteGuard above — see that function's header, including the
- * stable-shim rationale (guardShims.cjs) for why the written command points
- * at `~/.claude/session-manager/hooks/guard-inline-implementation.cjs`, not
- * at `INLINE_IMPLEMENTATION_GUARD_SCRIPT` directly. Unlike
- * installDestructiveGitGuard, this guard shares installPrdWriteGuard's
- * matcher (`Write|Edit|NotebookEdit`), so this appends into that SAME
- * matcher's `hooks` array when it already exists, rather than pushing a new
- * matcher entry.
- */
-async function installInlineImplementationGuard({ cwd, homeDir = os.homedir() }) {
-  const settingsPath = path.join(cwd, '.claude', 'settings.json');
-  addAllowedRoot(cwd);
+async function installDestructiveGitGuard({ cwd, homeDir = os.homedir(), skipShimEnsure = false } = {}) {
+  return installGuard(GUARD_DEFS.destructiveGit, { cwd, homeDir, skipShimEnsure });
+}
 
-  const existing = fs.existsSync(settingsPath) ? readJsonSafe(settingsPath, undefined) : {};
-  if (existing === undefined) {
-    return { ok: false, action: 'error', error: `${settingsPath} is not valid JSON — fix it by hand before installing the guard` };
-  }
-  if (!fs.existsSync(INLINE_IMPLEMENTATION_GUARD_SCRIPT)) {
-    return { ok: false, action: 'error', error: `${INLINE_IMPLEMENTATION_GUARD_SCRIPT} does not exist — cannot install a guard hook that points at a missing script` };
-  }
-  const shimError = await ensureGuardShimsOrError(homeDir);
-  if (shimError) return shimError;
-  const settings = (existing && typeof existing === 'object' && !Array.isArray(existing)) ? existing : {};
+function checkInlineImplementationGuard({ cwd, homeDir = os.homedir() } = {}) {
+  return checkGuard(GUARD_DEFS.inlineImplementation, { cwd, homeDir });
+}
 
-  const command = `node ${guardShimPath('guard-inline-implementation.cjs', homeDir)}`;
-  const hooks = (settings.hooks && typeof settings.hooks === 'object') ? settings.hooks : {};
-  const preToolUse = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse.slice() : [];
-
-  if (checkInlineImplementationGuard({ cwd, homeDir }).ok) {
-    return { ok: true, action: 'already-installed', settingsPath, command };
-  }
-
-  let repaired = false;
-  for (const matcher of preToolUse) {
-    if (!Array.isArray(matcher?.hooks)) continue;
-    for (const h of matcher.hooks) {
-      if (typeof h?.command === 'string' && h.command.includes('guard-inline-implementation')) {
-        h.command = command;
-        h.type = 'command';
-        repaired = true;
-      }
-    }
-  }
-
-  if (!repaired) {
-    const target = preToolUse.find((m) => m?.matcher === INLINE_IMPLEMENTATION_GUARD_MATCHER);
-    if (target) {
-      target.hooks = Array.isArray(target.hooks) ? target.hooks : [];
-      target.hooks.push({ type: 'command', command });
-    } else {
-      preToolUse.push({ matcher: INLINE_IMPLEMENTATION_GUARD_MATCHER, hooks: [{ type: 'command', command }] });
-    }
-  }
-
-  const next = { ...settings, hooks: { ...hooks, PreToolUse: preToolUse } };
-  await writeJson(settingsPath, next);
-
-  return { ok: true, action: repaired ? 'repaired' : 'installed', settingsPath, command };
+async function installInlineImplementationGuard({ cwd, homeDir = os.homedir(), skipShimEnsure = false } = {}) {
+  return installGuard(GUARD_DEFS.inlineImplementation, { cwd, homeDir, skipShimEnsure });
 }
 
 /**
@@ -788,8 +632,147 @@ async function checkDelegationReadiness({ cwd, homeDir = os.homedir() }) {
   };
 }
 
+/**
+ * Every auto-install attempt is logged from HERE, not just the manual
+ * Fix-It path in index.cjs's logGuardInstallAttempt — `scope: 'delegationReadiness'`
+ * is the distinct vocabulary this PRD's acceptance criteria names, so an
+ * auto-heal is never confused with a human pressing Fix It
+ * (scope: 'delegationReadinessGuardInstall'). Never throws — a logging
+ * failure must not prevent the guard install it's reporting on.
+ */
+function logAutoInstallEvent({ cwd, guard, action, error }) {
+  try {
+    const opsErrorLog = require('./opsErrorLog.cjs');
+    opsErrorLog.appendError({
+      cwd,
+      scope: 'delegationReadiness',
+      level: action === 'error' ? 'error' : 'info',
+      message: `auto-install ${guard}: ${action}`,
+      meta: { guard, action, ...(error ? { error } : {}) },
+    });
+  } catch { /* logging must never break the caller */ }
+}
+
+const GUARDS = [
+  { id: 'prd-write-guard', install: installPrdWriteGuard },
+  { id: 'destructive-git-guard', install: installDestructiveGitGuard },
+  { id: 'inline-implementation-guard', install: installInlineImplementationGuard },
+];
+
+// resolved project root -> Promise<{ ok, root, guards }>, kept for the app's
+// whole lifetime — a project that already passed all three guard checks
+// once never gets re-probed/re-written on a later cwd-change/keystroke.
+const guardsInstalledCache = new Map();
+
+/** Test-only: forces the next ensureGuardsInstalled call to actually run. */
+function clearGuardsInstalledCache() {
+  guardsInstalledCache.clear();
+}
+
+async function installAllGuards(root, homeDir) {
+  // Ensure the shim pointer + all three shims ONCE per pass, up front, rather
+  // than once per guard below — each install*Guard rewrites the SAME pointer
+  // file + shim files via writeTextAtomic (no content-equality skip), so
+  // calling it 3x here was 3x the atomic writes for identical content. The
+  // per-guard installers still ensure it themselves when called individually
+  // (the manual "Fix it" path installs one guard at a time and never goes
+  // through installAllGuards), and this call still refreshes the pointer to
+  // the current app root exactly as before an app upgrade requires.
+  const shimError = await ensureGuardShimsOrError(homeDir);
+  const guards = {};
+  for (const { id, install } of GUARDS) {
+    let outcome;
+    try {
+      outcome = shimError ? shimError : await install({ cwd: root, homeDir, skipShimEnsure: true });
+    } catch (err) {
+      outcome = { ok: false, action: 'error', error: err?.message ?? String(err) };
+    }
+    guards[id] = outcome;
+    logAutoInstallEvent({
+      cwd: root,
+      guard: id,
+      action: outcome.ok ? outcome.action : 'error',
+      error: outcome.ok ? undefined : outcome.error,
+    });
+  }
+  return { ok: Object.values(guards).every((g) => g.ok), root, guards };
+}
+
+/**
+ * Silently, idempotently installs the three sanctioned guards for whatever
+ * real project `cwd` belongs to — the fix for "Fix It is the only call site,
+ * so every project starts red forever." Never throws (every failure mode —
+ * a bad/ephemeral/nonexistent cwd, an unwritable project, malformed JSON —
+ * resolves to a logged, ok:false outcome instead), so it is always safe to
+ * `await` directly in front of checkDelegationReadiness.
+ *
+ * `cwd` is resolved to its real project root via opsOwnership's
+ * resolveProjectRoot (same normalization the ops-write path already trusts)
+ * BEFORE anything is cached or written, so a job/Epic worktree cwd installs
+ * into the actual project's `.claude/settings.json`, never a copy that gets
+ * deleted with the worktree.
+ */
+async function ensureGuardsInstalled(cwd, { homeDir = os.homedir() } = {}) {
+  let root;
+  try {
+    root = resolveProjectRoot(cwd);
+  } catch (err) {
+    logAutoInstallEvent({ cwd, guard: 'project-root', action: 'error', error: err?.message ?? String(err) });
+    return { ok: false, root: null, guards: {}, error: err?.message ?? String(err) };
+  }
+
+  const cacheKey = `${root} ${homeDir}`;
+  const cached = guardsInstalledCache.get(cacheKey);
+  if (cached) return cached;
+
+  // A deleted/renamed project folder must never come back to life as a
+  // side effect of probing it — installPrdWriteGuard/etc. happily
+  // `mkdir -p` their target, which would otherwise resurrect a phantom
+  // `<root>/.claude/` for a project that no longer exists on disk. Refuse
+  // before any write is attempted, and log via console (not the ops error
+  // log — there is no legitimate ops root left to write into).
+  let rootStat;
+  try {
+    rootStat = fs.statSync(root);
+  } catch {
+    rootStat = null;
+  }
+  if (!rootStat || !rootStat.isDirectory()) {
+    const message = `project root does not exist on disk: ${root}`;
+    console.warn(`[delegationReadiness] ensureGuardsInstalled: ${message}`);
+    // Not cached — same "only a success is worth remembering" rule as the
+    // installAllGuards path below, so a worktree that hasn't materialized
+    // yet (or a project folder restored after a delete) gets retried on the
+    // next probe instead of being permanently marked ok:false.
+    return { ok: false, root, guards: {}, error: message };
+  }
+
+  const promise = installAllGuards(root, homeDir).then((result) => {
+    // The cache's whole purpose (see the comment above guardsInstalledCache)
+    // is to skip re-probing a project that already SUCCEEDED — not to lock in
+    // a failed first attempt (malformed settings.json, a transient write
+    // error) so the automatic self-heal can never retry even after the
+    // underlying problem is fixed. installAllGuards never throws for an
+    // ordinary per-guard failure (see its own try/catch), so this ok:false
+    // path — not the .catch below — is the one that actually fires for the
+    // realistic failure modes; only a genuine success is worth remembering
+    // for the app's lifetime.
+    if (!result.ok) guardsInstalledCache.delete(cacheKey);
+    return result;
+  }).catch((err) => {
+    guardsInstalledCache.delete(cacheKey); // don't poison the cache on an unexpected throw
+    const message = err?.message ?? String(err);
+    logAutoInstallEvent({ cwd: root, guard: 'ensure-guards-installed', action: 'error', error: message });
+    return { ok: false, root, guards: {}, error: message };
+  });
+  guardsInstalledCache.set(cacheKey, promise);
+  return promise;
+}
+
 module.exports = {
   checkDelegationReadiness,
+  ensureGuardsInstalled,
+  clearGuardsInstalledCache,
   installPrdWriteGuard,
   installDestructiveGitGuard,
   installInlineImplementationGuard,

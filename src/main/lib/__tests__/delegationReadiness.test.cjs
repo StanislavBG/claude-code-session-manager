@@ -13,6 +13,8 @@ const os = require('node:os');
 const path = require('node:path');
 const {
   checkDelegationReadiness,
+  ensureGuardsInstalled,
+  clearGuardsInstalledCache,
   installPrdWriteGuard,
   installDestructiveGitGuard,
   installInlineImplementationGuard,
@@ -22,6 +24,7 @@ const {
   DESTRUCTIVE_GIT_GUARD_SCRIPT,
   INLINE_IMPLEMENTATION_GUARD_SCRIPT,
 } = require('../delegationReadiness.cjs');
+const { todayFile: opsErrorLogTodayFile } = require('../opsErrorLog.cjs');
 const {
   writeGuardShims,
   shimPath: guardShimPath,
@@ -34,11 +37,13 @@ const REQUIRED_TOOLS = ['scheduler_create_prd', 'session_manager_help'];
 
 beforeEach(() => {
   clearLiveProbeCache();
+  clearGuardsInstalledCache();
 });
 
 const tmpDirs = [];
 afterEach(async () => {
   clearLiveProbeCache();
+  clearGuardsInstalledCache();
   while (tmpDirs.length) {
     const d = tmpDirs.pop();
     await fsp.rm(d, { recursive: true, force: true });
@@ -983,3 +988,153 @@ test('installInlineImplementationGuard: uses the ABSOLUTE stable-shim path, neve
   expect(shimSource).toContain('guard-inline-implementation.cjs');
   expect(shimSource).not.toContain(INLINE_IMPLEMENTATION_GUARD_SCRIPT);
 });
+
+// ─────────────────────────────── ensureGuardsInstalled (self-heal — PRD: guards-auto-install)
+//
+// The "Fix It does nothing" incident: installPrdWriteGuard/installDestructiveGitGuard/
+// installInlineImplementationGuard above were only ever reachable from a human
+// pressing the New Session card's Fix It button, so every project started red
+// forever. ensureGuardsInstalled is the self-heal entry point invoked from the
+// app:delegation-readiness IPC handler BEFORE checkDelegationReadiness runs.
+
+/** Fabricates a linked git worktree pointing at `main`, without shelling out to git. */
+async function makeLinkedWorktreeFixture(mk) {
+  const main = await mk('sm-ensure-guards-main-');
+  fs.mkdirSync(path.join(main, '.git'), { recursive: true });
+  const worktree = await mk('sm-ensure-guards-worktree-');
+  const worktreeName = 'sm-epic-testfixture';
+  const worktreeGitFile = path.join(worktree, '.git');
+  const adminDir = path.join(main, '.git', 'worktrees', worktreeName);
+  fs.mkdirSync(adminDir, { recursive: true });
+  // Round-trip back-reference real `git worktree add` writes — required by
+  // worktreeMainRootOf's verification (see opsRootAbsoluteCwd.test.cjs).
+  fs.writeFileSync(path.join(adminDir, 'gitdir'), `${worktreeGitFile}\n`, 'utf8');
+  fs.writeFileSync(worktreeGitFile, `gitdir: ${adminDir}\n`, 'utf8');
+  return { main, worktree };
+}
+
+test('ensureGuardsInstalled: installs all three guards into a fresh project with no .claude/settings.json', async () => {
+  const cwd = await mkTmp('sm-ensure-guards-fresh-');
+  const homeDir = await mkTmp('sm-ensure-guards-fresh-home-');
+
+  const result = await ensureGuardsInstalled(cwd, { homeDir });
+  expect(result.ok).toBe(true);
+  expect(result.root).toBe(cwd);
+  expect(result.guards['prd-write-guard'].action).toBe('installed');
+  expect(result.guards['destructive-git-guard'].action).toBe('installed');
+  expect(result.guards['inline-implementation-guard'].action).toBe('installed');
+
+  const readiness = await checkDelegationReadiness({ cwd, homeDir });
+  expect(readiness.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
+  expect(readiness.checks.find((c) => c.id === 'destructive-git-guard').ok).toBe(true);
+  expect(readiness.checks.find((c) => c.id === 'inline-implementation-guard').ok).toBe(true);
+}, 15_000);
+
+test('ensureGuardsInstalled: a second call against an already-healthy project performs no write (memoized per cwd)', async () => {
+  const cwd = await mkTmp('sm-ensure-guards-idempotent-');
+  const homeDir = await mkTmp('sm-ensure-guards-idempotent-home-');
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+
+  const first = await ensureGuardsInstalled(cwd, { homeDir });
+  expect(first.ok).toBe(true);
+  const before = fs.statSync(settingsPath).mtimeMs;
+
+  const second = await ensureGuardsInstalled(cwd, { homeDir });
+  expect(second).toBe(first); // memoized — same resolved outcome, no re-run
+  const after = fs.statSync(settingsPath).mtimeMs;
+  expect(after).toBe(before);
+}, 15_000);
+
+test('ensureGuardsInstalled: malformed settings.json does not throw and leaves the guard row red with its manual fixAction intact', async () => {
+  const cwd = await mkTmp('sm-ensure-guards-malformed-');
+  const homeDir = await mkTmp('sm-ensure-guards-malformed-home-');
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  await fsp.mkdir(path.dirname(settingsPath), { recursive: true });
+  await fsp.writeFile(settingsPath, '{ not valid json', 'utf8');
+
+  const result = await ensureGuardsInstalled(cwd, { homeDir });
+  expect(result.ok).toBe(false);
+  expect(result.guards['prd-write-guard']).toMatchObject({ ok: false, action: 'error' });
+  // never silently discarded the human's unparseable file
+  expect(fs.readFileSync(settingsPath, 'utf8')).toBe('{ not valid json');
+
+  const readiness = await checkDelegationReadiness({ cwd, homeDir });
+  const check = readiness.checks.find((c) => c.id === 'prd-write-guard');
+  expect(check.ok).toBe(false);
+  expect(check.fixAction).toBe('install-prd-write-guard');
+}, 15_000);
+
+test('ensureGuardsInstalled: a failed attempt is NOT permanently cached — a later call retries once the underlying problem is fixed', async () => {
+  const cwd = await mkTmp('sm-ensure-guards-retry-');
+  const homeDir = await mkTmp('sm-ensure-guards-retry-home-');
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  await fsp.mkdir(path.dirname(settingsPath), { recursive: true });
+  await fsp.writeFile(settingsPath, '{ not valid json', 'utf8');
+
+  const first = await ensureGuardsInstalled(cwd, { homeDir });
+  expect(first.ok).toBe(false);
+
+  // Fixed by hand, WITHOUT an app restart / cache clear.
+  await fsp.writeFile(settingsPath, '{}', 'utf8');
+
+  const second = await ensureGuardsInstalled(cwd, { homeDir });
+  expect(second.ok).toBe(true);
+  expect(second.guards['prd-write-guard'].action).toBe('installed');
+}, 15_000);
+
+test('ensureGuardsInstalled: a nonexistent cwd never throws, is reported ok:false, and never resurrects the deleted folder', async () => {
+  const homeDir = await mkTmp('sm-ensure-guards-missing-home-');
+  const missingCwd = path.join(os.tmpdir(), `sm-ensure-guards-does-not-exist-${Date.now()}`, 'nested', 'project');
+
+  const result = await ensureGuardsInstalled(missingCwd, { homeDir });
+  expect(result.ok).toBe(false);
+  expect(result.error).toMatch(/does not exist on disk/);
+  // Never `mkdir -p`s a deleted project back into existence as a side effect.
+  expect(fs.existsSync(missingCwd)).toBe(false);
+}, 15_000);
+
+test('ensureGuardsInstalled: preserves a pre-existing unrelated PreToolUse matcher and hook', async () => {
+  const cwd = await mkTmp('sm-ensure-guards-unrelated-');
+  const homeDir = await mkTmp('sm-ensure-guards-unrelated-home-');
+  const settingsPath = path.join(cwd, '.claude', 'settings.json');
+  const unrelatedMatcher = { matcher: 'SomeOtherTool', hooks: [{ type: 'command', command: 'node /some/unrelated-hook.cjs' }] };
+  await writeJson(settingsPath, { someUnrelatedTopLevelKey: 'keep-me', hooks: { PreToolUse: [unrelatedMatcher] } });
+
+  const result = await ensureGuardsInstalled(cwd, { homeDir });
+  expect(result.ok).toBe(true);
+
+  const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  expect(written.someUnrelatedTopLevelKey).toBe('keep-me');
+  expect(written.hooks.PreToolUse).toContainEqual(unrelatedMatcher);
+}, 15_000);
+
+test('ensureGuardsInstalled: a worktree cwd installs into the MAIN tree root, never the ephemeral worktree', async () => {
+  const { main, worktree } = await makeLinkedWorktreeFixture(mkTmp);
+  const homeDir = await mkTmp('sm-ensure-guards-worktree-home-');
+
+  const result = await ensureGuardsInstalled(worktree, { homeDir });
+  expect(result.ok).toBe(true);
+  expect(result.root).toBe(main);
+
+  expect(fs.existsSync(path.join(main, '.claude', 'settings.json'))).toBe(true);
+  expect(fs.existsSync(path.join(worktree, '.claude', 'settings.json'))).toBe(false);
+
+  const readiness = await checkDelegationReadiness({ cwd: main, homeDir });
+  expect(readiness.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
+}, 15_000);
+
+test('ensureGuardsInstalled: records every auto-install attempt in the ops error log under scope "delegationReadiness"', async () => {
+  const cwd = await mkTmp('sm-ensure-guards-logged-');
+  const homeDir = await mkTmp('sm-ensure-guards-logged-home-');
+
+  await ensureGuardsInstalled(cwd, { homeDir });
+
+  const logFile = opsErrorLogTodayFile(cwd);
+  const lines = fs.readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const delegationLines = lines.filter((l) => l.scope === 'delegationReadiness');
+  expect(delegationLines.map((l) => l.meta?.guard)).toEqual(
+    expect.arrayContaining(['prd-write-guard', 'destructive-git-guard', 'inline-implementation-guard']),
+  );
+  expect(delegationLines.every((l) => l.level === 'info')).toBe(true);
+  expect(delegationLines.every((l) => l.meta?.action === 'installed')).toBe(true);
+}, 15_000);

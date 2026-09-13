@@ -14,6 +14,7 @@ import { create } from 'zustand'
 import type { ScheduleStateSnapshot } from '../../preload/api'
 import { toast } from './toast'
 import { withTimeout } from '../lib/withTimeout'
+import { scheduleTimeoutGraceToast, type GraceWindowHandle } from '../lib/timeoutGraceToast'
 
 const SCHEDULE_IPC_TIMEOUT_MS = 5_000
 
@@ -28,33 +29,56 @@ let started = false
 let offSubscription: (() => void) | null = null
 let offStallSubscription: (() => void) | null = null
 let toastedFailure = false
+let pendingGraceHandle: GraceWindowHandle | null = null
 // undefined = not yet seeded; null = no pause; string = pause reason
 let prevPauseReason: string | null | undefined = undefined
+
+function fetchState(): Promise<ScheduleStateSnapshot> {
+  return withTimeout(window.api.schedule.state(), SCHEDULE_IPC_TIMEOUT_MS, 'schedule.state')
+}
 
 export async function startSchedulePolling(): Promise<void> {
   if (started) return
   started = true
   try {
-    const snap = await withTimeout(
-      window.api.schedule.state(),
-      SCHEDULE_IPC_TIMEOUT_MS,
-      'schedule.state',
-    )
+    const snap = await fetchState()
     useScheduleState.setState({ snapshot: snap, loaded: true })
     // Seed without toasting — we don't fire on pre-existing pause at boot.
     prevPauseReason = snap.paused?.reason ?? null
   } catch (e) {
-    if (!toastedFailure) {
+    prevPauseReason = null
+    const handle = scheduleTimeoutGraceToast({
+      error: e,
+      retry: fetchState,
+      onRetrySuccess: (snap) => {
+        pendingGraceHandle = null
+        useScheduleState.setState({ snapshot: snap, loaded: true })
+        prevPauseReason = snap.paused?.reason ?? null
+      },
+      onStillFailing: (message) => {
+        pendingGraceHandle = null
+        if (!toastedFailure) {
+          toastedFailure = true
+          toast.error(`Scheduler state hydrate: ${message}`)
+        }
+      },
+    })
+    if (handle) {
+      pendingGraceHandle = handle
+    } else if (!toastedFailure) {
       toastedFailure = true
       const msg = e instanceof Error ? e.message : String(e)
       toast.error(`Scheduler state hydrate failed: ${msg}`)
     }
-    prevPauseReason = null
   }
   // Install the live subscription regardless of whether the initial hydrate
   // succeeded — if the first state() timed out, broadcasts will still drive
   // useScheduleState once main starts responding.
   offSubscription = window.api.schedule.onState((s) => {
+    if (pendingGraceHandle) {
+      pendingGraceHandle.cancel()
+      pendingGraceHandle = null
+    }
     const incoming = s.paused?.reason ?? null
     if (prevPauseReason !== undefined && incoming !== prevPauseReason) {
       if (incoming === 'auth') {
@@ -87,6 +111,10 @@ export function stopSchedulePolling(): void {
   if (offStallSubscription) {
     offStallSubscription()
     offStallSubscription = null
+  }
+  if (pendingGraceHandle) {
+    pendingGraceHandle.cancel()
+    pendingGraceHandle = null
   }
   started = false
   prevPauseReason = undefined

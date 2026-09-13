@@ -18,6 +18,7 @@ import { create } from 'zustand'
 import type { BillingData, BillingFetchResult } from '../../preload/api'
 import { toast } from './toast'
 import { withTimeout } from '../lib/withTimeout'
+import { scheduleTimeoutGraceToast, type GraceWindowHandle } from '../lib/timeoutGraceToast'
 
 const BILLING_REFRESH_MS = 60_000
 const BILLING_IPC_TIMEOUT_MS = 5_000
@@ -33,22 +34,52 @@ let started = false
 let timer: ReturnType<typeof setTimeout> | null = null
 let lastKind: BillingFetchResult['kind'] | null = null
 let toastedFailure = false
+let pendingGraceHandle: GraceWindowHandle | null = null
+
+function fetchBilling(): Promise<BillingFetchResult> {
+  return withTimeout(window.api.billing.fetch(), BILLING_IPC_TIMEOUT_MS, 'billing.fetch')
+}
+
+function applyResult(r: BillingFetchResult): void {
+  useBilling.setState({ data: r, refreshing: false })
+  lastKind = r.kind
+}
 
 async function tick(): Promise<void> {
   useBilling.setState({ refreshing: true })
   let next = BILLING_REFRESH_MS
   try {
-    const r = await withTimeout(window.api.billing.fetch(), BILLING_IPC_TIMEOUT_MS, 'billing.fetch')
-    useBilling.setState({ data: r, refreshing: false })
+    const r = await fetchBilling()
+    if (pendingGraceHandle) {
+      pendingGraceHandle.cancel()
+      pendingGraceHandle = null
+    }
+    applyResult(r)
     if (r.kind === 'transient') {
       next = lastKind === 'transient' ? 30_000 : 5_000
     } else if (r.kind === 'auth' || r.kind === 'meter_rate_limited') {
       next = 30_000
     }
-    lastKind = r.kind
   } catch (e) {
     useBilling.setState({ refreshing: false })
-    if (!toastedFailure) {
+    const handle = scheduleTimeoutGraceToast({
+      error: e,
+      retry: fetchBilling,
+      onRetrySuccess: (r) => {
+        pendingGraceHandle = null
+        applyResult(r)
+      },
+      onStillFailing: (message) => {
+        pendingGraceHandle = null
+        if (!toastedFailure) {
+          toastedFailure = true
+          toast.warn(`Billing usage fetch: ${message}`)
+        }
+      },
+    })
+    if (handle) {
+      pendingGraceHandle = handle
+    } else if (!toastedFailure) {
       toastedFailure = true
       const msg = e instanceof Error ? e.message : String(e)
       toast.warn(`Billing usage fetch failed: ${msg}`)
@@ -82,6 +113,10 @@ export function refreshBilling(): void {
   if (timer !== null) {
     clearTimeout(timer)
     timer = null
+  }
+  if (pendingGraceHandle) {
+    pendingGraceHandle.cancel()
+    pendingGraceHandle = null
   }
   tick()
 }

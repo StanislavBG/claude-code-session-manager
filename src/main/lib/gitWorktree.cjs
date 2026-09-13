@@ -481,29 +481,58 @@ async function sweepStaleWorktreeCheckouts(kind, opts = {}) {
  * copy of the human's WIP stays in `cwd` the whole time. Nothing here ever
  * `git add`s or commits the carried paths on the job's behalf, and nothing
  * ever restores them back into `cwd` — they were never removed from it.
+ *
+ * The diff itself is captured via `git diff --output=<file>` so git writes
+ * the patch straight to disk — never through Node's stdout buffer. A prior
+ * version piped the patch through `execFile`'s default-`maxBuffer` stdout
+ * capture, which overflowed on a real dirty tree of ~240 changed paths
+ * (`stdout maxBuffer length exceeded`, job 1192) and silently fell back to
+ * running the job in the SHARED working tree — the exact moment isolation
+ * matters most. `--output` removes the buffer ceiling entirely regardless of
+ * how large the tree's outstanding diff is. The temp patch file lives
+ * inside `dir` (the job's own fresh worktree checkout, not a bare
+ * `os.tmpdir()` path) so it is guaranteed to be cleaned up either by the
+ * explicit `fsp.rm` below or, on any earlier failure, by the caller tearing
+ * the whole `dir` down.
  */
 async function captureAndCarryBaseDiff({ cwd, dir }) {
   let paths = [];
-  let patch = '';
   try {
     const nameOut = await execGit(['diff', 'HEAD', '--name-only'], { cwd, timeout: 15_000 });
     paths = nameOut.split('\n').map((l) => l.trim()).filter(Boolean);
-    patch = await execGit(['diff', 'HEAD', '--binary'], { cwd, timeout: 30_000 });
   } catch (e) {
-    return { ok: false, reason: `capturing base diff failed: ${(e && (e.stderrText || e.message)) || e}` };
+    return { ok: false, reason: `listing changed paths failed: ${(e && (e.stderrText || e.message)) || e}` };
   }
-  if (!patch || !patch.trim()) return { ok: true, paths: [] };
 
-  const patchFile = path.join(os.tmpdir(), `sm-worktree-carry-${crypto.randomBytes(8).toString('hex')}.patch`);
+  // Everything from here on operates on a real (or attempted) file at
+  // `patchFile` — wrapped in one try/finally so the temp file is removed on
+  // EVERY exit path, including a `git diff` that errors after partially
+  // writing it, not just the clean-success path.
+  const patchFile = path.join(dir, `.sm-worktree-carry-${crypto.randomBytes(8).toString('hex')}.patch`);
   try {
-    await fsp.writeFile(patchFile, patch, 'utf8');
-    await execGit(['apply', '--binary', patchFile], { cwd: dir, timeout: 30_000 });
-  } catch (e) {
-    return { ok: false, reason: `git apply failed: ${(e && (e.stderrText || e.message)) || e}` };
+    try {
+      await execGit(['diff', 'HEAD', '--binary', `--output=${patchFile}`], { cwd, timeout: 120_000 });
+    } catch (e) {
+      return { ok: false, reason: `capturing base diff failed: ${(e && (e.stderrText || e.message)) || e}` };
+    }
+
+    let stat;
+    try {
+      stat = await fsp.stat(patchFile);
+    } catch (e) {
+      return { ok: false, reason: `reading captured diff file failed: ${(e && e.message) || e}` };
+    }
+    if (stat.size === 0) return { ok: true, paths: [] };
+
+    try {
+      await execGit(['apply', '--binary', patchFile], { cwd: dir, timeout: 30_000 });
+    } catch (e) {
+      return { ok: false, reason: `git apply failed: ${(e && (e.stderrText || e.message)) || e}` };
+    }
+    return { ok: true, paths };
   } finally {
     try { await fsp.rm(patchFile, { force: true }); } catch { /* best-effort */ }
   }
-  return { ok: true, paths };
 }
 
 /**

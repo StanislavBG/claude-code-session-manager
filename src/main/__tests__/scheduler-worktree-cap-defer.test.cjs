@@ -187,6 +187,20 @@ test('a non-git cwd still falls back to running in place (unchanged behaviour �
     expect(row.worktreeFallbackReason).toMatch(/not a git repository/);
     // Ran IN PLACE — the marker landed directly in projectCwd, not a worktree.
     expect(fs.existsSync(path.join(projectCwd, 'ran-here.marker'))).toBe(true);
+
+    // A job losing worktree isolation must never be a silent downgrade
+    // discoverable only by reading queue.json afterwards — it must also land
+    // as a warn line in the durable ops error log, naming the slug, cwd, and
+    // reason.
+    const { todayFile } = require('../lib/opsErrorLog.cjs');
+    const errorLogPath = todayFile(projectCwd);
+    expect(fs.existsSync(errorLogPath)).toBe(true);
+    const logLines = fs.readFileSync(errorLogPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    const fallbackLine = logLines.find((l) => l.scope === 'scheduler' && l.level === 'warn' && l.message.includes(slug));
+    expect(fallbackLine).toBeTruthy();
+    expect(fallbackLine.message).toMatch(/SHARED working tree/);
+    expect(fallbackLine.message).toMatch(/not a git repository/);
+    expect(fallbackLine.meta).toMatchObject({ slug, cwd: projectCwd, reason: expect.stringMatching(/not a git repository/) });
   } finally {
     fs.rmSync(projectCwd, { recursive: true, force: true });
     fs.rmSync(runDir, { recursive: true, force: true });

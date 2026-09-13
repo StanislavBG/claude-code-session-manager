@@ -300,6 +300,95 @@ test('[job] carry-over failure (git apply cannot apply) degrades cleanly: worktr
   }
 });
 
+// ──────────────────────────────────────────── PRD: stream the base-WIP diff capture (job 1192)
+
+test('[job] a wide dirty tree (300+ changed paths incl. a multi-MB file) captures and carries over without a maxBuffer overflow', async () => {
+  const files = [];
+  for (let i = 0; i < 300; i++) {
+    const rel = `wide-${i}.txt`;
+    fs.writeFileSync(path.join(repoCwd, rel), `initial ${i}\n`, 'utf8');
+    files.push(rel);
+  }
+  const bigRel = 'big-file.bin';
+  fs.writeFileSync(path.join(repoCwd, bigRel), Buffer.alloc(1024, 1));
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'wide baseline'], repoCwd);
+
+  // Dirty every tracked file (uncommitted tracked edits) and grow the binary
+  // file well past Node's execFile default maxBuffer (1MB) — the exact shape
+  // that overflowed the old buffered capture (job 1192: ~240 dirty paths).
+  for (const rel of files) fs.appendFileSync(path.join(repoCwd, rel), 'dirtied\n', 'utf8');
+  const bigBuf = Buffer.alloc(3 * 1024 * 1024); // 3MB of NUL bytes — git detects this as binary
+  fs.writeFileSync(path.join(repoCwd, bigRel), bigBuf);
+
+  const result = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'wide-tree' });
+  expect(result.ok).toBe(true);
+  expect(result.carriedPaths.length).toBe(files.length + 1);
+  expect(fs.readFileSync(path.join(result.dir, files[0]), 'utf8')).toContain('dirtied');
+  expect(Buffer.compare(fs.readFileSync(path.join(result.dir, bigRel)), bigBuf)).toBe(0);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: result.dir, branch: result.branch });
+}, 30_000);
+
+test('[job] a renamed file and a mutated binary file survive the capture/apply round trip using the same flags as production', async () => {
+  const binRel = 'asset.bin';
+  const binInitial = Buffer.from([0, 1, 2, 3, 4, 0, 255, 254]);
+  fs.writeFileSync(path.join(repoCwd, binRel), binInitial);
+  fs.writeFileSync(path.join(repoCwd, 'to-rename.txt'), 'original name content\n', 'utf8');
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'binary + rename baseline'], repoCwd);
+
+  // Dirty tree: a tracked rename plus a mutated binary file, both uncommitted.
+  git(['mv', 'to-rename.txt', 'renamed.txt'], repoCwd);
+  const binChanged = Buffer.from([9, 8, 7, 0, 6, 5, 0, 4]);
+  fs.writeFileSync(path.join(repoCwd, binRel), binChanged);
+
+  const result = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'rename-binary' });
+  expect(result.ok).toBe(true);
+  expect(fs.existsSync(path.join(result.dir, 'to-rename.txt'))).toBe(false);
+  expect(fs.readFileSync(path.join(result.dir, 'renamed.txt'), 'utf8')).toBe('original name content\n');
+  expect(Buffer.compare(fs.readFileSync(path.join(result.dir, binRel)), binChanged)).toBe(0);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: result.dir, branch: result.branch });
+});
+
+test('[job] a capture that cannot write its diff file (target dir missing) falls back with a specific reason, never the old generic maxBuffer message', async () => {
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'uncommitted tracked edit\n', 'utf8');
+  const bogusDir = path.join(tmpRoot, 'does-not-exist');
+  const result = await gitWorktree.captureAndCarryBaseDiff({ cwd: repoCwd, dir: bogusDir });
+  expect(result.ok).toBe(false);
+  expect(result.reason).toMatch(/capturing base diff failed/);
+  expect(result.reason).not.toMatch(/maxBuffer/i);
+  expect(fs.existsSync(bogusDir)).toBe(false); // nothing leaked into a directory that never existed
+});
+
+test('[job] the temp diff file is removed after carry-over on both the success and the git-apply-failure paths', async () => {
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'uncommitted tracked edit\n', 'utf8');
+  const success = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'cleanup-ok' });
+  expect(success.ok).toBe(true);
+  expect(fs.readdirSync(success.dir).filter((f) => f.startsWith('.sm-worktree-carry-'))).toEqual([]);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: success.dir, branch: success.branch });
+
+  // Force a git-apply failure on a genuine clean-base worktree by making the
+  // target file read-only before the capture/apply call, so the patch writes
+  // fine but applying it fails — the finally block must still remove the temp
+  // patch file even though apply itself errored.
+  const clean = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'cleanup-fail' });
+  expect(clean.ok).toBe(true);
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'another uncommitted tracked edit\n', 'utf8');
+  const targetFile = path.join(clean.dir, 'README.md');
+  fs.chmodSync(targetFile, 0o444);
+  try {
+    const fail = await gitWorktree.captureAndCarryBaseDiff({ cwd: repoCwd, dir: clean.dir });
+    expect(fail.ok).toBe(false);
+    expect(fail.reason).toMatch(/git apply failed/);
+  } finally {
+    fs.chmodSync(targetFile, 0o644);
+  }
+  expect(fs.readdirSync(clean.dir).filter((f) => f.startsWith('.sm-worktree-carry-'))).toEqual([]);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: clean.dir, branch: clean.branch });
+}, 30_000);
+
 test('[job] falls back once the concurrency cap is reached, and recovers after cleanup', async () => {
   process.env.SM_JOB_WORKTREE_MAX = '1';
   const first = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'cap-1' });

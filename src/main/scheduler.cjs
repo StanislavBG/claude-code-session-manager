@@ -5798,6 +5798,22 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       console.log(`[scheduler] ${job.slug}: isolated in worktree ${worktree.dir} (branch ${worktree.branch})`);
     } else {
       console.log(`[scheduler] ${job.slug}: running in main tree (worktree not used: ${worktree.reason})`);
+      // A job losing worktree isolation must never be a silent downgrade
+      // discoverable only by reading queue.json afterwards — every genuine
+      // fallback (never the deliberate SM_JOB_WORKTREE_DISABLE opt-out) is
+      // logged at warn in the durable ops error log, with the job slug, cwd,
+      // and specific reason attached.
+      if (!jobWorktree.isWorktreeDisabled()) {
+        try {
+          appendError({
+            cwd: job.cwd || defaultCwd,
+            scope: 'scheduler',
+            level: 'warn',
+            message: `${job.slug}: worktree isolation fell back to the SHARED working tree — ${worktree.reason}`,
+            meta: { slug: job.slug, cwd: job.cwd || defaultCwd, reason: worktree.reason },
+          });
+        } catch { /* durable logging must never break dispatch */ }
+      }
     }
     // dispatchPhase stamp folded into a single unconditional mutate covering
     // both branches above — the degraded-isolation fallback flag (skipped

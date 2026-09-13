@@ -163,6 +163,25 @@ test('appendHistory dedupes by slug+runId against what is already on disk', asyn
   expect(read.length).toBe(1);
 });
 
+test('appendHistory: a needs_review ledger line and a terminal row sharing slug+runId do NOT dedupe against each other', async () => {
+  // An entry and its resolution line (needsReviewLedger.cjs) deliberately
+  // reference the SAME runId as each other — and a slug's terminal archive
+  // row can later reuse that same runId too (same run, different `kind`).
+  // jobKey must bucket by kind or the second/third write looks like a
+  // crash-replay of the first and silently never lands.
+  const entryLine = { kind: 'needs_review_entry', slug: 'ledger-dup', runId: 'shared-run', at: new Date(NOW).toISOString(), reason: 'uncommitted_changes', source: 'spawnJob:finalize' };
+  const resolutionLine = { kind: 'needs_review_resolution', slug: 'ledger-dup', runId: 'shared-run', at: new Date(NOW).toISOString(), resolvedTo: 'completed', ladderRung: 'reverify', source: 'reverifyNeedsReview:heal', dwellMs: 1000 };
+  const terminalLine = old({ slug: 'ledger-dup', runId: 'shared-run' });
+  const r1 = await queueHistory.appendHistory([entryLine]);
+  const r2 = await queueHistory.appendHistory([resolutionLine]);
+  const r3 = await queueHistory.appendHistory([terminalLine]);
+  expect(r1.appended).toBe(1);
+  expect(r2.appended).toBe(1);
+  expect(r3.appended).toBe(1);
+  const read = await queueHistory.readHistory({ limit: 10 });
+  expect(read.filter((j) => j.slug === 'ledger-dup')).toHaveLength(3);
+});
+
 test('readHistory respects limit and returns [] when file is absent', async () => {
   const empty = await queueHistory.readHistory({ limit: 5 });
   expect(empty).toEqual([]);
@@ -220,6 +239,18 @@ test('selectHistoryJobs: default historyEntries=[] preserves old call shape', ()
   expect(merged.map((j) => j.slug)).toEqual(['01-fresh']);
 });
 
+test('selectHistoryJobs: needs_review ledger lines (kind !== "terminal") are excluded from the merged result', () => {
+  // The History view renders ScheduleJob-shaped rows (status, exitCode, ...)
+  // — a needs_review_entry/needs_review_resolution line (needsReviewLedger.cjs)
+  // has neither, and must not slip through as a statusless row in that table.
+  const { selectHistoryJobs } = require('../scheduler.cjs');
+  const terminalEntry = old({ slug: 'hist-1', runId: 'rhist1' });
+  const ledgerEntry = { kind: 'needs_review_entry', slug: 'ledger-1', runId: 'rledger1', at: new Date(NOW).toISOString(), reason: 'uncommitted_changes', source: 'spawnJob:finalize' };
+  const ledgerResolution = { kind: 'needs_review_resolution', slug: 'ledger-1', runId: 'rledger1', at: new Date(NOW).toISOString(), resolvedTo: 'completed', ladderRung: 'reverify', source: 'reverifyNeedsReview:heal', dwellMs: 500 };
+  const merged = selectHistoryJobs([], 10, [terminalEntry, ledgerEntry, ledgerResolution]);
+  expect(merged.map((j) => j.slug)).toEqual(['hist-1']);
+});
+
 // ---------- historyTerminalBySlug ----------
 //
 // Guards against scheduler.cjs's reconcile() resurrecting an already-
@@ -258,6 +289,22 @@ test('historyTerminalBySlug: cache invalidates after a new appendHistory call (m
   expect(second.has('cache-2')).toBe(true);
 });
 
+test('historyTerminalBySlug: ignores needs_review ledger lines, even a LATER one for an already-terminal slug', async () => {
+  // Chronological order matters here: the terminal row lands first, and a
+  // needs_review_entry for the SAME slug (a later re-run parking again)
+  // lands after it. Without the kind guard, last-line-wins would replace
+  // the true 'completed' record with a status-less ledger row.
+  const terminal = old({ slug: 'mixed-1', status: 'completed', runId: 'rterm' });
+  await queueHistory.appendHistory([terminal]);
+  await queueHistory.appendHistory([{
+    kind: 'needs_review_entry', slug: 'mixed-1', runId: 'rlater', cwd: null,
+    at: new Date(NOW).toISOString(), reason: 'uncommitted_changes', source: 'spawnJob:finalize',
+  }]);
+
+  const map = await queueHistory.historyTerminalBySlug();
+  expect(map.get('mixed-1')).toEqual({ status: 'completed', finishedAt: terminal.finishedAt, landedCommit: null });
+});
+
 // ---------- completedSlugsForCwd (PRD 1122) ----------
 //
 // Feeds scheduler.cjs's computeDepHistorySatisfaction: a dependsOn slug with
@@ -289,4 +336,20 @@ test('completedSlugsForCwd: returns an empty Set when the project has no history
   const freshCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-1122-fresh-'));
   const slugs = await queueHistory.completedSlugsForCwd(freshCwd);
   expect(slugs.size).toBe(0);
+});
+
+test('completedSlugsForCwd: ignores needs_review ledger lines even when they are the newest line for a completed slug', async () => {
+  const projectCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-1122-ledger-'));
+  await queueHistory.appendHistory([
+    old({ slug: '900-base', status: 'completed', runId: 'ra', cwd: projectCwd }),
+  ]);
+  // A later needs_review park for a NEW run of the same slug must not blank
+  // out the earlier 'completed' record read by completedSlugsForCwd.
+  await queueHistory.appendHistory([{
+    kind: 'needs_review_entry', slug: '900-base', runId: 'rb', cwd: projectCwd,
+    at: new Date(NOW).toISOString(), reason: 'uncommitted_changes', source: 'spawnJob:finalize',
+  }]);
+
+  const slugs = await queueHistory.completedSlugsForCwd(projectCwd);
+  expect(slugs.has('900-base')).toBe(true);
 });

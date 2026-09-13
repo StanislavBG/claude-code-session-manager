@@ -8004,6 +8004,12 @@ function selectHistoryJobs(jobs, limit, historyEntries = []) {
   const seen = new Set(hot.map((j) => `${j.slug}|${j.runId ?? ''}`));
   const archived = (Array.isArray(historyEntries) ? historyEntries : []).filter((j) => {
     if (!j) return false;
+    // needs_review_entry/needs_review_resolution lines (needsReviewLedger.cjs)
+    // share history.jsonl with terminal job rows but carry no `status` — the
+    // History view (SchedulerHistoryView.tsx) renders ScheduleJob rows, so a
+    // ledger line slipping through here would show up as a statusless,
+    // meaningless row in that table.
+    if (j.kind && j.kind !== 'terminal') return false;
     const key = `${j.slug}|${j.runId ?? ''}`;
     if (seen.has(key)) return false;
     seen.add(key);

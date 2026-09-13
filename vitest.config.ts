@@ -28,6 +28,7 @@ export default defineConfig({
       'src/main/__tests__/web-remote-e2e-pinning.test.cjs',
       'src/main/__tests__/docEdit.test.cjs',
       'src/main/__tests__/queueHistory.test.cjs',
+      'src/main/__tests__/needsReviewLedger.test.cjs',
       'src/main/__tests__/queueOpsAutoArchive.test.cjs',
       'src/main/__tests__/prdParserHighWater.test.cjs',
       'src/main/__tests__/broadcastCoalescer.test.cjs',

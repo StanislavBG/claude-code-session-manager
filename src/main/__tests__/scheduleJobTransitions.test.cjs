@@ -6,7 +6,7 @@
  */
 'use strict';
 
-import { test, expect } from 'vitest';
+import { test, expect, vi, beforeEach, afterEach } from 'vitest';
 const fs = require('node:fs');
 const crypto = require('node:crypto');
 const {
@@ -17,6 +17,7 @@ const {
   _resetRefusedTransitionCountForTests,
 } = require('../lib/scheduleJobTransitions.cjs');
 const auditLog = require('../lib/auditLog.cjs');
+const queueHistory = require('../lib/queueHistory.cjs');
 
 function uniqueSlug(label) {
   return `test-${label}-${crypto.randomUUID().slice(0, 8)}`;
@@ -174,4 +175,103 @@ test('_resetRefusedTransitionCountForTests resets the counter', () => {
   expect(getRefusedTransitionCount()).toBeGreaterThan(0);
   _resetRefusedTransitionCountForTests();
   expect(getRefusedTransitionCount()).toBe(0);
+});
+
+// ---------- needs_review ledger (PRD: needs_review durability) ----------
+//
+// transitionJob is the ONE place every needs_review entry/resolution is
+// decided (this file's own header comment) — these tests exercise that
+// hook directly rather than going through scheduler.cjs's many call sites.
+// queueHistory.appendHistory is mocked so these tests never touch disk or
+// race its own fire-and-forget promise; queueHistory.test.cjs already
+// covers appendHistory's real I/O.
+
+let appendHistorySpy;
+
+beforeEach(() => {
+  appendHistorySpy = vi.spyOn(queueHistory, 'appendHistory').mockResolvedValue({ appended: 1 });
+});
+
+afterEach(() => {
+  appendHistorySpy.mockRestore();
+});
+
+test('needs_review entry: transitioning INTO needs_review appends a kind:needs_review_entry ledger line', () => {
+  const slug = uniqueSlug('nr-entry');
+  const job = { slug, cwd: '/tmp/proj', status: 'running', runId: 'run-abc', verifierVerdict: 'uncommitted_changes' };
+
+  transitionJob(job, 'needs_review', { reason: 'finish protocol incomplete', source: 'spawnJob:finalize' });
+
+  expect(appendHistorySpy).toHaveBeenCalledTimes(1);
+  const [lines] = appendHistorySpy.mock.calls[0];
+  expect(lines).toHaveLength(1);
+  expect(lines[0]).toMatchObject({
+    kind: 'needs_review_entry',
+    slug,
+    cwd: '/tmp/proj',
+    runId: 'run-abc',
+    reason: 'uncommitted_changes',
+    source: 'spawnJob:finalize',
+  });
+  expect(typeof lines[0].at).toBe('string');
+  // Episode bookkeeping stamped on the job so a later resolution can
+  // reference this SAME runId even if job.runId is reassigned meanwhile.
+  expect(job.needsReviewEntryRunId).toBe('run-abc');
+  expect(job.needsReviewEnteredAt).toBe(lines[0].at);
+});
+
+test('needs_review resolution: transitioning OUT of needs_review appends a paired line referencing the ENTRY runId, with dwellMs', () => {
+  const slug = uniqueSlug('nr-resolve');
+  const job = { slug, cwd: '/tmp/proj', status: 'running', runId: 'run-1' };
+
+  transitionJob(job, 'needs_review', { reason: 'park', source: 'spawnJob:finalize' });
+  const enteredAt = job.needsReviewEnteredAt;
+
+  // A resume-recovery re-dispatch (or any later attempt) mints a FRESH runId
+  // before this episode resolves — the resolution must still reference the
+  // ENTRY's runId, not whatever the job carries now.
+  job.runId = 'run-2';
+  transitionJob(job, 'completed', { reason: 'boot reverify: stale needs_review healed', source: 'reverifyNeedsReview:heal' });
+
+  expect(appendHistorySpy).toHaveBeenCalledTimes(2);
+  const [resolutionLines] = appendHistorySpy.mock.calls[1];
+  expect(resolutionLines).toHaveLength(1);
+  const resolution = resolutionLines[0];
+  expect(resolution.kind).toBe('needs_review_resolution');
+  expect(resolution.runId).toBe('run-1'); // the ENTRY's runId
+  expect(resolution.resolvedTo).toBe('completed');
+  expect(resolution.ladderRung).toBe('reverify');
+  expect(typeof resolution.dwellMs).toBe('number');
+  expect(resolution.dwellMs).toBeGreaterThanOrEqual(0);
+  expect(Date.parse(enteredAt) + resolution.dwellMs).toBe(Date.parse(resolution.at));
+
+  // Episode bookkeeping cleared once resolved.
+  expect(job.needsReviewEntryRunId).toBeUndefined();
+  expect(job.needsReviewEnteredAt).toBeUndefined();
+});
+
+test('a slug that parks twice produces two independent entry/resolution pairs, not one merged episode', () => {
+  const { reduceNeedsReviewLedger } = require('../lib/needsReviewLedger.cjs');
+  const slug = uniqueSlug('nr-twice');
+  const job = { slug, cwd: '/tmp/proj', status: 'running', runId: 'run-A' };
+
+  transitionJob(job, 'needs_review', { reason: 'park 1', source: 'spawnJob:finalize' });
+  transitionJob(job, 'pending', { reason: 'manual reset', source: 'ipc:schedule:reset-job' });
+  transitionJob(job, 'running', { reason: 'redispatched', source: 'spawnJob:dispatch' });
+  job.runId = 'run-B';
+  transitionJob(job, 'needs_review', { reason: 'park 2', source: 'spawnJob:finalize' });
+  transitionJob(job, 'completed', { reason: 'healed', source: 'reverifyNeedsReview:heal' });
+
+  const ledgerLines = appendHistorySpy.mock.calls.map((call) => call[0][0]);
+  const entries = ledgerLines.filter((l) => l.kind === 'needs_review_entry');
+  const resolutions = ledgerLines.filter((l) => l.kind === 'needs_review_resolution');
+  expect(entries).toHaveLength(2);
+  expect(resolutions).toHaveLength(2);
+  expect(entries.map((l) => l.runId).sort()).toEqual(['run-A', 'run-B']);
+  expect(resolutions.map((l) => l.runId).sort()).toEqual(['run-A', 'run-B']);
+
+  const rollup = reduceNeedsReviewLedger(ledgerLines);
+  expect(rollup.unresolvedCount).toBe(0);
+  expect(rollup.byLadderRung['manual-reset']).toBe(1);
+  expect(rollup.byLadderRung['reverify']).toBe(1);
 });

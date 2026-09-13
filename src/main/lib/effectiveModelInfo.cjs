@@ -142,7 +142,15 @@ function readHistoryEntriesForCwd(cwd, deps) {
   for (const line of text.split('\n')) {
     if (!line.trim()) continue;
     try {
-      entries.push(JSON.parse(line));
+      const j = JSON.parse(line);
+      // needs_review_entry/needs_review_resolution lines (needsReviewLedger.cjs)
+      // share history.jsonl with terminal job rows but carry no `agentType` —
+      // findLatestSchedulerModel's own `j.agentType === agentType` filter
+      // already excludes them, but skip explicitly here too so this reader
+      // stays correct even if a future ledger line shape happens to pick up
+      // an agentType-shaped field.
+      if (j?.kind && j.kind !== 'terminal') continue;
+      entries.push(j);
     } catch {
       // corrupt/partial line — skip
     }

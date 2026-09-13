@@ -124,6 +124,14 @@ const ScheduleJobSchema = z
     // finalize (both the normal completion path and reapDeadRunningJobs).
     dispatchPhase: z.string().optional(),
     dispatchPhaseAt: z.string().optional(),
+    // needs_review episode bookkeeping (needsReviewLedger.cjs / PRD: needs_review
+    // durability): stamped by scheduleJobTransitions.cjs the instant a job
+    // transitions INTO 'needs_review', so the RESOLUTION line written when it
+    // later transitions back OUT can reference the same runId and compute a
+    // truthful dwell time — same lifecycle as heldReason/dispatchPhase (stamped
+    // at entry, deleted at resolution).
+    needsReviewEntryRunId: z.string().nullable().optional(),
+    needsReviewEnteredAt: z.string().nullable().optional(),
   })
   .passthrough();
 

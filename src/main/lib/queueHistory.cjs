@@ -53,8 +53,15 @@ function historyPathFor(entry) {
   return HISTORY_PATH;
 }
 
+// `kind` keeps a needs_review_entry/needs_review_resolution line (see
+// needsReviewLedger.cjs) from colliding with a TERMINAL row that shares the
+// same slug+runId — an entry and its resolution deliberately reference the
+// SAME runId (that's how they're paired), so without `kind` in the dedupe
+// key the second append would look like a replay of the first and silently
+// never be written. Absent `kind` (every existing terminal row) buckets
+// under 'terminal', so today's on-disk rows and callers are unaffected.
 function jobKey(job) {
-  return `${job?.slug ?? ''}|${job?.runId ?? ''}`;
+  return `${job?.slug ?? ''}|${job?.runId ?? ''}|${job?.kind ?? 'terminal'}`;
 }
 
 /**
@@ -259,6 +266,12 @@ async function historyTerminalBySlug() {
       if (!line.trim()) continue;
       try {
         const j = JSON.parse(line);
+        // needs_review_entry/needs_review_resolution lines (needsReviewLedger.cjs)
+        // share this file but aren't a job's terminal record — skip them, or a
+        // needs_review episode logged for a slug AFTER its real terminal row
+        // (e.g. it re-parked on a later run) would overwrite a true 'completed'
+        // with a kind-less, status-less row read as "not terminal".
+        if (j?.kind && j.kind !== 'terminal') continue;
         if (j?.slug) map.set(j.slug, { status: j.status, finishedAt: j.finishedAt, landedCommit: j.landedCommit ?? null });
       } catch {
         // corrupt/partial line — ignore
@@ -301,6 +314,11 @@ async function completedSlugsForCwd(cwd) {
     if (!line.trim()) continue;
     try {
       const j = JSON.parse(line);
+      // Skip needs_review ledger lines (needsReviewLedger.cjs) — they carry
+      // no `status` field, so treating them as a real record would let a
+      // later needs_review park/resolution silently blank out this slug's
+      // last true terminal status.
+      if (j?.kind && j.kind !== 'terminal') continue;
       if (j?.slug) statusBySlug.set(j.slug, j.status);
     } catch {
       // corrupt/partial line — ignore

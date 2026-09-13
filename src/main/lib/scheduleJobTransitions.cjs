@@ -32,6 +32,8 @@
 
 const { appendAuditEvent } = require('./auditLog.cjs');
 const telemetryCounters = require('./telemetryCounters.cjs');
+const queueHistory = require('./queueHistory.cjs');
+const { buildNeedsReviewEntryLine, buildNeedsReviewResolutionLine } = require('./needsReviewLedger.cjs');
 
 // A run genuinely finished when it leaves 'running' for one of these —
 // distinct from every other legal edge in LEGAL_TRANSITIONS (retries,
@@ -193,6 +195,37 @@ function transitionJob(job, toStatus, { reason, source, allowAnyFrom = false } =
 
   if (from === 'running' && FINISH_STATUSES.has(toStatus)) {
     telemetryCounters.trackSchedulerJobFinish({ status: toStatus });
+  }
+
+  // needs_review ledger (PRD: needs_review durability). This IS the single
+  // funnel every needs_review transition — entry or resolution — passes
+  // through (see this file's own header comment: transitionJob is the ONE
+  // place `status` is assigned), so hooking here, rather than any one of
+  // needs_review's several distinct entry call sites in scheduler.cjs,
+  // guarantees no path can bypass it.
+  //
+  // Fire-and-forget, exactly like every other best-effort side-channel write
+  // in this codebase (rcaReport.cjs, auditLog.cjs's own posture) — a ledger
+  // write failure must never fail or delay the transition it's recording.
+  if (toStatus === 'needs_review' && from !== 'needs_review') {
+    // ENTRY: stamp the episode's runId/enteredAt on the job itself so the
+    // RESOLUTION line (below) can reference the SAME runId even if the job's
+    // own `runId` is reassigned in between (e.g. a resume-recovery
+    // re-dispatch mints a fresh one before this episode resolves).
+    job.needsReviewEntryRunId = job.runId ?? null;
+    job.needsReviewEnteredAt = entry.at;
+    queueHistory.appendHistory([buildNeedsReviewEntryLine(job, entry)]).catch((e) => {
+      console.error('[scheduleJobTransitions] failed to append needs_review entry', e?.message ?? String(e));
+    });
+  } else if (from === 'needs_review' && toStatus !== 'needs_review') {
+    // RESOLUTION: read the episode stamped at entry, then clear it — the
+    // episode is over regardless of what this resolution line looks like.
+    const episode = { runId: job.needsReviewEntryRunId ?? null, enteredAt: job.needsReviewEnteredAt ?? null };
+    delete job.needsReviewEntryRunId;
+    delete job.needsReviewEnteredAt;
+    queueHistory.appendHistory([buildNeedsReviewResolutionLine(job, entry, episode)]).catch((e) => {
+      console.error('[scheduleJobTransitions] failed to append needs_review resolution', e?.message ?? String(e));
+    });
   }
 
   return true;

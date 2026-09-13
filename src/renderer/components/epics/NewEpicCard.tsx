@@ -27,25 +27,47 @@ type GuardFixAction = NonNullable<DelegationReadinessCheck['fixAction']>
 interface GuardInstaller {
   name: string
   testId: string
+  // Checked BEFORE `install` is ever called, so a preload that predates the
+  // bundle (`window.api.app.installXGuard` simply absent) surfaces as the
+  // same explicit restart toast as a live IPC rejection, never a raw
+  // "install is not a function" TypeError thrown out of the click handler.
+  available: () => boolean
   install: (cwd: string) => Promise<InstallGuardResult>
 }
 const GUARD_INSTALLERS: Record<GuardFixAction, GuardInstaller> = {
   'install-prd-write-guard': {
     name: 'PRD-write guard',
     testId: 'delegation-readiness-fix-prd-write-guard',
+    available: () => typeof window.api?.app?.installPrdWriteGuard === 'function',
     install: (cwd) => window.api.app.installPrdWriteGuard(cwd),
   },
   'install-destructive-git-guard': {
     name: 'Destructive-git guard',
     testId: 'delegation-readiness-fix-destructive-git-guard',
+    available: () => typeof window.api?.app?.installDestructiveGitGuard === 'function',
     install: (cwd) => window.api.app.installDestructiveGitGuard(cwd),
   },
   'install-inline-implementation-guard': {
     name: 'Inline-implementation guard',
     testId: 'delegation-readiness-fix-inline-implementation-guard',
+    available: () => typeof window.api?.app?.installInlineImplementationGuard === 'function',
     install: (cwd) => window.api.app.installInlineImplementationGuard(cwd),
   },
 }
+
+// Every press logs to the console under this prefix (attempt + outcome), so a
+// press that produces no visible effect can still be diagnosed from devtools
+// even when no toast/main-log evidence is otherwise obvious.
+const GUARD_INSTALL_LOG_PREFIX = '[NewEpicCard.installGuard]'
+
+// Electron's ipcRenderer.invoke rejects with exactly this substring when the
+// main process has no `ipcMain.handle` registered for the channel — the
+// signature of a renderer bundle newer than the main process it's paired
+// with (see this PRD's header for the four-Electron-instances incident).
+const NO_HANDLER_RE = /No handler registered/i
+
+const GUARD_RESTART_MESSAGE =
+  'This window is running an older Session Manager than the app files on disk — restart Session Manager'
 
 /**
  * Default on/off state for every Context Injection, given the currently
@@ -304,21 +326,35 @@ export function NewEpicCard({
   async function installGuard(fixAction: GuardFixAction) {
     if (!effectiveCwd || fixing) return
     const cwd = effectiveCwd
-    const { install, name } = GUARD_INSTALLERS[fixAction]
+    const { install, name, available } = GUARD_INSTALLERS[fixAction]
     setFixing(fixAction)
+    console.log(GUARD_INSTALL_LOG_PREFIX, 'attempt', { fixAction, name, cwd })
     try {
+      // Preload older than this bundle: the method was never exposed at all,
+      // so calling it would throw a raw TypeError instead of the same
+      // explicit "restart" story an old-main IPC rejection gets below.
+      if (!available()) {
+        console.error(GUARD_INSTALL_LOG_PREFIX, 'result', { fixAction, cwd, outcome: 'api-method-missing' })
+        toast.error(GUARD_RESTART_MESSAGE)
+        return
+      }
       const r = await install(cwd)
       if (!r.ok) {
+        console.error(GUARD_INSTALL_LOG_PREFIX, 'result', { fixAction, cwd, outcome: 'rejected', error: r.error })
         toast.error(r.error || `Could not install the ${name} hook`)
         return
       }
+      console.log(GUARD_INSTALL_LOG_PREFIX, 'result', { fixAction, cwd, outcome: 'success', action: r.action })
       toast.info(r.action === 'already-installed'
         ? `${name} was already installed`
         : `${name} ${r.action} in ${r.settingsPath}`)
       const next = await window.api.app.delegationReadiness(cwd)
       if (next && effectiveCwdRef.current === cwd) setReadiness(next)
     } catch (e) {
-      toast.error(`Could not install the ${name} hook: ${String(e)}`)
+      const message = e instanceof Error ? e.message : String(e)
+      const isNoHandler = NO_HANDLER_RE.test(message)
+      console.error(GUARD_INSTALL_LOG_PREFIX, 'result', { fixAction, cwd, outcome: isNoHandler ? 'no-handler-registered' : 'threw', error: message })
+      toast.error(isNoHandler ? GUARD_RESTART_MESSAGE : `Could not install the ${name} hook: ${message}`)
     } finally {
       setFixing(null)
     }

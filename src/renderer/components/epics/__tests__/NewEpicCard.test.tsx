@@ -6,6 +6,7 @@ import { NewEpicCard } from '../NewEpicCard'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { useSessions } from '../../../state/sessions'
 import { useChat } from '../../../state/chat'
+import { useToast } from '../../../state/toast'
 import { agentTagDef } from '../../../lib/agentTagDefs'
 import { CONTEXT_INJECTIONS } from '../../../lib/contextInjections'
 import type { AgentPersona } from '../../../../preload/api'
@@ -48,6 +49,7 @@ function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: strin
 }
 
 beforeEach(() => {
+  useToast.setState({ toasts: [], history: [] } as never)
   usePromptSessions.setState({ sessions: {}, events: {} })
   usePromptSessions.setState({ createPromptSession: createPromptSessionSpy })
   createPromptSessionSpy.mockClear()
@@ -66,6 +68,7 @@ beforeEach(() => {
       delegationReadiness: vi.fn().mockResolvedValue({ ok: true, checks: [] }),
       installPrdWriteGuard: vi.fn().mockResolvedValue({ ok: true, action: 'installed', settingsPath: '/p/.claude/settings.json' }),
       installDestructiveGitGuard: vi.fn().mockResolvedValue({ ok: true, action: 'installed', settingsPath: '/p/.claude/settings.json' }),
+      installInlineImplementationGuard: vi.fn().mockResolvedValue({ ok: true, action: 'installed', settingsPath: '/p/.claude/settings.json' }),
     },
     config: {
       readText: vi.fn().mockResolvedValue({ exists: false, text: '', mtimeMs: 0, error: null }),
@@ -765,6 +768,156 @@ describe('NewEpicCard', () => {
       await act(async () => {})
 
       expect(readinessSpy).toHaveBeenLastCalledWith('/home/bilko/Projects/beta')
+    })
+
+    // "Fix it does nothing" — every branch of installGuard must now be
+    // self-diagnosing: a console line under a stable prefix, and a toast on
+    // every branch (including the two branches that used to be silent or
+    // threw: an IPC rejection from an older main with no handler registered,
+    // and a preload predating this api method entirely).
+    describe('installGuard diagnostics (fix-it-does-nothing)', () => {
+      function mountWithFailingPrdWriteGuard() {
+        const readinessSpy = window.api.app.delegationReadiness as ReturnType<typeof vi.fn>
+        readinessSpy.mockResolvedValue({
+          ok: false,
+          checks: [{ id: 'prd-write-guard', label: 'PRD-write guard hook installed', ok: false, detail: 'missing', fix: 'Add it', fixAction: 'install-prd-write-guard' }],
+        })
+        useSessions.setState({ tabs: [{ id: 't1', cwd: '/home/bilko/Projects/beta' } as never], activeTabId: 't1' })
+        return mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+      }
+
+      it('shows the explicit restart toast, not a generic error, when the install rejects with "No handler registered"', async () => {
+        ;(window.api.app.installPrdWriteGuard as ReturnType<typeof vi.fn>)
+          .mockRejectedValue(new Error("No handler registered for 'app:install-prd-write-guard'"))
+        const el = mountWithFailingPrdWriteGuard()
+        await act(async () => {})
+
+        const btn = el.querySelector('[data-testid="delegation-readiness-fix-prd-write-guard"]') as HTMLButtonElement
+        act(() => btn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+        await act(async () => {})
+
+        const toasts = useToast.getState().toasts
+        expect(toasts.some((t) => t.kind === 'error' && t.message.includes('restart Session Manager'))).toBe(true)
+        expect(toasts.some((t) => t.message.includes('No handler registered'))).toBe(false)
+        expect(btn.disabled).toBe(false)
+        expect(btn.textContent).toBe('Fix it')
+      })
+
+      it('shows the same restart toast (never a thrown TypeError) when the preload predates this api method', async () => {
+        delete (window.api.app as unknown as { installPrdWriteGuard?: unknown }).installPrdWriteGuard
+        const el = mountWithFailingPrdWriteGuard()
+        await act(async () => {})
+
+        const btn = el.querySelector('[data-testid="delegation-readiness-fix-prd-write-guard"]') as HTMLButtonElement
+        expect(() => {
+          act(() => btn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+        }).not.toThrow()
+        await act(async () => {})
+
+        const toasts = useToast.getState().toasts
+        expect(toasts.some((t) => t.kind === 'error' && t.message.includes('restart Session Manager'))).toBe(true)
+        expect(btn.disabled).toBe(false)
+      })
+
+      it('shows an error toast naming the failure (not the restart toast) when install resolves { ok: false }', async () => {
+        ;(window.api.app.installPrdWriteGuard as ReturnType<typeof vi.fn>)
+          .mockResolvedValue({ ok: false, action: 'error', error: 'settings.json is not valid JSON' })
+        const el = mountWithFailingPrdWriteGuard()
+        await act(async () => {})
+
+        const btn = el.querySelector('[data-testid="delegation-readiness-fix-prd-write-guard"]') as HTMLButtonElement
+        act(() => btn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+        await act(async () => {})
+
+        const toasts = useToast.getState().toasts
+        expect(toasts.some((t) => t.kind === 'error' && t.message.includes('settings.json is not valid JSON'))).toBe(true)
+        expect(toasts.some((t) => t.message.includes('restart Session Manager'))).toBe(false)
+        expect(btn.disabled).toBe(false)
+      })
+
+      it('shows an info toast and fires a re-probe on success', async () => {
+        const readinessSpy = window.api.app.delegationReadiness as ReturnType<typeof vi.fn>
+        ;(window.api.app.installPrdWriteGuard as ReturnType<typeof vi.fn>)
+          .mockResolvedValue({ ok: true, action: 'installed', settingsPath: '/home/bilko/Projects/beta/.claude/settings.json' })
+        const el = mountWithFailingPrdWriteGuard()
+        await act(async () => {})
+
+        readinessSpy.mockResolvedValue({ ok: true, checks: [] })
+        const btn = el.querySelector('[data-testid="delegation-readiness-fix-prd-write-guard"]') as HTMLButtonElement
+        act(() => btn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+        await act(async () => {})
+
+        const toasts = useToast.getState().toasts
+        expect(toasts.some((t) => t.kind === 'info' && t.message.includes('PRD-write guard installed'))).toBe(true)
+        expect(readinessSpy).toHaveBeenCalledTimes(2)
+        expect(el.querySelector('[data-testid="delegation-readiness-warning"]')).toBeNull()
+      })
+
+      it('clears `fixing` in the finally branch on a rejected install, leaving the other guard button pressable', async () => {
+        const readinessSpy = window.api.app.delegationReadiness as ReturnType<typeof vi.fn>
+        readinessSpy.mockResolvedValue({
+          ok: false,
+          checks: [
+            { id: 'prd-write-guard', label: 'PRD-write guard hook installed', ok: false, detail: 'missing', fix: 'Add it', fixAction: 'install-prd-write-guard' },
+            { id: 'destructive-git-guard', label: 'Destructive-git guard hook installed', ok: false, detail: 'missing', fix: 'Add it', fixAction: 'install-destructive-git-guard' },
+          ],
+        })
+        ;(window.api.app.installPrdWriteGuard as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('boom'))
+        useSessions.setState({ tabs: [{ id: 't1', cwd: '/home/bilko/Projects/beta' } as never], activeTabId: 't1' })
+        const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+        await act(async () => {})
+
+        const prdBtn = el.querySelector('[data-testid="delegation-readiness-fix-prd-write-guard"]') as HTMLButtonElement
+        const gitBtn = el.querySelector('[data-testid="delegation-readiness-fix-destructive-git-guard"]') as HTMLButtonElement
+        act(() => prdBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+        // Mid-flight, both buttons are disabled by the shared `fixing` state.
+        expect(gitBtn.disabled).toBe(true)
+        await act(async () => {})
+
+        // The `finally` clears `fixing` even though the install rejected.
+        expect(prdBtn.disabled).toBe(false)
+        expect(gitBtn.disabled).toBe(false)
+      })
+
+      it('does not stamp a stale install\'s re-probe result onto a project the user has since switched away from', async () => {
+        const readinessSpy = window.api.app.delegationReadiness as ReturnType<typeof vi.fn>
+        readinessSpy.mockImplementation(async (cwd: string) =>
+          cwd === '/home/bilko/Projects/alpha'
+            ? { ok: true, checks: [] }
+            : {
+                ok: false,
+                checks: [{ id: 'prd-write-guard', label: 'PRD-write guard hook installed', ok: false, detail: 'missing', fix: 'Add it', fixAction: 'install-prd-write-guard' }],
+              },
+        )
+        useSessions.setState({ tabs: [{ id: 't1', cwd: '/home/bilko/Projects/beta' } as never], activeTabId: 't1' })
+        const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+        await act(async () => {})
+        expect(el.querySelector('[data-testid="delegation-readiness-warning"]')).not.toBeNull()
+
+        let resolveInstall!: (v: { ok: boolean; action: string; settingsPath: string }) => void
+        ;(window.api.app.installPrdWriteGuard as ReturnType<typeof vi.fn>).mockReturnValue(
+          new Promise((resolve) => { resolveInstall = resolve }),
+        )
+        const btn = el.querySelector('[data-testid="delegation-readiness-fix-prd-write-guard"]') as HTMLButtonElement
+        act(() => btn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+        await act(async () => {})
+
+        // The user switches to a DIFFERENT, healthy project while the install
+        // against "beta" is still in flight.
+        act(() => {
+          useSessions.setState({ tabs: [{ id: 't2', cwd: '/home/bilko/Projects/alpha' } as never], activeTabId: 't2' })
+        })
+        await act(async () => {})
+        expect(el.querySelector('[data-testid="delegation-readiness-warning"]')).toBeNull()
+
+        // The stale "beta" install now resolves and re-probes "beta" (still
+        // failing) — that result must NOT overwrite the already-correct
+        // "alpha" readiness now on screen.
+        act(() => { resolveInstall({ ok: true, action: 'installed', settingsPath: '/home/bilko/Projects/beta/.claude/settings.json' }) })
+        await act(async () => {})
+
+        expect(el.querySelector('[data-testid="delegation-readiness-warning"]')).toBeNull()
+      })
     })
   })
 })

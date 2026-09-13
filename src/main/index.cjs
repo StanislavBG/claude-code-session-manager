@@ -38,6 +38,7 @@ const epicWorktreeMerge = require('./lib/epicWorktreeMerge.cjs');
 const epicWorktreeProjectConfig = require('./lib/epicWorktreeProjectConfig.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
 const { checkDelegationReadiness, installPrdWriteGuard, installDestructiveGitGuard, installInlineImplementationGuard } = require('./lib/delegationReadiness.cjs');
+const { writeGuardShims } = require('./lib/guardShims.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES } = require('./lib/mcpToolCatalog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { resolveBuildTarget } = require('./lib/buildTarget.cjs');
@@ -527,6 +528,39 @@ ipcMain.handle('app:delegation-readiness', validated(schemas.delegationReadiness
   checkDelegationReadiness(payload)
 ));
 
+// Every guard-install attempt is logged from MAIN, not the renderer — a
+// press that never reaches this process (e.g. a renderer talking to an
+// older main with no handler for the channel, Electron's own "No handler
+// registered for ..." rejection) leaves no line here, which is exactly what
+// makes it distinguishable from a press that reached main and failed. Uses
+// opsErrorLog.appendError (the sole writer of the `logs` ops namespace) so
+// the record lands in the project's own
+// session-manager-operations/logs/errors-<date>.jsonl, same shape as every
+// other structured error line.
+function logGuardInstallAttempt(guard, cwd, outcome) {
+  const opsErrorLog = require('./lib/opsErrorLog.cjs');
+  opsErrorLog.appendError({
+    cwd,
+    scope: 'delegationReadinessGuardInstall',
+    level: outcome.ok ? 'info' : 'error',
+    message: outcome.ok
+      ? `${guard} install ${outcome.action}`
+      : `${guard} install failed: ${outcome.error || 'unknown error'}`,
+    meta: { guard, ...outcome },
+  });
+}
+
+async function handleGuardInstall(guard, installFn, payload) {
+  try {
+    const result = await installFn(payload);
+    logGuardInstallAttempt(guard, payload.cwd, result);
+    return result;
+  } catch (err) {
+    logGuardInstallAttempt(guard, payload.cwd, { ok: false, action: 'error', error: err?.message ?? String(err) });
+    throw err;
+  }
+}
+
 // The three readiness checks with a sanctioned one-press install. Session
 // Manager standardizes on the REFERENCE approach (absolute path to this
 // repo's guard script, never a vendored copy) — see installPrdWriteGuard's
@@ -536,13 +570,13 @@ ipcMain.handle('app:delegation-readiness', validated(schemas.delegationReadiness
 // header. inline-implementation-guard shares prd-write-guard's matcher, so
 // its installer appends into that SAME matcher's `hooks` array instead.
 ipcMain.handle('app:install-prd-write-guard', validated(schemas.delegationReadinessCwd, (payload) =>
-  installPrdWriteGuard(payload)
+  handleGuardInstall('prd-write-guard', installPrdWriteGuard, payload)
 ));
 ipcMain.handle('app:install-destructive-git-guard', validated(schemas.delegationReadinessCwd, (payload) =>
-  installDestructiveGitGuard(payload)
+  handleGuardInstall('destructive-git-guard', installDestructiveGitGuard, payload)
 ));
 ipcMain.handle('app:install-inline-implementation-guard', validated(schemas.delegationReadinessCwd, (payload) =>
-  installInlineImplementationGuard(payload)
+  handleGuardInstall('inline-implementation-guard', installInlineImplementationGuard, payload)
 ));
 
 ipcMain.handle('app:engage-rules-path', () => process.env.SESSION_MANAGER_ENGAGE_RULES || null);
@@ -1273,6 +1307,14 @@ app.whenReady().then(async () => {
   // to opt out.
   seedSchedulerMcp({ logger: console, writeLog: logs.writeLine }).catch((e) => {
     logs.writeLine({ scope: 'seed-scheduler-mcp', level: 'error', message: 'seed failed', meta: { error: e?.message } });
+  });
+  // Rewrite the stable guard-hook shims (~/.claude/session-manager/hooks/) to
+  // point at THIS running app's root, on every boot. An already-installed
+  // project hook resolves through the shim at invocation time, so an app
+  // upgrade (a new npx hash dir) just follows along with no re-install — see
+  // guardShims.cjs's header.
+  writeGuardShims().catch((e) => {
+    logs.writeLine({ scope: 'guard-shims', level: 'error', message: 'writeGuardShims failed', meta: { error: e?.message } });
   });
   // Epic index self-heal: a project whose active-index.json is MISSING or
   // fails to parse has lost every open Epic's status unless the per-Epic

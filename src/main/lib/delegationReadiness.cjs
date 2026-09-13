@@ -34,6 +34,8 @@ const DESTRUCTIVE_GIT_GUARD_SCRIPT = path.resolve(__dirname, '..', '..', '..', '
 const DESTRUCTIVE_GIT_GUARD_MATCHER = 'Bash';
 const INLINE_IMPLEMENTATION_GUARD_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'hooks', 'guard-inline-implementation.cjs');
 const INLINE_IMPLEMENTATION_GUARD_MATCHER = 'Write|Edit|NotebookEdit';
+const SELF_SCHEDULE_GUARD_SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'hooks', 'guard-self-schedule.cjs');
+const SELF_SCHEDULE_GUARD_MATCHER = 'ScheduleWakeup|CronCreate|Task|Agent';
 const LIVE_PROBE_TIMEOUT_MS = 10_000;
 const LIVE_PROBE_TTL_MS = 60_000;
 const REQUIRED_LIVE_TOOLS = ['scheduler_create_prd', 'session_manager_help'];
@@ -404,6 +406,16 @@ const GUARD_DEFS = {
     // guard-prd-writes — label/detail/fix text must not imply a hard gate.
     nudge: true,
   },
+  selfSchedule: {
+    id: 'self-schedule-guard',
+    label: 'Self-schedule guard hook installed',
+    guardName: 'guard-self-schedule',
+    scriptBasename: 'guard-self-schedule.cjs',
+    script: SELF_SCHEDULE_GUARD_SCRIPT,
+    matcher: SELF_SCHEDULE_GUARD_MATCHER,
+    fixActionId: 'install-self-schedule-guard',
+    nudge: false,
+  },
 };
 
 /**
@@ -599,6 +611,14 @@ async function installInlineImplementationGuard({ cwd, homeDir = os.homedir(), s
   return installGuard(GUARD_DEFS.inlineImplementation, { cwd, homeDir, skipShimEnsure });
 }
 
+function checkSelfScheduleGuard({ cwd, homeDir = os.homedir() } = {}) {
+  return checkGuard(GUARD_DEFS.selfSchedule, { cwd, homeDir });
+}
+
+async function installSelfScheduleGuard({ cwd, homeDir = os.homedir(), skipShimEnsure = false } = {}) {
+  return installGuard(GUARD_DEFS.selfSchedule, { cwd, homeDir, skipShimEnsure });
+}
+
 /**
  * Runs all eight delegation-readiness checks for `cwd`. Every filesystem read
  * is wrapped (readJsonSafe / try-catch) so a missing or unparseable file
@@ -624,6 +644,7 @@ async function checkDelegationReadiness({ cwd, homeDir = os.homedir() }) {
     checkPrdWriteGuard({ cwd, homeDir }),
     checkDestructiveGitGuard({ cwd, homeDir }),
     checkInlineImplementationGuard({ cwd, homeDir }),
+    checkSelfScheduleGuard({ cwd, homeDir }),
   ].map((c) => ({ fixAction: null, warn: false, ...c }));
 
   return {
@@ -657,6 +678,7 @@ const GUARDS = [
   { id: 'prd-write-guard', install: installPrdWriteGuard },
   { id: 'destructive-git-guard', install: installDestructiveGitGuard },
   { id: 'inline-implementation-guard', install: installInlineImplementationGuard },
+  { id: 'self-schedule-guard', install: installSelfScheduleGuard },
 ];
 
 // resolved project root -> Promise<{ ok, root, guards }>, kept for the app's
@@ -776,6 +798,7 @@ module.exports = {
   installPrdWriteGuard,
   installDestructiveGitGuard,
   installInlineImplementationGuard,
+  installSelfScheduleGuard,
   probeSchedulerMcpLive,
   clearLiveProbeCache,
   PRD_WRITE_GUARD_SCRIPT,
@@ -784,4 +807,6 @@ module.exports = {
   DESTRUCTIVE_GIT_GUARD_MATCHER,
   INLINE_IMPLEMENTATION_GUARD_SCRIPT,
   INLINE_IMPLEMENTATION_GUARD_MATCHER,
+  SELF_SCHEDULE_GUARD_SCRIPT,
+  SELF_SCHEDULE_GUARD_MATCHER,
 };

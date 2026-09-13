@@ -86,7 +86,7 @@ test('failing check with no fix omits the "(fix: ...)" suffix', () => {
 test('end-to-end: check() reports delegation_chain for this repo, expected to pass here', async () => {
   const status = await check();
   expect(status.components.delegation_chain).toBeDefined();
-  expect(status.components.delegation_chain.checks).toHaveLength(8);
+  expect(status.components.delegation_chain.checks).toHaveLength(9);
   const ids = status.components.delegation_chain.checks.map((c) => c.id);
   expect(ids).toEqual([
     'scheduler-mcp',
@@ -97,6 +97,7 @@ test('end-to-end: check() reports delegation_chain for this repo, expected to pa
     'prd-write-guard',
     'destructive-git-guard',
     'inline-implementation-guard',
+    'self-schedule-guard',
   ]);
   // This repo registers the scheduler MCP at user scope (~/.claude.json) and
   // wires guard-prd-writes in .claude/settings.json, and no longer carries a

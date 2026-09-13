@@ -22,6 +22,15 @@
             "command": "node scripts/hooks/guard-destructive-git.cjs"
           }
         ]
+      },
+      {
+        "matcher": "ScheduleWakeup|CronCreate|Task|Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/hooks/guard-self-schedule.cjs"
+          }
+        ]
       }
     ]
   }

@@ -23,6 +23,7 @@ const {
   PRD_WRITE_GUARD_SCRIPT,
   DESTRUCTIVE_GIT_GUARD_SCRIPT,
   INLINE_IMPLEMENTATION_GUARD_SCRIPT,
+  SELF_SCHEDULE_GUARD_SCRIPT,
 } = require('../delegationReadiness.cjs');
 const { todayFile: opsErrorLogTodayFile } = require('../opsErrorLog.cjs');
 const {
@@ -120,6 +121,10 @@ async function makeGreenFixtures() {
           matcher: 'Bash',
           hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }],
         },
+        {
+          matcher: 'ScheduleWakeup|CronCreate|Task|Agent',
+          hooks: [{ type: 'command', command: `node ${SELF_SCHEDULE_GUARD_SCRIPT}` }],
+        },
       ],
     },
   });
@@ -127,12 +132,12 @@ async function makeGreenFixtures() {
   return { homeDir, cwd, scriptPath };
 }
 
-test('all eight checks pass on a fully-configured project', async () => {
+test('all nine checks pass on a fully-configured project', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
   const result = await checkDelegationReadiness({ cwd, homeDir });
 
   expect(result.ok).toBe(true);
-  expect(result.checks).toHaveLength(8);
+  expect(result.checks).toHaveLength(9);
   expect(result.checks.every((c) => c.ok)).toBe(true);
   expect(result.checks.map((c) => c.id)).toEqual([
     'scheduler-mcp',
@@ -143,6 +148,7 @@ test('all eight checks pass on a fully-configured project', async () => {
     'prd-write-guard',
     'destructive-git-guard',
     'inline-implementation-guard',
+    'self-schedule-guard',
   ]);
 }, 15_000);
 
@@ -509,6 +515,10 @@ test('destructive-git-guard: fails independently when the hook is missing', asyn
             { type: 'command', command: `node ${INLINE_IMPLEMENTATION_GUARD_SCRIPT}` },
           ],
         },
+        {
+          matcher: 'ScheduleWakeup|CronCreate|Task|Agent',
+          hooks: [{ type: 'command', command: `node ${SELF_SCHEDULE_GUARD_SCRIPT}` }],
+        },
       ],
     },
   });
@@ -703,6 +713,10 @@ test('inline-implementation-guard: fails independently when the hook is missing 
         {
           matcher: 'Bash',
           hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }],
+        },
+        {
+          matcher: 'ScheduleWakeup|CronCreate|Task|Agent',
+          hooks: [{ type: 'command', command: `node ${SELF_SCHEDULE_GUARD_SCRIPT}` }],
         },
       ],
     },
@@ -1013,7 +1027,7 @@ async function makeLinkedWorktreeFixture(mk) {
   return { main, worktree };
 }
 
-test('ensureGuardsInstalled: installs all three guards into a fresh project with no .claude/settings.json', async () => {
+test('ensureGuardsInstalled: installs all four guards into a fresh project with no .claude/settings.json', async () => {
   const cwd = await mkTmp('sm-ensure-guards-fresh-');
   const homeDir = await mkTmp('sm-ensure-guards-fresh-home-');
 
@@ -1023,11 +1037,13 @@ test('ensureGuardsInstalled: installs all three guards into a fresh project with
   expect(result.guards['prd-write-guard'].action).toBe('installed');
   expect(result.guards['destructive-git-guard'].action).toBe('installed');
   expect(result.guards['inline-implementation-guard'].action).toBe('installed');
+  expect(result.guards['self-schedule-guard'].action).toBe('installed');
 
   const readiness = await checkDelegationReadiness({ cwd, homeDir });
   expect(readiness.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
   expect(readiness.checks.find((c) => c.id === 'destructive-git-guard').ok).toBe(true);
   expect(readiness.checks.find((c) => c.id === 'inline-implementation-guard').ok).toBe(true);
+  expect(readiness.checks.find((c) => c.id === 'self-schedule-guard').ok).toBe(true);
 }, 15_000);
 
 test('ensureGuardsInstalled: a second call against an already-healthy project performs no write (memoized per cwd)', async () => {
@@ -1133,7 +1149,7 @@ test('ensureGuardsInstalled: records every auto-install attempt in the ops error
   const lines = fs.readFileSync(logFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
   const delegationLines = lines.filter((l) => l.scope === 'delegationReadiness');
   expect(delegationLines.map((l) => l.meta?.guard)).toEqual(
-    expect.arrayContaining(['prd-write-guard', 'destructive-git-guard', 'inline-implementation-guard']),
+    expect.arrayContaining(['prd-write-guard', 'destructive-git-guard', 'inline-implementation-guard', 'self-schedule-guard']),
   );
   expect(delegationLines.every((l) => l.level === 'info')).toBe(true);
   expect(delegationLines.every((l) => l.meta?.action === 'installed')).toBe(true);

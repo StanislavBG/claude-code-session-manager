@@ -42,7 +42,7 @@ const { writeJson, writeTextAtomic, addAllowedRoot } = require('../config.cjs');
 // delegationReadiness.cjs's *_GUARD_SCRIPT constants use.
 const APP_ROOT = path.resolve(__dirname, '..', '..', '..');
 
-const GUARD_NAMES = ['guard-prd-writes.cjs', 'guard-destructive-git.cjs', 'guard-inline-implementation.cjs'];
+const GUARD_NAMES = ['guard-prd-writes.cjs', 'guard-destructive-git.cjs', 'guard-inline-implementation.cjs', 'guard-self-schedule.cjs'];
 
 function hooksDir(homeDir = os.homedir()) {
   return path.join(homeDir, '.claude', 'session-manager', 'hooks');

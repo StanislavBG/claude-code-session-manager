@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Bash-invocable CLI wrapping the Stage 0 renderer (render.tsx →
-// scripts/render-project-pages/dist/renderer.cjs, built by
+// web/project-pages/renderer/dist/renderer.cjs, built by
 // `npm run build:project-pages`). Requires that build to have already run —
 // this script does NOT bundle on the fly, since PRD authoring standards
 // forbid unbounded/slow steps inside a headless job.
 //
 // Usage:
-//   node scripts/render-project-pages.cjs <summary.json> <picks.json> <output dir> <generatedAt>
+//   node web/project-pages/render.cjs <summary.json> <picks.json> <output dir> <generatedAt>
 //
 // generatedAt (4th arg, required) is an ISO 8601 timestamp string the CALLER
 // stamps — Date.now() is unavailable in some execution contexts (e.g.
@@ -35,13 +35,13 @@ function fail(message) {
 function main() {
   const [summaryPath, picksPath, outDir, generatedAt] = process.argv.slice(2);
   if (!summaryPath || !picksPath || !outDir || !generatedAt) {
-    fail('usage: node scripts/render-project-pages.cjs <summary.json> <picks.json> <output dir> <generatedAt>');
+    fail('usage: node web/project-pages/render.cjs <summary.json> <picks.json> <output dir> <generatedAt>');
   }
   if (Number.isNaN(Date.parse(generatedAt))) {
     fail(`generatedAt must be an ISO 8601 timestamp, got: ${generatedAt}`);
   }
 
-  const bundlePath = path.join(__dirname, 'render-project-pages', 'dist', 'renderer.cjs');
+  const bundlePath = path.join(__dirname, 'renderer', 'dist', 'renderer.cjs');
   if (!fs.existsSync(bundlePath)) {
     fail(`build bundle not found at ${bundlePath} — run "npm run build:project-pages" first`);
   }

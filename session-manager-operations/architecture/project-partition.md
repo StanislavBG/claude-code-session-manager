@@ -2,8 +2,9 @@
 
 > This repo is read by every agent as one undifferentiated blob, but it holds four distinct
 > things with different consumers and different change-risk profiles. This doc writes down the
-> boundary that already exists — it does not move, rename, or split anything. Whether the
-> partition later becomes a physical directory move is a separate, not-yet-made decision.
+> boundary that already exists. As of PRD 1184, the WEB PRESENCE partition's producers are also
+> PHYSICALLY collected under `web/` — the first partition to move from a paper boundary to a
+> real directory, staged for a future `git subtree split --prefix=web` into its own repo.
 
 ## The four partitions
 
@@ -35,7 +36,8 @@ Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
 | `plugins/` | AGENT LAYER | `plugins/session-manager-dev/skills/` — 15 skills (verified count). |
 | `.claude-plugin/` | AGENT LAYER | Marketplace manifest for the `session-manager-dev` plugin. |
 | `.mcp.json` | AGENT LAYER | Registers `scheduler-mcp-server.cjs` — the agent-facing door onto the scheduler. |
-| `web-remote/` | WEB PRESENCE | See [web-remote/CLAUDE.md](../../web-remote/CLAUDE.md) for the live-vs-dead split inside it (`app/` live, `relay/` dead). |
+| `web/` | WEB PRESENCE | Physical home of the partition's producers (`project-pages/`, `manual/`, `remote-app/`) — see [`web/README.md`](../../web/README.md). |
+| `web-remote/` | WEB PRESENCE | `app/` moved to `web/remote-app/` (PRD 1184). See [web-remote/CLAUDE.md](../../web-remote/CLAUDE.md) — only `relay/` (dead) remains here. |
 | `session-manager-operations/` | OPERATIONS STATE | See namespace table below. |
 | `README.md` | DESKTOP HARNESS | Also shipped in the npm `files` array as end-user install docs. |
 | `node_modules/`, `.git/` | *(excluded)* | Dependency cache / VCS internals — not partition members. |
@@ -57,12 +59,22 @@ See [`code-map.md`](code-map.md) for `scheduler.cjs`'s own detail.
 
 ## `scripts/` top-level entries
 
+WEB PRESENCE producers moved to `web/` (PRD 1184) — see the `web/` section below. What remains
+in `scripts/` is AGENT LAYER + DESKTOP HARNESS only.
+
 | Entry | Partition | Note |
 | --- | --- | --- |
-| `render-project-pages.cjs`, `render-project-pages/`, `project-pages-logic/`, `project-pages-assets.cjs`, `project-pages-publish-gate.cjs`, `validate-project-pages-summary.cjs`, `generate-project-pages-font-data.mjs`, `build-manual.mjs`, `capture-manual-figures.mjs`, `build-project-pages-logic.mjs`, `build-project-pages-renderer.mjs` | WEB PRESENCE | Producers + their own build steps. Last two are companion build tooling for `project-pages-logic/`/`render-project-pages/`'s bundles, not named in the PRD's list but belong with it by the same reasoning. |
 | `hooks/` (`guard-destructive-git.cjs`, `guard-inline-implementation.cjs`, `guard-prd-writes.cjs`, `__tests__/`) | AGENT LAYER | Adopted by OTHER repos **by reference** at this repo's absolute path — never vendored. |
 | `scheduler-mcp-server.cjs`, `mint-epic.cjs` | AGENT LAYER | The agent-facing doors onto scheduler + Epic minting. |
-| `postinstall.cjs`, `lib/` (`activeSessions.cjs`, `watchdogHelpers.cjs`), `scheduler-watchdog.cjs`, `scheduler-watchdog.sh`, `install-scheduler-watchdog.sh`, `install-scheduler-mcp-user-scope.sh`, `health.sh`, `audit-ops-hygiene.cjs`, `bench-intraday-walk.cjs`, `check-conditional-hooks.cjs`, `check-unregistered-tests.cjs`, `check-unstable-selectors.cjs`, `cleanup-nested-queue-stubs.cjs`, `cleanup-worktree-ops-stubs.cjs`, `mirror-epic-status.cjs`, `ops-sweep.cjs`, `__tests__/` | DESKTOP HARNESS | Dev/build/lint/watchdog tooling for the app itself. `scripts/lib/` is required only by `scheduler-watchdog.cjs`. |
+| `postinstall.cjs`, `lib/` (`activeSessions.cjs`, `watchdogHelpers.cjs`), `scheduler-watchdog.cjs`, `scheduler-watchdog.sh`, `install-scheduler-watchdog.sh`, `install-scheduler-mcp-user-scope.sh`, `health.sh`, `audit-ops-hygiene.cjs`, `bench-intraday-walk.cjs`, `check-conditional-hooks.cjs`, `check-unregistered-tests.cjs`, `check-unstable-selectors.cjs`, `cleanup-nested-queue-stubs.cjs`, `cleanup-worktree-ops-stubs.cjs`, `mirror-epic-status.cjs`, `ops-sweep.cjs`, `__tests__/` (minus the manual/project-pages test files, moved alongside their subjects) | DESKTOP HARNESS | Dev/build/lint/watchdog tooling for the app itself. `scripts/lib/` is required only by `scheduler-watchdog.cjs`. `scripts/__tests__/package-files.test.cjs` stays here — it tests `package.json`'s `files` array as a whole, spanning all three code partitions, not one moved file. |
+
+## `web/` top-level entries
+
+| Entry | Partition | Note |
+| --- | --- | --- |
+| `project-pages/` (`render.cjs`, `renderer/`, `logic/`, `assets.cjs`, `publish-gate.cjs`, `validate-summary.cjs`, `build-renderer.mjs`, `build-logic.mjs`, `generate-font-data.mjs`, `__tests__/publish-gate.test.cjs`) | WEB PRESENCE | Producers + their own build steps, formerly `scripts/*project-pages*`. |
+| `manual/` (`build.mjs`, `capture-figures.mjs`, `__tests__/`) | WEB PRESENCE | Field Manual build/capture tooling, formerly `scripts/build-manual.mjs` + `scripts/capture-manual-figures.mjs`. Reads/writes `session-manager-operations/manual/` (OPERATIONS STATE, unmoved) and writes into `~/Projects/Bilko`. |
+| `remote-app/` | WEB PRESENCE | The phone-remote PWA, formerly `web-remote/app/`. |
 
 ## `package.json`'s `files` array, cross-checked
 
@@ -73,9 +85,9 @@ together, since `npm install` is the single distribution mechanism for the whole
 - **AGENT LAYER** entries: `.claude-plugin/`, `plugins/`, `scripts/mint-epic.cjs`,
   `scripts/scheduler-mcp-server.cjs`, `scripts/hooks/guard-prd-writes.cjs`,
   `scripts/hooks/guard-destructive-git.cjs`, `scripts/hooks/guard-inline-implementation.cjs`.
-- **WEB PRESENCE** entries: `scripts/render-project-pages.cjs`,
-  `scripts/render-project-pages/dist/`, `scripts/project-pages-logic/dist/`,
-  `scripts/validate-project-pages-summary.cjs`.
+- **WEB PRESENCE** entries: `web/project-pages/render.cjs`,
+  `web/project-pages/renderer/dist/`, `web/project-pages/logic/dist/`,
+  `web/project-pages/validate-summary.cjs`.
 - **DESKTOP HARNESS** entries (the rest): `bin/`, `scripts/postinstall.cjs`, `scripts/lib/`,
   `src/main/`, `src/preload/`, `src/seed/`, `dist/index.html`, `dist/assets/`, `dist/vad/`,
   `screenshots/`, `README.md`.

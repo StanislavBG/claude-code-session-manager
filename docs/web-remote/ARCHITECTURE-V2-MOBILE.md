@@ -30,7 +30,7 @@ Status: **design — pending build**. Companion to [`ARCHITECTURE.md`](./ARCHITE
 ```
 
 Three units:
-1. **App** — `web-remote/app`, rebuilt mobile-first, base `/projects/session-manager/`, drops into Bilko `public/projects/session-manager/`.
+1. **App** — `web/remote-app`, rebuilt mobile-first, base `/projects/session-manager/`, drops into Bilko `public/projects/session-manager/`.
 2. **Relay route** — the v1 `web-remote/relay` router logic remounted as a Fastify WS route **inside the Bilko repo** (`server/routes/sm-relay.ts`), auth via host Clerk instead of standalone Google OAuth. Keeps v1 rate-limit / audit-log / canRoute logic.
 3. **Local agent** — `src/main/webRemote.cjs`, extended with state + summary push and Anthropic key resolution; relay URL repointed to bilko.run.
 

@@ -3,8 +3,8 @@
 // package.json's `prepublishOnly` AFTER the two esbuild bundles are built and
 // BEFORE `vite build`, so `npm publish` cannot proceed past:
 //
-//   1. a MISSING bundle  — scripts/render-project-pages/dist/renderer.cjs or
-//                          scripts/project-pages-logic/dist/logic.cjs absent
+//   1. a MISSING bundle  — web/project-pages/renderer/dist/renderer.cjs or
+//                          web/project-pages/logic/dist/logic.cjs absent
 //                          (both are gitignored build artifacts);
 //   2. a STALE bundle    — older than any file under
 //                          src/renderer/lib/projectPages/** (tests excluded);
@@ -23,18 +23,18 @@
 // needs no extra state file to keep in sync. The catalog, by contrast, IS
 // committed, so it is compared by content (regenerated and diffed).
 //
-// Usage: node scripts/project-pages-publish-gate.cjs   (exit 1 on any failure)
+// Usage: node web/project-pages/publish-gate.cjs   (exit 1 on any failure)
 'use strict';
 
 const fs = require('node:fs');
 const path = require('node:path');
-const assets = require('./project-pages-assets.cjs');
+const assets = require('./assets.cjs');
 
 const SOURCE_ROOT_REL = 'src/renderer/lib/projectPages';
 
 const BUNDLES = [
-  { path: 'scripts/render-project-pages/dist/renderer.cjs', build: 'npm run build:project-pages' },
-  { path: 'scripts/project-pages-logic/dist/logic.cjs', build: 'npm run build:project-pages-logic' },
+  { path: 'web/project-pages/renderer/dist/renderer.cjs', build: 'npm run build:project-pages' },
+  { path: 'web/project-pages/logic/dist/logic.cjs', build: 'npm run build:project-pages-logic' },
 ];
 
 function isTestPath(rel) {
@@ -133,7 +133,7 @@ function runGate(repoRoot) {
 module.exports = { BUNDLES, SOURCE_ROOT_REL, newestSource, checkBundles, checkCatalog, checkSpecCopy, runGate };
 
 if (require.main === module) {
-  const repoRoot = path.resolve(__dirname, '..');
+  const repoRoot = path.resolve(__dirname, '..', '..');
   const result = runGate(repoRoot);
   if (!result.ok) {
     console.error('project-pages-publish-gate: refusing to publish:');

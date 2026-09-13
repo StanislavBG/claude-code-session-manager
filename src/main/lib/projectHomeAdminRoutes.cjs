@@ -7,8 +7,8 @@
  * first) — which is exactly why generation silently hung on a foreign
  * machine with no repo checked out. These four routes make the app itself
  * the authority on paths/schema/catalog/rendering, reusing the shipped
- * assets PRD 1088 put in the npm tarball (scripts/render-project-pages/dist/
- * renderer.cjs, scripts/project-pages-logic/dist/logic.cjs,
+ * assets PRD 1088 put in the npm tarball (web/project-pages/renderer/dist/
+ * renderer.cjs, web/project-pages/logic/dist/logic.cjs,
  * src/main/templates/project-pages-catalog.json,
  * src/main/templates/project-pages-pipeline.md) rather than reimplementing
  * any of them.
@@ -40,8 +40,8 @@ const LENSES = ['home', 'marketing', 'feature', 'architecture', 'brief'];
 // requires an app restart to pick up during dev, same as that module).
 const CATALOG_PATH = path.join(__dirname, '..', 'templates', 'project-pages-catalog.json');
 const SPEC_PATH = path.join(__dirname, '..', 'templates', 'project-pages-pipeline.md');
-const RENDERER_BUNDLE_PATH = path.join(__dirname, '..', '..', '..', 'scripts', 'render-project-pages', 'dist', 'renderer.cjs');
-const LOGIC_BUNDLE_PATH = path.join(__dirname, '..', '..', '..', 'scripts', 'project-pages-logic', 'dist', 'logic.cjs');
+const RENDERER_BUNDLE_PATH = path.join(__dirname, '..', '..', '..', 'web', 'project-pages', 'renderer', 'dist', 'renderer.cjs');
+const LOGIC_BUNDLE_PATH = path.join(__dirname, '..', '..', '..', 'web', 'project-pages', 'logic', 'dist', 'logic.cjs');
 
 let cachedCatalog = null;
 function loadCatalog() {

@@ -1,10 +1,10 @@
 /**
- * manual-chapter-links.test.cjs — a chapter's in-document links must resolve.
+ * chapter-links.test.cjs — a chapter's in-document links must resolve.
  *
  * A chapter body is rendered in two very different places, and a bare
  * `href="#target"` has to work in both:
  *   · the offline HTML/PDF edition, where every chapter is one `<section
- *     id="<slug>">` on a single page (scripts/build-manual.mjs);
+ *     id="<slug>">` on a single page (web/manual/build.mjs);
  *   · bilko.run/manual, where exactly ONE chapter is in the DOM at a time and
  *     the reader turns a `#<slug>` link into a chapter switch
  *     (~/Projects/Bilko/src/pages/ManualPage.tsx, handleArticleClick).
@@ -13,7 +13,7 @@
  * paying reader in at least one of the two editions, and nothing else catches
  * it: the build validates files and slugs, never link targets.
  *
- * Run: timeout 120 npx vitest run scripts/__tests__/manual-chapter-links.test.cjs
+ * Run: timeout 120 npx vitest run web/manual/__tests__/chapter-links.test.cjs
  */
 
 'use strict';
@@ -22,7 +22,7 @@ import { test, expect } from 'vitest';
 const fs = require('node:fs');
 const path = require('node:path');
 
-const REPO_ROOT = path.resolve(__dirname, '../..');
+const REPO_ROOT = path.resolve(__dirname, '../../..');
 const MANUAL_DIR = path.join(REPO_ROOT, 'session-manager-operations/manual');
 const CHAPTERS_DIR = path.join(MANUAL_DIR, 'chapters');
 

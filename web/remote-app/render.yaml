@@ -1,5 +1,5 @@
 # Render Static Site configuration for sm-app
-# Deploy: connect this repo in the Render dashboard, set rootDir = web-remote/app,
+# Deploy: connect this repo in the Render dashboard, set rootDir = web/remote-app,
 # then configure the env vars below in the Render Environment panel.
 #
 # Optional env vars (set in Render dashboard — never commit values):
@@ -15,7 +15,7 @@ services:
     env: static
     plan: free
     region: oregon
-    rootDir: web-remote/app
+    rootDir: web/remote-app
     buildCommand: npm ci && npm run build
     staticPublishPath: dist
     pullRequestPreviewsEnabled: false

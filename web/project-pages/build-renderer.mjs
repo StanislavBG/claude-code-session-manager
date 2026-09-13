@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 // Precompiles src/renderer/lib/projectPages/render.tsx (the Stage 0 Project
 // Pages renderer, see project-pages-pipeline.md) into a single CJS bundle at
-// scripts/render-project-pages/dist/renderer.cjs. Font bytes are inlined at
+// web/project-pages/renderer/dist/renderer.cjs. Font bytes are inlined at
 // bundle time — render.tsx imports them from library/fontData.ts (a
 // generated module of base64 strings, see
-// scripts/generate-project-pages-font-data.mjs), not read from disk at
+// web/project-pages/generate-font-data.mjs), not read from disk at
 // render time, so there is no separate asset-copy step here.
 //
-// Run via `npm run build:project-pages`. scripts/render-project-pages.cjs
+// Run via `npm run build:project-pages`. web/project-pages/render.cjs
 // (the CLI) requires this bundle and prints a clear error if it's missing —
 // re-run this script whenever render.tsx or the library changes.
 import { build } from 'esbuild';
@@ -15,9 +15,9 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const ENTRY = join(REPO_ROOT, 'src/renderer/lib/projectPages/render.tsx');
-const OUT_DIR = join(REPO_ROOT, 'scripts/render-project-pages/dist');
+const OUT_DIR = join(REPO_ROOT, 'web/project-pages/renderer/dist');
 const OUT_FILE = join(OUT_DIR, 'renderer.cjs');
 
 async function main() {
@@ -34,7 +34,7 @@ async function main() {
     jsx: 'automatic',
     // No externals: react + react-dom/server are devDependencies, so a machine
     // that installed the npm tarball has neither on its require path. The
-    // bundle must be self-sufficient for `node scripts/render-project-pages.cjs`
+    // bundle must be self-sufficient for `node web/project-pages/render.cjs`
     // to run there (PRD 1088).
   });
 

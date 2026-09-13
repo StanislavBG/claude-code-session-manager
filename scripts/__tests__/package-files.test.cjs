@@ -26,8 +26,8 @@ const REQUIRED_PATHS = [
   'scripts/scheduler-mcp-server.cjs',
   // Project Pages pipeline (PRD 1088): the CLIs a foreign machine's
   // project-home-builder Epic runs, plus the shipped catalog + spec copy.
-  'scripts/render-project-pages.cjs',
-  'scripts/validate-project-pages-summary.cjs',
+  'web/project-pages/render.cjs',
+  'web/project-pages/validate-summary.cjs',
   'src/main/templates/project-pages-catalog.json',
   'src/main/templates/project-pages-pipeline.md',
   // The seeded persona itself (PRD 1091) — without this, a foreign machine
@@ -51,11 +51,11 @@ const GUARD_SCRIPT_PATHS = [
 // checkout and `npm pack --dry-run` would not list them. Asserting that the
 // `files` array COVERS their paths (directory-prefix match, which is how npm
 // treats a trailing-slash entry) is deterministic regardless of build state;
-// scripts/__tests__/project-pages-publish-gate.test.cjs covers their
+// web/project-pages/__tests__/publish-gate.test.cjs covers their
 // existence + freshness.
 const BUILD_ARTIFACT_PATHS = [
-  'scripts/render-project-pages/dist/renderer.cjs',
-  'scripts/project-pages-logic/dist/logic.cjs',
+  'web/project-pages/renderer/dist/renderer.cjs',
+  'web/project-pages/logic/dist/logic.cjs',
 ];
 
 test('package.json "files" covers the Project Pages build artifacts', () => {
@@ -116,7 +116,7 @@ test('package.json "files" would fail this same check if scripts/hooks were drop
 // esbuild bundles were never built — a real `npm publish` would still ship a
 // tarball whose `files` entries point at nothing. Chosen fix: build the two
 // bundles ourselves (they're fast — well under a second each, see
-// scripts/build-project-pages-renderer.mjs / build-project-pages-logic.mjs)
+// web/project-pages/build-renderer.mjs / build-logic.mjs)
 // and THEN run a real (non-dry-run) `npm pack --ignore-scripts`. --ignore-scripts
 // is kept here too so this test doesn't also re-run `vite build` (slow, and
 // already covered by the normal build/typecheck gate) — the point of this
@@ -225,11 +225,11 @@ test(
 
     const renderOut = execFileSync(
       'node',
-      [path.join(pkgDir, 'scripts', 'render-project-pages.cjs'), summaryPath, picksPath, outDir, new Date().toISOString()],
+      [path.join(pkgDir, 'web', 'project-pages', 'render.cjs'), summaryPath, picksPath, outDir, new Date().toISOString()],
       { cwd: unpackRoot, timeout: 30000, encoding: 'utf8' },
     );
     // The renderer's own require(bundlePath) call is __dirname-relative
-    // (see render-project-pages.cjs), so a successful run with no "Cannot
+    // (see render.cjs), so a successful run with no "Cannot
     // find module" against REPO_ROOT is itself proof module resolution
     // never left the unpacked dir. Assert that negatively too.
     expect(renderOut).not.toContain(REPO_ROOT);
@@ -238,7 +238,7 @@ test(
     // standalone from the unpacked package.
     const validateOut = execFileSync(
       'node',
-      [path.join(pkgDir, 'scripts', 'validate-project-pages-summary.cjs'), summaryPath],
+      [path.join(pkgDir, 'web', 'project-pages', 'validate-summary.cjs'), summaryPath],
       { cwd: unpackRoot, timeout: 30000, encoding: 'utf8' },
     );
     expect(validateOut).toContain('valid');

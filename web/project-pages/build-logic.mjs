@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Precompiles src/renderer/lib/projectPages/logicBundle.ts (the non-React
 // Project Pages logic — summary validation, component library metadata)
-// into a single CJS bundle at scripts/project-pages-logic/dist/logic.cjs.
-// Separate from build-project-pages-renderer.mjs's bundle because that one
+// into a single CJS bundle at web/project-pages/logic/dist/logic.cjs.
+// Separate from build-renderer.mjs's bundle because that one
 // externals react/react-dom for renderToStaticMarkup; this bundle has no
 // runtime react dependency, so its CLI consumer
-// (validate-project-pages-summary.cjs) doesn't need react on its require
+// (validate-summary.cjs) doesn't need react on its require
 // path.
 //
 // Run via `npm run build:project-pages-logic`. Re-run whenever logicBundle.ts
@@ -15,9 +15,9 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
+const REPO_ROOT = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
 const ENTRY = join(REPO_ROOT, 'src/renderer/lib/projectPages/logicBundle.ts');
-const OUT_DIR = join(REPO_ROOT, 'scripts/project-pages-logic/dist');
+const OUT_DIR = join(REPO_ROOT, 'web/project-pages/logic/dist');
 const OUT_FILE = join(OUT_DIR, 'logic.cjs');
 
 async function main() {
@@ -37,7 +37,7 @@ async function main() {
     // so the bundle still needs the JSX transform. react/jsx-runtime is
     // INLINED (no externals) because react is a devDependency and the tarball
     // consumer has no react on its require path — same reasoning as
-    // build-project-pages-renderer.mjs (PRD 1088).
+    // build-renderer.mjs (PRD 1088).
     jsx: 'automatic',
   });
 

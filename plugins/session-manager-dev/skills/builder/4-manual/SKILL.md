@@ -54,7 +54,7 @@ Hard rules — these are the ones that protect a paying customer:
   the one thing people get wrong, the workflow that pays off. If a paragraph would be equally
   at home in `CLAUDE.md`, cut it.
 - **Preserve the free chapter.** At least one chapter must stay `free: true` — it is the
-  marketing sample, and `scripts/build-manual.mjs` refuses to build without one.
+  marketing sample, and `web/manual/build.mjs` refuses to build without one.
 
 ### 3. Bump the manual's own version
 

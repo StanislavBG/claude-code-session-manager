@@ -549,7 +549,7 @@ from `npm publish` — no `.npmignore` entry is needed. This is verified by
 | Service | Type | Source dir | Plan |
 |---|---|---|---|
 | `sm-relay` | Web Service (Node.js) | `web-remote/relay/` | Starter ($7/mo) — required for persistent WebSocket connections (Render free tier sleeps after 15 min inactivity) |
-| `sm-app` | Static Site | `web-remote/app/` | Free — Vite build, no server process needed |
+| `sm-app` | Static Site | `web/remote-app/` | Free — Vite build, no server process needed |
 
 Both services are in the user's existing Render account (same as fizzpop,
 etch-engine, bilko.run). Each has its own `render.yaml` in its source dir.
@@ -663,7 +663,7 @@ session to a test device session.
 **Done when**: local app can pair, connect to the deployed relay, and echo a
 `cmd:app:version` from a browser session back as a `resp:`.
 
-### PRD 09 — Web app (`web-remote/app/`)
+### PRD 09 — Web app (`web/remote-app/`)
 
 **Deliverables:**
 

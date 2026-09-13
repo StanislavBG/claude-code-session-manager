@@ -1,6 +1,6 @@
 /**
- * manual-figure-captures.test.cjs — cross-file consistency tests for the
- * Field Manual's figure-capture pipeline (scripts/capture-manual-figures.mjs
+ * figure-captures.test.cjs — cross-file consistency tests for the
+ * Field Manual's figure-capture pipeline (web/manual/capture-figures.mjs
  * + session-manager-operations/manual/figure-captures.json). The recipes
  * JSON and chapter HTML are read as text rather than imported (there's
  * nothing to import — they're data), but NAV_ITEMS is imported directly from
@@ -9,17 +9,17 @@
  * on src/main/__tests__/workTypeLibrary.test.cjs's cross-file text-assertion
  * technique.
  *
- * Run: timeout 120 npx vitest run scripts/__tests__/manual-figure-captures.test.cjs
+ * Run: timeout 120 npx vitest run web/manual/__tests__/figure-captures.test.cjs
  */
 
 'use strict';
 
 import { test, expect } from 'vitest';
-import { NAV_ITEMS } from '../../src/renderer/lib/navGroups';
+import { NAV_ITEMS } from '../../../src/renderer/lib/navGroups';
 const fs = require('node:fs');
 const path = require('node:path');
 
-const REPO_ROOT = path.resolve(__dirname, '../..');
+const REPO_ROOT = path.resolve(__dirname, '../../..');
 const CHAPTERS_DIR = path.join(REPO_ROOT, 'session-manager-operations/manual/chapters');
 const RECIPES_PATH = path.join(REPO_ROOT, 'session-manager-operations/manual/figure-captures.json');
 

@@ -5,11 +5,9 @@ Part of the **WEB PRESENCE** partition — see
 
 ## What's here
 
-- `app/` — the phone-remote PWA. **This is the LIVE SOURCE** of the bundle published to
-  `bilko.run/projects/session-manager/`. Verified 2026-09-12: the live manifest there
-  (`~/Projects/Bilko/public/projects/session-manager/manifest.json`) records
-  `"gitSha": "69c1d7a"`, which is this repo's last commit touching `web-remote/` — i.e. the
-  deployed bundle and this folder are in sync, not drifted.
+- The phone-remote PWA (**LIVE SOURCE** of the bundle published to
+  `bilko.run/projects/session-manager/`) moved to [`web/remote-app/`](../web/remote-app/) —
+  it is still part of the WEB PRESENCE partition, just no longer nested under this directory.
 - `relay/` — **DEAD.** Superseded by a diverged port at `~/Projects/Bilko/server/sm-relay/router.ts`,
   whose own file header literally says `Ported from session-manager web-remote/relay/src/router.ts`.
   Changes here do not reach production. Do not delete it in the course of unrelated work — that's a
@@ -17,9 +15,9 @@ Part of the **WEB PRESENCE** partition — see
 
 ## What must NOT be assumed
 
-- Do **not** assume editing `app/` here requires a separate deploy step you need to trigger —
-  check how `~/Projects/Bilko` currently pulls/builds this bundle before assuming it's automatic
-  or manual.
+- Do **not** assume editing `web/remote-app/` requires a separate deploy step you need to
+  trigger — check how `~/Projects/Bilko` currently pulls/builds this bundle before assuming
+  it's automatic or manual.
 - Do **not** edit `relay/` expecting it to affect the live relay. The live relay is
   `~/Projects/Bilko/server/sm-relay/router.ts`, a different, diverged file.
 - Do **not** decommission, delete, or route around **the bilko.run relay itself** (the deployed

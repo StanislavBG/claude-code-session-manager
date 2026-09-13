@@ -6,7 +6,7 @@ export default defineConfig({
   // cycle-1 e2e/*.spec.mjs (live-transcript, history-dashboard, new-session,
   // overview-billing, broadcast) were DELETED — they asserted removed UI; the
   // maintained tests/e2e/*.ts suite is the signal. mic/watchers .mjs still run.
-  testIgnore: ['**/.claude/worktrees/**', 'web-remote/**'],
+  testIgnore: ['**/.claude/worktrees/**', 'web-remote/**', 'web/remote-app/**'],
   timeout: 240_000,
   workers: 1,
   retries: process.env.CI ? 1 : 0,

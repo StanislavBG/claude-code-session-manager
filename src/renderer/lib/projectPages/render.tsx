@@ -3,8 +3,8 @@
 // fonts as base64 data: URIs, zero network calls, zero client-side JS).
 // No live React recomposition inside the app — this is the pure function
 // session-manager-operations/architecture/project-pages-pipeline.md's Stage 0
-// section describes, precompiled by scripts/build-project-pages-renderer.mjs
-// into scripts/render-project-pages/dist/renderer.cjs for the CLI to require.
+// section describes, precompiled by web/project-pages/build-renderer.mjs
+// into web/project-pages/renderer/dist/renderer.cjs for the CLI to require.
 //
 // Fonts: only the Latin-subset woff2 for each family/weight actually used by
 // the library is embedded (Geist 400-700, IBM Plex Mono 400/500/600,
@@ -23,7 +23,7 @@ import type { ProjectPageSummary, ProjectPagePicks } from './summaryType';
 
 function fontFace(family: string, weight: string, filename: string): string {
   const base64 = FONT_DATA[filename];
-  if (!base64) throw new Error(`Missing font data for ${filename} — rerun scripts/generate-project-pages-font-data.mjs`);
+  if (!base64) throw new Error(`Missing font data for ${filename} — rerun web/project-pages/generate-font-data.mjs`);
   return `@font-face{font-family:'${family}';font-style:normal;font-weight:${weight};font-display:swap;src:url(data:font/woff2;base64,${base64}) format('woff2');}`;
 }
 

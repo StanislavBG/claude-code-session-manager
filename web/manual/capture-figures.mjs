@@ -42,7 +42,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = resolve(__dirname, '..');
+const ROOT = resolve(__dirname, '..', '..');
 const MANUAL_DIR = join(ROOT, 'session-manager-operations', 'manual');
 const CHAPTERS_DIR = join(MANUAL_DIR, 'chapters');
 const FIGURES_DIR = join(MANUAL_DIR, 'figures');

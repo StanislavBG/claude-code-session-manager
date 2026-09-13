@@ -7,7 +7,7 @@
  *
  * This schema is DESCRIPTIVE, not the enforcement mechanism — the actual
  * gate a posted summary must pass is `validateProjectPageSummary` (shipped
- * in scripts/project-pages-logic/dist/logic.cjs, called by
+ * in web/project-pages/logic/dist/logic.cjs, called by
  * /admin/project-home/validate-summary and /admin/project-home/render).
  * Kept hand-written rather than derived at runtime so the contract route
  * never needs to load the TypeScript source; if summaryType.ts's shape

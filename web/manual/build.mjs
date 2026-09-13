@@ -11,9 +11,9 @@
  * through the entitlement-checked routes in server/routes/manual.ts.
  *
  * Usage:
- *   node scripts/build-manual.mjs                 # build into the default Bilko checkout
- *   node scripts/build-manual.mjs --out <dir>     # build somewhere else (CI, dry run)
- *   node scripts/build-manual.mjs --check         # verify sources only, write nothing
+ *   node web/manual/build.mjs                 # build into the default Bilko checkout
+ *   node web/manual/build.mjs --out <dir>     # build somewhere else (CI, dry run)
+ *   node web/manual/build.mjs --check         # verify sources only, write nothing
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, cpSync, statSync } from 'node:fs';
@@ -21,7 +21,7 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 
-const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SOURCE = join(REPO, 'session-manager-operations', 'manual');
 const DEFAULT_BILKO = resolve(REPO, '..', 'Bilko');
 

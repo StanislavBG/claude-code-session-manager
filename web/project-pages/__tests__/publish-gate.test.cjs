@@ -1,9 +1,9 @@
 /**
- * project-pages-publish-gate.test.cjs — the publish gate that stops a stale
+ * publish-gate.test.cjs — the publish gate that stops a stale
  * or missing Project Pages bundle (or a drifted catalog / spec copy) from
- * shipping in the npm tarball. See scripts/project-pages-publish-gate.cjs.
+ * shipping in the npm tarball. See web/project-pages/publish-gate.cjs.
  *
- * Run: timeout 300 npx vitest run scripts/__tests__/project-pages-publish-gate.test.cjs
+ * Run: timeout 300 npx vitest run web/project-pages/__tests__/publish-gate.test.cjs
  */
 
 'use strict';
@@ -14,9 +14,9 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const REPO_ROOT = path.resolve(__dirname, '../..');
-const gate = require('../project-pages-publish-gate.cjs');
-const assets = require('../project-pages-assets.cjs');
+const REPO_ROOT = path.resolve(__dirname, '../../..');
+const gate = require('../publish-gate.cjs');
+const assets = require('../assets.cjs');
 
 const tmpDirs = [];
 afterEach(() => {
@@ -45,9 +45,9 @@ test('missing bundle fails, naming the file and the npm script that builds it', 
   const result = gate.checkBundles(root);
   expect(result.ok).toBe(false);
   const joined = result.errors.join('\n');
-  expect(joined).toContain('scripts/render-project-pages/dist/renderer.cjs');
+  expect(joined).toContain('web/project-pages/renderer/dist/renderer.cjs');
   expect(joined).toContain('npm run build:project-pages');
-  expect(joined).toContain('scripts/project-pages-logic/dist/logic.cjs');
+  expect(joined).toContain('web/project-pages/logic/dist/logic.cjs');
   expect(joined).toContain('npm run build:project-pages-logic');
 });
 
@@ -115,7 +115,7 @@ test('generated catalog captures every lens, slot and variant note verbatim from
 // as prepublishOnly produces them — build them first so a fresh clone passes
 // too. esbuild finishes in a few seconds; bounded anyway.
 beforeAll(() => {
-  for (const script of ['scripts/build-project-pages-renderer.mjs', 'scripts/build-project-pages-logic.mjs']) {
+  for (const script of ['web/project-pages/build-renderer.mjs', 'web/project-pages/build-logic.mjs']) {
     execFileSync('node', [script], { cwd: REPO_ROOT, timeout: 120_000, stdio: 'pipe' });
   }
 }, 150_000);

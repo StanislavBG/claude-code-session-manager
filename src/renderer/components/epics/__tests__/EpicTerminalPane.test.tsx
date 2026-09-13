@@ -276,22 +276,49 @@ describe('EpicTerminalPane (PRD 831)', () => {
     expect(cmdWrite).toBeUndefined()
   })
 
-  it("uses the Epic's agentType persona model for --model when set and not 'inherit'", async () => {
-    const { write } = installFullWindowApiMock()
-    const fullApi = window.api as unknown as Record<string, unknown>
-    Object.assign(fullApi, {
-      agents: { listPersonas: vi.fn().mockResolvedValue([{ name: 'architect', model: 'sonnet' }]) },
-    })
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicTerminalPane } = await import('../EpicTerminalPane')
+  // Persona-resolution precedence (overlay-vs-global, inherit, dangling
+  // agentType) is agentModelResolve.cjs's own contract, covered by
+  // agentModelResolve.test.cjs — these tests only assert this component calls
+  // that SAME authority via the agents:resolve-epic-model IPC (cwd +
+  // claudeSessionId) and uses its answer verbatim, per unify-epic-model-
+  // resolution.
 
-    const epic = await usePromptSessions
-      .getState()
-      .createPromptSession('/proj', 'Epic with agent', 'feature', 'test', 'architect')
+  it('resolves --model via the agents:resolve-epic-model IPC, keyed by cwd + claudeSessionId', async () => {
+    const { write } = installWindowApiMock()
+    const resolveEpicModel = vi.fn().mockResolvedValue('sonnet')
+    const fullApi = window.api as unknown as Record<string, unknown>
+    Object.assign(fullApi, { agents: { resolveEpicModel } })
+    const { EpicTerminalPane } = await import('../EpicTerminalPane')
 
     mount(
       createElement(EpicTerminalPane, {
-        epicId: epic.id,
+        epicId: 'epic-1',
+        cwd: '/proj',
+        sessionId: 'claude-session-abc',
+        onReturnToChat: () => {},
+      }),
+    )
+
+    await flushAsync(2)
+    act(() => { vi.advanceTimersByTime(1600) })
+
+    expect(resolveEpicModel).toHaveBeenCalledWith({ cwd: '/proj', claudeSessionId: 'claude-session-abc' })
+    const cmdWrite = write.mock.calls.find(([payload]) => payload.data.includes('claude '))
+    expect(cmdWrite).toBeTruthy()
+    expect(cmdWrite![0].data).toContain("--model 'sonnet'")
+  })
+
+  it("falls back to the hardcoded 'sonnet' floor (never an unpinned --model) when the resolve-epic-model IPC call rejects", async () => {
+    const { write } = installWindowApiMock()
+    const fullApi = window.api as unknown as Record<string, unknown>
+    Object.assign(fullApi, {
+      agents: { resolveEpicModel: vi.fn().mockRejectedValue(new Error('boom')) },
+    })
+    const { EpicTerminalPane } = await import('../EpicTerminalPane')
+
+    mount(
+      createElement(EpicTerminalPane, {
+        epicId: 'epic-1',
         cwd: '/proj',
         sessionId: 'claude-session-abc',
         onReturnToChat: () => {},
@@ -304,121 +331,6 @@ describe('EpicTerminalPane (PRD 831)', () => {
     const cmdWrite = write.mock.calls.find(([payload]) => payload.data.includes('claude '))
     expect(cmdWrite).toBeTruthy()
     expect(cmdWrite![0].data).toContain("--model 'sonnet'")
-  })
-
-  it("falls back to the raw-session-model toggle when the persona's model is 'inherit'", async () => {
-    const { write } = installFullWindowApiMock()
-    const fullApi = window.api as unknown as Record<string, unknown>
-    Object.assign(fullApi, {
-      agents: { listPersonas: vi.fn().mockResolvedValue([{ name: 'architect', model: 'inherit' }]) },
-    })
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { getRawSessionModel } = await import('../../../lib/rawSessionModel')
-    const { EpicTerminalPane } = await import('../EpicTerminalPane')
-
-    const epic = await usePromptSessions
-      .getState()
-      .createPromptSession('/proj', 'Epic with inherit agent', 'feature', 'test', 'architect')
-
-    mount(
-      createElement(EpicTerminalPane, {
-        epicId: epic.id,
-        cwd: '/proj',
-        sessionId: 'claude-session-abc',
-        onReturnToChat: () => {},
-      }),
-    )
-
-    await flushAsync(2)
-    act(() => { vi.advanceTimersByTime(1600) })
-
-    const cmdWrite = write.mock.calls.find(([payload]) => payload.data.includes('claude '))
-    expect(cmdWrite).toBeTruthy()
-    expect(cmdWrite![0].data).toContain(`--model '${getRawSessionModel()}'`)
-  })
-
-  it('falls back to the raw-session-model toggle when the Epic has no agentType', async () => {
-    const { write } = installWindowApiMock()
-    const { getRawSessionModel } = await import('../../../lib/rawSessionModel')
-    const { EpicTerminalPane } = await import('../EpicTerminalPane')
-
-    mount(
-      createElement(EpicTerminalPane, {
-        epicId: 'epic-without-agent',
-        cwd: '/proj',
-        sessionId: 'claude-session-abc',
-        onReturnToChat: () => {},
-      }),
-    )
-
-    await flushAsync(2)
-    act(() => { vi.advanceTimersByTime(1600) })
-
-    const cmdWrite = write.mock.calls.find(([payload]) => payload.data.includes('claude '))
-    expect(cmdWrite).toBeTruthy()
-    expect(cmdWrite![0].data).toContain(`--model '${getRawSessionModel()}'`)
-  })
-
-  it('falls back to the raw-session-model toggle when listPersonas() rejects', async () => {
-    const { write } = installFullWindowApiMock()
-    const fullApi = window.api as unknown as Record<string, unknown>
-    Object.assign(fullApi, {
-      agents: { listPersonas: vi.fn().mockRejectedValue(new Error('boom')) },
-    })
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { getRawSessionModel } = await import('../../../lib/rawSessionModel')
-    const { EpicTerminalPane } = await import('../EpicTerminalPane')
-
-    const epic = await usePromptSessions
-      .getState()
-      .createPromptSession('/proj', 'Epic with failing lookup', 'feature', 'test', 'architect')
-
-    mount(
-      createElement(EpicTerminalPane, {
-        epicId: epic.id,
-        cwd: '/proj',
-        sessionId: 'claude-session-abc',
-        onReturnToChat: () => {},
-      }),
-    )
-
-    await flushAsync(2)
-    act(() => { vi.advanceTimersByTime(1600) })
-
-    const cmdWrite = write.mock.calls.find(([payload]) => payload.data.includes('claude '))
-    expect(cmdWrite).toBeTruthy()
-    expect(cmdWrite![0].data).toContain(`--model '${getRawSessionModel()}'`)
-  })
-
-  it('falls back to the raw-session-model toggle when the agentType persona no longer exists', async () => {
-    const { write } = installFullWindowApiMock()
-    const fullApi = window.api as unknown as Record<string, unknown>
-    Object.assign(fullApi, {
-      agents: { listPersonas: vi.fn().mockResolvedValue([{ name: 'someone-else', model: 'opus' }]) },
-    })
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { getRawSessionModel } = await import('../../../lib/rawSessionModel')
-    const { EpicTerminalPane } = await import('../EpicTerminalPane')
-
-    const epic = await usePromptSessions
-      .getState()
-      .createPromptSession('/proj', 'Epic with deleted agent', 'feature', 'test', 'architect')
-
-    mount(
-      createElement(EpicTerminalPane, {
-        epicId: epic.id,
-        cwd: '/proj',
-        sessionId: 'claude-session-abc',
-        onReturnToChat: () => {},
-      }),
-    )
-
-    await flushAsync(2)
-    act(() => { vi.advanceTimersByTime(1600) })
-
-    const cmdWrite = write.mock.calls.find(([payload]) => payload.data.includes('claude '))
-    expect(cmdWrite).toBeTruthy()
-    expect(cmdWrite![0].data).toContain(`--model '${getRawSessionModel()}'`)
   })
 
   it('PRD 833 I2: a session with no transcript yet launches with --session-id, not --resume', async () => {

@@ -1621,6 +1621,13 @@ export interface SessionManagerAPI {
      *  `listPersonas` above, which only reads the global directory. Null when neither
      *  location has the file. */
     getPersonaBody: (payload: { cwd: string; name: string }) => Promise<{ path: string; text: string } | null>;
+    /** The launch-time authority for an Epic-backed session's `--model`: the SAME
+     *  resolver (`agentModelResolve.cjs`'s `resolveEpicModel`) chatRunner.cjs's Chat
+     *  path calls in-process, reached here so Terminal (`EpicTerminalPane.tsx`, no
+     *  fs access) agrees with Chat by calling the identical function. Overlay-aware
+     *  (project `.claude/agents/<name>.md` wins over global), never throws — a
+     *  dangling agentType or absent/`inherit` model falls back to `'sonnet'`. */
+    resolveEpicModel: (payload: { cwd: string; claudeSessionId: string }) => Promise<string>;
     /** Fires after any save/delete/removeOverride — subscribers should re-fetch listPersonas(). */
     onChanged: (handler: () => void) => () => void;
   };

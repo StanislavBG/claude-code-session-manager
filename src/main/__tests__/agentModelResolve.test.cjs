@@ -190,6 +190,96 @@ test('resolvePrdPersonaForSpawn returns the fallback (no persona applied) when a
   expect(result).toEqual({ model: FALLBACK_MODEL, systemPrompt: null, personaPath: null });
 });
 
+// Overlay-aware resolution (unify-epic-model-resolution): resolveEpicModel
+// must use the SAME project-overlay-then-global precedence
+// resolvePrdPersonaForSpawn already uses, rather than the global-only
+// readPersonaModel — so a project's `.claude/agents/<name>.md` wins for a
+// launched Chat/Terminal session exactly like it already does for a
+// scheduled PRD.
+
+test('resolveEpicModel prefers a project-overlay persona over the global one with the same name', async () => {
+  const cwd = await mkTmpDir('sm-agentmodel-cwd-');
+  const globalDir = await mkTmpDir('sm-agentmodel-agents-');
+  writeIndex(cwd, { 'epic-1': { id: 'epic-1', claudeSessionId: 'sess-overlay', agentType: 'shared-persona' } });
+  writePersona(globalDir, 'shared-persona', ['model: opus']);
+  const projectAgentsDir = path.join(cwd, '.claude', 'agents');
+  writePersona(projectAgentsDir, 'shared-persona', ['model: haiku']);
+
+  const model = resolveEpicModel({
+    cwd,
+    claudeSessionId: 'sess-overlay',
+    deps: { globalDir, validatePath: noopValidatePath },
+  });
+
+  expect(model).toBe('haiku');
+});
+
+test('resolveEpicModel falls through to the global persona when no project overlay exists', async () => {
+  const cwd = await mkTmpDir('sm-agentmodel-cwd-');
+  const globalDir = await mkTmpDir('sm-agentmodel-agents-');
+  writeIndex(cwd, { 'epic-1': { id: 'epic-1', claudeSessionId: 'sess-global-only', agentType: 'global-only-persona' } });
+  writePersona(globalDir, 'global-only-persona', ['model: opus']);
+
+  const model = resolveEpicModel({
+    cwd,
+    claudeSessionId: 'sess-global-only',
+    deps: { globalDir, validatePath: noopValidatePath },
+  });
+
+  expect(model).toBe('opus');
+});
+
+test('resolveEpicModel falls back to FALLBACK_MODEL (never throws) for a dangling agentType with no persona file anywhere, and logs it once', async () => {
+  const cwd = await mkTmpDir('sm-agentmodel-cwd-');
+  const globalDir = await mkTmpDir('sm-agentmodel-agents-'); // never written to
+  writeIndex(cwd, { 'epic-1': { id: 'epic-1', claudeSessionId: 'sess-dangling', agentType: 'ghost-persona' } });
+
+  const call = () => resolveEpicModel({
+    cwd,
+    claudeSessionId: 'sess-dangling',
+    deps: { globalDir, validatePath: noopValidatePath },
+  });
+
+  expect(call).not.toThrow();
+  expect(call()).toBe(FALLBACK_MODEL);
+  call(); // second call must not log a second line (dedup per (cwd, agentType))
+
+  const { todayFile } = require('../lib/opsErrorLog.cjs');
+  const lines = fs.readFileSync(todayFile(cwd), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const matches = lines.filter((l) => l.message.includes('ghost-persona'));
+  expect(matches).toHaveLength(1);
+});
+
+// Chat (chatRunner.cjs, in-process) and Terminal (EpicTerminalPane.tsx, via
+// the agents:resolve-epic-model IPC added in this change) both call this
+// exact function with the same { cwd, claudeSessionId } shape — so "the same
+// Epic resolves identically in both views" is structural (one function, one
+// call signature), not a coincidence of two implementations agreeing. This
+// asserts the function is a pure, deterministic read of that Epic's overlay-
+// resolved persona model, which is what makes that guarantee hold.
+test('resolveEpicModel resolves identically for the same Epic across repeated calls (the guarantee Chat and Terminal both rely on)', async () => {
+  const cwd = await mkTmpDir('sm-agentmodel-cwd-');
+  const globalDir = await mkTmpDir('sm-agentmodel-agents-');
+  writeIndex(cwd, { 'epic-1': { id: 'epic-1', claudeSessionId: 'sess-shared', agentType: 'shared-epic-persona' } });
+  writePersona(globalDir, 'shared-epic-persona', ['model: haiku']);
+
+  const callArgs = { cwd, claudeSessionId: 'sess-shared', deps: { globalDir, validatePath: noopValidatePath } };
+  const chatResult = resolveEpicModel(callArgs);
+  const terminalResult = resolveEpicModel(callArgs); // simulates the IPC-forwarded call Terminal makes
+
+  expect(chatResult).toBe('haiku');
+  expect(terminalResult).toBe(chatResult);
+});
+
+// --model must never be left unpinned (CLAUDE.md model-pinning rule) on any
+// of the three launch paths. resolvePrdPersonaForSpawn's own miss-path tests
+// above already cover the scheduler call site; this covers the shared
+// Chat/Terminal resolver.
+test('resolveEpicModel never returns an empty/falsy --model value, even on every miss path', async () => {
+  expect(resolveEpicModel({})).toBeTruthy();
+  expect(resolveEpicModel({ cwd: '/nonexistent-cwd-xyz', claudeSessionId: 'no-such-session' })).toBeTruthy();
+});
+
 test('resolvePrdPersonaForSpawn caps the persona body at 6000 characters with a truncation notice naming the persona path', async () => {
   const longBody = 'x'.repeat(6500);
   const result = await resolvePrdPersonaForSpawn({

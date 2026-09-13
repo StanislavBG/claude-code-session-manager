@@ -530,11 +530,14 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     const fullPrompt = STOP_SIGNAL_INSTRUCTION + CHAT_MODE_TRUTH_INSTRUCTION + prompt;
 
     // sessionId is the Epic's claudeSessionId for an Epic-backed tab (see
-    // comment above childEnv) — resolve that Epic's agentType persona model
-    // so Chat and Terminal views of the same Epic launch with the same
-    // model. Never throws; falls back to the hardcoded 'sonnet' literal when
-    // there's no Epic, no agentType, or the persona has no model/'inherit' —
-    // --model must never be left unpinned (CLAUDE.md model-pinning rule).
+    // comment above childEnv) — resolve that Epic's agentType persona model,
+    // project-overlay-then-global (agentModelResolve.cjs's
+    // readOverlayAwarePersonaModel). Terminal (EpicTerminalPane.tsx) calls
+    // this SAME function via the agents:resolve-epic-model IPC, so the two
+    // views of one Epic agree by construction, not by convention. Never
+    // throws; falls back to the hardcoded 'sonnet' literal when there's no
+    // Epic, no agentType, or the persona has no model/'inherit' — --model
+    // must never be left unpinned (CLAUDE.md model-pinning rule).
     const model = agentModelResolve.resolveEpicModel({ cwd, claudeSessionId: sessionId });
 
     // Build argv as an array — no shell: true, no string interpolation

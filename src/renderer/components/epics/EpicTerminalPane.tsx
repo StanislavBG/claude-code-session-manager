@@ -4,34 +4,33 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { loadTerminalSettings, onTerminalSettingsChange, TERMINAL_THEMES } from '../../lib/terminalSettings'
 import { writeInChunks } from '../Terminal'
-import { getRawSessionModel } from '../../lib/rawSessionModel'
 import { shellQuote, modelFlag } from '../../lib/presets'
 import { canFit } from '../../lib/terminalFit'
 import { transcriptExists } from '../../lib/transcriptExists'
 import { useEpicTerminal } from '../../state/epicTerminal'
-import { usePromptSessions } from '../../state/promptSessions'
 import { toast } from '../../state/toast'
 
+/** Mirrors agentModelResolve.cjs's FALLBACK_MODEL — the floor this pane falls
+ *  back to if the IPC hop itself fails (never on a normal resolution: the
+ *  main-side resolveEpicModel already never throws). --model must never be
+ *  left unpinned (CLAUDE.md model-pinning rule). */
+const FALLBACK_MODEL = 'sonnet'
+
 /**
- * Resolves the `--model` this Epic's Terminal launch should use: the
- * agentType persona's own `model` field (Agent Library) when the Epic has
- * one set and it isn't 'inherit', else the global raw-session-model toggle —
- * the exact fallback this pane always used before per-Epic model defaults
- * existed. agentType is display-only everywhere else (CLAUDE.md); this is
- * the first concrete exception, scoped to just this one launch string.
+ * Resolves the `--model` this Epic's Terminal launch should use by calling
+ * the SAME authority Chat's headless launch calls in-process
+ * (agentModelResolve.cjs's resolveEpicModel, via the agents:resolve-epic-model
+ * IPC) — so Chat and Terminal agree on this Epic's model by construction, not
+ * by two implementations that are merely supposed to agree. `sessionId` IS
+ * this Epic's claudeSessionId (see the Props doc below), the same join key
+ * chatRunner.cjs passes.
  */
-async function resolveEpicModel(epicId: string): Promise<string> {
-  const epic = usePromptSessions.getState().sessions[epicId]
-  const agentType = epic?.agentType
-  if (!agentType) return getRawSessionModel()
+async function resolveEpicModel(cwd: string, claudeSessionId: string): Promise<string> {
   try {
-    const personas = await window.api.agents.listPersonas()
-    const persona = personas.find((p) => p.name === agentType)
-    if (persona?.model && persona.model !== 'inherit') return persona.model
+    return await window.api.agents.resolveEpicModel({ cwd, claudeSessionId })
   } catch {
-    /* fall through to the raw-session-model toggle */
+    return FALLBACK_MODEL
   }
-  return getRawSessionModel()
 }
 
 interface Props {
@@ -125,7 +124,7 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
         // `--resume` of a nonexistent session errors out. Same durable
         // resume-vs-create decision chat.ts's send() makes (PRD 833 I2).
         const resume = await transcriptExists(cwd, sessionId).catch(() => true)
-        const model = await resolveEpicModel(epicId)
+        const model = await resolveEpicModel(cwd, sessionId)
         const flag = resume ? `--resume ${shellQuote(sessionId)}` : `--session-id ${shellQuote(sessionId)}`
         const cmd = `claude --dangerously-skip-permissions ${flag}${modelFlag(model)}\r`
         setTimeout(() => writeInChunks(sessionId, cmd), 1500)

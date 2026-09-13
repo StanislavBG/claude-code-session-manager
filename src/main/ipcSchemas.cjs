@@ -623,6 +623,15 @@ const agentsGetPersonaBody = z.object({
   name: z.string().min(1).max(200),
 }).strict();
 
+// ──────────────────────────────────────────── Epic launch model (PRD: unify-epic-model-resolution)
+// Terminal's (EpicTerminalPane.tsx) call into agentModelResolve.cjs's
+// resolveEpicModel — the same launch-model authority chatRunner.cjs's Chat
+// path calls in-process, reached here over IPC since the renderer has no fs.
+const agentsResolveEpicModel = z.object({
+  cwd: z.string().min(1).max(4096),
+  claudeSessionId: z.string().min(1).max(200),
+}).strict();
+
 // ──────────────────────────────────────────── Project Pages (PRD 932)
 // Same validation split as projectBriefCwd above: real path validation is
 // config.cjs's validatePath at first fs access in projectPages.cjs.
@@ -1108,6 +1117,7 @@ module.exports = {
     exchangesList,
     agentsSavePersona,
     agentsGetPersonaBody,
+    agentsResolveEpicModel,
     delegationReadinessCwd,
     telemetrySetConfig,
   },

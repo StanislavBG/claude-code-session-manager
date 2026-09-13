@@ -37,6 +37,7 @@ const epicWorktreeMint = require('./lib/epicWorktreeMint.cjs');
 const epicWorktreeMerge = require('./lib/epicWorktreeMerge.cjs');
 const epicWorktreeProjectConfig = require('./lib/epicWorktreeProjectConfig.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
+const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { checkDelegationReadiness, installPrdWriteGuard, installDestructiveGitGuard, installInlineImplementationGuard } = require('./lib/delegationReadiness.cjs');
 const { writeGuardShims } = require('./lib/guardShims.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES } = require('./lib/mcpToolCatalog.cjs');
@@ -520,6 +521,15 @@ ipcMain.handle('agents:remove-override', async (_e, payload) => {
 // body that actually applies to its cwd. Read-only.
 ipcMain.handle('agents:get-persona-body', validated(schemas.agentsGetPersonaBody, (payload) =>
   agentLibrary.getPersonaBody(payload)));
+
+// "What will this Epic's launch actually use for --model?" — the SAME
+// resolver chatRunner.cjs's Chat-view launch calls in-process
+// (agentModelResolve.cjs's resolveEpicModel), reached here so Terminal's
+// launch (EpicTerminalPane.tsx, a renderer module with no fs access) agrees
+// with Chat by calling the identical function rather than a second one that
+// is merely supposed to. Never throws (resolveEpicModel's own contract).
+ipcMain.handle('agents:resolve-epic-model', validated(schemas.agentsResolveEpicModel, (payload) =>
+  agentModelResolve.resolveEpicModel(payload)));
 
 // "Can this project actually delegate?" probe (PRD: delegation-readiness).
 // Structured data over the preconditions for scheduler_create_prd being in an

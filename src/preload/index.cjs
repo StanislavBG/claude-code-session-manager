@@ -105,6 +105,7 @@ contextBridge.exposeInMainWorld('api', {
     deletePersona: (payload) => ipcRenderer.invoke('agents:delete-persona', payload),
     removeOverride: (payload) => ipcRenderer.invoke('agents:remove-override', payload),
     getPersonaBody: (payload) => ipcRenderer.invoke('agents:get-persona-body', payload),
+    resolveEpicModel: (payload) => ipcRenderer.invoke('agents:resolve-epic-model', payload),
     // Fired after any save/delete/removeOverride so every mounted
     // subscriber (Agent Library, Tag Library) re-fetches the same file.
     onChanged: (handler) => {

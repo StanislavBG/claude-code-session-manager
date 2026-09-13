@@ -3,14 +3,19 @@
 /**
  * agentModelResolve.cjs — resolves the `--model` an Epic's session should
  * launch a headless `claude -p` (or Terminal `claude`) process with: its
- * agentType persona's own `model` field (Agent Library) when the Epic has
- * one set and it isn't 'inherit', else `fallbackModel`.
+ * agentType persona's own `model` field, project-overlay-then-global
+ * (`epicMint.cjs`'s `resolvePersonaPaths`), when the Epic has one set and
+ * it isn't 'inherit', else `fallbackModel`.
  *
  * Extracted from PRD agent-model-default-terminal (which wired this for the
  * Terminal-view launch in EpicTerminalPane.tsx) so chatRunner.cjs's headless
  * Chat-view launch resolves the SAME persona-derived model — Chat and
  * Terminal are two VIEWS over one Epic session (CLAUDE.md) and must agree on
- * which model that session launches with.
+ * which model that session launches with. Terminal reaches `resolveEpicModel`
+ * through the `agents:resolve-epic-model` IPC (main-process only; the
+ * renderer has no fs access) rather than a second implementation, so the two
+ * views literally call the same function instead of two functions that are
+ * merely supposed to agree.
  *
  * Plain Node module (sync fs) — no Electron deps, mirrors epicMint.cjs's
  * readActiveIndex so this can be called from chatRunner.cjs's synchronous
@@ -21,7 +26,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
-const { readActiveIndex } = require('./epicMint.cjs');
+const { readActiveIndex, resolvePersonaPaths } = require('./epicMint.cjs');
 const configMgr = require('../config.cjs');
 
 /** The hardcoded floor every branch of resolveEpicModel falls back to — --model must never be omitted (CLAUDE.md "Automation model pinning"). */
@@ -73,30 +78,72 @@ function findAgentTypeByClaudeSessionId(cwd, claudeSessionId, deps = {}) {
 }
 
 /**
+ * Shared miss-tolerant reader both `readPersonaModel` and
+ * `readOverlayAwarePersonaModel` below are thin wrappers over: tries each
+ * candidate path in order (`validatePath` then sync `readFileSync`), and
+ * returns the first readable file's `model` frontmatter field — even if
+ * that field is absent, which is why an empty-`model` overlay file does NOT
+ * fall through to a later candidate (matches `getPersonaBody`'s own
+ * semantics). Logs the dangling-persona warning at most once per
+ * `(deps.cwd, agentType)` only when EVERY candidate misses. Never throws.
+ */
+function readModelFromCandidatePaths(candidates, agentType, deps) {
+  const validatePath = deps.validatePath || configMgr.validatePath;
+  for (const candidate of candidates) {
+    let real;
+    try {
+      real = validatePath(candidate);
+    } catch {
+      continue;
+    }
+    try {
+      const text = fs.readFileSync(real, 'utf8');
+      const { fm } = splitFrontmatter(text);
+      return fm.model || null;
+    } catch {
+      continue;
+    }
+  }
+  logDanglingPersonaOnce(deps.cwd, agentType);
+  return null;
+}
+
+/**
  * Reads a global agent persona's `model` frontmatter field by name
  * (`~/.claude/agents/<agentType>.md`), sync. Returns null on any miss
  * (no such file, unreadable, no `model` key) — never throws.
+ *
+ * Superseded as `resolveEpicModel`'s reader by `readOverlayAwarePersonaModel`
+ * below (a project's `.claude/agents/` overlay must win, same as the
+ * scheduled-PRD path) — kept as the global-only reader its own tests cover.
  */
 function readPersonaModel(agentType, deps = {}) {
   if (!agentType) return null;
   const globalDir = deps.globalDir || path.join(os.homedir(), '.claude', 'agents');
-  const validatePath = deps.validatePath || configMgr.validatePath;
-  let real;
-  try {
-    real = validatePath(path.join(globalDir, `${agentType}.md`));
-  } catch {
-    logDanglingPersonaOnce(deps.cwd, agentType);
-    return null;
-  }
-  let text;
-  try {
-    text = fs.readFileSync(real, 'utf8');
-  } catch {
-    logDanglingPersonaOnce(deps.cwd, agentType);
-    return null;
-  }
-  const { fm } = splitFrontmatter(text);
-  return fm.model || null;
+  return readModelFromCandidatePaths([path.join(globalDir, `${agentType}.md`)], agentType, deps);
+}
+
+/**
+ * Reads an Epic's agentType persona's `model` frontmatter field with the SAME
+ * project-overlay-then-global precedence `agentLibrary.cjs`'s `getPersonaBody`
+ * (and, through it, `resolvePrdPersonaForSpawn` below) already applies for a
+ * scheduled PRD — `epicMint.cjs`'s `resolvePersonaPaths` is the shared path
+ * resolver both readers go through, so there is exactly one place that decides
+ * which of the two files wins.
+ *
+ * Sync (not `getPersonaBody`'s async `fsp.readFile`) because `resolveEpicModel`
+ * must stay synchronous: `chatRunner.cjs`'s `executeRun()` registers its
+ * cancel handle into `inFlight` synchronously, and its caller (`pump()`) reads
+ * that entry back immediately after invoking the executor — an `await`
+ * inserted ahead of that registration would run it a tick late and silently
+ * break `cancel()`. Returns null on a total miss (neither location resolves)
+ * — never throws.
+ */
+function readOverlayAwarePersonaModel(agentType, deps = {}) {
+  if (!agentType) return null;
+  const resolvePaths = deps.resolvePersonaPaths || resolvePersonaPaths;
+  const { projectPath, globalPath } = resolvePaths(deps.cwd, agentType, deps);
+  return readModelFromCandidatePaths([projectPath, globalPath], agentType, deps);
 }
 
 /**
@@ -105,6 +152,12 @@ function readPersonaModel(agentType, deps = {}) {
  * file) falls back to `fallbackModel` (default: 'sonnet', the same literal
  * every claude -p call site pins per CLAUDE.md's model-pinning rule).
  *
+ * This is the SINGLE authority both Chat (`chatRunner.cjs`, in-process) and
+ * Terminal (`EpicTerminalPane.tsx`, via the `agents:resolve-epic-model` IPC
+ * added in the same change) call for an Epic-backed launch, so the two views
+ * of one Epic agree on which model that session launches with — see this
+ * module's header.
+ *
  * @param {{ cwd: string, claudeSessionId: string, fallbackModel?: string, deps?: object }} opts
  * @returns {string}
  */
@@ -112,7 +165,7 @@ function resolveEpicModel({ cwd, claudeSessionId, fallbackModel = FALLBACK_MODEL
   try {
     const agentType = findAgentTypeByClaudeSessionId(cwd, claudeSessionId, deps);
     if (!agentType) return fallbackModel;
-    const model = readPersonaModel(agentType, { ...deps, cwd });
+    const model = readOverlayAwarePersonaModel(agentType, { ...deps, cwd });
     if (!model || model === 'inherit') return fallbackModel;
     return model;
   } catch {
@@ -182,5 +235,6 @@ module.exports = {
   resolveEpicModel,
   findAgentTypeByClaudeSessionId,
   readPersonaModel,
+  readOverlayAwarePersonaModel,
   resolvePrdPersonaForSpawn,
 };

@@ -92,6 +92,7 @@ export default defineConfig({
       'src/main/__tests__/prdMigration.test.cjs',
       'src/main/__tests__/flatPrdTickSweep.test.cjs',
       'src/main/__tests__/reconcileFlatPrdSweep.test.cjs',
+      'src/main/__tests__/reconcileTiming.test.cjs',
       'src/main/__tests__/scheduler-find-prd-dir.test.cjs',
       'src/main/__tests__/scheduler-prd-missing-skip.test.cjs',
       'src/main/__tests__/scheduler-archive-completed-prd.test.cjs',

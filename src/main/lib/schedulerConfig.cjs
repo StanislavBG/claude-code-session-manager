@@ -56,6 +56,16 @@ module.exports = {
   // (pause/resume, job start/finish/reap/reset) bypass this via
   // broadcast({ flush: true }).
   BROADCAST_COALESCE_MS: 200,
+  // reconcile() pass duration above which a single warn-level breakdown is
+  // logged (per-phase ms, PRD file count, resolved dir count) — the only
+  // evidence trail for a slow pass otherwise requires hand-timing the scan
+  // from a throwaway script. Baseline measured 2026-09-13 on a machine with
+  // ~160 PRD dirs: allProjectCwds() ~270ms x5/pass, resolvePrdsDirs()
+  // ~430ms, historyTerminalBySlug() ~418ms over 784 entries — a healthy pass
+  // today is comfortably under 2s; this should trip well before a
+  // regression back toward those numbers compounds into the reported
+  // "schedule.state timed out after 5000ms" toast.
+  RECONCILE_SLOW_PASS_MS: 2_000,
   // Terminal (completed/failed) jobs older than this move from queue.json's
   // hot jobs[] into the append-only history.jsonl sidecar. See
   // src/main/lib/queueHistory.cjs.

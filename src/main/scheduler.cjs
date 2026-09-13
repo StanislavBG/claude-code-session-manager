@@ -91,6 +91,7 @@ const {
   USAGE_REFRESH_INTERVAL_MS,
   MAX_JOB_DURATION_MS,
   BROADCAST_COALESCE_MS,
+  RECONCILE_SLOW_PASS_MS,
   QUARANTINE_ESCALATE_MS: QUARANTINE_ESCALATE_MS_DEFAULT,
   JOB_OVERRUN_FACTOR: JOB_OVERRUN_FACTOR_DEFAULT,
   JOB_OVERRUN_FLOOR_MS: JOB_OVERRUN_FLOOR_MS_DEFAULT,
@@ -2145,7 +2146,7 @@ async function listPrdFiles() {
   ensureDirs();
   const dirs = candidatePrdsDirs();
   const perDir = await Promise.all(dirs.map((dir) => prdParser.listPrdFiles(dir)));
-  return perDir.flat().sort();
+  return { files: perDir.flat().sort(), dirCount: dirs.length };
 }
 
 /**
@@ -2289,6 +2290,14 @@ async function reconcile(state) {
   if (state && state.unreadable) {
     throw new Error(`reconcile skipped: queue.json unreadable (${state.unreadable})`);
   }
+  // Per-phase timing (PRD: reconcile evidence trail) — plain Date.now() diffs,
+  // matching the ad-hoc elapsedMs idiom already used in health.cjs/
+  // definitionOfDone.cjs. Only logged when the total exceeds
+  // RECONCILE_SLOW_PASS_MS (see the warn emission at the bottom of this
+  // function); a normal-speed pass logs nothing.
+  const reconcileStartMs = Date.now();
+  const phaseMs = {};
+
   // Sweep the retired flat prds/ dir BEFORE scanning it below. reconcile()
   // has several callers besides tickQueue's ~60s poll (broadcast()'s
   // coalescer, rescheduleTimer, schedule:rescan, schedule:adopt-prd) — this
@@ -2297,8 +2306,15 @@ async function reconcile(state) {
   // which caller triggers this reconcile pass. A freshly hand-written file
   // has no queue row yet, so it is never "live" and gets archived here
   // instead of ever reaching the onDisk scan below.
+  let phaseStartMs = Date.now();
   await consolidateAllFlatPrds(allProjectCwds());
-  const files = await listPrdFiles();
+  phaseMs.flatPrdSweep = Date.now() - phaseStartMs;
+
+  phaseStartMs = Date.now();
+  const { files, dirCount } = await listPrdFiles();
+  phaseMs.prdDirResolve = Date.now() - phaseStartMs;
+
+  phaseStartMs = Date.now();
   const onDisk = new Map();
   for (const f of files) {
     try {
@@ -2310,6 +2326,7 @@ async function reconcile(state) {
       console.warn('[scheduler] failed to parse', f, e?.message);
     }
   }
+  phaseMs.parseLoop = Date.now() - phaseStartMs;
 
   const next = [];
   const seen = new Set();
@@ -2432,9 +2449,11 @@ async function reconcile(state) {
   // ScheduleJobSchema (e.g. the 1021/1022 incident's `"status": "queued"`) —
   // see the repair pass below, right after historyBySlug is available.
   const invalidJobs = Array.isArray(state.invalidJobs) ? state.invalidJobs : [];
+  phaseStartMs = Date.now();
   const historyBySlug = (unmatchedSlugs.length > 0 || terminalDroppedNeedingHistoryCheck.length > 0 || invalidJobs.length > 0)
     ? await queueHistory.historyTerminalBySlug()
     : new Map();
+  phaseMs.historyLookup = Date.now() - phaseStartMs;
 
   // Backfill: any terminal job dropped above whose slug isn't already in
   // history.jsonl gets written now, before its row is gone for good. This is
@@ -2713,7 +2732,8 @@ async function reconcile(state) {
   // small. Append BEFORE dropping so a crash between the two can't lose a
   // record — appendHistory dedupes by slug+runId, so a replay of the same
   // batch on next boot is a safe no-op.
-  const nowMs = Date.now();
+  phaseStartMs = Date.now();
+  const nowMs = phaseStartMs;
   const { hot, toArchive } = queueHistory.partitionJobs(sorted, nowMs);
   if (toArchive.length > 0) {
     await queueHistory.appendHistory(toArchive);
@@ -2748,6 +2768,17 @@ async function reconcile(state) {
     }
   } catch (e) {
     console.warn('[scheduler] autoArchiveCompleted failed', e?.message);
+  }
+  phaseMs.queueWrite = Date.now() - phaseStartMs;
+
+  const totalMs = Date.now() - reconcileStartMs;
+  if (totalMs > RECONCILE_SLOW_PASS_MS) {
+    logs.writeLine({
+      level: 'warn',
+      scope: 'scheduler',
+      message: `reconcile() pass took ${totalMs}ms (threshold ${RECONCILE_SLOW_PASS_MS}ms)`,
+      meta: { totalMs, phaseMs, prdFileCount: files.length, resolvedDirCount: dirCount },
+    });
   }
 
   return state;

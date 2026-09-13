@@ -288,7 +288,7 @@ async function resolveEffectiveModelInfo({ cwd, agentType, deps = {} } = {}) {
   if (!cwd || !agentType) return miss;
 
   try {
-    const { projectRootOf } = deps.activeSessions || require('../../../scripts/lib/activeSessions.cjs');
+    const { projectRootOf } = deps.activeSessions || require('./activeSessions.cjs');
     const normalizedCwd = projectRootOf(path.resolve(cwd));
     if (!normalizedCwd) return miss;
 

@@ -74,7 +74,7 @@ const telemetryConsent = require('./lib/telemetryConsent.cjs');
 const { registerHistoryAggregatorHandlers, finalizeClosedDays, refreshIntradayToday } = require('./historyAggregator.cjs');
 const runLogRetention = require('./lib/runLogRetention.cjs');
 const { registerHistoryDashboardHandlers } = require('./historyDashboard.cjs');
-const { tryAcquireLock, releaseLock, DEFAULT_LOCK_PATH } = require('../../scripts/lib/watchdogHelpers.cjs');
+const { tryAcquireLock, releaseLock, DEFAULT_LOCK_PATH } = require('./lib/watchdogHelpers.cjs');
 const schedulerConfig = require('./lib/schedulerConfig.cjs');
 const memoryTool = require('./memoryTool.cjs');
 const { registerMemoryAggregateIpc } = require('./memoryAggregate.cjs');
@@ -94,7 +94,7 @@ const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');
 const { openInEditor, openFileInEditor, openInFinder, openInTerminal } = require('./lib/openExternalApp.cjs');
 const { rebuildActiveIndex } = require('./lib/activeIndexRebuild.cjs');
 const { activeIndexPath: promptSessionsActiveIndexPath } = require('./lib/epicMint.cjs');
-const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
+const { allProjectCwds } = require('./lib/activeSessions.cjs');
 const { scheduleBootSelfHeal } = require('./lib/bootSelfHeal.cjs');
 
 let mainWindow = null;
@@ -1391,7 +1391,7 @@ app.whenReady().then(async () => {
   }, 30_000);
   // Keep TODAY's rollup line current so the History dashboard never needs to
   // fall back to a live transcript scan. Shares the same O_EXCL lock file as
-  // the external watchdog's finalize pass (scripts/lib/watchdogHelpers.cjs)
+  // the external watchdog's finalize pass (src/main/lib/watchdogHelpers.cjs)
   // so the two never interleave writes to the rollup; a contended lock just
   // means this tick's refresh is skipped (harmless — the next tick retries).
   const intradayTimer = setInterval(runIntradayRefresh, schedulerConfig.HISTORY_INTRADAY_REFRESH_MS);

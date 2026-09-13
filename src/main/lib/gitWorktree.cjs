@@ -304,7 +304,7 @@ async function removeWorktreeDir(cwd, dir) {
  * <name>` segment stripped off.
  *
  * Round-trip verified before being trusted, mirroring the same defense
- * `scripts/lib/activeSessions.cjs`'s `worktreeMainRootOf` already applies: a
+ * `src/main/lib/activeSessions.cjs`'s `worktreeMainRootOf` already applies: a
  * `.git` pointer file is a plain text file, so its content must not be
  * trusted to redirect `git worktree remove --force` at an arbitrary path
  * without the candidate main tree's OWN admin dir

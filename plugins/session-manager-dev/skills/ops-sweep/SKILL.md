@@ -133,5 +133,5 @@ id(s) or PRD(s) filed.
   directly; don't run the full sweep for a question with a known answer.
 - Cron/scheduled sweeping across every active project cwd is an explicit
   stretch goal, not implemented here — this skill is manual, single-project,
-  invoked per run. `scripts/lib/watchdogHelpers.cjs`'s `activeProjectCwds()`
+  invoked per run. `src/main/lib/watchdogHelpers.cjs`'s `activeProjectCwds()`
   is the reusable piece if that's ever built.

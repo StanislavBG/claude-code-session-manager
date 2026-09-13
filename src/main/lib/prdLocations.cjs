@@ -27,7 +27,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { activeProjectCwds, allProjectCwds } = require('../../../scripts/lib/activeSessions.cjs');
+const { activeProjectCwds, allProjectCwds } = require('./activeSessions.cjs');
 
 const { opsPath, OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 
@@ -166,7 +166,7 @@ function resolvePrdWriteDir(cwd) {
 // defeating the cache — so this cache pairs the mtime key (instant
 // invalidation for the case the non-negotiable freshness test covers: a
 // brand-new Epic's `prds/` dir) with the SAME short TTL backstop
-// scripts/lib/activeSessions.cjs's cwdScanCache already established for
+// src/main/lib/activeSessions.cjs's cwdScanCache already established for
 // this exact module chain, bounding the archived-dir blind spot to one
 // TTL window instead of leaving it stale indefinitely. Nothing reads
 // resolveArchivedPrdsDirs off the dispatch-correctness path — the

@@ -107,7 +107,7 @@ function writeLocalLine({ cwd, scope, level, tabId, epicId, tags, message, meta 
 function reportToTelemetry({ cwd, scope, level, tabId, epicId, tags, message }) {
   try {
     const telemetryClient = require('./telemetryClient.cjs');
-    const { projectRootOf } = require('../../../scripts/lib/activeSessions.cjs');
+    const { projectRootOf } = require('./activeSessions.cjs');
     const normalizedCwd = projectRootOf(cwd) || cwd;
     const autoTags = [
       `scope:${scope || 'unknown'}`,

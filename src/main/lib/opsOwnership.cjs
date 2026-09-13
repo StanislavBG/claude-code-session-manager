@@ -237,7 +237,7 @@ function resolveProjectRoot(cwd, { opsInternal = 'normalize' } = {}) {
     );
   }
   // Lazy: activeSessions → gitWorktree → (lazily) config.cjs → this module.
-  const { projectRootOf } = require('../../../scripts/lib/activeSessions.cjs');
+  const { projectRootOf } = require('./activeSessions.cjs');
   const { isEphemeralCwd } = require('./ephemeralCwd.cjs');
   const root = projectRootOf(cwd);
   if (isEphemeralCwd(root)) {

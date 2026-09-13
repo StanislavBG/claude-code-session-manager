@@ -33,7 +33,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { allProjectCwds, activeProjectCwds, bustProjectCwdCache } = require('../../../scripts/lib/activeSessions.cjs');
+const { allProjectCwds, activeProjectCwds, bustProjectCwdCache } = require('./activeSessions.cjs');
 const { assertOpsWrite, resolveOpsRoot, OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 const { ScheduleJobSchema } = require('./scheduleJobSchema.cjs');
 

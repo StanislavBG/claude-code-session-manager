@@ -1,6 +1,6 @@
 'use strict';
 
-// Run: timeout 120 npx vitest run scripts/__tests__/watchdog-relaunch.test.cjs
+// Run: timeout 120 npx vitest run src/main/lib/__tests__/watchdog-relaunch.test.cjs
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -11,7 +11,7 @@ const {
   maybeRelaunchApp,
   readRelaunchState,
   DEFAULT_MAX_RELAUNCH_ATTEMPTS,
-} = require('../lib/watchdogHelpers.cjs');
+} = require('../watchdogHelpers.cjs');
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'watchdog-relaunch-test-'));

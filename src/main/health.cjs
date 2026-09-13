@@ -20,7 +20,7 @@ const { computeStallSummary, SCHEDULER_STATE_PATH, FAILURE_STREAK_WARN_THRESHOLD
 const { findStarvedProjects } = require('./lib/schedulerBatch.cjs');
 const { AUDIT_LOG_PATH } = require('./lib/auditLog.cjs');
 const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
-const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
+const { allProjectCwds } = require('./lib/activeSessions.cjs');
 
 const MAX_LOG_AGE_MS = 5 * 60_000; // 5 min — warn if no logs this old
 const PROJECT_ROOT = path.resolve(__dirname, '../..');

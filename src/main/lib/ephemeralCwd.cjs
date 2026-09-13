@@ -37,7 +37,7 @@
 
 const os = require('node:os');
 const path = require('node:path');
-const { worktreeMainRootOf } = require('../../../scripts/lib/activeSessions.cjs');
+const { worktreeMainRootOf } = require('./activeSessions.cjs');
 const { KIND_CONFIG } = require('./gitWorktree.cjs');
 
 const TMPDIR = path.resolve(os.tmpdir());

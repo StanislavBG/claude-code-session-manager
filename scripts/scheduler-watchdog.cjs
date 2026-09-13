@@ -30,7 +30,7 @@ const {
   maybeRelaunchApp,
   DEFAULT_HEARTBEAT_PATH,
   DEFAULT_MAX_AGE_MS,
-} = require('./lib/watchdogHelpers.cjs');
+} = require('../src/main/lib/watchdogHelpers.cjs');
 
 // ---------- paths ----------
 

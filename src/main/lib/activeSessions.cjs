@@ -11,7 +11,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { KIND_CONFIG: WORKTREE_KIND_CONFIG } = require('../../src/main/lib/gitWorktree.cjs');
+const { KIND_CONFIG: WORKTREE_KIND_CONFIG } = require('./gitWorktree.cjs');
 
 const HOME = os.homedir();
 const TMPDIR = os.tmpdir();

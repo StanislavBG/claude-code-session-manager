@@ -1,6 +1,6 @@
 'use strict';
 
-// Run: timeout 120 npx vitest run scripts/__tests__/watchdog-helpers.test.cjs
+// Run: timeout 120 npx vitest run src/main/lib/__tests__/watchdog-helpers.test.cjs
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -13,7 +13,7 @@ const {
   maybeFinalizeHistory,
   tryAcquireLock,
   releaseLock,
-} = require('../lib/watchdogHelpers.cjs');
+} = require('../watchdogHelpers.cjs');
 
 function tmpFile() {
   return path.join(os.tmpdir(), `watchdog-test-${process.pid}-${Math.floor(Math.random() * 1e9)}.log`);

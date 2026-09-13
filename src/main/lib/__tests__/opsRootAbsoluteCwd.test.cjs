@@ -29,7 +29,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const queueStore = require('../queueStore.cjs');
-const { activeProjectCwds } = require('../../../../scripts/lib/activeSessions.cjs');
+const { activeProjectCwds } = require('../activeSessions.cjs');
 
 const tmpDirs = [];
 
@@ -149,7 +149,7 @@ test('a transcript cwd inside an ops root is normalized to the project root, not
 });
 
 test('normalization keeps the active-project signal rather than dropping the row', () => {
-  const { projectRootOf } = require('../../../../scripts/lib/activeSessions.cjs');
+  const { projectRootOf } = require('../activeSessions.cjs');
   expect(projectRootOf('/p/session-manager-operations/prompt-sessions')).toBe('/p');
   expect(projectRootOf('/p/session-manager-operations')).toBe('/p');
   expect(projectRootOf('/p/session-manager-operations/scheduler/state')).toBe('/p');
@@ -185,7 +185,7 @@ test('projectStateDir fails closed on an ops-internal cwd, naming the offending 
 // list at all. `worktreeMainRootOf` reverses a linked worktree's `.git` FILE
 // (`gitdir: <main>/.git/worktrees/<name>`) back to `<main>`.
 
-const { worktreeMainRootOf } = require('../../../../scripts/lib/activeSessions.cjs');
+const { worktreeMainRootOf } = require('../activeSessions.cjs');
 const { KIND_CONFIG: WORKTREE_KIND_CONFIG } = require('../gitWorktree.cjs');
 
 // A worktree's MAIN tree root must live outside os.tmpdir() for these fixtures
@@ -285,13 +285,13 @@ test('worktreeMainRootOf returns null for a plain non-git directory', async () =
 
 test('projectRootOf resolves a worktree cwd to the main tree root', async () => {
   const { main, worktree } = await makeWorktreeFixture();
-  const { projectRootOf } = require('../../../../scripts/lib/activeSessions.cjs');
+  const { projectRootOf } = require('../activeSessions.cjs');
   expect(projectRootOf(worktree)).toBe(main);
 });
 
 test('projectRootOf resolves a cwd nested inside a worktree\'s OWN ops tree to the main root', async () => {
   const { main, worktree } = await makeWorktreeFixture();
-  const { projectRootOf } = require('../../../../scripts/lib/activeSessions.cjs');
+  const { projectRootOf } = require('../activeSessions.cjs');
   const nestedOps = path.join(worktree, 'session-manager-operations', 'scheduler', 'state');
   fs.mkdirSync(nestedOps, { recursive: true });
   expect(projectRootOf(nestedOps)).toBe(main);

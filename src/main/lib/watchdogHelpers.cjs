@@ -362,7 +362,7 @@ function releaseLock(lockPath) {
  *  dependency fails inside maybeFinalizeHistory's try/catch, not at require
  *  time for the whole watchdog script. */
 function defaultFinalizeClosedDays(opts) {
-  const { finalizeClosedDays } = require('../../src/main/historyAggregator.cjs');
+  const { finalizeClosedDays } = require('../historyAggregator.cjs');
   return finalizeClosedDays(opts);
 }
 

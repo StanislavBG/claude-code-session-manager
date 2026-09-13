@@ -12,7 +12,6 @@
     ".claude-plugin/",
     "plugins/",
     "scripts/postinstall.cjs",
-    "scripts/lib/",
     "scripts/mint-epic.cjs",
     "scripts/scheduler-mcp-server.cjs",
     "web/project-pages/render.cjs",

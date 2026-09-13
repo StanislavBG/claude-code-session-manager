@@ -2,7 +2,7 @@
  * scheduler-boot-orphans.test.cjs — boot-time reconciliation of 'running' jobs
  * left behind by an app crash/restart (PRD 686: consolidated in from the
  * external watchdog's reconcileQueueOffline(), which is now deleted from
- * scripts/lib/watchdogHelpers.cjs).
+ * src/main/lib/watchdogHelpers.cjs).
  *
  * Covers the two behaviors most likely to drift in the move:
  *   - a still-alive orphaned pid must be DEFERRED, never classified from its
@@ -101,7 +101,7 @@ test('feedbackSweepDue gates on the tick interval, not every tick', () => {
 });
 
 test('scheduler.cjs reuses watchdogHelpers.sweep verbatim (no forked copy)', () => {
-  const { sweep } = require('../../../scripts/lib/watchdogHelpers.cjs');
+  const { sweep } = require('../lib/watchdogHelpers.cjs');
   assert.equal(sweepFeedback, sweep, 'scheduler.cjs must import the same sweep function, not reimplement it');
 });
 

@@ -34,7 +34,7 @@
  */
 
 const path = require('node:path');
-const { projectRootOf, allProjectCwds } = require('../../../scripts/lib/activeSessions.cjs');
+const { projectRootOf, allProjectCwds } = require('./activeSessions.cjs');
 const { readActiveIndex } = require('./epicMint.cjs');
 const { isEphemeralCwd } = require('./ephemeralCwd.cjs');
 

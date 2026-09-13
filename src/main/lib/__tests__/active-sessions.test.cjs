@@ -1,13 +1,13 @@
 'use strict';
 
-// Run: timeout 120 npx vitest run scripts/__tests__/active-sessions.test.cjs
+// Run: timeout 120 npx vitest run src/main/lib/__tests__/active-sessions.test.cjs
 
 import { vi } from 'vitest';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { activeProjectCwds, allProjectCwds, bustProjectCwdCache } = require('../lib/activeSessions.cjs');
+const { activeProjectCwds, allProjectCwds, bustProjectCwdCache } = require('../activeSessions.cjs');
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'active-sessions-test-'));

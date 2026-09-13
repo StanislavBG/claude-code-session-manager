@@ -174,7 +174,7 @@ const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdF
 const { resolveDepSlug, findNearMatches } = require('./lib/depSlugResolve.cjs');
 const { computeDispositionRewrite } = require('./lib/prdDisposition.cjs');
 const { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds } = require('./lib/prdMigration.cjs');
-const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
+const { allProjectCwds } = require('./lib/activeSessions.cjs');
 
 // Captured once at module load so every run's meta sidecar can record how
 // stale the running process is relative to on-disk source (incident: PRD
@@ -3365,7 +3365,7 @@ const BOOT_ORPHAN_KILL_GRACE_MS = 6000;
  * process may still be writing to it, so reading now risks misclassifying a
  * job that is about to emit result:success as no_result and double-running it.
  * Ported from reconcileQueueOffline's cross-tick escalation (see
- * scripts/lib/watchdogHelpers.cjs) — here it's a single deferred window since
+ * src/main/lib/watchdogHelpers.cjs) — here it's a single deferred window since
  * this process stays up to revisit it, rather than a separate short-lived
  * watchdog process needing another tick.
  */
@@ -3391,7 +3391,7 @@ function partitionBootOrphans(jobs, isAlive = claudePidAlive) {
  * classified run outcome: success/failed finalize terminally; no_result/unknown
  * re-queues to pending bounded by ORPHAN_REQUEUE_CAP. The status-mutation
  * semantics (and the cap-exhaustion boundary) match the now-deleted
- * reconcileQueueOffline (scripts/lib/watchdogHelpers.cjs) verbatim; killNote
+ * reconcileQueueOffline (src/main/lib/watchdogHelpers.cjs) verbatim; killNote
  * plumbing differs slightly (see call sites) since this path always knows
  * pid liveness up front rather than re-checking per tick.
  *

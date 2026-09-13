@@ -24,7 +24,7 @@ afterEach(async () => {
   if (originalSmTelemetrySpool === undefined) delete process.env.SM_TELEMETRY_SPOOL; else process.env.SM_TELEMETRY_SPOOL = originalSmTelemetrySpool;
   const telemetryPath = require.resolve('../lib/telemetryClient.cjs');
   delete require.cache[telemetryPath];
-  const activeSessionsPath = require.resolve('../../../scripts/lib/activeSessions.cjs');
+  const activeSessionsPath = require.resolve('../lib/activeSessions.cjs');
   delete require.cache[activeSessionsPath];
   while (tmpDirs.length) {
     const d = tmpDirs.pop();
@@ -89,8 +89,8 @@ test('an ephemeral cwd yields zero local lines but one telemetry record, with a 
   const worktreeCwd = path.join(KIND_CONFIG.epic.root, 'fakehash', 'fake-epic-id');
   const realRoot = '/home/bilko/Projects/real-project';
 
-  const activeSessionsPath = require.resolve('../../../scripts/lib/activeSessions.cjs');
-  const original = require('../../../scripts/lib/activeSessions.cjs');
+  const activeSessionsPath = require.resolve('../lib/activeSessions.cjs');
+  const original = require('../lib/activeSessions.cjs');
   require.cache[activeSessionsPath] = {
     id: activeSessionsPath,
     filename: activeSessionsPath,

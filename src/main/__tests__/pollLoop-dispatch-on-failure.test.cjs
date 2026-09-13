@@ -73,10 +73,24 @@ function mkProject() {
   return { cwd, slug };
 }
 
+// dependsOn deliberately references a slug that can never resolve (no such
+// row, no history/archive entry) so pickNextBatch's dep gate holds this job
+// forever instead of ever handing it to spawnJob. tickQueue() still reaches
+// the picker and stamps lastDispatchAttemptAt (that stamp is unconditional —
+// see lastDispatchAttemptAt's own header comment), which is the only thing
+// these tests assert on. Without this, the picker actually dispatches the
+// job: spawnJob() is fire-and-forget (scheduler.cjs's own comment: "spawnJob
+// is fire-and-forget; it calls tickQueue() on completion") and its real
+// child-process exit handler later calls mutate() independently of the
+// tickTail chain flushPendingTick() drains — round-tripping whatever
+// lastDispatchAttemptAt was in memory at ITS read time. Reproduced outside
+// vitest: that stray write landed ~2s after this suite's own reset-to-null,
+// clobbering the NEXT test's "still null" assertion with the previous test's
+// stamp. A held (never-dispatched) job has no such background continuation.
 async function seedOnePendingJob() {
   const { cwd, slug } = mkProject();
   await scheduler.writeQueue({
-    jobs: [{ slug, title: 'x', cwd, status: 'pending', dependsOn: [] }],
+    jobs: [{ slug, title: 'x', cwd, status: 'pending', dependsOn: ['unresolvable-dep-never-completes'] }],
     config: {},
     paused: null,
   });

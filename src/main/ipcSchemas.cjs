@@ -320,6 +320,11 @@ const PrdAgentTypeSchema = z.string().regex(PERSONA_NAME_RE, 'agent name must be
 // call site since update also allows an explicit empty array to CLEAR the
 // dependency, which create has no reason to accept.
 const DepSlugSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9][\w.-]*$/);
+// Wave-authoring decision (scheduler wave-disposition PRD), shared between
+// schedulerCreatePrd (authoring time) and adminPrdFrontmatterPatch (the
+// after-the-fact change path) so both can never disagree on what a valid
+// disposition value is.
+const PrdDispositionSchema = z.enum(['append', 'new-head']);
 const schedulerCreatePrd = z.object({
   title: z.string().min(1).max(200).regex(NO_NEWLINE_RE, 'must not contain newlines'),
   // Optional (PRD: worktree-cwd Epic-lookup hazard) — when omitted, prdCreate.cjs's
@@ -340,6 +345,12 @@ const schedulerCreatePrd = z.object({
   // Explicit ordering (PRD 832): slugs that must complete before this PRD
   // becomes eligible. Written to frontmatter as `dependsOn: [a, b]`.
   dependsOn: z.array(DepSlugSchema).max(20).optional(),
+  // Explicit wave-authoring decision (scheduler wave-disposition PRD) — only
+  // meaningful (and only stamped) when this PRD joins an Epic that already
+  // has incomplete PRDs and lands as a wave root (no dependsOn of its own);
+  // createPrd() requires it in that situation for an interactive caller and
+  // defaults to 'append' (logged as a default) for a non-interactive one.
+  disposition: PrdDispositionSchema.optional(),
   // An EXISTING Epic's promptSessionId (PRD 748) — NOT a PromptTicket.id.
   // ensureEpic() (epicMint.cjs) joins the Epic whose active-index.json
   // sessions key literally equals this value; the renderer only ever sends
@@ -385,6 +396,19 @@ const schedulerCreatePrd = z.object({
   // invalidate. See prdCreate.cjs's buildPrdBody and schedulerBatch.cjs's
   // pickNextBatch.
   quietMachine: z.boolean().optional(),
+});
+
+// Renderer-facing counterpart to adminPrdFrontmatterPatch's dependsOn/
+// disposition patch (scheduler wave-disposition PRD) — backs the Scheduler
+// UI's "change disposition" action. `dependsOn` is the caller's already-
+// computed target (from the SAME backlog tree the UI renders — see
+// lib/backlogTree.ts); the main-process handler only validates the rewrite
+// is safe (prdDisposition.cjs), never re-derives "the" terminal itself.
+const scheduleSetPrdDisposition = z.object({
+  slug: z.string().regex(SCHEDULE_SLUG_RE),
+  cwd: z.string().min(1).max(4096).optional(),
+  disposition: PrdDispositionSchema,
+  dependsOn: z.array(DepSlugSchema).max(20).optional(),
 });
 
 // Bulk archive: slug list, capped to limit unbounded retag/archive payloads.
@@ -469,6 +493,11 @@ const adminPrdFrontmatterPatch = z.object({
   // (depSlugResolve.cjs) scheduler_create_prd uses, so update and create
   // can never disagree about what a dependsOn entry resolves to.
   dependsOn: z.array(DepSlugSchema).max(20).optional(),
+  // Patchable after creation too — the Scheduler UI's "change disposition"
+  // action (promote a wave to its own head, or attach it behind another
+  // chain) rewrites this alongside dependsOn via the same
+  // schedule:set-prd-disposition path (see prdDisposition.cjs).
+  disposition: PrdDispositionSchema.optional(),
 });
 
 const adminUpdatePrd = z.object({
@@ -1052,6 +1081,7 @@ module.exports = {
     scheduleReadLog,
     scheduleWritePrd,
     schedulerCreatePrd,
+    scheduleSetPrdDisposition,
     scheduleArchivePrd,
     scheduleRetagPrd,
     adminListPrdsQuery,

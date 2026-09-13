@@ -50,6 +50,14 @@ export type PrdFrontmatter = {
   // patchable key by PRD 1124 — see this module's header. Parsed/emitted
   // only in the inline `[a, b]` list form; an empty array clears it.
   dependsOn?: string[]
+  // Records the authoring-time decision (scheduler wave-disposition) for a
+  // PRD that joined an Epic already carrying incomplete PRDs: 'append'
+  // (this PRD's roots depend on the existing chain's terminal PRD(s)) or
+  // 'new-head' (an independent root, eligible to run in parallel). Only
+  // ever set on a wave's ROOT PRD — a PRD with its own explicit dependsOn
+  // never needed this decision in the first place. Absent when the Epic had
+  // no existing incomplete PRDs to decide against.
+  disposition?: 'append' | 'new-head'
   // Unrecognized keys round-trip via `extras`.
   extras?: Record<string, RawValue>
   // Original raw line per recognized key. Used to preserve quote style and
@@ -80,6 +88,7 @@ const RECOGNIZED_KEYS = new Set<keyof PrdFrontmatter>([
   'tag',
   'agentType',
   'dependsOn',
+  'disposition',
 ])
 
 // Emit order is stable so opening+saving without edits is byte-identical.
@@ -93,6 +102,7 @@ const EMIT_ORDER: Array<keyof PrdFrontmatter> = [
   'tag',
   'agentType',
   'dependsOn',
+  'disposition',
 ]
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
@@ -256,6 +266,9 @@ function applyKey(fm: PrdFrontmatter, key: string, after: string): void {
       if (list) fm.dependsOn = list
       return
     }
+    case 'disposition':
+      if (v === 'append' || v === 'new-head') fm.disposition = v
+      return
   }
 }
 

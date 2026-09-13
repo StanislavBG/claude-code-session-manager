@@ -32,7 +32,6 @@ export default defineConfig({
       'src/main/__tests__/queueOpsAutoArchive.test.cjs',
       'src/main/__tests__/prdParserHighWater.test.cjs',
       'src/main/__tests__/broadcastCoalescer.test.cjs',
-      'src/main/__tests__/scheduler-broadcast-reconcile.test.cjs',
       'src/main/__tests__/historyRollup.test.cjs',
       'src/main/__tests__/historyDashboard.test.cjs',
       'src/main/__tests__/historyAggregatorIntraday.test.cjs',

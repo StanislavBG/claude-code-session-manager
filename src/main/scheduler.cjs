@@ -171,7 +171,6 @@ const { reconcileEpicWorktreesOnBoot } = require('./lib/epicWorktreeBoot.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdFrontmatter.cjs');
 const { resolveDepSlug, findNearMatches } = require('./lib/depSlugResolve.cjs');
-const { computeDispositionRewrite } = require('./lib/prdDisposition.cjs');
 const { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds } = require('./lib/prdMigration.cjs');
 const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
 
@@ -2359,7 +2358,6 @@ async function reconcile(state) {
       // membership, so moving the file between Epic dirs must re-point the row.
       epicId: p.epicId ?? job.epicId ?? null,
       dependsOn: p.dependsOn,
-      disposition: p.disposition ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
       originSessionId: job.originSessionId
@@ -2474,7 +2472,6 @@ async function reconcile(state) {
       sourceTabId: p.sourceTabId ?? inv.row?.sourceTabId ?? null,
       epicId: p.epicId ?? inv.row?.epicId ?? null,
       dependsOn: p.dependsOn,
-      disposition: p.disposition ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
       originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
@@ -2598,7 +2595,6 @@ async function reconcile(state) {
       sourceTabId: p.sourceTabId,
       epicId: p.epicId ?? null,
       dependsOn: p.dependsOn,
-      disposition: p.disposition ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
       originSessionId: resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
@@ -9790,21 +9786,6 @@ function registerScheduleHandlers() {
     return { ok: true, kind: 'info', message: `Adopted ${slug} — it will run as a normal pending job` };
   }));
 
-  // Scheduler UI's "change disposition" action (scheduler wave-disposition
-  // PRD): promotes an appended wave to its own head, or re-attaches a head
-  // behind another chain. Thin wrapper over remote.setPrdDisposition, which
-  // validates the rewrite (cycle-safety, running/completed rows untouched)
-  // before delegating to the same remote.updatePrd every other PRD edit
-  // path uses — see that method's own comment in this file.
-  ipcMain.handle('schedule:set-prd-disposition', validated(schemas.scheduleSetPrdDisposition, async ({ slug, cwd, disposition, dependsOn }) => {
-    if (!(await safeSlugPath(slug))) return { ok: false, kind: 'error', message: 'invalid slug' };
-    const result = await remote.setPrdDisposition({ slug, cwd, disposition, dependsOn });
-    if (!result.ok) return { ok: false, kind: 'error', message: result.error ?? 'disposition change failed' };
-    appendAuditEvent('scheduler_prd_disposition_set', { slug, cwd: cwd ?? null, disposition, source: 'ipc:schedule:set-prd-disposition' });
-    await broadcast({ flush: true });
-    return { ok: true, kind: 'info', message: `${slug} is now ${disposition === 'new-head' ? 'an independent head' : 'attached behind the chosen chain'}` };
-  }));
-
   ipcMain.handle('schedule:run-now', async () => {
     // Manual run-now overrides any auto-pause. Clear it first.
     await clearPause('run-now');
@@ -10549,7 +10530,6 @@ async function listPrdsInternal() {
           epicId: parsed.epicId ?? null,
           dependsOn: parsed.dependsOn ?? null,
           agentType: parsed.agentType ?? null,
-          disposition: parsed.disposition ?? null,
           mtimeMs: stat.mtimeMs,
           archived,
         };
@@ -10944,33 +10924,6 @@ const remote = {
     } catch (e) {
       return { ok: false, error: e?.message ?? 'write failed' };
     }
-  },
-
-  // Backs the Scheduler UI's "change disposition" action (scheduler
-  // wave-disposition PRD): promoting an appended wave to its own head, or
-  // re-attaching a head behind another chain. `dependsOn` for a 'new-head'
-  // disposition is ignored (cleared unconditionally); for 'append' it's the
-  // caller's chosen target chain's terminal slug(s) — the renderer computes
-  // that from the SAME backlog tree (lib/backlogTree.ts) it already renders,
-  // so this function only has to validate the rewrite is safe, never
-  // re-derive "the" terminal itself.
-  //
-  // Validates via prdDisposition.cjs's computeDispositionRewrite (row not
-  // running/completed, no already-satisfied blocker being rewritten out from
-  // under it, no dependsOn cycle) BEFORE delegating the actual write to this
-  // SAME updatePrd — so a rejected rewrite never reaches the filesystem, and
-  // an accepted one gets updatePrd's own dependsOn FK re-validation for free.
-  async setPrdDisposition({ slug, cwd, disposition, dependsOn }) {
-    let listing;
-    try {
-      listing = await this.listPrds({ cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER });
-    } catch (e) {
-      return { ok: false, error: `could not read project PRDs: ${e?.message ?? e}` };
-    }
-    const rows = listing.prds ?? [];
-    const rewrite = computeDispositionRewrite({ slug, disposition, dependsOn: dependsOn ?? [], rows });
-    if (!rewrite.ok) return rewrite;
-    return this.updatePrd({ slug, cwd, frontmatter: { dependsOn: rewrite.dependsOn, disposition } });
   },
 
   // Cancels a job that hasn't finished yet. A 'running' job's process group

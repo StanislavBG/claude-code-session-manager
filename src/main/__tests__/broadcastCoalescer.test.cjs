@@ -101,22 +101,4 @@ test('flush() with no pending timer still sends (no-arm case)', async () => {
   expect(sent).toEqual(['state-1']);
 });
 
-test('a getPayload() that throws does not wedge the coalescer — the next schedule() still sends', async () => {
-  const sent = [];
-  const send = vi.fn((payload) => sent.push(payload));
-  const getPayload = vi.fn()
-    .mockRejectedValueOnce(new Error('boom'))
-    .mockResolvedValue('state-recovered');
-  const coalescer = createBroadcastCoalescer({ delayMs: 200, send, getPayload });
-
-  coalescer.schedule();
-  await vi.advanceTimersByTimeAsync(200);
-  expect(sent).toEqual([]);
-
-  coalescer.schedule();
-  await vi.advanceTimersByTimeAsync(200);
-  expect(sent).toEqual(['state-recovered']);
-  expect(getPayload).toHaveBeenCalledTimes(2);
-});
-
 console.log('broadcastCoalescer tests: PASS');

@@ -245,6 +245,10 @@ contextBridge.exposeInMainWorld('api', {
     writePrd: (slug, body) => ipcRenderer.invoke('schedule:write-prd', { slug, body }),
     listPrds: () => ipcRenderer.invoke('schedule:list-prds'),
     health: () => ipcRenderer.invoke('schedule:health'),
+    // Queue-health header: one honest verdict for "why does the queue look
+    // stale" (saturated/blocked/idle/stalled/paused/launch-blocked), scoped
+    // to `cwd` (null = machine-wide).
+    queueHealth: (cwd) => ipcRenderer.invoke('schedule:queue-health', cwd ? { cwd } : {}),
     onState: (handler) => {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('schedule:state', listener);
@@ -266,6 +270,10 @@ contextBridge.exposeInMainWorld('api', {
     // the same update-prd API path the admin route/MCP tool use, then
     // reconciles so the row promotes to 'pending' on the very same call.
     adoptPrd: (slug) => ipcRenderer.invoke('schedule:adopt-prd', { slug }),
+    // Change a PRD's wave disposition (promote to a new head, or attach
+    // behind another chain's terminal PRD(s)) — see scheduler.cjs's
+    // remote.setPrdDisposition for the safety validation this goes through.
+    setPrdDisposition: (args) => ipcRenderer.invoke('schedule:set-prd-disposition', args),
     // History — last N completed/failed jobs from queue.json.
     getHistory: (limit) => ipcRenderer.invoke('schedule:get-history', limit !== undefined ? { limit } : {}),
   },

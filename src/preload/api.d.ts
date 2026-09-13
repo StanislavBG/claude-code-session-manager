@@ -550,6 +550,11 @@ export interface ScheduleJob {
   /** Explicit cross-PRD ordering (PRD 832): slugs that must complete before
    *  this job is eligible. Replaces the retired shared-NN-parallel convention. */
   dependsOn?: string[];
+  /** Wave-authoring decision (scheduler wave-disposition PRD): 'append' (this
+   *  row's dependsOn extends the Epic's existing chain) or 'new-head' (an
+   *  independent root). Refreshed from the PRD file on every reconcile, like
+   *  dependsOn above; null when this row never needed the decision. */
+  disposition?: 'append' | 'new-head' | null;
   /** The originating claude session — the Epic's claudeSessionId, resolved
    *  from active-index.json at ingest (PRD 832). An Epic IS a tagged session. */
   originSessionId?: string | null;
@@ -702,6 +707,8 @@ export interface PrdListItem {
    *  previously dropped by listPrdsInternal before reaching this type, the
    *  same class of bug this field's sibling comment (epicId) warns about. */
   dependsOn?: string[] | null;
+  /** PRD frontmatter `disposition` — see ScheduleJob.disposition. */
+  disposition?: 'append' | 'new-head' | null;
   /** True when this PRD's source .md was found in a `prds-archived/` dir
    *  (its scheduler job already ran to completion) rather than the live
    *  `prds/` dir. Archived PRDs have no matching queue.json job row (the
@@ -829,6 +836,10 @@ export interface ScheduleStateSnapshot {
   jobs: ScheduleJob[];
   scheduledFor: string | null;
   lastRunAt: string | null;
+  /** Stamped every time tickQueue reaches the picker at all, whether or not
+   *  that pass ends in a launch — distinct from lastRunAt (only stamped on an
+   *  actual launch). See classifyQueueHealth's header comment. */
+  lastDispatchAttemptAt?: string | null;
   nextReset: string | null;
   /** Set when scheduler self-paused (rate-limit detected). null when running normally. */
   paused: SchedulePauseInfo | null;
@@ -865,6 +876,48 @@ export interface ScheduleLoadGate {
   /** How long the current gated stretch has lasted, 0 when not gated. */
   gatedSinceMs: number;
   at: string;
+}
+
+/** One dependency-chain group blocked on a terminal (failed/skipped) row — computeBlockedChains' shape. */
+export interface ScheduleBlockedChain {
+  cwd: string;
+  blockedBy: string[];
+  blocked: number;
+}
+
+/** classifyQueueHealth's verdict — the one honest cause behind a stale-looking queue. */
+export interface ScheduleQueueHealthVerdict {
+  kind: 'paused' | 'launch-blocked' | 'idle' | 'saturated' | 'blocked' | 'stalled' | 'running';
+  cwd: string | null;
+  pending: number;
+  needsReviewCount: number;
+  runningCount: number;
+  /** Pending rows whose dependsOn chain is fully satisfied right now — always computed, regardless of kind. */
+  dispatchable: number;
+  blockedChains: ScheduleBlockedChain[];
+  /** Present on 'blocked' / 'stalled' — ms since lastDispatchAttemptAt. */
+  idleMs?: number;
+  /** Present on 'paused'. */
+  reason?: string | null;
+  /** Present on 'launch-blocked'. */
+  agentType?: string;
+  block?: ScheduleLaunchBlock;
+  /** Present on 'saturated'. */
+  totalSlots?: number | null;
+}
+
+export interface ScheduleQueueHealthResult {
+  /** True when queue.json was unreadable — every other field is absent; render "unknown", never a zero. */
+  unknown: boolean;
+  reason?: string;
+  now?: number;
+  verdict?: ScheduleQueueHealthVerdict;
+  /** Machine-wide session slot pool — not scoped to the requested cwd. */
+  slots?: { inUse: number; total: number; free: number; source: 'env' | 'pool' };
+  /** Oldest currently-running job's age in ms, across every project. null when nothing is running. */
+  oldestRunningAgeMs?: number | null;
+  lastRunAt?: string | null;
+  lastDispatchAttemptAt?: string | null;
 }
 
 export interface HistoryAggregateRequest {
@@ -1791,6 +1844,10 @@ export interface SessionManagerAPI {
     writePrd: (slug: string, body: string) => Promise<{ ok: true; bytesWritten: number } | { ok: false; error: string }>;
     listPrds: () => Promise<PrdListItem[]>;
     health: () => Promise<ScheduleHealthSnapshot>;
+    /** Queue-health header verdict — reuses classifyQueueHealth so this can
+     *  never disagree with the starvation watchdog. `cwd` null/omitted =
+     *  machine-wide scope. */
+    queueHealth: (cwd?: string | null) => Promise<ScheduleQueueHealthResult>;
     onState: (handler: (snapshot: ScheduleStateSnapshot) => void) => () => void;
     /** Heartbeat-driven stall alert: queue holds jobs but 0 running / 0 pending / not paused for a full poll interval. Fires at most once per stall episode. */
     onStall: (handler: (event: ScheduleStallEvent) => void) => () => void;
@@ -1802,6 +1859,13 @@ export interface SessionManagerAPI {
     retagPrds: (items: RetagPrdItem[]) => Promise<RetagPrdResult>;
     /** Stamps a 'quarantined' PRD (no createdVia provenance) as legacy-adopted via the update-prd API, then reconciles it to 'pending'. */
     adoptPrd: (slug: string) => Promise<ActionOutcome>;
+    /** Change a PRD's wave disposition (promote to a new head, or attach behind another chain's terminal PRD(s)) — refuses a running/completed row or a dependsOn cycle. */
+    setPrdDisposition: (args: {
+      slug: string;
+      cwd?: string;
+      disposition: 'append' | 'new-head';
+      dependsOn?: string[];
+    }) => Promise<ActionOutcome>;
     /** Return the last N completed/failed jobs from queue.json (newest first). */
     getHistory: (limit?: number) => Promise<ScheduleHistoryResult>;
   };

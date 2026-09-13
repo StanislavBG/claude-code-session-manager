@@ -7530,6 +7530,12 @@ function classifyQueueStarvationByProject({ jobs, paused, runningSet: runningSlu
  * `thresholdMs` to decide 'stalled' vs the healthy 'running' default, which
  * is exactly the comparison classifyQueueStarvation would make internally.
  *
+ * `pending`/`dispatchable`/`blockedChains`/`needsReviewCount` are always
+ * populated (via computeBlockedChains — the exact primitive
+ * classifyQueueStarvation itself calls) regardless of kind, so a 'saturated'
+ * or 'running' header can still say how much of the backlog is dependency-
+ * blocked, not just the kinds where that's the headline cause.
+ *
  * Kinds, in the priority order they're checked (paused is a decision, not a
  * stall; an open launch breaker explains an otherwise-inexplicable
  * non-dispatch before slot/dependency causes are even considered):
@@ -7560,9 +7566,18 @@ function classifyQueueHealth({
   const pendingRows = projectJobs.filter((j) => j.status === 'pending');
   const runningRows = projectJobs.filter((j) => j.status === 'running' || runningSlugs?.has?.(j.slug));
   const needsReviewCount = projectJobs.filter((j) => j.status === 'needs_review').length;
-  const base = { cwd, pending: pendingRows.length, needsReviewCount, runningCount: runningRows.length };
 
-  if (paused) return { ...base, kind: 'paused', reason: paused.reason ?? null, dispatchable: null, blockedChains: [] };
+  // computeBlockedChains is the SAME primitive classifyQueueStarvation calls
+  // internally, computed once here so EVERY kind (not just 'blocked'/
+  // 'stalled') carries real dispatchable-vs-blocked counts instead of a null.
+  const blockedChains = computeBlockedChains(projectJobs);
+  const blockedTotal = blockedChains.reduce((n, c) => n + c.blocked, 0);
+  const dispatchable = Math.max(0, pendingRows.length - blockedTotal);
+  const base = {
+    cwd, pending: pendingRows.length, dispatchable, blockedChains, needsReviewCount, runningCount: runningRows.length,
+  };
+
+  if (paused) return { ...base, kind: 'paused', reason: paused.reason ?? null };
 
   // launch-blocked: only a persona a PENDING row in this scope actually uses
   // — a breaker open for a persona nothing here needs is not this scope's
@@ -7570,37 +7585,41 @@ function classifyQueueHealth({
   const neededAgentTypes = new Set(pendingRows.map((j) => launchFailure.launchBlockKeyFor(j)));
   for (const [key, block] of Object.entries(launchBlocks ?? {})) {
     if (block && neededAgentTypes.has(key)) {
-      return { ...base, kind: 'launch-blocked', agentType: key, block, dispatchable: null, blockedChains: [] };
+      return { ...base, kind: 'launch-blocked', agentType: key, block };
     }
   }
 
-  if (pendingRows.length === 0) return { ...base, kind: 'idle', dispatchable: 0, blockedChains: [] };
+  if (pendingRows.length === 0) return { ...base, kind: 'idle' };
 
   // classifyQueueStarvation only ever classifies while nothing is running
   // (its own runningCount > 0 guard) — that boundary is also exactly where
   // slot saturation, not dependency shape, is the honest cause.
   if (runningRows.length > 0) {
     if (Number.isFinite(freeSlots) && freeSlots <= 0) {
-      return { ...base, kind: 'saturated', totalSlots: totalSlots ?? null, dispatchable: null, blockedChains: [] };
+      return { ...base, kind: 'saturated', totalSlots: totalSlots ?? null };
     }
-    return { ...base, kind: 'running', dispatchable: null, blockedChains: [] };
+    return { ...base, kind: 'running' };
   }
 
+  // Nothing running: hand the SAME rows + idle clock to classifyQueueStarvation
+  // (thresholdMs: 0 — a live header must say "blocked" the instant every
+  // pending row is dependency-stuck, not wait out the watchdog's own grace
+  // period) purely for its idleMs reading; its own dispatchable/blockedChains
+  // are mathematically identical to `base`'s (same computeBlockedChains walk
+  // over the same rows), so `base` already carries them.
   const immediate = classifyQueueStarvation({
     jobs: projectJobs, paused: false, runningCount: 0,
     lastRunAtMs: lastDispatchAttemptAtMs, now, thresholdMs: 0,
   });
-  if (!immediate) {
-    // pending.length is already > 0 above, so this can only be null when
-    // lastDispatchAttemptAtMs is itself in the future (clock skew) — an
-    // honest unknown rather than a kind we can't back up with a number.
-    return { ...base, kind: 'running', dispatchable: null, blockedChains: [] };
-  }
-  if (immediate.kind === 'blocked') {
-    return { ...base, kind: 'blocked', dispatchable: immediate.dispatchable, blockedChains: immediate.blockedChains, idleMs: immediate.idleMs };
-  }
-  const kind = immediate.idleMs >= thresholdMs ? 'stalled' : 'running';
-  return { ...base, kind, dispatchable: immediate.dispatchable, blockedChains: immediate.blockedChains, idleMs: immediate.idleMs };
+  // pending.length is already > 0 above, so `immediate` can only be null when
+  // lastDispatchAttemptAtMs is itself in the future (clock skew) — fall back
+  // to computing idleMs the same way rather than asserting a kind we can't
+  // back up with a real number.
+  const idleMs = immediate ? immediate.idleMs
+    : (Number.isFinite(lastDispatchAttemptAtMs) ? now - lastDispatchAttemptAtMs : Infinity);
+  if (dispatchable === 0) return { ...base, kind: 'blocked', idleMs };
+  const kind = idleMs >= thresholdMs ? 'stalled' : 'running';
+  return { ...base, kind, idleMs };
 }
 
 /**

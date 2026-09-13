@@ -76,6 +76,7 @@ function installWindowApiMock() {
       listPrds: vi.fn().mockResolvedValue([]),
       sessionSlots: vi.fn().mockResolvedValue({ total: 3, inUse: 0, holders: [] }),
       setConfig: vi.fn().mockResolvedValue(undefined),
+      queueHealth: vi.fn().mockResolvedValue({ unknown: true, reason: 'test double' }),
     },
     supervisor: {
       getLog: vi.fn().mockResolvedValue([]),

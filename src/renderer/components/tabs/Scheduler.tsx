@@ -2,6 +2,7 @@ import { memo, useEffect, useState } from 'react'
 import { useSessions } from '../../state/sessions'
 import { usePromptSessions } from '../../state/promptSessions'
 import { SchedulerSubTabs } from './scheduler/SchedulerSubTabs'
+import { QueueHealthHeader } from './scheduler/QueueHealthHeader'
 import { SchedulePanel } from '../SchedulePanel'
 import { SchedulerPrdsView } from './plans/SchedulerPrdsView'
 import { SchedulerHistoryView } from './plans/SchedulerHistoryView'
@@ -299,7 +300,11 @@ function SchedulerComponent({ navigate }: SchedulerProps = {}) {
           next reset.
         </p>
 
-        <div className="mt-[18px] mb-[22px]">
+        <div className="mt-[18px] mb-[14px]">
+          <QueueHealthHeader scopeCwd={scopeCwd} />
+        </div>
+
+        <div className="mb-[22px]">
           <WindowStrip scopeCwd={scopeCwd} />
         </div>
 

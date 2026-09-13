@@ -291,7 +291,11 @@ test('reverifyNeedsReview computes looksDone for a guard-parked (silent_no_op) r
   ]);
 
   await wait(1100); // git --since has 1s resolution
-  commitFile(projectCwd, 'src/thing.js', 'hello', 'the actual fix landed on a sibling run');
+  // Must be attributable to THIS job (see attributeLandedCommits) — path
+  // overlap alone is no longer evidence. The row's own `landedCommit`
+  // ('deadbeef') is a stale/unresolvable placeholder, so this falls to the
+  // 'slug trailer' rule by naming the job's own slug in the commit message.
+  commitFile(projectCwd, 'src/thing.js', 'hello', 'the actual fix for 1181-guard-parked landed');
 
   await reverifyNeedsReview();
 
@@ -300,6 +304,7 @@ test('reverifyNeedsReview computes looksDone for a guard-parked (silent_no_op) r
   assert.equal(jobs[0].status, 'needs_review', 'looksDone alone never auto-completes — only applyNeedsReviewAutoResolve does');
   assert.ok(jobs[0].looksDone, 'expected a looksDone annotation computed for this guard-parked row');
   assert.equal(jobs[0].looksDone.commits.length, 1);
+  assert.equal(jobs[0].looksDone.rule, 'slug trailer');
 });
 
 test('reverifyNeedsReview never computes looksDone for a worktree_integration_failed row', async () => {

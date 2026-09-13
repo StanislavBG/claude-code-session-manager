@@ -33,7 +33,7 @@ const { execFileSync } = require('node:child_process');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'looks-done-test-'));
 process.env.HOME = tmpHome;
 
-const { reverifyNeedsReview, computeLooksDone, findSatisfyingCommitOnMain } = require('../scheduler.cjs');
+const { reverifyNeedsReview, computeLooksDone, applyNeedsReviewAutoResolve, findSatisfyingCommitOnMain } = require('../scheduler.cjs');
 const { resolvePrdWriteDir } = require('../lib/prdLocations.cjs');
 const { bustCwdCache } = require('../lib/queueStore.cjs');
 
@@ -127,7 +127,10 @@ test('failed + no result event (unverified-shaped) + later commit touching decla
   writeRunLog('run-171', '171-example', ['[scheduler] starting 171-example']); // no result event
 
   await wait(1100); // git --since has 1s resolution
-  commitFile(projectCwd, 'src/foo.js', 'hello', 'fix 171');
+  // Must name this job's own slug to be attributable (see
+  // attributeLandedCommits's 'slug trailer' rule) — path overlap alone is no
+  // longer evidence.
+  commitFile(projectCwd, 'src/foo.js', 'hello', 'fix 171-example');
 
   await reverifyNeedsReview();
 
@@ -136,8 +139,9 @@ test('failed + no result event (unverified-shaped) + later commit touching decla
   assert.equal(jobs[0].status, 'needs_review', 'looksDone never auto-completes — only surfaces for a human');
   assert.ok(jobs[0].looksDone, 'expected a looksDone annotation');
   assert.equal(jobs[0].looksDone.commits.length, 1);
+  assert.equal(jobs[0].looksDone.rule, 'slug trailer');
   assert.deepEqual(jobs[0].looksDone.paths, ['src/foo.js']);
-  assert.match(jobs[0].error, /looks done — 1 commit/);
+  assert.match(jobs[0].error, /looks done \(slug trailer\) — 1 commit/);
 });
 
 test('failed + a real result event (genuine gate failure) → not a candidate, stays failed untouched', async () => {
@@ -378,4 +382,90 @@ test('computeLooksDone: non-git cwd → null without throwing (git-unavailable)'
   const job = { slug: '11-no-repo', cwd: notARepo, startedAt: new Date().toISOString() };
   const looksDone = await computeLooksDone(job);
   assert.equal(looksDone, null);
+});
+
+// --- Attribution regression (PRD 1204/1205 incident, 2026-09-13) ---
+//
+// Two PRDs in the SAME Epic declaring the same hot file: sibling job B lands
+// a commit on that path while job A is parked in needs_review. Path overlap
+// alone must never read as job A's own evidence — that's exactly how 1204's
+// row cited 1205's commit 5dadf3c as "looks done" while 1204's real
+// implementing commit (164184e) sat unnoticed.
+
+test('sibling PRD commit on the same declared path is not attributable — computeLooksDone returns null, applyNeedsReviewAutoResolve never promotes to completed', async () => {
+  const projectCwd = path.join(tmpHome, 'proj-1204-sibling-incident');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd, 'proj-1204-sibling-incident-slug');
+  writePrd(projectCwd, '1204-job-a', [
+    '# Implementation notes',
+    'Edit `src/main/scheduler.cjs`.',
+  ].join('\n'));
+
+  const startedAt = new Date().toISOString();
+  await wait(1100);
+  // Sibling job B's commit: touches job A's declared path, but names neither
+  // job A's slug nor any `sm-job/1204-job-a` branch, and job A's row carries
+  // no landedCommit of its own.
+  commitFile(projectCwd, 'src/main/scheduler.cjs', 'sibling change', 'feat(scheduler): restructure the backlog into Epic groups (1205-job-b)');
+
+  const jobA = {
+    slug: '1204-job-a',
+    cwd: projectCwd,
+    status: 'needs_review',
+    startedAt,
+    autoFixAttempted: true,
+    autoFixOutcome: 'no-plan',
+    autoFixRetries: 1,
+    exhaustedResolveAttempts: 0,
+    statusHistory: [{ to: 'needs_review', at: new Date(Date.now() - 45 * 60_000).toISOString() }],
+  };
+
+  const looksDone = await computeLooksDone(jobA);
+  assert.equal(looksDone, null, 'a sibling\'s path-overlapping commit must never be credited as job A\'s own evidence');
+
+  const outcome = applyNeedsReviewAutoResolve(jobA);
+  assert.equal(outcome, 'requeued', 'with no attributable evidence, the row must fall through to the existing requeue path, never complete');
+  assert.equal(jobA.status, 'pending');
+});
+
+test('this job\'s OWN attributable commit (landedCommit) still produces looksDone and still promotes to completed', async () => {
+  const projectCwd = path.join(tmpHome, 'proj-1204-own-commit');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd, 'proj-1204-own-commit-slug');
+  writePrd(projectCwd, '1204-job-a2', [
+    '# Implementation notes',
+    'Edit `src/main/scheduler.cjs`.',
+  ].join('\n'));
+
+  const startedAt = new Date().toISOString();
+  await wait(1100);
+  // A sibling commit lands on the same path first...
+  commitFile(projectCwd, 'src/main/scheduler.cjs', 'sibling change', 'feat(scheduler): unrelated sibling work');
+  // ...then this job's OWN commit lands, exactly as spawnJob's finalize step
+  // would have recorded it on job.landedCommit.
+  commitFile(projectCwd, 'src/main/scheduler.cjs', 'this job\'s own change', 'fix(scheduler): attribution fix');
+  const ownSha = git(['rev-parse', 'HEAD'], projectCwd).trim();
+
+  const jobA = {
+    slug: '1204-job-a2',
+    cwd: projectCwd,
+    status: 'needs_review',
+    startedAt,
+    landedCommit: ownSha,
+    autoFixAttempted: true,
+    autoFixOutcome: 'no-plan',
+    autoFixRetries: 1,
+    exhaustedResolveAttempts: 0,
+    statusHistory: [{ to: 'needs_review', at: new Date(Date.now() - 45 * 60_000).toISOString() }],
+  };
+
+  const looksDone = await computeLooksDone(jobA);
+  assert.ok(looksDone, 'this job\'s own landedCommit must be recognized as attributable evidence');
+  assert.equal(looksDone.rule, 'landedCommit');
+  assert.deepEqual(looksDone.commits, [ownSha], 'only this job\'s own commit is evidence — never the sibling\'s');
+
+  jobA.looksDone = looksDone;
+  const outcome = applyNeedsReviewAutoResolve(jobA);
+  assert.equal(outcome, 'completed', 'strong, attributable evidence must still promote the row');
+  assert.equal(jobA.status, 'completed');
 });

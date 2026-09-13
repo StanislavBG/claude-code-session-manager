@@ -9081,9 +9081,9 @@ function applyNeedsReviewAutoResolve(j) {
   if (j.looksDone) {
     const attempt = j.exhaustedResolveAttempts ?? 0;
     const reason = originIsGuardParked
-      ? `needs_review auto-resolve: guard verdict '${j.verifierVerdict}' with landed commit and looksDone evidence — `
-        + `${j.looksDone.commits.length} commit(s) since this run touch the PRD's declared paths, work landed`
-      : `needs_review auto-resolve: verifier annotation shows work landed (${j.looksDone.commits.length} commit(s) since this run touch the PRD's declared paths)`;
+      ? `needs_review auto-resolve: guard verdict '${j.verifierVerdict}' with landed commit and looksDone evidence (${j.looksDone.rule}) — `
+        + `${j.looksDone.commits.length} commit(s) attributable to this job's own run touch the PRD's declared paths, work landed`
+      : `needs_review auto-resolve: verifier annotation shows work landed (${j.looksDone.rule} — ${j.looksDone.commits.length} commit(s) attributable to this job's own run touch the PRD's declared paths)`;
     transitionJob(j, 'completed', { reason, source: 'needsReviewAutoResolve' });
     appendAuditEvent('needs_review_auto_resolved', { slug: j.slug, cwd: j.cwd ?? null, outcome: 'completed', attempt });
     return 'completed';
@@ -9238,15 +9238,98 @@ function isEligibleForImmediateAutoFix(job, allJobs, fixSlugExists) {
 }
 
 /**
- * Widened evidence check (PRD 1102): does at least one commit land AFTER
- * this job's run window that touches a path the PRD itself declares? Scoped
- * to the PRD's own declared paths (never the whole repo) so a sibling job's
- * unrelated commit is not credited to this one — see healRefusalReason's own
+ * attributeLandedCommits(job, pathCommits, cwd) → { commits, rule } | null
+ *
+ * Narrows a set of PATH-overlapping commits (computeLooksDone's
+ * `landedSinceRun` result — any commit touching the PRD's declared paths,
+ * regardless of who authored it) down to the subset actually attributable to
+ * THIS job's own run. Path overlap alone is not attribution: inside one Epic,
+ * sibling PRDs routinely declare the same hot file, so a sibling's commit is
+ * indistinguishable from this job's own by path alone (the incident this
+ * function exists to close — PRD 1204's parked row cited PRD 1205's commit
+ * 5dadf3c as its own evidence).
+ *
+ * Three rules, tried strongest-first, first match wins:
+ *
+ *  1. 'landedCommit' — the row's own `job.landedCommit`, re-verified here via
+ *     `resolveLandedCommitEvidence` against THIS job's `startedAt`. This is
+ *     the strongest signal because it is not inferred from `git log` at all:
+ *     it is the sha spawnJob's own finalize step observed THIS dispatch's
+ *     worktree/branch landing (see resolveLandedCommitEvidence's own header
+ *     for why it also guards against a stale sha surviving a reset). Trusted
+ *     independent of whether it appears in `pathCommits` — it is definitionally
+ *     this job's own work, not something discovered by scanning history.
+ *  2. 'job branch' — a path-overlapping commit reachable from (an ancestor of
+ *     or equal to) this job's own `sm-job/<slug>` branch tip. Still
+ *     job-specific even though it IS a `git log` scan: a sibling's commit can
+ *     never be an ancestor of THIS job's own branch ref. In practice this
+ *     branch is deleted on successful integration (gitWorktree.cjs's
+ *     `cleanupWorktree`), so this mainly fires when integration failed and
+ *     the branch was deliberately kept for recovery, or reverify runs before
+ *     cleanup — a narrower window than rule 1, hence checked second.
+ *  3. 'slug trailer' — a path-overlapping commit whose message contains this
+ *     job's slug verbatim. Weakest of the three (a coincidental substring
+ *     match is possible, and nothing stamps this automatically today), so it
+ *     is the last resort when the two structural signals above found
+ *     nothing.
+ *
+ * Deliberately NOT a rule: raw path overlap by itself (the bug this function
+ * fixes) and `committedInWindow`-style time-window-only evidence — a sibling
+ * job running concurrently in the very same window is exactly as invisible to
+ * a time bound as it is to a path filter, so neither narrows attribution.
+ *
+ * Never throws: a missing ref, an unresolvable sha, or any git failure for a
+ * given commit/rule is treated as "that commit doesn't satisfy this rule",
+ * never as a fabricated match.
+ */
+async function attributeLandedCommits(job, pathCommits, cwd) {
+  if (job?.landedCommit && await resolveLandedCommitEvidence(cwd, job.landedCommit, job.startedAt)) {
+    return { commits: [job.landedCommit], rule: 'landedCommit' };
+  }
+
+  const branch = `sm-job/${job?.slug}`;
+  const branchCommits = [];
+  for (const sha of pathCommits) {
+    try {
+      await execGitAt(cwd, ['merge-base', '--is-ancestor', sha, branch], { timeout: 10_000 });
+      branchCommits.push(sha);
+    } catch { /* not an ancestor of this job's own branch, or branch doesn't exist */ }
+  }
+  if (branchCommits.length) return { commits: branchCommits, rule: 'job branch' };
+
+  if (job?.slug) {
+    const trailerCommits = [];
+    for (const sha of pathCommits) {
+      try {
+        const msg = await execGitAt(cwd, ['log', '-1', '--format=%B', sha], { timeout: 10_000 });
+        if (msg.includes(job.slug)) trailerCommits.push(sha);
+      } catch { /* unresolvable sha */ }
+    }
+    if (trailerCommits.length) return { commits: trailerCommits, rule: 'slug trailer' };
+  }
+
+  return null;
+}
+
+/**
+ * Widened evidence check (PRD 1102, narrowed to per-job attribution by a
+ * later PRD): does at least one commit ATTRIBUTABLE TO THIS JOB land AFTER
+ * its run window and touch a path the PRD itself declares? Scoped to the
+ * PRD's own declared paths (never the whole repo) so a sibling job's
+ * unrelated commit is never even considered — see healRefusalReason's own
  * rationale for why unscoped, repo-wide evidence is not attribution.
  *
+ * Path overlap alone is NOT evidence (see attributeLandedCommits's header):
+ * a sibling PRD in the same Epic routinely declares the same hot file, so
+ * `landedSinceRun`'s raw result is only a candidate list — the returned
+ * annotation is null unless `attributeLandedCommits` narrows it to at least
+ * one commit this job can actually claim.
+ *
  * Returns null (no annotation, never fabricated) when the PRD names no
- * paths — the caller then has only the existing, already-computed
- * committedInWindow signal to go on, same as before this PRD.
+ * paths, when no commit touches a declared path at all, or when
+ * path-overlapping commits exist but none are attributable to this job — the
+ * caller then has only the existing, already-computed committedInWindow
+ * signal to go on, same as before this PRD.
  *
  * `fetchedCwds` (optional) lets a caller iterating many candidates in one
  * pass (reverifyNeedsReview) dedupe the `git fetch --all --prune` across
@@ -9256,7 +9339,7 @@ function isEligibleForImmediateAutoFix(job, allJobs, fixSlugExists) {
  * wall-clock cost for zero new evidence. Omitted (or a fresh Set per call)
  * simply always fetches, unchanged from before this cache existed.
  *
- * @returns {Promise<{commits: string[], paths: string[], detectedAt: string} | null>}
+ * @returns {Promise<{commits: string[], paths: string[], detectedAt: string, rule: string} | null>}
  */
 async function computeLooksDone(job, fetchedCwds) {
   const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
@@ -9268,7 +9351,9 @@ async function computeLooksDone(job, fetchedCwds) {
   }
   const commits = await landedSinceRun(job.cwd, job.startedAt, paths);
   if (!commits.length) return null;
-  return { commits, paths, detectedAt: new Date().toISOString() };
+  const attributed = await attributeLandedCommits(job, commits, job.cwd);
+  if (!attributed) return null;
+  return { commits: attributed.commits, paths, detectedAt: new Date().toISOString(), rule: attributed.rule };
 }
 
 async function reverifyNeedsReview() {
@@ -9377,14 +9462,14 @@ async function reverifyNeedsReview() {
         if (!u) continue;
         if (u.fromFailed) {
           transitionJob(j, 'needs_review', {
-            reason: 'looks done — commit(s) since this run touch this PRD\'s declared paths; confirm before archiving',
+            reason: `looks done (${u.looksDone.rule}) — commit(s) attributable to this job's own run touch this PRD's declared paths; confirm before archiving`,
             source: 'reverifyNeedsReview:looksDone',
           });
         }
         if (j.status !== 'needs_review') continue;
         j.looksDone = u.looksDone;
         const shaList = u.looksDone.commits.slice(0, 5).map((c) => c.slice(0, 7)).join(', ');
-        j.error = `looks done — ${u.looksDone.commits.length} commit(s) since this run touch this PRD's paths (${shaList}); confirm before archiving`;
+        j.error = `looks done (${u.looksDone.rule}) — ${u.looksDone.commits.length} commit(s) attributable to this job's own run touch this PRD's paths (${shaList}); confirm before archiving`;
       }
     });
     console.log(`[scheduler] boot reverify: looksDone annotated for ${looksDoneUpdates.length} row(s): ${looksDoneUpdates.map((u) => u.slug).join(', ')}`);
@@ -11200,6 +11285,7 @@ module.exports = {
   isRescanCandidate,
   isFailedUnverifiedShaped,
   computeLooksDone,
+  attributeLandedCommits,
   isPromotableOriginal,
   selectAutoFixTargets,
   applyRcaClassification,

@@ -1,11 +1,19 @@
 # Agent-layer consumers — external reference survey
 
-> This doc moves nothing. It is the pre-move survey CLAUDE.md's Scheduler section demands:
-> "PRD-write + destructive-git guards: adopt by REFERENCE, never vendor — other repos point at
-> THIS repo's absolute `scripts/hooks/guard-*.cjs`". Combined with the Conventions law "No
-> backwards-compat shims", a naive move of the AGENT LAYER partition (see
-> [`project-partition.md`](project-partition.md)) has no safe fallback path once shipped — so this
-> survey has to exist before anyone queues that move.
+> This doc moves nothing. It is the pre-move survey CLAUDE.md's Scheduler section demands.
+>
+> **2026-09-12 update — the adoption mechanism changed under this survey.** CLAUDE.md's Scheduler
+> section now reads: "Guard hooks adopt by REFERENCE via a stable shim (`guardShims.cjs`) —
+> `~/.claude/session-manager/hooks/guard-*.cjs`, not this app's own path" (see
+> `src/main/lib/guardShims.cjs`) — superseding the older "other repos point at THIS repo's
+> absolute `scripts/hooks/guard-*.cjs`" wording this survey was originally written against. That
+> changes what a FUTURE install/re-install writes (see "How the guard paths actually get INTO
+> another repo's settings.json" below), but does NOT retroactively fix the two consuming repos
+> surveyed here — as of this update, both `starry-night-ships/.claude/settings.json` and
+> `social-signals-trader/.claude/settings.json` still carry the OLD raw-absolute-path `command`
+> strings (re-verified live), because nothing has re-run their guard installers since the shim
+> shipped. The PINNED verdicts and evidence below are still accurate for THOSE TWO REPOS AS THEY
+> STAND TODAY; the "Recommended sequencing" conclusion is not — see the note appended there.
 
 ## Method
 
@@ -158,22 +166,70 @@ Read `package.json`, `bin/cli.cjs`, and `scripts/postinstall.cjs` directly (not 
 
 ## How the guard paths actually get INTO another repo's settings.json
 
-`src/main/lib/delegationReadiness.cjs:28-33` computes the four agent-layer script paths via
-`path.resolve(__dirname, '..', '..', '..', 'scripts', ...)` — i.e. relative to *this file's own
-location inside this repo* — into constants `SCHEDULER_MCP_SERVER_SCRIPT`,
-`PRD_WRITE_GUARD_SCRIPT`, `DESTRUCTIVE_GIT_GUARD_SCRIPT`, `INLINE_IMPLEMENTATION_GUARD_SCRIPT`.
-New Epic's readiness banner then calls the install functions at lines 451-459 (`PRD_WRITE_GUARD_SCRIPT`)
-and 557-562 (`DESTRUCTIVE_GIT_GUARD_SCRIPT`), which write a literal `command: "node <that
-resolved absolute path>"` string directly into the target repo's `.claude/settings.json`. This is
-exactly the "adopt by reference" mechanism CLAUDE.md's law describes, and it is why the survey's
-LOUD/SILENT table above matters: **the write already happened, in the past, into two other
-repos' checked-in config.** Moving `scripts/hooks/` inside this repo changes what
-`path.resolve(__dirname, ...)` computes for all *future* installs, but does nothing to the
-already-written strings in `starry-night-ships/.claude/settings.json` and
-`social-signals-trader/.claude/settings.json` — those are frozen text that will point at a
-now-missing file until someone re-runs the readiness banner's fix action in each of those repos.
+**Superseded by the stable-shim mechanism (2026-09-12) — this section described the pre-shim
+write; kept for history, corrected mechanism below.** `src/main/lib/delegationReadiness.cjs`
+still computes the four agent-layer script paths via `path.resolve(__dirname, '..', '..', '..',
+'scripts', ...)` into constants (`PRD_WRITE_GUARD_SCRIPT`, `DESTRUCTIVE_GIT_GUARD_SCRIPT`,
+`INLINE_IMPLEMENTATION_GUARD_SCRIPT`, `SCHEDULER_MCP_SERVER_SCRIPT`), but the guard installers
+(`installPrdWriteGuard`/`installDestructiveGitGuard`/`installInlineImplementationGuard`) no
+longer write that resolved absolute path into the `command` string. They now call
+`ensureGuardShimsOrError`/`guardShimPath` (`src/main/lib/guardShims.cjs`) first, and write
+`command: "node ~/.claude/session-manager/hooks/guard-*.cjs"` — a tiny shim that re-requires the
+real script through a pointer file (`app-root.json`) rewritten on every app boot. Moving
+`scripts/hooks/` inside this repo now changes only what that pointer file resolves to on the
+NEXT boot; every project whose guard was installed (or re-installed) AFTER the shim shipped
+follows the move automatically, with no per-repo edit.
+
+That said, **the write already happened, in the past, into two other repos' checked-in config,
+before this shim existed**, and installing is idempotent/no-op once a guard already reads `ok`
+(see `installGuard`'s "already healthy? nothing to do" check) — so re-running the readiness
+banner's fix action does NOT retroactively upgrade an already-passing pre-shim entry to the new
+shim form. `starry-night-ships/.claude/settings.json` and `social-signals-trader/.claude/settings.json`
+are confirmed (re-grepped 2026-09-12) to still carry the literal old absolute-path `command`
+strings — genuinely frozen text that will point at a now-missing file if `scripts/hooks/` moves,
+until each is force-repaired (e.g. by hand, or by a repair path that ignores the "already
+healthy" short-circuit) to the shim form.
 
 ## Recommended sequencing for a future agent-layer move
+
+> **2026-09-12 update — superseded by the stable-shim mechanism.** Everything in this section was
+> written against the pre-shim "raw absolute path written into the consumer's `command` string"
+> mechanism. With `guardShims.cjs` in place, `scripts/hooks/` is no longer structurally pinned for
+> any consumer whose guard was installed (or force-repaired) after the shim shipped — the shim's
+> pointer file, not the consumer's `command` string, is what encodes the real location, and the
+> pointer is rewritten on every boot. The two items below are what's actually still true today:
+
+1. **The two guard hooks (`guard-prd-writes.cjs`, `guard-destructive-git.cjs`) remain PINNED
+   *only* by two frozen, pre-shim entries** — `starry-night-ships/.claude/settings.json:9` and
+   `social-signals-trader/.claude/settings.json:16,25` — which still write the OLD raw absolute
+   `command` path and will NOT self-heal to the shim form on their own: `checkGuard` already
+   reports `ok:true` for them (the file at the old raw path still exists), so `installGuard`'s
+   "already healthy, nothing to do" short-circuit means simply re-running the readiness banner's
+   fix action in those two repos is a no-op, not a migration. `scripts/hooks/` is safe to move
+   only after those two entries are force-repaired to the shim `command` form (by hand, or by a
+   future repair path that doesn't bail out on `ok:true`) — that repair is the one remaining
+   cross-repo dependency, not a permanent architectural pin.
+2. **`scripts/scheduler-mcp-server.cjs` is unaffected by the shim** (it has no guard/shim
+   mechanism of its own) and remains hardcoded in `social-signals-trader/.mcp.json` exactly as
+   originally surveyed — moving it still requires the same one coordinated external `.mcp.json`
+   edit described in the original analysis below.
+3. **`plugins/`, `.claude-plugin/`, `scripts/mint-epic.cjs`, and
+   `scripts/hooks/guard-inline-implementation.cjs`** are unaffected by this update — see their
+   original verdicts below, still current.
+4. **Whatever moves, update `package.json`'s `files` array entries in the same PRD** — still
+   applies unchanged.
+
+Net recommendation: `scripts/hooks/guard-prd-writes.cjs` and
+`scripts/hooks/guard-destructive-git.cjs` can move once the two frozen pre-shim consumer entries
+above are force-repaired to the shim form — that repair, not a permanent "frozen public path"
+policy, is the actual remaining blocker. `scripts/scheduler-mcp-server.cjs` still needs its one
+coordinated `.mcp.json` edit. Everything else in the agent layer can move freely per the original
+analysis below.
+
+---
+
+**Original analysis (pre-shim, kept for the evidence trail — see the update above for what's
+still current):**
 
 1. **The two guard hooks (`guard-prd-writes.cjs`, `guard-destructive-git.cjs`) cannot move at
    their current path without a coordinated fix-up in every consuming repo, and CLAUDE.md
@@ -213,10 +269,3 @@ now-missing file until someone re-runs the readiness banner's fix action in each
 5. **Whatever moves, update `package.json`'s `files` array entries in the same PRD** — a stale
    entry silently drops the file from future `npx` installs (npm-package angle above) even for
    components with zero *external-repo* consumers.
-
-Net recommendation: **do not move `scripts/hooks/guard-prd-writes.cjs` or
-`scripts/hooks/guard-destructive-git.cjs`** under the current "adopt by reference, no
-backwards-compat shims" rules — treat `scripts/hooks/` as a frozen public path. Everything else
-in the agent layer (`plugins/`, `.claude-plugin/`, `mint-epic.cjs`,
-`guard-inline-implementation.cjs`, and — with one coordinated external `.mcp.json` edit —
-`scheduler-mcp-server.cjs`) can move with sequencing as above.

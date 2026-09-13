@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | **DESKTOP HARNESS** | The Electron app itself: main/preload/renderer, build config, tests, dev tooling. | End users running `npx claude-code-session-manager`; contributors developing the app. |
 | **WEB PRESENCE** | Code in THIS repo that produces content displayed on bilko.run. The pages themselves live in `~/Projects/Bilko`, a sibling repo — see below. | bilko.run visitors; the `bilko-host-publisher` / `project-home-builder` agent personas. |
-| **AGENT LAYER** | Skills, hooks, and MCP tooling this repo ships so OTHER repos can adopt session-manager's dev workflow. | Other projects' Claude Code sessions, by npm install or by-reference absolute path — never just this repo. |
+| **AGENT LAYER** | Skills, hooks, and MCP tooling this repo ships so OTHER repos can adopt session-manager's dev workflow. | Other projects' Claude Code sessions, by npm install or by-reference stable shim (`~/.claude/session-manager/hooks/`) — never just this repo. |
 | **OPERATIONS STATE** | `session-manager-operations/` — per-project runtime state and docs, governed by the single-writer law. Not code. | This app's own main process (owned namespaces) and skills/humans (unowned namespaces). |
 
 Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
@@ -64,7 +64,7 @@ in `scripts/` is AGENT LAYER + DESKTOP HARNESS only.
 
 | Entry | Partition | Note |
 | --- | --- | --- |
-| `hooks/` (`guard-destructive-git.cjs`, `guard-inline-implementation.cjs`, `guard-prd-writes.cjs`, `__tests__/`) | AGENT LAYER | Adopted by OTHER repos **by reference** at this repo's absolute path — never vendored. |
+| `hooks/` (`guard-destructive-git.cjs`, `guard-inline-implementation.cjs`, `guard-prd-writes.cjs`, `__tests__/`) | AGENT LAYER | Adopted by OTHER repos **by reference** via the stable shim (`src/main/lib/guardShims.cjs`) at `~/.claude/session-manager/hooks/guard-*.cjs`, never this repo's own absolute path — and never vendored. |
 | `scheduler-mcp-server.cjs`, `mint-epic.cjs` | AGENT LAYER | The agent-facing doors onto scheduler + Epic minting. |
 | `postinstall.cjs`, `lib/` (`activeSessions.cjs`, `watchdogHelpers.cjs`), `scheduler-watchdog.cjs`, `scheduler-watchdog.sh`, `install-scheduler-watchdog.sh`, `install-scheduler-mcp-user-scope.sh`, `health.sh`, `audit-ops-hygiene.cjs`, `bench-intraday-walk.cjs`, `check-conditional-hooks.cjs`, `check-unregistered-tests.cjs`, `check-unstable-selectors.cjs`, `cleanup-nested-queue-stubs.cjs`, `cleanup-worktree-ops-stubs.cjs`, `mirror-epic-status.cjs`, `ops-sweep.cjs`, `__tests__/` (minus the manual/project-pages test files, moved alongside their subjects) | DESKTOP HARNESS | Dev/build/lint/watchdog tooling for the app itself. `scripts/lib/` is required only by `scheduler-watchdog.cjs`. `scripts/__tests__/package-files.test.cjs` stays here — it tests `package.json`'s `files` array as a whole, spanning all three code partitions, not one moved file. |
 

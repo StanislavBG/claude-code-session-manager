@@ -25,8 +25,9 @@ it updates, not just this one.
 - Do not assume a skill change here only affects this repo — treat every edit as a
   cross-repo API change.
 - Do not vendor a copy of `scripts/hooks/guard-*.cjs` into a skill or another repo. Those hooks
-  are adopted **by reference** at this repo's absolute path (see root `CLAUDE.md`'s Scheduler
-  section) — never copy them.
+  are adopted **by reference** via a stable shim (`src/main/lib/guardShims.cjs`) at
+  `~/.claude/session-manager/hooks/guard-*.cjs` — never this repo's own absolute path (see root
+  `CLAUDE.md`'s Scheduler section) — and never copy the guard scripts themselves.
 - Do not confuse this with `.claude/` at the repo root — that is this repo's *own* local dev
   config for developing session-manager itself, not part of what ships to other projects.
 - Do not assume a skill here can rely on interactive-session-only features when it may run

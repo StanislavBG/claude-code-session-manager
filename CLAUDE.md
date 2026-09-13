@@ -18,10 +18,11 @@ before changing anything in that area.** Reference docs, all under `session-mana
 | [`domain-model.md`](session-manager-operations/architecture/domain-model.md) | TAB / EPIC / PRD, Agent+Tag, AIM prompt, worktree isolation, single-writer law |
 | [`code-map.md`](session-manager-operations/architecture/code-map.md) | Load-bearing main + renderer files, renderer data flow |
 | [`conventions.md`](session-manager-operations/architecture/conventions.md) | Conventions + the full **Avoid** list (every entry is a real incident) |
-| [`bilko-run-marketing.md`](session-manager-operations/architecture/bilko-run-marketing.md) | Product page, Stripe checkout, npm listing (sibling repo `~/Projects/Bilko/`) |
-| [`build-target.md`](session-manager-operations/architecture/build-target.md) | Build/publish target resolution |
+| [`bilko-run-marketing.md`](session-manager-operations/architecture/bilko-run-marketing.md) | Product page, Stripe checkout, npm listing |
+| [`build-target.md`](session-manager-operations/architecture/build-target.md) | Build/publish target |
 | [`ops-maintenance-protocol.md`](session-manager-operations/architecture/ops-maintenance-protocol.md) | Ops-folder drift sweeps |
-| [`project-partition.md`](session-manager-operations/architecture/project-partition.md) | Repo's 4 partitions (harness/web/agent-layer/ops-state), path-by-path |
+| [`project-partition.md`](session-manager-operations/architecture/project-partition.md) | Repo's 4 partitions, path-by-path |
+| [`host-boundary.md`](session-manager-operations/architecture/host-boundary.md) | Host-vs-ours boundary, routing rule |
 
 ## Stack
 

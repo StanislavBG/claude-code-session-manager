@@ -65,7 +65,7 @@ same PR that adds the folder.
 ### Pattern C — legacy flat structure not fully migrated
 
 **Update 2026-08-02: resolved, see
-[`ops-maintenance-protocol-patterns-c-d-findings.md`](ops-maintenance-protocol-patterns-c-d-findings.md).**
+[`../reviews/2026-08-02-ops-protocol-patterns-c-d-findings.md`](../reviews/2026-08-02-ops-protocol-patterns-c-d-findings.md).**
 The 73 files were legitimately in-flight PRDs mid-drain, not stuck debt; re-checked a few hours
 later, the flat dir holds 0 `.md` files. No migration was needed.
 
@@ -83,7 +83,7 @@ filed as part of the same hygiene Epic as Pattern D below, not auto-migrated by 
 ### Pattern D — orphaned top-level session/epic JSON
 
 **Update 2026-08-02: resolved, see
-[`ops-maintenance-protocol-patterns-c-d-findings.md`](ops-maintenance-protocol-patterns-c-d-findings.md).**
+[`../reviews/2026-08-02-ops-protocol-patterns-c-d-findings.md`](../reviews/2026-08-02-ops-protocol-patterns-c-d-findings.md).**
 Scripted the PRD-dispatch-event check (`scripts/audit-ops-hygiene.cjs`): 0 real data-loss
 candidates found. Every orphan is either a never-started Epic or a dispatched PRD that landed
 under a differently-named auto-minted epic dir.

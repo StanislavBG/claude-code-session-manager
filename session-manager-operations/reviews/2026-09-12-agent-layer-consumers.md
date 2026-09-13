@@ -1,5 +1,8 @@
 # Agent-layer consumers — external reference survey
 
+> **Point-in-time survey, dated 2026-09-12 — re-grep before acting on any verdict below** if
+> significant time has passed; consumer paths and shim-adoption state can change out from under it.
+>
 > This doc moves nothing. It is the pre-move survey CLAUDE.md's Scheduler section demands.
 >
 > **2026-09-12 update — the adoption mechanism changed under this survey.** CLAUDE.md's Scheduler
@@ -211,11 +214,11 @@ healthy" short-circuit) to the shim form.
    cross-repo dependency, not a permanent architectural pin.
 2. **`scripts/scheduler-mcp-server.cjs` is unaffected by the shim** (it has no guard/shim
    mechanism of its own) and remains hardcoded in `social-signals-trader/.mcp.json` exactly as
-   originally surveyed — moving it still requires the same one coordinated external `.mcp.json`
-   edit described in the original analysis below.
+   originally surveyed — moving it still requires one coordinated external `.mcp.json` edit
+   (updating the hardcoded path there).
 3. **`plugins/`, `.claude-plugin/`, `scripts/mint-epic.cjs`, and
-   `scripts/hooks/guard-inline-implementation.cjs`** are unaffected by this update — see their
-   original verdicts below, still current.
+   `scripts/hooks/guard-inline-implementation.cjs`** are unaffected by this update — see the
+   "Per-component verdict" table above, still current.
 4. **Whatever moves, update `package.json`'s `files` array entries in the same PRD** — still
    applies unchanged.
 
@@ -223,49 +226,5 @@ Net recommendation: `scripts/hooks/guard-prd-writes.cjs` and
 `scripts/hooks/guard-destructive-git.cjs` can move once the two frozen pre-shim consumer entries
 above are force-repaired to the shim form — that repair, not a permanent "frozen public path"
 policy, is the actual remaining blocker. `scripts/scheduler-mcp-server.cjs` still needs its one
-coordinated `.mcp.json` edit. Everything else in the agent layer can move freely per the original
-analysis below.
-
----
-
-**Original analysis (pre-shim, kept for the evidence trail — see the update above for what's
-still current):**
-
-1. **The two guard hooks (`guard-prd-writes.cjs`, `guard-destructive-git.cjs`) cannot move at
-   their current path without a coordinated fix-up in every consuming repo, and CLAUDE.md
-   forecloses the usual escape hatches:** "adopt by REFERENCE, never vendor" rules out leaving a
-   vendored copy behind at the new location as a courtesy, and "no backwards-compat shims" rules
-   out leaving a thin re-exporting stub file at the old path that forwards to the new one. There
-   is no safe silent move for these two files under this repo's own stated rules.
-   - **The only compliant options are:** (a) leave `scripts/hooks/guard-*.cjs` at their current
-     path permanently as the published contract, and move everything else in the agent layer
-     around them — i.e. `scripts/hooks/` becomes a fixed public interface, not an internal
-     implementation detail free to relocate; or (b) move them, then go into
-     `starry-night-ships/.claude/settings.json` and `social-signals-trader/.claude/settings.json`
-     and hand-edit the `command` strings to the new path in the same change — which is a
-     cross-repo edit this PRD's own "Out of scope" section forbids performing here, and which
-     the New Epic readiness banner does not currently offer as a bulk "repair all known
-     consumers" action (it only re-installs into the repo whose readiness banner you're
-     currently viewing).
-   - Given the "no backwards-compat shim" law, **(a) is the only option that requires zero
-     coordinated cross-repo edits and zero rule-bending** — recommended.
-2. **`scripts/scheduler-mcp-server.cjs` has the same shape of problem** (hardcoded in
-   `social-signals-trader/.mcp.json`) but a smaller blast radius (one repo, one file, and an MCP
-   registration failure is LOUD rather than silent) — it could move together with a single
-   coordinated edit to that one `.mcp.json`, but doing so still requires the same cross-repo
-   write this PRD is barred from performing, so it should be sequenced into the same follow-up
-   as the guard fix-up, not attempted alone.
-3. **`plugins/` and `.claude-plugin/` are PINNED only through the marketplace-root entry**
-   (`~/.claude/settings.json:20`, a single path pointing at the *repo root*, not into either
-   folder). As long as the repo root itself does not move, relocating `plugins/` or
-   `.claude-plugin/` to a different sub-path *within* the repo does not require any cross-repo
-   edit — only re-verifying `.claude-plugin/marketplace.json`'s own internal reference to
-   wherever `plugins/` ends up (an in-repo concern, not an external one).
-4. **`scripts/mint-epic.cjs` and `scripts/hooks/guard-inline-implementation.cjs` are genuinely
-   MOVABLE today** — no external consumer was found for either. They can move freely from this
-   survey's evidence alone, though `guard-inline-implementation.cjs`'s current MOVABLE status is
-   an artifact of it not yet being adopted anywhere, not a structural guarantee — re-grep before
-   acting on this verdict if significant time has passed since 2026-09-12.
-5. **Whatever moves, update `package.json`'s `files` array entries in the same PRD** — a stale
-   entry silently drops the file from future `npx` installs (npm-package angle above) even for
-   components with zero *external-repo* consumers.
+coordinated `.mcp.json` edit. Everything else in the agent layer can move freely per the
+"Per-component verdict" table above.

@@ -18,7 +18,9 @@ Claude Code plugin, shipped in `package.json`'s `files` array and registered via
 npm, or references this repo's skills/hooks directly, to get the same dev workflow (PRD
 authoring, scheduler, code review chains) that session-manager itself uses to develop
 session-manager. Editing a skill here changes behavior in every consuming repo the next time
-it updates, not just this one.
+it updates, not just this one. See
+[`../session-manager-operations/reviews/2026-09-12-agent-layer-consumers.md`](../session-manager-operations/reviews/2026-09-12-agent-layer-consumers.md)
+for which sibling repos are live consumers today.
 
 ## What must NOT be assumed
 

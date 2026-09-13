@@ -1,5 +1,8 @@
 # Global settings inventory — ground truth
 
+> **FROZEN point-in-time inventory; six owner modules have since been deleted and every line
+> anchor has drifted — do not refresh in place.**
+
 Read-only inventory. No code changes. Produced to seed a later "how should global
 settings be managed" design thread, prompted by the dockview-workbench migration
 (PRDs 778–780, 787, 788) turning screens into panels.

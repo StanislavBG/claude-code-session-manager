@@ -19,6 +19,15 @@ just because its subject has since changed or been removed — see below.
 - `chatrunner-concurrency-reconciliation.md` — a 2026-07-24 re-verification pass.
 - `2026-09-13-file-org-audit-findings.md` — a dated, one-off structural audit of
   `session-manager-operations/` and the doc set (this file is an artifact of that audit).
+- `2026-08-02-ops-protocol-patterns-c-d-findings.md` — moved from `../architecture/` (was
+  `ops-maintenance-protocol-patterns-c-d-findings.md`), the Pattern C/D investigation for
+  `ops-maintenance-protocol.md`.
+- `2026-07-30-global-settings-inventory.md` — moved from `../architecture/`
+  (`global-settings-inventory.md`), a frozen point-in-time global-settings inventory.
+- `2026-09-12-agent-layer-consumers.md` — moved from `../architecture/`
+  (`agent-layer-consumers.md`), the external-consumer survey for the AGENT LAYER partition.
+- `2026-08-07-heap-snapshot-validation.md` — the dated mechanism-validation lab report split
+  out of `../architecture/heap-snapshot-diagnostics.md`.
 
 ## The rule this namespace exists to enforce
 

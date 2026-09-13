@@ -7,11 +7,10 @@ drives a dispatch, what each recovery rung does and when, and a symptom → caus
 for "the scheduler looks stuck."
 
 **Scope.** This doc does NOT restate: the PRD frontmatter/authoring contract (see
-[`PRD_AUTHORING.md`](../../src/main/templates/PRD_AUTHORING.md)),
-the on-disk storage layout (see [`scheduler/README.md`](../scheduler/README.md)), or the
-completion-handler-desync runbook for a `queue.json` row stuck `"running"` after a clean exit
-(see [`scheduler-ops-standards.md`](scheduler-ops-standards.md) — a different, narrower incident
-than anything below). Every claim below is a live `file:line` reference, verified against the
+[`PRD_AUTHORING.md`](../../src/main/templates/PRD_AUTHORING.md)) or
+the on-disk storage layout (see [`scheduler/README.md`](../scheduler/README.md)). The
+completion-handler-desync runbook for a `queue.json` row stuck `"running"` after a clean exit is
+[§9 below](#9-stuck-row-triage) — a different, narrower incident than anything above. Every claim below is a live `file:line` reference, verified against the
 working tree at the time this doc was written — `scheduler.cjs`/`gitWorktree.cjs` are large,
 actively-edited files, so a line number here can drift; if a citation looks wrong, `grep` the
 quoted function/constant name rather than trusting the number blindly.
@@ -182,8 +181,52 @@ default) — quarantine promotion out of `quarantined` only ever happens through
 never a timer; a `worktree_integration_failed` verdict where the branch itself no longer exists
 (mechanical recovery's one retry already failed).
 
-## 9. Ops namespace
+## 9. Stuck-row triage
 
-This file lives under `architecture/`, already a deliberately **NOT-owned**
-`session-manager-operations/` namespace per CLAUDE.md (skill-authored docs, no concurrent-write
-hazard) — no `opsOwnership.cjs`/`OWNERS` change is needed to add it.
+Runbook for "is this specific row actually done, despite what `queue.json` says?" — a
+narrower, different incident than the dispatch/recovery machinery above. Written after PRD
+`926-epic-prds-tab-include-archived` sat at `status: "running"` for nearly an hour after its
+`claude -p` process had already exited cleanly, its code review passed, and its commit had
+already landed on `main`: the scheduler's completion handler can fail partway through — run
+artifacts get written, but the `status: "completed"` transition doesn't — leaving the row
+stuck at `"running"` until the app restarts (a live app with a desynced row doesn't
+self-heal). Tracked as Epic `scheduler-job-status-desyncs-from-run-completion-95fcbba3`.
+
+**Ground truth for "did this job actually finish?" is the run's artifact directory, not the
+queue row**:
+
+```
+~/.claude/session-manager/scheduled-plans/runs/<runId>/<slug>.meta.json      # exitCode, finishedAt
+~/.claude/session-manager/scheduled-plans/runs/<runId>/<slug>.verdicts.json  # review verdict
+~/.claude/session-manager/scheduled-plans/runs/<runId>/<slug>.log           # full stream-json transcript
+```
+
+`runId` is the job's `runId` field in `queue.json` (also the run folder's timestamp). If
+`<slug>.meta.json` exists with a non-null `exitCode`, the process is done — regardless of
+what `queue.json.status` says.
+
+**Fast triage checklist:**
+
+1. `queue.json` → find jobs with `status: "running"`. Note `runtime.pid` and `runId`.
+2. `ps -p <runtime.pid>` — is the process actually alive?
+   - **Dead PID + desynced status** → completion handler didn't finish its write. Check
+     the run's `.meta.json` for the real outcome (see above) before touching anything.
+   - **Alive PID** → genuinely in-flight. Check `ps -o etime` against the PRD's
+     `estimateMinutes` — significantly over estimate is worth a look at the live log
+     tail, but is not automatically "stuck" (long PRDs happen; see §7's budget-watchdog row).
+3. Cross-check with the admin API (works even without shell access to the box):
+   `scheduler_list_jobs` (MCP tool, wraps the loopback admin server) mirrors `queue.json` —
+   same caveat applies, it is not more authoritative than the file.
+
+**What NOT to do:**
+
+- **Do not call `scheduler_reset_job` on a row whose run artifacts show a clean exit.**
+  Reset re-queues the PRD as `pending` and re-runs it from scratch — for an already-shipped,
+  already-committed PRD this duplicates real work (cost + wall-clock) and can produce a
+  conflicting second commit on top of the first. Reset is for genuinely hung or crashed jobs
+  only, confirmed via the PID-liveness check above.
+- **Do not hand-edit `scheduler/state/queue.json` outside the app's write path.** It's an
+  OWNERS namespace (`scheduler` is the sole writer, per `opsOwnership.cjs`) — external edits
+  race the live app and can corrupt the file the next time it writes. If a row needs
+  correcting, that's a `scheduler.cjs` code fix (make the completion handler's two writes
+  atomic, or add a reconciliation pass), not a manual patch.

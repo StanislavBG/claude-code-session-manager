@@ -17,7 +17,7 @@ const {
   FALLBACK_MODEL,
   resolveEpicModel,
   findAgentTypeByClaudeSessionId,
-  readPersonaModel,
+  readOverlayAwarePersonaModel,
   resolvePrdPersonaForSpawn,
 } = require('../lib/agentModelResolve.cjs');
 
@@ -103,37 +103,39 @@ test('findAgentTypeByClaudeSessionId returns null for no match', async () => {
   expect(findAgentTypeByClaudeSessionId(cwd, 'missing')).toBeNull();
 });
 
-test('readPersonaModel returns null for a persona with no model field', async () => {
+test('readOverlayAwarePersonaModel returns null for a persona with no model field', async () => {
+  const cwd = await mkTmpDir('sm-agentmodel-cwd-');
   const globalDir = await mkTmpDir('sm-agentmodel-agents-');
   writePersona(globalDir, 'no-model-persona', []);
-  expect(readPersonaModel('no-model-persona', { globalDir, validatePath: noopValidatePath })).toBeNull();
+  expect(readOverlayAwarePersonaModel('no-model-persona', { cwd, globalDir, validatePath: noopValidatePath })).toBeNull();
 });
 
-test('readPersonaModel returns null (never throws) for a path-traversal agentType rejected by validatePath', async () => {
+test('readOverlayAwarePersonaModel returns null (never throws) for a path-traversal agentType rejected by validatePath', async () => {
+  const cwd = await mkTmpDir('sm-agentmodel-cwd-');
   const globalDir = await mkTmpDir('sm-agentmodel-agents-');
   const realValidatePath = (p) => {
     const real = path.resolve(p);
     if (!real.startsWith(path.resolve(globalDir) + path.sep)) throw new Error('outside allowed boundaries');
     return real;
   };
-  expect(readPersonaModel('../../../etc/passwd', { globalDir, validatePath: realValidatePath })).toBeNull();
+  expect(readOverlayAwarePersonaModel('../../../etc/passwd', { cwd, globalDir, validatePath: realValidatePath })).toBeNull();
 });
 
 // READ side of the agentType FK: a persona that was valid when the Epic was
 // created but got deleted afterward (rename/deletion in Agent Library) must
 // still resolve to null, not throw — the WRITE side (epicMint.cjs's
 // ensureEpic) is what refuses a bad reference at creation time.
-test('readPersonaModel returns null (does not throw) for a persona deleted after the Epic was created, and logs it once via opsErrorLog', async () => {
+test('readOverlayAwarePersonaModel returns null (does not throw) for a persona deleted after the Epic was created, and logs it once via opsErrorLog', async () => {
   const cwd = await mkTmpDir('sm-agentmodel-cwd-');
   const globalDir = await mkTmpDir('sm-agentmodel-agents-'); // never written to — simulates a deleted persona
 
-  expect(() => readPersonaModel('deleted-persona', { globalDir, validatePath: noopValidatePath, cwd })).not.toThrow();
-  expect(readPersonaModel('deleted-persona', { globalDir, validatePath: noopValidatePath, cwd })).toBeNull();
+  expect(() => readOverlayAwarePersonaModel('deleted-persona', { globalDir, validatePath: noopValidatePath, cwd })).not.toThrow();
+  expect(readOverlayAwarePersonaModel('deleted-persona', { globalDir, validatePath: noopValidatePath, cwd })).toBeNull();
 
   const { todayFile } = require('../lib/opsErrorLog.cjs');
   const lines = fs.readFileSync(todayFile(cwd), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const matches = lines.filter((l) => l.message.includes('deleted-persona'));
-  // Logged once despite two readPersonaModel calls above — dedup key is (cwd, agentType).
+  // Logged once despite two readOverlayAwarePersonaModel calls above — dedup key is (cwd, agentType).
   expect(matches).toHaveLength(1);
   expect(matches[0].level).toBe('warn');
 });
@@ -192,10 +194,9 @@ test('resolvePrdPersonaForSpawn returns the fallback (no persona applied) when a
 
 // Overlay-aware resolution (unify-epic-model-resolution): resolveEpicModel
 // must use the SAME project-overlay-then-global precedence
-// resolvePrdPersonaForSpawn already uses, rather than the global-only
-// readPersonaModel — so a project's `.claude/agents/<name>.md` wins for a
-// launched Chat/Terminal session exactly like it already does for a
-// scheduled PRD.
+// resolvePrdPersonaForSpawn already uses — so a project's
+// `.claude/agents/<name>.md` wins for a launched Chat/Terminal session
+// exactly like it already does for a scheduled PRD.
 
 test('resolveEpicModel prefers a project-overlay persona over the global one with the same name', async () => {
   const cwd = await mkTmpDir('sm-agentmodel-cwd-');

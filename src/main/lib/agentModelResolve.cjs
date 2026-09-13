@@ -78,14 +78,14 @@ function findAgentTypeByClaudeSessionId(cwd, claudeSessionId, deps = {}) {
 }
 
 /**
- * Shared miss-tolerant reader both `readPersonaModel` and
- * `readOverlayAwarePersonaModel` below are thin wrappers over: tries each
- * candidate path in order (`validatePath` then sync `readFileSync`), and
- * returns the first readable file's `model` frontmatter field — even if
- * that field is absent, which is why an empty-`model` overlay file does NOT
- * fall through to a later candidate (matches `getPersonaBody`'s own
- * semantics). Logs the dangling-persona warning at most once per
- * `(deps.cwd, agentType)` only when EVERY candidate misses. Never throws.
+ * Shared miss-tolerant reader `readOverlayAwarePersonaModel` below is a thin
+ * wrapper over: tries each candidate path in order (`validatePath` then sync
+ * `readFileSync`), and returns the first readable file's `model` frontmatter
+ * field — even if that field is absent, which is why an empty-`model`
+ * overlay file does NOT fall through to a later candidate (matches
+ * `getPersonaBody`'s own semantics). Logs the dangling-persona warning at
+ * most once per `(deps.cwd, agentType)` only when EVERY candidate misses.
+ * Never throws.
  */
 function readModelFromCandidatePaths(candidates, agentType, deps) {
   const validatePath = deps.validatePath || configMgr.validatePath;
@@ -106,21 +106,6 @@ function readModelFromCandidatePaths(candidates, agentType, deps) {
   }
   logDanglingPersonaOnce(deps.cwd, agentType);
   return null;
-}
-
-/**
- * Reads a global agent persona's `model` frontmatter field by name
- * (`~/.claude/agents/<agentType>.md`), sync. Returns null on any miss
- * (no such file, unreadable, no `model` key) — never throws.
- *
- * Superseded as `resolveEpicModel`'s reader by `readOverlayAwarePersonaModel`
- * below (a project's `.claude/agents/` overlay must win, same as the
- * scheduled-PRD path) — kept as the global-only reader its own tests cover.
- */
-function readPersonaModel(agentType, deps = {}) {
-  if (!agentType) return null;
-  const globalDir = deps.globalDir || path.join(os.homedir(), '.claude', 'agents');
-  return readModelFromCandidatePaths([path.join(globalDir, `${agentType}.md`)], agentType, deps);
 }
 
 /**
@@ -234,7 +219,6 @@ module.exports = {
   FALLBACK_MODEL,
   resolveEpicModel,
   findAgentTypeByClaudeSessionId,
-  readPersonaModel,
   readOverlayAwarePersonaModel,
   resolvePrdPersonaForSpawn,
 };

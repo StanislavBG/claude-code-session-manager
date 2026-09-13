@@ -287,8 +287,8 @@ test('ensureEpic refuses the mint and appends an epic_mint_refused audit event w
 // "throw on write, report on read" — a mint whose agentType names a persona
 // that doesn't resolve is refused outright; a persona that goes dangling
 // LATER (renamed/deleted after the Epic was minted) is legitimate history,
-// left to agentModelResolve.cjs's readPersonaModel (stays permissive) and the
-// ops-hygiene sweep to report.
+// left to agentModelResolve.cjs's readOverlayAwarePersonaModel (stays
+// permissive) and the ops-hygiene sweep to report.
 
 test('minting with an unknown agentType throws and names the two paths checked', async () => {
   const cwd = await mkCwd();

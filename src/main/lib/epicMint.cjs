@@ -161,7 +161,7 @@ function resolvePersonaPaths(cwd, agentType, deps = {}) {
  * a readable `.md` persona file, checking the project overlay before the
  * global agents dir. Never throws (a traversal attempt or missing file is
  * treated as "doesn't exist", same fail-closed spirit as
- * agentModelResolve.cjs's readPersonaModel).
+ * agentModelResolve.cjs's readOverlayAwarePersonaModel).
  */
 function personaFileExists(cwd, agentType, deps = {}) {
   const projectDir = deps.projectDir || path.join(cwd, '.claude', 'agents');
@@ -289,8 +289,8 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
     }
 
     // WRITE-TIME FK CHECK (throw on write, report on read — see this file's
-    // header + agentModelResolve.cjs's readPersonaModel, which is the READ
-    // side of this same FK and stays permissive on purpose). A mint whose
+    // header + agentModelResolve.cjs's readOverlayAwarePersonaModel, which is
+    // the READ side of this same FK and stays permissive on purpose). A mint whose
     // agentType names a persona that doesn't resolve is a bug in the caller
     // (a typo, or a persona deleted between the picker loading and the mint
     // landing) — refuse it now rather than silently orphaning the Epic.

@@ -158,8 +158,16 @@ function resolvePrdWriteDir(cwd) {
 const assembledPrdsDirsCache = new Map(); // callerKey -> { freshnessKey, result }
 const assembledArchivedPrdsDirsCache = new Map();
 
+// Sorted-keys JSON.stringify: a plain JSON.stringify(opts) would key
+// { a: 1, b: 2 } and { b: 2, a: 1 } as two different cache entries — a real
+// (if currently latent, since every caller today passes at most one opts
+// key) correctness trap for a cache key.
+function stableStringify(obj) {
+  return JSON.stringify(obj, Object.keys(obj).sort());
+}
+
 function callerOptsKey(maxAgeMin, opts) {
-  return `${maxAgeMin}::${opts ? JSON.stringify(opts) : ''}`;
+  return `${maxAgeMin}::${opts ? stableStringify(opts) : ''}`;
 }
 
 // mtimeMs of each visited project's Epics root, joined into one string. Any

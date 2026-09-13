@@ -22,6 +22,13 @@ const {
   DESTRUCTIVE_GIT_GUARD_SCRIPT,
   INLINE_IMPLEMENTATION_GUARD_SCRIPT,
 } = require('../delegationReadiness.cjs');
+const {
+  writeGuardShims,
+  shimPath: guardShimPath,
+  hooksDir: guardHooksDir,
+  pointerPath: guardPointerPath,
+  APP_ROOT: GUARD_APP_ROOT,
+} = require('../guardShims.cjs');
 
 const REQUIRED_TOOLS = ['scheduler_create_prd', 'session_manager_help'];
 
@@ -340,42 +347,129 @@ test('scheduler-mcp-live: memoizes the probe per registration signature within t
 
 // ─────────────────────────────── installPrdWriteGuard (unchanged behavior)
 
-test('installPrdWriteGuard: writes the canonical ABSOLUTE-path entry and turns the check green', async () => {
+test('installPrdWriteGuard: writes the canonical STABLE-SHIM-path entry and turns the check green', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
   await fsp.rm(path.join(cwd, '.claude', 'settings.json'));
 
-  const r = await installPrdWriteGuard({ cwd });
+  const r = await installPrdWriteGuard({ cwd, homeDir });
   expect(r.ok).toBe(true);
   expect(r.action).toBe('installed');
-  expect(r.command).toBe(`node ${PRD_WRITE_GUARD_SCRIPT}`);
+  const shimCommand = `node ${guardShimPath('guard-prd-writes.cjs', homeDir)}`;
+  expect(r.command).toBe(shimCommand);
+  // The shim path survives app upgrades; it must never be the raw app-root script.
+  expect(r.command).not.toBe(`node ${PRD_WRITE_GUARD_SCRIPT}`);
 
   const written = JSON.parse(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'));
   expect(written.hooks.PreToolUse).toEqual([
-    { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] },
+    { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: shimCommand }] },
   ]);
   const result = await checkDelegationReadiness({ cwd, homeDir });
   expect(result.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
 }, 15_000);
 
 test('installPrdWriteGuard: is idempotent — a healthy guard is a no-op', async () => {
-  const { cwd } = await makeGreenFixtures();
-  await installPrdWriteGuard({ cwd });
+  const { homeDir, cwd } = await makeGreenFixtures();
+  await installPrdWriteGuard({ cwd, homeDir });
   const before = fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8');
 
-  const again = await installPrdWriteGuard({ cwd });
+  const again = await installPrdWriteGuard({ cwd, homeDir });
   expect(again.action).toBe('already-installed');
   expect(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8')).toBe(before);
 });
 
 test('installPrdWriteGuard: refuses on unparseable settings rather than discarding them', async () => {
-  const { cwd } = await makeGreenFixtures();
+  const { homeDir, cwd } = await makeGreenFixtures();
   await fsp.writeFile(path.join(cwd, '.claude', 'settings.json'), '{ not valid json', 'utf8');
 
-  const r = await installPrdWriteGuard({ cwd });
+  const r = await installPrdWriteGuard({ cwd, homeDir });
   expect(r.ok).toBe(false);
   expect(r.action).toBe('error');
   expect(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8')).toBe('{ not valid json');
 });
+
+// ─────────────────────────────── stable-shim indirection (guardShims.cjs)
+
+test('installPrdWriteGuard: repairs a hook pointing at a dead ephemeral _npx cache path to the stable shim path', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  // Shaped exactly like the decay this PRD closes: an absolute path under a
+  // version-scoped npx cache dir that no longer exists on this machine.
+  const deadNpxPath = path.join(
+    homeDir, '.npm', '_npx', '5346543b21849140', 'node_modules',
+    'claude-code-session-manager', 'scripts', 'hooks', 'guard-prd-writes.cjs',
+  );
+  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
+    hooks: { PreToolUse: [{ matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${deadNpxPath}` }] }] },
+  });
+
+  const before = await checkDelegationReadiness({ cwd, homeDir });
+  expect(before.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(false);
+
+  const r = await installPrdWriteGuard({ cwd, homeDir });
+  expect(r.ok).toBe(true);
+  expect(r.action).toBe('repaired');
+  const shimCommand = `node ${guardShimPath('guard-prd-writes.cjs', homeDir)}`;
+  expect(r.command).toBe(shimCommand);
+
+  const written = JSON.parse(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'));
+  const writeMatchers = written.hooks.PreToolUse.filter((m) => m.matcher === 'Write|Edit|NotebookEdit');
+  expect(writeMatchers).toHaveLength(1);
+  expect(writeMatchers[0].hooks).toEqual([{ type: 'command', command: shimCommand }]);
+
+  const after = await checkDelegationReadiness({ cwd, homeDir });
+  expect(after.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
+}, 15_000);
+
+test('checkPrdWriteGuard: reports red — not a false green — when an installed shim\'s pointer has decayed (one hop downstream of the hook command)', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  // makeGreenFixtures seeds a hook pointing DIRECTLY at the app-root script —
+  // already healthy, so installPrdWriteGuard would short-circuit as
+  // 'already-installed' without ever switching the command to the shim.
+  // Remove it first so the install genuinely writes the shim-path command.
+  await fsp.rm(path.join(cwd, '.claude', 'settings.json'));
+  const r = await installPrdWriteGuard({ cwd, homeDir });
+  expect(r.ok).toBe(true);
+  expect(r.command).toBe(`node ${guardShimPath('guard-prd-writes.cjs', homeDir)}`);
+  const healthy = await checkDelegationReadiness({ cwd, homeDir });
+  expect(healthy.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
+
+  // Corrupt ONLY the pointer — the shim FILE at the hook's command path never
+  // moves, which is exactly why checking just its existence isn't enough.
+  await writeJson(guardPointerPath(homeDir), { appRoot: path.join(homeDir, 'deleted-app-root') });
+
+  const decayed = await checkDelegationReadiness({ cwd, homeDir });
+  const check = decayed.checks.find((c) => c.id === 'prd-write-guard');
+  expect(check.ok).toBe(false);
+  expect(check.detail).toMatch(/pointer has decayed/);
+}, 15_000);
+
+test('checkPrdWriteGuard: accepts BOTH a direct app-root path and the stable shim path as healthy', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures(); // direct app-root path, already healthy
+  const directResult = await checkDelegationReadiness({ cwd, homeDir });
+  expect(directResult.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
+
+  const shimResult = await writeGuardShims({ homeDir });
+  expect(shimResult.ok).toBe(true);
+  await writeJson(path.join(cwd, '.claude', 'settings.json'), {
+    hooks: { PreToolUse: [{ matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${guardShimPath('guard-prd-writes.cjs', homeDir)}` }] }] },
+  });
+  const viaShim = await checkDelegationReadiness({ cwd, homeDir });
+  expect(viaShim.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
+}, 15_000);
+
+test('installPrdWriteGuard: refuses with ok:false/action:error when the guard shim cannot be written, never writing a hook pointing at a missing shim', async () => {
+  const { cwd } = await makeGreenFixtures();
+  await fsp.rm(path.join(cwd, '.claude', 'settings.json'));
+  const base = await mkTmp('sm-delegation-unwritable-');
+  const blocker = path.join(base, 'blocker-file');
+  await fsp.writeFile(blocker, 'x', 'utf8');
+  const unwritableHomeDir = path.join(blocker, 'home'); // parent segment is a FILE -> mkdir fails
+
+  const r = await installPrdWriteGuard({ cwd, homeDir: unwritableHomeDir });
+  expect(r.ok).toBe(false);
+  expect(r.action).toBe('error');
+  expect(r.error).toBeTruthy();
+  expect(fs.existsSync(path.join(cwd, '.claude', 'settings.json'))).toBe(false);
+}, 15_000);
 
 // The guard script is not just referenced — it is EXERCISED here, so the
 // "certifies a config that has never been proven to run" gap is closed by a
@@ -445,7 +539,7 @@ test('destructive-git-guard: fails when the hook names a script that does not ex
   expect(check.detail).toMatch(/does not exist/);
 }, 15_000);
 
-test('installDestructiveGitGuard: writes the canonical ABSOLUTE-path entry and turns the check green', async () => {
+test('installDestructiveGitGuard: writes the canonical STABLE-SHIM-path entry and turns the check green', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
   await writeJson(path.join(cwd, '.claude', 'settings.json'), {
     hooks: {
@@ -458,10 +552,12 @@ test('installDestructiveGitGuard: writes the canonical ABSOLUTE-path entry and t
     },
   });
 
-  const r = await installDestructiveGitGuard({ cwd });
+  const r = await installDestructiveGitGuard({ cwd, homeDir });
   expect(r.ok).toBe(true);
   expect(r.action).toBe('installed');
-  expect(r.command).toBe(`node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}`);
+  const shimCommand = `node ${guardShimPath('guard-destructive-git.cjs', homeDir)}`;
+  expect(r.command).toBe(shimCommand);
+  expect(r.command).not.toBe(`node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}`);
 
   const written = JSON.parse(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'));
   // The pre-existing Write|Edit|NotebookEdit matcher (and its hook) survives untouched.
@@ -469,7 +565,7 @@ test('installDestructiveGitGuard: writes the canonical ABSOLUTE-path entry and t
     { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] },
   );
   expect(written.hooks.PreToolUse).toContainEqual(
-    { matcher: 'Bash', hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }] },
+    { matcher: 'Bash', hooks: [{ type: 'command', command: shimCommand }] },
   );
 
   const result = await checkDelegationReadiness({ cwd, homeDir });
@@ -499,14 +595,15 @@ test('installDestructiveGitGuard: flips destructive-git-guard FAIL -> PASS on a 
     detail: `no guard-destructive-git PreToolUse hook in ${cwd}/.claude/settings.json`,
   });
 
-  const first = await installDestructiveGitGuard({ cwd });
+  const first = await installDestructiveGitGuard({ cwd, homeDir });
   expect(first).toMatchObject({ ok: true, action: 'installed', settingsPath });
 
   const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   const bash = written.hooks.PreToolUse.filter((m) => m.matcher === 'Bash');
   expect(bash).toHaveLength(1);
-  // By reference to THIS repo's absolute script — never a copy inside the target cwd.
-  expect(bash[0].hooks).toEqual([{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }]);
+  // By reference to the stable shim — never a copy inside the target cwd.
+  const shimCommand = `node ${guardShimPath('guard-destructive-git.cjs', homeDir)}`;
+  expect(bash[0].hooks).toEqual([{ type: 'command', command: shimCommand }]);
   expect(path.isAbsolute(DESTRUCTIVE_GIT_GUARD_SCRIPT)).toBe(true);
   expect(DESTRUCTIVE_GIT_GUARD_SCRIPT.startsWith(cwd + path.sep)).toBe(false);
   expect(fs.existsSync(path.join(cwd, 'scripts'))).toBe(false);
@@ -517,22 +614,22 @@ test('installDestructiveGitGuard: flips destructive-git-guard FAIL -> PASS on a 
 
   // Second press: no-op, byte-identical file.
   const snapshot = fs.readFileSync(settingsPath, 'utf8');
-  const second = await installDestructiveGitGuard({ cwd });
+  const second = await installDestructiveGitGuard({ cwd, homeDir });
   expect(second).toMatchObject({ ok: true, action: 'already-installed', settingsPath });
   expect(fs.readFileSync(settingsPath, 'utf8')).toBe(snapshot);
 }, 15_000);
 
 test('installDestructiveGitGuard: is idempotent — a healthy guard is a no-op', async () => {
-  const { cwd } = await makeGreenFixtures();
+  const { homeDir, cwd } = await makeGreenFixtures();
   const before = fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8');
 
-  const again = await installDestructiveGitGuard({ cwd });
+  const again = await installDestructiveGitGuard({ cwd, homeDir });
   expect(again.action).toBe('already-installed');
   expect(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8')).toBe(before);
 });
 
 test('installDestructiveGitGuard: repairs a broken entry in place rather than duplicating it', async () => {
-  const { cwd } = await makeGreenFixtures();
+  const { homeDir, cwd } = await makeGreenFixtures();
   await writeJson(path.join(cwd, '.claude', 'settings.json'), {
     hooks: {
       PreToolUse: [
@@ -548,20 +645,20 @@ test('installDestructiveGitGuard: repairs a broken entry in place rather than du
     },
   });
 
-  const r = await installDestructiveGitGuard({ cwd });
+  const r = await installDestructiveGitGuard({ cwd, homeDir });
   expect(r.action).toBe('repaired');
 
   const written = JSON.parse(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'));
   const bashMatchers = written.hooks.PreToolUse.filter((m) => m.matcher === 'Bash');
   expect(bashMatchers).toHaveLength(1);
-  expect(bashMatchers[0].hooks).toEqual([{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }]);
+  expect(bashMatchers[0].hooks).toEqual([{ type: 'command', command: `node ${guardShimPath('guard-destructive-git.cjs', homeDir)}` }]);
 });
 
 test('installDestructiveGitGuard: refuses on unparseable settings rather than discarding them', async () => {
-  const { cwd } = await makeGreenFixtures();
+  const { homeDir, cwd } = await makeGreenFixtures();
   await fsp.writeFile(path.join(cwd, '.claude', 'settings.json'), '{ not valid json', 'utf8');
 
-  const r = await installDestructiveGitGuard({ cwd });
+  const r = await installDestructiveGitGuard({ cwd, homeDir });
   expect(r.ok).toBe(false);
   expect(r.action).toBe('error');
   expect(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8')).toBe('{ not valid json');
@@ -676,8 +773,9 @@ test('installInlineImplementationGuard: appends into the EXISTING Write|Edit|Not
     fixAction: 'install-inline-implementation-guard',
   });
 
-  const r = await installInlineImplementationGuard({ cwd });
-  expect(r).toMatchObject({ ok: true, action: 'installed', settingsPath, command: `node ${INLINE_IMPLEMENTATION_GUARD_SCRIPT}` });
+  const r = await installInlineImplementationGuard({ cwd, homeDir });
+  const inlineShimCommand = `node ${guardShimPath('guard-inline-implementation.cjs', homeDir)}`;
+  expect(r).toMatchObject({ ok: true, action: 'installed', settingsPath, command: inlineShimCommand });
 
   const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   // Exactly ONE Write|Edit|NotebookEdit matcher entry, now carrying BOTH commands.
@@ -685,7 +783,7 @@ test('installInlineImplementationGuard: appends into the EXISTING Write|Edit|Not
   expect(writeMatchers).toHaveLength(1);
   expect(writeMatchers[0].hooks).toEqual([
     { type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` },
-    { type: 'command', command: `node ${INLINE_IMPLEMENTATION_GUARD_SCRIPT}` },
+    { type: 'command', command: inlineShimCommand },
   ]);
   // The unrelated Bash matcher and every unrelated top-level key survive untouched.
   expect(written.hooks.PreToolUse).toContainEqual(
@@ -700,7 +798,7 @@ test('installInlineImplementationGuard: appends into the EXISTING Write|Edit|Not
 }, 15_000);
 
 test('installInlineImplementationGuard: is idempotent — running it twice leaves exactly one entry, byte-identical file on the second press', async () => {
-  const { cwd } = await makeGreenFixtures();
+  const { homeDir, cwd } = await makeGreenFixtures();
   await writeJson(path.join(cwd, '.claude', 'settings.json'), {
     hooks: {
       PreToolUse: [
@@ -709,11 +807,11 @@ test('installInlineImplementationGuard: is idempotent — running it twice leave
     },
   });
 
-  const first = await installInlineImplementationGuard({ cwd });
+  const first = await installInlineImplementationGuard({ cwd, homeDir });
   expect(first.action).toBe('installed');
   const snapshot = fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8');
 
-  const second = await installInlineImplementationGuard({ cwd });
+  const second = await installInlineImplementationGuard({ cwd, homeDir });
   expect(second.action).toBe('already-installed');
   expect(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8')).toBe(snapshot);
 
@@ -724,7 +822,7 @@ test('installInlineImplementationGuard: is idempotent — running it twice leave
 });
 
 test('installInlineImplementationGuard: repairs an entry pointing at a now-nonexistent path in place rather than appending a duplicate', async () => {
-  const { cwd } = await makeGreenFixtures();
+  const { homeDir, cwd } = await makeGreenFixtures();
   const settingsPath = path.join(cwd, '.claude', 'settings.json');
   await writeJson(settingsPath, {
     hooks: {
@@ -740,7 +838,7 @@ test('installInlineImplementationGuard: repairs an entry pointing at a now-nonex
     },
   });
 
-  const r = await installInlineImplementationGuard({ cwd });
+  const r = await installInlineImplementationGuard({ cwd, homeDir });
   expect(r.action).toBe('repaired');
 
   const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -748,14 +846,14 @@ test('installInlineImplementationGuard: repairs an entry pointing at a now-nonex
   expect(writeMatchers).toHaveLength(1);
   const inlineHooks = writeMatchers[0].hooks.filter((h) => h.command.includes('guard-inline-implementation'));
   expect(inlineHooks).toHaveLength(1);
-  expect(inlineHooks[0].command).toBe(`node ${INLINE_IMPLEMENTATION_GUARD_SCRIPT}`);
+  expect(inlineHooks[0].command).toBe(`node ${guardShimPath('guard-inline-implementation.cjs', homeDir)}`);
 });
 
 test('installInlineImplementationGuard: refuses on unparseable settings rather than discarding them', async () => {
-  const { cwd } = await makeGreenFixtures();
+  const { homeDir, cwd } = await makeGreenFixtures();
   await fsp.writeFile(path.join(cwd, '.claude', 'settings.json'), '{ not valid json', 'utf8');
 
-  const r = await installInlineImplementationGuard({ cwd });
+  const r = await installInlineImplementationGuard({ cwd, homeDir });
   expect(r.ok).toBe(false);
   expect(r.action).toBe('error');
   expect(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8')).toBe('{ not valid json');
@@ -863,15 +961,25 @@ test('installInlineImplementationGuard: refuses when its guard script is missing
   });
 });
 
-test('installInlineImplementationGuard: uses the ABSOLUTE reference path, never a vendored copy', async () => {
-  const { cwd } = await makeGreenFixtures();
+test('installInlineImplementationGuard: uses the ABSOLUTE stable-shim path, never a vendored copy — and the shim itself resolves by REFERENCE, not a copy', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
   await writeJson(path.join(cwd, '.claude', 'settings.json'), {
     hooks: { PreToolUse: [{ matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] }] },
   });
 
-  const r = await installInlineImplementationGuard({ cwd });
-  expect(path.isAbsolute(INLINE_IMPLEMENTATION_GUARD_SCRIPT)).toBe(true);
-  expect(r.command).toContain(INLINE_IMPLEMENTATION_GUARD_SCRIPT);
-  expect(INLINE_IMPLEMENTATION_GUARD_SCRIPT.startsWith(cwd + path.sep)).toBe(false);
+  const r = await installInlineImplementationGuard({ cwd, homeDir });
+  const shimFile = guardShimPath('guard-inline-implementation.cjs', homeDir);
+  expect(path.isAbsolute(shimFile)).toBe(true);
+  expect(r.command).toBe(`node ${shimFile}`);
+  expect(shimFile.startsWith(cwd + path.sep)).toBe(false);
   expect(fs.existsSync(path.join(cwd, 'scripts'))).toBe(false);
+
+  // The shim is not a vendored copy of the real guard — it's a pointer-file
+  // indirection that names the real script's absolute path, which still
+  // lives only inside this repo.
+  const pointer = JSON.parse(fs.readFileSync(guardPointerPath(homeDir), 'utf8'));
+  expect(pointer.appRoot).toBe(GUARD_APP_ROOT);
+  const shimSource = fs.readFileSync(shimFile, 'utf8');
+  expect(shimSource).toContain('guard-inline-implementation.cjs');
+  expect(shimSource).not.toContain(INLINE_IMPLEMENTATION_GUARD_SCRIPT);
 });

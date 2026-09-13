@@ -1314,8 +1314,9 @@ function ensureDirs() {
  * reconcile()-level call is what makes "anything written to the retired flat
  * prds/ dir is swept into prds-archived/ without being executed" actually
  * true regardless of which of reconcile's several callers (tickQueue's poll,
- * job completion, the schedule:state/schedule:rescan IPC handlers,
- * rescheduleTimer) triggers the pass: a PRD dropped in the flat dir has no
+ * job completion, the schedule:rescan/schedule:adopt-prd IPC handlers,
+ * broadcast()'s coalescer, rescheduleTimer) triggers the pass — schedule:state
+ * no longer reconciles on read. A PRD dropped in the flat dir has no
  * queue row yet at that point, so it is never in LIVE_JOB_STATUSES and this
  * sweep archives it before reconcile can ever turn it into a pending job.
  */
@@ -2289,8 +2290,8 @@ async function reconcile(state) {
     throw new Error(`reconcile skipped: queue.json unreadable (${state.unreadable})`);
   }
   // Sweep the retired flat prds/ dir BEFORE scanning it below. reconcile()
-  // has several callers besides tickQueue's ~60s poll (broadcast,
-  // rescheduleTimer, the schedule:state IPC handler, schedule:rescan) — this
+  // has several callers besides tickQueue's ~60s poll (broadcast()'s
+  // coalescer, rescheduleTimer, schedule:rescan, schedule:adopt-prd) — this
   // lives here, not in any one caller, so the "a hand-written PRD in the flat
   // dir is swept before it can become a job" guarantee holds regardless of
   // which caller triggers this reconcile pass. A freshly hand-written file
@@ -2954,11 +2955,9 @@ function attachWindow(w) { mainWindow = w; }
 
 /**
  * Build the snapshot payload consumed by both the `schedule:state` IPC
- * handler and the `schedule:state` broadcast event. The IPC return adds a
- * `paths` map (renderer uses it for "open folder" actions); broadcast omits
- * it because subscribers don't need to re-derive paths on every tick.
+ * handler and the `schedule:state` broadcast event.
  */
-function buildScheduleStatePayload(state, { withPaths = false } = {}) {
+function buildScheduleStatePayload(state) {
   const payload = {
     config: state.config,
     jobs: state.jobs,
@@ -2999,9 +2998,6 @@ function buildScheduleStatePayload(state, { withPaths = false } = {}) {
       };
     })(),
   };
-  if (withPaths) {
-    payload.paths = { root: ROOT, prds: PRDS_DIR, runs: RUNS_DIR, queue: queueStore.MACHINE_STATE_PATH };
-  }
   return payload;
 }
 
@@ -9629,11 +9625,21 @@ function registerScheduleHandlers() {
   ensureDirs();
   supervisor.registerHandlers();
 
+  // Cheap read only — no reconcile(), no writeQueue(). The renderer treats
+  // this as a fast call behind a 5s deadline (scheduleState.ts's
+  // withTimeout), but reconcile() does a cross-project PRD discovery walk
+  // plus a disk write, which could blow that deadline and, worse, throw
+  // outright on a torn queue.json (reconcile refuses to run against
+  // `state.unreadable`) — turning a recoverable read into a rejected IPC and
+  // an error toast. Discovery still runs on a fixed cadence elsewhere:
+  // tickQueue (every POLL_INTERVAL_MS, 60s), rescheduleTimer, broadcast()'s
+  // coalescer (getPayload), schedule:rescan and schedule:adopt-prd. Worst
+  // case, a PRD dropped on disk while the Scheduler tab is open surfaces
+  // here within ~POLL_INTERVAL_MS + BROADCAST_COALESCE_MS (~60.2s) — via
+  // tickQueue's reconcile + its trailing broadcast() — not via this handler.
   ipcMain.handle('schedule:state', async () => {
     const state = await readQueue();
-    await reconcile(state);
-    await writeQueue(state);
-    return buildScheduleStatePayload(state, { withPaths: true });
+    return buildScheduleStatePayload(state);
   });
 
   // Session-Manager-wide claude -p slot pool (lib/sessionSlots.cjs) —
@@ -9832,9 +9838,11 @@ function registerScheduleHandlers() {
     return { ok: true };
   });
 
-  // Re-scan prds/ folder and merge into queue.json. The `schedule:state`
-  // handler already reconciles on read, but this gives the renderer an
-  // explicit refresh path that also broadcasts so all views update.
+  // Re-scan prds/ folder and merge into queue.json. `schedule:state` is a
+  // cheap read with no reconcile of its own — this is the renderer's
+  // explicit, immediate discovery path (mutate() + reconcile() + broadcast())
+  // for "I just dropped a PRD on disk and want it to show up now" rather than
+  // waiting for tickQueue's next ~60s pass.
   ipcMain.handle('schedule:rescan', async () => {
     const { added, removed } = await mutate(async (state) => {
       const before = new Set(state.jobs.map((j) => j.slug));

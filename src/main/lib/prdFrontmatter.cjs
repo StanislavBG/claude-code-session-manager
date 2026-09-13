@@ -77,8 +77,8 @@ function splitFrontmatter(raw) {
  * never emitted, which is how `scheduler_update_prd` clears a dependency.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition'];
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 function indentOf(line) {
@@ -178,6 +178,12 @@ function applyKey(fm, key, after) {
       // `false`) is treated as "not set" so the field never round-trips as
       // a no-op line for the overwhelming majority of PRDs that omit it.
       if (v === true) fm.quietMachine = true;
+      return;
+    case 'disposition':
+      // Wave-authoring decision ('append'/'new-head') — see
+      // src/renderer/lib/prdFrontmatter.ts's mirror of this field for the
+      // full rationale. Only these two values are recognized.
+      if (v === 'append' || v === 'new-head') fm.disposition = v;
       return;
   }
 }

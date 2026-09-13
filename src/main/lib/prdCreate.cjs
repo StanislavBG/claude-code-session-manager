@@ -30,6 +30,7 @@ const { fixChainDepthOf, baseSlugOf } = require('./fixChainDepth.cjs');
 const { DEFAULT_PRD_AGENT_TYPE, assertAgentTypeWritable } = require('./prdAgentType.cjs');
 const { resolveDepSlug, findNearMatches } = require('./depSlugResolve.cjs');
 const { isFixPlanSlug } = require('./fixPlanSlug.cjs');
+const { isIncomplete, resolveChainTerminals } = require('./prdDisposition.cjs');
 
 // A caller-supplied slug that already starts with its own `NN-` (e.g.
 // "254-perf-x") used to silently become the double-prefixed row
@@ -74,7 +75,7 @@ function deriveSlugFromTitle(title) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition,
   } = input;
 
   // No `parallelGroup` frontmatter key by convention (SKILL.md) — the NN-
@@ -108,6 +109,11 @@ function buildPrdBody(input) {
   fmLines.push(`agentType: ${agentType || DEFAULT_PRD_AGENT_TYPE}`);
   // Explicit ordering (PRD 832): replaces the retired shared-NN convention.
   if (dependsOn && dependsOn.length) fmLines.push(`dependsOn: [${dependsOn.join(', ')}]`);
+  // Wave-authoring decision (scheduler wave-disposition PRD) — only ever set
+  // when createPrd() actually had a disposition to record (see the call
+  // site above); a first-ever PRD in an Epic, or one with its own explicit
+  // dependsOn, has nothing to decide against and omits this key.
+  if (disposition) fmLines.push(`disposition: ${disposition}`);
   // Opt-in exclusive-lease flag (PRD 1107): serializes this job against
   // every other job machine-wide for its run, for a PRD whose acceptance
   // criteria are wall-clock/timing measurements that CPU contention from
@@ -235,6 +241,55 @@ async function createPrd(input, remote) {
     // ever be a no-op in practice; kept for defense-in-depth, not duplicated logic.
     const fallback = resolveSourcePromptIdFromClaudeSession(cwd, input.originClaudeSessionId);
     if (fallback) input = { ...input, sourcePromptId: fallback };
+  }
+
+  // Wave-disposition decision point (scheduler wave-disposition PRD): only
+  // matters for a PRD that would become a ROOT of its own wave — one the
+  // caller didn't already give an explicit dependsOn (that already fixes
+  // its position in some chain) — joining an Epic whose sourcePromptId this
+  // PRD shares. See prdDisposition.cjs's header for the full contract.
+  if (input.sourcePromptId && (!input.dependsOn || input.dependsOn.length === 0)) {
+    let epicRows = [];
+    try {
+      const listing = await remote.listPrds({ cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER });
+      epicRows = (listing?.prds ?? []).filter((p) => p.sourcePromptId === input.sourcePromptId);
+    } catch (e) {
+      console.warn(`[prdCreate] disposition resolution skipped (listPrds failed): ${e?.message ?? e}`);
+    }
+    if (epicRows.some((p) => isIncomplete(p.status))) {
+      let disposition = input.disposition ?? null;
+      if (!disposition) {
+        // A headless PRD executor's own job has SM_SCHEDULER_JOB_SLUG set on
+        // its env (scheduler.cjs stamps every spawned job's child env with
+        // it) — no human is present to ask, so the conservative default
+        // ('append') applies and is logged as a default, never as a silent
+        // choice. Anything else (a live interactive Epic chat session, or a
+        // direct admin-route call) is refused instead of guessed — see this
+        // PRD's AC2.
+        const nonInteractive = Boolean(process.env.SM_SCHEDULER_JOB_SLUG);
+        if (!nonInteractive) {
+          return {
+            ok: false,
+            status: 400,
+            error: `Epic ${input.sourcePromptId} already has incomplete PRDs — pass disposition: "append" ` +
+              '(extend the existing chain behind its current tail) or "new-head" (an independent root, ' +
+              'eligible to run in parallel) to record this wave\'s relationship to the existing plan.',
+          };
+        }
+        disposition = 'append';
+        console.warn(`[prdCreate] disposition defaulted to "append" for a non-interactive caller (epic ${input.sourcePromptId})`);
+        appendAuditEvent('prd_disposition_defaulted', { cwd: input.cwd, epicId: input.sourcePromptId, disposition });
+      }
+      if (disposition === 'append') {
+        // Only the Epic's still-incomplete rows count as "the active plan" to
+        // append behind — a completed, undepended-upon row would otherwise
+        // also read as a terminal, silently attaching this wave to already-
+        // finished work instead of purely the current chain's live tail(s).
+        const terminals = resolveChainTerminals(epicRows.filter((p) => isIncomplete(p.status)));
+        if (terminals.length) input = { ...input, dependsOn: terminals };
+      }
+      input = { ...input, disposition };
+    }
   }
 
   if (input.slug) {

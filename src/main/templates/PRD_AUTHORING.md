@@ -1,3 +1,4 @@
+<!-- PRD_AUTHORING.md v2 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 This guide codifies lessons from two stuck-job incidents (fizzpop poll-hang, etch-engine post-AC overrun) into enforceable rules every PRD MUST follow. Violating these rules costs real money and wastes hours waiting at a terminal.
@@ -147,6 +148,8 @@ estimateMinutes: 60
 **Summary:** The PRD body is the executor's entire context. It runs as `claude -p "<body>"` with no conversation history.
 
 **Rule:** Include exact file paths, function signatures if they save a Read, library versions, and the name of any sibling PRD the executor must NOT duplicate. Do not reference "the conversation", "what we discussed", "the design doc", or any other external context. If the executor would need to search for something, include the answer.
+
+**Epic context digest is additive, not a dependency (PRD 958):** when a job's `epicId` resolves to a known Epic in that project's `active-index.json`, the scheduler prepends a short digest of the Epic's own session (goal text + recent turns, built by `src/main/lib/epicContextDigest.cjs`'s `buildContextDigest`) to the `-p` prompt sent to the executor — the on-disk PRD `.md` file itself is never rewritten. This exists purely to orient the executor faster; it is never load-bearing. The digest is a silent no-op when the Epic doesn't resolve, and any failure building it is caught and logged, never blocking dispatch. Every PRD body must still stand on its own per the rule above — write it as if the digest will not be there.
 
 ---
 
@@ -448,3 +451,50 @@ intake`, commit `352b89c`). It syncs open GitHub issues into `session-manager-op
 → queue path the rest of this guide documents. An external project building a Slack (or any
 other) adapter should follow the same source → triage → queue shape, ending at
 `scheduler_create_prd` (app running) or a hand-written PRD file (app closed) as described above.
+
+## §15 Resolving a `failed`/`needs_review` job whose target work is already done
+
+**Symptom:** a job lands in `failed` or `needs_review` even though its actual objective was
+already satisfied — either by a sibling/concurrent job that finished the same work first (a
+duplicate PRD racing another one), or by an out-of-band actor (a human, another agent) reaching
+the same target state before the scheduler's run even started. The job's own transcript may be
+completely accurate (`SCHEDULER_VERDICT: PASS but no commit landed during the run window`) — the
+"failure" is a stale queue entry, not broken work.
+
+**Do NOT hand-edit `queue.json` to fix the status.** It's a live file the running Electron
+scheduler process (and the external watchdog) both read and write; a manual edit races the app's
+own save cycle and risks a torn write. There is also no supported IPC/CLI surface today to flip a
+single job's `status` field directly.
+
+**The safe, supported remediation — confirmed working live (2026-07-18):** archive the job's PRD
+*source file*, not the queue entry. `reconcile()` (`src/main/scheduler.cjs`) runs on every queue
+read/tick and drops any `queue.json` job entry whose PRD `.md` no longer exists in `prds/` — so
+archiving the file is sufficient; you never touch `queue.json` yourself.
+
+```js
+// From this repo's root (session-manager), or anywhere queueOps.cjs is reachable:
+const q = require('./src/main/queueOps.cjs');
+await q.archiveMany(['<slug-of-the-stale-job>']);
+// Atomic rename to prds-archived/<ISO>/<slug>.md — reversible, path-contained,
+// no queue.json write. The next reconcile() (within one scheduler tick, ~10-15s
+// observed) drops the matching queue.json job entry automatically.
+```
+
+This is the exact mechanism `schedule:clear-queue`'s IPC handler uses internally, just scoped to
+one slug instead of "every non-running job" — safe to call from outside Electron (no admin API
+needed) since `queueOps.cjs`'s `archiveMany` is a plain exported function, not IPC-gated.
+
+**When to use this vs. requeueing a retry:** only when you've confirmed the target state is
+already correct (read the failed job's own transcript/log — did it conclude "nothing left to
+do"? did a sibling job's commit already land the same objective? does an independent check like
+`gh pr view <n> --json mergeable` already show the desired end state?). If the target state is
+genuinely NOT yet reached, fix and requeue instead — archiving does not fix an actual bug, it
+only clears a stale status label for already-completed work.
+
+**Known gap this doesn't cover:** the verifier's `pass_no_commit` classification (a run that
+concludes "PASS, no code change needed" gets flagged `needs_review` as if it were suspicious)
+does not yet special-case "another actor already satisfied this PRD's postcondition" for
+externally-checkable targets (e.g. a `gh pr view`-mergeable branch). `RESCANNABLE_VERDICTS`
+already includes `pass_no_commit` for one narrow case (fix-plan jobs, exempted 2026-07-12) but
+not the general case. See `session-manager-operations/feedback/processed/` for the tracked
+follow-up on softening this classification for merge-style PRDs with a checkable postcondition.

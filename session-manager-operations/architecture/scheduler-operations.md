@@ -7,7 +7,7 @@ drives a dispatch, what each recovery rung does and when, and a symptom → caus
 for "the scheduler looks stuck."
 
 **Scope.** This doc does NOT restate: the PRD frontmatter/authoring contract (see
-[`PRD_AUTHORING.md`](file:///home/bilko/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md)),
+[`PRD_AUTHORING.md`](../../src/main/templates/PRD_AUTHORING.md)),
 the on-disk storage layout (see [`scheduler/README.md`](../scheduler/README.md)), or the
 completion-handler-desync runbook for a `queue.json` row stuck `"running"` after a clean exit
 (see [`scheduler-ops-standards.md`](scheduler-ops-standards.md) — a different, narrower incident

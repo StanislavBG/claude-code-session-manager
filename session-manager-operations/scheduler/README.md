@@ -32,7 +32,7 @@ into the flat directory — mint or join an Epic first (`scripts/mint-epic.cjs`,
 A PRD source file's required frontmatter, section structure, and authoring rules (parallel
 groups, the finish protocol, acceptance-criteria phrasing, the "no interactive AC" rule) are
 governed by `PRD_AUTHORING.md` — read
-[`~/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md`](file:///home/bilko/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md)
+[`src/main/templates/PRD_AUTHORING.md`](../../src/main/templates/PRD_AUTHORING.md)
 before authoring a new PRD by hand. This README does not duplicate that contract.
 
 A PRD's `agentType` frontmatter field (who executes it — a persona name, default `dev-lead`)

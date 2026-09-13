@@ -106,7 +106,7 @@ Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/
   Hand-writing is a degraded last resort (app not running); report it visibly.
 - Flat `scheduler/prds/` is **RETIRED** — auto-consolidated into `prds-archived/` on every `reconcile()` pass.
 - Before writing a PRD, read
-  [`PRD_AUTHORING.md`](file:///home/bilko/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md) —
+  [`PRD_AUTHORING.md`](src/main/templates/PRD_AUTHORING.md) —
   rules from two real stuck-job incidents + a pre-queue checklist (§10).
 - **Guard hooks adopt by REFERENCE via a stable shim** (`guardShims.cjs`,
   `~/.claude/session-manager/hooks/guard-*.cjs`) — readiness banner installs all three.

@@ -45,3 +45,14 @@ Before writing a new PRD for `<cwd>/session-manager-operations/scheduler/epics/<
 - Adding a new LeftNav tab for a live/observability feature before checking whether an existing surface (Terminal, Scheduler) already owns that data. Treat each nav destination as an independent "micro-service" — before adding one, check if an existing item already owns the data/job and extend it (a sub-tab) instead of shipping a parallel UI. When two surfaces read the same underlying state, consolidate rather than duplicate. The nav has been pruned once already (2026-06-03: Scheduler/Plans/Background-Agents merged into one Scheduler destination) after growing to ~31 destinations with real overlap.
 
 - Treating a transcript's recorded `cwd` as a project root without normalizing it first. Claude Code rewrites `cwd` on every subsequent transcript row once an agent `cd`s somewhere, and `activeSessions.cjs` reads the **last** such row — so an agent that steps into a PRD folder makes that folder look like a project. Every consumer then joins the ops subpath onto it and a whole second ops root is materialized underneath the first: `<project>/session-manager-operations/scheduler/epics/<id>/prds/session-manager-operations/scheduler/state/queue.json`, holding `{"jobs": []}`. Reported from starry-night-ships 2026-08-30 — 15 stubs there, 5 here, 17 more across four sibling projects, mtimes spanning 8 days. This is the *second* form of the ops-root hazard: the 2026-08-13 guard only required the cwd be absolute and exist, and these are both. `activeSessions.projectRootOf` now truncates at the first `session-manager-operations` segment (normalize, don't drop — the ancestor really is the project), and `queueStore.projectStateDir` fails closed on an ops-internal cwd for every other caller; loops over many cwds log-and-skip via `queuePathOrSkip` so one bad row can't abort every other project's read or write. Coverage: `opsRootAbsoluteCwd.test.cjs` + `opsRootNestedWrite.test.cjs`. Existing litter: `node scripts/cleanup-nested-queue-stubs.cjs <projectCwd> --apply`.
+
+## Distribution
+
+> Moved from `CLAUDE.md` on 2026-09-12 to make room for the `project-partition.md` table row.
+
+Published as `claude-code-session-manager` on npm (`npx claude-code-session-manager@latest`).
+`bin/cli.cjs` spawns the bundled Electron binary; `postinstall` runs `electron-rebuild` for
+`node-pty`. Linux+darwin only.
+
+**Simple mode**: `--simple` boots a chrome-free single-terminal cockpit (`app:launch-mode` IPC →
+`SimpleShell.tsx`, `DEFAULT_PRESETS[0]`; no persisted-tab hydration).

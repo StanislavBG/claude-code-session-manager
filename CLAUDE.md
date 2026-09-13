@@ -21,6 +21,7 @@ before changing anything in that area.** Reference docs, all under `session-mana
 | [`bilko-run-marketing.md`](session-manager-operations/architecture/bilko-run-marketing.md) | Product page, Stripe checkout, npm listing (sibling repo `~/Projects/Bilko/`) |
 | [`build-target.md`](session-manager-operations/architecture/build-target.md) | Build/publish target resolution |
 | [`ops-maintenance-protocol.md`](session-manager-operations/architecture/ops-maintenance-protocol.md) | Ops-folder drift sweeps |
+| [`project-partition.md`](session-manager-operations/architecture/project-partition.md) | Repo's 4 partitions (harness/web/agent-layer/ops-state), path-by-path |
 
 ## Stack
 
@@ -148,8 +149,5 @@ Each of these is a real incident, with the post-mortem in
 
 ## Distribution
 
-Published as `claude-code-session-manager` on npm (`npx claude-code-session-manager@latest`). `bin/cli.cjs`
-spawns the bundled Electron binary; `postinstall` runs `electron-rebuild` for `node-pty`. Linux+darwin only.
-
-**Simple mode**: `--simple` boots a chrome-free single-terminal cockpit (`app:launch-mode` IPC →
-`SimpleShell.tsx`, `DEFAULT_PRESETS[0]`; no persisted-tab hydration).
+Published as `claude-code-session-manager` on npm. Detail (postinstall, platforms, Simple mode):
+[`conventions.md`](session-manager-operations/architecture/conventions.md#distribution).

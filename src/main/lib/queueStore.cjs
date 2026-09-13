@@ -33,7 +33,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { allProjectCwds, activeProjectCwds } = require('../../../scripts/lib/activeSessions.cjs');
+const { allProjectCwds, activeProjectCwds, bustProjectCwdCache } = require('../../../scripts/lib/activeSessions.cjs');
 const { assertOpsWrite, resolveOpsRoot, OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 const { ScheduleJobSchema } = require('./scheduleJobSchema.cjs');
 
@@ -211,6 +211,11 @@ function stateCwds(opts) {
 
 function bustCwdCache() {
   cwdCache = { at: 0, cwds: [] };
+  // Without this chain, activeSessions' own scan cache hands stateCwds a
+  // stale list even after this bust — turning a caller's "I just wrote a
+  // brand-new project's first state file, make it visible now" into a
+  // no-op until activeSessions' independent TTL expires.
+  bustProjectCwdCache();
 }
 
 // ---------- merged read ----------

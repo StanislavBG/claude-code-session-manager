@@ -41,6 +41,27 @@ const TAIL_BYTES = 64 * 1024;
 // Safety cap on distinct cwds to bound result set size. O(1) extra space.
 const MAX_CWDS = 50;
 
+// activeProjectCwds' scan is a readdirSync of every dir under ~/.claude
+// /projects (2209 dirs / 8.8 GB observed) plus a statSync per transcript —
+// ~270 ms warm. reconcile() calls into it (directly or via allProjectCwds)
+// several times per pass, so cache the resolved cwd list keyed on the
+// resolved argument TUPLE (projectsDir, maxAgeMin, maxCwds) — never on
+// `!opts`, since allProjectCwds always constructs an options object and that
+// guard would cache nothing on the hottest path.
+//
+// Invalidation: projectsDir's own mtime (bumps when a project DIRECTORY is
+// added/removed — NOT when an existing transcript gains a line, which is
+// fine: a project already in the list stays in the list) plus a short TTL
+// as the backstop for everything else. Same mtime-keyed idiom as
+// scheduler/prdParser.cjs's dirCache and queueHistory.cjs's historyCacheKey.
+const CACHE_TTL_MS = 30_000;
+const cwdScanCache = new Map(); // key -> { dirMtimeMs, cachedAt, result }
+
+/** Forces the next activeProjectCwds/allProjectCwds call to rescan. */
+function bustProjectCwdCache() {
+  cwdScanCache.clear();
+}
+
 // The ops-root folder name. A transcript's `cwd` can point INSIDE it whenever
 // an agent `cd`s into an artifact directory (a PRD folder, prompt-sessions,
 // scheduler/state) — Claude Code records the new absolute cwd on every
@@ -190,6 +211,23 @@ function activeProjectCwds(maxAgeMin = 90, {
   maxCwds = MAX_CWDS,
   tmpDropRoots = TMP_DROP_ROOTS,
 } = {}) {
+  const cacheKey = [projectsDir, maxAgeMin, maxCwds].join('|');
+  let dirMtimeMs;
+  try {
+    dirMtimeMs = fs.statSync(projectsDir).mtimeMs;
+  } catch {
+    // Missing/unreadable dir: nothing to scan, and any prior cache entry for
+    // this key must not survive to be handed back once the dir later
+    // appears — drop it rather than caching this empty result.
+    cwdScanCache.delete(cacheKey);
+    return [];
+  }
+  const cached = cwdScanCache.get(cacheKey);
+  const now0 = Date.now();
+  if (cached && cached.dirMtimeMs === dirMtimeMs && now0 - cached.cachedAt < CACHE_TTL_MS) {
+    return cached.result;
+  }
+
   // maxAgeMin === Infinity means "every project ever seen, no recency filter"
   // (allProjectCwds below). Date.now() - Infinity is -Infinity, which every
   // mtime clears — spelled out here because it reads like an accident.
@@ -231,7 +269,7 @@ function activeProjectCwds(maxAgeMin = 90, {
 
   // Scan ~/.claude/projects/*/  transcript *.jsonl files.
   let slugs;
-  try { slugs = fs.readdirSync(projectsDir); } catch { return result; }
+  try { slugs = fs.readdirSync(projectsDir); } catch { cwdScanCache.delete(cacheKey); return result; }
 
   for (const slug of slugs) {
     if (result.length >= maxCwds) break;
@@ -266,6 +304,7 @@ function activeProjectCwds(maxAgeMin = 90, {
     }
   }
 
+  cwdScanCache.set(cacheKey, { dirMtimeMs, cachedAt: now0, result });
   return result;
 }
 
@@ -288,4 +327,10 @@ function allProjectCwds(opts = {}) {
   return activeProjectCwds(Infinity, { maxCwds: 500, ...opts });
 }
 
-module.exports = { activeProjectCwds, allProjectCwds, projectRootOf, worktreeMainRootOf };
+module.exports = {
+  activeProjectCwds,
+  allProjectCwds,
+  projectRootOf,
+  worktreeMainRootOf,
+  bustProjectCwdCache,
+};

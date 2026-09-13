@@ -7,12 +7,17 @@
 
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { resolvePrdWriteDir, resolvePrdsDirs } = require('../lib/prdLocations.cjs');
+const {
+  resolvePrdWriteDir,
+  resolvePrdsDirs,
+  resolveEpicPrdWriteDir,
+  listEpicPrdDirs,
+} = require('../lib/prdLocations.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -94,4 +99,97 @@ test('resolvePrdsDirs maps each active project cwd to its own PRDs dir', async (
 test('resolvePrdsDirs returns [] when no project has a recent transcript', () => {
   const dirs = resolvePrdsDirs(90, { projectsDir: '/nonexistent-projects-dir' });
   expect(dirs).toEqual([]);
+});
+
+test('listEpicPrdDirs memoizes on the Epics-root mtime: no readdir on a repeat call, but a freshly minted Epic prds dir is picked up on the very next call', async () => {
+  const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-memo-cwd-'));
+  tmpDirs.push(cwd);
+  fs.mkdirSync(resolveEpicPrdWriteDir(cwd, 'epic-1'), { recursive: true });
+
+  const first = listEpicPrdDirs(cwd);
+  expect(first).toEqual([resolveEpicPrdWriteDir(cwd, 'epic-1')]);
+
+  const readdirSpy = vi.spyOn(fs, 'readdirSync');
+  try {
+    // Nothing under the Epics root changed — the cached result comes back
+    // without a fresh readdir of the Epics root.
+    const second = listEpicPrdDirs(cwd);
+    expect(second).toEqual(first);
+    expect(readdirSpy).not.toHaveBeenCalled();
+  } finally {
+    readdirSpy.mockRestore();
+  }
+
+  // A brand-new Epic's prds/ dir is a NEW entry under the Epics root, which
+  // bumps the root's own mtime — no TTL wait required to see it.
+  fs.mkdirSync(resolveEpicPrdWriteDir(cwd, 'epic-2'), { recursive: true });
+  const third = listEpicPrdDirs(cwd);
+  expect(third).toEqual(
+    expect.arrayContaining([resolveEpicPrdWriteDir(cwd, 'epic-1'), resolveEpicPrdWriteDir(cwd, 'epic-2')]),
+  );
+});
+
+test('listEpicPrdDirs: an unreadable Epics root does not write a poisoned entry that survives the dir becoming readable', async () => {
+  const cwd = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-unreadable-cwd-'));
+  tmpDirs.push(cwd);
+
+  // No Epics root at all yet.
+  expect(listEpicPrdDirs(cwd)).toEqual([]);
+
+  // The root now exists, with a real Epic prds dir inside it.
+  fs.mkdirSync(resolveEpicPrdWriteDir(cwd, 'epic-1'), { recursive: true });
+  expect(listEpicPrdDirs(cwd)).toEqual([resolveEpicPrdWriteDir(cwd, 'epic-1')]);
+});
+
+test('resolvePrdsDirs EDGE (non-negotiable): a new epics/<id>/prds dir created after a prior call is visible on the VERY NEXT call, no TTL wait', async () => {
+  const projectsDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-freshness-projects-'));
+  tmpDirs.push(projectsDir);
+  const projectCwd = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-freshness-cwd-'));
+  tmpDirs.push(projectCwd);
+
+  const projDir = path.join(projectsDir, 'freshness-project');
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.writeFileSync(path.join(projDir, 'session1.jsonl'), `${JSON.stringify({ cwd: projectCwd })}\n`);
+
+  const before = resolvePrdsDirs(90, { projectsDir });
+  const newEpicPrdDir = resolveEpicPrdWriteDir(projectCwd, 'freshly-minted-epic');
+  expect(before).not.toContain(newEpicPrdDir);
+
+  fs.mkdirSync(newEpicPrdDir, { recursive: true });
+
+  const after = resolvePrdsDirs(90, { projectsDir });
+  expect(after).toContain(newEpicPrdDir);
+});
+
+test('resolvePrdsDirs: calls with an explicit { projectsDir } opts are keyed separately per projectsDir and never share a stale cache entry', async () => {
+  const projectsDirA = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-keyed-a-'));
+  tmpDirs.push(projectsDirA);
+  const projectsDirB = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-keyed-b-'));
+  tmpDirs.push(projectsDirB);
+  const cwdA = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-keyed-cwd-a-'));
+  tmpDirs.push(cwdA);
+  const cwdB = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-keyed-cwd-b-'));
+  tmpDirs.push(cwdB);
+
+  const projDirA = path.join(projectsDirA, 'proj-a');
+  fs.mkdirSync(projDirA, { recursive: true });
+  fs.writeFileSync(path.join(projDirA, 'session1.jsonl'), `${JSON.stringify({ cwd: cwdA })}\n`);
+  fs.mkdirSync(resolvePrdWriteDir(cwdA), { recursive: true });
+
+  const projDirB = path.join(projectsDirB, 'proj-b');
+  fs.mkdirSync(projDirB, { recursive: true });
+  fs.writeFileSync(path.join(projDirB, 'session1.jsonl'), `${JSON.stringify({ cwd: cwdB })}\n`);
+  fs.mkdirSync(resolvePrdWriteDir(cwdB), { recursive: true });
+
+  const dirsA = resolvePrdsDirs(90, { projectsDir: projectsDirA });
+  const dirsB = resolvePrdsDirs(90, { projectsDir: projectsDirB });
+
+  expect(dirsA).toContain(resolvePrdWriteDir(cwdA));
+  expect(dirsA).not.toContain(resolvePrdWriteDir(cwdB));
+  expect(dirsB).toContain(resolvePrdWriteDir(cwdB));
+  expect(dirsB).not.toContain(resolvePrdWriteDir(cwdA));
+
+  // Re-querying A after B was resolved must still reflect A's own state, not
+  // B's — proof the two opts objects never shared one cache key.
+  expect(resolvePrdsDirs(90, { projectsDir: projectsDirA })).toEqual(dirsA);
 });

@@ -12,6 +12,16 @@
  * live. Active-project discovery reuses activeSessions.cjs's
  * activeProjectCwds (the same discovery watchdogHelpers.cjs's sweep() uses)
  * rather than re-implementing transcript scanning here.
+ *
+ * CACHING NOTE (PRD adding mtime-keyed memoization to this module): what's
+ * cached here is only WHICH DIRECTORIES EXIST, never their CONTENTS. A new
+ * PRD .md file dropped into an already-known `prds/` dir does not change
+ * that dir's own existence, so it needs no cache invalidation here at all —
+ * `schedule:rescan` (scheduler.cjs's `ipcMain.handle('schedule:rescan', …)`)
+ * still reports it because the actual file-listing happens one layer down,
+ * in scheduler/prdParser.cjs's `listPrdFiles(dir)`, which has its OWN
+ * separate mtime cache keyed on that specific dir's mtime (bumped by the new
+ * file) and is unaffected by anything cached in this module.
  */
 'use strict';
 
@@ -53,18 +63,49 @@ function resolveEpicPrdWriteDir(cwd, epicId) {
   return path.join(resolveEpicsRoot(cwd), epicId, 'prds');
 }
 
+// listEpicPrdDirs' readdir-the-Epics-root-plus-existsSync-per-subdir walk is
+// the expensive half of prdLocations' per-reconcile()-pass cost (159/166
+// dirs, ~430ms/~400ms measured). A new Epic's prds/ dir is always created in
+// the SAME recursive mkdirSync call that creates `epics/<newId>/` itself
+// (epicMint.cjs's ensureEpic, both the mint branch and the join branch's
+// belt-and-suspenders mkdirSync) — so a brand-new `epics/<id>/prds` dir
+// first coming into existence always bumps the Epics root's OWN mtime (a
+// new directory entry under it), never just an existing subdir's mtime.
+// Cache keyed on that mtime, same dir-mtime idiom as
+// scheduler/prdParser.cjs's dirCache — no TTL, so the very next call after a
+// mint sees the new dir with no wait.
+const epicPrdDirsCache = new Map(); // epicsRootPath -> { mtimeMs, result }
+
 /** Enumerate every existing `epics/<id>/prds` dir under one project cwd. */
 function listEpicPrdDirs(cwd) {
   let root;
   try { root = resolveEpicsRoot(cwd); } catch { return []; }
+  let mtimeMs;
+  try {
+    mtimeMs = fs.statSync(root).mtimeMs;
+  } catch {
+    // Missing/unreadable root: nothing to scan, and any prior cache entry
+    // must not survive to be handed back once the dir later appears.
+    epicPrdDirsCache.delete(root);
+    return [];
+  }
+  const cached = epicPrdDirsCache.get(root);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.result;
+
   let entries;
-  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return []; }
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    epicPrdDirsCache.delete(root);
+    return [];
+  }
   const dirs = [];
   for (const ent of entries) {
     if (!ent.isDirectory()) continue;
     const prdDir = path.join(root, ent.name, 'prds');
     if (fs.existsSync(prdDir)) dirs.push(prdDir);
   }
+  epicPrdDirsCache.set(root, { mtimeMs, result: dirs });
   return dirs;
 }
 
@@ -101,6 +142,54 @@ function resolvePrdWriteDir(cwd) {
   return opsPath(cwd, ...PRD_SUBPATH);
 }
 
+// resolvePrdsDirs/resolveArchivedPrdsDirs each redo a fs.existsSync(dir) +
+// listEpicPrdDirs(cwd) walk across EVERY project on every call, and
+// reconcile() calls each of them once per pass. Cache the assembled result
+// keyed on the caller's own (maxAgeMin, opts) tuple — a call with an
+// explicit `{ projectsDir }` opts object is a DIFFERENT key from the
+// no-opts default, so the two never read or write each other's entry — PLUS
+// a freshness key built from every visited project's Epics-root mtimeMs,
+// same composite-mtime-key idiom as queueHistory.cjs's historyCacheKey. The
+// freshness key is cheap to rebuild every call (one statSync per project,
+// far cheaper than the readdir+existsSync-per-Epic walk it guards), so a
+// cache hit still costs O(projects) stats but skips the expensive walk
+// entirely — "one filesystem walk" per reconcile() pass, not the full
+// listEpicPrdDirs cost N times over.
+const assembledPrdsDirsCache = new Map(); // callerKey -> { freshnessKey, result }
+const assembledArchivedPrdsDirsCache = new Map();
+
+function callerOptsKey(maxAgeMin, opts) {
+  return `${maxAgeMin}::${opts ? JSON.stringify(opts) : ''}`;
+}
+
+// mtimeMs of each visited project's Epics root, joined into one string. Any
+// project whose root doesn't exist/isn't readable contributes a stable
+// sentinel so the key still changes the moment that root is created.
+function epicsRootsFreshnessKey(cwds) {
+  return cwds
+    .map((cwd) => {
+      let root;
+      try { root = resolveEpicsRoot(cwd); } catch { return `${cwd}:noroot`; }
+      try { return `${root}:${fs.statSync(root).mtimeMs}`; } catch { return `${root}:-1`; }
+    })
+    .join('|');
+}
+
+function memoizedAssembledDirs(cache, maxAgeMin, opts, compute) {
+  const callerKey = callerOptsKey(maxAgeMin, opts);
+  const allCwds = allProjectCwds(opts);
+  const activeCwds = activeProjectCwds(maxAgeMin, opts);
+  const cwdUnion = [...new Set([...allCwds, ...activeCwds])];
+  const freshnessKey = `${allCwds.join(',')}#${activeCwds.join(',')}#${epicsRootsFreshnessKey(cwdUnion)}`;
+
+  const cached = cache.get(callerKey);
+  if (cached && cached.freshnessKey === freshnessKey) return cached.result;
+
+  const result = compute(allCwds, activeCwds);
+  cache.set(callerKey, { freshnessKey, result });
+  return result;
+}
+
 /**
  * resolvePrdsDirs(maxAgeMin?, opts?) → string[]
  *
@@ -122,34 +211,36 @@ function resolvePrdWriteDir(cwd) {
  * underlying scan (e.g. `projectsDir` override for tests).
  */
 function resolvePrdsDirs(maxAgeMin, opts) {
-  const dirs = [];
-  const seen = new Set();
-  const add = (dir) => {
-    if (seen.has(dir)) return;
-    seen.add(dir);
-    dirs.push(dir);
-  };
+  return memoizedAssembledDirs(assembledPrdsDirsCache, maxAgeMin, opts, (allCwds, activeCwds) => {
+    const dirs = [];
+    const seen = new Set();
+    const add = (dir) => {
+      if (seen.has(dir)) return;
+      seen.add(dir);
+      dirs.push(dir);
+    };
 
-  // Every historical project that has a PRD dir on disk — the set that
-  // matters for discovery, regardless of when it was last touched.
-  for (const cwd of allProjectCwds(opts)) {
-    let dir;
-    try { dir = resolvePrdWriteDir(cwd); } catch { continue; }
-    if (fs.existsSync(dir)) add(dir);
-    // Epic-scoped dirs (the write layout for all new PRDs) are first-class
-    // scan sources alongside the legacy flat dir.
-    for (const epicDir of listEpicPrdDirs(cwd)) add(epicDir);
-  }
+    // Every historical project that has a PRD dir on disk — the set that
+    // matters for discovery, regardless of when it was last touched.
+    for (const cwd of allCwds) {
+      let dir;
+      try { dir = resolvePrdWriteDir(cwd); } catch { continue; }
+      if (fs.existsSync(dir)) add(dir);
+      // Epic-scoped dirs (the write layout for all new PRDs) are first-class
+      // scan sources alongside the legacy flat dir.
+      for (const epicDir of listEpicPrdDirs(cwd)) add(epicDir);
+    }
 
-  // Active projects are added unconditionally: a brand-new project has no
-  // prds/ dir yet, and callers that resolve a write destination must still
-  // find it. Scans over a non-existent dir are a harmless ENOENT no-op.
-  for (const cwd of activeProjectCwds(maxAgeMin, opts)) {
-    try { add(resolvePrdWriteDir(cwd)); } catch { /* unusable cwd */ }
-    for (const epicDir of listEpicPrdDirs(cwd)) add(epicDir);
-  }
+    // Active projects are added unconditionally: a brand-new project has no
+    // prds/ dir yet, and callers that resolve a write destination must still
+    // find it. Scans over a non-existent dir are a harmless ENOENT no-op.
+    for (const cwd of activeCwds) {
+      try { add(resolvePrdWriteDir(cwd)); } catch { /* unusable cwd */ }
+      for (const epicDir of listEpicPrdDirs(cwd)) add(epicDir);
+    }
 
-  return dirs;
+    return dirs;
+  });
 }
 
 /**
@@ -163,26 +254,28 @@ function resolvePrdsDirs(maxAgeMin, opts) {
  * history, not something list-prds should stop counting.
  */
 function resolveArchivedPrdsDirs(maxAgeMin, opts) {
-  const dirs = [];
-  const seen = new Set();
-  const add = (dir) => {
-    if (seen.has(dir)) return;
-    seen.add(dir);
-    dirs.push(dir);
-  };
+  return memoizedAssembledDirs(assembledArchivedPrdsDirsCache, maxAgeMin, opts, (allCwds, activeCwds) => {
+    const dirs = [];
+    const seen = new Set();
+    const add = (dir) => {
+      if (seen.has(dir)) return;
+      seen.add(dir);
+      dirs.push(dir);
+    };
 
-  for (const cwd of allProjectCwds(opts)) {
-    for (const dir of listArchivedPrdDirs(cwd)) {
-      if (fs.existsSync(dir)) add(dir);
+    for (const cwd of allCwds) {
+      for (const dir of listArchivedPrdDirs(cwd)) {
+        if (fs.existsSync(dir)) add(dir);
+      }
     }
-  }
-  for (const cwd of activeProjectCwds(maxAgeMin, opts)) {
-    for (const dir of listArchivedPrdDirs(cwd)) {
-      if (fs.existsSync(dir)) add(dir);
+    for (const cwd of activeCwds) {
+      for (const dir of listArchivedPrdDirs(cwd)) {
+        if (fs.existsSync(dir)) add(dir);
+      }
     }
-  }
 
-  return dirs;
+    return dirs;
+  });
 }
 
 /**

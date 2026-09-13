@@ -2992,20 +2992,33 @@ function buildScheduleStatePayload(state, { withPaths = false } = {}) {
 // per mutation. Callers where latency matters (pause/resume, job
 // start/finish/reap/reset) pass `{ flush: true }` to bypass the window and
 // send immediately.
+// getPayload is the coalescer's ONLY entry point back into queue state, so
+// routing the reconcile+write pair through it (rather than broadcast() doing
+// its own bare readQueue/reconcile/writeQueue) is what makes a burst of
+// broadcast() calls cost exactly one reconcile + one write per coalesce
+// window. It goes through mutate() (not a bare read/write pair) so it
+// serializes against every other concurrent mutation and inherits mutate's
+// pre-fn `state.unreadable` bail — never write a state derived from a failed
+// read. `module.exports.reconcile` (not the bare local binding) is the seam
+// tests spy on, matching this file's existing testable-seam convention (see
+// module.exports.stashList/evaluateSharedTreeGuard/committedInWindow above).
 const broadcastCoalescer = createBroadcastCoalescer({
   delayMs: BROADCAST_COALESCE_MS,
   send: (payload) => {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     sendIfAlive(mainWindow, 'schedule:state', payload);
   },
-  getPayload: async () => buildScheduleStatePayload(await readQueue()),
+  getPayload: () => mutate(async (state) => {
+    await module.exports.reconcile(state);
+    return buildScheduleStatePayload(state);
+  }),
 });
 
+// Reconcile is unconditional — even with no window attached (a
+// scheduler-passive or headless instance), discovery must still run so
+// on-disk PRDs get onboarded. Only the actual IPC push is window-gated,
+// inside the coalescer's own `send`.
 async function broadcast(opts = {}) {
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  const state = await readQueue();
-  await reconcile(state);
-  await writeQueue(state);
   if (opts.flush) {
     await broadcastCoalescer.flush();
   } else {
@@ -11026,6 +11039,7 @@ module.exports = {
   healRefusalReason,
   writeQueue,
   reconcile,
+  broadcast,
   reconcileSourcePromptId,
   allocateParallelGroup,
   selectHistoryJobs,

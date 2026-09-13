@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 
-export type RawModel = 'opus' | 'sonnet' | 'haiku'
+export type RawModel = 'opus' | 'sonnet' | 'haiku' | 'fable'
 
-export const RAW_MODELS: RawModel[] = ['opus', 'sonnet', 'haiku']
+export const RAW_MODELS: RawModel[] = ['opus', 'sonnet', 'haiku', 'fable']
 
 const STORAGE_KEY = 'sm.rawSessionModel'
 const DEFAULT: RawModel = 'opus'

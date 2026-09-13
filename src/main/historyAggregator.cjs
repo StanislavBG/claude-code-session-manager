@@ -21,10 +21,14 @@ const CACHE_MAX = 50_000;
 // tokens are priced far below input because they're served from
 // Anthropic's prompt cache, not re-processed — this is what makes the
 // cache-savings figure in the dashboard real money, not a vanity stat.
+// fable: Claude Fable 5.1 (claude-fable-5-1) — $10/$50 per MTok input/output,
+// cache reads at $0.25/MTok (the `claude-api` skill's model reference and its
+// Claude Fable 5.1 migration notes, both cached 2026-06-24).
 const MODEL_PRICING = {
   opus:   { i: 15,  o: 75, c: 1.5 },
   sonnet: { i: 3,   o: 15, c: 0.3 },
   haiku:  { i: 0.8, o: 4,  c: 0.08 },
+  fable:  { i: 10,  o: 50, c: 0.25 },
 };
 const DEFAULT_PRICING_KEY = 'sonnet'; // fallback for unrecognized model ids
 
@@ -40,6 +44,7 @@ function resolvePricingKey(modelId) {
   if (id.includes('opus')) return { key: 'opus', estimated: false };
   if (id.includes('sonnet')) return { key: 'sonnet', estimated: false };
   if (id.includes('haiku')) return { key: 'haiku', estimated: false };
+  if (id.includes('fable')) return { key: 'fable', estimated: false };
   return { key: DEFAULT_PRICING_KEY, estimated: true };
 }
 

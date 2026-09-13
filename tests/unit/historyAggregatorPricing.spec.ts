@@ -9,8 +9,8 @@ const { remote, MODEL_PRICING, scanAggrLines, parseJSONL, resolvePricingKey } =
   require('../../src/main/historyAggregator.cjs')
 
 describe('MODEL_PRICING', () => {
-  it('has opus/sonnet/haiku buckets with input/output/cache-read rates', () => {
-    for (const key of ['opus', 'sonnet', 'haiku']) {
+  it('has opus/sonnet/haiku/fable buckets with input/output/cache-read rates', () => {
+    for (const key of ['opus', 'sonnet', 'haiku', 'fable']) {
       expect(MODEL_PRICING[key]).toBeTruthy()
       expect(typeof MODEL_PRICING[key].i).toBe('number')
       expect(typeof MODEL_PRICING[key].o).toBe('number')
@@ -19,17 +19,18 @@ describe('MODEL_PRICING', () => {
   })
 
   it('prices cache-read tokens far below input tokens (the cache-savings premise)', () => {
-    for (const key of ['opus', 'sonnet', 'haiku']) {
+    for (const key of ['opus', 'sonnet', 'haiku', 'fable']) {
       expect(MODEL_PRICING[key].c).toBeLessThan(MODEL_PRICING[key].i)
     }
   })
 })
 
 describe('resolvePricingKey', () => {
-  it('matches opus/sonnet/haiku by case-insensitive substring', () => {
+  it('matches opus/sonnet/haiku/fable by case-insensitive substring', () => {
     expect(resolvePricingKey('claude-opus-4-8-20260115')).toEqual({ key: 'opus', estimated: false })
     expect(resolvePricingKey('claude-sonnet-5')).toEqual({ key: 'sonnet', estimated: false })
     expect(resolvePricingKey('claude-HAIKU-4-5-20251001')).toEqual({ key: 'haiku', estimated: false })
+    expect(resolvePricingKey('claude-fable-5-1')).toEqual({ key: 'fable', estimated: false })
   })
 
   it('falls back to sonnet, flagged as estimated, for unrecognized ids', () => {

@@ -38,6 +38,21 @@ const PERSONAS: AgentPersona[] = [
   },
 ]
 
+// Pinned to a concrete model id outside AgentLibrary's fixed MODELS tuple —
+// the Choice control must still render this as selected (never blank, never
+// silently overwritten on first click).
+const PINNED_MODEL_PERSONA: AgentPersona = {
+  name: 'pinned-model-agent',
+  description: 'Pinned to a concrete model id outside the standard list.',
+  tools: [],
+  model: 'claude-opus-5',
+  color: null,
+  tags: [], projects: [], action: null, actionLabel: null,
+  path: '/home/bilko/.claude/agents/pinned-model-agent.md',
+  body: 'You are pinned to a concrete model.',
+  overridingProjects: [],
+}
+
 function installWindowApiMock(personas: AgentPersona[] = PERSONAS) {
   const changedHandlers: Array<() => void> = []
   const api = {
@@ -171,5 +186,34 @@ describe('AgentLibrary', () => {
       await Promise.resolve()
     })
     expect(api.agents.deletePersona).toHaveBeenCalledWith({ name: 'debugger' })
+  })
+
+  it('renders an out-of-list model as a selected, marked chip and keeps it selected across a re-render', async () => {
+    installWindowApiMock([PINNED_MODEL_PERSONA, ...PERSONAS])
+    const el = await mount()
+
+    const row = el.querySelector('[data-agent-row="pinned-model-agent"]')!
+    await act(async () => {
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    const findPinnedChip = () =>
+      Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'claude-opus-5 (current)')
+
+    expect(findPinnedChip()).toBeTruthy()
+
+    // Force a re-render (toggling a tool checkbox) and confirm the pinned
+    // model chip is still shown as selected — the first click on it must
+    // never have silently swapped the draft to one of the fixed options.
+    const toolButton = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Read')!
+    await act(async () => {
+      toolButton.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+
+    const pinnedChipAfterRerender = findPinnedChip()
+    expect(pinnedChipAfterRerender).toBeTruthy()
+    expect(pinnedChipAfterRerender!.className).toContain('bg-accent/15')
   })
 })

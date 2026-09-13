@@ -37,7 +37,7 @@ import { ALL_PROJECTS } from '../../lib/projectActions'
  * session creation; it only pre-fills it.
  */
 
-const MODELS = ['inherit', 'haiku', 'sonnet', 'opus'] as const
+const MODELS = ['inherit', 'haiku', 'sonnet', 'opus', 'fable'] as const
 const TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'WebFetch', 'WebSearch', 'Task']
 const COLORS = ['', 'red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink']
 const COLOR_SWATCH: Record<string, string> = {
@@ -623,19 +623,28 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 function Choice({ options, value, onChange, mono }: { options: string[]; value: string; onChange: (v: string) => void; mono?: boolean }) {
+  // A persona's on-disk `model:` isn't validated against this fixed option
+  // list (agentPersonaSchema.cjs's write side just takes a bounded string) —
+  // an out-of-list value must still render as selected and survive a
+  // re-render, or the first click here would silently overwrite it.
+  const outOfList = value && !options.includes(value)
+  const shown = outOfList ? [...options, value] : options
   return (
     <div className="flex flex-wrap gap-1">
-      {options.map((o) => {
+      {shown.map((o) => {
         const on = o === value
+        const isCurrentOnDisk = outOfList && o === value
         return (
           <button
             key={o}
             onClick={() => onChange(o)}
+            title={isCurrentOnDisk ? `${o} — current on-disk value, not in the standard list` : undefined}
             className={`px-2.5 py-1 rounded text-xs border ${mono ? 'font-mono' : ''} ${
               on ? 'bg-accent/15 text-accent border-accent/40 font-semibold' : 'bg-bg-hi text-fg-dim border-line'
-            }`}
+            } ${isCurrentOnDisk ? 'border-dashed' : ''}`}
           >
             {o}
+            {isCurrentOnDisk ? ' (current)' : ''}
           </button>
         )
       })}

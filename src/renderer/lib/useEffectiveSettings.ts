@@ -9,16 +9,14 @@ import { parseScopedJson } from './parseScopedJson'
 const SETTINGS_REFRESH_MS = 30_000
 
 /**
- * Returns the merged-scope view of user/project/local settings.json with
- * a 30s self-refresh + chokidar watch on each scope path. Chokidar
- * watchers are refcounted, so it's safe to mount this alongside the
- * Settings tab (which watches the same paths).
+ * Returns the merged-scope view of user/project/local settings.json for an
+ * explicit `cwd`, with a 30s self-refresh + chokidar watch on each scope
+ * path. Chokidar watchers are refcounted, so it's safe to mount this
+ * alongside the Settings tab (which watches the same paths) or any other
+ * consumer keyed off a different cwd.
  */
-export function useEffectiveSettings() {
+export function useEffectiveSettingsFor(cwd: string | null) {
   const home = useHomeDir()
-  const tabs = useSessions((s) => s.tabs)
-  const activeTabId = useSessions((s) => s.activeTabId)
-  const cwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
 
   const scopePaths = useMemo(() => {
     if (!home) return {}
@@ -55,6 +53,14 @@ export function useEffectiveSettings() {
     () => mergeScopes(parseScopedJson(files, scopePaths)),
     [files, scopePaths]
   )
+}
+
+/** `useEffectiveSettingsFor` bound to the currently active tab's cwd. */
+export function useEffectiveSettings() {
+  const tabs = useSessions((s) => s.tabs)
+  const activeTabId = useSessions((s) => s.activeTabId)
+  const cwd = tabs.find((t) => t.id === activeTabId)?.cwd ?? null
+  return useEffectiveSettingsFor(cwd)
 }
 
 /** Read a leaf string from an EffectiveNode at the given path. */

@@ -64,6 +64,7 @@ export default defineConfig({
       'src/main/lib/__tests__/buildTarget.test.cjs',
       'src/main/lib/__tests__/projectBriefCore.test.cjs',
       'src/main/lib/__tests__/delegationReadiness.test.cjs',
+      'src/main/lib/__tests__/effectiveModelInfo.test.cjs',
       'src/main/lib/__tests__/guardShims.test.cjs',
       'src/main/lib/__tests__/opsOwnership.test.cjs',
       'src/main/lib/__tests__/schedulerBatchDepends.test.cjs',

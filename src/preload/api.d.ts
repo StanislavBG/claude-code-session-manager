@@ -1621,6 +1621,21 @@ export interface SessionManagerAPI {
      *  `listPersonas` above, which only reads the global directory. Null when neither
      *  location has the file. */
     getPersonaBody: (payload: { cwd: string; name: string }) => Promise<{ path: string; text: string } | null>;
+    /** "What will this Epic actually run as?" — persona alias, overlay-aware
+     *  provenance, and evidence-based concrete model id (scheduler run log or
+     *  session transcript). Never throws on the main side; a dangling
+     *  agentType or missing evidence degrades individual fields to null. Pair
+     *  with the renderer's `useEffectiveSettings.ts` scope-chain reader for
+     *  the effortLevel/effortSource half — this call only covers the parts
+     *  that need main-process filesystem access. */
+    resolveModelInfo: (payload: { cwd: string; agentType: string }) => Promise<{
+      agentType: string;
+      modelAlias: string | null;
+      modelSource: 'persona' | 'persona-overlay' | 'inherit' | 'fallback';
+      resolvedModelId: string | null;
+      resolvedFrom: 'scheduler-run' | 'transcript' | null;
+      effortReachable: boolean;
+    }>;
     /** The launch-time authority for an Epic-backed session's `--model`: the SAME
      *  resolver (`agentModelResolve.cjs`'s `resolveEpicModel`) chatRunner.cjs's Chat
      *  path calls in-process, reached here so Terminal (`EpicTerminalPane.tsx`, no

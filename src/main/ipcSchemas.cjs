@@ -623,6 +623,12 @@ const agentsGetPersonaBody = z.object({
   name: z.string().min(1).max(200),
 }).strict();
 
+// ──────────────────────────────────────────── Effective model info (PRD: what-will-this-run-as)
+const agentsResolveModelInfo = z.object({
+  cwd: z.string().min(1).max(4096),
+  agentType: z.string().min(1).max(200),
+}).strict();
+
 // ──────────────────────────────────────────── Epic launch model (PRD: unify-epic-model-resolution)
 // Terminal's (EpicTerminalPane.tsx) call into agentModelResolve.cjs's
 // resolveEpicModel — the same launch-model authority chatRunner.cjs's Chat
@@ -1117,6 +1123,7 @@ module.exports = {
     exchangesList,
     agentsSavePersona,
     agentsGetPersonaBody,
+    agentsResolveModelInfo,
     agentsResolveEpicModel,
     delegationReadinessCwd,
     telemetrySetConfig,

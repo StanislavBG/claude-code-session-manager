@@ -38,6 +38,7 @@ const epicWorktreeMerge = require('./lib/epicWorktreeMerge.cjs');
 const epicWorktreeProjectConfig = require('./lib/epicWorktreeProjectConfig.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
+const { resolveEffectiveModelInfo } = require('./lib/effectiveModelInfo.cjs');
 const { checkDelegationReadiness, ensureGuardsInstalled, installPrdWriteGuard, installDestructiveGitGuard, installInlineImplementationGuard } = require('./lib/delegationReadiness.cjs');
 const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
 const { writeGuardShims } = require('./lib/guardShims.cjs');
@@ -531,6 +532,12 @@ ipcMain.handle('agents:get-persona-body', validated(schemas.agentsGetPersonaBody
 // is merely supposed to. Never throws (resolveEpicModel's own contract).
 ipcMain.handle('agents:resolve-epic-model', validated(schemas.agentsResolveEpicModel, (payload) =>
   agentModelResolve.resolveEpicModel(payload)));
+
+// "What will this Epic actually run as?" (PRD: effective-model-resolver) —
+// persona alias + evidence-based concrete model id + provenance, for a given
+// (cwd, agentType). Read-only observer; never affects what a launch resolves.
+ipcMain.handle('agents:resolve-model-info', validated(schemas.agentsResolveModelInfo, (payload) =>
+  resolveEffectiveModelInfo(payload)));
 
 // "Can this project actually delegate?" probe (PRD: delegation-readiness).
 // Structured data over the preconditions for scheduler_create_prd being in an

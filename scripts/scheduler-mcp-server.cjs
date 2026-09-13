@@ -164,11 +164,6 @@ const TOOLS = [
         slug: { type: 'string', description: 'Optional kebab-case slug; derived from title if omitted' },
         parallelGroup: { type: 'number', description: 'DEPRECATED and ignored (PRD 832): numbers are strictly unique per project; use dependsOn for ordering' },
         dependsOn: { type: 'array', items: { type: 'string' }, description: 'Optional: PRD slugs that must complete before this one becomes eligible (replaces the retired shared-NN-parallel convention)' },
-        disposition: {
-          type: 'string',
-          enum: ['append', 'new-head'],
-          description: 'Required when this PRD would land as a new root (no dependsOn given) in an Epic that already has incomplete PRDs: "append" depends this wave on the existing chain\'s current terminal PRD(s); "new-head" leaves it independent, eligible to run in parallel. Omit when the Epic has no incomplete PRDs yet, or when dependsOn already places this PRD explicitly.',
-        },
         sourcePromptId: { type: 'string', description: "Effectively required: an EXISTING, already-human-approved Epic's promptSessionId (the id shown in the Epics list / active-index.json sessions key) to join — NOT a PromptTicket.id (those are distinct fields). The server never mints a new Epic; if this is omitted and no Epic can be resolved (via the SM_CHAT_SESSION_ID fallback below), the write is refused with an error telling the caller to create/approve an Epic first." },
         sourceTabId: { type: 'string', description: 'Optional: tab id (claudeSessionId) this PRD was queued from, so the scheduler can route a completion status prompt back to it' },
         tag: {
@@ -236,8 +231,6 @@ const TOOLS = [
             tag: { type: 'string', enum: PRD_WORK_TYPES },
             agentType: { type: 'string', description: 'WHO executes this PRD (persona name) — patchable after creation too, see scheduler_create_prd' },
             quietMachine: { type: 'boolean', description: 'Optional: the exclusive machine-wide quiet lease flag (see scheduler_create_prd) — patchable after creation too' },
-            dependsOn: { type: 'array', items: { type: 'string' }, description: 'Optional: replaces the dependsOn list; an explicit empty array CLEARS it — see scheduler_create_prd' },
-            disposition: { type: 'string', enum: ['append', 'new-head'], description: 'Optional: patches the recorded wave-authoring decision — see scheduler_create_prd' },
           },
         },
         body: { type: 'string', description: 'Optional: full replacement body (everything after the frontmatter)' },

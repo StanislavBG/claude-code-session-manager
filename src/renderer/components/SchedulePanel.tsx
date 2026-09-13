@@ -516,64 +516,32 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
             {(() => {
               const visibleSlugSet = new Set(inline.map((j) => j.slug))
               let runningIdx = 0
-              // Each Epic section can contain MULTIPLE independent heads
-              // (section.nodes' top-level roots) — a plan that got a
-              // 'new-head' disposition instead of extending the prior chain.
-              // Rendered as one continuous list before this PRD, with no
-              // boundary between them, a human couldn't tell a two-head Epic
-              // from one long chain. Iterating heads individually (instead of
-              // flattening the whole section at once) makes that boundary
-              // visible and gives each head's rows the sibling heads' current
-              // terminal PRDs to offer as "attach behind" targets.
               const sectionBlocks = backlogSections
                 .map((section) => {
-                  const headChoices = section.nodes.map((headNode) => ({
-                    rootSlug: headNode.row.slug,
-                    label: headNode.row.title || headNode.row.slug,
-                    terminals: headTerminalSlugs(headNode),
-                  }))
-                  const heads = section.nodes
-                    .map((headNode) => {
-                      const rows = flattenBacklogNodes([headNode])
-                        .filter((n) => visibleSlugSet.has(n.row.slug))
-                        .map((node) => ({ node, listIndex: runningIdx++ }))
-                      return { headRootSlug: headNode.row.slug, rows }
-                    })
-                    .filter((h) => h.rows.length > 0)
-                  return { section, heads, headChoices }
+                  const rows = flattenBacklogNodes(section.nodes)
+                    .filter((n) => visibleSlugSet.has(n.row.slug))
+                    .map((node) => ({ node, listIndex: runningIdx++ }))
+                  return { section, rows }
                 })
-                .filter((b) => b.heads.length > 0)
-              return sectionBlocks.map(({ section, heads, headChoices }) => (
+                .filter((b) => b.rows.length > 0)
+              return sectionBlocks.map(({ section, rows }) => (
                 <EpicSectionBlock key={section.epicId ?? '__none__'} section={section}>
-                  {heads.map(({ headRootSlug, rows }, headIdx) => (
-                    <div key={headRootSlug} data-testid="backlog-head-group">
-                      {heads.length > 1 && (
-                        <div
-                          className="px-[18px] pt-2.5 pb-1 text-[11px] font-mono uppercase tracking-wide text-fg-faint bg-bg-elev/30 border-t border-line/60"
-                          data-testid="backlog-head-label"
-                        >
-                          Plan {headIdx + 1} of {heads.length}
-                        </div>
-                      )}
-                      {rows.map(({ node, listIndex }) => (
-                        <JobRow
-                          key={node.row.slug}
-                          job={node.row}
-                          backlog={node}
-                          eta={etaMap.get(node.row.slug) ?? null}
-                          // Only running rows tick — everyone else gets a stable
-                          // `null` across ticks, so JobRow's memo bails for them
-                          // instead of re-rendering once a second for an unused
-                          // `now` value.
-                          elapsedMs={node.row.status === 'running' && node.row.startedAt ? now - Date.parse(node.row.startedAt) : null}
-                          avgDurationMs={avgDurationMs}
-                          listIndex={listIndex}
-                          hold={holdBySlug.get(node.row.slug)}
-                          onFocused={handleRowFocused}
-                          headChoices={headChoices.filter((h) => h.rootSlug !== headRootSlug)}
-                        />
-                      ))}
-                    </div>
+                  {rows.map(({ node, listIndex }) => (
+                    <JobRow
+                      key={node.row.slug}
+                      job={node.row}
+                      backlog={node}
+                      eta={etaMap.get(node.row.slug) ?? null}
+                      // Only running rows tick — everyone else gets a stable
+                      // `null` across ticks, so JobRow's memo bails for them
+                      // instead of re-rendering once a second for an unused
+                      // `now` value.
+                      elapsedMs={node.row.status === 'running' && node.row.startedAt ? now - Date.parse(node.row.startedAt) : null}
+                      avgDurationMs={avgDurationMs}
+                      listIndex={listIndex}
+                      hold={holdBySlug.get(node.row.slug)}
+                      onFocused={handleRowFocused}
+                    />
                   ))}
                 </EpicSectionBlock>
               ))
@@ -989,30 +957,6 @@ function computeEtaMap(
   return m
 }
 
-/** Attach-target metadata for one head (root chain) of an Epic section —
- *  what the "change disposition" control offers as "attach behind <label>". */
-export interface HeadChoice {
-  rootSlug: string
-  label: string
-  /** This head's own current terminal (leaf) slug(s) — what a new dependsOn
-   *  edge onto this head must point at to run behind everything already
-   *  queued in it. Empty only if the head's own subtree is entirely a
-   *  dependsOn cycle (backlogTree.ts renders those separately). */
-  terminals: string[]
-}
-
-/** A head's terminal (leaf) slugs: nodes in its own subtree with no
- *  children — nothing else in this Epic depends on them yet. Mirrors
- *  prdDisposition.cjs's resolveChainTerminals, kept as a separate
- *  implementation since it walks the renderer's already-built BacklogNode
- *  tree rather than a flat row list (main is CJS, this is renderer TS/ESM —
- *  see CLAUDE.md's "no ES modules in main" law). */
-function headTerminalSlugs(head: BacklogNode<ScheduleJob>): string[] {
-  return flattenBacklogNodes([head])
-    .filter((n) => n.children.length === 0)
-    .map((n) => n.row.slug)
-}
-
 /**
  * EpicSectionBlock — one collapsible block per Epic in the job table, headed
  * by the Epic's title, PRD count, and a status rollup. Collapse state is
@@ -1067,7 +1011,6 @@ interface JobRowBacklogInfo {
   parallelEligible: boolean
 }
 const EMPTY_BLOCKERS: BacklogBlocker[] = []
-const EMPTY_HEAD_CHOICES: HeadChoice[] = []
 const DEFAULT_BACKLOG_INFO: JobRowBacklogInfo = {
   depth: 0,
   blockers: EMPTY_BLOCKERS,
@@ -1091,7 +1034,7 @@ function blockerToneClass(b: BacklogBlocker): string {
   return 'text-amber-400/90'
 }
 
-function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocused, hold, backlog = DEFAULT_BACKLOG_INFO, headChoices = EMPTY_HEAD_CHOICES }: {
+function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocused, hold, backlog = DEFAULT_BACKLOG_INFO }: {
   job: ScheduleJob
   eta: string | null
   /** Live elapsed ms since `job.startedAt`, ticking once a second — `null`
@@ -1107,11 +1050,6 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
    *  lib/backlogTree. Defaults to a top-level, unblocked row so every
    *  existing call site (tests included) that doesn't pass it keeps working. */
   backlog?: JobRowBacklogInfo
-  /** Other heads (root chains) in this row's Epic section, available as
-   *  "attach behind" targets for the disposition-change control below —
-   *  only rendered when `job.disposition` is set. Defaults to an empty,
-   *  reference-stable array for the same memo reason as `backlog` above. */
-  headChoices?: HeadChoice[]
 }) {
   const [open, setOpen] = useState(false)
   const [showLog, setShowLog] = useState(false)
@@ -1372,9 +1310,6 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
                   reset to pending →
                 </button>
               )}
-              {job.disposition && (job.status === 'pending' || job.status === 'quarantined') && (
-                <DispositionControl job={job} headChoices={headChoices} />
-              )}
             </div>
           </DetailBlock>
         </div>
@@ -1393,60 +1328,6 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
 }
 
 export const JobRow = memo(JobRowComponent)
-
-/**
- * DispositionControl — the Scheduler UI's "change disposition" action
- * (scheduler wave-disposition PRD): promote an appended wave to its own
- * head, or re-attach a head behind another chain in the same Epic section.
- * Only rendered when `job.disposition` is set (this row was itself a
- * wave-authoring decision point) and the row is still pending/quarantined —
- * matches remote.setPrdDisposition's own running/completed refusal, so the
- * control never offers an action the backend would just reject.
- *
- * A plain `<select>` rather than two separate buttons: the "attach behind"
- * choice set is dynamic (one option per sibling head), and a menu keeps a
- * two-head Epic and a five-head Epic the same shape. Resets to the
- * placeholder after firing — this is an action trigger, not a persistent
- * setting.
- */
-function DispositionControl({ job, headChoices }: { job: ScheduleJob; headChoices: HeadChoice[] }) {
-  const [pending, setPending] = useState(false)
-  const fire = useCallback((disposition: 'append' | 'new-head', dependsOn?: string[]) => {
-    setPending(true)
-    window.api.schedule.setPrdDisposition({ slug: job.slug, cwd: job.cwd ?? undefined, disposition, dependsOn })
-      .then(toast.fromOutcome)
-      .catch(() => toast.error('Failed to change disposition'))
-      .finally(() => setPending(false))
-  }, [job.slug, job.cwd])
-
-  if (job.disposition !== 'append' && headChoices.length === 0) return null
-
-  return (
-    <select
-      data-testid="job-row-disposition-control"
-      disabled={pending}
-      value=""
-      onChange={(e) => {
-        const v = e.target.value
-        if (v === '__new-head__') fire('new-head')
-        else if (v) {
-          const target = headChoices.find((h) => h.rootSlug === v)
-          if (target) fire('append', target.terminals)
-        }
-      }}
-      className="text-[13px] font-semibold text-fg-dim hover:text-fg bg-transparent border border-line/60 rounded px-1.5 py-0.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-      title="Change this wave's relationship to the rest of the Epic's plan"
-    >
-      <option value="" disabled>change disposition…</option>
-      {job.disposition === 'append' && (
-        <option value="__new-head__">promote to new head</option>
-      )}
-      {headChoices.map((h) => (
-        <option key={h.rootSlug} value={h.rootSlug}>attach behind: {truncateLabel(h.label, 40)}</option>
-      ))}
-    </select>
-  )
-}
 
 // ─── Filter bar ─────────────────────────────────────────────────────────────
 

@@ -75,10 +75,7 @@ const MCP_TOOL_CATALOG = [
       + '`tag` and `agentType` are two DIFFERENT, independent fields — `tag` is WHAT KIND '
       + 'of work this PRD is (feature/bug/build/...); `agentType` is WHO executes it (a '
       + 'persona name, e.g. "dev-lead"). `agentType` defaults to "dev-lead" when omitted, '
-      + 'and is rejected at write time if it does not name a real persona file. '
-      + 'If this PRD has no dependsOn of its own AND the target Epic already has incomplete PRDs, '
-      + '`disposition` ("append" or "new-head") is REQUIRED — the write is refused without it (a '
-      + 'headless job caller instead gets a logged "append" default, since no human is present to ask).',
+      + 'and is rejected at write time if it does not name a real persona file.',
     whenToUse: 'Use whenever new work should be queued into an already-approved Epic — this is the /develop path.',
     whenNotToUse: 'TWO DISTINCT FAILURE MODES if this tool is not usable — do not conflate them: '
       + '(a) this tool call is PRESENT in your tool list but ERRORS as app-not-running / admin '

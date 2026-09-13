@@ -119,13 +119,6 @@ async function parsePrdRaw(filePath) {
     // dependent follow-up PRD (scheduler-launch-as-persona) resolves this
     // into a launch decision, which this module does not do.
     agentType: fm.agentType || null,
-    // Wave-authoring decision (scheduler wave-disposition PRD): 'append' or
-    // 'new-head', set only when createPrd() actually had a disposition to
-    // record — see prdCreate.cjs/prdDisposition.cjs. Absent on every PRD
-    // authored before this field existed, and on any PRD that never needed
-    // the decision (first-ever PRD in its Epic, or one with its own explicit
-    // dependsOn).
-    disposition: (fm.disposition === 'append' || fm.disposition === 'new-head') ? fm.disposition : null,
     // Opt-in exclusive-lease flag (PRD 1107, quietMachineLease.cjs +
     // schedulerBatch.cjs's pickNextBatch). Only a literal `true` opts in —
     // matches prdFrontmatter.cjs's applyKey semantics for this field.

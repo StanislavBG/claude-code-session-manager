@@ -47,6 +47,8 @@ import { QueuedJobPopover, type QueuedJobPopoverJob } from './home/QueuedJobPopo
 import { TerminalAppearanceCard } from './home/TerminalAppearanceCard'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
 import { AGENT_TAG_DEFS, AGENT_TAG_ORDER } from '../../lib/agentTagDefs'
+import { useEffectiveSettingsFor, readLeafWithSource } from '../../lib/useEffectiveSettings'
+import { formatEffortSegment } from '../../lib/effectiveModelInfo'
 import { ERD_ENTITIES } from '../../lib/dataModelErd'
 import { ticketTagTone } from '../../lib/ticketDisplay'
 import { toast } from '../../state/toast'
@@ -169,13 +171,28 @@ function useNeedsYouRows(): NeedsYouRow[] {
 // initial-prompt template (agentTagDefs.ts). An Epic carries exactly one
 // tag, chosen once at creation; this card is a read-only reference for what
 // each tag actually seeds into the session, not a picker.
+//
+// The caption also carries a MACHINE-WIDE effort readout: the settings.json
+// scope chain read with no cwd, so it reflects the global/user-scope default
+// rather than any one project's project/local overlay. Reuses
+// formatEffortSegment (effectiveModelInfo.ts) so this never drifts from the
+// per-Epic wording EffectiveRuntimeLine renders on New Session / Epic detail.
 // ────────────────────────────────────────────────────────────────────
-function AgentsCard() {
+export function AgentsCard() {
+  const settingsNode = useEffectiveSettingsFor(null)
+  const { value: effortLevel, source: effortSource } = readLeafWithSource(settingsNode, ['effortLevel'])
+  const effortCaption = formatEffortSegment(effortLevel, effortSource)
   return (
     <section className="mb-6">
       <div className="flex items-baseline justify-between mb-3">
         <h2 className="m-0 font-serif text-[22px] font-medium">Agents</h2>
-        <span className="font-mono text-[12px] text-fg-faint">1 tag per session</span>
+        <span
+          className="font-mono text-[12px] text-fg-faint"
+          data-testid="home-agents-effort"
+          title="Machine-wide effective reasoning effort — the settings.json scope chain's current winner, independent of any one project."
+        >
+          1 tag per session · {effortCaption}
+        </span>
       </div>
       <div className="grid gap-2">
         {AGENT_TAG_ORDER.map((tag) => {

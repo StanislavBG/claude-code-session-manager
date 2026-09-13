@@ -16,14 +16,34 @@ import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsC
  * module-load IPC wiring only fires if window.api exists at import time.
  */
 
-function installWindowApiMock(opts: { branch?: string | null; personas?: Array<{ name: string; model: string | null }> } = {}) {
+function installWindowApiMock(opts: {
+  branch?: string | null
+  personas?: Array<{ name: string; model: string | null }>
+  /** Mocked `agents:resolve-model-info` main-half result. `null` rejects the
+   *  call (IPC-failure edge case); omit for the harmless default fallback. */
+  runtimeInfo?: Record<string, unknown> | null
+} = {}) {
   const listPrds = vi.fn().mockResolvedValue([])
+  const resolveModelInfo = vi.fn().mockImplementation(({ agentType }: { cwd: string; agentType: string }) => {
+    if (opts.runtimeInfo === null) return Promise.reject(new Error('IPC unavailable'))
+    return Promise.resolve({
+      agentType,
+      modelAlias: null,
+      modelSource: 'fallback',
+      resolvedModelId: null,
+      resolvedFrom: null,
+      effortReachable: false,
+      ...opts.runtimeInfo,
+    })
+  })
   const api = {
     app: {
       gitBranch: vi.fn().mockResolvedValue(opts.branch ?? null),
+      homeDir: vi.fn().mockResolvedValue('/home/bilko'),
     },
     agents: {
       listPersonas: vi.fn().mockResolvedValue(opts.personas ?? []),
+      resolveModelInfo,
     },
     chat: {
       run: vi.fn().mockResolvedValue(undefined),
@@ -46,7 +66,10 @@ function installWindowApiMock(opts: { branch?: string | null; personas?: Array<{
     config: {
       exists: vi.fn().mockResolvedValue(true),
       readText: vi.fn().mockResolvedValue({ exists: false, text: '' }),
+      readJson: vi.fn().mockResolvedValue({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: null }),
       writeJson: vi.fn().mockResolvedValue({ ok: true }),
+      watch: vi.fn(),
+      unwatch: vi.fn(),
     },
     clipboard: { writeText: vi.fn().mockResolvedValue({ ok: true }) },
     logs: { write: vi.fn() },
@@ -158,8 +181,10 @@ describe('EpicDetail (PRD 827)', () => {
     })
   })
 
-  it('renders the Agent+model chip with the persona name and pretty-formatted model when the persona has an explicit model', async () => {
-    installWindowApiMock({ personas: [{ name: 'architect', model: 'claude-sonnet-4-5' }] })
+  it('renders the Agent+model chip with the persona name and evidence-backed concrete model when the persona has an explicit override', async () => {
+    installWindowApiMock({
+      runtimeInfo: { modelAlias: 'claude-sonnet-4-5', modelSource: 'persona', resolvedModelId: 'claude-sonnet-4-5', resolvedFrom: 'transcript' },
+    })
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
@@ -173,10 +198,16 @@ describe('EpicDetail (PRD 827)', () => {
     expect(chip).not.toBeNull()
     expect(chip?.textContent).toContain('architect')
     expect(chip?.textContent).toContain('Sonnet 4.5')
+    // The tag's OWN title (not just the inner span's) carries the model info,
+    // so hovering anywhere on the tag — not only its inner model text —
+    // surfaces it, matching the pre-existing full-tag tooltip contract.
+    expect(chip?.getAttribute('title')).toContain('Sonnet 4.5')
   })
 
-  it('renders the Agent chip with just the persona name (no model) when the persona model is inherit/unset', async () => {
-    installWindowApiMock({ personas: [{ name: 'dev-lead', model: 'inherit' }] })
+  it('renders the Agent chip labeled "inherited" (not an explicit choice) when the persona model is inherit/unset', async () => {
+    installWindowApiMock({
+      runtimeInfo: { modelAlias: null, modelSource: 'inherit', resolvedModelId: null, resolvedFrom: null },
+    })
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
 
@@ -188,7 +219,8 @@ describe('EpicDetail (PRD 827)', () => {
 
     const chip = el.querySelector('[data-testid="epic-agent-tag"]')
     expect(chip).not.toBeNull()
-    expect(chip?.textContent).toBe('dev-lead')
+    expect(chip?.textContent).toContain('dev-lead')
+    expect(chip?.textContent).toContain('inherited')
   })
 
   it('renders no Agent chip at all when the Epic has no agentType', async () => {

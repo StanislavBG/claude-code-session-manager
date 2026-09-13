@@ -24,6 +24,7 @@ vi.mock('../EpicTerminalPane', () => ({
 
 function installWindowApiMock() {
   const api = {
+    app: { homeDir: vi.fn().mockResolvedValue('/home/bilko') },
     chat: {
       run: vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn().mockResolvedValue(undefined),
@@ -45,7 +46,10 @@ function installWindowApiMock() {
     config: {
       exists: vi.fn().mockResolvedValue(true),
       readText: vi.fn().mockResolvedValue({ exists: false, text: '' }),
+      readJson: vi.fn().mockResolvedValue({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: null }),
       writeJson: vi.fn().mockResolvedValue({ ok: true }),
+      watch: vi.fn(),
+      unwatch: vi.fn(),
     },
     clipboard: { writeText: vi.fn().mockResolvedValue({ ok: true }) },
     logs: { write: vi.fn() },

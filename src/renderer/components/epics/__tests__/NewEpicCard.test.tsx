@@ -7,15 +7,25 @@ import { usePromptSessions } from '../../../state/promptSessions'
 import { useSessions } from '../../../state/sessions'
 import { useChat } from '../../../state/chat'
 import { useToast } from '../../../state/toast'
+import { useConfig } from '../../../state/config'
 import { agentTagDef } from '../../../lib/agentTagDefs'
 import { CONTEXT_INJECTIONS } from '../../../lib/contextInjections'
 import type { AgentPersona } from '../../../../preload/api'
+import type { MainModelHalf } from '../../../lib/effectiveModelInfo'
 import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsCreate'
 
 const createPromptSessionSpy = vi.fn(usePromptSessions.getState().createPromptSession)
 const sendSpy = vi.fn()
 const listPersonasSpy = vi.fn(async (): Promise<AgentPersona[]> => [])
 const getPersonaBodySpy = vi.fn(async (): Promise<{ path: string; text: string } | null> => null)
+const resolveModelInfoSpy = vi.fn(async (): Promise<MainModelHalf> => ({
+  agentType: 'architect',
+  modelAlias: null,
+  modelSource: 'fallback',
+  resolvedModelId: null,
+  resolvedFrom: null,
+  effortReachable: false,
+}))
 
 vi.mock('../../../lib/useKnownProjects', () => ({
   useKnownProjects: () => ({
@@ -60,8 +70,18 @@ beforeEach(() => {
   listPersonasSpy.mockResolvedValue([])
   getPersonaBodySpy.mockClear()
   getPersonaBodySpy.mockResolvedValue(null)
+  resolveModelInfoSpy.mockClear()
+  resolveModelInfoSpy.mockResolvedValue({
+    agentType: 'architect',
+    modelAlias: null,
+    modelSource: 'fallback',
+    resolvedModelId: null,
+    resolvedFrom: null,
+    effortReachable: false,
+  })
+  useConfig.setState({ files: {}, watchRefs: {} })
   ;(window as unknown as { api: unknown }).api = {
-    agents: { listPersonas: listPersonasSpy, getPersonaBody: getPersonaBodySpy },
+    agents: { listPersonas: listPersonasSpy, getPersonaBody: getPersonaBodySpy, resolveModelInfo: resolveModelInfoSpy },
     app: {
       homeDir: vi.fn().mockResolvedValue('/home/bilko'),
       gitBranch: vi.fn().mockResolvedValue('main'),
@@ -73,6 +93,8 @@ beforeEach(() => {
     config: {
       readText: vi.fn().mockResolvedValue({ exists: false, text: '', mtimeMs: 0, error: null }),
       readJson: vi.fn().mockResolvedValue({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: null }),
+      watch: vi.fn(),
+      unwatch: vi.fn(),
       listDir: vi.fn().mockResolvedValue({ ok: true, entries: [], error: null }),
       exists: vi.fn().mockResolvedValue(false),
     },
@@ -298,6 +320,23 @@ describe('NewEpicCard', () => {
       'NewEpicCard',
       'architect',
     ])
+  })
+
+  it('still renders the agent line (not blank) when the runtime-effective IPC rejects', async () => {
+    resolveModelInfoSpy.mockRejectedValue(new Error('IPC unavailable'))
+    listPersonasSpy.mockResolvedValue([
+      { name: 'architect', description: 'Owns overall plan and decomposition.', tools: ['Read', 'Edit'], model: 'opus', color: null, tags: [], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] },
+    ])
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    // Flush both the persona load and the rejected resolveModelInfo round-trip.
+    await act(async () => {})
+    await act(async () => {})
+
+    expect(resolveModelInfoSpy).toHaveBeenCalled()
+    // Degrades to the pre-existing bare-alias line rather than blanking the card.
+    expect(el.textContent).toContain('opus')
+    expect(el.textContent).toContain('Read Edit')
+    expect(el.querySelector('[data-testid="new-epic-create"]')).not.toBeNull()
   })
 
   it('threads the selected agent into createPromptSession and grounds the opening prompt with its description', async () => {

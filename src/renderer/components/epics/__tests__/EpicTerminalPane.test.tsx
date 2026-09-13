@@ -69,6 +69,7 @@ function installFullWindowApiMock() {
   const { spawn, write, kill, resize } = installWindowApiMock()
   const fullApi = window.api as unknown as Record<string, unknown>
   Object.assign(fullApi, {
+    app: { homeDir: vi.fn().mockResolvedValue('/home/bilko') },
     chat: {
       run: vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn().mockResolvedValue(undefined),
@@ -87,7 +88,10 @@ function installFullWindowApiMock() {
     config: {
       exists: vi.fn().mockResolvedValue(true),
       readText: vi.fn().mockResolvedValue({ exists: false, text: '' }),
+      readJson: vi.fn().mockResolvedValue({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: null }),
       writeJson: vi.fn().mockResolvedValue({ ok: true }),
+      watch: vi.fn(),
+      unwatch: vi.fn(),
     },
     promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
     logs: { write: vi.fn() },

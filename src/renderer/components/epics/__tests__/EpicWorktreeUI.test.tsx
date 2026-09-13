@@ -39,8 +39,18 @@ vi.mock('@xterm/addon-fit', () => {
 function installWindowApiMock(opts: { mergeToMain?: ReturnType<typeof vi.fn> } = {}) {
   const mergeToMain = opts.mergeToMain ?? vi.fn().mockResolvedValue({ ok: true, status: 'merged', integrated: true })
   const api = {
-    app: { gitBranch: vi.fn().mockResolvedValue(null) },
-    agents: { listPersonas: vi.fn().mockResolvedValue([]) },
+    app: { gitBranch: vi.fn().mockResolvedValue(null), homeDir: vi.fn().mockResolvedValue('/home/bilko') },
+    agents: {
+      listPersonas: vi.fn().mockResolvedValue([]),
+      resolveModelInfo: vi.fn().mockResolvedValue({
+        agentType: null,
+        modelAlias: null,
+        modelSource: 'fallback',
+        resolvedModelId: null,
+        resolvedFrom: null,
+        effortReachable: false,
+      }),
+    },
     epicDelegationStats: { get: vi.fn().mockResolvedValue({ prdsQueued: 0, inlineEdits: 0 }) },
     chat: {
       run: vi.fn().mockResolvedValue(undefined),
@@ -69,7 +79,10 @@ function installWindowApiMock(opts: { mergeToMain?: ReturnType<typeof vi.fn> } =
     config: {
       exists: vi.fn().mockResolvedValue(true),
       readText: vi.fn().mockResolvedValue({ exists: false, text: '' }),
+      readJson: vi.fn().mockResolvedValue({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: null }),
       writeJson: vi.fn().mockResolvedValue({ ok: true }),
+      watch: vi.fn(),
+      unwatch: vi.fn(),
     },
     clipboard: { writeText: vi.fn().mockResolvedValue({ ok: true }) },
     logs: { write: vi.fn() },

@@ -11,7 +11,8 @@ import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, resolv
 import { Turn, visibleFeedTurns, nearestPrecedingUserPrompt, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTurn'
 import { EpicIntakeCard } from './EpicIntakeCard'
 import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
-import { prettyModel } from '../../lib/prettyModel'
+import { useEffectiveModelInfo } from '../../lib/effectiveModelInfo'
+import { EffectiveRuntimeLine, formatEffectiveRuntimeLine } from './EffectiveRuntimeLine'
 import { ViewTabs } from '../ui/ViewTabs'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { RunLogViewer } from '../tabs/plans/RunLogViewer'
@@ -617,32 +618,14 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
 
   // Resolves the Agent+model readout for the header chip: read-only, mirrors
   // EpicTerminalPane's resolveEpicModel but for DISPLAY only (never affects
-  // which model actually launches). An unset/'inherit' persona model shows
-  // no model — the Epic still ran with the global default, but this chip
-  // only surfaces an EXPLICIT per-persona override, matching NewEpicCard's
-  // "the persona's own model wins when set" convention.
+  // which model actually launches). Alias, evidence-backed concrete model,
+  // effort level and each field's provenance all come from one resolver
+  // (agents:resolve-model-info + the settings scope chain), rendered by the
+  // same EffectiveRuntimeLine New Session mounts — never a second divergent
+  // formatter. `null` while loading or on IPC failure; the chip simply shows
+  // no model detail in that case rather than a fabricated one.
   const agentType = promptSession.agentType
-  const [agentModel, setAgentModel] = useState<string | null>(null)
-  useEffect(() => {
-    if (!agentType) {
-      setAgentModel(null)
-      return
-    }
-    let cancelled = false
-    window.api.agents
-      .listPersonas()
-      .then((personas) => {
-        if (cancelled) return
-        const persona = personas.find((p) => p.name === agentType)
-        setAgentModel(persona?.model && persona.model !== 'inherit' ? persona.model : null)
-      })
-      .catch(() => {
-        if (!cancelled) setAgentModel(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [agentType])
+  const runtimeInfo = useEffectiveModelInfo(agentType ? cwd : null, agentType ?? null)
 
   // Tab state resets to Discussion on every Epic change.
   useEffect(() => {
@@ -915,7 +898,8 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
               {agentType && (
                 <EpicAgentTag
                   agentType={agentType}
-                  model={agentModel ? prettyModel(agentModel) : null}
+                  model={runtimeInfo ? <EffectiveRuntimeLine info={runtimeInfo} /> : null}
+                  modelTitle={runtimeInfo ? formatEffectiveRuntimeLine(runtimeInfo).text : null}
                   onClick={() => openAgentLibrary(agentType)}
                 />
               )}

@@ -51,6 +51,7 @@ vi.mock('../../lib/useKnownProjects', () => ({
 
 function installWindowApiMock() {
   const api = {
+    app: { homeDir: vi.fn().mockResolvedValue('/home/bilko') },
     pty: { kill: vi.fn() },
     chat: {
       cancel: vi.fn().mockResolvedValue(undefined),
@@ -74,6 +75,8 @@ function installWindowApiMock() {
       readText: vi.fn().mockResolvedValue({ exists: true, text: 'transcript content', mtimeMs: 0, error: null }),
       writeJson: vi.fn().mockResolvedValue({ ok: true, mtimeMs: 0 }),
       readJson: vi.fn().mockResolvedValue({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: 'not found' }),
+      watch: vi.fn(),
+      unwatch: vi.fn(),
     },
     schedule: { listPrds: vi.fn().mockResolvedValue([]) },
     promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },

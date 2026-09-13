@@ -6,6 +6,8 @@ import { compactPath } from '../../lib/compactPath'
 import { resolveEpicProject } from '../../lib/epicProjectScope'
 import { AttachButton, AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
 import { composeEpicIntake } from '../../lib/epicIntake'
+import { useEffectiveModelInfo } from '../../lib/effectiveModelInfo'
+import { EffectiveRuntimeLine } from './EffectiveRuntimeLine'
 import { useChat } from '../../state/chat'
 import { toast } from '../../state/toast'
 import { computeGroundingBoard, summarizeGroundingBoard, type GroundingGroup } from '../../lib/groundingBoard'
@@ -302,6 +304,12 @@ export function NewEpicCard({
   const trimmedGoal = goal.trim()
   const canCreate = Boolean(effectiveCwd && trimmedGoal)
   effectiveCwdRef.current = effectiveCwd
+
+  // Read-only "what will this Agent actually run as" readout for the mono
+  // line below the mission — null while loading or on IPC failure, in which
+  // case the line below falls back to the pre-existing bare-alias text
+  // rather than blanking or blocking this dialog from opening.
+  const runtimeInfo = useEffectiveModelInfo(effectiveCwd || null, selectedAgent?.name ?? null)
 
   useEffect(() => {
     setReadiness(null)
@@ -655,7 +663,13 @@ export function NewEpicCard({
                 <div className="mt-2 border-l-2 border-accent-muted pl-2.5 text-[12.5px] leading-[1.5] text-fg-dim">
                   {selectedTagMission}
                   <div className="mt-1 font-mono text-[11px] text-fg-faint">
-                    {selectedAgent?.model && selectedAgent.model !== 'inherit' ? selectedAgent.model : 'sonnet'}
+                    {runtimeInfo ? (
+                      <EffectiveRuntimeLine info={runtimeInfo} />
+                    ) : selectedAgent?.model && selectedAgent.model !== 'inherit' ? (
+                      selectedAgent.model
+                    ) : (
+                      'sonnet'
+                    )}
                     {selectedAgent ? ` · ${selectedAgent.tools.join(' ') || 'no tool restriction'}` : ''}
                   </div>
                 </div>

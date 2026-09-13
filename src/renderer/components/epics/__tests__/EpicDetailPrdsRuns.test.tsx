@@ -17,6 +17,7 @@ function installWindowApiMock(prds: unknown[] = []) {
   const listPrds = vi.fn().mockResolvedValue(prds)
   const readLog = vi.fn().mockResolvedValue({ ok: true, text: 'log line 1\nlog line 2' })
   const api = {
+    app: { homeDir: vi.fn().mockResolvedValue('/home/bilko') },
     chat: {
       run: vi.fn().mockResolvedValue(undefined),
       cancel: vi.fn().mockResolvedValue(undefined),
@@ -38,7 +39,10 @@ function installWindowApiMock(prds: unknown[] = []) {
     config: {
       exists: vi.fn().mockResolvedValue(true),
       readText: vi.fn().mockResolvedValue({ exists: false, text: '' }),
+      readJson: vi.fn().mockResolvedValue({ exists: false, raw: '', data: null, parseError: null, mtimeMs: 0, error: null }),
       writeJson: vi.fn().mockResolvedValue({ ok: true }),
+      watch: vi.fn(),
+      unwatch: vi.fn(),
     },
     clipboard: { writeText: vi.fn().mockResolvedValue({ ok: true }) },
     logs: { write: vi.fn() },

@@ -12,7 +12,12 @@ under.
 ```
 session-manager-operations/prompt-sessions/
   active-index.json          — every Epic in this cwd that is 'proposed' or 'active'
-  <promptSessionId>.json      — one archive file per COMPLETED Epic (e.g. psess-ms9x7241-9.json)
+  <archiveId>.json            — one archive file per COMPLETED Epic. Two id conventions coexist:
+                                 the promptSessionId itself (e.g. psess-ms9x7241-9.json) for
+                                 older/human-minted Epics, and a slug derived from the Epic's
+                                 goal text (e.g. builder-check-git-vs-the-published-package-for-t-7fe0df63.json)
+                                 for others. Both are valid archive filenames; readers must not
+                                 assume one shape.
   attachments/                 — pasted images referenced from an Epic's goalText/openingPrompt
   transcripts/                 — durable per-Epic transcript store (promptSessionTranscript.cjs)
 ```
@@ -43,8 +48,8 @@ policy.
 time-boxed rule.** Pasted images are referenced by path from an Epic's `goalText`/`openingPrompt`,
 including archived Epics kept indefinitely per above — deleting an attachment while its owning
 Epic archive still references it would leave a broken link in an otherwise-permanent record, so
-today's answer has to match the archive's. This is also the largest and fastest-growing category
-(4.8M/26 files, dwarfing the other two combined) and the one where "keep forever" is least
+today's answer has to match the archive's. This is also the largest and fastest-growing category,
+by a wide margin over the other two combined, and the one where "keep forever" is least
 obviously right: images add little value once their owning Epic is old and unlikely to be
 resumed, unlike the JSON archive itself. **Follow-up (out of scope here):** a time-boxed prune
 rule for attachments belonging only to Epics archived past some age, with orphan-reference
@@ -57,10 +62,9 @@ not an ad hoc script.
 **Keep indefinitely.** This is `promptSessionTranscript.cjs`'s durable per-Epic transcript store —
 the fallback source for an archive's `durableTurns` when the one-shot copy of the raw
 `~/.claude/projects/.../<sessionUuid>.jsonl` came back empty (see the archive shape below). It is
-also the smallest of the three categories today (664K/57 files) and the plain-text/JSONL content
-compresses far better than the image attachments above, so there is no size pressure forcing a
-different answer yet. No code prunes these today, and none should be added without a proposed
-Epic if that changes.
+also the smallest of the three categories today, and the plain-text/JSONL content compresses far
+better than the image attachments above, so there is no size pressure forcing a different answer
+yet. No code prunes these today, and none should be added without a proposed Epic if that changes.
 
 ## Required shape
 
@@ -74,12 +78,9 @@ Epic if that changes.
 ```
 
 Intended contents: every **not-yet-archived** Epic for this cwd — i.e. `proposed` *and* `active`.
-Completed Epics move to their own archive file (below) and drop out of here.
-
-⚠️ The two writers currently disagree, which is Lifecycle **gap 3**: `lib/epicMint.cjs` (main)
-writes `proposed` Epics into this file, while `persistActiveIndex` (renderer) rewrites it
-filtered to `s.cwd === cwd && s.status === 'active'`, deleting them. Until that filter is
-widened to keep `proposed`, a proposal on disk survives only until the next renderer mutation.
+Completed Epics move to their own archive file (below) and drop out of here. Both writers agree:
+`lib/epicMint.cjs` (main) and `persistActiveIndex` (renderer) both keep `proposed` and `active`
+rows for this cwd (gaps 1–3 closed by 2026-09 — see git history).
 
 `PromptSession` (real fields, from `src/renderer/state/promptSessions.ts:10-40`):
 
@@ -164,7 +165,7 @@ Epic's stage reads this field.
 
 | Status | Meaning | Entered by | Spends tokens |
 | --- | --- | --- | --- |
-| `proposed` | Not started — the human opened the Epic but has not started it. | The New Epic form, the only Epic-creation path (`lib/promptSessionsCreateEpic.cjs` → `ensureEpic(..., { mintAuthority })`) | No |
+| `proposed` | Not started — the human opened the Epic, or a cross-project finding was routed here, but it has not started. | One of the two declared mint authorities (`lib/epicMint.cjs`'s `MINT_AUTHORITIES`), both going through `ensureEpic(..., { mintAuthority })`: the New Epic IPC handler (`lib/promptSessionsCreateEpic.cjs`, `mintAuthority: 'new-epic-ui'`), or `src/main/lib/crossProjectFeedback.cjs` (`mintAuthority: 'cross-project-feedback'`) landing feedback from another project | No |
 | `active` | The Epic's session is running. It authors PRDs and receives scheduler updates. | Human presses **Approve & start**, or finishes the draft — the same transition | Yes |
 | `completed` | Archived. `claudeSessionId` is dead and never reused. | `markCompleted()`, or **Discard** on a proposal | No |
 
@@ -205,7 +206,8 @@ separate draft **state**, not the Epic itself. There is still one birth state an
 and a human Epic can be parked as a proposal indefinitely without being started.
 
 Because such a row is legitimate, **nothing about a `proposed` Epic is ever erased** — a
-persister that cannot see a use for a sparse row must still keep it. See gap 3.
+persister that cannot see a use for a sparse row must still keep it (`persistActiveIndex` keeps
+both `'proposed'` and `'active'` rows for the cwd, per the storage-layout note above).
 
 Once `active`, the Epic's session is what authors PRDs (via `scheduler_create_prd` / `chat:create-prd`,
 carrying `sourcePromptId` = this Epic's id) and what the scheduler reports back into as
@@ -238,52 +240,27 @@ A property goes on the entity whose lifecycle it shares. If a new field is neede
 display run activity, it goes on the **session**, not the Epic — an Epic outlives any one run,
 and an Epic that is `active` says nothing about whether a run is in flight right now.
 
-### Known gaps (as of 2026-08-01)
-
-1. **A human-typed Epic is born `active`, skipping both the birth state and the shared
-   transition.** `NewEpicCard` calls `createPromptSession(cwd, goalText, tag)`, whose status
-   argument defaults to `'active'`, and separately fires the opening prompt — so `active` gets set
-   by the act of creation rather than by starting, and the New Epic path never touches the
-   `proposed → active` transition that Approve uses. It should create the Epic `proposed` and then
-   take that same transition, so there is one birth state and one start path.
-2. **`epicDisplayStatus` invents state that isn't state.** `src/renderer/lib/epicDerive.ts`
-   returns a six-value `EpicDisplayStatus` (`running`/`needs`/`queued`/`completed`/`proposed`/`draft`)
-   from one function, mixing all three entities: `completed`/`proposed` are real Epic status,
-   `running`/`queued`/`needs` are **session** activity, and the final fallback returns
-   **`'draft'` for an `active` Epic that simply has nothing in flight** — a label for a state that
-   does not exist, shown in place of the Epic's real one. (`epicPrds` separately uses `'draft'`
-   for a PRD file with no job row yet, which is a **PRD** property and a legitimate derived view.)
-   An idle `active` Epic must read `active`; session activity must be surfaced as the session's
-   status, not substituted for the Epic's.
-3. **Proposals are erased from disk by the next renderer write.** `epicMint.cjs` (main process)
-   writes `proposed` Epics into `active-index.json`, but `persistActiveIndex` (renderer) rewrites
-   that same file filtered to `status === 'active'` only. Any renderer mutation therefore drops
-   every `proposed` Epic on disk; they survive in the renderer store until reload, then are gone.
-   This silently destroys the agent-proposal intake that replaced the feedback folder, and it
-   blocks the minimal-row model above: a reserved `proposed` Epic cannot survive to be spawned if
-   the next write deletes it.
-
-   Fix: `persistActiveIndex` must keep `proposed` as well as `active` — the file holds everything
-   **not yet archived**, and a sparse `proposed` row (`id` + `claudeSessionId` only) is valid
-   content, not junk to be filtered out. Nothing about a `proposed` Epic is ever erased; only
-   `markCompleted` removes a row from this file, by moving it to its archive. This also resolves
-   the contradiction between this file's storage-layout note and the `active-index.json` shape
-   note above.
+Gaps 1–3 closed by 2026-09 (see git history): `createPromptSession` only ever mints `'proposed'`
+and takes the shared `proposed → active` transition, `epicDisplayStatus` no longer returns
+`'draft'` for an idle `active` Epic, and `persistActiveIndex` keeps both `'proposed'` and
+`'active'` rows for the cwd.
 
 ### Transitions in detail
 
-1. **Proposed** — a human creates the Epic in the New Epic card; it is born `proposed`
-   (`ensureEpic(..., { mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI })` — the only path that creates
-   one). Nothing runs and nothing is spent until **Approve & start**. **Discard** archives the
-   proposal (`markCompleted`) instead of deleting it, so a rejection stays auditable.
+1. **Proposed** — every Epic is born `proposed`, minted through `ensureEpic(...,
+   { mintAuthority })` by one of the two declared mint authorities (`lib/epicMint.cjs`'s
+   `MINT_AUTHORITIES`): the New Epic UI, or `crossProjectFeedback.cjs` landing a finding from
+   another project. Nothing runs and nothing is spent until **Approve & start**. **Discard**
+   archives the proposal (`markCompleted`) instead of deleting it, so a rejection stays auditable.
 2. **Active** — `active-index.json` carries the Epic and its event chain. Every
    create/append mutation re-persists the full active slice for this cwd (fire-and-forget,
    serialized per-path so concurrent writes to the same file can't race each other out of order).
 3. **Completed** — `markCompleted()` kills the Epic's live process, appends a `closed` event,
    flips `status` to `'completed'`, writes the full archive to `<id>.json`, and the Epic drops out
-   of `active-index.json` (persist only keeps `status === 'active'` rows). The Epic's
-   `claudeSessionId` is dead from this point — resuming it (`resumeArchived`) mints a brand-new
-   `claudeSessionId` and records `resumedFromId` tracing back to the archived Epic.
+   of `active-index.json` (persist keeps only `'proposed'` and `'active'` rows for the cwd — a
+   completed Epic matches neither). The Epic's `claudeSessionId` is dead from this point —
+   resuming it (`resumeArchived`) mints a brand-new `claudeSessionId` and records `resumedFromId`
+   tracing back to the archived Epic.
 4. **Hydration** — `hydrate(cwd)` reads `active-index.json` back on load (in-memory always wins on
    id collision; disk-deleted Epics are reconciled out, but only once no write to that path is
    still in flight). `hydrateArchived(cwd)` separately walks every `*.json` file in this folder

@@ -12,9 +12,25 @@ policy) lives outside any project, under `~/.claude/session-manager/`.
 session-manager-operations/scheduler/
   epics/<epic-id>/prds/<NN>-<slug>.md   — PRD source, scoped to the Epic that owns it (current layout)
   epics/<epic-id>/prds-archived/         — that Epic's own completed/retired PRDs
-  prds/<NN>-<slug>.md                    — RETIRED flat layout (pre-Epic-scoping PRDs)
+  prds/                                   — RETIRED as a flat PRD-source layout: holds NO PRD
+                                            markdown; auto-consolidated into prds-archived/ on
+                                            every reconcile() pass. Now an ACTIVE dotfile sidecar
+                                            store written by src/main/scheduler/prdParser.cjs's
+                                            allocateParallelGroup():
+                                              .max-allocated-group  — single file, the
+                                                                      parallel-group high-water
+                                                                      mark
+                                              .reserved-<NNNN>       — zero-byte per-group
+                                                                      reservation markers, one per
+                                                                      allocated parallelGroup;
+                                                                      never deleted once written
   prds-archived/                         — sibling archive for the retired flat layout
   state/queue.json                       — this project's job rows ({ jobs: [...] })
+  state/queue.json.corrupt-<ts>          — a torn/unparseable queue.json snapshot preserved at the
+                                            moment a read or write raced and lost, named by the
+                                            timestamp it was detected. Rare forensic artifacts, not
+                                            routine output — keep indefinitely; nothing prunes
+                                            these automatically today.
   state/history.jsonl                    — this project's run history (append-only JSON lines)
 ```
 
@@ -80,8 +96,11 @@ writer for one file in `prompt-sessions/`, not the other way around — see that
   not a per-project one.
 - `~/.claude/session-manager/scheduled-plans/runs/` — run logs (execution artifacts of this
   machine's runner) and `PRD_AUTHORING.md`.
-- The session-slot pool (`lib/sessionSlots.cjs`) — the machine-wide ≤3-concurrent-`claude -p`
-  cap every scheduler job and chat run shares.
+- The session-slot pool (`lib/sessionSlots.cjs`) — the machine-wide `claude -p` cap every
+  scheduler job and chat run shares: default 5, ceiling 10
+  (`DEFAULT_SLOTS`/`MAX_SLOTS` in `src/main/lib/sessionSlots.cjs`), adjustable from Home
+  (`schedule:set-session-slots` IPC, `sessionSlots.setCap`) unless overridden by the
+  `SM_SESSION_SLOTS` env var.
 
 ## Lifecycle
 
@@ -89,8 +108,9 @@ writer for one file in `prompt-sessions/`, not the other way around — see that
    if the dispatch path had none (`epicMint.cjs`'s `ensureEpic`).
 2. **Queued** — a corresponding row appears in `state/queue.json` with `status: 'pending'`,
    `epicId` set, `sourcePromptId` tracing back to the Epic.
-3. **Run** — the scheduler dispatches it as a `claude -p` job (concurrency-capped machine-wide at
-   3); the row transitions through `'running'` to a terminal status.
+3. **Run** — the scheduler dispatches it as a `claude -p` job (concurrency-capped machine-wide by
+   the session-slot pool above — default 5, ceiling 10); the row transitions through `'running'`
+   to a terminal status.
 4. **Archived** — on success (or retirement), the source `.md` moves from `.../prds/` to the
    sibling `.../prds-archived/` (same Epic, or the flat layout's own archive for pre-migration
    PRDs) so a completed slug can't be re-fired; `state/history.jsonl` gets an append-only record

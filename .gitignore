@@ -20,8 +20,8 @@ playwright-report
 # scripts/hooks/guard-prd-writes.cjs's header for the install/uninstall note.
 !.claude/settings.json
 .research/
-<path>
 
 # Generated scheduler skill-discovery output (not source)
 skill-proposals/
 .playwright-mcp/
+logs/

@@ -61,6 +61,7 @@ const {
   claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs,
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome, resolveCommitGuardOutcome,
 } = require('./lib/reaperHelpers.cjs');
+const { resolveProjectRoot } = require('./lib/opsOwnership.cjs');
 const { sweepStrandedJobBranches } = require('./lib/branchSweep.cjs');
 const { detectRateLimitInLog } = require('./lib/rateLimitDetect.cjs');
 const { stripAppOwnedChurn } = require('./lib/jobDirtFilter.cjs');
@@ -4138,6 +4139,38 @@ async function pathExistsInTree(cwd, treeish, p) {
 }
 
 /**
+ * resolveLandedCommitEvidence(cwd, sha) → Promise<boolean>
+ *
+ * Bounded, non-fatal proof that `sha` is a real, resolvable commit in the
+ * repo at `cwd` — `git cat-file -e <sha>^{commit}` via execGitAt's existing
+ * spawn+timeout bound (never shell:true, never an unbounded execSync). This
+ * is the evidence gate reapDeadRunningJobs (PRD: reaper must consult
+ * completion evidence) adds ahead of stamping a reaped row 'failed': a
+ * landedCommit field being non-empty is not proof by itself (job 1192 had
+ * one and still got reaped 'failed') — only a git-verified resolution is.
+ *
+ * `cwd` is normalized through opsOwnership's resolveProjectRoot first (the
+ * same "never trust a raw agent cwd" reasoning delegationReadiness.cjs
+ * already relies on) so a row reaped while its cwd is an ephemeral worktree
+ * checkout resolves the commit against the real project root instead.
+ *
+ * Never throws: a missing sha, a resolveProjectRoot failure (ephemeral cwd,
+ * thrown error), a spawn failure, a timeout, or a cwd that no longer exists
+ * on disk all resolve to `false` — the caller's safe default is 'failed',
+ * exactly like today, whenever this can't positively prove landing.
+ */
+async function resolveLandedCommitEvidence(cwd, sha) {
+  if (!sha || typeof sha !== 'string') return false;
+  try {
+    const root = resolveProjectRoot(cwd);
+    await execGitAt(root, ['cat-file', '-e', `${sha}^{commit}`], { timeout: 10_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Commit exactly `paths` (must already be dirty on disk) onto a dedicated
  * `sm-salvage/<slug>` ref, built from `headBefore` (or current HEAD when
  * unavailable) via a THROWAWAY `GIT_INDEX_FILE` — never touches the live
@@ -7567,6 +7600,38 @@ async function reapDeadRunningJobs() {
       integrationResults.set(d.slug, { effectiveSuccess, landedCommit, notLandedInfo });
     }
 
+    // Evidence-before-failure guard for a row about to be stamped 'failed'
+    // (this PRD — job 1192 shipped a real 3-file commit and was still
+    // reaped 'failed' because this check did not exist): a `landedCommit`
+    // already recorded on the row is only ever stamped from an actual HEAD
+    // advance or a proven branch-integration (jobLandedCommitThisRun / the
+    // dead-pid integration proof above / the dispatch-time sidecar
+    // backfill) — never speculative — but it can still be STALE by the time
+    // this row is reaped (the branch it named could have been force-pushed
+    // over, or the row could be carrying a sidecar-backfilled sha from a
+    // run that was later discarded). git-resolving it here is what turns
+    // "the field is non-empty" into "this sha is a real commit in this
+    // repo right now". Computed OUTSIDE mutate() for the same reason
+    // integrationResults is above: git spawn work must never run inside
+    // mutate()'s single global serialization chain.
+    //
+    // Scoped to exactly the rows that would otherwise fall through to
+    // 'failed' below: a 'success' outcome is already resolved by
+    // integrationResults above (never reaches 'failed'), a rate-limited
+    // death is retryable and never terminal, and a pidless row that already
+    // carries a `failureOverride` (PRD 1173) is already diverted to
+    // needs_review — this gate must never re-litigate either of those.
+    const landedCommitEvidence = new Map();
+    for (const d of dead) {
+      if (d.outcome === 'rate_limited' || d.outcome === 'success') continue;
+      if (d.pidless && d.failureOverride) continue;
+      const row = state.jobs.find((x) => x.slug === d.slug);
+      if (!row?.landedCommit) continue;
+      const rowCwd = row.cwd || state.config?.defaultCwd || DEFAULT_PROJECT_CWD;
+      const resolved = await resolveLandedCommitEvidence(rowCwd, row.landedCommit);
+      if (resolved) landedCommitEvidence.set(d.slug, row.landedCommit);
+    }
+
     await mutate(async (s) => {
       for (const { slug, pid, outcome, gateOutcome, pidless, reason, noOwnArtifact, failureOverride } of dead) {
         const idx = s.jobs.findIndex((x) => x.slug === slug);
@@ -7648,9 +7713,20 @@ async function reapDeadRunningJobs() {
         const baseReason = notLandedInfo
           ? `reaped: ${notLandedInfo.reason}`
           : (pidless ? reason : `reaped: process gone (outcome=${outcome})`);
+        // Evidence gate (this PRD): a row that would otherwise fall through
+        // to 'failed' below, but whose landedCommit was proven to resolve
+        // via git cat-file BEFORE this mutate() ran (see landedCommitEvidence
+        // above), gets promoted to 'completed' instead — the row already
+        // shipped real work, so a bookkeeping gap (no runtime.pid recorded)
+        // must never override git-verified evidence with a false failure.
+        const confirmedLandedCommit = (!effectiveSuccess && !notLandedInfo && !rateLimited)
+          ? (landedCommitEvidence.get(slug) || null)
+          : null;
         const transitionReason = rateLimited
           ? `reaped: rate limit detected — reset to pending, not failed (outcome=${outcome})${leftoverSuffix}`
-          : baseReason + leftoverSuffix;
+          : confirmedLandedCommit
+            ? `${baseReason}, but landedCommit ${confirmedLandedCommit} resolves — completed on evidence${leftoverSuffix}`
+            : baseReason + leftoverSuffix;
 
         if (rateLimited) {
           // Retryable, never terminal (PRD 1117) — same resetJobFields path
@@ -7659,12 +7735,17 @@ async function reapDeadRunningJobs() {
           // paused-for-rate-limit reset: fresh runId/startedAt/exitCode.
           resetJobFields(s.jobs[idx], transitionReason, { source: 'reapDeadRunningJobs:rate-limit' });
         } else {
-          const targetStatus = effectiveSuccess ? 'completed' : (notLandedInfo ? 'needs_review' : 'failed');
-          transitionJob(s.jobs[idx], targetStatus, { reason: transitionReason, source: 'reapDeadRunningJobs' });
-          s.jobs[idx].exitCode = effectiveSuccess ? 0 : (s.jobs[idx].exitCode ?? 1);
+          const landed = effectiveSuccess || Boolean(confirmedLandedCommit);
+          const targetStatus = effectiveSuccess
+            ? 'completed'
+            : (notLandedInfo ? 'needs_review' : (confirmedLandedCommit ? 'completed' : 'failed'));
+          const source = confirmedLandedCommit ? 'reapDeadRunningJobs:landed' : 'reapDeadRunningJobs';
+          transitionJob(s.jobs[idx], targetStatus, { reason: transitionReason, source });
+          s.jobs[idx].exitCode = landed ? 0 : (s.jobs[idx].exitCode ?? 1);
           s.jobs[idx].finishedAt = new Date().toISOString();
-          s.jobs[idx].error = effectiveSuccess ? null : `${transitionReason} (outcome=${outcome})`;
+          s.jobs[idx].error = landed ? null : `${transitionReason} (outcome=${outcome})`;
           s.jobs[idx].gateOutcome = gateOutcome;
+          if (confirmedLandedCommit) s.jobs[idx].landedCommit = confirmedLandedCommit;
           if (notLandedInfo) {
             s.jobs[idx].verifierVerdict = notLandedInfo.verdict;
           } else {

@@ -615,3 +615,121 @@ test('reapDeadRunningJobs: a non-git cwd skips the integration check entirely, p
   assert.equal(row.status, 'completed', 'a non-git cwd must keep today\'s behaviour — the check is meaningless there');
   assert.equal(row.verifierVerdict, undefined);
 });
+
+// ---------- Reaper landed-commit evidence gate (job 1192 incident) ----------
+//
+// job 1192 shipped a real 3-file commit (7bf5fa3f...) and was still
+// stamped 'failed' by reapDeadRunningJobs because a `landedCommit` field
+// being present was never actually verified against the repo. These cover
+// the dead-pid branch specifically (runtime.pid recorded, process
+// confirmed dead) rather than the pidless branch: a pidless row with a
+// non-empty landedCommit is already fully owned by PRD 1173's
+// resolvePidlessFailureOverride (routes to needs_review, tested above) —
+// this PRD's gate exists for the shape 1173 doesn't cover, where the
+// reaper would otherwise fall straight through to 'failed' with no
+// evidence check of any kind.
+
+test('reapDeadRunningJobs: a dead-pid reap with a git-resolvable landedCommit transitions to completed, naming the reap cause and the evidence, source reapDeadRunningJobs:landed', async () => {
+  const projectCwd = path.join(tmpHome, 'n-project-landed-commit-evidence');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+
+  fs.writeFileSync(path.join(projectCwd, 'shipped.txt'), 'done\n', 'utf8');
+  git(['add', '-A'], projectCwd);
+  git(['commit', '-q', '-m', 'ship the PRD work'], projectCwd);
+  const landedSha = git(['rev-parse', 'HEAD'], projectCwd).trim();
+
+  const runId = 'run-landed-commit-evidence';
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug: 'landed-but-reaped',
+      status: 'running',
+      cwd: projectCwd,
+      runId,
+      runtime: { pid: 999999 }, // guaranteed-dead pid
+      landedCommit: landedSha,
+    },
+  ]);
+  // Empty run dir → classifyRunOutcome finds no result event → 'no_result'
+  // → without this PRD's gate this would stamp 'failed' despite the real
+  // commit already sitting on HEAD.
+  fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId), { recursive: true });
+
+  bustCwdCache();
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === 'landed-but-reaped');
+  assert.equal(row.status, 'completed', 'a resolvable landedCommit must promote the reap to completed, not failed');
+  assert.equal(row.landedCommit, landedSha);
+  assert.equal(row.exitCode, 0);
+  assert.equal(row.error, null);
+  const lastTransition = row.statusHistory[row.statusHistory.length - 1];
+  assert.equal(lastTransition.source, 'reapDeadRunningJobs:landed');
+  assert.match(lastTransition.reason, /process gone/, 'the reap cause must still be named');
+  assert.match(lastTransition.reason, new RegExp(landedSha), 'the evidence sha must be named');
+  assert.match(lastTransition.reason, /resolves/);
+});
+
+test('reapDeadRunningJobs: a dead-pid reap with an unresolvable (stale) landedCommit keeps today\'s behaviour exactly — failed, same reason shape, same source', async () => {
+  const projectCwd = path.join(tmpHome, 'o-project-stale-landed-commit');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+
+  const staleSha = '0123456789abcdef0123456789abcdef01234567'; // well-formed sha, never committed anywhere
+  const runId = 'run-stale-landed-commit';
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug: 'stale-landed-commit',
+      status: 'running',
+      cwd: projectCwd,
+      runId,
+      runtime: { pid: 999999 },
+      landedCommit: staleSha,
+    },
+  ]);
+  fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId), { recursive: true });
+
+  bustCwdCache();
+  await reapDeadRunningJobs();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === 'stale-landed-commit');
+  assert.equal(row.status, 'failed', 'a landedCommit that does not resolve in the repo must never be trusted as evidence');
+  assert.equal(row.landedCommit, staleSha, 'the stale field is left on the row untouched, never cleared');
+  assert.match(row.error, /reaped: process gone \(outcome=no_result\)/);
+  assert.doesNotMatch(row.error, /resolves/);
+  const lastTransition = row.statusHistory[row.statusHistory.length - 1];
+  assert.equal(lastTransition.source, 'reapDeadRunningJobs', 'no evidence found — source must stay the plain reaper source, not :landed');
+});
+
+test('reapDeadRunningJobs: a landedCommit that cannot be git-resolved because the row cwd is not a usable git repo falls back to failed without throwing out of the reaper', async () => {
+  const projectCwd = path.join(tmpHome, 'p-project-unresolvable-cwd');
+  // Deliberately NOT initRepo(projectCwd) — no `.git` at all, the same
+  // "cwd git resolution cannot possibly succeed" shape a deleted/torn-down
+  // worktree checkout would produce (git itself errors identically for
+  // "not a git repository" and "no such directory" — both must be caught
+  // and treated as no-evidence, never thrown out of the reaper).
+  fs.mkdirSync(projectCwd, { recursive: true });
+  registerActiveProject(projectCwd);
+
+  const runId = 'run-unresolvable-cwd';
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug: 'unresolvable-cwd-job',
+      status: 'running',
+      cwd: projectCwd,
+      runId,
+      runtime: { pid: 999999 },
+      landedCommit: '89abcdef89abcdef89abcdef89abcdef89abcdef',
+    },
+  ]);
+  fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId), { recursive: true });
+
+  bustCwdCache();
+  await assert.doesNotReject(() => reapDeadRunningJobs(), 'a bounded git spawn failure/timeout must never escape the reaper as an unhandled rejection');
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === 'unresolvable-cwd-job');
+  assert.equal(row.status, 'failed', 'an unresolvable cwd must fall back to failed, exactly like no evidence at all');
+});

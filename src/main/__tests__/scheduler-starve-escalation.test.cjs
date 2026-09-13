@@ -12,21 +12,26 @@
  * Exercises selectStarveEscalations() (pure) directly, and
  * runStarveEscalationSweep() (the side-effecting wrapper) against a real,
  * scratch audit-log.jsonl and a fake attached window — matching
- * queue-starvation-per-project.test.cjs's pattern of setting HOME before
- * require() since every state path is baked from os.homedir() at load.
+ * pollLoop-dispatch-on-failure.test.cjs's pattern of setting HOME before
+ * require() (beforeAll runs AFTER module evaluation) since every state path
+ * is baked from os.homedir() at load, and restoring it in afterAll.
  *
  * Run: timeout 180 npx vitest run src/main/__tests__/scheduler-starve-escalation.test.cjs
  */
 
 'use strict';
 
-import { test, beforeEach } from 'vitest';
+import { test, beforeEach, afterAll } from 'vitest';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'starve-escalation-test-'));
+const originalHome = process.env.HOME;
+const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'starve-escalation-test-'));
+process.env.HOME = tmpHome;
+fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager'), { recursive: true });
+fs.mkdirSync(path.join(tmpHome, '.claude', 'projects'), { recursive: true });
 
 const {
   selectStarveEscalations,
@@ -35,6 +40,11 @@ const {
   attachWindow,
 } = require('../scheduler.cjs');
 const { AUDIT_LOG_PATH } = require('../lib/auditLog.cjs');
+
+afterAll(() => {
+  process.env.HOME = originalHome;
+  fs.rmSync(tmpHome, { recursive: true, force: true });
+});
 
 const CWD_A = '/home/bilko/Projects/Bilko';
 const CWD_B = '/home/bilko/Projects/session-manager';

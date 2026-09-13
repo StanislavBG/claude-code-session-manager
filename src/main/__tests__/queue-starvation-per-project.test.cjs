@@ -16,20 +16,32 @@
 
 'use strict';
 
-import { test } from 'vitest';
+import { test, afterAll } from 'vitest';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
 // HOME before require: every state path is baked from os.homedir() at load.
-process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'starve-per-project-test-'));
+// beforeAll runs AFTER module evaluation, so this assignment must stay at
+// top level — see pollLoop-dispatch-on-failure.test.cjs:40-56 for the
+// beforeAll/afterAll pattern this restore mirrors.
+const originalHome = process.env.HOME;
+const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'starve-per-project-test-'));
+process.env.HOME = tmpHome;
+fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager'), { recursive: true });
+fs.mkdirSync(path.join(tmpHome, '.claude', 'projects'), { recursive: true });
 
 const {
   classifyQueueStarvation,
   classifyQueueStarvationByProject,
   QUEUE_STARVATION_MS,
 } = require('../scheduler.cjs');
+
+afterAll(() => {
+  process.env.HOME = originalHome;
+  fs.rmSync(tmpHome, { recursive: true, force: true });
+});
 
 const PROJECT_A = '/home/bilko/Projects/starry-night-ships';
 const PROJECT_B = '/home/bilko/Projects/session-manager';

@@ -1379,7 +1379,22 @@ async function runPrdMigration() {
   // on every pass, but stays here so a fresh boot's very first log line
   // still reports the initial sweep — see consolidateAllFlatPrds's own
   // comment for why reconcile() is the load-bearing call site.)
-  await consolidateAllFlatPrds(allProjectCwds());
+  //
+  // Deferred off scheduler.init()'s synchronous critical path: allProjectCwds()
+  // is a synchronous ~270ms directory scan, and awaiting it inline here
+  // competed with the renderer's first IPC round trips (schedule.state,
+  // billing.fetch, teams.list) for the event loop during boot. Dropping the
+  // await doesn't weaken the consolidation guarantee — consolidateAllFlatPrds
+  // also runs at the top of every reconcile() (see its own comment above),
+  // and a flat PRD can only ever execute via tickQueue, which always
+  // reconciles first, so nothing dropped in the flat dir can run before a
+  // reconcile() pass sweeps it regardless of whether this boot-time pass has
+  // finished yet.
+  setImmediate(() => {
+    consolidateAllFlatPrds(allProjectCwds()).catch((e) => {
+      logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'deferred flat-PRD consolidation failed', meta: { error: e?.message } });
+    });
+  });
 
   // Rollout migration for the PRD-authoring-lockdown feature: stamp every
   // pre-existing PRD as legacy-adopted BEFORE reconcile() ever runs its

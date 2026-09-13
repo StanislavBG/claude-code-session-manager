@@ -128,6 +128,7 @@ export default defineConfig({
       'src/main/__tests__/activeIndexMerge.test.cjs',
       'src/main/__tests__/epicStatusMirror.test.cjs',
       'src/main/lib/__tests__/activeIndexRebuild.test.cjs',
+      'src/main/lib/__tests__/bootSelfHeal.test.cjs',
       'src/main/__tests__/scheduler-writeprd-epic-rollback.test.cjs',
       'src/main/__tests__/promptSessionTranscript.test.cjs',
       'src/main/__tests__/scheduler-notify-originating-tab-transcript.test.cjs',

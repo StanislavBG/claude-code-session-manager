@@ -95,6 +95,7 @@ const { openInEditor, openFileInEditor, openInFinder, openInTerminal } = require
 const { rebuildActiveIndex } = require('./lib/activeIndexRebuild.cjs');
 const { activeIndexPath: promptSessionsActiveIndexPath } = require('./lib/epicMint.cjs');
 const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
+const { scheduleBootSelfHeal } = require('./lib/bootSelfHeal.cjs');
 
 let mainWindow = null;
 let rebooting = false;
@@ -1354,40 +1355,12 @@ app.whenReady().then(async () => {
   });
   // Epic index self-heal: a project whose active-index.json is MISSING or
   // fails to parse has lost every open Epic's status unless the per-Epic
-  // status mirror (epicStatusMirror.cjs) can rebuild it. Runs once per boot,
-  // fire-and-forget, and only touches a project whose index reads unclean —
-  // a clean index is never rewritten here. See activeIndexRebuild.cjs.
-  try {
-    for (const projectCwd of allProjectCwds()) {
-      const indexPath = promptSessionsActiveIndexPath(projectCwd);
-      let unclean = false;
-      let parseError = null;
-      if (!fs.existsSync(indexPath)) {
-        unclean = true;
-      } else {
-        try {
-          JSON.parse(fs.readFileSync(indexPath, 'utf8'));
-        } catch (e) {
-          unclean = true;
-          parseError = e.message;
-        }
-      }
-      if (!unclean) continue;
-      try {
-        const { rows, skipped } = rebuildActiveIndex(projectCwd);
-        logs.writeLine({
-          scope: 'active-index-rebuild',
-          level: 'info',
-          message: 'rebuilt active-index.json from status mirrors',
-          meta: { cwd: projectCwd, parseError, restored: rows.length, skipped: skipped.length },
-        });
-      } catch (e) {
-        logs.writeLine({ scope: 'active-index-rebuild', level: 'error', message: 'rebuild failed', meta: { cwd: projectCwd, error: e?.message } });
-      }
-    }
-  } catch (e) {
-    logs.writeLine({ scope: 'active-index-rebuild', level: 'error', message: 'boot sweep failed', meta: { error: e?.message } });
-  }
+  // status mirror (epicStatusMirror.cjs) can rebuild it. Runs once per boot
+  // and only touches a project whose index reads unclean — a clean index is
+  // never rewritten. Deferred until the window paints (did-finish-load) so
+  // the ~270ms allProjectCwds() scan doesn't compete with the renderer's
+  // first IPC round trips for the event loop — see bootSelfHeal.cjs.
+  scheduleBootSelfHeal(mainWindow, { fs, allProjectCwds, promptSessionsActiveIndexPath, rebuildActiveIndex, logs });
   // History rollup finalize pass: deferred 30s past boot so it never competes
   // with first-paint, fire-and-forget (cron/offline refresh is PRD 651 — this
   // is just the one-shot in-app pass).

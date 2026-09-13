@@ -1,7 +1,7 @@
 # Claude Code Session Manager
 
-Electron desktop app — local cockpit for Claude Code CLI. Terminal + 25+ config/observability/scheduling
-tabs. Per-project state lives under `<cwd>/session-manager-operations/`.
+Electron desktop app — local cockpit for Claude Code CLI. Terminal + 25+ config/ops/scheduling tabs.
+Per-project state lives under `<cwd>/session-manager-operations/`.
 
 **This file holds the laws. The rationale behind each lives in a linked reference doc — follow the link
 before changing anything in that area.** Reference docs, all under `session-manager-operations/architecture/`:
@@ -9,9 +9,9 @@ before changing anything in that area.** Reference docs, all under `session-mana
 > **SIZE BUDGET — 12,000 chars**, checked with `wc -c CLAUDE.md` before every commit. This file is
 > read on every turn of every session. A new law is ONE line here; its rationale goes in the linked
 > doc. Over budget means **split, don't append**. Correcting a wrong line does not license a longer
-> one — rewrite at the same length, move the "why" to the doc. (The file hit 65,768 chars by
-> 2026-08-24: 57 feature commits appended, 0 of 359 PRDs ever pruned, and 7 of 8 `docs(claude-md)`
-> "cleanup" commits *grew* it. This paragraph is the only reaper.)
+> one — rewrite at the same length, move the "why" to the doc. (Hit 65,768 chars by 2026-08-24:
+> 57 commits appended, 0 of 359 PRDs pruned, 7 of 8 `docs(claude-md)` "cleanup" commits *grew* it.
+> This paragraph is the only reaper.)
 
 | Doc | Covers |
 | --- | --- |
@@ -23,6 +23,7 @@ before changing anything in that area.** Reference docs, all under `session-mana
 | [`ops-maintenance-protocol.md`](session-manager-operations/architecture/ops-maintenance-protocol.md) | Ops-folder drift sweeps |
 | [`project-partition.md`](session-manager-operations/architecture/project-partition.md) | Repo's 4 partitions, path-by-path |
 | [`host-boundary.md`](session-manager-operations/architecture/host-boundary.md) | Host-vs-ours boundary, routing rule |
+| [`scheduler-operations.md`](session-manager-operations/architecture/scheduler-operations.md) | Dispatch, needs_review ladder, reap gate, diagnosis table |
 
 ## Stack
 
@@ -32,20 +33,20 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 ## Commands
 
 - `npm run dev` — Vite + Electron with HMR. `SM_DEV=1` set automatically.
-- `npm run build` — production renderer build into `dist/`.
+- `npm run build` — renderer build into `dist/`.
 - `npm run typecheck` — `tsc --noEmit`. Must pass before commits.
-- `npm run test:unit` — `vitest run`. Single file: `timeout 120 npx vitest run <path>`. NOT `node --test` —
-  it can't resolve the TypeScript renderer imports.
+- `npm run test:unit` — `vitest run`. Single file: `timeout 120 npx vitest run <path>`. NOT `node --test`
+  (can't resolve TS renderer imports).
 - `npm run test:e2e` — Playwright Electron under `xvfb-run` (Linux).
-- `npm run lint` — `lint:selectors` + `lint:hooks`. Both guard blank-screen crashes; run alongside typecheck.
-- `npm run health` — `src/main/health.cjs`. Exit 0 = GREEN. Entry for `/local-project-health`.
+- `npm run lint` — `lint:selectors` + `lint:hooks`. Both guard blank-screen crashes; run with typecheck.
+- `npm run health` — `src/main/health.cjs` (exit 0 = GREEN); entry point for `/local-project-health`.
 - `npm publish` — runs `vite build` via `prepublishOnly`. Tag `latest`.
 
 ## Domain model — the laws
 
 Full detail + rationale: [`domain-model.md`](session-manager-operations/architecture/domain-model.md).
 Any new feature touching sessions, navigation, or per-project state must map onto the TAB → operations-root
-→ EPIC → session hierarchy rather than inventing a parallel scoping scheme.
+→ EPIC → session hierarchy.
 
 - **TAB = cwd = Main Project.** One TAB per project; extra sessions within a project are Epics, not tabs.
 - **EPIC = one unit of work** (`PromptSession`). "Sessions" is the user-facing name; `Epic`/`PromptSession`/
@@ -82,16 +83,16 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   paths only via its `opsPath()`. Read its `README.md` first.
   - **Owned** (in `OWNERS`, app-owned runtime state): `prompt-sessions` → epics · `scheduler` → scheduler ·
     `project-brief` → project-home · `logs` → logs · `bilko-host` → bilko-host · `project-pages` →
-    project-home (app's admin render route only; a Builder Epic's own Write-tool authoring stays ungoverned —
-    see `project-pages/README.md`).
+    project-home (admin render route only; a Builder Epic's own authoring stays ungoverned — see
+    `project-pages/README.md`).
   - **Deliberately NOT owned** (skill-authored docs/artifacts, no concurrent-write hazard — this is the
     correct split, not a gap): `architecture`, `design-mocks`, `HUMAN_LEARN`, `manual`, `reviews`.
-    `feedback` **retired** (2026-08-02). `browser` is a leftover artifact folder, safe to delete on sight.
+    `feedback` **retired** (2026-08-02). `browser` is a leftover, safe to delete on sight.
   - **Any new top-level folder under `session-manager-operations/` must land in this enumeration or in
-    `OWNERS` in the same PR that creates it** — `scripts/ops-sweep.cjs` greps this list and reports an
-    unlisted namespace as `UNDOCUMENTED`. Don't add a speculative `general` namespace.
+    `OWNERS` in the same PR that creates it** — `scripts/ops-sweep.cjs` flags an unlisted namespace as
+    `UNDOCUMENTED` — never a speculative `general` bucket.
 - **Open-core: the APP is free and stays free.** Field Manual is the only paid artifact. Never add a license
-  check, entitlement gate, trial limit, nag, or "pro" tier, and never move an app feature behind a purchase.
+  check, entitlement gate, trial limit, nag, or "pro" tier, and never move a feature behind a purchase.
 - **The bilko.run relay stays live** — desktop half of web remote removed 2026-08-06 (restore `b014cc2`). Do
   NOT delete/decommission the relay, its routes, or the product-page copy in `~/Projects/Bilko/`.
 
@@ -101,17 +102,19 @@ Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/
 [`code-map.md`](session-manager-operations/architecture/code-map.md),
 [`scheduler/README.md`](session-manager-operations/scheduler/README.md).
 
-- **PRD authoring is API-only** — the `scheduler_create_prd` MCP tool is the sole sanctioned way to write a
-  PRD file. Hand-writing one is a degraded last resort (app not running) and must be reported visibly.
+- **PRD authoring is API-only** — `scheduler_create_prd` is the sole sanctioned way to write a PRD.
+  Hand-writing is a degraded last resort (app not running); report it visibly.
 - Flat `scheduler/prds/` is **RETIRED** — auto-consolidated into `prds-archived/` on every `reconcile()` pass.
 - Before writing a PRD, read
   [`PRD_AUTHORING.md`](file:///home/bilko/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md) —
   rules from two real stuck-job incidents + a pre-queue checklist (§10).
-- **Guard hooks adopt by REFERENCE via a stable shim** (`guardShims.cjs`) —
-  `~/.claude/session-manager/hooks/guard-*.cjs`, not this app's own path; readiness banner installs all three.
-- A job parked in `needs_review` is a **question**, routed back to the authoring Epic — it never creates
-  work on its own.
+- **Guard hooks adopt by REFERENCE via a stable shim** (`guardShims.cjs`,
+  `~/.claude/session-manager/hooks/guard-*.cjs`) — readiness banner installs all three.
+- A job parked in `needs_review` is a **question**, routed back to the authoring Epic — never mints new work.
 - The Scheduler nav row is **PROJECT-face only** — every route it renders is cwd-derived.
+- Stuck queue or a parked `needs_review`? See
+  [`scheduler-operations.md`](session-manager-operations/architecture/scheduler-operations.md) — recovery
+  ladder + diagnosis table.
 
 ## Conventions
 
@@ -121,32 +124,32 @@ Full list + the incident behind each: [`conventions.md`](session-manager-operati
 - **No CommonJS in renderer, no ES modules in main** — `.cjs` for main/preload bypasses `type: module`.
 - **No backwards-compat shims** — single-author project; just rename and refactor.
 - **Privacy invariant**: `RecordingStatus` MUST be mounted on the TOP z-ladder rung whenever `isRecording === true`.
-- **One global z-ladder, `lib/zLayers.ts`** — values are class-name literals, never interpolated (Tailwind JIT).
+- **One global z-ladder, `lib/zLayers.ts`** — class-name literals only, never interpolated (Tailwind JIT).
 - **Telemetry is anonymous, on by default, opt-out** (`SM_TELEMETRY=0`) — see [telemetry.md](session-manager-operations/architecture/telemetry.md).
-- **No per-OS UI chrome** — native frame on every platform; no layering branches on `process.platform`.
+- **No per-OS UI chrome** — native frame everywhere; no layering branches on `process.platform`.
 - **Toast is the user-facing error channel** — `useToast().show('error', msg)`; never swallow errors.
 - **Renderer stores are islands** — no cross-store subscription; compose selectors per component.
-- **`--model` must be pinned explicitly** on every `claude -p`/`claude --print` call site — unpinned drifts cost.
+- **`--model` must be pinned explicitly** on every `claude -p`/`claude --print` call site — unpinned drift costs.
 
 ## Avoid
 
 Each of these is a real incident, with the post-mortem in
 [`conventions.md`](session-manager-operations/architecture/conventions.md) — read it before working around one.
 
-- Launching a `claude -p` process **without acquiring a slot from `lib/sessionSlots.cjs`** — the single
-  machine-wide concurrency limit — never reintroduce a private cap.
+- Launching a `claude -p` process **without acquiring a slot from `lib/sessionSlots.cjs`** (the sole
+  machine-wide cap) — never reintroduce a private cap.
 - Gating scheduler batches on **`parallelGroup`** — it's a unique-per-PRD display hint, never a barrier.
   `dependsOn` is the sole ordering primitive.
 - **Returning a freshly-built value from a zustand selector** (`?? []`, `.map(...)`, `Object.values(...)`) —
-  infinite re-render → React #185 → **the whole app renders blank**. Three incidents. `npm run lint:selectors`.
-- **Declaring a hook below a top-level early return** — React #300/#310 → the pane dies into its error
-  boundary. `npm run lint:hooks`.
-- Adding `shell: true` to `child_process.spawn` outside `watchers.cjs` / `app:test-fire-hook`.
-- Re-implementing tmp+rename atomic writes — use `config.cjs`'s `writeJson` / `writeTextAtomic`.
-- Reading remote URLs in prod — `createWindow` hard-fails if `dist/index.html` is missing.
-- Adding a new LeftNav tab before checking whether an existing surface owns that data — pruned once already
-  after growing to ~31 destinations with real overlap.
-- Adding pane-specific state to parent tabs, or importing design primitives via wildcard.
+  infinite re-render → React #185 → **the whole app renders blank**. `npm run lint:selectors`.
+- **Declaring a hook below a top-level early return** — React #300/#310 → pane dies into its error boundary.
+  `npm run lint:hooks`.
+- Adding `shell: true` to `child_process.spawn` outside `watchers.cjs`/`app:test-fire-hook`.
+- Re-implementing tmp+rename atomic writes — use `config.cjs`'s `writeJson`/`writeTextAtomic`.
+- Reading remote URLs in prod — `createWindow` fails if `dist/index.html` is missing.
+- Adding a new LeftNav tab before checking whether an existing surface owns that data — pruned once at
+  ~31 destinations with overlap.
+- Adding pane state to parent tabs, or importing design primitives via wildcard.
 
 ## Distribution
 

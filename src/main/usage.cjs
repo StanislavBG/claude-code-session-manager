@@ -116,6 +116,19 @@ const OK_CACHE_TTL_MS = 30_000;
  *
  * Returns one of: 'ok' | 'auth' | 'transient' | 'meter_rate_limited'
  */
+/**
+ * Parses a `Retry-After` header value (delta-seconds or an HTTP-date) into a
+ * millisecond duration from now, or null if absent/unparseable.
+ */
+function parseRetryAfterMs(headerValue) {
+  if (!headerValue) return null;
+  const seconds = Number(headerValue);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const dateMs = Date.parse(headerValue);
+  if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
+  return null;
+}
+
 function classifyUsageResponse(status, bodyText) {
   if (status === 401 || status === 403) return { kind: 'auth', httpStatus: status };
   if (status === 429) {
@@ -195,7 +208,12 @@ async function fetchUsage() {
     let parsed = null;
     try { parsed = JSON.parse(body); } catch { /* */ }
     if (parsed?.error?.type === 'rate_limit_error') {
-      return { kind: 'meter_rate_limited', message: body.slice(0, 200), httpStatus: 429 };
+      return {
+        kind: 'meter_rate_limited',
+        message: body.slice(0, 200),
+        httpStatus: 429,
+        retryAfterMs: parseRetryAfterMs(r.headers.get('retry-after')),
+      };
     }
     return { kind: 'transient', message: body.slice(0, 200) || 'HTTP 429', httpStatus: 429 };
   }
@@ -241,11 +259,11 @@ function registerBillingHandlers() {
       return r;
     }
     if (r.kind === 'meter_rate_limited') {
-      if (cache) return { kind: 'meter_rate_limited', message: r.message, httpStatus: r.httpStatus, cached: cache.data, staleSince: cache.fetchedAt };
+      if (cache) return { kind: 'meter_rate_limited', message: r.message, httpStatus: r.httpStatus, retryAfterMs: r.retryAfterMs, cached: cache.data, staleSince: cache.fetchedAt };
       return r;
     }
     return r; // config
   });
 }
 
-module.exports = { registerBillingHandlers, fetchUsage, classifyUsageResponse, usageMeterApplicable, readClaudeSettingsAuth };
+module.exports = { registerBillingHandlers, fetchUsage, classifyUsageResponse, parseRetryAfterMs, usageMeterApplicable, readClaudeSettingsAuth };

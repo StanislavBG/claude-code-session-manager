@@ -311,16 +311,25 @@ only post-AC work. If a review finding can't be fixed within scope, commit what
 you have, describe the finding in the commit body, and note the follow-up in your
 final result.`;
 
-// Parse \`git status --porcelain\` output into a list of changed paths. Pure +
+// Parse `git status --porcelain` output into `{ code, path }` entries. Pure +
 // exported for unit testing. Each porcelain line is "XY<space>PATH" (2 status
-// chars + space), so the path starts at index 3; rename lines ("R  a -> b")
-// keep the "a -> b" tail, which is fine for a human-facing dirty-file list.
-function parsePorcelain(stdout) {
+// chars + space); rename lines ("R  a -> b") keep the "a -> b" tail, which is
+// fine for a human-facing dirty-file list. `code` is the raw 2-char status
+// (e.g. '??' for untracked) — callers that need to distinguish "untracked"
+// from "tracked-but-modified" (the shared-tree guard's revert-vs-now-ignored
+// split) read it off the entry instead of re-deriving it later.
+function parsePorcelainEntries(stdout) {
   return String(stdout || '')
     .split('\n')
     .filter((l) => l.length > 0)
-    .map((l) => l.slice(3))
-    .filter(Boolean);
+    .map((l) => ({ code: l.slice(0, 2), path: l.slice(3) }))
+    .filter((e) => e.path);
+}
+
+// Parse `git status --porcelain` output into a list of changed paths. Pure +
+// exported for unit testing.
+function parsePorcelain(stdout) {
+  return parsePorcelainEntries(stdout).map((e) => e.path);
 }
 
 // Return the list of uncommitted paths in cwd, or null when the guard does not
@@ -336,6 +345,25 @@ function uncommittedChanges(cwd) {
       (err, stdout) => {
         if (err) { resolve(null); return; } // not a repo / git missing → skip
         resolve(parsePorcelain(stdout));
+      },
+    );
+  });
+}
+
+// Same as uncommittedChanges but keeps each path's porcelain status code —
+// the shared-tree guard's baseline needs this to tell "was untracked" apart
+// from "was tracked-and-modified" (see evaluateSharedTreeGuard). Returns null
+// under the same conditions as uncommittedChanges; never throws.
+function uncommittedChangesWithStatus(cwd) {
+  return new Promise((resolve) => {
+    if (!cwd) { resolve(null); return; }
+    execFile(
+      'git',
+      ['-C', cwd, 'status', '--porcelain'],
+      { timeout: 10_000, windowsHide: true },
+      (err, stdout) => {
+        if (err) { resolve(null); return; }
+        resolve(parsePorcelainEntries(stdout));
       },
     );
   });
@@ -429,17 +457,52 @@ function restoreSpecificStash(cwd, ref) {
 //   - reverted: a path that was dirty in the baseline, is clean now, and was
 //     not touched by any commit landed during the run — the job reset/
 //     checked-out over pre-existing uncommitted work without stashing it.
-// Pure/no I/O — the guard's git calls happen at the call site
-// (checkSharedTreeGuard). Exported for unit testing.
-function evaluateSharedTreeGuard({ stashBefore, stashAfter, dirtyBefore, dirtyAfter, pathsCommittedDuringRun }) {
+//
+// A THIRD outcome is not a revert at all: an untracked path can drop out of
+// `git status` because the run committed a `.gitignore` change that now
+// matches it — the file is untouched on disk, just no longer visible to git
+// (Incident: 2026-09-12, PRD 1181 added a bare `logs/` ignore pattern, eleven
+// untracked `session-manager-operations/logs/*` paths vanished from status,
+// and an otherwise-perfect run was parked in needs_review for a human who had
+// nothing to decide). `dirtyBefore` entries therefore carry each path's
+// porcelain status code (`{ code, path }`, from parsePorcelainEntries) so this
+// function can tell "was untracked" apart from "was tracked-and-modified":
+//   - a TRACKED path (any code other than '??') leaving the dirty set always
+//     means its content was restored to HEAD — still `reverted`, even though
+//     the file still exists on disk, because for a tracked file "exists" is
+//     not the question; "matches what the human left uncommitted" is.
+//   - an UNTRACKED path ('??') leaving the dirty set is `reverted` only if it
+//     no longer exists on disk; if it still exists, it merely became ignored
+//     and is reported separately as `nowIgnored`.
+// Plain path strings are still accepted in `dirtyBefore` for callers that
+// have no status code (e.g. the stash-detection pass, which always passes an
+// empty array) — an entry with no `code` is treated as tracked, matching the
+// old behavior exactly.
+//
+// Pure/no I/O — status-code parsing and on-disk existence checks both happen
+// at the call site (checkSharedTreeGuard); this function never stats the
+// filesystem. Exported for unit testing.
+function evaluateSharedTreeGuard({ stashBefore, stashAfter, dirtyBefore, dirtyAfter, pathsCommittedDuringRun, existsAfter }) {
   const beforeHashes = new Set((stashBefore || []).map((l) => parseStashLine(l)?.hash).filter(Boolean));
   const newStashes = (stashAfter || [])
     .map(parseStashLine)
     .filter((e) => e && !beforeHashes.has(e.hash));
   const dirtyAfterSet = new Set(dirtyAfter || []);
   const committedSet = new Set(pathsCommittedDuringRun || []);
-  const reverted = (dirtyBefore || []).filter((p) => !dirtyAfterSet.has(p) && !committedSet.has(p));
-  return { newStashes, reverted };
+  const existsSet = new Set(existsAfter || []);
+  const reverted = [];
+  const nowIgnored = [];
+  for (const entry of dirtyBefore || []) {
+    const p = typeof entry === 'string' ? entry : entry.path;
+    const code = typeof entry === 'string' ? undefined : entry.code;
+    if (dirtyAfterSet.has(p) || committedSet.has(p)) continue;
+    if (code === '??' && existsSet.has(p)) {
+      nowIgnored.push(p);
+    } else {
+      reverted.push(p);
+    }
+  }
+  return { newStashes, reverted, nowIgnored };
 }
 
 // Post-run shared-tree guard for an IN-PLACE job (worktree.ok === false —
@@ -489,18 +552,34 @@ async function checkSharedTreeGuard({ cwd, stashBaseline, dirtyBaseline, headBef
     // restored stash is not ALSO reported as an unexplained revert (it was
     // explained — by the stash this guard just restored).
     const dirtyAfter = await module.exports.uncommittedChanges(cwd);
-    const { reverted } = module.exports.evaluateSharedTreeGuard({
+    // Existence check for the "now ignored, not reverted" split (2026-09-12
+    // incident) — only untracked baseline entries need it; a tracked path
+    // leaving the dirty set is always a revert regardless of disk state (see
+    // evaluateSharedTreeGuard). Scoped to entries carrying a status code —
+    // plain path strings (no code) fall back to the old always-reverted path.
+    const existsAfter = (dirtyBaseline || [])
+      .filter((e) => e && typeof e === 'object' && e.code === '??')
+      .map((e) => e.path)
+      .filter((p) => {
+        try { return fs.existsSync(path.join(cwd, p)); } catch { return false; }
+      });
+    const { reverted, nowIgnored } = module.exports.evaluateSharedTreeGuard({
       stashBefore: stashBaseline,
       stashAfter,
       dirtyBefore: dirtyBaseline,
       dirtyAfter,
       pathsCommittedDuringRun,
+      existsAfter,
     });
     if (reverted.length) {
       result.reverted = reverted;
       console.error(`[scheduler] ${slug}: shared-tree guard: ${reverted.length} path(s) reverted in the shared tree with no commit to explain it (${reverted.slice(0, 3).join(', ')})`);
     }
-    return (result.restoredStash || result.restoreFailed || result.ambiguousStashes || result.reverted) ? result : null;
+    if (nowIgnored.length) {
+      result.nowIgnored = nowIgnored;
+      console.log(`[scheduler] ${slug}: shared-tree guard: ${nowIgnored.length} path(s) no longer shown by git status but still present on disk — likely a new ignore rule, not a revert (${nowIgnored.slice(0, 3).join(', ')})`);
+    }
+    return (result.restoredStash || result.restoreFailed || result.ambiguousStashes || result.reverted || result.nowIgnored) ? result : null;
   } catch (e) {
     console.error(`[scheduler] ${slug}: shared-tree guard error`, e);
     return null;
@@ -5550,8 +5629,13 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
 
     // Commit-guard baseline: snapshot the working tree BEFORE the run so the
     // post-run check flags only paths THIS job left dirty, not pre-existing WIP.
+    // Captured once, with status codes, so the shared-tree guard below can
+    // tell "was untracked" apart from "was tracked-and-modified" (2026-09-12
+    // incident) without a second `git status` call; every other consumer of
+    // `guardBaseline` still gets the plain path-string array it always did.
     const guardCwd = job.cwd || defaultCwd;
-    const guardBaseline = await uncommittedChanges(guardCwd);
+    const guardBaselineEntries = await uncommittedChangesWithStatus(guardCwd);
+    const guardBaseline = guardBaselineEntries ? guardBaselineEntries.map((e) => e.path) : guardBaselineEntries;
     const guardHeadBefore = await gitHead(guardCwd);
     // Shared-tree stash guard baseline (incident 2026-09-01): captured
     // unconditionally, before worktree isolation is even attempted, so an
@@ -5997,7 +6081,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       sharedTreeGuard = await module.exports.checkSharedTreeGuard({
         cwd: guardCwd,
         stashBaseline,
-        dirtyBaseline: guardBaseline,
+        dirtyBaseline: guardBaselineEntries,
         headBefore: guardHeadBefore,
         slug: job.slug,
       });
@@ -7871,6 +7955,57 @@ function isExhaustedAutoFix(job) {
 }
 
 /**
+ * Verdicts from the POST-RUN GUARDS (commit-guard / shared-tree guard) that a
+ * later, independently-checkable commit/looksDone signal can meaningfully
+ * confirm or refute. Auto-fix investigations only ever launch for FAILING
+ * runs (see isExhaustedAutoFix above and selectAutoFixTargets) — a job parked
+ * by one of these GUARD verdicts exits 0 and never has autoFixAttempted set,
+ * so it is invisible to isExhaustedAutoFix and can sit in needs_review
+ * forever with nothing to spend and nothing to exhaust (PRD 1181, 2026-09-12:
+ * exit 0, commit aff5607 landed, parked on a shared-tree verdict, cleared
+ * only by a human).
+ *
+ * 'worktree_integration_failed' is deliberately EXCLUDED — its damage IS a
+ * commit: one stranded on an unmerged `sm-job/<slug>` branch. A `landedCommit`
+ * existing is not evidence against that verdict, it is a restatement of it,
+ * so admitting it here would auto-complete a row whose work never actually
+ * reached the target branch. It already has its own dedicated, git-native
+ * resolution path (selectMechanicalRecoveryTarget / performMechanicalRecovery
+ * — a real re-attempted merge) and must never be pulled into this ladder.
+ */
+const GUARD_VERDICT_EVIDENCE_ELIGIBLE = new Set(['silent_no_op', 'shared_tree_reverted']);
+
+/**
+ * Pure predicate, no I/O: a needs_review row parked directly by one of the
+ * GUARD_VERDICT_EVIDENCE_ELIGIBLE verdicts, that never went through an
+ * auto-fix investigation at all (autoFixAttempted is not true) — the
+ * structural gap this PRD closes, distinct from isExhaustedAutoFix's "went
+ * through auto-fix and spent it" case. A job that DID get an auto-fix
+ * investigation is left to isExhaustedAutoFix's own ladder rather than this
+ * one, even if its verifierVerdict happens to also be in the eligible set.
+ * Exported for tests.
+ */
+function isGuardParkedWithoutAutoFix(job) {
+  if (!job || job.status !== 'needs_review') return false;
+  if (job.autoFixAttempted === true) return false;
+  return GUARD_VERDICT_EVIDENCE_ELIGIBLE.has(job.verifierVerdict);
+}
+
+/**
+ * Pure predicate, no I/O: is this needs_review row eligible for the bounded
+ * auto-resolve ladder at all — either because its auto-fix path is genuinely
+ * spent (isExhaustedAutoFix), or because it was parked by a GUARD verdict
+ * that never entered auto-fix in the first place (isGuardParkedWithoutAutoFix).
+ * Both classes share ONE ladder (applyNeedsReviewAutoResolve) rather than a
+ * duplicated one — the ladder itself doesn't care which door a row came
+ * through, only whether it now carries completion evidence (job.looksDone).
+ * Exported for tests.
+ */
+function isEligibleForNeedsReviewAutoResolve(job) {
+  return isExhaustedAutoFix(job) || isGuardParkedWithoutAutoFix(job);
+}
+
+/**
  * Pure predicate: an investigation produced a fix plan (autoFixOutcome ===
  * 'plan') but its fix-plan slug is not present among `queuedSlugs` — the
  * plan file failed to become a queue row (write failure, or some other
@@ -8017,17 +8152,26 @@ function isRescanCandidate(job) {
  * selectResumeRecoveryTarget / selectAutoFixTargets) so the guard can never
  * again be narrower than the work reverifyNeedsReview performs.
  *
- * Cost: selectMechanicalRecoveryTarget/selectResumeRecoveryTarget are pure
- * (no I/O). selectAutoFixTargets is called with an injected fixSlugExists
- * that always returns false — cheap and deliberately over-inclusive (a false
- * positive here just means one extra periodic pass, never a missed one) so
- * this guard never pays selectAutoFixTargets's production fs.existsSync scan
- * per tick. resolveRunId's IO only fires for rows missing job.runId, same as
+ * Widened again (this PRD): a `needs_review` row parked directly by a GUARD
+ * verdict with no auto-fix history (isGuardParkedWithoutAutoFix) is not an
+ * isRescanCandidate either — RESCANNABLE_VERDICTS covers transcript-verifier
+ * verdicts, not commit-guard/shared-tree-guard verdicts — but
+ * reverifyNeedsReview's looksDone-annotation pass now runs for it too (see
+ * that function). Same rule as always: never let this guard be narrower than
+ * the work reverifyNeedsReview actually performs.
+ *
+ * Cost: selectMechanicalRecoveryTarget/selectResumeRecoveryTarget and
+ * isGuardParkedWithoutAutoFix are pure (no I/O). selectAutoFixTargets is
+ * called with an injected fixSlugExists that always returns false — cheap
+ * and deliberately over-inclusive (a false positive here just means one
+ * extra periodic pass, never a missed one) so this guard never pays
+ * selectAutoFixTargets's production fs.existsSync scan per tick.
+ * resolveRunId's IO only fires for rows missing job.runId, same as
  * isRescanCandidate already incurs above.
  */
 function shouldRunPeriodicReverify(jobs) {
   if (!Array.isArray(jobs)) return false;
-  if (jobs.some((j) => isRescanCandidate(j))) return true;
+  if (jobs.some((j) => isRescanCandidate(j) || isGuardParkedWithoutAutoFix(j))) return true;
   if (jobs.some((j) => selectMechanicalRecoveryTarget(j) || selectResumeRecoveryTarget(j))) return true;
   return selectAutoFixTargets(jobs, { fixSlugExists: () => false }).length > 0;
 }
@@ -8193,9 +8337,11 @@ function needsReviewAutoResolveDisabled() {
  * selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) →
  *   [{ slug, cwd, ageMs, attempts }]
  *
- * Pure selector — no IO. Selects `needs_review` rows whose auto-fix path is
- * genuinely spent (isExhaustedAutoFix), whose newest statusHistory entry
- * with `to === 'needs_review'` is older than `thresholdMs`, and whose
+ * Pure selector — no IO. Selects `needs_review` rows eligible for the
+ * bounded auto-resolve ladder (isEligibleForNeedsReviewAutoResolve — either
+ * auto-fix genuinely spent, or parked by a GUARD verdict that never entered
+ * auto-fix at all), whose newest statusHistory entry with `to ===
+ * 'needs_review'` is older than `thresholdMs`, and whose
  * exhaustedResolveAttempts counter has not yet spent its cap.
  *
  * The inclusion bound is inclusive of the cap itself (`<= CAP`, not `<
@@ -8209,7 +8355,7 @@ function selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) {
   const targets = [];
   for (const j of jobs ?? []) {
     if (j.status !== 'needs_review') continue;
-    if (!isExhaustedAutoFix(j)) continue;
+    if (!isEligibleForNeedsReviewAutoResolve(j)) continue;
     if ((j.exhaustedResolveAttempts ?? 0) > NEEDS_REVIEW_RESOLVE_CAP) continue;
     const history = j.statusHistory || [];
     let entry = null;
@@ -8245,17 +8391,26 @@ function selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) {
  * failed-autoreset loop above) so a stale target computed before this
  * mutate() pass can never double-apply. Returns the outcome, or null if the
  * race guard rejected it.
+ *
+ * A row can reach here through either door (isEligibleForNeedsReviewAutoResolve):
+ * auto-fix genuinely exhausted, or parked directly by a GUARD_VERDICT_EVIDENCE_
+ * ELIGIBLE verdict with no auto-fix history at all. `originIsGuardParked` picks
+ * which door this particular row came through, purely to make the requeue/skip
+ * reason text (and the Queue UI's job.error) name the RIGHT evidence — a
+ * guard-parked row was never "exhausted auto-fix" and must never claim to be.
  */
 function applyNeedsReviewAutoResolve(j) {
-  if (!j || j.status !== 'needs_review' || !isExhaustedAutoFix(j)) return null;
+  if (!j || j.status !== 'needs_review' || !isEligibleForNeedsReviewAutoResolve(j)) return null;
   if ((j.exhaustedResolveAttempts ?? 0) > NEEDS_REVIEW_RESOLVE_CAP) return null;
+  const originIsGuardParked = !isExhaustedAutoFix(j) && isGuardParkedWithoutAutoFix(j);
 
   if (j.looksDone) {
     const attempt = j.exhaustedResolveAttempts ?? 0;
-    transitionJob(j, 'completed', {
-      reason: `needs_review auto-resolve: verifier annotation shows work landed (${j.looksDone.commits.length} commit(s) since this run touch the PRD's declared paths)`,
-      source: 'needsReviewAutoResolve',
-    });
+    const reason = originIsGuardParked
+      ? `needs_review auto-resolve: guard verdict '${j.verifierVerdict}' with landed commit and looksDone evidence — `
+        + `${j.looksDone.commits.length} commit(s) since this run touch the PRD's declared paths, work landed`
+      : `needs_review auto-resolve: verifier annotation shows work landed (${j.looksDone.commits.length} commit(s) since this run touch the PRD's declared paths)`;
+    transitionJob(j, 'completed', { reason, source: 'needsReviewAutoResolve' });
     appendAuditEvent('needs_review_auto_resolved', { slug: j.slug, cwd: j.cwd ?? null, outcome: 'completed', attempt });
     return 'completed';
   }
@@ -8264,18 +8419,22 @@ function applyNeedsReviewAutoResolve(j) {
   if (attemptsSoFar < NEEDS_REVIEW_RESOLVE_CAP) {
     const attempt = attemptsSoFar + 1;
     j.exhaustedResolveAttempts = attempt;
-    transitionJob(j, 'pending', {
-      reason: `needs_review auto-resolve: exhausted auto-fix, no completion evidence — requeued for one more run (attempt ${attempt}/${NEEDS_REVIEW_RESOLVE_CAP})`,
-      source: 'needsReviewAutoResolve',
-    });
+    const reason = originIsGuardParked
+      ? `needs_review auto-resolve: guard verdict '${j.verifierVerdict}' with no completion evidence yet — `
+        + `requeued for one more run (attempt ${attempt}/${NEEDS_REVIEW_RESOLVE_CAP})`
+      : `needs_review auto-resolve: exhausted auto-fix, no completion evidence — requeued for one more run (attempt ${attempt}/${NEEDS_REVIEW_RESOLVE_CAP})`;
+    transitionJob(j, 'pending', { reason, source: 'needsReviewAutoResolve' });
     appendAuditEvent('needs_review_auto_resolved', { slug: j.slug, cwd: j.cwd ?? null, outcome: 'requeued', attempt });
     return 'requeued';
   }
 
   j.needsReviewAutoResolvedSkip = true;
-  j.error = `needs_review auto-resolve: exhausted auto-fix path (autoFixOutcome=${j.autoFixOutcome ?? 'none'}, `
-    + `autoFixRetries=${j.autoFixRetries ?? 0}) with no completion evidence after ${NEEDS_REVIEW_RESOLVE_CAP} `
-    + `requeue attempt(s) — auto-skipped to unblock downstream dependsOn rows`;
+  j.error = originIsGuardParked
+    ? `needs_review auto-resolve: guard verdict '${j.verifierVerdict}' with no completion evidence after `
+      + `${NEEDS_REVIEW_RESOLVE_CAP} requeue attempt(s) — auto-skipped to unblock downstream dependsOn rows`
+    : `needs_review auto-resolve: exhausted auto-fix path (autoFixOutcome=${j.autoFixOutcome ?? 'none'}, `
+      + `autoFixRetries=${j.autoFixRetries ?? 0}) with no completion evidence after ${NEEDS_REVIEW_RESOLVE_CAP} `
+      + `requeue attempt(s) — auto-skipped to unblock downstream dependsOn rows`;
   transitionJob(j, 'skipped', {
     reason: `needs_review auto-resolve: cap exhausted (${NEEDS_REVIEW_RESOLVE_CAP}/${NEEDS_REVIEW_RESOLVE_CAP} requeue attempts) — auto-skipped`,
     source: 'needsReviewAutoResolve',
@@ -8424,11 +8583,29 @@ async function computeLooksDone(job) {
 
 async function reverifyNeedsReview() {
   const snap = await readQueue();
-  const candidates = snap.jobs.filter(isRescanCandidate);
+  // isGuardParkedWithoutAutoFix rows are NOT isRescanCandidate (their
+  // verifierVerdict is a commit-guard/shared-tree-guard verdict, not a
+  // RESCANNABLE_VERDICTS transcript-verifier one) — included here so this
+  // pass also computes their looksDone evidence, the widened half of the
+  // guard-verdict auto-resolve gap this PRD closes. Handled in its own
+  // branch below (no transcript rescan — there is no transcript verdict to
+  // rescan) rather than through the isRescanCandidate machinery.
+  const candidates = snap.jobs.filter((j) => isRescanCandidate(j) || isGuardParkedWithoutAutoFix(j));
   const healed = [];
   const leftForReview = [];
   const looksDoneUpdates = [];
   for (const job of candidates) {
+    if (!isRescanCandidate(job) && isGuardParkedWithoutAutoFix(job)) {
+      // Guard-verdict park, never auto-fixed: only evidence gathering, never
+      // a transcript rescan (there was never a transcript-verifier verdict
+      // here) and never a direct heal — applyNeedsReviewAutoResolve is the
+      // sole place that turns this annotation into a status change.
+      const looksDone = await computeLooksDone(job);
+      if (looksDone) {
+        looksDoneUpdates.push({ slug: job.slug, cwd: job.cwd, looksDone, fromFailed: false });
+      }
+      continue;
+    }
     if (job.status === 'failed') {
       // A failed row never runs the transcript-verifier rescan below — that
       // machinery (verifyRun/COMPLETED_EQUIVALENT_VERDICTS) exists to
@@ -10140,6 +10317,7 @@ module.exports = {
   allocateParallelGroup,
   selectHistoryJobs,
   parsePorcelain,
+  parsePorcelainEntries,
   FINISH_PROTOCOL,
   IDLE_OUTPUT_KILL_MS,
   BASH_DEFAULT_TIMEOUT_MS,
@@ -10176,6 +10354,9 @@ module.exports = {
   resolveRunId,
   isUnresolvableNeedsReview,
   isExhaustedAutoFix,
+  GUARD_VERDICT_EVIDENCE_ELIGIBLE,
+  isGuardParkedWithoutAutoFix,
+  isEligibleForNeedsReviewAutoResolve,
   isPlanUnqueued,
   isFixPlanDead,
   fixSlugFor,
@@ -10261,6 +10442,7 @@ module.exports = {
   evaluateSharedTreeGuard,
   checkSharedTreeGuard,
   uncommittedChanges,
+  uncommittedChangesWithStatus,
   gitHead,
   isBranchAlreadyIntegrated,
   selectResumeRecoveryTarget,

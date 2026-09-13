@@ -16,6 +16,7 @@
 'use strict';
 
 import { test, expect, vi, afterEach } from 'vitest';
+const fs = require('node:fs');
 const scheduler = require('../scheduler.cjs');
 const { evaluateSharedTreeGuard, checkSharedTreeGuard } = scheduler;
 
@@ -209,4 +210,91 @@ test('checkSharedTreeGuard never throws when the underlying git calls reject', a
     slug: 'job-1',
   });
   expect(result).toBeNull();
+});
+
+// --- 2026-09-12 false-positive: an untracked path that merely became
+// IGNORED during the run (a .gitignore edit) is not a revert. See the
+// evaluateSharedTreeGuard doc comment for the full incident writeup. Each
+// test below is written to FAIL against the pre-fix implementation (which
+// computed `reverted = dirtyBefore - dirtyAfter - committed` with no
+// existence/tracked-status distinction at all) and PASS after it.
+
+test('evaluateSharedTreeGuard: an untracked path that disappears from git status but STILL EXISTS on disk is nowIgnored, not reverted', () => {
+  // Pre-fix behavior: this path would land in `reverted` (dirtyBefore minus
+  // dirtyAfter minus committed, no existence check at all) — FAILS pre-fix.
+  const result = evaluateSharedTreeGuard({
+    stashBefore: [],
+    stashAfter: [],
+    dirtyBefore: [{ code: '??', path: 'session-manager-operations/logs/errors-2026-09-12.jsonl' }],
+    dirtyAfter: [],
+    pathsCommittedDuringRun: ['.gitignore'],
+    existsAfter: ['session-manager-operations/logs/errors-2026-09-12.jsonl'],
+  });
+  expect(result.reverted).toEqual([]);
+  expect(result.nowIgnored).toEqual(['session-manager-operations/logs/errors-2026-09-12.jsonl']);
+});
+
+test('evaluateSharedTreeGuard: an untracked path that disappears from git status AND no longer exists on disk is still reverted', () => {
+  // Proves the fix is not a blanket "stop reporting reverted": a genuinely
+  // deleted untracked file (the guard's real purpose — catching a job that
+  // discarded uncommitted work) must still surface. If the fix had simply
+  // stopped reporting any untracked-and-missing path as reverted, this test
+  // would fail (reverted would come back empty instead of containing the
+  // path).
+  const result = evaluateSharedTreeGuard({
+    stashBefore: [],
+    stashAfter: [],
+    dirtyBefore: [{ code: '??', path: 'data/scratch.txt' }],
+    dirtyAfter: [],
+    pathsCommittedDuringRun: [],
+    existsAfter: [], // file no longer exists on disk
+  });
+  expect(result.reverted).toEqual(['data/scratch.txt']);
+  expect(result.nowIgnored).toEqual([]);
+});
+
+test('evaluateSharedTreeGuard: a TRACKED path clean after the run is still reverted even though it exists on disk', () => {
+  // A tracked file leaving the dirty set means its content was restored to
+  // HEAD — exactly the discard this guard exists to catch — regardless of
+  // whether the file is still present. Pre-fix this already worked by
+  // accident (no existence check existed at all); this test pins the
+  // behavior now that existence checks exist for the untracked branch, so a
+  // future change can't accidentally start trusting `existsAfter` for
+  // tracked paths too.
+  const result = evaluateSharedTreeGuard({
+    stashBefore: [],
+    stashAfter: [],
+    dirtyBefore: [{ code: ' M', path: 'src/config.js' }],
+    dirtyAfter: [],
+    pathsCommittedDuringRun: [],
+    existsAfter: ['src/config.js'], // file exists, but content was reset to HEAD
+  });
+  expect(result.reverted).toEqual(['src/config.js']);
+  expect(result.nowIgnored).toEqual([]);
+});
+
+test('checkSharedTreeGuard end-to-end: the real 2026-09-12 incident shape — untracked logs path ignored by a committed .gitignore change, file still on disk — must NOT verdict shared_tree_reverted', async () => {
+  // PRD 1181's exact shape: a bare `logs/` pattern lands in .gitignore during
+  // the run (committed), eleven untracked log paths vanish from `git status`,
+  // and the files are untouched on disk. Pre-fix, checkSharedTreeGuard's
+  // `reverted` would contain this path (no existsAfter computation existed),
+  // driving the caller's `verdict: 'shared_tree_reverted'` downgrade — FAILS
+  // pre-fix.
+  const logPath = 'session-manager-operations/logs/errors-2026-09-12.jsonl';
+  vi.spyOn(scheduler, 'stashList').mockResolvedValue([]);
+  vi.spyOn(scheduler, 'gitHead').mockResolvedValue('sha-after');
+  vi.spyOn(scheduler, 'pathsChangedSince').mockResolvedValue(['.gitignore']);
+  vi.spyOn(scheduler, 'uncommittedChanges').mockResolvedValue([]); // the log path no longer shows up at all
+  vi.spyOn(fs, 'existsSync').mockImplementation((p) => String(p).includes('errors-2026-09-12.jsonl'));
+
+  const result = await checkSharedTreeGuard({
+    cwd: '/repo',
+    stashBaseline: [],
+    dirtyBaseline: [{ code: '??', path: logPath }],
+    headBefore: 'sha-before',
+    slug: 'job-1181',
+  });
+
+  expect(result.reverted).toBeUndefined();
+  expect(result.nowIgnored).toEqual([logPath]);
 });

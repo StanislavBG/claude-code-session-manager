@@ -24,6 +24,7 @@ const {
   selectReapableJobs, mapOutcomeToGateOutcome, classifyRunOutcome,
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome,
   isAlreadySatisfiedOnMain, resolvePidlessFailureOverride,
+  readSpawnedPidFromLog, isLogFresh,
 } = require('../reaperHelpers.cjs');
 const { detectRateLimitInLog } = require('../rateLimitDetect.cjs');
 
@@ -339,6 +340,28 @@ test('findLiveProcessForJob: no live process anywhere → null', () => {
   assert.strictEqual(pid, null);
 });
 
+// findLiveProcessForJob: runCwd — the 2026-09-13 in-place/shared-tree fix.
+// A run with no dedicated worktree (no worktreeDir) and no slug in argv
+// (dispatch never puts it there) is invisible to both existing matches; the
+// runCwd+cmdline-claude combo match exists for exactly this shape. `sleep`
+// is used as the /proc-visible process here (not a real `claude` binary), so
+// this exercises the cwd-plus-cmdline-substring code path directly rather
+// than depending on a real claude binary being installed.
+test('findLiveProcessForJob: runCwd match requires BOTH cwd AND a claude-looking cmdline — bare cwd match is never sufficient', async () => {
+  if (process.platform !== 'linux' || !fs.existsSync('/proc')) return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-reaper-runcwd-'));
+  // Runs in `dir` but its cmdline has no "claude" in it — must NOT match.
+  const child = spawn('sleep', ['5'], { cwd: dir, stdio: 'ignore' });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const pid = findLiveProcessForJob({ slug: 'unrelated-slug' }, { runCwd: dir });
+    assert.strictEqual(pid, null, 'a bare cwd match without a claude-looking cmdline must never match — shared-tree cross-match hazard');
+  } finally {
+    child.kill('SIGKILL');
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // logHasOutput — the literal "did the run dir produce any log output" check
 // that gates whether a pidless reap may assert gateOutcome: 'never_ran'.
 
@@ -414,6 +437,116 @@ test('resolvePidlessFailureOverride: row with no landedCommit → null, existing
   assert.strictEqual(resolvePidlessFailureOverride({ slug: 'genuinely-never-ran' }), null);
   assert.strictEqual(resolvePidlessFailureOverride({ slug: 'genuinely-never-ran', landedCommit: null }), null);
   assert.strictEqual(resolvePidlessFailureOverride({ slug: 'genuinely-never-ran', landedCommit: '' }), null);
+});
+
+// readSpawnedPidFromLog — recovers the pid a pidless row's spawn actually
+// produced from the run's own log (2026-09-13 incident: runId
+// 2026-09-13T16-15-56-818Z spawned pid=3138458, logged it, but the
+// runtime.pid persistence mutate failed silently and the pidless-grace
+// reaper terminalized a live job it could have found here).
+
+test('readSpawnedPidFromLog: parses the scheduler\'s own spawned-pid line', () => {
+  const p = writeTmpLog('some preamble\n[scheduler] spawned pid=3138458 sessionId=345ca5b1-c7a7-4167-9b55-f4905e3afe01 (process group)\n\nmore output\n');
+  assert.strictEqual(readSpawnedPidFromLog(p), 3138458);
+});
+
+test('readSpawnedPidFromLog: missing file → null', () => {
+  assert.strictEqual(readSpawnedPidFromLog('/nonexistent/path/does-not-exist.log'), null);
+});
+
+test('readSpawnedPidFromLog: empty file → null', () => {
+  const p = writeTmpLog('');
+  assert.strictEqual(readSpawnedPidFromLog(p), null);
+});
+
+test('readSpawnedPidFromLog: log with no spawned-pid line → null', () => {
+  const p = writeTmpLog('{"type":"result","subtype":"success","is_error":false,"result":"done"}\n');
+  assert.strictEqual(readSpawnedPidFromLog(p), null);
+});
+
+test('readSpawnedPidFromLog: null path → null', () => {
+  assert.strictEqual(readSpawnedPidFromLog(null), null);
+});
+
+// isLogFresh — pure predicate: a log modified within the window is positive
+// proof of life, independent of runtime.pid bookkeeping.
+
+test('isLogFresh: mtime within window → true', () => {
+  assert.strictEqual(isLogFresh(NOW - 60_000, NOW, 20 * 60_000), true);
+});
+
+test('isLogFresh: mtime outside window → false', () => {
+  assert.strictEqual(isLogFresh(NOW - 30 * 60_000, NOW, 20 * 60_000), false);
+});
+
+test('isLogFresh: missing/invalid mtime or window → false', () => {
+  assert.strictEqual(isLogFresh(null, NOW, 20 * 60_000), false);
+  assert.strictEqual(isLogFresh(NaN, NOW, 20 * 60_000), false);
+  assert.strictEqual(isLogFresh(NOW - 60_000, NOW, null), false);
+});
+
+// selectReapableJobs — Part B wiring: a pidless row past grace now consults
+// the run log for a pid, and a fresh log skips the row entirely, BEFORE
+// falling back to findLiveProcess or the existing terminal reap.
+
+test('selectReapableJobs: pidless + past grace + log yields a LIVE pid → recovered, never reapable, row stays running', () => {
+  const jobs = [{ slug: 'zombie-log-alive', status: 'running', startedAt: agoMin(464) }];
+  const pidAlive = (pid) => pid === 3138458;
+  const getLogPid = () => 3138458;
+  const { reapable, recovered, warnings } = selectReapableJobs(jobs, NOW, {
+    pidAlive, grace: GRACE, getLogPid,
+  });
+  assert.deepStrictEqual(reapable, []);
+  assert.deepStrictEqual(warnings, []);
+  assert.strictEqual(recovered.length, 1);
+  assert.strictEqual(recovered[0].slug, 'zombie-log-alive');
+  assert.strictEqual(recovered[0].pid, 3138458);
+});
+
+test('selectReapableJobs: pidless + past grace + log yields a DEAD pid → still reaps (no regression)', () => {
+  const jobs = [{ slug: 'zombie-log-dead', status: 'running', startedAt: agoMin(464) }];
+  const getLogPid = () => 3138458;
+  const { reapable, recovered } = selectReapableJobs(jobs, NOW, {
+    pidAlive: alwaysDead, grace: GRACE, getLogPid,
+  });
+  assert.deepStrictEqual(recovered, []);
+  assert.strictEqual(reapable.length, 1);
+  assert.strictEqual(reapable[0].pidless, true);
+});
+
+test('selectReapableJobs: pidless + past grace + FRESH log mtime → skipped entirely (neither reapable nor recovered)', () => {
+  const jobs = [{ slug: 'chatty-pidless', status: 'running', startedAt: agoMin(464) }];
+  const getLogMtimeMs = () => NOW - 60_000; // modified 1 minute ago
+  const { reapable, recovered, warnings } = selectReapableJobs(jobs, NOW, {
+    pidAlive: alwaysAlive, grace: GRACE, getLogMtimeMs, logFreshWindowMs: 20 * 60_000,
+  });
+  assert.deepStrictEqual(reapable, []);
+  assert.deepStrictEqual(recovered, []);
+  assert.strictEqual(warnings.length, 1);
+  assert.strictEqual(warnings[0].slug, 'chatty-pidless');
+  assert.match(warnings[0].reason, /log evidence/);
+});
+
+test('selectReapableJobs: pidless + past grace + STALE log mtime + no recoverable pid → reaps with the existing reason string, byte-identical', () => {
+  const jobs = [{ slug: 'zombie', status: 'running', startedAt: agoMin(464) }];
+  const getLogMtimeMs = () => NOW - 25 * 60_000; // stale relative to a 20m window
+  const { reapable } = selectReapableJobs(jobs, NOW, {
+    pidAlive: alwaysAlive, grace: GRACE, getLogMtimeMs, logFreshWindowMs: 20 * 60_000,
+  });
+  assert.strictEqual(reapable.length, 1);
+  assert.strictEqual(reapable[0].reason, 'reaped: no runtime.pid recorded after 10m — spawn never completed');
+});
+
+test('selectReapableJobs: a row WITH a live runtime.pid is untouched by every new code path', () => {
+  const jobs = [{ slug: 'live', status: 'running', runtime: { pid: 1 }, startedAt: agoMin(500) }];
+  const getLogPid = () => { throw new Error('must never be called for a live-pid row'); };
+  const getLogMtimeMs = () => { throw new Error('must never be called for a live-pid row'); };
+  const { reapable, recovered, warnings } = selectReapableJobs(jobs, NOW, {
+    pidAlive: alwaysAlive, grace: GRACE, getLogPid, getLogMtimeMs, logFreshWindowMs: 20 * 60_000,
+  });
+  assert.deepStrictEqual(reapable, []);
+  assert.deepStrictEqual(recovered, []);
+  assert.deepStrictEqual(warnings, []);
 });
 
 test('selectReapableJobs: pidless + past grace + landedCommit on the row → reapable entry carries a failureOverride', () => {

@@ -36,26 +36,37 @@ function claudePidAlive(pid) {
 }
 
 /**
- * findLiveProcessForJob(job, { worktreeDir }) → pid | null
+ * findLiveProcessForJob(job, { worktreeDir, runCwd }) → pid | null
  *
  * Positive liveness scan for a 'running' row whose `runtime.pid` is missing —
  * the case a missing pid must NOT be read as "the process is gone" (2026-09-06
  * incident: 234-uranus-eight-tails-ox marked failed/never_ran while PID
  * 2174739 was a live `claude -p` still writing to that job's own worktree).
  *
- * Linux-`/proc` only. Scans every numeric `/proc/<pid>` entry and matches
- * either: `/proc/<pid>/cwd` resolves to `worktreeDir` (or a path nested under
- * it), or `/proc/<pid>/cmdline` contains both `claude` and the job's slug
- * (fallback for a worktree-disabled/in-place run, where there is no dedicated
- * worktreeDir to match against). Returns the first matching pid, or null if
- * none is found.
+ * Linux-`/proc` only. Scans every numeric `/proc/<pid>` entry and matches any
+ * of, in order:
+ *  - `/proc/<pid>/cwd` resolves to `worktreeDir` (or a path nested under it)
+ *    — sufficient alone, no cmdline check needed.
+ *  - `/proc/<pid>/cmdline` contains both `claude` and the job's slug —
+ *    fallback for a worktree-disabled/in-place run with no dedicated
+ *    worktreeDir to match against.
+ *  - `/proc/<pid>/cwd` resolves to `runCwd` (or nested under it) AND
+ *    `/proc/<pid>/cmdline` contains `claude` (2026-09-13 incident:
+ *    runId 2026-09-13T16-15-56-818Z ran in-place in the shared tree — no
+ *    worktree, and dispatch never puts the slug into argv — so neither of
+ *    the above could ever match a live pid 3138458). `runCwd` is deliberately
+ *    NEVER matched alone: several concurrent jobs commonly share one tree's
+ *    cwd, so a bare cwd match without the process-identity check would
+ *    cross-match the wrong job's process.
+ *
+ * Returns the first matching pid, or null if none is found.
  *
  * Safe fallback by construction: on any platform without `/proc` (macOS,
  * Windows) `fs.readdirSync('/proc')` throws and this returns null immediately
  * — i.e. exactly today's behaviour (fail toward terminalizing), never a hang
  * or a thrown error propagating to the caller.
  */
-function findLiveProcessForJob(job, { worktreeDir } = {}) {
+function findLiveProcessForJob(job, { worktreeDir, runCwd } = {}) {
   const slug = job?.slug;
   let entries;
   try {
@@ -67,25 +78,105 @@ function findLiveProcessForJob(job, { worktreeDir } = {}) {
     if (!/^\d+$/.test(name)) continue;
     const pid = Number(name);
     if (!pid || pid <= 1) continue;
-    if (worktreeDir) {
+
+    let cwdLink = null;
+    if (worktreeDir || runCwd) {
       try {
-        const cwdLink = fs.readlinkSync(`/proc/${pid}/cwd`);
-        if (cwdLink === worktreeDir || cwdLink.startsWith(worktreeDir + path.sep)) return pid;
+        cwdLink = fs.readlinkSync(`/proc/${pid}/cwd`);
       } catch {
         // Process exited mid-scan, or permission denied — try the argv
         // fallback below before giving up on this pid.
       }
     }
-    if (slug) {
+
+    if (worktreeDir && cwdLink && (cwdLink === worktreeDir || cwdLink.startsWith(worktreeDir + path.sep))) {
+      return pid;
+    }
+
+    let cmd = null;
+    if (slug || (runCwd && cwdLink)) {
       try {
-        const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
-        if (/\bclaude\b/.test(cmd) && cmd.includes(slug)) return pid;
+        cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
       } catch {
         // Same as above — process gone or unreadable, keep scanning.
       }
     }
+
+    if (slug && cmd && /\bclaude\b/.test(cmd) && cmd.includes(slug)) return pid;
+
+    if (runCwd && cwdLink && cmd && /\bclaude\b/.test(cmd) &&
+        (cwdLink === runCwd || cwdLink.startsWith(runCwd + path.sep))) {
+      return pid;
+    }
   }
   return null;
+}
+
+/**
+ * readSpawnedPidFromLog(logPath) → pid | null
+ *
+ * Recovers the pid a pidless row's spawn actually produced by reading the
+ * run's own log — proof of life that pre-dates and is independent of the
+ * `runtime.pid` persistence this reap path exists to route around (2026-09-13
+ * incident: the mutate that stamps runtime.pid failed silently while the
+ * spawn itself, and this exact log line, succeeded). Reads only the first
+ * ~8KB — scheduler.cjs's spawnJob writes `[scheduler] spawned pid=<n> ...`
+ * synchronously right after fork, always near the top of the log — so this
+ * stays cheap against a multi-MB log. Pure IO, never throws: a missing file,
+ * an empty file, or a log with no such line all return null.
+ */
+function readSpawnedPidFromLog(logPath) {
+  if (!logPath) return null;
+  let fd;
+  try {
+    fd = fs.openSync(logPath, 'r');
+    const buf = Buffer.alloc(8192);
+    const bytesRead = fs.readSync(fd, buf, 0, buf.length, 0);
+    const text = buf.toString('utf8', 0, bytesRead);
+    const match = text.match(/\[scheduler\] spawned pid=(\d+)/);
+    if (!match) return null;
+    const pid = Number(match[1]);
+    return Number.isFinite(pid) && pid > 1 ? pid : null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* already closed / never opened */ }
+    }
+  }
+}
+
+/**
+ * readLogMtimeMs(logPath) → number | null
+ *
+ * Same never-throws IO contract as logHasOutput — returns the run log's
+ * last-modified time, or null when it can't be statted (missing file,
+ * permission denied).
+ */
+function readLogMtimeMs(logPath) {
+  if (!logPath) return null;
+  try {
+    return fs.statSync(logPath).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * isLogFresh(logMtimeMs, now, windowMs) → boolean
+ *
+ * Pure predicate: true when a run log was modified within `windowMs` of
+ * `now`. A log that grew recently is positive, independent proof its process
+ * is still alive — stronger evidence than "no runtime.pid recorded", which is
+ * only bookkeeping about a side-channel write that can fail on its own (see
+ * readSpawnedPidFromLog's header). Returns false for a missing/invalid mtime
+ * or window so a caller that couldn't stat the log falls through to the
+ * existing reap logic rather than treating "unknown" as "fresh".
+ */
+function isLogFresh(logMtimeMs, now, windowMs) {
+  if (typeof logMtimeMs !== 'number' || Number.isNaN(logMtimeMs)) return false;
+  if (typeof windowMs !== 'number' || windowMs <= 0) return false;
+  return (now - logMtimeMs) < windowMs;
 }
 
 /**
@@ -224,6 +315,20 @@ const ORPHAN_REQUEUE_CAP = 5;
  * work (2026-09-06 incident — see findLiveProcessForJob's header). Omitting
  * `findLiveProcess` (existing callers/tests) preserves prior behaviour
  * exactly: every pidless row past grace reaps, none are ever recovered.
+ *
+ * Two more optional injections, checked BEFORE `findLiveProcess`, for a
+ * pidless row past grace (2026-09-13 incident — see readSpawnedPidFromLog's
+ * and isLogFresh's own headers):
+ *  - `getLogMtimeMs` (`(job) → number | null`): if the row's run log was
+ *    modified within `logFreshWindowMs`, the row is skipped entirely — not
+ *    pushed to `reapable` OR `recovered` — because a growing log is positive
+ *    proof of life even with no pid evidence at all. One `warnings` entry is
+ *    still emitted so a permanently-pidless-but-chatty row stays visible.
+ *  - `getLogPid` (`(job) → pid | null`): reads the run's own log for the pid
+ *    its spawn actually produced. If `pidAlive(pid)` is true, the row is
+ *    diverted into `recovered` exactly like a `findLiveProcess` hit.
+ * Both default to a no-op when omitted, so existing callers/tests are
+ * unaffected.
  */
 /**
  * Pure, never-throws formatter for the dispatch-phase breadcrumb appended to
@@ -284,7 +389,9 @@ function resolvePidlessFailureOverride(job) {
   };
 }
 
-function selectReapableJobs(jobs, now, { pidAlive, grace, findLiveProcess } = {}) {
+function selectReapableJobs(jobs, now, {
+  pidAlive, grace, findLiveProcess, getLogMtimeMs, getLogPid, logFreshWindowMs,
+} = {}) {
   const reapable = [];
   const warnings = [];
   const recovered = [];
@@ -303,6 +410,22 @@ function selectReapableJobs(jobs, now, { pidAlive, grace, findLiveProcess } = {}
     }
     const ageMs = now - startedAt;
     if (ageMs < grace) continue; // spawn may still be mid-flight
+
+    const logMtimeMs = typeof getLogMtimeMs === 'function' ? getLogMtimeMs(j) : null;
+    if (isLogFresh(logMtimeMs, now, logFreshWindowMs)) {
+      warnings.push({
+        slug: j.slug,
+        reason: `pidless row skipped — run log modified ${Math.round((now - logMtimeMs) / 1000)}s ago, still alive by log evidence`,
+      });
+      continue; // neither reapable nor recovered — the log proves it's alive
+    }
+
+    const logPid = typeof getLogPid === 'function' ? getLogPid(j) : null;
+    if (logPid && pidAlive(logPid)) {
+      recovered.push({ slug: j.slug, pid: logPid });
+      continue;
+    }
+
     const livePid = typeof findLiveProcess === 'function' ? findLiveProcess(j) : null;
     if (livePid) {
       recovered.push({ slug: j.slug, pid: livePid });
@@ -386,4 +509,7 @@ module.exports = {
   isAlreadySatisfiedOnMain,
   resolveCommitGuardOutcome,
   formatDispatchPhaseSuffix,
+  readSpawnedPidFromLog,
+  readLogMtimeMs,
+  isLogFresh,
 };

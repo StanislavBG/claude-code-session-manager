@@ -60,6 +60,7 @@ const { readTail } = require('./lib/fileTail.cjs');
 const {
   claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs,
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome, resolveCommitGuardOutcome,
+  readSpawnedPidFromLog, readLogMtimeMs,
 } = require('./lib/reaperHelpers.cjs');
 const { resolveProjectRoot } = require('./lib/opsOwnership.cjs');
 const { sweepStrandedJobBranches } = require('./lib/branchSweep.cjs');
@@ -170,6 +171,7 @@ const { reconcileEpicWorktreesOnBoot } = require('./lib/epicWorktreeBoot.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdFrontmatter.cjs');
 const { resolveDepSlug, findNearMatches } = require('./lib/depSlugResolve.cjs');
+const { computeDispositionRewrite } = require('./lib/prdDisposition.cjs');
 const { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds } = require('./lib/prdMigration.cjs');
 const { allProjectCwds } = require('../../scripts/lib/activeSessions.cjs');
 
@@ -2357,6 +2359,7 @@ async function reconcile(state) {
       // membership, so moving the file between Epic dirs must re-point the row.
       epicId: p.epicId ?? job.epicId ?? null,
       dependsOn: p.dependsOn,
+      disposition: p.disposition ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
       originSessionId: job.originSessionId
@@ -2471,6 +2474,7 @@ async function reconcile(state) {
       sourceTabId: p.sourceTabId ?? inv.row?.sourceTabId ?? null,
       epicId: p.epicId ?? inv.row?.epicId ?? null,
       dependsOn: p.dependsOn,
+      disposition: p.disposition ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
       originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
@@ -2594,6 +2598,7 @@ async function reconcile(state) {
       sourceTabId: p.sourceTabId,
       epicId: p.epicId ?? null,
       dependsOn: p.dependsOn,
+      disposition: p.disposition ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
       originSessionId: resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
@@ -5046,8 +5051,27 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       safeLog(`[scheduler] spawned pid=${child.pid} sessionId=${sessionId} (process group)\n\n`);
       // Make this job the OOM killer's preferred victim over Electron.
       biasJobOomScore(child.pid);
-      // Fire-and-forget pid persistence — best effort.
-      if (onPid) onPid(child.pid, sessionId, cwd).catch(() => {});
+      // Persist runtime.pid with one retry — still fire-and-forget (must
+      // never block the spawn), but a final failure is now loud instead of
+      // silently swallowed. A silent failure here is exactly what let the
+      // pidless-grace reaper terminalize a live, working job (runtime.pid
+      // never landed, so selectReapableJobs had no way to tell "never
+      // spawned" from "spawned but unrecorded").
+      if (onPid) {
+        (async () => {
+          try {
+            await onPid(child.pid, sessionId, cwd);
+          } catch (firstErr) {
+            try {
+              await onPid(child.pid, sessionId, cwd);
+            } catch (finalErr) {
+              const message = finalErr?.message ?? String(finalErr);
+              console.error(`[scheduler] FAILED to persist runtime.pid for ${job.slug} pid=${child.pid}: ${message}`);
+              appendAuditEvent('job_pid_persist_failed', { slug: job.slug, cwd, pid: child.pid, error: message });
+            }
+          }
+        })();
+      }
     }
   });
 }
@@ -7866,12 +7890,19 @@ async function reapDeadRunningJobs() {
     // status:"running" with no slug left in runningSet to trigger reconciliation.
     // queue.json is the source of truth for which jobs are actually running.
     const state = await readQueue();
+    // Shared by the log-evidence injections below and the reapable-processing
+    // loop further down — same `j.runId` → run log path formula either way.
+    const logPathForJob = (j) => (j?.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null);
     const { reapable, warnings, recovered } = selectReapableJobs(state.jobs, Date.now(), {
       pidAlive: claudePidAlive,
       grace: PIDLESS_SPAWN_GRACE_MS,
       findLiveProcess: (j) => findLiveProcessForJob(j, {
         worktreeDir: jobWorktree.worktreeDirFor(j.cwd || state.config?.defaultCwd || DEFAULT_PROJECT_CWD, j.slug),
+        runCwd: j.runtime?.cwd || j.cwd,
       }),
+      getLogPid: (j) => readSpawnedPidFromLog(logPathForJob(j)),
+      getLogMtimeMs: (j) => readLogMtimeMs(logPathForJob(j)),
+      logFreshWindowMs: IDLE_OUTPUT_KILL_MS,
     });
     for (const w of warnings) {
       console.warn(`[scheduler] reapDeadRunningJobs: ${w.reason} slug=${w.slug} — leaving row alone`);
@@ -7898,9 +7929,7 @@ async function reapDeadRunningJobs() {
     const dead = [];
     for (const { slug, pid, pidless, reason, failureOverride } of reapable) {
       const j = state.jobs.find((x) => x.slug === slug);
-      const logPath = j?.runId
-        ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`)
-        : null;
+      const logPath = logPathForJob(j);
       // Absent/empty run dir → classifyRunOutcome finds no result event →
       // 'no_result' → non-success below → filed as failed, never completed.
       const outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
@@ -9761,6 +9790,21 @@ function registerScheduleHandlers() {
     return { ok: true, kind: 'info', message: `Adopted ${slug} — it will run as a normal pending job` };
   }));
 
+  // Scheduler UI's "change disposition" action (scheduler wave-disposition
+  // PRD): promotes an appended wave to its own head, or re-attaches a head
+  // behind another chain. Thin wrapper over remote.setPrdDisposition, which
+  // validates the rewrite (cycle-safety, running/completed rows untouched)
+  // before delegating to the same remote.updatePrd every other PRD edit
+  // path uses — see that method's own comment in this file.
+  ipcMain.handle('schedule:set-prd-disposition', validated(schemas.scheduleSetPrdDisposition, async ({ slug, cwd, disposition, dependsOn }) => {
+    if (!(await safeSlugPath(slug))) return { ok: false, kind: 'error', message: 'invalid slug' };
+    const result = await remote.setPrdDisposition({ slug, cwd, disposition, dependsOn });
+    if (!result.ok) return { ok: false, kind: 'error', message: result.error ?? 'disposition change failed' };
+    appendAuditEvent('scheduler_prd_disposition_set', { slug, cwd: cwd ?? null, disposition, source: 'ipc:schedule:set-prd-disposition' });
+    await broadcast({ flush: true });
+    return { ok: true, kind: 'info', message: `${slug} is now ${disposition === 'new-head' ? 'an independent head' : 'attached behind the chosen chain'}` };
+  }));
+
   ipcMain.handle('schedule:run-now', async () => {
     // Manual run-now overrides any auto-pause. Clear it first.
     await clearPause('run-now');
@@ -10505,6 +10549,7 @@ async function listPrdsInternal() {
           epicId: parsed.epicId ?? null,
           dependsOn: parsed.dependsOn ?? null,
           agentType: parsed.agentType ?? null,
+          disposition: parsed.disposition ?? null,
           mtimeMs: stat.mtimeMs,
           archived,
         };
@@ -10899,6 +10944,33 @@ const remote = {
     } catch (e) {
       return { ok: false, error: e?.message ?? 'write failed' };
     }
+  },
+
+  // Backs the Scheduler UI's "change disposition" action (scheduler
+  // wave-disposition PRD): promoting an appended wave to its own head, or
+  // re-attaching a head behind another chain. `dependsOn` for a 'new-head'
+  // disposition is ignored (cleared unconditionally); for 'append' it's the
+  // caller's chosen target chain's terminal slug(s) — the renderer computes
+  // that from the SAME backlog tree (lib/backlogTree.ts) it already renders,
+  // so this function only has to validate the rewrite is safe, never
+  // re-derive "the" terminal itself.
+  //
+  // Validates via prdDisposition.cjs's computeDispositionRewrite (row not
+  // running/completed, no already-satisfied blocker being rewritten out from
+  // under it, no dependsOn cycle) BEFORE delegating the actual write to this
+  // SAME updatePrd — so a rejected rewrite never reaches the filesystem, and
+  // an accepted one gets updatePrd's own dependsOn FK re-validation for free.
+  async setPrdDisposition({ slug, cwd, disposition, dependsOn }) {
+    let listing;
+    try {
+      listing = await this.listPrds({ cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER });
+    } catch (e) {
+      return { ok: false, error: `could not read project PRDs: ${e?.message ?? e}` };
+    }
+    const rows = listing.prds ?? [];
+    const rewrite = computeDispositionRewrite({ slug, disposition, dependsOn: dependsOn ?? [], rows });
+    if (!rewrite.ok) return rewrite;
+    return this.updatePrd({ slug, cwd, frontmatter: { dependsOn: rewrite.dependsOn, disposition } });
   },
 
   // Cancels a job that hasn't finished yet. A 'running' job's process group

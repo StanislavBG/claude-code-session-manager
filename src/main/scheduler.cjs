@@ -311,18 +311,96 @@ only post-AC work. If a review finding can't be fixed within scope, commit what
 you have, describe the finding in the commit body, and note the follow-up in your
 final result.`;
 
-// Parse `git status --porcelain` output into `{ code, path }` entries. Pure +
-// exported for unit testing. Each porcelain line is "XY<space>PATH" (2 status
-// chars + space); rename lines ("R  a -> b") keep the "a -> b" tail, which is
-// fine for a human-facing dirty-file list. `code` is the raw 2-char status
-// (e.g. '??' for untracked) — callers that need to distinguish "untracked"
-// from "tracked-but-modified" (the shared-tree guard's revert-vs-now-ignored
+// Unquote a single git porcelain v1 path token. Git wraps a path in double
+// quotes and C-style-escapes it (\", \\, \t, \n, and \NNN octal per raw UTF-8
+// byte) whenever it contains a double quote, backslash, control character, or
+// any byte >= 0x80 (core.quotepath's default "ASCII-safe" behavior) — a plain
+// path with none of those passes through untouched. Pure.
+function unquotePorcelainPath(raw) {
+  if (raw.length < 2 || raw[0] !== '"' || raw[raw.length - 1] !== '"') return raw;
+  const inner = raw.slice(1, -1);
+  const bytes = [];
+  const simpleEscapes = { '"': 0x22, '\\': 0x5c, n: 0x0a, t: 0x09, r: 0x0d, a: 0x07, b: 0x08, f: 0x0c, v: 0x0b };
+  for (let i = 0; i < inner.length; i += 1) {
+    const c = inner[i];
+    if (c === '\\' && i + 1 < inner.length) {
+      const next = inner[i + 1];
+      if (Object.prototype.hasOwnProperty.call(simpleEscapes, next)) {
+        bytes.push(simpleEscapes[next]);
+        i += 1;
+      } else if (next >= '0' && next <= '7') {
+        let octal = '';
+        let j = i + 1;
+        while (j < inner.length && octal.length < 3 && inner[j] >= '0' && inner[j] <= '7') {
+          octal += inner[j];
+          j += 1;
+        }
+        bytes.push(parseInt(octal, 8) & 0xff);
+        i = j - 1;
+      } else {
+        bytes.push(c.charCodeAt(0));
+      }
+    } else {
+      for (const b of Buffer.from(c, 'utf8')) bytes.push(b);
+    }
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
+// Split a rename/copy porcelain path field ("old -> new") into its two real
+// paths. Each side is independently quoted per unquotePorcelainPath's rule —
+// only the side that needs escaping is wrapped in quotes, the literal " -> "
+// arrow between them never is. Returns null when no " -> " separator is
+// found (a malformed/unexpected line) so the caller can fall back to treating
+// the whole field as one opaque path rather than guessing.
+function splitRenamePorcelainField(field) {
+  const arrow = ' -> ';
+  let head;
+  let rest;
+  if (field[0] === '"') {
+    let end = -1;
+    for (let i = 1; i < field.length; i += 1) {
+      if (field[i] === '\\') { i += 1; continue; }
+      if (field[i] === '"') { end = i; break; }
+    }
+    if (end === -1) return null;
+    head = field.slice(0, end + 1);
+    rest = field.slice(end + 1);
+  } else {
+    const idx = field.indexOf(arrow);
+    if (idx === -1) return null;
+    head = field.slice(0, idx);
+    rest = field.slice(idx);
+  }
+  if (!rest.startsWith(arrow)) return null;
+  return { oldPath: unquotePorcelainPath(head), path: unquotePorcelainPath(rest.slice(arrow.length)) };
+}
+
+// Parse `git status --porcelain` output into `{ code, path }` entries (plus
+// `oldPath` for a rename/copy). Pure + exported for unit testing. Each
+// porcelain line is "XY<space>PATH"; a staged rename/copy line is
+// "XY<space>OLD -> NEW" instead — X (index status) is 'R' or 'C' — and NEW is
+// the path git will report in any later `git status` call, so callers that
+// key off `.path` (dirtyAfter membership, pathsCommittedDuringRun membership,
+// fs.existsSync) must compare against NEW, never the fused "OLD -> NEW"
+// string. `oldPath` is retained on the entry for callers that need the
+// original path too. `code` is the raw 2-char status (e.g. '??' for
+// untracked) — callers that need to distinguish "untracked" from
+// "tracked-but-modified" (the shared-tree guard's revert-vs-now-ignored
 // split) read it off the entry instead of re-deriving it later.
 function parsePorcelainEntries(stdout) {
   return String(stdout || '')
     .split('\n')
     .filter((l) => l.length > 0)
-    .map((l) => ({ code: l.slice(0, 2), path: l.slice(3) }))
+    .map((l) => {
+      const code = l.slice(0, 2);
+      const field = l.slice(3);
+      if (code.includes('R') || code.includes('C')) {
+        const split = splitRenamePorcelainField(field);
+        if (split) return { code, path: split.path, oldPath: split.oldPath };
+      }
+      return { code, path: unquotePorcelainPath(field) };
+    })
     .filter((e) => e.path);
 }
 

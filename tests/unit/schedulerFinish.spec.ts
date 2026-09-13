@@ -29,11 +29,16 @@ describe('parsePorcelain (commit guard)', () => {
       'A  src/added.ts',
       'R  old.ts -> new.ts',
     ].join('\n')
+    // A rename resolves to the NEW path only — the path git will report in
+    // any later `git status` call, and the path a later commit's
+    // `git diff --name-only` will name (see scheduler-porcelain-rename.test.cjs
+    // for the full PRD 1187 writeup of why the old fused "old -> new" string
+    // was a structural false-positive generator for the shared-tree guard).
     expect(parsePorcelain(out)).toEqual([
       'src/a.ts',
       'src/new.ts',
       'src/added.ts',
-      'old.ts -> new.ts',
+      'new.ts',
     ])
   })
 

@@ -27,6 +27,10 @@ interface PrdMeta {
    *  here while the same PRD's queue row showed one. */
   epicId?: string | null
   sourcePromptId?: string | null
+  /** dependsOn — the real ordering primitive (see lib/dataModelErd.ts).
+   *  listPrds() used to drop this before it reached the renderer, the same
+   *  class of bug the epicId comment above already warns about. */
+  dependsOn?: string[] | null
   archived?: boolean
 }
 
@@ -499,7 +503,17 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
                         <ProjectTag cwd={p.cwd} />
                         <EpicTag epicId={epicRef.epicId} label={epicRef.label} onOpen={openEpic} />
                         {p.estimateMinutes != null && <span>{p.estimateMinutes}m</span>}
-                        <span>g{p.parallelGroup}</span>
+                        <span
+                          className="opacity-60"
+                          title="parallelGroup — a unique-per-PRD display hint, never an ordering barrier. dependsOn is the real ordering primitive."
+                        >
+                          g{p.parallelGroup}
+                        </span>
+                        {p.dependsOn && p.dependsOn.length > 0 && (
+                          <span title={`depends on: ${p.dependsOn.join(', ')}`}>
+                            ⛓ {p.dependsOn.length} dep{p.dependsOn.length === 1 ? '' : 's'}
+                          </span>
+                        )}
                         <span>edited {formatAgo(p.mtimeMs, Date.now())}</span>
                       </div>
                       {/* Slug as clickable monospace label — opens the same editor pane */}

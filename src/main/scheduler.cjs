@@ -9896,6 +9896,7 @@ async function listPrdsInternal() {
           estimateMinutes: parsed.estimateMinutes,
           sourcePromptId: parsed.sourcePromptId,
           epicId: parsed.epicId ?? null,
+          dependsOn: parsed.dependsOn ?? null,
           agentType: parsed.agentType ?? null,
           mtimeMs: stat.mtimeMs,
           archived,

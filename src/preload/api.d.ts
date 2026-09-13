@@ -697,6 +697,11 @@ export interface PrdListItem {
   sourcePromptId?: string | null;
   /** Owning Epic id, derived from the PRD's directory. See ScheduleJob.epicId. */
   epicId?: string | null;
+  /** PRD frontmatter `dependsOn` — slugs that must complete before this PRD
+   *  is eligible. Mirrors ScheduleJob.dependsOn; parsed by parsePrd but
+   *  previously dropped by listPrdsInternal before reaching this type, the
+   *  same class of bug this field's sibling comment (epicId) warns about. */
+  dependsOn?: string[] | null;
   /** True when this PRD's source .md was found in a `prds-archived/` dir
    *  (its scheduler job already ran to completion) rather than the live
    *  `prds/` dir. Archived PRDs have no matching queue.json job row (the

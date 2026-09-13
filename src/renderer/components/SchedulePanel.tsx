@@ -12,6 +12,7 @@ import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
 import { SchBadge, LeakBadge, LeftoverBadge, OverrunBadge, formatLeakedDescendants, ProjectTag, EpicTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
 import { resolveEpicRef } from '../lib/epicProvenance'
+import { buildBacklogTree, flattenBacklogNodes, type BacklogEpicSection, type BacklogNode, type BacklogBlocker } from '../lib/backlogTree'
 import { usePanelFocus } from '../lib/panelFocus'
 import type { NavKey } from './LeftNav'
 
@@ -174,6 +175,23 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
     return m
   }, [snap?.lastTick])
 
+  // Epic → dependency-chain grouping for the job table below — the real
+  // backlog hierarchy (see lib/backlogTree's header). Raw slice from the
+  // store, never derived inside a selector (React #185 class). Memoized on
+  // [snap, sessions] only (not on the 1s `now` ticker or the filter/hide
+  // state below) so JobRow's React.memo keeps bailing out on ticks that
+  // don't carry a new snapshot — see SchedulePanel.jobrow-render-count.test.
+  const sessions = usePromptSessions((s) => s.sessions)
+  const backlogSections = useMemo(
+    // rawSnap.jobs (unscoped, every project) is passed as the blocker-
+    // resolution set so a dependsOn on a job that merely lives in a
+    // DIFFERENT project doesn't render as a false "blocked by X (missing)"
+    // warning — see buildBacklogTree's own doc comment. Only snap.jobs
+    // (cwd-scoped) is rendered as this view's sections/rows.
+    () => (snap ? buildBacklogTree(snap.jobs, sessions, rawSnap?.jobs) : []),
+    [snap, sessions, rawSnap],
+  )
+
   // Hooks must run unconditionally on every render — declared here, before the
   // panelView/snap early returns below, so switching to the supervisor
   // sub-panel doesn't change the hook count between renders (React error #300:
@@ -181,18 +199,31 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
   const handleJobListKeyDown = useCallback((e: React.KeyboardEvent) => {
     const rows = jobListRef.current?.querySelectorAll<HTMLButtonElement>('[data-job-row]')
     if (!rows || rows.length === 0) return
+    // focusedJobIdx is the STABLE listIndex stamped on each row (assigned
+    // once over the FULL backlog tree, independent of which Epic sections
+    // are currently collapsed/filtered) — it is NOT a live position in
+    // `rows`, which only contains whatever is actually rendered right now.
+    // Collapsing an earlier section shortens/reorders `rows` without
+    // renumbering listIndex, so treating focusedJobIdx as a raw index into
+    // `rows` jumps focus to an unrelated row the moment the two diverge.
+    // Look the current row up by its stable data-job-index instead, and
+    // navigate relative to ITS live position.
+    const rowsArr = Array.from(rows)
+    const currentLiveIdx = rowsArr.findIndex((r) => r.dataset.jobIndex === String(focusedJobIdx))
+    const focusRow = (liveIdx: number) => {
+      const row = rowsArr[liveIdx]
+      if (!row) return
+      const stableIdx = Number(row.dataset.jobIndex)
+      setFocusedJobIdx(stableIdx)
+      try { localStorage.setItem(FOCUSED_IDX_KEY, String(stableIdx)) } catch { /* */ }
+      row.focus()
+    }
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      const next = Math.min(focusedJobIdx + 1, rows.length - 1)
-      setFocusedJobIdx(next)
-      try { localStorage.setItem(FOCUSED_IDX_KEY, String(next)) } catch { /* */ }
-      rows[next]?.focus()
+      focusRow(currentLiveIdx === -1 ? 0 : Math.min(currentLiveIdx + 1, rowsArr.length - 1))
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
-      const prev = Math.max(focusedJobIdx - 1, 0)
-      setFocusedJobIdx(prev)
-      try { localStorage.setItem(FOCUSED_IDX_KEY, String(prev)) } catch { /* */ }
-      rows[prev]?.focus()
+      focusRow(currentLiveIdx === -1 ? rowsArr.length - 1 : Math.max(currentLiveIdx - 1, 0))
     }
   }, [focusedJobIdx])
 
@@ -471,28 +502,50 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
             <div className="px-[18px] py-6 text-[13px] text-fg-faint italic">no matching jobs</div>
           )}
 
-          {/* Job rows */}
+          {/* Job rows — grouped by Epic, nested by dependsOn chain (see
+             lib/backlogTree). `visibleSlugSet` applies the existing text/
+             status filter and completed-collapse on top of the always-
+             complete tree, so blocker/cycle resolution stays correct even
+             for a slug the current filter hides. */}
           <div
             ref={jobListRef}
             role="list"
             aria-label="Job queue"
             onKeyDown={handleJobListKeyDown}
           >
-            {inline.map((j, idx) => (
-              <JobRow
-                key={j.slug}
-                job={j}
-                eta={etaMap.get(j.slug) ?? null}
-                // Only running rows tick — everyone else gets a stable `null`
-                // across ticks, so JobRow's memo bails for them instead of
-                // re-rendering once a second for an unused `now` value.
-                elapsedMs={j.status === 'running' && j.startedAt ? now - Date.parse(j.startedAt) : null}
-                avgDurationMs={avgDurationMs}
-                listIndex={idx}
-                hold={holdBySlug.get(j.slug)}
-                onFocused={handleRowFocused}
-              />
-            ))}
+            {(() => {
+              const visibleSlugSet = new Set(inline.map((j) => j.slug))
+              let runningIdx = 0
+              const sectionBlocks = backlogSections
+                .map((section) => {
+                  const rows = flattenBacklogNodes(section.nodes)
+                    .filter((n) => visibleSlugSet.has(n.row.slug))
+                    .map((node) => ({ node, listIndex: runningIdx++ }))
+                  return { section, rows }
+                })
+                .filter((b) => b.rows.length > 0)
+              return sectionBlocks.map(({ section, rows }) => (
+                <EpicSectionBlock key={section.epicId ?? '__none__'} section={section}>
+                  {rows.map(({ node, listIndex }) => (
+                    <JobRow
+                      key={node.row.slug}
+                      job={node.row}
+                      backlog={node}
+                      eta={etaMap.get(node.row.slug) ?? null}
+                      // Only running rows tick — everyone else gets a stable
+                      // `null` across ticks, so JobRow's memo bails for them
+                      // instead of re-rendering once a second for an unused
+                      // `now` value.
+                      elapsedMs={node.row.status === 'running' && node.row.startedAt ? now - Date.parse(node.row.startedAt) : null}
+                      avgDurationMs={avgDurationMs}
+                      listIndex={listIndex}
+                      hold={holdBySlug.get(node.row.slug)}
+                      onFocused={handleRowFocused}
+                    />
+                  ))}
+                </EpicSectionBlock>
+              ))
+            })()}
           </div>
 
           {/* Collapse toggle */}
@@ -779,12 +832,18 @@ function computeStatus({
   }
 }
 
-/** O(N log N) once: for each job, count of running+pending jobs ahead of it
- *  in (parallelGroup, slug) order. Lets computeEtaMap be O(1) per job. */
+/** O(N log N) once: for each job, count of running+pending jobs ahead of it,
+ *  ordered by unmet-`dependsOn`-count then slug — `dependsOn` is the real
+ *  ordering primitive (`parallelGroup` is a display hint, never a barrier;
+ *  see CLAUDE.md's Avoid list), so a row waiting on more unmet blockers
+ *  reads as further back in line. Lets computeEtaMap be O(1) per job. */
 function computeAheadCounts(jobs: ScheduleJob[]): Map<string, number> {
+  const bySlug = new Map(jobs.map((j) => [j.slug, j]))
+  const unmetDepCount = (j: ScheduleJob) =>
+    (j.dependsOn ?? []).filter((d) => bySlug.get(d)?.status !== 'completed').length
   const active = jobs
     .filter((j) => j.status === 'running' || j.status === 'pending')
-    .sort((a, b) => a.parallelGroup - b.parallelGroup || a.slug.localeCompare(b.slug))
+    .sort((a, b) => unmetDepCount(a) - unmetDepCount(b) || a.slug.localeCompare(b.slug))
   const out = new Map<string, number>()
   active.forEach((j, i) => out.set(j.slug, i))
   return out
@@ -898,7 +957,84 @@ function computeEtaMap(
   return m
 }
 
-function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocused, hold }: {
+/**
+ * EpicSectionBlock — one collapsible block per Epic in the job table, headed
+ * by the Epic's title, PRD count, and a status rollup. Collapse state is
+ * local (uncontrolled) since it's a pure display affordance, same pattern as
+ * JobRow's own `open` state below.
+ */
+function EpicSectionBlock({ section, children }: { section: BacklogEpicSection<ScheduleJob>; children: ReactNode }) {
+  const [expanded, setExpanded] = useState(true)
+  const rollup = Object.entries(section.counts)
+    .map(([status, n]) => `${n} ${status.replace(/_/g, ' ')}`)
+    .join(' · ')
+  return (
+    <div className="border-t border-line" data-testid="backlog-epic-section" data-epic-id={section.epicId ?? ''}>
+      <button
+        type="button"
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center gap-2.5 px-[18px] py-2.5 bg-bg-elev/60 hover:bg-bg-elev text-left"
+        aria-expanded={expanded}
+        title={section.label}
+      >
+        <span
+          className={`text-fg-faint inline-flex shrink-0 transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`}
+          aria-hidden="true"
+        >
+          <AlmanacIcon name="chevron" size={12} />
+        </span>
+        <span className="font-serif text-[14.5px] font-semibold text-fg truncate" data-testid="backlog-epic-label">
+          {section.label}
+        </span>
+        <span className="font-mono text-[11px] text-fg-faint shrink-0">
+          {section.total} PRD{section.total === 1 ? '' : 's'}
+        </span>
+        <span className="font-mono text-[11px] text-fg-faint truncate">{rollup}</span>
+      </button>
+      {expanded && children}
+    </div>
+  )
+}
+
+/** JobRow's Epic/dependency-chain presentation info. A module-level default
+ *  (not an inline literal) so an omitted `backlog` prop keeps the same
+ *  identity across renders — an inline `{}` default would be a freshly-built
+ *  object every render and defeat JobRow's React.memo (see
+ *  SchedulePanel.jobrow-render-count.test.tsx). */
+interface JobRowBacklogInfo {
+  depth: number
+  blockers: BacklogBlocker[]
+  blocked: boolean
+  hasNeedsReviewBlocker: boolean
+  hasMissingDep: boolean
+  cycle: boolean
+  parallelEligible: boolean
+}
+const EMPTY_BLOCKERS: BacklogBlocker[] = []
+const DEFAULT_BACKLOG_INFO: JobRowBacklogInfo = {
+  depth: 0,
+  blockers: EMPTY_BLOCKERS,
+  blocked: false,
+  hasNeedsReviewBlocker: false,
+  hasMissingDep: false,
+  cycle: false,
+  parallelEligible: false,
+}
+
+function blockerLabel(b: BacklogBlocker): string {
+  if (b.missing) return `${b.slug} (missing)`
+  if (b.needsReview) return `${b.slug} (needs review)`
+  return `${b.slug} (${(b.status ?? 'unknown').replace(/_/g, ' ')})`
+}
+
+function blockerToneClass(b: BacklogBlocker): string {
+  if (b.missing) return 'text-accent'
+  if (b.needsReview) return 'text-butter font-semibold'
+  if (b.status === 'completed') return 'text-sage'
+  return 'text-amber-400/90'
+}
+
+function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocused, hold, backlog = DEFAULT_BACKLOG_INFO }: {
   job: ScheduleJob
   eta: string | null
   /** Live elapsed ms since `job.startedAt`, ticking once a second — `null`
@@ -910,6 +1046,10 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
   onFocused: (index: number) => void
   /** Set when the last tick held this pending row behind an unsatisfied dep. */
   hold?: ScheduleJobHold
+  /** This row's position + blockers in the Epic/dependency tree — see
+   *  lib/backlogTree. Defaults to a top-level, unblocked row so every
+   *  existing call site (tests included) that doesn't pass it keeps working. */
+  backlog?: JobRowBacklogInfo
 }) {
   const [open, setOpen] = useState(false)
   const [showLog, setShowLog] = useState(false)
@@ -962,8 +1102,10 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
         type="button"
         data-job-row
         data-job-index={listIndex}
+        data-depth={backlog.depth}
         onClick={() => setOpen((v) => !v)}
         onFocus={() => onFocused(listIndex)}
+        style={backlog.depth > 0 ? { paddingLeft: 18 + backlog.depth * 20 } : undefined}
         className={`w-full text-left grid grid-cols-[116px_1fr_auto_auto] items-center gap-4 px-[18px] py-3.5 hover:bg-bg/40 focus:outline-none focus:ring-1 focus:ring-accent focus:ring-inset ${open ? 'bg-bg-elev/40' : ''}`}
         aria-expanded={open}
         aria-label={`${prdNumber(job.slug) ? `PRD ${prdNumber(job.slug)}, ` : ''}${job.title}, ${job.status}${trailingLabel ? `, ${trailingLabel}` : ''}`}
@@ -976,7 +1118,34 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
             {job.title}
             <LeakBadge leaked={job.leakedDescendants} />
             <LeftoverBadge count={job.leftoverCount} truncated={job.leftoverPathsTruncated} salvagePatch={job.salvagePatch} />
+            {backlog.parallelEligible && (
+              <span
+                data-testid="job-row-parallel-eligible"
+                title="No dependsOn, and nothing in this Epic depends on it — can run any time a slot is free"
+                className="text-[10px] font-semibold uppercase tracking-wide text-sage/90 bg-sage/10 border border-sage/30 rounded px-1.5 py-0.5"
+              >
+                parallel
+              </span>
+            )}
           </div>
+          {backlog.cycle && (
+            <div className="text-[12.5px] mt-0.5 text-accent font-mono" data-testid="job-row-cycle-warning">
+              ⚠ dependsOn cycle — {backlog.blockers.map((b) => b.slug).join(' ↔ ') || 'self-referencing'}
+            </div>
+          )}
+          {!backlog.cycle && backlog.blockers.length > 0 && (
+            <div className="text-[12.5px] mt-0.5 font-mono" data-testid="job-row-blockers">
+              <span className={backlog.blocked || backlog.hasMissingDep ? 'text-amber-400/90' : 'text-fg-faint'}>
+                {backlog.blocked || backlog.hasMissingDep ? 'blocked by ' : 'depends on '}
+              </span>
+              {backlog.blockers.map((b, i) => (
+                <span key={b.slug} className={blockerToneClass(b)}>
+                  {i > 0 && ', '}
+                  {blockerLabel(b)}
+                </span>
+              ))}
+            </div>
+          )}
           {note && (
             <div className={`text-[12.5px] mt-0.5 ${isFailed ? 'text-accent/80' : 'text-fg-faint'}`}>
               {note}

@@ -309,9 +309,10 @@ function evaluateLaunchGate(block, { now, claudeVersion } = {}) {
  * closed set so operators never have to open a transcript to tell a
  * non-start from an implementation failure from a verifier downgrade.
  */
-function deriveTerminalReason({ effectiveStatus, exitCode, verifyResult, sigtermOverride, worktreeIntegrationFailure }) {
+function deriveTerminalReason({ effectiveStatus, exitCode, verifyResult, sigtermOverride, worktreeIntegrationFailure, budgetKill }) {
   if (worktreeIntegrationFailure) return 'worktree_integration_failed';
   if (effectiveStatus === 'completed') return 'completed';
+  if (budgetKill) return 'budget_exceeded';
   if (sigtermOverride) return 'signal_kill_with_commit';
   if (exitCode === 143 || exitCode === 137) return 'signal_kill';
   if (typeof exitCode === 'number' && exitCode !== 0) return `impl_failed:exit_${exitCode}`;

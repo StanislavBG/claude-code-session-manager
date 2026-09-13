@@ -93,6 +93,9 @@ const {
   QUARANTINE_ESCALATE_MS: QUARANTINE_ESCALATE_MS_DEFAULT,
   JOB_OVERRUN_FACTOR: JOB_OVERRUN_FACTOR_DEFAULT,
   JOB_OVERRUN_FLOOR_MS: JOB_OVERRUN_FLOOR_MS_DEFAULT,
+  JOB_BUDGET_FACTOR: JOB_BUDGET_FACTOR_DEFAULT,
+  JOB_BUDGET_FLOOR_MS: JOB_BUDGET_FLOOR_MS_DEFAULT,
+  JOB_BUDGET_CEILING_MS: JOB_BUDGET_CEILING_MS_DEFAULT,
   PIDLESS_SPAWN_GRACE_MS,
   INVESTIGATION_MAX_MS,
   STARVATION_ESCALATE_MS,
@@ -101,12 +104,27 @@ const {
 const QUARANTINE_ESCALATE_MS = process.env.SM_QUARANTINE_ESCALATE_HOURS
   ? Number(process.env.SM_QUARANTINE_ESCALATE_HOURS) * 60 * 60_000
   : QUARANTINE_ESCALATE_MS_DEFAULT;
-const JOB_OVERRUN_FACTOR = process.env.SM_JOB_OVERRUN_FACTOR
-  ? Number(process.env.SM_JOB_OVERRUN_FACTOR)
-  : JOB_OVERRUN_FACTOR_DEFAULT;
-const JOB_OVERRUN_FLOOR_MS = process.env.SM_JOB_OVERRUN_FLOOR_MINUTES
-  ? Number(process.env.SM_JOB_OVERRUN_FLOOR_MINUTES) * 60_000
-  : JOB_OVERRUN_FLOOR_MS_DEFAULT;
+// Shared by every SM_*-env-overridable numeric constant below (bare factors
+// use unitMs=1; minute-denominated knobs use unitMs=60_000) — one parse rule
+// instead of one hand-copied ternary per constant.
+function numEnvOverride(envVar, unitMs, fallback) {
+  const raw = process.env[envVar];
+  return raw ? Number(raw) * unitMs : fallback;
+}
+const JOB_OVERRUN_FACTOR = numEnvOverride('SM_JOB_OVERRUN_FACTOR', 1, JOB_OVERRUN_FACTOR_DEFAULT);
+const JOB_OVERRUN_FLOOR_MS = numEnvOverride('SM_JOB_OVERRUN_FLOOR_MINUTES', 60_000, JOB_OVERRUN_FLOOR_MS_DEFAULT);
+// Same three numbers as JOB_OVERRUN_FACTOR/JOB_OVERRUN_FLOOR_MS today (3x,
+// 45min) is coincidental, not structural — this triad ACTS (kills) where
+// JOB_OVERRUN_* only ever escalates (see JOB_OVERRUN_FACTOR's own header);
+// tune them independently, don't re-couple on a future pass just because the
+// defaults happen to match right now.
+const JOB_BUDGET_FACTOR = numEnvOverride('SM_JOB_BUDGET_FACTOR', 1, JOB_BUDGET_FACTOR_DEFAULT);
+const JOB_BUDGET_FLOOR_MS = numEnvOverride('SM_JOB_BUDGET_FLOOR_MINUTES', 60_000, JOB_BUDGET_FLOOR_MS_DEFAULT);
+const JOB_BUDGET_CEILING_MS = numEnvOverride('SM_JOB_BUDGET_CEILING_MINUTES', 60_000, JOB_BUDGET_CEILING_MS_DEFAULT);
+// A running job past this fraction of its own budget gets a durable
+// `budgetWarning` stamp on its row (see the budget watchdog below) so the
+// renderer can warn BEFORE the kill, not only after.
+const BUDGET_WARNING_FRACTION = 0.75;
 const { pickForProject, pickNextBatch, findStarvedProjects, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/schedulerBatch.cjs');
 const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
 const { writeRcaReport, extractRcaBlock } = require('./lib/rcaReport.cjs');
@@ -312,41 +330,12 @@ only post-AC work. If a review finding can't be fixed within scope, commit what
 you have, describe the finding in the commit body, and note the follow-up in your
 final result.`;
 
-// Unquote a single git porcelain v1 path token. Git wraps a path in double
-// quotes and C-style-escapes it (\", \\, \t, \n, and \NNN octal per raw UTF-8
-// byte) whenever it contains a double quote, backslash, control character, or
-// any byte >= 0x80 (core.quotepath's default "ASCII-safe" behavior) — a plain
-// path with none of those passes through untouched. Pure.
-function unquotePorcelainPath(raw) {
-  if (raw.length < 2 || raw[0] !== '"' || raw[raw.length - 1] !== '"') return raw;
-  const inner = raw.slice(1, -1);
-  const bytes = [];
-  const simpleEscapes = { '"': 0x22, '\\': 0x5c, n: 0x0a, t: 0x09, r: 0x0d, a: 0x07, b: 0x08, f: 0x0c, v: 0x0b };
-  for (let i = 0; i < inner.length; i += 1) {
-    const c = inner[i];
-    if (c === '\\' && i + 1 < inner.length) {
-      const next = inner[i + 1];
-      if (Object.prototype.hasOwnProperty.call(simpleEscapes, next)) {
-        bytes.push(simpleEscapes[next]);
-        i += 1;
-      } else if (next >= '0' && next <= '7') {
-        let octal = '';
-        let j = i + 1;
-        while (j < inner.length && octal.length < 3 && inner[j] >= '0' && inner[j] <= '7') {
-          octal += inner[j];
-          j += 1;
-        }
-        bytes.push(parseInt(octal, 8) & 0xff);
-        i = j - 1;
-      } else {
-        bytes.push(c.charCodeAt(0));
-      }
-    } else {
-      for (const b of Buffer.from(c, 'utf8')) bytes.push(b);
-    }
-  }
-  return Buffer.from(bytes).toString('utf8');
-}
+// Unquote a single git porcelain v1 path token. Defined once in
+// gitWorktree.cjs (which this file already requires — the reverse would be
+// circular, since gitWorktree.cjs's own salvageDirtyDelta needs the exact
+// same unquoting) and reused here rather than re-implemented, so the two
+// porcelain consumers in this codebase can never drift apart.
+const { unquotePorcelainPath } = gitWorktree;
 
 // Split a rename/copy porcelain path field ("old -> new") into its two real
 // paths. Each side is independently quoted per unquotePorcelainPath's rule —
@@ -370,6 +359,18 @@ function splitRenamePorcelainField(field) {
   } else {
     const idx = field.indexOf(arrow);
     if (idx === -1) return null;
+    // An unquoted path containing a literal " -> " substring (git only
+    // quotes for a quote/backslash/control-byte/non-ASCII byte — a plain
+    // ASCII arrow inside a filename is never quoted) makes the true
+    // old/new boundary genuinely ambiguous from this text alone: the first
+    // occurrence could be the real separator, or it could be sitting
+    // inside the old path with the real separator later in the field.
+    // Guessing wrong silently corrupts oldPath/path for downstream
+    // fs.existsSync/Set-membership checks, which is worse than the
+    // existing "malformed line" fallback below — so more than one
+    // occurrence falls back to treating the whole field as one opaque
+    // path, same as any other line this function can't confidently parse.
+    if (field.indexOf(arrow, idx + arrow.length) !== -1) return null;
     head = field.slice(0, idx);
     rest = field.slice(idx);
   }
@@ -411,28 +412,12 @@ function parsePorcelain(stdout) {
   return parsePorcelainEntries(stdout).map((e) => e.path);
 }
 
-// Return the list of uncommitted paths in cwd, or null when the guard does not
-// apply (cwd is not a git work tree, git is missing, or the call errors). Never
-// throws — a guard failure must not fail an otherwise-successful job.
-function uncommittedChanges(cwd) {
-  return new Promise((resolve) => {
-    if (!cwd) { resolve(null); return; }
-    execFile(
-      'git',
-      ['-C', cwd, 'status', '--porcelain'],
-      { timeout: 10_000, windowsHide: true },
-      (err, stdout) => {
-        if (err) { resolve(null); return; } // not a repo / git missing → skip
-        resolve(parsePorcelain(stdout));
-      },
-    );
-  });
-}
-
 // Same as uncommittedChanges but keeps each path's porcelain status code —
 // the shared-tree guard's baseline needs this to tell "was untracked" apart
 // from "was tracked-and-modified" (see evaluateSharedTreeGuard). Returns null
-// under the same conditions as uncommittedChanges; never throws.
+// when the guard does not apply (cwd is not a git work tree, git is missing,
+// or the call errors); never throws — a guard failure must not fail an
+// otherwise-successful job.
 function uncommittedChangesWithStatus(cwd) {
   return new Promise((resolve) => {
     if (!cwd) { resolve(null); return; }
@@ -446,6 +431,17 @@ function uncommittedChangesWithStatus(cwd) {
       },
     );
   });
+}
+
+// Return the list of uncommitted paths in cwd, or null under the same
+// conditions as uncommittedChangesWithStatus (never throws). Kept as a thin
+// path-only projection of that call rather than its own execFile, so a future
+// fix to the git invocation (timeout, error handling) can't land in one and
+// silently miss the other.
+function uncommittedChanges(cwd) {
+  return uncommittedChangesWithStatus(cwd).then((entries) => (
+    entries === null ? null : entries.map((e) => e.path)
+  ));
 }
 
 // Return the current HEAD commit sha in cwd, or null on any error. Used by the
@@ -636,12 +632,18 @@ async function checkSharedTreeGuard({ cwd, stashBaseline, dirtyBaseline, headBef
     // leaving the dirty set is always a revert regardless of disk state (see
     // evaluateSharedTreeGuard). Scoped to entries carrying a status code —
     // plain path strings (no code) fall back to the old always-reverted path.
-    const existsAfter = (dirtyBaseline || [])
+    const untrackedBaselinePaths = (dirtyBaseline || [])
       .filter((e) => e && typeof e === 'object' && e.code === '??')
-      .map((e) => e.path)
-      .filter((p) => {
-        try { return fs.existsSync(path.join(cwd, p)); } catch { return false; }
-      });
+      .map((e) => e.path);
+    // A large untracked baseline (the 2026-09-12 incident's shared tree had
+    // ~240 such paths) makes this a lot of stat calls — fs.promises.access
+    // run concurrently instead of fs.existsSync run synchronously one at a
+    // time keeps this off the event loop instead of blocking every other
+    // in-flight scheduler/IPC task for the duration.
+    const existsChecks = await Promise.all(
+      untrackedBaselinePaths.map((p) => fsp.access(path.join(cwd, p)).then(() => true, () => false)),
+    );
+    const existsAfter = untrackedBaselinePaths.filter((_, i) => existsChecks[i]);
     const { reverted, nowIgnored } = module.exports.evaluateSharedTreeGuard({
       stashBefore: stashBaseline,
       stashAfter,
@@ -1814,6 +1816,99 @@ function findOverrunningJobs(jobs, now, { factor, floorMs } = {}) {
 }
 
 /**
+ * computeJobBudgetMs(estimateMinutes, { factor, floorMs, ceilingMs }) → number
+ *
+ * Pure. `budgetMs = clamp(estimateMinutes * factor, floorMs, ceilingMs)` — see
+ * JOB_BUDGET_FACTOR's header comment (schedulerConfig.cjs) for the measured
+ * p50/p90/max this is calibrated against. A missing/zero/non-finite estimate
+ * is treated as 0, which the floor clamp then dominates — "jobs with a
+ * missing estimate get the floor" falls straight out of the clamp, no
+ * special-casing needed.
+ */
+function computeJobBudgetMs(estimateMinutes, { factor, floorMs, ceilingMs } = {}) {
+  const f = typeof factor === 'number' && factor > 0 ? factor : JOB_BUDGET_FACTOR;
+  const floor = typeof floorMs === 'number' && floorMs >= 0 ? floorMs : JOB_BUDGET_FLOOR_MS;
+  const ceiling = typeof ceilingMs === 'number' && ceilingMs > 0 ? ceilingMs : JOB_BUDGET_CEILING_MS;
+  const est = Number(estimateMinutes);
+  const minutes = Number.isFinite(est) && est > 0 ? est : 0;
+  return Math.min(Math.max(minutes * f * 60_000, floor), ceiling);
+}
+
+/**
+ * classifyBudgetKill(res, landedCommitEvidence) → { status, reason, landedCommit } | null
+ *
+ * Pure. `res` is executeJob's resolved outcome — only fires when
+ * `res.killedByWatchdog === 'budget'` (stamped by the budget watchdog inside
+ * executeJob, never inferred from exit code/duration alone, so it can never
+ * collide with an ordinary idle-tail/deadman/external kill). ALWAYS routes to
+ * needs_review — never 'failed' (spawnJob's ordinary non-zero-exit default)
+ * and never silently 'completed' (executeJob's onExit excludes
+ * killedByWatchdog === 'budget' from the result=success → exit 0 mapping
+ * idle-tail/deadman get) — so a budget kill is a visible, actionable park,
+ * never a retry (classifyFailureOutcome/selectAutoFixTargets only ever see
+ * 'failed'/ordinary needs_review rows, not this one — see
+ * selectAutoFixTargets' own budget_exceeded exclusion) and never a discard:
+ * `landedCommitEvidence`, when the caller resolved one via the SAME
+ * commit-guard evidence check the plain sigterm/exit paths already use, is
+ * threaded onto the row as `landedCommit` so a job that HAD already
+ * committed before overrunning is still adjudicated on its git evidence.
+ */
+function classifyBudgetKill(res, landedCommitEvidence) {
+  if (!res || res.killedByWatchdog !== 'budget') return null;
+  return {
+    status: 'needs_review',
+    reason: res.budgetKillReason || `wall-clock budget exceeded (exit ${res.exitCode})`,
+    landedCommit: landedCommitEvidence || null,
+  };
+}
+
+/**
+ * isJobBudgetExempt(job) → boolean
+ *
+ * Pure. `quietMachine: true` PRDs (their whole point is running alone,
+ * un-contended, for a timing-sensitive measurement) and any PRD with an
+ * explicit `budgetExempt: true` opt-out have no wall-clock kill ceiling.
+ */
+function isJobBudgetExempt(job) {
+  return job?.quietMachine === true || job?.budgetExempt === true;
+}
+
+/** Pure predicate the budget watchdog's shouldFire calls — single source of
+ * truth for "has this job run past its own budget" so it's unit-testable
+ * without spinning up real timers. */
+function shouldKillForBudget(elapsedMs, budgetMs) {
+  return elapsedMs >= budgetMs;
+}
+
+/**
+ * resolveBudgetKillOutcome({ killedByWatchdog, killedBySignal, durationMs, jobBudgetMs, estimateMinutes })
+ *   → { killedByWatchdog: 'budget'|null, budgetKillReason: string|null }
+ *
+ * Pure. `ctx.killedByWatchdog` is stamped by the budget watchdog's action()
+ * the instant its periodic shouldFire() observes elapsedMs >= jobBudgetMs —
+ * but that setInterval tick and the child's real 'exit' event both run on
+ * the SAME single-threaded event loop, so it's possible to observe the
+ * budget threshold crossed and call ctx.killTree() in the same window the
+ * agent happens to exit cleanly (exit 0) or fails on its own for an
+ * unrelated reason — ctx.killTree() against an already-exited pid is a
+ * silent no-op (ESRCH, caught), but the flag would still read 'budget'
+ * unless gated here. Only trusted when the exit SHAPE actually looks like a
+ * signal kill (killedBySignal — mirrors the exact same check onExit already
+ * uses for its own mappedToSuccess exclusion), so a clean exit=0 or an
+ * ordinary unrelated non-zero failure racing the watchdog's tick is never
+ * misclassified as a budget kill downstream.
+ */
+function resolveBudgetKillOutcome({ killedByWatchdog, killedBySignal, durationMs, jobBudgetMs, estimateMinutes }) {
+  if (killedByWatchdog !== 'budget' || !killedBySignal) {
+    return { killedByWatchdog: killedByWatchdog === 'budget' ? null : (killedByWatchdog ?? null), budgetKillReason: null };
+  }
+  return {
+    killedByWatchdog: 'budget',
+    budgetKillReason: `wall-clock budget exceeded: ran ${Math.round(durationMs / 60_000)}m against a ${Math.round(jobBudgetMs / 60_000)}m budget (estimateMinutes=${estimateMinutes ?? 0})`,
+  };
+}
+
+/**
  * findStrandedInvestigations(jobs, now, maxMs, isAlive = claudePidAlive)
  *   → [{ slug, cwd, ageMs, restoreStatus }]
  *
@@ -2263,6 +2358,7 @@ async function reconcile(state) {
       epicId: p.epicId ?? job.epicId ?? null,
       dependsOn: p.dependsOn,
       quietMachine: p.quietMachine === true,
+      budgetExempt: p.budgetExempt === true,
       originSessionId: job.originSessionId
         ?? resolveOriginSessionId(p.cwd, p.epicId ?? reconcileSourcePromptId(job, p.sourcePromptId)),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
@@ -2376,6 +2472,7 @@ async function reconcile(state) {
       epicId: p.epicId ?? inv.row?.epicId ?? null,
       dependsOn: p.dependsOn,
       quietMachine: p.quietMachine === true,
+      budgetExempt: p.budgetExempt === true,
       originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? inv.row?.agentType ?? null,
@@ -2498,6 +2595,7 @@ async function reconcile(state) {
       epicId: p.epicId ?? null,
       dependsOn: p.dependsOn,
       quietMachine: p.quietMachine === true,
+      budgetExempt: p.budgetExempt === true,
       originSessionId: resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? null,
@@ -2846,6 +2944,11 @@ function buildScheduleStatePayload(state, { withPaths = false } = {}) {
     jobs: state.jobs,
     scheduledFor: state.scheduledFor,
     lastRunAt: state.lastRunAt,
+    // Distinct from lastRunAt (only stamped when a batch actually launches):
+    // stamped every time tickQueue reaches the picker at all. See
+    // classifyQueueHealth/classifyQueueStarvation's header comments for why
+    // the two must never merge.
+    lastDispatchAttemptAt: state.lastDispatchAttemptAt ?? null,
     nextReset: getNextResetCached(),
     paused: state.paused,
     // Launch circuit breaker (issue #11): which personas cannot launch right
@@ -3222,7 +3325,7 @@ function partitionBootOrphans(jobs, isAlive = claudePidAlive) {
 }
 
 /**
- * applyOrphanOutcome(job, outcome, killNote?) → void
+ * applyOrphanOutcome(job, outcome, killNote?, confirmedLandedCommit?) → void
  *
  * Mutates `job` in place to finalize a boot-orphaned 'running' job given its
  * classified run outcome: success/failed finalize terminally; no_result/unknown
@@ -3231,8 +3334,17 @@ function partitionBootOrphans(jobs, isAlive = claudePidAlive) {
  * reconcileQueueOffline (scripts/lib/watchdogHelpers.cjs) verbatim; killNote
  * plumbing differs slightly (see call sites) since this path always knows
  * pid liveness up front rather than re-checking per tick.
+ *
+ * `confirmedLandedCommit` is the same evidence-before-failure gate
+ * reapDeadRunningJobs applies (see resolveLandedCommitEvidence): a job that
+ * dies while the app itself is offline is classified 'failed' from its log
+ * tail alone, exactly like the pre-fix reap path was — so without this, an
+ * orphaned job that actually landed a real commit is reachable via boot
+ * reconciliation even though the live reap path is now guarded. Callers
+ * must resolve this (a git spawn) BEFORE calling mutate(), never inside it —
+ * pass null to skip the gate (e.g. when the outcome isn't 'failed').
  */
-function applyOrphanOutcome(job, outcome, killNote = '') {
+function applyOrphanOutcome(job, outcome, killNote = '', confirmedLandedCommit = null) {
   const now = new Date().toISOString();
   if (outcome === 'success') {
     transitionJob(job, 'completed', { reason: 'boot orphan reconciliation: run succeeded', source: 'applyOrphanOutcome' });
@@ -3241,9 +3353,16 @@ function applyOrphanOutcome(job, outcome, killNote = '') {
     job.finishedAt = now;
     delete job.runtime;
   } else if (outcome === 'failed') {
-    transitionJob(job, 'failed', { reason: `orphaned: app restarted while running${killNote}`, source: 'applyOrphanOutcome' });
-    job.exitCode = job.exitCode ?? 1;
-    job.error = `orphaned: app restarted while running${killNote}`;
+    if (confirmedLandedCommit) {
+      transitionJob(job, 'completed', { reason: `orphaned: app restarted while running${killNote}, but landedCommit ${confirmedLandedCommit} resolves — completed on evidence`, source: 'applyOrphanOutcome:landed' });
+      job.exitCode = 0;
+      job.error = null;
+      job.landedCommit = confirmedLandedCommit;
+    } else {
+      transitionJob(job, 'failed', { reason: `orphaned: app restarted while running${killNote}`, source: 'applyOrphanOutcome' });
+      job.exitCode = job.exitCode ?? 1;
+      job.error = `orphaned: app restarted while running${killNote}`;
+    }
     job.finishedAt = now;
     delete job.runtime;
   } else {
@@ -3251,6 +3370,13 @@ function applyOrphanOutcome(job, outcome, killNote = '') {
     if (tries < ORPHAN_REQUEUE_CAP) {
       resetJobFields(job, `orphaned: app restarted mid-run, re-queued (attempt ${tries + 1}/${ORPHAN_REQUEUE_CAP})${killNote}`, { source: 'applyOrphanOutcome' });
       job.orphanRetries = tries + 1;
+    } else if (confirmedLandedCommit) {
+      transitionJob(job, 'completed', { reason: `orphaned: app restarted while running, exhausted ${ORPHAN_REQUEUE_CAP} re-queue attempts${killNote}, but landedCommit ${confirmedLandedCommit} resolves — completed on evidence`, source: 'applyOrphanOutcome:landed' });
+      job.exitCode = 0;
+      job.error = null;
+      job.landedCommit = confirmedLandedCommit;
+      job.finishedAt = now;
+      delete job.runtime;
     } else {
       transitionJob(job, 'failed', { reason: `orphaned: app restarted while running, exhausted ${ORPHAN_REQUEUE_CAP} re-queue attempts${killNote}`, source: 'applyOrphanOutcome' });
       job.exitCode = job.exitCode ?? 1;
@@ -4139,15 +4265,26 @@ async function pathExistsInTree(cwd, treeish, p) {
 }
 
 /**
- * resolveLandedCommitEvidence(cwd, sha) → Promise<boolean>
+ * resolveLandedCommitEvidence(cwd, sha, sinceIso) → Promise<boolean>
  *
  * Bounded, non-fatal proof that `sha` is a real, resolvable commit in the
- * repo at `cwd` — `git cat-file -e <sha>^{commit}` via execGitAt's existing
- * spawn+timeout bound (never shell:true, never an unbounded execSync). This
- * is the evidence gate reapDeadRunningJobs (PRD: reaper must consult
- * completion evidence) adds ahead of stamping a reaped row 'failed': a
- * landedCommit field being non-empty is not proof by itself (job 1192 had
- * one and still got reaped 'failed') — only a git-verified resolution is.
+ * repo at `cwd`, committed no earlier than `sinceIso` — `git cat-file -e
+ * <sha>^{commit}` plus a `git log -1 --format=%cI` timestamp check, both via
+ * execGitAt's existing spawn+timeout bound (never shell:true, never an
+ * unbounded execSync). This is the evidence gate reapDeadRunningJobs (PRD:
+ * reaper must consult completion evidence) adds ahead of stamping a reaped
+ * row 'failed': a landedCommit field being non-empty is not proof by itself
+ * (job 1192 had one and still got reaped 'failed') — only a git-verified
+ * resolution is.
+ *
+ * The timestamp bound matters because `landedCommit` deliberately survives
+ * resetJobFields (see the comment there) so a re-fired run can consult it as
+ * priorLandedCommit — which means a STALE landedCommit from an earlier
+ * dispatch of the same slug can still be sitting on the row when a LATER
+ * dispatch dies for real. Without `sinceIso`, that stale-but-real sha would
+ * satisfy `cat-file -e` and wrongly promote a genuine failure to
+ * 'completed'. Passing the current dispatch's `row.startedAt` as `sinceIso`
+ * closes that: only a commit landed during THIS run counts as evidence.
  *
  * `cwd` is normalized through opsOwnership's resolveProjectRoot first (the
  * same "never trust a raw agent cwd" reasoning delegationReadiness.cjs
@@ -4159,11 +4296,22 @@ async function pathExistsInTree(cwd, treeish, p) {
  * on disk all resolve to `false` — the caller's safe default is 'failed',
  * exactly like today, whenever this can't positively prove landing.
  */
-async function resolveLandedCommitEvidence(cwd, sha) {
+async function resolveLandedCommitEvidence(cwd, sha, sinceIso) {
   if (!sha || typeof sha !== 'string') return false;
   try {
     const root = resolveProjectRoot(cwd);
     await execGitAt(root, ['cat-file', '-e', `${sha}^{commit}`], { timeout: 10_000 });
+    if (sinceIso) {
+      const since = new Date(sinceIso).getTime();
+      if (Number.isFinite(since)) {
+        const committedIso = (await execGitAt(root, ['log', '-1', '--format=%cI', sha], { timeout: 10_000 })).trim();
+        const committedAt = new Date(committedIso).getTime();
+        // A commit dated before this dispatch even started can only be a
+        // stale sha surviving from an earlier life of the row — never
+        // evidence that THIS dispatch landed anything.
+        if (Number.isFinite(committedAt) && committedAt < since) return false;
+      }
+    }
     return true;
   } catch {
     return false;
@@ -4712,6 +4860,56 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       },
     };
 
+    // Wall-clock budget watchdog: unlike idleTailWatchdog above (which only
+    // fires when the log mtime STALLS), this fires on total elapsed wall-
+    // clock time regardless of whether the job keeps writing output — the
+    // gap a chatty-but-runaway executor slips through (see
+    // computeJobBudgetMs's header for the measured p50/p90/max this budget
+    // is calibrated against). `quietMachine` jobs and any PRD with an
+    // explicit `budgetExempt: true` opt out entirely — logged once here so
+    // an unbounded job is never silently unbounded.
+    const jobBudgetMs = computeJobBudgetMs(job.estimateMinutes);
+    const budgetExempt = isJobBudgetExempt(job);
+    if (budgetExempt) {
+      safeLog(`[scheduler] wall-clock budget watchdog EXEMPT for ${job.slug} ` +
+        `(${job.quietMachine === true ? 'quietMachine' : 'budgetExempt'}) — no wall-clock kill ceiling this run\n`);
+    }
+    let budgetWarningStamped = false;
+    const budgetWatchdog = {
+      label: 'budget',
+      intervalMs: IDLE_CHECK_INTERVAL_MS,
+      shouldFire(ctx) {
+        if (budgetExempt) return false;
+        const elapsedMs = Date.now() - ctx.startedAt;
+        if (!budgetWarningStamped && elapsedMs >= jobBudgetMs * BUDGET_WARNING_FRACTION) {
+          budgetWarningStamped = true;
+          // Fire-and-forget (side effect inside a sync predicate, same pattern
+          // resultTailWatchdog's shouldFire already uses for agentResultSubtype)
+          // — exposes the warning on the row well before the kill fires, so
+          // the renderer can show it without waiting for the next tick.
+          mutate((state) => {
+            const j = state.jobs.find((x) => x.slug === job.slug);
+            if (!j) return;
+            j.budgetWarning = { budgetMs: jobBudgetMs, elapsedMs, at: new Date().toISOString() };
+          }).catch((e) => console.warn('[scheduler] budget-warning stamp failed', job.slug, e?.message));
+        }
+        return shouldKillForBudget(elapsedMs, jobBudgetMs);
+      },
+      action(ctx) {
+        const elapsedMs = Date.now() - ctx.startedAt;
+        ctx.safeLog(`\n[scheduler] wall-clock budget watchdog: ran ${Math.round(elapsedMs / 60_000)}m ` +
+          `(> ${Math.round(jobBudgetMs / 60_000)}m budget, estimateMinutes=${job.estimateMinutes ?? 0}) — SIGTERM process group\n`);
+        ctx.killedByWatchdog = 'budget';
+        ctx.killTree('SIGTERM');
+        const budgetKillTimer = setTimeout(() => {
+          ctx.safeLog(`\n[scheduler] budget watchdog: still alive ${Math.round(POST_RESULT_KILL_MS/1000)}s after SIGTERM — SIGKILL\n`);
+          ctx.killTree('SIGKILL');
+        }, POST_RESULT_KILL_MS);
+        if (budgetKillTimer.unref) budgetKillTimer.unref();
+        ctx.addTimer(budgetKillTimer);
+      },
+    };
+
     // ---------- spawn ----------
 
     const { child } = withChildAndLog({
@@ -4742,8 +4940,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           detached: true,
         },
       },
-      watchdogs: [resultTailWatchdog, deadmanWatchdog, idleTailWatchdog],
-      onExit({ exitCode, signal, killedByWatchdog: _kbw, error, spawnFailed, leakedDescendants, safeLog: sl }) {
+      watchdogs: [resultTailWatchdog, deadmanWatchdog, idleTailWatchdog, budgetWatchdog],
+      onExit({ exitCode, signal, killedByWatchdog, error, spawnFailed, leakedDescendants, safeLog: sl }) {
         const durationMs = Date.now() - startedAt;
         const leaked = leakedDescendants ?? [];
         if (leaked.length > 0) {
@@ -4773,7 +4971,11 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         // and 137 (128+SIGKILL) in case the process exited via signal-as-code.
         let effectiveCode = exitCode;
         const killedBySignal = signal === 'SIGTERM' || signal === 'SIGKILL' || exitCode === 143 || exitCode === 137 || exitCode === null;
-        const mappedToSuccess = agentResultSubtype === 'success' && killedBySignal;
+        // A budget kill must NEVER be laundered into a clean exit=0, even when
+        // the agent had already emitted result=success before it fired — the
+        // AC requires it always park needs_review, never silently 'completed'.
+        // idle-tail/deadman/result-tail kills keep the existing success-mapping.
+        const mappedToSuccess = agentResultSubtype === 'success' && killedBySignal && killedByWatchdog !== 'budget';
         if (mappedToSuccess) {
           effectiveCode = 0;
           sl(`\n[scheduler] mapping exit code=${exitCode} signal=${signal} → 0 ` +
@@ -4796,6 +4998,16 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           sl(`\n[scheduler] LAUNCH FAILURE (${launchFailed.kind}${launchFailed.httpStatus ? ` HTTP ${launchFailed.httpStatus}` : ''}): ` +
             `${launchFailed.message} — no turn was taken; this is not a PRD failure\n`);
         }
+        // Formatted once, here, off the FINAL durationMs (more accurate than
+        // the watchdog action's own snapshot at kill time) — matches the
+        // reason string format the AC requires verbatim. See
+        // resolveBudgetKillOutcome's own header for why this is gated on
+        // killedBySignal, not on killedByWatchdog alone.
+        const budgetKillOutcome = resolveBudgetKillOutcome({
+          killedByWatchdog, killedBySignal, durationMs, jobBudgetMs, estimateMinutes: job.estimateMinutes,
+        });
+        const { budgetKillReason } = budgetKillOutcome;
+        const effectiveKilledByWatchdog = budgetKillOutcome.killedByWatchdog;
         // Sync write: child 'exit' handler must flush meta before resolve()
         // so the spawnJob mutate() that follows sees the persisted exit code.
         config.writeJsonSync(metaPath, {
@@ -4806,10 +5018,14 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           launchEnvApplied: launchEnv && Object.keys(launchEnv).length ? Object.keys(launchEnv) : [],
           startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked,
           agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${exitCode}` : null,
+          killedByWatchdog: effectiveKilledByWatchdog, budgetKillReason,
           schedulerBootedAt: SCHEDULER_BOOTED_AT, schedulerCodeSha: SCHEDULER_CODE_SHA,
           originSessionId, contextDigestApplied,
         });
-        resolve({ exitCode: effectiveCode, durationMs, rateLimited, networkError, launchFailure: launchFailed, resultStats, leakedDescendants: leaked, sessionId });
+        resolve({
+          exitCode: effectiveCode, durationMs, rateLimited, networkError, launchFailure: launchFailed, resultStats,
+          leakedDescendants: leaked, sessionId, killedByWatchdog: effectiveKilledByWatchdog, budgetKillReason,
+        });
       },
     });
 
@@ -6235,6 +6451,10 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     // narrowly to exit 143 — never applied to other non-zero exit codes or to
     // rateLimited (already handled separately, above).
     let sigtermCommitFound = false;
+    // Verified SHA twin of sigtermCommitFound's boolean — only the budget-kill
+    // path (below) threads this onto the row's landedCommit; classifySigtermWithCommit's
+    // own needs_review branch is unchanged and keeps using the boolean alone.
+    let sigtermLandedCommitEvidence = null;
     if (res.exitCode === 143 && !res.rateLimited) {
       const guardHeadAtSigterm = await gitHead(guardCwd);
       sigtermCommitFound = await computeCommittedDuringRun(
@@ -6244,6 +6464,10 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
         job.startedAt,
         new Date().toISOString(),
       );
+      if (guardHeadBefore && guardHeadAtSigterm && guardHeadAtSigterm !== guardHeadBefore) {
+        const verified = await resolveLandedCommitEvidence(guardCwd, guardHeadAtSigterm, job.startedAt);
+        if (verified) sigtermLandedCommitEvidence = guardHeadAtSigterm;
+      }
     }
 
     // BLOCKED_BY_FOREIGN_WIP claim scan: the executor exits non-zero for this
@@ -6262,6 +6486,27 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
         }
       } catch (e) {
         console.warn(`[scheduler] ${job.slug}: foreign-WIP verdict scan failed, falling through to ordinary failed classification`, e?.message);
+      }
+    }
+
+    // Evidence gate for a PLAIN non-zero exit — not SIGTERM-with-commit
+    // (classifySigtermWithCommit above already routes exit 143 to
+    // needs_review when a commit landed) and not rate-limited (handled
+    // separately). A process that dies non-zero for any OTHER reason
+    // (crash during post-commit cleanup, an overrun watchdog's SIGKILL) is
+    // observed directly by THIS exit handler — it never reaches
+    // reapDeadRunningJobs' own git-verified landedCommit evidence gate, so
+    // without this check the exact bug that gate exists to prevent (job
+    // 1192: a landedCommit non-empty is not proof by itself, but discarding
+    // proof of real landed work with no evidence check at all is worse)
+    // recurs here, one call site over. Computed outside mutate() (I/O) like
+    // every other pre-finalize git check above.
+    let plainExitLandedCommitEvidence = null;
+    if (res.exitCode !== 0 && res.exitCode !== 143 && !res.rateLimited) {
+      const headAtPlainExit = await gitHead(guardCwd);
+      if (guardHeadBefore && headAtPlainExit && headAtPlainExit !== guardHeadBefore) {
+        const verified = await resolveLandedCommitEvidence(guardCwd, headAtPlainExit, job.startedAt);
+        if (verified) plainExitLandedCommitEvidence = headAtPlainExit;
       }
     }
 
@@ -6335,7 +6580,13 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           // Determine effective status, applying the verifier verdict for exit=0 runs.
           let effectiveStatus;
           let sigtermOverrideReason = null;
-          const sigtermOverride = res.exitCode !== 0
+          // Wall-clock budget kill — checked FIRST and unconditionally wins:
+          // never 'failed', never silently 'completed', and (via
+          // sigtermLandedCommitEvidence/plainExitLandedCommitEvidence, whichever
+          // this exit code populated) still adjudicated on git evidence rather
+          // than discarded. See classifyBudgetKill's own header.
+          const budgetKill = classifyBudgetKill(res, sigtermLandedCommitEvidence || plainExitLandedCommitEvidence);
+          const sigtermOverride = (!budgetKill && res.exitCode !== 0)
             ? classifySigtermWithCommit(res.exitCode, sigtermCommitFound)
             : null;
           // Validated against the LIVE row's own foreign-WIP manifest — never
@@ -6343,7 +6594,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           // launder a real regression into a block (PRD: give the executor a
           // first-class verdict for "the gate failed on a sibling's in-flight
           // file", but VALIDATE the claim rather than trust it).
-          const foreignWipValidation = (!sigtermOverride && foreignWipClaimedPaths !== null)
+          const foreignWipValidation = (!budgetKill && !sigtermOverride && foreignWipClaimedPaths !== null)
             ? validateForeignWipBlockClaim(foreignWipClaimedPaths, s.jobs[i2])
             : null;
           // Consecutive-block streak: cleared by default on every outcome and
@@ -6352,7 +6603,12 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           // between two blocks always resets "in a row" back to zero.
           const priorForeignWipBlockCount = s.jobs[i2].foreignWipBlockCount ?? 0;
           delete s.jobs[i2].foreignWipBlockCount;
-          if (sigtermOverride) {
+          if (budgetKill) {
+            effectiveStatus = budgetKill.status;
+            sigtermOverrideReason = budgetKill.reason;
+            s.jobs[i2].verifierVerdict = 'budget_exceeded';
+            if (budgetKill.landedCommit) jobLandedCommitThisRun = budgetKill.landedCommit;
+          } else if (sigtermOverride) {
             effectiveStatus = sigtermOverride.status;
             sigtermOverrideReason = sigtermOverride.reason;
           } else if (foreignWipValidation && foreignWipValidation.ok) {
@@ -6387,7 +6643,17 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
             effectiveStatus = 'failed';
             sigtermOverrideReason = `SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP rejected — unlisted path(s) not in the disclosed foreign-WIP manifest: ${foreignWipValidation.invalidPaths.join(', ') || '(no FOREIGN_WIP_PATHS line)'}`;
           } else if (res.exitCode !== 0) {
-            effectiveStatus = 'failed';
+            if (plainExitLandedCommitEvidence) {
+              // Same conservative posture as the SIGTERM+commit case above:
+              // a landed commit doesn't prove every AC line passed, so this
+              // still routes to needs_review for a human/reverify pass,
+              // never silently to completed.
+              effectiveStatus = 'needs_review';
+              sigtermOverrideReason = `exited ${res.exitCode} after landing a git-verified commit — verify AC before treating as done`;
+              jobLandedCommitThisRun = plainExitLandedCommitEvidence;
+            } else {
+              effectiveStatus = 'failed';
+            }
           } else if (
             !verifyResult
             || COMPLETED_EQUIVALENT_VERDICTS.has(verifyResult.verdict)
@@ -6416,15 +6682,14 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           const finalizeReason = (effectiveStatus === 'completed' && verifyResult?.verdict === 'already_satisfied_on_main')
             ? verifyResult.reason
             : (sigtermOverrideReason ?? `run finished with exit ${res.exitCode}`);
-          transitionJob(s.jobs[i2], effectiveStatus, { reason: finalizeReason, source: 'spawnJob:finalize' });
-          s.jobs[i2].finishedAt = new Date().toISOString();
-          s.jobs[i2].exitCode = res.exitCode;
-          s.jobs[i2].leakedDescendants = res.leakedDescendants ?? [];
-          if (salvagePatch) {
-            s.jobs[i2].salvagePatch = salvagePatch;
-          } else {
-            delete s.jobs[i2].salvagePatch;
-          }
+          // error/verifierVerdict are stamped BEFORE transitionJob() below —
+          // needsReviewLedger's buildNeedsReviewEntryLine reads job.
+          // verifierVerdict/heldReason/error synchronously off `job` the
+          // instant transitionJob() runs (it's called inside transitionJob,
+          // not deferred), so setting these after that call fed the durable
+          // needs_review ledger stale/leftover values from before this run,
+          // defeating its whole `byReason` rollup for the two escalation
+          // paths that land here.
           s.jobs[i2].error = (effectiveStatus === 'needs_review' || s.jobs[i2].blockedByForeignWip === true)
             ? (verifyResult?.reason ?? sigtermOverrideReason ?? null)
             // A failed job (non-zero exit) never consults verifyResult above,
@@ -6442,18 +6707,28 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
             s.jobs[i2].landedCommit = jobLandedCommitThisRun;
           }
           // Persist the verifier's verdict string so the renderer can show it.
-          // 'blocked_by_foreign_wip_streak' is set above from the sigterm/
-          // exit-code path, never from verifyResult (which stays null on a
-          // non-zero exit) — never clobber it here.
+          // 'blocked_by_foreign_wip_streak'/'budget_exceeded' are set above
+          // from the sigterm/exit-code path, never from verifyResult (which
+          // stays null on a non-zero exit) — never clobber either here.
           if (verifyResult?.verdict && verifyResult.verdict !== 'clean') {
             s.jobs[i2].verifierVerdict = verifyResult.verdict;
-          } else if (s.jobs[i2].verifierVerdict !== 'blocked_by_foreign_wip_streak') {
+          } else if (!['blocked_by_foreign_wip_streak', 'budget_exceeded'].includes(s.jobs[i2].verifierVerdict)) {
             delete s.jobs[i2].verifierVerdict;
+          }
+          transitionJob(s.jobs[i2], effectiveStatus, { reason: finalizeReason, source: 'spawnJob:finalize' });
+          s.jobs[i2].finishedAt = new Date().toISOString();
+          s.jobs[i2].exitCode = res.exitCode;
+          s.jobs[i2].leakedDescendants = res.leakedDescendants ?? [];
+          if (salvagePatch) {
+            s.jobs[i2].salvagePatch = salvagePatch;
+          } else {
+            delete s.jobs[i2].salvagePatch;
           }
           // Closed-set outcome taxonomy (issue #11 list A2) so a queue row
           // says WHY it ended without anyone opening the transcript.
           s.jobs[i2].terminalReason = launchFailure.deriveTerminalReason({
             effectiveStatus, exitCode: res.exitCode, verifyResult, sigtermOverride, worktreeIntegrationFailure,
+            budgetKill: !!budgetKill,
           });
           delete s.jobs[i2].launchFailure;
           delete s.jobs[i2].heldReason;
@@ -7235,6 +7510,100 @@ function classifyQueueStarvationByProject({ jobs, paused, runningSet: runningSlu
 }
 
 /**
+ * classifyQueueHealth({ jobs, paused, launchBlocks, runningSet, freeSlots,
+ *                        totalSlots, lastDispatchAttemptAtMs, now, cwd, thresholdMs })
+ *   → { kind, cwd, pending, dispatchable, blockedChains, needsReviewCount, runningCount, ... }
+ *
+ * Single source of truth for the Scheduler page's queue-health header: the
+ * one thing a human staring at a stale-looking queue needs is "which of the
+ * genuinely different causes is this" (all slots busy? every pending row
+ * blocked on a dependency? the dispatch driver itself never ticked?) — this
+ * function names that cause instead of leaving the renderer to re-derive it.
+ *
+ * Reuses classifyQueueStarvation for the blocked/stalled read so the header
+ * can never disagree with runQueueStarvationWatchdog's own decision to force
+ * a tick: both are handed the same lastDispatchAttemptAt-based idle clock and
+ * the same computeBlockedChains walk under the hood. Called here with
+ * `thresholdMs: 0` first (a live header must say "blocked" the instant every
+ * pending row is dependency-stuck, not wait out the watchdog's own 10-minute
+ * grace period) — the returned `idleMs` is then compared against the REAL
+ * `thresholdMs` to decide 'stalled' vs the healthy 'running' default, which
+ * is exactly the comparison classifyQueueStarvation would make internally.
+ *
+ * Kinds, in the priority order they're checked (paused is a decision, not a
+ * stall; an open launch breaker explains an otherwise-inexplicable
+ * non-dispatch before slot/dependency causes are even considered):
+ *   'paused'         — the scheduler itself is paused.
+ *   'launch-blocked' — a pending row's persona has an active circuit-breaker
+ *                       entry (lib/launchFailure.cjs).
+ *   'idle'           — nothing pending in this scope.
+ *   'saturated'      — pending work exists but every session slot is in use.
+ *   'blocked'        — nothing running, slots free, every pending row's
+ *                       dependsOn chain terminates in a non-completed row.
+ *   'stalled'        — nothing running, slots free, at least one row is
+ *                       dispatchable right now, and the dispatch driver has
+ *                       been idle >= thresholdMs (agrees with the watchdog).
+ *   'running'        — the healthy default: work is flowing, or the driver
+ *                       hasn't been idle long enough to call a stall yet.
+ *
+ * Pure, no IO. `cwd` scopes jobs/pending/blocked/needsReview to one project
+ * (the Scheduler nav row is PROJECT-face — see CLAUDE.md); `freeSlots` /
+ * `totalSlots` / `launchBlocks` stay machine-wide inputs by design, same as
+ * WindowStrip's existing scopeCwd split.
+ */
+function classifyQueueHealth({
+  jobs, paused, launchBlocks, runningSet: runningSlugs, freeSlots, totalSlots,
+  lastDispatchAttemptAtMs, now, cwd = null, thresholdMs = QUEUE_STARVATION_MS,
+} = {}) {
+  const rows = (Array.isArray(jobs) ? jobs : []).filter(Boolean);
+  const projectJobs = cwd ? rows.filter((j) => j.cwd === cwd) : rows;
+  const pendingRows = projectJobs.filter((j) => j.status === 'pending');
+  const runningRows = projectJobs.filter((j) => j.status === 'running' || runningSlugs?.has?.(j.slug));
+  const needsReviewCount = projectJobs.filter((j) => j.status === 'needs_review').length;
+  const base = { cwd, pending: pendingRows.length, needsReviewCount, runningCount: runningRows.length };
+
+  if (paused) return { ...base, kind: 'paused', reason: paused.reason ?? null, dispatchable: null, blockedChains: [] };
+
+  // launch-blocked: only a persona a PENDING row in this scope actually uses
+  // — a breaker open for a persona nothing here needs is not this scope's
+  // problem (matches WindowStrip's own unconditional-banner-per-block read).
+  const neededAgentTypes = new Set(pendingRows.map((j) => launchFailure.launchBlockKeyFor(j)));
+  for (const [key, block] of Object.entries(launchBlocks ?? {})) {
+    if (block && neededAgentTypes.has(key)) {
+      return { ...base, kind: 'launch-blocked', agentType: key, block, dispatchable: null, blockedChains: [] };
+    }
+  }
+
+  if (pendingRows.length === 0) return { ...base, kind: 'idle', dispatchable: 0, blockedChains: [] };
+
+  // classifyQueueStarvation only ever classifies while nothing is running
+  // (its own runningCount > 0 guard) — that boundary is also exactly where
+  // slot saturation, not dependency shape, is the honest cause.
+  if (runningRows.length > 0) {
+    if (Number.isFinite(freeSlots) && freeSlots <= 0) {
+      return { ...base, kind: 'saturated', totalSlots: totalSlots ?? null, dispatchable: null, blockedChains: [] };
+    }
+    return { ...base, kind: 'running', dispatchable: null, blockedChains: [] };
+  }
+
+  const immediate = classifyQueueStarvation({
+    jobs: projectJobs, paused: false, runningCount: 0,
+    lastRunAtMs: lastDispatchAttemptAtMs, now, thresholdMs: 0,
+  });
+  if (!immediate) {
+    // pending.length is already > 0 above, so this can only be null when
+    // lastDispatchAttemptAtMs is itself in the future (clock skew) — an
+    // honest unknown rather than a kind we can't back up with a number.
+    return { ...base, kind: 'running', dispatchable: null, blockedChains: [] };
+  }
+  if (immediate.kind === 'blocked') {
+    return { ...base, kind: 'blocked', dispatchable: immediate.dispatchable, blockedChains: immediate.blockedChains, idleMs: immediate.idleMs };
+  }
+  const kind = immediate.idleMs >= thresholdMs ? 'stalled' : 'running';
+  return { ...base, kind, dispatchable: immediate.dispatchable, blockedChains: immediate.blockedChains, idleMs: immediate.idleMs };
+}
+
+/**
  * The watchdog half: acts on classifyQueueStarvationByProject. Called from
  * the heartbeat, which already runs on its own timer independent of the
  * billing poll loop — so a wedged or never-succeeding poll (the
@@ -7638,15 +8007,19 @@ async function reapDeadRunningJobs() {
     // carries a `failureOverride` (PRD 1173) is already diverted to
     // needs_review — this gate must never re-litigate either of those.
     const landedCommitEvidence = new Map();
-    for (const d of dead) {
-      if (d.outcome === 'rate_limited' || d.outcome === 'success') continue;
-      if (d.pidless && d.failureOverride) continue;
+    // Each row's evidence check is an independent read-only `git cat-file`/
+    // `git log` pair with no shared mutable state between iterations, so
+    // this runs the whole dead-job batch concurrently rather than one
+    // dispatch's git-spawn latency at a time.
+    await Promise.all(dead.map(async (d) => {
+      if (d.outcome === 'rate_limited' || d.outcome === 'success') return;
+      if (d.pidless && d.failureOverride) return;
       const row = state.jobs.find((x) => x.slug === d.slug);
-      if (!row?.landedCommit) continue;
+      if (!row?.landedCommit) return;
       const rowCwd = row.cwd || state.config?.defaultCwd || DEFAULT_PROJECT_CWD;
-      const resolved = await resolveLandedCommitEvidence(rowCwd, row.landedCommit);
+      const resolved = await resolveLandedCommitEvidence(rowCwd, row.landedCommit, row.startedAt);
       if (resolved) landedCommitEvidence.set(d.slug, row.landedCommit);
-    }
+    }));
 
     await mutate(async (s) => {
       for (const { slug, pid, outcome, gateOutcome, pidless, reason, noOwnArtifact, failureOverride } of dead) {
@@ -7756,17 +8129,22 @@ async function reapDeadRunningJobs() {
             ? 'completed'
             : (notLandedInfo ? 'needs_review' : (confirmedLandedCommit ? 'completed' : 'failed'));
           const source = confirmedLandedCommit ? 'reapDeadRunningJobs:landed' : 'reapDeadRunningJobs';
-          transitionJob(s.jobs[idx], targetStatus, { reason: transitionReason, source });
-          s.jobs[idx].exitCode = landed ? 0 : (s.jobs[idx].exitCode ?? 1);
-          s.jobs[idx].finishedAt = new Date().toISOString();
+          // error/verifierVerdict are stamped BEFORE transitionJob() below —
+          // see the identical ordering fix (and its rationale) in spawnJob's
+          // finalize path: transitionJob's needs_review ledger entry reads
+          // these fields off `job` synchronously the instant it runs, so
+          // setting them after fed the ledger a stale/leftover reason.
           s.jobs[idx].error = landed ? null : `${transitionReason} (outcome=${outcome})`;
-          s.jobs[idx].gateOutcome = gateOutcome;
-          if (confirmedLandedCommit) s.jobs[idx].landedCommit = confirmedLandedCommit;
           if (notLandedInfo) {
             s.jobs[idx].verifierVerdict = notLandedInfo.verdict;
           } else {
             delete s.jobs[idx].verifierVerdict;
           }
+          transitionJob(s.jobs[idx], targetStatus, { reason: transitionReason, source });
+          s.jobs[idx].exitCode = landed ? 0 : (s.jobs[idx].exitCode ?? 1);
+          s.jobs[idx].finishedAt = new Date().toISOString();
+          s.jobs[idx].gateOutcome = gateOutcome;
+          if (confirmedLandedCommit) s.jobs[idx].landedCommit = confirmedLandedCommit;
           if (landedCommit) s.jobs[idx].landedCommit = landedCommit;
         }
         // A pidless spawn that never wrote its own '<slug>.log' into the
@@ -8136,6 +8514,69 @@ function isExhaustedAutoFix(job) {
 }
 
 /**
+ * Verdicts from the POST-RUN GUARDS (commit-guard / shared-tree guard) that a
+ * later, independently-checkable commit/looksDone signal can meaningfully
+ * confirm or refute. Auto-fix investigations only ever launch for FAILING
+ * runs (see isExhaustedAutoFix above and selectAutoFixTargets) — a job parked
+ * by one of these GUARD verdicts exits 0 and never has autoFixAttempted set,
+ * so it is invisible to isExhaustedAutoFix and can sit in needs_review
+ * forever with nothing to spend and nothing to exhaust (PRD 1181, 2026-09-12:
+ * exit 0, commit aff5607 landed, parked on a shared-tree verdict, cleared
+ * only by a human).
+ *
+ * 'worktree_integration_failed' is deliberately EXCLUDED — its damage IS a
+ * commit: one stranded on an unmerged `sm-job/<slug>` branch. A `landedCommit`
+ * existing is not evidence against that verdict, it is a restatement of it,
+ * so admitting it here would auto-complete a row whose work never actually
+ * reached the target branch. It already has its own dedicated, git-native
+ * resolution path (selectMechanicalRecoveryTarget / performMechanicalRecovery
+ * — a real re-attempted merge) and must never be pulled into this ladder.
+ *
+ * 'pidless_reap_with_landed_commit' (PRD 1173, resolvePidlessFailureOverride
+ * in reaperHelpers.cjs) is included: it parks on the exact same shape (exit
+ * never observed / no autoFixAttempted, real landedCommit evidence) as
+ * 'silent_no_op' and 'shared_tree_reverted', and this ladder never trusts
+ * landedCommit alone anyway — applyNeedsReviewAutoResolve only resolves once
+ * job.looksDone independently reconfirms via a fresh commits-since-this-run
+ * scan, which is exactly the "does the commit correspond to THIS dispatch"
+ * re-verification resolvePidlessFailureOverride's own header says the
+ * pidless-reap path itself cannot do. Omitting it here reproduces the same
+ * "nothing to spend, nothing to exhaust" needs_review stall this PRD exists
+ * to fix, just for a third verdict.
+ */
+const GUARD_VERDICT_EVIDENCE_ELIGIBLE = new Set(['silent_no_op', 'shared_tree_reverted', 'pidless_reap_with_landed_commit']);
+
+/**
+ * Pure predicate, no I/O: a needs_review row parked directly by one of the
+ * GUARD_VERDICT_EVIDENCE_ELIGIBLE verdicts, that never went through an
+ * auto-fix investigation at all (autoFixAttempted is not true) — the
+ * structural gap this PRD closes, distinct from isExhaustedAutoFix's "went
+ * through auto-fix and spent it" case. A job that DID get an auto-fix
+ * investigation is left to isExhaustedAutoFix's own ladder rather than this
+ * one, even if its verifierVerdict happens to also be in the eligible set.
+ * Exported for tests.
+ */
+function isGuardParkedWithoutAutoFix(job) {
+  if (!job || job.status !== 'needs_review') return false;
+  if (job.autoFixAttempted === true) return false;
+  return GUARD_VERDICT_EVIDENCE_ELIGIBLE.has(job.verifierVerdict);
+}
+
+/**
+ * Pure predicate, no I/O: is this needs_review row eligible for the bounded
+ * auto-resolve ladder at all — either because its auto-fix path is genuinely
+ * spent (isExhaustedAutoFix), or because it was parked by a GUARD verdict
+ * that never entered auto-fix in the first place (isGuardParkedWithoutAutoFix).
+ * Both classes share ONE ladder (applyNeedsReviewAutoResolve) rather than a
+ * duplicated one — the ladder itself doesn't care which door a row came
+ * through, only whether it now carries completion evidence (job.looksDone).
+ * Exported for tests.
+ */
+function isEligibleForNeedsReviewAutoResolve(job) {
+  return isExhaustedAutoFix(job) || isGuardParkedWithoutAutoFix(job);
+}
+
+/**
  * Pure predicate: an investigation produced a fix plan (autoFixOutcome ===
  * 'plan') but its fix-plan slug is not present among `queuedSlugs` — the
  * plan file failed to become a queue row (write failure, or some other
@@ -8282,17 +8723,26 @@ function isRescanCandidate(job) {
  * selectResumeRecoveryTarget / selectAutoFixTargets) so the guard can never
  * again be narrower than the work reverifyNeedsReview performs.
  *
- * Cost: selectMechanicalRecoveryTarget/selectResumeRecoveryTarget are pure
- * (no I/O). selectAutoFixTargets is called with an injected fixSlugExists
- * that always returns false — cheap and deliberately over-inclusive (a false
- * positive here just means one extra periodic pass, never a missed one) so
- * this guard never pays selectAutoFixTargets's production fs.existsSync scan
- * per tick. resolveRunId's IO only fires for rows missing job.runId, same as
+ * Widened again (this PRD): a `needs_review` row parked directly by a GUARD
+ * verdict with no auto-fix history (isGuardParkedWithoutAutoFix) is not an
+ * isRescanCandidate either — RESCANNABLE_VERDICTS covers transcript-verifier
+ * verdicts, not commit-guard/shared-tree-guard verdicts — but
+ * reverifyNeedsReview's looksDone-annotation pass now runs for it too (see
+ * that function). Same rule as always: never let this guard be narrower than
+ * the work reverifyNeedsReview actually performs.
+ *
+ * Cost: selectMechanicalRecoveryTarget/selectResumeRecoveryTarget and
+ * isGuardParkedWithoutAutoFix are pure (no I/O). selectAutoFixTargets is
+ * called with an injected fixSlugExists that always returns false — cheap
+ * and deliberately over-inclusive (a false positive here just means one
+ * extra periodic pass, never a missed one) so this guard never pays
+ * selectAutoFixTargets's production fs.existsSync scan per tick.
+ * resolveRunId's IO only fires for rows missing job.runId, same as
  * isRescanCandidate already incurs above.
  */
 function shouldRunPeriodicReverify(jobs) {
   if (!Array.isArray(jobs)) return false;
-  if (jobs.some((j) => isRescanCandidate(j))) return true;
+  if (jobs.some((j) => isRescanCandidate(j) || isGuardParkedWithoutAutoFix(j))) return true;
   if (jobs.some((j) => selectMechanicalRecoveryTarget(j) || selectResumeRecoveryTarget(j))) return true;
   return selectAutoFixTargets(jobs, { fixSlugExists: () => false }).length > 0;
 }
@@ -8458,9 +8908,11 @@ function needsReviewAutoResolveDisabled() {
  * selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) →
  *   [{ slug, cwd, ageMs, attempts }]
  *
- * Pure selector — no IO. Selects `needs_review` rows whose auto-fix path is
- * genuinely spent (isExhaustedAutoFix), whose newest statusHistory entry
- * with `to === 'needs_review'` is older than `thresholdMs`, and whose
+ * Pure selector — no IO. Selects `needs_review` rows eligible for the
+ * bounded auto-resolve ladder (isEligibleForNeedsReviewAutoResolve — either
+ * auto-fix genuinely spent, or parked by a GUARD verdict that never entered
+ * auto-fix at all), whose newest statusHistory entry with `to ===
+ * 'needs_review'` is older than `thresholdMs`, and whose
  * exhaustedResolveAttempts counter has not yet spent its cap.
  *
  * The inclusion bound is inclusive of the cap itself (`<= CAP`, not `<
@@ -8474,7 +8926,7 @@ function selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) {
   const targets = [];
   for (const j of jobs ?? []) {
     if (j.status !== 'needs_review') continue;
-    if (!isExhaustedAutoFix(j)) continue;
+    if (!isEligibleForNeedsReviewAutoResolve(j)) continue;
     if ((j.exhaustedResolveAttempts ?? 0) > NEEDS_REVIEW_RESOLVE_CAP) continue;
     const history = j.statusHistory || [];
     let entry = null;
@@ -8510,17 +8962,26 @@ function selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) {
  * failed-autoreset loop above) so a stale target computed before this
  * mutate() pass can never double-apply. Returns the outcome, or null if the
  * race guard rejected it.
+ *
+ * A row can reach here through either door (isEligibleForNeedsReviewAutoResolve):
+ * auto-fix genuinely exhausted, or parked directly by a GUARD_VERDICT_EVIDENCE_
+ * ELIGIBLE verdict with no auto-fix history at all. `originIsGuardParked` picks
+ * which door this particular row came through, purely to make the requeue/skip
+ * reason text (and the Queue UI's job.error) name the RIGHT evidence — a
+ * guard-parked row was never "exhausted auto-fix" and must never claim to be.
  */
 function applyNeedsReviewAutoResolve(j) {
-  if (!j || j.status !== 'needs_review' || !isExhaustedAutoFix(j)) return null;
+  if (!j || j.status !== 'needs_review' || !isEligibleForNeedsReviewAutoResolve(j)) return null;
   if ((j.exhaustedResolveAttempts ?? 0) > NEEDS_REVIEW_RESOLVE_CAP) return null;
+  const originIsGuardParked = !isExhaustedAutoFix(j) && isGuardParkedWithoutAutoFix(j);
 
   if (j.looksDone) {
     const attempt = j.exhaustedResolveAttempts ?? 0;
-    transitionJob(j, 'completed', {
-      reason: `needs_review auto-resolve: verifier annotation shows work landed (${j.looksDone.commits.length} commit(s) since this run touch the PRD's declared paths)`,
-      source: 'needsReviewAutoResolve',
-    });
+    const reason = originIsGuardParked
+      ? `needs_review auto-resolve: guard verdict '${j.verifierVerdict}' with landed commit and looksDone evidence — `
+        + `${j.looksDone.commits.length} commit(s) since this run touch the PRD's declared paths, work landed`
+      : `needs_review auto-resolve: verifier annotation shows work landed (${j.looksDone.commits.length} commit(s) since this run touch the PRD's declared paths)`;
+    transitionJob(j, 'completed', { reason, source: 'needsReviewAutoResolve' });
     appendAuditEvent('needs_review_auto_resolved', { slug: j.slug, cwd: j.cwd ?? null, outcome: 'completed', attempt });
     return 'completed';
   }
@@ -8529,18 +8990,22 @@ function applyNeedsReviewAutoResolve(j) {
   if (attemptsSoFar < NEEDS_REVIEW_RESOLVE_CAP) {
     const attempt = attemptsSoFar + 1;
     j.exhaustedResolveAttempts = attempt;
-    transitionJob(j, 'pending', {
-      reason: `needs_review auto-resolve: exhausted auto-fix, no completion evidence — requeued for one more run (attempt ${attempt}/${NEEDS_REVIEW_RESOLVE_CAP})`,
-      source: 'needsReviewAutoResolve',
-    });
+    const reason = originIsGuardParked
+      ? `needs_review auto-resolve: guard verdict '${j.verifierVerdict}' with no completion evidence yet — `
+        + `requeued for one more run (attempt ${attempt}/${NEEDS_REVIEW_RESOLVE_CAP})`
+      : `needs_review auto-resolve: exhausted auto-fix, no completion evidence — requeued for one more run (attempt ${attempt}/${NEEDS_REVIEW_RESOLVE_CAP})`;
+    transitionJob(j, 'pending', { reason, source: 'needsReviewAutoResolve' });
     appendAuditEvent('needs_review_auto_resolved', { slug: j.slug, cwd: j.cwd ?? null, outcome: 'requeued', attempt });
     return 'requeued';
   }
 
   j.needsReviewAutoResolvedSkip = true;
-  j.error = `needs_review auto-resolve: exhausted auto-fix path (autoFixOutcome=${j.autoFixOutcome ?? 'none'}, `
-    + `autoFixRetries=${j.autoFixRetries ?? 0}) with no completion evidence after ${NEEDS_REVIEW_RESOLVE_CAP} `
-    + `requeue attempt(s) — auto-skipped to unblock downstream dependsOn rows`;
+  j.error = originIsGuardParked
+    ? `needs_review auto-resolve: guard verdict '${j.verifierVerdict}' with no completion evidence after `
+      + `${NEEDS_REVIEW_RESOLVE_CAP} requeue attempt(s) — auto-skipped to unblock downstream dependsOn rows`
+    : `needs_review auto-resolve: exhausted auto-fix path (autoFixOutcome=${j.autoFixOutcome ?? 'none'}, `
+      + `autoFixRetries=${j.autoFixRetries ?? 0}) with no completion evidence after ${NEEDS_REVIEW_RESOLVE_CAP} `
+      + `requeue attempt(s) — auto-skipped to unblock downstream dependsOn rows`;
   transitionJob(j, 'skipped', {
     reason: `needs_review auto-resolve: cap exhausted (${NEEDS_REVIEW_RESOLVE_CAP}/${NEEDS_REVIEW_RESOLVE_CAP} requeue attempts) — auto-skipped`,
     source: 'needsReviewAutoResolve',
@@ -8606,6 +9071,11 @@ function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRu
     // fix-plan investigation to diagnose — there is no code defect to
     // author a PRD against, only another job's still-uncommitted tree.
     if (job.blockedByForeignWip === true) return false;
+    // A budget-killed job parks for a human/ladder decision, never an
+    // auto-fix investigation or auto-retry — the run didn't fail, it simply
+    // overran its own estimate; there's no code defect to diagnose (Out of
+    // scope: "retrying or auto-resuming a budget-killed job" for this PRD).
+    if (job.verifierVerdict === 'budget_exceeded') return false;
     // A stale re-run whose work already shipped (rcaReport's 'already-shipped'
     // class) must never buy a fix-plan PRD — there is nothing to fix, and the
     // correct recovery (archiving the PRD) is a human/reconcile action, not
@@ -8675,13 +9145,24 @@ function isEligibleForImmediateAutoFix(job, allJobs, fixSlugExists) {
  * paths — the caller then has only the existing, already-computed
  * committedInWindow signal to go on, same as before this PRD.
  *
+ * `fetchedCwds` (optional) lets a caller iterating many candidates in one
+ * pass (reverifyNeedsReview) dedupe the `git fetch --all --prune` across
+ * candidates that share a `cwd` — several `needs_review` rows for the same
+ * project is the common case a backlog produces, and each fetch is up to
+ * ~20s, so re-fetching the same repo once per row multiplies that pass's
+ * wall-clock cost for zero new evidence. Omitted (or a fresh Set per call)
+ * simply always fetches, unchanged from before this cache existed.
+ *
  * @returns {Promise<{commits: string[], paths: string[], detectedAt: string} | null>}
  */
-async function computeLooksDone(job) {
+async function computeLooksDone(job, fetchedCwds) {
   const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
   const paths = declaredPathsForPrd(prdPath);
   if (!paths.length) return null;
-  await fetchAllRefs(job.cwd);
+  if (!fetchedCwds || !fetchedCwds.has(job.cwd)) {
+    await fetchAllRefs(job.cwd);
+    if (fetchedCwds) fetchedCwds.add(job.cwd);
+  }
   const commits = await landedSinceRun(job.cwd, job.startedAt, paths);
   if (!commits.length) return null;
   return { commits, paths, detectedAt: new Date().toISOString() };
@@ -8689,11 +9170,33 @@ async function computeLooksDone(job) {
 
 async function reverifyNeedsReview() {
   const snap = await readQueue();
-  const candidates = snap.jobs.filter(isRescanCandidate);
+  // isGuardParkedWithoutAutoFix rows are NOT isRescanCandidate (their
+  // verifierVerdict is a commit-guard/shared-tree-guard verdict, not a
+  // RESCANNABLE_VERDICTS transcript-verifier one) — included here so this
+  // pass also computes their looksDone evidence, the widened half of the
+  // guard-verdict auto-resolve gap this PRD closes. Handled in its own
+  // branch below (no transcript rescan — there is no transcript verdict to
+  // rescan) rather than through the isRescanCandidate machinery.
+  const candidates = snap.jobs.filter((j) => isRescanCandidate(j) || isGuardParkedWithoutAutoFix(j));
   const healed = [];
   const leftForReview = [];
   const looksDoneUpdates = [];
+  // Shared across every computeLooksDone call in this one pass — dedupes
+  // the `git fetch --all --prune` per distinct cwd (see computeLooksDone's
+  // header) rather than re-fetching the same repo once per candidate row.
+  const fetchedCwds = new Set();
   for (const job of candidates) {
+    if (!isRescanCandidate(job) && isGuardParkedWithoutAutoFix(job)) {
+      // Guard-verdict park, never auto-fixed: only evidence gathering, never
+      // a transcript rescan (there was never a transcript-verifier verdict
+      // here) and never a direct heal — applyNeedsReviewAutoResolve is the
+      // sole place that turns this annotation into a status change.
+      const looksDone = await computeLooksDone(job, fetchedCwds);
+      if (looksDone) {
+        looksDoneUpdates.push({ slug: job.slug, cwd: job.cwd, looksDone, fromFailed: false });
+      }
+      continue;
+    }
     if (job.status === 'failed') {
       // A failed row never runs the transcript-verifier rescan below — that
       // machinery (verifyRun/COMPLETED_EQUIVALENT_VERDICTS) exists to
@@ -8702,7 +9205,7 @@ async function reverifyNeedsReview() {
       // completing-direction constraint). The only thing a failed candidate
       // can gain here is a looksDone annotation + a failed → needs_review
       // transition, for a human to confirm.
-      const looksDone = await computeLooksDone(job);
+      const looksDone = await computeLooksDone(job, fetchedCwds);
       if (looksDone) {
         looksDoneUpdates.push({ slug: job.slug, cwd: job.cwd, looksDone, fromFailed: true });
       } else {
@@ -8757,7 +9260,7 @@ async function reverifyNeedsReview() {
     // always before this periodic/boot pass can run against the same row, so
     // this check reliably catches the only order that can occur.
     if (stillOpen && job.autoFixAttempted !== true) {
-      const looksDone = await computeLooksDone(job);
+      const looksDone = await computeLooksDone(job, fetchedCwds);
       if (looksDone) {
         looksDoneUpdates.push({ slug: job.slug, cwd: job.cwd, looksDone, fromFailed: false });
       }
@@ -9097,6 +9600,57 @@ function registerScheduleHandlers() {
     };
   });
 
+  // Queue-health header (PRD): the one honest read of "why does the queue
+  // look stale" — reuses classifyQueueHealth so the UI and the starvation
+  // watchdog can never disagree. `cwd` is optional (null = machine-wide,
+  // matching WindowStrip's own scopeCwd fallback).
+  ipcMain.handle('schedule:queue-health', async (_e, payload) => {
+    const cwd = (payload && typeof payload.cwd === 'string') ? payload.cwd : null;
+    const state = await readQueue();
+    if (state.unreadable) {
+      return { unknown: true, reason: state.unreadable };
+    }
+    const now = Date.now();
+    const slotSnapshot = sessionSlots.snapshot();
+    const freeSlots = Math.max(0, slotSnapshot.total - slotSnapshot.inUse);
+    const verdict = classifyQueueHealth({
+      jobs: state.jobs,
+      paused: state.paused,
+      launchBlocks: state.launchBlocks,
+      runningSet,
+      freeSlots,
+      totalSlots: slotSnapshot.total,
+      lastDispatchAttemptAtMs: Date.parse(state.lastDispatchAttemptAt ?? ''),
+      now,
+      cwd,
+    });
+    // Oldest running job across the whole machine (any project) — the
+    // number that actually explains slot saturation, alongside the
+    // machine-wide slot pool itself.
+    let oldestRunningAgeMs = null;
+    for (const j of state.jobs) {
+      if (j.status !== 'running' && !runningSet.has(j.slug)) continue;
+      const startedAtMs = j.startedAt ? Date.parse(j.startedAt) : NaN;
+      if (!Number.isFinite(startedAtMs)) continue;
+      const age = now - startedAtMs;
+      if (oldestRunningAgeMs === null || age > oldestRunningAgeMs) oldestRunningAgeMs = age;
+    }
+    return {
+      unknown: false,
+      now,
+      verdict,
+      slots: {
+        inUse: slotSnapshot.inUse,
+        total: slotSnapshot.total,
+        free: freeSlots,
+        source: slotSnapshot.envOverride ? 'env' : 'pool',
+      },
+      oldestRunningAgeMs,
+      lastRunAt: state.lastRunAt ?? null,
+      lastDispatchAttemptAt: state.lastDispatchAttemptAt ?? null,
+    };
+  });
+
   ipcMain.handle('schedule:force-tick', async () => {
     // Bypass the billing-poll gate entirely — fire pending jobs immediately regardless of meter state.
     // Clears any existing pause first (same semantics as run-now).
@@ -9418,6 +9972,18 @@ async function init() {
       const logPath = j.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null;
       bootOutcomes.set(j.slug, logPath ? classifyRunOutcome(logPath) : 'unknown');
     }
+    // Same evidence-before-failure gate reapDeadRunningJobs applies, resolved
+    // BEFORE mutate() for the same reason (git spawn work must never run
+    // inside mutate()'s single global serialization chain) — an orphaned job
+    // classified 'failed'/'unknown' from its log tail alone can still have
+    // actually landed a real commit before the app restarted mid-run.
+    const bootLandedCommitEvidence = new Map();
+    await Promise.all(bootSnap.jobs.map(async (j) => {
+      if (!immediateSlugs.includes(j.slug) || j.status !== 'running') return;
+      if (bootOutcomes.get(j.slug) === 'success' || !j.landedCommit) return;
+      const resolved = await resolveLandedCommitEvidence(j.cwd || DEFAULT_PROJECT_CWD, j.landedCommit, j.startedAt);
+      if (resolved) bootLandedCommitEvidence.set(j.slug, j.landedCommit);
+    }));
     const bootReconciledCompletions = [];
     await mutate((state) => {
       for (const j of state.jobs) {
@@ -9425,7 +9991,7 @@ async function init() {
         const outcome = bootOutcomes.get(j.slug) ?? 'unknown';
         const pid = j.runtime?.pid;
         const killNote = pid ? ` (orphan pid=${pid}: dead)` : '';
-        applyOrphanOutcome(j, outcome, killNote);
+        applyOrphanOutcome(j, outcome, killNote, bootLandedCommitEvidence.get(j.slug) || null);
         if (j.status === 'completed') bootReconciledCompletions.push({ slug: j.slug, cwd: j.cwd });
         console.log(`[scheduler] boot reconcile: slug=${j.slug} outcome=${outcome} → status=${j.status}`);
       }
@@ -9449,9 +10015,18 @@ async function init() {
       if (result === 'killed') {
         console.log(`[scheduler] boot: SIGTERM'd orphan claude pid=${pid} for ${slug} — deferring finalize ${BOOT_ORPHAN_KILL_GRACE_MS}ms`);
       }
-      setTimeout(() => {
+      setTimeout(async () => {
         const logPath = j.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null;
         const outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
+        // Same evidence-before-failure gate as the immediate-orphan path
+        // above, resolved before mutate() for the same reason (git spawn
+        // work must never run inside mutate()'s serialization chain). Uses
+        // the captured pre-kill snapshot's landedCommit/cwd/startedAt — the
+        // race guard below already confirms `cur` is still this same run
+        // (runId === bootRunId) before this evidence is applied.
+        const confirmedLandedCommit = (outcome !== 'success' && j.landedCommit)
+          ? (await resolveLandedCommitEvidence(j.cwd || DEFAULT_PROJECT_CWD, j.landedCommit, j.startedAt) ? j.landedCommit : null)
+          : null;
         let deferredCompletedCwd;
         mutate((state) => {
           const cur = state.jobs.find((x) => x.slug === slug);
@@ -9460,7 +10035,7 @@ async function init() {
           // that new run is not the boot orphan we SIGTERM'd and must not be
           // touched by this stale classification.
           if (!cur || cur.status !== 'running' || cur.runId !== bootRunId) return;
-          applyOrphanOutcome(cur, outcome, killNote);
+          applyOrphanOutcome(cur, outcome, killNote, confirmedLandedCommit);
           console.log(`[scheduler] boot reconcile (deferred): slug=${slug} outcome=${outcome} → status=${cur.status}`);
           deferredCompletedCwd = cur.status === 'completed' ? cur.cwd : undefined;
         }).then(() => {
@@ -10321,18 +10896,38 @@ const remote = {
     if (wasRunning && pid) {
       killOrphanClaudePid(pid);
     }
+    // Evidence-before-failure guard, scoped to an actually-running job being
+    // killed here (a 'pending' cancel has no live process, so nothing new
+    // could have landed since its last stamp — and 'needs_review' is not
+    // even a legal transition from 'pending', see LEGAL_TRANSITIONS): the
+    // same reapDeadRunningJobs evidence gate (job 1192 — a landedCommit
+    // being non-empty is not proof by itself, but discarding proof of real
+    // landed work with no check at all is worse) applies here too. A
+    // dead-pid reap of a job that landed a commit (e.g. via the
+    // dispatch-time sidecar backfill) is routed to needs_review/completed;
+    // a deliberate cancel of that same state deserves no less.
+    const confirmedLandedCommit = (wasRunning && job.landedCommit)
+      ? ((await resolveLandedCommitEvidence(job.cwd || DEFAULT_PROJECT_CWD, job.landedCommit, job.startedAt))
+        ? job.landedCommit
+        : null)
+      : null;
+    const targetStatus = confirmedLandedCommit ? 'needs_review' : 'failed';
+    const cancelReason = confirmedLandedCommit
+      ? `cancelled via admin API, but landedCommit ${confirmedLandedCommit} resolves — verify before treating as done`
+      : 'cancelled via admin API';
     await mutate((s) => {
       const idx = s.jobs.findIndex((j) => j.slug === slug);
       if (idx < 0) return;
       const j = s.jobs[idx];
-      transitionJob(j, 'failed', { reason: 'cancelled via admin API', source: 'remote:cancelJob' });
-      j.error = 'cancelled via admin API';
+      transitionJob(j, targetStatus, { reason: cancelReason, source: 'remote:cancelJob' });
+      j.error = cancelReason;
       j.finishedAt = new Date().toISOString();
       j.exitCode = j.exitCode ?? null;
+      if (confirmedLandedCommit) j.verifierVerdict = 'cancelled_with_landed_commit';
       delete j.runtime;
     });
     await broadcast({ flush: true });
-    return { ok: true, slug, status: 'failed', wasRunning, cwd: job.cwd ?? null };
+    return { ok: true, slug, status: targetStatus, wasRunning, cwd: job.cwd ?? null };
   },
 
   // Exposes the module-level allocateParallelGroup (PRD 548) to callers that
@@ -10379,6 +10974,7 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
 module.exports = {
   classifyQueueStarvation,
   classifyQueueStarvationByProject,
+  classifyQueueHealth,
   runQueueStarvationWatchdog,
   QUEUE_STARVATION_MS,
   selectStarveEscalations,
@@ -10389,6 +10985,15 @@ module.exports = {
   findOverrunningJobs,
   JOB_OVERRUN_FACTOR,
   JOB_OVERRUN_FLOOR_MS,
+  computeJobBudgetMs,
+  classifyBudgetKill,
+  isJobBudgetExempt,
+  shouldKillForBudget,
+  resolveBudgetKillOutcome,
+  JOB_BUDGET_FACTOR,
+  JOB_BUDGET_FLOOR_MS,
+  JOB_BUDGET_CEILING_MS,
+  BUDGET_WARNING_FRACTION,
   registerScheduleHandlers,
   attachWindow,
   init,
@@ -10443,6 +11048,9 @@ module.exports = {
   resolveRunId,
   isUnresolvableNeedsReview,
   isExhaustedAutoFix,
+  GUARD_VERDICT_EVIDENCE_ELIGIBLE,
+  isGuardParkedWithoutAutoFix,
+  isEligibleForNeedsReviewAutoResolve,
   isPlanUnqueued,
   isFixPlanDead,
   fixSlugFor,

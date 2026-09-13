@@ -123,6 +123,12 @@ async function parsePrdRaw(filePath) {
     // schedulerBatch.cjs's pickNextBatch). Only a literal `true` opts in —
     // matches prdFrontmatter.cjs's applyKey semantics for this field.
     quietMachine: fm.quietMachine === 'true',
+    // Explicit opt-out of the wall-clock budget kill (scheduler.cjs's budget
+    // watchdog) — only a literal `true` opts out, matching quietMachine's
+    // parse semantics above. quietMachine jobs are exempt regardless of this
+    // field; this is for a job that isn't quiet-machine-eligible but still
+    // needs no wall-clock kill ceiling.
+    budgetExempt: fm.budgetExempt === 'true',
     body: body.trim(),
   };
 }

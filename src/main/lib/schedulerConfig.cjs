@@ -109,6 +109,20 @@ module.exports = {
   // SM_JOB_OVERRUN_FLOOR_MINUTES.
   JOB_OVERRUN_FLOOR_MS: 45 * 60_000,
 
+  // Wall-clock KILL budget (distinct from JOB_OVERRUN_FACTOR/JOB_OVERRUN_FLOOR_MS
+  // above, which only ever ESCALATE — log + audit, deliberately never kill).
+  // This one ACTS: a RUNNING job past `budgetMs = clamp(estimateMinutes *
+  // JOB_BUDGET_FACTOR, JOB_BUDGET_FLOOR_MS, JOB_BUDGET_CEILING_MS)` is
+  // SIGTERMed and parked needs_review. Calibrated against 606 run-meta
+  // records since 2026-08-25: p50=13m, p90=60m, max=240m, against a
+  // concurrencyCap of 4 — two 4h outliers hold half the machine's dispatch
+  // capacity for an afternoon with nothing noticing or acting on it. Override
+  // with SM_JOB_BUDGET_FACTOR / SM_JOB_BUDGET_FLOOR_MINUTES /
+  // SM_JOB_BUDGET_CEILING_MINUTES.
+  JOB_BUDGET_FACTOR: 3,
+  JOB_BUDGET_FLOOR_MS: 45 * 60_000,
+  JOB_BUDGET_CEILING_MS: 180 * 60_000,
+
   // A 'running' row with no runtime.pid recorded (spawnJob's status:running
   // mutate at scheduler.cjs:~3524 landed, but the pid-bearing runtime={}
   // mutate that follows executeJob's spawn callback never did — the spawn

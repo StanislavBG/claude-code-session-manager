@@ -22,6 +22,9 @@ just because its subject has since changed or been removed — see below.
 - `2026-08-02-ops-protocol-patterns-c-d-findings.md` — moved from `../architecture/` (was
   `ops-maintenance-protocol-patterns-c-d-findings.md`), the Pattern C/D investigation for
   `ops-maintenance-protocol.md`.
+- `2026-08-02-ops-maintenance-protocol-run-log.md` — split out of
+  `../architecture/ops-maintenance-protocol.md`, the frozen 2026-08-02 first-run narrative
+  (concrete counts, dates, what was and wasn't touched) for that doc's durable rules.
 - `2026-07-30-global-settings-inventory.md` — moved from `../architecture/`
   (`global-settings-inventory.md`), a frozen point-in-time global-settings inventory.
 - `2026-09-12-agent-layer-consumers.md` — moved from `../architecture/`

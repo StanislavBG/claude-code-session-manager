@@ -59,6 +59,56 @@ amount of sniffing derives "bump `VERSION`, write the changelog, tag, and flag t
 server needs a restart". That needs `CLAUDE.md` plus git history plus judgment — so the
 resolver stays dumb and discovery lives in the agent.
 
+## This project's npm publish requirements
+
+Session-manager's own `registry: "npm"` target has requirements beyond the generic shape above —
+this section is npm/session-manager-specific, not part of the resolver's generic contract.
+
+### Required package.json metadata
+
+Every published version must have:
+
+- `name` — `claude-code-session-manager`
+- `version` — semver, bumped before publish
+- `license` — `MIT`
+- `repository.url` — `https://github.com/StanislavBG/claude-code-session-manager.git`
+- `homepage` — `https://github.com/StanislavBG/claude-code-session-manager#readme`
+- `bugs.url` — `https://github.com/StanislavBG/claude-code-session-manager/issues`
+
+No `publishConfig.provenance` field — it has never existed in this project's `package.json`
+(current `publishConfig` is just `{ "access": "public" }`), and provenance itself is future work,
+gated on a `release.yml` GitHub Actions workflow that doesn't exist yet (see the 2FA note below).
+
+### GitHub repo requirement
+
+The published package MUST have a corresponding GitHub repo at
+`https://github.com/StanislavBG/claude-code-session-manager` — `package.json`'s `repository.url`
+points there. `repository`/`homepage`/`bugs` only appear on the npm registry page after the
+**next publish** following the commit that adds or changes them; they don't backfill old versions.
+
+### npm write-path 2FA gate / Trusted Publishing
+
+`npm publish` can 403 (`Two-factor authentication or granular access token with bypass 2fa enabled
+is required to publish packages`) even when `npm whoami` succeeds — a separate gate from login. A
+legacy "classic" publish token cannot satisfy it; only an account with 2FA enabled (interactive OTP
+at publish time) or a **granular access token with "bypass 2FA for write actions"** (npmjs.com web
+UI only — the CLI cannot create one) can. npm is deprecating the bypass-2FA token path itself —
+Phase 2 (~Jan 2027) removes its publish capability entirely. The durable fix, once a `release.yml`
+workflow exists, is **npm Trusted Publishing (OIDC)** — no token/2FA at all, since npm verifies the
+GitHub Actions run's own short-lived identity. Until that workflow is built, this repo has no fully
+unattended publish path; a local-worktree publish needs either a live human OTP or a (temporary,
+pre-2027) bypass-2FA token per release.
+
+### Publish command sequence
+
+The exact, verified command sequence — including the isolated-worktree technique (`vite build`
+reads the working directory, so publish always happens from a clean worktree checked out at the
+release tag, never the live/dirty main working directory) and the real `prepublishOnly` chain
+(`npm run build:project-pages && npm run build:project-pages-logic && npm run project-pages:gate
+&& vite build` — not a bare `vite build`) — lives in
+[`plugins/session-manager-dev/skills/builder/3-publish/SKILL.md`](../../plugins/session-manager-dev/skills/builder/3-publish/SKILL.md),
+not here. That skill owns the procedure; this file only states the target's requirements.
+
 ## Worked non-npm example
 
 A local-first Python cron daemon with no registry publish:

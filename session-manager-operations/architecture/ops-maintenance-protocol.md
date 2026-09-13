@@ -2,12 +2,23 @@
 
 `session-manager-operations/` is the backbone for this app's own runtime state AND ships as the
 template for what every other project's operations root looks like once session-manager opens a
-TAB on it. Because it accumulates fast (5 concurrent writers-in-code plus ad-hoc skill/agent
-output) and is never pruned automatically, it silently drifts from the source of truth that
-governs it: `CLAUDE.md`'s OWNERS table + lifecycle rules, and each namespace's own `README.md`.
-This document is the repeatable protocol for detecting and resolving that drift — first run
-manually against this project's own operations folder (below), later to be automated by a sweep
-agent that runs it against every project's operations root (see Pattern F).
+TAB on it. Because it accumulates fast (concurrent writers-in-code plus ad-hoc skill/agent output)
+and is never pruned automatically, it silently drifts from the source of truth that governs it:
+`CLAUDE.md`'s OWNERS table + lifecycle rules, and each namespace's own `README.md`. This document
+is the repeatable protocol for detecting and resolving that drift.
+
+Two things implement this protocol today: `scripts/audit-ops-hygiene.cjs` (session-manager's own
+repo, hardcodes this project's OWNERS vocabulary — Patterns C/D/E/F, its own, not this doc's) and
+`scripts/ops-sweep.cjs` plus the `session-manager-dev:ops-sweep` skill (portable, runs against ANY
+project's `session-manager-operations/`, including one with no CLAUDE.md at all — Pattern H below).
+**Both are built and runnable today.** The only unbuilt piece is a scheduled/cron cadence — see
+Cadence.
+
+The first run of this protocol against session-manager's own ops folder (2026-08-02) found real
+drift and resolved most of it. That run's narrative — concrete file counts, dates, and what was and
+wasn't touched — is a frozen, point-in-time record, not durable policy, so it lives in
+[`../reviews/2026-08-02-ops-maintenance-protocol-run-log.md`](../reviews/2026-08-02-ops-maintenance-protocol-run-log.md)
+rather than here; that doc links back here for the durable rules its run was exercising.
 
 ## Source-of-truth hierarchy (highest wins)
 
@@ -27,116 +38,101 @@ README) agree on what should happen to a namespace. When code, CLAUDE.md, and th
 disagree with each other (Pattern A below), that's a stop-and-decide case, not an
 auto-delete — file a proposed Epic, don't act unilaterally.
 
-**Update 2026-08-02: Pattern A resolved.** Decision: full retirement (option a). The `feedback`
-`OWNERS` entry and its `config.cjs` write grant are removed; the 69 historical files were
-archived to `session-manager-operations/feedback/archived-2026-08-02/`; `feedback/README.md` now
-points readers at `/propose-epic`; `CLAUDE.md`'s two contradictory bullets now agree. Zero open
-(un-triaged) items were on disk at decision time, confirming the folder had no live manual-inbox
-usage independent of the now-retired `/process-feedback` pass.
-
-## Patterns (found by running this protocol against session-manager's own ops folder, 2026-08-02)
+## Patterns and their detection rules
 
 ### Pattern A — retired-in-docs, live-in-code namespace
-`feedback/` is declared retired in CLAUDE.md's "status: 'proposed' is the human gate" bullet
-("The retired machinery — `session-manager-operations/feedback/`... is gone") while the same
-CLAUDE.md's OWNERS bullet two paragraphs earlier still lists `feedback → feedback` as a current
-owner — CLAUDE.md contradicts itself. Code confirms the retirement is real but incomplete:
-`rcaFeedbackHook.cjs` no longer writes there (it now files proposed Epics — see its own header
-comment), yet `config.cjs:139-146` still grants write access to `session-manager-operations/feedback/`
-with a comment claiming rcaFeedbackHook uses it, and `opsOwnership.cjs` still lists it as an owned
-namespace. `feedback/README.md` still instructs readers to file via the now-nonexistent
-`/process-feedback` skill. Three layers, three different stories, 72 files (2.9 MB) sitting on
-disk as a result. **Action**: don't delete the files — file a proposed Epic to make a real
-decision (keep as a manual-only inbox with corrected docs, or fully retire: drop the OWNERS entry
-+ write grant, archive the 72 files, rewrite the README to point at `/propose-epic`). Filed as
-Epic (see bottom of this doc).
+A namespace is declared retired in one doc layer (e.g. CLAUDE.md prose) while another doc layer
+(the OWNERS table, or a README) still describes it as actively owned/writable — or code itself
+still writes there. **Detection**: the ownership doc contains both "retired/gone" language and
+"owner/owns" language about the same namespace in the same clause; `scripts/ops-sweep.cjs`'s
+`CONTRADICTION` finding automates this. **Action**: don't delete anything on sight — file a
+proposed Epic to make the real decision (keep as a corrected doc, or fully retire: drop the OWNERS
+entry + write grant, archive the files, rewrite the README).
 
-### Pattern B — undocumented namespace (CLAUDE.md's "deliberately NOT in OWNERS" list is incomplete)
-CLAUDE.md names exactly `architecture/`, `design-mocks/`, `HUMAN_LEARN/`, `reviews/` as folders
-that live under the ops root without an OWNERS entry. In practice `browser/`, `logs/`,
-`project-pages/`, and now `bilko-host/` also exist as non-OWNERS artifact folders — each with its
-own README correctly self-declaring that status, but CLAUDE.md's own enumeration never grew to
-match. **Detection**: every folder under `session-manager-operations/` must appear in exactly one
-of (a) `opsOwnership.cjs`'s `OWNERS` keys or (b) CLAUDE.md's non-OWNERS enumeration. A folder in
-neither is undocumented at the CLAUDE.md level even if its own README is fine. **Action**: doc-only
-fix, low risk — update CLAUDE.md's enumeration whenever a new artifact folder's README lands,
-same PR that adds the folder.
+### Pattern B — undocumented namespace
+Every folder under `session-manager-operations/` must appear in exactly one of (a)
+`opsOwnership.cjs`'s `OWNERS` keys or (b) the ownership doc's non-OWNERS enumeration. **Detection**:
+a folder in neither is undocumented even if its own README is fine; `scripts/ops-sweep.cjs`'s
+`UNDOCUMENTED` finding. **Action**: doc-only fix, low risk — update the enumeration in the same PR
+that adds the folder.
 
 ### Pattern C — legacy flat structure not fully migrated
-
-**Update 2026-08-02: resolved, see
-[`../reviews/2026-08-02-ops-protocol-patterns-c-d-findings.md`](../reviews/2026-08-02-ops-protocol-patterns-c-d-findings.md).**
-The 73 files were legitimately in-flight PRDs mid-drain, not stuck debt; re-checked a few hours
-later, the flat dir holds 0 `.md` files. No migration was needed.
-
-
-CLAUDE.md states the flat `scheduler/prds/` layout is "RETIRED and auto-consolidated into
-`prds-archived/` at boot." On disk today, `scheduler/prds/` (top-level) still holds 73 files and
-`scheduler/prds-archived/` holds 179 — the claimed boot-time consolidation is either not running,
-not covering every file, or the 73 remaining files are legitimately still in flight (unclaimed
-PRDs, not yet archived because not yet completed). **Detection**: nonzero top-level
-`scheduler/prds/` file count that doesn't shrink between app restarts is the signal; distinguish
-"stuck legacy debt" from "normal in-flight PRDs" by cross-referencing against `scheduler/state/`
-queue/history before treating any of it as cleanup work. **Action**: investigate before touching —
-filed as part of the same hygiene Epic as Pattern D below, not auto-migrated by this protocol.
+A namespace declares an old flat layout "RETIRED and auto-consolidated" at boot, but on-disk file
+counts under the flat path don't shrink between runs. **Detection**: a nonzero flat-layout file
+count that doesn't shrink between app restarts is the signal; cross-reference against the
+namespace's own in-flight state (queue/history) before treating any of it as cleanup work —
+`scripts/audit-ops-hygiene.cjs` implements this for `scheduler/prds/` vs `scheduler/prds-archived/`.
+**Action**: investigate before touching — a nonzero count can be legitimate in-flight work, not
+stuck debt.
 
 ### Pattern D — orphaned top-level session/epic JSON
+A top-level archived record (e.g. `prompt-sessions/*.json`) has no matching subdirectory under the
+namespace it should have minted (e.g. `scheduler/epics/<id>/`). **Detection**: has to be scripted,
+not eyeballed — inspect the record's own event chain for dispatch evidence, then search dependent
+namespaces for a match under a *different* auto-minted id before concluding anything is lost;
+`scripts/audit-ops-hygiene.cjs` implements this for `prompt-sessions/` vs `scheduler/epics/`.
+**Action**: a record with no dispatch evidence and no match elsewhere is a genuine never-worked
+artifact, safe to age out under a retention policy; a record *with* dispatch evidence but no
+matching dir indicates real data loss and must never be deleted, only escalated.
 
-**Update 2026-08-02: resolved, see
-[`../reviews/2026-08-02-ops-protocol-patterns-c-d-findings.md`](../reviews/2026-08-02-ops-protocol-patterns-c-d-findings.md).**
-Scripted the PRD-dispatch-event check (`scripts/audit-ops-hygiene.cjs`): 0 real data-loss
-candidates found. Every orphan is either a never-started Epic or a dispatched PRD that landed
-under a differently-named auto-minted epic dir.
+### Pattern G — time-boxed archival with no retention policy
+*(Renamed from Pattern E in an earlier revision of this doc. That letter collided with
+`scripts/audit-ops-hygiene.cjs`'s own Pattern E — a different check, hand-authored-PRD detection —
+so cross-references between this doc and that script's comments could mean two different things
+under the same letter. Renamed to the next free letter, G, so the two never collide again.)*
 
+Any namespace that archives completed work (an `archived/`, `processed/`, or `-archived` subfolder)
+needs an explicit answer, in that namespace's own README, to "how long do we keep this, and
+who/what prunes it." Silence isn't neutral — it's how an archive folder grows unbounded with
+nobody able to say whether any of it is safe to remove. **Detection**: `scripts/ops-sweep.cjs`'s
+`NO_RETENTION_POLICY` finding — a namespace has files under an archive/processed subfolder but no
+retention/prune/expire language in its README (or no README at all).
 
-`prompt-sessions/`'s 46 top-level archived `*.json` files were cross-referenced against
-`scheduler/epics/`'s 35 directories: 29 have no matching `scheduler/epics/<id>/` directory. This
-is expected for Epics that never authored a PRD (discussion-tag Epics, abandoned proposals) — NOT
-automatically an orphan/leak. **Detection**: a top-level `prompt-sessions/*.json` with no
-`scheduler/epics/<same-id>/` dir AND no PRD-dispatch events in its own event chain is a genuine
-never-worked Epic, safe to age out under a retention policy; one *with* PRD history but a missing
-`scheduler/epics/` dir would indicate real data loss and must never be deleted, only escalated.
-**Action**: the distinguishing check (PRD-dispatch event presence) has to be scripted, not
-eyeballed — filed as part of the hygiene Epic; no deletion happened this session.
+### Pattern H — generalizing to other projects
+*(Renamed from Pattern F in an earlier revision of this doc, for the same reason as Pattern G above
+— that letter collided with `scripts/audit-ops-hygiene.cjs`'s own Pattern F, a different check,
+referential integrity. Renamed to the next free letter, H.)*
 
-### Pattern E — time-boxed archival with no retention policy
-`feedback/processed/` holds 70 files dated 2026-06-10 through 2026-07-12 with no expressed
-retention window anywhere (README, CLAUDE.md, or code) — it will grow forever. This is a policy
-gap, not a bug: every namespace that archives completed work (`feedback/processed/`,
-`prompt-sessions/` archived epics, `scheduler/prds-archived/`) needs an explicit answer to "how
-long do we keep this, and who/what prunes it" recorded in that namespace's own README. Silence
-here isn't neutral — it's how a folder gets to 42 MB (prompt-sessions/) or 3.2 MB (scheduler/)
-with nobody able to say whether any of it is safe to remove.
+This protocol was authored by reading *this* project's own CLAUDE.md and code. **This part is
+built**: `scripts/ops-sweep.cjs` plus the `session-manager-dev:ops-sweep` skill run it against ANY
+project's `session-manager-operations/` — including one with a different OWNERS vocabulary than
+session-manager's own, or no CLAUDE.md at all. Only a scheduled/cron cadence remains unbuilt (see
+Cadence). Portability constraints a sweep run against another project must honor:
 
-### Pattern F — generalizing to other projects (for the future sweep agent)
-This protocol was authored by reading *this* project's own CLAUDE.md and code. A sweep agent
-that runs it against another project's `session-manager-operations/` must NOT assume
-session-manager's own OWNERS vocabulary applies there — it must:
-1. Read that target project's own `CLAUDE.md` (or absence thereof) as the SoR for what that
-   project's ops folders are supposed to contain.
+1. Read that target project's own `CLAUDE.md` (if present) as the SoR for what that project's ops
+   folders are supposed to contain.
 2. Read each namespace's own `README.md` inside that project's ops root the same way Patterns
-   A–E do here — namespace-README-vs-declared-architecture is a portable check even when the
+   A–D do here — namespace-README-vs-declared-architecture is a portable check even when the
    declared architecture differs project to project.
-3. Never delete based on file age or size alone (Pattern E) — only based on a documented,
+3. Never delete based on file age or size alone (Pattern G) — only based on a documented,
    agreed-upon retention rule for that specific namespace in that specific project.
-4. Report findings as a per-project diff (what's undocumented, what's contradictory, what's
-   past its own stated retention) rather than executing changes directly — every actual
-   delete/migrate/archive action still goes through that project's own proposed-Epic gate,
-   never a direct filesystem mutation by the sweep agent itself. This mirrors the
-   `status: 'proposed'` human gate this project already uses for its own Epics — the sweep
-   agent is a *finder*, not an *actor*.
+4. Report findings as a per-project diff (what's undocumented, what's contradictory, what's past
+   its own stated retention) rather than executing changes directly — every actual
+   delete/migrate/archive action still goes through that project's own proposed-Epic gate, never a
+   direct filesystem mutation by the sweep itself. This mirrors the `status: 'proposed'` human gate
+   this project already uses for its own Epics — the sweep is a *finder*, not an *actor*.
+
+## Finding types emitted by `scripts/ops-sweep.cjs`
+
+All eight finding types below come from `scripts/ops-sweep.cjs` (the portable sweep — Pattern H).
+`scripts/audit-ops-hygiene.cjs` reports its own Patterns C/D/E/F in a different, unstructured
+report shape and does not emit any of these `type` values.
+
+| Finding type | What it flags | Pattern |
+| --- | --- | --- |
+| `MISSING_README` | Namespace dir has no `README.md`. | — |
+| `UNDOCUMENTED` | Namespace name never mentioned anywhere in the ownership doc. | B |
+| `CONTRADICTION` | The ownership doc contains both "retired/gone" and "owner/owns" language for the same namespace, or the namespace's own README and the ownership doc disagree on retired-vs-active status. | A |
+| `NO_RETENTION_POLICY` | Namespace has an archived/processed subfolder with files but no retention/prune/expire language in its README. | G |
+| `EPIC_INDEX_ORPHAN_ROWS` | `prompt-sessions/active-index.json` has a row with no matching `prompt-sessions/<id>.json` file — reuses `src/main/health.cjs`'s `computeEpicIndexDrift` so the two never disagree. | — |
+| `CLAUDE_MD_OVER_BUDGET` | The target's root `CLAUDE.md` exceeds its own self-declared SIZE BUDGET header. | — |
+| `OPS_PATH_LITERAL` | A `.cjs` file under `src/main/` (outside `lib/opsOwnership.cjs` itself) spells the `session-manager-operations` literal instead of building the path via `opsPath()`/`resolveOpsRoot()`. Only meaningful when the swept target IS the session-manager repo. | — |
+| `NESTED_CLAUDE_MD_OVER_BUDGET` | Any `CLAUDE.md` strictly below the repo root (excluding `node_modules`/`.git`) exceeds the fixed 4000-byte nested-doc cap. | — |
 
 ## Cadence
 
-Run manually today (no scheduled trigger yet — see the filed Epic to build the sweep agent).
-Suggested cadence once automated: monthly per active project, plus triggered whenever a new
+`/ops-sweep` — the skill plus `scripts/ops-sweep.cjs` — is built and runnable today, on demand,
+against any project. The only unbuilt piece is a scheduled cadence: no cron trigger exists yet.
+Suggested cadence once that's built: monthly per active project, plus triggered whenever a new
 top-level folder appears under a project's `session-manager-operations/` (Pattern B is cheap to
 catch early and expensive to catch late).
-
-## What this session did NOT do
-
-No files were deleted or migrated this session — every finding above (A, C, D) was routed to a
-proposed Epic instead of acted on directly, per the source-of-truth rule: two-of-three doc layers
-must agree before a destructive action is "safe," and none of A/C/D cleared that bar without
-further investigation. Pattern B (doc-only, CLAUDE.md enumeration) was low-risk enough to fix
-directly — see the CLAUDE.md diff in this same commit.

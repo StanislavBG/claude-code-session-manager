@@ -2,7 +2,7 @@
 /**
  * ops-sweep.cjs — generalized version of
  * session-manager-operations/architecture/ops-maintenance-protocol.md, runnable
- * against ANY project's `session-manager-operations/` folder (Pattern F in that
+ * against ANY project's `session-manager-operations/` folder (Pattern H in that
  * doc). Read-only: never moves, archives, or deletes anything — it only reports.
  *
  * Unlike this project's own audit-ops-hygiene.cjs (which hardcodes

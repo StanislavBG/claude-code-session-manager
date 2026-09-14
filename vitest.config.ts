@@ -227,6 +227,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-rate-limit-spin-guard.test.cjs',
       'src/main/__tests__/scheduler-rate-limit-cooldown-freshness.test.cjs',
       'src/main/lib/__tests__/rateLimitWindow.test.cjs',
+      'src/main/lib/__tests__/usageCircuit.test.cjs',
       'src/main/lib/__tests__/queueHealth.test.cjs',
       'src/main/lib/__tests__/queueStoreAtomicWrite.test.cjs',
       'src/main/lib/__tests__/queueStoreMachineStateRecovery.test.cjs',

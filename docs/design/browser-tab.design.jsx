@@ -1,11 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // LOCKED DESIGN — Browser tab · imported from claude.ai/design project
 // "Session Manager" (0ca33cd3-c2fa-4644-b728-bde42292abbd), file variants/browser.jsx
-// Imported 2026-07-09 via claude_design MCP. This is the SoT for the Browser tab
-// visual + interaction spec. It is a design mock (uses window.ALMANAC tokens + a
-// fake in-page pricing site); real impl swaps FakePricingPage for an Electron
-// WebContentsView and the mock state for real IPC. Do NOT edit to "improve" — it
-// is the contract the PRDs are cut against.
+// Imported 2026-07-09 via claude_design MCP. Parked design for a tab that was
+// never built — no Browser tab, and no WebContentsView embedding, exists
+// anywhere in src/. It is a design mock (uses window.ALMANAC tokens + a fake
+// in-page pricing site); real impl would swap FakePricingPage for an Electron
+// WebContentsView and the mock state for real IPC, if this is ever revisited.
 //
 // ALMANAC token set (from variants/almanac.jsx) — the warm-paper chrome palette:
 //   paper #f6efe1 · panel #efe6d3 · card #fbf6ec · edge #e0d3b8 · rule #d9c9a8

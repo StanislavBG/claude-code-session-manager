@@ -64,7 +64,8 @@ interface RecognitionCallbacks {
   inputDeviceId?: string | null
 }
 
-// F8 — Semantic turn-detection constants. See docs/voice/prd/F8-turn-detection.v2.md.
+// F8 — Semantic turn-detection constants. Designed, not implemented — see the
+// stub at turnDetectorWorker.ts. See docs/voice/prd/F8-turn-detection.v2.md.
 //
 // MVP NOTE: these are wired but not enforced; the actual smart-turn-v3 model
 // is not loaded in v1. The pure-VAD endpointing path below remains

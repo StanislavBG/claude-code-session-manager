@@ -1,6 +1,16 @@
 # Voice Agent Master Plan
 
-Goal: harden the in-app voice-to-Claude pipeline (the speech harness around Claude Code) along 8 feature axes. Each feature gets an in-depth PRD, a critique, a revised PRD, and two implementation passes; the whole run finishes with a security review and a code review.
+> **HISTORICAL — this is the voice block's index.** Part of the [`docs/`](../README.md)
+> frozen archive. F1–F9 all shipped; the checkpoints below are marked complete
+> retroactively. For current behavior, read the shipped modules, not this plan or
+> the PRDs under `prd/`: `src/renderer/lib/speechRecognition.ts`,
+> `src/renderer/state/voice.ts`, `src/renderer/components/MicLevelMeter.tsx`,
+> `src/renderer/components/MicDevicePicker.tsx`,
+> `src/renderer/components/LiveTranscript.tsx`. F8 (semantic turn detection) was
+> designed but NOT implemented — `src/renderer/lib/turnDetectorWorker.ts` is a stub
+> the host never consults.
+
+Goal: harden the in-app voice-to-Claude pipeline (the speech harness around Claude Code) along 8 feature axes (a 9th, F9, was added during implementation). Each feature gets an in-depth PRD, a critique, a revised PRD, and two implementation passes; the whole run finishes with a security review and a code review.
 
 ## Features (DAG nodes)
 
@@ -14,6 +24,7 @@ Goal: harden the in-app voice-to-Claude pipeline (the speech harness around Clau
 | F6 | Streaming partials | large | `whisperWorker.ts`, `speechRecognition.ts` |
 | F7 | First-run mic check | medium-large | new component + flow |
 | F8 | Turn-detection upgrade (semantic) | large | replaces VAD endpointing |
+| F9 | Live transcript render | medium | `LiveTranscript.tsx` |
 
 ## Per-feature workflow
 
@@ -44,15 +55,23 @@ F2 and F4 are tiny and unblock UX immediately. F1 depends on no other feature bu
 
 ## Checkpoints
 
-- [ ] CP1 — All 8 PRD v1 drafts written
-- [ ] CP2 — All 8 critiques returned
-- [ ] CP3 — All 8 PRD v2 finalized
-- [ ] CP4 — F2, F4 implemented (smallest, validates flow)
-- [ ] CP5 — F1, F5 implemented
-- [ ] CP6 — F3, F7 implemented
-- [ ] CP7 — F6 implemented
-- [ ] CP8 — F8 implemented
-- [ ] CP9 — Security review clean
-- [ ] CP10 — Code review clean
+- [x] CP1 — All 8 PRD v1 drafts written
+- [x] CP2 — All 8 critiques returned
+- [x] CP3 — All 8 PRD v2 finalized
+- [x] CP4 — F2, F4 implemented (smallest, validates flow)
+- [x] CP5 — F1, F5 implemented
+- [x] CP6 — F3, F7 implemented
+- [x] CP7 — F6 implemented
+- [x] CP8 — F8 implemented as an MVP stub — `turnDetectorWorker.ts` loads and
+  predicts a sentinel value, but the host never consults its result; the
+  pure-VAD endpointing path is what actually ships.
+- [x] CP9 — Security review clean
+- [x] CP10 — Code review clean
+- [x] F9 — Live transcript render shipped (`LiveTranscript.tsx`), added mid-plan
+  and not in the original 8-feature axis list above.
 
-Status of each PRD/impl tracked via the TaskList tool.
+Shipped modules (current behavior — not this plan, not the PRDs under `prd/`):
+`src/renderer/lib/speechRecognition.ts`, `src/renderer/state/voice.ts`,
+`src/renderer/components/MicLevelMeter.tsx`,
+`src/renderer/components/MicDevicePicker.tsx`,
+`src/renderer/components/LiveTranscript.tsx`.

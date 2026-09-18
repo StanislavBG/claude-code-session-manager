@@ -31,7 +31,7 @@ const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
-const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
 
@@ -88,9 +88,13 @@ function runStep({ slug, args, register, unregister }) {
       return;
     }
     const claudeBin = resolveClaudeBin();
+    // node-pty has NO `argv0` option, so the alias symlink is the only naming
+    // mechanism here — the comm is set, argv0 stays the alias path (which still
+    // contains the word `claude`). Do not try to pass argv0.
+    const { command } = claudeSpawnTarget('aux', 'plugin', claudeBin);
     let proc;
     try {
-      proc = pty.spawn(claudeBin, args, {
+      proc = pty.spawn(command, args, {
         name: 'xterm-256color',
         cols: 120,
         rows: 30,

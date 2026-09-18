@@ -17,7 +17,7 @@
 const { ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
-const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
 const { extractJson } = require('./lib/extractJson.cjs');
 const { assertInsideHome } = require('./lib/insideHome.cjs');
 const { expandHome } = require('./lib/expandHome.cjs');
@@ -99,7 +99,8 @@ function runClaude(prompt, { model = 'sonnet', timeoutMs = 90_000, systemPrompt 
     // stdin MUST be closed ('ignore') — `claude -p` otherwise blocks waiting
     // for piped stdin and returns empty. SM_KG_INTERNAL=1 tells the
     // prompt-logging hook to skip this invocation.
-    const child = spawn(bin, args, { env: { ...process.env, SM_KG_INTERNAL: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const target = claudeSpawnTarget('aux', 'docedit', bin);
+    const child = spawn(target.command, args, { env: { ...process.env, SM_KG_INTERNAL: '1' }, stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
     let out = '';
     let err = '';
     // Cap accumulated stdout — the model output shouldn't grow `out` without

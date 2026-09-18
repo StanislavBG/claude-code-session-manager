@@ -16,7 +16,7 @@
  */
 
 const { spawn } = require('node:child_process');
-const { resolveClaudeBin } = require('./claudeBin.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./claudeBin.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./cleanEnv.cjs');
 
 const CLASSIFY_TIMEOUT_MS = 30_000;
@@ -78,7 +78,8 @@ function classifyPromptTicket(text) {
 
     try {
       // stdin closed — `claude -p` otherwise blocks waiting for piped stdin.
-      child = spawnImpl(claudeBin, args, { env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+      const target = claudeSpawnTarget('aux', 'classify', claudeBin);
+      child = spawnImpl(target.command, args, { env: childEnv, stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
     } catch {
       finish('inline');
       return;

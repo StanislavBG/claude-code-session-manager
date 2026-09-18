@@ -35,7 +35,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
-const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { writeJsonSync } = require('./config.cjs');
 
@@ -106,13 +106,14 @@ function scriptPathMissing() {
  *  No shell:true — argv array passed directly to spawn. */
 function runClaudeMcpAdd(serverPath) {
   return new Promise((resolve) => {
-    const claudeBin = resolveClaudeBin();
+    const target = claudeSpawnTarget('aux', 'mcp-add');
     let proc;
     try {
       proc = spawn(
-        claudeBin,
+        target.command,
         ['mcp', 'add', SERVER_NAME, '--scope', 'user', '--', 'node', serverPath],
         {
+          ...(target.argv0 ? { argv0: target.argv0 } : {}),
           cwd: os.homedir(),
           env: cleanChildEnv({ PATH: pathWithUserBins() }),
           stdio: 'ignore',
@@ -130,13 +131,13 @@ function runClaudeMcpAdd(serverPath) {
 /** Run `claude mcp remove session-manager-scheduler --scope user`, best-effort. */
 function runClaudeMcpRemove() {
   return new Promise((resolve) => {
-    const claudeBin = resolveClaudeBin();
+    const target = claudeSpawnTarget('aux', 'mcp-remove');
     let proc;
     try {
       proc = spawn(
-        claudeBin,
+        target.command,
         ['mcp', 'remove', SERVER_NAME, '--scope', 'user'],
-        { cwd: os.homedir(), env: cleanChildEnv({ PATH: pathWithUserBins() }), stdio: 'ignore' }
+        { cwd: os.homedir(), env: cleanChildEnv({ PATH: pathWithUserBins() }), stdio: 'ignore', ...(target.argv0 ? { argv0: target.argv0 } : {}) }
       );
     } catch (err) {
       resolve({ ok: false, error: err?.message ?? String(err) });

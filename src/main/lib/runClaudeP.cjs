@@ -15,7 +15,7 @@
  */
 
 const { spawn } = require('node:child_process');
-const { resolveClaudeBin } = require('./claudeBin.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./claudeBin.cjs');
 
 const MAX_OUT_BYTES = 8 * 1024 * 1024;
 
@@ -31,7 +31,8 @@ function runClaudeP(prompt, { model = 'sonnet', timeoutMs = 180_000, systemPromp
       '--output-format', 'text',
     ];
     if (systemPrompt) args.push('--append-system-prompt', systemPrompt);
-    const child = spawn(bin, args, { env: { ...process.env, SM_KG_INTERNAL: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const target = claudeSpawnTarget('aux', 'runclaudep', bin);
+    const child = spawn(target.command, args, { env: { ...process.env, SM_KG_INTERNAL: '1' }, stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
     let out = '';
     let err = '';
     let killedForSize = false;

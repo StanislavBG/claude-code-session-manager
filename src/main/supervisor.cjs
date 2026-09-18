@@ -16,7 +16,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawn, execFileSync } = require('node:child_process');
 const { ipcMain } = require('electron');
-const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
 
 const HOME = os.homedir();
 const SUPERVISOR_LOG_PATH = path.join(HOME, '.claude', 'session-manager', 'supervisor.log');
@@ -207,7 +207,8 @@ function runProbe(claudeBin, prompt) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(claudeBin, [
+      const target = claudeSpawnTarget('aux', 'supervisor', claudeBin);
+      child = spawn(target.command, [
         '-p', prompt,
         '--model', 'claude-opus-4-7',
         '--no-session-persistence',
@@ -215,7 +216,7 @@ function runProbe(claudeBin, prompt) {
         '--max-budget-usd', '0.10',
         '--dangerously-skip-permissions',
         '--allowedTools', 'Bash',
-      ], { stdio: ['ignore', 'pipe', 'pipe'] });
+      ], { stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
     } catch (e) {
       console.error('[supervisor] probe spawn failed:', e?.message);
       resolve({ verdict: 'ok', action: 'none', targetPid: null, reason: `spawn failed: ${e?.message}`, costUsd: null });

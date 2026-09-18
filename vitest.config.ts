@@ -64,6 +64,7 @@ export default defineConfig({
       'src/main/lib/__tests__/instanceLock.test.cjs',
       'src/main/lib/__tests__/procIdentity.test.cjs',
       'src/main/lib/__tests__/procName.test.cjs',
+      'src/main/__tests__/procname-claude-spawn-sites.test.cjs',
       'src/main/lib/__tests__/childWithLog.test.cjs',
       'src/main/__tests__/uniquePrdNumbers.test.cjs',
       'src/main/__tests__/computeDepHistorySatisfaction.test.cjs',

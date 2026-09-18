@@ -39,6 +39,40 @@ function resolveClaudeBin() {
   return cached;
 }
 
+// ---------- process naming ----------
+//
+// Every `claude` spawn goes through claudeSpawnTarget so GNOME System Monitor
+// shows a distinct comm per role (sm-claude-job / -chat / -aux) and a labelled
+// argv0. See lib/procName.cjs for the mechanics. Invariants:
+//  - SM_CLAUDE_BIN set → aliasing SKIPPED, raw value used verbatim (tests point
+//    it at self-locating stubs; it must stay ONE binary, no path splitting).
+//  - aliasBinFor fails open (returns realBin) → no argv0 is set either, so the
+//    fallback is byte-identical to the pre-naming spawn.
+//  - Every alias and argv0 label contains the word `claude`, which the four
+//    /\bclaude\b/ cmdline gates (killOrphanClaudePid, claudePidAlive,
+//    findLiveProcessForJob x2) depend on.
+const ROLE_ALIASES = { job: 'sm-claude-job', chat: 'sm-claude-chat', aux: 'sm-claude-aux' };
+
+/**
+ * @param {'job'|'chat'|'aux'} role
+ * @param {string} [detail] argv0 label detail (job slug / epic session id)
+ * @param {string} [realBin] defaults to resolveClaudeBin()
+ * @returns {{ command: string, argv0?: string }} spread `argv0` into spawn options
+ */
+function claudeSpawnTarget(role, detail, realBin = resolveClaudeBin()) {
+  if (process.env.SM_CLAUDE_BIN) return { command: realBin };
+  const alias = ROLE_ALIASES[role];
+  if (!alias) return { command: realBin };
+  try {
+    const { aliasBinFor, smArgv0 } = require('./procName.cjs');
+    const command = aliasBinFor(realBin, alias);
+    if (command === realBin) return { command: realBin };
+    return { command, argv0: smArgv0(role, detail) };
+  } catch {
+    return { command: realBin };
+  }
+}
+
 // ---------- version probe ----------
 //
 // `claude --version`, cached. The scheduler's launch circuit breaker
@@ -75,7 +109,8 @@ function probeClaudeVersion({ now = Date.now(), execFileImpl } = {}) {
       // it, and the binary must never be handed the caller's working tree —
       // a stub `claude` (tests point SM_CLAUDE_BIN at one) that writes
       // markers or commits into process.cwd() once did so in the real repo.
-      execFile(bin, ['--version'], { timeout: VERSION_PROBE_TIMEOUT_MS, windowsHide: true, cwd: os.tmpdir() }, (err, stdout) => {
+      const target = claudeSpawnTarget('aux', 'version', bin);
+      execFile(target.command, ['--version'], { timeout: VERSION_PROBE_TIMEOUT_MS, windowsHide: true, cwd: os.tmpdir(), ...(target.argv0 ? { argv0: target.argv0 } : {}) }, (err, stdout) => {
         if (err) return done(null);
         const m = /(\d+\.\d+\.\d+[^\s]*)/.exec(String(stdout || ''));
         done(m ? m[1] : (String(stdout || '').trim() || null));
@@ -92,4 +127,4 @@ function resetClaudeVersionCache() {
   versionCache = { at: 0, value: null, inflight: null };
 }
 
-module.exports = { resolveClaudeBin, probeClaudeVersion, resetClaudeVersionCache };
+module.exports = { resolveClaudeBin, claudeSpawnTarget, probeClaudeVersion, resetClaudeVersionCache };

@@ -44,7 +44,7 @@
 
 const { spawn } = require('node:child_process');
 const { ipcMain } = require('electron');
-const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { recordExchange } = require('./exchanges.cjs');
 const { classifyToolUse } = require('./lib/toolUseClassify.cjs');
@@ -571,7 +571,9 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // real-time NDJSON streaming; stderr piped for error-message capture.
     let child;
     try {
-      child = spawn(claudeBin, args, {
+      const target = claudeSpawnTarget('chat', sessionId, claudeBin);
+      child = spawn(target.command, args, {
+        ...(target.argv0 ? { argv0: target.argv0 } : {}),
         cwd: execCwd,
         env: childEnv,
         stdio: ['ignore', 'pipe', 'pipe'],

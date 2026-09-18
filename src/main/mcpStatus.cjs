@@ -11,6 +11,7 @@
 
 const { spawn } = require('node:child_process');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
+const { withProcRole } = require('./lib/cleanEnv.cjs');
 
 const PROBE_TIMEOUT_MS = 30_000;
 
@@ -57,7 +58,7 @@ function runProbe() {
     let child;
     try {
       const target = claudeSpawnTarget('aux', 'mcp-list', bin);
-      child = spawn(target.command, ['mcp', 'list'], { env: process.env, stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
+      child = spawn(target.command, ['mcp', 'list'], { env: withProcRole(process.env, 'aux'), stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
     } catch (e) {
       resolve({ ok: false, servers: [], error: e?.message || 'spawn error', checkedAt: Date.now() });
       return;

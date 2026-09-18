@@ -35,8 +35,34 @@ function pathWithUserBins() {
   return base ? `${base}:${userBinDirs().join(':')}` : userBinDirs().join(':');
 }
 
+/**
+ * SM_PROC_ROLE attributes a child (and, by inheritance, every MCP server the
+ * `claude` child spawns — we cannot rename those) via /proc/<pid>/environ.
+ * Read by scripts/sm-ps.cjs. NOT SM_PROC_ROOT (procIdentity.cjs's /proc-root
+ * test override) — unrelated variable.
+ */
+const PROC_ROLE_ENV = 'SM_PROC_ROLE';
+
+/** Explicit `SM_PROC_ROLE` in `extra` wins; else inferred from the attribution
+ *  vars each spawn site already sets (job slug → job, tab id → shell, chat
+ *  session → chat); else `aux`. Inference keeps role stamping in ONE place. */
+function inferProcRole(extra) {
+  if (extra[PROC_ROLE_ENV]) return String(extra[PROC_ROLE_ENV]);
+  if (extra.SM_SCHEDULER_JOB_SLUG) return 'job';
+  if (extra.SESSION_MANAGER_TAB_ID) return 'shell';
+  if (extra.SM_CHAT_SESSION_ID) return 'chat';
+  return 'aux';
+}
+
+/** Stamp SM_PROC_ROLE onto a raw env object (for sites that deliberately do not
+ *  use cleanChildEnv's secret stripping, e.g. runClaudeP/docEdit). Returns a copy. */
+function withProcRole(env, role) {
+  return { ...env, [PROC_ROLE_ENV]: role };
+}
+
 function cleanChildEnv(extra = {}) {
   const env = { ...process.env, ...extra };
+  env[PROC_ROLE_ENV] = inferProcRole(extra);
   for (const k of Object.keys(env)) {
     if (
       k === 'CLAUDE_EFFORT' ||
@@ -52,4 +78,4 @@ function cleanChildEnv(extra = {}) {
   return env;
 }
 
-module.exports = { cleanChildEnv, userBinDirs, pathWithUserBins };
+module.exports = { cleanChildEnv, withProcRole, inferProcRole, PROC_ROLE_ENV, userBinDirs, pathWithUserBins };

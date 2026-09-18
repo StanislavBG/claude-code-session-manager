@@ -17,6 +17,7 @@ const os = require('node:os');
 const { spawn, execFileSync } = require('node:child_process');
 const { ipcMain } = require('electron');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
+const { withProcRole } = require('./lib/cleanEnv.cjs');
 
 const HOME = os.homedir();
 const SUPERVISOR_LOG_PATH = path.join(HOME, '.claude', 'session-manager', 'supervisor.log');
@@ -216,7 +217,7 @@ function runProbe(claudeBin, prompt) {
         '--max-budget-usd', '0.10',
         '--dangerously-skip-permissions',
         '--allowedTools', 'Bash',
-      ], { stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
+      ], { env: withProcRole(process.env, 'aux'), stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
     } catch (e) {
       console.error('[supervisor] probe spawn failed:', e?.message);
       resolve({ verdict: 'ok', action: 'none', targetPid: null, reason: `spawn failed: ${e?.message}`, costUsd: null });

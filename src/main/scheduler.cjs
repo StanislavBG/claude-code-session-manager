@@ -138,7 +138,7 @@ const queueOps = require('./queueOps.cjs');
 // Plain Node module, no Electron dependency; queuePath/prdsDir defaults already
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
-const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs } = require('./lib/prdLocations.cjs');
+const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduleJobTransitions.cjs');
@@ -183,20 +183,25 @@ const { allProjectCwds } = require('./lib/activeSessions.cjs');
 // an exemption it should have applied landed on disk, and nothing in the
 // run record showed that; this is the fix).
 const SCHEDULER_BOOTED_AT = new Date().toISOString();
-// Resolves against __dirname (this app's OWN source checkout) — unaffected by
-// PRD 994's job worktrees, which live under a job's PROJECT cwd, never under
-// this app's install directory.
-const SCHEDULER_CODE_SHA = (() => {
-  try {
-    return execFileSync('git', ['-C', __dirname, 'rev-parse', '--short', 'HEAD'], {
-      timeout: 5000,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {
-    return null;
-  }
-})();
+// A production npx install ships no .git at all, so a runtime `git
+// rev-parse` from __dirname was structurally always null there — every
+// production run-meta sidecar recorded schedulerCodeSha: null. buildIdentity
+// resolves build-info.json (baked at publish time) first, falling back to a
+// non-walking git read only in a dev checkout / job worktree — see
+// src/main/lib/buildIdentity.cjs's header.
+const { resolveBuildIdentity } = require('./lib/buildIdentity.cjs');
+const SCHEDULER_BUILD_IDENTITY = resolveBuildIdentity({ bootedAt: SCHEDULER_BOOTED_AT });
+const SCHEDULER_CODE_SHA = SCHEDULER_BUILD_IDENTITY.codeSha;
+// Spread into EVERY metaPath writer below (grep `metaPath` for the full
+// list) — single source so a future field never lands in some sidecars and
+// not others, the exact gap that left 3 of 5 writers silently missing
+// schedulerBootedAt/schedulerCodeSha before this constant existed.
+const SCHEDULER_META_IDENTITY = {
+  schedulerBootedAt: SCHEDULER_BOOTED_AT,
+  schedulerCodeSha: SCHEDULER_CODE_SHA,
+  schedulerVersion: SCHEDULER_BUILD_IDENTITY.version,
+  schedulerBuiltAt: SCHEDULER_BUILD_IDENTITY.builtAt,
+};
 
 const MAX_INVESTIGATION_DURATION_MS = 30 * 60_000;
 
@@ -1142,7 +1147,7 @@ function prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd,
   const finishedAt = Date.now();
   config.writeJsonSync(metaPath, {
     slug: job.slug, cwd, sessionId, exitCode: 0, skipped: reason,
-    note: msg, startedAt, finishedAt, durationMs: 0,
+    note: msg, startedAt, finishedAt, durationMs: 0, ...SCHEDULER_META_IDENTITY,
   });
   return { exitCode: 0, durationMs: 0, skipped: reason, note: msg, sessionId };
 }
@@ -2329,15 +2334,37 @@ async function reconcile(state) {
 
   phaseStartMs = Date.now();
   const onDisk = new Map();
+  // Slugs derive from title text with no cwd salt, so two different projects
+  // can legitimately queue an identically-slugged PRD — onDisk alone can
+  // only hold ONE parsed PRD per slug (last-file-wins), which would silently
+  // hand an EXISTING row the wrong project's PRD (or none at all) when two
+  // projects collide on a slug. This side index lets the two existing-row
+  // lookups below (job refresh + invalid-row repair) disambiguate by the
+  // row's own cwd first; the fresh-discovery loop further down still reads
+  // the bare `onDisk` (unscoped) since a same-slug NEW-PRD collision across
+  // two projects is a rarer edge this reconcile pass doesn't yet resolve.
+  const onDiskByCwd = new Map();
   for (const f of files) {
     try {
       // Per-file await: parsing is mtime-cached so steady-state hits zero
       // disk reads; on cold cache the awaits keep the main thread responsive.
       const p = await parsePrd(f);
       onDisk.set(p.slug, p);
+      if (p.cwd) onDiskByCwd.set(`${p.slug}::${p.cwd}`, p);
     } catch (e) {
       console.warn('[scheduler] failed to parse', f, e?.message);
     }
+  }
+  // resolvePrdForJob(slug, cwd) — cwd-scoped PRD lookup for an EXISTING
+  // queue row, falling back to the unscoped onDisk entry when this exact
+  // (slug, cwd) pair has no PRD (e.g. cwd is null/stale) — same behavior as
+  // a bare onDisk.get() for every slug that isn't cross-project-colliding.
+  function resolvePrdForJob(slug, cwd) {
+    if (cwd) {
+      const scoped = onDiskByCwd.get(`${slug}::${cwd}`);
+      if (scoped) return scoped;
+    }
+    return onDisk.get(slug);
   }
   phaseMs.parseLoop = Date.now() - phaseStartMs;
 
@@ -2358,7 +2385,7 @@ async function reconcile(state) {
   // historyTerminalBySlug() below and backfilled before being dropped.
   const terminalDroppedNeedingHistoryCheck = [];
   for (const job of state.jobs) {
-    const p = onDisk.get(job.slug);
+    const p = resolvePrdForJob(job.slug, job.cwd);
     if (!p) {
       // A terminal job whose .md is gone was archived on purpose — dropping
       // its row is the intended end of the auto-archive flow, PROVIDED it's
@@ -2392,10 +2419,24 @@ async function reconcile(state) {
       continue;
     }
     seen.add(job.slug);
+    // p.cwd REFINES the row's existing cwd; it never erases one. A PRD
+    // file with no `cwd:` frontmatter parses p.cwd as undefined — falling
+    // through to a bare `cwd: p.cwd` here nulled the row's real cwd,
+    // which queueStore.writeSplit then buckets into
+    // schedulerBatch.js's DEFAULT_PROJECT_CWD, silently relocating the
+    // row into the WRONG project's queue.json shard and emptying the
+    // owning project's shard underneath it (2026-09 data-loss incident).
+    // Resolved ONCE into a local so originSessionId's fallback below
+    // resolves against the SAME cwd this row actually gets, not the raw
+    // (possibly undefined) p.cwd — resolveOriginSessionId(undefined, ...)
+    // returns null unconditionally, which silently dropped the origin link
+    // for every PRD with no `cwd:` frontmatter even though a good cwd was
+    // available one line below.
+    const refreshedCwd = p.cwd ?? job.cwd ?? null;
     const updatedJob = {
       ...job,
       title: p.title,
-      cwd: p.cwd,
+      cwd: refreshedCwd,
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: reconcileSourcePromptId(job, p.sourcePromptId),
@@ -2409,7 +2450,7 @@ async function reconcile(state) {
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
       originSessionId: job.originSessionId
-        ?? resolveOriginSessionId(p.cwd, p.epicId ?? reconcileSourcePromptId(job, p.sourcePromptId)),
+        ?? resolveOriginSessionId(refreshedCwd, p.epicId ?? reconcileSourcePromptId(job, p.sourcePromptId)),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? job.agentType ?? null,
     };
@@ -2505,17 +2546,22 @@ async function reconcile(state) {
       });
       continue;
     }
-    const p = onDisk.get(inv.slug);
+    const p = resolvePrdForJob(inv.slug, inv.row?.cwd);
     if (!p) {
       // PRD file also gone with no terminal record anywhere — nothing to
       // repair against. queueStore already logged the quarantine once.
       continue;
     }
+    // Same cwd-refines-not-erases rule as the normal refresh path above, and
+    // same reason for resolving it once into a local: originSessionId's
+    // fallback must resolve against the cwd this row actually gets, not the
+    // raw (possibly undefined) p.cwd.
+    const repairedCwd = p.cwd ?? inv.row?.cwd ?? null;
     const job = {
       ...inv.row,
       slug: inv.slug,
       title: p.title,
-      cwd: p.cwd,
+      cwd: repairedCwd,
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: p.sourcePromptId ?? inv.row?.sourcePromptId ?? null,
@@ -2525,7 +2571,7 @@ async function reconcile(state) {
       disposition: p.disposition ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
-      originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
+      originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(repairedCwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? inv.row?.agentType ?? null,
     };
@@ -2636,10 +2682,20 @@ async function reconcile(state) {
       }
       continue;
     }
+    // No prior row exists to fall back to (this is a fresh discovery), so a
+    // PRD file with no `cwd:` frontmatter falls back to the project root it
+    // was actually found under (derived from its own file path) rather than
+    // nulling out to schedulerBatch.js's DEFAULT_PROJECT_CWD. Resolved once
+    // so originSessionId (below) resolves against this SAME cwd — passing
+    // the raw p.cwd there instead would resolve against `undefined` for
+    // exactly the no-frontmatter case this fallback exists to handle, since
+    // resolveOriginSessionId(cwd, ...) returns null unconditionally when
+    // `cwd` is falsy.
+    const discoveredCwd = p.cwd ?? deriveProjectCwdFromPrdPath(p.path) ?? null;
     const entry = {
       slug,
       title: p.title,
-      cwd: p.cwd,
+      cwd: discoveredCwd,
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: p.sourcePromptId,
@@ -2649,7 +2705,7 @@ async function reconcile(state) {
       disposition: p.disposition ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
-      originSessionId: resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
+      originSessionId: resolveOriginSessionId(discoveredCwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? null,
       status: 'pending',
@@ -4630,7 +4686,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // Sync write: this is an early-exit error path inside an async function,
     // so we could await, but using the sync variant keeps the error path
     // ordering identical to the spawn-failed branch below (also sync).
-    config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0 });
+    config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0, ...SCHEDULER_META_IDENTITY });
     return { exitCode: -1, durationMs: 0, error: errMsg, sessionId };
   }
 
@@ -4791,7 +4847,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   if (!promptCheck.ok) {
     safeLog(`[scheduler] ${promptCheck.error}\n`);
     closeFd();
-    config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: promptCheck.error, startedAt, finishedAt: Date.now(), durationMs: 0 });
+    config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: promptCheck.error, startedAt, finishedAt: Date.now(), durationMs: 0, ...SCHEDULER_META_IDENTITY });
     return { exitCode: -1, durationMs: 0, error: promptCheck.error, sessionId };
   }
 
@@ -5030,7 +5086,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           sl(`\n[scheduler] ${errMsg}\n`);
           // Sync write: inside a Promise executor callback; must flush meta
           // before resolve() so the spawnJob mutate() that follows sees it.
-          config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked, schedulerBootedAt: SCHEDULER_BOOTED_AT, schedulerCodeSha: SCHEDULER_CODE_SHA, originSessionId, contextDigestApplied });
+          config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked, ...SCHEDULER_META_IDENTITY, originSessionId, contextDigestApplied });
           resolve({ exitCode: -1, durationMs, error: errMsg, leakedDescendants: leaked, sessionId });
           return;
         }
@@ -5092,7 +5148,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked,
           agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${exitCode}` : null,
           killedByWatchdog: effectiveKilledByWatchdog, budgetKillReason,
-          schedulerBootedAt: SCHEDULER_BOOTED_AT, schedulerCodeSha: SCHEDULER_CODE_SHA,
+          ...SCHEDULER_META_IDENTITY,
           originSessionId, contextDigestApplied,
         });
         resolve({

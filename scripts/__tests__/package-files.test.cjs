@@ -92,6 +92,42 @@ test(
   240000,
 );
 
+test(
+  'build-info.json is gitignored, absent from a clean pack, and packed after scripts/write-build-info.cjs runs',
+  () => {
+    const buildInfoPath = path.join(REPO_ROOT, 'src', 'main', 'build-info.json');
+    const preexisting = fs.existsSync(buildInfoPath) ? fs.readFileSync(buildInfoPath, 'utf8') : null;
+
+    try {
+      fs.rmSync(buildInfoPath, { force: true });
+      expect(
+        execFileSync('git', ['check-ignore', 'src/main/build-info.json'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim(),
+      ).toBe('src/main/build-info.json');
+
+      const rawBefore = execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
+        cwd: REPO_ROOT, timeout: 120000, encoding: 'utf8',
+      });
+      const [{ files: filesBefore }] = JSON.parse(rawBefore);
+      expect(filesBefore.some((f) => f.path === 'src/main/build-info.json')).toBe(false);
+
+      // eslint-disable-next-line global-require
+      const { writeBuildInfo } = require('../write-build-info.cjs');
+      const info = writeBuildInfo();
+      expect(info.gitSha).toMatch(/^[0-9a-f]{40}$/);
+
+      const rawAfter = execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
+        cwd: REPO_ROOT, timeout: 120000, encoding: 'utf8',
+      });
+      const [{ files: filesAfter }] = JSON.parse(rawAfter);
+      expect(filesAfter.some((f) => f.path === 'src/main/build-info.json')).toBe(true);
+    } finally {
+      if (preexisting === null) fs.rmSync(buildInfoPath, { force: true });
+      else fs.writeFileSync(buildInfoPath, preexisting);
+    }
+  },
+  240000,
+);
+
 test('package.json "files" would fail this same check if scripts/hooks were dropped from it — proving the check above is load-bearing', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8'));
   const covers = (entry, p) => (entry.endsWith('/') ? p.startsWith(entry) : p === entry);

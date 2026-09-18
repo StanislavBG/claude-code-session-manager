@@ -30,3 +30,10 @@ skill-proposals/
 # stay anchored — a bare `logs/` also matches session-manager-operations/logs/,
 # hiding the owned ops error-log namespace from git (incident: PRD 1181, 2026-09-12).
 /logs/
+
+# Written by scripts/write-build-info.cjs (prepack + prepublishOnly) from the
+# PUBLISHING checkout — never committed, but still reaches the npm tarball
+# because package.json's files[] "src/main/" entry overrides .gitignore. A
+# dev checkout / job worktree has no build-info.json, so
+# src/main/lib/buildIdentity.cjs falls back to a live git read instead.
+src/main/build-info.json

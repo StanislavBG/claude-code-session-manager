@@ -65,6 +65,7 @@ export default defineConfig({
       'src/main/__tests__/computeDepHistorySatisfaction.test.cjs',
       'src/main/lib/__tests__/sessionSlots.test.cjs',
       'src/main/lib/__tests__/buildTarget.test.cjs',
+      'src/main/lib/__tests__/buildIdentity.test.cjs',
       'src/main/lib/__tests__/projectBriefCore.test.cjs',
       'src/main/lib/__tests__/delegationReadiness.test.cjs',
       'src/main/lib/__tests__/effectiveModelInfo.test.cjs',

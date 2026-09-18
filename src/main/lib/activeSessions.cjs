@@ -32,7 +32,7 @@ const TMPDIR = os.tmpdir();
 //     could not — e.g. a bare, .git-less worktree-root directory.
 const TMP_DROP_ROOTS = {
   exactDropCwds: [TMPDIR],
-  prefixDropRoots: [WORKTREE_KIND_CONFIG.job.root, WORKTREE_KIND_CONFIG.epic.root],
+  get prefixDropRoots() { return [WORKTREE_KIND_CONFIG.job.root, WORKTREE_KIND_CONFIG.epic.root]; },
 };
 
 // Transcript reads only need the last line with a `cwd` field — a few dozen

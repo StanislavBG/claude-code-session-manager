@@ -38,17 +38,16 @@
 const os = require('node:os');
 const path = require('node:path');
 const { worktreeMainRootOf } = require('./activeSessions.cjs');
-const { KIND_CONFIG } = require('./gitWorktree.cjs');
+const schedulerPaths = require('./schedulerPaths.cjs');
 
 const TMPDIR = path.resolve(os.tmpdir());
-const MANAGED_WORKTREE_ROOTS = [KIND_CONFIG.job.root, KIND_CONFIG.epic.root].map((p) => path.resolve(p));
 
 function isExactlyTmpdir(absCwd) {
   return absCwd === TMPDIR;
 }
 
 function isUnderManagedWorktreeRoot(absCwd) {
-  return MANAGED_WORKTREE_ROOTS.some((root) => {
+  return ['job', 'epic'].map((k) => path.resolve(schedulerPaths.worktreeRoot(k))).some((root) => {
     const rel = path.relative(root, absCwd);
     return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
   });

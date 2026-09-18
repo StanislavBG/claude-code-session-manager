@@ -55,6 +55,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const { execFile } = require('node:child_process');
 const { OPS_ROOT_DIR } = require('./opsOwnership.cjs');
+const schedulerPaths = require('./schedulerPaths.cjs');
 
 // Per-kind configuration. Roots are kept OUTSIDE any project's own tree
 // (os.tmpdir(), not `<cwd>/.git/...`) so a managed worktree never shows up in
@@ -86,7 +87,7 @@ const { OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 // days, same rationale as defaultMax above.
 const KIND_CONFIG = {
   job: {
-    root: path.join(os.tmpdir(), 'session-manager-job-worktrees'),
+    get root() { return schedulerPaths.worktreeRoot('job'); },
     branchPrefix: 'sm-job/',
     disableEnv: 'SM_JOB_WORKTREE_DISABLE',
     maxEnv: 'SM_JOB_WORKTREE_MAX',
@@ -95,7 +96,7 @@ const KIND_CONFIG = {
     defaultStaleSweepAgeMs: 24 * 60 * 60 * 1000,
   },
   epic: {
-    root: path.join(os.tmpdir(), 'session-manager-epic-worktrees'),
+    get root() { return schedulerPaths.worktreeRoot('epic'); },
     branchPrefix: 'sm-epic/',
     disableEnv: 'SM_EPIC_WORKTREE_DISABLE',
     maxEnv: 'SM_EPIC_WORKTREE_MAX',
@@ -282,11 +283,11 @@ async function removeWorktreeDir(cwd, dir) {
     /* best-effort */
   }
   const parentDir = path.dirname(dir);
-  // Guard against ever rmdir-ing os.tmpdir() itself — every real caller's
+  // Guard against ever rmdir-ing the worktree base (os.tmpdir() or SM_WORKTREE_ROOT) itself — every real caller's
   // `dir` is `<kind root>/<hash>/<key>`, so `parentDir` is always the hash
   // dir, never the tmpdir root, but this keeps the guarantee explicit rather
   // than relying solely on call-site discipline.
-  if (parentDir === os.tmpdir()) return;
+  if (parentDir === schedulerPaths.worktreeBase()) return;
   try {
     const remaining = await fsp.readdir(parentDir);
     if (remaining.length === 0) await fsp.rmdir(parentDir);

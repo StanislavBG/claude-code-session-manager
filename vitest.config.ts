@@ -177,6 +177,7 @@ export default defineConfig({
       'src/main/lib/__tests__/gitWorktreeSalvage.test.cjs',
       'src/main/lib/__tests__/gitWorktreeSalvageDelta.test.cjs',
       'src/main/__tests__/scheduler-inplace-salvage.test.cjs',
+      'src/main/lib/__tests__/schedulerPathsWorktree.test.cjs',
       'src/main/__tests__/scheduler-leftover-fields.test.cjs',
       'src/main/__tests__/scheduler-foreign-wip-manifest.test.cjs',
       'src/main/__tests__/scheduler-worktree-exec-cwd.test.cjs',

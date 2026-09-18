@@ -13,7 +13,9 @@
  * executor jobs BY DESIGN (children inherit env), so a redirected app runs
  * redirected jobs.
  *
- * Worktree roots (os.tmpdir()-based) are deliberately NOT here.
+ * Worktree roots are NOT under schedulerHome (they live on the tmp filesystem)
+ * but are resolved here all the same, via SM_WORKTREE_ROOT (else os.tmpdir()),
+ * so the job and epic roots always move together under one override.
  */
 
 const os = require('node:os');
@@ -44,6 +46,12 @@ function watchdogRelaunchLogPath() {
 }
 function historyRollupStampPath() { return path.join(schedulerHome(), 'history-rollup.stamp'); }
 function historyRollupLockPath() { return path.join(schedulerHome(), 'history-rollup.lock'); }
+
+/** SM_WORKTREE_ROOT, else os.tmpdir() — the parent of every managed worktree root. */
+function worktreeBase() { return process.env.SM_WORKTREE_ROOT || os.tmpdir(); }
+
+/** Managed worktree root for `kind` ('job' | 'epic'), resolved fresh on every call. */
+function worktreeRoot(kind) { return path.join(worktreeBase(), `session-manager-${kind}-worktrees`); }
 
 /**
  * Mode-aware admin token path, resolved fresh on every call. Precedence:
@@ -81,6 +89,8 @@ module.exports = {
   sessionSlotsConfigPath,
   adminTokenPath,
   machineStateLogCwd,
+  worktreeBase,
+  worktreeRoot,
   watchdogLogsDir,
   watchdogRelaunchStatePath,
   watchdogRelaunchLogPath,

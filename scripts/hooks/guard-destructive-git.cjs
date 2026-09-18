@@ -121,10 +121,9 @@ const { execFileSync } = require('node:child_process');
 
 // Duplicated from src/main/lib/gitWorktree.cjs's KIND_CONFIG — see this
 // file's header for why this is a deliberate duplication, not a require.
-const WORKTREE_ROOTS = [
-  path.join(os.tmpdir(), 'session-manager-job-worktrees'),
-  path.join(os.tmpdir(), 'session-manager-epic-worktrees'),
-];
+// Same SM_WORKTREE_ROOT-else-tmpdir base as schedulerPaths.worktreeBase().
+const WORKTREE_BASE = process.env.SM_WORKTREE_ROOT || os.tmpdir();
+const WORKTREE_ROOTS = ['job', 'epic'].map((k) => path.join(WORKTREE_BASE, `session-manager-${k}-worktrees`));
 const BRANCH_PREFIXES = ['sm-job/', 'sm-epic/'];
 
 const MAX_SH_C_DEPTH = 5;

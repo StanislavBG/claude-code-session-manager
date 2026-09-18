@@ -21,6 +21,7 @@ export default defineConfig({
       'src/renderer/**/*.spec.ts',
       'src/main/__tests__/epicValidationHook.test.cjs',
       'src/main/__tests__/scheduler-autofix-outcome.test.cjs',
+      'src/main/__tests__/scheduler-tick-wedge.test.cjs',
       'src/main/__tests__/scheduler-committed-in-window.test.cjs',
       'src/main/__tests__/scheduler-effective-concurrency.test.cjs',
       'src/main/__tests__/scheduler-rate-limit-pause.test.cjs',

@@ -146,6 +146,7 @@ const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epicContextDigest.cjs');
 const { JOB_STATUSES } = require('./lib/scheduleJobSchema.cjs');
 const { appendAuditEvent } = require('./lib/auditLog.cjs');
+const { withTimeout } = require('./lib/withTimeout.cjs');
 
 // ---------- origin session resolution (PRD 832) ----------
 // An Epic IS a tagged claude session — job rows carry the originating
@@ -2094,8 +2095,35 @@ async function writeQueue(state) {
 // preceding mutate threw, so the chain never deadlocks.
 let mutateTail = Promise.resolve();
 
+// Observe-only watchdog: a mutate body over MUTATE_WATCHDOG_MS is logged and
+// audited once per episode (latched until a mutate completes). mutateTail is
+// deliberately NEVER reset — it is what enforces the single-writer law, and
+// abandoning a live writer would let two read-modify-writes interleave.
+const MUTATE_WATCHDOG_MS = 60_000;
+let mutateWedgeLatched = false;
+
 function mutate(fn) {
   const next = mutateTail.then(async () => {
+    const wedgeTimer = setTimeout(() => {
+      if (mutateWedgeLatched) return;
+      mutateWedgeLatched = true;
+      console.warn(`[scheduler] MUTATE WEDGED: a queue mutation has run > ${MUTATE_WATCHDOG_MS}ms`);
+      appendAuditEvent('mutate_wedged', { budgetMs: MUTATE_WATCHDOG_MS });
+    }, MUTATE_WATCHDOG_MS);
+    if (typeof wedgeTimer.unref === 'function') wedgeTimer.unref();
+    try {
+      return await mutateBody(fn);
+    } finally {
+      clearTimeout(wedgeTimer);
+      mutateWedgeLatched = false;
+    }
+  });
+  mutateTail = next.catch(() => {}); // keep chain alive on errors
+  return next;
+}
+
+async function mutateBody(fn) {
+  {
     const state = await readQueue();
     // Bail BEFORE fn runs: a mutator handed an unreadable (therefore empty)
     // state would compute its result from a queue that isn't there, and
@@ -2141,9 +2169,7 @@ function mutate(fn) {
     }
     await writeQueue(state);
     return ret;
-  });
-  mutateTail = next.catch(() => {}); // keep chain alive on errors
-  return next;
+  }
 }
 
 // ---------- PRD parsing ----------
@@ -7487,12 +7513,55 @@ async function spawnResumeRecovery(job, resumeTarget) {
 // is synchronous and spawnJob is fire-and-forget.
 let tickTail = Promise.resolve();
 
+// Tick watchdog. The tick BODY (not enqueue-to-settle) is bounded: a body
+// that never settles (hung reconcile / git walk) is declared wedged, the
+// chain is reset, and `tickGeneration` is bumped so the abandoned body —
+// which may resume much later — fails its generation re-check after every
+// await and returns without spawning or mutating. mutateTail is NOT touched.
+let tickGeneration = 0;
+let tickWedgeLatched = false;
+function tickWatchdogMs() {
+  const raw = process.env.SM_TICK_WATCHDOG_MS;
+  if (raw === undefined || raw === '') return 120_000;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : 120_000;
+}
+
 // `bypassLoadGate` is set only by the explicit human run-now / force-tick
 // paths (via runDueJobs): the human is asking, so the CPU-load gate yields
 // and logs that it did. Every automatic caller leaves it false.
 function tickQueue({ bypassLoadGate = false } = {}) {
-  const next = tickTail.then(async () => {
+  const budgetMs = tickWatchdogMs();
+  const next = tickTail.then(() => {
+    const gen = tickGeneration;
+    return withTimeout(() => tickBody(gen, { bypassLoadGate }), budgetMs, () => {
+      tickGeneration++; // fence the abandoned body
+      console.warn(`[scheduler] TICK WEDGED: tick body exceeded ${budgetMs}ms — resetting tick chain`);
+      if (!tickWedgeLatched) {
+        tickWedgeLatched = true;
+        appendAuditEvent('tick_wedged', { budgetMs });
+      }
+      // CAS: only reset if nothing has queued behind this wedged link.
+      if (tickTail === tail) tickTail = Promise.resolve();
+      return recordTick({ fired: false, reason: 'wedged' }, { detail: `tick body exceeded ${budgetMs}ms` });
+    }).then((r) => {
+      if (r?.reason !== 'wedged') tickWedgeLatched = false;
+      return r;
+    });
+  });
+  const tail = next.catch(() => {});
+  tickTail = tail;
+  return next;
+}
+
+// The stale sentinel a fenced body returns: never recorded, never acted on.
+const STALE_TICK = Object.freeze({ fired: false, reason: 'stale-generation' });
+
+async function tickBody(gen, { bypassLoadGate }) {
+  {
+    const stale = () => gen !== tickGeneration;
     const state = await readQueue();
+    if (stale()) return STALE_TICK;
     // Never reconcile against an unreadable queue: reconcile() would see zero
     // job rows for every PRD on disk and resurrect the lot as 'pending'.
     if (state.unreadable) {
@@ -7512,11 +7581,13 @@ function tickQueue({ bypassLoadGate = false } = {}) {
     // Distinct from `lastRunAt` below, which stays true to its existing
     // meaning (a batch actually launched) since other readers depend on that.
     await mutate((s) => { s.lastDispatchAttemptAt = new Date().toISOString(); });
+    if (stale()) return STALE_TICK;
 
     // The retired-flat-dir sweep now lives inside reconcile() itself (see its
     // own comment) so every caller of reconcile — not just this tick — gets
     // the guarantee.
     await reconcile(state);
+    if (stale()) return STALE_TICK;
     // Reclaim any job-kind worktree whose owning row already resolved
     // (completed/failed/skipped) without the run ever reaching
     // cleanupWorktree — a leaked checkout that would otherwise sit until the
@@ -7542,7 +7613,9 @@ function tickQueue({ bypassLoadGate = false } = {}) {
       ? Math.max(0, Math.min(sessionSlots.available(), degradedConcurrencyCapValue - runningSet.size))
       : sessionSlots.available();
     const heldSlugs = await computeLaunchHolds(state);
+    if (stale()) return STALE_TICK;
     const satisfiedSlugsByCwd = await computeDepHistorySatisfaction(state);
+    if (stale()) return STALE_TICK;
     const { batch, reason: holdReason, holds } = pickNextBatch(state.jobs, runningSet, freeSlots, {
       leaseHeld: quietMachineLease.isHeld(),
       machineInUse: sessionSlots.inUse(),
@@ -7642,18 +7715,18 @@ function tickQueue({ bypassLoadGate = false } = {}) {
     }
 
     await mutate((s) => { s.lastRunAt = new Date().toISOString(); });
+    if (stale()) return STALE_TICK;
     await broadcast();
+    if (stale()) return STALE_TICK;
 
     const { runId, dir: runDir } = pickRunDir();
     for (const job of gatedBatch) {
-      if (cancelToken.cancelled) break;
+      if (cancelToken.cancelled || stale()) break;
       // spawnJob is fire-and-forget; it calls tickQueue() on completion.
       spawnJob(job, runId, runDir, state.config.defaultCwd).catch(() => {});
     }
     return recordTick({ fired: true, count: gatedBatch.length, group: gatedBatch[0]?.parallelGroup }, { holds });
-  });
-  tickTail = next.catch(() => {});
-  return next;
+  }
 }
 
 // Translates a tickQueue()/runDueJobs() outcome descriptor into a renderer-facing

@@ -4,9 +4,11 @@
  * pollLoop): the 'meter_rate_limited' branch used to never back off and
  * never call persistSchedulerState(), letting scheduler-state.json freeze
  * stale while the loop kept failing every POLL_INTERVAL_MS underneath it.
- * This suite covers the two pure pieces of the fix: the shared backoff
- * curve/cap (nextBackoffMs) and the once-per-streak WARN gate
- * (shouldWarnFailureStreak).
+ * This suite covers the pure pieces of the fix: the shared backoff
+ * curve/cap (nextBackoffMs), the once-per-streak WARN gate
+ * (shouldWarnFailureStreak), and the periodic escalation ladder that fires
+ * every FAILURE_STREAK_ESCALATION_MS while a streak PERSISTS past the
+ * initial WARN, re-arming once the streak clears (shouldEscalateFailureStreak).
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/rateLimitPollerStreak.test.cjs
  */
@@ -17,8 +19,10 @@ import { test, expect } from 'vitest';
 const {
   nextBackoffMs,
   shouldWarnFailureStreak,
+  shouldEscalateFailureStreak,
   BACKOFF_MAX_MS,
   FAILURE_STREAK_WARN_THRESHOLD,
+  FAILURE_STREAK_ESCALATION_MS,
 } = require('../scheduler.cjs');
 
 test('nextBackoffMs starts at 30s from a zero/falsy backoff', () => {
@@ -76,4 +80,35 @@ test('shouldWarnFailureStreak re-arms after a streak resets (alreadyWarned back 
 test('shouldWarnFailureStreak respects a custom threshold', () => {
   expect(shouldWarnFailureStreak(3, false, 3)).toBe(true);
   expect(shouldWarnFailureStreak(2, false, 3)).toBe(false);
+});
+
+test('shouldEscalateFailureStreak: false below the WARN threshold, regardless of elapsed time', () => {
+  expect(shouldEscalateFailureStreak(FAILURE_STREAK_WARN_THRESHOLD - 1, null, Date.now())).toBe(false);
+});
+
+test('shouldEscalateFailureStreak: fires immediately the first time (lastEscalatedAtMs null) once past the WARN threshold', () => {
+  expect(shouldEscalateFailureStreak(FAILURE_STREAK_WARN_THRESHOLD, null, Date.now())).toBe(true);
+});
+
+test('shouldEscalateFailureStreak: does not re-fire before FAILURE_STREAK_ESCALATION_MS has elapsed since the last one', () => {
+  const lastEscalatedAtMs = 1_000_000;
+  const tooSoon = lastEscalatedAtMs + FAILURE_STREAK_ESCALATION_MS - 1;
+  expect(shouldEscalateFailureStreak(FAILURE_STREAK_WARN_THRESHOLD, lastEscalatedAtMs, tooSoon)).toBe(false);
+});
+
+test('shouldEscalateFailureStreak: fires again once FAILURE_STREAK_ESCALATION_MS has elapsed — the persisting-streak ladder', () => {
+  const lastEscalatedAtMs = 1_000_000;
+  const dueNow = lastEscalatedAtMs + FAILURE_STREAK_ESCALATION_MS;
+  expect(shouldEscalateFailureStreak(FAILURE_STREAK_WARN_THRESHOLD, lastEscalatedAtMs, dueNow)).toBe(true);
+});
+
+test('shouldEscalateFailureStreak: re-arms after a streak clears (lastEscalatedAtMs reset to null) — a later independent streak escalates again', () => {
+  const firstStreakNow = 1_000_000;
+  expect(shouldEscalateFailureStreak(FAILURE_STREAK_WARN_THRESHOLD, null, firstStreakNow)).toBe(true);
+  // Streak clears (a success resets both failureStreakWarned and the
+  // escalation timestamp) — a LATER, independent streak crossing the WARN
+  // threshold again must escalate again immediately, not wait out a stale
+  // 30-minute window from the previous incident.
+  const laterStreakNow = firstStreakNow + 5 * 60_000; // well under 30 min later
+  expect(shouldEscalateFailureStreak(FAILURE_STREAK_WARN_THRESHOLD, null, laterStreakNow)).toBe(true);
 });

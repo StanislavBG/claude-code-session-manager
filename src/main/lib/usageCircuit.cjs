@@ -6,6 +6,17 @@
  * circuit with jittered backoff; degradedBudget() carries forward the last
  * known-good BINDING window's utilization (never 0), pinning to 100 on a
  * fresh executor-observed 429 and capping concurrency at 2. Pure Node.
+ *
+ * Kill switches (read live from process.env, so a test/operator can flip
+ * them without restarting anything that already holds a circuit instance):
+ *   SM_USAGE_CIRCUIT=0      — bypasses the breaker entirely: state() always
+ *                             reports 'closed' and recordFailure() never
+ *                             opens it. Escape hatch if the breaker itself
+ *                             is ever suspected of wedging dispatch.
+ *   SM_USAGE_DEGRADED_CAP=n — overrides degradedBudget()'s concurrencyCap
+ *                             outright (bypasses the normal min(cap, 2)),
+ *                             for an operator who needs a different ceiling
+ *                             while the meter is degraded.
  */
 
 const FLOOR_MS = 30_000;
@@ -64,11 +75,24 @@ function bindingWindow(payload) {
 }
 
 /**
+ * SM_USAGE_DEGRADED_CAP=<n> overrides the normal min(configuredCap, 2)
+ * ceiling outright — an operator escape hatch, not a default path. Falls
+ * through to the normal min(cap, 2) rule when unset/non-positive.
+ */
+function degradedConcurrencyCap(configuredCap) {
+  const override = Number(process.env.SM_USAGE_DEGRADED_CAP);
+  if (Number.isFinite(override) && override > 0) return override;
+  const cap = Number.isFinite(configuredCap) ? configuredCap : 2;
+  return Math.min(cap, 2);
+}
+
+/**
  * Conservative budget to run on while the meter is down. utilization is
  * carried forward from the last known-good BINDING window — never 0, which
  * would read as "plenty of headroom" instead of "we don't know." A fresh
  * executor-observed 429 (its own window not yet passed) pins utilization to
- * 100 regardless of the stale cached value. concurrencyCap never exceeds 2.
+ * 100 regardless of the stale cached value. concurrencyCap never exceeds 2
+ * (or SM_USAGE_DEGRADED_CAP, if set).
  */
 function degradedBudget(lastGoodPayload, executorEvidence = {}) {
   const window = bindingWindow(lastGoodPayload);
@@ -76,10 +100,7 @@ function degradedBudget(lastGoodPayload, executorEvidence = {}) {
     ? window.utilization
     : 100;
 
-  const configuredCap = Number.isFinite(executorEvidence.configuredCap)
-    ? executorEvidence.configuredCap
-    : 2;
-  const concurrencyCap = Math.min(configuredCap, 2);
+  const concurrencyCap = degradedConcurrencyCap(executorEvidence.configuredCap);
 
   if (executorEvidence.observed429 && isResetFresh(executorEvidence.resetsAt, executorEvidence.now)) {
     utilization = 100;
@@ -98,6 +119,12 @@ function singleFlight(fn) {
   };
 }
 
+/** SM_USAGE_CIRCUIT=0 (or 'false') bypasses the breaker entirely. */
+function breakerEnabled() {
+  const v = process.env.SM_USAGE_CIRCUIT;
+  return v == null || v === '' || (v !== '0' && String(v).toLowerCase() !== 'false');
+}
+
 /**
  * Breaker state machine over the meter: closed -> open after 3 consecutive
  * failures; open allows exactly one probe per backoff interval (half_open);
@@ -110,6 +137,12 @@ function createUsageCircuit({ now = () => Date.now() } = {}) {
   let backoffBaseMs = 0;
   let nextProbeAtMs = 0;
   let probeInFlight = false;
+  // ms timestamp the circuit most recently transitioned closed -> open; kept
+  // through half_open <-> open cycles of the SAME streak (a failed probe
+  // re-arms the timer but the meter has been down continuously since this
+  // timestamp), cleared only by recordSuccess. Feeds health.cjs's
+  // GREEN/YELLOW/RED ladder (open duration), not just a failure count.
+  let openedAtMs = null;
 
   function scheduleNextProbe() {
     const intervalMs = backoffWithJitter(backoffBaseMs);
@@ -118,6 +151,7 @@ function createUsageCircuit({ now = () => Date.now() } = {}) {
   }
 
   function state() {
+    if (!breakerEnabled()) return 'closed';
     if (currentState === 'open' && !probeInFlight && now() >= nextProbeAtMs) {
       currentState = 'half_open';
       probeInFlight = true;
@@ -127,6 +161,7 @@ function createUsageCircuit({ now = () => Date.now() } = {}) {
 
   function recordFailure(kind) { // eslint-disable-line no-unused-vars
     consecutiveFailures += 1;
+    if (!breakerEnabled()) return;
     if (currentState === 'half_open') {
       probeInFlight = false;
       currentState = 'open';
@@ -135,6 +170,7 @@ function createUsageCircuit({ now = () => Date.now() } = {}) {
     }
     if (currentState === 'closed' && consecutiveFailures >= 3) {
       currentState = 'open';
+      openedAtMs = now();
       scheduleNextProbe();
     }
   }
@@ -144,9 +180,19 @@ function createUsageCircuit({ now = () => Date.now() } = {}) {
     probeInFlight = false;
     backoffBaseMs = 0;
     currentState = 'closed';
+    openedAtMs = null;
   }
 
-  return { recordSuccess, recordFailure, state };
+  /** ms timestamp this streak opened, or null while closed. */
+  function openedAt() {
+    return currentState === 'open' || currentState === 'half_open' ? openedAtMs : null;
+  }
+
+  function getConsecutiveFailures() {
+    return consecutiveFailures;
+  }
+
+  return { recordSuccess, recordFailure, state, openedAt, getConsecutiveFailures };
 }
 
 module.exports = {
@@ -155,5 +201,6 @@ module.exports = {
   isResetFresh,
   bindingWindow,
   degradedBudget,
+  degradedConcurrencyCap,
   singleFlight,
 };

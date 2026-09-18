@@ -16,7 +16,7 @@ const { checkDelegationReadiness } = require('./lib/delegationReadiness.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
 const { migratePrds } = require('./lib/prdMigration.cjs');
 const queueStore = require('./lib/queueStore.cjs');
-const { computeStallSummary, SCHEDULER_STATE_PATH, FAILURE_STREAK_WARN_THRESHOLD, classifyQueueStarvation, STARVE_ESCALATION_MS } = require('./scheduler.cjs');
+const { computeStallSummary, SCHEDULER_STATE_PATH, FAILURE_STREAK_ESCALATION_MS, classifyQueueStarvation, STARVE_ESCALATION_MS } = require('./scheduler.cjs');
 const { findStarvedProjects } = require('./lib/schedulerBatch.cjs');
 const { AUDIT_LOG_PATH } = require('./lib/auditLog.cjs');
 const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
@@ -375,27 +375,50 @@ function evaluateEpicIndexHealth(cwds) {
 // not a failure, matches evaluatePrdMigrationHealth's fail-open-on-absence
 // spirit. Kept separate from the fs-touching check() call site, same pattern
 // as every other evaluate* helper in this file.
-function evaluateUsagePollerHealth(state, threshold = FAILURE_STREAK_WARN_THRESHOLD) {
+//
+// Ladder is driven by the shared usageCircuit's OWN open/closed state and
+// how long it's been open (usageCircuitState/usageCircuitOpenedAt, persisted
+// by scheduler.cjs's persistSchedulerState — this process never holds the
+// live in-memory circuit itself) — not a binary consecutiveFailures<5 check,
+// which used to read GREEN right up until the exact failure that also fired
+// the one-time WARN, then stayed flatly non-GREEN forever after with no way
+// to tell "just tripped" from "down for hours" apart:
+//   GREEN  — circuit closed (or half_open probing after a fresh backoff).
+//   YELLOW — circuit open, less than FAILURE_STREAK_ESCALATION_MS (30 min).
+//            Still `ok: true` — the circuit's OWN open threshold (3
+//            consecutive failures, usageCircuit.cjs) is lower than the old
+//            5-failure WARN, so treating YELLOW as `ok: false` here would
+//            silently tighten the overall `npm run health` rollup's failure
+//            bar from 5 down to 3. Graceful degradation (the whole point of
+//            the breaker) should not itself read as a critical failure.
+//   RED    — circuit open for FAILURE_STREAK_ESCALATION_MS or longer —
+//            `ok: false`, matching the same 30-minute threshold the
+//            escalation ladder (warnFailureStreakIfNeeded) re-alerts on.
+function evaluateUsagePollerHealth(state, redThresholdMs = FAILURE_STREAK_ESCALATION_MS) {
   if (!state || typeof state !== 'object') return { ok: true, applicable: false };
   const consecutiveFailures = typeof state.consecutiveFailures === 'number' ? state.consecutiveFailures : 0;
   const backoffMs = typeof state.backoffMs === 'number' ? state.backoffMs : null;
   const lastPollAt = typeof state.lastPollAt === 'number' ? state.lastPollAt : null;
-  // Trips at the SAME count as scheduler.cjs's shouldWarnFailureStreak
-  // (`consecutiveFailures >= threshold`) — the WARN and this non-GREEN must
-  // fire together, not one failure apart, or an operator sees the log line
-  // while the health dashboard still reads green.
-  const ok = consecutiveFailures < threshold;
+  const circuitState = typeof state.usageCircuitState === 'string' ? state.usageCircuitState : 'closed';
+  const openedAt = typeof state.usageCircuitOpenedAt === 'number' ? state.usageCircuitOpenedAt : null;
+
+  if (circuitState !== 'open' && circuitState !== 'half_open') {
+    return { ok: true, applicable: true, color: 'GREEN', consecutiveFailures, backoffMs, lastPollAt };
+  }
+
+  const openMs = openedAt ? Math.max(0, Date.now() - openedAt) : 0;
+  const color = openMs >= redThresholdMs ? 'RED' : 'YELLOW';
   return {
-    ok,
+    ok: color !== 'RED',
     applicable: true,
+    color,
     consecutiveFailures,
     backoffMs,
     lastPollAt,
-    threshold,
-    ...(ok ? {} : {
-      message: `usage/rate-limit poller has ${consecutiveFailures} consecutive failures `
-        + `(threshold ${threshold}), backoffMs=${backoffMs} — see logs scope=scheduler`,
-    }),
+    openedAt,
+    openMs,
+    message: `usage/rate-limit poller circuit is ${circuitState}, open for ${Math.round(openMs / 60_000)}m (${color}) — `
+      + `${consecutiveFailures} consecutive failures, backoffMs=${backoffMs} — see logs scope=scheduler`,
   };
 }
 

@@ -208,6 +208,67 @@ test('singleFlight: concurrent callers share the same in-flight promise, fn invo
   await p3;
 });
 
+test('openedAt: null while closed, stamped the moment it opens, stays stamped through a failed half_open probe, clears on success', () => {
+  let nowMs = 1000;
+  const circuit = createUsageCircuit({ now: () => nowMs });
+  assert.strictEqual(circuit.openedAt(), null);
+  circuit.recordFailure('a');
+  circuit.recordFailure('a');
+  assert.strictEqual(circuit.openedAt(), null); // still closed, 2 of 3
+  circuit.recordFailure('a');
+  assert.strictEqual(circuit.state(), 'open');
+  assert.strictEqual(circuit.openedAt(), 1000);
+
+  nowMs += 60 * 60 * 1000;
+  assert.strictEqual(circuit.state(), 'half_open');
+  assert.strictEqual(circuit.openedAt(), 1000); // unchanged through the probe
+
+  circuit.recordFailure('a'); // failed probe -> reopens
+  assert.strictEqual(circuit.state(), 'open');
+  assert.strictEqual(circuit.openedAt(), 1000); // still the ORIGINAL open time, not re-stamped
+
+  circuit.recordSuccess({});
+  assert.strictEqual(circuit.openedAt(), null);
+});
+
+test('getConsecutiveFailures: tracks failures, resets on success', () => {
+  const circuit = createUsageCircuit({ now: () => 0 });
+  assert.strictEqual(circuit.getConsecutiveFailures(), 0);
+  circuit.recordFailure('a');
+  circuit.recordFailure('a');
+  assert.strictEqual(circuit.getConsecutiveFailures(), 2);
+  circuit.recordSuccess({});
+  assert.strictEqual(circuit.getConsecutiveFailures(), 0);
+});
+
+test('SM_USAGE_CIRCUIT=0 bypasses the breaker entirely: state stays closed no matter how many failures', () => {
+  const prev = process.env.SM_USAGE_CIRCUIT;
+  process.env.SM_USAGE_CIRCUIT = '0';
+  try {
+    const circuit = createUsageCircuit({ now: () => 0 });
+    circuit.recordFailure('a');
+    circuit.recordFailure('a');
+    circuit.recordFailure('a');
+    circuit.recordFailure('a');
+    assert.strictEqual(circuit.state(), 'closed');
+    assert.strictEqual(circuit.openedAt(), null);
+  } finally {
+    if (prev === undefined) delete process.env.SM_USAGE_CIRCUIT; else process.env.SM_USAGE_CIRCUIT = prev;
+  }
+});
+
+test('SM_USAGE_DEGRADED_CAP overrides degradedBudget concurrencyCap outright, bypassing min(cap, 2)', () => {
+  const prev = process.env.SM_USAGE_DEGRADED_CAP;
+  process.env.SM_USAGE_DEGRADED_CAP = '7';
+  try {
+    const payload = { five_hour: { utilization: 30, resets_at: null } };
+    const { concurrencyCap } = degradedBudget(payload, { configuredCap: 2 });
+    assert.strictEqual(concurrencyCap, 7);
+  } finally {
+    if (prev === undefined) delete process.env.SM_USAGE_DEGRADED_CAP; else process.env.SM_USAGE_DEGRADED_CAP = prev;
+  }
+});
+
 test('singleFlight: de-dupes even when fn rejects, next call gets a fresh attempt', async () => {
   let calls = 0;
   const fn = () => (calls++ === 0 ? Promise.reject(new Error('boom')) : Promise.resolve('ok'));

@@ -67,6 +67,7 @@ const { sweepStrandedJobBranches } = require('./lib/branchSweep.cjs');
 const { detectRateLimitInLog } = require('./lib/rateLimitDetect.cjs');
 const { stripAppOwnedChurn } = require('./lib/jobDirtFilter.cjs');
 const { resolveBindingRateLimitReset } = require('./lib/rateLimitWindow.cjs');
+const { isResetFresh, bindingWindow, degradedBudget } = require('./lib/usageCircuit.cjs');
 const { computeQueueHealth } = require('./lib/queueHealth.cjs');
 const { createLoadGate, topCpuConsumers } = require('./lib/loadGate.cjs');
 const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
@@ -138,7 +139,7 @@ const queueOps = require('./queueOps.cjs');
 // Plain Node module, no Electron dependency; queuePath/prdsDir defaults already
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
-const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs } = require('./lib/prdLocations.cjs');
+const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduleJobTransitions.cjs');
@@ -1479,11 +1480,14 @@ function loadSchedulerState() {
     const raw = fs.readFileSync(SCHEDULER_STATE_PATH, 'utf8');
     const s = JSON.parse(raw);
     if (s.lastObservedReset) cachedNextReset = s.lastObservedReset;
+    if (typeof s.lastResetObservedAt === 'number') lastResetObservedAtMs = s.lastResetObservedAt;
     if (typeof s.consecutiveFailures === 'number') consecutiveFailures = s.consecutiveFailures;
     if (typeof s.backoffMs === 'number') backoffMs = s.backoffMs;
     if (typeof s.pauseClearedManuallyAt === 'number') pauseClearedManuallyAt = s.pauseClearedManuallyAt;
     if (typeof s.lastPollAt === 'number') lastPollAt = s.lastPollAt;
     if (typeof s.failureStreakWarned === 'boolean') failureStreakWarned = s.failureStreakWarned;
+    if (typeof s.failureStreakWarnedAt === 'number') failureStreakWarnedAt = s.failureStreakWarnedAt;
+    if (typeof s.lastEscalationAt === 'number') lastEscalationAtMs = s.lastEscalationAt;
   } catch { /* first boot or corrupt — start fresh */ }
 }
 
@@ -1496,7 +1500,11 @@ function persistSchedulerState() {
     config.writeJsonSync(SCHEDULER_STATE_PATH, {
       version: 1,
       lastObservedReset: cachedNextReset,
-      lastResetObservedAt: cachedNextReset ? Date.now() : null,
+      // Only stamped at the moment a FRESH reset was actually observed (see
+      // recordObservedReset) — never Date.now() on every persist call, which
+      // used to make a stale cachedNextReset look freshly-confirmed on every
+      // tick even when nothing new had been read.
+      lastResetObservedAt: lastResetObservedAtMs,
       lastPollAt,
       consecutiveFailures,
       backoffMs,
@@ -1504,6 +1512,13 @@ function persistSchedulerState() {
       pausedSince: null,
       pauseClearedManuallyAt,
       failureStreakWarned,
+      failureStreakWarnedAt,
+      lastEscalationAt: lastEscalationAtMs,
+      // Circuit fields are read fresh from the live shared breaker each
+      // persist — health.cjs (a separate `npm run health` process) reads
+      // THESE persisted values, since it never holds the in-memory circuit.
+      usageCircuitState: billing.usageCircuit.state(),
+      usageCircuitOpenedAt: billing.usageCircuit.openedAt(),
     });
   } catch (e) {
     console.warn('[scheduler] failed to persist scheduler state', e?.message);
@@ -2334,15 +2349,37 @@ async function reconcile(state) {
 
   phaseStartMs = Date.now();
   const onDisk = new Map();
+  // Slugs derive from title text with no cwd salt, so two different projects
+  // can legitimately queue an identically-slugged PRD — onDisk alone can
+  // only hold ONE parsed PRD per slug (last-file-wins), which would silently
+  // hand an EXISTING row the wrong project's PRD (or none at all) when two
+  // projects collide on a slug. This side index lets the two existing-row
+  // lookups below (job refresh + invalid-row repair) disambiguate by the
+  // row's own cwd first; the fresh-discovery loop further down still reads
+  // the bare `onDisk` (unscoped) since a same-slug NEW-PRD collision across
+  // two projects is a rarer edge this reconcile pass doesn't yet resolve.
+  const onDiskByCwd = new Map();
   for (const f of files) {
     try {
       // Per-file await: parsing is mtime-cached so steady-state hits zero
       // disk reads; on cold cache the awaits keep the main thread responsive.
       const p = await parsePrd(f);
       onDisk.set(p.slug, p);
+      if (p.cwd) onDiskByCwd.set(`${p.slug}::${p.cwd}`, p);
     } catch (e) {
       console.warn('[scheduler] failed to parse', f, e?.message);
     }
+  }
+  // resolvePrdForJob(slug, cwd) — cwd-scoped PRD lookup for an EXISTING
+  // queue row, falling back to the unscoped onDisk entry when this exact
+  // (slug, cwd) pair has no PRD (e.g. cwd is null/stale) — same behavior as
+  // a bare onDisk.get() for every slug that isn't cross-project-colliding.
+  function resolvePrdForJob(slug, cwd) {
+    if (cwd) {
+      const scoped = onDiskByCwd.get(`${slug}::${cwd}`);
+      if (scoped) return scoped;
+    }
+    return onDisk.get(slug);
   }
   phaseMs.parseLoop = Date.now() - phaseStartMs;
 
@@ -2363,7 +2400,7 @@ async function reconcile(state) {
   // historyTerminalBySlug() below and backfilled before being dropped.
   const terminalDroppedNeedingHistoryCheck = [];
   for (const job of state.jobs) {
-    const p = onDisk.get(job.slug);
+    const p = resolvePrdForJob(job.slug, job.cwd);
     if (!p) {
       // A terminal job whose .md is gone was archived on purpose — dropping
       // its row is the intended end of the auto-archive flow, PROVIDED it's
@@ -2397,10 +2434,24 @@ async function reconcile(state) {
       continue;
     }
     seen.add(job.slug);
+    // p.cwd REFINES the row's existing cwd; it never erases one. A PRD
+    // file with no `cwd:` frontmatter parses p.cwd as undefined — falling
+    // through to a bare `cwd: p.cwd` here nulled the row's real cwd,
+    // which queueStore.writeSplit then buckets into
+    // schedulerBatch.js's DEFAULT_PROJECT_CWD, silently relocating the
+    // row into the WRONG project's queue.json shard and emptying the
+    // owning project's shard underneath it (2026-09 data-loss incident).
+    // Resolved ONCE into a local so originSessionId's fallback below
+    // resolves against the SAME cwd this row actually gets, not the raw
+    // (possibly undefined) p.cwd — resolveOriginSessionId(undefined, ...)
+    // returns null unconditionally, which silently dropped the origin link
+    // for every PRD with no `cwd:` frontmatter even though a good cwd was
+    // available one line below.
+    const refreshedCwd = p.cwd ?? job.cwd ?? null;
     const updatedJob = {
       ...job,
       title: p.title,
-      cwd: p.cwd,
+      cwd: refreshedCwd,
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: reconcileSourcePromptId(job, p.sourcePromptId),
@@ -2414,7 +2465,7 @@ async function reconcile(state) {
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
       originSessionId: job.originSessionId
-        ?? resolveOriginSessionId(p.cwd, p.epicId ?? reconcileSourcePromptId(job, p.sourcePromptId)),
+        ?? resolveOriginSessionId(refreshedCwd, p.epicId ?? reconcileSourcePromptId(job, p.sourcePromptId)),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? job.agentType ?? null,
     };
@@ -2510,17 +2561,22 @@ async function reconcile(state) {
       });
       continue;
     }
-    const p = onDisk.get(inv.slug);
+    const p = resolvePrdForJob(inv.slug, inv.row?.cwd);
     if (!p) {
       // PRD file also gone with no terminal record anywhere — nothing to
       // repair against. queueStore already logged the quarantine once.
       continue;
     }
+    // Same cwd-refines-not-erases rule as the normal refresh path above, and
+    // same reason for resolving it once into a local: originSessionId's
+    // fallback must resolve against the cwd this row actually gets, not the
+    // raw (possibly undefined) p.cwd.
+    const repairedCwd = p.cwd ?? inv.row?.cwd ?? null;
     const job = {
       ...inv.row,
       slug: inv.slug,
       title: p.title,
-      cwd: p.cwd,
+      cwd: repairedCwd,
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: p.sourcePromptId ?? inv.row?.sourcePromptId ?? null,
@@ -2530,7 +2586,7 @@ async function reconcile(state) {
       disposition: p.disposition ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
-      originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
+      originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(repairedCwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? inv.row?.agentType ?? null,
     };
@@ -2641,10 +2697,20 @@ async function reconcile(state) {
       }
       continue;
     }
+    // No prior row exists to fall back to (this is a fresh discovery), so a
+    // PRD file with no `cwd:` frontmatter falls back to the project root it
+    // was actually found under (derived from its own file path) rather than
+    // nulling out to schedulerBatch.js's DEFAULT_PROJECT_CWD. Resolved once
+    // so originSessionId (below) resolves against this SAME cwd — passing
+    // the raw p.cwd there instead would resolve against `undefined` for
+    // exactly the no-frontmatter case this fallback exists to handle, since
+    // resolveOriginSessionId(cwd, ...) returns null unconditionally when
+    // `cwd` is falsy.
+    const discoveredCwd = p.cwd ?? deriveProjectCwdFromPrdPath(p.path) ?? null;
     const entry = {
       slug,
       title: p.title,
-      cwd: p.cwd,
+      cwd: discoveredCwd,
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: p.sourcePromptId,
@@ -2654,7 +2720,7 @@ async function reconcile(state) {
       disposition: p.disposition ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
-      originSessionId: resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
+      originSessionId: resolveOriginSessionId(discoveredCwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? null,
       status: 'pending',
@@ -2805,14 +2871,73 @@ async function reconcile(state) {
 // ---------- next-reset detection ----------
 
 let cachedNextReset = null; // bare ISO string or null
-let cachedUtilization = null; // five_hour utilization %, 0–100, or null if unknown
+let cachedUtilization = null; // binding-window utilization %, 0–100, or null if unknown
+// ms timestamp of the last FRESH reset observation (see recordObservedReset)
+// — distinct from Date.now(), so persistSchedulerState never re-stamps a
+// stale cachedNextReset as "just observed" on every poll cycle.
+let lastResetObservedAtMs = null;
+// Full usage payload (`{ five_hour, limits?, ... }`) from the last SUCCESSFUL
+// poll — the input degradedBudget() carries forward while the meter is down.
+// Never itself defaults to 0; absent (null) reads as "no signal yet" and
+// degradedBudget() treats that conservatively (100% / capped concurrency).
+let lastGoodUsagePayload = null;
+// Non-null while the meter is degraded (circuit open, or a poll otherwise
+// failed to return 'ok') — narrows tickQueue's freeSlots as a picker-side
+// hold instead of a second slot pool (see tickQueue's freeSlots computation).
+// Cleared to null the moment a poll succeeds or the meter is inapplicable.
+let degradedConcurrencyCapValue = null;
+// Deliberately a named constant, not a bare zero literal assigned straight
+// into cachedUtilization: a genuine "no consumer meter to poll" (enterprise
+// auth) is categorically different from "the meter is down and we don't
+// know" — the latter must never read as 0%/full-speed-ahead.
+const NO_METER_UTILIZATION = 0;
+
+/**
+ * Records a freshly-observed reset, stamping lastResetObservedAtMs only when
+ * there actually WAS a reset to observe (never on every poll regardless of
+ * payload content — see persistSchedulerState's header).
+ */
+function recordObservedReset(resetIso) {
+  if (resetIso) {
+    cachedNextReset = resetIso;
+    lastResetObservedAtMs = Date.now();
+  } else {
+    cachedNextReset = null;
+  }
+}
+
+/** Pure: this poll/executor cycle's conservative budget while the meter is degraded. */
+function computeDegradedBudget() {
+  return degradedBudget(lastGoodUsagePayload, {
+    observed429: lastFailureKind === 'meter_rate_limited',
+    resetsAt: cachedNextReset,
+    now: Date.now(),
+    configuredCap: sessionSlots.snapshot().total,
+  });
+}
+
+/**
+ * Computes AND applies this cycle's degraded budget to cachedUtilization /
+ * degradedConcurrencyCapValue in one call — every "meter down" branch in
+ * pollLoop/runQueueStarvationWatchdog needs the exact same
+ * compute-then-assign-both-fields pair, so it lives once here rather than
+ * being copy-pasted at each call site (where a future change to how the
+ * budget applies would otherwise have to be made N times).
+ */
+function applyDegradedBudget() {
+  const budget = computeDegradedBudget();
+  cachedUtilization = budget.utilization;
+  degradedConcurrencyCapValue = budget.concurrencyCap;
+  return budget;
+}
 
 /** Fetches latest usage from billing API. Throws on any error — callers handle it. */
 async function refreshNextReset() {
   const r = await billing.fetchUsage();
   if (r.kind !== 'ok') throw new Error(`usage fetch failed (${r.kind}): ${r.message ?? ''}`);
-  cachedNextReset = r.data?.usage?.five_hour?.resets_at ?? null;
-  cachedUtilization = r.data?.usage?.five_hour?.utilization ?? cachedUtilization;
+  const window = bindingWindow(r.data?.usage);
+  recordObservedReset(window.resets_at ?? null);
+  cachedUtilization = Number.isFinite(window.utilization) ? window.utilization : cachedUtilization;
   return cachedNextReset;
 }
 
@@ -2823,15 +2948,38 @@ function getNextResetCached() {
 /**
  * Pure: picks the reset to pause against for a rate-limited run (PRD 1118).
  * Prefers the BINDING window read off the run's own log — refreshNextReset()
- * only ever reports five_hour, which is the wrong clock when a
- * seven_day/seven_day_overage_included window is what actually 429'd
- * (five_hour can read 0% utilization at the very same moment). Falls back
- * to the billing-endpoint-derived reset only when the log yields nothing.
+ * only ever reports the binding window at POLL time, which can be a
+ * different clock than what actually 429'd this run (five_hour can read 0%
+ * utilization at the very same moment a seven_day window binds). Falls back
+ * to the billing-endpoint-derived reset only when the log yields nothing —
+ * and rejects EITHER source when it has already passed relative to `nowMs`
+ * (usageCircuit.isResetFresh): a stale reset must never arm a resume timer
+ * that already elapsed (that's the 30-second-nap bug computeEffectiveResumeAt
+ * below also guards against), so a stale value here returns null and lets
+ * the caller's 30-minute fallback take over instead.
  */
-function resolveRateLimitPauseReset(logPath, billingResetIso) {
+function resolveRateLimitPauseReset(logPath, billingResetIso, nowMs = Date.now()) {
   const logReset = resolveBindingRateLimitReset(logPath);
-  if (logReset != null) return new Date(logReset * 1000).toISOString();
-  return billingResetIso ?? null;
+  if (logReset != null) {
+    const iso = new Date(logReset * 1000).toISOString();
+    if (isResetFresh(iso, nowMs)) return iso;
+  }
+  if (billingResetIso && isResetFresh(billingResetIso, nowMs)) return billingResetIso;
+  return null;
+}
+
+/**
+ * Shared by both rate-limit pause sites (spawnJob's rateLimited branch and
+ * reapDeadRunningJobs): the billing-endpoint-derived fallback reset used
+ * when the run's own log yields no binding window. While the shared
+ * usageCircuit is OPEN, skip calling refreshNextReset() — it would just be
+ * another request against the endpoint the breaker just decided is down —
+ * and fall back to whatever was last cached instead (resolveRateLimitPauseReset
+ * itself still rejects that cached value if it has since gone stale).
+ */
+async function billingResetForPause() {
+  if (billing.usageCircuit.state() === 'open') return cachedNextReset;
+  return refreshNextReset().catch(() => cachedNextReset);
 }
 
 // ---------- health / poll state ----------
@@ -2850,6 +2998,20 @@ let pauseClearedManuallyAt = null;
 // not once per failure (57 failures must produce ONE opsErrorLog line, not 57).
 // Reset alongside consecutiveFailures everywhere that resets to 0.
 let failureStreakWarned = false;
+// ms timestamp the initial WARN fired this streak — anchors the periodic
+// escalation cadence below. Reset to null alongside failureStreakWarned.
+let failureStreakWarnedAt = null;
+// ms timestamp of the last periodic escalation (audit event + opsErrorLog
+// line) this streak. Reset to null alongside failureStreakWarned so a LATER
+// streak re-arms both the initial WARN and the escalation cadence.
+let lastEscalationAtMs = null;
+
+/** The failure-streak-WARN trio must always reset together — one helper, not 3 copies. */
+function resetFailureStreak() {
+  failureStreakWarned = false;
+  failureStreakWarnedAt = null;
+  lastEscalationAtMs = null;
+}
 // Ceiling on pollLoop's exponential poll backoff (both the 'transient'/'config'
 // branch and the 'meter_rate_limited' branch below share this cap — a single
 // constant so the two never drift to different ceilings).
@@ -2858,6 +3020,11 @@ const BACKOFF_MAX_MS = 480_000; // 8 minutes
 // jitter and becomes worth a human's attention. health.cjs imports this so the
 // WARN and the `npm run health` non-GREEN trip at the exact same count.
 const FAILURE_STREAK_WARN_THRESHOLD = 5;
+// How often a PERSISTING failure streak re-escalates (audit event +
+// opsErrorLog line) after the initial WARN, and the health.cjs YELLOW->RED
+// threshold for how long the usageCircuit has been open — one constant so
+// the log cadence and the health-color flip never drift apart.
+const FAILURE_STREAK_ESCALATION_MS = 30 * 60_000; // 30 minutes
 
 /** Pure: exponential backoff with a cap, shared by every pollLoop failure branch. Exported for unit testing. */
 function nextBackoffMs(prevBackoffMs) {
@@ -2874,19 +3041,59 @@ function shouldWarnFailureStreak(consecutiveFailures, alreadyWarned, threshold =
   return consecutiveFailures >= threshold && !alreadyWarned;
 }
 
-/** Emits the one-time opsErrorLog WARN for a failure streak crossing the threshold, if not already warned this streak. */
+/**
+ * Pure: does a PERSISTING failure streak warrant another escalation (audit
+ * event + opsErrorLog line) at `nowMs`? Exported for unit testing. Only
+ * relevant once the streak has already crossed `warnThreshold` (the initial
+ * WARN); `lastEscalatedAtMs` null means no escalation has fired yet this
+ * streak, so the first one is due immediately. Re-arms automatically once a
+ * streak clears (the caller resets `lastEscalatedAtMs` to null alongside
+ * `failureStreakWarned`), so a later independent streak escalates again.
+ */
+function shouldEscalateFailureStreak(consecutiveFailures, lastEscalatedAtMs, nowMs, thresholdMs = FAILURE_STREAK_ESCALATION_MS, warnThreshold = FAILURE_STREAK_WARN_THRESHOLD) {
+  if (consecutiveFailures < warnThreshold) return false;
+  if (!lastEscalatedAtMs) return true;
+  return nowMs - lastEscalatedAtMs >= thresholdMs;
+}
+
+/**
+ * Emits the one-time opsErrorLog WARN the moment a failure streak crosses
+ * the threshold, then — while that streak PERSISTS — re-escalates (audit
+ * event + another opsErrorLog line) every FAILURE_STREAK_ESCALATION_MS so a
+ * human watching only the audit log still sees a live incident, not just the
+ * single opening WARN from hours ago.
+ */
 function warnFailureStreakIfNeeded() {
-  if (!shouldWarnFailureStreak(consecutiveFailures, failureStreakWarned)) return;
-  failureStreakWarned = true;
-  try {
-    appendError({
-      cwd: DEFAULT_PROJECT_CWD,
-      scope: 'scheduler',
-      level: 'warn',
-      message: `usage/rate-limit poller has failed ${consecutiveFailures} consecutive times (kind=${lastFailureKind}, backoffMs=${backoffMs}) — see ${SCHEDULER_STATE_PATH}`,
-      meta: { consecutiveFailures, backoffMs, lastFailureKind },
-    });
-  } catch { /* durable logging must never break the poll loop */ }
+  const nowMs = Date.now();
+  if (shouldWarnFailureStreak(consecutiveFailures, failureStreakWarned)) {
+    failureStreakWarned = true;
+    failureStreakWarnedAt = nowMs;
+    lastEscalationAtMs = nowMs;
+    try {
+      appendError({
+        cwd: DEFAULT_PROJECT_CWD,
+        scope: 'scheduler',
+        level: 'warn',
+        message: `usage/rate-limit poller has failed ${consecutiveFailures} consecutive times (kind=${lastFailureKind}, backoffMs=${backoffMs}) — see ${SCHEDULER_STATE_PATH}`,
+        meta: { consecutiveFailures, backoffMs, lastFailureKind },
+      });
+    } catch { /* durable logging must never break the poll loop */ }
+    return;
+  }
+  if (failureStreakWarned && shouldEscalateFailureStreak(consecutiveFailures, lastEscalationAtMs, nowMs)) {
+    lastEscalationAtMs = nowMs;
+    const persistedMinutes = failureStreakWarnedAt ? Math.round((nowMs - failureStreakWarnedAt) / 60_000) : null;
+    try {
+      appendAuditEvent('usage_poller_failure_streak_persists', { consecutiveFailures, backoffMs, lastFailureKind, persistedMinutes });
+      appendError({
+        cwd: DEFAULT_PROJECT_CWD,
+        scope: 'scheduler',
+        level: 'warn',
+        message: `usage/rate-limit poller streak still failing after ${persistedMinutes}m (${consecutiveFailures} consecutive, kind=${lastFailureKind}, backoffMs=${backoffMs}) — see ${SCHEDULER_STATE_PATH}`,
+        meta: { consecutiveFailures, backoffMs, lastFailureKind, persistedMinutes },
+      });
+    } catch { /* durable logging must never break the poll loop */ }
+  }
 }
 // PRD 1119: consecutive-rapid-rate-limit hard-pause tracking, keyed per slug.
 // See isCooldownSuppressed/nextRapidRateLimitCount below for the pure rules.
@@ -3188,13 +3395,17 @@ function nextRapidRateLimitCount(prevCount, { rateLimited, durationMs }) {
 /**
  * Pure: decides the resumeAt actually armed for a pause. 'network' and
  * 'rate_limit' (PRD 1118) both get a bounded 30-minute fallback when no
- * explicit resumeAt is supplied — the live rate_limit failure mode is the
- * billing usage endpoint itself 429ing while the log yields no binding
- * window either, which used to leave an indefinite pause with no resume
- * timer at all (a queue that never comes back on its own).
+ * explicit resumeAt is supplied, OR when the supplied resumeAtIso has
+ * already passed (usageCircuit.isResetFresh) — a stale reset used to produce
+ * `Math.max(30_000, <negative>)` downstream in computeResumeDelay, a
+ * 30-SECOND nap instead of a real pause, spinning the queue right back into
+ * the same still-active rate limit. The live failure mode is the billing
+ * usage endpoint itself 429ing while the log yields no fresh binding window
+ * either, which used to leave an indefinite pause with no resume timer at
+ * all (a queue that never comes back on its own) — this covers both.
  */
 function computeEffectiveResumeAt(reason, resumeAtIso, nowMs = Date.now()) {
-  if (resumeAtIso) return resumeAtIso;
+  if (resumeAtIso && isResetFresh(resumeAtIso, nowMs)) return resumeAtIso;
   if (reason === 'network' || reason === 'rate_limit') {
     return new Date(nowMs + 30 * 60_000).toISOString();
   }
@@ -3286,7 +3497,7 @@ async function clearPause(source) {
     firstFailureAt = null;
     firstNon429FailureAt = null;
     lastFailureKind = null;
-    failureStreakWarned = false;
+    resetFailureStreak();
     persistSchedulerState();
   }
   if (wasPaused) await broadcast({ flush: true });
@@ -6330,8 +6541,13 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     }
 
     if (res.rateLimited) {
+      // The executor itself observed a 429 — open the shared circuit even if
+      // the billing poller has been reporting 'ok' all along (AC3: a
+      // different window can 429 the executor than the one binding the
+      // poller's own reads).
+      billing.usageCircuit.recordFailure('executor_429');
       const logPath = path.join(runDir, `${job.slug}.log`);
-      const billingResetIso = await refreshNextReset().catch(() => cachedNextReset);
+      const billingResetIso = await billingResetForPause();
       const resetIso = resolveRateLimitPauseReset(logPath, billingResetIso);
       const observedAt = dispatchStartedAtMs;
       const prevCount = consecutiveRapidRateLimitsBySlug.get(job.slug) || 0;
@@ -7317,7 +7533,14 @@ function tickQueue({ bypassLoadGate = false } = {}) {
     // to also carry a private `concurrencyCap` of 3 — the exact per-consumer
     // cap that sessionSlots.cjs was written to replace — which silently
     // ceilinged the queue at 3 while the pool the user configured said 5.
-    const freeSlots = sessionSlots.available();
+    // While the usage meter is degraded (degradedConcurrencyCapValue set by
+    // pollLoop — circuit open, or a poll otherwise failed), a picker-side
+    // hold narrows this SAME freeSlots figure instead of standing up a
+    // second pool: the row count admitted this tick simply can't exceed the
+    // degraded cap minus what's already running.
+    const freeSlots = degradedConcurrencyCapValue != null
+      ? Math.max(0, Math.min(sessionSlots.available(), degradedConcurrencyCapValue - runningSet.size))
+      : sessionSlots.available();
     const heldSlugs = await computeLaunchHolds(state);
     const satisfiedSlugsByCwd = await computeDepHistorySatisfaction(state);
     const { batch, reason: holdReason, holds } = pickNextBatch(state.jobs, runningSet, freeSlots, {
@@ -7776,9 +7999,12 @@ async function runQueueStarvationWatchdog(state, { now = Date.now(), thresholdMs
 
   // A never-populated utilization reading is itself one of the ways the
   // when-available path silently never fires (maybeLaunchWhenAvailable
-  // returns early on null). Treat unknown as safe here, exactly as the
-  // billing meter's own 429 fallback already does.
-  if (cachedUtilization === null || cachedUtilization === undefined) cachedUtilization = 0;
+  // returns early on null). Absence of information, not a green light: fall
+  // back to the same conservative degraded budget the poll loop itself uses
+  // rather than a blind cachedUtilization=0.
+  if (cachedUtilization === null || cachedUtilization === undefined) {
+    applyDegradedBudget();
+  }
   // The in-process cancelToken is only ever reset by runDueJobs() (force-tick
   // / run-now / resume-timer) — every other path that clears a pause
   // (clearPause(), the poll loop's own auto-recovery) leaves it untouched
@@ -8028,8 +8254,12 @@ async function reapDeadRunningJobs() {
     // the same still-active rate limit — the spin loop this PRD exists to
     // stop. Done once, outside mutate(), before finalizing any row below.
     if (dead.some((d) => d.outcome === 'rate_limited')) {
+      // Same rationale as spawnJob's own rateLimited branch: a dead-process
+      // reap that classifies as rate-limited is just as much an executor-
+      // observed 429 as a live one, and must open the same shared circuit.
+      billing.usageCircuit.recordFailure('executor_429');
       const triggering = dead.find((d) => d.outcome === 'rate_limited');
-      const billingResetIso = await refreshNextReset().catch(() => cachedNextReset);
+      const billingResetIso = await billingResetForPause();
       const resetIso = resolveRateLimitPauseReset(triggering.logPath, billingResetIso);
       const triggeringRow = triggering ? state.jobs.find((x) => x.slug === triggering.slug) : null;
       const observedAtMs = triggeringRow?.startedAt ? Date.parse(triggeringRow.startedAt) : null;
@@ -8347,14 +8577,21 @@ async function pollLoop() {
     // 404/time-out and eventually pause the queue on 'network' — treat usage as
     // wide-open and fire on pending + memory alone. (Blackrock-style machines.)
     if (!billing.usageMeterApplicable()) {
-      cachedUtilization = 0;
+      // Close the shared circuit if a PRIOR consumer-auth session left it
+      // open/half_open — this process has stopped polling the meter
+      // entirely, so nothing else will ever call recordSuccess() to clear
+      // it, and health.cjs would otherwise read a stale open circuit as
+      // YELLOW/RED forever even though nothing is actually degraded.
+      if (billing.usageCircuit.state() !== 'closed') billing.usageCircuit.recordSuccess({});
+      cachedUtilization = NO_METER_UTILIZATION;
+      degradedConcurrencyCapValue = null;
       consecutiveFailures = 0;
       backoffMs = 0;
       backoffNextAt = null;
       firstFailureAt = null;
       firstNon429FailureAt = null;
       lastFailureKind = null;
-      failureStreakWarned = false;
+      resetFailureStreak();
       lastPollAt = Date.now();
       lastPollOk = true;
       persistSchedulerState();
@@ -8370,18 +8607,40 @@ async function pollLoop() {
       return; // finally re-arms the timer
     }
 
+    // Shared breaker over the meter (AC1): while it is OPEN, no request is
+    // made except the half-open probe below (billing.fetchUsage() is only
+    // ever reached, further down, from the closed/half_open paths). "Meter
+    // down" reads as absence of information, not a green light — the
+    // conservative degraded budget stands in for both the utilization-
+    // threshold gate (maybeLaunchWhenAvailable) and the concurrency cap
+    // (tickQueue's freeSlots), never a blind cachedUtilization=0.
+    if (billing.usageCircuit.state() === 'open') {
+      applyDegradedBudget();
+      lastPollAt = Date.now();
+      lastPollOk = false;
+      warnFailureStreakIfNeeded();
+      persistSchedulerState();
+      const cur = await readQueue();
+      await maybeLaunchWhenAvailable(cur);
+      await broadcast();
+      return;
+    }
+
     const r = await billing.fetchUsage();
 
     if (r.kind === 'ok') {
-      cachedNextReset = r.data?.usage?.five_hour?.resets_at ?? cachedNextReset;
-      cachedUtilization = r.data?.usage?.five_hour?.utilization ?? cachedUtilization;
+      const window = bindingWindow(r.data?.usage);
+      recordObservedReset(window.resets_at ?? null);
+      cachedUtilization = Number.isFinite(window.utilization) ? window.utilization : cachedUtilization;
+      lastGoodUsagePayload = r.data?.usage ?? lastGoodUsagePayload;
+      degradedConcurrencyCapValue = null;
       consecutiveFailures = 0;
       backoffMs = 0;
       backoffNextAt = null;
       firstFailureAt = null;
       firstNon429FailureAt = null;
       lastFailureKind = null;
-      failureStreakWarned = false;
+      resetFailureStreak();
       lastPollAt = Date.now();
       lastPollOk = true;
       persistSchedulerState();
@@ -8397,14 +8656,14 @@ async function pollLoop() {
       await maybeLaunchWhenAvailable(cur);
       await broadcast();
     } else if (r.kind === 'meter_rate_limited') {
-      // Billing meter is itself being rate-limited. Treat as "utilization unknown but safe":
-      // fire available jobs anyway at utilization=0 rather than pausing the queue.
-      // Still back off the POLL cadence itself (same curve/cap as the transient
-      // branch) and persist state every cycle — without this, a sustained 429
-      // streak hammered the already-rate-limited endpoint every POLL_INTERVAL_MS
-      // forever AND never wrote lastPollAt/consecutiveFailures back to
-      // scheduler-state.json, so the sidecar froze stale while the loop kept
-      // failing silently underneath it (the 57-consecutive-failure incident).
+      // Billing meter is itself being rate-limited — absence of information,
+      // not a green light. Still back off the POLL cadence itself (same
+      // curve/cap as the transient branch) and persist state every cycle —
+      // without this, a sustained 429 streak hammered the already-rate-
+      // limited endpoint every POLL_INTERVAL_MS forever AND never wrote
+      // lastPollAt/consecutiveFailures back to scheduler-state.json, so the
+      // sidecar froze stale while the loop kept failing silently underneath
+      // it (the 57-consecutive-failure incident).
       lastPollAt = Date.now();
       lastPollOk = false;
       consecutiveFailures++;
@@ -8412,8 +8671,8 @@ async function pollLoop() {
       // Don't update firstNon429FailureAt — 429s don't count toward the 30-min network-pause threshold.
       backoffMs = nextBackoffMs(backoffMs);
       backoffNextAt = Date.now() + backoffMs;
-      cachedUtilization = 0; // assume safe; fire any pending work
-      console.log(`[scheduler] billing meter rate-limited (HTTP 429) — firing on heuristic (failure #${consecutiveFailures}); retry in ${backoffMs / 1000}s`);
+      applyDegradedBudget();
+      console.log(`[scheduler] billing meter rate-limited (HTTP 429) — firing on degraded budget (util=${cachedUtilization}%, cap=${degradedConcurrencyCapValue}) (failure #${consecutiveFailures}); retry in ${backoffMs / 1000}s`);
       warnFailureStreakIfNeeded();
       persistSchedulerState();
       const cur = await readQueue();
@@ -8453,13 +8712,12 @@ async function pollLoop() {
       // 'ok' and 'meter_rate_limited' branches used to reach
       // maybeLaunchWhenAvailable, so auth/transient failures left ready
       // pending work untouched until either the queue-starvation watchdog's
-      // 10-minute safety net fired or the poll itself recovered. Utilization
-      // is unknown during a failed poll, not unsafe — treated the same way
-      // the meter_rate_limited branch above already treats a 429 as safe to
-      // fire through. maybeLaunchWhenAvailable itself still honors an
-      // 'auth'/'network' pause (state.paused), so this is a no-op whenever
-      // setPaused() above actually engaged one.
-      if (cachedUtilization === null || cachedUtilization === undefined) cachedUtilization = 0;
+      // 10-minute safety net fired or the poll itself recovered. Absence of
+      // information, not a green light: fall back to the degraded budget
+      // rather than a blind cachedUtilization=0. maybeLaunchWhenAvailable
+      // itself still honors an 'auth'/'network' pause (state.paused), so
+      // this is a no-op whenever setPaused() above actually engaged one.
+      applyDegradedBudget();
       await maybeLaunchWhenAvailable(await readQueue());
       await broadcast();
     }
@@ -8478,7 +8736,7 @@ async function pollLoop() {
     // Same rationale as the auth/transient branch above: the outer catch
     // must not be a silent dispatch dead-end either.
     try {
-      if (cachedUtilization === null || cachedUtilization === undefined) cachedUtilization = 0;
+      applyDegradedBudget();
       await maybeLaunchWhenAvailable(await readQueue());
       await broadcast();
     } catch { /* best-effort — the poll loop must still re-arm below */ }
@@ -10683,6 +10941,15 @@ async function init() {
       nextReset: cachedNextReset,
       utilization: cachedUtilization,
       consecutiveFailures,
+      // AC4: state/consecutiveFailures/degraded-budget snapshot of the
+      // shared usage-meter breaker, so a human reading only the heartbeat
+      // log (no scheduler-state.json, no live UI) can see the meter's own
+      // health apart from the queue's.
+      usageMeter: {
+        state: billing.usageCircuit.state(),
+        consecutiveFailures,
+        degradedBudget: computeDegradedBudget(),
+      },
     });
   }, 60_000);
   if (heartbeatInterval.unref) heartbeatInterval.unref();
@@ -11326,8 +11593,11 @@ module.exports = {
   SCHEDULER_STATE_PATH,
   BACKOFF_MAX_MS,
   FAILURE_STREAK_WARN_THRESHOLD,
+  FAILURE_STREAK_ESCALATION_MS,
   nextBackoffMs,
   shouldWarnFailureStreak,
+  shouldEscalateFailureStreak,
+  computeDegradedBudget,
   healRefusalReason,
   writeQueue,
   reconcile,
@@ -11495,6 +11765,7 @@ module.exports = {
   RUNS_DIR,
   pickRunDir,
   resolveRateLimitPauseReset,
+  billingResetForPause,
   computeEffectiveResumeAt,
   computeResumeDelay,
   FOREIGN_WIP_BLOCK_STREAK_LIMIT,

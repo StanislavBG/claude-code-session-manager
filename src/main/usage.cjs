@@ -324,5 +324,10 @@ module.exports = {
   parseRetryAfterMs,
   usageMeterApplicable,
   readClaudeSettingsAuth,
+  // The single shared breaker instance — scheduler.cjs's pollLoop (and every
+  // other consumer) reads THIS object's state()/openedAt()/
+  // getConsecutiveFailures() rather than deriving its own, so a failure
+  // recorded via any path (poller, executor 429) opens the same circuit.
+  usageCircuit: circuit,
   __usageCircuitForTest: circuit,
 };

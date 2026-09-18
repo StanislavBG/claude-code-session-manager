@@ -16,6 +16,16 @@
  * whether that pass ends in an actual job launch (see classifyQueueStarvation's
  * header for why this must be distinct from `lastRunAt`).
  *
+ * Usage-meter circuit PRD update: pollLoop no longer fires blind at a hard-
+ * coded cachedUtilization=0 on failure — it falls back to
+ * usageCircuit.degradedBudget(), which carries forward the last known-good
+ * BINDING window's utilization (or conservatively assumes 100/no-headroom
+ * when there's no known-good reading yet at all). So each test below first
+ * drives ONE successful ('ok') poll — with the queue still empty, so it
+ * can't itself cause a dispatch — to seed that known-good low-utilization
+ * reading, THEN seeds the pending job and drives the failure. This proves
+ * dispatch proceeds under the CARRIED-FORWARD degraded budget, not a blind 0.
+ *
  * No existing test in this repo mocks a module import (see
  * pty-epic-worktree-spawn-cwd.test.cjs's header) — this monkey-patches
  * usage.cjs's cached module object directly instead, same pattern.
@@ -110,11 +120,23 @@ async function flushPendingTick() {
   await scheduler.tickQueue();
 }
 
-test('pollLoop still attempts a dispatch after a transient billing failure', async () => {
+test('pollLoop still attempts a dispatch after a transient billing failure, using the degraded budget (not utilization 0)', async () => {
+  // Seed a known-good low-utilization reading via an 'ok' poll first.
+  process.env.SM_E2E = '1';
+  process.env.SM_MOCK_BILLING_KIND = 'ok';
+  await scheduler.pollLoop();
+  // A prior test's leftover project (a REAL, still-registered project cwd —
+  // readQueue() merges every such cwd) can still hold its own permanently-
+  // pending job, so this seed poll's own maybeLaunchWhenAvailable may itself
+  // spawn a fire-and-forget tick; drain it before resetting/reseeding so
+  // that stray tick's async mutate() can't land AFTER (and clobber) the
+  // reset below.
+  await flushPendingTick();
+  await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
+
   await seedOnePendingJob();
   expect(await lastDispatchAttemptAt()).toBeNull();
 
-  process.env.SM_E2E = '1';
   process.env.SM_MOCK_BILLING_KIND = 'transient';
   await scheduler.pollLoop();
   await flushPendingTick();
@@ -122,10 +144,18 @@ test('pollLoop still attempts a dispatch after a transient billing failure', asy
   expect(await lastDispatchAttemptAt()).not.toBeNull();
 });
 
-test('pollLoop still attempts a dispatch after the billing poll throws', async () => {
+test('pollLoop still attempts a dispatch after the billing poll throws, using the degraded budget (not utilization 0)', async () => {
+  process.env.SM_E2E = '1';
+  process.env.SM_MOCK_BILLING_KIND = 'ok';
+  await scheduler.pollLoop(); // seed a known-good low-utilization reading
+  await flushPendingTick();
+  await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
+
   await seedOnePendingJob();
   expect(await lastDispatchAttemptAt()).toBeNull();
 
+  delete process.env.SM_E2E;
+  delete process.env.SM_MOCK_BILLING_KIND;
   billing.fetchUsage = async () => { throw new Error('simulated IPC transport failure'); };
   await scheduler.pollLoop();
   await flushPendingTick();

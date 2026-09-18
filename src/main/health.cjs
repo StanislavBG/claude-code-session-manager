@@ -638,6 +638,9 @@ async function check() {
   try {
     queueState = queueStore.readMergedSync();
     if (queueState.unreadable) throw new Error(queueState.unreadable);
+    for (const u of queueState.unreadableCwds ?? []) {
+      status.issues.push(`Scheduler queue shard quarantined for ${u.cwd}: ${u.error} — that project is skipped until it reads clean`);
+    }
     // A torn scheduler-machine.json is now recovered rather than halting
     // dispatch (queueStore.cjs's findLongestValidJsonPrefix) — but recovery
     // happening at all means the file failed to parse moments ago, which is
@@ -681,7 +684,8 @@ async function check() {
       .map(([cwd]) => cwd);
 
     status.components.scheduler_queue = {
-      ok: !liveness.stalled && projectsPastThreshold.length === 0 && !queueState.machineStateRecovered,
+      ok: !liveness.stalled && projectsPastThreshold.length === 0 && !queueState.machineStateRecovered
+        && (queueState.unreadableCwds ?? []).length === 0,
       path: queuePath,
       jobs: Object.keys(queueState.jobs || {}).length,
       running: runningCount,
@@ -692,6 +696,7 @@ async function check() {
       perProjectStall,
       tickLiveness: liveness.reason,
       machineStateRecovered: queueState.machineStateRecovered ?? false,
+      quarantinedCwds: (queueState.unreadableCwds ?? []).map((u) => u.cwd),
       machineStateRecoveryMode: queueState.machineStateRecoveryMode ?? null,
       // Informational only (PRD 1085): current 1-min loadavg per core vs the
       // launch-gate threshold, so a "nothing is launching" report can be

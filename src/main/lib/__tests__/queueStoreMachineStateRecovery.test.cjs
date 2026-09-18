@@ -121,3 +121,70 @@ test('readMerged (async) recovers the same real fixture', async () => {
   expect(state.machineStateRecoveryMode).toBe('prefix');
   expect(state.lastRunAt).toBe('2026-09-11T10:00:14.441Z');
 });
+
+// ---------- per-cwd shard quarantine (never recover, never write) ----------
+
+function makeProject(name, jobs) {
+  const cwd = path.join(tmpHome, 'Projects', name);
+  const stateDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  const file = path.join(stateDir, 'queue.json');
+  if (jobs) fs.writeFileSync(file, JSON.stringify({ jobs }));
+  const slugDir = path.join(tmpHome, '.claude', 'projects', `slug-${name}`);
+  fs.mkdirSync(slugDir, { recursive: true });
+  fs.writeFileSync(path.join(slugDir, 't.jsonl'), JSON.stringify({ cwd }) + '\n');
+  return { cwd, file };
+}
+
+const TORN = '{"jobs":[{"slug":"a","status":"running"}]} {"jobs":[{"slug":"a","stat';
+const goodJob = (slug, cwd) => ({
+  slug, status: 'pending', prdPath: `/x/${slug}.md`, cwd, scheduledFor: null, createdAt: new Date().toISOString(),
+});
+
+test('a torn shard is quarantined per cwd; the machine-level `unreadable` stays unset and the sibling shard still loads', () => {
+  const good = makeProject('good', [goodJob('g1', path.join(tmpHome, 'Projects', 'good'))]);
+  const torn = makeProject('torn');
+  fs.writeFileSync(torn.file, TORN);
+  const opts = { projectsDir: path.join(tmpHome, '.claude', 'projects') };
+
+  const state = queueStore.readMergedSync(opts);
+
+  expect(state.unreadable).toBeUndefined();
+  expect(state.unreadableCwds).toHaveLength(1);
+  expect(state.unreadableCwds[0]).toMatchObject({ cwd: torn.cwd, file: torn.file });
+  expect(typeof state.unreadableCwds[0].error).toBe('string');
+  expect(state.jobs.map((j) => j.slug)).toEqual(['g1']);
+  expect(state.sourceCwds).not.toContain(torn.cwd);
+});
+
+test('readMerged (async) quarantines the same way', async () => {
+  const torn = makeProject('torn2');
+  fs.writeFileSync(torn.file, TORN);
+  const state = await queueStore.readMerged({ projectsDir: path.join(tmpHome, '.claude', 'projects') });
+  expect(state.unreadable).toBeUndefined();
+  expect(state.unreadableCwds.map((u) => u.cwd)).toEqual([torn.cwd]);
+});
+
+test('writeSplit leaves a torn shard byte-identical even when merged rows carry its cwd, and still writes healthy shards', async () => {
+  const good = makeProject('good3', [goodJob('g1', path.join(tmpHome, 'Projects', 'good3'))]);
+  const torn = makeProject('torn3');
+  fs.writeFileSync(torn.file, TORN);
+  const before = fs.readFileSync(torn.file);
+  const opts = { projectsDir: path.join(tmpHome, '.claude', 'projects') };
+
+  const state = await queueStore.readMerged(opts);
+  state.jobs.push(goodJob('intruder', torn.cwd)); // a row that claims the torn cwd
+  state.jobs[0].status = 'running';
+  await queueStore.writeSplit(state, good.cwd);
+
+  expect(fs.readFileSync(torn.file).equals(before)).toBe(true);
+  const written = JSON.parse(fs.readFileSync(good.file, 'utf8'));
+  expect(written.jobs.map((j) => j.status)).toEqual(['running']);
+});
+
+test('writeSplit never re-creates a quarantined shard that has no file at all', async () => {
+  const ghost = makeProject('ghost');
+  const state = { config: {}, jobs: [goodJob('x', ghost.cwd)], sourceCwds: [], unreadableCwds: [{ cwd: ghost.cwd, file: ghost.file, error: 'x' }] };
+  await queueStore.writeSplit(state, ghost.cwd);
+  expect(fs.existsSync(ghost.file)).toBe(false);
+});

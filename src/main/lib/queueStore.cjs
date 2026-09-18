@@ -442,15 +442,17 @@ function shapeJobs(raw, file) {
 
 /**
  * readMergedSync(opts?) → { config, jobs, scheduledFor, lastRunAt, paused,
- * unreadable?, unreadablePath?, sourceCwds }.
+ * unreadable?, unreadablePath?, unreadableCwds, sourceCwds }.
  *
- * `unreadable` mirrors the old single-file semantics: ANY source file that
- * exists but fails to parse halts scheduling (never treat a project's queue
- * as empty because it read corrupt). `sourceCwds` records every project file
- * consulted so writeSplit can persist "this project now has zero jobs".
+ * `unreadable` is reserved for the machine-runtime file alone (a machine-wide
+ * halt). A project shard that exists but fails to read/parse is quarantined
+ * per cwd in `unreadableCwds: [{cwd, file, error}]` — other projects keep
+ * dispatching, and the torn shard is never treated as empty, recovered, or
+ * written. `sourceCwds` records every healthy project file consulted so
+ * writeSplit can persist "this project now has zero jobs".
  */
 function readMergedSync(opts) {
-  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, lastDispatchAttemptAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [] };
+  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, lastDispatchAttemptAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
   const sourceCwds = [];
   const machine = loadMachineStateSync();
   if (machine.shaped) {
@@ -473,8 +475,9 @@ function readMergedSync(opts) {
       sourceCwds.push(cwd);
     } catch (e) {
       if (e?.code === 'ENOENT') { sourceCwds.push(cwd); continue; }
-      out.unreadable = out.unreadable || `project queue unreadable (${file}): ${e?.message}`;
-      out.unreadablePath = out.unreadablePath || file;
+      // Quarantine this ONE shard; never recover or rewrite it (a job shard is a
+      // ledger — a prefix could time-travel a running row back to pending).
+      out.unreadableCwds.push({ cwd, file, error: e?.message ?? String(e) });
     }
   }
   defineSources(out, sourceCwds);
@@ -483,7 +486,7 @@ function readMergedSync(opts) {
 
 /** Async twin of readMergedSync for IPC hot paths. */
 async function readMerged(opts) {
-  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, lastDispatchAttemptAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [] };
+  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, lastDispatchAttemptAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
   const sourceCwds = [];
   const machine = await loadMachineState();
   if (machine.shaped) {
@@ -506,8 +509,9 @@ async function readMerged(opts) {
       sourceCwds.push(cwd);
     } catch (e) {
       if (e?.code === 'ENOENT') { sourceCwds.push(cwd); continue; }
-      out.unreadable = out.unreadable || `project queue unreadable (${file}): ${e?.message}`;
-      out.unreadablePath = out.unreadablePath || file;
+      // Quarantine this ONE shard; never recover or rewrite it (a job shard is a
+      // ledger — a prefix could time-travel a running row back to pending).
+      out.unreadableCwds.push({ cwd, file, error: e?.message ?? String(e) });
     }
   }
   defineSources(out, sourceCwds);
@@ -541,11 +545,14 @@ async function writeSplit(state, defaultCwd) {
     launchMitigations: state.launchMitigations ?? {},
   });
 
+  // A quarantined shard is left byte-identical: never re-created or clobbered,
+  // even if merged rows carry that cwd.
+  const quarantined = new Set((state.unreadableCwds ?? []).map((u) => u.cwd));
   const byCwd = new Map();
-  for (const cwd of state.sourceCwds ?? []) byCwd.set(cwd, []);
+  for (const cwd of state.sourceCwds ?? []) if (!quarantined.has(cwd)) byCwd.set(cwd, []);
   for (const job of state.jobs ?? []) {
     const cwd = job.cwd || defaultCwd;
-    if (!cwd) continue; // nowhere to put it; job is dropped from persistence rather than crashing
+    if (!cwd || quarantined.has(cwd)) continue; // nowhere to put it; job is dropped from persistence rather than crashing
     if (!byCwd.has(cwd)) byCwd.set(cwd, []);
     byCwd.get(cwd).push(job);
   }

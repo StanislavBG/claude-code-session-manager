@@ -1330,8 +1330,9 @@ function ensureDirs() {
  * queue row yet at that point, so it is never in LIVE_JOB_STATUSES and this
  * sweep archives it before reconcile can ever turn it into a pending job.
  */
-async function consolidateAllFlatPrds(cwds) {
+async function consolidateAllFlatPrds(cwds, skipCwds) {
   for (const cwd of cwds) {
+    if (skipCwds?.has(cwd)) continue; // torn shard: its PRDs are not ours to touch this pass
     try {
       const c = await consolidateFlatPrds(cwd);
       if (c.moved > 0) {
@@ -2038,6 +2039,22 @@ function findStrandedInvestigations(jobs, now, maxMs, isAlive = claudePidAlive) 
 // the .bak-* snapshots.
 const quarantinedPaths = new Set();
 function flagUnreadable(state) {
+  // Per-shard quarantine (queueStore.unreadableCwds): snapshot each torn shard
+  // once and name it, but never halt — other projects keep dispatching.
+  for (const u of state.unreadableCwds ?? []) {
+    if (!quarantinedPaths.has(u.file)) {
+      quarantinedPaths.add(u.file);
+      try {
+        fs.copyFileSync(u.file, `${u.file}.corrupt-${Date.now()}`);
+      } catch { /* best-effort: the read already failed, the copy may too */ }
+      console.error(`[scheduler] project queue shard quarantined (${u.cwd}): ${u.error}`);
+      logs.writeLine({
+        level: 'error', scope: 'scheduler',
+        message: `project queue shard unreadable — ${u.cwd} is quarantined, other projects keep dispatching`,
+        meta: { cwd: u.cwd, path: u.file, error: u.error },
+      });
+    }
+  }
   if (!state.unreadable) return state;
   if (state.unreadablePath && !quarantinedPaths.has(state.unreadablePath)) {
     quarantinedPaths.add(state.unreadablePath);
@@ -2190,11 +2207,23 @@ const parsePrd = prdParser.parsePrd;
 // one — acceptable: PRD counts per project are bounded (hundreds, not
 // millions), and correctness across multiple project dirs matters more than
 // preserving the single-dir cache's steady-state zero-read fast path.
-async function listPrdFiles() {
+async function listPrdFiles(skipCwds) {
   ensureDirs();
   const dirs = candidatePrdsDirs();
   const perDir = await Promise.all(dirs.map((dir) => prdParser.listPrdFiles(dir)));
-  return { files: perDir.flat().sort(), dirCount: dirs.length };
+  let files = perDir.flat();
+  // A quarantined project has no job rows this pass; scanning its PRDs would
+  // mint fresh `pending` rows for work that may already be running.
+  if (skipCwds && skipCwds.size > 0) {
+    const prefixes = [...skipCwds].map((c) => c + path.sep);
+    files = files.filter((f) => !prefixes.some((p) => f.startsWith(p)));
+  }
+  return { files: files.sort(), dirCount: dirs.length };
+}
+
+/** Set of cwds whose shard is quarantined in this merged read. */
+function quarantinedCwdSet(state) {
+  return new Set((state?.unreadableCwds ?? []).map((u) => u.cwd));
 }
 
 /**
@@ -2375,11 +2404,12 @@ async function reconcile(state) {
   // has no queue row yet, so it is never "live" and gets archived here
   // instead of ever reaching the onDisk scan below.
   let phaseStartMs = Date.now();
-  await consolidateAllFlatPrds(allProjectCwds());
+  const skipCwds = quarantinedCwdSet(state);
+  await consolidateAllFlatPrds(allProjectCwds(), skipCwds);
   phaseMs.flatPrdSweep = Date.now() - phaseStartMs;
 
   phaseStartMs = Date.now();
-  const { files, dirCount } = await listPrdFiles();
+  const { files, dirCount } = await listPrdFiles(skipCwds);
   phaseMs.prdDirResolve = Date.now() - phaseStartMs;
 
   phaseStartMs = Date.now();
@@ -8340,6 +8370,10 @@ async function reapDeadRunningJobs() {
     // status:"running" with no slug left in runningSet to trigger reconciliation.
     // queue.json is the source of truth for which jobs are actually running.
     const state = await readQueue();
+    // A quarantined shard's rows never loaded; the filter is defence in depth
+    // so a reap can never terminalize a row of a project we cannot persist.
+    const reapSkip = quarantinedCwdSet(state);
+    if (reapSkip.size > 0) state.jobs = state.jobs.filter((j) => !reapSkip.has(j.cwd));
     // Shared by the log-evidence injections below and the reapable-processing
     // loop further down — same `j.runId` → run log path formula either way.
     const logPathForJob = (j) => (j?.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null);
@@ -11111,6 +11145,7 @@ async function init() {
       counts,
       stall: { stalled: stall.stalled, total: stall.total },
       paused: s.paused ? { reason: s.paused.reason, resumeAt: s.paused.resumeAt } : null,
+      quarantinedCwds: (s.unreadableCwds ?? []).map((u) => u.cwd),
       nextReset: cachedNextReset,
       utilization: cachedUtilization,
       consecutiveFailures,

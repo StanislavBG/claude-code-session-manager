@@ -3,6 +3,10 @@ dist
 dist-electron
 release
 *.log
+# Tracked deliberately: a real historical scheduler run log, kept as a test
+# fixture (runVerify-landed-commit-outranks.test.cjs) so the 1218-fo-01
+# false-positive is replayed byte-for-byte, not reconstructed from memory.
+!src/main/__tests__/fixtures/*.log
 .DS_Store
 e2e/.cache
 test-results

@@ -6419,6 +6419,8 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
         allJobs: stateForDeps.jobs,
         committedDuringRun,
         priorLandedCommit,
+        jobLandedCommitThisRun,
+        exitCode: res.exitCode,
       }).catch((e) => ({
         verdict: 'verify_unavailable',
         reason: `verifier threw: ${e?.message ?? String(e)}`,
@@ -9496,6 +9498,13 @@ async function reverifyNeedsReview() {
         committedDuringRun,
         allowPreSentinelHeal: true,
         priorLandedCommit,
+        // job.landedCommit is THIS row's own last-run attribution (stamped by
+        // spawnJob's finalize, survives resetJobFields) — the same
+        // ground-truth-outranks-heuristics evidence spawnJob passes live,
+        // just read back post-hoc since there is no in-flight guardHeadBefore/
+        // headAtExit pair to recompute for an already-terminal row.
+        jobLandedCommitThisRun: job.landedCommit ?? null,
+        exitCode: job.exitCode ?? null,
       });
     } catch { leftForReview.push({ slug: job.slug, reason: 'verifyRun threw' }); continue; }
     const refusal = healRefusalReason(job, v, committedDuringRun);

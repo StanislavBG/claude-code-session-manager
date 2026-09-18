@@ -808,9 +808,30 @@ function allDeliverablesAlreadyTracked({ cwd, paths, execImpl = execFileSync, ti
  *                                            same slug landed, if any — supplied by the
  *                                            caller (scheduler.cjs). Used by the
  *                                            pass_no_commit_prior_run_verified exemption.
+ * @param {string|null} [params.jobLandedCommitThisRun] The commit SHA THIS run's own
+ *                                            guard cwd HEAD advanced to (spawnJob's
+ *                                            `headAtExit` when it differs from
+ *                                            `guardHeadBefore`), or the equivalent
+ *                                            already-persisted `job.landedCommit` when
+ *                                            re-verifying a stale needs_review row. This
+ *                                            is a HEAD delta observed for THIS job's own
+ *                                            dispatch — strictly stronger attribution than
+ *                                            `committedDuringRun`'s repo-wide window scan —
+ *                                            and, unlike the now-deleted `sm-job/<slug>`
+ *                                            branch tip, it survives `cleanupWorktree`.
+ *                                            Used by the ground-truth-outranks-heuristics
+ *                                            rule below. Default null for back-compat.
+ * @param {number|null} [params.exitCode]     The run's process exit code. The
+ *                                            ground-truth-outranks-heuristics rule only
+ *                                            ever applies when this is exactly 0 — default
+ *                                            null so callers that don't pass it keep
+ *                                            today's behavior byte-for-byte.
  * @returns {Promise<{verdict:string, reason:string, downgradeTo:string|null}>}
  */
-async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedDuringRun = false, allowPreSentinelHeal = false, ghExecImpl, priorLandedCommit = null }) {
+async function verifyRun({
+  runDir, prdPath, queueEntry, allJobs = [], committedDuringRun = false, allowPreSentinelHeal = false,
+  ghExecImpl, priorLandedCommit = null, jobLandedCommitThisRun = null, exitCode = null,
+}) {
   const { slug } = queueEntry;
   const logPath = path.join(runDir, `${slug}.log`);
   const verdictsPath = path.join(runDir, `${slug}.verdicts.json`);
@@ -865,9 +886,22 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
     // gitHead()/committedInWindow() both fail closed there. In that case
     // ONLY, fall back to the harness-emitted commit evidence in the
     // transcript, which git itself produced and the model cannot fabricate.
+    //
+    // jobLandedCommitThisRun (spawnJob's own guardHeadBefore/headAtExit delta,
+    // or the equivalent already-persisted job.landedCommit on a re-verify
+    // pass) is folded into the SAME commitEvidence signal used everywhere in
+    // this function — a HEAD delta observed for THIS job's own dispatch is at
+    // least as strong as the repo-wide committedDuringRun window scan, so
+    // every exemption below that already trusts commitEvidence (no_verdict_
+    // sentinel, pass_no_commit, the PASS+commitEvidence sentinel override)
+    // should trust this evidence too, not just the new ground-truth rule.
     const cwdIsGitRepo = isGitRepo(queueEntry?.cwd);
-    const commitEvidence = committedDuringRun || (!cwdIsGitRepo && transcriptCommitLanded);
-    const commitEvidenceSource = (!committedDuringRun && commitEvidence) ? 'transcript' : null;
+    const commitEvidence = committedDuringRun || Boolean(jobLandedCommitThisRun) || (!cwdIsGitRepo && transcriptCommitLanded);
+    let commitEvidenceSource = null;
+    if (!committedDuringRun) {
+      if (jobLandedCommitThisRun) commitEvidenceSource = 'jobLandedCommitThisRun';
+      else if (commitEvidence) commitEvidenceSource = 'transcript';
+    }
 
     // ── 3. HALT detection ─────────────────────────────────────────────────
     // Primary: check the final `{"type":"result"}` event's `result` text.
@@ -990,6 +1024,38 @@ async function verifyRun({ runDir, prdPath, queueEntry, allJobs = [], committedD
 
     // Scan for the SCHEDULER_VERDICT sentinel emitted by the finish protocol.
     const sentinel = scanSentinel(resultEvent, events);
+
+    // Ground truth outranks heuristics: an exit-0 run that landed a commit
+    // ATTRIBUTABLE TO THIS RUN (spawnJob's own guardHeadBefore/headAtExit
+    // delta, or the repo-wide committedDuringRun window scan) and never
+    // printed an explicit SCHEDULER_VERDICT: FAIL demotes every
+    // transcript_errors/verify_unavailable hit from `issues` to `annotations`
+    // — a tool error the agent already recovered from three calls later, or
+    // an environment probe, says nothing once the work is materially proven
+    // to have landed. Deliberately narrower than the sentinel-override below:
+    // it needs no PASS claim at all, only the ABSENCE of an explicit FAIL, so
+    // it also catches the majority no-sentinel-at-all park class that the
+    // PASS+commitEvidence override (further below) can never reach. Never
+    // demotes pass_no_commit/no_verdict_sentinel/abandoned_background_task —
+    // those are added below this point and are about the ABSENCE of a
+    // sentinel/commit, which this same evidence does not resolve.
+    // (Incident: 1218-fo-01 — a `git apply` "patch does not apply" tool error
+    // at event 179/209 was retried and succeeded 3 events later, the run
+    // landed commit d1edf15, and the row was parked needs_review anyway,
+    // spawning a $3.74 fix-plan investigation into work that needed no fix.)
+    const groundTruthOutranksHeuristics = exitCode === 0 && commitEvidence && sentinel !== 'fail';
+    if (groundTruthOutranksHeuristics) {
+      for (let k = issues.length - 1; k >= 0; k--) {
+        if (issues[k].verdict === 'transcript_errors' || issues[k].verdict === 'verify_unavailable') {
+          annotations.push({
+            verdict: issues[k].verdict,
+            reason: `${issues[k].reason} (demoted: exit 0 + commit landed this run outranks transcript heuristics)`,
+          });
+          issues.splice(k, 1);
+        }
+      }
+    }
+
     const sentinelFields = sentinel ? { sentinel } : {};
     const extras = (annotations.length || sentinel)
       ? { ...(annotations.length ? { annotations } : {}), ...sentinelFields }

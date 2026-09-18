@@ -83,6 +83,7 @@ const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require(
 const { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan } = require('./lib/fixPlanSlug.cjs');
 const { landedSinceRun, landedOnMainSince } = require('./lib/landedSinceRun.cjs');
 const { declaredPathsForPrd } = require('./lib/prdDeclaredPaths.cjs');
+const { identity: procIdentityOf, isDifferentProcess } = require('./lib/procIdentity.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated, SCHEDULE_SLUG_RE } = require('./ipcSchemas.cjs');
 const { readBody, sendJson } = require('./lib/localAdminHttp.cjs');
@@ -2187,6 +2188,13 @@ async function allocateParallelGroup(cwd) {
  *   - PID-recycling: between app death and this call, another process may have
  *     reused the PID. We read /proc/<pid>/cmdline (Linux) or `ps -p` (macOS)
  *     and only SIGTERM if the cmdline starts with the claude bin path.
+ *   - recordedIdentity (optional): when the caller has a COMPLETE prior
+ *     procIdentity for this pid (startTicks + cmdline), it is used only as a
+ *     VETO — if it provably differs from the pid's live identity right now,
+ *     the pid was recycled and the kill is refused ('mismatch') even before
+ *     the cmdline heuristic below runs. No recorded identity (today's only
+ *     case — job.runtime carries no identity yet) falls through unchanged to
+ *     the existing /\bclaude\b/ + `ps -p` heuristics.
  *   - Detached process group: jobs are spawned with detached:true so we kill
  *     -pid (the group). If the group leader is already gone, that fails
  *     silently and we fall back to single-pid kill.
@@ -2194,12 +2202,17 @@ async function allocateParallelGroup(cwd) {
  *     scheduled via setTimeout to clean up any process ignoring SIGTERM.
  *
  * Returns: 'killed' (cmdline matched + signal sent), 'gone' (pid not alive),
- *          'mismatch' (pid alive but cmdline doesn't look like claude),
+ *          'mismatch' (pid alive but cmdline doesn't look like claude, or a
+ *          complete recorded identity proves the pid was recycled),
  *          'unknown' (couldn't read cmdline — leave the pid alone).
  */
-function killOrphanClaudePid(pid) {
+function killOrphanClaudePid(pid, recordedIdentity = null) {
   if (!pid || typeof pid !== 'number' || pid <= 1) return 'gone';
   try { process.kill(pid, 0); } catch { return 'gone'; }
+  if (recordedIdentity && recordedIdentity.complete
+    && isDifferentProcess(recordedIdentity, procIdentityOf(pid))) {
+    return 'mismatch';
+  }
   let cmdline = '';
   try {
     cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');

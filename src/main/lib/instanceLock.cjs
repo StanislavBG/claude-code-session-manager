@@ -28,6 +28,8 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { identity, isDifferentProcess } = require('./procIdentity.cjs');
+const { appendAuditEvent } = require('./auditLog.cjs');
 
 // Env override is for unit tests only (isolates the lock from the real
 // ~/.claude of the machine running the suite).
@@ -58,7 +60,11 @@ function readLock() {
 }
 
 function writeLockExclusive() {
-  const body = JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() });
+  const body = JSON.stringify({
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    identity: identity(process.pid),
+  });
   fs.mkdirSync(path.dirname(lockPath()), { recursive: true });
   // 'wx' = atomic create-or-fail — two racing instances cannot both win.
   fs.writeFileSync(lockPath(), body, { flag: 'wx', mode: 0o600 });
@@ -67,14 +73,35 @@ function writeLockExclusive() {
 /**
  * Try to become the machine's scheduler owner.
  * Returns { owner: true } or { owner: false, holderPid } — never throws.
+ *
+ * A holder pid that is alive is normally respected — but if the lock body
+ * carries a COMPLETE recorded identity that provably differs from the live
+ * process now holding that pid (procIdentity.isDifferentProcess), the pid
+ * was recycled after a hard crash: today's bare pidAlive() check would pin
+ * ownership on that unrelated live process forever. That case is treated as
+ * stale and the lock is broken (audited as `stale_lock_broken`). A missing
+ * identity (legacy lock body, or an unreadable /proc on either side) is
+ * fail-closed to "not different" — i.e. today's pid-only behaviour.
  */
 function acquireSchedulerOwnership() {
   for (let attempt = 0; attempt < 2; attempt++) {
     const existing = readLock();
     if (existing && existing.pid !== process.pid && pidAlive(existing.pid)) {
-      return { owner: false, holderPid: existing.pid };
+      const liveIdentity = identity(existing.pid);
+      if (!isDifferentProcess(existing.identity, liveIdentity)) {
+        return { owner: false, holderPid: existing.pid };
+      }
+      appendAuditEvent('stale_lock_broken', {
+        path: lockPath(),
+        recordedPid: existing.pid,
+        recordedStartedAt: existing.startedAt ?? null,
+        recordedIdentity: existing.identity ?? null,
+        liveIdentity,
+      });
     }
-    // Missing, unreadable, our own, or stale (holder pid dead) — take it.
+    // Missing, unreadable, our own, stale (holder pid dead), or a recorded
+    // identity proven different from the live process at that recycled pid
+    // — take it.
     try {
       if (existing || fs.existsSync(lockPath())) fs.unlinkSync(lockPath());
     } catch { /* raced with another breaker — retry loop below settles it */ }

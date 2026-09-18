@@ -1443,6 +1443,13 @@ function runShutdownCleanup() {
   // Mark a clean exit so the next boot can distinguish a graceful quit from an
   // OOM-kill / native crash (which leaves the sentinel `open`).
   crashDiagnostics.markCleanShutdown();
+  // Release scheduler ownership on every teardown path, not just before-quit
+  // — the app.exit() sites (in-app reboot, dist-missing abort) bypass
+  // before-quit entirely and previously left a stale lock behind (fail-closed
+  // proc-identity recovery covers a hard crash, but a clean app.exit() should
+  // never need it). Pid-scoped and idempotent, so a redundant call from a
+  // later before-quit/will-quit firing is a safe no-op.
+  releaseSchedulerOwnership();
   // PRD F1 v2 §IPC plumbing: must unregisterAll on will-quit.
   try { globalShortcut.unregisterAll(); } catch { /* */ }
   voiceHotkey.disposeOnQuit();

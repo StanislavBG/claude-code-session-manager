@@ -138,7 +138,7 @@ const queueOps = require('./queueOps.cjs');
 // Plain Node module, no Electron dependency; queuePath/prdsDir defaults already
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
-const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath } = require('./lib/prdLocations.cjs');
+const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduleJobTransitions.cjs');
@@ -2334,37 +2334,15 @@ async function reconcile(state) {
 
   phaseStartMs = Date.now();
   const onDisk = new Map();
-  // Slugs derive from title text with no cwd salt, so two different projects
-  // can legitimately queue an identically-slugged PRD — onDisk alone can
-  // only hold ONE parsed PRD per slug (last-file-wins), which would silently
-  // hand an EXISTING row the wrong project's PRD (or none at all) when two
-  // projects collide on a slug. This side index lets the two existing-row
-  // lookups below (job refresh + invalid-row repair) disambiguate by the
-  // row's own cwd first; the fresh-discovery loop further down still reads
-  // the bare `onDisk` (unscoped) since a same-slug NEW-PRD collision across
-  // two projects is a rarer edge this reconcile pass doesn't yet resolve.
-  const onDiskByCwd = new Map();
   for (const f of files) {
     try {
       // Per-file await: parsing is mtime-cached so steady-state hits zero
       // disk reads; on cold cache the awaits keep the main thread responsive.
       const p = await parsePrd(f);
       onDisk.set(p.slug, p);
-      if (p.cwd) onDiskByCwd.set(`${p.slug}::${p.cwd}`, p);
     } catch (e) {
       console.warn('[scheduler] failed to parse', f, e?.message);
     }
-  }
-  // resolvePrdForJob(slug, cwd) — cwd-scoped PRD lookup for an EXISTING
-  // queue row, falling back to the unscoped onDisk entry when this exact
-  // (slug, cwd) pair has no PRD (e.g. cwd is null/stale) — same behavior as
-  // a bare onDisk.get() for every slug that isn't cross-project-colliding.
-  function resolvePrdForJob(slug, cwd) {
-    if (cwd) {
-      const scoped = onDiskByCwd.get(`${slug}::${cwd}`);
-      if (scoped) return scoped;
-    }
-    return onDisk.get(slug);
   }
   phaseMs.parseLoop = Date.now() - phaseStartMs;
 
@@ -2385,7 +2363,7 @@ async function reconcile(state) {
   // historyTerminalBySlug() below and backfilled before being dropped.
   const terminalDroppedNeedingHistoryCheck = [];
   for (const job of state.jobs) {
-    const p = resolvePrdForJob(job.slug, job.cwd);
+    const p = onDisk.get(job.slug);
     if (!p) {
       // A terminal job whose .md is gone was archived on purpose — dropping
       // its row is the intended end of the auto-archive flow, PROVIDED it's
@@ -2419,24 +2397,10 @@ async function reconcile(state) {
       continue;
     }
     seen.add(job.slug);
-    // p.cwd REFINES the row's existing cwd; it never erases one. A PRD
-    // file with no `cwd:` frontmatter parses p.cwd as undefined — falling
-    // through to a bare `cwd: p.cwd` here nulled the row's real cwd,
-    // which queueStore.writeSplit then buckets into
-    // schedulerBatch.js's DEFAULT_PROJECT_CWD, silently relocating the
-    // row into the WRONG project's queue.json shard and emptying the
-    // owning project's shard underneath it (2026-09 data-loss incident).
-    // Resolved ONCE into a local so originSessionId's fallback below
-    // resolves against the SAME cwd this row actually gets, not the raw
-    // (possibly undefined) p.cwd — resolveOriginSessionId(undefined, ...)
-    // returns null unconditionally, which silently dropped the origin link
-    // for every PRD with no `cwd:` frontmatter even though a good cwd was
-    // available one line below.
-    const refreshedCwd = p.cwd ?? job.cwd ?? null;
     const updatedJob = {
       ...job,
       title: p.title,
-      cwd: refreshedCwd,
+      cwd: p.cwd,
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: reconcileSourcePromptId(job, p.sourcePromptId),
@@ -2450,7 +2414,7 @@ async function reconcile(state) {
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
       originSessionId: job.originSessionId
-        ?? resolveOriginSessionId(refreshedCwd, p.epicId ?? reconcileSourcePromptId(job, p.sourcePromptId)),
+        ?? resolveOriginSessionId(p.cwd, p.epicId ?? reconcileSourcePromptId(job, p.sourcePromptId)),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? job.agentType ?? null,
     };
@@ -2546,22 +2510,17 @@ async function reconcile(state) {
       });
       continue;
     }
-    const p = resolvePrdForJob(inv.slug, inv.row?.cwd);
+    const p = onDisk.get(inv.slug);
     if (!p) {
       // PRD file also gone with no terminal record anywhere — nothing to
       // repair against. queueStore already logged the quarantine once.
       continue;
     }
-    // Same cwd-refines-not-erases rule as the normal refresh path above, and
-    // same reason for resolving it once into a local: originSessionId's
-    // fallback must resolve against the cwd this row actually gets, not the
-    // raw (possibly undefined) p.cwd.
-    const repairedCwd = p.cwd ?? inv.row?.cwd ?? null;
     const job = {
       ...inv.row,
       slug: inv.slug,
       title: p.title,
-      cwd: repairedCwd,
+      cwd: p.cwd,
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: p.sourcePromptId ?? inv.row?.sourcePromptId ?? null,
@@ -2571,7 +2530,7 @@ async function reconcile(state) {
       disposition: p.disposition ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
-      originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(repairedCwd, p.epicId ?? p.sourcePromptId),
+      originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? inv.row?.agentType ?? null,
     };
@@ -2682,20 +2641,10 @@ async function reconcile(state) {
       }
       continue;
     }
-    // No prior row exists to fall back to (this is a fresh discovery), so a
-    // PRD file with no `cwd:` frontmatter falls back to the project root it
-    // was actually found under (derived from its own file path) rather than
-    // nulling out to schedulerBatch.js's DEFAULT_PROJECT_CWD. Resolved once
-    // so originSessionId (below) resolves against this SAME cwd — passing
-    // the raw p.cwd there instead would resolve against `undefined` for
-    // exactly the no-frontmatter case this fallback exists to handle, since
-    // resolveOriginSessionId(cwd, ...) returns null unconditionally when
-    // `cwd` is falsy.
-    const discoveredCwd = p.cwd ?? deriveProjectCwdFromPrdPath(p.path) ?? null;
     const entry = {
       slug,
       title: p.title,
-      cwd: discoveredCwd,
+      cwd: p.cwd,
       parallelGroup: p.parallelGroup,
       estimateMinutes: p.estimateMinutes,
       sourcePromptId: p.sourcePromptId,
@@ -2705,7 +2654,7 @@ async function reconcile(state) {
       disposition: p.disposition ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
-      originSessionId: resolveOriginSessionId(discoveredCwd, p.epicId ?? p.sourcePromptId),
+      originSessionId: resolveOriginSessionId(p.cwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? null,
       status: 'pending',

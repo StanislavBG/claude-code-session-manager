@@ -8666,17 +8666,70 @@ function isGuardParkedWithoutAutoFix(job) {
 }
 
 /**
- * Pure predicate, no I/O: is this needs_review row eligible for the bounded
- * auto-resolve ladder at all — either because its auto-fix path is genuinely
- * spent (isExhaustedAutoFix), or because it was parked by a GUARD verdict
- * that never entered auto-fix in the first place (isGuardParkedWithoutAutoFix).
- * Both classes share ONE ladder (applyNeedsReviewAutoResolve) rather than a
- * duplicated one — the ladder itself doesn't care which door a row came
- * through, only whether it now carries completion evidence (job.looksDone).
+ * Pure predicate, no I/O: a needs_review row whose auto-fix investigation
+ * genuinely ran (autoFixAttempted === true) but whose outcome was NEVER
+ * durably stamped at all — and that has nothing left in flight to wait on:
+ * no live/queued fix-plan row at fixSlugFor(job).
+ *
+ * Distinct from isExhaustedAutoFix, which requires autoFixRetries >= 1 to
+ * have already accumulated. spawnInvestigation's onExit handler restores the
+ * job's status from 'investigating' back to needs_review in ONE mutate()
+ * call (scheduler.cjs's spawnInvestigation, source
+ * 'spawnInvestigation:onExit') and stamps autoFixOutcome ('plan' / 'no-plan'
+ * / 'error') in a SEPARATE, later mutate() call — an app restart or process
+ * death between the two leaves autoFixOutcome permanently unset, with
+ * autoFixRetries never incremented either, so isExhaustedAutoFix never fires
+ * and the row falls through every existing resolving door forever, re-scanned
+ * by the periodic reverify pass against the same frozen transcript with no
+ * new outcome to observe.
+ *
+ * Job 1218-fo-01 (2026-09-13, findings filed at
+ * session-manager-operations/reviews/2026-09-13-scheduler-stability-investigation.md,
+ * "post-run adjudication" section) sat exactly in this state: needs_review,
+ * verifierVerdict transcript_errors, autoFixAttempted: true, autoFixOutcome:
+ * undefined, autoFixRetries: undefined, statusHistory ending in
+ * "investigation probe exited — restoring prior status" — with a landed
+ * commit no existing ladder rung would credit.
+ *
+ * Deliberately narrower than "unset, 'error', or 'no-plan'": a row that DID
+ * get a durably-stamped 'error'/'no-plan' outcome with its one bounded retry
+ * still unspent (autoFixRetries < 1) is exactly the row
+ * selectAutoFixTargets's own retryEligible check still owns and will retry
+ * on its own — pulling it into THIS ladder instead would race it away from
+ * that retry (scheduler-needs-review-autoresolve.test.cjs's "a non-exhausted
+ * needs_review row … is left alone" guards exactly this). Only the
+ * outcome-truly-never-stamped case is structurally unrecoverable by any
+ * OTHER existing door, because nothing ever wrote a value selectAutoFixTargets
+ * or isExhaustedAutoFix could act on.
  * Exported for tests.
  */
-function isEligibleForNeedsReviewAutoResolve(job) {
-  return isExhaustedAutoFix(job) || isGuardParkedWithoutAutoFix(job);
+function isStrandedAutoFixPark(job, jobsInProject) {
+  if (!job || job.status !== 'needs_review') return false;
+  if (job.autoFixAttempted !== true) return false;
+  if (job.autoFixOutcome != null) return false;
+  const fixSlug = fixSlugFor(job);
+  const liveOrQueuedChild = (jobsInProject || []).some(
+    (j) => j.slug === fixSlug && j.status !== 'completed' && !DEAD_FIX_CHILD_STATUSES.has(j.status),
+  );
+  return !liveOrQueuedChild;
+}
+
+/**
+ * Pure predicate, no I/O: is this needs_review row eligible for the bounded
+ * auto-resolve ladder at all — either because its auto-fix path is genuinely
+ * spent (isExhaustedAutoFix), because it was parked by a GUARD verdict that
+ * never entered auto-fix in the first place (isGuardParkedWithoutAutoFix),
+ * or because its auto-fix investigation ran but was stranded before
+ * recording any outcome (isStrandedAutoFixPark). All three classes share ONE
+ * ladder (applyNeedsReviewAutoResolve) rather than a duplicated one — the
+ * ladder itself doesn't care which door a row came through, only whether it
+ * now carries completion evidence (job.looksDone). `jobsInProject` is only
+ * consulted by isStrandedAutoFixPark (to check for a live/queued fix-plan
+ * child) and defaults to empty so existing single-arg callers are unaffected.
+ * Exported for tests.
+ */
+function isEligibleForNeedsReviewAutoResolve(job, jobsInProject = []) {
+  return isExhaustedAutoFix(job) || isGuardParkedWithoutAutoFix(job) || isStrandedAutoFixPark(job, jobsInProject);
 }
 
 /**
@@ -9012,11 +9065,12 @@ function needsReviewAutoResolveDisabled() {
  *   [{ slug, cwd, ageMs, attempts }]
  *
  * Pure selector — no IO. Selects `needs_review` rows eligible for the
- * bounded auto-resolve ladder (isEligibleForNeedsReviewAutoResolve — either
- * auto-fix genuinely spent, or parked by a GUARD verdict that never entered
- * auto-fix at all), whose newest statusHistory entry with `to ===
- * 'needs_review'` is older than `thresholdMs`, and whose
- * exhaustedResolveAttempts counter has not yet spent its cap.
+ * bounded auto-resolve ladder (isEligibleForNeedsReviewAutoResolve — auto-fix
+ * genuinely spent, parked by a GUARD verdict that never entered auto-fix at
+ * all, or a stranded auto-fix park with no outcome ever recorded), whose
+ * newest statusHistory entry with `to === 'needs_review'` is older than
+ * `thresholdMs`, and whose exhaustedResolveAttempts counter has not yet
+ * spent its cap.
  *
  * The inclusion bound is inclusive of the cap itself (`<= CAP`, not `<
  * CAP`): NEEDS_REVIEW_RESOLVE_CAP counts REQUEUE attempts already spent, and
@@ -9029,7 +9083,7 @@ function selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) {
   const targets = [];
   for (const j of jobs ?? []) {
     if (j.status !== 'needs_review') continue;
-    if (!isEligibleForNeedsReviewAutoResolve(j)) continue;
+    if (!isEligibleForNeedsReviewAutoResolve(j, jobs)) continue;
     if ((j.exhaustedResolveAttempts ?? 0) > NEEDS_REVIEW_RESOLVE_CAP) continue;
     const history = j.statusHistory || [];
     let entry = null;
@@ -9073,8 +9127,8 @@ function selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) {
  * reason text (and the Queue UI's job.error) name the RIGHT evidence — a
  * guard-parked row was never "exhausted auto-fix" and must never claim to be.
  */
-function applyNeedsReviewAutoResolve(j) {
-  if (!j || j.status !== 'needs_review' || !isEligibleForNeedsReviewAutoResolve(j)) return null;
+function applyNeedsReviewAutoResolve(j, jobsInProject = []) {
+  if (!j || j.status !== 'needs_review' || !isEligibleForNeedsReviewAutoResolve(j, jobsInProject)) return null;
   if ((j.exhaustedResolveAttempts ?? 0) > NEEDS_REVIEW_RESOLVE_CAP) return null;
   const originIsGuardParked = !isExhaustedAutoFix(j) && isGuardParkedWithoutAutoFix(j);
 
@@ -10483,7 +10537,7 @@ async function init() {
         }
         for (const target of exhaustedNeedsReviewTargets) {
           const j = ms.jobs.find((x) => x.slug === target.slug);
-          const outcome = applyNeedsReviewAutoResolve(j);
+          const outcome = applyNeedsReviewAutoResolve(j, ms.jobs);
           if (outcome) {
             console.warn(
               `[scheduler] NEEDS_REVIEW AUTO-RESOLVE: project=${j.cwd ?? '(unknown)'} slug=${j.slug} `
@@ -11295,6 +11349,7 @@ module.exports = {
   isExhaustedAutoFix,
   GUARD_VERDICT_EVIDENCE_ELIGIBLE,
   isGuardParkedWithoutAutoFix,
+  isStrandedAutoFixPark,
   isEligibleForNeedsReviewAutoResolve,
   isPlanUnqueued,
   isFixPlanDead,

@@ -17,6 +17,7 @@ const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 const { addAllowedRoot } = require('./config.cjs');
+const { aliasedShellBin } = require('./lib/smProcNames.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { checkInsideHome } = require('./lib/insideHome.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
@@ -187,7 +188,13 @@ class PtyManager {
     let proc;
     try {
       // Interactive login shell so aliases / nvm / PATH resolve correctly.
-      proc = pty.spawn(shell, ['-il'], {
+      // `sm-shell` comm (pn-03) via symlink — node-pty has no argv0 option.
+      // ONLY interactive terminal tabs get this alias. supervisor.cjs
+      // getChildBashCmdlines matches comm === 'bash' EXACTLY over a scheduler
+      // job's descendants; no shell in a job's process tree is ever spawned
+      // through here, so that detection is unaffected. Non-bash/zsh shells and
+      // any alias failure fall back to the real path.
+      proc = pty.spawn(aliasedShellBin(shell), ['-il'], {
         name: 'xterm-256color',
         cols,
         rows,

@@ -24,6 +24,9 @@
 
 'use strict';
 
+// Name this process first (pn-03): otherwise it shows as a bare `node`.
+const { PROC_NAMES, setProcessTitle } = require('../src/main/lib/smProcNames.cjs');
+setProcessTitle(PROC_NAMES.mcpServer);
 const os = require('node:os');
 const path = require('node:path');
 const fsp = require('node:fs/promises');

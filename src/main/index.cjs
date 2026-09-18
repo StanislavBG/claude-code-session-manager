@@ -1,3 +1,8 @@
+const { PROC_NAMES, setProcessTitle, inhibitHolderShell } = require('./lib/smProcNames.cjs');
+// Self-describing `comm` in System Monitor (pn-03). process.argv is a JS copy
+// made at startup, so the argv-memory overwrite below never affects the
+// `process.argv.includes('--simple')` read further down.
+setProcessTitle(PROC_NAMES.main);
 const { app, BrowserWindow, ipcMain, dialog, Menu, session, systemPreferences, globalShortcut, shell, clipboard, powerSaveBlocker, protocol } = require('electron');
 const { spawn, execFile, execFileSync } = require('node:child_process');
 const path = require('node:path');
@@ -135,7 +140,10 @@ function startSystemdInhibit() {
       '--who=Claude Session Manager',
       '--why=Scheduler polling and claude -p jobs must survive idle',
       '--mode=block',
-      'sh', '-c', `while kill -0 ${process.pid} 2>/dev/null; do sleep 5; done`,
+      // sm-inhibit-hold: aliased shell so the permanent holder is attributable
+      // in System Monitor (its `sleep 5` child stays a bare `sleep`, parented
+      // under it). Falls back to plain /bin/sh if the alias can't be made.
+      inhibitHolderShell(), '-c', `while kill -0 ${process.pid} 2>/dev/null; do sleep 5; done`,
     ], { stdio: 'ignore', detached: false });
     child.on('error', (e) => {
       logs.writeLine({ scope: 'main', level: 'warn', message: 'systemd-inhibit spawn failed', meta: { error: e?.message } });

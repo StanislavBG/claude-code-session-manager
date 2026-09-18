@@ -1,5 +1,9 @@
 'use strict';
 
+// Name this process first (pn-03): otherwise it shows as a bare `node`.
+const { PROC_NAMES, setProcessTitle } = require('../src/main/lib/smProcNames.cjs');
+setProcessTitle(PROC_NAMES.watchdog);
+
 // scheduler-watchdog.cjs — external check-and-exit watchdog for session-manager.
 //
 // Designed to run from a systemd user timer (or cron) independently of the

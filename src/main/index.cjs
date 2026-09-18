@@ -1463,6 +1463,7 @@ function runShutdownCleanup() {
 
 app.on('will-quit', runShutdownCleanup);
 
+  try { scheduler.stop(); } catch { /* */ }
 app.on('window-all-closed', () => {
   if (rebooting) return; // new window is about to be created
   ptyManager.killAll();

@@ -47,6 +47,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
+const { startDispatchLoop } = require('./lib/dispatchLoop.cjs');
 const { randomUUID } = require('node:crypto');
 const { execFile, execFileSync } = require('node:child_process');
 const { ipcMain } = require('electron');
@@ -3133,6 +3134,7 @@ let resumeTimer = null;
 let pollLoopTimer = null;
 let rescheduleInterval = null;
 let heartbeatInterval = null;
+let dispatchLoopHandle = null;
 // Stall-detector state (computeStallSummary), read/written only inside the
 // heartbeat interval below. Keyed per-project cwd (never a single value) —
 // a single module-level flag would let one busy project's activity clear or
@@ -10508,6 +10510,15 @@ function registerScheduleHandlers() {
   });
 }
 
+function stopDispatchLoop() {
+  if (dispatchLoopHandle) { dispatchLoopHandle.stop(); dispatchLoopHandle = null; }
+}
+
+/** Shutdown path: stop the timers this module owns. */
+function stop() {
+  stopDispatchLoop();
+}
+
 async function init() {
   ensureDirs();
   // Boot phase — reconciliation, migrations, self-heal, first reset probe.
@@ -11026,6 +11037,15 @@ async function init() {
     });
   }, 60_000);
   if (heartbeatInterval.unref) heartbeatInterval.unref();
+
+  // Dispatch's own periodic driver: cadence is independent of pollLoop's billing
+  // backoff. A loop tick meeting a cancelled cancelToken returns 'cancelled' from
+  // tickBody; clearing stays with the starvation watchdog's existing force-clear.
+  stopDispatchLoop();
+  dispatchLoopHandle = startDispatchLoop({
+    tick: () => tickQueue(),
+    onError: (e) => console.warn('[scheduler] dispatch loop tick failed', e?.message),
+  });
 
   // Wake-from-sleep: immediately re-poll and re-evaluate the queue.
   try {
@@ -11827,6 +11847,7 @@ module.exports = {
   setPaused,
   clearPause,
   tickQueue,
+  stop,
   runDueJobs,
   pollLoop,
   maybeLaunchWhenAvailable,

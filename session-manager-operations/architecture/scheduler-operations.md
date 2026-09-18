@@ -230,3 +230,16 @@ what `queue.json.status` says.
   race the live app and can corrupt the file the next time it writes. If a row needs
   correcting, that's a `scheduler.cjs` code fix (make the completion handler's two writes
   atomic, or add a reconciliation pass), not a manual patch.
+
+## 10. Concurrent-writer hazard — the repo is never idle
+
+Multiple scheduler jobs (and the `builder` agent) can run against the same working tree at
+once. Never assume a diagnosis/fix session has the repo to itself, and never treat `git
+status` from ten minutes ago as still accurate — re-run it immediately before staging or
+committing anything. A file growing beyond your own diff, a version bump you didn't make, or
+scheduler/Epic state changing underneath you are signs of a live sibling writer, not repo
+corruption; diff each file and separate your own change from the concurrent one rather than
+blindly `git add -A`-ing both together. (Incident, 2026-08-02: a perf-fix session's own
+4-file diff coexisted with an unrelated concurrent rewrite of `chat.ts` and a mid-session
+`package.json` version bump neither of which it made, per that session's now-retired
+resume note.)

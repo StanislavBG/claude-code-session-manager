@@ -23,6 +23,7 @@ const os = require('node:os');
 const { ipcMain } = require('electron');
 const { refreshIfNeeded, expiresAtMs } = require('./lib/credentials.cjs');
 const { writeJson } = require('./config.cjs');
+const { createUsageCircuit, singleFlight } = require('./lib/usageCircuit.cjs');
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 
@@ -146,6 +147,18 @@ function classifyUsageResponse(status, bodyText) {
 
 let cache = null;
 let hydrationPromise = null;
+// Retry-After suppression window: while `now < retryNotBeforeMs`, fetchUsage()
+// refuses to issue another request and instead replays `lastRateLimitedResult`
+// (annotated `suppressed: true`) — set only from a 429's Retry-After header.
+let retryNotBeforeMs = 0;
+let lastRateLimitedResult = null;
+
+// Single shared circuit for the /api/oauth/usage meter. Both callers — the
+// renderer's billing:fetch IPC handler and the scheduler's pollLoop — go
+// through this same fetchUsage(), so a success recorded from EITHER caller
+// clears the streak for both, and concurrent callers coalesce into one HTTP
+// request via singleFlight.
+const circuit = createUsageCircuit();
 
 async function hydrateCache() {
   try {
@@ -155,10 +168,109 @@ async function hydrateCache() {
   }
 }
 
+function ensureHydrated() {
+  if (!hydrationPromise) hydrationPromise = hydrateCache();
+  return hydrationPromise;
+}
+
 async function persistCache(c) {
   await writeJson(CACHE_PATH, c);
 }
 
+/** The actual network round-trip, coalesced across concurrent callers below. */
+async function networkFetchUsage() {
+  // Check expiry and attempt proactive refresh before touching the network.
+  const refresh = await refreshIfNeeded();
+  if (refresh.kind === 'auth') {
+    return { kind: 'auth', message: refresh.message, httpStatus: 401, expiredAt: refresh.expiredAt ?? null };
+  }
+  if (refresh.kind === 'config') return refresh;
+  // 'ok' or 'unsupported' — creds present and not yet expired
+  const creds = refresh.creds;
+
+  let result;
+  let r;
+  try {
+    r = await fetch(USAGE_URL, {
+      headers: {
+        Authorization: `Bearer ${creds.accessToken}`,
+        'anthropic-beta': 'oauth-2025-04-20',
+        'User-Agent': 'claude-code-session-manager',
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (e) {
+    result = { kind: 'transient', message: e.message || String(e), httpStatus: null };
+  }
+  if (!result) {
+    if (r.status === 401 || r.status === 403) {
+      const body = await r.text().catch(() => '');
+      const ms = expiresAtMs(creds);
+      result = { kind: 'auth', message: body.slice(0, 200) || `HTTP ${r.status}`, httpStatus: r.status, expiredAt: ms };
+    } else if (r.status === 408 || r.status >= 500) {
+      const body = await r.text().catch(() => '');
+      result = { kind: 'transient', message: body.slice(0, 200) || `HTTP ${r.status}`, httpStatus: r.status };
+    } else if (r.status === 429) {
+      const body = await r.text().catch(() => '');
+      let parsed = null;
+      try { parsed = JSON.parse(body); } catch { /* */ }
+      if (parsed?.error?.type === 'rate_limit_error') {
+        result = {
+          kind: 'meter_rate_limited',
+          message: body.slice(0, 200),
+          httpStatus: 429,
+          retryAfterMs: parseRetryAfterMs(r.headers.get('retry-after')),
+        };
+      } else {
+        result = { kind: 'transient', message: body.slice(0, 200) || 'HTTP 429', httpStatus: 429 };
+      }
+    } else if (!r.ok) {
+      const body = await r.text().catch(() => '');
+      result = { kind: 'transient', message: body.slice(0, 200) || `HTTP ${r.status}`, httpStatus: r.status };
+    } else {
+      const usage = await r.json();
+      result = {
+        kind: 'ok',
+        data: {
+          usage,
+          subscriptionType: creds.subscriptionType ?? null,
+          rateLimitTier: creds.rateLimitTier ?? null,
+          credentialsExpiresAt: creds.expiresAt ?? null,
+          fetchedAt: Date.now(),
+        },
+      };
+    }
+  }
+
+  if (result.kind === 'ok') {
+    cache = { data: result.data, fetchedAt: Date.now(), sourceCredsExpiresAt: result.data.credentialsExpiresAt };
+    persistCache(cache).catch(() => {});
+    retryNotBeforeMs = 0;
+    lastRateLimitedResult = null;
+    circuit.recordSuccess(result.data);
+  } else if (result.kind === 'meter_rate_limited') {
+    lastRateLimitedResult = result;
+    if (Number.isFinite(result.retryAfterMs) && result.retryAfterMs > 0) {
+      retryNotBeforeMs = Date.now() + result.retryAfterMs;
+    }
+    circuit.recordFailure(result.kind);
+  } else if (result.kind === 'transient') {
+    circuit.recordFailure(result.kind);
+  }
+  return result;
+}
+
+// Concurrent callers (the renderer's billing:fetch and the scheduler's
+// pollLoop) coalesce into this one in-flight promise instead of each firing
+// their own request against a rate-limited endpoint.
+const singleFlightNetworkFetch = singleFlight(networkFetchUsage);
+
+/**
+ * The single owner of caching, single-flight de-duplication and Retry-After
+ * suppression for the usage meter. Every caller — renderer IPC and scheduler
+ * pollLoop alike — must go through this function rather than hitting the
+ * network or the cache file directly.
+ */
 async function fetchUsage() {
   // Test stub: SM_MOCK_BILLING_KIND lets e2e tests simulate billing API responses
   // without hitting the real endpoint. Only active when SM_E2E=1 to prevent
@@ -172,84 +284,23 @@ async function fetchUsage() {
     return { kind: 'ok', data: { usage: { five_hour: { utilization: 10, resets_at: null }, seven_day: { utilization: 10, resets_at: null }, seven_day_sonnet: null, seven_day_opus: null, extra_usage: null }, subscriptionType: null, rateLimitTier: null, credentialsExpiresAt: null, fetchedAt: Date.now() } };
   }
 
-  // Check expiry and attempt proactive refresh before touching the network.
-  const refresh = await refreshIfNeeded();
-  if (refresh.kind === 'auth') {
-    return { kind: 'auth', message: refresh.message, httpStatus: 401, expiredAt: refresh.expiredAt ?? null };
-  }
-  if (refresh.kind === 'config') return refresh;
-  // 'ok' or 'unsupported' — creds present and not yet expired
-  const creds = refresh.creds;
+  await ensureHydrated();
 
-  let r;
-  try {
-    r = await fetch(USAGE_URL, {
-      headers: {
-        Authorization: `Bearer ${creds.accessToken}`,
-        'anthropic-beta': 'oauth-2025-04-20',
-        'User-Agent': 'claude-code-session-manager',
-      },
-      signal: AbortSignal.timeout(10_000),
-    });
-  } catch (e) {
-    return { kind: 'transient', message: e.message || String(e), httpStatus: null };
+  if (cache && cache.fetchedAt && Date.now() - cache.fetchedAt < OK_CACHE_TTL_MS) {
+    return { kind: 'ok', data: cache.data };
   }
-  if (r.status === 401 || r.status === 403) {
-    const body = await r.text().catch(() => '');
-    const ms = expiresAtMs(creds);
-    return { kind: 'auth', message: body.slice(0, 200) || `HTTP ${r.status}`, httpStatus: r.status, expiredAt: ms };
+
+  if (lastRateLimitedResult && retryNotBeforeMs && Date.now() < retryNotBeforeMs) {
+    return { ...lastRateLimitedResult, suppressed: true };
   }
-  if (r.status === 408 || r.status >= 500) {
-    const body = await r.text().catch(() => '');
-    return { kind: 'transient', message: body.slice(0, 200) || `HTTP ${r.status}`, httpStatus: r.status };
-  }
-  if (r.status === 429) {
-    const body = await r.text().catch(() => '');
-    let parsed = null;
-    try { parsed = JSON.parse(body); } catch { /* */ }
-    if (parsed?.error?.type === 'rate_limit_error') {
-      return {
-        kind: 'meter_rate_limited',
-        message: body.slice(0, 200),
-        httpStatus: 429,
-        retryAfterMs: parseRetryAfterMs(r.headers.get('retry-after')),
-      };
-    }
-    return { kind: 'transient', message: body.slice(0, 200) || 'HTTP 429', httpStatus: 429 };
-  }
-  if (!r.ok) {
-    const body = await r.text().catch(() => '');
-    return { kind: 'transient', message: body.slice(0, 200) || `HTTP ${r.status}`, httpStatus: r.status };
-  }
-  const usage = await r.json();
-  return {
-    kind: 'ok',
-    data: {
-      usage,
-      subscriptionType: creds.subscriptionType ?? null,
-      rateLimitTier: creds.rateLimitTier ?? null,
-      credentialsExpiresAt: creds.expiresAt ?? null,
-      fetchedAt: Date.now(),
-    },
-  };
+
+  return singleFlightNetworkFetch();
 }
 
 function registerBillingHandlers() {
-  hydrationPromise = hydrateCache();
-
   ipcMain.handle('billing:fetch', async () => {
-    if (hydrationPromise) { await hydrationPromise; hydrationPromise = null; }
-
-    if (cache && cache.fetchedAt && Date.now() - cache.fetchedAt < OK_CACHE_TTL_MS) {
-      return { kind: 'ok', data: cache.data };
-    }
-
     const r = await fetchUsage();
-    if (r.kind === 'ok') {
-      cache = { data: r.data, fetchedAt: Date.now(), sourceCredsExpiresAt: r.data.credentialsExpiresAt };
-      persistCache(cache).catch(() => {});
-      return { kind: 'ok', data: r.data };
-    }
+    if (r.kind === 'ok') return { kind: 'ok', data: r.data };
     if (r.kind === 'auth') {
       if (cache) return { kind: 'auth', message: r.message, httpStatus: r.httpStatus, expiredAt: r.expiredAt, cached: cache.data, staleSince: cache.fetchedAt };
       return r;
@@ -259,11 +310,19 @@ function registerBillingHandlers() {
       return r;
     }
     if (r.kind === 'meter_rate_limited') {
-      if (cache) return { kind: 'meter_rate_limited', message: r.message, httpStatus: r.httpStatus, retryAfterMs: r.retryAfterMs, cached: cache.data, staleSince: cache.fetchedAt };
+      if (cache) return { kind: 'meter_rate_limited', message: r.message, httpStatus: r.httpStatus, retryAfterMs: r.retryAfterMs, suppressed: r.suppressed, cached: cache.data, staleSince: cache.fetchedAt };
       return r;
     }
     return r; // config
   });
 }
 
-module.exports = { registerBillingHandlers, fetchUsage, classifyUsageResponse, parseRetryAfterMs, usageMeterApplicable, readClaudeSettingsAuth };
+module.exports = {
+  registerBillingHandlers,
+  fetchUsage,
+  classifyUsageResponse,
+  parseRetryAfterMs,
+  usageMeterApplicable,
+  readClaudeSettingsAuth,
+  __usageCircuitForTest: circuit,
+};

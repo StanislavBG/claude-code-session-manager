@@ -105,7 +105,21 @@ test('a never-settling tick body is declared wedged, the chain resets, the stale
     // Next tick runs on a fresh chain (real reader, generous budget).
     queueStore.readMerged = realRead;
     process.env.SM_TICK_WATCHDOG_MS = '30000';
-    const fresh = await scheduler.tickQueue();
+    // Launch gates this case controls, so the dispatch assertion below does not
+    // depend on host state: the CPU load gate (loadavg1/cores > 0.85 -> 'load-deferred')
+    // via tickQueue's bypassLoadGate, and the memory gate ('memory-deferred', reads
+    // MemAvailable from /proc/meminfo) via a stubbed fs.readFileSync for that one path.
+    const realReadFileSync = fs.readFileSync;
+    fs.readFileSync = function patchedReadFileSync(file, ...rest) {
+      if (file === '/proc/meminfo') return 'MemAvailable:   67108864 kB\n';
+      return realReadFileSync.call(this, file, ...rest);
+    };
+    let fresh;
+    try {
+      fresh = await scheduler.tickQueue({ bypassLoadGate: true });
+    } finally {
+      fs.readFileSync = realReadFileSync;
+    }
     expect(fresh.reason).not.toBe('wedged');
 
     // Let the fresh tick's own spawn (if any) finish, then clear the marker.

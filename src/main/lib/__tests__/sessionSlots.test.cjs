@@ -97,3 +97,48 @@ test('snapshot names holders for attribution', () => {
   assert.equal(snap.inUse, 2);
   assert.deepEqual(snap.holders.map((h) => h.owner).sort(), ['chat:tab-1', 'scheduler:42-fix-thing']);
 });
+
+// ── expireDead: fail-closed release of provably-dead scheduler reservations ──
+const NOW = 10_000_000;
+const GRACE = 10 * 60 * 1000;
+
+test('expireDead: stamped dead pid with no live row is released', () => {
+  const t = slots.acquire('scheduler:a', { claimedAt: NOW - 1000 });
+  slots.stampPid(t, 4242);
+  const out = slots.expireDead({ liveSlugs: new Set(), pidAlive: () => false, now: NOW, graceMs: GRACE });
+  assert.deepEqual(out, ['scheduler:a']);
+  assert.equal(slots.inUse(), 0);
+});
+
+test('expireDead: a live pid or a live row keeps the token', () => {
+  const t1 = slots.acquire('scheduler:a', { claimedAt: NOW - 2 * GRACE });
+  slots.stampPid(t1, 4242);
+  const t2 = slots.acquire('scheduler:b', { claimedAt: NOW - 2 * GRACE });
+  slots.expireDead({ liveSlugs: new Set(['b']), pidAlive: () => true, now: NOW, graceMs: GRACE });
+  assert.equal(slots.inUse(), 2, 'live pid (a) and live row (b) both survive');
+  assert.ok(t1 && t2);
+});
+
+test('expireDead: pidless token expires only past the grace window', () => {
+  slots.acquire('scheduler:old', { claimedAt: NOW - GRACE - 1 });
+  slots.acquire('scheduler:fresh', { claimedAt: NOW - GRACE + 1000 });
+  const out = slots.expireDead({ liveSlugs: new Set(), pidAlive: () => false, now: NOW, graceMs: GRACE });
+  assert.deepEqual(out, ['scheduler:old']);
+  assert.equal(slots.inUse(), 1);
+});
+
+test('expireDead: chat and project-brief tokens are never touched', () => {
+  slots.acquire('chat:tab1', { claimedAt: 0 });
+  slots.acquire('project-brief:x', { claimedAt: 0 });
+  const out = slots.expireDead({ liveSlugs: new Set(), pidAlive: () => false, now: NOW, graceMs: GRACE });
+  assert.deepEqual(out, []);
+  assert.equal(slots.inUse(), 2);
+});
+
+test('expireDead: a mid-launch reservation (claimed after the pass began) survives even with a dead pid', () => {
+  const t = slots.acquire('scheduler:mid', { claimedAt: NOW + 5 });
+  slots.stampPid(t, 4242);
+  const out = slots.expireDead({ liveSlugs: new Set(), pidAlive: () => false, now: NOW, graceMs: GRACE });
+  assert.deepEqual(out, []);
+  assert.equal(slots.inUse(), 1);
+});

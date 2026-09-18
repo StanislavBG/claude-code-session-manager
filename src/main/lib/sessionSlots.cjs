@@ -27,6 +27,8 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { sessionSlotsConfigPath } = require('./schedulerPaths.cjs');
+const { appendAuditEvent } = require('./auditLog.cjs');
+const { isProvablyDead, DEFAULT_GRACE_MS } = require('./reservationExpiry.cjs');
 
 const MIN_SLOTS = 0;
 const MAX_SLOTS = 10;
@@ -73,7 +75,7 @@ function totalSlots() {
   return readPersistedCap();
 }
 
-// token → { owner, at }
+// token → { owner, at, claimedAt (ms), pid (null until stampPid) }
 const holders = new Map();
 
 function inUse() {
@@ -89,11 +91,45 @@ function available() {
  * `owner` is a diagnostic label ("scheduler:<slug>", "chat:<tabId>") shown in
  * snapshot() so a stuck holder is attributable.
  */
-function acquire(owner) {
+function acquire(owner, { claimedAt = Date.now() } = {}) {
   if (holders.size >= totalSlots()) return null;
   const token = crypto.randomUUID();
-  holders.set(token, { owner: String(owner || 'unknown'), at: new Date().toISOString() });
+  holders.set(token, { owner: String(owner || 'unknown'), at: new Date(claimedAt).toISOString(), claimedAt, pid: null });
   return token;
+}
+
+/** stampPid(token, pid) — record the child pid once known, so expireDead can prove death by pid. */
+function stampPid(token, pid) {
+  const h = holders.get(token);
+  if (!h || !Number.isInteger(pid) || pid <= 0) return false;
+  h.pid = pid;
+  return true;
+}
+
+/**
+ * expireDead — release `scheduler:` reservations whose owner is provably dead
+ * (see reservationExpiry.isProvablyDead). `chat:` / `project-brief:` tokens are
+ * never touched. Accounting only: no process is signalled. Returns the released
+ * owners. Each release is audited once (the token is gone after release).
+ * @param {{ liveSlugs: Set<string>, pidAlive?: Function, now?: number, graceMs?: number }} opts
+ */
+function expireDead({ liveSlugs, pidAlive, now = Date.now(), graceMs = DEFAULT_GRACE_MS } = {}) {
+  const live = liveSlugs instanceof Set ? liveSlugs : new Set(liveSlugs || []);
+  const expired = [];
+  for (const [token, h] of [...holders]) {
+    if (!h.owner.startsWith('scheduler:')) continue;
+    const slug = h.owner.slice('scheduler:'.length);
+    if (!isProvablyDead(h, { live: live.has(slug), pidAlive, now, graceMs })) continue;
+    holders.delete(token);
+    expired.push(h.owner);
+    appendAuditEvent('slot_reservation_expired', { owner: h.owner, pid: h.pid, claimedAt: h.at });
+  }
+  if (expired.length) {
+    for (const fn of listeners) {
+      try { fn(); } catch { /* a consumer's pump error is its own problem */ }
+    }
+  }
+  return expired;
 }
 
 // Release listeners: each consumer registers its own "a slot freed — try to
@@ -143,6 +179,8 @@ module.exports = {
   inUse,
   available,
   acquire,
+  stampPid,
+  expireDead,
   release,
   subscribe,
   snapshot,

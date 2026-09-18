@@ -12,17 +12,22 @@
  */
 'use strict';
 
+const { appendAuditEvent } = require('./auditLog.cjs');
+const { isProvablyDead, DEFAULT_GRACE_MS } = require('./reservationExpiry.cjs');
+
 // slug of the job currently holding the lease, or null.
 let heldBySlug = null;
+let heldClaimedAt = 0;
 
 function isHeld() {
   return heldBySlug !== null;
 }
 
 /** acquire(slug) → true if the lease was free and is now held by `slug`. */
-function acquire(slug) {
+function acquire(slug, { claimedAt = Date.now() } = {}) {
   if (heldBySlug !== null) return false;
   heldBySlug = String(slug);
+  heldClaimedAt = claimedAt;
   return true;
 }
 
@@ -36,6 +41,17 @@ function release(slug) {
   return true;
 }
 
+/** expireDead — free a lease whose holder has no running row and is past the grace window
+ * (the lease never carries a pid; the row-liveness + grace proof is the whole test). */
+function expireDead({ liveSlugs, now = Date.now(), graceMs = DEFAULT_GRACE_MS } = {}) {
+  if (heldBySlug === null) return false;
+  const live = liveSlugs instanceof Set ? liveSlugs : new Set(liveSlugs || []);
+  if (!isProvablyDead({ claimedAt: heldClaimedAt, pid: null }, { live: live.has(heldBySlug), now, graceMs })) return false;
+  appendAuditEvent('quiet_lease_expired', { slug: heldBySlug });
+  heldBySlug = null;
+  return true;
+}
+
 function holder() {
   return heldBySlug;
 }
@@ -43,6 +59,7 @@ function holder() {
 /** Test hook: force the lease back to free. */
 function __resetForTests() {
   heldBySlug = null;
+  heldClaimedAt = 0;
 }
 
-module.exports = { isHeld, acquire, release, holder, __resetForTests };
+module.exports = { isHeld, acquire, release, expireDead, holder, __resetForTests };

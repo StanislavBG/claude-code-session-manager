@@ -169,6 +169,7 @@ function resolveOriginSessionId(cwd, epicId) {
 }
 const sessionSlots = require('./lib/sessionSlots.cjs');
 const quietMachineLease = require('./lib/quietMachineLease.cjs');
+const runtimeState = require('./lib/schedulerRuntimeState.cjs');
 const jobWorktree = require('./lib/jobWorktree.cjs');
 const gitWorktree = require('./lib/gitWorktree.cjs');
 const { buildJobWorktreeIsLive } = require('./lib/jobWorktreeBootLive.cjs');
@@ -3196,12 +3197,11 @@ const runningSet = new Set();
 // N concurrent Opus processes — the >3-concurrent class that OOM-killed Electron.
 // Over-cap requests are QUEUED (not dropped) and drained as slots free, so a failed
 // PRD that never reaches 'needs_review' still eventually gets its fix-plan authored.
-let investigationsInFlight = 0;
 const MAX_CONCURRENT_INVESTIGATIONS = 1;
 const deferredInvestigations = new Map(); // fixable-job slug -> { failedJob, runDir }
 
 function drainDeferredInvestigation() {
-  if (investigationsInFlight >= MAX_CONCURRENT_INVESTIGATIONS) return;
+  if (runtimeState.investigationCount() >= MAX_CONCURRENT_INVESTIGATIONS) return;
   const next = deferredInvestigations.entries().next();
   if (next.done) return;
   const [slug, ctx] = next.value;
@@ -5681,7 +5681,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
       return { deferred: false };
     }
   }
-  if (investigationsInFlight >= MAX_CONCURRENT_INVESTIGATIONS) {
+  if (runtimeState.investigationCount() >= MAX_CONCURRENT_INVESTIGATIONS) {
     // Queue for retry when a slot frees rather than dropping — otherwise a failed
     // job (never 'needs_review', so reverifyNeedsReview won't retry it) would
     // silently never get an auto-authored fix-plan.
@@ -5695,12 +5695,12 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   // both pass the cap check. Released in onExit, on any pre-spawn early return, or
   // on a synchronous throw (try/catch below) — and releasing hands the slot to a
   // queued investigation so none are stranded.
-  investigationsInFlight++;
+  runtimeState.reserveInvestigation(failedJob.slug);
   let slotReleased = false;
   const releaseSlot = () => {
     if (slotReleased) return;
     slotReleased = true;
-    investigationsInFlight--;
+    runtimeState.releaseInvestigation(failedJob.slug);
     drainDeferredInvestigation();
   };
   try {
@@ -5923,6 +5923,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
 
   if (child) {
     safeLog(`[scheduler] investigation pid=${child.pid}\n\n`);
+    runtimeState.stampInvestigationPid(failedJob.slug, child.pid);
     // Recorded so findStrandedInvestigations (a post-restart maintenance
     // sweep — the live process has no other way to know a probe is still
     // running) can tell a live probe apart from one whose owning process is
@@ -6123,7 +6124,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
   // Session-Manager owns the machine-wide `claude -p` pool (sessionSlots.cjs)
   // — the scheduler REQUESTS capacity, it doesn't own a private cap. A miss
   // leaves the job pending; the next tick retries when a slot frees up.
-  const slotToken = sessionSlots.acquire(`scheduler:${job.slug}`);
+  const slotToken = sessionSlots.acquire(`scheduler:${job.slug}`, { claimedAt: Date.now() });
   if (!slotToken) {
     console.log(`[scheduler] no session slot free for ${job.slug} — deferring (${JSON.stringify(sessionSlots.snapshot().holders.map((h) => h.owner))})`);
     return;
@@ -6471,6 +6472,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     const foreignWip = worktree.ok ? { carriedPaths } : { preRunDirtyPaths };
     try {
       res = await executeJob(job, runDir, defaultCwd, async (pid, sessionId, cwd) => {
+        sessionSlots.stampPid(slotToken, pid);
         await mutate((s) => {
           const idx = s.jobs.findIndex((x) => x.slug === job.slug);
           if (idx >= 0) {
@@ -7577,6 +7579,35 @@ function tickWatchdogMs() {
 // `bypassLoadGate` is set only by the explicit human run-now / force-tick
 // paths (via runDueJobs): the human is asking, so the CPU-load gate yields
 // and logs that it did. Every automatic caller leaves it false.
+/**
+ * Fail-CLOSED expiry of runtime reservations (slot tokens, quiet-machine
+ * lease, investigation set, worktree accounting) whose owner is provably
+ * dead. `now` is the pass start: reservations claimed after it are never
+ * expired. Accounting only — never signals or removes anything.
+ */
+function runReservationExpiryPass(jobs, now = Date.now()) {
+  try {
+    const liveSlugs = new Set(runningSet);
+    const terminal = new Set();
+    for (const j of jobs || []) {
+      if (j.status === 'running' || j.status === 'investigating') liveSlugs.add(j.slug);
+      else if (j.status === 'completed' || j.status === 'failed' || j.status === 'skipped') terminal.add(j.slug);
+    }
+    const pidAlive = (pid) => claudePidAlive(pid);
+    sessionSlots.expireDead({ liveSlugs, pidAlive, now });
+    quietMachineLease.expireDead({ liveSlugs, now });
+    runtimeState.expireDeadInvestigations({ liveSlugs, pidAlive, now });
+    gitWorktree.expireDeadWorktreeRegistrations({
+      isTerminalBranch: (branch) => {
+        const key = gitWorktree.keyFromBranch('job', branch);
+        return !!key && !liveSlugs.has(key) && terminal.has(key);
+      },
+    });
+  } catch (e) {
+    console.warn('[scheduler] reservation expiry pass failed', e?.message);
+  }
+}
+
 function tickQueue({ bypassLoadGate = false } = {}) {
   const budgetMs = tickWatchdogMs();
   const next = tickTail.then(() => {
@@ -7605,6 +7636,7 @@ function tickQueue({ bypassLoadGate = false } = {}) {
 const STALE_TICK = Object.freeze({ fired: false, reason: 'stale-generation' });
 
 async function tickBody(gen, { bypassLoadGate }) {
+  const tickStartedAt = Date.now();
   {
     const stale = () => gen !== tickGeneration;
     const state = await readQueue();
@@ -7657,6 +7689,7 @@ async function tickBody(gen, { bypassLoadGate }) {
     // hold narrows this SAME freeSlots figure instead of standing up a
     // second pool: the row count admitted this tick simply can't exceed the
     // degraded cap minus what's already running.
+    runReservationExpiryPass(state.jobs, tickStartedAt);
     const freeSlots = degradedConcurrencyCapValue != null
       ? Math.max(0, Math.min(sessionSlots.available(), degradedConcurrencyCapValue - runningSet.size))
       : sessionSlots.available();
@@ -10654,6 +10687,9 @@ async function init() {
     // A slot freed anywhere (e.g. a chat run settled) may unblock a deferred
     // batch — advance the queue without waiting for the next 60s poll.
     sessionSlots.subscribe(() => { tickQueue().catch(() => {}); });
+    // Boot-time expiry pass (process-local state is empty after a restart, so
+    // this is a cheap belt-and-braces run against the freshly read queue).
+    try { runReservationExpiryPass((await readQueue()).jobs); } catch { /* best-effort */ }
     // Retire the global queue.json: split its rows into per-project shards
     // BEFORE the first read below, so boot reconciliation sees the shards.
     try {

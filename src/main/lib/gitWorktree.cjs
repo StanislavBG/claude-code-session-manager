@@ -185,6 +185,13 @@ function isUnderRoot(p, root) {
 // corrected down to match reality when it's proven to have leaked.
 const activeWorktreeCount = { job: 0, epic: 0 };
 
+// Registered checkouts this process created and has not yet cleaned up:
+// dir -> { kind, branch }. Lets `expireDeadWorktreeRegistrations` prove a
+// counted checkout is dead (no cwd holder + terminal row) and release its
+// count — accounting only, never a kill or an rm.
+const registeredCheckouts = new Map();
+const expiredCheckoutDirs = new Set(); // released by expiry, awaiting their (late) cleanupWorktree
+
 // Per-kind promise chain used as a simple async mutex (see `withKindLock`)
 // so the cap-check-and-reserve decision in `reserveWorktreeSlot` — which now
 // sometimes needs to `await` a fresh on-disk observation — stays a single
@@ -845,9 +852,31 @@ function parseBlockingMergePaths(stderrText) {
   const tracked = [];
   const untracked = [];
   let mode = null;
+  registeredCheckouts.set(dir, { kind, branch });
   for (const rawLine of stderrText.split('\n')) {
     if (/would be overwritten by merge:\s*$/.test(rawLine) && /local changes/.test(rawLine)) {
       mode = 'tracked';
+/**
+ * Release the count of any registered checkout whose branch has no live
+ * holder (no process cwd under its dir) AND whose row is terminal
+ * (`isTerminalBranch(branch)`). Fail-closed: an unknown/live row or a live
+ * holder keeps the count. Returns the expired dirs. O(registered) plus one
+ * /proc scan.
+ */
+function expireDeadWorktreeRegistrations({ isTerminalBranch, holders = listCwdHolders() } = {}) {
+  const expired = [];
+  if (typeof isTerminalBranch !== 'function') return expired;
+  for (const [dir, reg] of [...registeredCheckouts]) {
+    if (hasLiveHolder(dir, holders)) continue;
+    if (!isTerminalBranch(reg.branch)) continue;
+    registeredCheckouts.delete(dir);
+    expiredCheckoutDirs.add(dir);
+    activeWorktreeCount[reg.kind] = Math.max(0, activeWorktreeCount[reg.kind] - 1);
+    expired.push(dir);
+  }
+  return expired;
+}
+
       continue;
     }
     if (/would be overwritten by merge:\s*$/.test(rawLine) && /untracked working tree files/.test(rawLine)) {
@@ -1065,7 +1094,10 @@ async function cleanupWorktree({ kind, cwd, dir, branch, keepBranch }) {
     try { await execGit(['branch', '-D', branch], { cwd, timeout: 10_000 }); } catch { /* already gone */ }
   }
   try { await execGit(['worktree', 'prune'], { cwd, timeout: 10_000 }); } catch { /* best effort */ }
-  activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
+  // A checkout the expiry pass already released must not be counted down twice.
+  const alreadyExpired = dir ? expiredCheckoutDirs.delete(dir) : false;
+  if (dir) registeredCheckouts.delete(dir);
+  if (!alreadyExpired) activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
 }
 
 /**
@@ -1489,3 +1521,4 @@ module.exports = {
     }
   },
 };
+  expireDeadWorktreeRegistrations,

@@ -42,7 +42,7 @@ test('saturated: jobs running, zero free slots', () => {
   ];
   const v = classifyQueueHealth({
     jobs, paused: null, launchBlocks: {}, runningSet: new Set(['1-a']),
-    freeSlots: 0, totalSlots: 4, lastDispatchAttemptAtMs: NOW, now: NOW, cwd: CWD,
+    freeSlots: 0, totalSlots: 4, lastRunAtMs: NOW, now: NOW, cwd: CWD,
   });
   assert.equal(v.kind, 'saturated');
   assert.equal(v.runningCount, 1);
@@ -62,7 +62,7 @@ test('blocked: every pending row terminates in a failed dependency', () => {
   ];
   const v = classifyQueueHealth({
     jobs, paused: null, launchBlocks: {}, runningSet: new Set(),
-    freeSlots: 4, totalSlots: 4, lastDispatchAttemptAtMs: NOW - 5_000, now: NOW, cwd: CWD,
+    freeSlots: 4, totalSlots: 4, lastRunAtMs: NOW - 5_000, now: NOW, cwd: CWD,
   });
   assert.equal(v.kind, 'blocked');
   assert.equal(v.pending, 1);
@@ -77,7 +77,7 @@ test('idle: nothing pending', () => {
   ];
   const v = classifyQueueHealth({
     jobs, paused: null, launchBlocks: {}, runningSet: new Set(),
-    freeSlots: 4, totalSlots: 4, lastDispatchAttemptAtMs: NOW, now: NOW, cwd: CWD,
+    freeSlots: 4, totalSlots: 4, lastRunAtMs: NOW, now: NOW, cwd: CWD,
   });
   assert.equal(v.kind, 'idle');
   assert.equal(v.pending, 0);
@@ -90,7 +90,7 @@ test('stalled: dispatchable work, nothing running, driver idle past threshold', 
   ];
   const v = classifyQueueHealth({
     jobs, paused: null, launchBlocks: {}, runningSet: new Set(),
-    freeSlots: 4, totalSlots: 4, lastDispatchAttemptAtMs: NOW - LONG, now: NOW, cwd: CWD,
+    freeSlots: 4, totalSlots: 4, lastRunAtMs: NOW - LONG, now: NOW, cwd: CWD,
   });
   assert.equal(v.kind, 'stalled');
   assert.equal(v.dispatchable, 1);
@@ -103,7 +103,7 @@ test('running: dispatchable work, nothing running yet, but driver has not been i
   ];
   const v = classifyQueueHealth({
     jobs, paused: null, launchBlocks: {}, runningSet: new Set(),
-    freeSlots: 4, totalSlots: 4, lastDispatchAttemptAtMs: NOW - 5_000, now: NOW, cwd: CWD,
+    freeSlots: 4, totalSlots: 4, lastRunAtMs: NOW - 5_000, now: NOW, cwd: CWD,
   });
   assert.equal(v.kind, 'running');
 });
@@ -114,7 +114,7 @@ test('paused: a decision, not a stall — takes priority over everything else', 
   ];
   const v = classifyQueueHealth({
     jobs, paused: { reason: 'manual', since: NOW }, launchBlocks: {}, runningSet: new Set(),
-    freeSlots: 0, totalSlots: 4, lastDispatchAttemptAtMs: NOW - LONG, now: NOW, cwd: CWD,
+    freeSlots: 0, totalSlots: 4, lastRunAtMs: NOW - LONG, now: NOW, cwd: CWD,
   });
   assert.equal(v.kind, 'paused');
   assert.equal(v.reason, 'manual');
@@ -131,7 +131,7 @@ test('launch-blocked: an open circuit breaker for a persona a pending row actual
   };
   const v = classifyQueueHealth({
     jobs, paused: null, launchBlocks, runningSet: new Set(),
-    freeSlots: 4, totalSlots: 4, lastDispatchAttemptAtMs: NOW - LONG, now: NOW, cwd: CWD,
+    freeSlots: 4, totalSlots: 4, lastRunAtMs: NOW - LONG, now: NOW, cwd: CWD,
   });
   assert.equal(v.kind, 'launch-blocked');
   assert.equal(v.agentType, 'dev-lead');
@@ -148,7 +148,7 @@ test('launch-blocked is scoped: a breaker for a persona nothing pending here use
   };
   const v = classifyQueueHealth({
     jobs, paused: null, launchBlocks, runningSet: new Set(),
-    freeSlots: 4, totalSlots: 4, lastDispatchAttemptAtMs: NOW - 5_000, now: NOW, cwd: CWD,
+    freeSlots: 4, totalSlots: 4, lastRunAtMs: NOW - 5_000, now: NOW, cwd: CWD,
   });
   assert.notEqual(v.kind, 'launch-blocked');
 });
@@ -163,7 +163,7 @@ test('needsReviewCount and cwd scoping: another project\'s rows never leak into 
   ];
   const v = classifyQueueHealth({
     jobs, paused: null, launchBlocks: {}, runningSet: new Set(),
-    freeSlots: 4, totalSlots: 4, lastDispatchAttemptAtMs: NOW - 5_000, now: NOW, cwd: CWD,
+    freeSlots: 4, totalSlots: 4, lastRunAtMs: NOW - 5_000, now: NOW, cwd: CWD,
   });
   assert.equal(v.pending, 1);
   assert.equal(v.needsReviewCount, 1);

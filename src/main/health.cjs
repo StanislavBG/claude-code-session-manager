@@ -16,7 +16,7 @@ const { checkDelegationReadiness } = require('./lib/delegationReadiness.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
 const { migratePrds } = require('./lib/prdMigration.cjs');
 const queueStore = require('./lib/queueStore.cjs');
-const { computeStallSummary, SCHEDULER_STATE_PATH, FAILURE_STREAK_ESCALATION_MS, classifyQueueStarvation, STARVE_ESCALATION_MS } = require('./scheduler.cjs');
+const { computeStallSummary, SCHEDULER_STATE_PATH, FAILURE_STREAK_ESCALATION_MS, classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS } = require('./scheduler.cjs');
 const { findStarvedProjects } = require('./lib/schedulerBatch.cjs');
 const { AUDIT_LOG_PATH } = require('./lib/auditLog.cjs');
 const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
@@ -439,6 +439,10 @@ function evaluateUsagePollerHealth(state, redThresholdMs = FAILURE_STREAK_ESCALA
 // OWN forcing threshold; this is the "even the watchdog isn't helping
 // anymore" signal a human needs to see.
 const DISPATCH_STALL_THRESHOLD_MS = 2 * 60 * 60_000;
+// Early-warning tier off the SAME launch-keyed clock (lastRunAt — a batch
+// actually launched): still ok:true, but flagged so a slow leak surfaces
+// well before the 2-hour cold-report threshold.
+const DISPATCH_WARN_THRESHOLD_MS = 15 * 60_000;
 
 /**
  * evaluateQueueDispatchHealth(queueState, runningCount, now, thresholdMs) →
@@ -453,14 +457,18 @@ const DISPATCH_STALL_THRESHOLD_MS = 2 * 60 * 60_000;
  * `blocked` verdict therefore stays `ok: true` (never trips the health gate)
  * but is still reported by name so it isn't silently invisible either.
  */
-function evaluateQueueDispatchHealth(queueState, runningCount, now, thresholdMs = DISPATCH_STALL_THRESHOLD_MS) {
+function evaluateQueueDispatchHealth(queueState, runningCount, now, thresholdMs = DISPATCH_STALL_THRESHOLD_MS, warnMs = DISPATCH_WARN_THRESHOLD_MS) {
+  // Clock = lastRunAt (launches), never lastDispatchAttemptAt (loop-alive
+  // heartbeat, refreshed by ticks that launch nothing). Cold process: no
+  // in-memory pause/boot stamps to fold in. Breaker-held rows count blocked.
   const verdict = classifyQueueStarvation({
     jobs: queueState?.jobs,
     paused: queueState?.paused,
     runningCount,
-    lastRunAtMs: Date.parse(queueState?.lastDispatchAttemptAt ?? ''),
+    lastRunAtMs: Date.parse(queueState?.lastRunAt ?? ''),
+    heldSlugs: launchBlockedSlugs(queueState?.jobs, queueState?.launchBlocks),
     now,
-    thresholdMs,
+    thresholdMs: Math.min(warnMs, thresholdMs),
   });
   if (!verdict) return { ok: true };
   if (verdict.kind === 'blocked') {
@@ -468,18 +476,21 @@ function evaluateQueueDispatchHealth(queueState, runningCount, now, thresholdMs 
       ok: true,
       blocked: true,
       pending: verdict.pending,
-      message: `${verdict.pending} pending job(s) behind a blocked dependsOn chain — dispatch cannot help, needs a human`,
+      message: `${verdict.pending} pending job(s) behind a blocked dependsOn chain or open launch breaker — dispatch cannot help, needs a human`,
     };
   }
   const ageMin = Math.round(verdict.idleMs / 60_000);
+  const critical = verdict.idleMs >= thresholdMs;
   return {
-    ok: false,
-    starved: true,
+    ok: !critical,
+    ...(critical ? { starved: true } : { warn: true }),
     pending: verdict.pending,
     dispatchable: verdict.dispatchable,
     idleMs: verdict.idleMs,
-    message: `${verdict.dispatchable} dispatchable pending job(s), 0 running, no dispatch attempt in ~${ageMin}m `
-      + `(threshold ${Math.round(thresholdMs / 60_000)}m) — dispatch appears stuck`,
+    message: `${verdict.dispatchable} dispatchable pending job(s), 0 running, no launch in ~${ageMin}m `
+      + (critical
+        ? `(threshold ${Math.round(thresholdMs / 60_000)}m) — dispatch appears stuck`
+        : `(warn at ${Math.round(warnMs / 60_000)}m, fail at ${Math.round(thresholdMs / 60_000)}m) — dispatch may be stalling`),
   };
 }
 
@@ -1006,6 +1017,7 @@ module.exports = {
   evaluateStarveEscalationHealth,
   latestStarveEscalationReasons,
   DISPATCH_STALL_THRESHOLD_MS,
+  DISPATCH_WARN_THRESHOLD_MS,
   TICK_STALL_THRESHOLD_MS,
   HEARTBEAT_STALE_MS,
 };

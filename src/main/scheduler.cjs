@@ -54,7 +54,7 @@ const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const supervisor = require('./supervisor.cjs');
-const { resolveClaudeBin, probeClaudeVersion } = require('./lib/claudeBin.cjs');
+const { resolveClaudeBin, claudeSpawnTarget, probeClaudeVersion } = require('./lib/claudeBin.cjs');
 const launchFailure = require('./lib/launchFailure.cjs');
 const { appendError } = require('./lib/opsErrorLog.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
@@ -2234,7 +2234,15 @@ async function allocateParallelGroup(cwd) {
  * Safety:
  *   - PID-recycling: between app death and this call, another process may have
  *     reused the PID. We read /proc/<pid>/cmdline (Linux) or `ps -p` (macOS)
- *     and only SIGTERM if the cmdline starts with the claude bin path.
+ *     and only SIGTERM if the cmdline matches /\bclaude\b/. Since procName
+ *     aliasing, cmdline[0] is the alias path (`.../procnames/sm-claude-job`) or
+ *     the smArgv0 label (`sm-claude-job:<slug>`), NOT the claude bin path —
+ *     both still contain the word `claude`. The macOS `ps -p <pid> -o command=`
+ *     branch has the same exposure and the same guarantee (ps shows argv0).
+ *     Migration: cmdline is fixed at exec, and no claude procIdentity is
+ *     persisted (job.runtime carries none), so a pre-aliasing process recorded
+ *     and compared after upgrade still compares equal to itself — no
+ *     tolerance needed; unaliased legacy cmdlines also match /\bclaude\b/.
  *   - recordedIdentity (optional): when the caller has a COMPLETE prior
  *     procIdentity for this pid (startTicks + cmdline), it is used only as a
  *     VETO — if it provably differs from the pid's live identity right now,
@@ -3021,6 +3029,9 @@ let firstFailureAt = null;
 let firstNon429FailureAt = null; // tracks only transient/config failures; 429s don't count toward network-pause threshold
 let lastFailureKind = null; // 'transient' | 'meter_rate_limited' | 'auth' | null
 let pauseClearedManuallyAt = null;
+// In-memory only (no new persisted field): when clearPause last actually lifted a pause — a
+// legitimate restart point of the dispatch-idleness clock (dispatchIdleMs).
+let lastPauseClearedAt = null;
 // PRD: the usage-poller silent-failure-streak WARN is emitted once per streak,
 // not once per failure (57 failures must produce ONE opsErrorLog line, not 57).
 // Reset alongside consecutiveFailures everywhere that resets to 0.
@@ -3513,6 +3524,7 @@ async function clearPause(source) {
   });
   // Un-cancel the tick guard on every recovery path, not just runDueJobs().
   applyPauseCleared(wasPaused, cancelToken);
+  if (wasPaused) lastPauseClearedAt = Date.now();
   // Track manual clears for the auto-pause cooldown.
   if (source === 'manual' || source === 'run-now') {
     pauseClearedManuallyAt = Date.now();
@@ -5229,13 +5241,17 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
 
     // ---------- spawn ----------
 
+    // Distinct comm (`sm-claude-job`) + slug-labelled argv0 for System Monitor.
+    // Both keep the word `claude`, which the /\bclaude\b/ reaper gates need.
+    const jobSpawn = claudeSpawnTarget('job', job.slug, claudeBin);
+
     const { child } = withChildAndLog({
       fd,
       logPath,
       safeLog,
       closeFd,
       spawn: {
-        command: claudeBin,
+        command: jobSpawn.command,
         // Resume mode passes `--resume <sessionId>` (reconnect to the SAME
         // session) INSTEAD of `--session-id <sessionId>` (mint a new one) —
         // never both, see buildClaudeSpawnArgs.
@@ -5249,6 +5265,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         options: {
           cwd: spawnCwd,
           env: childEnv,
+          ...(jobSpawn.argv0 ? { argv0: jobSpawn.argv0 } : {}),
           // detached:true puts the child in its own process group so we can kill
           // the entire descendant tree (including any stray background bashes the
           // agent spawned) with `process.kill(-pid)`. Without this, child.kill()
@@ -5761,13 +5778,14 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   };
 
   // Phase 2: spawn with lifecycle managed by withChildAndLog.
+  const probeSpawn = claudeSpawnTarget('aux', 'investigate', claudeBin);
   const { child } = withChildAndLog({
     fd,
     logPath: investigationLogPath,
     safeLog,
     closeFd,
     spawn: {
-      command: claudeBin,
+      command: probeSpawn.command,
       args: [
         '-p', prompt,
         '--model', 'opus',
@@ -5776,7 +5794,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
         '--verbose',
         '--session-id', sessionId,
       ],
-      options: { cwd, env: childEnv },
+      options: { cwd, env: childEnv, ...(probeSpawn.argv0 ? { argv0: probeSpawn.argv0 } : {}) },
     },
     watchdogs: [deadmanWatchdog],
     onExit({ exitCode, error, spawnFailed, safeLog: sl }) {
@@ -7580,8 +7598,9 @@ async function tickBody(gen, { bypassLoadGate }) {
     // regardless of whether this pass ends in a launch — so
     // classifyQueueStarvation can tell "the engine keeps evaluating the
     // queue" apart from "nothing has invoked tickQueue in a long time".
-    // Distinct from `lastRunAt` below, which stays true to its existing
-    // meaning (a batch actually launched) since other readers depend on that.
+    // Distinct from `lastRunAt` below (a batch actually launched): this one
+    // means only "the loop is alive" (heartbeat/health) and must NEVER feed
+    // the idle clock — see dispatchIdleMs.
     await mutate((s) => { s.lastDispatchAttemptAt = new Date().toISOString(); });
     if (stale()) return STALE_TICK;
 
@@ -7805,6 +7824,40 @@ async function maybeLaunchWhenAvailable(state) {
 const QUEUE_STARVATION_MS = 10 * 60_000;
 
 /**
+ * dispatchIdleMs({ lastRunAtMs, lastPauseClearedAtMs, schedulerBootedAtMs, now }) → ms
+ *
+ * Pure. The ONE dispatch-idleness clock: `now - max(lastRunAt, lastPauseClearedAt,
+ * schedulerBootedAt)`. `lastRunAt` has exactly one writer (tickQueue, right
+ * before the spawn loop) so it already means "a batch actually launched";
+ * a pause clear and a scheduler boot are the other two moments the queue
+ * legitimately (re)starts. Deliberately NOT `lastDispatchAttemptAt`, which
+ * tickQueue stamps before every gate — a queue that ticks every 30 s and
+ * launches nothing (leaked slot, stuck hold) would refresh that stamp
+ * forever and never look idle (the structural repeat of the f18e161 bug
+ * where lastRunAt was refreshed every poll). No finite input → Infinity.
+ */
+function dispatchIdleMs({ lastRunAtMs, lastPauseClearedAtMs, schedulerBootedAtMs, now } = {}) {
+  const stamps = [lastRunAtMs, lastPauseClearedAtMs, schedulerBootedAtMs].filter(Number.isFinite);
+  return stamps.length ? now - Math.max(...stamps) : Infinity;
+}
+
+/**
+ * launchBlockedSlugs(jobs, launchBlocks) → Set<slug>
+ *
+ * Pure, sync (health.cjs runs as a cold process). Pending rows whose persona
+ * has ANY launch-breaker entry — a superset of computeLaunchHolds, which
+ * additionally lets one half-open probe row through per persona.
+ */
+function launchBlockedSlugs(jobs, launchBlocks) {
+  const out = new Set();
+  if (!launchBlocks || !Object.keys(launchBlocks).length) return out;
+  for (const j of Array.isArray(jobs) ? jobs : []) {
+    if (j && j.status === 'pending' && launchBlocks[launchFailure.launchBlockKeyFor(j)]) out.add(j.slug);
+  }
+  return out;
+}
+
+/**
  * classifyQueueStarvation({ jobs, paused, runningCount, lastRunAtMs, now, thresholdMs })
  *   → null | { kind: 'starved' | 'blocked', pending, dispatchable, blockedChains, idleMs }
  *
@@ -7831,22 +7884,28 @@ const QUEUE_STARVATION_MS = 10 * 60_000;
  * Returns null when the queue is healthy (work running, nothing pending,
  * paused on purpose, or simply not idle long enough yet).
  */
-function classifyQueueStarvation({ jobs, paused, runningCount, lastRunAtMs, now, thresholdMs = QUEUE_STARVATION_MS } = {}) {
+function classifyQueueStarvation({ jobs, paused, runningCount, lastRunAtMs, lastPauseClearedAtMs, schedulerBootedAtMs, heldSlugs, now, thresholdMs = QUEUE_STARVATION_MS } = {}) {
   if (paused) return null;                      // paused is a DECISION, not a stall
   if (runningCount > 0) return null;            // work is flowing
   const rows = Array.isArray(jobs) ? jobs : [];
   const pending = rows.filter((j) => j && j.status === 'pending');
   if (pending.length === 0) return null;        // nothing to run — not a stall
 
-  const idleMs = Number.isFinite(lastRunAtMs) ? now - lastRunAtMs : Infinity;
+  const idleMs = dispatchIdleMs({ lastRunAtMs, lastPauseClearedAtMs, schedulerBootedAtMs, now });
   if (idleMs < thresholdMs) return null;        // give the normal path its chance first
 
   // Which pending rows could actually dispatch? Anything NOT named by a
-  // blocked chain. computeBlockedChains already walks dependsOn with the
-  // picker's own resolution, so the two can never disagree.
+  // blocked chain (computeBlockedChains walks dependsOn with the picker's own
+  // resolution, so the two can never disagree) and NOT held by an open launch
+  // breaker / the quietMachine lease (`heldSlugs` — a separate input, never
+  // folded into the dependsOn walker). Held rows can't launch no matter how
+  // often we tick, so they read as 'blocked' (needs a human), not 'starved'.
   const blockedChains = computeBlockedChains(rows);
-  const blockedTotal = blockedChains.reduce((n, c) => n + c.blocked, 0);
-  const dispatchable = pending.length - blockedTotal;
+  const held = heldSlugs?.has ? heldSlugs : new Set(heldSlugs ?? []);
+  const open = held.size > 0 ? rows.filter((j) => !(j.status === 'pending' && held.has(j.slug))) : rows;
+  const openBlocked = held.size > 0 ? computeBlockedChains(open) : blockedChains;
+  const openPending = open.filter((j) => j.status === 'pending').length;
+  const dispatchable = openPending - openBlocked.reduce((n, c) => n + c.blocked, 0);
 
   return {
     kind: dispatchable > 0 ? 'starved' : 'blocked',
@@ -7869,14 +7928,14 @@ function classifyQueueStarvation({ jobs, paused, runningCount, lastRunAtMs, now,
  * projects sat starved/blocked for hours, and the watchdog never fired once
  * because "work is flowing" was true somewhere else. Partitioning by cwd
  * (the same grouping computeBlockedChains already does) fixes DETECTION only
- * — the idle clock (`lastRunAtMs`) stays machine-wide, since
- * `lastDispatchAttemptAt` is machine-level state, and only one tick is ever
+ * — the idle clock (see dispatchIdleMs) stays machine-wide, since
+ * `lastRunAt` is machine-level state, and only one tick is ever
  * forced per watchdog pass regardless of how many cwds are starved.
  *
  * Pure, no IO. Returns [] when paused (a DECISION, not a stall) or when no
  * project has a verdict.
  */
-function classifyQueueStarvationByProject({ jobs, paused, runningSet: runningSlugs, lastRunAtMs, now, thresholdMs = QUEUE_STARVATION_MS } = {}) {
+function classifyQueueStarvationByProject({ jobs, paused, runningSet: runningSlugs, lastRunAtMs, lastPauseClearedAtMs, schedulerBootedAtMs, heldSlugs, now, thresholdMs = QUEUE_STARVATION_MS } = {}) {
   if (paused) return [];
   const rows = (Array.isArray(jobs) ? jobs : []).filter(Boolean);
   const byCwd = new Map();
@@ -7898,6 +7957,9 @@ function classifyQueueStarvationByProject({ jobs, paused, runningSet: runningSlu
       paused: false,
       runningCount: projRunningCount,
       lastRunAtMs,
+      lastPauseClearedAtMs,
+      schedulerBootedAtMs,
+      heldSlugs,
       now,
       thresholdMs,
     });
@@ -7908,7 +7970,7 @@ function classifyQueueStarvationByProject({ jobs, paused, runningSet: runningSlu
 
 /**
  * classifyQueueHealth({ jobs, paused, launchBlocks, runningSet, freeSlots,
- *                        totalSlots, lastDispatchAttemptAtMs, now, cwd, thresholdMs })
+ *                        totalSlots, lastRunAtMs, lastPauseClearedAtMs, schedulerBootedAtMs, now, cwd, thresholdMs })
  *   → { kind, cwd, pending, dispatchable, blockedChains, needsReviewCount, runningCount, ... }
  *
  * Single source of truth for the Scheduler page's queue-health header: the
@@ -7919,7 +7981,7 @@ function classifyQueueStarvationByProject({ jobs, paused, runningSet: runningSlu
  *
  * Reuses classifyQueueStarvation for the blocked/stalled read so the header
  * can never disagree with runQueueStarvationWatchdog's own decision to force
- * a tick: both are handed the same lastDispatchAttemptAt-based idle clock and
+ * a tick: both are handed the same launch-keyed idle clock (dispatchIdleMs) and
  * the same computeBlockedChains walk under the hood. Called here with
  * `thresholdMs: 0` first (a live header must say "blocked" the instant every
  * pending row is dependency-stuck, not wait out the watchdog's own 10-minute
@@ -7956,7 +8018,7 @@ function classifyQueueStarvationByProject({ jobs, paused, runningSet: runningSlu
  */
 function classifyQueueHealth({
   jobs, paused, launchBlocks, runningSet: runningSlugs, freeSlots, totalSlots,
-  lastDispatchAttemptAtMs, now, cwd = null, thresholdMs = QUEUE_STARVATION_MS,
+  lastRunAtMs, lastPauseClearedAtMs, schedulerBootedAtMs, now, cwd = null, thresholdMs = QUEUE_STARVATION_MS,
 } = {}) {
   const rows = (Array.isArray(jobs) ? jobs : []).filter(Boolean);
   const projectJobs = cwd ? rows.filter((j) => j.cwd === cwd) : rows;
@@ -8006,18 +8068,21 @@ function classifyQueueHealth({
   // over the same rows), so `base` already carries them.
   const immediate = classifyQueueStarvation({
     jobs: projectJobs, paused: false, runningCount: 0,
-    lastRunAtMs: lastDispatchAttemptAtMs, now, thresholdMs: 0,
+    lastRunAtMs, lastPauseClearedAtMs, schedulerBootedAtMs, now, thresholdMs: 0,
   });
   // pending.length is already > 0 above, so `immediate` can only be null when
-  // lastDispatchAttemptAtMs is itself in the future (clock skew) — fall back
-  // to computing idleMs the same way rather than asserting a kind we can't
+  // the clock stamp is itself in the future (clock skew) — fall back to
+  // computing idleMs the same way rather than asserting a kind we can't
   // back up with a real number.
   const idleMs = immediate ? immediate.idleMs
-    : (Number.isFinite(lastDispatchAttemptAtMs) ? now - lastDispatchAttemptAtMs : Infinity);
+    : dispatchIdleMs({ lastRunAtMs, lastPauseClearedAtMs, schedulerBootedAtMs, now });
   if (dispatchable === 0) return { ...base, kind: 'blocked', idleMs };
   const kind = idleMs >= thresholdMs ? 'stalled' : 'running';
   return { ...base, kind, idleMs };
 }
+
+// Per-cwd latch for runQueueStarvationWatchdog: cwd → { kind, at, running }.
+const starvationLatch = new Map();
 
 /**
  * The watchdog half: acts on classifyQueueStarvationByProject. Called from
@@ -8031,33 +8096,55 @@ function classifyQueueHealth({
  * the tick itself is machine-wide (it drives whatever the picker finds
  * across every project), only the DETECTION is per-project.
  */
-async function runQueueStarvationWatchdog(state, { now = Date.now(), thresholdMs = QUEUE_STARVATION_MS } = {}) {
-  // lastDispatchAttemptAt, not lastRunAt: the latter only advances when a
-  // batch actually launches, so a poll that keeps succeeding while dispatch
-  // itself never gets invoked would otherwise mask a stall behind a fresh-
-  // looking timestamp that was never actually tracking dispatch liveness.
+async function runQueueStarvationWatchdog(state, {
+  now = Date.now(), thresholdMs = QUEUE_STARVATION_MS,
+  bootedAtMs = Date.parse(SCHEDULER_BOOTED_AT), pauseClearedAtMs = lastPauseClearedAt,
+} = {}) {
+  // The idle clock is launch-keyed (dispatchIdleMs): NOT lastDispatchAttemptAt,
+  // which tickQueue stamps before every gate — a queue whose 30 s loop ticks
+  // and launches nothing would refresh it forever and the watchdog would
+  // never fire. Rows held by an open launch breaker or the quietMachine lease
+  // can't launch however often we tick, so they're passed in as `heldSlugs`
+  // and read as 'blocked' (needs a human) rather than a false 'starved'.
+  const heldSlugs = new Set((await computeLaunchHolds(state)).keys());
+  if (quietMachineLease.isHeld()) {
+    for (const j of state?.jobs ?? []) if (j?.status === 'pending' && j.quietMachine === true) heldSlugs.add(j.slug);
+  }
   const verdicts = classifyQueueStarvationByProject({
     jobs: state?.jobs,
     paused: state?.paused,
     runningSet,
-    lastRunAtMs: Date.parse(state?.lastDispatchAttemptAt ?? ''),
+    lastRunAtMs: Date.parse(state?.lastRunAt ?? ''),
+    lastPauseClearedAtMs: pauseClearedAtMs,
+    schedulerBootedAtMs: bootedAtMs,
+    heldSlugs,
     now,
     thresholdMs,
   });
+  // Latch: one episode per (cwd, kind) — re-arms only once QUEUE_STARVATION_MS
+  // has elapsed again or the project's running count changes; forgotten the
+  // moment the cwd stops having a verdict at all.
+  const activeKeys = new Set(verdicts.map((v) => v.cwd));
+  for (const cwd of [...starvationLatch.keys()]) if (!activeKeys.has(cwd)) starvationLatch.delete(cwd);
   if (verdicts.length === 0) return null;
 
   let anyStarved = false;
   let primary = null;
   for (const verdict of verdicts) {
     const mins = Math.round(verdict.idleMs / 60_000);
+    const running = (state?.jobs ?? []).filter((j) => j?.cwd === verdict.cwd && (j.status === 'running' || runningSet.has(j.slug))).length;
+    const latched = starvationLatch.get(verdict.cwd);
+    const suppressed = !!latched && latched.kind === verdict.kind && latched.running === running && now - latched.at < QUEUE_STARVATION_MS;
+    if (!primary) primary = verdict;
+    if (suppressed) continue;
+    starvationLatch.set(verdict.cwd, { kind: verdict.kind, at: now, running });
     if (verdict.kind === 'blocked') {
       console.warn(
         `[scheduler] QUEUE BLOCKED (${verdict.cwd}): ${verdict.pending} pending job(s), 0 running, idle ${mins}m — every ready row is behind a `
-        + `terminal or parked dependency, so ticking cannot help. Blockers: `
+        + `terminal or parked dependency, an open launch breaker, or the quietMachine lease, so ticking cannot help. Blockers: `
         + verdict.blockedChains.map((c) => `${c.cwd} [${c.blockedBy.join(', ')}]`).join(' · '),
       );
       appendAuditEvent('queue_blocked_stall', { cwd: verdict.cwd, pending: verdict.pending, idleMs: verdict.idleMs, chains: verdict.blockedChains });
-      if (!primary) primary = verdict;
       continue;
     }
 
@@ -10232,7 +10319,9 @@ function registerScheduleHandlers() {
       runningSet,
       freeSlots,
       totalSlots: slotSnapshot.total,
-      lastDispatchAttemptAtMs: Date.parse(state.lastDispatchAttemptAt ?? ''),
+      lastRunAtMs: Date.parse(state.lastRunAt ?? ''),
+      lastPauseClearedAtMs: lastPauseClearedAt,
+      schedulerBootedAtMs: Date.parse(SCHEDULER_BOOTED_AT),
       now,
       cwd,
     });
@@ -11658,6 +11747,8 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
 module.exports = {
   classifyQueueStarvation,
   classifyQueueStarvationByProject,
+  dispatchIdleMs,
+  launchBlockedSlugs,
   classifyQueueHealth,
   runQueueStarvationWatchdog,
   QUEUE_STARVATION_MS,
@@ -11805,6 +11896,7 @@ module.exports = {
   SCHEDULER_CODE_SHA,
   resetJobFields,
   executeJob,
+  killOrphanClaudePid,
   prdArchivedSkipResult,
   spawnJob,
   listPrdsInternal,

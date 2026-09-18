@@ -16,7 +16,8 @@ const { checkDelegationReadiness } = require('./lib/delegationReadiness.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
 const { migratePrds } = require('./lib/prdMigration.cjs');
 const queueStore = require('./lib/queueStore.cjs');
-const { computeStallSummary, SCHEDULER_STATE_PATH, FAILURE_STREAK_ESCALATION_MS, classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS } = require('./scheduler.cjs');
+const schedulerPaths = require('./lib/schedulerPaths.cjs');
+const { computeStallSummary, FAILURE_STREAK_ESCALATION_MS, classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS } = require('./scheduler.cjs');
 const { findStarvedProjects } = require('./lib/schedulerBatch.cjs');
 const { AUDIT_LOG_PATH } = require('./lib/auditLog.cjs');
 const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
@@ -611,7 +612,7 @@ async function check() {
   };
 
   // 2. Check config directory exists and is writable.
-  const configDir = path.join(os.homedir(), '.claude');
+  const configDir = schedulerPaths.claudeHome();
   try {
     await fsp.access(configDir, fs.constants.R_OK | fs.constants.W_OK);
     const stat = await fsp.stat(configDir);
@@ -633,7 +634,7 @@ async function check() {
   // 3. Check scheduler state (federated, 2026-07-31): machine runtime file +
   // per-project job shards merged via queueStore — the retired global
   // queue.json is no longer consulted.
-  const queuePath = queueStore.MACHINE_STATE_PATH;
+  const queuePath = schedulerPaths.machineStatePath();
   let queueState = null;
   try {
     queueState = queueStore.readMergedSync();
@@ -663,11 +664,7 @@ async function check() {
     const quarantinedCount = Object.values(queueState.jobs || {}).filter(
       (j) => j.status === 'quarantined'
     ).length;
-    const heartbeatPath = path.join(
-      os.homedir(),
-      '.claude/session-manager/scheduler-heartbeat.log'
-    );
-    const heartbeat = readFreshHeartbeat(heartbeatPath);
+    const heartbeat = readFreshHeartbeat(schedulerPaths.heartbeatPath());
     const liveness = evaluateTickLiveness(queueState, heartbeat, Date.now(), runningCount);
 
     // Per-project rollup (PRD: monitoring must not collapse per-project
@@ -785,7 +782,7 @@ async function check() {
   // failure. A CORRUPT file (the torn-write class fixed for the sibling
   // scheduler-machine.json in f56bdc0) is NOT the same as missing — surfaced
   // as non-GREEN rather than fail-open, via loadUsagePollerState below.
-  const loaded = loadUsagePollerState(SCHEDULER_STATE_PATH);
+  const loaded = loadUsagePollerState(schedulerPaths.schedulerStatePath());
   if (loaded.missing) {
     status.components.usage_poller = { ok: true, applicable: false };
   } else if (loaded.errorMessage) {
@@ -829,10 +826,7 @@ async function check() {
   // of a stale installed build vs. the git repo — it fires regardless of
   // *why* the build is stale (the 2026-07-31 burrow-project ENOENT + the
   // 223-file/189-resurrected-job incident both trace back to this).
-  const legacyPrdsDir = path.join(
-    os.homedir(),
-    '.claude/session-manager/scheduled-plans/prds'
-  );
+  const legacyPrdsDir = schedulerPaths.prdsRoot();
   try {
     const migrationResult = await migratePrds(legacyPrdsDir);
     status.components.prd_migration = evaluatePrdMigrationHealth(migrationResult, legacyPrdsDir);
@@ -848,7 +842,7 @@ async function check() {
   }
 
   // 5. Check transcripts directory (where live session logs are tailed).
-  const projectsDir = path.join(os.homedir(), '.claude/projects');
+  const projectsDir = schedulerPaths.claudeProjectsDir();
   try {
     await fsp.access(projectsDir, fs.constants.R_OK);
     status.components.transcripts_dir = {
@@ -865,10 +859,7 @@ async function check() {
   }
 
   // 6. Check session-manager's own logs (informational, not blocking).
-  const smLogsDir = path.join(
-    os.homedir(),
-    '.claude/session-manager/logs'
-  );
+  const smLogsDir = schedulerPaths.watchdogLogsDir();
   let logAge = null;
   try {
     const files = await fsp.readdir(smLogsDir);

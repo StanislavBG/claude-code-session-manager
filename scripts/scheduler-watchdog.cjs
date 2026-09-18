@@ -24,7 +24,6 @@ setProcessTitle(PROC_NAMES.watchdog);
 // queue/feedback ownership and out of scope for PRD 686's consolidation.)
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 const {
@@ -32,23 +31,21 @@ const {
   localDateStr,
   maybeFinalizeHistory,
   maybeRelaunchApp,
-  DEFAULT_HEARTBEAT_PATH,
   DEFAULT_MAX_AGE_MS,
 } = require('../src/main/lib/watchdogHelpers.cjs');
+const schedulerPaths = require('../src/main/lib/schedulerPaths.cjs');
 
 // ---------- paths ----------
 
-const LOGS_DIR = path.join(os.homedir(), '.claude', 'session-manager', 'logs');
-
 function logPath() {
-  return path.join(LOGS_DIR, `watchdog-${localDateStr()}.log`);
+  return path.join(schedulerPaths.watchdogLogsDir(), `watchdog-${localDateStr()}.log`);
 }
 
 // ---------- logging ----------
 
 function appendLog(entry) {
   try {
-    fs.mkdirSync(LOGS_DIR, { recursive: true });
+    fs.mkdirSync(schedulerPaths.watchdogLogsDir(), { recursive: true });
     fs.appendFileSync(logPath(), JSON.stringify(entry) + '\n');
   } catch (e) {
     process.stderr.write(`[watchdog] log write failed: ${e?.message}\n`);
@@ -80,7 +77,7 @@ async function main() {
 
   // Single read: derive both heartbeatAgeMs (for the log) and fresh (for
   // branching) from the same snapshot so they are always consistent.
-  const lastTs = readLastHeartbeatTs(DEFAULT_HEARTBEAT_PATH);
+  const lastTs = readLastHeartbeatTs(schedulerPaths.heartbeatPath());
   const heartbeatAgeMs = lastTs !== null ? now - lastTs : null;
   const fresh = lastTs !== null && heartbeatAgeMs < DEFAULT_MAX_AGE_MS;
   const decision = fresh ? 'alive' : 'stale';

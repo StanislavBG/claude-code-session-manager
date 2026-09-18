@@ -4,14 +4,10 @@
 // Testable without spawning the watchdog entry script.
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
+const schedulerPaths = require('./schedulerPaths.cjs');
 
 
-// Mirrors scheduler.cjs:215 (single source of truth there; kept in sync here).
-const DEFAULT_HEARTBEAT_PATH = path.join(
-  os.homedir(), '.claude', 'session-manager', 'scheduler-heartbeat.log',
-);
 
 // The in-app heartbeat ticks every 60 s; 3 missed ticks = stale.
 const DEFAULT_MAX_AGE_MS = 180_000;
@@ -40,7 +36,7 @@ const TAIL_BYTES = 4096;
  * Single source of truth for the file-read + reverse-scan logic; used by
  * readLastHeartbeatTs() and heartbeatFresh().
  */
-function readLastHeartbeat(heartbeatPath = DEFAULT_HEARTBEAT_PATH) {
+function readLastHeartbeat(heartbeatPath = schedulerPaths.heartbeatPath()) {
   let buf;
   try {
     const stat = fs.statSync(heartbeatPath);
@@ -79,7 +75,7 @@ function readLastHeartbeat(heartbeatPath = DEFAULT_HEARTBEAT_PATH) {
  * Returns the `ts` field (epoch ms) from the last heartbeat entry.
  * Returns null on missing / empty / unparseable file or missing ts field.
  */
-function readLastHeartbeatTs(heartbeatPath = DEFAULT_HEARTBEAT_PATH) {
+function readLastHeartbeatTs(heartbeatPath = schedulerPaths.heartbeatPath()) {
   const entry = readLastHeartbeat(heartbeatPath);
   return (entry !== null && typeof entry.ts === 'number') ? entry.ts : null;
 }
@@ -90,7 +86,7 @@ function readLastHeartbeatTs(heartbeatPath = DEFAULT_HEARTBEAT_PATH) {
  * Returns true iff the last heartbeat ts is within maxAgeMs of `now`.
  * Missing / empty / unparseable file → false.
  */
-function heartbeatFresh(heartbeatPath = DEFAULT_HEARTBEAT_PATH, maxAgeMs = DEFAULT_MAX_AGE_MS) {
+function heartbeatFresh(heartbeatPath = schedulerPaths.heartbeatPath(), maxAgeMs = DEFAULT_MAX_AGE_MS) {
   const ts = readLastHeartbeatTs(heartbeatPath);
   if (ts === null) return false;
   return (Date.now() - ts) < maxAgeMs;
@@ -132,12 +128,6 @@ function isPidAlive(pid) {
 // 60 s by scheduler.cjs's heartbeatInterval regardless of pause state) as the
 // liveness signal — no second heartbeat file.
 
-const DEFAULT_RELAUNCH_STATE_PATH = path.join(
-  os.homedir(), '.claude', 'session-manager', 'watchdog-relaunch-state.json',
-);
-const DEFAULT_RELAUNCH_LOG_PATH = path.join(
-  os.homedir(), '.claude', 'logs', 'scheduler-watchdog-relaunch.log',
-);
 const DEFAULT_RELAUNCH_DEBOUNCE_MS = 90_000;
 const DEFAULT_MAX_RELAUNCH_ATTEMPTS = 3;
 
@@ -150,7 +140,7 @@ const DEFAULT_MAX_RELAUNCH_ATTEMPTS = 3;
  * rather than relaunching on top of a live process.
  */
 function checkAppLiveness({
-  heartbeatPath = DEFAULT_HEARTBEAT_PATH,
+  heartbeatPath = schedulerPaths.heartbeatPath(),
   maxAgeMs = DEFAULT_MAX_AGE_MS,
 } = {}) {
   if (heartbeatFresh(heartbeatPath, maxAgeMs)) {
@@ -164,7 +154,7 @@ function checkAppLiveness({
 }
 
 /** Default { lastAttemptTs: null, attemptCount: 0 } on missing/unparseable state file. */
-function readRelaunchState(statePath = DEFAULT_RELAUNCH_STATE_PATH) {
+function readRelaunchState(statePath = schedulerPaths.watchdogRelaunchStatePath()) {
   try {
     const raw = JSON.parse(fs.readFileSync(statePath, 'utf8'));
     return {
@@ -203,7 +193,7 @@ function logRelaunchLine(logPath, message) {
  * (short-lived) process doesn't block on the launched app and the app
  * survives the watchdog exiting.
  */
-function defaultSpawnRelaunch({ logPath = DEFAULT_RELAUNCH_LOG_PATH } = {}) {
+function defaultSpawnRelaunch({ logPath = schedulerPaths.watchdogRelaunchLogPath() } = {}) {
   const { spawn } = require('node:child_process');
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
   const fd = fs.openSync(logPath, 'a');
@@ -236,10 +226,10 @@ function defaultSpawnRelaunch({ logPath = DEFAULT_RELAUNCH_LOG_PATH } = {}) {
  * intervenes or the app comes up some other way.
  */
 function maybeRelaunchApp({
-  heartbeatPath = DEFAULT_HEARTBEAT_PATH,
+  heartbeatPath = schedulerPaths.heartbeatPath(),
   maxAgeMs = DEFAULT_MAX_AGE_MS,
-  statePath = DEFAULT_RELAUNCH_STATE_PATH,
-  logPath = DEFAULT_RELAUNCH_LOG_PATH,
+  statePath = schedulerPaths.watchdogRelaunchStatePath(),
+  logPath = schedulerPaths.watchdogRelaunchLogPath(),
   debounceMs = DEFAULT_RELAUNCH_DEBOUNCE_MS,
   maxAttempts = DEFAULT_MAX_RELAUNCH_ATTEMPTS,
   now = Date.now(),
@@ -286,12 +276,6 @@ function maybeRelaunchApp({
 // walk/persist logic — this is just the once-per-day scheduling + lock
 // wrapper around it, tailored to being invoked repeatedly by a systemd timer.
 
-const DEFAULT_STAMP_PATH = path.join(
-  os.homedir(), '.claude', 'session-manager', 'history-rollup.stamp',
-);
-const DEFAULT_LOCK_PATH = path.join(
-  os.homedir(), '.claude', 'session-manager', 'history-rollup.lock',
-);
 const DEFAULT_LOCK_STALE_MS = 10 * 60 * 1000; // 10 min
 const DEFAULT_FINALIZE_BUDGET_MS = 60_000;
 
@@ -384,8 +368,8 @@ function defaultFinalizeClosedDays(opts) {
  *   finalizeFn  — injectable finalizeClosedDays for testing
  */
 async function maybeFinalizeHistory({
-  stampPath = DEFAULT_STAMP_PATH,
-  lockPath = DEFAULT_LOCK_PATH,
+  stampPath = schedulerPaths.historyRollupStampPath(),
+  lockPath = schedulerPaths.historyRollupLockPath(),
   staleLockMs = DEFAULT_LOCK_STALE_MS,
   budgetMs = DEFAULT_FINALIZE_BUDGET_MS,
   dryRun = process.env.SM_WATCHDOG_DRYRUN === '1',
@@ -433,14 +417,20 @@ module.exports = {
   writeRelaunchState,
   defaultSpawnRelaunch,
   maybeRelaunchApp,
-  DEFAULT_HEARTBEAT_PATH,
   DEFAULT_MAX_AGE_MS,
-  DEFAULT_STAMP_PATH,
-  DEFAULT_LOCK_PATH,
   DEFAULT_LOCK_STALE_MS,
   DEFAULT_FINALIZE_BUDGET_MS,
-  DEFAULT_RELAUNCH_STATE_PATH,
-  DEFAULT_RELAUNCH_LOG_PATH,
   DEFAULT_RELAUNCH_DEBOUNCE_MS,
   DEFAULT_MAX_RELAUNCH_ATTEMPTS,
 };
+
+// Lazy default-path getters (SM_SCHEDULER_HOME resolved at read, never at require).
+for (const [name, resolve] of [
+  ['DEFAULT_HEARTBEAT_PATH', schedulerPaths.heartbeatPath],
+  ['DEFAULT_STAMP_PATH', schedulerPaths.historyRollupStampPath],
+  ['DEFAULT_LOCK_PATH', schedulerPaths.historyRollupLockPath],
+  ['DEFAULT_RELAUNCH_STATE_PATH', schedulerPaths.watchdogRelaunchStatePath],
+  ['DEFAULT_RELAUNCH_LOG_PATH', schedulerPaths.watchdogRelaunchLogPath],
+]) {
+  Object.defineProperty(module.exports, name, { get: resolve, enumerable: true });
+}

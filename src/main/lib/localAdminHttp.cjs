@@ -32,40 +32,20 @@
 'use strict';
 
 const http = require('node:http');
-const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const fsp = require('node:fs/promises');
 const config = require('../config.cjs');
-
-const TOKEN_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'admin-api.json');
+const schedulerPaths = require('./schedulerPaths.cjs');
 
 /**
- * Mode-aware token file path, resolved fresh on every call (not cached at
+ * Mode-aware token file path, resolved fresh on every call (never cached at
  * module load) so a dev/e2e launch never collides with a production
- * instance's admin-api.json. index.cjs treats SM_DEV and SM_E2E as one OR'd
- * `isDev` boolean with no ordering between them; if both happen to be set,
- * this resolves to the SM_DEV path (checked first below) — an arbitrary but
- * harmless tie-break, since real launches only ever set one or the other.
+ * instance's admin-api.json. The SM_ADMIN_TOKEN_PATH / SM_DEV / SM_E2E ladder
+ * lives in schedulerPaths.adminTokenPath() (the SM_ADMIN_TOKEN_PATH override
+ * exists because unit tests once overwrote the live app's port+token).
  */
-function resolveTokenPath() {
-  // Explicit override, highest priority. Exists because the unit tests call
-  // createAdminHttp().start() directly with neither SM_DEV nor SM_E2E set,
-  // which resolved to the PRODUCTION admin-api.json and overwrote the
-  // running app's port+token with a throwaway test server's — silently
-  // orphaning scheduler-mcp-server.cjs's access to the live app until the
-  // next app restart (confirmed live 2026-08-01: `npm run test:unit` made
-  // every scheduler_* MCP tool report "app is not running"). Tests point
-  // this at a tmp file; production never sets it.
-  if (process.env.SM_ADMIN_TOKEN_PATH) return process.env.SM_ADMIN_TOKEN_PATH;
-  if (process.env.SM_DEV === '1') {
-    return path.join(os.homedir(), '.claude', 'session-manager', 'admin-api.dev.json');
-  }
-  if (process.env.SM_E2E === '1') {
-    return path.join(os.homedir(), '.claude', 'session-manager', 'admin-api.e2e.json');
-  }
-  return TOKEN_PATH;
-}
+const resolveTokenPath = schedulerPaths.adminTokenPath;
 
 // Reserved health-check path, handled directly (not via registerRoute) so
 // start()'s post-boot self-check never depends on route-registration order
@@ -238,9 +218,11 @@ function createAdminHttp() {
 
 module.exports = {
   createAdminHttp,
-  TOKEN_PATH,
   resolveTokenPath,
   timingSafeEqualStrings,
   readBody,
   sendJson,
 };
+
+// Lazy getter (the token path is mode-aware and env-driven; never frozen at require).
+Object.defineProperty(module.exports, 'TOKEN_PATH', { get: () => schedulerPaths.adminTokenPath(), enumerable: true });

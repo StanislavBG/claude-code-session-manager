@@ -31,14 +31,12 @@
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
-const os = require('node:os');
 const crypto = require('node:crypto');
 const { allProjectCwds, activeProjectCwds, bustProjectCwdCache } = require('./activeSessions.cjs');
 const { assertOpsWrite, resolveOpsRoot, OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 const { ScheduleJobSchema } = require('./scheduleJobSchema.cjs');
+const schedulerPaths = require('./schedulerPaths.cjs');
 
-const MACHINE_STATE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduler-machine.json');
-const LEGACY_QUEUE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'queue.json');
 const OPS_DIRNAME = OPS_ROOT_DIR;
 const STATE_SUBPATH = ['scheduler', 'state'];
 
@@ -291,7 +289,6 @@ function findLongestValidJsonPrefix(raw) {
 // project's own ops root is the natural home for a machine-level log entry,
 // mirroring scheduler.cjs's own `job.cwd || DEFAULT_PROJECT_CWD` fallback for
 // cwd-less machine errors (schedulerBatch.cjs's DEFAULT_PROJECT_CWD).
-const MACHINE_STATE_LOG_CWD = path.join(os.homedir(), 'Projects', 'session-manager');
 
 // The truncated tail in the real 2026-09-11 tear contained an orphaned
 // `resumeAt` fragment with no way to reconstruct the `paused` object it
@@ -306,7 +303,7 @@ const PAUSED_HINT_RE = /"paused"|resumeAt/;
 function logMachineStateRecovery({ level, message, meta }) {
   try {
     const { appendError } = require('./opsErrorLog.cjs');
-    appendError({ cwd: MACHINE_STATE_LOG_CWD, scope: 'scheduler', level, message, meta });
+    appendError({ cwd: schedulerPaths.machineStateLogCwd(), scope: 'scheduler', level, message, meta });
   } catch { /* durable logging must never block recovery */ }
   console.error(`[queueStore] ${message}`);
 }
@@ -331,7 +328,7 @@ function buildMachineStateRecovery(raw, parseError) {
           ? '; the discarded tail looks like it contained paused/resumeAt data that could not '
             + 'be reconstructed — verify pause status manually'
           : ''),
-      meta: { path: MACHINE_STATE_PATH, prefixLength: prefix.prefixLength, totalLength: raw.length, pausedHint },
+      meta: { path: schedulerPaths.machineStatePath(), prefixLength: prefix.prefixLength, totalLength: raw.length, pausedHint },
     };
   }
   // No valid JSON prefix at all: fall back to defaults (shapeMachine({}) —
@@ -344,7 +341,7 @@ function buildMachineStateRecovery(raw, parseError) {
     message:
       `scheduler-machine.json unrecoverable (${parseError?.message}) — falling back to defaults `
       + 'so dispatch does not silently halt',
-    meta: { path: MACHINE_STATE_PATH, totalLength: raw.length },
+    meta: { path: schedulerPaths.machineStatePath(), totalLength: raw.length },
   };
 }
 
@@ -352,7 +349,7 @@ function recoverTornMachineStateSync(raw, parseError) {
   const recovery = buildMachineStateRecovery(raw, parseError);
   logMachineStateRecovery(recovery);
   try {
-    writeJsonAtomicSync(MACHINE_STATE_PATH, recovery.value);
+    writeJsonAtomicSync(schedulerPaths.machineStatePath(), recovery.value);
   } catch (e) {
     console.error(`[queueStore] failed to persist recovered machine state: ${e?.message}`);
   }
@@ -363,7 +360,7 @@ async function recoverTornMachineState(raw, parseError) {
   const recovery = buildMachineStateRecovery(raw, parseError);
   logMachineStateRecovery(recovery);
   try {
-    await writeJsonAtomic(MACHINE_STATE_PATH, recovery.value);
+    await writeJsonAtomic(schedulerPaths.machineStatePath(), recovery.value);
   } catch (e) {
     console.error(`[queueStore] failed to persist recovered machine state: ${e?.message}`);
   }
@@ -378,10 +375,10 @@ async function recoverTornMachineState(raw, parseError) {
 function loadMachineStateSync() {
   let raw;
   try {
-    raw = fs.readFileSync(MACHINE_STATE_PATH, 'utf8');
+    raw = fs.readFileSync(schedulerPaths.machineStatePath(), 'utf8');
   } catch (e) {
     if (e?.code === 'ENOENT') return {};
-    return { unreadable: `machine state unreadable: ${e?.message}`, unreadablePath: MACHINE_STATE_PATH };
+    return { unreadable: `machine state unreadable: ${e?.message}`, unreadablePath: schedulerPaths.machineStatePath() };
   }
   try {
     return { shaped: shapeMachine(JSON.parse(raw)) };
@@ -394,10 +391,10 @@ function loadMachineStateSync() {
 async function loadMachineState() {
   let raw;
   try {
-    raw = await fsp.readFile(MACHINE_STATE_PATH, 'utf8');
+    raw = await fsp.readFile(schedulerPaths.machineStatePath(), 'utf8');
   } catch (e) {
     if (e?.code === 'ENOENT') return {};
-    return { unreadable: `machine state unreadable: ${e?.message}`, unreadablePath: MACHINE_STATE_PATH };
+    return { unreadable: `machine state unreadable: ${e?.message}`, unreadablePath: schedulerPaths.machineStatePath() };
   }
   try {
     return { shaped: shapeMachine(JSON.parse(raw)) };
@@ -535,7 +532,7 @@ function defineSources(state, sourceCwds) {
  * deletions stick.
  */
 async function writeSplit(state, defaultCwd) {
-  await writeJsonAtomic(MACHINE_STATE_PATH, {
+  await writeJsonAtomic(schedulerPaths.machineStatePath(), {
     config: state.config,
     scheduledFor: state.scheduledFor ?? null,
     lastRunAt: state.lastRunAt ?? null,
@@ -583,7 +580,7 @@ async function writeSplit(state, defaultCwd) {
 async function migrateLegacyGlobalQueue(defaultCwd) {
   let raw;
   try {
-    raw = await fsp.readFile(LEGACY_QUEUE_PATH, 'utf8');
+    raw = await fsp.readFile(schedulerPaths.legacyQueuePath(), 'utf8');
   } catch {
     return { migrated: false };
   }
@@ -595,8 +592,8 @@ async function migrateLegacyGlobalQueue(defaultCwd) {
     return { migrated: false, error: e?.message };
   }
 
-  if (!fs.existsSync(MACHINE_STATE_PATH)) {
-    await writeJsonAtomic(MACHINE_STATE_PATH, {
+  if (!fs.existsSync(schedulerPaths.machineStatePath())) {
+    await writeJsonAtomic(schedulerPaths.machineStatePath(), {
       config: legacy.config || {},
       scheduledFor: legacy.scheduledFor ?? null,
       lastRunAt: legacy.lastRunAt ?? null,
@@ -629,14 +626,12 @@ async function migrateLegacyGlobalQueue(defaultCwd) {
     }
   }
 
-  await fsp.rename(LEGACY_QUEUE_PATH, `${LEGACY_QUEUE_PATH}.retired-${Date.now()}`);
+  await fsp.rename(schedulerPaths.legacyQueuePath(), `${schedulerPaths.legacyQueuePath()}.retired-${Date.now()}`);
   bustCwdCache();
   return { migrated: true, moved, projects: byCwd.size };
 }
 
 module.exports = {
-  MACHINE_STATE_PATH,
-  LEGACY_QUEUE_PATH,
   STATE_SUBPATH,
   projectStateDir,
   projectQueuePath,
@@ -652,3 +647,7 @@ module.exports = {
   writeJsonAtomicSync,
   findLongestValidJsonPrefix,
 };
+
+// Lazy path getters (SM_SCHEDULER_HOME resolved at read, never at require).
+Object.defineProperty(module.exports, 'MACHINE_STATE_PATH', { get: schedulerPaths.machineStatePath, enumerable: true });
+Object.defineProperty(module.exports, 'LEGACY_QUEUE_PATH', { get: schedulerPaths.legacyQueuePath, enumerable: true });

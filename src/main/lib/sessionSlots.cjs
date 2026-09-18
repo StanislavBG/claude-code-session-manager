@@ -25,14 +25,13 @@
 
 const crypto = require('node:crypto');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
+const { sessionSlotsConfigPath } = require('./schedulerPaths.cjs');
 
 const MIN_SLOTS = 0;
 const MAX_SLOTS = 10;
 const DEFAULT_SLOTS = 5;
 
-const CONFIG_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'session-slots-config.json');
 
 function clamp(n) {
   return Math.min(MAX_SLOTS, Math.max(MIN_SLOTS, n));
@@ -40,7 +39,7 @@ function clamp(n) {
 
 function readPersistedCap() {
   try {
-    const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
+    const raw = fs.readFileSync(sessionSlotsConfigPath(), 'utf8');
     const parsed = JSON.parse(raw);
     const cap = Number(parsed.cap);
     return Number.isFinite(cap) ? clamp(Math.trunc(cap)) : DEFAULT_SLOTS;
@@ -55,10 +54,11 @@ function setCap(cap) {
   if (!Number.isFinite(n) || Math.trunc(n) !== n || n < MIN_SLOTS || n > MAX_SLOTS) {
     throw new Error(`sessionSlots.setCap: cap must be an integer in [${MIN_SLOTS}, ${MAX_SLOTS}]`);
   }
-  fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });
-  const tmp = `${CONFIG_PATH}.${process.pid}.${Date.now()}.tmp`;
+  const configPath = sessionSlotsConfigPath();
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  const tmp = `${configPath}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify({ cap: n }, null, 2));
-  fs.renameSync(tmp, CONFIG_PATH);
+  fs.renameSync(tmp, configPath);
   for (const fn of listeners) {
     try { fn(); } catch { /* a consumer's pump error is its own problem */ }
   }

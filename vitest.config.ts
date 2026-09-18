@@ -243,6 +243,7 @@ export default defineConfig({
       'src/main/lib/__tests__/queueHealth.test.cjs',
       'src/main/lib/__tests__/queueStoreAtomicWrite.test.cjs',
       'src/main/lib/__tests__/queueStoreMachineStateRecovery.test.cjs',
+      'src/main/lib/__tests__/schedulerPaths.test.cjs',
       'src/main/lib/__tests__/loadGate.test.cjs',
       'src/main/lib/__tests__/opsRootResolve.test.cjs',
       'src/main/lib/__tests__/schedulerBatchFairness.test.cjs',

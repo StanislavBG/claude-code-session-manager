@@ -32,18 +32,16 @@
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
-const os = require('node:os');
 const { ipcMain } = require('electron');
 const { SCHEDULE_SLUG_RE: SLUG_RE, schemas } = require('./ipcSchemas.cjs');
 const logs = require('./logs.cjs');
 const config = require('./config.cjs');
 const { expandHome } = require('./lib/expandHome.cjs');
 const { HISTORY_RETENTION_MS } = require('./lib/schedulerConfig.cjs');
+const schedulerPaths = require('./lib/schedulerPaths.cjs');
 
-const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
-const PRDS_DIR = path.join(ROOT, 'prds');
-const PRDS_ARCHIVE_DIR = path.join(ROOT, 'prds-archived');
-const RETAG_LOG = path.join(ROOT, 'retag-log.jsonl');
+// Lazy: resolved via lib/schedulerPaths.cjs at each use (SM_SCHEDULER_HOME).
+const prdsArchiveDir = () => path.join(schedulerPaths.scheduledPlansRoot(), 'prds-archived');
 
 // ────────────────────────────────────────────── lint rules
 
@@ -136,7 +134,7 @@ const { resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs } = require('./lib/
 // aggregates both so the linter/archive/retag operations still see every
 // PRD regardless of which dir it currently lives in.
 function candidatePrdsDirs() {
-  return [PRDS_DIR, ...resolvePrdsDirs()];
+  return [schedulerPaths.prdsRoot(), ...resolvePrdsDirs()];
 }
 
 /**
@@ -574,9 +572,9 @@ async function retagOne({ slug, parallelGroup, estimateMinutes }) {
 async function appendRetagLog(entries) {
   if (entries.length === 0) return;
   try {
-    await fsp.mkdir(ROOT, { recursive: true });
+    await fsp.mkdir(schedulerPaths.scheduledPlansRoot(), { recursive: true });
     const lines = entries.map((e) => JSON.stringify({ ts: new Date().toISOString(), ...e }) + '\n').join('');
-    await fsp.appendFile(RETAG_LOG, lines);
+    await fsp.appendFile(path.join(schedulerPaths.scheduledPlansRoot(), 'retag-log.jsonl'), lines);
   } catch (e) {
     logs.writeLine({ level: 'warn', scope: 'queueOps', message: 'retag log append failed', meta: { error: e?.message } });
   }
@@ -629,9 +627,11 @@ module.exports = {
   selectAutoArchivable,
   autoArchiveCompleted,
   retagMany,
-  PRDS_DIR,
-  PRDS_ARCHIVE_DIR,
   archiveDirForSource,
   candidatePrdsDirs,
   findPrdDir,
 };
+
+// Lazy path getters (SM_SCHEDULER_HOME resolved at read, never at require).
+Object.defineProperty(module.exports, 'PRDS_DIR', { get: schedulerPaths.prdsRoot, enumerable: true });
+Object.defineProperty(module.exports, 'PRDS_ARCHIVE_DIR', { get: prdsArchiveDir, enumerable: true });

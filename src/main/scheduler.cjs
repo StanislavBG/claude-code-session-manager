@@ -48,6 +48,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { startDispatchLoop } = require('./lib/dispatchLoop.cjs');
+const schedulerPaths = require('./lib/schedulerPaths.cjs');
 const { randomUUID } = require('node:crypto');
 const { execFile, execFileSync } = require('node:child_process');
 const { ipcMain } = require('electron');
@@ -904,13 +905,9 @@ function isQueueRowRegression({ statusBefore, statusAfter, historyLenBefore, his
   return statusBefore === 'running' && statusAfter === 'pending' && historyLenAfter < historyLenBefore;
 }
 
-const ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans');
-const PRDS_DIR = path.join(ROOT, 'prds');
-const RUNS_DIR = path.join(ROOT, 'runs');
-const PRDS_ARCHIVE_DIR = path.join(ROOT, 'prds-archived');
-const QUEUE_PATH = path.join(ROOT, 'queue.json');
-const SCHEDULER_STATE_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduler-state.json');
-const HEARTBEAT_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'scheduler-heartbeat.log');
+// Machine-wide roots resolve lazily via lib/schedulerPaths.cjs (SM_SCHEDULER_HOME
+// override) — never module-scope consts. The ROOT/PRDS_DIR/RUNS_DIR/
+// SCHEDULER_STATE_PATH exports below are lazy getters over the same resolver.
 const HEARTBEAT_MAX_BYTES = 1024 * 1024;
 // DEFAULT_PROJECT_CWD imported from lib/schedulerBatch.cjs (single source of truth).
 
@@ -1029,7 +1026,7 @@ function biasJobOomScore(pid) {
  * (reconcile, list-prds, lint, rescan).
  */
 function candidatePrdsDirs() {
-  return [PRDS_DIR, ...resolvePrdsDirs()];
+  return [schedulerPaths.prdsRoot(), ...resolvePrdsDirs()];
 }
 
 /**
@@ -1293,15 +1290,15 @@ async function retireCompletedSlugs(slugs) {
 // plugin's /develop and /prd skills — which reference this stable `~`-absolute
 // path — work on any user's machine, not just the author's.
 const PRD_AUTHORING_TEMPLATE = path.join(__dirname, 'templates', 'PRD_AUTHORING.md');
-const PRD_AUTHORING_DEST = path.join(ROOT, 'PRD_AUTHORING.md');
 
 function ensureDirs() {
-  fs.mkdirSync(PRDS_DIR, { recursive: true });
-  fs.mkdirSync(RUNS_DIR, { recursive: true });
+  fs.mkdirSync(schedulerPaths.prdsRoot(), { recursive: true });
+  fs.mkdirSync(schedulerPaths.runsDir(), { recursive: true });
   // Seed the authoring guide once; never clobber a user's edited copy.
   try {
-    if (!fs.existsSync(PRD_AUTHORING_DEST) && fs.existsSync(PRD_AUTHORING_TEMPLATE)) {
-      fs.copyFileSync(PRD_AUTHORING_TEMPLATE, PRD_AUTHORING_DEST);
+    const authoringDest = path.join(schedulerPaths.scheduledPlansRoot(), 'PRD_AUTHORING.md');
+    if (!fs.existsSync(authoringDest) && fs.existsSync(PRD_AUTHORING_TEMPLATE)) {
+      fs.copyFileSync(PRD_AUTHORING_TEMPLATE, authoringDest);
     }
   } catch { /* non-fatal: the guide is a convenience, not load-bearing for a run */ }
 }
@@ -1364,7 +1361,7 @@ async function consolidateAllFlatPrds(cwds, skipCwds) {
 async function runPrdMigration() {
   let result;
   try {
-    result = await migratePrds(PRDS_DIR);
+    result = await migratePrds(schedulerPaths.prdsRoot());
   } catch (e) {
     logs.writeLine({ level: 'error', scope: 'scheduler', message: 'PRD migration failed', meta: { error: e?.message } });
     return null;
@@ -1375,7 +1372,7 @@ async function runPrdMigration() {
       level: 'warn',
       scope: 'scheduler',
       message: `PRD migration: ${result.unresolved.length} file(s) left in legacy dir`,
-      meta: { legacyDir: PRDS_DIR, unresolved: result.unresolved },
+      meta: { legacyDir: schedulerPaths.prdsRoot(), unresolved: result.unresolved },
     });
     for (const u of result.unresolved) {
       console.warn(`[scheduler] PRD migration: left ${u.file} in legacy dir (${u.reason})`);
@@ -1442,7 +1439,7 @@ const QUEUE_BAK_KEEP = 5;
 async function sweepQueueBackups() {
   let entries;
   try {
-    entries = await fsp.readdir(ROOT);
+    entries = await fsp.readdir(schedulerPaths.scheduledPlansRoot());
   } catch {
     return;
   }
@@ -1458,7 +1455,7 @@ async function sweepQueueBackups() {
   let removed = 0;
   for (const f of toDelete) {
     try {
-      await fsp.unlink(path.join(ROOT, f));
+      await fsp.unlink(path.join(schedulerPaths.scheduledPlansRoot(), f));
       removed++;
     } catch (e) {
       console.warn('[scheduler] backup sweep: unlink failed', f, e?.message);
@@ -1480,7 +1477,7 @@ const atomicWriteJsonSync = (p, data) => config.writeJsonSync(p, data);
 
 function loadSchedulerState() {
   try {
-    const raw = fs.readFileSync(SCHEDULER_STATE_PATH, 'utf8');
+    const raw = fs.readFileSync(schedulerPaths.schedulerStatePath(), 'utf8');
     const s = JSON.parse(raw);
     if (s.lastObservedReset) cachedNextReset = s.lastObservedReset;
     if (typeof s.lastResetObservedAt === 'number') lastResetObservedAtMs = s.lastResetObservedAt;
@@ -1500,7 +1497,7 @@ function persistSchedulerState() {
   // require threading awaits through pause/resume bookkeeping for negligible
   // benefit — the file is well under one page.
   try {
-    config.writeJsonSync(SCHEDULER_STATE_PATH, {
+    config.writeJsonSync(schedulerPaths.schedulerStatePath(), {
       version: 1,
       lastObservedReset: cachedNextReset,
       // Only stamped at the moment a FRESH reset was actually observed (see
@@ -1534,13 +1531,13 @@ function appendHeartbeat(entry) {
   try {
     const line = JSON.stringify(entry) + '\n';
     let size = 0;
-    try { size = fs.statSync(HEARTBEAT_PATH).size; } catch { /* new file */ }
+    try { size = fs.statSync(schedulerPaths.heartbeatPath()).size; } catch { /* new file */ }
     if (size >= HEARTBEAT_MAX_BYTES) {
-      const rotated = HEARTBEAT_PATH + '.1';
+      const rotated = schedulerPaths.heartbeatPath() + '.1';
       try { fs.unlinkSync(rotated); } catch { /* */ }
-      try { fs.renameSync(HEARTBEAT_PATH, rotated); } catch { /* */ }
+      try { fs.renameSync(schedulerPaths.heartbeatPath(), rotated); } catch { /* */ }
     }
-    fs.appendFileSync(HEARTBEAT_PATH, line);
+    fs.appendFileSync(schedulerPaths.heartbeatPath(), line);
   } catch (e) {
     console.warn('[scheduler] heartbeat write failed', e?.message);
   }
@@ -2613,7 +2610,7 @@ async function reconcile(state) {
   for (const inv of invalidJobs) {
     if (seen.has(inv.slug)) continue; // a valid row for this slug already exists
     const oldStatus = inv.row?.status;
-    const hist = historyBySlug.get(inv.slug) ?? latestTerminalOutcomeForSlug(inv.slug, { runsDir: RUNS_DIR });
+    const hist = historyBySlug.get(inv.slug) ?? latestTerminalOutcomeForSlug(inv.slug, { runsDir: schedulerPaths.runsDir() });
     if (hist) {
       // Never resurrect: this slug already has a durable terminal record
       // elsewhere (history.jsonl or a run sidecar) — repairing its corrupted
@@ -2755,7 +2752,7 @@ async function reconcile(state) {
     // guard above inert. Fall back to reading the slug's own newest run
     // sidecars straight off disk — same "don't resurrect an already-terminal
     // slug" intent, independent of history.jsonl's existence.
-    const fallback = latestTerminalOutcomeForSlug(slug, { runsDir: RUNS_DIR });
+    const fallback = latestTerminalOutcomeForSlug(slug, { runsDir: schedulerPaths.runsDir() });
     if (fallback) {
       if (fallback.status === 'completed') {
         historyArchiveCandidates.push({ slug, status: fallback.status, finishedAt: fallback.finishedAt });
@@ -3142,7 +3139,7 @@ function warnFailureStreakIfNeeded() {
         cwd: DEFAULT_PROJECT_CWD,
         scope: 'scheduler',
         level: 'warn',
-        message: `usage/rate-limit poller has failed ${consecutiveFailures} consecutive times (kind=${lastFailureKind}, backoffMs=${backoffMs}) — see ${SCHEDULER_STATE_PATH}`,
+        message: `usage/rate-limit poller has failed ${consecutiveFailures} consecutive times (kind=${lastFailureKind}, backoffMs=${backoffMs}) — see ${schedulerPaths.schedulerStatePath()}`,
         meta: { consecutiveFailures, backoffMs, lastFailureKind },
       });
     } catch { /* durable logging must never break the poll loop */ }
@@ -3157,7 +3154,7 @@ function warnFailureStreakIfNeeded() {
         cwd: DEFAULT_PROJECT_CWD,
         scope: 'scheduler',
         level: 'warn',
-        message: `usage/rate-limit poller streak still failing after ${persistedMinutes}m (${consecutiveFailures} consecutive, kind=${lastFailureKind}, backoffMs=${backoffMs}) — see ${SCHEDULER_STATE_PATH}`,
+        message: `usage/rate-limit poller streak still failing after ${persistedMinutes}m (${consecutiveFailures} consecutive, kind=${lastFailureKind}, backoffMs=${backoffMs}) — see ${schedulerPaths.schedulerStatePath()}`,
         meta: { consecutiveFailures, backoffMs, lastFailureKind, persistedMinutes },
       });
     } catch { /* durable logging must never break the poll loop */ }
@@ -3946,7 +3943,7 @@ async function notifyOriginatingTab(job, {
     const epicIdForTranscript = prd?.sourcePromptId || prd?.sourceTabId || job.epicId || null;
     if (epicIdForTranscript && job.cwd) {
       try {
-        const logPath = job.runId ? path.join(RUNS_DIR, job.runId, `${job.slug}.log`) : null;
+        const logPath = job.runId ? path.join(schedulerPaths.runsDir(), job.runId, `${job.slug}.log`) : null;
         const resultText = readResultFromLog(logPath);
         await appendTranscriptTurn(job.cwd, epicIdForTranscript, {
           role: 'assistant',
@@ -4856,7 +4853,7 @@ function buildClaudeSpawnArgs({ prompt, model, sessionId, resume, systemPrompt }
 // create it — `recursive: true` makes that race safe.
 function pickRunDir() {
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  const dir = path.join(RUNS_DIR, ts);
+  const dir = path.join(schedulerPaths.runsDir(), ts);
   return { runId: ts, dir };
 }
 
@@ -6252,7 +6249,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
         // targets a specific prior session on purpose) and for anything not
         // currently 'pending' (e.g. a needs_review->running recovery row).
         if (!resumeTarget && s.jobs[idx].status === 'pending') {
-          const outcome = latestTerminalOutcomeForSlug(job.slug, { runsDir: RUNS_DIR });
+          const outcome = latestTerminalOutcomeForSlug(job.slug, { runsDir: schedulerPaths.runsDir() });
           const reconcileDecision = evaluateDispatchSidecarReconcile({
             rowStatus: s.jobs[idx].status,
             rowRunId: s.jobs[idx].runId ?? null,
@@ -6261,7 +6258,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
             outcome,
           });
           if (reconcileDecision.skip) {
-            const sidecar = readRunOutcomeSidecars(path.join(RUNS_DIR, reconcileDecision.runId), job.slug);
+            const sidecar = readRunOutcomeSidecars(path.join(schedulerPaths.runsDir(), reconcileDecision.runId), job.slug);
             transitionJob(s.jobs[idx], 'completed', {
               reason: `prior run ${reconcileDecision.runId} already completed this slug (sidecar-reconciled)`,
               source: 'spawnJob:dispatch-sidecar-reconcile',
@@ -6291,7 +6288,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           // pass_no_commit_prior_run_verified exemption can fire on this
           // run if it turns out to be another no-op re-verification.
           if (!s.jobs[idx].landedCommit && outcome?.runId) {
-            const sidecar = readRunOutcomeSidecars(path.join(RUNS_DIR, outcome.runId), job.slug);
+            const sidecar = readRunOutcomeSidecars(path.join(schedulerPaths.runsDir(), outcome.runId), job.slug);
             if (sidecar.outcome?.landedCommit) {
               s.jobs[idx].landedCommit = sidecar.outcome.landedCommit;
             }
@@ -8376,7 +8373,7 @@ async function reapDeadRunningJobs() {
     if (reapSkip.size > 0) state.jobs = state.jobs.filter((j) => !reapSkip.has(j.cwd));
     // Shared by the log-evidence injections below and the reapable-processing
     // loop further down — same `j.runId` → run log path formula either way.
-    const logPathForJob = (j) => (j?.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null);
+    const logPathForJob = (j) => (j?.runId ? path.join(schedulerPaths.runsDir(), j.runId, `${j.slug}.log`) : null);
     const { reapable, warnings, recovered } = selectReapableJobs(state.jobs, Date.now(), {
       pidAlive: claudePidAlive,
       grace: PIDLESS_SPAWN_GRACE_MS,
@@ -8596,7 +8593,7 @@ async function reapDeadRunningJobs() {
               const baseSet = new Set(s.jobs[idx].guardBaseline);
               deltaPaths = after.filter((p) => !baseSet.has(p));
               if (deltaPaths.length) {
-                const salvagePath = path.join(RUNS_DIR, s.jobs[idx].runId, `${slug}.uncommitted.patch`);
+                const salvagePath = path.join(schedulerPaths.runsDir(), s.jobs[idx].runId, `${slug}.uncommitted.patch`);
                 const salvage = await jobWorktree.salvageJobDirtyDelta({ cwd: rowCwd, paths: deltaPaths, outFile: salvagePath });
                 if (salvage && salvage.ok) {
                   s.jobs[idx].salvagePatch = salvagePath;
@@ -9037,7 +9034,7 @@ function isFixPlanBeyondDepthCap(slug, investigationDepth, isFixPlan) {
  * check, no nested loop over user-scaled data. Dir names are ISO timestamps,
  * so lexical-descending sort picks the newest match. Exported for tests.
  */
-function resolveRunId(job, { runsDir = RUNS_DIR } = {}) {
+function resolveRunId(job, { runsDir = schedulerPaths.runsDir() } = {}) {
   if (!job || job.runId) return job?.runId || null;
   if (!job.slug) return null;
   let dirs;
@@ -9316,7 +9313,7 @@ function isFailedUnverifiedShaped(job) {
   if (job.verifierVerdict && RESCANNABLE_VERDICTS.has(job.verifierVerdict)) return true;
   const runId = job.runId || resolveRunId(job);
   if (!runId) return false;
-  const logPath = path.join(RUNS_DIR, runId, `${job.slug}.log`);
+  const logPath = path.join(schedulerPaths.runsDir(), runId, `${job.slug}.log`);
   return classifyRunOutcome(logPath) === 'no_result';
 }
 
@@ -9929,7 +9926,7 @@ async function reverifyNeedsReview() {
       }
       continue;
     }
-    const runDir = path.join(RUNS_DIR, job.runId || resolveRunId(job));
+    const runDir = path.join(schedulerPaths.runsDir(), job.runId || resolveRunId(job));
     const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
     // Derive committedDuringRun from the recorded run window. The live
     // commit-guard uses gitHead() (before/after HEAD diff); here the run is
@@ -10201,7 +10198,7 @@ async function reverifyNeedsReview() {
     });
     for (const job of targets) {
       const runId = job.runId || resolveRunId(job);
-      const runDir = path.join(RUNS_DIR, runId);
+      const runDir = path.join(schedulerPaths.runsDir(), runId);
       const isRetryAttempt = job.autoFixAttempted === true;
       const isDeadFixPlanReopen = isFixPlanDead(job, queueForResumeAndAutofix.jobs);
       const deadChild = isDeadFixPlanReopen
@@ -10517,7 +10514,7 @@ function registerScheduleHandlers() {
   ipcMain.handle('schedule:clear-queue', async () => {
     ensureDirs();
     const ts = new Date().toISOString().replace(/[:.]/g, '-');
-    const archiveDir = path.join(PRDS_ARCHIVE_DIR, ts);
+    const archiveDir = path.join(schedulerPaths.scheduledPlansRoot(), 'prds-archived', ts);
     const state = await readQueue();
     const victims = state.jobs.filter((j) => j.status !== 'running');
     if (victims.length === 0) {
@@ -10564,7 +10561,7 @@ function registerScheduleHandlers() {
 
   ipcMain.handle('schedule:open-folder', async () => {
     const { shell } = require('electron');
-    await shell.openPath(ROOT);
+    await shell.openPath(schedulerPaths.scheduledPlansRoot());
     return { ok: true };
   });
 
@@ -10582,8 +10579,8 @@ function registerScheduleHandlers() {
   ipcMain.handle('schedule:read-log', validated(schemas.scheduleReadLog, async ({ slug, runId }) => {
     // Defense-in-depth: re-check containment after path.resolve even though
     // SLUG_RE / RUN_ID_RE already forbid path separators.
-    const logPath = path.resolve(path.join(RUNS_DIR, runId, `${slug}.log`));
-    if (!logPath.startsWith(RUNS_DIR + path.sep)) {
+    const logPath = path.resolve(path.join(schedulerPaths.runsDir(), runId, `${slug}.log`));
+    if (!logPath.startsWith(schedulerPaths.runsDir() + path.sep)) {
       return { ok: false, error: 'invalid slug or runId' };
     }
     try {
@@ -10600,8 +10597,8 @@ function registerScheduleHandlers() {
     // template, authored before the user fills in `cwd`) falls back to the
     // legacy global dir until it's re-saved with a real cwd and migrated by
     // the next reconcile-driven scan.
-    const dir = (await findPrdDir(data.slug)) ?? PRDS_DIR;
-    if (dir === PRDS_DIR) ensureDirs();
+    const dir = (await findPrdDir(data.slug)) ?? schedulerPaths.prdsRoot();
+    if (dir === schedulerPaths.prdsRoot()) ensureDirs();
     const resolved = safeSlugPathIn(dir, data.slug);
     if (!resolved) return { ok: false, error: 'invalid slug' };
     try {
@@ -10730,7 +10727,7 @@ async function init() {
     const bootOutcomes = new Map();
     for (const j of bootSnap.jobs) {
       if (!immediateSlugs.includes(j.slug)) continue;
-      const logPath = j.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null;
+      const logPath = j.runId ? path.join(schedulerPaths.runsDir(), j.runId, `${j.slug}.log`) : null;
       bootOutcomes.set(j.slug, logPath ? classifyRunOutcome(logPath) : 'unknown');
     }
     // Same evidence-before-failure gate reapDeadRunningJobs applies, resolved
@@ -10777,7 +10774,7 @@ async function init() {
         console.log(`[scheduler] boot: SIGTERM'd orphan claude pid=${pid} for ${slug} — deferring finalize ${BOOT_ORPHAN_KILL_GRACE_MS}ms`);
       }
       setTimeout(async () => {
-        const logPath = j.runId ? path.join(RUNS_DIR, j.runId, `${j.slug}.log`) : null;
+        const logPath = j.runId ? path.join(schedulerPaths.runsDir(), j.runId, `${j.slug}.log`) : null;
         const outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
         // Same evidence-before-failure gate as the immediate-orphan path
         // above, resolved before mutate() for the same reason (git spawn
@@ -11393,8 +11390,8 @@ const remote = {
       }
       await fsp.mkdir(dir, { recursive: true });
     } else {
-      dir = (await findPrdDir(slug)) ?? PRDS_DIR;
-      if (dir === PRDS_DIR) ensureDirs();
+      dir = (await findPrdDir(slug)) ?? schedulerPaths.prdsRoot();
+      if (dir === schedulerPaths.prdsRoot()) ensureDirs();
     }
 
     // writePrd only ever JOINS an existing Epic now (no mintAuthority
@@ -11807,9 +11804,6 @@ module.exports = {
   registerScheduleHandlers,
   attachWindow,
   init,
-  ROOT,
-  PRDS_DIR,
-  SCHEDULER_STATE_PATH,
   BACKOFF_MAX_MS,
   FAILURE_STREAK_WARN_THRESHOLD,
   FAILURE_STREAK_ESCALATION_MS,
@@ -11983,7 +11977,6 @@ module.exports = {
   CONSECUTIVE_RAPID_RATE_LIMIT_THRESHOLD,
   RAPID_RATE_LIMIT_WINDOW_MS,
   MANUAL_PAUSE_COOLDOWN_MS,
-  RUNS_DIR,
   pickRunDir,
   resolveRateLimitPauseReset,
   billingResetForPause,
@@ -11993,3 +11986,14 @@ module.exports = {
   validateForeignWipBlockClaim,
   requeueForeignWipBlockedJobs,
 };
+
+// Lazy path getters: resolved from SM_SCHEDULER_HOME at each read, never frozen
+// at require time (see lib/schedulerPaths.cjs).
+for (const [name, resolve] of [
+  ['ROOT', schedulerPaths.scheduledPlansRoot],
+  ['PRDS_DIR', schedulerPaths.prdsRoot],
+  ['RUNS_DIR', schedulerPaths.runsDir],
+  ['SCHEDULER_STATE_PATH', schedulerPaths.schedulerStatePath],
+]) {
+  Object.defineProperty(module.exports, name, { get: resolve, enumerable: true });
+}

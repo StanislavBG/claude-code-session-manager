@@ -12,13 +12,7 @@ React 18 + Vite renderer. Layout (no per-file lists — `ls` it):
 - `lib/` — pure helpers and hooks · `state/` — zustand stores · `data/` — static data
 - `public/vad/` — self-hosted voice-activity assets · `testUtils/` — test helpers
 
-**`lib/projectPages/` is WEB PRESENCE, not harness.** Two hooks live here now
-(`useBuilderEpic.ts`, `useProjectPagesOutput.ts`). The build side sits in `web/project-pages/`:
-`build-renderer.mjs` and `build-logic.mjs` bundle entries from this folder, and
-`generate-font-data.mjs` WRITES into it. The entries they name (`render.tsx`, `logicBundle.ts`,
-`library/`, `fonts/`) were deleted by the single-`home.html` refactor, so those scripts dangle.
-Known debt: prune the `build:project-pages*` scripts or restore the entries. Do not treat
-this folder as harness-only when editing.
+**`lib/projectPages/` holds two hooks** (`useBuilderEpic.ts`, `useProjectPagesOutput.ts`) for the single-`home.html` Project Home; the old `web/project-pages` build toolchain was removed.
 
 **Tab registry = four files that change together:** `lib/navKey.ts` (`NavKey` union),
 `lib/screenKeys.ts`, `components/screenComponents.tsx`, `lib/navGroups.ts` (`NAV_ITEMS`). The

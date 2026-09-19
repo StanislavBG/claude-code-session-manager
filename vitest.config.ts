@@ -239,7 +239,6 @@ export default defineConfig({
       'web/manual/__tests__/figure-captures.test.cjs',
       'web/manual/__tests__/chapter-links.test.cjs',
       'scripts/__tests__/package-files.test.cjs',
-      'web/project-pages/__tests__/publish-gate.test.cjs',
       'src/main/__tests__/seedAgentPersonas.test.cjs',
       'src/main/__tests__/seedSchedulerMcp.test.cjs',
       'src/main/__tests__/seedStatus.test.cjs',

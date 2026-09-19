@@ -950,10 +950,11 @@ function parseBlockingMergePaths(stderrText) {
  * `git merge --abort`, which clears them. Never throws; a failed read
  * yields `conflictedPaths: []`. O(p log p) in the conflicted-path count.
  */
-async function classifyMergeFailure({ cwd, stderrText }) {
+async function classifyMergeFailure({ cwd, stderrText, stdoutText }) {
   const blocking = parseBlockingMergePaths(stderrText);
   if (blocking) return { failureKind: 'blocking_paths', blockingPaths: blocking };
-  if (/CONFLICT \(/.test(stderrText || '')) {
+  // git prints `CONFLICT (...)` lines on STDOUT, not stderr.
+  if (/CONFLICT \(/m.test(`${stdoutText || ''}\n${stderrText || ''}`)) {
     let conflictedPaths = [];
     try {
       const out = await execGit(['diff', '--name-only', '--diff-filter=U'], { cwd, timeout: 10_000 });
@@ -1137,14 +1138,14 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
           };
         } catch (retryErr) {
           const retryText = (retryErr && (retryErr.stderrText || retryErr.message)) || String(retryErr);
-          const retryClass = await classifyMergeFailure({ cwd, stderrText: retryText });
+          const retryClass = await classifyMergeFailure({ cwd, stderrText: retryText, stdoutText: retryErr && retryErr.stdoutText });
           try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
           return { ok: false, reason: `merge failed (likely a real content conflict): ${retryText}`, ...retryClass };
         }
       }
     }
     // Read the conflicted paths BEFORE the abort — it clears the index stages.
-    const failureClass = await classifyMergeFailure({ cwd, stderrText });
+    const failureClass = await classifyMergeFailure({ cwd, stderrText, stdoutText: e && e.stdoutText });
     // Abort a half-applied merge so `cwd` isn't left in a mid-merge state.
     try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
     return { ok: false, reason: `merge failed (likely a real content conflict): ${stderrText}`, ...failureClass };

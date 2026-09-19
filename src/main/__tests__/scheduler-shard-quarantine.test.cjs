@@ -16,6 +16,7 @@ import { test, expect, beforeAll, afterAll } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const claudeStub = require('../../../tests/helpers/claudeStub.cjs');
 
 let tmpHome;
 let originalHome;
@@ -39,14 +40,11 @@ function makeProject(name) {
 }
 
 function writeClaudeStub() {
-  const stubPath = path.join(os.tmpdir(), `sm-claude-stub-quarantine-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
-  const body = `
+  return claudeStub.writeClaudeStub({ body: `
     require('fs').writeFileSync(require('path').join(process.cwd(), 'ran-here.marker'), 'yes');
     process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok\\nSCHEDULER_VERDICT: PASS' }) + '\\n');
     process.exit(0);
-  `;
-  fs.writeFileSync(stubPath, `#!${process.execPath}\n${body}\n`, { mode: 0o755 });
-  return stubPath;
+  ` });
 }
 
 beforeAll(() => {

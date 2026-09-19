@@ -27,6 +27,7 @@ import { test, expect, beforeAll, afterAll, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const claudeStub = require('../../../tests/helpers/claudeStub.cjs');
 
 let tmpHome;
 let originalHome;
@@ -42,13 +43,10 @@ let queueStore;
 // guard then makes runQueueStarvationWatchdog return null for a reason that
 // has nothing to do with what that test is actually checking.
 function writeClaudeStub() {
-  const stubPath = path.join(os.tmpdir(), `sm-claude-stub-starve-driver-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
-  const body = `
+  return claudeStub.writeClaudeStub({ body: `
     process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok\\nSCHEDULER_VERDICT: PASS' }) + '\\n');
     process.exit(0);
-  `;
-  fs.writeFileSync(stubPath, `#!${process.execPath}\n${body}\n`, { mode: 0o755 });
-  return stubPath;
+  ` });
 }
 
 beforeAll(() => {

@@ -20,6 +20,7 @@ import { test, expect, beforeAll, afterAll, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const claudeStub = require('../../../tests/helpers/claudeStub.cjs');
 
 let tmpHome;
 let originalHome;
@@ -50,8 +51,7 @@ afterEach(() => {
 const THINKING_400 = 'API Error: 400 {"detail":{"error":"{\\"message\\":\\"\\\\\\"thinking.type.enabled\\\\\\" is not supported for this model. Use \\\\\\"thinking.type.adaptive\\\\\\" and \\\\\\"output_config.effort\\\\\\" to control thinking behavior.\\"}"}}';
 
 function writeStub({ mode }) {
-  const stubPath = path.join(os.tmpdir(), `sm-claude-stub-launch-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
-  const body = `
+  return claudeStub.writeClaudeStub({ body: `
     const fs = require('fs');
     const path = require('path');
     fs.writeFileSync(path.join(process.cwd(), 'env.marker'), JSON.stringify({
@@ -67,9 +67,7 @@ function writeStub({ mode }) {
     }
     process.stdout.write(JSON.stringify({ type: 'result', subtype: 'error', is_error: true, num_turns: 9, usage: { input_tokens: 100, output_tokens: 250 }, result: 'Error: tests failed' }) + '\\n');
     process.exit(1);
-  `;
-  fs.writeFileSync(stubPath, `#!${process.execPath}\n${body}\n`, { mode: 0o755 });
-  return stubPath;
+  ` });
 }
 
 function mkProject() {

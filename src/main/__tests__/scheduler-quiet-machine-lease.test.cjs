@@ -19,6 +19,7 @@ import { test, expect, beforeAll, afterAll, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const claudeStub = require('../../../tests/helpers/claudeStub.cjs');
 const { execFileSync } = require('node:child_process');
 
 let tmpHome;
@@ -66,15 +67,12 @@ function writeProjectQueue(cwd, jobs) {
 // as a genuine kill-with-partial-work, not an auto-retryable transient blip
 // with no evidence of real execution.
 function writeKilledClaudeStub() {
-  const stubPath = path.join(os.tmpdir(), `sm-claude-stub-quiet-killed-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
-  const body = `
+  return claudeStub.writeClaudeStub({ body: `
     const fs = require('fs');
     const path = require('path');
     fs.writeFileSync(path.join(process.cwd(), 'job-output.txt'), 'work in progress when killed\\n', 'utf8');
     process.exit(137);
-  `;
-  fs.writeFileSync(stubPath, `#!${process.execPath}\n${body}\n`, { mode: 0o755 });
-  return stubPath;
+  ` });
 }
 
 let reapDeadRunningJobs;

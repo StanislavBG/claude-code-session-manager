@@ -286,5 +286,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-reaper-helpers-basics.test.cjs',
     ],
     globals: true,
+    globalSetup: ['tests/setup/schedulerSandbox.globalSetup.cjs'],
+    setupFiles: ['tests/setup/schedulerSandbox.cjs'],
   },
 })

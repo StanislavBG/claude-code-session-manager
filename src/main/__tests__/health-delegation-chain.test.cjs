@@ -84,7 +84,21 @@ test('failing check with no fix omits the "(fix: ...)" suffix', () => {
 });
 
 test('end-to-end: check() reports delegation_chain for this repo, expected to pass here', async () => {
-  const status = await check();
+  // Probes THIS machine's real user-scope config (~/.claude.json MCP registration, guard
+  // shims), so it reads the real home — not the per-run sandbox HOME. Read-only: scheduler
+  // state stays redirected to the sandbox (SM_SCHEDULER_HOME re-pinned after the HOME swap).
+  const sandboxHome = process.env.HOME;
+  const sandboxSchedulerHome = process.env.SM_SCHEDULER_HOME;
+  process.env.HOME = require('node:os').userInfo().homedir;
+  if (sandboxSchedulerHome !== undefined) process.env.SM_SCHEDULER_HOME = sandboxSchedulerHome;
+  process.env.SM_ALLOW_LIVE_ROOT_READS = '1';
+  let status;
+  try {
+    status = await check();
+  } finally {
+    delete process.env.SM_ALLOW_LIVE_ROOT_READS;
+    process.env.HOME = sandboxHome;
+  }
   expect(status.components.delegation_chain).toBeDefined();
   expect(status.components.delegation_chain.checks).toHaveLength(9);
   const ids = status.components.delegation_chain.checks.map((c) => c.id);

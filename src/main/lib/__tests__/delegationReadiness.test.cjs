@@ -694,7 +694,7 @@ test('the installed destructive-git command actually DENIES a shared-tree stash 
   const denied = run('git stash', cwd);
   expect(denied.hookSpecificOutput?.permissionDecision).toBe('deny');
 
-  const worktreeCwd = path.join(os2.tmpdir(), 'session-manager-job-worktrees', 'somehash', 'some-slug');
+  const worktreeCwd = path.join(process.env.SM_WORKTREE_ROOT || os2.tmpdir(), 'session-manager-job-worktrees', 'somehash', 'some-slug');
   const allowed = run('git stash', worktreeCwd);
   expect(allowed.hookSpecificOutput?.permissionDecision).not.toBe('deny');
 });

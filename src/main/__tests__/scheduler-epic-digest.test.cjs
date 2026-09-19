@@ -19,6 +19,7 @@ import { test, expect, beforeAll, afterAll, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const claudeStub = require('../../../tests/helpers/claudeStub.cjs');
 
 let tmpHome;
 let originalHome;
@@ -51,17 +52,14 @@ afterEach(() => {
 // Stub `claude` binary: captures the '-p' prompt argv to `capturePath`, then
 // emits one stream-json result line and exits 0.
 function writeClaudeStub(capturePath) {
-  const stubPath = path.join(os.tmpdir(), `sm-claude-stub-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
-  const body = `
+  return claudeStub.writeClaudeStub({ body: `
     const fs = require('fs');
     const idx = process.argv.indexOf('-p');
     const prompt = idx >= 0 ? process.argv[idx + 1] : '';
     fs.writeFileSync(${JSON.stringify(capturePath)}, prompt, 'utf8');
     process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok' }) + '\\n');
     process.exit(0);
-  `;
-  fs.writeFileSync(stubPath, `#!${process.execPath}\n${body}\n`, { mode: 0o755 });
-  return stubPath;
+  ` });
 }
 
 function setupProject(prefix) {

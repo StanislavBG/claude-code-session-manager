@@ -98,8 +98,8 @@ test('adminTokenPath keeps the SM_ADMIN_TOKEN_PATH > SM_DEV > SM_E2E ladder', ()
     expect(sp.adminTokenPath()).toBe(path.join(tmpHome, 'admin-api.e2e.json'));
     process.env.SM_DEV = '1';
     expect(sp.adminTokenPath()).toBe(path.join(tmpHome, 'admin-api.dev.json'));
-    process.env.SM_ADMIN_TOKEN_PATH = '/tmp/explicit-token.json';
-    expect(sp.adminTokenPath()).toBe('/tmp/explicit-token.json');
+    process.env.SM_ADMIN_TOKEN_PATH = path.join(os.tmpdir(), 'explicit-token.json');
+    expect(sp.adminTokenPath()).toBe(path.join(os.tmpdir(), 'explicit-token.json'));
   } finally {
     delete process.env.SM_E2E; delete process.env.SM_DEV; delete process.env.SM_ADMIN_TOKEN_PATH;
   }
@@ -107,9 +107,9 @@ test('adminTokenPath keeps the SM_ADMIN_TOKEN_PATH > SM_DEV > SM_E2E ladder', ()
 
 test('machineStateLogCwd is the literal ~/Projects/session-manager unless overridden (never process.cwd())', () => {
   expect(sp.machineStateLogCwd()).toBe(path.join(os.homedir(), 'Projects', 'session-manager'));
-  process.env.SM_SCHEDULER_LOG_CWD = '/tmp/log-cwd';
+  process.env.SM_SCHEDULER_LOG_CWD = path.join(os.tmpdir(), 'log-cwd');
   try {
-    expect(sp.machineStateLogCwd()).toBe('/tmp/log-cwd');
+    expect(sp.machineStateLogCwd()).toBe(path.join(os.tmpdir(), 'log-cwd'));
   } finally {
     delete process.env.SM_SCHEDULER_LOG_CWD;
   }
@@ -184,4 +184,26 @@ test.each(ROUTED_MODULES)('%s derives no home-rooted path from os.homedir() itse
   });
   expect(offenders).toEqual([]);
   expect(src).toMatch(/schedulerPaths\.cjs/);
+});
+
+test('assertNotLiveRoot throws under vitest for a path outside the override roots and os.tmpdir(), naming resolver + path', () => {
+  const live = path.join(path.parse(os.homedir()).root, 'definitely-not-tmp', 'live-root');
+  // os.tmpdir() may itself be "/", so only assert the throw when the path is really outside it.
+  const rel = path.relative(os.tmpdir(), live);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    expect(() => sp.assertNotLiveRoot(live, 'someResolver')).toThrow(/someResolver.*live-root|live-root.*someResolver/s);
+  }
+  const ok = path.join(os.tmpdir(), 'fine');
+  expect(sp.assertNotLiveRoot(ok, 'someResolver')).toBe(ok);
+});
+
+test('an empty SM_SCHEDULER_HOME falls through to the real ~/.claude and the guard fires', () => {
+  const { spawnSync } = require('node:child_process');
+  const r = spawnSync(process.execPath, ['-e', "require('./src/main/lib/schedulerPaths.cjs').schedulerHome()"], {
+    cwd: REPO,
+    env: { ...process.env, SM_SCHEDULER_HOME: '', VITEST: '1', HOME: '/home/definitely-live-user' },
+    encoding: 'utf8',
+  });
+  expect(r.status).not.toBe(0);
+  expect(r.stderr).toMatch(/schedulerHome\(\) resolved to live root/);
 });

@@ -18,12 +18,11 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const claudeStub = require('../../../tests/helpers/claudeStub.cjs');
 
 function writeStub(lines) {
-  const stubPath = path.join(os.tmpdir(), `sm-claude-stub-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
   const body = lines.map((l) => `process.stdout.write(${JSON.stringify(JSON.stringify(l))} + "\\n");`).join('\n');
-  fs.writeFileSync(stubPath, `#!${process.execPath}\n${body}\nprocess.exit(0);\n`, { mode: 0o755 });
-  return stubPath;
+  return claudeStub.writeClaudeStub({ body: `${body}\nprocess.exit(0);` });
 }
 
 function isTerminal(channel) {

@@ -173,7 +173,7 @@ test('with neither SM_DEV nor SM_E2E set, resolves to the original admin-api.jso
   delete process.env.SM_E2E;
   delete process.env.SM_ADMIN_TOKEN_PATH;
   try {
-    expect(resolveTokenPath()).toBe(TOKEN_PATH);
+    expect(resolveTokenPath()).toBe(path.join(require('../schedulerPaths.cjs').schedulerHome(), 'admin-api.json'));
   } finally {
     if (prevDev === undefined) delete process.env.SM_DEV; else process.env.SM_DEV = prevDev;
     if (prevE2e === undefined) delete process.env.SM_E2E; else process.env.SM_E2E = prevE2e;

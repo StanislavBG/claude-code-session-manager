@@ -24,6 +24,7 @@ let originalJobDisable;
 let originalJobMax;
 let originalEpicDisable;
 let originalEpicMax;
+let originalWorktreeRoot;
 
 function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
@@ -43,6 +44,9 @@ beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-gitworktree-'));
   repoCwd = path.join(tmpRoot, 'repo');
   initRepo(repoCwd);
+  // Every sweep below runs against THIS throwaway root, never the live job-worktree root.
+  originalWorktreeRoot = process.env.SM_WORKTREE_ROOT;
+  process.env.SM_WORKTREE_ROOT = path.join(tmpRoot, 'worktrees');
   originalJobDisable = process.env.SM_JOB_WORKTREE_DISABLE;
   originalJobMax = process.env.SM_JOB_WORKTREE_MAX;
   originalEpicDisable = process.env.SM_EPIC_WORKTREE_DISABLE;
@@ -65,6 +69,7 @@ afterEach(async () => {
   // Best-effort: prune any worktree either kind's tests created before removing the repo.
   try { await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job' }); } catch { /* ignore */ }
   try { await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'epic' }); } catch { /* ignore */ }
+  restore('SM_WORKTREE_ROOT', originalWorktreeRoot);
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
 
@@ -1043,7 +1048,9 @@ test('[job] sweepStaleWorktreeCheckouts does NOT remove an old-mtime checkout wi
 test('[job] sweepStaleWorktreeCheckouts removes an old-mtime checkout when there is no live holder', async () => {
   const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'stale-and-dead' });
   expect(worktree.ok).toBe(true);
-  const holders = new Set(); // nothing holds it
+  // A populated holders set (some unrelated live cwd) that does not cover this checkout —
+  // exercises the liveness gate for real instead of defeating it with an empty set.
+  const holders = new Set([path.resolve(tmpRoot, 'unrelated-live-holder')]);
 
   const result = await gitWorktree.sweepStaleWorktreeCheckouts('job', { staleAgeMs: 0, holders });
 

@@ -19,6 +19,7 @@ let originalHome;
 let originalClaudeBin;
 let originalAutofix;
 let originalWatchdog;
+let originalClaudeVersion;
 let scheduler;
 let queueStore;
 let auditLog;
@@ -35,6 +36,10 @@ beforeAll(() => {
   originalClaudeBin = process.env.SM_CLAUDE_BIN;
   originalAutofix = process.env.SM_AUTOFIX_DISABLE;
   originalWatchdog = process.env.SM_TICK_WATCHDOG_MS;
+  // This test's spawn marker is written by the stub on ANY invocation, including the
+  // `claude --version` probe — so it needs the real probe, not the sandbox's pinned version.
+  originalClaudeVersion = process.env.SM_CLAUDE_VERSION;
+  delete process.env.SM_CLAUDE_VERSION;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-tick-wedge-'));
   process.env.HOME = tmpHome;
   process.env.SM_AUTOFIX_DISABLE = '1';
@@ -55,7 +60,7 @@ beforeAll(() => {
 
 afterAll(() => {
   process.env.HOME = originalHome;
-  for (const [k, v] of [['SM_CLAUDE_BIN', originalClaudeBin], ['SM_AUTOFIX_DISABLE', originalAutofix], ['SM_TICK_WATCHDOG_MS', originalWatchdog]]) {
+  for (const [k, v] of [['SM_CLAUDE_BIN', originalClaudeBin], ['SM_AUTOFIX_DISABLE', originalAutofix], ['SM_TICK_WATCHDOG_MS', originalWatchdog], ['SM_CLAUDE_VERSION', originalClaudeVersion]]) {
     if (v === undefined) delete process.env[k]; else process.env[k] = v;
   }
   fs.rmSync(tmpHome, { recursive: true, force: true });

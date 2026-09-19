@@ -16,8 +16,8 @@ const { spawnSync } = require('node:child_process');
 
 const HOOK_PATH = path.join(__dirname, '..', 'guard-destructive-git.cjs');
 const SHARED_CWD = '/home/tester/Projects/some-repo';
-const JOB_WORKTREE_CWD = path.join(os.tmpdir(), 'session-manager-job-worktrees', 'abc123', 'some-slug');
-const EPIC_WORKTREE_CWD = path.join(os.tmpdir(), 'session-manager-epic-worktrees', 'def456', 'some-epic-id');
+const JOB_WORKTREE_CWD = path.join(process.env.SM_WORKTREE_ROOT || os.tmpdir(), 'session-manager-job-worktrees', 'abc123', 'some-slug');
+const EPIC_WORKTREE_CWD = path.join(process.env.SM_WORKTREE_ROOT || os.tmpdir(), 'session-manager-epic-worktrees', 'def456', 'some-epic-id');
 
 function runHook(payload) {
   const input = typeof payload === 'string' ? payload : JSON.stringify(payload);

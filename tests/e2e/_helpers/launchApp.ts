@@ -9,6 +9,8 @@
  * .spec.ts:74) are left as-is — refactor lazily.
  */
 import { _electron as electron, type ElectronApplication, type Page } from '@playwright/test'
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -27,6 +29,20 @@ export async function launchApp(opts: LaunchOptions = {}): Promise<{
   errors: string[]
 }> {
   const errors: string[] = []
+  // Same sandbox contract as the vitest setup (tests/setup/schedulerSandbox.*): a
+  // Playwright-launched app never resolves the live scheduler home, job-worktree
+  // root, admin token, or HOME. Callers may still override any key via opts.env.
+  const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-e2e-sandbox-'))
+  const sandboxEnv: Record<string, string> = {
+    SM_SCHEDULER_HOME: path.join(sandbox, 'scheduler-home'),
+    SM_WORKTREE_ROOT: path.join(sandbox, 'worktrees'),
+    SM_ADMIN_TOKEN_PATH: path.join(sandbox, 'scheduler-home', 'admin-api.e2e.json'),
+    SM_CLAUDE_VERSION: '0.0.0-e2e',
+    HOME: path.join(sandbox, 'home'),
+  }
+  for (const d of [sandboxEnv.SM_SCHEDULER_HOME, sandboxEnv.SM_WORKTREE_ROOT, sandboxEnv.HOME]) {
+    fs.mkdirSync(d, { recursive: true })
+  }
   const app = await electron.launch({
     // Force the X11 ozone backend: under `xvfb-run` DISPLAY points at a virtual
     // X server, but a COSMIC/Wayland login also exports WAYLAND_DISPLAY, which
@@ -43,6 +59,7 @@ export async function launchApp(opts: LaunchOptions = {}): Promise<{
       SM_E2E: '1',
       SM_SUPERVISOR_DISABLE: '1',
       SM_MOCK_BILLING_KIND: 'meter_rate_limited',
+      ...sandboxEnv,
       ...(opts.env ?? {}),
     },
   })

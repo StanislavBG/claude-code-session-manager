@@ -183,7 +183,7 @@ test('duplicate cwds across tabs are visited once; a missing cwd is skipped with
 
 test('an ephemeral epic-worktree cwd is never scanned as its own project', async () => {
   const home = await mkHome();
-  const ephemeral = path.join(os.tmpdir(), 'session-manager-epic-worktrees', 'abc123', 'psess-xyz');
+  const ephemeral = path.join(process.env.SM_WORKTREE_ROOT || os.tmpdir(), 'session-manager-epic-worktrees', 'abc123', 'psess-xyz');
   const opsDir = path.join(ephemeral, 'session-manager-operations', 'logs');
   fs.mkdirSync(opsDir, { recursive: true });
   fs.writeFileSync(path.join(opsDir, `errors-${recentDateStr()}.jsonl`), JSON.stringify(errLine(1)) + '\n');

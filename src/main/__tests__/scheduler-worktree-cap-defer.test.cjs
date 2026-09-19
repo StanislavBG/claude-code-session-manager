@@ -18,6 +18,7 @@ import { test, expect, beforeAll, afterAll, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const claudeStub = require('../../../tests/helpers/claudeStub.cjs');
 const { execFileSync } = require('node:child_process');
 
 let tmpHome;
@@ -61,8 +62,9 @@ function writeProjectQueue(cwd, jobs) {
 // test can prove whether — and where — it was actually spawned, then emits a
 // clean stream-json success result.
 function writeClaudeStub() {
-  const stubPath = path.join(os.tmpdir(), `sm-claude-stub-capdefer-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
-  const body = `
+  return claudeStub.writeClaudeStub({
+    allowCommitUnder: os.tmpdir(),
+    body: `
     const fs = require('fs');
     const path = require('path');
     const { execFileSync } = require('child_process');
@@ -73,14 +75,13 @@ function writeClaudeStub() {
     // fallback case), where the run parks in needs_review instead, which is
     // fine — this test only cares whether it ran in place, not its verdict.
     try {
-      execFileSync('git', ['add', '-A'], { cwd: process.cwd() });
-      execFileSync('git', ['commit', '-q', '-m', 'stub commit'], { cwd: process.cwd() });
+      runGit(['add', '-A']);
+      runGit(['commit', '-q', '-m', 'stub commit']);
     } catch { /* not a git repo — best-effort only */ }
     process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok\\nSCHEDULER_VERDICT: PASS' }) + '\\n');
     process.exit(0);
-  `;
-  fs.writeFileSync(stubPath, `#!${process.execPath}\n${body}\n`, { mode: 0o755 });
-  return stubPath;
+  `,
+  });
 }
 
 beforeAll(() => {

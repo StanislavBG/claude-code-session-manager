@@ -30,12 +30,9 @@ const path = require('node:path');
 // mimics a long-running headless run so cancel() has something to SIGTERM.
 // Shebang + chmod makes it directly spawnable as a single executable (spawn
 // does not split a path on spaces, so SM_CLAUDE_BIN must be one binary).
-const stubPath = path.join(os.tmpdir(), `sm-claude-stub-${process.pid}.cjs`);
-fs.writeFileSync(
-  stubPath,
-  `#!${process.execPath}\nsetInterval(() => {}, 1000);\n`,
-  { mode: 0o755 },
-);
+const stubPath = require('../../../tests/helpers/claudeStub.cjs').writeClaudeStub({
+  body: 'setInterval(() => {}, 1000);',
+});
 process.env.SM_CLAUDE_BIN = stubPath;
 
 const cr = require('../chatRunner.cjs');

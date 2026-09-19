@@ -18,6 +18,7 @@ import { test, expect, beforeAll, afterAll, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const claudeStub = require('../../../tests/helpers/claudeStub.cjs');
 const { execFileSync } = require('node:child_process');
 
 let tmpHome;
@@ -68,16 +69,13 @@ function writeProjectQueue(cwd, jobs) {
 // which is not the scenario under test here — this must land as a genuine
 // non-zero exit.
 function writeKilledClaudeStub() {
-  const stubPath = path.join(os.tmpdir(), `sm-claude-stub-killed-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
-  const body = `
+  return claudeStub.writeClaudeStub({ body: `
     const fs = require('fs');
     const path = require('path');
     fs.writeFileSync(path.join(process.cwd(), 'README.md'), 'hello\\nedited by job\\n', 'utf8');
     fs.writeFileSync(path.join(process.cwd(), 'job-output.txt'), 'work the job produced before dying\\n', 'utf8');
     process.exit(137);
-  `;
-  fs.writeFileSync(stubPath, `#!${process.execPath}\n${body}\n`, { mode: 0o755 });
-  return stubPath;
+  ` });
 }
 
 beforeAll(() => {
@@ -192,13 +190,10 @@ test('an in-place job killed (exit 137) mid-run salvages a delta-scoped patch th
 // — a job whose only working-tree dirt is pre-existing human/sibling WIP
 // present before the run even started.
 function writeNoopClaudeStub() {
-  const stubPath = path.join(os.tmpdir(), `sm-claude-stub-noop-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
-  const body = `
+  return claudeStub.writeClaudeStub({ body: `
     process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'nothing to do', is_error: false }) + '\\n');
     process.exit(0);
-  `;
-  fs.writeFileSync(stubPath, `#!${process.execPath}\n${body}\n`, { mode: 0o755 });
-  return stubPath;
+  ` });
 }
 
 // Stub `claude` binary that blocks until a `go` marker file appears in its
@@ -206,8 +201,7 @@ function writeNoopClaudeStub() {
 // window to read the queue row's intermediate dispatchPhase before the run
 // finalizes and deletes it.
 function writeGatedClaudeStub() {
-  const stubPath = path.join(os.tmpdir(), `sm-claude-stub-gated-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
-  const body = `
+  return claudeStub.writeClaudeStub({ body: `
     const fs = require('fs');
     const path = require('path');
     const { execFileSync } = require('child_process');
@@ -218,9 +212,7 @@ function writeGatedClaudeStub() {
     }
     process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok', is_error: false }) + '\\n');
     process.exit(0);
-  `;
-  fs.writeFileSync(stubPath, `#!${process.execPath}\n${body}\n`, { mode: 0o755 });
-  return stubPath;
+  ` });
 }
 
 test('dispatchPhase breadcrumb advances to "spawned" mid-run and is gone after finalize', async () => {

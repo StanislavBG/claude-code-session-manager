@@ -149,3 +149,19 @@ test('readFreshHeartbeat: returns the parsed last line when fresh', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('no false positive: pending rows blocked on an unfinished dependsOn are waiting on a job, not a tick', () => {
+  const result = evaluateTickLiveness(
+    baseQueue({
+      jobs: [
+        { slug: '265-head', status: 'running' },
+        { slug: '266-next', status: 'pending', dependsOn: ['265-head'] },
+      ],
+    }),
+    { ts: NOW - 30_000, utilization: 0 },
+    NOW,
+    1,
+  );
+  assert.strictEqual(result.stalled, false);
+  assert.strictEqual(result.reason, 'no-pending-jobs');
+});

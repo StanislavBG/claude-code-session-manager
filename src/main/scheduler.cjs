@@ -1865,7 +1865,12 @@ function computeStallSummary(state) {
     byProject[key].invalid = (byProject[key].invalid || 0) + 1;
   }
   const total = jobs.length + invalidJobs.length;
-  const stalled = total > 0 && running === 0 && pending === 0 && !state?.paused;
+  // A drained queue (every row completed/skipped) is idle, not stalled — a
+  // stall needs at least one parked problem row (failed/needs_review/
+  // quarantined/invalid) that is waiting on someone.
+  const isProblemStatus = (st) => st !== 'completed' && st !== 'skipped';
+  const stalled = total > 0 && running === 0 && pending === 0 && !state?.paused
+    && (invalidJobs.length > 0 || jobs.some((j) => isProblemStatus(j.status)));
   for (const key of Object.keys(byProject)) {
     const counts = byProject[key];
     const projRunning = counts.running || 0;
@@ -1873,7 +1878,9 @@ function computeStallSummary(state) {
     const projTotal = Object.keys(counts)
       .filter((k) => k !== 'stalled')
       .reduce((sum, k) => sum + counts[k], 0);
-    counts.stalled = projTotal > 0 && projRunning === 0 && projPending === 0 && !state?.paused;
+    const projProblem = Object.keys(counts)
+      .some((k) => k !== 'stalled' && k !== 'completed' && k !== 'skipped' && counts[k] > 0);
+    counts.stalled = projTotal > 0 && projRunning === 0 && projPending === 0 && !state?.paused && projProblem;
   }
   return { stalled, total, running, pending, byProject };
 }

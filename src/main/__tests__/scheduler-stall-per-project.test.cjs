@@ -110,3 +110,17 @@ test('findStaleQuarantinedJobs: fires past threshold, not before', () => {
   assert.deepStrictEqual(slugs, ['exactly-at-threshold', 'stale']);
   assert.strictEqual(stale.find((s) => s.slug === 'stale').cwd, '/p1');
 });
+
+test('computeStallSummary: a fully drained project (all completed) is idle, not stalled', () => {
+  const state = {
+    paused: null,
+    jobs: [
+      { slug: 'a', cwd: '/p1', status: 'completed' },
+      { slug: 'b', cwd: '/p2', status: 'running' },
+    ],
+    invalidJobs: [],
+  };
+  const summary = computeStallSummary(state);
+  assert.strictEqual(summary.byProject['/p1'].stalled, false);
+  assert.strictEqual(computeStallSummary({ paused: null, jobs: [{ slug: 'a', cwd: '/p1', status: 'completed' }], invalidJobs: [] }).stalled, false);
+});

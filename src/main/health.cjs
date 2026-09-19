@@ -88,7 +88,15 @@ function readFreshHeartbeat(heartbeatPath) {
 // now) so it's testable without touching the filesystem.
 function evaluateTickLiveness(queueState, heartbeat, now, runningCount) {
   const jobs = queueState.jobs || [];
-  const pending = jobs.filter((j) => j.status === 'pending');
+  // A pending row whose dependsOn names a job that has not completed cannot be
+  // dispatched yet — it is waiting on that job, not on a tick. Counting it made
+  // a healthy dependsOn chain (one running, the rest waiting) read as a stall.
+  const statusBySlug = new Map(jobs.map((j) => [j.slug, j.status]));
+  const depsSatisfied = (j) => (j.dependsOn || []).every((d) => {
+    const st = statusBySlug.get(d);
+    return st === undefined || st === 'completed' || st === 'skipped';
+  });
+  const pending = jobs.filter((j) => j.status === 'pending' && depsSatisfied(j));
   const running = runningCount ?? jobs.filter((j) => j.status === 'running').length;
   const config = queueState.config || {};
   // The scheduler's private concurrencyCap is retired — the machine-wide

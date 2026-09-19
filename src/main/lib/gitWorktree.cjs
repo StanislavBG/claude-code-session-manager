@@ -224,6 +224,46 @@ function execGit(args, { cwd, timeout = 20_000 } = {}) {
   });
 }
 
+// Unquote a single git porcelain v1 path token. Git wraps a path in double
+// quotes and C-style-escapes it (\", \\, \t, \n, and \NNN octal per raw UTF-8
+// byte) whenever it contains a double quote, backslash, control character, or
+// any byte >= 0x80 (core.quotepath's default "ASCII-safe" behavior) — a plain
+// path with none of those passes through untouched. Pure. Lives here (not
+// scheduler.cjs, which also parses porcelain output) because scheduler.cjs
+// requires this module — the reverse would be circular — and every porcelain
+// consumer in either file must unquote a path before treating it as a real
+// on-disk path (fs.existsSync, a pathspec, a Set membership check).
+function unquotePorcelainPath(raw) {
+  if (raw.length < 2 || raw[0] !== '"' || raw[raw.length - 1] !== '"') return raw;
+  const inner = raw.slice(1, -1);
+  const bytes = [];
+  const simpleEscapes = { '"': 0x22, '\\': 0x5c, n: 0x0a, t: 0x09, r: 0x0d, a: 0x07, b: 0x08, f: 0x0c, v: 0x0b };
+  for (let i = 0; i < inner.length; i += 1) {
+    const c = inner[i];
+    if (c === '\\' && i + 1 < inner.length) {
+      const next = inner[i + 1];
+      if (Object.prototype.hasOwnProperty.call(simpleEscapes, next)) {
+        bytes.push(simpleEscapes[next]);
+        i += 1;
+      } else if (next >= '0' && next <= '7') {
+        let octal = '';
+        let j = i + 1;
+        while (j < inner.length && octal.length < 3 && inner[j] >= '0' && inner[j] <= '7') {
+          octal += inner[j];
+          j += 1;
+        }
+        bytes.push(parseInt(octal, 8) & 0xff);
+        i = j - 1;
+      } else {
+        bytes.push(c.charCodeAt(0));
+      }
+    } else {
+      for (const b of Buffer.from(c, 'utf8')) bytes.push(b);
+    }
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
 async function isGitRepo(cwd) {
   if (!cwd) return false;
   try {
@@ -534,7 +574,11 @@ async function captureAndCarryBaseDiff({ cwd, dir }) {
     if (stat.size === 0) return { ok: true, paths: [] };
 
     try {
-      await execGit(['apply', '--binary', patchFile], { cwd: dir, timeout: 30_000 });
+      // Same 120s ceiling as the capture step above: applying a patch large
+      // enough to need that long to generate can just as easily need that
+      // long to apply — leaving this at the old 30s reintroduces the same
+      // large-dirty-tree degrade-to-shared-tree failure one call later.
+      await execGit(['apply', '--binary', patchFile], { cwd: dir, timeout: 120_000 });
     } catch (e) {
       return { ok: false, reason: `git apply failed: ${(e && (e.stderrText || e.message)) || e}` };
     }
@@ -808,7 +852,29 @@ async function createWorktree({ kind, cwd, key }) {
     carriedPaths = carry.paths;
   }
 
+  registeredCheckouts.set(dir, { kind, branch });
   return { ok: true, dir, branch, baseCwd: cwd, carriedPaths };
+}
+
+/**
+ * Release the count of any registered checkout whose branch has no live
+ * holder (no process cwd under its dir) AND whose row is terminal
+ * (`isTerminalBranch(branch)`). Fail-closed: an unknown/live row or a live
+ * holder keeps the count. Returns the expired dirs. O(registered) plus one
+ * /proc scan.
+ */
+function expireDeadWorktreeRegistrations({ isTerminalBranch, holders = listCwdHolders() } = {}) {
+  const expired = [];
+  if (typeof isTerminalBranch !== 'function') return expired;
+  for (const [dir, reg] of [...registeredCheckouts]) {
+    if (hasLiveHolder(dir, holders)) continue;
+    if (!isTerminalBranch(reg.branch)) continue;
+    registeredCheckouts.delete(dir);
+    expiredCheckoutDirs.add(dir);
+    activeWorktreeCount[reg.kind] = Math.max(0, activeWorktreeCount[reg.kind] - 1);
+    expired.push(dir);
+  }
+  return expired;
 }
 
 /**
@@ -852,31 +918,9 @@ function parseBlockingMergePaths(stderrText) {
   const tracked = [];
   const untracked = [];
   let mode = null;
-  registeredCheckouts.set(dir, { kind, branch });
   for (const rawLine of stderrText.split('\n')) {
     if (/would be overwritten by merge:\s*$/.test(rawLine) && /local changes/.test(rawLine)) {
       mode = 'tracked';
-/**
- * Release the count of any registered checkout whose branch has no live
- * holder (no process cwd under its dir) AND whose row is terminal
- * (`isTerminalBranch(branch)`). Fail-closed: an unknown/live row or a live
- * holder keeps the count. Returns the expired dirs. O(registered) plus one
- * /proc scan.
- */
-function expireDeadWorktreeRegistrations({ isTerminalBranch, holders = listCwdHolders() } = {}) {
-  const expired = [];
-  if (typeof isTerminalBranch !== 'function') return expired;
-  for (const [dir, reg] of [...registeredCheckouts]) {
-    if (hasLiveHolder(dir, holders)) continue;
-    if (!isTerminalBranch(reg.branch)) continue;
-    registeredCheckouts.delete(dir);
-    expiredCheckoutDirs.add(dir);
-    activeWorktreeCount[reg.kind] = Math.max(0, activeWorktreeCount[reg.kind] - 1);
-    expired.push(dir);
-  }
-  return expired;
-}
-
       continue;
     }
     if (/would be overwritten by merge:\s*$/.test(rawLine) && /untracked working tree files/.test(rawLine)) {
@@ -1176,7 +1220,12 @@ async function salvageDirtyDelta({ cwd, paths, outFile }) {
     for (const line of String(statusOut || '').split('\n')) {
       if (!line) continue;
       const code = line.slice(0, 2);
-      const p = line.slice(3);
+      // Unquote before use: a raw quoted+C-escaped token (any path with a
+      // quote, backslash, control char, or non-ASCII byte) is not a real
+      // on-disk path — passing it straight through as a pathspec to the
+      // `git diff` calls below silently fails to match the real file,
+      // dropping that path's content out of the salvaged patch entirely.
+      const p = unquotePorcelainPath(line.slice(3));
       if (!p) continue;
       if (code === '??') untrackedPaths.push(p);
       else trackedPaths.push(p);
@@ -1334,7 +1383,10 @@ async function reclaimTerminalJobOrphans({ cwd, terminalSlugs, isLive }) {
     } catch {
       continue; // can't prove the checkout is clean-of-real-work — never assume
     }
-    const dirtyPaths = statusOut.split('\n').map((l) => l.slice(3).trim()).filter(Boolean);
+    const dirtyPaths = statusOut.split('\n')
+      .filter((l) => l.length > 0)
+      .map((l) => unquotePorcelainPath(l.slice(3).trim()))
+      .filter(Boolean);
     const opsOnly = dirtyPaths.every(
       (p) => p === OPS_ROOT_DIR || p.startsWith(`${OPS_ROOT_DIR}/`)
     );
@@ -1465,6 +1517,7 @@ module.exports = {
   getMaxConcurrentWorktrees,
   getStaleSweepAgeMs,
   isGitRepo,
+  unquotePorcelainPath,
   isBaseTreeClean,
   worktreeDirFor,
   branchNameFor,
@@ -1487,6 +1540,7 @@ module.exports = {
   mainTreeFromWorktreeGitFile,
   getObservedWorktreeCount,
   reserveWorktreeSlot,
+  expireDeadWorktreeRegistrations,
   reclaimTerminalJobOrphans,
   // Job-kind convenience wrappers — same call shape jobWorktree.cjs has
   // always exposed.
@@ -1521,4 +1575,3 @@ module.exports = {
     }
   },
 };
-  expireDeadWorktreeRegistrations,

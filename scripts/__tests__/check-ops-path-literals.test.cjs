@@ -13,7 +13,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const SCRIPT = path.resolve(__dirname, '../check-ops-path-literals.cjs');
-const { scan } = require('../check-ops-path-literals.cjs');
+const { scan, scanLiveRoots } =require('../check-ops-path-literals.cjs');
 const BARE = "const p = path.join(cwd, 'session-manager-operations', 'x');\n";
 
 let root;
@@ -52,4 +52,38 @@ test('clean tree exits 0', () => {
 
 test('the real repo tree is clean', () => {
   expect(scan(path.resolve(__dirname, '../..'))).toEqual([]);
+  expect(scanLiveRoots(path.resolve(__dirname, '../..'))).toEqual([]);
+});
+
+const LIVE = "const p = path.join(os.homedir(), '.claude', 'session-manager', 'x');\n";
+const LIVE_TMP = "const w = path.join(os.tmpdir(), 'session-manager-job-worktrees');\n";
+
+test('LIVE_ROOT_LITERAL: home/tmp join in src/main, tests/ (incl. .ts) fails with file:line', () => {
+  write('src/main/lib/__tests__/a.test.cjs', `// c\n${LIVE}`);
+  write('tests/e2e/b.spec.ts', LIVE_TMP);
+  write('scripts/c.cjs', LIVE);
+  const r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('src/main/lib/__tests__/a.test.cjs:2');
+  expect(r.stderr).toContain('tests/e2e/b.spec.ts:1');
+  expect(r.stderr).toContain('scripts/c.cjs:1');
+  expect(r.stderr).toContain('LIVE_ROOT_LITERAL');
+});
+
+test('LIVE_ROOT_LITERAL: resolver, self, allowlisted, comments, and non-root joins pass', () => {
+  write('src/main/lib/schedulerPaths.cjs', LIVE);
+  write('scripts/check-ops-path-literals.cjs', LIVE);
+  write('scripts/allowed.cjs', LIVE);
+  write('src/main/comment.cjs', `// ${LIVE}`);
+  write('src/main/agents.cjs', "const a = path.join(os.homedir(), '.claude', 'agents');\n");
+  write('src/main/cfg.cjs', "const a = path.join(os.homedir(), '.config', 'session-manager', 'x.json');\n");
+  write('src/main/cwd.cjs', "const a = path.join(os.homedir(), 'Projects', 'session-manager');\n");
+  expect(scanLiveRoots(root, { allowlist: new Map([['scripts/allowed.cjs', 'test reason']]) })).toEqual([]);
+});
+
+test('LIVE_ROOT_LITERAL: the scanner script never matches itself (self-match guard)', () => {
+  fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+  fs.copyFileSync(SCRIPT, path.join(root, 'scripts/check-ops-path-literals.cjs'));
+  expect(scanLiveRoots(root, { allowlist: new Map() })).toEqual([]);
+  expect(scan(root)).toEqual([]);
 });

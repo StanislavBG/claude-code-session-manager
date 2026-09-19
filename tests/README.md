@@ -35,26 +35,22 @@ can delete that worktree — use a scratch `TMPDIR`.
 ## Gates
 
 - `npm run typecheck` — `tsc --noEmit`
-- `npm run lint` — `lint:selectors` + `lint:hooks` + `lint:unregistered-tests`
+- `npm run lint` — `lint:selectors` + `lint:hooks` + `lint:unregistered-tests` + `lint:docs` + `lint:paths`
 - `npm run test:unit` — `vitest run`
 - `npm run test:e2e` — `xvfb-run -a playwright test`
 - `npm run smoke:darwin` — `tests/smoke/darwin-boot.spec.ts`
 
 CI (`.github/workflows/ci.yml`), job `ci` (ubuntu, Node 20): `npm ci` → `npm run typecheck` →
-`npm run test:unit` → `npm run build` → `npx playwright install chromium --with-deps` →
+`npm run lint` → `npm run test:unit` → `npm run build` → `npx playwright install chromium --with-deps` →
 `apt-get install xvfb` → `npm run test:e2e` (env `SM_E2E=1`, `SM_SUPERVISOR_DISABLE=1`,
-`SM_MOCK_BILLING_KIND=ok`). Job `smoke-darwin` (macOS): `npm ci` → `typecheck` → `build` →
+`SM_MOCK_BILLING_KIND=ok`). Job `smoke-darwin` (macOS): `npm ci` → `typecheck` → `lint` → `build` →
 `npm run smoke:darwin`.
-
-**`npm run lint` is NOT in CI at the time of writing** — run it locally.
 
 ## Notes on specific specs
 
 - `tests/golden.spec.ts` reads the gitignored `session-manager-operations/bilko-host/dist/`; it
   skips itself when `index.html` is absent.
 - `tests/smoke/darwin-boot.spec.ts` has no platform guard: on Linux it runs as a free extra boot smoke.
-- A registered unit test requires the gitignored build output `web/project-pages/logic/dist/logic.cjs`;
-  build it before `test:unit` on a fresh checkout.
 
 ## Scratch
 

@@ -4,12 +4,12 @@
  * requeue instead of burning a whole run + an auto-fix investigation on an
  * outage that has nothing to do with the code.
  *
- * Run: timeout 120 node --test src/main/__tests__/scheduler-transient-failure.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-transient-failure.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

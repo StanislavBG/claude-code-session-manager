@@ -1,12 +1,12 @@
 /**
  * scheduler-autofix-select.test.cjs — unit tests for selectAutoFixTargets.
  *
- * Run: timeout 120 node --test src/main/__tests__/scheduler-autofix-select.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-autofix-select.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const {
   selectAutoFixTargets, isUnresolvableNeedsReview, isRescanCandidate,

@@ -1,12 +1,12 @@
 /**
  * scheduler-investigation-prompt.test.cjs — unit tests for buildInvestigationPrompt.
  *
- * Run: timeout 120 node --test src/main/__tests__/scheduler-investigation-prompt.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-investigation-prompt.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -93,7 +93,7 @@ test('prompt instructs that cwd must be the git repo root where the fix will lan
   assert.match(prompt, /needs_review/);
 });
 
-test('prompt frontmatter block still declares exactly the four expected keys', () => {
+test('prompt frontmatter block still declares exactly the five expected keys', () => {
   const prompt = buildInvestigationPrompt(makeArgs());
   const fenceMatch = prompt.match(/```\s*\n\s*---\n([\s\S]*?)\n\s*---\n\s*```/);
   assert.ok(fenceMatch, 'expected a fenced frontmatter block in the prompt');
@@ -101,7 +101,7 @@ test('prompt frontmatter block still declares exactly the four expected keys', (
     .split('\n')
     .filter((line) => line.trim().length > 0)
     .map((line) => line.split(':')[0].trim());
-  assert.deepEqual(keys, ['title', 'cwd', 'parallelGroup', 'estimateMinutes']);
+  assert.deepEqual(keys, ['title', 'cwd', 'parallelGroup', 'estimateMinutes', 'isFixPlan']);
 });
 
 // ─── isGitRepoSync (scheduler.cjs) ─────────────────────────────────────────────

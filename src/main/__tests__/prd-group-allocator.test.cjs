@@ -8,12 +8,12 @@
  * so a collision silently merges two unrelated projects' PRDs into one
  * group.
  *
- * Run: timeout 120 node --test src/main/__tests__/prd-group-allocator.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/prd-group-allocator.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');

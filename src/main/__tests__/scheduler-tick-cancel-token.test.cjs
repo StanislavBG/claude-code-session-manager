@@ -8,12 +8,12 @@
  * subsequent tickQueue() call short-circuited on the stale flag forever,
  * even though queue.json's `paused` field was correctly null.
  *
- * Run: timeout 120 node --test src/main/__tests__/scheduler-tick-cancel-token.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-tick-cancel-token.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const { applyPauseCleared, pickNextBatch } = require('../scheduler.cjs');
 

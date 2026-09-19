@@ -1,12 +1,12 @@
 /**
  * scheduler-autopromote.test.cjs — unit tests for isPromotableOriginal.
  *
- * Run: timeout 120 node --test src/main/__tests__/scheduler-autopromote.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-autopromote.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const { isPromotableOriginal, healTargetForFix } = require('../scheduler.cjs');
 

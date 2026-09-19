@@ -8,12 +8,12 @@
  * against a manual force-tick click), the message must say so instead of
  * flatly claiming nothing is pending.
  *
- * Run: timeout 120 node --test src/main/__tests__/scheduler-force-tick-outcome.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-force-tick-outcome.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const { forceTickOutcome } = require('../scheduler.cjs');
 

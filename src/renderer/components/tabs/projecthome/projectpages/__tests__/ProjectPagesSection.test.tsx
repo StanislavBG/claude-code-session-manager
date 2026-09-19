@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { ProjectPagesSection } from '../ProjectPagesSection'
@@ -24,165 +24,37 @@ afterEach(() => {
 
 describe('ProjectPagesSection', () => {
   it('renders nothing while loaded is false', () => {
-    const el = mount(<ProjectPagesSection output={null} loaded={false} />)
+    const el = mount(<ProjectPagesSection output={null} loaded={false} onGenerate={() => {}} />)
     expect(el.textContent).toBe('')
   })
 
-  it('renders the empty state when output is null and loaded is true', () => {
-    const el = mount(<ProjectPagesSection output={null} loaded />)
-    expect(el.textContent).toContain('No Project Pages yet')
-    expect(el.textContent).toContain('Generate My Project Home')
-    // No second generate action lives in this section — only ProjectHome's own.
-    expect(Array.from(el.querySelectorAll('button')).some((b) => /generate/i.test(b.textContent ?? ''))).toBe(false)
+  it('shows the empty state with one Generate button when there is no home.html', () => {
+    const onGenerate = vi.fn()
+    const el = mount(<ProjectPagesSection output={null} loaded onGenerate={onGenerate} />)
+    expect(el.textContent).toContain('No Project Home yet')
+    expect(el.querySelector('iframe')).toBeNull()
+    const buttons = Array.from(el.querySelectorAll('button'))
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0].textContent).toContain('Generate Project Home')
+    act(() => buttons[0].click())
+    expect(onGenerate).toHaveBeenCalledTimes(1)
   })
 
-  it('renders the iframe display with the HOME html as srcDoc by default when output is present', () => {
+  it('renders home.html in a sandboxed iframe with a generated chip and a Regenerate button', () => {
+    const onGenerate = vi.fn()
+    const html = '<!DOCTYPE html><html><body>HOME</body></html>'
     const el = mount(
-      <ProjectPagesSection
-        output={{
-          home: '<!DOCTYPE html><html><body>HOME</body></html>',
-          marketing: '<!DOCTYPE html><html><body>MARKETING</body></html>',
-          feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
-          architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
-          generatedAt: '2026-08-02T00:00:00.000Z',
-          isDefault: false,
-        }}
-        loaded
-      />,
+      <ProjectPagesSection output={{ html, mtimeMs: Date.now() - 3 * 60_000 }} loaded onGenerate={onGenerate} />,
     )
     const iframe = el.querySelector('iframe') as HTMLIFrameElement
-    expect(iframe).toBeTruthy()
-    // Home is the default lens now that ProjectHome no longer renders a
-    // second copy of home.html above this section.
-    expect(iframe.getAttribute('srcdoc')).toContain('HOME')
-    expect(el.textContent).toContain('Full screen')
-    expect(el.textContent).toContain('About these templates')
-    const fullscreenBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Full screen') as HTMLButtonElement
-    act(() => fullscreenBtn.click())
-    expect(el.textContent).toContain('Exit full screen')
-  })
-
-  it('Brief tab is selectable and renders the brief html as srcDoc when present', () => {
-    const el = mount(
-      <ProjectPagesSection
-        output={{
-          home: '<!DOCTYPE html><html><body>HOME</body></html>',
-          marketing: '<!DOCTYPE html><html><body>MARKETING</body></html>',
-          feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
-          architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
-          brief: '<!DOCTYPE html><html><body>BRIEF</body></html>',
-          generatedAt: '2026-08-02T00:00:00.000Z',
-          isDefault: false,
-        }}
-        loaded
-      />,
-    )
-    const briefTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Brief') as HTMLButtonElement
-    expect(briefTab).toBeTruthy()
-    act(() => briefTab.click())
-    const iframe = el.querySelector('iframe') as HTMLIFrameElement
-    expect(iframe.getAttribute('srcdoc')).toContain('BRIEF')
-  })
-
-  it('Brief tab shows a fallback empty state (not a crash) when output predates the brief lens', () => {
-    const el = mount(
-      <ProjectPagesSection
-        output={{
-          home: '<!DOCTYPE html><html><body>HOME</body></html>',
-          marketing: '<!DOCTYPE html><html><body>MARKETING</body></html>',
-          feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
-          architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
-          generatedAt: '2026-08-02T00:00:00.000Z',
-          isDefault: false,
-        }}
-        loaded
-      />,
-    )
-    const briefTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Brief') as HTMLButtonElement
-    act(() => briefTab.click())
-    expect(el.querySelector('iframe')).toBeNull()
-    expect(el.textContent).toContain('Brief page not generated yet')
-  })
-
-  it('offers a tab for all FIVE generated templates, plus the explainer', () => {
-    const el = mount(
-      <ProjectPagesSection
-        output={{
-          home: '<!DOCTYPE html><html><body>HOME</body></html>',
-          marketing: '<!DOCTYPE html><html><body>MARKETING</body></html>',
-          feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
-          architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
-          brief: '<!DOCTYPE html><html><body>BRIEF</body></html>',
-          generatedAt: '2026-08-02T00:00:00.000Z',
-          isDefault: false,
-        }}
-        loaded
-      />,
-    )
-    const labels = Array.from(el.querySelectorAll('button')).map((b) => b.textContent)
-    for (const lens of ['Home', 'Marketing', 'Feature', 'Architecture', 'Brief', 'About these templates']) {
-      expect(labels).toContain(lens)
-    }
-  })
-
-  it('Marketing stays reachable as its own tab', () => {
-    const el = mount(
-      <ProjectPagesSection
-        output={{
-          home: '<!DOCTYPE html><html><body>HOME</body></html>',
-          marketing: '<!DOCTYPE html><html><body>MARKETING</body></html>',
-          feature: '<!DOCTYPE html><html><body>FEATURE</body></html>',
-          architecture: '<!DOCTYPE html><html><body>ARCHITECTURE</body></html>',
-          brief: '<!DOCTYPE html><html><body>BRIEF</body></html>',
-          generatedAt: '2026-08-02T00:00:00.000Z',
-          isDefault: false,
-        }}
-        loaded
-      />,
-    )
-    const marketingTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Marketing') as HTMLButtonElement
-    act(() => marketingTab.click())
-    expect((el.querySelector('iframe') as HTMLIFrameElement).getAttribute('srcdoc')).toContain('MARKETING')
-  })
-
-  it('Home renders for the shipped default, where every other lens is legitimately missing', () => {
-    const el = mount(
-      <ProjectPagesSection
-        output={{
-          home: '<!DOCTYPE html><html><body>SHIPPED DEFAULT</body></html>',
-          generatedAt: null,
-          isDefault: true,
-        }}
-        loaded
-      />,
-    )
-    expect((el.querySelector('iframe') as HTMLIFrameElement).getAttribute('srcdoc')).toContain('SHIPPED DEFAULT')
-  })
-
-  it('shows the "About these templates" explainer without depending on output', () => {
-    const el = mount(<ProjectPagesSection output={null} loaded />)
-    const libraryTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'About these templates') as HTMLButtonElement
-    act(() => libraryTab.click())
-    expect(el.textContent).toContain('Component library (shared across every project)')
-  })
-
-  it('a non-home lens is missing for the shipped default and points at the primary generate action instead of showing a second button', () => {
-    const el = mount(
-      <ProjectPagesSection
-        output={{
-          home: '<!DOCTYPE html><html><body>SHIPPED DEFAULT</body></html>',
-          generatedAt: null,
-          isDefault: true,
-        }}
-        loaded
-      />,
-    )
-    const marketingTab = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Marketing') as HTMLButtonElement
-    act(() => marketingTab.click())
-    expect(el.querySelector('iframe')).toBeNull()
-    expect(el.textContent).toContain('Marketing page not generated yet')
-    expect(el.textContent).toContain('Generate My Project Home')
-    expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent === 'Marketing')).toBe(true)
-    expect(Array.from(el.querySelectorAll('button')).some((b) => b.textContent === 'Regenerate')).toBe(false)
+    expect(iframe.getAttribute('sandbox')).toBe('allow-same-origin')
+    expect(iframe.getAttribute('srcdoc')).toBe(html)
+    expect(el.textContent).toContain('generated 3m ago')
+    expect(el.textContent).not.toContain('Shipped default')
+    const buttons = Array.from(el.querySelectorAll('button'))
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0].textContent).toContain('Regenerate')
+    act(() => buttons[0].click())
+    expect(onGenerate).toHaveBeenCalledTimes(1)
   })
 })

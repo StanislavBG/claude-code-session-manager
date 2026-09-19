@@ -1,33 +1,21 @@
 /**
  * Single fetch of session-manager-operations/project-pages/home.html for the
- * active project, shaped as the `ProjectPagesOutput` the (pre-rewrite) Project
- * Home UI still consumes — shared by ProjectHome.tsx and ProjectPagesSection.tsx
- * so there is one IPC call and one source of truth. Subscribes to the main
- * process's per-cwd watcher ('project-pages:changed') so a fresh write updates
- * live. A cwd the main process can't watch resolves `{ok:false}` — silently
- * no-op. TEMPORARY adapter: the renderer rewrite (ph-simplify-02) replaces it.
+ * active project as `{html, mtimeMs}` (null until the file exists). Subscribes
+ * to the main process's per-cwd watcher ('project-pages:changed') so a fresh
+ * write updates live. A cwd the main process can't watch resolves `{ok:false}`
+ * — silently no-op.
  */
 import { useEffect, useState } from 'react'
 import { toast } from '../../state/toast'
 import type { ProjectPagesGetResult } from '../../../preload/api'
 
 export interface ProjectPagesOutput {
-  home: string
-  marketing?: string
-  feature?: string
-  architecture?: string
-  brief?: string
-  generatedAt: string | null
-  isDefault: boolean
+  html: string
+  mtimeMs: number | null
 }
 
 function toOutput(res: ProjectPagesGetResult): ProjectPagesOutput | null {
-  if (res.html === null) return null
-  return {
-    home: res.html,
-    generatedAt: res.mtimeMs === null ? null : new Date(res.mtimeMs).toISOString(),
-    isDefault: false,
-  }
+  return res.html === null ? null : { html: res.html, mtimeMs: res.mtimeMs }
 }
 
 export function useProjectPagesOutput(cwd: string | null): { output: ProjectPagesOutput | null; loaded: boolean } {

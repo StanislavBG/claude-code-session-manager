@@ -1,8 +1,6 @@
 /**
  * The one sandboxed-iframe implementation for hosted Project Pages HTML —
- * used by both ProjectHome.tsx's main hosted document and
- * ProjectPagesSection.tsx's lens viewer, so there is exactly one
- * `<iframe sandbox srcDoc>` call site in the app, not two.
+ * the app's single `<iframe sandbox srcDoc>` call site.
  */
 export function HtmlFrame({ title, html }: { title: string; html: string }) {
   return (

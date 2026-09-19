@@ -1,28 +1,8 @@
 /**
  * ProjectHome — the hosted Project Home document for the active project
- * (NavKey `project-home`).
- *
- * Layout, top to bottom, and it is deliberately ONE document viewer, not two:
- *
- *   1. a thin live strip (PhNow / PhOpenQuestions) — state that changes
- *      underneath a static document, so it stays live React rather than being
- *      folded into the generated HTML;
- *   2. the identity + provenance card holding the page's single
- *      "Generate My Project Home" action;
- *   3. `ProjectPagesSection` — every generated template, Home included,
- *      selected by tab.
- *
- * This file used to ALSO render `home.html` in its own iframe between (2) and
- * (3). Once Home became a tab in the Pages strip (five templates, matching
- * `LENS_ORDER` and the generator), that block was the same document painted
- * twice on one screen, one viewer directly on top of the other — the top one
- * with no tab strip and no full-screen affordance. Removed 2026-08-09; the
- * Pages widget now opens on Home by default so the screen still leads with it.
+ * (NavKey `project-home`): a thin live strip (PhNow / PhOpenQuestions /
+ * PhAgentTools) above `ProjectPagesSection`, the single home.html view.
  * Don't reintroduce a second hosted iframe here.
- *
- * The synthesized purpose/what/areas/scope/conventions blocks this file used
- * to hand-render are the `brief` lens (ProjectPagesSection), generated from
- * the same `ProjectBrief` data instead of drawn twice — the same rule.
  */
 
 import { memo, useEffect, useMemo } from 'react'
@@ -33,13 +13,11 @@ import { useScheduleState } from '../../../state/scheduleState'
 import { useScheduledPrds } from '../../../lib/useScheduledPrds'
 import { inFlightCards, openQuestions } from '../../../lib/projectHomeDerive'
 import { setPendingPromptSessionId } from '../../../lib/promptSessionDeepLink'
-import { formatAgo } from '../../../lib/formatTime'
 import { useProjectPagesOutput } from '../../../lib/projectPages/useProjectPagesOutput'
 import { useBuilderEpic } from '../../../lib/projectPages/useBuilderEpic'
 import type { EpicSnapshots } from '../../../lib/epicDerive'
 import type { ScheduleJob } from '../../../../preload/api'
 import { EpicStatusChip } from '../../epics/epic-primitives'
-import { AlmanacIcon } from '../../layout/AlmanacIcon'
 import { EmptyState } from '../../ui/EmptyState'
 import { toast } from '../../../state/toast'
 import { PhBlock, PhCard } from './ph-primitives'
@@ -47,11 +25,6 @@ import { PhAgentTools } from './PhAgentTools'
 import { ProjectPagesSection } from './projectpages/ProjectPagesSection'
 
 const EMPTY_JOBS: ScheduleJob[] = []
-
-function projectNameFromCwd(cwd: string): string {
-  const parts = cwd.split('/').filter(Boolean)
-  return parts[parts.length - 1] || cwd
-}
 
 function answerInEpic(epicId: string): void {
   setPendingPromptSessionId(epicId)
@@ -132,8 +105,7 @@ function ProjectHomeComponent() {
     void usePromptSessions.getState().hydrateArchived(cwd)
   }, [cwd])
 
-  // One fetch of session-manager-operations/project-pages/output/*.html,
-  // shared with ProjectPagesSection below rather than fetched twice.
+  // One fetch of session-manager-operations/project-pages/home.html.
   const { output, loaded } = useProjectPagesOutput(cwd)
   const { generate } = useBuilderEpic(cwd)
 
@@ -147,14 +119,7 @@ function ProjectHomeComponent() {
     return <EmptyState title="Open a project to see its brief" />
   }
 
-  const projectName = projectNameFromCwd(activeTab.cwd)
   const snapshots: EpicSnapshots = { sessions, chats, jobs: scheduleJobs, prds }
-  const generatedMs = output?.generatedAt ? Date.parse(output.generatedAt) : NaN
-  const provenanceLabel = output
-    ? output.isDefault
-      ? 'Shipped default — not yet generated for this project'
-      : `generated ${formatAgo(Number.isNaN(generatedMs) ? null : generatedMs, Date.now())}`
-    : ''
 
   return (
     <div className="h-full overflow-auto">
@@ -163,33 +128,7 @@ function ProjectHomeComponent() {
         <PhOpenQuestions cwd={activeTab.cwd} sessions={sessions} chats={chats} />
         <PhAgentTools cwd={activeTab.cwd} />
 
-        <div className="rounded-xl border border-line bg-bg-hi px-6 py-5 mb-3.5 flex items-start gap-4">
-          <div className="min-w-0">
-            <div className="font-mono text-[10px] font-semibold uppercase tracking-wide text-fg-faint mb-2">
-              Project Home
-            </div>
-            <h1 className="font-serif text-[26px] font-semibold text-fg leading-tight max-w-[760px]">
-              {projectName}
-            </h1>
-            {loaded && (
-              <div className="font-mono text-[10.5px] text-fg-faint mt-2 leading-relaxed">{provenanceLabel}</div>
-            )}
-          </div>
-          <div className="ml-auto text-right shrink-0">
-            <button
-              type="button"
-              onClick={handleGenerate}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-bg-hi cursor-pointer hover:bg-accent-dark"
-            >
-              <span className="inline-flex">
-                <AlmanacIcon name="sparkle" size={14} />
-              </span>
-              Generate My Project Home
-            </button>
-          </div>
-        </div>
-
-        <ProjectPagesSection output={output} loaded={loaded} />
+        <ProjectPagesSection output={output} loaded={loaded} onGenerate={handleGenerate} />
       </div>
     </div>
   )

@@ -11,7 +11,7 @@
  * have shipped silently. Source: tests/e2e cycle-3 research §3 P0-1.
  */
 import { test, expect } from '@playwright/test'
-import type { NavKey } from '../../src/renderer/components/LeftNav'
+import type { NavKey } from '../../src/renderer/lib/navKey'
 import { launchApp, navigateToTab } from './_helpers/launchApp'
 
 // Full union mirrored from LeftNav.tsx. Order is the order they ship in the

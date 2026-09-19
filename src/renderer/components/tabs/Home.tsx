@@ -21,7 +21,7 @@
  */
 
 import { memo, useMemo, useEffect, useState, type ReactNode } from 'react'
-import type { NavKey } from '../LeftNav'
+import type { NavKey } from '../../lib/navKey'
 import { useBilling, getBillingData, refreshBilling } from '../../state/billing'
 import { useScheduleState } from '../../state/scheduleState'
 import { useSessions } from '../../state/sessions'

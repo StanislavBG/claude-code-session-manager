@@ -3,7 +3,7 @@ import { useConfig } from '../../state/config'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { SETTINGS_SCOPES, CLAUDE_MD_SCOPES } from '../../lib/scopes'
 import { listSkillEntries } from '../../lib/listSkills'
-import type { NavKey } from '../LeftNav'
+import type { NavKey } from '../../lib/navKey'
 
 /**
  * Global Controls — Home-only quick-link summary over the machine-wide

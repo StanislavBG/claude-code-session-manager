@@ -381,7 +381,7 @@ export const useLive = create<LiveState>((set, get) => ({
  * `tab` is null/undefined or no slice exists yet.
  *
  * Centralizes the subscribe/unsubscribe lifecycle so every consumer
- * (AgentView, Tasks, Subagents, SessionPlansView, AlmanacFooter) gets the
+ * (AgentView, Tasks, Subagents, AlmanacFooter) gets the
  * same refcounted behavior. Previously AgentView's mount-effect implicitly
  * drove `lastEventAt`; if it stopped mounting, peer consumers (like the
  * footer) would silently stall at 0.

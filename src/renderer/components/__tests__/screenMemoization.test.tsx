@@ -9,7 +9,7 @@ import { Settings } from '../tabs/Settings'
 import { Memory } from '../tabs/Memory'
 import { TagLibrary } from '../tabs/TagLibrary'
 import { AgentLibrary } from '../tabs/AgentLibrary'
-import type { NavKey } from '../LeftNav'
+import type { NavKey } from '../../lib/navKey'
 import { useLayout } from '../../state/layout'
 import { useSessions, type SessionTab } from '../../state/sessions'
 import { useConfig } from '../../state/config'
@@ -37,7 +37,7 @@ import { flushAsync } from '../../testUtils/domFlush'
  *     reachable from `renderScreenComponent` subscribe to it reactively
  *     (`useLiveTab`/`useLive` as a *hook*, not `.getState()`) — grep
  *     confirms the only reactive consumers are `AlmanacFooter` (app chrome,
- *     not a screen) and the orphaned, unreferenced `SessionPlansView`. So
+ *     not a screen). So
  *     there is deliberately no 'live' case here: memoizing these screens
  *     carries no live-store regression risk because none of them read it.
  */

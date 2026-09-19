@@ -3,7 +3,7 @@ import { SCREEN_KEYS, SCREEN_TITLES } from '../lib/screenKeys'
 import { readAppPrefs } from '../lib/appPrefs'
 import type { NavFace } from '../lib/navFace'
 import { isHomeOnlyNavKey, isProjectOnlyNavKey } from '../lib/navGroups'
-import type { NavKey } from '../components/LeftNav'
+import type { NavKey } from '../lib/navKey'
 
 /**
  * Panel registry entry. `component` is a lookup key (not a component

@@ -1081,26 +1081,6 @@ export interface WatcherClosedEvent {
   watcherId: string;
 }
 
-export interface TeamMember {
-  name: string;
-  agentType: string | null;
-  model: string | null;
-}
-
-export interface TeamInfo {
-  name: string;
-  configPath: string;
-  description: string | null;
-  leadAgentId: string | null;
-  members: TeamMember[];
-  memberCount: number;
-  inboxDepth: number;
-}
-
-export interface TeamsListResult {
-  teams: TeamInfo[];
-}
-
 // ────────────────────────────────────────────── Bundle D — queue ops
 
 export interface LintFinding {
@@ -1859,10 +1839,6 @@ export interface SessionManagerAPI {
     tickNow: () => Promise<{ ok: boolean }>;
     /** Return last 50 supervisor log entries, descending by ts. */
     getLog: () => Promise<SupervisorLogEntry[]>;
-  };
-  teams: {
-    /** Enumerate ~/.claude/teams/<name>/config.json + inbox depths. */
-    list: () => Promise<TeamsListResult>;
   };
   plugins: {
     /** Run `claude plugin install <slug>` in a hidden pty. Streams output

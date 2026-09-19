@@ -13,8 +13,6 @@ Part of the **DESKTOP HARNESS** partition, except `main/{bilkoHost,bilkoHostCore
   NAME (`ScheduleJob`, `AgentPersonaSaveInput`, …) — cite names, never line numbers.
 - `renderer/` — React app; has its own [`CLAUDE.md`](renderer/CLAUDE.md) (may not exist yet).
 - `seed/agents/` — the three personas `main/seedAgentPersonas.cjs` copies to `~/.claude/agents`.
-  `seed/prompts/` — bundled prompt library, consumed only by the renderer
-  (`renderer/lib/promptsSeed.ts` via `import.meta.glob`), not by main.
 - `../bin/cli.cjs` — the npx launcher.
 
 Per-file rationale:

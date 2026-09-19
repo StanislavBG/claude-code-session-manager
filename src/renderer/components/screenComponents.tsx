@@ -1,5 +1,5 @@
 import { Suspense, lazy, type ReactNode } from 'react'
-import type { NavKey } from './LeftNav'
+import type { NavKey } from '../lib/navKey'
 import { Home } from './tabs/Home'
 import { ProjectHome } from './tabs/projecthome/ProjectHome'
 import { EditorView } from './tabs/EditorView'

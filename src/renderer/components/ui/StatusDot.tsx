@@ -3,7 +3,7 @@
  *  default=emerald). `attention` uses the warm accent; `paused` uses zinc.
  *
  *  Back-compat: accepts a legacy `kind` prop (`on|off|warn|live|idle`) so
- *  earlier stub callsites (e.g. InstrumentTile) keep compiling.
+ *  earlier stub callsites keep compiling.
  */
 
 export type StatusDotState = 'live' | 'idle' | 'offline' | 'attention' | 'paused'

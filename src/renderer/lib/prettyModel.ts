@@ -8,7 +8,7 @@
  *   claude-fable-5-1[1m]           → "Fable 5.1 1m"
  *
  * Falls back to the input string when no known family is found. The
- * AppStatusBar pill and TeamsCard chip used to have separate, drifting
+ * AppStatusBar pill and other model chips used to have separate, drifting
  * implementations of this; unified here.
  */
 export function prettyModel(model: string): string {

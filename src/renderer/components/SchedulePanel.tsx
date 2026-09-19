@@ -14,7 +14,7 @@ import { SchBadge, LeakBadge, LeftoverBadge, OverrunBadge, formatLeakedDescendan
 import { resolveEpicRef } from '../lib/epicProvenance'
 import { buildBacklogTree, flattenBacklogNodes, type BacklogEpicSection, type BacklogNode, type BacklogBlocker } from '../lib/backlogTree'
 import { usePanelFocus } from '../lib/panelFocus'
-import type { NavKey } from './LeftNav'
+import type { NavKey } from '../lib/navKey'
 
 /** Inline completed-jobs cap. Older / overflow get rolled into the
  *  "+N more completed" collapse line. */

@@ -16,7 +16,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { NavKey } from '../LeftNav'
+import type { NavKey } from '../../lib/navKey'
 import { useSessions } from '../../state/sessions'
 import { useLayout } from '../../state/layout'
 import { useVoice } from '../../state/voice'

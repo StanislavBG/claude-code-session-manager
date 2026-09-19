@@ -36,7 +36,6 @@ const EXPECTED_NAMESPACES = [
   'history',
   'schedule',
   'supervisor',
-  'teams',
   'plugins',
   'clipboard',
   'memory',

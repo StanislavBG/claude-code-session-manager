@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { TabBar } from './components/TabBar'
-import { type NavKey } from './components/LeftNav'
+import { type NavKey } from './lib/navKey'
 import { AlmanacSidebar } from './components/layout/AlmanacSidebar'
 import { AlmanacFooter } from './components/layout/AlmanacFooter'
 import { BroadcastBar } from './components/BroadcastBar'
@@ -21,7 +21,6 @@ import { useLayout, needsProjectsPanelReconciliation } from './state/layout'
 import { useEditor } from './state/editor'
 import { useWatchers } from './state/watchers'
 import { startBillingPolling } from './state/billing'
-import { startTeamsPolling } from './state/teams'
 import { startSchedulePolling } from './state/scheduleState'
 import { DEFAULT_PRESETS, renderCommand, resolvePresetCwd } from './lib/presets'
 import { createPickedSession, openOrStartProject } from './lib/createPickedSession'
@@ -374,9 +373,8 @@ export function App() {
     useWatchers.getState().init()
 
     // Singleton pollers — replace per-component timers in Overview,
-    // SchedulePanel, TeamsCard, etc.
+    // SchedulePanel, etc.
     startBillingPolling()
-    startTeamsPolling()
     startSchedulePolling()
 
     // Boot diagnostics (v0.10.1) — surface bad startup state as a toast.

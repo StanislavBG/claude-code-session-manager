@@ -5,7 +5,7 @@ import { readAppPrefs, writeAppPrefs } from '../../lib/appPrefs'
 import { toast } from '../../state/toast'
 import { useSessionSlots } from '../../lib/useSessionSlots'
 import { SlotDots } from '../ui/SlotDots'
-import type { NavKey } from '../LeftNav'
+import type { NavKey } from '../../lib/navKey'
 
 /**
  * SessionManagerConfig — the home for GLOBAL (machine-level) configuration,

@@ -24,7 +24,7 @@ import { useBranch } from '../../lib/useBranch'
 import { usageTitle, utilPercent } from '../../lib/usageWindow'
 import { useSessionSlots } from '../../lib/useSessionSlots'
 import { SlotDots } from '../ui/SlotDots'
-import type { NavKey } from '../LeftNav'
+import type { NavKey } from '../../lib/navKey'
 
 interface AlmanacFooterProps {
   onNavigate?: (k: NavKey) => void

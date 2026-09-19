@@ -1,4 +1,4 @@
-import type { NavKey } from '../components/LeftNav'
+import type { NavKey } from './navKey'
 import type { AlmanacIconName } from '../components/layout/AlmanacIcon'
 import type { NavFace } from './navFace'
 

@@ -1,4 +1,4 @@
-import type { NavKey } from '../LeftNav'
+import type { NavKey } from '../../lib/navKey'
 import { LearningPanel } from '../LearningPanel'
 
 /**

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { NavKey } from './LeftNav'
+import type { NavKey } from '../lib/navKey'
 import { LEARNING_CONTENT, type LearningContent } from './learningContent'
 
 const STORAGE_KEY = 'sm.learningPanel.collapsed'

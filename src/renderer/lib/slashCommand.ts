@@ -1,4 +1,4 @@
-import type { NavKey } from '../components/LeftNav'
+import type { NavKey } from './navKey'
 
 const SLASH_NAV_COMMANDS: Record<string, NavKey> = {
   mcp: 'mcp',

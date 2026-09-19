@@ -282,9 +282,6 @@ contextBridge.exposeInMainWorld('api', {
     tickNow: () => ipcRenderer.invoke('supervisor:tick-now'),
     getLog: () => ipcRenderer.invoke('supervisor:get-log'),
   },
-  teams: {
-    list: () => ipcRenderer.invoke('teams:list'),
-  },
   plugins: {
     install: (payload) => ipcRenderer.invoke('plugins:install', payload),
     abort: (slug) => ipcRenderer.invoke('plugins:abort', slug),

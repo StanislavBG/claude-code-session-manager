@@ -1,4 +1,4 @@
-import type { NavKey } from './LeftNav'
+import type { NavKey } from '../lib/navKey'
 
 export interface LearningItem {
   /** Optional bold lead-in (e.g. a setting name) before the explanation. */

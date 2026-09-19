@@ -12,7 +12,7 @@ import { formatAgo, formatRelative } from '../../lib/formatTime'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { LegendItem } from './scheduler/sched-primitives'
 import { LearningPanel } from '../LearningPanel'
-import type { NavKey } from '../LeftNav'
+import type { NavKey } from '../../lib/navKey'
 
 /**
  * Scheduler — ONE screen for both sidebar faces (Home and Project), no fork

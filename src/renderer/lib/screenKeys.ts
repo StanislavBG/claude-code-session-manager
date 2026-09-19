@@ -1,4 +1,4 @@
-import type { NavKey } from '../components/LeftNav'
+import type { NavKey } from './navKey'
 import { NAV_ITEMS } from './navGroups'
 
 /**
@@ -7,7 +7,7 @@ import { NAV_ITEMS } from './navGroups'
  * screenComponents map — was three independently-maintained lists before
  * the Workbench per-screen-panel link; keep them merged.
  *
- * Adding a NavKey: append the literal to the NavKey union (LeftNav.tsx),
+ * Adding a NavKey: append the literal to the NavKey union (lib/navKey.ts),
  * append it here, add a title to TITLE_OVERRIDES if it has no NAV_ITEMS
  * sidebar row, then handle it in screenComponents.tsx.
  */

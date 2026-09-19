@@ -69,3 +69,14 @@ test('a precomputed cwdHolders set is forwarded through to hasLiveHolder unchang
   isLive('job-d', { worktree: '/tmp/checkout-d' });
   expect(hasLiveHolder).toHaveBeenCalledWith('/tmp/checkout-d', holders);
 });
+
+test('rowPid (the record/log ladder) is consulted instead of runtime.pid alone', () => {
+  const claudePidAlive = vi.fn((pid) => pid === 777);
+  const isLive = buildJobWorktreeIsLive({
+    bootJobs: [{ slug: 'job-e', status: 'running' }],
+    claudePidAlive,
+    hasLiveHolder: () => false,
+    rowPid: () => 777,
+  });
+  expect(isLive('job-e', { worktree: '/tmp/checkout-e' })).toBe(true);
+});

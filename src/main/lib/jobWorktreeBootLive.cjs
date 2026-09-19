@@ -22,15 +22,19 @@
  */
 
 /**
- * @param {{ bootJobs: Array<object>, claudePidAlive: (pid: number) => boolean, hasLiveHolder: (dir: string, holders?: Set<string>) => boolean, cwdHolders?: Set<string> }} deps
+ * `rowPid(job)` resolves a running row's pid; scheduler.cjs passes the same
+ * supervisor-record → runtime.pid → run-log ladder partitionBootOrphans uses,
+ * so the two boot passes agree. Default: runtime.pid alone.
+ *
+ * @param {{ bootJobs: Array<object>, claudePidAlive: (pid: number) => boolean, hasLiveHolder: (dir: string, holders?: Set<string>) => boolean, cwdHolders?: Set<string>, rowPid?: (job: object) => number|null }} deps
  * @returns {(slug: string, entry: { worktree: string, branch: string|null }) => boolean}
  */
-function buildJobWorktreeIsLive({ bootJobs, claudePidAlive, hasLiveHolder, cwdHolders }) {
+function buildJobWorktreeIsLive({ bootJobs, claudePidAlive, hasLiveHolder, cwdHolders, rowPid = (j) => j.runtime && j.runtime.pid }) {
   const runningPidBySlug = new Map();
   for (const j of Array.isArray(bootJobs) ? bootJobs : []) {
-    if (j && j.status === 'running' && j.runtime && j.runtime.pid) {
-      runningPidBySlug.set(j.slug, j.runtime.pid);
-    }
+    if (!j || j.status !== 'running') continue;
+    const pid = rowPid(j);
+    if (pid) runningPidBySlug.set(j.slug, pid);
   }
 
   return function isLive(slug, entry) {

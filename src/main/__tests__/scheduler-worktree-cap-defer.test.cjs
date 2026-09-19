@@ -31,6 +31,24 @@ function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
 }
 
+// A completed job's PRD is archived immediately (archiveCompletedPrd, called
+// for EVERY job that reaches effectiveStatus:'completed' — not just a
+// retention-aged one), and the very next reconcile() pass (spawnJob's own
+// broadcast({flush:true}) right after finishing) then finds the row's PRD
+// gone and backfills+drops it from queue.json into history.jsonl in that
+// SAME pass — see scheduler-reconcile-history-backfill.test.cjs. So a job
+// that actually completed is found in EITHER queue.json OR history.jsonl,
+// never guaranteed to still be the former.
+function readTerminalRow(queuePath, projectCwd, slug) {
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === slug);
+  if (row) return row;
+  const historyPath = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'state', 'history.jsonl');
+  if (!fs.existsSync(historyPath)) return undefined;
+  const lines = fs.readFileSync(historyPath, 'utf8').trim().split('\n').filter(Boolean);
+  return lines.map((l) => JSON.parse(l)).reverse().find((j) => j.slug === slug);
+}
+
 function initRepo(dir) {
   fs.mkdirSync(dir, { recursive: true });
   git(['init', '-q'], dir);
@@ -112,7 +130,13 @@ test('a job held behind the worktree cap stays pending with a heldReason, is nev
   registerActiveProject(projectCwd);
 
   const slug = `1112-test-held-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
-  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'prds');
+  // Epic-scoped, not the legacy flat prds/ dir: the flat dir is retired and
+  // swept into prds-archived/ by consolidateFlatPrds on every reconcile()
+  // pass once a row is no longer 'pending'/'running' — which would strand
+  // this test's row the moment it completes (reconcile()'s terminal-job
+  // "PRD gone -> archived on purpose" drop, see
+  // scheduler-reconcile-history-backfill.test.cjs).
+  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'epics', 'test-fixture-epic', 'prds');
   fs.mkdirSync(prdsDir, { recursive: true });
   fs.writeFileSync(path.join(prdsDir, `${slug}.md`), 'Held behind the worktree cap.', 'utf8');
   const queuePath = writeProjectQueue(projectCwd, [{ slug, status: 'pending', cwd: projectCwd }]);
@@ -148,8 +172,8 @@ test('a job held behind the worktree cap stays pending with a heldReason, is nev
 
     await spawnJob({ slug, cwd: projectCwd }, `${runId}-2`, runDir, projectCwd);
 
-    jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
-    row = jobs.find((j) => j.slug === slug);
+    row = readTerminalRow(queuePath, projectCwd, slug);
+    expect(row).toBeTruthy();
     expect(row.status).toBe('completed');
     expect(row.heldReason).toBeUndefined();
   } finally {
@@ -164,7 +188,8 @@ test('a non-git cwd still falls back to running in place (unchanged behaviour �
   registerActiveProject(projectCwd);
 
   const slug = `1112-test-nongit-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
-  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'prds');
+  // Epic-scoped — see the sibling test above for why not the flat prds/ dir.
+  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'epics', 'test-fixture-epic', 'prds');
   fs.mkdirSync(prdsDir, { recursive: true });
   fs.writeFileSync(path.join(prdsDir, `${slug}.md`), 'Non-git cwd, must run in place.', 'utf8');
   const queuePath = writeProjectQueue(projectCwd, [{ slug, status: 'pending', cwd: projectCwd }]);

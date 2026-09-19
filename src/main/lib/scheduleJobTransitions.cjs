@@ -207,7 +207,23 @@ function transitionJob(job, toStatus, { reason, source, allowAnyFrom = false } =
   // Fire-and-forget, exactly like every other best-effort side-channel write
   // in this codebase (rcaReport.cjs, auditLog.cjs's own posture) — a ledger
   // write failure must never fail or delay the transition it's recording.
-  if (toStatus === 'needs_review' && from !== 'needs_review') {
+  // 'investigating' is a PAUSE, not a resolution, when it's reached FROM
+  // needs_review: spawnInvestigation always restores the job to exactly the
+  // status it left (a snapshot taken before the pause), so
+  // needs_review -> investigating -> needs_review is one continuous episode,
+  // not two. Without this check, the pause mints a spurious 'auto-fix'
+  // resolution mid-episode, then the resume mints a spurious fresh entry
+  // that overwrites the original episode's runId/enteredAt/reason in the
+  // ledger's by-key maps (keyed on slug+runId) — corrupting byLadderRung and
+  // understating dwell time. Detected via the stamped episode fields
+  // themselves rather than the transition's source string, since the same
+  // 'investigating' status is also reached fresh from 'failed' (a job that
+  // was never parked needs_review at all, and has no episode to pause).
+  const isNeedsReviewPause = from === 'needs_review' && toStatus === 'investigating';
+  const pausedEpisodeOpen = job.needsReviewEntryRunId !== undefined;
+  const isNeedsReviewResume = from === 'investigating' && pausedEpisodeOpen;
+
+  if (toStatus === 'needs_review' && from !== 'needs_review' && !isNeedsReviewResume) {
     // ENTRY: stamp the episode's runId/enteredAt on the job itself so the
     // RESOLUTION line (below) can reference the SAME runId even if the job's
     // own `runId` is reassigned in between (e.g. a resume-recovery
@@ -217,9 +233,17 @@ function transitionJob(job, toStatus, { reason, source, allowAnyFrom = false } =
     queueHistory.appendHistory([buildNeedsReviewEntryLine(job, entry)]).catch((e) => {
       console.error('[scheduleJobTransitions] failed to append needs_review entry', e?.message ?? String(e));
     });
-  } else if (from === 'needs_review' && toStatus !== 'needs_review') {
+  } else if (
+    (from === 'needs_review' && toStatus !== 'needs_review' && !isNeedsReviewPause)
+    || (isNeedsReviewResume && toStatus !== 'needs_review')
+  ) {
     // RESOLUTION: read the episode stamped at entry, then clear it — the
     // episode is over regardless of what this resolution line looks like.
+    // The `isNeedsReviewResume` arm covers an episode that paused for
+    // investigation and is now resolving to something other than
+    // needs_review (e.g. the investigation actually fixed it) — the episode
+    // stamps were deliberately left untouched across the pause, so this
+    // still references the ORIGINAL entry time, not the pause's.
     const episode = { runId: job.needsReviewEntryRunId ?? null, enteredAt: job.needsReviewEnteredAt ?? null };
     delete job.needsReviewEntryRunId;
     delete job.needsReviewEnteredAt;
@@ -227,6 +251,9 @@ function transitionJob(job, toStatus, { reason, source, allowAnyFrom = false } =
       console.error('[scheduleJobTransitions] failed to append needs_review resolution', e?.message ?? String(e));
     });
   }
+  // else: isNeedsReviewPause (needs_review -> investigating), or
+  // isNeedsReviewResume && toStatus === 'needs_review' (investigating ->
+  // needs_review, still the same open episode) — intentionally a no-op.
 
   return true;
 }

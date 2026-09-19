@@ -340,6 +340,50 @@ function deriveEpicIdFromPrdPath(filePath) {
   return epicId;
 }
 
+/**
+ * deriveProjectCwdFromPrdPath(filePath) → projectCwd | null
+ *
+ * The inverse of resolvePrdWriteDir/resolveEpicPrdWriteDir: given an absolute
+ * PRD file path (flat `prds/`, Epic-scoped `epics/<id>/prds/`, or either's
+ * `prds-archived/` sibling), returns the project root it was discovered
+ * under — by finding the `session-manager-operations` segment and validating
+ * the path round-trips back through the same resolver it walked up from.
+ * Returns null for anything that doesn't match one of those shapes (never
+ * guesses). Used by reconcile()'s fresh-discovery path so a PRD file with no
+ * `cwd:` frontmatter still gets a real project cwd instead of null (which
+ * would otherwise fall through to schedulerBatch.js's DEFAULT_PROJECT_CWD
+ * and relocate the row into the wrong project's queue.json shard).
+ */
+function deriveProjectCwdFromPrdPath(filePath) {
+  if (!filePath || typeof filePath !== 'string' || !path.isAbsolute(filePath)) return null;
+  const segments = filePath.split(path.sep);
+  const opsIdx = segments.lastIndexOf(OPS_ROOT_DIR);
+  if (opsIdx <= 0) return null;
+  const projectCwd = segments.slice(0, opsIdx).join(path.sep);
+  const prdsDir = path.dirname(filePath);
+  const dirName = path.basename(prdsDir);
+  if (dirName !== 'prds' && dirName !== 'prds-archived') return null;
+  if (dirName === 'prds') {
+    try {
+      if (resolvePrdWriteDir(projectCwd) === prdsDir) return projectCwd;
+    } catch { /* fall through to the Epic-scoped check below */ }
+  }
+  if (dirName === 'prds-archived') {
+    // Flat legacy archive sibling of resolvePrdWriteDir's flat `prds/` (see
+    // listArchivedPrdDirs' first entry: opsPath(cwd, ...PRD_SUBPATH, '..',
+    // 'prds-archived')) — round-trip it the same way the flat `prds` branch
+    // above does, before falling through to the Epic-scoped check (which
+    // can never match a flat path: deriveEpicIdFromPrdPath requires an
+    // `epics/<id>/` segment a flat archive dir doesn't have).
+    try {
+      if (opsPath(projectCwd, ...PRD_SUBPATH, '..', 'prds-archived') === prdsDir) return projectCwd;
+    } catch { /* fall through to the Epic-scoped check below */ }
+  }
+  const epicId = deriveEpicIdFromPrdPath(filePath);
+  if (epicId) return projectCwd;
+  return null;
+}
+
 module.exports = {
   resolvePrdWriteDir,
   resolvePrdsDirs,
@@ -349,6 +393,7 @@ module.exports = {
   listEpicPrdDirs,
   listArchivedPrdDirs,
   deriveEpicIdFromPrdPath,
+  deriveProjectCwdFromPrdPath,
   PRD_SUBPATH,
   EPICS_SUBPATH,
 };

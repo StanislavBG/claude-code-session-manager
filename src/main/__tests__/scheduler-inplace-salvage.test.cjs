@@ -53,6 +53,12 @@ function registerActiveProject(cwd) {
   fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
 }
 
+// Every PRD fixture below lives Epic-scoped, not in the legacy flat prds/
+// dir: the flat dir is retired and swept into prds-archived/ by
+// consolidateFlatPrds the moment a job is no longer pending/running, which
+// would strand a just-completed/failed row the instant reconcile()'s
+// auto-archive-drop path (see scheduler-reconcile-history-backfill.test.cjs)
+// treats the now-missing PRD as "archived on purpose" and drops it.
 function writeProjectQueue(cwd, jobs) {
   const stateDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
   fs.mkdirSync(stateDir, { recursive: true });
@@ -115,7 +121,7 @@ test('an in-place job killed (exit 137) mid-run salvages a delta-scoped patch th
   fs.appendFileSync(path.join(projectCwd, 'human-wip.txt'), 'more human edits\n', 'utf8');
 
   const slug = `1098-test-inplace-killed-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
-  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'prds');
+  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'epics', 'test-fixture-epic', 'prds');
   fs.mkdirSync(prdsDir, { recursive: true });
   fs.writeFileSync(path.join(prdsDir, `${slug}.md`), 'Do a thing that gets killed mid-run.', 'utf8');
 
@@ -205,6 +211,15 @@ function writeGatedClaudeStub() {
     const fs = require('fs');
     const path = require('path');
     const { execFileSync } = require('child_process');
+    // spawnJob's dispatch path probes 'claude --version' (claudeBin.cjs)
+    // BEFORE the real dispatch — a real claude binary answers that
+    // near-instantly regardless of any in-flight work, so the stub must
+    // too, or the probe's own 8s exec timeout eats almost this whole test's
+    // poll window before the row ever advances past 'running-stamped'.
+    if (process.argv.includes('--version')) {
+      process.stdout.write('1.0.0 (stub)\\n');
+      process.exit(0);
+    }
     const goFile = path.join(process.cwd(), 'go.marker');
     const deadline = Date.now() + 10_000;
     while (!fs.existsSync(goFile) && Date.now() < deadline) {
@@ -221,7 +236,7 @@ test('dispatchPhase breadcrumb advances to "spawned" mid-run and is gone after f
   registerActiveProject(projectCwd);
 
   const slug = `1163-test-dispatchphase-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
-  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'prds');
+  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'epics', 'test-fixture-epic', 'prds');
   fs.mkdirSync(prdsDir, { recursive: true });
   fs.writeFileSync(path.join(prdsDir, `${slug}.md`), 'Do a thing, gated on a marker file.', 'utf8');
 
@@ -277,7 +292,7 @@ test('a job whose tree is dirty only from pre-existing baseline WIP (human/sibli
   fs.writeFileSync(path.join(projectCwd, 'human-wip.txt'), 'human work in progress\n', 'utf8');
 
   const slug = `1098-test-inplace-noop-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
-  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'prds');
+  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'epics', 'test-fixture-epic', 'prds');
   fs.mkdirSync(prdsDir, { recursive: true });
   fs.writeFileSync(path.join(prdsDir, `${slug}.md`), 'Do nothing.', 'utf8');
 

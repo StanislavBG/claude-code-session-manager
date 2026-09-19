@@ -356,22 +356,23 @@ export interface DelegationReadinessCheck {
     | 'agent-personas'
     | 'prd-write-guard'
     | 'destructive-git-guard'
-    | 'inline-implementation-guard';
+    | 'inline-implementation-guard'
+    | 'self-schedule-guard';
   label: string;
   ok: boolean;
   detail: string;
   fix: string | null;
   /** Non-null when Session Manager can install this fix itself, one press. */
-  fixAction: 'install-prd-write-guard' | 'install-destructive-git-guard' | 'install-inline-implementation-guard' | null;
+  fixAction: 'install-prd-write-guard' | 'install-destructive-git-guard' | 'install-inline-implementation-guard' | 'install-self-schedule-guard' | null;
   /** True when ok:true is a WARNING (still passing, but worth a human's attention) — today only scheduler-mcp-project-duplicate. */
   warn?: boolean;
   /** True when this check didn't run because a precondition (another check) already failed — reported ok:true, not a failure. */
   skipped?: boolean;
 }
 
-/** Result of installPrdWriteGuard, installDestructiveGitGuard, and
- *  installInlineImplementationGuard alike (delegationReadiness.cjs) — the
- *  three installers share one contract. */
+/** Result of installPrdWriteGuard, installDestructiveGitGuard,
+ *  installInlineImplementationGuard, and installSelfScheduleGuard alike
+ *  (delegationReadiness.cjs) — all four installers share one contract. */
 export interface InstallGuardResult {
   ok: boolean;
   action: 'installed' | 'repaired' | 'already-installed' | 'error';
@@ -658,13 +659,6 @@ export interface ScheduleJobStatusHistoryEntry {
   at: string;
 }
 
-export interface SchedulePaths {
-  root: string;
-  prds: string;
-  runs: string;
-  queue: string;
-}
-
 export type SchedulePauseReason = 'rate_limit' | 'auth' | 'network' | 'manual' | 'reset_failure';
 
 export interface SchedulePauseInfo {
@@ -858,8 +852,6 @@ export interface ScheduleStateSnapshot {
    * is saturated. Null before the first tick that evaluated it.
    */
   loadGate?: ScheduleLoadGate | null;
-  /** Returned only by the initial state() call, not the broadcast event. */
-  paths?: SchedulePaths;
 }
 
 export interface ScheduleLoadGate {
@@ -1579,6 +1571,7 @@ export interface SessionManagerAPI {
     installPrdWriteGuard: (cwd: string) => Promise<InstallGuardResult>;
     installDestructiveGitGuard: (cwd: string) => Promise<InstallGuardResult>;
     installInlineImplementationGuard: (cwd: string) => Promise<InstallGuardResult>;
+    installSelfScheduleGuard: (cwd: string) => Promise<InstallGuardResult>;
     onNewSession: (handler: () => void) => () => void;
     onRebootSession: (handler: () => void) => () => void;
     archiveProject: (encoded: string) => Promise<{ ok: boolean; error?: string }>;
@@ -1897,7 +1890,7 @@ export interface SessionManagerAPI {
     update: (cwd: string, patch: ProjectBriefPatch) => Promise<ProjectBriefUpdateResult>;
   };
   projectPages: {
-    /** Read output/*.html + manifest.json (or `{output: null}` if none exist yet). Never fires an LLM call. */
+    /** Read project-pages/home.html (`{html: null, mtimeMs: null}` if it does not exist yet). Never fires an LLM call. */
     get: (cwd: string) => Promise<ProjectPagesGetResult>;
     /** Start pushing `onChanged` events for this cwd's output dir. Refcounted per cwd; `ok:false` (reason 'ephemeral'|'invalid-cwd') means no live updates are possible, not an error. */
     watch: (cwd: string) => Promise<{ ok: boolean; reason?: 'ephemeral' | 'invalid-cwd' }>;

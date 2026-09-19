@@ -27,6 +27,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { readActiveIndex, resolvePersonaPaths } = require('./epicMint.cjs');
+const { PERSONA_NAME_RE } = require('../agentLibrary.cjs');
 const configMgr = require('../config.cjs');
 
 /** The hardcoded floor every branch of resolveEpicModel falls back to — --model must never be omitted (CLAUDE.md "Automation model pinning"). */
@@ -125,10 +126,40 @@ function readModelFromCandidatePaths(candidates, agentType, deps) {
  * — never throws.
  */
 function readOverlayAwarePersonaModel(agentType, deps = {}) {
-  if (!agentType) return null;
+  // Same guard agentLibrary.cjs's getPersonaBody applies before it joins
+  // `name` into a path: without it, a caller-supplied agentType like
+  // "../../other-project/CLAUDE" survives resolvePersonaPaths' plain
+  // path.join and validatePath's allowed-roots check (which only confirms
+  // the resolved path stays under the home dir / an opened project), letting
+  // any readable .md under those roots be read on this --model spawn path.
+  if (!agentType || !PERSONA_NAME_RE.test(agentType)) return null;
   const resolvePaths = deps.resolvePersonaPaths || resolvePersonaPaths;
   const { projectPath, globalPath } = resolvePaths(deps.cwd, agentType, deps);
   return readModelFromCandidatePaths([projectPath, globalPath], agentType, deps);
+}
+
+/**
+ * True when `personaPath` (an already-resolved persona file path, e.g. from
+ * agentLibrary.cjs's getPersonaBody) is the PROJECT overlay candidate rather
+ * than the global one — the same "which of resolvePersonaPaths' two
+ * candidates won" question readModelFromCandidatePaths above answers
+ * structurally by trying the project path first. Exported so a caller that
+ * already has a resolved persona path from a DIFFERENT reader (one that
+ * needs async I/O or richer provenance than this module's sync
+ * readOverlayAwarePersonaModel returns — e.g. effectiveModelInfo.cjs) can
+ * ask this module the overlay question instead of re-deriving its own
+ * resolvePersonaPaths-based comparison. Never throws; a resolution failure
+ * conservatively answers "not overlay" (assume global).
+ */
+function isProjectOverlayPersonaPath(cwd, agentType, personaPath, deps = {}) {
+  if (!personaPath) return false;
+  try {
+    const resolvePaths = deps.resolvePersonaPaths || resolvePersonaPaths;
+    const { projectPath } = resolvePaths(cwd, agentType, deps);
+    return Boolean(projectPath) && path.resolve(projectPath) === path.resolve(personaPath);
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -220,5 +251,6 @@ module.exports = {
   resolveEpicModel,
   findAgentTypeByClaudeSessionId,
   readOverlayAwarePersonaModel,
+  isProjectOverlayPersonaPath,
   resolvePrdPersonaForSpawn,
 };

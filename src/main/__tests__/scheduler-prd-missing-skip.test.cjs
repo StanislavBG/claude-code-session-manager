@@ -103,6 +103,22 @@ function writeProjectQueue(cwd, jobs) {
   return path.join(stateDir, 'queue.json');
 }
 
+// This test's whole premise is a PRD source missing EVERYWHERE — so the row
+// this produces is exactly what reconcile()'s auto-archive-drop path treats
+// as "archived on purpose": backfilled to history.jsonl and dropped from
+// queue.json in the very same reconcile pass that spawnJob's own
+// broadcast({flush:true}) triggers on completion (see
+// scheduler-reconcile-history-backfill.test.cjs). Look in both places.
+function readTerminalRow(queuePath, projectCwd, slug) {
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === slug);
+  if (row) return row;
+  const historyPath = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'state', 'history.jsonl');
+  if (!fs.existsSync(historyPath)) return undefined;
+  const lines = fs.readFileSync(historyPath, 'utf8').trim().split('\n').filter(Boolean);
+  return lines.map((l) => JSON.parse(l)).reverse().find((j) => j.slug === slug);
+}
+
 // This is the actual regression case: PRD 812's fix only covered executeJob's
 // own return value. The bug lived one layer up, in spawnJob's post-run
 // handler, which only short-circuited on skipped === 'prd-archived' and let
@@ -123,8 +139,7 @@ test("spawnJob's post-run handler retires a prd-missing skip as a plain completi
     const job = { slug, cwd: projectCwd };
     await spawnJob(job, 'run-spawnjob-missing', runDir, projectCwd);
 
-    const state = JSON.parse(fs.readFileSync(queuePath, 'utf8'));
-    const row = state.jobs.find((j) => j.slug === slug);
+    const row = readTerminalRow(queuePath, projectCwd, slug);
     expect(row).toBeDefined();
     // A 'prd-missing' skip means no executor ever ran — it must land on the
     // distinct 'skipped' status, never 'completed' (the status a genuine

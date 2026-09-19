@@ -53,10 +53,41 @@ function registerActiveProject(cwd) {
   fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
 }
 
+// Every real scheduler row is born from a real PRD .md file — reconcile()'s
+// auto-archive-drop path (a terminal job whose slug has no on-disk PRD
+// anywhere is treated as "archived on purpose": dropped from queue.json and
+// backfilled to history.jsonl, see scheduler-reconcile-history-backfill.
+// test.cjs) fires the moment a completion path reconciles with
+// broadcast({flush:true}). Without a matching PRD source, a row this test
+// drives to a terminal status vanishes from queue.json before the assertions
+// below ever read it back. Epic-scoped (not the legacy flat prds/ dir) so
+// it's never swept by consolidateFlatPrds either.
+// Some tests author their own real PRD (e.g. with `quietMachine: true`
+// frontmatter) before calling writeProjectQueue — never shadow that with a
+// blank fixture, which would silently overwrite its parsed frontmatter on
+// the next reconcile() refresh (onDisk.set(slug, ...) keeps whichever file a
+// later scan pass parses).
+function prdAlreadyExists(cwd, slug) {
+  const flatPath = path.join(cwd, 'session-manager-operations', 'scheduler', 'prds', `${slug}.md`);
+  if (fs.existsSync(flatPath)) return true;
+  const epicsRoot = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics');
+  if (!fs.existsSync(epicsRoot)) return false;
+  return fs.readdirSync(epicsRoot).some((epicId) => fs.existsSync(path.join(epicsRoot, epicId, 'prds', `${slug}.md`)));
+}
+
+function writeFixturePrd(cwd, slug) {
+  const prdsDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'test-fixture-epic', 'prds');
+  fs.mkdirSync(prdsDir, { recursive: true });
+  fs.writeFileSync(path.join(prdsDir, `${slug}.md`), 'Test fixture PRD.', 'utf8');
+}
+
 function writeProjectQueue(cwd, jobs) {
   const stateDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
   fs.mkdirSync(stateDir, { recursive: true });
   fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({ jobs }, null, 2));
+  for (const job of jobs) {
+    if (job && job.slug && !prdAlreadyExists(job.cwd || cwd, job.slug)) writeFixturePrd(job.cwd || cwd, job.slug);
+  }
   return path.join(stateDir, 'queue.json');
 }
 
@@ -107,7 +138,13 @@ test('a killed quietMachine job releases the exclusive lease, and an ordinary jo
 
   const quietSlug = `1107-test-quiet-killed-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
   const ordinarySlug = `1107-test-ordinary-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
-  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'prds');
+  // Epic-scoped, not the legacy flat prds/ dir: the flat dir is retired and
+  // swept into prds-archived/ by consolidateFlatPrds the moment a job is no
+  // longer pending/running, which would silently strip this PRD's
+  // `quietMachine: true` frontmatter from the row on the very next
+  // reconcile() refresh (or drop the row entirely once terminal — see
+  // scheduler-reconcile-history-backfill.test.cjs).
+  const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'epics', 'test-fixture-epic', 'prds');
   fs.mkdirSync(prdsDir, { recursive: true });
   fs.writeFileSync(path.join(prdsDir, `${quietSlug}.md`), '---\nquietMachine: true\n---\nMeasure timing without contention, then get killed.', 'utf8');
   fs.writeFileSync(path.join(prdsDir, `${ordinarySlug}.md`), 'An ordinary PRD queued behind the quiet job.', 'utf8');

@@ -499,6 +499,12 @@ test('POST /admin/scheduler/reset-job with cwd resets the SAME-slug job belongin
   bustCwdCache();
   const slug = uniqueSlug('collision-slug');
   const epicId = 'epic-reset-collision';
+  // Both projects' rows need a real PRD source — a 'needs_review' row whose
+  // PRD is invisible to reconcile()'s onDisk scan is silently dropped (never
+  // backfilled to history.jsonl the way a completed/failed/skipped orphan
+  // is), which would make jobA vanish for a reason unrelated to what this
+  // test actually verifies (cwd-scoped job lookup).
+  await writePrdFixture({ cwd: cwdA, epicId, slug });
   await writePrdFixture({ cwd: cwdB, epicId, slug });
   await scheduler.writeQueue({
     jobs: [
@@ -518,8 +524,14 @@ test('POST /admin/scheduler/reset-job with cwd resets the SAME-slug job belongin
     expect(res.json).toEqual({ ok: true, slug, status: 'pending' });
 
     const state = await scheduler.remote.listJobs();
-    const jobA = state.find((j) => j.cwd === cwdA);
-    const jobB = state.find((j) => j.cwd === cwdB);
+    // Filter by slug too, not just cwd: cwdA is a shared fixture directory
+    // reused by many tests in this file, each of which leaves its own
+    // never-archived PRD file behind (only the queue row is cleared in
+    // `finally`) — reconcile()'s fresh-discovery pass can quarantine one of
+    // those leftovers as a NEW row under this same cwd on any later pass, so
+    // `cwd` alone no longer uniquely identifies this test's own job.
+    const jobA = state.find((j) => j.cwd === cwdA && j.slug === slug);
+    const jobB = state.find((j) => j.cwd === cwdB && j.slug === slug);
     expect(jobA.status).toBe('needs_review'); // untouched
     expect(jobB.status).toBe('pending'); // the one actually targeted
   } finally {

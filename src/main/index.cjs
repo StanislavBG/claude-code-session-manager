@@ -44,7 +44,7 @@ const epicWorktreeProjectConfig = require('./lib/epicWorktreeProjectConfig.cjs')
 const agentLibrary = require('./agentLibrary.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { resolveEffectiveModelInfo } = require('./lib/effectiveModelInfo.cjs');
-const { checkDelegationReadiness, ensureGuardsInstalled, installPrdWriteGuard, installDestructiveGitGuard, installInlineImplementationGuard } = require('./lib/delegationReadiness.cjs');
+const { checkDelegationReadiness, ensureGuardsInstalled, installPrdWriteGuard, installDestructiveGitGuard, installInlineImplementationGuard, installSelfScheduleGuard } = require('./lib/delegationReadiness.cjs');
 const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
 const upgradeDrain = require('./lib/upgradeDrain.cjs');
 const { writeGuardShims } = require('./lib/guardShims.cjs');
@@ -618,12 +618,22 @@ function logGuardInstallAttempt(guard, cwd, outcome) {
 }
 
 async function handleGuardInstall(guard, installFn, payload) {
+  // Normalized the SAME way the sibling app:delegation-readiness handler
+  // above normalizes cwd, before either installing or logging — without
+  // this, a worktree/ops-internal cwd installs the guard into an ephemeral
+  // `.claude/settings.json` that vanishes with the worktree (this repo's
+  // "Worktree cwd ops-root hazard" incident class), diverging from the
+  // main-tree root the readiness banner (and its own auto-heal path,
+  // ensureGuardsInstalled) actually reads.
+  const resolved = resolveProjectContext({ cwd: payload.cwd });
+  const cwd = resolved.cwd || payload.cwd;
+  const normalizedPayload = { ...payload, cwd };
   try {
-    const result = await installFn(payload);
-    logGuardInstallAttempt(guard, payload.cwd, result);
+    const result = await installFn(normalizedPayload);
+    logGuardInstallAttempt(guard, cwd, result);
     return result;
   } catch (err) {
-    logGuardInstallAttempt(guard, payload.cwd, { ok: false, action: 'error', error: err?.message ?? String(err) });
+    logGuardInstallAttempt(guard, cwd, { ok: false, action: 'error', error: err?.message ?? String(err) });
     throw err;
   }
 }
@@ -644,6 +654,9 @@ ipcMain.handle('app:install-destructive-git-guard', validated(schemas.delegation
 ));
 ipcMain.handle('app:install-inline-implementation-guard', validated(schemas.delegationReadinessCwd, (payload) =>
   handleGuardInstall('inline-implementation-guard', installInlineImplementationGuard, payload)
+));
+ipcMain.handle('app:install-self-schedule-guard', validated(schemas.delegationReadinessCwd, (payload) =>
+  handleGuardInstall('self-schedule-guard', installSelfScheduleGuard, payload)
 ));
 
 ipcMain.handle('app:engage-rules-path', () => process.env.SESSION_MANAGER_ENGAGE_RULES || null);
@@ -1264,6 +1277,7 @@ app.whenReady().then(async () => {
 
   const heapSnapshotMenuItem = heapSnapshot.buildMenuItem(() => mainWindow);
 
+  // Application menu rules + rationale: session-manager-operations/architecture/application-menu.md
   const template = [
     {
       label: 'Session Manager',
@@ -1277,7 +1291,6 @@ app.whenReady().then(async () => {
             }
           },
         },
-  // Application menu rules + rationale: session-manager-operations/architecture/application-menu.md
         {
           label: 'Restart Session Manager App',
           accelerator: 'CmdOrCtrl+Shift+R',
@@ -1480,6 +1493,7 @@ function runShutdownCleanup() {
   // never need it). Pid-scoped and idempotent, so a redundant call from a
   // later before-quit/will-quit firing is a safe no-op.
   releaseSchedulerOwnership();
+  try { scheduler.stop(); } catch { /* */ }
   // PRD F1 v2 §IPC plumbing: must unregisterAll on will-quit.
   try { globalShortcut.unregisterAll(); } catch { /* */ }
   voiceHotkey.disposeOnQuit();
@@ -1493,7 +1507,6 @@ function runShutdownCleanup() {
 
 app.on('will-quit', runShutdownCleanup);
 
-  try { scheduler.stop(); } catch { /* */ }
 app.on('window-all-closed', () => {
   if (rebooting) return; // new window is about to be created
   ptyManager.killAll();

@@ -68,10 +68,29 @@ function registerActiveProject(cwd) {
   fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
 }
 
+// Every real scheduler row is born from a real PRD .md file — reconcile()'s
+// auto-archive-drop path (a terminal job whose slug has no on-disk PRD
+// anywhere is treated as "archived on purpose": dropped from queue.json and
+// backfilled to history.jsonl, see scheduler-reconcile-history-backfill.
+// test.cjs) fires the very next time broadcast({flush:true}) reconciles —
+// which reapDeadRunningJobs() itself does on every reap. Without a matching
+// PRD source, a row this test just reaped to a terminal status vanishes from
+// queue.json before the assertions below ever read it back. Epic-scoped (not
+// the legacy flat prds/ dir) so it's never swept by consolidateFlatPrds
+// either.
+function writeFixturePrd(cwd, slug) {
+  const prdsDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'test-fixture-epic', 'prds');
+  fs.mkdirSync(prdsDir, { recursive: true });
+  fs.writeFileSync(path.join(prdsDir, `${slug}.md`), 'Test fixture PRD.', 'utf8');
+}
+
 function writeProjectQueue(cwd, jobs) {
   const stateDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
   fs.mkdirSync(stateDir, { recursive: true });
   fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({ jobs }, null, 2));
+  for (const job of jobs) {
+    if (job && job.slug) writeFixturePrd(job.cwd || cwd, job.slug);
+  }
   return path.join(stateDir, 'queue.json');
 }
 

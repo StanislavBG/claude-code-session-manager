@@ -83,6 +83,17 @@ test('GUARD_VERDICT_EVIDENCE_ELIGIBLE contains exactly the benign guard verdicts
   assert.equal(GUARD_VERDICT_EVIDENCE_ELIGIBLE.has('worktree_integration_failed'), false);
 });
 
+// reaperHelpers.resolvePidlessFailureOverride parks a pidless reap on this
+// exact verdict when the row already carries a landedCommit — same shape as
+// silent_no_op/shared_tree_reverted (exit never observed, no autoFixAttempted,
+// real commit evidence), so it must share this ladder too, or a pidless-reap
+// row stalls in needs_review with nothing to spend and nothing to exhaust —
+// the same bug this file's other tests exist to prevent for the other two
+// verdicts.
+test('GUARD_VERDICT_EVIDENCE_ELIGIBLE also contains pidless_reap_with_landed_commit', () => {
+  assert.ok(GUARD_VERDICT_EVIDENCE_ELIGIBLE.has('pidless_reap_with_landed_commit'));
+});
+
 // --- isGuardParkedWithoutAutoFix / isEligibleForNeedsReviewAutoResolve ---
 
 test('a guard-verdict park with no auto-fix history is guard-parked-without-autofix', () => {

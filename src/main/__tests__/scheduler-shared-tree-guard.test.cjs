@@ -285,7 +285,13 @@ test('checkSharedTreeGuard end-to-end: the real 2026-09-12 incident shape — un
   vi.spyOn(scheduler, 'gitHead').mockResolvedValue('sha-after');
   vi.spyOn(scheduler, 'pathsChangedSince').mockResolvedValue(['.gitignore']);
   vi.spyOn(scheduler, 'uncommittedChanges').mockResolvedValue([]); // the log path no longer shows up at all
-  vi.spyOn(fs, 'existsSync').mockImplementation((p) => String(p).includes('errors-2026-09-12.jsonl'));
+  // checkSharedTreeGuard's existence check runs concurrently via
+  // fs.promises.access (fsp === fs.promises — same object) rather than
+  // fs.existsSync, so a large untracked baseline doesn't block the event
+  // loop with hundreds of synchronous stats back-to-back.
+  vi.spyOn(fs.promises, 'access').mockImplementation((p) => (
+    String(p).includes('errors-2026-09-12.jsonl') ? Promise.resolve() : Promise.reject(new Error('ENOENT'))
+  ));
 
   const result = await checkSharedTreeGuard({
     cwd: '/repo',

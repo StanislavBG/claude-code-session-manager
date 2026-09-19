@@ -34,7 +34,7 @@ const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'looks-done-test-'));
 process.env.HOME = tmpHome;
 
 const { reverifyNeedsReview, computeLooksDone, applyNeedsReviewAutoResolve, findSatisfyingCommitOnMain } = require('../scheduler.cjs');
-const { resolvePrdWriteDir } = require('../lib/prdLocations.cjs');
+const { resolveEpicPrdWriteDir } = require('../lib/prdLocations.cjs');
 const { bustCwdCache } = require('../lib/queueStore.cjs');
 
 function git(args, cwd) {
@@ -92,11 +92,30 @@ function writeRunLog(runId, slug, lines) {
   fs.writeFileSync(path.join(runDir, `${slug}.log`), lines.join('\n') + '\n');
 }
 
+// Epic-scoped, not the legacy flat prds/ dir: the flat dir is retired and
+// swept into prds-archived/ by consolidateFlatPrds the moment a job is no
+// longer live (pending/running/needs_review/investigating), which would
+// strand a row that starts 'failed' before reverifyNeedsReview ever gets a
+// chance to decide anything about it.
 function writePrd(cwd, slug, body) {
-  const dir = resolvePrdWriteDir(cwd);
+  const dir = resolveEpicPrdWriteDir(cwd, 'test-fixture-epic');
   fs.mkdirSync(dir, { recursive: true });
   const text = `---\ntitle: Test PRD\ncwd: ${cwd}\nestimateMinutes: 30\n---\n${body}\n`;
   fs.writeFileSync(path.join(dir, `${slug}.md`), text);
+}
+
+// A job reverifyNeedsReview() heals to 'completed' has its PRD archived
+// immediately (archiveCompletedPrd) and its row backfilled to history.jsonl
+// + dropped from queue.json on the very same reconcile pass — see
+// scheduler-reconcile-history-backfill.test.cjs. Look in both places.
+function readTerminalRow(queuePath, projectCwd, slug) {
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  const row = jobs.find((j) => j.slug === slug);
+  if (row) return row;
+  const historyPath = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'state', 'history.jsonl');
+  if (!fs.existsSync(historyPath)) return undefined;
+  const lines = fs.readFileSync(historyPath, 'utf8').trim().split('\n').filter(Boolean);
+  return lines.map((l) => JSON.parse(l)).reverse().find((j) => j.slug === slug);
 }
 
 async function wait(ms) {
@@ -220,11 +239,11 @@ test('needs_review with an in-window commit heals exactly as today (regression �
 
   await reverifyNeedsReview();
 
-  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
-  assert.equal(jobs.length, 1);
-  assert.equal(jobs[0].status, 'completed', 'a clean re-verify on a RESCANNABLE verdict must still heal');
-  assert.equal(jobs[0].verifierVerdict, undefined);
-  assert.equal(jobs[0].error, null);
+  const row = readTerminalRow(queuePath, projectCwd, '20-clean-feature');
+  assert.ok(row, 'healed job must be found in queue.json or (once archived+backfilled) history.jsonl');
+  assert.equal(row.status, 'completed', 'a clean re-verify on a RESCANNABLE verdict must still heal');
+  assert.equal(row.verifierVerdict, undefined);
+  assert.equal(row.error, null);
 });
 
 test('computeLooksDone: no declared paths on the PRD → null, never fabricates evidence', async () => {

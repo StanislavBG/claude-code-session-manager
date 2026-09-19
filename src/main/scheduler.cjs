@@ -1310,7 +1310,7 @@ const PRD_AUTHORING_TEMPLATE = path.join(__dirname, 'templates', 'PRD_AUTHORING.
 function ensureDirs() {
   fs.mkdirSync(schedulerPaths.prdsRoot(), { recursive: true });
   fs.mkdirSync(schedulerPaths.runsDir(), { recursive: true });
-  // Seed the authoring guide once; never clobber a user's edited copy.
+  // Re-seed the guide whenever the bundled template's version stamp differs.
   try {
     const authoringDest = path.join(schedulerPaths.scheduledPlansRoot(), 'PRD_AUTHORING.md');
     seedAuthoringGuide({
@@ -10545,6 +10545,21 @@ async function reverifyNeedsReview() {
   const evidenceSlugs = new Set(selectEvidenceScanTargets(snap.jobs).map((j) => j.slug));
   const evidenceScanned = [];
   for (const job of candidates) {
+    if (isStaleSharedTreeRevertedPark(job)) {
+      // Re-apply the corrected shared-tree check: the row's own landedCommit
+      // (this dispatch's, per resolveLandedCommitEvidence) still being an
+      // ancestor of HEAD means the park was a false positive — heal it.
+      const cwd = job.cwd || DEFAULT_PROJECT_CWD;
+      if (await resolveLandedCommitEvidence(cwd, job.landedCommit, job.startedAt)
+        && await module.exports.landedCommitIsAncestorOfHead(cwd, job.landedCommit)) {
+        healed.push(job.slug);
+        continue;
+      }
+      if (!isRescanCandidate(job) && !isGuardParkedWithoutAutoFix(job)) {
+        leftForReview.push({ slug: job.slug, reason: 'shared_tree_reverted: landed commit not an ancestor of HEAD' });
+        continue;
+      }
+    }
     if (job.status === 'needs_review' && !isTranscriptRescannable(job)) {
       // Any needs_review row whose verdict is not a transcript-verifier one
       // (a guard verdict, a not-yet-invented verdict, a stranded auto-fix
@@ -10624,21 +10639,6 @@ async function reverifyNeedsReview() {
     // Skipped when a fix-plan investigation was already minted for this row
     // (job.autoFixAttempted) — PRD 1136: 'looks done, confirm before
     // archiving' and 'a -fix- child is already investigating this' are two
-    if (isStaleSharedTreeRevertedPark(job)) {
-      // Re-apply the corrected shared-tree check: the row's own landedCommit
-      // (this dispatch's, per resolveLandedCommitEvidence) still being an
-      // ancestor of HEAD means the park was a false positive — heal it.
-      const cwd = job.cwd || DEFAULT_PROJECT_CWD;
-      if (await resolveLandedCommitEvidence(cwd, job.landedCommit, job.startedAt)
-        && await module.exports.landedCommitIsAncestorOfHead(cwd, job.landedCommit)) {
-        healed.push(job.slug);
-        continue;
-      }
-      if (!isRescanCandidate(job) && !isGuardParkedWithoutAutoFix(job)) {
-        leftForReview.push({ slug: job.slug, reason: 'shared_tree_reverted: landed commit not an ancestor of HEAD' });
-        continue;
-      }
-    }
     // different claims about the SAME evidence, and stamping both leaves a
     // human reading two contradictory signals off one row. autoFixAttempted
     // is stamped synchronously in spawnJob's same-tick auto-fix branch,
@@ -12493,6 +12493,8 @@ module.exports = {
   GUARD_VERDICT_EVIDENCE_ELIGIBLE,
   isGuardParkedWithoutAutoFix,
   isStrandedAutoFixPark,
+  isStaleSharedTreeRevertedPark,
+  landedCommitIsAncestorOfHead,
   isEligibleForNeedsReviewAutoResolve,
   isPlanUnqueued,
   isFixPlanDead,
@@ -12586,8 +12588,6 @@ module.exports = {
   isBranchAlreadyIntegrated,
   selectResumeRecoveryTarget,
   buildResumeRecoveryPreamble,
-  isStaleSharedTreeRevertedPark,
-  landedCommitIsAncestorOfHead,
   buildClaudeSpawnArgs,
   spawnResumeRecovery,
   selectMechanicalRecoveryTarget,

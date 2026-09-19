@@ -55,6 +55,12 @@ const GUARD_INSTALLERS: Record<GuardFixAction, GuardInstaller> = {
     available: () => typeof window.api?.app?.installInlineImplementationGuard === 'function',
     install: (cwd) => window.api.app.installInlineImplementationGuard(cwd),
   },
+  'install-self-schedule-guard': {
+    name: 'Self-schedule guard',
+    testId: 'delegation-readiness-fix-self-schedule-guard',
+    available: () => typeof window.api?.app?.installSelfScheduleGuard === 'function',
+    install: (cwd) => window.api.app.installSelfScheduleGuard(cwd),
+  },
 }
 
 // Every press logs to the console under this prefix (attempt + outcome), so a

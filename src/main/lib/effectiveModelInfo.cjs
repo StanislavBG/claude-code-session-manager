@@ -91,7 +91,14 @@ function computeEffortReachable(deps) {
  */
 async function resolvePersonaModelAlias(cwd, agentType, deps) {
   const getPersonaBody = deps.getPersonaBody || require('../agentLibrary.cjs').getPersonaBody;
-  const resolvePersonaPaths = deps.resolvePersonaPaths || require('./epicMint.cjs').resolvePersonaPaths;
+  // The overlay-vs-global provenance question itself ("which of
+  // resolvePersonaPaths' two candidates won") is answered by
+  // agentModelResolve.cjs's isProjectOverlayPersonaPath, not re-derived here
+  // — that module already owns this precedence decision for the launch
+  // path (readOverlayAwarePersonaModel), and this observer must never let
+  // its own copy of the comparison drift from the one that actually decides
+  // what gets spawned.
+  const { isProjectOverlayPersonaPath } = deps.agentModelResolve || require('./agentModelResolve.cjs');
 
   let persona;
   try {
@@ -102,15 +109,7 @@ async function resolvePersonaModelAlias(cwd, agentType, deps) {
   if (!persona) return { modelAlias: null, modelSource: 'fallback' };
 
   const { fm } = splitFrontmatter(persona.text);
-
-  let fromOverlay = false;
-  try {
-    const { projectPath } = resolvePersonaPaths(cwd, agentType);
-    fromOverlay = Boolean(projectPath) && path.resolve(projectPath) === path.resolve(persona.path);
-  } catch {
-    // Best-effort overlay signal only — a resolution failure here just means
-    // "assume global", never a reason to fail the whole lookup.
-  }
+  const fromOverlay = isProjectOverlayPersonaPath(cwd, agentType, persona.path, deps);
 
   if (fm.model && fm.model !== 'inherit') {
     return { modelAlias: fm.model, modelSource: fromOverlay ? 'persona-overlay' : 'persona' };

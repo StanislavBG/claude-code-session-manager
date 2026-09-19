@@ -176,6 +176,7 @@ const { buildJobWorktreeIsLive } = require('./lib/jobWorktreeBootLive.cjs');
 const { buildTerminalOrphanIsLive } = require('./lib/jobWorktreeTerminalOrphanLive.cjs');
 const { reconcileEpicWorktreesOnBoot } = require('./lib/epicWorktreeBoot.cjs');
 const queueStore = require('./lib/queueStore.cjs');
+const supervisorRecord = require('./lib/jobSupervisorRecord.cjs');
 const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdFrontmatter.cjs');
 const { resolveDepSlug, findNearMatches } = require('./lib/depSlugResolve.cjs');
 const { computeDispositionRewrite } = require('./lib/prdDisposition.cjs');
@@ -5392,6 +5393,22 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
 
     if (child) {
       safeLog(`[scheduler] spawned pid=${child.pid} sessionId=${sessionId} (process group)\n\n`);
+      // The one synchronous, authoritative dispatch record (see
+      // jobSupervisorRecord.cjs). detached:true → setsid → pgid === pid, so
+      // no process.getpgid. A write failure must never fail the dispatch.
+      try {
+        supervisorRecord.writeSupervisorRecord({
+          runDir, slug: job.slug, cwd, runId: path.basename(runDir), pid: child.pid, pgid: child.pid,
+          identity: procIdentityOf(child.pid), execCwd: spawnCwd,
+          worktreeDir: execCwd || null, worktreeBranch: execCwd ? `sm-job/${job.slug}` : null,
+          sessionId, startedAt, budgetMs: budgetExempt ? null : jobBudgetMs, maxDurationMs: null,
+          idleKillMs: IDLE_OUTPUT_KILL_MS, schedulerPid: process.pid, codeSha: SCHEDULER_CODE_SHA,
+        });
+      } catch (e) {
+        const message = e?.message ?? String(e);
+        console.error(`[scheduler] FAILED to write supervisor record for ${job.slug} pid=${child.pid}: ${message}`);
+        appendAuditEvent('supervisor_record_write_failed', { slug: job.slug, cwd, pid: child.pid, error: message });
+      }
       // Make this job the OOM killer's preferred victim over Electron.
       biasJobOomScore(child.pid);
       // Persist runtime.pid with one retry — still fire-and-forget (must
@@ -5923,6 +5940,19 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
 
   if (child) {
     safeLog(`[scheduler] investigation pid=${child.pid}\n\n`);
+    try {
+      supervisorRecord.writeSupervisorRecord({
+        runDir, slug: `${failedJob.slug}.investigation`, kind: 'investigation', cwd: failedJob.cwd ?? null,
+        runId: path.basename(runDir), pid: child.pid, pgid: child.pid, identity: procIdentityOf(child.pid),
+        execCwd: failedJob.cwd ?? null, worktreeDir: null, worktreeBranch: null, sessionId: null,
+        startedAt: Date.now(), budgetMs: null, maxDurationMs: MAX_INVESTIGATION_DURATION_MS, idleKillMs: null,
+        schedulerPid: process.pid, codeSha: SCHEDULER_CODE_SHA,
+      });
+    } catch (e) {
+      const message = e?.message ?? String(e);
+      console.error(`[scheduler] FAILED to write supervisor record for investigation ${failedJob.slug} pid=${child.pid}: ${message}`);
+      appendAuditEvent('supervisor_record_write_failed', { slug: failedJob.slug, cwd: failedJob.cwd, pid: child.pid, error: message, kind: 'investigation' });
+    }
     runtimeState.stampInvestigationPid(failedJob.slug, child.pid);
     // Recorded so findStrandedInvestigations (a post-restart maintenance
     // sweep — the live process has no other way to know a probe is still

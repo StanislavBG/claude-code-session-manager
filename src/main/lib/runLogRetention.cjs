@@ -12,7 +12,8 @@
  *
  * Directory shape: one subdirectory per tick (`RUNS_DIR/<iso-ts>/`, minted by
  * scheduler.cjs's pickRunDir), which commonly holds MANY different PRD
- * slugs' artifacts side by side — `<slug>.log`, `<slug>.meta.json`, and an
+ * slugs' artifacts side by side — `<slug>.log`, `<slug>.meta.json`, the
+ * `<slug>.supervisor.json` dispatch record (jobSupervisorRecord.cjs), and an
  * optional `root-cause-<slug>.md` (rcaReport.cjs) per slug. Retention is
  * therefore computed per (runId, slug) ENTRY, not per directory: a directory
  * is only "fully removable" once every entry it holds is independently
@@ -131,7 +132,7 @@ function scanRunEntries(runsDir) {
     for (const metaFile of metaFiles) {
       const slug = metaFile.slice(0, -META_SUFFIX.length);
       const relatedNames = files.filter(
-        (f) => f === metaFile || f === `${slug}.log` || f === `root-cause-${slug}.md`
+        (f) => f === metaFile || f === `${slug}.log` || f === `${slug}.supervisor.json` || f === `root-cause-${slug}.md`
       );
 
       let sizeBytes = 0;

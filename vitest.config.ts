@@ -199,6 +199,8 @@ export default defineConfig({
       'src/main/lib/__tests__/coldBootPromptSessionsWrite.test.cjs',
       'src/main/__tests__/config-readText-bounded.test.cjs',
       'src/main/__tests__/runLogRetention.test.cjs',
+      'src/main/lib/__tests__/jobSupervisorRecord.test.cjs',
+      'src/main/__tests__/scheduler-supervisor-record.test.cjs',
       'src/main/__tests__/scheduler-no-orphan-run-dir.test.cjs',
       'src/main/__tests__/heapSnapshot.test.cjs',
       'src/main/lib/__tests__/watchdog-helpers.test.cjs',

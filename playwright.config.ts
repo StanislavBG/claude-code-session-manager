@@ -5,7 +5,7 @@ export default defineConfig({
   // Exclude stale agent worktrees (they hold duplicate spec copies). The rotted
   // cycle-1 e2e/*.spec.mjs (live-transcript, history-dashboard, new-session,
   // overview-billing, broadcast) were DELETED — they asserted removed UI; the
-  // maintained tests/e2e/*.ts suite is the signal. mic/watchers .mjs still run.
+  // maintained tests/e2e/*.ts suite is the signal. chat-restart, mic and watchers .mjs specs still run.
   testIgnore: ['**/.claude/worktrees/**', 'web-remote/**', 'web/remote-app/**'],
   timeout: 240_000,
   workers: 1,

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
-import { ortWasmFilesLoaded } from '../../src/renderer/lib/ortWasmProbe'
+import { installOrtFetchTap, ortWasmFilesLoaded } from '../../src/renderer/lib/ortWasmProbe'
 
 const root = path.resolve(__dirname, '../..')
 const vadDir = path.join(root, 'src/renderer/public/vad')
@@ -30,5 +30,19 @@ describe('ortWasmFilesLoaded', () => {
       { name: 'http://x/vad/silero_vad_v5.onnx' },
     ])
     expect(got).toEqual(['ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.mjs'])
+  })
+})
+
+describe('installOrtFetchTap', () => {
+  it('records ort-wasm fetches (file:// has no Resource Timing) and passes through', async () => {
+    const calls: string[] = []
+    const fake = { fetch: async (u: string) => { calls.push(u); return 'ok' } }
+    ;(globalThis as unknown as { window: unknown }).window = fake
+    installOrtFetchTap()
+    await (fake.fetch as (u: string) => Promise<string>)('file:///app/dist/vad/ort-wasm-simd-threaded.wasm')
+    await (fake.fetch as (u: string) => Promise<string>)('file:///app/dist/vad/silero_vad_v5.onnx')
+    expect(calls).toHaveLength(2)
+    expect(ortWasmFilesLoaded([])).toEqual(['ort-wasm-simd-threaded.wasm'])
+    delete (globalThis as unknown as { window?: unknown }).window
   })
 })

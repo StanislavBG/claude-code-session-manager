@@ -9,9 +9,25 @@ export function ortWasmFilesLoaded(
   entries: ReadonlyArray<{ name: string }> = typeof performance !== 'undefined' ? performance.getEntriesByType('resource') : [],
 ): string[] {
   const out = new Set<string>()
-  for (const e of entries) {
+  // Resource Timing records nothing for file:// (the packaged app), so the
+  // wasm fetches ORT makes on the main thread are also captured by a fetch tap.
+  for (const e of [...entries, ...fetched]) {
     const m = /(ort-wasm[^/?#]*\.(?:wasm|mjs))(?:[?#]|$)/.exec(e.name)
     if (m) out.add(m[1])
   }
   return [...out]
+}
+
+const fetched: { name: string }[] = []
+
+/** Idempotent tap on window.fetch that remembers ort-wasm URLs (file:// has no Resource Timing). */
+export function installOrtFetchTap(): void {
+  if (typeof window === 'undefined' || (window as unknown as { __ortTap?: boolean }).__ortTap) return
+  ;(window as unknown as { __ortTap?: boolean }).__ortTap = true
+  const orig = window.fetch.bind(window)
+  window.fetch = (input, init) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    if (url.includes('ort-wasm')) fetched.push({ name: url })
+    return orig(input, init)
+  }
 }

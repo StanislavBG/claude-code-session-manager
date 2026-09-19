@@ -9,7 +9,7 @@
  * silence ever reaches the model.
  */
 
-import { ortWasmFilesLoaded } from './ortWasmProbe'
+import { installOrtFetchTap, ortWasmFilesLoaded } from './ortWasmProbe'
 import { MicVAD } from '@ricky0123/vad-web'
 import type { SpeechProbabilities } from '@ricky0123/vad-web/dist/models/common'
 import { log } from './logger'
@@ -713,6 +713,7 @@ export function createRecognition(opts: RecognitionCallbacks): RecognitionHandle
         // (dist/assets/) in prod, missing the real dist/vad/ location.
         const vadBase = new URL('vad/', document.baseURI).href
         log.info('speech', 'vad: asset base resolved', { vadBase })
+        installOrtFetchTap()
 
         // F5 stream ownership: build the constraints ourselves so the
         // configured `inputDeviceId` (or OS default if null/undefined) is

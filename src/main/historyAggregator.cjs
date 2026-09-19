@@ -643,7 +643,7 @@ function resetIntradayRegistryForTests() {
 /**
  * Pure walk-and-parse step (no rollup write) — split out from
  * refreshIntradayToday() so it can be benchmarked read-only against the real
- * ~/.claude/projects (see scripts/bench-intraday-walk.cjs) without touching
+ * ~/.claude/projects without touching
  * the rollup file on disk.
  */
 async function computeIntradayBuckets() {

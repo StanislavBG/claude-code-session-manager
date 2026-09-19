@@ -48,9 +48,7 @@ function listMirrorFiles(dir) {
  * `skipped` — file names not turned into a row.
  * `reasons` — `{ [fileName]: humanReadableReason }`, one entry per skipped
  *   file. A file is never guessed at: no mirrored `status` is a skip, not a
- *   fabricated 'unknown' row (see scripts/mirror-epic-status.cjs for the
- *   only place that vocabulary is deliberately introduced, for the
- *   migration's own back-fill bookkeeping).
+ *   fabricated 'unknown' row.
  *
  * `events` and `tombstones` from the existing on-disk index (if any) are
  * carried through completely untouched — this function only ever

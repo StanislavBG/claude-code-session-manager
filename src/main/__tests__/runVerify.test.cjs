@@ -1140,7 +1140,7 @@ function noOpRunEvents(resultText) {
 test('no_verdict_sentinel: no tool_result issues, no sentinel, no commit → needs_review', async () => {
   const tmp = makeTmpDir();
   try {
-    const slug = '406-browser-capture-panel-ui';
+    const slug = '406-capture-panel-ui';
     writeLog(tmp, slug, noOpRunEvents('I need clarification on which capture API to target before proceeding.'));
     const prdPath = writePrd(tmp, slug, '# Browser capture panel UI');
     const verdict = await verifyRun({
@@ -1160,7 +1160,7 @@ test('no_verdict_sentinel: no tool_result issues, no sentinel, no commit → nee
 test('no_verdict_sentinel guard: same run but committedDuringRun:true → stays clean', async () => {
   const tmp = makeTmpDir();
   try {
-    const slug = '406-browser-capture-panel-ui-committed';
+    const slug = '406-capture-panel-ui-committed';
     writeLog(tmp, slug, noOpRunEvents('I need clarification on which capture API to target before proceeding.'));
     const prdPath = writePrd(tmp, slug, '# Browser capture panel UI');
     const verdict = await verifyRun({
@@ -1180,7 +1180,7 @@ test('no_verdict_sentinel guard: same run but committedDuringRun:true → stays 
 test('no_verdict_sentinel guard: same run but with SCHEDULER_VERDICT: PASS sentinel + a commit → stays clean', async () => {
   const tmp = makeTmpDir();
   try {
-    const slug = '406-browser-capture-panel-ui-sentinel';
+    const slug = '406-capture-panel-ui-sentinel';
     writeLog(tmp, slug, noOpRunEvents('All acceptance criteria verified.\nSCHEDULER_VERDICT: PASS'));
     const prdPath = writePrd(tmp, slug, '# Browser capture panel UI');
     const verdict = await verifyRun({
@@ -1634,7 +1634,7 @@ test('isMergeMainSlug matches the NN-prXXX-merge-main and NN-fix-prXXX-merge-mai
   assert.equal(isMergeMainSlug('565-pr188-merge-main'), true);
   assert.equal(isMergeMainSlug('571-fix-pr141-merge-main'), true);
   assert.equal(isMergeMainSlug('523-fix-bounded-fix-plan-retry'), false);
-  assert.equal(isMergeMainSlug('406-browser-capture-panel-ui'), false);
+  assert.equal(isMergeMainSlug('406-capture-panel-ui'), false);
   assert.equal(isMergeMainSlug(''), false);
   assert.equal(isMergeMainSlug(undefined), false);
 });
@@ -1727,7 +1727,7 @@ test('merge-main exemption: gh call throws → falls through to pass_no_commit, 
 test('merge-main exemption: non-merge-main slug never attempts a gh call', async () => {
   const tmp = makeTmpDir();
   try {
-    const slug = '406-browser-capture-panel-ui';
+    const slug = '406-capture-panel-ui';
     writeLog(tmp, slug, noOpRunEvents('All acceptance criteria verified.\nSCHEDULER_VERDICT: PASS'));
     const prdPath = writePrd(tmp, slug, '# Browser capture panel UI');
     let ghCalls = 0;

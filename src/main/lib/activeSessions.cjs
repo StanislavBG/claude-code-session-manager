@@ -13,6 +13,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { KIND_CONFIG: WORKTREE_KIND_CONFIG } = require('./gitWorktree.cjs');
 const { OPS_ROOT_DIR } = require('./opsOwnership.cjs');
+const { classifyCwd, worktreeMainRootOf } = require('./cwdClassify.cjs');
 
 const HOME = os.homedir();
 const TMPDIR = os.tmpdir();
@@ -55,7 +56,10 @@ const MAX_CWDS = 50;
 // fine: a project already in the list stays in the list) plus a short TTL
 // as the backstop for everything else. Same mtime-keyed idiom as
 // scheduler/prdParser.cjs's dirCache and queueHistory.cjs's historyCacheKey.
-const CACHE_TTL_MS = 30_000;
+// TTL sits above the 60 s dispatch-loop interval (scheduler POLL_INTERVAL_MS) so
+// one pass never re-scans cold. Cached arrays are frozen — shared, never mutated.
+const CACHE_TTL_MS = 120_000;
+const EMPTY_CWDS = Object.freeze([]);
 const cwdScanCache = new Map(); // key -> { dirMtimeMs, cachedAt, result }
 
 /** Forces the next activeProjectCwds/allProjectCwds call to rescan. */
@@ -79,93 +83,16 @@ function bustProjectCwdCache() {
 // signal survives instead of being silently lost.
 const OPS_DIRNAME = OPS_ROOT_DIR;
 
-// Bound on the ancestor walk in worktreeMainRootOf — well past any real
-// filesystem depth, purely to guarantee termination without relying on
-// reaching '/' (e.g. a symlink loop or an unusually deep path).
-const MAX_WORKTREE_WALK = 40;
-
-const WORKTREES_MARKER = `${path.sep}.git${path.sep}worktrees${path.sep}`;
-
-/**
- * worktreeMainRootOf(cwd) → the main tree's root when cwd sits inside a
- * linked `git worktree` (job/epic worktrees under os.tmpdir(), or a
- * user-made one anywhere). Walks UP from cwd looking for a `.git` entry:
- *   - `.git` is a FILE (linked worktree) whose first line is
- *     `gitdir: <main>/.git/worktrees/<name>` → returns <main>.
- *   - `.git` is a DIRECTORY (already the main tree) → returns that ancestor.
- *   - nothing found within MAX_WORKTREE_WALK levels → returns null.
- * Pure fs, synchronous, never throws — any unexpected shape (garbled file,
- * unreadable entry, gitdir path without the worktrees marker) yields null so
- * the caller leaves the cwd unchanged rather than guessing.
- */
-function worktreeMainRootOf(cwd) {
-  let dir = cwd;
-  for (let i = 0; i < MAX_WORKTREE_WALK; i++) {
-    const gitPath = path.join(dir, '.git');
-    let stat;
-    try {
-      stat = fs.statSync(gitPath);
-    } catch {
-      stat = null;
-    }
-    if (stat) {
-      if (stat.isDirectory()) return dir;
-      if (stat.isFile()) {
-        let body;
-        try {
-          body = fs.readFileSync(gitPath, 'utf8');
-        } catch {
-          return null;
-        }
-        const firstLine = body.split('\n', 1)[0].trim();
-        const prefix = 'gitdir:';
-        if (!firstLine.startsWith(prefix)) return null;
-        const gitdir = firstLine.slice(prefix.length).trim();
-        const markerIdx = gitdir.indexOf(WORKTREES_MARKER);
-        if (markerIdx <= 0) return null;
-        const candidateMain = gitdir.slice(0, markerIdx);
-        const worktreeName = gitdir.slice(markerIdx + WORKTREES_MARKER.length).split(path.sep)[0];
-        // Round-trip verification: gitdir's content is a plain file that
-        // anything on disk could have written (e.g. a nested `.git` file
-        // tracked inside an untrusted repo), so it must not be trusted to
-        // redirect callers to an arbitrary attacker-chosen absolute path.
-        // A genuine linked worktree's admin dir back-references the exact
-        // `.git` FILE we are resolving via its own `gitdir` pointer file —
-        // require that round trip before accepting candidateMain.
-        if (!worktreeName) return null;
-        const adminGitdirFile = path.join(candidateMain, '.git', 'worktrees', worktreeName, 'gitdir');
-        let backRef;
-        try {
-          backRef = fs.readFileSync(adminGitdirFile, 'utf8').trim();
-        } catch {
-          return null;
-        }
-        if (path.resolve(backRef) !== path.resolve(gitPath)) return null;
-        return candidateMain;
-      }
-      return null;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-  return null;
-}
-
 /**
  * projectRootOf(cwd) → the project root for a cwd that may sit inside an ops
  * tree and/or a linked git worktree. Returns cwd unchanged when neither
- * applies. Only the FIRST ops-dir occurrence matters — a nested stray ops
- * root is itself the bug, never a project. The ops-dir truncation runs
- * first, then the worktree resolution, so a cwd deep inside a worktree's OWN
- * ops tree still lands on the real project's main root.
+ * applies, or when the worktree cannot be proven (kind `unknown` — callers that
+ * WRITE must consult classifyCwd; this stays total so dispatch never breaks).
+ * The classification itself (outermost ops truncation, then worktree
+ * resolution) lives in cwdClassify.cjs.
  */
 function projectRootOf(cwd) {
-  const parts = cwd.split(path.sep);
-  const i = parts.indexOf(OPS_DIRNAME);
-  const truncated = i > 0 ? (parts.slice(0, i).join(path.sep) || path.sep) : cwd;
-  const mainRoot = worktreeMainRootOf(truncated);
-  return mainRoot || truncated;
+  return classifyCwd(cwd).projectRoot ?? cwd;
 }
 
 /**
@@ -221,7 +148,7 @@ function activeProjectCwds(maxAgeMin = 90, {
     // this key must not survive to be handed back once the dir later
     // appears — drop it rather than caching this empty result.
     cwdScanCache.delete(cacheKey);
-    return [];
+    return EMPTY_CWDS;
   }
   const cached = cwdScanCache.get(cacheKey);
   const now0 = Date.now();
@@ -241,14 +168,18 @@ function activeProjectCwds(maxAgeMin = 90, {
     // Normalize an ops-internal cwd up to its project root BEFORE any of the
     // checks below — the stray-ops-root incident (see OPS_DIRNAME above) got
     // through precisely because such a path is absolute and does exist.
-    const cwd = projectRootOf(rawCwd);
+    const classified = classifyCwd(rawCwd);
+    // `unknown` (a .git file we cannot resolve) is non-registrable: registering
+    // it would hand every consumer a project whose ops writes are refused.
+    if (classified.kind === 'unknown') return;
+    const cwd = classified.projectRoot;
     // Must be ABSOLUTE. A relative fragment would pass the statSync below
     // whenever it happens to resolve against THIS process's own cwd, and
     // every consumer (queueStore.projectStateDir, prdLocations) then joins
     // it into an ops-root path that lands somewhere arbitrary. Callers key
     // whole per-project state off these strings — a project is a cwd, and a
     // cwd is an absolute path.
-    if (!path.isAbsolute(cwd)) return;
+    if (!cwd || !path.isAbsolute(cwd)) return;
     // Drop-guard of last resort: a cwd that is (or sits inside) a known
     // worktree-scratch root after projectRootOf's normalization is one
     // worktreeMainRootOf could not resolve to a main tree — never a real
@@ -270,7 +201,7 @@ function activeProjectCwds(maxAgeMin = 90, {
 
   // Scan ~/.claude/projects/*/  transcript *.jsonl files.
   let slugs;
-  try { slugs = fs.readdirSync(projectsDir); } catch { cwdScanCache.delete(cacheKey); return result; }
+  try { slugs = fs.readdirSync(projectsDir); } catch { cwdScanCache.delete(cacheKey); return Object.freeze(result); }
 
   for (const slug of slugs) {
     if (result.length >= maxCwds) break;
@@ -305,6 +236,7 @@ function activeProjectCwds(maxAgeMin = 90, {
     }
   }
 
+  Object.freeze(result);
   cwdScanCache.set(cacheKey, { dirMtimeMs, cachedAt: now0, result });
   return result;
 }

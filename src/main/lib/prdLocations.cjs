@@ -173,7 +173,8 @@ function resolvePrdWriteDir(cwd) {
 // archived-twin stale-queue-row guard (scheduler.cjs's archivedTwinExists)
 // calls listArchivedPrdDirs directly, uncached — so this is purely a
 // reporting-freshness bound (schedule:list-prds's per-Epic PRD/run counts).
-const ASSEMBLED_DIRS_CACHE_TTL_MS = 30_000;
+// Above the 60 s dispatch-loop interval (scheduler POLL_INTERVAL_MS).
+const ASSEMBLED_DIRS_CACHE_TTL_MS = 120_000;
 const assembledPrdsDirsCache = new Map(); // callerKey -> { freshnessKey, cachedAt, result }
 const assembledArchivedPrdsDirsCache = new Map();
 
@@ -215,6 +216,7 @@ function memoizedAssembledDirs(cache, maxAgeMin, opts, compute) {
   }
 
   const result = compute(allCwds, activeCwds);
+  if (Array.isArray(result)) Object.freeze(result);
   cache.set(callerKey, { freshnessKey, cachedAt: Date.now(), result });
   return result;
 }

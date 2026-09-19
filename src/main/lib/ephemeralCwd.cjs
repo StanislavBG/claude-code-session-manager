@@ -35,43 +35,23 @@
  * unrelated use that a blanket match would wrongly refuse.
  */
 
-const os = require('node:os');
 const path = require('node:path');
-const { worktreeMainRootOf } = require('./activeSessions.cjs');
-const schedulerPaths = require('./schedulerPaths.cjs');
-
-const TMPDIR = path.resolve(os.tmpdir());
-
-function isExactlyTmpdir(absCwd) {
-  return absCwd === TMPDIR;
-}
-
-function isUnderManagedWorktreeRoot(absCwd) {
-  return ['job', 'epic'].map((k) => path.resolve(schedulerPaths.worktreeRoot(k))).some((root) => {
-    const rel = path.relative(root, absCwd);
-    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
-  });
-}
-
-function isLinkedWorktreeRoot(absCwd) {
-  const mainRoot = worktreeMainRootOf(absCwd);
-  return Boolean(mainRoot) && path.resolve(mainRoot) !== absCwd;
-}
+const { classifyCwd } = require('./cwdClassify.cjs');
 
 /**
  * isEphemeralCwd(cwd) → true when `cwd` must never have ops state written
  * into it (tmpdir-resident, or a linked git worktree root). Pure, synchronous,
  * never throws — an unresolvable or non-absolute cwd is treated as NOT
  * ephemeral so this predicate only ever adds refusals, never masks the
- * existing "cwd must be absolute" checks callers already perform.
+ * existing "cwd must be absolute" checks callers already perform. The
+ * unprovable-worktree case is NOT ephemeral here: it is kind `unknown`, which
+ * opsOwnership.assertOpsWrite refuses separately (writes only — dispatch and
+ * reads stay open).
  */
 function isEphemeralCwd(cwd) {
   if (!cwd || typeof cwd !== 'string' || !path.isAbsolute(cwd)) return false;
-  const absCwd = path.resolve(cwd);
-  if (isExactlyTmpdir(absCwd)) return true;
-  if (isUnderManagedWorktreeRoot(absCwd)) return true;
-  if (isLinkedWorktreeRoot(absCwd)) return true;
-  return false;
+  const { kind } = classifyCwd(path.resolve(cwd));
+  return kind === 'ephemeral' || kind === 'worktree';
 }
 
 module.exports = { isEphemeralCwd };

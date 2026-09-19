@@ -103,7 +103,9 @@ test('an ephemeral cwd yields zero local lines but one telemetry record, with a 
 
   opsErrorLog.appendError({ cwd: worktreeCwd, scope: 'chatRunner', message: 'worktree err' });
 
-  expect(fs.existsSync(opsErrorLog.todayFile(worktreeCwd))).toBe(false);
+  // resolveProjectRoot now consumes cwdClassify (not the stubbed projectRootOf):
+  // an ephemeral worktree cwd is refused outright, so no local path is even built.
+  expect(() => opsErrorLog.todayFile(worktreeCwd)).toThrow(/ephemeral/);
   expect(reportErrorCalls).toHaveLength(1);
   expect(reportErrorCalls[0].context.cwd).toBe(realRoot);
   expect(reportErrorCalls[0].context.cwd).not.toBe(worktreeCwd);

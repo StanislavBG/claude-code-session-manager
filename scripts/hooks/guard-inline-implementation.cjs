@@ -78,6 +78,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+// Pure fs helper only — deliberately NOT gitWorktree (keeps this hook light).
+const { nearestGitEntry } = require('../../src/main/lib/cwdClassify.cjs');
 
 const SOURCE_DIRS = ['src', 'scripts', 'plugins', 'bin'];
 const DENY_TAGS = new Set(['feature', 'bug']);
@@ -122,6 +124,11 @@ function resolveOpsRootCwd(rawCwd) {
     return rawCwd;
   }
   try {
+    // Only a `.git` FILE (linked worktree) needs git to find the shared dir; a
+    // `.git` directory IS the project root, so skip the spawn.
+    const entry = nearestGitEntry(rawCwd);
+    if (!entry) return rawCwd;
+    if (!entry.isFile) return entry.dir;
     const commonDir = execFileSync(
       'git',
       ['rev-parse', '--path-format=absolute', '--git-common-dir'],

@@ -177,16 +177,29 @@ function assertOpsWrite(absPath, writer) {
   // worktree-cwd hazard (PRD 1082; incidents 2026-08-30, 2026-09-01).
   const { inOps } = parseOpsPath(absPath);
   if (inOps) {
-    const segs = absPath.split(path.sep);
-    const idx = segs.lastIndexOf(OPS_ROOT_DIR);
-    const projectRoot = segs.slice(0, idx).join(path.sep) || path.sep;
-    const { isEphemeralCwd } = require('./ephemeralCwd.cjs');
-    if (isEphemeralCwd(projectRoot)) {
+    // innermostOpsRoot (lastIndexOf) is the fact THIS gate keys on; activeSessions
+    // truncates at the outermost instead — cwdClassify returns both, unified in
+    // neither direction.
+    const { classifyCwd } = require('./cwdClassify.cjs');
+    const projectRoot = path.dirname(classifyCwd(absPath).innermostOpsRoot);
+    const { kind, reason } = classifyCwd(projectRoot);
+    if (kind === 'ephemeral' || kind === 'worktree') {
       const err = new Error(
         `refusing to write ${OPS_ROOT_DIR}/ state under an ephemeral project root `
         + `(tmpdir or linked git worktree): "${projectRoot}" — see lib/opsOwnership.cjs resolveProjectRoot`,
       );
       err.ephemeral = true;
+      throw err;
+    }
+    if (kind === 'unknown') {
+      // Fail closed on the unprovable case (worktree .git file whose admin
+      // back-reference is gone, garbled .git file): the exact shape behind the
+      // lost-Epics incidents. WRITES only — reads and dispatch stay open.
+      const err = new Error(
+        `refusing to write ${OPS_ROOT_DIR}/ state under "${projectRoot}": project identity `
+        + `cannot be proven (${reason}) — see lib/cwdClassify.cjs`,
+      );
+      err.unknownCwd = true;
       throw err;
     }
   }
@@ -236,10 +249,12 @@ function resolveProjectRoot(cwd, { opsInternal = 'normalize' } = {}) {
       `resolveProjectRoot: cwd must be a project root, not a path inside ${OPS_ROOT_DIR}/, got "${cwd}"`,
     );
   }
-  // Lazy: activeSessions → gitWorktree → (lazily) config.cjs → this module.
-  const { projectRootOf } = require('./activeSessions.cjs');
+  // Lazy: cwdClassify → schedulerPaths; ephemeralCwd → cwdClassify.
+  const { classifyCwd } = require('./cwdClassify.cjs');
   const { isEphemeralCwd } = require('./ephemeralCwd.cjs');
-  const root = projectRootOf(cwd);
+  // `unknown` deliberately does NOT throw here: reads and dispatch must keep
+  // working; assertOpsWrite is the choke point that refuses the WRITE.
+  const root = classifyCwd(cwd).projectRoot;
   if (isEphemeralCwd(root)) {
     const err = new Error(
       `resolveProjectRoot: refusing ephemeral cwd (tmpdir or linked git worktree), got "${cwd}"`,

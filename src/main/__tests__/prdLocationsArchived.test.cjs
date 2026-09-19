@@ -185,7 +185,7 @@ test('resolveArchivedPrdsDirs: a prds-archived/ dir created inside an ALREADY-EX
     fs.mkdirSync(epicArchiveDir, { recursive: true });
 
     // Bounded staleness is acceptable — but it must actually be bounded.
-    vi.advanceTimersByTime(31_000);
+    vi.advanceTimersByTime(121_000); // TTL is 120 s — above the 60 s dispatch-loop interval
     const after = resolveArchivedPrdsDirs(90, { projectsDir });
     expect(after.map((d) => path.resolve(d))).toContain(path.resolve(epicArchiveDir));
   } finally {

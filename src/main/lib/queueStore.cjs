@@ -33,6 +33,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { allProjectCwds, activeProjectCwds, bustProjectCwdCache } = require('./activeSessions.cjs');
+const { classifyCwd } = require('./cwdClassify.cjs');
 const { assertOpsWrite, resolveOpsRoot, OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 const { ScheduleJobSchema } = require('./scheduleJobSchema.cjs');
 const schedulerPaths = require('./schedulerPaths.cjs');
@@ -116,7 +117,12 @@ function projectHistoryPath(cwd) {
  */
 function queuePathOrSkip(cwd, context) {
   try {
-    return projectQueuePath(cwd);
+    const file = projectQueuePath(cwd);
+    // Unprovable project identity: the row stays dispatchable and is never
+    // dropped or emptied — the write itself is refused by assertOpsWrite.
+    const { kind, reason } = classifyCwd(cwd);
+    if (kind === 'unknown') console.warn(`[queueStore] ${context}: project identity unprovable for "${cwd}" (${reason}) — reads allowed, writes refused`);
+    return file;
   } catch (e) {
     if (e?.ephemeral) {
       console.warn(`[queueStore] ${context}: refusing ephemeral cwd "${cwd}" — ${e.message}`);
@@ -188,8 +194,10 @@ async function writeJsonAtomic(file, value) {
 // list briefly. Correctness fallback: a brand-new project appears at worst
 // CACHE_MS late, and its first write goes through writeSplit which busts the
 // cache.
-const CACHE_MS = 30_000;
-let cwdCache = { at: 0, cwds: [] };
+// Above the 60 s dispatch-loop interval so one pass never re-scans cold; the
+// cached array is frozen (shared, never mutated).
+const CACHE_MS = 120_000;
+let cwdCache = { at: 0, cwds: Object.freeze([]) };
 
 function stateCwds(opts) {
   const now = Date.now();
@@ -203,12 +211,13 @@ function stateCwds(opts) {
   }
   // ...and active projects are included even before their first write.
   for (const cwd of activeProjectCwds(undefined, opts)) add(cwd);
+  Object.freeze(cwds);
   if (!opts) cwdCache = { at: now, cwds };
   return cwds;
 }
 
 function bustCwdCache() {
-  cwdCache = { at: 0, cwds: [] };
+  cwdCache = { at: 0, cwds: Object.freeze([]) };
   // Without this chain, activeSessions' own scan cache hands stateCwds a
   // stale list even after this bust — turning a caller's "I just wrote a
   // brand-new project's first state file, make it visible now" into a

@@ -18,7 +18,14 @@ repo. This directory only holds the tooling that *produces* what Bilko serves:
   bilko.run/manual. Source content lives in `session-manager-operations/manual/` (OPERATIONS
   STATE, unmoved); output lands in `~/Projects/Bilko/data/manual/releases/`.
 - `remote-app/` — the phone-remote PWA, the live source of the bundle published at
-  `bilko.run/projects/session-manager/`.
+  `bilko.run/projects/session-manager/`. A **separate npm project** with its own install/test/build
+  that root test runners ignore; see [`remote-app/CLAUDE.md`](remote-app/CLAUDE.md).
+
+`web/manual/build.mjs` and `web/manual/capture-figures.mjs` are the only manual builders.
+
+Archived web-remote ADRs: see `docs/README.md` (link target may not exist yet).
+`src/main/templates/project-pages-pipeline.md` is a generated copy — never hand-edit; see
+[`../session-manager-operations/architecture/README.md`](../session-manager-operations/architecture/README.md).
 
 ## Staged for extraction
 
@@ -37,5 +44,7 @@ becomes mechanical later. Before actually running it, the human still needs to d
   `web/` moves to its own repo, either the harness repo re-vendors those specific build outputs
   before packing, or the split repo publishes them and the harness repo depends on that package
   — undecided.
+- **Reverse edge into `src/renderer`.** `web/manual/__tests__/figure-captures.test.cjs` imports
+  `src/renderer/lib/navGroups`, so `web/` is not self-contained — undecided (third blocker).
 - `web-remote/relay/` is dead code that was deliberately NOT moved here — it stays where it is
   pending a separate decision on whether to delete it.

@@ -12,6 +12,9 @@ Part of the **WEB PRESENCE** partition — see
   whose own file header literally says `Ported from session-manager web-remote/relay/src/router.ts`.
   Changes here do not reach production. Do not delete it in the course of unrelated work — that's a
   separate decision the human hasn't made yet.
+  It still carries an installed `node_modules/` and a `render.yaml` that reads as a live deploy but
+  is historical — do not redeploy it against the live bilko.run relay that root `CLAUDE.md`
+  protects. `relay/dist/` was removed as stale output (2026-09).
 
 ## What must NOT be assumed
 

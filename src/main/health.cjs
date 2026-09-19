@@ -19,8 +19,8 @@ const { migratePrds } = require('./lib/prdMigration.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const schedulerPaths = require('./lib/schedulerPaths.cjs');
 const { evaluateDispatchLiveness } = require('./lib/watchdogHelpers.cjs');
-const { computeStallSummary, FAILURE_STREAK_ESCALATION_MS, classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS } = require('./scheduler.cjs');
-const { findStarvedProjects } = require('./lib/schedulerBatch.cjs');
+const { computeStallSummary, computeDepHistorySatisfaction, FAILURE_STREAK_ESCALATION_MS, classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS } = require('./scheduler.cjs');
+const { findStarvedProjects, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/schedulerBatch.cjs');
 const { auditLogPath, readTail } = require('./lib/auditLog.cjs');
 const { resolveBuildIdentity } = require('./lib/buildIdentity.cjs');
 const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
@@ -501,6 +501,64 @@ function evaluateQueueDispatchHealth(queueState, runningCount, now, thresholdMs 
 }
 
 /**
+ * evaluateUnresolvableDepHealth(jobs, satisfiedSlugsByCwd) →
+ *   { ok, projects?: [{ cwd, roots, pending }], message? }
+ *
+ * Pure. A project whose EVERY pending row is held (directly or transitively)
+ * behind a dependsOn slug that names no live row and no history/archive
+ * record is fully blocked with a healthy engine — the 2026-09-18 fo-01 stall
+ * (21 pending rows, 0 running, one archived root, every other component
+ * GREEN). classifyQueueStarvation's 'blocked' kind cannot see this shape (it
+ * only walks failed/skipped ROWS), and evaluateQueueDispatchHealth keeps
+ * 'blocked' ok:true by design, so this is the component that fails it, naming
+ * the root slug(s). Reuses the picker's own resolver (findUnresolvableDepRoots)
+ * so health can never disagree with what dispatch actually holds. A project
+ * with anything running, or any dispatchable pending row, is not fully blocked.
+ * O(jobs + deps) per project; a fail-open project (history unreadable) is skipped.
+ */
+function evaluateUnresolvableDepHealth(jobs, satisfiedSlugsByCwd) {
+  const byCwd = new Map();
+  for (const j of Array.isArray(jobs) ? jobs : []) {
+    if (!j) continue;
+    const cwd = j.cwd || DEFAULT_PROJECT_CWD;
+    if (!byCwd.has(cwd)) byCwd.set(cwd, []);
+    byCwd.get(cwd).push(j);
+  }
+  const projects = [];
+  for (const [cwd, rows] of byCwd) {
+    const satisfied = satisfiedSlugsByCwd?.get?.(cwd) ?? new Set();
+    if (satisfied === DEP_HISTORY_FAIL_OPEN) continue;
+    const pending = rows.filter((j) => j.status === 'pending');
+    if (pending.length === 0 || rows.some((j) => j.status === 'running')) continue;
+    const roots = findUnresolvableDepRoots(rows, satisfied);
+    if (roots.length === 0) continue;
+    const rootSet = new Set(roots);
+    const bare = (x) => String(x ?? '').replace(/^\d+-/, '');
+    const held = new Set();
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const j of pending) {
+        if (held.has(j.slug)) continue;
+        const isHeld = (j.dependsOn ?? []).some((d) => rootSet.has(d)
+          || pending.some((p) => held.has(p.slug) && (p.slug === d || bare(p.slug) === bare(d))));
+        if (isHeld) { held.add(j.slug); grew = true; }
+      }
+    }
+    if (held.size === pending.length) projects.push({ cwd, roots, pending: pending.length });
+  }
+  if (projects.length === 0) return { ok: true };
+  return {
+    ok: false,
+    projects,
+    message: projects
+      .map((p) => `${p.cwd}: all ${p.pending} pending job(s) held behind unresolvable dependsOn root ${p.roots.join(', ')} `
+        + '(no live row, no history/archive record) — restore its completion record or fix the dependsOn')
+      .join('; '),
+  };
+}
+
+/**
  * latestStarveEscalationReasons(auditLogPath) → { [cwd]: holdReason }
  *
  * health.cjs runs as its own cold process (`npm run health`), so it has no
@@ -761,6 +819,16 @@ async function check() {
     status.components.queue_dispatch = evaluateQueueDispatchHealth(queueState, runningCount, now);
     if (!status.components.queue_dispatch.ok || status.components.queue_dispatch.blocked) {
       status.issues.push(`Queue dispatch: ${status.components.queue_dispatch.message}`);
+    }
+    try {
+      status.components.queue_dep_roots = evaluateUnresolvableDepHealth(
+        queueState.jobs, await computeDepHistorySatisfaction(queueState),
+      );
+    } catch (e) {
+      status.components.queue_dep_roots = { ok: true, error: `dep-root check failed: ${e?.message}` };
+    }
+    if (!status.components.queue_dep_roots.ok) {
+      status.issues.push(`Queue dependsOn: ${status.components.queue_dep_roots.message}`);
     }
 
     // Per-project starve escalation (bounded consequence for project_starved
@@ -1024,7 +1092,7 @@ async function check() {
   // Critical: nodejs, config dir, typescript, build artifact, test infrastructure.
   // Non-fatal: scheduler/transcripts dirs may not exist on fresh install.
   // Informational: app log age (shows if app is running, but not blocking).
-  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'queue_dispatch', 'project_starve_escalation', 'usage_poller', 'prd_migration', 'claude_md_budget', 'delegation_chain'];
+  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'queue_dispatch', 'queue_dep_roots', 'project_starve_escalation', 'usage_poller', 'prd_migration', 'claude_md_budget', 'delegation_chain'];
   status.ok = criticalComponents.every((c) => status.components[c]?.ok !== false);
 
   status.elapsedMs = Date.now() - start;
@@ -1056,6 +1124,7 @@ module.exports = {
   evaluateUsagePollerHealth,
   loadUsagePollerState,
   evaluateQueueDispatchHealth,
+  evaluateUnresolvableDepHealth,
   evaluateStarveEscalationHealth,
   evaluateBuildFreshness,
   latestStarveEscalationReasons,

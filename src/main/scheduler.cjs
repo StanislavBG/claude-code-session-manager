@@ -6351,9 +6351,22 @@ async function computeDepHistorySatisfaction(state) {
       for (const slug of await queueHistory.completedSlugsForCwd(cwd)) satisfied.add(slug);
       for (const dir of listArchivedPrdDirs(cwd)) {
         let entries;
-        try { entries = await fsp.readdir(dir); } catch { continue; }
-        for (const name of entries) {
-          if (name.endsWith('.md')) satisfied.add(name.slice(0, -3));
+        try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { continue; }
+        for (const ent of entries) {
+          if (ent.isFile() && ent.name.endsWith('.md')) { satisfied.add(ent.name.slice(0, -3)); continue; }
+          // Option (b) of PRD 1286: a manual archive (queueOps.archiveOne, the
+          // schedule:archive-prd route and scheduler_archive_prd MCP tool) files the PRD
+          // under prds-archived/<ISO-ts>/<slug>.md — one level DEEPER than the auto-archive
+          // layout. Reading only the top level made every manually-archived slug invisible
+          // here, so once its row aged out its dependents held forever as 'unresolved'.
+          // A dep whose PRD file was archived is satisfied; a dep with NO file, row or
+          // history record (never ran, or a typo) still holds — nothing is dropped.
+          if (!ent.isDirectory()) continue;
+          let inner;
+          try { inner = await fsp.readdir(path.join(dir, ent.name)); } catch { continue; }
+          for (const name of inner) {
+            if (name.endsWith('.md')) satisfied.add(name.slice(0, -3));
+          }
         }
       }
     } catch (e) {

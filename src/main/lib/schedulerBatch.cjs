@@ -75,7 +75,7 @@ function dedupeCycles(cycles) {
   return out;
 }
 
-function findBlockingDep(job, projectJobs, satisfiedSlugs = new Set()) {
+function makeDepResolver(projectJobs, satisfiedSlugs = new Set()) {
   const rowBySlug = new Map(projectJobs.map((j) => [j.slug, j]));
   const rowsByBareSlug = new Map();
   for (const j of projectJobs) {
@@ -102,6 +102,31 @@ function findBlockingDep(job, projectJobs, satisfiedSlugs = new Set()) {
     }
     return satisfiedBareSlugs.has(bareSlug(slug));
   };
+  return { rowsForDep, isKnownSatisfied };
+}
+
+/**
+ * findUnresolvableDepRoots(projectJobs, satisfiedSlugs) → string[]
+ *
+ * Pure. The dep slugs that name NO live row and NO completion/archive record
+ * — the roots findBlockingDep holds as 'unresolved'. Unlike a failed/pending
+ * dep row, nothing in the queue will ever change one of these; only a human
+ * (or a restored record) can. Sorted, de-duplicated. O(jobs + deps).
+ */
+function findUnresolvableDepRoots(projectJobs, satisfiedSlugs = new Set()) {
+  const { rowsForDep, isKnownSatisfied } = makeDepResolver(projectJobs, satisfiedSlugs);
+  const roots = new Set();
+  for (const j of projectJobs) {
+    if (j.status !== 'pending') continue;
+    for (const dep of j.dependsOn ?? []) {
+      if (rowsForDep(dep).length === 0 && !isKnownSatisfied(dep)) roots.add(dep);
+    }
+  }
+  return [...roots].sort();
+}
+
+function findBlockingDep(job, projectJobs, satisfiedSlugs = new Set()) {
+  const { rowsForDep, isKnownSatisfied } = makeDepResolver(projectJobs, satisfiedSlugs);
   // A dep row is blocking unless it's 'completed', OR it's a 'skipped' row
   // stamped `needsReviewAutoResolvedSkip` — the bounded needs_review
   // auto-resolve terminal decision (scheduler.cjs's
@@ -658,6 +683,6 @@ function findStarvedProjects(jobs, now, thresholdMs) {
 }
 
 module.exports = {
-  pickForProject, pickNextBatch, enqueueTimestamp, findStarvedProjects, findBlockingDep, DEFAULT_PROJECT_CWD,
+  pickForProject, pickNextBatch, enqueueTimestamp, findStarvedProjects, findBlockingDep, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD,
   DEP_HISTORY_FAIL_OPEN,
 };

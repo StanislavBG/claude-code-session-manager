@@ -207,3 +207,20 @@ test('an empty SM_SCHEDULER_HOME falls through to the real ~/.claude and the gua
   expect(r.status).not.toBe(0);
   expect(r.stderr).toMatch(/schedulerHome\(\) resolved to live root/);
 });
+
+// 2026-09-18 defaultCwd leak: the guard's allow-list is env-derived, so a live SM_SCHEDULER_HOME
+// (inherited from the app) or a mid-test HOME swap let a test write the LIVE machine file.
+// The passwd-home anchor must refuse the live root no matter what the env says.
+test('under VITEST the passwd-home live root is refused even when SM_SCHEDULER_HOME names it', async () => {
+  const liveHome = path.join(os.userInfo().homedir, '.claude', 'session-manager');
+  process.env.SM_SCHEDULER_HOME = liveHome;
+  try {
+    expect(() => sp.machineStatePath()).toThrow(/live root/);
+    // the path the leak wrote through: the machine-state read/write refuses instead of touching it
+    const queueStore = require('../queueStore.cjs');
+    expect(() => queueStore.MACHINE_STATE_PATH).toThrow(/live root/);
+    await expect(queueStore.writeSplit({ jobs: [], config: {} }, os.tmpdir())).rejects.toThrow(/live root/);
+  } finally {
+    process.env.SM_SCHEDULER_HOME = tmpHome;
+  }
+});

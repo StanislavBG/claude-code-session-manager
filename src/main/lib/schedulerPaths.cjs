@@ -38,12 +38,33 @@ function assertNotLiveRoot(resolved, resolverName) {
   // Narrow, per-test opt-in for a READ-ONLY probe of this machine's real user config
   // (health-delegation-chain.test.cjs). Never set it around anything that writes or sweeps.
   if (process.env.SM_ALLOW_LIVE_ROOT_READS === '1') return resolved;
+  // HOLE CLOSED (2026-09-18 defaultCwd leak): the allow-list below is env-derived, and so was
+  // the notion of "live" — both follow process.env.HOME / SM_SCHEDULER_HOME, which a test (or an
+  // env inherited from the live app) freely reassigns. A live SM_SCHEDULER_HOME therefore
+  // ALLOW-LISTED the very root the guard exists to refuse, and a HOME swapped mid-test moved
+  // "live" out from under it. The passwd-database home (os.userInfo(), immune to $HOME) is the
+  // one anchor a test cannot rewrite: nothing under its ~/.claude may be touched, whatever the
+  // allow-list says.
+  if (isLivePasswdRoot(resolved)) throw liveRootError(resolved, resolverName);
   const roots = [process.env.SM_SCHEDULER_HOME, process.env.SM_WORKTREE_ROOT, os.tmpdir()].filter(Boolean);
   if (roots.some((r) => isUnder(resolved, r))) return resolved;
-  throw new Error(
+  throw liveRootError(resolved, resolverName);
+}
+
+function liveRootError(resolved, resolverName) {
+  return new Error(
     `schedulerPaths.${resolverName}() resolved to live root ${resolved} under vitest — ` +
     'set SM_SCHEDULER_HOME / SM_WORKTREE_ROOT / HOME to a temp dir (tests/setup/schedulerSandbox.cjs does this per run)',
   );
+}
+
+/** True when `resolved` sits under the passwd-home's ~/.claude (HOME-env independent). */
+function isLivePasswdRoot(resolved) {
+  let home;
+  try { home = os.userInfo().homedir; } catch { return false; }
+  if (!home) return false;
+  // A sandbox that genuinely lives under the passwd home's tmp is not live; only ~/.claude is.
+  return isUnder(resolved, path.join(home, '.claude'));
 }
 
 /** SM_SCHEDULER_HOME, else ~/.claude/session-manager. */

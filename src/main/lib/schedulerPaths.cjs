@@ -67,6 +67,8 @@ function schedulerStatePath() { return assertNotLiveRoot(path.join(schedulerHome
 function heartbeatPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'scheduler-heartbeat.log'), 'heartbeatPath'); }
 function sessionSlotsConfigPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'session-slots-config.json'), 'sessionSlotsConfigPath'); }
 function watchdogLogsDir() { return assertNotLiveRoot(path.join(schedulerHome(), 'logs'), 'watchdogLogsDir'); }
+function restartRequestPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'restart-request.json'), 'restartRequestPath'); }
+function restartingMarkerPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'restarting.json'), 'restartingMarkerPath'); }
 function watchdogRelaunchStatePath() { return assertNotLiveRoot(path.join(schedulerHome(), 'watchdog-relaunch-state.json'), 'watchdogRelaunchStatePath'); }
 // Sibling of schedulerHome() (i.e. ~/.claude/logs by default), not inside it.
 function watchdogRelaunchLogPath() {
@@ -137,6 +139,8 @@ module.exports = {
   worktreeBase,
   worktreeRoot,
   watchdogLogsDir,
+  restartRequestPath,
+  restartingMarkerPath,
   watchdogRelaunchStatePath,
   watchdogRelaunchLogPath,
   historyRollupStampPath,

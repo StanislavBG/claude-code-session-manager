@@ -11,6 +11,7 @@ const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const { POLL_INTERVAL_MS, loadGateThreshold } = require('./lib/schedulerConfig.cjs');
 const { opsPath } = require('./lib/opsOwnership.cjs');
+const { effectivePaused } = require('./lib/upgradeDrain.cjs');
 const { checkPersonaImports } = require('./lib/personaImportHealth.cjs');
 const { checkDelegationReadiness } = require('./lib/delegationReadiness.cjs');
 const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
@@ -97,7 +98,7 @@ function evaluateTickLiveness(queueState, heartbeat, now, runningCount) {
     ?? (() => { try { return require('./lib/sessionSlots.cjs').totalSlots(); } catch { return Infinity; } })();
 
   if (pending.length === 0) return { stalled: false, reason: 'no-pending-jobs' };
-  if (queueState.paused) return { stalled: false, reason: 'paused' };
+  if (effectivePaused(queueState)) return { stalled: false, reason: queueState.paused ? 'paused' : 'draining' };
   if (config.enabled === false) return { stalled: false, reason: 'disabled' };
   if (running >= concurrencyCap) return { stalled: false, reason: 'at-capacity' };
   // 'manual' means the operator fires batches by hand — the scheduler is not
@@ -468,7 +469,7 @@ function evaluateQueueDispatchHealth(queueState, runningCount, now, thresholdMs 
   // in-memory pause/boot stamps to fold in. Breaker-held rows count blocked.
   const verdict = classifyQueueStarvation({
     jobs: queueState?.jobs,
-    paused: queueState?.paused,
+    paused: effectivePaused(queueState),
     runningCount,
     lastRunAtMs: Date.parse(queueState?.lastRunAt ?? ''),
     heldSlugs: launchBlockedSlugs(queueState?.jobs, queueState?.launchBlocks),
@@ -705,6 +706,8 @@ async function check() {
       path: queuePath,
       jobs: Object.keys(queueState.jobs || {}).length,
       running: runningCount,
+      // Deliberate restart drain (lib/upgradeDrain.cjs) — reported so it is never read as a stall.
+      drain: queueState.drain?.active ? { since: queueState.drain.since ?? null, requestedAt: queueState.drain.requestedAt ?? null } : null,
       failed: failedCount,
       needsReview: needsReviewCount,
       quarantined: quarantinedCount,

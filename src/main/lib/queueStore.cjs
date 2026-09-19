@@ -238,6 +238,10 @@ function shapeMachine(data) {
     // classifyQueueStarvation's header for why the two must never merge.
     lastDispatchAttemptAt: data.lastDispatchAttemptAt ?? null,
     paused: data.paused ?? null,
+    // Upgrade-drain state (lib/upgradeDrain.cjs): deliberately NOT part of
+    // `paused`, so a rate-limit pause can neither overwrite it nor have the
+    // manual-clear cooldown swallow it.
+    drain: data.drain && typeof data.drain === 'object' ? data.drain : null,
     // Launch circuit breaker (lib/launchFailure.cjs): per-persona blocks and
     // the degraded-mode env a persona is currently launching with. Machine
     // state, not per-project: the broken thing is the installed CLI.
@@ -458,7 +462,7 @@ function shapeJobs(raw, file) {
  * writeSplit can persist "this project now has zero jobs".
  */
 function readMergedSync(opts) {
-  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, lastDispatchAttemptAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
+  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, lastDispatchAttemptAt: null, paused: null, drain: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
   const sourceCwds = [];
   const machine = loadMachineStateSync();
   if (machine.shaped) {
@@ -492,7 +496,7 @@ function readMergedSync(opts) {
 
 /** Async twin of readMergedSync for IPC hot paths. */
 async function readMerged(opts) {
-  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, lastDispatchAttemptAt: null, paused: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
+  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, lastDispatchAttemptAt: null, paused: null, drain: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
   const sourceCwds = [];
   const machine = await loadMachineState();
   if (machine.shaped) {
@@ -547,6 +551,7 @@ async function writeSplit(state, defaultCwd) {
     lastRunAt: state.lastRunAt ?? null,
     lastDispatchAttemptAt: state.lastDispatchAttemptAt ?? null,
     paused: state.paused ?? null,
+    drain: state.drain ?? null,
     launchBlocks: state.launchBlocks ?? {},
     launchMitigations: state.launchMitigations ?? {},
   });

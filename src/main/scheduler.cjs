@@ -196,7 +196,8 @@ const SCHEDULER_BOOTED_AT = new Date().toISOString();
 // resolves build-info.json (baked at publish time) first, falling back to a
 // non-walking git read only in a dev checkout / job worktree — see
 // src/main/lib/buildIdentity.cjs's header.
-const { resolveBuildIdentity } = require('./lib/buildIdentity.cjs');
+const { resolveBuildIdentity, readInstalledBuildInfo } = require('./lib/buildIdentity.cjs');
+const upgradeDrain = require('./lib/upgradeDrain.cjs');
 const SCHEDULER_BUILD_IDENTITY = resolveBuildIdentity({ bootedAt: SCHEDULER_BOOTED_AT });
 const SCHEDULER_CODE_SHA = SCHEDULER_BUILD_IDENTITY.codeSha;
 // Spread into EVERY metaPath writer below (grep `metaPath` for the full
@@ -1553,6 +1554,112 @@ function heartbeatBuild() {
   return { version, codeSha, builtAt };
 }
 
+// ---------- upgrade drain driver (lib/upgradeDrain.cjs) ----------
+
+// Set by index.cjs: performs the actual app teardown + relaunch + exit.
+let restartHandler = null;
+function setRestartHandler(fn) { restartHandler = typeof fn === 'function' ? fn : null; }
+let drainDriving = false;
+
+function drainSnapshot(jobs) {
+  const running = new Set();
+  let investigating = 0;
+  for (const j of jobs ?? []) {
+    if (j?.status === 'running') running.add(j.slug);
+    else if (j?.status === 'investigating') investigating++;
+  }
+  for (const slug of runningSet) running.add(slug);
+  // Deferred investigations are not busy: while draining they never spawn.
+  return { running: running.size, investigating: Math.max(investigating, runtimeState.investigationCount()) };
+}
+
+/**
+ * Restart is triggered automatically ONLY when the installed build-info.json
+ * differs from the running codeSha (an install/update already happened) —
+ * never by polling npm. SM_AUTO_UPGRADE_RESTART=0 disables it.
+ */
+function maybeAutoRequestRestart() {
+  if (process.env.SM_AUTO_UPGRADE_RESTART === '0' || process.env.SM_DEV === '1') return null;
+  const installed = readInstalledBuildInfo();
+  const installedSha = typeof installed?.gitShortSha === 'string' ? installed.gitShortSha : null;
+  if (!upgradeDrain.installedBuildDiffers({ running: SCHEDULER_CODE_SHA, installed: installedSha })) return null;
+  return upgradeDrain.requestRestart({ reason: `installed build ${installedSha} differs from running ${SCHEDULER_CODE_SHA}`, requestedBy: 'auto-upgrade' });
+}
+
+async function driveUpgradeDrain(state) {
+  if (drainDriving) return;
+  drainDriving = true;
+  try {
+    let request = upgradeDrain.readRestartRequest();
+    if (!request && !state.drain?.active) request = maybeAutoRequestRestart();
+    const { action, reason } = upgradeDrain.evaluateDrain({
+      request,
+      queueSnapshot: drainSnapshot(state.jobs),
+      drainState: state.drain,
+      now: Date.now(),
+    });
+    if (action === 'none' || action === 'wait') { drainActive = Boolean(state.drain?.active); return; }
+    if (action === 'pause') {
+      await mutate((s) => { s.drain = { active: true, since: new Date().toISOString(), requestedAt: request.requestedAt }; });
+      drainActive = true;
+      appendAuditEvent('upgrade_drain_started', { reason: request.reason, requestedBy: request.requestedBy });
+      await broadcast({ flush: true });
+      return;
+    }
+    if (action === 'abort') {
+      upgradeDrain.retireRestartRequest();
+      await mutate((s) => { s.drain = null; });
+      drainActive = false;
+      appendAuditEvent('upgrade_drain_aborted', { reason });
+      await broadcast({ flush: true });
+      runDueJobs().catch(() => {});
+      return;
+    }
+    // 'restart': the FINAL zero-busy check runs inside a mutate, immediately
+    // before exit — the snapshot above may be stale by now.
+    let go = false;
+    await mutate((s) => {
+      const snap = drainSnapshot(s.jobs);
+      if (!s.drain?.active || snap.running + snap.investigating > 0) return;
+      upgradeDrain.stampDrainCompleted();
+      go = true;
+    });
+    if (!go) return;
+    appendAuditEvent('upgrade_drain_restart', { reason: request.reason, requestedBy: request.requestedBy });
+    try {
+      if (!restartHandler) throw new Error('no restart handler registered');
+      upgradeDrain.markRestarting();
+      await restartHandler(request);
+      // Only reached when the handler did NOT exit the process (dev-server
+      // in-place reboot): the restart is done, so retire the drain here.
+      upgradeDrain.clearRestartingMarker();
+      upgradeDrain.retireRestartRequest();
+      await mutate((s) => { s.drain = null; });
+      drainActive = false;
+    } catch (e) {
+      // Never strand the queue drained-and-paused: fall back to an abort.
+      console.error('[scheduler] drain restart failed — aborting drain:', e?.message ?? e);
+      upgradeDrain.clearRestartingMarker();
+      upgradeDrain.retireRestartRequest();
+      await mutate((s) => { s.drain = null; });
+      drainActive = false;
+      runDueJobs().catch(() => {});
+    }
+  } finally {
+    drainDriving = false;
+  }
+}
+
+/** Boot: clear a leftover drain whose request is complete (the restart happened) or gone. */
+async function clearStaleDrainAtBoot(boot) {
+  const request = upgradeDrain.readRestartRequest();
+  const action = upgradeDrain.bootDrainAction({ drainState: boot.drain, request });
+  upgradeDrain.clearRestartingMarker();
+  if (request?.drainCompletedAt) upgradeDrain.retireRestartRequest();
+  if (action === 'clear') await mutate((s) => { s.drain = null; });
+  drainActive = action === 'keep';
+}
+
 /**
  * heartbeatTick(deps?) — one 60 s heartbeat interval body. Each subsystem
  * (queue read + starvation watchdog, stall detector, heartbeat write) runs in
@@ -1584,6 +1691,9 @@ function heartbeatTick(deps = {}) {
     // least once. See classifyQueueStarvation.
     if (!q.unreadable) {
       runQueueStarvationWatchdog(q).catch((e) => console.error('[scheduler] starvation watchdog error', e));
+      // Restart-request drain state machine rides this same 60 s interval —
+      // no new driver.
+      driveUpgradeDrain(q).catch((e) => console.error('[scheduler] upgrade drain error', e));
     }
     return q;
   });
@@ -1664,6 +1774,7 @@ function heartbeatTick(deps = {}) {
         pendingDispatchable: Math.max(0, counts.pending - blockedPending),
         runningCount: counts.running,
         paused: Boolean(s.paused),
+        drain: s.drain?.active ? { since: s.drain.since ?? null, requestedAt: s.drain.requestedAt ?? null } : null,
       };
       return {
         ts: Date.now(),
@@ -3352,9 +3463,11 @@ const runningSet = new Set();
 // PRD that never reaches 'needs_review' still eventually gets its fix-plan authored.
 const MAX_CONCURRENT_INVESTIGATIONS = 1;
 const deferredInvestigations = new Map(); // fixable-job slug -> { failedJob, runDir }
+// Mirror of machine `drain.active`, kept in memory so spawn sites need no queue read.
+let drainActive = false;
 
 function drainDeferredInvestigation() {
-  if (runtimeState.investigationCount() >= MAX_CONCURRENT_INVESTIGATIONS) return;
+  if (drainActive || runtimeState.investigationCount() >= MAX_CONCURRENT_INVESTIGATIONS) return;
   const next = deferredInvestigations.entries().next();
   if (next.done) return;
   const [slug, ctx] = next.value;
@@ -3445,6 +3558,7 @@ function buildScheduleStatePayload(state) {
     lastDispatchAttemptAt: state.lastDispatchAttemptAt ?? null,
     nextReset: getNextResetCached(),
     paused: state.paused,
+    drain: state.drain ?? null,
     // Launch circuit breaker (issue #11): which personas cannot launch right
     // now and why, plus any degraded-mode env in force. Empty objects when healthy.
     launchBlocks: state.launchBlocks ?? {},
@@ -5878,7 +5992,8 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
       return { deferred: false };
     }
   }
-  if (runtimeState.investigationCount() >= MAX_CONCURRENT_INVESTIGATIONS) {
+  // A drain (lib/upgradeDrain.cjs) admits no NEW work: queue instead of spawning.
+  if (drainActive || runtimeState.investigationCount() >= MAX_CONCURRENT_INVESTIGATIONS) {
     // Queue for retry when a slot frees rather than dropping — otherwise a failed
     // job (never 'needs_review', so reverifyNeedsReview won't retry it) would
     // silently never get an auto-authored fix-plan.
@@ -7865,6 +7980,12 @@ async function tickBody(gen, { bypassLoadGate }) {
       console.log('[scheduler] tickQueue skipped: paused');
       return recordTick({ fired: false, reason: 'paused' }, { detail: 'scheduler paused' });
     }
+    // Upgrade drain (lib/upgradeDrain.cjs): a separate field from `paused`, so a
+    // rate-limit pause can't overwrite it. Nothing new dispatches; running and
+    // investigating rows finish.
+    if (state.drain?.active) {
+      return recordTick({ fired: false, reason: 'draining' }, { detail: 'draining for restart' });
+    }
     if (cancelToken.cancelled) return { fired: false, reason: 'cancelled' };
 
     // Stamped here — the moment tickQueue actually reaches the picker,
@@ -8386,7 +8507,7 @@ async function runQueueStarvationWatchdog(state, {
   }
   const verdicts = classifyQueueStarvationByProject({
     jobs: state?.jobs,
-    paused: state?.paused,
+    paused: upgradeDrain.effectivePaused(state),
     runningSet,
     lastRunAtMs: Date.parse(state?.lastRunAt ?? ''),
     lastPauseClearedAtMs: pauseClearedAtMs,
@@ -10672,7 +10793,7 @@ function registerScheduleHandlers() {
     const freeSlots = Math.max(0, slotSnapshot.total - slotSnapshot.inUse);
     const verdict = classifyQueueHealth({
       jobs: state.jobs,
-      paused: state.paused,
+      paused: upgradeDrain.effectivePaused(state),
       launchBlocks: state.launchBlocks,
       runningSet,
       freeSlots,
@@ -11135,6 +11256,7 @@ async function init() {
     // If we boot up while paused with a resumeAt in the past, clear it. This
     // happens when the app was closed across the reset window.
     const boot = await readQueue();
+    await clearStaleDrainAtBoot(boot);
     if (boot.paused && boot.paused.resumeAt && new Date(boot.paused.resumeAt).getTime() <= Date.now()) {
       await clearPause('boot-elapsed');
     } else if (boot.paused && boot.paused.resumeAt) {
@@ -12211,6 +12333,9 @@ module.exports = {
   setPaused,
   clearPause,
   tickQueue,
+  setRestartHandler,
+  driveUpgradeDrain,
+  clearStaleDrainAtBoot,
   stop,
   runDueJobs,
   pollLoop,

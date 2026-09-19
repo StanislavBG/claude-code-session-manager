@@ -6,6 +6,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const schedulerPaths = require('./schedulerPaths.cjs');
+const { isRestartingMarkerActive } = require('./upgradeDrain.cjs');
 
 
 
@@ -115,6 +116,7 @@ function evaluateDispatchLiveness(entry, now = Date.now(), { deadMs = DEFAULT_DI
   const d = entry.dispatch;
   if (!d || typeof d !== 'object') return { dead: false, reason: 'no-dispatch-field' };
   if (d.paused) return { dead: false, reason: 'paused' };
+  if (d.drain) return { dead: false, reason: 'draining' };
   if (!(d.pendingDispatchable > 0)) return { dead: false, reason: 'nothing-dispatchable' };
   if (d.runningCount !== 0) return { dead: false, reason: 'jobs-running' };
   const lastRunMs = Date.parse(d.lastRunAt ?? '');
@@ -264,6 +266,7 @@ function maybeRelaunchApp({
   maxAttempts = DEFAULT_MAX_RELAUNCH_ATTEMPTS,
   now = Date.now(),
   spawnFn = defaultSpawnRelaunch,
+  restartingMarkerPath = schedulerPaths.restartingMarkerPath(),
 } = {}) {
   const liveness = checkAppLiveness({ heartbeatPath, maxAgeMs });
   const state = readRelaunchState(statePath);
@@ -273,6 +276,14 @@ function maybeRelaunchApp({
       writeRelaunchState(statePath, { lastAttemptTs: null, attemptCount: 0 });
     }
     return { relaunched: false, reason: 'alive', attemptCount: 0 };
+  }
+
+  // A deliberate drain-restart is mid-exit: the old process is going away ON
+  // PURPOSE and its successor is booting. Relaunching now would race the
+  // single-instance lock. The marker's lifetime is bounded, so a restart that
+  // never comes up is picked up again once it expires.
+  if (isRestartingMarkerActive({ file: restartingMarkerPath, now })) {
+    return { relaunched: false, reason: 'restarting', attemptCount: state.attemptCount };
   }
 
   if (state.attemptCount >= maxAttempts) {

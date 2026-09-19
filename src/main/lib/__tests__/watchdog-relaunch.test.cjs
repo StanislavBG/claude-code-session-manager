@@ -223,3 +223,44 @@ test('dispatch-dead (fresh heartbeat, dead dispatch chain) never relaunches', ()
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── restarting marker (drain-restart exit window) ───────────────────────────
+
+test('stale heartbeat + active restarting marker → no relaunch; expired marker → relaunch', () => {
+  const dir = tmpDir();
+  try {
+    const hbPath = path.join(dir, 'heartbeat.log');
+    const statePath = path.join(dir, 'state.json');
+    const markerPath = path.join(dir, 'restarting.json');
+    const now = Date.now();
+    writeHeartbeat(hbPath, now - 10 * 60_000, DEAD_PID);
+    fs.writeFileSync(markerPath, JSON.stringify({ pid: DEAD_PID, at: now - 1_000, expiresAt: now + 60_000 }));
+    const spawnFn = makeSpawnSpy();
+
+    const held = maybeRelaunchApp({ heartbeatPath: hbPath, maxAgeMs: 180_000, statePath, restartingMarkerPath: markerPath, now, spawnFn });
+    assert.equal(held.relaunched, false);
+    assert.equal(held.reason, 'restarting');
+    assert.equal(spawnFn.calls.length, 0);
+    assert.equal(fs.existsSync(statePath), false, 'a held relaunch must not burn an attempt');
+
+    // Bounded lifetime: once the marker expires the watchdog resumes duty.
+    const lapsed = maybeRelaunchApp({ heartbeatPath: hbPath, maxAgeMs: 180_000, statePath, restartingMarkerPath: markerPath, now: now + 61_000, spawnFn });
+    assert.equal(lapsed.relaunched, true);
+    assert.equal(spawnFn.calls.length, 1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('fresh heartbeat carrying dispatch.drain is not dispatch-dead', () => {
+  const now = Date.now();
+  const entry = {
+    ts: now - 1_000,
+    dispatch: {
+      lastRunAt: new Date(now - 5 * 60 * 60_000).toISOString(),
+      pendingDispatchable: 5, runningCount: 0, paused: false,
+      drain: { since: new Date(now - 60_000).toISOString(), requestedAt: new Date(now - 60_000).toISOString() },
+    },
+  };
+  assert.deepEqual(evaluateDispatchLiveness(entry, now), { dead: false, reason: 'draining' });
+});

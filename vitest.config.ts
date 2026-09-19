@@ -210,6 +210,7 @@ export default defineConfig({
       'src/main/__tests__/heapSnapshot.test.cjs',
       'src/main/lib/__tests__/watchdog-helpers.test.cjs',
       'src/main/lib/__tests__/watchdog-relaunch.test.cjs',
+      'src/main/lib/__tests__/upgradeDrain.test.cjs',
       'src/main/lib/__tests__/active-sessions.test.cjs',
       'src/main/__tests__/proc-role-env.test.cjs',
       'scripts/__tests__/audit-ops-hygiene-pattern-e.test.cjs',

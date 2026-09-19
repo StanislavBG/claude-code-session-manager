@@ -1593,7 +1593,8 @@ export interface SessionManagerAPI {
     gitBranch: (cwd: string) => Promise<string | null>;
     /** Publish target for 'build'-tagged Epics — null disables the Build toolbar button. */
     resolveBuildTarget: (cwd: string) => Promise<BuildTarget | null>;
-    rebootApp: () => void;
+    /** Default: request a drain-first restart. `force: true` restarts immediately, killing running jobs. */
+    rebootApp: (opts?: { force?: boolean }) => void;
     testFireHook: (args: TestFireHookArgs) => Promise<TestFireHookResult>;
     /** F7 — true under SM_E2E=1; renderer uses this to suppress wizard auto-trigger. */
     isE2E: () => Promise<boolean>;

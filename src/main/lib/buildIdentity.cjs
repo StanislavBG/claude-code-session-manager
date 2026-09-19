@@ -100,4 +100,14 @@ function resolveBuildIdentity(opts = {}) {
   return { ...identityCache.get(packageRoot), bootedAt: opts.bootedAt ?? null };
 }
 
-module.exports = { resolveBuildIdentity };
+/**
+ * readInstalledBuildInfo() → the build-info.json currently ON DISK at this
+ * package root (fresh read, never the boot-time memo), or null. Compared with
+ * the running identity's codeSha to detect that an install/update already
+ * replaced the files under a live process.
+ */
+function readInstalledBuildInfo(packageRoot = PACKAGE_ROOT) {
+  return loadBuildInfoJson(packageRoot);
+}
+
+module.exports = { resolveBuildIdentity, readInstalledBuildInfo };

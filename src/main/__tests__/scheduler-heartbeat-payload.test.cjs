@@ -74,6 +74,7 @@ test('healthy tick carries dispatch {..., pendingDispatchable excludes blocked c
     lastRunAt: '2026-01-01T00:00:00.000Z', pendingDispatchable: 1, runningCount: 0, paused: false,
   }));
   expect(Object.keys(entry.dispatch).sort()).toEqual(
-    ['lastDispatchAttemptAt', 'lastRunAt', 'lastTickReason', 'paused', 'pendingDispatchable', 'runningCount'],
+    ['drain', 'lastDispatchAttemptAt', 'lastRunAt', 'lastTickReason', 'paused', 'pendingDispatchable', 'runningCount'],
   );
+  expect(entry.dispatch.drain).toBeNull();
 });

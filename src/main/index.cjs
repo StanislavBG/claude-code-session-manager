@@ -46,6 +46,7 @@ const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { resolveEffectiveModelInfo } = require('./lib/effectiveModelInfo.cjs');
 const { checkDelegationReadiness, ensureGuardsInstalled, installPrdWriteGuard, installDestructiveGitGuard, installInlineImplementationGuard } = require('./lib/delegationReadiness.cjs');
 const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
+const upgradeDrain = require('./lib/upgradeDrain.cjs');
 const { writeGuardShims } = require('./lib/guardShims.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES } = require('./lib/mcpToolCatalog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
@@ -316,7 +317,26 @@ function relaunchViaNpx() {
   return child;
 }
 
-async function rebootApp() {
+/**
+ * rebootApp({force}) — restart is a REQUEST that drains first and never kills
+ * (lib/upgradeDrain.cjs): dispatch pauses, running jobs finish, then the
+ * scheduler's heartbeat-driven drain calls performReboot(). `force: true`
+ * keeps the old immediate behaviour (kills running executors) for humans who
+ * accept the cost.
+ */
+async function rebootApp({ force = false } = {}) {
+  if (force) {
+    logReboot('force reboot requested — immediate, not draining');
+    return performReboot();
+  }
+  const request = upgradeDrain.requestRestart({ reason: 'user-reboot', requestedBy: 'user' });
+  logReboot(`restart requested (drain first): ${request.requestedAt}`);
+}
+
+// Registered as the scheduler's drain-complete exit path (zero running jobs).
+scheduler.setRestartHandler(() => performReboot());
+
+async function performReboot() {
   ptyManager.killAll();
   configMgr.closeAllWatchers();
   closeAllProjectPagesWatchers();
@@ -351,6 +371,9 @@ async function rebootApp() {
     return;
   }
 
+  // Bounded-lifetime marker: the watchdog must not relaunch a second instance
+  // during this deliberate exit window (single-instance-lock race).
+  upgradeDrain.markRestarting();
   let childOk = false;
   try {
     const child = relaunchViaNpx();
@@ -649,7 +672,7 @@ ipcMain.handle('app:pick-directory', async () => {
   return result.filePaths[0];
 });
 
-ipcMain.on('app:reboot-app', () => rebootApp());
+ipcMain.on('app:reboot-app', (_e, opts) => { rebootApp({ force: opts?.force === true }).catch((e) => logReboot(`reboot failed: ${e?.message}`)); });
 
 // Image paste — Ctrl+V in the Terminal pane. Reads the OS clipboard via
 // Electron's native API (renderer's navigator.clipboard.read() doesn't expose
@@ -1259,7 +1282,7 @@ app.whenReady().then(async () => {
         {
           label: 'Restart Session Manager App',
           accelerator: 'CmdOrCtrl+Shift+R',
-          click: rebootApp,
+          click: () => { rebootApp().catch((e) => logReboot(`reboot failed: ${e?.message}`)); },
         },
         {
           label: 'Restart Terminal in Active Tab',

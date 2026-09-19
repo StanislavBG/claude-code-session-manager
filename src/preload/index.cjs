@@ -9,7 +9,7 @@ contextBridge.exposeInMainWorld('api', {
     pickDirectory: () => ipcRenderer.invoke('app:pick-directory'),
     gitBranch: (cwd) => ipcRenderer.invoke('app:git-branch', { cwd }),
     resolveBuildTarget: (cwd) => ipcRenderer.invoke('build:resolve-target', { cwd }),
-    rebootApp: () => ipcRenderer.send('app:reboot-app'),
+    rebootApp: (opts) => ipcRenderer.send('app:reboot-app', opts),
     archiveProject: (encoded) => ipcRenderer.invoke('app:archive-project', { encoded }),
     testFireHook: (args) => ipcRenderer.invoke('app:test-fire-hook', args),
     // F7: lets the renderer suppress the wizard auto-trigger under SM_E2E=1.

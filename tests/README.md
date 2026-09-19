@@ -16,10 +16,10 @@ Every such file gets one `include` line in the same change that creates it.
 
 Enforcement: `npm run lint:unregistered-tests` (`scripts/check-unregistered-tests.cjs`; part of `npm run lint`).
 
-Current blind spots (a later PRD widens the guard):
-
-- Only `src/` is scanned. Tests under `scripts/` and `web/` still need a hand entry, unchecked.
-- No config→disk check: an `include` line pointing at a deleted file is not flagged.
+The guard scans `src/`, `scripts/` and `web/` (excluding `node_modules`, `dist`) for
+`*.test.{cjs,ts,tsx}` and `*.spec.cjs` under any `__tests__` segment, and checks both
+directions: a test on disk absent from `include` fails, and a literal `include` entry with
+no file on disk fails too. `VITEST_CONFIG_PATH` (or a CLI arg) points it at another config.
 
 Known debt: the `node:test` files under `src/main/__tests__` are allowlisted in
 `check-unregistered-tests.cjs` (vitest cannot run them; run with `node --test`). A later PRD resolves this.

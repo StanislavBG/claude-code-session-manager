@@ -25,7 +25,7 @@ import { ViewTabs } from '../../../ui/ViewTabs'
 import { PhBlock, PhCard } from '../ph-primitives'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
 import { HtmlFrame } from './HtmlFrame'
-import type { ProjectPagesOutput } from '../../../../../preload/api'
+import type { ProjectPagesOutput } from '../../../../lib/projectPages/useProjectPagesOutput'
 
 type Lens = 'home' | 'marketing' | 'feature' | 'architecture' | 'brief'
 type ViewKey = Lens | 'library'

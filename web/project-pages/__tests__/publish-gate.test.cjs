@@ -1,6 +1,6 @@
 /**
  * publish-gate.test.cjs — the publish gate that stops a stale
- * or missing Project Pages bundle (or a drifted catalog / spec copy) from
+ * * or missing Project Pages bundle from
  * shipping in the npm tarball. See web/project-pages/publish-gate.cjs.
  *
  * Run: timeout 300 npx vitest run web/project-pages/__tests__/publish-gate.test.cjs
@@ -16,7 +16,6 @@ const { execFileSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const gate = require('../publish-gate.cjs');
-const assets = require('../assets.cjs');
 
 const tmpDirs = [];
 afterEach(() => {
@@ -73,42 +72,6 @@ test('fresh bundles pass in a fixture', () => {
   const result = gate.checkBundles(root);
   expect(result.errors).toEqual([]);
   expect(result.ok).toBe(true);
-});
-
-test('a catalog that no longer matches the library sources fails', () => {
-  const root = mkFixtureRoot();
-  const tampered = path.join(root, 'catalog.json');
-  fs.writeFileSync(tampered, '{"lenses":[]}\n');
-  const result = gate.checkCatalog(REPO_ROOT, { catalogPath: tampered });
-  expect(result.ok).toBe(false);
-  expect(result.errors.join('\n')).toContain('npm run build:project-pages-assets');
-});
-
-test('a spec copy that drifted from the architecture spec fails', () => {
-  const root = mkFixtureRoot();
-  const drifted = path.join(root, 'spec.md');
-  fs.writeFileSync(drifted, '# not the spec\n');
-  const result = gate.checkSpecCopy(REPO_ROOT, { copyPath: drifted });
-  expect(result.ok).toBe(false);
-  expect(result.errors.join('\n')).toContain('npm run build:project-pages-assets');
-});
-
-test('generated catalog captures every lens, slot and variant note verbatim from the library', () => {
-  const catalog = assets.buildCatalog(REPO_ROOT);
-  expect(catalog.lenses.map((l) => l.id)).toEqual(['home', 'marketing', 'feature', 'architecture', 'brief']);
-  const home = catalog.lenses.find((l) => l.id === 'home');
-  const overview = home.slots.find((s) => s.id === 'overview');
-  expect(overview.variants).toEqual([
-    { id: 'dashboard', label: 'Stat band', note: 'Claim + sub, then a ruled stat band. The default.' },
-    { id: 'ledger', label: 'Dark ledger', note: 'Inverted; compact inline figures.' },
-  ]);
-  for (const lens of catalog.lenses) {
-    expect(lens.slots.length).toBeGreaterThan(0);
-    for (const slot of lens.slots) {
-      expect(slot.variants.length).toBeGreaterThan(0);
-      for (const v of slot.variants) expect(typeof v.note).toBe('string');
-    }
-  }
 });
 
 // The real-repo gate needs the (gitignored) bundles present and fresh, exactly

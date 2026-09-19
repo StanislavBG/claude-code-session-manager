@@ -37,7 +37,6 @@
     "build": "vite build",
     "build:project-pages": "node web/project-pages/build-renderer.mjs",
     "build:project-pages-logic": "node web/project-pages/build-logic.mjs",
-    "build:project-pages-assets": "node web/project-pages/assets.cjs",
     "project-pages:gate": "node web/project-pages/publish-gate.cjs",
     "typecheck": "tsc --noEmit",
     "start": "electron .",

@@ -242,65 +242,18 @@ const MCP_TOOL_CATALOG = [
       + 'delivered.',
   },
   {
-    name: 'project_home_get_contract',
+    name: 'project_home_write',
     group: 'project-home',
-    purpose: "Fetch the self-sufficient contract for generating this project's Project Home pages via the "
-      + "session-manager app's admin API — the protocol steps, the ProjectPageSummary/ProjectPagePicks JSON "
-      + 'schemas, the component catalog (all 5 lenses: home, marketing, feature, architecture, brief), the '
-      + 'absolute output paths, and the full pipeline spec text. Nothing in the response requires reading '
-      + "session-manager's own repo — this is what makes generation work on a machine with only the npm "
-      + 'package installed.',
-    whenToUse: 'Call this FIRST, before composing any ProjectPageSummary content or picking variants, whenever '
-      + 'a project-home-builder session starts generating Project Home pages for a project.',
-    whenNotToUse: 'Do not begin composing a ProjectPageSummary or choosing variants before calling this — it '
-      + 'must be the FIRST call a project-home-builder session makes; every other project_home_* tool assumes '
-      + "you already have this response's schema/catalog/paths in hand.",
-    exampleArgs: { cwd: '/home/bilko/Projects/session-manager' },
-    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted.",
-  },
-  {
-    name: 'project_home_validate_summary',
-    group: 'project-home',
-    purpose: 'Validate a composed ProjectPageSummary against the schema from project_home_get_contract via the '
-      + "session-manager app's admin API, without writing anything to disk.",
-    whenToUse: 'Use after composing (or editing) a ProjectPageSummary and before calling project_home_render — '
-      + 'fix every returned {field, message} error and re-validate until valid:true.',
-    whenNotToUse: 'Do not skip straight to project_home_render on an unvalidated summary — render does '
-      + 're-validate server-side and rejects with no writes on failure, but catching errors here first saves a '
-      + 'round trip and gives per-field detail sooner.',
-    exampleArgs: { cwd: '/home/bilko/Projects/session-manager', summary: { title: 'Example Project' } },
-    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted.",
-  },
-  {
-    name: 'project_home_render',
-    group: 'project-home',
-    purpose: 'Render and write all 5 Project Home lenses (home, marketing, feature, architecture, brief) plus '
-      + "summary.json/picks.json/manifest.json via the session-manager app's admin API — the only write path "
-      + 'for Project Home generation.',
-    whenToUse: 'Use once project_home_validate_summary reports valid:true and a variant has been picked for '
-      + "every lens/slot in the contract's catalog.",
-    whenNotToUse: 'Must NOT be used to fabricate summary content — every field of the summary passed here must '
-      + 'trace to something concrete about the real project (an Epic goal, a source file/dir, a convention, a '
-      + 'git log entry). This tool re-validates the summary server-side and rejects with no writes on schema '
-      + 'failure, but it only checks shape, never truthfulness.',
-    exampleArgs: {
-      cwd: '/home/bilko/Projects/session-manager',
-      summary: { title: 'Example Project' },
-      picks: { home: { hero: 'variant-a' } },
-    },
-    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted.",
-  },
-  {
-    name: 'project_home_status',
-    group: 'project-home',
-    purpose: "Report what already exists for this project's Project Home generation via the session-manager "
-      + "app's admin API — summary.json/picks.json/each lens file's existence + mtime, and manifest.json's "
-      + 'generatedAt.',
-    whenToUse: 'Use before starting generation to see prior state, and again after project_home_render to '
-      + 'confirm the new files landed.',
-    whenNotToUse: 'Do not treat an all-absent result as an error — a project that has never generated a '
-      + 'Project Home page yet still returns a well-formed status with every exists:false rather than failing.',
-    exampleArgs: { cwd: '/home/bilko/Projects/session-manager' },
+    purpose: "Write this project's Project Home page — ONE self-contained HTML document — to "
+      + "session-manager-operations/project-pages/home.html via the session-manager app's admin API. "
+      + 'The only write path for Project Home.',
+    whenToUse: 'Use when asked to generate or refresh the project home page. Compose the whole page yourself '
+      + '(inline <style>/<script>, data: URIs for assets) from what is really true about the project, then '
+      + 'pass the full document as `html`.',
+    whenNotToUse: 'Never fabricate content — every claim must trace to something concrete in the project. The '
+      + 'document must be self-contained: the call is rejected for empty input, more than 1MB, any '
+      + '<script src>, <link href="http…">, @import, or url(http…) — no network egress.',
+    exampleArgs: { cwd: '/home/bilko/Projects/session-manager', html: '<!DOCTYPE html><html><body><h1>Example</h1></body></html>' },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted.",
   },
   {
@@ -351,25 +304,6 @@ const MCP_RECIPES = [
       'Call feedback_list_projects to get the exact toCwd for the receiving project — never guess a path.',
       'Call feedback_open_session with toCwd, fromCwd, a one-line title, and a self-contained body (symptom, where observed, expected behavior, suspected cause).',
       'The call only delivers a PROPOSED session in the receiving project — nothing runs until a human there presses Approve & start; there is no reply channel.',
-    ],
-  },
-  {
-    id: 'generate-project-home',
-    title: "Generate a project's Project Home pages",
-    steps: [
-      "Call project_home_get_contract to get the protocol, ProjectPageSummary/ProjectPagePicks schemas, "
-        + 'component catalog, absolute output paths, and pipeline spec — the FIRST call any '
-        + 'project-home-builder session makes.',
-      'Author a ProjectPageSummary matching the contract\'s summarySchema — every field must trace to '
-        + 'something concrete about the real project; never fabricate content.',
-      'Call project_home_validate_summary with { cwd, summary } and fix every {field, message} error it '
-        + 'returns, re-validating until valid:true.',
-      "For each lens and slot in the contract's catalog, choose exactly one variant id by judging the "
-        + 'candidate variants against the summary you composed, assembling a ProjectPagePicks object '
-        + '(lensId -> slotId -> variantId).',
-      'Call project_home_render with { cwd, summary, picks } to render all 5 lenses and write '
-        + 'summary.json/picks.json/output files.',
-      "Call project_home_status to confirm the new files landed and read manifest.json's generatedAt.",
     ],
   },
 ];

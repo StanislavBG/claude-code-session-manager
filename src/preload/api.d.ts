@@ -1297,29 +1297,12 @@ export type ProjectBriefUpdateResult =
   | { ok: true; brief: ProjectBrief }
   | { ok: false; error: string };
 
-// ────────────────────────────────────────────── Project Pages (PRD 929-932, 969, project-home-hosted-html-spec)
-export interface ProjectPagesOutput {
-  home: string;
-  /** Absent when `isDefault` is true — the shipped default only covers the home lens. */
-  marketing?: string;
-  /** Absent when `isDefault` is true — the shipped default only covers the home lens. */
-  feature?: string;
-  /** Absent when `isDefault` is true — the shipped default only covers the home lens. */
-  architecture?: string;
-  /** Absent for output generated before the 'brief' lens existed (PRD 969), or
-   *  when `isDefault` is true — a project must regenerate to pick it up. */
-  brief?: string;
-  /** null for the shipped default (never generated). */
-  generatedAt: string | null;
-  /** True when `home` is the build-time shipped default, not this project's own
-   *  generated output — the renderer must label provenance rather than infer it. */
-  isDefault: boolean;
-}
-
+// ────────────────────────────────────────────── Project Pages (single home.html)
 export interface ProjectPagesGetResult {
-  /** Never null in practice — a project with no generated output still gets the
-   *  shipped default (isDefault: true). The type stays nullable defensively. */
-  output: ProjectPagesOutput | null;
+  /** Contents of session-manager-operations/project-pages/home.html, or null when it has not been generated. */
+  html: string | null;
+  /** home.html's mtime, or null when `html` is null. */
+  mtimeMs: number | null;
 }
 
 // ────────────────────────────────────────────── Host on Bilko.run
@@ -1944,8 +1927,8 @@ export interface SessionManagerAPI {
     watch: (cwd: string) => Promise<{ ok: boolean; reason?: 'ephemeral' | 'invalid-cwd' }>;
     /** Stop pushing `onChanged` events for this cwd — must be paired 1:1 with a prior `watch` call. */
     unwatch: (cwd: string) => Promise<{ ok: boolean }>;
-    /** Fires whenever a watched cwd's project-pages output dir changes, carrying the freshly recomputed output. */
-    onChanged: (handler: (payload: { cwd: string; output: ProjectPagesOutput | null }) => void) => () => void;
+    /** Fires whenever a watched cwd's home.html is added/changed/removed, carrying the freshly read result. */
+    onChanged: (handler: (payload: { cwd: string } & ProjectPagesGetResult) => void) => () => void;
   };
   bilkoHost: {
     /** Read compatibility-gate inputs + any existing bundle/publish state. Never fires an LLM call. */

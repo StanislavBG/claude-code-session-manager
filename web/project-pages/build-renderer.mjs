@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Precompiles src/renderer/lib/projectPages/render.tsx (the Stage 0 Project
-// Pages renderer, see project-pages-pipeline.md) into a single CJS bundle at
+// Pages renderer) into a single CJS bundle at
 // web/project-pages/renderer/dist/renderer.cjs. Font bytes are inlined at
 // bundle time — render.tsx imports them from library/fontData.ts (a
 // generated module of base64 strings, see

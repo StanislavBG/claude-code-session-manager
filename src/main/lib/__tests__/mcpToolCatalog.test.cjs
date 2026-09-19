@@ -78,12 +78,17 @@ test.each(MCP_TOOL_CATALOG)('$name composeDescription joins purpose/whenToUse/wh
   expect(composeDescription(entry).length).toBeGreaterThan(0);
 });
 
+test('project-home group is exactly the single project_home_write tool', () => {
+  expect(MCP_TOOL_CATALOG.filter((e) => e.group === 'project-home').map((e) => e.name)).toEqual(['project_home_write']);
+});
+
 test('MCP_RECIPES covers queue-work, unstick-needs-review, and hand-off-to-another-project', () => {
   const ids = MCP_RECIPES.map((r) => r.id);
   expect(ids).toContain('queue-work-via-develop');
   expect(ids).toContain('unstick-needs-review-job');
   expect(ids).toContain('hand-finding-to-another-project');
-  expect(ids).toContain('generate-project-home');
+  // the single-tool project_home_write needs no recipe; the old 4-step one is gone
+  expect(ids).not.toContain('generate-project-home');
   for (const recipe of MCP_RECIPES) {
     expect(recipe.title).toBeTruthy();
     expect(Array.isArray(recipe.steps)).toBe(true);

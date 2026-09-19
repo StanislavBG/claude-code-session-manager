@@ -7,11 +7,7 @@
 //                          web/project-pages/logic/dist/logic.cjs absent
 //                          (both are gitignored build artifacts);
 //   2. a STALE bundle    — older than any file under
-//                          src/renderer/lib/projectPages/** (tests excluded);
-//   3. a DRIFTED catalog — src/main/templates/project-pages-catalog.json no
-//                          longer matches what the library sources generate;
-//   4. a DRIFTED spec    — src/main/templates/project-pages-pipeline.md is not
-//                          a byte-for-byte copy of the architecture spec.
+//                          src/renderer/lib/projectPages/** (tests excluded).
 //
 // Every failure names the file and the npm script that fixes it.
 //
@@ -20,15 +16,13 @@
 // committed against), `git checkout` bumps source mtimes to "now" which makes
 // an older bundle read as stale — the SAFE direction (a false "stale" forces a
 // 2-second rebuild; a false "fresh" would ship a broken renderer), and it
-// needs no extra state file to keep in sync. The catalog, by contrast, IS
-// committed, so it is compared by content (regenerated and diffed).
+// needs no extra state file to keep in sync.
 //
 // Usage: node web/project-pages/publish-gate.cjs   (exit 1 on any failure)
 'use strict';
 
 const fs = require('node:fs');
 const path = require('node:path');
-const assets = require('./assets.cjs');
 
 const SOURCE_ROOT_REL = 'src/renderer/lib/projectPages';
 
@@ -85,52 +79,11 @@ function checkBundles(repoRoot) {
   return { ok: errors.length === 0, errors };
 }
 
-function checkCatalog(repoRoot, { catalogPath = path.join(repoRoot, assets.CATALOG_REL) } = {}) {
-  const errors = [];
-  try {
-    const expected = assets.serializeCatalog(assets.buildCatalog(repoRoot));
-    const actual = fs.existsSync(catalogPath) ? fs.readFileSync(catalogPath, 'utf8') : null;
-    if (actual === null) {
-      errors.push(`MISSING catalog ${assets.CATALOG_REL} — run \`npm run build:project-pages-assets\` and commit it`);
-    } else if (actual !== expected) {
-      errors.push(
-        `DRIFTED catalog ${assets.CATALOG_REL} no longer matches ${SOURCE_ROOT_REL}/library/*.tsx — run \`npm run build:project-pages-assets\` and commit it`,
-      );
-    }
-  } catch (err) {
-    errors.push(`catalog regeneration failed: ${err.message}`);
-  }
-  return { ok: errors.length === 0, errors };
-}
-
-function checkSpecCopy(repoRoot, { copyPath = path.join(repoRoot, assets.SPEC_COPY_REL) } = {}) {
-  const errors = [];
-  try {
-    const expected = assets.readSpec(repoRoot);
-    const actual = fs.existsSync(copyPath) ? fs.readFileSync(copyPath, 'utf8') : null;
-    if (actual === null) {
-      errors.push(`MISSING spec copy ${assets.SPEC_COPY_REL} — run \`npm run build:project-pages-assets\` and commit it`);
-    } else if (actual !== expected) {
-      errors.push(
-        `DRIFTED spec copy ${assets.SPEC_COPY_REL} differs from ${assets.SPEC_REL} — run \`npm run build:project-pages-assets\` and commit it`,
-      );
-    }
-  } catch (err) {
-    errors.push(`spec comparison failed: ${err.message}`);
-  }
-  return { ok: errors.length === 0, errors };
-}
-
 function runGate(repoRoot) {
-  const errors = [
-    ...checkBundles(repoRoot).errors,
-    ...checkCatalog(repoRoot).errors,
-    ...checkSpecCopy(repoRoot).errors,
-  ];
-  return { ok: errors.length === 0, errors };
+  return checkBundles(repoRoot);
 }
 
-module.exports = { BUNDLES, SOURCE_ROOT_REL, newestSource, checkBundles, checkCatalog, checkSpecCopy, runGate };
+module.exports = { BUNDLES, SOURCE_ROOT_REL, newestSource, checkBundles, runGate };
 
 if (require.main === module) {
   const repoRoot = path.resolve(__dirname, '..', '..');
@@ -140,5 +93,5 @@ if (require.main === module) {
     for (const e of result.errors) console.error(`  - ${e}`);
     process.exit(1);
   }
-  console.log('project-pages-publish-gate: bundles fresh, catalog + spec copy current');
+  console.log('project-pages-publish-gate: bundles fresh');
 }

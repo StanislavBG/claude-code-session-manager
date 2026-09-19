@@ -148,9 +148,8 @@ function validateWrite(realAbs) {
       //                    (PRD 825; scheduler.cjs remote.writePrd)
       //   project-brief    projectBrief.cjs's brief.json (PRD 837)
       //   bilko-host       bilkoHost.cjs's bundle prep
-      //   project-pages    projectHomeAdminRoutes.cjs's app-side render path
-      //                    (summary.json/picks.json/output/*; PRD:
-      //                    project-home-admin-routes)
+      //   project-pages    projectHomeAdminRoutes.cjs's project_home_write
+      //                    path (home.html)
       // Paths come from opsOwnership.opsPath (PRD 1082) — the one ops-root
       // resolver — which THROWS for an ephemeral root (a linked worktree that
       // pty.cjs registered as an allowed root for its spawn cwd, or

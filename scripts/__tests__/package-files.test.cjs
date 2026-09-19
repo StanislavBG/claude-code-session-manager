@@ -25,11 +25,9 @@ const REPO_ROOT = path.resolve(__dirname, '../..');
 const REQUIRED_PATHS = [
   'scripts/scheduler-mcp-server.cjs',
   // Project Pages pipeline (PRD 1088): the CLIs a foreign machine's
-  // project-home-builder Epic runs, plus the shipped catalog + spec copy.
+  // project-home-builder Epic runs.
   'web/project-pages/render.cjs',
   'web/project-pages/validate-summary.cjs',
-  'src/main/templates/project-pages-catalog.json',
-  'src/main/templates/project-pages-pipeline.md',
   // The seeded persona itself (PRD 1091) — without this, a foreign machine
   // never gets a project-home-builder agent to run in the first place.
   'src/seed/agents/project-home-builder.md',

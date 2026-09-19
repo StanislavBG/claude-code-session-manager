@@ -674,21 +674,12 @@ const projectPagesCwd = z.object({
   cwd: z.string().min(1).max(4096),
 }).strict();
 
-// ──────────────────────────────────────────── Project Home admin routes
-// (PRD: project-home-admin-routes). Same validation split as
-// projectPagesCwd above: real path validation is projectRootResolve.cjs +
-// config.cjs's validatePath at first fs access.
-const projectHomeAdminCwdQuery = z.object({
+// ──────────────────────────────────────────── Project Home admin route
+// Real path validation is projectRootResolve.cjs + config.cjs's validatePath;
+// html content limits live in projectHomeAdminRoutes.cjs's validateHomeHtml.
+const projectHomeAdminWriteBody = z.object({
   cwd: z.string().min(1).max(4096),
-}).strict();
-const projectHomeAdminValidateSummaryBody = z.object({
-  cwd: z.string().min(1).max(4096),
-  summary: z.unknown(),
-}).strict();
-const projectHomeAdminRenderBody = z.object({
-  cwd: z.string().min(1).max(4096),
-  summary: z.unknown(),
-  picks: z.unknown(),
+  html: z.string(),
 }).strict();
 
 // ──────────────────────────────────────────── Host on Bilko.run
@@ -1115,9 +1106,7 @@ module.exports = {
     memoryStale,
     projectBriefCwd,
     projectPagesCwd,
-    projectHomeAdminCwdQuery,
-    projectHomeAdminValidateSummaryBody,
-    projectHomeAdminRenderBody,
+    projectHomeAdminWriteBody,
     bilkoHostCwd,
     bilkoHostPrepareBundle,
     bilkoHostAddDocument,

@@ -11,10 +11,7 @@
  *   feedback_list_projects()       -> GET  /admin/feedback/targets
  *   feedback_open_session({ ... }) -> POST /admin/feedback/open-session
  *
- *   project_home_get_contract({ cwd? })              -> GET  /admin/project-home/contract
- *   project_home_validate_summary({ cwd?, summary }) -> POST /admin/project-home/validate-summary
- *   project_home_render({ cwd?, summary, picks })    -> POST /admin/project-home/render
- *   project_home_status({ cwd? })                    -> GET  /admin/project-home/status
+ *   project_home_write({ cwd?, html }) -> POST /admin/project-home/write
  *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
@@ -359,48 +356,15 @@ const TOOLS = [
     },
   },
   {
-    name: 'project_home_get_contract',
-    description: descriptionFor('project_home_get_contract'),
+    name: 'project_home_write',
+    description: descriptionFor('project_home_write'),
     inputSchema: {
       type: 'object',
       properties: {
         cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
+        html: { type: 'string', description: 'The complete self-contained HTML document (<= 1MB; no <script src>, <link href=http*>, @import, or url(http*)).' },
       },
-    },
-  },
-  {
-    name: 'project_home_validate_summary',
-    description: descriptionFor('project_home_validate_summary'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root when omitted." },
-        summary: { type: 'object', description: 'ProjectPageSummary object matching the summarySchema from project_home_get_contract' },
-      },
-      required: ['summary'],
-    },
-  },
-  {
-    name: 'project_home_render',
-    description: descriptionFor('project_home_render'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root when omitted." },
-        summary: { type: 'object', description: 'ProjectPageSummary object matching the summarySchema from project_home_get_contract' },
-        picks: { type: 'object', description: 'ProjectPagePicks object (lensId -> slotId -> variantId) matching the picksSchema from project_home_get_contract' },
-      },
-      required: ['summary', 'picks'],
-    },
-  },
-  {
-    name: 'project_home_status',
-    description: descriptionFor('project_home_status'),
-    inputSchema: {
-      type: 'object',
-      properties: {
-        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root when omitted." },
-      },
+      required: ['html'],
     },
   },
   {
@@ -591,35 +555,12 @@ async function handleCallTool(request) {
       const result = await adminRequest('POST', '/admin/chat/send-prompt', { tabId, prompt });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
-    if (name === 'project_home_get_contract') {
-      const cwd = resolveCwdArg(args);
-      const qs = new URLSearchParams({ cwd });
-      const result = await adminRequest('GET', `/admin/project-home/contract?${qs.toString()}`);
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-    }
-    if (name === 'project_home_validate_summary') {
-      if (!args || typeof args.summary !== 'object' || args.summary === null) {
-        return errorResult('missing required argument: summary');
+    if (name === 'project_home_write') {
+      if (!args || typeof args.html !== 'string' || args.html.length === 0) {
+        return errorResult('missing required argument: html');
       }
       const cwd = resolveCwdArg(args);
-      const result = await adminRequest('POST', '/admin/project-home/validate-summary', { cwd, summary: args.summary });
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-    }
-    if (name === 'project_home_render') {
-      if (!args || typeof args.summary !== 'object' || args.summary === null) {
-        return errorResult('missing required argument: summary');
-      }
-      if (typeof args.picks !== 'object' || args.picks === null) {
-        return errorResult('missing required argument: picks');
-      }
-      const cwd = resolveCwdArg(args);
-      const result = await adminRequest('POST', '/admin/project-home/render', { cwd, summary: args.summary, picks: args.picks });
-      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
-    }
-    if (name === 'project_home_status') {
-      const cwd = resolveCwdArg(args);
-      const qs = new URLSearchParams({ cwd });
-      const result = await adminRequest('GET', `/admin/project-home/status?${qs.toString()}`);
+      const result = await adminRequest('POST', '/admin/project-home/write', { cwd, html: args.html });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'session_manager_help') {

@@ -965,6 +965,142 @@ async function classifyMergeFailure({ cwd, stderrText, stdoutText }) {
   return { failureKind: 'other' };
 }
 
+// Extensions eligible for the pure-addition auto-resolve. All-or-nothing across
+// a merge: one conflicted path outside this list means no auto-resolve at all.
+const AUTO_RESOLVE_EXTENSIONS = new Set(['.md', '.markdown', '.txt', '.rst']);
+
+/**
+ * Renders `git merge-file -p --diff3` over the index's three conflict stages
+ * of `p`. Returns the merged text (with markers), or null when any stage is
+ * missing/unreadable, a stage is not valid UTF-8 (the round-trip would not be
+ * byte-exact), or git itself errors. `merge-file` exits with the conflict
+ * count (1..127) on a clean run — only >127 or a signal is an error. Never
+ * throws. O(file size).
+ */
+async function renderStagesDiff3({ cwd, p }) {
+  let tmp = null;
+  try {
+    tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-mergefile-'));
+    const files = [];
+    for (const stage of [2, 1, 3]) { // ours, base, theirs — merge-file's argument order
+      const content = await execGit(['cat-file', 'blob', `:${stage}:${p}`], { cwd, timeout: 10_000 });
+      if (content.includes('�')) return null;
+      const f = path.join(tmp, `stage${stage}`);
+      await fsp.writeFile(f, content, 'utf8');
+      files.push(f);
+    }
+    try {
+      return await execGit(['merge-file', '-p', '--diff3', '-L', 'ours', '-L', 'base', '-L', 'theirs', ...files], { cwd, timeout: 10_000 });
+    } catch (e) {
+      if (e && typeof e.code === 'number' && e.code >= 1 && e.code <= 127 && typeof e.stdoutText === 'string') return e.stdoutText;
+      return null;
+    }
+  } catch {
+    return null;
+  } finally {
+    if (tmp) { try { await fsp.rm(tmp, { recursive: true, force: true }); } catch { /* best effort */ } }
+  }
+}
+
+/**
+ * Parses diff3 merge-file output into segments: `{ text }` for pass-through
+ * regions and `{ ours, base, theirs }` (arrays of lines) for conflict hunks.
+ * Returns null on any out-of-order marker or an unterminated hunk. A marker
+ * prefix is only meaningful in its expected state; `=======` inside the ours
+ * or theirs section (e.g. a markdown setext underline) is treated as
+ * unparseable rather than guessed at. O(n) in output lines.
+ */
+function parseDiff3Output(output) {
+  const lines = output.split('\n');
+  const segments = [];
+  let plain = [];
+  let hunk = null;
+  let state = 'plain';
+  for (const line of lines) {
+    const isOpen = line.startsWith('<<<<<<< ');
+    const isBase = line.startsWith('||||||| ');
+    const isSep = line.startsWith('=======');
+    const isClose = line.startsWith('>>>>>>> ');
+    if (state === 'plain') {
+      if (isBase || isClose) return null;
+      if (isOpen) {
+        segments.push({ lines: plain });
+        plain = [];
+        hunk = { ours: [], base: [], theirs: [] };
+        state = 'ours';
+      } else {
+        plain.push(line);
+      }
+    } else if (state === 'ours') {
+      if (isOpen || isSep || isClose) return null;
+      if (isBase) state = 'base'; else hunk.ours.push(line);
+    } else if (state === 'base') {
+      if (isOpen || isBase || isClose) return null;
+      if (isSep && line === '=======') state = 'theirs'; else if (isSep) return null; else hunk.base.push(line);
+    } else {
+      if (isOpen || isBase || isSep) return null;
+      if (isClose) { segments.push({ hunk }); hunk = null; state = 'plain'; } else hunk.theirs.push(line);
+    }
+  }
+  if (state !== 'plain') return null;
+  segments.push({ lines: plain });
+  return segments;
+}
+
+/**
+ * True ONLY when, for EVERY path, the index holds all three conflict stages
+ * and every diff3 conflict hunk has an EMPTY base section (both sides purely
+ * added text where the merge base had nothing). Proven from the bytes, never
+ * assumed; fails toward false on every error path. Never throws.
+ */
+async function isPureAdditionConflict({ cwd, paths }) {
+  try {
+    if (!Array.isArray(paths) || !paths.length) return false;
+    for (const p of paths) {
+      const out = await renderStagesDiff3({ cwd, p });
+      if (out === null) return false;
+      const segments = parseDiff3Output(out);
+      if (!segments) return false;
+      const hunks = segments.filter((s) => s.hunk);
+      if (!hunks.length) return false;
+      if (hunks.some((s) => s.hunk.base.length !== 0)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Rewrites each conflicted path in the working tree with every conflict hunk
+ * replaced by OURS then THEIRS (no markers, base, reordering, or dedup);
+ * non-conflicted regions pass through unchanged. Renders ALL paths before
+ * writing any so a late failure leaves nothing half-rewritten. Throws on any
+ * failure — the caller aborts the merge.
+ */
+async function resolveByConcatenation({ cwd, paths }) {
+  const rendered = [];
+  for (const p of paths) {
+    const out = await renderStagesDiff3({ cwd, p });
+    const segments = out === null ? null : parseDiff3Output(out);
+    if (!segments) throw new Error(`cannot render conflict for ${p}`);
+    rendered.push({ p, text: joinSegments(segments) });
+  }
+  for (const { p, text } of rendered) {
+    await fsp.writeFile(path.join(cwd, p), text, 'utf8');
+  }
+}
+
+/** Rebuilds file text from parsed segments, hunks contributing ours+theirs lines. */
+function joinSegments(segments) {
+  const out = [];
+  for (const seg of segments) {
+    if (seg.hunk) out.push(...seg.hunk.ours, ...seg.hunk.theirs);
+    else out.push(...seg.lines);
+  }
+  return out.join('\n');
+}
+
 /**
  * Resolves `cwd`'s default branch, without ever hardcoding `main`: prefers
  * the remote-tracked default (`origin/HEAD`, set by `git clone`/`git remote
@@ -1146,6 +1282,23 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
     }
     // Read the conflicted paths BEFORE the abort — it clears the index stages.
     const failureClass = await classifyMergeFailure({ cwd, stderrText, stdoutText: e && e.stdoutText });
+    // Pure-addition auto-resolve: two jobs appended different text to the same
+    // doc. All-or-nothing; any doubt or failure falls through to the abort.
+    if (
+      failureClass.failureKind === 'content_conflict'
+      && failureClass.conflictedPaths.length
+      && failureClass.conflictedPaths.every((p) => AUTO_RESOLVE_EXTENSIONS.has(path.extname(p).toLowerCase()))
+    ) {
+      try {
+        const paths = failureClass.conflictedPaths;
+        if (await isPureAdditionConflict({ cwd, paths })) {
+          await resolveByConcatenation({ cwd, paths });
+          await execGit(['add', ...paths], { cwd, timeout: 30_000 });
+          await execGit(['commit', '-m', mergeMessage], { cwd, timeout: 30_000 });
+          return { ok: true, integrated: true, mergeCommit: true, autoResolved: 'pure_addition_concat', resolvedPaths: paths };
+        }
+      } catch { /* fall through to the abort */ }
+    }
     // Abort a half-applied merge so `cwd` isn't left in a mid-merge state.
     try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
     return { ok: false, reason: `merge failed (likely a real content conflict): ${stderrText}`, ...failureClass };

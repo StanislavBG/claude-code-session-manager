@@ -1357,22 +1357,128 @@ test('[job] integrateBranch classifies diverging same-line commits as content_co
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
 });
 
-test('[job] integrateBranch classifies disjoint appends to the END of one file as content_conflict', async () => {
+test('[job] integrateBranch classifies disjoint appends to the END of one file as content_conflict when the path is not allowlisted (.js)', async () => {
   const slug = 'test-slug-kind-append';
+  fs.writeFileSync(path.join(repoCwd, 'src.js'), '// intro\n', 'utf8');
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'add src.js'], repoCwd);
   const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
   expect(worktree.ok).toBe(true);
 
-  fs.appendFileSync(path.join(worktree.dir, 'README.md'), '\n## Section Six\nsix body\n', 'utf8');
+  fs.appendFileSync(path.join(worktree.dir, 'src.js'), '\n// Section Six\nsix body\n', 'utf8');
   git(['add', '-A'], worktree.dir);
   git(['commit', '-q', '-m', 'job appends section six'], worktree.dir);
-  fs.appendFileSync(path.join(repoCwd, 'README.md'), '\n## Section Seven\nseven body\n\n## Section Ten\nten body\n', 'utf8');
+  fs.appendFileSync(path.join(repoCwd, 'src.js'), '\n## Section Seven\nseven body\n\n## Section Ten\nten body\n', 'utf8');
   git(['add', '-A'], repoCwd);
   git(['commit', '-q', '-m', 'main appends sections seven and ten'], repoCwd);
 
   const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
   expect(outcome.ok).toBe(false);
   expect(outcome.failureKind).toBe('content_conflict');
-  expect(outcome.conflictedPaths).toEqual(['README.md']);
+  expect(outcome.conflictedPaths).toEqual(['src.js']);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+// ── pure-addition merge-conflict auto-resolve (mc-02) ──
+
+async function conflictScenario(slug, { base, side, main }) {
+  for (const [f, c] of Object.entries(base)) {
+    fs.mkdirSync(path.dirname(path.join(repoCwd, f)), { recursive: true });
+    fs.writeFileSync(path.join(repoCwd, f), c, 'utf8');
+  }
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'base files'], repoCwd);
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+  for (const [f, c] of Object.entries(side)) {
+    fs.mkdirSync(path.dirname(path.join(worktree.dir, f)), { recursive: true });
+    fs.writeFileSync(path.join(worktree.dir, f), c, 'utf8');
+  }
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job side'], worktree.dir);
+  for (const [f, c] of Object.entries(main)) {
+    fs.mkdirSync(path.dirname(path.join(repoCwd, f)), { recursive: true });
+    fs.writeFileSync(path.join(repoCwd, f), c, 'utf8');
+  }
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'main side'], repoCwd);
+  return worktree;
+}
+
+const MARKER_RE = /^(<<<<<<<|\|\|\|\|\|\|\||=======|>>>>>>>)/m;
+
+test('[job] integrateBranch auto-resolves a pure-addition .md conflict by concatenating ours then theirs', async () => {
+  const slug = 'test-slug-pure-add';
+  const worktree = await conflictScenario(slug, {
+    base: { 'd.md': '# Doc\n\nintro\n' },
+    side: { 'd.md': '# Doc\n\nintro\n\n## Section A\na body\n' },
+    main: { 'd.md': '# Doc\n\nintro\n\n## Section B\nb body\n\n## Section C\nc body\n' },
+  });
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.autoResolved).toBe('pure_addition_concat');
+  expect(outcome.resolvedPaths).toEqual(['d.md']);
+  const merged = fs.readFileSync(path.join(repoCwd, 'd.md'), 'utf8');
+  expect(merged).toBe('# Doc\n\nintro\n\n## Section B\nb body\n\n## Section C\nc body\n\n## Section A\na body\n');
+  expect(merged).not.toMatch(MARKER_RE);
+  expect(git(['status', '--porcelain'], repoCwd).trim()).toBe('');
+  expect(git(['log', '-1', '--format=%s'], repoCwd).trim()).toBe(`merge scheduler job ${slug}`);
+  expect(git(['rev-list', '--parents', '-n', '1', 'HEAD'], repoCwd).trim().split(' ').length).toBe(3);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
+test('[job] integrateBranch does NOT auto-resolve a same-line .md edit and leaves the tree clean', async () => {
+  const slug = 'test-slug-pure-add-neg-sameline';
+  const worktree = await conflictScenario(slug, {
+    base: { 'd.md': 'intro\nORIGINAL LINE\n' },
+    side: { 'd.md': 'intro\nSIDE EDIT\n' },
+    main: { 'd.md': 'intro\nMAIN EDIT\n' },
+  });
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.autoResolved).toBeUndefined();
+  expect(outcome.failureKind).toBe('content_conflict');
+  expect(outcome.conflictedPaths).toEqual(['d.md']);
+  expect(fs.readFileSync(path.join(repoCwd, 'd.md'), 'utf8')).toBe('intro\nMAIN EDIT\n');
+  expect(git(['status', '--porcelain'], repoCwd).trim()).toBe('');
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[job] integrateBranch does NOT auto-resolve a pure-addition conflict on a non-allowlisted path', async () => {
+  const slug = 'test-slug-pure-add-neg-js';
+  const worktree = await conflictScenario(slug, {
+    base: { 'src/thing.js': '// intro\n' },
+    side: { 'src/thing.js': '// intro\n// A\n' },
+    main: { 'src/thing.js': '// intro\n// B\n// C\n' },
+  });
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.autoResolved).toBeUndefined();
+  expect(outcome.failureKind).toBe('content_conflict');
+  expect(fs.readFileSync(path.join(repoCwd, 'src/thing.js'), 'utf8')).toBe('// intro\n// B\n// C\n');
+  expect(git(['status', '--porcelain'], repoCwd).trim()).toBe('');
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[job] integrateBranch bails the whole merge when only some conflicted paths are provable (mixed .md + .js)', async () => {
+  const slug = 'test-slug-pure-add-neg-mixed';
+  const worktree = await conflictScenario(slug, {
+    base: { 'd.md': 'intro\n', 'src/thing.js': 'ORIGINAL\n' },
+    side: { 'd.md': 'intro\n## A\n', 'src/thing.js': 'SIDE\n' },
+    main: { 'd.md': 'intro\n## B\n', 'src/thing.js': 'MAIN\n' },
+  });
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.autoResolved).toBeUndefined();
+  expect(outcome.conflictedPaths).toEqual(['d.md', 'src/thing.js']);
+  expect(fs.readFileSync(path.join(repoCwd, 'd.md'), 'utf8')).toBe('intro\n## B\n');
+  expect(fs.readFileSync(path.join(repoCwd, 'src/thing.js'), 'utf8')).toBe('MAIN\n');
+  expect(git(['status', '--porcelain'], repoCwd).trim()).toBe('');
+  expect(fs.existsSync(path.join(repoCwd, '.git', 'MERGE_HEAD'))).toBe(false);
 
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
 });

@@ -159,21 +159,28 @@ test('resolveArchivedPrdsDirs: a prds-archived/ dir created inside an ALREADY-EX
   // so the mtime-keyed freshness key alone would never invalidate. The
   // short TTL backstop (same idiom as activeSessions.cjs's cwdScanCache)
   // bounds that blind spot instead of leaving it stale indefinitely.
-  vi.useFakeTimers();
+  //
+  // Why this test is sensitive to the process environment: the code under test
+  // keys its cache on REAL directory mtimes and expires it via Date.now(); the
+  // fixtures are mkdtemp'd under os.tmpdir(), which a TMPDIR override moves.
+  // Installing fake timers BEFORE the async fs fixture setup let the fake timer
+  // queue interleave with real fs completions. Build every fixture on the real
+  // clock first, then fake ONLY Date — the sole clock the TTL reads.
+  const projectsDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-blindspot-projects-'));
+  tmpDirs.push(projectsDir);
+  const projectCwd = await mkEpicProject();
+  tmpDirs.push(projectCwd);
+
+  const epicId = `blindspot-epic-${process.pid}`;
+  const epicPrdsDir = resolveEpicPrdWriteDir(projectCwd, epicId);
+  fs.mkdirSync(epicPrdsDir, { recursive: true }); // Epic already exists, well before archiving.
+
+  const projDir = path.join(projectsDir, 'blindspot-project');
+  fs.mkdirSync(projDir, { recursive: true });
+  fs.writeFileSync(path.join(projDir, 'session1.jsonl'), `${JSON.stringify({ cwd: projectCwd })}\n`);
+
+  vi.useFakeTimers({ toFake: ['Date'] });
   try {
-    const projectsDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-prdloc-blindspot-projects-'));
-    tmpDirs.push(projectsDir);
-    const projectCwd = await mkEpicProject();
-    tmpDirs.push(projectCwd);
-
-    const epicId = `blindspot-epic-${process.pid}`;
-    const epicPrdsDir = resolveEpicPrdWriteDir(projectCwd, epicId);
-    fs.mkdirSync(epicPrdsDir, { recursive: true }); // Epic already exists, well before archiving.
-
-    const projDir = path.join(projectsDir, 'blindspot-project');
-    fs.mkdirSync(projDir, { recursive: true });
-    fs.writeFileSync(path.join(projDir, 'session1.jsonl'), `${JSON.stringify({ cwd: projectCwd })}\n`);
-
     // Prime the cache — no prds-archived/ dir exists yet.
     const before = resolveArchivedPrdsDirs(90, { projectsDir });
     const epicArchiveDir = path.join(epicPrdsDir, '..', 'prds-archived');

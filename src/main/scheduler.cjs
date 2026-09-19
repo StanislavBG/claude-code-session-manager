@@ -9497,6 +9497,34 @@ function selectHistoryJobs(jobs, limit, historyEntries = []) {
 // anyway). For non-fix-plan jobs the exemption never applies, so rescanning
 // their pass_no_commit verdict is a harmless no-op (same facts, same verdict).
 const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable', 'no_verdict_sentinel', 'abandoned_background_task', 'pass_no_commit', 'pass_no_commit_already_shipped']);
+// RESCANNABLE_VERDICTS is a HINT, not a gate: it names the verdicts whose
+// recovery rung is a transcript re-verification (verifyRun). Every other
+// needs_review verdict is still a heal candidate (isRescanCandidate) — it just
+// gets the evidence-only rung (computeLooksDone) instead of a transcript
+// rescan, because verifyRun cannot see a commit-guard / shared-tree verdict and
+// would return 'clean' and falsely heal it.
+
+// The ONLY needs_review verdicts NOT eligible for the periodic heal ladder.
+// An allow-list here was reopened three times (2026-09-12 x2, 2026-09-18
+// shared_tree_reverted) because a new park reason was born invisible to
+// self-healing. Add a verdict here only with a one-line proof that no
+// re-verification or evidence scan can ever change it.
+const RESCAN_EXCLUDED_VERDICTS = new Set([
+  // Commit-guard verdict verifyRun never inspects: a rescan returns 'clean' and would heal genuinely unfinished work.
+  'uncommitted_changes',
+  // Its damage IS a commit stranded on an unmerged sm-job branch — a landedCommit restates it; selectMechanicalRecoveryTarget owns the real re-merge.
+  'worktree_integration_failed',
+  // The run overran its own time/cost estimate; no transcript or git evidence can un-overrun it (selectAutoFixTargets excludes it too).
+  'budget_exceeded',
+]);
+
+// Per-pass / per-row bounds on the evidence-only rung (the widened candidate
+// set). Each scan costs one computeLooksDone: a per-cwd-deduped `git fetch`
+// (<=~20s) + a git log. Unbounded, a backlog of N parked rows would pay N of
+// those every 10 minutes forever.
+const REVERIFY_INTERVAL_MS = 10 * 60_000;
+const EVIDENCE_SCAN_MAX_PER_PASS = 20;
+const EVIDENCE_SCAN_MIN_INTERVAL_MS = 6 * REVERIFY_INTERVAL_MS;
 
 // Bounds fix-plan recursion: cap N permits at most N+1 fix jobs per original
 // slug (depth 1 = the original job, depth 2 = its `-fix`, depth 3+ is
@@ -9824,10 +9852,47 @@ function isFailedUnverifiedShaped(job) {
 
 function isRescanCandidate(job) {
   if (!job) return false;
+  // Default-ELIGIBLE: every needs_review row is a heal candidate unless its
+  // verdict is in RESCAN_EXCLUDED_VERDICTS. No runId requirement here — a row
+  // without one still gets the evidence rung and the unresolvable annotation.
+  if (job.status === 'needs_review') return !RESCAN_EXCLUDED_VERDICTS.has(job.verifierVerdict);
   if (!(job.runId || resolveRunId(job))) return false;
-  if (job.status === 'needs_review') return RESCANNABLE_VERDICTS.has(job.verifierVerdict);
   if (job.status === 'failed') return isFailedUnverifiedShaped(job);
   return false;
+}
+
+/**
+ * Which rung a needs_review candidate gets (RESCANNABLE_VERDICTS as a hint):
+ * true = transcript re-verification (needs a run dir to read); false = the
+ * evidence-only rung. I/O only when a rescannable-verdict row lacks a runId.
+ */
+function isTranscriptRescannable(job) {
+  return !!job && RESCANNABLE_VERDICTS.has(job.verifierVerdict) && !!(job.runId || resolveRunId(job));
+}
+
+/**
+ * Pure, no I/O: the bounded subset of evidence-only needs_review candidates
+ * reverifyNeedsReview scans this pass. Skips rows already carrying looksDone,
+ * rows scanned within EVIDENCE_SCAN_MIN_INTERVAL_MS (evidenceScannedAt), and —
+ * PRD 1136 — rows with a live auto-fix history unless they are an
+ * auto-resolve door (isEligibleForNeedsReviewAutoResolve, which is what
+ * consumes looksDone). Never-scanned rows go first, then least-recently
+ * scanned; capped at EVIDENCE_SCAN_MAX_PER_PASS. O(n log n) in needs_review rows.
+ * Per-pass cost ceiling: EVIDENCE_SCAN_MAX_PER_PASS computeLooksDone calls.
+ */
+function selectEvidenceScanTargets(jobs, now = Date.now()) {
+  const due = [];
+  for (const j of jobs ?? []) {
+    if (j.status !== 'needs_review' || !isRescanCandidate(j)) continue;
+    if (isTranscriptRescannable(j)) continue;
+    if (j.looksDone) continue;
+    if (j.autoFixAttempted === true && !isEligibleForNeedsReviewAutoResolve(j, jobs)) continue;
+    const last = Date.parse(j.evidenceScannedAt ?? '');
+    if (!Number.isNaN(last) && now - last < EVIDENCE_SCAN_MIN_INTERVAL_MS) continue;
+    due.push({ j, last: Number.isNaN(last) ? 0 : last });
+  }
+  due.sort((a, b) => a.last - b.last);
+  return due.slice(0, EVIDENCE_SCAN_MAX_PER_PASS).map((d) => d.j);
 }
 
 /**
@@ -9862,6 +9927,14 @@ function isRescanCandidate(job) {
  * reverifyNeedsReview's looksDone-annotation pass now runs for it too (see
  * that function). Same rule as always: never let this guard be narrower than
  * the work reverifyNeedsReview actually performs.
+ *
+ * Reopened a THIRD time 2026-09-18 (shared_tree_reverted parked 1229-fo-03
+ * falsely, 19 of 20 pending rows held): the fix was not another OR-clause but
+ * inverting the default — isRescanCandidate is now default-ELIGIBLE for every
+ * needs_review row (RESCAN_EXCLUDED_VERDICTS names the few exceptions), so a
+ * new park reason can never again be born unhealable. The OR-clauses below
+ * are now redundant for needs_review rows and kept only for their
+ * non-needs_review inputs.
  *
  * Cost: selectMechanicalRecoveryTarget/selectResumeRecoveryTarget and
  * isGuardParkedWithoutAutoFix are pure (no I/O). selectAutoFixTargets is
@@ -10452,12 +10525,18 @@ async function reverifyNeedsReview() {
   // the `git fetch --all --prune` per distinct cwd (see computeLooksDone's
   // header) rather than re-fetching the same repo once per candidate row.
   const fetchedCwds = new Set();
+  const evidenceSlugs = new Set(selectEvidenceScanTargets(snap.jobs).map((j) => j.slug));
+  const evidenceScanned = [];
   for (const job of candidates) {
-    if (!isRescanCandidate(job) && isGuardParkedWithoutAutoFix(job)) {
-      // Guard-verdict park, never auto-fixed: only evidence gathering, never
-      // a transcript rescan (there was never a transcript-verifier verdict
-      // here) and never a direct heal — applyNeedsReviewAutoResolve is the
-      // sole place that turns this annotation into a status change.
+    if (job.status === 'needs_review' && !isTranscriptRescannable(job)) {
+      // Any needs_review row whose verdict is not a transcript-verifier one
+      // (a guard verdict, a not-yet-invented verdict, a stranded auto-fix
+      // park): only evidence gathering, never a transcript rescan (verifyRun
+      // would call it clean) and never a direct heal —
+      // applyNeedsReviewAutoResolve is the sole place that turns this
+      // annotation into a status change. Bounded by selectEvidenceScanTargets.
+      if (!evidenceSlugs.has(job.slug)) continue;
+      evidenceScanned.push(job.slug);
       const looksDone = await computeLooksDone(job, fetchedCwds);
       if (looksDone) {
         looksDoneUpdates.push({ slug: job.slug, cwd: job.cwd, looksDone, fromFailed: false });
@@ -10564,6 +10643,13 @@ async function reverifyNeedsReview() {
         .catch((e) => { console.error('[scheduler] gate shadow error', gateTarget.slug, e); })
         .finally(() => { gateShadowPending = null; });
     }
+  }
+  if (evidenceScanned.length) {
+    const scannedSet = new Set(evidenceScanned);
+    const stamp = new Date().toISOString();
+    await mutate((s) => {
+      for (const j of s.jobs) if (scannedSet.has(j.slug) && j.status === 'needs_review') j.evidenceScannedAt = stamp;
+    });
   }
   if (looksDoneUpdates.length) {
     const bySlug = new Map(looksDoneUpdates.map((u) => [u.slug, u]));
@@ -11630,7 +11716,7 @@ async function init() {
         }
       }).catch(() => {});
     }
-  }, 10 * 60_000);
+  }, REVERIFY_INTERVAL_MS);
 
   // Self-rescheduling poll loop with exponential backoff. Replaces the
   // old fixed-interval pollTimer + initialPollTimeout.
@@ -12344,6 +12430,13 @@ module.exports = {
   NEEDS_REVIEW_RESOLVE_MS,
   needsReviewAutoResolveDisabled,
   isRescanCandidate,
+  isTranscriptRescannable,
+  selectEvidenceScanTargets,
+  RESCAN_EXCLUDED_VERDICTS,
+  RESCANNABLE_VERDICTS,
+  EVIDENCE_SCAN_MAX_PER_PASS,
+  EVIDENCE_SCAN_MIN_INTERVAL_MS,
+  REVERIFY_INTERVAL_MS,
   isFailedUnverifiedShaped,
   computeLooksDone,
   attributeLandedCommits,

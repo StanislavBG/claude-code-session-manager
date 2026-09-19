@@ -31,8 +31,8 @@ describe('isRescanCandidate', () => {
     expect(isRescanCandidate({ ...base, verifierVerdict: 'uncommitted_changes' })).toBe(false)
   })
 
-  it('excludes jobs without a runId (no log to re-scan)', () => {
-    expect(isRescanCandidate({ ...base, runId: undefined })).toBe(false)
+  it('keeps a needs_review job without a runId as a candidate (evidence rung, no transcript to re-scan)', () => {
+    expect(isRescanCandidate({ ...base, runId: undefined })).toBe(true)
   })
 
   it('excludes non-needs_review statuses', () => {
@@ -40,9 +40,9 @@ describe('isRescanCandidate', () => {
     expect(isRescanCandidate({ ...base, status: 'pending' })).toBe(false)
   })
 
-  it('excludes jobs with no verdict / unknown verdict', () => {
-    expect(isRescanCandidate({ ...base, verifierVerdict: undefined })).toBe(false)
-    expect(isRescanCandidate({ ...base, verifierVerdict: 'halt' })).toBe(false)
+  it('default-eligible: no verdict / unknown verdict is still a candidate (only RESCAN_EXCLUDED_VERDICTS refuse)', () => {
+    expect(isRescanCandidate({ ...base, verifierVerdict: undefined })).toBe(true)
+    expect(isRescanCandidate({ ...base, verifierVerdict: 'halt' })).toBe(true)
   })
 
   it('handles null/garbage input without throwing', () => {

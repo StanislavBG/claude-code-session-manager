@@ -19,7 +19,7 @@ const { migratePrds } = require('./lib/prdMigration.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const schedulerPaths = require('./lib/schedulerPaths.cjs');
 const { evaluateDispatchLiveness } = require('./lib/watchdogHelpers.cjs');
-const { computeStallSummary, computeDepHistorySatisfaction, FAILURE_STREAK_ESCALATION_MS, classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS } = require('./scheduler.cjs');
+const { computeStallSummary, computeDepHistorySatisfaction, FAILURE_STREAK_ESCALATION_MS, classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS, REVERIFY_INTERVAL_MS } = require('./scheduler.cjs');
 const { findStarvedProjects, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/schedulerBatch.cjs');
 const { auditLogPath, readTail } = require('./lib/auditLog.cjs');
 const { resolveBuildIdentity } = require('./lib/buildIdentity.cjs');
@@ -645,6 +645,69 @@ function loadUsagePollerState(statePath) {
   }
 }
 
+/**
+ * evaluateBlockingParkHealth(jobs, now, thresholdMs = REVERIFY_INTERVAL_MS) →
+ *   { ok, parks?: [{ cwd, slug, verdict, ageMs, dependents }], message? }
+ *
+ * Pure. A `needs_review` row parked longer than one full periodic-reverify
+ * interval that STILL holds >= 1 pending dependent (transitively, through
+ * pending rows, via dependsOn — exact or bare slug, same matching as the
+ * picker) is a silently-blocking park: the self-heal ladder had a full pass
+ * and did not release it. 2026-09-18: 1229-fo-03 held 19 of 20 pending rows
+ * while every other component read GREEN. Parked-since is the row's last
+ * `to: needs_review` statusHistory entry (fallback finishedAt); a row with no
+ * recoverable timestamp is skipped rather than guessed at. O(jobs + deps).
+ */
+function evaluateBlockingParkHealth(jobs, now, thresholdMs = REVERIFY_INTERVAL_MS) {
+  const rows = (Array.isArray(jobs) ? jobs : []).filter(Boolean);
+  const bare = (x) => String(x ?? '').replace(/^\d+-/, '');
+  const byCwd = new Map();
+  for (const j of rows) {
+    const cwd = j.cwd || DEFAULT_PROJECT_CWD;
+    if (!byCwd.has(cwd)) byCwd.set(cwd, []);
+    byCwd.get(cwd).push(j);
+  }
+  const parks = [];
+  for (const [cwd, group] of byCwd) {
+    const pending = group.filter((j) => j.status === 'pending');
+    if (pending.length === 0) continue;
+    for (const park of group) {
+      if (park.status !== 'needs_review') continue;
+      const history = Array.isArray(park.statusHistory) ? park.statusHistory : [];
+      let at = null;
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i]?.to === 'needs_review') { at = history[i].at; break; }
+      }
+      const since = Date.parse(at ?? park.finishedAt ?? '');
+      if (Number.isNaN(since) || now - since <= thresholdMs) continue;
+      const held = new Set();
+      const heldBy = (d, root) => root.slug === d || bare(root.slug) === bare(d);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const j of pending) {
+          if (held.has(j.slug)) continue;
+          if ((j.dependsOn ?? []).some((d) => heldBy(d, park) || pending.some((p) => held.has(p.slug) && heldBy(d, p)))) {
+            held.add(j.slug);
+            grew = true;
+          }
+        }
+      }
+      if (held.size > 0) parks.push({ cwd, slug: park.slug, verdict: park.verifierVerdict ?? null, ageMs: now - since, dependents: held.size });
+    }
+  }
+  if (parks.length === 0) return { ok: true };
+  return {
+    ok: false,
+    parks,
+    message: parks
+      .map((p) => `${p.slug} (${p.cwd}) parked needs_review${p.verdict ? `/${p.verdict}` : ''} for ${Math.round(p.ageMs / 60_000)}m `
+        + `(> one ${Math.round(REVERIFY_INTERVAL_MS / 60_000)}m reverify interval) is blocking ${p.dependents} pending dependent(s) — `
+        + 'the self-heal ladder did not release it; resolve it or scheduler_reset_job')
+      .join('; '),
+  };
+}
+
 async function check() {
   const start = Date.now();
   const status = {
@@ -829,6 +892,11 @@ async function check() {
     }
     if (!status.components.queue_dep_roots.ok) {
       status.issues.push(`Queue dependsOn: ${status.components.queue_dep_roots.message}`);
+    }
+
+    status.components.blocking_parks = evaluateBlockingParkHealth(queueState.jobs, now);
+    if (!status.components.blocking_parks.ok) {
+      status.issues.push(`Blocking park: ${status.components.blocking_parks.message}`);
     }
 
     // Per-project starve escalation (bounded consequence for project_starved
@@ -1092,7 +1160,7 @@ async function check() {
   // Critical: nodejs, config dir, typescript, build artifact, test infrastructure.
   // Non-fatal: scheduler/transcripts dirs may not exist on fresh install.
   // Informational: app log age (shows if app is running, but not blocking).
-  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'queue_dispatch', 'queue_dep_roots', 'project_starve_escalation', 'usage_poller', 'prd_migration', 'claude_md_budget', 'delegation_chain'];
+  const criticalComponents = ['nodejs', 'config_dir', 'typescript', 'build_artifact', 'test_infrastructure', 'scheduler_queue', 'queue_dispatch', 'queue_dep_roots', 'blocking_parks', 'project_starve_escalation', 'usage_poller', 'prd_migration', 'claude_md_budget', 'delegation_chain'];
   status.ok = criticalComponents.every((c) => status.components[c]?.ok !== false);
 
   status.elapsedMs = Date.now() - start;
@@ -1125,6 +1193,7 @@ module.exports = {
   loadUsagePollerState,
   evaluateQueueDispatchHealth,
   evaluateUnresolvableDepHealth,
+  evaluateBlockingParkHealth,
   evaluateStarveEscalationHealth,
   evaluateBuildFreshness,
   latestStarveEscalationReasons,

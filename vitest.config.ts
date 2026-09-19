@@ -288,6 +288,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-needs-review-autoresolve.test.cjs',
       'src/main/__tests__/scheduler-guard-verdict-autoresolve.test.cjs',
       'src/main/__tests__/scheduler-stranded-autofix-park.test.cjs',
+      'src/main/__tests__/scheduler-default-eligible-heal.test.cjs',
       'src/main/__tests__/scheduler-quarantine-autoresolve.test.cjs',
       'src/main/__tests__/scheduler-no-dead-end-status.test.cjs',
       'src/main/lib/__tests__/jobWorktreeBootLive.test.cjs',

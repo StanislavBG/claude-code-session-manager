@@ -1833,6 +1833,7 @@ export interface SessionManagerAPI {
     resetJob: (slug: string) => Promise<{ ok: boolean; error?: string }>;
     runNow: () => Promise<{ ok: boolean }>;
     forceTick: () => Promise<ActionOutcome>;
+    pause: () => Promise<{ ok: boolean }>;
     resume: () => Promise<{ ok: boolean }>;
     /** Re-scan prds/ and merge into queue.json; broadcasts updated state. */
     rescan: () => Promise<ActionOutcome>;

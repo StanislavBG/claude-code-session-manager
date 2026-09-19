@@ -83,7 +83,7 @@ function pauseMessage(reason: string, resumeAt: string | null, now: number): str
     return 'Paused: billing endpoint unreachable for 30+ min.'
   }
   if (reason === 'manual') {
-    return 'Scheduler paused manually. Click Resume to restart.'
+    return 'Scheduler paused manually — no new jobs start; running jobs continue. Click Resume to restart.'
   }
   return `Scheduler paused (${reason})`
 }
@@ -134,6 +134,20 @@ function WindowStrip({ scopeCwd }: { scopeCwd: string | null }) {
 
   return (
     <div className="flex flex-col gap-2">
+      {/* Pause control — only when running; Resume lives in the banner below */}
+      {!paused && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => window.api.schedule.pause()}
+            title="Stop NEW dispatch. Running jobs are not killed."
+            className="px-2.5 py-1 rounded border border-line hover:bg-white/10 transition-colors text-[12px] font-medium text-fg-dim hover:text-fg"
+          >
+            Pause
+          </button>
+        </div>
+      )}
+
       {/* Pause banner — only when paused */}
       {paused && (
         <div className={`flex items-center gap-3 border rounded-xl px-4 py-2.5 text-[13px] ${pauseBannerClass}`}>

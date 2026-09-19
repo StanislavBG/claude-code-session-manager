@@ -40,6 +40,8 @@ const REQUIRED_CAPABILITIES = [
   { capability: 'retag a PRD (parallelGroup/estimateMinutes)', ipcChannel: 'schedule:retag-prd', adminRoute: 'POST /admin/scheduler/retag-prd' },
   { capability: 'list scheduler jobs', ipcChannel: null, adminRoute: 'GET /admin/scheduler/jobs' },
   { capability: 'reset a stuck job', ipcChannel: 'schedule:reset-job', adminRoute: 'POST /admin/scheduler/reset-job' },
+  { capability: 'pause new dispatch (user-initiated)', ipcChannel: 'schedule:pause', adminRoute: 'POST /admin/scheduler/pause' },
+  { capability: 'resume a paused scheduler', ipcChannel: 'schedule:resume', adminRoute: 'POST /admin/scheduler/resume' },
   { capability: 'cancel a not-yet-terminal job', ipcChannel: null, adminRoute: 'POST /admin/scheduler/cancel-job' },
 ];
 

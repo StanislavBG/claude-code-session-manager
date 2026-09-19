@@ -143,6 +143,16 @@ const TOOLS = [
     },
   },
   {
+    name: 'scheduler_pause',
+    description: descriptionFor('scheduler_pause'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'scheduler_resume',
+    description: descriptionFor('scheduler_resume'),
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
     name: 'scheduler_list_jobs',
     description: descriptionFor('scheduler_list_jobs'),
     inputSchema: { type: 'object', properties: {} },
@@ -428,6 +438,10 @@ async function handleCallTool(request) {
       const force = args && args.force === true;
       const cwd = args && typeof args.cwd === 'string' ? args.cwd : undefined;
       const result = await adminRequest('POST', '/admin/scheduler/reset-job', { slug, force, cwd });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'scheduler_pause' || name === 'scheduler_resume') {
+      const result = await adminRequest('POST', `/admin/scheduler/${name === 'scheduler_pause' ? 'pause' : 'resume'}`, {});
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_list_jobs') {

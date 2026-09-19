@@ -126,6 +126,12 @@ export function buildCommands(): Command[] {
       run: async () => { toast.fromOutcome(await window.api.schedule.forceTick()) },
     },
     {
+      id: 'scheduler-pause',
+      label: 'Scheduler — Pause (stop new dispatch)',
+      section: 'scheduler',
+      run: async () => { await window.api.schedule.pause() },
+    },
+    {
       id: 'scheduler-resume',
       label: 'Scheduler — Resume from pause',
       section: 'scheduler',

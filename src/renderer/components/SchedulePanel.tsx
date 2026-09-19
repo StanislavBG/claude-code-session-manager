@@ -325,6 +325,16 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
           <span className="ml-auto font-mono text-[11.5px] text-fg-faint whitespace-nowrap">
             {effectiveConcurrency?.cap ?? 5} slot{(effectiveConcurrency?.cap ?? 5) !== 1 ? 's' : ''} · last batch {formatAgo(lastRunAt ? Date.parse(lastRunAt) : null, now)}
           </span>
+          {!paused && (
+            <button
+              type="button"
+              onClick={() => window.api.schedule.pause()}
+              className="text-[12px] px-3 py-1.5 border border-line hover:border-fg-faint rounded-lg shrink-0 hover:bg-bg-hi text-fg-dim hover:text-fg"
+              title="Stop NEW dispatch. Running jobs are not killed."
+            >
+              Pause
+            </button>
+          )}
           {status.action && (
             <button
               type="button"
@@ -787,7 +797,7 @@ function computeStatus({
       auth: 'Paused — authentication failed',
       network: 'Paused — network unreachable',
       reset_failure: 'Paused — billing data unavailable',
-      manual: 'Paused — manual',
+      manual: 'Paused — manual (you paused the queue)',
     }
     const pauseLine2Auth = 'Run `claude` in any terminal to refresh credentials, then Resume'
     return {

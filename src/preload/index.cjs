@@ -236,6 +236,7 @@ contextBridge.exposeInMainWorld('api', {
     resetJob: (slug) => ipcRenderer.invoke('schedule:reset-job', { slug }),
     runNow: () => ipcRenderer.invoke('schedule:run-now'),
     forceTick: () => ipcRenderer.invoke('schedule:force-tick'),
+    pause: () => ipcRenderer.invoke('schedule:pause'),
     resume: () => ipcRenderer.invoke('schedule:resume'),
     rescan: () => ipcRenderer.invoke('schedule:rescan'),
     clearQueue: () => ipcRenderer.invoke('schedule:clear-queue'),

@@ -38,7 +38,7 @@ const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'reap-dead-running-jobs-te
 process.env.HOME = tmpHome;
 
 const { reapDeadRunningJobs, PIDLESS_SPAWN_GRACE_MS } = require('../scheduler.cjs');
-const { AUDIT_LOG_PATH } = require('../lib/auditLog.cjs');
+const { auditLogPath } = require('../lib/auditLog.cjs');
 // queueStore's cwd discovery is cached for 30s (queueStore.cjs's CACHE_MS) —
 // a project registered by THIS test after an earlier test already populated
 // that cache (and didn't itself bust it, e.g. because it found nothing
@@ -131,7 +131,7 @@ test('reapDeadRunningJobs reaps a pidless row older than PIDLESS_SPAWN_GRACE_MS 
   // Empty run dir: created, but never written to (the exact 2026-09-01 repro).
   fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', 'run-pidless-zombie'), { recursive: true });
 
-  const auditSizeBefore = fs.existsSync(AUDIT_LOG_PATH) ? fs.statSync(AUDIT_LOG_PATH).size : 0;
+  const auditSizeBefore = fs.existsSync(auditLogPath()) ? fs.statSync(auditLogPath()).size : 0;
 
   await reapDeadRunningJobs();
 
@@ -142,7 +142,7 @@ test('reapDeadRunningJobs reaps a pidless row older than PIDLESS_SPAWN_GRACE_MS 
   assert.equal(jobs[0].runtime, undefined);
   assert.equal(jobs[0].gateOutcome, 'never_ran', 'a pidless reap means the gate never had a chance to run');
 
-  const auditText = fs.readFileSync(AUDIT_LOG_PATH, 'utf8').slice(auditSizeBefore);
+  const auditText = fs.readFileSync(auditLogPath(), 'utf8').slice(auditSizeBefore);
   const auditLines = auditText.trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const pidlessEvent = auditLines.find((e) => e.kind === 'job_reaped_pidless' && e.slug === 'pidless-zombie');
   assert.ok(pidlessEvent, 'reaping a pidless row must leave an audit trace');
@@ -184,7 +184,7 @@ test('reapDeadRunningJobs: a pidless row past grace with a landedCommit already 
   // multi-byte characters (e.g. an em dash in a reaper reason string), and
   // slicing a utf8-decoded JS string (UTF-16 code units) at a byte offset
   // then silently corrupts the boundary. The slug is unique to this test.
-  const auditLines = fs.readFileSync(AUDIT_LOG_PATH, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  const auditLines = fs.readFileSync(auditLogPath(), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const pidlessEvent = auditLines.find((e) => e.kind === 'job_reaped_pidless' && e.slug === 'shipped-but-pidless');
   assert.ok(pidlessEvent, 'reaping this row must still leave an audit trace');
   assert.equal(pidlessEvent.landedCommit, landedSha, 'the audit event must carry the landed-commit evidence so the decision is reconstructable from the audit log alone');

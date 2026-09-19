@@ -27,6 +27,15 @@ const ROUTED_MODULES = [
   'src/main/lib/watchdogHelpers.cjs',
   'src/main/health.cjs',
   'scripts/scheduler-watchdog.cjs',
+  'src/main/lib/auditLog.cjs',
+  'src/main/lib/historyRollup.cjs',
+  'src/main/lib/queueHistory.cjs',
+  'src/main/lib/instanceLock.cjs',
+  'src/main/lib/procName.cjs',
+  'src/main/heapSnapshot.cjs',
+  'scripts/scheduler-mcp-server.cjs',
+  'scripts/replay-verdicts.cjs',
+  'scripts/audit-ops-hygiene.cjs',
 ];
 
 const ENV_KEYS = ['SM_SCHEDULER_HOME', 'SM_SCHEDULER_LOG_CWD', 'SM_ADMIN_TOKEN_PATH', 'SM_DEV', 'SM_E2E'];
@@ -145,6 +154,24 @@ test('scheduler / queueOps / watchdogHelpers path exports follow the override', 
   expect(wd.DEFAULT_LOCK_PATH).toBe(sp.historyRollupLockPath());
   expect(wd.DEFAULT_STAMP_PATH).toBe(sp.historyRollupStampPath());
   expect(wd.DEFAULT_RELAUNCH_STATE_PATH).toBe(sp.watchdogRelaunchStatePath());
+});
+
+test('auditLog, historyRollup, queueHistory, instanceLock, procName, heapSnapshot land under SM_SCHEDULER_HOME', () => {
+  const saved = {};
+  for (const k of ['SM_HISTORY_PATH_OVERRIDE', 'SM_SCHEDULER_LOCK_PATH']) { saved[k] = process.env[k]; delete process.env[k]; }
+  try {
+    const auditLog = require('../auditLog.cjs');
+    expect(auditLog.auditLogPath()).toBe(path.join(tmpHome, 'audit-log.jsonl'));
+    auditLog.appendAuditEvent('schedulerPaths_test', {});
+    expect(fs.existsSync(path.join(tmpHome, 'audit-log.jsonl'))).toBe(true);
+    expect(require('../historyRollup.cjs').historyRollupPath()).toBe(path.join(tmpHome, 'history-rollup.jsonl'));
+    expect(require('../queueHistory.cjs').historyPath()).toBe(path.join(tmpHome, 'scheduled-plans', 'history.jsonl'));
+    expect(require('../instanceLock.cjs').lockPath()).toBe(path.join(tmpHome, 'scheduler-owner.lock'));
+    expect(require('../procName.cjs').procnamesRoot()).toBe(path.join(tmpHome, 'procnames'));
+    expect(sp.heapSnapshotDir()).toBe(tmpHome);
+  } finally {
+    for (const k of Object.keys(saved)) { if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k]; }
+  }
 });
 
 test.each(ROUTED_MODULES)('%s derives no home-rooted path from os.homedir() itself', (rel) => {

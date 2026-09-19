@@ -16,7 +16,7 @@
  * DELIBERATE exceptions to CLAUDE.md laws (do not "fix"):
  *  - The tmp+rename symlink primitive below is NOT config.cjs writeJson /
  *    writeTextAtomic: those write file contents and cannot create symlinks.
- *  - ALIAS_ROOT is intentionally NOT registered with config.cjs validateWrite /
+ *  - procnamesRoot() is intentionally NOT registered with config.cjs validateWrite /
  *    addAllowedRoot: that containment governs IPC-reachable writes; this is a
  *    main-process-internal write.
  *
@@ -25,10 +25,9 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
-const ALIAS_ROOT = path.join(os.homedir(), '.claude', 'session-manager', 'procnames');
+const { procnamesRoot } = require('./schedulerPaths.cjs');
 const MAX_ALIAS_LEN = 15; // Linux TASK_COMM_LEN (16) minus NUL
 const MAX_LABEL_LEN = 120;
 
@@ -53,12 +52,12 @@ function aliasBinFor(realBin, alias) {
     if (typeof realBin !== 'string' || !realBin) return realBin;
     const target = resolveBare(realBin);
     if (!target) return realBin;
-    const aliasPath = path.join(ALIAS_ROOT, alias);
+    const aliasPath = path.join(procnamesRoot(), alias);
     let current = null;
     try { current = fs.readlinkSync(aliasPath); } catch { /* absent or not a link */ }
     if (current !== target) {
-      fs.mkdirSync(ALIAS_ROOT, { recursive: true });
-      const tmp = path.join(ALIAS_ROOT, `.${alias}.${process.pid}.${Date.now()}.${tmpSeq++}.tmp`);
+      fs.mkdirSync(procnamesRoot(), { recursive: true });
+      const tmp = path.join(procnamesRoot(), `.${alias}.${process.pid}.${Date.now()}.${tmpSeq++}.tmp`);
       try {
         fs.symlinkSync(target, tmp);
         fs.renameSync(tmp, aliasPath); // atomic replace; never unlink-then-symlink
@@ -85,8 +84,8 @@ function smArgv0(role, detail) {
 /** Remove alias entries whose target no longer resolves to an executable. Never throws. O(entries). */
 function pruneStaleAliases() {
   try {
-    for (const name of fs.readdirSync(ALIAS_ROOT)) {
-      const p = path.join(ALIAS_ROOT, name);
+    for (const name of fs.readdirSync(procnamesRoot())) {
+      const p = path.join(procnamesRoot(), name);
       try {
         fs.accessSync(p, fs.constants.X_OK);
       } catch {
@@ -96,4 +95,4 @@ function pruneStaleAliases() {
   } catch { /* root absent/unreadable */ }
 }
 
-module.exports = { aliasBinFor, smArgv0, ALIAS_ROOT, pruneStaleAliases };
+module.exports = { aliasBinFor, smArgv0, procnamesRoot, pruneStaleAliases };

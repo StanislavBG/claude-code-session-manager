@@ -39,7 +39,7 @@ const {
   STARVE_ESCALATION_MS,
   attachWindow,
 } = require('../scheduler.cjs');
-const { AUDIT_LOG_PATH } = require('../lib/auditLog.cjs');
+const { auditLogPath } = require('../lib/auditLog.cjs');
 
 afterAll(() => {
   process.env.HOME = originalHome;
@@ -52,7 +52,7 @@ const CWD_B = '/home/bilko/Projects/session-manager';
 function readAuditKind(kind) {
   let lines;
   try {
-    lines = fs.readFileSync(AUDIT_LOG_PATH, 'utf8').split('\n').filter(Boolean);
+    lines = fs.readFileSync(auditLogPath(), 'utf8').split('\n').filter(Boolean);
   } catch {
     return [];
   }
@@ -75,8 +75,8 @@ function fakeWindow() {
 beforeEach(() => {
   // Fresh scratch audit log per test so escalation counts never bleed across
   // tests in this file.
-  fs.mkdirSync(path.dirname(AUDIT_LOG_PATH), { recursive: true });
-  fs.writeFileSync(AUDIT_LOG_PATH, '');
+  fs.mkdirSync(path.dirname(auditLogPath()), { recursive: true });
+  fs.writeFileSync(auditLogPath(), '');
   attachWindow(null);
 });
 

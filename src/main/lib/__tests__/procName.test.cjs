@@ -1,5 +1,5 @@
-// PRD pn-01: procName primitive. HOME is redirected to a temp dir BEFORE the
-// module loads (ALIAS_ROOT is computed at require time) — never the real ~/.claude.
+// PRD pn-01: procName primitive. HOME is redirected to a temp dir for the whole file
+// (procnamesRoot() resolves lazily from HOME) — never the real ~/.claude.
 import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -7,12 +7,12 @@ import path from 'node:path';
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'procname-'));
 const realHome = process.env.HOME;
-process.env.HOME = tmpHome;
-const { aliasBinFor, smArgv0, ALIAS_ROOT, pruneStaleAliases } = require('../procName.cjs');
-process.env.HOME = realHome;
+process.env.HOME = tmpHome; // stays redirected: procnamesRoot() resolves lazily
+const { aliasBinFor, smArgv0, procnamesRoot, pruneStaleAliases } = require('../procName.cjs');
 
 afterAll(() => {
-  try { fs.chmodSync(ALIAS_ROOT, 0o700); } catch { /* absent */ }
+  process.env.HOME = realHome;
+  try { fs.chmodSync(procnamesRoot(), 0o700); } catch { /* absent */ }
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
@@ -23,14 +23,14 @@ function fakeBin(name) {
 }
 
 describe('procName', () => {
-  it('ALIAS_ROOT lives under the temp HOME machine-state root', () => {
-    expect(ALIAS_ROOT).toBe(path.join(tmpHome, '.claude', 'session-manager', 'procnames'));
+  it('procnamesRoot() lives under the temp HOME machine-state root', () => {
+    expect(procnamesRoot()).toBe(path.join(tmpHome, '.claude', 'session-manager', 'procnames'));
   });
 
   it('creates a symlink and returns the alias path', () => {
     const bin = fakeBin('bin-a');
     const out = aliasBinFor(bin, 'sm-claude-job');
-    expect(out).toBe(path.join(ALIAS_ROOT, 'sm-claude-job'));
+    expect(out).toBe(path.join(procnamesRoot(), 'sm-claude-job'));
     expect(fs.readlinkSync(out)).toBe(bin);
   });
 
@@ -51,14 +51,14 @@ describe('procName', () => {
     expect(aliasBinFor('definitely-not-a-real-cmd-xyz', 'sm-claude-aux')).toBe('definitely-not-a-real-cmd-xyz');
   });
 
-  it.skipIf(process.getuid && process.getuid() === 0)('fails open when ALIAS_ROOT is read-only', () => {
+  it.skipIf(process.getuid && process.getuid() === 0)('fails open when procnamesRoot() is read-only', () => {
     const bin = fakeBin('bin-d');
-    fs.mkdirSync(ALIAS_ROOT, { recursive: true });
-    fs.chmodSync(ALIAS_ROOT, 0o500);
+    fs.mkdirSync(procnamesRoot(), { recursive: true });
+    fs.chmodSync(procnamesRoot(), 0o500);
     try {
       expect(aliasBinFor(bin, 'sm-shell')).toBe(bin);
     } finally {
-      fs.chmodSync(ALIAS_ROOT, 0o700);
+      fs.chmodSync(procnamesRoot(), 0o700);
     }
   });
 

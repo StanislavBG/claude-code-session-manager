@@ -6,11 +6,11 @@
  * when the admin API is unreachable — only the readiness section may report
  * unavailable.
  *
- * TOKEN_PATH (scripts/scheduler-mcp-server.cjs) is computed once, at
- * require-time, from os.homedir(). Since os.homedir() reads process.env.HOME
- * on POSIX, each test temporarily repoints HOME at a fresh tmp dir, clears
- * the require cache, and re-requires the module so TOKEN_PATH resolves under
- * that tmp dir — never touching the real ~/.claude/session-manager/admin-api.json.
+ * The admin token path (schedulerPaths.adminTokenPath) resolves lazily from
+ * os.homedir(). Since os.homedir() reads process.env.HOME on POSIX, each test
+ * repoints HOME at a fresh tmp dir for its duration (restored in afterEach)
+ * so the token path resolves under that tmp dir, never the real
+ * ~/.claude/session-manager/admin-api.json.
  *
  * Run: timeout 120 npx vitest run src/main/lib/__tests__/schedulerMcpServerHelp.test.cjs
  */
@@ -72,8 +72,7 @@ function requireServerWithHome(homeDir) {
   process.env.HOME = homeDir;
   delete require.cache[require.resolve(SERVER_PATH)];
   const mod = require(SERVER_PATH);
-  process.env.HOME = originalHome;
-  originalHome = undefined;
+  // HOME stays redirected until afterEach: admin-token path resolves lazily.
   return mod;
 }
 

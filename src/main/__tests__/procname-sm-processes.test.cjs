@@ -115,13 +115,13 @@ describe('shell aliasing rules', () => {
     expect(path.basename(names.aliasedShellBin(fake))).toBe('sm-shell');
   });
   it('fails open when ALIAS_ROOT is unwritable', () => {
-    fs.rmSync(procName.ALIAS_ROOT, { recursive: true, force: true });
-    fs.mkdirSync(path.dirname(procName.ALIAS_ROOT), { recursive: true });
-    fs.writeFileSync(procName.ALIAS_ROOT, 'a file, so mkdir/symlink under it fails');
+    fs.rmSync(procName.procnamesRoot(), { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(procName.procnamesRoot()), { recursive: true });
+    fs.writeFileSync(procName.procnamesRoot(), 'a file, so mkdir/symlink under it fails');
     try {
       expect(names.inhibitHolderShell()).toBe('/bin/sh');
       const bash = ['/bin/bash', '/usr/bin/bash'].find((p) => fs.existsSync(p));
       if (bash) expect(names.aliasedShellBin(bash)).toBe(bash);
-    } finally { fs.rmSync(procName.ALIAS_ROOT, { force: true }); }
+    } finally { fs.rmSync(procName.procnamesRoot(), { force: true }); }
   });
 });

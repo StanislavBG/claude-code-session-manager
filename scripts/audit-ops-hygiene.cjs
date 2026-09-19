@@ -40,10 +40,10 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
+const { auditLogPath } = require('../src/main/lib/schedulerPaths.cjs');
 const projectCwd = process.argv[2] || process.cwd();
 const OPS_ROOT = path.join(projectCwd, 'session-manager-operations');
 const SESSIONS_DIR = path.join(OPS_ROOT, 'prompt-sessions');
@@ -53,8 +53,9 @@ const FLAT_PRDS_DIR = path.join(SCHEDULER_DIR, 'prds');
 const ARCHIVED_PRDS_DIR = path.join(SCHEDULER_DIR, 'prds-archived');
 const QUEUE_PATH = path.join(SCHEDULER_DIR, 'state', 'queue.json');
 // Override hook for tests only — production always uses the real path.
-const AUDIT_LOG_PATH = process.env.SM_AUDIT_LOG_PATH_OVERRIDE
-  || path.join(os.homedir(), '.claude', 'session-manager', 'audit-log.jsonl');
+function resolveAuditLogPath() {
+  return process.env.SM_AUDIT_LOG_PATH_OVERRIDE || auditLogPath();
+}
 
 function readJson(p, fallback) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
@@ -160,7 +161,7 @@ function auditPatternD() {
 function readPrdCreateAuditKeys() {
   const keys = new Set();
   let lines;
-  try { lines = fs.readFileSync(AUDIT_LOG_PATH, 'utf8').split('\n'); } catch { return keys; }
+  try { lines = fs.readFileSync(resolveAuditLogPath(), 'utf8').split('\n'); } catch { return keys; }
   for (const line of lines) {
     if (!line.trim()) continue;
     let rec;

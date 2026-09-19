@@ -23,8 +23,8 @@
 'use strict';
 
 const path = require('node:path');
-const os = require('node:os');
 const fsp = require('node:fs/promises');
+const { heapSnapshotDir } = require('./lib/schedulerPaths.cjs');
 
 const CHANNEL = 'diagnostics:heap-snapshot';
 const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000; // 3 min — snapshots can be multi-hundred-MB
@@ -34,7 +34,7 @@ function isEnabled() {
 }
 
 function snapshotDir() {
-  return path.join(os.homedir(), '.claude', 'session-manager');
+  return heapSnapshotDir();
 }
 
 function timestampedFilename(now = new Date()) {

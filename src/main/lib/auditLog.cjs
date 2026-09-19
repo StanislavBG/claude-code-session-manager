@@ -16,10 +16,9 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
-const AUDIT_LOG_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'audit-log.jsonl');
+const { auditLogPath } = require('./schedulerPaths.cjs');
 
 /**
  * Best-effort identity of the process making this call — there is no
@@ -50,11 +49,12 @@ function appendAuditEvent(kind, fields = {}) {
       ...fields,
       caller: callerContext(),
     };
-    fs.mkdirSync(path.dirname(AUDIT_LOG_PATH), { recursive: true });
-    fs.appendFileSync(AUDIT_LOG_PATH, `${JSON.stringify(record)}\n`);
+    const target = auditLogPath();
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.appendFileSync(target, `${JSON.stringify(record)}\n`);
   } catch (e) {
     console.error('[auditLog] failed to append audit event', e?.message ?? String(e));
   }
 }
 
-module.exports = { appendAuditEvent, AUDIT_LOG_PATH };
+module.exports = { appendAuditEvent, auditLogPath };

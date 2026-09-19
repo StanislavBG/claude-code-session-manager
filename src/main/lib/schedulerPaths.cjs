@@ -46,6 +46,14 @@ function watchdogRelaunchLogPath() {
 }
 function historyRollupStampPath() { return path.join(schedulerHome(), 'history-rollup.stamp'); }
 function historyRollupLockPath() { return path.join(schedulerHome(), 'history-rollup.lock'); }
+function historyRollupPath() { return path.join(schedulerHome(), 'history-rollup.jsonl'); }
+function auditLogPath() { return path.join(schedulerHome(), 'audit-log.jsonl'); }
+function procnamesRoot() { return path.join(schedulerHome(), 'procnames'); }
+/** Legacy global history sidecar (read-only; new appends go to per-project shards). */
+function queueHistoryPath() { return path.join(scheduledPlansRoot(), 'history.jsonl'); }
+function instanceLockPath() { return path.join(schedulerHome(), 'scheduler-owner.lock'); }
+/** Where heap snapshots are written — the scheduler home itself. */
+function heapSnapshotDir() { return schedulerHome(); }
 
 /** SM_WORKTREE_ROOT, else os.tmpdir() — the parent of every managed worktree root. */
 function worktreeBase() { return process.env.SM_WORKTREE_ROOT || os.tmpdir(); }
@@ -96,4 +104,10 @@ module.exports = {
   watchdogRelaunchLogPath,
   historyRollupStampPath,
   historyRollupLockPath,
+  historyRollupPath,
+  auditLogPath,
+  procnamesRoot,
+  queueHistoryPath,
+  instanceLockPath,
+  heapSnapshotDir,
 };

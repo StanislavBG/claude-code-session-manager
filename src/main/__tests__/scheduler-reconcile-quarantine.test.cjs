@@ -80,7 +80,7 @@ test('reconcile() quarantines a newly-discovered PRD with no createdVia provenan
     fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({ jobs: [] }, null, 2), 'utf8');
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const { AUDIT_LOG_PATH } = require('../lib/auditLog.cjs');
+    const { auditLogPath } = require('../lib/auditLog.cjs');
 
     queueStore.bustCwdCache();
     const state = { jobs: [], invalidJobs: [], paused: null };
@@ -95,7 +95,7 @@ test('reconcile() quarantines a newly-discovered PRD with no createdVia provenan
     );
     expect(warned).toBe(true);
 
-    const auditLines = fs.readFileSync(AUDIT_LOG_PATH, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    const auditLines = fs.readFileSync(auditLogPath(), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
     expect(auditLines.some((rec) => rec.kind === 'prd_quarantined' && rec.slug === '9001-hand-written')).toBe(true);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
@@ -230,7 +230,7 @@ test('reconcile() adopts a quarantined row to pending once its PRD file is stamp
     fm.issuedAt = '2026-08-07T01:00:00.000Z';
     fs.writeFileSync(prdPath, serializePrdFile(fm, body), 'utf8');
 
-    const { AUDIT_LOG_PATH } = require('../lib/auditLog.cjs');
+    const { auditLogPath } = require('../lib/auditLog.cjs');
     queueStore.bustCwdCache();
     const state = { jobs: [quarantinedRow], invalidJobs: [], paused: null };
     await scheduler.reconcile(state);
@@ -239,7 +239,7 @@ test('reconcile() adopts a quarantined row to pending once its PRD file is stamp
     expect(row).toBeDefined();
     expect(row.status).toBe('pending');
 
-    const auditLines = fs.readFileSync(AUDIT_LOG_PATH, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    const auditLines = fs.readFileSync(auditLogPath(), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
     expect(auditLines.some((rec) => rec.kind === 'scheduler_prd_adopted' && rec.slug === '9004-adopt-me')).toBe(true);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });

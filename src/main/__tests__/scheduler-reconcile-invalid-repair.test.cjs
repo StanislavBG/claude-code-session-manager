@@ -127,8 +127,8 @@ test('reconcile() repairs a queue row with an invalid status back to pending, lo
     // require time, so spying on the module's export property after the
     // fact wouldn't intercept scheduler.cjs's already-bound reference —
     // assert against the real (tmpHome-isolated) audit log file instead.
-    const { AUDIT_LOG_PATH } = require('../lib/auditLog.cjs');
-    expect(AUDIT_LOG_PATH.startsWith(tmpHome)).toBe(true);
+    const { auditLogPath } = require('../lib/auditLog.cjs');
+    expect(auditLogPath().startsWith(tmpHome)).toBe(true);
 
     queueStore.bustCwdCache();
     await scheduler.reconcile(state);
@@ -142,7 +142,7 @@ test('reconcile() repairs a queue row with an invalid status back to pending, lo
     );
     expect(warnedRepair).toBe(true);
 
-    const auditLines = fs.readFileSync(AUDIT_LOG_PATH, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+    const auditLines = fs.readFileSync(auditLogPath(), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
     const auditedRepair = auditLines.some(
       (rec) => rec.kind === 'scheduler_row_repaired' && rec.slug === badRow.slug && rec.oldStatus === 'queued',
     );

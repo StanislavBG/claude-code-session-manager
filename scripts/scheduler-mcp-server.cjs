@@ -27,7 +27,6 @@
 // Name this process first (pn-03): otherwise it shows as a bare `node`.
 const { PROC_NAMES, setProcessTitle } = require('../src/main/lib/smProcNames.cjs');
 setProcessTitle(PROC_NAMES.mcpServer);
-const os = require('node:os');
 const path = require('node:path');
 const fsp = require('node:fs/promises');
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
@@ -47,7 +46,7 @@ function descriptionFor(toolName) {
   return composeDescription(entry);
 }
 
-const TOKEN_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'admin-api.json');
+const { adminTokenPath } = require('../src/main/lib/schedulerPaths.cjs');
 
 // Defined once so every failure path points to the same next call, verbatim
 // — never paste this sentence at each return site (PRD: session_manager_help).
@@ -74,7 +73,7 @@ function resolveCwdArg(args) {
 }
 
 async function readAdminConfig() {
-  const raw = await fsp.readFile(TOKEN_PATH, 'utf8');
+  const raw = await fsp.readFile(adminTokenPath(), 'utf8');
   const parsed = JSON.parse(raw);
   if (!parsed || typeof parsed.port !== 'number' || typeof parsed.token !== 'string') {
     throw new Error(NOT_RUNNING_ERROR);

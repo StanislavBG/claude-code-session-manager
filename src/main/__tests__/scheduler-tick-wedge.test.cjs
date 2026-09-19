@@ -26,7 +26,7 @@ let spawnMarker;
 
 function auditKinds() {
   try {
-    return fs.readFileSync(auditLog.AUDIT_LOG_PATH, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).kind);
+    return fs.readFileSync(auditLog.auditLogPath(), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).kind);
   } catch { return []; }
 }
 

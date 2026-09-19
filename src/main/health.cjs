@@ -19,7 +19,7 @@ const queueStore = require('./lib/queueStore.cjs');
 const schedulerPaths = require('./lib/schedulerPaths.cjs');
 const { computeStallSummary, FAILURE_STREAK_ESCALATION_MS, classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS } = require('./scheduler.cjs');
 const { findStarvedProjects } = require('./lib/schedulerBatch.cjs');
-const { AUDIT_LOG_PATH } = require('./lib/auditLog.cjs');
+const { auditLogPath } = require('./lib/auditLog.cjs');
 const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
 
@@ -741,7 +741,7 @@ async function check() {
     // "has any ONE project been starved past the LATER escalation threshold",
     // the exact condition the 2026-09-12 19h Bilko starve went unreported by.
     status.components.project_starve_escalation = evaluateStarveEscalationHealth(
-      queueState.jobs, now, STARVE_ESCALATION_MS, latestStarveEscalationReasons(AUDIT_LOG_PATH),
+      queueState.jobs, now, STARVE_ESCALATION_MS, latestStarveEscalationReasons(auditLogPath()),
     );
     if (!status.components.project_starve_escalation.ok) {
       status.issues.push(status.components.project_starve_escalation.message);

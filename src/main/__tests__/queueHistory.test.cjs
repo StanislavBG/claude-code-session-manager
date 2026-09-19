@@ -53,11 +53,11 @@ beforeEach(() => {
   // Fresh require per test so HISTORY_PATH's target file starts clean.
   delete require.cache[require.resolve('../lib/queueHistory.cjs')];
   queueHistory = require('../lib/queueHistory.cjs');
-  try { fs.unlinkSync(queueHistory.HISTORY_PATH); } catch { /* ok if absent */ }
+  try { fs.unlinkSync(queueHistory.historyPath()); } catch { /* ok if absent */ }
 });
 
 afterEach(() => {
-  try { fs.unlinkSync(queueHistory.HISTORY_PATH); } catch { /* ok if absent */ }
+  try { fs.unlinkSync(queueHistory.historyPath()); } catch { /* ok if absent */ }
   if (prevOverride === undefined) delete process.env.SM_HISTORY_PATH_OVERRIDE;
   else process.env.SM_HISTORY_PATH_OVERRIDE = prevOverride;
 });

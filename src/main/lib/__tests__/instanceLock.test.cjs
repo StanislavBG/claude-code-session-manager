@@ -4,7 +4,7 @@
 //
 // HOME is stubbed to a mkdtemp dir BEFORE requiring instanceLock.cjs (mirrors
 // scheduler-reconcile-invalid-repair.test.cjs): instanceLock.cjs pulls in
-// auditLog.cjs, whose AUDIT_LOG_PATH is computed once at require time from
+// auditLog.cjs, whose audit log path resolves from
 // os.homedir() — so real ~/.claude/session-manager state must never be
 // touched by this suite.
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
@@ -15,16 +15,16 @@ import path from 'node:path';
 let originalHome;
 let tmpHome;
 let instanceLock;
-let AUDIT_LOG_PATH;
+let auditLogPath;
 
 beforeAll(() => {
   originalHome = process.env.HOME;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-instance-lock-home-'));
   process.env.HOME = tmpHome;
   instanceLock = require('../instanceLock.cjs');
-  ({ AUDIT_LOG_PATH } = require('../auditLog.cjs'));
-  if (!AUDIT_LOG_PATH.startsWith(tmpHome)) {
-    throw new Error(`refusing to run: AUDIT_LOG_PATH (${AUDIT_LOG_PATH}) is not under the temp HOME (${tmpHome})`);
+  ({ auditLogPath } = require('../auditLog.cjs'));
+  if (!auditLogPath().startsWith(tmpHome)) {
+    throw new Error(`refusing to run: auditLogPath() (${auditLogPath()}) is not under the temp HOME (${tmpHome})`);
   }
 });
 
@@ -41,8 +41,8 @@ const pidAlive = (...args) => instanceLock.pidAlive(...args);
 const lockPath = (...args) => instanceLock.lockPath(...args);
 
 function readAuditEvents() {
-  if (!fs.existsSync(AUDIT_LOG_PATH)) return [];
-  return fs.readFileSync(AUDIT_LOG_PATH, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  if (!fs.existsSync(auditLogPath())) return [];
+  return fs.readFileSync(auditLogPath(), 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
 }
 
 let dir;
@@ -56,7 +56,7 @@ afterEach(() => {
   delete process.env.SM_SCHEDULER_LOCK_PATH;
   delete process.env.SM_PROC_ROOT;
   fs.rmSync(dir, { recursive: true, force: true });
-  if (fs.existsSync(AUDIT_LOG_PATH)) fs.rmSync(AUDIT_LOG_PATH, { force: true });
+  if (fs.existsSync(auditLogPath())) fs.rmSync(auditLogPath(), { force: true });
 });
 
 describe('instanceLock (PRD 834)', () => {

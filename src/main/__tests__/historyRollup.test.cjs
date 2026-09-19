@@ -135,7 +135,7 @@ test('appendRollupDays: compacts (dedupes) once file exceeds threshold', async (
     { date: '2026-07-01', projectDir: 'p', modelId: 'sonnet', inputTokens: 2 },
   ]);
   await historyRollup.compact();
-  const raw = fs.readFileSync(historyRollup.ROLLUP_PATH, 'utf8');
+  const raw = fs.readFileSync(historyRollup.historyRollupPath(), 'utf8');
   const nonEmptyLines = raw.split('\n').filter((l) => l.trim());
   expect(nonEmptyLines.length).toBe(1);
   expect(JSON.parse(nonEmptyLines[0]).inputTokens).toBe(2);
@@ -305,7 +305,7 @@ test('refreshIntradayToday: upserts a provisional (non-finalized) line for today
   // duplicates — today's line for the same key once the file is compacted.
   await historyAggregator.refreshIntradayToday();
   await historyRollup.compact();
-  const raw = fs.readFileSync(historyRollup.ROLLUP_PATH, 'utf8');
+  const raw = fs.readFileSync(historyRollup.historyRollupPath(), 'utf8');
   const matchingLines = raw.split('\n').filter((l) => {
     if (!l.trim()) return false;
     const obj = JSON.parse(l);

@@ -10,11 +10,11 @@
 // `nowMs` and `opts` so it's testable without touching the real clock or
 // disk. appendHistory/readHistory own the actual fs I/O.
 
-const os = require('os');
 const path = require('path');
 const fsp = require('fs').promises;
 const { HISTORY_RETENTION_MS } = require('./schedulerConfig.cjs');
 const { projectHistoryPath, stateCwds } = require('./queueStore.cjs');
+const { queueHistoryPath } = require('./schedulerPaths.cjs');
 const { resolveIsFixPlan } = require('./fixPlanSlug.cjs');
 
 // Legacy global sidecar — READ-ONLY since 2026-07-31 (federated per-project
@@ -26,8 +26,9 @@ const { resolveIsFixPlan } = require('./fixPlanSlug.cjs');
 // Overridable via SM_HISTORY_PATH_OVERRIDE so queueHistory.test.cjs can point
 // this at an isolated tmpdir path instead of racing a live Electron
 // instance's scheduler.cjs, which writes this same machine-global file.
-const HISTORY_PATH = process.env.SM_HISTORY_PATH_OVERRIDE
-  || path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'history.jsonl');
+function historyPath() {
+  return process.env.SM_HISTORY_PATH_OVERRIDE || queueHistoryPath();
+}
 
 /**
  * Every history file currently in play: each project's shard + the legacy
@@ -37,12 +38,12 @@ const HISTORY_PATH = process.env.SM_HISTORY_PATH_OVERRIDE
  * would leak real production history rows into an otherwise-isolated test.
  */
 function historyPaths() {
-  if (process.env.SM_HISTORY_PATH_OVERRIDE) return [HISTORY_PATH];
+  if (process.env.SM_HISTORY_PATH_OVERRIDE) return [historyPath()];
   const paths = [];
   for (const cwd of stateCwds()) {
     try { paths.push(projectHistoryPath(cwd)); } catch { /* unusable cwd */ }
   }
-  paths.push(HISTORY_PATH);
+  paths.push(historyPath());
   return paths;
 }
 
@@ -50,7 +51,7 @@ function historyPathFor(entry) {
   if (entry && entry.cwd) {
     try { return projectHistoryPath(entry.cwd); } catch { /* fall through */ }
   }
-  return HISTORY_PATH;
+  return historyPath();
 }
 
 // `kind` keeps a needs_review_entry/needs_review_resolution line (see
@@ -332,7 +333,7 @@ async function completedSlugsForCwd(cwd) {
 }
 
 module.exports = {
-  HISTORY_PATH,
+  historyPath,
   partitionJobs,
   appendHistory,
   readHistory,

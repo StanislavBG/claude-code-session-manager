@@ -26,16 +26,16 @@
 'use strict';
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { identity, isDifferentProcess } = require('./procIdentity.cjs');
+const { instanceLockPath } = require('./schedulerPaths.cjs');
 const { appendAuditEvent } = require('./auditLog.cjs');
 
 // Env override is for unit tests only (isolates the lock from the real
 // ~/.claude of the machine running the suite).
 function lockPath() {
   return process.env.SM_SCHEDULER_LOCK_PATH
-    || path.join(os.homedir(), '.claude', 'session-manager', 'scheduler-owner.lock');
+    || instanceLockPath();
 }
 
 function pidAlive(pid) {

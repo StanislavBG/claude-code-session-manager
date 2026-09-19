@@ -94,8 +94,7 @@ function requireServerWithHome(homeDir) {
   process.env.HOME = homeDir;
   delete require.cache[require.resolve(SERVER_PATH)];
   const mod = require(SERVER_PATH);
-  process.env.HOME = originalHome;
-  originalHome = undefined;
+  // HOME stays redirected until afterEach: admin-token path resolves lazily.
   return mod;
 }
 

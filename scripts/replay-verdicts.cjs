@@ -6,7 +6,7 @@
  * SCHEDULER_VERDICT: FAIL demotes transcript_errors/verify_unavailable to
  * annotations).
  *
- * Scans `~/.claude/session-manager/scheduled-plans/runs/*` (the same RUNS_DIR
+ * Scans `~/.claude/session-manager/scheduled-plans/runs/*` (the same runs dir
  * scheduler.cjs writes to — shared across every project on this machine) for
  * `<slug>.verdicts.json` sidecars whose original verdict was a park
  * (verdict transcript_errors|verify_unavailable, downgradeTo needs_review),
@@ -27,7 +27,7 @@
  * writes to the real runs dir regardless) so the documented invocation is
  * self-describing about the safety guarantee. --since filters run dirs by
  * their timestamp-derived directory name; omit it to scan every run dir.
- * RUNS_DIR is shared by every project scheduled on this machine, so by
+ * The runs dir is shared by every project scheduled on this machine, so by
  * default this scopes to the project it's invoked from (`process.cwd()`,
  * matched against each candidate's own `meta.cwd`) — pass --all-projects to
  * scan every project's history instead.
@@ -44,7 +44,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { verifyRun } = require('../src/main/runVerify.cjs');
 
-const RUNS_DIR = path.join(os.homedir(), '.claude', 'session-manager', 'scheduled-plans', 'runs');
+const { runsDir } = require('../src/main/lib/schedulerPaths.cjs');
 
 const PARK_VERDICTS = new Set(['transcript_errors', 'verify_unavailable']);
 
@@ -131,9 +131,9 @@ async function main() {
 
   let dirNames;
   try {
-    dirNames = fs.readdirSync(RUNS_DIR);
+    dirNames = fs.readdirSync(runsDir());
   } catch (e) {
-    console.error(`HALT: cannot read RUNS_DIR ${RUNS_DIR}: ${e.message}`);
+    console.error(`HALT: cannot read runs dir ${runsDir()}: ${e.message}`);
     process.exit(1);
   }
 
@@ -148,7 +148,7 @@ async function main() {
   const flippedSlugs = [];
 
   for (const { name: dirName } of runDirs) {
-    const runDir = path.join(RUNS_DIR, dirName);
+    const runDir = path.join(runsDir(), dirName);
     let entries;
     try { entries = fs.readdirSync(runDir); } catch { continue; }
 
@@ -163,7 +163,7 @@ async function main() {
 
       const meta = readJsonSafe(path.join(runDir, `${slug}.meta.json`));
       const cwd = meta?.cwd ?? process.cwd();
-      // RUNS_DIR is shared by every project scheduled on this machine (see
+      // The runs dir is shared by every project scheduled on this machine (see
       // this script's header) — scope to the project it's run from by
       // default so the count matches that project's own measured history,
       // not an unrelated sibling repo's. --all-projects opts out.

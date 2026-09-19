@@ -24,8 +24,8 @@ function uniqueSlug(label) {
 }
 
 function readAuditRecordsForSlug(slug) {
-  if (!fs.existsSync(auditLog.AUDIT_LOG_PATH)) return [];
-  return fs.readFileSync(auditLog.AUDIT_LOG_PATH, 'utf8')
+  if (!fs.existsSync(auditLog.auditLogPath())) return [];
+  return fs.readFileSync(auditLog.auditLogPath(), 'utf8')
     .split('\n')
     .filter(Boolean)
     .map((line) => {

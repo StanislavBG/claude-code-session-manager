@@ -26,10 +26,9 @@
 'use strict';
 
 const path = require('node:path');
-const os = require('node:os');
 const config = require('../config.cjs');
 
-const ROLLUP_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'history-rollup.jsonl');
+const { historyRollupPath } = require('./schedulerPaths.cjs');
 const COMPACT_THRESHOLD_BYTES = 5 * 1024 * 1024;
 
 const TOTALS_MODEL_ID = '';
@@ -75,7 +74,7 @@ function mergeRollupLines(lines) {
  * only want data lines should filter on modelId/projectDir.
  */
 async function readRollup(fromDate, toDate) {
-  const { exists, text } = await config.readText(ROLLUP_PATH);
+  const { exists, text } = await config.readText(historyRollupPath());
   if (!exists || !text) return new Map();
   const merged = mergeRollupLines(text.split('\n'));
   const filtered = new Map();
@@ -108,7 +107,7 @@ function isDateFinalized(mergedMap, date) {
 async function appendRollupDays(entries) {
   if (!entries || entries.length === 0) return;
 
-  const real = config.validatePath(ROLLUP_PATH);
+  const real = config.validatePath(historyRollupPath());
   config.validateWrite(real);
   const fsp = require('node:fs/promises');
   await fsp.mkdir(path.dirname(real), { recursive: true });
@@ -125,15 +124,15 @@ async function appendRollupDays(entries) {
 
 /** Dedupe the rollup file down to its last-write-wins merged lines. */
 async function compact() {
-  const { exists, text } = await config.readText(ROLLUP_PATH);
+  const { exists, text } = await config.readText(historyRollupPath());
   if (!exists || !text) return;
   const merged = mergeRollupLines(text.split('\n'));
   const rewritten = Array.from(merged.values()).map((b) => JSON.stringify(b)).join('\n') + '\n';
-  await config.writeTextAtomic(ROLLUP_PATH, rewritten);
+  await config.writeTextAtomic(historyRollupPath(), rewritten);
 }
 
 module.exports = {
-  ROLLUP_PATH,
+  historyRollupPath,
   COMPACT_THRESHOLD_BYTES,
   TOTALS_MODEL_ID,
   FINALIZED_MODEL_ID,

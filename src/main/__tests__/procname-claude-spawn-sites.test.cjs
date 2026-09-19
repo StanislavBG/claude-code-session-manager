@@ -123,7 +123,7 @@ describe('claudeSpawnTarget', () => {
   it('every real alias name and argv0 label satisfies /\\bclaude\\b/ (round-trip)', () => {
     for (const alias of ['sm-claude-job', 'sm-claude-chat', 'sm-claude-aux']) {
       expect(GATE.test(alias)).toBe(true);
-      expect(GATE.test(path.join(procName.ALIAS_ROOT, alias))).toBe(true);
+      expect(GATE.test(path.join(procName.procnamesRoot(), alias))).toBe(true);
     }
     for (const role of ['job', 'chat', 'aux']) {
       expect(GATE.test(procName.smArgv0(role, 'a-slug'))).toBe(true);
@@ -161,7 +161,7 @@ describe.skipIf(!HAS_PROC)('real aliased processes vs the reaper gates', () => {
     // A shebang stub's cmdline[0] is the interpreter and [1] the ALIAS PATH (the
     // kernel rewrites argv for scripts, so argv0 is not visible); a native
     // binary shows the label instead — see the ELF test below.
-    expect(cmd.includes(path.join(procName.ALIAS_ROOT, 'sm-claude-job'))).toBe(true);
+    expect(cmd.includes(path.join(procName.procnamesRoot(), 'sm-claude-job'))).toBe(true);
     expect(cmd.includes(slug)).toBe(true);
     // scheduler.cjs killOrphanClaudePid + reaperHelpers.cjs:31 / :105 / :107 regexes
     expect(GATE.test(cmd)).toBe(true);
@@ -277,9 +277,9 @@ describe.skipIf(!HAS_PROC)('comm assertions through the real runners', () => {
 
   it('fail-open: an unusable ALIAS_ROOT still lets the job run to completion', async () => {
     const { projectCwd, runDir } = setupProject();
-    fs.rmSync(procName.ALIAS_ROOT, { recursive: true, force: true });
-    fs.mkdirSync(path.dirname(procName.ALIAS_ROOT), { recursive: true });
-    fs.writeFileSync(procName.ALIAS_ROOT, 'not a directory'); // mkdir/symlink under it must fail
+    fs.rmSync(procName.procnamesRoot(), { recursive: true, force: true });
+    fs.mkdirSync(path.dirname(procName.procnamesRoot()), { recursive: true });
+    fs.writeFileSync(procName.procnamesRoot(), 'not a directory'); // mkdir/symlink under it must fail
     try {
       const slug = `pn02-failopen-${process.pid}`;
       writePrd(projectCwd, slug);
@@ -296,7 +296,7 @@ describe.skipIf(!HAS_PROC)('comm assertions through the real runners', () => {
       delete process.env.SM_CLAUDE_BIN;
       expect(claudeBin.claudeSpawnTarget('job', slug, stub)).toEqual({ command: stub });
     } finally {
-      fs.rmSync(procName.ALIAS_ROOT, { force: true });
+      fs.rmSync(procName.procnamesRoot(), { force: true });
       fs.rmSync(projectCwd, { recursive: true, force: true });
       fs.rmSync(runDir, { recursive: true, force: true });
     }

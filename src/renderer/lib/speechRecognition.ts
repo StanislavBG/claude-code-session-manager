@@ -64,8 +64,10 @@ interface RecognitionCallbacks {
   inputDeviceId?: string | null
 }
 
-// F8 — Semantic turn-detection constants. Designed, not implemented — see the
-// stub at turnDetectorWorker.ts. See docs/voice/prd/F8-turn-detection.v2.md.
+// F8 — Semantic turn-detection constants. Designed, NOT implemented: the model
+// is never loaded and the host never consults its result — turnDetectorWorker.ts
+// is a stub. (The F8 design doc lived in the retired `docs/voice/` archive; the
+// rationale that mattered is inlined below.)
 //
 // MVP NOTE: these are wired but not enforced; the actual smart-turn-v3 model
 // is not loaded in v1. The pure-VAD endpointing path below remains
@@ -83,7 +85,8 @@ interface RecognitionCallbacks {
 export const TURN_DETECTOR_MIN_AUDIO_MS = 1500
 export const TURN_DETECTOR_TIMEOUT_MS = 250
 
-// F6 — Streaming partials constants. See docs/voice/prd/F6-streaming-partials.v2.md.
+// F6 — Streaming partials constants. (The F6 design doc lived in the retired
+// `docs/voice/` archive; the tail-window rationale is inlined below.)
 //
 // Tail-window cap: partial encodes only ever see the last WINDOW_SECONDS of
 // audio. Past t=WINDOW_SECONDS, encode cost is O(1) regardless of utterance

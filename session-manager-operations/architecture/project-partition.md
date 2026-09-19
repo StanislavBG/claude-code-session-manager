@@ -29,7 +29,6 @@ Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
 | `dist/` | DESKTOP HARNESS | Renderer build output. |
 | `e2e/`, `tests/`, `test/`, `test-results/` | DESKTOP HARNESS | `test/` is being retired by PRD 1182. |
 | `screenshots/` | DESKTOP HARNESS | Manual/e2e capture output. |
-| `docs/` | DESKTOP HARNESS | Legacy dev/design notes and PRD drafts predating `session-manager-operations/architecture/`; not the authoritative ops docs. |
 | `.github/` | DESKTOP HARNESS | CI workflows (build/test/publish). |
 | `.claude/` | DESKTOP HARNESS | This repo's own local dev config (agent personas used to develop session-manager, worktrees, settings) — distinct from the AGENT LAYER, which is what THIS repo ships to *other* repos. |
 | `CLAUDE.md`, `tsconfig.json`, `vite.config.ts`, `vitest.config.ts`, `tailwind.config.js`, `postcss.config.js`, `playwright.config.ts`, `package.json`, `package-lock.json`, `.gitignore`, `LICENSE` | DESKTOP HARNESS | Root build/governance config. |

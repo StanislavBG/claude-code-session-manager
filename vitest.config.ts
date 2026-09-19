@@ -218,6 +218,7 @@ export default defineConfig({
       'scripts/__tests__/ops-sweep-claude-md-fallback.test.cjs',
       'scripts/__tests__/sync-settings-schema.test.cjs',
       'src/main/__tests__/prdAdminRoutes.test.cjs',
+      'src/main/__tests__/prdAuthoringSeed.test.cjs',
       'src/main/__tests__/prdAdminRouteParity.test.cjs',
       'src/main/__tests__/scheduler-reconcile-quarantine.test.cjs',
       'src/main/__tests__/prdMigrationLegacyAdopt.test.cjs',

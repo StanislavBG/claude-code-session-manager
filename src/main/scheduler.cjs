@@ -1303,6 +1303,8 @@ async function retireCompletedSlugs(slugs) {
 // Bundled authoring guide seeded into the scheduler dir so the session-manager-dev
 // plugin's /develop and /prd skills — which reference this stable `~`-absolute
 // path — work on any user's machine, not just the author's.
+// Line 1 of the template is `<!-- PRD_AUTHORING.md vN -->`: bump vN whenever the
+// template changes, or existing installs never receive the update.
 const PRD_AUTHORING_TEMPLATE = path.join(__dirname, 'templates', 'PRD_AUTHORING.md');
 
 function ensureDirs() {
@@ -1311,9 +1313,11 @@ function ensureDirs() {
   // Seed the authoring guide once; never clobber a user's edited copy.
   try {
     const authoringDest = path.join(schedulerPaths.scheduledPlansRoot(), 'PRD_AUTHORING.md');
-    if (!fs.existsSync(authoringDest) && fs.existsSync(PRD_AUTHORING_TEMPLATE)) {
-      fs.copyFileSync(PRD_AUTHORING_TEMPLATE, authoringDest);
-    }
+    seedAuthoringGuide({
+      src: PRD_AUTHORING_TEMPLATE,
+      dest: authoringDest,
+      write: (abs, text) => config.writeTextAtomic(abs, text, { writer: 'scheduler' }),
+    }).catch(() => { /* non-fatal, same as below */ });
   } catch { /* non-fatal: the guide is a convenience, not load-bearing for a run */ }
 }
 
@@ -1485,6 +1489,7 @@ async function sweepQueueBackups() {
 // callback that must flush meta.json before resolving) — replacing with async
 // would deadlock the exit path.
 const config = require('./config.cjs');
+const { seedAuthoringGuide } = require('./lib/prdAuthoringSeed.cjs');
 const atomicWriteJsonSync = (p, data) => config.writeJsonSync(p, data);
 
 // ---------- scheduler-state.json (sidecar) ----------

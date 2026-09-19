@@ -9,8 +9,8 @@ paper.
 **The user-facing pages themselves are NOT here.** They live in `~/Projects/Bilko`, a sibling
 repo. This directory only holds the tooling that *produces* what Bilko serves:
 
-- `project-pages/` — renders a project's Home/Marketing/Feature/Architecture/Brief pages from a
-  saved component library + a summary JSON. Consumed by the `project-home-builder` agent
+- `project-pages/` — legacy renderer toolchain for the old multi-page Project Pages (Project Home is now
+  a single agent-written `home.html`; see `session-manager-operations/project-pages/README.md`). Consumed by the `project-home-builder` agent
   persona and by `src/main/lib/projectHomeAdminRoutes.cjs` (an Electron IPC handler that stays
   in `src/main/` — it's DESKTOP HARNESS runtime that *calls* this WEB PRESENCE toolchain, not
   part of it).

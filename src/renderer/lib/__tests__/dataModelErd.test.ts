@@ -90,13 +90,10 @@ describe('dataModelErd', () => {
       ['scheduler/', 'scheduler'],
       ['project-brief', 'project-home'],
       ['bilko-host', 'bilko-host'],
+      ['project-pages', 'project-home'],
     ]
     for (const entity of ERD_ENTITIES) {
       if (!entity.store.path.includes('session-manager-operations/')) continue
-      if (entity.store.path.includes('project-pages')) {
-        expect(entity.store.writer, `${entity.id} is in a deliberately-unowned namespace and must omit writer`).toBeUndefined()
-        continue
-      }
       const hit = expectedByPathFragment.find(([fragment]) => entity.store.path.includes(fragment))
       if (!hit) continue
       expect(entity.store.writer, `${entity.id} should carry writer "${hit[1]}"`).toBe(hit[1])

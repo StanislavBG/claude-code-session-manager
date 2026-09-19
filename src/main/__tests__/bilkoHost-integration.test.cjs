@@ -14,8 +14,8 @@ function makeProject() {
   config.addAllowedRoot(root);
   fs.mkdirSync(path.join(root, 'session-manager-operations', 'project-pages', 'output'), { recursive: true });
   fs.writeFileSync(
-    path.join(root, 'session-manager-operations', 'project-pages', 'output', 'marketing.html'),
-    '<html><title>Demo</title>Marketing</html>',
+    path.join(root, 'session-manager-operations', 'project-pages', 'home.html'),
+    '<html><title>Demo</title>Home</html>',
   );
   fs.writeFileSync(
     path.join(root, 'session-manager-operations', 'project-pages', 'output', 'feature.html'),
@@ -29,7 +29,7 @@ test('prepareBundle seeds a root document and writes dist/index.html + manifest.
   const root = makeProject();
   const result = await bilkoHost.prepareBundle({ cwd: root, slug: 'demo-app' });
   assert.equal(fs.existsSync(path.join(result.distPath, 'index.html')), true);
-  assert.equal(fs.readFileSync(path.join(result.distPath, 'index.html'), 'utf8'), '<html><title>Demo</title>Marketing</html>');
+  assert.equal(fs.readFileSync(path.join(result.distPath, 'index.html'), 'utf8'), '<html><title>Demo</title>Home</html>');
   assert.equal(result.manifest.slug, 'demo-app');
   assert.equal(result.manifest.bundle.fileCount, 1);
   fs.rmSync(root, { recursive: true, force: true });

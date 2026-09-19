@@ -83,7 +83,7 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   paths only via its `opsPath()`. Read its `README.md` first.
   - **Owned** (in `OWNERS`, app-owned runtime state): `prompt-sessions` → epics · `scheduler` → scheduler ·
     `project-brief` → project-home · `logs` → logs · `bilko-host` → bilko-host · `project-pages` →
-    project-home (admin render route only; a Builder Epic's own authoring stays ungoverned — see
+    project-home (`home.html` via `project_home_write` only — see
     `project-pages/README.md`).
   - **Deliberately NOT owned** (skill-authored docs/artifacts, no concurrent-write hazard — this is the
     correct split, not a gap): `architecture`, `design-mocks`, `HUMAN_LEARN`, `manual`, `reviews`.

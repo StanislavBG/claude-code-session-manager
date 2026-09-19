@@ -1,8 +1,8 @@
 # Host on Bilko.run — architecture spec
 
 Canonical design for the **"Host on Bilko.run"** Configure-face left-nav tab: a
-per-project surface that turns an already-generated [Project Page](project-pages-pipeline.md)
-(the `marketing` lens) into a real listing on bilko.run, with a one-click
+per-project surface that turns the already-generated Project Home page
+(`project-pages/home.html`) into a real listing on bilko.run, with a one-click
 **Publish** action. This is the single source of truth for the `bilko-host`
 OWNERS namespace, the `bilko-host-publisher` Epic tag + local agent, and the
 `HostBilko.tsx` tab — edit here, not in any of those, when the design
@@ -72,12 +72,12 @@ list**, not one document:
 
 - Exactly one **root document** (`subpath: ''`) → `dist/index.html` →
   `bilko.run/projects/<slug>/`. This is "the project itself" — by default
-  the Marketing Project Page, same as the original single-document design.
+  the Project Home page (`home.html`).
 - Any number of **sub-path documents** (`subpath: 'special-doc/01'`) →
   `dist/special-doc/01/index.html` → `bilko.run/projects/<slug>/special-doc/01/`.
-  A document's `source` is either another already-generated Project Page
-  lens (`{ kind: 'project-page-lens', lens: 'home'|'feature'|'architecture' }`
-  — `marketing` is reserved for the root) or an arbitrary local HTML file
+  A document's `source` is either the Project Home page (`{ kind: 'project-page-lens', lens: 'home' }`,
+  the root's default; other lens names are legacy and only resolve if an old
+  `project-pages/output/<lens>.html` still exists) or an arbitrary local HTML file
   under the project (`{ kind: 'file', path }` — e.g. a `HUMAN_LEARN/` page).
 
 Stored in `session-manager-operations/bilko-host/documents.json`
@@ -116,11 +116,10 @@ a deletion is live before it actually is.
 
 ## Why this builds on Project Pages instead of inventing new content
 
-Project Home already computes, per project, a static self-contained
-`marketing.html` (`session-manager-operations/project-pages/output/
-marketing.html`) from a `ProjectPageSummary` that traces every field back to
-something real. That artifact — not new copy written by this feature — is
-what gets published. A project with no `project-pages/output/marketing.html`
+Project Home already produces, per project, one static self-contained
+`home.html` (`session-manager-operations/project-pages/home.html`), written
+by a project-home-builder agent from the real project. That artifact — not new copy written by this feature — is
+what gets published. A project with no `project-pages/home.html`
 yet cannot publish; the tab's empty state deep-links to Project Home's
 "Generate Now" first (same handoff Project Pages' own empty state uses).
 
@@ -212,7 +211,7 @@ re-runs Stage B).
 
 Before showing "Publish" at all:
 
-1. No `project-pages/output/marketing.html` → **"Generate a Project Page
+1. No `project-pages/home.html` → **"Generate a Project Page
    first"**, deep-links to Project Home.
 2. `package.json` has `"private": true` and no `homepage`/npm publish
    history → require an explicit extra confirm click before Stage A runs

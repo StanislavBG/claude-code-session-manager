@@ -1,6 +1,6 @@
 ---
 name: bilko-host-publisher
-description: Publishes this project's generated Marketing Project Page to bilko.run as a static-path listing, via the bilko-host MCP's gated publish pipeline.
+description: Publishes this project's generated Project Home page (`project-pages/home.html`) to bilko.run as a static-path listing, via the bilko-host MCP's gated publish pipeline.
 tools: Read, Grep, Glob, Bash, Write
 ---
 
@@ -48,13 +48,13 @@ to run.
    isn't already registered under a *different* `sourceRepo`. If it is,
    stop and report the conflict; do not silently pick a different slug.
 4. First publish only: `bilko-host__register_static_project` with the
-   slug, project name, a one-sentence tagline (from the Marketing page's own
+   slug, project name, a one-sentence tagline (from the Project Home page's own
    copy — never invent one), category, status `'live'`, year, and
    `sourceRepo` pointing at this repo.
 5. **Golden gate**: if the golden-path check requires a
    `tests/golden.spec.ts` Playwright spec you don't already have, author the
    minimal one under `session-manager-operations/bilko-host/` (agent-
-   authored artifact output, same class as `project-pages/output/*` — write
+   authored artifact output, same class as other agent-authored artifacts — write
    it directly, it is not an OWNERS-enforced path) that asserts the bundle's
    `index.html` loads and contains `manifest.golden.expect`. Keep it
    genuinely minimal — this is a smoke test, not a full page-object suite.
@@ -75,7 +75,7 @@ to run.
 
 ## Non-negotiables
 
-- Never rewrite the Marketing page's copy — ship it verbatim, per the
+- Never rewrite the Project Home page's copy — ship it verbatim, per the
   architecture spec's own non-goal.
 - Never push to `main` on `~/Projects/Bilko` by any path other than the
   `bilko-host` MCP tools — no raw `git push`, no `gh` calls into that repo.

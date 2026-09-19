@@ -48,17 +48,10 @@ const OWNERS = Object.freeze({
   'scheduler': 'scheduler',
   // Project Home owns the synthesized Brief (generate + hand-edit).
   'project-brief': 'project-home',
-  // Project Home also owns the app-side render path for Project Pages
-  // (summary.json/picks.json/output/* written via the
-  // /admin/project-home/render route, config.cjs's writeJson). This is a
-  // NARROWER claim than "project-home owns everything under this folder":
-  // the SAME folder is also written directly by a project-home-builder
-  // Epic's own Write tool, which never goes through config.cjs and so is
-  // NOT governed by this table at all (see
-  // session-manager-operations/project-pages/README.md). Declaring the
-  // namespace here only closes the fail-closed gap for the app's own write
-  // path — it does not claim exclusivity over the agent's Write-tool calls,
-  // which remain outside this law by construction.
+  // Project Home owns project-pages/home.html, written only via the
+  // project_home_write MCP tool -> /admin/project-home/write route
+  // (config.cjs's writeTextAtomic). See
+  // session-manager-operations/project-pages/README.md.
   'project-pages': 'project-home',
   // Structured per-tab error log lines (JSONL), tagged for tracing/analysis.
   'logs': 'logs',

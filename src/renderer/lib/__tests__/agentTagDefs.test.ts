@@ -28,12 +28,12 @@ const FORBIDDEN_REPO_PATH_SUBSTRINGS = [
 ]
 
 describe('AGENT_TAG_DEFS project-home-builder template', () => {
-  it('names only the MCP contract, no repo-relative paths, and never falls back to /develop', () => {
+  it('names only the project_home_write tool, no repo-relative paths, and never falls back to /develop', () => {
     const template = AGENT_TAG_DEFS['project-home-builder'].initialPromptTemplate
     for (const forbidden of FORBIDDEN_REPO_PATH_SUBSTRINGS) {
       expect(template).not.toContain(forbidden)
     }
     expect(template).not.toContain('/develop')
-    expect(template).toContain('project_home_get_contract')
+    expect(template).toContain('project_home_write')
   })
 })

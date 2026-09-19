@@ -65,15 +65,15 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
     tag: 'project-home-builder',
     label: 'Project Home Builder',
     description:
-      'Generates a project\'s 5 static Project Page HTML files (home, marketing, feature, architecture, brief) via the project-home-builder local agent — see session-manager-operations/architecture/project-pages-pipeline.md. Decomposition into PRDs is the expected next step, same as feature/bug/build.',
+      'Reads a project and writes its one-page Project Home overview (home.html) via the project-home-builder local agent and the project_home_write tool. Decomposition into PRDs is the expected next step, same as feature/bug/build.',
     developEagerness: 'expected-default',
-    developsVia: 'project-home-builder agent protocol (falls back to /develop only if that pipeline doesn\'t exist yet)',
+    developsVia: 'project-home-builder agent protocol (not /develop)',
   },
   {
     tag: 'bilko-host-publisher',
     label: 'Bilko Host Publisher',
     description:
-      'Publishes this project\'s generated Marketing Project Page to bilko.run via the bilko-host MCP\'s gated static-path publish pipeline — see session-manager-operations/architecture/bilko-host-integration.md. Running the publish sequence is the expected next step, same as feature/bug/build.',
+      'Publishes this project\'s Project Home page (home.html) to bilko.run via the bilko-host MCP\'s gated static-path publish pipeline — see session-manager-operations/architecture/bilko-host-integration.md. Running the publish sequence is the expected next step, same as feature/bug/build.',
     developEagerness: 'expected-default',
     developsVia: 'bilko-host-publisher agent protocol (not /develop)',
   },

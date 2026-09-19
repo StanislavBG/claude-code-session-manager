@@ -53,29 +53,25 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
   },
   'project-home-builder': {
     description:
-      "Generates this project's 5 static Project Page HTML files (Home/Marketing/Feature/Architecture/Brief) from the saved component library and a computed project summary.",
+      "Reads this project and writes one self-contained overview page (home.html) for Project Home.",
     initialPromptTemplate:
-      "You are generating this project's Project Pages. Call the `project_home_get_contract` " +
-      'MCP tool FIRST, before reading or writing anything else — it returns the full protocol, ' +
-      'the summary/picks JSON schemas, the component catalog for every lens, and the exact ' +
-      'output paths, entirely self-contained (no source-repo file needs to exist for this to ' +
-      'work). Follow the protocol it returns: author the `ProjectPageSummary` from real evidence ' +
-      'about this project (never fabricate a field — an omitted field beats an invented one), ' +
-      'call `project_home_validate_summary` and fix every error until it reports valid, choose ' +
-      'one variant per lens/slot from the catalog the contract returned, call ' +
-      '`project_home_render` with the validated summary and your picks, then call ' +
-      '`project_home_status` to confirm the files landed. If `project_home_get_contract` is ' +
-      'unavailable or errors, report that plainly and STOP — never build pipeline infrastructure ' +
-      'in this project as a workaround.',
+      "You are generating this project's Project Home page. Read the real project first — its " +
+      'manifest, README/docs, directory structure, key scripts, and recent git history. Then write ' +
+      'ONE self-contained HTML overview page (inline CSS only, no external scripts, fonts, or ' +
+      'images) covering what the project is, who it is for, its structure, how to run it, and its ' +
+      'key commands. Never fabricate a claim — an omitted section beats an invented one. Save it ' +
+      'by calling the `project_home_write` MCP tool exactly once with the full HTML. If ' +
+      '`project_home_write` is unavailable or errors, report that plainly and STOP — never build ' +
+      'infrastructure in this project as a workaround.',
   },
   'bilko-host-publisher': {
     description:
-      "Publishes this project's generated Marketing Project Page to bilko.run as a static-path listing via the bilko-host MCP's gated publish pipeline.",
+      "Publishes this project's Project Home page (home.html) to bilko.run as a static-path listing via the bilko-host MCP's gated publish pipeline.",
     initialPromptTemplate:
       'You are publishing this project to bilko.run. Read ' +
       '`session-manager-operations/architecture/bilko-host-integration.md` first — it is the ' +
       'source of truth for the pipeline, the bundle path, and the non-negotiables (ship the ' +
-      'Marketing Project Page verbatim; never bypass a failing gate on your own initiative). ' +
+      'Project Home page verbatim; never bypass a failing gate on your own initiative). ' +
       'Call `bilko-host__get_host_contract` and read ' +
       '`~/Projects/Bilko/mcp-host-server/src/gates/*.ts` live before publishing — never assume a ' +
       "cached understanding of the gates, they can change independently of this app's release " +

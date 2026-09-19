@@ -46,6 +46,10 @@ const {
 const WRITER = 'bilko-host';
 const PROJECT_PAGE_LENSES = new Set(['home', 'marketing', 'feature', 'architecture']);
 
+function homePagePath(cwd) {
+  return opsPath(cwd, 'project-pages', 'home.html');
+}
+
 function bilkoHostDir(cwd) {
   return opsPath(cwd, 'bilko-host');
 }
@@ -103,9 +107,10 @@ async function writeDocuments(cwd, documents) {
 async function get({ cwd }) {
   const realCwd = config.validatePath(cwd);
 
-  const marketingResult = await config.readText(
-    opsPath(realCwd, 'project-pages', 'output', 'marketing.html'),
-  );
+  // The single Project Home page (project-pages/home.html) seeds the root
+  // document. `hasMarketingPage` is the renderer's legacy field name for
+  // "a root-document source page exists".
+  const marketingResult = await config.readText(homePagePath(realCwd));
   const pkgResult = await config.readJson(path.join(realCwd, 'package.json'));
   const pkg = pkgResult.exists && !pkgResult.parseError ? pkgResult.data : null;
 
@@ -142,15 +147,15 @@ async function get({ cwd }) {
   };
 }
 
-/** Seeds documents.json with a single root document (the Marketing Project Page) if it doesn't exist yet. */
+/** Seeds documents.json with a single root document (the Project Home page, home.html) if it doesn't exist yet. */
 async function ensureSeededDocuments(cwd) {
   const existing = await readDocuments(cwd);
   if (existing) return existing;
   const seeded = [{
     id: crypto.randomUUID(),
     subpath: '',
-    title: 'Project (Marketing)',
-    source: { kind: 'project-page-lens', lens: 'marketing' },
+    title: 'Project (Home)',
+    source: { kind: 'project-page-lens', lens: 'home' },
     addedAt: new Date().toISOString(),
   }];
   await writeDocuments(cwd, seeded);
@@ -215,8 +220,12 @@ async function removeDocument({ cwd, id }) {
 
 async function resolveDocumentHtml(cwd, doc) {
   if (doc.source.kind === 'project-page-lens') {
+    // Only `home` is generated now (one home.html); the other lens names
+    // are legacy and resolve to their old output/<lens>.html if one exists.
     const result = await config.readText(
-      opsPath(cwd, 'project-pages', 'output', `${doc.source.lens}.html`),
+      doc.source.lens === 'home'
+        ? homePagePath(cwd)
+        : opsPath(cwd, 'project-pages', 'output', `${doc.source.lens}.html`),
     );
     if (!result.exists) {
       throw new Error(`document "${doc.title}" points at the ${doc.source.lens} Project Page, but it hasn't been generated yet`);

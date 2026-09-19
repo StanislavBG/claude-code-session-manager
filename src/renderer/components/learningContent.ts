@@ -554,8 +554,8 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       ],
     },
   'bilko-host': {
-      headline: 'Host on Bilko.run — publish this project\'s Marketing page',
-      intro: 'Turns the Marketing lens of this project\'s already-generated Project Pages into a live static-path listing on bilko.run, using the bilko-host MCP\'s existing gated publish pipeline (manifest/budget/golden/a11y/audit checks) — never a second, competing hosting mechanism.',
+      headline: 'Host on Bilko.run — publish this project\'s Project Home page',
+      intro: 'Turns this project\'s already-generated Project Home page (home.html) into a live static-path listing on bilko.run, using the bilko-host MCP\'s existing gated publish pipeline (manifest/budget/golden/a11y/audit checks) — never a second, competing hosting mechanism.',
       sections: [
         {
           title: 'What it shows',
@@ -568,7 +568,7 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       ],
       tips: [
         'Project face only — publishing is always scoped to the active project\'s tab.',
-        'Requires a generated Marketing Project Page first — Project Home\'s "Generate Now" produces it.',
+        'Requires a generated Project Home page first — Project Home\'s "Generate Now" produces it.',
         'Publish never bypasses a failing gate automatically — a human always decides whether to override.',
       ],
     },

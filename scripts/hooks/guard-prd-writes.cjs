@@ -43,42 +43,13 @@
  * row (src/main/lib/delegationReadiness.cjs's installPrdWriteGuard, which
  * merges into any existing hooks block instead of clobbering it).
  *
- * The standardized approach is REFERENCE, not vendor — do NOT copy this file
- * into the adopting repo. Vendoring drifts (it already did, with exactly one
- * adopter), and what is being guarded is session-manager-operations/scheduler/,
- * Session Manager's own territory inside someone else's repo, so the
- * enforcement logic belongs with the owner.
- *
- * This file lives in the session-manager repo, so a relative
- * `node scripts/hooks/guard-prd-writes.cjs` command only resolves when the
- * hook runs with THIS repo as cwd. Pasting that relative string into another
- * project yields a hook that exits non-zero WITHOUT code 2 — a non-blocking
- * error — so it silently guards nothing. Any other project's
- * `.claude/settings.json` must reference this file by its ABSOLUTE path:
- *
- *   {
- *     "hooks": {
- *       "PreToolUse": [
- *         {
- *           "matcher": "Write|Edit|NotebookEdit",
- *           "hooks": [
- *             {
- *               "type": "command",
- *               "command": "node /home/bilko/Projects/session-manager/scripts/hooks/guard-prd-writes.cjs"
- *             }
- *           ]
- *         }
- *       ]
- *     }
- *   }
- *
- * This is still opt-in per project, same as above — never auto-install this
- * into every project's settings without the human choosing to add it there.
- *
- * Roll out to another project by copying this file + the same settings.json
- * entry into that project — deliberately not published as a global/user-
- * scoped hook so a project can opt in individually (see this PRD's
- * Implementation notes: "scope the hook to the session-manager repo first").
+ * Adopted by REFERENCE through the stable shim
+ * `~/.claude/session-manager/hooks/guard-prd-writes.cjs`, written by
+ * src/main/lib/guardShims.cjs (installed by src/main/lib/delegationReadiness.cjs).
+ * The shim carries no guard logic — it reads `app-root.json` and require()s this
+ * file from the currently running app, so an app upgrade never breaks an adopter.
+ * Never vendor: do not copy this file into another repo, and do not hardcode an
+ * absolute path to it in another project's `.claude/settings.json`.
  *
  * ── Uninstall ────────────────────────────────────────────────────────────
  * Remove the `PreToolUse` entry above from `.claude/settings.json`. The

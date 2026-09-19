@@ -28,14 +28,13 @@
  *   everything for that one Epic only.
  *
  * ── Install (per-project, NOT machine-wide) ─────────────────────────────
- * Adopting project: press "Fix it" on the "Inline-implementation guard hook
- * installed" row of the New Epic readiness banner — it runs
- * installInlineImplementationGuard() (src/main/lib/delegationReadiness.cjs),
- * which merges a hook referencing THIS repo's own absolute script path into
- * `<your project>/.claude/settings.json`'s `Write|Edit|NotebookEdit` matcher,
- * the same reference-not-vendor path guard-prd-writes.cjs uses. Hand-editing
- * settings.json (below) is a degraded last resort for when the app isn't
- * running — add the command alongside guard-prd-writes.cjs in the SAME
+ * Adopted by REFERENCE through the stable shim
+ * `~/.claude/session-manager/hooks/guard-inline-implementation.cjs`, written by
+ * src/main/lib/guardShims.cjs (installed by src/main/lib/delegationReadiness.cjs's
+ * installInlineImplementationGuard(), via "Fix it" on the New Epic readiness
+ * banner). Never vendor: do not copy this file or hardcode an absolute path to it.
+ * The example below is THIS repo's own `.claude/settings.json` (relative command,
+ * cwd = repo root); add the command alongside guard-prd-writes.cjs in the SAME
  * `Write|Edit|NotebookEdit` matcher's `hooks` array:
  *
  *   {

@@ -21,6 +21,7 @@
     "scripts/hooks/guard-prd-writes.cjs",
     "scripts/hooks/guard-destructive-git.cjs",
     "scripts/hooks/guard-inline-implementation.cjs",
+    "scripts/hooks/guard-self-schedule.cjs",
     "src/main/",
     "src/preload/",
     "src/seed/",

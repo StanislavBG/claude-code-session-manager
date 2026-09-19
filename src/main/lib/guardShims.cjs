@@ -1,6 +1,6 @@
 /**
- * guardShims.cjs — stable, app-upgrade-proof indirection for the three
- * PreToolUse guard hooks that delegationReadiness.cjs installs into an
+ * guardShims.cjs — stable, app-upgrade-proof indirection for every
+ * PreToolUse guard hook (each name in GUARD_NAMES) that delegationReadiness.cjs installs into an
  * adopting project's `.claude/settings.json`.
  *
  * Why this exists: those installers used to bake
@@ -66,7 +66,7 @@ require(path.join(ptr.appRoot, 'scripts', 'hooks', '${guardName}'));
 }
 
 /**
- * Write the pointer file + all three shims under `homeDir`. Idempotent: a
+ * Write the pointer file + every shim in GUARD_NAMES under `homeDir`. Idempotent: a
  * re-run with the same `appRoot` produces byte-identical files; a re-run with
  * a DIFFERENT `appRoot` (an app upgrade) rewrites only the pointer, which is
  * exactly what lets already-installed project hooks follow the upgrade with

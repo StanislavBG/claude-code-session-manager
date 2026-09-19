@@ -17,12 +17,14 @@ const HOOK_PATH = path.join(__dirname, '..', 'guard-self-schedule.cjs');
 const IN_RUN_ENV = { SM_SCHEDULER_JOB_SLUG: '123-test-job' };
 
 function runHook(payload, env) {
+  // Strip the ambient marker: this suite may itself run inside a scheduler job.
+  const { SM_SCHEDULER_JOB_SLUG: _ambient, ...cleanEnv } = process.env;
   const input = typeof payload === 'string' ? payload : JSON.stringify(payload);
   const result = spawnSync(process.execPath, [HOOK_PATH], {
     input,
     encoding: 'utf8',
     timeout: 10_000,
-    env: { ...process.env, ...env },
+    env: { ...cleanEnv, ...env },
   });
   let parsed = null;
   try {

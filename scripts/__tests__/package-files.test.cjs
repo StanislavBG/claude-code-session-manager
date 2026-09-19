@@ -35,16 +35,12 @@ const REQUIRED_PATHS = [
   'src/seed/agents/project-home-builder.md',
 ];
 
-// The three PreToolUse guard scripts delegationReadiness.cjs resolves via
-// path.resolve(__dirname,'..','..','..','scripts','hooks','guard-*.cjs'). If
-// these are missing from "files", every remote npx install has all guards
-// silently dead (delegationReadiness.cjs reports EXISTS: false) even though
-// delegationReadiness.cjs itself ships fine.
-const GUARD_SCRIPT_PATHS = [
-  'scripts/hooks/guard-prd-writes.cjs',
-  'scripts/hooks/guard-destructive-git.cjs',
-  'scripts/hooks/guard-inline-implementation.cjs',
-];
+// Every PreToolUse guard script (GUARD_NAMES in guardShims.cjs) that the shims
+// require() from the app root. If any is missing from "files", every remote npx
+// install has that guard silently dead. Derived, so a fifth guard cannot ship
+// unpacked without this test going red.
+const { GUARD_NAMES } = require('../../src/main/lib/guardShims.cjs');
+const GUARD_SCRIPT_PATHS = GUARD_NAMES.map((n) => `scripts/hooks/${n}`);
 
 // The two esbuild bundles are gitignored build artifacts (`dist` in
 // .gitignore) produced by prepublishOnly, so they may not exist in a fresh
@@ -85,7 +81,7 @@ test(
 
     // The guards ship; their test fixtures do not — a directory entry for
     // "scripts/hooks/" would drag __tests__/ in too, so "files" must list
-    // the three guard scripts individually (see the entries above).
+    // every guard script individually (see the entries above).
     const draggedInTests = [...packedPaths].filter((p) => p.startsWith('scripts/hooks/__tests__/'));
     expect(draggedInTests, `npm pack must not ship guard test fixtures: ${draggedInTests.join(', ')}`).toEqual([]);
   },
@@ -140,7 +136,7 @@ test('package.json "files" would fail this same check if scripts/hooks were drop
   );
   expect(
     missingUnderRegression,
-    'sanity check failed: removing the guard entries from "files" should have made all three guard scripts unpacked',
+    'sanity check failed: removing the guard entries from "files" should have made every guard script unpacked',
   ).toEqual(GUARD_SCRIPT_PATHS);
 });
 

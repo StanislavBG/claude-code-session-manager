@@ -3648,37 +3648,65 @@ function resetJobFields(job, errorMsg, opts = {}) {
   return true;
 }
 
-// Grace period between a boot orphan's SIGTERM and reading its log to
-// classify the outcome — matches killOrphanClaudePid's own internal 5s
-// SIGKILL follow-up delay, plus a small margin so classification always runs
-// after that SIGKILL has had a chance to land.
-const BOOT_ORPHAN_KILL_GRACE_MS = 6000;
-
 /**
- * partitionBootOrphans(jobs, isAlive?) → { immediate: string[], deferred: string[] }
+ * partitionBootOrphans(jobs, liveness) → { immediate: string[], adopted: string[] }
  *
- * Pure decision split for boot reconciliation. A 'running' job whose recorded
- * pid is still alive must NOT be classified from its log yet — the orphaned
- * process may still be writing to it, so reading now risks misclassifying a
- * job that is about to emit result:success as no_result and double-running it.
- * Ported from reconcileQueueOffline's cross-tick escalation (see
- * src/main/lib/watchdogHelpers.cjs) — here it's a single deferred window since
- * this process stays up to revisit it, rather than a separate short-lived
- * watchdog process needing another tick.
+ * Pure decision split for boot reconciliation of 'running' rows. A row PROVEN
+ * ALIVE is `adopted`: left `running`, never signalled — the steady-state
+ * reaper (reapDeadRunningJobs) finishes it on exit, exactly as it does for any
+ * pidless-recovered row. Only rows proven dead or exited are `immediate` and go
+ * through applyOrphanOutcome. `liveness` is the same injected set
+ * selectReapableJobs takes (plus readRecord/runsDir/identityOf):
+ * { pidAlive, getLogPid, getLogMtimeMs, logFreshWindowMs, findLiveProcess,
+ *   readRecord(runDir, slug) }.
+ *
+ * classifyAdoption runs FIRST when the row has a supervisor record: 'adopt' and
+ * 'over-budget' are alive (budget re-arm across restart is a separate PRD, so
+ * an over-budget row is spared, not killed); 'exited' / 'dead' / 'foreign-pid'
+ * are not. A row with no record falls to the reaper's own ladder: recorded
+ * pid alive, then fresh log, log-pid alive, /proc cwd scan.
+ * Complexity: O(jobs) plus one /proc probe per running row.
  */
-function partitionBootOrphans(jobs, isAlive = claudePidAlive) {
+function partitionBootOrphans(jobs, {
+  pidAlive = claudePidAlive, getLogPid, getLogMtimeMs, logFreshWindowMs, findLiveProcess,
+  readRecord = supervisorRecord.readSupervisorRecord, runsDir = null, identityOf = procIdentityOf,
+  now = Date.now(),
+} = {}) {
   const immediate = [];
-  const deferred = [];
+  const adopted = [];
   for (const j of jobs) {
     if (j.status !== 'running') continue;
-    const pid = j.runtime?.pid;
-    if (pid && isAlive(pid)) {
-      deferred.push(j.slug);
-    } else {
-      immediate.push(j.slug);
-    }
+    if (isBootRowAlive(j, {
+      pidAlive, getLogPid, getLogMtimeMs, logFreshWindowMs, findLiveProcess, readRecord, runsDir, identityOf, now,
+    })) adopted.push(j.slug);
+    else immediate.push(j.slug);
   }
-  return { immediate, deferred };
+  return { immediate, adopted };
+}
+
+function isBootRowAlive(j, {
+  pidAlive, getLogPid, getLogMtimeMs, logFreshWindowMs, findLiveProcess, readRecord, runsDir, identityOf, now,
+}) {
+  const logMtimeMs = typeof getLogMtimeMs === 'function' ? getLogMtimeMs(j) : null;
+  const runDir = j.runId ? path.join(runsDir || schedulerPaths.runsDir(), j.runId) : null;
+  const record = runDir && typeof readRecord === 'function' ? readRecord(runDir, j.slug) : null;
+  if (record && record.pid) {
+    const alive = !!pidAlive(record.pid);
+    const verdict = supervisorRecord.classifyAdoption(record, {
+      identity: alive ? identityOf(record.pid) : null,
+      pidAlive: alive,
+      logMtimeMs,
+      exitMarker: supervisorRecord.hasExitMarker(runDir, record),
+      now,
+    });
+    return verdict === 'adopt' || verdict === 'over-budget';
+  }
+  const pid = j.runtime?.pid;
+  if (pid && pidAlive(pid)) return true;
+  if (typeof logFreshWindowMs === 'number' && Number.isFinite(logMtimeMs) && now - logMtimeMs <= logFreshWindowMs) return true;
+  const logPid = typeof getLogPid === 'function' ? getLogPid(j) : null;
+  if (logPid && pidAlive(logPid)) return true;
+  return !!(typeof findLiveProcess === 'function' && findLiveProcess(j));
 }
 
 /**
@@ -10740,15 +10768,14 @@ async function init() {
     // Boot reconciliation: finalize any job that was 'running' when the app died.
     // Check the run log first — a job that emitted result/success before the crash
     // should be marked 'completed', not 'failed', so it doesn't wedge the queue
-    // via the failure-gate. Also kill any still-live orphan claude child to prevent
-    // it from continuing to write to the project unsupervised (2026-05-21 incident).
+    // via the failure-gate. A still-live executor is spared, not killed.
     //
     // classifyRunOutcome calls readTail → fs.readFileSync (up to 64 KB per job).
     // Pre-compute all outcomes BEFORE entering the mutate lock so the blocking I/O
     // does not stall the event loop or hold the mutateTail chain during startup.
     //
-    // Jobs whose recorded pid is still alive are deferred (not classified here) —
-    // see partitionBootOrphans. Everything else (dead pid or no pid) is safe to
+    // Rows proven alive are adopted (left running, never killed) — see
+    // partitionBootOrphans. Everything else is proven dead/exited and is safe to
     // classify immediately below.
     const bootSnap = readQueueSync();
 
@@ -10789,12 +10816,31 @@ async function init() {
       console.error('[scheduler] boot epic-worktree reconciliation failed', e?.message);
     }
 
-    const { immediate: immediateSlugs, deferred: deferredSlugs } = partitionBootOrphans(bootSnap.jobs);
+    const bootLogPath = (j) => (j?.runId ? path.join(schedulerPaths.runsDir(), j.runId, `${j.slug}.log`) : null);
+    const { immediate: immediateSlugs, adopted: adoptedSlugs } = partitionBootOrphans(bootSnap.jobs, {
+      pidAlive: claudePidAlive,
+      getLogPid: (j) => readSpawnedPidFromLog(bootLogPath(j)),
+      getLogMtimeMs: (j) => readLogMtimeMs(bootLogPath(j)),
+      logFreshWindowMs: IDLE_OUTPUT_KILL_MS,
+      findLiveProcess: (j) => findLiveProcessForJob(j, {
+        worktreeDir: jobWorktree.worktreeDirFor(j.cwd || DEFAULT_PROJECT_CWD, j.slug),
+        runCwd: j.runtime?.cwd || j.cwd,
+      }),
+      readRecord: supervisorRecord.readSupervisorRecord,
+    });
     const bootOutcomes = new Map();
     for (const j of bootSnap.jobs) {
       if (!immediateSlugs.includes(j.slug)) continue;
       const logPath = j.runId ? path.join(schedulerPaths.runsDir(), j.runId, `${j.slug}.log`) : null;
-      bootOutcomes.set(j.slug, logPath ? classifyRunOutcome(logPath) : 'unknown');
+      let outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
+      // A row whose run already wrote its exit marker (meta.json) is finalized
+      // from that meta when the log tail alone can't say (killed/torn tail).
+      if (outcome === 'unknown' || outcome === 'no_result') {
+        let meta = null;
+        try { meta = j.runId ? JSON.parse(fs.readFileSync(path.join(schedulerPaths.runsDir(), j.runId, `${j.slug}.meta.json`), 'utf8')) : null; } catch { /* no/torn meta — keep the log outcome */ }
+        if (meta && typeof meta.exitCode === 'number') outcome = meta.exitCode === 0 ? 'success' : 'failed';
+      }
+      bootOutcomes.set(j.slug, outcome);
     }
     // Same evidence-before-failure gate reapDeadRunningJobs applies, resolved
     // BEFORE mutate() for the same reason (git spawn work must never run
@@ -10824,48 +10870,21 @@ async function init() {
       await archiveCompletedPrd(slug, cwd);
     }
 
-    // Still-alive orphans: SIGTERM (+ killOrphanClaudePid's own deferred SIGKILL
-    // follow-up) now, but classification waits until BOOT_ORPHAN_KILL_GRACE_MS
-    // later — reading the log while the orphan might still be writing to it
-    // could misclassify an about-to-succeed run as no_result and double-run the
-    // same PRD (2026-05-21 incident this guard exists for).
-    for (const slug of deferredSlugs) {
-      const j = bootSnap.jobs.find((x) => x.slug === slug);
-      const pid = j?.runtime?.pid;
-      const bootRunId = j?.runId ?? null; // captured now — guards against reconciling a DIFFERENT later run of the same slug
-      if (!pid) continue;
-      const result = killOrphanClaudePid(pid);
-      const killNote = ` (orphan pid=${pid}: ${result})`;
-      if (result === 'killed') {
-        console.log(`[scheduler] boot: SIGTERM'd orphan claude pid=${pid} for ${slug} — deferring finalize ${BOOT_ORPHAN_KILL_GRACE_MS}ms`);
-      }
-      setTimeout(async () => {
-        const logPath = j.runId ? path.join(schedulerPaths.runsDir(), j.runId, `${j.slug}.log`) : null;
-        const outcome = logPath ? classifyRunOutcome(logPath) : 'unknown';
-        // Same evidence-before-failure gate as the immediate-orphan path
-        // above, resolved before mutate() for the same reason (git spawn
-        // work must never run inside mutate()'s serialization chain). Uses
-        // the captured pre-kill snapshot's landedCommit/cwd/startedAt — the
-        // race guard below already confirms `cur` is still this same run
-        // (runId === bootRunId) before this evidence is applied.
-        const confirmedLandedCommit = (outcome !== 'success' && j.landedCommit)
-          ? (await resolveLandedCommitEvidence(j.cwd || DEFAULT_PROJECT_CWD, j.landedCommit, j.startedAt) ? j.landedCommit : null)
-          : null;
-        let deferredCompletedCwd;
-        mutate((state) => {
-          const cur = state.jobs.find((x) => x.slug === slug);
-          // Race guard: bail if the job already resolved, OR if it's already been
-          // re-picked into a NEW run (different runId) within the grace window —
-          // that new run is not the boot orphan we SIGTERM'd and must not be
-          // touched by this stale classification.
-          if (!cur || cur.status !== 'running' || cur.runId !== bootRunId) return;
-          applyOrphanOutcome(cur, outcome, killNote, confirmedLandedCommit);
-          console.log(`[scheduler] boot reconcile (deferred): slug=${slug} outcome=${outcome} → status=${cur.status}`);
-          deferredCompletedCwd = cur.status === 'completed' ? cur.cwd : undefined;
-        }).then(() => {
-          if (deferredCompletedCwd !== undefined) return archiveCompletedPrd(slug, deferredCompletedCwd);
-        }).catch((e) => console.error(`[scheduler] deferred boot reconcile failed for ${slug}:`, e?.message));
-      }, BOOT_ORPHAN_KILL_GRACE_MS).unref?.();
+    // Proven-alive rows stay `running` and are never signalled (the boot worktree
+    // sweep above already spares their checkout). No sessionSlots token is
+    // acquired: pickNextBatch's untrackedRunning correction counts the row
+    // against the pool, and reapDeadRunningJobs finalizes it on exit.
+    if (adoptedSlugs.length) {
+      const adoptedAtBoot = new Date().toISOString();
+      const adoptedRunIds = new Map(bootSnap.jobs.filter((j) => adoptedSlugs.includes(j.slug)).map((j) => [j.slug, j.runId ?? null]));
+      await mutate((state) => {
+        for (const j of state.jobs) {
+          // runId guard: never stamp a DIFFERENT later run of the same slug.
+          if (j.status !== 'running' || !adoptedRunIds.has(j.slug) || (j.runId ?? null) !== adoptedRunIds.get(j.slug)) continue;
+          j.adoptedAtBoot = adoptedAtBoot;
+          console.log(`[scheduler] boot: adopted live executor for ${j.slug} (pid=${j.runtime?.pid ?? 'unknown'}) — left running, no signal`);
+        }
+      });
     }
 
     // If we boot up while paused with a resumeAt in the past, clear it. This
@@ -11965,7 +11984,6 @@ module.exports = {
   buildScheduleStatePayload,
   partitionBootOrphans,
   applyOrphanOutcome,
-  BOOT_ORPHAN_KILL_GRACE_MS,
   registerAdminRoutes,
   notifyOriginatingTab,
   notifyNeedsReview,

@@ -58,7 +58,8 @@
     "lint:selectors": "node scripts/check-unstable-selectors.cjs",
     "lint:hooks": "node scripts/check-conditional-hooks.cjs",
     "lint:unregistered-tests": "node scripts/check-unregistered-tests.cjs",
-    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:unregistered-tests",
+    "lint:docs": "node scripts/check-doc-hierarchy.cjs",
+    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:unregistered-tests && npm run lint:docs",
     "sync:settings-schema": "node scripts/sync-settings-schema.cjs"
   },
   "keywords": [

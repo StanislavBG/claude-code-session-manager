@@ -4807,9 +4807,12 @@ function stampIntegrationFailure(row, integration) {
     row.integrationFailureKind = integration.failureKind;
     if (Array.isArray(integration.conflictedPaths)) row.integrationConflictPaths = integration.conflictedPaths;
     else delete row.integrationConflictPaths;
+    if (integration.baseHeadSha) row.integrationBaseHeadSha = integration.baseHeadSha;
+    else delete row.integrationBaseHeadSha;
   } else {
     delete row.integrationFailureKind;
     delete row.integrationConflictPaths;
+    delete row.integrationBaseHeadSha;
   }
 }
 
@@ -4825,14 +4828,21 @@ function stampIntegrationFailure(row, integration) {
  * auto-fix it authors no plan and spawns no model; it is pure git.
  *
  * The closed set of mechanically-resolvable verdicts starts at exactly
- * 'worktree_integration_failed': PRD 1125 already taught integrateBranch to
- * parse git's "would be overwritten by merge" stderr, verify the blocking
- * paths are byte-identical to the branch, discard the proven duplicates, and
- * retry the merge once. A job parked with this verdict has its `sm-job/
- * <slug>` branch preserved (integrateJobBranch never deletes the branch on
- * failure — see cleanupJobWorktree's `keepBranch: !integration.ok`), so a
- * plain re-call of integrateBranch against that same branch inherits PRD
- * 1125's auto-resolution for free — no re-implementation needed here.
+ * 'worktree_integration_failed', which covers two subtypes (job.
+ * integrationFailureKind): `blocking_paths` — PRD 1125 taught integrateBranch
+ * to parse git's "would be overwritten by merge" stderr, verify the blocking
+ * paths are byte-identical to the branch, discard the proven duplicates and
+ * retry once, so a re-call can genuinely succeed once the dirty files are
+ * gone — and `content_conflict`, which PRD 1125 explicitly does NOT handle
+ * (parseBlockingMergePaths returns null for it). Only pure-addition text
+ * conflicts are auto-resolved (mc-02, gitWorktree.cjs, kill switch
+ * SM_PURE_ADDITION_MERGE_DISABLE=1) — and that already ran inside the
+ * original failed integration. Re-calling integrateBranch for a content
+ * conflict that survived it, against an unmoved base HEAD, fails
+ * deterministically, so the selector skips it (WITHOUT spending the one
+ * attempt) until HEAD moves — a sibling merge may make the retry succeed.
+ * A job parked with this verdict has its `sm-job/<slug>` branch preserved
+ * (cleanupJobWorktree's `keepBranch: !integration.ok`).
  *
  * Bounded to exactly one attempt via job.mechanicalRecoveryAttempted,
  * stamped in the SAME mutate as the outcome (performMechanicalRecovery,
@@ -4844,11 +4854,41 @@ function stampIntegrationFailure(row, integration) {
  */
 const MECHANICALLY_RESOLVABLE_VERDICTS = new Set(['worktree_integration_failed']);
 
-function selectMechanicalRecoveryTarget(job) {
+/**
+ * True when a retry is provably futile: a content_conflict whose base HEAD is
+ * the same as at failure time. Unknown state (no stamp, null current HEAD)
+ * is NOT futile — falls back to attempting the retry.
+ */
+function isMechanicalRecoveryFutile(job, currentHeadSha) {
+  return job.integrationFailureKind === 'content_conflict'
+    && !!job.integrationBaseHeadSha
+    && !!currentHeadSha
+    && job.integrationBaseHeadSha === currentHeadSha;
+}
+
+/**
+ * Resolves the current HEAD once per distinct cwd for a pass. Returns a
+ * `(job) => sha|null` lookup over `jobs`; the memo lives only as long as the
+ * returned closure. O(distinct cwds) git calls, not O(jobs).
+ */
+async function resolveHeadShasForPass(jobs) {
+  const byCwd = new Map();
+  for (const j of jobs || []) {
+    if (!j || j.status !== 'needs_review' || j.integrationFailureKind !== 'content_conflict') continue;
+    const cwd = j.cwd || DEFAULT_PROJECT_CWD;
+    if (!byCwd.has(cwd)) byCwd.set(cwd, gitHead(cwd));
+  }
+  const resolved = new Map();
+  for (const [cwd, p] of byCwd) resolved.set(cwd, await p);
+  return (j) => (j && resolved.get(j.cwd || DEFAULT_PROJECT_CWD)) || null;
+}
+
+function selectMechanicalRecoveryTarget(job, currentHeadSha = null) {
   if (process.env.SM_MECHANICAL_RECOVERY_DISABLE === '1') return null;
   if (!job || job.status !== 'needs_review') return null;
   if (!MECHANICALLY_RESOLVABLE_VERDICTS.has(job.verifierVerdict)) return null;
   if (job.mechanicalRecoveryAttempted === true) return null;
+  if (isMechanicalRecoveryFutile(job, currentHeadSha)) return null;
   const cwd = job.cwd || DEFAULT_PROJECT_CWD;
   return { slug: job.slug, cwd, branch: jobWorktree.branchNameFor(job.slug), carriedPaths: job.carriedPaths || [] };
 }
@@ -6060,7 +6100,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   // Mechanical recovery (PRD 1130): same first-refusal treatment — a job
   // eligible for a pure-git retry must never also get a cold-read fix-plan
   // PRD authored in the same pass.
-  if (selectMechanicalRecoveryTarget(failedJob)) {
+  if (selectMechanicalRecoveryTarget(failedJob, failedJob.integrationFailureKind === 'content_conflict' ? await gitHead(failedJob.cwd || DEFAULT_PROJECT_CWD) : null)) {
     console.log(`[scheduler] skip investigation: ${failedJob.slug} is mechanical-recovery eligible`);
     return { deferred: false };
   }
@@ -7223,7 +7263,9 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     if (worktreeIntegrationFailure) {
       verifyResult = {
         verdict: 'worktree_integration_failed',
-        reason: `worktree branch integration failed: ${worktreeIntegrationFailure} — branch preserved for manual merge`,
+        reason: worktreeIntegrationDetail && worktreeIntegrationDetail.failureKind === 'content_conflict'
+          ? `Integration blocked by a content conflict in ${(worktreeIntegrationDetail.conflictedPaths || []).join(', ') || 'unknown paths'} — branch ${jobWorktree.branchNameFor(job.slug)} preserved; needs a manual merge.`
+          : `worktree branch integration failed: ${worktreeIntegrationFailure} — branch preserved for manual merge`,
         downgradeTo: 'needs_review',
       };
     }
@@ -7338,6 +7380,9 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     let mechanicalRecoveryTarget = null;
     let terminalNotifySnapshot = null;
     const newlyCompletedPrds = [];
+    // Base HEAD for the mechanical-recovery futility check — read here, never inside mutate() (no I/O).
+    const finalizeHeadSha = worktreeIntegrationDetail && worktreeIntegrationDetail.failureKind === 'content_conflict'
+      ? await gitHead(guardCwd) : null;
     await mutate((s) => {
       const i2 = s.jobs.findIndex((x) => x.slug === job.slug);
       // A job already moved off 'running' by someone else (namely
@@ -7639,7 +7684,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
             // depth-cap check, so it must never fall through to either.
             // Snapshot only (no I/O inside mutate()); the actual git retry
             // happens outside mutate(), below.
-            const mTarget = selectMechanicalRecoveryTarget(s.jobs[i2]);
+            const mTarget = selectMechanicalRecoveryTarget(s.jobs[i2], finalizeHeadSha);
             if (mTarget) {
               mechanicalRecoveryJob = { ...s.jobs[i2] };
               mechanicalRecoveryTarget = mTarget;
@@ -10847,9 +10892,17 @@ async function reverifyNeedsReview() {
   // check in spawnJob missed because the app restarted in between). Depth
   // never disqualifies it, so it runs regardless of investigationDepth.
   {
+    const headFor = await resolveHeadShasForPass(queueForResumeAndAutofix.jobs);
     for (const job of queueForResumeAndAutofix.jobs) {
-      const target = selectMechanicalRecoveryTarget(job);
-      if (!target) continue;
+      const head = headFor(job);
+      const target = selectMechanicalRecoveryTarget(job, head);
+      if (!target) {
+        if (job.status === 'needs_review' && job.mechanicalRecoveryAttempted !== true
+          && MECHANICALLY_RESOLVABLE_VERDICTS.has(job.verifierVerdict) && isMechanicalRecoveryFutile(job, head)) {
+          console.log(`[scheduler] mechanical-recovery: skip ${job.slug} — content conflict, base HEAD unchanged since failure`);
+        }
+        continue;
+      }
       console.log(`[scheduler] mechanical-recovery: needs_review ${job.slug} → re-integrating ${target.branch}`);
       performMechanicalRecovery(job, target).catch((e) => {
         console.error('[scheduler] performMechanicalRecovery error', job.slug, e);
@@ -12617,6 +12670,8 @@ module.exports = {
   buildClaudeSpawnArgs,
   spawnResumeRecovery,
   selectMechanicalRecoveryTarget,
+  isMechanicalRecoveryFutile,
+  resolveHeadShasForPass,
   stampIntegrationFailure,
   performMechanicalRecovery,
   MECHANICALLY_RESOLVABLE_VERDICTS,

@@ -1110,6 +1110,16 @@ function joinSegments(segments) {
  * this chain (no remote, no config, no matching local branch) simply falls
  * through to the next source.
  */
+// HEAD sha of `cwd` (null on any failure) — stamped on a failed integration so
+// mechanical recovery can tell whether the base tree has moved since.
+async function readHeadSha(cwd) {
+  try {
+    return (await execGit(['rev-parse', 'HEAD'], { cwd, timeout: 10_000 })).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 async function resolveDefaultBranch(cwd) {
   try {
     const out = (await execGit(['symbolic-ref', 'refs/remotes/origin/HEAD'], { cwd, timeout: 10_000 })).trim();
@@ -1276,7 +1286,7 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
           const retryText = (retryErr && (retryErr.stderrText || retryErr.message)) || String(retryErr);
           const retryClass = await classifyMergeFailure({ cwd, stderrText: retryText, stdoutText: retryErr && retryErr.stdoutText });
           try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
-          return { ok: false, reason: `merge failed (likely a real content conflict): ${retryText}`, ...retryClass };
+          return { ok: false, reason: `merge failed (likely a real content conflict): ${retryText}`, ...retryClass, baseHeadSha: await readHeadSha(cwd) };
         }
       }
     }
@@ -1285,7 +1295,8 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
     // Pure-addition auto-resolve: two jobs appended different text to the same
     // doc. All-or-nothing; any doubt or failure falls through to the abort.
     if (
-      failureClass.failureKind === 'content_conflict'
+      process.env.SM_PURE_ADDITION_MERGE_DISABLE !== '1'
+      && failureClass.failureKind === 'content_conflict'
       && failureClass.conflictedPaths.length
       && failureClass.conflictedPaths.every((p) => AUTO_RESOLVE_EXTENSIONS.has(path.extname(p).toLowerCase()))
     ) {
@@ -1301,7 +1312,7 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
     }
     // Abort a half-applied merge so `cwd` isn't left in a mid-merge state.
     try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
-    return { ok: false, reason: `merge failed (likely a real content conflict): ${stderrText}`, ...failureClass };
+    return { ok: false, reason: `merge failed (likely a real content conflict): ${stderrText}`, ...failureClass, baseHeadSha: await readHeadSha(cwd) };
   }
 }
 

@@ -118,6 +118,29 @@ test('selectMechanicalRecoveryTarget: kill-switch SM_MECHANICAL_RECOVERY_DISABLE
   expect(selectMechanicalRecoveryTarget(eligibleJob())).toBeNull();
 });
 
+const conflictJob = (o = {}) => eligibleJob({ integrationFailureKind: 'content_conflict', integrationBaseHeadSha: 'aaa111', ...o });
+
+test('selectMechanicalRecoveryTarget: content_conflict with unchanged HEAD is skipped', () => {
+  expect(selectMechanicalRecoveryTarget(conflictJob(), 'aaa111')).toBeNull();
+});
+
+test('selectMechanicalRecoveryTarget: content_conflict with a moved HEAD returns a target', () => {
+  expect(selectMechanicalRecoveryTarget(conflictJob(), 'bbb222')).not.toBeNull();
+});
+
+test('selectMechanicalRecoveryTarget: blocking_paths with unchanged HEAD still returns a target', () => {
+  const job = eligibleJob({ integrationFailureKind: 'blocking_paths', integrationBaseHeadSha: 'aaa111' });
+  expect(selectMechanicalRecoveryTarget(job, 'aaa111')).not.toBeNull();
+});
+
+test('selectMechanicalRecoveryTarget: a pre-mc-01 row with no integrationFailureKind still returns a target', () => {
+  expect(selectMechanicalRecoveryTarget(eligibleJob(), 'aaa111')).not.toBeNull();
+});
+
+test('selectMechanicalRecoveryTarget: null currentHeadSha never skips', () => {
+  expect(selectMechanicalRecoveryTarget(conflictJob(), null)).not.toBeNull();
+});
+
 test('MECHANICALLY_RESOLVABLE_VERDICTS: closed set contains exactly worktree_integration_failed', () => {
   expect(Array.from(MECHANICALLY_RESOLVABLE_VERDICTS)).toEqual(['worktree_integration_failed']);
 });

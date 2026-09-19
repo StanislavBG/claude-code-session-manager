@@ -9,6 +9,7 @@
  * silence ever reaches the model.
  */
 
+import { ortWasmFilesLoaded } from './ortWasmProbe'
 import { MicVAD } from '@ricky0123/vad-web'
 import type { SpeechProbabilities } from '@ricky0123/vad-web/dist/models/common'
 import { log } from './logger'
@@ -711,6 +712,7 @@ export function createRecognition(opts: RecognitionCallbacks): RecognitionHandle
         // a relative './vad/' resolves against the importing JS chunk
         // (dist/assets/) in prod, missing the real dist/vad/ location.
         const vadBase = new URL('vad/', document.baseURI).href
+        log.info('speech', 'vad: asset base resolved', { vadBase })
 
         // F5 stream ownership: build the constraints ourselves so the
         // configured `inputDeviceId` (or OS default if null/undefined) is
@@ -857,6 +859,8 @@ export function createRecognition(opts: RecognitionCallbacks): RecognitionHandle
             opts.onMisfire?.()
           },
         })
+        // Which ORT variant did the VAD really request? Name the FILE, not the base URL.
+        log.info('speech', 'vad: ort wasm files loaded', { files: ortWasmFilesLoaded() })
         vad.start()
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : 'Microphone access denied'

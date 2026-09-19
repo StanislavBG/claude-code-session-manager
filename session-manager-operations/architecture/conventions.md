@@ -36,6 +36,15 @@ Before writing a new PRD for `<cwd>/session-manager-operations/scheduler/epics/<
 - **Every process Session Manager spawns must be named via `src/main/lib/procName.cjs`** (comm alias + `smArgv0`, `claudeBin.cjs` `claudeSpawnTarget` for `claude`) **and stamped with `SM_PROC_ROLE`** — stamped inside `cleanEnv.cjs` (`cleanChildEnv`; `withProcRole` for the raw-env sites `runClaudeP.cjs`/`docEdit.cjs`/`mcpStatus.cjs`/`supervisor.cjs`), never per call site. Incident (user report, Pop!_OS System Monitor): dozens of anonymous `python`/`node`/`claude` processes with no way to tell what they were or which project they served. Renaming cannot reach the MCP servers `claude` itself spawns (`@playwright/mcp`, `mcp-server-fetch`, `workspace-mcp`, our own `scheduler-mcp-server.cjs`) — they inherit our env, so `node scripts/sm-ps.cjs [--json]` attributes them from `/proc/<pid>/environ` (`SM_PROC_ROLE`, `SM_SCHEDULER_JOB_SLUG`, `SM_CHAT_SESSION_ID`, `SM_PROJECT_ROOT`). `SM_PROC_ROLE` is unrelated to `SM_PROC_ROOT` (`procIdentity.cjs` test override).
 - **No scheduler status may be a dead end reachable only by a human `scheduler_reset_job`.** Every `JOB_STATUSES` value must either be genuinely final (`completed`/`skipped`) or have an automated selector that can move a parked row out — `quarantined`'s own exit (`autoResolveQuarantine`, this PRD) was the last gap, since `reconcile()`'s adopt path can only fire once a `createdVia` stamp appears, which never happens on its own. `scheduler-no-dead-end-status.test.cjs` iterates the real `JOB_STATUSES` array and fails if a new status ships with no wired automated exit.
 
+### VAD / ORT wasm assets are derived, not hand-vendored
+
+`src/renderer/public/vad/ort-wasm-*` is copied from `node_modules/onnxruntime-web/dist` by `npm run refresh:vad-assets`
+(`scripts/refresh-vad-assets.mjs`); `tests/unit/vad-assets-drift.spec.ts` fails on any byte drift. The top-level
+`onnxruntime-web` dependency is **kept deliberately**: `@ricky0123/vad-web` does `require("onnxruntime-web/wasm")`, so
+Vite bundles that package's JS into the renderer, and the wasm served from `/vad/` must be the same version as that JS
+(it was 1.24.3 wasm under 1.26.0 JS before this guard). Whisper (`@huggingface/transformers`) bundles its own nested ORT
+separately. After any `onnxruntime-web` bump: run the refresh script and commit the result.
+
 ## Avoid
 
 - Launching a `claude -p` process **without acquiring a slot from `lib/sessionSlots.cjs`** first. That pool (default 5, user-adjustable [0,10] from the Home tab, `SM_SESSION_SLOTS` overrides) is the single machine-wide concurrency limit — scheduler jobs *and* chat runs draw from it. The scheduler's own `concurrencyCap` is **retired**: it was the exact per-consumer private cap sessionSlots.cjs was written to replace, and it silently ceilinged the queue at 3 while the Home tab reported 5. Do not reintroduce a private cap in any consumer. OOM protection is the *memory gate* in `tickQueue` (`RESERVED_HOST_MB` 3000 + `MIN_FREE_MB_PER_JOB` 2500), which is machine-aware — not a hardcoded job count; the 2026-06-10 five-parallel OOM is covered there.

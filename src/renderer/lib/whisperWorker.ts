@@ -19,6 +19,7 @@
 
 import { pipeline, type AutomaticSpeechRecognitionPipeline } from '@huggingface/transformers'
 import { collapseRepetition } from './transcriptSanitize'
+import { ortWasmFilesLoaded } from './ortWasmProbe'
 
 let transcriber: AutomaticSpeechRecognitionPipeline | null = null
 
@@ -85,6 +86,7 @@ async function loadModel() {
       },
     })
     workerLog('info', 'load: pipeline ready', { ms: Date.now() - pipelineStart })
+    workerLog('info', 'load: ort wasm files loaded', { files: ortWasmFilesLoaded() })
 
     // Warmup: force encoder/decoder JIT before the first real utterance so the
     // user doesn't pay an extra ~500ms on their first command. Race against a

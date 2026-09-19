@@ -94,6 +94,34 @@ function heartbeatFresh(heartbeatPath = schedulerPaths.heartbeatPath(), maxAgeMs
   return (Date.now() - entry.ts) < maxAgeMs;
 }
 
+const DEFAULT_DISPATCH_DEAD_MS = 30 * 60_000;
+
+/**
+ * evaluateDispatchLiveness(entry, now, { deadMs }?) → { dead, reason }
+ *
+ * Pure. Observability only — a logically-dead scheduler (wedged tick chain,
+ * leaked slots) still writes fresh heartbeats, so freshness alone can't see
+ * it. `dead` only when ALL hold: heartbeat fresh (not degraded, within
+ * DEFAULT_MAX_AGE_MS), dispatch.lastRunAt older than deadMs (absent/unparseable
+ * counts as older), pendingDispatchable > 0, runningCount === 0, not paused.
+ * Callers must NOT relaunch on this: the process is alive, and a relaunch
+ * would spawn a second app on top of it.
+ */
+function evaluateDispatchLiveness(entry, now = Date.now(), { deadMs = DEFAULT_DISPATCH_DEAD_MS } = {}) {
+  if (!entry || entry.degraded === true || typeof entry.ts !== 'number') {
+    return { dead: false, reason: 'no-fresh-heartbeat' };
+  }
+  if (now - entry.ts >= DEFAULT_MAX_AGE_MS) return { dead: false, reason: 'heartbeat-stale' };
+  const d = entry.dispatch;
+  if (!d || typeof d !== 'object') return { dead: false, reason: 'no-dispatch-field' };
+  if (d.paused) return { dead: false, reason: 'paused' };
+  if (!(d.pendingDispatchable > 0)) return { dead: false, reason: 'nothing-dispatchable' };
+  if (d.runningCount !== 0) return { dead: false, reason: 'jobs-running' };
+  const lastRunMs = Date.parse(d.lastRunAt ?? '');
+  if (Number.isFinite(lastRunMs) && now - lastRunMs <= deadMs) return { dead: false, reason: 'recent-dispatch' };
+  return { dead: true, reason: 'dispatch-dead' };
+}
+
 /**
  * isPidAlive(pid) → boolean
  *
@@ -409,6 +437,7 @@ module.exports = {
   readLastHeartbeat,
   readLastHeartbeatTs,
   heartbeatFresh,
+  evaluateDispatchLiveness,
   isPidAlive,
   localDateStr,
   maybeFinalizeHistory,
@@ -420,6 +449,7 @@ module.exports = {
   defaultSpawnRelaunch,
   maybeRelaunchApp,
   DEFAULT_MAX_AGE_MS,
+  DEFAULT_DISPATCH_DEAD_MS,
   DEFAULT_LOCK_STALE_MS,
   DEFAULT_FINALIZE_BUDGET_MS,
   DEFAULT_RELAUNCH_DEBOUNCE_MS,

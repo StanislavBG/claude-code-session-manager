@@ -27,13 +27,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const {
-  readLastHeartbeatTs,
+  readLastHeartbeat,
+  evaluateDispatchLiveness,
   localDateStr,
   maybeFinalizeHistory,
   maybeRelaunchApp,
   DEFAULT_MAX_AGE_MS,
 } = require('../src/main/lib/watchdogHelpers.cjs');
 const schedulerPaths = require('../src/main/lib/schedulerPaths.cjs');
+const { appendAuditEvent } = require('../src/main/lib/auditLog.cjs');
 
 // ---------- paths ----------
 
@@ -77,7 +79,8 @@ async function main() {
 
   // Single read: derive both heartbeatAgeMs (for the log) and fresh (for
   // branching) from the same snapshot so they are always consistent.
-  const lastTs = readLastHeartbeatTs(schedulerPaths.heartbeatPath());
+  const lastEntry = readLastHeartbeat(schedulerPaths.heartbeatPath());
+  const lastTs = typeof lastEntry?.ts === 'number' ? lastEntry.ts : null;
   const heartbeatAgeMs = lastTs !== null ? now - lastTs : null;
   const fresh = lastTs !== null && heartbeatAgeMs < DEFAULT_MAX_AGE_MS;
   const decision = fresh ? 'alive' : 'stale';
@@ -87,8 +90,14 @@ async function main() {
   if (fresh) {
     // Alive branch: do nothing that touches queue.json. Let the in-app
     // scheduler manage its own queue to avoid races.
+    // Observability only: a fresh heartbeat with a dead dispatch chain is a
+    // live process — never relaunch (would spawn a second app on top of it).
+    const dispatchLiveness = evaluateDispatchLiveness(lastEntry, now);
+    if (dispatchLiveness.dead) {
+      appendAuditEvent('dispatch_dead_observed', { dispatch: lastEntry.dispatch, reason: dispatchLiveness.reason });
+    }
     const history = await runHistoryFinalize();
-    appendLog({ ...logEntry, history });
+    appendLog({ ...logEntry, dispatchLiveness, history });
     process.exit(0);
   }
 

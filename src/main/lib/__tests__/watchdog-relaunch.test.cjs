@@ -9,6 +9,8 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {
   maybeRelaunchApp,
+  evaluateDispatchLiveness,
+  readLastHeartbeat,
   readRelaunchState,
   DEFAULT_MAX_RELAUNCH_ATTEMPTS,
 } = require('../watchdogHelpers.cjs');
@@ -187,6 +189,36 @@ test('attemptCount resets to 0 once a fresh heartbeat is observed', () => {
     assert.equal(result.relaunched, false);
     assert.equal(result.reason, 'alive');
     assert.equal(readRelaunchState(statePath).attemptCount, 0);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('dispatch-dead (fresh heartbeat, dead dispatch chain) never relaunches', () => {
+  const dir = tmpDir();
+  try {
+    const hbPath = path.join(dir, 'heartbeat.log');
+    const statePath = path.join(dir, 'state.json');
+    const now = Date.now();
+    fs.writeFileSync(hbPath, JSON.stringify({
+      ts: now - 1_000,
+      pid: process.pid,
+      dispatch: {
+        lastDispatchAttemptAt: new Date(now - 1_000).toISOString(),
+        lastRunAt: new Date(now - 2 * 60 * 60_000).toISOString(),
+        lastTickReason: 'held',
+        pendingDispatchable: 5,
+        runningCount: 0,
+        paused: false,
+      },
+    }) + '\n');
+    assert.equal(evaluateDispatchLiveness(readLastHeartbeat(hbPath), now).dead, true);
+
+    const spawnFn = makeSpawnSpy();
+    const result = maybeRelaunchApp({ heartbeatPath: hbPath, maxAgeMs: 180_000, statePath, now, spawnFn });
+    assert.equal(result.relaunched, false);
+    assert.equal(result.reason, 'alive');
+    assert.equal(spawnFn.calls.length, 0);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

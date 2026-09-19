@@ -177,6 +177,7 @@ const { buildTerminalOrphanIsLive } = require('./lib/jobWorktreeTerminalOrphanLi
 const { reconcileEpicWorktreesOnBoot } = require('./lib/epicWorktreeBoot.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const supervisorRecord = require('./lib/jobSupervisorRecord.cjs');
+const adoptedRunSupervisor = require('./lib/adoptedRunSupervisor.cjs');
 const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdFrontmatter.cjs');
 const { resolveDepSlug, findNearMatches } = require('./lib/depSlugResolve.cjs');
 const { computeDispositionRewrite } = require('./lib/prdDisposition.cjs');
@@ -1651,11 +1652,25 @@ function heartbeatTick(deps = {}) {
           counts.unknown += 1;
         }
       }
+      // Logical-liveness signal for the external watchdog (see watchdogHelpers
+      // evaluateDispatchLiveness): computed once per heartbeat from the same
+      // queue snapshot. pendingDispatchable = pending rows minus those
+      // terminally blocked behind a failed/skipped dependency.
+      const blockedPending = computeBlockedChains(s.jobs).reduce((n, c) => n + c.blocked, 0);
+      const dispatch = {
+        lastDispatchAttemptAt: s.lastDispatchAttemptAt ?? null,
+        lastRunAt: s.lastRunAt ?? null,
+        lastTickReason: lastTick?.reason ?? null,
+        pendingDispatchable: Math.max(0, counts.pending - blockedPending),
+        runningCount: counts.running,
+        paused: Boolean(s.paused),
+      };
       return {
         ts: Date.now(),
         pid: process.pid,
         build: heartbeatBuild(),
         counts,
+        dispatch,
         stall: { stalled: stall.stalled, total: stall.total },
         paused: s.paused ? { reason: s.paused.reason, resumeAt: s.paused.resumeAt } : null,
         quarantinedCwds: (s.unreadableCwds ?? []).map((u) => u.cwd),
@@ -7842,6 +7857,10 @@ async function tickBody(gen, { bypassLoadGate }) {
       console.error('[scheduler] tickQueue skipped: queue.json unreadable');
       return { fired: false, reason: 'unreadable' };
     }
+    // Supervision of an adopted executor is independent of dispatch: it runs
+    // even while paused, before any early return below.
+    await superviseAdoptedRunsPass(state.jobs);
+    if (stale()) return STALE_TICK;
     if (state.paused) {
       console.log('[scheduler] tickQueue skipped: paused');
       return recordTick({ fired: false, reason: 'paused' }, { detail: 'scheduler paused' });
@@ -8587,6 +8606,72 @@ async function runBranchSweep(jobs) {
  * skipped too (spawn may still be mid-flight) — see selectReapableJobs for
  * the full predicate. Exported so unit tests can invoke it directly.
  */
+// Adopted-run supervision (see lib/adoptedRunSupervisor.cjs). In-memory by
+// design: the supervisors die with this process, and the next boot re-arms.
+const adoptedSupervisors = new Map();
+
+/** Pid of a boot-time running row via the same ladder isBootRowAlive uses:
+ * supervisor record → runtime.pid → pid spawned per the run log. */
+function bootRowPid(j, logPathOf) {
+  const runDir = j.runId ? path.join(schedulerPaths.runsDir(), j.runId) : null;
+  const record = runDir ? supervisorRecord.readSupervisorRecord(runDir, j.slug) : null;
+  return record?.pid || j.runtime?.pid || readSpawnedPidFromLog(logPathOf(j)) || null;
+}
+
+function signalAdoptedGroup(pgid, signal, pid) {
+  try { process.kill(-pgid, signal); } catch {
+    try { process.kill(pid, signal); } catch { /* already dead */ }
+  }
+}
+
+async function superviseAdoptedRunsPass(jobs) {
+  try {
+    const rows = jobs || (await readQueue()).jobs;
+    const runDirOf = (j) => (j.runId ? path.join(schedulerPaths.runsDir(), j.runId) : null);
+    return await adoptedRunSupervisor.superviseAdoptedRuns(rows, {
+      registry: adoptedSupervisors,
+      runDir: runDirOf,
+      readRecord: supervisorRecord.readSupervisorRecord,
+      lease: quietMachineLease,
+      markSupervised: async (row) => {
+        await mutate((s) => {
+          const j = s.jobs.find((x) => x.slug === row.slug);
+          if (j && j.status === 'running' && (j.runId ?? null) === (row.runId ?? null)) j.supervisedAt = new Date().toISOString();
+        });
+      },
+      makeDeps: (row, record) => {
+        const logPath = path.join(runDirOf(row), `${row.slug}.log`);
+        return {
+          logPath,
+          statLogMtimeMs: readLogMtimeMs,
+          pidAlive: claudePidAlive,
+          identityOf: procIdentityOf,
+          isDifferentProcess,
+          killGroup: signalAdoptedGroup,
+          // Stamped BEFORE the signal so reapDeadRunningJobs, which finalizes
+          // the row once the process is gone, always sees why it died.
+          stampKill: async (kind, reason) => {
+            await mutate((s) => {
+              const j = s.jobs.find((x) => x.slug === row.slug);
+              if (j && j.status === 'running' && (j.runId ?? null) === (row.runId ?? null)) {
+                j.adoptedKill = { watchdog: kind, reason, at: new Date().toISOString() };
+              }
+            });
+            try { fs.appendFileSync(logPath, `\n[scheduler] adopted-run ${kind} watchdog: ${reason}\n`); } catch { /* best-effort */ }
+          },
+          log: (msg) => console.log(`[scheduler] ${row.slug}: ${msg}`),
+          checkIntervalMs: IDLE_CHECK_INTERVAL_MS,
+          sigkillAfterMs: POST_RESULT_KILL_MS,
+          defaultMaxDurationMs: MAX_JOB_DURATION_MS,
+        };
+      },
+    });
+  } catch (e) {
+    console.warn('[scheduler] adopted-run supervision pass failed', e?.message);
+    return [];
+  }
+}
+
 async function reapDeadRunningJobs() {
   try {
     // Do NOT gate on runningSet: spawnJob()'s finally block unconditionally
@@ -8786,9 +8871,10 @@ async function reapDeadRunningJobs() {
     // this runs the whole dead-job batch concurrently rather than one
     // dispatch's git-spawn latency at a time.
     await Promise.all(dead.map(async (d) => {
-      if (d.outcome === 'rate_limited' || d.outcome === 'success') return;
-      if (d.pidless && d.failureOverride) return;
       const row = state.jobs.find((x) => x.slug === d.slug);
+      const adoptedBudgetKill = row?.adoptedKill?.watchdog === 'budget';
+      if (d.outcome === 'rate_limited' || (d.outcome === 'success' && !adoptedBudgetKill)) return;
+      if (d.pidless && d.failureOverride) return;
       if (!row?.landedCommit) return;
       const rowCwd = row.cwd || state.config?.defaultCwd || DEFAULT_PROJECT_CWD;
       const resolved = await resolveLandedCommitEvidence(rowCwd, row.landedCommit, row.startedAt);
@@ -8869,6 +8955,17 @@ async function reapDeadRunningJobs() {
         if (pidless && !effectiveSuccess && !rateLimited && !notLandedInfo && failureOverride) {
           notLandedInfo = { verdict: failureOverride.verdict, reason: failureOverride.reason };
         }
+        // An adopted run the budget watchdog killed (adoptedKill, stamped
+        // before the signal) parks exactly like a native budget kill: the
+        // shared classifyBudgetKill decides, and it wins over success/failure.
+        const adoptedBudgetKill = rateLimited ? null : classifyBudgetKill({
+          killedByWatchdog: s.jobs[idx].adoptedKill?.watchdog,
+          budgetKillReason: s.jobs[idx].adoptedKill?.reason,
+        }, landedCommitEvidence.get(slug) || null);
+        if (adoptedBudgetKill) {
+          effectiveSuccess = false;
+          notLandedInfo = { verdict: 'budget_exceeded', reason: adoptedBudgetKill.reason };
+        }
 
         const leftoverSuffix = deltaPaths && deltaPaths.length
           ? ` — left ${deltaPaths.length} files uncommitted`
@@ -8920,6 +9017,7 @@ async function reapDeadRunningJobs() {
           s.jobs[idx].gateOutcome = gateOutcome;
           if (confirmedLandedCommit) s.jobs[idx].landedCommit = confirmedLandedCommit;
           if (landedCommit) s.jobs[idx].landedCommit = landedCommit;
+          if (adoptedBudgetKill?.landedCommit) s.jobs[idx].landedCommit = adoptedBudgetKill.landedCommit;
         }
         // A pidless spawn that never wrote its own '<slug>.log' into the
         // batch runId dir it was stamped with must not keep that runId —
@@ -8934,6 +9032,7 @@ async function reapDeadRunningJobs() {
           s.jobs[idx].runId = null;
         }
         delete s.jobs[idx].runtime;
+        delete s.jobs[idx].adoptedKill;
         delete s.jobs[idx].dispatchPhase;
         delete s.jobs[idx].dispatchPhaseAt;
         delete s.jobs[idx].overrun;
@@ -10915,6 +11014,7 @@ async function init() {
     // partitionBootOrphans. Everything else is proven dead/exited and is safe to
     // classify immediately below.
     const bootSnap = readQueueSync();
+    const bootLogPath = (j) => (j?.runId ? path.join(schedulerPaths.runsDir(), j.runId, `${j.slug}.log`) : null);
 
     // Worktree boot reconciliation (PRD 994): a job worktree that survives an
     // app crash/host reboot must not leak disk or a dangling branch forever —
@@ -10929,11 +11029,15 @@ async function init() {
       // itself, proof its run already died. isLive checks the already-read
       // bootSnap (no extra queue read) for a live running-row pid, OR a live
       // /proc cwd holder under the checkout itself. See jobWorktreeBootLive.cjs.
+      // rowPid walks the SAME record → runtime.pid → log-pid ladder
+      // partitionBootOrphans uses, so the sweep and the partition can never
+      // disagree about which executor is alive.
       const isLive = buildJobWorktreeIsLive({
         bootJobs: bootSnap.jobs,
         claudePidAlive,
         hasLiveHolder: gitWorktree.hasLiveHolder,
         cwdHolders: gitWorktree.listCwdHolders(),
+        rowPid: (j) => bootRowPid(j, bootLogPath),
       });
       await jobWorktree.reconcileWorktreesOnBoot([...worktreeCwds], { isLive });
     } catch (e) {
@@ -10953,7 +11057,6 @@ async function init() {
       console.error('[scheduler] boot epic-worktree reconciliation failed', e?.message);
     }
 
-    const bootLogPath = (j) => (j?.runId ? path.join(schedulerPaths.runsDir(), j.runId, `${j.slug}.log`) : null);
     const { immediate: immediateSlugs, adopted: adoptedSlugs } = partitionBootOrphans(bootSnap.jobs, {
       pidAlive: claudePidAlive,
       getLogPid: (j) => readSpawnedPidFromLog(bootLogPath(j)),
@@ -11019,10 +11122,15 @@ async function init() {
           // runId guard: never stamp a DIFFERENT later run of the same slug.
           if (j.status !== 'running' || !adoptedRunIds.has(j.slug) || (j.runId ?? null) !== adoptedRunIds.get(j.slug)) continue;
           j.adoptedAtBoot = adoptedAtBoot;
+          delete j.supervisedAt; // a prior process's supervisor died with it
           console.log(`[scheduler] boot: adopted live executor for ${j.slug} (pid=${j.runtime?.pid ?? 'unknown'}) — left running, no signal`);
         }
       });
     }
+
+    // Re-arm budget/idle/deadman + the quietMachine lease for the adopted rows
+    // (a dispatch-loop pass repeats this for any row left without a supervisor).
+    await superviseAdoptedRunsPass();
 
     // If we boot up while paused with a resumeAt in the past, clear it. This
     // happens when the app was closed across the reset window.

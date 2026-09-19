@@ -17,6 +17,7 @@ const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
 const { migratePrds } = require('./lib/prdMigration.cjs');
 const queueStore = require('./lib/queueStore.cjs');
 const schedulerPaths = require('./lib/schedulerPaths.cjs');
+const { evaluateDispatchLiveness } = require('./lib/watchdogHelpers.cjs');
 const { computeStallSummary, FAILURE_STREAK_ESCALATION_MS, classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS } = require('./scheduler.cjs');
 const { findStarvedProjects } = require('./lib/schedulerBatch.cjs');
 const { auditLogPath, readTail } = require('./lib/auditLog.cjs');
@@ -747,6 +748,12 @@ async function check() {
           + `no scheduler tick in ~${ageMin}m (threshold ${Math.round(TICK_STALL_THRESHOLD_MS / 60_000)}m)`
         );
       }
+    }
+    // Same classification the external watchdog logs (observability only).
+    const dispatchLiveness = evaluateDispatchLiveness(heartbeat, now);
+    status.components.scheduler_queue.dispatchLiveness = dispatchLiveness;
+    if (dispatchLiveness.dead) {
+      status.issues.push('Scheduler dispatch appears dead: heartbeat is fresh but nothing has launched in 30m+ with dispatchable work pending and nothing running');
     }
     status.components.queue_dispatch = evaluateQueueDispatchHealth(queueState, runningCount, now);
     if (!status.components.queue_dispatch.ok || status.components.queue_dispatch.blocked) {

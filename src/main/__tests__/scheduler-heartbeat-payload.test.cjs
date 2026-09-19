@@ -60,3 +60,20 @@ test('watchdogHelpers treats a hand-written degraded line as stale', () => {
   fs.writeFileSync(HB(), JSON.stringify({ ts: Date.now() }) + '\n');
   expect(heartbeatFresh(HB())).toBe(true);
 });
+
+test('healthy tick carries dispatch {..., pendingDispatchable excludes blocked chains}', () => {
+  const jobs = [
+    { slug: '1-a', cwd: '/p', status: 'failed' },
+    { slug: '2-b', cwd: '/p', status: 'pending', dependsOn: ['1-a'] },
+    { slug: '3-c', cwd: '/p', status: 'pending' },
+  ];
+  const entry = scheduler.heartbeatTick({
+    readQueueSync: () => ({ jobs, unreadable: true, paused: null, lastRunAt: '2026-01-01T00:00:00.000Z' }),
+  });
+  expect(entry.dispatch).toEqual(expect.objectContaining({
+    lastRunAt: '2026-01-01T00:00:00.000Z', pendingDispatchable: 1, runningCount: 0, paused: false,
+  }));
+  expect(Object.keys(entry.dispatch).sort()).toEqual(
+    ['lastDispatchAttemptAt', 'lastRunAt', 'lastTickReason', 'paused', 'pendingDispatchable', 'runningCount'],
+  );
+});

@@ -8,6 +8,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {
   heartbeatFresh,
+  evaluateDispatchLiveness,
   readLastHeartbeat,
   localDateStr,
   maybeFinalizeHistory,
@@ -309,4 +310,66 @@ test('maybeFinalizeHistory: dryRun computes without stamping or requiring a writ
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+describe('evaluateDispatchLiveness', () => {
+  const now = 10_000_000_000;
+  const deadMs = 30 * 60_000;
+  const base = () => ({
+    ts: now - 1_000,
+    dispatch: {
+      lastDispatchAttemptAt: new Date(now - 1_000).toISOString(),
+      lastRunAt: new Date(now - deadMs - 60_000).toISOString(),
+      lastTickReason: 'held',
+      pendingDispatchable: 3,
+      runningCount: 0,
+      paused: false,
+    },
+  });
+
+  test('all conditions met → dead', () => {
+    assert.deepEqual(evaluateDispatchLiveness(base(), now, { deadMs }), { dead: true, reason: 'dispatch-dead' });
+  });
+
+  test('default deadMs is 30 min', () => {
+    assert.equal(evaluateDispatchLiveness(base(), now).dead, true);
+    const e = base();
+    e.dispatch.lastRunAt = new Date(now - 29 * 60_000).toISOString();
+    assert.equal(evaluateDispatchLiveness(e, now).dead, false);
+  });
+
+  test('each condition is conjunctive', () => {
+    const recent = base(); recent.dispatch.lastRunAt = new Date(now - 60_000).toISOString();
+    const none = base(); none.dispatch.pendingDispatchable = 0;
+    const running = base(); running.dispatch.runningCount = 1;
+    const stale = base(); stale.ts = now - 10 * 60_000;
+    for (const e of [recent, none, running, stale]) {
+      assert.equal(evaluateDispatchLiveness(e, now, { deadMs }).dead, false);
+    }
+  });
+
+  test('never-dispatched (null lastRunAt) counts as older than deadMs', () => {
+    const e = base(); e.dispatch.lastRunAt = null;
+    assert.equal(evaluateDispatchLiveness(e, now, { deadMs }).dead, true);
+  });
+
+  test('paused suppresses', () => {
+    const e = base(); e.dispatch.paused = true;
+    assert.deepEqual(evaluateDispatchLiveness(e, now, { deadMs }), { dead: false, reason: 'paused' });
+  });
+
+  test('drained queue (nothing dispatchable) suppresses', () => {
+    const e = base(); e.dispatch.pendingDispatchable = 0;
+    assert.equal(evaluateDispatchLiveness(e, now, { deadMs }).reason, 'nothing-dispatchable');
+  });
+
+  test('a degraded line is ignored', () => {
+    const e = { ...base(), degraded: true, errors: [] };
+    assert.equal(evaluateDispatchLiveness(e, now, { deadMs }).dead, false);
+  });
+
+  test('null entry / missing dispatch field → not dead', () => {
+    assert.equal(evaluateDispatchLiveness(null, now).dead, false);
+    assert.equal(evaluateDispatchLiveness({ ts: now }, now).dead, false);
+  });
 });

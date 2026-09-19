@@ -1,6 +1,6 @@
 # Claude Code Session Manager
 
-Electron desktop app — local cockpit for Claude Code CLI. Terminal + 25+ config/ops/scheduling tabs.
+Electron desktop app — local cockpit for Claude Code CLI. Terminal + config/ops/scheduling tabs.
 Per-project state lives under `<cwd>/session-manager-operations/`.
 
 **This file holds the laws. The rationale behind each lives in a linked reference doc — follow the link
@@ -23,11 +23,22 @@ before changing anything in that area.** Reference docs, all under `session-mana
 | [`ops-maintenance-protocol.md`](session-manager-operations/architecture/ops-maintenance-protocol.md) | Ops-folder drift sweeps |
 | [`project-partition.md`](session-manager-operations/architecture/project-partition.md) | Repo's 4 partitions, path-by-path |
 | [`host-boundary.md`](session-manager-operations/architecture/host-boundary.md) | Host-vs-ours boundary, routing rule |
+| [`README.md`](session-manager-operations/architecture/README.md) | Index of this folder |
 | [`scheduler-operations.md`](session-manager-operations/architecture/scheduler-operations.md) | Dispatch, needs_review ladder, reap gate, diagnosis table |
+
+## Scoped MDs — auto-load when you edit there; read first
+
+| Path | Scope |
+| --- | --- |
+| [`src/CLAUDE.md`](src/CLAUDE.md), [`src/renderer/CLAUDE.md`](src/renderer/CLAUDE.md) | main/preload, renderer |
+| [`scripts/README.md`](scripts/README.md), [`tests/README.md`](tests/README.md) | scripts, tests |
+| [`web/README.md`](web/README.md), [`web/remote-app/CLAUDE.md`](web/remote-app/CLAUDE.md), [`web-remote/CLAUDE.md`](web-remote/CLAUDE.md) | web presence, remote app, relay |
+| [`plugins/CLAUDE.md`](plugins/CLAUDE.md), `docs/README.md` | plugins, docs |
+| [`session-manager-operations/CLAUDE.md`](session-manager-operations/CLAUDE.md), [`architecture/README.md`](session-manager-operations/architecture/README.md) | ops root, architecture |
 
 ## Stack
 
-Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand · xterm + node-pty · Whisper
+Electron 42 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand · xterm + node-pty · Whisper
 (ricky0123/vad-web + onnxruntime-web) for voice.
 
 ## Commands
@@ -38,9 +49,10 @@ Electron 33 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `npm run test:unit` — `vitest run`. Single file: `timeout 120 npx vitest run <path>`. NOT `node --test`
   (can't resolve TS renderer imports).
 - `npm run test:e2e` — Playwright Electron under `xvfb-run` (Linux).
-- `npm run lint` — `lint:selectors` + `lint:hooks`. Both guard blank-screen crashes; run with typecheck.
+- `npm run lint` — unstable selectors + conditional hooks (blank-screen guards) + unregistered tests; run with typecheck.
 - `npm run health` — `src/main/health.cjs` (exit 0 = GREEN); entry point for `/local-project-health`.
-- `npm publish` — runs `vite build` via `prepublishOnly`. Tag `latest`.
+- `npm publish` — `prepublishOnly` = project-pages build + logic build + gate + `vite build`. Tag `latest`.
+  Published as `claude-code-session-manager`; [distribution detail](session-manager-operations/architecture/conventions.md#distribution).
 
 ## Domain model — the laws
 
@@ -80,17 +92,8 @@ Any new feature touching sessions, navigation, or per-project state must map ont
 - **SINGLE-WRITER LAW over the operations root** (`src/main/lib/opsOwnership.cjs`). Every
   `session-manager-operations/<namespace>/` has exactly ONE owning writer; everyone else reads. Fail-closed —
   an undeclared writer throws. Adding a namespace or writer is a deliberate edit to that file. Build ops
-  paths only via its `opsPath()`. Read its `README.md` first.
-  - **Owned** (in `OWNERS`, app-owned runtime state): `prompt-sessions` → epics · `scheduler` → scheduler ·
-    `project-brief` → project-home · `logs` → logs · `bilko-host` → bilko-host · `project-pages` →
-    project-home (`home.html` via `project_home_write` only — see
-    `project-pages/README.md`).
-  - **Deliberately NOT owned** (skill-authored docs/artifacts, no concurrent-write hazard — this is the
-    correct split, not a gap): `architecture`, `design-mocks`, `HUMAN_LEARN`, `manual`, `reviews`.
-    `feedback` **retired** (2026-08-02). `browser` is a leftover, safe to delete on sight.
-  - **Any new top-level folder under `session-manager-operations/` must land in this enumeration or in
-    `OWNERS` in the same PR that creates it** — `scripts/ops-sweep.cjs` flags an unlisted namespace as
-    `UNDOCUMENTED` — never a speculative `general` bucket.
+  paths only via its `opsPath()`. Enumeration, owners, retention:
+  [session-manager-operations/CLAUDE.md](session-manager-operations/CLAUDE.md).
 - **Open-core: the APP is free and stays free.** Field Manual is the only paid artifact. Never add a license
   check, entitlement gate, trial limit, nag, or "pro" tier, and never move a feature behind a purchase.
 - **The bilko.run relay stays live** — desktop half of web remote removed 2026-08-06 (restore `b014cc2`). Do
@@ -109,7 +112,7 @@ Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/
   [`PRD_AUTHORING.md`](src/main/templates/PRD_AUTHORING.md) —
   rules from two real stuck-job incidents + a pre-queue checklist (§10).
 - **Guard hooks adopt by REFERENCE via a stable shim** (`guardShims.cjs`,
-  `~/.claude/session-manager/hooks/guard-*.cjs`) — readiness banner installs all three.
+  `~/.claude/session-manager/hooks/guard-*.cjs`) — readiness banner installs all four.
 - A job parked in `needs_review` is a **question**, routed back to the authoring Epic — never mints new work.
 - The Scheduler nav row is **PROJECT-face only** — every route it renders is cwd-derived.
 - Stuck queue or a parked `needs_review`? See
@@ -150,8 +153,3 @@ Each of these is a real incident, with the post-mortem in
 - Adding a new LeftNav tab before checking whether an existing surface owns that data — pruned once at
   ~31 destinations with overlap.
 - Adding pane state to parent tabs, or importing design primitives via wildcard.
-
-## Distribution
-
-Published as `claude-code-session-manager` on npm. Detail (postinstall, platforms, Simple mode):
-[`conventions.md`](session-manager-operations/architecture/conventions.md#distribution).

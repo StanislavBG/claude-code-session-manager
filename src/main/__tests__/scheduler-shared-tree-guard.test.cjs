@@ -298,3 +298,77 @@ test('checkSharedTreeGuard end-to-end: the real 2026-09-12 incident shape — un
   expect(result.reverted).toBeUndefined();
   expect(result.nowIgnored).toEqual([logPath]);
 });
+
+// --- landedCommit ground truth (2026-09-18, 1229-fo-03 false positive) ---
+// Real temp git fixture, never the live repo. Baseline-dirty path `cfg.txt`
+// goes clean with no commit covering it (the shape that makes the baseline
+// diff say "reverted"); only the landedCommit ancestry decides the verdict.
+const { execFileSync } = require('node:child_process');
+const os = require('node:os');
+const nodePath = require('node:path');
+
+function gitIn(dir, ...args) {
+  return execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
+}
+
+function fixtureRepo() {
+  const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'shared-tree-landed-'));
+  gitIn(dir, 'init', '-q');
+  gitIn(dir, 'config', 'user.email', 't@example.com');
+  gitIn(dir, 'config', 'user.name', 'T');
+  fs.writeFileSync(nodePath.join(dir, 'cfg.txt'), 'base\n');
+  gitIn(dir, 'add', '-A');
+  gitIn(dir, 'commit', '-q', '-m', 'base');
+  const base = gitIn(dir, 'rev-parse', 'HEAD');
+  fs.writeFileSync(nodePath.join(dir, 'cfg.txt'), 'human wip\n'); // baseline-dirty
+  return { dir, base };
+}
+
+function commitPath(dir, rel, msg) {
+  fs.writeFileSync(nodePath.join(dir, rel), `${msg}\n`);
+  gitIn(dir, 'add', rel);
+  gitIn(dir, 'commit', '-q', '-m', msg);
+  return gitIn(dir, 'rev-parse', 'HEAD');
+}
+
+test('checkSharedTreeGuard: landedCommit still an ancestor of HEAD plus an unrelated later commit is NOT reverted', async () => {
+  const { dir, base } = fixtureRepo();
+  const landed = commitPath(dir, 'job.txt', 'job work');
+  gitIn(dir, 'checkout', '--', 'cfg.txt'); // baseline-dirty path goes clean, no commit covers it
+  commitPath(dir, 'later.txt', 'unrelated human commit');
+
+  const result = await checkSharedTreeGuard({
+    cwd: dir, stashBaseline: [], dirtyBaseline: [{ code: ' M', path: 'cfg.txt' }],
+    headBefore: base, slug: 'job-a', landedCommit: landed,
+  });
+  expect(result).toBeNull();
+});
+
+test('checkSharedTreeGuard: landedCommit absent from history still parks as reverted', async () => {
+  const { dir, base } = fixtureRepo();
+  const landed = commitPath(dir, 'job.txt', 'job work');
+  gitIn(dir, 'reset', '-q', '--hard', base); // job commit discarded
+  commitPath(dir, 'later.txt', 'unrelated human commit');
+
+  const result = await checkSharedTreeGuard({
+    cwd: dir, stashBaseline: [], dirtyBaseline: [{ code: ' M', path: 'cfg.txt' }],
+    headBefore: base, slug: 'job-b', landedCommit: landed,
+  });
+  expect(result).toEqual({ reverted: ['cfg.txt'] });
+});
+
+test('checkSharedTreeGuard: no landedCommit at all still parks as reverted', async () => {
+  const { dir, base } = fixtureRepo();
+  gitIn(dir, 'checkout', '--', 'cfg.txt');
+  const result = await checkSharedTreeGuard({
+    cwd: dir, stashBaseline: [], dirtyBaseline: [{ code: ' M', path: 'cfg.txt' }],
+    headBefore: base, slug: 'job-c', landedCommit: null,
+  });
+  expect(result).toEqual({ reverted: ['cfg.txt'] });
+});
+
+test('landedCommitIsAncestorOfHead: empty/unknown sha is false, never throws', async () => {
+  const { dir } = fixtureRepo();
+  expect(await scheduler.landedCommitIsAncestorOfHead(dir, '')).toBe(false);
+  expect(await scheduler.landedCommitIsAncestorOfHead(dir, 'deadbeefdeadbeef')).toBe(false);
+});

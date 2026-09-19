@@ -342,3 +342,38 @@ test('reverifyNeedsReview never computes looksDone for a worktree_integration_fa
   assert.equal(jobs[0].looksDone, undefined, 'a stranded-branch verdict must never be treated as evidence-gatherable');
   assert.equal(jobs[0].status, 'needs_review');
 });
+
+test('reverifyNeedsReview heals a stale shared_tree_reverted row (autoFixAttempted, no outcome) whose landedCommit is still an ancestor of HEAD', async () => {
+  const projectCwd = path.join(tmpHome, 'proj-stale-shared-tree');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd, 'proj-stale-shared-tree-slug');
+  writePrd(projectCwd, '1229-stale-shared-tree', '# Implementation notes\nEdit `src/thing.js`.');
+
+  const startedAt = new Date(Date.now() - 5000).toISOString();
+  await wait(1100);
+  commitFile(projectCwd, 'src/thing.js', 'job work', 'the job own commit');
+  const landed = git(['rev-parse', 'HEAD'], projectCwd).trim();
+  commitFile(projectCwd, 'docs/unrelated.md', 'human', 'human commit after the job');
+
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug: '1229-stale-shared-tree',
+      status: 'needs_review',
+      cwd: projectCwd,
+      runId: 'run-1229',
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      exitCode: 0,
+      verifierVerdict: 'shared_tree_reverted',
+      landedCommit: landed,
+      autoFixAttempted: true,
+    },
+  ]);
+
+  await reverifyNeedsReview();
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  // Healed rows are archived out of the live queue on the same pass.
+  const row = jobs.find((j) => j.slug === '1229-stale-shared-tree');
+  assert.ok(!row || row.status === 'completed', 'row must no longer be parked in needs_review');
+});

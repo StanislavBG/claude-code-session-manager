@@ -605,7 +605,7 @@ function evaluateSharedTreeGuard({ stashBefore, stashAfter, dirtyBefore, dirtyAf
 // executor-created stash (never guesses when there are 2+); reports anything
 // it can't safely resolve on the returned object so the caller can surface it
 // on the job row instead of finishing silently green.
-async function checkSharedTreeGuard({ cwd, stashBaseline, dirtyBaseline, headBefore, slug }) {
+async function checkSharedTreeGuard({ cwd, stashBaseline, dirtyBaseline, headBefore, slug, landedCommit }) {
   try {
     const [stashAfter, headAfter] = await Promise.all([
       module.exports.stashList(cwd),
@@ -670,7 +670,16 @@ async function checkSharedTreeGuard({ cwd, stashBaseline, dirtyBaseline, headBef
       pathsCommittedDuringRun,
       existsAfter,
     });
-    if (reverted.length) {
+    // Ground truth outranks the baseline diff (2026-09-18, 1229-fo-03): the
+    // dirty baseline is invalidated by ANY later writer (a human commit that
+    // sweeps the same paths), so it can't prove a revert on its own. The
+    // job's own landedCommit still being an ancestor of HEAD proves its work
+    // was not discarded — anchored to that sha, not to the baseline.
+    const workSurvives = reverted.length > 0
+      && await module.exports.landedCommitIsAncestorOfHead(cwd, landedCommit);
+    if (workSurvives) {
+      console.log(`[scheduler] ${slug}: shared-tree guard: ${reverted.length} baseline path(s) went clean but landed commit ${String(landedCommit).slice(0, 7)} is still an ancestor of HEAD — not a revert`);
+    } else if (reverted.length) {
       result.reverted = reverted;
       console.error(`[scheduler] ${slug}: shared-tree guard: ${reverted.length} path(s) reverted in the shared tree with no commit to explain it (${reverted.slice(0, 3).join(', ')})`);
     }
@@ -4971,6 +4980,39 @@ async function resolveLandedCommitEvidence(cwd, sha, sinceIso) {
 }
 
 /**
+ * True when `sha` is a non-empty commit that is an ancestor of (or equal to)
+ * HEAD in the repo at `cwd` (`git merge-base --is-ancestor`). Bounded, never
+ * throws: an empty sha, an unknown sha, or any git failure is `false`, so the
+ * caller's safe default is "cannot prove the work survived".
+ */
+async function landedCommitIsAncestorOfHead(cwd, sha) {
+  if (!sha || typeof sha !== 'string' || !cwd) return false;
+  try {
+    await execGitAt(resolveProjectRoot(cwd), ['merge-base', '--is-ancestor', sha, 'HEAD'], { timeout: 10_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pure predicate: a needs_review row parked as shared_tree_reverted that
+ * carries a landedCommit — the only shape reverifyNeedsReview can re-check
+ * against ground truth (landedCommitIsAncestorOfHead). Deliberately
+ * independent of autoFixAttempted: 1229-fo-03 was parked with
+ * autoFixAttempted:true and no autoFixOutcome (isStrandedAutoFixPark shape),
+ * yet isStrandedAutoFixPark could not release it — that ladder only resolves
+ * once job.looksDone is set, and reverifyNeedsReview computes looksDone only
+ * for isRescanCandidate / isGuardParkedWithoutAutoFix rows, neither of which
+ * a shared_tree_reverted + autoFixAttempted row is.
+ */
+function isStaleSharedTreeRevertedPark(job) {
+  return !!job && job.status === 'needs_review'
+    && job.verifierVerdict === 'shared_tree_reverted'
+    && typeof job.landedCommit === 'string' && job.landedCommit.length > 0;
+}
+
+/**
  * Commit exactly `paths` (must already be dirty on disk) onto a dedicated
  * `sm-salvage/<slug>` ref, built from `headBefore` (or current HEAD when
  * unavailable) via a THROWAWAY `GIT_INDEX_FILE` — never touches the live
@@ -7156,6 +7198,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
         dirtyBaseline: guardBaselineEntries,
         headBefore: guardHeadBefore,
         slug: job.slug,
+        landedCommit: jobLandedCommitThisRun,
       });
       // A restored stash alone isn't silence — it's logged loudly above and
       // surfaced on the job row below — but a path that's still missing
@@ -9831,7 +9874,7 @@ function isRescanCandidate(job) {
  */
 function shouldRunPeriodicReverify(jobs) {
   if (!Array.isArray(jobs)) return false;
-  if (jobs.some((j) => isRescanCandidate(j) || isGuardParkedWithoutAutoFix(j))) return true;
+  if (jobs.some((j) => isRescanCandidate(j) || isGuardParkedWithoutAutoFix(j) || isStaleSharedTreeRevertedPark(j))) return true;
   if (jobs.some((j) => selectMechanicalRecoveryTarget(j) || selectResumeRecoveryTarget(j))) return true;
   return selectAutoFixTargets(jobs, { fixSlugExists: () => false }).length > 0;
 }
@@ -10401,7 +10444,7 @@ async function reverifyNeedsReview() {
   // guard-verdict auto-resolve gap this PRD closes. Handled in its own
   // branch below (no transcript rescan — there is no transcript verdict to
   // rescan) rather than through the isRescanCandidate machinery.
-  const candidates = snap.jobs.filter((j) => isRescanCandidate(j) || isGuardParkedWithoutAutoFix(j));
+  const candidates = snap.jobs.filter((j) => isRescanCandidate(j) || isGuardParkedWithoutAutoFix(j) || isStaleSharedTreeRevertedPark(j));
   const healed = [];
   const leftForReview = [];
   const looksDoneUpdates = [];
@@ -10485,6 +10528,21 @@ async function reverifyNeedsReview() {
     // Skipped when a fix-plan investigation was already minted for this row
     // (job.autoFixAttempted) — PRD 1136: 'looks done, confirm before
     // archiving' and 'a -fix- child is already investigating this' are two
+    if (isStaleSharedTreeRevertedPark(job)) {
+      // Re-apply the corrected shared-tree check: the row's own landedCommit
+      // (this dispatch's, per resolveLandedCommitEvidence) still being an
+      // ancestor of HEAD means the park was a false positive — heal it.
+      const cwd = job.cwd || DEFAULT_PROJECT_CWD;
+      if (await resolveLandedCommitEvidence(cwd, job.landedCommit, job.startedAt)
+        && await module.exports.landedCommitIsAncestorOfHead(cwd, job.landedCommit)) {
+        healed.push(job.slug);
+        continue;
+      }
+      if (!isRescanCandidate(job) && !isGuardParkedWithoutAutoFix(job)) {
+        leftForReview.push({ slug: job.slug, reason: 'shared_tree_reverted: landed commit not an ancestor of HEAD' });
+        continue;
+      }
+    }
     // different claims about the SAME evidence, and stamping both leaves a
     // human reading two contradictory signals off one row. autoFixAttempted
     // is stamped synchronously in spawnJob's same-tick auto-fix branch,
@@ -12392,6 +12450,8 @@ module.exports = {
   isBranchAlreadyIntegrated,
   selectResumeRecoveryTarget,
   buildResumeRecoveryPreamble,
+  isStaleSharedTreeRevertedPark,
+  landedCommitIsAncestorOfHead,
   buildClaudeSpawnArgs,
   spawnResumeRecovery,
   selectMechanicalRecoveryTarget,

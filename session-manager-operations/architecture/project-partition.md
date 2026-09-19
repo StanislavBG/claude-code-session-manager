@@ -27,14 +27,13 @@ Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
 | `src/` | *(split — see below)* | |
 | `scripts/` | *(split — see below)* | |
 | `dist/` | DESKTOP HARNESS | Renderer build output. |
-| `e2e/`, `tests/`, `test/`, `test-results/` | DESKTOP HARNESS | `test/` is being retired by PRD 1182. |
-| `screenshots/` | DESKTOP HARNESS | Manual/e2e capture output. |
-| `.github/` | DESKTOP HARNESS | CI workflows (build/test/publish). |
+| `e2e/`, `tests/`, `test-results/` | DESKTOP HARNESS | Playwright specs, fixtures, and run output. |
+| `.github/` | DESKTOP HARNESS | CI workflows (build, test, publish). |
 | `.claude/` | DESKTOP HARNESS | This repo's own local dev config (agent personas used to develop session-manager, worktrees, settings) — distinct from the AGENT LAYER, which is what THIS repo ships to *other* repos. |
 | `CLAUDE.md`, `tsconfig.json`, `vite.config.ts`, `vitest.config.ts`, `tailwind.config.js`, `postcss.config.js`, `playwright.config.ts`, `package.json`, `package-lock.json`, `.gitignore`, `LICENSE` | DESKTOP HARNESS | Root build/governance config. |
-| `plugins/` | AGENT LAYER | `plugins/session-manager-dev/skills/` — 15 skills (verified count). |
+| `plugins/` | AGENT LAYER | `plugins/session-manager-dev/skills/` — the skills this repo ships (list the directory for the current set). |
 | `.claude-plugin/` | AGENT LAYER | Marketplace manifest for the `session-manager-dev` plugin. |
-| `.mcp.json` | AGENT LAYER | Registers `scheduler-mcp-server.cjs` — the agent-facing door onto the scheduler. |
+| `.mcp.json` | AGENT LAYER | Registers only `bilko-host`. The scheduler MCP server (`scripts/scheduler-mcp-server.cjs`) is registered at user scope in `~/.claude.json` (installed by `scripts/install-scheduler-mcp-user-scope.sh`), not here. |
 | `web/` | WEB PRESENCE | Physical home of the partition's producers (`project-pages/`, `manual/`, `remote-app/`) — see [`web/README.md`](../../web/README.md). |
 | `web-remote/` | WEB PRESENCE | `app/` moved to `web/remote-app/` (PRD 1184). See [web-remote/CLAUDE.md](../../web-remote/CLAUDE.md) — only `relay/` (dead) remains here. |
 | `session-manager-operations/` | OPERATIONS STATE | See namespace table below. |
@@ -46,9 +45,9 @@ Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
 
 | Folder | Partition | Note |
 | --- | --- | --- |
-| `src/main/` | DESKTOP HARNESS | **Except** `bilkoHost.cjs`, `bilkoHostCore.cjs`, `projectPages.cjs` → WEB PRESENCE (producers of the bilko.run project page). ~87.7k lines. |
+| `src/main/` | DESKTOP HARNESS | **Except** `bilkoHost.cjs`, `bilkoHostCore.cjs`, `projectPages.cjs` → WEB PRESENCE (producers of the bilko.run project page). Also holds `lib/activeSessions.cjs` and `lib/watchdogHelpers.cjs`, moved here from the scripts folder's old helper subdirectory. |
 | `src/preload/` | DESKTOP HARNESS | |
-| `src/renderer/` | DESKTOP HARNESS | ~87.1k lines. |
+| `src/renderer/` | DESKTOP HARNESS | **Except** `lib/projectPages/` → WEB PRESENCE (compiled into the bilko.run page bundle by `web/project-pages/build-renderer.mjs`; `web/project-pages/generate-font-data.mjs` writes `library/fontData.ts` there). |
 | `src/seed/` | DESKTOP HARNESS | |
 
 **Ambiguous case, resolved:** `src/main/scheduler.cjs` is DESKTOP HARNESS runtime (it is the app's job
@@ -63,15 +62,15 @@ in `scripts/` is AGENT LAYER + DESKTOP HARNESS only.
 
 | Entry | Partition | Note |
 | --- | --- | --- |
-| `hooks/` (`guard-destructive-git.cjs`, `guard-inline-implementation.cjs`, `guard-prd-writes.cjs`, `__tests__/`) | AGENT LAYER | Adopted by OTHER repos **by reference** via the stable shim (`src/main/lib/guardShims.cjs`) at `~/.claude/session-manager/hooks/guard-*.cjs`, never this repo's own absolute path — and never vendored. As of 2026-09-12, `starry-night-ships` and `social-signals-trader` still pin the old raw absolute path in their checked-in `settings.json`, unrepaired since the shim shipped — see [`../reviews/2026-09-12-agent-layer-consumers.md`](../reviews/2026-09-12-agent-layer-consumers.md). |
+| `hooks/` (`guard-destructive-git.cjs`, `guard-inline-implementation.cjs`, `guard-prd-writes.cjs`, `guard-self-schedule.cjs`, `__tests__/`) | AGENT LAYER | Adopted by OTHER repos **by reference** via the stable shim (`src/main/lib/guardShims.cjs`) at `~/.claude/session-manager/hooks/guard-*.cjs`, never this repo's own absolute path — and never vendored. As of 2026-09-12, `starry-night-ships` and `social-signals-trader` still pin the old raw absolute path in their checked-in `settings.json`, unrepaired since the shim shipped — see [`../reviews/2026-09-12-agent-layer-consumers.md`](../reviews/2026-09-12-agent-layer-consumers.md). |
 | `scheduler-mcp-server.cjs`, `mint-epic.cjs` | AGENT LAYER | The agent-facing doors onto scheduler + Epic minting. |
-| `postinstall.cjs`, `lib/` (`activeSessions.cjs`, `watchdogHelpers.cjs`), `scheduler-watchdog.cjs`, `scheduler-watchdog.sh`, `install-scheduler-watchdog.sh`, `install-scheduler-mcp-user-scope.sh`, `health.sh`, `audit-ops-hygiene.cjs`, `bench-intraday-walk.cjs`, `check-conditional-hooks.cjs`, `check-unregistered-tests.cjs`, `check-unstable-selectors.cjs`, `cleanup-nested-queue-stubs.cjs`, `cleanup-worktree-ops-stubs.cjs`, `mirror-epic-status.cjs`, `ops-sweep.cjs`, `__tests__/` (minus the manual/project-pages test files, moved alongside their subjects) | DESKTOP HARNESS | Dev/build/lint/watchdog tooling for the app itself. `scripts/lib/` is required only by `scheduler-watchdog.cjs`. `scripts/__tests__/package-files.test.cjs` stays here — it tests `package.json`'s `files` array as a whole, spanning all three code partitions, not one moved file. |
+| `postinstall.cjs`, `sync-settings-schema.cjs`, `scheduler-watchdog.cjs`, `scheduler-watchdog.sh`, `install-scheduler-watchdog.sh`, `install-scheduler-mcp-user-scope.sh`, `health.sh`, `audit-ops-hygiene.cjs`, `bench-intraday-walk.cjs`, `check-conditional-hooks.cjs`, `check-unregistered-tests.cjs`, `check-unstable-selectors.cjs`, `cleanup-nested-queue-stubs.cjs`, `cleanup-worktree-ops-stubs.cjs`, `mirror-epic-status.cjs`, `ops-sweep.cjs`, `__tests__/` (minus the manual/project-pages test files, moved alongside their subjects) | DESKTOP HARNESS | Dev/build/lint/watchdog tooling for the app itself. `scripts/__tests__/package-files.test.cjs` stays here — it tests `package.json`'s `files` array as a whole, spanning all three code partitions, not one moved file. |
 
 ## `web/` top-level entries
 
 | Entry | Partition | Note |
 | --- | --- | --- |
-| `project-pages/` (`render.cjs`, `renderer/`, `logic/`, `assets.cjs`, `publish-gate.cjs`, `validate-summary.cjs`, `build-renderer.mjs`, `build-logic.mjs`, `generate-font-data.mjs`, `__tests__/publish-gate.test.cjs`) | WEB PRESENCE | Producers + their own build steps, formerly `scripts/*project-pages*`. |
+| `project-pages/` (`render.cjs`, `renderer/`, `logic/`, `publish-gate.cjs`, `validate-summary.cjs`, `build-renderer.mjs`, `build-logic.mjs`, `generate-font-data.mjs`, `__tests__/publish-gate.test.cjs`) | WEB PRESENCE | Producers + their own build steps, formerly `scripts/*project-pages*`. |
 | `manual/` (`build.mjs`, `capture-figures.mjs`, `__tests__/`) | WEB PRESENCE | Field Manual build/capture tooling, formerly `scripts/build-manual.mjs` + `scripts/capture-manual-figures.mjs`. Reads/writes `session-manager-operations/manual/` (OPERATIONS STATE, unmoved) and writes into `~/Projects/Bilko`. |
 | `remote-app/` | WEB PRESENCE | The phone-remote PWA, formerly `web-remote/app/`. |
 
@@ -83,13 +82,14 @@ together, since `npm install` is the single distribution mechanism for the whole
 
 - **AGENT LAYER** entries: `.claude-plugin/`, `plugins/`, `scripts/mint-epic.cjs`,
   `scripts/scheduler-mcp-server.cjs`, `scripts/hooks/guard-prd-writes.cjs`,
-  `scripts/hooks/guard-destructive-git.cjs`, `scripts/hooks/guard-inline-implementation.cjs`.
+  `scripts/hooks/guard-destructive-git.cjs`, `scripts/hooks/guard-inline-implementation.cjs`,
+  `scripts/hooks/guard-self-schedule.cjs`.
 - **WEB PRESENCE** entries: `web/project-pages/render.cjs`,
   `web/project-pages/renderer/dist/`, `web/project-pages/logic/dist/`,
   `web/project-pages/validate-summary.cjs`.
-- **DESKTOP HARNESS** entries (the rest): `bin/`, `scripts/postinstall.cjs`, `scripts/lib/`,
+- **DESKTOP HARNESS** entries (the rest): `bin/`, `scripts/postinstall.cjs`,
   `src/main/`, `src/preload/`, `src/seed/`, `dist/index.html`, `dist/assets/`, `dist/vad/`,
-  `screenshots/`, `README.md`.
+  `README.md`.
 
 ## `session-manager-operations/` namespaces
 
@@ -106,6 +106,7 @@ WEB PRESENCE territory.
 
 ## Verification
 
-Repo root listed via `ls -la`, `src/`/`scripts/` listed via `ls`, diffed by hand against every
-row above — no top-level path is unassigned or duplicated, aside from the two explicitly
-excluded (`node_modules/`, `.git/`) and the one explicitly excluded stray file.
+The check is a manual diff, not a proof of exhaustiveness: list the repo root (`ls -a`) and
+`src/`, `scripts/`, `web/`, and compare each entry against the tables above. Any entry present
+on disk but in no row, or in a row but absent on disk, is drift to fix here. `package.json`'s
+`files` array is the second cross-check (`node -e "console.log(require('./package.json').files)"`).

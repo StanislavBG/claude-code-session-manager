@@ -39,24 +39,22 @@ responsibility, invoked through the MCP. Do not add a second, competing
 publish path (e.g. hand-writing to `standalone-projects.json` via `gh`/raw
 git from this app) — that would drift from Bilko's own gates and rules.
 
-**Known landmine (flag, don't route around silently):** as of this design's
-research (2026-08-02), `mcp-host-server`'s commit step still attempts to
-push to a second, retired `content-grade` remote in addition to `origin` —
-Bilko's own `CLAUDE.md` says that remote's history has diverged and pushes
-there are expected to fail harmlessly. The `bilko-host-publisher` agent
-persona (below) is told explicitly to treat a `content-grade` push failure
-in the tool's output as expected noise, not a publish failure — checking
-`origin`'s push result and the final `status` call is what actually confirms
-success.
+**Known landmine (historical — true as of 2026-08-02; since fixed):** at this design's
+research date, `mcp-host-server`'s commit step also pushed to a second, retired `content-grade`
+remote in addition to `origin` (that remote's history had diverged, so those pushes failed
+harmlessly). `mcp-host-server` now pushes to `origin` only, and the matching prompt
+instruction telling the `bilko-host-publisher` persona to treat a `content-grade` push failure
+as expected noise was removed from `agentTagDefs.ts`. Checking `origin`'s push result and the
+final `status` call is what confirms a publish.
 
 **Two separate deploy targets exist for session-manager specifically — don't
-conflate them.** `~/Projects/session-manager/web-remote/app/` (the mobile
+conflate them.** `~/Projects/session-manager/web/remote-app/` (the mobile
 cockpit) already has its own `render.yaml` deploying to a standalone
 `session-manager.bilko.run` Render *static site* — a parallel, ungated,
 direct-git-push pipeline unrelated to the Bilko monorepo's registry/gates.
 "Host on Bilko.run" in this design means the **Bilko-repo `static-path`
 route** (`bilko.run/projects/<slug>/`, the gated MCP pipeline) exclusively.
-The `web-remote/app` Render site is out of scope here and unaffected.
+The `web/remote-app` Render site is out of scope here and unaffected.
 
 ## One Bilko project, many hosted documents
 
@@ -150,7 +148,7 @@ document from the current list —
   `git rev-parse`, `hostKit.version`, `golden.path`/`golden.expect` — always
   pointed at the root document, `bundle.sizeBytesGz`/`fileCount` summed
   across all documents) — mirrors the pattern already proven in
-  `web-remote/app/scripts/emit-manifest.mjs`, generalized from one Vite
+  `web/remote-app/scripts/emit-manifest.mjs`, generalized from one Vite
   build to N static HTML files.
 
 Pure/no-LLM, same "Prepare Bundle" cost-free button pattern as everywhere
@@ -227,8 +225,8 @@ Before showing "Publish" at all:
   as `agent-library`/`tag-library`).
 - `HostBilko.tsx` (new, `components/tabs/`) — single-panel status card
   (compat check → bundle preview/Prepare Bundle → Publish → live status),
-  reusing `ph-primitives.tsx` visuals where they overlap rather than a third
-  copy of empty-state/status-pill components.
+  reusing the shared `EmptyState` from `components/ui/` rather than a private
+  copy of the empty-state component.
 - No new zustand store — `bilko-host:get` reads the same small-JSON-files
   pattern `project-pages:get` already uses.
 
@@ -237,8 +235,8 @@ Before showing "Publish" at all:
 `src/main/config.cjs`'s `validateWrite` has a second, narrower gate on top
 of `OWNERS`: a hardcoded per-namespace allowlist of which
 `session-manager-operations/<namespace>/` subtrees a project root may
-actually write to at all (`browser`, `feedback`, `prompt-sessions`,
-`scheduler`, `project-brief` each have their own carve-out). `bilko-host`
+actually write to at all (today: `prompt-sessions`, `scheduler`,
+`project-brief`, `bilko-host`, `project-pages`). `bilko-host`
 needed the same carve-out added — without it every `config.writeJson`/
 `writeTextAtomic` call in `bilkoHost.cjs` throws "Write outside allowed
 write boundaries" regardless of `OWNERS`, since `OWNERS` and this allowlist

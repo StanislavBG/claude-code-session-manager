@@ -1279,6 +1279,7 @@ app.whenReady().then(async () => {
             }
           },
         },
+  // Application menu rules + rationale: session-manager-operations/architecture/application-menu.md
         {
           label: 'Restart Session Manager App',
           accelerator: 'CmdOrCtrl+Shift+R',

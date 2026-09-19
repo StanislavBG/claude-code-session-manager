@@ -325,7 +325,7 @@ one is fixed:
   none `failed`) — the tap fires correctly today. The remaining gap in the real install's historical
   data is a boot cadence + timing question (this machine's Electron app has not been launched fresh
   since the fix landed), not a code defect.
-- **`session.open`** (`pty.cjs:204`, `trackSessionOpen()`) — fires only on a **fresh** PTY spawn,
+- **`session.open`** (`src/main/pty.cjs` `trackSessionOpen`) — fires only on a **fresh** PTY spawn,
   deliberately not on a reattach (`pty.cjs`'s `spawn()` returns early for an already-registered
   `tabId` — a renderer HMR reload, or switching back to an Epic's Terminal pane that's already
   running in this same Electron process). This is intentional, not a bug: Tab = claudeSessionId is a

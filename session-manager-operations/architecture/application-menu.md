@@ -13,7 +13,7 @@ Vocabulary used below and in code comments:
   item (`CmdOrCtrl+N`, `F12`, ...). Fires the item's action even when the
   menu itself is closed.
 - **Context menu** — the separate right-click menu built in
-  `src/main/index.cjs:395-399`. Not part of the application menu; not covered
+  `src/main/index.cjs`'s `mainWindow.webContents.on('context-menu', ...)` handler (search for `context-menu`). Not part of the application menu; not covered
   by the rules below.
 
 ## Role items vs click items

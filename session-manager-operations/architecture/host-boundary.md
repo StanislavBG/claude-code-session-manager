@@ -131,8 +131,9 @@ any other static-path publish, not as a proposal asking Bilko to design our rout
 
 ## Publish gates currently blocking us
 
-Both recorded in [`session-manager-operations/bilko-host/publish-state.json`](../bilko-host/publish-state.json)
-(PRD 1146's publish attempt, 2026-09-11) and both are **HOST-LEGITIMATE** — host-side config/tooling
+The gates below are recorded in `session-manager-operations/bilko-host/publish-state.json` (PRD 1146's publish attempt,
+2026-09-11). That file is machine-local runtime state, untracked and absent from a fresh clone, so it is quoted
+rather than linked. Excerpt: `status: "publish-failed"`, `lastError: "publish blocked by gate(s): budget, a11y ... manifest, golden, and audit gates all passed."`. The two gates (below) are **HOST-LEGITIMATE** — host-side config/tooling
 gaps, legitimate `/send-feedback` candidates once this PRD's scope closes (not opened by this PRD):
 
 - **`budget` gate**: `app_budgets.max_size_gz_bytes` is `195000` for slug `session-manager`, below

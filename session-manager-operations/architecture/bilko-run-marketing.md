@@ -23,7 +23,7 @@ Key files in `~/Projects/Bilko/` for session-manager's listing:
 - `src/data/packages.ts` / `src/data/standalone-projects.json` — registry entries for the `/projects` grid
   and the npm-package card.
 
-There is **no intake channel into `~/Projects/Bilko/`** — no feedback folder (checked 2026-07-28), and no
-cross-project Epic filing (removed 2026-08-02). Report a cross-repo issue to the human, or fix it directly in
-`~/Projects/Bilko/` (it's the same author's project, not an external service).
+`~/Projects/Bilko/` now has its own `session-manager-operations/` root and receives cross-project reports as
+`proposed` Epics via the `feedback_open_session` MCP tool (see `send-feedback`). Product-page work for
+session-manager itself is still `/develop` here, not a report to Bilko.
 

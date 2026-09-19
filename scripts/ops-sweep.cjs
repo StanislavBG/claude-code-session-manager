@@ -286,22 +286,11 @@ for (const entry of namespaceDirs) {
 const opsPathLint = (() => {
   const resolverPath = path.join(targetCwd, 'src', 'main', 'lib', 'opsOwnership.cjs');
   if (!fs.existsSync(resolverPath)) return { applicable: false, violations: [] };
-  const srcMain = path.join(targetCwd, 'src', 'main');
-  const violations = [];
-  const walk = (dir) => {
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) { if (e.name !== '__tests__' && e.name !== 'node_modules') walk(p); continue; }
-      if (!e.name.endsWith('.cjs') || p === resolverPath) continue;
-      const lines = fs.readFileSync(p, 'utf8').split('\n');
-      lines.forEach((line, i) => {
-        if (line.includes("'session-manager-operations'") || line.includes('"session-manager-operations"')) {
-          violations.push({ file: path.relative(targetCwd, p), line: i + 1, text: line.trim().slice(0, 140) });
-        }
-      });
-    }
-  };
-  walk(srcMain);
+  // The shared scanner is dev-only (not in package.json files); an npm-installed copy of this
+  // script has no scanner and simply skips the rule.
+  let scan;
+  try { ({ scan } = require('./check-ops-path-literals.cjs')); } catch { return { applicable: false, violations: [] }; }
+  const violations = scan(targetCwd);
   return { applicable: true, violations };
 })();
 for (const v of opsPathLint.violations) {

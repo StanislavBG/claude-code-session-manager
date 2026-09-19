@@ -59,7 +59,8 @@
     "lint:hooks": "node scripts/check-conditional-hooks.cjs",
     "lint:unregistered-tests": "node scripts/check-unregistered-tests.cjs",
     "lint:docs": "node scripts/check-doc-hierarchy.cjs",
-    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:unregistered-tests && npm run lint:docs",
+    "lint:paths": "node scripts/check-ops-path-literals.cjs",
+    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:unregistered-tests && npm run lint:docs && npm run lint:paths",
     "sync:settings-schema": "node scripts/sync-settings-schema.cjs"
   },
   "keywords": [

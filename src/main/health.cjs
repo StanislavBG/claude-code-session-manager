@@ -19,7 +19,8 @@ const queueStore = require('./lib/queueStore.cjs');
 const schedulerPaths = require('./lib/schedulerPaths.cjs');
 const { computeStallSummary, FAILURE_STREAK_ESCALATION_MS, classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS } = require('./scheduler.cjs');
 const { findStarvedProjects } = require('./lib/schedulerBatch.cjs');
-const { auditLogPath } = require('./lib/auditLog.cjs');
+const { auditLogPath, readTail } = require('./lib/auditLog.cjs');
+const { resolveBuildIdentity } = require('./lib/buildIdentity.cjs');
 const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
 
@@ -41,6 +42,7 @@ const TICK_STALL_THRESHOLD_MS = TICK_STALL_MULTIPLIER * POLL_INTERVAL_MS;
 // scheduler-heartbeat.log is only appended to while Electron is running, so
 // a stale line here is silent-on-purpose, not evidence of anything.
 const HEARTBEAT_STALE_MS = 5 * 60_000;
+const AUDIT_TAIL_BYTES = 1024 * 1024;
 
 function runCheck(cmd, cwd = PROJECT_ROOT) {
   try {
@@ -73,6 +75,7 @@ function readFreshHeartbeat(heartbeatPath) {
   } catch {
     return null;
   }
+  if (entry.degraded === true) return null; // a subsystem threw — utilization was not read
   if (typeof entry.ts !== 'number' || Date.now() - entry.ts > HEARTBEAT_STALE_MS) return null;
   return entry;
 }
@@ -507,12 +510,9 @@ function evaluateQueueDispatchHealth(queueState, runningCount, now, thresholdMs 
  * Missing/unreadable log → {} (no reasons known yet), never a throw.
  */
 function latestStarveEscalationReasons(auditLogPath) {
-  let lines;
-  try {
-    lines = fs.readFileSync(auditLogPath, 'utf8').split('\n').filter(Boolean);
-  } catch {
-    return {};
-  }
+  // Bounded reverse tail — the log is never rotated (28 MB+), and the latest
+  // escalation per cwd is by definition recent.
+  const lines = readTail(AUDIT_TAIL_BYTES, auditLogPath);
   const byCwd = {};
   for (const line of lines) {
     let rec;
@@ -524,6 +524,24 @@ function latestStarveEscalationReasons(auditLogPath) {
     if (rec?.kind === 'project_starve_escalated' && rec.cwd) byCwd[rec.cwd] = rec.holdReason ?? 'unknown';
   }
   return byCwd;
+}
+
+/**
+ * evaluateBuildFreshness({running, installedOnDisk, repoHead}) → component
+ *
+ * Pure; each input is a short git sha or null. restartNeeded: the on-disk
+ * install differs from what the live heartbeat says is running. publishNeeded:
+ * repo HEAD differs from the installed build. Both are reported, neither is
+ * critical (never flips status.ok).
+ */
+function evaluateBuildFreshness({ running = null, installedOnDisk = null, repoHead = null } = {}) {
+  const differs = (a, b) => !!a && !!b && !(a.startsWith(b) || b.startsWith(a));
+  const restartNeeded = differs(running, installedOnDisk);
+  const publishNeeded = differs(repoHead, installedOnDisk);
+  const notes = [];
+  if (restartNeeded) notes.push(`restart needed: running ${running}, installed ${installedOnDisk}`);
+  if (publishNeeded) notes.push(`publish needed: repo HEAD ${repoHead}, installed ${installedOnDisk}`);
+  return { ok: true, running, installedOnDisk, repoHead, restartNeeded, publishNeeded, ...(notes.length ? { note: notes.join('; ') } : {}) };
 }
 
 /**
@@ -974,6 +992,24 @@ async function check() {
     status.issues.push(`Epic index health check failed: ${e.message}`);
   }
 
+  // 6.7. Build freshness (informational): running heartbeat vs installed
+  // build-info vs repo HEAD.
+  try {
+    let repoHead = null;
+    try {
+      repoHead = execFileSync('git', ['-C', PROJECT_ROOT, 'rev-parse', '--short', 'HEAD'], {
+        timeout: 5000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim() || null;
+    } catch { /* not a git checkout */ }
+    status.components.build = evaluateBuildFreshness({
+      running: readFreshHeartbeat(schedulerPaths.heartbeatPath())?.build?.codeSha ?? null,
+      installedOnDisk: resolveBuildIdentity().codeSha ?? null,
+      repoHead,
+    });
+  } catch (e) {
+    status.components.build = { ok: true, error: e.message };
+  }
+
   // 7. Summary scoring: ok if all critical components pass.
   // Critical: nodejs, config dir, typescript, build artifact, test infrastructure.
   // Non-fatal: scheduler/transcripts dirs may not exist on fresh install.
@@ -1011,6 +1047,7 @@ module.exports = {
   loadUsagePollerState,
   evaluateQueueDispatchHealth,
   evaluateStarveEscalationHealth,
+  evaluateBuildFreshness,
   latestStarveEscalationReasons,
   DISPATCH_STALL_THRESHOLD_MS,
   DISPATCH_WARN_THRESHOLD_MS,

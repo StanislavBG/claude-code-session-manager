@@ -57,4 +57,29 @@ function appendAuditEvent(kind, fields = {}) {
   }
 }
 
-module.exports = { appendAuditEvent, auditLogPath };
+/**
+ * readTail(maxBytes, target?) → string[] — the complete JSONL lines within the
+ * last `maxBytes` of the log, oldest first. O(maxBytes), never O(file): the
+ * audit log is a never-rotated provenance record and grows without bound. A
+ * line cut by the window's start is dropped. Missing/unreadable file → [].
+ */
+function readTail(maxBytes, target = auditLogPath()) {
+  let fd;
+  try {
+    fd = fs.openSync(target, 'r');
+    const { size } = fs.fstatSync(fd);
+    const readSize = Math.min(Math.max(0, maxBytes), size);
+    if (readSize === 0) return [];
+    const buf = Buffer.alloc(readSize);
+    fs.readSync(fd, buf, 0, readSize, size - readSize);
+    const lines = buf.toString('utf8').split('\n');
+    if (readSize < size) lines.shift(); // first element is a partial line
+    return lines.filter(Boolean);
+  } catch {
+    return [];
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch { /* */ } }
+  }
+}
+
+module.exports = { appendAuditEvent, auditLogPath, readTail };

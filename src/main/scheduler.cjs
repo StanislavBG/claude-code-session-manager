@@ -1545,6 +1545,143 @@ function appendHeartbeat(entry) {
   }
 }
 
+// Build identity stamped on every heartbeat line — memoized at boot
+// (SCHEDULER_BUILD_IDENTITY), so a tick costs no git or fs work.
+function heartbeatBuild() {
+  const { version, codeSha, builtAt } = SCHEDULER_BUILD_IDENTITY;
+  return { version, codeSha, builtAt };
+}
+
+/**
+ * heartbeatTick(deps?) — one 60 s heartbeat interval body. Each subsystem
+ * (queue read + starvation watchdog, stall detector, heartbeat write) runs in
+ * its own try/catch so one throw can't silently skip the others. Any failure
+ * makes the written line `degraded: true` + `errors`; watchdogHelpers'
+ * heartbeatFresh() and health.cjs's readFreshHeartbeat() treat such a line as
+ * NOT fresh, so a throw never disarms the external watchdog or fakes
+ * utilization health never read.
+ */
+function heartbeatTick(deps = {}) {
+  const readQueue = deps.readQueueSync ?? readQueueSync;
+  const errors = [];
+  const guard = (subsystem, fn) => {
+    try {
+      return fn();
+    } catch (e) {
+      errors.push({ subsystem, error: e?.message ?? String(e) });
+      console.error(`[scheduler] heartbeat subsystem "${subsystem}" failed`, e);
+      return undefined;
+    }
+  };
+
+  const s = guard('queue-read-starvation-watchdog', () => {
+    const q = readQueue();
+    // NEVER-STOP INVARIANT: if a queue holds ready PRDs and nothing is
+    // running, something must drive it. This is the only driver that does
+    // not depend on the billing poll loop, a pause timer, or a completing
+    // job to schedule the next tick — every one of which has failed at
+    // least once. See classifyQueueStarvation.
+    if (!q.unreadable) {
+      runQueueStarvationWatchdog(q).catch((e) => console.error('[scheduler] starvation watchdog error', e));
+    }
+    return q;
+  });
+
+  let stall;
+  if (s) {
+    stall = guard('stall-detector', () => {
+      const summary = computeStallSummary(s);
+      // Per-project alerting (see computeStallSummary's header): a project
+      // stalled while others are busy must still fire, and one project
+      // recovering must not clear or suppress another's still-open episode —
+      // that is exactly what a single module-level stallSince/stallToasted
+      // flag masked before (the burrow-vs-others incident this PRD fixes).
+      const now = Date.now();
+      const stalledCwds = Object.keys(summary.byProject).filter((cwd) => summary.byProject[cwd].stalled);
+      for (const cwd of [...stallSince.keys()]) {
+        if (!stalledCwds.includes(cwd)) {
+          stallSince.delete(cwd);
+          stallToasted.delete(cwd);
+        }
+      }
+      const toAlert = [];
+      for (const cwd of stalledCwds) {
+        if (!stallSince.has(cwd)) stallSince.set(cwd, now);
+        if (!stallToasted.get(cwd) && now - stallSince.get(cwd) >= POLL_INTERVAL_MS) {
+          stallToasted.set(cwd, true);
+          toAlert.push(cwd);
+        }
+      }
+      if (toAlert.length > 0) {
+        console.error(
+          `[scheduler] STALL DETECTED in project(s): ${toAlert.join(', ')} — 0 running, 0 pending, not paused, `
+          + `for >= ${Math.round(POLL_INTERVAL_MS / 1000)}s`,
+          summary.byProject,
+        );
+        appendAuditEvent('scheduler_stall_detected', { projects: toAlert, total: summary.total, byProject: summary.byProject });
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          sendIfAlive(mainWindow, 'schedule:stall', {
+            message: `Scheduler stall in ${toAlert.length} project(s): ${toAlert.join(', ')}. Check the Scheduler tab.`,
+            projects: toAlert,
+            total: summary.total,
+            byProject: summary.byProject,
+          });
+        }
+      }
+      return summary;
+    });
+  }
+
+  let entry = null;
+  if (s && stall && errors.length === 0) {
+    entry = guard('heartbeat-write', () => {
+      // Initialise from the real status union (scheduleJobSchema.cjs) rather
+      // than a hand-maintained subset — the old `{ pending, running, completed,
+      // failed }` literal silently minted a NEW key for any other value, which
+      // is how a heartbeat with a `queued: 2` bucket looked like "normal" 24h
+      // visibility instead of the alarm it should have been. Any row whose
+      // status isn't in JOB_STATUSES routes into `unknown`, never a
+      // freshly-minted key.
+      const counts = Object.fromEntries(JOB_STATUSES.map((st) => [st, 0]));
+      counts.unknown = 0;
+      for (const j of s.jobs) {
+        if (Object.prototype.hasOwnProperty.call(counts, j.status) && j.status !== 'unknown') {
+          counts[j.status] += 1;
+        } else {
+          counts.unknown += 1;
+        }
+      }
+      return {
+        ts: Date.now(),
+        pid: process.pid,
+        build: heartbeatBuild(),
+        counts,
+        stall: { stalled: stall.stalled, total: stall.total },
+        paused: s.paused ? { reason: s.paused.reason, resumeAt: s.paused.resumeAt } : null,
+        quarantinedCwds: (s.unreadableCwds ?? []).map((u) => u.cwd),
+        nextReset: cachedNextReset,
+        utilization: cachedUtilization,
+        consecutiveFailures,
+        // State/consecutiveFailures/degraded-budget snapshot of the shared
+        // usage-meter breaker, so a human reading only the heartbeat log can
+        // see the meter's own health apart from the queue's.
+        usageMeter: {
+          state: billing.usageCircuit.state(),
+          consecutiveFailures,
+          degradedBudget: computeDegradedBudget(),
+        },
+      };
+    });
+  }
+  if (!entry || errors.length > 0) {
+    // Deliberately carries no utilization/counts: this line says "I ran but
+    // could not read state", and consumers must not mistake it for a fresh read.
+    entry = { ts: Date.now(), pid: process.pid, build: heartbeatBuild(), degraded: true, errors };
+  }
+  appendHeartbeat(entry);
+  return entry;
+}
+
 /**
  * computeStallSummary(state) → { stalled, total, running, pending, byProject }
  *
@@ -11153,95 +11290,7 @@ async function init() {
   // setInterval callback is sync; readQueueSync stays sync to avoid awaiting
   // inside the timer body (and the 60s cadence makes the cost moot).
   if (heartbeatInterval) clearInterval(heartbeatInterval);
-  heartbeatInterval = setInterval(() => {
-    const s = readQueueSync();
-    // NEVER-STOP INVARIANT: if a queue holds ready PRDs and nothing is
-    // running, something must drive it. This is the only driver that does
-    // not depend on the billing poll loop, a pause timer, or a completing
-    // job to schedule the next tick — every one of which has failed at
-    // least once. See classifyQueueStarvation.
-    if (!s.unreadable) {
-      runQueueStarvationWatchdog(s).catch((e) => console.error('[scheduler] starvation watchdog error', e));
-    }
-    // Initialise from the real status union (scheduleJobSchema.cjs) rather
-    // than a hand-maintained subset — the old `{ pending, running, completed,
-    // failed }` literal silently minted a NEW key for any other value
-    // (`counts[j.status] = (counts[j.status]||0)+1`), which is exactly how a
-    // heartbeat with a `queued: 2` bucket looked like "normal" 24h
-    // visibility instead of the alarm it should have been. Any row whose
-    // status isn't in JOB_STATUSES (shouldn't happen post-quarantine, but
-    // this is the last line of defence) routes into `unknown`, never a
-    // freshly-minted key.
-    const counts = Object.fromEntries(JOB_STATUSES.map((st) => [st, 0]));
-    counts.unknown = 0;
-    for (const j of s.jobs) {
-      if (Object.prototype.hasOwnProperty.call(counts, j.status) && j.status !== 'unknown') {
-        counts[j.status] += 1;
-      } else {
-        counts.unknown += 1;
-      }
-    }
-
-    const stall = computeStallSummary(s);
-    // Per-project alerting (see computeStallSummary's header): a project
-    // stalled while others are busy must still fire, and one project
-    // recovering must not clear or suppress another's still-open episode —
-    // that is exactly what a single module-level stallSince/stallToasted
-    // flag masked before (the burrow-vs-others incident this PRD fixes).
-    const now = Date.now();
-    const stalledCwds = Object.keys(stall.byProject).filter((cwd) => stall.byProject[cwd].stalled);
-    for (const cwd of [...stallSince.keys()]) {
-      if (!stalledCwds.includes(cwd)) {
-        stallSince.delete(cwd);
-        stallToasted.delete(cwd);
-      }
-    }
-    const toAlert = [];
-    for (const cwd of stalledCwds) {
-      if (!stallSince.has(cwd)) stallSince.set(cwd, now);
-      if (!stallToasted.get(cwd) && now - stallSince.get(cwd) >= POLL_INTERVAL_MS) {
-        stallToasted.set(cwd, true);
-        toAlert.push(cwd);
-      }
-    }
-    if (toAlert.length > 0) {
-      console.error(
-        `[scheduler] STALL DETECTED in project(s): ${toAlert.join(', ')} — 0 running, 0 pending, not paused, `
-        + `for >= ${Math.round(POLL_INTERVAL_MS / 1000)}s`,
-        stall.byProject,
-      );
-      appendAuditEvent('scheduler_stall_detected', { projects: toAlert, total: stall.total, byProject: stall.byProject });
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        sendIfAlive(mainWindow, 'schedule:stall', {
-          message: `Scheduler stall in ${toAlert.length} project(s): ${toAlert.join(', ')}. Check the Scheduler tab.`,
-          projects: toAlert,
-          total: stall.total,
-          byProject: stall.byProject,
-        });
-      }
-    }
-
-    appendHeartbeat({
-      ts: Date.now(),
-      pid: process.pid,
-      counts,
-      stall: { stalled: stall.stalled, total: stall.total },
-      paused: s.paused ? { reason: s.paused.reason, resumeAt: s.paused.resumeAt } : null,
-      quarantinedCwds: (s.unreadableCwds ?? []).map((u) => u.cwd),
-      nextReset: cachedNextReset,
-      utilization: cachedUtilization,
-      consecutiveFailures,
-      // AC4: state/consecutiveFailures/degraded-budget snapshot of the
-      // shared usage-meter breaker, so a human reading only the heartbeat
-      // log (no scheduler-state.json, no live UI) can see the meter's own
-      // health apart from the queue's.
-      usageMeter: {
-        state: billing.usageCircuit.state(),
-        consecutiveFailures,
-        degradedBudget: computeDegradedBudget(),
-      },
-    });
-  }, 60_000);
+  heartbeatInterval = setInterval(() => heartbeatTick(), 60_000);
   if (heartbeatInterval.unref) heartbeatInterval.unref();
 
   // Dispatch's own periodic driver: cadence is independent of pollLoop's billing
@@ -12014,6 +12063,8 @@ module.exports = {
   spawnJob,
   listPrdsInternal,
   computeStallSummary,
+  heartbeatTick,
+  appendHeartbeat,
   findStaleQuarantinedJobs,
   QUARANTINE_ESCALATE_MS,
   selectQuarantineAutoResolveTargets,

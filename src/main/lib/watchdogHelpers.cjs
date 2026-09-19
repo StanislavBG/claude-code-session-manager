@@ -84,12 +84,14 @@ function readLastHeartbeatTs(heartbeatPath = schedulerPaths.heartbeatPath()) {
  * heartbeatFresh(heartbeatPath?, maxAgeMs?) → boolean
  *
  * Returns true iff the last heartbeat ts is within maxAgeMs of `now`.
- * Missing / empty / unparseable file → false.
+ * Missing / empty / unparseable file → false. A `degraded: true` line (a
+ * heartbeat subsystem threw — see scheduler.cjs heartbeatTick) is NOT fresh:
+ * the loop ran but could not read state, so it must not disarm the watchdog.
  */
 function heartbeatFresh(heartbeatPath = schedulerPaths.heartbeatPath(), maxAgeMs = DEFAULT_MAX_AGE_MS) {
-  const ts = readLastHeartbeatTs(heartbeatPath);
-  if (ts === null) return false;
-  return (Date.now() - ts) < maxAgeMs;
+  const entry = readLastHeartbeat(heartbeatPath);
+  if (entry === null || entry.degraded === true || typeof entry.ts !== 'number') return false;
+  return (Date.now() - entry.ts) < maxAgeMs;
 }
 
 /**

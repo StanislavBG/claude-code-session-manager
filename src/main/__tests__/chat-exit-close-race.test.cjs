@@ -21,14 +21,14 @@
  * arrives, THEN close fires) rather than relying on real OS/pipe timing,
  * which is not reliably reproducible from a real child process.
  *
- * Run: timeout 120 node --test src/main/__tests__/chat-exit-close-race.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/chat-exit-close-race.test.cjs
  */
 
 'use strict';
 
 delete process.env.SM_CHAT_CONCURRENCY;
 
-const { test } = require('node:test');
+import { test, afterAll } from 'vitest';
 const assert = require('node:assert/strict');
 const EventEmitter = require('node:events');
 const cp = require('node:child_process');
@@ -134,7 +134,7 @@ function isTerminal(channel) {
   );
 }
 
-test.after(() => {
+afterAll(() => {
   cp.spawn = originalSpawn;
   delete process.env.SM_CHAT_CONCURRENCY;
 });

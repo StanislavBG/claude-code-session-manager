@@ -1,12 +1,12 @@
 /**
  * mcpStatus.test.cjs — unit tests for the `claude mcp list` output parser.
  *
- * Run: timeout 120 node --test src/main/__tests__/mcpStatus.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/mcpStatus.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const { parseMcpList } = require('../mcpStatus.cjs');
 

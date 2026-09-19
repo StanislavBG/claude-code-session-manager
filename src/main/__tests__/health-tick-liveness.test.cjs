@@ -6,12 +6,12 @@
  * since they're pure/fs-isolated — no need to mock os.homedir() through the
  * full check() to cover the liveness logic.
  *
- * Run: timeout 120 node --test src/main/__tests__/health-tick-liveness.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/health-tick-liveness.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -72,6 +72,7 @@ test('no false positive: running is already at concurrencyCap', () => {
       { slug: '544-stuck-job', status: 'pending' },
     ],
   });
+  q.slotCap = 3; // machine-wide sessionSlots pool is the only cap now
   const result = evaluateTickLiveness(q, null, NOW);
   assert.strictEqual(result.stalled, false);
   assert.strictEqual(result.reason, 'at-capacity');
@@ -105,8 +106,15 @@ test('degrades honestly: heartbeat missing/stale means utilization cannot be rul
   assert.strictEqual(result.reason, 'cannot-verify-utilization');
 });
 
-test('does not caveat when firePolicy is not when-available (utilization is irrelevant, so no heartbeat needed)', () => {
+test('manual firePolicy: pending work with free capacity is configured behaviour, not a stall', () => {
   const q = baseQueue({ config: { ...baseQueue().config, firePolicy: 'manual' } });
+  const result = evaluateTickLiveness(q, null, NOW);
+  assert.strictEqual(result.stalled, false);
+  assert.strictEqual(result.reason, 'manual-fire-policy');
+});
+
+test('does not caveat when firePolicy is neither when-available nor manual (no heartbeat needed)', () => {
+  const q = baseQueue({ config: { ...baseQueue().config, firePolicy: 'always' } });
   const result = evaluateTickLiveness(q, null, NOW);
   assert.strictEqual(result.stalled, true);
 });

@@ -3,7 +3,7 @@
 // rejectCredentials — write-side denylist for files:* mutations (write/create/
 // rename/delete all call it). Pure path logic; no fs touched.
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');

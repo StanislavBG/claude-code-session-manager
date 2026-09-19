@@ -6,10 +6,10 @@
  * Runs against a tmp HOME so no real files are touched.
  * Stubs summarize.cjs to avoid any network calls.
  *
- * Run: timeout 120 node --test src/main/__tests__/exchanges.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/exchanges.test.cjs
  */
 
-const { test, describe, before, after } = require('node:test');
+import { test, describe, beforeAll as before, afterAll as after } from 'vitest';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');

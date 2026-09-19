@@ -1,12 +1,12 @@
 /**
  * dod-batchkey.test.cjs — unit tests for definitionOfDone.cjs helpers.
  *
- * Run: timeout 120 node --test src/main/__tests__/dod-batchkey.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/dod-batchkey.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');

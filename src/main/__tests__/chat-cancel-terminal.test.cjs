@@ -13,14 +13,14 @@
  * path (via SM_CLAUDE_BIN pointing at a stub process) and asserts a terminal
  * event is broadcast on cancel.
  *
- * Run: timeout 120 node --test src/main/__tests__/chat-cancel-terminal.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/chat-cancel-terminal.test.cjs
  */
 
 'use strict';
 
 delete process.env.SM_CHAT_CONCURRENCY;
 
-const { test } = require('node:test');
+import { test, afterAll } from 'vitest';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -111,7 +111,7 @@ function isTerminal(channel) {
   );
 }
 
-test.after(() => {
+afterAll(() => {
   try { fs.unlinkSync(stubPath); } catch { /* already gone */ }
   delete process.env.SM_CLAUDE_BIN;
 });

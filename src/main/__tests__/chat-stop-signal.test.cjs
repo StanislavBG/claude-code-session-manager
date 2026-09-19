@@ -2,12 +2,12 @@
  * chat-stop-signal.test.cjs — unit tests for chatRunner.parseStopSignal, the
  * single source of truth for the terminal-chat stop-signal protocol (PRD 318).
  *
- * Run: timeout 120 node --test src/main/__tests__/chat-stop-signal.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/chat-stop-signal.test.cjs
  */
 
 'use strict';
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const { parseStopSignal, STOP_SENTINEL } = require('../chatRunner.cjs');
 

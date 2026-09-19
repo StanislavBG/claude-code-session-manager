@@ -1,7 +1,7 @@
 /**
  * dod-drain-hook.test.cjs — drives the DoD drain handler.
  *
- * Run: timeout 120 node --test src/main/__tests__/dod-drain-hook.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/dod-drain-hook.test.cjs
  *
  * Scenarios:
  *   1. Drain with completed jobs → writes report once.
@@ -13,7 +13,7 @@
 
 'use strict';
 
-const { test, beforeEach, afterEach } = require('node:test');
+import { test, beforeEach, afterEach } from 'vitest';
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');

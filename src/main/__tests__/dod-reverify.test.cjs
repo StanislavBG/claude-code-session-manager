@@ -1,14 +1,14 @@
 /**
  * dod-reverify.test.cjs — unit tests for extractAcCommand / reverifyAc / reverifyBatch.
  *
- * Run: timeout 180 node --test src/main/__tests__/dod-reverify.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/dod-reverify.test.cjs
  *
  * Fixtures: os.tmpdir() only — never touches the real prds dir or scheduler queue.
  */
 
 'use strict';
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');

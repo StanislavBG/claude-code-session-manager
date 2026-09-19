@@ -1,14 +1,14 @@
 /**
  * dod-report.test.cjs — unit tests for flagRiskySurfaces + writeReport.
  *
- * Run: timeout 120 node --test src/main/__tests__/dod-report.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/dod-report.test.cjs
  *
  * Fixtures: os.tmpdir() only — never writes into real runs/.
  */
 
 'use strict';
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');

@@ -6,14 +6,14 @@
  * asserts a `chat:run:notice` event is broadcast — informational, not a
  * terminal event.
  *
- * Run: timeout 120 node --test src/main/__tests__/chat-mcp-consent-notice.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/chat-mcp-consent-notice.test.cjs
  */
 
 'use strict';
 
 delete process.env.SM_CHAT_CONCURRENCY;
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');

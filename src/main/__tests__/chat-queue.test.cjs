@@ -6,7 +6,7 @@
  * this cap/FIFO governs silent runs only — manual runs bypass it entirely
  * (see chatRunner.spec.ts's "manual runs are uncapped" tests).
  *
- * Run: timeout 120 node --test src/main/__tests__/chat-queue.test.cjs
+ * Run: timeout 300 npx vitest run src/main/__tests__/chat-queue.test.cjs
  */
 
 'use strict';
@@ -14,7 +14,7 @@
 // Force the default cap (2) regardless of the developer's shell env.
 delete process.env.SM_CHAT_CONCURRENCY;
 
-const { test } = require('node:test');
+import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const cr = require('../chatRunner.cjs');
 

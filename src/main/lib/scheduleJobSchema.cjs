@@ -1,6 +1,6 @@
 /**
  * Canonical runtime schema for a ScheduleJob record, mirroring the TS
- * `ScheduleJob` interface at src/preload/api.d.ts:375-422 field-for-field.
+ * `ScheduleJob` interface (`ScheduleJob` in src/preload/api.d.ts) field-for-field.
  *
  * Modelled directly on promptSessionSchema.cjs's "zod schema asserted at the
  * main-process boundary" pattern: the Epic entity has had this guarantee
@@ -52,7 +52,7 @@ const ScheduleJobStatusHistoryEntrySchema = z
   .passthrough();
 
 // Only `slug` and `status` are required. Every other ScheduleJob field
-// (src/preload/api.d.ts:375-422) is declared here for documentation and type
+// (`ScheduleJob` in src/preload/api.d.ts) is declared here for documentation and type
 // checking when present, but kept optional: a job row moves through several
 // legitimate partial shapes across its life (freshly minted with nulls,
 // mid-run with runtime fields, terminal with exitCode/error) and plenty of

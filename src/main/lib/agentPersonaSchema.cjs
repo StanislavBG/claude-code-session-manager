@@ -1,6 +1,6 @@
 /**
  * Canonical runtime schema for an Agent persona WRITE payload, mirroring the
- * TS `AgentPersonaSaveInput` interface at src/preload/api.d.ts:229-246
+ * TS `AgentPersonaSaveInput` interface in src/preload/api.d.ts
  * field-for-field.
  *
  * Modelled on promptSessionSchema.cjs / scheduleJobSchema.cjs's "zod schema
@@ -39,7 +39,7 @@ const ProjectEntrySchema = z.string().refine(
   `must be "${ALL_PROJECTS}" or an absolute path`,
 );
 
-// Mirrors AgentPersonaSaveInput (src/preload/api.d.ts:229-246). `tags` is the
+// Mirrors AgentPersonaSaveInput (src/preload/api.d.ts). `tags` is the
 // Epic-mission WorkType union, NOT a free-form string list — the same
 // concept as PromptSessionSchema's `tag` / scheduleRetagPrd's `tag`, just
 // plural here since a persona can be associated with more than one mission.

@@ -1,7 +1,7 @@
 /**
  * First-boot seeder for the bundled `session-manager-dev` plugin.
  *
- * The plugin (its 10 dev skills) ships inside the npx distribution. To make it
+ * The plugin (the dev skills under plugins/session-manager-dev/skills) ships inside the npx distribution. To make it
  * a true default, the app installs it on first launch from its own bundled
  * marketplace (offline — no GitHub/registry). Idempotent two ways:
  *

@@ -46,7 +46,7 @@ test('WORK_TYPES matches the tag ids declared in tagLibrary.ts TAG_LIBRARY, in o
   expect(tagMatches).toEqual(WORK_TYPES);
 });
 
-test('api.d.ts tag unions (line ~1166 and ~1687) both contain exactly the same 6 values', () => {
+test('api.d.ts tag unions both contain exactly the same 6 values', () => {
   const src = fs.readFileSync(API_D_TS_PATH, 'utf8');
   const unionMatches = [...src.matchAll(/tag\?:\s*((?:'[^']+'\s*\|?\s*)+);/g)].map((m) =>
     m[1]

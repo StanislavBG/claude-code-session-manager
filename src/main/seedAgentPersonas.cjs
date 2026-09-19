@@ -130,4 +130,4 @@ async function seedAgentPersonas({ logger = console, writeLog = () => {} } = {})
   }
 }
 
-module.exports = { seedAgentPersonas, markerPath, MAX_ATTEMPTS };
+module.exports = { seedAgentPersonas, markerPath, MAX_ATTEMPTS, PERSONAS };

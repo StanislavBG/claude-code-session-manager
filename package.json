@@ -28,7 +28,6 @@
     "dist/index.html",
     "dist/assets/",
     "dist/vad/",
-    "screenshots/",
     "README.md"
   ],
   "scripts": {

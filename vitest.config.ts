@@ -26,7 +26,6 @@ export default defineConfig({
       'src/main/__tests__/scheduler-effective-concurrency.test.cjs',
       'src/main/__tests__/scheduler-rate-limit-pause.test.cjs',
       'src/main/__tests__/pty-write-result.test.cjs',
-      'src/main/__tests__/web-remote-e2e-pinning.test.cjs',
       'src/main/__tests__/docEdit.test.cjs',
       'src/main/__tests__/queueHistory.test.cjs',
       'src/main/__tests__/needsReviewLedger.test.cjs',

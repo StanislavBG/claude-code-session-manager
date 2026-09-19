@@ -1310,3 +1310,69 @@ test('[guard][epic] integrateEpicBranch inherits the same guard and still merges
 
   await gitWorktree.cleanupEpicWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
 });
+
+// ── integrateBranch failure subtype classification (mc-01) ──
+
+test('[job] integrateBranch classifies a dirty different tracked file as failureKind blocking_paths', async () => {
+  const slug = 'test-slug-kind-blocking';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+
+  fs.writeFileSync(path.join(worktree.dir, 'README.md'), 'job edit\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job edits README'], worktree.dir);
+  // Dirty (uncommitted), byte-DIFFERENT edit in the main tree blocks the merge.
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'different local edit\n', 'utf8');
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toMatch(/merge failed \(likely a real content conflict\)/);
+  expect(outcome.failureKind).toBe('blocking_paths');
+  expect(outcome.blockingPaths.tracked).toEqual(['README.md']);
+  expect(outcome.blockingPaths.untracked).toEqual([]);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[job] integrateBranch classifies diverging same-line commits as content_conflict with the conflicted path', async () => {
+  const slug = 'test-slug-kind-content';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+
+  fs.writeFileSync(path.join(worktree.dir, 'README.md'), 'job edit\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job edits README'], worktree.dir);
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'main tree edit\n', 'utf8');
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'main tree edits README'], repoCwd);
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.failureKind).toBe('content_conflict');
+  expect(outcome.conflictedPaths).toEqual(['README.md']);
+  // The abort still ran.
+  expect(fs.existsSync(path.join(repoCwd, '.git', 'MERGE_HEAD'))).toBe(false);
+  expect(git(['status', '--porcelain'], repoCwd).trim()).toBe('');
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[job] integrateBranch classifies disjoint appends to the END of one file as content_conflict', async () => {
+  const slug = 'test-slug-kind-append';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+
+  fs.appendFileSync(path.join(worktree.dir, 'README.md'), '\n## Section Six\nsix body\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job appends section six'], worktree.dir);
+  fs.appendFileSync(path.join(repoCwd, 'README.md'), '\n## Section Seven\nseven body\n\n## Section Ten\nten body\n', 'utf8');
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'main appends sections seven and ten'], repoCwd);
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.failureKind).toBe('content_conflict');
+  expect(outcome.conflictedPaths).toEqual(['README.md']);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});

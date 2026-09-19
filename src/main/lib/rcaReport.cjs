@@ -295,9 +295,16 @@ function buildRcaMarkdown({ job, verdict, meta, logTail, acText, failureClass, i
   const durationMs = meta?.durationMs != null ? `${meta.durationMs}ms` : 'unknown';
   const prevention = PREVENTION_HINTS[failureClass] ?? PREVENTION_HINTS[FAILURE_CLASSES.UNKNOWN];
 
+  const integrationLine = job.integrationFailureKind
+    ? `\n\nIntegration failure subtype: ${job.integrationFailureKind}` +
+      (job.integrationFailureKind === 'content_conflict' && Array.isArray(job.integrationConflictPaths)
+        ? ` (conflicted paths: ${job.integrationConflictPaths.join(', ') || 'unknown'})`
+        : '')
+    : '';
+
   const sections = [
     `# What happened\n\nJob \`${job.slug}\` was parked in \`needs_review\` with verifier verdict ` +
-      `\`${verdict}\` (${humanVerdict(verdict)}).${job.error ? `\n\n${job.error}` : ''}`,
+      `\`${verdict}\` (${humanVerdict(verdict)}).${job.error ? `\n\n${job.error}` : ''}${integrationLine}`,
     `# Evidence\n\n- Exit code: ${exitCode}\n- Duration: ${durationMs}\n\nLast 60 log lines:\n\n\`\`\`\n${last60 || '(no log available)'}\n\`\`\``,
     `# The PRD's acceptance criteria\n\n${acText || '(acceptance criteria not found — original PRD may have been archived or removed)'}`,
     `# Likely failure class\n\n**${failureClass}**\n\nPrevention: ${prevention}`,

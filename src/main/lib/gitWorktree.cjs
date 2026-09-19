@@ -941,6 +941,30 @@ function parseBlockingMergePaths(stderrText) {
 }
 
 /**
+ * Classifies a failed `git merge` from its stderr — additive metadata for
+ * integrateBranch's `ok: false` results (the `reason` string is untouched).
+ * 'blocking_paths' = git refused up-front over dirty/untracked paths
+ * (auto-resolvable, PRD 1125); 'content_conflict' = a genuine 3-way
+ * `CONFLICT (` (deterministic on every retry); 'other' = anything else.
+ * For content_conflict, reads the unmerged paths — MUST be called before
+ * `git merge --abort`, which clears them. Never throws; a failed read
+ * yields `conflictedPaths: []`. O(p log p) in the conflicted-path count.
+ */
+async function classifyMergeFailure({ cwd, stderrText }) {
+  const blocking = parseBlockingMergePaths(stderrText);
+  if (blocking) return { failureKind: 'blocking_paths', blockingPaths: blocking };
+  if (/CONFLICT \(/.test(stderrText || '')) {
+    let conflictedPaths = [];
+    try {
+      const out = await execGit(['diff', '--name-only', '--diff-filter=U'], { cwd, timeout: 10_000 });
+      conflictedPaths = Array.from(new Set(out.split('\n').map((l) => l.trim()).filter(Boolean))).sort();
+    } catch { /* best effort — abort must still run */ }
+    return { failureKind: 'content_conflict', conflictedPaths };
+  }
+  return { failureKind: 'other' };
+}
+
+/**
  * Resolves `cwd`'s default branch, without ever hardcoding `main`: prefers
  * the remote-tracked default (`origin/HEAD`, set by `git clone`/`git remote
  * set-head`), falls back to the repo's own `init.defaultBranch` config, then
@@ -1112,15 +1136,18 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
             resolvedPaths: allPaths,
           };
         } catch (retryErr) {
-          try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
           const retryText = (retryErr && (retryErr.stderrText || retryErr.message)) || String(retryErr);
-          return { ok: false, reason: `merge failed (likely a real content conflict): ${retryText}` };
+          const retryClass = await classifyMergeFailure({ cwd, stderrText: retryText });
+          try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
+          return { ok: false, reason: `merge failed (likely a real content conflict): ${retryText}`, ...retryClass };
         }
       }
     }
+    // Read the conflicted paths BEFORE the abort — it clears the index stages.
+    const failureClass = await classifyMergeFailure({ cwd, stderrText });
     // Abort a half-applied merge so `cwd` isn't left in a mid-merge state.
     try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
-    return { ok: false, reason: `merge failed (likely a real content conflict): ${stderrText}` };
+    return { ok: false, reason: `merge failed (likely a real content conflict): ${stderrText}`, ...failureClass };
   }
 }
 

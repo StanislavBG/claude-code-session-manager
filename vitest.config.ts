@@ -38,6 +38,7 @@ export default defineConfig({
       'src/main/__tests__/historyDashboard.test.cjs',
       'src/main/__tests__/historyAggregatorIntraday.test.cjs',
       'src/main/__tests__/rcaReport.test.cjs',
+      'src/main/__tests__/scheduler-integration-failure-stamp.test.cjs',
       'src/main/__tests__/classifyTranscriptLine.test.cjs',
       'src/main/__tests__/transcriptsUsageFor.test.cjs',
       'src/main/__tests__/transcripts-doFlush-array.test.cjs',

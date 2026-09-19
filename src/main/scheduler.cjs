@@ -4798,6 +4798,22 @@ Print PASS only once the commit above has actually landed.`;
 }
 
 /**
+ * Stamps integrateBranch's failure subtype (`failureKind`) and conflicted
+ * paths onto a job row at finalize; clears both when there is no failure so
+ * a re-run never carries a stale subtype. Plain JSON values only.
+ */
+function stampIntegrationFailure(row, integration) {
+  if (integration && integration.failureKind) {
+    row.integrationFailureKind = integration.failureKind;
+    if (Array.isArray(integration.conflictedPaths)) row.integrationConflictPaths = integration.conflictedPaths;
+    else delete row.integrationConflictPaths;
+  } else {
+    delete row.integrationFailureKind;
+    delete row.integrationConflictPaths;
+  }
+}
+
+/**
  * Mechanical recovery (PRD 1130). isFixPlanBeyondDepthCap (below) is the
  * ONLY gate on re-investigating a fix-plan job at investigationDepth >= 2 —
  * correct for open-ended "author another plan" recursion, but it also
@@ -6859,6 +6875,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     let res;
     let worktreeLeftoverDirty = [];
     let worktreeIntegrationFailure = null;
+    let worktreeIntegrationDetail = null;
     // Set only when integrateJobBranch's stderr-parsing auto-resolve fired
     // (PRD 1125) — surfaced on the job row so the Queue UI can say the merge
     // self-healed rather than silently looking like an ordinary merge.
@@ -6919,6 +6936,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
         }
         if (!integration.ok) {
           worktreeIntegrationFailure = integration.reason;
+          worktreeIntegrationDetail = integration;
           console.error(`[scheduler] ${job.slug}: worktree branch integration FAILED (${integration.reason}) — branch ${worktree.branch} preserved in ${guardCwd} for manual recovery`);
         } else if (integration.integrated) {
           console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} integrated into ${guardCwd}${integration.mergeCommit ? ' (merge commit)' : ' (fast-forward)'}`);
@@ -7511,6 +7529,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           } else if (!['blocked_by_foreign_wip_streak', 'budget_exceeded'].includes(s.jobs[i2].verifierVerdict)) {
             delete s.jobs[i2].verifierVerdict;
           }
+          stampIntegrationFailure(s.jobs[i2], worktreeIntegrationFailure ? worktreeIntegrationDetail : null);
           transitionJob(s.jobs[i2], effectiveStatus, { reason: finalizeReason, source: 'spawnJob:finalize' });
           s.jobs[i2].finishedAt = new Date().toISOString();
           s.jobs[i2].exitCode = res.exitCode;
@@ -12598,6 +12617,7 @@ module.exports = {
   buildClaudeSpawnArgs,
   spawnResumeRecovery,
   selectMechanicalRecoveryTarget,
+  stampIntegrationFailure,
   performMechanicalRecovery,
   MECHANICALLY_RESOLVABLE_VERDICTS,
   selectLeftoverQuarantineTarget,

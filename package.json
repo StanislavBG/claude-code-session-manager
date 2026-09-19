@@ -14,6 +14,8 @@
     "scripts/postinstall.cjs",
     "scripts/mint-epic.cjs",
     "scripts/scheduler-mcp-server.cjs",
+    "scripts/ops-sweep.cjs",
+    "scripts/audit-ops-hygiene.cjs",
     "web/project-pages/render.cjs",
     "web/project-pages/renderer/dist/",
     "web/project-pages/logic/dist/",

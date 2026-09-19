@@ -24,6 +24,9 @@ const { execFileSync } = require('node:child_process');
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const REQUIRED_PATHS = [
   'scripts/scheduler-mcp-server.cjs',
+  // Portable ops sweeps the ops-sweep skill tells npm-installed users to run.
+  'scripts/ops-sweep.cjs',
+  'scripts/audit-ops-hygiene.cjs',
   // Project Pages pipeline (PRD 1088): the CLIs a foreign machine's
   // project-home-builder Epic runs.
   'web/project-pages/render.cjs',

@@ -135,6 +135,7 @@ const { pickForProject, pickNextBatch, findStarvedProjects, DEFAULT_PROJECT_CWD,
 const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
 const { writeRcaReport, extractRcaBlock } = require('./lib/rcaReport.cjs');
 const queueHistory = require('./lib/queueHistory.cjs');
+const { resolveGate, runGateSequence } = require('./lib/definitionOfDone.cjs');
 const queueOps = require('./queueOps.cjs');
 // Feedback-auto-PRD sweep — formerly only run by the external scheduler-watchdog
 // while the app was down (PRD 686 moved it in-app so it also runs while alive).
@@ -10329,6 +10330,55 @@ async function computeLooksDone(job, fetchedCwds) {
   return { commits: attributed.commits, paths, detectedAt: new Date().toISOString(), rule: attributed.rule };
 }
 
+/**
+ * Shadow gate (observation only): run a needs_review row's authored gate at
+ * the project's current HEAD and record what it WOULD have decided as
+ * `gateShadow` on the verdicts sidecar and the row. Changes NO status, takes
+ * no slot (not a claude -p run — runGateSequence keeps one shadow gate in
+ * flight machine-wide). Never called from finalize: only the reverify pass.
+ * Returns the recorded gateShadow, or null when nothing was recorded (already
+ * recorded at this HEAD, PRD unreadable, or another shadow gate is running).
+ */
+async function runGateShadow(job) {
+  if (!job || !job.slug || !job.cwd) return null;
+  const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
+  let prdText;
+  try { prdText = fs.readFileSync(prdPath, 'utf8'); } catch { return null; }
+  const head = await gitHead(job.cwd);
+  if (job.gateShadow && job.gateShadow.head === head) return null;
+  const gate = resolveGate(prdText);
+  let outcome;
+  if (gate.source === 'none') outcome = { status: 'unavailable', reason: 'gate-opt-out', results: [] };
+  else if (!gate.sequence.length) outcome = { status: 'unavailable', reason: 'no-parseable-gate', results: [] };
+  else {
+    const r = await runGateSequence(gate.sequence, { cwd: job.cwd });
+    if (r.status === 'busy') return null;
+    outcome = r;
+  }
+  const gateShadow = { ...outcome, head, source: gate.source, ranAt: new Date().toISOString() };
+  const runId = job.runId || resolveRunId(job);
+  if (runId) {
+    const verdictsPath = path.join(schedulerPaths.runsDir(), runId, `${job.slug}.verdicts.json`);
+    // Read-merge (single-writer law: runVerify owns the sidecar's other keys).
+    // Only merge into an existing run dir — never conjure one.
+    if (fs.existsSync(path.dirname(verdictsPath))) {
+      let existing = {};
+      try { existing = JSON.parse(fs.readFileSync(verdictsPath, 'utf8')) || {}; } catch { /* absent/unparseable → fresh */ }
+      try { atomicWriteJsonSync(verdictsPath, { ...existing, gateShadow }); } catch { /* best-effort */ }
+    }
+  }
+  await mutate((s) => {
+    for (const j of s.jobs) {
+      if (j.slug === job.slug && j.status === 'needs_review') j.gateShadow = gateShadow;
+    }
+  });
+  await broadcast();
+  return gateShadow;
+}
+
+// Tail of the last background shadow gate — lets tests (and only tests) await it.
+let gateShadowPending = null;
+
 async function reverifyNeedsReview() {
   const snap = await readQueue();
   // isGuardParkedWithoutAutoFix rows are NOT isRescanCandidate (their
@@ -10432,6 +10482,16 @@ async function reverifyNeedsReview() {
       if (looksDone) {
         looksDoneUpdates.push({ slug: job.slug, cwd: job.cwd, looksDone, fromFailed: false });
       }
+    }
+  }
+  // Shadow gate (observation only): at most ONE needs_review row per pass,
+  // fired in the background so a 15-minute gate never stalls this pass.
+  if (!gateShadowPending && process.env.SM_GATE_SHADOW_DISABLE !== '1') {
+    const gateTarget = snap.jobs.find((j) => j.status === 'needs_review' && !j.gateShadow);
+    if (gateTarget) {
+      gateShadowPending = runGateShadow(gateTarget)
+        .catch((e) => { console.error('[scheduler] gate shadow error', gateTarget.slug, e); })
+        .finally(() => { gateShadowPending = null; });
     }
   }
   if (looksDoneUpdates.length) {
@@ -12197,6 +12257,8 @@ module.exports = {
   memoryLimitedBatchSize,
   availableForJobs,
   reverifyNeedsReview,
+  runGateShadow,
+  awaitGateShadowIdle: async () => { while (gateShadowPending) await gateShadowPending; },
   shouldRunPeriodicReverify,
   findStuckFailedJobs,
   STUCK_FAILED_ESCALATE_MS,

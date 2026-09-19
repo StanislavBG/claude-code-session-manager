@@ -91,41 +91,104 @@ function reportExists(key, runsDir = RUNS_DIR) {
   return false;
 }
 
-// Shell metacharacters that require shell:true — prohibited by CLAUDE.md for
-// non-user-supplied strings. Commands containing these are marked unverifiable
-// rather than running under a shell, since CLAUDE.md restricts shell:true to
-// watchers.cjs and app:test-fire-hook only.
-const SHELL_META_RE = /[|>&;<`]|\$[({]/;
+const DEFAULT_GATE_TIMEOUT_MS = 300_000;
 
 /**
- * Extract the first bounded AC test command from a PRD body.
- *
- * Searches the # Acceptance criteria section for lines containing a
- * `timeout NNN cmd [args...]` invocation. Returns the command string or null.
- *
- * Commands containing shell metacharacters (pipe, redirect, subshell) are
- * skipped — they cannot be run without shell:true which is prohibited here.
- * The parser falls through to the next AC line in that case.
- *
- * Complexity: O(L) where L = number of lines in the body (not user-scaled;
- * PRD bodies are bounded documents, typically < 200 lines).
- *
- * @param {string} prdBody  PRD markdown with frontmatter already stripped.
- * @returns {string|null}
+ * Quote-aware tokenizer for ONE command segment — no shell. Returns the argv
+ * tokens, or null when an unquoted shell metacharacter survives (pipe,
+ * redirect, `;`, lone `&`, backtick, `$(`/`${`) or a quote is unbalanced.
+ * Complexity: O(n) over the segment's characters.
  */
-function extractAcCommand(prdBody) {
-  if (!prdBody || typeof prdBody !== 'string') return null;
+function tokenizeNoShell(seg) {
+  const tokens = [];
+  let cur = '';
+  let inTok = false;
+  let quote = null;
+  for (let i = 0; i < seg.length; i++) {
+    const c = seg[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      else cur += c;
+      continue;
+    }
+    if (c === '"' || c === "'") { quote = c; inTok = true; continue; }
+    if (/\s/.test(c)) {
+      if (inTok) { tokens.push(cur); cur = ''; inTok = false; }
+      continue;
+    }
+    if ('|<>;&`'.includes(c) || (c === '$' && (seg[i + 1] === '(' || seg[i + 1] === '{'))) return null;
+    cur += c;
+    inTok = true;
+  }
+  if (quote) return null;
+  if (inTok) tokens.push(cur);
+  return tokens;
+}
 
-  // Parse line-by-line to locate the # Acceptance criteria section.
-  // A regex lookahead approach with the `m` flag misidentifies `$` as
-  // end-of-line (not end-of-string), causing the lazy capture to terminate
-  // immediately. Line-by-line parsing avoids that pitfall.
-  const lines = prdBody.split('\n');
+/**
+ * Split a command chain on `&&` outside quotes and backticks.
+ * Complexity: O(n).
+ */
+function splitOnAndAnd(text) {
+  const segs = [];
+  let cur = '';
+  let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      cur += c;
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') { quote = c; cur += c; continue; }
+    if (c === '&' && text[i + 1] === '&') { segs.push(cur); cur = ''; i++; continue; }
+    cur += c;
+  }
+  segs.push(cur);
+  return segs;
+}
+
+/**
+ * Parse one `&&` chain into [{argv, timeoutMs, env, raw}]. Returns [] when any
+ * segment is empty or needs a shell — a half-parsed gate must never run.
+ * A leading `timeout N` (or `Ns`) token sets timeoutMs; leading literal
+ * `NAME=value` tokens become env (a `TMPDIR=` assignment is dropped — the
+ * shadow runner always supplies its own isolated TMPDIR; its value is
+ * typically the un-runnable `$(mktemp -d)`, which is handled here without a
+ * shell by simply never evaluating it).
+ */
+function parseChain(text) {
+  const out = [];
+  for (const seg of splitOnAndAnd(text)) {
+    const raw = seg.trim();
+    if (!raw) return [];
+    // A dropped TMPDIR=$(mktemp -d) prefix is the one substitution we accept.
+    const stripped = raw.replace(/^TMPDIR=\$\(mktemp -d\)\s+/, '');
+    const tokens = tokenizeNoShell(stripped);
+    if (!tokens || !tokens.length) return [];
+    const env = {};
+    while (tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) {
+      const [k, ...rest] = tokens.shift().split('=');
+      if (k !== 'TMPDIR') env[k] = rest.join('=');
+    }
+    let timeoutMs = DEFAULT_GATE_TIMEOUT_MS;
+    if (tokens[0] === 'timeout' && /^\d+s?$/.test(tokens[1] || '')) {
+      timeoutMs = parseInt(tokens[1], 10) * 1000;
+      tokens.splice(0, 2);
+    }
+    if (!tokens.length) return [];
+    out.push({ argv: tokens, timeoutMs, env, raw });
+  }
+  return out;
+}
+
+/** Locate the `# Acceptance criteria` lines (whole body when the heading is absent). */
+function acCandidateLines(body) {
+  const lines = body.split('\n');
   let inAcSection = false;
   let hasAcSection = false;
   let acHeadingLevel = 0;
   const acLines = [];
-
   for (const line of lines) {
     if (/^#+\s/i.test(line)) {
       const level = line.match(/^(#+)/)[1].length;
@@ -134,42 +197,127 @@ function extractAcCommand(prdBody) {
         hasAcSection = true;
         acHeadingLevel = level;
       } else if (inAcSection && level <= acHeadingLevel) {
-        // A sibling or parent heading ends the AC section;
-        // sub-headings (level > acHeadingLevel) stay inside it.
         inAcSection = false;
       }
       continue;
     }
     if (inAcSection) acLines.push(line);
   }
+  return hasAcSection ? acLines : lines;
+}
 
-  // Fall back to full body if no AC section header was found.
-  const candidates = hasAcSection ? acLines : lines;
-
-  for (const line of candidates) {
-    // Prefer backtick-delimited inline code: `timeout NNN cmd ...`
-    const backtickMatch = line.match(/`(timeout\s+\d+\s+[^`]+)`/i);
-    if (backtickMatch) {
-      const cmd = backtickMatch[1].trim();
-      if (!SHELL_META_RE.test(cmd)) return cmd;
-    }
-
-    // Fall back: bare `timeout NNN cmd ...` anywhere on the line.
-    // Trim trailing all-lowercase-alpha tokens (prose words like "passes",
-    // "and", "the") while keeping at least 4 tokens (timeout, N, binary,
-    // first-arg). This prevents over-matching into prose that follows the
-    // command on the same AC line (e.g. "timeout 60 npm test and verify").
-    const rawMatch = line.match(/\btimeout\s+\d+\s+\S+(?:\s+\S+)*/);
-    if (rawMatch) {
-      const tokens = rawMatch[0].trim().split(/\s+/);
-      while (tokens.length > 4 && /^[a-z]+$/.test(tokens[tokens.length - 1])) {
-        tokens.pop();
+/**
+ * Read an explicit gate spec: frontmatter `gate:` (`none`, inline `[a, b]`, or
+ * a `- item` list) or a fenced ```gate block (one command chain per line).
+ * Returns { kind: 'none' } | { kind: 'commands', chains: string[] } | null.
+ */
+function readExplicitGate(prdText) {
+  const fmMatch = prdText.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (fmMatch) {
+    const fmLines = fmMatch[1].split(/\r?\n/);
+    for (let i = 0; i < fmLines.length; i++) {
+      const m = fmLines[i].match(/^gate:\s*(.*)$/);
+      if (!m) continue;
+      const rest = m[1].trim();
+      if (/^(['"]?)none\1$/i.test(rest)) return { kind: 'none' };
+      const chains = [];
+      if (rest.startsWith('[') && rest.endsWith(']')) {
+        // Inline list — items may hold commas inside quotes, so split quote-aware.
+        let cur = ''; let q = null;
+        for (const c of rest.slice(1, -1)) {
+          if (q) { if (c === q) q = null; else cur += c; continue; }
+          if (c === '"' || c === "'") { q = c; continue; }
+          if (c === ',') { chains.push(cur.trim()); cur = ''; continue; }
+          cur += c;
+        }
+        chains.push(cur.trim());
+      } else if (rest === '') {
+        for (let j = i + 1; j < fmLines.length; j++) {
+          const li = fmLines[j].match(/^\s+-\s+(.*)$/);
+          if (!li) break;
+          chains.push(li[1].trim().replace(/^(['"])(.*)\1$/, '$2'));
+        }
       }
-      const cmd = tokens.join(' ');
-      if (!SHELL_META_RE.test(cmd)) return cmd;
+      const kept = chains.filter(Boolean);
+      if (kept.length) return { kind: 'commands', chains: kept };
     }
   }
+  const fence = prdText.match(/^```gate[ \t]*\r?\n([\s\S]*?)^```/m);
+  if (fence) {
+    const chains = fence[1].split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+    if (chains.length === 1 && /^none$/i.test(chains[0])) return { kind: 'none' };
+    if (chains.length) return { kind: 'commands', chains };
+  }
   return null;
+}
+
+/**
+ * Resolve a PRD's gate: explicit spec first (frontmatter `gate:` / ```gate
+ * fence), else the first acceptance-criteria line carrying a parseable
+ * `timeout N …` chain (backtick span preferred, else bare from the first
+ * `timeout N`). Accepts the PRD with or without frontmatter.
+ *
+ * @param {string} prdText
+ * @returns {{ source: 'none'|'explicit'|'ac-line'|'absent', sequence: Array<{argv:string[], timeoutMs:number, env:object, raw:string}> }}
+ */
+function resolveGate(prdText) {
+  if (!prdText || typeof prdText !== 'string') return { source: 'absent', sequence: [] };
+  const explicit = readExplicitGate(prdText);
+  if (explicit) {
+    if (explicit.kind === 'none') return { source: 'none', sequence: [] };
+    const sequence = [];
+    for (const chain of explicit.chains) {
+      const parsed = parseChain(chain);
+      if (!parsed.length) return { source: 'explicit', sequence: [] };
+      sequence.push(...parsed);
+    }
+    return { source: 'explicit', sequence };
+  }
+  const body = splitFrontmatter(prdText).body;
+  for (const line of acCandidateLines(body)) {
+    const backtickMatch = line.match(/`([^`]*\btimeout\s+\d+\s[^`]*)`/i);
+    if (backtickMatch) {
+      const seq = parseChain(backtickMatch[1]);
+      if (seq.length) return { source: 'ac-line', sequence: seq };
+    }
+    // Bare fallback: from the first `timeout N` to end of line, dropping
+    // trailing all-lowercase prose words (keeping ≥ 4 tokens, as before).
+    const rawMatch = line.match(/\btimeout\s+\d+\s+\S+(?:\s+\S+)*/);
+    if (rawMatch) {
+      const segs = splitOnAndAnd(rawMatch[0]);
+      const tokens = segs[segs.length - 1].trim().split(/\s+/);
+      while (tokens.length > 4 && /^[a-z]+$/.test(tokens[tokens.length - 1])) tokens.pop();
+      segs[segs.length - 1] = tokens.join(' ');
+      const seq = parseChain(segs.join('&&'));
+      if (seq.length) return { source: 'ac-line', sequence: seq };
+    }
+  }
+  return { source: 'absent', sequence: [] };
+}
+
+/**
+ * The gate as an ordered list of no-shell commands: [{argv, timeoutMs}, …].
+ * Empty when there is no parseable gate or the PRD opted out with `gate: none`
+ * (resolveGate distinguishes the two). Complexity: O(L) over the PRD's lines.
+ *
+ * @param {string} prdBody  PRD markdown (frontmatter optional).
+ * @returns {Array<{argv:string[], timeoutMs:number, env:object, raw:string}>}
+ */
+function extractAcSequence(prdBody) {
+  return resolveGate(prdBody).sequence;
+}
+
+/**
+ * The single-command view of the gate, as the original `timeout NNN cmd …`
+ * string, or null when the gate is absent or is a multi-command chain
+ * (reverifyAc runs one command; the chain is the shadow runner's job).
+ *
+ * @param {string} prdBody  PRD markdown with frontmatter already stripped.
+ * @returns {string|null}
+ */
+function extractAcCommand(prdBody) {
+  const seq = extractAcSequence(prdBody);
+  return seq.length === 1 && seq[0].raw.startsWith('timeout') ? seq[0].raw : null;
 }
 
 /**
@@ -217,8 +365,8 @@ function reverifyAc(job, { timeoutMs = 60_000, prdsDir } = {}) {
   const cmd = extractAcCommand(prdBody);
   if (!cmd) return Promise.resolve(unverifiable());
 
-  // Simple whitespace split — SHELL_META_RE in extractAcCommand already excludes
-  // commands that would need a shell. Paths with spaces are not expected in AC
+  // Simple whitespace split — extractAcCommand already excludes
+  // commands that would need a shell (tokenizeNoShell). Paths with spaces are not expected in AC
   // commands (PRD authoring convention: use relative paths from cwd).
   const argv = cmd.trim().split(/\s+/);
   if (argv.length < 2) return Promise.resolve(unverifiable());
@@ -231,7 +379,7 @@ function reverifyAc(job, { timeoutMs = 60_000, prdsDir } = {}) {
       child = spawn(argv[0], argv.slice(1), {
         cwd: job.cwd,
         stdio: 'ignore',
-        // No shell:true — extractAcCommand rejects commands with shell metacharacters.
+        // No shell:true — tokenizeNoShell rejects commands with shell metacharacters.
       });
     } catch (err) {
       resolve(unverifiable());
@@ -532,6 +680,99 @@ function writeReport(key, { acResults = [], riskFlags = [], runsDir } = {}) {
   return reportPath;
 }
 
+
+// ─── Shadow gate runner ────────────────────────────────────────────────────────
+// Runs a PRD's parsed gate sequence WITHOUT deciding anything: the caller
+// records the outcome next to the verdict. Not a claude -p run, so it takes no
+// slot from sessionSlots; instead a single module-level flag keeps at most one
+// shadow gate in flight machine-wide (the scheduler is one process).
+let gateInFlight = false;
+const OUTPUT_TAIL_CHARS = 1000;
+
+function runOneGateCommand(cmd, { cwd, env }) {
+  return new Promise((resolve) => {
+    const startNs = process.hrtime.bigint();
+    const ms = () => Math.round(Number(process.hrtime.bigint() - startNs) / 1e6);
+    const label = cmd.argv.join(' ');
+    let child;
+    try {
+      child = spawn(cmd.argv[0], cmd.argv.slice(1), {
+        cwd,
+        env: { ...env, ...cmd.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+        // No shell:true — the sequence was tokenized by tokenizeNoShell.
+      });
+    } catch {
+      resolve({ cmd: label, status: 'unavailable', code: null, ms: ms(), timedOut: false, tail: '' });
+      return;
+    }
+    let tail = '';
+    const onData = (d) => { tail = (tail + d).slice(-OUTPUT_TAIL_CHARS); };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    let settled = false;
+    let timedOut = false;
+    let escalate;
+    const killTimer = setTimeout(() => {
+      timedOut = true;
+      try { child.kill('SIGTERM'); } catch { /* already dead */ }
+      escalate = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch { /* race */ }
+      }, 5_000);
+      if (escalate.unref) escalate.unref();
+    }, cmd.timeoutMs);
+    if (killTimer.unref) killTimer.unref();
+    const finish = (r) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(killTimer);
+      clearTimeout(escalate);
+      resolve({ cmd: label, ms: ms(), timedOut, tail, ...r });
+    };
+    child.on('error', () => finish({ status: 'unavailable', code: null }));
+    child.on('close', (code) => {
+      const exitCode = typeof code === 'number' ? code : -1;
+      finish({ status: exitCode === 0 ? 'pass' : 'fail', code: exitCode });
+    });
+  });
+}
+
+/**
+ * Run a gate sequence (extractAcSequence output) in `cwd` with `&&` semantics:
+ * stop at the first non-pass. Each run gets its own isolated TMPDIR (mkdtemp,
+ * removed afterwards) and CI=1, so a suite that sweeps its temp root can never
+ * touch a live one.
+ *
+ * @param {Array<{argv:string[], timeoutMs:number, env?:object}>} sequence
+ * @param {{ cwd: string }} opts
+ * @returns {Promise<{ status: 'green'|'red'|'unavailable'|'busy', results: object[] }>}
+ *   'busy' = another shadow gate is in flight; nothing ran, nothing to record.
+ */
+async function runGateSequence(sequence, { cwd }) {
+  if (gateInFlight) return { status: 'busy', results: [] };
+  if (!Array.isArray(sequence) || !sequence.length) return { status: 'unavailable', results: [] };
+  try { fs.statSync(cwd); } catch { return { status: 'unavailable', results: [] }; }
+  gateInFlight = true;
+  let tmp = null;
+  try {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-gate-shadow-'));
+    const env = { ...process.env, TMPDIR: tmp, CI: '1' };
+    const results = [];
+    for (const cmd of sequence) {
+      const r = await runOneGateCommand(cmd, { cwd, env });
+      results.push(r);
+      if (r.status === 'unavailable') return { status: 'unavailable', results };
+      if (r.status === 'fail') return { status: 'red', results };
+    }
+    return { status: 'green', results };
+  } catch {
+    return { status: 'unavailable', results: [] };
+  } finally {
+    gateInFlight = false;
+    if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ } }
+  }
+}
+
 const WATERMARK_FILENAME = '.dod-watermark.json';
 
 /**
@@ -573,6 +814,9 @@ module.exports = {
   reportPathFor,
   reportExists,
   extractAcCommand,
+  extractAcSequence,
+  resolveGate,
+  runGateSequence,
   extractSection,
   reverifyAc,
   reverifyBatch,

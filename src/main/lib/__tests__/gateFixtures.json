@@ -1,0 +1,20 @@
+[
+  "- [ ] Gate (last thing the run does, must be green): `timeout 300 npm run typecheck && timeout 300 npm run lint && timeout 600 npm run test:unit`.",
+  "- [ ] Gate (last thing the run does, must be green): `timeout 300 npm run typecheck && timeout 300 npm run lint && TMPDIR=$(mktemp -d) timeout 900 npm run test:unit`.",
+  "- [ ] Gate (last thing the run does, must be green): `timeout 300 npm run typecheck && timeout 300 npm run lint && TMPDIR=$(mktemp -d) timeout 900 npm run test:unit` — run the unit suite with a scratch TMPDIR so gitWorktree.test.cjs sweeps a throwaway root, never the live job-worktree root.",
+  "- [ ] Gate (last thing the run does, must be green): `timeout 300 npm run typecheck && timeout 300 npm run lint && TMPDIR=$(mktemp -d) timeout 900 npm run test:unit` — scratch TMPDIR so gitWorktree.test.cjs sweeps a throwaway root, never the live job-worktree root.",
+  "- [ ] No zustand selector returns a freshly-built value; `timeout 300 npm run lint:selectors` passes.",
+  "- [ ] No hook is declared below a top-level early return — `timeout 300 npm run lint:hooks` exits 0.",
+  "- [ ] Tests: `timeout 300 npm run typecheck` and `timeout 300 npm run lint` pass.",
+  "- [ ] Tests: `TMPDIR=$(mktemp -d) timeout 300 npx vitest run src/main/__tests__/activeIndexMerge.test.cjs` passes.",
+  "- [ ] Both tests pass: `timeout 900 npm run test:unit` and `TMPDIR=$(mktemp -d) timeout 900 npm run test:unit`.",
+  "- [ ] All 16 tests in `timeout 120 npx vitest run tests/unit/chatRunner.spec.ts` pass.",
+  "- [ ] `SM_CHAT_CONCURRENCY=3 timeout 120 npx vitest run tests/unit/chatRunner.spec.ts` passes",
+  "- [ ] Each handled basename is removed from the ALLOWLIST map; `timeout 120 node scripts/check-unregistered-tests.cjs` exits 0.",
+  "- [ ] `timeout 120 npm run lint:docs` exits 0 on the current tree.",
+  "- [ ] Locally, the same sequence passes: `timeout 300 npm run typecheck && timeout 300 npm run lint && timeout 600 npm run build:project-pages`.",
+  "- [ ] After the commit lands, `timeout 60 gh run list --branch main --limit 1` prints the newest run without error.",
+  "- [ ] `for i in 1 2 3; do TMPDIR=$(mktemp -d) timeout 180 npx vitest run src/main/__tests__/scheduler-tick-wedge.test.cjs; done` is green 3/3 (shell loop — not a no-shell gate).",
+  "- [ ] The gate is `timeout 300 npm run typecheck | tail -5` (pipe — needs a shell).",
+  "- [ ] Prose only, no command at all."
+]

@@ -53,8 +53,7 @@ const { classifyPromptTicket } = require('./lib/classifyPromptTicket.cjs');
 const sessionSlots = require('./lib/sessionSlots.cjs');
 const opsErrorLog = require('./lib/opsErrorLog.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
-const { resolveEpicSpawnCwd } = require('./lib/epicSpawnCwd.cjs');
-const { resolveEpicTranscriptPath } = require('./lib/epicTranscriptPath.cjs');
+const { planEpicSpawn } = require('./lib/epicSpawnPlan.cjs');
 const logs = require('./logs.cjs');
 
 // The only two CLI errors that mean "wrong session flag" (verified against the
@@ -548,24 +547,26 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // must never be left unpinned (CLAUDE.md model-pinning rule).
     const model = agentModelResolve.resolveEpicModel({ cwd, claudeSessionId: sessionId });
 
-    // Main is authoritative about --resume vs --session-id: the renderer's
-    // `resume` was computed in another process from a different cwd. The
-    // caller's value is only a fallback when the resolver throws.
-    let useResume = !!resume;
-    try {
-      const resolved = resolveEpicTranscriptPath({ cwd, claudeSessionId: sessionId });
-      useResume = !!resolved.existsAnywhere;
-      if (useResume !== !!resume) {
-        try {
-          logs.writeLine({
-            scope: 'chatRunner',
-            level: 'warn',
-            message: `session flag mismatch: renderer resume=${!!resume}, main resume=${useResume}; transcript=${resolved.path ?? 'none'}`,
-            meta: { tabId, sessionId, rendererResume: !!resume, mainResume: useResume, transcriptPath: resolved.path ?? null },
-          });
-        } catch { /* logging must never fail a turn */ }
-      }
-    } catch { /* fall back to the caller-supplied value */ }
+    // Main is authoritative about --resume vs --session-id AND the spawn cwd, and it decides
+    // them TOGETHER (epicSpawnPlan.cjs): a transcript under an encoding the spawn cwd cannot see
+    // must never yield a claimed flag. Unreachable / closed Epics are refused before any spawn.
+    const plan = planEpicSpawn({ cwd, claudeSessionId: sessionId, fallbackResume: !!resume });
+    if (!plan.ok) {
+      emitTerminal('chat:run:error', { tabId, sessionId, code: plan.code, message: plan.message });
+      settle();
+      return;
+    }
+    const useResume = plan.useResume;
+    if (useResume !== !!resume) {
+      try {
+        logs.writeLine({
+          scope: 'chatRunner',
+          level: 'warn',
+          message: `session flag mismatch: renderer resume=${!!resume}, main resume=${useResume}; transcript=${plan.transcriptPath ?? 'none'}`,
+          meta: { tabId, sessionId, rendererResume: !!resume, mainResume: useResume, transcriptPath: plan.transcriptPath ?? null },
+        });
+      } catch { /* logging must never fail a turn */ }
+    }
 
     // Build argv as an array — no shell: true, no string interpolation. Also
     // used for the flag-swap retry so both attempts share one construction path.
@@ -592,7 +593,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // below keeps using it exactly as before — only this ACTUAL spawn cwd
     // option does. See epicSpawnCwd.cjs's header comment (the ops-root
     // hazard) and jobWorktree.cjs's own (execCwd vs job.cwd) for why.
-    const execCwd = resolveEpicSpawnCwd({ cwd, claudeSessionId: sessionId, deps: { restore: true } });
+    const execCwd = plan.execCwd;
 
     let killed = false;
     let child = null;

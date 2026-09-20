@@ -157,8 +157,8 @@ function broadcast(channel, payload) {
   } catch { /* render frame may be gone */ }
 }
 
-// `chatRunner.run()`'s silent lane only ever invokes `onSilentResult` on its
-// success path (`chatRunner.cjs`'s `emitTerminal` no-ops every OTHER terminal
+// `chatRunner.run()`'s silent lane invokes `onSilentResult` on its success path and
+// `onSilentError` when planEpicSpawn refuses the run (`chatRunner.cjs`'s `emitTerminal` no-ops every OTHER terminal
 // event — error/timeout/spawn-failure/cancel — for `silent` runs, since those
 // six broadcasts are deliberately suppressed for probes). `run()` is also a
 // silent no-op if the tabId already has an active/queued run (its per-tab
@@ -208,6 +208,7 @@ function docEditViaSession({ tabId, sessionId, cwd, before, instruction, documen
     prompt,
     resume: true,
     silent: true,
+    onSilentError: (message) => settleOnce({ ok: false, error: message }),
     onSilentResult: (text) => {
       // chatRunner.cjs prepends its own stop-signal protocol instruction to
       // every prompt (including this resumed one) — unlike the isolated

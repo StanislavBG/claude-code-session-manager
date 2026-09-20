@@ -311,7 +311,7 @@ function getConcurrencyCap() {
 // after the executor is invoked (see run()/pump()) so cancel() callers can
 // await full teardown instead of firing SIGTERM and returning immediately.
 const inFlight = new Map();
-const waiting = []; // [{ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult }]
+const waiting = []; // [{ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult, onSilentError }]
 // tabIds picked by pump() but not yet registered in `inFlight` by executeRun.
 // Closes the microtask-wide window in which per-tab exclusivity would
 // otherwise not hold. See pump().
@@ -361,7 +361,7 @@ function broadcast(channel, payload) {
  * per-tab prompt queue in chat.ts only ever calls this once per tab at a
  * time, but the guard holds regardless).
  *
- * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void, promptId?: string }} opts
+ * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void, onSilentError?: (message: string, code?: string) => void, promptId?: string }} opts
  */
 function run(opts) {
   // Per-tab exclusivity still holds — two `claude -p --resume` against ONE
@@ -450,10 +450,10 @@ sessionSlots.subscribe(() => { try { pump(); } catch { /* defensive */ } });
  * for the run's lifetime so cancel() can reach it. Never rejects — the queue
  * pump relies on the returned promise always settling so the lane frees.
  *
- * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void, promptId?: string }} opts
+ * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void, onSilentError?: (message: string, code?: string) => void, promptId?: string }} opts
  * @returns {Promise<void>}
  */
-function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult, promptId }) {
+function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult, onSilentError, promptId }) {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     // Last few tool_use blocks seen on the stream, oldest first — surfaced in
@@ -553,6 +553,11 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     const plan = planEpicSpawn({ cwd, claudeSessionId: sessionId, fallbackResume: !!resume });
     if (!plan.ok) {
       emitTerminal('chat:run:error', { tabId, sessionId, code: plan.code, message: plan.message });
+      // emitTerminal is a no-op broadcast for silent runs, so hand the refusal to the caller
+      // directly — otherwise it waits out its own timeout and reports a generic one.
+      if (silent && typeof onSilentError === 'function') {
+        try { onSilentError(plan.message, plan.code); } catch { /* caller bug must not wedge the lane */ }
+      }
       settle();
       return;
     }

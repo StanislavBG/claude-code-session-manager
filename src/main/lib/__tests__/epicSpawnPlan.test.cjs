@@ -155,3 +155,42 @@ test('chatRunner: dead-encoding transcript => zero CLI spawns, exactly one clear
     fs.rmSync(project, { recursive: true, force: true });
   }
 });
+
+test('chatRunner: silent run refused by planEpicSpawn => onSilentError with the refusal, no broadcasts, no spawn', async () => {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-proj-'));
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    const idxDir = path.join(project, 'session-manager-operations', 'prompt-sessions');
+    fs.mkdirSync(idxDir, { recursive: true });
+    fs.writeFileSync(path.join(idxDir, 'active-index.json'), JSON.stringify({ sessions: epic({ status: 'completed' }) }));
+    const cp = require('node:child_process');
+    const realSpawn = cp.spawn;
+    let spawns = 0;
+    cp.spawn = () => { spawns++; throw new Error('must not spawn'); };
+    const chatRunner = require('../../chatRunner.cjs');
+    chatRunner.__resetQueueForTests();
+    const sent = [];
+    chatRunner.attachWindow({ isDestroyed: () => false, webContents: { isDestroyed: () => false, send: (channel, payload) => sent.push({ channel, payload }) } });
+    const errors = [];
+    const results = [];
+    try {
+      chatRunner.run({
+        tabId: 'silent1', sessionId: SID, prompt: 'hi', cwd: project, resume: true, silent: true,
+        onSilentResult: (t) => results.push(t),
+        onSilentError: (message, code) => errors.push({ message, code }),
+      });
+      // no timer: delivery is a few microtasks after run()
+      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    } finally { cp.spawn = realSpawn; }
+    expect(spawns).toBe(0);
+    expect(results).toEqual([]);
+    expect(errors.length).toBe(1);
+    expect(errors[0].code).toBe('epic_closed');
+    expect(errors[0].message).toMatch(/closed/i);
+    expect(sent.filter((e) => e.channel.startsWith('chat:run:'))).toEqual([]);
+  } finally {
+    process.env.HOME = prevHome;
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});

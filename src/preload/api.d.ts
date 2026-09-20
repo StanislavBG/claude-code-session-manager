@@ -1541,6 +1541,8 @@ export interface ChatExternalSendEvent {
 export interface SessionManagerAPI {
   app: {
     version: () => Promise<string>;
+    /** Published-`latest` probe (cached 6h, opt-out SM_UPDATE_CHECK=0). Never rejects; offline → latest null. */
+    updateStatus: () => Promise<{ current: string; latest: string | null; behind: boolean }>;
     homeDir: () => Promise<string>;
     cwd: () => Promise<string>;
     engageRulesPath: () => Promise<string | null>;

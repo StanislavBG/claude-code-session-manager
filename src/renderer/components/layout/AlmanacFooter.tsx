@@ -1,7 +1,8 @@
 /**
  * AlmanacFooter — paper-warm window footer that replaces StatusBar.
  * One 30px strip: connected dot · session (5h) + weekly (7d) usage · branch ·
- * last activity · todos · version.
+ * last activity · todos · session-slot dots · version chip (amber `v<cur> → v<latest>`
+ * when the running build is behind npm `latest`, via lib/useUpdateStatus.ts).
  *
  * Both usage pills read the same windows Home's UsageMeters render
  * (`five_hour` = "Session", `seven_day` = "Weekly · all models") and share its
@@ -23,6 +24,7 @@ import { useScheduleState } from '../../state/scheduleState'
 import { useBranch } from '../../lib/useBranch'
 import { usageTitle, utilPercent } from '../../lib/usageWindow'
 import { useSessionSlots } from '../../lib/useSessionSlots'
+import { useUpdateStatus } from '../../lib/useUpdateStatus'
 import { SlotDots } from '../ui/SlotDots'
 import type { NavKey } from '../../lib/navKey'
 
@@ -40,6 +42,7 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
   const schedPaused = useScheduleState((s) => s.snapshot?.paused ?? null)
   const branch = useBranch(tab?.cwd ?? null)
   const slots = useSessionSlots()
+  const update = useUpdateStatus()
   // Force re-render every 60s so the "X min ago" + remaining tick.
   const [, tick] = useState(0)
   useEffect(() => {
@@ -159,7 +162,17 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
         )}
       </button>
 
-      <span className="text-fg-faint">v{__APP_VERSION__}</span>
+      {update?.behind && update.latest ? (
+        <span
+          className="text-amber-300"
+          title="A newer version is published — update the app. A stale npx cache can pin an old version."
+          data-testid="footer-version"
+        >
+          v{update.current} → v{update.latest}
+        </span>
+      ) : (
+        <span className="text-fg-dim" data-testid="footer-version">v{update?.current ?? __APP_VERSION__}</span>
+      )}
     </div>
   )
 }

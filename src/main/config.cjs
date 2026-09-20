@@ -129,6 +129,11 @@ function validateWrite(realAbs) {
     (p) => realAbs === p || realAbs.startsWith(p + path.sep)
   );
   if (inWritePrefix) return;
+  // The app's own userData dir (update-check.json cache).
+  try {
+    const ud = require('electron').app.getPath('userData');
+    if (realAbs === path.join(ud, 'update-check.json')) return;
+  } catch { /* electron app unavailable (unit tests) */ }
   // Also allowed inside a registered project root's .claude/ subtree.
   for (const root of allowedRoots) {
     if (root === os.homedir()) continue;

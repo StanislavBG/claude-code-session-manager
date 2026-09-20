@@ -61,6 +61,7 @@ export default defineConfig({
       'src/main/__tests__/queueOps-interactive-ac-lint.test.cjs',
       'src/main/lib/__tests__/localAdminHttp.test.cjs',
       'src/main/lib/__tests__/dispatchLoop.test.cjs',
+      'src/main/lib/__tests__/updateCheck.test.cjs',
       'src/main/__tests__/scheduler-dispatch-loop.test.cjs',
       'src/main/lib/__tests__/toolUseClassify.test.cjs',
       'src/main/lib/__tests__/instanceLock.test.cjs',

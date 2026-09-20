@@ -491,6 +491,8 @@ function createWindow() {
 
 ipcMain.handle('app:version', () => app.getVersion());
 
+ipcMain.handle('app:update-status', () => require('./lib/updateCheck.cjs').getUpdateStatus());
+
 ipcMain.handle('app:home-dir', () => os.homedir());
 
 ipcMain.handle('app:cwd', () => process.cwd());

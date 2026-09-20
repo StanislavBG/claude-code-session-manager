@@ -54,6 +54,14 @@ const sessionSlots = require('./lib/sessionSlots.cjs');
 const opsErrorLog = require('./lib/opsErrorLog.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { resolveEpicSpawnCwd } = require('./lib/epicSpawnCwd.cjs');
+const { resolveEpicTranscriptPath } = require('./lib/epicTranscriptPath.cjs');
+const logs = require('./logs.cjs');
+
+// The only two CLI errors that mean "wrong session flag" (verified against the
+// real CLI). "in use" → the transcript exists, so resume; "no conversation" →
+// nothing to resume, so create. Never widen this into a general retry.
+const SESSION_IN_USE_RE = /Session ID .* is already in use/i;
+const NO_CONVERSATION_RE = /No conversation found with session ID/i;
 
 // ─── Stop-signal protocol ──────────────────────────────────────────────────
 // Single source of truth for the sentinel and parser. The renderer (PRD 320)
@@ -540,20 +548,40 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // must never be left unpinned (CLAUDE.md model-pinning rule).
     const model = agentModelResolve.resolveEpicModel({ cwd, claudeSessionId: sessionId });
 
-    // Build argv as an array — no shell: true, no string interpolation
-    const args = [
-      '-p', fullPrompt,
-      '--model', model,
-      '--dangerously-skip-permissions',
-      '--output-format', 'stream-json',
-      '--verbose',
-    ];
-    if (resume) {
+    // Main is authoritative about --resume vs --session-id: the renderer's
+    // `resume` was computed in another process from a different cwd. The
+    // caller's value is only a fallback when the resolver throws.
+    let useResume = !!resume;
+    try {
+      const resolved = resolveEpicTranscriptPath({ cwd, claudeSessionId: sessionId });
+      useResume = !!resolved.existsAnywhere;
+      if (useResume !== !!resume) {
+        try {
+          logs.writeLine({
+            scope: 'chatRunner',
+            level: 'warn',
+            message: `session flag mismatch: renderer resume=${!!resume}, main resume=${useResume}; transcript=${resolved.path ?? 'none'}`,
+            meta: { tabId, sessionId, rendererResume: !!resume, mainResume: useResume, transcriptPath: resolved.path ?? null },
+          });
+        } catch { /* logging must never fail a turn */ }
+      }
+    } catch { /* fall back to the caller-supplied value */ }
+
+    // Build argv as an array — no shell: true, no string interpolation. Also
+    // used for the flag-swap retry so both attempts share one construction path.
+    const buildArgs = (resumeFlag) => {
+      const a = [
+        '-p', fullPrompt,
+        '--model', model,
+        '--dangerously-skip-permissions',
+        '--output-format', 'stream-json',
+        '--verbose',
+      ];
       // --resume carries the session context; no --session-id needed
-      args.push('--resume', sessionId);
-    } else {
-      args.push('--session-id', sessionId);
-    }
+      if (resumeFlag) a.push('--resume', sessionId);
+      else a.push('--session-id', sessionId);
+      return a;
+    };
 
     if (!silent) broadcast('chat:run:started', { tabId, sessionId });
 
@@ -566,34 +594,12 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // hazard) and jobWorktree.cjs's own (execCwd vs job.cwd) for why.
     const execCwd = resolveEpicSpawnCwd({ cwd, claudeSessionId: sessionId });
 
-    // Spawn with stdin closed (mirrors scheduler's 'ignore' — prevents the
-    // "claude -p stdin must be closed" gotcha from kg.cjs). stdout is piped for
-    // real-time NDJSON streaming; stderr piped for error-message capture.
-    let child;
-    try {
-      const target = claudeSpawnTarget('chat', sessionId, claudeBin);
-      child = spawn(target.command, args, {
-        ...(target.argv0 ? { argv0: target.argv0 } : {}),
-        cwd: execCwd,
-        env: childEnv,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        detached: true, // own process group so killTree can SIGTERM descendants
-      });
-    } catch (err) {
-      emitTerminal('chat:run:error', {
-        tabId,
-        sessionId,
-        message: `spawn failed: ${err?.message ?? String(err)}`,
-      });
-      settle();
-      return;
-    }
-
-    // One-shot kill helper — idempotent via the `killed` flag
     let killed = false;
+    let child = null;
     const doKill = (sig) => {
       if (killed) return;
       killed = true;
+      if (!child) return;
       // Negative pid targets the process group (requires detached: true)
       try { process.kill(-child.pid, sig); }
       catch { try { child.kill(sig); } catch { /* already dead */ } }
@@ -647,10 +653,40 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     }, KILL_CEILING_MS);
     if (killTimer.unref) killTimer.unref();
 
+    // One spawn of the CLI. Per-attempt state (buffers, child) lives in here;
+    // everything turn-level (timers, latch, lane) is in the enclosing scope.
+    const startAttempt = (resumeFlag, attemptNo) => {
+    // Spawn with stdin closed (mirrors scheduler's 'ignore' — prevents the
+    // "claude -p stdin must be closed" gotcha from kg.cjs). stdout is piped for
+    // real-time NDJSON streaming; stderr piped for error-message capture.
+    let thisChild;
+    try {
+      const target = claudeSpawnTarget('chat', sessionId, claudeBin);
+      thisChild = spawn(target.command, buildArgs(resumeFlag), {
+        ...(target.argv0 ? { argv0: target.argv0 } : {}),
+        cwd: execCwd,
+        env: childEnv,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        detached: true, // own process group so killTree can SIGTERM descendants
+      });
+    } catch (err) {
+      clearTimeout(killTimer);
+      clearTimeout(warnTimer);
+      emitTerminal('chat:run:error', {
+        tabId,
+        sessionId,
+        message: `spawn failed: ${err?.message ?? String(err)}`,
+      });
+      settle();
+      return;
+    }
+    child = thisChild;
+
     // ─── Stream parsing ────────────────────────────────────────────────────
     // stdout is newline-delimited JSON (stream-json format). We buffer partial
     // lines across TCP/pipe chunks. O(output-size) in memory per run.
 
+    // Per-attempt state — a retry starts from empty buffers.
     let lineBuffer = '';
     let finalAssistantText = '';
     let stderrBuffer = '';
@@ -738,7 +774,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       }
     };
 
-    child.stdout.on('data', (chunk) => {
+    thisChild.stdout.on('data', (chunk) => {
       lineBuffer += chunk.toString('utf8');
       let nl;
       while ((nl = lineBuffer.indexOf('\n')) !== -1) {
@@ -747,11 +783,11 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       }
     });
 
-    child.stderr.on('data', (chunk) => {
+    thisChild.stderr.on('data', (chunk) => {
       stderrBuffer += chunk.toString('utf8');
     });
 
-    child.on('error', (err) => {
+    thisChild.on('error', (err) => {
       clearTimeout(killTimer);
       clearTimeout(warnTimer);
       emitTerminal('chat:run:error', {
@@ -768,11 +804,34 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // line) reaches the 'data' handler above, which raced this fallback into
     // firing first and dropping the real chat:run:complete behind the
     // terminalSent latch.
-    child.on('close', (code, signal) => {
-      clearTimeout(killTimer);
-      clearTimeout(warnTimer);
+    thisChild.on('close', (code, signal) => {
       // Flush any partial line that didn't end with \n
       if (lineBuffer.trim()) processLine(lineBuffer.trim());
+
+      // Flag-swap retry: the CLI rejected the session flag before doing any
+      // work. Retry exactly once with the other flag; the timers, lane and
+      // terminal latch stay at executeRun level, so this is still one turn.
+      if (!terminalSent && !killed && code !== 0 && attemptNo === 1
+          && finalAssistantText === '' && recentToolUses.length === 0
+          && !/rate.?limit/i.test(stderrBuffer)) {
+        const swapTo = resumeFlag
+          ? (NO_CONVERSATION_RE.test(stderrBuffer) ? false : null)
+          : (SESSION_IN_USE_RE.test(stderrBuffer) ? true : null);
+        if (swapTo !== null) {
+          if (!silent) {
+            broadcast('chat:run:notice', {
+              tabId,
+              sessionId,
+              message: `Session flag mismatch (${resumeFlag ? '--resume' : '--session-id'} rejected); retrying once with ${swapTo ? '--resume' : '--session-id'}.`,
+            });
+          }
+          startAttempt(swapTo, 2);
+          return;
+        }
+      }
+
+      clearTimeout(killTimer);
+      clearTimeout(warnTimer);
 
       // Emit a fallback terminal event for any run that ended without one — a
       // cancel/SIGTERM (killed=true), a crash before a result, or a silent
@@ -799,6 +858,9 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       }
       settle();
     });
+    };
+
+    startAttempt(useResume, 1);
   });
 }
 

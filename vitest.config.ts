@@ -204,6 +204,7 @@ export default defineConfig({
       'src/main/lib/__tests__/epicWorktreeProjectConfig.test.cjs',
       'src/main/__tests__/pty-epic-worktree-spawn-cwd.test.cjs',
       'src/main/__tests__/chatRunner-epic-worktree-execcwd.test.cjs',
+      'src/main/__tests__/chatRunner-session-flag-retry.test.cjs',
       'src/main/lib/__tests__/coldBootPromptSessionsWrite.test.cjs',
       'src/main/__tests__/config-readText-bounded.test.cjs',
       'src/main/__tests__/runLogRetention.test.cjs',

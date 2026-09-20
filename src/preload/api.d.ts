@@ -1780,6 +1780,8 @@ export interface SessionManagerAPI {
       total: number; inUse: number; holders: { owner: string; at: string }[];
       min: number; max: number; default: number; envOverride: boolean;
     }>;
+    /** Resolved base dir of managed Epic/job worktrees (SM_WORKTREE_ROOT, else the persistent per-user state dir). */
+    worktreeBase: () => Promise<string>;
     /** Set the slot pool's user cap (Home tab), [0, 10]; 0 pauses new launches. Ignored if SM_SESSION_SLOTS is set. */
     setSessionSlots: (cap: number) => Promise<{
       total: number; inUse: number; holders: { owner: string; at: string }[];

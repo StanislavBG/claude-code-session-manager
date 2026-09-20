@@ -13,11 +13,12 @@
  * executor jobs BY DESIGN (children inherit env), so a redirected app runs
  * redirected jobs.
  *
- * Worktree roots are NOT under schedulerHome (they live on the tmp filesystem)
- * but are resolved here all the same, via SM_WORKTREE_ROOT (else os.tmpdir()),
+ * Worktree roots are NOT under schedulerHome (they live in a per-user state dir)
+ * but are resolved here all the same, via SM_WORKTREE_ROOT (else persistentWorktreeBase()),
  * so the job and epic roots always move together under one override.
  */
 
+const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
@@ -109,8 +110,29 @@ function instanceLockPath() { return path.join(schedulerHome(), 'scheduler-owner
 /** Where heap snapshots are written — the scheduler home itself. */
 function heapSnapshotDir() { return schedulerHome(); }
 
-/** SM_WORKTREE_ROOT, else os.tmpdir() — the parent of every managed worktree root. */
-function worktreeBase() { return assertNotLiveRoot(process.env.SM_WORKTREE_ROOT || os.tmpdir(), 'worktreeBase'); }
+/**
+ * Persistent per-user default for worktrees: $XDG_STATE_HOME/session-manager (absolute values only,
+ * per the XDG spec) else ~/.local/state/session-manager. NOT os.tmpdir(): a systemd tmp.conf `D /tmp`
+ * empties /tmp at boot, and the Claude CLI keys an Epic's transcript to its SPAWN cwd (the worktree),
+ * so a tmp-resident worktree took the transcript's directory with it ("lost sessions").
+ * It is also deliberately outside every project repo and outside ~/.claude/projects: what /tmp bought
+ * (a checkout never nested in the repo, so the repo's globs, `git status` and packaging never see it)
+ * is kept by living in a per-user state dir instead of beside the project.
+ */
+function persistentWorktreeBase() {
+  const xdg = process.env.XDG_STATE_HOME;
+  const stateHome = xdg && path.isAbsolute(xdg) ? xdg : path.join(os.homedir(), '.local', 'state');
+  return path.join(stateHome, 'session-manager');
+}
+
+/** SM_WORKTREE_ROOT, else persistentWorktreeBase() (created 0700 on demand) — parent of every managed worktree root. */
+function worktreeBase() {
+  if (process.env.SM_WORKTREE_ROOT) return assertNotLiveRoot(process.env.SM_WORKTREE_ROOT, 'worktreeBase');
+  // Guard BEFORE mkdir: under vitest an unset SM_WORKTREE_ROOT must throw, never create a live dir.
+  const base = assertNotLiveRoot(persistentWorktreeBase(), 'worktreeBase');
+  try { fs.mkdirSync(base, { recursive: true, mode: 0o700 }); } catch { /* best-effort; createWorktree surfaces a real failure */ }
+  return base;
+}
 
 /** Managed worktree root for `kind` ('job' | 'epic'), resolved fresh on every call. */
 function worktreeRoot(kind) {
@@ -158,6 +180,7 @@ module.exports = {
   adminTokenPath,
   machineStateLogCwd,
   worktreeBase,
+  persistentWorktreeBase,
   worktreeRoot,
   watchdogLogsDir,
   restartRequestPath,

@@ -11056,6 +11056,9 @@ function registerScheduleHandlers() {
   // configuration tab.
   ipcMain.handle('schedule:session-slots', () => sessionSlots.snapshot());
 
+  // Read-only: where Epic/job git worktrees (and so their CLI transcript encodings) live.
+  ipcMain.handle('schedule:worktree-base', () => require('./lib/schedulerPaths.cjs').worktreeBase());
+
   // Home-tab control for the same pool: user-set cap in [0, 10], default 5.
   // 0 pauses new claude -p launches machine-wide without killing anything
   // already running. SM_SESSION_SLOTS (if set) still overrides this at read

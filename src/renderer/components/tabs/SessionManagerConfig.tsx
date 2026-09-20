@@ -31,10 +31,17 @@ export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
   const slots = useSessionSlots()
   const [openToHomeOnLaunch, setOpenToHomeOnLaunch] = useState(false)
   const [prefsSaving, setPrefsSaving] = useState(false)
+  const [worktreeBase, setWorktreeBase] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
     readAppPrefs().then((p) => { if (alive) setOpenToHomeOnLaunch(p.openToHomeOnLaunch === true) })
+    return () => { alive = false }
+  }, [])
+
+  useEffect(() => {
+    let alive = true
+    window.api.schedule.worktreeBase?.().then((p) => { if (alive) setWorktreeBase(p) }).catch(() => {})
     return () => { alive = false }
   }, [])
 
@@ -106,6 +113,7 @@ export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
         </p>
         <ul className="m-0 pl-0 list-none space-y-1 font-mono text-[12px] text-fg-dim">
           <li>~/.claude/session-manager/scheduler-machine.json <span className="text-fg-faint">— policy + pause state</span></li>
+          <li data-testid="worktree-base-path">{worktreeBase ?? '…'}/session-manager-epic-worktrees/ <span className="text-fg-faint">— Epic git worktrees (SM_WORKTREE_ROOT overrides)</span></li>
           <li>&lt;project&gt;/session-manager-operations/scheduler/state/ <span className="text-fg-faint">— per-project queue + history</span></li>
           <li>&lt;project&gt;/session-manager-operations/scheduler/epics/&lt;epic&gt;/prds/ <span className="text-fg-faint">— PRD sources, per session</span></li>
         </ul>

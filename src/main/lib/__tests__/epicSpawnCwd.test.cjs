@@ -191,3 +191,37 @@ test('a real, existing directory IS returned — the check gates on disk state, 
     fs.rmSync(realDir, { recursive: true, force: true });
   }
 });
+
+// ─── spawn-side: a vanished worktree is restored at the SAME path, never swapped for cwd ───
+
+test('restore:true re-attaches the worktree and returns the recorded dir (transcript encoding unchanged)', () => {
+  const calls = [];
+  const result = resolveEpicSpawnCwd({
+    cwd: '/projects/foo',
+    claudeSessionId: 'sess-1',
+    deps: {
+      readActiveIndex: stubReadActiveIndex(WORKTREE_SESSIONS),
+      statSync: statGone,
+      restore: true,
+      restoreWorktree: (a) => { calls.push(a); return true; },
+    },
+  });
+  expect(result).toBe('/tmp/session-manager-epic-worktrees/deadbeef/epic-1');
+  expect(calls).toEqual([{ dir: '/tmp/session-manager-epic-worktrees/deadbeef/epic-1', branch: 'sm-epic/epic-1', baseCwd: '/projects/foo' }]);
+});
+
+test('restore:true with a failed restore still returns the recorded dir — never the project cwd', () => {
+  const result = resolveEpicSpawnCwd({
+    cwd: '/projects/foo',
+    claudeSessionId: 'sess-1',
+    deps: { readActiveIndex: stubReadActiveIndex(WORKTREE_SESSIONS), statSync: statGone, restore: true, restoreWorktree: () => false },
+  });
+  expect(result).toBe('/tmp/session-manager-epic-worktrees/deadbeef/epic-1');
+});
+
+test('restoreEpicWorktree refuses dirs outside an epic-worktrees segment and non sm-epic branches', () => {
+  const { restoreEpicWorktree } = require('../epicSpawnCwd.cjs');
+  expect(restoreEpicWorktree({ dir: '/etc/evil', branch: 'sm-epic/x', baseCwd: '/projects/foo' })).toBe(false);
+  expect(restoreEpicWorktree({ dir: '/tmp/session-manager-epic-worktrees/a/b', branch: 'main; rm -rf', baseCwd: '/projects/foo' })).toBe(false);
+  expect(restoreEpicWorktree({ dir: 'relative/session-manager-epic-worktrees/a', branch: 'sm-epic/x', baseCwd: '/projects/foo' })).toBe(false);
+});

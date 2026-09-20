@@ -592,7 +592,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // below keeps using it exactly as before — only this ACTUAL spawn cwd
     // option does. See epicSpawnCwd.cjs's header comment (the ops-root
     // hazard) and jobWorktree.cjs's own (execCwd vs job.cwd) for why.
-    const execCwd = resolveEpicSpawnCwd({ cwd, claudeSessionId: sessionId });
+    const execCwd = resolveEpicSpawnCwd({ cwd, claudeSessionId: sessionId, deps: { restore: true } });
 
     let killed = false;
     let child = null;

@@ -23,6 +23,7 @@ function installApi(prefsFile: Record<string, unknown>) {
     schedule: {
       sessionSlots: vi.fn().mockResolvedValue({ total: 3, inUse: 0, holders: [] }),
       setConfig: vi.fn().mockResolvedValue(undefined),
+      worktreeBase: vi.fn().mockResolvedValue('/home/u/.local/state/session-manager'),
     },
   }
   return { readJson, writeJson }
@@ -55,6 +56,13 @@ describe('SessionManagerConfig — Behavior toggle', () => {
     const toggle = el.querySelector('button[role="switch"]') as HTMLButtonElement
     expect(toggle).toBeTruthy()
     expect(toggle.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('shows the resolved worktree base in the On disk list', async () => {
+    installApi({})
+    const el = mount()
+    await flushAsync()
+    expect(el.querySelector('[data-testid="worktree-base-path"]')?.textContent).toContain('/home/u/.local/state/session-manager/session-manager-epic-worktrees/')
   })
 
   it('renders checked when app-prefs.json has openToHomeOnLaunch:true', async () => {

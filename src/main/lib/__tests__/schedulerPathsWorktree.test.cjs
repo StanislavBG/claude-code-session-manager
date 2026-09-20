@@ -68,8 +68,47 @@ test('resolver and KIND_CONFIG roots follow SM_WORKTREE_ROOT together', () => {
   expect(schedulerPaths.worktreeRoot('epic')).toBe(path.join(override, 'session-manager-epic-worktrees'));
   expect(gitWorktree.KIND_CONFIG.job.root).toBe(schedulerPaths.worktreeRoot('job'));
   expect(gitWorktree.KIND_CONFIG.epic.root).toBe(schedulerPaths.worktreeRoot('epic'));
+});
+
+test('unset SM_WORKTREE_ROOT resolves the persistent per-user dir (0700, created), never os.tmpdir()', () => {
+  const state = path.join(scratch, 'state');
+  const prevXdg = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = state;
   delete process.env.SM_WORKTREE_ROOT;
-  expect(schedulerPaths.worktreeRoot('job')).toBe(path.join(os.tmpdir(), 'session-manager-job-worktrees'));
+  try {
+    // scratch lives under os.tmpdir(), so the state dir passes the (unchanged) guard as a tmp child.
+    const base = schedulerPaths.worktreeBase();
+    expect(base).toBe(path.join(state, 'session-manager'));
+    expect(base).not.toBe(os.tmpdir());
+    expect(fs.statSync(base).mode & 0o777).toBe(0o700);
+    expect(schedulerPaths.worktreeRoot('epic')).toBe(path.join(base, 'session-manager-epic-worktrees'));
+  } finally {
+    if (prevXdg === undefined) delete process.env.XDG_STATE_HOME; else process.env.XDG_STATE_HOME = prevXdg;
+  }
+});
+
+test('the vitest guard still throws for a live default (no SM_WORKTREE_ROOT, real ~/.local/state) and creates nothing', () => {
+  const prevXdg = process.env.XDG_STATE_HOME;
+  delete process.env.XDG_STATE_HOME;
+  delete process.env.SM_WORKTREE_ROOT;
+  const prevHome = process.env.HOME;
+  const fakeHome = path.join(scratch, 'nohome');
+  process.env.HOME = '/nonexistent-live-home-for-guard-test';
+  try {
+    expect(() => schedulerPaths.worktreeBase()).toThrow(/live root/);
+    expect(fs.existsSync(path.join(fakeHome, '.local'))).toBe(false);
+  } finally {
+    process.env.HOME = prevHome;
+    if (prevXdg !== undefined) process.env.XDG_STATE_HOME = prevXdg;
+  }
+});
+
+test('SM_WORKTREE_ROOT set wins over the persistent default', () => {
+  process.env.XDG_STATE_HOME = path.join(scratch, 'ignored');
+  try {
+    expect(schedulerPaths.worktreeBase()).toBe(override);
+    expect(fs.existsSync(path.join(scratch, 'ignored'))).toBe(false);
+  } finally { delete process.env.XDG_STATE_HOME; }
 });
 
 test('create / sweep / isEphemeralCwd operate under the override, never the real root', async () => {

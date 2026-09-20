@@ -330,7 +330,7 @@ async function removeWorktreeDir(cwd, dir) {
     /* best-effort */
   }
   const parentDir = path.dirname(dir);
-  // Guard against ever rmdir-ing the worktree base (os.tmpdir() or SM_WORKTREE_ROOT) itself — every real caller's
+  // Guard against ever rmdir-ing the worktree base (persistent state dir or SM_WORKTREE_ROOT) itself — every real caller's
   // `dir` is `<kind root>/<hash>/<key>`, so `parentDir` is always the hash
   // dir, never the tmpdir root, but this keeps the guarantee explicit rather
   // than relying solely on call-site discipline.

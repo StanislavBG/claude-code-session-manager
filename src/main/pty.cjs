@@ -181,7 +181,7 @@ class PtyManager {
     // returns its isolated worktree dir when one exists — `cwd` itself is
     // NEVER repointed; only this actual PTY spawn option is. See
     // epicSpawnCwd.cjs's header comment (the ops-root hazard) for why.
-    const spawnCwd = resolveEpicSpawnCwd({ cwd, claudeSessionId: tabId });
+    const spawnCwd = resolveEpicSpawnCwd({ cwd, claudeSessionId: tabId, deps: { restore: true } });
     if (spawnCwd !== cwd) {
       console.log(`[pty] tabId=${tabId} isolated in worktree ${spawnCwd}`);
     }

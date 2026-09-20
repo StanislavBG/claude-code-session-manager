@@ -27,6 +27,8 @@
  */
 
 const fs = require('node:fs');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { readActiveIndex } = require('./epicMint.cjs');
 
 /**
@@ -62,6 +64,26 @@ function isUsableDir(dir, statImpl) {
 }
 
 /**
+ * Re-attach `branch` at `dir` (`git worktree add`). Sync + bounded; never throws. `dir` comes from
+ * a git-tracked file, so it is only honoured when it sits in a `session-manager-epic-worktrees`
+ * segment and the branch is an `sm-epic/` one — nothing else may be materialised from that record.
+ * @returns {boolean} true when `dir` now exists as a checkout.
+ */
+function restoreEpicWorktree({ dir, branch, baseCwd }) {
+  try {
+    if (!path.isAbsolute(dir) || !path.isAbsolute(baseCwd)) return false;
+    if (!path.resolve(dir).split(path.sep).includes('session-manager-epic-worktrees')) return false;
+    if (typeof branch !== 'string' || !/^sm-epic\/[A-Za-z0-9._-]+$/.test(branch)) return false;
+    const run = (args) => execFileSync('git', args, { cwd: baseCwd, stdio: 'ignore', timeout: 15_000 });
+    run(['worktree', 'prune']);
+    run(['worktree', 'add', dir, branch]);
+    return isUsableDir(dir, fs.statSync);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * @param {{ cwd: string, claudeSessionId: string, deps?: object }} opts
  * @returns {string} `worktree.dir` when the matching Epic has one AND it still
  *   exists on disk, else `cwd` unchanged.
@@ -77,10 +99,19 @@ function resolveEpicSpawnCwd({ cwd, claudeSessionId, deps = {} } = {}) {
         const dir = session.worktree?.dir;
         if (!dir) return cwd;
         if (!isUsableDir(dir, statSync)) {
-          // Falling back is strictly better than failing the spawn: the
-          // session still runs, just un-isolated, which is the same degraded
-          // mode a project that never had a worktree runs in.
-          console.log(`[epicSpawnCwd] worktree dir gone (${dir}) — falling back to ${cwd}`);
+          // NEVER fall back to the project cwd: the CLI files the transcript under
+          // encodeCwd(spawn cwd), so a resumed session started in a different dir splits
+          // its transcript across two encodings ("lost session"). Instead re-attach the
+          // Epic's own branch at the SAME recorded path (encoding unchanged); if that is
+          // impossible, return the recorded dir anyway so the spawn fails loudly (ENOENT)
+          // rather than silently forking the transcript. Read-side callers (no `restore`)
+          // keep the old cwd answer — they never spawn and must never mutate git state.
+          if (deps.restore) {
+            const restored = (deps.restoreWorktree || restoreEpicWorktree)({ dir, branch: session.worktree?.branch, baseCwd: cwd });
+            console.log(`[epicSpawnCwd] worktree dir gone (${dir}) — ${restored ? 'restored at same path' : 'restore failed; spawn will fail rather than split the transcript'}`);
+            return dir;
+          }
+          console.log(`[epicSpawnCwd] worktree dir gone (${dir}) — read-side falls back to ${cwd}`);
           return cwd;
         }
         return dir;
@@ -92,4 +123,4 @@ function resolveEpicSpawnCwd({ cwd, claudeSessionId, deps = {} } = {}) {
   return cwd;
 }
 
-module.exports = { resolveEpicSpawnCwd };
+module.exports = { resolveEpicSpawnCwd, restoreEpicWorktree };

@@ -231,6 +231,7 @@ contextBridge.exposeInMainWorld('api', {
   schedule: {
     state: () => ipcRenderer.invoke('schedule:state'),
     sessionSlots: () => ipcRenderer.invoke('schedule:session-slots'),
+    worktreeBase: () => ipcRenderer.invoke('schedule:worktree-base'),
     setSessionSlots: (cap) => ipcRenderer.invoke('schedule:set-session-slots', { cap }),
     setConfig: (partial) => ipcRenderer.invoke('schedule:set-config', partial),
     resetJob: (slug) => ipcRenderer.invoke('schedule:reset-job', { slug }),

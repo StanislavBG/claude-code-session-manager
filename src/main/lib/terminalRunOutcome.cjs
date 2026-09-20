@@ -21,6 +21,7 @@ const COMPLETED_EQUIVALENT_VERDICTS = new Set([
   'pass_no_commit_target_verified',
   'pass_no_commit_already_shipped',
   'pass_no_commit_prior_run_verified',
+  'pass_no_commit_artifact_verified',
 ]);
 
 // Bounds the scan: only the newest few run dirs are stat'd per slug, never

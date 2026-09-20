@@ -4540,11 +4540,18 @@ async function findSatisfyingCommitOnMain(job) {
  *     newlyDirty is empty: a fix-plan job that left real dirt behind is
  *     still a genuine finish-protocol violation (incident:
  *     523-fix-bounded-fix-plan-retry, 2026-07-12).
+ *   - artifactVerified (zero-edit case only): runVerify.cjs proved a PRD that
+ *     DECLARED `deliverable: artifact` wrote its git-excluded artifacts inside
+ *     the run window (pass_no_commit_artifact_verified). That verdict is
+ *     deliberately NOT blanket-excused via legitimateNoOp (the call site
+ *     excludes it) — it stands the guard down only on a clean tree, like the
+ *     fix-plan carve-out, so stray uncommitted tracked edits still park as
+ *     uncommitted_changes.
  */
-function commitGuardVerdict({ newlyDirty, siblingRunning, ranInWorktree, jobSelfCommitted, legitimateNoOp, isFixPlanJob, verifyResult, salvagePatch }) {
+function commitGuardVerdict({ newlyDirty, siblingRunning, ranInWorktree, jobSelfCommitted, legitimateNoOp, isFixPlanJob, artifactVerified, verifyResult, salvagePatch }) {
   if ((siblingRunning && !ranInWorktree) || jobSelfCommitted || legitimateNoOp) return null;
   const dirty = newlyDirty || [];
-  if (dirty.length === 0 && isFixPlanJob) return null;
+  if (dirty.length === 0 && (isFixPlanJob || artifactVerified)) return null;
 
   const carried = [...(verifyResult?.annotations ?? [])];
   if (verifyResult && verifyResult.verdict !== 'clean') {
@@ -7175,6 +7182,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
         priorLandedCommit,
         jobLandedCommitThisRun,
         exitCode: res.exitCode,
+        worktreeDir: worktree.ok ? worktree.dir : null,
       }).catch((e) => ({
         verdict: 'verify_unavailable',
         reason: `verifier threw: ${e?.message ?? String(e)}`,
@@ -7209,7 +7217,8 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     // annotation, so a real "finish protocol incomplete" is distinguishable from
     // transcript noise in the queue (feedback 2026-06-10 addendum).
     const guardWillRefire = verifyResult && verifyResult.downgradeTo === 'pending';
-    const guardIsLegitimateNoOp = verifyResult && COMPLETED_EQUIVALENT_VERDICTS.has(verifyResult.verdict);
+    const guardArtifactVerified = verifyResult?.verdict === 'pass_no_commit_artifact_verified';
+    const guardIsLegitimateNoOp = verifyResult && !guardArtifactVerified && COMPLETED_EQUIVALENT_VERDICTS.has(verifyResult.verdict);
     if (res.exitCode === 0 && !res.rateLimited && !guardWillRefire && !guardIsLegitimateNoOp) {
       // afterGuardCwd === null means non-git cwd (or git errored) —
       // best-effort skip, same as always; only a git-status result (even an
@@ -7230,6 +7239,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           jobSelfCommitted,
           legitimateNoOp: guardIsLegitimateNoOp,
           isFixPlanJob: resolveIsFixPlan(job.slug, job.isFixPlan),
+          artifactVerified: guardArtifactVerified,
           verifyResult,
           salvagePatch,
         });

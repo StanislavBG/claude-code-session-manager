@@ -14,6 +14,7 @@
 // tree); defaults to the repo. Complexity: O(files x links), all small.
 
 const fs = require('fs')
+const { spawnSync } = require('child_process')
 const path = require('path')
 const { parseClaudeMdBudget, evaluateClaudeMdBudget } = require('../src/main/health.cjs')
 
@@ -46,6 +47,14 @@ const failures = []
 const fail = (msg) => failures.push(msg)
 const exists = (rel) => fs.existsSync(path.join(ROOT, rel))
 const rel = (abs) => path.relative(ROOT, abs).split(path.sep).join('/')
+
+// A link target that is absent but gitignored (a build output such as
+// web/project-pages/, present in the main checkout, absent in a fresh job
+// worktree) is a note, not a failure. Exit 0 = ignored; 1 or 128 (not a repo) = not.
+function isGitIgnored(absPath) {
+  const r = spawnSync('git', ['check-ignore', '-q', '--', absPath], { cwd: ROOT, stdio: 'ignore' })
+  return r.status === 0
+}
 
 function listDirs(dir) {
   try {
@@ -105,7 +114,10 @@ for (const f of [...linted].sort()) {
     if (/^(https?:|mailto:|#)/i.test(target)) continue
     const p = target.split('#')[0]
     if (!p) continue
-    if (!fs.existsSync(path.resolve(path.dirname(abs), p))) fail(`${f}: broken relative link: ${target}`)
+    const resolved = path.resolve(path.dirname(abs), p)
+    if (fs.existsSync(resolved)) continue
+    if (isGitIgnored(resolved)) { console.log(`doc-hierarchy: note: ${f}: link target is gitignored and absent (excluded): ${target}`); continue }
+    fail(`${f}: broken relative link: ${target}`)
   }
   for (const m of text.matchAll(/file:\/\/[^\s)>\]]*/gi)) {
     if (!failures.includes(`${f}: file:// link: ${m[0]}`)) fail(`${f}: file:// link: ${m[0]}`)

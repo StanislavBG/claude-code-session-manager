@@ -60,6 +60,21 @@ test('broken relative link fails', () => {
   expect(r.stderr).toContain('web/README.md: broken relative link: ./nope.md#top');
 });
 
+test('link to a gitignored, absent path is a note; a non-ignored missing path still fails', () => {
+  spawnSync('git', ['init', '-q'], { cwd: root });
+  write('.gitignore', 'web/built-output/\n');
+  write('web/README.md', 'see [out](./built-output/index.html)\n');
+  let r = run();
+  expect(r.status, r.stderr).toBe(0);
+  expect(r.stdout).toContain('note:');
+  expect(r.stdout).toContain('./built-output/index.html');
+  write('web/README.md', 'see [out](./built-output/index.html) and [gone](./nope/x.md)\n');
+  r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('broken relative link: ./nope/x.md');
+  expect(r.stderr).not.toContain('built-output');
+});
+
 test('file:// link fails', () => {
   write('plugins/CLAUDE.md', '[abs](file:///home/x/y.md)\n');
   const r = run();

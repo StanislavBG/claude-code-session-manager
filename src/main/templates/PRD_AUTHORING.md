@@ -146,8 +146,8 @@ estimateMinutes: 60
 Use `deliverable: artifact` + `artifactPaths: [a, b]` (both passed to `scheduler_create_prd`) ONLY when every deliverable is a file the target repo deliberately git-excludes (e.g. patches/notes under `session-manager-operations/review-records/`, matched by `.git/info/exclude`), so "no commit" is the correct outcome.
 
 - Every artifact path must be named in `artifactPaths`; an unlisted file is invisible to the verifier. Each path is relative, never contains `..`.
-- The artifact must be non-empty and written during the run window — the verifier stat-checks it on disk (checked by PRD 1321; this section documents the declaration).
-- The run must still leave the working tree clean — declaring artifacts excuses the missing commit, not stray tracked edits.
+- The artifact must be non-empty and written during the run window — the verifier stat-checks it on disk (verdict `pass_no_commit_artifact_verified`; window = start−60s..finish+120s).
+- The run must still leave the working tree clean — declaring artifacts excuses the missing commit, not stray tracked edits. The commit guard enforces this: the `pass_no_commit_artifact_verified` verdict stands the guard down only when nothing tracked was left dirty; any uncommitted tracked change still parks as `uncommitted_changes`.
 - Both fields are required together: the write is refused if only one is given.
 
 Incident: sigma PRD `816-prepare-157-copy-citation-extras-patch` (2026-09-20) wrote its patch into a git-excluded folder; with no way to declare that, two runs both parked in `needs_review`.

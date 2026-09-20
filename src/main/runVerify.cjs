@@ -40,6 +40,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { parsePrdFile } = require('./lib/prdFrontmatter.cjs');
 
 const VERDICTS_SCHEMA_VERSION = 1;
 
@@ -778,6 +779,57 @@ function allDeliverablesAlreadyTracked({ cwd, paths, execImpl = execFileSync, ti
   }
 }
 
+
+/**
+ * Material check for a DECLARED artifact-only PRD (`deliverable: artifact` +
+ * `artifactPaths`). Returns true only when every declared path resolves inside
+ * `cwd`, is a non-empty regular file, and has an mtime inside the run window
+ * (startedAt - 60s .. (finishedAt ?? now) + 120s). Never throws: any doubt
+ * (no paths, `..`, escape, missing, non-file, empty, stale, fs error) → false.
+ * `cwd` may be a list of roots; a path is accepted if it verifies under any.
+ * Complexity O(paths).
+ */
+function artifactsVerifiedOnDisk({ cwd, paths, startedAt, finishedAt, fsImpl = fs } = {}) {
+  return artifactsCheck({ cwd, paths, startedAt, finishedAt, fsImpl }).ok;
+}
+
+function artifactsCheck({ cwd, paths, startedAt, finishedAt, fsImpl = fs }) {
+  const fail = { ok: false, verified: [] };
+  try {
+    const roots = (Array.isArray(cwd) ? cwd : [cwd]).filter((r) => typeof r === 'string' && r);
+    if (!roots.length || !Array.isArray(paths) || paths.length === 0) return fail;
+    const start = Date.parse(startedAt ?? '');
+    if (Number.isNaN(start)) return fail;
+    const endParsed = finishedAt ? Date.parse(finishedAt) : NaN;
+    const end = Number.isNaN(endParsed) ? Date.now() : endParsed;
+    const lo = start - 60_000;
+    const hi = end + 120_000;
+    const verified = [];
+    for (const p of paths) {
+      if (typeof p !== 'string' || !p || p.includes('\0')) return fail;
+      if (p.split(/[\\/]/).includes('..')) return fail;
+      let hit = null;
+      for (const root of roots) {
+        const base = path.resolve(root);
+        const abs = path.resolve(base, p);
+        const rel = path.relative(base, abs);
+        if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) continue;
+        let st;
+        try { st = fsImpl.statSync(abs); } catch { continue; }
+        if (!st.isFile() || st.size <= 0) continue;
+        if (st.mtimeMs < lo || st.mtimeMs > hi) continue;
+        hit = { path: p, size: st.size, mtime: new Date(st.mtimeMs).toISOString() };
+        break;
+      }
+      if (!hit) return fail;
+      verified.push(hit);
+    }
+    return { ok: true, verified };
+  } catch {
+    return fail;
+  }
+}
+
 // ─── main verifier ────────────────────────────────────────────────────────────
 
 /**
@@ -830,7 +882,7 @@ function allDeliverablesAlreadyTracked({ cwd, paths, execImpl = execFileSync, ti
  */
 async function verifyRun({
   runDir, prdPath, queueEntry, allJobs = [], committedDuringRun = false, allowPreSentinelHeal = false,
-  ghExecImpl, priorLandedCommit = null, jobLandedCommitThisRun = null, exitCode = null,
+  ghExecImpl, priorLandedCommit = null, jobLandedCommitThisRun = null, exitCode = null, worktreeDir = null,
 }) {
   const { slug } = queueEntry;
   const logPath = path.join(runDir, `${slug}.log`);
@@ -1202,7 +1254,42 @@ async function verifyRun({
           );
         }
       }
+      // EXEMPTION: a PRD that DECLARES `deliverable: artifact` + `artifactPaths`
+      // (all deliverables live in a git-excluded dir, so "no commit" is
+      // correct). Reads the declared list from frontmatter — never scrapes
+      // prose — and stat-checks each file on disk (non-empty, in the run
+      // window). Paths resolve against queueEntry.cwd, then retry against the
+      // run's worktree dir when the caller supplies one. Any doubt falls
+      // through to pass_no_commit below. The commit guard separately requires
+      // a clean tree for this verdict (scheduler.cjs commitGuardVerdict).
+      let artifactVerified = false;
       if (!mergeMainVerified && !priorRunVerified && !alreadyShipped) {
+        let fm = null;
+        try { fm = parsePrdFile(prdFullText).frontmatter; } catch { fm = null; }
+        if (fm && fm.deliverable === 'artifact' && Array.isArray(fm.artifactPaths) && fm.artifactPaths.length > 0) {
+          const check = artifactsCheck({
+            cwd: [queueEntry?.cwd, worktreeDir],
+            paths: fm.artifactPaths,
+            startedAt: queueEntry?.startedAt,
+            finishedAt: queueEntry?.finishedAt,
+          });
+          if (check.ok) {
+            artifactVerified = true;
+            return conclude(
+              'pass_no_commit_artifact_verified',
+              'SCHEDULER_VERDICT: PASS with no commit, but every declared artifact exists, is non-empty, and was '
+                + `written inside the run window (${check.verified.map((v) => v.path).join(', ')})`,
+              null,
+              {
+                ...(annotations.length ? { annotations } : {}),
+                sentinel,
+                verifiedArtifacts: check.verified,
+              },
+            );
+          }
+        }
+      }
+      if (!mergeMainVerified && !priorRunVerified && !alreadyShipped && !artifactVerified) {
         issues.push({
           verdict: 'pass_no_commit',
           reason: 'SCHEDULER_VERDICT: PASS but no commit landed during the run window — the run claims success but produced no code change',
@@ -1294,6 +1381,7 @@ module.exports = {
   checkMergeablePr,
   extractPrdDeliverablePaths,
   allDeliverablesAlreadyTracked,
+  artifactsVerifiedOnDisk,
   isAncestorCommit,
   isGitRepo,
   hasAbandonedBackgroundTask,

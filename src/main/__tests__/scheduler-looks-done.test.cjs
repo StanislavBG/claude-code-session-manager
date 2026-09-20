@@ -269,7 +269,6 @@ test('computeLooksDone: no declared paths on the PRD → null, never fabricates 
 test('needs_review row with autoFixAttempted:true is never also stamped looksDone (PRD 1136 — mutually exclusive)', async () => {
   const projectCwd = path.join(tmpHome, 'proj-already-fix-planned');
   initRepo(projectCwd);
-  registerActiveProject(projectCwd, 'proj-already-fix-planned-slug');
   writePrd(projectCwd, '30-example', [
     '# Implementation notes',
     'Edit `src/thing.js`.',
@@ -303,6 +302,11 @@ test('needs_review row with autoFixAttempted:true is never also stamped looksDon
     '[scheduler] starting 30-example',
     JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'still broken' }),
   ]);
+
+  // Register LAST: the project only becomes discoverable once its PRD and queue row both
+  // exist, so a straggling background reconcile from an earlier test can't see the PRD
+  // without its row and mint a 'quarantined' adopt row over this needs_review one.
+  registerActiveProject(projectCwd, 'proj-already-fix-planned-slug');
 
   commitFile(projectCwd, 'src/thing.js', 'hello', 'later commit touching the declared path');
 

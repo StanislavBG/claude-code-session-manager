@@ -237,17 +237,6 @@ export function DetailLine({ k, v, wrap }: { k: string; v: string; wrap?: boolea
   )
 }
 
-// ─── LegendItem — dot + count + label chip used in window strip ──────────────
-export function LegendItem({ dotClass, n, label }: { dotClass: string; n: number; label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[13px] text-fg-dim">
-      <span className={`w-2 h-2 rounded-full ${dotClass}`} aria-hidden="true" />
-      <strong className="text-fg font-mono text-[13.5px]">{n}</strong>
-      {' '}{label}
-    </span>
-  )
-}
-
 // ─── VERDICT_LABELS — verifier verdict → human-readable label ───────────────
 // Single source consumed by the Queue job detail panel, PRDs needs_review
 // card, and History job detail panel — all three surfaces display a job's
@@ -392,6 +381,103 @@ export function PrdStatusPill({ status }: { status: PrdDisplayStatus }) {
       className={`text-[11.5px] font-semibold px-[9px] py-0.5 rounded-full ${tone.bg} ${tone.text}${tone.border ? ' ring-1 ring-inset ring-line' : ''}`}
     >
       {tone.label}
+    </span>
+  )
+}
+
+// ─── 2A band primitives — full-bleed rows separated by 1px rules, no card ────
+// Title band / KPI band / PLANS toolbar are all built from these. No rounded
+// corner, no border box: the only chrome is the 1px rule-structural underline.
+
+export function BandRow({ children, height, className = '', testId }: {
+  children: ReactNode; height?: number; className?: string; testId?: string
+}) {
+  return (
+    <div
+      data-testid={testId}
+      style={height ? { height } : undefined}
+      className={`flex items-center border-b border-rule-structural ${className}`}
+    >
+      {children}
+    </div>
+  )
+}
+
+/** ⓘ affordance — the native title carries the detail (no popover state to leak). */
+export function InfoDot({ title, testId }: { title: string; testId?: string }) {
+  return (
+    <span
+      data-testid={testId}
+      title={title}
+      aria-label={title}
+      className="inline-flex items-center justify-center w-[13px] h-[13px] rounded-full border border-fg-faint text-[9px] leading-none text-fg-faint cursor-help normal-case tracking-normal"
+    >
+      i
+    </span>
+  )
+}
+
+/** One KPI cell: SMALL-CAPS label row, big value + inline sub, third line. */
+export function KpiCell({ label, info, labelExtra, value, sub, third, testId }: {
+  label: string
+  info?: string
+  labelExtra?: ReactNode
+  value: ReactNode
+  sub?: ReactNode
+  third?: ReactNode
+  testId: string
+}) {
+  return (
+    <div
+      data-testid={testId}
+      className="flex-1 basis-0 min-w-0 px-3 py-1.5 border-l border-rule-structural first:border-l-0 flex flex-col justify-center gap-0.5"
+    >
+      <div className="flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-wide text-fg-faint leading-none">
+        <span>{label}</span>
+        {info && <InfoDot title={info} />}
+        {labelExtra && <span className="ml-auto normal-case tracking-normal">{labelExtra}</span>}
+      </div>
+      <div className="flex items-baseline gap-1.5 min-w-0 leading-tight">
+        <span className="text-[21px] font-semibold text-fg leading-none">{value}</span>
+        {sub && <span className="text-[12px] text-fg-dim truncate">{sub}</span>}
+      </div>
+      <div className="font-mono text-[11.5px] text-fg-faint leading-none truncate h-[13px] flex items-center">{third}</div>
+    </div>
+  )
+}
+
+/** Thin horizontal progress bar. `pct` is 0–100 and is clamped. */
+export function MiniBar({ pct, tone = 'bg-accent' }: { pct: number; tone?: string }) {
+  const w = Math.max(0, Math.min(100, pct))
+  return (
+    <span className="block w-full h-[5px] bg-rule-inner rounded-sm overflow-hidden" role="progressbar" aria-valuenow={Math.round(w)} aria-valuemin={0} aria-valuemax={100}>
+      <span className={`block h-full ${tone}`} style={{ width: `${w}%` }} />
+    </span>
+  )
+}
+
+/** `total` pills, first `filled` lit. */
+export function SegmentPills({ filled, total }: { filled: number; total: number }) {
+  const n = Math.max(0, Math.min(total, 10))
+  return (
+    <span className="flex gap-[3px] w-full" data-testid="kpi-slot-pills">
+      {Array.from({ length: n }, (_, i) => (
+        <span key={i} className={`flex-1 h-[5px] rounded-sm ${i < filled ? 'bg-accent' : 'bg-rule-inner'}`} />
+      ))}
+    </span>
+  )
+}
+
+/** −/N/+ stepper, clamped to [min, max]. */
+export function Stepper({ value, min, max, disabled, onChange, title }: {
+  value: number; min: number; max: number; disabled?: boolean; onChange: (next: number) => void; title?: string
+}) {
+  const btn = 'w-[20px] h-[20px] leading-none rounded border border-line text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-40 disabled:cursor-not-allowed text-[13px]'
+  return (
+    <span className="inline-flex items-center gap-1" title={title}>
+      <button type="button" aria-label="Decrease concurrency" data-testid="kpi-concurrency-dec" disabled={disabled || value <= min} onClick={() => onChange(Math.max(min, value - 1))} className={btn}>−</button>
+      <span data-testid="kpi-concurrency-value" className="w-[20px] text-center text-[18px] font-semibold text-fg font-mono">{value}</span>
+      <button type="button" aria-label="Increase concurrency" data-testid="kpi-concurrency-inc" disabled={disabled || value >= max} onClick={() => onChange(Math.min(max, value + 1))} className={btn}>+</button>
     </span>
   )
 }

@@ -21,6 +21,9 @@ export default {
         },
         line: '#e0d3b8',
         rule: '#d9c9a8',
+        // 2A Scheduler bands: structural = band separators + KPI verticals; inner = row separators inside a band.
+        'rule-structural': '#d4ccb8',
+        'rule-inner': '#e8e0cd',
         fg: {
           DEFAULT: '#2a221a',
           dim: '#5b4a36',

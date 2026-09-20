@@ -93,7 +93,12 @@ function saveHidden(set: Set<string>) {
  * SchedulePanel — Queue sub-view of the Scheduler tab. Shows policy controls,
  * filter chips, and an expandable job list wired to the live queue snapshot.
  */
-export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string | null; navigate?: (k: NavKey) => void }) {
+export function SchedulePanel({ scopeCwd = null, navigate, filterText }: {
+  scopeCwd?: string | null
+  navigate?: (k: NavKey) => void
+  /** When provided, the Scheduler shell's PLANS-toolbar input owns the text filter (the in-panel input is hidden). */
+  filterText?: string
+}) {
   const rawSnap = useScheduleState((s) => s.snapshot)
   // Scheduler-as-browser (2026-07-31 domain model): the panel shows one
   // TAB/project's jobs when scoped. Derived AFTER selection (memoized) — never
@@ -107,7 +112,11 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
   const [now, setNow] = useState(() => Date.now())
   const [hiddenSlugs, setHiddenSlugs] = useState<Set<string>>(() => loadHidden())
   const [showAllCompleted, setShowAllCompleted] = useState(false)
-  const [filter, setFilter] = useState<QueueFilter>(() => loadFilter())
+  const [filterState, setFilter] = useState<QueueFilter>(() => loadFilter())
+  const filter = useMemo<QueueFilter>(
+    () => (filterText === undefined ? filterState : { ...filterState, text: filterText }),
+    [filterState, filterText],
+  )
   const [meterBannerDismissed, setMeterBannerDismissed] = useState(false)
   const [panelView, setPanelView] = useState<'queue' | 'supervisor'>('queue')
 
@@ -306,46 +315,7 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
 
       <div className="px-9 py-6 max-w-[1100px] mx-auto space-y-4">
 
-        {/* Status banner — FireStatus card */}
-        <div
-          className={`flex flex-wrap items-center gap-3 px-4 py-3 rounded-xl border ${statusBannerClassAlmanac(status.kind)}`}
-          title={status.tooltip}
-        >
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className={`w-[38px] h-[38px] rounded-xl bg-bg border border-line flex items-center justify-center shrink-0 ${statusToneClass(status.kind)}`}>
-              <AlmanacIcon name="clock" size={19} />
-            </div>
-            <div className="min-w-0">
-              <div className="text-[14px] text-fg truncate">{renderStatusLine1(withUtilization(status.line1, snap.utilization))}</div>
-              {status.line2 && (
-                <div className="text-[12px] text-fg-faint font-mono mt-0.5 truncate">{status.line2}</div>
-              )}
-            </div>
-          </div>
-          <span className="ml-auto font-mono text-[11.5px] text-fg-faint whitespace-nowrap">
-            {effectiveConcurrency?.cap ?? 5} slot{(effectiveConcurrency?.cap ?? 5) !== 1 ? 's' : ''} · last batch {formatAgo(lastRunAt ? Date.parse(lastRunAt) : null, now)}
-          </span>
-          {!paused && (
-            <button
-              type="button"
-              onClick={() => window.api.schedule.pause()}
-              className="text-[12px] px-3 py-1.5 border border-line hover:border-fg-faint rounded-lg shrink-0 hover:bg-bg-hi text-fg-dim hover:text-fg"
-              title="Stop NEW dispatch. Running jobs are not killed."
-            >
-              Pause
-            </button>
-          )}
-          {status.action && (
-            <button
-              type="button"
-              onClick={status.action.onClick}
-              className="text-[12px] px-3 py-1.5 border border-line hover:border-fg-faint rounded-lg shrink-0 hover:bg-bg-hi text-fg-dim hover:text-fg"
-              title={status.action.title}
-            >
-              {status.action.label}
-            </button>
-          )}
-        </div>
+        {/* FireStatus banner removed (2A): state word → title band, actions → title-band buttons (tabs/scheduler/SchedulerTopBands.tsx). */}
 
         {/* Meter rate-limited banner */}
         {health && health.consecutiveFailures > 5 && health.lastFailureKind === 'meter_rate_limited' && !paused && !meterBannerDismissed && (
@@ -366,89 +336,7 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
           </div>
         )}
 
-        {/* PolicyBar */}
-        <div className="flex items-center gap-[18px] flex-wrap bg-bg-elev border border-line rounded-xl px-4 py-3">
-          {/* Start jobs */}
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] text-fg-dim">Start jobs</span>
-            <select
-              value={config.firePolicy ?? 'when-available'}
-              onChange={(e) => window.api.schedule.setConfig({ firePolicy: e.target.value as ScheduleFirePolicy })}
-              className="appearance-none border border-line bg-bg-hi rounded-lg px-2.5 py-1.5 font-sans text-[13px] text-fg font-medium"
-              title="when-available: poll usage and fire when tokens are below threshold. on-reset: fire after each 5h reset. manual: only on Run now."
-            >
-              <option value="when-available">when available</option>
-              <option value="on-reset">only on reset</option>
-              <option value="manual">manually</option>
-            </select>
-          </div>
-
-          {/* Concurrency cap */}
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] text-fg-dim">Up to</span>
-            {effectiveConcurrency?.source === 'env' && (
-              <span
-                className="text-[10px] font-semibold uppercase tracking-wide text-amber-400/90 bg-amber-400/10 border border-amber-400/30 rounded px-1.5 py-0.5"
-                title="Pinned by SM_SESSION_SLOTS — unset the env var to edit"
-              >
-                env
-              </span>
-            )}
-            <input
-              type="number"
-              min={0}
-              max={10}
-              value={effectiveConcurrency?.cap ?? 5}
-              disabled={effectiveConcurrency?.source === 'env'}
-              onChange={(e) => { void window.api.schedule.setSessionSlots(Number(e.target.value)) }}
-              className="w-11 text-center border border-line bg-bg-hi rounded-lg py-1.5 font-mono text-[13px] text-fg disabled:opacity-50 disabled:cursor-not-allowed"
-              title={
-                effectiveConcurrency?.source === 'env'
-                  ? 'pinned by SM_SESSION_SLOTS — unset the env var to edit'
-                  : 'Machine-wide claude -p session slots, shared with chat runs'
-              }
-            />
-            <span className="text-[13px] text-fg-dim">at once</span>
-          </div>
-
-          {/* Utilization threshold — only relevant for when-available policy */}
-          {(config.firePolicy ?? 'when-available') === 'when-available' && (
-            <div className="flex items-center gap-2">
-              <span className="text-[13px] text-fg-dim">Pause above</span>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                value={config.utilizationThreshold ?? 90}
-                onChange={(e) => window.api.schedule.setConfig({ utilizationThreshold: Number(e.target.value) })}
-                className="w-11 text-center border border-line bg-bg-hi rounded-lg py-1.5 font-mono text-[13px] text-fg"
-                title="Fire only when 5h utilization is below this percent"
-              />
-              <span className="text-[13px] text-fg-dim">% of window</span>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => window.api.schedule.forceTick().then(toast.fromOutcome).catch(() => toast.error('Failed to fire batch'))}
-              disabled={counts.pending === 0 && counts.running === 0}
-              className="bg-accent text-white rounded-lg px-4 py-2 text-[13px] font-semibold whitespace-nowrap disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90"
-              title="Bypasses the billing-usage poll. Use when the meter is rate-limited or you want immediate progress."
-            >
-              Fire next batch now
-            </button>
-            <button
-              type="button"
-              onClick={() => window.api.schedule.rescan().then(toast.fromOutcome).catch(() => toast.error('Failed to rescan'))}
-              className="bg-bg-hi border border-line text-fg-dim hover:text-fg rounded-lg px-3.5 py-2 text-[13px] font-medium"
-              title="Re-scan the prds/ folder. Use when you've added or edited PRDs on disk and want the queue to reflect them immediately."
-            >
-              Refresh
-            </button>
-          </div>
-        </div>
+        {/* PolicyBar removed (2A): fire policy / cap / threshold → CONCURRENCY KPI cell; Fire + Refresh → title band. */}
 
         {/* Running concurrency badge */}
         {runningJobs.length > 0 && (() => {
@@ -469,6 +357,7 @@ export function SchedulePanel({ scopeCwd = null, navigate }: { scopeCwd?: string
         {/* Filter bar */}
         {jobs.length > 0 && (
           <FilterBar
+            showText={filterText === undefined}
             filter={filter}
             onChange={(f) => { setFilter(f); saveFilter(f) }}
           />
@@ -758,7 +647,7 @@ interface StatusInfo {
   action?: { label: string; onClick: () => void; title: string }
 }
 
-function computeStatus({
+export function computeStatus({
   snap, now, avgDurationMs, runningJobs,
 }: { snap: ScheduleStateSnapshot; now: number; avgDurationMs: number; runningJobs: ScheduleJob[] }): StatusInfo {
   const { config, jobs, paused, nextReset, utilization, effectiveConcurrency } = snap
@@ -928,44 +817,6 @@ function partitionJobs(
     else collapsedCount++
   }
   return { inline, collapsedCount }
-}
-
-function statusBannerClassAlmanac(kind: StatusKind): string {
-  if (kind === 'running') return 'bg-amber-400/10 border-amber-400/25'
-  if (kind === 'paused') return 'bg-amber-500/10 border-amber-500/25'
-  if (kind === 'auto-throttled') return 'bg-amber-500/5 border-amber-500/15'
-  return 'bg-bg-elev border-line'
-}
-
-/** FireStatus icon tone by status kind — mirrors the design's kind→tone mapping. */
-function statusToneClass(kind: StatusKind): string {
-  if (kind === 'running' || kind === 'auto-soon') return 'text-accent'
-  if (kind === 'idle') return 'text-sage'
-  if (kind === 'paused' || kind === 'auto-throttled') return 'text-butter'
-  return 'text-fg-faint' // manual, on-reset
-}
-
-const STATUS_MODE_WORDS = ['Running', 'Paused', 'Manual', 'On-reset', 'Auto']
-
-/** Bolds the leading mode token (Running/Paused/Manual/On-reset/Auto) in a status line1, if present. */
-function renderStatusLine1(line1: string): ReactNode {
-  for (const word of STATUS_MODE_WORDS) {
-    if (line1.startsWith(word)) {
-      return (
-        <>
-          <strong className="font-bold">{word}</strong>
-          {line1.slice(word.length)}
-        </>
-      )
-    }
-  }
-  return line1
-}
-
-/** Appends `· util N%` to a status line1 when utilization is known and not already present. */
-function withUtilization(line1: string, utilization: number | null | undefined): string {
-  if (utilization === null || utilization === undefined || line1.includes('util')) return line1
-  return `${line1} · util ${Math.round(utilization)}%`
 }
 
 /** Per-job ETA for every row in `jobsToShow`, computed once per tick in one
@@ -1173,6 +1024,7 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
       <button
         type="button"
         data-job-row
+        data-job-status={job.status}
         data-job-index={listIndex}
         data-depth={backlog.depth}
         onClick={() => setOpen((v) => !v)}
@@ -1460,7 +1312,7 @@ function DispositionControl({ job, headChoices }: { job: ScheduleJob; headChoice
 
 // ─── Filter bar ─────────────────────────────────────────────────────────────
 
-function FilterBar({ filter, onChange }: { filter: QueueFilter; onChange: (f: QueueFilter) => void }) {
+function FilterBar({ filter, onChange, showText }: { filter: QueueFilter; onChange: (f: QueueFilter) => void; showText: boolean }) {
   const chips: Array<{ label: string; value: FilterStatus }> = [
     { label: 'All', value: 'all' },
     { label: 'Running', value: 'running' },
@@ -1474,8 +1326,8 @@ function FilterBar({ filter, onChange }: { filter: QueueFilter; onChange: (f: Qu
   ]
   return (
     <div className="flex items-center gap-3 flex-wrap">
-      {/* Text filter */}
-      <div className="relative flex-1 min-w-[200px] max-w-[320px]">
+      {/* Text filter — hidden when the shell's PLANS toolbar owns it */}
+      {showText && <div className="relative flex-1 min-w-[200px] max-w-[320px]">
         <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-fg-faint inline-flex" aria-hidden="true">
           <AlmanacIcon name="search" size={15} />
         </span>
@@ -1487,7 +1339,7 @@ function FilterBar({ filter, onChange }: { filter: QueueFilter; onChange: (f: Qu
           className="w-full bg-bg-hi border border-line rounded-xl py-2 pl-9 pr-3 text-[13.5px] text-fg placeholder:text-fg-faint focus:outline-none focus:border-fg-faint"
           aria-label="Filter jobs by title, slug, or project"
         />
-      </div>
+      </div>}
 
       {/* Status chips */}
       <FilterPills options={chips} value={filter.status} onChange={(s) => onChange({ ...filter, status: s })} />

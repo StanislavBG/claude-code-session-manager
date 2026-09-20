@@ -1,5 +1,16 @@
 # Scheduler screen — control → API map
 
+> **2026-09-19 (PRD sched2a-top-bands): §§1–3 below are the PRE-2A as-is inventory.** The stacked headers were replaced by
+> `tabs/scheduler/SchedulerTopBands.tsx` (title band / KPI band / PLANS toolbar). Routing after the change — every API kept:
+> Pause/Resume/Refresh/Fire next batch → title band (`queue-health-header`); Retry now + pause banner + degraded banner →
+> `SchedulerAlerts` under the title band; Start-jobs select / Up-to-N (now a −/N/+ stepper, still `setSessionSlots`, `env` badge) /
+> Pause-above → CONCURRENCY KPI cell (`kpi-fire-policy`, `kpi-concurrency-*`, `kpi-threshold`); Queue/PRDs/History pills +
+> ⚙ Machine → PLANS toolbar links (PRDs / History / Machine) + Graph|List|Critical-path segment (both modes → `subView='queue'`);
+> filter jobs text input → PLANS toolbar `filter PRDs…` (`SchedulePanel` `filterText` prop; status chips stay in-panel);
+> `queueHealth` poll → `useQueueHealth` in SchedulerTopBands. `QueueHealthHeader.tsx`, `WindowStrip`, `SchedulerSubTabs.tsx`,
+> FireStatus banner and PolicyBar are deleted. The status-banner "Fire next batch now (manual policy)" action is folded into the
+> always-present title-band Fire next batch button.
+
 Reference for the Scheduler UI redesign: every interactive control on the Scheduler screen (Queue / PRDs /
 History sub-views, plus the Machine pill), the exact `window.api.*` call or local state mutation it fires, its
 enable/disable/hidden predicate, and its `data-testid`. Derived from source on 2026-09-19 (HEAD `cf9bf76`);

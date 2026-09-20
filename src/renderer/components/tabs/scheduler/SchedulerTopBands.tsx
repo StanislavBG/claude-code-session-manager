@@ -7,8 +7,9 @@ import { formatAgo, formatRelative } from '../../../lib/formatTime'
 import { withTimeout } from '../../../lib/withTimeout'
 import { buildPlans, summarizeQueue } from '../../../lib/schedulerStages'
 import { computeStatus } from './computeStatus'
-import { LearningPanel } from '../../LearningPanel'
-import { BandRow, InfoDot, KpiCell, MiniBar, SegmentPills, Stepper } from './sched-primitives'
+import { LearningBody } from '../../LearningPanel'
+import { LEARNING_CONTENT } from '../../learningContent'
+import { BandRow, ClickToEditNumber, InfoDot, KpiCell, MiniBar, SegmentPills, Stepper } from './sched-primitives'
 
 /**
  * Design 2A's three full-bleed bands — title (40px), KPI (70px), PLANS toolbar
@@ -190,9 +191,11 @@ export interface SchedulerTopBandsProps {
   onFilterText: (t: string) => void
   planMode: PlanMode
   onPlanMode: (m: PlanMode) => void
+  /** Ref callback for the PLANS toolbar's mount point; SchedulePanel portals its Graph-mode counts / status filter / overflow menu here. */
+  planToolsRef?: (el: HTMLElement | null) => void
 }
 
-export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, onFilterText, planMode, onPlanMode }: SchedulerTopBandsProps) {
+export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, onFilterText, planMode, onPlanMode, planToolsRef }: SchedulerTopBandsProps) {
   const snapshot = useScheduleState((s) => s.snapshot)
   const sessions = usePromptSessions((s) => s.sessions)
   const health = useQueueHealth(scopeCwd)
@@ -292,9 +295,12 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
         <span className="font-mono text-[12px] text-fg-faint whitespace-nowrap" data-testid="scheduler-meta">
           {summary.inFlight} in flight · {summary.heldByDeps} held · last batch {lastBatch}
         </span>
-        <InfoDot title={infoTitle} testId="scheduler-verdict-info" />
+        <InfoDot title={infoTitle} testId="scheduler-verdict-info" popoverTestId="scheduler-info-popover">
+          {/* Click popover (never hover): the verdict/diagnostic text plus the former LEARN content. */}
+          <pre className="m-0 mb-2 whitespace-pre-wrap font-mono text-[11.5px] text-fg-dim">{infoTitle}</pre>
+          {LEARNING_CONTENT.scheduler && <LearningBody content={LEARNING_CONTENT.scheduler} />}
+        </InfoDot>
         <span className="ml-auto flex items-center gap-2">
-          <LearningPanel active="scheduler" />
           <button
             type="button"
             onClick={() => window.api.schedule.rescan().then(toast.fromOutcome).catch(() => toast.error('Failed to rescan'))}
@@ -386,19 +392,25 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
         <KpiCell
           testId="kpi-concurrency"
           label="Concurrency"
-          labelExtra={
-            <select
-              data-testid="kpi-fire-policy"
-              value={policy}
-              onChange={(e) => window.api.schedule.setConfig({ firePolicy: e.target.value as ScheduleFirePolicy })}
-              className="appearance-none border border-line bg-bg-hi rounded px-1 py-0 text-[10.5px] text-fg-dim"
-              title="when-available: poll usage and fire when tokens are below threshold. on-reset: fire after each 5h reset. manual: only on Run now."
-              aria-label="Start jobs policy"
-            >
-              <option value="when-available">when available</option>
-              <option value="on-reset">only on reset</option>
-              <option value="manual">manually</option>
-            </select>
+          info="Start-jobs policy, concurrency cap and utilization threshold"
+          infoTestId="kpi-concurrency-info"
+          infoAlignRight
+          infoContent={
+            <label className="flex items-center gap-2">
+              <span className="text-fg">Start jobs</span>
+              <select
+                data-testid="kpi-fire-policy"
+                value={policy}
+                onChange={(e) => window.api.schedule.setConfig({ firePolicy: e.target.value as ScheduleFirePolicy })}
+                className="border border-line bg-bg-hi rounded px-1 py-0.5 text-[12px] text-fg-dim"
+                title="when-available: poll usage and fire when tokens are below threshold. on-reset: fire after each 5h reset. manual: only on Run now."
+                aria-label="Start jobs policy"
+              >
+                <option value="when-available">when available</option>
+                <option value="on-reset">only on reset</option>
+                <option value="manual">manually</option>
+              </select>
+            </label>
           }
           value={
             <span className="inline-flex items-center gap-1">
@@ -418,19 +430,16 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
           sub="at once"
           third={
             policy === 'when-available' ? (
-              <span className="inline-flex items-center gap-1">
-                pause above
-                <input
-                  type="number"
+              <span>
+                pause above{' '}
+                <ClickToEditNumber
+                  value={snapshot.config.utilizationThreshold ?? 90}
                   min={0}
                   max={100}
-                  data-testid="kpi-threshold"
-                  value={snapshot.config.utilizationThreshold ?? 90}
-                  onChange={(e) => window.api.schedule.setConfig({ utilizationThreshold: Math.max(0, Math.min(100, Number(e.target.value))) })}
-                  className="w-9 text-center border border-line bg-bg-hi rounded py-0 font-mono text-[11.5px] text-fg"
-                  title="Fire only when 5h utilization is below this percent"
+                  testId="kpi-threshold"
+                  title="Fire only when 5h utilization is below this percent — click to edit"
+                  onCommit={(n) => window.api.schedule.setConfig({ utilizationThreshold: n })}
                 />
-                %
               </span>
             ) : null
           }
@@ -444,6 +453,8 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
           {planCounts.active} active · {planCounts.queued} queued · {planCounts.draft} draft · {jobs.length} PRDs
         </span>
         <span className="ml-auto flex items-center gap-3">
+          {/* Mount point for SchedulePanel's Graph-mode job counts, status filter and overflow menu (portal). */}
+          <span ref={planToolsRef} className="contents" data-testid="scheduler-plan-tools" />
           <input
             type="text"
             value={filterText}

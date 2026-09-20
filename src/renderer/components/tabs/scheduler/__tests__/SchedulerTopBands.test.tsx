@@ -196,8 +196,9 @@ describe('SchedulerTopBands — concurrency + policy', () => {
     expect(q('kpi-concurrency').textContent).toContain('env')
   })
 
-  it('fire-policy select still reaches setConfig({ firePolicy }); threshold hides off when-available', async () => {
+  it('fire-policy select (in the ⓘ popover) reaches setConfig({ firePolicy }); threshold hides off when-available', async () => {
     await mount()
+    await click(q('kpi-concurrency-info'))
     const sel = q('kpi-fire-policy') as HTMLSelectElement
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!
@@ -208,11 +209,15 @@ describe('SchedulerTopBands — concurrency + policy', () => {
     expect(api.schedule.setConfig).toHaveBeenCalledWith({ firePolicy: 'manual' })
     useScheduleState.setState({ snapshot: fixture({ config: { enabled: true, offsetMinutes: 0, defaultCwd: '/p', firePolicy: 'manual', schemaVersion: 1 } as never }) })
     await mount()
-    expect(container.querySelector('[data-testid="kpi-threshold"]')).toBeNull()
+    expect(container.querySelector('[data-testid="kpi-threshold-text"]')).toBeNull()
   })
 
-  it('threshold input calls setConfig({ utilizationThreshold })', async () => {
+  it('threshold is plain text "pause above 90%" at rest; click-to-edit calls setConfig({ utilizationThreshold })', async () => {
     await mount()
+    expect(q('kpi-concurrency').textContent).toContain('pause above 90%')
+    expect(container.querySelector('[data-testid="kpi-threshold"]')).toBeNull()
+    expect(container.querySelector('[data-testid="kpi-fire-policy"]')).toBeNull()
+    await click(q('kpi-threshold-text'))
     const input = q('kpi-threshold') as HTMLInputElement
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
@@ -221,6 +226,19 @@ describe('SchedulerTopBands — concurrency + policy', () => {
       await Promise.resolve()
     })
     expect(api.schedule.setConfig).toHaveBeenCalledWith({ utilizationThreshold: 80 })
+  })
+
+  it('no popover is open after mount; the title ⓘ opens one on click and Escape / outside mousedown close it; no LEARN target', async () => {
+    await mount()
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    expect(container.textContent).not.toMatch(/\bLearn\b/i)
+    await click(q('scheduler-verdict-info'))
+    expect(container.querySelector('[role="dialog"]')).not.toBeNull()
+    await act(async () => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await Promise.resolve() })
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
+    await click(q('scheduler-verdict-info'))
+    await act(async () => { document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); await Promise.resolve() })
+    expect(container.querySelector('[role="dialog"]')).toBeNull()
   })
 })
 

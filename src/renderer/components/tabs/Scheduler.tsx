@@ -55,6 +55,8 @@ function SchedulerComponent({ navigate }: SchedulerProps = {}) {
   const [planMode, setPlanMode] = useState<PlanMode>('graph')
   // Drives SchedulePanel's job filter (text is session-only, as before; status persists there).
   const [filterText, setFilterText] = useState('')
+  // PLANS-toolbar mount point (state, not a ref, so SchedulePanel re-renders once it exists) for Graph mode's portaled counts/filter/menu.
+  const [planToolsEl, setPlanToolsEl] = useState<HTMLElement | null>(null)
   const [subView, setSubView] = useState<SubView>(() => {
     const stored = localStorage.getItem(LS_KEY)
     return (stored === 'prds' || stored === 'history' || stored === 'machine') ? stored : 'queue'
@@ -99,11 +101,12 @@ function SchedulerComponent({ navigate }: SchedulerProps = {}) {
         onFilterText={setFilterText}
         planMode={planMode}
         onPlanMode={setPlanMode}
+        planToolsRef={setPlanToolsEl}
       />
 
       {/* ── Content ──────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0">
-        {subView === 'queue' && <SchedulePanel scopeCwd={scopeCwd} navigate={navigate} filterText={filterText} planMode={planMode} onOpenPrds={openPrds} />}
+        {subView === 'queue' && <SchedulePanel scopeCwd={scopeCwd} navigate={navigate} filterText={filterText} planMode={planMode} onOpenPrds={openPrds} planToolsEl={planToolsEl} />}
         {subView === 'prds' && <SchedulerPrdsView scopeCwd={scopeCwd} />}
         {subView === 'history' && <SchedulerHistoryView scopeCwd={scopeCwd} />}
         {subView === 'machine' && (

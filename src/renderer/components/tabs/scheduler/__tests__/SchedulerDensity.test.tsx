@@ -104,15 +104,15 @@ describe('Scheduler 2A density (class-set approach — jsdom has no layout)', ()
     const total = title + kpi + toolbar + header + minimap
     expect(total, JSON.stringify(parts)).toBeLessThanOrEqual(210)
 
-    // Everything else that also sits above the first PRD row: counts strip + stage header.
-    const counts = px(one('[data-testid="plan-graph"] > div').className)
+    // The Graph-mode counts/status strip is gone (PLANS is the only toolbar): the plan list is plan-graph's first child.
+    expect(one('[data-testid="plan-graph"]').firstElementChild!.getAttribute('role')).toBe('list')
     const stageHeader = px(first.querySelector<HTMLElement>('[data-testid="stage-header"]')!.className)
-    expect(total + counts + stageHeader).toBeLessThanOrEqual(260)
+    expect(total + stageHeader).toBeLessThanOrEqual(234)
   })
 
   it('Graph mode has no card chrome: no rounded-xl/2xl box, no filter pills, no coach card', () => {
-    expect(container.querySelectorAll('.rounded-xl, .rounded-2xl, button.rounded-full')).toHaveLength(0)
+    expect(container.querySelectorAll('.rounded-xl, .rounded-2xl, button.rounded-full:not([aria-haspopup])')).toHaveLength(0)
     expect(container.textContent).not.toContain('Nothing needed from you')
-    expect(container.querySelector('[role="group"][aria-label="Filter by status"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="scheduler-plans-toolbar"] select[aria-label="Filter by status"]')).not.toBeNull()
   })
 })

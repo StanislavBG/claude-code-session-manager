@@ -49,9 +49,13 @@ function mount(jobs: ScheduleJob[], props: Record<string, unknown> = {}) {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
-  act(() => root!.render(<SchedulePanel scopeCwd="/p" {...props} />))
+  // Stand-in for the PLANS toolbar's mount point: Graph mode portals its counts / status filter / ⋯ menu into it.
+  slot = document.createElement('div')
+  document.body.appendChild(slot)
+  act(() => root!.render(<SchedulePanel scopeCwd="/p" planToolsEl={slot} {...props} />))
   return container
 }
+let slot: HTMLElement | null = null
 
 const q = (el: ParentNode, sel: string) => Array.from(el.querySelectorAll<HTMLElement>(sel))
 
@@ -62,6 +66,8 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root?.unmount())
   container?.remove()
+  slot?.remove()
+  slot = null
   container = null
   root = null
   useScheduleState.setState({ snapshot: null, loaded: false })
@@ -70,6 +76,14 @@ afterEach(() => {
 })
 
 describe('Graph mode — plan bands', () => {
+  it('plan label is the Epic title (goalText before the blank line); raw id only when the store has no such Epic', () => {
+    usePromptSessions.setState({ sessions: { e1: { id: 'e1', goalText: 'Blender MCP asset pipeline\n\nLong goal body' } } as any })
+    const el = mount([job({ slug: '1-a' }), job({ slug: '2-b', epicId: 'epic-blender-unhydrated' })])
+    const labels = q(el, '[data-testid="plan-label"]').map((l) => l.textContent)
+    expect(labels).toContain('Blender MCP asset pipeline')
+    expect(labels.some((l) => l!.startsWith('Epic epic-blender'))).toBe(true)
+  })
+
   it('renders one band per plan with a status chip, 2-digit index and the Epic label', () => {
     usePromptSessions.setState({ sessions: { e1: { id: 'e1', title: 'Blender pipeline', goalText: 'Blender pipeline' } } as any })
     const el = mount([
@@ -252,7 +266,8 @@ describe('Graph vs List mode', () => {
     expect(el.querySelector('[aria-live="polite"]')).not.toBeNull()
     // listIndex is a unique, stable id (the arrow-key handler navigates by live DOM position).
     expect(q(el, '[data-job-row]').map((r) => r.dataset.jobIndex).sort()).toEqual(['0', '1'])
-    const clear = q(el, 'button').find((b) => b.textContent === 'Clear completed')!
+    act(() => slot!.querySelector<HTMLButtonElement>('[data-testid="plan-tools-menu"]')!.click())
+    const clear = q(slot!, 'button').find((b) => b.textContent === 'Clear completed')!
     act(() => clear.click())
     expect(JSON.parse(localStorage.getItem('sm.scheduler.hiddenCompletedSlugs')!)).toContain('1-a')
     expect(el.querySelector('[data-slug="1-a"]')).toBeNull()

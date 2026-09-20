@@ -2,10 +2,11 @@
  * Shared presentational primitives for the Almanac Scheduler design.
  * Single source of truth consumed by Queue / PRDs / History restyle PRDs (20-group).
  */
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ScheduleJobStatus, LeakedDescendant, ScheduleJob } from '../../../../preload/api'
 import { Badge } from '../../ui/Badge'
 import { projectColorFor } from '../../../lib/projectColor'
+import { Z } from '../../../lib/zLayers'
 import { shortEpicId } from '../../../lib/epicProvenance'
 
 // ─── projectNameFromCwd — canonical "last path segment" extraction ──────────
@@ -403,24 +404,96 @@ export function BandRow({ children, height, className = '', testId }: {
   )
 }
 
-/** ⓘ affordance — the native title carries the detail (no popover state to leak). */
-export function InfoDot({ title, testId }: { title: string; testId?: string }) {
+const INFO_DOT_CLS = 'inline-flex items-center justify-center w-[13px] h-[13px] rounded-full border border-fg-faint text-[9px] leading-none text-fg-faint normal-case tracking-normal'
+
+/**
+ * ⓘ affordance. Without `children` the native title carries the detail (no popover state to
+ * leak). With `children` it becomes a CLICK-opened popover (role="dialog") — never hover — that
+ * closes on Escape or an outside mousedown, so nothing ever covers the plan area unprompted.
+ */
+export function InfoDot({ title, testId, children, popoverTestId, alignRight, glyph = 'i', widthCls = 'w-96' }: { title: string; testId?: string; children?: ReactNode; popoverTestId?: string; alignRight?: boolean; glyph?: string; widthCls?: string }) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLSpanElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent) => { if (!rootRef.current?.contains(e.target as Node)) setOpen(false) }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey) }
+  }, [open])
+
+  if (!children) {
+    return (
+      <span data-testid={testId} title={title} aria-label={title} className={`${INFO_DOT_CLS} cursor-help`}>
+        i
+      </span>
+    )
+  }
   return (
-    <span
-      data-testid={testId}
-      title={title}
-      aria-label={title}
-      className="inline-flex items-center justify-center w-[13px] h-[13px] rounded-full border border-fg-faint text-[9px] leading-none text-fg-faint cursor-help normal-case tracking-normal"
-    >
-      i
+    <span ref={rootRef} className="relative inline-flex normal-case tracking-normal font-normal">
+      <button
+        type="button"
+        data-testid={testId}
+        title={title}
+        aria-label={title}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={`${INFO_DOT_CLS} cursor-pointer hover:text-fg hover:border-fg`}
+      >
+        {glyph}
+      </button>
+      {open && (
+        <div
+          role="dialog"
+          data-testid={popoverTestId}
+          className={`absolute ${alignRight ? 'right-0' : 'left-0'} top-full mt-1 ${Z.dialog} ${widthCls} max-h-[70vh] overflow-y-auto rounded border border-line bg-bg-elev shadow-lg px-3 py-2 text-left text-[12px] text-fg-dim`}
+        >
+          {children}
+        </div>
+      )}
     </span>
   )
 }
 
+/** Plain text at rest, a number input only while editing; commits on every valid change like the old input did. */
+export function ClickToEditNumber({ value, min, max, onCommit, testId, title }: {
+  value: number; min: number; max: number; onCommit: (n: number) => void; testId?: string; title?: string
+}) {
+  const [editing, setEditing] = useState(false)
+  if (!editing) {
+    return (
+      <button type="button" data-testid={testId ? `${testId}-text` : undefined} title={title} onClick={() => setEditing(true)} className="bg-transparent border-0 p-0 font-mono text-[11.5px] text-fg-faint hover:text-fg hover:underline cursor-text">
+        {value}%
+      </button>
+    )
+  }
+  return (
+    <input
+      type="number"
+      autoFocus
+      min={min}
+      max={max}
+      data-testid={testId}
+      title={title}
+      defaultValue={value}
+      onChange={(e) => onCommit(Math.max(min, Math.min(max, Number(e.target.value))))}
+      onBlur={() => setEditing(false)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === 'Escape') setEditing(false) }}
+      className="w-9 text-center border border-line bg-bg-hi rounded py-0 font-mono text-[11.5px] text-fg"
+    />
+  )
+}
+
 /** One KPI cell: SMALL-CAPS label row, big value + inline sub, third line. */
-export function KpiCell({ label, info, labelExtra, value, sub, third, testId }: {
+export function KpiCell({ label, info, infoContent, infoTestId, infoAlignRight, labelExtra, value, sub, third, testId }: {
   label: string
   info?: string
+  /** When set the ⓘ becomes a click popover holding this content (title text stays as the aria-label). */
+  infoContent?: ReactNode
+  infoTestId?: string
+  infoAlignRight?: boolean
   labelExtra?: ReactNode
   value: ReactNode
   sub?: ReactNode
@@ -434,7 +507,7 @@ export function KpiCell({ label, info, labelExtra, value, sub, third, testId }: 
     >
       <div className="flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-wide text-fg-faint leading-none">
         <span>{label}</span>
-        {info && <InfoDot title={info} />}
+        {info && <InfoDot title={info} testId={infoTestId} alignRight={infoAlignRight}>{infoContent}</InfoDot>}
         {labelExtra && <span className="ml-auto normal-case tracking-normal">{labelExtra}</span>}
       </div>
       <div className="flex items-baseline gap-1.5 min-w-0 leading-tight">

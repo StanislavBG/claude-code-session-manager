@@ -18,6 +18,7 @@
 import type { ScheduleJob } from '../../preload/api'
 import type { PromptSession } from '../state/promptSessions'
 import { buildBacklogTree, flattenBacklogNodes, type BacklogBlocker } from './backlogTree'
+import { splitTitleAndGoal } from './epicDerive'
 import { prdNumber } from '../components/tabs/scheduler/sched-primitives'
 
 export type PlanStatus = 'active' | 'queued' | 'done' | 'draft'
@@ -336,7 +337,8 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
     plans.push({
       epicId: section.epicId,
       index: 0,
-      label: section.label,
+      // A known Epic's goalText is `${title}\n\n${goal}` — the plan header shows just the human title.
+      label: section.known ? splitTitleAndGoal(section.label).title : section.label,
       status: planStatusOf(rows),
       prdCount: rows.length,
       stageCount,

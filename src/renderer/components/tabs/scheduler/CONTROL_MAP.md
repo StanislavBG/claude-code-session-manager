@@ -21,8 +21,8 @@ components are under `tabs/scheduler/`. `PRDS` = `tabs/plans/SchedulerPrdsView.t
 | Pause | `schedule.pause()` | hidden when `snapshot.paused` | — |
 | Resume | `schedule.resume()` | shown only when paused | — |
 | Fire next batch | `schedule.forceTick().then(toast.fromOutcome)` | disabled when `pending === 0 && running === 0` | — |
-| ⓘ verdict | none (title text from `schedule.queueHealth` verdict) | — | `scheduler-verdict-info` |
-| Learning panel | own component; no scheduler API | — | — |
+| ⓘ verdict | click popover: verdict text from `schedule.queueHealth` + the scheduler learning content | — | `scheduler-verdict-info` |
+| Learning content | folded into the ⓘ popover above (click to open; Escape / outside click closes). No separate LEARN control. No scheduler API. | — | `scheduler-info-popover` |
 
 Read-only feeds: `schedule.queueHealth(scopeCwd)` on mount / scope change / every 15 s (`useQueueHealth` in `TB`) → state word, meta line, SLOTS cell.
 `SchedulerAlerts` (under the title band): pause banner **Resume** → `schedule.resume()` (`pause-banner`); per-persona launch-block **Retry now**
@@ -35,9 +35,9 @@ Read-only feeds: `schedule.queueHealth(scopeCwd)` on mount / scope change / ever
 
 | Control | Fires | Disabled / hidden | testid |
 | --- | --- | --- | --- |
-| Start-jobs `<select>` | `schedule.setConfig({ firePolicy })` | never | `kpi-fire-policy` |
+| Start-jobs `<select>` (inside the CONCURRENCY ⓘ click popover) | `schedule.setConfig({ firePolicy })` | never | `kpi-concurrency-info` → `kpi-fire-policy` |
 | − / N / + stepper | `schedule.setSessionSlots(clamp 0..10)` | disabled when `effectiveConcurrency.source === 'env'` (`env` badge) | `kpi-concurrency-dec` / `-value` / `-inc` |
-| Pause-above `<input>` % | `schedule.setConfig({ utilizationThreshold })` | only when `firePolicy === 'when-available'` | `kpi-threshold` |
+| "pause above N%" — text at rest, click → number input | `schedule.setConfig({ utilizationThreshold })` | only when `firePolicy === 'when-available'` | `kpi-threshold-text` → `kpi-threshold` |
 
 ## 3. PLANS toolbar (`TB`, testid `scheduler-plans-toolbar`)
 
@@ -45,15 +45,21 @@ Read-only feeds: `schedule.queueHealth(scopeCwd)` on mount / scope change / ever
 | --- | --- | --- |
 | Graph / List / Critical path segment | `onPlanMode(m)` + `onSubView('queue')` — local state | `plan-mode-graph` / `-list` / `-critical` |
 | PRDs / History / Machine links | `onSubView(v)` — local state, persisted to `localStorage['sm.schedulerTab.subView']` | — |
+| status `<select>` (Graph mode; portaled from SP into the toolbar) | SP `setFilter` — local, persisted `sm.scheduler.queueFilter` | `scheduler-status-filter` |
+| job counts `N jobs · Np · Nr · Nd · Nf` (Graph mode; portal) | read-only | `plan-tools-counts` |
+| N hidden · un-hide (Graph mode; portal) | local: clears `hiddenSlugs` | — |
+| ⋯ menu → Clear completed / Archive & clear queue… (Graph mode; portal — see §4) | see §4 | `plan-tools-menu` |
 | filter PRDs… input | `filterText` → SchedulePanel job filter (status chips are the in-panel `FilterBar`, persisted `sm.scheduler.queueFilter`) | `scheduler-filter-input` |
 
-## 4. Counts strip + plan bands (`SP`, `PlanBand.tsx`)
+## 4. Plan-tools (Graph mode: PLANS toolbar ⋯ menu; List mode: counts header) + plan bands (`SP`, `PlanBand.tsx`)
+
+> Graph mode has NO second toolbar row: `SP` portals `PlanTools` into the PLANS toolbar (`scheduler-plan-tools` mount point). List mode keeps its own counts header on purpose.
 
 | Control | Fires | Disabled / hidden | testid |
 | --- | --- | --- | --- |
-| Clear completed | local: adds completed/failed slugs to `hiddenSlugs` + `localStorage['sm.scheduler.hiddenCompletedSlugs']`. **No API.** | only when a completed/skipped job is visible | — |
+| Clear completed (⋯ menu in Graph mode) | local: adds completed/failed slugs to `hiddenSlugs` + `localStorage['sm.scheduler.hiddenCompletedSlugs']`. **No API.** | only when a completed/skipped job is visible | — |
 | N hidden · un-hide | local: clears `hiddenSlugs` | only when N > 0 | — |
-| Archive & clear queue… | `window.confirm` → `schedule.clearQueue()`; `!r.ok` → toast | disabled when every job is running | — |
+| Archive & clear queue… (⋯ menu in Graph mode) | `window.confirm` → `schedule.clearQueue()`; `!r.ok` → toast | disabled when every job is running | — |
 | Plan caret | local expand/collapse (ACTIVE/QUEUED open, DONE/DRAFT collapsed by default) | never | `plan-toggle` |
 | Plan action: ACTIVE **Pause plan** | `schedule.pause()` — **machine-wide** (no per-plan pause exists) | — | `plan-action` |
 | Plan action: QUEUED **Run now** | `schedule.forceTick()` — **machine-wide**, not this plan | — | `plan-action` |
@@ -187,7 +193,7 @@ control or listed with a reason. **No member reachable before 2A lost its route*
 | `pause` | §1 Pause; §4 ACTIVE Pause plan |
 | `resume` | §1 Resume; §1 pause banner + Retry now |
 | `rescan` | §1 Refresh |
-| `clearQueue` | §4 Archive & clear queue… |
+| `clearQueue` | §3/§4 PLANS toolbar ⋯ menu → Archive & clear queue… |
 | `openFolder` | §6 folder |
 | `readLog` | §4 DONE View run; §5 view log →; §8b; §9 (via RunLogViewer) |
 | `writePrd` / `listPrds` / `archivePrds` / `retagPrds` | §8a (PRDs sub-view) |

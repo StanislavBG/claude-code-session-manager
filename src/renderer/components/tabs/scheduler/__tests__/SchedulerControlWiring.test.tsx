@@ -108,15 +108,19 @@ describe('Scheduler 2A — control → API wiring', () => {
 
   it('CONCURRENCY cell: firePolicy, utilizationThreshold, session slots', async () => {
     await mount()
+    expect(container.querySelector('[data-testid="kpi-fire-policy"]')).toBeNull() // lives in the ⓘ popover, closed at rest
+    await click(tid('kpi-concurrency-info'))
     await change(tid('kpi-fire-policy') as HTMLSelectElement, 'manual')
     expect(api.schedule.setConfig).toHaveBeenCalledWith({ firePolicy: 'manual' })
+    await click(tid('kpi-threshold-text'))
     await change(tid('kpi-threshold') as HTMLInputElement, '80')
     expect(api.schedule.setConfig).toHaveBeenCalledWith({ utilizationThreshold: 80 })
     await click(tid('kpi-concurrency-inc')); expect(api.schedule.setSessionSlots).toHaveBeenCalledWith(4)
   })
 
-  it('counts strip: Archive & clear queue…', async () => {
+  it('PLANS toolbar ⋯ menu: Archive & clear queue…', async () => {
     await mount()
+    await click(tid('plan-tools-menu'))
     await click(btn('Archive & clear queue…'))
     expect(window.confirm).toHaveBeenCalled()
     expect(api.schedule.clearQueue).toHaveBeenCalledTimes(1)

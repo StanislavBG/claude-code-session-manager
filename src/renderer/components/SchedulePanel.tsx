@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { ScheduleJob, ScheduleJobHold, ScheduleHealthSnapshot } from '../../preload/api.d'
 import { toast } from '../state/toast'
 import { formatTimingLabel, formatAgo } from '../lib/formatTime'
@@ -6,7 +7,7 @@ import { useScheduleState } from '../state/scheduleState'
 import { usePromptSessions } from '../state/promptSessions'
 import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
-import { projectNameFromCwd } from './tabs/scheduler/sched-primitives'
+import { projectNameFromCwd, InfoDot } from './tabs/scheduler/sched-primitives'
 import { buildHeadChoicesBySlug, sectionHeadChoices } from './tabs/scheduler/DispositionControl'
 import { buildBacklogTree, flattenBacklogNodes } from '../lib/backlogTree'
 import { buildPlans } from '../lib/schedulerStages'
@@ -89,7 +90,7 @@ function saveHidden(set: Set<string>) {
  * SchedulePanel — Queue sub-view of the Scheduler tab. Shows policy controls,
  * filter chips, and an expandable job list wired to the live queue snapshot.
  */
-export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode = 'graph', onOpenPrds }: {
+export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode = 'graph', onOpenPrds, planToolsEl = null }: {
   scopeCwd?: string | null
   navigate?: (k: NavKey) => void
   /** 'list' = the vertical Epic tree (EpicSectionBlock + JobRow); 'graph' (default) and 'critical' = plan bands of stage columns. */
@@ -98,6 +99,8 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
   onOpenPrds?: (slug: string | null) => void
   /** When provided, the Scheduler shell's PLANS-toolbar input owns the text filter (the in-panel input is hidden). */
   filterText?: string
+  /** The PLANS toolbar's mount point (SchedulerTopBands). Graph mode portals its counts / status filter / overflow menu here instead of rendering a second toolbar row. */
+  planToolsEl?: HTMLElement | null
 }) {
   const rawSnap = useScheduleState((s) => s.snapshot)
   // Scheduler-as-browser (2026-07-31 domain model): the panel shows one
@@ -393,44 +396,24 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
         {/* Graph mode (2A): full-bleed plan bands — one per Epic — of stage columns. */}
         {!isList && (
           <div data-testid="plan-graph">
-            <div className="flex items-center justify-between gap-3 px-[18px] h-[26px] border-y border-rule-structural">
-              <span className="font-mono text-[11.5px] text-fg-faint shrink-0">
-                {filteredJobs.length} job{filteredJobs.length !== 1 ? 's' : ''} · {counts.pending}p · {counts.running}r · {counts.completed}d
-                {counts.failed > 0 && <span className="text-accent"> · {counts.failed}f</span>}
-              </span>
-              <StatusChips filter={filter} onChange={(f) => { setFilter(f); saveFilter(f) }} />
-              <div className="flex items-center gap-3 shrink-0">
-                {hiddenInGraph > 0 && (
-                  <button
-                    type="button"
-                    onClick={onUnhideAll}
-                    className="text-[12px] text-fg-faint hover:text-fg-dim underline bg-transparent border-0 cursor-pointer"
-                    title="Show the completed/failed jobs hidden by Clear completed"
-                  >
-                    {hiddenInGraph} hidden · un-hide
-                  </button>
-                )}
-                {hasInlineCompleted && (
-                  <button
-                    type="button"
-                    onClick={onClearCompleted}
-                    className="text-[12px] text-fg-dim hover:text-fg bg-transparent border-0 cursor-pointer font-medium"
-                    title="Hide completed jobs from this view (queue.json unchanged — they remain in history)"
-                  >
-                    Clear completed
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={onClearQueue}
-                  disabled={jobs.every((j) => j.status === 'running')}
-                  className="text-[12px] text-accent border border-accent/40 hover:bg-accent/10 rounded-sm px-2 py-0.5 cursor-pointer font-medium disabled:opacity-40 disabled:cursor-not-allowed"
-                  title="Archive every non-running PRD (moved to prds-archived/<timestamp>/) and remove them from the queue. Running jobs are kept."
-                >
-                  Archive &amp; clear queue…
-                </button>
-              </div>
-            </div>
+            {/* The old second toolbar row (counts / status chips / Clear completed / Archive) is gone in Graph mode:
+                its contents live in the PLANS toolbar via this portal. List mode deliberately KEEPS its own
+                counts header (below) — the asymmetry is intentional, not an oversight. */}
+            {planToolsEl && createPortal(
+              <PlanTools
+                jobCount={filteredJobs.length}
+                counts={counts}
+                filter={filter}
+                onFilter={(f) => { setFilter(f); saveFilter(f) }}
+                hiddenInGraph={hiddenInGraph}
+                onUnhideAll={onUnhideAll}
+                hasInlineCompleted={hasInlineCompleted}
+                onClearCompleted={onClearCompleted}
+                onClearQueue={onClearQueue}
+                clearQueueDisabled={jobs.every((j) => j.status === 'running')}
+              />,
+              planToolsEl,
+            )}
             {plans.length === 0 && (
               <div className="px-[18px] py-6 text-[13px] text-fg-faint italic">no matching jobs</div>
             )}
@@ -708,22 +691,69 @@ const FILTER_CHIPS: Array<{ label: string; value: FilterStatus }> = [
   { label: 'Quarantined', value: 'quarantined' },
 ]
 
-/** Graph-mode status filter: flat mono text buttons (no pill, no border) sized for the 26px counts strip. */
-function StatusChips({ filter, onChange }: { filter: QueueFilter; onChange: (f: QueueFilter) => void }) {
+/**
+ * Graph-mode job counts + status filter + overflow menu, rendered INTO the PLANS toolbar (see the
+ * planToolsEl portal). Status filter = a compact select beside the toolbar's text filter; Clear
+ * completed / Archive & clear queue… sit behind a click-opened ⋯ menu (Escape / outside click closes).
+ */
+function PlanTools({ jobCount, counts, filter, onFilter, hiddenInGraph, onUnhideAll, hasInlineCompleted, onClearCompleted, onClearQueue, clearQueueDisabled }: {
+  jobCount: number
+  counts: { pending: number; running: number; completed: number; failed: number }
+  filter: QueueFilter
+  onFilter: (f: QueueFilter) => void
+  hiddenInGraph: number
+  onUnhideAll: () => void
+  hasInlineCompleted: boolean
+  onClearCompleted: () => void
+  onClearQueue: () => void
+  clearQueueDisabled: boolean
+}) {
+  const item = 'block w-full text-left px-2 py-1 text-[12px] hover:bg-bg-hi disabled:opacity-40 disabled:cursor-not-allowed bg-transparent border-0 cursor-pointer'
   return (
-    <div role="group" aria-label="Filter by status" className="flex items-center gap-2.5 min-w-0 overflow-hidden font-mono text-[11.5px]">
-      {FILTER_CHIPS.map((c) => (
+    <>
+      <span className="font-mono text-[11.5px] text-fg-faint whitespace-nowrap" data-testid="plan-tools-counts">
+        {jobCount} job{jobCount !== 1 ? 's' : ''} · {counts.pending}p · {counts.running}r · {counts.completed}d
+        {counts.failed > 0 && <span className="text-accent"> · {counts.failed}f</span>}
+      </span>
+      {hiddenInGraph > 0 && (
         <button
-          key={c.value}
           type="button"
-          aria-pressed={filter.status === c.value}
-          onClick={() => onChange({ ...filter, status: c.value })}
-          className={`shrink-0 bg-transparent border-0 p-0 cursor-pointer ${filter.status === c.value ? 'text-accent font-semibold underline underline-offset-4' : 'text-fg-faint hover:text-fg-dim'}`}
+          onClick={onUnhideAll}
+          className="text-[12px] text-fg-faint hover:text-fg-dim underline bg-transparent border-0 cursor-pointer whitespace-nowrap"
+          title="Show the completed/failed jobs hidden by Clear completed"
         >
-          {c.label}
+          {hiddenInGraph} hidden · un-hide
         </button>
-      ))}
-    </div>
+      )}
+      <select
+        data-testid="scheduler-status-filter"
+        aria-label="Filter by status"
+        value={filter.status}
+        onChange={(e) => onFilter({ ...filter, status: e.target.value as FilterStatus })}
+        className="bg-bg-hi border border-line rounded px-1 py-0.5 text-[12px] text-fg-dim"
+        title="Filter the plan graph by job status"
+      >
+        {FILTER_CHIPS.map((c) => <option key={c.value} value={c.value}>{c.value === 'all' ? 'all statuses' : c.label.toLowerCase()}</option>)}
+      </select>
+      <InfoDot title="Queue actions" testId="plan-tools-menu" popoverTestId="plan-tools-menu-popover" alignRight glyph="⋯" widthCls="w-52">
+        <div className="-mx-3 -my-2">
+          {hasInlineCompleted && (
+            <button type="button" onClick={onClearCompleted} className={`${item} text-fg-dim`} title="Hide completed jobs from this view (queue.json unchanged — they remain in history)">
+              Clear completed
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClearQueue}
+            disabled={clearQueueDisabled}
+            className={`${item} text-accent`}
+            title="Archive every non-running PRD (moved to prds-archived/<timestamp>/) and remove them from the queue. Running jobs are kept."
+          >
+            Archive &amp; clear queue…
+          </button>
+        </div>
+      </InfoDot>
+    </>
   )
 }
 

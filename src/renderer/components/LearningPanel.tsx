@@ -23,6 +23,47 @@ function saveCollapsed(collapsed: boolean) {
   try { localStorage.setItem(STORAGE_KEY, collapsed ? '1' : '0') } catch { /* */ }
 }
 
+/** The Learn popover's content — shared with the Scheduler's title-band ⓘ popover. */
+export function LearningBody({ content }: { content: LearningContent }) {
+  return (
+    <>
+      <p className="text-xs text-fg-dim leading-relaxed mb-3">{content.intro}</p>
+      {content.sections.map((sec) => (
+        <div key={sec.title} className="mb-3 last:mb-0">
+          <h3 className="text-[11px] uppercase tracking-wider text-fg font-medium mb-1">
+            {sec.title}
+          </h3>
+          <ul className="space-y-1">
+            {sec.items.map((item, i) => (
+              <li key={i} className="text-xs text-fg-dim leading-relaxed">
+                {item.term && (
+                  <span className="text-fg font-medium">{item.term}</span>
+                )}
+                {item.term && ' — '}
+                <span>{item.body}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+      {content.tips && content.tips.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-line">
+          <h3 className="text-[11px] uppercase tracking-wider text-fg-dim font-medium mb-1">
+            Tips
+          </h3>
+          <ul className="space-y-1">
+            {content.tips.map((tip, i) => (
+              <li key={i} className="text-xs text-fg-faint leading-relaxed">
+                • {tip}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </>
+  )
+}
+
 export function LearningPanel({ active }: { active: NavKey }) {
   // `collapsed` boolean logic inverted: open = !collapsed.
   const [open, setOpen] = useState<boolean>(() => !loadCollapsed())
@@ -84,39 +125,7 @@ export function LearningPanel({ active }: { active: NavKey }) {
       </button>
       {open && (
         <div className="absolute right-0 top-full z-30 mt-1 w-96 max-h-[70vh] overflow-y-auto rounded border border-line bg-bg-elev shadow-lg px-4 pb-4 pt-3 text-left">
-          <p className="text-xs text-fg-dim leading-relaxed mb-3">{content.intro}</p>
-          {content.sections.map((sec) => (
-            <div key={sec.title} className="mb-3 last:mb-0">
-              <h3 className="text-[11px] uppercase tracking-wider text-fg font-medium mb-1">
-                {sec.title}
-              </h3>
-              <ul className="space-y-1">
-                {sec.items.map((item, i) => (
-                  <li key={i} className="text-xs text-fg-dim leading-relaxed">
-                    {item.term && (
-                      <span className="text-fg font-medium">{item.term}</span>
-                    )}
-                    {item.term && ' — '}
-                    <span>{item.body}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-          {content.tips && content.tips.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-line">
-              <h3 className="text-[11px] uppercase tracking-wider text-fg-dim font-medium mb-1">
-                Tips
-              </h3>
-              <ul className="space-y-1">
-                {content.tips.map((tip, i) => (
-                  <li key={i} className="text-xs text-fg-faint leading-relaxed">
-                    • {tip}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          <LearningBody content={content} />
         </div>
       )}
     </span>

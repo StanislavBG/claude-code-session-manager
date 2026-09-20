@@ -147,8 +147,12 @@ test('SM_DEV=1 writes to a dev-suffixed path, never the production admin-api.jso
     expect(parsed.port).toBe(port);
     expect(parsed.token).toBe(token);
     // Production file must be untouched by the dev-mode instance.
+    // Content, not mtime: a live Session Manager on this machine legitimately rewrites the real
+    // admin-api.json at any moment (mtime drifted 12ms mid-test under load). What must hold is
+    // that THIS dev instance never wrote its port/token there.
     if (prevMtime !== null) {
-      expect(fs.statSync(TOKEN_PATH).mtimeMs).toBe(prevMtime);
+      const prod = JSON.parse(fs.readFileSync(TOKEN_PATH, 'utf8'));
+      expect(prod.token).not.toBe(token);
     } else {
       expect(fs.existsSync(TOKEN_PATH)).toBe(false);
     }

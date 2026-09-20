@@ -3,6 +3,10 @@ import { toast } from '../../../state/toast'
 import { formatEta, type Plan, type PlanStatus } from '../../../lib/schedulerStages'
 import { RunLogViewer } from '../plans/RunLogViewer'
 import { StageColumn, STAGE_COL_W } from './StageColumn'
+import { PlanMinimap } from './PlanMinimap'
+import { FurtherStagesTail } from './FurtherStagesTail'
+import { CriticalPathColumn } from './CriticalPathColumn'
+import type { PlanMode } from './SchedulerTopBands'
 import { InfoDot, projectNameFromCwd } from './sched-primitives'
 import type { HeadChoice } from './DispositionControl'
 
@@ -29,6 +33,8 @@ const pad2 = (n: number) => String(n).padStart(2, '0')
 
 interface PlanBandProps {
   plan: Plan
+  /** 'critical' renders the plan as its single longest dependsOn chain instead of stage columns. */
+  mode?: PlanMode
   now: number
   hidden: ReadonlySet<string>
   indexBySlug: ReadonlyMap<string, number>
@@ -58,7 +64,7 @@ function PlanProgress({ plan }: { plan: Plan }) {
   )
 }
 
-export function PlanBand({ plan, now, hidden, indexBySlug, headChoicesBySlug, onRowFocused, onOpenPrds }: PlanBandProps) {
+export function PlanBand({ plan, mode = 'graph', now, hidden, indexBySlug, headChoicesBySlug, onRowFocused, onOpenPrds }: PlanBandProps) {
   const [expanded, setExpanded] = useState(plan.status === 'active' || plan.status === 'queued')
   const [showLog, setShowLog] = useState(false)
   const stripRef = useRef<HTMLDivElement>(null)
@@ -89,6 +95,15 @@ export function PlanBand({ plan, now, hidden, indexBySlug, headChoicesBySlug, on
   const perView = Math.max(1, Math.ceil(viewW / STAGE_COL_W))
   const start = Math.max(0, Math.min(first - OVERSCAN, plan.stageCount))
   const end = Math.min(plan.stageCount, first + perView + OVERSCAN)
+
+  // Local scroll only (no API). The brush, range label and tail are all derived from `first`; the
+  // strip's scroll event feeds `first` back, so the minimap brush and the columns stay in sync both ways.
+  const seekStage = (i: number) => {
+    const f = Math.max(0, Math.min(plan.stageCount - 1, i))
+    if (stripRef.current) stripRef.current.scrollLeft = f * STAGE_COL_W
+    setFirst(f)
+  }
+  const tailStart = Math.min(plan.stageCount, first + perView)
 
   const onScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const el = e.currentTarget
@@ -187,27 +202,38 @@ export function PlanBand({ plan, now, hidden, indexBySlug, headChoicesBySlug, on
         {action}
       </div>
 
-      {expanded && (
-        <div
-          ref={stripRef}
-          data-testid="plan-stages"
-          onScroll={onScroll}
-          className="flex overflow-x-auto border-t border-rule-structural"
-        >
-          {start > 0 && <div aria-hidden="true" className="shrink-0" style={{ width: start * STAGE_COL_W }} />}
-          {plan.stages.slice(start, end).map((stage) => (
-            <StageColumn
-              key={stage.n}
-              stage={stage}
-              epicId={plan.epicId}
-              now={now}
-              hidden={hidden}
-              indexBySlug={indexBySlug}
-              headChoicesBySlug={headChoicesBySlug}
-              onRowFocused={onRowFocused}
-            />
-          ))}
-          {end < plan.stageCount && <div aria-hidden="true" className="shrink-0" style={{ width: (plan.stageCount - end) * STAGE_COL_W }} />}
+      {expanded && mode === 'critical' && (
+        <CriticalPathColumn plan={plan} now={now} indexBySlug={indexBySlug} headChoicesBySlug={headChoicesBySlug} onRowFocused={onRowFocused} />
+      )}
+
+      {expanded && mode !== 'critical' && plan.status === 'active' && (
+        <PlanMinimap stages={plan.stages} first={first} perView={perView} onSeek={seekStage} />
+      )}
+
+      {expanded && mode !== 'critical' && (
+        <div className="flex border-t border-rule-structural">
+          <div
+            ref={stripRef}
+            data-testid="plan-stages"
+            onScroll={onScroll}
+            className="flex flex-1 min-w-0 overflow-x-auto"
+          >
+            {start > 0 && <div aria-hidden="true" className="shrink-0" style={{ width: start * STAGE_COL_W }} />}
+            {plan.stages.slice(start, end).map((stage) => (
+              <StageColumn
+                key={stage.n}
+                stage={stage}
+                epicId={plan.epicId}
+                now={now}
+                hidden={hidden}
+                indexBySlug={indexBySlug}
+                headChoicesBySlug={headChoicesBySlug}
+                onRowFocused={onRowFocused}
+              />
+            ))}
+            {end < plan.stageCount && <div aria-hidden="true" className="shrink-0" style={{ width: (plan.stageCount - end) * STAGE_COL_W }} />}
+          </div>
+          <FurtherStagesTail stages={plan.stages.slice(tailStart)} onSeek={seekStage} />
         </div>
       )}
 

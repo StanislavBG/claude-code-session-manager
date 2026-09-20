@@ -1,12 +1,11 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import type { ScheduleStateSnapshot, ScheduleJob, ScheduleJobHold, ScheduleFirePolicy, ScheduleHealthSnapshot, SupervisorLogEntry, SupervisorConfig, LintQueueResult } from '../../preload/api.d'
+import type { ScheduleStateSnapshot, ScheduleJob, ScheduleJobHold, ScheduleFirePolicy, ScheduleHealthSnapshot, SupervisorLogEntry, SupervisorConfig } from '../../preload/api.d'
 import { toast } from '../state/toast'
 import { formatTimingLabel, formatRelative, formatClock, formatAgo, formatDuration } from '../lib/formatTime'
 import { useScheduleState } from '../state/scheduleState'
 import { usePromptSessions } from '../state/promptSessions'
 import { setPendingPromptSessionId } from '../lib/promptSessionDeepLink'
-import { getLintQueueCached } from '../lib/lintQueueCache'
 import { RunLogViewer } from './tabs/plans/RunLogViewer'
 import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
@@ -16,6 +15,7 @@ import { resolveEpicRef } from '../lib/epicProvenance'
 import { buildBacklogTree, flattenBacklogNodes, type BacklogEpicSection, type BacklogBlocker } from '../lib/backlogTree'
 import { buildPlans } from '../lib/schedulerStages'
 import { PlanBand } from './tabs/scheduler/PlanBand'
+import { SchedulerFooter } from './tabs/scheduler/SchedulerFooter'
 import type { PlanMode } from './tabs/scheduler/SchedulerTopBands'
 import { usePanelFocus } from '../lib/panelFocus'
 import type { NavKey } from '../lib/navKey'
@@ -108,7 +108,6 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
     return { ...rawSnap, jobs: rawSnap.jobs.filter((j) => j.cwd === scopeCwd) }
   }, [rawSnap, scopeCwd])
   const [health, setHealth] = useState<ScheduleHealthSnapshot | null>(null)
-  const [showHealth, setShowHealth] = useState(false)
   const [now, setNow] = useState(() => Date.now())
   const [hiddenSlugs, setHiddenSlugs] = useState<Set<string>>(() => loadHidden())
   const [showAllCompleted, setShowAllCompleted] = useState(false)
@@ -439,6 +438,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
                 <PlanBand
                   key={plan.epicId ?? '__none__'}
                   plan={plan}
+                  mode={planMode}
                   now={now}
                   hidden={graphHidden}
                   indexBySlug={indexBySlug}
@@ -587,11 +587,6 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
           )}
         </div>}
 
-        {/* Diagnostics — poll health + queue lint merged into one line */}
-        <div className={gutter}>
-          <DiagnosticsSection snap={snap} health={health} now={now} open={showHealth} setOpen={setShowHealth} />
-        </div>
-
         {/* Coach — reassurance that nothing is needed while things run automatically */}
         {!paused && (
           <div className={gutter}><div className="flex gap-2.5 bg-sage/10 border border-sage/30 rounded-xl px-3.5 py-2.5 text-[13.5px] text-fg-dim leading-relaxed">
@@ -602,32 +597,10 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
             </span>
           </div></div>
         )}
-
-        {/* Footer */}
-        <div className={`flex items-center justify-between text-[12px] text-fg-faint pt-1 border-t border-line ${isList ? '' : 'px-[18px] pb-2'}`}>
-          <span>
-            {nextReset && <span title={`next 5h reset: ${nextReset}`}>reset {formatRelative(Date.parse(nextReset) - now)}</span>}
-            {lastRunAt && <span className="ml-2" title={lastRunAt}>last run {formatRelative(now - Date.parse(lastRunAt))} ago</span>}
-          </span>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setPanelView('supervisor')}
-              className="hover:text-fg-dim underline"
-              title="Open supervisor log and settings"
-            >
-              supervisor
-            </button>
-            <button
-              type="button"
-              onClick={() => window.api.schedule.openFolder()}
-              className="hover:text-fg-dim underline"
-            >
-              folder
-            </button>
-          </div>
-        </div>
       </div>
+
+      {/* Footer diagnostics band — full-bleed (replaces DiagnosticsSection + the old footer row) */}
+      <SchedulerFooter health={health} jobCount={jobs.length} lastRunAt={lastRunAt} nextReset={nextReset} now={now} onOpenSupervisor={() => setPanelView('supervisor')} />
     </div>
   )
 }
@@ -1500,136 +1473,6 @@ function SupervisorLogRow({ entry, now }: { entry: SupervisorLogEntry; now: numb
         )}
       </div>
       <div className="text-fg-faint truncate mt-0.5">{entry.reason}</div>
-    </div>
-  )
-}
-
-
-/**
- * DiagnosticsSection — scheduler poll health and the queue-health linter
- * (unbounded loops, missing frontmatter, missing cwd, --no-verify, etc.)
- * collapsed into ONE row. These used to be two separate collapsed drawers
- * stacked on top of each other — both are "is anything quietly wrong,"
- * just from different sources, so a user checking on the queue had to open
- * two things to get one answer. One amber dot now covers both; expanding
- * shows the full detail from each underneath.
- */
-function DiagnosticsSection({
-  snap,
-  health,
-  now,
-  open,
-  setOpen,
-}: {
-  snap: ScheduleStateSnapshot
-  health: ScheduleHealthSnapshot | null
-  now: number
-  open: boolean
-  setOpen: (v: boolean) => void
-}) {
-  const [report, setReport] = useState<LintQueueResult | null>(null)
-  const [lintLoading, setLintLoading] = useState(false)
-
-  const signal = `${snap.jobs.length}:${snap.lastRunAt ?? ''}`
-  useEffect(() => {
-    let alive = true
-    setLintLoading(true)
-    getLintQueueCached()
-      .then((r) => { if (alive) setReport(r) })
-      .catch(() => { /* */ })
-      .finally(() => { if (alive) setLintLoading(false) })
-    return () => { alive = false }
-  }, [signal])
-
-  let lintErrors = 0
-  let lintWarns = 0
-  const flaggedPrds = report ? report.reports.filter((r) => r.findings.length > 0) : []
-  for (const r of flaggedPrds) {
-    for (const f of r.findings) {
-      if (f.severity === 'error') lintErrors++
-      else lintWarns++
-    }
-  }
-  const lintClean = lintErrors === 0 && lintWarns === 0
-  const lintLabel = !report
-    ? (lintLoading ? 'scanning…' : 'idle')
-    : lintClean
-      ? `queue lint clear (${report.reports.length} scanned)`
-      : `queue lint ${lintErrors} error${lintErrors === 1 ? '' : 's'}${lintWarns > 0 ? `, ${lintWarns} warn${lintWarns === 1 ? '' : 's'}` : ''}`
-
-  const pollFailures = health?.consecutiveFailures ?? 0
-  const pollLabel = health
-    ? `${pollFailures} poll failure${pollFailures === 1 ? '' : 's'} since boot`
-    : null
-
-  const hasIssue = pollFailures > 0 || (health?.pauseReason ?? null) !== null || !lintClean
-  const summaryParts = [pollLabel, lintLabel].filter(Boolean)
-
-  return (
-    <div className="flex flex-col gap-2 bg-bg-hi border border-line rounded-xl px-4 py-3 text-[13.5px] text-fg-dim">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-2.5 w-full text-left"
-        aria-expanded={open}
-        title="Scheduler poll health and queue-lint findings, in one place"
-      >
-        <span className={`w-2 h-2 rounded-full shrink-0 ${hasIssue ? 'bg-butter' : 'bg-sage'}`} aria-hidden="true" />
-        <strong className="text-fg font-semibold shrink-0">Diagnostics</strong>
-        <span className="truncate">{summaryParts.join(' · ')}</span>
-        <span className="ml-auto text-fg-faint shrink-0" aria-hidden="true">{open ? '▾' : '▸'}</span>
-      </button>
-      {open && (
-        <div className="pl-[18px] space-y-3 font-mono text-[12px]">
-          {health && (
-            <div className="space-y-0.5">
-              <div>booted: {formatAgo(health.bootedAt, now)}</div>
-              <div>last poll: {formatAgo(health.lastPollAt, now)} · {health.lastPollOk ? 'ok' : 'failed'}</div>
-              {health.backoffNextAt !== null && health.backoffNextAt > now && (
-                <div>retry in: {formatRelative(health.backoffNextAt - now)}</div>
-              )}
-              {health.nextResetCached && (
-                <div>cached reset: {formatClock(Date.parse(health.nextResetCached))}</div>
-              )}
-              {health.runningJobs.length > 0 && (
-                <div>running: {health.runningJobs.map((j) => `${j.slug}(pid ${j.pid})`).join(', ')}</div>
-              )}
-            </div>
-          )}
-          {report && (
-            <div className="space-y-1">
-              {lintClean ? (
-                <div className="text-sage">✓ no issues in {report.reports.length} PRD{report.reports.length !== 1 ? 's' : ''}</div>
-              ) : (
-                flaggedPrds.map((r) => (
-                  <div key={r.slug}>
-                    <div className="text-fg-dim truncate" title={r.slug}>{r.slug}</div>
-                    {r.findings.map((f, i) => (
-                      <div
-                        key={`${r.slug}-${i}`}
-                        className={`pl-3 truncate ${f.severity === 'error' ? 'text-accent/80' : 'text-butter/90'}`}
-                        title={f.snippet}
-                      >
-                        {f.severity === 'error' ? '✗' : '⚠'} L{f.line}: {f.snippet}
-                      </div>
-                    ))}
-                  </div>
-                ))
-              )}
-              <button
-                type="button"
-                onClick={() => {
-                  setLintLoading(true)
-                  getLintQueueCached({ fresh: true }).then(setReport).catch(() => {}).finally(() => setLintLoading(false))
-                }}
-                className="text-fg-faint hover:text-fg-dim underline"
-              >
-                {lintLoading ? '…' : 'rerun lint'}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   )
 }

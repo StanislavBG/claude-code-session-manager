@@ -28,6 +28,16 @@
 >   counts strip above the plan bands in Graph mode (same handlers). The "N more completed" toggle exists only in List mode.
 > - Keyboard nav (`role=list`, `data-job-row`, `data-job-index`, arrow keys) and the aria-live region are unchanged and cover both modes.
 
+> **2026-09-19 (PRD sched2a-graph-minimap-and-footer): minimap, tail, Critical path, footer band.** Routing — every API kept:
+> - NEW `WHOLE GRAPH` band (`PlanMinimap.tsx`, ACTIVE plans only): dot strip + rust brush (drag/click → local scroll of the stage strip),
+>   `Running` / `Blockers` (`minimap-running` / `minimap-blockers`) jump the stage window locally — no API; disabled when no such stage.
+> - NEW `FURTHER STAGES` tail (`FurtherStagesTail.tsx`): click a stage row → local scroll; no API.
+> - `Critical path` segment is now real: `CriticalPathColumn.tsx` (longest `dependsOn` chain via `criticalPath`, same `PrdRow`); no new API.
+> - `DiagnosticsSection` block and the old footer row (reset / last run / `supervisor` / `folder`) → `SchedulerFooter.tsx`
+>   (`scheduler-footer`): poll failures ← `schedule.health()`; lint counts + `rerun lint` ← `getLintQueueCached` (`fresh:true`);
+>   `supervisor` → `setPanelView('supervisor')` (SupervisorPanel); `folder` → `schedule.openFolder()`; ⓘ (`footer-info`) expands the
+>   old detail (booted / last poll / retry / cached reset / pids / per-PRD findings). Line-by-line mapping is in the component header.
+
 Reference for the Scheduler UI redesign: every interactive control on the Scheduler screen (Queue / PRDs /
 History sub-views, plus the Machine pill), the exact `window.api.*` call or local state mutation it fires, its
 enable/disable/hidden predicate, and its `data-testid`. Derived from source on 2026-09-19 (HEAD `cf9bf76`);

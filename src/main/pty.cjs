@@ -23,6 +23,7 @@ const { checkInsideHome } = require('./lib/insideHome.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const opsErrorLog = require('./lib/opsErrorLog.cjs');
 const { planEpicSpawn } = require('./lib/epicSpawnPlan.cjs');
+const { resolveEpicSpawnCwd } = require('./lib/epicSpawnCwd.cjs');
 const telemetryCounters = require('./lib/telemetryCounters.cjs');
 
 // Absolute path to the installed package root (src/main/ -> ../../), shown in
@@ -180,8 +181,22 @@ class PtyManager {
     // so this asks the same decision function chatRunner.cjs does (epicSpawnPlan.cjs). `cwd`
     // itself is NEVER repointed; only this actual PTY spawn option is (epicSpawnCwd.cjs's
     // ops-root hazard). A refused plan is surfaced in-tab rather than spawning into a bad cwd.
+    // Split: Chat and Terminal share this one verdict function, but the Terminal additionally
+    // downgrades `epic_closed` to a plain shell — it opens `$SHELL -il` (no --resume, no
+    // transcript write), not a chat turn. That path uses the read-side resolver WITHOUT
+    // `deps.restore`, so opening a closed Epic's terminal never re-attaches a checkout.
     const plan = planEpicSpawn({ cwd, claudeSessionId: tabId });
-    if (!plan.ok) {
+    let spawnCwd;
+    if (plan.ok) {
+      spawnCwd = plan.execCwd;
+    } else if (plan.code === 'epic_closed') {
+      spawnCwd = resolveEpicSpawnCwd({ cwd, claudeSessionId: tabId });
+      sendIfAlive(
+        this.window,
+        `pty:data:${tabId}`,
+        `\r\nThis Epic is completed \u2014 opening a read-only shell in ${spawnCwd}. Start a new Epic for new work.\r\n`,
+      );
+    } else {
       opsErrorLog.appendError({
         cwd,
         scope: 'pty',
@@ -193,7 +208,6 @@ class PtyManager {
       setImmediate(() => sendIfAlive(this.window, `pty:exit:${tabId}`, { exitCode: 1, signal: undefined }));
       return { pid: null, cwd, reattached: false, error: plan.message };
     }
-    const spawnCwd = plan.execCwd;
     if (spawnCwd !== cwd) {
       console.log(`[pty] tabId=${tabId} isolated in worktree ${spawnCwd}`);
     }

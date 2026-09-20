@@ -137,7 +137,9 @@ test('inode-change rotation invalidates and rebuilds the index — no stale offs
   // The chokidar watcher on the live sub picks up the rotation and rebuilds
   // the index via readDelta's inode-change reset — poll (bounded) rather
   // than assume a fixed debounce delay.
-  const deadline = Date.now() + 5000;
+  // 30s ceiling, not 5s: the watcher event is starved under heavy CPU contention; the loop
+  // exits the instant the condition holds so idle cost is unchanged.
+  const deadline = Date.now() + 30000;
   while (Date.now() < deadline) {
     page = await pageEvents(tabId, 0, 0);
     if (page.totalLines === 1 && page.events[0]?.data === 'new-a') break;
@@ -146,7 +148,7 @@ test('inode-change rotation invalidates and rebuilds the index — no stale offs
   expect(page.totalLines).toBe(1);
   expect(page.events[0].data).toBe('new-a');
   closeTab(tabId);
-}, 10000);
+}, 40000);
 
 test('a partial trailing line is not indexed until it completes', async () => {
   const sessionId = 'sess-partial';

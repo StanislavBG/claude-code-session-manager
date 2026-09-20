@@ -121,7 +121,10 @@ describe('EpicDetail (PRD 827)', () => {
     expect(el.textContent).toContain('Get it out the door.')
     expect(el.querySelector('[data-testid="epic-mark-completed"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="epic-resume"]')).toBeNull()
-  })
+    // First test in the file pays the cold transform of EpicDetail's whole import graph.
+    // Measured (12 isolated runs, 28 busy-loop procs on 14 cores): p50 5.7s, p95 9.5s vs
+    // 1.4-1.8s idle; it exceeded the 15s global default under full-suite contention.
+  }, 60_000)
 
   describe('editable title (full view)', () => {
     async function mountEpic() {

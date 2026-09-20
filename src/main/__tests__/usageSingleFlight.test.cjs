@@ -89,7 +89,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   purgeRequireCache();
-  fs.rmSync(tmpHome, { recursive: true, force: true });
+  // maxRetries: a fire-and-forget cache write inside usage.cjs can land in .claude/ mid-rm
+  // (ENOTEMPTY) when the machine is loaded; this is cleanup robustness, not a test retry.
+  fs.rmSync(tmpHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 });
 
 test('two concurrent fetchUsage() calls produce exactly one HTTP fetch', async () => {

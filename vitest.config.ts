@@ -222,6 +222,7 @@ export default defineConfig({
       'scripts/__tests__/ops-sweep-claude-md-fallback.test.cjs',
       'scripts/__tests__/sync-settings-schema.test.cjs',
       'scripts/__tests__/check-doc-hierarchy.test.cjs',
+      'scripts/__tests__/check-epic-transcripts.test.cjs',
       'scripts/__tests__/check-ops-path-literals.test.cjs',
       'src/main/__tests__/prdAdminRoutes.test.cjs',
       'src/main/__tests__/prdAuthoringSeed.test.cjs',

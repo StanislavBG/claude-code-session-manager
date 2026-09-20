@@ -25,6 +25,7 @@ const { auditLogPath, readTail } = require('./lib/auditLog.cjs');
 const { resolveBuildIdentity } = require('./lib/buildIdentity.cjs');
 const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
+const { scanEpicTranscripts } = require('./lib/epicTranscriptDiagnostic.cjs');
 
 const MAX_LOG_AGE_MS = 5 * 60_000; // 5 min — warn if no logs this old
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -1147,6 +1148,19 @@ async function check(opts = {}) {
   } catch (e) {
     status.components.epic_index = { ok: false, error: e.message };
     status.issues.push(`Epic index health check failed: ${e.message}`);
+  }
+
+  // 6.66. Epic transcript location (NON-fatal warning): a mislocated/duplicated
+  // transcript is read correctly by epicTranscriptPath, so it never reddens the
+  // rollup (not in criticalComponents). See scripts/check-epic-transcripts.cjs.
+  try {
+    const findings = scanEpicTranscripts({ cwds: allProjectCwds() });
+    status.components.epic_transcripts = { ok: true, findings: findings.length, duplicated: findings.filter((f) => f.classification === 'duplicated').length };
+    if (findings.length > 0) {
+      status.issues.push(`Warning: ${findings.length} Epic transcript(s) mislocated/duplicated — run: node scripts/check-epic-transcripts.cjs`);
+    }
+  } catch (e) {
+    status.components.epic_transcripts = { ok: true, error: e.message };
   }
 
   // 6.7. Build freshness (informational): running heartbeat vs installed

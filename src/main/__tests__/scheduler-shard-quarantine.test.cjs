@@ -103,8 +103,8 @@ test('tickQueue dispatches the healthy project while the torn project is skipped
   expect(fs.existsSync(path.join(torn.cwd, 'ran-here.marker'))).toBe(false);
   expect(fs.readFileSync(torn.queueFile).equals(before)).toBe(true);
 
-  const health = await require('../health.cjs').check();
+  const health = await require('../health.cjs').check({ skipTypecheck: true });
   expect(health.components.scheduler_queue.ok).toBe(false);
   expect(health.components.scheduler_queue.quarantinedCwds).toEqual([torn.cwd]);
   expect(health.issues.some((i) => i.includes(torn.cwd))).toBe(true);
-}, 120_000); // health.check() alone can take tens of seconds
+}, 120_000); // skipTypecheck: this asserts scheduler_queue only; tsc was the tens of seconds

@@ -175,22 +175,87 @@ test('spawn() opens a merged-worktree Epic in the project cwd (dead worktree dir
   manager.kill(sessionId);
 });
 
-test('spawn() refuses a completed Epic without spawning and returns the plan message', () => {
-  const mainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-pty-closed-'));
-  const sessionId = 'epic-session-closed';
-  writeActiveIndexWithWorktree(mainCwd, { epicId: 'epic-c', claudeSessionId: sessionId, worktreeDir: mainCwd });
+function setEpic(mainCwd, epicId, patch) {
   const idxPath = path.join(mainCwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
   const idx = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
-  idx.sessions['epic-c'].status = 'completed';
+  const rec = idx.sessions[epicId];
+  if (patch.status) rec.status = patch.status;
+  if (patch.worktreeStatus) rec.worktree.status = patch.worktreeStatus;
   fs.writeFileSync(idxPath, JSON.stringify(idx));
+}
 
-  let spawned = false;
-  nodePty.spawn = () => {
-    spawned = true;
+function captureSpawn() {
+  const out = { opts: null, count: 0 };
+  nodePty.spawn = (shell, args, opts) => {
+    out.opts = opts;
+    out.count += 1;
     return fakeProc();
   };
+  return out;
+}
+
+function fakeWindow(sent) {
+  return {
+    isDestroyed: () => false,
+    webContents: { isDestroyed: () => false, isCrashed: () => false, send: (channel, payload) => sent.push({ channel, payload }) },
+  };
+}
+
+test('spawn() opens a completed Epic (merged worktree) as a shell in the project cwd with an informational line', () => {
+  const mainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-pty-closed-'));
+  const sessionId = 'epic-session-closed';
+  const deadDir = path.join(os.tmpdir(), 'sm-pty-closed-dead-worktree');
+  writeActiveIndexWithWorktree(mainCwd, { epicId: 'epic-c', claudeSessionId: sessionId, worktreeDir: deadDir });
+  setEpic(mainCwd, 'epic-c', { status: 'completed', worktreeStatus: 'merged' });
+
+  const cap = captureSpawn();
+  const sent = [];
+  manager.window = fakeWindow(sent);
+  try {
+    const result = manager.spawn({ tabId: sessionId, cwd: mainCwd, cols: 80, rows: 24 });
+    expect(cap.count).toBe(1);
+    expect(cap.opts.cwd).toBe(mainCwd);
+    expect(result.pid).toBe(4242);
+    expect(result.error).toBeUndefined();
+    const info = sent.find((m) => m.channel === `pty:data:${sessionId}`);
+    expect(info.payload).toMatch(/Epic is completed/);
+    expect(info.payload).toContain(mainCwd);
+  } finally {
+    manager.window = null;
+    manager.kill(sessionId);
+  }
+});
+
+test('spawn() opens a completed Epic whose worktree dir still exists in that worktree dir', () => {
+  const mainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-pty-closed-live-'));
+  const worktreeCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-pty-closed-live-wt-'));
+  const sessionId = 'epic-session-closed-live';
+  writeActiveIndexWithWorktree(mainCwd, { epicId: 'epic-cl', claudeSessionId: sessionId, worktreeDir: worktreeCwd });
+  setEpic(mainCwd, 'epic-cl', { status: 'completed' });
+
+  const cap = captureSpawn();
+  manager.spawn({ tabId: sessionId, cwd: mainCwd, cols: 80, rows: 24 });
+  expect(cap.count).toBe(1);
+  expect(cap.opts.cwd).toBe(worktreeCwd);
+  manager.kill(sessionId);
+  fs.rmSync(worktreeCwd, { recursive: true, force: true });
+});
+
+test('spawn() still refuses session_unreachable without any node-pty spawn', () => {
+  const mainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-pty-unreachable-'));
+  const sessionId = 'epic-session-unreachable';
+  const deadDir = path.join(os.tmpdir(), 'sm-pty-unreachable-dead-worktree');
+  writeActiveIndexWithWorktree(mainCwd, { epicId: 'epic-u', claudeSessionId: sessionId, worktreeDir: deadDir });
+  setEpic(mainCwd, 'epic-u', { worktreeStatus: 'merged' });
+  // Transcript exists only under the dead worktree's encoded project dir.
+  const enc = deadDir.replace(/[^a-zA-Z0-9]/g, '-');
+  const tdir = path.join(tmpHome, '.claude', 'projects', enc);
+  fs.mkdirSync(tdir, { recursive: true });
+  fs.writeFileSync(path.join(tdir, `${sessionId}.jsonl`), '{"type":"user"}\n');
+
+  const cap = captureSpawn();
   const result = manager.spawn({ tabId: sessionId, cwd: mainCwd, cols: 80, rows: 24 });
-  expect(spawned).toBe(false);
+  expect(cap.count).toBe(0);
   expect(result.pid).toBeNull();
-  expect(result.error).toMatch(/closed/);
+  expect(result.error).toMatch(/cannot be resumed/);
 });

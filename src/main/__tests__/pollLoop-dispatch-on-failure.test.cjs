@@ -135,13 +135,19 @@ test('pollLoop still attempts a dispatch after a transient billing failure, usin
   await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
 
   await seedOnePendingJob();
-  expect(await lastDispatchAttemptAt()).toBeNull();
+  // Baseline, not `toBeNull()`: under full-suite load a straggler tick from an
+  // earlier poll/test (spawnJob's completion tick, a slot-release pump) can
+  // stamp between the reset above and here, so the stamp is not guaranteed
+  // null. What the test proves is that THIS poll+flush advances the stamp.
+  const before = await lastDispatchAttemptAt();
 
   process.env.SM_MOCK_BILLING_KIND = 'transient';
   await scheduler.pollLoop();
   await flushPendingTick();
 
-  expect(await lastDispatchAttemptAt()).not.toBeNull();
+  const after = await lastDispatchAttemptAt();
+  expect(after).not.toBeNull();
+  expect(after).not.toBe(before);
 });
 
 test('pollLoop still attempts a dispatch after the billing poll throws, using the degraded budget (not utilization 0)', async () => {
@@ -152,7 +158,11 @@ test('pollLoop still attempts a dispatch after the billing poll throws, using th
   await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
 
   await seedOnePendingJob();
-  expect(await lastDispatchAttemptAt()).toBeNull();
+  // Baseline, not `toBeNull()`: under full-suite load a straggler tick from an
+  // earlier poll/test (spawnJob's completion tick, a slot-release pump) can
+  // stamp between the reset above and here, so the stamp is not guaranteed
+  // null. What the test proves is that THIS poll+flush advances the stamp.
+  const before = await lastDispatchAttemptAt();
 
   delete process.env.SM_E2E;
   delete process.env.SM_MOCK_BILLING_KIND;
@@ -160,5 +170,7 @@ test('pollLoop still attempts a dispatch after the billing poll throws, using th
   await scheduler.pollLoop();
   await flushPendingTick();
 
-  expect(await lastDispatchAttemptAt()).not.toBeNull();
+  const after = await lastDispatchAttemptAt();
+  expect(after).not.toBeNull();
+  expect(after).not.toBe(before);
 });

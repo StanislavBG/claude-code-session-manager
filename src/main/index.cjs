@@ -513,7 +513,7 @@ ipcMain.handle('app:launch-mode', () => ({
 // `claude mcp list`. Read-only, single in-flight call — no polling.
 ipcMain.handle('mcp:status', () => probeMcpStatus());
 
-// Project Home's "Agent tools" block (PhAgentTools): the same catalog data
+// The Dashboard's "Agent tools" section (HomeAgentTools): the same catalog data
 // GET /admin/mcp/catalog serves to external callers, read in-process here so
 // the renderer never makes a direct HTTP call. Static data, no cwd needed.
 ipcMain.handle('mcp:catalog', () => ({ ok: true, tools: MCP_TOOL_CATALOG, recipes: MCP_RECIPES }));

@@ -2,7 +2,7 @@
  * Pure view-helpers for ProjectHome's synthesized Brief blocks (PRD 840).
  * No React, no IPC — translation of project-home-mock.jsx's `PhMd` splitter,
  * `PH_SCOPE_TINT` map, and source-chip shaping into testable functions the
- * component composes with ph-primitives.tsx block chrome.
+ * component composes with its own block chrome.
  */
 import { formatAgo } from './formatTime'
 

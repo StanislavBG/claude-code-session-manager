@@ -16,6 +16,7 @@
  *      against running scheduler jobs / chat runs for context.
  *   5. Recent sessions — pulls `.claude/projects/*.jsonl` (same source as the
  *      History tab) and shows the 5 most-recent.
+ *   6. Agent tools — collapsed MCP tool catalog (name + one-line purpose).
  *
  * Data sources are all existing zustand stores; nothing new on the backend.
  */
@@ -45,6 +46,7 @@ import { HomeSessionDrawer, type DrawerKeyVal, type DrawerTailLine } from './hom
 import { NewEpicProjectDrawer } from './home/NewEpicProjectDrawer'
 import { QueuedJobPopover, type QueuedJobPopoverJob } from './home/QueuedJobPopover'
 import { TerminalAppearanceCard } from './home/TerminalAppearanceCard'
+import { HomeAgentTools } from './home/HomeAgentTools'
 import { BillingStatusOverlay } from '../ui/BillingStatusBanner'
 import { AGENT_TAG_DEFS, AGENT_TAG_ORDER } from '../../lib/agentTagDefs'
 import { useEffectiveSettingsFor, readLeafWithSource } from '../../lib/useEffectiveSettings'
@@ -104,6 +106,7 @@ function HomeComponent({ onNavigate }: HomeProps) {
         <NeedsYouSection rows={needsRows} onNavigate={onNavigate} />
         <ActiveSessionsCard onNavigate={onNavigate} />
         <RecentSessionsCard onNavigate={onNavigate} />
+        <HomeAgentTools />
         <AgentsCard />
         <DataModelCard onNavigate={onNavigate} />
         {/* App-wide terminal theme + font size. Lives here, not in a gear

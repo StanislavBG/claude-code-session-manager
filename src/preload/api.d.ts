@@ -200,8 +200,8 @@ export interface McpStatusResult {
 }
 
 /** One session-manager-scheduler MCP tool's catalog entry (src/main/lib/mcpToolCatalog.cjs) —
- *  the same data GET /admin/mcp/catalog serves, read in-process for Project Home's
- *  PhAgentTools block. */
+ *  the same data GET /admin/mcp/catalog serves, read in-process for the Dashboard's
+ *  HomeAgentTools section. */
 export interface McpToolCatalogEntry {
   name: string;
   group: 'scheduler' | 'chat' | 'feedback' | 'help';

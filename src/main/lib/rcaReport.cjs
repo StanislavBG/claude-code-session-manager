@@ -150,12 +150,34 @@ function extractRcaBlock(text) {
 
 const ALREADY_SHIPPED_RE = /already (fully )?(satisfied|implemented|committed|done|shipped)|was (already )?(implemented|committed) in|nothing (new )?to commit|no (code )?changes were needed/i;
 const SELF_QUEUE_SKILL_RE = /Launching skill: session-manager-dev:(develop|process-feedback)/;
-const SELF_QUEUE_WAKEUP_RE = /ScheduleWakeup/;
+// SELF_QUEUE rules must match an actual INVOCATION, never a bare tool-name
+// mention. Incident: sigma `816-prepare-157-copy-citation-extras-patch`, run
+// `2026-09-20T18-17-03-476Z` — a 23 KB log (well under the 64 KB `readTail`
+// window) whose single `ScheduleWakeup` occurrence was the harness's
+// `{"type":"system","subtype":"init",...,"tools":[...]}` tool list — was
+// classified `failure-class: self-queue` in its root-cause report. The wakeup
+// rule now requires a stream-json tool_use `"name":"ScheduleWakeup"` field, and
+// classifyFailure strips init events before any rule runs.
+const SELF_QUEUE_WAKEUP_RE = /"name"\s*:\s*"ScheduleWakeup"/;
 const STUCK_LOOP_RE = /\b(until\s|while\s+true|sleep\s)/i;
 const AC_CHECKBOX_RE = /^\s*[-*]\s*\[[xX]\]/;
 const SENTINEL_PASS_RE = /SCHEDULER_VERDICT:\s*PASS/;
 const STUCK_LOOP_WINDOW = 40; // "final lines" per AC
 const POST_AC_OVERRUN_MIN_TAIL_FRACTION = 0.3;
+
+/**
+ * Drop every stream-json harness init event (`"type":"system"` +
+ * `"subtype":"init"`) from a log tail. That line names every available tool
+ * and would otherwise false-match tool-name/word rules. Other system events
+ * are kept. Pure; single pass, O(n) in characters.
+ */
+function stripHarnessInitEvents(logTail) {
+  if (!logTail) return '';
+  return logTail
+    .split('\n')
+    .filter((l) => !(l.includes('"subtype":"init"') && l.includes('"type":"system"') && l.trimStart().startsWith('{')))
+    .join('\n');
+}
 
 /**
  * Classify why a job likely landed in needs_review, from the log tail plus
@@ -164,8 +186,9 @@ const POST_AC_OVERRUN_MIN_TAIL_FRACTION = 0.3;
  * Complexity: O(n) over log-tail lines (n bounded — callers pass a tail, not
  * a full log).
  */
-function classifyFailure({ verdict, logTail }) {
-  const lines = (logTail || '').split('\n');
+function classifyFailure({ verdict, logTail: rawLogTail }) {
+  const logTail = stripHarnessInitEvents(rawLogTail);
+  const lines = logTail.split('\n');
 
   // Checked before every other rule: an unambiguous, materially-checked
   // verdict (the scheduler itself validated the executor's claimed paths
@@ -399,6 +422,7 @@ module.exports = {
   // Pure helpers, exported for unit tests.
   humanVerdict,
   classifyFailure,
+  stripHarnessInitEvents,
   extractAcceptanceCriteria,
   extractRcaBlock,
   buildRcaMarkdown,

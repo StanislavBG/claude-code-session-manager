@@ -210,7 +210,10 @@ test('needs_review with an in-window commit heals exactly as today (regression â
     '- [ ] `npm test` passes',
   ].join('\n'));
 
-  const startedAt = new Date().toISOString();
+  // Window opens a minute back: the only commit here is initRepo's, and git's --since
+  // compares whole seconds, so `new Date()` (taken AFTER initRepo) drops it out of the
+  // window whenever the clock crosses a second boundary under load.
+  const startedAt = new Date(Date.now() - 60_000).toISOString();
   const queuePath = writeProjectQueue(projectCwd, [
     {
       slug: '20-clean-feature',

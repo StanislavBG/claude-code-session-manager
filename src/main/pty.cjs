@@ -22,7 +22,7 @@ const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { checkInsideHome } = require('./lib/insideHome.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const opsErrorLog = require('./lib/opsErrorLog.cjs');
-const { resolveEpicSpawnCwd } = require('./lib/epicSpawnCwd.cjs');
+const { planEpicSpawn } = require('./lib/epicSpawnPlan.cjs');
 const telemetryCounters = require('./lib/telemetryCounters.cjs');
 
 // Absolute path to the installed package root (src/main/ -> ../../), shown in
@@ -176,12 +176,24 @@ class PtyManager {
 
     const shell = process.env.SHELL || '/bin/bash';
     console.log('[pty] spawning shell', shell);
-    // Tab ID = claudeSessionId (see CLAUDE.md), so for an Epic-attached tab
-    // this resolves the Epic's own record in `cwd`'s active-index.json and
-    // returns its isolated worktree dir when one exists — `cwd` itself is
-    // NEVER repointed; only this actual PTY spawn option is. See
-    // epicSpawnCwd.cjs's header comment (the ops-root hazard) for why.
-    const spawnCwd = resolveEpicSpawnCwd({ cwd, claudeSessionId: tabId, deps: { restore: true } });
+    // Tab ID = claudeSessionId (see CLAUDE.md), and Chat/Terminal are two views over ONE session,
+    // so this asks the same decision function chatRunner.cjs does (epicSpawnPlan.cjs). `cwd`
+    // itself is NEVER repointed; only this actual PTY spawn option is (epicSpawnCwd.cjs's
+    // ops-root hazard). A refused plan is surfaced in-tab rather than spawning into a bad cwd.
+    const plan = planEpicSpawn({ cwd, claudeSessionId: tabId });
+    if (!plan.ok) {
+      opsErrorLog.appendError({
+        cwd,
+        scope: 'pty',
+        tabId,
+        tags: ['spawn-refused', plan.code],
+        message: plan.message,
+      });
+      sendIfAlive(this.window, `pty:data:${tabId}`, `\r\n${plan.message}\r\n`);
+      setImmediate(() => sendIfAlive(this.window, `pty:exit:${tabId}`, { exitCode: 1, signal: undefined }));
+      return { pid: null, cwd, reattached: false, error: plan.message };
+    }
+    const spawnCwd = plan.execCwd;
     if (spawnCwd !== cwd) {
       console.log(`[pty] tabId=${tabId} isolated in worktree ${spawnCwd}`);
     }

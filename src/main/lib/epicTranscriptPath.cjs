@@ -5,8 +5,9 @@
  * transcript actually live?".
  *
  * The CLI writes `~/.claude/projects/<encodeCwd(spawn cwd)>/<id>.jsonl`, and an
- * Epic's spawn cwd is its isolated worktree dir (chatRunner.cjs via
- * resolveEpicSpawnCwd), NOT the project cwd. Turn 1 can still land under the
+ * Epic's spawn cwd is normally its isolated worktree dir (chatRunner.cjs and
+ * pty.cjs via epicSpawnPlan.cjs), falling back to the project cwd when the
+ * worktree is merged/gone. Turn 1 can still land under the
  * project encoding (the worktree mint is fire-and-forget), and the worktree dir
  * itself is routinely swept from /tmp while its transcript survives under
  * ~/.claude/projects. So candidates are built from the recorded `worktree.dir`

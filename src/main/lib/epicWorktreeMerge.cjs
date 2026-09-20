@@ -17,10 +17,10 @@
  * On success the worktree checkout is torn down (cleanupEpicWorktree) since
  * its content now safely lives on the main tree. On a real conflict, the
  * branch and worktree directory are left intact — never silently discarded
- * — so a human can still open a Terminal into `worktree.dir` (PRD 1033's
- * existing epicSpawnCwd.cjs wiring — it keys off `worktree.dir` alone, not
- * `worktree.status`, so a conflicted Epic's Terminal spawn keeps landing
- * there with no new code path needed) and resolve it manually before
+ * — so a human can still open a Terminal into `worktree.dir` (the spawn
+ * resolution in epicSpawnCwd.cjs is status-aware: `needs_merge_resolution`
+ * with an existing dir still lands there, while `merged`/`disabled` skip the
+ * re-attach and fall back to the project cwd) and resolve it manually before
  * re-running this same action.
  */
 

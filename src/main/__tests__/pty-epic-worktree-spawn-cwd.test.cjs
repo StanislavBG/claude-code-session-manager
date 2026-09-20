@@ -154,3 +154,43 @@ test("spawn() falls back to cwd unchanged when the Epic's worktree field is abse
   expect(capturedOpts.cwd).toBe(mainCwd);
   manager.kill(sessionId);
 });
+
+test('spawn() opens a merged-worktree Epic in the project cwd (dead worktree dir is never used)', () => {
+  const mainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-pty-merged-'));
+  const sessionId = 'epic-session-merged';
+  const deadDir = path.join(os.tmpdir(), 'sm-pty-dead-worktree-does-not-exist');
+  writeActiveIndexWithWorktree(mainCwd, { epicId: 'epic-m', claudeSessionId: sessionId, worktreeDir: deadDir });
+  const idxPath = path.join(mainCwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
+  const idx = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
+  idx.sessions['epic-m'].worktree.status = 'merged';
+  fs.writeFileSync(idxPath, JSON.stringify(idx));
+
+  let capturedOpts = null;
+  nodePty.spawn = (shell, args, opts) => {
+    capturedOpts = opts;
+    return fakeProc();
+  };
+  manager.spawn({ tabId: sessionId, cwd: mainCwd, cols: 80, rows: 24 });
+  expect(capturedOpts.cwd).toBe(mainCwd);
+  manager.kill(sessionId);
+});
+
+test('spawn() refuses a completed Epic without spawning and returns the plan message', () => {
+  const mainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-pty-closed-'));
+  const sessionId = 'epic-session-closed';
+  writeActiveIndexWithWorktree(mainCwd, { epicId: 'epic-c', claudeSessionId: sessionId, worktreeDir: mainCwd });
+  const idxPath = path.join(mainCwd, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
+  const idx = JSON.parse(fs.readFileSync(idxPath, 'utf8'));
+  idx.sessions['epic-c'].status = 'completed';
+  fs.writeFileSync(idxPath, JSON.stringify(idx));
+
+  let spawned = false;
+  nodePty.spawn = () => {
+    spawned = true;
+    return fakeProc();
+  };
+  const result = manager.spawn({ tabId: sessionId, cwd: mainCwd, cols: 80, rows: 24 });
+  expect(spawned).toBe(false);
+  expect(result.pid).toBeNull();
+  expect(result.error).toMatch(/closed/);
+});

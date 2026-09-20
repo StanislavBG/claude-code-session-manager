@@ -28,7 +28,7 @@ export interface HeadChoice {
  *  implementation since it walks the renderer's already-built BacklogNode
  *  tree rather than a flat row list (main is CJS, this is renderer TS/ESM —
  *  see CLAUDE.md's "no ES modules in main" law). */
-export function headTerminalSlugs(head: BacklogNode<ScheduleJob>): string[] {
+function headTerminalSlugs(head: BacklogNode<ScheduleJob>): string[] {
   return flattenBacklogNodes([head])
     .filter((n) => n.children.length === 0)
     .map((n) => n.row.slug)

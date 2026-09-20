@@ -2,7 +2,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { JobRow } from './SchedulePanel'
+import { JobRow } from './tabs/scheduler/JobRow'
 import { usePromptSessions } from '../state/promptSessions'
 import { takePendingPromptSessionId } from '../lib/promptSessionDeepLink'
 import type { ScheduleJob } from '../../preload/api'

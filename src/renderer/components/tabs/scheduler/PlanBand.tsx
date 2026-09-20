@@ -176,7 +176,7 @@ export function PlanBand({ plan, mode = 'graph', now, hidden, indexBySlug, headC
       data-plan-status={plan.status}
       className={`border-l-[3px] ${SPINE[plan.status]} border-b border-rule-structural`}
     >
-      <div className="h-[34px] flex items-center gap-2.5 px-3" data-testid="plan-header">
+      <div className="h-[32px] flex items-center gap-2.5 px-3" data-testid="plan-header">
         <button
           type="button"
           aria-expanded={expanded}

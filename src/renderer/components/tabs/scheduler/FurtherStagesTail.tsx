@@ -1,7 +1,7 @@
 import type { Stage } from '../../../lib/schedulerStages'
 import { InfoDot } from './sched-primitives'
 
-export const TAIL_W = 200
+const TAIL_W = 200
 
 /** FURTHER STAGES: one mini progress row per stage beyond the visible window. Click = local scroll. */
 export function FurtherStagesTail({ stages, onSeek }: { stages: Stage[]; onSeek: (i: number) => void }) {
@@ -29,7 +29,7 @@ export function FurtherStagesTail({ stages, onSeek }: { stages: Stage[]; onSeek:
             onClick={() => onSeek(s.n - 1)}
             className="h-[26px] px-3 flex items-center gap-2 border-t border-rule-inner bg-transparent hover:bg-bg-hi cursor-pointer text-left"
           >
-            <span className="font-mono text-[11.5px] text-fg-dim w-[46px] shrink-0">stage {s.n}</span>
+            <span className="font-mono text-[11.5px] text-fg-dim w-[58px] whitespace-nowrap shrink-0">stage {s.n}</span>
             <span
               role="progressbar"
               aria-valuenow={s.doneCount}

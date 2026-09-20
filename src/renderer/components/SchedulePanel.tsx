@@ -1,20 +1,20 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { ReactNode } from 'react'
-import type { ScheduleStateSnapshot, ScheduleJob, ScheduleJobHold, ScheduleFirePolicy, ScheduleHealthSnapshot, SupervisorLogEntry, SupervisorConfig } from '../../preload/api.d'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ScheduleJob, ScheduleJobHold, ScheduleHealthSnapshot } from '../../preload/api.d'
 import { toast } from '../state/toast'
-import { formatTimingLabel, formatRelative, formatClock, formatAgo, formatDuration } from '../lib/formatTime'
+import { formatTimingLabel, formatAgo } from '../lib/formatTime'
 import { useScheduleState } from '../state/scheduleState'
 import { usePromptSessions } from '../state/promptSessions'
-import { setPendingPromptSessionId } from '../lib/promptSessionDeepLink'
-import { RunLogViewer } from './tabs/plans/RunLogViewer'
 import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
-import { SchBadge, LeakBadge, LeftoverBadge, OverrunBadge, formatLeakedDescendants, ProjectTag, EpicTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
-import { DispositionControl, truncateLabel, sectionHeadChoices, buildHeadChoicesBySlug, type HeadChoice } from './tabs/scheduler/DispositionControl'
-import { resolveEpicRef } from '../lib/epicProvenance'
-import { buildBacklogTree, flattenBacklogNodes, type BacklogEpicSection, type BacklogBlocker } from '../lib/backlogTree'
+import { projectNameFromCwd } from './tabs/scheduler/sched-primitives'
+import { buildHeadChoicesBySlug, sectionHeadChoices } from './tabs/scheduler/DispositionControl'
+import { buildBacklogTree, flattenBacklogNodes } from '../lib/backlogTree'
 import { buildPlans } from '../lib/schedulerStages'
 import { PlanBand } from './tabs/scheduler/PlanBand'
+import { JobRow, EpicSectionBlock } from './tabs/scheduler/JobRow'
+import { SupervisorPanel } from './tabs/scheduler/SupervisorPanel'
+import { FirstRunGuide } from './tabs/scheduler/FirstRunGuide'
+import { computeStatus, type StatusKind } from './tabs/scheduler/computeStatus'
 import { SchedulerFooter } from './tabs/scheduler/SchedulerFooter'
 import type { PlanMode } from './tabs/scheduler/SchedulerTopBands'
 import { usePanelFocus } from '../lib/panelFocus'
@@ -276,7 +276,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
     )
   }
 
-  const { config, jobs, paused, lastRunAt, nextReset, effectiveConcurrency } = snap
+  const { jobs, paused, lastRunAt, nextReset, effectiveConcurrency } = snap
 
   // First run — nothing queued for this scope yet. PRDs are authored by an
   // Epic's session, not written here, so the only real first step is
@@ -344,7 +344,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
 
         {/* Meter rate-limited banner */}
         {health && health.consecutiveFailures > 5 && health.lastFailureKind === 'meter_rate_limited' && !paused && !meterBannerDismissed && (
-          <div className={gutter}><div className="flex items-center gap-3 px-4 py-3 bg-amber-400/15 border border-amber-400/30 rounded-xl">
+          <div className={gutter}><div className={isList ? 'flex items-center gap-3 px-4 py-3 bg-amber-400/15 border border-amber-400/30 rounded-xl' : 'flex items-center gap-3 -mx-[18px] px-[18px] py-1 bg-amber-400/15 border-y border-amber-400/30'}>
             <span aria-hidden="true">⚠</span>
             <span className="text-[13.5px] text-amber-400/90">
               <strong className="font-semibold">Usage meter unavailable</strong> — last good reading{' '}
@@ -363,8 +363,8 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
 
         {/* PolicyBar removed (2A): fire policy / cap / threshold → CONCURRENCY KPI cell; Fire + Refresh → title band. */}
 
-        {/* Running concurrency badge */}
-        {runningJobs.length > 0 && (() => {
+        {/* Running concurrency badge — List mode only; Graph mode carries this in the SLOTS / READY KPI cells. */}
+        {isList && runningJobs.length > 0 && (() => {
           const cap = effectiveConcurrency?.cap ?? 5
           const groupPending = jobs.filter((j) => j.status === 'pending').length
           return (
@@ -379,8 +379,8 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
           )
         })()}
 
-        {/* Filter bar */}
-        {jobs.length > 0 && (
+        {/* Filter bar — List mode; Graph mode renders the status chips flat inside the counts strip. */}
+        {isList && jobs.length > 0 && (
           <div className={gutter}>
             <FilterBar
               showText={filterText === undefined}
@@ -393,12 +393,13 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
         {/* Graph mode (2A): full-bleed plan bands — one per Epic — of stage columns. */}
         {!isList && (
           <div data-testid="plan-graph">
-            <div className="flex items-center justify-between px-[18px] h-[30px] border-y border-rule-structural">
-              <span className="font-mono text-[11.5px] text-fg-faint">
+            <div className="flex items-center justify-between gap-3 px-[18px] h-[26px] border-y border-rule-structural">
+              <span className="font-mono text-[11.5px] text-fg-faint shrink-0">
                 {filteredJobs.length} job{filteredJobs.length !== 1 ? 's' : ''} · {counts.pending}p · {counts.running}r · {counts.completed}d
                 {counts.failed > 0 && <span className="text-accent"> · {counts.failed}f</span>}
               </span>
-              <div className="flex items-center gap-3">
+              <StatusChips filter={filter} onChange={(f) => { setFilter(f); saveFilter(f) }} />
+              <div className="flex items-center gap-3 shrink-0">
                 {hiddenInGraph > 0 && (
                   <button
                     type="button"
@@ -588,7 +589,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
         </div>}
 
         {/* Coach — reassurance that nothing is needed while things run automatically */}
-        {!paused && (
+        {isList && !paused && (
           <div className={gutter}><div className="flex gap-2.5 bg-sage/10 border border-sage/30 rounded-xl px-3.5 py-2.5 text-[13.5px] text-fg-dim leading-relaxed">
             <span aria-hidden="true">✓</span>
             <span>
@@ -603,223 +604,6 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
       <SchedulerFooter health={health} jobCount={jobs.length} lastRunAt={lastRunAt} nextReset={nextReset} now={now} onOpenSupervisor={() => setPanelView('supervisor')} />
     </div>
   )
-}
-
-// ─── First-run guide ─────────────────────────────────────────────────────────
-
-const GUIDE_STEPS: Array<{ title: string; body: string }> = [
-  {
-    title: 'Start a session',
-    body: "In Sessions, pick an Agent and a Mission, describe the outcome you want, then Approve & start. Its thread writes the PRD files into that session's own folder.",
-  },
-  {
-    title: 'Queue what it wrote',
-    body: 'The PRDs tab lists every file the session produced. Queue one, or the whole session, and they appear here.',
-  },
-  {
-    title: 'Leave it alone',
-    body: 'Jobs start themselves inside your window, pause on rate-limit, and resume at the reset. History records how each ended.',
-  },
-]
-
-const GUIDE_GLOSSARY: Array<{ term: string; def: string }> = [
-  { term: 'Session', def: 'One goal, one Claude session, and the folder of PRDs written to reach it.' },
-  { term: 'PRD', def: 'One markdown file = one job. Authored by the session.' },
-  { term: '5-hour window', def: 'Your Claude billing window, on a rolling clock.' },
-  { term: 'Session pool', def: '5 slots shared with terminal and session chats.' },
-]
-
-/**
- * Shown instead of the job table when this scope has zero PRDs anywhere —
- * not a filtered-to-empty view. Nothing here writes a PRD: that happens in
- * a session, so the only real action is "go create one." A "New PRD" button
- * would offer a capability this screen doesn't have. Copy uses "session",
- * the user-facing name for an Epic (see CLAUDE.md's domain model).
- */
-function FirstRunGuide({ navigate }: { navigate?: (k: NavKey) => void }) {
-  return (
-    <div className="overflow-y-auto h-full">
-      <div className="px-9 py-6 max-w-[900px] mx-auto">
-        <div className="bg-bg-hi border border-line rounded-2xl px-9 py-8">
-          <h2 className="m-0 font-serif text-[25px] font-semibold text-fg">
-            Nothing to run yet — the scheduler needs a session.
-          </h2>
-          <p className="mt-2 mb-6 text-[14.5px] text-fg-dim leading-relaxed max-w-[580px]">
-            You don't write PRDs here. A session breaks its goal into numbered PRD files, and this
-            page runs them in order. Two steps, once.
-          </p>
-
-          <div className="grid grid-cols-3 gap-3.5">
-            {GUIDE_STEPS.map((step, i) => {
-              const isNow = i === 0
-              return (
-                <div
-                  key={step.title}
-                  className={`bg-bg border rounded-xl px-4 py-4 flex flex-col gap-2 ${
-                    isNow ? 'border-accent shadow-[0_0_0_3px_rgba(184,92,52,.09)]' : 'border-line'
-                  }`}
-                >
-                  <span
-                    className={`w-6 h-6 rounded-full grid place-items-center font-mono text-[12px] font-semibold ${
-                      isNow ? 'bg-accent text-white' : 'bg-bg-elev text-fg-dim'
-                    }`}
-                  >
-                    {i + 1}
-                  </span>
-                  <h3 className="m-0 text-[15px] font-semibold text-fg">{step.title}</h3>
-                  <p className="m-0 text-[13.5px] text-fg-dim leading-relaxed">{step.body}</p>
-                  {isNow && (
-                    <button
-                      type="button"
-                      onClick={() => navigate?.('terminal')}
-                      className="self-start bg-accent text-white rounded-lg px-3.5 py-1.5 text-[13px] font-semibold mt-1"
-                    >
-                      Go to Sessions →
-                    </button>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-
-          <dl className="flex mt-[22px] pt-4 border-t border-line gap-5 flex-wrap">
-            {GUIDE_GLOSSARY.map(({ term, def }) => (
-              <div key={term} className="flex-1 min-w-[150px]">
-                <dt className="text-[13.5px] font-semibold text-fg mb-0.5">{term}</dt>
-                <dd className="m-0 text-[12.5px] text-fg-faint leading-relaxed">{def}</dd>
-              </div>
-            ))}
-          </dl>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-type StatusKind = 'running' | 'paused' | 'auto-soon' | 'auto-throttled' | 'manual' | 'on-reset' | 'idle'
-
-interface StatusInfo {
-  kind: StatusKind
-  line1: string
-  line2: string | null
-  tooltip?: string
-  action?: { label: string; onClick: () => void; title: string }
-}
-
-export function computeStatus({
-  snap, now, avgDurationMs, runningJobs,
-}: { snap: ScheduleStateSnapshot; now: number; avgDurationMs: number; runningJobs: ScheduleJob[] }): StatusInfo {
-  const { config, jobs, paused, nextReset, utilization, effectiveConcurrency } = snap
-  let pendingCount = 0
-  let completedCount = 0
-  for (const j of jobs) {
-    if (j.status === 'pending') pendingCount++
-    else if (j.status === 'completed') completedCount++
-  }
-  const runningCount = runningJobs.length
-  const totalActive = pendingCount + runningCount
-  const cap = effectiveConcurrency?.cap ?? 5
-
-  if (runningCount > 0) {
-    const oldest = runningJobs.reduce((a, b) =>
-      (a.startedAt ?? '') < (b.startedAt ?? '') ? a : b
-    )
-    const elapsed = oldest.startedAt ? now - Date.parse(oldest.startedAt) : 0
-    const k = completedCount + runningCount
-    const n = completedCount + totalActive
-    const concurrencyLabel = runningCount > 1 ? ` · ${runningCount}/${cap} parallel` : ''
-    return {
-      kind: 'running',
-      line1: `Running ${k}/${n}${concurrencyLabel} · ${formatTimingLabel(elapsed)}`,
-      line2: runningCount === 1
-        ? oldest.title
-        : runningJobs.map((j) => j.title).join(', '),
-      tooltip: runningJobs.map((j) => `${j.slug} (g${j.parallelGroup})`).join('; '),
-    }
-  }
-
-  if (paused) {
-    const resumeMs = paused.resumeAt ? Date.parse(paused.resumeAt) - now : null
-    const pauseLine1: Record<string, string> = {
-      rate_limit: 'Paused — tokens exhausted',
-      auth: 'Paused — authentication failed',
-      network: 'Paused — network unreachable',
-      reset_failure: 'Paused — billing data unavailable',
-      manual: 'Paused — manual (you paused the queue)',
-    }
-    const pauseLine2Auth = 'Run `claude` in any terminal to refresh credentials, then Resume'
-    return {
-      kind: 'paused',
-      line1: pauseLine1[paused.reason] ?? `Paused — ${paused.reason}`,
-      line2: paused.reason === 'auth'
-        ? pauseLine2Auth
-        : resumeMs !== null && resumeMs > 0
-          ? `auto-resume ${formatClock(Date.parse(paused.resumeAt!))} (in ${formatRelative(resumeMs)})`
-          : (paused.resumeAt ? 'resuming…' : 'no auto-resume scheduled'),
-      tooltip: paused.resumeAt ?? '',
-      action: {
-        label: 'Resume',
-        onClick: () => window.api.schedule.resume(),
-        title: 'Clear the pause and resume queue immediately',
-      },
-    }
-  }
-
-  if (totalActive === 0) {
-    return { kind: 'idle', line1: 'No work queued', line2: null }
-  }
-
-  const pol = config.firePolicy ?? 'when-available'
-  if (pol === 'manual') {
-    return {
-      kind: 'manual',
-      line1: `Manual · ${pendingCount} pending`,
-      line2: 'click Fire next batch now to fire',
-      action: {
-        label: 'Fire next batch now',
-        onClick: () => window.api.schedule.forceTick().then(toast.fromOutcome).catch(() => toast.error('Failed to fire batch')),
-        title: 'Bypasses the billing-usage poll. Use when the meter is rate-limited or you want immediate progress.',
-      },
-    }
-  }
-
-  if (pol === 'on-reset') {
-    if (!nextReset) {
-      return { kind: 'on-reset', line1: 'On-reset · waiting for billing data', line2: null }
-    }
-    const fireAt = Date.parse(nextReset) + (config.offsetMinutes * 60_000)
-    const wait = fireAt - now
-    return {
-      kind: 'on-reset',
-      line1: `On-reset · ${pendingCount} pending`,
-      line2: wait > 0 ? `fires ${formatClock(fireAt)} (in ${formatRelative(wait)})` : 'firing now…',
-    }
-  }
-
-  // when-available
-  const thresh = config.utilizationThreshold ?? 90
-  if (utilization === null || utilization === undefined) {
-    return {
-      kind: 'auto-soon',
-      line1: `Auto · ${pendingCount} pending`,
-      line2: 'checking token availability…',
-    }
-  }
-  if (utilization >= thresh) {
-    const wait = nextReset ? Date.parse(nextReset) - now : null
-    return {
-      kind: 'auto-throttled',
-      line1: `Auto · throttled (util ${utilization.toFixed(0)}% ≥ ${thresh}%)`,
-      line2: wait && wait > 0
-        ? `next reset ${formatClock(Date.parse(nextReset!))} (in ${formatRelative(wait)})`
-        : 'will fire when usage drops',
-    }
-  }
-  return {
-    kind: 'auto-soon',
-    line1: `Auto · ${pendingCount} pending · util ${utilization.toFixed(0)}%`,
-    line2: `fires within 2 min (poll cycle)`,
-  }
 }
 
 /** O(N log N) once: for each job, count of running+pending jobs ahead of it,
@@ -909,402 +693,42 @@ function computeEtaMap(
   return m
 }
 
-/**
- * EpicSectionBlock — one collapsible block per Epic in the job table, headed
- * by the Epic's title, PRD count, and a status rollup. Collapse state is
- * local (uncontrolled) since it's a pure display affordance, same pattern as
- * JobRow's own `open` state below.
- */
-function EpicSectionBlock({ section, children }: { section: BacklogEpicSection<ScheduleJob>; children: ReactNode }) {
-  const [expanded, setExpanded] = useState(true)
-  const rollup = Object.entries(section.counts)
-    .map(([status, n]) => `${n} ${status.replace(/_/g, ' ')}`)
-    .join(' · ')
-  return (
-    <div className="border-t border-line" data-testid="backlog-epic-section" data-epic-id={section.epicId ?? ''}>
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center gap-2.5 px-[18px] py-2.5 bg-bg-elev/60 hover:bg-bg-elev text-left"
-        aria-expanded={expanded}
-        title={section.label}
-      >
-        <span
-          className={`text-fg-faint inline-flex shrink-0 transition-transform duration-150 ${expanded ? 'rotate-90' : ''}`}
-          aria-hidden="true"
-        >
-          <AlmanacIcon name="chevron" size={12} />
-        </span>
-        <span className="font-serif text-[14.5px] font-semibold text-fg truncate" data-testid="backlog-epic-label">
-          {section.label}
-        </span>
-        <span className="font-mono text-[11px] text-fg-faint shrink-0">
-          {section.total} PRD{section.total === 1 ? '' : 's'}
-        </span>
-        <span className="font-mono text-[11px] text-fg-faint truncate">{rollup}</span>
-      </button>
-      {expanded && children}
-    </div>
-  )
-}
-
-/** JobRow's Epic/dependency-chain presentation info. A module-level default
- *  (not an inline literal) so an omitted `backlog` prop keeps the same
- *  identity across renders — an inline `{}` default would be a freshly-built
- *  object every render and defeat JobRow's React.memo (see
- *  SchedulePanel.jobrow-render-count.test.tsx). */
-interface JobRowBacklogInfo {
-  depth: number
-  blockers: BacklogBlocker[]
-  blocked: boolean
-  hasNeedsReviewBlocker: boolean
-  hasMissingDep: boolean
-  cycle: boolean
-  parallelEligible: boolean
-}
-const EMPTY_BLOCKERS: BacklogBlocker[] = []
-const EMPTY_HEAD_CHOICES: HeadChoice[] = []
-const DEFAULT_BACKLOG_INFO: JobRowBacklogInfo = {
-  depth: 0,
-  blockers: EMPTY_BLOCKERS,
-  blocked: false,
-  hasNeedsReviewBlocker: false,
-  hasMissingDep: false,
-  cycle: false,
-  parallelEligible: false,
-}
-
-function blockerLabel(b: BacklogBlocker): string {
-  if (b.missing) return `${b.slug} (missing)`
-  if (b.needsReview) return `${b.slug} (needs review)`
-  return `${b.slug} (${(b.status ?? 'unknown').replace(/_/g, ' ')})`
-}
-
-function blockerToneClass(b: BacklogBlocker): string {
-  if (b.missing) return 'text-accent'
-  if (b.needsReview) return 'text-butter font-semibold'
-  if (b.status === 'completed') return 'text-sage'
-  return 'text-amber-400/90'
-}
-
-function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocused, hold, backlog = DEFAULT_BACKLOG_INFO, headChoices = EMPTY_HEAD_CHOICES }: {
-  job: ScheduleJob
-  eta: string | null
-  /** Live elapsed ms since `job.startedAt`, ticking once a second — `null`
-   *  for every non-running row so its props stay reference/value-stable
-   *  across ticks and the React.memo wrapper below can bail out. */
-  elapsedMs: number | null
-  avgDurationMs: number
-  listIndex: number
-  onFocused: (index: number) => void
-  /** Set when the last tick held this pending row behind an unsatisfied dep. */
-  hold?: ScheduleJobHold
-  /** This row's position + blockers in the Epic/dependency tree — see
-   *  lib/backlogTree. Defaults to a top-level, unblocked row so every
-   *  existing call site (tests included) that doesn't pass it keeps working. */
-  backlog?: JobRowBacklogInfo
-  /** Other heads (root chains) in this row's Epic section, available as
-   *  "attach behind" targets for the disposition-change control below —
-   *  only rendered when `job.disposition` is set. Defaults to an empty,
-   *  reference-stable array for the same memo reason as `backlog` above. */
-  headChoices?: HeadChoice[]
-}) {
-  const [open, setOpen] = useState(false)
-  const [showLog, setShowLog] = useState(false)
-
-  // Traceability link back to the Epic this job's PRD belongs to. Resolution
-  // order (epicId → sourcePromptId → sourceTabId) lives in
-  // lib/epicProvenance so the PRDs and History views resolve identically —
-  // this row used to key on sourceTabId alone, which silently mis-resolved
-  // rows where the two fields disagree.
-  const sessions = usePromptSessions((s) => s.sessions)
-  const epicRef = useMemo(() => resolveEpicRef(job, sessions), [job, sessions])
-  const linkedPromptSession = epicRef.known && epicRef.epicId ? sessions[epicRef.epicId] : null
-
-  const navigateToPromptSession = useCallback((id: string) => {
-    setPendingPromptSessionId(id)
-    window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'terminal' }))
-  }, [])
-
-  const isRunning = job.status === 'running'
-  const isFailed = job.status === 'failed'
-
-  let trailingLabel: string | null = null
-  if (isRunning && elapsedMs !== null) {
-    trailingLabel = `${formatDuration(elapsedMs)} elapsed`
-  } else if (job.status === 'completed' && job.startedAt && job.finishedAt) {
-    trailingLabel = `took ${formatTimingLabel(Date.parse(job.finishedAt) - Date.parse(job.startedAt))}`
-  } else if (eta) {
-    trailingLabel = eta
-  }
-
-  // Note shown in collapsed row below the title
-  const errorText = job.error ?? null
-  const note = isFailed && errorText
-    ? errorText.split('\n')[0]
-    : job.status === 'needs_review' && job.verifierVerdict
-      ? verdictLabel(job.verifierVerdict)
-      : null
-
-  // Progress fraction for running jobs (capped at 0.99 so it never "completes")
-  const progressPct = isRunning && elapsedMs !== null
-    ? Math.min(0.99, elapsedMs / avgDurationMs)
-    : 0
-
-  return (
-    <div
-      role="listitem"
-      className="border-t border-line"
-    >
-      <button
-        type="button"
-        data-job-row
-        data-job-status={job.status}
-        data-job-index={listIndex}
-        data-depth={backlog.depth}
-        onClick={() => setOpen((v) => !v)}
-        onFocus={() => onFocused(listIndex)}
-        style={backlog.depth > 0 ? { paddingLeft: 18 + backlog.depth * 20 } : undefined}
-        className={`w-full text-left grid grid-cols-[116px_1fr_auto_auto] items-center gap-4 px-[18px] py-3.5 hover:bg-bg/40 focus:outline-none focus:ring-1 focus:ring-accent focus:ring-inset ${open ? 'bg-bg-elev/40' : ''}`}
-        aria-expanded={open}
-        aria-label={`${prdNumber(job.slug) ? `PRD ${prdNumber(job.slug)}, ` : ''}${job.title}, ${job.status}${trailingLabel ? `, ${trailingLabel}` : ''}`}
-        title={job.title}
-      >
-        <SchBadge status={job.status} />
-        <div className="min-w-0">
-          <div className="flex items-baseline gap-2 text-[14.5px] font-medium text-fg leading-snug">
-            {prdNumber(job.slug) && <PrdNumberBadge n={prdNumber(job.slug)!} />}
-            {job.title}
-            <LeakBadge leaked={job.leakedDescendants} />
-            <LeftoverBadge count={job.leftoverCount} truncated={job.leftoverPathsTruncated} salvagePatch={job.salvagePatch} />
-            {backlog.parallelEligible && (
-              <span
-                data-testid="job-row-parallel-eligible"
-                title="No dependsOn, and nothing in this Epic depends on it — can run any time a slot is free"
-                className="text-[10px] font-semibold uppercase tracking-wide text-sage/90 bg-sage/10 border border-sage/30 rounded px-1.5 py-0.5"
-              >
-                parallel
-              </span>
-            )}
-          </div>
-          {backlog.cycle && (
-            <div className="text-[12.5px] mt-0.5 text-accent font-mono" data-testid="job-row-cycle-warning">
-              ⚠ dependsOn cycle — {backlog.blockers.map((b) => b.slug).join(' ↔ ') || 'self-referencing'}
-            </div>
-          )}
-          {!backlog.cycle && backlog.blockers.length > 0 && (
-            <div className="text-[12.5px] mt-0.5 font-mono" data-testid="job-row-blockers">
-              <span className={backlog.blocked || backlog.hasMissingDep ? 'text-amber-400/90' : 'text-fg-faint'}>
-                {backlog.blocked || backlog.hasMissingDep ? 'blocked by ' : 'depends on '}
-              </span>
-              {backlog.blockers.map((b, i) => (
-                <span key={b.slug} className={blockerToneClass(b)}>
-                  {i > 0 && ', '}
-                  {blockerLabel(b)}
-                </span>
-              ))}
-            </div>
-          )}
-          {note && (
-            <div className={`text-[12.5px] mt-0.5 ${isFailed ? 'text-accent/80' : 'text-fg-faint'}`}>
-              {note}
-            </div>
-          )}
-          {hold && (
-            <div className="text-[12.5px] mt-0.5 text-amber-400/90 font-mono" data-testid="job-row-hold">
-              {hold.dep
-                ? <>held · waiting on {hold.dep} ({hold.depStatus})</>
-                : <>held · {hold.reason ?? 'launch blocked'}</>}
-            </div>
-          )}
-          {!hold && job.status === 'pending' && job.heldReason && (
-            <div className="text-[12.5px] mt-0.5 text-amber-400/90 font-mono" data-testid="job-row-held-reason">
-              held · {job.heldReason}
-            </div>
-          )}
-          <EpicTag
-            epicId={epicRef.epicId}
-            label={epicRef.label ? truncateLabel(epicRef.label) : null}
-            onOpen={navigateToPromptSession}
-            testId="job-row-prompt-session-chip"
-            className="mt-0.5"
-          />
-        </div>
-        <ProjectTag cwd={job.cwd} />
-        <span className="inline-flex items-center gap-2.5 font-mono text-xs text-fg-faint shrink-0">
-          <OverrunBadge status={job.status} overrun={job.overrun} />
-          {trailingLabel}
-          <span
-            className={`text-fg-faint inline-flex transition-transform duration-150 ${open ? 'rotate-90' : ''}`}
-            aria-hidden="true"
-          >
-            <AlmanacIcon name="chevron" size={14} />
-          </span>
-        </span>
-      </button>
-
-      {/* Thin progress bar for running jobs (only when collapsed) */}
-      {isRunning && !open && (
-        <div className="h-1 bg-line mx-[18px] mb-3 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-accent transition-all duration-1000"
-            style={{ width: `${Math.max(4, progressPct * 100)}%` }}
-          />
-        </div>
-      )}
-
-      {/* Expanded detail panel */}
-      {open && (
-        <div className="px-[18px] py-5 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-5 bg-bg-elev/50 border-t border-line">
-          <DetailBlock label="Status">
-            <DetailLine k="result" v={job.exitCode !== null ? `exit ${job.exitCode}` : '—'} />
-            <DetailLine k="state" v={job.status.replace(/_/g, ' ')} />
-            {job.verifierVerdict && (
-              <DetailLine k="verdict" v={verdictLabel(job.verifierVerdict)} />
-            )}
-            {job.leakedDescendants && job.leakedDescendants.length > 0 && (
-              <DetailLine k="leaked" v={formatLeakedDescendants(job.leakedDescendants)} wrap />
-            )}
-            {job.leftoverCount != null && job.leftoverCount > 0 && (
-              <DetailLine
-                k="uncommitted"
-                v={`${job.leftoverCount} file${job.leftoverCount === 1 ? '' : 's'}${job.leftoverPathsTruncated ? '+' : ''}: ${(job.leftoverPaths ?? []).join(', ')}${job.salvagePatch ? ` — salvaged to ${job.salvagePatch}` : ''}`}
-                wrap
-              />
-            )}
-            {errorText && (
-              <DetailLine k="error" v={errorText.split('\n')[0]} wrap />
-            )}
-          </DetailBlock>
-
-          {job.statusHistory && job.statusHistory.length > 0 && (
-            <DetailBlock label="History">
-              <div className="grid gap-1">
-                {job.statusHistory.map((entry, i) => (
-                  <div key={i} className="font-mono text-xs leading-relaxed">
-                    <div className="text-fg">
-                      {entry.from ?? '(new)'} → {entry.to}
-                      <span className="text-fg-faint"> · {formatClock(Date.parse(entry.at))}</span>
-                    </div>
-                    {entry.reason && (
-                      <div className="text-fg-faint break-words">{entry.reason}</div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </DetailBlock>
-          )}
-
-          <DetailBlock label="Timing">
-            <DetailLine
-              k="started"
-              v={job.startedAt ? formatClock(Date.parse(job.startedAt)) : '—'}
-            />
-            <DetailLine
-              k="finished"
-              v={job.finishedAt ? formatClock(Date.parse(job.finishedAt)) : '—'}
-            />
-            <DetailLine
-              k="duration"
-              v={
-                job.startedAt && job.finishedAt
-                  ? formatTimingLabel(Date.parse(job.finishedAt) - Date.parse(job.startedAt))
-                  : isRunning && elapsedMs !== null
-                    ? formatDuration(elapsedMs)
-                    : '—'
-              }
-            />
-          </DetailBlock>
-
-          <DetailBlock label="Location">
-            <DetailLine k="group" v={`${job.parallelGroup} · ${job.slug}`} />
-            <DetailLine k="cwd" v={job.cwd ?? '—'} wrap />
-            <DetailLine k="session" v={epicRef.label ?? epicRef.epicId ?? '—'} wrap />
-            <DetailLine k="session id" v={epicRef.epicId ?? '—'} wrap />
-            <DetailLine k="prompt id" v={job.sourcePromptId ?? '—'} wrap />
-            <DetailLine k="source tab" v={job.sourceTabId ?? '—'} wrap />
-          </DetailBlock>
-
-          <DetailBlock label="Actions">
-            <div className="flex flex-col gap-1.5 items-start">
-              {linkedPromptSession && (
-                <button
-                  type="button"
-                  data-testid="job-row-prompt-session-link"
-                  title={linkedPromptSession.goalText}
-                  onClick={() => navigateToPromptSession(linkedPromptSession.id)}
-                  className="text-[13px] font-semibold text-accent hover:text-accent/80 bg-transparent border-0 cursor-pointer p-0"
-                >
-                  view epic →
-                </button>
-              )}
-              {job.runId && (
-                <button
-                  type="button"
-                  onClick={() => setShowLog(true)}
-                  className="text-[13px] font-semibold text-fg-dim hover:text-fg bg-transparent border-0 cursor-pointer p-0"
-                >
-                  view log →
-                </button>
-              )}
-              {job.status === 'quarantined' && (
-                <button
-                  type="button"
-                  data-testid="job-row-adopt-prd"
-                  title="Stamp this PRD's provenance so the scheduler will run it — no unstamped PRD runs automatically."
-                  onClick={() => {
-                    window.api.schedule.adoptPrd(job.slug).then(toast.fromOutcome).catch(() => toast.error('Failed to adopt PRD'))
-                  }}
-                  className="text-[13px] font-semibold text-accent hover:text-accent/80 bg-transparent border-0 cursor-pointer p-0"
-                >
-                  adopt PRD →
-                </button>
-              )}
-              {job.status !== 'pending' && job.status !== 'running' && job.status !== 'quarantined' && (
-                <button
-                  type="button"
-                  onClick={() => window.api.schedule.resetJob(job.slug)}
-                  className="text-[13px] font-semibold text-fg-dim hover:text-fg bg-transparent border-0 cursor-pointer p-0"
-                >
-                  reset to pending →
-                </button>
-              )}
-              {job.disposition && (job.status === 'pending' || job.status === 'quarantined') && (
-                <DispositionControl job={job} headChoices={headChoices} />
-              )}
-            </div>
-          </DetailBlock>
-        </div>
-      )}
-
-      {showLog && job.runId && (
-        <RunLogViewer
-          runId={job.runId}
-          slug={job.slug}
-          title={job.title || job.slug}
-          onClose={() => setShowLog(false)}
-        />
-      )}
-    </div>
-  )
-}
-
-export const JobRow = memo(JobRowComponent)
 
 // ─── Filter bar ─────────────────────────────────────────────────────────────
 
+const FILTER_CHIPS: Array<{ label: string; value: FilterStatus }> = [
+  { label: 'All', value: 'all' },
+  { label: 'Running', value: 'running' },
+  { label: 'Investigating', value: 'investigating' },
+  { label: 'Pending', value: 'pending' },
+  { label: 'Completed', value: 'completed' },
+  { label: 'Skipped', value: 'skipped' },
+  { label: 'Needs review', value: 'needs_review' },
+  { label: 'Failed', value: 'failed' },
+  { label: 'Quarantined', value: 'quarantined' },
+]
+
+/** Graph-mode status filter: flat mono text buttons (no pill, no border) sized for the 26px counts strip. */
+function StatusChips({ filter, onChange }: { filter: QueueFilter; onChange: (f: QueueFilter) => void }) {
+  return (
+    <div role="group" aria-label="Filter by status" className="flex items-center gap-2.5 min-w-0 overflow-hidden font-mono text-[11.5px]">
+      {FILTER_CHIPS.map((c) => (
+        <button
+          key={c.value}
+          type="button"
+          aria-pressed={filter.status === c.value}
+          onClick={() => onChange({ ...filter, status: c.value })}
+          className={`shrink-0 bg-transparent border-0 p-0 cursor-pointer ${filter.status === c.value ? 'text-accent font-semibold underline underline-offset-4' : 'text-fg-faint hover:text-fg-dim'}`}
+        >
+          {c.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function FilterBar({ filter, onChange, showText }: { filter: QueueFilter; onChange: (f: QueueFilter) => void; showText: boolean }) {
-  const chips: Array<{ label: string; value: FilterStatus }> = [
-    { label: 'All', value: 'all' },
-    { label: 'Running', value: 'running' },
-    { label: 'Investigating', value: 'investigating' },
-    { label: 'Pending', value: 'pending' },
-    { label: 'Completed', value: 'completed' },
-    { label: 'Skipped', value: 'skipped' },
-    { label: 'Needs review', value: 'needs_review' },
-    { label: 'Failed', value: 'failed' },
-    { label: 'Quarantined', value: 'quarantined' },
-  ]
+  const chips = FILTER_CHIPS
   return (
     <div className="flex items-center gap-3 flex-wrap">
       {/* Text filter — hidden when the shell's PLANS toolbar owns it */}
@@ -1328,151 +752,3 @@ function FilterBar({ filter, onChange, showText }: { filter: QueueFilter; onChan
   )
 }
 
-// ─── Supervisor sub-panel ────────────────────────────────────────────────────
-
-function SupervisorPanel({
-  supervisorConfig,
-  onSetConfig,
-  onBack,
-}: {
-  supervisorConfig: SupervisorConfig | undefined
-  onSetConfig: (partial: Partial<SupervisorConfig>) => void
-  onBack: () => void
-}) {
-  const [log, setLog] = useState<SupervisorLogEntry[]>([])
-  const [now, setNow] = useState(() => Date.now())
-  const focused = usePanelFocus()
-
-  useEffect(() => {
-    if (!focused) return
-    window.api.supervisor.getLog().then(setLog).catch(() => {})
-    setNow(Date.now())
-    const id = setInterval(() => setNow(Date.now()), 5000)
-    return () => clearInterval(id)
-  }, [focused])
-
-  const cfg: SupervisorConfig = {
-    enabled: supervisorConfig?.enabled ?? true,
-    intervalMinutes: supervisorConfig?.intervalMinutes ?? 15,
-    maxConcurrentProbes: supervisorConfig?.maxConcurrentProbes ?? 2,
-    probeStaleThresholdMinutes: supervisorConfig?.probeStaleThresholdMinutes ?? 10,
-  }
-
-  return (
-    <div className="bg-bg-elev/60">
-      {/* Header */}
-      <div className="px-3 py-2 flex items-center gap-2 border-b border-line">
-        <button
-          type="button"
-          onClick={onBack}
-          className="text-[10px] text-fg-faint hover:text-fg-dim"
-          title="Back to queue"
-        >
-          ← queue
-        </button>
-        <span className="text-[11px] font-medium text-fg-dim">Supervisor</span>
-        <button
-          type="button"
-          onClick={() => window.api.supervisor.getLog().then(setLog).catch(() => {})}
-          className="ml-auto text-[10px] text-fg-faint hover:text-fg-dim underline"
-          title="Refresh log"
-        >
-          refresh
-        </button>
-      </div>
-
-      {/* Config controls */}
-      <div className="px-3 py-2 space-y-1.5 border-b border-line">
-        <div className="text-[9px] text-fg-faint uppercase tracking-wider">Config</div>
-        <div className="flex items-center gap-3 flex-wrap text-[10px] text-fg-faint">
-          <label className="flex items-center gap-1">
-            <input
-              type="checkbox"
-              checked={cfg.enabled}
-              onChange={(e) => onSetConfig({ enabled: e.target.checked })}
-              className="cursor-pointer"
-            />
-            <span>enabled</span>
-          </label>
-          <label className="flex items-center gap-1" title="How often to check for wedged jobs (minutes)">
-            <span>interval</span>
-            <input
-              type="number"
-              min={5}
-              max={60}
-              value={cfg.intervalMinutes}
-              onChange={(e) => onSetConfig({ intervalMinutes: Number(e.target.value) })}
-              className="w-10 bg-bg border border-line rounded px-1 py-0.5 font-mono"
-            />
-            <span>min</span>
-          </label>
-          <label className="flex items-center gap-1" title="Max concurrent Opus probes per tick">
-            <span>probes</span>
-            <input
-              type="number"
-              min={1}
-              max={5}
-              value={cfg.maxConcurrentProbes}
-              onChange={(e) => onSetConfig({ maxConcurrentProbes: Number(e.target.value) })}
-              className="w-8 bg-bg border border-line rounded px-1 py-0.5 font-mono"
-            />
-          </label>
-          <label className="flex items-center gap-1" title="Probe a job only if no JSONL event in this many minutes">
-            <span>stale</span>
-            <input
-              type="number"
-              min={5}
-              max={30}
-              value={cfg.probeStaleThresholdMinutes}
-              onChange={(e) => onSetConfig({ probeStaleThresholdMinutes: Number(e.target.value) })}
-              className="w-8 bg-bg border border-line rounded px-1 py-0.5 font-mono"
-            />
-            <span>min</span>
-          </label>
-        </div>
-      </div>
-
-      {/* Log table */}
-      <div className="px-3 py-2">
-        <div className="text-[9px] text-fg-faint uppercase tracking-wider mb-1">
-          Recent probes (last {log.length})
-        </div>
-        {log.length === 0 ? (
-          <div className="text-[10px] text-fg-faint italic">No probes yet.</div>
-        ) : (
-          <div className="space-y-0.5 max-h-64 overflow-y-auto">
-            {log.map((entry, i) => (
-              <SupervisorLogRow key={`${entry.ts}-${i}`} entry={entry} now={now} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function SupervisorLogRow({ entry, now }: { entry: SupervisorLogEntry; now: number }) {
-  const isAction = entry.action !== 'none'
-  const ago = formatRelative(now - entry.ts)
-  return (
-    <div
-      className={`text-[10px] px-1.5 py-1 rounded font-mono ${isAction ? 'bg-red-500/10 border border-red-500/20' : 'bg-bg/40'}`}
-      title={entry.reason}
-    >
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="text-fg-faint shrink-0">{ago} ago</span>
-        <span className={`shrink-0 px-1 rounded ${entry.verdict === 'stuck' ? 'text-red-400 bg-red-500/10' : 'text-green-500/70'}`}>
-          {entry.verdict}
-        </span>
-        <span className="truncate text-fg-dim">{entry.jobSlug}</span>
-        {isAction && (
-          <span className="shrink-0 text-red-400">{entry.action}{entry.targetPid ? ` pid=${entry.targetPid}` : ''}</span>
-        )}
-        {entry.costUsd !== null && (
-          <span className="shrink-0 text-fg-faint">${entry.costUsd.toFixed(3)}</span>
-        )}
-      </div>
-      <div className="text-fg-faint truncate mt-0.5">{entry.reason}</div>
-    </div>
-  )
-}

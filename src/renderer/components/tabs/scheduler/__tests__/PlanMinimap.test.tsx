@@ -89,7 +89,7 @@ describe('WHOLE GRAPH minimap', () => {
     expect(running.title).toBe('#101 101-s1 — running')
     expect(running.dataset.tone).toBe('running')
     expect(dots.find((d) => d.title.includes('— completed'))!.className).toContain('bg-sage')
-    expect(one(el, '[data-testid="plan-minimap"]').className).toContain('h-[32px]')
+    expect(one(el, '[data-testid="plan-minimap"]').className).toContain('h-[28px]')
   })
 
   it('is only shown for ACTIVE plans', async () => {

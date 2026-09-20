@@ -430,7 +430,7 @@ export function KpiCell({ label, info, labelExtra, value, sub, third, testId }: 
   return (
     <div
       data-testid={testId}
-      className="flex-1 basis-0 min-w-0 px-3 py-1.5 border-l border-rule-structural first:border-l-0 flex flex-col justify-center gap-0.5"
+      className="flex-1 basis-0 min-w-0 px-3 py-1 border-l border-rule-structural first:border-l-0 flex flex-col justify-center gap-0.5"
     >
       <div className="flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-wide text-fg-faint leading-none">
         <span>{label}</span>

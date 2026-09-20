@@ -17,7 +17,7 @@ import type { NavKey } from '../../lib/navKey'
  * PRD queue, no global config) — reached via lib/navGroups.ts's labelByFace.
  * That split was reverted the same day: the two screens dodged real overlap
  * (SessionManagerConfig's "Scheduler policy" section duplicated the exact
- * same fire-policy/concurrency/threshold controls SchedulePanel's PolicyBar
+ * same fire-policy/concurrency/threshold controls the former PolicyBar
  * already renders live) instead of resolving it, so it's back to one
  * combined view — with four destinations split by how often the content
  * changes (2026-08 restyle): three tabs in one segmented pillbar for the
@@ -90,7 +90,7 @@ function SchedulerComponent({ navigate }: SchedulerProps = {}) {
 
   return (
     <div className="h-full flex flex-col">
-      {/* ── 2A bands: title 46px / KPI 78px / PLANS toolbar 32px ──── */}
+      {/* ── 2A bands: title 40px / KPI 70px / PLANS toolbar 30px ──── */}
       <SchedulerTopBands
         scopeCwd={scopeCwd}
         subView={subView}

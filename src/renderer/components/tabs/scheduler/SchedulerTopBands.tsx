@@ -6,13 +6,13 @@ import { toast } from '../../../state/toast'
 import { formatAgo, formatRelative } from '../../../lib/formatTime'
 import { withTimeout } from '../../../lib/withTimeout'
 import { buildPlans, summarizeQueue } from '../../../lib/schedulerStages'
-import { computeStatus } from '../../SchedulePanel'
+import { computeStatus } from './computeStatus'
 import { LearningPanel } from '../../LearningPanel'
 import { BandRow, InfoDot, KpiCell, MiniBar, SegmentPills, Stepper } from './sched-primitives'
 
 /**
- * Design 2A's three full-bleed bands — title (46px), KPI (78px), PLANS toolbar
- * (32px) — replacing the four stacked cards (serif title block, QueueHealthHeader,
+ * Design 2A's three full-bleed bands — title (40px), KPI (70px), PLANS toolbar
+ * (30px) — replacing the four stacked cards (serif title block, QueueHealthHeader,
  * WindowStrip, SchedulePanel's FireStatus + PolicyBar). UI only: every control
  * keeps its existing window.api call.
  *
@@ -34,7 +34,7 @@ const POLL_MS = 15_000
 const ATTENTION = new Set(['failed', 'needs_review', 'quarantined'])
 
 /** Shared with the plan list: first failed/needs_review/quarantined row scrolls into view. */
-export function scrollToNeedsYou(): void {
+function scrollToNeedsYou(): void {
   const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-job-row]'))
   const target = rows.find((r) => ATTENTION.has(r.dataset.jobStatus ?? ''))
   target?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
@@ -281,8 +281,8 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
 
   return (
     <div data-testid="scheduler-top-bands" className="shrink-0 px-[18px]">
-      {/* ── Title band — 46px ─────────────────────────────────────── */}
-      <BandRow height={46} testId="queue-health-header" className="gap-3">
+      {/* ── Title band — 40px ─────────────────────────────────────── */}
+      <BandRow height={40} testId="queue-health-header" className="gap-3">
         <h1 className="m-0 font-serif text-[21px] font-semibold leading-none tracking-tight text-fg">Scheduler</h1>
         <span className="w-px h-[20px] bg-rule-structural" aria-hidden="true" />
         <span className={`inline-flex items-center gap-1.5 text-[12.5px] font-medium ${tone.text}`} data-testid="scheduler-state-word" data-state={word}>
@@ -322,8 +322,8 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
 
       <SchedulerAlerts now={now} />
 
-      {/* ── KPI band — 78px, six equal cells ──────────────────────── */}
-      <BandRow height={78} testId="scheduler-kpi-band">
+      {/* ── KPI band — 70px, six equal cells ──────────────────────── */}
+      <BandRow height={70} testId="scheduler-kpi-band">
         <KpiCell
           testId="kpi-window"
           label="Window used"
@@ -437,8 +437,8 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
         />
       </BandRow>
 
-      {/* ── PLANS toolbar — 32px ──────────────────────────────────── */}
-      <BandRow height={32} testId="scheduler-plans-toolbar" className="gap-3">
+      {/* ── PLANS toolbar — 30px ──────────────────────────────────── */}
+      <BandRow height={30} testId="scheduler-plans-toolbar" className="gap-3">
         <span className="text-[10.5px] font-semibold uppercase tracking-wide text-fg-faint">Plans</span>
         <span className="font-mono text-[12px] text-fg-faint whitespace-nowrap" data-testid="scheduler-plans-meta">
           {planCounts.active} active · {planCounts.queued} queued · {planCounts.draft} draft · {jobs.length} PRDs

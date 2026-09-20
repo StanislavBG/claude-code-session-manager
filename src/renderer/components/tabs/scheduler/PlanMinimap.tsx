@@ -18,8 +18,8 @@ const TONE_CLASS: Record<Tone, string> = {
   pending: 'bg-fg-faint/50',
 }
 
-export interface MinimapDot { x: number; y: number; tone: Tone; title: string }
-export interface MinimapLayout {
+interface MinimapDot { x: number; y: number; tone: Tone; title: string }
+interface MinimapLayout {
   dots: MinimapDot[]
   /** Left edge / width of each stage's cluster, index = stage.n - 1. */
   stageX: number[]
@@ -36,7 +36,7 @@ function toneOf(status: string): Tone {
 }
 
 /** One pass over every PRD, O(V). Computed once per snapshot (memoized by the caller's `stages`). */
-export function layoutMinimap(stages: Stage[]): MinimapLayout {
+function layoutMinimap(stages: Stage[]): MinimapLayout {
   const dots: MinimapDot[] = []
   const stageX: number[] = []
   const stageW: number[] = []
@@ -59,11 +59,11 @@ export function layoutMinimap(stages: Stage[]): MinimapLayout {
 }
 
 /** Lowest 0-based stage index whose rows include a status matching `pred`, or -1. */
-export function firstStageWith(stages: Stage[], pred: (status: string) => boolean): number {
+function firstStageWith(stages: Stage[], pred: (status: string) => boolean): number {
   return stages.findIndex((s) => s.rows.some((r) => pred(r.status)))
 }
-export const isRunningStatus = (s: string) => s === 'running' || s === 'investigating'
-export const isBlockerStatus = (s: string) => s === 'failed' || s === 'needs_review' || s === 'quarantined'
+const isRunningStatus = (s: string) => s === 'running' || s === 'investigating'
+const isBlockerStatus = (s: string) => s === 'failed' || s === 'needs_review' || s === 'quarantined'
 
 interface PlanMinimapProps {
   stages: Stage[]
@@ -99,7 +99,7 @@ export function PlanMinimap({ stages, first, perView, onSeek }: PlanMinimapProps
 
   const seg = 'px-2 h-[20px] text-[11.5px] disabled:opacity-40 disabled:cursor-not-allowed'
   return (
-    <div data-testid="plan-minimap" className="h-[32px] flex items-center gap-3 px-3 border-t border-rule-inner">
+    <div data-testid="plan-minimap" className="h-[28px] flex items-center gap-3 px-3 border-t border-rule-inner">
       <span className="shrink-0 flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-wide text-fg-faint">
         Whole graph
         <InfoDot title="Every PRD in this plan as one dot, grouped by stage. The rust box is the range of stages shown below — drag it to scroll." />

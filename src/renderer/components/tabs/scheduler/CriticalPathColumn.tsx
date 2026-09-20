@@ -6,7 +6,7 @@ import type { HeadChoice } from './DispositionControl'
 const EMPTY_HEAD_CHOICES: HeadChoice[] = []
 const isRunning = (s: string) => s === 'running' || s === 'investigating'
 
-export interface CriticalEntry {
+interface CriticalEntry {
   row: PlanRow
   /** Sum of estimateMinutes (null = 0) from the chain's first PRD through this one. */
   totalMinutes: number
@@ -15,7 +15,7 @@ export interface CriticalEntry {
 }
 
 /** The plan's longest dependsOn chain, with running totals and per-stage non-critical counts. O(V). */
-export function criticalEntries(plan: Plan): CriticalEntry[] {
+function criticalEntries(plan: Plan): CriticalEntry[] {
   const chain = criticalPath(plan)
   const bySlug = new Map<string, PlanRow>()
   const stageSize = new Map<number, number>()

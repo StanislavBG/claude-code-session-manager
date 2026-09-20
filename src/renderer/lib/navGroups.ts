@@ -52,7 +52,7 @@ const BOTH: NavFace[] = ['home', 'project']
 export const NAV_ITEMS: NavGroupItem[] = [
   // Workspace
   { key: 'overview',     group: 'Workspace', label: 'Dashboard', icon: 'home',        hint: 'This machine — every project, every active session', faces: HOME },
-  { key: 'project-home', group: 'Workspace', label: 'Project Home', icon: 'home',     hint: 'What this project is, and what is in flight', faces: PROJECT },
+  { key: 'project-home', group: 'Workspace', label: 'Project Home', icon: 'home',     hint: 'One generated overview page for this project', faces: PROJECT },
   { key: 'terminal',   group: 'Workspace', label: 'Sessions',  icon: 'terminal',     hint: 'Independent goal-scoped sessions for this project', faces: PROJECT },
   { key: 'projects',   group: 'Workspace', label: 'File Explorer', icon: 'projects',  hint: 'Browse files + edit — starts at your home folder from Home, the active project from a Tab', faces: BOTH },
   // Scheduler is PROJECT-only: every route and view it renders is scoped to a

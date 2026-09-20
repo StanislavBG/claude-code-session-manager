@@ -12,15 +12,12 @@ const bilkoHost = require('../bilkoHost.cjs');
 function makeProject() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bilko-host-'));
   config.addAllowedRoot(root);
-  fs.mkdirSync(path.join(root, 'session-manager-operations', 'project-pages', 'output'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'session-manager-operations', 'project-pages'), { recursive: true });
   fs.writeFileSync(
     path.join(root, 'session-manager-operations', 'project-pages', 'home.html'),
     '<html><title>Demo</title>Home</html>',
   );
-  fs.writeFileSync(
-    path.join(root, 'session-manager-operations', 'project-pages', 'output', 'feature.html'),
-    '<html><title>Demo</title>Feature</html>',
-  );
+  fs.writeFileSync(path.join(root, 'feature.html'), '<html><title>Demo</title>Feature</html>');
   fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'demo-app', version: '1.2.3' }));
   return root;
 }
@@ -42,7 +39,7 @@ test('addDocument then prepareBundle writes a sub-path document at the expected 
     cwd: root,
     subpath: 'special-doc/01',
     title: 'Feature deep-dive',
-    source: { kind: 'project-page-lens', lens: 'feature' },
+    source: { kind: 'file', path: 'feature.html' },
   });
   const result = await bilkoHost.prepareBundle({ cwd: root, slug: 'demo-app' });
   assert.equal(
@@ -53,6 +50,22 @@ test('addDocument then prepareBundle writes a sub-path document at the expected 
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('a non-home project-page-lens document throws the retired-lens error (no output/ fallback)', async () => {
+  const root = makeProject();
+  await bilkoHost.prepareBundle({ cwd: root, slug: 'demo-app' });
+  await bilkoHost.addDocument({
+    cwd: root,
+    subpath: 'special-doc/01',
+    title: 'Feature deep-dive',
+    source: { kind: 'project-page-lens', lens: 'feature' },
+  });
+  await assert.rejects(
+    () => bilkoHost.prepareBundle({ cwd: root, slug: 'demo-app' }),
+    /retired "feature" Project Page lens; only the single home\.html page is generated now/,
+  );
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('removeDocument + prepareBundle wholesale-rebuilds dist/, leaving no trace of the removed file', async () => {
   const root = makeProject();
   await bilkoHost.prepareBundle({ cwd: root, slug: 'demo-app' });
@@ -60,7 +73,7 @@ test('removeDocument + prepareBundle wholesale-rebuilds dist/, leaving no trace 
     cwd: root,
     subpath: 'special-doc/01',
     title: 'Feature deep-dive',
-    source: { kind: 'project-page-lens', lens: 'feature' },
+    source: { kind: 'file', path: 'feature.html' },
   });
   await bilkoHost.prepareBundle({ cwd: root, slug: 'demo-app' });
   const docId = added.documents.find((d) => d.subpath === 'special-doc/01').id;
@@ -95,10 +108,10 @@ test('addDocument refuses a duplicate sub-path', async () => {
     cwd: root,
     subpath: 'doc',
     title: 'A',
-    source: { kind: 'project-page-lens', lens: 'feature' },
+    source: { kind: 'file', path: 'feature.html' },
   });
   await assert.rejects(
-    () => bilkoHost.addDocument({ cwd: root, subpath: 'doc', title: 'B', source: { kind: 'project-page-lens', lens: 'feature' } }),
+    () => bilkoHost.addDocument({ cwd: root, subpath: 'doc', title: 'B', source: { kind: 'file', path: 'feature.html' } }),
     /already uses subpath/,
   );
   fs.rmSync(root, { recursive: true, force: true });

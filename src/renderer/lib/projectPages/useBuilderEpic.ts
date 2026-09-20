@@ -1,10 +1,9 @@
 /**
  * Shared "Generate My Project Home" mechanism — creates or resumes a single
  * `project-home-builder`-tagged Epic for the active project. Lifted out of
- * ProjectPagesSection.tsx (PRD 932) so ProjectHome.tsx's one primary generate
- * action and ProjectPagesSection's lens viewer both drive the exact same
- * find-or-create path (architecture spec's "resume, don't duplicate" rule)
- * instead of two divergent copies.
+ * ProjectPagesSection.tsx (PRD 932). The single Generate action drives this
+ * find-or-create path (architecture spec's "resume, don't duplicate" rule),
+ * producing exactly one artifact: project-pages/home.html.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { usePromptSessions, type PromptSession } from '../../state/promptSessions'
@@ -15,7 +14,7 @@ import { setPendingPromptSessionId } from '../promptSessionDeepLink'
 
 export const BUILDER_TAG = 'project-home-builder' as const
 export const BUILDER_AGENT_NAME = 'project-home-builder' as const
-const GENERATE_GOAL = "Generate this project's Project Pages (Home/Marketing/Feature/Architecture/Brief)."
+const GENERATE_GOAL = "Generate this project's Project Home page (one self-contained home.html)."
 
 export function findActiveBuilderEpic(sessions: Record<string, PromptSession>, cwd: string): PromptSession | null {
   for (const session of Object.values(sessions)) {

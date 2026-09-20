@@ -26,5 +26,7 @@ page in a sandboxed frame. The Host-on-Bilko.run tab also reads `home.html` as
 its default root document (see
 [`bilko-host-integration.md`](../architecture/bilko-host-integration.md)).
 
-There is no summary, picks, or per-lens output; a project with no `home.html`
-shows an empty state with a Generate action.
+Exactly one artifact exists: `home.html`. The old `output/<lens>.html` lens
+directory is retired — nothing writes or reads it (a non-`home` lens document
+in Host-on-Bilko.run throws). A project with no `home.html` shows an empty
+state with a Generate action.

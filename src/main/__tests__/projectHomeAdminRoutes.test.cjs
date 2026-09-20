@@ -163,3 +163,15 @@ test('bad JSON, missing/relative cwd, non-project cwd, and unknown keys are 400s
   expect(res.status).toBe(400);
   expect(res.body.error).toContain('not a Session Manager project');
 });
+
+test('one-file contract: project-pages holds exactly home.html after one write and after a regenerate', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const pagesDir = path.join(fs.realpathSync(cwd), 'session-manager-operations', 'project-pages');
+  await adminHttp.call('POST', '/admin/project-home/write', { body: { cwd, html: '<p>first</p>' } });
+  expect(fs.readdirSync(pagesDir)).toEqual(['home.html']);
+  await adminHttp.call('POST', '/admin/project-home/write', { body: { cwd, html: '<p>second, different</p>' } });
+  expect(fs.readdirSync(pagesDir)).toEqual(['home.html']);
+  expect(fs.readFileSync(path.join(pagesDir, 'home.html'), 'utf8')).toBe('<p>second, different</p>');
+});

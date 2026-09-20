@@ -220,13 +220,12 @@ async function removeDocument({ cwd, id }) {
 
 async function resolveDocumentHtml(cwd, doc) {
   if (doc.source.kind === 'project-page-lens') {
-    // Only `home` is generated now (one home.html); the other lens names
-    // are legacy and resolve to their old output/<lens>.html if one exists.
-    const result = await config.readText(
-      doc.source.lens === 'home'
-        ? homePagePath(cwd)
-        : opsPath(cwd, 'project-pages', 'output', `${doc.source.lens}.html`),
-    );
+    // Only `home` is generated now (one home.html); other lens names are
+    // retired and have no output anywhere — fail loudly rather than fall back.
+    if (doc.source.lens !== 'home') {
+      throw new Error(`document "${doc.title}" points at the retired "${doc.source.lens}" Project Page lens; only the single home.html page is generated now`);
+    }
+    const result = await config.readText(homePagePath(cwd));
     if (!result.exists) {
       throw new Error(`document "${doc.title}" points at the ${doc.source.lens} Project Page, but it hasn't been generated yet`);
     }

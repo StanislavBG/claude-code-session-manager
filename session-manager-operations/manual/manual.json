@@ -1,9 +1,9 @@
 {
-  "version": "1.8.0",
+  "version": "1.9.0",
   "title": "The Session Manager Field Manual",
   "summary": "A tab-by-tab operator's guide to Claude Code Session Manager — what each surface is for, the one thing people get wrong about it, and the workflow that makes it pay for itself.",
-  "documentsAppVersion": "0.90.0",
-  "releasedAt": "2026-09-02",
+  "documentsAppVersion": "0.91.0",
+  "releasedAt": "2026-09-20",
   "chapters": [
     {
       "slug": "getting-started",
@@ -74,8 +74,8 @@
     },
     {
       "slug": "home-and-project-brief",
-      "title": "Home & Project Brief — the cockpit's dashboard",
-      "blurb": "How the Home tab's cross-project dashboard and a project's self-maintaining Brief document actually work, and the daily workflow that gets the most out of both.",
+      "title": "Home & Project Home — the cockpit's dashboard",
+      "blurb": "How the Home tab's cross-project dashboard works, what Project Home actually is now — one generated page and the button that writes it — and the daily workflow that gets the most out of both.",
       "file": "home-and-project-brief.html"
     },
     {

@@ -1,15 +1,15 @@
-<h1>Home &amp; Project Brief — the cockpit's dashboard</h1>
+<h1>Home &amp; Project Home — the cockpit's dashboard</h1>
 
 <p class="lede">Home is not a landing page you pass through on the way to work — it is the one
 screen that answers "what does this machine need from me right now?" across every project you've
-ever opened. Project Brief is its sibling on the other side of a Terminal tab: a synthesized,
-editable document about the one project you're currently in. Neither one runs anything by itself;
-both exist to keep you from having to click through five tabs to find out what's true.</p>
+ever opened. Project Home is its sibling on the other side of a Terminal tab: one generated page about the one
+project you're currently in. Neither one runs anything by itself; both exist to keep you from
+having to click through five tabs to find out what's true.</p>
 
 <h2>1. What Home actually shows, top to bottom</h2>
 
 <p>Home is assembled from existing zustand stores — nothing on this screen is a second copy of
-data another tab already owns. Read top to bottom, it is a fixed stack of six sections:</p>
+data another tab already owns. Read top to bottom, it is a fixed stack of seven sections:</p>
 
 <table class="manual-table">
   <thead><tr><th>Section</th><th>What it is</th></tr></thead>
@@ -26,6 +26,10 @@ data another tab already owns. Read top to bottom, it is a fixed stack of six se
     holders, joined against running scheduler jobs and chat runs for context.</td></tr>
     <tr><td><strong>Recent sessions</strong></td><td>The five most-recently-touched transcripts
     under <code>~/.claude/projects/</code> — the same source History reads.</td></tr>
+    <tr><td><strong>Agent tools</strong></td><td>Collapsed by default to a single
+    "Agent tools · <em>N</em> MCP tools" line. Expand it for every MCP tool a Session in any
+    project can reach, one row each: the tool name and a one-line purpose. Moved here from
+    Project Home in app v0.91.0.</td></tr>
     <tr><td><strong>Agents</strong></td><td>A read-only reference card listing each of the five
     Session tags and the exact <code>initialPromptTemplate</code> text it seeds into a session —
     not a picker, just "what does this tag actually do".</td></tr>
@@ -103,68 +107,58 @@ flow, not a second way to create one.</p>
   type your goal, submit.</li>
 </ol>
 
-<h2>5. Project Brief: a document that maintains itself, cheaply</h2>
+<h2>5. Project Home: one generated page, and the button that makes it</h2>
 
-<p>Switch to a project's <strong>Project Home</strong> surface and you're looking at something
-different from Home: one project's own synthesized brief, not a cross-project dashboard. Above the
-document sits a thin live strip that changes underneath the static content:</p>
+<p>Switch to a project's <strong>Project Home</strong> surface and you get exactly one thing: a
+single self-contained HTML page about that project, rendered in a sandboxed iframe. There is no
+live strip, no synthesized brief blocks, no per-lens output. The whole surface is one file —
+<code>session-manager-operations/project-pages/home.html</code> — plus the button that writes it.</p>
 
-<ul>
-  <li><strong>What is in flight</strong> — cards for the project's current Sessions, computed live
-  from the Session queue every render. The card copy explicitly says "this block is never
-  hand-written" for a reason: it can't drift out of sync with what's actually running.</li>
-  <li><strong>Waiting on you</strong> — open questions the last run couldn't resolve on its own,
-  each with an <strong>Answer in Session →</strong> button that jumps straight to that Session's Terminal
-  view. Hidden entirely when there are none.</li>
-</ul>
+<p>Before that file exists, the screen is a lone <strong>Generate Project Home</strong> button and
+nothing else. Once it exists, the page fills the pane, with a small control row flush right above
+it: a <code>generated &lt;n&gt;m ago</code> provenance chip and a <strong>Regenerate</strong>
+button.</p>
 
-<p>Below that strip is the generated document itself, rendered in the same sandboxed iframe the
-Project Pages feature uses, with one button above it: <strong>Generate My Project Home</strong>.</p>
+<p class="manual-note">This surface was deliberately emptied in app v0.91.0. It previously carried
+"What is in flight" and "Waiting on you" strips above the document; both were removed because Home
+already answers those questions machine-wide in its Active sessions and Needs you sections. If you
+are looking for the MCP tool catalog that used to sit here, it now lives on Home as the collapsed
+Agent tools section described in section 1.</p>
 
-<figure class="manual-figure" data-figure="project-brief-overview">
-  <div class="manual-figure__frame" data-capture="Project Home tab for an active project, showing the in-flight strip and generated document"></div>
+<figure class="manual-figure" data-figure="project-home-overview">
+  <div class="manual-figure__frame" data-capture="Project Home tab for a project that already has a generated home.html, showing the control row and the page filling the pane"></div>
   <figcaption>
-    <span class="callout" data-arrow="up">1</span> What is in flight — live, never hand-written.
-    <span class="callout" data-arrow="left">2</span> Generate My Project Home.
-    <span class="callout" data-arrow="down">3</span> Provenance line — generated timestamp or
-    "shipped default".
+    <span class="callout" data-arrow="up">1</span> The generated page — one file, sandboxed iframe.
+    <span class="callout" data-arrow="left">2</span> Provenance chip — "generated &lt;n&gt;m ago".
+    <span class="callout" data-arrow="right">3</span> Regenerate.
   </figcaption>
 </figure>
 
-<h2>6. What "Generate" actually does, and why it's cost-gated</h2>
+<h2>6. What "Generate" actually does</h2>
 
-<p>Pressing Generate fires exactly one <code>claude -p</code> pass, pinned to
-<code>sonnet</code>, with a 3-minute hard timeout — the same spawn pattern the Memory Clusters
-feature uses (stdin closed, cost-gated so it only runs on your explicit click, never on a timer).
-It acquires a slot from the same machine-wide session-slot pool described above before it launches,
-so a Generate click competes with your scheduler queue and your other chat runs for the same 5 (or
-however many you've set) slots — if the pool is exhausted, the request simply fails with "no
-session slot free — try again shortly" rather than queuing invisibly.</p>
+<p>Generate is not a silent background synthesis pass — it opens a <strong>Session</strong> and
+hands the work to an agent, in front of you. Pressing it creates, or resumes if one is already
+active, a single Session in that project tagged <code>project-home-builder</code> and bound to the
+<code>project-home-builder</code> Agent persona, then navigates you straight into it.</p>
 
-<p>What goes into the prompt is deliberately narrow and real: your project's <code>CLAUDE.md</code>
-text, every active and archived Session's tag + goal text (archived ones capped at the 200 most
-recent), the last 50 lines of <code>git log --oneline</code>, and a depth-2 listing of
-<code>src/</code>. The synthesizer is instructed to treat all of that purely as data to analyze,
-never as instructions to follow — it returns one JSON object and nothing else, which is then
-persisted to <code>&lt;project&gt;/session-manager-operations/project-brief/brief.json</code>.</p>
+<p>Two preflight checks run <em>before</em> any Session is created, and either one refuses the
+click with a toast rather than minting a Session you would then have to clean up: the
+<code>project-home-builder</code> persona must actually be installed in your Agent Library, and
+this project's delegation readiness must be green — the same checks the New Session readiness
+banner shows you. A refusal creates nothing at all.</p>
 
-<h2>7. The brief is a file you're meant to hand-edit</h2>
+<p>The agent then reads the real project — manifest, README, directory structure, key scripts,
+recent commits — and calls the <code>project_home_write</code> MCP tool exactly once with the
+finished HTML. That tool validates the document (under 1 MB; no <code>&lt;script src&gt;</code>, no
+remote <code>&lt;link&gt;</code>, no <code>@import</code>, no remote <code>url(...)</code>) and
+writes it atomically. It is the only sanctioned writer of that file.</p>
 
-<p>This is the detail most people miss: the brief is not a cache you regenerate and discard — it's
-a real, versioned document with a maintain loop built in. Certain blocks are "pinnable". Hand-edit
-one (zero LLM cost, no session slot involved) and it is automatically pinned, which means the next
-Generate pass feeds your edited text back in as an input instead of silently overwriting it with a
-fresh synthesis. Un-pin a block explicitly if you want the next refresh to regenerate it from
-scratch.</p>
+<p class="manual-note">Because it runs as an ordinary Session, a Generate competes for the same
+machine-wide session slots as your scheduler queue and your other chats — and you can watch it
+work, and interrupt it, like any other Session. Regenerating <em>replaces</em> home.html rather
+than accumulating a second file; the folder holds exactly one page, always.</p>
 
-<p class="manual-note">Practical rule: generate once when a project is unfamiliar to skim its shape,
-then treat the brief the way you'd treat a README you maintain by hand — edit the parts that are
-wrong or stale, regenerate the parts you haven't touched, and don't re-run Generate reflexively
-just because time has passed. The provenance line under the title tells you exactly how stale the
-generated portion is.</p>
-
-<h2>8. The workflow that pays off</h2>
-
+<h2>7. The workflow that pays off</h2>
 <ol class="manual-steps">
   <li>Open Home first, every session. Check Needs you before you check anything else — it's the
   one place a proposed Session, a stalled chat, and a failed job all surface together.</li>
@@ -174,6 +168,7 @@ generated portion is.</p>
   conversation in it; a second tab on the same cwd never activates a new project, it just re-focuses
   the one you already have.</li>
   <li>The first time you land in an unfamiliar project's Project Home, press Generate once to get
-  oriented, then switch to hand-editing the brief as your understanding of the project firms up —
-  don't keep paying for full re-synthesis of blocks you already know are right.</li>
+  oriented. After that, regenerate only when the project has actually changed shape — a new
+  top-level module, a changed build command. Re-running it reflexively because time has passed
+  spends a session slot rewriting a page that was already right.</li>
 </ol>

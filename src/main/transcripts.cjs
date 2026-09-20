@@ -191,8 +191,11 @@ async function readPage(sub, startLine, endLine) {
   const from = Math.max(0, Math.min(startLine, total - 1));
   const to = Math.max(0, Math.min(endLine, total - 1));
   if (total === 0 || from > to) return { events: [], totalLines: total };
-  const first = sub.lineIndex[from];
-  const last = sub.lineIndex[to];
+  // Snapshot the entries synchronously: the awaits below can interleave with a
+  // rotation/truncation rebuild that shrinks sub.lineIndex, so never re-index it after.
+  const entries = sub.lineIndex.slice(from, to + 1);
+  const first = entries[0];
+  const last = entries[entries.length - 1];
   const spanOffset = first.byteOffset;
   const spanLength = last.byteOffset + last.byteLength - spanOffset;
   const events = [];
@@ -202,7 +205,7 @@ async function readPage(sub, startLine, endLine) {
     const buf = Buffer.alloc(spanLength);
     await fd.read(buf, 0, spanLength, spanOffset);
     for (let lineNo = from; lineNo <= to; lineNo++) {
-      const entry = sub.lineIndex[lineNo];
+      const entry = entries[lineNo - from];
       const relOffset = entry.byteOffset - spanOffset;
       const text = buf.toString('utf8', relOffset, relOffset + entry.byteLength);
       let obj;

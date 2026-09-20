@@ -38,4 +38,21 @@ describe('ProjectHome with no active tab', () => {
     expect(() => mount(<ProjectHome />)).not.toThrow()
     expect(container?.textContent).toContain('Open a project to see its brief')
   })
+
+  it('renders no hand-written live blocks for an active tab without home.html', async () => {
+    useSessions.setState({ tabs: [{ id: 't1', cwd: '/proj' } as any], activeTabId: 't1' })
+    ;(globalThis as any).window.api.projectPages = {
+      get: vi.fn().mockResolvedValue({ html: null, mtimeMs: null }),
+      watch: vi.fn().mockResolvedValue(undefined),
+      unwatch: vi.fn().mockResolvedValue(undefined),
+      onChanged: vi.fn().mockReturnValue(() => {}),
+    }
+    await act(async () => {
+      mount(<ProjectHome />)
+    })
+    const text = container?.textContent ?? ''
+    expect(text).not.toContain('What is in flight')
+    expect(text).not.toContain('Waiting on you')
+    expect(text).not.toContain('Agent tools')
+  })
 })

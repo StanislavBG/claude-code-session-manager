@@ -38,9 +38,22 @@ function attachWindow(w) {
 
 const { encodeCwd } = require('./lib/encodeCwd.cjs');
 const { classifyLine } = require('./lib/classifyTranscriptLine.cjs');
+const { resolveEpicTranscriptPath } = require('./lib/epicTranscriptPath.cjs');
+
+/**
+ * Where the CLI's JSONL for this session lives. Epic sessions run in a
+ * worktree, so the resolver checks the worktree encoding as well as the
+ * project one; a non-Epic tab resolves to the plain project-encoded path.
+ * Sync + absolute always (falls back to the plain path on invalid input).
+ */
+function resolveTranscript(cwd, sessionUuid) {
+  const r = resolveEpicTranscriptPath({ cwd, claudeSessionId: sessionUuid });
+  const filePath = r.path || path.join(os.homedir(), '.claude', 'projects', encodeCwd(cwd), `${sessionUuid}.jsonl`);
+  return { filePath, existsAnywhere: !!r.existsAnywhere };
+}
 
 function transcriptPath(cwd, sessionUuid) {
-  return path.join(os.homedir(), '.claude', 'projects', encodeCwd(cwd), `${sessionUuid}.jsonl`);
+  return resolveTranscript(cwd, sessionUuid).filePath;
 }
 
 // Cap bytes read per readDelta pass. Bounds memory on first attach to a very
@@ -361,9 +374,14 @@ async function subscribe({ tabId, cwd, sessionUuid }) {
     });
     return { ok: false, path: null, error: 'too many active subscriptions' };
   }
-  const filePath = transcriptPath(cwd, sessionUuid);
-  const dir = path.dirname(filePath);
-  await fsp.mkdir(dir, { recursive: true }).catch(() => {});
+  // Known limitation: filePath is latched here and never re-resolved. Fine
+  // because nothing relocates a transcript under an open subscription.
+  const { filePath, existsAnywhere } = resolveTranscript(cwd, sessionUuid);
+  // Only create the dir when no transcript exists anywhere (it is the dir the
+  // CLI is about to write); otherwise we'd mint empty project dirs it never made.
+  if (!existsAnywhere) {
+    await fsp.mkdir(path.dirname(filePath), { recursive: true }).catch(() => {});
+  }
   const sub = {
     tabId,
     cwd,

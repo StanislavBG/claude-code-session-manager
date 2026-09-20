@@ -27,7 +27,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
-const { encodeCwd } = require('./encodeCwd.cjs');
+const { resolveEpicTranscriptPath } = require('./epicTranscriptPath.cjs');
 
 // Mirrors rawSessionModel.ts's RAW_MODELS — duplicated rather than imported
 // because that file is a renderer ES module and this is a main-process CJS
@@ -252,10 +252,10 @@ function findLatestTranscriptModel(cwd, agentType, deps) {
   matches.sort((a, b) => (Date.parse(b.createdAt || 0) || 0) - (Date.parse(a.createdAt || 0) || 0));
 
   const homeDir = deps.homeDir || os.homedir();
-  const encodeCwdFn = deps.encodeCwd || encodeCwd;
   const re = /"model":"([^"]+)"/g;
   for (const session of matches) {
-    const filePath = path.join(homeDir, '.claude', 'projects', encodeCwdFn(cwd), `${session.claudeSessionId}.jsonl`);
+    const filePath = resolveEpicTranscriptPath({ cwd, claudeSessionId: session.claudeSessionId, deps: { homeDir } }).path;
+    if (!filePath) continue;
     const tail = readTail(filePath, MAX_TRANSCRIPT_TAIL_BYTES, deps);
     if (!tail) continue;
     let match;

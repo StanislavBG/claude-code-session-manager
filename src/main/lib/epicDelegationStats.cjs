@@ -27,7 +27,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { encodeCwd } = require('./encodeCwd.cjs');
+const { resolveEpicTranscriptPath } = require('./epicTranscriptPath.cjs');
 const { classifyLine } = require('./classifyTranscriptLine.cjs');
 
 // Same cap transcripts.cjs's readDelta uses for a single pass — bounds
@@ -85,7 +85,8 @@ function countInlineEdits(cwd, claudeSessionId, deps = {}) {
   const readFn = deps.readTranscriptTail || readTranscriptTail;
   const homeDir = deps.homeDir || os.homedir();
   try {
-    const filePath = path.join(homeDir, '.claude', 'projects', encodeCwd(cwd), `${claudeSessionId}.jsonl`);
+    const filePath = resolveEpicTranscriptPath({ cwd, claudeSessionId, deps: { homeDir } }).path;
+    if (!filePath) return 0;
     const text = readFn(filePath, deps);
     let count = 0;
     for (const line of text.split('\n')) {

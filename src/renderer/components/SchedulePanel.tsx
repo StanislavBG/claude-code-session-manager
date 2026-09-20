@@ -11,8 +11,12 @@ import { RunLogViewer } from './tabs/plans/RunLogViewer'
 import { FilterPills } from './ui/FilterPills'
 import { AlmanacIcon } from './layout/AlmanacIcon'
 import { SchBadge, LeakBadge, LeftoverBadge, OverrunBadge, formatLeakedDescendants, ProjectTag, EpicTag, DetailBlock, DetailLine, prdNumber, PrdNumberBadge, projectNameFromCwd, verdictLabel } from './tabs/scheduler/sched-primitives'
+import { DispositionControl, truncateLabel, sectionHeadChoices, buildHeadChoicesBySlug, type HeadChoice } from './tabs/scheduler/DispositionControl'
 import { resolveEpicRef } from '../lib/epicProvenance'
-import { buildBacklogTree, flattenBacklogNodes, type BacklogEpicSection, type BacklogNode, type BacklogBlocker } from '../lib/backlogTree'
+import { buildBacklogTree, flattenBacklogNodes, type BacklogEpicSection, type BacklogBlocker } from '../lib/backlogTree'
+import { buildPlans } from '../lib/schedulerStages'
+import { PlanBand } from './tabs/scheduler/PlanBand'
+import type { PlanMode } from './tabs/scheduler/SchedulerTopBands'
 import { usePanelFocus } from '../lib/panelFocus'
 import type { NavKey } from '../lib/navKey'
 
@@ -27,14 +31,6 @@ const COMPLETED_FRESH_MS = 24 * 60 * 60 * 1000
 const HIDDEN_KEY = 'sm.scheduler.hiddenCompletedSlugs'
 const FOCUSED_IDX_KEY = 'sm.scheduler.focusedJobIndex'
 const LS_FILTER_KEY = 'sm.scheduler.queueFilter'
-
-/** Truncates a job row's linked-prompt-session label to keep the collapsed
- *  row a single line. */
-function truncateLabel(text: string, max = 60): string {
-  const trimmed = text.trim()
-  if (trimmed.length <= max) return trimmed
-  return `${trimmed.slice(0, max - 1)}…`
-}
 
 type FilterStatus = 'all' | 'running' | 'investigating' | 'pending' | 'completed' | 'skipped' | 'needs_review' | 'failed' | 'quarantined'
 interface QueueFilter { text: string; status: FilterStatus }
@@ -93,9 +89,13 @@ function saveHidden(set: Set<string>) {
  * SchedulePanel — Queue sub-view of the Scheduler tab. Shows policy controls,
  * filter chips, and an expandable job list wired to the live queue snapshot.
  */
-export function SchedulePanel({ scopeCwd = null, navigate, filterText }: {
+export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode = 'graph', onOpenPrds }: {
   scopeCwd?: string | null
   navigate?: (k: NavKey) => void
+  /** 'list' = the vertical Epic tree (EpicSectionBlock + JobRow); 'graph' (default) and 'critical' = plan bands of stage columns. */
+  planMode?: PlanMode
+  /** Draft plan's 'Schedule…' — jump to the PRDs sub-view, opening `slug`. */
+  onOpenPrds?: (slug: string | null) => void
   /** When provided, the Scheduler shell's PLANS-toolbar input owns the text filter (the in-panel input is hidden). */
   filterText?: string
 }) {
@@ -200,6 +200,26 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText }: {
     () => (snap ? buildBacklogTree(snap.jobs, sessions, rawSnap?.jobs) : []),
     [snap, sessions, rawSnap],
   )
+
+  // Graph mode — plans are derived from the FILTERED jobs, memoized on the snapshot
+  // (never on the 1s `now` ticker) so every PlanRow keeps its identity across ticks
+  // and PrdRow's React.memo bails out. Declared before the early returns (rules of hooks).
+  const graphJobs = useMemo(() => (snap ? applyFilter(snap.jobs, filter) : []), [snap, filter])
+  const cap = snap?.effectiveConcurrency?.cap
+  const plans = useMemo(
+    () => (planMode === 'list' ? [] : buildPlans(graphJobs, { sessions, avgDurationMs, concurrency: cap })),
+    [planMode, graphJobs, sessions, avgDurationMs, cap],
+  )
+  // Stable per-row listIndex (DOM order) for the arrow-key handler, and per-row attach-behind targets.
+  const indexBySlug = useMemo(() => {
+    const m = new Map<string, number>()
+    let i = 0
+    for (const p of plans) for (const st of p.stages) for (const r of st.rows) m.set(r.slug, i++)
+    return m
+  }, [plans])
+  const headChoicesBySlug = useMemo(() => buildHeadChoicesBySlug(backlogSections), [backlogSections])
+  // 'Clear completed' hides (renderer-side only) — shared with List mode via hiddenSlugs.
+  const graphHidden = hiddenSlugs
 
   // Hooks must run unconditionally on every render — declared here, before the
   // panelView/snap early returns below, so switching to the supervisor
@@ -306,20 +326,26 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText }: {
     saveHidden(new Set())
     setShowAllCompleted(false)
   }
-  const hasInlineCompleted = inline.some((j) => j.status === 'completed')
+  const hasInlineCompleted = planMode === 'list'
+    ? inline.some((j) => j.status === 'completed')
+    : jobs.some((j) => (j.status === 'completed' || j.status === 'skipped') && !hiddenSlugs.has(j.slug))
+  const hiddenInGraph = jobs.filter((j) => (j.status === 'completed' || j.status === 'failed') && hiddenSlugs.has(j.slug)).length
+  const isList = planMode === 'list'
+  // Non-graph chrome keeps the 18px gutter in full-bleed (graph) mode; in List mode the max-width column pads it.
+  const gutter = isList ? '' : 'px-[18px] py-2'
 
   return (
     <div className="overflow-y-auto h-full">
       {/* Screen-reader live region */}
       <div aria-live="polite" aria-atomic="true" className="sr-only">{announcement}</div>
 
-      <div className="px-9 py-6 max-w-[1100px] mx-auto space-y-4">
+      <div className={isList ? 'px-9 py-6 max-w-[1100px] mx-auto space-y-4' : ''}>
 
         {/* FireStatus banner removed (2A): state word → title band, actions → title-band buttons (tabs/scheduler/SchedulerTopBands.tsx). */}
 
         {/* Meter rate-limited banner */}
         {health && health.consecutiveFailures > 5 && health.lastFailureKind === 'meter_rate_limited' && !paused && !meterBannerDismissed && (
-          <div className="flex items-center gap-3 px-4 py-3 bg-amber-400/15 border border-amber-400/30 rounded-xl">
+          <div className={gutter}><div className="flex items-center gap-3 px-4 py-3 bg-amber-400/15 border border-amber-400/30 rounded-xl">
             <span aria-hidden="true">⚠</span>
             <span className="text-[13.5px] text-amber-400/90">
               <strong className="font-semibold">Usage meter unavailable</strong> — last good reading{' '}
@@ -333,7 +359,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText }: {
             >
               Dismiss
             </button>
-          </div>
+          </div></div>
         )}
 
         {/* PolicyBar removed (2A): fire policy / cap / threshold → CONCURRENCY KPI cell; Fire + Refresh → title band. */}
@@ -343,7 +369,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText }: {
           const cap = effectiveConcurrency?.cap ?? 5
           const groupPending = jobs.filter((j) => j.status === 'pending').length
           return (
-            <div className="flex items-center gap-2 text-[12px] font-mono">
+            <div className={`flex items-center gap-2 text-[12px] font-mono ${gutter}`}>
               <span className="px-2 py-0.5 rounded bg-amber-400/20 text-amber-400 shrink-0">
                 {runningJobs.length}/{cap} running
               </span>
@@ -356,15 +382,77 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText }: {
 
         {/* Filter bar */}
         {jobs.length > 0 && (
-          <FilterBar
-            showText={filterText === undefined}
-            filter={filter}
-            onChange={(f) => { setFilter(f); saveFilter(f) }}
-          />
+          <div className={gutter}>
+            <FilterBar
+              showText={filterText === undefined}
+              filter={filter}
+              onChange={(f) => { setFilter(f); saveFilter(f) }}
+            />
+          </div>
         )}
 
-        {/* Job table */}
-        <div className="bg-bg-hi border border-line rounded-2xl overflow-hidden">
+        {/* Graph mode (2A): full-bleed plan bands — one per Epic — of stage columns. */}
+        {!isList && (
+          <div data-testid="plan-graph">
+            <div className="flex items-center justify-between px-[18px] h-[30px] border-y border-rule-structural">
+              <span className="font-mono text-[11.5px] text-fg-faint">
+                {filteredJobs.length} job{filteredJobs.length !== 1 ? 's' : ''} · {counts.pending}p · {counts.running}r · {counts.completed}d
+                {counts.failed > 0 && <span className="text-accent"> · {counts.failed}f</span>}
+              </span>
+              <div className="flex items-center gap-3">
+                {hiddenInGraph > 0 && (
+                  <button
+                    type="button"
+                    onClick={onUnhideAll}
+                    className="text-[12px] text-fg-faint hover:text-fg-dim underline bg-transparent border-0 cursor-pointer"
+                    title="Show the completed/failed jobs hidden by Clear completed"
+                  >
+                    {hiddenInGraph} hidden · un-hide
+                  </button>
+                )}
+                {hasInlineCompleted && (
+                  <button
+                    type="button"
+                    onClick={onClearCompleted}
+                    className="text-[12px] text-fg-dim hover:text-fg bg-transparent border-0 cursor-pointer font-medium"
+                    title="Hide completed jobs from this view (queue.json unchanged — they remain in history)"
+                  >
+                    Clear completed
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onClearQueue}
+                  disabled={jobs.every((j) => j.status === 'running')}
+                  className="text-[12px] text-accent border border-accent/40 hover:bg-accent/10 rounded-sm px-2 py-0.5 cursor-pointer font-medium disabled:opacity-40 disabled:cursor-not-allowed"
+                  title="Archive every non-running PRD (moved to prds-archived/<timestamp>/) and remove them from the queue. Running jobs are kept."
+                >
+                  Archive &amp; clear queue…
+                </button>
+              </div>
+            </div>
+            {plans.length === 0 && (
+              <div className="px-[18px] py-6 text-[13px] text-fg-faint italic">no matching jobs</div>
+            )}
+            <div ref={jobListRef} role="list" aria-label="Job queue" onKeyDown={handleJobListKeyDown}>
+              {plans.map((plan) => (
+                <PlanBand
+                  key={plan.epicId ?? '__none__'}
+                  plan={plan}
+                  now={now}
+                  hidden={graphHidden}
+                  indexBySlug={indexBySlug}
+                  headChoicesBySlug={headChoicesBySlug}
+                  onRowFocused={handleRowFocused}
+                  onOpenPrds={onOpenPrds}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Job table — List mode (the pre-2A vertical tree, unchanged) */}
+        {isList && <div className="bg-bg-hi border border-line rounded-2xl overflow-hidden">
           {/* Table header */}
           <div className="flex items-center justify-between px-[18px] py-3 bg-bg-elev">
             <span className="font-serif text-base font-semibold text-fg">
@@ -426,11 +514,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText }: {
               // terminal PRDs to offer as "attach behind" targets.
               const sectionBlocks = backlogSections
                 .map((section) => {
-                  const headChoices = section.nodes.map((headNode) => ({
-                    rootSlug: headNode.row.slug,
-                    label: headNode.row.title || headNode.row.slug,
-                    terminals: headTerminalSlugs(headNode),
-                  }))
+                  const headChoices = sectionHeadChoices(section)
                   const heads = section.nodes
                     .map((headNode) => {
                       const rows = flattenBacklogNodes([headNode])
@@ -501,24 +585,26 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText }: {
               )}
             </button>
           )}
-        </div>
+        </div>}
 
         {/* Diagnostics — poll health + queue lint merged into one line */}
-        <DiagnosticsSection snap={snap} health={health} now={now} open={showHealth} setOpen={setShowHealth} />
+        <div className={gutter}>
+          <DiagnosticsSection snap={snap} health={health} now={now} open={showHealth} setOpen={setShowHealth} />
+        </div>
 
         {/* Coach — reassurance that nothing is needed while things run automatically */}
         {!paused && (
-          <div className="flex gap-2.5 bg-sage/10 border border-sage/30 rounded-xl px-3.5 py-2.5 text-[13.5px] text-fg-dim leading-relaxed">
+          <div className={gutter}><div className="flex gap-2.5 bg-sage/10 border border-sage/30 rounded-xl px-3.5 py-2.5 text-[13.5px] text-fg-dim leading-relaxed">
             <span aria-hidden="true">✓</span>
             <span>
               <strong className="font-semibold text-fg">Nothing needed from you.</strong>{' '}
               Close the app if you like — jobs keep running, and History shows how each one ended.
             </span>
-          </div>
+          </div></div>
         )}
 
         {/* Footer */}
-        <div className="flex items-center justify-between text-[12px] text-fg-faint pt-1 border-t border-line">
+        <div className={`flex items-center justify-between text-[12px] text-fg-faint pt-1 border-t border-line ${isList ? '' : 'px-[18px] pb-2'}`}>
           <span>
             {nextReset && <span title={`next 5h reset: ${nextReset}`}>reset {formatRelative(Date.parse(nextReset) - now)}</span>}
             {lastRunAt && <span className="ml-2" title={lastRunAt}>last run {formatRelative(now - Date.parse(lastRunAt))} ago</span>}
@@ -848,30 +934,6 @@ function computeEtaMap(
     m.set(j.slug, estMs <= 5_000 ? '~now' : `~${formatTimingLabel(estMs)}`)
   }
   return m
-}
-
-/** Attach-target metadata for one head (root chain) of an Epic section —
- *  what the "change disposition" control offers as "attach behind <label>". */
-export interface HeadChoice {
-  rootSlug: string
-  label: string
-  /** This head's own current terminal (leaf) slug(s) — what a new dependsOn
-   *  edge onto this head must point at to run behind everything already
-   *  queued in it. Empty only if the head's own subtree is entirely a
-   *  dependsOn cycle (backlogTree.ts renders those separately). */
-  terminals: string[]
-}
-
-/** A head's terminal (leaf) slugs: nodes in its own subtree with no
- *  children — nothing else in this Epic depends on them yet. Mirrors
- *  prdDisposition.cjs's resolveChainTerminals, kept as a separate
- *  implementation since it walks the renderer's already-built BacklogNode
- *  tree rather than a flat row list (main is CJS, this is renderer TS/ESM —
- *  see CLAUDE.md's "no ES modules in main" law). */
-function headTerminalSlugs(head: BacklogNode<ScheduleJob>): string[] {
-  return flattenBacklogNodes([head])
-    .filter((n) => n.children.length === 0)
-    .map((n) => n.row.slug)
 }
 
 /**
@@ -1255,60 +1317,6 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
 }
 
 export const JobRow = memo(JobRowComponent)
-
-/**
- * DispositionControl — the Scheduler UI's "change disposition" action
- * (scheduler wave-disposition PRD): promote an appended wave to its own
- * head, or re-attach a head behind another chain in the same Epic section.
- * Only rendered when `job.disposition` is set (this row was itself a
- * wave-authoring decision point) and the row is still pending/quarantined —
- * matches remote.setPrdDisposition's own running/completed refusal, so the
- * control never offers an action the backend would just reject.
- *
- * A plain `<select>` rather than two separate buttons: the "attach behind"
- * choice set is dynamic (one option per sibling head), and a menu keeps a
- * two-head Epic and a five-head Epic the same shape. Resets to the
- * placeholder after firing — this is an action trigger, not a persistent
- * setting.
- */
-function DispositionControl({ job, headChoices }: { job: ScheduleJob; headChoices: HeadChoice[] }) {
-  const [pending, setPending] = useState(false)
-  const fire = useCallback((disposition: 'append' | 'new-head', dependsOn?: string[]) => {
-    setPending(true)
-    window.api.schedule.setPrdDisposition({ slug: job.slug, cwd: job.cwd ?? undefined, disposition, dependsOn })
-      .then(toast.fromOutcome)
-      .catch(() => toast.error('Failed to change disposition'))
-      .finally(() => setPending(false))
-  }, [job.slug, job.cwd])
-
-  if (job.disposition !== 'append' && headChoices.length === 0) return null
-
-  return (
-    <select
-      data-testid="job-row-disposition-control"
-      disabled={pending}
-      value=""
-      onChange={(e) => {
-        const v = e.target.value
-        if (v === '__new-head__') fire('new-head')
-        else if (v) {
-          const target = headChoices.find((h) => h.rootSlug === v)
-          if (target) fire('append', target.terminals)
-        }
-      }}
-      className="text-[13px] font-semibold text-fg-dim hover:text-fg bg-transparent border border-line/60 rounded px-1.5 py-0.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-      title="Change this wave's relationship to the rest of the Epic's plan"
-    >
-      <option value="" disabled>change disposition…</option>
-      {job.disposition === 'append' && (
-        <option value="__new-head__">promote to new head</option>
-      )}
-      {headChoices.map((h) => (
-        <option key={h.rootSlug} value={h.rootSlug}>attach behind: {truncateLabel(h.label, 40)}</option>
-      ))}
-    </select>
-  )
-}
 
 // ─── Filter bar ─────────────────────────────────────────────────────────────
 

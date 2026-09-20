@@ -11,6 +11,23 @@
 > FireStatus banner and PolicyBar are deleted. The status-banner "Fire next batch now (manual policy)" action is folded into the
 > always-present title-band Fire next batch button.
 
+> **2026-09-19 (PRD sched2a-plan-stage-columns): the Queue body's job table is now Graph mode.** Default `planMode='graph'`
+> (Scheduler.tsx → `SchedulePanel planMode`); `List` renders the old EpicSectionBlock + JobRow tree unchanged (Critical path
+> renders as Graph until its PRD). Routing — every API/testid kept:
+> - JobRow "Actions" block → inline detail under a clicked row (`tabs/scheduler/PrdRow.tsx` `PrdDetail`): `view epic →`
+>   (`job-row-prompt-session-link`), `view log →` (RunLogViewer/`readLog`), `adopt PRD →` (`job-row-adopt-prd`, quarantined),
+>   `reset to pending →` (`resetJob`), disposition select (`job-row-disposition-control`, `setPrdDisposition`; component moved to
+>   `tabs/scheduler/DispositionControl.tsx`).
+> - NEW per-plan header button (`plan-action`, `PlanBand.tsx`): ACTIVE `Pause plan` → `schedule.pause()` (**machine-wide — no per-plan
+>   pause exists**, title says so); QUEUED `Run now` → `schedule.forceTick()` (**machine-wide**, not this plan); DONE `View run` →
+>   RunLogViewer on the plan's latest-finished row's runId (`readLog`); DRAFT `Schedule…` → PRDs sub-view on the plan's first PRD
+>   (`setPendingPrdSlug` + `subView='prds'`; the PRDs view has no per-Epic filter).
+> - NEW stage attention pair (`StageColumn.tsx`): `Retry #N` (`stage-retry`) → `schedule.resetJob(slug)`; `Review #N` (`stage-review`)
+>   → `openPromptSession(plan.epicId)` (the authoring Epic; never mints work). Stage footer `+N done/blocked/in stage ▾` is local state.
+> - Table-header controls (`Clear completed` + hiddenSlugs localStorage, `Archive & clear queue…`, `N hidden · un-hide`) → slim
+>   counts strip above the plan bands in Graph mode (same handlers). The "N more completed" toggle exists only in List mode.
+> - Keyboard nav (`role=list`, `data-job-row`, `data-job-index`, arrow keys) and the aria-live region are unchanged and cover both modes.
+
 Reference for the Scheduler UI redesign: every interactive control on the Scheduler screen (Queue / PRDs /
 History sub-views, plus the Machine pill), the exact `window.api.*` call or local state mutation it fires, its
 enable/disable/hidden predicate, and its `data-testid`. Derived from source on 2026-09-19 (HEAD `cf9bf76`);

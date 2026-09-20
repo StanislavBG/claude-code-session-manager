@@ -1,4 +1,5 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useCallback, useEffect, useState } from 'react'
+import { setPendingPrdSlug } from '../../lib/prdDeepLink'
 import { useSessions } from '../../state/sessions'
 import { usePromptSessions } from '../../state/promptSessions'
 import { SchedulerTopBands, type SubView, type PlanMode } from './scheduler/SchedulerTopBands'
@@ -49,8 +50,8 @@ interface SchedulerProps {
 }
 
 function SchedulerComponent({ navigate }: SchedulerProps = {}) {
-  // Graph | List | Critical path is state only in this PRD — Graph and List both
-  // render today's job list; the modes land in later PRDs.
+  // Graph (default) renders plan bands of stage columns; List keeps the pre-2A vertical tree.
+  // Critical path renders as Graph until its own PRD lands.
   const [planMode, setPlanMode] = useState<PlanMode>('graph')
   // Drives SchedulePanel's job filter (text is session-only, as before; status persists there).
   const [filterText, setFilterText] = useState('')
@@ -77,6 +78,12 @@ function SchedulerComponent({ navigate }: SchedulerProps = {}) {
     void usePromptSessions.getState().hydrateArchived(activeCwd)
   }, [activeCwd])
 
+  // Draft plan 'Schedule…': the PRDs view has no per-Epic filter, so land on the plan's first PRD.
+  const openPrds = useCallback((slug: string | null) => {
+    if (slug) setPendingPrdSlug(slug)
+    setSubView('prds')
+  }, [])
+
   useEffect(() => {
     localStorage.setItem(LS_KEY, subView)
   }, [subView])
@@ -96,7 +103,7 @@ function SchedulerComponent({ navigate }: SchedulerProps = {}) {
 
       {/* ── Content ──────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0">
-        {subView === 'queue' && <SchedulePanel scopeCwd={scopeCwd} navigate={navigate} filterText={filterText} />}
+        {subView === 'queue' && <SchedulePanel scopeCwd={scopeCwd} navigate={navigate} filterText={filterText} planMode={planMode} onOpenPrds={openPrds} />}
         {subView === 'prds' && <SchedulerPrdsView scopeCwd={scopeCwd} />}
         {subView === 'history' && <SchedulerHistoryView scopeCwd={scopeCwd} />}
         {subView === 'machine' && (

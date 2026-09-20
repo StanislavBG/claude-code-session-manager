@@ -126,6 +126,13 @@ export function formatEta(ms: number): string {
   return `~${Math.floor(mins / 60)}h${String(mins % 60).padStart(2, '0')}m`
 }
 
+/** A running row's right cell: '62%' when it has an estimate, else '4m12s'. Exported so the
+ *  live per-second tick in PrdRow reuses this instead of forking the formula. */
+export function runningTrailing(j: ScheduleJob, elapsedMs: number): string {
+  const est = j.estimateMinutes ? j.estimateMinutes * 60_000 : null
+  return est ? `${Math.min(99, Math.floor((elapsedMs / est) * 100))}%` : formatElapsed(elapsedMs)
+}
+
 function averageDurationMs(jobs: ScheduleJob[]): number {
   let sum = 0
   let n = 0
@@ -259,9 +266,7 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
         c = { kind: 'done', trailing: d > 0 ? formatElapsed(d) : '', held: false, blocked: false }
       } else if (isRunning(s)) {
         const el = j.startedAt ? Math.max(0, now - Date.parse(j.startedAt)) : null
-        const est = j.estimateMinutes ? j.estimateMinutes * 60_000 : null
-        const trailing = el === null ? '' : est ? `${Math.min(99, Math.floor((el / est) * 100))}%` : formatElapsed(el)
-        c = { kind: 'running', trailing, held: false, blocked: false }
+        c = { kind: 'running', trailing: el === null ? '' : runningTrailing(j, el), held: false, blocked: false }
       } else if (s === 'failed') c = { kind: 'failed', trailing: 'failed', held: false, blocked: false }
       else if (s === 'needs_review') c = { kind: 'review', trailing: 'review', held: false, blocked: false }
       else if (s === 'quarantined') c = { kind: 'quarantined', trailing: 'quarantined', held: false, blocked: false }

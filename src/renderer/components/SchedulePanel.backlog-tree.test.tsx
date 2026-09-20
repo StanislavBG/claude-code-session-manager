@@ -6,6 +6,9 @@
  * These mount the full SchedulePanel (rather than lib/backlogTree.test.ts's
  * pure-function coverage) to prove the grouping/nesting/blocker/cycle
  * behavior actually reaches the DOM.
+ *
+ * 2A redesign: the Epic tree is now the panel's 'list' mode (Graph — plan bands of
+ * stage columns — is the default), so every mount below passes planMode="list".
  */
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
@@ -89,7 +92,7 @@ describe('SchedulePanel — Epic/dependency backlog tree', () => {
       ]),
       loaded: true,
     })
-    const el = mount(<SchedulePanel scopeCwd="/p" />)
+    const el = mount(<SchedulePanel scopeCwd="/p" planMode="list" />)
     const sections = el.querySelectorAll('[data-testid="backlog-epic-section"]')
     expect(sections).toHaveLength(2)
   })
@@ -103,7 +106,7 @@ describe('SchedulePanel — Epic/dependency backlog tree', () => {
       ]),
       loaded: true,
     })
-    const el = mount(<SchedulePanel scopeCwd="/p" />)
+    const el = mount(<SchedulePanel scopeCwd="/p" planMode="list" />)
     const rows = Array.from(el.querySelectorAll('[data-job-row]')) as HTMLElement[]
     expect(rows).toHaveLength(3)
     const depths = rows.map((r) => Number(r.getAttribute('data-depth')))
@@ -118,7 +121,7 @@ describe('SchedulePanel — Epic/dependency backlog tree', () => {
       ]),
       loaded: true,
     })
-    const el = mount(<SchedulePanel scopeCwd="/p" />)
+    const el = mount(<SchedulePanel scopeCwd="/p" planMode="list" />)
     const blockerLines = el.querySelectorAll('[data-testid="job-row-blockers"]')
     expect(blockerLines).toHaveLength(1)
     expect(blockerLines[0].textContent).toContain('base')
@@ -134,7 +137,7 @@ describe('SchedulePanel — Epic/dependency backlog tree', () => {
       ]),
       loaded: true,
     })
-    const el = mount(<SchedulePanel scopeCwd="/p" />)
+    const el = mount(<SchedulePanel scopeCwd="/p" planMode="list" />)
     const blockerLine = el.querySelector('[data-testid="job-row-blockers"]') as HTMLElement
     expect(blockerLine.textContent).toContain('needs review')
   })
@@ -147,7 +150,7 @@ describe('SchedulePanel — Epic/dependency backlog tree', () => {
       ]),
       loaded: true,
     })
-    const el = mount(<SchedulePanel scopeCwd="/p" />)
+    const el = mount(<SchedulePanel scopeCwd="/p" planMode="list" />)
     const warnings = el.querySelectorAll('[data-testid="job-row-cycle-warning"]')
     expect(warnings).toHaveLength(2)
   })
@@ -161,7 +164,7 @@ describe('SchedulePanel — Epic/dependency backlog tree', () => {
       ]),
       loaded: true,
     })
-    const el = mount(<SchedulePanel scopeCwd="/p" />)
+    const el = mount(<SchedulePanel scopeCwd="/p" planMode="list" />)
     expect(el.querySelectorAll('[data-testid="job-row-parallel-eligible"]')).toHaveLength(1)
   })
 })

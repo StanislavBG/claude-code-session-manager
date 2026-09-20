@@ -10,7 +10,7 @@
 
 'use strict';
 
-import { test, expect } from 'vitest';
+import { test, expect, vi } from 'vitest';
 const { resolveEpicSpawnCwd } = require('../epicSpawnCwd.cjs');
 
 function stubReadActiveIndex(sessions) {
@@ -210,12 +210,68 @@ test('restore:true re-attaches the worktree and returns the recorded dir (transc
   expect(calls).toEqual([{ dir: '/tmp/session-manager-epic-worktrees/deadbeef/epic-1', branch: 'sm-epic/epic-1', baseCwd: '/projects/foo' }]);
 });
 
-test('restore:true with a failed restore still returns the recorded dir — never the project cwd', () => {
+test('restore:true with a failed restore returns the project cwd — never a dead recorded dir', () => {
   const result = resolveEpicSpawnCwd({
     cwd: '/projects/foo',
     claudeSessionId: 'sess-1',
     deps: { readActiveIndex: stubReadActiveIndex(WORKTREE_SESSIONS), statSync: statGone, restore: true, restoreWorktree: () => false },
   });
+  expect(result).toBe('/projects/foo');
+});
+
+test('a merged Epic with a missing dir returns the project cwd and never attempts a restore', () => {
+  const spy = vi.fn(() => true);
+  for (const status of ['merged', 'disabled']) {
+    const result = resolveEpicSpawnCwd({
+      cwd: '/projects/foo',
+      claudeSessionId: 'sess-1',
+      deps: {
+        readActiveIndex: stubReadActiveIndex({
+          'epic-1': { id: 'epic-1', claudeSessionId: 'sess-1', worktree: { dir: '/tmp/session-manager-epic-worktrees/deadbeef/epic-1', branch: 'sm-epic/epic-1', status } },
+        }),
+        statSync: statGone,
+        restore: true,
+        restoreWorktree: spy,
+      },
+    });
+    expect(result).toBe('/projects/foo');
+  }
+  expect(spy).not.toHaveBeenCalled();
+});
+
+test('an active Epic with a missing dir attempts a restore and returns the project cwd when it fails', () => {
+  const spy = vi.fn(() => false);
+  const result = resolveEpicSpawnCwd({
+    cwd: '/projects/foo',
+    claudeSessionId: 'sess-1',
+    deps: {
+      readActiveIndex: stubReadActiveIndex({
+        'epic-1': { id: 'epic-1', claudeSessionId: 'sess-1', worktree: { dir: '/tmp/session-manager-epic-worktrees/deadbeef/epic-1', branch: 'sm-epic/epic-1', status: 'active' } },
+      }),
+      statSync: statGone,
+      restore: true,
+      restoreWorktree: spy,
+    },
+  });
+  expect(spy).toHaveBeenCalledTimes(1);
+  expect(result).toBe('/projects/foo');
+});
+
+test('a worktree record with no status key is restore-eligible and does not throw', () => {
+  const spy = vi.fn(() => true);
+  const result = resolveEpicSpawnCwd({
+    cwd: '/projects/foo',
+    claudeSessionId: 'sess-1',
+    deps: {
+      readActiveIndex: stubReadActiveIndex({
+        'epic-1': { id: 'epic-1', claudeSessionId: 'sess-1', worktree: { dir: '/tmp/session-manager-epic-worktrees/deadbeef/epic-1', branch: 'sm-epic/epic-1' } },
+      }),
+      statSync: statGone,
+      restore: true,
+      restoreWorktree: spy,
+    },
+  });
+  expect(spy).toHaveBeenCalledTimes(1);
   expect(result).toBe('/tmp/session-manager-epic-worktrees/deadbeef/epic-1');
 });
 

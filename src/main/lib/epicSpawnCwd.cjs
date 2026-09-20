@@ -85,8 +85,9 @@ function restoreEpicWorktree({ dir, branch, baseCwd }) {
 
 /**
  * @param {{ cwd: string, claudeSessionId: string, deps?: object }} opts
- * @returns {string} `worktree.dir` when the matching Epic has one AND it still
- *   exists on disk, else `cwd` unchanged.
+ * @returns {string} `worktree.dir` when it exists (or was just restored), else `cwd`.
+ *   Never a nonexistent path. The transcript-split hazard is guarded by
+ *   epicSpawnPlan.cjs's reachability check, not by returning a dead path.
  */
 function resolveEpicSpawnCwd({ cwd, claudeSessionId, deps = {} } = {}) {
   if (!cwd || !claudeSessionId) return cwd;
@@ -99,19 +100,27 @@ function resolveEpicSpawnCwd({ cwd, claudeSessionId, deps = {} } = {}) {
         const dir = session.worktree?.dir;
         if (!dir) return cwd;
         if (!isUsableDir(dir, statSync)) {
-          // NEVER fall back to the project cwd: the CLI files the transcript under
-          // encodeCwd(spawn cwd), so a resumed session started in a different dir splits
-          // its transcript across two encodings ("lost session"). Instead re-attach the
-          // Epic's own branch at the SAME recorded path (encoding unchanged); if that is
-          // impossible, return the recorded dir anyway so the spawn fails loudly (ENOENT)
-          // rather than silently forking the transcript. Read-side callers (no `restore`)
-          // keep the old cwd answer — they never spawn and must never mutate git state.
-          if (deps.restore) {
+          // The checkout is gone. A merged/disabled Epic's branch was deleted with it
+          // (epicWorktreeMerge.cjs cleans up with keepBranch:false), so re-attaching can
+          // never succeed — skip the two git subprocesses. Otherwise (spawn side only)
+          // re-attach the Epic's branch at the SAME recorded path so the transcript
+          // encoding is unchanged. Read-side callers (no `restore`) never mutate git state.
+          const st = session.worktree?.status;
+          const restorable = st !== 'merged' && st !== 'disabled';
+          if (deps.restore && restorable) {
             const restored = (deps.restoreWorktree || restoreEpicWorktree)({ dir, branch: session.worktree?.branch, baseCwd: cwd });
-            console.log(`[epicSpawnCwd] worktree dir gone (${dir}) — ${restored ? 'restored at same path' : 'restore failed; spawn will fail rather than split the transcript'}`);
-            return dir;
+            if (restored) {
+              console.log(`[epicSpawnCwd] worktree dir gone (${dir}) — restored at same path`);
+              return dir;
+            }
+            console.log(`[epicSpawnCwd] worktree dir gone (${dir}) — restore failed; falling back to ${cwd}`);
+          } else if (deps.restore) {
+            console.log(`[epicSpawnCwd] worktree dir gone (${dir}) — checkout was removed on ${st}; restore correctly skipped, falling back to ${cwd}`);
+          } else {
+            console.log(`[epicSpawnCwd] worktree dir gone (${dir}) — read-side falls back to ${cwd}`);
           }
-          console.log(`[epicSpawnCwd] worktree dir gone (${dir}) — read-side falls back to ${cwd}`);
+          // Always a REAL directory; epicSpawnPlan.cjs refuses when the transcript is not
+          // visible from this cwd, so this cannot silently fork a transcript.
           return cwd;
         }
         return dir;

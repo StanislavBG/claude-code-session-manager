@@ -74,6 +74,46 @@ test('transcript under the project encoding, no worktree => ok, resume from proj
   expect(plan).toMatchObject({ ok: true, useResume: true, execCwd: PROJECT });
 });
 
+test('merged worktree (dir gone), transcript only under project encoding => ok, resume from project cwd (reported incident)', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-realproj-'));
+  try {
+    const sid = SID;
+    const d = path.join(home, '.claude', 'projects', encodeCwd(proj));
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, `${sid}.jsonl`), '{"type":"user"}\n');
+    const merged = epic({ worktree: { dir: DEAD, branch: 'sm-epic/e1', status: 'merged' } });
+    const deps = { homeDir: home, readActiveIndex: () => ({ sessions: merged }) };
+    const first = planEpicSpawn({ cwd: proj, claudeSessionId: sid, deps });
+    expect(first).toMatchObject({ ok: true, execCwd: proj, useResume: true });
+    // No circuit-breaker entry from the fallback: a second call is also ok.
+    expect(planEpicSpawn({ cwd: proj, claudeSessionId: sid, deps })).toMatchObject({ ok: true, execCwd: proj, useResume: true });
+  } finally { fs.rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('merged worktree, no transcript anywhere => ok, real directory, no resume', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-realproj-'));
+  try {
+    const merged = epic({ worktree: { dir: DEAD, branch: 'sm-epic/e1', status: 'merged' } });
+    const plan = planEpicSpawn({ cwd: proj, claudeSessionId: SID, deps: { homeDir: home, readActiveIndex: () => ({ sessions: merged }) } });
+    expect(plan.ok).toBe(true);
+    expect(plan.useResume).toBe(false);
+    expect(fs.statSync(plan.execCwd).isDirectory()).toBe(true);
+  } finally { fs.rmSync(proj, { recursive: true, force: true }); }
+});
+
+test('merged worktree, transcript only under dead encoding => refused, no git worktree add command', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-realproj-'));
+  try {
+    transcriptUnder(DEAD);
+    const merged = epic({ worktree: { dir: DEAD, branch: 'sm-epic/e1', status: 'merged' } });
+    const plan = planEpicSpawn({ cwd: proj, claudeSessionId: SID, deps: { homeDir: home, readActiveIndex: () => ({ sessions: merged }) } });
+    expect(plan).toMatchObject({ ok: false, code: 'session_unreachable' });
+    expect(plan.message).toMatch(/merged to main/);
+    expect(plan.message).not.toMatch(/git worktree add/);
+    expect(plan.message).not.toMatch(/swept from \/tmp/);
+  } finally { fs.rmSync(proj, { recursive: true, force: true }); }
+});
+
 test('closed (completed) Epic is refused with its own message', () => {
   const plan = planEpicSpawn({ cwd: PROJECT, claudeSessionId: SID, deps: { homeDir: home, readActiveIndex: () => ({ sessions: epic({ status: 'completed' }) }) } });
   expect(plan).toMatchObject({ ok: false, code: 'epic_closed' });

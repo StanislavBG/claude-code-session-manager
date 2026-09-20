@@ -8,11 +8,13 @@
  * conversation found"), the flag-swap retry then hit `--session-id` ("already in use"), and both
  * doors were locked.
  *
- * Chosen fix: (a) first — resolveEpicSpawnCwd({restore:true}) re-attaches the Epic's own branch
- * at the SAME recorded path (encoding unchanged), so the CLI sees the transcript again. When that
- * is impossible, (b): refuse BEFORE spawning with an actionable message naming the missing
- * worktree path, never claim a flag that cannot work. Reachability = "some existing transcript
- * lives under encodeCwd(spawn cwd)" and the spawn cwd is a real directory.
+ * Three-way decision: (1) re-attach — resolveEpicSpawnCwd({restore:true}) re-attaches the Epic's
+ * own branch at the SAME recorded path (encoding unchanged), so the CLI sees the transcript again;
+ * (2) project-cwd fallback — when that spawn cwd cannot see the transcript but the project cwd can
+ * (transcript filed under encodeCwd(project cwd)), spawn from the project cwd; nothing forks since
+ * it writes to the directory it already occupies; (3) refuse BEFORE spawning with a message stating
+ * the real cause, never claim a flag that cannot work. Reachable = "some existing transcript lives
+ * under encodeCwd(candidate cwd)" and the candidate is a real directory.
  *
  * Also refuses requests routed to a closed (`completed`) Epic, and keeps a per-session circuit
  * breaker: once a session is found unreachable, later requests are refused after ONE stat (is the
@@ -95,19 +97,32 @@ function planEpicSpawn({ cwd, claudeSessionId, fallbackResume = false, deps = {}
     useResume = !!resolved.existsAnywhere;
   } catch { /* keep the caller-supplied flag */ }
 
-  const execCwd = (deps.resolveSpawnCwd || resolveEpicSpawnCwd)({ cwd, claudeSessionId, deps: { restore: true, readActiveIndex: deps.readActiveIndex, statSync: deps.statSync, restoreWorktree: deps.restoreWorktree } });
+  let execCwd = (deps.resolveSpawnCwd || resolveEpicSpawnCwd)({ cwd, claudeSessionId, deps: { restore: true, readActiveIndex: deps.readActiveIndex, statSync: deps.statSync, restoreWorktree: deps.restoreWorktree } });
 
   if (resolved && resolved.existsAnywhere) {
     const projectsDir = path.join(deps.homeDir || os.homedir(), '.claude', 'projects');
-    const home = path.join(projectsDir, encodeCwd(execCwd));
-    const reachable = isDir(execCwd, statSync) && resolved.existingPaths.some((p) => path.dirname(p) === home);
-    if (!reachable) {
+    // O(candidates × existingPaths); both are tiny. Candidate order: chosen execCwd, then project cwd.
+    const findReachable = (dir) => {
+      if (!isDir(dir, statSync)) return null;
+      const home = path.join(projectsDir, encodeCwd(dir));
+      return resolved.existingPaths.find((p) => path.dirname(p) === home) || null;
+    };
+    let hit = findReachable(execCwd);
+    if (!hit && execCwd !== cwd) {
+      // The transcript may already live under the project encoding; spawning there writes back to
+      // the directory it occupies, so nothing forks.
+      hit = findReachable(cwd);
+      if (hit) execCwd = cwd;
+    }
+    if (!hit) {
       const missing = brokenDir || execCwd;
+      const wt = epic?.worktree;
+      const recovery = wt?.status === 'merged'
+        ? `That checkout was removed when the Epic was merged to main and its ${wt.branch || 'sm-epic/*'} branch was deleted, so it cannot be recreated. Start a new Epic.`
+        : `The checkout is gone and could not be re-attached (it may have been swept from its temp/state directory). Recreate it (git worktree add "${missing}" ${wt?.branch || '<sm-epic branch>'}) or start a new Epic.`;
       const message =
         `Session ${claudeSessionId} cannot be resumed: its transcript is at ${resolved.existingPaths[0]}, ` +
-        `which the CLI only finds when run from ${missing}, and that worktree no longer exists and could not be ` +
-        `re-attached (likely swept from /tmp). Recreate it (git worktree add "${missing}" ${epic?.worktree?.branch || '<sm-epic branch>'}) ` +
-        `or start a new Epic.`;
+        `which the CLI only finds when run from ${missing}. ${recovery}`;
       unreachable.set(claudeSessionId, { dir: missing, message });
       return { ok: false, code: 'session_unreachable', message };
     }

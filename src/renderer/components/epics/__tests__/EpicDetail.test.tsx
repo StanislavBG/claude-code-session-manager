@@ -184,6 +184,26 @@ describe('EpicDetail (PRD 827)', () => {
     })
   })
 
+  it('caps the header title and goal with an inner scroll so a huge opening prompt cannot crowd out the transcript', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+    const title = 'A short title'
+    const session = await usePromptSessions
+      .getState()
+      .createPromptSession('/tmp/proj', `${title}\n\n${'A very long goal sentence. '.repeat(200)}`, 'feature')
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const h1 = el.querySelector('[data-testid="epic-detail-title"]') as HTMLElement
+    expect(h1.className).toContain('max-h-')
+    expect(h1.className).toContain('overflow-y-auto')
+    expect(h1.getAttribute('title')).toBe(title)
+    const goal = el.querySelector('[data-testid="epic-detail-goal"]') as HTMLElement
+    expect(goal.className).toContain('max-h-')
+    expect(goal.className).toContain('overflow-y-auto')
+  })
+
   it('renders the Agent+model chip with the persona name and evidence-backed concrete model when the persona has an explicit override', async () => {
     installWindowApiMock({
       runtimeInfo: { modelAlias: 'claude-sonnet-4-5', modelSource: 'persona', resolvedModelId: 'claude-sonnet-4-5', resolvedFrom: 'transcript' },

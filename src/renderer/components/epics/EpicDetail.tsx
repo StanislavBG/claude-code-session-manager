@@ -110,6 +110,8 @@ function MetaItem({ label, value }: { label: string; value: string }) {
  * paragraph below it is the session's first prompt, already sent to the
  * agent, so editing it would rewrite history without changing what ran.
  * Save is disabled until dirty + non-empty; ⌘/Ctrl+Enter saves, Escape cancels.
+ * Title and goal are both height-capped with an inner scroll so a huge opening
+ * prompt cannot crowd out the transcript — keep the clamp.
  */
 function EpicTitle({ epicId, title, goal }: { epicId: string; title: string; goal: string }) {
   const [editing, setEditing] = useState(false)
@@ -149,7 +151,11 @@ function EpicTitle({ epicId, title, goal }: { epicId: string; title: string; goa
   if (!editing) {
     return (
       <div className="group flex items-start gap-1.5">
-        <h1 className="m-0 font-serif text-2xl font-semibold leading-tight text-fg" data-testid="epic-detail-title">
+        <h1
+          className="m-0 max-h-[2.6em] overflow-y-auto overscroll-contain font-serif text-2xl font-semibold leading-tight text-fg"
+          title={title}
+          data-testid="epic-detail-title"
+        >
           {title}
         </h1>
         <button
@@ -888,7 +894,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
 
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-bg" data-testid="epic-detail">
-      <header className="border-b border-line px-5 pt-4">
+      <header className="shrink-0 border-b border-line px-5 pt-4">
         <div className="flex items-start gap-3.5">
           <div className="min-w-0">
             <div className="mb-1.5 flex items-center gap-2" data-testid="epic-detail-tags">
@@ -924,7 +930,14 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
             <EpicTitle epicId={epicId} title={title} goal={goal} />
             {/* Read-only by design: this paragraph is the session's first
                 prompt, already sent — see EpicTitle's header comment. */}
-            {goal && <p className="m-0 mt-1.5 max-w-[700px] text-[13.5px] leading-relaxed text-fg-dim">{goal}</p>}
+            {goal && (
+              <p
+                className="m-0 mt-1.5 max-h-[8.5em] max-w-[700px] overflow-y-auto overscroll-contain text-[13.5px] leading-relaxed text-fg-dim"
+                data-testid="epic-detail-goal"
+              >
+                {goal}
+              </p>
+            )}
           </div>
           <div className="ml-auto flex shrink-0 gap-1.5">
             {!isCompleted && (

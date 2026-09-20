@@ -351,6 +351,9 @@ const schedulerCreatePrd = z.object({
   // createPrd() requires it in that situation for an interactive caller and
   // defaults to 'append' (logged as a default) for a non-interactive one.
   disposition: PrdDispositionSchema.optional(),
+  // Artifact-only PRD declaration — cross-field rules enforced in prdCreate.cjs.
+  deliverable: z.literal('artifact').optional(),
+  artifactPaths: z.array(z.string().min(1).max(1024).regex(NO_NEWLINE_RE, 'must not contain newlines')).max(50).optional(),
   // An EXISTING Epic's promptSessionId (PRD 748) — NOT a PromptTicket.id.
   // ensureEpic() (epicMint.cjs) joins the Epic whose active-index.json
   // sessions key literally equals this value; the renderer only ever sends

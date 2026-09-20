@@ -75,7 +75,7 @@ function deriveSlugFromTitle(title) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths,
   } = input;
 
   // No `parallelGroup` frontmatter key by convention (SKILL.md) — the NN-
@@ -114,6 +114,9 @@ function buildPrdBody(input) {
   // site above); a first-ever PRD in an Epic, or one with its own explicit
   // dependsOn, has nothing to decide against and omits this key.
   if (disposition) fmLines.push(`disposition: ${disposition}`);
+  // Artifact-only declaration — validated by createPrd() before this runs.
+  if (deliverable) fmLines.push(`deliverable: ${deliverable}`);
+  if (artifactPaths && artifactPaths.length) fmLines.push(`artifactPaths: [${artifactPaths.join(', ')}]`);
   // Opt-in exclusive-lease flag (PRD 1107): serializes this job against
   // every other job machine-wide for its run, for a PRD whose acceptance
   // criteria are wall-clock/timing measurements that CPU contention from
@@ -317,6 +320,29 @@ async function createPrd(input, remote) {
   if (input.parallelGroup != null) {
     console.warn(`[prdCreate] parallelGroup input is deprecated and ignored (got ${input.parallelGroup}) — numbers are unique per project; use dependsOn for ordering`);
   }
+  // Artifact-only declaration (deliverable + artifactPaths): fail-closed,
+  // checked BEFORE the NN allocation so a refusal burns no number.
+  const hasArtifactPaths = Array.isArray(input.artifactPaths) && input.artifactPaths.length > 0;
+  if (input.deliverable != null && input.deliverable !== 'artifact') {
+    return { ok: false, status: 400, error: 'deliverable must be exactly "artifact" when given' };
+  }
+  if (input.deliverable === 'artifact' && !hasArtifactPaths) {
+    return { ok: false, status: 400, error: 'deliverable: "artifact" requires a non-empty artifactPaths — name every git-excluded file this PRD produces' };
+  }
+  if (input.artifactPaths != null && input.deliverable !== 'artifact') {
+    return { ok: false, status: 400, error: 'artifactPaths requires deliverable: "artifact" — artifactPaths given without it' };
+  }
+  if (hasArtifactPaths) {
+    for (const ap of input.artifactPaths) {
+      if (typeof ap !== 'string' || !ap.trim() || /[\r\n,\[\]]/.test(ap)) {
+        return { ok: false, status: 400, error: `artifactPaths entry ${JSON.stringify(ap)} must be a non-empty single-line path without commas or brackets` };
+      }
+      if (ap.includes('..')) {
+        return { ok: false, status: 400, error: `artifactPaths entry "${ap}" must not contain ".."` };
+      }
+    }
+  }
+
   const nn = await remote.allocateParallelGroup(input.cwd);
   const filenameSlug = `${nn}-${slug}`;
 

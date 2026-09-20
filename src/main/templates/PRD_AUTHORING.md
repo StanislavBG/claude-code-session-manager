@@ -141,6 +141,17 @@ estimateMinutes: 60
 - `estimateMinutes` is used for ETA display; include a realistic estimate (note: empirical median is ~10 min, p90 ~20 min — avoid wildly inflated estimates that hide real outliers).
 - `parallelGroup` in frontmatter, when present, IS honored by the scheduler (`pickNextBatch` reads `parallelGroup ?? 99` and overrides the filename NN). Use this only for cross-stream interleaving — e.g., the cellar series `122-`, `123-`, `124-` overrides to groups `113`, `114`, `115` so cellar steps fire alongside the parallel etch steps. Do NOT use it to reorder within a single stream; rename the file instead.
 
+### Artifact-only PRDs
+
+Use `deliverable: artifact` + `artifactPaths: [a, b]` (both passed to `scheduler_create_prd`) ONLY when every deliverable is a file the target repo deliberately git-excludes (e.g. patches/notes under `session-manager-operations/review-records/`, matched by `.git/info/exclude`), so "no commit" is the correct outcome.
+
+- Every artifact path must be named in `artifactPaths`; an unlisted file is invisible to the verifier. Each path is relative, never contains `..`.
+- The artifact must be non-empty and written during the run window — the verifier stat-checks it on disk (checked by PRD 1321; this section documents the declaration).
+- The run must still leave the working tree clean — declaring artifacts excuses the missing commit, not stray tracked edits.
+- Both fields are required together: the write is refused if only one is given.
+
+Incident: sigma PRD `816-prepare-157-copy-citation-extras-patch` (2026-09-20) wrote its patch into a git-excluded folder; with no way to declare that, two runs both parked in `needs_review`.
+
 ---
 
 ## §7 Self-containment

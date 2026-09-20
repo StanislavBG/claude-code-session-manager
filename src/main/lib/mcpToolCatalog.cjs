@@ -96,7 +96,12 @@ const MCP_TOOL_CATALOG = [
       + 'and is rejected at write time if it does not name a real persona file. '
       + 'If this PRD has no dependsOn of its own AND the target Epic already has incomplete PRDs, '
       + '`disposition` ("append" or "new-head") is REQUIRED — the write is refused without it (a '
-      + 'headless job caller instead gets a logged "append" default, since no human is present to ask).',
+      + 'headless job caller instead gets a logged "append" default, since no human is present to ask). '
+      + '`deliverable` ("artifact") + `artifactPaths` declare an ARTIFACT-ONLY PRD: `artifactPaths` are the '
+      + 'files this PRD produces that are NOT meant to be committed (git-excluded), they are stat-checked on '
+      + 'disk by the verifier, and declaring them is the ONLY way an artifact-only PRD can pass the finish '
+      + 'protocol without a commit. Each requires the other (the write is refused if only one is given), and '
+      + 'no path may contain "..".',
     whenToUse: 'Use whenever new work should be queued into an already-approved Epic — this is the /develop path.',
     whenNotToUse: 'TWO DISTINCT FAILURE MODES if this tool is not usable — do not conflate them: '
       + '(a) this tool call is PRESENT in your tool list but ERRORS as app-not-running / admin '

@@ -77,8 +77,8 @@ function splitFrontmatter(raw) {
  * never emitted, which is how `scheduler_update_prd` clears a dependency.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'deliverable', 'artifactPaths']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'deliverable', 'artifactPaths'];
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 function indentOf(line) {
@@ -185,6 +185,17 @@ function applyKey(fm, key, after) {
       // full rationale. Only these two values are recognized.
       if (v === 'append' || v === 'new-head') fm.disposition = v;
       return;
+    case 'deliverable':
+      // Artifact-only PRD declaration — only the literal `artifact` is
+      // recognized; anything else is dropped so a typo can never opt in.
+      if (v === 'artifact') fm.deliverable = v;
+      return;
+    case 'artifactPaths': {
+      // Inline `[a, b]` list, same shape as dependsOn.
+      const list = parseInlineList(after);
+      if (list) fm.artifactPaths = list;
+      return;
+    }
   }
 }
 
@@ -220,10 +231,10 @@ function parsePrdFile(text) {
 
     if (RECOGNIZED_KEYS.has(key)) {
       applyKey(fm, key, after);
-      if (key === 'dependsOn') {
-        if (fm.dependsOn) {
+      if (key === 'dependsOn' || key === 'artifactPaths') {
+        if (fm[key]) {
           if (!fm._raw) fm._raw = {};
-          fm._raw[key] = { line, parsed: fm.dependsOn };
+          fm._raw[key] = { line, parsed: fm[key] };
         }
       } else {
         const parsed = parseScalar(after);

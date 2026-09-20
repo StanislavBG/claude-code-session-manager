@@ -80,11 +80,14 @@ test('every counter event still yields appVersion + machineDigest once persisted
   counters.trackEpicCreate(deps);
   counters.trackSchedulerJobFinish({ status: 'completed' }, deps);
 
-  // track() ingress does real (albeit fast) fs I/O before it resolves; wait a
-  // tick since the counter functions fire it without awaiting the promise.
-  await new Promise((r) => setTimeout(r, 50));
-
-  const recs = await readQueueLines(client);
+  // track() ingress does real fs I/O and the counter functions fire it without
+  // awaiting the promise, so poll (bounded) for all 4 records rather than a fixed
+  // sleep — a fixed 50ms lost the race under CPU contention.
+  let recs = [];
+  for (let i = 0; i < 200 && recs.length < 4; i++) {
+    await new Promise((r) => setTimeout(r, 25));
+    recs = await readQueueLines(client);
+  }
   expect(recs.length).toBe(4);
   for (const rec of recs) {
     const meta = asPersistedMetadata(rec);

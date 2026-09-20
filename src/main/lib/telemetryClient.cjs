@@ -374,12 +374,19 @@ async function persistSent() {
   await config.writeJson(sentPath(), { ids: S.sentOrder, updatedAt: new Date().toISOString() }, { mode: 0o600 });
 }
 
+// Records are immutable once queued, so their serialized size is computed once. Without
+// this, enforceCap() re-stringified the whole queue on every append: O(n^2) stringifies
+// (~15s idle for 5000 appends) and the reason the cap tests blew their budget under load.
+const recordBytesCache = new WeakMap();
 function recordBytes(r) {
+  const hit = recordBytesCache.get(r);
+  if (hit !== undefined) return hit;
+  let n = 0;
   try {
-    return Buffer.byteLength(JSON.stringify(r), 'utf8');
-  } catch {
-    return 0;
-  }
+    n = Buffer.byteLength(JSON.stringify(r), 'utf8');
+  } catch { /* unserializable -> 0 */ }
+  recordBytesCache.set(r, n);
+  return n;
 }
 
 /** Oldest-first eviction, bounded by count and total bytes. O(n) per call, n <= QUEUE_CAP_COUNT. */

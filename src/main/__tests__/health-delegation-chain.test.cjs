@@ -94,7 +94,9 @@ test('end-to-end: check() reports delegation_chain for this repo, expected to pa
   process.env.SM_ALLOW_LIVE_ROOT_READS = '1';
   let status;
   try {
-    status = await check();
+    // skipTypecheck: this test asserts on delegation_chain only; the tsc shell-out was
+    // ~15s of the ~16s idle runtime and starved to the 90s budget under CPU load.
+    status = await check({ skipTypecheck: true });
   } finally {
     delete process.env.SM_ALLOW_LIVE_ROOT_READS;
     process.env.HOME = sandboxHome;

@@ -716,7 +716,10 @@ function evaluateBlockingParkHealth(jobs, now, thresholdMs = REVERIFY_INTERVAL_M
   };
 }
 
-async function check() {
+// opts.skipTypecheck: skip the whole-repo `tsc` shell-out (~15s idle, unbounded under CPU load).
+// For callers that assert on one other component; the typescript component is then
+// reported { ok: true, skipped: true } so it can never read as a real pass.
+async function check(opts = {}) {
   const start = Date.now();
   const status = {
     ok: true,
@@ -736,8 +739,8 @@ async function check() {
   }
 
   // 1.5. Check TypeScript compilation (no errors).
-  const typesOk = runCheck('npm run typecheck 2>&1 | grep -q "error" && exit 1 || exit 0');
-  status.components.typescript = { ok: typesOk };
+  const typesOk = opts.skipTypecheck ? true : runCheck('npm run typecheck 2>&1 | grep -q "error" && exit 1 || exit 0');
+  status.components.typescript = opts.skipTypecheck ? { ok: true, skipped: true } : { ok: typesOk };
   if (!typesOk) {
     status.issues.push('TypeScript compilation has errors');
     status.ok = false;

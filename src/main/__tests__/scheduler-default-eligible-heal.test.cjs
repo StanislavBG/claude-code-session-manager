@@ -19,6 +19,13 @@ const path = require('node:path');
 
 process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'default-eligible-heal-test-'));
 
+// Fixture cwd must be a REAL, writable dir: transitionJob out of needs_review
+// fire-and-forgets a history append under <cwd>/session-manager-operations. A fake
+// path made it fail EACCES AFTER the sync test returned, so its console.error hit
+// vitest mid worker-close ("Closing rpc while onUserConsoleLog was pending").
+const PROJECT_CWD = path.join(process.env.HOME, 'project');
+fs.mkdirSync(PROJECT_CWD, { recursive: true });
+
 const {
   isRescanCandidate,
   isTranscriptRescannable,
@@ -39,7 +46,7 @@ const {
 } = require('../scheduler.cjs');
 const { evaluateBlockingParkHealth } = require('../health.cjs');
 
-const row = (o = {}) => ({ slug: '10-x', status: 'needs_review', runId: 'r1', cwd: '/p', ...o });
+const row = (o = {}) => ({ slug: '10-x', status: 'needs_review', runId: 'r1', cwd: PROJECT_CWD, ...o });
 
 test('shared_tree_reverted is a rescan candidate without being on any list', () => {
   assert.equal(RESCANNABLE_VERDICTS.has('shared_tree_reverted'), false);
@@ -142,8 +149,8 @@ test('auto-resolve ladder is capped: requeue attempts stop at NEEDS_REVIEW_RESOL
 describe('evaluateBlockingParkHealth', () => {
   const now = Date.parse('2026-09-18T20:00:00Z');
   const parkedAgo = (ms) => [{ to: 'needs_review', at: new Date(now - ms).toISOString() }];
-  const park = (ms, o = {}) => ({ slug: '5-park', status: 'needs_review', cwd: '/p', verifierVerdict: 'shared_tree_reverted', statusHistory: parkedAgo(ms), ...o });
-  const dep = (slug, dependsOn) => ({ slug, status: 'pending', cwd: '/p', dependsOn });
+  const park = (ms, o = {}) => ({ slug: '5-park', status: 'needs_review', cwd: PROJECT_CWD, verifierVerdict: 'shared_tree_reverted', statusHistory: parkedAgo(ms), ...o });
+  const dep = (slug, dependsOn) => ({ slug, status: 'pending', cwd: PROJECT_CWD, dependsOn });
 
   test('parked past one interval with pending dependents (transitive) is non-green, naming row + count', () => {
     const r = evaluateBlockingParkHealth([park(REVERIFY_INTERVAL_MS + 1000), dep('6-a', ['5-park']), dep('7-b', ['6-a']), dep('8-c', [])], now);

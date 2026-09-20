@@ -26,6 +26,14 @@ const path = require('node:path');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'needs-review-autoresolve-test-'));
 process.env.HOME = tmpHome;
 
+// Fixture cwd must be a REAL, writable dir: every transitionJob out of
+// needs_review fire-and-forgets a history append under <cwd>/session-manager-operations.
+// A fake path ('/home/user/project') made that append fail with EACCES *after*
+// the synchronous test returned, so its console.error landed while vitest was
+// closing the worker ("Closing rpc while onUserConsoleLog was pending" -> exit 1).
+const PROJECT_CWD = path.join(tmpHome, 'project');
+fs.mkdirSync(PROJECT_CWD, { recursive: true });
+
 const {
   selectExhaustedNeedsReviewTargets,
   applyNeedsReviewAutoResolve,
@@ -41,7 +49,7 @@ const THRESHOLD_MS = 30 * MIN_MS;
 function exhaustedJob(overrides = {}) {
   return {
     slug: 'exhausted-row',
-    cwd: '/home/user/project',
+    cwd: PROJECT_CWD,
     status: 'needs_review',
     autoFixAttempted: true,
     autoFixOutcome: 'no-plan',
@@ -153,16 +161,16 @@ test('applyNeedsReviewAutoResolve race-guards against a row that moved off needs
 test('a 3-row dependsOn chain drains: the exhausted middle row auto-skips and the third row becomes eligible', () => {
   const now = Date.now();
   const rowA = {
-    slug: 'a-first', cwd: '/home/user/project', status: 'completed',
+    slug: 'a-first', cwd: PROJECT_CWD, status: 'completed',
   };
   const rowB = exhaustedJob({
     slug: 'b-middle',
-    cwd: '/home/user/project',
+    cwd: PROJECT_CWD,
     exhaustedResolveAttempts: NEEDS_REVIEW_RESOLVE_CAP,
     dependsOn: ['a-first'],
   });
   const rowC = {
-    slug: 'c-last', cwd: '/home/user/project', status: 'pending', dependsOn: ['b-middle'],
+    slug: 'c-last', cwd: PROJECT_CWD, status: 'pending', dependsOn: ['b-middle'],
   };
   const jobs = [rowA, rowB, rowC];
 
@@ -182,8 +190,8 @@ test('a 3-row dependsOn chain drains: the exhausted middle row auto-skips and th
 });
 
 test('a generic (non-auto-resolved) skipped dep still blocks forever — the carve-out is narrow', () => {
-  const rowB = { slug: 'b-middle', cwd: '/home/user/project', status: 'skipped' }; // no needsReviewAutoResolvedSkip marker
-  const rowC = { slug: 'c-last', cwd: '/home/user/project', status: 'pending', dependsOn: ['b-middle'] };
+  const rowB = { slug: 'b-middle', cwd: PROJECT_CWD, status: 'skipped' }; // no needsReviewAutoResolvedSkip marker
+  const rowC = { slug: 'c-last', cwd: PROJECT_CWD, status: 'pending', dependsOn: ['b-middle'] };
   const { batch } = pickForProject([rowB, rowC], new Set(), 5);
   assert.equal(batch.length, 0, 'a PRD-source-vanished skip must remain a permanent block, unaffected by this carve-out');
 });

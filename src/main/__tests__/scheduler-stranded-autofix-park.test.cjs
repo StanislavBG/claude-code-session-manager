@@ -38,6 +38,13 @@ const { execFileSync } = require('node:child_process');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'stranded-autofix-park-test-'));
 process.env.HOME = tmpHome;
 
+// Fixture cwd must be a REAL, writable dir: transitionJob out of needs_review
+// fire-and-forgets a history append under <cwd>/session-manager-operations. A fake
+// path made it fail EACCES AFTER the sync test returned, so its console.error hit
+// vitest mid worker-close ("Closing rpc while onUserConsoleLog was pending").
+const PROJECT_CWD = path.join(tmpHome, 'project');
+fs.mkdirSync(PROJECT_CWD, { recursive: true });
+
 const {
   isStrandedAutoFixPark,
   isExhaustedAutoFix,
@@ -72,7 +79,7 @@ function registerActiveProject(cwd, slug) {
 function strandedJob(overrides = {}) {
   return {
     slug: '1218-fo-01-move-scripts-lib-into-src-main-lib',
-    cwd: '/home/user/project',
+    cwd: PROJECT_CWD,
     status: 'needs_review',
     exitCode: 0,
     verifierVerdict: 'transcript_errors',

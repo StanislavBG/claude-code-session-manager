@@ -1,5 +1,5 @@
 /**
- * Project Home's single-page view: an honest empty state with one Generate
+ * Project Home's single-page view: a lone Generate
  * button until project-pages/home.html exists, then that one file in a
  * sandboxed iframe with a "generated <ago>" chip and a Regenerate button.
  *
@@ -8,8 +8,6 @@
  */
 import { formatAgo } from '../../../../lib/formatTime'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
-import { EmptyState } from '../../../ui/EmptyState'
-import { PhBlock, PhCard } from '../ph-primitives'
 import { HtmlFrame } from './HtmlFrame'
 import type { ProjectPagesOutput } from '../../../../lib/projectPages/useProjectPagesOutput'
 
@@ -40,33 +38,24 @@ export function ProjectPagesSection({
 
   if (!output) {
     return (
-      <PhBlock kicker="home" title="Project Home" note="No home page has been generated for this project yet.">
-        <EmptyState
-          title="No Project Home yet"
-          hint={
-            <div className="mt-3">
-              <GenerateButton label="Generate Project Home" onGenerate={onGenerate} />
-            </div>
-          }
-        />
-      </PhBlock>
+      <div className="flex justify-center py-16">
+        <GenerateButton label="Generate Project Home" onGenerate={onGenerate} />
+      </div>
     )
   }
 
   return (
-    <PhBlock
-      kicker="home"
-      title="Project Home"
-      right={
-        <div className="flex items-center gap-2.5">
-          <span className="font-mono text-[10.5px] text-fg-faint">generated {formatAgo(output.mtimeMs, Date.now())}</span>
-          <GenerateButton label="Regenerate" onGenerate={onGenerate} />
-        </div>
-      }
-    >
-      <PhCard className="overflow-hidden" style={{ height: 'calc(100vh - 260px)', minHeight: 520 }}>
+    <div>
+      <div className="mb-2 flex items-center justify-end gap-2.5">
+        <span className="font-mono text-[10.5px] text-fg-faint">generated {formatAgo(output.mtimeMs, Date.now())}</span>
+        <GenerateButton label="Regenerate" onGenerate={onGenerate} />
+      </div>
+      <div
+        className="overflow-hidden rounded-xl border border-line bg-bg-hi"
+        style={{ height: 'calc(100vh - 200px)', minHeight: 520 }}
+      >
         <HtmlFrame title="Project Home" html={output.html} />
-      </PhCard>
-    </PhBlock>
+      </div>
+    </div>
   )
 }

@@ -31,7 +31,8 @@ describe('ProjectPagesSection', () => {
   it('shows the empty state with one Generate button when there is no home.html', () => {
     const onGenerate = vi.fn()
     const el = mount(<ProjectPagesSection output={null} loaded onGenerate={onGenerate} />)
-    expect(el.textContent).toContain('No Project Home yet')
+    expect(el.textContent).not.toContain('No Project Home yet')
+    expect(el.textContent).not.toContain('No home page has been generated')
     expect(el.querySelector('iframe')).toBeNull()
     const buttons = Array.from(el.querySelectorAll('button'))
     expect(buttons).toHaveLength(1)
@@ -51,6 +52,8 @@ describe('ProjectPagesSection', () => {
     expect(iframe.getAttribute('srcdoc')).toBe(html)
     expect(el.textContent).toContain('generated 3m ago')
     expect(el.textContent).not.toContain('Shipped default')
+    expect(el.textContent).not.toContain('No home page has been generated')
+    expect(el.querySelectorAll('iframe')).toHaveLength(1)
     const buttons = Array.from(el.querySelectorAll('button'))
     expect(buttons).toHaveLength(1)
     expect(buttons[0].textContent).toContain('Regenerate')

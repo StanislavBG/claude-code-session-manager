@@ -846,6 +846,24 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
             sessionId,
             message: 'run cancelled',
           });
+        } else if (SESSION_IN_USE_RE.test(stderrBuffer) || NO_CONVERSATION_RE.test(stderrBuffer)) {
+          // A session-flag rejection that survived the one-shot swap (or was
+          // not eligible for it). The raw stderr dump names neither the flag,
+          // the cwd nor the transcript — a real report cost a full diagnostic
+          // session to trace to a stale app build, because flag resolution
+          // lives in main and older builds resolve it with older rules.
+          let appVersion = 'unknown';
+          try { appVersion = require('electron').app.getVersion() || 'unknown'; } catch { /* never fail the turn */ }
+          emitTerminal('chat:run:error', {
+            tabId,
+            sessionId,
+            code: 'session_flag_exhausted',
+            message: `The Claude CLI rejected the session flag (${resumeFlag ? '--resume' : '--session-id'} on this attempt; `
+              + `${attemptNo === 2 ? 'the one-shot swap retry with the other flag was already spent' : 'no swap retry was possible'}). `
+              + `Spawn cwd: ${execCwd}. Transcript: ${plan.transcriptPath ?? 'no transcript found on disk'}. `
+              + `App version: ${appVersion}. If this version is behind the published latest, update the app first — `
+              + 'the session-flag resolution logic lives in main, and a stale build resolves it with older rules.',
+          });
         } else {
           const errDetail = stderrBuffer.trim()
             ? `: ${stderrBuffer.trim().slice(0, 300)}`

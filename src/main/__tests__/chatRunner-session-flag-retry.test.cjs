@@ -47,14 +47,14 @@ function attachRecorder() {
 // Stub claude: logs its argv (one JSON line per spawn) to logFile. Invocation 1
 // fails with `firstStderr` (optionally after emitting assistant text); later
 // invocations succeed.
-function writeStub(logFile, { firstStderr, textFirst }) {
+function writeStub(logFile, { firstStderr, textFirst, alwaysFail }) {
   const stubPath = path.join(os.tmpdir(), `sm-flagretry-stub-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
   const body = `
     const fs = require('fs');
     const log = ${JSON.stringify(logFile)};
     fs.appendFileSync(log, JSON.stringify(process.argv.slice(2)) + '\\n');
     const n = fs.readFileSync(log, 'utf8').trim().split('\\n').length;
-    if (n === 1) {
+    if (n === 1 || ${alwaysFail ? 'true' : 'false'}) {
       ${textFirst ? "process.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'partial' }] } }) + '\\n');" : ''}
       process.stderr.write(${JSON.stringify(firstStderr)});
       process.exit(1);
@@ -130,7 +130,7 @@ test('no retry when the failed attempt already streamed assistant text', async (
     expect(spawns(logFile)).toHaveLength(1);
     expect(terminals()).toHaveLength(1);
     expect(terminals()[0].channel).toBe('chat:run:error');
-    expect(terminals()[0].payload.message).toMatch(/already in use/);
+    expect(terminals()[0].payload.code).toBe('session_flag_exhausted');
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }
@@ -153,6 +153,55 @@ test('"No conversation found" on --resume retries once with --session-id (main o
     expect(argvs).toHaveLength(1);
     expect(argvs[0]).toContain('--session-id');
     expect(terminals()[0].channel).toBe('chat:run:error');
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('spent swap retry (both flags rejected) emits actionable session_flag_exhausted error', async () => {
+  attachRecorder();
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-flagretry-cwd-'));
+  const logFile = path.join(cwd, 'argv.log');
+  const sessionId = `flag-sess4-${process.pid}`;
+  process.env.SM_CLAUDE_BIN = writeStub(logFile, {
+    firstStderr: `Error: Session ID ${sessionId} is already in use.\n`,
+    alwaysFail: true,
+  });
+  try {
+    curTab = 'tab-d';
+    cr.run({ tabId: 'tab-d', sessionId, prompt: 'hello', cwd, resume: false });
+    await waitFor(() => terminals().length > 0);
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(spawns(logFile)).toHaveLength(2);
+    expect(terminals()).toHaveLength(1);
+    const { channel, payload } = terminals()[0];
+    expect(channel).toBe('chat:run:error');
+    expect(payload.code).toBe('session_flag_exhausted');
+    expect(payload.message).toContain(cwd);
+    expect(payload.message).toContain(`${sessionId}.jsonl`);
+    expect(payload.message).toContain('--resume');
+    expect(payload.message).toMatch(/App version: /);
+    expect(payload.message).toMatch(/update the app first/);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('non-zero exit with unrelated stderr keeps the generic fallback message', async () => {
+  attachRecorder();
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-flagretry-cwd-'));
+  const logFile = path.join(cwd, 'argv.log');
+  const sessionId = `flag-sess5-${process.pid}`;
+  process.env.SM_CLAUDE_BIN = writeStub(logFile, { firstStderr: 'boom: something else broke\n' });
+  try {
+    curTab = 'tab-e';
+    cr.run({ tabId: 'tab-e', sessionId, prompt: 'hello', cwd, resume: false });
+    await waitFor(() => terminals().length > 0);
+    const { channel, payload } = terminals()[0];
+    expect(channel).toBe('chat:run:error');
+    expect(payload.code).toBeUndefined();
+    expect(payload.message).toMatch(/^process exited without a result event/);
   } finally {
     fs.rmSync(cwd, { recursive: true, force: true });
   }

@@ -6,8 +6,12 @@ import { PrdRow } from './PrdRow'
 import { InfoDot } from './sched-primitives'
 import type { HeadChoice } from './DispositionControl'
 
-/** Fixed column width — 5 columns fit a 1350px viewport (5 × 264 = 1320 + spine/gutter). */
-export const STAGE_COL_W = 264
+/**
+ * Fixed column width. At a 1350px viewport the LeftNav takes 252px, leaving a ~1095px plan band; minus the
+ * 3px spine and FURTHER_STAGES_W that is ~947px of strip = 5 × 190 (the 5th clips ≤3px). Reference mock-up: 289px columns at
+ * 1308px, but it is drawn without the LeftNav, so the frame-relative width is what matters here.
+ */
+export const STAGE_COL_W = 190
 
 const ROW_CAP = 7
 const DONE_ROW_CAP = 5
@@ -105,15 +109,15 @@ export function StageColumn({ stage, epicId, now, hidden, indexBySlug, headChoic
       data-testid="stage-column"
       data-stage={stage.n}
       style={{ width: STAGE_COL_W }}
-      className="shrink-0 border-l border-rule-structural first:border-l-0 flex flex-col"
+      className="shrink-0 border-l border-rule-structural first:border-l-0 flex flex-col self-stretch"
     >
-      <div className="h-[30px] shrink-0 flex items-center gap-1.5 px-3 border-b border-rule-inner" data-testid="stage-header">
+      <div className="h-[30px] shrink-0 flex items-center gap-1.5 px-2 border-b border-rule-inner" data-testid="stage-header">
         <span aria-hidden="true" className={`w-[7px] h-[7px] rounded-full shrink-0 ${STATE_DOT[stage.state]}`} />
-        <span className={`text-[10.5px] font-semibold uppercase tracking-wide ${STATE_TEXT[stage.state]}`}>Stage {stage.n}</span>
+        <span className={`text-[10px] font-semibold uppercase tracking-wide ${STATE_TEXT[stage.state]}`}>Stage {stage.n}</span>
         {stage.state === 'blocked' && (
           <InfoDot title="Rows in this stage are failed / need review / are quarantined, or wait on one that is." />
         )}
-        <span data-testid="stage-summary" className="ml-auto font-mono text-[11.5px] text-fg-dim">{stage.summary}</span>
+        <span data-testid="stage-summary" className="ml-auto font-mono text-[10.5px] text-fg-dim truncate">{stage.summary}</span>
       </div>
 
       <div role="presentation">
@@ -121,7 +125,7 @@ export function StageColumn({ stage, epicId, now, hidden, indexBySlug, headChoic
           <div key={r.slug}>
             {renderRow(r)}
             {showPair && i === pairAfter && (
-              <div data-testid="stage-attention-actions" className="flex gap-2 px-3 py-1.5 border-t border-rule-inner">
+              <div data-testid="stage-attention-actions" className="flex gap-1.5 px-2 py-1.5 border-t border-rule-inner">
                 {failed && (
                   <button
                     type="button"
@@ -161,7 +165,7 @@ export function StageColumn({ stage, epicId, now, hidden, indexBySlug, headChoic
           data-testid="stage-footer"
           aria-expanded={expanded}
           onClick={() => setExpanded((v) => !v)}
-          className="h-[26px] border-t border-rule-inner font-mono text-[11.5px] text-fg-faint hover:text-fg-dim bg-transparent cursor-pointer"
+          className="mt-auto h-[26px] border-t border-rule-inner font-mono text-[11px] text-fg-faint hover:text-fg-dim bg-transparent cursor-pointer"
         >
           {expanded ? 'show less ▴' : `${footerLabel(hiddenRows, stage.n)} ▾`}
         </button>

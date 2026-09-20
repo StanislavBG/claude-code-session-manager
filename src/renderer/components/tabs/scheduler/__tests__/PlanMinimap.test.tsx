@@ -3,6 +3,7 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
+import { STAGE_COL_W } from '../StageColumn'
 import { SchedulePanel } from '../../../SchedulePanel'
 import { useScheduleState } from '../../../../state/scheduleState'
 import { usePromptSessions } from '../../../../state/promptSessions'
@@ -102,12 +103,12 @@ describe('WHOLE GRAPH minimap', () => {
     const strip = one(el, '[data-testid="plan-stages"]')
     const brush = () => one(el, '[data-testid="plan-minimap-brush"]')
     const range = () => one(el, '[data-testid="plan-minimap-range"]').textContent
-    expect(range()).toBe('stages 1–6 of 12')
+    expect(range()).toBe('stages 1–8 of 12') // jsdom never measures: 1350 fallback / 190px
     const left0 = brush().style.left
 
     // scroll -> brush
-    act(() => { strip.scrollLeft = 4 * 264; strip.dispatchEvent(new Event('scroll', { bubbles: true })) })
-    expect(range()).toBe('stages 5–10 of 12')
+    act(() => { strip.scrollLeft = 4 * STAGE_COL_W; strip.dispatchEvent(new Event('scroll', { bubbles: true })) })
+    expect(range()).toBe('stages 5–12 of 12')
     expect(brush().style.left).not.toBe(left0)
     const leftScrolled = brush().style.left
 
@@ -115,7 +116,7 @@ describe('WHOLE GRAPH minimap', () => {
     const dots = one(el, '[data-testid="plan-minimap-dots"]')
     act(() => { dots.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, clientX: 0 })) })
     expect(strip.scrollLeft).toBe(0)
-    expect(range()).toBe('stages 1–6 of 12')
+    expect(range()).toBe('stages 1–8 of 12')
     expect(brush().style.left).toBe(left0)
     expect(brush().style.left).not.toBe(leftScrolled)
   })
@@ -124,7 +125,7 @@ describe('WHOLE GRAPH minimap', () => {
     const el = await mount(chain(12))
     const strip = one(el, '[data-testid="plan-stages"]')
     act(() => one(el, '[data-testid="minimap-blockers"]').click())
-    expect(strip.scrollLeft).toBe(4 * 264) // stage 5 failed
+    expect(strip.scrollLeft).toBe(4 * STAGE_COL_W) // stage 5 failed
     act(() => one(el, '[data-testid="minimap-running"]').click())
     expect(strip.scrollLeft).toBe(0) // stage 1 running
     expect(api.schedule.pause).not.toHaveBeenCalled()
@@ -139,16 +140,63 @@ describe('WHOLE GRAPH minimap', () => {
   })
 })
 
+describe('WHOLE GRAPH brush', () => {
+  /** Stage n has n PRDs (chained), so cluster widths differ per stage. */
+  function uneven(): ScheduleJob[] {
+    const out: ScheduleJob[] = []
+    let prev = ''
+    for (let s = 1; s <= 14; s++) {
+      for (let i = 0; i < s; i++) {
+        const slug = `${300 + out.length}-u`
+        out.push(job({ slug, status: out.length === 0 ? 'running' : 'pending', dependsOn: prev ? [prev] : undefined }))
+      }
+      prev = out[out.length - 1].slug
+    }
+    return out
+  }
+  it('is visible (non-zero width) and its width follows the stage window', async () => {
+    const el = await mount(uneven())
+    const brush = () => one(el, '[data-testid="plan-minimap-brush"]')
+    const w0 = parseFloat(brush().style.width)
+    expect(w0).toBeGreaterThan(0)
+    expect(brush().className).toContain('border-accent')
+    const strip = one(el, '[data-testid="plan-stages"]')
+    act(() => { strip.scrollLeft = 6 * STAGE_COL_W; strip.dispatchEvent(new Event('scroll', { bubbles: true })) })
+    const w1 = parseFloat(brush().style.width)
+    expect(w1).toBeGreaterThan(0)
+    expect(w1).not.toBe(w0)
+  })
+})
+
+describe('opening position', () => {
+  const open = (jobs: ScheduleJob[]) => mount(jobs).then((el) => ({
+    el, range: el.querySelector('[data-testid="plan-minimap-range"]')?.textContent, left: one(el, '[data-testid="plan-stages"]').scrollLeft,
+  }))
+  it('opens on the first stage with a running row', async () => {
+    const jobs = chain(14).map((j, i) => (i === 0 ? { ...j, status: 'completed' as const, startedAt: null } : i === 5 ? { ...j, status: 'running' as const, startedAt: new Date().toISOString() } : j.status === 'failed' ? { ...j, status: 'pending' as const } : j))
+    const { range, left } = await open(jobs)
+    expect(left).toBe(5 * STAGE_COL_W)
+    expect(range).toBe('stages 6–13 of 14')
+  })
+  it('falls back to the first blocker, then to stage 1', async () => {
+    const noRunning = chain(14).map((j) => (j.status === 'running' ? { ...j, status: 'completed' as const } : j))
+    expect((await open(noRunning)).left).toBe(4 * STAGE_COL_W) // stage 5 failed
+    act(() => root?.unmount()); container?.remove()
+    const calm = chain(14).map((j) => (j.status === 'running' || j.status === 'failed' ? { ...j, status: 'pending' as const } : j))
+    expect((await open(calm)).left).toBe(0)
+  })
+})
+
 describe('FURTHER STAGES tail', () => {
   it('lists hidden stages with progress bars and scrolls the strip on click', async () => {
     const el = await mount(chain(10))
     const tail = one(el, '[data-testid="further-stages"]')
-    expect(tail.textContent).toContain('STAGE 7–10'.replace('STAGE', 'Stage'))
+    expect(tail.textContent).toContain('Stage 9–10')
     expect(tail.textContent).toContain('Further stages')
     const rows = all(tail, '[data-testid="further-stage-row"]')
-    expect(rows.map((r) => r.textContent)).toEqual(['stage 7', 'stage 8', 'stage 9', 'stage 10'])
+    expect(rows.map((r) => r.textContent)).toEqual(['stage 9', 'stage 10'])
     act(() => rows[1].click())
-    expect(one(el, '[data-testid="plan-stages"]').scrollLeft).toBe(7 * 264)
+    expect(one(el, '[data-testid="plan-stages"]').scrollLeft).toBe(9 * STAGE_COL_W)
   })
 
   it('is absent when every stage is visible', async () => {

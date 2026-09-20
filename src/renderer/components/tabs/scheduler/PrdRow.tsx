@@ -76,12 +76,12 @@ function PrdRowComponent({ row, elapsedMs, listIndex, onFocused, headChoices = E
         aria-expanded={open}
         aria-label={`${row.prdNumber ? `PRD ${row.prdNumber}, ` : ''}${job.title}, ${job.status}${trailing ? `, ${trailing}` : ''}`}
         title={job.title}
-        className={`w-full h-[31px] py-1 px-3 text-left flex items-center gap-2 hover:bg-bg/40 focus:outline-none focus:ring-1 focus:ring-accent focus:ring-inset ${tintClass(row)}`}
+        className={`w-full h-[31px] py-1 px-2 text-left flex items-center gap-1.5 hover:bg-bg/40 focus:outline-none focus:ring-1 focus:ring-accent focus:ring-inset ${tintClass(row)}`}
       >
         <span aria-hidden="true" className={`shrink-0 w-[7px] h-[7px] rounded-full ${dotClass(row)}`} />
-        <span className="shrink-0 font-mono text-[11.5px] text-fg-faint w-[34px]">{row.prdNumber ? `#${row.prdNumber}` : ''}</span>
-        <span className={`flex-1 min-w-0 truncate text-[13px] leading-tight ${dimTitle ? 'text-fg-faint' : 'text-fg font-medium'}`}>{job.title}</span>
-        <span data-testid="prd-row-trailing" className={`shrink-0 font-mono text-[11.5px] ${trailingClass(row)}`}>{trailing}</span>
+        <span className="shrink-0 font-mono text-[10.5px] text-fg-faint w-[30px]">{row.prdNumber ? `#${row.prdNumber}` : ''}</span>
+        <span className={`flex-1 min-w-0 truncate text-[12.5px] leading-tight ${dimTitle ? 'text-fg-faint' : 'text-fg font-medium'}`}>{job.title}</span>
+        <span data-testid="prd-row-trailing" className={`shrink-0 font-mono text-[10.5px] ${trailingClass(row)}`}>{trailing}</span>
       </button>
       {open && <PrdDetail row={row} elapsedMs={elapsedMs} headChoices={headChoices} />}
     </div>

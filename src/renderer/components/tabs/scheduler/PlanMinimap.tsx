@@ -2,11 +2,18 @@ import { useMemo, useRef } from 'react'
 import type { Stage } from '../../../lib/schedulerStages'
 import { InfoDot } from './sched-primitives'
 
-/** Dot geometry (px): 4px square on a 6px pitch, 4 rows → 24px inside the 32px band. */
+/**
+ * Dot geometry (px): 4px square on a 6px pitch, 4 rows → 22px of dots. PAD_X/PAD_Y is the inset that
+ * leaves room for the brush's padding ring, so the whole strip is 26px inside the 28px band.
+ */
 const PITCH = 6
 const DOT = 4
 const ROWS = 4
-const STAGE_GAP = 8
+const STAGE_GAP = 12
+const PAD_X = 5
+const PAD_Y = 2
+/** Brush overhang beyond the cluster edges (< STAGE_GAP/2 so it never touches a neighbouring cluster). */
+const BRUSH_OVERHANG = 4
 
 type Tone = 'done' | 'running' | 'attention' | 'failed' | 'pending'
 // Literal class names only (Tailwind JIT). Same palette as the stage columns' dots.
@@ -40,7 +47,7 @@ function layoutMinimap(stages: Stage[]): MinimapLayout {
   const dots: MinimapDot[] = []
   const stageX: number[] = []
   const stageW: number[] = []
-  let x = 0
+  let x = PAD_X
   for (const s of stages) {
     const cols = Math.max(1, Math.ceil(s.rows.length / ROWS))
     stageX.push(x)
@@ -48,22 +55,22 @@ function layoutMinimap(stages: Stage[]): MinimapLayout {
     s.rows.forEach((r, i) => {
       dots.push({
         x: x + Math.floor(i / ROWS) * PITCH,
-        y: (i % ROWS) * PITCH,
+        y: PAD_Y + (i % ROWS) * PITCH,
         tone: toneOf(r.status),
         title: `${r.prdNumber ? `#${r.prdNumber}` : r.slug} ${r.title} — ${r.status}`,
       })
     })
     x += cols * PITCH + STAGE_GAP
   }
-  return { dots, stageX, stageW, width: Math.max(0, x - STAGE_GAP) }
+  return { dots, stageX, stageW, width: Math.max(0, x - STAGE_GAP) + PAD_X }
 }
 
 /** Lowest 0-based stage index whose rows include a status matching `pred`, or -1. */
-function firstStageWith(stages: Stage[], pred: (status: string) => boolean): number {
+export function firstStageWith(stages: Stage[], pred: (status: string) => boolean): number {
   return stages.findIndex((s) => s.rows.some((r) => pred(r.status)))
 }
-const isRunningStatus = (s: string) => s === 'running' || s === 'investigating'
-const isBlockerStatus = (s: string) => s === 'failed' || s === 'needs_review' || s === 'quarantined'
+export const isRunningStatus = (s: string) => s === 'running' || s === 'investigating'
+export const isBlockerStatus = (s: string) => s === 'failed' || s === 'needs_review' || s === 'quarantined'
 
 interface PlanMinimapProps {
   stages: Stage[]
@@ -108,7 +115,7 @@ export function PlanMinimap({ stages, first, perView, onSeek }: PlanMinimapProps
         data-testid="plan-minimap-dots"
         role="presentation"
         className="relative shrink min-w-0 overflow-hidden cursor-ew-resize touch-none"
-        style={{ width: layout.width, height: ROWS * PITCH - (PITCH - DOT) }}
+        style={{ width: layout.width, height: ROWS * PITCH - (PITCH - DOT) + 2 * PAD_Y }}
         onPointerDown={(e) => { dragging.current = true; e.currentTarget.setPointerCapture?.(e.pointerId); seekAt(e) }}
         onPointerMove={(e) => { if (dragging.current) seekAt(e) }}
         onPointerUp={() => { dragging.current = false }}
@@ -126,8 +133,8 @@ export function PlanMinimap({ stages, first, perView, onSeek }: PlanMinimapProps
         <span
           data-testid="plan-minimap-brush"
           aria-hidden="true"
-          className="absolute top-0 bottom-0 border border-accent pointer-events-none"
-          style={{ left: brushL - 2, width: brushR - brushL + 4 }}
+          className="absolute top-0 bottom-0 border border-accent bg-accent/10 rounded-[2px] pointer-events-none"
+          style={{ left: brushL - BRUSH_OVERHANG, width: brushR - brushL + 2 * BRUSH_OVERHANG }}
         />
       </div>
       <span className="ml-auto shrink-0 font-mono text-[11.5px] text-fg-faint" data-testid="plan-minimap-range">

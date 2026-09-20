@@ -11,6 +11,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { Scheduler } from '../../Scheduler'
+import { STAGE_COL_W } from '../StageColumn'
+import { FURTHER_STAGES_W } from '../FurtherStagesTail'
 import { useScheduleState } from '../../../../state/scheduleState'
 import { useSessions } from '../../../../state/sessions'
 import type { ScheduleStateSnapshot, ScheduleJob } from '../../../../../preload/api'
@@ -45,6 +47,7 @@ function plan(epicId: string, n: number, status: 'running' | 'pending' | 'comple
 
 let container: HTMLDivElement
 let root: Root
+const STRIP_W = 1350 - 252 - 3 - FURTHER_STAGES_W
 const px = (cls: string) => Number(/(?:^|\s)h-\[(\d+)px\]/.exec(cls)?.[1] ?? NaN)
 const one = (sel: string) => container.querySelector<HTMLElement>(sel)!
 
@@ -54,8 +57,8 @@ beforeEach(async () => {
   ;(globalThis as any).window.api = api
   window.innerWidth = 1350
   window.innerHeight = 866
-  // Stage strip = viewport minus the FURTHER STAGES tail; PlanBand reads clientWidth to size its window.
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1150 })
+  // Stage strip = 1350 viewport − 252px LeftNav − 3px spine − FURTHER STAGES tail; PlanBand reads clientWidth to size its window.
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => STRIP_W })
   const jobs = [...plan('ea', 60, 'running'), ...plan('eb', 34, 'pending'), ...plan('ec', 20, 'completed')]
   expect(jobs).toHaveLength(114)
   useScheduleState.setState({
@@ -86,9 +89,14 @@ describe('Scheduler 2A density (class-set approach — jsdom has no layout)', ()
     for (const r of rows) expect(px(r.className)).toBeLessThanOrEqual(32)
   })
 
-  it('≥ 5 stage columns are in the DOM in the first plan at 1350px', () => {
+  it('5 stage columns fit the strip at 1350px, with the FURTHER STAGES tail beside them', () => {
     const first = one('[data-testid="plan-band"]')
-    expect(first.querySelectorAll('[data-testid="stage-column"]').length).toBeGreaterThanOrEqual(5)
+    expect(Math.ceil(STRIP_W / STAGE_COL_W)).toBe(5) // five columns, not four + a sliver of a fifth
+    expect(STRIP_W / STAGE_COL_W).toBeGreaterThan(4.9) // …and the fifth is (all but) whole
+    // windowed: visible ceil(strip / col) columns + 1 overscan on the right (opens at stage 1 — it is running)
+    const cols = first.querySelectorAll('[data-testid="stage-column"]').length
+    expect(cols).toBe(Math.ceil(STRIP_W / STAGE_COL_W) + 1)
+    expect(first.querySelector('[data-testid="further-stages"]')).not.toBeNull()
   })
 
   it('title + KPI + PLANS toolbar + plan header + WHOLE GRAPH strip ≤ 210px above the first PRD row', () => {

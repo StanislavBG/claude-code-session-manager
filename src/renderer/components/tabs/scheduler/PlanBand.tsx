@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { toast } from '../../../state/toast'
 import { formatEta, type Plan, type PlanStatus } from '../../../lib/schedulerStages'
 import { RunLogViewer } from '../plans/RunLogViewer'
 import { StageColumn, STAGE_COL_W } from './StageColumn'
-import { PlanMinimap } from './PlanMinimap'
+import { PlanMinimap, firstStageWith, isBlockerStatus, isRunningStatus } from './PlanMinimap'
 import { FurtherStagesTail } from './FurtherStagesTail'
 import { CriticalPathColumn } from './CriticalPathColumn'
 import type { PlanMode } from './SchedulerTopBands'
@@ -71,8 +71,25 @@ export function PlanBand({ plan, mode = 'graph', now, hidden, indexBySlug, headC
   const [first, setFirst] = useState(0)
   const [viewW, setViewW] = useState(FALLBACK_VIEW_W)
 
-  useEffect(() => {
-    if (expanded && stripRef.current?.clientWidth) setViewW(stripRef.current.clientWidth)
+  // Where the work is: first stage with a running row, else the first with a failed / needs_review /
+  // quarantined row, else stage 1. O(rows) once per snapshot.
+  const openStage = useMemo(() => {
+    const running = firstStageWith(plan.stages, isRunningStatus)
+    return running >= 0 ? running : Math.max(0, firstStageWith(plan.stages, isBlockerStatus))
+  }, [plan.stages])
+
+  // Layout effect (not useEffect): measure the strip and scroll to the opening stage before first paint,
+  // so the columns, range label and brush never visibly jump. Re-runs on re-expand (the strip re-mounts at 0).
+  useLayoutEffect(() => {
+    if (!expanded) return
+    const el = stripRef.current
+    const w = el?.clientWidth || FALLBACK_VIEW_W
+    const f = Math.max(0, Math.min(openStage, plan.stageCount - Math.max(1, Math.ceil(w / STAGE_COL_W))))
+    if (el?.clientWidth) setViewW(el.clientWidth)
+    if (el) el.scrollLeft = f * STAGE_COL_W
+    setFirst(f)
+    // openStage/stageCount deliberately omitted: snapshots refresh constantly and must not yank the user's scroll.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded])
 
   // The plan's most recent run (DONE → 'View run'): latest finishedAt among rows that have a runId.
@@ -182,7 +199,7 @@ export function PlanBand({ plan, mode = 'graph', now, hidden, indexBySlug, headC
           aria-expanded={expanded}
           aria-label={expanded ? 'Collapse plan' : 'Expand plan'}
           data-testid="plan-toggle"
-          onClick={() => { setExpanded((v) => !v); setFirst(0) }} // a re-mounted strip starts scrolled to 0
+          onClick={() => setExpanded((v) => !v)}
           className="shrink-0 w-[14px] text-[11px] text-fg-faint hover:text-fg bg-transparent border-0 cursor-pointer p-0"
         >
           {expanded ? '▾' : '▸'}

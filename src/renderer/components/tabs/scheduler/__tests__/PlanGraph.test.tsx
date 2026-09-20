@@ -163,8 +163,8 @@ describe('Graph mode — stage columns and rows', () => {
     const btn = rows[0].querySelector('button')!
     expect(btn.className).toContain('h-[31px]')
     expect(btn.className).toContain('py-1')
-    expect(btn.innerHTML).toContain('text-[13px]')
-    expect(btn.innerHTML).toContain('text-[11.5px]')
+    expect(btn.innerHTML).toContain('text-[12.5px]')
+    expect(btn.innerHTML).toContain('text-[10.5px]')
   })
 
   it('caps a stage at 7 rows with a "+N in stage" footer that expands locally (no API call)', () => {

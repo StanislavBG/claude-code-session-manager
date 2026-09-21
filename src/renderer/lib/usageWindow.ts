@@ -41,3 +41,16 @@ export function usageTitle(label: string, w: UsageWindow | null | undefined): st
   const tail = reset ? ` · resets in ${reset.rel}${reset.abs ? ` (${reset.abs})` : ''}` : ''
   return `${label} · ${pct}% used${tail} — click to open Home`
 }
+
+/**
+ * Human label for a billing `limits[]` window kind. Same vocabulary as Home's
+ * UsageMeters ("Session"/"5-hour", "Weekly"/"all models") and the footer.
+ * Unknown/future kinds fall back to the raw kind; null/empty → null.
+ */
+export function windowKindLabel(kind: string | null | undefined, scopeModelName?: string | null): string | null {
+  if (!kind) return null
+  if (kind === 'session' || kind === 'five_hour') return 'Session · 5h'
+  if (kind === 'weekly_all') return 'Weekly · all models'
+  if (kind === 'weekly_scoped') return scopeModelName ? `Weekly · ${scopeModelName}` : 'Weekly · scoped'
+  return kind
+}

@@ -6,6 +6,7 @@ import { toast } from '../../../state/toast'
 import { usePanelFocus } from '../../../lib/panelFocus'
 import { useDocumentVisible } from '../../../lib/useDocumentVisible'
 import { formatAgo, formatRelative } from '../../../lib/formatTime'
+import { windowKindLabel } from '../../../lib/usageWindow'
 import { withTimeout } from '../../../lib/withTimeout'
 import { buildPlans, summarizeQueue } from '../../../lib/schedulerStages'
 import { computeStatus } from './computeStatus'
@@ -299,6 +300,7 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
   const util = snapshot.utilization
   const pollHealth = snapshot.pollHealth
   const pollStale = pollHealth != null && !pollHealth.lastPollOk
+  const windowLabel = windowKindLabel(snapshot.utilizationWindow)
   const resetMs = snapshot.nextReset ? Date.parse(snapshot.nextReset) : null
   const resetsIn = resetMs ? (resetMs > now ? formatRelative(resetMs - now) : 'soon') : '—'
 
@@ -359,8 +361,10 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
       <BandRow height={70} testId="scheduler-kpi-band">
         <KpiCell
           testId="kpi-window"
-          label="Window used"
-          info={pollStale ? `Billing poll failing — this reading may be outdated (last good reading ${formatAgo(pollHealth!.lastPollAt, now)}). Machine-wide 5h window.` : 'Share of the machine-wide 5h billing window consumed.'}
+          label={windowLabel ? `${windowLabel} used` : 'Window used'}
+          info={pollStale
+            ? `Billing poll failing — this reading may be outdated (last good reading ${formatAgo(pollHealth!.lastPollAt, now)}). Machine-wide ${windowLabel ?? 'binding'} window.`
+            : `Share of the machine-wide ${windowLabel ?? 'binding'} billing window consumed — the window closest to its limit.`}
           value={util === null || util === undefined ? '—' : `${Math.round(util)}%`}
           sub={`resets in ${resetsIn}`}
           third={<MiniBar pct={util ?? 0} tone={pollStale ? 'bg-amber-500' : 'bg-accent'} />}

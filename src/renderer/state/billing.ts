@@ -127,11 +127,6 @@ export function getBillingData(r: BillingFetchResult | null): BillingData | null
   return null
 }
 
-/** Five-hour utilization as a 0–100 percentage, 0 if unavailable. */
-export function getFiveHourUtil(r: BillingFetchResult | null): number {
-  return getBillingData(r)?.usage.five_hour?.utilization ?? 0
-}
-
 /** Force an immediate refresh, resetting the timer. */
 export function refreshBilling(): void {
   if (timer !== null) {

@@ -154,12 +154,23 @@ export interface UsageWindow {
   resets_at: string | null;
 }
 
+export interface UsageLimitEntry {
+  kind: string;
+  group: string;
+  percent: number | null;
+  severity: string | null;
+  resets_at: string | null;
+  scope: { model?: { display_name?: string } } | null;
+  is_active: boolean;
+}
+
 export interface UsageSnapshot {
   five_hour: UsageWindow | null;
   seven_day: UsageWindow | null;
   seven_day_sonnet: UsageWindow | null;
   seven_day_opus: UsageWindow | null;
   seven_day_oauth_apps: UsageWindow | null;
+  limits?: UsageLimitEntry[] | null;
   extra_usage: {
     is_enabled: boolean;
     monthly_limit: number | null;

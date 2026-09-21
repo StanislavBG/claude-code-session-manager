@@ -122,6 +122,23 @@ describe('SchedulerTopBands — KPI cells', () => {
     expect(q('kpi-concurrency').textContent).toContain('pause above')
   })
 
+  it('kpi-window names the binding window with the shared label vocabulary', async () => {
+    useScheduleState.setState({ snapshot: fixture({ utilizationWindow: 'weekly_all' }) })
+    await mount()
+    expect(q('kpi-window').textContent).toContain('Weekly · all models')
+    expect(q('kpi-window').textContent).not.toContain('undefined')
+  })
+
+  it('kpi-window falls back to the raw kind for an unknown window, generic label when absent', async () => {
+    useScheduleState.setState({ snapshot: fixture({ utilizationWindow: 'nimbus_quill' }) })
+    await mount()
+    expect(q('kpi-window').textContent).toContain('nimbus_quill')
+    useScheduleState.setState({ snapshot: fixture({ utilizationWindow: null }) })
+    await mount()
+    expect(q('kpi-window').textContent).toContain('Window used')
+    expect(q('kpi-window').textContent).not.toContain('undefined')
+  })
+
   it('DONE TODAY spend renders "—" first, then fills from a single history.dashboard call', async () => {
     let resolve!: (v: unknown) => void
     api.history.dashboard.mockReturnValue(new Promise((r) => { resolve = r }))

@@ -14,13 +14,23 @@
  * Run standalone: timeout 120 npx vitest run src/main/__tests__/runVerify-transcript-commit-evidence.test.cjs
  */
 
-import { test } from 'vitest';
+import { test, beforeAll, afterAll, vi } from 'vitest';
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { verifyRun } = require('../runVerify.cjs');
+
+// Sidecar goes through config.writeJsonSync, whose allow-list rejects os.tmpdir() fixtures.
+let writeSpy;
+beforeAll(() => {
+  writeSpy = vi.spyOn(require('../config.cjs'), 'writeJsonSync').mockImplementation((abs, data) => {
+    require('node:fs').writeFileSync(abs, JSON.stringify(data, null, 2) + '\n');
+    return { ok: true, mtimeMs: 0 };
+  });
+});
+afterAll(() => writeSpy.mockRestore());
 
 // ─── helpers (mirrors runVerify.test.cjs) ─────────────────────────────────────
 

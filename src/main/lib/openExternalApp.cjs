@@ -42,6 +42,28 @@ function findCommand(name) {
 }
 
 /**
+ * Spawn a detached opener and resolve once the OS reports the outcome.
+ * A missing/unexecutable binary emits an async 'error' (ENOENT/EACCES); without
+ * a listener that is an uncaught exception and the caller would see ok:true.
+ * Races 'spawn' against 'error' — never uses shell:true.
+ *
+ * @returns {Promise<{ ok: true, opener: string } | { ok: false, error: string }>}
+ */
+function spawnDetached(cmd, args, opener = cmd) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(cmd, args, { detached: true, stdio: 'ignore', env: cleanChildEnv() });
+    } catch (e) {
+      resolve({ ok: false, error: `failed to launch ${opener}: ${e?.message ?? e}` });
+      return;
+    }
+    child.once('error', (e) => resolve({ ok: false, error: `failed to launch ${opener}: ${e?.message ?? e}` }));
+    child.once('spawn', () => { child.unref(); resolve({ ok: true, opener }); });
+  });
+}
+
+/**
  * Open a project root directory in the user's editor.
  *
  * @param {{ cwd: string, editor?: string | null }} opts
@@ -51,8 +73,7 @@ async function openInEditor({ cwd, editor }) {
   const candidates = (editor && editor !== 'auto') ? [editor] : editorCandidates();
   for (const cmd of candidates) {
     if (!findCommand(cmd)) continue;
-    spawn(cmd, [cwd], { detached: true, stdio: 'ignore', env: cleanChildEnv() }).unref();
-    return { ok: true, opener: cmd };
+    return spawnDetached(cmd, [cwd]);
   }
   return { ok: false, error: 'no editor found' };
 }
@@ -89,8 +110,7 @@ async function openFileInEditor({ path: abs, line, col, editor }) {
     const supportsGoto = /^(code|cursor|subl)$/.test(cmd);
     const target = (supportsGoto && line) ? `${abs}:${line}${col ? `:${col}` : ''}` : abs;
     const args = supportsGoto ? ['-g', target] : [abs];
-    spawn(cmd, args, { detached: true, stdio: 'ignore', env: cleanChildEnv() }).unref();
-    return { ok: true, opener: cmd };
+    return spawnDetached(cmd, args);
   }
   return { ok: false, error: 'no editor found' };
 }
@@ -128,14 +148,12 @@ async function openInTerminal({ cwd }) {
       const args = t === 'gnome-terminal'
         ? ['--working-directory=' + cwd]
         : ['-e', `bash -c "cd '${cwd.replace(/'/g, "'\\''")}' && exec bash"`];
-      spawn(t, args, { detached: true, stdio: 'ignore', env: cleanChildEnv() }).unref();
-      return { ok: true, opener: t };
+      return spawnDetached(t, args);
     }
   } else if (process.platform === 'darwin') {
-    spawn('open', ['-a', 'Terminal', cwd], { detached: true, stdio: 'ignore', env: cleanChildEnv() }).unref();
-    return { ok: true, opener: 'Terminal.app' };
+    return spawnDetached('open', ['-a', 'Terminal', cwd], 'Terminal.app');
   }
   return { ok: false, error: 'no terminal found' };
 }
 
-module.exports = { findCommand, openInEditor, openFileInEditor, openInFinder, openInTerminal };
+module.exports = { spawnDetached, findCommand, openInEditor, openFileInEditor, openInFinder, openInTerminal };

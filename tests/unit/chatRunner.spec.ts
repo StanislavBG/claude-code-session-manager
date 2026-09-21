@@ -773,3 +773,70 @@ describe('per-tab collision handling', () => {
     expect(captured).toHaveLength(1)
   })
 })
+
+describe('bounded stream buffers (real executeRun path via a faked child process)', () => {
+  const os = require('node:os') as typeof import('node:os')
+  const fs = require('node:fs') as typeof import('node:fs')
+  const path = require('node:path') as typeof import('node:path')
+  const opsErrorLog = require('../../src/main/lib/opsErrorLog.cjs') as { appendError: (row: Record<string, unknown>) => unknown }
+  const { createHeadTailBuffer } = require('../../src/main/lib/headTailBuffer.cjs') as {
+    createHeadTailBuffer: (max: number) => { append: (s: string) => void; matchText: () => string; preview: () => string; size: number }
+  }
+  const realAppendError = opsErrorLog.appendError
+  const errorRows: Array<Record<string, unknown>> = []
+  let scratch = ''
+
+  beforeEach(() => {
+    chatRunner.__setExecutor(null)
+    nextChild = null
+    lastSpawnArgs = null
+    errorRows.length = 0
+    opsErrorLog.appendError = (row) => { errorRows.push(row); return undefined }
+    scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'chatrunner-bounded-'))
+  })
+  afterEach(() => {
+    opsErrorLog.appendError = realAppendError
+    fs.rmSync(scratch, { recursive: true, force: true })
+  })
+
+  it('10 MB of stderr noise then "already in use" still triggers the one-shot flag swap', async () => {
+    chatRunner.run({ tabId: 'tab-stderr-cap', sessionId: 'sess-stderr-cap', prompt: 'hi', cwd: scratch, resume: false })
+    await flush()
+    const first = nextChild!
+    expect(first).not.toBeNull()
+    const noise = Buffer.alloc(1024 * 1024, 'x')
+    for (let i = 0; i < 10; i++) first.stderr.emit('data', noise)
+    first.stderr.emit('data', Buffer.from('\nError: Session ID x is already in use.\n'))
+    first.emit('close', 1, null)
+    expect(nextChild).not.toBe(first)
+    expect(lastSpawnArgs).toContain('--resume')
+  })
+
+  it('head+tail buffer keeps preview exact and retained size within cap + 300', () => {
+    const buf = createHeadTailBuffer(64 * 1024)
+    const full = '  \n' + 'a'.repeat(50)
+    buf.append(full)
+    expect(buf.preview()).toBe(full.trim().slice(0, 300))
+    const big = createHeadTailBuffer(64 * 1024)
+    const noise = 'y'.repeat(1024 * 1024)
+    big.append('boom: first line\n')
+    for (let i = 0; i < 10; i++) big.append(noise)
+    big.append('Error: Session ID x is already in use.')
+    expect(big.size).toBeLessThanOrEqual(64 * 1024 + 301)
+    expect(big.matchText()).toMatch(/Session ID .* is already in use/i)
+    expect(big.preview()).toBe(('boom: first line\n' + noise).trim().slice(0, 300))
+  })
+
+  it('an 8 MB+ stdout line with no newline is dropped with exactly one ops error row', async () => {
+    chatRunner.run({ tabId: 'tab-line-cap', sessionId: 'sess-line-cap', prompt: 'hi', cwd: scratch, resume: false })
+    await flush()
+    const child = nextChild!
+    const chunk = Buffer.alloc(3 * 1024 * 1024, 'z')
+    for (let i = 0; i < 6; i++) child.stdout.emit('data', chunk)
+    const overflowRows = errorRows.filter((r) => String(r.message).includes('without a newline'))
+    expect(overflowRows).toHaveLength(1)
+    expect(overflowRows[0].scope).toBe('chatRunner')
+    emitResultLine(child, 'ok')
+    await flush()
+  })
+})

@@ -6596,6 +6596,22 @@ async function handleLaunchFailure({ job, res, runId, runDir, launchKey, launchE
   await broadcast({ flush: true });
 }
 
+// Scheduler-scoped error sink for failures that would otherwise be invisible
+// in packaged/npx builds (stdout unread). Never throws.
+function reportSchedulerError(message, slug, e) {
+  try {
+    logs.writeLine({
+      scope: 'scheduler',
+      level: 'error',
+      message,
+      meta: { slug, error: e?.message || String(e), stack: e?.stack },
+    });
+  } catch { /* logging must never be the thing that fails */ }
+  try {
+    appendAuditEvent('scheduler_error', { slug, message, error: e?.message || String(e), stack: e?.stack });
+  } catch { /* same */ }
+}
+
 async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
   // Session-Manager owns the machine-wide `claude -p` pool (sessionSlots.cjs)
   // — the scheduler REQUESTS capacity, it doesn't own a private cap. A miss
@@ -6971,6 +6987,9 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       });
     } finally {
       if (worktree.ok) {
+       // A vanished worktree dir must not let a rejection escape this finally:
+       // that would discard `res` and skip every status mutation below.
+       try {
         worktreeLeftoverDirty = (await uncommittedChanges(worktree.dir)) || [];
         // Salvage the worktree's full diff (tracked + untracked) to the run
         // dir BEFORE the checkout is removed below — otherwise a job killed
@@ -7007,6 +7026,14 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
           branch: worktree.branch,
           keepBranch: !integration.ok,
         });
+       } catch (e) {
+        worktreeIntegrationFailure = e?.message || String(e);
+        reportSchedulerError('spawnJob worktree finalize failed', job.slug, e);
+        // Best-effort: release the checkout + worktree-cap slot, keep the branch.
+        try {
+          await jobWorktree.cleanupJobWorktree({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+        } catch { /* already reported above */ }
+       }
       } else {
         // In-place run (non-git cwd, cap reached, env-disabled, or a carry-over
         // failure) — there is no throwaway checkout to diff, so salvage only
@@ -7943,6 +7970,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     }
   } catch (e) {
     console.error('[scheduler] spawnJob error', job.slug, e);
+    reportSchedulerError('spawnJob error', job.slug, e);
   } finally {
     runningSet.delete(job.slug);
     // Slot release notifies subscribed pumps (chat lane) machine-wide.
@@ -8302,7 +8330,7 @@ async function tickBody(gen, { bypassLoadGate }) {
     for (const job of gatedBatch) {
       if (cancelToken.cancelled || stale()) break;
       // spawnJob is fire-and-forget; it calls tickQueue() on completion.
-      spawnJob(job, runId, runDir, state.config.defaultCwd).catch(() => {});
+      spawnJob(job, runId, runDir, state.config.defaultCwd).catch((e) => reportSchedulerError('spawnJob dispatch rejected', job.slug, e));
     }
     return recordTick({ fired: true, count: gatedBatch.length, group: gatedBatch[0]?.parallelGroup }, { holds });
   }
@@ -11626,6 +11654,9 @@ async function init() {
   // resets early or the auth token rotates. Tracked so re-init doesn't leak.
   if (rescheduleInterval) clearInterval(rescheduleInterval);
   rescheduleInterval = setInterval(() => {
+    // One throwing tick (e.g. readQueueSync on a torn queue.json) must skip
+    // only itself — the interval keeps firing and the failure is logged.
+    try {
     rescheduleTimer().catch(() => {});
     const s = readQueueSync();
     // Periodic self-heal: re-run the verifier over stale needs_review jobs so a
@@ -11837,6 +11868,9 @@ async function init() {
           }
         }
       }).catch(() => {});
+    }
+    } catch (e) {
+      reportSchedulerError('rescheduleInterval tick failed', null, e);
     }
   }, REVERIFY_INTERVAL_MS);
 
@@ -12509,6 +12543,7 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
 }
 
 module.exports = {
+  reportSchedulerError,
   classifyQueueStarvation,
   classifyQueueStarvationByProject,
   dispatchIdleMs,

@@ -29,7 +29,9 @@ const os = require('node:os');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { resolveEpicTranscriptPath } = require('./epicTranscriptPath.cjs');
 
-// Mirrors rawSessionModel.ts's RAW_MODELS — duplicated rather than imported
+// Deliberately stays a FIXED alias set (reviewed against the catalog-driven raw picker): it answers
+// "alias vs concrete id", not "which options to offer", so live catalog ids must not enter it.
+// Mirrors rawSessionModel.ts's RAW_MODELS fallback — duplicated rather than imported
 // because that file is a renderer ES module and this is a main-process CJS
 // module (CLAUDE.md: "No CommonJS in renderer, no ES modules in main").
 // Anything NOT in this set is treated as an already-concrete pinned model id

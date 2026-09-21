@@ -84,7 +84,7 @@ function labelFromCwd(cwd: string): string {
  *   with the same sessionId otherwise (no new UUID generated — the id
  *   is already definitive from hydration).
  */
-async function resolveStartupCommand(
+export async function resolveStartupCommand(
   p: { cwd: string; sessionId: string },
   freshStart = false,
   model: RawModel = getRawSessionModel(),
@@ -98,8 +98,8 @@ async function resolveStartupCommand(
   // repeated wakeTab calls for tabs that never had a transcript).
   const sessionId = freshStart && !useResume ? crypto.randomUUID() : p.sessionId
   const startupCommand = useResume
-    ? `claude --dangerously-skip-permissions --resume ${shellQuote(sessionId)} --model ${model}`
-    : `claude --dangerously-skip-permissions --session-id ${shellQuote(sessionId)} --model ${model}`
+    ? `claude --dangerously-skip-permissions --resume ${shellQuote(sessionId)} --model ${shellQuote(model)}`
+    : `claude --dangerously-skip-permissions --session-id ${shellQuote(sessionId)} --model ${shellQuote(model)}`
   return { sessionId, startupCommand }
 }
 

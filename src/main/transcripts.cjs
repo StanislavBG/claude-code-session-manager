@@ -37,6 +37,7 @@ function attachWindow(w) {
 }
 
 const { encodeCwd } = require('./lib/encodeCwd.cjs');
+const { LRUCache } = require('./lib/lruCache.cjs');
 const { classifyLine } = require('./lib/classifyTranscriptLine.cjs');
 const { resolveEpicTranscriptPath } = require('./lib/epicTranscriptPath.cjs');
 
@@ -449,21 +450,32 @@ async function getBuffer(tabId) {
 // this size report null (omitted by the renderer) rather than a partial sum.
 const MAX_USAGE_FILE_BYTES = 64 * 1024 * 1024;
 
-/** Map<filePath, { mtimeMs, size, usage: {inputTokens, outputTokens} }> */
-const usageCache = new Map();
+/** Max distinct transcripts whose running totals stay cached. */
+const USAGE_CACHE_MAX = 200;
+
+/**
+ * LRU<filePath, { ino, size, mtimeMs, readOffset, usage }>. `readOffset` is the
+ * byte just past the last complete (newline-terminated) line already summed, so
+ * the next call only parses [readOffset, size). The full parse keeps no
+ * de-dup state (every usage event is summed), so none is cached here.
+ */
+const usageCache = new LRUCache(USAGE_CACHE_MAX);
 
 /**
  * Sum `usage` events out of one session's JSONL transcript — same
  * classifyLine()/field-name resolution live.ts's ingest uses for its running
  * per-tab totals (input_tokens/output_tokens, snake_case on the wire).
- * Cached by file mtime so repeat calls for an unchanged transcript are a
- * single fs.stat.
+ * Append-only tail parse: when the inode matches and the file has not shrunk,
+ * only the new bytes are read (positional fd.read) and a trailing partial line
+ * waits until completed; truncation / inode change → full re-parse.
+ * Cost per call: O(appended bytes) time and space; O(file) only on cold/reset.
  */
 async function usageForOne(filePath) {
   const stat = await fsp.stat(filePath).catch(() => null);
   if (!stat) return null;
   const cached = usageCache.get(filePath);
-  if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+  const canTail = !!cached && cached.ino === stat.ino && stat.size >= cached.readOffset;
+  if (canTail && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) {
     return cached.usage;
   }
   if (stat.size > MAX_USAGE_FILE_BYTES) {
@@ -475,11 +487,33 @@ async function usageForOne(filePath) {
     });
     return null;
   }
-  const text = await fsp.readFile(filePath, 'utf8').catch(() => null);
-  if (text === null) return null;
-  let inputTokens = 0;
-  let outputTokens = 0;
-  for (const line of text.split('\n')) {
+  const start = canTail ? cached.readOffset : 0;
+  let inputTokens = canTail ? cached.usage.inputTokens : 0;
+  let outputTokens = canTail ? cached.usage.outputTokens : 0;
+  const want = stat.size - start;
+  let buf = Buffer.alloc(0);
+  if (want > 0) {
+    let fd;
+    try {
+      fd = await fsp.open(filePath, 'r');
+      buf = Buffer.alloc(want);
+      let got = 0;
+      while (got < want) {
+        const { bytesRead } = await fd.read(buf, got, want - got, start + got);
+        if (bytesRead === 0) break;
+        got += bytesRead;
+      }
+      buf = buf.subarray(0, got);
+    } catch {
+      return null;
+    } finally {
+      await fd?.close().catch(() => {});
+    }
+  }
+  // Consume only complete lines; a trailing partial line is re-read next call.
+  const lastNl = buf.lastIndexOf(0x0a);
+  const complete = lastNl === -1 ? '' : buf.subarray(0, lastNl + 1).toString('utf8');
+  for (const line of complete.split('\n')) {
     if (!line) continue;
     let obj;
     try {
@@ -496,7 +530,13 @@ async function usageForOne(filePath) {
     }
   }
   const usage = { inputTokens, outputTokens };
-  usageCache.set(filePath, { mtimeMs: stat.mtimeMs, size: stat.size, usage });
+  usageCache.set(filePath, {
+    ino: stat.ino,
+    size: stat.size,
+    mtimeMs: stat.mtimeMs,
+    readOffset: start + lastNl + 1,
+    usage,
+  });
   return usage;
 }
 
@@ -562,6 +602,9 @@ module.exports = {
   // Test-only accessor onto the raw Subscription object (its lineIndex in
   // particular) — asserting a memory ceiling requires inspecting what's
   // actually held, not just what a read API returns.
+  __usageCacheForTest: usageCache,
+  __usageForOneForTest: usageForOne,
+  __usageCacheMaxForTest: USAGE_CACHE_MAX,
   __getSubForTest: (tabId) => subs.get(tabId),
   // Test-only: run a live (emit:true) flush directly against a subscription,
   // without going through the chokidar watcher — lets batching/IPC-shape

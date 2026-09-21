@@ -15,6 +15,7 @@ import { useModelCatalog } from '../../lib/useModelCatalog'
 import { modelFamily } from '../../lib/prettyModel'
 import { modelSupportsEffort } from '../../lib/effortSupport'
 import { ALL_PROJECTS } from '../../lib/projectActions'
+import { useSessions } from '../../state/sessions'
 
 /**
  * Agent Library — list+detail editor over `~/.claude/agents/*.md` personas.
@@ -95,6 +96,18 @@ function toKnownTags(tags: string[]): AgentPersonaTag[] {
   return tags.filter((t): t is AgentPersonaTag => KNOWN_PERSONA_TAGS.has(t))
 }
 
+/** Tooltip for the list's override badge: per project, which keys a frontmatter-only overlay sets, or "full body". */
+function overrideSummary(p: AgentPersona): string {
+  return p.overridingProjects
+    .map((name) => {
+      const d = p.overrideDetails?.find((x) => x.project === name)
+      if (!d) return name
+      const parts = [...d.fields.filter((f) => f !== 'name'), ...(d.bodyOverridden ? ['full body'] : [])]
+      return `${name}: ${parts.join(', ') || 'overlay'}`
+    })
+    .join('\n')
+}
+
 function AgentLibraryComponent() {
   const [personas, setPersonas] = useState<AgentPersona[] | null>(null)
   const [selectedName, setSelectedName] = useState<string | null>(null)
@@ -106,6 +119,9 @@ function AgentLibraryComponent() {
   const [busy, setBusy] = useState(false)
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
+  // The active project is the active tab's cwd — null on a HOME-face surface with no tab.
+  const activeCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
+  const activeProject = activeCwd ? activeCwd.replace(/\/+$/, '').split('/').pop() || activeCwd : null
 
   const load = async (selectAfter?: string) => {
     try {
@@ -241,6 +257,30 @@ function AgentLibraryComponent() {
     }
   }
 
+  // Writes the ACTIVE project's frontmatter-only overlay through the same savePersona IPC (projectName
+  // set = overlay, never the global file); clearing both keys drops the overlay via removeOverride.
+  const saveOverride = async (patch: { model: string; effort: string }) => {
+    if (!saved || !activeProject) return
+    setBusy(true)
+    try {
+      if (patch.model === 'inherit' && patch.effort === 'inherit') {
+        await window.api.agents.removeOverride({ name: saved.name, projectName: activeProject })
+        toast.info(`cleared ${activeProject}'s override of ${saved.name}`)
+      } else {
+        await window.api.agents.savePersona({
+          name: saved.name, projectName: activeProject, description: '', tools: [], color: '', tags: [], body: '',
+          model: patch.model, effort: patch.effort,
+        })
+        toast.info(`saved ${activeProject}'s override of ${saved.name}`)
+      }
+      await load(saved.name)
+    } catch (e) {
+      toast.error((e as Error).message || 'failed to save project override')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <Panel
       toolbar={
@@ -299,7 +339,9 @@ function AgentLibraryComponent() {
                       <span className="shrink-0 flex items-center gap-1.5">
                         {isDirty && <span className="text-[10px] font-semibold text-accent">unsaved</span>}
                         {!isDirty && p.overridingProjects.length > 0 && (
-                          <Badge tone="dim">{p.overridingProjects.length} override{p.overridingProjects.length > 1 ? 's' : ''}</Badge>
+                          <span title={overrideSummary(p)}>
+                            <Badge tone="dim">{p.overridingProjects.length} override{p.overridingProjects.length > 1 ? 's' : ''}</Badge>
+                          </span>
                         )}
                         {confirming ? (
                           <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
@@ -353,6 +395,8 @@ function AgentLibraryComponent() {
               onSave={save}
               onDelete={remove}
               onDropOverride={dropOverride}
+              activeProject={activeProject}
+              onSaveOverride={saveOverride}
             />
           ) : (
             <EmptyState title="select an agent" />
@@ -368,7 +412,7 @@ export const AgentLibrary = memo(AgentLibraryComponent)
 
 function AgentPersonaEditor({
   obj, set, saved, dirty, isNew, busy, confirmDelete, setConfirmDelete,
-  onDuplicate, onRevert, onSave, onDelete, onDropOverride,
+  onDuplicate, onRevert, onSave, onDelete, onDropOverride, activeProject, onSaveOverride,
 }: {
   obj: Draft
   set: (patch: Partial<Draft>) => void
@@ -383,6 +427,8 @@ function AgentPersonaEditor({
   onSave: () => void
   onDelete: () => void
   onDropOverride: (projectName: string) => void
+  activeProject: string | null
+  onSaveOverride: (patch: { model: string; effort: string }) => void
 }) {
   const path = `~/.claude/agents/${obj.name}.md`
   const canRevertOrSave = dirty || isNew
@@ -414,6 +460,10 @@ function AgentPersonaEditor({
         <ModelPicker value={obj.model} onChange={(v) => set({ model: v })} />
 
         <EffortPicker value={obj.effort} model={obj.model} onChange={(v) => set({ effort: v })} />
+
+        {!isNew && saved && (
+          <ProjectOverrideBlock saved={saved} activeProject={activeProject} busy={busy} onSave={onSaveOverride} />
+        )}
 
         <Field label="tools" hint={`${obj.tools.length} of ${TOOLS.length} granted. Anything not ticked is refused at call time.`}>
           <div className="flex flex-wrap gap-1.5">
@@ -639,7 +689,9 @@ const BLOCKED_REASON = 'Blocked by the availableModels allowlist in your Claude 
  * id (with the alias's `[1m]` suffix when one is chosen). `catalog === null`
  * degrades to the static five chips.
  */
-function ModelPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+function ModelPicker({ value, onChange, label = 'default model', hint, testIdPrefix = '', inheritLabel }: {
+  value: string; onChange: (v: string) => void; label?: string; hint?: string; testIdPrefix?: string; inheritLabel?: string
+}) {
   const { catalog, loading, degraded, refresh } = useModelCatalog(null)
   const aliases = catalog ? ['inherit', ...catalog.aliases] : [...MODELS]
   const allow = catalog?.availableModels ?? null
@@ -667,12 +719,14 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (v: string)
 
   return (
     <Field
-      label="default model"
-      hint="This persona's default model for its Epics — sets the --model an Epic launches with (Terminal + Chat both honor it). 'inherit' falls back to each view's own default, not this Settings page. Cheap models for read-only personas; opus for judgement calls."
+      label={label}
+      hint={hint ?? "This persona's default model for its Epics — sets the --model an Epic launches with (Terminal + Chat both honor it). 'inherit' falls back to each view's own default, not this Settings page. Cheap models for read-only personas; opus for judgement calls."}
     >
-      <Choice options={aliases} value={aliasValue} onChange={onChange} mono blocked={blocked} />
+      <div data-testid={`${testIdPrefix}model-row`}>
+        <Choice options={aliases} value={aliasValue} onChange={onChange} mono blocked={blocked} labels={inheritLabel ? { inherit: inheritLabel } : undefined} />
+      </div>
       {showVersion && (
-        <div className="mt-2" data-testid="model-version-row">
+        <div className="mt-2" data-testid={`${testIdPrefix}model-version-row`}>
           <div className="text-[10.5px] text-fg-faint mb-1 font-mono">version</div>
           <Choice
             options={[LATEST, ...versions]}
@@ -690,7 +744,7 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (v: string)
             : loading ? 'Loading model catalog…' : 'catalog unavailable — showing the standard list.'}
         </span>
         <button
-          data-testid="model-catalog-refresh"
+          data-testid={`${testIdPrefix}model-catalog-refresh`}
           onClick={() => { void refresh() }}
           disabled={loading}
           className="underline text-fg-dim disabled:opacity-40"
@@ -708,7 +762,9 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (v: string)
  * settings.json file and get a session-only marker. `catalog === null` degrades to the static list.
  * A model known not to support effort gets a non-blocking note — the control stays enabled.
  */
-function EffortPicker({ value, model, onChange }: { value: string; model: string; onChange: (v: string) => void }) {
+function EffortPicker({ value, model, onChange, label = 'effort', testIdPrefix = '', inheritLabel }: {
+  value: string; model: string; onChange: (v: string) => void; label?: string; testIdPrefix?: string; inheritLabel?: string
+}) {
   const { catalog } = useModelCatalog(null)
   const levels = catalog && catalog.effortLevels.length ? ['inherit', ...catalog.effortLevels] : [...EFFORTS]
   const settingsLevels = catalog?.settingsEffortLevels ?? []
@@ -717,7 +773,7 @@ function EffortPicker({ value, model, onChange }: { value: string; model: string
   const unsupported = stored !== 'inherit' && modelSupportsEffort(model) === false
   return (
     <Field
-      label="effort"
+      label={label}
       hint={
         catalog
           ? `Effort levels are live-read from the installed claude CLI (what /effort accepts). ${
@@ -726,19 +782,93 @@ function EffortPicker({ value, model, onChange }: { value: string; model: string
           : "catalog unavailable — showing the standard list. 'inherit' writes no effort: line."
       }
     >
-      <div data-testid="effort-row">
-        <Choice options={levels} value={stored} onChange={onChange} mono />
+      <div data-testid={`${testIdPrefix}effort-row`}>
+        <Choice options={levels} value={stored} onChange={onChange} mono labels={inheritLabel ? { inherit: inheritLabel } : undefined} />
       </div>
       {sessionOnly.length > 0 && (
-        <div className="text-[11px] text-fg-faint mt-1 font-mono" data-testid="effort-session-only">
+        <div className="text-[11px] text-fg-faint mt-1 font-mono" data-testid={`${testIdPrefix}effort-session-only`}>
           {sessionOnly.map((l) => `${l} (session-only)`).join(' · ')}
         </div>
       )}
       {unsupported && (
-        <div className="text-[11px] text-amber-400 mt-1 leading-snug" data-testid="effort-unsupported-note">
+        <div className="text-[11px] text-amber-400 mt-1 leading-snug" data-testid={`${testIdPrefix}effort-unsupported-note`}>
           The selected model does not support effort — the CLI will ignore this setting.
         </div>
       )}
     </Field>
+  )
+}
+
+/**
+ * PROJECT OVERRIDE — the ACTIVE project's runtime model/effort for this persona, written as a
+ * frontmatter-only overlay at `<cwd>/.claude/agents/<name>.md` (no body; lib/personaMerge.cjs inherits the
+ * rest from the global persona). Deliberately a separate block from the global rows above it: those edit
+ * `~/.claude/agents/<name>.md` for the whole machine, these edit only this project's file. Each picker writes
+ * on change (no draft/Save step) so the two scopes never share a Save button.
+ */
+function ProjectOverrideBlock({ saved, activeProject, busy, onSave }: {
+  saved: AgentPersona
+  activeProject: string | null
+  busy: boolean
+  onSave: (patch: { model: string; effort: string }) => void
+}) {
+  if (!activeProject) {
+    return (
+      <div data-testid="project-override-none" className="border border-dashed border-line rounded p-3 text-[11px] text-fg-faint">
+        <div className="text-[10.5px] font-semibold uppercase tracking-wide mb-1 font-mono">project override</div>
+        No active project — open a project tab to override this persona&apos;s model or effort for that project only.
+      </div>
+    )
+  }
+  const detail = saved.overrideDetails?.find((d) => d.project === activeProject)
+  const fullBody = !!detail?.bodyOverridden
+  const model = detail?.values?.model ?? 'inherit'
+  const effort = detail?.values?.effort ?? 'inherit'
+  const globalModel = saved.model ?? 'inherit'
+  const globalEffort = saved.effort ?? 'inherit'
+
+  return (
+    <div data-testid="project-override" className="border border-accent/40 rounded p-3 space-y-3 bg-accent/5">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10.5px] font-semibold uppercase tracking-wide text-accent font-mono">project override</span>
+        <Badge tone="accent">{activeProject} only</Badge>
+        <span className="ml-auto text-[11px] text-fg-faint font-mono">{`<project>/.claude/agents/${saved.name}.md`}</span>
+      </div>
+      <div className="text-[11px] text-fg-faint leading-snug">
+        Changes what the SCHEDULER (and new Epics) spawn for <strong>{activeProject}</strong> only — a frontmatter-only overlay with just the keys you set;
+        the persona&apos;s body stays the global one. The global model/effort rows edit the machine-wide persona and are never touched here.
+      </div>
+      {fullBody && (
+        <div data-testid="project-override-fullbody" className="text-[11px] text-amber-400 leading-snug">
+          {activeProject} already has a FULL-BODY override of this persona (its own definition text). It is shown as-is and not converted to a
+          frontmatter-only overlay — edit that file directly, or drop it with × under &quot;project overrides&quot; below.
+        </div>
+      )}
+      <fieldset disabled={busy || fullBody} className="space-y-3 border-0 p-0 m-0 min-w-0">
+        <ModelPicker
+          value={model}
+          onChange={(v) => { if (!fullBody) onSave({ model: v, effort }) }}
+          label="project model"
+          hint="'use global' writes no model: line in the overlay."
+          testIdPrefix="override-"
+          inheritLabel="use global"
+        />
+        <EffortPicker
+          value={effort}
+          model={model !== 'inherit' ? model : globalModel}
+          onChange={(v) => { if (!fullBody) onSave({ model, effort: v }) }}
+          label="project effort"
+          testIdPrefix="override-"
+          inheritLabel="use global"
+        />
+      </fieldset>
+      <div data-testid="override-provenance" className="text-[11px] font-mono text-fg-dim space-y-0.5">
+        {[['model', globalModel, model], ['effort', globalEffort, effort]].map(([k, g, o]) => (
+          <div key={k} data-testid={`override-provenance-${k}`}>
+            {k}: {o !== 'inherit' ? <>{g} <span className="text-fg-faint">(global)</span> → <span className="text-accent">{o}</span> <span className="text-fg-faint">(this project)</span></> : <>{g} <span className="text-fg-faint">(global — not overridden)</span></>}
+          </div>
+        ))}
+      </div>
+    </div>
   )
 }

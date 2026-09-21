@@ -1,7 +1,7 @@
 /**
  * Choice — single-select pill row for catalog-driven pickers (model family/version, effort, New Session overrides).
  */
-export function Choice({ options, value, onChange, mono, blocked }: { options: string[]; value: string; onChange: (v: string) => void; mono?: boolean; blocked?: Record<string, string> }) {
+export function Choice({ options, value, onChange, mono, blocked, labels }: { options: string[]; value: string; onChange: (v: string) => void; mono?: boolean; blocked?: Record<string, string>; labels?: Record<string, string> }) {
   // A persona's on-disk `model:` may not be in the option list (hand-edited,
   // or a since-retired id; agentPersonaSchema.cjs just takes a bounded string).
   // It is appended as a selected-but-unlisted option, so a re-render or an
@@ -25,7 +25,7 @@ export function Choice({ options, value, onChange, mono, blocked }: { options: s
               on ? 'bg-accent/15 text-accent border-accent/40 font-semibold' : 'bg-bg-hi text-fg-dim border-line'
             } ${isCurrentOnDisk ? 'border-dashed' : ''} ${block ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
-            {o}
+            {labels?.[o] ?? o}
             {isCurrentOnDisk ? ' (current)' : ''}
           </button>
         )

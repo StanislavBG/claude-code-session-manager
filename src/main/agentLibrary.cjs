@@ -84,9 +84,50 @@ function serializePersona({ name, description, tools, model, effort, color, tags
 }
 
 /**
+ * Project OVERRIDE write: a frontmatter-only overlay at
+ * `<cwd>/.claude/agents/<name>.md` carrying ONLY the overridden `model` /
+ * `effort` keys and no body (lib/personaMerge.cjs inherits everything else
+ * from the global persona). Keys already in an existing frontmatter-only
+ * overlay are preserved; an existing overlay that has a BODY is refused so a
+ * full-body overlay is never silently converted. Both keys unset removes the
+ * file (same as `removeOverride`) rather than leaving an empty overlay.
+ */
+async function saveOverlay({ name, projectName, model, effort, loadSessions, validatePath, writeTextAtomic }) {
+  const projects = await openProjects({ loadSessions });
+  const project = projects.find((p) => p.name === projectName);
+  if (!project) throw new Error(`project not open: ${projectName}`);
+  const target = validatePath(path.join(project.cwd, '.claude', 'agents', `${name}.md`));
+  let fm = {};
+  try {
+    const existing = splitFrontmatter(await fsp.readFile(target, 'utf8'));
+    if (existing.body.trim() !== '') {
+      throw new Error(`${name} has a full-body override in ${projectName} — edit ${target} directly; it is not converted to a frontmatter-only override`);
+    }
+    fm = existing.fm;
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  const next = { ...fm };
+  for (const [k, v] of [['model', model], ['effort', effort]]) {
+    if (v && v !== 'inherit') next[k] = v;
+    else delete next[k];
+  }
+  if (Object.keys(next).length === 0) {
+    await removeOverride({ name, projectName, loadSessions, validatePath });
+    return { ok: true, path: target, removed: true };
+  }
+  const lines = ['---', ...Object.entries(next).map(([k, v]) => `${k}: ${v}`), '---', ''];
+  await writeTextAtomic(target, lines.join('\n'));
+  return { ok: true, path: target };
+}
+
+/**
  * Writes a global persona `.md` file — `~/.claude/agents/<name>.md`. Pass
  * `originalName` when renaming an existing persona so the old file is
- * removed once the new one is written (no-op if names match).
+ * removed once the new one is written (no-op if names match). Pass
+ * `projectName` (an open project) to instead write that project's
+ * frontmatter-only OVERRIDE of the persona — see saveOverlay; only `model` and
+ * `effort` are read in that mode.
  */
 async function savePersona({
   name,
@@ -102,12 +143,17 @@ async function savePersona({
   actionLabel,
   title,
   body,
+  projectName,
   globalDir = path.join(os.homedir(), '.claude', 'agents'),
+  loadSessions = sessionsStore.load,
   validatePath = configMgr.validatePath,
   writeTextAtomic = configMgr.writeTextAtomic,
 } = {}) {
   if (!PERSONA_NAME_RE.test(name || '')) {
     throw new Error('agent name must be lowercase, hyphenated (e.g. "my-agent")');
+  }
+  if (projectName) {
+    return saveOverlay({ name, projectName, model, effort, loadSessions, validatePath, writeTextAtomic });
   }
   const target = validatePath(path.join(globalDir, `${name}.md`));
   const text = serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, body });
@@ -232,9 +278,12 @@ async function listPersonas({
       if (!fsSync.existsSync(overlayReal)) continue;
       overridingProjects.push(p.name);
       const merged = resolveMergedPersona(p.cwd, path.basename(file, '.md'), { validatePath, globalDir });
+      const fields = merged ? Object.keys(merged.provenance).filter((k) => merged.provenance[k] === 'overlay') : [];
       overrideDetails.push({
         project: p.name,
-        fields: merged ? Object.keys(merged.provenance).filter((k) => merged.provenance[k] === 'overlay') : [],
+        fields,
+        // The project's value for each overridden key (the UI renders global → project).
+        values: merged ? Object.fromEntries(fields.map((k) => [k, merged.fm[k]])) : {},
         bodyOverridden: merged ? merged.bodySource === 'overlay' : false,
         issue: merged ? merged.overlayIssue : null,
       });

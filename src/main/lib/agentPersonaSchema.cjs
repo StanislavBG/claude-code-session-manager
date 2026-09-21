@@ -57,6 +57,8 @@ const AgentPersonaSaveSchema = z.object({
   action: z.string().max(20000).optional(),
   actionLabel: BoundedString.optional(),
   title: BoundedString.optional(),
+  // Set = write this project's frontmatter-only override (model/effort only) instead of the global file.
+  projectName: BoundedString.optional(),
   // Unbounded — a persona's body is arbitrary system-prompt prose.
   body: z.string(),
 });

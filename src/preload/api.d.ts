@@ -256,7 +256,7 @@ export interface AgentPersona {
   /** Project names (basename of cwd) whose currently-open tab overlays this agent. */
   overridingProjects: string[];
   /** Per open project with an overlay: which frontmatter keys / body the overlay overrides (merged view provenance). */
-  overrideDetails?: { project: string; fields: string[]; bodyOverridden: boolean; issue: string | null }[];
+  overrideDetails?: { project: string; fields: string[]; values?: Record<string, string>; bodyOverridden: boolean; issue: string | null }[];
 }
 
 /** Payload for `agents.savePersona` — creates or overwrites a global persona file. */
@@ -278,6 +278,8 @@ export interface AgentPersonaSaveInput {
   /** Caption override for this persona's Action button. */
   actionLabel?: string;
   title?: string;
+  /** Open project name: write that project's frontmatter-only override (only `model`/`effort` are used) instead of the global file. */
+  projectName?: string;
   body: string;
 }
 

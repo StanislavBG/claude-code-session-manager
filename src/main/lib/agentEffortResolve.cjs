@@ -14,7 +14,9 @@
  *   1. persona `effort:` — project overlay (`<cwd>/.claude/agents/<name>.md`)
  *      beats the global `~/.claude/agents/<name>.md` (same path resolver and
  *      same reader as the model path: agentModelResolve.cjs's
- *      readOverlayAwarePersona — one implementation, not a copy).
+ *      readOverlayAwarePersona, i.e. personaMerge.cjs's field-level merge — a
+ *      frontmatter-only overlay can pin just `effort`; source is
+ *      'persona-overlay' only when the overlay itself supplied the value).
  *   2. `inherit`, absent, dangling agentType, unreadable persona → `effort:
  *      null`, meaning "pass NO --effort flag at all" so the CLI applies its
  *      own settings.json / default resolution.
@@ -58,7 +60,7 @@ function resolveEpicEffort({ cwd, claudeSessionId, agentType, deps = {} } = {}) 
     if (!persona) return { ...NO_EFFORT };
     const raw = typeof persona.fm.effort === 'string' ? persona.fm.effort.trim() : '';
     if (!raw || NON_FLAG_EFFORT.has(raw.toLowerCase())) return { effort: null, source: 'inherit' };
-    return { effort: raw, source: persona.fromOverlay ? 'persona-overlay' : 'persona' };
+    return { effort: raw, source: persona.provenance.effort === 'overlay' ? 'persona-overlay' : 'persona' };
   } catch {
     return { ...NO_EFFORT };
   }

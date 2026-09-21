@@ -22,7 +22,7 @@ const fsSync = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
-const { resolvePersonaPaths } = require('./lib/epicMint.cjs');
+const { resolveMergedPersona, PERSONA_NAME_RE } = require('./lib/personaMerge.cjs');
 const configMgr = require('./config.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 
@@ -31,9 +31,6 @@ function parseTools(raw) {
   if (!raw) return [];
   return raw.split(',').map((t) => t.trim()).filter(Boolean);
 }
-
-/** Filename-safe persona name: lowercase, hyphenated, matches the `.md` files on disk. */
-const PERSONA_NAME_RE = /^[a-z][a-z0-9-]*$/;
 
 /** Sentinel `projects:` entry meaning "this agent's Action button shows in every project". */
 const ALL_PROJECTS = '*';
@@ -222,6 +219,9 @@ async function listPersonas({
     const { fm, body } = splitFrontmatter(text);
 
     const overridingProjects = [];
+    // Per-project merged view: which frontmatter fields (and whether the body)
+    // the overlay actually overrides — from the shared merge, not a boolean.
+    const overrideDetails = [];
     for (const p of projects) {
       let overlayReal;
       try {
@@ -229,7 +229,15 @@ async function listPersonas({
       } catch {
         continue; // project cwd outside allowed roots — skip rather than throw
       }
-      if (fsSync.existsSync(overlayReal)) overridingProjects.push(p.name);
+      if (!fsSync.existsSync(overlayReal)) continue;
+      overridingProjects.push(p.name);
+      const merged = resolveMergedPersona(p.cwd, path.basename(file, '.md'), { validatePath, globalDir });
+      overrideDetails.push({
+        project: p.name,
+        fields: merged ? Object.keys(merged.provenance).filter((k) => merged.provenance[k] === 'overlay') : [],
+        bodyOverridden: merged ? merged.bodySource === 'overlay' : false,
+        issue: merged ? merged.overlayIssue : null,
+      });
     }
 
     personas.push({
@@ -247,6 +255,7 @@ async function listPersonas({
       path: real,
       body: body.trim(),
       overridingProjects,
+      overrideDetails,
     });
   }
 
@@ -254,44 +263,29 @@ async function listPersonas({
 }
 
 /**
- * Reads a persona `.md` file's raw text for `epicIntake.ts`'s `agentBody`
- * input, honoring the same project-overlay-then-global precedence as
- * `epicMint.cjs`'s `resolvePersonaPaths` (a project's `<cwd>/.claude/agents/
- * <name>.md` wins over `~/.claude/agents/<name>.md`) — the same precedence
- * `listPersonas` deliberately does NOT apply, since that lists only the
- * global directory for the Agent Library nav page. Returns `null` when
- * neither location has the file; frontmatter stripping and the 6000-char cap
- * are epicIntake.ts's job, not this reader's.
+ * Reads a persona for `epicIntake.ts`'s `agentBody` input and the PRD spawn
+ * path, through the shared overlay-over-global MERGE (lib/personaMerge.cjs —
+ * see its header for the rules). Returns `{ path, text, fm, body, fromOverlay,
+ * bodySource, provenance, overlayIssue }` where `fm`/`body` are the MERGED
+ * view, `provenance[key]` says which frontmatter keys came from the overlay,
+ * and `text` is the body-source file's raw text (byte-identical to the
+ * pre-merge result for a full-body overlay) or a re-serialized merge for a
+ * frontmatter-only overlay. `listPersonas` deliberately does NOT apply this —
+ * it lists the global directory for the Agent Library nav page. Returns `null`
+ * when neither location has the file; frontmatter stripping and the 6000-char
+ * cap are epicIntake.ts's / agentModelResolve.cjs's job, not this reader's.
+ * (Sync fs inside an async signature: the merge module is shared with the
+ * synchronous model resolver.)
  */
 async function getPersonaBody({
   cwd,
   name,
   validatePath = configMgr.validatePath,
+  ...deps
 } = {}) {
-  // Same gate savePersona/deletePersona apply before touching a path built
-  // from `name` (agentLibrary.cjs's PERSONA_NAME_RE check) — without it a
-  // `name` like "../../other-project/CLAUDE" survives resolvePersonaPaths'
-  // plain path.join and validatePath's allowed-roots check (which only
-  // confirms the resolved path stays under the home dir / an opened
-  // project), letting any readable .md under those roots be read and
-  // forwarded into the Epic's opening prompt.
-  if (!PERSONA_NAME_RE.test(name || '')) return null;
-  const { projectPath, globalPath } = resolvePersonaPaths(cwd, name);
-  for (const candidate of [projectPath, globalPath]) {
-    let real;
-    try {
-      real = validatePath(candidate);
-    } catch {
-      continue;
-    }
-    try {
-      const text = await fsp.readFile(real, 'utf8');
-      return { path: real, text };
-    } catch {
-      continue;
-    }
-  }
-  return null;
+  // PERSONA_NAME_RE is enforced inside resolveMergedPersona (the traversal
+  // guard for "../../other-project/CLAUDE"-style names).
+  return resolveMergedPersona(cwd, name, { ...deps, validatePath });
 }
 
 module.exports = {

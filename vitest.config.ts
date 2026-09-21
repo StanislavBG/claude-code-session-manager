@@ -175,6 +175,7 @@ export default defineConfig({
       'src/main/__tests__/promptSessionsCreateEpicHandler.test.cjs',
       'src/main/__tests__/agentModelResolve.test.cjs',
       'src/main/__tests__/agentEffortResolve.test.cjs',
+      'src/main/__tests__/personaMerge.test.cjs',
       'src/main/__tests__/telemetrySettings.test.cjs',
       'src/main/__tests__/machineProfile.test.cjs',
       'src/main/__tests__/telemetryClient.test.cjs',

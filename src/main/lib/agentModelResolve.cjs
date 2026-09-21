@@ -27,12 +27,11 @@
  * executeRun() without restructuring it into an async flow.
  */
 
-const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { readActiveIndex, resolvePersonaPaths } = require('./epicMint.cjs');
-const { PERSONA_NAME_RE } = require('../agentLibrary.cjs');
+const { resolveMergedPersona, PERSONA_NAME_RE } = require('./personaMerge.cjs');
 const configMgr = require('../config.cjs');
 
 /** The hardcoded floor every branch of resolveEpicModel falls back to — --model must never be omitted (CLAUDE.md "Automation model pinning"). */
@@ -94,68 +93,28 @@ function epicOverrideValue(epic, field) {
 }
 
 /**
- * Shared miss-tolerant persona reader (model AND effort resolution both go
- * through it — one concept, one implementation): tries each candidate path in
- * order (`validatePath` then sync `readFileSync`) and returns the FIRST
- * readable file's parsed frontmatter plus which candidate won — even if the
- * field a caller cares about is absent, which is why an empty-`model` overlay
- * file does NOT fall through to a later candidate (matches `getPersonaBody`'s
- * own semantics). Logs the dangling-persona warning at most once per
- * `(deps.cwd, agentType)` only when EVERY candidate misses. Never throws.
- */
-function readFrontmatterFromCandidatePaths(candidates, agentType, deps) {
-  const validatePath = deps.validatePath || configMgr.validatePath;
-  for (let i = 0; i < candidates.length; i++) {
-    const candidate = candidates[i];
-    let real;
-    try {
-      real = validatePath(candidate);
-    } catch {
-      continue;
-    }
-    try {
-      const text = fs.readFileSync(real, 'utf8');
-      const { fm } = splitFrontmatter(text);
-      return { fm, path: real, candidateIndex: i };
-    } catch {
-      continue;
-    }
-  }
-  logDanglingPersonaOnce(deps.cwd, agentType);
-  return null;
-}
-
-/**
- * Reads an Epic's agentType persona's frontmatter with the SAME
- * project-overlay-then-global precedence `agentLibrary.cjs`'s `getPersonaBody`
- * (and, through it, `resolvePrdPersonaForSpawn` below) already applies for a
- * scheduled PRD — `epicMint.cjs`'s `resolvePersonaPaths` is the shared path
- * resolver both readers go through, so there is exactly one place that decides
- * which of the two files wins. Returns `{ fm, path, fromOverlay }`, or null on
- * a total miss / invalid name — never throws.
+ * Reads an Epic's agentType persona through personaMerge.cjs's
+ * `resolveMergedPersona` — the ONE overlay-over-global merge every reader
+ * shares (overlay frontmatter keys win, absent keys and an empty overlay body
+ * fall back to the global; see that module's header for the `inherit` and
+ * malformed-overlay rules). Returns `{ fm, body, path, fromOverlay,
+ * provenance, ... }`, or null on a total miss / invalid name — never throws,
+ * and logs the dangling-persona warning at most once per (cwd, agentType).
  *
- * Sync (not `getPersonaBody`'s async `fsp.readFile`) because `resolveEpicModel`
- * must stay synchronous: `chatRunner.cjs`'s `executeRun()` registers its
- * cancel handle into `inFlight` synchronously, and its caller (`pump()`) reads
- * that entry back immediately after invoking the executor — an `await`
- * inserted ahead of that registration would run it a tick late and silently
- * break `cancel()`.
+ * Sync (not `getPersonaBody`'s async form) because `resolveEpicModel` must
+ * stay synchronous: `chatRunner.cjs`'s `executeRun()` registers its cancel
+ * handle into `inFlight` synchronously, and its caller (`pump()`) reads that
+ * entry back immediately after invoking the executor — an `await` inserted
+ * ahead of that registration would run it a tick late and silently break
+ * `cancel()`. The PERSONA_NAME_RE traversal guard lives in the merge module.
  */
 function readOverlayAwarePersona(agentType, deps = {}) {
-  // Same guard agentLibrary.cjs's getPersonaBody applies before it joins
-  // `name` into a path: without it, a caller-supplied agentType like
-  // "../../other-project/CLAUDE" survives resolvePersonaPaths' plain
-  // path.join and validatePath's allowed-roots check (which only confirms
-  // the resolved path stays under the home dir / an opened project), letting
-  // any readable .md under those roots be read on this spawn path.
-  if (!agentType || !PERSONA_NAME_RE.test(agentType)) return null;
-  const resolvePaths = deps.resolvePersonaPaths || resolvePersonaPaths;
-  const { projectPath, globalPath } = resolvePaths(deps.cwd, agentType, deps);
-  // A null projectPath (no cwd) simply has no overlay candidate.
-  const candidates = projectPath ? [projectPath, globalPath] : [globalPath];
-  const hit = readFrontmatterFromCandidatePaths(candidates, agentType, deps);
-  if (!hit) return null;
-  return { fm: hit.fm, path: hit.path, fromOverlay: Boolean(projectPath) && hit.candidateIndex === 0 };
+  const persona = resolveMergedPersona(deps.cwd, agentType, deps);
+  if (!persona) {
+    if (agentType && PERSONA_NAME_RE.test(agentType)) logDanglingPersonaOnce(deps.cwd, agentType);
+    return null;
+  }
+  return persona;
 }
 
 /** The persona's `model` frontmatter field (overlay-then-global), or null. Never throws. */
@@ -266,7 +225,9 @@ async function resolvePrdPersonaForSpawn({ cwd, agentType, fallbackModel = FALLB
       reportOnce(cwd, agentType, deps);
       return miss;
     }
-    const { fm, body } = splitFrontmatter(persona.text);
+    // getPersonaBody returns the MERGED persona (fm + body); a bare `{ path, text }`
+    // (older injected reader) is parsed here.
+    const { fm, body } = persona.fm ? persona : splitFrontmatter(persona.text);
     const model = fm.model && fm.model !== 'inherit' ? fm.model : fallbackModel;
     const systemPrompt = buildPersonaBodyText(body, persona.path);
     return { model, systemPrompt, personaPath: persona.path };

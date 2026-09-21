@@ -82,8 +82,10 @@ function writePersona(dir, name, frontmatterLines, bodyText) {
   fs.writeFileSync(path.join(dir, `${name}.md`), lines.join('\n'));
 }
 
-async function runJobWithAgentType({ agentType }) {
-  const mainCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-prd-persona-main-'));
+async function runJobWithAgentType({ agentType, overlay }) {
+  // Under tmpHome so config.validatePath's home-dir boundary admits the project overlay.
+  const mainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-prd-persona-main-'));
+  if (overlay) writePersona(path.join(mainCwd, '.claude', 'agents'), overlay.name, overlay.frontmatter, overlay.body || '');
   fs.mkdirSync(path.join(tmpHome, '.claude'), { recursive: true });
   const runDir = fs.mkdtempSync(path.join(tmpHome, '.claude', 'sm-prd-persona-run-'));
   const slug = `1115-test-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
@@ -156,4 +158,21 @@ test('executeJob: persona effort reaches the child as --effort; inherit yields n
   const inherit = await runJobWithAgentType({ agentType: 'effort-inherit' });
   expect(inherit.argv).not.toContain('--effort');
   expect(inherit.argv).not.toContain('inherit');
+});
+
+// ---------- project overlay MERGE: frontmatter-only overlay patches the runtime fields ----------
+
+test('executeJob: a frontmatter-only project overlay changes --model/--effort while the global persona body still reaches --append-system-prompt', async () => {
+  const globalAgentsDir = path.join(tmpHome, '.claude', 'agents');
+  writePersona(globalAgentsDir, 'dev-lead', ['model: sonnet'], 'You are dev-lead. Global body.');
+
+  const { result, argv } = await runJobWithAgentType({
+    agentType: 'dev-lead',
+    overlay: { name: 'dev-lead', frontmatter: ['model: claude-opus-4-6', 'effort: high'], body: '' },
+  });
+
+  expect(result.exitCode).toBe(0);
+  expect(argv[argv.indexOf('--model') + 1]).toBe('claude-opus-4-6');
+  expect(argv[argv.indexOf('--effort') + 1]).toBe('high');
+  expect(argv[argv.indexOf('--append-system-prompt') + 1]).toBe('You are dev-lead. Global body.');
 });

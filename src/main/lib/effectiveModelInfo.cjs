@@ -115,15 +115,18 @@ async function resolvePersonaModelAlias(cwd, agentType, deps) {
   } catch {
     persona = null;
   }
-  if (!persona) return { modelAlias: null, modelSource: 'fallback' };
+  if (!persona) return { modelAlias: null, modelSource: 'fallback', provenance: {} };
 
-  const { fm } = splitFrontmatter(persona.text);
-  const fromOverlay = isProjectOverlayPersonaPath(cwd, agentType, persona.path, deps);
+  // getPersonaBody returns the MERGED persona with per-field provenance; a bare
+  // `{ path, text }` (older injected reader) falls back to whole-file provenance.
+  const fm = persona.fm || splitFrontmatter(persona.text).fm;
+  const provenance = persona.provenance
+    || Object.fromEntries(Object.keys(fm).map((k) => [k, isProjectOverlayPersonaPath(cwd, agentType, persona.path, deps) ? 'overlay' : 'global']));
 
   if (fm.model && fm.model !== 'inherit') {
-    return { modelAlias: fm.model, modelSource: fromOverlay ? 'persona-overlay' : 'persona' };
+    return { modelAlias: fm.model, modelSource: provenance.model === 'overlay' ? 'persona-overlay' : 'persona', provenance };
   }
-  return { modelAlias: null, modelSource: 'inherit' };
+  return { modelAlias: null, modelSource: 'inherit', provenance };
 }
 
 /** Best-effort read of `<cwd>/session-manager-operations/scheduler/state/queue.json`'s hot jobs[]. */
@@ -290,6 +293,7 @@ async function resolveEffectiveModelInfo({ cwd, agentType, deps = {} } = {}) {
     agentType: agentType || null,
     modelAlias: null,
     modelSource: 'fallback',
+    personaProvenance: {},
     resolvedModelId: null,
     resolvedFrom: null,
     effortEnvReachable,
@@ -303,10 +307,10 @@ async function resolveEffectiveModelInfo({ cwd, agentType, deps = {} } = {}) {
     const normalizedCwd = projectRootOf(path.resolve(cwd));
     if (!normalizedCwd) return miss;
 
-    const { modelAlias, modelSource } = await resolvePersonaModelAlias(normalizedCwd, agentType, deps);
+    const { modelAlias, modelSource, provenance: personaProvenance } = await resolvePersonaModelAlias(normalizedCwd, agentType, deps);
     const { effort: personaEffort, source: personaEffortSource } = (deps.agentEffortResolve || require('./agentEffortResolve.cjs'))
       .resolveEpicEffort({ cwd: normalizedCwd, agentType, deps });
-    const result = { agentType, modelAlias, modelSource, resolvedModelId: null, resolvedFrom: null, effortEnvReachable, personaEffort, personaEffortSource };
+    const result = { agentType, modelAlias, modelSource, personaProvenance, resolvedModelId: null, resolvedFrom: null, effortEnvReachable, personaEffort, personaEffortSource };
 
     if (isConcreteModelId(modelAlias)) {
       // Already a concrete pinned id — echo it back, fabricate no evidence.

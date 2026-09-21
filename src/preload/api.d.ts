@@ -255,6 +255,8 @@ export interface AgentPersona {
   body: string;
   /** Project names (basename of cwd) whose currently-open tab overlays this agent. */
   overridingProjects: string[];
+  /** Per open project with an overlay: which frontmatter keys / body the overlay overrides (merged view provenance). */
+  overrideDetails?: { project: string; fields: string[]; bodyOverridden: boolean; issue: string | null }[];
 }
 
 /** Payload for `agents.savePersona` — creates or overwrites a global persona file. */
@@ -1648,7 +1650,7 @@ export interface SessionManagerAPI {
      *  resolved with project-overlay-then-global precedence for `cwd` — unlike
      *  `listPersonas` above, which only reads the global directory. Null when neither
      *  location has the file. */
-    getPersonaBody: (payload: { cwd: string; name: string }) => Promise<{ path: string; text: string } | null>;
+    getPersonaBody: (payload: { cwd: string; name: string }) => Promise<{ path: string; text: string; provenance?: Record<string, 'overlay' | 'global'>; bodySource?: 'overlay' | 'global' } | null>;
     /** "What will this Epic actually run as?" — persona alias, overlay-aware
      *  provenance, and evidence-based concrete model id (scheduler run log or
      *  session transcript). Never throws on the main side; a dangling
@@ -1660,6 +1662,8 @@ export interface SessionManagerAPI {
       agentType: string;
       modelAlias: string | null;
       modelSource: 'persona' | 'persona-overlay' | 'inherit' | 'fallback';
+      /** Per-frontmatter-key origin of the merged persona (overlay vs global). */
+      personaProvenance?: Record<string, 'overlay' | 'global'>;
       resolvedModelId: string | null;
       resolvedFrom: 'scheduler-run' | 'transcript' | null;
       /** Env-var path only: would cleanChildEnv strip CLAUDE_EFFORT. Persona effort travels on argv regardless. */

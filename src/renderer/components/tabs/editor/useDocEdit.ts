@@ -71,7 +71,6 @@ export function useDocEdit(path: string, documentText: string) {
       stopRecognition()
       dispatch({ type: 'RESET_FILE' })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path])
 
   function stopRecognition() {

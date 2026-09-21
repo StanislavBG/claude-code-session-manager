@@ -82,7 +82,6 @@ function SettingsComponent() {
       return
     }
     setScope(navFace === 'project' && cwd ? 'project' : 'user')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navFace, cwd])
 
   // 'telemetry' (~/.config/session-manager/otel.json) and 'app' (Session

@@ -83,7 +83,6 @@ function SystemPromptComponent() {
     loadText(activePath, true)
     watchFile(activePath)
     return () => { unwatchFile(activePath) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePath])
 
   // The selected import gets the same treatment. Kept separate from the effect
@@ -94,7 +93,6 @@ function SystemPromptComponent() {
     loadText(docPath, true)
     watchFile(docPath)
     return () => { unwatchFile(docPath) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docPath, activePath])
 
   const [saveError, setSaveError] = useState<string | null>(null)

@@ -73,7 +73,6 @@ export function GlobalControlsSection({ navigate }: GlobalControlsSectionProps) 
     return () => {
       ;[...jsonPaths, ...textPaths].forEach((p) => unwatchFile(p))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsPath, claudeMdPath, mcpPath])
 
   const [skillsCount, setSkillsCount] = useState<number | null>(null)

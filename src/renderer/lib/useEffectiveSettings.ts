@@ -46,7 +46,6 @@ export function useEffectiveSettingsFor(cwd: string | null) {
       clearInterval(timer)
       paths.forEach((p) => unwatchFile(p))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(scopePaths)])
 
   return useMemo(

@@ -13,7 +13,6 @@ const RESET = '\x1b[0m'
 // conversation text (which may itself contain control bytes, e.g. pasted
 // terminal output) could manipulate cursor position, the window title, or
 // trigger OSC 52 clipboard writes when replayed here.
-// eslint-disable-next-line no-control-regex
 const CONTROL_SEQ_RE = /\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\-_])/g
 function stripAnsi(text: string): string {
   return text.replace(CONTROL_SEQ_RE, '')

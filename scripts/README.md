@@ -12,6 +12,7 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | check-conditional-hooks.cjs | `npm run lint:hooks` (in `lint`) | no |
 | check-epic-transcripts.cjs | manual read-only diagnostic (`--json`); also surfaced as a non-fatal warning in `npm run health` | no |
 | check-doc-hierarchy.cjs | `npm run lint:docs` (in `lint`) | no |
+| check-explicit-any.cjs | `npm run lint:any` (in `lint`) — bans explicit `any`/`@ts-ignore` in renderer+preload; per-line `// lint-allow-any: <reason>` | no |
 | check-unregistered-tests.cjs | `npm run lint:unregistered-tests` (in `lint`) | no |
 | check-unstable-selectors.cjs | `npm run lint:selectors` (in `lint`) | no |
 | cleanup-nested-queue-stubs.cjs | manual one-shot; dispatches to cleanup-worktree-ops-stubs.cjs | no |

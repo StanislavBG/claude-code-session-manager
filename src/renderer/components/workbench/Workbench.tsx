@@ -254,7 +254,6 @@ export function Workbench({ onNavigate, onNewSession, onOpenVoice, onOpenSchedul
       if (saveTimer !== null) window.clearTimeout(saveTimer)
       saveTimer = window.setTimeout(() => persistLayout(event.api.toJSON()), LAYOUT_SAVE_DEBOUNCE_MS)
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Dispose the onDidRemovePanel/onDidAddGroup subscriptions registered in
@@ -272,7 +271,6 @@ export function Workbench({ onNavigate, onNewSession, onOpenVoice, onOpenSchedul
     // Keyed on focusToken (bumped by every openPanel call, even a same-id
     // one) rather than focusedPanelId itself — see layout.ts's focusToken
     // doc for why a same-id `set()` must still re-trigger this.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusToken, mountPanel])
 
   // "Reset layout" (CommandPalette) bumps resetToken — the store is how a
@@ -291,7 +289,6 @@ export function Workbench({ onNavigate, onNewSession, onOpenVoice, onOpenSchedul
     persistedRef.current = null
     mountPanel(DEFAULT_PANEL_ID)
     persistLayout(api.toJSON())
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetToken])
 
   // RecordingStatus toggling shifts the whole app tree by 28px (App.tsx's

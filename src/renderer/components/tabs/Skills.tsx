@@ -81,7 +81,6 @@ function SkillsComponent() {
       return
     }
     setScope(navFace === 'project' && cwd ? 'project' : 'user')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navFace, cwd])
 
   // Enumerate skills and commands for the active scope.
@@ -136,7 +135,6 @@ function SkillsComponent() {
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope, scopeRoots])
 
   const files = useConfig((s) => s.files)
@@ -194,7 +192,6 @@ function SkillsComponent() {
     if (!files[selectedPath]) loadText(selectedPath)
     watchFile(selectedPath)
     return () => unwatchFile(selectedPath)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPath])
 
   const [saveError, setSaveError] = useState<string | null>(null)

@@ -89,7 +89,6 @@ export function PlanBand({ plan, mode = 'graph', now, hidden, indexBySlug, headC
     if (el) el.scrollLeft = f * STAGE_COL_W
     setFirst(f)
     // openStage/stageCount deliberately omitted: snapshots refresh constantly and must not yank the user's scroll.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded])
 
   // The plan's most recent run (DONE → 'View run'): latest finishedAt among rows that have a runId.

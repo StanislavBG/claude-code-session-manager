@@ -49,7 +49,6 @@ describe('buildTranscriptDigest', () => {
   })
 
   it('integrates with the real classifyLine output for a mixed assistant turn', () => {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     const { classifyLine } = require('../../../main/lib/classifyTranscriptLine.cjs')
     const events = classifyLine({
       type: 'assistant',

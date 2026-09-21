@@ -330,7 +330,6 @@ function ResponseEvent({
       <span
         data-testid="epic-response-event-text"
         className="prose-chat inline [&_*]:m-0 [&_*]:inline"
-        // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: displayHtml }}
       />
       <span aria-hidden="true"> —</span>
@@ -617,7 +616,6 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
     attachTranscriptFeed({ tabId: epicId, cwd, sessionUuid: sessionId })
     void hydrate({ tabId: epicId, cwd, sessionId })
     return () => detachTranscriptFeed(epicId)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [epicId])
 
   // Resolves the Agent+model readout for the header chip: read-only, mirrors

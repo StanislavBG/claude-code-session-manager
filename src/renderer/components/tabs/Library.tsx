@@ -57,7 +57,6 @@ export function McpLibrary() {
 
   useEffect(() => {
     refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [home])
 
   const items = useMemo(
@@ -185,7 +184,6 @@ export function SkillsLibrary() {
 
   useEffect(() => {
     refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [home])
 
   const items = useMemo(
@@ -267,7 +265,6 @@ export function PluginsLibrary() {
 
   useEffect(() => {
     refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [home])
 
   const items = useMemo(
@@ -376,7 +373,6 @@ export function HooksLibrary() {
 
   useEffect(() => {
     refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path])
 
   const items = useMemo(
@@ -495,7 +491,6 @@ export function AgentsLibrary() {
 
   useEffect(() => {
     refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [home])
 
   const items = useMemo(
@@ -576,7 +571,6 @@ export function PermissionsPresetsLibrary() {
 
   useEffect(() => {
     refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path])
 
   const items = useMemo(
@@ -677,7 +671,6 @@ export function PromptPresetsLibrary() {
 
   useEffect(() => {
     refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path])
 
   const activeIds = useMemo(() => new Set(readActivePresetIds(existing)), [existing])

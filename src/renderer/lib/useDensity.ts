@@ -44,7 +44,6 @@ export function useDensity(): { density: Density; setDensity: (d: Density) => vo
     // Sync in case singleton changed between render and effect.
     if (current !== density) setLocal(current)
     return () => { listeners.delete(fn) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const setDensity = useCallback((d: Density) => setGlobalDensity(d), [])
   return { density, setDensity }

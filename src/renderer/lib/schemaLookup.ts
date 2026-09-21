@@ -98,7 +98,6 @@ export function buildSchemaResolver(rawRoot: unknown): SchemaResolver {
   }
 
   const dropRef = (s: RawSchema): RawSchema => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { $ref, ...rest } = s
     return rest
   }

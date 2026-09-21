@@ -25,7 +25,6 @@ export function useScopedConfigFiles(
       if (p) out[s] = p
     }
     return out
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spec, home, cwd])
 
   useEffect(() => {
@@ -37,7 +36,6 @@ export function useScopedConfigFiles(
     return () => {
       paths.forEach((p) => unwatchFile(p))
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(scopePaths)])
 
   return scopePaths

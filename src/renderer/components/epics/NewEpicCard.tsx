@@ -300,7 +300,6 @@ export function NewEpicCard({
   useEffect(() => {
     const allowed = missionKey.split(',') as EpicTag[]
     if (!allowed.includes(tag)) setTag(allowed[0])
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [missionKey])
 
   // Epics are always created from within a tab's project context, and that

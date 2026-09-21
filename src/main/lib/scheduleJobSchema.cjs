@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Canonical runtime schema for a ScheduleJob record, mirroring the TS
  * `ScheduleJob` interface (`ScheduleJob` in src/preload/api.d.ts) field-for-field.
@@ -24,6 +25,7 @@
 
 const { z } = require('zod');
 
+/** @type {[string, ...string[]]} */
 const JOB_STATUSES = ['pending', 'running', 'investigating', 'completed', 'skipped', 'failed', 'needs_review', 'quarantined'];
 
 const ScheduleJobStatusSchema = z.enum(JOB_STATUSES);
@@ -138,6 +140,7 @@ const ScheduleJobSchema = z
 /**
  * Throws a clear, descriptive error (not a raw ZodError dump) when `job`
  * doesn't match ScheduleJobSchema. Mirrors assertValidPromptSession's shape.
+ * @param {unknown} job
  */
 function assertValidScheduleJob(job) {
   const result = ScheduleJobSchema.safeParse(job);

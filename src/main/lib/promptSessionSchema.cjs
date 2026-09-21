@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Canonical runtime schema for a PromptSession (Epic) record, mirroring the
  * TS `PromptSession` interface at src/renderer/state/promptSessions.ts:29-76
@@ -96,6 +97,7 @@ const PromptSessionSchema = z.object({
  * doesn't match PromptSessionSchema. Callers that want fail-closed
  * enforcement before persisting a session object call this immediately
  * before their write.
+ * @param {unknown} session
  */
 function assertValidPromptSession(session) {
   const result = PromptSessionSchema.safeParse(session);

@@ -34,3 +34,4 @@ machines on first boot; `templates/PRD_AUTHORING.md` is seeded into consuming pr
 - **Tests in `main/**/__tests__/*.test.cjs` are hand-registered** in `vitest.config.ts`; an
   unlisted file silently never runs. See [`tests/README.md`](../tests/README.md).
 - Changing `api.d.ts` means updating the mirroring zod schema by hand; nothing generates it.
+- **Main typecheck ratchet**: `tsconfig.main.json` type-checks only its explicit `include` allowlist (files also start with `// @ts-check`; `checkJs` is off so transitive requires are not dragged in) — to add a file, list it in `include`, add `// @ts-check`, get `npm run typecheck` green with JSDoc types (no `any`/`@ts-ignore`).

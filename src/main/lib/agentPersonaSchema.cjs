@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Canonical runtime schema for an Agent persona WRITE payload, mirroring the
  * TS `AgentPersonaSaveInput` interface in src/preload/api.d.ts
@@ -67,6 +68,7 @@ const AgentPersonaSaveSchema = z.object({
  * Throws a clear, descriptive error (not a raw ZodError dump) when `persona`
  * doesn't match AgentPersonaSaveSchema. Mirrors assertValidPromptSession /
  * assertValidScheduleJob's shape and message format exactly.
+ * @param {unknown} persona
  */
 function assertValidAgentPersonaSave(persona) {
   const result = AgentPersonaSaveSchema.safeParse(persona);

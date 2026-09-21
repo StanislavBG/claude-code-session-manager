@@ -33,7 +33,7 @@
     "dev:renderer": "vite",
     "dev:electron": "wait-on http://localhost:5173 && SM_DEV=1 electron .",
     "build": "vite build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.main.json",
     "start": "electron .",
     "postinstall": "node scripts/postinstall.cjs",
     "prepack": "node scripts/write-build-info.cjs",

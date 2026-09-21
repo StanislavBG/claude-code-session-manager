@@ -1,3 +1,4 @@
+// @ts-check
 /**
  * Zod schemas for all IPC handler payloads. Applied at the boundary between
  * renderer and main — rejects malformed data before it reaches any business
@@ -152,20 +153,22 @@ const PROMPT_SESSION_ID_RE = /^(?!__proto__$|constructor$|prototype$)[A-Za-z0-9_
 // renderer only logs the failure). Dropping just the offending row matches how
 // the rest of this pipeline already fails: per-id (activeIndexMerge.cjs's
 // tombstone/resurrection handling), never per-batch.
+/** @param {unknown} raw */
 const dropInvalidSessions = (raw) => {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const rec = /** @type {Record<string, unknown>} */ (raw);
   const kept = Object.create(null);
-  for (const id of Object.keys(raw)) {
+  for (const id of Object.keys(rec)) {
     if (!PROMPT_SESSION_ID_RE.test(id)) {
       console.warn(`[ipc] merge-active-index: dropping session with invalid id ${JSON.stringify(id)}`);
       continue;
     }
-    const parsed = PromptSessionSchema.safeParse(raw[id]);
+    const parsed = PromptSessionSchema.safeParse(rec[id]);
     if (!parsed.success) {
       console.warn(`[ipc] merge-active-index: dropping malformed session ${id} — ${parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')}`);
       continue;
     }
-    kept[id] = raw[id];
+    kept[id] = rec[id];
   }
   return kept;
 };
@@ -1045,6 +1048,13 @@ const telemetrySetConfig = z.object({
  * a ZodError (caught by Electron's IPC harness → rejected promise). Existing
  * call sites already rely on throw semantics for malformed input, so we keep
  * that behavior for backwards compatibility.
+ */
+/**
+ * @template T
+ * @template R
+ * @param {{ parse: (payload: unknown) => T }} schema
+ * @param {(parsed: T) => R} handler
+ * @returns {(_event: unknown, payload: unknown) => R}
  */
 function validated(schema, handler) {
   return (_event, payload) => {

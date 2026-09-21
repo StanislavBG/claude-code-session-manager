@@ -163,6 +163,7 @@ export default defineConfig({
       'src/main/__tests__/health-build-freshness.test.cjs',
       'src/main/__tests__/scheduler-heartbeat-payload.test.cjs',
       'src/main/lib/__tests__/auditLog.test.cjs',
+      'src/main/lib/__tests__/gitCacheBound.test.cjs',
       'src/main/__tests__/health-usage-poller.test.cjs',
       'src/main/__tests__/health-queue-dispatch.test.cjs',
       'src/main/__tests__/health-worktree-cap-blocked.test.cjs',

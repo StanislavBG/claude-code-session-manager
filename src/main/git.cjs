@@ -23,6 +23,7 @@ const { spawn } = require('node:child_process');
 const path = require('node:path');
 const { schemas } = require('./ipcSchemas.cjs');
 const { validatePath } = require('./config.cjs');
+const { LRUCache } = require('./lib/lruCache.cjs');
 
 const GIT_TIMEOUT_MS = 5_000;
 const CACHE_TTL_MS = 5_000;
@@ -30,8 +31,11 @@ const MAX_BUFFER = 10 * 1024 * 1024; // 10 MiB — same cap Unleashed uses
 
 // Per-cwd in-memory caches. Keyed by the realpath-validated cwd so symlinks
 // to the same repo dedupe. Each entry: { value, expiresAt }.
-const statusCache = new Map();
-const fileStatusCache = new Map();
+// Bounded LRU: worktree cwds are unique per Epic/job, so an unbounded Map grew
+// for the app's lifetime and pinned every files[] array.
+const CACHE_MAX_CWDS = 16;
+const statusCache = new LRUCache(CACHE_MAX_CWDS);
+const fileStatusCache = new LRUCache(CACHE_MAX_CWDS);
 
 /**
  * Run `git <args>` in cwd with a hard 5s SIGKILL ceiling. Resolves
@@ -241,6 +245,7 @@ async function getStatus(cwd) {
   const now = Date.now();
   const cached = statusCache.get(realCwd);
   if (cached && cached.expiresAt > now) return cached.value;
+  if (cached) statusCache.delete(realCwd);
 
   // Single porcelain call gets us branch + ahead/behind + files in one shot.
   const result = await runGit(
@@ -281,6 +286,7 @@ async function getFileStatus(cwd) {
   const now = Date.now();
   const cached = fileStatusCache.get(realCwd);
   if (cached && cached.expiresAt > now) return cached.value;
+  if (cached) fileStatusCache.delete(realCwd);
 
   const result = await runGit(
     ['status', '--porcelain=v1', '-u', '-z'],
@@ -330,4 +336,5 @@ module.exports = {
   parsePorcelain,
   mapStatus,
   clearCache,
+  _caches: { statusCache, fileStatusCache, CACHE_MAX_CWDS },
 };

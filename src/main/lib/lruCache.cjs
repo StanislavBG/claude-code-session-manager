@@ -16,6 +16,12 @@ class LRUCache {
   has(k) {
     return this._m.has(k);
   }
+  delete(k) {
+    return this._m.delete(k);
+  }
+  clear() {
+    this._m.clear();
+  }
   get(k) {
     if (!this._m.has(k)) return undefined;
     const v = this._m.get(k);

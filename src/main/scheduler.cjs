@@ -6628,6 +6628,101 @@ function reportSchedulerError(message, slug, e) {
   } catch { /* same */ }
 }
 
+/**
+ * Salvage, integrate and clean up a job's throwaway worktree once its run has
+ * ended. NEVER throws: any rejection (salvage / integrate / cleanup) is
+ * reported through deps.reportSchedulerError and surfaces as
+ * `worktreeIntegrationFailure`, so spawnJob's finalize mutate always runs and
+ * the job can never be left `running`. The branch is kept on every failure.
+ * @returns {Promise<{worktreeLeftoverDirty: string[], salvagePatch: string|null,
+ *   worktreeIntegrationFailure: string|null, worktreeIntegrationDetail: object|null,
+ *   mergeAutoResolved: string|null, mergeAutoResolvedPaths: string[]|null}>}
+ */
+async function finalizeJobWorktree({ job, runDir, worktree, guardCwd, carriedPaths, deps = {} }) {
+  const jw = deps.jobWorktree || jobWorktree;
+  const uncommitted = deps.uncommittedChanges || uncommittedChanges;
+  const report = deps.reportSchedulerError || reportSchedulerError;
+  let worktreeLeftoverDirty = [];
+  let salvagePatch = null;
+  let worktreeIntegrationFailure = null;
+  let worktreeIntegrationDetail = null;
+  let mergeAutoResolved = null;
+  let mergeAutoResolvedPaths = null;
+  try {
+    worktreeLeftoverDirty = (await uncommitted(worktree.dir)) || [];
+    // Salvage the worktree's full diff (tracked + untracked) to the run
+    // dir BEFORE the checkout is removed below — otherwise a job killed
+    // before its finish-protocol commit loses that work outright, with
+    // no branch, no stash, no patch anywhere. Best-effort: never blocks
+    // integration/cleanup and never changes the job's verdict.
+    if (worktreeLeftoverDirty.length) {
+      const salvagePath = path.join(runDir, `${job.slug}.uncommitted.patch`);
+      const salvage = await jw.salvageJobWorktreeDiff({ dir: worktree.dir, outFile: salvagePath });
+      if (salvage && salvage.ok) {
+        salvagePatch = salvagePath;
+        console.log(`[scheduler] ${job.slug}: salvaged ${salvage.bytes} byte(s) of uncommitted worktree diff to ${salvagePath}`);
+      }
+    }
+    const integration = await jw.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug, carriedPaths });
+    if (integration.ok && integration.reason === 'carried-wip-only') {
+      console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} touched only carried base WIP paths — skipping merge (carried-wip-only)`);
+    }
+    if (!integration.ok) {
+      worktreeIntegrationFailure = integration.reason;
+      worktreeIntegrationDetail = integration;
+      console.error(`[scheduler] ${job.slug}: worktree branch integration FAILED (${integration.reason}) — branch ${worktree.branch} preserved in ${guardCwd} for manual recovery`);
+    } else if (integration.integrated) {
+      console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} integrated into ${guardCwd}${integration.mergeCommit ? ' (merge commit)' : ' (fast-forward)'}`);
+      if (integration.autoResolved) {
+        mergeAutoResolved = integration.autoResolved;
+        mergeAutoResolvedPaths = integration.resolvedPaths || [];
+        console.log(`[scheduler] ${job.slug}: merge auto-resolved (${integration.autoResolved}) — discarded ${mergeAutoResolvedPaths.length} identical working-tree duplicate(s): ${mergeAutoResolvedPaths.join(', ')}`);
+      }
+    }
+    await jw.cleanupJobWorktree({
+      cwd: guardCwd,
+      dir: worktree.dir,
+      branch: worktree.branch,
+      keepBranch: !integration.ok,
+    });
+  } catch (e) {
+    worktreeIntegrationFailure = e?.message || String(e);
+    report('spawnJob worktree finalize failed', job.slug, e);
+    // Best-effort: release the checkout + worktree-cap slot, keep the branch.
+    try {
+      await jw.cleanupJobWorktree({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+    } catch { /* already reported above */ }
+  }
+  return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths };
+}
+
+/**
+ * Map a worktree integration failure onto the verifier verdict spawnJob stamps
+ * (pure). Null failure -> null (no override). Always downgrades to needs_review.
+ */
+function worktreeIntegrationVerdict({ failure, detail, slug }) {
+  if (!failure) return null;
+  return {
+    verdict: 'worktree_integration_failed',
+    reason: detail && detail.failureKind === 'content_conflict'
+      ? `Integration blocked by a content conflict in ${(detail.conflictedPaths || []).join(', ') || 'unknown paths'} — branch ${jobWorktree.branchNameFor(slug)} preserved; needs a manual merge.`
+      : `worktree branch integration failed: ${failure} — branch preserved for manual merge`,
+    downgradeTo: 'needs_review',
+  };
+}
+
+/**
+ * Run one interval tick; a throw is reported and swallowed so the interval
+ * keeps firing.
+ */
+function guardedTick(fn, label) {
+  try {
+    fn();
+  } catch (e) {
+    reportSchedulerError(label, null, e);
+  }
+}
+
 async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
   // Session-Manager owns the machine-wide `claude -p` pool (sessionSlots.cjs)
   // — the scheduler REQUESTS capacity, it doesn't own a private cap. A miss
@@ -7003,53 +7098,8 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
       });
     } finally {
       if (worktree.ok) {
-       // A vanished worktree dir must not let a rejection escape this finally:
-       // that would discard `res` and skip every status mutation below.
-       try {
-        worktreeLeftoverDirty = (await uncommittedChanges(worktree.dir)) || [];
-        // Salvage the worktree's full diff (tracked + untracked) to the run
-        // dir BEFORE the checkout is removed below — otherwise a job killed
-        // before its finish-protocol commit loses that work outright, with
-        // no branch, no stash, no patch anywhere. Best-effort: never blocks
-        // integration/cleanup and never changes the job's verdict.
-        if (worktreeLeftoverDirty.length) {
-          const salvagePath = path.join(runDir, `${job.slug}.uncommitted.patch`);
-          const salvage = await jobWorktree.salvageJobWorktreeDiff({ dir: worktree.dir, outFile: salvagePath });
-          if (salvage && salvage.ok) {
-            salvagePatch = salvagePath;
-            console.log(`[scheduler] ${job.slug}: salvaged ${salvage.bytes} byte(s) of uncommitted worktree diff to ${salvagePath}`);
-          }
-        }
-        const integration = await jobWorktree.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug, carriedPaths });
-        if (integration.ok && integration.reason === 'carried-wip-only') {
-          console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} touched only carried base WIP paths — skipping merge (carried-wip-only)`);
-        }
-        if (!integration.ok) {
-          worktreeIntegrationFailure = integration.reason;
-          worktreeIntegrationDetail = integration;
-          console.error(`[scheduler] ${job.slug}: worktree branch integration FAILED (${integration.reason}) — branch ${worktree.branch} preserved in ${guardCwd} for manual recovery`);
-        } else if (integration.integrated) {
-          console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} integrated into ${guardCwd}${integration.mergeCommit ? ' (merge commit)' : ' (fast-forward)'}`);
-          if (integration.autoResolved) {
-            mergeAutoResolved = integration.autoResolved;
-            mergeAutoResolvedPaths = integration.resolvedPaths || [];
-            console.log(`[scheduler] ${job.slug}: merge auto-resolved (${integration.autoResolved}) — discarded ${mergeAutoResolvedPaths.length} identical working-tree duplicate(s): ${mergeAutoResolvedPaths.join(', ')}`);
-          }
-        }
-        await jobWorktree.cleanupJobWorktree({
-          cwd: guardCwd,
-          dir: worktree.dir,
-          branch: worktree.branch,
-          keepBranch: !integration.ok,
-        });
-       } catch (e) {
-        worktreeIntegrationFailure = e?.message || String(e);
-        reportSchedulerError('spawnJob worktree finalize failed', job.slug, e);
-        // Best-effort: release the checkout + worktree-cap slot, keep the branch.
-        try {
-          await jobWorktree.cleanupJobWorktree({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
-        } catch { /* already reported above */ }
-       }
+        ({ worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths } =
+          await finalizeJobWorktree({ job, runDir, worktree, guardCwd, carriedPaths }));
       } else {
         // In-place run (non-git cwd, cap reached, env-disabled, or a carry-over
         // failure) — there is no throwaway checkout to diff, so salvage only
@@ -7322,13 +7372,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
     // guard AC explicitly requires this failure be surfaced as an explicit job
     // outcome, never silently dropped alongside the branch it's stranded on.
     if (worktreeIntegrationFailure) {
-      verifyResult = {
-        verdict: 'worktree_integration_failed',
-        reason: worktreeIntegrationDetail && worktreeIntegrationDetail.failureKind === 'content_conflict'
-          ? `Integration blocked by a content conflict in ${(worktreeIntegrationDetail.conflictedPaths || []).join(', ') || 'unknown paths'} — branch ${jobWorktree.branchNameFor(job.slug)} preserved; needs a manual merge.`
-          : `worktree branch integration failed: ${worktreeIntegrationFailure} — branch preserved for manual merge`,
-        downgradeTo: 'needs_review',
-      };
+      verifyResult = worktreeIntegrationVerdict({ failure: worktreeIntegrationFailure, detail: worktreeIntegrationDetail, slug: job.slug });
     }
 
     // Shared-tree stash guard (incident 2026-09-01): only meaningful for an
@@ -11470,6 +11514,223 @@ function stop() {
   stopDispatchLoop();
 }
 
+// Body of the 10-minute maintenance interval (self-heal, escalations, restores).
+// Extracted so a throw is testable through guardedTick.
+function rescheduleIntervalTick() {
+  rescheduleTimer().catch(() => {});
+  const s = readQueueSync();
+  // Periodic self-heal: re-run the verifier over stale needs_review jobs so a
+  // job whose work actually landed (committed in-window, no FAIL sentinel)
+  // auto-clears WITHOUT waiting for the next app restart. Cheap-guarded by
+  // shouldRunPeriodicReverify, which reuses isRescanCandidate so the guard
+  // and the candidate filter can never drift apart again (they did once —
+  // see that function's comment). Kill-switch:
+  // SM_REVERIFY_PERIODIC_DISABLE=1 (boot reverify above stays always-on).
+  // reverifyNeedsReview's auto-fix loop is capped downstream by
+  // MAX_CONCURRENT_INVESTIGATIONS (spawnInvestigation queues/early-returns
+  // past it), so this interval firing cannot fan out investigations.
+  if (process.env.SM_REVERIFY_PERIODIC_DISABLE !== '1') {
+    if (shouldRunPeriodicReverify(s.jobs)) {
+      reverifyNeedsReview().catch(() => {});
+    }
+    // A quarantined row only ever promotes to 'pending' through
+    // reconcile()'s adopt path (see reconcile()'s "Adopt path" comment) —
+    // it re-checks the PRD file's createdVia stamp every pass. broadcast()
+    // already runs reconcile+writeQueue on every normal poll tick, but an
+    // idle queue (nothing pending/running to fire) can back off that
+    // cadence for a long time; this guarantees an adopted-but-still-
+    // quarantined row is re-checked within 10 minutes regardless.
+    if (s.jobs.some((j) => j.status === 'quarantined')) {
+      broadcast().catch(() => {});
+    }
+  }
+  // Age-based escalation (independent of the self-heal kill-switch above —
+  // this is a monitoring signal, not an auto-fix action): a quarantined
+  // row nobody has adopted or archived past QUARANTINE_ESCALATE_MS is
+  // warn-logged by project + slug + age so it cannot sit stranded and
+  // silent (the four burrow-project rows this PRD was written against).
+  for (const stale of findStaleQuarantinedJobs(s.jobs, Date.now(), QUARANTINE_ESCALATE_MS)) {
+    console.warn(
+      `[scheduler] QUARANTINED PRD STALE: project=${stale.cwd ?? '(unknown)'} slug=${stale.slug} `
+      + `age=${Math.round(stale.ageMs / 3_600_000)}h (>= ${Math.round(QUARANTINE_ESCALATE_MS / 3_600_000)}h threshold) — `
+      + `adopt it from the Scheduler tab's Quarantined filter, or archive it; nothing else will clear this`,
+    );
+    appendAuditEvent('prd_quarantine_stale', { slug: stale.slug, cwd: stale.cwd, ageMs: stale.ageMs });
+  }
+
+  // Estimate-relative overrun escalation. Sits in the blind spot between
+  // the 4h deadman and the 20-minute idle-output watchdog: a job that keeps
+  // producing output while looping trips neither, so nothing noticed a PRD
+  // running 9x its own estimate until a human went looking. Escalate loudly;
+  // never kill on an estimate (see JOB_OVERRUN_FACTOR).
+  for (const over of findOverrunningJobs(s.jobs, Date.now())) {
+    console.warn(
+      `[scheduler] JOB OVERRUNNING ESTIMATE: project=${over.cwd ?? '(unknown)'} slug=${over.slug} `
+      + `ran=${Math.round(over.ranMs / 60_000)}m vs estimate=${over.estimateMinutes}m `
+      + `(${over.ratio.toFixed(1)}x, threshold ${JOB_OVERRUN_FACTOR}x floor ${Math.round(JOB_OVERRUN_FLOOR_MS / 60_000)}m) — `
+      + `still running; the ${Math.round(MAX_JOB_DURATION_MS / 3_600_000)}h deadman has NOT fired yet. `
+      + `Check the run log, then let it finish or cancel it via scheduler_cancel_job`,
+    );
+    appendAuditEvent('job_overrunning_estimate', {
+      slug: over.slug, cwd: over.cwd, estimateMinutes: over.estimateMinutes, ranMs: over.ranMs, ratio: over.ratio,
+    });
+    // Durable stamp so schedule:state (and therefore the renderer) can see
+    // this without re-deriving it — the console.warn/audit event above are
+    // visible only in the log, never on the row itself. Display-only
+    // advisory field; re-stamped in place every sweep, never appended.
+    mutate((state) => {
+      const j = state.jobs.find((x) => x.slug === over.slug);
+      if (!j) return;
+      j.overrun = {
+        ratio: over.ratio, ranMs: over.ranMs, estimateMinutes: over.estimateMinutes, at: new Date().toISOString(),
+      };
+    }).catch((e) => console.warn('[scheduler] overrun stamp failed', e?.message));
+  }
+
+  // Stranded-investigation restore. Unlike the two escalations above, this
+  // one ACTS: 'investigating' is a transient status whose restore
+  // (spawnInvestigation's onExit/catch) only runs inside the process that
+  // spawned the probe, so an app restart mid-probe leaves the row frozen
+  // there forever (see findStrandedInvestigations' header, and the
+  // "'investigating' must never be the job's resting state" comment at
+  // spawnInvestigation's onExit). This restores each stranded row to the
+  // exact terminal status it already carried before the probe was
+  // spawned — it never re-runs or re-investigates anything.
+  const stranded = findStrandedInvestigations(s.jobs, Date.now(), INVESTIGATION_MAX_MS);
+  if (stranded.length > 0) {
+    mutate((ms) => {
+      for (const st of stranded) {
+        const j = ms.jobs.find((x) => x.slug === st.slug);
+        if (!j || j.status !== 'investigating') continue; // race guard — may have resolved since the scan above
+        transitionJob(j, st.restoreStatus, { reason: `stranded investigation restored after ${Math.round(st.ageMs / 60_000)}m with no live probe behind it`, source: 'findStrandedInvestigations' });
+        delete j.runtime;
+        console.warn(
+          `[scheduler] STRANDED INVESTIGATION RESTORED: project=${st.cwd ?? '(unknown)'} slug=${st.slug} `
+          + `age=${Math.round(st.ageMs / 3_600_000)}h (>= ${Math.round(INVESTIGATION_MAX_MS / 3_600_000)}h threshold), no live probe — `
+          + `restored to '${st.restoreStatus}'`,
+        );
+        appendAuditEvent('investigation_stranded_restored', { slug: st.slug, cwd: st.cwd, ageMs: st.ageMs, restoreStatus: st.restoreStatus });
+      }
+    })
+      .then(() => broadcast({ flush: true }))
+      .catch(() => {});
+  }
+
+  // Per-project starvation (PRD 1087): a project with pending work that has
+  // been passed over on every tick while OTHER projects dispatch. Nothing
+  // else distinguishes "no pending work" from "pending work, never
+  // started" — the 2026-09-01 NN-ordering starvation ran 3.5 h unnoticed.
+  // Escalation only, same shape as the quarantine/overrun warnings above.
+  const starvedProjects = findStarvedProjects(s.jobs, Date.now(), STARVATION_ESCALATE_MS);
+  for (const sp of starvedProjects) {
+    console.warn(
+      `[scheduler] PROJECT STARVED: project=${sp.cwd} pending=${sp.pendingCount} oldest=${sp.oldestPendingSlug} `
+      + `waiting=${Math.round(sp.ageMs / 60_000)}m (>= ${Math.round(STARVATION_ESCALATE_MS / 60_000)}m threshold) `
+      + `while other projects are running — check the cross-project fairness rule in pickNextBatch`,
+    );
+    appendAuditEvent('project_starved', { cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs });
+  }
+  // Bounded, automated consequence for a starve that outlives the WARN
+  // above (PRD: the 2026-09-12 19h Bilko starve had ~115 identical
+  // project_starved rows and zero consequence). STARVE_ESCALATION_MS is
+  // strictly later than STARVATION_ESCALATE_MS, so this only ever fires on
+  // a subset of the rows already reported above — same verdict, no
+  // re-derivation.
+  runStarveEscalationSweep(starvedProjects);
+
+  // Bounded failed -> pending auto-reset (PRD 1151), plus the stuck-failed
+  // escalation now narrowed to only the rows that auto-reset gave up on.
+  // See selectFailedAutoResetTargets' + findStuckFailedJobs' headers.
+  // Computed together, acted on in the SAME mutate(...) pass, so the
+  // stuckFailedNotified race guard below and the auto-reset race guard
+  // above it can never observe two different snapshots of the same row.
+  // Kill-switches: SM_FAILED_AUTORESET_DISABLE=1 / SM_STUCK_FAILED_ESCALATE_DISABLE=1.
+  const autoResetTargets = failedAutoResetDisabled()
+    ? []
+    : selectFailedAutoResetTargets(s.jobs, Date.now(), FAILED_AUTORESET_MS);
+  const stuckFailed = stuckFailedEscalationDisabled()
+    ? []
+    : findStuckFailedJobs(s.jobs, Date.now(), STUCK_FAILED_ESCALATE_MS);
+  // Bounded automatic terminal decision for exhausted needs_review rows
+  // (this PRD): computed alongside the failed-row passes above and acted
+  // on in the SAME mutate(...) pass below, for the same race-guard reason
+  // — a row's exhaustedResolveAttempts counter must never be read from one
+  // snapshot and written from another. Kill-switch: SM_NEEDS_REVIEW_AUTORESOLVE_DISABLE=1.
+  const exhaustedNeedsReviewTargets = needsReviewAutoResolveDisabled()
+    ? []
+    : selectExhaustedNeedsReviewTargets(s.jobs, Date.now(), NEEDS_REVIEW_RESOLVE_MS);
+  // Bounded automatic exit for quarantined rows (this PRD): computed
+  // alongside the passes above and acted on in the SAME mutate(...) pass
+  // below, for the same race-guard reason — quarantineResolveAttempts must
+  // never be read from one snapshot and written from another, and the
+  // createdVia re-check inside autoResolveQuarantine must happen in the
+  // same turn as the transition it gates. Kill-switch:
+  // SM_QUARANTINE_AUTORESOLVE_DISABLE=1.
+  const quarantineTargets = quarantineAutoResolveDisabled()
+    ? []
+    : selectQuarantineAutoResolveTargets(s.jobs, Date.now(), QUARANTINE_ESCALATE_MS);
+  if (autoResetTargets.length > 0 || stuckFailed.length > 0 || exhaustedNeedsReviewTargets.length > 0 || quarantineTargets.length > 0) {
+    mutate(async (ms) => {
+      for (const target of autoResetTargets) {
+        const j = ms.jobs.find((x) => x.slug === target.slug);
+        if (!j || j.status !== 'failed' || (j.failedAutoResetAttempts ?? 0) >= FAILED_AUTORESET_CAP) continue; // race guard
+        const attempt = (j.failedAutoResetAttempts ?? 0) + 1;
+        j.failedAutoResetAttempts = attempt;
+        const reason = `auto-reset after ${Math.round(FAILED_AUTORESET_MS / 60_000)}m failed (attempt ${attempt}/${FAILED_AUTORESET_CAP})`;
+        // resetJobFields is the same field-clearing list the admin
+        // scheduler_reset_job handler uses (ipc:schedule:reset-job) — reuse
+        // it rather than inventing a second list. It also sets job.error to
+        // the reason text passed in; we clear that back to null right
+        // after since this is a clean auto-reset, not a recorded error.
+        if (!resetJobFields(j, reason, { source: 'autoResetFailed' })) continue;
+        j.error = null;
+        delete j.stuckFailedNotified;
+        console.warn(
+          `[scheduler] FAILED PRD AUTO-RESET: project=${j.cwd ?? '(unknown)'} slug=${j.slug} `
+          + `failed=${Math.round(target.ageMs / 60_000)}m (>= ${Math.round(FAILED_AUTORESET_MS / 60_000)}m threshold) — ${reason}`,
+        );
+        appendAuditEvent('job_auto_reset_failed', { slug: j.slug, cwd: j.cwd, ageMs: target.ageMs, attempt });
+      }
+      for (const stuck of stuckFailed) {
+        const j = ms.jobs.find((x) => x.slug === stuck.slug);
+        if (!j || j.status !== 'failed' || j.stuckFailedNotified === true) continue; // race guard
+        // Still has auto-reset attempts left — it will be (or already was,
+        // earlier this same pass) picked up by the loop above instead.
+        // Never log "reset it by hand" for a row that isn't actually stuck.
+        if ((j.failedAutoResetAttempts ?? 0) < FAILED_AUTORESET_CAP) continue;
+        j.stuckFailedNotified = true;
+        console.warn(
+          `[scheduler] FAILED PRD STUCK: project=${stuck.cwd ?? '(unknown)'} slug=${stuck.slug} `
+          + `failed=${Math.round(stuck.ageMs / 3_600_000)}h (>= ${Math.round(STUCK_FAILED_ESCALATE_MS / 3_600_000)}h threshold) — `
+          + `auto-reset cap exhausted (${FAILED_AUTORESET_CAP}/${FAILED_AUTORESET_CAP} attempts); reset it by hand via scheduler_reset_job`,
+        );
+        appendAuditEvent('job_stuck_failed', { slug: stuck.slug, cwd: stuck.cwd, ageMs: stuck.ageMs });
+      }
+      for (const target of exhaustedNeedsReviewTargets) {
+        const j = ms.jobs.find((x) => x.slug === target.slug);
+        const outcome = applyNeedsReviewAutoResolve(j, ms.jobs);
+        if (outcome) {
+          console.warn(
+            `[scheduler] NEEDS_REVIEW AUTO-RESOLVE: project=${j.cwd ?? '(unknown)'} slug=${j.slug} `
+            + `exhausted=${Math.round(target.ageMs / 60_000)}m (>= ${Math.round(NEEDS_REVIEW_RESOLVE_MS / 60_000)}m threshold) — outcome=${outcome}`,
+          );
+        }
+      }
+      for (const target of quarantineTargets) {
+        const j = ms.jobs.find((x) => x.slug === target.slug);
+        if (!j || j.status !== 'quarantined' || (j.quarantineResolveAttempts ?? 0) >= QUARANTINE_RESOLVE_CAP) continue; // race guard
+        const outcome = await autoResolveQuarantine(j, target.ageMs);
+        if (outcome) {
+          console.warn(
+            `[scheduler] QUARANTINED PRD AUTO-RESOLVE: project=${j.cwd ?? '(unknown)'} slug=${j.slug} `
+            + `age=${Math.round(target.ageMs / 3_600_000)}h (>= ${Math.round(QUARANTINE_ESCALATE_MS / 3_600_000)}h threshold) — outcome=${outcome}`,
+          );
+        }
+      }
+    }).catch(() => {});
+  }
+}
+
 async function init() {
   ensureDirs();
   // Boot phase — reconciliation, migrations, self-heal, first reset probe.
@@ -11672,222 +11933,7 @@ async function init() {
   rescheduleInterval = setInterval(() => {
     // One throwing tick (e.g. readQueueSync on a torn queue.json) must skip
     // only itself — the interval keeps firing and the failure is logged.
-    try {
-    rescheduleTimer().catch(() => {});
-    const s = readQueueSync();
-    // Periodic self-heal: re-run the verifier over stale needs_review jobs so a
-    // job whose work actually landed (committed in-window, no FAIL sentinel)
-    // auto-clears WITHOUT waiting for the next app restart. Cheap-guarded by
-    // shouldRunPeriodicReverify, which reuses isRescanCandidate so the guard
-    // and the candidate filter can never drift apart again (they did once —
-    // see that function's comment). Kill-switch:
-    // SM_REVERIFY_PERIODIC_DISABLE=1 (boot reverify above stays always-on).
-    // reverifyNeedsReview's auto-fix loop is capped downstream by
-    // MAX_CONCURRENT_INVESTIGATIONS (spawnInvestigation queues/early-returns
-    // past it), so this interval firing cannot fan out investigations.
-    if (process.env.SM_REVERIFY_PERIODIC_DISABLE !== '1') {
-      if (shouldRunPeriodicReverify(s.jobs)) {
-        reverifyNeedsReview().catch(() => {});
-      }
-      // A quarantined row only ever promotes to 'pending' through
-      // reconcile()'s adopt path (see reconcile()'s "Adopt path" comment) —
-      // it re-checks the PRD file's createdVia stamp every pass. broadcast()
-      // already runs reconcile+writeQueue on every normal poll tick, but an
-      // idle queue (nothing pending/running to fire) can back off that
-      // cadence for a long time; this guarantees an adopted-but-still-
-      // quarantined row is re-checked within 10 minutes regardless.
-      if (s.jobs.some((j) => j.status === 'quarantined')) {
-        broadcast().catch(() => {});
-      }
-    }
-    // Age-based escalation (independent of the self-heal kill-switch above —
-    // this is a monitoring signal, not an auto-fix action): a quarantined
-    // row nobody has adopted or archived past QUARANTINE_ESCALATE_MS is
-    // warn-logged by project + slug + age so it cannot sit stranded and
-    // silent (the four burrow-project rows this PRD was written against).
-    for (const stale of findStaleQuarantinedJobs(s.jobs, Date.now(), QUARANTINE_ESCALATE_MS)) {
-      console.warn(
-        `[scheduler] QUARANTINED PRD STALE: project=${stale.cwd ?? '(unknown)'} slug=${stale.slug} `
-        + `age=${Math.round(stale.ageMs / 3_600_000)}h (>= ${Math.round(QUARANTINE_ESCALATE_MS / 3_600_000)}h threshold) — `
-        + `adopt it from the Scheduler tab's Quarantined filter, or archive it; nothing else will clear this`,
-      );
-      appendAuditEvent('prd_quarantine_stale', { slug: stale.slug, cwd: stale.cwd, ageMs: stale.ageMs });
-    }
-
-    // Estimate-relative overrun escalation. Sits in the blind spot between
-    // the 4h deadman and the 20-minute idle-output watchdog: a job that keeps
-    // producing output while looping trips neither, so nothing noticed a PRD
-    // running 9x its own estimate until a human went looking. Escalate loudly;
-    // never kill on an estimate (see JOB_OVERRUN_FACTOR).
-    for (const over of findOverrunningJobs(s.jobs, Date.now())) {
-      console.warn(
-        `[scheduler] JOB OVERRUNNING ESTIMATE: project=${over.cwd ?? '(unknown)'} slug=${over.slug} `
-        + `ran=${Math.round(over.ranMs / 60_000)}m vs estimate=${over.estimateMinutes}m `
-        + `(${over.ratio.toFixed(1)}x, threshold ${JOB_OVERRUN_FACTOR}x floor ${Math.round(JOB_OVERRUN_FLOOR_MS / 60_000)}m) — `
-        + `still running; the ${Math.round(MAX_JOB_DURATION_MS / 3_600_000)}h deadman has NOT fired yet. `
-        + `Check the run log, then let it finish or cancel it via scheduler_cancel_job`,
-      );
-      appendAuditEvent('job_overrunning_estimate', {
-        slug: over.slug, cwd: over.cwd, estimateMinutes: over.estimateMinutes, ranMs: over.ranMs, ratio: over.ratio,
-      });
-      // Durable stamp so schedule:state (and therefore the renderer) can see
-      // this without re-deriving it — the console.warn/audit event above are
-      // visible only in the log, never on the row itself. Display-only
-      // advisory field; re-stamped in place every sweep, never appended.
-      mutate((state) => {
-        const j = state.jobs.find((x) => x.slug === over.slug);
-        if (!j) return;
-        j.overrun = {
-          ratio: over.ratio, ranMs: over.ranMs, estimateMinutes: over.estimateMinutes, at: new Date().toISOString(),
-        };
-      }).catch((e) => console.warn('[scheduler] overrun stamp failed', e?.message));
-    }
-
-    // Stranded-investigation restore. Unlike the two escalations above, this
-    // one ACTS: 'investigating' is a transient status whose restore
-    // (spawnInvestigation's onExit/catch) only runs inside the process that
-    // spawned the probe, so an app restart mid-probe leaves the row frozen
-    // there forever (see findStrandedInvestigations' header, and the
-    // "'investigating' must never be the job's resting state" comment at
-    // spawnInvestigation's onExit). This restores each stranded row to the
-    // exact terminal status it already carried before the probe was
-    // spawned — it never re-runs or re-investigates anything.
-    const stranded = findStrandedInvestigations(s.jobs, Date.now(), INVESTIGATION_MAX_MS);
-    if (stranded.length > 0) {
-      mutate((ms) => {
-        for (const st of stranded) {
-          const j = ms.jobs.find((x) => x.slug === st.slug);
-          if (!j || j.status !== 'investigating') continue; // race guard — may have resolved since the scan above
-          transitionJob(j, st.restoreStatus, { reason: `stranded investigation restored after ${Math.round(st.ageMs / 60_000)}m with no live probe behind it`, source: 'findStrandedInvestigations' });
-          delete j.runtime;
-          console.warn(
-            `[scheduler] STRANDED INVESTIGATION RESTORED: project=${st.cwd ?? '(unknown)'} slug=${st.slug} `
-            + `age=${Math.round(st.ageMs / 3_600_000)}h (>= ${Math.round(INVESTIGATION_MAX_MS / 3_600_000)}h threshold), no live probe — `
-            + `restored to '${st.restoreStatus}'`,
-          );
-          appendAuditEvent('investigation_stranded_restored', { slug: st.slug, cwd: st.cwd, ageMs: st.ageMs, restoreStatus: st.restoreStatus });
-        }
-      })
-        .then(() => broadcast({ flush: true }))
-        .catch(() => {});
-    }
-
-    // Per-project starvation (PRD 1087): a project with pending work that has
-    // been passed over on every tick while OTHER projects dispatch. Nothing
-    // else distinguishes "no pending work" from "pending work, never
-    // started" — the 2026-09-01 NN-ordering starvation ran 3.5 h unnoticed.
-    // Escalation only, same shape as the quarantine/overrun warnings above.
-    const starvedProjects = findStarvedProjects(s.jobs, Date.now(), STARVATION_ESCALATE_MS);
-    for (const sp of starvedProjects) {
-      console.warn(
-        `[scheduler] PROJECT STARVED: project=${sp.cwd} pending=${sp.pendingCount} oldest=${sp.oldestPendingSlug} `
-        + `waiting=${Math.round(sp.ageMs / 60_000)}m (>= ${Math.round(STARVATION_ESCALATE_MS / 60_000)}m threshold) `
-        + `while other projects are running — check the cross-project fairness rule in pickNextBatch`,
-      );
-      appendAuditEvent('project_starved', { cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs });
-    }
-    // Bounded, automated consequence for a starve that outlives the WARN
-    // above (PRD: the 2026-09-12 19h Bilko starve had ~115 identical
-    // project_starved rows and zero consequence). STARVE_ESCALATION_MS is
-    // strictly later than STARVATION_ESCALATE_MS, so this only ever fires on
-    // a subset of the rows already reported above — same verdict, no
-    // re-derivation.
-    runStarveEscalationSweep(starvedProjects);
-
-    // Bounded failed -> pending auto-reset (PRD 1151), plus the stuck-failed
-    // escalation now narrowed to only the rows that auto-reset gave up on.
-    // See selectFailedAutoResetTargets' + findStuckFailedJobs' headers.
-    // Computed together, acted on in the SAME mutate(...) pass, so the
-    // stuckFailedNotified race guard below and the auto-reset race guard
-    // above it can never observe two different snapshots of the same row.
-    // Kill-switches: SM_FAILED_AUTORESET_DISABLE=1 / SM_STUCK_FAILED_ESCALATE_DISABLE=1.
-    const autoResetTargets = failedAutoResetDisabled()
-      ? []
-      : selectFailedAutoResetTargets(s.jobs, Date.now(), FAILED_AUTORESET_MS);
-    const stuckFailed = stuckFailedEscalationDisabled()
-      ? []
-      : findStuckFailedJobs(s.jobs, Date.now(), STUCK_FAILED_ESCALATE_MS);
-    // Bounded automatic terminal decision for exhausted needs_review rows
-    // (this PRD): computed alongside the failed-row passes above and acted
-    // on in the SAME mutate(...) pass below, for the same race-guard reason
-    // — a row's exhaustedResolveAttempts counter must never be read from one
-    // snapshot and written from another. Kill-switch: SM_NEEDS_REVIEW_AUTORESOLVE_DISABLE=1.
-    const exhaustedNeedsReviewTargets = needsReviewAutoResolveDisabled()
-      ? []
-      : selectExhaustedNeedsReviewTargets(s.jobs, Date.now(), NEEDS_REVIEW_RESOLVE_MS);
-    // Bounded automatic exit for quarantined rows (this PRD): computed
-    // alongside the passes above and acted on in the SAME mutate(...) pass
-    // below, for the same race-guard reason — quarantineResolveAttempts must
-    // never be read from one snapshot and written from another, and the
-    // createdVia re-check inside autoResolveQuarantine must happen in the
-    // same turn as the transition it gates. Kill-switch:
-    // SM_QUARANTINE_AUTORESOLVE_DISABLE=1.
-    const quarantineTargets = quarantineAutoResolveDisabled()
-      ? []
-      : selectQuarantineAutoResolveTargets(s.jobs, Date.now(), QUARANTINE_ESCALATE_MS);
-    if (autoResetTargets.length > 0 || stuckFailed.length > 0 || exhaustedNeedsReviewTargets.length > 0 || quarantineTargets.length > 0) {
-      mutate(async (ms) => {
-        for (const target of autoResetTargets) {
-          const j = ms.jobs.find((x) => x.slug === target.slug);
-          if (!j || j.status !== 'failed' || (j.failedAutoResetAttempts ?? 0) >= FAILED_AUTORESET_CAP) continue; // race guard
-          const attempt = (j.failedAutoResetAttempts ?? 0) + 1;
-          j.failedAutoResetAttempts = attempt;
-          const reason = `auto-reset after ${Math.round(FAILED_AUTORESET_MS / 60_000)}m failed (attempt ${attempt}/${FAILED_AUTORESET_CAP})`;
-          // resetJobFields is the same field-clearing list the admin
-          // scheduler_reset_job handler uses (ipc:schedule:reset-job) — reuse
-          // it rather than inventing a second list. It also sets job.error to
-          // the reason text passed in; we clear that back to null right
-          // after since this is a clean auto-reset, not a recorded error.
-          if (!resetJobFields(j, reason, { source: 'autoResetFailed' })) continue;
-          j.error = null;
-          delete j.stuckFailedNotified;
-          console.warn(
-            `[scheduler] FAILED PRD AUTO-RESET: project=${j.cwd ?? '(unknown)'} slug=${j.slug} `
-            + `failed=${Math.round(target.ageMs / 60_000)}m (>= ${Math.round(FAILED_AUTORESET_MS / 60_000)}m threshold) — ${reason}`,
-          );
-          appendAuditEvent('job_auto_reset_failed', { slug: j.slug, cwd: j.cwd, ageMs: target.ageMs, attempt });
-        }
-        for (const stuck of stuckFailed) {
-          const j = ms.jobs.find((x) => x.slug === stuck.slug);
-          if (!j || j.status !== 'failed' || j.stuckFailedNotified === true) continue; // race guard
-          // Still has auto-reset attempts left — it will be (or already was,
-          // earlier this same pass) picked up by the loop above instead.
-          // Never log "reset it by hand" for a row that isn't actually stuck.
-          if ((j.failedAutoResetAttempts ?? 0) < FAILED_AUTORESET_CAP) continue;
-          j.stuckFailedNotified = true;
-          console.warn(
-            `[scheduler] FAILED PRD STUCK: project=${stuck.cwd ?? '(unknown)'} slug=${stuck.slug} `
-            + `failed=${Math.round(stuck.ageMs / 3_600_000)}h (>= ${Math.round(STUCK_FAILED_ESCALATE_MS / 3_600_000)}h threshold) — `
-            + `auto-reset cap exhausted (${FAILED_AUTORESET_CAP}/${FAILED_AUTORESET_CAP} attempts); reset it by hand via scheduler_reset_job`,
-          );
-          appendAuditEvent('job_stuck_failed', { slug: stuck.slug, cwd: stuck.cwd, ageMs: stuck.ageMs });
-        }
-        for (const target of exhaustedNeedsReviewTargets) {
-          const j = ms.jobs.find((x) => x.slug === target.slug);
-          const outcome = applyNeedsReviewAutoResolve(j, ms.jobs);
-          if (outcome) {
-            console.warn(
-              `[scheduler] NEEDS_REVIEW AUTO-RESOLVE: project=${j.cwd ?? '(unknown)'} slug=${j.slug} `
-              + `exhausted=${Math.round(target.ageMs / 60_000)}m (>= ${Math.round(NEEDS_REVIEW_RESOLVE_MS / 60_000)}m threshold) — outcome=${outcome}`,
-            );
-          }
-        }
-        for (const target of quarantineTargets) {
-          const j = ms.jobs.find((x) => x.slug === target.slug);
-          if (!j || j.status !== 'quarantined' || (j.quarantineResolveAttempts ?? 0) >= QUARANTINE_RESOLVE_CAP) continue; // race guard
-          const outcome = await autoResolveQuarantine(j, target.ageMs);
-          if (outcome) {
-            console.warn(
-              `[scheduler] QUARANTINED PRD AUTO-RESOLVE: project=${j.cwd ?? '(unknown)'} slug=${j.slug} `
-              + `age=${Math.round(target.ageMs / 3_600_000)}h (>= ${Math.round(QUARANTINE_ESCALATE_MS / 3_600_000)}h threshold) — outcome=${outcome}`,
-            );
-          }
-        }
-      }).catch(() => {});
-    }
-    } catch (e) {
-      reportSchedulerError('rescheduleInterval tick failed', null, e);
-    }
+    guardedTick(rescheduleIntervalTick, 'rescheduleInterval tick failed');
   }, REVERIFY_INTERVAL_MS);
 
   // Self-rescheduling poll loop with exponential backoff. Replaces the
@@ -12560,6 +12606,10 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
 
 module.exports = {
   reportSchedulerError,
+  finalizeJobWorktree,
+  worktreeIntegrationVerdict,
+  guardedTick,
+  rescheduleIntervalTick,
   classifyQueueStarvation,
   classifyQueueStarvationByProject,
   dispatchIdleMs,

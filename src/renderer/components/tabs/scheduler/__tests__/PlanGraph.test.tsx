@@ -182,7 +182,7 @@ describe('Graph mode — stage columns and rows', () => {
   })
 
   it('labels a truncated all-done stage "+N done"', () => {
-    const el = mount(Array.from({ length: 9 }, (_, i) => job({ slug: `${i + 1}-d`, status: 'completed' })))
+    const el = mount([job({ slug: '0-root', status: 'completed' }), ...Array.from({ length: 9 }, (_, i) => job({ slug: `${i + 1}-d`, status: 'completed', dependsOn: ['0-root'] }))])
     // Done plans start collapsed — expand.
     act(() => el.querySelector<HTMLElement>('[data-testid="plan-toggle"]')!.click())
     expect(el.querySelector('[data-testid="stage-footer"]')!.textContent).toBe('+4 done ▾')
@@ -202,7 +202,7 @@ describe('Graph mode — stage columns and rows', () => {
     const el = mount([
       job({ slug: '402-f', status: 'failed' }),
       job({ slug: '418-r', status: 'needs_review' }),
-      job({ slug: '403-b', dependsOn: ['402-f'] }),
+      job({ slug: '403-b', dependsOn: ['402-f', '418-r'] }),
     ])
     const pair = el.querySelector('[data-testid="stage-attention-actions"]')!
     expect(pair).not.toBeNull()
@@ -225,7 +225,7 @@ describe('Graph mode — stage columns and rows', () => {
     usePromptSessions.setState({ sessions: { e1: { id: 'e1', title: 'E', goalText: 'goal' } } as any })
     const el = mount([
       job({ slug: '1-q', status: 'quarantined', runId: 'r9', disposition: 'append' as any }),
-      job({ slug: '2-f', status: 'failed', runId: 'r8' }),
+      job({ slug: '2-f', status: 'failed', runId: 'r8', dependsOn: ['1-q'] }),
     ])
     const open = (slug: string) => act(() => el.querySelector<HTMLElement>(`[data-slug="${slug}"] button`)!.click())
     open('1-q')
@@ -261,7 +261,7 @@ describe('Graph vs List mode', () => {
   it('keeps Clear completed (hiddenSlugs + localStorage) and keyboard-nav attributes in Graph mode', () => {
     const el = mount([
       job({ slug: '1-a', status: 'completed', finishedAt: new Date().toISOString(), startedAt: new Date().toISOString() }),
-      job({ slug: '2-b' }),
+      job({ slug: '2-b', dependsOn: ['1-a'] }),
     ])
     expect(el.querySelector('[role="list"][aria-label="Job queue"]')).not.toBeNull()
     expect(el.querySelector('[aria-live="polite"]')).not.toBeNull()

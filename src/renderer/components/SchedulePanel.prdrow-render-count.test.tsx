@@ -32,7 +32,7 @@ const JOBS: ScheduleJob[] = [
   job('1-running', { status: 'running', startedAt: new Date(0).toISOString() }),
 ]
 // Built ONCE — exactly what SchedulePanel's useMemo gives the rows between ticks.
-const ROWS = buildPlans(JOBS, { sessions: {}, now: 0 })[0].stages.flatMap((s) => s.rows)
+const ROWS = buildPlans(JOBS, { sessions: {}, now: 0 }).flatMap((p) => p.stages.flatMap((s) => s.rows))
 const stableOnFocused = vi.fn()
 
 function Harness({ elapsed }: { elapsed: number }) {

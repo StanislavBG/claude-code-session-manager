@@ -40,7 +40,8 @@ function plan(epicId: string, n: number, status: 'running' | 'pending' | 'comple
       estimateMinutes: null, bodyPreview: '', runId: null, epicId, error: null, exitCode: null,
       startedAt: st === 'running' ? new Date(Date.now() - 60_000).toISOString() : st === 'completed' ? '2026-01-01T00:00:00Z' : null,
       finishedAt: st === 'completed' ? '2026-01-01T00:04:00Z' : null,
-      dependsOn: stage === 0 ? [] : [`${epicId}-${String(i - 6).padStart(3, '0')}`],
+      // stage-1 rows also hang off row 000 so the Epic stays ONE weakly-connected plan (no depth change).
+      dependsOn: stage === 0 ? [] : [...new Set([`${epicId}-${String(i - 6).padStart(3, '0')}`, ...(stage === 1 ? [`${epicId}-000`] : [])])],
     } as unknown as ScheduleJob)
   }
   return out

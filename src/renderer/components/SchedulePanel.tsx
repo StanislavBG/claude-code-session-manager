@@ -427,7 +427,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
             <div ref={jobListRef} role="list" aria-label="Job queue" onKeyDown={handleJobListKeyDown}>
               {plans.map((plan) => (
                 <PlanBand
-                  key={plan.epicId ?? '__none__'}
+                  key={`${plan.epicId ?? '__none__'}#${plan.waveIndex}`}
                   plan={plan}
                   mode={planMode}
                   now={now}

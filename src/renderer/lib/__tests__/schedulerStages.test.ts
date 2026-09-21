@@ -14,7 +14,9 @@ function job(slug: string, o: Partial<ScheduleJob> & Record<string, unknown> = {
 }
 const plans = (jobs: ScheduleJob[]) => buildPlans(jobs, { sessions: {}, now: NOW, avgDurationMs: 120_000 })
 const p1 = (jobs: ScheduleJob[]) => plans(jobs)[0]
-const row = (jobs: ScheduleJob[], slug: string) => p1(jobs).stages.flatMap((s) => s.rows).find((r) => r.slug === slug)!
+const row = (jobs: ScheduleJob[], slug: string) => plans(jobs).flatMap((p) => p.stages.flatMap((s) => s.rows)).find((r) => r.slug === slug)!
+/** Rows of one Epic that share no dependsOn edge are separate WAVES (plans); `hub` is a completed root they all hang off, so they form ONE plan (stage 1 = hub, fixture rows start at stage 2). */
+const hub = (...js: ScheduleJob[]) => [job('0-hub', { status: 'completed' }), ...js.map((j) => ((j.dependsOn as string[]).length === 0 ? { ...j, dependsOn: ['0-hub'] } : j))]
 
 describe('buildPlans basics', () => {
   it('empty input → no plans', () => { expect(plans([])).toEqual([]) })
@@ -35,18 +37,18 @@ describe('buildPlans basics', () => {
 
 describe('Plan.status', () => {
   it('active when a row is running or investigating', () => {
-    expect(p1([job('1-a', { status: 'investigating' }), job('2-b')]).status).toBe('active')
+    expect(p1(hub(job('1-a', { status: 'investigating' }), job('2-b'))).status).toBe('active')
     expect(p1([job('1-a', { status: 'running' })]).status).toBe('active')
   })
   it('done when all completed/skipped', () => {
-    expect(p1([job('1-a', { status: 'completed' }), job('2-b', { status: 'skipped' })]).status).toBe('done')
+    expect(p1(hub(job('1-a', { status: 'completed' }), job('2-b', { status: 'skipped' }))).status).toBe('done')
   })
   it('draft when every row is quarantined', () => {
-    expect(p1([job('1-a', { status: 'quarantined' }), job('2-b', { status: 'quarantined' })]).status).toBe('draft')
+    expect(p1([job('0-hub', { status: 'quarantined' }), job('1-a', { status: 'quarantined', dependsOn: ['0-hub'] }), job('2-b', { status: 'quarantined', dependsOn: ['0-hub'] })]).status).toBe('draft')
   })
   it('queued otherwise', () => {
     expect(p1([job('1-a'), job('2-b', { dependsOn: ['1-a'] })]).status).toBe('queued')
-    expect(p1([job('1-a', { status: 'completed' }), job('2-b')]).status).toBe('queued')
+    expect(plans([job('1-a', { status: 'completed' }), job('2-b')]).map((p) => p.status)).toEqual(['done', 'queued'])
   })
 })
 
@@ -56,6 +58,7 @@ describe('stage depth', () => {
     expect([1, 2, 3, 4].map((n) => row(js, ['1-a', '2-b', '3-c', '4-d'][n - 1]).stage)).toEqual([1, 2, 3, 1])
     expect(p1(js).stageCount).toBe(3)
     expect(p1(js).stages.map((s) => s.n)).toEqual([1, 2, 3])
+    expect(plans(js).map((p) => p.prdCount)).toEqual([3, 1]) // 4-d is its own wave
   })
   it('cross-epic edges ignored for staging but reported', () => {
     const js = [job('1-a', { epicId: 'x' }), job('2-b', { epicId: 'y', dependsOn: ['1-a'] })]
@@ -77,12 +80,12 @@ describe('stage depth', () => {
 
 describe('Stage.state / summary', () => {
   it('done', () => {
-    const s = p1([job('1-a', { status: 'completed' }), job('2-b', { status: 'skipped' })]).stages[0]
+    const s = p1(hub(job('1-a', { status: 'completed' }), job('2-b', { status: 'skipped' }))).stages[1]
     expect(s.state).toBe('done'); expect(s.summary).toBe('2/2 done')
   })
   it('running', () => {
-    const js = [job('1-a', { status: 'running' }), job('2-b'), job('3-c'), job('4-d')]
-    const s = p1(js).stages[0]
+    const js = hub(job('1-a', { status: 'running' }), job('2-b'), job('3-c'), job('4-d'))
+    const s = p1(js).stages[1]
     expect(s.state).toBe('running'); expect(s.summary).toBe('1 running · 3')
   })
   it('held: rows waiting on healthy deps', () => {
@@ -97,7 +100,7 @@ describe('Stage.state / summary', () => {
     expect(p1(js).blockedCount).toBe(1)
   })
   it('pending: ready rows only', () => {
-    const s = p1([job('1-a'), job('2-b')]).stages[0]
+    const s = p1(hub(job('1-a'), job('2-b'))).stages[1]
     expect(s.state).toBe('pending'); expect(s.summary).toBe('2 ready')
   })
 })
@@ -105,25 +108,25 @@ describe('Stage.state / summary', () => {
 describe('row kinds / trailing', () => {
   it('done shows duration; running shows percent with estimate, elapsed without', () => {
     const start = new Date(NOW - 252_000).toISOString()
-    const js = [
+    const js = hub(
       job('1-a', { status: 'completed', startedAt: new Date(NOW - 300_000).toISOString(), finishedAt: start }),
       job('2-b', { status: 'running', startedAt: start }),
       job('3-c', { status: 'running', startedAt: start, estimateMinutes: 7 }),
-    ]
+    )
     expect(row(js, '1-a')).toMatchObject({ rowKind: 'done', rowTrailing: '48s' })
     expect(row(js, '2-b')).toMatchObject({ rowKind: 'running', rowTrailing: '4m12s' })
     expect(row(js, '3-c')).toMatchObject({ rowKind: 'running', rowTrailing: '60%' })
   })
   it('next goes to exactly one row per stage; others get eta', () => {
-    const js = [job('1-a'), job('2-b'), job('3-c')]
-    const kinds = p1(js).stages[0].rows.map((r) => r.rowKind)
+    const js = hub(job('1-a'), job('2-b'), job('3-c'))
+    const kinds = p1(js).stages[1].rows.map((r) => r.rowKind)
     expect(kinds).toEqual(['next', 'eta', 'eta'])
     expect(row(js, '1-a').rowTrailing).toBe('next')
     expect(row(js, '2-b').rowTrailing).toBe('~2m')
   })
   it('retry, dep, gate, failed, review, quarantined', () => {
     const hist = [{ from: 'failed', to: 'pending', reason: null, source: null, at: '' }]
-    const js = [
+    const js = hub(
       job('1-a', { status: 'running' }),
       job('2-b'), // next
       job('3-c', { statusHistory: hist }),
@@ -132,7 +135,7 @@ describe('row kinds / trailing', () => {
       job('6-f', { status: 'failed' }),
       job('7-g', { status: 'needs_review' }),
       job('8-h', { status: 'quarantined' }),
-    ]
+    )
     expect(row(js, '3-c')).toMatchObject({ rowKind: 'retry', rowTrailing: '1 retry' })
     expect(row(js, '2-b').rowKind).toBe('next')
     expect(row(js, '4-d')).toMatchObject({ rowKind: 'dep', rowTrailing: '←1' })
@@ -149,7 +152,7 @@ describe('row kinds / trailing', () => {
 
 describe('plan counters + eta', () => {
   it('counts and etaMs', () => {
-    const js = [job('1-a', { status: 'completed' }), job('2-b', { status: 'running', startedAt: new Date(NOW - 60_000).toISOString(), estimateMinutes: 5 }), job('3-c', { dependsOn: ['2-b'], estimateMinutes: 10 })]
+    const js = [job('1-a', { status: 'completed' }), job('2-b', { status: 'running', startedAt: new Date(NOW - 60_000).toISOString(), estimateMinutes: 5, dependsOn: ['1-a'] }), job('3-c', { dependsOn: ['2-b'], estimateMinutes: 10 })]
     const p = p1(js)
     expect(p).toMatchObject({ prdCount: 3, doneCount: 1, runningCount: 1, heldCount: 1, blockedCount: 0 })
     expect(p.etaMs).toBe(4 * 60_000 + 10 * 60_000)

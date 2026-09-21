@@ -1,6 +1,6 @@
 /**
  * schedulerStages — pure derivation layer for the Scheduler 2A redesign:
- * the queue as PLANS (one per Epic), each split into numbered STAGES
+ * the queue as PLANS (one per weakly-connected wave of an Epic), each split into numbered STAGES
  * (longest-path depth levels of the in-Epic dependsOn DAG).
  *
  * Builds ON TOP of backlogTree (blockers / cycle facts) — it never
@@ -72,6 +72,8 @@ export interface Stage {
 
 export interface Plan {
   epicId: string | null
+  /** 1-based wave ordinal within the Epic (components ordered by lowest PRD number). */
+  waveIndex: number
   /** 1-based, stable: ordered by first-PRD slug number ascending, ties by epicId. */
   index: number
   label: string
@@ -185,8 +187,46 @@ function stageSummary(state: StageState, s: Omit<Stage, 'summary' | 'state'>, pe
   }
 }
 
+function byFirst(a: { _firstNum: number; _firstSlug: string }, b: { _firstNum: number; _firstSlug: string }): number {
+  if (a._firstNum !== b._firstNum) return a._firstNum < b._firstNum ? -1 : 1
+  return a._firstSlug.localeCompare(b._firstSlug)
+}
+
 /**
- * Groups `jobs` into Plans (one per Epic) with complete Stage lists.
+ * Weakly-connected components of one Epic's rows over the in-Epic dependsOn edges (cross-Epic
+ * and dangling edges are ignored, so they never merge or spawn waves). Union-find with path
+ * halving: near O(V+E). Cyclic rows are just edges here, so a cycle lands in one component.
+ * Deterministic: components emit in first-seen node order.
+ */
+function weakComponents<N extends { row: { slug: string; dependsOn?: string[] | null } }>(
+  nodes: N[],
+  inEpic: Set<string>,
+): N[][] {
+  const parent = new Map<string, string>(nodes.map((n) => [n.row.slug, n.row.slug]))
+  const find = (x: string): string => {
+    while (parent.get(x) !== x) {
+      parent.set(x, parent.get(parent.get(x)!)!)
+      x = parent.get(x)!
+    }
+    return x
+  }
+  for (const n of nodes) {
+    for (const d of n.row.dependsOn ?? []) {
+      if (inEpic.has(d)) parent.set(find(n.row.slug), find(d))
+    }
+  }
+  const groups = new Map<string, N[]>()
+  for (const n of nodes) {
+    const r = find(n.row.slug)
+    const g = groups.get(r)
+    if (g) g.push(n)
+    else groups.set(r, [n])
+  }
+  return [...groups.values()]
+}
+
+/**
+ * Groups `jobs` into Plans (one per weakly-connected wave of an Epic) with complete Stage lists.
  * Cross-Epic dependsOn edges never affect staging. Cycle members get
  * (max depth of their non-cycle predecessors) + 1 and `cycle: true`.
  */
@@ -204,159 +244,174 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
   jobs.filter(ready).sort(byPriority).forEach((j, i) => aheadIdx.set(j.slug, i))
 
   const sections = buildBacklogTree(jobs, opts.sessions, jobs)
-  const plans: Array<Plan & { _firstNum: number }> = []
+  const plans: Array<Plan & { _firstNum: number; _firstSlug: string }> = []
 
   for (const section of sections) {
-    const nodes = flattenBacklogNodes(section.nodes)
-    const inEpic = new Set(nodes.map((n) => n.row.slug))
-    const nodeBySlug = new Map(nodes.map((n) => [n.row.slug, n]))
+    const allNodes = flattenBacklogNodes(section.nodes)
+    const inEpic = new Set(allNodes.map((n) => n.row.slug))
+    const nodeBySlug = new Map(allNodes.map((n) => [n.row.slug, n]))
+    const sectionPlans: Array<Plan & { _firstNum: number; _firstSlug: string }> = []
+    for (const nodes of weakComponents(allNodes, inEpic)) {
 
-    // ── stage depth: memoized DFS; cyclic rows ignore edges to other cyclic rows.
-    const depth = new Map<string, number>()
-    const inProgress = new Set<string>()
-    const depsOf = (slug: string): string[] => {
-      const node = nodeBySlug.get(slug)!
-      return (node.row.dependsOn ?? []).filter((d) => inEpic.has(d) && !(node.cycle && nodeBySlug.get(d)!.cycle))
-    }
-    const depthOf = (slug: string): number => {
-      const memo = depth.get(slug)
-      if (memo !== undefined) return memo
-      if (inProgress.has(slug)) return 0 // belt-and-suspenders: never hang
-      inProgress.add(slug)
-      let max = 0
-      for (const d of depsOf(slug)) max = Math.max(max, depthOf(d))
-      inProgress.delete(slug)
-      depth.set(slug, max + 1)
-      return max + 1
-    }
-    for (const n of nodes) {
-      depthOf(n.row.slug)
-    }
-
-    const rows: PlanRow[] = nodes.map((n) => {
-      const j = n.row
-      const deps = (j.dependsOn ?? []).filter((d) => inEpic.has(d))
-      return {
-        slug: j.slug,
-        title: j.title,
-        status: j.status,
-        stage: depth.get(j.slug)!,
-        prdNumber: prdNumber(j.slug),
-        rowKind: 'dep',
-        rowTrailing: '',
-        cycle: n.cycle,
-        estimateMinutes: j.estimateMinutes ?? null,
-        deps,
-        crossEpicDeps: (j.dependsOn ?? []).filter((d) => !inEpic.has(d)),
-        blockers: n.blockers,
-        job: j,
+      // ── stage depth: memoized DFS; cyclic rows ignore edges to other cyclic rows.
+      const depth = new Map<string, number>()
+      const inProgress = new Set<string>()
+      const depsOf = (slug: string): string[] => {
+        const node = nodeBySlug.get(slug)!
+        return (node.row.dependsOn ?? []).filter((d) => inEpic.has(d) && !(node.cycle && nodeBySlug.get(d)!.cycle))
       }
-    })
-    rows.sort(byPriority)
-    const stageCount = rows.reduce((m, r) => Math.max(m, r.stage), 0)
+      const depthOf = (slug: string): number => {
+        const memo = depth.get(slug)
+        if (memo !== undefined) return memo
+        if (inProgress.has(slug)) return 0 // belt-and-suspenders: never hang
+        inProgress.add(slug)
+        let max = 0
+        for (const d of depsOf(slug)) max = Math.max(max, depthOf(d))
+        inProgress.delete(slug)
+        depth.set(slug, max + 1)
+        return max + 1
+      }
+      for (const n of nodes) {
+        depthOf(n.row.slug)
+      }
 
-    // ── per-row classification
-    const cls = new Map<string, Classified>()
-    for (const r of rows) {
-      const j = r.job
-      const node = nodeBySlug.get(r.slug)!
-      const s = j.status
-      let c: Classified
-      if (isDone(s)) {
-        const d = j.startedAt && j.finishedAt ? Date.parse(j.finishedAt) - Date.parse(j.startedAt) : NaN
-        c = { kind: 'done', trailing: d > 0 ? formatElapsed(d) : '', held: false, blocked: false }
-      } else if (isRunning(s)) {
-        const el = j.startedAt ? Math.max(0, now - Date.parse(j.startedAt)) : null
-        c = { kind: 'running', trailing: el === null ? '' : runningTrailing(j, el), held: false, blocked: false }
-      } else if (s === 'failed') c = { kind: 'failed', trailing: 'failed', held: false, blocked: false }
-      else if (s === 'needs_review') c = { kind: 'review', trailing: 'review', held: false, blocked: false }
-      else if (s === 'quarantined') c = { kind: 'quarantined', trailing: 'quarantined', held: false, blocked: false }
-      else {
-        const unmet = node.blockers.filter((b) => !b.missing && b.status !== 'completed')
-        if (unmet.length > 0) {
-          const stuck = unmet.some((b) => isStuckBlocker(b.status))
-          const first = unmet[0].slug
-          c = { kind: 'dep', trailing: `←${prdNumber(first) ?? first}`, held: !stuck, blocked: stuck }
-        } else if (j.heldReason) {
-          c = { kind: 'gate', trailing: 'gate', held: true, blocked: false }
-        } else {
-          const retries = retryCount(j)
-          const idx = aheadIdx.get(j.slug) ?? 0
-          c = retries > 0
-            ? { kind: 'retry', trailing: `${retries} ${retries === 1 ? 'retry' : 'retries'}`, held: false, blocked: false }
-            : { kind: 'eta', trailing: formatEta((idx * avgMs) / conc), held: false, blocked: false }
+      const rows: PlanRow[] = nodes.map((n) => {
+        const j = n.row
+        const deps = (j.dependsOn ?? []).filter((d) => inEpic.has(d))
+        return {
+          slug: j.slug,
+          title: j.title,
+          status: j.status,
+          stage: depth.get(j.slug)!,
+          prdNumber: prdNumber(j.slug),
+          rowKind: 'dep',
+          rowTrailing: '',
+          cycle: n.cycle,
+          estimateMinutes: j.estimateMinutes ?? null,
+          deps,
+          crossEpicDeps: (j.dependsOn ?? []).filter((d) => !inEpic.has(d)),
+          blockers: n.blockers,
+          job: j,
+        }
+      })
+      rows.sort(byPriority)
+      const stageCount = rows.reduce((m, r) => Math.max(m, r.stage), 0)
+
+      // ── per-row classification
+      const cls = new Map<string, Classified>()
+      for (const r of rows) {
+        const j = r.job
+        const node = nodeBySlug.get(r.slug)!
+        const s = j.status
+        let c: Classified
+        if (isDone(s)) {
+          const d = j.startedAt && j.finishedAt ? Date.parse(j.finishedAt) - Date.parse(j.startedAt) : NaN
+          c = { kind: 'done', trailing: d > 0 ? formatElapsed(d) : '', held: false, blocked: false }
+        } else if (isRunning(s)) {
+          const el = j.startedAt ? Math.max(0, now - Date.parse(j.startedAt)) : null
+          c = { kind: 'running', trailing: el === null ? '' : runningTrailing(j, el), held: false, blocked: false }
+        } else if (s === 'failed') c = { kind: 'failed', trailing: 'failed', held: false, blocked: false }
+        else if (s === 'needs_review') c = { kind: 'review', trailing: 'review', held: false, blocked: false }
+        else if (s === 'quarantined') c = { kind: 'quarantined', trailing: 'quarantined', held: false, blocked: false }
+        else {
+          const unmet = node.blockers.filter((b) => !b.missing && b.status !== 'completed')
+          if (unmet.length > 0) {
+            const stuck = unmet.some((b) => isStuckBlocker(b.status))
+            const first = unmet[0].slug
+            c = { kind: 'dep', trailing: `←${prdNumber(first) ?? first}`, held: !stuck, blocked: stuck }
+          } else if (j.heldReason) {
+            c = { kind: 'gate', trailing: 'gate', held: true, blocked: false }
+          } else {
+            const retries = retryCount(j)
+            const idx = aheadIdx.get(j.slug) ?? 0
+            c = retries > 0
+              ? { kind: 'retry', trailing: `${retries} ${retries === 1 ? 'retry' : 'retries'}`, held: false, blocked: false }
+              : { kind: 'eta', trailing: formatEta((idx * avgMs) / conc), held: false, blocked: false }
+          }
+        }
+        cls.set(r.slug, c)
+      }
+
+      // ── stages (+ exactly one 'next' per stage: highest-priority dispatchable pending row)
+      const stages: Stage[] = []
+      for (let n = 1; n <= stageCount; n++) {
+        const srows = rows.filter((r) => r.stage === n) // already priority-sorted
+        const next = srows.find((r) => {
+          const k = cls.get(r.slug)!.kind
+          return r.status === 'pending' && (k === 'eta' || k === 'retry')
+        })
+        if (next) { const c = cls.get(next.slug)!; c.kind = 'next'; c.trailing = 'next' }
+        let doneCount = 0, runningCount = 0, heldCount = 0, blockedCount = 0, pendingCount = 0, attention = 0
+        for (const r of srows) {
+          const c = cls.get(r.slug)!
+          r.rowKind = c.kind
+          r.rowTrailing = c.trailing
+          if (isDone(r.status)) doneCount++
+          else if (isRunning(r.status)) runningCount++
+          else if (r.status === 'pending') {
+            pendingCount++
+            if (c.held) heldCount++
+            if (c.blocked) blockedCount++
+          } else if (isAttention(r.status)) attention++
+        }
+        const state: StageState =
+          doneCount === srows.length ? 'done'
+            : runningCount > 0 ? 'running'
+              : blockedCount + attention > 0 ? 'blocked'
+                : heldCount > 0 ? 'held'
+                  : 'pending'
+        const base = { n, rows: srows, doneCount, runningCount, heldCount, blockedCount }
+        stages.push({ ...base, state, summary: stageSummary(state, base, pendingCount, attention) })
+      }
+
+      // ── plan-level ETA: serial remaining work / concurrency
+      let remaining = 0
+      for (const r of rows) {
+        const est = r.estimateMinutes ? r.estimateMinutes * 60_000 : avgMs
+        if (r.status === 'pending') remaining += est
+        else if (isRunning(r.status)) {
+          const el = r.job.startedAt ? Math.max(0, now - Date.parse(r.job.startedAt)) : 0
+          remaining += Math.max(0, est - el)
         }
       }
-      cls.set(r.slug, c)
-    }
 
-    // ── stages (+ exactly one 'next' per stage: highest-priority dispatchable pending row)
-    const stages: Stage[] = []
-    for (let n = 1; n <= stageCount; n++) {
-      const srows = rows.filter((r) => r.stage === n) // already priority-sorted
-      const next = srows.find((r) => {
-        const k = cls.get(r.slug)!.kind
-        return r.status === 'pending' && (k === 'eta' || k === 'retry')
+      const firstNum = rows.reduce((m, r) => Math.min(m, numOf(r.slug)), Infinity)
+      sectionPlans.push({
+        epicId: section.epicId,
+        waveIndex: 0,
+        index: 0,
+        // A known Epic's goalText is `${title}\n\n${goal}` — the plan header shows just the human title.
+        label: section.known ? splitTitleAndGoal(section.label).title : section.label,
+        status: planStatusOf(rows),
+        prdCount: rows.length,
+        stageCount,
+        doneCount: stages.reduce((a, s) => a + s.doneCount, 0),
+        runningCount: stages.reduce((a, s) => a + s.runningCount, 0),
+        heldCount: stages.reduce((a, s) => a + s.heldCount, 0),
+        blockedCount: stages.reduce((a, s) => a + s.blockedCount, 0),
+        etaMs: remaining / conc,
+        stages,
+        _firstNum: firstNum,
+        _firstSlug: rows[0].slug,
       })
-      if (next) { const c = cls.get(next.slug)!; c.kind = 'next'; c.trailing = 'next' }
-      let doneCount = 0, runningCount = 0, heldCount = 0, blockedCount = 0, pendingCount = 0, attention = 0
-      for (const r of srows) {
-        const c = cls.get(r.slug)!
-        r.rowKind = c.kind
-        r.rowTrailing = c.trailing
-        if (isDone(r.status)) doneCount++
-        else if (isRunning(r.status)) runningCount++
-        else if (r.status === 'pending') {
-          pendingCount++
-          if (c.held) heldCount++
-          if (c.blocked) blockedCount++
-        } else if (isAttention(r.status)) attention++
-      }
-      const state: StageState =
-        doneCount === srows.length ? 'done'
-          : runningCount > 0 ? 'running'
-            : blockedCount + attention > 0 ? 'blocked'
-              : heldCount > 0 ? 'held'
-                : 'pending'
-      const base = { n, rows: srows, doneCount, runningCount, heldCount, blockedCount }
-      stages.push({ ...base, state, summary: stageSummary(state, base, pendingCount, attention) })
     }
 
-    // ── plan-level ETA: serial remaining work / concurrency
-    let remaining = 0
-    for (const r of rows) {
-      const est = r.estimateMinutes ? r.estimateMinutes * 60_000 : avgMs
-      if (r.status === 'pending') remaining += est
-      else if (isRunning(r.status)) {
-        const el = r.job.startedAt ? Math.max(0, now - Date.parse(r.job.startedAt)) : 0
-        remaining += Math.max(0, est - el)
-      }
-    }
-
-    const firstNum = rows.reduce((m, r) => Math.min(m, numOf(r.slug)), Infinity)
-    plans.push({
-      epicId: section.epicId,
-      index: 0,
-      // A known Epic's goalText is `${title}\n\n${goal}` — the plan header shows just the human title.
-      label: section.known ? splitTitleAndGoal(section.label).title : section.label,
-      status: planStatusOf(rows),
-      prdCount: rows.length,
-      stageCount,
-      doneCount: stages.reduce((a, s) => a + s.doneCount, 0),
-      runningCount: stages.reduce((a, s) => a + s.runningCount, 0),
-      heldCount: stages.reduce((a, s) => a + s.heldCount, 0),
-      blockedCount: stages.reduce((a, s) => a + s.blockedCount, 0),
-      etaMs: remaining / conc,
-      stages,
-      _firstNum: firstNum,
+    // Wave ordinal: components ordered by lowest PRD number (ties: first slug). The label only
+    // shows the wave when the Epic really has more than one plan.
+    sectionPlans.sort(byFirst)
+    sectionPlans.forEach((p, i) => {
+      p.waveIndex = i + 1
+      if (sectionPlans.length > 1) p.label = `${p.label} · plan ${i + 1}/${sectionPlans.length}`
+      plans.push(p)
     })
   }
 
   plans.sort((a, b) => {
     if (a._firstNum !== b._firstNum) return a._firstNum < b._firstNum ? -1 : 1
-    return (a.epicId ?? '').localeCompare(b.epicId ?? '')
+    const e = (a.epicId ?? '').localeCompare(b.epicId ?? '')
+    return e !== 0 ? e : a.waveIndex - b.waveIndex
   })
-  return plans.map(({ _firstNum, ...p }, i) => ({ ...p, index: i + 1 }))
+  return plans.map(({ _firstNum, _firstSlug, ...p }, i) => ({ ...p, index: i + 1 }))
 }
 
 /** KPI-band aggregates. `now` only anchors "done today" (local calendar day). */

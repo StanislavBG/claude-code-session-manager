@@ -153,7 +153,6 @@ function ObjectRow({
         return branchMatches(node.children[k], [...path, k], filter, schema)
       return false
     })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allKeys.join(','), filter, node, path.join('.'), schema])
 
   if (filter.trim() && visibleKeys.length === 0 && !rowMatches(path, info, filter)) return null

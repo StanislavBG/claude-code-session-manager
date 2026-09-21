@@ -127,7 +127,6 @@ export function CodeEditorPane({ path, name, value, onChange, onSave, onReady, o
   // active file with a new line) still reveals.
   useEffect(() => {
     if (editorRef.current) revealPending(editorRef.current)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path])
 
   // Live-apply theme changes without remount.

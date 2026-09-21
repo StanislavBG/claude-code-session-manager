@@ -183,7 +183,6 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
     if (!selectedSlug) return
     const absPath = prdAbsPath(selectedSlug)
     if (absPath) useEditor.getState().openFile(absPath)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSlug, prds])
 
   function openPrd(slug: string) {

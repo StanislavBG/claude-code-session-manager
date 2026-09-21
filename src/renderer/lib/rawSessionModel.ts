@@ -63,7 +63,6 @@ export function useRawSessionModel(): { model: RawModel; setModel: (m: RawModel)
     // Sync in case singleton changed between render and effect.
     if (current !== model) setLocal(current)
     return () => { listeners.delete(fn) }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const setModel = useCallback((m: RawModel) => setRawSessionModel(m), [])
   return { model, setModel }

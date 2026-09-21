@@ -117,7 +117,6 @@ export function TiptapBody({ value, onChange }: Props) {
     ],
     content: splitRef.current.body,
     onUpdate: ({ editor: ed }) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const body = (ed.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown()
       suppressExternalRef.current = true
       onChange(joinFrontmatter(splitRef.current, body))
@@ -137,7 +136,6 @@ export function TiptapBody({ value, onChange }: Props) {
     if (!editor || suppressExternalRef.current) return
     const newSplit = splitFrontmatter(value)
     // Only re-load if the body actually changed from outside.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const currentBody = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown()
     if (newSplit.body !== currentBody) {
       splitRef.current = newSplit

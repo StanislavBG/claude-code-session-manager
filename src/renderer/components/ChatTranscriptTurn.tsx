@@ -747,7 +747,6 @@ function McpInstructionsCard({ turn }: { turn: ChatTurn }) {
       </div>
       <div
         className="prose-chat bg-elev px-2 py-1.5 text-xs leading-relaxed text-fg"
-        // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: html }}
       />
     </div>
@@ -1385,7 +1384,6 @@ function TurnComponent({
               ref={bodyRef}
               className={`prose-chat border px-3 py-2 text-sm leading-relaxed ${bubbleTone} ${bubbleCorners} ${isPlan ? 'prose-chat--plan' : ''}`}
               onClick={(e) => { void handleChatLinkClick(e, cwd) }}
-              // eslint-disable-next-line react/no-danger
               dangerouslySetInnerHTML={{ __html: shownHtml }}
             />
             {(clamped.truncated || bodyExpanded) && clampBodyChars !== null && (

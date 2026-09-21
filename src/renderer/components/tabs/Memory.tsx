@@ -139,7 +139,6 @@ function WorkspaceMemoryView() {
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedName, workspace])
 
   if (!home) return <EmptyState title="loading…" />

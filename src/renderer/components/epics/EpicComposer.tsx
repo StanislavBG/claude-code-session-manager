@@ -70,7 +70,6 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
     setText(takePendingEpicDraft(epic.id) ?? '')
     att.clear()
     setDictating(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [epic.id])
 
   // Recognition can stop on its own (idle timeout, error) without this

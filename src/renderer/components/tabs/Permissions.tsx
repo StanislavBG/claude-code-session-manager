@@ -74,7 +74,6 @@ function PermissionsComponent() {
       return
     }
     setScope(navFace === 'project' && cwd ? 'project' : 'user')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navFace, cwd])
 
   // 'presets' (PermissionsPresetsLibrary, in ./Library.tsx) is a static

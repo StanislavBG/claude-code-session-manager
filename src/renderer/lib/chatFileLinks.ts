@@ -60,7 +60,6 @@ export function linkifyFilePaths(root: HTMLElement): void {
 
   const textNodes: Text[] = []
   let n: Node | null
-  // eslint-disable-next-line no-cond-assign
   while ((n = walker.nextNode())) textNodes.push(n as Text)
 
   for (const node of textNodes) {

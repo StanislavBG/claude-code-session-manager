@@ -53,7 +53,8 @@
     "lint:unregistered-tests": "node scripts/check-unregistered-tests.cjs",
     "lint:docs": "node scripts/check-doc-hierarchy.cjs",
     "lint:paths": "node scripts/check-ops-path-literals.cjs",
-    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:unregistered-tests && npm run lint:docs && npm run lint:paths",
+    "lint:any": "node scripts/check-explicit-any.cjs",
+    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:unregistered-tests && npm run lint:docs && npm run lint:paths && npm run lint:any",
     "sync:settings-schema": "node scripts/sync-settings-schema.cjs"
   },
   "keywords": [

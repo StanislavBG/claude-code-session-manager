@@ -97,7 +97,6 @@ export function useModelCatalog(cwd: string | null): {
       cancelled = true
       listeners.delete(onUpdate)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
   const refresh = useCallback(async () => {
@@ -108,7 +107,6 @@ export function useModelCatalog(cwd: string | null): {
     if (!mounted.current) return
     setCatalog(entries.get(key)?.catalog ?? null)
     setLoading(false)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
   return { catalog, loading, degraded: !loading && (catalog === null || catalog.degraded), refresh }

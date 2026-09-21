@@ -183,7 +183,6 @@ function HooksComponent() {
       return
     }
     setScope(navFace === 'project' && cwd ? 'project' : 'user')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navFace, cwd])
 
   // 'library' (HooksLibrary, in ./Library.tsx) is a static reference catalog

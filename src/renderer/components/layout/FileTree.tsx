@@ -269,7 +269,6 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     // cwd alone drives this effect. reloadAndRestore also closes over showHidden,
     // so listing it would wrongly re-reset transient state on a hidden toggle —
     // the separate effect below owns that path.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd])
 
   // Re-load when the hidden toggle changes. Skip the initial mount (the cwd
@@ -283,7 +282,6 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     // showHidden alone drives this effect: reloadAndRestore reads the current
     // cwd/expansion at call time, and depending on `expanded` would reload on
     // every folder toggle. The cwd effect owns cwd changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showHidden])
 
   // Refresh git status every 5s while mounted AND focused — a backgrounded

@@ -210,7 +210,6 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
     void fetchUsage(rows)
     const t = setInterval(() => void fetchUsage(rows), 30_000)
     return () => clearInterval(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [epicUsageKey, selectedId, usageActive])
   const snapshots: EpicSnapshots = { sessions, chats, jobs: scheduleJobs, prds, usage }
   const selectedEpic = selectedId ? (sessions[selectedId] ?? null) : null

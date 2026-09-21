@@ -135,7 +135,6 @@ function McpServersComponent() {
       return
     }
     setScope(navFace === 'project' && cwd ? 'project' : 'user')
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navFace, cwd])
 
   const path = useMemo(() => (home ? pathFor(scope, home, cwd) : null), [home, scope, cwd])
@@ -153,7 +152,6 @@ function McpServersComponent() {
     if (!files[path]) loadJson(path)
     watchFile(path)
     return () => unwatchFile(path)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path])
 
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -184,7 +182,6 @@ function McpServersComponent() {
   }
   useEffect(() => {
     refreshStatus()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (!home) return <EmptyState title="loading…" />

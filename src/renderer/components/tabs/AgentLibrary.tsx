@@ -4,6 +4,7 @@ import { ListDetail } from '../ui/ListDetail'
 import { EmptyState } from '../ui/EmptyState'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
+import { Choice } from '../ui/Choice'
 import { toast } from '../../state/toast'
 import type { AgentPersona, AgentPersonaSaveInput, AgentPersonaTag } from '../../../preload/api'
 import { TAG_LIBRARY } from '../../lib/tagLibrary'
@@ -624,39 +625,6 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       <div className="text-[10.5px] font-semibold uppercase tracking-wide text-fg-faint mb-1.5 font-mono">{label}</div>
       {children}
       {hint && <div className="text-[11px] text-fg-faint mt-1 leading-snug">{hint}</div>}
-    </div>
-  )
-}
-
-function Choice({ options, value, onChange, mono, blocked }: { options: string[]; value: string; onChange: (v: string) => void; mono?: boolean; blocked?: Record<string, string> }) {
-  // A persona's on-disk `model:` may not be in the option list (hand-edited,
-  // or a since-retired id; agentPersonaSchema.cjs just takes a bounded string).
-  // It is appended as a selected-but-unlisted option, so a re-render or an
-  // untouched save never silently rewrites it. `blocked` maps option -> reason;
-  // those render disabled with the reason as their title, never hidden.
-  const outOfList = value && !options.includes(value)
-  const shown = outOfList ? [...options, value] : options
-  return (
-    <div className="flex flex-wrap gap-1">
-      {shown.map((o) => {
-        const on = o === value
-        const isCurrentOnDisk = outOfList && o === value
-        const block = blocked?.[o]
-        return (
-          <button
-            key={o}
-            onClick={() => onChange(o)}
-            disabled={!!block}
-            title={block ?? (isCurrentOnDisk ? `${o} — current on-disk value, not in the standard list` : undefined)}
-            className={`px-2.5 py-1 rounded text-xs border ${mono ? 'font-mono' : ''} ${
-              on ? 'bg-accent/15 text-accent border-accent/40 font-semibold' : 'bg-bg-hi text-fg-dim border-line'
-            } ${isCurrentOnDisk ? 'border-dashed' : ''} ${block ? 'opacity-40 cursor-not-allowed' : ''}`}
-          >
-            {o}
-            {isCurrentOnDisk ? ' (current)' : ''}
-          </button>
-        )
-      })}
     </div>
   )
 }

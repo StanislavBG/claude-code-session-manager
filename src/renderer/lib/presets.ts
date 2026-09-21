@@ -61,7 +61,8 @@ export function modelFlag(model?: string): string {
 
 /** ` --effort <level>` (shell-quoted), or '' for null/'inherit' — never `--effort inherit`/`null`. */
 export function effortFlag(effort?: string | null): string {
-  if (!effort || effort === 'inherit') return ''
+  // `auto` is a /effort reset verb, never a --effort value.
+  if (!effort || effort === 'inherit' || effort.toLowerCase() === 'auto') return ''
   return ` --effort ${shellQuote(effort)}`
 }
 

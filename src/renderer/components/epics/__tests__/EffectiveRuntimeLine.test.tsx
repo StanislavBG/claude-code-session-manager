@@ -20,7 +20,7 @@ function info(overrides: Partial<EffectiveModelInfo>): EffectiveModelInfo {
     modelSource: 'persona',
     resolvedModelId: null,
     resolvedFrom: null,
-    effortReachable: true,
+    effortEnvReachable: true,
     personaEffort: null,
     personaEffortSource: null,
     effortLevel: null,

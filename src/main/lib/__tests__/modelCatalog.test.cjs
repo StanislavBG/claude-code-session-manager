@@ -11,17 +11,20 @@ function mk(over = {}) {
   const fsImpl = {
     readFileSync: (f) => { if (f in files) return files[f]; if (String(f).endsWith('claude-settings-schema.json')) return JSON.stringify({ properties: { effortLevel: { enum: ['low', 'medium', 'high', 'xhigh'] } } }); throw new Error('ENOENT'); },
     realpathSync: (p) => p,
+    statSync: () => ({ isFile: () => true, size: 200 * 1024 * 1024 }),
+    openSync: () => 1, readSync: (fd, buf) => { buf.write('\x7fELF'); return 4; }, closeSync: () => {},
+    ...over.fs,
   };
   const runClaudeP = vi.fn(async (prompt) => ({ ok: true, out: prompt === '/model' ? MODEL_OUT : EFFORT_OUT }));
   const writeJson = vi.fn(async () => {});
   const deps = {
-    env: {}, now: () => NOW, userDataDir: () => '/ud', homeDir: () => '/home/u', projectRootOf: (c) => c,
+    env: {}, now: () => NOW, homeDir: () => '/home/u', projectRootOf: (c) => c,
     probeClaudeVersion: async () => '2.1.277', resolveClaudeBin: () => '/bin/claude',
     scanModelIds: () => ['claude-opus-5', 'claude-sonnet-5'], fs: fsImpl, runClaudeP, writeJson, ...over.deps,
   };
   return { deps, runClaudeP, writeJson };
 }
-const CACHE = '/ud/model-catalog.json';
+const CACHE = '/home/u/.claude/session-manager/model-catalog.json';
 const cacheEntry = (o = {}) => JSON.stringify({ aliases: ['sonnet'], models: ['claude-old-1'], effortLevels: ['low'], settingsEffortLevels: ['low'], claudeVersion: '2.1.277', probedAt: new Date(NOW - 1000).toISOString(), degraded: false, ...o });
 
 describe('parsers', () => {
@@ -62,7 +65,7 @@ describe('resolveModelCatalog', () => {
     const t = mk({ files: { '/home/u/.claude/settings.json': JSON.stringify({ availableModels: ['opus', 'haiku'] }), '/p/.claude/settings.local.json': JSON.stringify({ availableModels: ['haiku', 'sonnet'] }) } });
     const c = await resolveModelCatalog({ cwd: '/p', force: true, deps: t.deps });
     expect(c.aliases).toContain('opus[1m]');
-    expect(c.effortLevels).toEqual(['low', 'medium', 'high', 'xhigh', 'max', 'auto']);
+    expect(c.effortLevels).toEqual(['low', 'medium', 'high', 'xhigh', 'max']); // `auto` is a reset verb, not selectable
     expect(c.models).toEqual(['claude-opus-5', 'claude-sonnet-5']);
     expect(c.settingsEffortLevels).toEqual(['low', 'medium', 'high', 'xhigh']);
     expect(c.availableModels).toEqual(['opus', 'haiku', 'sonnet']);
@@ -130,5 +133,70 @@ describe('resolveModelCatalog', () => {
     const t2 = mk({ files: { [CACHE]: cacheEntry() }, deps: { env: { SM_E2E: '1' } } });
     expect((await resolveModelCatalog({ deps: t2.deps })).aliases).toEqual(['sonnet']);
     expect(t2.runClaudeP).not.toHaveBeenCalled();
+  });
+});
+
+describe('catalog cache file (real write boundary)', () => {
+  it('is written under ~/.claude, a path the real validateWrite accepts', async () => {
+    const os = require('node:os'); const pth = require('node:path');
+    const config = require('../../config.cjs');
+    const realHome = os.homedir();
+    const file = pth.join(realHome, '.claude', 'session-manager', 'model-catalog.json');
+    const t = mk({ deps: { homeDir: () => realHome, writeJson: undefined } });
+    const written = [];
+    t.deps.writeJson = async (f, d) => { written.push(f); config.validateWrite(f); };
+    await resolveModelCatalog({ force: true, deps: t.deps });
+    expect(written).toEqual([file]);
+  });
+  it('a userData path is rejected by validateWrite (why the cache must not live there)', () => {
+    const config = require('../../config.cjs');
+    expect(() => config.validateWrite('/somewhere/userData/model-catalog.json')).toThrow(/outside allowed write boundaries/);
+  });
+});
+
+describe('binary scan guard', () => {
+  it('never scans a small shell-script stub; degrades to the floor', async () => {
+    const scan = vi.fn(() => ['claude-x-1']);
+    const t = mk({ fs: { statSync: () => ({ isFile: () => true, size: 300 }) }, deps: { scanModelIds: scan } });
+    const c = await resolveModelCatalog({ force: true, deps: t.deps });
+    expect(scan).not.toHaveBeenCalled();
+    expect(c.sources.models).toBe('floor');
+    expect(c.degraded).toBe(true);
+  });
+  it('never scans a large file that is a shell script', async () => {
+    const scan = vi.fn(() => ['claude-x-1']);
+    const t = mk({ fs: { readSync: (fd, buf) => { buf.write('#!/bin/bash\n'); return 12; } }, deps: { scanModelIds: scan } });
+    await resolveModelCatalog({ force: true, deps: t.deps });
+    expect(scan).not.toHaveBeenCalled();
+  });
+});
+
+describe('null CLI version key', () => {
+  it('neither serves a cache as fresh nor writes one', async () => {
+    const t = mk({ files: { [CACHE]: cacheEntry({ claudeVersion: null }) }, deps: { probeClaudeVersion: async () => null } });
+    const c = await resolveModelCatalog({ deps: t.deps });
+    expect(t.runClaudeP).toHaveBeenCalled();
+    expect(c.claudeVersion).toBeNull();
+    expect(t.writeJson).not.toHaveBeenCalled();
+  });
+  it('a null-version cache entry is never a fresh hit for a real version', async () => {
+    const t = mk({ files: { [CACHE]: cacheEntry({ claudeVersion: null }) } });
+    await resolveModelCatalog({ deps: t.deps });
+    expect(t.runClaudeP).toHaveBeenCalled();
+  });
+});
+
+describe('effort auto is never a flag value', () => {
+  it('drops `auto` from live and cached effort levels', async () => {
+    const t = mk({ files: { [CACHE]: cacheEntry({ effortLevels: ['low', 'auto'], probedAt: new Date(NOW - 48 * 3600e3).toISOString() }) }, deps: { runClaudeP: vi.fn(async () => ({ ok: false })) } });
+    const c = await resolveModelCatalog({ deps: t.deps });
+    expect(c.effortLevels).toEqual(['low']);
+  });
+  it('effortArgs and resolveEpicEffort never emit --effort auto', () => {
+    const { effortArgs } = require('../agentEffortResolve.cjs');
+    expect(effortArgs('auto')).toEqual([]);
+    expect(effortArgs('AUTO')).toEqual([]);
+    expect(effortArgs('inherit')).toEqual([]);
+    expect(effortArgs('high')).toEqual(['--effort', 'high']);
   });
 });

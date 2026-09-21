@@ -30,6 +30,9 @@
 
 const { findAgentTypeByClaudeSessionId, readOverlayAwarePersona } = require('./agentModelResolve.cjs');
 
+// `auto` is a `/effort` RESET verb, not a `--effort` value; it must never reach argv.
+const NON_FLAG_EFFORT = new Set(['inherit', 'auto']);
+
 const NO_EFFORT = Object.freeze({ effort: null, source: null });
 
 /**
@@ -47,7 +50,7 @@ function resolveEpicEffort({ cwd, claudeSessionId, agentType, deps = {} } = {}) 
     const persona = readOverlayAwarePersona(type, { ...deps, cwd });
     if (!persona) return { ...NO_EFFORT };
     const raw = typeof persona.fm.effort === 'string' ? persona.fm.effort.trim() : '';
-    if (!raw || raw === 'inherit') return { effort: null, source: 'inherit' };
+    if (!raw || NON_FLAG_EFFORT.has(raw.toLowerCase())) return { effort: null, source: 'inherit' };
     return { effort: raw, source: persona.fromOverlay ? 'persona-overlay' : 'persona' };
   } catch {
     return { ...NO_EFFORT };
@@ -56,7 +59,7 @@ function resolveEpicEffort({ cwd, claudeSessionId, agentType, deps = {} } = {}) 
 
 /** argv fragment for a resolved effort: `['--effort', level]` or `[]`. One place decides the "no flag" rule. */
 function effortArgs(effort) {
-  return typeof effort === 'string' && effort && effort !== 'inherit' ? ['--effort', effort] : [];
+  return typeof effort === 'string' && effort && !NON_FLAG_EFFORT.has(effort.toLowerCase()) ? ['--effort', effort] : [];
 }
 
 module.exports = { resolveEpicEffort, effortArgs };

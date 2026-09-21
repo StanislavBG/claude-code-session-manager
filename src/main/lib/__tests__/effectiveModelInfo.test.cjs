@@ -18,7 +18,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { encodeCwd } = require('../encodeCwd.cjs');
-const { resolveEffectiveModelInfo, isConcreteModelId, computeEffortReachable } = require('../effectiveModelInfo.cjs');
+const { resolveEffectiveModelInfo, isConcreteModelId, computeEffortEnvReachable } = require('../effectiveModelInfo.cjs');
 // config.cjs's `allowedRoots` is a module-level singleton seeded from
 // os.homedir() at FIRST require — since this test's HOME changes every test
 // (fresh mkdtemp), a persona lookup (getPersonaBody -> validatePath) would
@@ -233,12 +233,12 @@ test('isConcreteModelId treats known CLI aliases as non-concrete and everything 
   expect(isConcreteModelId('claude-opus-5')).toBe(true);
 });
 
-test('effortReachable is always false for an app-launched session — cleanChildEnv strips CLAUDE_EFFORT and CLAUDE_CODE_* before a child ever sees them', () => {
-  expect(computeEffortReachable({})).toBe(false);
+test('effortEnvReachable is always false for an app-launched session — cleanChildEnv strips CLAUDE_EFFORT and CLAUDE_CODE_* before a child ever sees them', () => {
+  expect(computeEffortEnvReachable({})).toBe(false);
 });
 
-test('resolveEffectiveModelInfo surfaces effortReachable alongside the model fields', async () => {
+test('resolveEffectiveModelInfo surfaces effortEnvReachable alongside the model fields', async () => {
   writeGlobalPersona('any', ['model: sonnet']);
   const info = await resolveEffectiveModelInfo({ cwd, agentType: 'any' });
-  expect(info.effortReachable).toBe(false);
+  expect(info.effortEnvReachable).toBe(false);
 });

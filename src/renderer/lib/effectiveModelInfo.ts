@@ -48,7 +48,7 @@ export interface MainModelHalf {
   modelSource: ModelSource
   resolvedModelId: string | null
   resolvedFrom: ResolvedFrom
-  effortReachable: boolean
+  effortEnvReachable: boolean
   /** Persona `effort:` level (null = persona sets none / inherit / dangling). */
   personaEffort: string | null
   personaEffortSource: 'persona' | 'persona-overlay' | 'inherit' | null

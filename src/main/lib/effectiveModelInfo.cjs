@@ -63,6 +63,8 @@ function isConcreteModelId(modelAlias) {
 }
 
 /**
+ * ENV-VAR question only (`effortEnvReachable`): persona effort now travels on argv as `--effort`,
+ * which cleanChildEnv cannot strip — so this says nothing about whether effort reaches the CLI.
  * True when this app's spawn path (cleanEnv.cjs's cleanChildEnv) would strip
  * an effort env var before a child ever saw it — i.e. whether the settings
  * schema's env-var effort configuration path is actually reachable for an
@@ -70,7 +72,7 @@ function isConcreteModelId(modelAlias) {
  * hardcoding a boolean, so this self-corrects if that deletion list ever
  * changes instead of silently drifting stale.
  */
-function computeEffortReachable(deps) {
+function computeEffortEnvReachable(deps) {
   try {
     const { cleanChildEnv } = deps.cleanEnv || require('./cleanEnv.cjs');
     const probe = cleanChildEnv({ CLAUDE_EFFORT: 'high', CLAUDE_CODE_EFFORT_LEVEL: 'high' });
@@ -273,7 +275,7 @@ function findLatestTranscriptModel(cwd, agentType, deps) {
 
 /**
  * resolveEffectiveModelInfo({ cwd, agentType, deps? }) →
- *   { agentType, modelAlias, modelSource, resolvedModelId, resolvedFrom, effortReachable,
+ *   { agentType, modelAlias, modelSource, resolvedModelId, resolvedFrom, effortEnvReachable,
  *     personaEffort, personaEffortSource }
  *
  * Never throws. `cwd` is normalized through the same worktree/ops-internal
@@ -281,14 +283,14 @@ function findLatestTranscriptModel(cwd, agentType, deps) {
  * resolves to its main project tree before anything is looked up.
  */
 async function resolveEffectiveModelInfo({ cwd, agentType, deps = {} } = {}) {
-  const effortReachable = computeEffortReachable(deps);
+  const effortEnvReachable = computeEffortEnvReachable(deps);
   const miss = {
     agentType: agentType || null,
     modelAlias: null,
     modelSource: 'fallback',
     resolvedModelId: null,
     resolvedFrom: null,
-    effortReachable,
+    effortEnvReachable,
     personaEffort: null,
     personaEffortSource: null,
   };
@@ -302,7 +304,7 @@ async function resolveEffectiveModelInfo({ cwd, agentType, deps = {} } = {}) {
     const { modelAlias, modelSource } = await resolvePersonaModelAlias(normalizedCwd, agentType, deps);
     const { effort: personaEffort, source: personaEffortSource } = (deps.agentEffortResolve || require('./agentEffortResolve.cjs'))
       .resolveEpicEffort({ cwd: normalizedCwd, agentType, deps });
-    const result = { agentType, modelAlias, modelSource, resolvedModelId: null, resolvedFrom: null, effortReachable, personaEffort, personaEffortSource };
+    const result = { agentType, modelAlias, modelSource, resolvedModelId: null, resolvedFrom: null, effortEnvReachable, personaEffort, personaEffortSource };
 
     if (isConcreteModelId(modelAlias)) {
       // Already a concrete pinned id — echo it back, fabricate no evidence.
@@ -337,6 +339,6 @@ async function resolveEffectiveModelInfo({ cwd, agentType, deps = {} } = {}) {
 module.exports = {
   resolveEffectiveModelInfo,
   isConcreteModelId,
-  computeEffortReachable,
+  computeEffortEnvReachable,
   KNOWN_MODEL_ALIASES,
 };

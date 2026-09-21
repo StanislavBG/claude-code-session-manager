@@ -48,7 +48,7 @@ function installWindowApiMock(opts: { mergeToMain?: ReturnType<typeof vi.fn> } =
         modelSource: 'fallback',
         resolvedModelId: null,
         resolvedFrom: null,
-        effortReachable: false,
+        effortEnvReachable: false,
         personaEffort: null,
         personaEffortSource: null,
       }),

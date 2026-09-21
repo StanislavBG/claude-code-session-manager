@@ -24,7 +24,7 @@ const resolveModelInfoSpy = vi.fn(async (): Promise<MainModelHalf> => ({
   modelSource: 'fallback',
   resolvedModelId: null,
   resolvedFrom: null,
-  effortReachable: false,
+  effortEnvReachable: false,
   personaEffort: null,
   personaEffortSource: null,
 }))
@@ -79,7 +79,7 @@ beforeEach(() => {
     modelSource: 'fallback',
     resolvedModelId: null,
     resolvedFrom: null,
-    effortReachable: false,
+    effortEnvReachable: false,
     personaEffort: null,
     personaEffortSource: null,
   })

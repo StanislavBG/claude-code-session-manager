@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest'
-import { DEFAULT_PRESETS, renderCommand, modelFlag } from '../presets'
+import { DEFAULT_PRESETS, renderCommand, modelFlag, effortFlag } from '../presets'
+
+describe('effortFlag', () => {
+  it('never emits --effort auto (a /effort reset verb), inherit or null', () => {
+    expect(effortFlag('auto')).toBe('')
+    expect(effortFlag('inherit')).toBe('')
+    expect(effortFlag(null)).toBe('')
+    expect(effortFlag('high')).toBe(" --effort 'high'")
+  })
+})
 
 describe('modelFlag', () => {
   it('renders a shell-quoted --model flag for an explicit model', () => {

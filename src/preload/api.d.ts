@@ -235,7 +235,7 @@ export interface AgentPersona {
   description: string | null;
   tools: string[];
   model: string | null;
-  /** Per-Epic reasoning effort (`effort:` frontmatter; a `models.catalog` effort level). Null = inherit. Stored + displayed only for now — not yet passed to the claude spawn. */
+  /** Per-Epic reasoning effort (`effort:` frontmatter; a `models.catalog` effort level). Null = inherit. Passed to the claude spawn as `--effort` (never `auto`). */
   effort: string | null;
   color: string | null;
   /** Epic intent tags (tagLibrary.ts's TAG_LIBRARY) this persona is associated with. */
@@ -1658,7 +1658,8 @@ export interface SessionManagerAPI {
       modelSource: 'persona' | 'persona-overlay' | 'inherit' | 'fallback';
       resolvedModelId: string | null;
       resolvedFrom: 'scheduler-run' | 'transcript' | null;
-      effortReachable: boolean;
+      /** Env-var path only: would cleanChildEnv strip CLAUDE_EFFORT. Persona effort travels on argv regardless. */
+      effortEnvReachable: boolean;
       /** Persona `effort:` level (null = pass no --effort) and where it came from. */
       personaEffort: string | null;
       personaEffortSource: 'persona' | 'persona-overlay' | 'inherit' | null;

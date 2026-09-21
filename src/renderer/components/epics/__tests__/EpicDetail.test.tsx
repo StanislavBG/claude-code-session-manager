@@ -32,7 +32,7 @@ function installWindowApiMock(opts: {
       modelSource: 'fallback',
       resolvedModelId: null,
       resolvedFrom: null,
-      effortReachable: false,
+      effortEnvReachable: false,
       personaEffort: null,
       personaEffortSource: null,
       ...opts.runtimeInfo,

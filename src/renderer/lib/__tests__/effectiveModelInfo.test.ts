@@ -24,7 +24,7 @@ const BASE_MAIN_HALF: MainModelHalf = {
   modelSource: 'persona',
   resolvedModelId: null,
   resolvedFrom: null,
-  effortReachable: false,
+  effortEnvReachable: false,
   personaEffort: null,
   personaEffortSource: null,
 }
@@ -86,7 +86,7 @@ describe('composeEffectiveModelInfo', () => {
       modelSource: 'inherit',
       resolvedModelId: 'claude-opus-5',
       resolvedFrom: 'scheduler-run',
-      effortReachable: false,
+      effortEnvReachable: false,
       personaEffort: null,
       personaEffortSource: null,
     }

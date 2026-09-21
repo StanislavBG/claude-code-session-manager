@@ -67,6 +67,16 @@ test('inherit and absent resolve to null effort', async () => {
   expect(resolveEpicEffort({ cwd, agentType: 'none', deps })).toEqual({ effort: null, source: 'inherit' });
 });
 
+test('a persona effort of `auto` (a /effort reset verb) resolves to no flag', async () => {
+  const cwd = await mkTmpDir('sm-effort-cwd-');
+  const globalDir = await mkTmpDir('sm-effort-agents-');
+  writePersona(globalDir, 'au', ['effort: auto']);
+  const deps = { globalDir, validatePath: noopValidatePath };
+  const r = resolveEpicEffort({ cwd, agentType: 'au', deps });
+  expect(r.effort).toBeNull();
+  expect(effortArgs(r.effort)).toEqual([]);
+});
+
 test('dangling agentType / unknown Epic / empty opts resolve to null without throwing', async () => {
   const cwd = await mkTmpDir('sm-effort-cwd-');
   const globalDir = await mkTmpDir('sm-effort-agents-');

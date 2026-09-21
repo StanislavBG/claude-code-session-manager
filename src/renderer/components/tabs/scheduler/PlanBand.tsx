@@ -211,6 +211,9 @@ export function PlanBand({ plan, mode = 'graph', now, hidden, indexBySlug, headC
         <span className="font-mono text-[11.5px] text-fg-faint truncate min-w-0" data-testid="plan-meta">
           {project} · {plan.prdCount} PRD{plan.prdCount === 1 ? '' : 's'} · {plan.stageCount} stage{plan.stageCount === 1 ? '' : 's'}
         </span>
+        <span className="font-mono text-[11.5px] text-fg-dim shrink-0" data-testid="plan-step-count">
+          {plan.prdCount} step{plan.prdCount === 1 ? '' : 's'} · {plan.doneCount} done
+        </span>
         <InfoDot title={`${plan.doneCount} done · ${plan.runningCount} running · ${plan.heldCount} held · ${plan.blockedCount} blocked`} />
         <span className="ml-auto font-mono text-[11.5px] text-fg-dim shrink-0" data-testid="plan-progress-label">
           {plan.doneCount}/{plan.prdCount}{remaining}

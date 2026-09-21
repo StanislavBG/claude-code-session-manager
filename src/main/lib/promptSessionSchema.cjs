@@ -72,6 +72,9 @@ const PromptSessionSchema = z.object({
   openingPrompt: z.string().nullable().optional(),
   source: EpicSourceSchema.optional(),
   agentType: z.string().optional(),
+  // Per-Epic runtime overrides chosen on the New Session card; absent = the persona's own value.
+  model: z.string().optional(),
+  effort: z.string().optional(),
   // Absent on Epics minted before this field existed — those fall back to
   // rendering the flat `openingPrompt` as a single block (see
   // ChatTranscriptTurn.tsx's EpicIntakeCard).

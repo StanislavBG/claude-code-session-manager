@@ -293,3 +293,19 @@ test('resolvePrdPersonaForSpawn caps the persona body at 6000 characters with a 
   expect(result.systemPrompt.toLowerCase()).toContain('truncat');
   expect(result.systemPrompt).toContain('/home/user/.claude/agents/dev-lead.md');
 });
+
+// Epic-level override (New Session card) > persona frontmatter > fallback.
+test('an Epic-level model override beats the persona model; an Epic without the field resolves unchanged', async () => {
+  const cwd = await mkTmpDir('sm-model-ovr-cwd-');
+  const globalDir = await mkTmpDir('sm-model-ovr-agents-');
+  writeIndex(cwd, {
+    withOverride: { id: 'withOverride', claudeSessionId: 's-ovr', agentType: 'p', model: 'claude-opus-5' },
+    legacy: { id: 'legacy', claudeSessionId: 's-old', agentType: 'p' },
+    inheritOverride: { id: 'inheritOverride', claudeSessionId: 's-inh', agentType: 'p', model: 'inherit' },
+  });
+  writePersona(globalDir, 'p', ['model: haiku']);
+  const deps = { globalDir, validatePath: (p) => p };
+  expect(resolveEpicModel({ cwd, claudeSessionId: 's-ovr', deps })).toBe('claude-opus-5');
+  expect(resolveEpicModel({ cwd, claudeSessionId: 's-old', deps })).toBe('haiku');
+  expect(resolveEpicModel({ cwd, claudeSessionId: 's-inh', deps })).toBe('haiku');
+});

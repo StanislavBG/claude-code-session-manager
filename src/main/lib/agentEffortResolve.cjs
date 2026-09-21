@@ -7,6 +7,10 @@
  * agentLibrary.cjs's serializePersona; the key is literally `effort`).
  *
  * PRECEDENCE (explicit):
+ *   0. Epic-level `effort` (the New Session card's override, stored on the Epic
+ *      record; source 'epic') beats everything below. Only reachable on the
+ *      Chat/Terminal path (claudeSessionId) — a scheduled PRD has no Epic record
+ *      of its own to carry it. `inherit`/`auto` there means "no override".
  *   1. persona `effort:` — project overlay (`<cwd>/.claude/agents/<name>.md`)
  *      beats the global `~/.claude/agents/<name>.md` (same path resolver and
  *      same reader as the model path: agentModelResolve.cjs's
@@ -28,7 +32,7 @@
  * Plain sync Node module, never throws (same contract as resolveEpicModel).
  */
 
-const { findAgentTypeByClaudeSessionId, readOverlayAwarePersona } = require('./agentModelResolve.cjs');
+const { findEpicByClaudeSessionId, epicOverrideValue, readOverlayAwarePersona } = require('./agentModelResolve.cjs');
 
 // `auto` is a `/effort` RESET verb, not a `--effort` value; it must never reach argv.
 const NON_FLAG_EFFORT = new Set(['inherit', 'auto']);
@@ -39,13 +43,16 @@ const NO_EFFORT = Object.freeze({ effort: null, source: null });
  * @param {{ cwd: string, claudeSessionId?: string, agentType?: string|null, deps?: object }} opts
  *   `agentType` wins when given (scheduler PRD path); otherwise it is joined
  *   from the Epic's `claudeSessionId` (Chat/Terminal path).
- * @returns {{ effort: string|null, source: 'persona'|'persona-overlay'|'inherit'|null }}
+ * @returns {{ effort: string|null, source: 'epic'|'persona'|'persona-overlay'|'inherit'|null }}
  *   source null = no agentType/persona resolved; 'inherit' = persona present
  *   but sets no level.
  */
 function resolveEpicEffort({ cwd, claudeSessionId, agentType, deps = {} } = {}) {
   try {
-    const type = agentType || findAgentTypeByClaudeSessionId(cwd, claudeSessionId, deps);
+    const epic = claudeSessionId ? findEpicByClaudeSessionId(cwd, claudeSessionId, deps) : null;
+    const override = epicOverrideValue(epic, 'effort');
+    if (override && !NON_FLAG_EFFORT.has(override.toLowerCase())) return { effort: override, source: 'epic' };
+    const type = agentType || epic?.agentType || null;
     if (!type) return { ...NO_EFFORT };
     const persona = readOverlayAwarePersona(type, { ...deps, cwd });
     if (!persona) return { ...NO_EFFORT };

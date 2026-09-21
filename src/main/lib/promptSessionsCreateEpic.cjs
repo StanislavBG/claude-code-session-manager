@@ -41,12 +41,14 @@ const { validatePath } = require('../config.cjs');
  * IPC (config:read-json/write-json, lib/activeIndexMerge.cjs's own merge) is
  * already required to pass through.
  */
-async function createEpicViaIpc(cwd, { goalText, tag, agentType, source, openingPrompt, sections } = {}) {
+async function createEpicViaIpc(cwd, { goalText, tag, agentType, model, effort, source, openingPrompt, sections } = {}) {
   validatePath(cwd);
   const { epicId } = await ensureEpic(cwd, {
     goalText,
     tag,
     agentType,
+    model,
+    effort,
     source,
     openingPrompt,
     sections,
@@ -62,8 +64,8 @@ function registerPromptSessionsCreateEpicHandlers() {
   const { schemas: s, validated: v } = require('../ipcSchemas.cjs');
   ipcMain.handle(
     'promptSessions:create-epic',
-    v(s.promptSessionsCreateEpic, ({ cwd, goalText, tag, agentType, source, openingPrompt, sections }) =>
-      createEpicViaIpc(cwd, { goalText, tag, agentType, source, openingPrompt, sections })),
+    v(s.promptSessionsCreateEpic, ({ cwd, goalText, tag, agentType, model, effort, source, openingPrompt, sections }) =>
+      createEpicViaIpc(cwd, { goalText, tag, agentType, model, effort, source, openingPrompt, sections })),
   );
 }
 

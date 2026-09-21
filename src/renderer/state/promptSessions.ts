@@ -84,6 +84,11 @@ export interface PromptSession {
    *  persona's framing is folded into `openingPrompt` once, at creation, by
    *  composeEpicIntake (epicIntake.ts). */
   agentType?: string
+  /** Per-Epic model override chosen on the New Session card (an alias or concrete id). Absent = the
+   *  persona's own `model`. Written by main's ensureEpic(); resolveEpicModel ranks it above the persona. */
+  model?: string
+  /** Per-Epic effort override — twin of `model`; resolveEpicEffort ranks it above the persona's `effort:`. */
+  effort?: string
   /** Labeled slices of `openingPrompt`, in the same order composeEpicIntake
    *  (epicIntake.ts) concatenates them: actor, injection(s), input, mission,
    *  goal, reference(s). Lets the Epic's first turn render a structured AIM
@@ -272,6 +277,8 @@ interface PromptSessionsState {
      *  EpicQueue's scripted 'build' Epic). */
     openingPrompt?: string,
     sections?: EpicIntakeSection[],
+    /** New Session card's per-Epic runtime overrides — forwarded as IPC fields; main writes the record. */
+    runtime?: { model?: string; effort?: string },
   ) => Promise<PromptSession>
   /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
    *  approved session, or null when the id is unknown or not a proposal.
@@ -508,8 +515,12 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
   events: {},
   focusedEpicId: null,
   setFocusedEpicId: (promptSessionId) => set({ focusedEpicId: promptSessionId }),
-  createPromptSession: async (cwd, goalText, tag, source, agentType, openingPrompt, sections) => {
-    const result = await window.api.promptSessions.create({ cwd, goalText, tag, agentType, openingPrompt, sections })
+  createPromptSession: async (cwd, goalText, tag, source, agentType, openingPrompt, sections, runtime) => {
+    const result = await window.api.promptSessions.create({
+      cwd, goalText, tag, agentType, openingPrompt, sections,
+      ...(runtime?.model ? { model: runtime.model } : {}),
+      ...(runtime?.effort ? { effort: runtime.effort } : {}),
+    })
     // ensureEpic's response is the byte-identical record just written to
     // active-index.json (validated against promptSessionSchema.cjs main-side)
     // — safe to trust as PromptSession without re-checking shape here.

@@ -144,3 +144,16 @@ test('a cwd outside every allowed root is rejected before anything is minted', a
   const index = readActiveIndex(unregistered);
   expect(Object.keys(index.sessions)).toHaveLength(0);
 });
+
+test('model/effort overrides persist on the minted Epic; without them the record gains no such keys', async () => {
+  const cwd = await mkCwd();
+  const payload = schemas.promptSessionsCreateEpic.parse({ cwd, goalText: 'Override run', agentType: 'architect', model: 'claude-opus-5', effort: 'max' });
+  const withOverride = await createEpicViaIpc(cwd, payload);
+  expect(withOverride.session).toMatchObject({ model: 'claude-opus-5', effort: 'max' });
+  expect(readActiveIndex(cwd).sessions[withOverride.epicId]).toEqual(withOverride.session);
+  expect(PromptSessionSchema.safeParse(withOverride.session).success).toBe(true);
+
+  const plain = await createEpicViaIpc(cwd, schemas.promptSessionsCreateEpic.parse({ cwd, goalText: 'Plain run', agentType: 'architect' }));
+  expect('model' in plain.session).toBe(false);
+  expect('effort' in plain.session).toBe(false);
+});

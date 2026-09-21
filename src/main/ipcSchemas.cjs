@@ -198,6 +198,9 @@ const promptSessionsCreateEpic = z.object({
   goalText: z.string().min(1).max(20000),
   tag: EpicTagSchema.optional(),
   agentType: z.string().min(1).max(256).optional(),
+  // Per-Epic runtime overrides (New Session card) — absent = use the persona's own value.
+  model: z.string().min(1).max(256).optional(),
+  effort: z.string().min(1).max(64).optional(),
   source: EpicSourceSchema.optional(),
   // The full first-prompt body + its labeled sections (epicIntake.ts's
   // composeEpicIntake) — both optional, since not every mint caller (e.g. a

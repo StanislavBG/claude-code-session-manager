@@ -631,7 +631,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // formatter. `null` while loading or on IPC failure; the chip simply shows
   // no model detail in that case rather than a fabricated one.
   const agentType = promptSession.agentType
-  const runtimeInfo = useEffectiveModelInfo(agentType ? cwd : null, agentType ?? null)
+  const runtimeInfo = useEffectiveModelInfo(agentType ? cwd : null, agentType ?? null, { model: promptSession.model, effort: promptSession.effort })
 
   // Tab state resets to Discussion on every Epic change.
   useEffect(() => {

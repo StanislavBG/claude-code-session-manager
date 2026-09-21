@@ -964,3 +964,71 @@ describe('NewEpicCard', () => {
     })
   })
 })
+
+describe('NewEpicCard per-Epic model / effort override', () => {
+  const persona = (name: string, model: string | null, effort: string | null): AgentPersona => ({
+    name, description: `${name}.`, tools: [], model, effort, color: null, tags: ['feature'], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [],
+  })
+  const click = (b: Element) => act(() => { b.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+  const pick = (el: HTMLElement, group: 'model' | 'effort', label: string) => {
+    const btn = Array.from(el.querySelectorAll(`[data-testid="new-epic-${group}-override"] button`)).find((b) => b.textContent === label)
+    expect(btn, `${group} option ${label}`).toBeTruthy()
+    click(btn!)
+  }
+  async function mountWithGoal() {
+    listPersonasSpy.mockResolvedValue([persona('architect', 'opus', 'high'), persona('builder', 'sonnet', null)])
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    act(() => setNativeValue(el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement, 'Do the thing'))
+    return el
+  }
+  const submit = async (el: HTMLElement) => {
+    click(el.querySelector('[data-testid="new-epic-create"]')!)
+    await act(async () => {})
+  }
+  const createPayload = () => (window.api.promptSessions.create as ReturnType<typeof vi.fn>).mock.calls[0][0]
+
+  it('a default (no override) creation carries no model/effort in the IPC payload', async () => {
+    const el = await mountWithGoal()
+    await submit(el)
+    const payload = createPayload()
+    expect('model' in payload).toBe(false)
+    expect('effort' in payload).toBe(false)
+    expect(el.querySelector('[data-testid="new-epic-model-override"]')!.textContent).toContain('agent: opus')
+  })
+
+  it('puts a chosen model and effort into the create payload, using the static lists when the catalog is null', async () => {
+    const el = await mountWithGoal()
+    pick(el, 'model', 'haiku')
+    pick(el, 'effort', 'max')
+    await submit(el)
+    expect(createPayload()).toMatchObject({ model: 'haiku', effort: 'max' })
+  })
+
+  it('re-seeds both controls from the new persona when the agent changes', async () => {
+    const el = await mountWithGoal()
+    pick(el, 'model', 'haiku')
+    pick(el, 'effort', 'max')
+    click(el.querySelector('[data-testid="new-epic-agent-builder"]')!)
+    await submit(el)
+    const payload = createPayload()
+    expect(payload.agentType).toBe('builder')
+    expect('model' in payload).toBe(false)
+    expect('effort' in payload).toBe(false)
+  })
+
+  it('offers the live catalog aliases and effort levels when the catalog resolves', async () => {
+    ;(window.api as unknown as { models: unknown }).models = {
+      catalog: vi.fn().mockResolvedValue({
+        aliases: ['opus', 'sonnet'], models: ['claude-opus-5', 'claude-opus-4-7'], effortLevels: ['low', 'ultra'], settingsEffortLevels: ['low'], availableModels: null,
+      }),
+    }
+    const el = await mountWithGoal()
+    await act(async () => {})
+    pick(el, 'model', 'opus')
+    pick(el, 'model', 'claude-opus-5')
+    pick(el, 'effort', 'ultra')
+    await submit(el)
+    expect(createPayload()).toMatchObject({ model: 'claude-opus-5', effort: 'ultra' })
+  })
+})

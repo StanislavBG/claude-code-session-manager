@@ -208,7 +208,7 @@ function withPathLock(lockPath, task) {
 }
 
 /**
- * ensureEpic(cwd, { epicId?, goalText, tag?, status?, openingPrompt?, source?, agentType?, mintAuthority? }) → Promise<{ epicId, prdDir, created }>
+ * ensureEpic(cwd, { epicId?, goalText, tag?, status?, openingPrompt?, source?, agentType?, model?, effort?, mintAuthority? }) → Promise<{ epicId, prdDir, created }>
  *
  * Two behaviors, and only two:
  *  - JOIN (the default, for every automated caller): `epicId` names an Epic
@@ -227,7 +227,7 @@ function withPathLock(lockPath, task) {
  * The Epic's id doubles as its directory name under scheduler/epics/, so the
  * PromptSession ↔ on-disk Epic mapping is 1:1 with no lookup table.
  */
-function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, sections = null, source = null, agentType = null, mintAuthority = null } = {}, deps = {}) {
+function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'proposed', openingPrompt = null, sections = null, source = null, agentType = null, model = null, effort = null, mintAuthority = null } = {}, deps = {}) {
   if (!cwd || typeof cwd !== 'string') throw new Error('ensureEpic: cwd is required');
   // A relative cwd (e.g. a caller passing '.') would otherwise get stored
   // verbatim on the minted Epic's `cwd` field — the renderer's EpicsWorkspace
@@ -337,6 +337,9 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
       // ensureEpic IPC path (state/promptSessions.ts). Never affects which
       // claude CLI spawns.
       ...(agentType ? { agentType } : {}),
+      // Per-Epic runtime overrides — written only when set, so an Epic minted without one keeps its on-disk shape.
+      ...(typeof model === 'string' && model ? { model } : {}),
+      ...(typeof effort === 'string' && effort ? { effort } : {}),
     };
 
     // Validate the constructed record against the canonical PromptSession

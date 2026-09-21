@@ -42,9 +42,9 @@ import { ALL_PROJECTS } from '../../lib/projectActions'
  */
 
 // Static fallback only — rendered when the live catalog is unavailable (ModelPicker).
-const MODELS = ['inherit', 'haiku', 'sonnet', 'opus', 'fable'] as const
+export const MODELS = ['inherit', 'haiku', 'sonnet', 'opus', 'fable'] as const
 // Static fallback only — rendered when the live catalog is unavailable (EffortPicker).
-const EFFORTS = ['inherit', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+export const EFFORTS = ['inherit', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 const TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'WebFetch', 'WebSearch', 'Task']
 const COLORS = ['', 'red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink']
 const COLOR_SWATCH: Record<string, string> = {

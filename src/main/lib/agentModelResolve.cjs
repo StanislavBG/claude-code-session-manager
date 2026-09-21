@@ -17,6 +17,11 @@
  * views literally call the same function instead of two functions that are
  * merely supposed to agree.
  *
+ * PRECEDENCE (explicit): Epic-level `model` (the New Session card's override,
+ * stored on the Epic record) > persona frontmatter `model` > `fallbackModel`.
+ * An Epic with no `model` key (every Epic minted before the override existed)
+ * resolves exactly as it always did.
+ *
  * Plain Node module (sync fs) — no Electron deps, mirrors epicMint.cjs's
  * readActiveIndex so this can be called from chatRunner.cjs's synchronous
  * executeRun() without restructuring it into an async flow.
@@ -68,14 +73,24 @@ function logDanglingPersonaOnce(cwd, agentType) {
  * resolveSourcePromptIdFromClaudeSession uses (Epic:claude-session is 1:1).
  * Returns null if no matching Epic is found or it has no agentType set.
  */
-function findAgentTypeByClaudeSessionId(cwd, claudeSessionId, deps = {}) {
+function findEpicByClaudeSessionId(cwd, claudeSessionId, deps = {}) {
   if (!cwd || !claudeSessionId) return null;
   const load = deps.readActiveIndex || readActiveIndex;
   const { sessions } = load(cwd);
   for (const session of Object.values(sessions)) {
-    if (session && session.claudeSessionId === claudeSessionId) return session.agentType || null;
+    if (session && session.claudeSessionId === claudeSessionId) return session;
   }
   return null;
+}
+
+function findAgentTypeByClaudeSessionId(cwd, claudeSessionId, deps = {}) {
+  return findEpicByClaudeSessionId(cwd, claudeSessionId, deps)?.agentType || null;
+}
+
+/** A non-empty trimmed string from an Epic's optional `model`/`effort` override field, else null. */
+function epicOverrideValue(epic, field) {
+  const raw = epic && typeof epic[field] === 'string' ? epic[field].trim() : '';
+  return raw || null;
 }
 
 /**
@@ -190,7 +205,10 @@ function isProjectOverlayPersonaPath(cwd, agentType, personaPath, deps = {}) {
  */
 function resolveEpicModel({ cwd, claudeSessionId, fallbackModel = FALLBACK_MODEL, deps = {} } = {}) {
   try {
-    const agentType = findAgentTypeByClaudeSessionId(cwd, claudeSessionId, deps);
+    const epic = findEpicByClaudeSessionId(cwd, claudeSessionId, deps);
+    const override = epicOverrideValue(epic, 'model');
+    if (override && override !== 'inherit') return override;
+    const agentType = epic?.agentType || null;
     if (!agentType) return fallbackModel;
     const model = readOverlayAwarePersonaModel(agentType, { ...deps, cwd });
     if (!model || model === 'inherit') return fallbackModel;
@@ -261,6 +279,8 @@ module.exports = {
   FALLBACK_MODEL,
   resolveEpicModel,
   findAgentTypeByClaudeSessionId,
+  findEpicByClaudeSessionId,
+  epicOverrideValue,
   readOverlayAwarePersonaModel,
   readOverlayAwarePersona,
   isProjectOverlayPersonaPath,

@@ -2095,6 +2095,9 @@ export interface PromptSessionsCreateEpicPayload {
   goalText: string;
   tag?: 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'bilko-host-publisher';
   agentType?: string;
+  /** Per-Epic model/effort overrides (New Session card); omitted = the persona's own. */
+  model?: string;
+  effort?: string;
   source?: {
     producer: 'new-epic-ui' | 'scheduler-dispatch';
     prdSlug?: string;

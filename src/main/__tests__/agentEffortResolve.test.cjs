@@ -99,3 +99,19 @@ test('effortArgs emits the pair only for a real level', () => {
   expect(effortArgs('high')).toEqual(['--effort', 'high']);
   for (const v of [null, undefined, '', 'inherit']) expect(effortArgs(v)).toEqual([]);
 });
+
+// Epic-level override (New Session card) > persona frontmatter > no flag.
+test('an Epic-level effort override beats the persona effort; an Epic without the field resolves unchanged', async () => {
+  const cwd = await mkTmpDir('sm-effort-ovr-cwd-');
+  const globalDir = await mkTmpDir('sm-effort-ovr-agents-');
+  writeIndex(cwd, {
+    withOverride: { id: 'withOverride', claudeSessionId: 's-ovr', agentType: 'p', effort: 'max' },
+    legacy: { id: 'legacy', claudeSessionId: 's-old', agentType: 'p' },
+    noPersona: { id: 'noPersona', claudeSessionId: 's-np', effort: 'low' },
+  });
+  writePersona(globalDir, 'p', ['effort: low']);
+  const deps = { globalDir, validatePath: noopValidatePath };
+  expect(resolveEpicEffort({ cwd, claudeSessionId: 's-ovr', deps })).toEqual({ effort: 'max', source: 'epic' });
+  expect(resolveEpicEffort({ cwd, claudeSessionId: 's-old', deps })).toEqual({ effort: 'low', source: 'persona' });
+  expect(resolveEpicEffort({ cwd, claudeSessionId: 's-np', deps })).toEqual({ effort: 'low', source: 'epic' });
+});

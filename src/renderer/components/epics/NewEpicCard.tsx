@@ -6,6 +6,7 @@ import { compactPath } from '../../lib/compactPath'
 import { resolveEpicProject } from '../../lib/epicProjectScope'
 import { AttachButton, AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
 import { composeEpicIntake } from '../../lib/epicIntake'
+import { EpicRuntimeOverride } from './EpicRuntimeOverride'
 import { useEffectiveModelInfo } from '../../lib/effectiveModelInfo'
 import { EffectiveRuntimeLine } from './EffectiveRuntimeLine'
 import { useChat } from '../../state/chat'
@@ -221,6 +222,13 @@ export function NewEpicCard({
   const [creating, setCreating] = useState(false)
   const [dragOver, setDragOver] = useState(false)
   const [advanced, setAdvanced] = useState(false)
+  // Per-Epic runtime overrides ('' = use the agent's own). Re-seeded to '' whenever the agent changes.
+  const [modelOverride, setModelOverride] = useState('')
+  const [effortOverride, setEffortOverride] = useState('')
+  useEffect(() => {
+    setModelOverride('')
+    setEffortOverride('')
+  }, [agentName])
   const [home, setHome] = useState<string | null>(null)
   const [board, setBoard] = useState<GroundingGroup[] | null>(null)
   // "Can this project actually delegate?" (delegation-readiness-probe) —
@@ -315,7 +323,7 @@ export function NewEpicCard({
   // line below the mission — null while loading or on IPC failure, in which
   // case the line below falls back to the pre-existing bare-alias text
   // rather than blanking or blocking this dialog from opening.
-  const runtimeInfo = useEffectiveModelInfo(effectiveCwd || null, selectedAgent?.name ?? null)
+  const runtimeInfo = useEffectiveModelInfo(effectiveCwd || null, selectedAgent?.name ?? null, { model: modelOverride, effort: effortOverride })
 
   useEffect(() => {
     setReadiness(null)
@@ -402,6 +410,8 @@ export function NewEpicCard({
     agentTouchedRef.current = false
     setAgentName((agents?.find((a) => a.name === 'architect') ?? agents?.[0])?.name ?? '')
     setAdvanced(false)
+    setModelOverride('')
+    setEffortOverride('')
     setBoard(null)
     setInjectionOverrides({})
     att.clear()
@@ -469,9 +479,10 @@ export function NewEpicCard({
     // openingPrompt/sections are persisted on the Epic (not just sent into
     // chat below) so its first turn can render as a structured AIM briefing
     // card rather than only a flat prose bubble — see EpicIntakeCard.
+    const runtime = { model: modelOverride || undefined, effort: effortOverride || undefined }
     const session = selectedAgent
-      ? await createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard', selectedAgent.name, openingPrompt, sections)
-      : await createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard', undefined, openingPrompt, sections)
+      ? await createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard', selectedAgent.name, openingPrompt, sections, runtime)
+      : await createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard', undefined, openingPrompt, sections, runtime)
     approveProposed(session.id, 'NewEpicCard')
     // Send the objective straight into the Epic's session, so it opens already
     // waiting on the agent — the user has just typed the goal, there is
@@ -678,6 +689,15 @@ export function NewEpicCard({
                     )}
                     {selectedAgent ? ` · ${selectedAgent.tools.join(' ') || 'no tool restriction'}` : ''}
                   </div>
+                  <EpicRuntimeOverride
+                    cwd={effectiveCwd || null}
+                    personaModel={selectedAgent?.model ?? null}
+                    personaEffort={selectedAgent?.effort ?? null}
+                    model={modelOverride}
+                    effort={effortOverride}
+                    onModel={setModelOverride}
+                    onEffort={setEffortOverride}
+                  />
                 </div>
               </div>
             </div>

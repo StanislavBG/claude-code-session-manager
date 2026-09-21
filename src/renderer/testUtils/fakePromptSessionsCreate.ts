@@ -25,6 +25,8 @@ export function fakePromptSessionsCreate() {
       goalText,
       tag,
       agentType,
+      model,
+      effort,
       openingPrompt,
       sections,
     }: {
@@ -32,6 +34,8 @@ export function fakePromptSessionsCreate() {
       goalText: string
       tag?: PromptSession['tag']
       agentType?: string
+      model?: string
+      effort?: string
       openingPrompt?: string
       sections?: EpicIntakeSection[]
     }) => {
@@ -47,6 +51,8 @@ export function fakePromptSessionsCreate() {
         completedAt: null,
         ...(tag ? { tag } : {}),
         ...(agentType ? { agentType } : {}),
+        ...(model ? { model } : {}),
+        ...(effort ? { effort } : {}),
         ...(openingPrompt ? { openingPrompt } : {}),
         ...(sections && sections.length ? { sections } : {}),
       }

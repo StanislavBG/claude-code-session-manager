@@ -25,6 +25,7 @@ function info(overrides: Partial<EffectiveModelInfo>): EffectiveModelInfo {
     personaEffortSource: null,
     effortLevel: null,
     effortSource: null,
+    epicModel: null,
     ...overrides,
   }
 }
@@ -124,5 +125,10 @@ describe('EffectiveRuntimeLine', () => {
     )
     expect(el.textContent).toContain('model default')
     expect(el.textContent).not.toContain('null')
+  })
+
+  it('reports an Epic-level override with its own "this session" provenance', () => {
+    const el = mount(info({ epicModel: 'claude-opus-5', effortLevel: 'max', effortSource: 'epic' }))
+    expect(el.textContent).toBe('opus → claude-opus-5 (this session) · effort max (this session)')
   })
 })

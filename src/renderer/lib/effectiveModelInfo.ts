@@ -21,16 +21,20 @@ import type { Scope } from './scopes'
  *  never drift into different wording for the same provenance fact. */
 export function formatEffortSegment(effortLevel: string | null, effortSource: EffortSource | null): string {
   if (!effortLevel || !effortSource) return 'effort — (model default)'
+  if (effortSource === 'epic') return `effort ${effortLevel} (this session)`
   if (effortSource === 'persona') return `effort ${effortLevel} (persona)`
   if (effortSource === 'persona-overlay') return `effort ${effortLevel} (project persona)`
   return `effort ${effortLevel} (${effortSource} settings.json)`
 }
 
 /** Where a displayed effort came from: the agent persona (launch passes `--effort`) or a settings scope (CLI default). */
-export type EffortSource = Scope | 'persona' | 'persona-overlay'
+export type EffortSource = Scope | 'epic' | 'persona' | 'persona-overlay'
 
 /** One-line explanation of which effort source won — feeds EffectiveRuntimeLine's `title`. */
 export function effortProvenanceNote(effortSource: EffortSource | null): string {
+  if (effortSource === 'epic') {
+    return 'Effort was chosen for this session only and is passed to the CLI as --effort, overriding the agent persona and settings.json.'
+  }
   if (effortSource === 'persona' || effortSource === 'persona-overlay') {
     return 'Effort comes from the agent persona and is passed to the CLI as --effort, overriding settings.json.'
   }
@@ -58,6 +62,14 @@ export interface MainModelHalf {
 export interface EffectiveModelInfo extends MainModelHalf {
   effortLevel: string | null
   effortSource: EffortSource | null
+  /** Epic-level model override (this session only) — wins over the persona's `modelAlias`. */
+  epicModel: string | null
+}
+
+/** The per-Epic runtime overrides (PromptSession.model / .effort); absent/empty = use the agent's own. */
+export interface EpicRuntimeOverrides {
+  model?: string | null
+  effort?: string | null
 }
 
 /**
@@ -65,14 +77,18 @@ export interface EffectiveModelInfo extends MainModelHalf {
  * synthetic EffectiveNode (mergeScopes over literal scope data), no IPC and
  * no React runtime required.
  */
-export function composeEffectiveModelInfo(mainHalf: MainModelHalf, node: EffectiveNode): EffectiveModelInfo {
+export function composeEffectiveModelInfo(mainHalf: MainModelHalf, node: EffectiveNode, overrides: EpicRuntimeOverrides = {}): EffectiveModelInfo {
+  const epicModel = overrides.model && overrides.model !== 'inherit' ? overrides.model : null
+  const epicEffort = overrides.effort && overrides.effort !== 'inherit' && overrides.effort !== 'auto' ? overrides.effort : null
+  // Epic-level override wins over persona and settings — mirrors agentEffortResolve.cjs's precedence.
+  if (epicEffort) return { ...mainHalf, epicModel, effortLevel: epicEffort, effortSource: 'epic' }
   // Persona effort wins: it is what the launch actually passes as --effort.
   // The settings scope-chain read is the fallback when the persona sets none.
   if (mainHalf.personaEffort && (mainHalf.personaEffortSource === 'persona' || mainHalf.personaEffortSource === 'persona-overlay')) {
-    return { ...mainHalf, effortLevel: mainHalf.personaEffort, effortSource: mainHalf.personaEffortSource }
+    return { ...mainHalf, epicModel, effortLevel: mainHalf.personaEffort, effortSource: mainHalf.personaEffortSource }
   }
   const { value: effortLevel, source: effortSource } = readLeafWithSource(node, ['effortLevel'])
-  return { ...mainHalf, effortLevel, effortSource }
+  return { ...mainHalf, epicModel, effortLevel, effortSource }
 }
 
 /**
@@ -83,7 +99,7 @@ export function composeEffectiveModelInfo(mainHalf: MainModelHalf, node: Effecti
  * before this hook existed rather than a fabricated "persona not found"
  * result it can't actually stand behind.
  */
-export function useEffectiveModelInfo(cwd: string | null, agentType: string | null): EffectiveModelInfo | null {
+export function useEffectiveModelInfo(cwd: string | null, agentType: string | null, overrides?: EpicRuntimeOverrides): EffectiveModelInfo | null {
   const node = useEffectiveSettingsFor(cwd)
   const [mainHalf, setMainHalf] = useState<MainModelHalf | null>(null)
 
@@ -104,5 +120,5 @@ export function useEffectiveModelInfo(cwd: string | null, agentType: string | nu
   }, [cwd, agentType])
 
   if (!cwd || !agentType || !mainHalf) return null
-  return composeEffectiveModelInfo(mainHalf, node)
+  return composeEffectiveModelInfo(mainHalf, node, overrides)
 }

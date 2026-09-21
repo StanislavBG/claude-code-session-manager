@@ -1,4 +1,4 @@
-import { prettyModel } from '../../lib/prettyModel'
+import { prettyModel, modelFamily } from '../../lib/prettyModel'
 import { formatEffortSegment, effortProvenanceNote } from '../../lib/effectiveModelInfo'
 import type { EffectiveModelInfo } from '../../lib/effectiveModelInfo'
 
@@ -15,7 +15,17 @@ interface ModelSegment {
   title: string
 }
 
+function epicModelSegment(model: string): ModelSegment {
+  const family = modelFamily(model)
+  const isId = family !== null && model.startsWith('claude-')
+  return {
+    text: isId ? `${family} → ${model} (this session)` : `${model} · resolved by the CLI at launch (this session)`,
+    title: `This session's model was chosen on the New Session card${isId ? ` (${prettyModel(model)})` : ''} and is passed to the CLI as --model, overriding the agent persona.`,
+  }
+}
+
 function modelSegment(info: EffectiveModelInfo): ModelSegment {
+  if (info.epicModel) return epicModelSegment(info.epicModel)
   if (info.modelSource === 'fallback') {
     return {
       text: `${FALLBACK_DISPLAY_MODEL} · persona not found`,

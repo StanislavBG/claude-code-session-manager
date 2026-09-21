@@ -1124,6 +1124,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
                   tabId={epicId}
                   sessionId={sessionId}
                   runActive
+                  streaming
                   consentActionDisabled={running}
                   enableRawSessionActions={false}
                   inlineFilePreview

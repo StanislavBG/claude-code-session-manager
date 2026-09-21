@@ -11,8 +11,18 @@ export function useThrottledValue<T>(value: T, ms: number, enabled = true): T {
   const latest = useRef(value)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   latest.current = value
+  // While disabled `throttled` isn't tracking the input. Remember that, so a
+  // later false->true flip returns the live value and re-syncs state in an
+  // effect — no setState (and so no extra render) on every disabled render.
+  const stale = useRef(false)
+  if (!enabled && throttled !== value) stale.current = true
 
   useEffect(() => {
+    if (enabled && stale.current) {
+      stale.current = false
+      setThrottled(latest.current)
+      return
+    }
     if (!enabled || timer.current !== null) return
     timer.current = setTimeout(() => {
       timer.current = null
@@ -28,5 +38,5 @@ export function useThrottledValue<T>(value: T, ms: number, enabled = true): T {
     [],
   )
 
-  return enabled ? throttled : value
+  return enabled && !stale.current ? throttled : value
 }

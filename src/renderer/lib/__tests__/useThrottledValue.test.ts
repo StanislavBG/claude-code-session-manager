@@ -39,4 +39,12 @@ describe('useThrottledValue', () => {
     render('final', false)
     expect(seen[seen.length - 1]).toBe('final')
   })
+
+  it('does not return a stale value when enabled flips on after input changed while disabled', () => {
+    const { seen, render } = harness()
+    render('a', false)
+    render('b', false)
+    render('b', true)
+    expect(seen[seen.length - 1]).toBe('b')
+  })
 })

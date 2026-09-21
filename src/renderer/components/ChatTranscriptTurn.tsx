@@ -974,6 +974,7 @@ function TurnComponent({
   tabId,
   sessionId,
   runActive = false,
+  streaming = false,
   consentActionDisabled = false,
   enableRawSessionActions = true,
   inlineFilePreview = false,
@@ -991,6 +992,10 @@ function TurnComponent({
    *  answer button through the same chat send() path the composer uses. */
   sessionId: string
   runActive?: boolean
+  /** True only for the in-flight live bubble whose text grows per delta —
+   *  throttles + bypasses the markdown cache. Not derived from `runActive`
+   *  (also true for the last finished turn) or `presentation`. */
+  streaming?: boolean
   consentActionDisabled?: boolean
   /** False for views with no backing SessionTab/PTY (e.g. PromptSessionConversation,
    *  PRD 804) — hides the "Grant consent" action, which spawns an inline
@@ -1319,10 +1324,10 @@ function TurnComponent({
   const isRunning = presentation === 'working'
   // Live bubble: the text grows on every delta, so re-parse at most every
   // LIVE_MARKDOWN_THROTTLE_MS and keep every prefix out of the shared cache.
-  const markdownSrc = useThrottledValue(shownText, LIVE_MARKDOWN_THROTTLE_MS, isRunning)
+  const markdownSrc = useThrottledValue(shownText, LIVE_MARKDOWN_THROTTLE_MS, streaming)
   const shownHtml = useMemo(
-    () => renderChatMarkdown(markdownSrc, isRunning ? { cache: false } : undefined),
-    [markdownSrc, isRunning],
+    () => renderChatMarkdown(markdownSrc, streaming ? { cache: false } : undefined),
+    [markdownSrc, streaming],
   )
   // isApiErrorMessage/interruptedByShutdown both mean this turn is
   // incomplete (a dropped API response, a shutdown mid-stream) — reuse the

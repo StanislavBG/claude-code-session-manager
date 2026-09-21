@@ -298,5 +298,24 @@ describe('childWithLog sweep ordering + sync paths (PRD 1370)', () => {
     process.off('unhandledRejection', h);
     expect(unhandled).toEqual([]);
     expect(closed).toBe(true);
+    expect(fs.readFileSync(logPath, 'utf8')).toContain('onExit threw: exit boom');
+  }, 15000);
+
+  it('a throwing synchronous onExit is logged, closes the fd, and is re-thrown', async () => {
+    const { logPath, fd, safeLog, closeFd } = setup('sm-child-throw-sync-');
+    let closed = false;
+    const wrapClose = () => { closed = true; closeFd(); };
+    const thrown = await new Promise((resolve) => {
+      const onUncaught = (e) => { process.off('uncaughtException', onUncaught); resolve(e); };
+      process.on('uncaughtException', onUncaught);
+      withChildAndLog({
+        fd, logPath, safeLog, closeFd: wrapClose,
+        spawn: { command: 'sh', args: ['-c', 'exit 0'] },
+        onExit: () => { throw new Error('exit boom'); },
+      });
+    });
+    expect(thrown.message).toBe('exit boom');
+    expect(closed).toBe(true);
+    expect(fs.readFileSync(logPath, 'utf8')).toContain('onExit threw: exit boom');
   }, 15000);
 });

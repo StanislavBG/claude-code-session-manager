@@ -274,6 +274,13 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
             safeLog,
           });
         }
+      } catch (e) {
+        // Log while the fd is still open (closeFd below makes safeLog a no-op),
+        // then rethrow: sync callers see the throw as before PRD 1353; the
+        // deferred path contains it below.
+        const stack = e && e.stack ? String(e.stack).split('\n').slice(0, 3).join('\n') : '';
+        safeLog(`[childWithLog] onExit threw: ${e && e.message}${stack ? `\n${stack}` : ''}\n`);
+        throw e;
       } finally {
         closeFd();
       }
@@ -283,9 +290,8 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
     // (bounded by the 2 s ps timeout) for the leak report; a throwing onExit
     // must not become an unhandled rejection.
     if (!pending) { finish([]); return; }
-    pending.then(finish).catch((e) => {
-      safeLog(`[childWithLog] onExit threw: ${e && e.message}\n`);
-    });
+    // finish() already logged the throw and closed the fd; just contain it.
+    pending.then(finish).catch(() => {});
   };
 
   // Attempt synchronous spawn. On failure, call handleDone immediately so the

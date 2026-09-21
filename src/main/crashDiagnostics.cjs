@@ -27,11 +27,13 @@ const { app, powerSaveBlocker, powerMonitor, crashReporter } = require('electron
 const fs = require('node:fs');
 const path = require('node:path');
 const { reportCrash } = require('./lib/crashTelemetry.cjs');
+const { createLoopDelayMonitor, stallVerdict } = require('./lib/loopDelay.cjs');
 
 let logs = null;
 let getPowerBlockerId = () => -1;
 let onSuspendWhileAlive = null;
 let heartbeatTimer = null;
+let loopMonitor = null;
 let sentinelPath = null;
 let startedAtIso = null;
 let lastSample = null;
@@ -118,6 +120,7 @@ function heartbeat() {
   persistSentinel(false);
   const top = [...lastSample.procs].sort((a, b) => b.mb - a.mb).slice(0, 4);
   const level = lastSample.totalMb >= MEM_WARN_MB ? 'warn' : 'debug';
+  const loop = loopMonitor ? loopMonitor.snapshot() : null;
   logs?.writeLine({
     scope: 'crash-diag',
     level,
@@ -127,8 +130,11 @@ function heartbeat() {
       mainRssMb: lastSample.main.rssMb,
       powerBlockerHeld: lastSample.powerBlockerHeld,
       top: top.map((p) => `${p.type}:${p.mb}MB`),
+      ...loop,
     },
   });
+  const stall = loop && stallVerdict(loop);
+  if (stall) logs?.writeLine({ scope: 'crash-diag', ...stall, meta: { ...loop } });
 }
 
 // Read the previous run's sentinel. If it was still `open`, the app died
@@ -242,6 +248,8 @@ function init(opts) {
   persistSentinel(false);   // mark this run as open
   registerCrashHooks();
 
+  loopMonitor = createLoopDelayMonitor();
+  loopMonitor.enable();
   heartbeat();              // immediate baseline sample
   heartbeatTimer = setInterval(heartbeat, HEARTBEAT_MS);
   if (heartbeatTimer.unref) heartbeatTimer.unref(); // don't keep the loop alive
@@ -250,6 +258,7 @@ function init(opts) {
 // Call from will-quit so a graceful exit is distinguishable from an OOM-kill.
 function markCleanShutdown() {
   if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  if (loopMonitor) { loopMonitor.disable(); loopMonitor = null; }
   persistSentinel(true);
 }
 

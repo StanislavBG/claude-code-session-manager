@@ -9,6 +9,7 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | script | invoked by | shipped on npm |
 | --- | --- | --- |
 | audit-ops-hygiene.cjs | manual; named in `ops-sweep` + `develop` SKILL.md | yes |
+| bench/main-bench.cjs | `npm run bench` (main-process micro-benches, plain Node); renderer half is `npm run bench:renderer` (`tests/bench/`, `vitest.bench.config.ts`, not in `test:unit`) | no |
 | check-conditional-hooks.cjs | `npm run lint:hooks` (in `lint`) | no |
 | check-epic-transcripts.cjs | manual read-only diagnostic (`--json`); also surfaced as a non-fatal warning in `npm run health` | no |
 | check-doc-hierarchy.cjs | `npm run lint:docs` (in `lint`) | no |
@@ -53,6 +54,8 @@ The four `hooks/guard-*.cjs` are adopted by reference, not copied: `src/main/lib
 ## Cleanup dispatch
 
 `cleanup-nested-queue-stubs.cjs` removes nested queue shards and then dispatches to `cleanup-worktree-ops-stubs.cjs` (its `main()`), which handles the worktree-side stubs.
+
+Bench numbers are machine-relative — compare runs on the same machine only; there are no pass/fail thresholds.
 
 ## npm shipping
 

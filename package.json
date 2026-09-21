@@ -39,6 +39,8 @@
     "prepack": "node scripts/write-build-info.cjs",
     "prepublishOnly": "node scripts/write-build-info.cjs && vite build",
     "test:unit": "vitest run",
+    "bench": "node scripts/bench/main-bench.cjs",
+    "bench:renderer": "vitest run --config vitest.bench.config.ts",
     "test:e2e": "xvfb-run -a playwright test",
     "smoke:darwin": "playwright test tests/smoke/darwin-boot.spec.ts",
     "test:e2e:mic": "xvfb-run -a playwright test e2e/mic.spec.mjs",

@@ -955,7 +955,11 @@ const DEFAULT_CONFIG = {
   // 'on-reset'        = fire offsetMinutes after the next 5h reset (legacy).
   // 'manual'          = only fire on explicit Run now click.
   firePolicy: 'when-available',
-  // For 'when-available'. Fire only when five_hour utilization < this percent.
+  // For 'when-available'. Fire only when BINDING-window utilization < this
+  // percent. Binding = the most-consumed unscoped window (five_hour OR weekly):
+  // dispatching into an exhausted weekly window would just produce 429s, so the
+  // gate holds on it — a hold that can last days, which is why it is surfaced
+  // loudly (utilizationHold snapshot field, heartbeat window name, health).
   utilizationThreshold: 90,
   schemaVersion: 1,
   supervisor: {
@@ -1804,6 +1808,9 @@ function heartbeatTick(deps = {}) {
         quarantinedCwds: (s.unreadableCwds ?? []).map((u) => u.cwd),
         nextReset: cachedNextReset,
         utilization: cachedUtilization,
+        // Which window `utilization` (and nextReset) refer to — a reader of
+        // this log can't otherwise tell a 5h hold from a weekly one.
+        utilizationWindow: cachedBindingWindowName,
         consecutiveFailures,
         // State/consecutiveFailures/degraded-budget snapshot of the shared
         // usage-meter breaker, so a human reading only the heartbeat log can
@@ -3226,6 +3233,10 @@ async function reconcile(state) {
 
 let cachedNextReset = null; // bare ISO string or null
 let cachedUtilization = null; // binding-window utilization %, 0–100, or null if unknown
+let cachedBindingWindowName = null; // name/kind of the window cachedUtilization reads (e.g. 'five_hour', 'weekly_all')
+// Non-null while maybeLaunchWhenAvailable is holding the queue on the
+// utilization gate: { window, percent, threshold, resetsAt }. Snapshot-level.
+let utilizationHold = null;
 // ms timestamp of the last FRESH reset observation (see recordObservedReset)
 // — distinct from Date.now(), so persistSchedulerState never re-stamps a
 // stale cachedNextReset as "just observed" on every poll cycle.
@@ -3281,6 +3292,7 @@ function computeDegradedBudget() {
 function applyDegradedBudget() {
   const budget = computeDegradedBudget();
   cachedUtilization = budget.utilization;
+  cachedBindingWindowName = bindingWindow(lastGoodUsagePayload).name;
   degradedConcurrencyCapValue = budget.concurrencyCap;
   return budget;
 }
@@ -3297,6 +3309,7 @@ async function refreshNextReset() {
   }
   recordObservedReset(window.resets_at ?? null);
   cachedUtilization = window.utilization;
+  cachedBindingWindowName = window.name;
   lastGoodUsagePayload = r.data?.usage ?? lastGoodUsagePayload;
   return cachedNextReset;
 }
@@ -3612,6 +3625,8 @@ function buildScheduleStatePayload(state) {
     launchBlocks: state.launchBlocks ?? {},
     launchMitigations: state.launchMitigations ?? {},
     utilization: cachedUtilization,
+    utilizationWindow: cachedBindingWindowName,
+    utilizationHold,
     pollHealth: {
       lastPollAt,
       lastPollOk,
@@ -8455,12 +8470,20 @@ async function runDueJobs({ bypassLoadGate = false } = {}) {
 // ---------- when-available launch logic ----------
 
 async function maybeLaunchWhenAvailable(state) {
+  utilizationHold = null;
   if (state.config.firePolicy !== 'when-available') return;
   if (state.paused) return;
   const pending = state.jobs.filter((j) => j.status === 'pending' && !runningSet.has(j.slug));
   if (pending.length === 0) return;
   if (cachedUtilization === null || cachedUtilization === undefined) return;
   if (cachedUtilization >= state.config.utilizationThreshold) {
+    utilizationHold = {
+      window: cachedBindingWindowName,
+      percent: cachedUtilization,
+      threshold: state.config.utilizationThreshold,
+      resetsAt: cachedNextReset,
+    };
+    console.log(`[scheduler] when-available: utilization-held — ${cachedBindingWindowName ?? 'unknown'} window at ${cachedUtilization}% ≥ ${state.config.utilizationThreshold}%, resets ${cachedNextReset ?? 'unknown'}, ${pending.length} pending — holding, not ticking`);
     await broadcast();
     return;
   }
@@ -9545,6 +9568,7 @@ async function pollLoop() {
       const window = bindingWindow(r.data?.usage);
       recordObservedReset(window.resets_at ?? null);
       cachedUtilization = window.utilization;
+      cachedBindingWindowName = window.name;
       lastGoodUsagePayload = r.data?.usage ?? lastGoodUsagePayload;
       degradedConcurrencyCapValue = null;
       consecutiveFailures = 0;
@@ -12764,6 +12788,7 @@ module.exports = {
   FOREIGN_WIP_END_DELIMITER,
   TRANSIENT_RETRY_CAP,
   buildScheduleStatePayload,
+  refreshNextReset,
   partitionBootOrphans,
   applyOrphanOutcome,
   registerAdminRoutes,

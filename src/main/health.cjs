@@ -39,6 +39,8 @@ const PROJECT_ROOT = path.resolve(__dirname, '../..');
 // outage goes unnoticed for hours (the 2026-07-14 incident sat stalled for
 // 16.5h before anything asserted on it).
 const TICK_STALL_MULTIPLIER = 3;
+// A utilization hold whose reset is further out than this is not a routine 5h pause.
+const LONG_HOLD_MS = 5 * 60 * 60_000;
 const TICK_STALL_THRESHOLD_MS = TICK_STALL_MULTIPLIER * POLL_INTERVAL_MS;
 // A heartbeat line older than this is treated as "the app isn't running /
 // we can't observe live utilization" rather than "utilization is low" —
@@ -139,7 +141,19 @@ function evaluateTickLiveness(queueState, heartbeat, now, runningCount) {
       };
     }
     if (typeof heartbeat.utilization === 'number' && heartbeat.utilization >= config.utilizationThreshold) {
-      return { stalled: false, reason: 'utilization-at-threshold', utilization: heartbeat.utilization };
+      // A hold on the binding window is benign only if it self-heals soon
+      // (reset within 5h). A weekly hold, or an unknown reset horizon, can
+      // last days — surface it rather than reading GREEN.
+      const resetMs = heartbeat.nextReset ? Date.parse(heartbeat.nextReset) : NaN;
+      const longHold = !Number.isFinite(resetMs) || resetMs - now > LONG_HOLD_MS;
+      return {
+        stalled: false,
+        reason: 'utilization-at-threshold',
+        utilization: heartbeat.utilization,
+        window: heartbeat.utilizationWindow ?? null,
+        nextReset: heartbeat.nextReset ?? null,
+        ...(longHold ? { longHold: true } : {}),
+      };
     }
   }
 
@@ -860,6 +874,16 @@ async function check(opts = {}) {
       })(),
       loadGateThreshold: loadGateThreshold(),
     };
+    if (liveness.longHold) {
+      status.components.scheduler_queue.longHold = {
+        window: liveness.window, utilization: liveness.utilization, nextReset: liveness.nextReset,
+      };
+      status.issues.push(
+        `Queue held on the ${liveness.window ?? 'binding'} usage window at ${liveness.utilization}% (≥ threshold); `
+        + (liveness.nextReset ? `resets ${liveness.nextReset}` : 'reset time unknown')
+        + ' — hold may last days, not a normal short pause'
+      );
+    }
     if (liveness.stalled) {
       const ageMin = Math.round(liveness.tickAgeMs / 60_000);
       status.components.scheduler_queue.stalledJob = liveness.oldestPendingSlug;

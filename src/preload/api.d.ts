@@ -504,7 +504,7 @@ export interface ScheduleConfig {
   defaultCwd: string;
   /** Auto-fire policy. Default 'when-available'. */
   firePolicy: ScheduleFirePolicy;
-  /** When firePolicy='when-available', fire only if five_hour utilization is
+  /** When firePolicy='when-available', fire only if binding-window utilization is
    *  strictly below this percent. 0–100. Default 90. */
   utilizationThreshold: number;
   schemaVersion: 1;
@@ -858,8 +858,12 @@ export interface ScheduleStateSnapshot {
   launchBlocks?: Record<string, ScheduleLaunchBlock>;
   /** Degraded-mode launch env in force per persona. Empty when nothing is degraded. */
   launchMitigations?: Record<string, ScheduleLaunchMitigation>;
-  /** Latest five_hour utilization percent (0–100) cached from billing.fetchUsage. null if unknown. */
+  /** Latest BINDING-window utilization percent (0–100) cached from billing.fetchUsage. null if unknown. */
   utilization: number | null;
+  /** Name/kind of the window `utilization` reads (e.g. 'five_hour', 'weekly_all'). null if unknown. */
+  utilizationWindow?: string | null;
+  /** Non-null while the when-available gate is holding the queue on utilization: which window, and its reset. */
+  utilizationHold?: { window: string | null; percent: number; threshold: number; resetsAt: string | null } | null;
   /** Poll health — last billing poll result; used to detect stale utilization. */
   pollHealth?: SchedulePollHealth;
   /** Effective concurrency cap and whether it's env-pinned or config-driven. */

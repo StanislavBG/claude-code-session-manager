@@ -158,6 +158,7 @@ export default defineConfig({
       'src/main/__tests__/rateLimitPollerStreak.test.cjs',
       'src/main/__tests__/usageSingleFlight.test.cjs',
       'src/main/__tests__/pollLoop-dispatch-on-failure.test.cjs',
+      'src/main/__tests__/scheduler-utilization-hold.test.cjs',
       'src/main/__tests__/queue-starvation-dispatch-driver.test.cjs',
       'src/main/__tests__/queue-starvation-per-project.test.cjs',
       'src/main/__tests__/queue-health-verdict.test.cjs',

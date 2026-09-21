@@ -4,6 +4,16 @@ import { formatTimingLabel, formatClock, formatRelative } from '../../../lib/for
 
 export type StatusKind = 'running' | 'paused' | 'auto-soon' | 'auto-throttled' | 'manual' | 'on-reset' | 'idle'
 
+// A utilization hold whose reset is further out than this is not a routine 5h pause.
+const LONG_HOLD_MS = 5 * 60 * 60_000
+
+const WINDOW_LABELS: Record<string, string> = {
+  five_hour: '5-hour', session: '5-hour', weekly_all: 'weekly', weekly: 'weekly',
+}
+function windowLabel(name: string): string {
+  return WINDOW_LABELS[name] ?? name.replace(/_/g, ' ')
+}
+
 interface StatusInfo {
   kind: StatusKind
   line1: string
@@ -15,7 +25,7 @@ interface StatusInfo {
 export function computeStatus({
   snap, now, avgDurationMs, runningJobs,
 }: { snap: ScheduleStateSnapshot; now: number; avgDurationMs: number; runningJobs: ScheduleJob[] }): StatusInfo {
-  const { config, jobs, paused, nextReset, utilization, effectiveConcurrency } = snap
+  const { config, jobs, paused, nextReset, utilization, utilizationWindow, effectiveConcurrency } = snap
   let pendingCount = 0
   let completedCount = 0
   for (const j of jobs) {
@@ -113,12 +123,24 @@ export function computeStatus({
   }
   if (utilization >= thresh) {
     const wait = nextReset ? Date.parse(nextReset) - now : null
+    const win = utilizationWindow ? windowLabel(utilizationWindow) : null
+    // Unknown reset horizon is treated as the LONG case, never the benign one.
+    const long = wait === null || Number.isNaN(wait) || wait > LONG_HOLD_MS
+    const resetPart = wait && wait > 0
+      ? `resets ${formatClock(Date.parse(nextReset!))} (in ${formatRelative(wait)})`
+      : null
+    let line2: string
+    if (long) {
+      line2 = `${win ?? 'binding'} window — long hold${resetPart ? `, ${resetPart}` : ', reset time unknown'}`
+    } else {
+      line2 = resetPart
+        ? `${win ? `${win} window ` : ''}next ${resetPart}`
+        : 'will fire when usage drops'
+    }
     return {
       kind: 'auto-throttled',
       line1: `Auto · throttled (util ${utilization.toFixed(0)}% ≥ ${thresh}%)`,
-      line2: wait && wait > 0
-        ? `next reset ${formatClock(Date.parse(nextReset!))} (in ${formatRelative(wait)})`
-        : 'will fire when usage drops',
+      line2,
     }
   }
   return {

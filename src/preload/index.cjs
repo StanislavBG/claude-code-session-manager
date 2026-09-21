@@ -116,6 +116,9 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('agents:changed', listener);
     },
   },
+  models: {
+    catalog: (payload) => ipcRenderer.invoke('models:catalog', payload),
+  },
   logs: {
     // ctx is optional: { cwd, tabId, epicId, tags } — when present and
     // level is 'error', main also appends a tagged line to that project's

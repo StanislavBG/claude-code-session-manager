@@ -44,6 +44,7 @@ const epicWorktreeProjectConfig = require('./lib/epicWorktreeProjectConfig.cjs')
 const agentLibrary = require('./agentLibrary.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { resolveEffectiveModelInfo } = require('./lib/effectiveModelInfo.cjs');
+const { resolveModelCatalog } = require('./lib/modelCatalog.cjs');
 const { checkDelegationReadiness, ensureGuardsInstalled, installPrdWriteGuard, installDestructiveGitGuard, installInlineImplementationGuard, installSelfScheduleGuard } = require('./lib/delegationReadiness.cjs');
 const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
 const upgradeDrain = require('./lib/upgradeDrain.cjs');
@@ -571,6 +572,10 @@ ipcMain.handle('agents:resolve-epic-model', validated(schemas.agentsResolveEpicM
 // (cwd, agentType). Read-only observer; never affects what a launch resolves.
 ipcMain.handle('agents:resolve-model-info', validated(schemas.agentsResolveModelInfo, (payload) =>
   resolveEffectiveModelInfo(payload)));
+
+// Live model/effort catalog (modelCatalog.cjs) — never throws; `force` bypasses its cache.
+ipcMain.handle('models:catalog', validated(schemas.modelsCatalog, (payload) =>
+  resolveModelCatalog(payload)));
 
 // "Can this project actually delegate?" probe (PRD: delegation-readiness).
 // Structured data over the preconditions for scheduler_create_prd being in an

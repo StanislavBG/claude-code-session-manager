@@ -1663,6 +1663,26 @@ export interface SessionManagerAPI {
     /** Fires after any save/delete/removeOverride — subscribers should re-fetch listPersonas(). */
     onChanged: (handler: () => void) => () => void;
   };
+  models: {
+    /** Live model/effort catalog (`modelCatalog.cjs`'s `resolveModelCatalog`). Never rejects from
+     *  the resolver itself — a failed probe degrades down cache → floor and sets `degraded`.
+     *  `cwd` only affects `availableModels` (settings-scope allowlist); `force` bypasses the cache. */
+    catalog: (payload: { cwd?: string; force?: boolean }) => Promise<{
+      aliases: string[];
+      models: string[];
+      effortLevels: string[];
+      settingsEffortLevels: string[];
+      availableModels: string[] | null;
+      claudeVersion: string | null;
+      probedAt: string | null;
+      sources: {
+        aliases: 'probe' | 'cache' | 'floor';
+        models: 'binary' | 'cache' | 'floor';
+        effortLevels: 'probe' | 'cache' | 'floor';
+      };
+      degraded: boolean;
+    }>;
+  };
   logs: {
     write: (
       scope: string,

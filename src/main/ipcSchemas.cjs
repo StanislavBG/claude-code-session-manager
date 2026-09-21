@@ -661,6 +661,12 @@ const agentsResolveModelInfo = z.object({
   agentType: z.string().min(1).max(200),
 }).strict();
 
+// ──────────────────────────────────────────── Live model/effort catalog (modelCatalog.cjs)
+const modelsCatalog = z.object({
+  cwd: z.string().optional(),
+  force: z.boolean().optional(),
+}).strict();
+
 // ──────────────────────────────────────────── Epic launch model (PRD: unify-epic-model-resolution)
 // Terminal's (EpicTerminalPane.tsx) call into agentModelResolve.cjs's
 // resolveEpicModel — the same launch-model authority chatRunner.cjs's Chat
@@ -1146,6 +1152,7 @@ module.exports = {
     agentsSavePersona,
     agentsGetPersonaBody,
     agentsResolveModelInfo,
+    modelsCatalog,
     agentsResolveEpicModel,
     delegationReadinessCwd,
     telemetrySetConfig,

@@ -280,6 +280,14 @@ async function fetchUsage() {
     if (kind === 'meter_rate_limited') return { kind: 'meter_rate_limited', message: 'e2e stub', httpStatus: 429 };
     if (kind === 'transient') return { kind: 'transient', message: 'e2e stub', httpStatus: 503 };
     if (kind === 'auth') return { kind: 'auth', message: 'e2e stub', httpStatus: 401 };
+    // 'ok_weekly_binding': real-shape limits[] where the WEEKLY window binds (64%) while the
+    // session window reads 12% and a scoped entry reads 90% (must be ignored). Distinct values
+    // let an e2e prove the KPI was derived via bindingWindow(), not a flat five_hour fallback.
+    if (kind === 'ok_weekly_binding') {
+      const sessionReset = new Date(Date.now() + 3 * 3_600_000).toISOString();
+      const weeklyReset = new Date(Date.now() + (2 * 24 + 5) * 3_600_000).toISOString();
+      return { kind: 'ok', data: { usage: { five_hour: { utilization: 12, resets_at: sessionReset }, seven_day: { utilization: 64, resets_at: weeklyReset }, limits: [{ kind: 'session', group: 'session', percent: 12, severity: 'normal', resets_at: sessionReset, scope: null, is_active: false }, { kind: 'weekly_all', group: 'weekly', percent: 64, severity: 'normal', resets_at: weeklyReset, scope: null, is_active: true }, { kind: 'weekly_scoped', group: 'weekly', percent: 90, severity: 'warning', resets_at: weeklyReset, scope: { model: 'opus' }, is_active: false }], seven_day_sonnet: null, seven_day_opus: null, extra_usage: null }, subscriptionType: null, rateLimitTier: null, credentialsExpiresAt: null, fetchedAt: Date.now() } };
+    }
     // 'ok' stub returns a minimal valid payload.
     return { kind: 'ok', data: { usage: { five_hour: { utilization: 10, resets_at: null }, seven_day: { utilization: 10, resets_at: null }, limits: [{ kind: 'session', group: 'session', percent: 10, severity: 'normal', resets_at: null, scope: null, is_active: false }, { kind: 'weekly_all', group: 'weekly', percent: 10, severity: 'normal', resets_at: null, scope: null, is_active: true }], seven_day_sonnet: null, seven_day_opus: null, extra_usage: null }, subscriptionType: null, rateLimitTier: null, credentialsExpiresAt: null, fetchedAt: Date.now() } };
   }

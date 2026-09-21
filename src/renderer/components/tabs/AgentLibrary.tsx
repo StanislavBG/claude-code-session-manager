@@ -12,6 +12,7 @@ import { takePendingPersonaName } from '../../lib/agentLibraryDeepLink'
 import { useKnownProjects } from '../../lib/useKnownProjects'
 import { useModelCatalog } from '../../lib/useModelCatalog'
 import { modelFamily } from '../../lib/prettyModel'
+import { modelSupportsEffort } from '../../lib/effortSupport'
 import { ALL_PROJECTS } from '../../lib/projectActions'
 
 /**
@@ -41,6 +42,8 @@ import { ALL_PROJECTS } from '../../lib/projectActions'
 
 // Static fallback only — rendered when the live catalog is unavailable (ModelPicker).
 const MODELS = ['inherit', 'haiku', 'sonnet', 'opus', 'fable'] as const
+// Static fallback only — rendered when the live catalog is unavailable (EffortPicker).
+const EFFORTS = ['inherit', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 const TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'WebFetch', 'WebSearch', 'Task']
 const COLORS = ['', 'red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink']
 const COLOR_SWATCH: Record<string, string> = {
@@ -53,6 +56,7 @@ interface Draft {
   description: string
   tools: string[]
   model: string
+  effort: string
   color: string
   // string[], not AgentPersonaTag[] — mirrors AgentPersona.tags (read path stays permissive;
   // a loaded persona may carry a stale/foreign tag). Filtered down to KNOWN_PERSONA_TAGS at
@@ -71,6 +75,7 @@ function toDraft(p: AgentPersona): Draft {
     description: p.description ?? '',
     tools: p.tools,
     model: p.model ?? 'inherit',
+    effort: p.effort ?? 'inherit',
     color: p.color ?? '',
     tags: p.tags,
     projects: p.projects ?? [],
@@ -80,7 +85,7 @@ function toDraft(p: AgentPersona): Draft {
   }
 }
 
-const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', color: '', tags: [], projects: [], action: '', actionLabel: '', body: '' }
+const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', effort: 'inherit', color: '', tags: [], projects: [], action: '', actionLabel: '', body: '' }
 
 // The write-side schema (agentPersonaSchema.cjs) only accepts these — a persona loaded with a
 // foreign tag must have it dropped before save, not merely re-sent verbatim (see Draft.tags).
@@ -172,6 +177,7 @@ function AgentLibraryComponent() {
         description: obj.description,
         tools: obj.tools,
         model: obj.model,
+        effort: obj.effort,
         color: obj.color,
         // Drop any tag that isn't in the closed WorkType union before sending — a persona
         // loaded with a stale/foreign tag (permitted on read) must not make every future save
@@ -405,6 +411,8 @@ function AgentPersonaEditor({
         </Field>
 
         <ModelPicker value={obj.model} onChange={(v) => set({ model: v })} />
+
+        <EffortPicker value={obj.effort} model={obj.model} onChange={(v) => set({ effort: v })} />
 
         <Field label="tools" hint={`${obj.tools.length} of ${TOOLS.length} granted. Anything not ticked is refused at call time.`}>
           <div className="flex flex-wrap gap-1.5">
@@ -722,6 +730,47 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (v: string)
           refresh
         </button>
       </div>
+    </Field>
+  )
+}
+
+/**
+ * Catalog-driven effort picker. Options are `inherit` + the levels `/effort` accepts in a live
+ * session (`catalog.effortLevels`); levels absent from `settingsEffortLevels` cannot be written to a
+ * settings.json file and get a session-only marker. `catalog === null` degrades to the static list.
+ * A model known not to support effort gets a non-blocking note — the control stays enabled.
+ */
+function EffortPicker({ value, model, onChange }: { value: string; model: string; onChange: (v: string) => void }) {
+  const { catalog } = useModelCatalog(null)
+  const levels = catalog && catalog.effortLevels.length ? ['inherit', ...catalog.effortLevels] : [...EFFORTS]
+  const settingsLevels = catalog?.settingsEffortLevels ?? []
+  const sessionOnly = catalog ? levels.filter((l) => l !== 'inherit' && !settingsLevels.includes(l)) : []
+  const stored = value || 'inherit'
+  const unsupported = stored !== 'inherit' && modelSupportsEffort(model) === false
+  return (
+    <Field
+      label="effort"
+      hint={
+        catalog
+          ? `Effort levels are live-read from the installed claude CLI (what /effort accepts). ${
+              sessionOnly.length ? `${sessionOnly.join(', ')} ${sessionOnly.length > 1 ? 'are' : 'is'} session-only — settings.json accepts ${settingsLevels.join(', ')}. ` : ''
+            }'inherit' writes no effort: line.`
+          : "catalog unavailable — showing the standard list. 'inherit' writes no effort: line."
+      }
+    >
+      <div data-testid="effort-row">
+        <Choice options={levels} value={stored} onChange={onChange} mono />
+      </div>
+      {sessionOnly.length > 0 && (
+        <div className="text-[11px] text-fg-faint mt-1 font-mono" data-testid="effort-session-only">
+          {sessionOnly.map((l) => `${l} (session-only)`).join(' · ')}
+        </div>
+      )}
+      {unsupported && (
+        <div className="text-[11px] text-amber-400 mt-1 leading-snug" data-testid="effort-unsupported-note">
+          The selected model does not support effort — the CLI will ignore this setting.
+        </div>
+      )}
     </Field>
   )
 }

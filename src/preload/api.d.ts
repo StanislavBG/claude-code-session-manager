@@ -235,6 +235,8 @@ export interface AgentPersona {
   description: string | null;
   tools: string[];
   model: string | null;
+  /** Per-Epic reasoning effort (`effort:` frontmatter; a `models.catalog` effort level). Null = inherit. Stored + displayed only for now — not yet passed to the claude spawn. */
+  effort: string | null;
   color: string | null;
   /** Epic intent tags (tagLibrary.ts's TAG_LIBRARY) this persona is associated with. */
   tags: AgentPersonaTag[];
@@ -263,6 +265,8 @@ export interface AgentPersonaSaveInput {
   description: string;
   tools: string[];
   model: string;
+  /** Effort level, or `'inherit'`/omitted to write no `effort:` line. */
+  effort?: string;
   color: string;
   tags: AgentPersonaTag[];
   /** Project cwds (or the `'*'` sentinel) this persona's Action button appears in. */

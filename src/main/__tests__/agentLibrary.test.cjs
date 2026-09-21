@@ -253,3 +253,24 @@ test('a persona with no Action fields reports them as empty/null rather than und
   expect(p.action).toBeNull();
   expect(p.actionLabel).toBeNull();
 });
+
+test('effort: written when set, omitted for inherit/unset, round-trips, and untouched personas gain no line', async () => {
+  const globalDir = await mkTmp('sm-agent-library-effort-');
+  const base = { tools: [], color: '', tags: [], body: 'B.', globalDir, validatePath: identityValidatePath, writeTextAtomic: fakeWriteTextAtomic };
+  await savePersona({ ...base, name: 'with-effort', model: 'opus', effort: 'xhigh' });
+  await savePersona({ ...base, name: 'inherit-effort', model: 'opus', effort: 'inherit' });
+  await savePersona({ ...base, name: 'unset-effort', model: 'opus' });
+  const raw = (n) => fsp.readFile(path.join(globalDir, `${n}.md`), 'utf8');
+  expect(await raw('with-effort')).toContain('effort: xhigh');
+  expect(await raw('inherit-effort')).not.toContain('effort:');
+  expect(await raw('unset-effort')).not.toContain('effort:');
+
+  const ps = await listPersonas({ globalDir, loadSessions: async () => ({ tabs: [] }), validatePath: identityValidatePath });
+  const by = Object.fromEntries(ps.map((p) => [p.name, p]));
+  expect(by['with-effort'].effort).toBe('xhigh');
+  expect(by['unset-effort'].effort).toBeNull();
+
+  // Untouched save of a no-effort persona (UI maps null -> 'inherit') must not add a line.
+  await savePersona({ ...base, name: 'unset-effort', model: 'opus', effort: by['unset-effort'].effort ?? 'inherit' });
+  expect(await raw('unset-effort')).not.toContain('effort:');
+});

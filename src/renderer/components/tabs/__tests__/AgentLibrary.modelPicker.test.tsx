@@ -16,8 +16,8 @@ const CATALOG = {
   degraded: false,
 }
 
-function persona(model: string | null): AgentPersona {
-  return {
+function persona(model: string | null, effort: string | null = null): AgentPersona {
+  return { effort,
     name: 'p', description: 'd', tools: [], model, color: null,
     tags: [], projects: [], action: null, actionLabel: null,
     path: '/x/p.md', body: 'b', overridingProjects: [],
@@ -29,12 +29,12 @@ let root: Root | null = null
 let savePersona: ReturnType<typeof vi.fn>
 let catalogFn: ReturnType<typeof vi.fn> | undefined
 
-async function mount(model: string | null, catalog: unknown) {
+async function mount(model: string | null, catalog: unknown, effort: string | null = null) {
   savePersona = vi.fn().mockResolvedValue({ ok: true, path: '' })
   catalogFn = catalog === undefined ? undefined : vi.fn().mockResolvedValue(catalog)
   ;(window as unknown as { api: unknown }).api = {
     agents: {
-      listPersonas: vi.fn().mockResolvedValue([persona(model)]),
+      listPersonas: vi.fn().mockResolvedValue([persona(model, effort)]),
       savePersona,
       deletePersona: vi.fn(), removeOverride: vi.fn(),
       onChanged: vi.fn(() => () => {}),
@@ -130,5 +130,53 @@ describe('AgentLibrary model picker', () => {
     const el = await mount('opus', CATALOG)
     await click(el.querySelector('[data-testid="model-catalog-refresh"]') as HTMLElement)
     expect(catalogFn!.mock.calls.at(-1)![0]).toMatchObject({ force: true })
+  })
+})
+
+const EFFORT_CATALOG = {
+  ...CATALOG,
+  effortLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'auto'],
+  settingsEffortLevels: ['low', 'medium', 'high', 'xhigh'],
+}
+const effortLabels = (el: HTMLElement) =>
+  Array.from(el.querySelector('[data-testid="effort-row"]')!.querySelectorAll('button')).map((b) => b.textContent)
+
+describe('AgentLibrary effort picker', () => {
+  it('renders inherit + catalog effortLevels with a session-only marker', async () => {
+    const el = await mount('opus', EFFORT_CATALOG)
+    expect(effortLabels(el)).toEqual(['inherit', 'low', 'medium', 'high', 'xhigh', 'max', 'auto'])
+    const marker = el.querySelector('[data-testid="effort-session-only"]')!.textContent!
+    expect(marker).toContain('max (session-only)')
+    expect(marker).toContain('auto (session-only)')
+    expect(marker).not.toContain('high (session-only)')
+  })
+
+  it('null catalog falls back to the static list', async () => {
+    const el = await mount('opus', null)
+    expect(effortLabels(el)).toEqual(['inherit', 'low', 'medium', 'high', 'xhigh', 'max'])
+  })
+
+  it('an unlisted stored value stays selected', async () => {
+    const el = await mount('opus', EFFORT_CATALOG, 'ludicrous')
+    expect(effortLabels(el)).toContain('ludicrous (current)')
+  })
+
+  it('picking a level saves it; untouched save of a no-effort persona sends inherit', async () => {
+    const el = await mount('opus', EFFORT_CATALOG)
+    await click(Array.from(el.querySelector('[data-testid="effort-row"]')!.querySelectorAll('button')).find((b) => b.textContent === 'high') as HTMLElement)
+    await saveClick(el)
+    expect(savePersona.mock.calls[0][0].effort).toBe('high')
+  })
+
+  it('notes (without disabling) when the selected model does not support effort', async () => {
+    const el = await mount('haiku', EFFORT_CATALOG, 'high')
+    expect(el.querySelector('[data-testid="effort-unsupported-note"]')).toBeTruthy()
+    const b = Array.from(el.querySelector('[data-testid="effort-row"]')!.querySelectorAll('button'))[0] as HTMLButtonElement
+    expect(b.disabled).toBe(false)
+  })
+
+  it('no note for a supporting model', async () => {
+    const el = await mount('claude-opus-4-8', EFFORT_CATALOG, 'high')
+    expect(el.querySelector('[data-testid="effort-unsupported-note"]')).toBeNull()
   })
 })

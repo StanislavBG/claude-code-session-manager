@@ -23,7 +23,7 @@ function persona(over: Partial<AgentPersona> = {}): AgentPersona {
     description: 'Looks around.',
     tools: [],
     model: null,
-    color: null,
+    effort: null, color: null,
     tags: [],
     projects: [],
     action: null,

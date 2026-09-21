@@ -50,6 +50,7 @@ const AgentPersonaSaveSchema = z.object({
   description: BoundedString,
   tools: z.array(BoundedString),
   model: BoundedString,
+  effort: BoundedString.optional(),
   color: BoundedString,
   tags: z.array(WorkTypeSchema),
   projects: z.array(ProjectEntrySchema).optional(),

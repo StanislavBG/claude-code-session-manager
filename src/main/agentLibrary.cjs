@@ -70,11 +70,12 @@ function decodeLine(s) {
  * overrides the button's caption (defaults to the persona name). Claude Code
  * ignores all three; only this app reads them.
  */
-function serializePersona({ name, description, tools, model, color, tags, projects, action, actionLabel, title, body }) {
+function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, body }) {
   const lines = ['---', `name: ${name}`];
   if (description) lines.push(`description: ${description}`);
   if (tools && tools.length) lines.push(`tools: ${tools.join(', ')}`);
   if (model && model !== 'inherit') lines.push(`model: ${model}`);
+  if (effort && effort !== 'inherit') lines.push(`effort: ${effort}`);
   if (color) lines.push(`color: ${color}`);
   if (tags && tags.length) lines.push(`tags: ${tags.join(', ')}`);
   if (projects && projects.length) lines.push(`projects: ${projects.join(', ')}`);
@@ -96,6 +97,7 @@ async function savePersona({
   description,
   tools,
   model,
+  effort,
   color,
   tags,
   projects,
@@ -111,7 +113,7 @@ async function savePersona({
     throw new Error('agent name must be lowercase, hyphenated (e.g. "my-agent")');
   }
   const target = validatePath(path.join(globalDir, `${name}.md`));
-  const text = serializePersona({ name, description, tools, model, color, tags, projects, action, actionLabel, title, body });
+  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, body });
   await writeTextAtomic(target, text);
   if (originalName && originalName !== name) {
     const oldReal = validatePath(path.join(globalDir, `${originalName}.md`));
@@ -235,6 +237,7 @@ async function listPersonas({
       description: fm.description || null,
       tools: parseTools(fm.tools),
       model: fm.model || null,
+      effort: fm.effort || null,
       color: fm.color || null,
       tags: parseTools(fm.tags),
       projects: parseTools(fm.projects),

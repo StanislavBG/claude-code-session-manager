@@ -87,8 +87,8 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   `actionLabel:` frontmatter renders a button in that project's Sessions toolbar. Pressing it is the same act
   as pressing New Session, through the same mint authority.
 - **Settings (System/Project/Local) is substrate, not per-Epic curation.** If a behavior should differ per
-  Epic, it is a Tag, an Agent persona, or a future PRD — never a plain Settings edit. `model` is the one
-  field carved out per-Epic (persona frontmatter wins over the Settings default).
+  Epic, it is a Tag, an Agent persona, or a future PRD — never a plain Settings edit. `model` + `effort` are
+  carved out per-Epic (persona frontmatter wins over the Settings default).
 - **SINGLE-WRITER LAW over the operations root** (`src/main/lib/opsOwnership.cjs`). Every
   `session-manager-operations/<namespace>/` has exactly ONE owning writer; everyone else reads. Fail-closed —
   an undeclared writer throws. Adding a namespace or writer is a deliberate edit to that file. Build ops

@@ -3,26 +3,21 @@
 
 // Bans explicit `any` in src/renderer + src/preload. `tsc --strict` only blocks
 // IMPLICIT any, so `: any` / `as any` would otherwise creep back unchecked.
-// Flags `: any`, `as any`, `<any>` / `<..., any>` (incl. `Record<string, any>`),
-// `any[]`, `@ts-ignore`, `@ts-nocheck`. Text inside comments/strings is ignored
-// (except the @ts-* directives, which live in comments by nature).
+// Walks the TypeScript AST for `AnyKeyword` (exact for every type position, immune
+// to comments/strings/JSX text) and scans real comments for `@ts-ignore` /
+// `@ts-nocheck`. Complexity: O(n) in source size per file.
 // Escape hatch, per line: `// lint-allow-any: <non-empty reason>`.
 // Excludes tests (*.test.* / *.spec.* / __tests__) and src/renderer/public/**.
 
 const fs = require('fs')
 const path = require('path')
+const ts = require('typescript')
 
 const ROOT = path.join(__dirname, '..')
 const SCAN_ROOTS = [path.join(ROOT, 'src', 'renderer'), path.join(ROOT, 'src', 'preload')]
 const PUBLIC_DIR = path.join(ROOT, 'src', 'renderer', 'public')
 
-const ANY_PATTERNS = [
-  /:\s*any\b/,
-  /\bas\s+any\b/,
-  /[<,]\s*any\s*[>,]/,
-  /\bany\s*\[\]/,
-]
-const DIRECTIVE_RE = /(?:\/\/|\/\*|^\s*\*)\s*@ts-(?:ignore|nocheck)\b/
+const DIRECTIVE_RE = /@ts-(?:ignore|nocheck)\b/
 const ALLOW_RE = /\/\/\s*lint-allow-any:\s*\S/
 
 function isTestPath(p) {
@@ -48,71 +43,38 @@ function walk(dir, out) {
   }
 }
 
-// Blanks comments and string/template contents with spaces (newlines and
-// length preserved so line numbers line up). O(n).
-function stripCommentsAndStrings(src) {
-  let out = ''
-  let i = 0
-  const n = src.length
-  while (i < n) {
-    const c = src[i]
-    const c2 = src[i + 1]
-    if (c === '/' && c2 === '/') {
-      while (i < n && src[i] !== '\n') {
-        out += ' '
-        i++
-      }
-      continue
-    }
-    if (c === '/' && c2 === '*') {
-      out += '  '
-      i += 2
-      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) {
-        out += src[i] === '\n' ? '\n' : ' '
-        i++
-      }
-      if (i < n) {
-        out += '  '
-        i += 2
-      }
-      continue
-    }
-    if (c === '"' || c === "'" || c === '`') {
-      const quote = c
-      out += ' '
-      i++
-      while (i < n && src[i] !== quote) {
-        if (src[i] === '\\') {
-          out += '  '
-          i += 2
-          continue
-        }
-        out += src[i] === '\n' ? '\n' : ' '
-        i++
-      }
-      if (i < n) {
-        out += ' '
-        i++
-      }
-      continue
-    }
-    out += c
-    i++
-  }
-  return out
-}
-
 function checkSource(file, src) {
-  const violations = []
-  const origLines = src.split('\n')
-  const scanLines = stripCommentsAndStrings(src).split('\n')
-  for (let idx = 0; idx < origLines.length; idx++) {
-    const orig = origLines[idx]
-    if (ALLOW_RE.test(orig)) continue
-    const scan = scanLines[idx] || ''
-    if (ANY_PATTERNS.some((re) => re.test(scan)) || DIRECTIVE_RE.test(orig)) {
-      violations.push({ file, line: idx + 1, snippet: orig.trim().slice(0, 120) })
+  const kind = file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+  const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, kind)
+  const lineOf = (pos) => sf.getLineAndCharacterOfPosition(pos).line
+  const hits = new Set() // 0-based line indexes
+
+  // Comments are collected from AST-anchored trivia (leading of every node incl. the
+  // EOF token, trailing after each node), so string/JSX text is never mistaken for one.
+  const seen = new Set()
+  const checkComments = (ranges) => {
+    for (const r of ranges || []) {
+      if (seen.has(r.pos)) continue
+      seen.add(r.pos)
+      const m = DIRECTIVE_RE.exec(src.slice(r.pos, r.end))
+      if (m) hits.add(lineOf(r.pos + m.index))
     }
+  }
+
+  const visit = (node) => {
+    if (node.kind === ts.SyntaxKind.AnyKeyword) hits.add(lineOf(node.getStart(sf)))
+    checkComments(ts.getLeadingCommentRanges(src, node.getFullStart()))
+    checkComments(ts.getTrailingCommentRanges(src, node.getEnd()))
+    ts.forEachChild(node, visit)
+  }
+  visit(sf)
+
+  const origLines = src.split('\n')
+  const violations = []
+  for (const idx of [...hits].sort((a, b) => a - b)) {
+    const orig = origLines[idx] || ''
+    if (ALLOW_RE.test(orig)) continue
+    violations.push({ file, line: idx + 1, snippet: orig.trim().slice(0, 120) })
   }
   return violations
 }
@@ -134,4 +96,4 @@ function main() {
 
 if (require.main === module) main()
 
-module.exports = { checkSource, stripCommentsAndStrings }
+module.exports = { checkSource }

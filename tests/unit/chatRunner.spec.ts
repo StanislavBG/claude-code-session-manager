@@ -43,6 +43,9 @@ const cp = require('node:child_process') as { spawn: (...args: unknown[]) => unk
 type FakeChild = EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; pid: number; kill: (sig?: string) => void }
 let nextChild: FakeChild | null = null
 let lastSpawnArgs: string[] | null = null
+// Per-test override of the shared spawn stub (chatRunner.cjs destructured `spawn`
+// at require time, so reassigning cp.spawn later would not reach it).
+let spawnHook: ((child: FakeChild, args: string[]) => void) | null = null
 cp.spawn = (...spawnCallArgs: unknown[]) => {
   const child = new EventEmitter() as FakeChild
   child.stdout = new EventEmitter()
@@ -51,6 +54,7 @@ cp.spawn = (...spawnCallArgs: unknown[]) => {
   child.kill = () => {}
   nextChild = child
   lastSpawnArgs = spawnCallArgs[1] as string[]
+  spawnHook?.(child, lastSpawnArgs)
   return child
 }
 
@@ -77,6 +81,8 @@ const chatRunner = require('../../src/main/chatRunner.cjs') as {
   } | null
   __setExecutor: (fn: ((job: Record<string, unknown>) => Promise<void>) | null) => void
   __resetQueueForTests: () => void
+  __liveSessionCount: () => number
+  cancel: (tabId: string) => Promise<void>
   parseStopSignal: (text: string) => { questions: string[] } | null
   splitStopSignal: (text: string) => { answerBody: string; questions: string[] } | null
   STOP_SENTINEL: string
@@ -838,5 +844,117 @@ describe('bounded stream buffers (real executeRun path via a faked child process
     expect(overflowRows[0].scope).toBe('chatRunner')
     emitResultLine(child, 'ok')
     await flush()
+  })
+})
+
+describe('per-sessionId in-flight latch (real executeRun path via a faked child process)', () => {
+  const os = require('node:os') as typeof import('node:os')
+  const fs = require('node:fs') as typeof import('node:fs')
+  const path = require('node:path') as typeof import('node:path')
+  const opsErrorLog = require('../../src/main/lib/opsErrorLog.cjs') as { appendError: (row: Record<string, unknown>) => unknown }
+  const realAppendError = opsErrorLog.appendError
+  let scratch = ''
+  let spawned: FakeChild[] = []
+  let spawnArgv: string[][] = []
+
+  beforeEach(() => {
+    chatRunner.__setExecutor(null)
+    opsErrorLog.appendError = () => undefined
+    scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'chatrunner-latch-'))
+    spawned = []
+    spawnArgv = []
+  })
+  afterEach(() => {
+    opsErrorLog.appendError = realAppendError
+    spawnHook = null
+    fs.rmSync(scratch, { recursive: true, force: true })
+  })
+
+  it('is empty after success, failure, cancel and spawn ENOENT', async () => {
+    chatRunner.run({ tabId: 'l1', sessionId: 'sess-l1', prompt: 'a', cwd: scratch, resume: false })
+    await flush()
+    expect(chatRunner.__liveSessionCount()).toBe(1)
+    emitResultLine(nextChild!, 'ok')
+    await flush()
+    expect(chatRunner.__liveSessionCount()).toBe(0)
+
+    chatRunner.run({ tabId: 'l2', sessionId: 'sess-l2', prompt: 'a', cwd: scratch, resume: false })
+    await flush()
+    nextChild!.emit('close', 1, null)
+    await flush()
+    expect(chatRunner.__liveSessionCount()).toBe(0)
+
+    chatRunner.run({ tabId: 'l3', sessionId: 'sess-l3', prompt: 'a', cwd: scratch, resume: false })
+    await flush()
+    const c3 = nextChild!
+    const cancelled = chatRunner.cancel('l3')
+    c3.emit('close', null, 'SIGTERM')
+    await cancelled
+    await flush() // pump()'s .finally() (which drops the latch) runs a microtask after settle
+    expect(chatRunner.__liveSessionCount()).toBe(0)
+
+    chatRunner.run({ tabId: 'l4', sessionId: 'sess-l4', prompt: 'a', cwd: scratch, resume: false })
+    await flush()
+    nextChild!.emit('error', Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' }))
+    await flush()
+    expect(chatRunner.__liveSessionCount()).toBe(0)
+  })
+
+  it('cancel then immediate re-run of the same sessionId waits for the slow exit, then starts with --resume', async () => {
+    let live = 0
+    let maxLive = 0
+    spawnHook = (child, args) => {
+      live += 1
+      maxLive = Math.max(maxLive, live)
+      // Exits 500 ms after being killed, like a CLI flushing its transcript.
+      child.kill = () => { setTimeout(() => { live -= 1; child.emit('close', null, 'SIGTERM') }, 500) }
+      spawned.push(child)
+      spawnArgv.push(args)
+    }
+    // process.kill(-pid) on the fake pid must not hit a real group.
+    const realKill = process.kill
+    process.kill = (() => { throw new Error('ESRCH') }) as typeof process.kill
+    // The CLI writes <HOME>/.claude/projects/<encoded cwd>/<sid>.jsonl on first spawn; main
+    // (epicSpawnPlan) then picks --resume off that transcript. Scratch HOME keeps it off the real one.
+    const realHome = process.env.HOME
+    process.env.HOME = scratch
+    const { encodeCwd } = require('../../src/main/lib/encodeCwd.cjs') as { encodeCwd: (d: string) => string }
+    const projDir = path.join(scratch, '.claude', 'projects', encodeCwd(scratch))
+    fs.mkdirSync(projDir, { recursive: true })
+    fs.writeFileSync(path.join(projDir, 'sess-l5.jsonl'), '{}\n')
+    try {
+      chatRunner.run({ tabId: 'l5', sessionId: 'sess-l5', prompt: 'first', cwd: scratch, resume: false })
+      await flush()
+      expect(spawned).toHaveLength(1)
+      const cancelled = chatRunner.cancel('l5')
+      chatRunner.run({ tabId: 'l5', sessionId: 'sess-l5', prompt: 'second', cwd: scratch, resume: true })
+      await flush()
+      expect(spawned).toHaveLength(1)
+      await cancelled
+      await flush()
+      expect(spawned).toHaveLength(2)
+      expect(maxLive).toBe(1)
+      expect(spawnArgv[1]).toContain('--resume')
+      spawned[1].emit('close', 0, null)
+      await flush()
+      expect(chatRunner.__liveSessionCount()).toBe(0)
+    } finally {
+      process.kill = realKill
+      if (realHome === undefined) delete process.env.HOME
+      else process.env.HOME = realHome
+    }
+  })
+
+  it('serializes two different tabs that share one sessionId', async () => {
+    chatRunner.run({ tabId: 'l6a', sessionId: 'sess-l6', prompt: 'a', cwd: scratch, resume: false })
+    await flush()
+    const first = nextChild!
+    const outcome = chatRunner.run({ tabId: 'l6b', sessionId: 'sess-l6', prompt: 'b', cwd: scratch, resume: true })
+    expect(outcome.queued).toBe(true)
+    await flush()
+    expect(nextChild).toBe(first)
+    emitResultLine(first, 'done')
+    await flush()
+    expect(nextChild).not.toBe(first)
   })
 })

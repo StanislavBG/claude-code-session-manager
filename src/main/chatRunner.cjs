@@ -322,6 +322,13 @@ const waiting = []; // [{ tabId, sessionId, prompt, cwd, resume, silent, onSilen
 // Closes the microtask-wide window in which per-tab exclusivity would
 // otherwise not hold. See pump().
 const dispatching = new Set();
+// sessionIds with a live CLI child: added when pump() dispatches a run, dropped
+// in the same .finally() that frees the lane — i.e. only after executeRun has
+// settled from `close`/`error`/spawn failure. A cancelled child still exiting
+// therefore keeps holding it. Two `claude -p` against one sessionId die with
+// "Session ID … is already in use", so pump() refuses to start a second run
+// for a held sessionId (it waits in `waiting` like any other blocked run).
+const liveSessions = new Set();
 let activeCount = 0;
 
 // Indirection so tests can stub the spawn without launching claude.
@@ -337,6 +344,7 @@ function __setExecutor(fn) { executor = fn || executeRun; }
 function __resetQueueForTests() {
   inFlight.clear();
   dispatching.clear();
+  liveSessions.clear();
   waiting.length = 0;
   activeCount = 0;
   sessionSlots.__resetForTests();
@@ -385,6 +393,7 @@ function run(opts) {
   // visible in `inFlight` — the same window pump() guards against.
   const tabBusy = inFlight.has(opts.tabId)
     || dispatching.has(opts.tabId)
+    || liveSessions.has(opts.sessionId)
     || waiting.some((w) => w.tabId === opts.tabId);
   if (tabBusy && opts.silent) {
     // Silent probes stay best-effort and invisible: a probe that collides is
@@ -407,7 +416,8 @@ function pump() {
     // it in `inFlight` (which happens a microtask later) — without it, one
     // synchronous sweep of this loop could start two runs for the same tab and
     // race two --resume processes against a single sessionId.
-    const idx = waiting.findIndex((w) => !inFlight.has(w.tabId) && !dispatching.has(w.tabId));
+    const idx = waiting.findIndex((w) => !inFlight.has(w.tabId) && !dispatching.has(w.tabId)
+      && !liveSessions.has(w.sessionId));
     // Everything queued is blocked behind its own tab's live run; the settle()
     // of that run re-pumps.
     if (idx === -1) break;
@@ -420,6 +430,7 @@ function pump() {
     const [job] = waiting.splice(idx, 1);
     activeCount += 1;
     dispatching.add(job.tabId);
+    liveSessions.add(job.sessionId);
     Promise.resolve()
       .then(() => {
         const donePromise = executor(job);
@@ -430,6 +441,7 @@ function pump() {
       .catch(() => { /* executeRun never rejects; defensive */ })
       .finally(() => {
         dispatching.delete(job.tabId);
+        liveSessions.delete(job.sessionId);
         sessionSlots.release(slotToken);
         activeCount -= 1;
         pump();
@@ -1018,6 +1030,7 @@ module.exports = {
   run,
   cancel,
   __resetQueueForTests,
+  __liveSessionCount: () => liveSessions.size,
   attachWindow,
   registerChatHandlers,
   parseStopSignal,

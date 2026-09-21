@@ -19,6 +19,7 @@ import type { ScheduleStateSnapshot, ScheduleJob } from '../../../../../preload/
 
 const api = {
   schedule: {
+    listPrds: async () => [],
     health: vi.fn(() => new Promise(() => {})),
     onState: () => () => {},
     queueHealth: vi.fn(() => new Promise(() => {})),

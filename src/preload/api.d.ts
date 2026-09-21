@@ -579,6 +579,9 @@ export interface ScheduleJob {
    *  intent-carrying `sourcePromptId`/`sourceTabId`, which can disagree.
    *  Authoritative source for "which Epic is this from" in every UI. */
   epicId?: string | null;
+  /** Renderer-only: true for a row synthesized from an archived PRD file (no queue row
+   *  exists to act on) — see lib/archivedPlanRows. Never present in queue.json. */
+  synthetic?: boolean;
   /** Bounded trail of accepted status transitions (scheduleJobTransitions.cjs's
    *  transitionJob), oldest-first, capped at ~20 entries. Lets a status
    *  change be reviewed after the fact instead of only inferred from a

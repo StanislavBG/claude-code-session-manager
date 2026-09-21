@@ -131,6 +131,7 @@ function PrdDetail({ row, elapsedMs, headChoices }: { row: PlanRow; elapsedMs: n
         <div className={`${line} text-amber-400/90`} data-testid="job-row-held-reason">held · {job.heldReason}</div>
       )}
       {errorText && <div className={`${line} text-accent/80`}>{errorText}</div>}
+      {!job.synthetic && (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-0.5">
         {linkedPromptSession && (
           <button
@@ -174,6 +175,7 @@ function PrdDetail({ row, elapsedMs, headChoices }: { row: PlanRow; elapsedMs: n
           <DispositionControl job={job} headChoices={headChoices} />
         )}
       </div>
+      )}
       {showLog && job.runId && (
         <RunLogViewer runId={job.runId} slug={job.slug} title={job.title || job.slug} onClose={() => setShowLog(false)} />
       )}

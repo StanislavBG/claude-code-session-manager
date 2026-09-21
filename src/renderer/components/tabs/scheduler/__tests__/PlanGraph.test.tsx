@@ -15,6 +15,7 @@ let container: HTMLDivElement | null = null
 let root: Root | null = null
 const api = {
   schedule: {
+    listPrds: async () => [],
     health: () => new Promise(() => {}),
     onState: () => () => {},
     setConfig: async () => ({ ok: true }),

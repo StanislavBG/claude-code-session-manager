@@ -47,6 +47,7 @@ function snapshot(jobs: ScheduleJob[]): ScheduleStateSnapshot {
 beforeEach(() => {
   ;(globalThis as any).window.api = {
     schedule: {
+      listPrds: async () => [],
       health: () => new Promise(() => {}),
       onState: () => () => {},
       setConfig: async () => ({ ok: true }),

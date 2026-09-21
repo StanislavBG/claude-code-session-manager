@@ -14,6 +14,7 @@ let root: Root | null = null
 const api = {
   supervisor: { getLog: async () => [] },
   schedule: {
+    listPrds: async () => [],
     health: async () => ({ consecutiveFailures: 2, bootedAt: 0, lastPollAt: 0, lastPollOk: true, backoffNextAt: null, nextResetCached: null, runningJobs: [] }),
     onState: () => () => {},
     setConfig: async () => ({ ok: true }),

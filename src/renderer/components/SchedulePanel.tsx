@@ -11,6 +11,8 @@ import { projectNameFromCwd, InfoDot } from './tabs/scheduler/sched-primitives'
 import { buildHeadChoicesBySlug, sectionHeadChoices } from './tabs/scheduler/DispositionControl'
 import { buildBacklogTree, flattenBacklogNodes } from '../lib/backlogTree'
 import { buildPlans } from '../lib/schedulerStages'
+import { mergeArchivedPlanRows } from '../lib/archivedPlanRows'
+import { useScheduledPrds } from '../lib/useScheduledPrds'
 import { PlanBand } from './tabs/scheduler/PlanBand'
 import { JobRow, EpicSectionBlock } from './tabs/scheduler/JobRow'
 import { SupervisorPanel } from './tabs/scheduler/SupervisorPanel'
@@ -206,7 +208,12 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
   // Graph mode — plans are derived from the FILTERED jobs, memoized on the snapshot
   // (never on the 1s `now` ticker) so every PlanRow keeps its identity across ticks
   // and PrdRow's React.memo bails out. Declared before the early returns (rules of hooks).
-  const graphJobs = useMemo(() => (snap ? applyFilter(snap.jobs, filter) : []), [snap, filter])
+  // Archived PRDs of already-visible Epics are merged back in so a finished plan keeps its done steps.
+  const prds = useScheduledPrds()
+  const graphJobs = useMemo(
+    () => (snap ? applyFilter(mergeArchivedPlanRows(snap.jobs, prds, scopeCwd), filter) : []),
+    [snap, prds, scopeCwd, filter],
+  )
   const cap = snap?.effectiveConcurrency?.cap
   const plans = useMemo(
     () => (planMode === 'list' ? [] : buildPlans(graphJobs, { sessions, avgDurationMs, concurrency: cap })),

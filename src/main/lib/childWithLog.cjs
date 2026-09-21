@@ -51,7 +51,10 @@
  */
 
 const fs = require('node:fs');
-const { spawn, execFileSync } = require('node:child_process');
+const { spawn, execFile } = require('node:child_process');
+
+// Injectable for tests (enumeration-failure coverage).
+const deps = { execFile };
 
 // Grace period between the post-exit SIGTERM sweep and the follow-up SIGKILL
 // sweep of a detached child's process group. See sweepChildProcessGroup below.
@@ -144,44 +147,55 @@ function openLog(logPath) {
 // Read-only — never throws, never blocks the caller's exit path. Used to
 // report what sweepChildProcessGroup is about to kill, since the kill itself
 // is silent (ESRCH on the normal empty-group case).
+// Async: resolves to the survivors list, rejects on ps failure/timeout. O(P) in
+// the process table, off the main event loop.
 function enumerateProcessGroupSurvivors(pgid) {
-  if (process.platform !== 'linux') return [];
-  if (!pgid || pgid <= 1) return [];
-  try {
-    const out = execFileSync('ps', ['-eo', 'pid,pgrp,pcpu,etimes,comm'], { encoding: 'utf8', timeout: 2000 });
-    const survivors = [];
-    for (const line of out.split('\n').slice(1)) {
-      const m = line.trim().match(/^(\d+)\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(.+)$/);
-      if (!m) continue;
-      const [, pidStr, pgrpStr, pcpuStr, etimesStr, comm] = m;
-      if (Number(pgrpStr) !== pgid) continue;
-      survivors.push({ pid: Number(pidStr), pcpu: Number(pcpuStr), etimes: Number(etimesStr), comm });
-    }
-    return survivors;
-  } catch {
-    return [];
-  }
+  if (process.platform !== 'linux') return Promise.resolve([]);
+  if (!pgid || pgid <= 1) return Promise.resolve([]);
+  return new Promise((resolve, reject) => {
+    try {
+      deps.execFile('ps', ['-eo', 'pid,pgrp,pcpu,etimes,comm'], { encoding: 'utf8', timeout: 2000 }, (err, out) => {
+        if (err) { reject(err); return; }
+        const survivors = [];
+        for (const line of String(out).split('\n').slice(1)) {
+          const m = line.trim().match(/^(\d+)\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(.+)$/);
+          if (!m) continue;
+          const [, pidStr, pgrpStr, pcpuStr, etimesStr, comm] = m;
+          if (Number(pgrpStr) !== pgid) continue;
+          survivors.push({ pid: Number(pidStr), pcpu: Number(pcpuStr), etimes: Number(etimesStr), comm });
+        }
+        resolve(survivors);
+      });
+    } catch (e) { reject(e); }
+  });
 }
 
-// Returns the leaked descendants found (see enumerateProcessGroupSurvivors),
-// having enumerated them BEFORE issuing SIGTERM so the report reflects what
-// was actually swept, not what happened to still be running afterward.
-function sweepChildProcessGroup(child, detached) {
-  if (!detached) return [];
-  if (!child || !child.pid || child.pid <= 1) return [];
+// Issues SIGTERM (then a delayed SIGKILL) immediately and returns a promise for
+// the leaked descendants (see enumerateProcessGroupSurvivors). Enumeration is
+// started BEFORE the SIGTERM but the kill never waits on it; the promise never
+// rejects — a failed enumeration resolves [] after a safeLog line.
+function sweepChildProcessGroup(child, detached, safeLog) {
+  if (!detached) return Promise.resolve([]);
+  if (!child || !child.pid || child.pid <= 1) return Promise.resolve([]);
   // Defensive: never target the Session Manager process's own group.
-  if (child.pid === process.pid) return [];
+  if (child.pid === process.pid) return Promise.resolve([]);
 
-  const leaked = enumerateProcessGroupSurvivors(child.pid).filter((p) => p.pid !== child.pid);
+  const pid = child.pid;
+  const leakedP = enumerateProcessGroupSurvivors(pid)
+    .then((all) => all.filter((p) => p.pid !== pid))
+    .catch((e) => {
+      safeLog(`[childWithLog] process-group enumeration failed; leak report omitted: ${e && e.message}\n`);
+      return [];
+    });
 
-  try { process.kill(-child.pid, 'SIGTERM'); } catch { /* ESRCH: empty group, the normal case */ }
+  try { process.kill(-pid, 'SIGTERM'); } catch { /* ESRCH: empty group, the normal case */ }
 
   const t = setTimeout(() => {
-    try { process.kill(-child.pid, 'SIGKILL'); } catch { /* ESRCH: empty group, the normal case */ }
+    try { process.kill(-pid, 'SIGKILL'); } catch { /* ESRCH: empty group, the normal case */ }
   }, POST_EXIT_GROUP_SWEEP_GRACE_MS);
   if (t.unref) t.unref();
 
-  return leaked;
+  return leakedP;
 }
 
 function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watchdogs = [], onExit }) {
@@ -220,9 +234,15 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
   // O(|watchdogs|) setup, O(1) per poll tick.
   const clearFns = watchdogs.map((wd) => {
     const t = setInterval(() => {
-      if (wd.shouldFire(ctx)) {
-        clearInterval(t);
-        wd.action(ctx);
+      try {
+        if (wd.shouldFire(ctx)) {
+          clearInterval(t);
+          wd.action(ctx);
+        }
+      } catch (e) {
+        // A throwing shouldFire is retried next tick; a throwing action has
+        // already cleared its interval. Never let it escape the timer.
+        safeLog(`[childWithLog] watchdog "${wd.label}" threw: ${e && e.message}\n`);
       }
     }, wd.intervalMs);
     if (t.unref) t.unref();
@@ -238,19 +258,25 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
   // calls onExit (caller may still safeLog inside), then closes the fd.
   const handleDone = (exitCode, signal, error, spawnFailed) => {
     clearAllTimers();
-    const leakedDescendants = sweepChildProcessGroup(ctx.child, !!spawnSpec.options?.detached);
-    if (onExit) {
-      onExit({
-        exitCode,
-        signal: signal ?? null,
-        killedByWatchdog: ctx.killedByWatchdog,
-        error,
-        spawnFailed: spawnFailed ?? false,
-        leakedDescendants,
-        safeLog,
-      });
-    }
-    closeFd();
+    // Kill cascade is issued synchronously inside sweepChildProcessGroup; only
+    // onExit + closeFd wait (bounded by the 2 s ps timeout) for the leak report.
+    sweepChildProcessGroup(ctx.child, !!spawnSpec.options?.detached, safeLog).then((leakedDescendants) => {
+      try {
+        if (onExit) {
+          onExit({
+            exitCode,
+            signal: signal ?? null,
+            killedByWatchdog: ctx.killedByWatchdog,
+            error,
+            spawnFailed: spawnFailed ?? false,
+            leakedDescendants,
+            safeLog,
+          });
+        }
+      } finally {
+        closeFd();
+      }
+    });
   };
 
   // Attempt synchronous spawn. On failure, call handleDone immediately so the
@@ -282,4 +308,4 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
   return { child, cancel };
 }
 
-module.exports = { openLog, withChildAndLog, POST_EXIT_GROUP_SWEEP_GRACE_MS };
+module.exports = { openLog, withChildAndLog, POST_EXIT_GROUP_SWEEP_GRACE_MS, _deps: deps };

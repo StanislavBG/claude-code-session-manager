@@ -21,7 +21,7 @@
  *       shouldFire(ctx) returns true, then calls action(ctx).
  *     - action() may call ctx.addTimer(t) to register secondary timers
  *       (e.g. SIGTERM → SIGKILL cascades) so they are also cleared on exit.
- *   Calls onExit() synchronously inside the child 'exit'/'error' handler,
+ *   Calls onExit() inside the child 'exit'/'error' handler,
  *   before calling closeFd(). Caller may call ctx.safeLog() inside onExit.
  *
  * WatchdogContext:
@@ -170,32 +170,35 @@ function enumerateProcessGroupSurvivors(pgid) {
   });
 }
 
-// Issues SIGTERM (then a delayed SIGKILL) immediately and returns a promise for
-// the leaked descendants (see enumerateProcessGroupSurvivors). Enumeration is
-// started BEFORE the SIGTERM but the kill never waits on it; the promise never
-// rejects — a failed enumeration resolves [] after a safeLog line.
+// Returns null when there is nothing to enumerate/sweep (non-detached, missing or
+// invalid pid, our own group) so the caller can finish synchronously. Otherwise
+// returns a promise for the leaked descendants: enumeration runs FIRST so the
+// report reflects what the sweep is about to reap, and SIGTERM (+ the delayed
+// SIGKILL) is issued only once it has SETTLED — resolved or rejected. The 2 s ps
+// timeout bounds that wait. The promise never rejects: a failed enumeration
+// resolves [] after a safeLog line, and the group is still killed.
 function sweepChildProcessGroup(child, detached, safeLog) {
-  if (!detached) return Promise.resolve([]);
-  if (!child || !child.pid || child.pid <= 1) return Promise.resolve([]);
+  if (!detached) return null;
+  if (!child || !child.pid || child.pid <= 1) return null;
   // Defensive: never target the Session Manager process's own group.
-  if (child.pid === process.pid) return Promise.resolve([]);
+  if (child.pid === process.pid) return null;
 
   const pid = child.pid;
-  const leakedP = enumerateProcessGroupSurvivors(pid)
+  const kill = () => {
+    try { process.kill(-pid, 'SIGTERM'); } catch { /* ESRCH: empty group, the normal case */ }
+    const t = setTimeout(() => {
+      try { process.kill(-pid, 'SIGKILL'); } catch { /* ESRCH: empty group, the normal case */ }
+    }, POST_EXIT_GROUP_SWEEP_GRACE_MS);
+    if (t.unref) t.unref();
+  };
+
+  return enumerateProcessGroupSurvivors(pid)
     .then((all) => all.filter((p) => p.pid !== pid))
     .catch((e) => {
       safeLog(`[childWithLog] process-group enumeration failed; leak report omitted: ${e && e.message}\n`);
       return [];
-    });
-
-  try { process.kill(-pid, 'SIGTERM'); } catch { /* ESRCH: empty group, the normal case */ }
-
-  const t = setTimeout(() => {
-    try { process.kill(-pid, 'SIGKILL'); } catch { /* ESRCH: empty group, the normal case */ }
-  }, POST_EXIT_GROUP_SWEEP_GRACE_MS);
-  if (t.unref) t.unref();
-
-  return leakedP;
+    })
+    .then((leaked) => { kill(); return leaked; });
 }
 
 function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watchdogs = [], onExit }) {
@@ -258,9 +261,7 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
   // calls onExit (caller may still safeLog inside), then closes the fd.
   const handleDone = (exitCode, signal, error, spawnFailed) => {
     clearAllTimers();
-    // Kill cascade is issued synchronously inside sweepChildProcessGroup; only
-    // onExit + closeFd wait (bounded by the 2 s ps timeout) for the leak report.
-    sweepChildProcessGroup(ctx.child, !!spawnSpec.options?.detached, safeLog).then((leakedDescendants) => {
+    const finish = (leakedDescendants) => {
       try {
         if (onExit) {
           onExit({
@@ -276,6 +277,14 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
       } finally {
         closeFd();
       }
+    };
+    const pending = sweepChildProcessGroup(ctx.child, !!spawnSpec.options?.detached, safeLog);
+    // Nothing to enumerate: stay synchronous. Otherwise onExit + closeFd wait
+    // (bounded by the 2 s ps timeout) for the leak report; a throwing onExit
+    // must not become an unhandled rejection.
+    if (!pending) { finish([]); return; }
+    pending.then(finish).catch((e) => {
+      safeLog(`[childWithLog] onExit threw: ${e && e.message}\n`);
     });
   };
 

@@ -67,9 +67,7 @@ describe('childWithLog post-exit group sweep (PRD 1065)', () => {
 // inferring it from ps.
 describe('childWithLog onExit leakedDescendants reporting (PRD 1110)', () => {
   it.skipIf(process.platform !== 'linux')(
-    'reports a backgrounded grandchild still alive when enumeration ran',
-    // Enumeration is async and the kill never waits on it, so the grandchild
-    // ignores SIGTERM to stay observable until the SIGKILL sweep.
+    'reports the same backgrounded grandchild the sweep reaped',
     async () => {
       dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-child-leak-'));
       const logPath = path.join(dir, 'job.log');
@@ -86,7 +84,7 @@ describe('childWithLog onExit leakedDescendants reporting (PRD 1110)', () => {
             command: 'sh',
             args: [
               '-c',
-              `(trap '' TERM; exec sleep 30) & echo $! > ${pidFile}; exec sleep 0.2`,
+              `sleep 30 & echo $! > ${pidFile}; exec sleep 0.2`,
             ],
             options: { detached: true },
           },
@@ -223,4 +221,82 @@ describe('childWithLog async enumeration + guarded watchdog (PRD 1353)', () => {
     handle.cancel();
     await done;
   }, 10000);
+});
+
+// PRD 1370 — enumerate BEFORE SIGTERM; no-enumeration paths stay synchronous.
+describe('childWithLog sweep ordering + sync paths (PRD 1370)', () => {
+  const { _deps } = require('../childWithLog.cjs');
+  const realExecFile = _deps.execFile;
+  const realKill = process.kill;
+  afterEach(() => { _deps.execFile = realExecFile; process.kill = realKill; });
+
+  function setup(name) {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), name));
+    const logPath = path.join(dir, 'job.log');
+    return { logPath, ...openLog(logPath) };
+  }
+
+  it.skipIf(process.platform !== 'linux').each([
+    ['successful', (cb) => cb(null, 'PID PGRP %CPU ELAPSED COMMAND\n')],
+    ['failing', (cb) => cb(new Error('ps boom'))],
+  ])('SIGTERM waits for the %s enumeration', async (label, respond) => {
+    const { logPath, fd, safeLog, closeFd } = setup('sm-child-order-');
+    let psCb;
+    _deps.execFile = (_c, _a, _o, cb) => { psCb = cb; };
+    const groupKills = [];
+    process.kill = (pid, sig) => {
+      if (pid < -1 && sig === 'SIGTERM') { groupKills.push(pid); return true; }
+      return realKill.call(process, pid, sig);
+    };
+    let info;
+    const done = new Promise((resolve) => {
+      withChildAndLog({
+        fd, logPath, safeLog, closeFd,
+        spawn: { command: 'sh', args: ['-c', 'exit 0'], options: { detached: true } },
+        onExit: (i) => { info = i; resolve(); },
+      });
+    });
+    for (let i = 0; i < 100 && !psCb; i++) await new Promise((r) => setTimeout(r, 20));
+    expect(psCb).toBeTruthy();
+    await new Promise((r) => setTimeout(r, 100));
+    expect(groupKills).toEqual([]);
+    respond(psCb);
+    await done; // onExit runs only after the kill was issued
+    expect(groupKills.length).toBe(1);
+    expect(info.leakedDescendants).toEqual([]);
+    if (label === 'failing') expect(fs.readFileSync(logPath, 'utf8')).toContain('enumeration failed');
+  }, 15000);
+
+  it('runs onExit synchronously when the spawn throws', () => {
+    const { logPath, fd, safeLog, closeFd } = setup('sm-child-spawnfail-');
+    let ran = false;
+    const r = withChildAndLog({
+      fd, logPath, safeLog, closeFd,
+      spawn: { command: 'sh', args: [], options: { cwd: '/nonexistent\0bad', detached: true } },
+      onExit: (i) => { ran = i.spawnFailed === true; },
+    });
+    expect(r.child).toBeNull();
+    expect(ran).toBe(true);
+  });
+
+  it.skipIf(process.platform !== 'linux')('a throwing deferred onExit is logged and still closes the fd', async () => {
+    const { logPath, fd, safeLog, closeFd } = setup('sm-child-throw-');
+    _deps.execFile = (_c, _a, _o, cb) => { setImmediate(() => cb(null, 'h\n')); };
+    const unhandled = [];
+    const h = (e) => unhandled.push(e);
+    process.on('unhandledRejection', h);
+    let closed = false;
+    const wrapClose = () => { closed = true; closeFd(); };
+    await new Promise((resolve) => {
+      withChildAndLog({
+        fd, logPath, safeLog, closeFd: wrapClose,
+        spawn: { command: 'sh', args: ['-c', 'exit 0'], options: { detached: true } },
+        onExit: () => { setImmediate(resolve); throw new Error('exit boom'); },
+      });
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    process.off('unhandledRejection', h);
+    expect(unhandled).toEqual([]);
+    expect(closed).toBe(true);
+  }, 15000);
 });

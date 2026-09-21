@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import ForceGraph2D from 'react-force-graph-2d'
+import ForceGraph2D, { type NodeObject } from 'react-force-graph-2d'
 import type { PluginSkillEntry, SkillEdge } from '../../../lib/pluginSkills'
 
 const ACCENT = '#b85c34'
@@ -49,10 +49,10 @@ export function SkillReferenceGraph({
         height={size.height}
         nodeId="id"
         nodeLabel="name"
-        nodeColor={(node: any) => (node.id === selectedId ? ACCENT : DIM)}
+        nodeColor={(node: NodeObject) => (node.id === selectedId ? ACCENT : DIM)}
         linkDirectionalArrowLength={4}
         linkDirectionalArrowRelPos={1}
-        onNodeClick={(node: any) => onSelect(node.id)}
+        onNodeClick={(node: NodeObject) => onSelect(String(node.id))}
       />
     </div>
   )

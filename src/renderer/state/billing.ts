@@ -6,7 +6,7 @@
  * Worst case the user saw the toast twice. Now a single tick lives here and
  * both consumers read from the same zustand snapshot.
  *
- * Backoff: any non-`ok` result (rate-limited, auth, transient, config) doubles
+ * Backoff: every non-`ok` result (rate-limited, auth, transient, config) doubles
  * the poll delay from a 60s baseline up to a 300s cap, with +/-25% jitter so
  * concurrent app instances don't all retry in lockstep against an endpoint
  * that's already refusing. A `retryAfterMs` hint on the result floors the

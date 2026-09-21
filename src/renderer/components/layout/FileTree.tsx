@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Z } from '../../lib/zLayers'
-import type { FileEntry } from '../../../preload/api'
+import type { FileEntry, GitFileStatusMap, GitFileStatusType } from '../../../preload/api'
 import { extOf, IMAGE_EXTS } from '../../state/editor'
 import { toast } from '../../state/toast'
 import { usePanelFocus, usePanelFocusRef } from '../../lib/panelFocus'
@@ -83,8 +83,8 @@ interface TreeNode extends FileEntry {
   loading?: boolean
 }
 
-type GitStatusType = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'staged' | 'conflict'
-type GitStatusMap = Record<string, GitStatusType>
+type GitStatusType = GitFileStatusType
+type GitStatusMap = GitFileStatusMap
 
 const GIT_BADGES: Record<GitStatusType, { color: string; label: string }> = {
   modified: { color: '#e2a93d', label: 'M' },
@@ -130,11 +130,8 @@ function getExtColor(name: string, isDir: boolean): string {
 }
 
 async function tryLoadGitStatus(cwd: string): Promise<GitStatusMap> {
-  // Wave 1d ships window.api.git.fileStatus. Until then, gracefully no-op.
   try {
-    const api = (window as unknown as { api?: { git?: { fileStatus?: (cwd: string) => Promise<GitStatusMap> } } }).api
-    if (!api?.git?.fileStatus) return {}
-    return await api.git.fileStatus(cwd)
+    return await window.api.git.fileStatus(cwd)
   } catch {
     return {}
   }

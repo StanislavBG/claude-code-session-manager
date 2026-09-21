@@ -506,7 +506,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     // ensureEpic's response is the byte-identical record just written to
     // active-index.json (validated against promptSessionSchema.cjs main-side)
     // — safe to trust as PromptSession without re-checking shape here.
-    const session = result.session as unknown as PromptSession
+    const session = result.session
     const firstEvent: PromptSessionEvent = {
       id: mintId('pevt'),
       promptSessionId: session.id,
@@ -718,7 +718,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       // The active-index write above already removed this Epic's row from
       // disk (removedIds) — the archive that was meant to replace it just
       // failed to land, so put the row back rather than leaving the Epic in
-      // neither place. Best-effort: any further failure here is already
+      // neither place. Best-effort: every further failure here is already
       // logged inside persistActiveIndex itself.
       persistActiveIndex(priorSession.cwd, get().sessions, get().events).catch(() => {})
       throw err

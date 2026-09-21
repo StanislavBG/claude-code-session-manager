@@ -245,7 +245,7 @@ export function Workbench({ onNavigate, onNewSession, onOpenVoice, onOpenSchedul
         mountPanel(DEFAULT_PANEL_ID)
       }
     })
-    // Debounced autosave: any layout change (resize, split, drag, close)
+    // Debounced autosave: each layout change (resize, split, drag, close)
     // schedules one write ~500ms out, mirroring hydrateSessions' debounced
     // autosave (sessions.ts). `persistLayout` itself refuses to save a
     // zero-panel layout.

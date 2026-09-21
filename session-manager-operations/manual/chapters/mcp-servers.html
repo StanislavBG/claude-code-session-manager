@@ -112,7 +112,11 @@ once at the start of a session.</p>
 
 <p>The view switcher next to the scope switcher flips between <strong>Installed</strong> (the
 editor above) and <strong>Library</strong> — a browsable catalog of known MCP servers you can add
-with one click. The Library only ever reads <code>~/.claude.json</code>'s <code>mcpServers</code>
+in one step. Some catalog entries contain literal <code>&lt;token&gt;</code> placeholders (for example
+<code>--db-path &lt;path&gt;</code>); for those, Install first opens a form asking for a value for every
+placeholder, and nothing is written until you fill them all. On the Installed view, saving a new or
+changed server that still contains a placeholder is refused with an error, and a stored server that
+still has one carries an "unconfigured placeholder" badge. The Library only ever reads <code>~/.claude.json</code>'s <code>mcpServers</code>
 keys to mark which catalog entries are already installed; it has no separate connection state of
 its own. Installing from the Library still lands you back in the same "unprobed until you test it"
 situation above — a catalog entry existing doesn't mean the server it describes is reachable on

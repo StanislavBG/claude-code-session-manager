@@ -662,6 +662,8 @@ async function checkDelegationReadiness({ cwd, homeDir = os.homedir() }) {
  * failure must not prevent the guard install it's reporting on.
  */
 function logAutoInstallEvent({ cwd, guard, action, error }) {
+  // A no-op outcome is not an event worth an error-log row (24 rows/3 days of boot noise).
+  if (action === 'already-installed') return;
   try {
     const opsErrorLog = require('./opsErrorLog.cjs');
     opsErrorLog.appendError({
@@ -743,7 +745,7 @@ async function ensureGuardsInstalled(cwd, { homeDir = os.homedir() } = {}) {
     return { ok: false, root: null, guards: {}, error: err?.message ?? String(err) };
   }
 
-  const cacheKey = `${root} ${homeDir}`;
+  const cacheKey = `${root}\0${homeDir}`;
   const cached = guardsInstalledCache.get(cacheKey);
   if (cached) return cached;
 

@@ -1154,3 +1154,22 @@ test('ensureGuardsInstalled: records every auto-install attempt in the ops error
   expect(delegationLines.every((l) => l.level === 'info')).toBe(true);
   expect(delegationLines.every((l) => l.meta?.action === 'installed')).toBe(true);
 }, 15_000);
+
+test('ensureGuardsInstalled: an already-installed re-run writes no new ops error-log rows', async () => {
+  const cwd = await mkTmp('sm-ensure-guards-noop-');
+  const homeDir = await mkTmp('sm-ensure-guards-noop-home-');
+
+  await ensureGuardsInstalled(cwd, { homeDir });
+  const logFile = opsErrorLogTodayFile(cwd);
+  const before = fs.readFileSync(logFile, 'utf8');
+
+  clearGuardsInstalledCache();
+  const again = await ensureGuardsInstalled(cwd, { homeDir });
+  expect(Object.values(again.guards).every((g) => g.action === 'already-installed')).toBe(true);
+  expect(fs.readFileSync(logFile, 'utf8')).toBe(before);
+}, 15_000);
+
+test('delegationReadiness.cjs source contains no raw NUL byte', () => {
+  const src = fs.readFileSync(path.join(__dirname, '..', 'delegationReadiness.cjs'));
+  expect(src.includes(0)).toBe(false);
+});

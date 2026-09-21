@@ -1507,6 +1507,7 @@ function loadSchedulerState() {
     if (typeof s.lastPollAt === 'number') lastPollAt = s.lastPollAt;
     if (typeof s.failureStreakWarned === 'boolean') failureStreakWarned = s.failureStreakWarned;
     if (typeof s.failureStreakWarnedAt === 'number') failureStreakWarnedAt = s.failureStreakWarnedAt;
+    failureStreakWarnedAt = restoreFailureStreakWarnedAt(failureStreakWarned, failureStreakWarnedAt, Date.now());
     if (typeof s.lastEscalationAt === 'number') lastEscalationAtMs = s.lastEscalationAt;
   } catch { /* first boot or corrupt — start fresh */ }
 }
@@ -3398,6 +3399,21 @@ function shouldWarnFailureStreak(consecutiveFailures, alreadyWarned, threshold =
 }
 
 /**
+ * Pure: `failureStreakWarned === true` must always carry a numeric
+ * `failureStreakWarnedAt` (a state file may hold one without the other), so
+ * the escalation message never renders "after nullm". Backfills `nowMs`.
+ */
+function restoreFailureStreakWarnedAt(warned, warnedAt, nowMs) {
+  if (!warned) return typeof warnedAt === 'number' ? warnedAt : null;
+  return typeof warnedAt === 'number' ? warnedAt : nowMs;
+}
+
+/** Pure: whole minutes a warned streak has persisted; never null/NaN. */
+function persistedStreakMinutes(warnedAt, nowMs) {
+  return typeof warnedAt === 'number' ? Math.round((nowMs - warnedAt) / 60_000) : 0;
+}
+
+/**
  * Pure: does a PERSISTING failure streak warrant another escalation (audit
  * event + opsErrorLog line) at `nowMs`? Exported for unit testing. Only
  * relevant once the streak has already crossed `warnThreshold` (the initial
@@ -3438,7 +3454,7 @@ function warnFailureStreakIfNeeded() {
   }
   if (failureStreakWarned && shouldEscalateFailureStreak(consecutiveFailures, lastEscalationAtMs, nowMs)) {
     lastEscalationAtMs = nowMs;
-    const persistedMinutes = failureStreakWarnedAt ? Math.round((nowMs - failureStreakWarnedAt) / 60_000) : null;
+    const persistedMinutes = persistedStreakMinutes(failureStreakWarnedAt, nowMs);
     try {
       appendAuditEvent('usage_poller_failure_streak_persists', { consecutiveFailures, backoffMs, lastFailureKind, persistedMinutes });
       appendError({
@@ -12577,6 +12593,8 @@ module.exports = {
   nextBackoffMs,
   shouldWarnFailureStreak,
   shouldEscalateFailureStreak,
+  restoreFailureStreakWarnedAt,
+  persistedStreakMinutes,
   computeDegradedBudget,
   healRefusalReason,
   writeQueue,

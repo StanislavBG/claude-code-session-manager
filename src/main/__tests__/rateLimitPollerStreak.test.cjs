@@ -20,6 +20,8 @@ const {
   nextBackoffMs,
   shouldWarnFailureStreak,
   shouldEscalateFailureStreak,
+  restoreFailureStreakWarnedAt,
+  persistedStreakMinutes,
   BACKOFF_MAX_MS,
   FAILURE_STREAK_WARN_THRESHOLD,
   FAILURE_STREAK_ESCALATION_MS,
@@ -111,4 +113,16 @@ test('shouldEscalateFailureStreak: re-arms after a streak clears (lastEscalatedA
   // 30-minute window from the previous incident.
   const laterStreakNow = firstStreakNow + 5 * 60_000; // well under 30 min later
   expect(shouldEscalateFailureStreak(FAILURE_STREAK_WARN_THRESHOLD, null, laterStreakNow)).toBe(true);
+});
+
+test('restoreFailureStreakWarnedAt backfills now when warned=true has no numeric timestamp', () => {
+  expect(restoreFailureStreakWarnedAt(true, null, 5000)).toBe(5000);
+  expect(restoreFailureStreakWarnedAt(true, 1000, 5000)).toBe(1000);
+  expect(restoreFailureStreakWarnedAt(false, null, 5000)).toBeNull();
+});
+
+test('persistedStreakMinutes is always a number, never null', () => {
+  expect(persistedStreakMinutes(null, 5000)).toBe(0);
+  expect(persistedStreakMinutes(0, 120_000)).toBe(2);
+  expect(persistedStreakMinutes(restoreFailureStreakWarnedAt(true, undefined, 5000), 5000)).toBe(0);
 });

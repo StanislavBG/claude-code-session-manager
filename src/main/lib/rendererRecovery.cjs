@@ -25,6 +25,11 @@ function createReloadPolicy({ now = Date.now, max = MAX_RELOADS, windowMs = WIND
       stamps.push(t);
       return true;
     },
+    /** Would tryReload() succeed right now? Pure — consumes no slot. */
+    canReload() {
+      const t = now();
+      return stamps.filter((s) => t - s < windowMs).length < max;
+    },
     /** Should a render-process-gone reason trigger recovery? */
     shouldRecoverFromGone(reason) {
       return reason !== 'clean-exit';
@@ -51,18 +56,41 @@ function attachRendererRecovery(wc, {
   };
   const alive = () => !wc.isDestroyed();
 
+  function logCapReached(reason) {
+    if (capLogged) return;
+    capLogged = true;
+    log('error', 'renderer auto-reload cap reached — giving up', { reason, max: MAX_RELOADS, windowMs: WINDOW_MS });
+  }
+
   function reload(reason) {
     if (!alive()) return;
     if (!policy.tryReload()) {
-      if (!capLogged) {
-        capLogged = true;
-        log('error', 'renderer auto-reload cap reached — giving up', { reason, max: MAX_RELOADS, windowMs: WINDOW_MS });
-      }
+      logCapReached(reason);
       return;
     }
     capLogged = false;
     log('warn', 'renderer auto-reload', { reason });
     try { wc.reload(); } catch (e) { log('error', 'renderer reload threw', { reason, error: e?.message }); }
+  }
+
+  // A hung main thread cannot commit a same-process reload, so kill the renderer
+  // and let the render-process-gone handler do the single cap-counted reload
+  // (in a new process). No slot is consumed here.
+  function recoverFromHang() {
+    if (!alive()) return;
+    if (!policy.canReload()) {
+      // A hung-but-visible window beats a dead white one.
+      logCapReached('unresponsive');
+      return;
+    }
+    try {
+      if (typeof wc.forcefullyCrashRenderer !== 'function') throw new Error('forcefullyCrashRenderer unavailable');
+      log('warn', 'renderer unresponsive — forcefully crashing for recovery');
+      wc.forcefullyCrashRenderer();
+    } catch (e) {
+      log('warn', 'forcefullyCrashRenderer failed — falling back to reload', { error: e?.message });
+      reload('unresponsive');
+    }
   }
 
   wc.on('render-process-gone', (_e, details) => {
@@ -76,7 +104,7 @@ function attachRendererRecovery(wc, {
     if (unresponsiveTimer) return;
     unresponsiveTimer = setTimer(() => {
       unresponsiveTimer = null;
-      reload('unresponsive');
+      recoverFromHang();
     }, UNRESPONSIVE_GRACE_MS);
   });
 

@@ -440,6 +440,9 @@ function createWindow() {
       });
   });
 
+  // Bounded auto-recovery for a crashed / hung / failed-to-load renderer.
+  require('./lib/rendererRecovery.cjs').attachRendererRecovery(mainWindow.webContents, { logs });
+
   // Native right-click menu — Copy / Paste / Select All everywhere. Roles
   // hook into Electron's built-in clipboard/selection plumbing, which xterm.js
   // (and Monaco, and Tiptap) all participate in via the standard DOM
@@ -449,8 +452,6 @@ function createWindow() {
   // renderer frame. Fires on Ctrl+R and HMR full-page reloads — the fresh
   // renderer will re-register its own watches, so the old sender's contribution
   // must be unwound first to avoid refcount ratcheting.
-  require('./lib/rendererRecovery.cjs').attachRendererRecovery(mainWindow.webContents, { logs });
-
   mainWindow.webContents.on('did-start-navigation', () => {
     configMgr.releaseWatchesForSender(mainWindow.webContents.id);
   });

@@ -453,6 +453,8 @@ function createWindow() {
   // renderer frame. Fires on Ctrl+R and HMR full-page reloads — the fresh
   // renderer will re-register its own watches, so the old sender's contribution
   // must be unwound first to avoid refcount ratcheting.
+  require('./lib/rendererRecovery.cjs').attachRendererRecovery(mainWindow.webContents, { logs });
+
   mainWindow.webContents.on('did-start-navigation', () => {
     configMgr.releaseWatchesForSender(mainWindow.webContents.id);
   });

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { toast } from '../../state/toast'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 
@@ -36,6 +36,21 @@ function formatSize(bytes: number): string {
  *  Epic card and (per PRD 828/827) the Epic-scoped composer. */
 export function useAttachments(): AttachmentsState {
   const [items, setItems] = useState<AttachmentItem[]>([])
+  // Mirror of `items` so remove/clear/unmount can revoke synchronously, outside
+  // a state updater (updaters may run twice under StrictMode).
+  const itemsRef = useRef<AttachmentItem[]>([])
+  const commit = (next: AttachmentItem[]) => {
+    itemsRef.current = next
+    setItems(next)
+  }
+  // Each blob URL pins its whole File until revoked — release whatever is still held on unmount.
+  useEffect(
+    () => () => {
+      for (const i of itemsRef.current) if (i.url) URL.revokeObjectURL(i.url)
+      itemsRef.current = []
+    },
+    [],
+  )
   const add = (files: FileList | File[]) => {
     const list = Array.from(files)
     if (!list.length) return
@@ -51,10 +66,17 @@ export function useAttachments(): AttachmentsState {
         file: f,
       }
     })
-    setItems((prev) => [...prev, ...next])
+    commit([...itemsRef.current, ...next])
   }
-  const remove = (id: string) => setItems((prev) => prev.filter((i) => i.id !== id))
-  const clear = () => setItems([])
+  const remove = (id: string) => {
+    const gone = itemsRef.current.find((i) => i.id === id)
+    if (gone?.url) URL.revokeObjectURL(gone.url)
+    commit(itemsRef.current.filter((i) => i.id !== id))
+  }
+  const clear = () => {
+    for (const i of itemsRef.current) if (i.url) URL.revokeObjectURL(i.url)
+    commit([])
+  }
   return { items, add, remove, clear }
 }
 

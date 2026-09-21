@@ -8,10 +8,10 @@ import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsC
 
 /**
  * PRD 1035 — surfacing the per-Epic git worktree isolation checkpoint
- * (PRDs 1032-1034) in the UI: the EpicWorktreeChip status readout, the
- * EpicDetail conflict banner + Resolve-in-Terminal/Retry-merge actions, and
- * the "Merge to main" action itself. Mirrors EpicDetail.test.tsx's window.api
- * stub pattern.
+ * (PRDs 1032-1034) in the UI: the EpicWorktreeChip status readout and the
+ * EpicDetail conflict banner + Resolve-in-Terminal action. There is no manual
+ * "Merge to main" / "Retry merge" button — merging is done in git. Mirrors
+ * EpicDetail.test.tsx's window.api stub pattern.
  */
 
 vi.mock('@xterm/xterm', () => {
@@ -153,7 +153,7 @@ describe('Epic worktree isolation UI (PRD 1035)', () => {
     expect(chip!.textContent).toBe('shared tree')
   })
 
-  it('EpicDetail shows the isolated branch chip + a "Merge to main" button when worktree.status is active', async () => {
+  it('EpicDetail shows the isolated branch chip and NO "Merge to main" button when worktree.status is active', async () => {
     installWindowApiMock()
     const { el } = await mountActiveEpicWithWorktree({
       dir: '/tmp/worktrees/epic-x',
@@ -163,33 +163,11 @@ describe('Epic worktree isolation UI (PRD 1035)', () => {
     })
     const chip = el.querySelector('[data-testid="epic-worktree-chip"]')
     expect(chip!.textContent).toContain('sm-epic/epic-x')
-    expect(el.querySelector('[data-testid="epic-merge-to-main"]')).not.toBeNull()
+    expect(el.querySelector('[data-testid="epic-merge-to-main"]')).toBeNull()
     expect(el.querySelector('[data-testid="epic-worktree-conflict-banner"]')).toBeNull()
   })
 
-  it('clicking "Merge to main" calls the store action and toasts success', async () => {
-    const mergeToMain = vi.fn().mockResolvedValue({ ok: true, status: 'merged', integrated: true })
-    installWindowApiMock({ mergeToMain })
-    const { el, session } = await mountActiveEpicWithWorktree({
-      dir: '/tmp/worktrees/epic-x',
-      branch: 'sm-epic/epic-x',
-      baseCwd: '/tmp/proj',
-      status: 'active',
-    })
-    const button = el.querySelector('[data-testid="epic-merge-to-main"]') as HTMLButtonElement
-    await act(async () => {
-      button.click()
-      await flushAsync()
-    })
-    expect(mergeToMain).toHaveBeenCalledWith({
-      cwd: '/tmp/proj',
-      epicId: session.id,
-      branch: 'sm-epic/epic-x',
-      dir: '/tmp/worktrees/epic-x',
-    })
-  })
-
-  it('shows the conflict banner with the reason + Resolve-in-Terminal/Retry-merge actions on needs_merge_resolution', async () => {
+  it('shows the conflict banner with the reason, branch + Resolve-in-Terminal action (no retry) on needs_merge_resolution', async () => {
     installWindowApiMock()
     const { el } = await mountActiveEpicWithWorktree({
       dir: '/tmp/worktrees/epic-x',
@@ -202,8 +180,8 @@ describe('Epic worktree isolation UI (PRD 1035)', () => {
     expect(banner).not.toBeNull()
     expect(banner!.textContent).toContain('both branches edited README.md line 4')
     expect(el.querySelector('[data-testid="epic-worktree-resolve-in-terminal"]')).not.toBeNull()
-    expect(el.querySelector('[data-testid="epic-worktree-retry-merge"]')).not.toBeNull()
-    // No plain "Merge to main" button while conflicted — only Retry merge.
+    expect(banner!.textContent).toContain('sm-epic/epic-x')
+    expect(el.querySelector('[data-testid="epic-worktree-retry-merge"]')).toBeNull()
     expect(el.querySelector('[data-testid="epic-merge-to-main"]')).toBeNull()
   })
 
@@ -222,23 +200,5 @@ describe('Epic worktree isolation UI (PRD 1035)', () => {
       await flushAsync()
     })
     expect(el.querySelector('[data-testid="epic-terminal-pane-wrap"]')).not.toBeNull()
-  })
-
-  it('"Retry merge" re-calls mergeToMain and shows a conflict toast on a second failure', async () => {
-    const mergeToMain = vi.fn().mockResolvedValue({ ok: false, status: 'needs_merge_resolution', reason: 'still conflicted' })
-    installWindowApiMock({ mergeToMain })
-    const { el } = await mountActiveEpicWithWorktree({
-      dir: '/tmp/worktrees/epic-x',
-      branch: 'sm-epic/epic-x',
-      baseCwd: '/tmp/proj',
-      status: 'needs_merge_resolution',
-      conflictReason: 'conflict',
-    })
-    const retryButton = el.querySelector('[data-testid="epic-worktree-retry-merge"]') as HTMLButtonElement
-    await act(async () => {
-      retryButton.click()
-      await flushAsync()
-    })
-    expect(mergeToMain).toHaveBeenCalled()
   })
 })

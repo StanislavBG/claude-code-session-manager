@@ -440,21 +440,6 @@ function useRowMenuItems(
       })
     }
   }
-  if (epic.worktree?.status === 'active') {
-    items.push({
-      label: 'Merge to main',
-      onSelect: () => {
-        usePromptSessions
-          .getState()
-          .mergeEpicToMain(epic.id)
-          .then((result) => {
-            if (result.ok) toast.info('Merged to main')
-            else toast.error(`Merge conflict — resolve in Terminal (${result.reason ?? 'unknown reason'})`)
-          })
-          .catch((err: unknown) => toast.error(err instanceof Error ? err.message : String(err)))
-      },
-    })
-  }
   if (epic.status === 'completed') {
     items.push({
       label: 'Reopen',

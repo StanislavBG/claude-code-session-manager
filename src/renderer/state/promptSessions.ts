@@ -293,15 +293,6 @@ interface PromptSessionsState {
    *  status to 'completed', and persists the full event chain + transcript
    *  to session-manager-operations/prompt-sessions/<id>.json. */
   markCompleted: (promptSessionId: string, source?: string) => Promise<void>
-  /** Explicit "merge to main" action (PRD 1034) — folds this Epic's isolated
-   *  git worktree branch back into its owning project's main tree via the
-   *  same integrateEpicBranch checkpoint markCompleted uses. No-ops (returns
-   *  `{ ok: true }`) when the Epic has no worktree. On a real conflict, the
-   *  worktree's status is patched to 'needs_merge_resolution' and the branch
-   *  + worktree dir are left intact (never deleted) so a Terminal opened
-   *  against this Epic can still resolve it manually before this is called
-   *  again. */
-  mergeEpicToMain: (promptSessionId: string) => Promise<{ ok: boolean; reason?: string }>
   /** Mints a brand-new independent PromptSession (fresh claudeSessionId —
    *  the archived one is dead) that carries a traceability link back to the
    *  archived session it follows on from. */
@@ -383,29 +374,20 @@ function hasPendingWrite(path: string): boolean {
   return (pendingWriteCounts.get(path) ?? 0) > 0
 }
 
-/** Shared merge-to-main attempt (PRD 1034) used by both the explicit
- *  `mergeEpicToMain` action and markCompleted's merge-before-archive
- *  checkpoint — the ONLY point where an Epic's per-Epic git isolation
- *  (PRD 1032/1033) resolves back into its owning project's main tree.
- *  No-ops when the Epic has no worktree, or its worktree is already
- *  `'merged'`/`'disabled'` — nothing to (re-)attempt there. A worktree
- *  flagged `'needs_merge_resolution'` only re-attempts when `allowRetry` is
- *  set: markCompleted's own automatic checkpoint passes nothing (so a
- *  conflicted worktree is never silently retried mid-archive), while the
- *  explicit `mergeEpicToMain` action (EpicDetail/EpicQueue's own "Merge to
- *  main"/"Retry merge" buttons — PRD 1035) passes `true`, since a human
- *  pressing that button IS the explicit retry this module's contract always
- *  described. Never throws: an IPC failure (main process down, etc.) leaves
- *  the worktree exactly as it was rather than guessing a status. */
+/** Merge-to-main attempt (PRD 1034) — markCompleted's merge-before-archive
+ *  checkpoint is its sole caller, and the ONLY point where an Epic's per-Epic
+ *  git isolation (PRD 1032/1033) resolves back into its owning project's main
+ *  tree. No-ops when the Epic has no worktree, or its worktree is anything
+ *  other than `'active'` (already `'merged'`/`'disabled'`, or flagged
+ *  `'needs_merge_resolution'` — never silently retried). Never throws: an IPC
+ *  failure (main process down, etc.) leaves the worktree exactly as it was
+ *  rather than guessing a status. */
 async function attemptMergeToMainInternal(
   session: PromptSession,
-  allowRetry = false,
 ): Promise<{ worktree: PromptSession['worktree']; reason?: string }> {
   const worktree = session.worktree
   if (!worktree) return { worktree }
-  if (worktree.status !== 'active' && !(allowRetry && worktree.status === 'needs_merge_resolution')) {
-    return { worktree }
-  }
+  if (worktree.status !== 'active') return { worktree }
   if (typeof window === 'undefined' || !window.api?.promptSessions?.mergeToMain) return { worktree }
   try {
     const result = await window.api.promptSessions.mergeToMain({
@@ -741,23 +723,6 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       persistActiveIndex(priorSession.cwd, get().sessions, get().events).catch(() => {})
       throw err
     }
-  },
-  mergeEpicToMain: async (promptSessionId) => {
-    const session = get().sessions[promptSessionId]
-    if (!session) {
-      throw new Error(`mergeEpicToMain: no PromptSession with id "${promptSessionId}"`)
-    }
-    const { worktree, reason } = await attemptMergeToMainInternal(session, true)
-    // Only settle onto a session that's still the same one we started
-    // against — a concurrent markCompleted/deleteEpic/another merge call
-    // must never have its outcome overwritten by a stale one landing late.
-    const current = get().sessions[promptSessionId]
-    if (current && current.worktree === session.worktree) {
-      const patched = { ...current, worktree }
-      set({ sessions: { ...get().sessions, [promptSessionId]: patched } })
-      persistActiveIndex(session.cwd, get().sessions, get().events).catch(() => {})
-    }
-    return { ok: worktree?.status === 'merged', reason }
   },
   resumeArchived: async (archivedId, source) => {
     const archived = get().sessions[archivedId]

@@ -260,22 +260,23 @@ test('spawn() still refuses session_unreachable without any node-pty spawn', () 
   expect(result.error).toMatch(/cannot be resumed/);
 });
 
-test('planEpicSpawn resumes from the project root when the caller cwd is the vanished worktree path (transcript under project-root encoding)', () => {
+test('planEpicSpawn with a REAL on-disk index: project-root caller resumes, vanished-worktree caller is refused spawn_cwd_missing', () => {
   const { planEpicSpawn, __resetForTests } = require('../lib/epicSpawnPlan.cjs');
   __resetForTests();
   const projectRoot = fs.mkdtempSync(path.join(tmpHome, 'sm-plan-root-'));
   const deadWt = path.join(os.tmpdir(), 'sm-plan-dead-worktree-xyz');
   const sessionId = 'epic-session-root-probe';
+  writeActiveIndexWithWorktree(projectRoot, { epicId: 'epic-rp', claudeSessionId: sessionId, worktreeDir: deadWt });
   const tdir = path.join(tmpHome, '.claude', 'projects', projectRoot.replace(/[^a-zA-Z0-9]/g, '-'));
   fs.mkdirSync(tdir, { recursive: true });
   fs.writeFileSync(path.join(tdir, `${sessionId}.jsonl`), '{"type":"user"}\n');
-  const epic = {
-    id: 'epic-rp', cwd: projectRoot, claudeSessionId: sessionId, status: 'active',
-    worktree: { dir: deadWt, branch: 'sm-epic/epic-rp', baseCwd: projectRoot, status: 'active' },
-  };
-  const deps = { homeDir: tmpHome, readActiveIndex: () => ({ sessions: { 'epic-rp': epic } }), restoreWorktree: () => null };
-  const plan = planEpicSpawn({ cwd: deadWt, claudeSessionId: sessionId, deps });
-  expect(plan).toMatchObject({ ok: true, execCwd: projectRoot, useResume: true });
-  // A successful plan leaves no stale circuit-breaker entry: a second call still succeeds.
-  expect(planEpicSpawn({ cwd: deadWt, claudeSessionId: sessionId, deps }).ok).toBe(true);
+  const deps = { homeDir: tmpHome, restoreWorktree: () => null };
+
+  expect(planEpicSpawn({ cwd: projectRoot, claudeSessionId: sessionId, deps }))
+    .toMatchObject({ ok: true, execCwd: projectRoot, useResume: true });
+  __resetForTests();
+  const refused = planEpicSpawn({ cwd: deadWt, claudeSessionId: sessionId, deps });
+  expect(refused).toMatchObject({ ok: false, code: 'spawn_cwd_missing' });
+  expect(refused.message).toContain(deadWt);
+  expect(refused.message).toMatch(/project cwd/);
 });

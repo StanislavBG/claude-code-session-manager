@@ -72,7 +72,7 @@ function findEpic(cwd, claudeSessionId, deps) {
 /**
  * @param {{ cwd: string, claudeSessionId: string, fallbackResume?: boolean, deps?: object }} opts
  * @returns {{ ok: true, execCwd: string, useResume: boolean, transcriptPath: string|null }
- *   | { ok: false, code: 'epic_closed'|'session_unreachable', message: string }}
+ *   | { ok: false, code: 'epic_closed'|'session_unreachable'|'spawn_cwd_missing', message: string }}
  */
 function planEpicSpawn({ cwd, claudeSessionId, fallbackResume = false, deps = {} } = {}) {
   const statSync = deps.statSync || fs.statSync;
@@ -109,12 +109,13 @@ function planEpicSpawn({ cwd, claudeSessionId, fallbackResume = false, deps = {}
       return resolved.existingPaths.find((p) => path.dirname(p) === home) || null;
     };
     // The transcript may already live under the project encoding; spawning there writes back to
-    // the directory it occupies, so nothing forks. When the caller's `cwd` is itself the vanished
-    // worktree path, neither it nor execCwd is the project root, so probe the root explicitly.
+    // the directory it occupies, so nothing forks. `projectRootOf(cwd)` only contributes for a LIVE
+    // worktree caller cwd (it returns a vanished worktree path unchanged, so it adds nothing there);
+    // `epic.cwd`/`worktree.baseCwd` are not probed — the Epic is only found via the caller cwd, which
+    // is already a candidate, so they could never change an outcome.
     let projectRoot = null;
     try { projectRoot = projectRootOf(cwd); } catch { /* unresolvable → skip */ }
-    const candidates = [...new Set([execCwd, cwd, projectRoot, epic?.cwd, epic?.worktree?.baseCwd]
-      .filter((d) => typeof d === 'string' && d))];
+    const candidates = [...new Set([execCwd, cwd, projectRoot].filter((d) => typeof d === 'string' && d))];
     let reachableDir = null;
     for (const dir of candidates) {
       if (findReachable(dir)) { reachableDir = dir; break; }
@@ -136,6 +137,14 @@ function planEpicSpawn({ cwd, claudeSessionId, fallbackResume = false, deps = {}
       unreachable.set(claudeSessionId, { dir: missing, message });
       return { ok: false, code: 'session_unreachable', message };
     }
+  }
+
+  if (!isDir(execCwd, statSync)) {
+    return {
+      ok: false,
+      code: 'spawn_cwd_missing',
+      message: `Cannot spawn session ${claudeSessionId}: directory ${execCwd} does not exist. Pass the Epic's project cwd (the project root, not a removed worktree path) as the caller cwd.`,
+    };
   }
 
   return { ok: true, execCwd, useResume, transcriptPath: resolved?.path ?? null };

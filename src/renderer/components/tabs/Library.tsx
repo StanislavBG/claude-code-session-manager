@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import { Badge } from '../ui/Badge'
+import { Button } from '../ui/Button'
+import { distinctPlaceholders, fillPlaceholders, type Placeholder } from '../../lib/mcpPlaceholders'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { toast } from '../../state/toast'
 import {
@@ -47,6 +49,8 @@ export function McpLibrary() {
   const [error, setError] = useState<string | null>(null)
   const [flash, setFlash] = useState<string | null>(null)
   const [query, setQuery] = useState('')
+  // Catalog entry awaiting values for its `<token>` placeholders (nothing written yet).
+  const [pending, setPending] = useState<{ m: CatalogMcp; fields: Placeholder[]; values: Record<string, string> } | null>(null)
 
   const refresh = async () => {
     if (!home) return
@@ -64,7 +68,17 @@ export function McpLibrary() {
     [query]
   )
 
-  const install = async (m: CatalogMcp) => {
+  const install = (m: CatalogMcp) => {
+    const fields = distinctPlaceholders(m.config)
+    if (fields.length > 0) {
+      setError(null)
+      setPending({ m, fields, values: {} })
+      return
+    }
+    return writeInstall(m, m.config)
+  }
+
+  const writeInstall = async (m: CatalogMcp, config: CatalogMcp['config']) => {
     if (!home) return
     setBusy(m.id)
     setError(null)
@@ -72,14 +86,15 @@ export function McpLibrary() {
     const r = await window.api.config.readJson(path)
     const full = (r.data && typeof r.data === 'object' ? (r.data as Record<string, unknown>) : {}) ?? {}
     const servers = { ...((full.mcpServers as Record<string, unknown>) ?? {}) }
-    servers[m.id] = { ...('command' in m.config ? { type: 'stdio' } : {}), ...m.config }
+    servers[m.id] = { ...('command' in config ? { type: 'stdio' } : {}), ...config }
     const write = await window.api.config.writeJson(path, { ...full, mcpServers: servers })
     setBusy(null)
     if (!write.ok) {
       setError(write.error ?? 'write failed')
       return
     }
-    setFlash(`installed ${m.id} — switch to Installed to edit placeholders`)
+    setPending(null)
+    setFlash(`installed ${m.id}`)
     setTimeout(() => setFlash(null), 4000)
     refresh()
   }
@@ -119,6 +134,39 @@ export function McpLibrary() {
           }`}
         >
           {error ?? flash}
+        </div>
+      )}
+      {pending && (
+        <div className="px-4 py-3 border-b border-line bg-bg-elev space-y-2" data-testid="mcp-placeholder-form">
+          <div className="text-xs text-fg">
+            Configure <span className="font-medium">{pending.m.name}</span> — fill in every value before installing
+          </div>
+          {pending.fields.map((f) => (
+            <label key={f.token} className="flex items-center gap-2 text-xs">
+              <span className="w-64 shrink-0 text-fg-faint font-mono truncate" title={f.label}>{f.label}</span>
+              <input
+                required
+                aria-label={f.token}
+                value={pending.values[f.token] ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setPending((p) => (p ? { ...p, values: { ...p.values, [f.token]: v } } : p))
+                }}
+                placeholder={f.token}
+                className="flex-1 bg-bg border border-line rounded px-2 py-1 text-xs text-fg font-mono"
+              />
+            </label>
+          ))}
+          <div className="flex gap-2">
+            <Button
+              variant="primary"
+              disabled={busy === pending.m.id || pending.fields.some((f) => !(pending.values[f.token] ?? '').trim())}
+              onClick={() => writeInstall(pending.m, fillPlaceholders(pending.m.config, pending.values))}
+            >
+              install
+            </Button>
+            <Button onClick={() => setPending(null)}>cancel</Button>
+          </div>
         </div>
       )}
       <div className="flex-1 overflow-auto divide-y divide-line">

@@ -14,7 +14,8 @@ import { useHomeDir } from '../../lib/useHomeDir'
 import { useLayout } from '../../state/layout'
 import type { Scope } from '../../lib/scopes'
 import { McpLibrary, ViewSwitcher } from './Library'
-import { toast } from '../../state/toast'
+import { toast, useToast } from '../../state/toast'
+import { distinctPlaceholders } from '../../lib/mcpPlaceholders'
 import { deriveMcpConnectionState, type McpConnectionInfo } from '../../lib/mcpConnectionState'
 import type { McpStatusResult } from '../../../preload/api'
 
@@ -284,6 +285,17 @@ function McpServersComponent() {
             lastSavedAt={file.lastSavedAt}
             onSave={async () => {
               setSaveError(null)
+              // Refuse to persist a new/changed server that still has a literal `<token>`.
+              // Unchanged servers are exempt so a pre-existing broken entry can't block fixing/removing others.
+              const disk = (file.diskData as { mcpServers?: Record<string, unknown> } | null)?.mcpServers ?? {}
+              for (const [n, srv] of Object.entries(servers)) {
+                if (JSON.stringify(srv) === JSON.stringify(disk[n])) continue
+                const ph = distinctPlaceholders(srv)
+                if (ph.length > 0) {
+                  useToast.getState().show('error', `Not saved: "${n}" still contains placeholder ${ph.map((p) => p.token).join(', ')} — replace it with a real value`)
+                  return
+                }
+              }
               const r = await saveJson(path)
               if (!r.ok) setSaveError(r.error ?? 'save failed')
             }}
@@ -328,6 +340,14 @@ function McpServersComponent() {
                         <span className="truncate">{n}</span>
                       </span>
                       <span className="ml-2 flex items-center gap-2 shrink-0">
+                        {(() => {
+                          const ph = distinctPlaceholders(servers[n])
+                          return ph.length > 0 ? (
+                            <Badge tone="warn" title={`${scope} scope · ${path}`}>
+                              unconfigured placeholder: {ph.map((p) => p.token).join(', ')}
+                            </Badge>
+                          ) : null
+                        })()}
                         <Badge tone={conn.badgeTone}>{conn.label}</Badge>
                         <ProvenanceBadge interactive={false} scope={scope} input={mcpProvInput(n, servers[n])} />
                         <span className="text-fg-faint">{servers[n].type ?? 'stdio'}</span>

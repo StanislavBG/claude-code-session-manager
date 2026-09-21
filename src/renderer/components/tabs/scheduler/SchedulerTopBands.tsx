@@ -3,6 +3,8 @@ import type { ScheduleFirePolicy, ScheduleQueueHealthResult, ScheduleQueueHealth
 import { useScheduleState } from '../../../state/scheduleState'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { toast } from '../../../state/toast'
+import { usePanelFocus } from '../../../lib/panelFocus'
+import { useDocumentVisible } from '../../../lib/useDocumentVisible'
 import { formatAgo, formatRelative } from '../../../lib/formatTime'
 import { withTimeout } from '../../../lib/withTimeout'
 import { buildPlans, summarizeQueue } from '../../../lib/schedulerStages'
@@ -69,18 +71,43 @@ function headline(v: ScheduleQueueHealthVerdict, oldestRunningAgeMs: number | nu
  * Queue-health poll (15s) — the source for slots / verdict / dispatchable /
  * lastDispatchAttemptAt. schedule:state broadcasts on every mutation, but the
  * verdict depends on machine-wide slot occupancy + wall-clock idle time.
+ *
+ * Gated on panel focus + document visibility (dockview keeps the panel
+ * mounted while hidden); regaining focus loads immediately. A tick is skipped
+ * while the previous request is in flight. The first failure of a streak
+ * toasts once; a success resets the streak.
  */
-function useQueueHealth(scopeCwd: string | null): ScheduleQueueHealthResult | null {
+export function useQueueHealth(scopeCwd: string | null): ScheduleQueueHealthResult | null {
   const [result, setResult] = useState<ScheduleQueueHealthResult | null>(null)
+  const panelFocused = usePanelFocus()
+  const docVisible = useDocumentVisible()
+  const active = panelFocused && docVisible
   useEffect(() => {
+    if (!active) return
     let alive = true
+    let inFlight = false
+    let failing = false
     const load = () => {
-      void window.api.schedule.queueHealth(scopeCwd).then((r) => { if (alive) setResult(r) }).catch(() => {})
+      if (inFlight) return
+      inFlight = true
+      void window.api.schedule.queueHealth(scopeCwd).then(
+        (r) => {
+          inFlight = false
+          failing = false
+          if (alive) setResult(r)
+        },
+        (err: unknown) => {
+          inFlight = false
+          if (failing) return
+          failing = true
+          toast.error(`Queue health refresh failed: ${err instanceof Error ? err.message : String(err)}`)
+        },
+      )
     }
     load()
     const id = setInterval(load, POLL_MS)
     return () => { alive = false; clearInterval(id) }
-  }, [scopeCwd])
+  }, [scopeCwd, active])
   return result
 }
 

@@ -7,6 +7,7 @@ import { extractUrls } from '../lib/extractUrls'
 import { computeLineDiff, type DiffLine } from '../lib/lineDiff'
 import { toast } from '../state/toast'
 import { renderChatMarkdown } from '../lib/renderChatMarkdown'
+import { useThrottledValue } from '../lib/useThrottledValue'
 import { handleChatLinkClick, openLinkifiedFilePath, readLinkifiedFileText } from '../lib/handleChatLinkClick'
 import { assistantTurnPresentation } from '../lib/assistantTurnPresentation'
 import { clampTurnText } from '../lib/chatVerbosity'
@@ -73,6 +74,8 @@ function UrlCallout({ url }: { url: string }) {
 
 // A file mention is previewable inline (via MarkdownPreview) only when it
 // looks like markdown — code/other files still just open in the Editor.
+// Live (streaming) bubble markdown re-parse interval — see useThrottledValue.
+const LIVE_MARKDOWN_THROTTLE_MS = 100
 const MARKDOWN_PATH_RE = /\.(?:md|markdown)(?::\d+)*$/i
 
 // Same callout shape as UrlCallout, for bare file-path mentions (e.g. a pasted
@@ -1314,8 +1317,14 @@ function TurnComponent({
   const urls = extractUrls(shownText)
   const filePaths = extractFilePaths(shownText)
   const isPlan = hasMarkdownList(shownText)
-  const shownHtml = useMemo(() => renderChatMarkdown(shownText), [shownText])
   const isRunning = presentation === 'working'
+  // Live bubble: the text grows on every delta, so re-parse at most every
+  // LIVE_MARKDOWN_THROTTLE_MS and keep every prefix out of the shared cache.
+  const markdownSrc = useThrottledValue(shownText, LIVE_MARKDOWN_THROTTLE_MS, isRunning)
+  const shownHtml = useMemo(
+    () => renderChatMarkdown(markdownSrc, isRunning ? { cache: false } : undefined),
+    [markdownSrc, isRunning],
+  )
   // isApiErrorMessage/interruptedByShutdown both mean this turn is
   // incomplete (a dropped API response, a shutdown mid-stream) — reuse the
   // same ERROR_TINT/ERROR_TEXT the 'error' role and the two attribution

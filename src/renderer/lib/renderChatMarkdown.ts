@@ -38,13 +38,23 @@ export const CHAT_MARKDOWN_CACHE_CAP = 400
 
 const cache = new Map<string, string>()
 
-export function renderChatMarkdown(src: string): string {
-  const cached = cache.get(src)
-  if (cached !== undefined) return cached
+export interface RenderChatMarkdownOptions {
+  /** `false` skips the module cache entirely (no read, no write). Sanitization always runs. */
+  cache?: boolean
+}
+
+export function renderChatMarkdown(src: string, opts?: RenderChatMarkdownOptions): string {
+  const useCache = opts?.cache !== false
+  if (useCache) {
+    const cached = cache.get(src)
+    if (cached !== undefined) return cached
+  }
 
   const html = DOMPurify.sanitize(
     marked.parse(src, { async: false, breaks: true, renderer: chatMarkdownRenderer }) as string,
   )
+
+  if (!useCache) return html
 
   cache.set(src, html)
   if (cache.size > CHAT_MARKDOWN_CACHE_CAP) {
@@ -53,6 +63,10 @@ export function renderChatMarkdown(src: string): string {
   }
 
   return html
+}
+
+export function chatMarkdownCacheSize(): number {
+  return cache.size
 }
 
 export function clearChatMarkdownCache(): void {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { CHAT_MARKDOWN_CACHE_CAP, clearChatMarkdownCache, renderChatMarkdown } from '../renderChatMarkdown'
+import { CHAT_MARKDOWN_CACHE_CAP, chatMarkdownCacheSize, clearChatMarkdownCache, renderChatMarkdown } from '../renderChatMarkdown'
 
 describe('renderChatMarkdown', () => {
   // Issue #3 repro: Claude often emits checkmark-prefixed lines with a single
@@ -106,5 +106,29 @@ describe('renderChatMarkdown', () => {
       expect(warm).not.toContain('<script>')
       expect(warm).toBe(cold)
     })
+  })
+})
+
+describe('renderChatMarkdown cache: false', () => {
+  beforeEach(() => clearChatMarkdownCache())
+
+  it('never reads or writes the cache across 300 growing prefixes, and keeps finished entries', () => {
+    const finished = renderChatMarkdown('finished turn')
+    expect(chatMarkdownCacheSize()).toBe(1)
+    let text = ''
+    for (let i = 0; i < 300; i++) {
+      text += `word${i} `
+      renderChatMarkdown(text, { cache: false })
+    }
+    expect(chatMarkdownCacheSize()).toBe(1)
+    // Same reference-equal string back proves a cache hit for the finished turn.
+    expect(renderChatMarkdown('finished turn')).toBe(finished)
+  })
+
+  it('does not read a cached entry, and still sanitizes', () => {
+    const src = '<img src=x onerror=alert(1)> hi'
+    const html = renderChatMarkdown(src, { cache: false })
+    expect(html).not.toContain('onerror')
+    expect(chatMarkdownCacheSize()).toBe(0)
   })
 })

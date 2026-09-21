@@ -13,6 +13,7 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | check-epic-transcripts.cjs | manual read-only diagnostic (`--json`); also surfaced as a non-fatal warning in `npm run health` | no |
 | check-doc-hierarchy.cjs | `npm run lint:docs` (in `lint`) | no |
 | check-explicit-any.cjs | `npm run lint:any` (in `lint`) — bans explicit `any`/`@ts-ignore` in renderer+preload; per-line `// lint-allow-any: <reason>` | no |
+| check-main-ts-check.cjs | `npm run lint:main-ts-check` (in `lint`) — `tsconfig.main.json` `include` ⇔ `// @ts-check` first line, both directions; explicit list only, `checkJs` false | no |
 | check-unregistered-tests.cjs | `npm run lint:unregistered-tests` (in `lint`) | no |
 | check-unstable-selectors.cjs | `npm run lint:selectors` (in `lint`) | no |
 | cleanup-nested-queue-stubs.cjs | manual one-shot; dispatches to cleanup-worktree-ops-stubs.cjs | no |

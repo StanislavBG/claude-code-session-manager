@@ -28,7 +28,7 @@ import { Z } from '../../../lib/zLayers'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
-import { Markdown } from 'tiptap-markdown'
+import { Markdown, type MarkdownStorage } from 'tiptap-markdown'
 import { splitFrontmatter, joinFrontmatter, type SplitDoc } from '../../../lib/markdownDoc'
 
 interface Props {
@@ -118,7 +118,7 @@ export function TiptapBody({ value, onChange }: Props) {
     content: splitRef.current.body,
     onUpdate: ({ editor: ed }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const body = (ed.storage as any).markdown.getMarkdown() as string
+      const body = (ed.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown()
       suppressExternalRef.current = true
       onChange(joinFrontmatter(splitRef.current, body))
       // Allow external updates again on next tick.
@@ -138,7 +138,7 @@ export function TiptapBody({ value, onChange }: Props) {
     const newSplit = splitFrontmatter(value)
     // Only re-load if the body actually changed from outside.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentBody = (editor.storage as any).markdown.getMarkdown() as string
+    const currentBody = (editor.storage as unknown as { markdown: MarkdownStorage }).markdown.getMarkdown()
     if (newSplit.body !== currentBody) {
       splitRef.current = newSplit
       editor.commands.setContent(newSplit.body)

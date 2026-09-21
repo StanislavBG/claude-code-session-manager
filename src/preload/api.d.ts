@@ -1,3 +1,5 @@
+import type { PromptSession } from '../renderer/state/promptSessions';
+
 export interface BuildTarget {
   registry: string;
   packageName: string;
@@ -2124,7 +2126,7 @@ export interface PromptSessionsCreateEpicPayload {
 
 export interface PromptSessionsCreateEpicResult {
   epicId: string;
-  session: Record<string, unknown>;
+  session: PromptSession;
 }
 
 // ─────────────────────────────────── PromptSessions create-worktree (main-side createEpicWorktree)

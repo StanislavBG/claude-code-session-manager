@@ -86,10 +86,8 @@ export async function installMonacoSchemas(regs: SchemaRegistration[]) {
       return { uri: r.uri, fileMatch: r.fileMatch, schema }
     })
   )
-  // monaco-editor 0.55+ marks languages.json as deprecated in its .d.ts but the
-  // runtime export `jsonDefaults` is still the public API. Access via `any`.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const jsonDefaults = (monaco.languages as any).json.jsonDefaults
+  // monaco-editor 0.55+ deprecates languages.json in favour of the top-level `json` namespace.
+  const jsonDefaults = monaco.json.jsonDefaults
   jsonDefaults.setDiagnosticsOptions({
     validate: true,
     allowComments: false,

@@ -56,6 +56,11 @@ const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/agentEffortResolve.cjs');
 const { planEpicSpawn } = require('./lib/epicSpawnPlan.cjs');
 const logs = require('./logs.cjs');
+const { createHeadTailBuffer } = require('./lib/headTailBuffer.cjs');
+
+// Caps on per-run stream buffers (a run can last hours).
+const STDERR_TAIL_MAX = 64 * 1024;
+const LINE_BUFFER_MAX = 8 * 1024 * 1024;
 
 // The only two CLI errors that mean "wrong session flag" (verified against the
 // real CLI). "in use" → the transcript exists, so resume; "no conversation" →
@@ -478,6 +483,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // funnels through here so the exit path can emit a fallback only when the
     // run settled without one.
     let terminalSent = false;
+    let lineOverflowLogged = false;
     const emitTerminal = (channel, payload) => {
       if (terminalSent) return;
       terminalSent = true;
@@ -700,7 +706,9 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // Per-attempt state — a retry starts from empty buffers.
     let lineBuffer = '';
     let finalAssistantText = '';
-    let stderrBuffer = '';
+    const stderrBuffer = createHeadTailBuffer(STDERR_TAIL_MAX);
+
+    const stderrText = () => stderrBuffer.matchText();
 
     const processLine = (line) => {
       if (!line) return;
@@ -792,10 +800,25 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
         processLine(lineBuffer.slice(0, nl).trim());
         lineBuffer = lineBuffer.slice(nl + 1);
       }
+      if (lineBuffer.length > LINE_BUFFER_MAX) {
+        // Un-terminated line past the cap: drop it rather than grow forever.
+        lineBuffer = '';
+        if (!lineOverflowLogged) {
+          lineOverflowLogged = true;
+          opsErrorLog.appendError({
+            cwd,
+            scope: 'chatRunner',
+            tabId,
+            tags: silent ? ['silent-probe'] : [],
+            message: `stdout line exceeded ${LINE_BUFFER_MAX} bytes without a newline; buffer dropped`,
+            meta: { sessionId, silent },
+          });
+        }
+      }
     });
 
     thisChild.stderr.on('data', (chunk) => {
-      stderrBuffer += chunk.toString('utf8');
+      stderrBuffer.append(chunk.toString('utf8'));
     });
 
     thisChild.on('error', (err) => {
@@ -824,10 +847,10 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       // terminal latch stay at executeRun level, so this is still one turn.
       if (!terminalSent && !killed && code !== 0 && attemptNo === 1
           && finalAssistantText === '' && recentToolUses.length === 0
-          && !/rate.?limit/i.test(stderrBuffer)) {
+          && !/rate.?limit/i.test(stderrText())) {
         const swapTo = resumeFlag
-          ? (NO_CONVERSATION_RE.test(stderrBuffer) ? false : null)
-          : (SESSION_IN_USE_RE.test(stderrBuffer) ? true : null);
+          ? (NO_CONVERSATION_RE.test(stderrText()) ? false : null)
+          : (SESSION_IN_USE_RE.test(stderrText()) ? true : null);
         if (swapTo !== null) {
           if (!silent) {
             broadcast('chat:run:notice', {
@@ -856,7 +879,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
             sessionId,
             message: 'run cancelled',
           });
-        } else if (SESSION_IN_USE_RE.test(stderrBuffer) || NO_CONVERSATION_RE.test(stderrBuffer)) {
+        } else if (SESSION_IN_USE_RE.test(stderrText()) || NO_CONVERSATION_RE.test(stderrText())) {
           // A session-flag rejection that survived the one-shot swap (or was
           // not eligible for it). The raw stderr dump names neither the flag,
           // the cwd nor the transcript — a real report cost a full diagnostic
@@ -875,9 +898,8 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
               + 'the session-flag resolution logic lives in main, and a stale build resolves it with older rules.',
           });
         } else {
-          const errDetail = stderrBuffer.trim()
-            ? `: ${stderrBuffer.trim().slice(0, 300)}`
-            : '';
+          const preview = stderrBuffer.preview();
+          const errDetail = preview ? `: ${preview}` : '';
           emitTerminal('chat:run:error', {
             tabId,
             sessionId,

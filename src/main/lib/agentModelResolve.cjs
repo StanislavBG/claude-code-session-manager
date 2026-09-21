@@ -56,7 +56,7 @@ function logDanglingPersonaOnce(cwd, agentType) {
       cwd,
       scope: 'agentModelResolve',
       level: 'warn',
-      message: `agentType '${agentType}' has no resolvable persona file — model resolution fell back to '${FALLBACK_MODEL}'`,
+      message: `agentType '${agentType}' has no resolvable persona file — model resolution fell back to '${FALLBACK_MODEL}' (and no persona effort applies)`,
       meta: { agentType },
     });
   } catch { /* logging must never break model resolution */ }
@@ -79,18 +79,19 @@ function findAgentTypeByClaudeSessionId(cwd, claudeSessionId, deps = {}) {
 }
 
 /**
- * Shared miss-tolerant reader `readOverlayAwarePersonaModel` below is a thin
- * wrapper over: tries each candidate path in order (`validatePath` then sync
- * `readFileSync`), and returns the first readable file's `model` frontmatter
- * field — even if that field is absent, which is why an empty-`model`
- * overlay file does NOT fall through to a later candidate (matches
- * `getPersonaBody`'s own semantics). Logs the dangling-persona warning at
- * most once per `(deps.cwd, agentType)` only when EVERY candidate misses.
- * Never throws.
+ * Shared miss-tolerant persona reader (model AND effort resolution both go
+ * through it — one concept, one implementation): tries each candidate path in
+ * order (`validatePath` then sync `readFileSync`) and returns the FIRST
+ * readable file's parsed frontmatter plus which candidate won — even if the
+ * field a caller cares about is absent, which is why an empty-`model` overlay
+ * file does NOT fall through to a later candidate (matches `getPersonaBody`'s
+ * own semantics). Logs the dangling-persona warning at most once per
+ * `(deps.cwd, agentType)` only when EVERY candidate misses. Never throws.
  */
-function readModelFromCandidatePaths(candidates, agentType, deps) {
+function readFrontmatterFromCandidatePaths(candidates, agentType, deps) {
   const validatePath = deps.validatePath || configMgr.validatePath;
-  for (const candidate of candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i];
     let real;
     try {
       real = validatePath(candidate);
@@ -100,7 +101,7 @@ function readModelFromCandidatePaths(candidates, agentType, deps) {
     try {
       const text = fs.readFileSync(real, 'utf8');
       const { fm } = splitFrontmatter(text);
-      return fm.model || null;
+      return { fm, path: real, candidateIndex: i };
     } catch {
       continue;
     }
@@ -110,32 +111,42 @@ function readModelFromCandidatePaths(candidates, agentType, deps) {
 }
 
 /**
- * Reads an Epic's agentType persona's `model` frontmatter field with the SAME
+ * Reads an Epic's agentType persona's frontmatter with the SAME
  * project-overlay-then-global precedence `agentLibrary.cjs`'s `getPersonaBody`
  * (and, through it, `resolvePrdPersonaForSpawn` below) already applies for a
  * scheduled PRD — `epicMint.cjs`'s `resolvePersonaPaths` is the shared path
  * resolver both readers go through, so there is exactly one place that decides
- * which of the two files wins.
+ * which of the two files wins. Returns `{ fm, path, fromOverlay }`, or null on
+ * a total miss / invalid name — never throws.
  *
  * Sync (not `getPersonaBody`'s async `fsp.readFile`) because `resolveEpicModel`
  * must stay synchronous: `chatRunner.cjs`'s `executeRun()` registers its
  * cancel handle into `inFlight` synchronously, and its caller (`pump()`) reads
  * that entry back immediately after invoking the executor — an `await`
  * inserted ahead of that registration would run it a tick late and silently
- * break `cancel()`. Returns null on a total miss (neither location resolves)
- * — never throws.
+ * break `cancel()`.
  */
-function readOverlayAwarePersonaModel(agentType, deps = {}) {
+function readOverlayAwarePersona(agentType, deps = {}) {
   // Same guard agentLibrary.cjs's getPersonaBody applies before it joins
   // `name` into a path: without it, a caller-supplied agentType like
   // "../../other-project/CLAUDE" survives resolvePersonaPaths' plain
   // path.join and validatePath's allowed-roots check (which only confirms
   // the resolved path stays under the home dir / an opened project), letting
-  // any readable .md under those roots be read on this --model spawn path.
+  // any readable .md under those roots be read on this spawn path.
   if (!agentType || !PERSONA_NAME_RE.test(agentType)) return null;
   const resolvePaths = deps.resolvePersonaPaths || resolvePersonaPaths;
   const { projectPath, globalPath } = resolvePaths(deps.cwd, agentType, deps);
-  return readModelFromCandidatePaths([projectPath, globalPath], agentType, deps);
+  // A null projectPath (no cwd) simply has no overlay candidate.
+  const candidates = projectPath ? [projectPath, globalPath] : [globalPath];
+  const hit = readFrontmatterFromCandidatePaths(candidates, agentType, deps);
+  if (!hit) return null;
+  return { fm: hit.fm, path: hit.path, fromOverlay: Boolean(projectPath) && hit.candidateIndex === 0 };
+}
+
+/** The persona's `model` frontmatter field (overlay-then-global), or null. Never throws. */
+function readOverlayAwarePersonaModel(agentType, deps = {}) {
+  const persona = readOverlayAwarePersona(agentType, deps);
+  return (persona && persona.fm.model) || null;
 }
 
 /**
@@ -251,6 +262,7 @@ module.exports = {
   resolveEpicModel,
   findAgentTypeByClaudeSessionId,
   readOverlayAwarePersonaModel,
+  readOverlayAwarePersona,
   isProjectOverlayPersonaPath,
   resolvePrdPersonaForSpawn,
 };

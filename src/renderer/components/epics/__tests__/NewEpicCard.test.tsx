@@ -25,6 +25,8 @@ const resolveModelInfoSpy = vi.fn(async (): Promise<MainModelHalf> => ({
   resolvedModelId: null,
   resolvedFrom: null,
   effortReachable: false,
+  personaEffort: null,
+  personaEffortSource: null,
 }))
 
 vi.mock('../../../lib/useKnownProjects', () => ({
@@ -78,6 +80,8 @@ beforeEach(() => {
     resolvedModelId: null,
     resolvedFrom: null,
     effortReachable: false,
+    personaEffort: null,
+    personaEffortSource: null,
   })
   useConfig.setState({ files: {}, watchRefs: {} })
   ;(window as unknown as { api: unknown }).api = {

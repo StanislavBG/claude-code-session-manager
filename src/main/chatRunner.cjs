@@ -53,6 +53,7 @@ const { classifyPromptTicket } = require('./lib/classifyPromptTicket.cjs');
 const sessionSlots = require('./lib/sessionSlots.cjs');
 const opsErrorLog = require('./lib/opsErrorLog.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
+const { resolveEpicEffort, effortArgs } = require('./lib/agentEffortResolve.cjs');
 const { planEpicSpawn } = require('./lib/epicSpawnPlan.cjs');
 const logs = require('./logs.cjs');
 
@@ -546,6 +547,9 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // Epic, no agentType, or the persona has no model/'inherit' — --model
     // must never be left unpinned (CLAUDE.md model-pinning rule).
     const model = agentModelResolve.resolveEpicModel({ cwd, claudeSessionId: sessionId });
+    // Persona `effort:` (same overlay-aware persona, agentEffortResolve.cjs);
+    // effortArgs() yields NO tokens for inherit/absent/dangling.
+    const effortFlags = effortArgs(resolveEpicEffort({ cwd, claudeSessionId: sessionId }).effort);
 
     // Main is authoritative about --resume vs --session-id AND the spawn cwd, and it decides
     // them TOGETHER (epicSpawnPlan.cjs): a transcript under an encoding the spawn cwd cannot see
@@ -579,6 +583,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       const a = [
         '-p', fullPrompt,
         '--model', model,
+        ...effortFlags,
         '--dangerously-skip-permissions',
         '--output-format', 'stream-json',
         '--verbose',

@@ -2,8 +2,8 @@
  * effectiveModelInfo.ts — the renderer half of "what will this Epic actually
  * run as": composes the main process's persona/evidence resolver
  * (agents:resolve-model-info, src/main/lib/effectiveModelInfo.cjs) with the
- * effort-level half, which stays in the renderer because it's a pure
- * scope-chain read over settings.json already owned by
+ * effort-level half: a persona-sourced effort (from the main half) wins,
+ * else the pure scope-chain read over settings.json already owned by
  * useEffectiveSettings.ts (that hook's `readLeafWithSource` was written for
  * exactly this — see its header — and had zero consumers before this).
  *
@@ -19,9 +19,23 @@ import type { Scope } from './scopes'
  *  formatter for this string, shared by EffectiveRuntimeLine (New Session /
  *  Epic detail) and Home's machine-wide caption, so the two surfaces can
  *  never drift into different wording for the same provenance fact. */
-export function formatEffortSegment(effortLevel: string | null, effortSource: Scope | null): string {
+export function formatEffortSegment(effortLevel: string | null, effortSource: EffortSource | null): string {
   if (!effortLevel || !effortSource) return 'effort — (model default)'
+  if (effortSource === 'persona') return `effort ${effortLevel} (persona)`
+  if (effortSource === 'persona-overlay') return `effort ${effortLevel} (project persona)`
   return `effort ${effortLevel} (${effortSource} settings.json)`
+}
+
+/** Where a displayed effort came from: the agent persona (launch passes `--effort`) or a settings scope (CLI default). */
+export type EffortSource = Scope | 'persona' | 'persona-overlay'
+
+/** One-line explanation of which effort source won — feeds EffectiveRuntimeLine's `title`. */
+export function effortProvenanceNote(effortSource: EffortSource | null): string {
+  if (effortSource === 'persona' || effortSource === 'persona-overlay') {
+    return 'Effort comes from the agent persona and is passed to the CLI as --effort, overriding settings.json.'
+  }
+  if (effortSource) return 'The persona sets no effort, so the settings.json effortLevel applies.'
+  return 'No effort is set by the persona or settings.json, so the model default applies.'
 }
 
 export type ModelSource = 'persona' | 'persona-overlay' | 'inherit' | 'fallback'
@@ -35,12 +49,15 @@ export interface MainModelHalf {
   resolvedModelId: string | null
   resolvedFrom: ResolvedFrom
   effortReachable: boolean
+  /** Persona `effort:` level (null = persona sets none / inherit / dangling). */
+  personaEffort: string | null
+  personaEffortSource: 'persona' | 'persona-overlay' | 'inherit' | null
 }
 
 /** The full resolver output: main-process evidence + renderer-side effort scope. */
 export interface EffectiveModelInfo extends MainModelHalf {
   effortLevel: string | null
-  effortSource: Scope | null
+  effortSource: EffortSource | null
 }
 
 /**
@@ -49,6 +66,11 @@ export interface EffectiveModelInfo extends MainModelHalf {
  * no React runtime required.
  */
 export function composeEffectiveModelInfo(mainHalf: MainModelHalf, node: EffectiveNode): EffectiveModelInfo {
+  // Persona effort wins: it is what the launch actually passes as --effort.
+  // The settings scope-chain read is the fallback when the persona sets none.
+  if (mainHalf.personaEffort && (mainHalf.personaEffortSource === 'persona' || mainHalf.personaEffortSource === 'persona-overlay')) {
+    return { ...mainHalf, effortLevel: mainHalf.personaEffort, effortSource: mainHalf.personaEffortSource }
+  }
   const { value: effortLevel, source: effortSource } = readLeafWithSource(node, ['effortLevel'])
   return { ...mainHalf, effortLevel, effortSource }
 }

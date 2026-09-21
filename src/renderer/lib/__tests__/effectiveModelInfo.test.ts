@@ -11,7 +11,7 @@
  */
 
 import { describe, test, expect } from 'vitest'
-import { composeEffectiveModelInfo, type MainModelHalf } from '../effectiveModelInfo'
+import { composeEffectiveModelInfo, formatEffortSegment, type MainModelHalf } from '../effectiveModelInfo'
 import { mergeScopes, type ScopeInput } from '../mergeScopes'
 
 function node(inputs: ScopeInput[]) {
@@ -25,6 +25,8 @@ const BASE_MAIN_HALF: MainModelHalf = {
   resolvedModelId: null,
   resolvedFrom: null,
   effortReachable: false,
+  personaEffort: null,
+  personaEffortSource: null,
 }
 
 describe('composeEffectiveModelInfo', () => {
@@ -85,8 +87,37 @@ describe('composeEffectiveModelInfo', () => {
       resolvedModelId: 'claude-opus-5',
       resolvedFrom: 'scheduler-run',
       effortReachable: false,
+      personaEffort: null,
+      personaEffortSource: null,
     }
     const info = composeEffectiveModelInfo(mainHalf, node([]))
     expect(info).toMatchObject(mainHalf)
+  })
+})
+
+describe('persona effort', () => {
+  test('a persona effort beats a settings-scope effort in composeEffectiveModelInfo', () => {
+    const info = composeEffectiveModelInfo(
+      { ...BASE_MAIN_HALF, personaEffort: 'max', personaEffortSource: 'persona' },
+      node([{ scope: 'user', data: { effortLevel: 'low' } }]),
+    )
+    expect(info.effortLevel).toBe('max')
+    expect(info.effortSource).toBe('persona')
+  })
+
+  test('inherit persona falls back to the settings read', () => {
+    const info = composeEffectiveModelInfo(
+      { ...BASE_MAIN_HALF, personaEffort: null, personaEffortSource: 'inherit' },
+      node([{ scope: 'user', data: { effortLevel: 'low' } }]),
+    )
+    expect(info.effortLevel).toBe('low')
+    expect(info.effortSource).toBe('user')
+  })
+
+  test('formatEffortSegment renders persona provenance distinctly from settings provenance', () => {
+    expect(formatEffortSegment('high', 'persona')).toBe('effort high (persona)')
+    expect(formatEffortSegment('high', 'persona-overlay')).toBe('effort high (project persona)')
+    expect(formatEffortSegment('high', 'user')).toBe('effort high (user settings.json)')
+    expect(formatEffortSegment(null, null)).toBe('effort — (model default)')
   })
 })

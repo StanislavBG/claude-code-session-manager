@@ -1,5 +1,5 @@
 import { prettyModel } from '../../lib/prettyModel'
-import { formatEffortSegment } from '../../lib/effectiveModelInfo'
+import { formatEffortSegment, effortProvenanceNote } from '../../lib/effectiveModelInfo'
 import type { EffectiveModelInfo } from '../../lib/effectiveModelInfo'
 
 /**
@@ -64,7 +64,7 @@ function modelSegment(info: EffectiveModelInfo): ModelSegment {
 export function formatEffectiveRuntimeLine(info: EffectiveModelInfo): { text: string; title: string } {
   const model = modelSegment(info)
   const effort = formatEffortSegment(info.effortLevel, info.effortSource)
-  return { text: `${model.text} · ${effort}`, title: `${model.title} ${effort}.` }
+  return { text: `${model.text} · ${effort}`, title: `${model.title} ${effort}. ${effortProvenanceNote(info.effortSource)}` }
 }
 
 /**

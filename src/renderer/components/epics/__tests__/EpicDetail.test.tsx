@@ -33,6 +33,8 @@ function installWindowApiMock(opts: {
       resolvedModelId: null,
       resolvedFrom: null,
       effortReachable: false,
+      personaEffort: null,
+      personaEffortSource: null,
       ...opts.runtimeInfo,
     })
   })

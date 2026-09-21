@@ -145,6 +145,7 @@ const queueOps = require('./queueOps.cjs');
 const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
+const { resolveEpicEffort, effortArgs } = require('./lib/agentEffortResolve.cjs');
 const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduleJobTransitions.cjs');
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epicContextDigest.cjs');
 const { JOB_STATUSES } = require('./lib/scheduleJobSchema.cjs');
@@ -5249,15 +5250,17 @@ async function performLeftoverQuarantine(job, paths, headBefore = null) {
  * selects `--resume <sessionId>` (reconnect) INSTEAD of `--session-id
  * <sessionId>` (mint) — the two flags are mutually exclusive, never both.
  * `--model` is always explicit (never left to the CLI's drifting default —
- * see conventions.md). `systemPrompt`, when given (the PRD's `agentType`
+ * see conventions.md). `effort`, when a level (persona `effort:` via
+ * agentEffortResolve.cjs), appends `--effort <level>`; null/inherit → no flag. `systemPrompt`, when given (the PRD's `agentType`
  * persona body, resolved by agentModelResolve.cjs's resolvePrdPersonaForSpawn),
  * is passed as `--append-system-prompt` so the executor IS that persona at
  * launch rather than being asked in prose to adopt one.
  */
-function buildClaudeSpawnArgs({ prompt, model, sessionId, resume, systemPrompt }) {
+function buildClaudeSpawnArgs({ prompt, model, effort, sessionId, resume, systemPrompt }) {
   return [
     '-p', prompt,
     '--model', model,
+    ...effortArgs(effort),
     ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
     '--dangerously-skip-permissions',
     '--output-format', 'stream-json',
@@ -5510,7 +5513,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // a dangling/absent agentType falls back to no persona + FALLBACK_MODEL
   // and is logged once by resolvePrdPersonaForSpawn itself.
   const personaResolution = await agentModelResolve.resolvePrdPersonaForSpawn({ cwd, agentType: job.agentType });
-  safeLog(`[scheduler] agentType=${job.agentType || '(none)'} persona=${personaResolution.personaPath || '(fallback — no persona applied)'} model=${personaResolution.model}\n`);
+  const personaEffort = resolveEpicEffort({ cwd, agentType: job.agentType }).effort;
+  safeLog(`[scheduler] agentType=${job.agentType || '(none)'} persona=${personaResolution.personaPath || '(fallback — no persona applied)'} model=${personaResolution.model}${personaEffort ? ` effort=${personaEffort}` : ''}\n`);
 
   return await new Promise((resolve) => {
     const claudeBin = resolveClaudeBin();
@@ -5710,6 +5714,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         args: buildClaudeSpawnArgs({
           prompt,
           model: personaResolution.model,
+          effort: personaEffort,
           sessionId,
           resume: !!resumeTarget,
           systemPrompt: personaResolution.systemPrompt,

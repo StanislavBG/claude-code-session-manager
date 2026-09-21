@@ -43,6 +43,7 @@ const epicWorktreeMerge = require('./lib/epicWorktreeMerge.cjs');
 const epicWorktreeProjectConfig = require('./lib/epicWorktreeProjectConfig.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
+const agentEffortResolve = require('./lib/agentEffortResolve.cjs');
 const { resolveEffectiveModelInfo } = require('./lib/effectiveModelInfo.cjs');
 const { resolveModelCatalog } = require('./lib/modelCatalog.cjs');
 const { checkDelegationReadiness, ensureGuardsInstalled, installPrdWriteGuard, installDestructiveGitGuard, installInlineImplementationGuard, installSelfScheduleGuard } = require('./lib/delegationReadiness.cjs');
@@ -566,6 +567,10 @@ ipcMain.handle('agents:get-persona-body', validated(schemas.agentsGetPersonaBody
 // is merely supposed to. Never throws (resolveEpicModel's own contract).
 ipcMain.handle('agents:resolve-epic-model', validated(schemas.agentsResolveEpicModel, (payload) =>
   agentModelResolve.resolveEpicModel(payload)));
+// Effort twin of the above (agentEffortResolve.cjs): Terminal appends
+// `--effort <level>` only when `effort` is non-null. Never throws.
+ipcMain.handle('agents:resolve-epic-effort', validated(schemas.agentsResolveEpicEffort, (payload) =>
+  agentEffortResolve.resolveEpicEffort(payload)));
 
 // "What will this Epic actually run as?" (PRD: effective-model-resolver) —
 // persona alias + evidence-based concrete model id + provenance, for a given

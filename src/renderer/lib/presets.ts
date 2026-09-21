@@ -59,6 +59,12 @@ export function modelFlag(model?: string): string {
   return ` --model ${shellQuote(model)}`
 }
 
+/** ` --effort <level>` (shell-quoted), or '' for null/'inherit' — never `--effort inherit`/`null`. */
+export function effortFlag(effort?: string | null): string {
+  if (!effort || effort === 'inherit') return ''
+  return ` --effort ${shellQuote(effort)}`
+}
+
 const claudeDangerous = ({ sessionId, model }: { sessionId: string; cwd: string; model?: string }) =>
   `claude --dangerously-skip-permissions --session-id ${shellQuote(sessionId)}${modelFlag(model)}`
 const claudeSafe = ({ sessionId, model }: { sessionId: string; cwd: string; model?: string }) =>

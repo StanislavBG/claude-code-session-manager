@@ -131,3 +131,29 @@ test('executeJob: a job with no agentType at all runs unaffected (no persona, so
   const modelIdx = argv.indexOf('--model');
   expect(argv[modelIdx + 1]).toBe('sonnet');
 });
+
+// ---------- persona effort → --effort ----------
+
+test('buildClaudeSpawnArgs: effort appends --effort <level>; null/inherit/absent add no token', () => {
+  const base = { prompt: 'x', model: 'sonnet', sessionId: 'sid', resume: false };
+  const args = buildClaudeSpawnArgs({ ...base, effort: 'high' });
+  expect(args[args.indexOf('--effort') + 1]).toBe('high');
+  expect(args.indexOf('--model')).toBeGreaterThanOrEqual(0);
+  for (const effort of [null, 'inherit', undefined]) {
+    expect(buildClaudeSpawnArgs({ ...base, effort })).not.toContain('--effort');
+  }
+});
+
+test('executeJob: persona effort reaches the child as --effort; inherit yields no --effort token', async () => {
+  const globalAgentsDir = path.join(tmpHome, '.claude', 'agents');
+  writePersona(globalAgentsDir, 'effort-high', ['model: opus', 'effort: high'], 'body');
+  writePersona(globalAgentsDir, 'effort-inherit', ['model: opus', 'effort: inherit'], 'body');
+
+  const high = await runJobWithAgentType({ agentType: 'effort-high' });
+  expect(high.argv[high.argv.indexOf('--effort') + 1]).toBe('high');
+  expect(high.argv[high.argv.indexOf('--model') + 1]).toBe('opus');
+
+  const inherit = await runJobWithAgentType({ agentType: 'effort-inherit' });
+  expect(inherit.argv).not.toContain('--effort');
+  expect(inherit.argv).not.toContain('inherit');
+});

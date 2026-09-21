@@ -1656,6 +1656,9 @@ export interface SessionManagerAPI {
       resolvedModelId: string | null;
       resolvedFrom: 'scheduler-run' | 'transcript' | null;
       effortReachable: boolean;
+      /** Persona `effort:` level (null = pass no --effort) and where it came from. */
+      personaEffort: string | null;
+      personaEffortSource: 'persona' | 'persona-overlay' | 'inherit' | null;
     }>;
     /** The launch-time authority for an Epic-backed session's `--model`: the SAME
      *  resolver (`agentModelResolve.cjs`'s `resolveEpicModel`) chatRunner.cjs's Chat
@@ -1664,6 +1667,13 @@ export interface SessionManagerAPI {
      *  (project `.claude/agents/<name>.md` wins over global), never throws — a
      *  dangling agentType or absent/`inherit` model falls back to `'sonnet'`. */
     resolveEpicModel: (payload: { cwd: string; claudeSessionId: string }) => Promise<string>;
+    /** Effort twin of `resolveEpicModel` (`agentEffortResolve.cjs`): the persona `effort:` level
+     *  Terminal must launch with, or `effort: null` = append NO `--effort` flag (inherit / absent /
+     *  dangling persona). Chat resolves the same value in-process. Never throws. */
+    resolveEpicEffort: (payload: { cwd: string; claudeSessionId: string }) => Promise<{
+      effort: string | null;
+      source: 'persona' | 'persona-overlay' | 'inherit' | null;
+    }>;
     /** Fires after any save/delete/removeOverride — subscribers should re-fetch listPersonas(). */
     onChanged: (handler: () => void) => () => void;
   };

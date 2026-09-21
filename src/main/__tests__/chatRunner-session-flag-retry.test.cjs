@@ -206,3 +206,47 @@ test('non-zero exit with unrelated stderr keeps the generic fallback message', a
     fs.rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+// ---------- persona effort → --effort (agentEffortResolve.cjs) ----------
+
+async function chatArgvForPersona(effortLine) {
+  attachRecorder();
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chat-effort-cwd-'));
+  const logFile = path.join(cwd, 'argv.log');
+  const sessionId = `effort-sess-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
+  fs.mkdirSync(path.join(tmpHome, '.claude', 'agents'), { recursive: true });
+  fs.writeFileSync(
+    path.join(tmpHome, '.claude', 'agents', 'effort-persona.md'),
+    ['---', 'name: effort-persona', 'model: opus', ...(effortLine ? [effortLine] : []), '---', 'body'].join('\n'),
+  );
+  const opsDir = path.join(cwd, 'session-manager-operations', 'prompt-sessions');
+  fs.mkdirSync(opsDir, { recursive: true });
+  fs.writeFileSync(path.join(opsDir, 'active-index.json'), JSON.stringify({
+    sessions: { e1: { id: 'e1', claudeSessionId: sessionId, agentType: 'effort-persona' } }, events: {},
+  }));
+  // First call succeeds outright: firstStderr unused because alwaysFail/n===1 → use a passing stub.
+  const stubPath = path.join(os.tmpdir(), `sm-effort-stub-${process.pid}-${Math.floor(Math.random() * 1e9)}.cjs`);
+  fs.writeFileSync(stubPath, `#!${process.execPath}\nrequire('fs').appendFileSync(${JSON.stringify(logFile)}, JSON.stringify(process.argv.slice(2)) + '\\n');\nprocess.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok' }) + '\\n');\n`, { mode: 0o755 });
+  process.env.SM_CLAUDE_BIN = stubPath;
+  try {
+    curTab = 'tab-effort';
+    cr.run({ tabId: 'tab-effort', sessionId, prompt: 'hello', cwd, resume: false });
+    await waitFor(() => terminals().length >= 1 && fs.existsSync(logFile));
+    return spawns(logFile)[0];
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+    fs.rmSync(stubPath, { force: true });
+  }
+}
+
+test('chat spawn: persona effort adds --effort <level> beside --model and --session-id', async () => {
+  const argv = await chatArgvForPersona('effort: xhigh');
+  expect(argv[argv.indexOf('--effort') + 1]).toBe('xhigh');
+  expect(argv[argv.indexOf('--model') + 1]).toBe('opus');
+  expect(argv).toContain('--session-id');
+});
+
+test('chat spawn: effort inherit / absent adds no --effort token', async () => {
+  expect(await chatArgvForPersona('effort: inherit')).not.toContain('--effort');
+  expect(await chatArgvForPersona(null)).not.toContain('--effort');
+});

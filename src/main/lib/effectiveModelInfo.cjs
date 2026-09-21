@@ -13,11 +13,11 @@
  * "we don't know; the CLI resolves this alias at launch." The two must
  * never collapse into one optimistic string.
  *
- * Effort-level resolution is deliberately NOT here — it already exists,
- * unused, in the renderer's `useEffectiveSettings.ts` (a scope-chain reader
- * with a file watcher). This module supplies only the half that genuinely
- * needs main-process filesystem access: persona lookup (overlay-aware) and
- * concrete-model evidence (scheduler run logs, session transcripts).
+ * PERSONA effort IS here now (agentEffortResolve.cjs): it needs the same
+ * main-process, overlay-aware persona read as the persona model, and a launch
+ * now actually passes it as `--effort`. The settings.json effortLevel
+ * scope-chain read stays in the renderer (`useEffectiveSettings.ts`) as the
+ * FALLBACK when the persona sets no level — this module never reads settings.
  *
  * Never throws — every lookup failure degrades a field to null, same
  * contract as agentModelResolve.cjs's resolveEpicModel.
@@ -273,7 +273,8 @@ function findLatestTranscriptModel(cwd, agentType, deps) {
 
 /**
  * resolveEffectiveModelInfo({ cwd, agentType, deps? }) →
- *   { agentType, modelAlias, modelSource, resolvedModelId, resolvedFrom, effortReachable }
+ *   { agentType, modelAlias, modelSource, resolvedModelId, resolvedFrom, effortReachable,
+ *     personaEffort, personaEffortSource }
  *
  * Never throws. `cwd` is normalized through the same worktree/ops-internal
  * -aware resolver every ops-root reader goes through, so a job worktree cwd
@@ -288,6 +289,8 @@ async function resolveEffectiveModelInfo({ cwd, agentType, deps = {} } = {}) {
     resolvedModelId: null,
     resolvedFrom: null,
     effortReachable,
+    personaEffort: null,
+    personaEffortSource: null,
   };
   if (!cwd || !agentType) return miss;
 
@@ -297,7 +300,9 @@ async function resolveEffectiveModelInfo({ cwd, agentType, deps = {} } = {}) {
     if (!normalizedCwd) return miss;
 
     const { modelAlias, modelSource } = await resolvePersonaModelAlias(normalizedCwd, agentType, deps);
-    const result = { agentType, modelAlias, modelSource, resolvedModelId: null, resolvedFrom: null, effortReachable };
+    const { effort: personaEffort, source: personaEffortSource } = (deps.agentEffortResolve || require('./agentEffortResolve.cjs'))
+      .resolveEpicEffort({ cwd: normalizedCwd, agentType, deps });
+    const result = { agentType, modelAlias, modelSource, resolvedModelId: null, resolvedFrom: null, effortReachable, personaEffort, personaEffortSource };
 
     if (isConcreteModelId(modelAlias)) {
       // Already a concrete pinned id — echo it back, fabricate no evidence.

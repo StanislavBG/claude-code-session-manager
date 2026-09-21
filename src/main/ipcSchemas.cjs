@@ -675,6 +675,7 @@ const agentsResolveEpicModel = z.object({
   cwd: z.string().min(1).max(4096),
   claudeSessionId: z.string().min(1).max(200),
 }).strict();
+const agentsResolveEpicEffort = agentsResolveEpicModel;
 
 // ──────────────────────────────────────────── Project Pages (PRD 932)
 // Same validation split as projectBriefCwd above: real path validation is
@@ -1154,6 +1155,7 @@ module.exports = {
     agentsResolveModelInfo,
     modelsCatalog,
     agentsResolveEpicModel,
+    agentsResolveEpicEffort,
     delegationReadinessCwd,
     telemetrySetConfig,
   },

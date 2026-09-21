@@ -49,6 +49,8 @@ function installWindowApiMock(opts: { mergeToMain?: ReturnType<typeof vi.fn> } =
         resolvedModelId: null,
         resolvedFrom: null,
         effortReachable: false,
+        personaEffort: null,
+        personaEffortSource: null,
       }),
     },
     epicDelegationStats: { get: vi.fn().mockResolvedValue({ prdsQueued: 0, inlineEdits: 0 }) },

@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { loadTerminalSettings, onTerminalSettingsChange, TERMINAL_THEMES } from '../../lib/terminalSettings'
 import { writeInChunks } from '../Terminal'
-import { shellQuote, modelFlag } from '../../lib/presets'
+import { shellQuote, modelFlag, effortFlag } from '../../lib/presets'
 import { canFit } from '../../lib/terminalFit'
 import { transcriptExists } from '../../lib/transcriptExists'
 import { useEpicTerminal } from '../../state/epicTerminal'
@@ -30,6 +30,16 @@ async function resolveEpicModel(cwd: string, claudeSessionId: string): Promise<s
     return await window.api.agents.resolveEpicModel({ cwd, claudeSessionId })
   } catch {
     return FALLBACK_MODEL
+  }
+}
+
+/** Effort twin of resolveEpicModel (agents:resolve-epic-effort). Returns null
+ *  — append NO `--effort` flag — for inherit/absent/dangling or an IPC failure. */
+async function resolveEpicEffort(cwd: string, claudeSessionId: string): Promise<string | null> {
+  try {
+    return (await window.api.agents.resolveEpicEffort({ cwd, claudeSessionId })).effort
+  } catch {
+    return null
   }
 }
 
@@ -125,8 +135,9 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
         // resume-vs-create decision chat.ts's send() makes (PRD 833 I2).
         const resume = await transcriptExists(cwd, sessionId).catch(() => true)
         const model = await resolveEpicModel(cwd, sessionId)
+        const effort = await resolveEpicEffort(cwd, sessionId)
         const flag = resume ? `--resume ${shellQuote(sessionId)}` : `--session-id ${shellQuote(sessionId)}`
-        const cmd = `claude --dangerously-skip-permissions ${flag}${modelFlag(model)}\r`
+        const cmd = `claude --dangerously-skip-permissions ${flag}${modelFlag(model)}${effortFlag(effort)}\r`
         setTimeout(() => writeInChunks(sessionId, cmd), 1500)
       })
       .catch((err) => {

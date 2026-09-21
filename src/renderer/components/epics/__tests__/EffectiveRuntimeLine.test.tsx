@@ -21,6 +21,8 @@ function info(overrides: Partial<EffectiveModelInfo>): EffectiveModelInfo {
     resolvedModelId: null,
     resolvedFrom: null,
     effortReachable: true,
+    personaEffort: null,
+    personaEffortSource: null,
     effortLevel: null,
     effortSource: null,
     ...overrides,

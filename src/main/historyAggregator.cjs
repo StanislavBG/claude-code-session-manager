@@ -49,25 +49,8 @@ function resolvePricingKey(modelId) {
 }
 
 // ── LRU cache ─────────────────────────────────────────────────────────────────
-// Backed by an insertion-order Map: delete+re-insert on access = O(1) LRU.
-class LRUCache {
-  constructor(max) {
-    this._max = max;
-    this._m = new Map();
-  }
-  get(k) {
-    if (!this._m.has(k)) return undefined;
-    const v = this._m.get(k);
-    this._m.delete(k);
-    this._m.set(k, v);
-    return v;
-  }
-  set(k, v) {
-    this._m.delete(k);
-    this._m.set(k, v);
-    if (this._m.size > this._max) this._m.delete(this._m.keys().next().value);
-  }
-}
+// Shared implementation: lib/lruCache.cjs (re-exported below for existing callers).
+const { LRUCache } = require('./lib/lruCache.cjs');
 
 /**
  * Cache for parseJSONL results.

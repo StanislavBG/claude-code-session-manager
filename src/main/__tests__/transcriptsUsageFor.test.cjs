@@ -8,7 +8,7 @@
 
 'use strict';
 
-import { test, expect, beforeEach, afterEach } from 'vitest';
+import { test, expect, beforeEach, afterEach, vi } from 'vitest';
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -92,4 +92,115 @@ test('a growing transcript is re-summed after the file mtime/size change', async
 
   const after = await usageFor(cwd, [sessionId]);
   expect(after[sessionId]).toEqual({ inputTokens: 13, outputTokens: 6 });
+});
+
+// ── incremental tail parse + bounded cache ─────────────────────────────────
+
+const fsp = require('node:fs/promises');
+const transcripts = require('../transcripts.cjs');
+
+function fromScratch(filePath) {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  for (const line of fs.readFileSync(filePath, 'utf8').split('\n')) {
+    if (!line) continue;
+    let o;
+    try { o = JSON.parse(line); } catch { continue; }
+    const u = o.usage || {};
+    inputTokens += u.input_tokens ?? 0;
+    outputTokens += u.output_tokens ?? 0;
+  }
+  return { inputTokens, outputTokens };
+}
+
+test('incremental result equals a from-scratch parse across 5 appends (partial line + repeated id)', async () => {
+  const sessionId = 'sess-incr';
+  const filePath = writeTranscript(cwd, sessionId, [
+    { id: 'm1', usage: { input_tokens: 10, output_tokens: 1 } },
+  ]);
+  const check = async () => {
+    const r = await usageFor(cwd, [sessionId]);
+    expect(r[sessionId]).toEqual(fromScratch(filePath));
+  };
+  await check();
+  const l2 = JSON.stringify({ id: 'm2', usage: { input_tokens: 20, output_tokens: 2 } });
+  // 1: append ending mid-line
+  fs.appendFileSync(filePath, l2.slice(0, 15));
+  await check();
+  // 2: complete that line
+  fs.appendFileSync(filePath, l2.slice(15) + '\n');
+  await check();
+  // 3: repeat an earlier message id (full parse sums it again)
+  fs.appendFileSync(filePath, JSON.stringify({ id: 'm1', usage: { input_tokens: 10, output_tokens: 1 } }) + '\n');
+  await check();
+  // 4: non-usage + malformed line
+  fs.appendFileSync(filePath, JSON.stringify({ type: 'user' }) + '\nnot json\n');
+  await check();
+  // 5: multibyte content then usage
+  fs.appendFileSync(filePath, JSON.stringify({ t: 'héllo 日本', usage: { input_tokens: 4, output_tokens: 4 } }) + '\n');
+  await check();
+  expect((await usageFor(cwd, [sessionId]))[sessionId]).toEqual({ inputTokens: 44, outputTokens: 8 });
+});
+
+test('the call after a one-line append reads < 4 KB from disk', async () => {
+  const sessionId = 'sess-bytes';
+  const big = Array.from({ length: 2000 }, (_, i) => ({ i, pad: 'x'.repeat(100), usage: { input_tokens: 1, output_tokens: 1 } }));
+  const filePath = writeTranscript(cwd, sessionId, big);
+  await usageFor(cwd, [sessionId]);
+  expect(fs.statSync(filePath).size).toBeGreaterThan(200_000);
+
+  fs.appendFileSync(filePath, JSON.stringify({ usage: { input_tokens: 5, output_tokens: 5 } }) + '\n');
+  const fh = await fsp.open(filePath, 'r');
+  const proto = Object.getPrototypeOf(fh);
+  await fh.close();
+  const orig = proto.read;
+  const lengths = [];
+  const spy = vi.spyOn(proto, 'read').mockImplementation(function (buf, off, len, pos) {
+    lengths.push(len);
+    return orig.call(this, buf, off, len, pos);
+  });
+  try {
+    const r = await usageFor(cwd, [sessionId]);
+    expect(r[sessionId]).toEqual({ inputTokens: 2005, outputTokens: 2005 });
+  } finally {
+    spy.mockRestore();
+  }
+  expect(lengths.length).toBeGreaterThan(0);
+  expect(lengths.reduce((a, b) => a + b, 0)).toBeLessThan(4096);
+});
+
+test('truncation / replacement triggers a full re-parse', async () => {
+  const sessionId = 'sess-trunc';
+  const filePath = writeTranscript(cwd, sessionId, [
+    { usage: { input_tokens: 100, output_tokens: 100 } },
+    { usage: { input_tokens: 100, output_tokens: 100 } },
+  ]);
+  await usageFor(cwd, [sessionId]);
+  fs.writeFileSync(filePath, JSON.stringify({ usage: { input_tokens: 1, output_tokens: 2 } }) + '\n');
+  expect((await usageFor(cwd, [sessionId]))[sessionId]).toEqual({ inputTokens: 1, outputTokens: 2 });
+});
+
+test('usageCache is bounded and evicts the least-recently-used entry', async () => {
+  const cache = transcripts.__usageCacheForTest;
+  const max = transcripts.__usageCacheMaxForTest;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-usage-lru-'));
+  try {
+    const files = [];
+    for (let i = 0; i < max + 5; i++) {
+      const f = path.join(dir, `s${i}.jsonl`);
+      fs.writeFileSync(f, JSON.stringify({ usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
+      files.push(f);
+    }
+    const before = cache.size;
+    for (const f of files) {
+      // usageForOne is reached through usageFor's path; call via a cwd-independent route.
+      await transcripts.__usageForOneForTest(f);
+    }
+    expect(cache.size).toBeLessThanOrEqual(max);
+    expect(before).toBeLessThanOrEqual(max);
+    expect(cache.has(files[0])).toBe(false);
+    expect(cache.has(files[files.length - 1])).toBe(true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });

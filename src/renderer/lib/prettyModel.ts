@@ -20,3 +20,11 @@ export function prettyModel(model: string): string {
   const ver = m[3] ? `${m[2]}.${m[3]}` : m[2]
   return ctx ? `${fam} ${ver} ${ctx[1]}` : `${fam} ${ver}`
 }
+
+export type ModelFamily = 'opus' | 'sonnet' | 'haiku' | 'fable'
+
+/** Family of a concrete id or alias (`claude-opus-5` → 'opus'); null for best/opusplan/default. */
+export function modelFamily(model: string): ModelFamily | null {
+  const m = /(opus|sonnet|haiku|fable)/i.exec(model)
+  return m ? (m[1].toLowerCase() as ModelFamily) : null
+}

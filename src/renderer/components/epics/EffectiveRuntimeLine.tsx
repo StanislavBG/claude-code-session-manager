@@ -26,6 +26,15 @@ function modelSegment(info: EffectiveModelInfo): ModelSegment {
   const inherited = info.modelSource === 'inherit'
   const alias = inherited ? 'inherited' : info.modelAlias ?? 'inherited'
 
+  // A persona pinned to a concrete id is already concrete — resolver echoes it back with no evidence source.
+  if (info.resolvedModelId && info.resolvedModelId === info.modelAlias && !info.resolvedFrom) {
+    const concrete = prettyModel(info.resolvedModelId)
+    return {
+      text: `${info.resolvedModelId} → ${concrete} (pinned)`,
+      title: `This persona pins the exact model ${info.resolvedModelId} (${concrete}) — no alias for the CLI to resolve at launch.`,
+    }
+  }
+
   if (!info.resolvedModelId) {
     return {
       text: `${alias} · resolved by the CLI at launch`,

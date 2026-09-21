@@ -10,6 +10,8 @@ import { TAG_LIBRARY } from '../../lib/tagLibrary'
 import { ticketTagTone } from '../../lib/ticketDisplay'
 import { takePendingPersonaName } from '../../lib/agentLibraryDeepLink'
 import { useKnownProjects } from '../../lib/useKnownProjects'
+import { useModelCatalog } from '../../lib/useModelCatalog'
+import { modelFamily } from '../../lib/prettyModel'
 import { ALL_PROJECTS } from '../../lib/projectActions'
 
 /**
@@ -37,6 +39,7 @@ import { ALL_PROJECTS } from '../../lib/projectActions'
  * session creation; it only pre-fills it.
  */
 
+// Static fallback only — rendered when the live catalog is unavailable (ModelPicker).
 const MODELS = ['inherit', 'haiku', 'sonnet', 'opus', 'fable'] as const
 const TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'WebFetch', 'WebSearch', 'Task']
 const COLORS = ['', 'red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink']
@@ -401,12 +404,7 @@ function AgentPersonaEditor({
           />
         </Field>
 
-        <Field
-          label="default model"
-          hint="This persona's default model for its Epics — sets the --model an Epic launches with (Terminal + Chat both honor it). 'inherit' falls back to each view's own default, not this Settings page. Cheap models for read-only personas; opus for judgement calls."
-        >
-          <Choice options={MODELS as unknown as string[]} value={obj.model} onChange={(v) => set({ model: v })} mono />
-        </Field>
+        <ModelPicker value={obj.model} onChange={(v) => set({ model: v })} />
 
         <Field label="tools" hint={`${obj.tools.length} of ${TOOLS.length} granted. Anything not ticked is refused at call time.`}>
           <div className="flex flex-wrap gap-1.5">
@@ -622,11 +620,12 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   )
 }
 
-function Choice({ options, value, onChange, mono }: { options: string[]; value: string; onChange: (v: string) => void; mono?: boolean }) {
-  // A persona's on-disk `model:` isn't validated against this fixed option
-  // list (agentPersonaSchema.cjs's write side just takes a bounded string) —
-  // an out-of-list value must still render as selected and survive a
-  // re-render, or the first click here would silently overwrite it.
+function Choice({ options, value, onChange, mono, blocked }: { options: string[]; value: string; onChange: (v: string) => void; mono?: boolean; blocked?: Record<string, string> }) {
+  // A persona's on-disk `model:` may not be in the option list (hand-edited,
+  // or a since-retired id; agentPersonaSchema.cjs just takes a bounded string).
+  // It is appended as a selected-but-unlisted option, so a re-render or an
+  // untouched save never silently rewrites it. `blocked` maps option -> reason;
+  // those render disabled with the reason as their title, never hidden.
   const outOfList = value && !options.includes(value)
   const shown = outOfList ? [...options, value] : options
   return (
@@ -634,14 +633,16 @@ function Choice({ options, value, onChange, mono }: { options: string[]; value: 
       {shown.map((o) => {
         const on = o === value
         const isCurrentOnDisk = outOfList && o === value
+        const block = blocked?.[o]
         return (
           <button
             key={o}
             onClick={() => onChange(o)}
-            title={isCurrentOnDisk ? `${o} — current on-disk value, not in the standard list` : undefined}
+            disabled={!!block}
+            title={block ?? (isCurrentOnDisk ? `${o} — current on-disk value, not in the standard list` : undefined)}
             className={`px-2.5 py-1 rounded text-xs border ${mono ? 'font-mono' : ''} ${
               on ? 'bg-accent/15 text-accent border-accent/40 font-semibold' : 'bg-bg-hi text-fg-dim border-line'
-            } ${isCurrentOnDisk ? 'border-dashed' : ''}`}
+            } ${isCurrentOnDisk ? 'border-dashed' : ''} ${block ? 'opacity-40 cursor-not-allowed' : ''}`}
           >
             {o}
             {isCurrentOnDisk ? ' (current)' : ''}
@@ -649,5 +650,78 @@ function Choice({ options, value, onChange, mono }: { options: string[]; value: 
         )
       })}
     </div>
+  )
+}
+
+const LATEST = 'latest'
+const BLOCKED_REASON = 'Blocked by the availableModels allowlist in your Claude settings'
+
+/**
+ * Two-level, catalog-driven model picker: an alias row (every alias the installed
+ * CLI offers, `inherit` prepended) and, for family aliases, a version row pinning a
+ * concrete id. The stored value is written verbatim — a bare alias, or a concrete
+ * id (with the alias's `[1m]` suffix when one is chosen). `catalog === null`
+ * degrades to the static five chips.
+ */
+function ModelPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { catalog, loading, degraded, refresh } = useModelCatalog(null)
+  const aliases = catalog ? ['inherit', ...catalog.aliases] : [...MODELS]
+  const allow = catalog?.availableModels ?? null
+  const blockedAlias = (a: string) => !!allow && a !== 'inherit' && !allow.includes(a)
+  const blockedId = (id: string, fam: string | null) => !!allow && !allow.includes(id) && !(fam && allow.includes(fam))
+
+  const stored = value || 'inherit'
+  const suffix = /\[[^\]]*\]$/.exec(stored)?.[0] ?? ''
+  const isAlias = aliases.includes(stored)
+  // A pinned concrete id maps back to its family alias (+ suffix) so the alias row shows it selected.
+  const pinnedAlias = !isAlias && catalog && modelFamily(stored) && aliases.includes(modelFamily(stored)! + suffix)
+    ? modelFamily(stored)! + suffix
+    : null
+  const aliasValue = isAlias ? stored : pinnedAlias ?? stored
+  const family = modelFamily(aliasValue)
+  const aliasSuffix = /\[[^\]]*\]$/.exec(aliasValue)?.[0] ?? ''
+  const showVersion = !!catalog && stored !== 'inherit' && !!family && aliases.includes(aliasValue)
+  const versions = showVersion ? catalog!.models.filter((id) => modelFamily(id) === family).map((id) => id + aliasSuffix) : []
+  const versionValue = isAlias ? LATEST : stored
+
+  const blocked: Record<string, string> = {}
+  if (catalog) for (const a of aliases) if (blockedAlias(a)) blocked[a] = BLOCKED_REASON
+  const blockedVersions: Record<string, string> = {}
+  for (const v of versions) if (blockedId(v, family)) blockedVersions[v] = BLOCKED_REASON
+
+  return (
+    <Field
+      label="default model"
+      hint="This persona's default model for its Epics — sets the --model an Epic launches with (Terminal + Chat both honor it). 'inherit' falls back to each view's own default, not this Settings page. Cheap models for read-only personas; opus for judgement calls."
+    >
+      <Choice options={aliases} value={aliasValue} onChange={onChange} mono blocked={blocked} />
+      {showVersion && (
+        <div className="mt-2" data-testid="model-version-row">
+          <div className="text-[10.5px] text-fg-faint mb-1 font-mono">version</div>
+          <Choice
+            options={[LATEST, ...versions]}
+            value={versionValue}
+            onChange={(v) => onChange(v === LATEST ? aliasValue : v)}
+            mono
+            blocked={blockedVersions}
+          />
+        </div>
+      )}
+      <div className="text-[11px] text-fg-faint mt-1 leading-snug flex items-center gap-2">
+        <span>
+          {catalog
+            ? `Models are live-read from the installed claude CLI${degraded ? ' (cached — CLI probe unavailable)' : ''}. "latest" keeps the floating alias.`
+            : loading ? 'Loading model catalog…' : 'catalog unavailable — showing the standard list.'}
+        </span>
+        <button
+          data-testid="model-catalog-refresh"
+          onClick={() => { void refresh() }}
+          disabled={loading}
+          className="underline text-fg-dim disabled:opacity-40"
+        >
+          refresh
+        </button>
+      </div>
+    </Field>
   )
 }

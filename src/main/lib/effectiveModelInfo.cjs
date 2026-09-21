@@ -34,7 +34,10 @@ const { resolveEpicTranscriptPath } = require('./epicTranscriptPath.cjs');
 // module (CLAUDE.md: "No CommonJS in renderer, no ES modules in main").
 // Anything NOT in this set is treated as an already-concrete pinned model id
 // (e.g. 'claude-opus-5'), never as an alias needing evidence.
-const KNOWN_MODEL_ALIASES = new Set(['opus', 'sonnet', 'haiku', 'fable']);
+// Also the non-family CLI aliases the Agent Library picker can now write
+// (best / opusplan / default); a trailing `[1m]`-style suffix is stripped
+// before the lookup (see isConcreteModelId), so 'opus[1m]' is an alias too.
+const KNOWN_MODEL_ALIASES = new Set(['opus', 'sonnet', 'haiku', 'fable', 'best', 'opusplan', 'default']);
 
 // Run-log evidence (scheduler.cjs's executeJob, ~line 4473) is written
 // essentially at dispatch time, before any of the run's own stdout streams
@@ -54,7 +57,9 @@ function runsDir(homeDir) {
 }
 
 function isConcreteModelId(modelAlias) {
-  return Boolean(modelAlias) && !KNOWN_MODEL_ALIASES.has(modelAlias);
+  if (!modelAlias) return false;
+  // 'opus[1m]' is an alias with a context suffix; 'claude-opus-4-7[1m]' keeps its id.
+  return !KNOWN_MODEL_ALIASES.has(modelAlias.replace(/\[[^\]]*\]$/, ''));
 }
 
 /**

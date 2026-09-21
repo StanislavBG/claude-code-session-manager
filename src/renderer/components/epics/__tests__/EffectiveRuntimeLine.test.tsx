@@ -46,6 +46,12 @@ afterEach(() => {
 })
 
 describe('EffectiveRuntimeLine', () => {
+  it('pinned concrete id: says pinned, never "resolved by the CLI at launch"', () => {
+    const el = mount(info({ modelAlias: 'claude-opus-5', resolvedModelId: 'claude-opus-5', resolvedFrom: null }))
+    expect(el.textContent).toContain('claude-opus-5 → Opus 5 (pinned)')
+    expect(el.textContent).not.toContain('resolved by the CLI')
+  })
+
   it('resolved: shows alias, evidence-backed concrete model, and effort with source', () => {
     const el = mount(
       info({

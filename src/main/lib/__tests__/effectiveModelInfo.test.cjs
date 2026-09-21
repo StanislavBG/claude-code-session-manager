@@ -223,6 +223,11 @@ test('isConcreteModelId treats known CLI aliases as non-concrete and everything 
   expect(isConcreteModelId('opus')).toBe(false);
   expect(isConcreteModelId('sonnet')).toBe(false);
   expect(isConcreteModelId('haiku')).toBe(false);
+  expect(isConcreteModelId('opus[1m]')).toBe(false);
+  expect(isConcreteModelId('best')).toBe(false);
+  expect(isConcreteModelId('opusplan')).toBe(false);
+  expect(isConcreteModelId('default')).toBe(false);
+  expect(isConcreteModelId('claude-opus-4-7[1m]')).toBe(true);
   expect(isConcreteModelId('fable')).toBe(false);
   expect(isConcreteModelId(null)).toBe(false);
   expect(isConcreteModelId('claude-opus-5')).toBe(true);

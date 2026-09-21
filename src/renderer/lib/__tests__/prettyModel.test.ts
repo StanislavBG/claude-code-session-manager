@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { prettyModel } from '../prettyModel'
+import { prettyModel, modelFamily } from '../prettyModel'
 
 describe('prettyModel', () => {
   const cases: Array<[string, string]> = [
@@ -24,5 +24,19 @@ describe('prettyModel', () => {
 
   it.each(cases)('prettyModel(%j) -> %j', (input, expected) => {
     expect(prettyModel(input)).toBe(expected)
+  })
+})
+
+describe('modelFamily', () => {
+  it('derives the family from ids and aliases, null for non-family aliases', () => {
+    expect(modelFamily('claude-opus-4-8')).toBe('opus')
+    expect(modelFamily('sonnet[1m]')).toBe('sonnet')
+    expect(modelFamily('claude-haiku-4-5-20251001')).toBe('haiku')
+    expect(modelFamily('best')).toBeNull()
+    expect(modelFamily('opusplan')).toBe('opus')
+  })
+  it('prettyModel never blanks bracketed/non-family aliases', () => {
+    expect(prettyModel('opus[1m]')).toBe('opus[1m]')
+    expect(prettyModel('best')).toBe('best')
   })
 })

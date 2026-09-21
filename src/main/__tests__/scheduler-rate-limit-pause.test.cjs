@@ -31,6 +31,7 @@ const {
   billingResetForPause,
   computeEffectiveResumeAt,
   computeResumeDelay,
+  computeDegradedBudget,
 } = require('../scheduler.cjs');
 const billing = require('../usage.cjs');
 
@@ -134,4 +135,18 @@ test('computeResumeDelay: a reset far enough out DOES trip the overflow guard', 
   const thirtyDaysOut = new Date(now + 30 * 24 * 60 * 60_000).toISOString();
   const { tooFar } = computeResumeDelay(thirtyDaysOut, now);
   assert.strictEqual(tooFar, true);
+});
+
+test('refreshNextReset (via billingResetForPause) seeds lastGoodUsagePayload: a following degraded cycle yields the fetched percent, not 100', async () => {
+  const originalFetchUsage = billing.fetchUsage;
+  billing.fetchUsage = async () => ({
+    kind: 'ok',
+    data: { usage: { limits: [{ kind: 'weekly_all', percent: 64, resets_at: '2026-09-24T17:00:00Z', scope: null, is_active: true }] } },
+  });
+  try {
+    await billingResetForPause();
+    assert.strictEqual(computeDegradedBudget().utilization, 64);
+  } finally {
+    billing.fetchUsage = originalFetchUsage;
+  }
 });

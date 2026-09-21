@@ -191,11 +191,24 @@ test('bindingWindow: limits[] with only scoped / non-finite entries falls back t
   assert.strictEqual(win.utilization, 12);
 });
 
-test('degradedBudget: never yields 0 utilization, even when the last good binding window read 0', () => {
+test('degradedBudget: a last-good binding window that genuinely read 0% carries forward as 0, not 100', () => {
   const payload = { five_hour: { utilization: 0, resets_at: null } };
-  const { utilization } = degradedBudget(payload, {});
-  assert.notStrictEqual(utilization, 0);
-  assert.strictEqual(utilization, 100); // no real signal -> conservative default
+  assert.strictEqual(degradedBudget(payload, {}).utilization, 0);
+});
+
+test('degradedBudget: no payload ever received (null/absent) still yields 100, never a blind 0', () => {
+  assert.strictEqual(degradedBudget(null, {}).utilization, 100);
+  assert.strictEqual(degradedBudget(undefined, {}).utilization, 100);
+});
+
+test('degradedBudget: a degraded cycle after a real-shape poll carries forward the real percent (64), not 100', () => {
+  const payload = {
+    limits: [
+      { kind: 'session', percent: 6, resets_at: null, scope: null, is_active: false },
+      { kind: 'weekly_all', percent: 64, resets_at: '2026-09-24T17:00:00Z', scope: null, is_active: true },
+    ],
+  };
+  assert.strictEqual(degradedBudget(payload, {}).utilization, 64);
 });
 
 test('degradedBudget: carries forward the real last-good BINDING (weekly_all) utilization, e.g. 81%, never 0', () => {

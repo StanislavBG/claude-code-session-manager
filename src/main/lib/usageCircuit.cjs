@@ -113,15 +113,18 @@ function degradedConcurrencyCap(configuredCap) {
 
 /**
  * Conservative budget to run on while the meter is down. utilization is
- * carried forward from the last known-good BINDING window — never 0, which
- * would read as "plenty of headroom" instead of "we don't know." A fresh
+ * carried forward from the last known-good BINDING window (a genuine 0% stays
+ * 0); with no payload ever received it is 100, never a blind 0 that would read
+ * as "plenty of headroom" instead of "we don't know." A fresh
  * executor-observed 429 (its own window not yet passed) pins utilization to
  * 100 regardless of the stale cached value. concurrencyCap never exceeds 2
  * (or SM_USAGE_DEGRADED_CAP, if set).
  */
 function degradedBudget(lastGoodPayload, executorEvidence = {}) {
+  // "Never a blind 0" means NO payload ever received -> 100. A payload whose
+  // binding window genuinely reads 0% carries forward as 0.
   const window = bindingWindow(lastGoodPayload);
-  let utilization = Number.isFinite(window.utilization) && window.utilization > 0
+  let utilization = lastGoodPayload && Number.isFinite(window.utilization)
     ? window.utilization
     : 100;
 

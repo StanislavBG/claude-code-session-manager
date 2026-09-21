@@ -3290,8 +3290,14 @@ async function refreshNextReset() {
   const r = await billing.fetchUsage();
   if (r.kind !== 'ok') throw new Error(`usage fetch failed (${r.kind}): ${r.message ?? ''}`);
   const window = bindingWindow(r.data?.usage);
+  if (!Number.isFinite(window.utilization)) {
+    // Successful fetch with no readable percent = meter/contract problem, not a reading.
+    billing.usageCircuit.recordFailure('no_utilization');
+    throw new Error('usage fetch ok but payload yielded no finite utilization');
+  }
   recordObservedReset(window.resets_at ?? null);
-  cachedUtilization = Number.isFinite(window.utilization) ? window.utilization : cachedUtilization;
+  cachedUtilization = window.utilization;
+  lastGoodUsagePayload = r.data?.usage ?? lastGoodUsagePayload;
   return cachedNextReset;
 }
 
@@ -9520,10 +9526,25 @@ async function pollLoop() {
 
     const r = await billing.fetchUsage();
 
+    if (r.kind === 'ok' && !Number.isFinite(bindingWindow(r.data?.usage).utilization)) {
+      // Successful fetch but no finite percent: a meter/contract problem, not a
+      // reading. Report it truthfully instead of leaving a stale number that
+      // looks live; carry the conservative degraded budget forward.
+      billing.usageCircuit.recordFailure('no_utilization');
+      applyDegradedBudget();
+      lastPollAt = Date.now();
+      lastPollOk = false;
+      persistSchedulerState();
+      const cur = await readQueue();
+      await maybeLaunchWhenAvailable(cur);
+      await broadcast();
+      return;
+    }
+
     if (r.kind === 'ok') {
       const window = bindingWindow(r.data?.usage);
       recordObservedReset(window.resets_at ?? null);
-      cachedUtilization = Number.isFinite(window.utilization) ? window.utilization : cachedUtilization;
+      cachedUtilization = window.utilization;
       lastGoodUsagePayload = r.data?.usage ?? lastGoodUsagePayload;
       degradedConcurrencyCapValue = null;
       consecutiveFailures = 0;

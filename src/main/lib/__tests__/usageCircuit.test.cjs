@@ -101,18 +101,74 @@ test('isResetFresh: past -> false, future -> true, null -> false', () => {
   assert.strictEqual(isResetFresh('not-a-date', now), false);
 });
 
-test('bindingWindow: limits[] with weekly_all is_active wins over five_hour', () => {
+const REAL_LIMITS = [
+  { kind: 'session', group: 'session', percent: 6, severity: 'normal', resets_at: '2026-09-22T00:40:00.280514+00:00', scope: null, is_active: false },
+  { kind: 'weekly_all', group: 'weekly', percent: 64, severity: 'normal', resets_at: '2026-09-24T17:00:00.280532+00:00', scope: null, is_active: true },
+  { kind: 'weekly_scoped', group: 'weekly', percent: 18, severity: 'normal', resets_at: '2026-09-24T17:00:00.280763+00:00', scope: { model: { id: null, display_name: 'Fable' }, surface: null }, is_active: false },
+];
+
+test('bindingWindow: verbatim real payload selects weekly_all 64', () => {
   const payload = {
-    five_hour: { utilization: 5, resets_at: '2026-09-13T15:00:00Z' },
-    limits: [
-      { type: 'five_hour', is_active: false, utilization: 5, resets_at: '2026-09-13T15:00:00Z' },
-      { type: 'weekly_all', is_active: true, utilization: 81, resets_at: '2026-09-19T00:00:00Z' },
-    ],
+    five_hour: { utilization: 6, resets_at: '2026-09-22T00:40:00.280514+00:00' },
+    seven_day: { utilization: 64, resets_at: '2026-09-24T17:00:00.280532+00:00' },
+    limits: REAL_LIMITS,
   };
-  const win = bindingWindow(payload);
+  assert.deepStrictEqual(bindingWindow(payload), {
+    name: 'weekly_all',
+    utilization: 64,
+    resets_at: '2026-09-24T17:00:00.280532+00:00',
+  });
+});
+
+test('bindingWindow: max percent wins over is_active (session 95 beats weekly_all 64)', () => {
+  const win = bindingWindow({
+    limits: [
+      { kind: 'session', percent: 95, resets_at: '2026-09-22T00:40:00Z', scope: null, is_active: false },
+      { kind: 'weekly_all', percent: 64, resets_at: '2026-09-24T17:00:00Z', scope: null, is_active: true },
+    ],
+  });
+  assert.strictEqual(win.name, 'session');
+  assert.strictEqual(win.utilization, 95);
+});
+
+test('bindingWindow: is_active breaks a percent tie', () => {
+  const win = bindingWindow({
+    limits: [
+      { kind: 'session', percent: 50, resets_at: null, scope: null, is_active: false },
+      { kind: 'weekly_all', percent: 50, resets_at: null, scope: null, is_active: true },
+    ],
+  });
   assert.strictEqual(win.name, 'weekly_all');
-  assert.strictEqual(win.utilization, 81);
-  assert.strictEqual(win.resets_at, '2026-09-19T00:00:00Z');
+});
+
+test('bindingWindow: a high weekly_scoped entry is never selected', () => {
+  const win = bindingWindow({
+    limits: [
+      { kind: 'session', percent: 6, resets_at: null, scope: null, is_active: false },
+      { kind: 'weekly_all', percent: 10, resets_at: null, scope: null, is_active: true },
+      { kind: 'weekly_scoped', percent: 99, resets_at: null, scope: { model: { display_name: 'Fable' } }, is_active: false },
+    ],
+  });
+  assert.strictEqual(win.name, 'weekly_all');
+  assert.strictEqual(win.utilization, 10);
+});
+
+test('bindingWindow: percent over 100 is returned raw, not clamped', () => {
+  const win = bindingWindow({ limits: [{ kind: 'session', percent: 112, resets_at: null, scope: null }] });
+  assert.strictEqual(win.utilization, 112);
+});
+
+test('bindingWindow: null resets_at backfills from the matching flat window', () => {
+  const win = bindingWindow({
+    five_hour: { utilization: 40, resets_at: '2026-09-22T00:40:00Z' },
+    seven_day: { utilization: 5, resets_at: '2026-09-24T17:00:00Z' },
+    limits: [
+      { kind: 'session', percent: 40, resets_at: null, scope: null },
+      { kind: 'weekly_all', percent: 5, resets_at: null, scope: null },
+    ],
+  });
+  assert.strictEqual(win.name, 'session');
+  assert.strictEqual(win.resets_at, '2026-09-22T00:40:00Z');
 });
 
 test('bindingWindow: limits[] absent falls back to five_hour', () => {
@@ -122,12 +178,12 @@ test('bindingWindow: limits[] absent falls back to five_hour', () => {
   assert.strictEqual(win.utilization, 42);
 });
 
-test('bindingWindow: limits[] present but nothing is_active also falls back to five_hour', () => {
+test('bindingWindow: limits[] with only scoped / non-finite entries falls back to five_hour', () => {
   const payload = {
     five_hour: { utilization: 12, resets_at: null },
     limits: [
-      { type: 'five_hour', is_active: false, utilization: 12, resets_at: null },
-      { type: 'weekly_all', is_active: false, utilization: 81, resets_at: null },
+      { kind: 'weekly_scoped', percent: 81, resets_at: null, scope: { model: { display_name: 'Fable' } } },
+      { kind: 'session', resets_at: null, scope: null },
     ],
   };
   const win = bindingWindow(payload);
@@ -146,8 +202,8 @@ test('degradedBudget: carries forward the real last-good BINDING (weekly_all) ut
   const payload = {
     five_hour: { utilization: 0, resets_at: null },
     limits: [
-      { type: 'five_hour', is_active: false, utilization: 0, resets_at: null },
-      { type: 'weekly_all', is_active: true, utilization: 81, resets_at: '2026-09-19T00:00:00Z' },
+      { kind: 'session', is_active: false, percent: 0, resets_at: null, scope: null },
+      { kind: 'weekly_all', is_active: true, percent: 81, resets_at: '2026-09-19T00:00:00Z', scope: null },
     ],
   };
   const { utilization } = degradedBudget(payload, {});

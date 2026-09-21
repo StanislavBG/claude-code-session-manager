@@ -281,7 +281,7 @@ async function fetchUsage() {
     if (kind === 'transient') return { kind: 'transient', message: 'e2e stub', httpStatus: 503 };
     if (kind === 'auth') return { kind: 'auth', message: 'e2e stub', httpStatus: 401 };
     // 'ok' stub returns a minimal valid payload.
-    return { kind: 'ok', data: { usage: { five_hour: { utilization: 10, resets_at: null }, seven_day: { utilization: 10, resets_at: null }, seven_day_sonnet: null, seven_day_opus: null, extra_usage: null }, subscriptionType: null, rateLimitTier: null, credentialsExpiresAt: null, fetchedAt: Date.now() } };
+    return { kind: 'ok', data: { usage: { five_hour: { utilization: 10, resets_at: null }, seven_day: { utilization: 10, resets_at: null }, limits: [{ kind: 'session', group: 'session', percent: 10, severity: 'normal', resets_at: null, scope: null, is_active: false }, { kind: 'weekly_all', group: 'weekly', percent: 10, severity: 'normal', resets_at: null, scope: null, is_active: true }], seven_day_sonnet: null, seven_day_opus: null, extra_usage: null }, subscriptionType: null, rateLimitTier: null, credentialsExpiresAt: null, fetchedAt: Date.now() } };
   }
 
   await ensureHydrated();

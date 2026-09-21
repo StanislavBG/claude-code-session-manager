@@ -50,19 +50,44 @@ function isResetFresh(iso, now) {
   return resetMs > nowMs;
 }
 
+/** Flat sibling window that mirrors a `limits[]` entry's `kind`, for resets_at backfill. */
+const FLAT_WINDOW_BY_KIND = { session: 'five_hour', weekly_all: 'seven_day' };
+
+/** An entry's utilization: real `percent`, else the flat-shape `utilization`. */
+function entryPercent(l) {
+  return Number.isFinite(l.percent) ? l.percent : l.utilization;
+}
+
 /**
- * Which window is actually binding dispatch. Prefers `payload.limits[]`'s
- * `is_active` entry (the richer per-window shape); falls back to the flat
- * `five_hour` field when `limits[]` is absent, matching usage.cjs's shape.
+ * Which window is actually binding dispatch. The real /api/oauth/usage
+ * `limits[]` entries carry `kind` / `group` / `percent` / `severity` /
+ * `resets_at` / `scope` / `is_active` (percent is 0-100, may exceed 100).
+ * Only UNSCOPED entries (`scope == null`) are candidates — a scoped entry
+ * (e.g. `weekly_scoped` for one model) does not bind dispatch generally. Among
+ * them the HIGHEST finite percent wins ("binding" = closest to blocking us);
+ * `is_active` only breaks ties, because the API sets it on group precedence
+ * and trusting it alone would pick weekly_all 64 over session 95. With no
+ * usable unscoped entry, falls back to the flat `five_hour`. Pure, no I/O.
  */
 function bindingWindow(payload) {
-  if (payload && Array.isArray(payload.limits) && payload.limits.length) {
-    const active = payload.limits.find((l) => l && l.is_active);
-    if (active) {
+  if (payload && Array.isArray(payload.limits)) {
+    let best = null;
+    let bestPct = -Infinity;
+    for (const l of payload.limits) {
+      if (!l || l.scope != null) continue;
+      const pct = entryPercent(l);
+      if (!Number.isFinite(pct)) continue;
+      if (pct > bestPct || (pct === bestPct && l.is_active === true && !(best && best.is_active === true))) {
+        best = l;
+        bestPct = pct;
+      }
+    }
+    if (best) {
+      const flat = payload[FLAT_WINDOW_BY_KIND[best.kind]];
       return {
-        name: active.type || active.name || 'unknown',
-        utilization: active.utilization,
-        resets_at: active.resets_at ?? null,
+        name: best.kind || best.type || best.name || 'unknown',
+        utilization: bestPct,
+        resets_at: best.resets_at ?? (flat ? flat.resets_at ?? null : null),
       };
     }
   }

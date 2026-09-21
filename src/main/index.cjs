@@ -82,6 +82,7 @@ const { registerHistoryAggregatorHandlers, finalizeClosedDays, refreshIntradayTo
 const runLogRetention = require('./lib/runLogRetention.cjs');
 const { registerHistoryDashboardHandlers } = require('./historyDashboard.cjs');
 const { tryAcquireLock, releaseLock, DEFAULT_LOCK_PATH } = require('./lib/watchdogHelpers.cjs');
+const { createIntradayRefresh } = require('./lib/intradayRefresh.cjs');
 const schedulerConfig = require('./lib/schedulerConfig.cjs');
 const memoryTool = require('./memoryTool.cjs');
 const { registerMemoryAggregateIpc } = require('./memoryAggregate.cjs');
@@ -204,14 +205,9 @@ const REBOOT_LOG = path.join(os.homedir(), '.claude', 'session-manager-reboot.lo
 // finalize pass never interleave writes to the rollup file. A contended lock
 // just means this tick is skipped — the next timer tick (or the next boot)
 // retries, so skipping is always safe.
-function runIntradayRefresh() {
-  if (!tryAcquireLock(DEFAULT_LOCK_PATH)) return;
-  refreshIntradayToday()
-    .catch((e) => {
-      logs.writeLine({ scope: 'history-rollup', level: 'error', message: 'refreshIntradayToday failed', meta: { error: e?.message } });
-    })
-    .finally(() => releaseLock(DEFAULT_LOCK_PATH));
-}
+const runIntradayRefresh = createIntradayRefresh({
+  tryAcquireLock, releaseLock, lockPath: DEFAULT_LOCK_PATH, refresh: refreshIntradayToday, logs,
+});
 
 function logReboot(line) {
   try {

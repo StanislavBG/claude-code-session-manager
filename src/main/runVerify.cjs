@@ -898,7 +898,9 @@ async function verifyRun({
       scannedAt: new Date().toISOString(),
       ...(extras ?? {}),
     };
-    try { fs.writeFileSync(verdictsPath, JSON.stringify(record, null, 2)); } catch { /* best-effort */ }
+    // Atomic (tmp+rename) — scheduler.cjs reads this sidecar to decide completed-equivalence,
+    // so a torn write must never be observable. Lazy require keeps this module electron-free at load.
+    try { require('./config.cjs').writeJsonSync(verdictsPath, record); } catch { /* best-effort */ }
     return { verdict, reason, downgradeTo, ...(extras ?? {}) };
   }
 

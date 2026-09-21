@@ -19,13 +19,24 @@
  *      Expected: clean → null (caller may stamp 'completed')
  */
 
-import { test } from 'vitest';
+import { test, beforeAll, afterAll, vi } from 'vitest';
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { verifyRun, parseLog } = require('../runVerify.cjs');
+
+// The verdicts sidecar goes through config.writeJsonSync, whose write allow-list
+// rejects os.tmpdir() fixtures. Route it to a plain write for these fixtures.
+let writeSpy;
+beforeAll(() => {
+  writeSpy = vi.spyOn(require('../config.cjs'), 'writeJsonSync').mockImplementation((abs, data) => {
+    fs.writeFileSync(abs, JSON.stringify(data, null, 2) + '\n');
+    return { ok: true, mtimeMs: 0 };
+  });
+});
+afterAll(() => writeSpy.mockRestore());
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 

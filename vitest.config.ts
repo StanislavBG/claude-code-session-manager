@@ -235,6 +235,7 @@ export default defineConfig({
       'scripts/__tests__/check-doc-hierarchy.test.cjs',
       'scripts/__tests__/check-explicit-any.test.cjs',
       'scripts/__tests__/check-main-ts-check.test.cjs',
+      'scripts/__tests__/check-tracked-filenames.test.cjs',
       'scripts/__tests__/check-epic-transcripts.test.cjs',
       'scripts/__tests__/check-ops-path-literals.test.cjs',
       'src/main/__tests__/prdAdminRoutes.test.cjs',

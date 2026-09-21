@@ -55,7 +55,8 @@
     "lint:paths": "node scripts/check-ops-path-literals.cjs",
     "lint:any": "node scripts/check-explicit-any.cjs",
     "lint:main-ts-check": "node scripts/check-main-ts-check.cjs",
-    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:unregistered-tests && npm run lint:docs && npm run lint:paths && npm run lint:any && npm run lint:main-ts-check",
+    "lint:filenames": "node scripts/check-tracked-filenames.cjs",
+    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:unregistered-tests && npm run lint:docs && npm run lint:paths && npm run lint:any && npm run lint:main-ts-check && npm run lint:filenames",
     "sync:settings-schema": "node scripts/sync-settings-schema.cjs"
   },
   "keywords": [

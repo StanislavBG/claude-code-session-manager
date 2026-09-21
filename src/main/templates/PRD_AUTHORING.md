@@ -141,6 +141,10 @@ estimateMinutes: 60
 - `estimateMinutes` is used for ETA display; include a realistic estimate (note: empirical median is ~10 min, p90 ~20 min — avoid wildly inflated estimates that hide real outliers).
 - `parallelGroup` in frontmatter, when present, IS honored by the scheduler (`pickNextBatch` reads `parallelGroup ?? 99` and overrides the filename NN). Use this only for cross-stream interleaving — e.g., the cellar series `122-`, `123-`, `124-` overrides to groups `113`, `114`, `115` so cellar steps fire alongside the parallel etch steps. Do NOT use it to reorder within a single stream; rename the file instead.
 
+### `planId` (API-owned — never pass it)
+
+`planId` is a frontmatter key that `createPrd` stamps on every PRD: the durable identity of the plan (wave) the PRD belongs to. An `append` PRD (or one with an explicit `dependsOn`) inherits the planId of the PRD(s) it attaches behind; a first-ever or `new-head` PRD mints a fresh one. The Scheduler tracker groups by it, so a second plan in one Epic is a recorded fact, not a re-derivation. Callers never pass or hand-write it — `scheduler_create_prd` ignores it. PRDs without one (pre-stamp) fall back to dependency-graph grouping.
+
 ### Artifact-only PRDs
 
 Use `deliverable: artifact` + `artifactPaths: [a, b]` (both passed to `scheduler_create_prd`) ONLY when every deliverable is a file the target repo deliberately git-excludes (e.g. patches/notes under `session-manager-operations/review-records/`, matched by `.git/info/exclude`), so "no commit" is the correct outcome.

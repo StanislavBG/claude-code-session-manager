@@ -30,7 +30,7 @@ const { fixChainDepthOf, baseSlugOf } = require('./fixChainDepth.cjs');
 const { DEFAULT_PRD_AGENT_TYPE, assertAgentTypeWritable } = require('./prdAgentType.cjs');
 const { resolveDepSlug, findNearMatches } = require('./depSlugResolve.cjs');
 const { isFixPlanSlug } = require('./fixPlanSlug.cjs');
-const { isIncomplete, resolveChainTerminals } = require('./prdDisposition.cjs');
+const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
 
 // A caller-supplied slug that already starts with its own `NN-` (e.g.
 // "254-perf-x") used to silently become the double-prefixed row
@@ -75,7 +75,7 @@ function deriveSlugFromTitle(title) {
 function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
-    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId,
   } = input;
 
   // No `parallelGroup` frontmatter key by convention (SKILL.md) — the NN-
@@ -114,6 +114,9 @@ function buildPrdBody(input) {
   // site above); a first-ever PRD in an Epic, or one with its own explicit
   // dependsOn, has nothing to decide against and omits this key.
   if (disposition) fmLines.push(`disposition: ${disposition}`);
+  // Durable wave identity — owned by createPrd() (never a caller input), so
+  // buildPlans groups by it instead of re-deriving from the live dependsOn graph.
+  if (isValidPlanId(planId)) fmLines.push(`planId: ${planId}`);
   // Artifact-only declaration — validated by createPrd() before this runs.
   if (deliverable) fmLines.push(`deliverable: ${deliverable}`);
   if (artifactPaths && artifactPaths.length) fmLines.push(`artifactPaths: [${artifactPaths.join(', ')}]`);
@@ -420,16 +423,18 @@ async function createPrd(input, remote) {
   // see later. A listPrds() read failure is skipped-with-a-warning, never a
   // write outage: an I/O hiccup on the read side must not block every PRD
   // write in the project.
+  let depRows = null;
   if (input.dependsOn && input.dependsOn.length) {
     let listing;
     try {
-      listing = await remote.listPrds({ cwd: input.cwd, limit: Number.MAX_SAFE_INTEGER });
+      listing = await remote.listPrds({ cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER });
     } catch (e) {
       console.warn(`[prdCreate] dependsOn validation skipped (listPrds failed): ${e?.message ?? e}`);
       listing = null;
     }
     if (listing) {
-      const candidateSlugs = (listing.prds ?? []).map((p) => p.slug);
+      depRows = listing.prds ?? [];
+      const candidateSlugs = depRows.map((p) => p.slug);
       for (const dep of input.dependsOn) {
         if (resolveDepSlug(dep, candidateSlugs).length > 0) continue;
         const near = findNearMatches(dep, candidateSlugs);
@@ -444,7 +449,20 @@ async function createPrd(input, remote) {
     }
   }
 
-  const body = buildPrdBody(input);
+  // planId is API-owned: any caller-supplied value is discarded. Inherited from the
+  // resolved dependencies (append terminals or explicit dependsOn) using the FK-check
+  // listing above; otherwise (first-ever / new-head / legacy deps) freshly minted.
+  let planId = null;
+  if (input.dependsOn && input.dependsOn.length && depRows) {
+    const inherited = resolveInheritedPlanId(input.dependsOn, depRows);
+    planId = inherited.planId;
+    if (inherited.diverged) {
+      console.warn(`[prdCreate] dependsOn spans plans ${inherited.diverged.join(', ')} — inheriting ${planId} (lowest-numbered dependency)`);
+    }
+  }
+  if (!planId) planId = mintPlanId();
+
+  const body = buildPrdBody({ ...input, planId });
   const writeResult = await remote.writePrd(filenameSlug, body, input.cwd);
   if (!writeResult?.ok) {
     return { ok: false, status: 500, error: writeResult?.error ?? 'write failed' };

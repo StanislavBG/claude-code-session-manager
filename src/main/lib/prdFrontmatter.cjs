@@ -77,8 +77,8 @@ function splitFrontmatter(raw) {
  * never emitted, which is how `scheduler_update_prd` clears a dependency.
  */
 
-const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'deliverable', 'artifactPaths']);
-const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'deliverable', 'artifactPaths'];
+const RECOGNIZED_KEYS = new Set(['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths']);
+const EMIT_ORDER = ['title', 'cwd', 'estimateMinutes', 'parallelGroup', 'sourcePromptId', 'sourceTabId', 'tag', 'agentType', 'createdVia', 'issuedAt', 'dependsOn', 'quietMachine', 'disposition', 'planId', 'deliverable', 'artifactPaths'];
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 
 function indentOf(line) {
@@ -178,6 +178,10 @@ function applyKey(fm, key, after) {
       // `false`) is treated as "not set" so the field never round-trips as
       // a no-op line for the overwhelming majority of PRDs that omit it.
       if (v === true) fm.quietMachine = true;
+      return;
+    case 'planId':
+      // Durable wave identity stamped by createPrd(); a garbage value is dropped.
+      if (typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(v)) fm.planId = v;
       return;
     case 'disposition':
       // Wave-authoring decision ('append'/'new-head') — see

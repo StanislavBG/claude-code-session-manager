@@ -126,6 +126,8 @@ async function parsePrdRaw(filePath) {
     // the decision (first-ever PRD in its Epic, or one with its own explicit
     // dependsOn).
     disposition: (fm.disposition === 'append' || fm.disposition === 'new-head') ? fm.disposition : null,
+    // Durable wave identity (createPrd-stamped); malformed values read as absent.
+    planId: (typeof fm.planId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(fm.planId)) ? fm.planId : null,
     // Opt-in exclusive-lease flag (PRD 1107, quietMachineLease.cjs +
     // schedulerBatch.cjs's pickNextBatch). Only a literal `true` opts in —
     // matches prdFrontmatter.cjs's applyKey semantics for this field.

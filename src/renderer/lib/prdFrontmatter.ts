@@ -58,6 +58,8 @@ export type PrdFrontmatter = {
   // never needed this decision in the first place. Absent when the Epic had
   // no existing incomplete PRDs to decide against.
   disposition?: 'append' | 'new-head'
+  // Durable wave identity stamped by the main-process createPrd(); API-owned.
+  planId?: string
   // Unrecognized keys round-trip via `extras`.
   extras?: Record<string, RawValue>
   // Original raw line per recognized key. Used to preserve quote style and
@@ -89,6 +91,7 @@ const RECOGNIZED_KEYS = new Set<keyof PrdFrontmatter>([
   'agentType',
   'dependsOn',
   'disposition',
+  'planId',
 ])
 
 // Emit order is stable so opening+saving without edits is byte-identical.
@@ -103,6 +106,7 @@ const EMIT_ORDER: Array<keyof PrdFrontmatter> = [
   'agentType',
   'dependsOn',
   'disposition',
+  'planId',
 ]
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
@@ -266,6 +270,9 @@ function applyKey(fm: PrdFrontmatter, key: string, after: string): void {
       if (list) fm.dependsOn = list
       return
     }
+    case 'planId':
+      if (typeof v === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(v)) fm.planId = v
+      return
     case 'disposition':
       if (v === 'append' || v === 'new-head') fm.disposition = v
       return

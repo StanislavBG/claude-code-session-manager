@@ -28,6 +28,7 @@
  * the scheduler considers a row's real blockers at run time.
  */
 
+const crypto = require('node:crypto');
 const { resolveDepSlug } = require('./depSlugResolve.cjs');
 
 /** A row is "incomplete" (still part of the Epic's active plan) unless it
@@ -191,7 +192,52 @@ function computeDispositionRewrite({ slug, disposition, dependsOn, rows }) {
   return { ok: true, dependsOn: newDependsOn };
 }
 
+/** planId shape: a single frontmatter token, no commas/brackets/whitespace, so the
+ *  line-oriented parsers need no tokenizer. Anything else is treated as absent. */
+const PLAN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+function isValidPlanId(v) {
+  return typeof v === 'string' && PLAN_ID_RE.test(v);
+}
+
+/** Fresh, sortable, coordination-free plan id: `pl-<base36 ms>-<6 hex random>`. */
+function mintPlanId() {
+  return `pl-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
+}
+
+/**
+ * Resolve the planId a new PRD inherits from the PRDs it depends on. `depSlugs` are
+ * resolved against `rows` ({ slug, planId }) via the shared resolveDepSlug rule. Returns
+ * { planId, diverged } — planId is null when no dependency carries a valid one (caller
+ * mints). When dependencies carry two or more DIFFERENT planIds, the lowest-numbered
+ * dependency's wins (ties broken by slug) and `diverged` lists the distinct ids.
+ */
+function resolveInheritedPlanId(depSlugs, rows) {
+  const slugs = rows.map((r) => r.slug);
+  const seen = new Set();
+  const deps = [];
+  for (const d of depSlugs ?? []) {
+    for (const s of resolveDepSlug(d, slugs)) {
+      if (seen.has(s)) continue;
+      seen.add(s);
+      const row = rows.find((r) => r.slug === s);
+      if (row && isValidPlanId(row.planId)) deps.push(row);
+    }
+  }
+  if (!deps.length) return { planId: null, diverged: null };
+  const num = (slug) => {
+    const m = /^(\d+)-/.exec(slug);
+    return m ? Number(m[1]) : Number.MAX_SAFE_INTEGER;
+  };
+  deps.sort((a, b) => num(a.slug) - num(b.slug) || a.slug.localeCompare(b.slug));
+  const distinct = [...new Set(deps.map((r) => r.planId))];
+  return { planId: deps[0].planId, diverged: distinct.length > 1 ? distinct : null };
+}
+
 module.exports = {
+  isValidPlanId,
+  mintPlanId,
+  resolveInheritedPlanId,
   isIncomplete,
   resolveChainTerminals,
   wouldCreateCycle,

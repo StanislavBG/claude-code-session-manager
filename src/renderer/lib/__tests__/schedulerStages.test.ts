@@ -208,3 +208,29 @@ describe('formatters', () => {
     expect(formatEta(1000)).toBe('~now'); expect(formatEta(120_000)).toBe('~2m'); expect(formatEta(11_880_000)).toBe('~3h18m')
   })
 })
+
+describe('buildPlans planId grouping', () => {
+  it('groups by explicit planId even when the dependsOn graph would connect them', () => {
+    const ps = plans([
+      job('1-a', { planId: 'pl-1' }),
+      job('2-b', { planId: 'pl-1', dependsOn: ['1-a'] }),
+      job('3-c', { planId: 'pl-2', dependsOn: ['2-b'] }),
+    ])
+    expect(ps.map((p) => p.prdCount)).toEqual([2, 1])
+    expect(ps[1].stages.map((s) => s.n)).toEqual([1])
+  })
+  it('a mixed section (some rows lack planId) falls back to derivation with no dup/dropped rows', () => {
+    const ps = plans([
+      job('1-a', { planId: 'pl-1' }),
+      job('2-b', { dependsOn: ['1-a'] }),
+      job('3-c'),
+    ])
+    const slugs = ps.flatMap((p) => p.stages.flatMap((s) => s.rows.map((r) => r.slug))).sort()
+    expect(slugs).toEqual(['1-a', '2-b', '3-c'])
+    expect(ps.map((p) => p.prdCount).sort()).toEqual([1, 2])
+  })
+  it('legacy fixture without planId keeps connected-component waves', () => {
+    const ps = plans([job('1-a'), job('2-b', { dependsOn: ['1-a'] }), job('3-c')])
+    expect(ps.map((p) => p.prdCount).sort()).toEqual([1, 2])
+  })
+})

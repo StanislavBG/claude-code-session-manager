@@ -63,3 +63,24 @@ describe('prdFrontmatter round-trip', () => {
     expect(body).toBe('just body\n')
   })
 })
+
+describe('prdFrontmatter planId', () => {
+  const text = '---\ntitle: p\ncwd: /tmp\nestimateMinutes: 5\ndisposition: append\nplanId: pl-abc123-ff00aa\n---\nbody\n'
+  it('renderer parser round-trips planId byte-identical', () => {
+    const { frontmatter, body } = parsePrdFile(text)
+    expect(frontmatter.planId).toBe('pl-abc123-ff00aa')
+    expect(serializePrdFile(frontmatter, body)).toBe(text)
+  })
+  it('renderer parser ignores a garbage planId', () => {
+    const { frontmatter } = parsePrdFile('---\ntitle: p\nplanId: a b, [c]\n---\nx\n')
+    expect(frontmatter.planId).toBeUndefined()
+  })
+  it('main parser round-trips planId byte-identical and drops garbage', async () => {
+    // @ts-expect-error — CJS main module has no type declarations
+    const main = await import('../../src/main/lib/prdFrontmatter.cjs') as any
+    const { frontmatter, body } = main.parsePrdFile(text)
+    expect(frontmatter.planId).toBe('pl-abc123-ff00aa')
+    expect(main.serializePrdFile(frontmatter, body)).toBe(text)
+    expect(main.parsePrdFile('---\ntitle: p\nplanId: a b, [c]\n---\nx\n').frontmatter.planId).toBeUndefined()
+  })
+})

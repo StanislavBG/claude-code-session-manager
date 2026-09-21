@@ -560,6 +560,8 @@ export interface ScheduleJob {
    *  independent root). Refreshed from the PRD file on every reconcile, like
    *  dependsOn above; null when this row never needed the decision. */
   disposition?: 'append' | 'new-head' | null;
+  /** Durable wave identity stamped into PRD frontmatter by createPrd(); buildPlans groups by it. Null on PRDs that predate the stamp. */
+  planId?: string | null;
   /** The originating claude session — the Epic's claudeSessionId, resolved
    *  from active-index.json at ingest (PRD 832). An Epic IS a tagged session. */
   originSessionId?: string | null;
@@ -710,6 +712,8 @@ export interface PrdListItem {
   dependsOn?: string[] | null;
   /** PRD frontmatter `disposition` — see ScheduleJob.disposition. */
   disposition?: 'append' | 'new-head' | null;
+  /** PRD frontmatter `planId` — see ScheduleJob.planId. */
+  planId?: string | null;
   /** True when this PRD's source .md was found in a `prds-archived/` dir
    *  (its scheduler job already ran to completion) rather than the live
    *  `prds/` dir. Archived PRDs have no matching queue.json job row (the

@@ -226,6 +226,28 @@ function weakComponents<N extends { row: { slug: string; dependsOn?: string[] | 
 }
 
 /**
+ * One Epic section's plan groups. When EVERY row carries an explicit `planId` (stamped by
+ * createPrd), group by it — first-seen order — so plan membership is a recorded fact. Any
+ * row lacking one (pre-stamp PRDs) sends the whole section down the derivation fallback, so
+ * a mixed section can never duplicate or drop a row. Each row lands in exactly one group.
+ */
+function planGroups<N extends { row: { slug: string; planId?: string | null; dependsOn?: string[] | null } }>(
+  nodes: N[],
+  inEpic: Set<string>,
+): N[][] {
+  if (nodes.length > 0 && nodes.every((n) => !!n.row.planId)) {
+    const groups = new Map<string, N[]>()
+    for (const n of nodes) {
+      const g = groups.get(n.row.planId!)
+      if (g) g.push(n)
+      else groups.set(n.row.planId!, [n])
+    }
+    return [...groups.values()]
+  }
+  return weakComponents(nodes, inEpic)
+}
+
+/**
  * Groups `jobs` into Plans (one per weakly-connected wave of an Epic) with complete Stage lists.
  * Cross-Epic dependsOn edges never affect staging. Cycle members get
  * (max depth of their non-cycle predecessors) + 1 and `cycle: true`.
@@ -251,14 +273,15 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
     const inEpic = new Set(allNodes.map((n) => n.row.slug))
     const nodeBySlug = new Map(allNodes.map((n) => [n.row.slug, n]))
     const sectionPlans: Array<Plan & { _firstNum: number; _firstSlug: string }> = []
-    for (const nodes of weakComponents(allNodes, inEpic)) {
+    for (const nodes of planGroups(allNodes, inEpic)) {
 
       // ── stage depth: memoized DFS; cyclic rows ignore edges to other cyclic rows.
+      const inPlan = new Set(nodes.map((n) => n.row.slug)) // explicit planId groups may have cross-plan edges: never stage across them
       const depth = new Map<string, number>()
       const inProgress = new Set<string>()
       const depsOf = (slug: string): string[] => {
         const node = nodeBySlug.get(slug)!
-        return (node.row.dependsOn ?? []).filter((d) => inEpic.has(d) && !(node.cycle && nodeBySlug.get(d)!.cycle))
+        return (node.row.dependsOn ?? []).filter((d) => inPlan.has(d) && !(node.cycle && nodeBySlug.get(d)!.cycle))
       }
       const depthOf = (slug: string): number => {
         const memo = depth.get(slug)

@@ -182,7 +182,7 @@ const supervisorRecord = require('./lib/jobSupervisorRecord.cjs');
 const adoptedRunSupervisor = require('./lib/adoptedRunSupervisor.cjs');
 const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdFrontmatter.cjs');
 const { resolveDepSlug, findNearMatches } = require('./lib/depSlugResolve.cjs');
-const { computeDispositionRewrite } = require('./lib/prdDisposition.cjs');
+const { computeDispositionRewrite, mintPlanId, resolveInheritedPlanId } = require('./lib/prdDisposition.cjs');
 const { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds } = require('./lib/prdMigration.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
 
@@ -2812,6 +2812,7 @@ async function reconcile(state) {
       epicId: p.epicId ?? job.epicId ?? null,
       dependsOn: p.dependsOn,
       disposition: p.disposition ?? null,
+      planId: p.planId ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
       originSessionId: job.originSessionId
@@ -2934,6 +2935,7 @@ async function reconcile(state) {
       epicId: p.epicId ?? inv.row?.epicId ?? null,
       dependsOn: p.dependsOn,
       disposition: p.disposition ?? null,
+      planId: p.planId ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
       originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(repairedCwd, p.epicId ?? p.sourcePromptId),
@@ -3068,6 +3070,7 @@ async function reconcile(state) {
       epicId: p.epicId ?? null,
       dependsOn: p.dependsOn,
       disposition: p.disposition ?? null,
+      planId: p.planId ?? null,
       quietMachine: p.quietMachine === true,
       budgetExempt: p.budgetExempt === true,
       originSessionId: resolveOriginSessionId(discoveredCwd, p.epicId ?? p.sourcePromptId),
@@ -11951,6 +11954,7 @@ async function listPrdsInternal() {
           dependsOn: parsed.dependsOn ?? null,
           agentType: parsed.agentType ?? null,
           disposition: parsed.disposition ?? null,
+          planId: parsed.planId ?? null,
           mtimeMs: stat.mtimeMs,
           archived,
         };
@@ -12384,7 +12388,14 @@ const remote = {
     const rows = listing.prds ?? [];
     const rewrite = computeDispositionRewrite({ slug, disposition, dependsOn: dependsOn ?? [], rows });
     if (!rewrite.ok) return rewrite;
-    return this.updatePrd({ slug, cwd, frontmatter: { dependsOn: rewrite.dependsOn, disposition } });
+    // Keep the durable planId in step with the new relationship: a promoted head
+    // starts its own plan; a re-attached row joins the target chain's plan (cleared
+    // when the target predates the stamp, so the derivation fallback applies).
+    let planId = mintPlanId();
+    if (disposition === 'append') {
+      planId = resolveInheritedPlanId(rewrite.dependsOn, rows).planId;
+    }
+    return this.updatePrd({ slug, cwd, frontmatter: { dependsOn: rewrite.dependsOn, disposition, planId } });
   },
 
   // Cancels a job that hasn't finished yet. A 'running' job's process group

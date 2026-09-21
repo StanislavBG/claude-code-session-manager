@@ -224,3 +224,15 @@ describe('prdFrontmatter dependsOn (PRD 1124)', () => {
     expect(updated).not.toContain('dependsOn')
   })
 })
+
+describe('planId key', () => {
+  it('parses and re-emits planId after disposition', () => {
+    const text = '---\ntitle: t\ndisposition: new-head\nplanId: pl-x1-abc123\n---\nb\n'
+    const { frontmatter, body } = parsePrdFile(text)
+    expect(frontmatter.planId).toBe('pl-x1-abc123')
+    expect(serializePrdFile(frontmatter, body)).toBe(text)
+  })
+  it('drops a malformed planId instead of throwing', () => {
+    expect(parsePrdFile('---\ntitle: t\nplanId: [a, b]\n---\nb\n').frontmatter.planId).toBeUndefined()
+  })
+})

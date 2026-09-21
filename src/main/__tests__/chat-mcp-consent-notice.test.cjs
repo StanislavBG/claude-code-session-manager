@@ -18,6 +18,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+
+// Scratch project dir under os.tmpdir() — never the real repo root (opsErrorLog would pollute it).
+const scratchCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chat-cwd-'));
 const claudeStub = require('../../../tests/helpers/claudeStub.cjs');
 
 function writeStub(lines) {
@@ -70,7 +73,7 @@ test('MCP consent denial in a tool_result surfaces a chat:run:notice event', asy
     },
   });
 
-  cr.run({ tabId: 'T-notice', sessionId: 'S-notice', prompt: 'do a design thing', cwd: process.cwd(), resume: false });
+  cr.run({ tabId: 'T-notice', sessionId: 'S-notice', prompt: 'do a design thing', cwd: scratchCwd, resume: false });
 
   for (let i = 0; i < 60 && !events.some((e) => isTerminal(e.channel)); i++) {
     await new Promise((r) => setTimeout(r, 25));
@@ -120,7 +123,7 @@ test('a normal tool_result with no consent marker does not fire chat:run:notice'
     },
   });
 
-  cr.run({ tabId: 'T-clean', sessionId: 'S-clean', prompt: 'do a normal thing', cwd: process.cwd(), resume: false });
+  cr.run({ tabId: 'T-clean', sessionId: 'S-clean', prompt: 'do a normal thing', cwd: scratchCwd, resume: false });
 
   for (let i = 0; i < 60 && !events.some((e) => isTerminal(e.channel)); i++) {
     await new Promise((r) => setTimeout(r, 25));

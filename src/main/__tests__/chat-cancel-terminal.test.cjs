@@ -37,6 +37,9 @@ process.env.SM_CLAUDE_BIN = stubPath;
 
 const cr = require('../chatRunner.cjs');
 
+// Scratch project dir under os.tmpdir() — never the real repo root (opsErrorLog would pollute it).
+const scratchCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chat-cwd-'));
+
 const tick = () => new Promise((r) => setImmediate(r));
 
 test('cancelling an ACTIVE run broadcasts a terminal event (unsticks the UI)', async () => {
@@ -50,7 +53,7 @@ test('cancelling an ACTIVE run broadcasts a terminal event (unsticks the UI)', a
     },
   });
 
-  cr.run({ tabId: 'T', sessionId: 'S', prompt: 'hello', cwd: process.cwd(), resume: false });
+  cr.run({ tabId: 'T', sessionId: 'S', prompt: 'hello', cwd: scratchCwd, resume: false });
 
   // Let the spawn happen and started event fire.
   for (let i = 0; i < 6; i++) await tick();
@@ -86,7 +89,7 @@ test('cancel() resolves only AFTER the terminal broadcast fires, not immediately
     },
   });
 
-  cr.run({ tabId: 'T2', sessionId: 'S2', prompt: 'hello', cwd: process.cwd(), resume: false });
+  cr.run({ tabId: 'T2', sessionId: 'S2', prompt: 'hello', cwd: scratchCwd, resume: false });
 
   for (let i = 0; i < 6; i++) await tick();
 

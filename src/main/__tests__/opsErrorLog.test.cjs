@@ -85,3 +85,25 @@ test('appendError merges caller tags without duplicating auto-derived ones', () 
   assert.equal(count, 1);
   assert.ok(line.tags.includes('silent-probe'));
 });
+
+test('under vitest, a real project root is refused: no file written, no telemetry', () => {
+  const repoRoot = path.resolve(__dirname, '..', '..', '..');
+  const logsBefore = fs.existsSync(path.join(repoRoot, 'session-manager-operations', 'logs'))
+    ? fs.readdirSync(path.join(repoRoot, 'session-manager-operations', 'logs')).map((f) => [f, fs.statSync(path.join(repoRoot, 'session-manager-operations', 'logs', f)).mtimeMs])
+    : null;
+  const telemetryPath = require.resolve('../lib/telemetryClient.cjs');
+  const saved = require.cache[telemetryPath];
+  let calls = 0;
+  require.cache[telemetryPath] = { id: telemetryPath, filename: telemetryPath, loaded: true, exports: { reportError: () => { calls++; }, logLine: () => { calls++; } } };
+  try {
+    opsErrorLog.appendError({ cwd: repoRoot, scope: 'chatRunner', tabId: 'T', message: 'fixture' });
+    opsErrorLog.appendError({ cwd: repoRoot, scope: 'chatRunner', level: 'warn', message: 'fixture' });
+  } finally {
+    if (saved) require.cache[telemetryPath] = saved; else delete require.cache[telemetryPath];
+  }
+  const logsAfter = fs.existsSync(path.join(repoRoot, 'session-manager-operations', 'logs'))
+    ? fs.readdirSync(path.join(repoRoot, 'session-manager-operations', 'logs')).map((f) => [f, fs.statSync(path.join(repoRoot, 'session-manager-operations', 'logs', f)).mtimeMs])
+    : null;
+  assert.deepEqual(logsAfter, logsBefore);
+  assert.equal(calls, 0);
+});

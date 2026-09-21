@@ -32,6 +32,9 @@ import { test, afterAll } from 'vitest';
 const assert = require('node:assert/strict');
 const EventEmitter = require('node:events');
 const cp = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 // Replace spawn BEFORE chatRunner.cjs is first required, so the module's
 // top-level `const { spawn } = require('node:child_process')` destructuring
@@ -50,6 +53,9 @@ cp.spawn = () => {
 
 const cr = require('../chatRunner.cjs');
 
+// Scratch project dir under os.tmpdir() — never the real repo root (opsErrorLog would pollute it).
+const scratchCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chat-cwd-'));
+
 const tick = () => new Promise((r) => setImmediate(r));
 
 test('a final-text-only turn whose stdout chunk lands after exit still surfaces chat:run:complete', async () => {
@@ -63,7 +69,7 @@ test('a final-text-only turn whose stdout chunk lands after exit still surfaces 
     },
   });
 
-  cr.run({ tabId: 'T2', sessionId: 'S2', prompt: 'show me a sample post', cwd: process.cwd(), resume: false });
+  cr.run({ tabId: 'T2', sessionId: 'S2', prompt: 'show me a sample post', cwd: scratchCwd, resume: false });
 
   for (let i = 0; i < 20 && !nextChild; i++) await tick();
   const child = nextChild;
@@ -108,7 +114,7 @@ test('a crashed process with no result event ever emitted still fires the fallba
     },
   });
 
-  cr.run({ tabId: 'T3', sessionId: 'S3', prompt: 'anything', cwd: process.cwd(), resume: false });
+  cr.run({ tabId: 'T3', sessionId: 'S3', prompt: 'anything', cwd: scratchCwd, resume: false });
 
   for (let i = 0; i < 20 && !nextChild; i++) await tick();
   const child = nextChild;

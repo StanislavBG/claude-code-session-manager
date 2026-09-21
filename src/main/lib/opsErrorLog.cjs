@@ -12,6 +12,7 @@
  */
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { assertOpsWrite } = require('./opsOwnership.cjs');
 const { isEphemeralCwd } = require('./ephemeralCwd.cjs');
@@ -125,6 +126,23 @@ function reportToTelemetry({ cwd, scope, level, tabId, epicId, tags, message }) 
   } catch { /* telemetry must never break the caller — this is the sole error funnel */ }
 }
 
+function realOrResolved(p) {
+  const abs = path.resolve(p);
+  try { return fs.realpathSync(abs); } catch { return abs; }
+}
+
+function isInside(child, parent) {
+  const rel = path.relative(parent, child);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
+
+/** True when `cwd` resolves inside os.tmpdir() or SM_SANDBOX_DIR. O(roots). */
+function isInsideTestScratch(cwd) {
+  const target = realOrResolved(cwd);
+  const roots = [os.tmpdir(), process.env.SM_SANDBOX_DIR].filter(Boolean);
+  return roots.some((r) => isInside(target, realOrResolved(r)));
+}
+
 /**
  * Append one structured error line, tagged for tracing/analysis.
  *
@@ -141,6 +159,10 @@ function reportToTelemetry({ cwd, scope, level, tabId, epicId, tags, message }) 
  */
 function appendError({ cwd, scope, level = 'error', tabId, epicId, tags = [], message, meta }) {
   if (!cwd || typeof cwd !== 'string') return; // no project to attribute this line to — skip
+
+  // Test-process guard: a vitest fixture passing a real project root must never
+  // write to that project's logs/ NOR ship a fake event to production telemetry.
+  if (process.env.VITEST && !isInsideTestScratch(cwd)) return;
 
   if (isEphemeralCwd(cwd)) {
     // A worktree is torn down when its Epic/job ends and os.tmpdir() is

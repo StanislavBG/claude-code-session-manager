@@ -28,6 +28,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { encodeCwd } = require('./encodeCwd.cjs');
+const { projectRootOf } = require('./activeSessions.cjs');
 const { readActiveIndex } = require('./epicMint.cjs');
 const { resolveEpicSpawnCwd } = require('./epicSpawnCwd.cjs');
 const { resolveEpicTranscriptPath } = require('./epicTranscriptPath.cjs');
@@ -107,14 +108,23 @@ function planEpicSpawn({ cwd, claudeSessionId, fallbackResume = false, deps = {}
       const home = path.join(projectsDir, encodeCwd(dir));
       return resolved.existingPaths.find((p) => path.dirname(p) === home) || null;
     };
-    let hit = findReachable(execCwd);
-    if (!hit && execCwd !== cwd) {
-      // The transcript may already live under the project encoding; spawning there writes back to
-      // the directory it occupies, so nothing forks.
-      hit = findReachable(cwd);
-      if (hit) execCwd = cwd;
+    // The transcript may already live under the project encoding; spawning there writes back to
+    // the directory it occupies, so nothing forks. When the caller's `cwd` is itself the vanished
+    // worktree path, neither it nor execCwd is the project root, so probe the root explicitly.
+    let projectRoot = null;
+    try { projectRoot = projectRootOf(cwd); } catch { /* unresolvable → skip */ }
+    const candidates = [...new Set([execCwd, cwd, projectRoot, epic?.cwd, epic?.worktree?.baseCwd]
+      .filter((d) => typeof d === 'string' && d))];
+    let reachableDir = null;
+    for (const dir of candidates) {
+      if (findReachable(dir)) { reachableDir = dir; break; }
     }
-    if (!hit) {
+    if (reachableDir) {
+      execCwd = reachableDir;
+      unreachable.delete(claudeSessionId);
+    } else {
+      // Name a directory that would actually work: an existing candidate is only worth naming if
+      // its encoding owns a transcript, which none did — so name the recorded worktree checkout.
       const missing = brokenDir || execCwd;
       const wt = epic?.worktree;
       const recovery = wt?.status === 'merged'

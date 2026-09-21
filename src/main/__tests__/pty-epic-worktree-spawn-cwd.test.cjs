@@ -259,3 +259,23 @@ test('spawn() still refuses session_unreachable without any node-pty spawn', () 
   expect(result.pid).toBeNull();
   expect(result.error).toMatch(/cannot be resumed/);
 });
+
+test('planEpicSpawn resumes from the project root when the caller cwd is the vanished worktree path (transcript under project-root encoding)', () => {
+  const { planEpicSpawn, __resetForTests } = require('../lib/epicSpawnPlan.cjs');
+  __resetForTests();
+  const projectRoot = fs.mkdtempSync(path.join(tmpHome, 'sm-plan-root-'));
+  const deadWt = path.join(os.tmpdir(), 'sm-plan-dead-worktree-xyz');
+  const sessionId = 'epic-session-root-probe';
+  const tdir = path.join(tmpHome, '.claude', 'projects', projectRoot.replace(/[^a-zA-Z0-9]/g, '-'));
+  fs.mkdirSync(tdir, { recursive: true });
+  fs.writeFileSync(path.join(tdir, `${sessionId}.jsonl`), '{"type":"user"}\n');
+  const epic = {
+    id: 'epic-rp', cwd: projectRoot, claudeSessionId: sessionId, status: 'active',
+    worktree: { dir: deadWt, branch: 'sm-epic/epic-rp', baseCwd: projectRoot, status: 'active' },
+  };
+  const deps = { homeDir: tmpHome, readActiveIndex: () => ({ sessions: { 'epic-rp': epic } }), restoreWorktree: () => null };
+  const plan = planEpicSpawn({ cwd: deadWt, claudeSessionId: sessionId, deps });
+  expect(plan).toMatchObject({ ok: true, execCwd: projectRoot, useResume: true });
+  // A successful plan leaves no stale circuit-breaker entry: a second call still succeeds.
+  expect(planEpicSpawn({ cwd: deadWt, claudeSessionId: sessionId, deps }).ok).toBe(true);
+});

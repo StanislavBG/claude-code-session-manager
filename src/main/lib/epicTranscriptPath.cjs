@@ -140,12 +140,16 @@ function resolveEpicTranscriptPath({ cwd, claudeSessionId, deps = {} } = {}) {
   const file = (dir) => path.join(projectsDir, encodeCwd(dir), `${claudeSessionId}.jsonl`);
 
   const worktreeDirs = [];
+  // Project cwd recorded on the Epic — the caller's `cwd` may itself be the vanished worktree
+  // path, whose encoding is not where a merged/swept Epic's transcript lives.
+  const recordedCwds = [];
   try {
     const sessions = cachedSessions(cwd, deps, statSync);
     let inIndex = false;
     for (const s of Object.values(sessions)) {
       if (s && s.claudeSessionId === claudeSessionId) {
         inIndex = true;
+        if (typeof s.cwd === 'string' && s.cwd) recordedCwds.push(s.cwd);
         if (typeof s.worktree?.dir === 'string' && s.worktree.dir) worktreeDirs.push(s.worktree.dir);
       }
     }
@@ -161,7 +165,7 @@ function resolveEpicTranscriptPath({ cwd, claudeSessionId, deps = {} } = {}) {
     spawnCwd = cwd;
   }
 
-  const candidates = [...new Set([file(spawnCwd), ...worktreeDirs.map(file), file(cwd)])];
+  const candidates = [...new Set([file(spawnCwd), ...worktreeDirs.map(file), file(cwd), ...recordedCwds.map(file)])];
 
   const existing = [];
   for (const p of candidates) {

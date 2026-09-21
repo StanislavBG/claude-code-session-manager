@@ -67,7 +67,9 @@ describe('childWithLog post-exit group sweep (PRD 1065)', () => {
 // inferring it from ps.
 describe('childWithLog onExit leakedDescendants reporting (PRD 1110)', () => {
   it.skipIf(process.platform !== 'linux')(
-    'reports the same backgrounded grandchild the sweep reaped',
+    'reports a backgrounded grandchild still alive when enumeration ran',
+    // Enumeration is async and the kill never waits on it, so the grandchild
+    // ignores SIGTERM to stay observable until the SIGKILL sweep.
     async () => {
       dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-child-leak-'));
       const logPath = path.join(dir, 'job.log');
@@ -84,7 +86,7 @@ describe('childWithLog onExit leakedDescendants reporting (PRD 1110)', () => {
             command: 'sh',
             args: [
               '-c',
-              `sleep 30 & echo $! > ${pidFile}; exec sleep 0.2`,
+              `(trap '' TERM; exec sleep 30) & echo $! > ${pidFile}; exec sleep 0.2`,
             ],
             options: { detached: true },
           },
@@ -138,4 +140,87 @@ describe('childWithLog onExit leakedDescendants reporting (PRD 1110)', () => {
     },
     15000,
   );
+});
+
+// PRD 1353 — async enumeration must never block/alter the kill cascade, and a
+// throwing watchdog must not break the wall-clock kill path.
+describe('childWithLog async enumeration + guarded watchdog (PRD 1353)', () => {
+  const { _deps } = require('../childWithLog.cjs');
+  const realExecFile = _deps.execFile;
+  afterEach(() => { _deps.execFile = realExecFile; });
+
+  it.skipIf(process.platform !== 'linux')(
+    'enumeration failure omits the report, logs, and still kills the group',
+    async () => {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-child-enumfail-'));
+      const logPath = path.join(dir, 'job.log');
+      const pidFile = path.join(dir, 'grandchild.pid');
+      const { fd, safeLog, closeFd } = openLog(logPath);
+      _deps.execFile = (_c, _a, _o, cb) => { setImmediate(() => cb(new Error('ps boom'))); };
+
+      const exitInfo = await new Promise((resolve) => {
+        withChildAndLog({
+          fd, logPath, safeLog, closeFd,
+          spawn: {
+            command: 'sh',
+            args: ['-c', `sleep 30 & echo $! > ${pidFile}; exec sleep 0.2`],
+            options: { detached: true },
+          },
+          onExit: (info) => { info.safeLog('onExit-ran\n'); resolve(info); },
+        });
+      });
+      expect(exitInfo.leakedDescendants).toEqual([]);
+      for (let i = 0; i < 20 && !fs.existsSync(pidFile); i++) await new Promise((r) => setTimeout(r, 50));
+      const gc = Number(fs.readFileSync(pidFile, 'utf8').trim());
+      await new Promise((r) => setTimeout(r, 500)); // SIGTERM lands immediately, no grace wait
+      expect(() => process.kill(gc, 0)).toThrow();
+      expect(fs.readFileSync(logPath, 'utf8')).toContain('enumeration failed');
+    },
+    15000,
+  );
+
+  function runWatchdog(wd) {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-child-wd-'));
+    const logPath = path.join(dir, 'job.log');
+    const { fd, safeLog, closeFd } = openLog(logPath);
+    let handle;
+    const done = new Promise((resolve) => {
+      handle = withChildAndLog({
+        fd, logPath, safeLog, closeFd,
+        spawn: { command: 'sleep', args: ['5'], options: {} },
+        watchdogs: [{ label: 'w', intervalMs: 20, ...wd }],
+        onExit: resolve,
+      });
+    });
+    return { logPath, handle, done };
+  }
+
+  it('a throwing shouldFire does not stop a later tick firing the action', async () => {
+    let calls = 0;
+    let fired = 0;
+    const { handle, logPath, done } = runWatchdog({
+      shouldFire: () => { calls++; if (calls < 3) throw new Error('sf boom'); return true; },
+      action: (ctx) => { fired++; ctx.killedByWatchdog = 'w'; ctx.killTree('SIGTERM'); },
+    });
+    const info = await done;
+    expect(fired).toBe(1);
+    expect(info.killedByWatchdog).toBe('w');
+    expect(fs.readFileSync(logPath, 'utf8')).toContain('watchdog "w" threw: sf boom');
+    handle.cancel();
+  }, 10000);
+
+  it('a throwing action clears its interval and is logged', async () => {
+    let should = 0;
+    let acts = 0;
+    const { handle, logPath, done } = runWatchdog({
+      shouldFire: () => { should++; return true; },
+      action: () => { acts++; throw new Error('act boom'); },
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(acts).toBe(1);
+    expect(should).toBe(1);
+    expect(fs.readFileSync(logPath, 'utf8')).toContain('watchdog "w" threw: act boom');
+    handle.cancel();
+    await done;
+  }, 10000);
 });

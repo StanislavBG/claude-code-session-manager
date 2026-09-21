@@ -9,10 +9,10 @@
  * This is the ONLY point where that per-Epic isolation resolves back into
  * the shared tree — never mid-session (see gitWorktree.cjs's own header
  * comment for the ff-only -> merge-commit -> abort-and-flag algorithm this
- * reuses verbatim). Callers reach it two ways: an explicit "merge to main"
- * action (renderer state's `mergeEpicToMain`), and `markCompleted`'s
- * merge-before-archive checkpoint — both funnel through this one handler so
- * the integration strategy is never duplicated.
+ * reuses verbatim). The single caller is `markCompleted`'s merge-before-archive
+ * checkpoint (via `attemptMergeToMainInternal` in
+ * `src/renderer/state/promptSessions.ts`); there is no explicit "merge to
+ * main" action.
  *
  * On success the worktree checkout is torn down (cleanupEpicWorktree) since
  * its content now safely lives on the main tree. On a real conflict, the
@@ -20,8 +20,9 @@
  * — so a human can still open a Terminal into `worktree.dir` (the spawn
  * resolution in epicSpawnCwd.cjs is status-aware: `needs_merge_resolution`
  * with an existing dir still lands there, while `merged`/`disabled` skip the
- * re-attach and fall back to the project cwd) and resolve it manually before
- * re-running this same action.
+ * re-attach and fall back to the project cwd) and resolve it manually — the
+ * branch and worktree dir are deliberately left intact so the human can merge
+ * them from the command line.
  */
 
 const { integrateEpicBranch, cleanupEpicWorktree } = require('./gitWorktree.cjs');

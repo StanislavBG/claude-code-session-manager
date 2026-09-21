@@ -6,6 +6,7 @@ import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal } from '../../state/epicTerminal'
 import { useEpicUsage } from '../../state/epicUsage'
 import { usePanelFocus } from '../../lib/panelFocus'
+import type { NavKey } from '../../lib/navKey'
 import { useDocumentVisible } from '../../lib/useDocumentVisible'
 import { useKnownProjects } from '../../lib/useKnownProjects'
 import { takePendingPromptSessionId } from '../../lib/promptSessionDeepLink'
@@ -43,6 +44,8 @@ const EMPTY_JOBS: ScheduleJob[] = []
  * without a project tab already selected). In the latter (genuinely no tabs
  * open) it renders an empty-state message instead.
  */
+const TERMINAL_PANEL_ID: NavKey = 'terminal'
+
 export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   const sessions = usePromptSessions((s) => s.sessions)
   const events = usePromptSessions((s) => s.events)
@@ -201,7 +204,9 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   // mounted while hidden and the main-side fetch parses transcripts. Regaining
   // focus re-runs the effect, which loads immediately.
   const epicUsageKey = epics.map((e) => e.id).join('\n')
-  const panelFocused = usePanelFocus()
+  // EpicsWorkspace lives only in the 'terminal' panel, whose content has no
+  // PanelFocusProvider — resolve against the panel id explicitly.
+  const panelFocused = usePanelFocus(TERMINAL_PANEL_ID)
   const docVisible = useDocumentVisible()
   const usageActive = panelFocused && docVisible
   useEffect(() => {

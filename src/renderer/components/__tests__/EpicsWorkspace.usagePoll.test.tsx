@@ -3,9 +3,6 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 
-const gate = vi.hoisted(() => ({ focused: true, visible: true }))
-vi.mock('../../lib/panelFocus', () => ({ usePanelFocus: () => gate.focused }))
-vi.mock('../../lib/useDocumentVisible', () => ({ useDocumentVisible: () => gate.visible }))
 vi.mock('../../lib/useKnownProjects', () => ({
   useKnownProjects: () => ({ projects: [], rows: [], enriched: {}, loading: false, resolving: false }),
 }))
@@ -14,6 +11,7 @@ import { EpicsWorkspace } from '../epics/EpicsWorkspace'
 import { usePromptSessions } from '../../state/promptSessions'
 import { useEpicUsage } from '../../state/epicUsage'
 import { useSessions } from '../../state/sessions'
+import { useLayout } from '../../state/layout'
 import { fakePromptSessionsCreate } from '../../testUtils/fakePromptSessionsCreate'
 
 const CWD = '/home/bilko/Projects/alpha'
@@ -21,6 +19,10 @@ const fetchSpy = vi.fn().mockResolvedValue(undefined)
 let container: HTMLDivElement
 let root: Root
 
+const setVisibility = (state: 'visible' | 'hidden') => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
+  document.dispatchEvent(new Event('visibilitychange'))
+}
 const render = () => act(async () => { root.render(<EpicsWorkspace cwd={CWD} />) })
 const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
 
@@ -28,8 +30,8 @@ const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAs
 
 beforeEach(async () => {
   vi.useFakeTimers()
-  gate.focused = true
-  gate.visible = true
+  useLayout.setState({ focusedPanelId: 'terminal' })
+  setVisibility('visible')
   fetchSpy.mockClear()
   ;(window as unknown as { api: unknown }).api = {
     app: { homeDir: vi.fn().mockResolvedValue('/home/bilko') },
@@ -65,22 +67,28 @@ afterEach(() => {
   delete (window as unknown as { api?: unknown }).api
 })
 
-describe('EpicsWorkspace usage poll gating', () => {
-  it('makes 0 fetchUsage calls over 60s while hidden', async () => {
-    gate.focused = false
+describe('EpicsWorkspace usage poll gating (real panel focus)', () => {
+  it('makes 0 fetchUsage calls over 60s while another panel is focused', async () => {
+    useLayout.setState({ focusedPanelId: 'scheduler' })
     await render()
     await advance(60_000)
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  it('polls every 30s while visible and loads immediately on regaining focus', async () => {
-    gate.focused = false
+  it('loads immediately on regaining terminal focus, then every 30s', async () => {
+    useLayout.setState({ focusedPanelId: 'scheduler' })
     await render()
-    gate.focused = true
-    await render()
+    await act(async () => { useLayout.setState({ focusedPanelId: 'terminal' }) })
     const initial = fetchSpy.mock.calls.length
     expect(initial).toBeGreaterThanOrEqual(1)
     await advance(60_000)
     expect(fetchSpy.mock.calls.length).toBe(initial + 2)
+  })
+
+  it('makes 0 fetchUsage calls over 60s while the document is hidden', async () => {
+    setVisibility('hidden')
+    await render()
+    await advance(60_000)
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })

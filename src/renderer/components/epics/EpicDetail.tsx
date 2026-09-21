@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useChat, attachTranscriptFeed, detachTranscriptFeed } from '../../state/chat'
+import { useChat, attachTranscriptFeed, detachTranscriptFeed, type ChatTurn } from '../../state/chat'
+import { buildEpicTimeline } from '../../lib/epicTimeline'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
 import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal, type EpicTerminalMode } from '../../state/epicTerminal'
@@ -8,7 +9,7 @@ import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSna
 import { EpicStatusChip, EpicKindTag, EpicAgentTag, EpicWorktreeChip } from './epic-primitives'
 import { EpicQueuePanel } from './EpicQueuePanel'
 import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, resolveValidatedStatus, STATUS_TONE, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
-import { Turn, visibleFeedTurns, nearestPrecedingUserPrompt, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTurn'
+import { Turn, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTurn'
 import { EpicIntakeCard } from './EpicIntakeCard'
 import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
 import { useEffectiveModelInfo } from '../../lib/effectiveModelInfo'
@@ -23,10 +24,8 @@ import { useScheduledPrds } from '../../lib/useScheduledPrds'
 import { useBranch } from '../../lib/useBranch'
 import type { ScheduleJob } from '../../../preload/api'
 import { parseTranscriptTurns, selectNewTurns } from '../../lib/terminalHandoffTranscript'
-import { splitStopSignal } from '../../lib/stopSignal'
 import { useChatPrefs, resolveEpicVerbosity } from '../../state/chatPrefs'
 import {
-  filterTurnsByVerbosity,
   ASSISTANT_CLAMP_CHARS,
   CHAT_VERBOSITY_DISPLAY_ORDER,
   CHAT_VERBOSITY_META,
@@ -91,6 +90,7 @@ async function captureTerminalHandoffTurns(cwd: string, epicId: string, sessionI
 
 const EMPTY_EVENTS: PromptSessionEvent[] = []
 const EMPTY_JOBS: ScheduleJob[] = []
+const EMPTY_TURNS: ChatTurn[] = []
 
 type ViewKey = 'discussion' | 'prds' | 'runs'
 
@@ -665,20 +665,20 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   useEffect(() => { void hydrateChatPrefs() }, [hydrateChatPrefs])
   const verbosity = resolveEpicVerbosity(globalVerbosity, perEpicVerbosity, epicId)
 
-  const turns = chat?.turns ?? []
+  const turns = chat?.turns ?? EMPTY_TURNS
   const running = chat?.running ?? false
   // role:'event' turns are JSONL transcript-feed events (mode, attachment,
   // queue-operation, tool_use, usage, …) — ChatTranscriptTurn.tsx's Turn
   // routes every one of them to a typed renderer (never filtered by kind).
   // visibleFeedTurns drops only the two permitted exact-duplicate cases: a
   // repeated ai-title and a last-prompt duplicating the preceding user turn.
-  const dedupedTurns = visibleFeedTurns(turns)
-  // Verbosity dial (lib/chatVerbosity.ts) — a pure DISPLAY filter applied
-  // after dedup. `turns` is untouched, so raising the level restores the full
-  // record with no re-read of the JSONL. Question/notice/error turns are
-  // exempt from the dial by construction (turnMinVerbosity), so a run parked
-  // on a confirmation can never be hidden by it.
-  const { visible: visibleTurns, hiddenCount, revealLevel } = filterTurnsByVerbosity(dedupedTurns, verbosity)
+  // Verbosity dial (lib/chatVerbosity.ts) is a pure DISPLAY filter applied
+  // after dedup; the whole derivation lives in buildEpicTimeline, memoized on
+  // turns/events/verbosity only so live-stream deltas never recompute it.
+  const { visibleTurns, hiddenCount, revealLevel, latestValidationBySlug, timeline, lastAssistantIndex } = useMemo(
+    () => buildEpicTimeline(turns, sessionEvents, verbosity),
+    [turns, sessionEvents, verbosity],
+  )
   const clampBodyChars = ASSISTANT_CLAMP_CHARS[verbosity]
   // The Epic's first user turn is its opening prompt (see
   // OPENING_PROMPT_CLAMP_CHARS) — a thin expandable line, not a wall of text.
@@ -690,75 +690,6 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // machinery, not conversation — collapsed behind a ≡ glyph everywhere
   // except the single loudest level, which means "show me the raw record".
   const injectedPreamble = showsInjectedPreamble(verbosity) ? ('shown' as const) : ('hidden' as const)
-  // With event turns interleaved, the array's last element is no longer
-  // reliably the last assistant turn (a trailing mode/attachment event is
-  // common) — find it explicitly so the "running" indicator still lands on
-  // the right bubble.
-  let lastAssistantIndex = -1
-  for (let idx = visibleTurns.length - 1; idx >= 0; idx--) {
-    if (visibleTurns[idx].role === 'assistant') {
-      lastAssistantIndex = idx
-      break
-    }
-  }
-
-  // A 'response' PromptSessionEvent is appended by chat.ts for EVERY completed
-  // turn (onComplete/onNeedsInput), not only for out-of-band ones (PRD-finished
-  // notices, Terminal-stint markers) — it doubles as the "toast the user if
-  // this Epic isn't focused" signal (promptSessions.ts's mergeAppendedEvent).
-  // When this Epic IS focused, that same text already rendered in full as a
-  // live assistant Turn below, so showing it again as a compact ResponseEvent
-  // line is a pure duplicate, not a distinct raw/summary pairing. Drop only
-  // the events that duplicate an already-rendered turn; genuine out-of-band
-  // ones (no matching live turn, e.g. a scheduler PRD reply) still render.
-  // appendResponseEvent persists `answerBody` (chat.ts's onComplete/
-  // onNeedsInput both call it with the stop-signal-stripped text), but the
-  // surviving assistant turn may hold the JSONL feed's FULL text — sentinel
-  // block and all, per the reconciliation rule in state/chat.ts. Compare on
-  // the stop-signal-stripped form of each turn's text so a response event
-  // still matches its turn regardless of which copy won.
-  const assistantTurnTexts = new Set(
-    turns.filter((t) => t.role === 'assistant').map((t) => (splitStopSignal(t.text)?.body ?? t.text)),
-  )
-  const isDuplicateResponseEvent = (e: PromptSessionEvent): boolean => {
-    if (!e.text) return false
-    if (assistantTurnTexts.has(e.text)) return true
-    // appendResponseEvent truncates to RESPONSE_EVENT_PREVIEW_MAX chars with a
-    // trailing '…' (chat.ts) — compare against that truncated prefix too.
-    if (e.text.endsWith('…')) {
-      const prefix = e.text.slice(0, -1)
-      for (const text of assistantTurnTexts) {
-        if (text.startsWith(prefix)) return true
-      }
-    }
-    return false
-  }
-
-  // PRD 987 — latest validation verdict per PRD slug, read off this Epic's
-  // own 'response' check-in events (PRD 986's event.validation), so the
-  // 'prd_created' dispatch chip below can render the Epic's verdict rather
-  // than only the job's self-reported outcome. Later events overwrite
-  // earlier ones for the same slug — a re-check-in (e.g. a re-run) always
-  // wins over a stale earlier verdict.
-  const latestValidationBySlug = new Map<string, 'unvalidated' | 'validating' | 'verified' | 'refuted'>()
-  for (const e of sessionEvents) {
-    if (e.kind === 'response' && e.prdSlug && e.validation) {
-      latestValidationBySlug.set(e.prdSlug, e.validation)
-    }
-  }
-
-  // Merged timeline: chat turns + this Epic's own 'prd_created'/'closed'/
-  // 'response' (Terminal-stint marker, PRD 831) audit events, ordered by
-  // time — the same timeline construction the retired PromptSessionConversation.tsx used.
-  const timeline = [
-    ...visibleTurns.map((t) => ({ kind: 'turn' as const, at: t.at, turn: t })),
-    ...sessionEvents
-      .filter((e): e is PromptSessionEvent & { kind: 'prd_created' | 'closed' | 'response' } =>
-        e.kind === 'prd_created' || e.kind === 'closed' || (e.kind === 'response' && !isDuplicateResponseEvent(e)),
-      )
-      .map((e) => ({ kind: 'event' as const, at: Date.parse(e.at), event: e })),
-  ].sort((a, b) => a.at - b.at)
-
   useEffect(() => {
     const el = scrollRef.current
     if (el) el.scrollTop = el.scrollHeight
@@ -1085,8 +1016,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
             {timeline.map((item) => {
               if (item.kind === 'turn') {
                 const t = item.turn
-                const i = visibleTurns.indexOf(t)
-                const precedingUserPrompt = nearestPrecedingUserPrompt(visibleTurns, i)
+                const { index: i, precedingUserPrompt } = item
                 // The Epic's very first turn IS its opening prompt — when
                 // this Epic carries composeEpicIntake's structured sections
                 // (absent on Epics minted before this field existed, or on

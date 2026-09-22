@@ -201,6 +201,23 @@ can't load skills.
      completeness pass instead of extending the chain further; a chain that long is a sign the
      original decomposition was wrong, not that it needs one more link. A chain does not relax
      the ~15-min/30-min-ceiling sizing below — each link is still individually small.
+
+   **Every plan ends with one `validate` PRD.** After the work-item PRDs are written, author
+   exactly one more through `scheduler_create_prd`: `agentType: "validator"`, `tag: "build"`,
+   `estimateMinutes: 10`, `dependsOn` = every other slug in this plan, slug
+   `validate-<short-plan-name>`. Its Goal lists the plan's PRD slugs and titles; its Acceptance
+   criteria give, per PRD, where its file lives
+   (`<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/<NN>-<slug>.md` while queued,
+   the sibling `prds-archived/` once terminal — locate by slug in either) and end with the
+   review-record path to write and commit:
+   `session-manager-operations/reviews/validation/<epic-id>/<validate-slug>.md`.
+   Implementation notes: "Work as the validator persona — the procedure is your system prompt."
+   While a plan has a pending validator, the scheduler suppresses both the per-PRD validation
+   prompt into this session and the in-run `/code-review` steps for its work-items — one review,
+   once, at the end. If `scheduler_create_prd` rejects `agentType: "validator"` (persona not
+   installed on this machine yet), say so and fall back to today's per-PRD validation; do not
+   hand-write the file.
+
    - **Sub-tasked Acceptance Criteria** (either shape, when a single PRD legitimately spans more
      than one concern dimension from step 3 — e.g. it has both core-functionality and
      edge-case/interaction-effect checks): group the `# Acceptance criteria` checklist under
@@ -429,64 +446,48 @@ can't load skills.
 
 6. **Confirm to the user**, per emitted PRD: filename, chosen `NN` + rationale
    (parallel-with-X / serial-after-Y), `cwd`, and an ETA + token-cost ballpark. Note they can
-   "Run now" in the SchedulePanel or wait for `when-available` polling.
+   "Run now" in the SchedulePanel or wait for `when-available` polling. Name the plan's validate
+   PRD and state that no per-PRD validation will be requested from this session.
 
-## Phase 2 — Track to completion (reusable tail)
+## Phase 2 — Validation runs as its own job; this session only decides
 
-The queued PRDs run headlessly and can take a while. Don't fire-and-forget, and don't block —
-hand off to a recurring check. An approved proposal delegates to this exact phase, so it is the
-single definition of "tracked to done" for both entry paths.
+Every plan queued in Phase 1 ends with a `validate` PRD (agentType `validator`) whose
+`dependsOn` lists every other slug in the plan, so the scheduler runs it exactly once, after the
+last work-item lands. That job — not this session — re-runs each PRD's gate, checks every
+acceptance criterion against the tree, reviews the plan's combined diff (`/code-review`,
+`/security-review`), commits a review record, and ends with `VALIDATION: <slug>
+VERIFIED|REFUTED` per PRD. The scheduler appends one verdict event per PRD to this Epic (the
+traffic light reads them) plus one check-in for the validator itself.
 
-7. **Watch the scheduler every ~30 min.** Start a 30-minute monitoring loop (`/loop 30m` over
-   this watch step, or a `ScheduleWakeup` at 1800s if self-pacing) scoped to the PRD ids you
-   emitted. On each tick, read the scheduler's job status (queue + run history under
-   `~/.claude/session-manager/scheduled-plans/`, or the SchedulePanel) and branch:
-   - **Still queued / running, within its window** — leave it; re-check next tick.
-   - **Failed / errored / `needs_review` / timed out / killed by the watchdog or supervisor /
-     overran its estimate badly** — STOP waiting and surface it now: which PRD, the failure
-     signal, the relevant log tail, and the likely cause (a stuck poll-loop or post-AC overrun
-     per `PRD_AUTHORING.md`). Don't silently retry forever. For `needs_review`, the scheduler
-     auto-files a Root Cause Analysis into the target project's feedback inbox
-     (`rcaFeedbackHook`, filename `<date>-rca-<slug>-<runId>.md`) — reference that file in
-     your report rather than re-deriving the analysis, and let the approving user fold its
-     prevention hint back into future PRD authoring. A `rateLimited` exit-1 is the
-     scheduler's benign auto-pause (auto-resumes next window) — keep waiting, don't escalate.
-   - **All PRDs completed successfully** — go to step 8.
+7. **Do not poll and do not re-verify per PRD.** Completed work-items arrive here as check-in
+   events only; leave them alone. There is no 30-minute loop to start and no `ScheduleWakeup` to
+   arm. Act on exactly three signals:
+   - **A work-item parks `needs_review` / `failed`** — read the scheduler's auto-filed RCA
+     (`<date>-rca-<slug>-<runId>.md` in the project's feedback inbox) and decide: fix the PRD
+     (`scheduler_update_prd`) and `scheduler_reset_job`, or `scheduler_archive_prd` it. The
+     plan's validator waits behind it. A `rateLimited` exit is the scheduler's benign auto-pause
+     — not a signal.
+   - **The validator's check-in arrives** — read its review record. Every PRD VERIFIED and no
+     Critical/Important finding → the plan is done; report what landed (slugs, commits, record
+     path). Any REFUTED PRD or Critical/Important finding → queue a fix wave: one `behavior`/
+     `wire` PRD per finding (recipe format, ≤ 10 min each), no `dependsOn`, plus a new trailing
+     `validate` PRD for the wave. Do not fix inline.
+   - **The validator itself parks** — treat it like any parked job; its RCA says why the
+     procedure could not run.
 
-8. **Gate: definition of done** (same for both entry paths). Once the code has landed:
-   - **Verify live against each PRD's acceptance criteria** — run the health check, hit the
-     endpoint, show before/after. The headless run asserted its own test command; this is the
-     interactive confirmation it actually does what was asked.
-   - **Route to the specialist that actually matches what changed** — not always the generic
-     reviewer. This environment has dedicated agents that sit unused unless explicitly called;
-     match the PRD's surface to the right one before calling a major/risky change done:
-     - Touches an API's request/response shape, REST/GraphQL contract, or endpoint design →
-       dispatch `api-designer` (Agent tool).
-     - Touches auth, input handling, secrets, or data storage → dispatch `security-auditor` in
-       addition to the mandatory security AC the PRD's own execution already required — the
-       auditor catches what the executor's self-check might miss.
-     - Is a structural refactor (no behavior change intended) → dispatch `refactorer`.
-     - Is performance-sensitive or touches a hot path → dispatch `perf-profiler`.
-     - Adds or updates a dependency → dispatch `dependency-auditor`.
-     - Touches a database schema, migration, or table design → **no specialist exists for this
-       in this environment today.** Don't silently let the generic code-reviewer stand in for a
-       schema review it isn't specialized for — say so explicitly in your report ("schema change,
-       no dedicated reviewer available, manual review recommended") rather than implying coverage
-       that isn't there.
-     - Anything else, or a **major feature/risky change** not covered above — dispatch the
-       generic `requesting-code-review` skill (`code-reviewer` agent) as the default.
-     Fix Critical/Important findings from whichever specialist(s) ran before calling it done.
-   - **Report back**: what landed, PRD/commit refs, which specialist(s) reviewed it (or the
-     explicit "no specialist available" note), verification result, anything left open.
+8. **Definition of done** = the plan's latest validator reported every PRD VERIFIED with no open
+   Critical/Important finding, and its review record is committed. Report: what landed (PRD
+   slugs, commits), the record path, findings deferred as Minor, anything left open. A plan with
+   a REFUTED PRD is never "done with caveats" — it gets a fix wave or an explicit human decision
+   to stop.
 
 ## References (reuse, don't duplicate)
 
 - `~/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md` — the §1–§10 safety rules.
 - `standards.md` beside this file — the engineering + execution-discipline rules. Every PRD points the executor at its absolute path (see "Standards" above) rather than embedding a copy.
 - `test-driven-development`, `systematic-debugging` — interactive dev sessions.
-- `requesting-code-review` — the Phase-2 default review gate; `api-designer`, `security-auditor`,
-  `refactorer`, `perf-profiler`, `dependency-auditor` — specialist agents routed to by surface
-  area (see step 8) rather than always defaulting to the generic reviewer.
+- `validator` persona (src/seed/agents/validator.md) — the plan-level review point for scheduled
+  work; `requesting-code-review` — interactive sessions reviewing their own inline work only.
 
 ## Notes
 

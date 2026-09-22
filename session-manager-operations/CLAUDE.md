@@ -43,7 +43,7 @@ Epic lifecycle is specified exactly once, at
 | `project-brief` | OWNERS → project-home | synthesized per-project Brief | keep indefinitely | [link](project-brief/README.md) |
 | `project-pages` | OWNERS → project-home (render route only) | generated static Project Page artifacts | regenerated on demand | [link](project-pages/README.md) |
 | `prompt-sessions` | OWNERS → epics | durable Epic (PromptSession) store | keep indefinitely | [link](prompt-sessions/README.md) |
-| `reviews` | not owned | frozen audit-trail review docs | keep indefinitely | none |
+| `reviews` | not owned | frozen audit-trail review docs, incl. `validation/<epic-id>/` plan records committed by validator jobs | keep indefinitely | none |
 | `scheduler` | OWNERS → scheduler | PRD sources + queue/history state | keep indefinitely | [link](scheduler/README.md) |
 | `ui-prefs` | OWNERS → ui-prefs | per-project UI state | keep indefinitely | [link](ui-prefs/README.md) |
 

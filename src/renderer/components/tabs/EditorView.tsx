@@ -19,6 +19,7 @@ import { Z } from '../../lib/zLayers'
 import type { editor } from 'monaco-editor'
 import {
   useEditor,
+  hydrateEditorSession,
   isImage,
   isPdf,
   isMarkdown,
@@ -122,6 +123,13 @@ function EditorViewComponent() {
 
   const registerEditor = useCallback((ed: editor.IStandaloneCodeEditor | null) => { monacoRef.current = ed }, [])
   const getEditor = useCallback(() => monacoRef.current, [])
+
+  // Restore the open-files tab strip from the active project's ui-prefs/prefs.json
+  // (structural only — no buffers). No-ops past the first successful call, even
+  // across multiple concurrently-mounted EditorView instances (see editor.ts).
+  useEffect(() => {
+    void hydrateEditorSession()
+  }, [])
 
   // Lazily read the active file into the buffer store (text files only; images
   // and PDFs are served straight to their pane over smfile://). Depends ONLY on

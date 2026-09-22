@@ -10,6 +10,8 @@
  */
 
 import { create } from 'zustand'
+import { useSessions } from './sessions'
+import { readUiPrefs, writeUiPrefsPatch, type EditorSessionPrefs } from '../lib/uiPrefs'
 
 export interface OpenFile {
   path: string
@@ -17,6 +19,10 @@ export interface OpenFile {
 }
 
 export type ViewMode = 'edit' | 'preview' | 'split' | 'wysiwyg'
+
+function isViewMode(v: string): v is ViewMode {
+  return v === 'edit' || v === 'preview' || v === 'split' || v === 'wysiwyg'
+}
 
 /** A pending request to reveal a line after a file opens (terminal links). */
 interface PendingReveal {
@@ -38,6 +44,11 @@ interface EditorState {
   viewMode: Record<string, ViewMode>
   /** Set when a file is opened with a target line (terminal `foo.ts:42`). */
   pendingReveal: PendingReveal | null
+  /** True once hydrateEditorSession() has resolved (restore attempted, whether
+   *  or not anything was actually restored) — gates the autosave subscription
+   *  below so it never overwrites a not-yet-restored on-disk session with the
+   *  store's empty initial state. */
+  hydrated: boolean
 
   openFile: (path: string, opts?: { line?: number; col?: number }) => void
   closeFile: (path: string) => void
@@ -57,6 +68,10 @@ interface EditorState {
   /** Remap an open file from oldPath to newPath (Document menu → Rename), keeping
    *  its buffer/baseline/dirty/viewMode and tab position instead of a close+reopen. */
   renameOpenFile: (oldPath: string, newPath: string) => void
+  /** Replace openFiles/activeFilePath/viewMode from a persisted session — never
+   *  touches buffers/baselines/dirty (restored files are re-read from disk by
+   *  hydrateEditorSession, not seeded from any persisted buffer). */
+  restoreSession: (session: { openFiles: string[]; activeFilePath: string | null; viewModeByPath: Record<string, string> }) => void
 }
 
 function basename(p: string): string {
@@ -96,6 +111,7 @@ export const useEditor = create<EditorState>((set, get) => ({
   dirty: {},
   viewMode: {},
   pendingReveal: null,
+  hydrated: false,
 
   openFile: (path, opts) => {
     const { openFiles } = get()
@@ -205,6 +221,21 @@ export const useEditor = create<EditorState>((set, get) => ({
       viewMode: rekey(get().viewMode, oldPath, newPath),
     })
   },
+
+  restoreSession: ({ openFiles, activeFilePath, viewModeByPath }) => {
+    const files: OpenFile[] = openFiles.map((path) => ({ path, name: basename(path) }))
+    const pathSet = new Set(openFiles)
+    const viewMode: Record<string, ViewMode> = {}
+    for (const [path, mode] of Object.entries(viewModeByPath)) {
+      if (pathSet.has(path) && isViewMode(mode)) viewMode[path] = mode
+    }
+    set({
+      openFiles: files,
+      activeFilePath: activeFilePath && pathSet.has(activeFilePath) ? activeFilePath : (files[0]?.path ?? null),
+      viewMode,
+      hydrated: true,
+    })
+  },
 }))
 
 // -------------------------------------------------------------------------
@@ -259,6 +290,121 @@ export function defaultViewMode(p: string): ViewMode {
 export function smfileUrl(absPath: string): string {
   const encoded = absPath.split('/').map(encodeURIComponent).join('/')
   return `smfile://local${encoded.startsWith('/') ? '' : '/'}${encoded}`
+}
+
+// -------------------------------------------------------------------------
+// Persistence — structural session only (open paths, active path, per-path
+// view mode). Buffers/baselines/dirty are never written or read back here;
+// see uiPrefs.ts's EditorSessionPrefs doc comment for why.
+// -------------------------------------------------------------------------
+
+/**
+ * The Editor scene is intentionally NOT tied to the active session tab (it
+ * can hold files opened from several projects' FileTrees/terminal links at
+ * once — see App.tsx's "'editor' owns independent tab-id state" comment), so
+ * there is no single correct project to persist a multi-project open-files
+ * list against. The active session tab's cwd is used as a deliberate
+ * simplification: it is the only "current project" notion available before
+ * any file is open (needed to know which prefs.json to hydrate from), and
+ * cross-project editor state is explicitly out of scope.
+ */
+function activeProjectCwd(): string | null {
+  const { tabs, activeTabId } = useSessions.getState()
+  return tabs.find((t) => t.id === activeTabId)?.cwd ?? null
+}
+
+function persistedSessionOf(state: EditorState): EditorSessionPrefs {
+  return {
+    openFiles: state.openFiles.map((f) => f.path),
+    activeFilePath: state.activeFilePath,
+    viewModeByPath: state.viewMode,
+  }
+}
+
+function flushEditorSession(): void {
+  const cwd = activeProjectCwd()
+  if (!cwd) return
+  writeUiPrefsPatch(cwd, { editorSession: persistedSessionOf(useEditor.getState()) }).catch((e) => {
+    console.warn('[editor] persist failed:', e)
+  })
+}
+
+// Wired from doHydrateEditorSession, once, AFTER the restore below has
+// already applied — mirrors sessions.ts's hydrateSessions(), which wires its
+// own autosave subscription only once restoreTabs has run. Wiring it any
+// earlier (e.g. at module load) would make restoreSession's own state change
+// trip the debounce and echo a redundant write right back.
+let saveTimer: number | null = null
+let autosaveWired = false
+function wireAutosave(): void {
+  if (autosaveWired) return
+  autosaveWired = true
+  useEditor.subscribe((state, prev) => {
+    if (state.openFiles === prev.openFiles && state.activeFilePath === prev.activeFilePath && state.viewMode === prev.viewMode) return
+    if (saveTimer !== null) window.clearTimeout(saveTimer)
+    saveTimer = window.setTimeout(flushEditorSession, 200)
+  })
+}
+
+let hydratePromise: Promise<void> | null = null
+
+/**
+ * Hydrate once, on EditorView's first mount: restore the structural session
+ * from the active project's ui-prefs/prefs.json, then re-open each surviving
+ * path's CURRENT on-disk content — never a persisted buffer, since none is
+ * ever written. A persisted path that no longer exists on disk is silently
+ * dropped. Safe to call from multiple concurrently-mounted EditorView
+ * instances: the in-flight promise is shared, and a call after hydration has
+ * already completed is a no-op.
+ */
+export function hydrateEditorSession(): Promise<void> {
+  if (useEditor.getState().hydrated) return Promise.resolve()
+  if (!hydratePromise) {
+    hydratePromise = doHydrateEditorSession().finally(() => { hydratePromise = null })
+  }
+  return hydratePromise
+}
+
+async function doHydrateEditorSession(): Promise<void> {
+  const cwd = activeProjectCwd()
+  let persisted: EditorSessionPrefs | undefined
+  if (cwd) {
+    const prefs = await readUiPrefs(cwd)
+    persisted = prefs.editorSession
+  }
+  const candidatePaths = Array.isArray(persisted?.openFiles)
+    ? persisted.openFiles.filter((p): p is string => typeof p === 'string')
+    : []
+
+  const canRead = typeof window !== 'undefined' && !!window.api?.files?.read
+  const reads = await Promise.all(candidatePaths.map(async (path) => {
+    if (!canRead) return null
+    try {
+      const r = await window.api.files.read(path)
+      if (r.ok) return { path, text: r.text as string | null }
+      if (r.binary) return { path, text: null as string | null }
+      return null
+    } catch {
+      return null
+    }
+  }))
+  const existing = reads.filter((r): r is { path: string; text: string | null } => r !== null)
+
+  useEditor.getState().restoreSession({
+    openFiles: existing.map((r) => r.path),
+    activeFilePath: persisted?.activeFilePath ?? null,
+    viewModeByPath: persisted?.viewModeByPath ?? {},
+  })
+  for (const r of existing) {
+    if (r.text !== null) useEditor.getState().loadBuffer(r.path, r.text)
+  }
+
+  wireAutosave()
+  // Immediately (not debounced) re-persist the just-restored, existence-
+  // filtered session — mirrors sessions.ts's "Initial flush" so a dropped
+  // stale path doesn't linger in prefs.json until the next edit happens to
+  // trigger a save.
+  flushEditorSession()
 }
 
 // Test handle so e2e specs can drive the Editor scene without a live Claude session.

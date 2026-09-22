@@ -10,6 +10,17 @@
  * hid one project's completed rows because another project happened to reuse
  * the same PRD slug).
  */
+/** state/editor.ts — the Editor scene's STRUCTURAL session only (which paths
+ *  are open, which is active, each path's view mode). Buffers/baselines/dirty
+ *  are deliberately never persisted here — a stale unsaved edit silently
+ *  reappearing after a restart is a data-integrity risk, not a convenience;
+ *  every restored path is re-read from disk fresh instead. */
+export interface EditorSessionPrefs {
+  openFiles: string[]
+  activeFilePath: string | null
+  viewModeByPath: Record<string, string>
+}
+
 export interface UiPrefs {
   /** FileTree.tsx — expanded folder paths in the Files sidebar. */
   fileTreeExpanded?: string[]
@@ -26,6 +37,8 @@ export interface UiPrefs {
    *  1399: same reasoning as epicPins, moved off the global
    *  ~/.claude/session-manager/chat-prefs.json). */
   chatVerbosityPerEpic?: Record<string, string>
+  /** editor.ts — the Editor scene's open-files tab strip for this project. */
+  editorSession?: EditorSessionPrefs
 }
 
 export function uiPrefsPath(cwd: string): string {

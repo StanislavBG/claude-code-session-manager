@@ -913,6 +913,12 @@ export const ERD_ENTITIES: ErdEntity[] = [
         ref: 'epic.id',
         note: 'chatPrefs.ts — per-Epic verbosity overrides, keyed by epicId (moved off the global chat-prefs.json)',
       },
+      {
+        name: 'editorSession',
+        type: '{ openFiles: string[]; activeFilePath: string | null; viewModeByPath: Record<string, string> }',
+        optional: true,
+        note: 'editor.ts — the Editor scene\'s structural tab strip only; buffers/baselines/dirty are never persisted (PRD 1400)',
+      },
     ],
   },
 ]

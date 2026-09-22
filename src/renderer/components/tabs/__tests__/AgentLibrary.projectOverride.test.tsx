@@ -33,7 +33,14 @@ async function mount(details: Detail[], activeCwd: string | null) {
       onChanged: vi.fn(() => () => {}),
     },
     app: { homeDir: vi.fn().mockResolvedValue('/home/bilko') },
-    config: { listDir: vi.fn().mockResolvedValue([]), readText: vi.fn().mockResolvedValue(''), exists: vi.fn().mockResolvedValue(false) },
+    config: {
+      listDir: vi.fn().mockResolvedValue([]),
+      readText: vi.fn().mockResolvedValue(''),
+      exists: vi.fn().mockResolvedValue(false),
+      watch: vi.fn(),
+      unwatch: vi.fn(),
+      onChanged: vi.fn(() => () => {}),
+    },
     models: undefined, // catalog === null → static option lists
   }
   useSessions.setState({

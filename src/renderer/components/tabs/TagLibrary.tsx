@@ -6,6 +6,7 @@ import { TAG_LIBRARY, type TagLibraryEntry } from '../../lib/tagLibrary'
 import { ticketTagTone } from '../../lib/ticketDisplay'
 import { agentTagDef } from '../../lib/agentTagDefs'
 import { toast } from '../../state/toast'
+import { useAgentsDirWatch } from '../../lib/useAgentsDirWatch'
 import type { AgentPersona, AgentPersonaTag } from '../../../preload/api'
 
 // The write-side schema (agentPersonaSchema.cjs) only accepts these — mirrors AgentLibrary.tsx's
@@ -44,12 +45,17 @@ function TagLibraryComponent() {
   const mounted = useRef(true)
   useEffect(() => () => { mounted.current = false }, [])
 
+  // Guards against an out-of-order resolution: the mount effect, the
+  // agents:changed echo, and the directory watch below can all fire load()
+  // in close succession — a stale response must never clobber a fresher one.
+  const loadSeq = useRef(0)
   const load = async () => {
+    const seq = ++loadSeq.current
     try {
       const list = await window.api.agents.listPersonas()
-      if (mounted.current) setPersonas(list)
+      if (mounted.current && loadSeq.current === seq) setPersonas(list)
     } catch (e) {
-      if (!mounted.current) return
+      if (!mounted.current || loadSeq.current !== seq) return
       setPersonas([])
       toast.error((e as Error).message || 'failed to load agent personas')
     }
@@ -60,6 +66,12 @@ function TagLibraryComponent() {
   // from its own side) — refresh here too so this panel never shows a stale
   // snapshot if it's already mounted when that happens.
   useEffect(() => window.api.agents.onChanged(() => load()), [])
+
+  // agents:changed only fires as a write-echo from this app's OWN save — an
+  // external edit to ~/.claude/agents/*.md is otherwise invisible. This page
+  // is Home-face, machine-wide only (see docblock above), so only the global
+  // directory is watched — no per-project overlay concept here.
+  useAgentsDirWatch(null, () => load())
 
   const selected = TAG_LIBRARY.find((entry) => entry.tag === selectedTag) ?? null
 

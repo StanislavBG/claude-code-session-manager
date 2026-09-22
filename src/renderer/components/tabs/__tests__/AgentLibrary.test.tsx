@@ -72,7 +72,14 @@ function installWindowApiMock(personas: AgentPersona[] = PERSONAS) {
     // The Action-scope field lists this machine's known projects (useKnownProjects
     // -> useHomeDir), so the persona editor now needs these two reads to mount.
     app: { homeDir: vi.fn().mockResolvedValue('/home/bilko') },
-    config: { listDir: vi.fn().mockResolvedValue([]), readText: vi.fn().mockResolvedValue(''), exists: vi.fn().mockResolvedValue(false) },
+    config: {
+      listDir: vi.fn().mockResolvedValue([]),
+      readText: vi.fn().mockResolvedValue(''),
+      exists: vi.fn().mockResolvedValue(false),
+      watch: vi.fn(),
+      unwatch: vi.fn(),
+      onChanged: vi.fn(() => () => {}),
+    },
   }
   ;(window as unknown as { api: typeof api }).api = api
   return { api, emitChanged: () => changedHandlers.forEach((h) => h()) }

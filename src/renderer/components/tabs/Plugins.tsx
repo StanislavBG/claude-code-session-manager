@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { KVTable, type Column } from '../ui/KVTable'
 import { EmptyState } from '../ui/EmptyState'
@@ -6,6 +6,7 @@ import { ProvenanceBadge } from '../ui/ProvenanceBadge'
 import { Badge } from '../ui/Badge'
 import type { ProvenanceInput } from '../../lib/provenance'
 import { useHomeDir } from '../../lib/useHomeDir'
+import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
 import type { DirEntry, SeedStatus } from '../../../preload/api'
 import { PluginsLibrary } from './Library'
 import { resolveInstalledPluginSkillsDir, listPluginSkills, type PluginSkillEntry } from '../../lib/pluginSkills'
@@ -93,53 +94,62 @@ function PluginsComponent() {
     }
   }, [])
 
-  useEffect(() => {
+  // Callable both on mount/home-resolve and from the manifest-file watch
+  // below (Plugins.tsx used to only read once at mount — an external edit to
+  // installed_plugins.json, e.g. `claude plugin install` run outside this
+  // app, was invisible until reload).
+  const loadSeq = useRef(0)
+  const loadRows = useCallback(async () => {
+    // Bumped before the early return too, so a still-in-flight call from a
+    // since-unset `home` can never win a race against a later valid call.
+    const seq = ++loadSeq.current
     if (!home) return
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      const next: PluginRow[] = []
-      try {
-        const r = await window.api.config.readJson(`${home}/.claude/plugins/installed_plugins.json`)
-        if (r.exists && !r.parseError && r.data && typeof r.data === 'object') {
-          const manifest = r.data as InstalledPluginsManifest
-          for (const [key, entries] of Object.entries(manifest.plugins ?? {})) {
-            if (!Array.isArray(entries)) continue
-            const name = key.split('@')[0]
-            const marketplace = key.split('@')[1]
-            for (const entry of entries) {
-              if (!entry?.installPath) continue
-              const dirEntry: DirEntry = {
-                name,
-                path: entry.installPath,
-                isDirectory: true,
-                isFile: false,
-                mtimeMs: 0,
-                size: 0,
-              }
-              const row = await inspectPluginDir(dirEntry)
-              if (!row.manifest?.version) {
-                row.manifest = { ...(row.manifest ?? {}), version: entry.version }
-              }
-              row.marketplace = marketplace
-              next.push(row)
+    setLoading(true)
+    const next: PluginRow[] = []
+    try {
+      const r = await window.api.config.readJson(`${home}/.claude/plugins/installed_plugins.json`)
+      if (r.exists && !r.parseError && r.data && typeof r.data === 'object') {
+        const manifest = r.data as InstalledPluginsManifest
+        for (const [key, entries] of Object.entries(manifest.plugins ?? {})) {
+          if (!Array.isArray(entries)) continue
+          const name = key.split('@')[0]
+          const marketplace = key.split('@')[1]
+          for (const entry of entries) {
+            if (!entry?.installPath) continue
+            const dirEntry: DirEntry = {
+              name,
+              path: entry.installPath,
+              isDirectory: true,
+              isFile: false,
+              mtimeMs: 0,
+              size: 0,
             }
+            const row = await inspectPluginDir(dirEntry)
+            if (!row.manifest?.version) {
+              row.manifest = { ...(row.manifest ?? {}), version: entry.version }
+            }
+            row.marketplace = marketplace
+            next.push(row)
           }
         }
-      } catch {
-        // Missing/unparseable manifest → empty list, no throw.
       }
-      if (cancelled) return
-      next.sort((a, b) => a.name.localeCompare(b.name))
-      if (!cancelled) {
-        setRows(next)
-        setLoading(false)
-      }
-    })()
-    return () => {
-      cancelled = true
+    } catch {
+      // Missing/unparseable manifest → empty list, no throw.
     }
+    if (loadSeq.current !== seq) return
+    next.sort((a, b) => a.name.localeCompare(b.name))
+    setRows(next)
+    setLoading(false)
   }, [home])
+
+  useEffect(() => { void loadRows() }, [loadRows])
+
+  // Invalidate any still-in-flight loadRows on actual unmount — the seq bump
+  // above only covers a NEW call superseding an old one; nothing else calls
+  // loadRows after the component is gone.
+  useEffect(() => () => { loadSeq.current += 1 }, [])
+
+  useConfigDirWatch(home ? [`${home}/.claude/plugins/installed_plugins.json`] : [], loadRows)
 
   const columns: Column<PluginRow>[] = [
     {

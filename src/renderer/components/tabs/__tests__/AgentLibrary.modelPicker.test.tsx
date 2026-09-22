@@ -40,7 +40,14 @@ async function mount(model: string | null, catalog: unknown, effort: string | nu
       onChanged: vi.fn(() => () => {}),
     },
     app: { homeDir: vi.fn().mockResolvedValue('/home/bilko') },
-    config: { listDir: vi.fn().mockResolvedValue([]), readText: vi.fn().mockResolvedValue(''), exists: vi.fn().mockResolvedValue(false) },
+    config: {
+      listDir: vi.fn().mockResolvedValue([]),
+      readText: vi.fn().mockResolvedValue(''),
+      exists: vi.fn().mockResolvedValue(false),
+      watch: vi.fn(),
+      unwatch: vi.fn(),
+      onChanged: vi.fn(() => () => {}),
+    },
     models: catalogFn ? { catalog: catalogFn } : undefined,
   }
   container = document.createElement('div')

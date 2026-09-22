@@ -12,6 +12,7 @@ import { ticketTagTone } from '../../lib/ticketDisplay'
 import { takePendingPersonaName } from '../../lib/agentLibraryDeepLink'
 import { useKnownProjects } from '../../lib/useKnownProjects'
 import { useModelCatalog } from '../../lib/useModelCatalog'
+import { useAgentsDirWatch } from '../../lib/useAgentsDirWatch'
 import { modelFamily } from '../../lib/prettyModel'
 import { modelSupportsEffort } from '../../lib/effortSupport'
 import { ALL_PROJECTS } from '../../lib/projectActions'
@@ -123,14 +124,20 @@ function AgentLibraryComponent() {
   const activeCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
   const activeProject = activeCwd ? activeCwd.replace(/\/+$/, '').split('/').pop() || activeCwd : null
 
+  // Guards against an out-of-order resolution: the mount effect, the
+  // agents:changed echo, and the directory watch below can all fire load()
+  // in close succession (e.g. one filesystem event per file in a multi-file
+  // git checkout) — a stale response must never clobber a fresher one.
+  const loadSeq = useRef(0)
   const load = async (selectAfter?: string) => {
+    const seq = ++loadSeq.current
     try {
       const list = await window.api.agents.listPersonas()
-      if (!mounted.current) return
+      if (!mounted.current || loadSeq.current !== seq) return
       setPersonas(list)
       setSelectedName((cur) => selectAfter ?? cur ?? list[0]?.name ?? null)
     } catch (e) {
-      if (!mounted.current) return
+      if (!mounted.current || loadSeq.current !== seq) return
       setPersonas([])
       toast.error((e as Error).message || 'failed to load agent personas')
     }
@@ -141,6 +148,13 @@ function AgentLibraryComponent() {
   // its own side) — refresh here too so this panel never shows a stale
   // snapshot if it's already mounted when that happens.
   useEffect(() => window.api.agents.onChanged(() => load()), [])
+
+  // agents:changed only fires as a write-echo from this app's OWN save/delete
+  // (agentLibrary.cjs) — an external edit to ~/.claude/agents/*.md (or the
+  // active project's overlay dir) is otherwise invisible until the next
+  // manual reload. Watch both directories directly and re-list on any
+  // add/change/unlink, in addition to (not instead of) the echo above.
+  useAgentsDirWatch(activeCwd, () => load())
 
   // Cross-tab deep link: EpicDetail's read-only Agent+model chip (PRD
   // agent-epic-readback) navigates here to jump straight to the persona a

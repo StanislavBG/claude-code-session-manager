@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Panel } from '../ui/Panel'
 import { ListDetail } from '../ui/ListDetail'
 import { MarkdownEditor } from '../ui/MarkdownEditor'
@@ -12,6 +12,7 @@ import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useLayout } from '../../state/layout'
 import { listSkillEntries } from '../../lib/listSkills'
+import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
 import type { Scope } from '../../lib/scopes'
 import type { DirEntry } from '../../../preload/api'
 import { SkillsLibrary, ViewSwitcher } from './Library'
@@ -83,59 +84,71 @@ function SkillsComponent() {
     setScope(navFace === 'project' && cwd ? 'project' : 'user')
   }, [navFace, cwd])
 
-  // Enumerate skills and commands for the active scope.
-  useEffect(() => {
-    if (!scopeRoots) return
-    let cancelled = false
-    const bases =
-      scope === 'user' ? scopeRoots.user : scopeRoots.project
+  // Current scope's roots — also the set of directories watched below, so
+  // both derive from the same scope/scopeRoots pair.
+  const bases = useMemo(() => {
+    if (!scopeRoots) return null
+    return scope === 'user' ? scopeRoots.user : scopeRoots.project
+  }, [scope, scopeRoots])
+
+  // Enumerate skills and commands for the active scope. Callable both on
+  // mount/scope change and from the directory watch below (Skills.tsx used
+  // to only list once at mount — an external edit to a SKILL.md or command
+  // file outside this app was invisible until reload).
+  const loadSeq = useRef(0)
+  const loadItems = useCallback(async () => {
+    // Bumped before any early return too, so a still-in-flight call from a
+    // just-superseded (bases/scope) pair can never win a race against this
+    // one — including the "scope lost its bases" transition below.
+    const seq = ++loadSeq.current
     if (!bases) {
       setItems([])
       return
     }
-    ;(async () => {
-      const next: Item[] = []
-      // Skills: subdirs containing SKILL.md, possibly nested under a
-      // namespace dir (e.g. ~/.claude/skills/user/<name>/SKILL.md).
-      const skillEntries = await listSkillEntries(bases.skills)
-      for (const s of skillEntries) {
-        next.push({
-          kind: 'skills',
-          scope,
-          name: s.name,
-          path: s.path,
-          dir: s.dir,
-          disabled: readSkillDisabled(s.text),
-          description: parseSkillMeta(s.text).description ?? undefined,
-        })
-      }
-      // Commands: each .md file is a command.
-      const cmdsDir = await window.api.config.listDir(bases.commands, { filesOnly: true })
-      for (const e of cmdsDir.entries as DirEntry[]) {
-        if (!e.name.endsWith('.md')) continue
-        next.push({
-          kind: 'commands',
-          scope,
-          name: e.name.replace(/\.md$/, ''),
-          path: e.path,
-          dir: null,
-          disabled: false,
-        })
-      }
-      if (!cancelled) {
-        next.sort((a, b) =>
-          a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'skills' ? -1 : 1
-        )
-        setItems(next)
-        if (!next.find((i) => i.path === selectedPath)) {
-          setSelectedPath(next[0]?.path ?? null)
-        }
-      }
-    })()
-    return () => {
-      cancelled = true
+    const next: Item[] = []
+    // Skills: subdirs containing SKILL.md, possibly nested under a
+    // namespace dir (e.g. ~/.claude/skills/user/<name>/SKILL.md).
+    const skillEntries = await listSkillEntries(bases.skills)
+    for (const s of skillEntries) {
+      next.push({
+        kind: 'skills',
+        scope,
+        name: s.name,
+        path: s.path,
+        dir: s.dir,
+        disabled: readSkillDisabled(s.text),
+        description: parseSkillMeta(s.text).description ?? undefined,
+      })
     }
-  }, [scope, scopeRoots])
+    // Commands: each .md file is a command.
+    const cmdsDir = await window.api.config.listDir(bases.commands, { filesOnly: true })
+    for (const e of cmdsDir.entries as DirEntry[]) {
+      if (!e.name.endsWith('.md')) continue
+      next.push({
+        kind: 'commands',
+        scope,
+        name: e.name.replace(/\.md$/, ''),
+        path: e.path,
+        dir: null,
+        disabled: false,
+      })
+    }
+    if (loadSeq.current !== seq) return
+    next.sort((a, b) =>
+      a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'skills' ? -1 : 1
+    )
+    setItems(next)
+    setSelectedPath((cur) => (next.find((i) => i.path === cur) ? cur : next[0]?.path ?? null))
+  }, [bases, scope])
+
+  useEffect(() => { void loadItems() }, [loadItems])
+
+  // Invalidate any still-in-flight loadItems on actual unmount — the seq bump
+  // above only covers a NEW call superseding an old one; nothing else calls
+  // loadItems after the component is gone.
+  useEffect(() => () => { loadSeq.current += 1 }, [])
+
+  useConfigDirWatch(bases ? [bases.skills, bases.commands] : [], loadItems)
 
   const files = useConfig((s) => s.files)
   const loadText = useConfig((s) => s.loadText)

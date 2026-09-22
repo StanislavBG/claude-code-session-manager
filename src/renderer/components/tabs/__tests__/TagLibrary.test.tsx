@@ -54,6 +54,12 @@ function installWindowApiMock(personas: AgentPersona[] = PERSONAS) {
         }
       }),
     },
+    app: { homeDir: vi.fn().mockResolvedValue('/home/bilko') },
+    config: {
+      watch: vi.fn(),
+      unwatch: vi.fn(),
+      onChanged: vi.fn(() => () => {}),
+    },
   }
   ;(window as unknown as { api: typeof api }).api = api
   return { api, emitChanged: () => changedHandlers.forEach((h) => h()) }

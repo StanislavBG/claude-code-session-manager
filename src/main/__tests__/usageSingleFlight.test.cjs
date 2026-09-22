@@ -88,6 +88,7 @@ afterEach(() => {
   process.env.HOME = realHome;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  vi.useRealTimers();
   purgeRequireCache();
   // maxRetries: a fire-and-forget cache write inside usage.cjs can land in .claude/ mid-rm
   // (ENOTEMPTY) when the machine is loaded; this is cleanup robustness, not a test retry.
@@ -112,6 +113,15 @@ test('two concurrent fetchUsage() calls produce exactly one HTTP fetch', async (
 });
 
 test('an ok result resets the shared circuit streak built up by prior failures', async () => {
+  // The breaker's open->half_open transition (usageCircuit.cjs's state())
+  // compares real Date.now() against a jittered 15-30s backoff deadline. On
+  // a loaded machine, real wall-clock time can drift far enough between the
+  // 3rd failure and the assertions below for that deadline to pass, flipping
+  // 'open' to 'half_open' out from under this test. Freeze time so the
+  // open/closed assertions are decided by call sequence, not the real clock.
+  vi.useFakeTimers();
+  vi.setSystemTime(Date.now());
+
   const usage = require('../usage.cjs');
   const circuit = usage.__usageCircuitForTest;
 

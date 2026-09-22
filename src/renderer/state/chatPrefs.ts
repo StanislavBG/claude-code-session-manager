@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { CHAT_VERBOSITY_DEFAULT, isChatVerbosity, type ChatVerbosity } from '../lib/chatVerbosity'
 import { readUiPrefs, writeUiPrefsPatch } from '../lib/uiPrefs'
 import { knownEpicIdsForCwd } from '../lib/epicIdsForCwd'
+import { toast } from './toast'
 
 /**
  * Persisted chat-feed display prefs. Follows the `epicsPrefs.ts` pattern:
@@ -83,7 +84,11 @@ async function migratePerEpic(cwd: string): Promise<Record<string, ChatVerbosity
     const level = readLevel(v)
     if (level) seeded[epicId] = level
   }
-  await writeUiPrefsPatch(cwd, { chatVerbosityPerEpic: seeded }).catch(() => {})
+  // One-shot best-effort seed: nothing to revert (no user-visible optimistic
+  // state was set yet), but a failure must still surface rather than vanish.
+  await writeUiPrefsPatch(cwd, { chatVerbosityPerEpic: seeded }).catch((e) => {
+    console.warn('migratePerEpic: failed to seed ui-prefs chatVerbosityPerEpic', e)
+  })
   return seeded
 }
 
@@ -132,14 +137,28 @@ export const useChatPrefs = create<ChatPrefsState>((set, get) => ({
     if (level === verbosity) delete next[epicId]
     else next[epicId] = level
     set({ perEpic: next })
-    writeUiPrefsPatch(cwd, { chatVerbosityPerEpic: next }).catch(() => {})
+    writeUiPrefsPatch(cwd, { chatVerbosityPerEpic: next }).catch(() => {
+      // Only revert if nothing else has moved perEpic on since this call
+      // (writeUiPrefsPatch serializes per-cwd, so a later Epic's write can
+      // settle and persist successfully before this one's failure is caught
+      // here) — otherwise this stale failure would stomp that later,
+      // already-persisted change.
+      if (get().perEpic !== next) return
+      set({ perEpic })
+      toast.error("Couldn't save chat verbosity — reverted.")
+    })
   },
 
   clearEpicVerbosity: (cwd, epicId) => {
-    const next = { ...get().perEpic }
+    const prev = get().perEpic
+    const next = { ...prev }
     delete next[epicId]
     set({ perEpic: next })
-    writeUiPrefsPatch(cwd, { chatVerbosityPerEpic: next }).catch(() => {})
+    writeUiPrefsPatch(cwd, { chatVerbosityPerEpic: next }).catch(() => {
+      if (get().perEpic !== next) return
+      set({ perEpic: prev })
+      toast.error("Couldn't save chat verbosity — reverted.")
+    })
   },
 }))
 

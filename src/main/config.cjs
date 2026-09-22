@@ -19,7 +19,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { assertOpsWrite, opsPath } = require('./lib/opsOwnership.cjs');
+const { assertOpsWrite, opsPath, OWNERS } = require('./lib/opsOwnership.cjs');
 const chokidar = require('chokidar');
 const logs = require('./logs.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
@@ -143,19 +143,15 @@ function validateWrite(realAbs) {
       if (realAbs === claudeSub || realAbs.startsWith(claudeSub + path.sep)) {
         return;
       }
-      // Writable ops namespaces under a registered project root — this
-      // repo's per-project artifact-store convention:
-      //   prompt-sessions  PromptSession persistence (promptSessions.ts) and
-      //                    the scheduler's read-modify-write of active-index
-      //                    (promptSessionEvents.cjs, PRD 814)
-      //   scheduler        PRD sources + Epic PRD dirs + state shards
-      //                    (PRD 825; scheduler.cjs remote.writePrd)
-      //   project-brief    projectBrief.cjs's brief.json (PRD 837)
-      //   bilko-host       bilkoHost.cjs's bundle prep
-      //   project-pages    projectHomeAdminRoutes.cjs's project_home_write
-      //                    path (home.html)
-      //   memory-clusters  memoryAggregate.cjs's regenerable clustering
-      //                    cache (PRD 1389)
+      // Writable ops namespaces under a registered project root — every
+      // namespace declared in opsOwnership.cjs's OWNERS map is writable here
+      // by construction (PRD 1410): OWNERS is the single source of truth for
+      // "this namespace exists and has an owner", so a namespace can never
+      // again be declared owned yet unwritable (incident: PRD 1398 added
+      // 'ui-prefs' to OWNERS but this list was hand-maintained separately and
+      // never updated, so every ui-prefs write threw here before
+      // assertOpsWrite's per-writer check ever ran). Which WRITER may use a
+      // given namespace is still assertOpsWrite's job below, not this list's.
       // Paths come from opsOwnership.opsPath (PRD 1082) — the one ops-root
       // resolver — which THROWS for an ephemeral root (a linked worktree that
       // pty.cjs registered as an allowed root for its spawn cwd, or
@@ -163,7 +159,7 @@ function validateWrite(realAbs) {
       // never a writable destination, so its exemptions simply do not exist.
       let opsSubs;
       try {
-        opsSubs = ['prompt-sessions', 'scheduler', 'project-brief', 'bilko-host', 'project-pages', 'memory-clusters'].map((ns) => opsPath(realRoot, ns));
+        opsSubs = Object.keys(OWNERS).map((ns) => opsPath(realRoot, ns));
       } catch {
         opsSubs = [];
       }

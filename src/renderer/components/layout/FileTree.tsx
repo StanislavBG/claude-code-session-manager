@@ -38,8 +38,8 @@ async function loadExpanded(cwd: string): Promise<string[]> {
   const prefs = await readUiPrefs(cwd)
   return Array.isArray(prefs.fileTreeExpanded) ? prefs.fileTreeExpanded.filter((p) => typeof p === 'string') : []
 }
-function saveExpanded(cwd: string, set: Set<string>) {
-  writeUiPrefsPatch(cwd, { fileTreeExpanded: [...set].slice(0, 500) }).catch(() => {})
+function saveExpanded(cwd: string, set: Set<string>): Promise<void> {
+  return writeUiPrefsPatch(cwd, { fileTreeExpanded: [...set].slice(0, 500) })
 }
 // Drop `path` and any descendant of it from the expanded set, so a deleted or
 // renamed folder doesn't leave a dead entry that fires a doomed files.list on
@@ -365,7 +365,17 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     expandedUserSetRef.current = true
     expandedRef.current = next
     setExpanded(next)
-    saveExpanded(cwd, next)
+    saveExpanded(cwd, next).catch(() => {
+      // Only revert if nothing else has moved the set on since this call
+      // (writeUiPrefsPatch serializes per-cwd, so a later toggle's write can
+      // settle and persist successfully before this one's failure is caught
+      // here) — otherwise this stale failure would stomp that later,
+      // already-persisted change.
+      if (expandedRef.current !== next) return
+      expandedRef.current = prev
+      setExpanded(prev)
+      toast.error("Couldn't save folder expansion — reverted.")
+    })
   }, [cwd])
 
   const toggleDir = useCallback(async (node: TreeNode) => {

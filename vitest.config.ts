@@ -46,6 +46,7 @@ export default defineConfig({
       'src/main/__tests__/transcripts-worktree-epic-path.test.cjs',
       'src/main/__tests__/transcripts-batch-flush.test.cjs',
       'src/main/__tests__/prdCreate.test.cjs',
+      'src/main/__tests__/configWriteBoundaryOwners.test.cjs',
       'src/main/__tests__/prdSizing.test.cjs',
       'src/main/__tests__/scheduler-admin-routes.test.cjs',
       'src/main/__tests__/classifyPromptTicket.test.cjs',

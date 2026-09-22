@@ -54,9 +54,9 @@ async function loadFilter(cwd: string | null): Promise<QueueFilter> {
   }
 }
 
-function saveFilter(cwd: string | null, f: QueueFilter) {
-  if (!cwd) return
-  writeUiPrefsPatch(cwd, { queueFilterStatus: f.status }).catch(() => {})
+function saveFilter(cwd: string | null, f: QueueFilter): Promise<void> {
+  if (!cwd) return Promise.resolve()
+  return writeUiPrefsPatch(cwd, { queueFilterStatus: f.status })
 }
 
 function applyFilter(jobs: ScheduleJob[], filter: QueueFilter): ScheduleJob[] {
@@ -80,9 +80,9 @@ async function loadHidden(cwd: string | null): Promise<Set<string>> {
   return Array.isArray(prefs.hiddenCompletedSlugs) ? new Set(prefs.hiddenCompletedSlugs.filter((x) => typeof x === 'string')) : new Set()
 }
 
-function saveHidden(cwd: string | null, set: Set<string>) {
-  if (!cwd) return
-  writeUiPrefsPatch(cwd, { hiddenCompletedSlugs: [...set] }).catch(() => {})
+function saveHidden(cwd: string | null, set: Set<string>): Promise<void> {
+  if (!cwd) return Promise.resolve()
+  return writeUiPrefsPatch(cwd, { hiddenCompletedSlugs: [...set] })
 }
 
 /**
@@ -138,6 +138,15 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
   // project changes so that project's own fresh read is allowed through.
   const hiddenUserSetRef = useRef(false)
   const filterUserSetRef = useRef(false)
+  // Live mirrors of hiddenSlugs/filterState for persistHidden/persistFilter's
+  // failed-write revert check below — a plain ref reads synchronously,
+  // unlike re-reading React state inside a setState updater (React 18
+  // automatic batching does not guarantee the updater runs before the next
+  // line executes, so checking a "reverted" flag set inside it is unsound).
+  const hiddenSlugsRef = useRef(hiddenSlugs)
+  hiddenSlugsRef.current = hiddenSlugs
+  const filterStateRef = useRef(filterState)
+  filterStateRef.current = filterState
 
   // Hydrate this project's hidden-completed / filter state whenever the
   // active project changes — both live in THIS project's ui-prefs/prefs.json
@@ -305,6 +314,42 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
     setFocusedJobIdx(i)
   }, [])
 
+  // Optimistic-write helpers for the two ui-prefs-backed fields (hiddenSlugs,
+  // filterState): update in-memory state immediately, then revert + toast on
+  // a failed persist (CLAUDE.md: never swallow errors) rather than leaving
+  // the UI showing a choice that never reached disk. Declared unconditionally
+  // alongside the other hooks above, before the early returns below (rules
+  // of hooks) — see handleRowFocused's comment.
+  const persistFilter = useCallback((f: QueueFilter) => {
+    const prev = filterStateRef.current
+    filterUserSetRef.current = true
+    filterStateRef.current = f
+    setFilter(f)
+    saveFilter(scopeCwd, f).catch(() => {
+      // Only revert if nothing else has moved the filter on since this call
+      // (writeUiPrefsPatch serializes per-cwd, so a later pick's write can
+      // settle and persist successfully before this one's failure is caught
+      // here) — otherwise this stale failure would stomp that later,
+      // already-persisted change.
+      if (filterStateRef.current !== f) return
+      filterStateRef.current = prev
+      setFilter(prev)
+      toast.error("Couldn't save queue filter — reverted.")
+    })
+  }, [scopeCwd])
+  const persistHidden = useCallback((next: Set<string>) => {
+    const prev = hiddenSlugsRef.current
+    hiddenUserSetRef.current = true
+    hiddenSlugsRef.current = next
+    setHiddenSlugs(next)
+    saveHidden(scopeCwd, next).catch(() => {
+      if (hiddenSlugsRef.current !== next) return
+      hiddenSlugsRef.current = prev
+      setHiddenSlugs(prev)
+      toast.error("Couldn't save hidden completed jobs — reverted.")
+    })
+  }, [scopeCwd])
+
   if (!snap) return null
 
   if (panelView === 'supervisor') {
@@ -348,9 +393,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
   const onClearCompleted = () => {
     const next = new Set(hiddenSlugs)
     for (const j of jobs) if (j.status === 'completed' || j.status === 'failed') next.add(j.slug)
-    hiddenUserSetRef.current = true
-    setHiddenSlugs(next)
-    saveHidden(scopeCwd, next)
+    persistHidden(next)
   }
   const onClearQueue = async () => {
     const victims = jobs.filter((j) => j.status !== 'running').length
@@ -363,9 +406,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
     }
   }
   const onUnhideAll = () => {
-    hiddenUserSetRef.current = true
-    setHiddenSlugs(new Set())
-    saveHidden(scopeCwd, new Set())
+    persistHidden(new Set())
     setShowAllCompleted(false)
   }
   const hasInlineCompleted = planMode === 'list'
@@ -428,7 +469,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
             <FilterBar
               showText={filterText === undefined}
               filter={filter}
-              onChange={(f) => { filterUserSetRef.current = true; setFilter(f); saveFilter(scopeCwd, f) }}
+              onChange={persistFilter}
             />
           </div>
         )}
@@ -444,7 +485,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
                 jobCount={filteredJobs.length}
                 counts={counts}
                 filter={filter}
-                onFilter={(f) => { filterUserSetRef.current = true; setFilter(f); saveFilter(scopeCwd, f) }}
+                onFilter={persistFilter}
                 hiddenInGraph={hiddenInGraph}
                 onUnhideAll={onUnhideAll}
                 hasInlineCompleted={hasInlineCompleted}

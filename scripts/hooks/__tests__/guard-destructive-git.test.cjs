@@ -1,8 +1,31 @@
 /**
  * guard-destructive-git.test.cjs — PreToolUse hook contract tests for
- * scripts/hooks/guard-destructive-git.cjs. Runs the real script as a child
- * process (stdin JSON in, stdout JSON out), same as guard-prd-writes.test.cjs,
- * so the test exercises the actual install shape.
+ * scripts/hooks/guard-destructive-git.cjs.
+ *
+ * Exercises `decide()`/`parsePayload()` from
+ * scripts/hooks/lib/guard-destructive-git-policy.cjs — the decision logic
+ * the CLI wraps — in-process for every policy case. Requiring that module
+ * has no I/O of its own, so requiring it directly is equivalent to the real
+ * decision the CLI makes, just without paying for a *CLI* child-process
+ * spawn per case. (The CLI file itself can't be safely `require()`d from a
+ * test: it runs its stdin-read-then-process.exit main() as a require-time
+ * side effect — deliberately, see its header — which would hang/kill the
+ * test process.) Note `decide()` itself still shells out to a real `git
+ * rev-parse` for most denied cases outside a path-recognized managed
+ * worktree (see `isInsideManagedWorktreeByBranch` in the policy module) —
+ * this removes the outer CLI-process spawn, not every subprocess spawn.
+ *
+ * Only ONE test (the "smoke test" section at the bottom) spawns the real CLI
+ * script as a child process, to prove the actual install shape (stdin JSON
+ * in, stdout JSON out, per guard-destructive-git.cjs's header) still works.
+ * Root cause of the prior flake (PRD 1412): this file used to spawn the real
+ * CLI process ~50 times per run; under full-suite parallel-worker load, one
+ * spawn could occasionally miss its hardcoded 10s timeout and get
+ * SIGTERM-killed, failing that test's `expect(status).toBe(0)` — an infra
+ * timing flake, not a parsing bug (the parser itself is fully deterministic:
+ * no shared/global state *in the parsing logic*, no randomness, and a fresh
+ * process each call can't accumulate cross-test skew). Running the same 50
+ * cases in-process removes ~49 of those outer CLI-process spawns.
  *
  * Run: timeout 60 npx vitest run scripts/hooks/__tests__/guard-destructive-git.test.cjs
  */
@@ -13,40 +36,25 @@ import { test, expect } from 'vitest';
 const path = require('node:path');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
+const { decide, parsePayload } = require('../lib/guard-destructive-git-policy.cjs');
 
 const HOOK_PATH = path.join(__dirname, '..', 'guard-destructive-git.cjs');
 const SHARED_CWD = '/home/tester/Projects/some-repo';
 const JOB_WORKTREE_CWD = path.join(process.env.SM_WORKTREE_ROOT || os.tmpdir(), 'session-manager-job-worktrees', 'abc123', 'some-slug');
 const EPIC_WORKTREE_CWD = path.join(process.env.SM_WORKTREE_ROOT || os.tmpdir(), 'session-manager-epic-worktrees', 'def456', 'some-epic-id');
 
-function runHook(payload) {
-  const input = typeof payload === 'string' ? payload : JSON.stringify(payload);
-  const result = spawnSync(process.execPath, [HOOK_PATH], {
-    input,
-    encoding: 'utf8',
-    timeout: 10_000,
-  });
-  let parsed = null;
-  try {
-    parsed = result.stdout ? JSON.parse(result.stdout) : null;
-  } catch { /* asserted separately per test */ }
-  return { ...result, parsed };
-}
-
 function runBash(command, cwd = SHARED_CWD) {
-  return runHook({ tool_name: 'Bash', cwd, tool_input: { command } });
+  return decide({ tool_name: 'Bash', cwd, tool_input: { command } });
 }
 
 function expectDenied(command, cwd = SHARED_CWD) {
-  const { parsed, status } = runBash(command, cwd);
-  expect(status).toBe(0);
+  const parsed = runBash(command, cwd);
   expect(parsed?.hookSpecificOutput?.permissionDecision).toBe('deny');
   return parsed;
 }
 
 function expectAllowed(command, cwd = SHARED_CWD) {
-  const { parsed, status } = runBash(command, cwd);
-  expect(status).toBe(0);
+  const parsed = runBash(command, cwd);
   expect(parsed?.hookSpecificOutput?.permissionDecision).not.toBe('deny');
   return parsed;
 }
@@ -209,18 +217,17 @@ test('does not fail closed on an unterminated quote mentioning git but no police
 // ─────────────────────────────── non-Bash / malformed payloads never block
 
 test('allows non-Bash tool calls untouched', () => {
-  const { parsed } = runHook({ tool_name: 'Write', cwd: SHARED_CWD, tool_input: { file_path: 'x.md', content: 'x' } });
+  const parsed = decide({ tool_name: 'Write', cwd: SHARED_CWD, tool_input: { file_path: 'x.md', content: 'x' } });
   expect(parsed?.hookSpecificOutput?.permissionDecision).not.toBe('deny');
 });
 
 test('fails open on malformed stdin JSON', () => {
-  const { status, parsed } = runHook('{ not valid json');
-  expect(status).toBe(0);
+  const parsed = decide(parsePayload('{ not valid json'));
   expect(parsed?.hookSpecificOutput?.permissionDecision).not.toBe('deny');
 });
 
 test('fails open when tool_input.command is missing', () => {
-  const { parsed } = runHook({ tool_name: 'Bash', cwd: SHARED_CWD, tool_input: {} });
+  const parsed = decide({ tool_name: 'Bash', cwd: SHARED_CWD, tool_input: {} });
   expect(parsed?.hookSpecificOutput?.permissionDecision).not.toBe('deny');
 });
 
@@ -245,4 +252,29 @@ test('allows a heredoc git commit -m "$(cat <<\'EOF\' ... EOF)"', () => {
 
 test('denies an unparsable command containing git stash', () => {
   expectDenied(`git stash push -m "unterminated`);
+});
+
+// ─────────────────────────────── smoke test: real process wiring
+//
+// The only test in this file that spawns the actual script as a child
+// process — proves the CLI shape guard-destructive-git.cjs's header
+// documents (stdin JSON in, stdout JSON out) still works end-to-end, the
+// same case ('denies across a newline') that originally flaked in PRD 1412.
+// Generous timeout + maxBuffer since this is now a single spawn, not ~50.
+
+test('smoke: real process wiring denies across a newline (stdin JSON in, stdout JSON out)', () => {
+  const result = spawnSync(process.execPath, [HOOK_PATH], {
+    input: JSON.stringify({
+      tool_name: 'Bash',
+      cwd: SHARED_CWD,
+      tool_input: { command: 'npm test\ngit checkout -- src/index.js' },
+    }),
+    encoding: 'utf8',
+    timeout: 30_000,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  expect(result.status).toBe(0);
+  const parsed = JSON.parse(result.stdout);
+  expect(parsed?.hookSpecificOutput?.permissionDecision).toBe('deny');
+  expect(parsed.reason).toMatch(/git checkout -- <path>/);
 });

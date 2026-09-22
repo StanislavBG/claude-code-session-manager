@@ -20,6 +20,7 @@
     "scripts/hooks/guard-destructive-git.cjs",
     "scripts/hooks/guard-inline-implementation.cjs",
     "scripts/hooks/guard-self-schedule.cjs",
+    "scripts/hooks/lib/guard-destructive-git-policy.cjs",
     "src/main/",
     "src/preload/",
     "src/seed/",

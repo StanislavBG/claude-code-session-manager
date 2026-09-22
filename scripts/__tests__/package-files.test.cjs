@@ -30,6 +30,14 @@ const REQUIRED_PATHS = [
   // The seeded persona itself (PRD 1091) — without this, a foreign machine
   // never gets a project-home-builder agent to run in the first place.
   'src/seed/agents/project-home-builder.md',
+  // guard-destructive-git.cjs's pure decision logic (PRD 1412) — the CLI
+  // `require()`s this at load time, so a missing file here throws
+  // MODULE_NOT_FOUND at require time, before the guard's own fail-open
+  // try/catch can even run (a real npx install reproduces this: unpacking a
+  // dry-run tarball and requiring the CLI throws exactly this). Listed
+  // individually (not folded into GUARD_SCRIPT_PATHS below) since it isn't
+  // itself a guard script.
+  'scripts/hooks/lib/guard-destructive-git-policy.cjs',
 ];
 
 // Every PreToolUse guard script (GUARD_NAMES in guardShims.cjs) that the shims

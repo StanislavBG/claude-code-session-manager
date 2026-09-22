@@ -66,8 +66,12 @@ describe('dataModelErd', () => {
   // through opsNamespace) contains 27 distinct ids — this asserts against
   // that authoritative list, not the miscounted prose number. PRD 1390 added
   // epicWorktreeConfig on top of that list, for 28. PRD 1391 added exchange
-  // (exchanges.jsonl moving to the per-project ops root), for 29.
-  it('has exactly the 29 entities enumerated in the PRD plus epicWorktreeConfig + exchange', () => {
+  // (exchanges.jsonl moving to the per-project ops root), for 29. PRD 1394
+  // fixed agentMemoryEntry's store shape (no id change) and added 5 entities
+  // for real, previously-unmodeled machine config files/probes
+  // (mcpServerRegistry, pluginRegistry, systemPrompt, skillsAndCommands,
+  // mcpStatusProbe), for 34.
+  it('has exactly the 34 entities enumerated in the PRD plus epicWorktreeConfig + exchange + the PRD-1394 config entities', () => {
     expect(ERD_ENTITIES.map((e) => e.id).sort()).toEqual(
       [
         'project', 'tab', 'epic', 'epicEvent', 'epicTranscriptTurn', 'epicArchive',
@@ -77,6 +81,8 @@ describe('dataModelErd', () => {
         'memoryCluster', 'agentMemoryEntry', 'claudeTranscript', 'transcriptEvent',
         'historyRollupDay', 'billingUsage', 'projectBrief', 'projectPages',
         'bilkoPublishState', 'settingsScope', 'layoutEnvelope', 'opsNamespace',
+        'mcpServerRegistry', 'pluginRegistry', 'systemPrompt', 'skillsAndCommands',
+        'mcpStatusProbe',
       ].sort(),
     )
   })

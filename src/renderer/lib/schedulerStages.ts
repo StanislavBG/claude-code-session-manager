@@ -74,7 +74,8 @@ export interface Plan {
   epicId: string | null
   /** 1-based wave ordinal within the Epic (components ordered by lowest PRD number). */
   waveIndex: number
-  /** 1-based, stable: ordered by first-PRD slug number ascending, ties by epicId. */
+  /** 1-based, stable: ordered by last (highest) PRD slug number DESCENDING — the newest
+   *  plan, or a plan that just had a PRD appended, is index 1 — ties by epicId then waveIndex. */
   index: number
   label: string
   status: PlanStatus
@@ -266,13 +267,13 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
   jobs.filter(ready).sort(byPriority).forEach((j, i) => aheadIdx.set(j.slug, i))
 
   const sections = buildBacklogTree(jobs, opts.sessions, jobs)
-  const plans: Array<Plan & { _firstNum: number; _firstSlug: string }> = []
+  const plans: Array<Plan & { _firstNum: number; _lastNum: number; _firstSlug: string }> = []
 
   for (const section of sections) {
     const allNodes = flattenBacklogNodes(section.nodes)
     const inEpic = new Set(allNodes.map((n) => n.row.slug))
     const nodeBySlug = new Map(allNodes.map((n) => [n.row.slug, n]))
-    const sectionPlans: Array<Plan & { _firstNum: number; _firstSlug: string }> = []
+    const sectionPlans: Array<Plan & { _firstNum: number; _lastNum: number; _firstSlug: string }> = []
     for (const nodes of planGroups(allNodes, inEpic)) {
 
       // ── stage depth: memoized DFS; cyclic rows ignore edges to other cyclic rows.
@@ -399,6 +400,7 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
       }
 
       const firstNum = rows.reduce((m, r) => Math.min(m, numOf(r.slug)), Infinity)
+      const lastNum = rows.reduce((m, r) => Math.max(m, numOf(r.slug)), -Infinity)
       sectionPlans.push({
         epicId: section.epicId,
         waveIndex: 0,
@@ -415,6 +417,7 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
         etaMs: remaining / conc,
         stages,
         _firstNum: firstNum,
+        _lastNum: lastNum,
         _firstSlug: rows[0].slug,
       })
     }
@@ -429,12 +432,14 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
     })
   }
 
+  // Newest-first: a plan that just had a PRD appended (raising its highest PRD number) bubbles
+  // to the top, rather than sitting wherever its lowest PRD number happened to land it.
   plans.sort((a, b) => {
-    if (a._firstNum !== b._firstNum) return a._firstNum < b._firstNum ? -1 : 1
+    if (a._lastNum !== b._lastNum) return a._lastNum > b._lastNum ? -1 : 1
     const e = (a.epicId ?? '').localeCompare(b.epicId ?? '')
     return e !== 0 ? e : a.waveIndex - b.waveIndex
   })
-  return plans.map(({ _firstNum, _firstSlug, ...p }, i) => ({ ...p, index: i + 1 }))
+  return plans.map(({ _firstNum, _lastNum, _firstSlug, ...p }, i) => ({ ...p, index: i + 1 }))
 }
 
 /** KPI-band aggregates. `now` only anchors "done today" (local calendar day). */

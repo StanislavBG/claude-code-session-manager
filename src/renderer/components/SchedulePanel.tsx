@@ -14,6 +14,7 @@ import { buildPlans } from '../lib/schedulerStages'
 import { mergeArchivedPlanRows } from '../lib/archivedPlanRows'
 import { useScheduledPrds } from '../lib/useScheduledPrds'
 import { PlanBand } from './tabs/scheduler/PlanBand'
+import { Pager } from './ui/Pager'
 import { JobRow, EpicSectionBlock } from './tabs/scheduler/JobRow'
 import { SupervisorPanel } from './tabs/scheduler/SupervisorPanel'
 import { FirstRunGuide } from './tabs/scheduler/FirstRunGuide'
@@ -30,6 +31,8 @@ const COMPLETED_DISPLAY_CAP = 5
 /** Anything completed more than this ago is auto-collapsed (with the
  *  cap above as a secondary limit on fresh completions). */
 const COMPLETED_FRESH_MS = 24 * 60 * 60 * 1000
+/** Graph-mode plan bands shown per page — the rest sit behind the Prev/Next pager. */
+const PLAN_PAGE_SIZE = 10
 
 type FilterStatus = 'all' | 'running' | 'investigating' | 'pending' | 'completed' | 'skipped' | 'needs_review' | 'failed' | 'quarantined'
 interface QueueFilter { text: string; status: FilterStatus }
@@ -235,6 +238,19 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
   const plans = useMemo(
     () => (planMode === 'list' ? [] : buildPlans(graphJobs, { sessions, avgDurationMs, concurrency: cap })),
     [planMode, graphJobs, sessions, avgDurationMs, cap],
+  )
+  // Page index is ephemeral React state (never persisted — a reload has no business restoring
+  // "page 3"). Resets to page 1 whenever the plan set's identity changes: project switch, filter
+  // change, plan count change, or — since sort order is newest-first — a plan reordering (e.g. one
+  // just got a PRD appended and bubbled to the top) even when the count stays the same.
+  const [plansPage, setPlansPage] = useState(1)
+  const plansIdentity = plans.map((p) => `${p.epicId ?? ''}#${p.waveIndex}`).join(',')
+  useEffect(() => { setPlansPage(1) }, [scopeCwd, filter.status, filter.text, plansIdentity])
+  const plansPageCount = Math.max(1, Math.ceil(plans.length / PLAN_PAGE_SIZE))
+  const plansPageClamped = Math.min(plansPage, plansPageCount)
+  const pagedPlans = useMemo(
+    () => plans.slice((plansPageClamped - 1) * PLAN_PAGE_SIZE, plansPageClamped * PLAN_PAGE_SIZE),
+    [plans, plansPageClamped],
   )
   // Stable per-row listIndex (DOM order) for the arrow-key handler, and per-row attach-behind targets.
   const indexBySlug = useMemo(() => {
@@ -442,7 +458,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
               <div className="px-[18px] py-6 text-[13px] text-fg-faint italic">no matching jobs</div>
             )}
             <div ref={jobListRef} role="list" aria-label="Job queue" onKeyDown={handleJobListKeyDown}>
-              {plans.map((plan) => (
+              {pagedPlans.map((plan) => (
                 <PlanBand
                   key={`${plan.epicId ?? '__none__'}#${plan.waveIndex}`}
                   plan={plan}
@@ -456,6 +472,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
                 />
               ))}
             </div>
+            <Pager page={plansPageClamped} pageSize={PLAN_PAGE_SIZE} totalItems={plans.length} onPageChange={setPlansPage} />
           </div>
         )}
 

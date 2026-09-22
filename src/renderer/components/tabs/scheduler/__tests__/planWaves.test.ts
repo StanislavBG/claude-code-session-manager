@@ -22,16 +22,17 @@ describe('buildPlans waves', () => {
     expect(plans[0].label).not.toMatch(/plan \d/)
   })
 
-  it('completed 6-step chain + independent follow-up root → 2 bands (6 rows + 1)', () => {
+  it('completed 6-step chain + independent follow-up root → 2 bands (6 rows + 1), newer (follow-up) plan first', () => {
     const plans = buildPlans([...chain(10, 6, { status: 'completed' }), job('20-follow')], opts)
-    expect(plans.map((p) => p.prdCount)).toEqual([6, 1])
-    expect(plans.map((p) => p.waveIndex)).toEqual([1, 2])
+    // Top-level order is newest-first (by highest PRD number): 20-follow (wave 2) sorts before the 10-15 chain (wave 1).
+    expect(plans.map((p) => p.prdCount)).toEqual([1, 6])
+    expect(plans.map((p) => p.waveIndex)).toEqual([2, 1])
     expect(plans.map((p) => p.index)).toEqual([1, 2])
-    expect(plans[0].stageCount).toBe(6)
-    expect(plans[1].stageCount).toBe(1)
-    expect(plans[1].stages[0].n).toBe(1)
-    expect(plans[0].label).toMatch(/plan 1\/2$/)
-    expect(plans[1].label).toMatch(/plan 2\/2$/)
+    expect(plans[0].stageCount).toBe(1)
+    expect(plans[1].stageCount).toBe(6)
+    expect(plans[0].stages[0].n).toBe(1)
+    expect(plans[0].label).toMatch(/plan 2\/2$/)
+    expect(plans[1].label).toMatch(/plan 1\/2$/)
   })
 
   it('append wave (dependsOn into wave 1) stays one band', () => {
@@ -45,14 +46,15 @@ describe('buildPlans waves', () => {
     const b = [job('30-b', { epicId: 'e2', dependsOn: ['11-s1'] })]
     const plans = buildPlans([...a, ...b], opts)
     expect(plans).toHaveLength(2)
-    expect(plans.map((p) => p.epicId)).toEqual(['e1', 'e2'])
+    // Newest-first: e2's plan tops out at 30, e1's at 11.
+    expect(plans.map((p) => p.epicId)).toEqual(['e2', 'e1'])
     expect(plans.every((p) => p.waveIndex === 1)).toBe(true)
   })
 
-  it('independent rows each form their own plan (3 rows → 3 bands)', () => {
+  it('independent rows each form their own plan (3 rows → 3 bands), newest (highest PRD number) first', () => {
     const plans = buildPlans([job('10-a'), job('11-b'), job('12-c')], opts)
     expect(plans).toHaveLength(3)
-    expect(plans.map((p) => p.waveIndex)).toEqual([1, 2, 3])
+    expect(plans.map((p) => p.waveIndex)).toEqual([3, 2, 1])
   })
 
   it('cycle becomes its own plan and does not hang', () => {
@@ -61,6 +63,7 @@ describe('buildPlans waves', () => {
       opts,
     )
     expect(plans).toHaveLength(2)
-    expect(plans[0].stages.flatMap((s) => s.rows).every((r) => r.cycle)).toBe(true)
+    // 20-c (single row, max PRD number 20) sorts before the 10/11 cycle (max 11).
+    expect(plans[1].stages.flatMap((s) => s.rows).every((r) => r.cycle)).toBe(true)
   })
 })

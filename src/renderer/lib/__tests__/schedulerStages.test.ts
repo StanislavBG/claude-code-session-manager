@@ -25,9 +25,30 @@ describe('buildPlans basics', () => {
     expect(p.prdCount).toBe(1); expect(p.stageCount).toBe(1); expect(p.index).toBe(1)
     expect(p.stages[0].rows[0].rowKind).toBe('next')
   })
-  it('one plan per epic, indexed by first PRD number then epicId', () => {
+  it('one plan per epic, indexed by last (highest) PRD number descending, then epicId', () => {
     const ps = plans([job('30-a', { epicId: 'b' }), job('10-x', { epicId: 'z' }), job('10-y', { epicId: 'c' })])
-    expect(ps.map((p) => [p.epicId, p.index])).toEqual([['c', 1], ['z', 2], ['b', 3]])
+    expect(ps.map((p) => [p.epicId, p.index])).toEqual([['b', 1], ['c', 2], ['z', 3]])
+  })
+  it('newest-first: cross-plan order is by each plan\'s HIGHEST PRD number descending, not lowest', () => {
+    // plan A = 1001,1050 · plan B = 1020 · plan C = 1030,1090 → order C, A, B (max: 1090, 1050, 1020)
+    const ps = plans([
+      job('1001-a', { epicId: 'A' }), job('1050-a2', { epicId: 'A', dependsOn: ['1001-a'] }),
+      job('1020-b', { epicId: 'B' }),
+      job('1030-c', { epicId: 'C' }), job('1090-c2', { epicId: 'C', dependsOn: ['1030-c'] }),
+    ])
+    expect(ps.map((p) => p.epicId)).toEqual(['C', 'A', 'B'])
+    // waveIndex within an Epic is unaffected — still ascending by first-PRD number.
+    for (const p of ps) expect(p.waveIndex).toBe(1)
+  })
+  it('waveIndex within a multi-wave Epic stays ascending even though the wave with the higher PRD number sorts first at the top level', () => {
+    // Epic D has two independent waves: wave 1 = 100-d1 (older), wave 2 = 200-d2 (newer/appended-later).
+    const ps = plans([job('100-d1', { epicId: 'D' }), job('200-d2', { epicId: 'D' })])
+    const byWave = new Map(ps.map((p) => [p.waveIndex, p]))
+    expect(byWave.get(1)!.prdCount).toBe(1)
+    expect(byWave.get(2)!.prdCount).toBe(1)
+    // Top level: the wave carrying the higher PRD number (200-d2, wave 2) sorts first.
+    expect(ps[0].waveIndex).toBe(2)
+    expect(ps[1].waveIndex).toBe(1)
   })
   it('uses session label when the epic resolves', () => {
     const ps = buildPlans([job('1-a')], { sessions: { e1: { goalText: 'starry-night' } as never }, now: NOW })
@@ -48,7 +69,8 @@ describe('Plan.status', () => {
   })
   it('queued otherwise', () => {
     expect(p1([job('1-a'), job('2-b', { dependsOn: ['1-a'] })]).status).toBe('queued')
-    expect(plans([job('1-a', { status: 'completed' }), job('2-b')]).map((p) => p.status)).toEqual(['done', 'queued'])
+    // 2-b (own wave, higher PRD number) sorts before 1-a — newest-first.
+    expect(plans([job('1-a', { status: 'completed' }), job('2-b')]).map((p) => p.status)).toEqual(['queued', 'done'])
   })
 })
 
@@ -56,9 +78,11 @@ describe('stage depth', () => {
   it('longest-path depth, roots are stage 1', () => {
     const js = [job('1-a'), job('2-b', { dependsOn: ['1-a'] }), job('3-c', { dependsOn: ['1-a', '2-b'] }), job('4-d')]
     expect([1, 2, 3, 4].map((n) => row(js, ['1-a', '2-b', '3-c', '4-d'][n - 1]).stage)).toEqual([1, 2, 3, 1])
-    expect(p1(js).stageCount).toBe(3)
-    expect(p1(js).stages.map((s) => s.n)).toEqual([1, 2, 3])
-    expect(plans(js).map((p) => p.prdCount)).toEqual([3, 1]) // 4-d is its own wave
+    // 4-d is its own (single-row) wave with the higher PRD number, so it sorts first.
+    const ps = plans(js)
+    expect(ps.map((p) => p.prdCount)).toEqual([1, 3])
+    expect(ps[1].stageCount).toBe(3)
+    expect(ps[1].stages.map((s) => s.n)).toEqual([1, 2, 3])
   })
   it('cross-epic edges ignored for staging but reported', () => {
     const js = [job('1-a', { epicId: 'x' }), job('2-b', { epicId: 'y', dependsOn: ['1-a'] })]
@@ -216,8 +240,9 @@ describe('buildPlans planId grouping', () => {
       job('2-b', { planId: 'pl-1', dependsOn: ['1-a'] }),
       job('3-c', { planId: 'pl-2', dependsOn: ['2-b'] }),
     ])
-    expect(ps.map((p) => p.prdCount)).toEqual([2, 1])
-    expect(ps[1].stages.map((s) => s.n)).toEqual([1])
+    // pl-2 (single row, max PRD number 3) sorts before pl-1 (max PRD number 2) — newest-first.
+    expect(ps.map((p) => p.prdCount)).toEqual([1, 2])
+    expect(ps[0].stages.map((s) => s.n)).toEqual([1])
   })
   it('a mixed section (some rows lack planId) falls back to derivation with no dup/dropped rows', () => {
     const ps = plans([

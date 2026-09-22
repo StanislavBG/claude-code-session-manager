@@ -7653,10 +7653,17 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     let mechanicalRecoveryTarget = null;
     let terminalNotifySnapshot = null;
     const newlyCompletedPrds = [];
+    // PRD 1408: captured inside the mutate() below (the one in-memory read of
+    // `s.jobs` this finalize pass already does) so notifyOriginatingTab's own
+    // hasDownstreamValidator check can reuse it instead of a second, redundant
+    // readQueue() — that call federates queue.json shards across every known
+    // project cwd on the machine, not just this job's own project.
+    let jobsSnapshotForNotify = null;
     // Base HEAD for the mechanical-recovery futility check — read here, never inside mutate() (no I/O).
     const finalizeHeadSha = worktreeIntegrationDetail && worktreeIntegrationDetail.failureKind === 'content_conflict'
       ? await gitHead(guardCwd) : null;
     await mutate((s) => {
+      jobsSnapshotForNotify = s.jobs.slice();
       const i2 = s.jobs.findIndex((x) => x.slug === job.slug);
       // A job already moved off 'running' by someone else (namely
       // remote.cancelJob, PRD 1024 — it SIGTERMs the process then finalizes
@@ -8070,7 +8077,9 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     });
 
     if (terminalNotifySnapshot) {
-      notifyOriginatingTab(terminalNotifySnapshot).catch((e) => {
+      notifyOriginatingTab(terminalNotifySnapshot, {
+        loadJobs: async () => jobsSnapshotForNotify || [],
+      }).catch((e) => {
         console.error('[scheduler] notifyOriginatingTab error', job.slug, e);
       });
     }

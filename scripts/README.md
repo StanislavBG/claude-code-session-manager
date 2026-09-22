@@ -15,6 +15,7 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | check-doc-hierarchy.cjs | `npm run lint:docs` (in `lint`) | no |
 | check-explicit-any.cjs | `npm run lint:any` (in `lint`) — bans explicit `any`/`@ts-ignore` in renderer+preload; per-line `// lint-allow-any: <reason>` | no |
 | check-main-ts-check.cjs | `npm run lint:main-ts-check` (in `lint`) — `tsconfig.main.json` `include` ⇔ `// @ts-check` first line, both directions; explicit list only, `checkJs` false | no |
+| check-renderer-storage.cjs | `npm run lint:renderer-storage` (in `lint`) — ratchet-bans `localStorage.`/`sessionStorage.` in `src/renderer` outside an explicit ALLOWLIST (Epic stateless-ui-review) | no |
 | check-tracked-filenames.cjs | `npm run lint:filenames` (in `lint`) — fails on tracked paths with Windows-illegal chars, trailing dot/space, or reserved device names | no |
 | check-unregistered-tests.cjs | `npm run lint:unregistered-tests` (in `lint`) | no |
 | check-unstable-selectors.cjs | `npm run lint:selectors` (in `lint`) | no |

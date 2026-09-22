@@ -64,11 +64,13 @@ describe('dataModelErd', () => {
 
   // The PRD's prose says "26 entities" but its own enumerated id list (project
   // through opsNamespace) contains 27 distinct ids — this asserts against
-  // that authoritative list, not the miscounted prose number.
-  it('has exactly the 27 entities enumerated in the PRD', () => {
+  // that authoritative list, not the miscounted prose number. PRD 1390 added
+  // epicWorktreeConfig on top of that list, for 28.
+  it('has exactly the 28 entities enumerated in the PRD plus epicWorktreeConfig', () => {
     expect(ERD_ENTITIES.map((e) => e.id).sort()).toEqual(
       [
         'project', 'tab', 'epic', 'epicEvent', 'epicTranscriptTurn', 'epicArchive',
+        'epicWorktreeConfig',
         'prd', 'scheduleJob', 'scheduleJobStatusHistory', 'scheduleHistoryEntry',
         'scheduleConfig', 'runLog', 'agentPersona', 'tag', 'memoryEntry',
         'memoryCluster', 'agentMemoryEntry', 'claudeTranscript', 'transcriptEvent',

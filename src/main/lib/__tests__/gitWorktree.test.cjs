@@ -847,34 +847,28 @@ test('[epic] SM_EPIC_WORKTREE_DISABLE=1 restores in-place behaviour independentl
 
 test('[epic] the per-project UI toggle (epicWorktreeProjectConfig.cjs) disables isolation for just that cwd', async () => {
   const projectConfig = require('../epicWorktreeProjectConfig.cjs');
-  const originalOverride = process.env.SM_EPIC_WORKTREE_PROJECT_CONFIG_PATH;
-  process.env.SM_EPIC_WORKTREE_PROJECT_CONFIG_PATH = path.join(tmpRoot, 'epic-worktree-project-config.json');
-  try {
-    projectConfig.setEpicWorktreeDisabledForProject(repoCwd, true);
-    expect(projectConfig.isEpicWorktreeDisabledForProject(repoCwd)).toBe(true);
+  projectConfig.setEpicWorktreeDisabledForProject(repoCwd, true);
+  expect(projectConfig.isEpicWorktreeDisabledForProject(repoCwd)).toBe(true);
 
-    const result = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId: 'toggle-x' });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/isolation toggle/);
+  const result = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId: 'toggle-x' });
+  expect(result.ok).toBe(false);
+  expect(result.reason).toMatch(/isolation toggle/);
 
-    // A different, untouched project cwd is unaffected — the toggle is
-    // per-project, not machine-wide like the env var.
-    const otherCwd = path.join(tmpRoot, 'other-repo');
-    initRepo(otherCwd);
-    const otherResult = await gitWorktree.createEpicWorktree({ cwd: otherCwd, epicId: 'toggle-y' });
-    expect(otherResult.ok).toBe(true);
-    await gitWorktree.cleanupEpicWorktree({ cwd: otherCwd, dir: otherResult.dir, branch: otherResult.branch });
+  // A different, untouched project cwd is unaffected — the toggle is
+  // per-project (its own <cwd>/session-manager-operations/prompt-sessions/
+  // epic-worktree-config.json), not machine-wide like the env var.
+  const otherCwd = path.join(tmpRoot, 'other-repo');
+  initRepo(otherCwd);
+  const otherResult = await gitWorktree.createEpicWorktree({ cwd: otherCwd, epicId: 'toggle-y' });
+  expect(otherResult.ok).toBe(true);
+  await gitWorktree.cleanupEpicWorktree({ cwd: otherCwd, dir: otherResult.dir, branch: otherResult.branch });
 
-    // Turning it back off restores isolation for the original project.
-    projectConfig.setEpicWorktreeDisabledForProject(repoCwd, false);
-    expect(projectConfig.isEpicWorktreeDisabledForProject(repoCwd)).toBe(false);
-    const restored = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId: 'toggle-z' });
-    expect(restored.ok).toBe(true);
-    await gitWorktree.cleanupEpicWorktree({ cwd: repoCwd, dir: restored.dir, branch: restored.branch });
-  } finally {
-    if (originalOverride === undefined) delete process.env.SM_EPIC_WORKTREE_PROJECT_CONFIG_PATH;
-    else process.env.SM_EPIC_WORKTREE_PROJECT_CONFIG_PATH = originalOverride;
-  }
+  // Turning it back off restores isolation for the original project.
+  projectConfig.setEpicWorktreeDisabledForProject(repoCwd, false);
+  expect(projectConfig.isEpicWorktreeDisabledForProject(repoCwd)).toBe(false);
+  const restored = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId: 'toggle-z' });
+  expect(restored.ok).toBe(true);
+  await gitWorktree.cleanupEpicWorktree({ cwd: repoCwd, dir: restored.dir, branch: restored.branch });
 });
 
 test('[epic] reconcileWorktreesOnBoot removes a leaked epic worktree with no liveness predicate given', async () => {

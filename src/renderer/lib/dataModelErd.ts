@@ -312,6 +312,24 @@ export const ERD_ENTITIES: ErdEntity[] = [
     ],
   },
   {
+    id: 'epicWorktreeConfig',
+    name: 'EpicWorktreeConfig',
+    group: 'epic',
+    store: {
+      path: '<cwd>/session-manager-operations/prompt-sessions/epic-worktree-config.json',
+      format: 'json',
+      writer: 'epics',
+      definedIn: 'src/main/lib/epicWorktreeProjectConfig.cjs ',
+    },
+    summary: "Per-project 'disable Epic worktree isolation' toggle, read by gitWorktree.cjs's isWorktreeDisabled('epic', cwd) on every worktree creation attempt.",
+    fields: [
+      { name: 'disabled', type: 'boolean' },
+    ],
+    notes: [
+      'One-shot migration from the legacy machine-wide ~/.claude/session-manager/epic-worktree-project-config.json map, keyed by project cwd — that file is left in place, never deleted.',
+    ],
+  },
+  {
     id: 'prd',
     name: 'PRD',
     group: 'scheduler',

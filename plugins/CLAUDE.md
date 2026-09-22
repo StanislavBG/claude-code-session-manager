@@ -49,9 +49,9 @@ for live sibling consumers.
 - Do not confuse this with `.claude/` at the repo root — this repo's own unshipped local dev
   config. `.claude/agents/*.md` are per-project OVERLAYS that win over
   `~/.claude/agents/*.md` (Claude Code's own precedence, per `src/main/agentLibrary.cjs`);
-  `src/seed/agents/` is the shipped source for exactly the three personas
-  `src/main/seedAgentPersonas.cjs` copies into `~/.claude/agents/` on first boot (`architect`,
-  `dev-lead`, `project-home-builder`); `builder` and `bilko-host-publisher` have no seed source
+  `src/seed/agents/` is the shipped source for the four personas
+  `src/main/seedAgentPersonas.cjs` copies into `~/.claude/agents/` on first boot (see its
+  `PERSONAS` list); `builder` and `bilko-host-publisher` have no seed source
   and exist only as this repo's overlays. Tracked on purpose: `.claude/settings.json` (guard
   hooks) plus the `builder.md`/`project-home-builder.md` overlays (auditable edits) —
   `bilko-host-publisher.md` is untracked despite being in use; nothing else under `.claude/` is.

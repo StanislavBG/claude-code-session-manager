@@ -12,7 +12,7 @@ Part of the **DESKTOP HARNESS** partition, except `main/{bilkoHost,bilkoHostCore
   `main/lib/scheduleJobSchema.cjs` and `main/ipcSchemas.cjs` (zod) mirror it by interface
   NAME (`ScheduleJob`, `AgentPersonaSaveInput`, …) — cite names, never line numbers.
 - `renderer/` — React app; has its own [`CLAUDE.md`](renderer/CLAUDE.md) (may not exist yet).
-- `seed/agents/` — the three personas `main/seedAgentPersonas.cjs` copies to `~/.claude/agents`.
+- `seed/agents/` — the four personas `main/seedAgentPersonas.cjs` copies to `~/.claude/agents`.
 - `../bin/cli.cjs` — the npx launcher.
 
 Per-file rationale:

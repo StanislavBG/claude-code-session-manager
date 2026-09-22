@@ -238,6 +238,7 @@ async function resolvePrdPersonaForSpawn({ cwd, agentType, fallbackModel = FALLB
 
 module.exports = {
   FALLBACK_MODEL,
+  AGENT_BODY_CHAR_CAP,
   resolveEpicModel,
   findAgentTypeByClaudeSessionId,
   findEpicByClaudeSessionId,

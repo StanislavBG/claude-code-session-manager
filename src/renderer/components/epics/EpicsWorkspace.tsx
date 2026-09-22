@@ -267,6 +267,7 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
     <div className="flex h-full min-h-0 w-full" data-testid="epics-workspace">
       <div className="flex min-h-0 shrink-0 flex-col">
         <EpicQueueControls
+          cwd={effectiveCwd as string}
           epics={epics}
           snapshots={snapshots}
           events={events}

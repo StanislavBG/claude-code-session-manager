@@ -100,7 +100,7 @@ beforeEach(() => {
   usePromptSessions.setState({ sessions: {}, events: {} })
   usePromptSessions.setState({ createPromptSession: createPromptSessionSpy })
   createPromptSessionSpy.mockClear()
-  useEpicsPrefs.setState({ pins: {}, group: 'status', sort: 'recent', compact: false, hydrated: true })
+  useEpicsPrefs.setState({ pins: {}, group: 'status', sort: 'recent', compact: false, hydrated: true, pinsCwd: null })
   useChat.setState({ chats: {}, hydratedTabs: {} })
   useScheduleState.setState({ snapshot: null })
   useEpicUsage.setState({ usage: {} })

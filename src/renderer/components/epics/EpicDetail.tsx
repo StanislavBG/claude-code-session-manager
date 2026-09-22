@@ -659,8 +659,9 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const globalVerbosity = useChatPrefs((s) => s.verbosity)
   const perEpicVerbosity = useChatPrefs((s) => s.perEpic)
   const hydrateChatPrefs = useChatPrefs((s) => s.hydrate)
-  const setEpicVerbosity = useChatPrefs((s) => s.setEpicVerbosity)
-  useEffect(() => { void hydrateChatPrefs() }, [hydrateChatPrefs])
+  const setEpicVerbosityRaw = useChatPrefs((s) => s.setEpicVerbosity)
+  const setEpicVerbosity = (id: string, level: ChatVerbosity) => setEpicVerbosityRaw(cwd, id, level)
+  useEffect(() => { void hydrateChatPrefs(cwd) }, [hydrateChatPrefs, cwd])
   const verbosity = resolveEpicVerbosity(globalVerbosity, perEpicVerbosity, epicId)
 
   const turns = chat?.turns ?? EMPTY_TURNS

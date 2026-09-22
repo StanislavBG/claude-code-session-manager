@@ -880,6 +880,41 @@ export const ERD_ENTITIES: ErdEntity[] = [
       { name: 'checkedAt', type: 'number' },
     ],
   },
+  {
+    id: 'uiPrefs',
+    name: 'UiPrefs',
+    aka: 'ui-prefs/prefs.json',
+    group: 'config',
+    store: {
+      path: '<cwd>/session-manager-operations/ui-prefs/prefs.json',
+      format: 'json',
+      writer: 'ui-prefs',
+      definedIn: 'src/renderer/lib/uiPrefs.ts ',
+    },
+    summary:
+      'Per-project UI state that used to live in scattered global/localStorage keys — one file per project keeps it scoped to the project it belongs to by construction (PRD 1398/1399).',
+    fields: [
+      { name: 'fileTreeExpanded', type: 'string[]', optional: true, note: 'FileTree.tsx — expanded folder paths in the Files sidebar' },
+      { name: 'hiddenCompletedSlugs', type: 'string[]', optional: true, note: 'SchedulePanel.tsx — "Clear completed" hides, renderer-side only' },
+      { name: 'queueFilterStatus', type: 'string', optional: true, note: "SchedulePanel.tsx — the queue's status filter chip" },
+      {
+        name: 'epicPins',
+        type: 'Record<string, boolean>',
+        optional: true,
+        key: 'fk',
+        ref: 'epic.id',
+        note: 'epicsPrefs.ts — pinned-to-top Epic ids, keyed by epicId (moved off the global epics-prefs.json)',
+      },
+      {
+        name: 'chatVerbosityPerEpic',
+        type: 'Record<string, ChatVerbosity>',
+        optional: true,
+        key: 'fk',
+        ref: 'epic.id',
+        note: 'chatPrefs.ts — per-Epic verbosity overrides, keyed by epicId (moved off the global chat-prefs.json)',
+      },
+    ],
+  },
 ]
 
 export function erdEntity(id: string): ErdEntity {

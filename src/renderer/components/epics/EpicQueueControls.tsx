@@ -138,6 +138,8 @@ function isCommandPaletteOpen(): boolean {
 }
 
 export interface EpicQueueControlsProps {
+  /** Active project's cwd — scopes which project's `ui-prefs/prefs.json` pins persist to. */
+  cwd: string
   epics: PromptSession[]
   snapshots: EpicSnapshots
   events: Record<string, PromptSessionEvent[]>
@@ -148,7 +150,7 @@ export interface EpicQueueControlsProps {
   now?: number
 }
 
-export function EpicQueueControls({ epics, snapshots, events, selectedId, onSelect, onNew, now }: EpicQueueControlsProps) {
+export function EpicQueueControls({ cwd, epics, snapshots, events, selectedId, onSelect, onNew, now }: EpicQueueControlsProps) {
   // A per-render Date.now() in the grouping memo's deps would defeat every
   // memo below on every render (PRD 833 I6) — recency buckets only need
   // ~30s resolution, so tick a stable timestamp instead.
@@ -164,10 +166,9 @@ export function EpicQueueControls({ epics, snapshots, events, selectedId, onSele
   const [closedKeys, setClosedKeys] = useState<Set<string>>(() => new Set(['completed']))
   const [limits, setLimits] = useState<Record<string, number>>({})
 
-  const hydrated = useEpicsPrefs((s) => s.hydrated)
-  const hydrate = useEpicsPrefs((s) => s.hydrate)
   const pins = useEpicsPrefs((s) => s.pins)
-  const togglePin = useEpicsPrefs((s) => s.togglePin)
+  const hydrate = useEpicsPrefs((s) => s.hydrate)
+  const togglePinRaw = useEpicsPrefs((s) => s.togglePin)
   const group = useEpicsPrefs((s) => s.group)
   const setGroup = useEpicsPrefs((s) => s.setGroup)
   const sort = useEpicsPrefs((s) => s.sort)
@@ -176,8 +177,10 @@ export function EpicQueueControls({ epics, snapshots, events, selectedId, onSele
   const setCompact = useEpicsPrefs((s) => s.setCompact)
 
   useEffect(() => {
-    if (!hydrated) hydrate()
-  }, [hydrated, hydrate])
+    void hydrate(cwd)
+  }, [cwd, hydrate])
+
+  const togglePin = (epicId: string) => togglePinRaw(cwd, epicId)
 
   const pinSet = useMemo(() => new Set(Object.keys(pins).filter((id) => pins[id])), [pins])
 

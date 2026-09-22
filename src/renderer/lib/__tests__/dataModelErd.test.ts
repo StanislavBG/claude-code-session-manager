@@ -70,8 +70,9 @@ describe('dataModelErd', () => {
   // fixed agentMemoryEntry's store shape (no id change) and added 5 entities
   // for real, previously-unmodeled machine config files/probes
   // (mcpServerRegistry, pluginRegistry, systemPrompt, skillsAndCommands,
-  // mcpStatusProbe), for 34.
-  it('has exactly the 34 entities enumerated in the PRD plus epicWorktreeConfig + exchange + the PRD-1394 config entities', () => {
+  // mcpStatusProbe), for 34. PRD 1399 added uiPrefs (per-project
+  // ui-prefs/prefs.json), for 35.
+  it('has exactly the 35 entities enumerated in the PRD plus epicWorktreeConfig + exchange + the PRD-1394 config entities + uiPrefs', () => {
     expect(ERD_ENTITIES.map((e) => e.id).sort()).toEqual(
       [
         'project', 'tab', 'epic', 'epicEvent', 'epicTranscriptTurn', 'epicArchive',
@@ -82,7 +83,7 @@ describe('dataModelErd', () => {
         'historyRollupDay', 'billingUsage', 'projectBrief', 'projectPages',
         'bilkoPublishState', 'settingsScope', 'layoutEnvelope', 'opsNamespace',
         'mcpServerRegistry', 'pluginRegistry', 'systemPrompt', 'skillsAndCommands',
-        'mcpStatusProbe',
+        'mcpStatusProbe', 'uiPrefs',
       ].sort(),
     )
   })

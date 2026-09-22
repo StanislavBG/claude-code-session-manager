@@ -17,6 +17,15 @@ export interface UiPrefs {
   hiddenCompletedSlugs?: string[]
   /** SchedulePanel.tsx — the queue's status filter chip. */
   queueFilterStatus?: string
+  /** epicsPrefs.ts — pinned-to-top Epic ids for this project (PRD 1399: an
+   *  Epic belongs to exactly one project, so this moved off the global
+   *  ~/.claude/session-manager/epics-prefs.json, which mixed every project's
+   *  pins into one file). */
+  epicPins?: Record<string, boolean>
+  /** chatPrefs.ts — per-Epic chat verbosity overrides for this project (PRD
+   *  1399: same reasoning as epicPins, moved off the global
+   *  ~/.claude/session-manager/chat-prefs.json). */
+  chatVerbosityPerEpic?: Record<string, string>
 }
 
 export function uiPrefsPath(cwd: string): string {

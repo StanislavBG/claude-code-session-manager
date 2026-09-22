@@ -21,11 +21,20 @@ Path helper: `uiPrefsPath(cwd)` in `src/renderer/lib/uiPrefs.ts` —
 
 ```ts
 {
-  fileTreeExpanded?: string[],      // FileTree.tsx — expanded folder paths in the Files sidebar
-  hiddenCompletedSlugs?: string[],  // SchedulePanel.tsx — "Clear completed" hides, renderer-side only
-  queueFilterStatus?: string,       // SchedulePanel.tsx — the queue's status filter chip
+  fileTreeExpanded?: string[],                    // FileTree.tsx — expanded folder paths in the Files sidebar
+  hiddenCompletedSlugs?: string[],                 // SchedulePanel.tsx — "Clear completed" hides, renderer-side only
+  queueFilterStatus?: string,                      // SchedulePanel.tsx — the queue's status filter chip
+  epicPins?: Record<string, boolean>,              // epicsPrefs.ts — pinned-to-top Epic ids, keyed by epicId
+  chatVerbosityPerEpic?: Record<string, string>,   // chatPrefs.ts — per-Epic chat verbosity overrides, keyed by epicId
 }
 ```
+
+`epicPins`/`chatVerbosityPerEpic` are seeded once, on first read, from the legacy global
+`~/.claude/session-manager/epics-prefs.json`/`chat-prefs.json` files' `pins`/`perEpic` maps —
+narrowed to only the Epic ids that belong to this cwd (cross-referenced against
+`prompt-sessions/active-index.json` + archived `prompt-sessions/<id>.json` files). The legacy
+global files are left untouched; group/sort/compact and the global verbosity default stay in
+them permanently as personal display defaults, not project data (PRD 1399).
 
 All fields are optional — a missing field falls back to its component's own default. New fields
 may be added here as more per-project UI state migrates off `localStorage` (see

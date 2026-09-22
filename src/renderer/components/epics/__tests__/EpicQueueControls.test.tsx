@@ -24,7 +24,7 @@ function installWindowApiMock() {
 
 beforeEach(() => {
   installWindowApiMock()
-  useEpicsPrefs.setState({ pins: {}, group: 'status', sort: 'recent', compact: false, hydrated: true })
+  useEpicsPrefs.setState({ pins: {}, group: 'status', sort: 'recent', compact: false, hydrated: true, pinsCwd: '/proj' })
 })
 
 afterEach(() => {
@@ -69,6 +69,7 @@ function emptySnapshots(overrides: Partial<EpicSnapshots> = {}): EpicSnapshots {
 
 function baseProps(epics: PromptSession[], snapshots: EpicSnapshots, extra: Partial<React.ComponentProps<typeof EpicQueueControls>> = {}) {
   return {
+    cwd: '/proj',
     epics,
     snapshots,
     events: {} as Record<string, PromptSessionEvent[]>,
@@ -137,7 +138,7 @@ describe('EpicQueueControls', () => {
     expect(el.querySelectorAll('[data-testid="epic-queue-row"]')).toHaveLength(25)
   })
 
-  it('pins a row to a sticky top section and persists via the epicsPrefs store', () => {
+  it('pins a row to a sticky top section and persists via the epicsPrefs store', async () => {
     const epics = [makeEpic({ id: 'e-a' }), makeEpic({ id: 'e-b' })]
     const snapshots = emptySnapshots({ sessions: Object.fromEntries(epics.map((e) => [e.id, e])) })
     const el = mount(<EpicQueueControls {...baseProps(epics, snapshots)} />)
@@ -148,8 +149,10 @@ describe('EpicQueueControls', () => {
 
     expect(useEpicsPrefs.getState().pins['e-b']).toBe(true)
     expect(el.textContent).toContain('pinned')
+    // writeUiPrefsPatch reads-then-writes (read-modify-write, per lib/uiPrefs.ts),
+    // so the actual writeJson call lands a microtask after the synchronous click.
     const write = (window as unknown as { api: { config: { writeJson: ReturnType<typeof vi.fn> } } }).api.config.writeJson
-    expect(write).toHaveBeenCalled()
+    await vi.waitFor(() => expect(write).toHaveBeenCalled())
 
     // Unpinning returns the row to its regular section (no longer duplicated).
     // Re-query: pinning moved the row into a new sticky section, so the DOM

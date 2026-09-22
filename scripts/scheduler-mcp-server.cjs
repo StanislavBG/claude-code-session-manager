@@ -514,7 +514,14 @@ async function handleCallTool(request) {
       const note = result?.ok !== false
         ? ' — PRD file written; the queue row is derived on the next scheduler reconcile pass, not by this call.'
         : '';
-      return { content: [{ type: 'text', text: JSON.stringify(result) + note }] };
+      let text = JSON.stringify(result) + note;
+      // Sizing warnings (PRD 1403) are advisory only — never block the write,
+      // just surfaced here so the authoring session can decide to split the
+      // PRD before confirming it. See prdSizing.cjs.
+      if (Array.isArray(result?.warnings) && result.warnings.length > 0) {
+        text += `\nSizing warnings:\n${result.warnings.map((w) => `- ${w}`).join('\n')}`;
+      }
+      return { content: [{ type: 'text', text }] };
     }
     if (name === 'feedback_list_projects') {
       const result = await adminRequest('GET', '/admin/feedback/targets');

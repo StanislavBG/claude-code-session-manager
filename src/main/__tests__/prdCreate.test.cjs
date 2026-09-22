@@ -417,6 +417,8 @@ test('createPrd with a valid payload allocates a group, writes through remote.wr
   expect(result.ok).toBe(true);
   expect(typeof result.nn).toBe('number');
   expect(result.filename).toMatch(/^\d+-add-widget-frobnication\.md$/);
+  // PRD 1403: sizing warnings ride along in the success response, advisory only.
+  expect(Array.isArray(result.warnings)).toBe(true);
 
   const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
   expect(written).toMatch(/^---\n/);

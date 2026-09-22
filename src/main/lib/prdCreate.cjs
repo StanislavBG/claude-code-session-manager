@@ -31,6 +31,7 @@ const { DEFAULT_PRD_AGENT_TYPE, assertAgentTypeWritable } = require('./prdAgentT
 const { resolveDepSlug, findNearMatches } = require('./depSlugResolve.cjs');
 const { isFixPlanSlug } = require('./fixPlanSlug.cjs');
 const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
+const { sizingWarnings } = require('./prdSizing.cjs');
 
 // A caller-supplied slug that already starts with its own `NN-` (e.g.
 // "254-perf-x") used to silently become the double-prefixed row
@@ -496,6 +497,8 @@ async function createPrd(input, remote) {
     epicId: writeResult.epicId ?? null,
     enqueued: false,
     note: 'PRD file written; the queue row is derived by the next scheduler reconcile pass, not created here',
+    // Advisory only (PRD 1403) — never blocks the write. See prdSizing.cjs.
+    warnings: sizingWarnings(input),
   };
 }
 
@@ -541,6 +544,7 @@ function registerAdminRoute(adminHttp, remote) {
       epicId: result.epicId ?? null,
       enqueued: false,
       note: result.note,
+      warnings: result.warnings,
     });
   });
 }

@@ -156,6 +156,13 @@ test('the bundled project-home-builder persona contains no session-manager-repo 
   }
 });
 
+test('seeded dev-lead persona pins an executor-tier model', () => {
+  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const raw = fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', 'dev-lead.md'), 'utf8');
+  const { fm } = splitFrontmatter(raw);
+  expect(fm.model).toBe('sonnet');
+});
+
 test('SM_SEED_AGENT_PERSONAS_DISABLE=1 short-circuits', async () => {
   process.env.SM_SEED_AGENT_PERSONAS_DISABLE = '1';
 

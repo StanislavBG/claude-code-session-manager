@@ -3,8 +3,15 @@
 /**
  * exchanges.cjs — durable append-only log of completed terminal-chat exchanges.
  *
- * Appends one NDJSON record per successful chat run to:
- *   ~/.claude/knowledge-log/exchanges/<encodeCwd(cwd)>.jsonl
+ * Appends one NDJSON record per successful chat run to the per-project ops
+ * root (single-writer law, lib/opsOwnership.cjs — 'prompt-sessions' is owned
+ * by 'epics'):
+ *   <cwd>/session-manager-operations/prompt-sessions/exchanges.jsonl
+ *
+ * Historical rows from before this PRD live on, untouched, in the old global
+ * store (~/.claude/knowledge-log/exchanges/<encodeCwd(cwd)>.jsonl) — migrating
+ * them would require the same unsafe cwd-decoding this store is meant to
+ * avoid, so they are simply left behind; only new exchanges land here.
  *
  * Record shape (contract for PRDs 324 + 325):
  *   { ts, sessionId, cwd, prompt, result, summary, degraded?, promptId? }
@@ -20,31 +27,30 @@
  */
 
 const fsp = require('node:fs/promises');
-const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
-const { encodeCwd } = require('./lib/encodeCwd.cjs');
-const { validatePath } = require('./config.cjs');
+const { opsPath, assertOpsWrite } = require('./lib/opsOwnership.cjs');
 const { summarize } = require('./lib/summarize.cjs');
 
-const HOME = os.homedir();
-const EXCHANGES_DIR = path.join(HOME, '.claude', 'knowledge-log', 'exchanges');
+const EXCHANGES_WRITER = 'epics';
+
+function exchangesFilePath(cwd) {
+  return opsPath(cwd, 'prompt-sessions', 'exchanges.jsonl');
+}
 
 /**
- * Record a completed exchange. Creates the exchanges directory if needed.
- * Appends one JSON line; uses O_APPEND so concurrent writes from separate
- * processes are safe (each line is a single write, POSIX O_APPEND atomic for
- * pipe-sized payloads).
+ * Record a completed exchange. Creates the ops directory if needed. Appends
+ * one JSON line via raw fs O_APPEND (not config.cjs's writeJson) so
+ * concurrent writes from separate processes stay safe — each line is a
+ * single write, POSIX O_APPEND atomic for pipe-sized payloads. Because this
+ * bypasses config.cjs's normal write boundary, the single-writer law is
+ * asserted explicitly here.
  *
  * @param {{ sessionId: string, cwd: string, prompt: string, result: string, promptId?: string }} opts
  * @returns {Promise<void>}
  */
 async function recordExchange({ sessionId, cwd, prompt, result, promptId }) {
-  const encoded = encodeCwd(cwd);
-  const filePath = path.join(EXCHANGES_DIR, `${encoded}.jsonl`);
-
-  // Security: validate that the target path stays within home dir
-  validatePath(EXCHANGES_DIR);
+  const filePath = exchangesFilePath(cwd);
+  assertOpsWrite(filePath, EXCHANGES_WRITER);
 
   // Summarize — always resolves; never throws
   const { summary, model, degraded } = await summarize(result);
@@ -63,7 +69,7 @@ async function recordExchange({ sessionId, cwd, prompt, result, promptId }) {
 
   const line = JSON.stringify(record) + '\n';
 
-  await fsp.mkdir(EXCHANGES_DIR, { recursive: true });
+  await fsp.mkdir(path.dirname(filePath), { recursive: true });
   await fsp.appendFile(filePath, line, { encoding: 'utf8' });
 }
 
@@ -79,8 +85,7 @@ const DEFAULT_LIMIT = 100;
  * @returns {Promise<object[]>}
  */
 async function listExchanges({ cwd, sessionId, limit = DEFAULT_LIMIT, offset = 0 }) {
-  const encoded = encodeCwd(cwd);
-  const filePath = path.join(EXCHANGES_DIR, `${encoded}.jsonl`);
+  const filePath = exchangesFilePath(cwd);
 
   let stat;
   try { stat = await fsp.stat(filePath); } catch { return []; }
@@ -128,4 +133,4 @@ async function listExchanges({ cwd, sessionId, limit = DEFAULT_LIMIT, offset = 0
   return filtered.slice(offset, offset + limit);
 }
 
-module.exports = { recordExchange, listExchanges, EXCHANGES_DIR };
+module.exports = { recordExchange, listExchanges };

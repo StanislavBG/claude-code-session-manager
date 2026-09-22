@@ -1,20 +1,9 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect } from 'react'
+import { useUiChromePrefs, type Density } from '../state/uiChromePrefs'
 
-export type Density = 'compact' | 'roomy'
+export type { Density }
 
-const STORAGE_KEY = 'sm.density'
-const DEFAULT: Density = 'roomy'
 const BODY_CLASS = 'density-compact'
-
-function loadDensity(): Density {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw === 'compact' || raw === 'roomy') return raw
-  } catch {
-    /* ignore */
-  }
-  return DEFAULT
-}
 
 function applyToBody(d: Density) {
   if (typeof document === 'undefined') return
@@ -22,29 +11,27 @@ function applyToBody(d: Density) {
   else document.body.classList.remove(BODY_CLASS)
 }
 
-// Module-level singleton state + listener set so every useDensity() hook
-// instance stays in sync across the tree without prop-drilling.
-let current: Density = loadDensity()
-const listeners = new Set<(d: Density) => void>()
-applyToBody(current)
-
-function setGlobalDensity(d: Density) {
-  if (d === current) return
-  current = d
-  try { localStorage.setItem(STORAGE_KEY, d) } catch { /* ignore */ }
-  applyToBody(d)
-  listeners.forEach((fn) => fn(d))
+// Module-level once-flag: the body class must react to every density change
+// regardless of how many useDensity() instances are mounted, but should only
+// be wired up once.
+let subscribed = false
+function ensureBodyClassSubscription() {
+  if (subscribed) return
+  subscribed = true
+  applyToBody(useUiChromePrefs.getState().density)
+  useUiChromePrefs.subscribe((s) => applyToBody(s.density))
 }
 
 export function useDensity(): { density: Density; setDensity: (d: Density) => void } {
-  const [density, setLocal] = useState<Density>(current)
+  ensureBodyClassSubscription()
+  const hydrated = useUiChromePrefs((s) => s.hydrated)
+  const hydrate = useUiChromePrefs((s) => s.hydrate)
   useEffect(() => {
-    const fn = (d: Density) => setLocal(d)
-    listeners.add(fn)
-    // Sync in case singleton changed between render and effect.
-    if (current !== density) setLocal(current)
-    return () => { listeners.delete(fn) }
-  }, [])
-  const setDensity = useCallback((d: Density) => setGlobalDensity(d), [])
+    if (!hydrated) hydrate()
+  }, [hydrated, hydrate])
+
+  const density = useUiChromePrefs((s) => s.density)
+  const setDensityPref = useUiChromePrefs((s) => s.setDensity)
+  const setDensity = useCallback((d: Density) => setDensityPref(d), [setDensityPref])
   return { density, setDensity }
 }

@@ -2,21 +2,17 @@
  * First-run guided tour state.
  *
  * Mirrors the MicWizard pattern: a single boolean `open` plus a small set of
- * actions. The "completed" signal is persisted as a localStorage timestamp
- * `sm.tour.completedAt` so it survives across reloads and the renderer can
- * gate auto-open with a synchronous read (no async hydrate dance).
- *
- * Why localStorage (vs. a JSON file on disk like wizard state): the tour is
- * purely a UI nudge — losing the flag means re-showing it once, which is
- * harmless. The async file path used by the mic wizard exists because it
- * mirrors a versioned schema; the tour has no such structure.
+ * actions. The "completed" signal is persisted through `uiChromePrefs`'s
+ * `tourCompletedAt` field (disk-backed, see `state/uiChromePrefs.ts`) so it
+ * survives across reloads. `hasCompletedTour()` is async because the prefs
+ * store hydrates from disk asynchronously — its one call site (App.tsx's
+ * first-run effect) is already inside an async IIFE.
  *
  * Complexity: all actions are O(1).
  */
 
 import { create } from 'zustand'
-
-export const TOUR_STORAGE_KEY = 'sm.tour.completedAt'
+import { useUiChromePrefs } from './uiChromePrefs'
 
 interface TourState {
   /** Modal-style overlay visibility. */
@@ -71,27 +67,21 @@ export const useTour = create<TourState>((set, get) => ({
   },
 
   complete: () => {
-    try {
-      localStorage.setItem(TOUR_STORAGE_KEY, String(Date.now()))
-    } catch {
-      /* private mode, quota, etc. — the worst case is we show the tour again. */
-    }
+    useUiChromePrefs.getState().setTourCompletedAt(Date.now())
     set({ open: false, currentStep: 0 })
   },
 
   close: () => set({ open: false }),
 }))
 
-/** Synchronous check used by App.tsx to gate first-run auto-open. */
-export function hasCompletedTour(): boolean {
-  try {
-    return Boolean(localStorage.getItem(TOUR_STORAGE_KEY))
-  } catch {
-    return false
-  }
+/** Async check used by App.tsx to gate first-run auto-open — awaits hydration first. */
+export async function hasCompletedTour(): Promise<boolean> {
+  const prefs = useUiChromePrefs.getState()
+  if (!prefs.hydrated) await prefs.hydrate()
+  return useUiChromePrefs.getState().tourCompletedAt != null
 }
 
 /** Clears the completion flag. Exposed for the command palette / debug. */
 export function resetTour(): void {
-  try { localStorage.removeItem(TOUR_STORAGE_KEY) } catch { /* */ }
+  useUiChromePrefs.getState().setTourCompletedAt(null)
 }

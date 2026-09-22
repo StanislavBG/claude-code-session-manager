@@ -1,27 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { NavKey } from '../lib/navKey'
+import { useUiChromePrefs } from '../state/uiChromePrefs'
 import { LEARNING_CONTENT, type LearningContent } from './learningContent'
-
-const STORAGE_KEY = 'sm.learningPanel.collapsed'
-
-function loadCollapsed(): boolean {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw === null) return false
-    // Legacy: was a per-tab JSON map. Migrate "any tab collapsed" → globally collapsed.
-    if (raw.startsWith('{')) {
-      const parsed = JSON.parse(raw)
-      return !!(parsed && typeof parsed === 'object' && Object.values(parsed).some(Boolean))
-    }
-    return raw === '1' || raw === 'true'
-  } catch {
-    return false
-  }
-}
-
-function saveCollapsed(collapsed: boolean) {
-  try { localStorage.setItem(STORAGE_KEY, collapsed ? '1' : '0') } catch { /* */ }
-}
 
 /** The Learn popover's content — shared with the Scheduler's title-band ⓘ popover. */
 export function LearningBody({ content }: { content: LearningContent }) {
@@ -65,26 +45,35 @@ export function LearningBody({ content }: { content: LearningContent }) {
 }
 
 export function LearningPanel({ active }: { active: NavKey }) {
-  // `collapsed` boolean logic inverted: open = !collapsed.
-  const [open, setOpen] = useState<boolean>(() => !loadCollapsed())
+  const learningPanelCollapsed = useUiChromePrefs((s) => s.learningPanelCollapsed)
+  const setLearningPanelCollapsed = useUiChromePrefs((s) => s.setLearningPanelCollapsed)
+  const hydrated = useUiChromePrefs((s) => s.hydrated)
+  const hydrate = useUiChromePrefs((s) => s.hydrate)
+  useEffect(() => {
+    if (!hydrated) hydrate()
+  }, [hydrated, hydrate])
+
+  // `collapsed` boolean logic inverted: open = !collapsed. First paint uses
+  // the store's synchronous default (false → open); once hydrate() resolves
+  // the persisted value, this re-syncs from disk (one-frame flash accepted,
+  // same tradeoff epicsPrefs.ts takes elsewhere).
+  const [open, setOpen] = useState<boolean>(() => !learningPanelCollapsed)
   const rootRef = useRef<HTMLSpanElement | null>(null)
+
+  useEffect(() => {
+    if (hydrated) setOpen(!learningPanelCollapsed)
+    // Only re-sync when hydration resolves — afterwards `open` is owned
+    // locally by toggle()/outside-click, which also persist to the store.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated])
 
   const toggle = useCallback(() => {
     setOpen((prev) => {
       const next = !prev
-      saveCollapsed(!next)
+      setLearningPanelCollapsed(!next)
       return next
     })
-  }, [])
-
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key !== STORAGE_KEY) return
-      setOpen(!loadCollapsed())
-    }
-    window.addEventListener('storage', onStorage)
-    return () => window.removeEventListener('storage', onStorage)
-  }, [])
+  }, [setLearningPanelCollapsed])
 
   // Close on outside click.
   useEffect(() => {
@@ -92,12 +81,12 @@ export function LearningPanel({ active }: { active: NavKey }) {
     const onDocClick = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) {
         setOpen(false)
-        saveCollapsed(true)
+        setLearningPanelCollapsed(true)
       }
     }
     document.addEventListener('mousedown', onDocClick)
     return () => document.removeEventListener('mousedown', onDocClick)
-  }, [open])
+  }, [open, setLearningPanelCollapsed])
 
   // Close on tab change (skip the initial mount so persisted state still applies).
   const mounted = useRef(false)

@@ -4,9 +4,9 @@
  * Adapted from Unleashed's WelcomeTour but trimmed to our actual UI surface
  * (TabBar / LeftNav / StatusBar / mic / sessions / scheduler) and rewired to
  * the zustand tour store rather than per-instance state. Triggered
- * automatically on first launch (App.tsx checks localStorage
- * `sm.tour.completedAt`) and re-runnable via the command palette
- * (`tour:start`).
+ * automatically on first launch (App.tsx checks the disk-backed
+ * `uiChromePrefs.tourCompletedAt`, via `hasCompletedTour()`) and re-runnable
+ * via the command palette (`tour:start`).
  *
  * The step CONTENT lives in `lib/tourSteps.ts` — a JSX-free module so tests
  * can import it — and is re-exported here for existing importers. This file

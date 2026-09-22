@@ -193,16 +193,21 @@ test('Toast appears on toast.error() and auto-expires after 5s', async () => {
 test('Density toggle persists across reload', async () => {
   const { app, win } = await launchApp()
   try {
-    // Set density=compact via localStorage (the toggle is in LeftNav footer;
-    // tabbing through every nav item to reach it is fragile). The same
-    // pathway the toggle uses: localStorage 'sm.density'.
-    await win.evaluate(() => {
-      localStorage.setItem('sm.density', 'compact')
+    // Set density=compact through the disk-backed uiChromePrefs file (the
+    // toggle lives in Settings > Session Manager preferences; tabbing
+    // through every nav item to reach it is fragile). Same file/IPC path the
+    // toggle itself uses: window.api.config.writeJson on
+    // ~/.claude/session-manager/ui-chrome-prefs.json.
+    await win.evaluate(async () => {
+      await window.api.config.writeJson('~/.claude/session-manager/ui-chrome-prefs.json', { density: 'compact' })
     })
     await win.reload()
     await win.waitForSelector('[data-testid="tour-tabbar"]', { timeout: 15_000 })
 
-    const persisted = await win.evaluate(() => localStorage.getItem('sm.density'))
+    const persisted = await win.evaluate(async () => {
+      const r = await window.api.config.readJson('~/.claude/session-manager/ui-chrome-prefs.json')
+      return r.exists ? (r.data as { density?: string } | null)?.density ?? null : null
+    })
     expect(persisted).toBe('compact')
 
     const hasClass = await win.evaluate(() => document.body.classList.contains('density-compact'))

@@ -2,17 +2,39 @@
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { describe, expect, it, afterEach, beforeEach } from 'vitest'
+import { describe, expect, it, afterEach, beforeEach, vi } from 'vitest'
 import { AlmanacSidebar } from '../AlmanacSidebar'
 import { useScheduleState } from '../../../state/scheduleState'
 import { useSessions } from '../../../state/sessions'
 import { useLayout } from '../../../state/layout'
+import { useUiChromePrefs } from '../../../state/uiChromePrefs'
 
-// AlmanacSidebar persists rail/collapse state to localStorage; jsdom provides
-// a real localStorage so no mocking needed, but clear it between tests so one
-// test's rail toggle doesn't leak into the next.
+const UI_CHROME_PREFS_DEFAULTS = {
+  sidebarWidth: 252,
+  sidebarCollapsed: false,
+  collapsedGroups: [] as string[],
+  learningPanelCollapsed: false,
+  tourCompletedAt: null as number | null,
+  density: 'roomy' as const,
+  hydrated: false,
+}
+
+// AlmanacSidebar persists rail/collapse state through the disk-backed
+// uiChromePrefs store (window.api.config.readJson/writeJson), not
+// localStorage — mock the IPC bridge and reset the store between tests so
+// one test's rail toggle doesn't leak into the next.
+beforeEach(() => {
+  ;(globalThis as any).window.api = {
+    config: {
+      readJson: vi.fn().mockResolvedValue({ exists: false }),
+      writeJson: vi.fn().mockResolvedValue(undefined),
+    },
+  }
+})
+
 afterEach(() => {
-  localStorage.clear()
+  delete (globalThis as any).window?.api
+  useUiChromePrefs.setState({ ...UI_CHROME_PREFS_DEFAULTS })
   useScheduleState.setState({ snapshot: null, loaded: false })
   useSessions.setState({ tabs: [], activeTabId: null })
   useLayout.setState({ navFace: 'home' })
@@ -206,7 +228,7 @@ describe('AlmanacSidebar', () => {
   })
 
   it('renders icon-only rows with no visible label/hint text in rail (collapsed) mode', () => {
-    localStorage.setItem('sm.almanac.sidebarCollapsed', '1')
+    useUiChromePrefs.setState({ sidebarCollapsed: true, hydrated: true })
     const { container, root } = mount()
     try {
       const nav = container.querySelector('[data-testid="tour-leftnav"]')

@@ -35,10 +35,10 @@ import { log } from './lib/logger'
 let unsupportedLogged = false
 
 export function App() {
-  // Subscribe to the density singleton at the app root so its module loads and
-  // applies the `density-compact` body class from persisted localStorage on
-  // every boot. Without a caller the hook is dead code and the class is never
-  // applied (the LeftNav-footer toggle that used to call it was dropped).
+  // Subscribe to density at the app root so the body-class side effect wires
+  // up and the `uiChromePrefs` store hydrates from disk on every boot.
+  // Without a caller the hook is dead code and the class is never applied
+  // (the LeftNav-footer toggle that used to call it was dropped).
   useDensity()
   // The layout store's registry covers every NavKey screen (screenKeys.ts);
   // openPanel/focusPanel are the single routing path every nav entry point
@@ -616,7 +616,7 @@ export function App() {
       try {
         const isE2E = await window.api.app.isE2E?.()
         if (cancelled || isE2E) return
-        if (hasCompletedTour()) return
+        if (await hasCompletedTour()) return
         if (useVoice.getState().wizardOpen) return
         useTour.getState().start()
       } catch { /* */ }

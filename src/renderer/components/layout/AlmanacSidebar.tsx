@@ -28,6 +28,11 @@ import { prettyModel } from '../../lib/prettyModel'
 import { useBranch } from '../../lib/useBranch'
 import { NAV_GROUP_DESCRIPTIONS, getNavItemsForFace, type NavGroupItem } from '../../lib/navGroups'
 import type { NavFace } from '../../lib/navFace'
+import {
+  useUiChromePrefs,
+  clampWidth,
+  SIDEBAR_WIDTH_DEFAULT,
+} from '../../state/uiChromePrefs'
 
 // v0.13.1 — Tools are now full pages too. We still keep them in a separate
 // group below Configure so users see them as workflow surfaces (not
@@ -50,48 +55,17 @@ function toolItems(items: NavGroupItem[]): ToolItem[] {
     .map(({ key, label, icon, hint }) => ({ key, label, icon, hint }))
 }
 
-// Resizable width — persisted per the user's drag, clamped to a sane range.
-const WIDTH_KEY = 'sm.almanac.sidebarWidth'
-
-const WIDTH_MIN = 180
-const WIDTH_MAX = 480
-const WIDTH_DEFAULT = 252
-function loadWidth(): number {
-  try {
-    const v = parseInt(localStorage.getItem(WIDTH_KEY) ?? '', 10)
-    if (Number.isFinite(v)) return Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, v))
-  } catch { /* ignore */ }
-  return WIDTH_DEFAULT
-}
-
 // Rail (collapsed) sidebar — fixed icon-only width, persisted across launches.
 const RAIL_WIDTH = 52
-const SIDEBAR_COLLAPSED_KEY = 'sm.almanac.sidebarCollapsed'
-
-function loadCollapsedRail(): boolean {
-  try {
-    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'
-  } catch { /* ignore */ }
-  return false
-}
 
 // Collapsible nav groups. Each section header (Workspace / Configure / Tools)
 // can be folded away independently; the set of collapsed group names is
-// persisted as a JSON array.
-const COLLAPSED_KEY = 'sm.almanac.collapsedGroups'
+// persisted as a JSON array through `uiChromePrefs`.
 type GroupName = 'Workspace' | 'Configure' | 'Tools'
 
-function loadCollapsed(): Set<GroupName> {
-  try {
-    const raw = localStorage.getItem(COLLAPSED_KEY)
-    if (!raw) return new Set()
-    const arr = JSON.parse(raw)
-    if (!Array.isArray(arr)) return new Set()
-    return new Set(arr.filter((s): s is GroupName =>
-      s === 'Workspace' || s === 'Configure' || s === 'Tools'))
-  } catch {
-    return new Set()
-  }
+function toGroupNameSet(groups: string[]): Set<GroupName> {
+  return new Set(groups.filter((s): s is GroupName =>
+    s === 'Workspace' || s === 'Configure' || s === 'Tools'))
 }
 
 function useLiveIndicators() {
@@ -123,26 +97,31 @@ interface AlmanacSidebarProps {
 }
 
 export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSidebarProps) {
-  const [collapsed, setCollapsed] = useState<Set<GroupName>>(() => loadCollapsed())
+  const hydrated = useUiChromePrefs((s) => s.hydrated)
+  const hydrate = useUiChromePrefs((s) => s.hydrate)
+  useEffect(() => {
+    if (!hydrated) hydrate()
+  }, [hydrated, hydrate])
+
+  // First paint reads the store's synchronous DEFAULT values (below); once
+  // hydrate() resolves the persisted values these selectors re-render with
+  // the real prefs — a one-frame default-then-hydrated flash, same tradeoff
+  // epicsPrefs.ts already accepts elsewhere.
+  const collapsedGroups = useUiChromePrefs((s) => s.collapsedGroups)
+  const setCollapsedGroups = useUiChromePrefs((s) => s.setCollapsedGroups)
+  const collapsed = useMemo(() => toGroupNameSet(collapsedGroups), [collapsedGroups])
   const toggleGroup = useCallback((g: GroupName) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev)
-      if (next.has(g)) next.delete(g); else next.add(g)
-      try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(Array.from(next))) }
-      catch { /* ignore */ }
-      return next
-    })
-  }, [])
+    const next = new Set(collapsed)
+    if (next.has(g)) next.delete(g); else next.add(g)
+    setCollapsedGroups(Array.from(next))
+  }, [collapsed, setCollapsedGroups])
 
   // Rail collapse — whole-sidebar icon-only mode, orthogonal to per-group fold.
-  const [rail, setRail] = useState<boolean>(() => loadCollapsedRail())
+  const rail = useUiChromePrefs((s) => s.sidebarCollapsed)
+  const setSidebarCollapsed = useUiChromePrefs((s) => s.setSidebarCollapsed)
   const toggleRail = useCallback(() => {
-    setRail((prev) => {
-      const next = !prev
-      try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, next ? '1' : '0') } catch { /* ignore */ }
-      return next
-    })
-  }, [])
+    setSidebarCollapsed(!rail)
+  }, [rail, setSidebarCollapsed])
 
   const tabs = useSessions((s) => s.tabs)
   const activeTabId = useSessions((s) => s.activeTabId)
@@ -158,19 +137,30 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
   // short flat list; rail mode has never rendered headers either.
   const sectioned = navFace === 'home' && !rail
 
-  // Drag-to-resize. widthRef mirrors width so a new drag starts from the
-  // current size; the move/up listeners live on window so the drag keeps
+  // Drag-to-resize. `width` is local component state so per-pixel drag
+  // updates stay smooth and don't hit the persisted store on every
+  // pointermove — only the final value (on pointerup / reset) is persisted
+  // via `setSidebarWidth`. widthRef mirrors width so a new drag starts from
+  // the current size; the move/up listeners live on window so the drag keeps
   // tracking even if the pointer leaves the thin handle.
-  const [width, setWidth] = useState<number>(() => loadWidth())
+  const storeWidth = useUiChromePrefs((s) => s.sidebarWidth)
+  const setSidebarWidth = useUiChromePrefs((s) => s.setSidebarWidth)
+  const [width, setWidth] = useState<number>(storeWidth)
   const widthRef = useRef(width)
   widthRef.current = width
+  // Re-sync local width whenever the store's canonical value changes — on
+  // hydrate() resolving, and (idempotently) after this component's own
+  // setSidebarWidth calls below.
+  useEffect(() => {
+    setWidth(storeWidth)
+  }, [storeWidth])
   const startResize = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
     const startX = e.clientX
     const startW = widthRef.current
     let lastW = startW
     const onMove = (ev: PointerEvent) => {
-      lastW = Math.min(WIDTH_MAX, Math.max(WIDTH_MIN, startW + (ev.clientX - startX)))
+      lastW = clampWidth(startW + (ev.clientX - startX))
       setWidth(lastW)
     }
     const onUp = () => {
@@ -178,17 +168,17 @@ export function AlmanacSidebar({ active, onNavigate, onNewSession }: AlmanacSide
       window.removeEventListener('pointerup', onUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      try { localStorage.setItem(WIDTH_KEY, String(lastW)) } catch { /* ignore */ }
+      setSidebarWidth(lastW)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     document.body.style.cursor = 'col-resize'
     document.body.style.userSelect = 'none'
-  }, [])
+  }, [setSidebarWidth])
   const resetWidth = useCallback(() => {
-    setWidth(WIDTH_DEFAULT)
-    try { localStorage.setItem(WIDTH_KEY, String(WIDTH_DEFAULT)) } catch { /* ignore */ }
-  }, [])
+    setWidth(SIDEBAR_WIDTH_DEFAULT)
+    setSidebarWidth(SIDEBAR_WIDTH_DEFAULT)
+  }, [setSidebarWidth])
 
   return (
     <aside

@@ -22,6 +22,7 @@ import { SchedulerFooter } from './tabs/scheduler/SchedulerFooter'
 import type { PlanMode } from './tabs/scheduler/SchedulerTopBands'
 import { usePanelFocus } from '../lib/panelFocus'
 import type { NavKey } from '../lib/navKey'
+import { readUiPrefs, writeUiPrefsPatch } from '../lib/uiPrefs'
 
 /** Inline completed-jobs cap. Older / overflow get rolled into the
  *  "+N more completed" collapse line. */
@@ -29,33 +30,30 @@ const COMPLETED_DISPLAY_CAP = 5
 /** Anything completed more than this ago is auto-collapsed (with the
  *  cap above as a secondary limit on fresh completions). */
 const COMPLETED_FRESH_MS = 24 * 60 * 60 * 1000
-/** localStorage key for the user's "Clear completed" visual hides. The
- *  underlying queue.json is unchanged — this is renderer-side only. */
-const HIDDEN_KEY = 'sm.scheduler.hiddenCompletedSlugs'
-const FOCUSED_IDX_KEY = 'sm.scheduler.focusedJobIndex'
-const LS_FILTER_KEY = 'sm.scheduler.queueFilter'
 
 type FilterStatus = 'all' | 'running' | 'investigating' | 'pending' | 'completed' | 'skipped' | 'needs_review' | 'failed' | 'quarantined'
 interface QueueFilter { text: string; status: FilterStatus }
 
 const FILTER_STATUS_VALUES: FilterStatus[] = ['all', 'running', 'investigating', 'pending', 'completed', 'skipped', 'needs_review', 'failed', 'quarantined']
 
-function loadFilter(): QueueFilter {
-  try {
-    const raw = localStorage.getItem(LS_FILTER_KEY)
-    if (!raw) return { text: '', status: 'all' }
-    const p = JSON.parse(raw)
-    return {
-      text: '',
-      status: FILTER_STATUS_VALUES.includes(p.status) ? p.status : 'all',
-    }
-  } catch {
-    return { text: '', status: 'all' }
+// hiddenCompletedSlugs/queueFilterStatus live in the ACTIVE project's own
+// ui-prefs/prefs.json (lib/uiPrefs.ts) rather than one machine-wide
+// localStorage key — two different projects that happen to reuse the same
+// PRD slug used to hide or filter each other's rows (PRD 1398). `cwd: null`
+// (no active project — e.g. the unscoped "all projects" queue view) means
+// there is nowhere to persist to, so these degrade to in-memory-only state.
+async function loadFilter(cwd: string | null): Promise<QueueFilter> {
+  if (!cwd) return { text: '', status: 'all' }
+  const prefs = await readUiPrefs(cwd)
+  return {
+    text: '',
+    status: FILTER_STATUS_VALUES.includes(prefs.queueFilterStatus as FilterStatus) ? (prefs.queueFilterStatus as FilterStatus) : 'all',
   }
 }
 
-function saveFilter(f: QueueFilter) {
-  try { localStorage.setItem(LS_FILTER_KEY, JSON.stringify({ status: f.status })) } catch { /* */ }
+function saveFilter(cwd: string | null, f: QueueFilter) {
+  if (!cwd) return
+  writeUiPrefsPatch(cwd, { queueFilterStatus: f.status }).catch(() => {})
 }
 
 function applyFilter(jobs: ScheduleJob[], filter: QueueFilter): ScheduleJob[] {
@@ -73,19 +71,15 @@ function applyFilter(jobs: ScheduleJob[], filter: QueueFilter): ScheduleJob[] {
   })
 }
 
-function loadHidden(): Set<string> {
-  try {
-    const raw = localStorage.getItem(HIDDEN_KEY)
-    if (!raw) return new Set()
-    const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? new Set(arr.filter((x) => typeof x === 'string')) : new Set()
-  } catch {
-    return new Set()
-  }
+async function loadHidden(cwd: string | null): Promise<Set<string>> {
+  if (!cwd) return new Set()
+  const prefs = await readUiPrefs(cwd)
+  return Array.isArray(prefs.hiddenCompletedSlugs) ? new Set(prefs.hiddenCompletedSlugs.filter((x) => typeof x === 'string')) : new Set()
 }
 
-function saveHidden(set: Set<string>) {
-  try { localStorage.setItem(HIDDEN_KEY, JSON.stringify([...set])) } catch { /* */ }
+function saveHidden(cwd: string | null, set: Set<string>) {
+  if (!cwd) return
+  writeUiPrefsPatch(cwd, { hiddenCompletedSlugs: [...set] }).catch(() => {})
 }
 
 /**
@@ -114,9 +108,9 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
   }, [rawSnap, scopeCwd])
   const [health, setHealth] = useState<ScheduleHealthSnapshot | null>(null)
   const [now, setNow] = useState(() => Date.now())
-  const [hiddenSlugs, setHiddenSlugs] = useState<Set<string>>(() => loadHidden())
+  const [hiddenSlugs, setHiddenSlugs] = useState<Set<string>>(new Set())
   const [showAllCompleted, setShowAllCompleted] = useState(false)
-  const [filterState, setFilter] = useState<QueueFilter>(() => loadFilter())
+  const [filterState, setFilter] = useState<QueueFilter>({ text: '', status: 'all' })
   const filter = useMemo<QueueFilter>(
     () => (filterText === undefined ? filterState : { ...filterState, text: filterText }),
     [filterState, filterText],
@@ -125,12 +119,35 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
   const [panelView, setPanelView] = useState<'queue' | 'supervisor'>('queue')
 
   const jobListRef = useRef<HTMLDivElement>(null)
-  const [focusedJobIdx, setFocusedJobIdx] = useState(() => {
-    try { return Number(localStorage.getItem(FOCUSED_IDX_KEY)) || 0 } catch { return 0 }
-  })
+  // Keyboard-focus row index — ephemeral UI state, never persisted (it used to
+  // survive a reload via a global `sm.scheduler.focusedJobIndex` localStorage
+  // key, which made no sense once queue rows are per-project: PRD 1398).
+  const [focusedJobIdx, setFocusedJobIdx] = useState(0)
 
   const [announcement, setAnnouncement] = useState('')
   const focused = usePanelFocus()
+
+  // Guards the hydration effect below against clobbering a user action (Clear
+  // completed / un-hide / pick a filter) that lands before the disk read
+  // resolves — same ordering hazard uiSettingsPrefs.ts's owners hit (PRD
+  // 1398 review): a stale `.then(setHiddenSlugs)` must not overwrite a
+  // choice the user already made in the interim. Reset whenever the active
+  // project changes so that project's own fresh read is allowed through.
+  const hiddenUserSetRef = useRef(false)
+  const filterUserSetRef = useRef(false)
+
+  // Hydrate this project's hidden-completed / filter state whenever the
+  // active project changes — both live in THIS project's ui-prefs/prefs.json
+  // (lib/uiPrefs.ts), not a single global key shared by every project, so
+  // switching projects must re-read rather than carry over stale state.
+  useEffect(() => {
+    let cancelled = false
+    hiddenUserSetRef.current = false
+    filterUserSetRef.current = false
+    loadHidden(scopeCwd).then((s) => { if (!cancelled && !hiddenUserSetRef.current) setHiddenSlugs(s) })
+    loadFilter(scopeCwd).then((f) => { if (!cancelled && !filterUserSetRef.current) setFilter(f) })
+    return () => { cancelled = true }
+  }, [scopeCwd])
 
   useEffect(() => {
     window.api.schedule.health().then(setHealth).catch(() => {})
@@ -253,7 +270,6 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
       if (!row) return
       const stableIdx = Number(row.dataset.jobIndex)
       setFocusedJobIdx(stableIdx)
-      try { localStorage.setItem(FOCUSED_IDX_KEY, String(stableIdx)) } catch { /* */ }
       row.focus()
     }
     if (e.key === 'ArrowDown') {
@@ -271,7 +287,6 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
   // returns below (rules of hooks).
   const handleRowFocused = useCallback((i: number) => {
     setFocusedJobIdx(i)
-    try { localStorage.setItem(FOCUSED_IDX_KEY, String(i)) } catch { /* */ }
   }, [])
 
   if (!snap) return null
@@ -317,8 +332,9 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
   const onClearCompleted = () => {
     const next = new Set(hiddenSlugs)
     for (const j of jobs) if (j.status === 'completed' || j.status === 'failed') next.add(j.slug)
+    hiddenUserSetRef.current = true
     setHiddenSlugs(next)
-    saveHidden(next)
+    saveHidden(scopeCwd, next)
   }
   const onClearQueue = async () => {
     const victims = jobs.filter((j) => j.status !== 'running').length
@@ -331,8 +347,9 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
     }
   }
   const onUnhideAll = () => {
+    hiddenUserSetRef.current = true
     setHiddenSlugs(new Set())
-    saveHidden(new Set())
+    saveHidden(scopeCwd, new Set())
     setShowAllCompleted(false)
   }
   const hasInlineCompleted = planMode === 'list'
@@ -395,7 +412,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
             <FilterBar
               showText={filterText === undefined}
               filter={filter}
-              onChange={(f) => { setFilter(f); saveFilter(f) }}
+              onChange={(f) => { filterUserSetRef.current = true; setFilter(f); saveFilter(scopeCwd, f) }}
             />
           </div>
         )}
@@ -411,7 +428,7 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
                 jobCount={filteredJobs.length}
                 counts={counts}
                 filter={filter}
-                onFilter={(f) => { setFilter(f); saveFilter(f) }}
+                onFilter={(f) => { filterUserSetRef.current = true; setFilter(f); saveFilter(scopeCwd, f) }}
                 hiddenInGraph={hiddenInGraph}
                 onUnhideAll={onUnhideAll}
                 hasInlineCompleted={hasInlineCompleted}

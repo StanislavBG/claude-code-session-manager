@@ -5,7 +5,7 @@ Part of the **OPERATIONS STATE** partition — see
 
 ## What's here
 
-13 namespaces, no top-level files. Governance is the **SINGLE-WRITER LAW**
+14 namespaces, no top-level files. Governance is the **SINGLE-WRITER LAW**
 (`src/main/lib/opsOwnership.cjs`): every namespace has exactly ONE owning
 writer; everyone else reads. Fail-closed — an undeclared writer throws.
 Adding a namespace or writer is a deliberate edit to that file. Build ops
@@ -14,9 +14,9 @@ paths only via its `opsPath()`.
 - **Owned** (in `OWNERS`, app-owned runtime state): `prompt-sessions` →
   epics · `scheduler` → scheduler · `project-brief` → project-home ·
   `logs` → logs · `bilko-host` → bilko-host · `memory-clusters` →
-  memory-clusters · `project-pages` → project-home (admin render route
-  only; a Builder Epic's own authoring stays ungoverned — see
-  [`project-pages/README.md`](project-pages/README.md)).
+  memory-clusters · `ui-prefs` → ui-prefs · `project-pages` → project-home
+  (admin render route only; a Builder Epic's own authoring stays ungoverned
+  — see [`project-pages/README.md`](project-pages/README.md)).
 - **Deliberately NOT owned** (skill-authored docs/artifacts, no write
   hazard): `architecture`, `design-mocks`, `HUMAN_LEARN`, `manual`,
   `reviews`. `feedback` **retired** (2026-08-02).
@@ -45,6 +45,7 @@ Epic lifecycle is specified exactly once, at
 | `prompt-sessions` | OWNERS → epics | durable Epic (PromptSession) store | keep indefinitely | [link](prompt-sessions/README.md) |
 | `reviews` | not owned | frozen audit-trail review docs | keep indefinitely | none |
 | `scheduler` | OWNERS → scheduler | PRD sources + queue/history state | keep indefinitely | [link](scheduler/README.md) |
+| `ui-prefs` | OWNERS → ui-prefs | per-project UI state | keep indefinitely | [link](ui-prefs/README.md) |
 
 ## Who consumes this
 
@@ -58,7 +59,4 @@ the storage-layout contract; this table only says who owns it.
   `assertOpsWrite` throws fail-closed.
 - Do not build an ops-root path by string concatenation — use
   `opsPath()`/`resolveOpsRoot()`.
-- Do not add a new top-level folder here without also adding a row to the
-  table above (or an `OWNERS` entry) in the same PR — otherwise
-  `scripts/ops-sweep.cjs` flags it `UNDOCUMENTED`.
 - Do not link out with a `file://` URL — it only resolves on one machine.

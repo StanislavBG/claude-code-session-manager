@@ -66,7 +66,7 @@ export interface ImportRef {
 /** Declared owner ids for the single-writer law over a project's
  *  session-manager-operations/ root. Mirrors OWNERS in
  *  src/main/lib/opsOwnership.cjs — one writer per namespace; everyone reads. */
-export type OpsWriter = 'epics' | 'scheduler' | 'project-home';
+export type OpsWriter = 'epics' | 'scheduler' | 'project-home' | 'ui-prefs';
 
 export interface WriteResult {
   ok: boolean;

@@ -13,6 +13,9 @@ import type { ScheduleStateSnapshot, ScheduleJob } from '../../../../../preload/
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
+// Fake of the disk-backed config IPC, keyed by absolute path — backs
+// hiddenCompletedSlugs/queueFilterStatus persistence (lib/uiPrefs.ts).
+const configStore = new Map<string, unknown>()
 const api = {
   schedule: {
     listPrds: async () => [],
@@ -27,6 +30,16 @@ const api = {
     rescan: async () => ({ ok: true }),
     openFolder: async () => {},
     setPrdDisposition: vi.fn(async () => ({ ok: true })),
+  },
+  config: {
+    readJson: vi.fn(async (path: string) => {
+      const data = configStore.get(path)
+      return data ? { exists: true, data } : { exists: false, data: null }
+    }),
+    writeJson: vi.fn(async (path: string, data: unknown) => {
+      configStore.set(path, data)
+      return { ok: true, mtimeMs: Date.now() }
+    }),
   },
 }
 
@@ -62,6 +75,7 @@ const q = (el: ParentNode, sel: string) => Array.from(el.querySelectorAll<HTMLEl
 
 beforeEach(() => {
   vi.clearAllMocks()
+  configStore.clear()
   ;(globalThis as any).window.api = api
 })
 afterEach(() => {
@@ -73,7 +87,6 @@ afterEach(() => {
   root = null
   useScheduleState.setState({ snapshot: null, loaded: false })
   usePromptSessions.setState({ sessions: {} })
-  localStorage.clear()
 })
 
 describe('Graph mode — plan bands', () => {
@@ -258,7 +271,7 @@ describe('Graph vs List mode', () => {
     expect(list.querySelectorAll('[data-testid="plan-band"]')).toHaveLength(2)
   })
 
-  it('keeps Clear completed (hiddenSlugs + localStorage) and keyboard-nav attributes in Graph mode', () => {
+  it('keeps Clear completed (hiddenSlugs + per-project ui-prefs) and keyboard-nav attributes in Graph mode', async () => {
     const el = mount([
       job({ slug: '1-a', status: 'completed', finishedAt: new Date().toISOString(), startedAt: new Date().toISOString() }),
       job({ slug: '2-b', dependsOn: ['1-a'] }),
@@ -269,8 +282,10 @@ describe('Graph vs List mode', () => {
     expect(q(el, '[data-job-row]').map((r) => r.dataset.jobIndex).sort()).toEqual(['0', '1'])
     act(() => slot!.querySelector<HTMLButtonElement>('[data-testid="plan-tools-menu"]')!.click())
     const clear = q(slot!, 'button').find((b) => b.textContent === 'Clear completed')!
-    act(() => clear.click())
-    expect(JSON.parse(localStorage.getItem('sm.scheduler.hiddenCompletedSlugs')!)).toContain('1-a')
+    await act(async () => { clear.click(); await Promise.resolve() })
+    await vi.waitFor(() => expect(configStore.get('/p/session-manager-operations/ui-prefs/prefs.json')).toEqual(
+      expect.objectContaining({ hiddenCompletedSlugs: ['1-a'] }),
+    ))
     expect(el.querySelector('[data-slug="1-a"]')).toBeNull()
   })
 })

@@ -64,6 +64,11 @@ const OWNERS = Object.freeze({
   // memoryAggregate.cjs's clustering result, rebuilt on any explicit
   // refresh:true. See memory-clusters/README.md.
   'memory-clusters': 'memory-clusters',
+  // Per-project UI state (PRD 1398) — small renderer prefs that used to live
+  // in cwd-scoped or (worse) global localStorage keys. Written directly by
+  // the renderer through the generic config:write-json IPC with writer:
+  // 'ui-prefs'; no dedicated main-process module. See ui-prefs/README.md.
+  'ui-prefs': 'ui-prefs',
 });
 
 /**

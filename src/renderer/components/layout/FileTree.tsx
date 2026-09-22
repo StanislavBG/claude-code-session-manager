@@ -5,7 +5,8 @@
  *   - Lazy expand: children are fetched on first toggle, then cached on the node.
  *   - Hidden-file toggle (re-fetches the root + re-restores expanded subtrees so
  *     their children reflect the new filter).
- *   - Expansion persists per-cwd (localStorage) and is restored on return.
+ *   - Expansion persists per-cwd (the active project's ui-prefs/prefs.json) and
+ *     is restored on return.
  *   - Fuzzy substring search filter against node names.
  *   - Per-row right-click context menu: rename / delete / new file / new folder
  *     / open externally / reveal in OS / copy path / send to chat.
@@ -23,39 +24,37 @@ import type { FileEntry, GitFileStatusMap, GitFileStatusType } from '../../../pr
 import { extOf, IMAGE_EXTS } from '../../state/editor'
 import { toast } from '../../state/toast'
 import { usePanelFocus, usePanelFocusRef } from '../../lib/panelFocus'
+import { readUiPrefs, writeUiPrefsPatch } from '../../lib/uiPrefs'
+import { readUiSettingsPrefs, writeUiSettingsPrefs } from '../../lib/uiSettingsPrefs'
 
-// Persist which folders are expanded, per-cwd, so browsing state survives
-// navigating away from the Files sidebar and back (the component unmounts, and
-// cwd changes wipe in-memory state). Keyed by cwd; capped to avoid unbounded
-// growth from deep one-off explorations.
-const EXPAND_KEY = (cwd: string) => `sm.fileTree.expanded:${cwd}`
-function loadExpanded(cwd: string): string[] {
-  try {
-    const raw = localStorage.getItem(EXPAND_KEY(cwd))
-    const arr = raw ? JSON.parse(raw) : []
-    return Array.isArray(arr) ? arr.filter((p) => typeof p === 'string') : []
-  } catch { return [] }
+// Persist which folders are expanded, per-cwd, in the active project's own
+// ui-prefs/prefs.json (session-manager-operations/ui-prefs/ — see its
+// README) rather than a `sm.fileTree.expanded:${cwd}` localStorage key per
+// cwd ever browsed, so browsing state survives navigating away from the
+// Files sidebar and back (the component unmounts, and cwd changes wipe
+// in-memory state) without growing one global key per project forever.
+// Capped to avoid unbounded growth from deep one-off explorations.
+async function loadExpanded(cwd: string): Promise<string[]> {
+  const prefs = await readUiPrefs(cwd)
+  return Array.isArray(prefs.fileTreeExpanded) ? prefs.fileTreeExpanded.filter((p) => typeof p === 'string') : []
 }
 function saveExpanded(cwd: string, set: Set<string>) {
-  try { localStorage.setItem(EXPAND_KEY(cwd), JSON.stringify([...set].slice(0, 500))) } catch { /* quota */ }
+  writeUiPrefsPatch(cwd, { fileTreeExpanded: [...set].slice(0, 500) }).catch(() => {})
 }
 // Drop `path` and any descendant of it from the expanded set, so a deleted or
 // renamed folder doesn't leave a dead entry that fires a doomed files.list on
 // every project switch. Returns a new set only when something was removed.
-// Persist the hidden-files toggle the same way (localStorage), but globally —
-// it's a user preference, not a per-cwd browsing state. `null` (never set)
-// must be distinguished from an explicitly stored `false`, since the default
-// is now `true`.
-export const SHOW_HIDDEN_KEY = 'sm.fileTree.showHidden'
-export function loadShowHidden(): boolean {
-  try {
-    const raw = localStorage.getItem(SHOW_HIDDEN_KEY)
-    if (raw === null) return true
-    return JSON.parse(raw) === true
-  } catch { return true }
+// Persist the hidden-files toggle in the machine-wide ui-settings-prefs.json
+// (lib/uiSettingsPrefs.ts) — it's a personal viewing preference, not per-cwd
+// browsing state, so it deliberately does NOT live in the per-project
+// ui-prefs file above. Falls back to `true` (the default) until hydration
+// resolves or if it was never set.
+export async function loadShowHidden(): Promise<boolean> {
+  const prefs = await readUiSettingsPrefs()
+  return typeof prefs.fileTreeShowHidden === 'boolean' ? prefs.fileTreeShowHidden : true
 }
 export function saveShowHidden(value: boolean) {
-  try { localStorage.setItem(SHOW_HIDDEN_KEY, JSON.stringify(value)) } catch { /* quota */ }
+  writeUiSettingsPrefs({ fileTreeShowHidden: value }).catch(() => {})
 }
 function pruneExpanded(set: Set<string>, path: string): Set<string> {
   const prefix = path + '/'
@@ -152,9 +151,27 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
   // can read the current set without re-subscribing to every expand/collapse.
   const expandedRef = useRef(expanded)
   expandedRef.current = expanded
+  // Guards the cwd-change effect's restored-expansion apply against a user
+  // toggle that lands before the ui-prefs read resolves — same ordering
+  // hazard as showHiddenUserSetRef above. Reset per cwd in that effect; set
+  // by persistExpanded, the single point where the expanded set mutates.
+  const expandedUserSetRef = useRef(false)
   const [search, setSearch] = useState('')
-  const [showHidden, setShowHiddenState] = useState(loadShowHidden)
+  // Starts at the default (true) and hydrates from the machine-wide
+  // ui-settings-prefs.json below — loadShowHidden() is now an async IPC read,
+  // so it can no longer seed useState's synchronous initializer. Guarded by
+  // showHiddenUserSetRef against the same ordering hazard uiSettingsPrefs.ts's
+  // owners hit under code review (a slow hydration read resolving AFTER the
+  // user already toggled must not silently revert their click).
+  const [showHidden, setShowHiddenState] = useState(true)
+  const showHiddenUserSetRef = useRef(false)
+  useEffect(() => {
+    let cancelled = false
+    loadShowHidden().then((v) => { if (!cancelled && !showHiddenUserSetRef.current) setShowHiddenState(v) })
+    return () => { cancelled = true }
+  }, [])
   const setShowHidden = useCallback((updater: boolean | ((prev: boolean) => boolean)) => {
+    showHiddenUserSetRef.current = true
     setShowHiddenState((prev) => {
       const next = typeof updater === 'function' ? (updater as (prev: boolean) => boolean)(prev) : updater
       saveShowHidden(next)
@@ -236,7 +253,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
 
   // Load + RESTORE expansion when cwd changes. `cancelled` gates only the
   // non-root tail (dead-entry prune + git status); the tree writes themselves
-  // are guarded by loadReqRef inside reloadAndRestore.
+  // are guarded by loadReqRef inside restoreSubtrees.
   useEffect(() => {
     setSearch('')
     setRenaming(null)
@@ -244,13 +261,26 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     setCreatePrompt(null)
     setDeleteConfirm(null)
     setGitStatus({})
-    const restored = loadExpanded(cwd)
-    const initial = new Set(restored)
-    expandedRef.current = initial
-    setExpanded(initial)
     let cancelled = false
+    expandedUserSetRef.current = false
     ;(async () => {
-      const dead = await reloadAndRestore(restored)
+      // loadExpanded (an IPC read of the project's ui-prefs file) and loadRoot
+      // run concurrently rather than serially, so the expansion-prefs round
+      // trip doesn't delay the root listing from starting. restoreSubtrees is
+      // only called once BOTH have resolved — it attaches children onto the
+      // root nodes loadRoot's setRoot produced, so it must never race ahead
+      // of that write.
+      const [restored] = await Promise.all([loadExpanded(cwd), loadRoot()])
+      if (cancelled) return
+      // A user already toggled a folder (persistExpanded) while this read was
+      // in flight — that choice wins over the now-stale disk snapshot.
+      if (!expandedUserSetRef.current) {
+        const initial = new Set(restored)
+        expandedRef.current = initial
+        setExpanded(initial)
+      }
+      if (!restored.length) return
+      const dead = await restoreSubtrees(restored)
       if (cancelled || !dead.length) return
       // Single pass: drop every persisted path that is dead or a descendant of
       // one, so a folder deleted while away leaves no ghost re-firing files.list.
@@ -266,9 +296,9 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     })()
     tryLoadGitStatus(cwd).then((s) => { if (!cancelled) setGitStatus(s) })
     return () => { cancelled = true }
-    // cwd alone drives this effect. reloadAndRestore also closes over showHidden,
-    // so listing it would wrongly re-reset transient state on a hidden toggle —
-    // the separate effect below owns that path.
+    // cwd alone drives this effect. loadRoot/restoreSubtrees also close over
+    // showHidden, so listing it would wrongly re-reset transient state on a
+    // hidden toggle — the separate effect below owns that path.
   }, [cwd])
 
   // Re-load when the hidden toggle changes. Skip the initial mount (the cwd
@@ -332,6 +362,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     const prev = expandedRef.current
     const next = updater(prev)
     if (next === prev) return
+    expandedUserSetRef.current = true
     expandedRef.current = next
     setExpanded(next)
     saveExpanded(cwd, next)

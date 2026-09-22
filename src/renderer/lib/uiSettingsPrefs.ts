@@ -2,8 +2,12 @@
  * Shared disk-backed file for small, unrelated-but-machine-wide UI settings —
  * the raw-session default model (`lib/rawSessionModel.ts`), the terminal
  * appearance theme/font size (`lib/terminalSettings.ts`), the Editor scene's
- * prefs (`state/editorPrefs.ts`), and the History screen's analytics/budget
- * prefs (`lib/historyAnalyticsPrefs.ts`). One file, four independent owners:
+ * prefs (`state/editorPrefs.ts`), the History screen's analytics/budget
+ * prefs (`lib/historyAnalyticsPrefs.ts`), and the Files sidebar's hidden-file
+ * toggle (`components/layout/FileTree.tsx`) — deliberately global rather than
+ * per-project, since it's a personal viewing preference, not project data
+ * (see `session-manager-operations/ui-prefs/README.md` for the per-project
+ * counterpart). One file, five independent owners:
  * `writeUiSettingsPrefs` always re-reads the current contents before writing
  * its patch (mirrors `appPrefs.ts`'s read-modify-write), so one field's write
  * never clobbers another's. Two of those owners (editor, history) are each a
@@ -31,6 +35,7 @@ export interface UiSettingsPrefs {
     range?: number
     budgetCapUsd?: number
   }
+  fileTreeShowHidden?: boolean
 }
 
 export const UI_SETTINGS_PREFS_FILE = '~/.claude/session-manager/ui-settings-prefs.json'

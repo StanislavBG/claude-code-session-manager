@@ -81,6 +81,7 @@ const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { appendResponseEventIfKnown } = require('./promptSessionEvents.cjs');
 const { maybeEnqueueValidationPrompt } = require('./lib/epicValidationHook.cjs');
 const { parseValidationSentinels } = require('./lib/validationSentinels.cjs');
+const { hasDownstreamValidator } = require('./lib/planValidator.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { verifyRun, parseLog, scanSentinel, scanForeignWipPathsClaim } = require('./runVerify.cjs');
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/terminalRunOutcome.cjs');
@@ -275,7 +276,17 @@ const BASH_MAX_TIMEOUT_MS = 900_000; // 15 min — must stay below IDLE_OUTPUT_K
 // centrally here (not per-PRD) so it applies to every current and future PRD.
 // The commit step is also backstopped by the post-run commit guard below: a
 // clean exit that leaves uncommitted changes is downgraded to needs_review.
-const FINISH_PROTOCOL = `
+//
+// PRD 1408: a plan that ends in its own trailing `validator` job (PRD
+// 1405/1407) already re-reviews every work-item's diff once, so asking EVERY
+// work-item to also run /code-review + /security-review inline is duplicate
+// review work — and the dominant cost tail on multi-file PRDs. buildFinishProtocol
+// derives a `reviewInRun: false` variant that collapses those two steps into
+// one deferral note and renumbers the rest, sharing every other word
+// byte-for-byte with the default (`reviewInRun: true`, which is exactly
+// FINISH_PROTOCOL) via the head/review-steps/tail pieces below.
+function buildFinishHead(verifyStepNum) {
+  return `
 
 ---
 # SCHEDULER FINISH PROTOCOL (mandatory — runs AFTER the work above)
@@ -284,7 +295,7 @@ Once every acceptance-criteria line above is satisfied, finish in this EXACT
 sequence. Do not stop before the commit lands; committing is part of the job.
 
 RUN VERIFICATION IN THE FOREGROUND — this applies to the whole run, not just
-step 3 below: every test/typecheck/lint/build command you run, whether while
+step ${verifyStepNum} below: every test/typecheck/lint/build command you run, whether while
 implementing the AC or during VERIFY, must run SYNCHRONOUSLY and you must wait
 for it to return. Never start a verification command as a background task
 (no background Bash) and then call Monitor, TaskOutput, or ScheduleWakeup to
@@ -297,17 +308,26 @@ to fit inside that ceiling; if a gate command still cannot finish inside
 budget, stop and emit SCHEDULER_VERDICT: FAIL with the reason instead of
 deferring it.
 
-1. CODE REVIEW — run \`/code-review --fix\` on your changes and apply the fixes it
+`;
+}
+
+const FINISH_REVIEW_STEPS_IN_RUN = `1. CODE REVIEW — run \`/code-review --fix\` on your changes and apply the fixes it
    surfaces (correctness first). For any finding you judge a false positive, say
    why in your result; do not silently skip it. If \`/code-review\` is not
    available in this environment, do an equivalent careful self-review instead.
 2. SECURITY REVIEW — run \`/security-review\` and address every finding (or
    justify it). If unavailable, self-review the diff for injection, secrets,
    path traversal, and unsafe input handling.
-3. VERIFY — run the project's OWN check commands (typecheck / lint / tests — the
+`;
+
+const FINISH_REVIEW_STEP_DEFERRED = `1. REVIEW — code and security review for this plan run once, in its trailing validator job. Do NOT run /code-review or /security-review here.
+`;
+
+function buildFinishTail({ verifyStepNum, commitStepNum, verdictStepNum }) {
+  return `${verifyStepNum}. VERIFY — run the project's OWN check commands (typecheck / lint / tests — the
    project's CLAUDE.md names them; infer from the repo if not) and make them
    pass. Do not assume npm; use whatever the target project uses.
-4. COMMIT — the queue can run several jobs against this SAME working tree at
+${commitStepNum}. COMMIT — the queue can run several jobs against this SAME working tree at
    once. Do NOT stage the whole working tree in one blanket/wildcard git-add
    sweep — that captures whatever a concurrent sibling job is mid-writing and
    mis-attributes its work to this commit, corrupting both jobs' verdicts.
@@ -315,12 +335,12 @@ deferring it.
    commit: \`git add <path> [<path>...] && git commit -m "<type>(<scope>): <summary>"\`.
    Your own work must still never be left uncommitted — this only changes
    which paths get staged, never whether you commit.
-5. VERDICT SENTINEL — as the LAST LINE of your final result text, emit exactly
+${verdictStepNum}. VERDICT SENTINEL — as the LAST LINE of your final result text, emit exactly
    one of these lines (no trailing text after it):
      SCHEDULER_VERDICT: PASS
      SCHEDULER_VERDICT: FAIL <one-line reason>
      SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP
-   Print PASS only when the AC gate is green AND the commit from step 4 landed.
+   Print PASS only when the AC gate is green AND the commit from step ${commitStepNum} landed.
    Print FAIL (and exit 1) if the AC gate was red or the commit could not land.
    NEVER print PASS on a red AC gate — a lying PASS turns the verifier from a
    false-failure catcher into a silent-failure shipper. A truthful PASS + a
@@ -349,6 +369,30 @@ for review. Do NOT add work beyond the acceptance criteria — this protocol is 
 only post-AC work. If a review finding can't be fixed within scope, commit what
 you have, describe the finding in the commit body, and note the follow-up in your
 final result.`;
+}
+
+/**
+ * buildFinishProtocol({ reviewInRun }) → string
+ *
+ * `reviewInRun: true` (default) is byte-for-byte FINISH_PROTOCOL: steps 1-5
+ * are CODE REVIEW, SECURITY REVIEW, VERIFY, COMMIT, VERDICT SENTINEL.
+ * `reviewInRun: false` collapses the two review steps into one deferral note
+ * (step 1) and renumbers VERIFY/COMMIT/VERDICT SENTINEL to 2-4 — used when
+ * `hasDownstreamValidator` (lib/planValidator.cjs) finds this job's diff will
+ * be re-reviewed once by the plan's own trailing validator job, so asking
+ * every work-item to also run /code-review + /security-review inline is
+ * redundant review work.
+ */
+function buildFinishProtocol({ reviewInRun = true } = {}) {
+  if (reviewInRun) {
+    return buildFinishHead(3) + FINISH_REVIEW_STEPS_IN_RUN
+      + buildFinishTail({ verifyStepNum: 3, commitStepNum: 4, verdictStepNum: 5 });
+  }
+  return buildFinishHead(2) + FINISH_REVIEW_STEP_DEFERRED
+    + buildFinishTail({ verifyStepNum: 2, commitStepNum: 3, verdictStepNum: 4 });
+}
+
+const FINISH_PROTOCOL = buildFinishProtocol({ reviewInRun: true });
 
 // Unquote a single git porcelain v1 path token. Defined once in
 // gitWorktree.cjs (which this file already requires — the reverse would be
@@ -4299,6 +4343,11 @@ async function notifyOriginatingTab(job, {
   appendTranscriptTurn = promptSessionTranscript.appendTurn,
   readResultFromLog = extractResultTextFromLog,
   enqueueValidation = maybeEnqueueValidationPrompt,
+  // PRD 1408: same queue rows spawnJob/tickQueue already use — read fresh
+  // here (not threaded through the terminal-transition snapshot) since this
+  // fires well after dispatch, when the plan may have gained/dropped a
+  // trailing validator row since this job was spawned.
+  loadJobs = async () => (await readQueue()).jobs || [],
 } = {}) {
   try {
     const prd = await resolveNotifyPrd(job, parsePrdRaw);
@@ -4422,21 +4471,35 @@ async function notifyOriginatingTab(job, {
         // PRD 1407: a validator job's own check-in never enqueues a
         // validation prompt for itself — it IS the plan's validation pass,
         // not a work-item awaiting one.
+        //
+        // PRD 1408: nor does an ordinary work-item whose plan already ends in
+        // a trailing validator job depending on it — that validator's own
+        // check-in (above) is the single validation pass for the whole plan,
+        // so a per-PRD prompt here would be a second, redundant ask into the
+        // same (Opus/Fable-tier) authoring session.
         if (job.agentType !== 'validator') {
+          let skipForDownstreamValidator = false;
           try {
-            enqueueValidation(
-              {
-                cwd: job.cwd || null,
-                epicId,
-                prdSlug: job.slug,
-                prdPath: prd?.path || archivedPrdPathForJob(job) || null,
-                outcome: job.status,
-                eventValidation: 'unvalidated',
-              },
-              { sendPrompt },
-            );
+            skipForDownstreamValidator = hasDownstreamValidator(job, await loadJobs());
           } catch (e) {
-            console.error('[scheduler] notifyOriginatingTab enqueueValidation error', job?.slug, e);
+            console.error('[scheduler] notifyOriginatingTab loadJobs error', job?.slug, e);
+          }
+          if (!skipForDownstreamValidator) {
+            try {
+              enqueueValidation(
+                {
+                  cwd: job.cwd || null,
+                  epicId,
+                  prdSlug: job.slug,
+                  prdPath: prd?.path || archivedPrdPathForJob(job) || null,
+                  outcome: job.status,
+                  eventValidation: 'unvalidated',
+                },
+                { sendPrompt },
+              );
+            } catch (e) {
+              console.error('[scheduler] notifyOriginatingTab enqueueValidation error', job?.slug, e);
+            }
           }
         }
         return;
@@ -5413,7 +5476,7 @@ function pickRunDir() {
  * Watchdogs are declared as an array; the result-tailer's exit-code mapping
  * (success+killedBySignal → 0) is scheduler-specific and lives in onExit.
  */
-async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget = null, foreignWip = null, launchEnv = null, onPhase = null) {
+async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget = null, foreignWip = null, launchEnv = null, onPhase = null, reviewInRun = true) {
   // First statement — stamps the 'exec-entered' dispatch-phase breadcrumb
   // before openLog below, so a hang inside openLog/spawn itself still shows
   // execution reached this function (see spawnJob's dispatchPhase comment).
@@ -5599,7 +5662,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // Always route through composeExecutorPrompt (even with an empty digest)
   // so the finish protocol is appended in the prompt's tail exactly once,
   // after any digest fence rather than concatenated ahead of it.
-  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: FINISH_PROTOCOL });
+  prompt = composeExecutorPrompt({ prdBody: prompt, digestText, finishProtocol: buildFinishProtocol({ reviewInRun }) });
 
   // Foreign-WIP manifest (starry-night-ships PRD 148 postmortem): the
   // scheduler already knows, at spawn time, which dirty paths this job did
@@ -6820,7 +6883,15 @@ function guardedTick(fn, label) {
   }
 }
 
-async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
+async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, siblingJobs = null) {
+  // PRD 1408: the queue rows in scope at dispatch (tickQueue's own
+  // state.jobs, threaded straight down — never re-read here or inside
+  // executeJob) decide whether this job's own finish protocol still needs to
+  // run /code-review + /security-review inline, or can defer to a downstream
+  // `validator` job that will re-review this diff once the plan finishes.
+  // A caller with no rows in scope (spawnResumeRecovery) reads them itself,
+  // once, before delegating to spawnJob — still never inside executeJob.
+  const reviewInRun = !hasDownstreamValidator(job, siblingJobs || []);
   // Session-Manager owns the machine-wide `claude -p` pool (sessionSlots.cjs)
   // — the scheduler REQUESTS capacity, it doesn't own a private cap. A miss
   // leaves the job pending; the next tick retries when a slot frees up.
@@ -7192,7 +7263,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null) {
             s.jobs[idx].dispatchPhaseAt = new Date().toISOString();
           }
         });
-      });
+      }, reviewInRun);
     } finally {
       if (worktree.ok) {
         ({ worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths } =
@@ -8227,7 +8298,11 @@ async function reclaimTerminalJobOrphansThrottled(state) {
  */
 async function spawnResumeRecovery(job, resumeTarget) {
   const { runId, dir: runDir } = pickRunDir();
-  await spawnJob(job, runId, runDir, job.cwd || DEFAULT_PROJECT_CWD, resumeTarget);
+  // No queue rows in scope here (unlike tickQueue's own dispatch loop) — read
+  // once, before delegating to spawnJob, so hasDownstreamValidator still
+  // never runs inside executeJob itself.
+  const siblingJobs = (await readQueue().catch(() => ({ jobs: [] }))).jobs || [];
+  await spawnJob(job, runId, runDir, job.cwd || DEFAULT_PROJECT_CWD, resumeTarget, siblingJobs);
 }
 
 // Serialized ticker: prevents two concurrent tickQueue() calls from racing
@@ -8487,7 +8562,10 @@ async function tickBody(gen, { bypassLoadGate }) {
     for (const job of gatedBatch) {
       if (cancelToken.cancelled || stale()) break;
       // spawnJob is fire-and-forget; it calls tickQueue() on completion.
-      spawnJob(job, runId, runDir, state.config.defaultCwd).catch((e) => reportSchedulerError('spawnJob dispatch rejected', job.slug, e));
+      // state.jobs is the queue's rows in scope at THIS dispatch (PRD 1408) —
+      // threaded straight through so spawnJob's hasDownstreamValidator check
+      // never re-reads the queue itself.
+      spawnJob(job, runId, runDir, state.config.defaultCwd, null, state.jobs).catch((e) => reportSchedulerError('spawnJob dispatch rejected', job.slug, e));
     }
     return recordTick({ fired: true, count: gatedBatch.length, group: gatedBatch[0]?.parallelGroup }, { holds });
   }
@@ -12780,6 +12858,7 @@ module.exports = {
   parsePorcelain,
   parsePorcelainEntries,
   FINISH_PROTOCOL,
+  buildFinishProtocol,
   IDLE_OUTPUT_KILL_MS,
   BASH_DEFAULT_TIMEOUT_MS,
   BASH_MAX_TIMEOUT_MS,

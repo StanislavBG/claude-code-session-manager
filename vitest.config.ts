@@ -53,6 +53,7 @@ export default defineConfig({
       'src/main/__tests__/prdParserSourcePromptId.test.cjs',
       'src/main/__tests__/scheduler-notify-originating-tab.test.cjs',
       'src/main/__tests__/validationSentinels.test.cjs',
+      'src/main/__tests__/planValidator.test.cjs',
       'src/main/__tests__/scheduler-heal-refusal.test.cjs',
       'src/main/__tests__/chat-dead-channels.test.cjs',
       'src/main/__tests__/chat-preamble-anchors.test.cjs',

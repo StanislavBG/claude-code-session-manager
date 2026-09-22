@@ -302,3 +302,42 @@ test('PRD 1407: a validator job with two sentinel lines appends two verdict even
   );
   expect(enqueueValidation).not.toHaveBeenCalled();
 });
+
+// ─── PRD 1408: a downstream validator suppresses the per-PRD validation ask ─
+test('skips enqueueValidation when loadJobs reports a pending validator row depending on this job', async () => {
+  const sendPrompt = vi.fn();
+  const appendResponseEvent = vi.fn(async () => true);
+  const enqueueValidation = vi.fn();
+  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1' }));
+  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+  const loadJobs = vi.fn(async () => ([
+    { slug: '1408-work-item' },
+    { slug: '1408-validate', agentType: 'validator', status: 'pending', dependsOn: ['1408-work-item'] },
+  ]));
+
+  await notifyOriginatingTab(
+    { slug: '1408-work-item', status: 'completed', cwd: '/some/cwd' },
+    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, enqueueValidation, loadJobs },
+  );
+
+  expect(appendResponseEvent).toHaveBeenCalledTimes(1);
+  expect(loadJobs).toHaveBeenCalledTimes(1);
+  expect(enqueueValidation).not.toHaveBeenCalled();
+});
+
+test('still enqueues validation when loadJobs reports no downstream validator', async () => {
+  const sendPrompt = vi.fn();
+  const appendResponseEvent = vi.fn(async () => true);
+  const enqueueValidation = vi.fn();
+  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1' }));
+  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+  const loadJobs = vi.fn(async () => ([{ slug: '1408-work-item' }]));
+
+  await notifyOriginatingTab(
+    { slug: '1408-work-item', status: 'completed', cwd: '/some/cwd' },
+    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, enqueueValidation, loadJobs },
+  );
+
+  expect(appendResponseEvent).toHaveBeenCalledTimes(1);
+  expect(enqueueValidation).toHaveBeenCalledTimes(1);
+});

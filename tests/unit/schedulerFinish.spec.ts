@@ -13,7 +13,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { parsePorcelain, FINISH_PROTOCOL, computeCommittedDuringRun } = require('../../src/main/scheduler.cjs')
+const { parsePorcelain, FINISH_PROTOCOL, buildFinishProtocol, computeCommittedDuringRun } = require('../../src/main/scheduler.cjs')
 
 describe('parsePorcelain (commit guard)', () => {
   it('returns [] for an empty / clean tree', () => {
@@ -77,6 +77,27 @@ describe('FINISH_PROTOCOL', () => {
     expect(FINISH_PROTOCOL).toMatch(/timeout \d+/)
     // governs the whole run, not just step 3 VERIFY
     expect(FINISH_PROTOCOL).toMatch(/whole run, not just\s*\nstep 3/)
+  })
+})
+
+describe('buildFinishProtocol (PRD 1408: yields to a plan-level validator)', () => {
+  it('reviewInRun: true is byte-for-byte FINISH_PROTOCOL', () => {
+    expect(buildFinishProtocol({ reviewInRun: true })).toBe(FINISH_PROTOCOL)
+  })
+
+  it('reviewInRun: false drops the two review-invocation steps but keeps the commit + verdict contract', () => {
+    const deferred = buildFinishProtocol({ reviewInRun: false })
+    // No standalone CODE REVIEW / SECURITY REVIEW steps, and no backtick-quoted
+    // invocation of either tool (the deferred step names them only inside a
+    // "Do NOT run /code-review or /security-review here" instruction not to).
+    expect(deferred).not.toMatch(/CODE REVIEW —/)
+    expect(deferred).not.toMatch(/SECURITY REVIEW —/)
+    expect(deferred).not.toMatch(/`\/code-review/)
+    expect(deferred).not.toMatch(/`\/security-review/)
+    expect(deferred).toMatch(/Do NOT run \/code-review or \/security-review here/)
+    expect(deferred).toMatch(/git add <path>/)
+    expect(deferred).toMatch(/SYNCHRONOUSLY/)
+    expect(deferred).toMatch(/SCHEDULER_VERDICT: PASS/)
   })
 })
 

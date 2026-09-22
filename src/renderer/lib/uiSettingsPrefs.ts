@@ -22,8 +22,22 @@ export async function readUiSettingsPrefs(): Promise<UiSettingsPrefs> {
   return {}
 }
 
-export async function writeUiSettingsPrefs(patch: UiSettingsPrefs): Promise<void> {
-  if (typeof window === 'undefined' || !window.api?.config?.writeJson) return
-  const current = await readUiSettingsPrefs()
-  await window.api.config.writeJson(UI_SETTINGS_PREFS_FILE, { ...current, ...patch })
+// Serializes every write through this module so the two independent owners'
+// read-modify-write cycles can never interleave (rawSessionModel.ts's and
+// terminalSettings.ts's writes both funnel through here): without this, a
+// write's own read could complete before an overlapping write's read lands
+// its file update, and the later write's `{ ...current, ...patch }` would
+// spread a now-stale `current`, silently dropping the other field's change.
+let writeQueue: Promise<void> = Promise.resolve()
+
+export function writeUiSettingsPrefs(patch: UiSettingsPrefs): Promise<void> {
+  const run = writeQueue.then(async () => {
+    if (typeof window === 'undefined' || !window.api?.config?.writeJson) return
+    const current = await readUiSettingsPrefs()
+    await window.api.config.writeJson(UI_SETTINGS_PREFS_FILE, { ...current, ...patch })
+  })
+  // Chain the queue through a swallowed copy so one write's rejection never
+  // stalls the next caller's turn; `run` itself still rejects for its own caller.
+  writeQueue = run.catch(() => {})
+  return run
 }

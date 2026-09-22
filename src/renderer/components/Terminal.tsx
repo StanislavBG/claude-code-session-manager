@@ -6,7 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import { useSessions } from '../state/sessions'
 import { useEditor } from '../state/editor'
 import { toast } from '../state/toast'
-import { applyTerminalSettings, loadTerminalSettings, onTerminalSettingsChange, DEFAULT_TERMINAL_SETTINGS, TERMINAL_THEMES } from '../lib/terminalSettings'
+import { mountTerminalSettings, DEFAULT_TERMINAL_SETTINGS, TERMINAL_THEMES } from '../lib/terminalSettings'
 import { EpicsWorkspace } from './epics/EpicsWorkspace'
 import { fetchTerminalDigest } from '../lib/terminalDigest'
 import { PasteThumbnail } from './PasteThumbnail'
@@ -56,7 +56,6 @@ export function Terminal({ tabId, cwd }: Props) {
     console.log('[Terminal] mount effect running, tabId=', tabId, 'cwd=', cwd, 'alreadySpawned=', spawnedRef.current)
     if (!hostRef.current || spawnedRef.current) return
     spawnedRef.current = true
-    let disposed = false
 
     // Two-phase mount: paint with the default immediately (loadTerminalSettings
     // is an async IPC read) then apply the real value once it resolves, below.
@@ -77,14 +76,10 @@ export function Terminal({ tabId, cwd }: Props) {
       try { fit.fit() } catch { /* ignore */ }
     }
 
-    void loadTerminalSettings().then((s) => {
-      if (!disposed) applyTerminalSettings(term, s, guardedFit)
-    })
-
     // Live theme + font updates from the TerminalControls popover. xterm v5
     // accepts assignment to `term.options.*` without remount, but font size
     // changes need a refit so the existing rows reflow.
-    const offSettings = onTerminalSettingsChange((s) => applyTerminalSettings(term, s, guardedFit))
+    const offSettings = mountTerminalSettings(term, guardedFit)
     // WebLinksAddon with an explicit handler: by default the addon underlines
     // URLs but the click hits the xterm <div> and dies (setWindowOpenHandler
     // only fires on window.open()). Routing through the new app:open-external
@@ -259,7 +254,6 @@ export function Terminal({ tabId, cwd }: Props) {
     ro.observe(hostRef.current)
 
     return () => {
-      disposed = true
       window.removeEventListener('resize', onWinResize)
       window.removeEventListener(WORKBENCH_REFIT_EVENT, onWinResize)
       ro.disconnect()

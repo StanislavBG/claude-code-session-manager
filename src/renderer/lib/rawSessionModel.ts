@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { readUiSettingsPrefs, writeUiSettingsPrefs } from './uiSettingsPrefs'
+import { toast } from '../state/toast'
 
 /** Any alias (`opus`, `opus[1m]`) or concrete id (`claude-opus-5`) the CLI's `--model` accepts. */
 export type RawModel = string
@@ -37,10 +38,15 @@ export function isRawModel(x: string): x is RawModel {
 // cache-then-refresh pattern: a hot path never blocks on disk).
 let current: RawModel = DEFAULT
 const listeners = new Set<(m: RawModel) => void>()
+// True once a user action has set a value — guards `hydrate()`'s disk read
+// (fired at module load) from overwriting a choice the user already made
+// while that read was still in flight.
+let userSet = false
 
 async function hydrate(): Promise<void> {
   try {
     const prefs = await readUiSettingsPrefs()
+    if (userSet) return
     if (typeof prefs.rawSessionModel === 'string' && isRawModel(prefs.rawSessionModel)) {
       current = prefs.rawSessionModel
       listeners.forEach((fn) => fn(current))
@@ -57,10 +63,18 @@ export function getRawSessionModel(): RawModel {
 }
 
 export function setRawSessionModel(m: RawModel): void {
+  userSet = true
   if (m === current) return
+  const previous = current
   current = m
   listeners.forEach((fn) => fn(m))
-  void writeUiSettingsPrefs({ rawSessionModel: m }).catch(() => { /* ignore */ })
+  writeUiSettingsPrefs({ rawSessionModel: m }).catch(() => {
+    // Persist failed — revert so the UI doesn't show a choice that never
+    // reached disk, and tell the user (CLAUDE.md: never swallow errors).
+    current = previous
+    listeners.forEach((fn) => fn(current))
+    toast.error("Couldn't save the default model — reverted.")
+  })
 }
 
 export function useRawSessionModel(): { model: RawModel; setModel: (m: RawModel) => void } {

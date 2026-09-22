@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { applyTerminalSettings, loadTerminalSettings, onTerminalSettingsChange, DEFAULT_TERMINAL_SETTINGS, TERMINAL_THEMES } from '../lib/terminalSettings'
+import { mountTerminalSettings, DEFAULT_TERMINAL_SETTINGS, TERMINAL_THEMES } from '../lib/terminalSettings'
 import { writeInChunks } from './Terminal'
 import { canFit } from '../lib/terminalFit'
 import { transcriptExists } from '../lib/transcriptExists'
@@ -57,7 +57,6 @@ export function InlineConsentTerminal({ sessionId, cwd, command, onGranted, onCl
   useEffect(() => {
     if (!hostRef.current || spawnedRef.current) return
     spawnedRef.current = true
-    let disposed = false
 
     // Two-phase mount: paint with the default immediately (loadTerminalSettings
     // is an async IPC read) then apply the real value once it resolves, below.
@@ -77,10 +76,7 @@ export function InlineConsentTerminal({ sessionId, cwd, command, onGranted, onCl
       if (!el || !canFit(el.clientWidth, el.clientHeight)) return
       try { fit.fit() } catch { /* ignore */ }
     }
-    void loadTerminalSettings().then((s) => {
-      if (!disposed) applyTerminalSettings(term, s, guardedFit)
-    })
-    const offSettings = onTerminalSettingsChange((s) => applyTerminalSettings(term, s, guardedFit))
+    const offSettings = mountTerminalSettings(term, guardedFit)
 
     term.open(hostRef.current)
     guardedFit()
@@ -126,7 +122,6 @@ export function InlineConsentTerminal({ sessionId, cwd, command, onGranted, onCl
     ro.observe(hostRef.current)
 
     return () => {
-      disposed = true
       window.removeEventListener('resize', onWinResize)
       ro.disconnect()
       offData()

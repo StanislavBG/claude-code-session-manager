@@ -30,8 +30,9 @@
  * `loadTerminalSettings()` is async (an IPC round trip), so every mount site
  * (`Terminal.tsx`, `epics/EpicTerminalPane.tsx`, `InlineConsentTerminal.tsx`)
  * does a two-phase mount: construct the xterm instance with
- * `DEFAULT_TERMINAL_SETTINGS` immediately, then apply the loaded value via
- * `applyTerminalSettings()` once the read resolves.
+ * `DEFAULT_TERMINAL_SETTINGS` immediately, then call `mountTerminalSettings()`
+ * to apply the loaded value once the read resolves and stay subscribed to
+ * live updates.
  *
  * ## Where it is edited
  *
@@ -44,6 +45,7 @@
 
 import type { ITheme, Terminal as XTerm } from '@xterm/xterm'
 import { readUiSettingsPrefs, writeUiSettingsPrefs } from './uiSettingsPrefs'
+import { toast } from '../state/toast'
 
 export type TerminalThemeName = 'dark' | 'light' | 'paper'
 
@@ -84,7 +86,12 @@ export async function loadTerminalSettings(): Promise<TerminalSettings> {
 export async function saveTerminalSettings(s: TerminalSettings): Promise<void> {
   try {
     await writeUiSettingsPrefs({ terminal: s })
-  } catch { /* IPC failure — ignore, still broadcast so live xterms stay in sync */ }
+  } catch {
+    // Still broadcast below so every live xterm stays visually in sync for
+    // this session, but the value won't survive a restart — say so
+    // (CLAUDE.md: never swallow errors).
+    toast.error("Couldn't save terminal appearance — it won't persist after restart.")
+  }
   window.dispatchEvent(new CustomEvent<TerminalSettings>(EVENT_NAME, { detail: s }))
 }
 
@@ -95,6 +102,32 @@ export function applyTerminalSettings(term: XTerm, s: TerminalSettings, refit?: 
   term.options.theme = TERMINAL_THEMES[s.theme]
   term.options.fontSize = s.fontSize
   refit?.()
+}
+
+/**
+ * Wires a freshly-constructed xterm instance (already painted with
+ * DEFAULT_TERMINAL_SETTINGS) to this module: applies the real settings once
+ * `loadTerminalSettings()` resolves, then keeps it live via
+ * `onTerminalSettingsChange`. The single place all 3 mount sites route
+ * through, so the ordering guard below — a live broadcast that arrives while
+ * the initial load is still in flight must win, never be undone by that
+ * slower-resolving initial value once it lands — lives once, not 3 times.
+ * Returns an unsubscribe function to call from the mount effect's cleanup.
+ */
+export function mountTerminalSettings(term: XTerm, refit?: () => void): () => void {
+  let disposed = false
+  let liveUpdateReceived = false
+  const off = onTerminalSettingsChange((s) => {
+    liveUpdateReceived = true
+    applyTerminalSettings(term, s, refit)
+  })
+  void loadTerminalSettings().then((s) => {
+    if (!disposed && !liveUpdateReceived) applyTerminalSettings(term, s, refit)
+  })
+  return () => {
+    disposed = true
+    off()
+  }
 }
 
 /** Subscribe a live xterm instance to settings changes. */

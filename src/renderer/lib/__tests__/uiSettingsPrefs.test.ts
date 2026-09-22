@@ -52,4 +52,44 @@ describe('uiSettingsPrefs', () => {
     installApi({ readJson, writeJson })
     await expect(writeUiSettingsPrefs({ rawSessionModel: 'sonnet' })).rejects.toThrow('disk full')
   })
+
+  it('serializes two overlapping writes so the later one never reads a stale snapshot (cross-feature TOCTOU)', async () => {
+    let store: Record<string, unknown> = {}
+    const readJson = vi.fn(async () => ({ exists: Object.keys(store).length > 0, data: { ...store } }))
+    const writeResolvers: Array<() => void> = []
+    const writeJson = vi.fn((_path: string, data: unknown) => new Promise<void>((resolve) => {
+      writeResolvers.push(() => {
+        store = { ...(data as Record<string, unknown>) }
+        resolve()
+      })
+    }))
+    installApi({ readJson, writeJson })
+
+    // rawSessionModel.ts and terminalSettings.ts both write through this
+    // module — issuing their writes back-to-back must not let the second
+    // one's read-modify-write cycle start before the first one's write lands.
+    const p1 = writeUiSettingsPrefs({ rawSessionModel: 'sonnet' })
+    await vi.waitFor(() => expect(writeJson).toHaveBeenCalledTimes(1))
+
+    const p2 = writeUiSettingsPrefs({ terminal: { theme: 'paper', fontSize: 18 } })
+    // p2 must be queued behind p1, not racing its read against p1's write.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(writeJson).toHaveBeenCalledTimes(1)
+
+    writeResolvers[0]()
+    await p1
+    await vi.waitFor(() => expect(writeJson).toHaveBeenCalledTimes(2))
+    // p2's read-modify-write must have picked up p1's already-applied field.
+    expect(writeJson.mock.calls[1][1]).toEqual({
+      rawSessionModel: 'sonnet',
+      terminal: { theme: 'paper', fontSize: 18 },
+    })
+
+    writeResolvers[1]()
+    await p2
+    expect(store).toEqual({
+      rawSessionModel: 'sonnet',
+      terminal: { theme: 'paper', fontSize: 18 },
+    })
+  })
 })

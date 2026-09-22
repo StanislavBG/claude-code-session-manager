@@ -127,4 +127,34 @@ describe('TerminalAppearanceCard', () => {
     expect(container.querySelector('[data-testid="terminal-theme-light"]')?.getAttribute('aria-pressed')).toBe('true')
     expect(container.textContent).toContain('18px')
   })
+
+  it('does not clobber a saved field when clicked before hydration resolves (regression)', async () => {
+    act(() => root.unmount())
+    container.remove()
+    installApi()
+    store.terminal = { theme: 'paper', fontSize: 18 }
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    act(() => { root.render(createElement(TerminalAppearanceCard)) })
+
+    // The controls are disabled and inert until hydration resolves — a click
+    // that landed on the still-DEFAULT seed value would otherwise merge onto
+    // it and silently overwrite whichever field the user didn't just touch
+    // (e.g. clicking "light" before load resolves would write fontSize back
+    // to the DEFAULT 13, discarding the saved fontSize: 18).
+    const themeBtn = container.querySelector('[data-testid="terminal-theme-light"]') as HTMLButtonElement
+    expect(themeBtn.disabled).toBe(true)
+    act(() => { themeBtn.click() })
+    expect(writeJson).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(currentTheme()).toBe('paper')
+    expect(currentFontSize()).toBe(18)
+    expect(themeBtn.disabled).toBe(false)
+  })
 })

@@ -57,4 +57,40 @@ describe('rawSessionModel', () => {
       expect.objectContaining({ rawSessionModel: 'haiku' }),
     ))
   })
+
+  it('setRawSessionModel wins over a hydrate() read that resolves later with a stale value (regression)', async () => {
+    let resolveRead: (v: unknown) => void = () => {}
+    const readJson = vi.fn().mockReturnValue(new Promise((r) => { resolveRead = r }))
+    installApi({ readJson, writeJson: vi.fn().mockResolvedValue(undefined) })
+    const { getRawSessionModel, setRawSessionModel } = await freshModule()
+
+    // User picks a model before hydrate()'s own disk read resolves.
+    setRawSessionModel('haiku')
+    expect(getRawSessionModel()).toBe('haiku')
+
+    // hydrate() finally resolves with the OLDER on-disk value — it must not
+    // stomp the choice the user already made in the interim.
+    resolveRead({ exists: true, data: { rawSessionModel: 'sonnet' } })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(getRawSessionModel()).toBe('haiku')
+  })
+
+  it('setRawSessionModel reverts to the previous value and toasts when the write fails', async () => {
+    installApi({
+      readJson: vi.fn().mockResolvedValue({ exists: true, data: { rawSessionModel: 'sonnet' } }),
+      writeJson: vi.fn().mockRejectedValue(new Error('disk full')),
+    })
+    const { getRawSessionModel, setRawSessionModel } = await freshModule()
+    await vi.waitFor(() => expect(getRawSessionModel()).toBe('sonnet'))
+
+    const { toast } = await import('../../state/toast')
+    const errorSpy = vi.spyOn(toast, 'error').mockImplementation(() => '')
+
+    setRawSessionModel('haiku')
+    expect(getRawSessionModel()).toBe('haiku')
+    await vi.waitFor(() => expect(getRawSessionModel()).toBe('sonnet'))
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("Couldn't save"))
+
+    errorSpy.mockRestore()
+  })
 })

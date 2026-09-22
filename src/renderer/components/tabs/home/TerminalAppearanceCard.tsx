@@ -27,18 +27,26 @@ const THEME_ORDER: TerminalThemeName[] = ['dark', 'light', 'paper']
 
 export function TerminalAppearanceCard() {
   const [settings, setSettings] = useState<TerminalSettings>(DEFAULT_TERMINAL_SETTINGS)
+  // Gates interaction until the real value has loaded — without it, a click
+  // that lands before the IPC read resolves would merge its patch onto the
+  // still-DEFAULT seed value and silently overwrite whichever saved field
+  // (theme or fontSize) the user didn't just touch.
+  const [hydrated, setHydrated] = useState(false)
 
   // Two-phase mount: paint with the default, then apply the async-loaded
   // value once the IPC read resolves.
   useEffect(() => {
     let cancelled = false
     loadTerminalSettings().then((s) => {
-      if (!cancelled) setSettings(s)
+      if (cancelled) return
+      setSettings(s)
+      setHydrated(true)
     })
     return () => { cancelled = true }
   }, [])
 
   const update = (patch: Partial<TerminalSettings>) => {
+    if (!hydrated) return
     setSettings((prev) => {
       const next = { ...prev, ...patch }
       void saveTerminalSettings(next)
@@ -77,9 +85,10 @@ export function TerminalAppearanceCard() {
                   key={t}
                   type="button"
                   onClick={() => update({ theme: t })}
+                  disabled={!hydrated}
                   aria-pressed={settings.theme === t}
                   data-testid={`terminal-theme-${t}`}
-                  className={`px-2 py-2 rounded-lg text-[11px] font-medium border transition-colors ${
+                  className={`px-2 py-2 rounded-lg text-[11px] font-medium border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                     settings.theme === t
                       ? 'bg-bg border-accent text-fg'
                       : 'bg-bg border-line text-fg-dim hover:text-fg hover:border-fg-faint'
@@ -101,7 +110,7 @@ export function TerminalAppearanceCard() {
               <button
                 type="button"
                 onClick={() => bumpFont(-1)}
-                disabled={settings.fontSize <= TERMINAL_FONT_MIN}
+                disabled={!hydrated || settings.fontSize <= TERMINAL_FONT_MIN}
                 aria-label="Decrease font size"
                 className="flex-1 py-1.5 rounded border border-line bg-bg text-fg-dim hover:text-fg hover:border-fg-faint disabled:opacity-40 disabled:cursor-not-allowed"
               >
@@ -110,14 +119,15 @@ export function TerminalAppearanceCard() {
               <button
                 type="button"
                 onClick={() => update({ fontSize: TERMINAL_FONT_DEFAULT })}
-                className="flex-1 py-1.5 rounded border border-line bg-bg text-[11px] text-fg-dim hover:text-fg hover:border-fg-faint"
+                disabled={!hydrated}
+                className="flex-1 py-1.5 rounded border border-line bg-bg text-[11px] text-fg-dim hover:text-fg hover:border-fg-faint disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 reset
               </button>
               <button
                 type="button"
                 onClick={() => bumpFont(1)}
-                disabled={settings.fontSize >= TERMINAL_FONT_MAX}
+                disabled={!hydrated || settings.fontSize >= TERMINAL_FONT_MAX}
                 aria-label="Increase font size"
                 className="flex-1 py-1.5 rounded border border-line bg-bg text-fg-dim hover:text-fg hover:border-fg-faint disabled:opacity-40 disabled:cursor-not-allowed"
               >

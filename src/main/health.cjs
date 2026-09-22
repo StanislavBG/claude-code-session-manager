@@ -23,7 +23,7 @@ const { computeStallSummary, computeDepHistorySatisfaction, FAILURE_STREAK_ESCAL
 const { findStarvedProjects, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/schedulerBatch.cjs');
 const { auditLogPath, readTail } = require('./lib/auditLog.cjs');
 const { resolveBuildIdentity } = require('./lib/buildIdentity.cjs');
-const { DEFAULT_RUNS_DIR, computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
+const { computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
 const { scanEpicTranscripts } = require('./lib/epicTranscriptDiagnostic.cjs');
 
@@ -1138,15 +1138,16 @@ async function check(opts = {}) {
   // `config`, same home as every other scheduler machine setting.
   try {
     const retentionCfg = queueState?.config?.schedulerRunLogRetention;
-    const liveKeys = liveKeysFromJobs(queueState?.jobs || [], { runsDir: DEFAULT_RUNS_DIR });
+    const runsDir = schedulerPaths.runsDir();
+    const liveKeys = liveKeysFromJobs(queueState?.jobs || [], { runsDir });
     const report = computeReport(
-      DEFAULT_RUNS_DIR,
+      runsDir,
       retentionCfg?.policy || {},
       { liveKeys }
     );
     status.components.run_log_retention = {
       ok: true,
-      path: DEFAULT_RUNS_DIR,
+      path: runsDir,
       totalBytes: report.usage.totalBytes,
       dirCount: report.usage.dirCount,
       runCount: report.usage.runCount,

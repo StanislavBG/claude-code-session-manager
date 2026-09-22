@@ -43,13 +43,8 @@
  */
 
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
-
-const DEFAULT_RUNS_DIR = path.join(
-  os.homedir(),
-  '.claude', 'session-manager', 'scheduled-plans', 'runs'
-);
+const schedulerPaths = require('./schedulerPaths.cjs');
 
 // Any status that is not yet a terminal outcome. Mirrors the status literals
 // used throughout scheduler.cjs (see e.g. its DOD_SLUG_RE-adjacent status
@@ -436,14 +431,13 @@ function applyRetention(runsDir, settings, opts) {
  * startup timer, alongside finalizeClosedDays) — never on its own timer.
  */
 function runBootSweep(opts) {
-  const runsDir = (opts && opts.runsDir) || DEFAULT_RUNS_DIR;
+  const runsDir = (opts && opts.runsDir) || schedulerPaths.runsDir();
   const queueStore = require('./queueStore.cjs');
   const state = queueStore.readMergedSync();
   return applyRetention(runsDir, state.config || {}, { jobs: state.jobs || [] });
 }
 
 module.exports = {
-  DEFAULT_RUNS_DIR,
   LIVE_STATUSES,
   isLiveJob,
   liveKeysFromJobs,

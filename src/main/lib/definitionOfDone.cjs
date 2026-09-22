@@ -14,17 +14,13 @@ const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { resolvePrdWriteDir } = require('./prdLocations.cjs');
+const schedulerPaths = require('./schedulerPaths.cjs');
 
 // Regex identifying meta/dod slugs that must NOT influence the batchKey.
 // This is the load-bearing loop-avoidance filter: when the gate job itself
 // completes, the real batchKey must remain unchanged so the drain branch stays
 // a no-op (idempotent) instead of re-firing forever.
 const DOD_SLUG_RE = /(^|-)dod(-|$)|definition-of-done/i;
-
-const RUNS_DIR = path.join(
-  os.homedir(),
-  '.claude', 'session-manager', 'scheduled-plans', 'runs'
-);
 
 /**
  * Compute a stable short hash for a completed job-set.
@@ -62,7 +58,7 @@ function batchKey(jobs) {
 function reportPathFor(key) {
   if (!/^[0-9a-f]+$/.test(key)) throw new Error(`invalid batchKey: ${key}`);
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
-  return path.join(RUNS_DIR, ts, `definition-of-done-${key}.md`);
+  return path.join(schedulerPaths.runsDir(), ts, `definition-of-done-${key}.md`);
 }
 
 /**
@@ -70,10 +66,10 @@ function reportPathFor(key) {
  * run subdirectory. Scans runs/<ts>/ (shallow, one level).
  *
  * @param {string} key       Output of batchKey()
- * @param {string} [runsDir] Override for testing; defaults to RUNS_DIR
+ * @param {string} [runsDir] Override for testing; defaults to schedulerPaths.runsDir()
  * @returns {boolean}
  */
-function reportExists(key, runsDir = RUNS_DIR) {
+function reportExists(key, runsDir = schedulerPaths.runsDir()) {
   if (!/^[0-9a-f]+$/.test(key)) throw new Error(`invalid batchKey: ${key}`);
   let entries;
   try {
@@ -604,7 +600,7 @@ const STATUS_EMOJI = { pass: '✅', fail: '❌', unverifiable: '⚠️' };
 function writeReport(key, { acResults = [], riskFlags = [], runsDir } = {}) {
   if (!/^[0-9a-f]+$/.test(key)) throw new Error(`invalid batchKey: ${key}`);
 
-  const resolvedRunsDir = runsDir ?? RUNS_DIR;
+  const resolvedRunsDir = runsDir ?? schedulerPaths.runsDir();
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const dir = path.join(resolvedRunsDir, ts);
   const reportPath = path.join(dir, `definition-of-done-${key}.md`);
@@ -781,10 +777,10 @@ const WATERMARK_FILENAME = '.dod-watermark.json';
  * sidecar means "beginning of time" (process everything), matching the
  * pre-watermark unbounded behavior on first-ever drain.
  *
- * @param {string} [runsDir] Override for testing; defaults to RUNS_DIR
+ * @param {string} [runsDir] Override for testing; defaults to schedulerPaths.runsDir()
  * @returns {string|null}  ISO8601 timestamp, or null if unset/unreadable.
  */
-function readWatermark(runsDir = RUNS_DIR) {
+function readWatermark(runsDir = schedulerPaths.runsDir()) {
   try {
     const raw = fs.readFileSync(path.join(runsDir, WATERMARK_FILENAME), 'utf8');
     const parsed = JSON.parse(raw);
@@ -799,9 +795,9 @@ function readWatermark(runsDir = RUNS_DIR) {
  * jobs that completed after it.
  *
  * @param {string} lastFinishedAt  ISO8601 timestamp.
- * @param {string} [runsDir]       Override for testing; defaults to RUNS_DIR
+ * @param {string} [runsDir]       Override for testing; defaults to schedulerPaths.runsDir()
  */
-function writeWatermark(lastFinishedAt, runsDir = RUNS_DIR) {
+function writeWatermark(lastFinishedAt, runsDir = schedulerPaths.runsDir()) {
   fs.mkdirSync(runsDir, { recursive: true });
   _writeFileAtomic(
     path.join(runsDir, WATERMARK_FILENAME),

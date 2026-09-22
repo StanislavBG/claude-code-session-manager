@@ -28,6 +28,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { resolveEpicTranscriptPath } = require('./epicTranscriptPath.cjs');
+const schedulerPaths = require('./schedulerPaths.cjs');
 
 // Deliberately stays a FIXED alias set (reviewed against the catalog-driven raw picker): it answers
 // "alias vs concrete id", not "which options to offer", so live catalog ids must not enter it.
@@ -50,13 +51,6 @@ const MAX_RUN_LOG_HEAD_BYTES = 64 * 1024;
 // Same bound epicDelegationStats.cjs's readTranscriptTail uses for a single
 // pass over a transcript that can reach tens of MB. O(min(size, cap)).
 const MAX_TRANSCRIPT_TAIL_BYTES = 8 * 1024 * 1024;
-
-// Mirrors scheduler.cjs's own ROOT/RUNS_DIR constants (same convention as
-// queueStore.cjs's LEGACY_QUEUE_PATH, which duplicates this literal rather
-// than requiring scheduler.cjs's ~530KB module graph for one path).
-function runsDir(homeDir) {
-  return path.join(homeDir, '.claude', 'session-manager', 'scheduled-plans', 'runs');
-}
 
 function isConcreteModelId(modelAlias) {
   if (!modelAlias) return false;
@@ -232,10 +226,9 @@ function findLatestSchedulerModel(cwd, agentType, deps) {
   const matches = jobs.filter((j) => j && j.agentType === agentType && j.runId && j.slug);
   matches.sort((a, b) => jobTimestampMs(b) - jobTimestampMs(a));
 
-  const homeDir = deps.homeDir || os.homedir();
   const re = /\[scheduler\] agentType=\S+ persona=.*? model=(\S+)/g;
   for (const job of matches) {
-    const logPath = path.join(runsDir(homeDir), job.runId, `${job.slug}.log`);
+    const logPath = path.join(schedulerPaths.runsDir(), job.runId, `${job.slug}.log`);
     const head = readHead(logPath, MAX_RUN_LOG_HEAD_BYTES, deps);
     if (!head) continue;
     let match;

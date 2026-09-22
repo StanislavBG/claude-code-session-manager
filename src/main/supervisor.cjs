@@ -18,11 +18,11 @@ const { spawn, execFileSync } = require('node:child_process');
 const { ipcMain } = require('electron');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
 const { withProcRole } = require('./lib/cleanEnv.cjs');
+const schedulerPaths = require('./lib/schedulerPaths.cjs');
 
 const HOME = os.homedir();
 const SUPERVISOR_LOG_PATH = path.join(HOME, '.claude', 'session-manager', 'supervisor.log');
 const SUPERVISOR_LOG_MAX_BYTES = 1024 * 1024;
-const RUNS_DIR = path.join(HOME, '.claude', 'session-manager', 'scheduled-plans', 'runs');
 
 // In-flight probe slugs — prevents duplicate probes across ticks.
 const inFlightProbes = new Set();
@@ -371,7 +371,7 @@ async function probeJob(job, lastActivityAge) {
     const startedAt = job.startedAt || new Date().toISOString();
     const ageMinutes = Math.floor((Date.now() - Date.parse(startedAt)) / 60_000);
     const runId = job.runtime?.runId;
-    const logPath = runId ? path.join(RUNS_DIR, runId, `${slug}.log`) : null;
+    const logPath = runId ? path.join(schedulerPaths.runsDir(), runId, `${slug}.log`) : null;
 
     const pstreeOutput = getPstree(jobPid);
     const childBashCmdlines = getChildBashCmdlines(jobPid);
@@ -426,7 +426,7 @@ async function supervisorTick() {
   for (const job of runningJobs) {
     if (inFlightProbes.has(job.slug)) continue;
     const runId = job.runtime?.runId;
-    const logPath = runId ? path.join(RUNS_DIR, runId, `${job.slug}.log`) : null;
+    const logPath = runId ? path.join(schedulerPaths.runsDir(), runId, `${job.slug}.log`) : null;
     if (!logPath) continue;
     const lastActivity = getLastActivityTs(logPath);
     const ageMs = Date.now() - lastActivity;

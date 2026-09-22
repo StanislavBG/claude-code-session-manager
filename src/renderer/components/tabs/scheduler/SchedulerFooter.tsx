@@ -16,7 +16,7 @@ interface Props {
 /**
  * Footer diagnostics band (2A) — replaces the old DiagnosticsSection block AND the old
  * reset / last-run / supervisor / folder footer row. Where each old line went:
- *  - 'N poll failures since boot' (health.consecutiveFailures) → band, left summary
+ *  - 'N poll failures in current streak' (health.consecutiveFailures) → band, left summary
  *  - 'queue lint N errors, N warns' (getLintQueueCached)        → band, left summary ('graph lint …')
  *  - booted / last poll / retry in / cached reset / running pids → ⓘ detail, first block
  *  - per-PRD lint findings + 'rerun lint' (fresh: true)          → ⓘ detail, second block
@@ -53,8 +53,10 @@ export function SchedulerFooter({ health, jobCount, lastRunAt, nextReset, now, o
   const lintLabel = report
     ? `graph lint ${lintErrors} error${lintErrors === 1 ? '' : 's'}, ${lintWarns} warn${lintWarns === 1 ? '' : 's'}`
     : `graph lint ${lintLoading ? 'scanning…' : 'idle'}`
+  // consecutiveFailures is persisted across restarts (scheduler-state.json) — it's the
+  // current failure STREAK, not a since-boot count, so the label must not claim "since boot".
   const pollFailures = health?.consecutiveFailures ?? 0
-  const pollLabel = health ? `${pollFailures} poll failure${pollFailures === 1 ? '' : 's'} since boot` : null
+  const pollLabel = health ? `${pollFailures} poll failure${pollFailures === 1 ? '' : 's'} in current streak` : null
   const summary = [pollLabel, lintLabel].filter(Boolean).join(' · ')
 
   const link = 'text-accent hover:underline bg-transparent border-0 p-0 cursor-pointer text-[12px]'

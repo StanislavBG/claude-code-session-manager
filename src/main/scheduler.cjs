@@ -1513,7 +1513,17 @@ function loadSchedulerState() {
     if (typeof s.failureStreakWarnedAt === 'number') failureStreakWarnedAt = s.failureStreakWarnedAt;
     failureStreakWarnedAt = restoreFailureStreakWarnedAt(failureStreakWarned, failureStreakWarnedAt, Date.now());
     if (typeof s.lastEscalationAt === 'number') lastEscalationAtMs = s.lastEscalationAt;
+    if (typeof s.lastPollOk === 'boolean') lastPollOk = s.lastPollOk;
+    if (typeof s.lastFailureKind === 'string' || s.lastFailureKind === null) lastFailureKind = s.lastFailureKind;
+    if (typeof s.backoffNextAt === 'number' || s.backoffNextAt === null) backoffNextAt = s.backoffNextAt;
+    if (typeof s.cachedUtilization === 'number' || s.cachedUtilization === null) cachedUtilization = s.cachedUtilization;
+    if (typeof s.cachedBindingWindowName === 'string' || s.cachedBindingWindowName === null) cachedBindingWindowName = s.cachedBindingWindowName;
   } catch { /* first boot or corrupt — start fresh */ }
+}
+
+/** Test-only seam: the module-level fields loadSchedulerState() restores that have no other exported reader. */
+function getSchedulerStateSnapshot() {
+  return { lastPollOk, lastFailureKind, backoffNextAt, cachedUtilization, cachedBindingWindowName };
 }
 
 function persistSchedulerState() {
@@ -1544,6 +1554,14 @@ function persistSchedulerState() {
       // THESE persisted values, since it never holds the in-memory circuit.
       usageCircuitState: billing.usageCircuit.state(),
       usageCircuitOpenedAt: billing.usageCircuit.openedAt(),
+      // Footer/KPI display fields — previously memory-only, so a restart showed
+      // misleading placeholders (poll-failed, no rate-limit banner, "—" utilization)
+      // until the next post-boot billing poll overwrote them.
+      lastPollOk,
+      lastFailureKind,
+      backoffNextAt,
+      cachedUtilization,
+      cachedBindingWindowName,
     });
   } catch (e) {
     console.warn('[scheduler] failed to persist scheduler state', e?.message);
@@ -12690,6 +12708,9 @@ module.exports = {
   shouldEscalateFailureStreak,
   restoreFailureStreakWarnedAt,
   persistedStreakMinutes,
+  loadSchedulerState,
+  persistSchedulerState,
+  getSchedulerStateSnapshot,
   computeDegradedBudget,
   healRefusalReason,
   writeQueue,

@@ -223,7 +223,7 @@ describe('Footer band', () => {
   it('shows poll failures + graph lint, supervisor/folder links, and expands the old diagnostics detail', async () => {
     const el = await mount(chain(2))
     const f = one(el, '[data-testid="scheduler-footer"]')
-    expect(one(f, '[data-testid="footer-summary"]').textContent).toBe('2 poll failures since boot · graph lint 1 error, 1 warn')
+    expect(one(f, '[data-testid="footer-summary"]').textContent).toBe('2 poll failures in current streak · graph lint 1 error, 1 warn')
     expect(el.textContent).not.toContain('Diagnostics')
     act(() => one(f, '[data-testid="footer-folder"]').click())
     expect(api.schedule.openFolder).toHaveBeenCalled()

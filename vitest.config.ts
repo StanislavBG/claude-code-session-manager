@@ -156,6 +156,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-notify-originating-tab-transcript.test.cjs',
       'src/main/__tests__/opsErrorLog.test.cjs',
       'src/main/__tests__/rateLimitPollerStreak.test.cjs',
+      'src/main/__tests__/schedulerStateSidecarRestore.test.cjs',
       'src/main/__tests__/usageSingleFlight.test.cjs',
       'src/main/__tests__/pollLoop-dispatch-on-failure.test.cjs',
       'src/main/__tests__/scheduler-utilization-hold.test.cjs',

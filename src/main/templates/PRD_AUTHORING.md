@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v2 -->
+<!-- PRD_AUTHORING.md v3 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 This guide codifies lessons from two stuck-job incidents (fizzpop poll-hang, etch-engine post-AC overrun) into enforceable rules every PRD MUST follow. Violating these rules costs real money and wastes hours waiting at a terminal.
@@ -122,14 +122,14 @@ curl -sf https://bilko.run/projects/<slug>/ > /dev/null || { echo "SMOKE TEST FA
 
 ## §6 Frontmatter rules
 
-**Summary:** Required keys are `title`, `cwd` (absolute path), `estimateMinutes`. Default to letting the filename `NN-` prefix drive grouping; include `parallelGroup` ONLY when you are deliberately interleaving across project streams.
+**Summary:** Required keys are `title`, `cwd` (absolute path), `estimateMinutes`. Default to letting the filename `NN-` prefix drive grouping.
 
 **Required frontmatter:**
 ```yaml
 ---
 title: <one line, plain English>
 cwd: ~/Projects/<target-repo>
-estimateMinutes: 60
+estimateMinutes: 10
 ---
 ```
 
@@ -139,7 +139,7 @@ estimateMinutes: 60
 - `cwd` MUST point to the target project. Prefer `~/...` for portability; only use an absolute path if you have a specific reason to pin to one machine.
 - **`cwd` MUST already exist on disk at queue time.** The scheduler runs a dead-cwd guard (`fs.accessSync(cwd, fs.constants.X_OK)` in `src/main/scheduler.cjs:669-680`) *before* spawning the child, so a PRD whose `cwd` references a not-yet-created directory will exit with `-1: cwd no longer exists` and the body will never run — even if the first step of the body would have created the directory. If the PRD's purpose is to create a brand-new sibling project at `~/Projects/<new-slug>/`, point `cwd` at the parent (`~/Projects`) and make the first executable step `mkdir -p ~/Projects/<new-slug> && cd ~/Projects/<new-slug>`.
 - `estimateMinutes` is used for ETA display; include a realistic estimate (note: empirical median is ~10 min, p90 ~20 min — avoid wildly inflated estimates that hide real outliers).
-- `parallelGroup` in frontmatter, when present, IS honored by the scheduler (`pickNextBatch` reads `parallelGroup ?? 99` and overrides the filename NN). Use this only for cross-stream interleaving — e.g., the cellar series `122-`, `123-`, `124-` overrides to groups `113`, `114`, `115` so cellar steps fire alongside the parallel etch steps. Do NOT use it to reorder within a single stream; rename the file instead.
+- `parallelGroup` is DEPRECATED and ignored (PRD 832) — `dependsOn: [<slug>, …]` is the only ordering primitive; numbers are unique per project.
 
 ### `planId` (API-owned — never pass it)
 
@@ -168,11 +168,11 @@ Incident: sigma PRD `816-prepare-157-copy-citation-extras-patch` (2026-09-20) wr
 
 ---
 
-## §8 Scope sizing — target ~15 min, ceiling 30 (data-driven, 2026-06)
+## §8 Scope sizing — target ≤10 min, ceiling 15 (data-driven, 2026-09)
 
-**Summary:** One PRD ≈ **~15 wall-clock minutes** of work. Empirically (400+ runs) median real run = **~7 min**, p90 = **21 min**; authored estimates ran 5–8× too high. **If you project >30 min, SPLIT.**
+**Summary:** One PRD ≈ **≤10 wall-clock minutes** of work. Empirically (2026-09 calibration) wall p50 = **7.8 min**, 60% of runs ≤ 10 min; authored estimates ran 4× too high. **If you project >15 min, SPLIT.**
 
-**Rule:** Split larger work into sequential PRDs; reference the dependency in `# Implementation notes`. PRDs in the same `NN-` group run in parallel — don't put dependent work in the same group. e2e/publish work is the failure tail: **shard test suites to one spec per PRD; never run a full suite or an endpoint-polling publish in a single PRD** (§1/§5).
+**Rule:** Split larger work into sequential PRDs; reference the dependency in `# Implementation notes`. e2e/publish work is the failure tail: **shard test suites to one spec per PRD; never run a full suite or an endpoint-polling publish in a single PRD** (§1/§5).
 
 ---
 
@@ -202,9 +202,9 @@ Before queueing a new PRD, verify each of these:
 - [ ] **§3 Smoke tests + verify-before-done:** Every deploy/migration step is followed by a test command that exits 1 on failure. Run the AC test command once before declaring done; never end the run on a red test.
 - [ ] **§4 Bounded generators:** Any search/seed loop has an explicit `MAX_ATTEMPTS` constant and surfaces failure on exhaustion.
 - [ ] **§5 Render deploys:** Deploy waits use a live URL check, not uptime/restart signals.
-- [ ] **§6 Frontmatter:** `title`, `cwd` (`~/Projects/<name>` preferred; path MUST exist on this machine), `estimateMinutes` present. `parallelGroup` only if intentionally interleaving cross-stream.
+- [ ] **§6 Frontmatter:** `title`, `cwd` (`~/Projects/<name>` preferred; path MUST exist on this machine), `estimateMinutes` present. `parallelGroup` is deprecated — use `dependsOn` for ordering.
 - [ ] **§7 Self-contained:** No references to "the conversation" or external context. Paths and identifiers are inline. Body is clean UTF-8 — **no NUL/control bytes** (paste-from-PDF crashes the spawn). Quick check: `grep -qP '\x00' file && echo BAD`.
-- [ ] **§8 Scope:** Targets ~15 min, ceiling 30. If projected larger, split. e2e/publish sharded to one spec per PRD.
+- [ ] **§8 Scope:** Targets ≤10 min, ceiling 15. If projected larger, split. e2e/publish sharded to one spec per PRD.
 - [ ] **§9 Failure surfacing:** Errors exit 1 with a diagnostic line. No silent `|| true` swallows. (`rateLimited` exit-1 is benign auto-pause, not a failure.)
 - [ ] **§11 Negative-assertion checks:** Any "this should produce NO output / NO match" check (a `grep` that should find nothing, a "no leftover X" guard) is written as an inverted conditional that exits 0 on the clean case. A bare `grep` whose success is "no match" exits 1 and trips the verifier `transcript_errors` downgrade even when the run is perfect.
 - [ ] **§12 End green:** The acceptance/test gate is the LAST thing the run does; any intentionally-failing step (TDD red test, expected-nonzero probe) runs EARLY, never after the gate, and is captured (`2>&1 | tail` inside a conditional) so it doesn't surface as a bare `is_error`/`Traceback` in the final portion of the transcript.

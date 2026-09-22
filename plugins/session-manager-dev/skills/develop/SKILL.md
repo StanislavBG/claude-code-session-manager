@@ -3,7 +3,8 @@ name: develop
 description: >-
   Lead a software-development task by analyzing it from multiple angles (positive path, edge
   cases, interaction effects, integration, UI validation) and decomposing it into a series of
-  self-contained PRDs — either a handful of independent small PRDs, or a 3-5 PRD evolving chain
+  self-contained PRDs, sized as <10-minute Sonnet-executable work-items — either a handful of
+  independent small PRDs, or a 3-5 PRD evolving chain
   with sub-tasked acceptance criteria for larger asks — queued for the session-manager
   scheduler, each pointing the headless executor at the engineering standards file to read at
   runtime — then track those PRDs to completion, verify them against their acceptance criteria,
@@ -355,9 +356,9 @@ can't load skills.
 
    - [ ] <each line is a verifiable check the executor can run after building>
    - [ ] <include explicit file paths, function names, expected behavior>
-   - [ ] a bounded test command passes, e.g. `timeout 300 npm run typecheck` / `pytest -x` /
-     `cargo check` (the run-before-done / never-end-on-red rule lives in standards.md →
-     Execution discipline; the AC just has to name the command).
+   - [ ] exactly one gate line — a bounded command or an `&&` chain of at most two, e.g.
+     `timeout 300 npm run typecheck && timeout 300 npx vitest run <file>` (the run-before-done
+     rule lives in standards.md; the AC just names the command).
 
    # Implementation notes
 
@@ -383,17 +384,31 @@ can't load skills.
    "the design we discussed"; if a PRD depends on another PRD's output, say so in
    `# Implementation notes` AND give it a higher `NN` so it queues after.
 
-   **Scope sizing — keep it SMALL (data-driven, 2026-06).** Across 400+ real runs the median
-   PRD finishes in **~7 minutes**, p90 **~21 min**, p99 **~66 min** — yet authored
-   `estimateMinutes` ran 5–8× too high. Oversized scoping anchors PRDs too big and pushes them
-   into the rare >60-min tail where ~100% of true hangs live (deploy poll-loops, unbounded e2e
-   suites). Target ~15 minutes of wall-clock work per PRD — **hard ceiling ~30 min; if you
-   project more, SPLIT** into sequential `NN` PRDs and document the dependency in each. Set
-   `estimateMinutes` realistically: **p50≈8, p90≈21** — don't write 60/90, it's almost always
-   wrong and hides real outliers. Each execution costs ~$0.50–$2; smaller PRDs = smaller blast
-   radius when a run is rate-limited, timed out, or killed. **`rateLimited` exit-1 is NOT a
-   failure** — it's the scheduler's designed auto-pause; the job auto-resumes at the next
-   window reset. Don't add retry logic for it.
+   **Work-item shape — every PRD must be executable by a Sonnet-class executor in under 10
+   minutes (2026-09 calibration: wall p50 7.8 min, 60% of runs ≤ 10 min; authored estimates ran
+   4× high).**
+   - **One change-set per PRD**: ≤ 3 files edited, ≤ 1 new file, exactly ONE gate line (a
+     bounded command or an `&&` chain of at most two). If a PRD needs a new shared helper AND
+     its first consumer, that is two PRDs (`primitive` → `wire`).
+   - **≤ 6 AC lines**: each behavior line names file + symbol + the observable result; exactly
+     one tests line naming the test file and the test names; exactly one gate line. No
+     open-ended lines ("grep X and update whatever depends on it") — resolve the list yourself
+     while authoring and name the files.
+   - **Implementation notes are a recipe, not prose**: `Read first:` (≤ 4 files, with line
+     ranges), `Steps:` (numbered, each naming the file and the function/signature), `Do not
+     touch:` (files a sibling PRD owns). Quote a signature rather than describing it.
+   - **`estimateMinutes` ≤ 10 target, 15 ceiling** — project more, split. (The scheduler's kill
+     budget floors at 45 min regardless, so a low estimate never starves a run.)
+   - **Decomposition types** — name one per PRD in its first Goal sentence, and chain in this
+     order when several apply:
+     - `primitive` — one new helper/module + its unit test, no call sites.
+     - `wire` — adopt an existing primitive at named call sites, no logic change.
+     - `behavior` — one function's logic change + the test that pins it.
+     - `migration` — mechanical rename/move/config change, no logic; gate is typecheck/lint.
+     - `doc` — text only; gate is `lint:docs` or the doc's own test.
+     - `validate` — the plan's trailing validation PRD (see Phase 2).
+   - `scheduler_create_prd` returns `warnings[]` when a PRD exceeds these limits — fix the PRD
+     before confirming it to the user; never queue a warned PRD silently.
 
 5. **Emit each PRD.** If you used `scheduler_create_prd`, this step is already done — the tool
    wrote the file to the canonical path with the standards pointer included; skip to step 5.

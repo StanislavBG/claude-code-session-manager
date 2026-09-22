@@ -1,16 +1,10 @@
 # Engineering standards
 
-> Single source of truth for the developer guidance that used to live in the global
-> `~/.claude/CLAUDE.md`. Consumers: the `/develop` skill reads it while planning and
-> inlines it **verbatim** into every PRD it emits (under an `## Engineering standards`
-> heading); the `/prd` command points here for the execution-discipline rules so a
-> directly-authored PRD carries the same block. The headless `claude -p` executor sees no
-> skills and no conversation — inlining this is the only way these rules reach it. Edit
-> here once; every call site updates.
->
-> The **Execution discipline** section below is the executor-facing core — it is the part
-> that MUST appear in every PRD body. The rest (Performance, Debugging, API reuse, TDD)
-> guides authoring and interactive work.
+> Single source of truth for the engineering rationale behind every scheduled PRD.
+> `scheduler_create_prd` (src/main/lib/prdCreate.cjs) appends a one-line pointer to this file's
+> absolute path to every PRD — never a copy — and the executor's ordered run contract lives in
+> the `dev-lead` persona it is launched as. Read a section here when a contract line needs its
+> reasoning; edit here once and every PRD sees it.
 
 ## Performance
 

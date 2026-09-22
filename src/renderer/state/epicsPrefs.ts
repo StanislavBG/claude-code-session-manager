@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { EpicGroupKey, EpicSortKey } from '../lib/epicQueueControls'
 import { readUiPrefs, writeUiPrefsPatch } from '../lib/uiPrefs'
 import { knownEpicIdsForCwd } from '../lib/epicIdsForCwd'
+import { toast } from './toast'
 
 /**
  * Persisted Epic-queue control-layer prefs — pins, sort, group, compact.
@@ -60,7 +61,11 @@ async function migratePins(cwd: string): Promise<Record<string, boolean>> {
   for (const [epicId, pinned] of Object.entries(legacy)) {
     if (pinned && knownIds.has(epicId)) seeded[epicId] = pinned
   }
-  await writeUiPrefsPatch(cwd, { epicPins: seeded }).catch(() => {})
+  // One-shot best-effort seed: nothing to revert (no user-visible optimistic
+  // state was set yet), but a failure must still surface rather than vanish.
+  await writeUiPrefsPatch(cwd, { epicPins: seeded }).catch((e) => {
+    console.warn('migratePins: failed to seed ui-prefs epicPins', e)
+  })
   return seeded
 }
 
@@ -100,9 +105,19 @@ export const useEpicsPrefs = create<EpicsPrefsState>((set, get) => ({
   },
 
   togglePin: (cwd, epicId) => {
-    const next = { ...get().pins, [epicId]: !get().pins[epicId] }
+    const prev = get().pins
+    const next = { ...prev, [epicId]: !prev[epicId] }
     set({ pins: next })
-    writeUiPrefsPatch(cwd, { epicPins: next }).catch(() => {})
+    writeUiPrefsPatch(cwd, { epicPins: next }).catch(() => {
+      // Only revert if nothing else has moved pins on since this call
+      // (writeUiPrefsPatch serializes per-cwd, so a later toggle's write can
+      // settle and persist successfully before this one's failure is caught
+      // here) — otherwise this stale failure would stomp that later,
+      // already-persisted change.
+      if (get().pins !== next) return
+      set({ pins: prev })
+      toast.error("Couldn't save pinned Epics — reverted.")
+    })
   },
 
   setGroup: (group) => {

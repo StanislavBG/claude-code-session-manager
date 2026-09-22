@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useChatPrefs, resolveEpicVerbosity, CHAT_PREFS_FILE } from '../chatPrefs'
 import { CHAT_VERBOSITY_DEFAULT } from '../../lib/chatVerbosity'
+import { useToast } from '../toast'
 
 const CWD = '/proj-a'
 const UI_PREFS_PATH = `${CWD}/session-manager-operations/ui-prefs/prefs.json`
@@ -111,6 +112,23 @@ describe('chatPrefs', () => {
     await vi.waitFor(() => {
       expect(writeJson).toHaveBeenCalledWith(UI_PREFS_PATH, expect.objectContaining({ chatVerbosityPerEpic: {} }), 'ui-prefs')
     })
+  })
+
+  it('setEpicVerbosity reverts the optimistic update and toasts when the write rejects', async () => {
+    installApi({ uiPrefs: { chatVerbosityPerEpic: {} } })
+    await useChatPrefs.getState().hydrate(CWD)
+    useToast.setState({ toasts: [], history: [], unreadCount: 0 })
+    ;(window as unknown as { api: { config: { writeJson: unknown } } }).api.config.writeJson =
+      vi.fn(async () => { throw new Error('boom') })
+
+    useChatPrefs.setState({ verbosity: 'standard', perEpic: {} })
+    useChatPrefs.getState().setEpicVerbosity(CWD, 'epic-a', 'raw')
+    expect(useChatPrefs.getState().perEpic).toEqual({ 'epic-a': 'raw' })
+
+    await vi.waitFor(() => {
+      expect(useChatPrefs.getState().perEpic).toEqual({})
+    })
+    expect(useToast.getState().toasts.some((t) => t.kind === 'error' && /chat verbosity/.test(t.message))).toBe(true)
   })
 
   it('resolveEpicVerbosity prefers the override, else the global default', () => {

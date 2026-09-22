@@ -11,6 +11,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { SchedulePanel } from '../SchedulePanel'
 import { useScheduleState } from '../../state/scheduleState'
+import { useToast } from '../../state/toast'
 import type { ScheduleStateSnapshot, ScheduleJob } from '../../../preload/api'
 
 let container: HTMLDivElement | null = null
@@ -121,6 +122,28 @@ describe('SchedulePanel ui-prefs per-project isolation', () => {
 
     expect(c.textContent).toContain('Thing')
     expect(store.has('/proj-b/session-manager-operations/ui-prefs/prefs.json')).toBe(false)
+  })
+
+  it('clearing completed reverts and toasts when the write rejects', async () => {
+    const store = new Map<string, unknown>()
+    installApi(store)
+    ;(globalThis as any).window.api.config.writeJson = vi.fn(async () => { throw new Error('boom') })
+    useToast.setState({ toasts: [], history: [], unreadCount: 0 })
+
+    useScheduleState.setState({ snapshot: snapshot([job({ cwd: '/proj-a' })]), loaded: true })
+    const c = mount(<SchedulePanel scopeCwd="/proj-a" planMode="list" />)
+    await flush()
+
+    const clearBtn = Array.from(c.querySelectorAll('button')).find((b) => b.textContent === 'Clear completed')
+    expect(clearBtn).toBeTruthy()
+    await act(async () => { clearBtn!.click() })
+    await flush()
+
+    // The optimistic hide is reverted once the write rejects — the row is
+    // visible again — and the user is told, rather than the failure being
+    // silently swallowed (CLAUDE.md: Toast is the user-facing error channel).
+    await vi.waitFor(() => expect(c.textContent).toContain('Thing'))
+    expect(useToast.getState().toasts.some((t) => t.kind === 'error' && /hidden completed/.test(t.message))).toBe(true)
   })
 
   it('a status filter chosen for one project is not applied to another', async () => {

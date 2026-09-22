@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { loadTerminalSettings, onTerminalSettingsChange, TERMINAL_THEMES } from '../../lib/terminalSettings'
+import { applyTerminalSettings, loadTerminalSettings, onTerminalSettingsChange, DEFAULT_TERMINAL_SETTINGS, TERMINAL_THEMES } from '../../lib/terminalSettings'
 import { writeInChunks } from '../Terminal'
 import { shellQuote, modelFlag, effortFlag } from '../../lib/presets'
 import { canFit } from '../../lib/terminalFit'
@@ -84,15 +84,17 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
   useEffect(() => {
     if (!hostRef.current || spawnedRef.current) return
     spawnedRef.current = true
+    let disposed = false
 
-    const initial = loadTerminalSettings()
+    // Two-phase mount: paint with the default immediately (loadTerminalSettings
+    // is an async IPC read) then apply the real value once it resolves, below.
     const term = new XTerm({
       fontFamily: '"IBM Plex Mono", JetBrains Mono, ui-monospace, Menlo, monospace',
-      fontSize: initial.fontSize,
+      fontSize: DEFAULT_TERMINAL_SETTINGS.fontSize,
       lineHeight: 1.2,
       cursorBlink: true,
       allowProposedApi: true,
-      theme: TERMINAL_THEMES[initial.theme],
+      theme: TERMINAL_THEMES[DEFAULT_TERMINAL_SETTINGS.theme],
     })
 
     const fit = new FitAddon()
@@ -102,11 +104,10 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
       if (!el || !canFit(el.clientWidth, el.clientHeight)) return
       try { fit.fit() } catch { /* ignore */ }
     }
-    const offSettings = onTerminalSettingsChange((s) => {
-      term.options.theme = TERMINAL_THEMES[s.theme]
-      term.options.fontSize = s.fontSize
-      guardedFit()
+    void loadTerminalSettings().then((s) => {
+      if (!disposed) applyTerminalSettings(term, s, guardedFit)
     })
+    const offSettings = onTerminalSettingsChange((s) => applyTerminalSettings(term, s, guardedFit))
 
     term.open(hostRef.current)
     guardedFit()
@@ -152,6 +153,7 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
     ro.observe(hostRef.current)
 
     return () => {
+      disposed = true
       window.removeEventListener('resize', onWinResize)
       ro.disconnect()
       offData()

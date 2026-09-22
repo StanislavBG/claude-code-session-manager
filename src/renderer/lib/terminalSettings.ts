@@ -19,11 +19,19 @@
  *
  * ## Where it lives
  *
- * `localStorage['sm.terminal.settings']` — a renderer-only preference, never
- * written to `~/.claude/` and never part of any project's
- * `session-manager-operations/`. Saving broadcasts a `sm:terminal:settings`
- * window event so live xterm instances update in place (xterm v5 supports
- * `term.options.theme = …` without a remount) rather than being torn down.
+ * `~/.claude/session-manager/ui-settings-prefs.json`'s `terminal` field — a
+ * machine-wide, disk-backed preference (shared with `lib/rawSessionModel.ts`'s
+ * `rawSessionModel` field via `lib/uiSettingsPrefs.ts`'s read-modify-write),
+ * never part of any project's `session-manager-operations/`. Saving broadcasts
+ * a `sm:terminal:settings` window event so live xterm instances update in
+ * place (xterm v5 supports `term.options.theme = …` without a remount) rather
+ * than being torn down.
+ *
+ * `loadTerminalSettings()` is async (an IPC round trip), so every mount site
+ * (`Terminal.tsx`, `epics/EpicTerminalPane.tsx`, `InlineConsentTerminal.tsx`)
+ * does a two-phase mount: construct the xterm instance with
+ * `DEFAULT_TERMINAL_SETTINGS` immediately, then apply the loaded value via
+ * `applyTerminalSettings()` once the read resolves.
  *
  * ## Where it is edited
  *
@@ -34,7 +42,8 @@
  * belongs there; don't re-add a per-pane copy.
  */
 
-import type { ITheme } from '@xterm/xterm'
+import type { ITheme, Terminal as XTerm } from '@xterm/xterm'
+import { readUiSettingsPrefs, writeUiSettingsPrefs } from './uiSettingsPrefs'
 
 export type TerminalThemeName = 'dark' | 'light' | 'paper'
 
@@ -43,7 +52,6 @@ export interface TerminalSettings {
   fontSize: number
 }
 
-const STORAGE_KEY = 'sm.terminal.settings'
 const EVENT_NAME = 'sm:terminal:settings'
 
 export const TERMINAL_FONT_MIN = 10
@@ -55,11 +63,11 @@ export const DEFAULT_TERMINAL_SETTINGS: TerminalSettings = {
   fontSize: TERMINAL_FONT_DEFAULT,
 }
 
-export function loadTerminalSettings(): TerminalSettings {
+export async function loadTerminalSettings(): Promise<TerminalSettings> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return DEFAULT_TERMINAL_SETTINGS
-    const parsed = JSON.parse(raw) as Partial<TerminalSettings>
+    const prefs = await readUiSettingsPrefs()
+    const parsed = prefs.terminal as Partial<TerminalSettings> | undefined
+    if (!parsed) return DEFAULT_TERMINAL_SETTINGS
     return {
       theme: (parsed.theme === 'light' || parsed.theme === 'paper' || parsed.theme === 'dark')
         ? parsed.theme
@@ -73,11 +81,20 @@ export function loadTerminalSettings(): TerminalSettings {
   }
 }
 
-export function saveTerminalSettings(s: TerminalSettings): void {
+export async function saveTerminalSettings(s: TerminalSettings): Promise<void> {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(s))
-  } catch { /* quota / private mode — ignore */ }
+    await writeUiSettingsPrefs({ terminal: s })
+  } catch { /* IPC failure — ignore, still broadcast so live xterms stay in sync */ }
   window.dispatchEvent(new CustomEvent<TerminalSettings>(EVENT_NAME, { detail: s }))
+}
+
+/** Applies a loaded/changed settings value to a live xterm instance — the one
+ *  place all 3 mount sites + the live sm:terminal:settings handler route
+ *  through, so paint-then-apply and live-update never diverge. */
+export function applyTerminalSettings(term: XTerm, s: TerminalSettings, refit?: () => void): void {
+  term.options.theme = TERMINAL_THEMES[s.theme]
+  term.options.fontSize = s.fontSize
+  refit?.()
 }
 
 /** Subscribe a live xterm instance to settings changes. */

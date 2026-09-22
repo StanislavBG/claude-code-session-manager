@@ -6,7 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import { useSessions } from '../state/sessions'
 import { useEditor } from '../state/editor'
 import { toast } from '../state/toast'
-import { loadTerminalSettings, onTerminalSettingsChange, TERMINAL_THEMES } from '../lib/terminalSettings'
+import { applyTerminalSettings, loadTerminalSettings, onTerminalSettingsChange, DEFAULT_TERMINAL_SETTINGS, TERMINAL_THEMES } from '../lib/terminalSettings'
 import { EpicsWorkspace } from './epics/EpicsWorkspace'
 import { fetchTerminalDigest } from '../lib/terminalDigest'
 import { PasteThumbnail } from './PasteThumbnail'
@@ -56,15 +56,17 @@ export function Terminal({ tabId, cwd }: Props) {
     console.log('[Terminal] mount effect running, tabId=', tabId, 'cwd=', cwd, 'alreadySpawned=', spawnedRef.current)
     if (!hostRef.current || spawnedRef.current) return
     spawnedRef.current = true
+    let disposed = false
 
-    const initial = loadTerminalSettings()
+    // Two-phase mount: paint with the default immediately (loadTerminalSettings
+    // is an async IPC read) then apply the real value once it resolves, below.
     const term = new XTerm({
       fontFamily: '"IBM Plex Mono", JetBrains Mono, ui-monospace, Menlo, monospace',
-      fontSize: initial.fontSize,
+      fontSize: DEFAULT_TERMINAL_SETTINGS.fontSize,
       lineHeight: 1.2,
       cursorBlink: true,
       allowProposedApi: true,
-      theme: TERMINAL_THEMES[initial.theme],
+      theme: TERMINAL_THEMES[DEFAULT_TERMINAL_SETTINGS.theme],
     })
 
     const fit = new FitAddon()
@@ -75,14 +77,14 @@ export function Terminal({ tabId, cwd }: Props) {
       try { fit.fit() } catch { /* ignore */ }
     }
 
+    void loadTerminalSettings().then((s) => {
+      if (!disposed) applyTerminalSettings(term, s, guardedFit)
+    })
+
     // Live theme + font updates from the TerminalControls popover. xterm v5
     // accepts assignment to `term.options.*` without remount, but font size
     // changes need a refit so the existing rows reflow.
-    const offSettings = onTerminalSettingsChange((s) => {
-      term.options.theme = TERMINAL_THEMES[s.theme]
-      term.options.fontSize = s.fontSize
-      guardedFit()
-    })
+    const offSettings = onTerminalSettingsChange((s) => applyTerminalSettings(term, s, guardedFit))
     // WebLinksAddon with an explicit handler: by default the addon underlines
     // URLs but the click hits the xterm <div> and dies (setWindowOpenHandler
     // only fires on window.open()). Routing through the new app:open-external
@@ -257,6 +259,7 @@ export function Terminal({ tabId, cwd }: Props) {
     ro.observe(hostRef.current)
 
     return () => {
+      disposed = true
       window.removeEventListener('resize', onWinResize)
       window.removeEventListener(WORKBENCH_REFIT_EVENT, onWinResize)
       ro.disconnect()

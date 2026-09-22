@@ -10,12 +10,13 @@
  * tabs and finding the theme followed them.
  */
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   TERMINAL_THEMES,
   TERMINAL_FONT_MIN,
   TERMINAL_FONT_MAX,
   TERMINAL_FONT_DEFAULT,
+  DEFAULT_TERMINAL_SETTINGS,
   loadTerminalSettings,
   saveTerminalSettings,
   type TerminalSettings,
@@ -25,12 +26,22 @@ import {
 const THEME_ORDER: TerminalThemeName[] = ['dark', 'light', 'paper']
 
 export function TerminalAppearanceCard() {
-  const [settings, setSettings] = useState<TerminalSettings>(() => loadTerminalSettings())
+  const [settings, setSettings] = useState<TerminalSettings>(DEFAULT_TERMINAL_SETTINGS)
+
+  // Two-phase mount: paint with the default, then apply the async-loaded
+  // value once the IPC read resolves.
+  useEffect(() => {
+    let cancelled = false
+    loadTerminalSettings().then((s) => {
+      if (!cancelled) setSettings(s)
+    })
+    return () => { cancelled = true }
+  }, [])
 
   const update = (patch: Partial<TerminalSettings>) => {
     setSettings((prev) => {
       const next = { ...prev, ...patch }
-      saveTerminalSettings(next)
+      void saveTerminalSettings(next)
       return next
     })
   }
@@ -52,8 +63,8 @@ export function TerminalAppearanceCard() {
           Terminal tabs, an Epic&rsquo;s Terminal view of its session, and the inline permission
           prompt. It is not per project, per session, or per tab. It does not restyle the app
           chrome (there is no app theme switch), and the code editor keeps its own separate
-          paper/dark setting in the Editor tab&rsquo;s Display menu. Stored in this machine&rsquo;s
-          browser storage as <code className="font-mono text-[12px]">sm.terminal.settings</code>,
+          paper/dark setting in the Editor tab&rsquo;s Display menu. Stored in{' '}
+          <code className="font-mono text-[12px]">~/.claude/session-manager/ui-settings-prefs.json</code>,
           applied live without restarting a session.
         </p>
 

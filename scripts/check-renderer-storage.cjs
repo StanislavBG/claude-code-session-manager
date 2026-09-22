@@ -17,8 +17,6 @@ const STORAGE_RE = /localStorage\.|sessionStorage\./
 
 // repo-relative path -> reason this file may still call localStorage/sessionStorage directly.
 const ALLOWLIST = new Map([
-  ['src/renderer/lib/rawSessionModel.ts', 'pending migration, Epic stateless-ui-review'],
-  ['src/renderer/lib/terminalSettings.ts', 'pending migration, Epic stateless-ui-review'],
   ['src/renderer/state/editorPrefs.ts', 'pending migration, Epic stateless-ui-review'],
   ['src/renderer/components/layout/FileTree.tsx', 'pending migration, Epic stateless-ui-review'],
   ['src/renderer/components/tabs/ProjectsWorkspace.tsx', 'pending migration, Epic stateless-ui-review'],

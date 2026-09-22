@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { readUiSettingsPrefs, writeUiSettingsPrefs } from './uiSettingsPrefs'
 
 /** Any alias (`opus`, `opus[1m]`) or concrete id (`claude-opus-5`) the CLI's `--model` accepts. */
 export type RawModel = string
@@ -21,7 +22,6 @@ export function rawModelOptions(catalog: { aliases: readonly string[]; models: r
   return [...new Set(out)]
 }
 
-const STORAGE_KEY = 'sm.rawSessionModel'
 const DEFAULT: RawModel = 'opus'
 
 /** True for a plausible model alias/id (bounded, no whitespace or shell-hostile chars). */
@@ -29,20 +29,28 @@ export function isRawModel(x: string): x is RawModel {
   return /^[A-Za-z0-9][A-Za-z0-9._\-]{0,79}(\[[0-9a-z]{1,4}\])?$/.test(x)
 }
 
-function loadRawSessionModel(): RawModel {
+// Module-level singleton state + listener set so every useRawSessionModel()
+// hook instance stays in sync across the tree without prop-drilling. `current`
+// starts at DEFAULT and is updated once `hydrate()` resolves — sessions.ts's
+// resolveStartupCommand launches a session off this synchronous cache rather
+// than awaiting the IPC read itself (mirrors useKnownProjects.ts's
+// cache-then-refresh pattern: a hot path never blocks on disk).
+let current: RawModel = DEFAULT
+const listeners = new Set<(m: RawModel) => void>()
+
+async function hydrate(): Promise<void> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw && isRawModel(raw)) return raw
+    const prefs = await readUiSettingsPrefs()
+    if (typeof prefs.rawSessionModel === 'string' && isRawModel(prefs.rawSessionModel)) {
+      current = prefs.rawSessionModel
+      listeners.forEach((fn) => fn(current))
+    }
   } catch {
-    /* ignore */
+    /* ignore — stays at DEFAULT */
   }
-  return DEFAULT
 }
 
-// Module-level singleton state + listener set so every useRawSessionModel()
-// hook instance stays in sync across the tree without prop-drilling.
-let current: RawModel = loadRawSessionModel()
-const listeners = new Set<(m: RawModel) => void>()
+void hydrate()
 
 export function getRawSessionModel(): RawModel {
   return current
@@ -51,8 +59,8 @@ export function getRawSessionModel(): RawModel {
 export function setRawSessionModel(m: RawModel): void {
   if (m === current) return
   current = m
-  try { localStorage.setItem(STORAGE_KEY, m) } catch { /* ignore */ }
   listeners.forEach((fn) => fn(m))
+  void writeUiSettingsPrefs({ rawSessionModel: m }).catch(() => { /* ignore */ })
 }
 
 export function useRawSessionModel(): { model: RawModel; setModel: (m: RawModel) => void } {

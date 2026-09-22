@@ -72,7 +72,7 @@ function installWindowApiMock(opts: { telemetryCfg?: Record<string, unknown>; te
     status: telemetryStatus(opts.telemetryStatusOverrides),
   }))
   const status = vi.fn().mockResolvedValue(telemetryStatus(opts.telemetryStatusOverrides))
-  const configPath = vi.fn().mockResolvedValue('/home/x/.config/session-manager/telemetry.json')
+  const configPath = vi.fn().mockResolvedValue('/home/x/.claude/session-manager/telemetry.json')
   const recentRecords = vi.fn().mockResolvedValue([{ recordId: 'r1', channel: 'error', wire: { name: 'X' } }])
   const flushNow = vi.fn().mockResolvedValue({ sent: ['r1'], failed: [], reason: 'manual' })
 
@@ -80,7 +80,7 @@ function installWindowApiMock(opts: { telemetryCfg?: Record<string, unknown>; te
     otel: {
       getConfig: vi.fn().mockResolvedValue(otelConfig()),
       status: vi.fn().mockResolvedValue({ enabled: false, initialized: false, error: null, includeContent: false }),
-      configPath: vi.fn().mockResolvedValue('/home/x/.config/session-manager/otel.json'),
+      configPath: vi.fn().mockResolvedValue('/home/x/.claude/session-manager/otel.json'),
       setConfig: vi.fn(),
     },
     telemetry: { getConfig, setConfig, status, configPath, recentRecords, flushNow },

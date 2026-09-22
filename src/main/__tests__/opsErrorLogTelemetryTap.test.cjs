@@ -137,7 +137,7 @@ test('a realistic error with an absolute path and a prompt-like string never rea
   process.env.HOME = home;
   // Explicit opt-in: overrides the test-environment no-op guard so this
   // test's real telemetryClient call actually persists into an isolated dir.
-  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.config', 'session-manager');
+  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.claude', 'session-manager');
 
   for (const p of ['../lib/telemetryClient.cjs', '../config.cjs', '../lib/telemetrySettings.cjs', '../lib/machineProfile.cjs']) {
     const resolved = require.resolve(p);

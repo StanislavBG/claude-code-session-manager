@@ -1,7 +1,7 @@
 /**
  * telemetrySettings — persists product-telemetry consent/config + install identity.
  *
- * Storage: ~/.config/session-manager/telemetry.json
+ * Storage: ~/.claude/session-manager/telemetry.json
  * Shape: {
  *   enabled: boolean,                // ON by default — hard kill switch is SM_TELEMETRY=0
  *   installId: string,               // crypto.randomUUID(), minted once, the only identity
@@ -45,8 +45,14 @@ const DEFAULTS = Object.freeze({
 
 const KNOWN_KEYS = new Set(Object.keys(DEFAULTS));
 
+let migrated = false;
 function storePath() {
-  return path.join(os.homedir(), '.config', 'session-manager', 'telemetry.json');
+  const p = path.join(os.homedir(), '.claude', 'session-manager', 'telemetry.json');
+  if (!migrated) {
+    migrated = true;
+    config.migrateLegacyHomeFile(path.join(os.homedir(), '.config', 'session-manager', 'telemetry.json'), p);
+  }
+  return p;
 }
 
 function isValid(cfg) {

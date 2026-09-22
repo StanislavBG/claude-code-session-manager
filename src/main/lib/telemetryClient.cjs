@@ -7,7 +7,7 @@
  * through the same queue/dedup/backoff machinery but sent one record at a
  * time via sendSingle() rather than sendBatch().
  *
- * Records accumulate durably in ~/.config/session-manager/telemetry-queue.jsonl
+ * Records accumulate durably in ~/.claude/session-manager/telemetry-queue.jsonl
  * the instant they're accepted, and are only ever sent by flush(reason) — on
  * a deliberate cadence (boot / daily / version-change / quit / manual), never
  * on a short interval. Every record is idempotent by recordId and stamped at
@@ -111,12 +111,21 @@ function logWarn(message, meta) {
 
 /**
  * SM_TELEMETRY_SPOOL, when set, overrides the spool directory in place of
- * `~/.config/session-manager` — the explicit opt-in a test that genuinely
+ * `~/.claude/session-manager` — the explicit opt-in a test that genuinely
  * needs to exercise real queue/sent-file I/O uses to prove it isn't about to
  * write into a real user's spool (see isTestEnvironment() below).
  */
+let spoolMigrated = false;
 function spoolDir() {
-  return process.env.SM_TELEMETRY_SPOOL || path.join(os.homedir(), '.config', 'session-manager');
+  if (process.env.SM_TELEMETRY_SPOOL) return process.env.SM_TELEMETRY_SPOOL;
+  const dir = path.join(os.homedir(), '.claude', 'session-manager');
+  if (!spoolMigrated) {
+    spoolMigrated = true;
+    const oldDir = path.join(os.homedir(), '.config', 'session-manager');
+    config.migrateLegacyHomeFile(path.join(oldDir, 'telemetry-queue.jsonl'), path.join(dir, 'telemetry-queue.jsonl'));
+    config.migrateLegacyHomeFile(path.join(oldDir, 'telemetry-sent.json'), path.join(dir, 'telemetry-sent.json'));
+  }
+  return dir;
 }
 
 function queuePath() {

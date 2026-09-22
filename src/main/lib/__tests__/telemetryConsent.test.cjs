@@ -40,7 +40,7 @@ function freshModules(home) {
   process.env.HOME = home;
   // Explicit opt-in: overrides the test-environment no-op guard so this
   // suite's real telemetryClient calls actually persist into an isolated dir.
-  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.config', 'session-manager');
+  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.claude', 'session-manager');
   for (const p of ['../telemetryConsent.cjs', '../telemetryClient.cjs', '../telemetrySettings.cjs', '../machineProfile.cjs', '../../config.cjs']) {
     const resolved = require.resolve(p);
     delete require.cache[resolved];
@@ -105,7 +105,7 @@ test('turning off does NOT clear telemetry-sent.json or the watermarks — re-en
   expect(JSON.parse(sentPathContent).ids.length).toBeGreaterThan(0);
 
   // Also seed a watermarks file to prove opt-out leaves it untouched.
-  const watermarksDir = path.join(home, '.config', 'session-manager');
+  const watermarksDir = path.join(home, '.claude', 'session-manager');
   await fsp.mkdir(watermarksDir, { recursive: true });
   const watermarksPath = path.join(watermarksDir, 'telemetry-watermarks.json');
   const watermarksBefore = { 'abc123/errors-2026-01-01.jsonl': { bytesEnqueued: 100, bytesConfirmed: 100 } };

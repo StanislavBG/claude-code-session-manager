@@ -56,7 +56,7 @@ function freshTelemetry(home) {
   process.env.HOME = home;
   // Explicit opt-in: overrides the test-environment no-op guard so this
   // suite's real telemetryClient calls actually persist into an isolated dir.
-  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.config', 'session-manager');
+  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.claude', 'session-manager');
   for (const p of ['../telemetryClient.cjs', '../../config.cjs', '../telemetrySettings.cjs', '../machineProfile.cjs']) {
     const resolved = require.resolve(p);
     delete require.cache[resolved];
@@ -133,7 +133,7 @@ function makeDeps({ home, telemetryClient, config, tabCwds }) {
 }
 
 function watermarksFileFor(home) {
-  return path.join(home, '.config', 'session-manager', 'telemetry-watermarks.json');
+  return path.join(home, '.claude', 'session-manager', 'telemetry-watermarks.json');
 }
 
 async function readWatermarks(home) {
@@ -569,7 +569,7 @@ test('bootDrain always drains with reason "boot", and drains a second time with 
 
 test('drainBacklog resolves (never rejects) when readdir fails, telemetryClient throws, and the watermarks file is corrupt', async () => {
   const home = await mkHome();
-  await fsp.mkdir(path.join(home, '.config', 'session-manager'), { recursive: true });
+  await fsp.mkdir(path.join(home, '.claude', 'session-manager'), { recursive: true });
   await fsp.writeFile(watermarksFileFor(home), 'not valid { json', 'utf8');
   const project = await mkProject('contained');
   writeErrorsFile(project, recentDateStr(), [errLine(1)]);
@@ -584,7 +584,7 @@ test('drainBacklog resolves (never rejects) when readdir fails, telemetryClient 
     logLine: async () => { throw new Error('boom client'); },
     flush: async () => { throw new Error('boom flush'); },
     isPending: async () => { throw new Error('boom pending'); },
-    sentPath: () => path.join(home, '.config', 'session-manager', 'telemetry-sent.json'),
+    sentPath: () => path.join(home, '.claude', 'session-manager', 'telemetry-sent.json'),
   };
   const deps = {
     sessionsStore: { load: async () => ({ tabs: [{ cwd: project }] }) },

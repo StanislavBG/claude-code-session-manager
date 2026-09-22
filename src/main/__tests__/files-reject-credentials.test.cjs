@@ -29,7 +29,7 @@ test('denies writing autostart persistence entries', () => {
 });
 
 test('allows ordinary files — including shell rc, which developers do edit', () => {
-  for (const p of [under('Projects', 'app', 'src', 'index.ts'), under('.bashrc'), under('.zshrc'), under('.config', 'session-manager', 'voice.json')]) {
+  for (const p of [under('Projects', 'app', 'src', 'index.ts'), under('.bashrc'), under('.zshrc'), under('.claude', 'session-manager', 'voice.json')]) {
     assert.doesNotThrow(() => rejectCredentials(p), `${p} should be allowed`);
   }
 });

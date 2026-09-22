@@ -348,7 +348,7 @@ function freshClient(home, profileOverrides) {
   process.env.HOME = home;
   // Explicit opt-in: overrides the test-environment no-op guard so this
   // suite's real telemetryClient calls actually persist into an isolated dir.
-  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.config', 'session-manager');
+  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.claude', 'session-manager');
   for (const p of HOME_DEPENDENT_MODULES) {
     const resolved = require.resolve(p);
     delete require.cache[resolved];
@@ -695,7 +695,7 @@ test('records queued, a 503 mid-drain, then a fresh client flushing successfully
 
   expect(stubServer.state.errors.length).toBe(before); // nothing landed during the failure
 
-  const wmPath = path.join(home, '.config', 'session-manager', 'telemetry-watermarks.json');
+  const wmPath = path.join(home, '.claude', 'session-manager', 'telemetry-watermarks.json');
   const wmAfterFailure = JSON.parse(await fsp.readFile(wmPath, 'utf8'));
   const entryAfterFailure = Object.values(wmAfterFailure).find((e) => e && typeof e === 'object' && 'bytesConfirmed' in e);
   expect(entryAfterFailure.bytesConfirmed).toBe(0); // bytesConfirmed frozen during the failed phase

@@ -1,7 +1,7 @@
 /**
  * VoiceSettings — persists voice hotkey configuration to disk.
  *
- * Storage: ~/.config/session-manager/voice.json
+ * Storage: ~/.claude/session-manager/voice.json
  * Shape: {
  *   accelerator: string, mode: 'hold'|'toggle', global: boolean, schemaVersion: 1,
  *   // F5 device picker (optional, additive):
@@ -44,8 +44,14 @@ function defaultsForPlatform() {
   return { accelerator: 'Ctrl+Shift+Space', mode: 'hold', global: false, schemaVersion: SCHEMA_VERSION };
 }
 
+let migrated = false;
 function storePath() {
-  return path.join(os.homedir(), '.config', 'session-manager', 'voice.json');
+  const p = path.join(os.homedir(), '.claude', 'session-manager', 'voice.json');
+  if (!migrated) {
+    migrated = true;
+    config.migrateLegacyHomeFile(path.join(os.homedir(), '.config', 'session-manager', 'voice.json'), p);
+  }
+  return p;
 }
 
 // PRD F1 v2 §Chord schema. Anchored, requires ≥1 modifier so a bare

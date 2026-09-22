@@ -228,7 +228,7 @@ function OtelExportSection() {
 
 /**
  * Product telemetry (bilko.run) — anonymous, on-by-default, opt-out. Persisted
- * to ~/.config/session-manager/telemetry.json (telemetrySettings.cjs). No
+ * to ~/.claude/session-manager/telemetry.json (telemetrySettings.cjs). No
  * identity field beyond the minted installId; no email/username/account
  * input anywhere in this section — see telemetry.md for the full data model
  * and the "how duplicate submission is prevented" mechanisms this section's

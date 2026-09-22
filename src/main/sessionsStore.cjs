@@ -2,7 +2,7 @@
  * SessionsStore — persists the renderer's tab list to disk so the app can
  * restore tabs + resume claude sessions after an electron restart.
  *
- * Storage: ~/.config/session-manager/tabs.json
+ * Storage: ~/.claude/session-manager/tabs.json
  * Shape: { tabs: PersistedTab[], activeTabId: string | null, savedAt: number }
  *
  * Only serializable, durable fields are persisted: id, sessionId, cwd,
@@ -17,8 +17,14 @@ const os = require('node:os');
 const { ipcMain } = require('electron');
 const config = require('./config.cjs');
 
+let migrated = false;
 function storePath() {
-  return path.join(os.homedir(), '.config', 'session-manager', 'tabs.json');
+  const p = path.join(os.homedir(), '.claude', 'session-manager', 'tabs.json');
+  if (!migrated) {
+    migrated = true;
+    config.migrateLegacyHomeFile(path.join(os.homedir(), '.config', 'session-manager', 'tabs.json'), p);
+  }
+  return p;
 }
 
 async function load() {

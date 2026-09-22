@@ -158,13 +158,13 @@ contextBridge.exposeInMainWorld('api', {
     getHotkeyConfig: () => ipcRenderer.invoke('voice:get-hotkey-config'),
     setHotkeyConfig: (cfg) => ipcRenderer.invoke('voice:set-hotkey', cfg),
     setRecording: (recording) => ipcRenderer.send('voice:set-recording', !!recording),
-    // F5 device picker prefs (~/.config/session-manager/voice.json `device` key).
+    // F5 device picker prefs (~/.claude/session-manager/voice.json `device` key).
     getDevicePref: () => ipcRenderer.invoke('voice:get-device-pref'),
     setDevicePref: (pref) => ipcRenderer.invoke('voice:set-device-pref', pref),
-    // F7 first-run wizard state (~/.config/session-manager/voice.json `wizard` key).
+    // F7 first-run wizard state (~/.claude/session-manager/voice.json `wizard` key).
     getWizardState: () => ipcRenderer.invoke('voice:wizard-state'),
     markWizardComplete: () => ipcRenderer.invoke('voice:wizard-complete'),
-    // F8 turn-detector settings (~/.config/session-manager/voice.json `turnDetector` key).
+    // F8 turn-detector settings (~/.claude/session-manager/voice.json `turnDetector` key).
     // MVP: settings persistence + kill switch only; no model is actually loaded in v1.
     getTurnDetector: () => ipcRenderer.invoke('voice:get-turn-detector'),
     setTurnDetector: (state) => ipcRenderer.invoke('voice:set-turn-detector', state),

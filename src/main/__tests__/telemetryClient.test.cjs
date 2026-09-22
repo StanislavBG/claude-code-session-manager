@@ -78,8 +78,8 @@ function freshClient(home, profileOverrides) {
   // Explicit opt-in: this suite deliberately exercises telemetryClient's real
   // queue/sent-file I/O, so it must override the test-environment no-op guard
   // by pointing the spool at this test's own isolated tmp dir (never a real
-  // user's ~/.config/session-manager).
-  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.config', 'session-manager');
+  // user's ~/.claude/session-manager).
+  process.env.SM_TELEMETRY_SPOOL = path.join(home, '.claude', 'session-manager');
   for (const p of ['../lib/telemetryClient.cjs', '../config.cjs', '../lib/telemetrySettings.cjs', '../lib/machineProfile.cjs']) {
     const resolved = require.resolve(p);
     delete require.cache[resolved];

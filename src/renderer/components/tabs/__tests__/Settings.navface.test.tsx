@@ -56,13 +56,13 @@ function installWindowApiMock() {
     otel: {
       getConfig: vi.fn().mockResolvedValue({ enabled: false }),
       status: vi.fn().mockResolvedValue({ running: false }),
-      configPath: vi.fn().mockResolvedValue('/home/bilko/.config/session-manager/otel.json'),
+      configPath: vi.fn().mockResolvedValue('/home/bilko/.claude/session-manager/otel.json'),
     },
     telemetry: {
       getConfig: vi.fn().mockResolvedValue({ enabled: false, installId: 'install-uuid', endpoint: '' }),
       setConfig: vi.fn().mockResolvedValue({ ok: true, config: { enabled: false } }),
       status: vi.fn().mockResolvedValue({ pendingCount: 0, sentCount: 0, dedupedAppends: 0, evictedCount: 0 }),
-      configPath: vi.fn().mockResolvedValue('/home/bilko/.config/session-manager/telemetry.json'),
+      configPath: vi.fn().mockResolvedValue('/home/bilko/.claude/session-manager/telemetry.json'),
     },
   }
   ;(window as unknown as { api: typeof api }).api = api
@@ -259,7 +259,7 @@ function clickViewTab(el: HTMLElement, label: string) {
 }
 
 describe('Settings Telemetry/Session Manager tabs are Home-only', () => {
-  // SettingsTelemetry (~/.config/session-manager/otel.json) and
+  // SettingsTelemetry (~/.claude/session-manager/otel.json) and
   // SettingsAppPrefs (localStorage) have no cwd/scope input anywhere — they
   // render identically regardless of navFace, so they must not appear as an
   // option on the Project face.

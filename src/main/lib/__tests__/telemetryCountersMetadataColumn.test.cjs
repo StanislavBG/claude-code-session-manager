@@ -37,7 +37,7 @@ async function mkHome() {
   process.env.HOME = dir;
   // Explicit opt-in: overrides the test-environment no-op guard so this
   // suite's real telemetryClient calls actually persist into an isolated dir.
-  process.env.SM_TELEMETRY_SPOOL = path.join(dir, '.config', 'session-manager');
+  process.env.SM_TELEMETRY_SPOOL = path.join(dir, '.claude', 'session-manager');
   return dir;
 }
 

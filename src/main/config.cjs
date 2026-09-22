@@ -113,7 +113,6 @@ const WRITE_PREFIXES = [
   path.join(os.homedir(), '.claude'),
   path.join(os.homedir(), '.claude.json'), // global MCP servers config
   path.join(os.homedir(), '.config', 'claude-code'),
-  path.join(os.homedir(), '.config', 'session-manager'),
 ];
 
 /**
@@ -313,6 +312,20 @@ function writeJsonSync(abs, data, opts = {}) {
   return { ok: true, mtimeMs: stat.mtimeMs };
 }
 
+/**
+ * One-shot best-effort move of a legacy config file to its new home. No-op
+ * (silent) when the new path already exists or the old path never existed —
+ * either way there is nothing to migrate. Same-filesystem rename is atomic,
+ * so there is no partial-write window to worry about.
+ */
+function migrateLegacyHomeFile(oldPath, newPath) {
+  try {
+    if (fs.existsSync(newPath) || !fs.existsSync(oldPath)) return;
+    fs.mkdirSync(path.dirname(newPath), { recursive: true });
+    fs.renameSync(oldPath, newPath);
+  } catch { /* best-effort; a stale/missing legacy file must never block boot */ }
+}
+
 async function listDir(abs, { filesOnly = false, dirsOnly = false, includeHidden = false } = {}) {
   try {
     abs = validatePath(expandHome(abs));
@@ -490,6 +503,7 @@ module.exports = {
   readText,
   writeJson,
   writeJsonSync,
+  migrateLegacyHomeFile,
   writeTextAtomic,
   writeBinaryAtomic,
   listDir,

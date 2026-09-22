@@ -340,7 +340,7 @@ export interface VoiceMarkWizardCompleteResult {
 /**
  * F8 — semantic turn-detection settings. MVP shape only; the actual
  * smart-turn-v3 ONNX model is not loaded in v1. Persisted at
- * ~/.config/session-manager/voice.json under `turnDetector`. See PRD F8 v2.
+ * ~/.claude/session-manager/voice.json under `turnDetector`. See PRD F8 v2.
  */
 export interface VoiceTurnDetectorState {
   enabled: boolean;

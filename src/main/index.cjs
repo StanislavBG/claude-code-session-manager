@@ -1027,7 +1027,7 @@ ipcMain.handle('exchanges:list', validated(schemas.exchangesList, async (payload
   }
 }));
 
-// OTEL telemetry export (opt-in via ~/.config/session-manager/otel.json).
+// OTEL telemetry export (opt-in via ~/.claude/session-manager/otel.json).
 ipcMain.handle('otel:get-config', async () => otelSettings.load());
 ipcMain.handle('otel:set-config', async (_e, cfg) => {
   if (!otelSettings.isValid(cfg)) {

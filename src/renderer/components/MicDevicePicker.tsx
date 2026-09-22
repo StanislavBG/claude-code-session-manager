@@ -1,6 +1,6 @@
 /**
  * MicDevicePicker — F5 v1: tiny <select> next to the mic button that lists
- * audioinput devices, persists the user's choice to ~/.config/session-manager/
+ * audioinput devices, persists the user's choice to ~/.claude/session-manager/
  * voice.json (`device` subtree), and live-restarts recording on switch.
  *
  * Out of v1 scope (TODO(F5-followup)):

@@ -84,7 +84,7 @@ function SettingsComponent() {
     setScope(navFace === 'project' && cwd ? 'project' : 'user')
   }, [navFace, cwd])
 
-  // 'telemetry' (~/.config/session-manager/otel.json) and 'app' (Session
+  // 'telemetry' (~/.claude/session-manager/otel.json) and 'app' (Session
   // Manager native prefs, localStorage) are both machine-wide only — no
   // cwd/scope input anywhere in SettingsTelemetry/SettingsAppPrefs, so they
   // render byte-identical regardless of navFace. Project face never offers

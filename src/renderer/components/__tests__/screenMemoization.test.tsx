@@ -143,7 +143,7 @@ function installBroadWindowApiMock() {
     otel: {
       getConfig: vi.fn().mockResolvedValue({ enabled: false }),
       status: vi.fn().mockResolvedValue({ running: false }),
-      configPath: vi.fn().mockResolvedValue('/home/bilko/.config/session-manager/otel.json'),
+      configPath: vi.fn().mockResolvedValue('/home/bilko/.claude/session-manager/otel.json'),
     },
     files: { delete: vi.fn().mockResolvedValue({ ok: true }) },
     memory: {

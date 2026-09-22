@@ -76,9 +76,14 @@ test('LIVE_ROOT_LITERAL: resolver, self, allowlisted, comments, and non-root joi
   write('scripts/allowed.cjs', LIVE);
   write('src/main/comment.cjs', `// ${LIVE}`);
   write('src/main/agents.cjs', "const a = path.join(os.homedir(), '.claude', 'agents');\n");
-  write('src/main/cfg.cjs', "const a = path.join(os.homedir(), '.config', 'session-manager', 'x.json');\n");
   write('src/main/cwd.cjs', "const a = path.join(os.homedir(), 'Projects', 'session-manager');\n");
   expect(scanLiveRoots(root, { allowlist: new Map([['scripts/allowed.cjs', 'test reason']]) })).toEqual([]);
+});
+
+test('LIVE_ROOT_LITERAL: a NEW .config/session-manager join is caught (the old dir is retired)', () => {
+  write('src/main/cfg.cjs', "const a = path.join(os.homedir(), '.config', 'session-manager', 'x.json');\n");
+  const violations = scanLiveRoots(root, { allowlist: new Map() });
+  expect(violations).toEqual([{ file: 'src/main/cfg.cjs', line: 1, text: expect.stringContaining("'.config'") }]);
 });
 
 test('LIVE_ROOT_LITERAL: the scanner script never matches itself (self-match guard)', () => {

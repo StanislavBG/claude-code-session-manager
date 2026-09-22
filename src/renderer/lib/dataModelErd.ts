@@ -196,7 +196,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
     aka: 'TAB',
     group: 'project',
     store: {
-      path: '~/.config/session-manager/tabs.json',
+      path: '~/.claude/session-manager/tabs.json',
       format: 'json',
       definedIn: 'src/main/sessionsStore.cjs ',
     },

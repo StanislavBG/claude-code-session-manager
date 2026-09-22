@@ -1,7 +1,7 @@
 /**
  * otelSettings — persists OTEL telemetry export configuration.
  *
- * Storage: ~/.config/session-manager/otel.json
+ * Storage: ~/.claude/session-manager/otel.json
  * Shape: {
  *   enabled: boolean,
  *   endpoint: string,        // OTLP/HTTP traces endpoint
@@ -30,8 +30,14 @@ const DEFAULTS = Object.freeze({
   schemaVersion: SCHEMA_VERSION,
 });
 
+let migrated = false;
 function storePath() {
-  return path.join(os.homedir(), '.config', 'session-manager', 'otel.json');
+  const p = path.join(os.homedir(), '.claude', 'session-manager', 'otel.json');
+  if (!migrated) {
+    migrated = true;
+    config.migrateLegacyHomeFile(path.join(os.homedir(), '.config', 'session-manager', 'otel.json'), p);
+  }
+  return p;
 }
 
 function isValid(cfg) {

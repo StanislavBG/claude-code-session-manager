@@ -21,7 +21,7 @@
  * a conservative, delivery-confirmed offset) at once — see the two-phase
  * design below.
  *
- * TWO-PHASE WATERMARK. Per file, ~/.config/session-manager/telemetry-
+ * TWO-PHASE WATERMARK. Per file, ~/.claude/session-manager/telemetry-
  * watermarks.json tracks:
  *   - bytesEnqueued:  how far we've read + handed lines to telemetryClient.
  *                     Advances the instant a line has been processed
@@ -85,8 +85,14 @@ function lastRunSummary() {
   return lastSummary ? { ...lastSummary } : null;
 }
 
+let migrated = false;
 function watermarksPath() {
-  return path.join(os.homedir(), '.config', 'session-manager', 'telemetry-watermarks.json');
+  const p = path.join(os.homedir(), '.claude', 'session-manager', 'telemetry-watermarks.json');
+  if (!migrated) {
+    migrated = true;
+    config.migrateLegacyHomeFile(path.join(os.homedir(), '.config', 'session-manager', 'telemetry-watermarks.json'), p);
+  }
+  return p;
 }
 
 function resolveDeps(deps = {}) {
@@ -154,7 +160,7 @@ function entryFor(wm, key) {
 
 /**
  * Known projects come from the same source of truth the renderer restores
- * tabs from (sessionsStore.cjs's ~/.config/session-manager/tabs.json — TAB =
+ * tabs from (sessionsStore.cjs's ~/.claude/session-manager/tabs.json — TAB =
  * cwd = Main Project), deduped by normalized cwd, with ephemeral (worktree /
  * tmpdir) cwds excluded before normalization even runs, since a worktree cwd
  * would otherwise resolve back to its real project and be scanned twice

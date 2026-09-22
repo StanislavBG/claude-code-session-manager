@@ -17,14 +17,14 @@ touching any of the four modules below.
 
 ## The four local stores (ERD)
 
-All four live under `~/.config/session-manager/` — machine-global, not per-project (there is one
+All four live under `~/.claude/session-manager/` — machine-global, not per-project (there is one
 install, one queue, one identity, regardless of how many project tabs are open).
 
 ### 1. `telemetry.json` — config + install identity
 
 | | |
 | --- | --- |
-| Path | `~/.config/session-manager/telemetry.json` |
+| Path | `~/.claude/session-manager/telemetry.json` |
 | Owning module | `src/main/lib/telemetrySettings.cjs` |
 | Write mode | Atomic (tmp + rename via `config.cjs`'s `writeTextAtomic`), serialized through an in-process write queue |
 | Primary key | Singleton file — one row |
@@ -49,7 +49,7 @@ no username, no hostname.
 
 | | |
 | --- | --- |
-| Path | `~/.config/session-manager/telemetry-queue.jsonl` |
+| Path | `~/.claude/session-manager/telemetry-queue.jsonl` |
 | Owning module | `src/main/lib/telemetryClient.cjs` |
 | Write mode | **Append** on ingest (`persistAppendLine`); **full atomic rewrite** after a successful send or a cap eviction (`persistQueueFull`) |
 | Primary key | `recordId` (one JSON object per line: `{ recordId, channel, wire }`) |
@@ -64,7 +64,7 @@ the moment it was queued (see Privacy model below).
 
 | | |
 | --- | --- |
-| Path | `~/.config/session-manager/telemetry-sent.json` |
+| Path | `~/.claude/session-manager/telemetry-sent.json` |
 | Owning module | `src/main/lib/telemetryClient.cjs` |
 | Write mode | Atomic (`config.cjs`'s `writeJson`) |
 | Primary key | `ids: string[]` — an ordered set of `recordId`s |
@@ -75,7 +75,7 @@ the moment it was queued (see Privacy model below).
 
 | | |
 | --- | --- |
-| Path | `~/.config/session-manager/telemetry-watermarks.json` |
+| Path | `~/.claude/session-manager/telemetry-watermarks.json` |
 | Owning module | `src/main/lib/telemetryBacklog.cjs` |
 | Write mode | Atomic (`config.cjs`'s `writeJson`), rewritten after each file's drain step |
 | Primary key | `"<projectHash>/<filename>"` (e.g. `a1b2c3d4e5f6/errors-2026-08-01.jsonl`) |

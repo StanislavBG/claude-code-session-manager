@@ -45,8 +45,11 @@ const LIVE_FILE_RE = /\.(?:cjs|mjs|js|ts|tsx)$/
 const HOME_OR_TMP_RE = /\b(?:homedir|tmpdir)\(\)/
 // '.claude' is not matched alone (agents/projects/settings are Claude Code's own dirs, not
 // scheduler roots); it counts through the session-manager segment that follows it.
-// The app's '.config' dir and the 'Projects' checkout dir are likewise not scheduler roots.
-const LIVE_SEGMENT_RE = /(?<!['"](?:\.config|Projects)['"],\s*)['"`](?:session-manager|scheduled-plans|[\w.-]*-worktrees)['"`]/
+// The 'Projects' checkout dir (~/Projects/session-manager, the repo clone itself) is likewise
+// not a scheduler root. '.config' is NOT exempted — everything under
+// ~/.config/session-manager has migrated to ~/.claude/session-manager, so a new join under
+// the old dir is exactly the split-brain this rule exists to catch.
+const LIVE_SEGMENT_RE = /(?<!['"]Projects['"],\s*)['"`](?:session-manager|scheduled-plans|[\w.-]*-worktrees)['"`]/
 
 // repo-relative path -> reason this file may join a home/tmp root with a scheduler-root segment.
 const LIVE_ROOT_ALLOWLIST = new Map([
@@ -63,6 +66,12 @@ const LIVE_ROOT_ALLOWLIST = new Map([
   ['src/main/seedDevPlugin.cjs', 'seed marker file under ~/.claude/session-manager; not a scheduler root'],
   ['src/main/seedSchedulerMcp.cjs', 'seed marker file under ~/.claude/session-manager; not a scheduler root'],
   ['src/main/usage.cjs', 'billing-cache.json under ~/.claude/session-manager; not a scheduler root'],
+  ['src/main/sessionsStore.cjs', 'tabs.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
+  ['src/main/otelSettings.cjs', 'otel.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
+  ['src/main/voiceSettings.cjs', 'voice.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
+  ['src/main/lib/telemetrySettings.cjs', 'telemetry.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
+  ['src/main/lib/telemetryBacklog.cjs', 'telemetry-watermarks.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
+  ['src/main/lib/telemetryClient.cjs', 'telemetry spool under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
   // Tests that deliberately assert the default (unredirected) location.
   ['src/main/__tests__/heapSnapshot.test.cjs', 'asserts the default snapshot dir'],
   ['src/main/lib/__tests__/delegationReadiness.test.cjs', 'builds a fake job-worktree cwd string to classify; touches no disk'],

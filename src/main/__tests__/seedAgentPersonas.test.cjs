@@ -163,6 +163,17 @@ test('seeded dev-lead persona pins an executor-tier model', () => {
   expect(fm.model).toBe('sonnet');
 });
 
+test('seeded dev-lead body fits AGENT_BODY_CHAR_CAP and carries the run contract', () => {
+  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { AGENT_BODY_CHAR_CAP } = require('../lib/agentModelResolve.cjs');
+  const raw = fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', 'dev-lead.md'), 'utf8');
+  const { body } = splitFrontmatter(raw);
+  const trimmed = body.trim();
+  expect(trimmed.length).toBeLessThan(AGENT_BODY_CHAR_CAP);
+  expect(trimmed).toContain('## Run contract');
+  expect(trimmed).toContain('SCHEDULER_VERDICT: PASS');
+});
+
 test('SM_SEED_AGENT_PERSONAS_DISABLE=1 short-circuits', async () => {
   process.env.SM_SEED_AGENT_PERSONAS_DISABLE = '1';
 

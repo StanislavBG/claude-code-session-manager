@@ -74,7 +74,7 @@ test('buildPrdBody emits required frontmatter keys and body sections in order', 
   expect(body).toMatch(/- not this/);
   // must point at STANDARDS_PATH rather than inline the standards.md content
   expect(body.includes(STANDARDS_PATH)).toBeTruthy();
-  expect(body).toMatch(/Before writing any code, read/);
+  expect(body).toMatch(/Your system prompt carries the ordered run contract/);
   // the pointer block mentions "Execution discipline" by name, but must not
   // inline the full standards.md prose (e.g. its Performance-section rules)
   expect(body.includes('Lay out hot data contiguously')).toBeFalsy();

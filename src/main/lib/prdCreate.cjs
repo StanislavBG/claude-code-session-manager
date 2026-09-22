@@ -134,10 +134,10 @@ function buildPrdBody(input) {
   const oosLines = oosSource.map((line) => `- ${line}`).join('\n');
 
   const standardsPointer = [
-    `Before writing any code, read \`${STANDARDS_PATH}\` — it has the Performance, Debugging,`,
-    'API-reuse, TDD, and Execution-discipline rules that apply to this PRD. Every rule in it is',
-    'mandatory, especially Execution discipline (bounded commands, verify before done, the',
-    'finish-protocol sentinel).',
+    'Your system prompt carries the ordered run contract.',
+    `\`${STANDARDS_PATH}\` holds the reasoning behind each contract line (Performance, Debugging,`,
+    'API reuse, TDD, Execution discipline) — read the section a line points at when it is unclear;',
+    'do not re-read the whole file every run.',
   ].join('\n');
 
   const bodyLines = [

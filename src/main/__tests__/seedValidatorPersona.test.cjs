@@ -110,4 +110,7 @@ test('the seeded validator body is under AGENT_BODY_CHAR_CAP and contains both r
   expect(trimmed.length).toBeLessThan(AGENT_BODY_CHAR_CAP);
   expect(trimmed).toContain('VALIDATION: <slug> VERIFIED');
   expect(trimmed).toContain('SCHEDULER_VERDICT: PASS');
+  expect(trimmed).not.toContain('Do not touch:');
+  expect(trimmed).not.toContain('Report explicitly:');
+  expect(trimmed.endsWith('report them.')).toBe(true);
 });

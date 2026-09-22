@@ -31,7 +31,3 @@ Your PRD's `# Acceptance criteria` lists the plan's PRD slugs and where each PRD
 - Bound every command with `timeout`; run nothing in the background; do not call ScheduleWakeup, Monitor, or /develop.
 - Absence checks must exit 0 when clean (`if grep …; then echo HALT; exit 1; fi; echo clean`).
 - Do the review once; do not loop on findings — report them.
-
-Do not touch: src/seed/agents/dev-lead.md, src/main/__tests__/seedAgentPersonas.test.cjs, ~/.claude/agents/*, src/main/scheduler.cjs.
-
-Report explicitly: on THIS machine the running app is the npx build, so ~/.claude/agents/validator.md only appears after the next publish + app restart; until then `scheduler_create_prd` with agentType validator is rejected by assertAgentTypeWritable — the user can copy the seed file there manually.

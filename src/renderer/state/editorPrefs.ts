@@ -3,11 +3,21 @@
  *
  * These are app-wide (not per-file): font size, word-wrap, minimap, theme.
  * Live-applied to Monaco via `ed.updateOptions` so toggling never remounts the
- * editor. Persisted to localStorage by hand (one small flat object) — no need
- * for zustand persist middleware for a single key.
+ * editor. Persisted to `~/.claude/session-manager/ui-settings-prefs.json`'s
+ * `editor` field via `lib/uiSettingsPrefs.ts` (shared with the raw-session
+ * model and terminal appearance prefs — read-modify-write, one field's write
+ * never clobbers another's).
+ *
+ * The store's initial state is the hard-coded DEFAULTS below (paints
+ * immediately, no flash of an empty scene) and is asynchronously overwritten
+ * once the disk read resolves — mirrors `lib/rawSessionModel.ts`'s
+ * hydrate-on-import pattern. `userSet` guards that hydration from clobbering
+ * a change the user already made while the read was still in flight.
  */
 
 import { create } from 'zustand'
+import { readUiSettingsPrefs, writeUiSettingsPrefs } from '../lib/uiSettingsPrefs'
+import { toast } from './toast'
 
 export type EditorTheme = 'paper' | 'dark'
 
@@ -24,23 +34,20 @@ export interface EditorPrefs {
 }
 
 const DEFAULTS: EditorPrefs = { fontSize: 13, wordWrap: false, minimap: false, theme: 'paper', autosave: true, wideMeasure: false, assistantRail: true }
-const KEY = 'sm.editorPrefs.v1'
 const MIN_FONT = 9
 const MAX_FONT = 28
 
-function load(): EditorPrefs {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return DEFAULTS
-    const parsed = JSON.parse(raw) as Partial<EditorPrefs>
-    return { ...DEFAULTS, ...parsed }
-  } catch {
-    return DEFAULTS
+function sanitize(parsed: Partial<EditorPrefs> | undefined): EditorPrefs {
+  if (!parsed || typeof parsed !== 'object') return DEFAULTS
+  return {
+    fontSize: typeof parsed.fontSize === 'number' && parsed.fontSize >= MIN_FONT && parsed.fontSize <= MAX_FONT ? parsed.fontSize : DEFAULTS.fontSize,
+    wordWrap: typeof parsed.wordWrap === 'boolean' ? parsed.wordWrap : DEFAULTS.wordWrap,
+    minimap: typeof parsed.minimap === 'boolean' ? parsed.minimap : DEFAULTS.minimap,
+    theme: parsed.theme === 'dark' || parsed.theme === 'paper' ? parsed.theme : DEFAULTS.theme,
+    autosave: typeof parsed.autosave === 'boolean' ? parsed.autosave : DEFAULTS.autosave,
+    wideMeasure: typeof parsed.wideMeasure === 'boolean' ? parsed.wideMeasure : DEFAULTS.wideMeasure,
+    assistantRail: typeof parsed.assistantRail === 'boolean' ? parsed.assistantRail : DEFAULTS.assistantRail,
   }
-}
-
-function persist(prefs: EditorPrefs): void {
-  try { localStorage.setItem(KEY, JSON.stringify(prefs)) } catch { /* quota / private mode — ignore */ }
 }
 
 interface PrefsState extends EditorPrefs {
@@ -55,9 +62,15 @@ interface PrefsState extends EditorPrefs {
   toggleAssistantRail: () => void
 }
 
+// True once a user action has set a value — guards `hydrate()`'s disk read
+// (fired at module load) from overwriting a choice the user already made
+// while that read was still in flight.
+let userSet = false
+
 export const useEditorPrefs = create<PrefsState>((set, get) => {
   const save = (patch: Partial<EditorPrefs>) => {
-    const next: EditorPrefs = {
+    userSet = true
+    const previous: EditorPrefs = {
       fontSize: get().fontSize,
       wordWrap: get().wordWrap,
       minimap: get().minimap,
@@ -65,13 +78,18 @@ export const useEditorPrefs = create<PrefsState>((set, get) => {
       autosave: get().autosave,
       wideMeasure: get().wideMeasure,
       assistantRail: get().assistantRail,
-      ...patch,
     }
-    persist(next)
+    const next: EditorPrefs = { ...previous, ...patch }
     set(patch)
+    writeUiSettingsPrefs({ editor: next }).catch(() => {
+      // Revert so the UI doesn't show a choice that never reached disk, and
+      // tell the user (CLAUDE.md: never swallow errors).
+      set(previous)
+      toast.error("Couldn't save editor preferences — reverted.")
+    })
   }
   return {
-    ...load(),
+    ...DEFAULTS,
     setFontSize: (n) => save({ fontSize: Math.max(MIN_FONT, Math.min(MAX_FONT, Math.round(n))) }),
     bumpFontSize: (delta) => save({ fontSize: Math.max(MIN_FONT, Math.min(MAX_FONT, get().fontSize + delta)) }),
     resetFontSize: () => save({ fontSize: DEFAULTS.fontSize }),
@@ -83,3 +101,15 @@ export const useEditorPrefs = create<PrefsState>((set, get) => {
     toggleAssistantRail: () => save({ assistantRail: !get().assistantRail }),
   }
 })
+
+async function hydrate(): Promise<void> {
+  try {
+    const prefs = await readUiSettingsPrefs()
+    if (userSet) return
+    if (prefs.editor) useEditorPrefs.setState(sanitize(prefs.editor as Partial<EditorPrefs>))
+  } catch {
+    /* ignore — stays at DEFAULTS */
+  }
+}
+
+void hydrate()

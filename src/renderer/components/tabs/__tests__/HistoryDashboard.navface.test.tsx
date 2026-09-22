@@ -5,6 +5,7 @@ import { act } from 'react-dom/test-utils'
 import { HistoryDashboard } from '../HistoryDashboard'
 import { useLayout } from '../../../state/layout'
 import { useSessions, type SessionTab } from '../../../state/sessions'
+import { useToast } from '../../../state/toast'
 import { encodeWorkspace } from '../../../lib/encodeWorkspace'
 import type { HistoryDashboardProjectRow, HistoryDashboardResult, HistoryDashboardTotals } from '../../../../preload/api'
 
@@ -94,9 +95,17 @@ function buildRaw(): HistoryDashboardResult {
 }
 
 function installWindowApiMock() {
+  const store: Record<string, unknown> = {}
   const api = {
     history: {
       dashboard: vi.fn().mockResolvedValue(buildRaw()),
+    },
+    config: {
+      readJson: vi.fn(async () => ({ exists: Object.keys(store).length > 0, data: { ...store } })),
+      writeJson: vi.fn(async (_path: string, data: unknown) => {
+        Object.assign(store, data as Record<string, unknown>)
+        return { ok: true, mtimeMs: Date.now() }
+      }),
     },
   }
   ;(window as unknown as { api: typeof api }).api = api
@@ -313,5 +322,50 @@ describe('HistoryDashboard Project face — force-scoped, no escape hatch', () =
     const el = await mount(<HistoryDashboard />)
     expect(el.textContent).not.toContain('no sessions in range')
     expect(el.textContent).not.toContain(BETA_CWD)
+  })
+})
+
+// Measure/range now persist through the shared ui-settings-prefs.json (via
+// lib/historyAnalyticsPrefs.ts) instead of localStorage — a merge-write so a
+// later BudgetStrip cap write never drops these two fields.
+describe('HistoryDashboard measure/range — disk-backed persistence', () => {
+  it('paints with the sane defaults (spend / 30d) then hydrates a persisted choice', async () => {
+    const api = installWindowApiMock()
+    await api.config.writeJson('~/.claude/session-manager/ui-settings-prefs.json', { history: { measure: 'sessions', range: 90 } })
+    const el = await mount(<HistoryDashboard />)
+    const sessionsBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Sessions')
+    const rangeBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === '90d')
+    expect(sessionsBtn?.className).toContain('bg-bg-hi')
+    expect(rangeBtn?.className).toContain('bg-bg-hi')
+  })
+
+  it('clicking a measure/range control writes it through window.api.config.writeJson', async () => {
+    const el = await mount(<HistoryDashboard />)
+    const sessionsBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Sessions')!
+    await act(async () => {
+      sessionsBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    const api = (window as unknown as { api: { config: { writeJson: ReturnType<typeof vi.fn> } } }).api
+    expect(api.config.writeJson).toHaveBeenCalledWith(
+      '~/.claude/session-manager/ui-settings-prefs.json',
+      expect.objectContaining({ history: expect.objectContaining({ measure: 'sessions' }) }),
+    )
+  })
+
+  it('reverts and toasts when the write fails (never swallow errors)', async () => {
+    useToast.setState({ toasts: [], history: [], unreadCount: 0 })
+    const api = installWindowApiMock()
+    api.config.writeJson.mockRejectedValueOnce(new Error('disk full'))
+    const el = await mount(<HistoryDashboard />)
+    const sessionsBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Sessions')!
+    await act(async () => {
+      sessionsBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    const spendBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent === 'Spend')!
+    expect(spendBtn.className).toContain('bg-bg-hi')
+    expect(useToast.getState().toasts.some((t) => t.kind === 'error')).toBe(true)
   })
 })

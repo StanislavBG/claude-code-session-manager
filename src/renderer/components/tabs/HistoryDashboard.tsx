@@ -10,6 +10,7 @@ import { useSessions } from '../../state/sessions'
 import { useKnownProjects } from '../../lib/useKnownProjects'
 import { normalizeCwd } from '../../lib/knownProjectAggregate'
 import { foldHistoryDaysByCwd, hasExclusions, describeExclusions } from '../../lib/historyProjectFold'
+import { readHistoryAnalyticsPrefs, writeHistoryAnalyticsPrefs } from '../../lib/historyAnalyticsPrefs'
 import { ControlBar, type RangeDays } from './history/analytics/ControlBar'
 import { Headline } from './history/analytics/Headline'
 import { BudgetStrip } from './history/analytics/BudgetStrip'
@@ -22,28 +23,12 @@ import { Concentration } from './history/analytics/panels/Concentration'
 import { CachePanel } from './history/analytics/panels/CachePanel'
 import { Rhythm } from './history/analytics/panels/Rhythm'
 
-const MEASURE_KEY = 'sm.history.analytics.measure'
-const RANGE_KEY = 'sm.history.analytics.range'
 const MEASURES: Measure[] = ['in', 'out', 'total', 'prompts', 'sessions', 'time', 'spend']
 const RANGES: RangeDays[] = [30, 60, 90, 0]
+const DEFAULT_MEASURE: Measure = 'spend'
+const DEFAULT_RANGE: RangeDays = 30
 /** Module-level so the `days` fallback is reference-stable across renders. */
 const EMPTY_DAYS: HistoryDashboardDay[] = []
-
-function loadMeasure(): Measure {
-  try {
-    const v = localStorage.getItem(MEASURE_KEY)
-    if (v && (MEASURES as string[]).includes(v)) return v as Measure
-  } catch { /* quota / private mode — ignore */ }
-  return 'spend'
-}
-
-function loadRange(): RangeDays {
-  try {
-    const v = Number(localStorage.getItem(RANGE_KEY))
-    if ((RANGES as number[]).includes(v)) return v as RangeDays
-  } catch { /* quota / private mode — ignore */ }
-  return 30
-}
 
 function emptyTotals(): HistoryDashboardTotals {
   return {
@@ -53,8 +38,48 @@ function emptyTotals(): HistoryDashboardTotals {
 }
 
 export function HistoryDashboard() {
-  const [measure, setMeasure] = useState<Measure>(loadMeasure)
-  const [range, setRange] = useState<RangeDays>(loadRange)
+  const [measure, setMeasureState] = useState<Measure>(DEFAULT_MEASURE)
+  const [range, setRangeState] = useState<RangeDays>(DEFAULT_RANGE)
+  // Guards the async hydrate below from clobbering a choice the user already
+  // made (via setMeasure/setRange) while the disk read was still in flight —
+  // same ordering hazard `lib/rawSessionModel.ts`'s `userSet` flag guards.
+  const measureTouchedRef = useRef(false)
+  const rangeTouchedRef = useRef(false)
+
+  const setMeasure = (m: Measure) => {
+    measureTouchedRef.current = true
+    const previous = measure
+    setMeasureState(m)
+    writeHistoryAnalyticsPrefs({ measure: m }).catch(() => {
+      setMeasureState(previous)
+      toast.error("Couldn't save the measure preference — reverted.")
+    })
+  }
+  const setRange = (r: RangeDays) => {
+    rangeTouchedRef.current = true
+    const previous = range
+    setRangeState(r)
+    writeHistoryAnalyticsPrefs({ range: r }).catch(() => {
+      setRangeState(previous)
+      toast.error("Couldn't save the range preference — reverted.")
+    })
+  }
+
+  // Two-phase mount: paint with the DEFAULT_MEASURE/DEFAULT_RANGE above, then
+  // apply the persisted value once the async disk read resolves.
+  useEffect(() => {
+    let cancelled = false
+    readHistoryAnalyticsPrefs().then((p) => {
+      if (cancelled) return
+      if (!measureTouchedRef.current && p.measure && (MEASURES as string[]).includes(p.measure)) {
+        setMeasureState(p.measure as Measure)
+      }
+      if (!rangeTouchedRef.current && p.range !== undefined && (RANGES as number[]).includes(p.range)) {
+        setRangeState(p.range as RangeDays)
+      }
+    })
+    return () => { cancelled = true }
+  }, [])
 
   // The Project face is FORCE-scoped to the active tab's project — no
   // manual override, no escape hatch (matches Scheduler's Project-face
@@ -91,9 +116,6 @@ export function HistoryDashboard() {
   const [raw, setRaw] = useState<HistoryDashboardResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [tick, setTick] = useState(0)
-
-  useEffect(() => { try { localStorage.setItem(MEASURE_KEY, measure) } catch { /* ignore */ } }, [measure])
-  useEffect(() => { try { localStorage.setItem(RANGE_KEY, String(range)) } catch { /* ignore */ } }, [range])
 
   useEffect(() => {
     let cancelled = false

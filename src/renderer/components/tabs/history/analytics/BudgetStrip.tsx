@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { HistoryDashboardDay } from '../../../../../preload/api'
 import { computeBudgetProjection } from '../../../../lib/historyMath'
 import { usd } from '../../../../lib/analyticsFormat'
+import { readHistoryAnalyticsPrefs, writeHistoryAnalyticsPrefs } from '../../../../lib/historyAnalyticsPrefs'
+import { toast } from '../../../../state/toast'
 import { CARD } from './analytics-primitives'
 
-// Preserved verbatim from the pre-rewrite HistoryDashboard.tsx so a user's
-// saved cap survives this rewrite.
-const BUDGET_CAP_STORAGE_KEY = 'sm.history.budgetCapUsd'
 const DEFAULT_BUDGET_CAP_USD = 50
 
 interface Props {
@@ -15,19 +14,33 @@ interface Props {
 }
 
 export function BudgetStrip({ days }: Props) {
-  const [capUsd, setCapUsd] = useState<number>(() => {
-    try {
-      const raw = localStorage.getItem(BUDGET_CAP_STORAGE_KEY)
-      const parsed = raw === null ? NaN : Number(raw)
-      return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_BUDGET_CAP_USD
-    } catch {
-      return DEFAULT_BUDGET_CAP_USD
-    }
-  })
+  const [capUsd, setCapUsdState] = useState<number>(DEFAULT_BUDGET_CAP_USD)
+  // Guards the async hydrate below from clobbering a cap the user already
+  // typed while the disk read was still in flight.
+  const touchedRef = useRef(false)
 
+  // Two-phase mount: paint with DEFAULT_BUDGET_CAP_USD, then apply the
+  // persisted value once the async disk read resolves.
   useEffect(() => {
-    try { localStorage.setItem(BUDGET_CAP_STORAGE_KEY, String(capUsd)) } catch { /* quota / private mode — ignore */ }
-  }, [capUsd])
+    let cancelled = false
+    readHistoryAnalyticsPrefs().then((p) => {
+      if (cancelled || touchedRef.current) return
+      if (typeof p.budgetCapUsd === 'number' && Number.isFinite(p.budgetCapUsd) && p.budgetCapUsd > 0) {
+        setCapUsdState(p.budgetCapUsd)
+      }
+    })
+    return () => { cancelled = true }
+  }, [])
+
+  const setCapUsd = (v: number) => {
+    touchedRef.current = true
+    const previous = capUsd
+    setCapUsdState(v)
+    writeHistoryAnalyticsPrefs({ budgetCapUsd: v }).catch(() => {
+      setCapUsdState(previous)
+      toast.error("Couldn't save the budget cap — reverted.")
+    })
+  }
 
   const { mtdSpend, projectedSpend } = useMemo(() => {
     const now = new Date()

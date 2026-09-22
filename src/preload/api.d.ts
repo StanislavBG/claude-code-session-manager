@@ -1944,7 +1944,7 @@ export interface SessionManagerAPI {
     /** Create a new memory entry with starter frontmatter + body. */
     create: (name: string, description?: string, workspace?: string) => Promise<MemoryMutationResult>;
     /** Aggregate workspace memories into semantic clusters. `refresh:true` fires a cost-gated `claude -p` pass; otherwise returns the cache only. */
-    aggregate: (workspace: string, refresh?: boolean) => Promise<MemoryAggregateResult>;
+    aggregate: (workspace: string, refresh?: boolean, cwd?: string) => Promise<MemoryAggregateResult>;
     /** Deterministic, zero-LLM-cost staleness report. `cwd` (optional) scopes the dead-repo-ref check. */
     stale: (workspace?: string, cwd?: string) => Promise<MemoryStaleResult>;
   };

@@ -632,10 +632,14 @@ const memoryStale = z.object({
 // the encoded cwd slug (memoryAggregate.cjs reads directly from
 // ~/.claude/projects/<workspace>/memory/), same regex as the other memory:*
 // handlers. `refresh: true` is the cost gate that fires the single claude -p
-// clustering pass; falsy returns the cached result.
+// clustering pass; falsy returns the cached result. `cwd` (PRD 1389,
+// optional — same shape as memory:stale's) addresses the per-project cache
+// at <cwd>/session-manager-operations/memory-clusters/clusters.json;
+// absent/invalid cwd just disables caching for that call.
 const memoryAggregate = z.object({
   workspace: z.string().regex(MEMORY_WORKSPACE_RE),
   refresh: z.boolean().optional(),
+  cwd: z.string().max(4096).optional(),
 }).strict();
 
 // ──────────────────────────────────────────── Project Brief (PRD 837)

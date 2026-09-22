@@ -66,7 +66,7 @@ orphans — memories that fit no cluster.</p>
   <li>The result is parsed defensively — any cluster member, link endpoint, or orphan that isn't
   a real memory slug on disk is dropped, so the report can never reference a memory that doesn't
   exist.</li>
-  <li>The result is cached to <code>~/.claude/session-manager/memory-clusters/&lt;workspace&gt;.json</code>
+  <li>The result is cached to <code>&lt;cwd&gt;/session-manager-operations/memory-clusters/clusters.json</code>
   and rendered as cluster cards plus an "Unclustered" strip for orphans.</li>
   <li>Clicking any slug — in a cluster or in Unclustered — jumps you to that memory in the Editor
   view.</li>

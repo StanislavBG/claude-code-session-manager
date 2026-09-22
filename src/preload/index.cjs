@@ -315,8 +315,8 @@ contextBridge.exposeInMainWorld('api', {
       if (workspace) payload.workspace = workspace;
       return ipcRenderer.invoke('memory:create', payload);
     },
-    aggregate: (workspace, refresh) =>
-      ipcRenderer.invoke('memory:aggregate', refresh ? { workspace, refresh: true } : { workspace }),
+    aggregate: (workspace, refresh, cwd) =>
+      ipcRenderer.invoke('memory:aggregate', { workspace, ...(refresh ? { refresh: true } : {}), ...(cwd ? { cwd } : {}) }),
     stale: (workspace, cwd) =>
       ipcRenderer.invoke('memory:stale', { ...(workspace ? { workspace } : {}), ...(cwd ? { cwd } : {}) }),
   },

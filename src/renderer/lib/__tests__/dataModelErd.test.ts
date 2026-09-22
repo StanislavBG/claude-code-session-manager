@@ -91,6 +91,7 @@ describe('dataModelErd', () => {
       ['project-brief', 'project-home'],
       ['bilko-host', 'bilko-host'],
       ['project-pages', 'project-home'],
+      ['memory-clusters', 'memory-clusters'],
     ]
     for (const entity of ERD_ENTITIES) {
       if (!entity.store.path.includes('session-manager-operations/')) continue

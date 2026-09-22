@@ -264,6 +264,7 @@ function WorkspaceMemoryView() {
       ) : view === 'clusters' ? (
         <MemoryClustersPanel
           workspace={workspace}
+          cwd={cwd}
           onOpenMember={(slug) => {
             setSelectedName(`${slug}.md`)
             setView('classic')

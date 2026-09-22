@@ -60,6 +60,10 @@ const OWNERS = Object.freeze({
   // bilko-host-publisher Epic authors beyond dist/ is agent-Write-tool
   // output, same unenforceable-by-construction class as project-pages/output.
   'bilko-host': 'bilko-host',
+  // Memory Clusters owns its own regenerable per-project cache (PRD 1389) —
+  // memoryAggregate.cjs's clustering result, rebuilt on any explicit
+  // refresh:true. See memory-clusters/README.md.
+  'memory-clusters': 'memory-clusters',
 });
 
 /**

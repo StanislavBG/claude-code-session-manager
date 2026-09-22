@@ -17,11 +17,13 @@ import type { MemoryAggregateResult, MemoryCluster } from '../../../../preload/a
 interface Props {
   /** Encoded workspace key for the IPC layer. */
   workspace: string
+  /** Real project cwd — addresses the per-project cache file on disk (PRD 1389). */
+  cwd: string | null
   /** Open a member memory in the Editor view (parent switches view + selection). */
   onOpenMember: (slug: string) => void
 }
 
-export function MemoryClustersPanel({ workspace, onOpenMember }: Props) {
+export function MemoryClustersPanel({ workspace, cwd, onOpenMember }: Props) {
   const [result, setResult] = useState<MemoryAggregateResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [loaded, setLoaded] = useState(false)
@@ -34,7 +36,7 @@ export function MemoryClustersPanel({ workspace, onOpenMember }: Props) {
       const requestId = ++requestRef.current
       setBusy(true)
       try {
-        const r = await window.api.memory.aggregate(workspace, refresh)
+        const r = await window.api.memory.aggregate(workspace, refresh, cwd ?? undefined)
         if (requestRef.current !== requestId) return
         setResult(r)
       } catch (e) {
@@ -47,7 +49,7 @@ export function MemoryClustersPanel({ workspace, onOpenMember }: Props) {
         }
       }
     },
-    [workspace],
+    [workspace, cwd],
   )
 
   // Mount / workspace switch — cache-only, no LLM spend.

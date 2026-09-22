@@ -154,6 +154,8 @@ function validateWrite(realAbs) {
       //   bilko-host       bilkoHost.cjs's bundle prep
       //   project-pages    projectHomeAdminRoutes.cjs's project_home_write
       //                    path (home.html)
+      //   memory-clusters  memoryAggregate.cjs's regenerable clustering
+      //                    cache (PRD 1389)
       // Paths come from opsOwnership.opsPath (PRD 1082) — the one ops-root
       // resolver — which THROWS for an ephemeral root (a linked worktree that
       // pty.cjs registered as an allowed root for its spawn cwd, or
@@ -161,7 +163,7 @@ function validateWrite(realAbs) {
       // never a writable destination, so its exemptions simply do not exist.
       let opsSubs;
       try {
-        opsSubs = ['prompt-sessions', 'scheduler', 'project-brief', 'bilko-host', 'project-pages'].map((ns) => opsPath(realRoot, ns));
+        opsSubs = ['prompt-sessions', 'scheduler', 'project-brief', 'bilko-host', 'project-pages', 'memory-clusters'].map((ns) => opsPath(realRoot, ns));
       } catch {
         opsSubs = [];
       }

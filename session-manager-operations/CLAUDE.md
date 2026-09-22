@@ -5,7 +5,7 @@ Part of the **OPERATIONS STATE** partition — see
 
 ## What's here
 
-12 namespaces, no top-level files. Governance is the **SINGLE-WRITER LAW**
+13 namespaces, no top-level files. Governance is the **SINGLE-WRITER LAW**
 (`src/main/lib/opsOwnership.cjs`): every namespace has exactly ONE owning
 writer; everyone else reads. Fail-closed — an undeclared writer throws.
 Adding a namespace or writer is a deliberate edit to that file. Build ops
@@ -13,18 +13,18 @@ paths only via its `opsPath()`.
 
 - **Owned** (in `OWNERS`, app-owned runtime state): `prompt-sessions` →
   epics · `scheduler` → scheduler · `project-brief` → project-home ·
-  `logs` → logs · `bilko-host` → bilko-host · `project-pages` →
-  project-home (admin render route only; a Builder Epic's own authoring
-  stays ungoverned — see [`project-pages/README.md`](project-pages/README.md)).
-- **Deliberately NOT owned** (skill-authored docs/artifacts, no
-  concurrent-write hazard): `architecture`, `design-mocks`, `HUMAN_LEARN`,
-  `manual`, `reviews`. `feedback` **retired** (2026-08-02).
+  `logs` → logs · `bilko-host` → bilko-host · `memory-clusters` →
+  memory-clusters · `project-pages` → project-home (admin render route
+  only; a Builder Epic's own authoring stays ungoverned — see
+  [`project-pages/README.md`](project-pages/README.md)).
+- **Deliberately NOT owned** (skill-authored docs/artifacts, no write
+  hazard): `architecture`, `design-mocks`, `HUMAN_LEARN`, `manual`,
+  `reviews`. `feedback` **retired** (2026-08-02).
 - **Any new top-level folder must land in the table below or in `OWNERS`
-  in the same PR that creates it** — `scripts/ops-sweep.cjs` flags an
-  unlisted namespace as `UNDOCUMENTED`.
+  in the same PR** — `scripts/ops-sweep.cjs` flags an unlisted namespace
+  as `UNDOCUMENTED`.
 
-The root itself (`session-manager-operations/` with no namespace segment)
-has no owner — `opsOwnership.cjs` refuses a write there outright.
+The bare root has no owner — `opsOwnership.cjs` refuses a write there.
 
 Epic lifecycle is specified exactly once, at
 [`prompt-sessions/README.md#lifecycle`](prompt-sessions/README.md#lifecycle)
@@ -39,6 +39,7 @@ Epic lifecycle is specified exactly once, at
 | `HUMAN_LEARN` | not owned | human-readable knowledge-base pages | keep indefinitely | none |
 | `logs` | OWNERS → logs | per-tab JSONL error log | append-only, unpruned | [link](logs/README.md) |
 | `manual` | not owned | authoring source for the paid Field Manual | keep indefinitely | [link](manual/README.md) |
+| `memory-clusters` | OWNERS → memory-clusters | per-project memory-cluster cache | regenerated on demand | [link](memory-clusters/README.md) |
 | `project-brief` | OWNERS → project-home | synthesized per-project Brief | keep indefinitely | [link](project-brief/README.md) |
 | `project-pages` | OWNERS → project-home (render route only) | generated static Project Page artifacts | regenerated on demand | [link](project-pages/README.md) |
 | `prompt-sessions` | OWNERS → epics | durable Epic (PromptSession) store | keep indefinitely | [link](prompt-sessions/README.md) |
@@ -47,17 +48,16 @@ Epic lifecycle is specified exactly once, at
 
 ## Who consumes this
 
-This app's own main process (for owned namespaces, via `opsPath()`) and
-skills/humans authoring the unowned namespaces directly with the Write
-tool. A namespace's own README is the contract for its storage layout —
-this table only says who owns it and where to look next.
+This app's main process (owned namespaces, via `opsPath()`) and skills/humans
+authoring the unowned ones directly with Write. Each namespace's README is
+the storage-layout contract; this table only says who owns it.
 
 ## What must NOT be assumed
 
 - Do not write into an owned namespace from outside its declared owner —
-  `opsOwnership.cjs`'s `assertOpsWrite` throws fail-closed.
+  `assertOpsWrite` throws fail-closed.
 - Do not build an ops-root path by string concatenation — use
-  `opsPath()`/`resolveOpsRoot()` from `src/main/lib/opsOwnership.cjs`.
+  `opsPath()`/`resolveOpsRoot()`.
 - Do not add a new top-level folder here without also adding a row to the
   table above (or an `OWNERS` entry) in the same PR — otherwise
   `scripts/ops-sweep.cjs` flags it `UNDOCUMENTED`.

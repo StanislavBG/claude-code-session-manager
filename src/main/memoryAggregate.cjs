@@ -8,9 +8,10 @@
  * owns) and, via a single cost-gated `claude -p` pass, organizes them into
  * named semantic clusters with `[[wikilink]]`-derived connections.
  *
- * Cache: ~/.claude/session-manager/memory-clusters/<workspace>.json
- * The `claude -p` call only fires when the caller passes `refresh: true` —
- * this is the cost gate; the renderer wires it to an explicit button.
+ * Cache: <cwd>/session-manager-operations/memory-clusters/clusters.json (one
+ * file per project — see memory-clusters/README.md). The `claude -p` call
+ * only fires when the caller passes `refresh: true` — this is the cost gate;
+ * the renderer wires it to an explicit button.
  *
  * Spawn/capture/timeout pattern mirrors kg.cjs's runClaude (~line 316-351):
  * stdin closed, model pinned, hard timeout that resolves {ok:false} rather
@@ -26,17 +27,34 @@ const { extractJson } = require('./lib/extractJson.cjs');
 const { runClaudeP } = require('./lib/runClaudeP.cjs');
 const { writeJson } = require('./config.cjs');
 const config = require('./config.cjs');
+const { opsPath } = require('./lib/opsOwnership.cjs');
 const { MEMORY_SLUG_RE } = require('./lib/memorySlug.cjs');
 
 const HOME = os.homedir();
-const CLUSTERS_DIR = path.join(HOME, '.claude', 'session-manager', 'memory-clusters');
+const CACHE_WRITER = 'memory-clusters';
 
 function memoryDir(workspace) {
   return path.join(HOME, '.claude', 'projects', workspace, 'memory');
 }
 
-function cachePath(workspace) {
-  return path.join(CLUSTERS_DIR, `${workspace}.json`);
+function clustersCachePath(cwd) {
+  return opsPath(cwd, 'memory-clusters', 'clusters.json');
+}
+
+/**
+ * Resolves `cwd` to a real, boundary-checked project root, or null when
+ * `cwd` is absent/invalid. Mirrors memoryTool.cjs's stale() cwd handling:
+ * an absent/unusable cwd disables the per-project cache entirely rather than
+ * throwing — the cache is purely regenerable, so a caller with no cwd (or a
+ * cwd this process cannot vouch for) just gets an uncached aggregate.
+ */
+function resolveCwd(cwd) {
+  if (typeof cwd !== 'string' || !cwd) return null;
+  try {
+    return config.validatePath(cwd);
+  } catch {
+    return null;
+  }
 }
 
 // System prompt for clustering — sets the role server-side so the CLI treats
@@ -143,17 +161,19 @@ function parseClusters(rawLlmText, slugs) {
   return { clusters, orphans };
 }
 
-async function readCache(workspace) {
-  const r = await config.readText(cachePath(workspace));
+async function readCache(cwd) {
+  const realCwd = resolveCwd(cwd);
+  if (!realCwd) return null;
+  const r = await config.readText(clustersCachePath(realCwd));
   if (!r.exists) return null;
   try { return JSON.parse(r.text); } catch { return null; }
 }
 
-async function aggregate({ workspace, refresh }) {
+async function aggregate({ workspace, refresh, cwd }) {
   const ws = typeof workspace === 'string' && workspace ? workspace : encodeCwd(null);
 
   if (!refresh) {
-    const cached = await readCache(ws);
+    const cached = await readCache(cwd);
     if (cached) return { ...cached, cached: true };
     return { workspace: ws, generatedAt: null, clusters: [], orphans: [], cached: false };
   }
@@ -174,7 +194,11 @@ async function aggregate({ workspace, refresh }) {
   }
 
   const result = { workspace: ws, generatedAt: Date.now(), clusters, orphans };
-  await writeJson(cachePath(ws), result);
+  const realCwd = resolveCwd(cwd);
+  if (realCwd) {
+    config.addAllowedRoot(realCwd);
+    await writeJson(clustersCachePath(realCwd), result, { writer: CACHE_WRITER });
+  }
   return { ...result, cached: false };
 }
 
@@ -189,4 +213,5 @@ module.exports = {
   aggregate,
   // exported for tests
   parseFrontmatter,
+  clustersCachePath,
 };

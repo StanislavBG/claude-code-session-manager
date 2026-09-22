@@ -523,8 +523,9 @@ export const ERD_ENTITIES: ErdEntity[] = [
     name: 'MemoryCluster',
     group: 'memory',
     store: {
-      path: '~/.claude/session-manager/memory-clusters/<encodedCwd>.json',
+      path: '<cwd>/session-manager-operations/memory-clusters/clusters.json',
       format: 'json',
+      writer: 'memory-clusters',
       definedIn: 'src/main/memoryAggregate.cjs ',
     },
     summary: 'Derived grouping of related MemoryEntry files, computed and cached per workspace.',

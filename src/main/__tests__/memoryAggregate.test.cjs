@@ -2,7 +2,11 @@
 
 import { test } from 'vitest';
 const assert = require('node:assert/strict');
-const { parseClusters } = require('../memoryAggregate.cjs');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { parseClusters, aggregate, clustersCachePath } = require('../memoryAggregate.cjs');
+const { opsPath } = require('../lib/opsOwnership.cjs');
 
 test('parseClusters maps well-formed JSON to the result shape and routes unlisted slugs to orphans', () => {
   const slugs = ['scheduler_concurrency_memory', 'no_schedule_self_e2e', 'unrelated_note'];
@@ -67,4 +71,39 @@ test('parseClusters drops link endpoints and members that reference nonexistent 
   assert.deepEqual(result.clusters[0].memberSlugs, ['known']);
   assert.deepEqual(result.clusters[0].links, []);
   assert.deepEqual(result.orphans, []);
+});
+
+test('clustersCachePath resolves under <cwd>/session-manager-operations/memory-clusters/clusters.json, one file per project', () => {
+  const cwd = '/home/u/Projects/demo';
+  assert.equal(clustersCachePath(cwd), opsPath(cwd, 'memory-clusters', 'clusters.json'));
+  assert.match(clustersCachePath(cwd), /\/session-manager-operations\/memory-clusters\/clusters\.json$/);
+});
+
+test('aggregate persists and reads back the per-project cache file at the new ops-owned location', async () => {
+  const cwd = fs.mkdtempSync(path.join(os.homedir(), '.sm-test-memory-clusters-'));
+  try {
+    const workspace = `test-ws-${Date.now()}`;
+
+    const written = await aggregate({ workspace, refresh: true, cwd });
+    assert.equal(written.cached, false);
+    assert.deepEqual(written.clusters, []);
+    assert.deepEqual(written.orphans, []);
+
+    const expectedPath = opsPath(cwd, 'memory-clusters', 'clusters.json');
+    assert.ok(fs.existsSync(expectedPath), `expected cache file at ${expectedPath}`);
+    assert.deepEqual(JSON.parse(fs.readFileSync(expectedPath, 'utf8')).workspace, workspace);
+
+    const read = await aggregate({ workspace, refresh: false, cwd });
+    assert.equal(read.cached, true);
+    assert.equal(read.workspace, workspace);
+  } finally {
+    fs.rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('aggregate without a cwd skips the cache instead of throwing', async () => {
+  const workspace = `test-ws-nocwd-${Date.now()}`;
+  const result = await aggregate({ workspace, refresh: false });
+  assert.equal(result.cached, false);
+  assert.deepEqual(result.clusters, []);
 });

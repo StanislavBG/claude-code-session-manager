@@ -80,6 +80,7 @@ const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { appendResponseEventIfKnown } = require('./promptSessionEvents.cjs');
 const { maybeEnqueueValidationPrompt } = require('./lib/epicValidationHook.cjs');
+const { parseValidationSentinels } = require('./lib/validationSentinels.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { verifyRun, parseLog, scanSentinel, scanForeignWipPathsClaim } = require('./runVerify.cjs');
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/terminalRunOutcome.cjs');
@@ -4329,10 +4330,25 @@ async function notifyOriginatingTab(job, {
     // fallback). Best-effort: a missing cwd/epic id, an unreadable run log,
     // or an IPC error here must never block the notification below.
     const epicIdForTranscript = prd?.sourcePromptId || prd?.sourceTabId || job.epicId || null;
-    if (epicIdForTranscript && job.cwd) {
+    // Read the job's raw result text once, up front, so both the transcript
+    // append below and the validator-sentinel parsing further down (PRD
+    // 1407) reuse the same read instead of hitting the run log twice. Only
+    // read when at least one consumer needs it — an ordinary job with no
+    // resolvable transcript target and no validator sentinels to parse must
+    // not pay for a log-tail read it will throw away.
+    const needsResultText = (epicIdForTranscript && job.cwd)
+      || (job.agentType === 'validator' && job.status === 'completed');
+    let resultText = null;
+    if (needsResultText) {
       try {
         const logPath = job.runId ? path.join(schedulerPaths.runsDir(), job.runId, `${job.slug}.log`) : null;
-        const resultText = readResultFromLog(logPath);
+        resultText = readResultFromLog(logPath);
+      } catch (e) {
+        console.error('[scheduler] notifyOriginatingTab readResultFromLog error', job?.slug, e);
+      }
+    }
+    if (epicIdForTranscript && job.cwd) {
+      try {
         await appendTranscriptTurn(job.cwd, epicIdForTranscript, {
           role: 'assistant',
           text: resultText || message,
@@ -4343,7 +4359,43 @@ async function notifyOriginatingTab(job, {
       }
     }
 
+    // PRD 1407: a plan-level validator job ends its run with one
+    // `VALIDATION: <slug> VERIFIED`/`REFUTED` line per PRD it checked.
+    // Parsed only for a completed validator job; every ordinary work-item
+    // job gets an empty array here and behaves exactly as before.
+    const verdicts = (job.agentType === 'validator' && job.status === 'completed')
+      ? parseValidationSentinels(resultText)
+      : [];
+
+    if (!epicId && verdicts.length > 0) {
+      // No Epic to attach these to (unresolved sourcePromptId/epicId, same
+      // rare case the check-in message below falls back on) — unlike the
+      // check-in message, a verdict has no chat-notification fallback, so
+      // without this log the parsed evidence vanishes with no trace at all.
+      console.error(
+        `[scheduler] notifyOriginatingTab: ${verdicts.length} validator verdict(s) parsed for ${job.slug} but no epicId to attach them to — dropped`,
+      );
+    }
+
     if (epicId) {
+      // PRD 1407: append one response event per parsed verdict, BEFORE the
+      // validator job's own check-in append below — each verdict stamps
+      // `validation: 'verified' | 'refuted'` onto the authoring Epic's
+      // event chain, which epicDerive.ts/epicTimeline.ts already render as
+      // the Epic traffic light and which epicValidationHook.cjs's loop
+      // guard already ignores (only 'unvalidated' can trigger a prompt).
+      for (const v of verdicts) {
+        try {
+          await appendResponseEvent(
+            job.cwd || null,
+            epicId,
+            `Validation ${v.verdict.toUpperCase()}: ${v.slug}${v.reason ? ` — ${v.reason}` : ''}`,
+            { prdSlug: v.slug, outcome: 'completed', validation: v.verdict },
+          );
+        } catch (e) {
+          console.error('[scheduler] notifyOriginatingTab verdict appendResponseEvent error', job?.slug, v.slug, e);
+        }
+      }
       // PRD 986: the check-in event is born validation:'unvalidated' — never
       // 'verified' — regardless of the job's self-reported outcome. The
       // check-in is a request to validate, not an assertion of done.
@@ -4366,20 +4418,26 @@ async function notifyOriginatingTab(job, {
         // happened above). All gating (kill-switch SM_EPIC_VALIDATION_DISABLE,
         // active-Epic check, once-per-(epicId, prdSlug), loop guard, slot-pool
         // routing) lives in lib/epicValidationHook.cjs.
-        try {
-          enqueueValidation(
-            {
-              cwd: job.cwd || null,
-              epicId,
-              prdSlug: job.slug,
-              prdPath: prd?.path || archivedPrdPathForJob(job) || null,
-              outcome: job.status,
-              eventValidation: 'unvalidated',
-            },
-            { sendPrompt },
-          );
-        } catch (e) {
-          console.error('[scheduler] notifyOriginatingTab enqueueValidation error', job?.slug, e);
+        //
+        // PRD 1407: a validator job's own check-in never enqueues a
+        // validation prompt for itself — it IS the plan's validation pass,
+        // not a work-item awaiting one.
+        if (job.agentType !== 'validator') {
+          try {
+            enqueueValidation(
+              {
+                cwd: job.cwd || null,
+                epicId,
+                prdSlug: job.slug,
+                prdPath: prd?.path || archivedPrdPathForJob(job) || null,
+                outcome: job.status,
+                eventValidation: 'unvalidated',
+              },
+              { sendPrompt },
+            );
+          } catch (e) {
+            console.error('[scheduler] notifyOriginatingTab enqueueValidation error', job?.slug, e);
+          }
         }
         return;
       }

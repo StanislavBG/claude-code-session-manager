@@ -260,3 +260,45 @@ test('PRD 985: a PRD missing entirely still routes via the job row\'s own epicId
   );
   expect(appendTranscriptTurn).toHaveBeenCalledWith(cwd, 'psess-985-from-queue-row', expect.anything());
 });
+
+// ─── PRD 1407: validator jobs stamp verdicts onto the authoring Epic ────────
+// A completed validator job's result text carries one `VALIDATION: <slug>
+// VERIFIED|REFUTED` line per PRD it checked. Each parsed verdict becomes its
+// own response event BEFORE the validator's own (still-unvalidated)
+// check-in, and the validator's check-in never enqueues a validation prompt
+// for itself.
+test('PRD 1407: a validator job with two sentinel lines appends two verdict events plus its own check-in, and never enqueues validation', async () => {
+  const sendPrompt = vi.fn();
+  const appendResponseEvent = vi.fn(async () => true);
+  const appendTranscriptTurn = vi.fn(async () => {});
+  const enqueueValidation = vi.fn();
+  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-validator-1' }));
+  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+  const readResultFromLog = vi.fn(() => [
+    'VALIDATION: 111-alpha VERIFIED',
+    'VALIDATION: 222-beta REFUTED — missing coverage',
+  ].join('\n'));
+
+  await notifyOriginatingTab(
+    { slug: '1407-validator-run', status: 'completed', cwd: '/some/cwd', agentType: 'validator' },
+    {
+      parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent,
+      appendTranscriptTurn, readResultFromLog, enqueueValidation,
+    },
+  );
+
+  expect(appendResponseEvent).toHaveBeenCalledTimes(3);
+  expect(appendResponseEvent).toHaveBeenNthCalledWith(
+    1, '/some/cwd', 'psess-validator-1', expect.stringContaining('111-alpha'),
+    { prdSlug: '111-alpha', outcome: 'completed', validation: 'verified' },
+  );
+  expect(appendResponseEvent).toHaveBeenNthCalledWith(
+    2, '/some/cwd', 'psess-validator-1', expect.stringContaining('222-beta'),
+    { prdSlug: '222-beta', outcome: 'completed', validation: 'refuted' },
+  );
+  expect(appendResponseEvent).toHaveBeenNthCalledWith(
+    3, '/some/cwd', 'psess-validator-1', expect.stringContaining('1407-validator-run'),
+    { prdSlug: '1407-validator-run', outcome: 'completed', validation: 'unvalidated' },
+  );
+  expect(enqueueValidation).not.toHaveBeenCalled();
+});

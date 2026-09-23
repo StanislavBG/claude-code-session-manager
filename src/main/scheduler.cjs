@@ -9017,7 +9017,24 @@ async function runQueueStarvationWatchdog(state, {
   // A forced tick is machine-wide by construction (the picker considers
   // every project's rows) — one call here services every starved cwd found
   // this pass, not one call per cwd.
-  await tickQueue({ bypassLoadGate: false }).catch((e) => console.error('[scheduler] starvation tick error', e));
+  //
+  // bypassLoadGate: TRUE. The watchdog only reaches here on a 'starved'
+  // verdict: pending + dispatchable rows, ZERO running, idle >= 10 min. That
+  // is exactly the state where the CPU load gate (scheduler.cjs's INNERMOST
+  // launch predicate) is a false positive — a box whose loadavg is high while
+  // *this* scheduler runs nothing is being loaded by something else, and the
+  // load gate would then hold the last-resort tick behind the very saturation
+  // it can't influence, freezing the queue for hours (observed 2026-09-23:
+  // 3 dispatchable, 0 running, lastTickReason 'load-deferred' unbroken from
+  // 07:00→13:06). The gate is advisory headroom ("leave one core free"), not
+  // a resource guard; starting ONE batch cannot OOM the host. The slot pool
+  // and memory gate — which DO guard real exhaustion — are unaffected by this
+  // flag and still bound the batch. The watchdog is the automated equivalent
+  // of a human Run-now, the other caller that legitimately bypasses load
+  // (§2/§3, scheduler-operations.md). Latched to one forced tick per
+  // QUEUE_STARVATION_MS per cwd, so this cannot thrash. Routed via
+  // module.exports so tests can assert the bypass without driving real load.
+  await module.exports.tickQueue({ bypassLoadGate: true }).catch((e) => console.error('[scheduler] starvation tick error', e));
   return primary;
 }
 

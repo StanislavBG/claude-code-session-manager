@@ -216,6 +216,52 @@ test('rows held by a launch breaker / lease read blocked, not starved (per proje
   expect(byProject.map((v) => v.kind)).toEqual(['blocked']);
 });
 
+test('a starved queue forces its tick with bypassLoadGate:true — the CPU load gate must not freeze the last-resort dispatch', async () => {
+  // Regression for the 2026-09-23 freeze: 3 dispatchable jobs, 0 running,
+  // lastTickReason 'load-deferred' unbroken 07:00→13:06. The watchdog is the
+  // safety net for exactly that state, but it used to force its tick with
+  // bypassLoadGate:false, so a box loaded by ANOTHER process held the net's
+  // own tick behind the load gate and nothing ever ran. Spy the exported
+  // tickQueue seam (the call is routed via module.exports precisely so this
+  // is assertable without manufacturing real machine load, which
+  // SM_LOAD_GATE_PER_CORE clamps at 0.25 and can't force deterministically).
+  const cwd = '/tmp/sm-starve-bypass-project';
+  const jobs = [{ slug: 'bypass-a', cwd, status: 'pending', dependsOn: [] }];
+  const state = { jobs, paused: null, lastRunAt: new Date(NOW - 40 * 60_000).toISOString() };
+  const opts = { now: NOW, bootedAtMs: NOW - 3 * 60 * 60_000 };
+  const tickSpy = vi.spyOn(scheduler, 'tickQueue').mockResolvedValue({ fired: false, reason: 'drained' });
+  try {
+    const verdict = await scheduler.runQueueStarvationWatchdog(state, opts);
+    expect(verdict.kind).toBe('starved');
+    expect(tickSpy).toHaveBeenCalledTimes(1);
+    expect(tickSpy).toHaveBeenCalledWith({ bypassLoadGate: true });
+  } finally {
+    tickSpy.mockRestore();
+  }
+});
+
+test('the bypass is not unconditional — a queue with something already running never force-ticks at all', async () => {
+  // Guard against the bypass becoming an escape hatch: the watchdog only
+  // reaches its forced tick on a genuine 'starved' verdict (0 running). When
+  // a job is already running, classifyQueueStarvation returns null and no
+  // forced tick fires — so bypassLoadGate never even comes into play.
+  const cwd = '/tmp/sm-running-nobypass-project';
+  const jobs = [
+    { slug: 'run-a', cwd, status: 'running', dependsOn: [] },
+    { slug: 'pend-b', cwd, status: 'pending', dependsOn: [] },
+  ];
+  const state = { jobs, paused: null, lastRunAt: new Date(NOW - 40 * 60_000).toISOString() };
+  const opts = { now: NOW, bootedAtMs: NOW - 3 * 60 * 60_000 };
+  const tickSpy = vi.spyOn(scheduler, 'tickQueue').mockResolvedValue({ fired: false, reason: 'drained' });
+  try {
+    const verdict = await scheduler.runQueueStarvationWatchdog(state, opts);
+    expect(verdict).toBeNull();
+    expect(tickSpy).not.toHaveBeenCalled();
+  } finally {
+    tickSpy.mockRestore();
+  }
+});
+
 test('the watchdog latches: one forced tick / audit per starve episode, re-armed by threshold or running-count change', async () => {
   const cwd = '/tmp/sm-starve-latch-project';
   const jobs = [{ slug: 'latch-a', cwd, status: 'pending', dependsOn: [] }];

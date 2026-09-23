@@ -120,6 +120,38 @@ function isExpiringSoon(creds, withinMs = 5 * 60_000) {
   return ms !== null && ms - Date.now() < withinMs;
 }
 
+/**
+ * isRefreshFutile(creds) → boolean
+ *
+ * True when the token is already expired AND there is no refresh token to
+ * present. In that state every refresh avenue is a dead end: tryOAuthRefresh
+ * short-circuits to 'unsupported' (it needs `creds.refreshToken`), and the
+ * `claude --version` CLI fallback performs its own silent OAuth refresh from
+ * that SAME missing refresh token, so it cannot help either. The only recovery
+ * is an out-of-band `claude login` — which refreshIfNeeded picks up on its very
+ * next call via the isExpiringSoon early-return, since fresh creds never reach
+ * this path. Left ungated, this state made pollLoop spawn a `claude --version`
+ * process and write the oauth_refresh_unsupported → cli_fallback_ok →
+ * auth_failed_expired triple on EVERY 15 s poll, forever (observed 2026-09-23:
+ * expiredAtMs 1775277875159, identical triple every ~15 min across the log).
+ */
+function isRefreshFutile(creds) {
+  return isExpired(creds) && !creds.refreshToken;
+}
+
+// Throttle for the futile-refresh state above: once seen, don't respawn the
+// CLI fallback or re-log the auth triple on every poll. Re-probe at most once
+// per this window (an external `claude login` is still caught immediately by
+// refreshIfNeeded's isExpiringSoon early-return, and by the cheap re-read
+// below — neither needs the storm). Mirrors loadGate.cjs's AUDIT_INTERVAL_MS.
+const FUTILE_REFRESH_COOLDOWN_MS = 15 * 60_000;
+let lastFutileRefreshLoggedAt = null;
+
+/** Test-only: reset the futile-refresh throttle so each test starts clean. */
+function __resetFutileRefreshThrottle() {
+  lastFutileRefreshLoggedAt = null;
+}
+
 async function writeCredentials(rawData, freshOauth, source = 'file') {
   const next = { ...rawData, claudeAiOauth: { ...rawData.claudeAiOauth, ...freshOauth } };
   if (source === 'keychain') {
@@ -222,6 +254,33 @@ async function refreshIfNeeded(forceRefresh = false) {
 
   const alreadyExpired = isExpired(creds);
 
+  // Futile-refresh short-circuit: token already expired AND no refresh token
+  // to present. Every downstream avenue (OAuth grant, `claude --version` CLI
+  // fallback) is a guaranteed dead end from the same missing token, so running
+  // them on every 15 s poll only spawns a doomed child process and re-logs the
+  // same triple forever (2026-09-23 storm). Re-read once — cheap, and the ONE
+  // real recovery (`claude login`) lands here — then, if still futile, return
+  // the auth verdict WITHOUT the OAuth call or the CLI-fallback spawn, logging
+  // at most once per FUTILE_REFRESH_COOLDOWN_MS instead of every poll.
+  if (isRefreshFutile(creds)) {
+    const recheckCr = await readCredentials();
+    if (recheckCr.kind === 'ok' && !isRefreshFutile(recheckCr.creds) && !isExpired(recheckCr.creds)) {
+      appendRefreshLog({ event: 'externally_refreshed_ok', recheckExpiresAt: recheckCr.creds.expiresAt ?? null });
+      lastFutileRefreshLoggedAt = null;
+      return { kind: 'ok', creds: recheckCr.creds };
+    }
+    const nowMs = Date.now();
+    if (lastFutileRefreshLoggedAt === null || nowMs - lastFutileRefreshLoggedAt >= FUTILE_REFRESH_COOLDOWN_MS) {
+      lastFutileRefreshLoggedAt = nowMs;
+      appendRefreshLog({ event: 'auth_failed_expired_no_refresh_token', expiredAtMs: expiresAtMs(creds) });
+    }
+    return {
+      kind: 'auth',
+      message: 'Credentials expired and cannot be auto-refreshed (no refresh token). Run `claude` in a terminal to log in.',
+      expiredAt: expiresAtMs(creds),
+    };
+  }
+
   // Stretch: try OAuth refresh endpoint first.
   const oauthResult = await tryOAuthRefresh(creds);
   appendRefreshLog({ event: `oauth_refresh_${oauthResult.kind}`, message: oauthResult.message ?? null });
@@ -277,8 +336,11 @@ module.exports = {
   expiresAtMs,
   isExpired,
   isExpiringSoon,
+  isRefreshFutile,
   refreshIfNeeded,
   parseCredsRaw,
+  __resetFutileRefreshThrottle,
+  FUTILE_REFRESH_COOLDOWN_MS,
   KEYCHAIN_SERVICE,
   CREDS_PATH,
 };

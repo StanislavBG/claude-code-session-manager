@@ -286,6 +286,7 @@ export default defineConfig({
       'src/main/lib/__tests__/schedulerPaths.test.cjs',
       'src/main/__tests__/dep-orphan-archive-health.test.cjs',
       'src/main/lib/__tests__/loadGate.test.cjs',
+      'src/main/lib/__tests__/credentials-futile-refresh.test.cjs',
       'src/main/lib/__tests__/opsRootResolve.test.cjs',
       'src/main/lib/__tests__/schedulerBatchFairness.test.cjs',
       'src/main/__tests__/scheduler-stranded-investigation.test.cjs',

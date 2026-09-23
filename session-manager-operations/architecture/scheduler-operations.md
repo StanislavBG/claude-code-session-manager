@@ -30,8 +30,9 @@ timer that calls it directly on a fixed cadence** — every call is a reaction t
   threshold. A poll does **not** need to succeed to trigger a tick.
 - **The starvation watchdog**, forced from the 60s heartbeat timer, independent of the poll loop
   — see §3.
-- **A human** — `runDueJobs()` (Run now / resume-timer) is the only caller that can
-  set `bypassLoadGate: true`.
+- **A human** — `runDueJobs()` (Run now / resume-timer) sets `bypassLoadGate: true`. The only
+  other bypass is the starvation watchdog's last-resort forced tick (§3) — automated, but the
+  same rationale: dispatch when nothing else will.
 - **A slot freeing up** — `sessionSlots.subscribe(() => tickQueue())` (registered in `init()`)
   fires on every `release()` and on `setCap()` raising the pool.
 - **`reapDeadRunningJobs()` finishing its sweep** — ticks once more after finalizing dead rows.
@@ -97,7 +98,13 @@ other project (2026-09-12 incident, comment just above it).
 independently of the billing poll loop, is the action half: it logs+audits one event per
 starved/blocked project, and — if anything is `'starved'` — force-clears a stuck `cancelToken`
 ("the watchdog must be able to un-wedge this too") and forces exactly ONE machine-wide
-`tickQueue({ bypassLoadGate: false })` near the end of the function, per pass.
+`tickQueue({ bypassLoadGate: true })` near the end of the function, per pass. The bypass is
+load-gate-only: a `'starved'` verdict means pending+dispatchable rows with ZERO running for
+≥10 min, so a high `loadavg` is coming from *another* process the scheduler can't influence —
+holding the last-resort tick behind it froze the queue for hours (2026-09-23: `load-deferred`
+unbroken 07:00→13:06). The slot pool and memory gate — the guards for real exhaustion — are
+NOT bypassed and still bound the forced batch; only the advisory CPU-headroom gate is skipped,
+exactly as a human Run-now (§2) skips it.
 
 ## 4. The `needs_review` recovery ladder
 

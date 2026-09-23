@@ -628,6 +628,50 @@ function evaluateBuildFreshness({ running = null, installedOnDisk = null, repoHe
 }
 
 /**
+ * evaluateCredentialHealth({ credState, now }) → { component, issues }
+ *
+ * Pure over its inputs — `credState` is the shape lib/credentials.cjs's
+ * refreshIfNeeded()/readCredentials() return ({ kind, message?, expiredAt? }),
+ * injected so this is testable without touching the Keychain. Surfaces the ONE
+ * failure that silently voids the whole scheduler on a user's machine: the
+ * OAuth token is expired (or missing) so every headless `claude -p` job fails
+ * to authenticate. The scheduler already pauses on a live 'auth' poll
+ * (scheduler.cjs setPaused('auth')), but nothing told the OPERATOR why the
+ * queue went quiet — `npm run health` read GREEN while no job could run. This
+ * names the cause and the fix (`claude login`).
+ *
+ * NON-CRITICAL by design: reported in components.credentials + issues so
+ * /local-project-health shows it, but it does not flip status.ok — health must
+ * not hard-fail a repo checkout just because THIS machine's token lapsed, and
+ * an expired token is an operator action (re-login), not a code defect. Maps:
+ *   kind 'auth'   → not ok, actionable `claude login` message (the real block)
+ *   kind 'config' → not ok, credentials unreadable/absent
+ *   kind 'ok'/'unsupported' → ok (token usable, or too-fresh-to-refresh)
+ */
+function evaluateCredentialHealth({ credState, now = Date.now() } = {}) {
+  const issues = [];
+  if (!credState || typeof credState !== 'object') {
+    return { component: { ok: true, state: 'unknown' }, issues };
+  }
+  const { kind } = credState;
+  if (kind === 'auth') {
+    const expiredAt = typeof credState.expiredAt === 'number' ? credState.expiredAt : null;
+    const agoMin = expiredAt ? Math.max(0, Math.round((now - expiredAt) / 60_000)) : null;
+    const when = expiredAt ? new Date(expiredAt).toISOString() : 'unknown';
+    const msg = `Claude credentials expired${agoMin !== null ? ` (${agoMin}m ago, at ${when})` : ''} — headless \`claude -p\` scheduler jobs cannot authenticate. Run \`claude login\` in a terminal to refresh.`;
+    issues.push(msg);
+    return { component: { ok: false, state: 'expired', expiredAt, message: msg }, issues };
+  }
+  if (kind === 'config') {
+    const msg = `Claude credentials unreadable: ${credState.message ?? 'unknown'} — scheduler jobs cannot authenticate. Run \`claude login\`.`;
+    issues.push(msg);
+    return { component: { ok: false, state: 'unreadable', message: msg }, issues };
+  }
+  // 'ok' (fresh) or 'unsupported' (auto-refresh unavailable but token still valid)
+  return { component: { ok: true, state: kind === 'unsupported' ? 'valid-no-refresh' : 'valid' }, issues };
+}
+
+/**
  * evaluateStarveEscalationHealth(jobs, now, thresholdMs, escalationReasons)
  *   → { ok, projects?, message? }
  *
@@ -1206,6 +1250,22 @@ async function check(opts = {}) {
     status.components.build = { ok: true, error: e.message };
   }
 
+  // 6.8. Credential health (informational-but-loud): is the Claude OAuth token
+  // usable? An expired/absent token silently voids every headless `claude -p`
+  // job — the queue "runs" but nothing authenticates. refreshIfNeeded() reads
+  // the Keychain/file and (post futile-refresh fix) never spawns a doomed CLI
+  // fallback for an expired-no-refresh-token creds, so this is a cheap read.
+  // Non-critical: names the cause + `claude login` fix without flipping ok.
+  try {
+    const { refreshIfNeeded } = require('./lib/credentials.cjs');
+    const credState = await refreshIfNeeded();
+    const { component, issues } = evaluateCredentialHealth({ credState, now: Date.now() });
+    status.components.credentials = component;
+    for (const i of issues) status.issues.push(i);
+  } catch (e) {
+    status.components.credentials = { ok: true, state: 'unknown', error: e.message };
+  }
+
   // 7. Summary scoring: ok if all critical components pass.
   // Critical: nodejs, config dir, typescript, build artifact, test infrastructure.
   // Non-fatal: scheduler/transcripts dirs may not exist on fresh install.
@@ -1232,6 +1292,7 @@ module.exports = {
   readFreshHeartbeat,
   evaluatePrdMigrationHealth,
   evaluateDelegationChainHealth,
+  evaluateCredentialHealth,
   computeEpicIndexDrift,
   evaluateEpicIndexHealth,
   computeProjectProblemCounts,

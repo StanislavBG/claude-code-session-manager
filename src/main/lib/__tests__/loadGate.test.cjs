@@ -9,7 +9,7 @@
 // batteries. These tests pin the pure decision, the audit rate-limit and the
 // escalation, with loadavg/cores/clock all injected.
 const assert = require('node:assert/strict');
-const { isLoadGated, createLoadGate, AUDIT_INTERVAL_MS } = require('../loadGate.cjs');
+const { isLoadGated, createLoadGate, topCpuConsumers, AUDIT_INTERVAL_MS } = require('../loadGate.cjs');
 const { loadGateThreshold, LOAD_GATE_PER_CORE } = require('../schedulerConfig.cjs');
 
 const ORIGINAL_ENV = process.env.SM_LOAD_GATE_PER_CORE;
@@ -63,6 +63,49 @@ test('SM_LOAD_GATE_PER_CORE is honored and clamped to [0.25, 4]; 0 disables; gar
   assert.equal(loadGateThreshold(), 0);
   process.env.SM_LOAD_GATE_PER_CORE = 'banana';
   assert.equal(loadGateThreshold(), 0.85);
+});
+
+// ─── topCpuConsumers: platform-correct ps invocation ───────────────────────
+//
+// The audit line the scheduler warn-logs when the load gate escalates. Purely
+// diagnostic (nothing branches on it) but it was blank on macOS: the code only
+// ran the GNU `ps --sort` form, which BSD ps rejects with "illegal option",
+// so every Mac logged `top CPU: n/a` exactly when the operator needed to know
+// what was saturating the box.
+
+test('Linux uses the GNU ps form (-eo … --sort=-pcpu) and skips the header row', () => {
+  const calls = [];
+  const fakeExec = (bin, args) => {
+    calls.push({ bin, args });
+    return 'PID %CPU COMMAND\n  1 90.0 node\n  2 10.0 tsc\n';
+  };
+  const rows = topCpuConsumers(2, { execImpl: fakeExec, platform: 'linux' });
+  assert.deepEqual(calls[0], { bin: 'ps', args: ['-eo', 'pid,pcpu,comm', '--sort=-pcpu'] });
+  assert.deepEqual(rows, ['1 90.0 node', '2 10.0 tsc']);
+});
+
+test('macOS uses the BSD ps form (-Aco … -r), NOT the GNU --sort that BSD ps rejects', () => {
+  const calls = [];
+  const fakeExec = (bin, args) => {
+    calls.push({ bin, args });
+    return '  PID %CPU COMM\n  847 94.4 suggestd\n  443 15.1 WindowServer\n';
+  };
+  const rows = topCpuConsumers(3, { execImpl: fakeExec, platform: 'darwin' });
+  assert.deepEqual(calls[0].args, ['-Aco', 'pid,pcpu,comm', '-r']);
+  assert.ok(!calls[0].args.some((a) => String(a).includes('--sort')), 'must not pass the GNU --sort to BSD ps');
+  assert.deepEqual(rows, ['847 94.4 suggestd', '443 15.1 WindowServer']);
+});
+
+test('an unsupported platform returns [] without ever spawning ps', () => {
+  let spawned = false;
+  const rows = topCpuConsumers(3, { execImpl: () => { spawned = true; return ''; }, platform: 'win32' });
+  assert.deepEqual(rows, []);
+  assert.equal(spawned, false);
+});
+
+test('a ps failure (throw) degrades to [] rather than propagating — the audit line is best-effort', () => {
+  const rows = topCpuConsumers(3, { execImpl: () => { throw new Error('boom'); }, platform: 'darwin' });
+  assert.deepEqual(rows, []);
 });
 
 // ─── createLoadGate: decision, 1-minute-only, bypass ───────────────────────

@@ -57,12 +57,36 @@ function isLoadGated(loadavg1, cores, threshold) {
   return loadavg1 / cores > threshold;
 }
 
-/** Best-effort top-N CPU consumers (Linux only). Returns [] anywhere else or on error. */
-function topCpuConsumers(n = 3) {
-  if (process.platform !== 'linux') return [];
+/**
+ * Best-effort top-N CPU consumers, for the audit line the scheduler warn-logs
+ * when the load gate has held jobs past its escalation window. Diagnostic only
+ * — nothing downstream branches on the result, so it fails to [] rather than
+ * throwing. Supported on Linux AND macOS (the two platforms this app targets);
+ * [] anywhere else or on any error.
+ *
+ * The `ps` invocation is platform-specific and NOT interchangeable:
+ *  - Linux (GNU/procps): `ps -eo pid,pcpu,comm --sort=-pcpu`. `--sort` is a
+ *    GNU long option.
+ *  - macOS (BSD ps): has NO `--sort` (`ps: illegal option -- -`, which threw
+ *    and left the gate audit logging `top CPU: n/a` on every Mac). BSD sorts
+ *    with `-r` (by CPU usage) and takes `-A` for all processes, `-c` for the
+ *    executable comm without its path. `ps -Aco pid,pcpu,comm -r` is the
+ *    column-and-sort equivalent.
+ * Both print a `PID %CPU COMM` header we skip, so downstream parsing is shared.
+ * `execImpl` is injected only by the unit test; production uses execFileSync.
+ */
+function topCpuConsumers(n = 3, { execImpl = execFileSync, platform = process.platform } = {}) {
+  let args;
+  if (platform === 'linux') {
+    args = ['-eo', 'pid,pcpu,comm', '--sort=-pcpu'];
+  } else if (platform === 'darwin') {
+    args = ['-Aco', 'pid,pcpu,comm', '-r'];
+  } else {
+    return [];
+  }
   try {
-    const out = execFileSync('ps', ['-eo', 'pid,pcpu,comm', '--sort=-pcpu'], { encoding: 'utf8', timeout: 2000 });
-    return out.split('\n').slice(1, 1 + n).map((l) => l.trim()).filter(Boolean);
+    const out = execImpl('ps', args, { encoding: 'utf8', timeout: 2000 });
+    return String(out).split('\n').slice(1, 1 + n).map((l) => l.trim()).filter(Boolean);
   } catch {
     return [];
   }

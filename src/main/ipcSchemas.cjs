@@ -322,10 +322,14 @@ const PrdAgentTypeSchema = z.string().regex(PERSONA_NAME_RE, 'agent name must be
 // Shared shape for a `dependsOn` slug entry — schedulerCreatePrd and
 // adminUpdatePrd (scheduler_update_prd, PRD 1124) must accept the exact same
 // slug shape or an update could write a dependsOn value create would have
-// rejected. Array-level constraints (`.max(20)`, `.optional()`) stay at each
-// call site since update also allows an explicit empty array to CLEAR the
-// dependency, which create has no reason to accept.
+// rejected. Array-level constraints (`.max(MAX_DEPENDS_ON)`, `.optional()`)
+// stay at each call site since update also allows an explicit empty array to
+// CLEAR the dependency, which create has no reason to accept.
 const DepSlugSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9][\w.-]*$/);
+// Array-level cap shared by every dependsOn field below — a validate PRD in a
+// large /develop plan depends on every other slug in the plan, so this must
+// stay well above the largest plan size the PRD authoring flow allows.
+const MAX_DEPENDS_ON = 100;
 // Wave-authoring decision (scheduler wave-disposition PRD), shared between
 // schedulerCreatePrd (authoring time) and adminPrdFrontmatterPatch (the
 // after-the-fact change path) so both can never disagree on what a valid
@@ -350,7 +354,7 @@ const schedulerCreatePrd = z.object({
   parallelGroup: z.number().int().min(1).max(999999).optional(),
   // Explicit ordering (PRD 832): slugs that must complete before this PRD
   // becomes eligible. Written to frontmatter as `dependsOn: [a, b]`.
-  dependsOn: z.array(DepSlugSchema).max(20).optional(),
+  dependsOn: z.array(DepSlugSchema).max(MAX_DEPENDS_ON).optional(),
   // Explicit wave-authoring decision (scheduler wave-disposition PRD) — only
   // meaningful (and only stamped) when this PRD joins an Epic that already
   // has incomplete PRDs and lands as a wave root (no dependsOn of its own);
@@ -417,7 +421,7 @@ const scheduleSetPrdDisposition = z.object({
   slug: z.string().regex(SCHEDULE_SLUG_RE),
   cwd: z.string().min(1).max(4096).optional(),
   disposition: PrdDispositionSchema,
-  dependsOn: z.array(DepSlugSchema).max(20).optional(),
+  dependsOn: z.array(DepSlugSchema).max(MAX_DEPENDS_ON).optional(),
 });
 
 // Bulk archive: slug list, capped to limit unbounded retag/archive payloads.
@@ -501,7 +505,7 @@ const adminPrdFrontmatterPatch = z.object({
   // non-empty array is validated write-time against the SAME resolver
   // (depSlugResolve.cjs) scheduler_create_prd uses, so update and create
   // can never disagree about what a dependsOn entry resolves to.
-  dependsOn: z.array(DepSlugSchema).max(20).optional(),
+  dependsOn: z.array(DepSlugSchema).max(MAX_DEPENDS_ON).optional(),
   // Patchable after creation too — the Scheduler UI's "change disposition"
   // action (promote a wave to its own head, or attach it behind another
   // chain) rewrites this alongside dependsOn via the same

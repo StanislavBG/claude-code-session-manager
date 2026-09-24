@@ -40,6 +40,30 @@ can delete that worktree — use a scratch `TMPDIR`.
 - `npm run test:e2e` — `xvfb-run -a playwright test`
 - `npm run smoke:darwin` — `tests/smoke/darwin-boot.spec.ts`
 
+## Stability (load-sensitive flakes)
+
+A single green `npm run test:unit` run does not prove a test is reliable under load — a test
+that races real wall-clock time or spawns many short-timeout child processes can pass in
+isolation and fail intermittently inside the full parallel-worker suite (PRD 1414). Validators
+(and anyone chasing a "failed once, passes alone" report) should run:
+
+```
+STABILITY_RUNS=3 timeout 900 npm run test:unit:stability
+```
+
+`scripts/test-unit-stability.sh` runs `npm run test:unit` N times (default 3,
+`STABILITY_RUNS`-overridable) and exits non-zero listing any test that failed in any run. It is
+dev-only — not in package.json's `files`, never shipped in the npm tarball.
+
+When authoring a test that touches real time or spawns child processes, prefer:
+- An injected/frozen clock (`vi.useFakeTimers()` + `vi.setSystemTime()`, or the module's own
+  `now`/`nowMs` param) over comparing `Date.now()`/`new Date()` against a real `setTimeout` delay —
+  unless the delay is a ONE-DIRECTIONAL buffer (a real wait only makes the assertion MORE true,
+  e.g. `wait(1100)` before a `git log --since` check), which is load-safe as-is.
+- One real child-process spawn to prove the wiring, with the actual case matrix run in-process
+  against the same module's exported pure logic (see `guard-destructive-git-policy.cjs`, split out
+  by PRD 1412) — never a loop that spawns a real process per case.
+
 CI (`.github/workflows/ci.yml`), job `ci` (ubuntu, Node 20): `npm ci` → `npm run typecheck` →
 `npm run lint` → `npm run test:unit` → `npm run build` → `npx playwright install chromium --with-deps` →
 `apt-get install xvfb` → `npm run test:e2e` (env `SM_E2E=1`, `SM_SUPERVISOR_DISABLE=1`,

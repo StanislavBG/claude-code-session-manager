@@ -73,6 +73,20 @@ test('assertOpsWrite throws for a refused write and is silent for an allowed one
   assert.doesNotThrow(() => assertOpsWrite(`${P}/project-brief/brief.json`, 'project-home'));
 });
 
+test('assertOpsWrite fails closed (not a raw crash) on a relative path that looks like it is inside an ops root', () => {
+  // A caller that skips opsPath/resolveProjectRoot (which already throw on a
+  // relative cwd) and builds its own path string by hand must still get a
+  // graceful, catchable refusal here — this is the last line of defense
+  // (PRD 1082). Before this guard, classifyCwd's absolute-path check (added
+  // for the worktree-relative-cwd hazard) left innermostOpsRoot null for a
+  // relative path, and path.dirname(null) threw an untagged TypeError
+  // instead of the intended `unknownCwd`-tagged Error.
+  assert.throws(
+    () => assertOpsWrite('session-manager-operations/scheduler/state/queue.json', 'scheduler'),
+    (e) => e.unknownCwd === true && /absolute/.test(e.message),
+  );
+});
+
 test('every declared owner is a non-empty string (table sanity)', () => {
   for (const [ns, owner] of Object.entries(OWNERS)) {
     assert.equal(typeof owner, 'string', `${ns} owner must be a string`);

@@ -32,6 +32,23 @@ const { execFileSync } = require('node:child_process');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'looks-done-test-'));
 process.env.HOME = tmpHome;
+// reverifyNeedsReview's own auto-fix pass (PRD 1414 root cause): a
+// needs_review row with autoFixAttempted:true is still RETRY-eligible
+// (selectAutoFixTargets) whenever autoFixOutcome is unset/'no-plan'/'error'
+// and autoFixRetries < 1 — exactly this file's PRD-1136 fixture. reverify
+// then calls spawnInvestigation(job, ...) FIRE-AND-FORGET (no `await`, only
+// `.catch()`), so it keeps running real disk/git I/O in the background after
+// reverifyNeedsReview() (and the test awaiting it) returns. Under
+// `npm run test:unit`'s full-suite load that background work sometimes had
+// enough real time to run before this file's own assertions/next test read
+// queue.json, and was observed re-discovering '30-example' as an unstamped
+// PRD and quarantining it out from under this test (confirmed via a captured
+// failure: 'quarantining unstamped PRD 30-example ... no createdVia
+// provenance'). This file's own tests only assert reverifyNeedsReview's
+// direct return value / queue mutations, never spawnInvestigation's, so
+// disable auto-fix the same way sibling scheduler test files already do
+// (e.g. scheduler-shard-quarantine.test.cjs).
+process.env.SM_AUTOFIX_DISABLE = '1';
 
 const { reverifyNeedsReview, computeLooksDone, applyNeedsReviewAutoResolve, findSatisfyingCommitOnMain } = require('../scheduler.cjs');
 const { resolveEpicPrdWriteDir } = require('../lib/prdLocations.cjs');
@@ -121,6 +138,29 @@ function readTerminalRow(queuePath, projectCwd, slug) {
 async function wait(ms) {
   await new Promise((r) => setTimeout(r, ms));
 }
+
+// Every test in this file shares ONE tmpHome (see the module-level mkdtempSync
+// above) and most call reverifyNeedsReview(), which scans EVERY project
+// registered under tmpHome/.claude/projects — not just the one this test just
+// wrote (queueStore.cjs's stateCwds unions allProjectCwds()+activeProjectCwds()
+// across the whole HOME). Without this cleanup, each later test's
+// reverifyNeedsReview() call re-processes every earlier test's already-settled
+// fixture row too (confirmed via full-suite stdout: the PRD-1136 test's own
+// reverifyNeedsReview() call was observed re-running auto-fix bookkeeping for
+// 171-example, a prior test's row), and each re-processed candidate costs 1+
+// real `git` subprocess calls (fetchAllRefs, committedInWindow, ...). That
+// backlog only grows as more tests run, so a later test's single
+// reverifyNeedsReview() call does correspondingly more child-process I/O — on
+// a loaded `npm run test:unit` worker pool this cumulative latency is what
+// occasionally pushes a later test toward vitest's 15s per-test budget
+// (vitest.config.ts documents the same class of load-timeout elsewhere),
+// while the file passes in ~10s alone with nothing to accumulate. Wiping the
+// registry after each test bounds every reverifyNeedsReview() call to just
+// that test's own row(s), removing the cross-test amplification.
+afterEach(() => {
+  fs.rmSync(path.join(tmpHome, '.claude', 'projects'), { recursive: true, force: true });
+  bustCwdCache();
+});
 
 test('failed + no result event (unverified-shaped) + later commit touching declared path → looksDone, transitions to needs_review', async () => {
   const projectCwd = path.join(tmpHome, 'proj-171');

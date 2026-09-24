@@ -33,6 +33,7 @@ const path = require('node:path');
 let tmpHome;
 let originalHome;
 let scheduler;
+let bustCwdCache;
 
 beforeAll(() => {
   originalHome = process.env.HOME;
@@ -40,6 +41,7 @@ beforeAll(() => {
   process.env.HOME = tmpHome;
 
   scheduler = require('../scheduler.cjs');
+  ({ bustCwdCache } = require('../lib/queueStore.cjs'));
 
   if (!scheduler.PRDS_DIR.startsWith(tmpHome)) {
     throw new Error(`refusing to run: PRDS_DIR (${scheduler.PRDS_DIR}) is not under the temp HOME (${tmpHome})`);
@@ -56,6 +58,14 @@ function registerActiveProject(cwd) {
   const slugDir = path.join(projectsDir, `fake-project-slug-${path.basename(cwd)}`);
   fs.mkdirSync(slugDir, { recursive: true });
   fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
+  // Each test registers a NEW project mid-file; without busting queueStore's
+  // stateCwds cache (CACHE_MS 120s), a reconcile() call from an EARLIER test
+  // in this file can leave a stale cwd list cached that this test's freshly
+  // registered project is invisible to — reconcile() then never discovers
+  // its PRD at all (confirmed: this is what made
+  // 'reconcile() still onboards a PRD written to the canonical Epic-scoped
+  // dir' intermittently fail under full-suite load, PRD 1414).
+  bustCwdCache();
 }
 
 function makeFixtureProject(prefix) {

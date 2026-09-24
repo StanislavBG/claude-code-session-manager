@@ -152,6 +152,21 @@ function classifyCwd(cwd) {
   if (!cwd || typeof cwd !== 'string') {
     return { kind: 'unknown', projectRoot: null, outermostOpsRoot: null, innermostOpsRoot: null, reason: 'cwd is not a non-empty string' };
   }
+  // Must run BEFORE inspectGit: nearestGitEntry walks ancestors via
+  // fs.statSync, which silently resolves a relative `dir` against
+  // process.cwd() — so a relative cwd that happens to be a real subpath of
+  // WHATEVER PROCESS IS RUNNING THIS CODE (not the transcript's actual
+  // project) can walk up into a real `.git`, including a linked worktree's
+  // `.git` FILE, and return that worktree's real main-tree root as if it
+  // were the relative fragment's own project. The 'worktree' branch below
+  // returns early on g.shape alone with no absolute check of its own, so
+  // this guard cannot be deferred to after inspectGit runs (confirmed via
+  // opsRootAbsoluteCwd.test.cjs: reproduces in every git worktree, not just
+  // job worktrees — process.cwd() there is a worktree whose .git FILE
+  // resolves back to the real main tree root).
+  if (!path.isAbsolute(cwd)) {
+    return { kind: 'unknown', projectRoot: null, outermostOpsRoot: null, innermostOpsRoot: null, reason: 'cwd is not an absolute path' };
+  }
   const parts = cwd.split(path.sep);
   const first = parts.indexOf(OPS_DIRNAME);
   const last = parts.lastIndexOf(OPS_DIRNAME);

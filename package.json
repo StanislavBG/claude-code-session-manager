@@ -40,6 +40,7 @@
     "prepack": "node scripts/write-build-info.cjs",
     "prepublishOnly": "node scripts/write-build-info.cjs && vite build",
     "test:unit": "vitest run",
+    "test:unit:stability": "bash scripts/test-unit-stability.sh",
     "bench": "node scripts/bench/main-bench.cjs",
     "bench:renderer": "vitest run --config vitest.bench.config.ts",
     "test:e2e": "xvfb-run -a playwright test",

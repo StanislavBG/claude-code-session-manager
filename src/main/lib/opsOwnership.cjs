@@ -179,6 +179,20 @@ function assertOpsWrite(absPath, writer) {
   // worktree-cwd hazard (PRD 1082; incidents 2026-08-30, 2026-09-01).
   const { inOps } = parseOpsPath(absPath);
   if (inOps) {
+    // classifyCwd fails closed on a non-absolute absPath (returns
+    // innermostOpsRoot: null) — path.dirname(null) throws a raw, untagged
+    // TypeError, which would crash this "last line of defense" instead of
+    // producing the graceful, catchable refusal every other branch here
+    // gives. A caller that skips the absolute-path helpers (opsPath/
+    // resolveProjectRoot) and hands assertOpsWrite a relative fragment
+    // containing an OPS_ROOT_DIR segment must still fail closed, not crash.
+    if (typeof absPath !== 'string' || !path.isAbsolute(absPath)) {
+      const err = new Error(
+        `refusing to write ${OPS_ROOT_DIR}/ state: absPath must be absolute, got "${absPath}"`,
+      );
+      err.unknownCwd = true;
+      throw err;
+    }
     // innermostOpsRoot (lastIndexOf) is the fact THIS gate keys on; activeSessions
     // truncates at the outermost instead — cwdClassify returns both, unified in
     // neither direction.

@@ -90,11 +90,16 @@ test('tickQueue dispatches the healthy project while the torn project is skipped
   const snaps = fs.readdirSync(path.dirname(torn.queueFile)).filter((f) => f.startsWith('queue.json.corrupt-'));
   expect(snaps).toHaveLength(1);
 
+  // 60s, not 20s: under npm run test:unit's full-suite parallel-worker load
+  // this occasionally needed more than 20s for the real child-process
+  // dispatch to land (PRD 1414 — confirmed flaky only inside the full suite,
+  // never in isolation or under synthetic single-file CPU load). The
+  // surrounding vitest test timeout below (120s) already budgets for this.
   await new Promise((resolve, reject) => {
     const t0 = Date.now();
     const poll = () => {
       if (fs.existsSync(path.join(good.cwd, 'ran-here.marker'))) return resolve();
-      if (Date.now() - t0 > 20_000) return reject(new Error('healthy project never dispatched'));
+      if (Date.now() - t0 > 60_000) return reject(new Error('healthy project never dispatched'));
       setTimeout(poll, 100);
     };
     poll();

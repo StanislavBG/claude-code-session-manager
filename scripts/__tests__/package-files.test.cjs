@@ -38,6 +38,10 @@ const REQUIRED_PATHS = [
   // individually (not folded into GUARD_SCRIPT_PATHS below) since it isn't
   // itself a guard script.
   'scripts/hooks/lib/guard-destructive-git-policy.cjs',
+  // Same shape for the three sibling guards (PRD 1415).
+  'scripts/hooks/lib/guard-self-schedule-policy.cjs',
+  'scripts/hooks/lib/guard-prd-writes-policy.cjs',
+  'scripts/hooks/lib/guard-inline-implementation-policy.cjs',
 ];
 
 // Every PreToolUse guard script (GUARD_NAMES in guardShims.cjs) that the shims

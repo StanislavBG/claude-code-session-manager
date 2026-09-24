@@ -90,11 +90,7 @@
  */
 'use strict';
 
-const ALWAYS_DENY_TOOLS = new Set(['ScheduleWakeup', 'CronCreate']);
-const BACKGROUNDABLE_AGENT_TOOLS = new Set(['Task', 'Agent']);
-
-const STANDARDS_QUOTE = 'You ARE the executor — never re-queue or self-schedule.';
-const STANDARDS_CITE = 'plugins/session-manager-dev/skills/develop/standards.md:85 (Execution discipline)';
+const { decide, parsePayload } = require('./lib/guard-self-schedule-policy.cjs');
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -107,69 +103,21 @@ function readStdin() {
   });
 }
 
-function allow() {
-  process.stdout.write(JSON.stringify({ continue: true }));
-  process.exit(0);
-}
-
-function deny(reason) {
-  process.stdout.write(JSON.stringify({
-    continue: true,
-    decision: 'block',
-    reason,
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason: reason,
-    },
-  }));
+function emit(result) {
+  process.stdout.write(JSON.stringify(result));
   process.exit(0);
 }
 
 async function main() {
   const raw = await readStdin();
-  let payload;
-  try {
-    payload = raw ? JSON.parse(raw) : {};
-  } catch (e) {
-    console.error(`[guard-self-schedule] malformed stdin JSON, failing open: ${e?.message}`);
-    return allow();
-  }
-
-  try {
-    const jobSlug = process.env.SM_SCHEDULER_JOB_SLUG;
-    if (!jobSlug) return allow(); // interactive session — this guard is inert here
-
-    const toolName = payload.tool_name;
-
-    if (ALWAYS_DENY_TOOLS.has(toolName)) {
-      const reason = [
-        `Blocked: \`${toolName}\` from inside a headless scheduler-spawned run (job '${jobSlug}').`,
-        `${STANDARDS_CITE}: "${STANDARDS_QUOTE}"`,
-        'A headless run has no next turn — nothing will ever deliver this wakeup, so the job exits with its work stranded and parks in needs_review even if it was already correct.',
-        'Do it now instead: commit what you have, then run any required review synchronously inline (call the reviewer and read its result in this same turn) before the finish protocol — never schedule it for later.',
-      ].join(' ');
-      return deny(reason);
-    }
-
-    if (BACKGROUNDABLE_AGENT_TOOLS.has(toolName) && payload.tool_input && payload.tool_input.run_in_background) {
-      const reason = [
-        `Blocked: a backgrounded ${toolName} call (run_in_background: true) from inside a headless scheduler-spawned run (job '${jobSlug}').`,
-        `${STANDARDS_CITE}: "${STANDARDS_QUOTE}"`,
-        'A headless run has no later turn to collect a background agent\'s result, so waiting on it (ListAgents, Monitor, ScheduleWakeup) strands the job in needs_review with its work already done but uncommitted.',
-        'Call it synchronously instead — omit run_in_background (or set it to false) and read its result in this same turn, before the finish protocol.',
-      ].join(' ');
-      return deny(reason);
-    }
-
-    return allow();
-  } catch (e) {
-    console.error(`[guard-self-schedule] internal error, failing open: ${e?.message}`);
-    return allow();
-  }
+  return emit(decide(parsePayload(raw)));
 }
 
+// Runs as a require-time side effect, NOT gated on `require.main === module`
+// — see src/main/lib/guardShims.cjs's header: the installed shim invokes this
+// script via a plain `require()`, so gating on `require.main` would silently
+// stop the shim from ever running the guard.
 main().catch((e) => {
   console.error(`[guard-self-schedule] unhandled error, failing open: ${e?.message}`);
-  allow();
+  emit({ continue: true });
 });

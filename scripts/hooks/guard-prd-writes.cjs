@@ -73,10 +73,7 @@
  */
 'use strict';
 
-const path = require('node:path');
-
-const SCHEDULER_SEGMENT = `${path.sep}session-manager-operations${path.sep}scheduler${path.sep}`;
-const FIX_PLAN_RE = /^\d+-fix-.*\.md$/;
+const { decide, parsePayload } = require('./lib/guard-prd-writes-policy.cjs');
 
 function readStdin() {
   return new Promise((resolve) => {
@@ -89,83 +86,21 @@ function readStdin() {
   });
 }
 
-/** Extract the single filesystem path a Write/Edit/NotebookEdit call targets. */
-function targetPathFor(toolName, toolInput) {
-  if (!toolInput || typeof toolInput !== 'object') return null;
-  if (toolName === 'NotebookEdit') return toolInput.notebook_path ?? null;
-  return toolInput.file_path ?? null;
-}
-
-/** MCP tool name to point the agent at, based on the attempted operation. */
-function suggestedToolFor(toolName, absPath) {
-  const isArchived = absPath.includes(`${path.sep}prds-archived${path.sep}`);
-  if (isArchived) return 'mcp__session-manager-scheduler__scheduler_archive_prd';
-  // Write = the file doesn't exist yet from the agent's point of view (a
-  // brand-new PRD); Edit/NotebookEdit = mutating an existing file in place.
-  if (toolName === 'Write') return 'mcp__session-manager-scheduler__scheduler_create_prd';
-  return 'mcp__session-manager-scheduler__scheduler_update_prd';
-}
-
-function allow() {
-  process.stdout.write(JSON.stringify({ continue: true }));
-  process.exit(0);
-}
-
-function deny(reason) {
-  process.stdout.write(JSON.stringify({
-    continue: true,
-    decision: 'block',
-    reason,
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason: reason,
-    },
-  }));
+function emit(result) {
+  process.stdout.write(JSON.stringify(result));
   process.exit(0);
 }
 
 async function main() {
   const raw = await readStdin();
-  let payload;
-  try {
-    payload = raw ? JSON.parse(raw) : {};
-  } catch (e) {
-    console.error(`[guard-prd-writes] malformed stdin JSON, failing open: ${e?.message}`);
-    return allow();
-  }
-
-  try {
-    const toolName = payload.tool_name;
-    if (toolName !== 'Write' && toolName !== 'Edit' && toolName !== 'NotebookEdit') {
-      return allow();
-    }
-
-    const rawPath = targetPathFor(toolName, payload.tool_input);
-    if (!rawPath || typeof rawPath !== 'string') return allow();
-
-    const cwd = typeof payload.cwd === 'string' && payload.cwd ? payload.cwd : process.cwd();
-    const absPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(cwd, rawPath);
-
-    if (!absPath.includes(SCHEDULER_SEGMENT)) return allow();
-
-    const base = path.basename(absPath);
-    if (FIX_PLAN_RE.test(base)) return allow();
-
-    const suggested = suggestedToolFor(toolName, absPath);
-    const reason = [
-      `Direct ${toolName} to a session-manager-operations/scheduler/ path is blocked.`,
-      `PRDs must be authored through the scheduler API, not a raw file write — use the "${suggested}" MCP tool instead.`,
-      'If the Session Manager app is not running (the admin API this MCP tool talks to only exists while it is), the degraded fallback documented in the develop skill applies: hand-write the file as a last resort and say so visibly in your report.',
-    ].join(' ');
-    return deny(reason);
-  } catch (e) {
-    console.error(`[guard-prd-writes] internal error, failing open: ${e?.message}`);
-    return allow();
-  }
+  return emit(decide(parsePayload(raw)));
 }
 
+// Runs as a require-time side effect, NOT gated on `require.main === module`
+// — see src/main/lib/guardShims.cjs's header: the installed shim invokes this
+// script via a plain `require()`, so gating on `require.main` would silently
+// stop the shim from ever running the guard.
 main().catch((e) => {
   console.error(`[guard-prd-writes] unhandled error, failing open: ${e?.message}`);
-  allow();
+  emit({ continue: true });
 });

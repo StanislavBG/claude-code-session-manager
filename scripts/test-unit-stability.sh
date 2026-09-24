@@ -28,7 +28,7 @@ for i in $(seq 1 "$RUNS"); do
     status="FAIL"
     FAILED_ANY=1
   fi
-  summary="$(grep -E '^(Test Files|Tests) ' "$log" | tr '\n' ' ')"
+  summary="$(grep -E '^\s*(Test Files|Tests) ' "$log" | tr '\n' ' ')"
   echo "run $i: $status  $summary"
   SUMMARY_LINES+=("run $i: $status  $summary")
   if [ "$status" = "FAIL" ]; then

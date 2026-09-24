@@ -112,13 +112,20 @@ test('writeGuardShims: rewriting the pointer to a DIFFERENT app root lets an alr
   const shimBytesBefore = fs.readFileSync(shimFile, 'utf8');
 
   // Simulate an app upgrade: a second "app root" at a brand-new path, with
-  // its own copy of scripts/hooks/guard-prd-writes.cjs (this is the ONLY file
-  // guardShims ever reads through the pointer at invocation time).
+  // its own copy of scripts/hooks/guard-prd-writes.cjs — the file guardShims
+  // reads through the pointer at invocation time — plus the sibling policy
+  // module it `require()`s at load time (guard-prd-writes-policy.cjs, PRD
+  // 1415); a real upgrade ships both since both are listed in package.json's
+  // "files".
   const secondAppRoot = await mkTmp('sm-guard-shims-upgraded-app-');
-  await fsp.mkdir(path.join(secondAppRoot, 'scripts', 'hooks'), { recursive: true });
+  await fsp.mkdir(path.join(secondAppRoot, 'scripts', 'hooks', 'lib'), { recursive: true });
   await fsp.copyFile(
     path.join(APP_ROOT, 'scripts', 'hooks', 'guard-prd-writes.cjs'),
     path.join(secondAppRoot, 'scripts', 'hooks', 'guard-prd-writes.cjs'),
+  );
+  await fsp.copyFile(
+    path.join(APP_ROOT, 'scripts', 'hooks', 'lib', 'guard-prd-writes-policy.cjs'),
+    path.join(secondAppRoot, 'scripts', 'hooks', 'lib', 'guard-prd-writes-policy.cjs'),
   );
 
   const r = await writeGuardShims({ homeDir, appRoot: secondAppRoot });

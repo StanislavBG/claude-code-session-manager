@@ -35,7 +35,7 @@ const ALLOWLIST = new Map([
   ['scripts/check-doc-hierarchy.cjs', 'standalone lint that walks the repo tree for ops docs; no runtime resolver needed'],
   ['scripts/cleanup-worktree-ops-stubs.cjs', 'one-shot cleanup that matches stray ops dirnames inside worktrees; must not normalize them away'],
   ['scripts/cleanup-nested-queue-stubs.cjs', 'one-shot cleanup that detects the doubled ops dirname; must not normalize it away'],
-  ['scripts/hooks/guard-inline-implementation.cjs', 'installed to ~/.claude/session-manager/hooks via shim; runs outside the repo and cannot require opsOwnership'],
+  ['scripts/hooks/lib/guard-inline-implementation-policy.cjs', 'required by guard-inline-implementation.cjs, installed to ~/.claude/session-manager/hooks via shim; runs outside the repo and cannot require opsOwnership'],
 ])
 
 const SCHEDULER_PATHS_REL = 'src/main/lib/schedulerPaths.cjs'

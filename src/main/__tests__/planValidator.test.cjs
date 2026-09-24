@@ -69,3 +69,57 @@ test('false when the depending row is not agentType validator', () => {
   ];
   expect(hasDownstreamValidator(job, jobs)).toBe(false);
 });
+
+test('true when a pending validator reaches the job transitively via one sink (2-hop)', () => {
+  const job = { slug: '111-alpha' };
+  const jobs = [
+    job,
+    { slug: '150-sink', agentType: 'dev-lead', status: 'pending', dependsOn: ['111-alpha'] },
+    { slug: '999-validate', agentType: 'validator', status: 'pending', dependsOn: ['150-sink'] },
+  ];
+  expect(hasDownstreamValidator(job, jobs)).toBe(true);
+});
+
+test('true when a pending validator reaches the job transitively via two intermediate sinks (3-hop)', () => {
+  const job = { slug: '111-alpha' };
+  const jobs = [
+    job,
+    { slug: '140-mid', agentType: 'dev-lead', status: 'pending', dependsOn: ['111-alpha'] },
+    { slug: '150-sink', agentType: 'dev-lead', status: 'pending', dependsOn: ['140-mid'] },
+    { slug: '999-validate', agentType: 'validator', status: 'pending', dependsOn: ['150-sink'] },
+  ];
+  expect(hasDownstreamValidator(job, jobs)).toBe(true);
+});
+
+test('false when the validator only reaches an unrelated branch', () => {
+  const job = { slug: '111-alpha' };
+  const jobs = [
+    job,
+    { slug: '222-beta', agentType: 'dev-lead', status: 'pending', dependsOn: [] },
+    { slug: '150-sink', agentType: 'dev-lead', status: 'pending', dependsOn: ['222-beta'] },
+    { slug: '999-validate', agentType: 'validator', status: 'pending', dependsOn: ['150-sink'] },
+  ];
+  expect(hasDownstreamValidator(job, jobs)).toBe(false);
+});
+
+test('cycle in dependsOn terminates and returns false when the job is not reachable', () => {
+  const job = { slug: '111-alpha' };
+  const jobs = [
+    job,
+    { slug: '200-a', agentType: 'dev-lead', status: 'pending', dependsOn: ['201-b'] },
+    { slug: '201-b', agentType: 'dev-lead', status: 'pending', dependsOn: ['200-a'] },
+    { slug: '999-validate', agentType: 'validator', status: 'pending', dependsOn: ['200-a'] },
+  ];
+  expect(hasDownstreamValidator(job, jobs)).toBe(false);
+});
+
+test('false when a same-named validator/sink pair belongs to a different project (cwd)', () => {
+  const job = { slug: '011-alpha', cwd: '/projectA' };
+  const jobs = [
+    job,
+    { slug: '012-sink', cwd: '/projectA', agentType: 'dev-lead', status: 'pending', dependsOn: [] },
+    { slug: '512-sink', cwd: '/projectB', agentType: 'dev-lead', status: 'pending', dependsOn: ['011-alpha'] },
+    { slug: '999-validate', cwd: '/projectB', agentType: 'validator', status: 'pending', dependsOn: ['sink'] },
+  ];
+  expect(hasDownstreamValidator(job, jobs)).toBe(false);
+});

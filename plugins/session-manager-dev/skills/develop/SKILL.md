@@ -204,7 +204,10 @@ can't load skills.
 
    **Every plan ends with one `validate` PRD.** After the work-item PRDs are written, author
    exactly one more through `scheduler_create_prd`: `agentType: "validator"`, `tag: "build"`,
-   `estimateMinutes: 10`, `dependsOn` = every other slug in this plan, slug
+   `estimateMinutes: 10`, `dependsOn` = every other slug in this plan (`dependsOn` is capped at
+   100 entries; for a plan bigger than that, list only the plan's sink PRDs — those nothing else
+   in the plan depends on — since `hasDownstreamValidator` walks `dependsOn` transitively, so a
+   validator anchored on the sinks alone still covers every upstream PRD), slug
    `validate-<short-plan-name>`. Its Goal lists the plan's PRD slugs and titles; its Acceptance
    criteria give, per PRD, where its file lives
    (`<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/<NN>-<slug>.md` while queued,
@@ -215,8 +218,10 @@ can't load skills.
    While a plan has a pending validator, the scheduler suppresses both the per-PRD validation
    prompt into this session and the in-run `/code-review` steps for its work-items — one review,
    once, at the end. If `scheduler_create_prd` rejects `agentType: "validator"` (persona not
-   installed on this machine yet), say so and fall back to today's per-PRD validation; do not
-   hand-write the file.
+   installed on this machine yet — the usual cause is a running app older than 0.96.0, since the
+   validator persona is only seeded to `~/.claude/agents` on app boot), say so and fall back to
+   today's per-PRD validation; do not hand-write the file. Note the stale-app cause in your report
+   so the human knows to restart onto >=0.96.0.
 
    - **Sub-tasked Acceptance Criteria** (either shape, when a single PRD legitimately spans more
      than one concern dimension from step 3 — e.g. it has both core-functionality and
@@ -452,8 +457,10 @@ can't load skills.
 ## Phase 2 — Validation runs as its own job; this session only decides
 
 Every plan queued in Phase 1 ends with a `validate` PRD (agentType `validator`) whose
-`dependsOn` lists every other slug in the plan, so the scheduler runs it exactly once, after the
-last work-item lands. That job — not this session — re-runs each PRD's gate, checks every
+`dependsOn` lists every other slug in the plan — or, for a plan over the 100-entry cap, just the
+plan's sink PRDs, since `hasDownstreamValidator` walks `dependsOn` transitively and still credits
+every upstream PRD — so the scheduler runs it exactly once, after the last work-item lands.
+That job — not this session — re-runs each PRD's gate, checks every
 acceptance criterion against the tree, reviews the plan's combined diff (`/code-review`,
 `/security-review`), commits a review record, and ends with `VALIDATION: <slug>
 VERIFIED|REFUTED` per PRD. The scheduler appends one verdict event per PRD to this Epic (the

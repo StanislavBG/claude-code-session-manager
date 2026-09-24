@@ -57,7 +57,11 @@ second pool; they only withhold launches from the one that exists:</p>
   <li><strong>CPU-load gate.</strong> A job is held back when the 1-minute load average per core
   exceeds a threshold (default 0.85), even if slots and memory are free. This catches contention a
   memory gate can't see — e.g. several CPU-heavy test batteries running at once slowly starving
-  each other of wall-clock, each one then overrunning its own timeout.</li>
+  each other of wall-clock, each one then overrunning its own timeout. The one exception is the
+  starvation watchdog: when the load gate alone has held dispatchable work for 10 minutes with
+  nothing running — the load is coming from some other process — its forced tick skips the CPU
+  gate and starts one batch. The slot pool and memory gate still bound that batch, exactly as a
+  manual Run now does.</li>
 </ul>
 
 <p>On top of the per-project cap, the scheduler also enforces <strong>cross-project fairness</strong>:

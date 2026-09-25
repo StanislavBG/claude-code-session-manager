@@ -1,2 +1,118 @@
 <h1>Good habits — great results, safely</h1>
 <p class="lede">Ten habits that make your agents more helpful, cheaper and safer — and the common mistakes to avoid.</p>
+
+<p>None of these habits need a new button or a new setting. They're the tools already covered in
+this manual, used in the order that gets you the best result with the least risk. Read them once
+and they start to feel automatic.</p>
+
+<h2>Habits that keep your agency effective</h2>
+
+<h3>1. Give every job its own Session</h3>
+<p>A <a href="#first-session">Session</a> is one job, from a goal to a finished result — not a
+running conversation you keep repurposing for whatever comes up next. A fresh Session per job
+keeps its history honest: anyone reading it later, including you, sees exactly what it was asked
+to do, and nothing else mixed in.</p>
+
+<h3>2. Describe the outcome, not the steps</h3>
+<p>Tell the <a href="#first-session">architect what you want to be true</a> once the work is
+done, not which file to open or which line to change. "Add a dark mode toggle to Settings" gives
+it room to plan; a list of clicks doesn't. A real constraint — a deadline, a file that must not
+change — helps more than naming a technique.</p>
+
+<h3>3. Let the architect plan before anyone builds</h3>
+<p>The <a href="#meet-your-agency">architect turns a big idea into small, well-defined work
+orders</a> before any code gets written. Skipping that step to save time usually costs more of
+it later, once a dev-lead hits a decision only the plan should have made.</p>
+
+<h3>4. Keep work orders small</h3>
+<p>A <a href="#plans-and-scheduler">work order</a> with one clear goal is easy to check and easy
+to get right. A sprawling one has more places to quietly go wrong, with no natural point to stop
+and check it along the way. If a work order feels big, it's usually two work orders wearing one
+name.</p>
+
+<h2>Habits that keep you in control</h2>
+
+<h3>5. Answer Needs review questions promptly</h3>
+<p><a href="#checking-the-work">Needs review</a> is a question, not a failure — but it's also a
+stop sign. Any work order waiting on it can't move until you answer. Leaving it for days doesn't
+only delay one job; it can quietly stall everything queued behind it too.</p>
+
+<h3>6. Check the result yourself</h3>
+<p>Checklists, tests, and the validator filter out the obvious misses, but
+<a href="#checking-the-work">whether the finished work solves your actual problem is still your
+call</a>. A verified verdict is strong evidence. It isn't a substitute for looking at what
+changed.</p>
+
+<h3>7. Watch usage and cost</h3>
+<p>Every Session and every work order spends real usage against your Claude Code plan. The
+<a href="#cockpit-tour">usage meters and cost history around the cockpit</a> show you where that's
+going, so a plan running hotter than expected gets noticed in an afternoon, not a month.</p>
+
+<h2>Habits that keep you safe</h2>
+
+<h3>8. Keep passwords and keys out of prompts and files</h3>
+<p>Never type a real password, API key, or token into a goal or a
+<a href="#house-rules">CLAUDE.md file or a Project-scope setting</a>. CLAUDE.md is meant to be
+checked into version control and shared with your whole team, and a Project-scope setting ships to
+everyone the moment they pull your changes. A secret belongs in a credential store built for that
+job, never in plain text an agent reads or writes.</p>
+
+<h3>9. Keep your project under version control</h3>
+<p>Every <a href="#plans-and-scheduler">work order the Scheduler runs works in its own copy of
+your project</a>, and making that safe copy depends on your project already being tracked in git
+— the version-control system most software projects use. Without git, a work order runs directly
+in your project instead of a protected copy. Git also gives you a plain undo button: it can show
+you exactly what changed and step you back to before it happened.</p>
+
+<h2>When an agent goes in circles</h2>
+
+<p>Sometimes a Session keeps retrying the same fix, or drifts further from what you meant with
+every reply. That's your cue to stop, not to keep clarifying in place.</p>
+
+<h3>10. Stop and restart with a clearer goal</h3>
+<p>Rewriting the goal mid-conversation rarely helps — the agent is already anchored to everything
+said before it. It's usually faster to end that Session and
+<a href="#first-session">start a new one with a tighter goal</a>, written the way you would if
+this were the first time you'd ever asked for it.</p>
+
+<h2>Common mistakes to avoid</h2>
+
+<p>Most trouble traces back to one of these habits running in reverse:</p>
+
+<ul>
+  <li>Treating "the tests passed" as the same as "done," instead of checking the result
+  yourself.</li>
+  <li>Letting a Needs review question sit for days while everything behind it waits too.</li>
+  <li>Pasting a real secret into a goal or a shared file to get something working quickly.</li>
+  <li>Writing one giant work order because splitting it felt like more effort, then untangling
+  what went wrong somewhere inside it.</li>
+  <li>Working outside version control, so a mistaken change has nothing to undo back to.</li>
+</ul>
+
+<aside class="manual-warning"><strong>Watch out:</strong> a password or key typed into a prompt, a
+CLAUDE.md file, or a Project-scope setting doesn't stay private. Any agent in that Session can
+read it back — and because CLAUDE.md and Project settings are meant to be shared, so can anyone
+else who works on the project. Keep secrets in a proper credential store, never in text an agent
+reads or writes.</aside>
+
+<aside class="manual-analogy"><strong>Think of it like this:</strong> these habits are the same
+ones that make any contractor relationship go well — a clear brief, one job at a time, checking
+the invoice, and keeping your own paperwork in order. Working with agents doesn't change any of
+that. It only means the habit matters faster, because the work happens faster too.</aside>
+
+<div class="manual-takeaways">
+  <h2>What you learned</h2>
+  <ul>
+    <li>Give each job its own Session, and describe the outcome you want, not the steps to get
+    there.</li>
+    <li>Let the architect plan, and keep work orders small enough to check on their own.</li>
+    <li>Answer Needs review promptly, check the finished result yourself, and watch usage and cost
+    as you go.</li>
+    <li>Keep passwords and keys out of prompts and files, and keep your project under version
+    control so any change can be undone.</li>
+    <li>If an agent goes in circles, stop and start a new Session with a clearer goal instead of
+    patching the old one.</li>
+  </ul>
+</div>
+
+<p class="manual-next">Next up: <a href="#glossary">Glossary — every term in plain English</a></p>

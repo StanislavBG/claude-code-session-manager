@@ -1328,9 +1328,17 @@ async function archiveCompletedPrd(slug, cwd) {
  * `schedule:archive-prd`) so a stale queue entry can never survive to fire
  * against a PRD that no longer exists in the live prds/ dir — the same
  * ENOENT-avoidance archivedTwinExists provides in executeJob, applied at the
- * archiving source instead of at fire-time. auto-archived slugs never need
- * this (selectAutoArchivable in queueOps.cjs only selects already-completed
- * jobs), so this is exercised only by the manual archive path.
+ * archiving source instead of at fire-time.
+ *
+ * MUST NEVER be called from inside a mutate() body (directly, or transitively
+ * via reconcile()/tickBody, which always run inside one) — this function
+ * itself calls mutate() below, and a mutate queued from inside a mutate body
+ * queues behind the very mutate awaiting it, so mutateTail never settles:
+ * every tick wedges machine-wide until the app restarts (proven live
+ * 2026-09-25). That is exactly why queueOps.cjs's autoArchiveCompleted (which
+ * DOES run inside reconcile()) calls archiveMany with { retire: false } and
+ * skips this function entirely — it is exercised only by the manual archive
+ * path (queueOps.cjs's `schedule:archive-prd`, called from outside mutate()).
  */
 async function retireCompletedSlugs(slugs) {
   const list = Array.isArray(slugs) ? slugs.filter(Boolean) : [];

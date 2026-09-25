@@ -265,6 +265,7 @@ export default defineConfig({
       'src/main/__tests__/crossProjectFeedbackRoutes.test.cjs',
       'web/manual/__tests__/figure-captures.test.cjs',
       'web/manual/__tests__/chapter-links.test.cjs',
+      'web/manual/__tests__/readability.test.cjs',
       'scripts/__tests__/package-files.test.cjs',
       'src/main/__tests__/seedAgentPersonas.test.cjs',
       'src/main/__tests__/seedValidatorPersona.test.cjs',

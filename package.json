@@ -53,6 +53,7 @@
     "refresh:vad-assets": "node scripts/refresh-vad-assets.mjs",
     "health": "node src/main/health.cjs",
     "manual:check": "node web/manual/build.mjs --check",
+    "manual:readability": "node web/manual/readability.mjs",
     "manual:build": "node web/manual/build.mjs",
     "manual:figures": "xvfb-run -a node web/manual/capture-figures.mjs",
     "lint:selectors": "node scripts/check-unstable-selectors.cjs",

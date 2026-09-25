@@ -66,24 +66,45 @@ const chapterHtml = src.chapters.map(c => ({
 }));
 
 const OFFLINE_CSS = `
-:root{--bg:#0d0d0d;--fg:#e8e8e8;--muted:#9a9a9a;--line:#2a2a2a;--accent:#5fdf9f}
+:root{--bg:#fff;--fg:#1a1a1a;--muted:#44464b;--line:#d8dbe0;--code-bg:#f2f3f5;
+--accent:#0a6e46;--accent-bg:#eaf7f0;--tip-line:#1b6fc9;--tip-bg:#eef6ff;--warn-line:#b25e09;--warn-bg:#fff4e5}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.7 system-ui,-apple-system,sans-serif}
-.wrap{max-width:820px;margin:0 auto;padding:48px 24px 96px}
-h1{font-size:2.1em;line-height:1.2;margin:2.5em 0 .4em;border-bottom:1px solid var(--line);padding-bottom:.3em}
+body{margin:0;background:var(--bg);color:var(--fg);font:18px/1.7 system-ui,-apple-system,"Segoe UI",sans-serif}
+.wrap{max-width:68ch;margin:0 auto;padding:48px 24px 96px}
+h1{font-size:2em;line-height:1.25;margin:2.2em 0 .4em;color:#000;border-bottom:1px solid var(--line);padding-bottom:.3em}
 h1:first-child{margin-top:0}
-h2{font-size:1.35em;margin:2em 0 .5em}h3{font-size:1.1em;margin:1.6em 0 .4em}
-p{margin:.9em 0}.lede{font-size:1.12em;color:#cfcfcf}
-code{background:#191919;padding:.15em .4em;border-radius:4px;font-size:.9em}
-pre{background:#111;border:1px solid var(--line);border-radius:8px;padding:16px;overflow-x:auto}
+h2{font-size:1.4em;margin:1.8em 0 .5em;color:#000}h3{font-size:1.15em;margin:1.5em 0 .4em;color:#000}
+p{margin:.9em 0}p.lede{font-size:1.15em;color:var(--muted)}
+a{color:#0a5cb8}a:hover{color:#083f80}
+kbd{display:inline-block;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;background:#f7f7f8;padding:.1em .5em;font:.85em ui-monospace,SFMono-Regular,Menlo,monospace}
+code{background:var(--code-bg);padding:.15em .4em;border-radius:4px;font-size:.88em;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+pre{background:var(--code-bg);border:1px solid var(--line);border-radius:8px;padding:16px;overflow-x:auto}
 pre code{background:none;padding:0}
-.manual-table{width:100%;border-collapse:collapse;margin:1.2em 0;font-size:.94em}
-.manual-table th,.manual-table td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
-.manual-table th{background:#161616;color:#fff}
-.manual-note{border-left:3px solid var(--accent);background:#131a16;padding:12px 16px;border-radius:0 6px 6px 0}
-.manual-incident{border:1px solid #4a3520;background:#1a1410;border-radius:8px;padding:4px 18px;margin:1.2em 0}
-.manual-steps li{margin:.5em 0}
-.manual-figure{margin:1.6em 0;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#111}
+table.manual-table{width:100%;border-collapse:collapse;margin:1.4em 0;font-size:.95em}
+table.manual-table th,table.manual-table td{border:1px solid var(--line);padding:10px 12px;text-align:left;vertical-align:top}
+table.manual-table th{background:var(--code-bg);color:#000}
+aside.manual-analogy,aside.manual-tip,aside.manual-note,aside.manual-warning{margin:1.4em 0;padding:14px 18px;border-radius:0 8px 8px 0;border-left:4px solid var(--line)}
+aside.manual-analogy strong,aside.manual-tip strong,aside.manual-note strong,aside.manual-warning strong{display:block;margin-bottom:.3em}
+aside.manual-analogy{border-left-color:var(--accent);background:var(--accent-bg)}
+aside.manual-tip{border-left-color:var(--tip-line);background:var(--tip-bg)}
+aside.manual-note{border-left-color:#8a8d93;background:#f4f4f5}
+aside.manual-warning{border-left-color:var(--warn-line);background:var(--warn-bg)}
+ol.manual-steps{padding-left:1.4em}ol.manual-steps li{margin:.5em 0}
+ol.manual-flow{list-style:none;display:flex;flex-wrap:wrap;margin:1.6em 0;padding:0}
+ol.manual-flow li{flex:1 1 0;border:1px solid var(--line);border-radius:8px;padding:14px 16px;background:#fafbfc;position:relative;min-width:140px}
+ol.manual-flow li+li{margin-left:28px}
+ol.manual-flow li+li::before{content:"→";position:absolute;left:-26px;top:50%;transform:translateY(-50%);font-size:1.3em;color:var(--muted)}
+@media (max-width:640px){
+  ol.manual-flow{flex-direction:column}
+  ol.manual-flow li+li{margin-left:0;margin-top:28px}
+  ol.manual-flow li+li::before{content:"↓";left:50%;top:-24px;transform:translateX(-50%)}
+}
+dl.manual-glossary dt{font-weight:700;margin-top:1.1em}
+dl.manual-glossary dd{margin:.2em 0 0}
+div.manual-takeaways{margin:2em 0;padding:16px 20px;border:1px solid var(--line);border-radius:8px;background:#f7f9fa}
+div.manual-takeaways h2{margin-top:0}
+p.manual-next{margin-top:2.2em;padding-top:1em;border-top:1px solid var(--line);font-weight:600}
+.manual-figure{margin:1.6em 0;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fafbfc}
 .manual-figure img{display:block;width:100%}
 /* An uncaptured slot is a production note, not content — the reader sees no
    figure rather than a hatched "pending capture" box. Inert once
@@ -91,11 +112,31 @@ pre code{background:none;padding:0}
    src/index.css. */
 .manual-figure:has(.manual-figure__frame){display:none}
 .manual-figure__frame{display:none}
-figcaption{padding:12px 16px;color:var(--muted);font-size:.88em;display:flex;flex-wrap:wrap;gap:14px}
-.callout{display:inline-flex;align-items:center;justify-content:center;width:1.5em;height:1.5em;border-radius:50%;background:var(--accent);color:#000;font-weight:700;font-size:.8em;margin-right:.4em}
-.toc{border:1px solid var(--line);border-radius:8px;padding:16px 24px;background:#111}
-a{color:#7fc4ff}
+figcaption{padding:12px 16px;color:var(--muted);font-size:.9em;display:flex;flex-wrap:wrap;gap:14px}
+nav.toc{border:1px solid var(--line);border-radius:8px;padding:16px 24px;background:#fafbfc}
+nav.toc h3{margin:1em 0 .3em}nav.toc h3:first-child{margin-top:0}
+nav.toc ol{margin:.3em 0 1em;padding-left:1.4em}
+@media print{
+  body{font-size:12pt}
+  .wrap{max-width:none;padding:0}
+  a{color:inherit;text-decoration:none}
+  aside.manual-analogy,aside.manual-tip,aside.manual-note,aside.manual-warning,
+  ol.manual-flow,div.manual-takeaways,table.manual-table{break-inside:avoid;page-break-inside:avoid}
+  section{break-before:page;page-break-before:always}
+}
 `.trim();
+
+// Groups TOC entries by consecutive runs of the same `part`, preserving
+// manifest order; a chapter with no `part` gets its own ungrouped, headingless run.
+const tocGroups = [];
+for (const c of chapterHtml) {
+  const last = tocGroups[tocGroups.length - 1];
+  if (last && last.part === (c.part ?? null)) last.chapters.push(c);
+  else tocGroups.push({ part: c.part ?? null, chapters: [c] });
+}
+const tocHtml = tocGroups.map(g => `${g.part ? `<h3>${g.part}</h3>` : ''}<ol>${
+  g.chapters.map(c => `<li><a href="#${c.slug}">${c.title}</a></li>`).join('')
+}</ol>`).join('');
 
 const offlineHtml = `<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8"/>
@@ -105,13 +146,11 @@ const offlineHtml = `<!DOCTYPE html>
 <body><div class="wrap">
 <h1>${src.title}</h1>
 <p class="lede">${src.summary}</p>
-<p style="color:#9a9a9a">Version ${src.version} · released ${src.releasedAt} · documents Session Manager v${src.documentsAppVersion}</p>
-<nav class="toc"><strong>Contents</strong><ol>${
-  chapterHtml.map(c => `<li><a href="#${c.slug}">${c.title}</a></li>`).join('')
-}</ol></nav>
+<p style="color:#44464b">Version ${src.version} · released ${src.releasedAt} · documents Session Manager v${src.documentsAppVersion}</p>
+<nav class="toc"><strong>Contents</strong>${tocHtml}</nav>
 ${chapterHtml.map(c => `<section id="${c.slug}">${c.html}</section>`).join('\n')}
-<hr style="border:0;border-top:1px solid #2a2a2a;margin:48px 0 24px"/>
-<p style="color:#666;font-size:.85em">© Bilko.run · Your copy of ${src.title}. Updates for this
+<hr style="border:0;border-top:1px solid #d8dbe0;margin:48px 0 24px"/>
+<p style="color:#44464b;font-size:.85em">© Bilko.run · Your copy of ${src.title}. Updates for this
 edition are free — re-download the latest at bilko.run/manual.</p>
 </div></body></html>`;
 
@@ -193,6 +232,7 @@ async function main() {
     chapters: src.chapters.map(c => ({
       slug: c.slug, title: c.title, blurb: c.blurb,
       ...(c.free ? { free: true } : {}),
+      ...(c.part ? { part: c.part } : {}),
       file: c.file,
       ...(c.figures ? { figures: c.figures } : {}),
     })),

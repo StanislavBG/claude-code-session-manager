@@ -341,13 +341,17 @@ async function archiveOne(slug, ts, cwd) {
  * Injected by index.cjs at registration time (see registerQueueOpsHandlers)
  * so a manual archive can retire any still-runnable queue job for the same
  * slug without queueOps.cjs importing scheduler.cjs (circular — scheduler.cjs
- * already requires queueOps.cjs). No-op until set; the auto-archive path
- * never needs it (selectAutoArchivable only ever selects already-completed
- * jobs).
+ * already requires queueOps.cjs). No-op until set. Only ever invoked when
+ * archiveMany is called with { retire: true } (the default, used by the
+ * manual schedule:archive-prd path) — autoArchiveCompleted passes
+ * { retire: false } because it calls retireCompletedSlugsFn (== scheduler's
+ * retireCompletedSlugs) from inside reconcile(), itself always inside a
+ * mutate() body; retireCompletedSlugs's own mutate() call would then queue
+ * behind the mutate awaiting it and deadlock every tick (2026-09-25 incident).
  */
 let retireCompletedSlugsFn = async () => {};
 
-async function archiveMany(slugs, cwd) {
+async function archiveMany(slugs, cwd, { retire = true } = {}) {
   if (!Array.isArray(slugs) || slugs.length === 0) {
     return { ok: true, archived: 0, archivedTo: null, results: [] };
   }
@@ -362,7 +366,7 @@ async function archiveMany(slugs, cwd) {
   }
   const archived = results.filter((r) => r.ok).length;
   const archivedSlugs = results.filter((r) => r.ok).map((r) => r.slug);
-  if (archivedSlugs.length > 0) {
+  if (retire && archivedSlugs.length > 0) {
     await retireCompletedSlugsFn(archivedSlugs).catch((e) => {
       logs.writeLine({ level: 'warn', scope: 'queueOps', message: 'archiveMany: retireCompletedSlugs failed', meta: { error: e?.message } });
     });
@@ -440,6 +444,13 @@ function selectAutoArchivable(jobs, { nowMs, retentionMs } = {}) {
  * the same path-containment. No-op (without touching disk) when
  * SM_PRD_AUTOARCHIVE_DISABLE=1. Each successful move is logged one line
  * (slug -> dest).
+ *
+ * Passes { retire: false } to archiveMany: this runs inside reconcile(),
+ * which always runs inside a mutate() body or tickBody, so invoking
+ * retireCompletedSlugs (which itself calls mutate()) here would queue that
+ * mutate behind the one already awaiting it and deadlock every tick — proven
+ * live 2026-09-25. Also unneeded on the merits: selectAutoArchivable only
+ * ever selects already-completed jobs, so there is nothing left to retire.
  */
 async function autoArchiveCompleted(state, { nowMs } = {}) {
   if (process.env.SM_PRD_AUTOARCHIVE_DISABLE === '1') {
@@ -450,7 +461,7 @@ async function autoArchiveCompleted(state, { nowMs } = {}) {
   if (slugs.length === 0) {
     return { ok: true, archived: 0, archivedTo: null, results: [] };
   }
-  const result = await archiveMany(slugs);
+  const result = await archiveMany(slugs, undefined, { retire: false });
   for (const r of result.results) {
     if (r.ok) {
       logs.writeLine({

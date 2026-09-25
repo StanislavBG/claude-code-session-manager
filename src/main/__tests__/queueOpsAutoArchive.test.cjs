@@ -5,22 +5,39 @@
  *
  * selectAutoArchivable is pure (no fs) so it's fully covered here without
  * touching disk. autoArchiveCompleted's disk-mutating path (archiveMany) is
- * exercised only via its kill-switch / no-op branches, since archiveMany
- * targets the real ~/.claude/session-manager/scheduled-plans/prds-archived
- * directory (not test-injectable) — mutating that from a test run would be
- * an unwanted side effect on the developer's real filesystem.
+ * mostly exercised only via its kill-switch / no-op branches, since
+ * archiveMany's default destination is not test-injectable — except for the
+ * two retire-flag tests below, which write into PRDS_DIR (a lazy getter
+ * resolved under this run's SM_SCHEDULER_HOME sandbox — see
+ * tests/setup/schedulerSandbox.cjs — so they never touch a real
+ * ~/.claude/session-manager tree) and stub 'electron' via require.cache so
+ * registerQueueOpsHandlers' ipcMain.handle calls are no-ops outside a real
+ * Electron process. 'electron' is an externalized node_modules dependency
+ * under vitest, so vi.mock('electron', ...) never intercepts queueOps.cjs's
+ * own require('electron') — pre-seeding require.cache for its resolved path
+ * is the one hook that reaches it.
  *
  * Run: timeout 300 npx vitest run src/main/__tests__/queueOpsAutoArchive.test.cjs
  */
 
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, afterEach, vi } from 'vitest';
+const fs = require('node:fs');
+const path = require('node:path');
+
+const electronPath = require.resolve('electron');
+require.cache[electronPath] = {
+  id: electronPath,
+  filename: electronPath,
+  loaded: true,
+  exports: { ipcMain: { handle: () => {} } },
+};
 
 const RETENTION_MS = 7 * 24 * 60 * 60_000;
 const NOW = Date.parse('2026-07-24T12:00:00.000Z');
 
-const { selectAutoArchivable, autoArchiveCompleted } = require('../queueOps.cjs');
+const { selectAutoArchivable, autoArchiveCompleted, archiveMany, registerQueueOpsHandlers, PRDS_DIR } = require('../queueOps.cjs');
 
 function fresh(overrides = {}) {
   return {
@@ -151,4 +168,44 @@ test('selectAutoArchivable never selects a slug whose job is still pending or ru
   const completed = old({ slug: '15-done', status: 'completed' });
   const slugs = selectAutoArchivable([pending, running, completed], { nowMs: NOW });
   expect(slugs).toEqual(['15-done']);
+});
+
+// ---------- retire-flag deadlock guard (PRD 1442: reconcile() -> mutate()
+// body -> autoArchiveCompleted -> archiveMany -> retireCompletedSlugsFn ->
+// mutate() re-entered every tick, so mutateTail never settled) ----------
+
+test('autoArchiveCompleted never invokes retireCompletedSlugs', async () => {
+  const slug = 'test-auto-archive-no-retire';
+  fs.mkdirSync(PRDS_DIR, { recursive: true });
+  const src = path.join(PRDS_DIR, `${slug}.md`);
+  fs.writeFileSync(src, '# Goal\n\ntest\n', 'utf8');
+
+  const spy = vi.fn(async () => {});
+  registerQueueOpsHandlers({ retireCompletedSlugs: spy });
+
+  const job = old({ slug, status: 'completed' });
+  const result = await autoArchiveCompleted({ jobs: [job] }, { nowMs: NOW });
+
+  expect(result.archived).toBe(1);
+  expect(fs.existsSync(src)).toBe(false);
+  expect(result.results[0].ok).toBe(true);
+  expect(fs.existsSync(result.results[0].archivedTo)).toBe(true);
+  expect(spy).not.toHaveBeenCalled();
+});
+
+test('manual archiveMany still retires', async () => {
+  const slug = 'test-manual-archive-still-retires';
+  fs.mkdirSync(PRDS_DIR, { recursive: true });
+  const src = path.join(PRDS_DIR, `${slug}.md`);
+  fs.writeFileSync(src, '# Goal\n\ntest\n', 'utf8');
+
+  const spy = vi.fn(async () => {});
+  registerQueueOpsHandlers({ retireCompletedSlugs: spy });
+
+  const result = await archiveMany([slug]);
+
+  expect(result.archived).toBe(1);
+  expect(fs.existsSync(src)).toBe(false);
+  expect(spy).toHaveBeenCalledTimes(1);
+  expect(spy).toHaveBeenCalledWith([slug]);
 });

@@ -1,2 +1,130 @@
 <h1>Around the cockpit — Home, memory, usage, history and more</h1>
-<p class="lede">A guided walk through the rest of the app: dashboards, memory, usage meters, cost history, voice input and publishing.</p>
+
+<p class="lede">Session Manager has more than one screen, and each one earns its place. This
+chapter is a short walk through the rest of the cockpit — where to check on everything at once,
+what your agents remember, how to watch your usage and spending, and how to publish a page for the
+world to see.</p>
+
+<h2>Home and Project Home</h2>
+
+<h3>Home</h3>
+
+<p>Home is the Dashboard — a one-page overview of every project and every Session on your machine.
+Open it and you'll see how many projects you have, which Sessions need your attention, which ones
+are actively running, and a short list of the ones you touched most recently.</p>
+
+<p>Think of Home as your front desk. You don't do your work there — you just check it on your way
+in, so nothing important is waiting for you without your knowledge.</p>
+
+<h3>Project Home</h3>
+
+<p>Switch into a single project's tab, and its Home becomes Project Home instead: a one-page,
+auto-written overview of just that project. Press Generate and an agent reads the project and
+writes the page for you. Press it again later, and the page catches up with whatever changed.</p>
+
+<h2>File Explorer</h2>
+
+<p>File Explorer is the built-in file browser and editor. Open it from Home, and it starts at your
+own computer's home folder. Open it from inside a project tab instead, and it starts right there.
+Browse the folder tree on one side, and open any file to read or edit it on the other — no
+separate app required.</p>
+
+<h2>Memory and the Clusters report</h2>
+
+<h3>Memory</h3>
+
+<p>Memory holds the notes an agent keeps and can read back in a later Session — things it learned
+about your project, your preferences, or work still in progress. Open Memory for a project, and
+you'll see every note saved so far, split by whether it belongs to the whole project or to one
+particular agent.</p>
+
+<h3>The Clusters report</h3>
+
+<p>A pile of separate notes is hard to skim. The Clusters tab groups a project's memory into a
+handful of named, related bundles, so you can see the shape of what your agents know at a glance
+instead of reading every note one by one. It's built from notes already saved on your machine, so
+opening it costs nothing — press Refresh only when you want it to look for new patterns.</p>
+
+<h2>Usage meters and History</h2>
+
+<h3>Usage meters</h3>
+
+<p>Claude Code's usage limits reset on a schedule, and the usage meters show you exactly where you
+stand against them: one meter for your rolling five-hour session window, and separate meters for
+your weekly limits — across all models, and broken out for Opus, Sonnet, and any connected app.
+Each meter shows a percentage used and a countdown to its next reset.</p>
+
+<aside class="manual-analogy"><strong>Think of it like this:</strong> a usage meter is a fuel
+gauge, not a speedometer. It won't slow you down — it just tells you how much room is left before
+a window resets, so a long work session never catches you by surprise.</aside>
+
+<h3>History</h3>
+
+<p>History is a record of past Sessions, with cost and usage over time, gathered across every
+project on your machine. Pick a time range and a measure — spend, tokens, active time, and more —
+and History draws the trend, ranks your projects against each other, and lets you drill into any
+one of them for the detail behind the total.</p>
+
+<h2>Voice input and the recording indicator</h2>
+
+<h3>Voice input</h3>
+
+<p>Voice lets you talk to your agents with your microphone instead of typing. Your speech is
+transcribed on your own machine and turned into text, the same as if you'd typed it yourself.</p>
+
+<h3>The recording indicator</h3>
+
+<p>Whenever your microphone is capturing audio, a red bar appears at the very top of the window
+and says so in plain words. It's deliberately impossible to hide or cover up — a promise that
+you'll always know when Session Manager is listening, with nothing happening quietly in the
+background.</p>
+
+<h2>Simple mode, publishing, and telemetry</h2>
+
+<h3>Simple mode</h3>
+
+<p>Sometimes you don't want a cockpit at all — you just want one terminal. Launch with the
+<code>--simple</code> flag, and Session Manager boots straight into a single terminal in whatever
+folder you launched it from, with none of the navigation, tabs, or configuration screens around
+it. Just you and Claude Code.</p>
+
+<h3>Publishing to bilko.run</h3>
+
+<p>Host on Bilko.run publishes a project's overview page to the public web. You choose which pages
+belong in the bundle, one agent prepares them, and a publishing agent then pushes the bundle live
+on bilko.run. Removing a page from your list doesn't take it down by itself — it comes down the
+next time you publish.</p>
+
+<h3>Anonymous telemetry</h3>
+
+<p>Session Manager reports anonymous usage data back to bilko.run by default — never your prompts,
+your files, or anything that could identify you, only things like which app version you're running
+and roughly how the app gets used. It's on so we can see whether the app is working well for
+people. It is never required for the app to work for you.</p>
+
+<aside class="manual-note"><strong>Good to know:</strong> nothing sent home carries your name,
+your email, your file paths, or anything from inside a Session — the whole point of this data is
+that it can't be traced back to you.</aside>
+
+<p>Turning it off takes one step. In Settings, find the telemetry toggle and switch it off, or
+dismiss the first-run notice with its own "Turn off" button. Running Session Manager from a script
+or a scheduled job instead? Set the environment variable <code>SM_TELEMETRY=0</code>, and it
+overrides everything else, every time.</p>
+
+<div class="manual-takeaways">
+  <h2>What you learned</h2>
+  <ul>
+    <li>Home is the Dashboard for your whole machine; Project Home is the same idea for one
+    project.</li>
+    <li>File Explorer browses and edits any file without leaving the cockpit.</li>
+    <li>Memory keeps what your agents have learned, and the Clusters report groups it into
+    readable bundles.</li>
+    <li>Usage meters track your five-hour and weekly limits; History tracks cost and usage over
+    time.</li>
+    <li>Voice lets you talk to your agents, the recording indicator always tells you when it's
+    listening, and telemetry is anonymous, on by default, and one setting — or
+    <code>SM_TELEMETRY=0</code> — away from off.</li>
+  </ul>
+</div>
+
+<p class="manual-next">Next up: <a href="#good-habits">Good habits — great results, safely</a></p>

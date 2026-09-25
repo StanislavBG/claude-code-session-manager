@@ -1,2 +1,120 @@
 <h1>Your first Session — from idea to working agent</h1>
-<p class="lede">Install the free app, open a project, and hand your agency its first job in about ten minutes.</p>
+
+<p class="lede">This chapter walks you from a blank screen to your agency's first finished job. You'll
+install the free app, open a project, and hand your team a goal in plain English. Ten minutes from
+now, you'll have watched an agent actually work.</p>
+
+<h2>What you need first</h2>
+
+<p>You need one thing before you start: Claude Code itself, installed and signed in. Session
+Manager doesn't replace Claude Code — it wraps it in a cockpit, so the CLI still needs to be
+authenticated with your account before anything can run. If you're not sure, open a terminal and
+run <code>claude login</code>.</p>
+
+<p>Everything else is free. Session Manager itself never asks you to pay, sign up, or unlock a
+tier — you only need Claude Code ready to go. You don't need to know any command-line tricks, and
+you don't need to have written code before. The cockpit is built for a curious first-timer just as
+much as a veteran developer.</p>
+
+<h2>Install and take the tour</h2>
+
+<ol class="manual-steps">
+  <li>Open a terminal and run <code>npx claude-code-session-manager@latest</code>.</li>
+  <li>Wait for the first launch to finish. It downloads Electron once, so the first start takes a
+  minute or two. Every launch after that is fast.</li>
+  <li>The app opens on the Dashboard — one page listing every project and session on your
+  machine.</li>
+</ol>
+
+<p>On that very first launch, a short guided tour opens on its own and points out the pieces of the
+cockpit you'll use most: where projects live, where sessions run, and where to change settings.
+Skim it or skip it — nothing about it is required. You can bring it back whenever you like: press
+<kbd>Cmd-K</kbd> (or <kbd>Ctrl-K</kbd> on Linux) to open the command palette, then choose "Restart
+guided tour."</p>
+
+<h2>Open a project</h2>
+
+<p>Session Manager works on one project folder at a time, and it keeps a separate tab for each one
+you open. Click "Open / Start Project" on the left, then pick the folder you want to work in. If
+the folder doesn't exist yet, the picker's New Folder button starts a brand new one.</p>
+
+<aside class="manual-analogy"><strong>Think of it like this:</strong> a tab is a client file. Your
+agency can juggle several clients at once, but it never mixes up whose work belongs to whom — each
+project gets its own tab, its own history, its own sessions.</aside>
+
+<p>Opening a project you've already worked in just switches back to its tab — you never end up
+with two tabs for the same folder.</p>
+
+<h2>Give your agency its first job</h2>
+
+<p>Inside a project, open its Sessions view and click "+ New Session." A form opens asking for two
+things and a goal.</p>
+
+<ol class="manual-steps">
+  <li>Pick an Agent — the "who." This is which member of your agency runs the session. The
+  architect, the project lead you met last chapter, is a solid first pick for almost anything.</li>
+  <li>Pick a Mission — the "what kind of work." Feature is for building something new, Bug is for
+  fixing something broken, and Discussion is for thinking something through before any code
+  changes.</li>
+  <li>Describe the outcome you want, in your own words, in the goal box.</li>
+  <li>Click "Start Session."</li>
+</ol>
+
+<p>Clicking "Start Session" sends your goal as the agent's very first instruction, and the session
+starts working right away.</p>
+
+<aside class="manual-tip"><strong>Try this:</strong> describe the result you want, not the steps to
+get there. "Add a dark mode toggle to Settings" gives the architect room to plan; "open this file
+and change line 40" doesn't leave it any planning to do. Naming a real constraint — a deadline, a
+file that must not change — helps more than naming a technique.</aside>
+
+<h2>The life of a Session</h2>
+
+<p>Every session moves through the same three stages, in the same order, and it's always in exactly
+one of them.</p>
+
+<table class="manual-table">
+  <thead><tr><th>Stage</th><th>What it means</th></tr></thead>
+  <tbody>
+    <tr><td>Proposed</td><td>Set up but not started. Nothing has run, and nothing has been
+    spent.</td></tr>
+    <tr><td>Active</td><td>Running. It's doing the work and reporting back.</td></tr>
+    <tr><td>Completed</td><td>Finished, with its full history kept for later.</td></tr>
+  </tbody>
+</table>
+
+<p>Clicking "Start Session" moves a new session straight from Proposed to Active in one step. But
+sometimes a session sits as Proposed for a while first — if you close the form before starting it,
+or if one of your agents files a suggestion of its own for you to decide on. A Proposed session
+shows two buttons: "Approve & start," which sends it exactly the way "Start Session" would, and
+"Discard," which cancels it but keeps the record.</p>
+
+<h2>Watch it work</h2>
+
+<p>Once a session is active, you can watch it two ways, and they're both views of the exact same
+conversation — nothing is duplicated or out of sync between them, and switching views never starts
+a second session by accident.</p>
+
+<p>Chat reads like a conversation: your goal, the agent's replies, and its questions, one message at
+a time. It's the friendliest way to follow along, and it's where most first sessions are spent.
+Terminal shows the raw command line underneath, everything the agent is actually typing and
+running, for when you want to see every detail instead of a summary of it. Switch between them with
+the Chat and Terminal buttons at the top of the session. Most of the time, Chat is all you need —
+reach for Terminal when you want to see exactly what's happening underneath.</p>
+
+<div class="manual-takeaways">
+  <h2>What you learned</h2>
+  <ul>
+    <li>You need Claude Code installed and signed in before Session Manager can run anything.</li>
+    <li>Install with one command, then replay the guided tour anytime from the command
+    palette.</li>
+    <li>"Open / Start Project" gives each project its own tab.</li>
+    <li>"+ New Session" asks for an Agent (who), a Mission (what kind of work), and your goal, then
+    "Start Session" sends it.</li>
+    <li>Every session is Proposed, then Active, then Completed — and Chat and Terminal are two
+    views of that one session, never two different ones.</li>
+  </ul>
+</div>
+
+<p class="manual-next">Next up: <a href="#plans-and-scheduler">Work that runs while you're away —
+plans and the Scheduler</a></p>

@@ -47,6 +47,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
+const { AsyncLocalStorage } = require('node:async_hooks');
 const { startDispatchLoop } = require('./lib/dispatchLoop.cjs');
 const schedulerPaths = require('./lib/schedulerPaths.cjs');
 const { randomUUID } = require('node:crypto');
@@ -2477,6 +2478,15 @@ async function writeQueue(state) {
 // preceding mutate threw, so the chain never deadlocks.
 let mutateTail = Promise.resolve();
 
+// Tracks whether the current async continuation is running inside a live
+// mutate() body. A mutate() called (and awaited) from inside another mutate's
+// `fn` would otherwise queue behind its own caller on mutateTail and deadlock
+// forever — this turns that class of bug into an immediate, audited rejection.
+// A callback (setTimeout/promise) scheduled from inside a mutate body but
+// firing AFTER that body has finished sees ctx.active === false and proceeds
+// normally, since AsyncLocalStorage propagates the store into it.
+const mutateCtx = new AsyncLocalStorage();
+
 // Observe-only watchdog: a mutate body over MUTATE_WATCHDOG_MS is logged and
 // audited once per episode (latched until a mutate completes). mutateTail is
 // deliberately NEVER reset — it is what enforces the single-writer law, and
@@ -2485,6 +2495,12 @@ const MUTATE_WATCHDOG_MS = 60_000;
 let mutateWedgeLatched = false;
 
 function mutate(fn) {
+  if (mutateCtx.getStore()?.active === true) {
+    const err = new Error('mutate() re-entered from inside a running mutate body — would deadlock');
+    console.error('[scheduler] MUTATE RE-ENTRANT', err.stack);
+    appendAuditEvent('mutate_reentrant', { stack: String(err.stack).split('\n').slice(0, 8).join('\n') });
+    return Promise.reject(err);
+  }
   const next = mutateTail.then(async () => {
     const wedgeTimer = setTimeout(() => {
       if (mutateWedgeLatched) return;
@@ -2493,9 +2509,11 @@ function mutate(fn) {
       appendAuditEvent('mutate_wedged', { budgetMs: MUTATE_WATCHDOG_MS });
     }, MUTATE_WATCHDOG_MS);
     if (typeof wedgeTimer.unref === 'function') wedgeTimer.unref();
+    const ctx = { active: true };
     try {
-      return await mutateBody(fn);
+      return await mutateCtx.run(ctx, () => mutateBody(fn));
     } finally {
+      ctx.active = false;
       clearTimeout(wedgeTimer);
       mutateWedgeLatched = false;
     }
@@ -12884,6 +12902,7 @@ module.exports = {
   computeDegradedBudget,
   healRefusalReason,
   writeQueue,
+  _mutateForTests: mutate, // mutate() has no other exported call site; test-only seam.
   reconcile,
   broadcast,
   reconcileSourcePromptId,

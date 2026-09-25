@@ -126,3 +126,30 @@ function contrast(a, b) {
   untracked `node_modules` present) and `git -C ~/Projects/Bilko branch -d manual-v2` — both
   removed.
 - Gate: `timeout 60 curl -fsS https://bilko.run/api/manual/toc | grep -q 2.0.0` — pass.
+
+## manual-date-fix — release date timezone off-by-one
+
+- **Bug:** the live reader showed "released 9/24/2026" for `releasedAt: "2026-09-25"` — a
+  date-only ISO string parses as UTC midnight, so `new Date(toc.releasedAt).toLocaleDateString()`
+  rendered the previous day in every US timezone (the same off-by-one 1.10.1 had).
+- **Fix:** `shared/manual-catalog.ts` gains `formatManualReleaseDate(isoDate)` —
+  `new Date(isoDate).toLocaleDateString(undefined, { timeZone: 'UTC' })`, which never shifts the
+  day. `src/pages/ManualPage.tsx:194` now calls it instead of formatting `releasedAt` directly;
+  `grep -rn "new Date(.*releasedAt" src server` found no other unshifted use.
+- **Test:** `tests/manual.test.ts` — under `TZ=America/Los_Angeles`,
+  `formatManualReleaseDate('2026-09-25')` contains `'25'` and not `'24'`.
+- Merge: worktree `~/Projects/Bilko-manual-date-fix` on branch `manual-date-fix` (from
+  `origin/main`, `node_modules` symlinked) — `git fetch origin` (already up to date), commit
+  `09c7244` "fix(manual): release date renders without timezone shift", then on `~/Projects/Bilko`
+  `main`: `git fetch origin` (already up to date), `git merge --ff-only origin/main` (no-op),
+  `git merge --no-edit manual-date-fix` — fast-forwarded (no merge commit needed), no conflict
+  with the repo's pre-existing shared-dirty foreign WIP (`public/outdoor-hours/*`).
+- **Push SHA:** `09c7244` (`94635fd..09c7244  main -> main`).
+- Cleanup: `git worktree remove --force ~/Projects/Bilko-manual-date-fix` and
+  `git branch -d manual-date-fix` — both removed.
+- Deploy: polled the page's asset bundle hash every 20s; changed from `index-I80ZawDX.js` to
+  `index-BwMuAhBn.js` ~1 minute after push.
+- Live verification (headless Playwright chromium, `https://bilko.run/products/session-manager/manual`):
+  page text reads `"released 9/25/2026 · documents Session Manager v0.97.0"`.
+- Gate: `cd ~/Projects/Bilko && TZ=America/Los_Angeles timeout 300 npx vitest run tests/manual.test.ts`
+  — 11/11 passed.

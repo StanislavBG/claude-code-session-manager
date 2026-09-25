@@ -88,3 +88,16 @@ function contrast(a, b) {
 - **Verification:** `cd ~/Projects/Bilko-manual-v2 && npm run typecheck` — passed;
   `npx vitest run tests/manual.test.ts` — 10/10 passed, including the new part-passthrough
   assertion.
+
+## mv2-40 — release bundle build
+
+- **Commit:** `034f46c` — "manual: Field Manual 2.0.0 release bundle" (worktree
+  `~/Projects/Bilko-manual-v2`, not pushed; mv2-50 merges + pushes after validation).
+- **Files touched:** `data/manual/releases/2.0.0/` (13 chapter files, `manifest.json`,
+  `field-manual-2.0.0.html`, `field-manual-2.0.0.pdf`, `figures/`).
+- **What changed:** built the 2.0.0 release from `session-manager-operations/manual/`
+  (`releasedAt: 2026-09-25`, `documentsAppVersion: 0.97.0`, both already current — no source edit
+  needed) via `node web/manual/build.mjs --out ~/Projects/Bilko-manual-v2/data/manual/releases`.
+- **Verification:** `npm run manual:readability` — exit 0, all 13 chapters 900–1,600 words;
+  `timeout 120 npx vitest run web/manual/__tests__` — 14/14 passed; `cd ~/Projects/Bilko-manual-v2
+  && timeout 300 npx vitest run tests/manual.test.ts` — 14/14 passed.

@@ -1,2 +1,144 @@
 <h1>Work that runs while you're away — plans and the Scheduler</h1>
-<p class="lede">How a big idea becomes small work orders, and how the Scheduler runs them in the background around your usage limits.</p>
+
+<p class="lede">A big idea doesn't run as one giant task. The architect turns it into small,
+written work orders, and the Scheduler runs them in the background, in order, while you do
+something else. This chapter shows you how that work order is written, and how the Scheduler
+decides what to run and when.</p>
+
+<h2>A work order is a written contract</h2>
+
+<p>When you ask the architect to build something, it doesn't just start typing. It writes a work
+order first — a short, plain document with four parts, so a dev-lead can pick it up later and know
+exactly what to do.</p>
+
+<table class="manual-table">
+  <thead><tr><th>Part</th><th>What it holds</th></tr></thead>
+  <tbody>
+    <tr><td>Goal</td><td>One sentence: what this piece of work is for.</td></tr>
+    <tr><td>Checklist</td><td>How to know the work is actually done — checks a dev-lead can run
+    without you in the room.</td></tr>
+    <tr><td>Notes</td><td>Where to look, what already exists, anything the dev-lead shouldn't have
+    to guess.</td></tr>
+    <tr><td>What not to do</td><td>The edges of the job — what's deliberately left for a later work
+    order, or left alone entirely.</td></tr>
+  </tbody>
+</table>
+
+<p>That checklist has to be something a dev-lead can check on its own, with no screen to look at
+and no mouse to click. "Open the app and try it" isn't a checklist item — a dev-lead can't do
+that. "Run this test and it passes" is.</p>
+
+<aside class="manual-analogy"><strong>Think of it like this:</strong> a work order is a work
+ticket you'd hand a contractor who won't be in the room while they build — everything they need
+is on the ticket, because you won't be there to answer questions.</aside>
+
+<h2>From your idea to a queue of work orders</h2>
+
+<p>You bring the architect an idea, in your own words — a bug to fix, a feature to add. The
+architect asks about anything unclear, then splits the idea into several small work orders,
+usually so each one is small enough to finish on its own. You'll typically hear this called
+<code>/develop</code> when you type it directly, but saying what you want works just as well —
+the architect is always the one doing the planning.</p>
+
+<p>Each work order then joins the Scheduler's queue for your project, ready to run. Some work
+orders need another one to finish first — a work order can say it depends on an earlier one, and
+the Scheduler always waits for that dependency before starting it. Nothing else decides the
+order; two work orders with no dependency between them can run in any order, including at the
+same time.</p>
+
+<h2>Its own copy of your project</h2>
+
+<p>Each work order that runs gets its own copy of your project to work in, so two work orders
+running at the same time never step on each other's changes. When a work order finishes cleanly,
+its result is folded back into your real project.</p>
+
+<aside class="manual-note"><strong>Good to know:</strong> this is why two work orders can safely
+run at once even when they touch the same project — each one is working in its own copy until it's
+done.</aside>
+
+<h2>How many run at once</h2>
+
+<p>Every Claude Code job on your machine — Scheduler work and Chat conversations alike — draws
+from one shared, machine-wide limit, so your laptop is never asked to run more agents than it can
+actually handle. You can raise or lower that limit from the Home tab. Set it to zero and nothing
+new starts, without touching anything already running.</p>
+
+<p>Claude Code itself has a usage limit that resets every few hours. When you're close to that
+limit, the Scheduler pauses on its own rather than firing work orders that would fail — and picks
+back up by itself once your usage window resets. You can also pause it yourself at any time.</p>
+
+<h2>A job's life</h2>
+
+<p>Here's what one work order goes through, from the moment it's written to the moment it's
+done:</p>
+
+<ol class="manual-flow">
+  <li><strong>The architect</strong> writes the work order and adds it to the queue.</li>
+  <li><strong>The Scheduler waits</strong> for a free slot and for any dependency to finish
+  first.</li>
+  <li><strong>A dev-lead runs it</strong> in its own copy of the project, in the background.</li>
+  <li><strong>It reports back</strong> — done, stuck, or with a question for you.</li>
+  <li><strong>Its result</strong> is folded back into your real project.</li>
+</ol>
+
+<h2>Reading a work order's status</h2>
+
+<p>Every work order in the queue carries one status, in plain words:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Status</th><th>What it means</th></tr></thead>
+  <tbody>
+    <tr><td>Pending</td><td>Waiting its turn — for a free slot, or for a dependency to finish
+    first.</td></tr>
+    <tr><td>Running</td><td>A dev-lead is working on it right now, in its own copy of your
+    project.</td></tr>
+    <tr><td>Completed</td><td>Done, and folded back into your project.</td></tr>
+    <tr><td>Failed</td><td>It ran and didn't finish successfully. The Scheduler will usually give
+    it another try on its own.</td></tr>
+    <tr><td>Needs review</td><td>Stopped with a question only you can answer — not a failure.</td></tr>
+  </tbody>
+</table>
+
+<p>Needs review is worth pausing on, because it's easy to mistake for a failure. It isn't one. A
+dev-lead reached a fork it genuinely can't choose for you — maybe the work order was unclear, or
+it found something that changes the plan — and it stopped rather than guess. That question comes
+back to you in the Session that wrote the work order, so you can answer it and let the work
+continue.</p>
+
+<aside class="manual-warning"><strong>Watch out:</strong> a work order stuck in Needs review isn't
+going anywhere until you answer it. If it's blocking others that depend on it, answering it
+promptly keeps the rest of the queue moving.</aside>
+
+<h2>Taking the wheel: Pause, Resume, and Run now</h2>
+
+<p>Three controls in the Scheduler let you step in whenever you want:</p>
+
+<ol class="manual-steps">
+  <li><strong>Pause</strong> stops new work orders from starting. Anything already running keeps
+  running — Pause never kills work mid-flight.</li>
+  <li><strong>Resume</strong> clears a pause, whether you set it or the Scheduler paused itself on
+  a usage limit, and lets the queue start firing again right away.</li>
+  <li><strong>Run now</strong> fires the next ready work order immediately, instead of waiting for
+  the Scheduler's own timing.</li>
+</ol>
+
+<aside class="manual-tip"><strong>Try this:</strong> open the Scheduler tab and look at a single
+work order's status. You'll see it move from Pending to Running to Completed — usually without
+you touching anything at all.</aside>
+
+<div class="manual-takeaways">
+  <h2>What you learned</h2>
+  <ul>
+    <li>A work order is a written contract: a goal, a checklist, notes, and what not to do.</li>
+    <li>The architect turns your idea into small work orders and queues them for you.</li>
+    <li>The Scheduler runs them one after another, waiting only when a work order depends on an
+    earlier one, each in its own copy of your project.</li>
+    <li>A machine-wide limit caps how many run at once, and the Scheduler pauses and resumes on
+    its own around your usage limits.</li>
+    <li>Pending, Running, Completed, Failed, and Needs review — and Needs review is a question,
+    not a failure.</li>
+  </ul>
+</div>
+
+<p class="manual-next">Next up: <a href="#checking-the-work">Trust, but verify — how the work gets
+checked</a></p>

@@ -1,2 +1,120 @@
 <h1>What is an AI agent?</h1>
-<p class="lede">The difference between a chatbot that answers and an agent that gets things done — and the four parts every agent is made of.</p>
+
+<p class="lede">A chatbot answers a question and stops. An agent takes a goal, does the work
+itself, and keeps going until the job is finished. This chapter shows you the difference, and
+the four parts every agent is built from.</p>
+
+<h2>A chatbot answers. An agent acts.</h2>
+
+<p>A chatbot listens to you, thinks, and replies with words. That's the whole exchange. It never
+leaves the conversation to touch anything in the real world.</p>
+
+<p>An agent is different. Give it a goal, and it can look at your files, change them, and run
+commands on your computer. Claude Code — the command-line tool this manual is about — works this
+way. It reads your project, edits files, and runs commands to get real work done.</p>
+
+<p>That's a bigger deal than it sounds. A chatbot might describe how to fix a bug in words. An
+agent opens the file, fixes the bug, runs the tests, and tells you it's done.</p>
+
+<h2>The agent loop: look, think, act, check, repeat</h2>
+
+<p>An agent doesn't finish a job in one step. It moves through a loop, again and again, until the
+job is actually done.</p>
+
+<ol class="manual-flow">
+  <li><strong>Look.</strong> It reads what's there right now — your files, a command's output, or
+  an error message.</li>
+  <li><strong>Think.</strong> It decides what to do next, based on the goal you gave it.</li>
+  <li><strong>Act.</strong> It makes a move: edits a file, runs a command, or reads something new.</li>
+  <li><strong>Check.</strong> It looks at what happened. Did that work? Is the goal met yet?</li>
+  <li><strong>Repeat.</strong> If the job isn't done, it loops back to Look and keeps going.</li>
+</ol>
+
+<p>This loop is why an agent can carry out a real task instead of just answering a single
+question. It keeps working, step by step, until it reaches the goal or needs your help.</p>
+
+<h2>The four parts of every agent</h2>
+
+<p>Every AI agent, including Claude Code, is built from four parts. Picture a new employee on
+their first day, and each part matches something you'd hand them.</p>
+
+<table class="manual-table">
+  <thead><tr><th>Part</th><th>What it does</th></tr></thead>
+  <tbody>
+    <tr><td>Model</td><td>The brain. It reads the goal and decides what to do next.</td></tr>
+    <tr><td>Tools</td><td>The hands. They let the agent read files, write files, and run
+    commands.</td></tr>
+    <tr><td>Instructions</td><td>The job description. Your rules and goals, written down for the
+    agent to follow.</td></tr>
+    <tr><td>Context and memory</td><td>The notebook and desk. Everything the agent can currently
+    see and recall.</td></tr>
+  </tbody>
+</table>
+
+<aside class="manual-analogy"><strong>Think of it like this:</strong> a new hire needs a brain to
+make decisions, hands to do the work, a job description to know what's expected, and a desk with
+notes to track where they left off. Take away any one part, and the other three can't finish the
+job alone.</aside>
+
+<p>Context and memory deserve a closer look, because they have a limit. An agent can only hold so
+much on its desk at once — file contents, your instructions, and everything said so far in the
+conversation. When that space fills up, older material gets summarized to make room. That's why
+a long conversation can sometimes act like it's forgotten something you said an hour ago.</p>
+
+<h2>What agents are good at — and where they struggle</h2>
+
+<p>Agents are strong at exactly the kind of work that wears people down: reading a lot of code
+quickly, following a repeatable process step by step, and working through a long list of small
+fixes without losing patience. A fiftieth file gets the same care as the first.</p>
+
+<p>They're weaker where judgment and outside context matter. An agent can't read your mind, so a
+vague goal like "make this better" gives it too little to work with. It also can't know whether a
+decision is right for your business or your users — only whether the code runs. And it doesn't
+automatically carry today's conversation into tomorrow's. Something it needs to remember has to be
+written down, so a later Session can read it back.</p>
+
+<h2>Why you stay in charge</h2>
+
+<p>Handing real actions to a program on your computer only works if you trust what it's allowed to
+do. Claude Code builds that trust in with permissions.</p>
+
+<p>Reading files to understand your project never needs your approval. But before Claude Code runs
+a command or changes a file, it stops and asks you first. You can approve it once, or tell it to
+always allow that exact action from then on, so it stops asking for the same thing again.</p>
+
+<aside class="manual-tip"><strong>Try this:</strong> read what an agent is about to do before you
+approve it. That single pause is where you're actually in charge.</aside>
+
+<p>Approving an action in the moment isn't the whole job. Read the changes an agent makes, run its
+tests, and check that the result actually meets the goal you gave it. <a
+href="#checking-the-work">Trust, but verify</a> covers this in full.</p>
+
+<h2>What it costs: tokens and usage limits</h2>
+
+<p>None of this runs for free. Every time an agent reads a file, thinks through a step, or writes
+a reply, it's processing tokens — small pieces of text, each a few letters long. Tokens are the
+unit Claude Code's usage is measured in.</p>
+
+<p>Your plan includes a usage allowance that renews on a regular schedule, and a meter that tracks
+how much of it you've used. A short, focused task uses a small slice of that allowance. A long
+conversation that drags on for hours, especially one juggling a lot of file content, uses far
+more — an agent re-reads its whole conversation every time it takes another step.</p>
+
+<p>Keeping tasks focused, and starting a fresh Session when you move to unrelated work, is the
+easiest way to keep that meter moving slowly.</p>
+
+<div class="manual-takeaways">
+  <h2>What you learned</h2>
+  <ul>
+    <li>A chatbot only answers; an agent reads, writes, and runs commands to get a job done.</li>
+    <li>An agent works in a loop — look, think, act, check, repeat — until the goal is met.</li>
+    <li>Every agent has four parts: a model (brain), tools (hands), instructions (job
+    description), and context and memory (notebook and desk).</li>
+    <li>Agents are strong at repeatable, well-defined work, and weaker at judgment calls and vague
+    goals.</li>
+    <li>Permissions and reviewing the work keep you in charge, and tokens are the meter that
+    tracks what it costs.</li>
+  </ul>
+</div>
+
+<p class="manual-next">Next up: <a href="#claude-code-basics">Claude Code in plain English</a></p>

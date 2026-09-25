@@ -101,3 +101,28 @@ function contrast(a, b) {
 - **Verification:** `npm run manual:readability` — exit 0, all 13 chapters 900–1,600 words;
   `timeout 120 npx vitest run web/manual/__tests__` — 14/14 passed; `cd ~/Projects/Bilko-manual-v2
   && timeout 300 npx vitest run tests/manual.test.ts` — 14/14 passed.
+
+## mv2-50 — shipped live
+
+- Precondition: `session-manager-operations/reviews/validation/the-manual-needs-to-be-redone-delete-and-start-o-3ba80794/validate-manual-v2.md`
+  — all 19 PRDs VERIFIED, no Critical/Important findings (one Minor doc-count discrepancy, not a
+  code defect), `SCHEDULER_VERDICT: PASS`.
+- Merge: `~/Projects/Bilko` on `main` — `git fetch origin` (already up to date, 0 ahead/0 behind),
+  `git merge --ff-only origin/main` (no-op), then `git merge --no-edit manual-v2` — clean merge,
+  no conflicts with the repo's pre-existing shared-dirty foreign WIP (`public/outdoor-hours/*`,
+  `session-manager-operations/*`), commit `94635fd` "Merge branch 'manual-v2'".
+- **Push SHA:** `94635fd` (`e0241d8..94635fd  main -> main`).
+- Deploy: polled `https://bilko.run/api/manual/toc` every 30s; version flipped from `1.10.1` to
+  `2.0.0` at 23:19:46 UTC, ~1.5 minutes after push.
+- Live verification (headless Playwright chromium via MCP, signed-out session,
+  `https://bilko.run/products/session-manager/manual`):
+  - Welcome chapter rendered with h1 contrast 13.73:1 and body-text contrast 9.56:1 against the
+    page background (`#2d2520`/`#4a3d33` on `#f9f4ec`) — both clear the 4.5:1 AA threshold.
+  - `#meet-your-agency` shows the locked state: "This chapter is part of the paid manual. Unlock
+    all 13 chapters for $19.99." with a "Sign in to unlock" button.
+  - Screenshots: `session-manager-operations/manual/RELEASE-2.0.0-live/welcome-chapter-signed-out.png`,
+    `session-manager-operations/manual/RELEASE-2.0.0-live/meet-your-agency-locked.png`.
+- Cleanup: `git -C ~/Projects/Bilko worktree remove --force ~/Projects/Bilko-manual-v2` (only
+  untracked `node_modules` present) and `git -C ~/Projects/Bilko branch -d manual-v2` — both
+  removed.
+- Gate: `timeout 60 curl -fsS https://bilko.run/api/manual/toc | grep -q 2.0.0` — pass.

@@ -372,4 +372,70 @@ describe('evaluateDispatchLiveness', () => {
     assert.equal(evaluateDispatchLiveness(null, now).dead, false);
     assert.equal(evaluateDispatchLiveness({ ts: now }, now).dead, false);
   });
+
+  const wedgedDeadMs = 10 * 60_000;
+
+  test('wedged + stale lastDispatchAttemptAt → tick-wedged dead', () => {
+    const e = base();
+    e.dispatch.lastTickReason = 'wedged';
+    e.dispatch.lastDispatchAttemptAt = new Date(now - wedgedDeadMs - 60_000).toISOString();
+    assert.deepEqual(
+      evaluateDispatchLiveness(e, now, { deadMs, wedgedDeadMs }),
+      { dead: true, reason: 'tick-wedged' },
+    );
+  });
+
+  test('wedged but recent attempt → not dead', () => {
+    const e = base();
+    e.dispatch.lastTickReason = 'wedged';
+    e.dispatch.lastDispatchAttemptAt = new Date(now - 60_000).toISOString();
+    // Also clear the unrelated dispatch-dead conditions so a recent wedged
+    // attempt reads as genuinely alive, not merely falling through to a
+    // different dead reason.
+    e.dispatch.lastRunAt = new Date(now - 60_000).toISOString();
+    assert.equal(evaluateDispatchLiveness(e, now, { deadMs, wedgedDeadMs }).dead, false);
+  });
+
+  test('wedged while paused → paused (not dead)', () => {
+    const e = base();
+    e.dispatch.lastTickReason = 'wedged';
+    e.dispatch.lastDispatchAttemptAt = new Date(now - wedgedDeadMs - 60_000).toISOString();
+    e.dispatch.paused = true;
+    assert.deepEqual(
+      evaluateDispatchLiveness(e, now, { deadMs, wedgedDeadMs }),
+      { dead: false, reason: 'paused' },
+    );
+  });
+
+  test('wedged with pendingDispatchable 0 still dead (the 2026-09-25 shape)', () => {
+    const e = base();
+    e.dispatch.lastTickReason = 'wedged';
+    e.dispatch.lastDispatchAttemptAt = new Date(now - wedgedDeadMs - 60_000).toISOString();
+    e.dispatch.pendingDispatchable = 0;
+    assert.deepEqual(
+      evaluateDispatchLiveness(e, now, { deadMs, wedgedDeadMs }),
+      { dead: true, reason: 'tick-wedged' },
+    );
+  });
+
+  test('wedged with unparseable lastDispatchAttemptAt → tick-wedged dead', () => {
+    const e = base();
+    e.dispatch.lastTickReason = 'wedged';
+    e.dispatch.lastDispatchAttemptAt = null;
+    assert.deepEqual(
+      evaluateDispatchLiveness(e, now, { deadMs, wedgedDeadMs }),
+      { dead: true, reason: 'tick-wedged' },
+    );
+  });
+
+  test('default wedgedDeadMs is 10 min', () => {
+    const e = base();
+    e.dispatch.lastTickReason = 'wedged';
+    e.dispatch.lastDispatchAttemptAt = new Date(now - 9 * 60_000).toISOString();
+    assert.equal(evaluateDispatchLiveness(e, now, { deadMs }).reason, 'dispatch-dead');
+    const e2 = base();
+    e2.dispatch.lastTickReason = 'wedged';
+    e2.dispatch.lastDispatchAttemptAt = new Date(now - 11 * 60_000).toISOString();
+    assert.deepEqual(evaluateDispatchLiveness(e2, now, { deadMs }), { dead: true, reason: 'tick-wedged' });
+  });
 });

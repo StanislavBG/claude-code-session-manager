@@ -96,19 +96,28 @@ function heartbeatFresh(heartbeatPath = schedulerPaths.heartbeatPath(), maxAgeMs
 }
 
 const DEFAULT_DISPATCH_DEAD_MS = 30 * 60_000;
+const DEFAULT_TICK_WEDGED_DEAD_MS = 10 * 60_000;
 
 /**
- * evaluateDispatchLiveness(entry, now, { deadMs }?) → { dead, reason }
+ * evaluateDispatchLiveness(entry, now, { deadMs, wedgedDeadMs }?) → { dead, reason }
  *
  * Pure. Observability only — a logically-dead scheduler (wedged tick chain,
  * leaked slots) still writes fresh heartbeats, so freshness alone can't see
- * it. `dead` only when ALL hold: heartbeat fresh (not degraded, within
- * DEFAULT_MAX_AGE_MS), dispatch.lastRunAt older than deadMs (absent/unparseable
- * counts as older), pendingDispatchable > 0, runningCount === 0, not paused.
+ * it. `dead` when EITHER:
+ *   - dispatch.lastTickReason === 'wedged' and lastDispatchAttemptAt is
+ *     older than wedgedDeadMs (absent/unparseable counts as older) — a
+ *     wedged reconcile never derives rows, so pendingDispatchable stays 0
+ *     and the rule below can never fire (2026-09-25: watchdog logged
+ *     'alive'/'nothing-dispatchable' every 3 min through a 30+ min mutate
+ *     deadlock because of exactly this gap); or
+ *   - ALL of: dispatch.lastRunAt older than deadMs (absent/unparseable
+ *     counts as older), pendingDispatchable > 0, runningCount === 0.
+ * Both rules require: heartbeat fresh (not degraded, within
+ * DEFAULT_MAX_AGE_MS) and not paused/draining.
  * Callers must NOT relaunch on this: the process is alive, and a relaunch
  * would spawn a second app on top of it.
  */
-function evaluateDispatchLiveness(entry, now = Date.now(), { deadMs = DEFAULT_DISPATCH_DEAD_MS } = {}) {
+function evaluateDispatchLiveness(entry, now = Date.now(), { deadMs = DEFAULT_DISPATCH_DEAD_MS, wedgedDeadMs = DEFAULT_TICK_WEDGED_DEAD_MS } = {}) {
   if (!entry || entry.degraded === true || typeof entry.ts !== 'number') {
     return { dead: false, reason: 'no-fresh-heartbeat' };
   }
@@ -117,6 +126,12 @@ function evaluateDispatchLiveness(entry, now = Date.now(), { deadMs = DEFAULT_DI
   if (!d || typeof d !== 'object') return { dead: false, reason: 'no-dispatch-field' };
   if (d.paused) return { dead: false, reason: 'paused' };
   if (d.drain) return { dead: false, reason: 'draining' };
+  if (d.lastTickReason === 'wedged') {
+    const lastAttemptMs = Date.parse(d.lastDispatchAttemptAt ?? '');
+    if (!Number.isFinite(lastAttemptMs) || now - lastAttemptMs > wedgedDeadMs) {
+      return { dead: true, reason: 'tick-wedged' };
+    }
+  }
   if (!(d.pendingDispatchable > 0)) return { dead: false, reason: 'nothing-dispatchable' };
   if (d.runningCount !== 0) return { dead: false, reason: 'jobs-running' };
   const lastRunMs = Date.parse(d.lastRunAt ?? '');
@@ -461,6 +476,7 @@ module.exports = {
   maybeRelaunchApp,
   DEFAULT_MAX_AGE_MS,
   DEFAULT_DISPATCH_DEAD_MS,
+  DEFAULT_TICK_WEDGED_DEAD_MS,
   DEFAULT_LOCK_STALE_MS,
   DEFAULT_FINALIZE_BUDGET_MS,
   DEFAULT_RELAUNCH_DEBOUNCE_MS,

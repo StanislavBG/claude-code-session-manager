@@ -1,2 +1,114 @@
 <h1>Claude Code in plain English</h1>
-<p class="lede">The building blocks of Claude Code — sessions, house rules, skills, tools and permissions — explained without the jargon.</p>
+
+<p class="lede">Claude Code is the command-line tool that does the real work: reading files,
+writing code, and running commands inside one project folder. This chapter walks through its
+core pieces — Sessions, house rules, skills, and more — in plain English, since every later
+chapter in this manual builds on these same words.</p>
+
+<h2>It lives in your project folder</h2>
+
+<p>Claude Code is a program you start from the terminal, and everything it does happens inside
+one project folder on your computer. It reads the files that are actually there, edits them, and
+runs commands, instead of guessing at a project it can't see.</p>
+
+<p>Each time you start it, Claude Code begins a fresh conversation. That one back-and-forth,
+from a goal to a finished result, is a Session — this manual's word for one job you hand it.
+Session Manager keeps every Session on record, so you can reopen an old one and pick up where you
+left off instead of explaining the project again. That's called resuming, and it works because
+the full conversation history was saved the first time.</p>
+
+<aside class="manual-tip"><strong>Try this:</strong> resuming isn't just a Session Manager
+feature — Claude Code's own terminal supports it too. Run <code>claude --continue</code> to reopen
+your most recent conversation in a project folder, right where it left off.</aside>
+
+<h2>House rules: instructions, settings, and permissions</h2>
+
+<p>A file named <code>CLAUDE.md</code> holds the standing instructions you'd otherwise repeat
+every conversation: your conventions, your build commands, what "done" looks like here. Claude
+Code reads it automatically at the start of every Session, so you only have to write a rule
+once.</p>
+
+<aside class="manual-analogy"><strong>Think of it like this:</strong> CLAUDE.md is the employee
+handbook you hand a new hire on day one. It tells every Session your standing rules before it
+does anything else, so nobody has to ask twice.</aside>
+
+<p>Settings holds the rest of the machine-level choices: which commands run without asking,
+which outside tools are connected, and what model runs by default. It lives in a small set of
+files, each scoped to just you, to one project, or to your whole machine, so a rule can apply
+everywhere or only where you put it.</p>
+
+<p>Permissions decide what Claude Code may do without stopping to ask you first. Reading a file
+to understand your project never needs approval. Before it runs a command or changes a file, it
+pauses and asks — and you can approve that one action, or tell it to always allow that exact
+thing from now on.</p>
+
+<h2>New tricks: skills and slash commands</h2>
+
+<p>A skill is a packaged set of instructions Claude Code can load for one kind of task: how your
+team reviews a pull request, how you deploy to staging, how a commit message should read. Write a
+clear description for it, and Claude Code loads the skill on its own whenever your request
+matches — no typing required.</p>
+
+<p>A slash command works the other way: you type <code>/name</code> yourself, and only that
+loads it. Some slash commands ship with Claude Code, like <code>/model</code>; others are skills
+you or your team wrote, meant to be typed rather than left to fire on their own. Either kind lives
+as a file you can read, edit, and share.</p>
+
+<h2>Reaching outside: MCP Servers and Hooks</h2>
+
+<p>MCP Servers connect Claude Code to tools outside your project folder — a ticket tracker, a
+database, a design file — so it can read and act on real, current information instead of you
+pasting it in by hand.</p>
+
+<p>Hooks are small scripts that run automatically at a specific moment: before a command runs,
+after a file changes, when a Session starts. Use one to enforce a rule Claude Code can't talk
+itself out of, like blocking a risky command outright, or to react the instant something
+happens.</p>
+
+<h2>Building your own agent: subagents and choosing a model</h2>
+
+<p>A subagent is a specialized helper you define once — its own instructions, its own allowed
+tools, sometimes its own model — and call on for one particular kind of task. It works in its own
+space, so a long, noisy job, like reading through hundreds of test results, doesn't crowd out
+your main conversation.</p>
+
+<p>Claude Code can run on more than one Claude model, and you choose which one a Session uses.
+A lighter, faster model suits a quick, well-defined task. A more capable model earns its keep on
+a hard problem that needs careful judgment. You can set a default and switch mid-conversation
+whenever the job changes.</p>
+
+<h2>Where to find each of these in Session Manager</h2>
+
+<p>Claude Code reads all of this straight from files on your computer — Session Manager doesn't
+invent a second copy of any of it. Each screen below is an editor over the real file, and each
+links to the chapter that covers it in depth.</p>
+
+<table class="manual-table">
+  <thead><tr><th>Claude Code building block</th><th>Where it lives in Session Manager</th><th>Read more</th></tr></thead>
+  <tbody>
+    <tr><td>Sessions &amp; resuming</td><td>Sessions</td><td><a href="#first-session">Your first Session</a></td></tr>
+    <tr><td>CLAUDE.md house rules</td><td>System Prompt</td><td><a href="#house-rules">House rules</a></td></tr>
+    <tr><td>Settings &amp; permission rules</td><td>Settings, Permissions</td><td><a href="#house-rules">House rules</a></td></tr>
+    <tr><td>Skills &amp; slash commands</td><td>Skills</td><td><a href="#new-abilities">New abilities</a></td></tr>
+    <tr><td>MCP servers</td><td>MCP Servers</td><td><a href="#new-abilities">New abilities</a></td></tr>
+    <tr><td>Hooks</td><td>Hooks</td><td><a href="#new-abilities">New abilities</a></td></tr>
+    <tr><td>Custom agents (subagents)</td><td>Agent Library</td><td><a href="#agents-and-missions">Shaping your team</a></td></tr>
+    <tr><td>Choosing a model</td><td>Settings, Agent Library</td><td><a href="#agents-and-missions">Shaping your team</a></td></tr>
+  </tbody>
+</table>
+
+<div class="manual-takeaways">
+  <h2>What you learned</h2>
+  <ul>
+    <li>Claude Code runs from the terminal, working inside one project folder at a time.</li>
+    <li>A Session is one conversation, and resuming reopens its full history instead of starting
+    over.</li>
+    <li>CLAUDE.md, Settings, and Permissions are Claude Code's house rules — what it always knows,
+    and what it may do without asking.</li>
+    <li>Skills load themselves automatically; slash commands only run when you type them.</li>
+    <li>MCP Servers, Hooks, subagents, and your choice of model round out what Claude Code can
+    reach, react to, and think with.</li>
+  </ul>
+</div>
+
+<p class="manual-next">Next up: <a href="#meet-your-agency">Meet your agency</a></p>

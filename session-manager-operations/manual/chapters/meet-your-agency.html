@@ -1,2 +1,124 @@
 <h1>Meet your agency — the team that works for you</h1>
-<p class="lede">Session Manager gives you a small team of AI agents: a planner, builders and a checker. Here's who does what, and why a team beats a single assistant.</p>
+
+<p class="lede">Session Manager isn't one assistant. It's a small agency of AI agents, and you're
+the client who hires them. This chapter introduces the team, what each member actually does, and
+why splitting the work up beats handing it all to one assistant.</p>
+
+<h2>Your own small agency</h2>
+
+<p>Picture a small creative agency. A client brings an idea. A project lead turns that idea into a
+plan and hands out pieces of it. Builders each take one piece and finish it. Someone else checks
+the finished work before it ships.</p>
+
+<p>Session Manager runs the same way, except every role on the team is an AI agent. You describe
+what you want. One agent plans it. Other agents build the pieces. One more checks the result. You
+approve the plan, and you get the final say on whether the work is actually done.</p>
+
+<aside class="manual-analogy"><strong>Think of it like this:</strong> you're the client and the
+director of your own agency. You don't write the plan yourself, and you don't do the typing — you
+say what you want, and you sign off on what comes back.</aside>
+
+<h2>Meet the team</h2>
+
+<table class="manual-table">
+  <thead><tr><th>Role</th><th>What they do</th><th>When you meet them</th></tr></thead>
+  <tbody>
+    <tr><td>Architect</td><td>Plans the work with you and breaks it into small work orders. Never
+    builds.</td><td>At the start of a Session, while you're still describing what you want.</td></tr>
+    <tr><td>Dev-lead</td><td>Builds one work order at a time, in the background.</td><td>While the
+    Scheduler is running your work orders, usually without you watching.</td></tr>
+    <tr><td>Validator</td><td>Checks a finished plan once and gives a verdict on each work
+    order.</td><td>After the last work order in a plan lands.</td></tr>
+    <tr><td>Project Home builder</td><td>Writes a one-page overview of a project.</td><td>Only
+    when you ask for one.</td></tr>
+  </tbody>
+</table>
+
+<p>The architect is the agent you actually talk to. It reads your project, asks a question when
+something's unclear, and turns a big idea into a series of small, well-defined work orders. It
+never writes the code itself — every work order it plans gets handed to a dev-lead instead.
+Because planning is worth taking slowly, the architect thinks with the most capable model
+available to it.</p>
+
+<p>A dev-lead does exactly one work order, start to finish, with no view of the bigger plan.
+It reads the work order, makes the change, runs the checks it was given, and reports back. A
+dev-lead never decides what gets built or in what order — that call was already made by the
+architect before the work order reached it. Since a work order is already small and clearly
+scoped, a dev-lead runs on a faster, lighter model built for focused building rather than open
+planning.</p>
+
+<p>The validator only appears once, at the end of a plan, after every one of its work orders has
+landed. It re-runs each one's own checks, compares the real result against what was promised, and
+gives a pass-or-fail verdict for each work order in the plan. It never edits your project and
+never adds new work orders of its own — it only reports what it found. Like a dev-lead, it runs on
+a fast model, because checking finished work is also a small, clear job.</p>
+
+<p>A fourth agent, the Project Home builder, writes a single overview page for a project — what it
+is, how it's built, how to run it. It only runs when you ask for one; it never writes a page on
+its own.</p>
+
+<h2>How a job flows</h2>
+
+<p>Here's what happens between the moment you type a goal and the moment it's done:</p>
+
+<ol class="manual-flow">
+  <li><strong>You describe</strong> what you want, in your own words.</li>
+  <li><strong>Architect plans</strong> the work and breaks it into small work orders.</li>
+  <li><strong>Work orders queued</strong> — each one waits its turn, ready to run.</li>
+  <li><strong>Dev-leads build</strong> them, one work order at a time, in the background.</li>
+  <li><strong>Validator checks</strong> every finished work order against what was promised.</li>
+  <li><strong>You review</strong> the result and decide what happens next.</li>
+</ol>
+
+<p>You can keep working, or step away entirely, while the middle of that flow runs on its own. The
+work order queue and the Scheduler that runs it get their own chapter — this one is about who's
+doing the work, not how the calendar behind it works.</p>
+
+<h2>Why a team beats one assistant</h2>
+
+<p>A single assistant that plans, builds, and checks its own work has three problems a small team
+doesn't.</p>
+
+<p>First, thinking is expensive, and typing shouldn't be. A careful plan is worth a slower, more
+capable model. Once that plan is broken into small, clear work orders, building each one doesn't
+need that same level of thought — a faster, lighter model finishes it just as well, for less. One
+assistant using its most capable setting for every step pays the planning price for typing work
+too.</p>
+
+<p>Second, one assistant grading its own homework misses its own mistakes. The validator wasn't in
+the room while the work got built, so it checks with fresh eyes — the same reason a second person
+proofreads your writing better than you can.</p>
+
+<p>Third, small tasks succeed more often than big ones. A work order with one clear goal is easy
+to check and easy to get right. A single sprawling task, done in one long pass, has more places to
+quietly go wrong — and no natural point to stop and check the result before moving on.</p>
+
+<h2>Your part in it</h2>
+
+<p>None of this runs without you. You still describe the goal, approve the plan before any work
+order runs, and read what comes back. The agency does the typing; you stay the director.</p>
+
+<p>The four roles above are the ones Session Manager ships with, but they aren't the only agents
+you can have. You can write your own, with their own job description and their own rules, and add
+them to your team. <a href="#agents-and-missions">Shaping your team</a> covers how.</p>
+
+<aside class="manual-tip"><strong>Try this:</strong> next time the architect hands you a plan,
+read the list of work orders before you approve it. That's the moment you're actually
+directing.</aside>
+
+<div class="manual-takeaways">
+  <h2>What you learned</h2>
+  <ul>
+    <li>Session Manager works like a small agency: you're the client and director, not the typist.</li>
+    <li>The architect plans and breaks work into small work orders — it never builds.</li>
+    <li>A dev-lead builds exactly one work order at a time, in the background, with no view of the
+    bigger plan.</li>
+    <li>The validator checks a finished plan once, gives a pass-or-fail verdict per work order,
+    and never edits your project.</li>
+    <li>A team beats one assistant: it saves thinking for planning, checks work with fresh eyes,
+    and succeeds more often because each task stays small.</li>
+  </ul>
+</div>
+
+<p class="manual-next">Next up: <a href="#first-session">Your first Session — from idea to working
+agent</a></p>

@@ -103,6 +103,7 @@ export default defineConfig({
       'src/main/lib/__tests__/prdDisposition.test.cjs',
       'src/main/__tests__/prdCreateDisposition.test.cjs',
       'src/main/__tests__/prdCreatePlanId.test.cjs',
+      'src/main/__tests__/prdCreateAdoption.test.cjs',
       'src/main/__tests__/prdSetDisposition.test.cjs',
       'src/main/__tests__/prdAgentType.test.cjs',
       'src/main/lib/__tests__/terminalRunOutcome.test.cjs',

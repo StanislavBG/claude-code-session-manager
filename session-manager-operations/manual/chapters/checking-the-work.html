@@ -1,2 +1,100 @@
 <h1>Trust, but verify — how the work gets checked</h1>
-<p class="lede">Checklists, tests and a dedicated checker agent — plus what to do when a job stops to ask you a question.</p>
+
+<p class="lede">An agent can sound completely sure of itself and still be wrong. This chapter shows
+you the checks your agency runs before it calls anything done — and the one check that's still
+yours to make.</p>
+
+<h2>Why an agent can be confidently wrong</h2>
+
+<p>An agent writes its answer one word at a time, each word chosen because it fits well after the
+last one. Nothing in that process checks the answer against reality as it goes. A wrong answer can
+come out reading just as smooth and certain as a right one.</p>
+
+<p>This isn't a flaw you can nag away. It's how the technology works, for every agent, on every
+job. So your agency doesn't lean on any one agent trusting itself — it builds the checking in as a
+separate step, done by someone other than whoever wrote the code.</p>
+
+<aside class="manual-analogy"><strong>Think of it like this:</strong> a contractor who's sure the
+wiring is right still gets it inspected. Confidence was never the test. A second, independent look
+is.</aside>
+
+<h2>The checklist, written before the work starts</h2>
+
+<p>Every work order carries a checklist, written by the architect before a dev-lead touches any
+code. That order matters. Writing the checklist first means "done" was defined by the goal, not
+guessed backward from whatever got built.</p>
+
+<p>A good checklist item is something a dev-lead can check on its own, with no screen to look at
+and no one in the room. "The button feels right" isn't checkable that way. "Running this command
+prints this result" is. That's why work orders lean on commands and tests, not impressions.</p>
+
+<h2>Tests: checks that run themselves</h2>
+
+<p>A test is a small program that checks another program. It runs a piece of code, compares what
+came out to what should have come out, and reports pass or fail — automatically, without a person
+watching. A dev-lead runs the tests its checklist names before calling a work order finished.</p>
+
+<p>Tests catch a real class of mistake: code that looks right but breaks a case nobody thought to
+try by eye. They can't catch everything, though. A test only checks what it was written to check —
+which is one reason your agency doesn't stop at "the tests passed."</p>
+
+<h2>The validator's second look</h2>
+
+<p>Once every work order in a plan has landed, the validator — your agency's quality control —
+reviews the whole plan, one time. It doesn't take any dev-lead's word for it. It re-runs each work
+order's own checklist commands itself, then reads the actual result against what the work order
+promised.</p>
+
+<p>The validator hands back one verdict per work order: verified, meaning the evidence backs up
+what was promised, or refuted, meaning it doesn't — with a plain reason why. Those verdicts go to
+the architect, the one who keeps track of the whole plan and decides what happens next.</p>
+
+<h2>When a work order stops to ask you something</h2>
+
+<p>Sometimes a dev-lead hits a fork it genuinely can't choose for you — the work order was
+unclear, or it found something that changes the plan. Rather than guess, it stops and marks the
+work order Needs review. That's a question, not a failure, and it waits for you in the Scheduler.</p>
+
+<ol class="manual-steps">
+  <li>Open the work order's card and read what it's asking. The Review button takes you straight
+  to the Session that wrote it, where the question is waiting.</li>
+  <li>Answer it there — clear up what was unclear, or point out what changed — then press Retry to
+  send the work order back into the queue with your answer in hand.</li>
+  <li>Or set it aside. If you leave it, your agency won't wait on you forever: it will eventually
+  skip that one work order on its own, so anything else in the queue that isn't waiting on it can
+  keep moving.</li>
+</ol>
+
+<aside class="manual-warning"><strong>Watch out:</strong> "the tests pass" is not the same as
+"done." Tests only check what someone thought to write a test for. A work order can pass every
+test it names and still miss the point of what you actually asked for — that's exactly the gap the
+validator, and you, are there to catch.</aside>
+
+<h2>You are the final judge</h2>
+
+<p>Checklists, tests, and the validator all exist to make your judgment easier, not to replace it.
+They filter out the obvious misses so what reaches you is worth your time. But whether the
+finished work actually solves your problem is still your call, not your agency's.</p>
+
+<p>Look at what changed before you treat something as truly finished, especially for anything you
+care about getting right. A verified verdict is strong evidence. It isn't a substitute for you
+deciding the job is actually done.</p>
+
+<div class="manual-takeaways">
+  <h2>What you learned</h2>
+  <ul>
+    <li>An agent can sound certain and still be wrong — checking is a separate step, done by
+    someone else.</li>
+    <li>A work order's checklist is written before the work starts, so "done" means the goal, not
+    whatever got built.</li>
+    <li>Tests are automatic checks a dev-lead runs itself, but they only catch what they were
+    written to catch.</li>
+    <li>The validator reviews a whole plan once it's finished, re-running each checklist itself
+    and handing back a verified or refuted verdict per work order.</li>
+    <li>Needs review is a question, not a failure — read it, fix and retry, or set it aside and let
+    your agency move on. Either way, you're the one who decides a job is truly done.</li>
+  </ul>
+</div>
+
+<p class="manual-next">Next up: <a href="#agents-and-missions">Shaping your team — Agents, Missions
+and one-click Actions</a></p>

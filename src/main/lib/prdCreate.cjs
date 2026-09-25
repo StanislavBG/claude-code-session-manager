@@ -480,23 +480,48 @@ async function createPrd(input, remote) {
     sourceTabId: input.sourceTabId ?? null,
   });
 
+  // PRD 1446: writePrd() succeeding used to just promise "the next scheduler
+  // reconcile pass (~1 minute)" adopts this file — but nothing reliably ran
+  // that pass (the 60s pollLoop only reaches reconcile() via
+  // maybeLaunchWhenAvailable, which returns early while zero rows are
+  // pending; the 10-minute rescheduleTimer could itself stall behind a slow
+  // billing fetch). Trigger one reconcile immediately through the EXISTING
+  // broadcast-coalescer seam (remote.requestReconcile(), same one resetJob
+  // already uses) instead of waiting on either. Best-effort: a reconcile
+  // failure here must not fail a write that already landed on disk — the
+  // PRD file is real regardless, and the next scheduled pass still adopts
+  // it if this one didn't stick.
+  let enqueued = false;
+  if (typeof remote.requestReconcile === 'function') {
+    try {
+      await remote.requestReconcile();
+      if (typeof remote.getJob === 'function') {
+        enqueued = Boolean(await remote.getJob(filenameSlug));
+      }
+    } catch (e) {
+      console.warn(`[prdCreate] immediate requestReconcile failed (non-fatal, next scheduled pass will adopt it): ${e?.message ?? e}`);
+    }
+  }
+
   // No `status` field here, and never one named 'queued' — that string was
   // handed straight to callers as if it were a real ScheduleJob status, and
   // is exactly how the 1021/1022 incident's invalid `"status": "queued"`
   // rows got onto disk (this route's own response was the most likely
   // source). A PRD is a queue row's SOURCE, not the row itself: writePrd
-  // only ever joins an Epic and writes the .md file — the queue row is
-  // created separately, by the next reconcile() pass. `enqueued: false` is
-  // true by construction (this function never touches queue.json), so no
-  // caller can copy a fake job status out of this response again.
+  // only ever joins an Epic and writes the .md file — the queue row above
+  // is created separately, by reconcile(). `enqueued` reflects whether that
+  // reconcile pass (triggered synchronously above) actually produced the
+  // row before this function returned — it is not a fabricated status.
   return {
     ok: true,
     nn,
     filename: `${filenameSlug}.md`,
     prdPath: writeResult.path ?? null,
     epicId: writeResult.epicId ?? null,
-    enqueued: false,
-    note: 'PRD file written; the queue row is derived by the next scheduler reconcile pass, not created here',
+    enqueued,
+    note: enqueued
+      ? 'PRD file written and adopted into the queue as a pending row'
+      : 'PRD file written; the queue row is derived by the next scheduler reconcile pass, not created here',
     // Advisory only (PRD 1403) — never blocks the write. See prdSizing.cjs.
     warnings: sizingWarnings(input),
   };
@@ -542,7 +567,7 @@ function registerAdminRoute(adminHttp, remote) {
       filename: result.filename,
       prdPath: result.prdPath ?? null,
       epicId: result.epicId ?? null,
-      enqueued: false,
+      enqueued: result.enqueued,
       note: result.note,
       warnings: result.warnings,
     });

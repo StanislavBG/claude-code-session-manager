@@ -3801,13 +3801,31 @@ function computeFireAt(state, nextResetIso) {
   return reset + (state.config.offsetMinutes * 60_000);
 }
 
+// PRD 1446: refreshNextReset() awaits billing.fetchUsage(), which can hang
+// or back off for minutes while the usage meter is rate-limited. Left
+// unbounded, that stalled THIS function's own mutate(reconcile) call for as
+// long as the fetch took — the 10-minute rescheduleTimer was meant to be a
+// second, independent path into reconcile() alongside the 60s pollLoop, but
+// a hung fetch silently took it out too, leaving newly-created PRDs
+// unadopted (PRDs 1420-1441, 2026-09-25). Racing against this timeout lets
+// the reconcile still run on the cached reset value; the abandoned
+// refreshNextReset() call is left to resolve on its own and update the
+// cache for next time.
+const RESCHEDULE_TIMER_BILLING_RACE_MS = 10_000;
+
 async function rescheduleTimer() {
   clearFireTimer();
   // Wrap in try/catch — on failure use the cached value so the on-reset
   // timer can still be armed from the last known reset.
   let nextResetIso;
   try {
-    nextResetIso = await refreshNextReset();
+    nextResetIso = await Promise.race([
+      refreshNextReset(),
+      new Promise((resolve) => {
+        const t = setTimeout(() => resolve(cachedNextReset), RESCHEDULE_TIMER_BILLING_RACE_MS);
+        if (typeof t.unref === 'function') t.unref();
+      }),
+    ]);
   } catch {
     nextResetIso = cachedNextReset;
   }
@@ -12479,6 +12497,19 @@ const remote = {
     }
   },
 
+  // Triggers an immediate reconcile pass through the SAME seam resetJob
+  // already uses below (broadcast's coalescer, whose getPayload runs
+  // module.exports.reconcile) — no second reconcile implementation. PRD
+  // 1446: prdCreate.cjs's createPrd() calls this right after a successful
+  // write so a fresh PRD becomes a pending queue row without waiting for
+  // the next scheduled pass — the 60s pollLoop only reaches reconcile() via
+  // maybeLaunchWhenAvailable, which returns early while zero rows are
+  // pending, and the 10-minute rescheduleTimer can itself stall behind a
+  // slow/hung billing fetch (see rescheduleTimer's own bounded race below).
+  async requestReconcile() {
+    await broadcast({ flush: true });
+  },
+
   // User-initiated pause/resume — the admin-route/MCP twins of the
   // schedule:pause / schedule:resume IPC handlers, through the same setPaused /
   // clearPause. Pause stops NEW dispatch only; running jobs are never touched.
@@ -12905,6 +12936,8 @@ module.exports = {
   _mutateForTests: mutate, // mutate() has no other exported call site; test-only seam.
   reconcile,
   broadcast,
+  rescheduleTimer,
+  RESCHEDULE_TIMER_BILLING_RACE_MS,
   reconcileSourcePromptId,
   allocateParallelGroup,
   selectHistoryJobs,

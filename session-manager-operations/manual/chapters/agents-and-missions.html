@@ -1,2 +1,131 @@
 <h1>Shaping your team — Agents, Missions and one-click Actions</h1>
-<p class="lede">Write your own agents in plain English, pick the right kind of mission, and turn a favorite setup into a one-click button.</p>
+
+<p class="lede">Every agent in your agency is just a plain text file — no coding needed to write
+one. This chapter shows you how to write your own, pick a Mission for it, and turn your favorite
+setup into a single button.</p>
+
+<h2>Write an agent in plain English</h2>
+
+<p>Open the Agent Library and you'll see a list of agents already on your machine — the architect,
+the dev-leads, and any others you've added. Each one is a small text file with a few labeled
+parts, called fields. You fill them in, and the agent is ready to work.</p>
+
+<ul>
+  <li><strong>name</strong> — the file's short label, all lowercase with hyphens, like
+  <code>release-notes-writer</code>.</li>
+  <li><strong>description</strong> — one sentence saying what this agent does. It shows up in
+  every list where you pick an agent, and it's read aloud to the agent itself at the start of a
+  Session, so write it like an instruction, not a title.</li>
+  <li><strong>instructions</strong> — the longer text below the fields. This is the agent's own
+  rulebook: what it should always do, what it should never do, and how it should think about the
+  work.</li>
+  <li><strong>model</strong> — optional. Leave it blank and the agent uses whatever the Session
+  would use anyway. Set it and every Session that hires this agent uses that model instead.</li>
+</ul>
+
+<p>Here's a short example — an agent whose only job is turning a list of changes into a friendly
+note for users:</p>
+
+<pre><code>---
+name: release-notes-writer
+description: Turns a list of finished changes into a short, friendly note for users.
+model: sonnet
+---
+
+You write release notes for our users. Keep each note to two or three
+sentences. Say what changed and why it helps them, and skip any detail
+they'll never see.</code></pre>
+
+<p>A good agent has a description that reads like a real instruction, not a job title, and
+instructions that are specific enough to remove guesswork. "Write good code" tells an agent
+nothing it doesn't already assume. "Never touch a test file unless the test itself is wrong"
+tells it something it can actually follow.</p>
+
+<aside class="manual-analogy"><strong>Think of it like this:</strong> the Agent Library is your
+agency's staffing directory. Every entry is a job description you write once. Any Session can hire
+that person for the work, and the description you wrote is the first thing they read before
+starting.</aside>
+
+<h2>Picking a model — and what it costs</h2>
+
+<p>Session Manager offers a small set of models: Haiku, Sonnet, Opus, and Fable, plus the "match my
+Session" option that leaves the choice to whatever's already running. They aren't interchangeable
+on price. Haiku is the cheapest and fastest. Opus is the most capable and the most expensive per
+exchange. Sonnet sits in the middle and is the sensible everyday pick.</p>
+
+<p>The rule of thumb built into the Agent Library itself is blunt: give a cheap model to an agent
+that only reads files and reports back, and save the expensive model for an agent that has to make
+real judgment calls — deciding what's broken, or what approach is safest.</p>
+
+<aside class="manual-tip"><strong>Try this:</strong> open an agent you already have, and check its
+model field. If it's blank, that agent is quietly inheriting whatever model its Session happens to
+use — which may be pricier than the work needs.</aside>
+
+<h2>Your copy, or the project's copy</h2>
+
+<p>An agent you write lives on your machine and works in every project you open — it's your
+personal copy. But one project can keep its own small override of that same agent, changing only
+its model, without touching the version everyone else sees. That's useful when one project's work
+is genuinely heavier or lighter than usual, without renaming the agent or making a second one.</p>
+
+<h2>Missions — what kind of work a Session is</h2>
+
+<p>Every Session carries exactly one Mission, alongside its Agent. Where the Agent answers "who's
+doing this work," the Mission answers "what kind of work is it." You manage the list of Missions
+in the Tag Library.</p>
+
+<p>Three Missions show up as buttons when you start a Session by hand:</p>
+
+<table class="manual-table">
+  <thead><tr><th>Mission</th><th>What it sets up</th></tr></thead>
+  <tbody>
+    <tr><td>Feature</td><td>Plans new work, then hands the actual building to the Scheduler as
+    work orders.</td></tr>
+    <tr><td>Bug</td><td>Reproduces the problem first, then queues a fix — never guesses at the
+    cause from a description alone.</td></tr>
+    <tr><td>Discussion</td><td>Keeps the Session talk-only. No files change until you decide
+    something is worth building.</td></tr>
+  </tbody>
+</table>
+
+<p>A handful of other Missions exist behind specific buttons elsewhere in the app — publishing a
+release, or writing a project's overview page — and you'll never need to pick those by hand.</p>
+
+<p>Each Mission carries its own short opening instruction, which the agent reads before your own
+goal. Discussion's, for example, tells the agent plainly that the point is a decision, not a code
+change. That's why swapping Missions changes how a Session behaves, even with the same goal typed
+in and the same agent doing the work.</p>
+
+<p>What you can edit from the Tag Library is which agents are meant for which Mission — tick a box
+next to an agent to connect it to a Mission, or remove it. What you can't do is invent a brand-new
+Mission from the app itself; the built-in list is fixed on purpose, so it stays small and every
+Session means the same thing by "Feature" or "Bug."</p>
+
+<h2>Actions — a favorite agent, one click away</h2>
+
+<p>Once an agent is written the way you like it, you can turn it into a button. Give the agent a
+project — one specific project, or every project — and a short opening instruction, and it appears
+as its own button in that project's Sessions toolbar, right next to "+ New Session."</p>
+
+<p>Pressing that button isn't a shortcut around Sessions — it starts a brand-new one, the same way
+"+ New Session" does. It just skips the typing: the agent you scoped becomes the Session's Agent,
+its connected Mission becomes the Session's Mission, and the instruction you wrote becomes the
+opening goal. The button's label is the agent's name unless you give it a shorter one.</p>
+
+<div class="manual-takeaways">
+  <h2>What you learned</h2>
+  <ul>
+    <li>An agent is a plain text file with a name, a description, instructions, and an optional
+    model — no code required.</li>
+    <li>Models differ in price and power: cheap models for simple, read-only work; Opus for real
+    judgment calls.</li>
+    <li>An agent lives on your machine by default; one project can override just its model without
+    touching the shared copy.</li>
+    <li>A Mission sets what kind of work a Session is and what it reads before your goal; the
+    built-in list is fixed, but which agents connect to which Mission is yours to edit.</li>
+    <li>Scoping an agent to a project turns it into a one-click Action button — a shortcut to a
+    normal new Session, never a second way to create one.</li>
+  </ul>
+</div>
+
+<p class="manual-next">Next up: <a href="#house-rules">House rules — instructions, settings and permissions</a></p>

@@ -44,20 +44,21 @@
   const PIP_HOME = [1405, 895] // s1 leaves Pip hugging the napkin at (1432, 830)
   const HIT = [PIP_HOME[0] + 120, PIP_HOME[1] - 13] // glue tip at the thwack hit (facing right, scale 0.72)
   const NAP = { x: 1452, y: 788, rot: -0.14, s: 0.64 } // s1's napkin, exactly where s1 left it
-  const NAP_HOVER = [1545, 652] // where it floats after the ta-da (Pip rides it here)
+  const NAP_HOVER = [1425, 652] // where it floats after the ta-da (Pip rides it here): well inside the screen, clear of its right border
   const CARD = { x: 1190, s: 0.85, w: 440, h: 300, yarn: 205, seat: 130 } // chat⇄terminal card
-  const SESS = [1010, 470] // centre of the mini-session paper in the screen
+  const SESS = [920, 470] // centre of the mini-session paper in the screen (left of term10's float station)
   const TABS = [
     { label: 'Home', icon: 'home' },
     { label: 'garden-app', icon: 'leaf' },
     { label: 'recipe-bot', icon: 'bowl' },
     { label: 'napkin-idea', icon: 'bulb', active: true },
   ]
-  // s1's terminals that become tabs: s1 rest pose → float station (clear of sidebar/plaque/Pip) → swoop
+  // s1's terminals that become tabs: s1 rest pose → float station (clear of sidebar/plaque/Pip, the napkin's
+  // hover spot and the mini session at SESS) → swoop
   const HERO = [
     { x: 640, y: 485, rot: -0.38, s: 1.0, scr: 2, tape: false, id: 's1-term3', st: [868, 470], c1: [1010, 420], c2: [915, 130], side: -1 },
     { x: 1060, y: 505, rot: 0.14, s: 1.1, scr: 1, tape: true, id: 's1-term6', st: [1150, 752], c1: [1330, 600], c2: [1075, 70], side: -1 },
-    { x: 1505, y: 475, rot: -0.22, s: 0.95, scr: 2, tape: false, cursor: 'block', id: 's1-term10', st: [1345, 590], c1: [1480, 390], c2: [1262, 70], side: -1 },
+    { x: 1505, y: 475, rot: -0.22, s: 0.95, scr: 2, tape: false, cursor: 'block', id: 's1-term10', st: [1228, 447], c1: [1323, 232], c2: [1262, 70], side: -1 },
   ]
   // s1's pieces that lie inside the console footprint (rotated bounds ≥ 40 px inside it, incl. the
   // outBack return): the console simply covers them
@@ -832,7 +833,7 @@
       const hp = hopPose(L.u)
       x = L.x
       y = L.y - (t >= P.board0 ? hp.lift : 0)
-      o = t >= P.board0 ? { pose: hp.pose, poseT: hp.poseT, squash: L.squash, air: L.air, vel: L.vel, look: [0.4, -0.6] } : { pose: 'idle', squash: L.squash, look: [0.6, -0.8], mouth: 'grin' }
+      o = t >= P.board0 ? { pose: hp.pose, poseT: hp.poseT, squash: L.squash, air: L.air, vel: L.vel, look: [0.25, -0.7] } : { pose: 'idle', squash: L.squash, look: [0.2, -0.85], mouth: 'grin' }
     } else if (t < P.napFly - 0.12) {
       // riding the hovering napkin, watching the terminals fly home
       x = napTop[0]

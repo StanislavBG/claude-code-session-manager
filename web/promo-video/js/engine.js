@@ -100,22 +100,28 @@
   /** Timed caption chunks for every NARRATION clip (cameos are never captioned). */
   function buildCaptions(tl) {
     const caps = []
-    for (const sc of tl.scenes) {
+    tl.scenes.forEach((sc, i) => {
+      // a caption may not outlive its scene into the next cut: it must be gone before the incoming
+      // transition (sheet / camera move) starts, i.e. by scene end minus that transition's half-length
+      const next = tl.scenes[i + 1]
+      const limit = sc.end - (next ? TRANSITIONS[kindOf(next)].half : 0)
       for (const v of sc.vo || []) {
         const chunks = chunkLine(v.text)
         const total = chunks.reduce((a, c) => a + weight(c), 0)
         let at = v.start
         for (const c of chunks) {
           const d = (weight(c) / total) * v.duration
-          caps.push({ start: at, end: at + d, text: c, scene: sc.id })
+          caps.push({ start: at, end: at + d, text: c, scene: sc.id, limit })
           at += d
         }
       }
-    }
-    // hold each chunk until the next one starts (max +0.6s) so captions don't flicker
+    })
+    // hold each chunk until the next one starts (max +0.6s) so captions don't flicker, clamped to
+    // the scene's limit above — but never before its own end (words still being spoken stay on)
     for (let i = 0; i < caps.length; i++) {
       const next = caps[i + 1]
-      caps[i].hold = next ? Math.min(next.start, caps[i].end + 0.6) : caps[i].end + 0.6
+      const hold = next ? Math.min(next.start, caps[i].end + 0.6) : caps[i].end + 0.6
+      caps[i].hold = Math.max(caps[i].end, Math.min(hold, caps[i].limit))
     }
     return caps
   }

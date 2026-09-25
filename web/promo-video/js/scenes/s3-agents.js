@@ -12,22 +12,27 @@
  *   T.fan       "Pick": the three agent cards riffle up out of the box in a staggered fan
  *   T.grab      "agent": hand (from the top) pinches the architect by its hard hat, carries it on an arc
  *               (it waves, swings with the motion), drops it into slot 1 on a beat (T.drop1); Pip points at it
- *   T.peel      "mission": a second hand (from the right) curls the sage Feature sticker's corner, peels it,
- *               carries it to slot 2 and thups it in on a beat (T.press2), then lifts straight up and leaves;
- *               both slot checks sit popped for ~0.27 s; Pip gazes up at it
+ *   T.peel      "mission": once hand A has cleared slot 1, a second hand (from the right) swoops in, curls the sage
+ *               Feature sticker's corner, peels it, carries it to slot 2 and thups it in on the beat after the drop
+ *               (T.press2) — one hand on screen at a time; then lifts straight up and leaves; both slot checks sit
+ *               popped for ~0.27 s; Pip gazes up at it
  *   T.pack      "Claude": both hop out of the slots, arc to the envelope's pocket lip and visibly SINK in behind
  *               the pocket (shrinking to 0.85); the flap shuts over them (heart seal)
  *   T.stamp     beat under "arrives": rubber stamp THUNK "Actor → Input → Mission → Goal", fast lift so the
  *               label reads for ~0.6 s; Pip flinches (> <) then wobbles back
- *   T.slide     envelope leans forward (still upright + readable), lies down only at T.flat0, then zips along
- *               the floor under the Session door; Pip hops over it
- *   T.beam      half-beat inside "briefed": door cracks open, warm halo + floor pool + crayon beam, and a plain
- *               cream speech bubble with typing dots pops out of the doorway (Claude arrived); Pip cheers mid-air
- *   T.favPop    beat before "Favorites": an architect copy hops out of the Agent Library, waving, a pink heart
- *               pops above it and rides along with it
+ *   T.slide     on "briefed" the envelope leans forward (still upright + readable), lies down only at T.flat0, then
+ *               zips along the floor under the Session door (T.zip0); Pip hops over it. The zip, Pip's take-off and
+ *               the door's creak are the LOUD cues: they start >= LOUD_GAP after "briefed." ends so the word's final
+ *               consonant stays clear (ASR heard "brief" when the cluster sat inside the word)
+ *   T.beam      first beat AFTER "Claude arrives briefed.": door cracks open (T.crack), warm halo + floor pool +
+ *               crayon beam, and a plain cream speech bubble with typing dots pops out of the doorway (Claude
+ *               arrived); Pip cheers mid-air
+ *   T.favPop    half-beat after the bubble has landed (inside "Favorites"): an architect copy hops out of the Agent
+ *               Library, waving, a pink heart pops above it and rides along with it
  *   T.favFly    it flies on an arc, squash-shrinks (never edge-on) into the mini card; the Hot keys strip +
- *               terracotta clay button stand up half a beat before it lands on the cap on the beat under
- *               "become" (T.favLand) — the heart pops into the cap and bursts
+ *               terracotta clay button stand up half a beat before it lands on the cap on the half-beat under
+ *               "become" (T.favLand) — the heart pops into the cap and bursts. Grid: beam · favPop · strip ·
+ *               favLand · press sit on consecutive half-beats
  *   T.press     beat on "one-click": a bare human hand (blue sleeve, so the finger reads on terracotta) slides in
  *               along its own arm axis, hovers, lifts (anticipation), jabs; the dome squashes and springs back past
  *               rest, doodle puff; Pip claps with a hop, the devlead + validator cards wave from the box.
@@ -73,6 +78,8 @@
   const SLEEVE = C.blue
   const HC_ROT = 0.27 // hand C's arm angle (from the top): threads the gap between slot 2 and the sticker sheet
   const HC_OFF = 0.55 // …and presses this far right of the dome apex (·r) so the mini icon stays visible
+  const PEEL_T = 0.15 // hand B's corner curl on the Feature sticker (brisk: curl + carry share the beat before the thup)
+  const LOUD_GAP = 0.16 // s a narrated word must have ended before a loud SFX starts (ASR lost "briefed"'s final consonant)
 
   // ───────── helpers ─────────
   const qarc = (a, b, lift, p) => {
@@ -129,6 +136,10 @@
   // ───────── the clock: every beat from the narration + the music grid ─────────
   function beats(info) {
     const w = (word, fb) => (info.wordAt ? info.wordAt(word, fb) : fb)
+    const wEnd = (word, fb) => {
+      const hit = info.words ? info.words.find((x) => x.word === word) : null
+      return hit ? hit.end : fb
+    }
     const nb = (x) => (info.nextBeat ? info.nextBeat(x) : x)
     const beat = info.beat || 0.58
     const half = (x) => {
@@ -142,26 +153,27 @@
     T.grab = Math.max(T.fan + 0.45, w('agent', 0.86))
     T.drop1 = nb(T.grab + 0.33)
     T.mission = w('mission', 1.48)
-    T.peel = Math.max(T.drop1 + 0.1, T.mission - 0.06)
-    T.press2 = nb(T.peel + 0.4)
+    T.press2 = nb(Math.max(T.drop1 + 0.5, T.mission + 0.35)) // sticker thup on the beat after the drop, inside "mission"
+    T.peel = T.press2 - PEEL_T - 0.19 // hand B swoops in only once hand A has left slot 1: curl PEEL_T, carry 0.16, land 0.03
     T.claude = w('claude', 2.21)
     T.pack = Math.max(T.press2 + 0.26, T.claude - 0.04) // both hop out of the slots on "Claude"…
     T.packEnd = T.pack + 0.24 // …arc over and sink into the envelope's pocket (visible going IN)
     T.stamp = nb(T.packEnd + 0.04) // THUNK on the beat under "arrives"
-    T.briefed = w('briefed', 2.95)
-    T.beam = half(Math.max(T.briefed, T.stamp + 0.8)) // light on the half-beat inside "briefed" (stamp stays readable)
-    T.slide = T.beam - 0.3 // envelope leans forward, still upright (label readable)
-    T.slideEnd = T.beam + 0.03 // …and is fully under the door just after the light cracks
-    T.flat0 = T.beam - 0.16 // it lies down only just before it zips off
-    T.flat1 = T.beam - 0.09
-    T.zip0 = T.flat0 - 0.01
+    T.briefedEnd = wEnd('briefed', 3.45) // line 2 ends here — nothing loud may sit on the word's final consonant
+    T.beam = nb(Math.max(T.briefedEnd, T.stamp + 0.8)) // light on the first beat AFTER the line (stamp stays readable)
+    T.zip0 = Math.max(T.beam - 0.17, T.briefedEnd + LOUD_GAP) // the zip (+ Pip's take-off) is the first loud cue
+    T.flat0 = T.zip0 + 0.01 // it lies down only just before it zips off
+    T.flat1 = T.flat0 + 0.07
+    T.slide = Math.max(T.stamp + 0.5, T.flat0 - 0.4) // envelope leans forward on "briefed", still upright (label readable)
+    T.slideEnd = T.zip0 + 0.2 // …and is fully under the door just after the light cracks
+    T.crack = Math.max(T.beam - 0.06, T.zip0 + 0.02) // the door cracks open (creak) once the zip is under way
     T.fav = w('favorites', 3.75)
-    T.favPop = Math.max(T.beam + 0.25, nb(T.fav - 0.15)) // the favourite hops out of the box
+    T.favPop = half(Math.max(T.beam + 0.25, T.fav - 0.15)) // the favourite hops out on the next half-beat, once the bubble has landed
     T.favFly = T.favPop + 0.2
-    T.favLand = Math.max(T.favFly + 0.34, nb(w('become', 4.31) - 0.12)) // mini lands on the cap on a beat
+    T.favLand = half(Math.max(T.favFly + 0.34, w('become', 4.31) - 0.12)) // mini lands on the cap on the grid (half-beat)
     T.stripLand = T.favLand - beat / 2 // Hot keys strip stands up half a beat before, where the card is heading
     T.strip = T.stripLand - 0.17
-    T.press = Math.max(T.favLand + 0.45, nb(w('one-click', 4.71) - 0.02))
+    T.press = nb(Math.max(T.favLand + 0.25, w('one-click', 4.71) - 0.02)) // the jab on the beat under "one-click"
     return T
   }
 
@@ -211,7 +223,7 @@
   }
   const SLOT_ST = { x: S2[0], y: S2[1], rot: 0.025, s: 0.95 }
   function stickerFrame(tt, T) {
-    const p1 = T.peel + 0.26
+    const p1 = T.peel + PEEL_T
     if (tt < p1) return null
     const a = sheetStickerFrame(1)
     if (tt < T.press2 - 0.03) {
@@ -251,7 +263,7 @@
       K.at(ctx, Math.round(-0.16 * cam.dx), 0, 0, 1, () => drawForm(ctx, t))
 
       const sw = stickerW(ctx)
-      const peelP = seg(tt, T.peel, T.peel + 0.26)
+      const peelP = seg(tt, T.peel, T.peel + PEEL_T)
       const packP = seg(tt, T.pack, T.packEnd)
 
       // ── slots (+ what sits in them) ──
@@ -355,8 +367,8 @@
       }
 
       // ── the Session door (warm light spills out on "briefed") ──
-      const glow = 0.35 * seg(tt, T.slideEnd - 0.1, T.slideEnd) + 0.65 * E.outCubic(seg(tt, T.beam - 0.04, T.beam + 0.1))
-      const doorOpen = 0.3 * E.outBack(seg(tt, T.beam - 0.06, T.beam + 0.24))
+      const glow = 0.35 * seg(tt, T.crack - 0.01, T.crack + 0.09) + 0.65 * E.outCubic(seg(tt, T.beam - 0.04, T.beam + 0.1))
+      const doorOpen = 0.3 * E.outBack(seg(tt, T.crack, T.crack + 0.3))
       const gulp = bump(tt, T.slideEnd - 0.1, T.slideEnd + 0.1)
       if (glow > 0) drawDoorLight(ctx, glow, tt, T)
       PROPS.door(ctx, DOOR.x, FLOOR - (DOOR.h / 2) * DOOR.s * (1 - 0.03 * gulp), t, { id: 's3-door', scale: [DOOR.s * (1 + 0.025 * gulp), DOOR.s * (1 - 0.03 * gulp)], open: doorOpen, glow, jitter: 0.5 })
@@ -442,17 +454,18 @@
       cue(T.grab, 'paper', { dur: 0.18, gain: 0.5, pan: panOf(BOX.x) })
       cue(T.drop1, 'thup', { gain: 0.95, pitch: 0.95, pan: panOf(S1[0]) })
       cue(T.drop1 + 0.1, 'blip', { gain: 0.5, pitch: 1.2, pan: panOf(S1[0]) })
-      cue(T.peel + 0.04, 'peel', { dur: 0.3, gain: 0.95, pan: panOf(SHEET.x) })
+      cue(T.peel + 0.03, 'peel', { dur: PEEL_T + 0.07, gain: 0.95, pan: panOf(SHEET.x) })
       cue(T.press2, 'thup', { gain: 0.95, pitch: 1.12, pan: panOf(S2[0]) })
       cue(T.press2 + 0.03, 'chime', { gain: 0.55, pan: panOf(S2[0]) })
       cue(T.pack, 'swish', { pitch: 1.35, gain: 0.4, pan: panOf(900) }) // both hop out of the slots
       cue(T.pack + 0.13, 'envelope', { dur: 0.26, gain: 0.8, pan: panOf(ENV.x) }) // …and sink into the pocket
       cue(T.packEnd, 'flap', { pitch: 1.15, gain: 0.5, pan: panOf(ENV.x) }) // flap shuts
       cue(T.stamp, 'stamp', { gain: 1, pan: panOf(ENV.x) })
-      cue(T.flat0 - 0.02, 'boing', { pitch: 1.5, gain: 0.3, pan: panOf(PIPX) }) // Pip takes off
+      // the loud "arrival" cluster: every cue from here to the sparkle starts >= LOUD_GAP after "briefed." ends
+      cue(T.zip0, 'boing', { pitch: 1.5, gain: 0.3, pan: panOf(PIPX) }) // Pip takes off with the zip
       cue(T.zip0, 'envelope', { dur: 0.24, gain: 0.85, pan: panOf(1250) })
       cue(T.zip0 + 0.05, 'swish', { pitch: 1.2, gain: 0.45, pan: panOf(1500) })
-      cue(T.beam - 0.05, 'creak', { dur: 0.3, pitch: 1.4, gain: 0.4, pan: panOf(DOOR.x) })
+      cue(T.crack + 0.01, 'creak', { dur: 0.3, pitch: 1.4, gain: 0.4, pan: panOf(DOOR.x) })
       cue(T.beam, 'sparkle', { gain: 0.75, pan: panOf(DOOR.x) })
       cue(T.strip + 0.02, 'swish', { pitch: 0.9, gain: 0.45, pan: panOf(BTN.x) })
       cue(T.stripLand, 'slap', { gain: 0.75, pan: panOf(BTN.x) })
@@ -639,7 +652,7 @@
     const head = [PIPX, FLOOR - 170]
     const hops = [
       PIP.hop(tt, T.lid + 0.02, { dur: 0.42, height: 44, pre: 0.1 }),
-      PIP.hop(tt, T.flat0 - 0.02, { dur: 0.44, height: 100, pre: 0.1 }), // clears the flat envelope zipping under
+      PIP.hop(tt, T.zip0, { dur: 0.44, height: 100, pre: 0.1 }), // takes off with the zip, clears the flat envelope
       PIP.hop(tt, T.press + 0.05, { dur: 0.36, height: 38, pre: 0.08 }),
     ]
     let hy = 0
@@ -682,7 +695,7 @@
   // ───────── hands ─────────
   function drawHandA(ctx, t, tt, T, pinch) {
     const tIn = T.grab - 0.34
-    const tOut = T.drop1 + 0.45
+    const tOut = T.drop1 + 0.19 // off the top before hand B's first frame: one hand on screen at a time
     if (tt < tIn || tt > tOut) return
     let tip
     let pose = 'pinch'
@@ -694,15 +707,16 @@
     } else if (tt < T.drop1) {
       tip = pinch
     } else {
+      // releases as the slot-1 check pops, then lifts away up-left (ease-in: one visible lift frame, then gone)
       pose = 'drop'
-      const p = E.inCubic(seg(tt, T.drop1 + 0.03, tOut))
+      const p = E.inQuad(seg(tt, T.drop1 + 0.02, tOut))
       tip = mix2([P1[0], P1[1] - 18 - 10 * seg(tt, T.drop1, T.drop1 + 0.05)], [P1[0] - 160, -320], p)
     }
     CAST.hand(ctx, tip[0], tip[1], t, { id: 's3-handA', from: 'top', pose, scale: HAND_S, rot: -0.12, sleeve: SLEEVE })
   }
 
   function drawHandB(ctx, t, tt, T, peelP, stF, sw) {
-    const tIn = T.peel - 0.32
+    const tIn = T.peel - 0.16 // a brisk swoop in from the right, once hand A has left
     const tLift = T.press2 + 0.06 // thup held for one frame…
     const tUp = T.press2 + 0.17 // …lift straight up, clear of the slot-2 check…
     const tOut = T.press2 + 0.28 // …then away up-right before the pack starts
@@ -736,7 +750,7 @@
   function drawHandC(ctx, t, tt, T, btn) {
     // Enters, hovers and leaves along its OWN arm axis, so the fingertip never sweeps across the form's labels;
     // the sleeve threads the gap between slot 2 and the sticker sheet.
-    const tIn = T.press - 0.5
+    const tIn = T.press - 0.4 // enters as the mini card lands: the strip is up and the eye is already on the button
     const tOut = T.press + 0.62
     if (tt < tIn || tt > tOut || !btn) return
     const ax = [Math.sin(HC_ROT), -Math.cos(HC_ROT)] // up the arm, towards the shoulder

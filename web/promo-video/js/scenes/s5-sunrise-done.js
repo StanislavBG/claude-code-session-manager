@@ -5,8 +5,9 @@
  * s4's last frame continued. Pure function of (t, info): beats from info.cameoAt / info.wordAt / info.nextBeat.
  *
  * Beats (T.* in beats5(); fallbacks = the current timeline):
- *   T.alarm     on the cut: the "reset" alarm clock rings and hops; the Window-used needle swings back to empty
- *               (overshoot), the "paused" sign flips back up to ▶ and the belt rolls again; YOU wakes up; Pip jumps.
+ *   T.alarm     on the cut: the "reset" alarm clock rings and hops; the Window-used needle eases back to empty
+ *               (outCubic: outBack's 4.7x initial slope read as a one-frame pop at 15 fps), the "paused" sign flips
+ *               back up to ▶ and the belt rolls again; YOU wakes up; Pip jumps.
  *   cameos      "Check!" x3 (bot-check-1/2/3): the teacup helpers of bays 0, 2, 4 spring up, each crayons a
  *               green check exactly as its "Check!" starts, then a tiny cheer (left → centre → right, like the pans).
  *   T.blindUp   after the third check: the navy blind snaps up (slow → fast), the moon swings off on its thread,
@@ -94,7 +95,7 @@
     // ── reset: alarm, gauge, sign, belt ──
     // a short ring (it must not compete with the helpers' "Check!"s)
     S.clock.ring = t < T.alarm ? 0 : 1 - seg(t, T.alarm + 0.34, T.alarm + 0.5)
-    S.gauge.value = t < T.gaugeReset[0] ? 0.9 : lerp(0.9, 0.04, E.outBack(seg(t, T.gaugeReset[0], T.gaugeReset[1])))
+    S.gauge.value = t < T.gaugeReset[0] ? 0.9 : lerp(0.9, 0.04, E.outCubic(seg(t, T.gaugeReset[0], T.gaugeReset[1])))
     S.sign = { flip: 1 - seg(t, T.signUp[0], T.signUp[1]), ease: 'inOutCubic', rock: t < T.signUp[0] ? 1 : false }
     S.belt.offset = L.D_TOTAL + 150 * E.inOutCubic(seg(t, T.beltRoll[0], T.beltRoll[1]))
     // ── sky ──

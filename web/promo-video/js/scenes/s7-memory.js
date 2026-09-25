@@ -22,7 +22,8 @@
  *   T.stamp   beat on "plain": a wooden rubber stamp THUNKs terracotta "STALE" on the faded, coffee-ringed
  *             card; Pip flinches underneath (squash, eyes shut).
  *   T.grab    Pip reaches up, the pin pops, the card comes off overhead with STALE readable; T.crA..T.crB
- *             ("notes you can") it crumples into a ball (hands squeeze in, the ball pops on a beat, bwomp);
+ *             ("notes you can") it crumples into a ball (hands squeeze in, the ball pops on a beat, bwomp; the
+ *             crumple sfx starts on the first 15-fps frame that shows a crease, not on T.crA itself);
  *   T.rel     the throw wind-up starts after the crumple and releases on "tidy": the ball flies a chunky
  *             crayon-swooshed arc into the basket (T.in swish, basket bounces, plink on the next beat).
  *   T.newPin  a mitten slides a mint "+ New memory" card into the gap; it pins on a half-beat; Pip claps,
@@ -905,7 +906,12 @@
       cue(T.stamp, 'stamp', { gain: 1, pan: panOf(STALE.x) })
       // unpin, crumple, throw, swish
       cue(T.grab + 0.02, 'pop', { gain: 0.5, pitch: 1.15, pan: panOf(STALE.x) })
-      cue(T.crA, 'crumple', { gain: 0.95, dur: Math.max(0.25, T.crB - T.crA + 0.04), pan: panOf(STALE.x) })
+      // the card's silhouette stays flat until crumple p ≳ 0.2, so the sound starts on the first 15-fps frame
+      // (global grid, floor-quantized by the engine) at or after that point; it used to lead the crease by ~0.1 s
+      const fps = (window.PROMO && PROMO.fps) || 15
+      const g0 = (info && info.start) || 0
+      const crVis = Math.ceil((g0 + T.crA + 0.2 * (T.crB - T.crA)) * fps - 1e-4) / fps - g0
+      cue(crVis, 'crumple', { gain: 0.95, dur: Math.max(0.25, T.crB - crVis + 0.04), pan: panOf(STALE.x) })
       cue(T.crB - 0.03, 'bwomp', { gain: 0.6, pan: panOf(STALE.x) })
       cue(T.rel, 'swoosh', { gain: 0.45, dur: 0.3, pan: panOf(LAUNCH[0]) })
       cue(T.in - 0.03, 'swish', { gain: 1, pan: panOf(BASKET.x) })

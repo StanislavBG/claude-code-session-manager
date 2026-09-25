@@ -75,7 +75,8 @@
  *     o.title ('Memory')  o.tab ('Workspace')  o.titleIn 0..1 (1) header pops in
  *   → { slots:[[x,y] x6] (3x2 grid of card spots), title, tab, corners:{tl,tr,bl,br} }
  * memoryCard(ctx,x,y,t,o) — torn-top index card (260x180): red header rule, blue rules, hand
- *     text o.text (wraps to 3 lines; none → varied cursive scribbles), bold pencil outline.
+ *     text o.text (wraps to 3 lines; none → neutral pencil wave squiggles, never letter-like), bold
+ *     pencil outline.
  *     o.color 'cream'|'butter'|'sage'|'peach'|'mint'|hex ('cream')
  *     o.pin (true) thumbtack at the top edge; o.pinColor (tomato) o.pinR (12) o.pinPress 0..1 (1)
  *     o.pinPop 0..1 (0) the pin pops out: anticipation grow → shrinks away with a little hop (gone at 1)
@@ -452,96 +453,34 @@
     return last
   }
   /**
-   * Cursive handwriting squiggle — reads as writing without inventing words. Every "letter" picks one
-   * of five glyph shapes (e/l loop, o/a oval, n/m humps, i/t stroke + dot/cross lifted separately,
-   * g/y descender loop) with its own advance (0.6–1.1 size), so it never reads as "eeee llll".
-   * o.size (12) o.p 0..1 draw-on  o.color  o.alpha (0.8)  o.w (2.4)
+   * Neutral pencil "handwriting": short soft waves of varying length — the same squiggle words the
+   * s7 memory cards draw — so a line reads as text at a glance without ever forming letters or
+   * pseudo-words. Geometry scales with o.size (16 = the s7 card look: words 38–82 px long,
+   * 3.6–6 px amplitude, 12–22 px word gaps), centred on the old x-height band above baseline y.
+   * o.size (12) o.p 0..1 draw-on  o.color  o.alpha (0.8)  o.w (2.4)   → last drawn point [x, y]
    */
   function scribble(ctx, x, y, len, id, t, o = {}) {
     const r = K.rng('scrib', id)
     const jr = K.rng('scribj', id, K.boil(t))
     const size = def(o.size, 12)
     const p = def(o.p, 1)
-    const xh = size * 0.82 // x-height
+    const k = size / 16 // 1 = the s7 memory-card squiggle geometry
+    const y0 = y - size * 0.41 // mid x-height of a hand font sitting on baseline y
+    const step = Math.max(2, 3 * k)
     const pts = [] // [x, y, penUp]
-    const lifts = [] // { at: index in pts it follows, pl: [[x,y]...] } — i dots / t crosses
-    const pt = (px, py, up) => pts.push([x + px, y + py, !!up])
-    const oval = (cxo, cyo, rx, ry, n) => {
-      for (let s = 1; s <= n; s++) {
-        const a = -Math.PI / 6 - (s / n) * TAU
-        pt(cxo + Math.cos(a) * rx, cyo + Math.sin(a) * ry)
-      }
-    }
     let cx = 0
-    let prevG = -1
-    while (cx < len) {
-      const letters = 2 + Math.floor(r() * 5)
-      pt(cx - size * 0.22, size * 0.04, true)
-      for (let L = 0; L < letters && cx < len; L++) {
-        let adv = size * (0.6 + r() * 0.5)
-        const g = r()
-        const kind = g < 0.28 ? 0 : g < 0.48 ? 1 : g < 0.68 ? 2 : g < 0.84 ? 3 : 4
-        const k = kind === prevG && kind !== 0 ? 0 : kind // never the same non-loop glyph twice
-        prevG = k
-        if (k === 0) {
-          // e / l: trochoid loop
-          const tall = r() < 0.3 ? 1.9 : 0.85 + r() * 0.3
-          const a = adv / TAU
-          const b = a * 2.3
-          for (let s = 1; s <= 9; s++) {
-            const th = (s / 9) * TAU
-            pt(cx + a * th + b * Math.sin(th), -xh * 0.5 * (1 - Math.cos(th)) * tall)
-          }
-        } else if (k === 1) {
-          // o / a: closed oval, tail out
-          adv *= 1.05
-          pt(cx + adv * 0.72, -xh * 0.78)
-          oval(cx + adv * 0.45, -xh * 0.5, adv * 0.32, xh * 0.5, 9)
-          pt(cx + adv * 0.74, -xh * 0.2)
-          pt(cx + adv, -xh * 0.05)
-        } else if (k === 2) {
-          // n / m: one or two humps, no loops
-          const humps = r() < 0.5 ? 1 : 2
-          adv *= humps === 2 ? 1.35 : 1
-          const hw = adv / humps
-          pt(cx + hw * 0.08, -xh * 0.9)
-          pt(cx + hw * 0.1, -xh * 0.1)
-          for (let hmp = 0; hmp < humps; hmp++) {
-            for (let s = 1; s <= 5; s++) {
-              const u = s / 5
-              pt(cx + hw * (hmp + 0.1 + 0.9 * u), -xh * Math.pow(Math.sin(Math.PI * u), 0.7) * (hmp ? 0.92 : 1))
-            }
-          }
-        } else if (k === 3) {
-          // i / t: short stroke + a separate lift (dot or cross)
-          const isT = r() < 0.45
-          const hgt = isT ? xh * 1.55 : xh * 0.95
-          adv *= 0.8
-          pt(cx + adv * 0.3, -hgt * 0.55)
-          pt(cx + adv * 0.42, -hgt)
-          pt(cx + adv * 0.46, -hgt * 0.35)
-          pt(cx + adv * 0.62, -xh * 0.02)
-          pt(cx + adv, -xh * 0.28)
-          if (isT) lifts.push({ at: pts.length, pl: [[x + cx + adv * 0.12, y - xh * 1.06], [x + cx + adv * 0.8, y - xh * 1.12]] })
-          else lifts.push({ at: pts.length, pl: [[x + cx + adv * 0.46, y - xh * 1.42], [x + cx + adv * 0.5 + 1.2, y - xh * 1.48]] })
-        } else {
-          // g / y: small bowl + descender loop below the baseline
-          adv *= 1.05
-          pt(cx + adv * 0.62, -xh * 0.74)
-          oval(cx + adv * 0.4, -xh * 0.48, adv * 0.26, xh * 0.44, 8)
-          pt(cx + adv * 0.66, -xh * 0.2)
-          pt(cx + adv * 0.6, xh * 0.55)
-          pt(cx + adv * 0.44, xh * 0.95)
-          pt(cx + adv * 0.28, xh * 0.72)
-          pt(cx + adv * 0.52, xh * 0.18)
-          pt(cx + adv, -xh * 0.14)
-        }
-        cx += adv
+    while (cx < len - 16 * k) {
+      const wl = Math.min(len - cx, (38 + r() * 44) * k)
+      const amp = (3.6 + r() * 2.4) * k
+      const f = (0.3 + r() * 0.1) / k
+      const ph = r() * 6
+      for (let u = 0; u <= wl; u += step) {
+        const env = Math.sqrt(Math.sin(Math.PI * Math.min(1, u / wl)))
+        pts.push([x + cx + u, y0 + Math.sin(ph + u * f) * amp * (0.45 + 0.55 * env), u === 0])
       }
-      pt(cx + size * 0.18, 0)
-      cx += size * 0.95
+      cx += wl + (12 + r() * 10) * k
     }
-    pts[0][2] = true
+    if (!pts.length) return [x, y]
     const show = Math.floor(pts.length * p)
     ctx.save()
     ctx.lineCap = 'round'
@@ -550,20 +489,13 @@
     ctx.globalAlpha *= def(o.alpha, 0.8)
     ctx.lineWidth = def(o.w, 2.4)
     ctx.beginPath()
-    let pen = false
     for (let i = 0; i < show; i++) {
-      const [px, py, lift] = pts[i]
-      const jx = (jr() - 0.5) * 0.6
-      const jy = (jr() - 0.5) * 0.6
-      if (lift || !pen) ctx.moveTo(px + jx, py + jy)
+      const [px, py, up] = pts[i]
+      const jx = (jr() - 0.5) * 0.7
+      const jy = (jr() - 0.5) * 0.7
+      if (up) ctx.moveTo(px + jx, py + jy)
       else ctx.lineTo(px + jx, py + jy)
-      pen = true
     }
-    lifts.forEach((lf) => {
-      if (lf.at > show) return
-      ctx.moveTo(lf.pl[0][0] + (jr() - 0.5) * 0.6, lf.pl[0][1] + (jr() - 0.5) * 0.6)
-      ctx.lineTo(lf.pl[1][0] + (jr() - 0.5) * 0.6, lf.pl[1][1] + (jr() - 0.5) * 0.6)
-    })
     ctx.stroke()
     ctx.restore()
     return show > 0 ? pts[show - 1] : [x, y]

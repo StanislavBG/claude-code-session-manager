@@ -4,7 +4,7 @@
  *   0 → hit+0.6    the camera pulls back (1.14 → 1) while every prop from the film swipes into a collage
  *                  ring on arcs with overshoot, right side first so it follows the wipe: the torn sun rises
  *                  top-right; the framed poster, the memory card and the DONE stack land on the right; the s1
- *                  terminal card + sticky notes tuck in along the top/bottom edges; the paper moon drops in
+ *                  terminal card + sticky notes tuck in along the top/bottom edges (inside the frame, never cropped); the paper moon drops in
  *                  top-left with Pip standing in its cup; the binder tabs, the Chat/Terminal card (flips from
  *                  Terminal to Chat as it lands) and the three agent cards (hopping) land on the left.
  *                  Parallax: ring 1.3x the camera zoom, backdrop 0.35x (plus 0.35x info.camShift).
@@ -215,6 +215,8 @@
     const y = CY + (it.y - CY) * kr + s.dy
     K.at(ctx, x, y, s.rot, [1 / Math.sqrt(s.sq), s.sq], () => fn(ctx, t))
   }
+  // Every piece sits fully inside the frame: the top/bottom ones (term, stickyT, stickyB) rest ~32 px in from the
+  // edge, which leaves ~10 px while the pull-back parallax (kr up to ~1.05 as they land) still holds them further out.
   const RING = [
     { id: 'poster', x: 1742, y: 398, rot: 0.075, t0: -0.14, from: [0.95, -0.3], spin: 0.7, draw: (ctx, t) => P.posterPage(ctx, 0, 0, t, { scale: 0.33, frame: 1, tag: 0, id: 's9poster' }) },
     { id: 'memo', x: 1770, y: 676, rot: -0.1, t0: -0.1, from: [1, 0.1], spin: -0.8, draw: (ctx, t) => P.memoryCard(ctx, 0, 0, t, { scale: 0.78, color: 'butter', id: 's9memo' }) },
@@ -234,9 +236,9 @@
         P.folderTab(ctx, -2, 76, t, { label: 'recipe-bot', icon: 'bowl', color: 'peach', id: 's9tab3' })
       },
     },
-    { id: 'term', x: 640, y: 30, rot: -0.13, t0: -0.04, from: [0.1, -1], spin: -0.5, draw: (ctx, t) => P.terminalCard(ctx, 0, 0, t, { scale: 0.6, scribbles: 2, id: 's9term' }) },
-    { id: 'stickyT', x: 1386, y: 26, rot: 0.16, t0: -0.12, from: [0.2, -1], spin: 0.6, draw: (ctx, t) => P.stickyNote(ctx, 0, 0, t, { size: 130, color: 'pink', curl: 0.5, id: 's9stT' }) },
-    { id: 'stickyB', x: 1530, y: 1052, rot: -0.2, t0: -0.02, from: [0.3, 1], spin: -0.5, draw: (ctx, t) => {
+    { id: 'term', x: 640, y: 90, rot: -0.13, t0: -0.04, from: [0.1, -1], spin: -0.5, draw: (ctx, t) => P.terminalCard(ctx, 0, 0, t, { scale: 0.6, scribbles: 2, id: 's9term' }) },
+    { id: 'stickyT', x: 1386, y: 106, rot: 0.16, t0: -0.12, from: [0.2, -1], spin: 0.6, draw: (ctx, t) => P.stickyNote(ctx, 0, 0, t, { size: 130, color: 'pink', curl: 0.5, id: 's9stT' }) },
+    { id: 'stickyB', x: 1530, y: 972, rot: -0.2, t0: -0.02, from: [0.3, 1], spin: -0.5, draw: (ctx, t) => {
         P.stickyNote(ctx, 0, 0, t, { size: 130, color: 'sage', curl: 0.4, id: 's9stB' })
         K.pencil.curve(ctx, [[-30, -22], [-12, -6], [26, -46]], 's9stBck', t, { stroke: C.paperWhite, strokeWidth: 6, roughness: 1 })
       },
@@ -698,15 +700,19 @@
       add(0.13, 'whoosh', { gain: 0.55, pan: 0.05, pitch: 0.94 })
       add(0.3, 'whoosh', { gain: 0.6, pan: -0.55, pitch: 1.16 })
       add(T.moon0 + 0.42, 'boing', { gain: 0.35, pitch: 1.45, pan: pan(MOON.x) })
-      add(0.62, 'flip', { gain: 0.35, pitch: 1.15, pan: pan(196) }) // the Chat/Terminal card turns over to Chat
-      // letter-drop pops, one per tile, climbing the scale (first one rides the band hit)
+      // the Chat/Terminal card turns over to Chat: tied to the flip visual (0.46-0.78), so it stays put at half
+      // gain rather than moving out from under "Session Manager."
+      add(0.62, 'flip', { gain: 0.175, pitch: 1.15, pan: pan(196) })
+      // letter-drop pops, one per tile, climbing the scale (first one rides the band hit). Kept low: all 14 land
+      // under the narration's "Session Manager." (the film's weakest voice-to-bed spot), on top of the band hit.
       let k = 0
       for (let i = 0; i < TITLE.length; i++) {
         if (TITLE[i] === ' ') continue
-        add(T.hit + k * T.stag, 'letterPop', { note: NOTES[k], gain: k === 0 ? 0.7 : 0.48 + 0.02 * (k % 3), pan: pan(CX + (i - 7) * 76) })
+        add(T.hit + k * T.stag, 'letterPop', { note: NOTES[k], gain: k === 0 ? 0.35 : 0.25 + 0.01 * (k % 3), pan: pan(CX + (i - 7) * 76) })
         k++
       }
-      add(T.sub0, 'pencil', { dur: Math.max(0.3, T.sub1 - T.sub0), gain: 0.3, pan: 0 })
+      // the subtitle writes on under "Manager" (sub0 = lastLand - 0.1): tied to the reveal, so half gain, not moved
+      add(T.sub0, 'pencil', { dur: Math.max(0.3, T.sub1 - T.sub0), gain: 0.15, pan: 0 })
       add(T.build - 0.04, 'pencil', { dur: 0.32, gain: 0.4, pan: -0.15 })
       add(T.build - 0.1, 'blip', { gain: 0.3, pitch: 1.2, pan: pan(MOON.x + 60) })
       add(T.show - 0.04, 'pencil', { dur: 0.5, gain: 0.4, pan: 0.15 })

@@ -76,8 +76,9 @@ const ff = spawn(
     '-ss', String(from), '-t', String(to - from), '-i', wavPath,
     '-vf', `fps=${OUT_FPS},format=yuv420p`,
     '-c:v', 'libx264', '-preset', 'slow', '-crf', '17', '-tune', 'animation',
-    '-af', 'loudnorm=I=-15:TP=-1.5:LRA=11',
-    '-c:a', 'aac', '-b:a', '192k', '-ar', '48000',
+    // no loudnorm here: audio.js already masters the mix to -16 LUFS / -1.5 dBTP with its own
+    // limiter; a second single-pass loudnorm re-gained it +0.9 dB and AAC overshot to -0.7 dBTP
+    '-c:a', 'aac', '-b:a', '256k', '-ar', '48000',
     '-movflags', '+faststart', '-shortest',
     out,
   ],

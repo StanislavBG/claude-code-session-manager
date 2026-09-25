@@ -8,7 +8,10 @@
   "cameoTail": 0.35,
   "bpm": 104,
   "loudness": -20,
-  "trim": {"lead": 0.04, "fadeIn": 0.015},
+  "trim": {
+    "lead": 0.04,
+    "fadeIn": 0.015
+  },
   "scenes": [
     {
       "id": "s1-desk-chaos",
@@ -21,8 +24,14 @@
       "speed": 1.1,
       "lines": [
         "Twelve terminals.",
-        {"text": "Forty sticky notes.", "gap": 0.25},
-        {"text": "What was I doing again?", "gap": 0.3}
+        {
+          "text": "Forty sticky notes.",
+          "gap": 0.25
+        },
+        {
+          "text": "What was I doing again?",
+          "gap": 0.3
+        }
       ]
     },
     {
@@ -34,11 +43,29 @@
       "voLead": 0.9,
       "lines": [
         "Session Manager: one console for Claude Code.",
-        {"text": "A tab per project —", "say": "A tab per project,", "gap": 0.25},
-        {"text": "chat or terminal, same conversation.", "gap": 0.22}
+        {
+          "text": "A tab per project \u2014",
+          "say": "A tab per project,",
+          "gap": 0.25
+        },
+        {
+          "text": "chat or terminal, same conversation.",
+          "gap": 0.22
+        }
       ],
       "cameos": [
-        {"id": "pip-tada", "text": "Ta-da!", "voice": "am_puck", "speed": 1.0, "pitch": 1.18, "formant": "preserved", "at": 0.45, "snap": "half", "gain": 0.95, "pan": -0.1}
+        {
+          "id": "pip-tada",
+          "text": "Ta-da!",
+          "voice": "am_puck",
+          "speed": 1.0,
+          "pitch": 1.18,
+          "formant": "preserved",
+          "at": 0.45,
+          "snap": "half",
+          "gain": 1.1,
+          "pan": -0.1
+        }
       ]
     },
     {
@@ -48,9 +75,18 @@
       "transition": "pan",
       "minDur": 6,
       "lines": [
-        {"text": "Pick an agent and a mission —", "say": "Pick an agent and a mission,"},
-        {"text": "Claude arrives briefed.", "gap": 0.22},
-        {"text": "Favorites become one-click buttons.", "gap": 0.3}
+        {
+          "text": "Pick an agent and a mission \u2014",
+          "say": "Pick an agent and a mission,"
+        },
+        {
+          "text": "Claude arrives briefed.",
+          "gap": 0.22
+        },
+        {
+          "text": "Favorites become one-click buttons.",
+          "gap": 0.3
+        }
       ]
     },
     {
@@ -62,7 +98,10 @@
       "voLead": 0.6,
       "lines": [
         "Bedtime?",
-        {"text": "The Scheduler runs the cards, checks each one, and pauses at your limit.", "gap": 0.35}
+        {
+          "text": "The Scheduler runs the cards, checks each one, and pauses at your limit.",
+          "gap": 0.35
+        }
       ]
     },
     {
@@ -73,13 +112,49 @@
       "minDur": 5,
       "voLead": 0.4,
       "lines": [
-        {"text": "Morning:", "say": "Morning!"},
-        {"text": "a pile of done, and one note that needs you.", "gap": 0.3}
+        {
+          "text": "Morning:",
+          "say": "Morning!"
+        },
+        {
+          "text": "a pile of done, and one note that needs you.",
+          "gap": 0.3
+        }
       ],
       "cameos": [
-        {"id": "bot-check-1", "text": "Check!", "voice": "af_aoede", "speed": 1.0, "pitch": 1.26, "formant": "shifted", "at": 0.2, "gain": 0.8, "pan": -0.45},
-        {"id": "bot-check-2", "text": "Check!", "voice": "am_adam", "speed": 1.0, "pitch": 1.26, "formant": "shifted", "at": 0.58, "gain": 0.8, "pan": 0.0},
-        {"id": "bot-check-3", "text": "Check!", "voice": "bf_emma", "speed": 1.0, "pitch": 1.26, "formant": "shifted", "at": 0.96, "gain": 0.8, "pan": 0.45}
+        {
+          "id": "bot-check-1",
+          "text": "Check!",
+          "voice": "af_aoede",
+          "speed": 1.0,
+          "pitch": 1.26,
+          "formant": "shifted",
+          "at": 0.2,
+          "gain": 0.8,
+          "pan": -0.45
+        },
+        {
+          "id": "bot-check-2",
+          "text": "Check!",
+          "voice": "am_adam",
+          "speed": 1.0,
+          "pitch": 1.26,
+          "formant": "shifted",
+          "at": 0.58,
+          "gain": 0.8,
+          "pan": 0.0
+        },
+        {
+          "id": "bot-check-3",
+          "text": "Check!",
+          "voice": "bf_emma",
+          "speed": 1.0,
+          "pitch": 1.26,
+          "formant": "shifted",
+          "at": 0.96,
+          "gain": 1.0,
+          "pan": 0.45
+        }
       ]
     },
     {
@@ -89,8 +164,15 @@
       "transition": "wipe",
       "minDur": 5.5,
       "lines": [
-        {"text": "Files sit right beside Claude:", "say": "Files sit right beside Claude,", "speed": 0.95},
-        {"text": "edit one, or toss it into chat.", "gap": 0.3}
+        {
+          "text": "Files sit right beside Claude:",
+          "say": "Files sit right beside Claude,",
+          "speed": 0.95
+        },
+        {
+          "text": "edit one, or toss it into chat.",
+          "gap": 0.3
+        }
       ]
     },
     {
@@ -100,7 +182,7 @@
       "transition": "pan",
       "minDur": 5,
       "lines": [
-        "Peek at what Claude remembers — plain notes you can tidy."
+        "Peek at what Claude remembers \u2014 plain notes you can tidy."
       ]
     },
     {
@@ -110,13 +192,53 @@
       "transition": "tilt",
       "minDur": 7,
       "lines": [
-        {"text": "Then show off:", "say": "Then show off,"},
-        {"text": "a project page from your real code —", "say": "a project page from your real code,", "gap": 0.25},
-        {"text": "like ours on bilko.run.", "say": "like ours on bilko dot run.", "gap": 0.25}
+        {
+          "text": "Then show off:",
+          "say": "Then show off,"
+        },
+        {
+          "text": "a project page from your real code \u2014",
+          "say": "a project page from your real code,",
+          "gap": 0.25
+        },
+        {
+          "text": "like ours on bilko.run.",
+          "say": "like ours on bilko dot run.",
+          "gap": 0.25
+        }
       ],
       "cameos": [
-        {"id": "visitor-ooh-1", "text": "Ooh!", "voice": "af_bella", "speed": 1.0, "pitch": 1.12, "formant": "preserved", "at": {"after": "vo", "offset": 0.3}, "snap": "half", "gain": 0.6, "pan": -0.35, "fadeIn": 0.04},
-        {"id": "visitor-ooh-2", "text": "Ooh!", "voice": "am_michael", "speed": 1.0, "pitch": 1.12, "formant": "preserved", "at": {"with": "visitor-ooh-1", "offset": 0.16}, "gain": 0.55, "pan": 0.35, "fadeIn": 0.05}
+        {
+          "id": "visitor-ooh-1",
+          "text": "Ooh!",
+          "voice": "af_bella",
+          "speed": 1.0,
+          "pitch": 1.12,
+          "formant": "preserved",
+          "at": {
+            "after": "vo",
+            "offset": 0.3
+          },
+          "snap": "half",
+          "gain": 1.25,
+          "pan": -0.35,
+          "fadeIn": 0.04
+        },
+        {
+          "id": "visitor-ooh-2",
+          "text": "Ooh!",
+          "voice": "am_michael",
+          "speed": 1.0,
+          "pitch": 1.12,
+          "formant": "preserved",
+          "at": {
+            "with": "visitor-ooh-1",
+            "offset": 0.16
+          },
+          "gain": 1.2,
+          "pan": 0.35,
+          "fadeIn": 0.05
+        }
       ]
     },
     {
@@ -130,11 +252,32 @@
       "cameoTail": 1.25,
       "lines": [
         "Session Manager.",
-        {"text": "Build it, show it off —", "say": "Build it, show it off,", "gap": 0.35},
-        {"text": "free and open.", "gap": 0.25}
+        {
+          "text": "Build it, show it off \u2014",
+          "say": "Build it, show it off,",
+          "gap": 0.35
+        },
+        {
+          "text": "free and open.",
+          "gap": 0.25
+        }
       ],
       "cameos": [
-        {"id": "pip-yay", "text": "Yay!", "voice": "am_puck", "speed": 1.08, "pitch": 1.18, "formant": "preserved", "at": {"after": "vo", "offset": 0.35}, "snap": "half", "gain": 0.95, "pan": 0.1}
+        {
+          "id": "pip-yay",
+          "text": "Yay!",
+          "voice": "am_puck",
+          "speed": 1.08,
+          "pitch": 1.18,
+          "formant": "preserved",
+          "at": {
+            "after": "vo",
+            "offset": 0.35
+          },
+          "snap": "half",
+          "gain": 0.95,
+          "pan": 0.1
+        }
       ]
     }
   ]

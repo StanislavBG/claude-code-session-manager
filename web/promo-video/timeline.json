@@ -69,7 +69,7 @@
           "file": "vo/cameo-pip-tada.wav",
           "start": 6.082,
           "duration": 0.673,
-          "gain": 0.95,
+          "gain": 1.1,
           "pan": -0.1
         }
       ]
@@ -174,7 +174,7 @@
           "file": "vo/cameo-bot-check-3.wav",
           "start": 28.301,
           "duration": 0.576,
-          "gain": 0.8,
+          "gain": 1,
           "pan": 0.45
         }
       ]
@@ -257,7 +257,7 @@
           "file": "vo/cameo-visitor-ooh-1.wav",
           "start": 49.526,
           "duration": 0.386,
-          "gain": 0.6,
+          "gain": 1.25,
           "pan": -0.35
         },
         {
@@ -266,7 +266,7 @@
           "file": "vo/cameo-visitor-ooh-2.wav",
           "start": 49.686,
           "duration": 0.535,
-          "gain": 0.55,
+          "gain": 1.2,
           "pan": 0.35
         }
       ]

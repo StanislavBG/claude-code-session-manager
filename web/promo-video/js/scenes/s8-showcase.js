@@ -14,7 +14,8 @@
  *   gallery facade "Showcase": Pip's last bound lands him past the free slot (turning mid-air); the mitten
  *     lifts the frame off his mitts and swings it up into the slot, then pushes a thumbtack in at
  *     cameoAt('visitor-ooh-1') - 0.2 (pin + bandHit) while Pip cheers clear of the frame; two strolling
- *     visitors stop, "Ooh!", clap; hearts pop in their own slots (wall gaps / between the heads).
+ *     visitors stop, "Ooh!", clap (soft claps under the cameos); hearts pop (quietly) in their own slots (wall
+ *     gaps / between the heads); the LOUD claps wait for the first beat after the second "Ooh!" ends.
  *
  * Parallax: every world layer has a factor f (hills + trees 0.7, houses 0.86, ground / gallery 1, signpost
  * 1.2) against the camera track; during the engine's tilt-in the backdrop wall lags (-0.25·dy) while the
@@ -117,7 +118,9 @@
     T.clapA = T.tagA + 0.02
     T.frameA = T.code + 0.02
     T.frameB = T.frameA + 0.32
-    T.snap = T.frameA + 0.6 * 0.32 // outBack crosses scale 1 here
+    // the kraft frame reads as landed on the first 15-fps frame ≥ frameA + 0.073 (alpha ≥ .75, scale within ~5%);
+    // cueing the snap where outBack crosses scale 1 (+0.19) sounded ~100 ms late
+    T.snap = T.frameA + 0.08
     // pick-up: Pip leaps under the frame while the mitten lifts it
     T.land = nhb(T.code + 0.62)
     T.leap0 = T.land - 0.3
@@ -131,7 +134,11 @@
     T.turn = T.hop0 + (N_HOPS - 1) * hb + 0.5 * AIR * hb // turns to face the slot at the top of the last hop
     T.hang = Math.max(T.pin - 0.14, T.arrive + 0.2) // the mitten has swung the frame into the slot
     T.pinA = T.pin - 0.12
-    T.clap = nb(T.ooh2 + 0.12)
+    T.clap = nb(T.ooh2 + 0.12) // clap POSES (Pip cheer→clap, both visitors) + a soft claps bed
+    // the loud claps wait for the first beat after the second "Ooh!" ends: at T.clap they buried both cameos
+    const ooh2 = (info.cameos || []).find((c) => c.id === 'visitor-ooh-2')
+    T.ooh2End = ooh2 ? ooh2.end : T.ooh2 + 0.53
+    T.clapLoud = nb(T.ooh2End)
     const h0 = nhb(T.ooh1 + 0.05) // hearts cascade on quarter-beats from the first "Ooh!"
     T.hearts = [0, 1, 2, 3, 4].map((i) => h0 + (i * hb) / 2)
     return T
@@ -856,9 +863,12 @@
     add(T.pin, 'pin', { gain: 1.1, pan: panOf(scrX(SLOT.x, T.pin)) })
     // accent on top of the score's own full-band hit, which music() below now lands on the push-pin
     add(T.pin, 'bandHit', { gain: 0.35, pan: panOf(scrX(SLOT.x, T.pin)) * 0.5 })
-    add(T.hearts[0], 'sparkle', { gain: 0.55, pan: panOf(scrX(HEARTS[0].x, T.hearts[0])) })
-    T.hearts.forEach((h, i) => add(h + 0.02, 'pop', { gain: 0.3, pitch: 1.15 + 0.12 * i, pan: panOf(scrX(HEARTS[i].x, h)) }))
-    add(T.clap, 'claps', { gain: 0.8, dur: Math.max(0.6, dur - T.clap), pan: 0.15 })
+    // the hearts cascade under the visitors' "Ooh!" cameos (49.5-50.3 global): half gain so the voices win
+    add(T.hearts[0], 'sparkle', { gain: 0.3, pan: panOf(scrX(HEARTS[0].x, T.hearts[0])) })
+    T.hearts.forEach((h, i) => add(h + 0.02, 'pop', { gain: 0.15, pitch: 1.15 + 0.12 * i, pan: panOf(scrX(HEARTS[i].x, h)) }))
+    // soft claps under the "Ooh!"s so the visible clapping is never silent; the loud ones once both cameos are out
+    add(T.clap, 'claps', { gain: 0.3, dur: 0.5, pan: 0.15 })
+    add(T.clapLoud, 'claps', { gain: 0.8, dur: Math.max(0.6, dur - T.clapLoud), pan: 0.15 })
     return cues.filter((c) => c.t < dur)
   }
 

@@ -12,11 +12,18 @@ read back through `config.cjs`. There is no concurrent-write hazard to guard: on
 authors a release, a human reviews it, `web/manual/build.mjs` emits it. Enumerated in the root
 `CLAUDE.md` alongside the other non-`OWNERS` folders.
 
+## Writing style
+
+[`STYLE.md`](STYLE.md) is the single writing contract for the manual's voice, reading level,
+chapter template, and component vocabulary. Read it before writing or revising any chapter —
+every chapter PRD and every `builder:manual` revision reads it first.
+
 ## Shape
 
 ```
 manual/
-├── manual.json              # source manifest — version, chapters, downloadable assets
+├── STYLE.md                  # writing contract — voice, reading level, component vocabulary
+├── manual.json               # source manifest — version, chapters, downloadable assets
 ├── chapters/<slug>.html     # one file per chapter; plain HTML fragments, no <html> wrapper
 └── figures/                 # annotated screenshots (copied verbatim into the release)
 ```

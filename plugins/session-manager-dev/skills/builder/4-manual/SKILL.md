@@ -45,6 +45,8 @@ Edit the chapter HTML in `session-manager-operations/manual/chapters/`.
 
 Hard rules — these are the ones that protect a paying customer:
 
+- **Follow `manual/STYLE.md`** (voice, reading level, component vocabulary) — it is the single
+  writing contract for every chapter, revisions included.
 - **Every claim must be checkable against real code right now.** Read the file, run the
   command, confirm the constant. A wrong instruction in a paid product is a refund.
 - **Never invent a screenshot.** A figure slot that has no captured image stays a

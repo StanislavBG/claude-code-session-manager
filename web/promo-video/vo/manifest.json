@@ -1,0 +1,566 @@
+{
+  "model": "kokoro-v1.0.onnx",
+  "sample_rate": 24000,
+  "trim": {
+    "threshold": -45,
+    "lead": 0.04,
+    "tail": 0.07,
+    "fadeIn": 0.015,
+    "fadeOut": 0.03
+  },
+  "loudness": -20,
+  "clips": [
+    {
+      "rawDuration": 1.195,
+      "trim": [
+        0.003,
+        1.165
+      ],
+      "gainDb": 0.2,
+      "meanDb": -20.2,
+      "duration": 1.162,
+      "id": "s1-desk-chaos-1",
+      "kind": "narration",
+      "file": "s1-desk-chaos-1.wav",
+      "text": "Twelve terminals.",
+      "voice": "af_jessica",
+      "speed": 1.1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"Twelve terminals.\",\"af_jessica\",1.1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 1.387,
+      "trim": [
+        0,
+        1.365
+      ],
+      "gainDb": 0.2,
+      "meanDb": -20.2,
+      "duration": 1.365,
+      "id": "s1-desk-chaos-2",
+      "kind": "narration",
+      "file": "s1-desk-chaos-2.wav",
+      "text": "Forty sticky notes.",
+      "voice": "af_jessica",
+      "speed": 1.1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"Forty sticky notes.\",\"af_jessica\",1.1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 1.515,
+      "trim": [
+        0,
+        1.473
+      ],
+      "gainDb": 0.5,
+      "meanDb": -20.5,
+      "duration": 1.473,
+      "id": "s1-desk-chaos-3",
+      "kind": "narration",
+      "file": "s1-desk-chaos-3.wav",
+      "text": "What was I doing again?",
+      "voice": "af_jessica",
+      "speed": 1.1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"What was I doing again?\",\"af_jessica\",1.1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 2.987,
+      "trim": [
+        0,
+        2.957
+      ],
+      "gainDb": 2.3,
+      "meanDb": -22.3,
+      "duration": 2.957,
+      "id": "s2-one-console-1",
+      "kind": "narration",
+      "file": "s2-one-console-1.wav",
+      "text": "Session Manager: one console for Claude Code.",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"Session Manager: one console for Claude Code.\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 1.365,
+      "trim": [
+        0.03,
+        1.343
+      ],
+      "gainDb": 2.6,
+      "meanDb": -22.6,
+      "duration": 1.313,
+      "id": "s2-one-console-2",
+      "kind": "narration",
+      "file": "s2-one-console-2.wav",
+      "text": "A tab per project,",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"A tab per project,\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 2.347,
+      "trim": [
+        0,
+        2.307
+      ],
+      "gainDb": 2.3,
+      "meanDb": -22.3,
+      "duration": 2.307,
+      "id": "s2-one-console-3",
+      "kind": "narration",
+      "file": "s2-one-console-3.wav",
+      "text": "chat or terminal, same conversation.",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"chat or terminal, same conversation.\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 0.68,
+      "trim": [
+        0,
+        0.673
+      ],
+      "gainDb": -2.4,
+      "meanDb": -17.6,
+      "duration": 0.673,
+      "id": "cameo-pip-tada",
+      "kind": "cameo",
+      "file": "cameo-pip-tada.wav",
+      "text": "Ta-da!",
+      "voice": "am_puck",
+      "speed": 1,
+      "pitch": 1.18,
+      "formant": "preserved",
+      "key": "[2,\"Ta-da!\",\"am_puck\",1,1.18,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 1.6,
+      "trim": [
+        0.007,
+        1.545
+      ],
+      "gainDb": 2.7,
+      "meanDb": -22.7,
+      "duration": 1.538,
+      "id": "s3-agents-1",
+      "kind": "narration",
+      "file": "s3-agents-1.wav",
+      "text": "Pick an agent and a mission,",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"Pick an agent and a mission,\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 1.323,
+      "trim": [
+        0.025,
+        1.264
+      ],
+      "gainDb": 1.7,
+      "meanDb": -21.7,
+      "duration": 1.239,
+      "id": "s3-agents-2",
+      "kind": "narration",
+      "file": "s3-agents-2.wav",
+      "text": "Claude arrives briefed.",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"Claude arrives briefed.\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 2.048,
+      "trim": [
+        0.006,
+        2.048
+      ],
+      "gainDb": 2.2,
+      "meanDb": -22.2,
+      "duration": 2.042,
+      "id": "s3-agents-3",
+      "kind": "narration",
+      "file": "s3-agents-3.wav",
+      "text": "Favorites become one-click buttons.",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"Favorites become one-click buttons.\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 0.875,
+      "trim": [
+        0.009,
+        0.772
+      ],
+      "gainDb": 0.7,
+      "meanDb": -20.7,
+      "duration": 0.763,
+      "id": "s4-night-scheduler-1",
+      "kind": "narration",
+      "file": "s4-night-scheduler-1.wav",
+      "text": "Bedtime?",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"Bedtime?\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 3.968,
+      "trim": [
+        0,
+        3.968
+      ],
+      "gainDb": 2.4,
+      "meanDb": -22.4,
+      "duration": 3.968,
+      "id": "s4-night-scheduler-2",
+      "kind": "narration",
+      "file": "s4-night-scheduler-2.wav",
+      "text": "The Scheduler runs the cards, checks each one, and pauses at your limit.",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"The Scheduler runs the cards, checks each one, and pauses at your limit.\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 0.747,
+      "trim": [
+        0.002,
+        0.658
+      ],
+      "gainDb": -0.5,
+      "meanDb": -19.5,
+      "duration": 0.656,
+      "id": "s5-sunrise-done-1",
+      "kind": "narration",
+      "file": "s5-sunrise-done-1.wav",
+      "text": "Morning!",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"Morning!\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 2.453,
+      "trim": [
+        0.03,
+        2.426
+      ],
+      "gainDb": 2,
+      "meanDb": -22,
+      "duration": 2.396,
+      "id": "s5-sunrise-done-2",
+      "kind": "narration",
+      "file": "s5-sunrise-done-2.wav",
+      "text": "a pile of done, and one note that needs you.",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"a pile of done, and one note that needs you.\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 0.483,
+      "trim": [
+        0,
+        0.483
+      ],
+      "gainDb": -3.8,
+      "meanDb": -16.2,
+      "duration": 0.483,
+      "id": "cameo-bot-check-1",
+      "kind": "cameo",
+      "file": "cameo-bot-check-1.wav",
+      "text": "Check!",
+      "voice": "af_aoede",
+      "speed": 1,
+      "pitch": 1.26,
+      "formant": "shifted",
+      "key": "[2,\"Check!\",\"af_aoede\",1,1.26,\"shifted\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 0.414,
+      "trim": [
+        0,
+        0.414
+      ],
+      "gainDb": -2.4,
+      "meanDb": -17.6,
+      "duration": 0.414,
+      "id": "cameo-bot-check-2",
+      "kind": "cameo",
+      "file": "cameo-bot-check-2.wav",
+      "text": "Check!",
+      "voice": "am_adam",
+      "speed": 1,
+      "pitch": 1.26,
+      "formant": "shifted",
+      "key": "[2,\"Check!\",\"am_adam\",1,1.26,\"shifted\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 0.659,
+      "trim": [
+        0,
+        0.576
+      ],
+      "gainDb": 1.8,
+      "meanDb": -21.8,
+      "duration": 0.576,
+      "id": "cameo-bot-check-3",
+      "kind": "cameo",
+      "file": "cameo-bot-check-3.wav",
+      "text": "Check!",
+      "voice": "bf_emma",
+      "speed": 1,
+      "pitch": 1.26,
+      "formant": "shifted",
+      "key": "[2,\"Check!\",\"bf_emma\",1,1.26,\"shifted\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 1.877,
+      "trim": [
+        0.027,
+        1.803
+      ],
+      "gainDb": 2.3,
+      "meanDb": -22.3,
+      "duration": 1.776,
+      "id": "s6-files-1",
+      "kind": "narration",
+      "file": "s6-files-1.wav",
+      "text": "Files sit right beside Claude,",
+      "voice": "af_heart",
+      "speed": 0.95,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"Files sit right beside Claude,\",\"af_heart\",0.95,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 2.027,
+      "trim": [
+        0,
+        1.998
+      ],
+      "gainDb": 2.5,
+      "meanDb": -22.5,
+      "duration": 1.998,
+      "id": "s6-files-2",
+      "kind": "narration",
+      "file": "s6-files-2.wav",
+      "text": "edit one, or toss it into chat.",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"edit one, or toss it into chat.\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 3.051,
+      "trim": [
+        0,
+        3.029
+      ],
+      "gainDb": 2,
+      "meanDb": -22,
+      "duration": 3.029,
+      "id": "s7-memory-1",
+      "kind": "narration",
+      "file": "s7-memory-1.wav",
+      "text": "Peek at what Claude remembers — plain notes you can tidy.",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"Peek at what Claude remembers — plain notes you can tidy.\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 0.96,
+      "trim": [
+        0,
+        0.935
+      ],
+      "gainDb": 0.7,
+      "meanDb": -20.7,
+      "duration": 0.935,
+      "id": "s8-showcase-1",
+      "kind": "narration",
+      "file": "s8-showcase-1.wav",
+      "text": "Then show off,",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"Then show off,\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 2.005,
+      "trim": [
+        0,
+        1.969
+      ],
+      "gainDb": 2.2,
+      "meanDb": -22.2,
+      "duration": 1.969,
+      "id": "s8-showcase-2",
+      "kind": "narration",
+      "file": "s8-showcase-2.wav",
+      "text": "a project page from your real code,",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"a project page from your real code,\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 1.92,
+      "trim": [
+        0.027,
+        1.876
+      ],
+      "gainDb": 2.6,
+      "meanDb": -22.6,
+      "duration": 1.849,
+      "id": "s8-showcase-3",
+      "kind": "narration",
+      "file": "s8-showcase-3.wav",
+      "text": "like ours on bilko dot run.",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"like ours on bilko dot run.\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 0.386,
+      "trim": [
+        0,
+        0.386
+      ],
+      "gainDb": 1.1,
+      "meanDb": -21.1,
+      "duration": 0.386,
+      "id": "cameo-visitor-ooh-1",
+      "kind": "cameo",
+      "file": "cameo-visitor-ooh-1.wav",
+      "text": "Ooh!",
+      "voice": "af_bella",
+      "speed": 1,
+      "pitch": 1.12,
+      "formant": "preserved",
+      "key": "[2,\"Ooh!\",\"af_bella\",1,1.12,\"preserved\",0.04,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 0.603,
+      "trim": [
+        0.038,
+        0.573
+      ],
+      "gainDb": 3.6,
+      "meanDb": -23.6,
+      "duration": 0.535,
+      "id": "cameo-visitor-ooh-2",
+      "kind": "cameo",
+      "file": "cameo-visitor-ooh-2.wav",
+      "text": "Ooh!",
+      "voice": "am_michael",
+      "speed": 1,
+      "pitch": 1.12,
+      "formant": "preserved",
+      "key": "[2,\"Ooh!\",\"am_michael\",1,1.12,\"preserved\",0.05,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 1.173,
+      "trim": [
+        0,
+        1.081
+      ],
+      "gainDb": 1.2,
+      "meanDb": -21.2,
+      "duration": 1.081,
+      "id": "s9-endcard-1",
+      "kind": "narration",
+      "file": "s9-endcard-1.wav",
+      "text": "Session Manager.",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"Session Manager.\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 1.195,
+      "trim": [
+        0,
+        1.192
+      ],
+      "gainDb": 1.9,
+      "meanDb": -21.9,
+      "duration": 1.192,
+      "id": "s9-endcard-2",
+      "kind": "narration",
+      "file": "s9-endcard-2.wav",
+      "text": "Build it, show it off,",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"Build it, show it off,\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 1.109,
+      "trim": [
+        0.007,
+        1.004
+      ],
+      "gainDb": 1.3,
+      "meanDb": -21.3,
+      "duration": 0.997,
+      "id": "s9-endcard-3",
+      "kind": "narration",
+      "file": "s9-endcard-3.wav",
+      "text": "free and open.",
+      "voice": "af_heart",
+      "speed": 1,
+      "pitch": 1,
+      "formant": "preserved",
+      "key": "[2,\"free and open.\",\"af_heart\",1,1,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    },
+    {
+      "rawDuration": 0.425,
+      "trim": [
+        0,
+        0.425
+      ],
+      "gainDb": -3.4,
+      "meanDb": -16.6,
+      "duration": 0.425,
+      "id": "cameo-pip-yay",
+      "kind": "cameo",
+      "file": "cameo-pip-yay.wav",
+      "text": "Yay!",
+      "voice": "am_puck",
+      "speed": 1.08,
+      "pitch": 1.18,
+      "formant": "preserved",
+      "key": "[2,\"Yay!\",\"am_puck\",1.08,1.18,\"preserved\",null,{\"threshold\":-45,\"lead\":0.04,\"tail\":0.07,\"fadeIn\":0.015,\"fadeOut\":0.03},-20]"
+    }
+  ],
+  "total_duration": 41.497
+}

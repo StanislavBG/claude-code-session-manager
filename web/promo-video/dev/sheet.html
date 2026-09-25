@@ -1,0 +1,34 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>dev sheet</title><link rel="icon" href="data:,">
+<style>html,body{margin:0;background:#222}canvas{display:block}</style></head>
+<body>
+<canvas id="stage" width="1920" height="1080"></canvas>
+<script src="../vendor/rough.js"></script>
+<script src="../js/kit.js"></script>
+<script src="../js/mascot.js"></script>
+<script src="../js/props/day.js"></script>
+<script src="../js/props/night.js"></script>
+<script src="../js/props/show.js"></script>
+<script>
+// dev/sheet.html?page=<name> loads dev/<name>.js, which must set
+//   window.SHEET = { times: [t0, t1, ...], draw(ctx, t) }   // draws one 1920x1080 frame at time t
+// dev/sheet.mjs screenshots every time into one contact-sheet PNG.
+(async function () {
+  const fonts = [
+    ['Patrick Hand', '../vendor/fonts/PatrickHand/PatrickHand-Regular.ttf', {}],
+    ['Gochi Hand', '../vendor/fonts/GochiHand/GochiHand-Regular.ttf', {}],
+    ['Caveat', '../vendor/fonts/Caveat/Caveat-Variable.ttf', { weight: '400 700' }],
+    ['Kalam', '../vendor/fonts/Kalam/Kalam-Regular.ttf', {}],
+    ['Kalam', '../vendor/fonts/Kalam/Kalam-Bold.ttf', { weight: '700' }],
+    ['Fredoka', '../vendor/fonts/Fredoka/Fredoka-Variable.ttf', { weight: '300 700' }],
+  ]
+  await Promise.all(fonts.map(async ([f, u, d]) => { try { const x = new FontFace(f, `url("${encodeURI(u)}")`, d); await x.load(); document.fonts.add(x) } catch (e) { console.warn('font', f, e.message) } }))
+  const page = new URLSearchParams(location.search).get('page')
+  const s = document.createElement('script')
+  s.src = page + '.js?v=' + Date.now()
+  s.onload = () => { document.documentElement.dataset.ready = window.SHEET ? '1' : 'error' }
+  s.onerror = () => { document.documentElement.dataset.ready = 'error' }
+  document.body.appendChild(s)
+})()
+</script>
+</body></html>

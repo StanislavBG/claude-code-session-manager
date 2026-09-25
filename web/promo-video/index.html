@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Manager Promo</title>
+<link rel="icon" href="data:,">
+<meta name="description" content="A hand-drawn paper-collage promo for Session Manager, animated live in JavaScript.">
+<style>
+  :root {
+    --bg: #e9dcc3;
+    --ink: #2b2a4c;
+    --paper: #fffaf0;
+    --accent: #ef6f53;
+    --muted: #6b6883;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #1d1b2e; --ink: #f3ecdc; --paper: #2b2945; --accent: #f59a7f; --muted: #b8b3cf; }
+  }
+  :root[data-theme="dark"] { --bg: #1d1b2e; --ink: #f3ecdc; --paper: #2b2945; --accent: #f59a7f; --muted: #b8b3cf; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Patrick Hand", "Comic Sans MS", system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 16px; gap: 12px; overflow-x: hidden;
+  }
+  .frame { position: relative; width: min(100%, calc((100vh - 110px) * 16 / 9)); aspect-ratio: 16 / 9;
+    border-radius: 6px; box-shadow: 0 10px 30px rgba(40, 25, 10, .35); overflow: hidden; background: #fbf4e4; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #overlay { position: absolute; inset: 0; display: grid; place-items: center; cursor: pointer;
+    background: rgba(43, 42, 76, .18); transition: opacity .25s; }
+  #overlay.hidden { opacity: 0; pointer-events: none; }
+  #overlay .btn { width: clamp(64px, 12vw, 128px); aspect-ratio: 1; border-radius: 50%; background: var(--accent);
+    display: grid; place-items: center; box-shadow: 4px 6px 0 rgba(43, 42, 76, .35); transform: rotate(-4deg); }
+  #overlay .btn::after { content: ""; margin-left: 12%; border-left: 34px solid #fffaf0; border-top: 21px solid transparent; border-bottom: 21px solid transparent; }
+  #overlay.busy .btn { animation: wob .5s infinite alternate; }
+  @keyframes wob { to { transform: rotate(4deg) scale(1.05); } }
+  .bar { width: min(100%, calc((100vh - 110px) * 16 / 9)); display: flex; gap: 12px; align-items: center; }
+  .bar button { font: inherit; font-size: 20px; min-width: 48px; height: 40px; border: 2px solid var(--ink); border-radius: 10px 12px 9px 13px;
+    background: var(--paper); color: var(--ink); cursor: pointer; box-shadow: 2px 3px 0 rgba(43, 42, 76, .3); }
+  .bar button.off { opacity: .45; text-decoration: line-through; }
+  .bar input[type=range] { flex: 1; accent-color: var(--accent); min-width: 0; }
+  #time { font-variant-numeric: tabular-nums; color: var(--muted); min-width: 92px; text-align: right; }
+  .note { color: var(--muted); font-size: 15px; text-align: center; }
+  @media (max-width: 520px) { #time { display: none; } }
+  /* ?render — Playwright captures the bare 1920x1080 stage */
+  html.render body { padding: 0; display: block; background: #000; }
+  html.render .frame { width: 1920px; height: 1080px; aspect-ratio: auto; border-radius: 0; box-shadow: none; }
+  html.render .bar, html.render .note, html.render #overlay { display: none; }
+</style>
+</head>
+<body>
+  <script>if (new URLSearchParams(location.search).has('render')) document.documentElement.classList.add('render')</script>
+  <div class="frame">
+    <canvas id="stage" width="1920" height="1080" aria-label="Session Manager promo animation"></canvas>
+    <div id="overlay" title="Play"><div class="btn"></div></div>
+  </div>
+  <div class="bar">
+    <button id="play" aria-label="Play or pause">▶</button>
+    <input id="scrub" type="range" min="0" step="0.01" value="0" aria-label="Seek">
+    <span id="time">0.0s</span>
+    <button id="cc" aria-label="Toggle captions">CC</button>
+  </div>
+  <div class="note">Drawn live in JavaScript — every frame is paper, pencil and a little math. Sound on!</div>
+
+  <script src="vendor/rough.js"></script>
+  <script src="js/kit.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/engine.js"></script>
+  <script src="js/mascot.js"></script>
+  <script src="js/props/day.js"></script>
+  <script src="js/props/night.js"></script>
+  <script src="js/props/show.js"></script>
+  <!-- SCENES:BEGIN (build-timeline.mjs rewrites this block from script/script.json) -->
+  <script src="js/scenes/s1-desk-chaos.js"></script>
+  <script src="js/scenes/s2-one-console.js"></script>
+  <script src="js/scenes/s3-agents.js"></script>
+  <script src="js/scenes/s4-night-scheduler.js"></script>
+  <script src="js/scenes/s5-sunrise-done.js"></script>
+  <script src="js/scenes/s6-files.js"></script>
+  <script src="js/scenes/s7-memory.js"></script>
+  <script src="js/scenes/s8-showcase.js"></script>
+  <script src="js/scenes/s9-endcard.js"></script>
+  <!-- SCENES:END -->
+</body>
+</html>

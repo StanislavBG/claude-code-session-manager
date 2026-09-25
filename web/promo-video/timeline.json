@@ -1,0 +1,315 @@
+{
+  "generated": "build-timeline.mjs from script/script.json",
+  "duration": 56.993,
+  "bpm": 103.3855,
+  "beat": 0.58035,
+  "logoTime": 51.071,
+  "scenes": [
+    {
+      "id": "s1-desk-chaos",
+      "file": "js/scenes/s1-desk-chaos.js",
+      "start": 0,
+      "end": 5.5,
+      "mood": "chaos",
+      "transition": "none",
+      "vo": [
+        {
+          "file": "vo/s1-desk-chaos-1.wav",
+          "start": 0.5,
+          "duration": 1.162,
+          "text": "Twelve terminals."
+        },
+        {
+          "file": "vo/s1-desk-chaos-2.wav",
+          "start": 1.912,
+          "duration": 1.365,
+          "text": "Forty sticky notes."
+        },
+        {
+          "file": "vo/s1-desk-chaos-3.wav",
+          "start": 3.577,
+          "duration": 1.473,
+          "text": "What was I doing again?"
+        }
+      ],
+      "cameos": []
+    },
+    {
+      "id": "s2-one-console",
+      "file": "js/scenes/s2-one-console.js",
+      "start": 5.5,
+      "end": 14.352,
+      "mood": "full",
+      "transition": "tape",
+      "vo": [
+        {
+          "file": "vo/s2-one-console-1.wav",
+          "start": 6.905,
+          "duration": 2.957,
+          "text": "Session Manager: one console for Claude Code."
+        },
+        {
+          "file": "vo/s2-one-console-2.wav",
+          "start": 10.112,
+          "duration": 1.313,
+          "text": "A tab per project —",
+          "say": "A tab per project,"
+        },
+        {
+          "file": "vo/s2-one-console-3.wav",
+          "start": 11.645,
+          "duration": 2.307,
+          "text": "chat or terminal, same conversation."
+        }
+      ],
+      "cameos": [
+        {
+          "id": "pip-tada",
+          "text": "Ta-da!",
+          "file": "vo/cameo-pip-tada.wav",
+          "start": 6.082,
+          "duration": 0.673,
+          "gain": 0.95,
+          "pan": -0.1
+        }
+      ]
+    },
+    {
+      "id": "s3-agents",
+      "file": "js/scenes/s3-agents.js",
+      "start": 14.352,
+      "end": 20.541,
+      "mood": "full",
+      "transition": "pan",
+      "vo": [
+        {
+          "file": "vo/s3-agents-1.wav",
+          "start": 14.802,
+          "duration": 1.538,
+          "text": "Pick an agent and a mission —",
+          "say": "Pick an agent and a mission,"
+        },
+        {
+          "file": "vo/s3-agents-2.wav",
+          "start": 16.56,
+          "duration": 1.239,
+          "text": "Claude arrives briefed."
+        },
+        {
+          "file": "vo/s3-agents-3.wav",
+          "start": 18.099,
+          "duration": 2.042,
+          "text": "Favorites become one-click buttons."
+        }
+      ],
+      "cameos": []
+    },
+    {
+      "id": "s4-night-scheduler",
+      "file": "js/scenes/s4-night-scheduler.js",
+      "start": 20.541,
+      "end": 27.341,
+      "mood": "night",
+      "transition": "drop",
+      "vo": [
+        {
+          "file": "vo/s4-night-scheduler-1.wav",
+          "start": 21.141,
+          "duration": 0.763,
+          "text": "Bedtime?"
+        },
+        {
+          "file": "vo/s4-night-scheduler-2.wav",
+          "start": 22.254,
+          "duration": 3.968,
+          "text": "The Scheduler runs the cards, checks each one, and pauses at your limit."
+        }
+      ],
+      "cameos": []
+    },
+    {
+      "id": "s5-sunrise-done",
+      "file": "js/scenes/s5-sunrise-done.js",
+      "start": 27.341,
+      "end": 32.779,
+      "mood": "sunrise",
+      "transition": "none",
+      "vo": [
+        {
+          "file": "vo/s5-sunrise-done-1.wav",
+          "start": 29.027,
+          "duration": 0.656,
+          "text": "Morning:",
+          "say": "Morning!"
+        },
+        {
+          "file": "vo/s5-sunrise-done-2.wav",
+          "start": 29.983,
+          "duration": 2.396,
+          "text": "a pile of done, and one note that needs you."
+        }
+      ],
+      "cameos": [
+        {
+          "id": "bot-check-1",
+          "text": "Check!",
+          "file": "vo/cameo-bot-check-1.wav",
+          "start": 27.541,
+          "duration": 0.483,
+          "gain": 0.8,
+          "pan": -0.45
+        },
+        {
+          "id": "bot-check-2",
+          "text": "Check!",
+          "file": "vo/cameo-bot-check-2.wav",
+          "start": 27.921,
+          "duration": 0.414,
+          "gain": 0.8,
+          "pan": 0
+        },
+        {
+          "id": "bot-check-3",
+          "text": "Check!",
+          "file": "vo/cameo-bot-check-3.wav",
+          "start": 28.301,
+          "duration": 0.576,
+          "gain": 0.8,
+          "pan": 0.45
+        }
+      ]
+    },
+    {
+      "id": "s6-files",
+      "file": "js/scenes/s6-files.js",
+      "start": 32.779,
+      "end": 38.279,
+      "mood": "full",
+      "transition": "wipe",
+      "vo": [
+        {
+          "file": "vo/s6-files-1.wav",
+          "start": 33.229,
+          "duration": 1.776,
+          "text": "Files sit right beside Claude:",
+          "say": "Files sit right beside Claude,"
+        },
+        {
+          "file": "vo/s6-files-2.wav",
+          "start": 35.305,
+          "duration": 1.998,
+          "text": "edit one, or toss it into chat."
+        }
+      ],
+      "cameos": []
+    },
+    {
+      "id": "s7-memory",
+      "file": "js/scenes/s7-memory.js",
+      "start": 38.279,
+      "end": 43.279,
+      "mood": "full",
+      "transition": "pan",
+      "vo": [
+        {
+          "file": "vo/s7-memory-1.wav",
+          "start": 38.729,
+          "duration": 3.029,
+          "text": "Peek at what Claude remembers — plain notes you can tidy."
+        }
+      ],
+      "cameos": []
+    },
+    {
+      "id": "s8-showcase",
+      "file": "js/scenes/s8-showcase.js",
+      "start": 43.279,
+      "end": 50.571,
+      "mood": "build",
+      "transition": "tilt",
+      "vo": [
+        {
+          "file": "vo/s8-showcase-1.wav",
+          "start": 43.729,
+          "duration": 0.935,
+          "text": "Then show off:",
+          "say": "Then show off,"
+        },
+        {
+          "file": "vo/s8-showcase-2.wav",
+          "start": 44.914,
+          "duration": 1.969,
+          "text": "a project page from your real code —",
+          "say": "a project page from your real code,"
+        },
+        {
+          "file": "vo/s8-showcase-3.wav",
+          "start": 47.133,
+          "duration": 1.849,
+          "text": "like ours on bilko.run.",
+          "say": "like ours on bilko dot run."
+        }
+      ],
+      "cameos": [
+        {
+          "id": "visitor-ooh-1",
+          "text": "Ooh!",
+          "file": "vo/cameo-visitor-ooh-1.wav",
+          "start": 49.526,
+          "duration": 0.386,
+          "gain": 0.6,
+          "pan": -0.35
+        },
+        {
+          "id": "visitor-ooh-2",
+          "text": "Ooh!",
+          "file": "vo/cameo-visitor-ooh-2.wav",
+          "start": 49.686,
+          "duration": 0.535,
+          "gain": 0.55,
+          "pan": 0.35
+        }
+      ]
+    },
+    {
+      "id": "s9-endcard",
+      "file": "js/scenes/s9-endcard.js",
+      "start": 50.571,
+      "end": 56.993,
+      "mood": "finale",
+      "transition": "wipe",
+      "vo": [
+        {
+          "file": "vo/s9-endcard-1.wav",
+          "start": 51.071,
+          "duration": 1.081,
+          "text": "Session Manager."
+        },
+        {
+          "file": "vo/s9-endcard-2.wav",
+          "start": 52.502,
+          "duration": 1.192,
+          "text": "Build it, show it off —",
+          "say": "Build it, show it off,"
+        },
+        {
+          "file": "vo/s9-endcard-3.wav",
+          "start": 53.944,
+          "duration": 0.997,
+          "text": "free and open."
+        }
+      ],
+      "cameos": [
+        {
+          "id": "pip-yay",
+          "text": "Yay!",
+          "file": "vo/cameo-pip-yay.wav",
+          "start": 55.318,
+          "duration": 0.425,
+          "gain": 0.95,
+          "pan": 0.1
+        }
+      ]
+    }
+  ]
+}

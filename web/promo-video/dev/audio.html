@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>audio test</title><link rel="icon" href="data:,">
+<style>html,body{margin:0;background:#222;color:#eee;font:14px monospace}</style></head>
+<body>
+<p>dev/audio.html — driven by dev/audio-test.mjs</p>
+<script src="../vendor/rough.js"></script>
+<script src="../js/kit.js"></script>
+<script src="../js/audio.js"></script>
+<script>
+// window.TEST — helpers the Node driver calls through page.evaluate().
+(function () {
+  const SR = AUDIO.SR
+  const b64 = (ab) => {
+    const bytes = new Uint8Array(ab)
+    let s = ''
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000))
+    return btoa(s)
+  }
+  const unb64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0)).buffer
+  const decode = async (ab) => new OfflineAudioContext(1, 1, SR).decodeAudioData(ab)
+  const load = async (url) => decode(await (await fetch(url)).arrayBuffer())
+
+  /** a cute two-syllable "voice" stand-in (glottal pulses through vowel formants) */
+  function standIn(syll, f0, kind) {
+    const len = syll.reduce((a, s) => a + s.dur + 0.05, 0.1)
+    const b = new AudioBuffer({ length: Math.round(len * SR), numberOfChannels: 1, sampleRate: SR })
+    const d = b.getChannelData(0)
+    const r = K.rng('standin', kind, f0)
+    let t0 = 0.05
+    for (const s of syll) {
+      let ph = 0
+      const n = Math.round(s.dur * SR)
+      const i0 = Math.round(t0 * SR)
+      let y1 = 0, y2 = 0, z1 = 0, z2 = 0
+      const bp = (f, q) => {
+        const w = 2 * Math.PI * f / SR, al = Math.sin(w) / (2 * q)
+        return [al / (1 + al), 0, -al / (1 + al), -2 * Math.cos(w) / (1 + al), (1 - al) / (1 + al)]
+      }
+      const A = bp(s.f1, 5), B = bp(s.f2, 7)
+      let a1 = 0, a2 = 0, b1 = 0, b2 = 0, c1 = 0, c2 = 0, e1 = 0, e2 = 0
+      for (let i = 0; i < n; i++) {
+        const t = i / SR
+        const f = f0 * s.p * (1 + 0.15 * (t / s.dur)) * (1 + 0.01 * Math.sin(2 * Math.PI * 5.5 * t))
+        ph += f / SR
+        const src = (ph % 1) < 0.08 ? 1 : 0
+        const x = src - 0.08 + (r() - 0.5) * 0.02
+        const ya = A[0] * x + A[2] * a2 - A[3] * b1 - A[4] * b2
+        a2 = a1; a1 = x; b2 = b1; b1 = ya
+        const yb = B[0] * x + B[2] * c2 - B[3] * e1 - B[4] * e2
+        c2 = c1; c1 = x; e2 = e1; e1 = yb
+        const env = Math.min(1, t / 0.02) * Math.min(1, (s.dur - t) / 0.06)
+        d[i0 + i] += (ya + 0.6 * yb) * env * 3
+      }
+      t0 += s.dur + 0.05
+    }
+    return b
+  }
+  /** a narration-ish stand-in: babbling syllables (used only when vo/ has no clips) */
+  function narrationStandIn(seconds, key) {
+    const r = K.rng('narr', key)
+    const syll = []
+    let t = 0
+    while (t < seconds) {
+      const dur = 0.12 + r() * 0.16
+      const v = [[700, 1200], [400, 2000], [500, 900], [300, 2300]][Math.floor(r() * 4)]
+      syll.push({ dur, f1: v[0], f2: v[1], p: 0.9 + r() * 0.25 })
+      t += dur + 0.05 + (r() < 0.15 ? 0.25 : 0)
+    }
+    return standIn(syll, 190, 'narr' + key)
+  }
+
+  const SCENES = [
+    ['s1-desk-chaos', 'chaos', 5.5],
+    ['s2-one-console', 'full', 7],
+    ['s3-agents', 'full', 6],
+    ['s4-night-scheduler', 'night', 7],
+    ['s5-sunrise-done', 'sunrise', 5],
+    ['s6-files', 'full', 5.5],
+    ['s7-memory', 'full', 5],
+    ['s8-showcase', 'build', 7],
+    ['s9-endcard', 'finale', 6],
+  ]
+
+  /** the synthetic 56 s plan: BRIEF moods (s1–s8 stretched ×1.033 like VO-driven scenes do), logo ≈ 50 */
+  async function buildPlan(cfg) {
+    const duration = 56
+    const s9 = 49.6
+    const k = s9 / 48
+    const moods = []
+    let t = 0
+    SCENES.forEach(([id, mood, len], i) => {
+      const end = i === SCENES.length - 1 ? duration : t + len * k
+      moods.push({ id, start: t, end, mood })
+      t = end
+    })
+    // narration: real clips if present, else babble stand-ins
+    const clips = []
+    for (const f of cfg.voFiles || []) clips.push({ name: f, buffer: await load('../' + f) })
+    const vo = []
+    moods.forEach((m, i) => {
+      let at = m.start + 0.15
+      const stop = m.end - (m.mood === 'finale' ? 2.3 : 0.9)
+      let j = i
+      let guard = 0
+      while (at < stop - 0.5 && guard++ < 8) {
+        const c = clips.length ? clips[j++ % clips.length] : { name: 'stand-in', buffer: narrationStandIn(Math.min(2.2, stop - at), i + ':' + guard) }
+        if (at + c.buffer.duration > stop + 0.3) break
+        vo.push({ start: at, buffer: c.buffer, kind: 'narration', label: m.id + ' ' + c.name })
+        at += c.buffer.duration + 0.35
+      }
+    })
+    // two cameos in narration gaps
+    let pip = null
+    if (cfg.cameoB64) pip = await decode(unb64(cfg.cameoB64))
+    const tada = pip || standIn([{ dur: 0.14, f1: 750, f2: 1250, p: 1 }, { dur: 0.32, f1: 780, f2: 1300, p: 1.33 }], 330, 'tada')
+    const yay = standIn([{ dur: 0.38, f1: 650, f2: 1900, p: 1.25 }], 330, 'yay')
+    const s2 = moods[1]
+    vo.push({ start: s2.end - 1.05, buffer: tada, kind: 'cameo', gain: 1, pan: 0.25, label: 'Pip ta-da' })
+    vo.push({ start: moods[8].end - 2.0, buffer: yay, kind: 'cameo', gain: 0.9, pan: -0.2, label: 'Pip yay' })
+    // a cue for EVERY sfx type, spread over the film, plus the engine's cut swooshes
+    const types = AUDIO.SFX_TYPES
+    const sfx = types.map((type, i) => ({ t: 0.4 + (i * 54.5) / types.length, type, pan: ((i % 5) - 2) * 0.3 }))
+    moods.slice(1).forEach((m) => sfx.push({ t: m.start - 0.34, type: 'swoosh', gain: 0.7, dur: 0.72 }))
+    sfx.sort((a, b) => a.t - b.t)
+    return { duration, bpm: 104, logoTime: 49.9, moods, vo, sfx }
+  }
+
+  async function render(cfg) {
+    const plan = await buildPlan(cfg)
+    Object.assign(plan, cfg.planExtra || {})
+    const t0 = performance.now()
+    const buf = await AUDIO.renderMix(plan)
+    const ms = performance.now() - t0
+    let finite = true
+    for (let c = 0; c < buf.numberOfChannels; c++) for (const v of buf.getChannelData(c)) if (!Number.isFinite(v)) { finite = false; break }
+    const info = AUDIO.renderMix.last
+    return {
+      wav: b64(AUDIO.toWav(buf)),
+      ms,
+      finite,
+      loud: AUDIO.loudness(buf),
+      info: { music: info.music, duckSpans: info.duckSpans, limiter: info.limiter, masterGainDb: info.masterGainDb, voMaxGrDb: info.voMaxGrDb },
+      moods: plan.moods,
+      vo: plan.vo.map((v) => ({ start: v.start, dur: v.buffer.duration, kind: v.kind, label: v.label })),
+      sfxCount: plan.sfx.length,
+    }
+  }
+
+  /** each SFX type alone: finite + non-silent + loudness at mix scale; also one long WAV of all of them */
+  async function sfxAll() {
+    const rows = []
+    const parts = []
+    for (const type of AUDIO.SFX_TYPES) {
+      const t0 = performance.now()
+      const b = await AUDIO.renderSfx(type, {})
+      const ms = performance.now() - t0
+      const L = b.getChannelData(0)
+      const R = b.getChannelData(1)
+      let finite = true
+      let active = 0
+      let last = 0
+      for (let i = 0; i < L.length; i++) {
+        const v = Math.max(Math.abs(L[i]), Math.abs(R[i]))
+        if (!Number.isFinite(L[i]) || !Number.isFinite(R[i])) finite = false
+        if (v > 1e-3) { active++; last = i }
+      }
+      const lu = AUDIO.loudness(b)
+      rows.push({ type, ms: Math.round(ms), finite, activeMs: Math.round((active / SR) * 1000), tailMs: Math.round((last / SR) * 1000), shortMax: +lu.shortMax.toFixed(1), peakDb: +lu.peakDb.toFixed(1), off: AUDIO.SFX_META[type].off })
+      parts.push([L.slice(0, Math.min(L.length, last + SR * 0.05)), R.slice(0, Math.min(R.length, last + SR * 0.05))])
+    }
+    const gap = Math.round(SR * 0.3)
+    const n = parts.reduce((a, p) => a + p[0].length + gap, 0)
+    const out = new AudioBuffer({ length: n, numberOfChannels: 2, sampleRate: SR })
+    let o = 0
+    const marks = []
+    parts.forEach((p, i) => {
+      marks.push({ type: rows[i].type, t: +(o / SR).toFixed(2) })
+      out.getChannelData(0).set(p[0], o)
+      out.getChannelData(1).set(p[1], o)
+      o += p[0].length + gap
+    })
+    // scale the whole reel so its peak sits at −3 dBFS (listening copy only)
+    let pk = 0
+    for (let c = 0; c < 2; c++) for (const v of out.getChannelData(c)) pk = Math.max(pk, Math.abs(v))
+    for (let c = 0; c < 2; c++) {
+      const d = out.getChannelData(c)
+      for (let i = 0; i < d.length; i++) d[i] *= 0.7 / pk
+    }
+    return { rows, marks, wav: b64(AUDIO.toWav(out)) }
+  }
+
+  /** music group balance: loudness of each group alone (raw, no normalisation), per mood */
+  async function groups(cfg) {
+    const plan = await buildPlan(cfg)
+    const res = {}
+    for (const g of ['uke', 'bass', 'bell', 'keys', 'harp', 'perc', 'pad', 'lead']) {
+      const b = await AUDIO.renderMix(Object.assign({}, plan, { vo: [], sfx: [], solo: [g], normalize: false }))
+      const L = b.getChannelData(0)
+      const R = b.getChannelData(1)
+      res[g] = {}
+      for (const m of plan.moods) {
+        const a = Math.round(m.start * SR)
+        const e = Math.round(m.end * SR)
+        res[g][m.mood + '@' + m.start.toFixed(1)] = +AUDIO.loudness([L.subarray(a, e), R.subarray(a, e)]).integrated.toFixed(1)
+      }
+    }
+    return res
+  }
+
+  window.TEST = { render, sfxAll, groups, buildPlan }
+  document.documentElement.dataset.ready = window.AUDIO ? '1' : 'error'
+})()
+</script>
+</body></html>

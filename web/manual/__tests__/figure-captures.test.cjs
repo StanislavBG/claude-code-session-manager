@@ -23,32 +23,8 @@ const REPO_ROOT = path.resolve(__dirname, '../../..');
 const CHAPTERS_DIR = path.join(REPO_ROOT, 'session-manager-operations/manual/chapters');
 const RECIPES_PATH = path.join(REPO_ROOT, 'session-manager-operations/manual/figure-captures.json');
 
-/**
- * Figures whose surface the capture script (as written, with its fixed
- * Playwright launch args and no test-only state-injection hooks) cannot
- * currently produce, verified by reading the relevant source rather than
- * guessed:
- *   - simple-mode-cockpit: gated on `process.argv.includes('--simple')`
- *     (src/main/index.cjs, `app:launch-mode` handler) — the capture script's
- *     launchApp() passes a fixed args array with no `--simple`, and recipes
- *     have no field to inject launch flags.
- *   - voice-modal: two of its three callouts require `isRecording` to be
- *     true (MicActivityPanel's transcript line, SubmitCountdown's bar —
- *     src/renderer/components/layout/VoiceModal.tsx / SubmitCountdown.tsx),
- *     which only becomes true via a real getUserMedia() capture. There is
- *     no fake-audio device flag or test-mode bypass in this script or the
- *     app's IPC surface.
- *   - voice-recording-banner: RecordingStatus (src/renderer/components/
- *     RecordingStatus.tsx) is mounted only while `isRecording === true` —
- *     same real-microphone requirement as voice-modal, with no bypass.
- * Each one was deliberately left out of figure-captures.json rather than
- * given a recipe known to fail at capture time (a real run would still fail
- * loudly and safely — the script never fabricates a placement — but writing
- * a recipe we already know can't succeed serves no one). If the script ever
- * grows a way to launch with extra args or fake a recording, delete the
- * matching entry here and add a real recipe.
- */
-const KNOWN_UNREACHABLE = new Set(['simple-mode-cockpit', 'voice-modal', 'voice-recording-banner']);
+// No chapter declares a figure in manual 2.0.0.
+const KNOWN_UNREACHABLE = new Set();
 
 // Read once, reused by every test below.
 const RECIPES = JSON.parse(fs.readFileSync(RECIPES_PATH, 'utf8'));

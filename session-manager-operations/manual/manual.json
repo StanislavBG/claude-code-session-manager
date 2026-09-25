@@ -1,136 +1,104 @@
 {
-  "version": "1.10.1",
+  "version": "2.0.0",
   "title": "The Session Manager Field Manual",
-  "summary": "A tab-by-tab operator's guide to Claude Code Session Manager — what each surface is for, the one thing people get wrong about it, and the workflow that makes it pay for itself.",
+  "summary": "A warm, plain-English guide to AI agents — and to running your own small agency of them with Claude Code and Session Manager. No experience needed.",
   "documentsAppVersion": "0.97.0",
-  "releasedAt": "2026-09-24",
+  "releasedAt": "2026-09-25",
   "chapters": [
     {
-      "slug": "getting-started",
-      "title": "Getting Started — the 10-minute setup",
-      "blurb": "Install, open your first project tab, and understand the one idea the whole app is built on: a TAB is a project, a SESSION is a unit of work.",
+      "slug": "welcome",
+      "title": "Welcome — your friendly map of what's ahead",
+      "blurb": "Who this manual is for, what Claude Code and Session Manager are, and how to get the most from the pages ahead. No experience needed.",
+      "part": "Agents, explained",
       "free": true,
-      "file": "getting-started.html"
+      "file": "welcome.html"
     },
     {
-      "slug": "epics-and-sessions",
-      "title": "Sessions — Terminal and Chat are one session",
-      "blurb": "Why a Session is a tagged Claude session, how Agent + Mission ground it, and why switching between Terminal and Chat never loses your context.",
-      "file": "epics-and-sessions.html"
+      "slug": "what-is-an-agent",
+      "title": "What is an AI agent?",
+      "blurb": "The difference between a chatbot that answers and an agent that gets things done — and the four parts every agent is made of.",
+      "part": "Agents, explained",
+      "free": true,
+      "file": "what-is-an-agent.html"
     },
     {
-      "slug": "file-explorer",
-      "title": "File Explorer — one browser, two starting points",
-      "blurb": "Why the same tab opens to your home folder from Home but your active project from a Tab, the autosave + dirty-state editor pane, and switching projects without leaving it.",
-      "file": "file-explorer.html"
+      "slug": "claude-code-basics",
+      "title": "Claude Code in plain English",
+      "blurb": "The building blocks of Claude Code — sessions, house rules, skills, tools and permissions — explained without the jargon.",
+      "part": "Agents, explained",
+      "free": true,
+      "file": "claude-code-basics.html"
     },
     {
-      "slug": "scheduler",
-      "title": "Scheduler — author once, run around your token window",
-      "blurb": "Writing a PRD that actually completes, how the queue picks work, auto-pause on rate limits, and reading a job parked in needs_review.",
-      "file": "scheduler.html"
+      "slug": "meet-your-agency",
+      "title": "Meet your agency — the team that works for you",
+      "blurb": "Session Manager gives you a small team of AI agents: a planner, builders and a checker. Here's who does what, and why a team beats a single assistant.",
+      "part": "Meet your agency",
+      "file": "meet-your-agency.html"
     },
     {
-      "slug": "settings-and-scopes",
-      "title": "Settings & Scopes — editing the substrate, not the conversation",
-      "blurb": "The User/Project/Local scope model, why a Settings edit changes every Session in scope rather than just the one you're in, and when to reach for a Tag or Agent instead.",
-      "file": "settings-and-scopes.html"
+      "slug": "first-session",
+      "title": "Your first Session — from idea to working agent",
+      "blurb": "Install the free app, open a project, and hand your agency its first job in about ten minutes.",
+      "part": "Meet your agency",
+      "file": "first-session.html"
     },
     {
-      "slug": "mcp-servers",
-      "title": "MCP Servers — registering tools, and proving they actually connected",
-      "blurb": "Editing ~/.claude.json and .mcp.json safely, and the live-probe workflow that catches a server that looks configured but never actually connects.",
-      "file": "mcp-servers.html"
+      "slug": "plans-and-scheduler",
+      "title": "Work that runs while you're away — plans and the Scheduler",
+      "blurb": "How a big idea becomes small work orders, and how the Scheduler runs them in the background around your usage limits.",
+      "part": "Meet your agency",
+      "file": "plans-and-scheduler.html"
     },
     {
-      "slug": "permissions",
-      "title": "Permissions — stop the interruptions, don't disable the guardrail",
-      "blurb": "Allow/deny/ask rules, the three scopes, the mistake people make with Project scope, and using fewer-permission-prompts to build the allowlist for you.",
-      "file": "permissions.html"
+      "slug": "checking-the-work",
+      "title": "Trust, but verify — how the work gets checked",
+      "blurb": "Checklists, tests and a dedicated checker agent — plus what to do when a job stops to ask you a question.",
+      "part": "Meet your agency",
+      "file": "checking-the-work.html"
     },
     {
-      "slug": "agent-library",
-      "title": "Agent Library — authoring the \"who\" of a Session",
-      "blurb": "Building focused personas instead of repeating instructions in every prompt, how a persona's model field picks --model, and the project-override mistake that makes an edit look like it did nothing.",
-      "file": "agent-library.html"
+      "slug": "agents-and-missions",
+      "title": "Shaping your team — Agents, Missions and one-click Actions",
+      "blurb": "Write your own agents in plain English, pick the right kind of mission, and turn a favorite setup into a one-click button.",
+      "part": "Make it yours",
+      "file": "agents-and-missions.html"
     },
     {
-      "slug": "system-prompt",
-      "title": "System Prompt — editing the CLI's own house rules, machine-wide",
-      "blurb": "The one file this tab actually writes — ~/.claude/CLAUDE.md — why there's no scope switcher, and editing an @-import as the real file it is, not a preview.",
-      "file": "system-prompt.html"
+      "slug": "house-rules",
+      "title": "House rules — instructions, settings and permissions",
+      "blurb": "Tell every agent how you like things done, and decide what they may do without asking — without switching off the safety rails.",
+      "part": "Make it yours",
+      "file": "house-rules.html"
     },
     {
-      "slug": "skills",
-      "title": "Skills — what auto-fires, what you type, and where it lives",
-      "blurb": "Telling a Skill apart from a Slash Command, why scope matters before you touch Toggle or Remove, and finding this project's own dev skillset in the Library.",
-      "file": "skills.html"
+      "slug": "new-abilities",
+      "title": "New abilities — skills, plugins, tools and hooks",
+      "blurb": "Teach your agents new tricks: packaged skills, plugins, connected tools and automatic hooks — and how to add them safely.",
+      "part": "Make it yours",
+      "file": "new-abilities.html"
     },
     {
-      "slug": "plugins",
-      "title": "Plugins — the Installed inspector and the Library catalog",
-      "blurb": "Why Installed is read-only by design, how Library's Install button actually runs claude plugin install for you, and where this project's own dev skillset comes from.",
-      "file": "plugins.html"
+      "slug": "cockpit-tour",
+      "title": "Around the cockpit — Home, memory, usage, history and more",
+      "blurb": "A guided walk through the rest of the app: dashboards, memory, usage meters, cost history, voice input and publishing.",
+      "part": "Make it yours",
+      "file": "cockpit-tour.html"
     },
     {
-      "slug": "home-and-project-brief",
-      "title": "Home & Project Home — the cockpit's dashboard",
-      "blurb": "How the Home tab's cross-project dashboard works, what Project Home actually is now — one generated page and the button that writes it — and the daily workflow that gets the most out of both.",
-      "file": "home-and-project-brief.html"
+      "slug": "good-habits",
+      "title": "Good habits — great results, safely",
+      "blurb": "Ten habits that make your agents more helpful, cheaper and safer — and the common mistakes to avoid.",
+      "part": "Make it yours",
+      "file": "good-habits.html"
     },
     {
-      "slug": "hooks",
-      "title": "Hooks — edit the CLI's own shell-outs, safely",
-      "blurb": "A guide to the Hooks tab's event editor, scope merging, and the test-fire workflow for safely verifying a hook command before it runs for real.",
-      "file": "hooks.html"
-    },
-    {
-      "slug": "tag-library",
-      "title": "Tag Library — the mission that ships with every Session",
-      "blurb": "How a tag's opening framing and /develop eagerness shape every Session that carries it, and the one relationship on this page you can actually edit.",
-      "file": "tag-library.html"
-    },
-    {
-      "slug": "bilko-host",
-      "title": "Host on Bilko.run — publishing this project's page, gated for real",
-      "blurb": "The free Prepare Bundle / gated Publish two-stage pipeline, hosting more than one page under one listing, and reading a gate failure without guessing.",
-      "file": "bilko-host.html"
-    },
-    {
-      "slug": "history-analytics",
-      "title": "History — where your Claude time and money went",
-      "blurb": "How to read the History dashboard's cost/token/tool analytics and catch a runaway-spend project before the bill does — it's not a session browser.",
-      "file": "history-analytics.html"
-    },
-    {
-      "slug": "memory-clusters",
-      "title": "Memory Clusters — what an agent has actually been remembering",
-      "blurb": "How the Memory tab's Clusters view groups a project's saved memory notes into themes, why it's a cost-gated periodic report rather than a live view, and how to read an empty result.",
-      "file": "memory-clusters.html"
-    },
-    {
-      "slug": "usage",
-      "title": "Usage — reading the 5-hour window before it reads you",
-      "blurb": "How the 5-hour and weekly usage meters work, where the numbers come from, and tuning the session slot pool so the Scheduler pausing on a rate limit never surprises you.",
-      "file": "usage.html"
-    },
-    {
-      "slug": "voice",
-      "title": "Voice Input — dictate into any session, offline",
-      "blurb": "How the local Silero VAD + Moonshine speech pipeline actually works, the auto-submit timer people talk over, and the workflow that makes dictation faster than typing.",
-      "file": "voice.html"
-    },
-    {
-      "slug": "plans-and-tasks",
-      "title": "Plans & Tasks — reading what the agent already told you",
-      "blurb": "How Session Manager surfaces an agent's live to-do list and plan revisions straight from the transcript, and the footer chip that replaced the old Tasks tab.",
-      "file": "plans-and-tasks.html"
-    },
-    {
-      "slug": "simple-mode",
-      "title": "Simple Mode — the chrome-free single-terminal cockpit",
-      "blurb": "What --simple actually boots (one skip-perms terminal, no nav or config surface), why persisted tabs and Sessions never appear there, and when to reach for it instead of the full app.",
-      "file": "simple-mode.html"
+      "slug": "glossary",
+      "title": "Glossary — every term in plain English",
+      "blurb": "Every word this manual uses, explained in a sentence or two, with a pointer to where it is covered.",
+      "part": "Reference",
+      "free": true,
+      "file": "glossary.html"
     }
   ],
   "assets": [

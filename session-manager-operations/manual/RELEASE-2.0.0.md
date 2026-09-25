@@ -73,3 +73,18 @@ function contrast(a, b) {
 
 - Grouping the chapter list by part (`mv2-32` owns `shared/manual-catalog.ts`'s part field).
 - Pushing `manual-v2` to origin (`mv2-50` merges and pushes after validation).
+
+## mv2-32 — reader parts nav
+
+- **Commit:** `10570bc` — "feat(manual): group reader chapter list by part" (worktree
+  `~/Projects/Bilko-manual-v2`, not pushed).
+- **Files touched:** `shared/manual-catalog.ts`, `src/pages/ManualPage.tsx`,
+  `tests/manual.test.ts`.
+- **What changed:** `ManualChapter` gains optional `part?: string`; `tocFromManifest` carries it
+  through into the public `/api/manual/toc` response only when present. The reader's desktop nav
+  now renders a small heading above the first chapter of each part (numbering continues across
+  parts, unaffected), and the mobile `<select>` groups chapters with `<optgroup label={part}>`.
+  Chapters without a `part` render exactly as before.
+- **Verification:** `cd ~/Projects/Bilko-manual-v2 && npm run typecheck` — passed;
+  `npx vitest run tests/manual.test.ts` — 10/10 passed, including the new part-passthrough
+  assertion.

@@ -505,6 +505,6 @@ describe('lazy screen boundary (screenComponents.tsx React.lazy + Suspense)', ()
     })
     await flushAsync(12)
 
-    expect(container.textContent).toContain('Every session, ever')
+    expect(container.textContent).toContain('Spend, tokens and time')
   })
 })

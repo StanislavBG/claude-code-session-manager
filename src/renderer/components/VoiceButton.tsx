@@ -15,7 +15,7 @@ function logRejectedThrottled(reason: GateReason) {
   log.debug('voice', 'mic.gate.click_rejected', { reason })
 }
 
-/** Mic button — toggles local Whisper speech-to-text recording. */
+/** Mic button — toggles local (Moonshine) speech-to-text recording. */
 export function VoiceButton() {
   // Subscribe to the slices used in the view hook below; the click handler
   // re-reads via getState() to avoid stale-closure races on rapid taps.

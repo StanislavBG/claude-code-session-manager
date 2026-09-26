@@ -42,7 +42,7 @@ Before writing a new PRD for `<cwd>/session-manager-operations/scheduler/epics/<
 (`scripts/refresh-vad-assets.mjs`); `tests/unit/vad-assets-drift.spec.ts` fails on any byte drift. The top-level
 `onnxruntime-web` dependency is **kept deliberately**: `@ricky0123/vad-web` does `require("onnxruntime-web/wasm")`, so
 Vite bundles that package's JS into the renderer, and the wasm served from `/vad/` must be the same version as that JS
-(it was 1.24.3 wasm under 1.26.0 JS before this guard). Whisper (`@huggingface/transformers`) bundles its own nested ORT
+(it was 1.24.3 wasm under 1.26.0 JS before this guard). Moonshine speech-to-text (`@huggingface/transformers`) bundles its own nested ORT
 separately. After any `onnxruntime-web` bump: run the refresh script and commit the result.
 
 ## Avoid

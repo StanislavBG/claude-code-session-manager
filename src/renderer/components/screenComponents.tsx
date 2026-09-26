@@ -58,7 +58,7 @@ interface PageConfig {
 
 const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'skills':        { title: 'Reusable instructions',     intro: 'Skills are scoped pieces of context that Claude loads on demand. Add new ones, audit what is live, or disable a skill that is misbehaving.' },
-  'history':       { title: 'Every session, ever',       intro: 'Resumable transcripts across every project you have opened. Pick a row to reattach Claude to the same conversation.' },
+  'history':       { title: 'Spend, tokens and time',    intro: 'Estimated spend, tokens, prompts and active time across every project — by project, model and day. Export any range to CSV.' },
   // 'scheduler' intentionally omitted: Scheduler owns its own full-bleed editorial header
   // (eyebrow + serif h1 + intro paragraph). Adding it here would double-render the heading.
   'plugins':       { title: 'Plugins',                   intro: 'Extensions for Claude Code. Install, enable, or remove plugins per-scope.' },
@@ -73,7 +73,7 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'tag-library':   { title: 'Tag Library',                   intro: 'Every session intent tag, its meaning, and its /develop-eagerness default. Assign or remove which agent personas carry each tag.' },
   'bilko-host':    { title: 'Host on Bilko.run',              intro: 'Publish this project\'s generated Marketing page to bilko.run as a static-path listing, via the bilko-host MCP\'s gated publish pipeline.' },
   // Tools — promoted from modals in v0.13.1.
-  'voice':            { title: 'Voice & microphone',  intro: 'Whisper transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
+  'voice':            { title: 'Voice & microphone',  intro: 'On-device transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
   'data-model':       { title: 'Data Model',           intro: 'A hand-maintained ERD of what Session Manager actually persists — storage paths, single-writer owners, and how entities relate.' },
 }
 

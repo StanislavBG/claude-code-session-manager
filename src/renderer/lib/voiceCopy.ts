@@ -16,7 +16,7 @@ export function copyFor(reason: GateReason, ctx: CopyContext = {}): string {
     case 'ready':
       return ctx.isRecording
         ? 'Stop voice input'
-        : 'Start voice input (local Whisper, offline)'
+        : 'Start voice input (on-device, offline)'
     case 'idle':
       return 'Microphone — speech model not started'
     case 'loading': {

@@ -147,7 +147,7 @@ describe('AlmanacSidebar', () => {
     try {
       const text = projectMount.container.querySelector('[data-testid="tour-leftnav"]')?.textContent ?? ''
       expect(text).not.toContain('History')
-      expect(text).not.toContain('Every session, ever')
+      expect(text).not.toContain('Spend, tokens and time across every project')
     } finally {
       act(() => projectMount.root.unmount())
       projectMount.container.remove()
@@ -158,7 +158,7 @@ describe('AlmanacSidebar', () => {
     try {
       const text = homeMount.container.querySelector('[data-testid="tour-leftnav"]')?.textContent ?? ''
       expect(text).toContain('History')
-      expect(text).toContain('Every session, ever')
+      expect(text).toContain('Spend, tokens and time across every project')
     } finally {
       act(() => homeMount.root.unmount())
       homeMount.container.remove()
@@ -220,7 +220,7 @@ describe('AlmanacSidebar', () => {
       expect(text).toContain('Tools')
       expect(text).toContain('One-off utilities — not configuration, just things you reach for sometimes.')
       expect(text).toContain('Voice')
-      expect(text).toContain('Whisper transcription + push-to-talk')
+      expect(text).toContain('On-device transcription + push-to-talk')
     } finally {
       act(() => root.unmount())
       container.remove()

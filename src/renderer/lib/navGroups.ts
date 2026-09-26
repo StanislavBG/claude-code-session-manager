@@ -65,7 +65,7 @@ export const NAV_ITEMS: NavGroupItem[] = [
   // (lib/historyProjectFold.ts folds every project's days together), so a
   // per-project copy of it was a second door onto the same cross-project
   // screen. Reachable from the Home face only.
-  { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Every session, ever — resumable', faces: HOME },
+  { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Spend, tokens and time across every project', faces: HOME },
 
   // Configure
   { key: 'system-prompt', group: 'Configure', label: 'System Prompt', icon: 'system-prompt', hint: 'Your ~/.claude/CLAUDE.md — house rules for every session on this machine', faces: HOME },
@@ -81,7 +81,7 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'bilko-host',     group: 'Configure', label: 'Host on Bilko.run', icon: 'link',        hint: 'Publish this project\'s Marketing page to bilko.run', faces: PROJECT },
 
   // Tools
-  { key: 'voice',    group: 'Tools', label: 'Voice',    icon: 'mic',           hint: 'Whisper transcription + push-to-talk', faces: HOME },
+  { key: 'voice',    group: 'Tools', label: 'Voice',    icon: 'mic',           hint: 'On-device transcription + push-to-talk', faces: HOME },
   // Data Model is HOME-only: it diagrams the APPLICATION's own persisted
   // shapes, identical for every project — same precedent as History above.
   { key: 'data-model', group: 'Tools', label: 'Data Model', icon: 'compass',   hint: 'ERD of what Session Manager actually persists, and how it joins', faces: HOME },

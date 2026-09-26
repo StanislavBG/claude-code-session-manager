@@ -21,7 +21,7 @@ Single-author hobby project. Linux and macOS only. Free, MIT, anonymous opt-out 
 - **Hooks** — all 29 documented events with inline tooltips explaining what each event fires on. Definitions editor plus a test-fire runner so you can verify a hook without rebuilding state.
 - **Plugins** — manifest inspector for installed plugins plus a Discover panel that lists first-party plugins with one-click install (pty-wrapped `claude plugin install`).
 - **MCP servers** — five transports (stdio, http, streamable-http, ws, sse) with a reserved-name linter so you don't waste a launch on a server Claude refuses to load.
-- **Voice** — local Whisper ASR plus Silero VAD running in a Web Worker. Push-to-talk hotkey, continuous listening, auto-submit, and barge-in that ducks TTS playback. Nothing leaves the machine.
+- **Voice** — local Moonshine ASR (English) plus Silero VAD running in a Web Worker. Push-to-talk hotkey, continuous listening, auto-submit, and barge-in that ducks TTS playback. Nothing leaves the machine.
 - **Toast notifications + 4-scope drift surfacing** — non-fatal errors land in a corner toast instead of being swallowed. Settings show drift across the default / user / project / local scopes so you always know which value actually wins.
 ## Install
 
@@ -29,7 +29,7 @@ Single-author hobby project. Linux and macOS only. Free, MIT, anonymous opt-out 
 npx claude-code-session-manager@latest
 ```
 
-Linux and macOS only. The first launch downloads Electron (~200 MB) and runs `electron-rebuild` on `node-pty` so it links against the bundled Electron ABI. Subsequent launches are instant from the npx cache.
+Linux and macOS only. Needs Node.js 22.12+ (Electron 42's installer needs it) and Claude Code installed and signed in — Claude Code's native installer does not bring Node with it. The first launch downloads Electron (~200 MB) and runs `electron-rebuild` on `node-pty` so it links against the bundled Electron ABI. Subsequent launches are instant from the npx cache.
 
 macOS needs Xcode Command Line Tools: `xcode-select --install`.
 Linux needs `build-essential` and `python3` for the rebuild.
@@ -84,7 +84,7 @@ The queue-health linter scans every queued PRD for two patterns that have caused
 
 ## Architecture
 
-Electron 42 with a CommonJS main process and a Vite-built React 18 renderer. xterm and node-pty drive the terminals. zustand owns renderer state. Whisper via `@huggingface/transformers` plus Silero VAD via `@ricky0123/vad-web` runs voice on-device through onnxruntime-web. Tailwind for styling. Single-author project, no backwards-compat shims — when something needs renaming, it gets renamed.
+Electron 42 with a CommonJS main process and a Vite-built React 18 renderer. xterm and node-pty drive the terminals. zustand owns renderer state. Moonshine via `@huggingface/transformers` plus Silero VAD via `@ricky0123/vad-web` runs voice on-device through onnxruntime-web. Tailwind for styling. Single-author project, no backwards-compat shims — when something needs renaming, it gets renamed.
 
 ## Contributing / development
 

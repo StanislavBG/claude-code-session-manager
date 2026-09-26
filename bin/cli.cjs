@@ -5,6 +5,7 @@
  */
 const { spawn } = require('node:child_process');
 const path = require('node:path');
+const { nodeFloor, isBelow } = require('./node-floor.cjs');
 
 if (process.platform !== 'linux' && process.platform !== 'darwin') {
   console.error('[claude-code-session-manager] Windows is not supported yet.');
@@ -15,10 +16,21 @@ let electronBin;
 try {
   electronBin = require('electron');
 } catch (err) {
-  // `electron`'s own postinstall downloads its ~100MB binary from GitHub releases; a failure
-  // here almost always means that download didn't complete (flaky network, a corporate
-  // proxy/firewall blocking GitHub release downloads, low disk space) — not a bug in this
-  // package. Point at the likely causes and a retry path instead of just "reinstall" (gh-9).
+  // `require('electron')` downloads its ~100MB binary from GitHub releases on first use.
+  // Electron 42's downloader (@electron/get 5) is ESM-only, so below Node 22.12 it can't
+  // even load (ERR_REQUIRE_ESM). Name that cause instead of blaming the network. Checked
+  // only after a failure: an already-downloaded binary still launches on older Node.
+  const floor = nodeFloor();
+  if (floor && isBelow(process.versions.node, floor)) {
+    console.error(`[claude-code-session-manager] Node.js ${floor.join('.')} or newer is required — this is Node ${process.versions.node}.`);
+    console.error('Electron, which this app runs on, cannot download itself on older Node. Upgrade Node, then re-run:');
+    console.error('  npx claude-code-session-manager@latest');
+    process.exit(1);
+  }
+  // Otherwise a failure here almost always means that download didn't complete (flaky
+  // network, a corporate proxy/firewall blocking GitHub release downloads, low disk space) —
+  // not a bug in this package. Point at the likely causes and a retry path instead of just
+  // "reinstall" (gh-9).
   console.error('[claude-code-session-manager] electron dependency is missing — its binary download did not complete.');
   console.error('This is usually a network issue, not a problem with this package. Try:');
   console.error('  1. Re-run: npx claude-code-session-manager@latest (retries the download)');

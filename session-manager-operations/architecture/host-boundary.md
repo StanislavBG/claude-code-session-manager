@@ -15,6 +15,10 @@
 
 Every file verified by reading it in full on 2026-09-12. Quotes are Bilko's own words.
 
+> **2026-09-25:** the Field Manual went free (2.0.1). `src/lib/sessionManagerCheckout.ts`,
+> `MANUAL_PRICE_LABEL`, the product page's checkout call and the reader's buy UI were deleted; rows below
+> naming them are historical.
+
 | File (in `~/Projects/Bilko`) | Verdict | Justification (quoting Bilko's own contract) |
 | --- | --- | --- |
 | `src/pages/SessionManagerPage.tsx` | **OURS-MISPLACED** | Host's own rule: *"New apps default to `static-path` (own repo). Use `react-route` only when an app genuinely needs to live in this bundle (rare)."* This page needs Clerk sign-in + a Stripe checkout call — but the 8 AI-tool siblings prove that doesn't require `react-route`: they are `static-path` and *"call their endpoint same-origin via Clerk JWT — no CORS, no cross-origin auth"* (host-contract.md, gateway pattern). The `FEATURES` array (our tab-by-tab pitch copy) is pure product knowledge with no host dependency at all. |
@@ -31,6 +35,10 @@ Every file verified by reading it in full on 2026-09-12. Quotes are Bilko's own 
 | `public/projects/session-manager/` | **HOST-LEGITIMATE** (already correct) | Already verified: its `manifest.json` records `gitSha: "69c1d7a"`, this repo's last `web-remote` commit — it is a **published artifact** of `web/remote-app/` (this repo), stored where a static-path sibling's bundle belongs. This is the existing, correct model: *artifact there, source here.* It is what the rest of this doc's recommendations are trying to replicate for the marketing page and manual reader. |
 
 ## The paid-manual case, worked through
+
+> **2026-09-25:** the Field Manual is free from release 2.0.1 (every chapter `free: true`; see
+> [`manual/README.md`](../manual/README.md)). The entitlement machinery analysed below stays in
+> Bilko only so late payments resolve and past buyers keep their rows; the ownership split holds.
 
 This is the hardest case because the manual is genuinely a joint artifact: content we author, sold
 through an entitlement the host alone can verify.
@@ -96,8 +104,8 @@ become **permanent 301s** to `/projects/session-manager/manual` and `/projects/s
 - The `standalone-projects.json` registry row and the permanent 301s for the two legacy paths.
 
 **What moves to the new web repo:**
-- `SessionManagerPage.tsx`, `ManualPage.tsx`, `manualClient.ts`, `sessionManagerCheckout.ts`.
-- `MANUAL_TITLE`/`MANUAL_PRICE_LABEL`/manifest-shape types out of `shared/manual-catalog.ts`.
+- `SessionManagerPage.tsx`, `ManualPage.tsx`, `manualClient.ts`.
+- `MANUAL_TITLE`/manifest-shape types out of `shared/manual-catalog.ts`.
 - The `src/config/tools.ts` `session-manager` entry's `description`/`features`/`loader` — replaced
   by a minimal `static-path` registry row.
 

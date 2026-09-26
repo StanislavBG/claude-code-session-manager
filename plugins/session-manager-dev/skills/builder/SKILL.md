@@ -1,6 +1,6 @@
 ---
 name: builder
-description: Watch the current project's git history against its published npm package and drive the next publish — diff HEAD against the last release, classify + bump the version from conventional-commit prefixes, gate on typecheck/tests, publish from an isolated git worktree (never the live working directory), keep the paid Field Manual in step with what shipped, then report. Orchestrates 6 nested sub-skills (builder:diff, :classify-and-bump, :gate, :publish, :manual, :report). Use when the user says "/builder", "publish", "release", "cut a release", "bump the version", "ship to npm", "update the manual", or asks whether there's anything unpublished.
+description: Watch the current project's git history against its published npm package and drive the next publish — diff HEAD against the last release, classify + bump the version from conventional-commit prefixes, gate on typecheck/tests, publish from an isolated git worktree (never the live working directory), keep the free Field Manual in step with what shipped, then report. Orchestrates 6 nested sub-skills (builder:diff, :classify-and-bump, :gate, :publish, :manual, :report). Use when the user says "/builder", "publish", "release", "cut a release", "bump the version", "ship to npm", "update the manual", or asks whether there's anything unpublished.
 ---
 
 # builder (orchestrator)
@@ -40,7 +40,7 @@ identifier (`builder:diff`) without the numeric prefix.
       │ version bumped, tagged, pushed, published, dist-tag verified
       ▼
 ┌───────────────────────┐
-│ 4. builder:manual          │  does the PAID Field Manual still describe reality?
+│ 4. builder:manual          │  does the Field Manual still describe reality?
 └───────────────────────┘     revise chapters → bump manual version → build bundle
       │ manual release (or an explicit "no content change")
       ▼
@@ -73,7 +73,7 @@ identifier (`builder:diff`) without the numeric prefix.
   executes — no publish, no version bump, no tag. Report the failure and stop.
 - **The manual is a product, not a changelog.** `builder:manual` may only claim what it has
   verified against real code, and may never invent a screenshot. A wrong instruction in a
-  $19.99 paid guide is a refund — treat its accuracy bar as higher than the app's own docs.
+  guide readers follow step by step breaks their setup — hold it above the app's own docs.
   A manual bundle that isn't pushed to the Bilko repo is not shipped; say so plainly.
 - **Never guess a version bump from unconventional commit messages.** If the commit list
   doesn't cleanly map to `fix:`/`feat:`/`BREAKING CHANGE:` prefixes, `builder:classify-and-bump`

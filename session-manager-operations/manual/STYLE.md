@@ -213,9 +213,9 @@ written here. A term that couldn't be verified against real source was dropped, 
   from memory of "how it probably works."
 - **No `<figure>` and no screenshots in 2.0.0.** Describe what the reader will see in words.
 - **No inline styles, no `<style>` or `<script>` blocks, no external images.**
-- **Session Manager itself is free** (`npx claude-code-session-manager@latest`) — the Field
-  Manual is the only thing that's paid. Say this plainly wherever it's relevant; never imply the
-  app needs a purchase to work.
+- **Session Manager is free** (`npx claude-code-session-manager@latest`), and so is every chapter
+  of this Field Manual. Say this plainly wherever it's relevant; never imply the app or any
+  chapter needs a purchase.
 - **Never promise a feature that doesn't exist.** If a chapter needs to describe a limitation or
   a gap, say so honestly rather than describing the feature the reader wishes existed.
 

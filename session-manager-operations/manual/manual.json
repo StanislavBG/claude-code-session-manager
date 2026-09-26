@@ -1,8 +1,8 @@
 {
-  "version": "2.0.0",
+  "version": "2.0.1",
   "title": "The Session Manager Field Manual",
   "summary": "A warm, plain-English guide to AI agents — and to running your own small agency of them with Claude Code and Session Manager. No experience needed.",
-  "documentsAppVersion": "0.97.0",
+  "documentsAppVersion": "0.98.0",
   "releasedAt": "2026-09-25",
   "chapters": [
     {
@@ -34,6 +34,7 @@
       "title": "Meet your agency — the team that works for you",
       "blurb": "Session Manager gives you a small team of AI agents: a planner, builders and a checker. Here's who does what, and why a team beats a single assistant.",
       "part": "Meet your agency",
+      "free": true,
       "file": "meet-your-agency.html"
     },
     {
@@ -41,6 +42,7 @@
       "title": "Your first Session — from idea to working agent",
       "blurb": "Install the free app, open a project, and hand your agency its first job in about ten minutes.",
       "part": "Meet your agency",
+      "free": true,
       "file": "first-session.html"
     },
     {
@@ -48,6 +50,7 @@
       "title": "Work that runs while you're away — plans and the Scheduler",
       "blurb": "How a big idea becomes small work orders, and how the Scheduler runs them in the background around your usage limits.",
       "part": "Meet your agency",
+      "free": true,
       "file": "plans-and-scheduler.html"
     },
     {
@@ -55,6 +58,7 @@
       "title": "Trust, but verify — how the work gets checked",
       "blurb": "Checklists, tests and a dedicated checker agent — plus what to do when a job stops to ask you a question.",
       "part": "Meet your agency",
+      "free": true,
       "file": "checking-the-work.html"
     },
     {
@@ -62,6 +66,7 @@
       "title": "Shaping your team — Agents, Missions and one-click Actions",
       "blurb": "Write your own agents in plain English, pick the right kind of mission, and turn a favorite setup into a one-click button.",
       "part": "Make it yours",
+      "free": true,
       "file": "agents-and-missions.html"
     },
     {
@@ -69,6 +74,7 @@
       "title": "House rules — instructions, settings and permissions",
       "blurb": "Tell every agent how you like things done, and decide what they may do without asking — without switching off the safety rails.",
       "part": "Make it yours",
+      "free": true,
       "file": "house-rules.html"
     },
     {
@@ -76,6 +82,7 @@
       "title": "New abilities — skills, plugins, tools and hooks",
       "blurb": "Teach your agents new tricks: packaged skills, plugins, connected tools and automatic hooks — and how to add them safely.",
       "part": "Make it yours",
+      "free": true,
       "file": "new-abilities.html"
     },
     {
@@ -83,6 +90,7 @@
       "title": "Around the cockpit — Home, memory, usage, history and more",
       "blurb": "A guided walk through the rest of the app: dashboards, memory, usage meters, cost history, voice input and publishing.",
       "part": "Make it yours",
+      "free": true,
       "file": "cockpit-tour.html"
     },
     {
@@ -90,6 +98,7 @@
       "title": "Good habits — great results, safely",
       "blurb": "Ten habits that make your agents more helpful, cheaper and safer — and the common mistakes to avoid.",
       "part": "Make it yours",
+      "free": true,
       "file": "good-habits.html"
     },
     {

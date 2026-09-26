@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:#f5f0e6;color:#1a1612;font-family:"Inter Tight",-apple-system,"Helvetica Neue",Arial,sans-serif}
+a{color:#a83818;text-underline-offset:3px}
+a:hover{color:#1a1612}
+</style>
+</helmet>
+<div style="position:fixed;inset:0;overflow:hidden;background:#f5f0e6">
+<div style="position:absolute;top:0;left:{{ offX }}px;width:1440px;height:860px;transform:scale({{ scale }});transform-origin:0 0;display:flex;flex-direction:column;overflow:hidden">
+  <header style="flex:none;height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 24px;border-bottom:1px solid #d4ccb8">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="width:26px;height:26px;border-radius:6px;background:#a83818;color:#f5f0e6;display:grid;place-items:center;font-weight:700;font-size:14px">S</div>
+      <div style="font-weight:600;font-size:15px">Session Manager</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.06em;color:#2e5a3e;border:1px solid #2e5a3e;border-radius:999px;padding:2px 8px">FREE MANUAL</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:18px;font-size:13px">
+      <a href="#manual" style="color:#3a342b">Read the manual →</a>
+      <div style="display:flex;align-items:center;gap:8px;color:#5d5648">
+        <div style="width:24px;height:24px;border-radius:50%;background:#ede6d6;border:1px solid #d4ccb8;display:grid;place-items:center;font-size:11px;font-weight:600;color:#3a342b">B</div>
+        <span>{{ account }}</span>
+      </div>
+    </div>
+  </header>
+
+  <main style="flex:1;min-height:0;width:100%;max-width:1180px;margin:0 auto;padding:clamp(16px,2.6vh,32px) 24px clamp(14px,2vh,24px);display:flex;flex-direction:column;gap:clamp(12px,1.8vh,20px)">
+    <div style="flex:none;display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:40px;align-items:stretch">
+      <div style="display:flex;flex-direction:column;gap:clamp(10px,1.6vh,16px);min-width:0">
+        <h1 style="margin:0;font-family:'Source Serif 4',Charter,Georgia,serif;font-weight:700;font-size:clamp(34px,4.6vh,48px);line-height:1.05;letter-spacing:-.01em;text-wrap:pretty">Your local cockpit for Claude Code</h1>
+        <p style="margin:0;max-width:600px;font-size:16px;line-height:1.55;color:#5d5648;text-wrap:pretty">Sessions, a scheduler that works around your token window, memory, history and every Claude Code config surface — one desktop app, running on your machine.</p>
+        <p style="margin:0;max-width:620px;font-size:15px;line-height:1.55;color:#3a342b;text-wrap:pretty"><strong style="color:#1a1612">The manual is free, and stays free.</strong> The Field Manual and the film are open to everyone — read the routes we already walked before you spend a cent. The app is a one-time $19.99.</p>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;max-width:640px">
+          <a href="#film" style="text-decoration:none;color:inherit;display:flex;gap:12px;align-items:center;padding:8px;border:1px solid #d4ccb8;border-radius:8px;background:#ede6d6" style-hover="border-color:#a83818">
+            <div style="flex:none;width:84px;height:54px;border-radius:5px;background:#e3dcc8;border:1px solid #d4ccb8;display:grid;place-items:center">
+              <div style="width:28px;height:28px;border-radius:50%;background:#1a1612;display:grid;place-items:center">
+                <div style="width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-left:9px solid #f5f0e6;margin-left:3px"></div>
+              </div>
+            </div>
+            <div style="min-width:0">
+              <div style="font-weight:600;font-size:14px">Watch the 57-second film</div>
+              <div style="font-size:12px;color:#5d5648;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">“Pip and the Paper Moon” · free</div>
+            </div>
+          </a>
+          <a id="manual" href="#manual" style="text-decoration:none;color:inherit;display:flex;gap:12px;align-items:center;padding:8px;border:1px solid #d4ccb8;border-radius:8px;background:#ede6d6" style-hover="border-color:#a83818">
+            <div style="flex:none;width:54px;height:54px;border-radius:5px;background:#1a1612;color:#f4b942;display:grid;place-items:center;font-family:'Source Serif 4',Georgia,serif;font-weight:700;font-size:13px;line-height:1;text-align:center">Field<br>Manual</div>
+            <div style="min-width:0">
+              <div style="font-weight:600;font-size:14px">Read the Field Manual</div>
+              <div style="font-size:12px;color:#5d5648;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">17 chapters · free, no sign-up</div>
+            </div>
+          </a>
+        </div>
+      </div>
+
+      <div style="border:1.5px solid #1a1612;border-radius:10px;padding:22px;background:#fbf8f1;display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <div style="font-family:'Source Serif 4',Georgia,serif;font-weight:700;font-size:30px">$19.99</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.08em;color:#9c937f">ONE TIME</div>
+        </div>
+        <div style="margin-top:-6px;font-weight:600;font-size:17px">Session Manager for desktop</div>
+        <div style="font-size:13px;line-height:1.55;color:#5d5648">macOS, Windows and Linux builds. Every future update included. Licence lives on your account — no keys to lose.</div>
+        <sc-if value="{{ notPaid }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <button onClick="{{ buy }}" style="all:unset;cursor:pointer;text-align:center;background:#a83818;color:#f5f0e6;font-weight:600;font-size:15px;padding:13px 16px;border-radius:7px" style-hover="background:#1a1612">Buy the app — $19.99</button>
+            <div style="font-size:12px;color:#5d5648;text-align:center;line-height:1.5">Licence attaches to <strong style="color:#1a1612">{{ account }}</strong>.<br>Downloads unlock here right after payment.</div>
+          </div>
+        </sc-if>
+        <sc-if value="{{ paid }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:12px;font-weight:600;color:#2e5a3e">✓ Paid — licensed to {{ account }}</div>
+            <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px">
+              <sc-for list="{{ builds }}" as="b" hint-placeholder-count="3">
+                <a href="#download" style="text-decoration:none;text-align:center;background:#1a1612;color:#f5f0e6;font-size:12px;font-weight:600;padding:10px 4px;border-radius:6px" style-hover="background:#a83818;color:#f5f0e6">{{ b }}</a>
+              </sc-for>
+            </div>
+            <div style="font-size:11px;color:#5d5648;text-align:center">Sign in on the app with the same account to activate.</div>
+          </div>
+        </sc-if>
+        <div style="margin-top:auto;display:flex;justify-content:center;gap:10px;font-size:12px;color:#9c937f">
+          <a href="#switch">Not you? Switch account</a><span>·</span><a href="#restore" onClick="{{ restore }}">Already bought it?</a>
+        </div>
+      </div>
+    </div>
+
+    <nav style="flex:none;display:flex;flex-wrap:wrap;gap:6px">
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="9">
+        <button onClick="{{ t.select }}" style="all:unset;cursor:pointer;font-size:13px;font-weight:500;padding:7px 13px;border-radius:999px;border:1px solid {{ t.border }};background:{{ t.bg }};color:{{ t.fg }}">{{ t.label }}</button>
+      </sc-for>
+    </nav>
+
+    <section style="flex:1;min-height:0;overflow:hidden;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:20px;padding:clamp(16px,2.4vh,26px);border:1px solid #d4ccb8;border-radius:10px;background:#fbf8f1">
+      <div style="min-width:0;min-height:0;display:flex;flex-direction:column;gap:clamp(8px,1.4vh,14px)">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;letter-spacing:.1em;color:#a83818">{{ cur.kicker }}</div>
+        <h2 style="margin:0;font-family:'Source Serif 4',Georgia,serif;font-weight:600;font-size:clamp(20px,2.8vh,28px);line-height:1.2;text-wrap:pretty">{{ cur.title }}</h2>
+        <p style="margin:0;font-size:15px;line-height:1.6;color:#5d5648;max-width:680px;text-wrap:pretty">{{ cur.body }}</p>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <sc-for list="{{ cur.bullets }}" as="b" hint-placeholder-count="3">
+            <div style="display:flex;gap:10px;font-size:14px;color:#3a342b;line-height:1.45"><span style="flex:none;width:6px;height:6px;margin-top:7px;border-radius:50%;background:#a83818"></span><span>{{ b }}</span></div>
+          </sc-for>
+        </div>
+        <div style="margin-top:auto;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:12px 14px;border:1px solid #d4ccb8;border-radius:8px;background:#f5f0e6">
+          <sc-for list="{{ cur.steps }}" as="s" hint-placeholder-count="3">
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#3a342b"><span style="flex:none;width:20px;height:20px;border-radius:50%;background:#1a1612;color:#f4b942;display:grid;place-items:center;font-family:'JetBrains Mono',monospace;font-size:10px">{{ s.n }}</span>{{ s.t }}</div>
+          </sc-for>
+        </div>
+      </div>
+      <aside style="min-height:0;display:flex;flex-direction:column;gap:10px;padding:16px;border:1px solid #d4ccb8;border-radius:8px;background:#f5f0e6">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.1em;color:#9c937f">IN THE FIELD MANUAL</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;color:#2e5a3e">FREE</div>
+        </div>
+        <div style="font-family:'Source Serif 4',Georgia,serif;font-weight:600;font-size:17px;line-height:1.3">{{ cur.chapter }}</div>
+        <div style="height:1px;background:#d4ccb8"></div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <sc-for list="{{ cur.points }}" as="p" hint-placeholder-count="3">
+            <div style="display:flex;gap:8px;font-size:13px;line-height:1.45;color:#5d5648"><span style="color:#a83818">✦</span><span>{{ p }}</span></div>
+          </sc-for>
+        </div>
+        <a href="#manual" style="margin-top:auto;font-size:13px;font-weight:600">Read this chapter →</a>
+      </aside>
+    </section>
+  </main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;purchased&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;},&quot;account&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;you@example.com&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const TABS = [
+ {label:"Sessions",title:"One project, many sessions — Terminal and Chat, same thread.",body:"Each session is a goal-scoped Claude session with its own agent persona and mission. Switch between the interactive terminal and the headless chat view and you're still in the same conversation.",bullets:["Open a session with a chosen persona and mission, pre-framed from both","Terminal and Chat hand the one session back and forth — never fork it","A verbosity dial from raw tool-calls down to just the answer"],steps:["Pick a persona + mission","Work in Terminal or Chat","Resume it later, intact"],chapter:"Epics & Sessions — Terminal and Chat are one session",points:["Why the two views must never mint a second session id","How an opening prompt is composed from Actor, Input and Mission","When to start fresh instead of stretching an old one"]},
+ {label:"Scheduler",title:"Queue work around your token window, not your calendar.",body:"The scheduler knows when your usage window resets and lines up runs so heavy jobs land where the budget is.",bullets:["See the current window and what's left in it","Queue prompts to fire at reset","Pause the queue the moment a run needs you"],steps:["Queue a job","Let the window reset","Review the results"],chapter:"Scheduling — spending the window well",points:["Which jobs belong right after a reset","Why long runs should be split, not stretched","Reading usage before it reads you"]},
+ {label:"Agent Library",title:"Personas you can reuse, version and share.",body:"Keep agent definitions in one library instead of scattered files. Edit once, use across every project.",bullets:["Create agents from a template or from scratch","Diff an agent against its last version","Attach an agent to any new session"],steps:["Define an agent","Test it in a session","Promote it to the library"],chapter:"Agents — a persona is a contract",points:["What belongs in a persona and what doesn't","Keeping agents narrow enough to trust","Versioning without breaking old sessions"]},
+ {label:"Tag Library",title:"Tag sessions and prompts so you can find them next month.",body:"Tags cut across projects, so a pattern you solved once is one filter away.",bullets:["Tag sessions, prompts and agents alike","Filter history by any tag combination","Rename a tag everywhere at once"],steps:["Tag as you go","Filter by tag","Reuse what worked"],chapter:"Tags — a vocabulary, not a pile",points:["A small tag set beats a clever one","Tagging outcomes, not topics","Pruning tags that stopped earning their keep"]},
+ {label:"Memory",title:"See and edit what Claude remembers, in one place.",body:"Every memory file, project and global, laid out and editable — no hunting through dotfiles.",bullets:["Browse memory by scope","Edit with a live preview","Spot conflicting instructions"],steps:["Open memory","Trim what's stale","Save and continue"],chapter:"Memory — less is more durable",points:["What earns a line in memory","Project vs global scope","Catching contradictions early"]},
+ {label:"History",title:"Every session, searchable, on your own disk.",body:"Full-text search across past sessions. Nothing leaves your machine.",bullets:["Search by text, tag or project","Reopen any session where it ended","Export a transcript in one click"],steps:["Search","Open","Pick up where you left off"],chapter:"History — your best prompt library",points:["Mining old sessions for prompts","When to reopen versus restart","Keeping history useful, not huge"]},
+ {label:"Skills · Hooks · MCP",title:"Every config surface, visible and editable.",body:"Skills, hooks and MCP servers side by side — enable, disable and inspect without editing JSON by hand.",bullets:["Toggle skills per project","Wire hooks with a guided editor","Add MCP servers and check they respond"],steps:["Inspect","Toggle","Verify"],chapter:"Config surfaces — what each one is for",points:["Skills vs hooks vs MCP, in one table","Hooks that save time and hooks that bite","Testing an MCP server before you rely on it"]},
+ {label:"Voice",title:"Talk to a session when your hands are busy.",body:"Dictate prompts into any session; transcription runs locally.",bullets:["Push-to-talk into Terminal or Chat","Local transcription","Edit before sending"],steps:["Hold to talk","Review","Send"],chapter:"Voice — prompting out loud",points:["Where voice beats typing","Structuring a spoken prompt","Keeping it private"]},
+ {label:"Everything, one cockpit",title:"Sessions, schedule, memory and config — one window.",body:"The app pulls every Claude Code surface into one local desktop cockpit. The manual shows you how to fly it.",bullets:["One app instead of a dozen terminals and dotfiles","Runs entirely on your machine","Buy once, every update included"],steps:["Read the manual","Buy the app","Fly it"],chapter:"The whole route, start to finish",points:["A first week with Session Manager","The five habits that pay off most","What to ignore until you need it"]}
+];
+class Component extends DCLogic {
+  state = { i: 0, paid: false, vw: window.innerWidth, vh: window.innerHeight };
+  componentDidMount() {
+    this._r = () => this.setState({ vw: window.innerWidth, vh: window.innerHeight });
+    window.addEventListener("resize", this._r);
+    this._ro = new ResizeObserver(this._r); this._ro.observe(document.documentElement);
+    this._r(); requestAnimationFrame(this._r);
+  }
+  componentWillUnmount() { window.removeEventListener("resize", this._r); this._ro && this._ro.disconnect(); }
+  renderVals() {
+    const vw = this.state.vw || window.innerWidth || 1440, vh = this.state.vh || window.innerHeight || 860;
+    const scale = Math.min(vw / 1440, vh / 860);
+    const offX = Math.max(0, (vw - 1440 * scale) / 2);
+    const i = this.state.i, paid = !!this.props.purchased || this.state.paid;
+    const t = TABS[i];
+    return {
+      scale, offX,
+      account: this.props.account ?? "you@example.com",
+      paid, notPaid: !paid,
+      buy: () => this.setState({ paid: true }),
+      restore: (e) => { e.preventDefault(); this.setState({ paid: true }); },
+      builds: ["macOS", "Windows", "Linux"],
+      tabs: TABS.map((x, k) => ({ label: x.label, select: () => this.setState({ i: k }),
+        bg: k === i ? "#1a1612" : "transparent", fg: k === i ? "#f5f0e6" : "#3a342b", border: k === i ? "#1a1612" : "#d4ccb8" })),
+      cur: { ...t, kicker: t.label.toUpperCase(), steps: t.steps.map((s, n) => ({ n: n + 1, t: s })) }
+    };
+  }
+}
+</script>
+</body>
+</html>

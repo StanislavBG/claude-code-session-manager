@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * Builds a release bundle of The Session Manager Field Manual — the $19.99
- * digital product sold at bilko.run/manual.
+ * Builds a release bundle of The Session Manager Field Manual — the free
+ * guide published at bilko.run/manual (every chapter, both downloads).
  *
  *   source  : session-manager-operations/manual/   (this repo — authored + reviewed here)
  *   output  : <bilko>/data/manual/releases/<version>/   (committed into the Bilko repo)
  *
  * The output directory is deliberately NOT under Bilko's `dist/`, so the static
- * file plugin can never serve a paid chapter by guessed URL — every read goes
- * through the entitlement-checked routes in server/routes/manual.ts.
+ * file plugin never serves a chapter by guessed URL — every read goes through
+ * the manifest-driven routes in server/routes/manual.ts.
  *
  * Usage:
  *   node web/manual/build.mjs                 # build into the default Bilko checkout
@@ -44,10 +44,12 @@ const src = JSON.parse(readFileSync(manualJsonPath, 'utf-8'));
 
 if (!/^\d+\.\d+\.\d+$/.test(src.version ?? '')) fail(`version must be MAJOR.MINOR.PATCH, got "${src.version}"`);
 if (!Array.isArray(src.chapters) || src.chapters.length === 0) fail('manual.json declares no chapters');
-if (!src.chapters.some(c => c.free)) {
-  // Without a free chapter the sales page has nothing to show, and the paywall
-  // becomes the entire product experience for a non-buyer.
-  fail('at least one chapter must be marked "free" — it is the marketing sample');
+// The manual is free (root CLAUDE.md, open-core law). Bilko's chapter route
+// (server/routes/manual.ts) has always keyed its lock on each manifest entry's
+// `free` flag, so a chapter added without it could ship locked — refuse the build.
+const unflagged = src.chapters.filter(c => c.free !== true).map(c => c.slug);
+if (unflagged.length) {
+  fail(`every chapter must be marked "free": true — the manual is free; missing on: ${unflagged.join(', ')}`);
 }
 
 const slugs = new Set();
@@ -150,8 +152,8 @@ const offlineHtml = `<!DOCTYPE html>
 <nav class="toc"><strong>Contents</strong>${tocHtml}</nav>
 ${chapterHtml.map(c => `<section id="${c.slug}">${c.html}</section>`).join('\n')}
 <hr style="border:0;border-top:1px solid #d8dbe0;margin:48px 0 24px"/>
-<p style="color:#44464b;font-size:.85em">© Bilko.run · Your copy of ${src.title}. Updates for this
-edition are free — re-download the latest at bilko.run/manual.</p>
+<p style="color:#44464b;font-size:.85em">© Bilko.run · ${src.title} is free, updates included —
+re-download the latest at bilko.run/manual.</p>
 </div></body></html>`;
 
 if (checkOnly) {
@@ -199,7 +201,7 @@ async function main() {
 
   const assets = [];
   for (const a0 of src.assets ?? []) {
-    // Buyers always get the newest release, so a downloaded file whose name is
+    // Readers always get the newest release, so a downloaded file whose name is
     // frozen at whatever version it was first declared under actively misleads
     // them. Declare `field-manual-{version}.pdf` and let the build fill it in.
     const a = { ...a0, file: a0.file.replaceAll('{version}', src.version) };
@@ -210,7 +212,7 @@ async function main() {
     } else if (existsSync(join(SOURCE, 'assets', a.file))) {
       cpSync(join(SOURCE, 'assets', a.file), join(outDir, a.file));
     } else {
-      // Declaring an asset the bundle doesn't contain hands buyers a broken
+      // Declaring an asset the bundle doesn't contain hands readers a broken
       // download button — refuse the build rather than ship it.
       fail(`asset "${a.id}" declares ${a.file} but no source exists at manual/assets/${a.file}`);
     }

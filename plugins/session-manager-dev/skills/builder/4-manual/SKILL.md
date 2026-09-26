@@ -1,19 +1,19 @@
 ---
 name: builder:manual
-description: Keep The Session Manager Field Manual — the paid $19.99 digital product sold at bilko.run/manual — in step with what actually shipped. Runs after builder:publish (or standalone), diffs the just-released commits against the manual's chapter map, revises the affected chapters, bumps the manual's own version, builds the release bundle into the Bilko repo, and reports what changed. Invoked as the last step of /builder, or directly via "/builder:manual", "update the manual", "does the manual need a revision".
+description: Keep The Session Manager Field Manual — the free guide published at bilko.run/manual — in step with what actually shipped. Runs after builder:publish (or standalone), diffs the just-released commits against the manual's chapter map, revises the affected chapters, bumps the manual's own version, builds the release bundle into the Bilko repo, and reports what changed. Invoked as the last step of /builder, or directly via "/builder:manual", "update the manual", "does the manual need a revision".
 ---
 
 # builder:manual (step 5)
 
-The manual is a **product we sell**, not documentation we generate. It has its own version
-line, its own release cadence, and a buyer who paid $19.99 and is owed accuracy. This step
-exists so a shipped feature never silently invalidates a paid chapter.
+The manual is a **product we publish**, not documentation we generate. It has its own version
+line, its own release cadence, and readers who follow it step by step and are owed accuracy. This
+step exists so a shipped feature never silently invalidates a chapter.
 
 - **Source of truth:** `session-manager-operations/manual/` (see its `README.md` for the
   on-disk shape and the release checklist).
 - **Build:** `npm run manual:build` → `~/Projects/Bilko/data/manual/releases/<version>/`.
-- **Sold via:** the already-live `session_manager` Stripe SKU. There is no second price to
-  create; entitlement already exists for every past buyer.
+- **Price:** free — every chapter and both downloads (root `CLAUDE.md`, open-core law). The
+  legacy `session_manager` Stripe SKU stays wired only so late payments resolve; it sells nothing.
 
 ## Inputs
 
@@ -43,20 +43,21 @@ Three outcomes, and only one of them is work:
 
 Edit the chapter HTML in `session-manager-operations/manual/chapters/`.
 
-Hard rules — these are the ones that protect a paying customer:
+Hard rules — these are the ones that protect a reader:
 
 - **Follow `manual/STYLE.md`** (voice, reading level, component vocabulary) — it is the single
   writing contract for every chapter, revisions included.
 - **Every claim must be checkable against real code right now.** Read the file, run the
-  command, confirm the constant. A wrong instruction in a paid product is a refund.
+  command, confirm the constant. A wrong instruction breaks every reader who follows it.
 - **Never invent a screenshot.** A figure slot that has no captured image stays a
   `manual-figure__frame` placeholder stating what still needs capturing. Placeholder text is
   honest; a fabricated UI is not.
 - **Don't restate the codebase.** The manual is an operator's guide — what a surface is for,
   the one thing people get wrong, the workflow that pays off. If a paragraph would be equally
   at home in `CLAUDE.md`, cut it.
-- **Preserve the free chapter.** At least one chapter must stay `free: true` — it is the
-  marketing sample, and `web/manual/build.mjs` refuses to build without one.
+- **Every chapter stays free.** Every chapter, a new one included, must carry `free: true` —
+  Bilko keys its chapter lock on that flag, and `web/manual/build.mjs` refuses to build a
+  release where any chapter lacks it.
 
 ### 3. Bump the manual's own version
 
@@ -65,7 +66,7 @@ In `manual.json`:
 - `documentsAppVersion` → the app version just published, always.
 - `version` → **patch** for corrections and figure fills, **minor** for a revised or added
   chapter, **major** for a restructure that changes the chapter map. This is independent of
-  the app's version — a buyer tracks the manual's line, not the app's.
+  the app's version — a reader tracks the manual's line, not the app's.
 - `releasedAt` → today, in the user's local timezone (America/Los_Angeles).
 
 ### 4. Build and verify
@@ -76,7 +77,8 @@ npm run manual:build     # emits into ../Bilko/data/manual/releases/<version>/
 ```
 
 The build is the gate. It refuses on a missing chapter file, a malformed or duplicated slug,
-an asset declared without a source, or no free chapter. A refusal is a stop, not a warning.
+an asset declared without a source, or a chapter not marked `free: true`. A refusal is a stop,
+not a warning.
 
 Then confirm the bundle is real — the manifest must not over-promise:
 
@@ -97,7 +99,7 @@ unpublished manual. Two commits, one logical release:
 - `~/Projects/Bilko`: `data/manual/releases/<version>/`.
 
 Per the project's standing rule, commit locally as soon as the build and test pass — don't
-wait to be asked. Pushing the Bilko side is what actually ships it to buyers, so treat that
+wait to be asked. Pushing the Bilko side is what actually ships it to readers, so treat that
 push with the same release trigger the npm publish gets.
 
 ## Output
@@ -109,14 +111,14 @@ Report, in this order:
 3. Coverage gaps found (shipped surfaces with no chapter) — as proposals, not as work done.
 4. Figures still pending capture, by chapter.
 5. Whether the Bilko-side bundle is committed and pushed. If it isn't pushed, say plainly
-   that buyers are still seeing the previous edition.
+   that readers are still seeing the previous edition.
 
 ## What this step is not
 
 - Not a screenshot pipeline. Capturing and annotating real app screenshots is its own PRD;
   until it lands, figures are placed by hand and unplaced slots render as honest placeholders.
-- Not a marketing-copy editor. The sales page (`SessionManagerPage.tsx` in the Bilko repo) is
-  separate from the product it sells.
-- Not a pricing or entitlement change. The $19.99 `session_manager` SKU and the
-  `MANUAL_PRODUCT_KEY` mapping in `shared/manual-catalog.ts` are deliberately fixed — changing
-  either strands existing buyers and needs an explicit decision, not a release step.
+- Not a marketing-copy editor. The product page (`SessionManagerPage.tsx` in the Bilko repo) is
+  separate from the manual it links to.
+- Not a pricing or entitlement change. The manual is free. The legacy `session_manager` SKU and
+  the `MANUAL_PRODUCT_KEY` mapping in `shared/manual-catalog.ts` stay wired only so late payments
+  resolve and past buyers keep their rows — removing either is an explicit decision, not a step.

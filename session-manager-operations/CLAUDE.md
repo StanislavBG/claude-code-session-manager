@@ -38,7 +38,7 @@ Epic lifecycle is specified exactly once, at
 | `feedback` | retired 2026-08-02 | former feedback intake, superseded by New Epic | n/a — retired | [link](feedback/README.md) |
 | `HUMAN_LEARN` | not owned | human-readable knowledge-base pages | keep indefinitely | none |
 | `logs` | OWNERS → logs | per-tab JSONL error log | append-only, unpruned | [link](logs/README.md) |
-| `manual` | not owned | authoring source for the paid Field Manual | keep indefinitely | [link](manual/README.md) |
+| `manual` | not owned | authoring source for the free Field Manual | keep indefinitely | [link](manual/README.md) |
 | `memory-clusters` | OWNERS → memory-clusters | per-project memory-cluster cache | regenerated on demand | [link](memory-clusters/README.md) |
 | `project-brief` | OWNERS → project-home | synthesized per-project Brief | keep indefinitely | [link](project-brief/README.md) |
 | `project-pages` | OWNERS → project-home (render route only) | generated static Project Page artifacts | regenerated on demand | [link](project-pages/README.md) |

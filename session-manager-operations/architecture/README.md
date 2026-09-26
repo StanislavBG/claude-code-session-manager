@@ -12,7 +12,7 @@ Classes: **LAW-RATIONALE** (linked from root `CLAUDE.md`) · **REFERENCE** (subs
 | [domain-model.md](domain-model.md) | TAB / EPIC / PRD laws, single-writer, mint authority | LAW-RATIONALE |
 | [code-map.md](code-map.md) | load-bearing main + renderer files, data flow | LAW-RATIONALE |
 | [conventions.md](conventions.md) | conventions + the incident behind each Avoid entry | LAW-RATIONALE |
-| [bilko-run-marketing.md](bilko-run-marketing.md) | product page, Stripe checkout, npm listing | LAW-RATIONALE |
+| [bilko-run-marketing.md](bilko-run-marketing.md) | product page, Stripe wiring, npm listing | LAW-RATIONALE |
 | [build-target.md](build-target.md) | build/publish target semantics | LAW-RATIONALE |
 | [ops-maintenance-protocol.md](ops-maintenance-protocol.md) | ops-folder drift sweeps | LAW-RATIONALE |
 | [project-partition.md](project-partition.md) | the repo's four partitions, path by path | LAW-RATIONALE |

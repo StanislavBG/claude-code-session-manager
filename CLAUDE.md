@@ -18,7 +18,7 @@ before changing anything in that area.** Reference docs, all under `session-mana
 | [`domain-model.md`](session-manager-operations/architecture/domain-model.md) | TAB / EPIC / PRD, Agent+Tag, AIM prompt, worktree isolation, single-writer law |
 | [`code-map.md`](session-manager-operations/architecture/code-map.md) | Load-bearing main + renderer files, renderer data flow |
 | [`conventions.md`](session-manager-operations/architecture/conventions.md) | Conventions + the full **Avoid** list (every entry is a real incident) |
-| [`bilko-run-marketing.md`](session-manager-operations/architecture/bilko-run-marketing.md) | Product page, Stripe checkout, npm listing |
+| [`bilko-run-marketing.md`](session-manager-operations/architecture/bilko-run-marketing.md) | Product page, Stripe wiring, npm listing |
 | [`build-target.md`](session-manager-operations/architecture/build-target.md) | Build/publish target |
 | [`ops-maintenance-protocol.md`](session-manager-operations/architecture/ops-maintenance-protocol.md) | Ops-folder drift sweeps |
 | [`project-partition.md`](session-manager-operations/architecture/project-partition.md) | Repo's 4 partitions, path-by-path |
@@ -38,7 +38,7 @@ before changing anything in that area.** Reference docs, all under `session-mana
 
 ## Stack
 
-Electron 42 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand · xterm + node-pty · Whisper
+Electron 42 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand · xterm + node-pty · Moonshine
 (ricky0123/vad-web + onnxruntime-web) for voice.
 
 ## Commands
@@ -94,8 +94,8 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   an undeclared writer throws. Adding a namespace or writer is a deliberate edit to that file. Build ops
   paths only via its `opsPath()`. Enumeration, owners, retention:
   [session-manager-operations/CLAUDE.md](session-manager-operations/CLAUDE.md).
-- **Open-core: the APP is free and stays free.** Field Manual is the only paid artifact. Never add a license
-  check, entitlement gate, trial limit, nag, or "pro" tier, and never move a feature behind a purchase.
+- **Open-core: the APP and the Field Manual are both free, and stay free.** Never add a license check,
+  entitlement gate, trial limit, nag, or "pro" tier, and never move a feature or chapter behind a purchase.
 - **The bilko.run relay stays live** — desktop half of web remote removed 2026-08-06 (restore `b014cc2`). Do
   NOT delete/decommission the relay, its routes, or the product-page copy in `~/Projects/Bilko/`.
 

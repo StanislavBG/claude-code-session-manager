@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400;1,8..60,600;1,8..60,700&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:#f5f0e6;color:#1a1612;font-family:"Inter Tight",-apple-system,"Helvetica Neue",Arial,sans-serif}
+a{color:#a83818;text-underline-offset:3px}
+a:hover{color:#1a1612}
+</style>
+</helmet>
+<div style="position:fixed;inset:0;overflow:hidden;background-color:#f5f0e6;background-image:radial-gradient(#d4ccb8 1.3px, transparent 1.5px);background-size:22px 22px">
+<div style="position:absolute;top:{{ offY }}px;left:{{ offX }}px;width:1440px;height:860px;transform:scale({{ scale }});transform-origin:0 0;overflow:hidden;display:flex;flex-direction:column">
+
+  <sc-if value="{{ stripes }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute;top:58px;bottom:0;left:1174px;width:40px;background:#a83818;z-index:0"></div>
+    <div style="position:absolute;top:58px;bottom:0;left:1226px;width:40px;background:#a83818;z-index:0"></div>
+  </sc-if>
+
+  <header style="position:relative;z-index:2;flex:none;height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 40px;background:#f5f0e6;border-bottom:2px solid #1a1612">
+    <div style="display:flex;align-items:center;gap:12px">
+      <div style="width:32px;height:32px;border-radius:8px;background:#a83818;border:2px solid #1a1612;box-shadow:2px 2px 0 #1a1612;transform:rotate(-6deg);display:grid;place-items:center;color:#f5f0e6;font-family:'Source Serif 4',Georgia,serif;font-weight:700;font-size:18px">S</div>
+      <div style="font-weight:700;font-size:17px;letter-spacing:-.01em">Session Manager</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;letter-spacing:.1em;background:#f4b942;border:1.5px solid #1a1612;border-radius:4px;padding:2px 6px;transform:rotate(-3deg)">ALPHA</div>
+      <div style="font-family:'Source Serif 4',Georgia,serif;font-style:italic;font-size:15px;color:#5d5648">— the Claude Code supercharger</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:20px;font-size:14px">
+      <a href="#manual" style="color:#1a1612;font-weight:600">Field Manual (it's free) →</a>
+      <div style="display:flex;align-items:center;gap:8px;padding:3px 12px 3px 3px;border:1.5px solid #1a1612;border-radius:999px;background:#fbf8f1;color:#3a342b;font-size:13px">
+        <div style="width:24px;height:24px;border-radius:50%;background:#f4b942;border:1.5px solid #1a1612;display:grid;place-items:center;font-size:11px;font-weight:700;color:#1a1612">B</div>
+        <span>{{ account }}</span>
+      </div>
+    </div>
+  </header>
+
+  <div style="position:relative;z-index:1;flex:none;height:421px;display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:40px;padding:26px 40px 0">
+    <div style="min-width:0;display:flex;flex-direction:column;align-items:flex-start">
+      <h1 style="margin:0;width:100%;font-family:'Source Serif 4',Charter,Georgia,serif;font-weight:700;line-height:1;letter-spacing:-.02em">
+        <span style="display:flex;align-items:center;gap:22px;font-size:64px">Claude Code,<span style="transform:rotate(-2deg);background:#2e5a3e;color:#f5f0e6;border:2px solid #1a1612;box-shadow:3px 3px 0 #1a1612;border-radius:6px;padding:4px 10px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.08em;line-height:1.4">FOR CLAUDE CODE LEARNERS &amp; TINKERERS</span></span>
+        <em style="display:block;width:fit-content;margin:-2px 0 0 -6px;padding:0 12px 0 4px;font-size:124px;line-height:.95;letter-spacing:-.02em;color:#a83818;box-shadow:inset 0 -.22em 0 #f4b942">supercharged.</em>
+      </h1>
+      <p style="margin:24px 0 0;max-width:none;font-size:17px;line-height:1.55;color:#3a342b;text-wrap:pretty">Session Manager is a desktop app that bolts onto Claude Code and gives it a proper garage: sessions that don't lose the plot, a scheduler that waits out your token limit for you, and every setting in one friendly window. All on your own laptop.</p>
+      <div style="position:relative;width:100%;margin-top:28px;display:flex;align-items:center;gap:18px">
+        <div style="flex:none;font-family:'Source Serif 4',Georgia,serif;font-style:italic;font-size:18px;line-height:1.3;color:#3a342b;white-space:nowrap">Kick the tires first →</div>
+        <a id="film" href="#film" onClick="{{ openFilm }}" style="text-decoration:none;color:#1a1612;flex:1;min-width:0;display:flex;gap:12px;align-items:center;padding:8px 12px 8px 8px;background:#fbf8f1;border:2px solid #1a1612;border-radius:10px;box-shadow:4px 4px 0 #1a1612;transform:rotate(-1deg);transition:transform .15s, box-shadow .15s" style-hover="transform:rotate(0deg) translate(-2px,-2px);box-shadow:6px 6px 0 #1a1612;color:#1a1612">
+          <div style="flex:none;width:92px;height:54px;border-radius:6px;background:#e3dcc8;border:1.5px solid #1a1612;display:grid;place-items:center">
+            <div style="width:28px;height:28px;border-radius:50%;background:#a83818;border:1.5px solid #1a1612;display:grid;place-items:center">
+              <div style="width:0;height:0;border-top:6px solid transparent;border-bottom:6px solid transparent;border-left:9px solid #f5f0e6;margin-left:3px"></div>
+            </div>
+          </div>
+          <div style="min-width:0">
+            <div style="font-weight:700;font-size:15px">Watch it run</div>
+            <div style="font-size:13px;color:#5d5648">57 seconds · “Pip and the Paper Moon”</div>
+          </div>
+        </a>
+        <a id="manual" href="#manual" style="text-decoration:none;color:#1a1612;flex:1;min-width:0;display:flex;gap:12px;align-items:center;padding:8px 12px 8px 8px;background:#fbf8f1;border:2px solid #1a1612;border-radius:10px;box-shadow:4px 4px 0 #1a1612;transform:rotate(1deg);transition:transform .15s, box-shadow .15s" style-hover="transform:rotate(0deg) translate(-2px,-2px);box-shadow:6px 6px 0 #1a1612;color:#1a1612">
+          <div style="flex:none;width:44px;height:54px;border-radius:3px 6px 6px 3px;background:#1a1612;border-left:6px solid #a83818;display:grid;place-items:center;color:#f4b942;font-family:'Source Serif 4',Georgia,serif;font-weight:700;font-size:15px">FM</div>
+          <div style="min-width:0">
+            <div style="font-weight:700;font-size:15px">Read the Field Manual</div>
+            <div style="font-size:13px;color:#5d5648">17 chapters of tips &amp; tricks</div>
+          </div>
+        </a>
+        <div style="position:absolute;right:-34px;top:-30px;width:62px;height:62px;border-radius:50%;background:#2e5a3e;border:2px solid #1a1612;box-shadow:3px 3px 0 #1a1612;transform:rotate(-12deg);display:grid;place-items:center;color:#f5f0e6;font-family:'Source Serif 4',Georgia,serif;font-style:italic;font-weight:700;font-size:18px">free!</div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-direction:column;align-items:center">
+      <div style="position:relative;z-index:3;width:12px;height:12px;border-radius:50%;background:#1a1612;box-shadow:0 0 0 3px #f5f0e6"></div>
+      <div style="position:relative;z-index:3;width:2px;height:40px;background:#1a1612"></div>
+      <div style="position:relative;width:352px;margin-top:-22px;transform:rotate(3deg);transform-origin:50% 18px;background:#f4b942;border:2px solid #1a1612;border-radius:14px;box-shadow:6px 6px 0 #1a1612;padding:34px 20px 18px;display:flex;flex-direction:column;align-items:center;text-align:center">
+        <div style="position:absolute;top:10px;left:50%;margin-left:-8px;width:16px;height:16px;border-radius:50%;background:#f5f0e6;border:2px solid #1a1612"></div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.14em">THE APP</div>
+        <div style="margin-top:2px;display:flex;align-items:baseline;gap:10px"><span style="font-family:'Source Serif 4',Georgia,serif;font-weight:700;font-size:64px;line-height:1;letter-spacing:-.02em">$0</span><span style="font-family:'Source Serif 4',Georgia,serif;font-size:24px;color:#3a342b;text-decoration:line-through;text-decoration-thickness:2px">$19.99</span></div>
+        <div style="margin-top:4px;font-family:'Source Serif 4',Georgia,serif;font-style:italic;font-size:17px;color:#3a342b">free while we're in alpha.</div>
+        <div style="margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;letter-spacing:.1em;color:#3a342b">MAC · WINDOWS · LINUX</div>
+        <div style="width:100%;margin-top:14px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;gap:8px;padding:10px;background:#1a1612;border:2px solid #1a1612;border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#f5f0e6;text-align:left;white-space:nowrap;overflow:hidden;user-select:all"><span style="color:#f4b942">$</span><span>npx claude-code-session-manager@latest</span></div>
+          <button onClick="{{ copy }}" style="all:unset;box-sizing:border-box;cursor:pointer;width:100%;text-align:center;background:#a83818;color:#f5f0e6;font-weight:700;font-size:16px;padding:13px 16px;border:2px solid #1a1612;border-radius:10px;box-shadow:3px 3px 0 #1a1612;transition:transform .08s, box-shadow .08s" style-active="transform:translate(3px,3px);box-shadow:0 0 0 #1a1612">{{ copyLabel }}</button>
+          <div style="font-size:13px;line-height:1.45;color:#1a1612">Paste it into your terminal and you're off.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section style="position:relative;z-index:1;flex:1;min-height:0;margin:20px 40px 22px;display:grid;grid-template-columns:260px minmax(0,1fr) 300px;gap:30px;padding:16px 22px 16px 16px;background:#fbf8f1;border:2px solid #1a1612;border-radius:16px;box-shadow:6px 6px 0 #1a1612">
+    <div style="min-height:0;display:flex;flex-direction:column;gap:3px">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;padding:2px 10px 6px">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;letter-spacing:.14em">THE PARTS BIN</span>
+        <span style="font-family:'Source Serif 4',Georgia,serif;font-style:italic;font-size:13px;color:#5d5648">pick a part</span>
+      </div>
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="9">
+        <button onClick="{{ t.select }}" style="all:unset;box-sizing:border-box;cursor:pointer;display:flex;align-items:center;gap:10px;height:28px;padding:0 10px;border-radius:8px;border:1.5px solid {{ t.border }};background:{{ t.bg }};box-shadow:{{ t.shadow }};transform:{{ t.shift }};font-size:14px;font-weight:{{ t.weight }};color:#1a1612;transition:transform .15s, box-shadow .15s" style-hover="border-color:#1a1612">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5d5648">{{ t.num }}</span><span>{{ t.label }}</span>
+        </button>
+      </sc-for>
+    </div>
+
+    <div style="position:relative;min-width:0;min-height:0;display:flex;flex-direction:column;gap:12px;padding-top:6px">
+      <div style="position:absolute;right:-10px;top:-40px;font-family:'Source Serif 4',Georgia,serif;font-style:italic;font-weight:700;font-size:220px;line-height:1;color:#ede6d6;pointer-events:none">{{ cur.num }}</div>
+      <div style="position:relative;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.12em;color:#a83818">PART {{ cur.num }} · {{ cur.kicker }}</div>
+      <h2 style="position:relative;margin:0;max-width:580px;font-family:'Source Serif 4',Georgia,serif;font-weight:700;font-size:32px;line-height:1.12;letter-spacing:-.01em;text-wrap:pretty">{{ cur.title }}</h2>
+      <p style="position:relative;margin:0;max-width:600px;font-size:16px;line-height:1.55;color:#3a342b;text-wrap:pretty">{{ cur.body }}</p>
+      <div style="position:relative;margin-top:4px;display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{ cur.bullets }}" as="b" hint-placeholder-count="3">
+          <div style="display:flex;align-items:center;gap:10px;font-size:15px;color:#1a1612"><span style="flex:none;width:20px;height:20px;border-radius:50%;background:#f4b942;border:1.5px solid #1a1612;display:grid;place-items:center;font-weight:700;font-size:13px;line-height:1">+</span><span>{{ b }}</span></div>
+        </sc-for>
+      </div>
+    </div>
+
+    <aside style="position:relative;min-height:0;margin:8px 0 4px;transform:rotate(1.2deg);background:#f5f0e6;border:2px solid #1a1612;border-radius:6px;box-shadow:4px 4px 0 #1a1612;padding:24px 18px 14px;display:flex;flex-direction:column;gap:10px">
+      <div style="position:absolute;top:-13px;left:50%;margin-left:-46px;width:92px;height:22px;background:#f4b942;border:1.5px solid #1a1612;transform:rotate(-4deg)"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;letter-spacing:.12em;color:#3a342b">FROM THE FIELD MANUAL</span>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;letter-spacing:.08em;color:#f5f0e6;background:#2e5a3e;border-radius:4px;padding:2px 6px">FREE</span>
+      </div>
+      <div style="font-family:'Source Serif 4',Georgia,serif;font-weight:700;font-size:20px;line-height:1.25;text-wrap:pretty">{{ cur.chapter }}</div>
+      <div style="border-top:1.5px dashed #d4ccb8"></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{ cur.points }}" as="p" hint-placeholder-count="3">
+          <div style="display:flex;gap:8px;font-size:13px;line-height:1.4;color:#3a342b"><span style="color:#a83818">✦</span><span>{{ p }}</span></div>
+        </sc-for>
+      </div>
+      <a href="#manual" style="margin-top:auto;font-size:14px;font-weight:700">Read this chapter free →</a>
+    </aside>
+  </section>
+
+  <sc-if value="{{ filmOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeFilm }}" style="position:absolute;inset:0;z-index:20;background-color:rgba(26,22,18,.92);background-image:radial-gradient(#3a342b 1.3px, transparent 1.5px);background-size:22px 22px">
+      <div onClick="{{ stop }}" style="position:absolute;left:200px;top:52px;width:1040px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div style="display:flex;align-items:center;gap:14px">
+            <div style="transform:rotate(-3deg);background:#f4b942;border:2px solid #1a1612;box-shadow:3px 3px 0 #a83818;border-radius:6px;padding:4px 10px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.12em;color:#1a1612">NOW SHOWING</div>
+            <div style="font-family:'Source Serif 4',Georgia,serif;font-style:italic;font-weight:700;font-size:24px;color:#f5f0e6">Pip and the Paper Moon</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:.08em;color:#d4ccb8">57 SEC</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.1em;color:#d4ccb8">ESC</span>
+            <button onClick="{{ closeFilm }}" style="all:unset;box-sizing:border-box;cursor:pointer;width:40px;height:40px;border-radius:50%;background:#f5f0e6;border:2px solid #1a1612;box-shadow:3px 3px 0 #a83818;display:grid;place-items:center;font-size:22px;line-height:1;color:#1a1612" style-hover="background:#f4b942">×</button>
+          </div>
+        </div>
+
+        <div onClick="{{ toggle }}" style="position:relative;width:1040px;height:585px;cursor:pointer;background:#e3dcc8;border:3px solid #1a1612;border-radius:14px;box-shadow:8px 8px 0 #a83818;overflow:hidden;display:grid;place-items:center">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:10px;color:#3a342b">
+            <div style="font-family:'Source Serif 4',Georgia,serif;font-style:italic;font-weight:700;font-size:56px;color:#1a1612">Pip and the Paper Moon</div>
+            <div style="font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:600;letter-spacing:.14em">YOUR 57-SECOND FILM PLAYS HERE · 16:9</div>
+          </div>
+          <sc-if value="{{ showBigPlay }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute;inset:0;display:grid;place-items:center;background:rgba(245,240,230,.35)">
+              <div style="width:104px;height:104px;border-radius:50%;background:#a83818;border:3px solid #1a1612;box-shadow:5px 5px 0 #1a1612;display:grid;place-items:center">
+                <div style="width:0;height:0;border-top:20px solid transparent;border-bottom:20px solid transparent;border-left:32px solid #f5f0e6;margin-left:8px"></div>
+              </div>
+            </div>
+          </sc-if>
+          <sc-if value="{{ ended }}" hint-placeholder-val="{{ false }}">
+            <div onClick="{{ stop }}" style="position:absolute;inset:0;cursor:default;background:#f5f0e6;background-image:radial-gradient(#d4ccb8 1.3px, transparent 1.5px);background-size:22px 22px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px">
+              <div style="transform:rotate(-2deg);background:#2e5a3e;color:#f5f0e6;border:2px solid #1a1612;box-shadow:3px 3px 0 #1a1612;border-radius:6px;padding:4px 10px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;letter-spacing:.1em">THE END (FOR NOW)</div>
+              <div style="font-family:'Source Serif 4',Georgia,serif;font-weight:700;font-size:52px;letter-spacing:-.02em;color:#1a1612">That's the whole tour.</div>
+              <div style="font-size:17px;color:#3a342b">Want to take it for a spin? It's free while we're in alpha.</div>
+              <div style="display:flex;gap:14px;margin-top:6px">
+                <button onClick="{{ copy }}" style="all:unset;box-sizing:border-box;cursor:pointer;background:#a83818;color:#f5f0e6;font-weight:700;font-size:16px;padding:13px 20px;border:2px solid #1a1612;border-radius:10px;box-shadow:3px 3px 0 #1a1612" style-active="transform:translate(3px,3px);box-shadow:0 0 0 #1a1612">{{ copyLabel }}</button>
+                <a href="#manual" onClick="{{ closeFilm }}" style="text-decoration:none;background:#fbf8f1;color:#1a1612;font-weight:700;font-size:16px;padding:13px 20px;border:2px solid #1a1612;border-radius:10px;box-shadow:3px 3px 0 #1a1612" style-hover="background:#f4b942;color:#1a1612">Read the Field Manual →</a>
+              </div>
+              <button onClick="{{ replay }}" style="all:unset;cursor:pointer;font-size:14px;font-weight:600;color:#1a1612;text-decoration:underline;text-underline-offset:3px">Watch again</button>
+            </div>
+          </sc-if>
+        </div>
+
+        <div style="height:60px;display:flex;align-items:center;gap:14px;padding:0 14px;background:#fbf8f1;border:2px solid #1a1612;border-radius:12px;box-shadow:4px 4px 0 #a83818">
+          <button onClick="{{ toggle }}" style="all:unset;box-sizing:border-box;cursor:pointer;flex:none;width:40px;height:40px;border-radius:10px;background:#a83818;border:2px solid #1a1612;box-shadow:2px 2px 0 #1a1612;display:flex;align-items:center;justify-content:center;gap:4px" style-active="transform:translate(2px,2px);box-shadow:0 0 0 #1a1612">
+            <sc-if value="{{ playing }}" hint-placeholder-val="{{ true }}">
+              <span style="width:5px;height:14px;background:#f5f0e6;border-radius:1px"></span><span style="width:5px;height:14px;background:#f5f0e6;border-radius:1px"></span>
+            </sc-if>
+            <sc-if value="{{ notPlaying }}" hint-placeholder-val="{{ false }}">
+              <span style="width:0;height:0;border-top:8px solid transparent;border-bottom:8px solid transparent;border-left:12px solid #f5f0e6;margin-left:3px"></span>
+            </sc-if>
+          </button>
+          <span style="flex:none;width:36px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:#1a1612">{{ timeNow }}</span>
+          <div onClick="{{ seek }}" style="position:relative;flex:1;height:14px;cursor:pointer;background:#e3dcc8;border:1.5px solid #1a1612;border-radius:999px">
+            <div style="position:absolute;left:0;top:0;bottom:0;width:{{ pct }}%;background:#f4b942;border-radius:999px"></div>
+            <div style="position:absolute;top:50%;left:{{ pct }}%;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;background:#f5f0e6;border:2px solid #1a1612;box-shadow:2px 2px 0 #1a1612"></div>
+          </div>
+          <span style="flex:none;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:#5d5648">0:57</span>
+          <button onClick="{{ cycleSpeed }}" style="all:unset;box-sizing:border-box;cursor:pointer;flex:none;min-width:48px;text-align:center;padding:6px 10px;border:1.5px solid #1a1612;border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#1a1612" style-hover="background:#f4b942">{{ speedLabel }}</button>
+          <button onClick="{{ toggleMute }}" style="all:unset;box-sizing:border-box;cursor:pointer;flex:none;padding:6px 10px;border:1.5px solid #1a1612;border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#1a1612" style-hover="background:#f4b942">{{ muteLabel }}</button>
+          <button onClick="{{ fullscreen }}" style="all:unset;box-sizing:border-box;cursor:pointer;flex:none;padding:6px 10px;border:1.5px solid #1a1612;border-radius:8px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:#1a1612" style-hover="background:#f4b942">FULL SCREEN</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;stripes&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;},&quot;account&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;you@example.com&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+const TABS = [
+ {label:"Sessions",title:"Sessions that don't lose the plot.",body:"Give every job its own session, with a persona and a mission. Hop between the terminal and a chat view whenever you like — it's the same conversation, so Claude remembers what you were doing.",bullets:["Tell Claude who to be and what it's working on, up front","Flip between Terminal and Chat without starting over","Turn detail up to every tool call, or down to just the answer"],chapter:"Sessions without the mess",points:["Why one job should get one session","How to write a mission Claude actually sticks to","When to start fresh instead of dragging an old one along"]},
+ {label:"Scheduler",title:"Hit your token limit? Queue it and go get lunch.",body:"The scheduler knows when your usage window resets and fires your queued prompts right on time — so the big stuff runs when you've got the most room.",bullets:["See how much of your window is left, at a glance","Line up prompts to run the moment it resets","Anything that needs you waits until you're back"],chapter:"Making the most of your token window",points:["Which jobs to save for right after a reset","Splitting long jobs so they don't stall halfway","Reading your usage before it surprises you"]},
+ {label:"Agent Library",title:"Build your own crew of Claudes.",body:"Save the personas that work — the careful reviewer, the speedy prototyper, the patient explainer — and bring them into any project.",bullets:["Start from a template or write your own","Improve one once, every project gets the upgrade","See exactly what changed between versions"],chapter:"Personas that pull their weight",points:["What to put in a persona (and what to leave out)","Keeping agents focused enough to trust","Updating a persona without breaking old sessions"]},
+ {label:"Tag Library",title:"Find that one brilliant prompt again.",body:"Tag sessions, prompts and agents as you go. Next month, the trick you figured out today is one click away.",bullets:["Tag anything — sessions, prompts, agents","Mix tags to filter your history","Rename a tag once, it changes everywhere"],chapter:"Tags you'll actually use",points:["Why a few tags beat a clever system","Tag what happened, not just the topic","Clearing out tags that stopped helping"]},
+ {label:"Memory",title:"Peek at what Claude remembers.",body:"Every memory file — for one project or all of them — in one tidy place. Read it, fix it, move on. No digging through hidden folders.",bullets:["Browse memory by project or globally","Edit with a live preview","Spot instructions that contradict each other"],chapter:"Memory: less is more",points:["What deserves a spot in memory","Project memory vs global memory","Catching mixed signals before Claude does"]},
+ {label:"History",title:"Everything you've done, searchable, on your laptop.",body:"Search every session you've ever run and reopen any of them right where you left off. Nothing gets uploaded anywhere.",bullets:["Search by words, tags or project","Jump back into any session mid-thought","Export a transcript in one click"],chapter:"Your history is your best teacher",points:["Digging up prompts that already worked","When to reopen and when to restart","Keeping history useful, not huge"]},
+ {label:"Skills · Hooks · MCP",title:"The scary config stuff, made friendly.",body:"Skills, hooks and MCP servers side by side, with on/off switches. No hand-editing JSON, no guessing what's switched on.",bullets:["Switch skills on and off per project","Set up hooks with a guided editor","Add an MCP server and check it actually answers"],chapter:"Skills, hooks and MCP, explained plainly",points:["What each one is for, in one table","Hooks that save time vs hooks that bite","Testing an MCP server before you rely on it"]},
+ {label:"Voice",title:"Hands full? Just talk.",body:"Hold a key and talk to any session. It transcribes on your own machine, and you can tidy the text before it sends.",bullets:["Push-to-talk into Terminal or Chat","Transcribed locally — it stays on your laptop","Fix the words before they go"],chapter:"Prompting out loud",points:["When talking beats typing","Shaping a spoken prompt so it lands","Keeping voice private"]},
+ {label:"The whole kit",title:"The whole kit, one window.",body:"Sessions, scheduler, memory, history and every setting — all bolted into one app on your laptop. And it's free while we're in alpha.",bullets:["One app instead of a dozen terminals and hidden files","Runs entirely on your machine","Free for the whole alpha — one command to install"],chapter:"Your first week, start to finish",points:["A day-by-day first week with Session Manager","The five habits that pay off most","What to ignore until you need it"]}
+];
+const pad = n => String(n).padStart(2, "0");
+const LEN = 57;
+const fmt = s => Math.floor(s / 60) + ":" + pad(Math.floor(s % 60));
+class Component extends DCLogic {
+  state = { i: 0, copied: false, film: false, playing: false, t: 0, speed: 1, muted: false, vw: window.innerWidth, vh: window.innerHeight };
+  componentDidMount() {
+    this._r = () => this.setState({ vw: window.innerWidth, vh: window.innerHeight });
+    window.addEventListener("resize", this._r);
+    this._ro = new ResizeObserver(this._r); this._ro.observe(document.documentElement);
+    this._r(); requestAnimationFrame(this._r);
+    this._iv = setInterval(() => {
+      const s = this.state; if (!s.film || !s.playing) return;
+      const t = Math.min(LEN, s.t + 0.25 * s.speed); this.setState({ t, playing: t < LEN });
+    }, 250);
+    this._k = (e) => {
+      if (!this.state.film) return;
+      if (e.key === "Escape") this.setState({ film: false, playing: false });
+      if (e.key === " ") { e.preventDefault(); this.togglePlay(); }
+    };
+    window.addEventListener("keydown", this._k);
+  }
+  componentWillUnmount() { window.removeEventListener("resize", this._r); window.removeEventListener("keydown", this._k); this._ro && this._ro.disconnect(); clearInterval(this._iv); }
+  togglePlay() { this.setState(s => s.t >= LEN ? { t: 0, playing: true } : { playing: !s.playing }); }
+  renderVals() {
+    const i = this.state.i, vw = this.state.vw || window.innerWidth || 1440, vh = this.state.vh || window.innerHeight || 860;
+    const scale = Math.min(vw / 1440, vh / 860);
+
+    const t = TABS[i];
+    return {
+      scale, offX: Math.max(0, (vw - 1440 * scale) / 2), offY: Math.max(0, (vh - 860 * scale) / 2),
+      stripes: this.props.stripes ?? true,
+      account: this.props.account ?? "you@example.com",
+      filmOpen: this.state.film,
+      openFilm: (e) => { e.preventDefault(); this.setState({ film: true, t: 0, playing: true }); },
+      closeFilm: () => this.setState({ film: false, playing: false }),
+      stop: (e) => e.stopPropagation(),
+      toggle: (e) => { e.stopPropagation(); this.togglePlay(); },
+      replay: (e) => { e.stopPropagation(); this.setState({ t: 0, playing: true }); },
+      seek: (e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); const p = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); this.setState({ t: p * LEN }); },
+      cycleSpeed: (e) => { e.stopPropagation(); this.setState(s => ({ speed: s.speed === 1 ? 1.5 : s.speed === 1.5 ? 2 : 1 })); },
+      toggleMute: (e) => { e.stopPropagation(); this.setState(s => ({ muted: !s.muted })); },
+      fullscreen: (e) => { e.stopPropagation(); document.documentElement.requestFullscreen?.().catch(() => {}); },
+      playing: this.state.playing, notPlaying: !this.state.playing,
+      ended: this.state.t >= LEN, showBigPlay: !this.state.playing && this.state.t < LEN,
+      timeNow: fmt(this.state.t), pct: (this.state.t / LEN) * 100,
+      speedLabel: this.state.speed + "×", muteLabel: this.state.muted ? "SOUND OFF" : "SOUND ON",
+      copyLabel: this.state.copied ? "Copied — now paste it in your terminal" : "Copy the install command",
+      copy: () => { navigator.clipboard?.writeText("npx claude-code-session-manager@latest").catch(() => {}); this.setState({ copied: true }); clearTimeout(this._t); this._t = setTimeout(() => this.setState({ copied: false }), 2200); },
+      tabs: TABS.map((x, k) => {
+        const on = k === i;
+        return { label: x.label, num: pad(k + 1), select: () => this.setState({ i: k }),
+          bg: on ? "#f4b942" : "transparent", border: on ? "#1a1612" : "transparent",
+          shadow: on ? "2px 2px 0 #1a1612" : "none", shift: on ? "translateX(6px)" : "none", weight: on ? 700 : 500 };
+      }),
+      cur: { ...t, num: pad(i + 1), kicker: t.label.toUpperCase() }
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -100,9 +100,9 @@ of them has an app-owned single writer vs. is skill-authored is [CLAUDE.md](../.
 `OWNERS` enumeration under Domain model — not restated here.
 
 **Ambiguous case, resolved:** `manual/` is operations state (a skill-authored artifact folder,
-not app-owned) whose *product* — the Field Manual — is sold via the WEB PRESENCE partition
-(bilko.run checkout). The folder's partition is OPERATIONS STATE; only its output crosses into
-WEB PRESENCE territory.
+not app-owned) whose *product* — the Field Manual — is published free via the WEB PRESENCE
+partition (bilko.run reader). The folder's partition is OPERATIONS STATE; only its output
+crosses into WEB PRESENCE territory.
 
 ## Verification
 

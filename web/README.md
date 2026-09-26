@@ -9,7 +9,7 @@ paper.
 **The user-facing pages themselves are NOT here.** They live in `~/Projects/Bilko`, a sibling
 repo. This directory only holds the tooling that *produces* what Bilko serves:
 
-- `manual/` — builds and captures figures for the Field Manual, the paid product sold at
+- `manual/` — builds and captures figures for the Field Manual, the free guide published at
   bilko.run/manual. Source content lives in `session-manager-operations/manual/` (OPERATIONS
   STATE, unmoved); output lands in `~/Projects/Bilko/data/manual/releases/`.
 - `remote-app/` — the phone-remote PWA, the live source of the bundle published at

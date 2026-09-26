@@ -1,0 +1,302 @@
+{
+  "$comment": "Final copy for bilko.run/products/session-manager (landing v2). Source of truth for every visible string and aria label; DESIGN_SPEC.md next to this file explains each changed line with evidence. Keys marked 'aria' are never rendered as visible text. '{…}' are template slots filled at runtime.",
+  "meta": {
+    "documentTitle": "Session Manager — bilko.run",
+    "manualHref": "/products/session-manager/manual",
+    "chapterHrefTemplate": "/products/session-manager/manual#{slug}",
+    "installCommand": "npx claude-code-session-manager@latest"
+  },
+  "header": {
+    "wordmark": "Session Manager",
+    "badge": "ALPHA",
+    "tagline": "— the Claude Code supercharger",
+    "manualLink": "Field Manual (it's free) →",
+    "manualLinkNotFree": "Field Manual →",
+    "account": {
+      "signIn": "Sign in",
+      "signedInPrefixSr": "Signed in as",
+      "avatarFallbackInitial": "?"
+    },
+    "aria": {
+      "account": "Account"
+    }
+  },
+  "hero": {
+    "audience": "FOR CLAUDE CODE LEARNERS & TINKERERS",
+    "headlineLine1": "Claude Code,",
+    "headlineLine2": "supercharged.",
+    "body": "Session Manager is a desktop app that bolts onto Claude Code and gives it a proper garage: sessions that don't lose the plot, a scheduler that waits out your token limit for you, and every setting in one friendly window. The app runs on your own laptop.",
+    "ctaLead": "Kick the tires first →",
+    "sticker": "free!"
+  },
+  "ctas": {
+    "film": {
+      "title": "Watch it run",
+      "subtitle": "57 seconds · “Pip and the Paper Moon”"
+    },
+    "manual": {
+      "title": "Read the Field Manual",
+      "subtitleTemplate": "{n} chapters of tips & tricks",
+      "subtitleFallback": "tips & tricks, every chapter free",
+      "href": "/products/session-manager/manual"
+    }
+  },
+  "priceTag": {
+    "kicker": "THE APP",
+    "price": "$0",
+    "line": "free, and stays free.",
+    "platforms": "MAC · LINUX",
+    "commandPrompt": "$",
+    "command": "npx claude-code-session-manager@latest",
+    "copyLabel": "Copy the install command",
+    "copiedLabel": "Copied — now paste it in your terminal",
+    "copyFailedLabel": "Couldn't copy — select it above",
+    "note": "Node 22.12+, Claude Code signed in? Paste & go.",
+    "aria": {
+      "region": "Price and install",
+      "platforms": "Runs on macOS and Linux",
+      "commandBox": "Install command",
+      "copiedStatus": "Install command copied to your clipboard.",
+      "copyFailedStatus": "Couldn't copy automatically. Select the command and copy it yourself."
+    }
+  },
+  "partsBin": {
+    "label": "THE PARTS BIN",
+    "hint": "pick a part",
+    "kickerTemplate": "PART {nn} · {LABEL}",
+    "aside": {
+      "label": "FROM THE FIELD MANUAL",
+      "freeChip": "FREE",
+      "link": "Read this chapter free →",
+      "linkNotFree": "Read this chapter →"
+    },
+    "aria": {
+      "tablist": "The parts bin",
+      "chapterLinkTemplate": "Read this chapter free: {title}",
+      "chapterLinkNotFreeTemplate": "Read this chapter: {title}"
+    }
+  },
+  "tabs": [
+    {
+      "key": "sessions",
+      "label": "Sessions",
+      "title": "Sessions that don't lose the plot.",
+      "body": "Give every job its own session, with a persona and a mission. Hop between the terminal and a chat view whenever you like — it's the same conversation, so Claude remembers what you were doing.",
+      "bullets": [
+        "Tell Claude who to be and what it's working on, up front",
+        "Flip between Terminal and Chat without starting over",
+        "Turn detail up to every tool call, or down to just the answer"
+      ],
+      "chapter": {
+        "slug": "first-session",
+        "title": "Your first Session — from idea to working agent",
+        "points": [
+          "Install it, then take the guided tour",
+          "Hand your agency its first job, in plain English",
+          "Chat or Terminal: two views of one Session"
+        ]
+      }
+    },
+    {
+      "key": "scheduler",
+      "label": "Scheduler",
+      "title": "Hit your token limit? Queue it and go get lunch.",
+      "body": "The scheduler watches your usage window and starts queued jobs whenever there's room — and if you hit the limit, it pauses and picks back up at the reset.",
+      "bullets": [
+        "See how much of your window is left, at a glance",
+        "Hit the limit? It pauses, then resumes at the reset",
+        "Anything that needs you waits until you're back"
+      ],
+      "chapter": {
+        "slug": "plans-and-scheduler",
+        "title": "Work that runs while you're away — plans and the Scheduler",
+        "points": [
+          "How a big idea becomes small work orders",
+          "Every job runs in its own project copy",
+          "Pausing near your limit, then resuming"
+        ]
+      }
+    },
+    {
+      "key": "agents",
+      "label": "Agent Library",
+      "title": "Build your own crew of Claudes.",
+      "body": "Save the personas that work — the careful reviewer, the speedy prototyper, the patient explainer — and bring them into any project.",
+      "bullets": [
+        "Start from a bundled persona or a blank page",
+        "Improve one once, every project gets the upgrade",
+        "Let one project swap the model, no fork needed"
+      ],
+      "chapter": {
+        "slug": "agents-and-missions",
+        "title": "Shaping your team — Agents, Missions and one-click Actions",
+        "points": [
+          "Write an agent in plain English — no code",
+          "Picking a model, and what it costs",
+          "Turn a favorite agent into a one-click Action"
+        ]
+      }
+    },
+    {
+      "key": "tags",
+      "label": "Tag Library",
+      "title": "Name the job before Claude starts it.",
+      "body": "A small, fixed set of missions — Feature, Bug, Discussion and friends. Every session gets one, and your agents carry the missions they suit.",
+      "bullets": [
+        "One mission per session, chosen up front",
+        "Group your sessions by mission at a glance",
+        "Match agents to missions from either side"
+      ],
+      "chapter": {
+        "slug": "agents-and-missions",
+        "title": "Shaping your team — Agents, Missions and one-click Actions",
+        "points": [
+          "Missions: what kind of work a Session is",
+          "Feature, Bug, Discussion — what each sets up",
+          "Why the mission list is fixed on purpose"
+        ]
+      }
+    },
+    {
+      "key": "memory",
+      "label": "Memory",
+      "title": "Peek at what Claude remembers.",
+      "body": "Every memory note — per project, and per agent — in one tidy place. Read it, fix it, move on. No digging through hidden folders.",
+      "bullets": [
+        "Browse memory by project or by agent",
+        "See related notes grouped into clusters",
+        "Spot stale notes that point at missing files"
+      ],
+      "chapter": {
+        "slug": "cockpit-tour",
+        "title": "Around the cockpit — Home, memory, usage, history and more",
+        "points": [
+          "What Memory keeps between Sessions",
+          "Project notes vs one agent's notes",
+          "The Clusters report: memory at a glance"
+        ]
+      }
+    },
+    {
+      "key": "history",
+      "label": "History",
+      "title": "Every token, dollar and hour, tallied on your laptop.",
+      "body": "Estimated spend, tokens and active time for every project, by model and by day — built from the transcripts already on your disk.",
+      "bullets": [
+        "Chart spend, tokens or time, 30 days to all time",
+        "Rank your projects, then drill into one",
+        "Export the numbers to CSV in one click"
+      ],
+      "chapter": {
+        "slug": "cockpit-tour",
+        "title": "Around the cockpit — Home, memory, usage, history and more",
+        "points": [
+          "Usage meters: your five-hour and weekly limits",
+          "History: cost and usage over time",
+          "Pick a range and a measure, see the trend"
+        ]
+      }
+    },
+    {
+      "key": "config",
+      "label": "Skills · Hooks · MCP",
+      "title": "The scary config stuff, made friendly.",
+      "body": "Skills, hooks and MCP servers, each a click away — toggle skill auto-use, test your servers. No hand-editing JSON, no guessing what answers.",
+      "bullets": [
+        "Switch your skills' auto-use on or off",
+        "Set up hooks with a guided editor",
+        "Add an MCP server and check it actually answers"
+      ],
+      "chapter": {
+        "slug": "new-abilities",
+        "title": "New abilities — skills, plugins, tools and hooks",
+        "points": [
+          "What each one is for, in one table",
+          "Test-firing a hook before it runs for real",
+          "Testing an MCP server before you rely on it"
+        ]
+      }
+    },
+    {
+      "key": "voice",
+      "label": "Voice",
+      "title": "Hands full? Just talk.",
+      "body": "Hold a key and talk to any session. It transcribes on your own machine, and you can tidy the text before it sends.",
+      "bullets": [
+        "Push-to-talk into Terminal or Chat",
+        "Transcribed locally — audio stays on your laptop",
+        "Fix the words before they go"
+      ],
+      "chapter": {
+        "slug": "cockpit-tour",
+        "title": "Around the cockpit — Home, memory, usage, history and more",
+        "points": [
+          "Talking to your agents instead of typing",
+          "Speech turned to text on your own machine",
+          "The red bar that says it's listening"
+        ]
+      }
+    },
+    {
+      "key": "kit",
+      "label": "The whole kit",
+      "title": "The whole kit, one window.",
+      "body": "Sessions, scheduler, memory, history and every setting — all bolted into one app on your laptop. And it's free, and it stays free.",
+      "bullets": [
+        "One app instead of a dozen terminals and hidden files",
+        "Runs on your machine; telemetry is anonymous and opt-out",
+        "Free, and stays free — one command to install"
+      ],
+      "chapter": {
+        "slug": "welcome",
+        "title": "Welcome — your friendly map of what's ahead",
+        "points": [
+          "Claude Code, in one breath",
+          "What Session Manager adds to it",
+          "How the manual's three parts fit together"
+        ]
+      }
+    }
+  ],
+  "film": {
+    "nowShowing": "NOW SHOWING",
+    "title": "Pip and the Paper Moon",
+    "runtime": "57 SEC",
+    "escHint": "ESC",
+    "src": "/apps/session-manager/promo.mp4?v=2",
+    "poster": "/apps/session-manager/promo-poster.jpg",
+    "durationFallback": "0:57",
+    "speedLabels": [
+      "1×",
+      "1.5×",
+      "2×"
+    ],
+    "soundOn": "SOUND ON",
+    "soundOff": "SOUND OFF",
+    "fullscreen": "FULL SCREEN",
+    "exitFullscreen": "EXIT FULL SCREEN",
+    "videoFallback": "Your browser can't play this film here.",
+    "videoFallbackLink": "Download the MP4 (12 MB)",
+    "aria": {
+      "dialog": "Pip and the Paper Moon, a 57-second film",
+      "close": "Close the film",
+      "play": "Play",
+      "pause": "Pause",
+      "replay": "Play again",
+      "seek": "Seek",
+      "seekValueTemplate": "{now} of {total}",
+      "speedTemplate": "Playback speed {rate}"
+    }
+  },
+  "endCard": {
+    "badge": "THE END (FOR NOW)",
+    "headline": "That's the whole tour.",
+    "body": "Want to take it for a spin? It's free, and it stays free.",
+    "copyLabel": "Copy the install command",
+    "copiedLabel": "Copied — now paste it in your terminal",
+    "copyFailedLabel": "Couldn't copy — select it below",
+    "manualCta": "Read the Field Manual →",
+    "manualHref": "/products/session-manager/manual",
+    "replay": "Watch again"
+  }
+}

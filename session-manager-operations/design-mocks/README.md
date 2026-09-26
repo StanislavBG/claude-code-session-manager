@@ -15,6 +15,7 @@ either a closed historical record or a still-relevant template.
 | `home/` | **CLOSED 2026-08.** Design spec for the Home/Project-Home surface. Same status as `epics/`: archived-PRD references only. |
 | `project-pages-component-library/` | **Frozen port record**, superseded by `web/project-pages/` (a build output, not tracked in git — referenced by path, not linked, so it never resolves in a fresh worktree). Its own README's "Not the shipped architecture" and "needs a superset synthesis step" sections describe a gap that has since been closed by that port — read them as history of the design phase, not as an open TODO. |
 | `dom-specs/` | The DOM-spec authoring template (`TEMPLATE.html`). One spec has ever been produced from it (`scheduler-tab.html`, 2026-08-02). Keep — it's a live template for future tab specs, not dead weight, even though only one tab has used it so far. |
+| `landing-v2/` | **ACTIVE 2026-09.** Spec and final copy (`copy.json`) for the bilko.run Session Manager landing page (`/products/session-manager`, implemented in the Bilko repo), plus the saved Claude Design sources (`landing-v1.dc.html`, `landing-v2.dc.html`) and a render. `DESIGN_SPEC.md` maps the mock onto Bilko code and records every copy change with evidence. |
 
 ## Who writes here
 

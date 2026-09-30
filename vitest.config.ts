@@ -122,6 +122,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-reconcile-cwd-preserve.test.cjs',
       'src/main/__tests__/scheduler-reconcile-invalid-repair.test.cjs',
       'src/main/__tests__/scheduler-archived-twin-guard.test.cjs',
+      'src/main/__tests__/epic-ancestor-prd-lookup.test.cjs',
       'src/main/__tests__/scheduler-investigation-clean-skip.test.cjs',
       'src/main/__tests__/runVerify-atomic-verdicts.test.cjs',
       'src/main/__tests__/intradayRefresh.test.cjs',

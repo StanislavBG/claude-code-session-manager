@@ -151,7 +151,7 @@ const queueOps = require('./queueOps.cjs');
 // Plain Node module, no Electron dependency; queuePath/prdsDir defaults already
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
-const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath } = require('./lib/prdLocations.cjs');
+const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath, ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/agentEffortResolve.cjs');
@@ -1182,7 +1182,15 @@ function archivedPrdPathForJob(job) {
  */
 async function archivedTwinExists(job) {
   const slug = job && job.slug;
-  for (const dir of listArchivedPrdDirs((job && job.cwd) || DEFAULT_PROJECT_CWD)) {
+  const dirs = [...listArchivedPrdDirs((job && job.cwd) || DEFAULT_PROJECT_CWD)];
+  // Epic-in-non-git-parent case (see prdLocations.ancestorEpicDirs' header
+  // comment): job.cwd's own project never sees the ancestor Epic's archive
+  // dir via listArchivedPrdDirs, so also walk up from job.cwd for this
+  // job's EXACT epicId.
+  if (job && job.cwd && job.epicId) {
+    dirs.push(...ancestorEpicArchivedPrdDirs(job.cwd, job.epicId));
+  }
+  for (const dir of dirs) {
     const candidate = safeSlugPathIn(dir, slug);
     if (!candidate) continue;
     try {
@@ -1235,6 +1243,41 @@ async function findPrdDir(slug) {
       await fsp.access(path.join(dir, `${slug}.md`));
       return dir;
     } catch { /* not here — try the next candidate dir */ }
+  }
+  return null;
+}
+
+/**
+ * Job-aware widening of findPrdDir: tries the ordinary global candidate
+ * search first (unchanged), then a stored absolute PRD path on the row (if
+ * the queue schema ever carries one — checked defensively), then walks up
+ * to 3 ancestor directories above `job.cwd` for that EXACT `job.epicId`'s
+ * `prds` dir (prdLocations.ancestorEpicPrdDirs).
+ *
+ * Fixes the incident where an Epic lives in a non-git PARENT folder P
+ * (P/session-manager-operations/scheduler/epics/<epicId>/prds/*.md) but its
+ * PRDs' frontmatter `cwd` is the sub-repo P/repo — P is never itself a
+ * tracked project cwd, so findPrdDir's candidatePrdsDirs() never visits it
+ * and the job was wrongly retired as `prd-missing`. epicId is matched
+ * exactly (never a glob); every path is built with path.join, never string
+ * concatenation with user input.
+ */
+async function findPrdDirForJob(job) {
+  const viaGlobalSearch = await findPrdDir(job && job.slug);
+  if (viaGlobalSearch) return viaGlobalSearch;
+  if (job && typeof job.prdPath === 'string' && job.prdPath) {
+    try {
+      await fsp.access(job.prdPath);
+      return path.dirname(job.prdPath);
+    } catch { /* stored path stale — fall through to the ancestor walk */ }
+  }
+  if (job && job.cwd && job.epicId) {
+    for (const dir of ancestorEpicPrdDirs(job.cwd, job.epicId)) {
+      try {
+        await fsp.access(path.join(dir, `${job.slug}.md`));
+        return dir;
+      } catch { /* not here — try the next ancestor */ }
+    }
   }
   return null;
 }
@@ -5604,11 +5647,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     prompt = buildResumeRecoveryPreamble({ dirtyPaths: resumeTarget.dirtyPaths, salvagePatch: resumeTarget.salvagePatch });
   } else {
   // Read full PRD body fresh from disk (queue stored only the preview).
-  // Resolve through findPrdDir's full candidate search (legacy flat dir +
-  // every project's Epic-scoped dirs) first, so the common case — a live
-  // Epic-scoped PRD — is a first-try hit instead of probing the retired flat
-  // dir and only then falling back.
-  const resolvedDir = await findPrdDir(job.slug);
+  // Resolve through findPrdDirForJob's full candidate search (legacy flat
+  // dir + every project's Epic-scoped dirs, then a stored absolute prd path,
+  // then an ancestor-folder Epic walk above job.cwd) first, so the common
+  // case — a live Epic-scoped PRD — is a first-try hit instead of probing
+  // the retired flat dir and only then falling back.
+  const resolvedDir = await findPrdDirForJob(job);
   prdPath = resolvedDir ? path.join(resolvedDir, `${job.slug}.md`) : prdPathForJob(job);
   try {
     const parsed = await parsePrd(prdPath);
@@ -5622,8 +5666,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // The project-scoped dir isn't the only place a PRD source can live — a
     // writer that hasn't migrated to prdLocations.cjs yet (or a not-yet-run
     // boot migration) can leave it in the legacy global dir. Fall back to
-    // findPrdDir's full candidate search before failing the job outright.
-    const fallbackDir = await findPrdDir(job.slug);
+    // findPrdDirForJob's full candidate search before failing the job outright.
+    const fallbackDir = await findPrdDirForJob(job);
     if (fallbackDir) {
       const fallbackPath = path.join(fallbackDir, `${job.slug}.md`);
       safeLog(`[scheduler] PRD not in project dir; found ${job.slug}.md in ${fallbackDir}\n`);
@@ -13089,6 +13133,7 @@ module.exports = {
   archivedPrdPathForJob,
   archivedTwinExists,
   findPrdDir,
+  findPrdDirForJob,
   resolveVerifyPrdPath,
   resolveFixPlanPath,
   resolveNotifyPrd,

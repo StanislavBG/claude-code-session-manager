@@ -5040,10 +5040,16 @@ function stampIntegrationFailure(row, integration) {
     else delete row.integrationConflictPaths;
     if (integration.baseHeadSha) row.integrationBaseHeadSha = integration.baseHeadSha;
     else delete row.integrationBaseHeadSha;
+    if (integration.expectedBranch) row.integrationExpectedBranch = integration.expectedBranch;
+    else delete row.integrationExpectedBranch;
+    if (integration.actualBranch) row.integrationActualBranch = integration.actualBranch;
+    else delete row.integrationActualBranch;
   } else {
     delete row.integrationFailureKind;
     delete row.integrationConflictPaths;
     delete row.integrationBaseHeadSha;
+    delete row.integrationExpectedBranch;
+    delete row.integrationActualBranch;
   }
 }
 
@@ -5121,7 +5127,13 @@ function selectMechanicalRecoveryTarget(job, currentHeadSha = null) {
   if (job.mechanicalRecoveryAttempted === true) return null;
   if (isMechanicalRecoveryFutile(job, currentHeadSha)) return null;
   const cwd = job.cwd || DEFAULT_PROJECT_CWD;
-  return { slug: job.slug, cwd, branch: jobWorktree.branchNameFor(job.slug), carriedPaths: job.carriedPaths || [] };
+  return {
+    slug: job.slug,
+    cwd,
+    branch: jobWorktree.branchNameFor(job.slug),
+    carriedPaths: job.carriedPaths || [],
+    baseBranch: job.worktreeBaseBranch || null,
+  };
 }
 
 /**
@@ -5140,7 +5152,7 @@ function selectMechanicalRecoveryTarget(job, currentHeadSha = null) {
  */
 async function performMechanicalRecovery(job, target) {
   const integration = await jobWorktree.integrateJobBranch({
-    cwd: target.cwd, branch: target.branch, slug: target.slug, carriedPaths: target.carriedPaths,
+    cwd: target.cwd, branch: target.branch, slug: target.slug, carriedPaths: target.carriedPaths, baseBranch: target.baseBranch,
   });
   if (integration.ok) {
     await jobWorktree.cleanupJobWorktree({ cwd: target.cwd, dir: undefined, branch: target.branch, keepBranch: false });
@@ -6339,6 +6351,14 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
     console.log(`[scheduler] skip investigation: ${failedJob.slug} is mechanical-recovery eligible`);
     return { deferred: false };
   }
+  // stray_checkout is environmental (the project's own checkout sits off the
+  // expected base branch) — no fix-plan PRD can ever land against it; a human
+  // must fix the checkout. Authoring one anyway just re-hits the same refusal
+  // on every retry, forever blocking dependents.
+  if (failedJob.integrationFailureKind === 'stray_checkout') {
+    console.log(`[scheduler] skip investigation: ${failedJob.slug} integration blocked by stray checkout (environmental)`);
+    return { deferred: false };
+  }
   if (isFixPlanBeyondDepthCap(failedJob.slug, failedJob.investigationDepth, failedJob.isFixPlan)) {
     console.log(`[scheduler] skip investigation: ${failedJob.slug} is a fix plan at/beyond depth cap (depth=${failedJob.investigationDepth ?? 'none'})`);
     return { deferred: false };
@@ -6867,7 +6887,7 @@ async function finalizeJobWorktree({ job, runDir, worktree, guardCwd, carriedPat
         console.log(`[scheduler] ${job.slug}: salvaged ${salvage.bytes} byte(s) of uncommitted worktree diff to ${salvagePath}`);
       }
     }
-    const integration = await jw.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug, carriedPaths });
+    const integration = await jw.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug, carriedPaths, baseBranch: worktree.baseBranch });
     if (integration.ok && integration.reason === 'carried-wip-only') {
       console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} touched only carried base WIP paths — skipping merge (carried-wip-only)`);
     }
@@ -7246,12 +7266,18 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     // recorded on the job row so integration can exclude these paths from
     // the branch diff below, and so it's queryable from the queue.
     const carriedPaths = (worktree.ok && Array.isArray(worktree.carriedPaths)) ? worktree.carriedPaths : [];
-    if (carriedPaths.length) {
-      await mutate((s) => {
-        const idx = s.jobs.findIndex((x) => x.slug === job.slug);
-        if (idx >= 0) s.jobs[idx].carriedPaths = carriedPaths;
-      });
-    }
+    // baseBranch (createWorktree, this PRD) — the branch `cwd` was actually on
+    // when the worktree forked, threaded onto the job row so a later mechanical
+    // recovery retries integration against the SAME target, not whatever `cwd`
+    // happens to sit on by then.
+    const worktreeBaseBranch = (worktree.ok && typeof worktree.baseBranch === 'string' && worktree.baseBranch) ? worktree.baseBranch : null;
+    await mutate((s) => {
+      const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+      if (idx < 0) return;
+      if (carriedPaths.length) s.jobs[idx].carriedPaths = carriedPaths;
+      if (worktreeBaseBranch) s.jobs[idx].worktreeBaseBranch = worktreeBaseBranch;
+      else delete s.jobs[idx].worktreeBaseBranch;
+    });
 
     // Integrate the job's branch back into guardCwd's own HEAD, THEN tear the
     // worktree checkout down — both must happen BEFORE any git read below

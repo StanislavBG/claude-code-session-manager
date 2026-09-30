@@ -1289,6 +1289,91 @@ test('[guard] resolveDefaultBranch resolves a sensible default (the sole local b
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
 });
 
+// ──────────────────────────────────────────── recorded base-branch integration (PRD: integrate-onto-recorded-base-branch)
+
+test('[base-branch] integrates onto recorded feature base branch when the checkout legitimately sits on a non-default branch', async () => {
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  git(['checkout', '-b', 'feat/json-display'], repoCwd);
+
+  const slug = 'test-slug-base-feature';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+  expect(worktree.baseBranch).toBe('feat/json-display');
+
+  fs.writeFileSync(path.join(worktree.dir, 'feature-output.txt'), 'job output\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit on feature checkout'], worktree.dir);
+
+  // The checkout stays on the feature branch the whole time — never the repo default.
+  expect(await gitWorktree.getCurrentBranch(repoCwd)).toBe('feat/json-display');
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug, baseBranch: worktree.baseBranch });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(fs.existsSync(path.join(repoCwd, 'feature-output.txt'))).toBe(true);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+  git(['checkout', defaultBranch], repoCwd);
+  git(['branch', '-D', 'feat/json-display'], repoCwd);
+});
+
+test('[base-branch] refuses with stray_checkout when HEAD moved off the recorded base branch', async () => {
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  git(['checkout', '-b', 'feat/json-display'], repoCwd);
+
+  const slug = 'test-slug-base-moved';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+  expect(worktree.baseBranch).toBe('feat/json-display');
+
+  fs.writeFileSync(path.join(worktree.dir, 'feature-output-2.txt'), 'job output\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit on feature checkout'], worktree.dir);
+
+  // The checkout moves off the recorded base branch before integration runs.
+  git(['checkout', defaultBranch], repoCwd);
+  const headBefore = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  const statusBefore = git(['status', '--porcelain'], repoCwd);
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug, baseBranch: worktree.baseBranch });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.failureKind).toBe('stray_checkout');
+  expect(outcome.expectedBranch).toBe('feat/json-display');
+  expect(outcome.actualBranch).toBe(defaultBranch);
+  expect(outcome.reason).toMatch(/^refusing to integrate: HEAD is on "/);
+  expect(outcome.reason).toContain('feat/json-display');
+
+  // Refusing must not touch git state: no checkout/reset/switch performed.
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(headBefore);
+  expect(git(['status', '--porcelain'], repoCwd)).toBe(statusBefore);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+  try { git(['branch', '-D', worktree.branch], repoCwd); } catch { /* best-effort */ }
+  git(['branch', '-D', 'feat/json-display'], repoCwd);
+});
+
+test('[base-branch] ignores an sm-job/ recorded base and falls back to the repo default branch', async () => {
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  const slug = 'test-slug-base-sm-job-ignored';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+
+  fs.writeFileSync(path.join(worktree.dir, 'sm-job-base-ignored.txt'), 'job output\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  // repoCwd sits on the real default branch — an sm-job/* baseBranch value
+  // (e.g. read back off a stale job row) must be treated the same as no
+  // baseBranch at all, falling back to resolveDefaultBranch(cwd).
+  const outcome = await gitWorktree.integrateJobBranch({
+    cwd: repoCwd, branch: worktree.branch, slug, baseBranch: 'sm-job/leftover-from-a-prior-run',
+  });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(await gitWorktree.getCurrentBranch(repoCwd)).toBe(defaultBranch);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
 test('[guard][epic] integrateEpicBranch inherits the same guard and still merges cleanly when HEAD is on the default branch', async () => {
   const epicId = 'test-epic-guard-ok';
   const worktree = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId });

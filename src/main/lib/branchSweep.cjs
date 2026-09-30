@@ -114,7 +114,15 @@ async function sweepStrandedJobBranches({ cwd, jobs, attemptedBranches }) {
       continue;
     }
     attempted.add(attemptKey);
-    const integration = await gitWorktree.integrateJobBranch({ cwd, branch, slug: slug || branch });
+    // baseBranch: read off the job row when one still exists (the crash-between-
+    // commit-and-integrate case this sweep exists for) so integration targets the
+    // SAME branch the checkout was actually on when the worktree was created —
+    // not whatever cwd happens to sit on during this sweep pass. A fully orphaned
+    // branch (no row at all) has nothing to read, so it falls back to
+    // resolveDefaultBranch(cwd), same as before.
+    const integration = await gitWorktree.integrateJobBranch({
+      cwd, branch, slug: slug || branch, baseBranch: (row && row.worktreeBaseBranch) || null,
+    });
     results.push({ branch, slug, action: integration.ok ? 'integrated' : 'conflict', integration });
   }
   return { results };

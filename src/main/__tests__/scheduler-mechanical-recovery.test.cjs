@@ -141,6 +141,18 @@ test('selectMechanicalRecoveryTarget: null currentHeadSha never skips', () => {
   expect(selectMechanicalRecoveryTarget(conflictJob(), null)).not.toBeNull();
 });
 
+test('selectMechanicalRecoveryTarget: target carries worktreeBaseBranch', () => {
+  const target = selectMechanicalRecoveryTarget(eligibleJob({ worktreeBaseBranch: 'feat/json-display' }));
+  expect(target).not.toBeNull();
+  expect(target.baseBranch).toBe('feat/json-display');
+});
+
+test('selectMechanicalRecoveryTarget: target baseBranch is null when the job row has no worktreeBaseBranch', () => {
+  const target = selectMechanicalRecoveryTarget(eligibleJob());
+  expect(target).not.toBeNull();
+  expect(target.baseBranch).toBeNull();
+});
+
 test('MECHANICALLY_RESOLVABLE_VERDICTS: closed set contains exactly worktree_integration_failed', () => {
   expect(Array.from(MECHANICALLY_RESOLVABLE_VERDICTS)).toEqual(['worktree_integration_failed']);
 });

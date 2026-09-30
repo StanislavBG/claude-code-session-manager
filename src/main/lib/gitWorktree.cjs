@@ -784,7 +784,10 @@ async function reserveWorktreeSlot(kind) {
 /**
  * Create a linked worktree on a fresh branch checked out from the main
  * tree's current HEAD. Returns `{ ok: true, dir, branch, baseCwd,
- * carriedPaths }` on success, or `{ ok: false, reason }` — the reason is
+ * carriedPaths, baseBranch }` on success (`baseBranch` is `cwd`'s branch at
+ * creation time — `null` on a detached HEAD — so integration later targets
+ * the branch the checkout actually started from, not whatever `cwd` sits on
+ * by the time the job finishes), or `{ ok: false, reason }` — the reason is
  * always a short, human-readable string meant to be logged verbatim so a
  * fallback to running in place is never silent.
  *
@@ -814,6 +817,7 @@ async function createWorktree({ kind, cwd, key }) {
 
   if (!(await isGitRepo(cwd))) return { ok: false, reason: 'not a git repository' };
 
+  const baseBranch = await getCurrentBranch(cwd);
   const baseWasClean = await isBaseTreeClean(cwd);
 
   // Cap check + slot reservation as a single atomic step, per kind — see
@@ -853,7 +857,7 @@ async function createWorktree({ kind, cwd, key }) {
   }
 
   registeredCheckouts.set(dir, { kind, branch });
-  return { ok: true, dir, branch, baseCwd: cwd, carriedPaths };
+  return { ok: true, dir, branch, baseCwd: cwd, carriedPaths, baseBranch };
 }
 
 /**
@@ -1174,25 +1178,44 @@ async function getCurrentBranch(cwd) {
  * the base tree still holding that same path dirty.
  *
  * Refuses outright — before touching any other git state — when `cwd`'s
- * HEAD is not on the repo's own default branch (resolved via
- * `resolveDefaultBranch`, never hardcoded to `main`) or is detached. A
- * stray checkout onto some other branch (e.g. a leftover `sm-job/*` branch
- * from a prior run) would otherwise make every subsequent merge-base/merge
- * silently target the WRONG tree, producing merge "conflicts" that are
- * really just wrong-base artifacts (RCA: starry-night-ships, 2026-09-12).
- * This refusal never checks out, resets, or switches anything — it only
- * reports; a human fixes the checkout.
+ * HEAD is not on the expected target branch or is detached. The expected
+ * target is `baseBranch` (the branch `cwd` was actually on when the
+ * worktree was created, per `createWorktree`) when it is a non-empty string
+ * that doesn't start with one of OUR OWN managed branch prefixes (KIND_CONFIG's
+ * `branchPrefix`, i.e. `sm-job/`/`sm-epic/` — read from the same config
+ * createWorktree/branchNameFor use, so a prefix rename can never drift the two
+ * apart) — a leftover managed-branch value is never a legitimate integration
+ * target, so it falls back the same as no baseBranch at all); otherwise it
+ * falls back to `resolveDefaultBranch(cwd)` (never hardcoded to `main`) —
+ * today's pre-PRD behavior for callers that don't pass `baseBranch` (e.g.
+ * `branchSweep.cjs`'s orphan sweep, which has no job row to read it from).
+ * A checkout that has moved off the expected target since the worktree was
+ * created (e.g. a leftover `sm-job/*` branch from a prior run) would
+ * otherwise make every subsequent merge-base/merge silently target the
+ * WRONG tree, producing merge "conflicts" that are really just wrong-base
+ * artifacts (RCA: starry-night-ships, 2026-09-12) — still guarded here
+ * because an `sm-*` baseBranch is rejected as an expected target, and a HEAD
+ * that moved after the worktree forked is refused regardless of what
+ * baseBranch was recorded. This refusal never checks out, resets, or
+ * switches anything — it only reports (`failureKind: 'stray_checkout'`); a
+ * human fixes the checkout.
  */
-async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
+async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranch }) {
   if (!cwd || !branch) return { ok: false, reason: 'missing cwd/branch' };
 
-  const defaultBranch = await resolveDefaultBranch(cwd);
+  const isOwnManagedBranch = (b) => Object.values(KIND_CONFIG).some((c) => b.startsWith(c.branchPrefix));
+  const expectedBranch = (typeof baseBranch === 'string' && baseBranch && !isOwnManagedBranch(baseBranch))
+    ? baseBranch
+    : await resolveDefaultBranch(cwd);
   const currentBranch = await getCurrentBranch(cwd);
-  if (currentBranch !== defaultBranch) {
-    const actual = currentBranch === null ? 'detached HEAD' : currentBranch;
+  if (currentBranch !== expectedBranch) {
+    const actualBranch = currentBranch === null ? 'detached HEAD' : currentBranch;
     return {
       ok: false,
-      reason: `refusing to integrate: HEAD is on "${actual}", not the repo's default branch "${defaultBranch}" — a stray checkout must be fixed before integration can proceed`,
+      failureKind: 'stray_checkout',
+      expectedBranch,
+      actualBranch,
+      reason: `refusing to integrate: HEAD is on "${actualBranch}", not the expected base branch "${expectedBranch}" — a stray checkout must be fixed before integration can proceed`,
     };
   }
 
@@ -1679,8 +1702,8 @@ async function reconcileWorktreesOnBoot(cwds, opts = {}) {
 async function createJobWorktree({ cwd, slug }) {
   return createWorktree({ kind: 'job', cwd, key: slug });
 }
-async function integrateJobBranch({ cwd, branch, slug, carriedPaths }) {
-  return integrateBranch({ kind: 'job', cwd, branch, key: slug, carriedPaths });
+async function integrateJobBranch({ cwd, branch, slug, carriedPaths, baseBranch }) {
+  return integrateBranch({ kind: 'job', cwd, branch, key: slug, carriedPaths, baseBranch });
 }
 async function cleanupJobWorktree({ cwd, dir, branch, keepBranch }) {
   return cleanupWorktree({ kind: 'job', cwd, dir, branch, keepBranch });
@@ -1695,8 +1718,8 @@ async function salvageJobDirtyDelta({ cwd, paths, outFile }) {
 async function createEpicWorktree({ cwd, epicId }) {
   return createWorktree({ kind: 'epic', cwd, key: epicId });
 }
-async function integrateEpicBranch({ cwd, branch, epicId }) {
-  return integrateBranch({ kind: 'epic', cwd, branch, key: epicId });
+async function integrateEpicBranch({ cwd, branch, epicId, baseBranch }) {
+  return integrateBranch({ kind: 'epic', cwd, branch, key: epicId, baseBranch });
 }
 async function cleanupEpicWorktree({ cwd, dir, branch, keepBranch }) {
   return cleanupWorktree({ kind: 'epic', cwd, dir, branch, keepBranch });

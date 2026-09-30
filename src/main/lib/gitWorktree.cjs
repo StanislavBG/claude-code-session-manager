@@ -855,9 +855,16 @@ async function createWorktree({ kind, cwd, key, fromRef }) {
   const baseBranch = await getCurrentBranch(cwd);
   const baseWasClean = await isBaseTreeClean(cwd);
 
-  let resolvedFromRef = null;
+  // Resolved to a commit SHA — never the bare ref/branch NAME — before it's
+  // handed to `git worktree add` below: a name could keep moving (or, for a
+  // '-'-prefixed name, be read as an option rather than a positional arg)
+  // between this resolution and the actual checkout; a SHA pins exactly the
+  // commit this call decided on. `forkedFrom` on the result still carries
+  // the original NAME (never the SHA) — that's the human-readable "what ref
+  // did this fork from" a caller wants to log/display.
+  let resolvedFromRefSha = null;
   if (typeof fromRef === 'string' && fromRef) {
-    resolvedFromRef = await tryResolveCommit(cwd, `${fromRef}^{commit}`) ? fromRef : null;
+    resolvedFromRefSha = await tryResolveCommit(cwd, `${fromRef}^{commit}`);
   }
 
   // Cap check + slot reservation as a single atomic step, per kind — see
@@ -868,7 +875,7 @@ async function createWorktree({ kind, cwd, key, fromRef }) {
 
   const dir = worktreeDirFor(kind, cwd, key);
   const branch = branchNameFor(kind, key);
-  const worktreeSource = resolvedFromRef || 'HEAD';
+  const worktreeSource = resolvedFromRefSha || 'HEAD';
   try {
     await fsp.mkdir(path.dirname(dir), { recursive: true });
     // Defensive: a same-key leftover from a prior crashed run (same slug/id
@@ -883,7 +890,7 @@ async function createWorktree({ kind, cwd, key, fromRef }) {
   }
 
   let carriedPaths = [];
-  if (!resolvedFromRef && !baseWasClean) {
+  if (!resolvedFromRefSha && !baseWasClean) {
     // Routed through module.exports (not the bare local function) so tests
     // can substitute a failing carry-over without needing a real git-apply
     // conflict fixture — see gitWorktree.test.cjs's carry-over-failure case.
@@ -899,7 +906,7 @@ async function createWorktree({ kind, cwd, key, fromRef }) {
 
   registeredCheckouts.set(dir, { kind, branch });
   const result = { ok: true, dir, branch, baseCwd: cwd, carriedPaths, baseBranch };
-  if (resolvedFromRef) result.forkedFrom = resolvedFromRef;
+  if (resolvedFromRefSha) result.forkedFrom = fromRef;
   return result;
 }
 
@@ -1764,10 +1771,17 @@ async function tryResolveCommit(cwd, spec) {
  * exit 129 / an "unknown option" stderr, git < 2.38's signature for not
  * supporting `--write-tree` at all) is a hard failure.
  */
-async function runMergeTreeWriteTree({ cwd, targetRef, branch }) {
+async function runMergeTreeWriteTree({ cwd, oldSha, branchSha }) {
   try {
+    // Resolved SHAs, never ref/branch NAMES: (1) keeps the tree content this
+    // computes and the parents `git commit-tree` later stamps always in sync
+    // with the exact objects decided on above — a name could resolve to a
+    // DIFFERENT object by the time this runs if something else moved it
+    // between the earlier resolution and this call; (2) a branch/ref name
+    // starting with '-' (e.g. an epicId-derived branch) would otherwise be
+    // read as an option by `git merge-tree`, not a positional argument.
     const out = await execGit(
-      ['merge-tree', '--write-tree', '--name-only', '--no-messages', targetRef, branch],
+      ['merge-tree', '--write-tree', '--name-only', '--no-messages', oldSha, branchSha],
       { cwd, timeout: 30_000 },
     );
     return { ok: true, treeOid: (out.split('\n')[0] || '').trim() };
@@ -1808,21 +1822,45 @@ async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
   const branchSha = await tryResolveCommit(cwd, `${branch}^{commit}`);
   if (!branchSha) return { ok: false, reason: `branch "${branch}" not found` };
 
+  // Resolve the ref itself (any object type) separately from its `^{commit}`
+  // form: a ref that exists but doesn't resolve to a commit (points at a
+  // blob/tree, or a corrupt/annotated-non-commit ref) must be an explicit
+  // failure, never silently treated as "doesn't exist yet" — that would run
+  // the create-only CAS below and stomp the ref's existing (non-commit)
+  // value instead of refusing.
+  const targetRefExists = await tryResolveCommit(cwd, targetRef);
   const oldSha = await tryResolveCommit(cwd, `${targetRef}^{commit}`);
+  if (targetRefExists && !oldSha) {
+    return { ok: false, reason: `targetRef "${targetRef}" exists but does not resolve to a commit` };
+  }
 
   if (oldSha === branchSha) {
     return { ok: true, integrated: false, reason: 'branch has no new commits' };
   }
 
+  // Retries only when `targetRef` actually moved since `oldSha` was read
+  // (a real CAS race a fresh attempt can resolve); otherwise the update-ref
+  // failure is real (bad ref name, permissions, disk) and reported as such
+  // rather than silently retried forever.
+  async function updateRefOrClassify(args) {
+    try {
+      await execGit(['update-ref', ...args], { cwd, timeout: 10_000 });
+      return { ok: true };
+    } catch (e) {
+      const stderrText = (e && (e.stderrText || e.message)) || String(e);
+      const nowSha = await tryResolveCommit(cwd, `${targetRef}^{commit}`);
+      if (nowSha !== oldSha) return { retry: true };
+      return { ok: false, failureKind: 'update_ref_failed', reason: stderrText };
+    }
+  }
+
   if (!oldSha) {
     // targetRef doesn't exist yet — a create-only CAS is the correct
     // fast-forward: everything on branch is new relative to an empty ref.
-    try {
-      await execGit(['update-ref', targetRef, branchSha, ''], { cwd, timeout: 10_000 });
-      return { ok: true, integrated: true, fastForward: true, sha: branchSha };
-    } catch {
-      return { retry: true };
-    }
+    const outcome = await updateRefOrClassify([targetRef, branchSha, '']);
+    if (outcome.retry) return { retry: true };
+    if (!outcome.ok) return outcome;
+    return { ok: true, integrated: true, fastForward: true, sha: branchSha };
   }
 
   let isAncestor;
@@ -1838,15 +1876,13 @@ async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
   }
 
   if (isAncestor) {
-    try {
-      await execGit(['update-ref', targetRef, branchSha, oldSha], { cwd, timeout: 10_000 });
-      return { ok: true, integrated: true, fastForward: true, sha: branchSha };
-    } catch {
-      return { retry: true };
-    }
+    const outcome = await updateRefOrClassify([targetRef, branchSha, oldSha]);
+    if (outcome.retry) return { retry: true };
+    if (!outcome.ok) return outcome;
+    return { ok: true, integrated: true, fastForward: true, sha: branchSha };
   }
 
-  const mergeTreeResult = await runMergeTreeWriteTree({ cwd, targetRef, branch });
+  const mergeTreeResult = await runMergeTreeWriteTree({ cwd, oldSha, branchSha });
   if (!mergeTreeResult.ok) return mergeTreeResult;
 
   const commitTreeArgs = ['commit-tree', mergeTreeResult.treeOid, '-p', oldSha, '-p', branchSha, '-m', message];
@@ -1868,12 +1904,10 @@ async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
     }
   }
 
-  try {
-    await execGit(['update-ref', targetRef, newSha, oldSha], { cwd, timeout: 10_000 });
-    return { ok: true, integrated: true, mergeCommit: true, sha: newSha };
-  } catch {
-    return { retry: true };
-  }
+  const outcome = await updateRefOrClassify([targetRef, newSha, oldSha]);
+  if (outcome.retry) return { retry: true };
+  if (!outcome.ok) return outcome;
+  return { ok: true, integrated: true, mergeCommit: true, sha: newSha };
 }
 
 /**
@@ -1896,12 +1930,32 @@ async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
  * caller landed first) retries the WHOLE computation, up to 3 attempts total,
  * before giving up with `failureKind: 'ref_race'`.
  */
-async function integrateOntoRef({ cwd, targetRef, branch, message }) {
-  if (!cwd || typeof cwd !== 'string') return { ok: false, reason: 'no cwd provided' };
-  if (!targetRef || typeof targetRef !== 'string') return { ok: false, reason: 'no targetRef provided' };
-  if (!branch || typeof branch !== 'string') return { ok: false, reason: 'no branch provided' };
-  if (!(await isGitRepo(cwd))) return { ok: false, reason: 'not a git repository' };
+/**
+ * Normalizes `targetRef` to a full `refs/heads/...` name: a short name like
+ * `sm-land/x` becomes `refs/heads/sm-land/x`; a value already under
+ * `refs/heads/` passes through unchanged; anything else that already starts
+ * with `refs/` (e.g. `refs/tags/x`, `refs/remotes/x`) is rejected — it is not
+ * a local branch and prefixing `refs/heads/` onto it would silently target
+ * the wrong ref. Returns null on any non-normalizable input (including a
+ * non-string/empty value). Pure — never touches git or disk.
+ */
+function normalizeTargetRef(targetRef) {
+  if (typeof targetRef !== 'string' || !targetRef) return null;
+  if (targetRef.startsWith('refs/heads/')) return targetRef;
+  if (targetRef.startsWith('refs/')) return null;
+  return `refs/heads/${targetRef}`;
+}
 
+/**
+ * Fetches `git worktree list --porcelain` fresh and refuses when
+ * `targetRef` (already normalized to `refs/heads/...`) is checked out in any
+ * worktree — see integrateOntoRef's header. Split out so each retry
+ * iteration in integrateOntoRef re-checks this from scratch: a sibling
+ * process could check `targetRef` out into a worktree in between two of our
+ * own retry attempts, and a guard that only ran once before the retry loop
+ * would miss that.
+ */
+async function checkTargetRefNotCheckedOut({ cwd, targetRef }) {
   let worktreeListOut;
   try {
     worktreeListOut = await execGit(['worktree', 'list', '--porcelain'], { cwd, timeout: 15_000 });
@@ -1918,24 +1972,57 @@ async function integrateOntoRef({ cwd, targetRef, branch, message }) {
       reason: `${targetRef} is checked out in a worktree — updating it directly would desync that working tree`,
     };
   }
+  return { ok: true };
+}
 
-  const mergeMessage = (typeof message === 'string' && message) || `integrate ${branch} onto ${targetRef}`;
+async function integrateOntoRef({ cwd, targetRef, branch, message }) {
+  if (!cwd || typeof cwd !== 'string') return { ok: false, reason: 'no cwd provided' };
+  if (!targetRef || typeof targetRef !== 'string') return { ok: false, reason: 'no targetRef provided' };
+  if (!branch || typeof branch !== 'string') return { ok: false, reason: 'no branch provided' };
+  if (!(await isGitRepo(cwd))) return { ok: false, reason: 'not a git repository' };
+
+  const normalizedTargetRef = normalizeTargetRef(targetRef);
+  if (!normalizedTargetRef) {
+    return { ok: false, reason: `targetRef "${targetRef}" is not a refs/heads/... branch ref (or a short name that normalizes to one)` };
+  }
+  try {
+    await execGit(['check-ref-format', normalizedTargetRef], { cwd, timeout: 10_000 });
+  } catch (e) {
+    return { ok: false, reason: `targetRef "${targetRef}" failed check-ref-format: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+
+  const mergeMessage = (typeof message === 'string' && message) || `integrate ${branch} onto ${normalizedTargetRef}`;
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const result = await attemptIntegrateOntoRef({ cwd, targetRef, branch, message: mergeMessage });
+    const guard = await checkTargetRefNotCheckedOut({ cwd, targetRef: normalizedTargetRef });
+    if (!guard.ok) return guard;
+    const result = await attemptIntegrateOntoRef({ cwd, targetRef: normalizedTargetRef, branch, message: mergeMessage });
     if (!result.retry) return result;
   }
   return { ok: false, failureKind: 'ref_race' };
 }
 
 /**
- * Sanitizes `epicId` down to `[A-Za-z0-9._-]` and prefixes it with
- * `sm-land/` — the single definition of an Epic's land-branch name, so
+ * Validates `epicId` is ALREADY a safe branch-name component and prefixes it
+ * with `sm-land/` — the single definition of an Epic's land-branch name, so
  * `ensureLandBranch` and any future caller never drift apart on how an
  * epicId becomes a branch name.
+ *
+ * Returns null (never a silently-mangled name) when `epicId` is not a
+ * string, is empty, contains any character outside `[A-Za-z0-9._-]`,
+ * contains `..`, ends with `.lock`, or starts with `.` or `-` — the same
+ * shapes `git check-ref-format`/a shell arg parser would choke on or
+ * misinterpret. A caller that gets null must treat the epicId as rejected,
+ * not retry with a stripped-down version of it: silently stripping invalid
+ * characters would let two different epicIds collide on the same land
+ * branch (e.g. `"a/b"` and `"ab"` both sanitizing to `"ab"`).
  */
 function landBranchNameFor(epicId) {
-  const sanitized = typeof epicId === 'string' ? epicId.replace(/[^A-Za-z0-9._-]/g, '') : '';
-  return `${LAND_BRANCH_PREFIX}${sanitized}`;
+  if (typeof epicId !== 'string' || !epicId) return null;
+  if (!/^[A-Za-z0-9._-]+$/.test(epicId)) return null;
+  if (epicId.includes('..')) return null;
+  if (epicId.endsWith('.lock')) return null;
+  if (epicId.startsWith('.') || epicId.startsWith('-')) return null;
+  return `${LAND_BRANCH_PREFIX}${epicId}`;
 }
 
 /**
@@ -1955,7 +2042,7 @@ async function ensureLandBranch({ cwd, epicId, baseBranch }) {
   if (!cwd || typeof cwd !== 'string') return { ok: false, reason: 'no cwd provided' };
 
   const branch = landBranchNameFor(epicId);
-  if (branch === LAND_BRANCH_PREFIX) return { ok: false, reason: 'epicId sanitizes to an empty string' };
+  if (!branch) return { ok: false, reason: `epicId "${epicId}" is not a safe branch-name component` };
   const ref = `refs/heads/${branch}`;
 
   const existingSha = await tryResolveCommit(cwd, `${ref}^{commit}`);

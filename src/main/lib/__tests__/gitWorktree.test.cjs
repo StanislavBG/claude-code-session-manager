@@ -1673,6 +1673,122 @@ test('[integrateOntoRef] refuses when targetRef is checked out in a worktree, le
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
 });
 
+test('[integrateOntoRef] a short targetRef (no refs/heads/ prefix) is normalized before the checked-out guard runs, refusing target_checked_out on the currently checked-out branch', async () => {
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  const headBefore = git(['rev-parse', 'HEAD'], repoCwd).trim();
+
+  const slug = 'test-integrate-short-checked-out';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'job-only.txt'), 'job content\n', 'utf8');
+  git(['add', 'job-only.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  // Short name, exactly what a caller holding just an epicId/branch name
+  // (not the full refs/heads/... form) would pass.
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: defaultBranch, branch: worktree.branch, message: 'short ref test',
+  });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.failureKind).toBe('target_checked_out');
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(headBefore);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] a short targetRef fast-forwards correctly once normalized to refs/heads/...', async () => {
+  const baseSha = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  git(['branch', 'sm-land/short-ff-test', baseSha], repoCwd);
+
+  const slug = 'test-integrate-short-ff';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'job-only.txt'), 'job output\n', 'utf8');
+  git(['add', 'job-only.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+  const branchSha = git(['rev-parse', 'HEAD'], worktree.dir).trim();
+
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: 'sm-land/short-ff-test', branch: worktree.branch, message: 'short ff test',
+  });
+  expect(outcome).toEqual({ ok: true, integrated: true, fastForward: true, sha: branchSha });
+  expect(git(['rev-parse', 'refs/heads/sm-land/short-ff-test'], repoCwd).trim()).toBe(branchSha);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] rejects a targetRef outside refs/heads/ (e.g. a tag ref) rather than silently prefixing it', async () => {
+  const slug = 'test-integrate-non-heads-ref';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: 'refs/tags/v1', branch: worktree.branch, message: 'bad ref test',
+  });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toMatch(/refs\/heads/);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] a non-race update-ref failure (the ref never moved) is reported once as update_ref_failed, not retried 3x into ref_race', async () => {
+  const slug = 'test-integrate-update-ref-fails';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'job-only.txt'), 'job content\n', 'utf8');
+  git(['add', 'job-only.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  // targetRef doesn't exist yet, so this hits the create-only CAS. Make the
+  // refs/heads directory itself read-only (not just its .git/refs parent —
+  // the file being created lives directly inside refs/heads, so that's the
+  // directory whose write permission actually gates the create) so the real
+  // `git update-ref` invocation fails for a reason that has NOTHING to do
+  // with a concurrent ref update — the ref genuinely never moves (stays
+  // nonexistent) across the failure, which is exactly the case the fix must
+  // classify as a real, explicit failure instead of burning all 3 retries
+  // and reporting the (misleading) ref_race. A flat (non-nested) branch name
+  // is used so no intermediate directory needs to already exist.
+  const refsHeadsDir = path.join(repoCwd, '.git', 'refs', 'heads');
+  fs.chmodSync(refsHeadsDir, 0o555);
+  try {
+    const outcome = await gitWorktree.integrateOntoRef({
+      cwd: repoCwd, targetRef: 'refs/heads/perm-denied-test', branch: worktree.branch, message: 'perm test',
+    });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.failureKind).toBe('update_ref_failed');
+    expect(outcome.reason).toBeTruthy();
+  } finally {
+    fs.chmodSync(refsHeadsDir, 0o755);
+  }
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] a targetRef that exists but does not resolve to a commit is an explicit failure, not a create-only attempt', async () => {
+  // Point sm-land/blob-ref at a blob (not a commit) — a ref that legitimately
+  // exists but isn't a commit. Modern `git update-ref` refuses to write a
+  // non-commit object to a branch ref outright, so the loose ref file is
+  // written directly on disk instead, bypassing that validation the same
+  // way a corrupted/hand-edited ref would.
+  const blobOid = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: repoCwd, input: 'not a commit\n', encoding: 'utf8' }).trim();
+  const blobRefPath = path.join(repoCwd, '.git', 'refs', 'heads', 'sm-land', 'blob-ref');
+  fs.mkdirSync(path.dirname(blobRefPath), { recursive: true });
+  fs.writeFileSync(blobRefPath, `${blobOid}\n`, 'utf8');
+
+  const slug = 'test-integrate-non-commit-ref';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'job-only.txt'), 'job content\n', 'utf8');
+  git(['add', 'job-only.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: 'refs/heads/sm-land/blob-ref', branch: worktree.branch, message: 'non-commit ref test',
+  });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toMatch(/does not resolve to a commit/);
+  // Untouched — still pointing at the original blob.
+  expect(git(['cat-file', '-t', 'refs/heads/sm-land/blob-ref'], repoCwd).trim()).toBe('blob');
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
 test('[integrateOntoRef] is a no-op (integrated:false) when branch has no new commits', async () => {
   const baseSha = git(['rev-parse', 'HEAD'], repoCwd).trim();
   git(['branch', 'sm-land/noop-test', baseSha], repoCwd);
@@ -1738,13 +1854,37 @@ test('[ensureLandBranch] creates sm-land/<epicId> at the default branch tip, and
   expect(git(['rev-parse', 'refs/heads/sm-land/epic-abc'], repoCwd).trim()).toBe(headSha);
 });
 
-test('[ensureLandBranch] sanitizes epicId and refuses an all-invalid epicId', async () => {
+test('[ensureLandBranch] rejects an epicId whose sanitized form would differ from the input — no silent stripping', async () => {
+  // 'epic/1 two!' would previously have been silently stripped down to
+  // 'epic1two' — two DIFFERENT epicIds (e.g. 'epic/1 two!' and 'epic1two')
+  // must never be allowed to collide on the same land branch.
   const result = await gitWorktree.ensureLandBranch({ cwd: repoCwd, epicId: 'epic/1 two!' });
-  expect(result.ok).toBe(true);
-  expect(result.branch).toBe('sm-land/epic1two');
+  expect(result.ok).toBe(false);
+  expect(result.reason).toMatch(/not a safe branch-name component/);
 
   const empty = await gitWorktree.ensureLandBranch({ cwd: repoCwd, epicId: '!!!' });
   expect(empty).toEqual({ ok: false, reason: expect.any(String) });
+});
+
+test('[ensureLandBranch] rejects epicIds shaped like ".." / ".lock" suffix / leading "." / leading "-"', async () => {
+  const cases = ['a..b', 'epic.lock', '.hidden', '-flag-shaped'];
+  for (const epicId of cases) {
+    const result = await gitWorktree.ensureLandBranch({ cwd: repoCwd, epicId });
+    expect(result.ok).toBe(false);
+  }
+});
+
+test('[ensureLandBranch] accepts an epicId that is already a safe branch-name component, unchanged', async () => {
+  const result = await gitWorktree.ensureLandBranch({ cwd: repoCwd, epicId: 'epic_1.two-3' });
+  expect(result.ok).toBe(true);
+  expect(result.branch).toBe('sm-land/epic_1.two-3');
+});
+
+test('landBranchNameFor returns null (never a mangled name) for an unsafe epicId, and the sm-land/ prefix + epicId verbatim for a safe one', () => {
+  expect(gitWorktree.landBranchNameFor('safe-epic.123')).toBe('sm-land/safe-epic.123');
+  expect(gitWorktree.landBranchNameFor('bad id!')).toBe(null);
+  expect(gitWorktree.landBranchNameFor('')).toBe(null);
+  expect(gitWorktree.landBranchNameFor(null)).toBe(null);
 });
 
 test('[createWorktree fromRef] forks the worktree from fromRef instead of HEAD, and skips WIP carry-over', async () => {

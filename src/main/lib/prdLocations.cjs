@@ -384,6 +384,64 @@ function deriveProjectCwdFromPrdPath(filePath) {
   return null;
 }
 
+// Incident (2026-09-30): an Epic can live in a non-git PARENT folder P
+// (P/session-manager-operations/scheduler/epics/<epicId>/prds/*.md) while
+// its PRDs' own frontmatter `cwd` points at a SUB-REPO, e.g. P/repo. P is
+// never itself a tracked project cwd (activeProjectCwds/allProjectCwds only
+// know about registered project roots), so no amount of
+// resolvePrdsDirs()/listEpicPrdDirs() enumeration ever visits it — only
+// walking UP from the job's own cwd does. Bounded to a few hops so a
+// same-machine but unrelated ancestor folder that happens to also contain a
+// `session-manager-operations/` tree can't be walked into indefinitely.
+const MAX_EPIC_ANCESTOR_HOPS = 3;
+
+/**
+ * epicId must be an exact, plain directory-name match — never a glob, never
+ * string-concatenated into a path. Mirrors resolveEpicPrdWriteDir's own
+ * guard above.
+ */
+function isSafeEpicId(epicId) {
+  return typeof epicId === 'string' && epicId.length > 0
+    && !epicId.includes('/') && !epicId.includes('\\') && !epicId.includes('..');
+}
+
+/**
+ * Walk up to MAX_EPIC_ANCESTOR_HOPS parent directories ABOVE `cwd` (never
+ * including `cwd` itself — that's already covered by resolveEpicsRoot/
+ * listEpicPrdDirs) looking for an EXACT
+ * `<ancestor>/session-manager-operations/scheduler/epics/<epicId>/<leafSubpath...>`
+ * match. Built only from `path.join` segments (never string concatenation
+ * with the caller-supplied epicId/cwd), with a resolved-path containment
+ * check as defense in depth. Returns only dirs that actually exist on disk.
+ */
+function ancestorEpicDirs(cwd, epicId, leafSubpath) {
+  if (!cwd || typeof cwd !== 'string' || !path.isAbsolute(cwd)) return [];
+  if (!isSafeEpicId(epicId)) return [];
+  const out = [];
+  let dir = path.dirname(cwd);
+  for (let hop = 0; hop < MAX_EPIC_ANCESTOR_HOPS; hop++) {
+    const candidate = path.join(dir, OPS_ROOT_DIR, ...EPICS_SUBPATH, epicId, ...leafSubpath);
+    const resolvedDir = path.resolve(dir);
+    if (path.resolve(candidate).startsWith(resolvedDir + path.sep) && fs.existsSync(candidate)) {
+      out.push(candidate);
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // reached the filesystem root
+    dir = parent;
+  }
+  return out;
+}
+
+/** Ancestor-folder `epics/<epicId>/prds` dirs above `cwd` (see ancestorEpicDirs). */
+function ancestorEpicPrdDirs(cwd, epicId) {
+  return ancestorEpicDirs(cwd, epicId, ['prds']);
+}
+
+/** Ancestor-folder `epics/<epicId>/prds-archived` dirs above `cwd` (see ancestorEpicDirs). */
+function ancestorEpicArchivedPrdDirs(cwd, epicId) {
+  return ancestorEpicDirs(cwd, epicId, ['prds-archived']);
+}
+
 module.exports = {
   resolvePrdWriteDir,
   resolvePrdsDirs,
@@ -394,6 +452,9 @@ module.exports = {
   listArchivedPrdDirs,
   deriveEpicIdFromPrdPath,
   deriveProjectCwdFromPrdPath,
+  ancestorEpicPrdDirs,
+  ancestorEpicArchivedPrdDirs,
+  isSafeEpicId,
   PRD_SUBPATH,
   EPICS_SUBPATH,
 };

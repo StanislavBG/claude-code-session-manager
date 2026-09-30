@@ -17,6 +17,7 @@ const os = require('node:os');
 const { spawn, execFileSync } = require('node:child_process');
 const { ipcMain } = require('electron');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
+const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claudeCliCaps.cjs');
 const { withProcRole } = require('./lib/cleanEnv.cjs');
 const schedulerPaths = require('./lib/schedulerPaths.cjs');
 
@@ -204,7 +205,8 @@ Decision rules:
 - "stuck"/kill-agent only if the agent itself is wedged (no child processes, no recent log events, > 60 min stale). Set targetPid to the claude root pid.`;
 }
 
-function runProbe(claudeBin, prompt) {
+async function runProbe(claudeBin, prompt) {
+  await ensureCliCapsProbed();
   return new Promise((resolve) => {
     let child;
     try {
@@ -216,6 +218,7 @@ function runProbe(claudeBin, prompt) {
         '--output-format', 'json',
         '--max-budget-usd', '0.10',
         '--dangerously-skip-permissions',
+        ...headlessPermissionArgs(),
         '--allowedTools', 'Bash',
       ], { env: withProcRole(process.env, 'aux'), stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
     } catch (e) {

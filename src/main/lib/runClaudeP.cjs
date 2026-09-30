@@ -16,12 +16,14 @@
 
 const { spawn } = require('node:child_process');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./claudeBin.cjs');
+const { headlessPermissionArgs, ensureCliCapsProbed } = require('./claudeCliCaps.cjs');
 const { withProcRole } = require('./cleanEnv.cjs');
 
 const MAX_OUT_BYTES = 8 * 1024 * 1024;
 
 /** Spawn `claude -p`, capture stdout. Resolves {ok, out, error} — never throws. */
-function runClaudeP(prompt, { model = 'sonnet', timeoutMs = 180_000, systemPrompt = null } = {}) {
+async function runClaudeP(prompt, { model = 'sonnet', timeoutMs = 180_000, systemPrompt = null } = {}) {
+  await ensureCliCapsProbed();
   return new Promise((resolve) => {
     let bin;
     try { bin = resolveClaudeBin(); } catch (e) { resolve({ ok: false, error: `claude not found: ${e?.message}` }); return; }
@@ -29,6 +31,7 @@ function runClaudeP(prompt, { model = 'sonnet', timeoutMs = 180_000, systemPromp
       '-p', prompt,
       '--model', model,
       '--dangerously-skip-permissions',
+      ...headlessPermissionArgs(),
       '--output-format', 'text',
     ];
     if (systemPrompt) args.push('--append-system-prompt', systemPrompt);

@@ -57,6 +57,12 @@ const billing = require('./usage.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const supervisor = require('./supervisor.cjs');
 const { resolveClaudeBin, claudeSpawnTarget, probeClaudeVersion } = require('./lib/claudeBin.cjs');
+const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claudeCliCaps.cjs');
+// Fire-and-forget priming — by the time the first job dispatches, the cached
+// probe result is almost always already warm for buildClaudeSpawnArgs's sync
+// callers; async spawn sites still `await ensureCliCapsProbed()` themselves
+// as the authoritative guarantee.
+ensureCliCapsProbed().catch(() => {});
 const launchFailure = require('./lib/launchFailure.cjs');
 const { appendError } = require('./lib/opsErrorLog.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
@@ -5498,6 +5504,7 @@ function buildClaudeSpawnArgs({ prompt, model, effort, sessionId, resume, system
     ...effortArgs(effort),
     ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
     '--dangerously-skip-permissions',
+    ...headlessPermissionArgs(),
     '--output-format', 'stream-json',
     '--verbose',
     ...(resume ? ['--resume', sessionId] : ['--session-id', sessionId]),
@@ -5750,6 +5757,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   const personaResolution = await agentModelResolve.resolvePrdPersonaForSpawn({ cwd, agentType: job.agentType });
   const personaEffort = resolveEpicEffort({ cwd, agentType: job.agentType }).effort;
   safeLog(`[scheduler] agentType=${job.agentType || '(none)'} persona=${personaResolution.personaPath || '(fallback — no persona applied)'} model=${personaResolution.model}${personaEffort ? ` effort=${personaEffort}` : ''}\n`);
+
+  // Authoritative guarantee that buildClaudeSpawnArgs (a pure sync helper,
+  // called below via withChildAndLog) sees a resolved --permission-prompts
+  // probe result — the module-load priming above is a warm-cache head start,
+  // not a correctness guarantee on its own.
+  await ensureCliCapsProbed();
 
   return await new Promise((resolve) => {
     const claudeBin = resolveClaudeBin();
@@ -6474,6 +6487,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   });
   await broadcast({ flush: true });
 
+  await ensureCliCapsProbed();
   const claudeBin = resolveClaudeBin();
   const childEnv = cleanChildEnv({
     PATH: pathWithUserBins(), // Homebrew/user bins for macOS
@@ -6507,6 +6521,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
         '-p', prompt,
         '--model', 'opus',
         '--dangerously-skip-permissions',
+        ...headlessPermissionArgs(),
         '--output-format', 'stream-json',
         '--verbose',
         '--session-id', sessionId,

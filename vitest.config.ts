@@ -356,6 +356,7 @@ export default defineConfig({
       'src/main/__tests__/chat-exit-close-race.test.cjs',
       'src/main/__tests__/chat-cancel-terminal.test.cjs',
       'scripts/__tests__/check-renderer-storage.test.cjs',
+      'src/main/lib/__tests__/claudeCliCaps.test.cjs',
     ],
     globals: true,
     globalSetup: ['tests/setup/schedulerSandbox.globalSetup.cjs'],

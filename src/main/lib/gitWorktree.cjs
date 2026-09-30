@@ -1243,6 +1243,40 @@ async function getCurrentBranch(cwd) {
  * switches anything — it only reports (`failureKind: 'stray_checkout'`); a
  * human fixes the checkout.
  */
+/**
+ * True when `branch`'s ONLY committed changes (relative to `cwd`'s HEAD)
+ * touch paths in `carriedPaths` (the human's carried-over base-tree WIP from
+ * `createWorktree`) AND every one of those changed paths' committed blob on
+ * `branch` is byte-identical to what's still sitting dirty in `cwd` right
+ * now — i.e. the branch committed exactly the carried WIP and nothing more.
+ * Extracted out of `integrateBranch` (identical logic, same content-verify
+ * safety reasoning documented there) so `jobLanding.cjs`'s checkout-free Epic
+ * path can reuse the same classification before ever attempting a land.
+ * Never throws — any read failure (including no `carriedPaths`) is reported
+ * as `false`, the safer default that falls through to a real integration
+ * attempt rather than silently dropping a commit.
+ */
+async function isCarriedWipOnly({ cwd, branch, carriedPaths }) {
+  if (!Array.isArray(carriedPaths) || !carriedPaths.length) return false;
+  try {
+    let mergeBase = '';
+    try {
+      mergeBase = (await execGit(['merge-base', 'HEAD', branch], { cwd, timeout: 10_000 })).trim();
+    } catch {
+      mergeBase = '';
+    }
+    const changedOut = await execGit(['diff', `${mergeBase || 'HEAD'}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
+    const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (changed.length && changed.every((p) => carriedPaths.includes(p))) {
+      const allIdentical = await pathsIdenticalToBranch({ cwd, branch, paths: changed });
+      if (allIdentical) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranch }) {
   if (!cwd || !branch) return { ok: false, reason: 'missing cwd/branch' };
 
@@ -1277,34 +1311,17 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     return { ok: true, integrated: false, reason: 'branch has no new commits' };
   }
 
-  if (Array.isArray(carriedPaths) && carriedPaths.length) {
-    try {
-      const changedOut = await execGit(['diff', `${mergeBase || 'HEAD'}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
-      const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
-      if (changed.length && changed.every((p) => carriedPaths.includes(p))) {
-        // Path membership alone is NOT enough: a job that legitimately edits
-        // the SAME file the base tree had carried-in WIP on (e.g. this
-        // repo's own scheduler.cjs churns queue.json/active-index.json while
-        // jobs run) would otherwise have its real commit misclassified as
-        // "just the carried WIP" and dropped — the caller treats
-        // `integrated: false` as safe-to-delete-the-branch, so that commit
-        // would be gone for good, worse than the ordinary merge-conflict
-        // path (branch kept, flagged for manual recovery) this shortcut is
-        // supposed to be a safe subset of. Content-verify: only when every
-        // changed path's committed blob on `branch` is byte-identical to
-        // what's STILL sitting dirty in `cwd` right now proves the job
-        // committed exactly the carried WIP and nothing more. Any mismatch
-        // (including a read failure — fail toward the safer default) falls
-        // through to the normal merge attempt below instead of skipping.
-        const allIdentical = await pathsIdenticalToBranch({ cwd, branch, paths: changed });
-        if (allIdentical) {
-          return { ok: true, integrated: false, reason: 'carried-wip-only' };
-        }
-      }
-    } catch {
-      // Best-effort classification only — if the diff can't be read, fall
-      // through to the normal integration attempt below.
-    }
+  // Path membership alone is NOT enough: a job that legitimately edits the
+  // SAME file the base tree had carried-in WIP on (e.g. this repo's own
+  // scheduler.cjs churns queue.json/active-index.json while jobs run) would
+  // otherwise have its real commit misclassified as "just the carried WIP"
+  // and dropped — the caller treats `integrated: false` as
+  // safe-to-delete-the-branch, so that commit would be gone for good, worse
+  // than the ordinary merge-conflict path (branch kept, flagged for manual
+  // recovery) this shortcut is supposed to be a safe subset of. See
+  // `isCarriedWipOnly` above for the content-verify logic.
+  if (await isCarriedWipOnly({ cwd, branch, carriedPaths })) {
+    return { ok: true, integrated: false, reason: 'carried-wip-only' };
   }
 
   try {
@@ -2024,6 +2041,7 @@ module.exports = {
   pathsIdenticalToBranch,
   resolveDefaultBranch,
   getCurrentBranch,
+  isCarriedWipOnly,
   integrateBranch,
   cleanupWorktree,
   salvageWorktreeDiff,

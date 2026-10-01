@@ -69,7 +69,7 @@ if (!found) {
 Rule: every PRD needs these fields.
 1. `title` — one line, plain English.
 2. `cwd` — target project's path. Prefer `~/Projects/<name>` (expanded at ingest; an absolute path breaks on another machine). Must exist on disk at queue time — the scheduler checks before spawning, so a PRD that creates its own `cwd` as step 1 never runs. For a brand-new sibling project, point `cwd` at the parent dir and make step 1 `mkdir -p ~/Projects/<new-slug> && cd` into it.
-3. `estimateMinutes` — a realistic integer. Empirical median is ~10 min, p90 ~20 — don't inflate it.
+3. `estimateMinutes` — a realistic integer. Most PRDs take 5–10 minutes (§8) — don't inflate it.
 
 `parallelGroup` is deprecated and ignored. `dependsOn: [<slug>, ...]` is the only ordering primitive.
 
@@ -175,7 +175,7 @@ python -m pytest tests/test_repro.py::test_bug 2>&1 | tail -3 || true   # expect
 timeout 300 pytest -q   # LAST thing the run does
 ```
 
-The scheduler appends a finish protocol after your PRD's own steps — you never write it: review, then the `# Gate` commands (§6), then commit the exact `# Files` paths, then the verdict line — `SCHEDULER_VERDICT: PASS` once the gate is green and the commit landed, else `SCHEDULER_VERDICT: FAIL <reason>` plus exit 1. The verifier trusts a truthful `PASS` plus a landed commit over stray transcript markers. Never print `PASS` on a red gate.
+The scheduler appends a finish protocol after your PRD's own steps — you never write it: review, then the `# Gate` commands (§6), then commit the exact `# Files` paths, then the verdict line — `SCHEDULER_VERDICT: PASS` once the gate is green and the commit landed, else `SCHEDULER_VERDICT: FAIL <one-line reason>`. The verifier trusts a truthful `PASS` plus a landed commit over stray transcript markers. Never print `PASS` on a red gate.
 
 ---
 
@@ -204,7 +204,7 @@ It only works while the app is running — closing it removes the admin port/tok
 ### Fallback: writing the PRD file directly
 
 1. Join the EXISTING, already-approved Epic you're in: `node <session-manager-repo>/scripts/mint-epic.cjs <cwd> <epic-id>` — last stdout line is the prds dir. This only joins; get a human to create the Epic first if it doesn't exist.
-2. Write `<NN>-<slug>.md` by hand into that dir, with `sourcePromptId: <epic-id>` in the frontmatter, following §5's rules and this guide's body shape (`# Goal`, `# Acceptance criteria`, `# Implementation notes`, `# Files`, `# Gate`, `## Engineering standards`).
+2. Write `<NN>-<slug>.md` by hand into that dir, with `sourcePromptId: <epic-id>` in the frontmatter, following §5's rules and this guide's body shape (`# Goal`, `# Acceptance criteria`, `# Files`, `# Implementation notes`, `# Out of scope`, `# Gate`, `## Engineering standards`).
 3. There is no API to render `# Files`/`# Gate` here — write them yourself, in this exact shape:
 
     # Files

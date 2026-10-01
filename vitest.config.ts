@@ -221,6 +221,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-shard-quarantine.test.cjs',
       'src/main/__tests__/scheduler-bash-timeout-env.test.cjs',
       'src/main/__tests__/scheduler-prd-persona-spawn.test.cjs',
+      'src/main/__tests__/scheduler-investigation-spawn-lockdown.test.cjs',
       'src/main/lib/__tests__/epicSpawnCwd.test.cjs',
       'src/main/lib/__tests__/epicSpawnPlan.test.cjs',
       'src/main/lib/__tests__/epicTranscriptPath.test.cjs',

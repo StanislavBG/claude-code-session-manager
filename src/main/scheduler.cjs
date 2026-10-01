@@ -6677,12 +6677,23 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   await broadcast({ flush: true });
 
   await ensureCliCapsProbed();
+  await ensureTimeoutShimOnce();
   const claudeBin = resolveClaudeBin();
+  // SM_TIMEOUT_SHIM_DISABLE=1 is the kill switch for the PATH addition below —
+  // paired with the install skip inside ensureTimeoutShimOnce().
+  const timeoutShimEnabled = process.env.SM_TIMEOUT_SHIM_DISABLE !== '1';
   const childEnv = cleanChildEnv({
-    PATH: pathWithUserBins(), // Homebrew/user bins for macOS
+    PATH: timeoutShimEnabled ? withTimeoutShimOnPath(pathWithUserBins()) : pathWithUserBins(), // Homebrew/user bins for macOS
     BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
     BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
   });
+  // Set AFTER cleanChildEnv returns, never inside the object passed to it:
+  // cleanChildEnv strips every CLAUDE_CODE_*-prefixed key from its own merged
+  // result (see cleanEnv.cjs), so setting it there would delete its own
+  // addition. A headless run has no later turn, so a background task it
+  // starts has nothing to report back to — same stall as a tool that waits
+  // for one.
+  childEnv.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = '1';
 
   // Investigation needs only a deadman watchdog — no idle-tail or result-tail
   // since investigations are short-running Opus probes with a hard ceiling.
@@ -6711,6 +6722,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
         '--model', 'opus',
         '--dangerously-skip-permissions',
         ...headlessPermissionArgs(),
+        '--disallowedTools', HEADLESS_DISALLOWED_TOOLS.join(','),
         '--output-format', 'stream-json',
         '--verbose',
         '--session-id', sessionId,

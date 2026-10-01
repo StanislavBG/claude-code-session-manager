@@ -45,7 +45,14 @@ function git(args, cwd) {
 
 function initRepo(dir) {
   fs.mkdirSync(dir, { recursive: true });
-  git(['init', '-q'], dir);
+  git(['init', '-q', '-b', 'master'], dir);
+  // resolveDefaultBranch (gitWorktree.cjs) falls back to `git config --get
+  // init.defaultBranch` when there's no origin/HEAD — which, unpinned, picks
+  // up this Mac's Xcode SYSTEM gitconfig (init.defaultBranch=main) regardless
+  // of the branch -b master just created, so it must be overridden locally
+  // too or expectedBranch disagrees with HEAD on every job row that leaves
+  // baseBranch unset.
+  git(['config', 'init.defaultBranch', 'master'], dir);
   git(['config', 'user.email', 'test@example.com'], dir);
   git(['config', 'user.name', 'Test'], dir);
   fs.writeFileSync(path.join(dir, 'a.txt'), 'original a\n', 'utf8');

@@ -17,7 +17,7 @@ const ALWAYS_DENY_TOOLS = new Set(['ScheduleWakeup', 'CronCreate']);
 const BACKGROUNDABLE_AGENT_TOOLS = new Set(['Task', 'Agent']);
 
 const STANDARDS_QUOTE = 'You ARE the executor — never re-queue or self-schedule.';
-const STANDARDS_CITE = 'plugins/session-manager-dev/skills/develop/standards.md:85 (Execution discipline)';
+const STANDARDS_CITE = 'plugins/session-manager-dev/skills/develop/standards.md (Execution discipline)';
 
 function buildAllow() {
   return { continue: true };

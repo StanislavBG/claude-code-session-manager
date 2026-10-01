@@ -77,7 +77,7 @@ test('buildPrdBody emits required frontmatter keys and body sections in order', 
   expect(body).toMatch(/Your system prompt carries the ordered run contract/);
   // the pointer block mentions "Execution discipline" by name, but must not
   // inline the full standards.md prose (e.g. its Performance-section rules)
-  expect(body.includes('Lay out hot data contiguously')).toBeFalsy();
+  expect(body.includes('State an explicit hypothesis before each debugging action')).toBeFalsy();
 });
 
 test('buildPrdBody emits agentType: dev-lead by default when omitted (PRD 1114)', () => {
@@ -286,7 +286,7 @@ test('POST /admin/scheduler/create-prd with a valid payload writes a file with f
     expect(written).toMatch(/## Engineering standards/);
     // must point at STANDARDS_PATH rather than inline standards.md
     expect(written.includes(STANDARDS_PATH)).toBeTruthy();
-    expect(written.includes('Lay out hot data contiguously')).toBeFalsy();
+    expect(written.includes('State an explicit hypothesis before each debugging action')).toBeFalsy();
   } finally {
     await admin.stop();
   }

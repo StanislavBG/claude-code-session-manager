@@ -34,7 +34,7 @@ let PROJECT_CWD;
 
 beforeAll(() => {
   originalHome = process.env.HOME;
-  tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'review-notice-wiring-home-'));
+  tmpHome = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'review-notice-wiring-home-'));
   process.env.HOME = tmpHome;
   delete process.env.SM_REVIEW_NOTICE_HOLD_MINUTES;
   delete process.env.SM_REVIEW_NOTICE_IMMEDIATE;

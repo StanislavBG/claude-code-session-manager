@@ -29,7 +29,7 @@ test('buildReviewNotice uses the filed report\'s own summary and path', () => {
   expect(notice.cause).toBe('uncommitted_changes');
   expect(notice.epicId).toBe('epic-1');
   expect(notice.firstParkedAt).toBe('2026-10-01T00:00:00.000Z');
-  expect(notice.sentAt).toBeNull()
+  expect(notice.sentAt).toBeNull();
 });
 
 test('buildReviewNotice falls back to a deterministic summary and null path when report is null', () => {

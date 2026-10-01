@@ -75,6 +75,7 @@ const { resolveProjectRoot } = require('./lib/opsOwnership.cjs');
 const { sweepStrandedJobBranches } = require('./lib/branchSweep.cjs');
 const { detectRateLimitInLog } = require('./lib/rateLimitDetect.cjs');
 const { stripAppOwnedChurn } = require('./lib/jobDirtFilter.cjs');
+const { GATE_AUTHORITY_VERDICTS, decideGateAuthority } = require('./lib/gateAuthority.cjs');
 const { resolveBindingRateLimitReset } = require('./lib/rateLimitWindow.cjs');
 const { isResetFresh, bindingWindow, degradedBudget } = require('./lib/usageCircuit.cjs');
 const { computeQueueHealth } = require('./lib/queueHealth.cjs');
@@ -11042,6 +11043,31 @@ async function runGateShadow(job) {
     outcome = r;
   }
   const gateShadow = { ...outcome, head, source: gate.source, ranAt: new Date().toISOString() };
+
+  // Gate authority: a green re-run may complete the row outright, but only
+  // for transcript-noise verdicts with a landed commit — every other park
+  // (including no verdict at all) falls through to the plain observe-only
+  // path below, unchanged. ancestorOk/cleanOk are ground-truth git checks,
+  // never trusted from anything the job itself reported.
+  let decision = null;
+  if (
+    job.verifierVerdict
+    && GATE_AUTHORITY_VERDICTS.includes(job.verifierVerdict)
+    && typeof job.landedCommit === 'string'
+    && job.landedCommit.length > 0
+  ) {
+    let ancestorOk = false;
+    try { ancestorOk = await landedCommitIsAncestorOfHead(job.cwd, job.landedCommit); } catch { ancestorOk = false; }
+    let cleanOk = false;
+    try {
+      const status = await execGitAt(job.cwd, ['status', '--porcelain', '--untracked-files=no']);
+      const dirty = stripAppOwnedChurn(parsePorcelain(status));
+      cleanOk = Array.isArray(dirty) && dirty.length === 0;
+    } catch { cleanOk = false; }
+    decision = decideGateAuthority({ job, gate, outcome, ancestorOk, cleanOk });
+    gateShadow.authority = decision;
+  }
+
   const runId = job.runId || resolveRunId(job);
   if (runId) {
     const verdictsPath = path.join(schedulerPaths.runsDir(), runId, `${job.slug}.verdicts.json`);
@@ -11053,11 +11079,35 @@ async function runGateShadow(job) {
       try { atomicWriteJsonSync(verdictsPath, { ...existing, gateShadow }); } catch { /* best-effort */ }
     }
   }
+
+  // Resolve inside the SAME mutate that records the shadow, re-checking the
+  // row is still needs_review with the SAME verdict it had when `decision`
+  // was computed — a park can change underneath this async function (heal,
+  // human reset) between the gate run above and this write landing.
+  let resolved = null;
   await mutate((s) => {
     for (const j of s.jobs) {
-      if (j.slug === job.slug && j.status === 'needs_review') j.gateShadow = gateShadow;
+      if (j.slug !== job.slug || j.status !== 'needs_review') continue;
+      j.gateShadow = gateShadow;
+      if (!decision?.complete || j.verifierVerdict !== job.verifierVerdict) continue;
+      const v = j.verifierVerdict;
+      transitionJob(j, 'completed', {
+        reason: `gate re-run green at ${head.slice(0, 7)}; verdict ${v} overridden`,
+        source: 'gateAuthoritative',
+      });
+      j.error = null;
+      delete j.verifierVerdict;
+      delete j.looksDone;
+      resolved = { slug: j.slug, cwd: j.cwd, verdict: v };
     }
   });
+  if (resolved) {
+    try { await archiveCompletedPrd(resolved.slug, resolved.cwd); } catch (e) {
+      console.error('[scheduler] gate authority archive error', resolved.slug, e);
+    }
+    appendAuditEvent('needs_review_gate_resolved', { slug: resolved.slug, cwd: resolved.cwd, verdict: resolved.verdict, head });
+    console.log(`[scheduler] gate authority: ${resolved.slug} completed — gate re-run green at ${head.slice(0, 7)}, verdict ${resolved.verdict} overridden`);
+  }
   await broadcast();
   return gateShadow;
 }
@@ -11191,15 +11241,42 @@ async function reverifyNeedsReview() {
       }
     }
   }
-  // Shadow gate (observation only): at most ONE needs_review row per pass,
-  // fired in the background so a 15-minute gate never stalls this pass.
+  // Shadow gate (observation only, or — for a transcript-noise verdict with
+  // a landed commit — gate AUTHORITY: a green re-run completes the row). At
+  // most ONE needs_review row per pass, fired in the background so a long
+  // gate never stalls this pass. The candidate choice is itself async now
+  // (it reads HEAD per candidate's cwd), so the WHOLE choice runs inside the
+  // promise assigned to gateShadowPending — otherwise a second pass starting
+  // before this one's choice resolves could pick its own target too,
+  // breaking the single-flight rule.
   if (!gateShadowPending && process.env.SM_GATE_SHADOW_DISABLE !== '1') {
-    const gateTarget = snap.jobs.find((j) => j.status === 'needs_review' && !j.gateShadow);
-    if (gateTarget) {
-      gateShadowPending = runGateShadow(gateTarget)
-        .catch((e) => { console.error('[scheduler] gate shadow error', gateTarget.slug, e); })
-        .finally(() => { gateShadowPending = null; });
-    }
+    let pickedSlug = null;
+    gateShadowPending = (async () => {
+      const headByCwd = new Map();
+      const headFor = async (cwd) => {
+        if (!headByCwd.has(cwd)) headByCwd.set(cwd, await gitHead(cwd));
+        return headByCwd.get(cwd);
+      };
+      // Prefer a gate-authority-eligible row whose HEAD moved since its last
+      // shadow run (or that never got one) — a sibling fix landing can turn
+      // a red re-run green, so a shadow stale at an old HEAD is worth
+      // retrying before any plain observe-only candidate.
+      let gateTarget = null;
+      for (const j of snap.jobs) {
+        if (j.status !== 'needs_review') continue;
+        if (!j.verifierVerdict || !GATE_AUTHORITY_VERDICTS.includes(j.verifierVerdict)) continue;
+        if (typeof j.landedCommit !== 'string' || !j.landedCommit.length) continue;
+        let head;
+        try { head = await headFor(j.cwd); } catch { continue; } // this candidate's git read failed — skip it, try the next
+        if (!j.gateShadow || j.gateShadow.head !== head) { gateTarget = j; break; }
+      }
+      if (!gateTarget) gateTarget = snap.jobs.find((j) => j.status === 'needs_review' && !j.gateShadow);
+      if (!gateTarget) return;
+      pickedSlug = gateTarget.slug;
+      await runGateShadow(gateTarget);
+    })()
+      .catch((e) => { console.error('[scheduler] gate shadow error', pickedSlug, e); })
+      .finally(() => { gateShadowPending = null; });
   }
   if (evidenceScanned.length) {
     const scannedSet = new Set(evidenceScanned);

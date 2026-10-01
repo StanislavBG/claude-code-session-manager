@@ -25,6 +25,7 @@ test('classifyLadderRung maps every known automated source to its named rung', (
   expect(classifyLadderRung({ source: 'reverifyNeedsReview:auto-promote' })).toBe('auto-fix');
   expect(classifyLadderRung({ source: 'reverifyNeedsReview:heal' })).toBe('reverify');
   expect(classifyLadderRung({ source: 'needsReviewAutoResolve' })).toBe('reverify');
+  expect(classifyLadderRung({ source: 'gateAuthoritative' })).toBe('reverify');
 });
 
 test('classifyLadderRung: ordinary spawnJob:dispatch (no resume-recovery reason) is NOT resume-recovery', () => {

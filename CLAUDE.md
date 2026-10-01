@@ -110,7 +110,7 @@ Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/
 - Flat `scheduler/prds/` is **RETIRED** — auto-consolidated into `prds-archived/` on every `reconcile()` pass.
 - Before writing a PRD, read
   [`PRD_AUTHORING.md`](src/main/templates/PRD_AUTHORING.md) —
-  rules from two real stuck-job incidents + a pre-queue checklist (§10).
+  rules from two real stuck-job incidents + a pre-queue checklist (§15).
 - **Guard hooks adopt by REFERENCE via a stable shim** (`guardShims.cjs`,
   `~/.claude/session-manager/hooks/guard-*.cjs`) — readiness banner installs all four.
 - A job parked in `needs_review` is a **question**, routed back to the authoring Epic — never mints new work.

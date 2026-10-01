@@ -30,7 +30,7 @@ breaks them all, undetectably from here.
 session-manager-internal path (`src/main/...`, `src/renderer/...`, bare `scripts/...`) inside one
 is a portability defect unless `$SM_ROOT`-qualified (see `ops-sweep/SKILL.md`'s resolution) or
 removed. Current offenders, not precedent: `memory-sanitation/SKILL.md`, `builder/SKILL.md` +
-`builder/0-diff/SKILL.md`, `develop/SKILL.md`, `develop/standards.md`, `ops-sweep/SKILL.md`.
+`builder/0-diff/SKILL.md`, `develop/standards.md`, `ops-sweep/SKILL.md`.
 
 ## Who consumes this
 

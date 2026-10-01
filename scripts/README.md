@@ -8,7 +8,7 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 
 | script | invoked by | shipped on npm |
 | --- | --- | --- |
-| audit-ops-hygiene.cjs | manual; named in `ops-sweep` + `develop` SKILL.md | yes |
+| audit-ops-hygiene.cjs | manual; named in `ops-sweep` SKILL.md | yes |
 | bench/main-bench.cjs | `npm run bench` (main-process micro-benches, plain Node); renderer half is `npm run bench:renderer` (`tests/bench/`, `vitest.bench.config.ts`, not in `test:unit`) | no |
 | check-conditional-hooks.cjs | `npm run lint:hooks` (in `lint`) | no |
 | check-epic-transcripts.cjs | manual read-only diagnostic (`--json`); also surfaced as a non-fatal warning in `npm run health` | no |
@@ -22,9 +22,9 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | cleanup-nested-queue-stubs.cjs | manual one-shot; dispatches to cleanup-worktree-ops-stubs.cjs | no |
 | cleanup-worktree-ops-stubs.cjs | via cleanup-nested-queue-stubs.cjs | no |
 | health.sh | manual; `local-project-health` skill's lookup path (`npm run health` uses src/main/health.cjs) | no |
-| install-scheduler-mcp-user-scope.sh | manual; named in `develop` SKILL.md | no |
+| install-scheduler-mcp-user-scope.sh | manual (`seedSchedulerMcp.cjs` does the same at app start) | no |
 | install-scheduler-watchdog.sh | manual; installs the systemd user timer (cron fallback) | no |
-| mint-epic.cjs | `develop` SKILL.md and PRD_AUTHORING.md manual-write fallback | yes |
+| mint-epic.cjs | PRD_AUTHORING.md manual-write fallback | yes |
 | ops-sweep.cjs | `ops-sweep` SKILL.md (`node "$SM_ROOT/scripts/ops-sweep.cjs" <cwd>`) | yes |
 | postinstall.cjs | npm `postinstall` | yes |
 | probe-electron-helper-comm.cjs | manual probe (Linux, xvfb) | no |

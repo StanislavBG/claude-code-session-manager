@@ -205,7 +205,7 @@ It only works while the app is running — closing it removes the admin port/tok
 
 1. Join the EXISTING, already-approved Epic you're in: `node <session-manager-repo>/scripts/mint-epic.cjs <cwd> <epic-id>` — last stdout line is the prds dir. This only joins; get a human to create the Epic first if it doesn't exist.
 2. Write `<NN>-<slug>.md` by hand into that dir, with `sourcePromptId: <epic-id>` in the frontmatter, following §5's rules and this guide's body shape (`# Goal`, `# Acceptance criteria`, `# Files`, `# Implementation notes`, `# Out of scope`, `# Gate`, `## Engineering standards`).
-3. There is no API to render `# Files`/`# Gate` here — write them yourself, in this exact shape:
+3. There is no API to render `# Files`, `# Gate` or `## Engineering standards` here — write them yourself, in this exact shape (use the absolute path of the `/develop` skill's `standards.md`):
 
     # Files
 
@@ -222,6 +222,13 @@ It only works while the app is running — closing it removes the admin port/tok
     timeout 300 npm run typecheck
     timeout 600 npx vitest run src/x.test.cjs
     ```
+
+    ## Engineering standards
+
+    Your system prompt carries the ordered run contract.
+    `/abs/path/to/develop/standards.md` holds the reasoning behind each contract line (Performance, Debugging,
+    API reuse, TDD, Execution discipline) — read the section a line points at when it is unclear;
+    do not re-read the whole file every run.
 
 4. Pick `NN` by scanning every `scheduler/epics/*/prds/` and `prds-archived/` dir for the current max, plus one — this path has no atomic allocation, so a collision with another writer is possible, not theoretical. Never reuse a number to mean "runs in parallel"; use `dependsOn` for ordering.
 

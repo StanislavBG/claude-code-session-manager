@@ -5201,7 +5201,7 @@ function selectMechanicalRecoveryTarget(job, currentHeadSha = null) {
  */
 async function performMechanicalRecovery(job, target) {
   const integration = await jobWorktree.integrateJobBranch({
-    cwd: target.cwd, branch: target.branch, slug: target.slug, carriedPaths: target.carriedPaths, baseBranch: target.baseBranch,
+    cwd: target.cwd, branch: target.branch, slug: target.slug, carriedPaths: target.carriedPaths, baseBranch: target.baseBranch, allowRefLanding: true,
   });
   if (integration.ok) {
     await jobWorktree.cleanupJobWorktree({ cwd: target.cwd, dir: undefined, branch: target.branch, keepBranch: false });
@@ -5212,6 +5212,7 @@ async function performMechanicalRecovery(job, target) {
     if (!j) return;
     j.mechanicalRecoveryAttempted = true;
     if (integration.ok) {
+      if (integration.viaRef) j.landedCommit = integration.sha;
       if (transitionJob(j, 'completed', {
         reason: `mechanical recovery: ${target.branch} re-integrated successfully`,
         source: 'scheduler:mechanicalRecovery',
@@ -5227,6 +5228,9 @@ async function performMechanicalRecovery(job, target) {
     }
   });
   if (integration.ok) {
+    if (integration.viaRef) {
+      console.log(`[scheduler] mechanical-recovery: ${job.slug} landed onto the base ref directly; the main checkout was busy on another branch and was never touched.`);
+    }
     console.log(`[scheduler] mechanical-recovery: ${job.slug} → completed (branch ${target.branch} re-integrated)`);
     if (becameCompleted) await archiveCompletedPrd(job.slug, job.cwd);
   } else {

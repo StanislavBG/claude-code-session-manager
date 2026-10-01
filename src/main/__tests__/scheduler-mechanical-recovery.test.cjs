@@ -255,3 +255,57 @@ test('performMechanicalRecovery: a branch that no longer exists is handled witho
   expect(jobs[0].mechanicalRecoveryAttempted).toBe(true);
   expect(jobs[0].error).toMatch(/not found/);
 });
+
+test('performMechanicalRecovery: a stray checkout lands via ref, stamps landedCommit, and still completes the job', async () => {
+  const projectCwd = path.join(tmpHome, 'proj-stray-ref');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd, 'proj-stray-ref-slug');
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], projectCwd).trim();
+
+  const slug = 'fix-plan-stray-ref';
+  const branch = jobWorktree.branchNameFor(slug);
+  git(['checkout', '-q', '-b', branch], projectCwd);
+  fs.writeFileSync(path.join(projectCwd, 'c.txt'), 'from the fix plan\n', 'utf8');
+  git(['add', '-A'], projectCwd);
+  git(['commit', '-q', '-m', 'fix plan work'], projectCwd);
+  const branchHead = git(['rev-parse', branch], projectCwd).trim();
+  // The checkout ends up on a THIRD branch, neither the job branch nor the
+  // default branch — the "main checkout busy on something else" case
+  // allowRefLanding exists for, not the ordinary in-checkout merge path the
+  // other tests above exercise.
+  git(['checkout', '-q', defaultBranch], projectCwd);
+  git(['checkout', '-q', '-b', 'stray'], projectCwd);
+
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug,
+      status: 'needs_review',
+      cwd: projectCwd,
+      verifierVerdict: 'worktree_integration_failed',
+      investigationDepth: 2,
+      error: 'worktree branch integration FAILED (merge failed) — branch preserved for manual recovery',
+    },
+  ]);
+
+  const target = selectMechanicalRecoveryTarget({ slug, cwd: projectCwd, status: 'needs_review', verifierVerdict: 'worktree_integration_failed' });
+  expect(target).not.toBeNull();
+
+  await performMechanicalRecovery({ slug, cwd: projectCwd }, target);
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  expect(jobs).toHaveLength(1);
+  expect(jobs[0].status).toBe('completed');
+  expect(jobs[0].verifierVerdict).toBeUndefined();
+  expect(jobs[0].mechanicalRecoveryAttempted).toBe(true);
+  expect(jobs[0].landedCommit).toBe(branchHead);
+
+  // The checkout never moved off 'stray' — its working tree has no c.txt —
+  // while the default branch REF itself advanced to contain the commit.
+  expect(git(['symbolic-ref', '--short', 'HEAD'], projectCwd).trim()).toBe('stray');
+  expect(fs.existsSync(path.join(projectCwd, 'c.txt'))).toBe(false);
+  expect(git(['rev-parse', defaultBranch], projectCwd).trim()).toBe(branchHead);
+  expect(git(['show', `${defaultBranch}:c.txt`], projectCwd)).toBe('from the fix plan\n');
+  // The branch, now landed, is cleaned up.
+  const branchList = git(['branch', '--list', branch], projectCwd);
+  expect(branchList.trim()).toBe('');
+});

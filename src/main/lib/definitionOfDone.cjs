@@ -811,6 +811,7 @@ module.exports = {
   reportExists,
   extractAcCommand,
   extractAcSequence,
+  parseChain,
   resolveGate,
   runGateSequence,
   extractSection,

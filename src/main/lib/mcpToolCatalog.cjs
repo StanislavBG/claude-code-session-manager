@@ -101,7 +101,14 @@ const MCP_TOOL_CATALOG = [
       + 'files this PRD produces that are NOT meant to be committed (git-excluded), they are stat-checked on '
       + 'disk by the verifier, and declaring them is the ONLY way an artifact-only PRD can pass the finish '
       + 'protocol without a commit. Each requires the other (the write is refused if only one is given), and '
-      + 'no path may contain "..".',
+      + 'no path may contain "..". '
+      + '`gate` and `files` are REQUIRED on every call — the tool refuses a call missing either. `gate` lists '
+      + '1-10 commands that prove this PRD is done (each starting with `timeout <seconds>`, joined with `&&`, '
+      + 'no shell metacharacters), or exactly `["none"]` for a PRD with no runnable check; the scheduler '
+      + 're-runs these commands and reads them back from the rendered `# Gate` section verbatim, so a stray '
+      + '```gate fence anywhere else in the PRD text is rejected. `files` lists the 1-50 repo-relative files '
+      + 'or folders this PRD may change; PRDs that can run at the same time must not share a file — chain '
+      + 'them with `dependsOn` instead.',
     whenToUse: 'Use whenever new work should be queued into an already-approved Epic — this is the /develop path.',
     whenNotToUse: 'TWO DISTINCT FAILURE MODES if this tool is not usable — do not conflate them: '
       + '(a) this tool call is PRESENT in your tool list but ERRORS as app-not-running / admin '
@@ -122,8 +129,10 @@ const MCP_TOOL_CATALOG = [
       cwd: '/home/bilko/Projects/session-manager',
       estimateMinutes: 30,
       goal: 'Cover retryWithBackoff.cjs edge cases (zero retries, max-delay clamp) that currently have no test.',
-      acceptanceCriteria: ['New test file exercises zero-retry and max-delay-clamp cases', 'timeout 300 npm run typecheck passes', 'timeout 600 npm run test:unit passes'],
+      acceptanceCriteria: ['New test file exercises zero-retry and max-delay-clamp cases', 'Typecheck passes', 'Unit tests pass'],
       implementationNotes: 'See src/main/lib/retryWithBackoff.cjs and its existing __tests__ sibling for the pattern to extend.',
+      gate: ['timeout 300 npm run typecheck', 'timeout 600 npm run test:unit'],
+      files: ['src/main/lib/retryWithBackoff.cjs', 'src/main/lib/__tests__/retryWithBackoff.test.cjs'],
       sourcePromptId: 'epic-id-of-an-already-approved-session',
     },
     notes: 'See /develop.',

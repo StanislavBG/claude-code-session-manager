@@ -409,6 +409,17 @@ const schedulerCreatePrd = z.object({
   // invalidate. See prdCreate.cjs's buildPrdBody and schedulerBatch.cjs's
   // pickNextBatch.
   quietMachine: z.boolean().optional(),
+  // Commands that prove this PRD is done (gate-and-files-in-PRD-body unit) —
+  // rendered verbatim as the `# Gate` body section's ```gate fence and read
+  // back by definitionOfDone.cjs's resolveGate/parseChain. ['none'] opts out
+  // for docs/config PRDs with no runnable check. Shape-validated (length,
+  // chars, no-shell, none-is-alone) by prdGateFiles.cjs's validateGate, not
+  // here — this schema only bounds array size and element type.
+  gate: z.array(z.string()).min(1).max(10).optional(),
+  // Repo-relative files/folders this PRD may change — rendered verbatim as
+  // the `# Files` body section. Validated (repo-relative, no .., no globs)
+  // by prdGateFiles.cjs's validateFiles, not here.
+  files: z.array(z.string()).min(1).max(50).optional(),
 });
 
 // Renderer-facing counterpart to adminPrdFrontmatterPatch's dependsOn/

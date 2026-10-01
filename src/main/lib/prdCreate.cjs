@@ -32,6 +32,8 @@ const { resolveDepSlug, findNearMatches } = require('./depSlugResolve.cjs');
 const { isFixPlanSlug } = require('./fixPlanSlug.cjs');
 const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
 const { sizingWarnings } = require('./prdSizing.cjs');
+const { validateGate, validateFiles, renderFilesSection, renderGateSection } = require('./prdGateFiles.cjs');
+const { resolveGate, parseChain } = require('./definitionOfDone.cjs');
 
 // A caller-supplied slug that already starts with its own `NN-` (e.g.
 // "254-perf-x") used to silently become the double-prefixed row
@@ -77,6 +79,7 @@ function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
     implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId,
+    gate, files,
   } = input;
 
   // No `parallelGroup` frontmatter key by convention (SKILL.md) — the NN-
@@ -140,13 +143,22 @@ function buildPrdBody(input) {
     'do not re-read the whole file every run.',
   ].join('\n');
 
+  // `# Files` sits right after Acceptance criteria; `# Gate` sits after Out
+  // of scope, before Engineering standards (gate-and-files-in-PRD-body unit).
+  // Each section appears only when its field is given — gate/files stay
+  // optional at this layer; createPrd() is what makes them mandatory for the
+  // real API callers (MCP tool / HTTP route).
   const bodyLines = [
     '# Goal', '', goal, '',
     '# Acceptance criteria', '', acLines, '',
+  ];
+  if (files && files.length) bodyLines.push(...renderFilesSection(files));
+  bodyLines.push(
     '# Implementation notes', '', implementationNotes, '',
     '# Out of scope', '', oosLines, '',
-    '## Engineering standards', '', standardsPointer, '',
-  ];
+  );
+  if (gate && gate.length) bodyLines.push(...renderGateSection(gate));
+  bodyLines.push('## Engineering standards', '', standardsPointer, '');
 
   return `${fmLines.join('\n')}${bodyLines.join('\n')}`;
 }
@@ -347,6 +359,33 @@ async function createPrd(input, remote) {
     }
   }
 
+  // Gate + files validation (gate-and-files-in-PRD-body unit): fail-closed,
+  // checked BEFORE NN allocation so a refusal burns no number — same posture
+  // as the artifactPaths checks above. The actual shape rules live in
+  // prdGateFiles.cjs (pure, no I/O); this is just the accumulate-and-return glue.
+  const extraWarnings = [];
+  let gateCommands;
+  if (input.gate !== undefined) {
+    const gateValidation = validateGate(input.gate);
+    if (!gateValidation.ok) {
+      return { ok: false, status: 400, error: gateValidation.error };
+    }
+    gateCommands = gateValidation.commands;
+    extraWarnings.push(...gateValidation.warnings);
+  } else {
+    extraWarnings.push('No gate: the scheduler cannot re-check this PRD.');
+  }
+  let filesList;
+  if (input.files !== undefined) {
+    const filesValidation = validateFiles(input.files);
+    if (!filesValidation.ok) {
+      return { ok: false, status: 400, error: filesValidation.error };
+    }
+    filesList = filesValidation.files;
+  } else {
+    extraWarnings.push('No files list: the executor is not told which files it may change.');
+  }
+
   const nn = await remote.allocateParallelGroup(input.cwd);
   const filenameSlug = `${nn}-${slug}`;
 
@@ -463,7 +502,31 @@ async function createPrd(input, remote) {
   }
   if (!planId) planId = mintPlanId();
 
-  const body = buildPrdBody({ ...input, planId });
+  const body = buildPrdBody({ ...input, planId, gate: gateCommands, files: filesList });
+
+  // Read-back check (gate-and-files-in-PRD-body unit): the whole point of a
+  // declared gate is that the scheduler's own reader (resolveGate/parseChain
+  // in definitionOfDone.cjs) gets back exactly what was declared. A stray
+  // ```gate fence elsewhere in the body (goal/notes/criteria/out-of-scope)
+  // would otherwise win — readExplicitGate takes the FIRST fence in the
+  // text — and the scheduler would silently re-run the wrong gate. Caught
+  // here, before the write, rather than discovered later from a job log.
+  if (gateCommands) {
+    const expectedSource = gateCommands.length === 1 && /^none$/i.test(gateCommands[0]) ? 'none' : 'explicit';
+    const expectedSequence = expectedSource === 'none' ? [] : gateCommands.flatMap(parseChain);
+    const resolved = resolveGate(body);
+    const matches = resolved.source === expectedSource
+      && JSON.stringify(resolved.sequence) === JSON.stringify(expectedSequence);
+    if (!matches) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'The PRD text already holds a gate fence (```gate), so the scheduler would read the wrong gate. '
+          + 'Remove it from the goal, notes or criteria and call again.',
+      };
+    }
+  }
+
   const writeResult = await remote.writePrd(filenameSlug, body, input.cwd);
   if (!writeResult?.ok) {
     return { ok: false, status: 500, error: writeResult?.error ?? 'write failed' };
@@ -522,8 +585,17 @@ async function createPrd(input, remote) {
     note: enqueued
       ? 'PRD file written and adopted into the queue as a pending row'
       : 'PRD file written; the queue row is derived by the next scheduler reconcile pass, not created here',
-    // Advisory only (PRD 1403) — never blocks the write. See prdSizing.cjs.
-    warnings: sizingWarnings(input),
+    // gate-and-files-in-PRD-body unit: honest echo of what was actually
+    // validated and rendered, same spirit as `note` above — never a fabricated status.
+    gate: {
+      source: gateCommands ? (gateCommands.length === 1 && /^none$/i.test(gateCommands[0]) ? 'none' : 'explicit') : 'absent',
+      commands: gateCommands || [],
+    },
+    files: filesList || [],
+    // Advisory only (PRD 1403 sizing warnings + gate-and-files-in-PRD-body
+    // absent/none-gate warnings) — never blocks the write. See prdSizing.cjs
+    // and prdGateFiles.cjs.
+    warnings: [...extraWarnings, ...sizingWarnings(input)],
   };
 }
 
@@ -569,6 +641,8 @@ function registerAdminRoute(adminHttp, remote) {
       epicId: result.epicId ?? null,
       enqueued: result.enqueued,
       note: result.note,
+      gate: result.gate,
+      files: result.files,
       warnings: result.warnings,
     });
   });

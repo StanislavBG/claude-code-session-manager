@@ -38,22 +38,41 @@ function attachWindow(w) {
 
 /**
  * Resolve a path to its realpath, handling non-existent files by resolving
- * the parent directory instead. Prevents symlink traversal attacks.
+ * the nearest existing ancestor directory instead. Prevents symlink
+ * traversal attacks.
+ *
+ * A fresh target can be missing more than one directory level, for example
+ * "<tmpdir>/session-manager-operations/prompt-sessions/x.json" right after
+ * `mkdtemp`, where neither `session-manager-operations` nor
+ * `prompt-sessions` exists yet. Walk up one directory at a time until one
+ * exists, realpath that ancestor, then join every segment below it back on.
+ * Why: stopping after a single parent hop returns the lexical (not
+ * realpath'd) path on macOS, where `os.tmpdir()` sits under `/var`, a
+ * symlink to `/private/var`. The caller's root check then compares that
+ * unresolved `/var/...` path against a sibling root that DID resolve to
+ * `/private/var/...` and always rejects it, even for paths that belong
+ * squarely inside the allowed root.
  */
 function realResolve(abs) {
   const lex = path.resolve(expandHome(abs));
   try {
     return fs.realpathSync(lex);
   } catch (e) {
-    if (e.code === 'ENOENT') {
-      const parent = path.dirname(lex);
-      try {
-        return path.join(fs.realpathSync(parent), path.basename(lex));
-      } catch {
-        return lex;
-      }
+    if (e.code !== 'ENOENT') throw e;
+  }
+  const tail = [path.basename(lex)];
+  let dir = path.dirname(lex);
+  for (;;) {
+    try {
+      const realDir = fs.realpathSync(dir);
+      return path.join(realDir, ...tail.reverse());
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+      const parentDir = path.dirname(dir);
+      if (parentDir === dir) return lex; // hit the filesystem root; give up safely
+      tail.push(path.basename(dir));
+      dir = parentDir;
     }
-    throw e;
   }
 }
 
@@ -510,4 +529,5 @@ module.exports = {
   registerPromptSessionsRoot,
   validatePath,
   validateWrite,
+  realResolve,
 };

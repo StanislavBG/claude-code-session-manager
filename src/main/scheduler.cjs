@@ -278,113 +278,118 @@ const BASH_MAX_TIMEOUT_MS = 900_000; // 15 min — must stay below IDLE_OUTPUT_K
 // Value lives in reaperHelpers.cjs (imported above) so the external watchdog
 // shares the exact same budget — both increment the same j.orphanRetries field.
 
-// Appended to every scheduled job prompt so the queue can be RELIED ON to finish
-// work to a consistent bar: review → security-review → verify → commit. Enforced
-// centrally here (not per-PRD) so it applies to every current and future PRD.
-// The commit step is also backstopped by the post-run commit guard below: a
-// clean exit that leaves uncommitted changes is downgraded to needs_review.
+// Appended to every scheduled job prompt so every PRD finishes the same way:
+// review → security review → verify → commit → verdict line. It lives here,
+// not in each PRD, so it covers every current and future PRD. The post-run
+// commit guard backs up the commit step: a clean exit that leaves
+// uncommitted changes is downgraded to needs_review.
 //
 // PRD 1408: a plan that ends in its own trailing `validator` job (PRD
-// 1405/1407) already re-reviews every work-item's diff once, so asking EVERY
-// work-item to also run /code-review + /security-review inline is duplicate
-// review work — and the dominant cost tail on multi-file PRDs. buildFinishProtocol
-// derives a `reviewInRun: false` variant that collapses those two steps into
-// one deferral note and renumbers the rest, sharing every other word
-// byte-for-byte with the default (`reviewInRun: true`, which is exactly
-// FINISH_PROTOCOL) via the head/review-steps/tail pieces below.
+// 1405/1407) already reviews every work item's diff once, so asking EVERY
+// work item to also run /code-review + /security-review is duplicate work
+// and the main cost tail on multi-file PRDs. buildFinishProtocol builds a
+// `reviewInRun: false` variant that folds those two steps into one deferral
+// note and renumbers the rest. Every other word is shared byte-for-byte with
+// the default (`reviewInRun: true`, which is exactly FINISH_PROTOCOL) through
+// the head / review-steps / tail pieces below.
+//
+// Plain words on purpose: short sentences, one rule each, rule first, then
+// "Why:". Tests pin the load-bearing tokens (SYNCHRONOUSLY, background Bash,
+// Monitor, TaskOutput, ScheduleWakeup, "no later turn", `timeout <n>`,
+// `git add <path>`, the SCHEDULER_VERDICT lines) — keep them exact. No line
+// of this text may START with SCHEDULER_VERDICT: or FOREIGN_WIP_PATHS: —
+// runVerify's scanners are line-anchored.
 function buildFinishHead(verifyStepNum) {
   return `
 
 ---
-# SCHEDULER FINISH PROTOCOL (mandatory — runs AFTER the work above)
+# SCHEDULER FINISH PROTOCOL (required — do this after the work above)
 
-Once every acceptance-criteria line above is satisfied, finish in this EXACT
-sequence. Do not stop before the commit lands; committing is part of the job.
+When every acceptance criterion above is met, do the steps below in order.
+Do not stop before your commit lands. The commit is part of the job.
 
-RUN VERIFICATION IN THE FOREGROUND — this applies to the whole run, not just
-step ${verifyStepNum} below: every test/typecheck/lint/build command you run, whether while
-implementing the AC or during VERIFY, must run SYNCHRONOUSLY and you must wait
-for it to return. Never start a verification command as a background task
-(no background Bash) and then call Monitor, TaskOutput, or ScheduleWakeup to
-pick up its result later — a headless \`claude -p\` run has no later turn, so
-nothing ever delivers that notification and the run dies mid-verification with
-no commit and no verdict. Your foreground Bash budget for this run is
-${BASH_DEFAULT_TIMEOUT_MS / 1000}s by default, up to ${BASH_MAX_TIMEOUT_MS / 1000}s max
-— size your own \`timeout <n>\` wrapper (e.g. \`timeout ${Math.floor(BASH_MAX_TIMEOUT_MS / 1000)} npm test\`)
-to fit inside that ceiling; if a gate command still cannot finish inside
-budget, stop and emit SCHEDULER_VERDICT: FAIL with the reason instead of
-deferring it.
+Do not stop to ask a question. No one can answer it: this run has no later
+turn. If something is unclear, make the safest reasonable choice, say what you
+chose in your final report, and finish. If you truly cannot go on, end with the
+verdict line SCHEDULER_VERDICT: FAIL and the reason.
+
+Run every check in the foreground. This rule covers the whole run, not only step ${verifyStepNum}.
+It covers every test, typecheck, lint and build command, while you build and while you verify.
+- Run each command SYNCHRONOUSLY and wait for it to return.
+- Never start a check as a background task (no background Bash).
+- Never call Monitor, TaskOutput or ScheduleWakeup to collect a result later.
+  Why: a headless \`claude -p\` run has no later turn. Nothing will deliver
+  that result, and the run ends with no commit and no verdict.
+- Your foreground Bash limit is ${BASH_DEFAULT_TIMEOUT_MS / 1000}s by default and ${BASH_MAX_TIMEOUT_MS / 1000}s at most.
+  Wrap long commands to fit inside it, for example \`timeout ${Math.floor(BASH_MAX_TIMEOUT_MS / 1000)} npm test\`.
+- If a check still cannot finish in time, stop and end with the verdict line
+  SCHEDULER_VERDICT: FAIL and the reason. Do not put it off.
 
 `;
 }
 
-const FINISH_REVIEW_STEPS_IN_RUN = `1. CODE REVIEW — run \`/code-review --fix\` on your changes and apply the fixes it
-   surfaces (correctness first). For any finding you judge a false positive, say
-   why in your result; do not silently skip it. If \`/code-review\` is not
-   available in this environment, do an equivalent careful self-review instead.
-2. SECURITY REVIEW — run \`/security-review\` and address every finding (or
-   justify it). If unavailable, self-review the diff for injection, secrets,
-   path traversal, and unsafe input handling.
+const FINISH_REVIEW_STEPS_IN_RUN = `1. CODE REVIEW — run \`/code-review --fix\` on your changes. Apply the fixes it finds,
+   correctness first. If you think a finding is wrong, say why in your final report.
+   Do not skip a finding silently. If \`/code-review\` is not available here,
+   review your own diff with the same care.
+2. SECURITY REVIEW — run \`/security-review\` and fix every finding, or explain
+   why it is safe. If it is not available, check your diff yourself for
+   injection, secrets, path traversal and unsafe input handling.
 `;
 
-const FINISH_REVIEW_STEP_DEFERRED = `1. REVIEW — code and security review for this plan run once, in its trailing validator job. Do NOT run /code-review or /security-review here.
+const FINISH_REVIEW_STEP_DEFERRED = `1. REVIEW — skip it in this run. The plan's trailing validator job reviews code and security once, for the whole plan. Do NOT run /code-review or /security-review here.
 `;
 
 function buildFinishTail({ verifyStepNum, commitStepNum, verdictStepNum }) {
-  return `${verifyStepNum}. VERIFY — run the project's OWN check commands (typecheck / lint / tests — the
-   project's CLAUDE.md names them; infer from the repo if not) and make them
-   pass. Do not assume npm; use whatever the target project uses.
-${commitStepNum}. COMMIT — the queue can run several jobs against this SAME working tree at
-   once. Do NOT stage the whole working tree in one blanket/wildcard git-add
-   sweep — that captures whatever a concurrent sibling job is mid-writing and
-   mis-attributes its work to this commit, corrupting both jobs' verdicts.
-   Stage only the exact paths YOU created or modified for this PRD, then
-   commit: \`git add <path> [<path>...] && git commit -m "<type>(<scope>): <summary>"\`.
-   Your own work must still never be left uncommitted — this only changes
-   which paths get staged, never whether you commit.
-${verdictStepNum}. VERDICT SENTINEL — as the LAST LINE of your final result text, emit exactly
-   one of these lines (no trailing text after it):
+  return `${verifyStepNum}. VERIFY — run every command in the PRD's \`# Gate\` section, in order, in the
+   foreground. Each must exit 0. If the PRD has no \`# Gate\` section, run the
+   project's own typecheck, lint and test commands instead. The project's
+   CLAUDE.md names them; if it does not, find them in the repo. Do not assume npm.
+${commitStepNum}. COMMIT — stage only the exact paths you created or changed for this PRD,
+   then commit:
+     \`git add <path> [<path>...] && git commit -m "<type>(<scope>): <summary>"\`
+   Never stage the whole tree with a wildcard or blanket git add.
+   Why: other jobs may be writing files in this same working tree right now.
+   A blanket add puts their half-done work in your commit and breaks both
+   jobs' verdicts. Always commit your own work: this rule changes what you
+   stage, never whether you commit.
+${verdictStepNum}. VERDICT LINE — end your final report with exactly one of these lines.
+   Put nothing after it, except the FOREIGN_WIP_PATHS line described below.
      SCHEDULER_VERDICT: PASS
      SCHEDULER_VERDICT: FAIL <one-line reason>
      SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP
-   Print PASS only when the AC gate is green AND the commit from step ${commitStepNum} landed.
-   Print FAIL (and exit 1) if the AC gate was red or the commit could not land.
-   NEVER print PASS on a red AC gate — a lying PASS turns the verifier from a
-   false-failure catcher into a silent-failure shipper. A truthful PASS + a
-   landed commit lets the verifier override incidental transcript noise (grep
-   results containing "Error", a TDD red-test run early in the session, debug
-   Tracebacks) so those do not false-trip a needs_review downgrade.
-   Print BLOCKED_BY_FOREIGN_WIP (and exit 1) ONLY when your own AC gate failed
-   because it ran against a SIBLING job's in-flight, uncommitted file — never
-   because of your own regression — AND every failing path is one this prompt
-   already disclosed to you as foreign (see the "FOREIGN WORKING-TREE STATE"
-   section above, if present). It MUST be accompanied by a second line naming
-   every such path:
-     FOREIGN_WIP_PATHS: <path1>, <path2>, ...
-   The scheduler independently validates every listed path against the exact
-   foreign-WIP manifest it disclosed to you. Only list a path that (a) this
-   prompt already told you is foreign WIP, not yours, AND (b) is why your own
-   AC gate failed — never a path you own, and never a path that failed for
-   some other reason of your own making. Any listed path NOT in that manifest
-   downgrades this whole verdict back to FAIL, with your claim rejected. This
-   is not an escape hatch for your own broken code: claiming it for a
-   regression you introduced, or for a path you never received as foreign
-   WIP, is a lying verdict exactly like a false PASS.
+   - Print PASS only when the gate is green AND the commit from step ${commitStepNum} landed.
+   - Print FAIL when the gate is red or the commit could not land.
+   - Never print PASS on a red gate. Why: a false PASS ships broken work that
+     no one notices. A true PASS plus a landed commit lets the scheduler ignore
+     harmless noise in your transcript, such as grep hits for "Error", an early
+     red test run, or debug tracebacks.
+   - Print BLOCKED_BY_FOREIGN_WIP ONLY when your gate failed because of a
+     sibling job's unfinished, uncommitted file — never because of your own
+     change — AND every failing path is one this prompt already listed as
+     foreign (see the "FOREIGN WORKING-TREE STATE" section above, if present).
+     Add a second line that names every such path:
+       FOREIGN_WIP_PATHS: <path1>, <path2>, ...
+     The scheduler checks each listed path against the list it gave you. List
+     a path only if (a) this prompt told you it is foreign work, not yours,
+     and (b) it is why your gate failed. One path that is not on that list
+     turns the whole verdict back into FAIL. Claiming this for your own bug is
+     a false verdict, just like a false PASS.
 
-A job that exits with uncommitted changes is treated as INCOMPLETE and flagged
-for review. Do NOT add work beyond the acceptance criteria — this protocol is the
-only post-AC work. If a review finding can't be fixed within scope, commit what
-you have, describe the finding in the commit body, and note the follow-up in your
-final result.`;
+A job that ends with uncommitted changes counts as INCOMPLETE and is flagged
+for review. Do not add work beyond the acceptance criteria: these steps are the
+only work after them. If you cannot fix a review finding within scope, commit
+what you have, describe the finding in the commit body, and note the follow-up
+in your final report.`;
 }
 
 /**
  * buildFinishProtocol({ reviewInRun }) → string
  *
  * `reviewInRun: true` (default) is byte-for-byte FINISH_PROTOCOL: steps 1-5
- * are CODE REVIEW, SECURITY REVIEW, VERIFY, COMMIT, VERDICT SENTINEL.
+ * are CODE REVIEW, SECURITY REVIEW, VERIFY, COMMIT, VERDICT LINE.
  * `reviewInRun: false` collapses the two review steps into one deferral note
- * (step 1) and renumbers VERIFY/COMMIT/VERDICT SENTINEL to 2-4 — used when
+ * (step 1) and renumbers VERIFY/COMMIT/VERDICT LINE to 2-4 — used when
  * `hasDownstreamValidator` (lib/planValidator.cjs) finds this job's diff will
  * be re-reviewed once by the plan's own trailing validator job, so asking
  * every work-item to also run /code-review + /security-review inline is

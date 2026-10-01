@@ -76,7 +76,17 @@ describe('FINISH_PROTOCOL', () => {
     expect(FINISH_PROTOCOL).toMatch(/no later turn/)
     expect(FINISH_PROTOCOL).toMatch(/timeout \d+/)
     // governs the whole run, not just step 3 VERIFY
-    expect(FINISH_PROTOCOL).toMatch(/whole run, not just\s*\nstep 3/)
+    expect(FINISH_PROTOCOL).toMatch(/whole run, not only step 3\b/)
+  })
+
+  it('points VERIFY at the PRD\'s own # Gate section and bans stopping to ask a question', () => {
+    expect(FINISH_PROTOCOL).toMatch(/# Gate/)
+    expect(FINISH_PROTOCOL).toMatch(/Do not stop to ask a question/)
+    // runVerify's verdict scanners are line-anchored: a prompt line that itself
+    // starts with one of these tokens could be echoed back and misread as a
+    // real verdict.
+    expect(FINISH_PROTOCOL).not.toMatch(/^SCHEDULER_VERDICT:/m)
+    expect(FINISH_PROTOCOL).not.toMatch(/^FOREIGN_WIP_PATHS:/m)
   })
 })
 
@@ -98,6 +108,13 @@ describe('buildFinishProtocol (PRD 1408: yields to a plan-level validator)', () 
     expect(deferred).toMatch(/git add <path>/)
     expect(deferred).toMatch(/SYNCHRONOUSLY/)
     expect(deferred).toMatch(/SCHEDULER_VERDICT: PASS/)
+    // governs the whole run, not just step 2 VERIFY (steps renumber down by one
+    // when the review steps collapse into a single deferral note)
+    expect(deferred).toMatch(/whole run, not only step 2\b/)
+    expect(deferred).toMatch(/# Gate/)
+    expect(deferred).toMatch(/Do not stop to ask a question/)
+    expect(deferred).not.toMatch(/^SCHEDULER_VERDICT:/m)
+    expect(deferred).not.toMatch(/^FOREIGN_WIP_PATHS:/m)
   })
 })
 

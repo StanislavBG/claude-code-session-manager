@@ -113,7 +113,7 @@ Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/
   rules from two real stuck-job incidents + a pre-queue checklist (§10).
 - **Guard hooks adopt by REFERENCE via a stable shim** (`guardShims.cjs`,
   `~/.claude/session-manager/hooks/guard-*.cjs`) — readiness banner installs all four.
-- A job parked in `needs_review` is a **question**, routed back to the authoring Epic — never mints new work.
+- A `needs_review` park self-heals first; the authoring Epic gets one grouped notice only after the ladder fails — never mints new work.
 - The Scheduler nav row is **PROJECT-face only** — every route it renders is cwd-derived.
 - Stuck queue or a parked `needs_review`? See
   [`scheduler-operations.md`](session-manager-operations/architecture/scheduler-operations.md) — recovery

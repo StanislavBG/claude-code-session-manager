@@ -86,6 +86,7 @@ const prdParser = require('./scheduler/prdParser.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { appendResponseEventIfKnown } = require('./promptSessionEvents.cjs');
+const { buildReviewNotice, selectDueReviewNotices, formatReviewNotice, holdMsFromEnv } = require('./lib/reviewNotice.cjs');
 const { maybeEnqueueValidationPrompt } = require('./lib/epicValidationHook.cjs');
 const { parseValidationSentinels } = require('./lib/validationSentinels.cjs');
 const { hasDownstreamValidator } = require('./lib/planValidator.cjs');
@@ -4640,6 +4641,13 @@ async function notifyOriginatingTab(job, {
  * non-active session and returns false. Nothing here can create an Epic — if
  * no open authoring Epic exists, the root-cause report in the run directory
  * is the whole record and the Scheduler tab is where it surfaces.
+ *
+ * Quiet by default (this PRD): the park path no longer calls this at park
+ * time. It records a `reviewNotice` on the job row instead and lets
+ * flushDueReviewNotices send one grouped message once the self-heal ladder
+ * gives up or the hold time passes. This function now only runs under the
+ * SM_REVIEW_NOTICE_IMMEDIATE=1 kill switch (same park-time call site, for
+ * local debugging) — it is otherwise dead code outside its own tests.
  */
 async function notifyNeedsReview(job, report, {
   parsePrdRaw = prdParser.parsePrdRaw,
@@ -4668,6 +4676,71 @@ async function notifyNeedsReview(job, report, {
     console.error('[scheduler] notifyNeedsReview error', job?.slug, e);
     return false;
   }
+}
+
+// Single-flight guard for flushDueReviewNotices — same shape as
+// gateShadowPending above: a module-level flag rather than a class, so two
+// triggers landing close together (an auto-resolve skip right next to the
+// heartbeat interval) read-modify-write queue.json in series, never racing
+// each other over the same rows.
+let reviewNoticeFlushPending = null;
+
+/**
+ * flushDueReviewNotices() → Promise<void>
+ *
+ * The only path that still calls appendResponseEventIfKnown for a
+ * needs_review park (outside the SM_REVIEW_NOTICE_IMMEDIATE=1 kill switch
+ * above notifyNeedsReview). Reads the live queue, asks reviewNotice.cjs's
+ * selectDueReviewNotices which (cwd, Epic, cause) groups have gone quiet —
+ * the ladder gave up (needsReviewAutoResolvedSkip) or the hold time passed
+ * (holdMsFromEnv) — and sends each group ONE message via formatReviewNotice.
+ *
+ * Every row in a group is marked sent (reviewNotice.sentAt) even when the
+ * send itself returned false: a deleted Epic must not cause a resend on
+ * every tick, and the RCA report already on disk is still the full record.
+ *
+ * Single-flight via reviewNoticeFlushPending: a call while one is already in
+ * flight returns the SAME promise instead of starting a second pass over the
+ * same rows. Never throws — a bad read or a disk error just leaves the
+ * notice for the next pass to retry.
+ */
+async function flushDueReviewNotices({
+  appendResponseEvent = appendResponseEventIfKnown,
+  now = Date.now(),
+} = {}) {
+  if (reviewNoticeFlushPending) return reviewNoticeFlushPending;
+  reviewNoticeFlushPending = (async () => {
+    try {
+      const state = await readQueue();
+      if (state.unreadable) return;
+      const groups = selectDueReviewNotices(state.jobs || [], { now, holdMs: holdMsFromEnv() });
+      for (const group of groups) {
+        if (!group.epicId || !group.cwd) {
+          console.log(`[scheduler] flushDueReviewNotices: no authoring Epic for ${group.jobs.map((j) => j.slug).join(', ')}, report only`);
+        } else {
+          await appendResponseEvent(group.cwd, group.epicId, formatReviewNotice(group), {
+            prdSlug: group.jobs[0].slug,
+            outcome: 'needs_review',
+            validation: 'unvalidated',
+          }).catch((e) => {
+            console.error('[scheduler] flushDueReviewNotices appendResponseEvent error', group.epicId, e);
+          });
+        }
+        const slugs = new Set(group.jobs.map((j) => j.slug));
+        const sentAt = new Date(now).toISOString();
+        await mutate((s) => {
+          for (const j of s.jobs) {
+            if (slugs.has(j.slug) && j.reviewNotice && !j.reviewNotice.sentAt) j.reviewNotice.sentAt = sentAt;
+          }
+        }).catch(() => {});
+      }
+    } catch (e) {
+      console.error('[scheduler] flushDueReviewNotices error', e);
+    } finally {
+      reviewNoticeFlushPending = null;
+    }
+  })();
+  return reviewNoticeFlushPending;
 }
 
 /** Scan the tail of a job's log for a network-outage signal: the structured
@@ -8223,14 +8296,39 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
         annotations: needsReviewRcaSnapshot.verifierAnnotations,
       })
         .then(async (report) => {
-          // Persist the classification onto the parked job row so the scheduler
-          // can route on it (e.g. selectAutoFixTargets excluding 'archive')
-          // without re-parsing the RCA markdown on every pass.
+          // Resolve the authoring Epic the same way notifyNeedsReview does —
+          // the review notice needs the same epicId so flushDueReviewNotices
+          // can route the eventual grouped message to the right place.
+          let epicId = null;
+          try {
+            const prd = await resolveNotifyPrd(needsReviewRcaSnapshot, prdParser.parsePrdRaw);
+            epicId = prd?.sourcePromptId || needsReviewRcaSnapshot.epicId || null;
+          } catch {
+            epicId = null;
+          }
+          // Persist the RCA classification AND the review notice onto the
+          // parked job row in the SAME mutate — the scheduler routes on the
+          // classification (e.g. selectAutoFixTargets excluding 'archive')
+          // and flushDueReviewNotices routes on the notice, neither re-parsing
+          // the RCA markdown nor losing the notice to a lost race.
           await mutate((s) => {
             const j = s.jobs.find((x) => x.slug === needsReviewRcaSnapshot.slug);
             applyRcaClassification(j, report);
+            if (j) {
+              j.reviewNotice = buildReviewNotice({ job: j, report, epicId, now: new Date().toISOString(), prior: j.reviewNotice });
+            }
           }).catch(() => {});
-          return notifyNeedsReview(needsReviewRcaSnapshot, report);
+          // Quiet by default (this PRD): the notice recorded above waits for
+          // flushDueReviewNotices to send it, grouped, once the ladder gives
+          // up or the hold time passes. SM_REVIEW_NOTICE_IMMEDIATE=1 restores
+          // the old immediate-notify behavior, for local debugging.
+          if (process.env.SM_REVIEW_NOTICE_IMMEDIATE === '1') {
+            await notifyNeedsReview(needsReviewRcaSnapshot, report);
+            await mutate((s) => {
+              const j = s.jobs.find((x) => x.slug === needsReviewRcaSnapshot.slug);
+              if (j && j.reviewNotice) j.reviewNotice.sentAt = new Date().toISOString();
+            }).catch(() => {});
+          }
         })
         .catch((e) => {
           console.error('[scheduler] writeRcaReport error', job.slug, e);
@@ -12081,7 +12179,14 @@ function rescheduleIntervalTick() {
           );
         }
       }
-    }).catch(() => {});
+    }).catch(() => {})
+      .finally(() => {
+        // An auto-resolve skip just made a notice due in THIS pass — flush
+        // right away instead of waiting for the next one. Fire-and-forget:
+        // never blocks this tick, never throws (flushDueReviewNotices
+        // catches internally).
+        flushDueReviewNotices().catch(() => {});
+      });
   }
 }
 
@@ -13123,6 +13228,7 @@ module.exports = {
   registerAdminRoutes,
   notifyOriginatingTab,
   notifyNeedsReview,
+  flushDueReviewNotices,
   isNotifiableTerminalStatus,
   extractResultTextFromLog,
   candidatePrdsDirs,

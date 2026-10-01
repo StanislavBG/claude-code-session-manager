@@ -484,7 +484,7 @@ describe('EpicDetail (PRD 827)', () => {
     expect(responseEvents[1].getAttribute('aria-label')).toBeNull()
   })
 
-  it('CORE: a response event with outcome "needs_review" (rcaReport.cjs\'s routed question) renders amber-tinted and marked as a question aimed at the human, distinct from an ordinary completed/failed outcome', async () => {
+  it('CORE: a response event with outcome "needs_review" (a grouped scheduler notice) renders amber-tinted and marked as a scheduler notice, distinct from an ordinary completed/failed outcome', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
@@ -505,11 +505,11 @@ describe('EpicDetail (PRD 827)', () => {
     const responseEvent = el.querySelector('[data-testid="epic-response-event"]')!
     expect(responseEvent).toBeTruthy()
     expect(responseEvent.querySelector('[data-testid="epic-response-question-marker"]')?.textContent).toContain(
-      'Question aimed at you',
+      'Scheduler notice — PRD stopped',
     )
     // AMBER_TEXT/AMBER_TINT (not STATUS_TONE.needs_review's neutral butter pill).
     expect(responseEvent.className).toMatch(/#8e641a/)
-    expect(responseEvent.getAttribute('aria-label')).toContain('Question routed back from a scheduler run')
+    expect(responseEvent.getAttribute('aria-label')).toContain('Scheduler notice from a stopped PRD')
   })
 
   it('renders the "closed" event as a terminator rule (EventDivider), not plain centered text', async () => {

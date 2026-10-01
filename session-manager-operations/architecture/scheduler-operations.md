@@ -173,6 +173,18 @@ A finished step's row leaves `queue.json` (`archiveCompletedPrd` + `reconcile()`
 
 ## 8. What recovers automatically vs what needs a human
 
+**The human-facing notice is quiet and grouped, not immediate.** A park into
+`needs_review` records a notice on the job row (`reviewNotice.cjs`'s
+`buildReviewNotice`) and sends nothing yet — the ladder above almost always
+heals it first. The authoring Epic gets exactly ONE message per (project,
+Epic, cause) group, sent only when the ladder gives up on a row (an
+auto-resolve skip, rung 6) or the row has sat `needs_review` with no
+resolution for `SM_REVIEW_NOTICE_HOLD_MINUTES` (default 240 minutes).
+`scheduler.cjs`'s `flushDueReviewNotices` is the sole sender; it groups every
+row sharing the same cause into one plain-language message rather than one
+message per PRD. Kill switch `SM_REVIEW_NOTICE_IMMEDIATE=1` restores the old
+immediate, ungrouped notify-at-park-time behavior, for local debugging.
+
 **Automatic, no operator action required:** the starvation watchdog forcing a tick (§3); rungs
 1, 2, 4, 5, and the bounded part of rung 6 of the needs_review ladder (§4); the reap/orphan
 git-evidence gate promoting a wrongly-reaped row to `completed` (§5); the launch circuit breaker

@@ -127,7 +127,7 @@ const MCP_TOOL_CATALOG = [
     exampleArgs: {
       title: 'Add unit tests for the retry backoff helper',
       cwd: '/home/bilko/Projects/session-manager',
-      estimateMinutes: 30,
+      estimateMinutes: 10,
       goal: 'Cover retryWithBackoff.cjs edge cases (zero retries, max-delay clamp) that currently have no test.',
       acceptanceCriteria: ['New test file exercises zero-retry and max-delay-clamp cases', 'Typecheck passes', 'Unit tests pass'],
       implementationNotes: 'See src/main/lib/retryWithBackoff.cjs and its existing __tests__ sibling for the pattern to extend.',
@@ -174,7 +174,7 @@ const MCP_TOOL_CATALOG = [
       + 'the safe way to fix a wrong dependsOn without archiving (which marks the PRD completed and wrongly frees its dependents).',
     whenToUse: 'Use to correct a PRD scope/estimate/tag before it starts running — e.g. before resetting a needs_review job whose spec needs to change.',
     whenNotToUse: 'Do not use once the job is running or terminal (completed/failed/needs_review) without first resetting it back to pending — the route refuses the edit.',
-    exampleArgs: { slug: 'add-mcp-tool-catalog', frontmatter: { estimateMinutes: 45 } },
+    exampleArgs: { slug: 'add-mcp-tool-catalog', frontmatter: { estimateMinutes: 8 } },
     notes: null,
   },
   {
@@ -206,7 +206,7 @@ const MCP_TOOL_CATALOG = [
       + "parallelGroup changes, its NN- filename prefix) via the session-manager app's admin API.",
     whenToUse: 'Use to correct an estimate or renumber a PRD file after it was created.',
     whenNotToUse: 'Do not use parallelGroup as an ordering/dependency barrier — it is only a unique-per-PRD display hint; use dependsOn on scheduler_create_prd/scheduler_update_prd for real ordering.',
-    exampleArgs: { items: [{ slug: 'add-mcp-tool-catalog', estimateMinutes: 30 }] },
+    exampleArgs: { items: [{ slug: 'add-mcp-tool-catalog', estimateMinutes: 10 }] },
     notes: null,
   },
   {

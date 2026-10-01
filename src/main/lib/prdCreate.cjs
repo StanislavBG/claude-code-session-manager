@@ -11,8 +11,8 @@
  * anymore — both just point the headless executor at STANDARDS_PATH with an
  * instruction to read it before starting. There's nothing to go stale: the
  * executor always reads the live file at run time, same one-concept-one-
- * implementation reasoning that keeps the two PRD-creation paths in sync
- * (see SKILL.md).
+ * implementation reasoning that keeps the two PRD-creation paths (admin
+ * HTTP route, chat:create-prd IPC) in sync.
  */
 'use strict';
 
@@ -70,10 +70,10 @@ function deriveSlugFromTitle(title) {
 
 /**
  * Build the full PRD markdown body (frontmatter + required sections + a
- * pointer at the engineering standards file), matching the structure
- * `/develop`'s SKILL.md documents: frontmatter, then Goal / Acceptance
- * criteria / Implementation notes / Out of scope / Engineering standards,
- * in order.
+ * pointer at the engineering standards file), matching the body shape
+ * PRD_AUTHORING.md §13 documents: frontmatter, then Goal / Acceptance
+ * criteria / Files / Implementation notes / Out of scope / Gate /
+ * Engineering standards, in order.
  */
 function buildPrdBody(input) {
   const {
@@ -82,7 +82,7 @@ function buildPrdBody(input) {
     gate, files,
   } = input;
 
-  // No `parallelGroup` frontmatter key by convention (SKILL.md) — the NN-
+  // No `parallelGroup` frontmatter key (PRD_AUTHORING.md §5) — the NN-
   // filename prefix is the single source of truth for grouping; adding a
   // second one here would let the two drift out of sync.
   const fmLines = ['---', `title: ${title}`, `cwd: ${cwd}`, `estimateMinutes: ${estimateMinutes}`];
@@ -145,9 +145,9 @@ function buildPrdBody(input) {
 
   // `# Files` sits right after Acceptance criteria; `# Gate` sits after Out
   // of scope, before Engineering standards (gate-and-files-in-PRD-body unit).
-  // Each section appears only when its field is given — gate/files stay
-  // optional at this layer; createPrd() is what makes them mandatory for the
-  // real API callers (MCP tool / HTTP route).
+  // Each section appears only when its field is given. Only the MCP tool
+  // refuses a call without them; createPrd() (so the HTTP route and the IPC
+  // handler too) just warns when either is absent.
   const bodyLines = [
     '# Goal', '', goal, '',
     '# Acceptance criteria', '', acLines, '',

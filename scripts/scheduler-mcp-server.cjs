@@ -162,7 +162,7 @@ const TOOLS = [
       properties: {
         title: { type: 'string', description: 'One-line human-readable title' },
         cwd: { type: 'string', description: 'Absolute path to the target project (where claude -p will run). Optional inside an Epic session — the server resolves the real project from the calling session (originClaudeSessionId/sourcePromptId) when omitted.' },
-        estimateMinutes: { type: 'number', description: 'Integer wall-clock estimate in minutes' },
+        estimateMinutes: { type: 'number', description: 'Integer wall-clock estimate in minutes. Most PRDs take 5-10; never over 15 (split instead)' },
         goal: { type: 'string', description: '2-4 sentences: what the executor will build and why' },
         acceptanceCriteria: {
           type: 'array', items: { type: 'string' },

@@ -329,7 +329,7 @@ function extractAcCommand(prdBody) {
  *              per-project PRDs dir (resolvePrdWriteDir(job.cwd)).
  * @returns {Promise<{ slug: string, status: 'pass'|'fail'|'unverifiable', code: number|null, ms: number }>}
  */
-function reverifyAc(job, { timeoutMs = 60_000, prdsDir } = {}) {
+async function reverifyAc(job, { timeoutMs = 60_000, prdsDir } = {}) {
   const resolvedPrdsDir = prdsDir ?? (job.cwd ? resolvePrdWriteDir(job.cwd) : null);
   const startNs = process.hrtime.bigint();
 
@@ -345,75 +345,38 @@ function reverifyAc(job, { timeoutMs = 60_000, prdsDir } = {}) {
   try {
     fs.statSync(job.cwd);
   } catch {
-    return Promise.resolve(unverifiable());
+    return unverifiable();
   }
 
-  // Read and strip PRD frontmatter via the shared parser.
+  // Read the raw PRD text, frontmatter included, and resolve its gate the
+  // same way the shadow gate does. resolveGate already turns any leading
+  // `timeout N` into `timeoutMs`, so this never spawns a `timeout` binary —
+  // that binary does not exist on macOS, which is why every AC re-run here
+  // used to report 'unverifiable' on this platform.
   const prdPath = path.join(resolvedPrdsDir, `${job.slug}.md`);
-  let prdBody;
+  let raw;
   try {
-    const raw = fs.readFileSync(prdPath, 'utf8');
-    prdBody = splitFrontmatter(raw).body;
+    raw = fs.readFileSync(prdPath, 'utf8');
   } catch {
-    return Promise.resolve(unverifiable());
+    return unverifiable();
   }
 
-  const cmd = extractAcCommand(prdBody);
-  if (!cmd) return Promise.resolve(unverifiable());
+  const { source, sequence } = resolveGate(raw);
+  if (source === 'none' || source === 'absent' || !sequence.length) return unverifiable();
 
-  // Simple whitespace split — extractAcCommand already excludes
-  // commands that would need a shell (tokenizeNoShell). Paths with spaces are not expected in AC
-  // commands (PRD authoring convention: use relative paths from cwd).
-  const argv = cmd.trim().split(/\s+/);
-  if (argv.length < 2) return Promise.resolve(unverifiable());
-
-  return new Promise((resolve) => {
-    let settled = false;
-
-    let child;
-    try {
-      child = spawn(argv[0], argv.slice(1), {
-        cwd: job.cwd,
-        stdio: 'ignore',
-        // No shell:true — tokenizeNoShell rejects commands with shell metacharacters.
-      });
-    } catch (err) {
-      resolve(unverifiable());
-      return;
+  // `&&` semantics: stop at the first step that does not pass. This re-runs
+  // the SAME authored gate sequence, not a separate single-command heuristic.
+  for (const step of sequence) {
+    const result = await runOneGateCommand(
+      { ...step, timeoutMs: Math.min(step.timeoutMs, timeoutMs) },
+      { cwd: job.cwd, env: process.env },
+    );
+    if (result.status === 'unavailable') return unverifiable();
+    if (result.status === 'fail') {
+      return { slug: job.slug, status: 'fail', code: result.code, ms: elapsedMs() };
     }
-
-    let escalate;
-    const killTimer = setTimeout(() => {
-      try { child.kill('SIGTERM'); } catch { /* already dead */ }
-      escalate = setTimeout(() => {
-        try { child.kill('SIGKILL'); } catch { /* race */ }
-      }, 5_000);
-      if (escalate.unref) escalate.unref();
-    }, timeoutMs);
-    if (killTimer.unref) killTimer.unref();
-
-    child.on('error', () => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(killTimer);
-      clearTimeout(escalate);
-      resolve(unverifiable());
-    });
-
-    child.on('close', (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(killTimer);
-      clearTimeout(escalate);
-      const exitCode = typeof code === 'number' ? code : -1;
-      resolve({
-        slug: job.slug,
-        status: exitCode === 0 ? 'pass' : 'fail',
-        code: exitCode,
-        ms: elapsedMs(),
-      });
-    });
-  });
+  }
+  return { slug: job.slug, status: 'pass', code: 0, ms: elapsedMs() };
 }
 
 /**

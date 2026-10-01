@@ -305,6 +305,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-looks-done.test.cjs',
       'src/main/__tests__/scheduler-gate-shadow.test.cjs',
       'src/main/lib/__tests__/definitionOfDoneSequence.test.cjs',
+      'src/main/lib/__tests__/gateAuthority.test.cjs',
       'src/main/__tests__/scheduler-periodic-reverify-guard.test.cjs',
       'src/main/__tests__/scheduler-stuck-failed-escalation.test.cjs',
       'src/main/__tests__/scheduler-failed-autoreset.test.cjs',

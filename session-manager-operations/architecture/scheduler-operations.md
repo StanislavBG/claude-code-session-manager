@@ -125,6 +125,13 @@ different algorithm.
 | 5 | **reverify** | `reverifyNeedsReview()` (`scheduler.cjs`), run once on boot and every 10 minutes (`shouldRunPeriodicReverify` gate) via `rescheduleInterval`. Re-runs the verifier over stale `needs_review`/`failed` rows and computes a `looksDone` annotation (a later commit touching the PRD's declared paths). | Genuinely stale + still-passing verdict → `completed` (source `reverifyNeedsReview:heal`). A row with `looksDone` but no direct heal path is left for rung 6. |
 | 6 | **bounded auto-resolve / manual-reset** | `applyNeedsReviewAutoResolve`, gated by `selectExhaustedNeedsReviewTargets`: an exhausted-auto-fix or guard-parked row that has sat `needs_review` for `NEEDS_REVIEW_RESOLVE_MS` (30 min). | `looksDone` → `completed`. Otherwise up to `NEEDS_REVIEW_RESOLVE_CAP=2` requeues to `pending`; the cap-exhausted pass auto-`skip`s the row (`needsReviewAutoResolvedSkip`) so a `dependsOn` chain behind it still drains. Anything not matching one of the sources above (an explicit human `scheduler_reset_job`) buckets as `manual-reset` in the ledger. |
 
+Gate authority is not a seventh rung. It runs inside the shadow gate (`runGateShadow`) that rung 5
+already fires in the background, decided by `decideGateAuthority` (`lib/gateAuthority.cjs`). A
+needs_review park with verdict `transcript_errors`, `no_verdict_sentinel` or
+`abandoned_background_task` completes on its own when the gate re-run is green, the landed commit is
+on HEAD, and the tracked tree is clean. Kill switch: `SM_GATE_AUTHORITATIVE_DISABLE=1`. Every other
+verdict keeps the shadow gate observation-only, exactly as before.
+
 ## 5. The reap/orphan path and its git-evidence gate
 
 `reapDeadRunningJobs()` (`scheduler.cjs`) scans `queue.json` (never the in-memory

@@ -55,6 +55,7 @@ const { execFile, execFileSync } = require('node:child_process');
 const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
+const { ensureTimeoutShim, withTimeoutShimOnPath } = require('./lib/timeoutShim.cjs');
 const supervisor = require('./supervisor.cjs');
 const { resolveClaudeBin, claudeSpawnTarget, probeClaudeVersion } = require('./lib/claudeBin.cjs');
 const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claudeCliCaps.cjs');
@@ -5528,6 +5529,26 @@ async function performLeftoverQuarantine(job, paths, headBefore = null) {
   });
 }
 
+// A headless `claude -p` run has no later turn. A tool that waits for a
+// later turn (ScheduleWakeup, the Cron tools, Monitor) or for a human
+// (AskUserQuestion, plan mode) stalls the run: it ends with no commit and no
+// verdict, and the job parks in needs_review. EnterWorktree/ExitWorktree wait
+// on a worktree handoff that never comes back in a headless run either.
+// Agent and Skill stay allowed: the finish protocol runs /code-review and
+// /security-review, both of which dispatch sub-agents.
+const HEADLESS_DISALLOWED_TOOLS = Object.freeze([
+  'ScheduleWakeup',
+  'CronCreate',
+  'CronDelete',
+  'CronList',
+  'Monitor',
+  'AskUserQuestion',
+  'EnterPlanMode',
+  'ExitPlanMode',
+  'EnterWorktree',
+  'ExitWorktree',
+]);
+
 /**
  * Pure argv builder for a `claude -p` child spawn, shared so the
  * resume-vs-fresh-session choice is made in exactly one place. `resume`
@@ -5539,6 +5560,9 @@ async function performLeftoverQuarantine(job, paths, headBefore = null) {
  * persona body, resolved by agentModelResolve.cjs's resolvePrdPersonaForSpawn),
  * is passed as `--append-system-prompt` so the executor IS that persona at
  * launch rather than being asked in prose to adopt one.
+ * `--disallowedTools` takes a variadic list, so another flag must always
+ * follow it to end that list — `--output-format` does, right after. Never
+ * put `--disallowedTools` last or right before the prompt.
  */
 function buildClaudeSpawnArgs({ prompt, model, effort, sessionId, resume, systemPrompt }) {
   return [
@@ -5548,6 +5572,7 @@ function buildClaudeSpawnArgs({ prompt, model, effort, sessionId, resume, system
     ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
     '--dangerously-skip-permissions',
     ...headlessPermissionArgs(),
+    '--disallowedTools', HEADLESS_DISALLOWED_TOOLS.join(','),
     '--output-format', 'stream-json',
     '--verbose',
     ...(resume ? ['--resume', sessionId] : ['--session-id', sessionId]),
@@ -5568,6 +5593,32 @@ function pickRunDir() {
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const dir = path.join(schedulerPaths.runsDir(), ts);
   return { runId: ts, dir };
+}
+
+// macOS ships no `timeout` command, but a PRD gate command starts with
+// `timeout <seconds> ...`. ensureTimeoutShimOnce() installs a dependency-free
+// stand-in (see lib/timeoutShim.cjs) once per process — not once per job — so
+// every later executeJob call reuses the same cached promise instead of
+// re-checking the files on disk. It never throws and never blocks or fails a
+// spawn: a failed install just logs one line and leaves the PATH addition
+// pointing at a shim dir that may have nothing in it yet, no worse than
+// today's no-shim-at-all. SM_TIMEOUT_SHIM_DISABLE=1 skips it outright.
+let timeoutShimEnsured = null;
+function ensureTimeoutShimOnce() {
+  if (process.env.SM_TIMEOUT_SHIM_DISABLE === '1') return Promise.resolve();
+  if (!timeoutShimEnsured) {
+    timeoutShimEnsured = ensureTimeoutShim().then(
+      (result) => {
+        if (!result.ok && !result.skipped) {
+          console.error(`[scheduler] could not install the timeout shim: ${result.error}`);
+        }
+      },
+      (err) => {
+        console.error(`[scheduler] could not install the timeout shim: ${err?.message ?? err}`);
+      },
+    );
+  }
+  return timeoutShimEnsured;
 }
 
 /**
@@ -5807,6 +5858,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // probe result — the module-load priming above is a warm-cache head start,
   // not a correctness guarantee on its own.
   await ensureCliCapsProbed();
+  await ensureTimeoutShimOnce();
 
   return await new Promise((resolve) => {
     const claudeBin = resolveClaudeBin();
@@ -5828,8 +5880,11 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // `launchEnv` is the launch circuit breaker's degraded-mode env (e.g.
     // MAX_THINKING_TOKENS=0 while an outdated CLI's thinking parameter is
     // being rejected — lib/launchFailure.cjs); applied last so it wins.
+    // SM_TIMEOUT_SHIM_DISABLE=1 is the kill switch for the PATH addition
+    // below — paired with the install skip inside ensureTimeoutShimOnce().
+    const timeoutShimEnabled = process.env.SM_TIMEOUT_SHIM_DISABLE !== '1';
     const childEnv = cleanChildEnv({
-      PATH: pathWithUserBins(),
+      PATH: timeoutShimEnabled ? withTimeoutShimOnPath(pathWithUserBins()) : pathWithUserBins(),
       SM_PROJECT_ROOT: cwd,
       SM_SCHEDULER_JOB_SLUG: job.slug,
       SM_SCHEDULER_JOB_MAY_QUEUE: job.agentType === 'architect' ? '1' : '0',
@@ -5837,6 +5892,13 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
       ...(launchEnv && typeof launchEnv === 'object' ? launchEnv : {}),
     });
+    // Set AFTER cleanChildEnv returns, never inside the object passed to it:
+    // cleanChildEnv strips every CLAUDE_CODE_*-prefixed key from its own
+    // merged result (see cleanEnv.cjs), so setting it there would delete its
+    // own addition. A headless run has no later turn, so a background task
+    // it starts has nothing to report back to — same stall as a tool that
+    // waits for one.
+    childEnv.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = '1';
     if (launchEnv && Object.keys(launchEnv).length) {
       safeLog(`[scheduler] launch mitigation env applied: ${Object.entries(launchEnv).map(([k, v]) => `${k}=${v}`).join(' ')}\n`);
     }
@@ -13176,6 +13238,7 @@ module.exports = {
   selectResumeRecoveryTarget,
   buildResumeRecoveryPreamble,
   buildClaudeSpawnArgs,
+  HEADLESS_DISALLOWED_TOOLS,
   spawnResumeRecovery,
   selectMechanicalRecoveryTarget,
   isMechanicalRecoveryFutile,

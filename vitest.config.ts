@@ -87,6 +87,7 @@ export default defineConfig({
       'src/main/lib/__tests__/effectiveModelInfo.test.cjs',
       'src/main/lib/__tests__/modelCatalog.test.cjs',
       'src/main/lib/__tests__/guardShims.test.cjs',
+      'src/main/lib/__tests__/timeoutShim.test.cjs',
       'src/main/lib/__tests__/opsOwnership.test.cjs',
       'src/main/lib/__tests__/cwdClassify.test.cjs',
       'src/main/lib/__tests__/schedulerBatchDepends.test.cjs',

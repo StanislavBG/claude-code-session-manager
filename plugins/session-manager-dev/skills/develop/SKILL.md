@@ -1,516 +1,239 @@
 ---
 name: develop
 description: >-
-  Lead a software-development task by analyzing it from multiple angles (positive path, edge
-  cases, interaction effects, integration, UI validation) and decomposing it into a series of
-  self-contained PRDs, sized as <10-minute Sonnet-executable work-items — either a handful of
-  independent small PRDs, or a 3-5 PRD evolving chain
-  with sub-tasked acceptance criteria for larger asks — queued for the session-manager
-  scheduler, each pointing the headless executor at the engineering standards file to read at
-  runtime — then track those PRDs to completion, verify them against their acceptance criteria,
-  and report back. Use whenever the user says "/develop", "develop X", "build me X", "implement
-  X", "let's code X", or otherwise starts dev work that should run as scheduled PRDs rather than
-  inline now. This skill is the home for the developer-only guidance (performance, debugging,
-  API-reuse, TDD) that was removed from the always-on global CLAUDE.md. Keywords: develop,
-  build, implement, code, feature, refactor, bugfix, queue dev work, PRDs, PRD chain, multi-angle
-  analysis.
+  Lead a software-development task: analyze it from five angles, split it into small
+  self-contained PRDs (an independent set, or a 3-5 PRD chain), queue them for the
+  session-manager scheduler with the required gate and files, each pointing the headless
+  executor at the engineering standards file, then track them to a validated finish and report
+  back. Use whenever the user says "/develop", "develop X", "build me X", "implement X", "let's
+  code X", or otherwise starts dev work that should run as scheduled PRDs rather than inline
+  now. Home of the developer-only guidance (performance, debugging, API reuse, TDD). Keywords:
+  develop, build, implement, code, feature, refactor, bugfix, queue dev work, PRDs, PRD chain,
+  multi-angle analysis.
 ---
 
-# /develop — prompt → scheduled PRDs → tracked to done
+# /develop — plan, queue, track to done
 
-**Role:** `/develop` owns the *pipeline*: it turns a development request into one or more
-self-contained PRDs, queues them, and tracks them to completion. It is the convergence point
-for both entry paths — an interactive human prompt inside an Epic's own conversation comes
-straight here; so does an agent that concluded work is needed while running inside that same
-Epic. There is no separate proposal channel any more: an Epic exists because a human opened
-one, and `/develop` authors PRDs into it. Everything from here on is identical regardless of
-who asked.
+Terms: **plan** = the PRDs one pass queues, ending in a validate PRD. **gate** = commands that
+prove a PRD done. **files** = paths a PRD may change. **verdict line** = a run's last line
+(`SCHEDULER_VERDICT: PASS`). **needs_review** = a parked PRD: a question for this Epic, never
+new work. **report** = your final message to the human.
 
-**Epic-gated — non-negotiable.** `/develop` may only run inside an already-existing,
-already-human-approved Epic's own conversation (Chat or Terminal — the two views over one Epic
-session, per the domain model). It never creates an Epic itself and never writes a PRD against
-one it had to guess at. Before doing anything else:
-1. Resolve `<epic-id>`: this conversation's own claudeSessionId must already match an Epic's
-   `claudeSessionId` in `<cwd>/session-manager-operations/prompt-sessions/active-index.json` —
-   that Epic's `id` is `<epic-id>` for every PRD authored in this pass.
-2. If it doesn't match any Epic — this was invoked as a bare standalone command outside any
-   Epic context — **stop and say so**. Tell the human to create the Epic first (the New Epic
-   card in the app — the only place an Epic can be created), then re-run `/develop` from
-   inside that Epic. Do not mint one yourself (`ensureEpic` will refuse), do not fall back to
-   writing an epicless PRD, and do not proceed with authoring.
+## Rules that always apply
 
-**Tag-aware default (2026-08-01).** The Epic's own intent tag (`feature` / `bug` /
-`discussion` — CLAUDE.md's domain model) sets how eagerly this skill should fire, not just
-what to write once it does:
-- **`feature` / `bug`** — decomposition into PRDs is the expected default path for these once
-  scope is reasonably clear. Reach for `/develop` proactively; don't wait to be re-asked.
-- **`discussion`** — whether development is even warranted is often still the open question.
-  `/develop` stays fully available inside a Discussion Epic (a discussion can conclude "yes,
-  build this"), but never assume it's the next step — don't jump straight to decomposing PRDs
-  just because the conversation is active. Keep exploring/deciding until that's actually settled.
+1. **Epic gate. Run it first.**
+   1. Your session id is `$SM_CHAT_SESSION_ID`.
+   2. Read `session-manager-operations/prompt-sessions/active-index.json` in the main checkout
+      (`$SM_PROJECT_ROOT`, or the first `git worktree list` path). Why: a worktree copy is
+      frozen at branch time and often lacks this Epic.
+   3. The `sessions` entry whose `claudeSessionId` matches is this Epic: its `id` is
+      `<epic-id>`, its `tag` drives rule 2.
+   4. No match: stop and say so. Tell the human to open an Epic with the New Epic card and run
+      /develop there. Never mint an Epic or write a PRD without one. Why: only a human creates
+      an Epic.
+2. **Tag-aware default.** On a `feature` or `bug` Epic, PRDs are the expected path once scope
+   is clear; start unasked. On a `discussion` Epic it stays available, but wait until the
+   human settles that code is wanted.
+3. **Never hand-implement in this session**, even when the plan is agreed. Why: this session
+   runs an expensive planner model; a cheaper executor runs each PRD as a headless `claude -p`
+   job.
+4. **Never delegate PRD authoring.** You write scope, title, goal, criteria and notes. Calling
+   `scheduler_create_prd` with your own text is not delegation.
+5. **Never restate the engineering rules.** They live in `standards.md` beside this file, with
+   the reasons behind the run rules. Interactive work uses the `test-driven-development`,
+   `systematic-debugging` and `requesting-code-review` skills. Why: one copy never goes stale.
 
-**Never** hand-implement the work inline in chat, and never restate rules that live elsewhere:
-the engineering rules belong to `standards.md`. Reference it; don't fork it.
+## Phase 1 — plan and queue
 
-This applies even when the plan is already fully scoped and confirmed in conversation — that
-makes the PRD queue clean, it isn't a reason to skip queuing. The reason to route through the
-scheduler isn't decomposition need, it's model economics: keep the interactive main-loop session
-(an expensive planner-tier model) focused on discussion and decisions, and let a cheaper executor
-model do the implementing as a headless `claude -p` job.
+Read `~/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md` before writing PRDs.
 
-**Only execution is delegated — authoring never is.** Do the thinking — decomposition, scope,
-title, goal, and acceptance criteria — yourself, in the main loop; that's what "authoring" means
-here, and it's non-negotiable regardless of which mechanism ends up putting bytes on disk. Do
-not spawn a subagent to draft a PRD or otherwise hand off the writing/thinking — that defeats the
-point of keeping planning on the expensive model. Once you've composed the PRD yourself, submit
-it through `scheduler_create_prd` (the MCP tool — see step 4's "PRD structure and location"
-below): that tool call is the sanctioned path from your own composed content to a file on disk,
-not a second author. The scheduled `claude -p` job remains the only step that runs on the
-cheaper executor.
+### Preflight — confirm the tool is even in your tool list
 
-## Standards (single source of truth)
+Before drafting, check that `mcp__session-manager-scheduler__scheduler_create_prd` is in your
+tools. Why: drafts made first are wasted. It is the only sanctioned way to write a PRD. Its two
+failure modes have opposite answers:
 
-The engineering standards (Performance, Debugging, API reuse / single source of truth, TDD,
-and the executor-facing Execution discipline) live in **`standards.md`** beside this file, in
-the same skill directory (`.../skills/develop/standards.md` — NOT `~/.claude/skills/develop/`,
-which is a different, non-existent path; resolve it relative to wherever this SKILL.md itself
-was loaded from).
+- **(a) Tool PRESENT but ERRORS** because the session-manager app is not running. A validation
+  error is not this case: fix the input and retry.
+- **(b) Tool ABSENT from your tool list.** The `session-manager-scheduler` MCP server is not
+  registered: a **misconfiguration**, not an offline app.
+  **STOP. Do not write any PRD file.** Tell the human. The app registers the server at user
+  scope when it starts; if it is still missing, the human runs
+  `claude mcp add session-manager-scheduler --scope user -- node "$SM_ROOT/scripts/scheduler-mcp-server.cjs"`
+  (`$SM_ROOT` = the installed package root, four folders above this skill's folder) and opens
+  a new session. Never add a project `.mcp.json` entry yourself. Why: it brings back per-repo
+  drift.
 
-**Reference it, don't embed it.** The headless executor (`claude -p`) runs on the same
-filesystem this authoring session does, with full tool access — so a PRD only needs to name
-`standards.md`'s absolute path (resolved once, at authoring time, the same way this file already
-resolves it) and instruct the executor to `Read` it before starting. There is now exactly one
-copy of this text on disk, ever — no pasted snapshot to go stale, and nothing to re-read fresh
-before writing (an earlier version of this skill pasted the full contents into every PRD and had
-to warn authors to re-read it fresh each time to avoid shipping a stale in-context copy — PRDs
-467/468 did exactly that and repeated an anti-pattern a guard added earlier the same session was
-meant to prevent. Referencing by path removes the failure mode instead of warning against it).
-Never restate or fork its content — one concept, one implementation, one location.
+**Fallback for case (a) only.** Hand-write the file as the "Fallback: writing the PRD file
+directly" section of PRD_AUTHORING.md says, ending with the `## Engineering standards` pointer
+the API writes (`standards.md`'s absolute path). Your report must say visibly: the app was not
+running, you hand-wrote the file, its exact path, and that a human must check it. Why: the
+API's checks did not run.
 
-For interactive dev work, also apply the `test-driven-development` and `systematic-debugging`
-skills; the headless PRDs get the distilled core from `standards.md` instead, since they
-can't load skills.
+### Steps
 
-## Phase 1 — Author + queue the PRDs
+1. **Clarify only what a wrong guess would cost rework on.** Ask 2–4 plain-text questions in
+   one message, once, and wait. Never use AskUserQuestion. Why: Chat view turns run headless.
+2. **Explore broadly.** Find the absolute path, helpers and patterns to reuse, the test
+   command, constraints, and exact paths and signatures. Read look-alike siblings to confirm
+   the shape. Check existing tests, and `scheduler_list_prds` for an open PRD on the same
+   area. Why: a duplicate or contradicting PRD is a real failure.
+3. **Use five lenses**, a sentence each, none skipped silently: positive path; edge cases
+   (empty, max, concurrent, malformed, permission, failure); interaction effects (what depends
+   on your change); integration (reuse the existing schema, store, API, primitives);
+   validation (for UI: which screenshot, light and dark, proves which criterion).
+4. **Run a completeness pass** if the ask exceeds one or two PRDs or spans subsystems: give one
+   Explore or general-purpose sub-agent the ask verbatim, your draft list and the lenses; ask
+   what is missing. Fold in real gaps, drop vague ones. Repeat at most once. It reviews; you
+   author.
+5. **Tests and security go inside the feature's own PRD** as criteria (security when it
+   touches input, auth or data), never as follow-ups. Why: TDD needs the test with the code;
+   security is decided while writing it. Also check quality (performance, error handling).
+   Deeper edge cases, hardening and docs may be sibling PRDs.
+6. **Pick a shape.** Most asks are an independent set. Chain 3–5 PRDs only for truly
+   sequential work: each link `dependsOn` the previous one; its notes name what that link
+   delivers and say to read the landed code first. Never chain past 5; redo the completeness
+   pass. Each goal's first sentence names its type, in chain order: `primitive` (new helper
+   and its test), `wire` (adopt it at named call sites), `behavior` (one function's logic and
+   its test), `migration` (mechanical change), `doc`, `validate`.
+7. **Keep each PRD small**: at most 3 edited files, 1 new file, 6 criteria. A new helper and its
+   first caller are two PRDs. Most PRDs take 5–10 executor minutes; past estimates were 3–5×
+   too high. Never estimate over 15; split. Why: the kill budget floors at 45 minutes, so a low
+   estimate never starves a run.
+8. **Make each PRD self-contained.** The executor sees only the PRD and the project. Notes are
+   a recipe: `Read first:` (at most 4 files, with line ranges), `Steps:` (numbered, each naming
+   file and function), `Do not touch:` (files a sibling owns). Quote signatures. Say when a PRD
+   needs another PRD's output.
+9. **Write plain, checkable criteria.** Each names a file, a symbol and the result; one names
+   the test file and tests. Commands go in `gate`. No open-ended "grep X and update" lines.
+10. **Show the plan once**, as a table (#, PRD, files, gate, dependsOn, estimate), not PRD
+    drafts. Queue at once when the Epic is `feature` or `bug` and scope is clear; otherwise ask
+    one approval question, once.
+11. **Walk the pre-queue checklist** (last section of PRD_AUTHORING.md), then queue each PRD
+    with `scheduler_create_prd`, the validate PRD last.
+12. **Fix each warning** the API returns with `scheduler_update_prd`, or say why you keep it.
+    Then post one short message: each PRD's number and slug, the validate slug, and that no
+    per-PRD check will come from this session.
+13. **Never stop for review after queueing.** Why: the validator is the review.
 
-1. **Clarify scope first.** If the prompt has genuine ambiguity (acceptance criteria, target
-   repo, framework, edge cases), ask 2–4 focused questions as plain text and wait. Don't use
-   the AskUserQuestion tool. Don't guess on decisions that would cost real rework. (When the
-   caller is an approved Epic proposal, scope is already established by its objective — don't
-   re-ask; build from the brief it hands you.)
+### PRD fields
 
-2. **Explore the target repo — broadly, not just the obvious file.** Identify the absolute
-   `cwd`, existing patterns/utilities to reuse (per the API-reuse standard — search before
-   writing new code), the test command, and any constraints. Capture exact file paths and
-   signatures; they go straight into the PRDs. Don't stop at the first component that looks
-   relevant — check its siblings too (does the same pattern appear in 2-3 similar components?
-   do they actually share the same shape, or only look similar — confirm by reading, don't
-   assume: a wrong assumption here means an inaccurate PRD, discovered only after the executor
-   runs it), check existing tests for the area, and check whether a prior PRD already touched
-   this subsystem (`ls <cwd>/session-manager-operations/scheduler/epics/*/prds/` for related slugs, in
-   the target repo) — duplicating or contradicting a still-queued PRD is a real failure mode,
-   not a hypothetical one.
+| Field | Rule |
+| --- | --- |
+| `title`, `goal`, `acceptanceCriteria`, `implementationNotes`, `outOfScope` | Steps 6–9. Goal: 2–4 sentences. |
+| `gate`, `files` | **REQUIRED.** Rules below. The tool refuses a call without them. |
+| `estimateMinutes` | Honest: 5–10, never over 15. |
+| `sourcePromptId` | Always `<epic-id>`. Never rely on the server's fallback. |
+| `cwd` | Always the project's absolute path (`$SM_PROJECT_ROOT`). |
+| `dependsOn` | Slugs that must finish first. The only ordering tool. |
+| `disposition` | Only when the API asks. `append` waits behind the Epic's unfinished PRDs; `new-head` may run now, so only when no files are shared. |
+| `slug` | Optional kebab-case without an `NN-` prefix. The API picks the number. |
+| `tag`, `agentType` | Omit (`dev-lead` default), except on the validate PRD. |
+| `quietMachine` | Only for timing measurements. |
 
-3. **Analyze the request through five named lenses, draft a candidate decomposition, then run
-   a completeness pass before finalizing it.** This step exists because small, bounded individual
-   PRDs (step 4) are correct and non-negotiable — but a *set* of small PRDs can still be
-   incomplete if the upfront decomposition missed something. Keeping PRDs small is not a
-   substitute for getting the decomposition right; it's a separate concern, and this step is
-   where decomposition depth and breadth get checked.
+Never pass `parallelGroup`; it is ignored. The API writes the frontmatter, the `# Files` and
+`# Gate` sections and the standards pointer. Do not write them yourself, and do not put a gate
+fence (three backticks + `gate`) in the goal, notes or criteria — the API rejects that.
 
-   **The five lenses.** Before drafting the PRD list, look at the request through each of these
-   explicitly — not as a vague "think it through" gesture, but as five concrete questions you can
-   answer in a sentence each. Skipping a lens silently is how a decomposition ships narrow:
-   - **Positive path.** What does the request look like when everything goes right? Name the
-     concrete user-visible or system-visible outcome — this anchors the core PRD(s).
-   - **Edge cases.** What inputs/states break the happy-path assumption? Empty/zero/max states,
-     concurrent access, malformed input, permission boundaries, network/process failure.
-   - **Interaction effects.** Does this change anything that another feature, panel, store, or
-     in-flight state already depends on? A layout change can break a responsive breakpoint; a
-     new field can desync two stores that used to agree; a UI merge can silently drop a
-     conditional-render gate another feature relied on. Naming this explicitly is what catches
-     the "it works in isolation but breaks its neighbor" class of bug.
-   - **Integration.** Does this correctly compose with the existing architecture at its
-     boundaries — the IPC schema, the shared store, an existing API contract, an established
-     design-primitive file — rather than reimplementing a parallel path? This is the API-reuse
-     standard (`standards.md`) applied at the planning stage, before code exists to duplicate.
-   - **Validation (UI/visual, planned up front — not just checked at the end).** For any ask
-     that touches UI or visual output, decide *now*, while drafting, exactly how it will be
-     confirmed working before it's called done: what screenshot/state to capture, light AND dark
-     mode if the project has both, and which specific acceptance line will prove it (not "looks
-     right" — a concrete, checkable claim). Bake that plan into the PRD's own Acceptance
-     Criteria (see step 4's sub-tasked AC) rather than leaving visual confirmation as an
-     afterthought bolted on at the step 8 gate — deciding the validation method during design
-     surfaces gaps (e.g. "there's no existing screenshot tooling for this surface") while there's
-     still time to plan around them, instead of discovering it mid-execution.
+### gate rules
 
-   - For a **genuinely trivial ask** (one obvious PRD, no cross-file consequences, all five
-     lenses come back empty) — skip straight to step 4, no ceremony needed.
-   - For anything **larger than one or two obvious PRDs, or touching more than one
-     component/subsystem** — before finalizing, dispatch a second, independent agent (the Agent
-     tool, `subagent_type: "Explore"` or `"general-purpose"` — this is a single extra dispatch,
-     not the full multi-agent Workflow tool, and needs no special opt-in) with: the original ask
-     verbatim, your draft PRD list (titles + one-line goals), and the five lenses above by name,
-     instructing it to find what's missing under each one — uncovered edge cases, error-handling
-     paths, tests, cross-feature/cross-state interaction effects, integration points that would
-     be reimplemented instead of reused, components that share the same pattern but weren't
-     included, anything the draft assumed without verifying. Treat its findings as a second
-     opinion to weigh, not an automatic addition — fold real, concrete gaps into the PRD set (add,
-     split, or adjust a PRD); dismiss vague or speculative ones. For a large, multi-subsystem ask,
-     it's fine to repeat this once more after folding in the first round's findings (a second
-     completeness pass on the revised set) — stop once a pass turns up nothing new, don't loop
-     indefinitely.
-   - **Check each drafted PRD against explicit concern dimensions, not just "does the feature
-     work"**: missing features/edge cases beyond the happy path, interaction effects, integration,
-     tests, security, and quality (perf, error handling). This is where depth actually comes
-     from — a decomposition that only ever asks "what file does this touch" produces exactly the
-     narrow, single-concern PRDs this step exists to catch.
-     - **Tests and security are NOT separate follow-up PRDs — they are mandatory AC lines inside
-       the SAME PRD as the feature they belong to.** This is non-negotiable: `standards.md`'s TDD
-       rule requires the test before/with the implementation, not after, and a security concern
-       (input validation at a boundary, auth checks, no string-built queries) is a decision made
-       while writing the code — a later "security review PRD" would just end up re-touching the
-       same lines, doubling work and leaving the shipped code insecure in the meantime. Every
-       feature PRD's own Acceptance Criteria must include its test command AND, when it touches
-       input/auth/data, the relevant security checks — don't spin these out.
-     - **Genuinely separable work MAY become its own sibling PRD**: deeper edge-case coverage
-       beyond what the core AC needs to prove correctness, performance/observability hardening,
-       docs. Splitting these out is exactly the "more isolated, narrower PRDs" instinct — apply
-       it here, where a dedicated PRD adds real value, not to tests/security where it subtracts
-       from correctness.
-   - This is a planning-quality step, not an execution step — it happens entirely in the
-     interactive main-loop session, before anything gets written to disk or queued.
+1. 1–10 commands. The scheduler re-runs them, in order. Each must exit 0.
+2. Start each command with `timeout <seconds>`. Why: a command without a timeout can hang the
+   run.
+3. Join steps inside one entry with `&&`.
+4. No pipes, redirects, `;`, `&`, backticks, `$(` or `${`. Why: the scheduler runs gate
+   commands without a shell.
+5. Do not start an entry with `#`. Keep each entry on one line, at most 500 chars.
+6. Use `["none"]` only for docs or config with no runnable check. Never mix `none` with
+   commands.
+7. A leading `TMPDIR=$(mktemp -d) ` and `NAME=value` words are allowed before the command.
 
-4. **Decompose into a series of SMALL, bounded PRDs.** Split the (now completeness-checked)
-   decomposition into individually small PRDs and sequence them.
+A check that needs a shell belongs in a test file that the gate runs.
 
-   **Two shapes — pick per request, don't default to one:**
-   - **Independent set.** Most requests: a handful of small PRDs that can mostly run in
-     parallel, each a self-contained unit (this is what "genuinely separable work" in step 3
-     produces).
-   - **Evolving chain (3-5 PRDs).** Use this shape when the request is naturally a sequence of
-     stages that build on each other rather than independent units — e.g. scaffold → core
-     behavior → edge-case/interaction hardening → integration wiring → UI validation pass. Each
-     PRD in the chain: gets its own unique `NN` (numbers are strictly unique per project —
-     PRD 832, user decision 2026-07-31) plus a `dependsOn: [<previous-link-slug>]`
-     frontmatter line expressing the chain edge explicitly, and its
-     `# Implementation notes` states in one line what the *previous* link actually delivered
-     (file paths/functions it added, referencing its real landed state — not the plan for it,
-     since PRDs 1..k-1 may have adjusted scope during execution) and what this link is expected
-     to build on top of. Do not chain more than 5 deep — beyond that, re-run step 3's
-     completeness pass instead of extending the chain further; a chain that long is a sign the
-     original decomposition was wrong, not that it needs one more link. A chain does not relax
-     the ~15-min/30-min-ceiling sizing below — each link is still individually small.
+### files rules
 
-   **Every plan ends with one `validate` PRD.** After the work-item PRDs are written, author
-   exactly one more through `scheduler_create_prd`: `agentType: "validator"`, `tag: "build"`,
-   `estimateMinutes: 10`, `dependsOn` = every other slug in this plan (`dependsOn` is capped at
-   100 entries; for a plan bigger than that, list only the plan's sink PRDs — those nothing else
-   in the plan depends on — since `hasDownstreamValidator` walks `dependsOn` transitively, so a
-   validator anchored on the sinks alone still covers every upstream PRD), slug
-   `validate-<short-plan-name>`. Its Goal lists the plan's PRD slugs and titles; its Acceptance
-   criteria give, per PRD, where its file lives
-   (`<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/<NN>-<slug>.md` while queued,
-   the sibling `prds-archived/` once terminal — locate by slug in either) and end with the
-   review-record path to write and commit:
+1. 1–50 repo-relative paths. A folder ends with `/`.
+2. No absolute paths, no `~`, no `..`, no `*` or `?`.
+3. PRDs that can run at the same time must not share a file. If two PRDs touch the same file,
+   chain them with `dependsOn`.
+
+### What a headless run cannot do
+
+The scheduler blocks ScheduleWakeup, Cron tools, Monitor, AskUserQuestion, plan mode, worktree
+tools and background tasks. A `timeout` command is always on PATH (a shim on macOS). The run
+never stops to ask; it makes the safest reasonable choice and reports it. So write PRDs that
+need none of this and leave no decision open.
+
+### How a PRD runs
+
+The dev-lead persona runs orient (read `# Files`) → red (a failing test) → build → finish
+protocol, which the scheduler appends: review → verify the `# Gate` commands → commit exact
+paths → verdict line.
+
+### The validate PRD
+
+End every plan with exactly one validate PRD:
+
+1. `agentType: "validator"`, `tag: "build"`, `estimateMinutes: 10`, slug
+   `validate-<short-plan-name>`.
+2. `dependsOn`: every other slug in the plan. Past the cap of 100, only the sinks (PRDs nothing
+   depends on). Why: `dependsOn` is walked transitively.
+3. Goal: the plan's slugs and titles.
+4. Criteria: one per PRD, naming its file
+   (`session-manager-operations/scheduler/epics/<epic-id>/prds/<NN>-<slug>.md` while queued,
+   `prds-archived/` beside it once done; find it by slug). The last: write and commit
    `session-manager-operations/reviews/validation/<epic-id>/<validate-slug>.md`.
-   Implementation notes: "Work as the validator persona — the procedure is your system prompt."
-   While a plan has a pending validator, the scheduler suppresses both the per-PRD validation
-   prompt into this session and the in-run `/code-review` steps for its work-items — one review,
-   once, at the end. If `scheduler_create_prd` rejects `agentType: "validator"` (persona not
-   installed on this machine yet — the usual cause is a running app older than 0.96.0, since the
-   validator persona is only seeded to `~/.claude/agents` on app boot), say so and fall back to
-   today's per-PRD validation; do not hand-write the file. Note the stale-app cause in your report
-   so the human knows to restart onto >=0.96.0.
+5. Notes: "Work as the validator persona — the procedure is your system prompt."
+6. `gate: ["none"]`; `files`: the record path. Why: the validator re-runs each PRD's gate
+   itself, and a REFUTED PRD is still a successful validation.
 
-   - **Sub-tasked Acceptance Criteria** (either shape, when a single PRD legitimately spans more
-     than one concern dimension from step 3 — e.g. it has both core-functionality and
-     edge-case/interaction-effect checks): group the `# Acceptance criteria` checklist under
-     sub-headings instead of one flat list, e.g. `## Core functionality`, `## Edge cases`,
-     `## Interaction / integration`, `## Tests`. This is additive structure only — it does not
-     change what step 4's "Required body sections" template requires (still exactly one
-     `# Acceptance criteria` section overall), and it does not license combining what should be
-     separate PRDs into one oversized one; if the sub-task groups would each take real time on
-     their own, that's a signal to split into a chain link instead of one bloated PRD.
+The validator prints `VALIDATION: <slug> VERIFIED` or `VALIDATION: <slug> REFUTED — <reason>`
+per PRD. While it is pending, the scheduler skips per-PRD validation prompts and in-run review.
 
-   **Preflight — confirm the tool is even in your tool list before you start composing PRDs.**
-   Check for `mcp__session-manager-scheduler__scheduler_create_prd` in your available tools as
-   the very first thing you do in this step, before any drafting — catching a missing tool here
-   costs nothing; catching it after you've already composed and written PRD bodies means
-   discarding that work. If it's absent, see "Two failure modes" immediately below — case (b),
-   not the reachable-but-erroring fallback.
+If the API rejects `agentType: "validator"`, the persona is not installed: keep the plan
+queued, say so, ask the human to restart the app, and answer each VALIDATION REQUEST the
+scheduler sends here. Never write the record yourself.
 
-   **`scheduler_create_prd` is the ONLY sanctioned way to author a PRD — not a preference, a
-   rule.** Every PRD reaches disk through the MCP tool
-   (`mcp__session-manager-scheduler__scheduler_create_prd`). Hand-writing the file directly is a
-   degraded, LAST-RESORT fallback (below) reserved for the single case where the tool is present
-   but errors as unreachable — never a co-equal alternative to reach for out of habit or
-   convenience, and never applicable when the tool isn't in your list at all (see "Two failure
-   modes" below). Its input
-   (`title`, `cwd`, `estimateMinutes`, `goal`, `acceptanceCriteria[]`, `implementationNotes`,
-   `outOfScope[]`) maps directly onto the sections below — pass them straight through. **Always
-   pass `sourcePromptId` explicitly, set to the `<epic-id>` resolved in the Epic-gated step
-   above** — never omit it and rely on the server-side session-id fallback; that fallback exists
-   only to cover a model that forgot, not as this skill's normal path, and the server refuses to
-   write the PRD at all if no existing Epic resolves. It
-   allocates a strictly-unique `NN` atomically (no read-then-write race against another
-   concurrent `/develop` invocation, never reused across the project — PRD
-   832), derives and collision-checks the slug, and embeds the standards pointer for you.
-   `parallelGroup` is DEPRECATED and ignored — express ordering with the `dependsOn` input
-   (slugs that must complete first); independent PRDs simply omit it and may run in parallel.
+## Phase 2 — track to done
 
-   **Two failure modes — do not conflate them. They have opposite correct responses.**
+The scheduler heals most parks itself:
 
-   - **(a) Tool PRESENT but ERRORS as "app not running" / admin API unreachable.** The tool
-     shows up in your tool list (`mcp__session-manager-scheduler__scheduler_create_prd` is
-     callable), but calling it fails because the session-manager Electron app that hosts the
-     admin API isn't running right now. This is the ONLY case the manual-write fallback below
-     covers. Do not use this path when the tool is reachable but merely returned a validation
-     error (bad frontmatter, unresolvable Epic, etc.) — fix the input and retry the tool; a
-     validation error is not "the app is not running."
-   - **(b) Tool ABSENT from your tool list entirely.** You never see
-     `mcp__session-manager-scheduler__scheduler_create_prd` offered at all — there is no error to
-     catch, because the tool call is never attempted. This means the `session-manager-scheduler`
-     MCP server is not registered for the project you're running against — a **misconfiguration**,
-     not "the app is offline." **STOP. Do not write any PRD file, hand-authored or otherwise.**
-     Report to the human, by name: "the `session-manager-scheduler` MCP tool is not available in
-     this session — the server isn't registered for this project." Point them at the fix: it
-     should be registered once at USER scope (`claude mcp add session-manager-scheduler --scope
-     user -- node <path-to-session-manager-repo>/scripts/scheduler-mcp-server.cjs`, or run
-     `scripts/install-scheduler-mcp-user-scope.sh` from the session-manager repo) so every
-     project gets the tool without a per-repo `.mcp.json` edit — do not work around a missing
-     tool by hand-writing the file, and do not add a project-local `.mcp.json` entry yourself as
-     a substitute; that's the human's call and re-introduces the per-repo drift this fix removes.
+1. Transcript-noise parks (verdicts transcript_errors, no_verdict_sentinel,
+   abandoned_background_task) complete when the gate re-run is green, the landed commit is on
+   HEAD and the tracked tree is clean.
+2. Stray-checkout parks (the main checkout was on another branch) are re-landed onto the base
+   branch ref without touching the checkout.
+3. needs_review notices are held and grouped per Epic and cause. One notice is sent only when
+   the ladder gives up or the hold time ends (default 4 hours, `SM_REVIEW_NOTICE_HOLD_MINUTES`).
 
-   **Fallback for case (a) only.** This is a deliberate bypass of the service boundary, not a
-   shortcut: using it means the frontmatter validation, atomic `NN` allocation, standards-pointer
-   insertion, and Epic-existence check that `scheduler_create_prd` normally performs did not
-   run. **You MUST call this out, visibly, in your report** — state plainly that the app wasn't
-   running, that you hand-authored the PRD file directly instead of using the tool, name the
-   exact file, and flag it for human verification (this bypass is also what
-   `scripts/audit-ops-hygiene.cjs` and the `ops-sweep` skill look for and report as a hygiene
-   finding, independent of your own report).
-   When you do use it: compute the highest in-use number deterministically yourself — never
-   eyeball or narrow-grep the `ls` (a narrowed pattern like `'^10[0-9]'` silently misses `110+`
-   and collides). PRDs are stored per-project, so `NN` allocation for a given PRD only needs
-   *that project's own* prds directory scanned — not every project's:
-   ```bash
-   ls <cwd>/session-manager-operations/scheduler/epics/*/prds/ <cwd>/session-manager-operations/scheduler/prds-archived/ 2>/dev/null | grep -oE '^[0-9]+' | sort -n | uniq | tail -5
-   ```
-   (`<cwd>` is the target repo's absolute path — the same one this PRD's `cwd` field will use.)
-   The last line is the current max within that project. Then: **always next free `NN` =
-   max+1** — never reuse a sibling's number (unique-per-project rule, PRD 832); express
-   ordering with `dependsOn: [<slug>]` frontmatter instead. This manual path has a
-   small, accepted race (two concurrent authors could compute the same "next free" `NN`) —
-   cosmetic (two unrelated groups end up sharing a number) rather than destructive, and only
-   reachable when the atomic tool path above isn't available. Record each cross-PRD dependency
-   in the dependent PRD's notes either way.
+Rules:
 
-   ### PRD structure and location
+1. Do not poll, re-verify each PRD, or arm ScheduleWakeup or a loop. Finished PRDs arrive as
+   check-in events; leave them alone.
+2. Do not re-queue or reset on a single park or a rate-limit pause. Why: the scheduler may
+   still heal it; a duplicate races the healed run.
+3. Act only on two signals:
+   1. **A grouped scheduler notice** (needs_review). Read each file on its `Reports:` line. Fix
+      each PRD on its `PRDs:` line (`scheduler_update_prd`, then `scheduler_reset_job`) or drop
+      it (`scheduler_archive_prd`). A parked validator arrives this way too.
+   2. **A validator verdict.** Read its record. A `REFUTED` PRD, or a Critical or Important
+      finding, means a fix wave: one `behavior` or `wire` PRD per finding plus a new validate
+      PRD. Never fix inline.
+4. **Done** = the latest validator marked every PRD `VERIFIED`, no Critical or Important
+   finding is open, and its record is committed. Never "done with caveats": a REFUTED PRD gets
+   a fix wave or an explicit human decision to stop.
 
-   Each individual PRD must follow this structure — this is `/develop`'s single authority on
-   one PRD's structure, location, and scope sizing (the engineering rules stay separate, in
-   `standards.md`).
+### Final report
 
-   You are writing a PRD that will be executed by the user's session-manager scheduler — a
-   system that runs `claude -p <prd-body> --dangerously-skip-permissions` jobs around 5-hour
-   token-window resets, with auto-pause on rate-limit and auto-resume.
+1. What landed: each PRD slug and its commit.
+2. The validation record path.
+3. Minor findings deferred.
+4. Anything still open.
+5. Any fallback used, warning kept or validator skipped.
 
-   **Canonical location — non-negotiable.** Every PRD belongs to an **Epic** (the TAB → EPIC →
-   PRD domain model in the project CLAUDE.md) — specifically the `<epic-id>` resolved in the
-   Epic-gated step above. PRDs MUST be written to, inside the target repo:
-   ```
-   <cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/<NN>-<kebab-slug>.md
-   ```
-   Always pass that `<epic-id>` as `sourcePromptId` when creating each PRD — via the MCP
-   `scheduler_create_prd` tool's `sourcePromptId` input, or, for the manual-write fallback, by
-   resolving the directory with:
-   ```bash
-   node <session-manager-repo>/scripts/mint-epic.cjs <cwd> <epic-id>
-   ```
-   This only JOINS an existing Epic and prints its prds/ directory on the last stdout line — it
-   never creates one. If `<epic-id>` doesn't exist yet, that means the Epic-gated step above
-   wasn't satisfied; go back and get a human to create/approve the Epic first, don't work around
-   this by minting one.
+## Never
 
-   **Anywhere else doesn't get scheduled or gets retired.** `data/prds/`, `docs/prds/`, and the
-   old global `prds/` dir under `~/.claude/session-manager/scheduled-plans/` are invisible to
-   the scheduler; the legacy flat `session-manager-operations/scheduler/prds/` dir is RETIRED —
-   anything written there is auto-consolidated into `prds-archived/` and never executed. This
-   consolidation runs at the top of every `reconcile()` call (`consolidateAllFlatPrds`, called
-   from inside `reconcile()` itself in `src/main/scheduler.cjs`, before `reconcile` scans that
-   dir for PRD sources) — not only at app boot, and not just from the tick-queue poll:
-   `reconcile()` also runs from job completion, the `schedule:state`/`schedule:rescan` IPC
-   handlers, and `rescheduleTimer()`, so the sweep is guaranteed regardless of which of those
-   triggers the next pass. A file landing in the flat dir while the app is already running is
-   swept out before it could ever be turned into a job, closing the window a boot-only pass left
-   open. PRD *source* files are per-project and per-Epic, resolved at runtime via
-   `src/main/lib/prdLocations.cjs`.
-
-   **Filename rules.** `NN` is the PRD's unique per-project number (always next free =
-   max+1 per the `ls` command above; ordering via `dependsOn` frontmatter, never via shared
-   numbers). `<kebab-slug>` is a short, descriptive kebab-case identifier
-   (e.g. `voice-commands-send-cancel`, `ticker-velocity-mcp`), kept under 60 chars. Verify your
-   chosen filename doesn't already exist before writing.
-
-   **Required frontmatter:**
-   ```yaml
-   ---
-   title: <one-line human-readable title>
-   cwd: <path to target project — where claude -p will run>
-   estimateMinutes: <integer wall-clock estimate>
-   ---
-   ```
-   `cwd` is critical — without it the job runs in the scheduler's default cwd (session-manager).
-   Always set it to the path of the project the work targets, written as `~/Projects/<repo>`
-   (the parser expands `~` to `os.homedir()` at ingest, so the same PRD works on any machine).
-   Avoid hardcoding an absolute home path (`/home/<you>/Projects/<repo>`); it breaks on any
-   machine with a different home directory.
-
-   **Required body sections, in this order:**
-   ```markdown
-   # Goal
-
-   <2-4 sentences. What the executor will build and why it matters. NO "as a user I want to"
-   framing. Concrete: name the function, the file, the user-visible change.>
-
-   # Acceptance criteria
-
-   - [ ] <each line is a verifiable check the executor can run after building>
-   - [ ] <include explicit file paths, function names, expected behavior>
-   - [ ] exactly one gate line — a bounded command or an `&&` chain of at most two, e.g.
-     `timeout 300 npm run typecheck && timeout 300 npx vitest run <file>` (the run-before-done
-     rule lives in standards.md; the AC just names the command).
-
-   # Implementation notes
-
-   <file paths the executor will need to read first; the architectural pattern to follow; any
-   non-obvious constraints. Be specific. Quote function signatures if it saves the executor a
-   Read call.>
-
-   # Out of scope
-
-   <short bulleted list of what NOT to build, to prevent scope creep>
-   ```
-   (When a PRD spans multiple step-3 concern dimensions, replace the flat `# Acceptance criteria`
-   list above with sub-headings — `## Core functionality`, `## Edge cases`,
-   `## Interaction / integration`, `## Tests` — each still a checklist of verifiable lines. See
-   step 4's "Sub-tasked Acceptance Criteria" note. This is the only body section that may gain
-   sub-headings; Goal, Implementation notes, and Out of scope stay flat.)
-
-   **Self-containment is load-bearing.** The executor (`claude -p`) starts with NO conversation
-   context — only the PRD body and the project files. So: include exact file paths (e.g.
-   `src/main/index.cjs:142`); quote function signatures or relevant code blocks if the executor
-   would have to grep for them; name the libraries/patterns to use (e.g. "use the existing
-   `validatePath` helper in `config.cjs`"); don't reference "the conversation we just had" or
-   "the design we discussed"; if a PRD depends on another PRD's output, say so in
-   `# Implementation notes` AND give it a higher `NN` so it queues after.
-
-   **Work-item shape — every PRD must be executable by a Sonnet-class executor in under 10
-   minutes (2026-09 calibration: wall p50 7.8 min, 60% of runs ≤ 10 min; authored estimates ran
-   4× high).**
-   - **One change-set per PRD**: ≤ 3 files edited, ≤ 1 new file, exactly ONE gate line (a
-     bounded command or an `&&` chain of at most two). If a PRD needs a new shared helper AND
-     its first consumer, that is two PRDs (`primitive` → `wire`).
-   - **≤ 6 AC lines**: each behavior line names file + symbol + the observable result; exactly
-     one tests line naming the test file and the test names; exactly one gate line. No
-     open-ended lines ("grep X and update whatever depends on it") — resolve the list yourself
-     while authoring and name the files.
-   - **Implementation notes are a recipe, not prose**: `Read first:` (≤ 4 files, with line
-     ranges), `Steps:` (numbered, each naming the file and the function/signature), `Do not
-     touch:` (files a sibling PRD owns). Quote a signature rather than describing it.
-   - **`estimateMinutes` ≤ 10 target, 15 ceiling** — project more, split. (The scheduler's kill
-     budget floors at 45 min regardless, so a low estimate never starves a run.)
-   - **Decomposition types** — name one per PRD in its first Goal sentence, and chain in this
-     order when several apply:
-     - `primitive` — one new helper/module + its unit test, no call sites.
-     - `wire` — adopt an existing primitive at named call sites, no logic change.
-     - `behavior` — one function's logic change + the test that pins it.
-     - `migration` — mechanical rename/move/config change, no logic; gate is typecheck/lint.
-     - `doc` — text only; gate is `lint:docs` or the doc's own test.
-     - `validate` — the plan's trailing validation PRD (see Phase 2).
-   - `scheduler_create_prd` returns `warnings[]` when a PRD exceeds these limits — fix the PRD
-     before confirming it to the user; never queue a warned PRD silently.
-
-5. **Emit each PRD.** If you used `scheduler_create_prd`, this step is already done — the tool
-   wrote the file to the canonical path with the standards pointer included; skip to step 5.
-   **Fallback path only:** write to the canonical path and structure above, then **append `##
-   Engineering standards` with a one-line pointer**, not the file's contents:
-   ```markdown
-   ## Engineering standards
-
-   Before writing any code, read `<absolute path to standards.md, resolved above>` — it has the
-   Performance, Debugging, API-reuse, TDD, and Execution-discipline rules that apply to this PRD.
-   Every rule in it is mandatory, especially Execution discipline (bounded commands, verify
-   before done, the finish-protocol sentinel).
-   ```
-   This is the load-bearing step — it's the only way the standards (incl. Execution discipline)
-   reach the headless run, and it now stays current automatically since the executor reads the
-   live file rather than a snapshot taken at authoring time. Honor the `PRD_AUTHORING.md` §10
-   pre-queue checklist.
-
-6. **Confirm to the user**, per emitted PRD: filename, chosen `NN` + rationale
-   (parallel-with-X / serial-after-Y), `cwd`, and an ETA + token-cost ballpark. Note they can
-   "Run now" in the SchedulePanel or wait for `when-available` polling. Name the plan's validate
-   PRD and state that no per-PRD validation will be requested from this session.
-
-## Phase 2 — Validation runs as its own job; this session only decides
-
-Every plan queued in Phase 1 ends with a `validate` PRD (agentType `validator`) whose
-`dependsOn` lists every other slug in the plan — or, for a plan over the 100-entry cap, just the
-plan's sink PRDs, since `hasDownstreamValidator` walks `dependsOn` transitively and still credits
-every upstream PRD — so the scheduler runs it exactly once, after the last work-item lands.
-That job — not this session — re-runs each PRD's gate, checks every
-acceptance criterion against the tree, reviews the plan's combined diff (`/code-review`,
-`/security-review`), commits a review record, and ends with `VALIDATION: <slug>
-VERIFIED|REFUTED` per PRD. The scheduler appends one verdict event per PRD to this Epic (the
-traffic light reads them) plus one check-in for the validator itself.
-
-7. **Do not poll and do not re-verify per PRD.** Completed work-items arrive here as check-in
-   events only; leave them alone. There is no 30-minute loop to start and no `ScheduleWakeup` to
-   arm. Act on exactly three signals:
-   - **A work-item parks `needs_review` / `failed`** — read the scheduler's auto-filed RCA
-     (`<date>-rca-<slug>-<runId>.md` in the project's feedback inbox) and decide: fix the PRD
-     (`scheduler_update_prd`) and `scheduler_reset_job`, or `scheduler_archive_prd` it. The
-     plan's validator waits behind it. A `rateLimited` exit is the scheduler's benign auto-pause
-     — not a signal.
-   - **The validator's check-in arrives** — read its review record. Every PRD VERIFIED and no
-     Critical/Important finding → the plan is done; report what landed (slugs, commits, record
-     path). Any REFUTED PRD or Critical/Important finding → queue a fix wave: one `behavior`/
-     `wire` PRD per finding (recipe format, ≤ 10 min each), no `dependsOn`, plus a new trailing
-     `validate` PRD for the wave. Do not fix inline.
-   - **The validator itself parks** — treat it like any parked job; its RCA says why the
-     procedure could not run.
-
-8. **Definition of done** = the plan's latest validator reported every PRD VERIFIED with no open
-   Critical/Important finding, and its review record is committed. Report: what landed (PRD
-   slugs, commits), the record path, findings deferred as Minor, anything left open. A plan with
-   a REFUTED PRD is never "done with caveats" — it gets a fix wave or an explicit human decision
-   to stop.
-
-## References (reuse, don't duplicate)
-
-- `~/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md` — the §1–§10 safety rules.
-- `standards.md` beside this file — the engineering + execution-discipline rules. Every PRD points the executor at its absolute path (see "Standards" above) rather than embedding a copy.
-- `test-driven-development`, `systematic-debugging` — interactive dev sessions.
-- `validator` persona (src/seed/agents/validator.md) — the plan-level review point for scheduled
-  work; `requesting-code-review` — interactive sessions reviewing their own inline work only.
-
-## Notes
-
-- Submit each PRD through `scheduler_create_prd`, then confirm — don't draft them inline in chat
-  for review first. Only hand-write the file when the tool is PRESENT but ERRORS as unreachable
-  (app not running) — see the "Two failure modes" note above, including its mandatory bypass
-  warning. If the tool is ABSENT from your tool list, that's a misconfiguration, not an offline
-  app: stop and tell the human, never hand-write the file.
-- Don't combine unrelated features into one PRD. One focused, completable unit each.
-- Don't add a `parallelGroup` frontmatter key — the filename `NN-` prefix drives grouping.
-- Don't write a PRD to `data/prds/`, `docs/prds/`, the project's own folder, or anywhere outside
-  the canonical path — and don't reach for a hand-written file at the canonical path either, when
-  `scheduler_create_prd` is reachable. The user has explicitly flagged this as a recurring
-  problem.
-- Don't leave `cwd` unset hoping for the default. Be explicit.
-- Don't skip a step-3 lens silently and don't force every request into a chain — most asks are
-  still an independent set of small PRDs; reach for the 3-5-PRD evolving chain only when the
-  work is genuinely sequential (each link depends on the previous one's landed state), and never
-  chain past 5 links.
+- Write a PRD anywhere the API does not. `data/prds/`, `docs/prds/`,
+  `~/.claude/session-manager/scheduled-plans/prds/` and the retired flat
+  `session-manager-operations/scheduler/prds/` never run.
+- Combine unrelated features in one PRD.

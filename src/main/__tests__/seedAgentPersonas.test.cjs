@@ -95,9 +95,17 @@ test('a machine already fully seeded under the old done:true marker only picks u
 
   await seedAgentPersonas({ logger: silentLogger() });
 
-  // Pre-existing files from the old run are untouched...
+  // architect.md's bundled seedVersion is 1 — the implicit version an unstamped
+  // installed file also reads as — so same version, untouched by the upgrade pass.
   expect(fs.readFileSync(path.join(agentsDir(), 'architect.md'), 'utf8')).toBe('old architect content\n');
-  expect(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8')).toBe('old dev-lead content\n');
+  // dev-lead.md's bundled seedVersion is 2 — the unstamped installed file (implicit
+  // version 1) is stale, so the upgrade pass replaces it, backing up the old content first.
+  const bundledDevLead = fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', 'dev-lead.md'), 'utf8');
+  expect(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8')).toBe(bundledDevLead);
+  const backupDir = path.join(agentsDir(), '.backup');
+  const backups = fs.readdirSync(backupDir).filter((f) => f.startsWith('dev-lead.'));
+  expect(backups.length).toBe(1);
+  expect(fs.readFileSync(path.join(backupDir, backups[0]), 'utf8')).toBe('old dev-lead content\n');
   // ...but the newly added persona is delivered.
   expect(fs.existsSync(path.join(agentsDir(), 'project-home-builder.md'))).toBe(true);
 
@@ -181,4 +189,81 @@ test('SM_SEED_AGENT_PERSONAS_DISABLE=1 short-circuits', async () => {
 
   expect(fs.existsSync(agentsDir())).toBe(false);
   expect(fs.existsSync(markerPath())).toBe(false);
+});
+
+// --- upgrade pass ---------------------------------------------------------
+
+test('upgrading a stale persona carries over the installed model and effort frontmatter', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  const installed = ['---', 'name: dev-lead', 'model: opus', 'effort: high', 'seedVersion: 1', '---', '', 'old dev-lead body', ''].join('\n');
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), installed);
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { fm, body } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
+  expect(fm.model).toBe('opus');
+  expect(fm.effort).toBe('high');
+  expect(fm.seedVersion).toBe('2'); // bundled stamp, not the installed file's old one
+  expect(body).toContain('## Run contract'); // bundled body replaced the old one
+});
+
+test('the upgrade backs up the pre-upgrade file content before overwriting', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), 'old dev-lead content\n');
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  const backupDir = path.join(agentsDir(), '.backup');
+  const backups = fs.readdirSync(backupDir).filter((f) => f.startsWith('dev-lead.'));
+  expect(backups.length).toBe(1);
+  expect(backups[0]).toMatch(/^dev-lead\..+\.md$/);
+  expect(fs.readFileSync(path.join(backupDir, backups[0]), 'utf8')).toBe('old dev-lead content\n');
+});
+
+test('an installed persona already at the bundled seedVersion is left untouched by the upgrade pass', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  const bundledDevLead = fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', 'dev-lead.md'), 'utf8');
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), bundledDevLead);
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  expect(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8')).toBe(bundledDevLead);
+  expect(fs.existsSync(path.join(agentsDir(), '.backup'))).toBe(false);
+});
+
+test('an installed persona at a newer seedVersion than bundled is left untouched by the upgrade pass', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  const newer = ['---', 'name: dev-lead', 'seedVersion: 99', '---', '', 'from the future', ''].join('\n');
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), newer);
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  expect(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8')).toBe(newer);
+  expect(fs.existsSync(path.join(agentsDir(), '.backup'))).toBe(false);
+});
+
+test('SM_SEED_AGENT_PERSONAS_DISABLE=1 also skips the upgrade pass for a pre-existing stale file', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), 'old dev-lead content\n');
+  process.env.SM_SEED_AGENT_PERSONAS_DISABLE = '1';
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  expect(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8')).toBe('old dev-lead content\n');
+  expect(fs.existsSync(path.join(agentsDir(), '.backup'))).toBe(false);
+});
+
+test('the upgrade pass runs even when the marker says every persona is already seeded and attempts are exhausted', async () => {
+  const { MAX_ATTEMPTS } = require('../seedAgentPersonas.cjs');
+  const mPath = markerPath();
+  fs.mkdirSync(path.dirname(mPath), { recursive: true });
+  fs.writeFileSync(mPath, JSON.stringify({ seeded: ALL_PERSONAS, attempts: MAX_ATTEMPTS, ts: '2026-01-01T00:00:00.000Z' }));
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), 'old dev-lead content\n');
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  const bundledDevLead = fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', 'dev-lead.md'), 'utf8');
+  expect(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8')).toBe(bundledDevLead);
 });

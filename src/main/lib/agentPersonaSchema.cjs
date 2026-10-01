@@ -60,6 +60,11 @@ const AgentPersonaSaveSchema = z.object({
   title: BoundedString.optional(),
   // Set = write this project's frontmatter-only override (model/effort only) instead of the global file.
   projectName: BoundedString.optional(),
+  // Bundled-persona version stamp (seedAgentPersonas.cjs). Omit to carry over
+  // the existing file's stamp unchanged — see agentLibrary.cjs's savePersona.
+  // Without this field zod's default "strip unknown keys" behavior would
+  // silently drop it from a save payload that did carry one.
+  seedVersion: z.number().int().optional(),
   // Unbounded — a persona's body is arbitrary system-prompt prose.
   body: z.string(),
 });

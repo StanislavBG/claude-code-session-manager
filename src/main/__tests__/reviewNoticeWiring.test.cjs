@@ -1,16 +1,20 @@
 /**
  * reviewNoticeWiring.test.cjs — wires reviewNotice.cjs's pure selection logic
  * (covered on its own in reviewNotice.test.cjs) into scheduler.cjs's
- * flushDueReviewNotices and notifyNeedsReview.
+ * flushDueReviewNotices, notifyNeedsReview and rescheduleIntervalTick's
+ * hold-expiry else-branch.
  *
- * Mocks queueStore's readMerged/writeSplit (same seam as
+ * Mocks queueStore's readMerged/readMergedSync/writeSplit (same seam as
  * scheduler-mutate-reentrancy.test.cjs) so this never touches a real
  * queue.json — the fixture job array IS the queue, read fresh on every
- * readQueue() call and mutated in place by mutate(), which is enough to
- * observe flushDueReviewNotices' own effects (reviewNotice.sentAt) without
- * writing anything to disk. appendResponseEvent is always the injected mock
- * (flushDueReviewNotices'/notifyNeedsReview's own DI param) — never the real
- * appendResponseEventIfKnown — so this needs no active-index.json fixture.
+ * readQueue()/readQueueSync() call and mutated in place by mutate(), which is
+ * enough to observe flushDueReviewNotices' own effects (reviewNotice.sentAt)
+ * without writing anything to disk. appendResponseEvent is the injected mock
+ * everywhere except the two rescheduleIntervalTick tests below, which drive
+ * the real no-DI call site on purpose — there it falls through to the real
+ * appendResponseEventIfKnown, which safely returns false on a missing
+ * active-index.json (no session known, nothing written) rather than needing
+ * its own fixture.
  *
  * HOME is overridden to a tmp dir BEFORE requiring scheduler.cjs — same
  * reason as scheduler-mutate-reentrancy.test.cjs (several main/lib modules
@@ -75,8 +79,12 @@ function mockQueueStore(jobs, { readDelayMs = 0 } = {}) {
     if (readDelayMs) await new Promise((r) => setTimeout(r, readDelayMs));
     return freshState(jobs);
   });
+  // rescheduleIntervalTick reads through the SYNC seam (readQueueSync ->
+  // queueStore.readMergedSync), never the async one above — mocked too so a
+  // test that drives the tick directly sees this same fixture.
+  const readMergedSync = vi.spyOn(queueStore, 'readMergedSync').mockImplementation(() => freshState(jobs));
   const writeSplit = vi.spyOn(queueStore, 'writeSplit').mockResolvedValue(undefined);
-  return { readMerged, writeSplit };
+  return { readMerged, readMergedSync, writeSplit };
 }
 
 function parkedJob(overrides = {}) {
@@ -218,6 +226,64 @@ test('two overlapping calls share one pass over the queue — only one send happ
   // it at 2, and keeps the send itself to exactly one.
   expect(readMerged).toHaveBeenCalledTimes(2);
   expect(appendResponseEvent).toHaveBeenCalledTimes(1);
+});
+
+// --- rescheduleIntervalTick: the hold-expiry gap ---
+//
+// Before this fix, flushDueReviewNotices only ran from inside the ladder's
+// own mutate().finally() — so a needs_review row the ladder never touches at
+// all (ineligible for isEligibleForNeedsReviewAutoResolve, or every target
+// array empty for some other reason) had NO path that ever flushed its
+// notice once the hold expired. It would sit `sentAt: null` forever. These
+// two tests drive rescheduleIntervalTick itself, through its real (no-DI)
+// call to flushDueReviewNotices, rather than calling flushDueReviewNotices
+// directly as the tests above do.
+
+test('rescheduleIntervalTick flushes a notice whose hold expired when the ladder found no targets this tick', async () => {
+  // status: 'needs_review', no verifierVerdict/autoFixAttempted/failed/
+  // quarantined fields anywhere in the queue — autoResetTargets, stuckFailed,
+  // exhaustedNeedsReviewTargets and quarantineTargets are all empty, so the
+  // ladder's own `if` is false and only the new `else if` can fire this.
+  const job = parkedJob({
+    reviewNotice: {
+      ...parkedJob().reviewNotice,
+      firstParkedAt: new Date(Date.now() - 250 * MIN_MS).toISOString(),
+    },
+  });
+  const { readMerged } = mockQueueStore([job]);
+  process.env.SM_REVERIFY_PERIODIC_DISABLE = '1'; // keep the unrelated periodic-reverify pass out of this
+
+  try {
+    scheduler.rescheduleIntervalTick();
+    // The else-branch calls flushDueReviewNotices() with no override, same as
+    // the ladder's own .finally() call site — single-flight means awaiting it
+    // here joins that SAME in-flight pass rather than starting a second one.
+    await scheduler.flushDueReviewNotices();
+  } finally {
+    delete process.env.SM_REVERIFY_PERIODIC_DISABLE;
+  }
+
+  expect(readMerged).toHaveBeenCalled();
+  expect(job.reviewNotice.sentAt).not.toBeNull();
+});
+
+test('rescheduleIntervalTick does not flush when no row carries an unsent notice', () => {
+  const job = parkedJob({
+    reviewNotice: { ...parkedJob().reviewNotice, sentAt: new Date().toISOString() },
+  });
+  const { readMerged } = mockQueueStore([job]);
+  process.env.SM_REVERIFY_PERIODIC_DISABLE = '1';
+
+  try {
+    scheduler.rescheduleIntervalTick();
+  } finally {
+    delete process.env.SM_REVERIFY_PERIODIC_DISABLE;
+  }
+
+  // The else-branch's own guard (s.jobs.some(unsent reviewNotice)) is
+  // evaluated synchronously against the tick's own snapshot — false here, so
+  // flushDueReviewNotices (and the extra queue read it would cost) never runs.
+  expect(readMerged).not.toHaveBeenCalled();
 });
 
 // --- notifyNeedsReview: the SM_REVIEW_NOTICE_IMMEDIATE=1 kill switch's target ---

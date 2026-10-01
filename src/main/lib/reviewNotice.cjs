@@ -114,7 +114,7 @@ function selectDueReviewNotices(jobs = [], { now = Date.now(), holdMs = DEFAULT_
 // falls back to the raw cause for anything not listed here.
 const HUMAN_CAUSE = {
   'worktree_integration_failed:stray_checkout': 'the main checkout was on a different branch, so the work could not be merged',
-  transcript_errors: "the run's own transcript showed real errors, not just warnings",
+  transcript_errors: "the run's transcript showed error lines, so its pass could not be trusted",
   no_verdict_sentinel: 'the run finished without leaving a clear pass or fail signal',
   abandoned_background_task: 'the run started a background task and then stopped watching it',
   silent_no_op: 'the run finished clean but made no changes, so there is no evidence it did the work',

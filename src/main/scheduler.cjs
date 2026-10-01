@@ -12187,6 +12187,9 @@ function rescheduleIntervalTick() {
         // catches internally).
         flushDueReviewNotices().catch(() => {});
       });
+  } else if (s.jobs.some((j) => j.reviewNotice && !j.reviewNotice.sentAt)) {
+    // Ladder didn't fire this tick (row ineligible for auto-resolve, or SM_NEEDS_REVIEW_AUTORESOLVE_DISABLE=1) — flush any notice whose hold already expired, reusing this tick's own snapshot for the guard so a tick with nothing unsent reads nothing extra.
+    flushDueReviewNotices().catch(() => {});
   }
 }
 

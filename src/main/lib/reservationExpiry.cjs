@@ -9,10 +9,15 @@
  */
 'use strict';
 
+const { pidAlive } = require('./pidAlive.cjs');
+
 const DEFAULT_GRACE_MS = 10 * 60 * 1000;
 
+// Thin alias over pidAlive.cjs's shared pidAlive() — kept as its own named
+// export (rather than inlining the require at every call site) so existing
+// imports of `defaultPidAlive` from this module keep working unchanged.
 function defaultPidAlive(pid) {
-  try { process.kill(pid, 0); return true; } catch (e) { return e?.code === 'EPERM'; }
+  return pidAlive(pid);
 }
 
 /**

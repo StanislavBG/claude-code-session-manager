@@ -165,7 +165,7 @@ function PrdDetail({ row, elapsedMs, headChoices }: { row: PlanRow; elapsedMs: n
         {job.status !== 'pending' && job.status !== 'running' && job.status !== 'quarantined' && (
           <button
             type="button"
-            onClick={() => window.api.schedule.resetJob(job.slug)}
+            onClick={() => window.api.schedule.resetJob(job.slug, job.cwd ?? undefined)}
             className={`${btn} text-fg-dim hover:text-fg`}
           >
             reset to pending →

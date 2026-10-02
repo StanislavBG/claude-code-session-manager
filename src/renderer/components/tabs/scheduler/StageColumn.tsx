@@ -132,7 +132,7 @@ export function StageColumn({ stage, epicId, now, hidden, indexBySlug, headChoic
                     data-testid="stage-retry"
                     title={`Reset ${failed.slug} to pending`}
                     onClick={() => {
-                      window.api.schedule.resetJob(failed.slug)
+                      window.api.schedule.resetJob(failed.slug, failed.job.cwd ?? undefined)
                         .then((res) => { if (!res.ok) toast.error(res.error ?? `Failed to reset ${failed.slug}`) })
                         .catch(() => toast.error(`Failed to reset ${failed.slug}`))
                     }}

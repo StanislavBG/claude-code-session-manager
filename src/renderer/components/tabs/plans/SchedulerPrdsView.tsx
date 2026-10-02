@@ -249,7 +249,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
     try {
       const slugs = [...checked]
       for (const slug of slugs) {
-        await window.api.schedule.resetJob(slug)
+        await window.api.schedule.resetJob(slug, prds.find((p) => p.slug === slug)?.cwd || undefined)
       }
       clearChecked()
     } catch (e) {
@@ -366,7 +366,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
             <TBtn
               label="Reset"
               tip="Reset failed job to pending"
-              onClick={() => { window.api.schedule.resetJob(selectedSlug) }}
+              onClick={() => { window.api.schedule.resetJob(selectedSlug, prds.find((p) => p.slug === selectedSlug)?.cwd || undefined) }}
               disabled={status !== 'failed'}
             />
             <TBtn
@@ -533,7 +533,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
                           )}
                           <button
                             type="button"
-                            onClick={() => window.api.schedule.resetJob(p.slug)}
+                            onClick={() => window.api.schedule.resetJob(p.slug, p.cwd || undefined)}
                             className="text-xs px-2.5 py-1 rounded border border-line text-fg-dim hover:text-fg hover:bg-bg-hi"
                           >
                             Re-fire

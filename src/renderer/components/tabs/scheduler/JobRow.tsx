@@ -366,7 +366,7 @@ function JobRowComponent({ job, eta, elapsedMs, avgDurationMs, listIndex, onFocu
               {job.status !== 'pending' && job.status !== 'running' && job.status !== 'quarantined' && (
                 <button
                   type="button"
-                  onClick={() => window.api.schedule.resetJob(job.slug)}
+                  onClick={() => window.api.schedule.resetJob(job.slug, job.cwd ?? undefined)}
                   className="text-[13px] font-semibold text-fg-dim hover:text-fg bg-transparent border-0 cursor-pointer p-0"
                 >
                   reset to pending →

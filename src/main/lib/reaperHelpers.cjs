@@ -11,6 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { readTail } = require('./fileTail.cjs');
 const { detectRateLimitInLog } = require('./rateLimitDetect.cjs');
+const { pidAlive } = require('./pidAlive.cjs');
 
 /**
  * Return true if pid is alive AND its cmdline looks like a claude process.
@@ -20,12 +21,18 @@ const { detectRateLimitInLog } = require('./rateLimitDetect.cjs');
  * cmdline, so we conservatively return true — never false-reap a live PID
  * just because we can't verify its identity.
  *
+ * Existence check now delegates to the shared pidAlive() (pidAlive.cjs) so
+ * EPERM (pid exists, owned by another user) counts as alive here too — the
+ * previous bare `process.kill(pid, 0)` + catch-all-false treated EPERM the
+ * same as ESRCH (no such process), silently false-reaping a live-but-
+ * unsignalable pid.
+ *
  * Conservative by design: a false negative (live process treated as dead) is
  * far worse than a late reap.
  */
 function claudePidAlive(pid) {
   if (!pid || typeof pid !== 'number' || pid <= 1) return false;
-  try { process.kill(pid, 0); } catch { return false; }
+  if (!pidAlive(pid)) return false;
   try {
     const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
     return /\bclaude\b/.test(cmd);

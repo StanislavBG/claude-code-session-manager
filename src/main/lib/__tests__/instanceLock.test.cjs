@@ -68,16 +68,19 @@ describe('instanceLock (PRD 834)', () => {
   });
 
   it('a live foreign holder makes acquisition passive with the holder pid reported', () => {
-    // Use our own live pid as the "foreign" holder — pidAlive(process.pid) is
-    // true, and acquire treats pid !== process.pid as foreign, so fake one by
-    // writing pid 1 (init — always alive, never ours).
+    // pidAlive.cjs's shared predicate treats pid <= 1 as always invalid
+    // (never alive, by construction), so pid 1 can no longer stand in for a
+    // live-but-foreign holder here. Use process.ppid instead — guaranteed
+    // alive for the lifetime of this test (the vitest worker's own parent)
+    // and guaranteed not to be our own pid.
+    const foreignPid = process.ppid;
     fs.mkdirSync(path.dirname(lockPath()), { recursive: true });
-    fs.writeFileSync(lockPath(), JSON.stringify({ pid: 1, startedAt: 'x' }));
+    fs.writeFileSync(lockPath(), JSON.stringify({ pid: foreignPid, startedAt: 'x' }));
     const res = acquireSchedulerOwnership();
     expect(res.owner).toBe(false);
-    expect(res.holderPid).toBe(1);
+    expect(res.holderPid).toBe(foreignPid);
     // The holder's lock is untouched.
-    expect(JSON.parse(fs.readFileSync(lockPath(), 'utf8')).pid).toBe(1);
+    expect(JSON.parse(fs.readFileSync(lockPath(), 'utf8')).pid).toBe(foreignPid);
   });
 
   it('a stale lock (dead pid) is broken and ownership taken', () => {
@@ -121,12 +124,14 @@ describe('instanceLock (PRD 834)', () => {
 
   it('a legacy lock ({pid, startedAt} only, no identity) is respected while its pid is alive', () => {
     // Mirrors the on-disk shape of every lock written before this PRD.
+    // process.ppid stands in for "alive, not ours" — see the pid-1 note above.
+    const foreignPid = process.ppid;
     fs.mkdirSync(path.dirname(lockPath()), { recursive: true });
-    fs.writeFileSync(lockPath(), JSON.stringify({ pid: 1, startedAt: 'x' }));
+    fs.writeFileSync(lockPath(), JSON.stringify({ pid: foreignPid, startedAt: 'x' }));
     const res = acquireSchedulerOwnership();
     expect(res.owner).toBe(false);
-    expect(res.holderPid).toBe(1);
-    expect(JSON.parse(fs.readFileSync(lockPath(), 'utf8')).pid).toBe(1);
+    expect(res.holderPid).toBe(foreignPid);
+    expect(JSON.parse(fs.readFileSync(lockPath(), 'utf8')).pid).toBe(foreignPid);
     // No identity information to compare, so no stale-lock-broken audit event.
     expect(readAuditEvents().some((e) => e.kind === 'stale_lock_broken')).toBe(false);
   });

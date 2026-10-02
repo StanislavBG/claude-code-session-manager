@@ -21,7 +21,7 @@ picked up automatically; no separate registration step or lint guard.
 
 ## Running one file
 
-- vitest: `timeout 120 npx vitest run <path>`
+- vitest: `npx vitest run <path>`
 - Playwright (Linux): `xvfb-run -a timeout 600 npx playwright test <path>`
 
 Never run the whole e2e suite casually. Running `test:unit` from inside a job worktree

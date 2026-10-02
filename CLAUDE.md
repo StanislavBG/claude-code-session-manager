@@ -46,10 +46,10 @@ Electron 42 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `npm run dev` — Vite + Electron with HMR. `SM_DEV=1` set automatically.
 - `npm run build` — renderer build into `dist/`.
 - `npm run typecheck` — `tsc --noEmit`. Must pass before commits.
-- `npm run test:unit` — `vitest run`. Single file: `timeout 120 npx vitest run <path>`. NOT `node --test`
+- `npm run test:unit` — `vitest run`. Single file: `npx vitest run <path>` (no `timeout` on macOS). NOT `node --test`
   (can't resolve TS renderer imports).
 - `npm run test:e2e` — Playwright Electron under `xvfb-run` (Linux).
-- `npm run lint` — unstable selectors + conditional hooks (blank-screen guards) + unregistered tests + doc hierarchy (`lint:docs`); run with typecheck.
+- `npm run lint` — unstable selectors + conditional hooks (blank-screen guards) + doc hierarchy (`lint:docs`); run with typecheck.
 - `npm run health` — `src/main/health.cjs` (exit 0 = GREEN); entry point for `/local-project-health`.
 - `npm publish` — `prepublishOnly` = project-pages build + logic build + gate + `vite build`. Tag `latest`.
   Published as `claude-code-session-manager`; [distribution detail](session-manager-operations/architecture/conventions.md#distribution).
@@ -148,7 +148,7 @@ Each of these is a real incident, with the post-mortem in
 - **Declaring a hook below a top-level early return** — React #300/#310 → pane dies into its error boundary.
   `npm run lint:hooks`.
 - Adding `shell: true` to `child_process.spawn` outside `watchers.cjs`/`app:test-fire-hook`.
-- Re-implementing tmp+rename atomic writes — use `config.cjs`'s `writeJson`/`writeTextAtomic`.
+- Re-implementing tmp+rename atomic writes — use `lib/atomicFs.cjs`.
 - Reading remote URLs in prod — `createWindow` fails if `dist/index.html` is missing.
 - Adding a new LeftNav tab before checking whether an existing surface owns that data — pruned once at
   ~31 destinations with overlap.

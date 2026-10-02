@@ -8,16 +8,30 @@
  *
  * Two independent passes run on every call, in this order:
  *
- * 1. UPGRADE PASS (upgradeStalePersonas): for a persona whose installed file
- *    already exists, compares its `seedVersion` frontmatter stamp (missing =
- *    1) against the bundled file's own stamp. Lower → the installed file is
- *    backed up to `<destAgentsDir()>/.backup/<name>.<timestamp>.md`, then
- *    replaced by the bundled content with the installed `model:`/`effort:`
- *    lines carried over (a hand-edited body or any other frontmatter key is
- *    NOT preserved — this is a stamped-version upgrade, not a merge). Same or
- *    higher → left untouched. Runs every call, independent of the marker file
- *    below and of MAX_ATTEMPTS, so a machine that finished seeding years ago
- *    still picks up a persona fix shipped in a later release.
+ * 1. UPGRADE PASS (upgradeStalePersonas): compares an installed persona's
+ *    `seedVersion` frontmatter stamp (missing counts as 1) against the
+ *    bundled file's own stamp. Same or higher stays untouched. Lower checks
+ *    the installed file's body against every body this app has ever shipped
+ *    for that persona (`lib/shippedPersonaSeeds.cjs`). No match means a
+ *    person wrote or edited that file; it is left alone and the skip is
+ *    logged. Why: a lower stamp alone does not prove the file is a stale
+ *    shipped copy — only a body match does. A match replaces the installed
+ *    file with the bundled one. Frontmatter keys the user changed are kept,
+ *    including a `model:` line the user removed entirely; keys the user
+ *    never touched take the bundled value. Why: an upgrade should not
+ *    silently undo a choice the user made in the Agent Library editor. The
+ *    body always comes from the bundled file on a match — it is never a
+ *    hand edit, by definition. Before any write, the installed file is
+ *    backed up to
+ *    `~/.claude/session-manager/persona-backups/<name>.<content-hash>.md`,
+ *    one file per distinct content. Why that folder: Claude Code loads agent
+ *    files from `~/.claude/agents/` recursively, so a backup kept there would
+ *    load as a second agent under the same name. Why the hash name: a
+ *    failing upgrade retried on the next boot reuses the same backup file
+ *    instead of piling up a new one. Runs every call, independent of the
+ *    marker file below and of MAX_ATTEMPTS, so a machine that finished
+ *    seeding years ago still picks up a persona fix shipped in a later
+ *    release.
  * 2. FIRST-SEED PASS (the rest of this file, unchanged in spirit): NEVER
  *    overwrites a file that doesn't yet carry a bundled persona under that
  *    name — hand-edited or user-authored personas at a name outside
@@ -61,8 +75,10 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { writeJsonSync, writeTextAtomic } = require('./config.cjs');
+const crypto = require('node:crypto');
+const { writeJsonSync, writeTextAtomic, validatePath, validateWrite } = require('./config.cjs');
 const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
+const { SHIPPED_PERSONA_SEEDS } = require('./lib/shippedPersonaSeeds.cjs');
 
 const PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator'];
 // What `{ done: true }` (the pre-seeded-set marker format) meant: only these two personas existed
@@ -119,61 +135,150 @@ function writeMarker(state) {
   }
 }
 
-/** A persona file's `seedVersion` frontmatter stamp as a number. Missing or unparseable counts as 1 — the version every file shipped at before this field existed. */
+/** `\r\n` and lone `\r` become `\n` — every parser in this file reads text through this first, so a CRLF-saved persona file still parses. */
+function normalizeNewlines(text) {
+  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+/** sha256 hex of a persona's body only (frontmatter stripped, newlines normalized, trimmed) — the key the upgrade pass matches against `lib/shippedPersonaSeeds.cjs`. */
+function personaBodyHash(text) {
+  const { body } = splitFrontmatter(normalizeNewlines(text));
+  return crypto.createHash('sha256').update(body.trim()).digest('hex');
+}
+
+/** A persona file's `seedVersion` frontmatter stamp as a number. Missing, empty, non-integer, or below 1 all count as 1 — the version every file shipped at before this field existed. (An empty `seedVersion:` line parses to `''`; `Number('')` is 0, not 1 — handled explicitly below.) */
 function readSeedVersion(text) {
-  const n = Number(splitFrontmatter(text).fm.seedVersion);
-  return Number.isFinite(n) ? n : 1;
+  const raw = splitFrontmatter(normalizeNewlines(text)).fm.seedVersion;
+  if (raw === undefined || raw === '') return 1;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) return 1;
+  return n;
 }
 
 /**
- * Returns `bundledText` with its frontmatter `model:`/`effort:` lines
- * replaced by the matching value from `installedFm` (the installed file's
- * own parsed frontmatter) — the user's choice on an upgraded file, not the
- * bundled default. A key absent from `installedFm` leaves the bundled line
- * untouched; a key present in `installedFm` but absent from the bundled
- * frontmatter is appended rather than dropped, so an installed `effort:`
- * override survives even when the bundled persona ships with no `effort:`
- * line at all. Only the frontmatter block is rewritten — never the body —
- * so a run contract that happens to say "model" in prose is never touched.
- * Returns `bundledText` unchanged if it has no parseable frontmatter fence
- * (should never happen for a bundled file; defensive only).
+ * Whether two frontmatter values for the same `key` are the same choice.
+ * Both `undefined` (neither file has the key) counts as same; only one
+ * `undefined` never does. `tools`/`tags`/`projects` are comma lists — compare
+ * them split on `,`, trimmed, emptied of blank items, and rejoined, so
+ * `"a, b"` and `"a,b"` are the same list. Every other key compares as a
+ * trimmed string.
  */
-function withCarriedOverModelAndEffort(bundledText, installedFm) {
-  if (!bundledText.startsWith('---\n')) return bundledText;
-  const closeIdx = bundledText.indexOf('\n---', 4);
-  if (closeIdx === -1) return bundledText;
-  const fmBlock = bundledText.slice(0, closeIdx); // '---\nkey: val\n...' — no trailing newline, no closing fence
-  const rest = bundledText.slice(closeIdx); // '\n---\n<body>'
-  let nextFmBlock = fmBlock;
-  for (const key of ['model', 'effort']) {
-    const value = installedFm[key];
-    if (value === undefined) continue; // installed file has no such line: keep the bundled one
-    const lineRe = new RegExp(`^${key}:.*$`, 'm');
-    if (lineRe.test(nextFmBlock)) {
-      nextFmBlock = nextFmBlock.replace(lineRe, `${key}: ${value}`);
-    } else {
-      nextFmBlock += `\n${key}: ${value}`; // bundled file never had this key — append so the user's choice survives
-    }
+function sameFmValue(a, b, key) {
+  if (a === undefined && b === undefined) return true;
+  if (a === undefined || b === undefined) return false;
+  if (key === 'tools' || key === 'tags' || key === 'projects') {
+    const normalizeList = (v) => v.split(',').map((s) => s.trim()).filter((s) => s.length > 0).join(', ');
+    return normalizeList(a) === normalizeList(b);
   }
-  return nextFmBlock + rest;
+  return a.trim() === b.trim();
 }
 
-/** File-safe ISO timestamp for a backup filename — no `:` or `.` (both illegal/awkward in a filename on some filesystems). */
-function fileSafeTimestamp() {
-  return new Date().toISOString().replace(/[:.]/g, '-');
+/** Where a stale persona's pre-upgrade content is kept — never inside `~/.claude/agents`, so Claude Code (which loads every file there recursively) never loads a backup as a second agent. */
+function personaBackupsDir() {
+  return path.join(os.homedir(), '.claude', 'session-manager', 'persona-backups');
+}
+
+/** Content-addressed backup path for `name`'s installed file: the first 12 hex chars of the sha256 of its exact (pre-normalization) bytes. Same content always maps to the same path, so retrying a failing upgrade on every boot can never pile up backups. */
+function backupPathFor(name, installedText) {
+  const sha12 = crypto.createHash('sha256').update(installedText).digest('hex').slice(0, 12);
+  return path.join(personaBackupsDir(), `${name}.${sha12}.md`);
+}
+
+/** `text`'s frontmatter block split into individual lines, fences excluded — `[]` when `text` has no parseable frontmatter fence. */
+function frontmatterLines(text) {
+  if (!text.startsWith('---\n')) return [];
+  const end = text.indexOf('\n---', 4);
+  if (end === -1) return [];
+  return text.slice(4, end).split('\n');
+}
+
+/** The frontmatter key a single frontmatter line defines (same key shape `splitFrontmatter` matches), or `null` for a blank/comment/malformed line. */
+function keyOfLine(line) {
+  const m = line.match(/^([A-Za-z][A-Za-z0-9_]*)\s*:\s*(.*)\s*$/);
+  return m ? m[1] : null;
+}
+
+/**
+ * The text to write when upgrading an installed persona to the bundled one,
+ * given `matches` — the non-empty list of `shippedPersonaSeeds.cjs` entries
+ * whose body matches the installed file (the caller only calls this once it
+ * has proven that). The body always comes from `bundledText`, untouched —
+ * on a match, by definition, nothing about the body is a hand edit.
+ *
+ * Per frontmatter key, except `name` and `seedVersion` (never diffed):
+ * the key is "user-changed" when NO entry in `matches` has the same value
+ * (`sameFmValue`) for it as the installed file — i.e. the installed value
+ * cannot be explained as some version of the shipped default, so it must be
+ * a deliberate choice.
+ *   - Not user-changed: the bundled line wins (or bundled absence wins).
+ *   - User-changed, installed file still has the key: the installed file's
+ *     OWN line for that key is used verbatim — never rebuilt from the parsed
+ *     value, so a value containing regex-replacement-special text like `$&`
+ *     or `$1` is reproduced exactly. This never calls `String.prototype.replace`
+ *     with a replacement string built from file content.
+ *   - User-changed, installed file lacks the key: the key is dropped — the
+ *     user's removal (meaning "inherit the app default") survives.
+ * Output always uses `\n` line endings, regardless of either input's.
+ */
+function buildUpgradedPersona(bundledText, installedText, matches) {
+  const normBundled = normalizeNewlines(bundledText);
+  if (matches.length === 0 || !normBundled.startsWith('---\n')) return bundledText; // should never happen — caller only calls this on a proven match; defensive only
+  const normInstalled = normalizeNewlines(installedText);
+
+  const { fm: bundledFm, body } = splitFrontmatter(normBundled);
+  const { fm: installedFm } = splitFrontmatter(normInstalled);
+
+  const installedLineByKey = new Map();
+  for (const line of frontmatterLines(normInstalled)) {
+    const key = keyOfLine(line);
+    if (key) installedLineByKey.set(key, line);
+  }
+
+  const allKeys = new Set([...Object.keys(bundledFm), ...Object.keys(installedFm)]);
+  allKeys.delete('name');
+  allKeys.delete('seedVersion');
+
+  const userChanged = new Set();
+  for (const key of allKeys) {
+    if (!matches.some((entry) => sameFmValue(entry.fm[key], installedFm[key], key))) userChanged.add(key);
+  }
+
+  const nextLines = [];
+  const emitted = new Set();
+  for (const line of frontmatterLines(normBundled)) {
+    const key = keyOfLine(line);
+    if (!key || !userChanged.has(key)) {
+      nextLines.push(line); // not user-changed (or not a key line at all) — bundled wins verbatim
+      if (key) emitted.add(key);
+      continue;
+    }
+    const installedLine = installedLineByKey.get(key);
+    if (installedLine !== undefined) nextLines.push(installedLine); // user-changed, installed kept it — use the user's own line
+    emitted.add(key); // else: user removed this key — drop the bundled line entirely
+  }
+  for (const key of userChanged) {
+    if (emitted.has(key)) continue; // a user-changed key the bundled file never had — append it
+    const installedLine = installedLineByKey.get(key);
+    if (installedLine !== undefined) nextLines.push(installedLine);
+  }
+
+  return `---\n${nextLines.join('\n')}\n---\n${body}`;
 }
 
 /**
  * Replaces a stale installed persona with the current bundled one, once per
  * boot, for every name in `PERSONAS` whose installed file is both PRESENT
- * and behind the bundled `seedVersion` — see this file's header for the full
- * rule. Backs up the old file first; never overwrites a same-or-newer
- * installed file; never throws (a per-persona failure is logged and
+ * and behind the bundled `seedVersion` AND whose body matches a body this
+ * app has shipped before (`shippedSeeds`, normally `lib/shippedPersonaSeeds.cjs`
+ * — injectable so tests can supply a fake list). See this file's header for
+ * the full rule, and `buildUpgradedPersona` for how frontmatter keys merge.
+ * Never overwrites a same-or-newer installed file, or one whose body never
+ * shipped from this app; never throws (a per-persona failure is logged and
  * skipped, the loop continues). Independent of the marker/MAX_ATTEMPTS
  * machinery the first-seed pass below uses — the caller gates both passes
  * on the kill switch only.
  */
-async function upgradeStalePersonas({ logger = console, writeLog = () => {} } = {}) {
+async function upgradeStalePersonas({ logger = console, writeLog = () => {}, shippedSeeds = SHIPPED_PERSONA_SEEDS } = {}) {
   const srcDir = bundledSourceDir();
   const destDir = destAgentsDir();
   for (const name of PERSONAS) {
@@ -186,13 +291,34 @@ async function upgradeStalePersonas({ logger = console, writeLog = () => {} } = 
       const installedVersion = readSeedVersion(installedText);
       if (installedVersion >= bundledVersion) continue; // same or newer — never touched
 
-      const backupDir = path.join(destDir, '.backup');
-      fs.mkdirSync(backupDir, { recursive: true });
-      const backupPath = path.join(backupDir, `${name}.${fileSafeTimestamp()}.md`);
-      fs.copyFileSync(destPath, backupPath);
+      const installedHash = personaBodyHash(installedText);
+      const matches = (shippedSeeds[name] ?? []).filter((entry) => entry.bodySha256 === installedHash);
+      if (matches.length === 0) {
+        // Lower seedVersion alone doesn't prove this is a stale shipped copy — only a body match does.
+        // No match means a person wrote or hand-edited this file; leave it alone.
+        logger.log?.(`[seedAgentPersonas] kept ${name}.md: its text differs from every shipped version, so the seedVersion ${bundledVersion} upgrade was skipped.`);
+        writeLog({
+          scope: 'seed-agent-personas',
+          level: 'info',
+          message: 'persona upgrade skipped: local edits',
+          meta: { name, installedVersion, bundledVersion },
+        });
+        continue;
+      }
 
-      const installedFm = splitFrontmatter(installedText).fm;
-      const nextText = withCarriedOverModelAndEffort(bundledText, installedFm);
+      // Confirm the write can succeed before any write happens — a doomed
+      // write (e.g. ~/.claude/agents symlinked outside the allowed roots)
+      // must never leave an orphan backup behind. Throws straight into the
+      // catch below on failure.
+      validateWrite(validatePath(destPath));
+
+      const backupPath = backupPathFor(name, installedText);
+      if (!fs.existsSync(backupPath)) {
+        fs.mkdirSync(path.dirname(backupPath), { recursive: true });
+        await writeTextAtomic(backupPath, installedText);
+      } // same content already backed up by an earlier attempt — never write a second copy
+
+      const nextText = buildUpgradedPersona(bundledText, installedText, matches);
       await writeTextAtomic(destPath, nextText);
       logger.log?.(`[seedAgentPersonas] upgraded ${name}.md to seedVersion ${bundledVersion}. Backup saved at ${backupPath}.`);
     } catch (err) {
@@ -208,11 +334,11 @@ async function upgradeStalePersonas({ logger = console, writeLog = () => {} } = 
   }
 }
 
-async function seedAgentPersonas({ logger = console, writeLog = () => {} } = {}) {
+async function seedAgentPersonas({ logger = console, writeLog = () => {}, shippedSeeds = SHIPPED_PERSONA_SEEDS } = {}) {
   if (process.env.SM_SEED_AGENT_PERSONAS_DISABLE === '1') return;
 
   // Every boot, regardless of marker state — see this file's header.
-  await upgradeStalePersonas({ logger, writeLog });
+  await upgradeStalePersonas({ logger, writeLog, shippedSeeds });
 
   const marker = readMarker();
   const pending = PERSONAS.filter((name) => !marker.seeded.includes(name));
@@ -248,4 +374,15 @@ async function seedAgentPersonas({ logger = console, writeLog = () => {} } = {})
   }
 }
 
-module.exports = { seedAgentPersonas, markerPath, MAX_ATTEMPTS, PERSONAS };
+module.exports = {
+  seedAgentPersonas,
+  upgradeStalePersonas,
+  buildUpgradedPersona,
+  personaBodyHash,
+  readSeedVersion,
+  normalizeNewlines,
+  sameFmValue,
+  markerPath,
+  MAX_ATTEMPTS,
+  PERSONAS,
+};

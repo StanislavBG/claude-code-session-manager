@@ -191,6 +191,46 @@ test('savePersona with originalName renames — writes the new file and removes 
   expect(fs.existsSync(path.join(globalDir, 'old-name.md'))).toBe(false);
 });
 
+test('savePersona without a seedVersion argument carries over an existing stamp', async () => {
+  const globalDir = await mkTmp('sm-agent-library-seedversion-');
+  await fsp.writeFile(path.join(globalDir, 'stamped-agent.md'), '---\nname: stamped-agent\nseedVersion: 7\n---\nOld body.\n');
+  await savePersona({
+    name: 'stamped-agent',
+    description: 'Edited via the UI.',
+    tools: [],
+    model: 'inherit',
+    color: '',
+    body: 'New body.',
+    globalDir,
+    validatePath: identityValidatePath,
+    writeTextAtomic: fakeWriteTextAtomic,
+  });
+  const text = await fsp.readFile(path.join(globalDir, 'stamped-agent.md'), 'utf8');
+  // No seedVersion argument was passed above — savePersona must read the
+  // existing file's own stamp and carry it forward, not drop it.
+  expect(text).toContain('seedVersion: 7');
+  expect(text).toContain('New body.');
+});
+
+test('savePersona for a brand-new persona writes no seedVersion line', async () => {
+  const globalDir = await mkTmp('sm-agent-library-seedversion-new-');
+  await savePersona({
+    name: 'fresh-agent',
+    description: 'A new persona.',
+    tools: [],
+    model: 'inherit',
+    color: '',
+    body: 'Body.',
+    globalDir,
+    validatePath: identityValidatePath,
+    writeTextAtomic: fakeWriteTextAtomic,
+  });
+  const text = await fsp.readFile(path.join(globalDir, 'fresh-agent.md'), 'utf8');
+  // No prior file to carry a stamp from, and none was passed in — a
+  // hand-authored persona must never gain a seedVersion line from thin air.
+  expect(text).not.toContain('seedVersion:');
+});
+
 test('deletePersona removes the file, and is a no-op when it is already gone', async () => {
   const globalDir = await mkTmp('sm-agent-library-delete-');
   await fsp.writeFile(path.join(globalDir, 'gone-soon.md'), '---\nname: gone-soon\n---\nBody.\n');

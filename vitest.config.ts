@@ -312,6 +312,7 @@ export default defineConfig({
       'src/main/lib/__tests__/prdDeclaredPaths.test.cjs',
       'src/main/__tests__/scheduler-looks-done.test.cjs',
       'src/main/__tests__/scheduler-gate-shadow.test.cjs',
+      'src/main/__tests__/scheduler-gate-pick.test.cjs',
       'src/main/lib/__tests__/definitionOfDoneSequence.test.cjs',
       'src/main/lib/__tests__/prdGateFiles.test.cjs',
       'src/main/lib/__tests__/gateAuthority.test.cjs',

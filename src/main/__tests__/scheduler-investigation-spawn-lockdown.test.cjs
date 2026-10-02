@@ -36,6 +36,7 @@ let originalHome;
 let spawnInvestigation;
 let _mutateForTests;
 let tickQueue;
+let bustCwdCache;
 
 // Set by the test, right after it creates them, so afterAll can wait for the
 // onExit handler's in-flight work before removing tmpHome, then do the
@@ -66,6 +67,7 @@ beforeAll(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-investigation-spawn-'));
   process.env.HOME = tmpHome;
   ({ spawnInvestigation, _mutateForTests, tickQueue } = require('../scheduler.cjs'));
+  ({ bustCwdCache } = require('../lib/queueStore.cjs'));
 });
 
 // Polls `logPath` for `substring` — at most 5s, every 25ms — instead of
@@ -166,6 +168,21 @@ test('spawnInvestigation: the real probe child carries --disallowedTools, the ti
   // scheduler.cjs's spawnInvestigation builds this same path (about line
   // 6601) — the onExit handler's final log line lands here.
   pendingLogPath = path.join(runDir, `${job.slug}.investigation.log`);
+
+  // Register cwd as a live project and give it a real queue.json row for
+  // `job`. spawnInvestigation re-reads the live row before it spawns (it
+  // must fail closed if the row can't be found) — this test calls
+  // spawnInvestigation directly, bypassing reverifyNeedsReview, so without
+  // this registration the live-row check would see no row and skip the
+  // spawn, same as scheduler-gate-shadow.test.cjs's setup() does for the
+  // same reason.
+  const slugDir = path.join(tmpHome, '.claude', 'projects', 'sm-investigation-lockdown-slug');
+  fs.mkdirSync(slugDir, { recursive: true });
+  fs.writeFileSync(path.join(slugDir, 't.jsonl'), JSON.stringify({ cwd }) + '\n');
+  bustCwdCache();
+  const stateDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({ jobs: [job] }, null, 2));
 
   const result = await spawnInvestigation(job, runDir);
   expect(result).toEqual({ deferred: false });

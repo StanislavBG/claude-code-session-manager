@@ -3675,13 +3675,17 @@ let drainActive = false;
 
 function drainDeferredInvestigation() {
   if (drainActive || runtimeState.investigationCount() >= MAX_CONCURRENT_INVESTIGATIONS) return;
-  const next = deferredInvestigations.entries().next();
-  if (next.done) return;
-  const [slug, ctx] = next.value;
-  deferredInvestigations.delete(slug);
-  spawnInvestigation(ctx.failedJob, ctx.runDir).catch((e) => {
-    console.error('[scheduler] drained investigation error', slug, e);
-  });
+  // Skip the slug the background gate shadow is still deciding (gateShadowSlug,
+  // set near reverifyNeedsReview's pick) — leave it queued rather than drain it
+  // out from under the gate. Take the first OTHER entry instead, in queue order.
+  for (const [slug, ctx] of deferredInvestigations) {
+    if (slug === gateShadowSlug) continue;
+    deferredInvestigations.delete(slug);
+    spawnInvestigation(ctx.failedJob, ctx.runDir).catch((e) => {
+      console.error('[scheduler] drained investigation error', slug, e);
+    });
+    return;
+  }
 }
 let cancelToken = { cancelled: false };
 // Last memory-gate observation; included in snapshot for renderer visibility.
@@ -6703,10 +6707,31 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   // the whole probe duration — previously this left the job's persisted
   // status frozen at 'failed'/'needs_review' the entire time, which read as
   // "nothing is happening" even though an Opus process was actively running.
+  //
+  // Live-row check, in the SAME mutate: `failedJob` can be a stale snapshot
+  // (the deferred-investigation path keeps one from the moment the slot was
+  // busy) and the row underneath it can have moved on — most commonly the
+  // background gate shadow completed it in this same pass. Re-check the row
+  // actually read here, not the snapshot the caller passed in: it must
+  // exist, its live status must still be 'needs_review' or 'failed', and
+  // transitionJob must accept the move. Fail closed on any of the three —
+  // never spawn a probe for a row that is already finished or gone.
+  let liveCheck = { ok: false, status: 'gone' };
   await mutate((s) => {
     const j = s.jobs.find((x) => x.slug === failedJob.slug);
-    if (j) transitionJob(j, 'investigating', { reason: 'spawning investigation probe', source: 'spawnInvestigation:start' });
+    if (!j) return;
+    const statusEligible = j.status === 'needs_review' || j.status === 'failed';
+    const transitioned = transitionJob(j, 'investigating', { reason: 'spawning investigation probe', source: 'spawnInvestigation:start' });
+    liveCheck = { ok: statusEligible && transitioned, status: j.status };
   });
+  if (!liveCheck.ok) {
+    const msg = `[scheduler] skip investigation: ${failedJob.slug} is now ${liveCheck.status} — not probing`;
+    console.log(msg);
+    safeLog(`${msg}\n`);
+    closeFd();
+    releaseSlot();
+    return { deferred: false };
+  }
   await broadcast({ flush: true });
 
   await ensureCliCapsProbed();
@@ -11319,6 +11344,73 @@ async function runGateShadow(job) {
 
 // Tail of the last background shadow gate — lets tests (and only tests) await it.
 let gateShadowPending = null;
+// The slug the background shadow gate is currently deciding, from the pick
+// below until that gate run finishes. Lets the auto-fix loop (and the
+// deferred-investigation drain) skip this one row while the gate still has
+// it — one row gets one recovery attempt at a time.
+let gateShadowSlug = null;
+
+/**
+ * Pure: picks the one needs_review row reverifyNeedsReview's background
+ * shadow gate should run this pass, or null when none qualifies. No I/O:
+ * `headByCwd` is a Map of cwd -> HEAD sha (or null), pre-fetched by the
+ * caller with `gitHead` (which never rejects, so building it needs no
+ * try/catch — a cwd whose read failed just maps to null here).
+ *
+ * A row is never picked when its cwd's HEAD is unknown (null) — there is
+ * nothing to compare a recorded gateShadow against.
+ *
+ * Tier 1, skipped when `authorityDisabled`: a stale, gate-authority-eligible
+ * row — verdict in GATE_AUTHORITY_VERDICTS, a non-empty landedCommit, and
+ * stale (no gateShadow, or one at a different HEAD, or one not marked
+ * `definitive`). Ordered so a row that never got a shadow run goes first,
+ * then the oldest `gateShadow.ranAt` (an unparseable or missing `ranAt`
+ * sorts as oldest), then queue order. Rule first, why second: the old pick
+ * took the first stale row in queue order with no rotation, so in a busy
+ * plan one row whose gate stays red forever could crowd out every other
+ * row's turn (review finding #8).
+ *
+ * Tier 2: the first needs_review row with no gateShadow at all, in queue
+ * order — today's plain observe-only rule, unchanged.
+ *
+ * Returns the first tier-1 row, else the tier-2 row, else null.
+ */
+function selectGateShadowTarget(jobs, headByCwd, { authorityDisabled = false } = {}) {
+  const eligible = jobs.filter((j) => {
+    if (j.status !== 'needs_review') return false;
+    const head = headByCwd.get(j.cwd);
+    return typeof head === 'string' && head.length > 0;
+  });
+
+  const isStale = (j) => {
+    const head = headByCwd.get(j.cwd);
+    return !j.gateShadow || j.gateShadow.head !== head || j.gateShadow.definitive !== true;
+  };
+
+  if (!authorityDisabled) {
+    const ranAtMs = (j) => {
+      const t = j.gateShadow ? Date.parse(j.gateShadow.ranAt) : NaN;
+      return Number.isFinite(t) ? t : -Infinity; // never-run or unparseable sorts oldest
+    };
+    const tier1 = eligible.filter((j) => isStale(j)
+      && j.verifierVerdict
+      && GATE_AUTHORITY_VERDICTS.includes(j.verifierVerdict)
+      && typeof j.landedCommit === 'string'
+      && j.landedCommit.length > 0);
+    if (tier1.length) {
+      const ranked = tier1
+        .map((j, i) => ({ j, i, neverRun: !j.gateShadow, ranAt: ranAtMs(j) }))
+        .sort((a, b) => {
+          if (a.neverRun !== b.neverRun) return a.neverRun ? -1 : 1;
+          if (a.ranAt !== b.ranAt) return a.ranAt - b.ranAt;
+          return a.i - b.i; // tie: queue order
+        });
+      return ranked[0].j;
+    }
+  }
+
+  return eligible.find((j) => !j.gateShadow) ?? null;
+}
 
 async function reverifyNeedsReview() {
   const snap = await readQueue();
@@ -11448,40 +11540,46 @@ async function reverifyNeedsReview() {
   }
   // Shadow gate (observation only, or — for a transcript-noise verdict with
   // a landed commit — gate AUTHORITY: a green re-run completes the row). At
-  // most ONE needs_review row per pass, fired in the background so a long
-  // gate never stalls this pass. The candidate choice is itself async now
-  // (it reads HEAD per candidate's cwd), so the WHOLE choice runs inside the
-  // promise assigned to gateShadowPending — otherwise a second pass starting
-  // before this one's choice resolves could pick its own target too,
-  // breaking the single-flight rule.
+  // most one needs_review row per pass, fired in the background so a long
+  // gate never stalls this pass. selectGateShadowTarget does the picking: a
+  // never-run or stale authority-eligible row first (oldest shadow run
+  // first), else the first row that never got a shadow run at all — so one
+  // row whose gate stays red forever can't crowd out every other row's turn.
+  // gateShadowSlug names the picked row for as long as its gate is running,
+  // so the auto-fix loop below (and the deferred-investigation drain) can
+  // leave that one row alone — the gate is cheap and goes first; a probe
+  // only gets the row if the gate didn't resolve it.
+  //
+  // The pick itself is async (it reads HEAD per candidate's cwd), so it runs
+  // inside its own promise, `pick`, resolved before `gateShadowPending`
+  // chains the gate run after it. `gateShadowPending` is still assigned
+  // synchronously, before any await, exactly as before — otherwise a second
+  // pass starting before this one's pick resolves could choose a target of
+  // its own too, breaking the single-flight rule.
+  let pick = null;
   if (!gateShadowPending && process.env.SM_GATE_SHADOW_DISABLE !== '1') {
-    let pickedSlug = null;
-    gateShadowPending = (async () => {
+    pick = (async () => {
+      const needsReview = snap.jobs.filter((j) => j.status === 'needs_review');
       const headByCwd = new Map();
-      const headFor = async (cwd) => {
-        if (!headByCwd.has(cwd)) headByCwd.set(cwd, await gitHead(cwd));
-        return headByCwd.get(cwd);
-      };
-      // Prefer a gate-authority-eligible row whose HEAD moved since its last
-      // shadow run (or that never got one) — a sibling fix landing can turn
-      // a red re-run green, so a shadow stale at an old HEAD is worth
-      // retrying before any plain observe-only candidate.
-      let gateTarget = null;
-      for (const j of snap.jobs) {
-        if (j.status !== 'needs_review') continue;
-        if (!j.verifierVerdict || !GATE_AUTHORITY_VERDICTS.includes(j.verifierVerdict)) continue;
-        if (typeof j.landedCommit !== 'string' || !j.landedCommit.length) continue;
-        let head;
-        try { head = await headFor(j.cwd); } catch { continue; } // this candidate's git read failed — skip it, try the next
-        if (!j.gateShadow || j.gateShadow.head !== head) { gateTarget = j; break; }
+      for (const cwd of new Set(needsReview.map((j) => j.cwd))) {
+        headByCwd.set(cwd, await gitHead(cwd));
       }
-      if (!gateTarget) gateTarget = snap.jobs.find((j) => j.status === 'needs_review' && !j.gateShadow);
-      if (!gateTarget) return;
-      pickedSlug = gateTarget.slug;
-      await runGateShadow(gateTarget);
-    })()
-      .catch((e) => { console.error('[scheduler] gate shadow error', pickedSlug, e); })
-      .finally(() => { gateShadowPending = null; });
+      return selectGateShadowTarget(snap.jobs, headByCwd, {
+        authorityDisabled: process.env.SM_GATE_AUTHORITATIVE_DISABLE === '1',
+      });
+    })();
+    gateShadowPending = pick
+      .then((gateTarget) => {
+        if (!gateTarget) return;
+        gateShadowSlug = gateTarget.slug;
+        return runGateShadow(gateTarget);
+      })
+      .catch((e) => { console.error('[scheduler] gate shadow error', gateShadowSlug, e); })
+      .finally(() => {
+        gateShadowPending = null;
+        gateShadowSlug = null;
+        drainDeferredInvestigation();
+      });
   }
   if (evidenceScanned.length) {
     const scannedSet = new Set(evidenceScanned);
@@ -11705,9 +11803,14 @@ async function reverifyNeedsReview() {
   // MAX_CONCURRENT_INVESTIGATIONS (queues the rest for retry), so this loop
   // cannot fan out past the cap regardless of how many targets are selected.
   if (process.env.SM_AUTOFIX_DISABLE !== '1') {
+    // If this pass started a gate-shadow pick above, wait for it — it only
+    // reads HEADs, so this is a short wait, not the gate run itself — then
+    // drop its target from this loop's candidates. The gate gets first shot
+    // at that one row; a probe only takes it if the gate didn't resolve it.
+    if (pick) await pick;
     const targets = selectAutoFixTargets(queueForResumeAndAutofix.jobs, {
       fixSlugExists: (s) => candidatePrdsDirs().some((dir) => fs.existsSync(path.join(dir, `${s}.md`))),
-    });
+    }).filter((job) => job.slug !== gateShadowSlug);
     for (const job of targets) {
       const runId = job.runId || resolveRunId(job);
       const runDir = path.join(schedulerPaths.runsDir(), runId);
@@ -13360,6 +13463,7 @@ module.exports = {
   reverifyNeedsReview,
   runGateShadow,
   awaitGateShadowIdle: async () => { while (gateShadowPending) await gateShadowPending; },
+  selectGateShadowTarget,
   shouldRunPeriodicReverify,
   findStuckFailedJobs,
   STUCK_FAILED_ESCALATE_MS,

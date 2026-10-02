@@ -40,9 +40,6 @@ export type NavKey =
   | 'agent-library'
   // Read-only directory of the Epic intent-tag taxonomy (Home face only).
   | 'tag-library'
-  // Publish this project's generated Marketing Project Page to bilko.run
-  // via the bilko-host MCP's gated static-path pipeline (Project face only).
-  | 'bilko-host'
   // Static ERD of the app's OWN persisted data model — entities, storage
   // paths, relations. Machine-wide (identical for every project), so Home
   // face only. See lib/dataModelErd.ts + components/tabs/DataModel.tsx.

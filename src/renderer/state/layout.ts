@@ -85,7 +85,7 @@ interface LayoutState {
    * entry points like CommandPalette's `nav:*` commands, which don't know
    * or assert a face themselves. `openPanel` applies the MIRROR
    * rule for a PROJECT-only NavKey (`isProjectOnlyNavKey`: Project Home,
-   * Sessions, Scheduler, Memory, Host on Bilko.run) and flips to 'project' —
+   * Sessions, Scheduler, Memory) and flips to 'project' —
    * otherwise a face-agnostic route onto one of those (Home's "Open Scheduler
    * →" buttons, the footer's paused-scheduler pill, `nav:scheduler` in the
    * palette) would render a cwd-scoped screen beside the Home sidebar with no

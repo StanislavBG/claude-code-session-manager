@@ -197,7 +197,6 @@ export function buildCommands(): Command[] {
     { id: 'nav:voice', label: 'Go to Voice', section: 'nav', emitOnly: true },
     { id: 'nav:agent-library', label: 'Go to Agent Library', section: 'nav', emitOnly: true },
     { id: 'nav:tag-library', label: 'Go to Tag Library', section: 'nav', emitOnly: true },
-    { id: 'nav:bilko-host', label: 'Go to Bilko Host', section: 'nav', emitOnly: true },
   ]
   return cmds
 }

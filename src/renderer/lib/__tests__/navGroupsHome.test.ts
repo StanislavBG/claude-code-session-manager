@@ -23,7 +23,7 @@ describe('getNavItemsForFace', () => {
     'system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings',
     'history', 'data-model',
   ]
-  const PROJECT_ONLY = ['project-home', 'memory', 'terminal', 'bilko-host', 'scheduler']
+  const PROJECT_ONLY = ['project-home', 'memory', 'terminal', 'scheduler']
   const BOTH = ['projects']
 
   it('home face returns home-only + both keys', () => {
@@ -257,11 +257,9 @@ describe('settings-shaped editors are HOME-only (consolidated from BOTH)', () =>
     expect(isHomeOnlyNavKey(key)).toBe(true)
   })
 
-  it('memory and bilko-host are left untouched as PROJECT-only', () => {
+  it('memory is left untouched as PROJECT-only', () => {
     expect(NAV_ITEMS.find((i) => i.key === 'memory')?.faces).toEqual(['project'])
-    expect(NAV_ITEMS.find((i) => i.key === 'bilko-host')?.faces).toEqual(['project'])
     expect(isHomeOnlyNavKey('memory')).toBe(false)
-    expect(isHomeOnlyNavKey('bilko-host')).toBe(false)
   })
 })
 
@@ -280,7 +278,7 @@ describe('isHomeOnlyNavKey', () => {
 })
 
 describe('isProjectOnlyNavKey', () => {
-  it.each(['project-home', 'terminal', 'scheduler', 'memory', 'bilko-host'] as const)(
+  it.each(['project-home', 'terminal', 'scheduler', 'memory'] as const)(
     'is true for %s', (key) => {
       expect(isProjectOnlyNavKey(key)).toBe(true)
     },

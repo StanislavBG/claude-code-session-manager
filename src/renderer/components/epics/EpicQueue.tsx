@@ -76,9 +76,9 @@ function useBuildAction(onSelect: (id: string) => void) {
   const { target, resolving } = useBuildTarget(activeTabCwd)
   const [creating, setCreating] = useState(false)
   const inFlight = useInFlightBuildEpic(activeTabCwd)
-  // Actor for the 'build' Epic — same lookup-by-name pattern HostBilko.tsx
-  // and ProjectPagesSection.tsx already use for their own dedicated-pipeline
-  // agents, so Build Epics get an Actor line instead of opening on Default.
+  // Actor for the 'build' Epic — same lookup-by-name pattern
+  // ProjectPagesSection.tsx already uses for its own dedicated-pipeline
+  // agent, so Build Epics get an Actor line instead of opening on Default.
   const [builderPersona, setBuilderPersona] = useState<{ name: string; description: string | null } | null>(null)
   useEffect(() => {
     let cancelled = false

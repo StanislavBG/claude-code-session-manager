@@ -78,7 +78,6 @@ export const NAV_ITEMS: NavGroupItem[] = [
   { key: 'settings',       group: 'Configure', label: 'Settings',       icon: 'settings',       hint: 'Theme, voice, billing window — per-session model lives in Agent Library', faces: HOME },
   { key: 'agent-library',  group: 'Configure', label: 'Agent Library',  icon: 'book',           hint: 'Agent personas available to this machine, and which projects override them', faces: HOME },
   { key: 'tag-library',    group: 'Configure', label: 'Tag Library',    icon: 'target',         hint: 'Session intent tags and their /develop behavior', faces: HOME },
-  { key: 'bilko-host',     group: 'Configure', label: 'Host on Bilko.run', icon: 'link',        hint: 'Publish this project\'s Marketing page to bilko.run', faces: PROJECT },
 
   // Tools
   { key: 'voice',    group: 'Tools', label: 'Voice',    icon: 'mic',           hint: 'Whisper transcription + push-to-talk', faces: HOME },
@@ -122,7 +121,7 @@ export function isHomeOnlyNavKey(key: NavKey): boolean {
 
 /**
  * Mirror of `isHomeOnlyNavKey` for `faces: PROJECT` entries (Project Home,
- * Sessions, Scheduler, Memory, Host on Bilko.run). Same purpose, opposite
+ * Sessions, Scheduler, Memory). Same purpose, opposite
  * face: a face-agnostic route (CommandPalette's `nav:*`, the footer's
  * scheduler pill, Home's "Open Scheduler →" buttons) that lands on one of
  * these screens must assert `navFace: 'project'`, or the user ends up reading

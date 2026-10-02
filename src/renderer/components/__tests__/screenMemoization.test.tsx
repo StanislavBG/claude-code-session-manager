@@ -15,7 +15,7 @@ import { useSessions, type SessionTab } from '../../state/sessions'
 import { useConfig } from '../../state/config'
 import { useScheduleState } from '../../state/scheduleState'
 import { usePromptSessions, type PromptSession } from '../../state/promptSessions'
-import type { ScheduleStateSnapshot, BilkoHostGetResult, AgentPersona } from '../../../preload/api'
+import type { ScheduleStateSnapshot, AgentPersona } from '../../../preload/api'
 import { flushAsync } from '../../testUtils/domFlush'
 
 /**
@@ -391,64 +391,6 @@ describe('memoized screens still react to their own store', () => {
     expect(el.textContent).toContain('marker-job-title-xyz')
   })
 
-  it('promptSessions store: HostBilko (memoized) re-renders when an active publish Epic appears', async () => {
-    const api = installBroadWindowApiMock() as unknown as Record<string, unknown>
-    const CWD = '/home/bilko/Projects/alpha'
-    Object.assign(api, {
-      bilkoHost: {
-        get: vi.fn().mockResolvedValue({
-          hasMarketingPage: true,
-          projectName: 'alpha',
-          packagePrivate: false,
-          packageHomepage: null,
-          packageVersion: '1.0.0',
-          defaultSlug: 'alpha',
-          documents: [],
-          bundleStale: false,
-          bundleManifest: null,
-          publishState: null,
-        } satisfies BilkoHostGetResult),
-      },
-    })
-    const tab: SessionTab = {
-      id: 'tab-alpha',
-      sessionId: 'tab-alpha',
-      label: 'alpha',
-      cwd: CWD,
-      pid: null,
-      status: 'dormant',
-      exitCode: null,
-      startupCommand: null,
-      presetId: null,
-      generation: 0,
-    }
-    useSessions.setState({ tabs: [tab], activeTabId: tab.id })
-    usePromptSessions.setState({ sessions: {}, events: {} })
-
-    const { HostBilko } = await import('../tabs/HostBilko')
-    const el = await mount(createElement(HostBilko))
-    await flushAsync()
-    expect(el.textContent).toContain('Publish')
-    expect(el.textContent).not.toContain('View publish in progress')
-
-    const session: PromptSession = {
-      id: 'epic-1',
-      cwd: CWD,
-      goalText: 'Publish alpha',
-      claudeSessionId: 'sess-1',
-      status: 'active',
-      createdAt: new Date().toISOString(),
-      completedAt: null,
-      tag: 'bilko-host-publisher',
-    } as PromptSession
-
-    await act(async () => {
-      usePromptSessions.setState({ sessions: { [session.id]: session }, events: {} })
-      await Promise.resolve()
-    })
-
-    expect(el.textContent).toContain('View publish in progress')
-  })
 })
 
 // ─── 4. Lazy screen boundary actually renders ──────────────────────────────

@@ -1789,7 +1789,9 @@ export interface SessionManagerAPI {
       min: number; max: number; default: number; envOverride: boolean;
     }>;
     setConfig: (partial: Partial<ScheduleConfig & { supervisor?: Partial<SupervisorConfig> }>) => Promise<{ ok: boolean; config: ScheduleConfig }>;
-    resetJob: (slug: string) => Promise<{ ok: boolean; error?: string }>;
+    /** `cwd`, when given, narrows the match to that project's job row — two
+     *  different projects can independently produce the identical slug. */
+    resetJob: (slug: string, cwd?: string) => Promise<{ ok: boolean; error?: string }>;
     runNow: () => Promise<{ ok: boolean }>;
     forceTick: () => Promise<ActionOutcome>;
     pause: () => Promise<{ ok: boolean }>;

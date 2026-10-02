@@ -27,6 +27,7 @@ contextBridge.exposeInMainWorld('api', {
     installPrdWriteGuard: (cwd) => ipcRenderer.invoke('app:install-prd-write-guard', { cwd }),
     installDestructiveGitGuard: (cwd) => ipcRenderer.invoke('app:install-destructive-git-guard', { cwd }),
     installInlineImplementationGuard: (cwd) => ipcRenderer.invoke('app:install-inline-implementation-guard', { cwd }),
+    installSelfScheduleGuard: (cwd) => ipcRenderer.invoke('app:install-self-schedule-guard', { cwd }),
     onNewSession: (handler) => {
       const listener = () => handler();
       ipcRenderer.on('app:new-session', listener);
@@ -239,7 +240,7 @@ contextBridge.exposeInMainWorld('api', {
     worktreeBase: () => ipcRenderer.invoke('schedule:worktree-base'),
     setSessionSlots: (cap) => ipcRenderer.invoke('schedule:set-session-slots', { cap }),
     setConfig: (partial) => ipcRenderer.invoke('schedule:set-config', partial),
-    resetJob: (slug) => ipcRenderer.invoke('schedule:reset-job', { slug }),
+    resetJob: (slug, cwd) => ipcRenderer.invoke('schedule:reset-job', cwd ? { slug, cwd } : { slug }),
     runNow: () => ipcRenderer.invoke('schedule:run-now'),
     forceTick: () => ipcRenderer.invoke('schedule:force-tick'),
     pause: () => ipcRenderer.invoke('schedule:pause'),

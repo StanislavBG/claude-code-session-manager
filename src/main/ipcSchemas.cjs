@@ -282,6 +282,15 @@ const scheduleSlug = z.object({
   slug: z.string().regex(SCHEDULE_SLUG_RE),
 });
 
+// reset-job: slug + optional cwd — narrows the match to one project's job
+// row so two different projects' slugs that happen to collide (slugs carry
+// no cwd salt) don't cross-reset. Mirrors remote.resetJob's own cwd filter
+// in scheduler.cjs.
+const scheduleResetJob = z.object({
+  slug: z.string().regex(SCHEDULE_SLUG_RE),
+  cwd: z.string().min(1).max(4096).optional(),
+});
+
 const scheduleReadLog = z.object({
   slug: z.string().regex(SCHEDULE_SLUG_RE),
   runId: z.string().regex(SCHEDULE_RUN_ID_RE),
@@ -1087,6 +1096,7 @@ module.exports = {
     sessionsPayload,
     layoutEnvelope,
     scheduleSlug,
+    scheduleResetJob,
     scheduleReadLog,
     scheduleWritePrd,
     schedulerCreatePrd,

@@ -1347,6 +1347,18 @@ async function resolveSlugOrReason(slug, cwd) {
   return { ok: true, path: p };
 }
 
+/**
+ * Shared row-match predicate for a reset-job request: slugs carry no cwd
+ * salt, so two different projects can independently produce the identical
+ * slug. Both the renderer-facing `schedule:reset-job` IPC handler and
+ * remote.resetJob (admin/MCP) go through this one predicate so a cwd-bearing
+ * caller always resets THAT project's job, never just any row matching the
+ * string.
+ */
+function jobMatchesSlugAndCwd(j, slug, cwd) {
+  return j.slug === slug && (!cwd || j.cwd === cwd);
+}
+
 /** Actionable message for `resolveSlugOrReason`'s 'not-found' reason. */
 function unknownSlugMessage(slug) {
   return `unknown slug "${slug}": no PRD file with that name in any known project — call scheduler_list_prds (optionally with cwd) to see what exists`;
@@ -12205,10 +12217,10 @@ function registerScheduleHandlers() {
     return { ok: true, config };
   }));
 
-  ipcMain.handle('schedule:reset-job', validated(schemas.scheduleSlug, async ({ slug }) => {
+  ipcMain.handle('schedule:reset-job', validated(schemas.scheduleResetJob, async ({ slug, cwd }) => {
     if (!(await safeSlugPath(slug))) return { ok: false, error: 'invalid slug' };
     const outcome = await mutate((state) => {
-      const idx = state.jobs.findIndex((j) => j.slug === slug);
+      const idx = state.jobs.findIndex((j) => jobMatchesSlugAndCwd(j, slug, cwd));
       if (idx < 0) return { kind: 'not-found' };
       // Guard is in resetJobFields: refuses to reset an already-'completed'
       // or already-'skipped' job without force:true (see its doc comment for
@@ -13199,11 +13211,9 @@ const remote = {
       return { ok: false, error: resolved.reason === 'invalid-slug' ? 'invalid slug' : unknownSlugMessage(slug) };
     }
     const outcome = await mutate((state) => {
-      // Same cwd filter as resolveSlugOrReason's file lookup above — slugs are
-      // derived from title text with no cwd salt, so two different projects
-      // can independently produce the identical slug; an opts.cwd caller must
-      // reset THAT project's job, not just any queue row matching the string.
-      const idx = state.jobs.findIndex((j) => j.slug === slug && (!opts.cwd || j.cwd === opts.cwd));
+      // Same cwd filter as the schedule:reset-job IPC handler above and
+      // resolveSlugOrReason's file lookup — see jobMatchesSlugAndCwd's header.
+      const idx = state.jobs.findIndex((j) => jobMatchesSlugAndCwd(j, slug, opts.cwd));
       if (idx < 0) return { kind: 'not-found' };
       // Terminal-status guard lives in resetJobFields itself; force:true
       // threads through to override it. Capture the pre-reset status here
@@ -13745,6 +13755,7 @@ module.exports = {
   SCHEDULER_CODE_SHA,
   resetJobFields,
   resetRefusalMessage,
+  jobMatchesSlugAndCwd,
   executeJob,
   killOrphanClaudePid,
   prdArchivedSkipResult,

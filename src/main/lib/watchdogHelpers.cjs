@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const schedulerPaths = require('./schedulerPaths.cjs');
 const { isRestartingMarkerActive } = require('./upgradeDrain.cjs');
+const { pidAlive: pidAliveCore } = require('./pidAlive.cjs');
 
 
 
@@ -142,23 +143,14 @@ function evaluateDispatchLiveness(entry, now = Date.now(), { deadMs = DEFAULT_DI
 /**
  * isPidAlive(pid) → boolean
  *
- * Plain liveness check via process.kill(pid, 0) (no signal sent). Single
- * source of truth for the "is this recorded pid still alive" check used by
- * checkAppLiveness's defense-in-depth relaunch gate.
- *
- * EPERM (pid exists, owned by another user) counts as alive — only ESRCH
- * (no such process) means dead. Watchdog and app run as the same user in
- * practice, so this distinction rarely matters here, but treating EPERM as
- * "dead" would be wrong on its face (the process demonstrably exists).
+ * Thin alias over pidAlive.cjs's shared pidAlive() — single source of truth
+ * for the "is this recorded pid still alive" check used by
+ * checkAppLiveness's defense-in-depth relaunch gate. Kept as a named export
+ * here (rather than inlining the require at every call site) so existing
+ * imports of `isPidAlive` from this module keep working unchanged.
  */
 function isPidAlive(pid) {
-  if (typeof pid !== 'number' || !Number.isFinite(pid)) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return e?.code === 'EPERM';
-  }
+  return pidAliveCore(pid);
 }
 
 // Offline queue.json reconciliation (orphaned 'running' jobs whose pid died

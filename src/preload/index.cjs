@@ -9,7 +9,6 @@ contextBridge.exposeInMainWorld('api', {
     engageRulesPath: () => ipcRenderer.invoke('app:engage-rules-path'),
     pickDirectory: () => ipcRenderer.invoke('app:pick-directory'),
     gitBranch: (cwd) => ipcRenderer.invoke('app:git-branch', { cwd }),
-    resolveBuildTarget: (cwd) => ipcRenderer.invoke('build:resolve-target', { cwd }),
     rebootApp: (opts) => ipcRenderer.send('app:reboot-app', opts),
     archiveProject: (encoded) => ipcRenderer.invoke('app:archive-project', { encoded }),
     testFireHook: (args) => ipcRenderer.invoke('app:test-fire-hook', args),
@@ -116,6 +115,18 @@ contextBridge.exposeInMainWorld('api', {
       const listener = () => handler();
       ipcRenderer.on('agents:changed', listener);
       return () => ipcRenderer.removeListener('agents:changed', listener);
+    },
+  },
+  macros: {
+    list: () => ipcRenderer.invoke('macros:list'),
+    save: (payload) => ipcRenderer.invoke('macros:save', payload),
+    delete: (payload) => ipcRenderer.invoke('macros:delete', payload),
+    setProject: (payload) => ipcRenderer.invoke('macros:set-project', payload),
+    // Fired after any save/delete/set-project so every subscriber re-fetches list().
+    onChanged: (handler) => {
+      const listener = () => handler();
+      ipcRenderer.on('macros:changed', listener);
+      return () => ipcRenderer.removeListener('macros:changed', listener);
     },
   },
   models: {

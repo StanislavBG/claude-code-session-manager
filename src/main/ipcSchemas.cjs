@@ -13,6 +13,7 @@ const { PromptSessionSchema, EpicTagSchema, EpicSourceSchema, EpicIntakeSectionS
 const { PrdWorkTypeSchema } = require('./lib/workTypeLibrary.cjs');
 const { PERSONA_NAME_RE } = require('./agentLibrary.cjs');
 const { AgentPersonaSaveSchema } = require('./lib/agentPersonaSchema.cjs');
+const { MacroSaveSchema, MacroDeleteSchema, MacroSetProjectSchema } = require('./lib/macroLibrary.cjs');
 
 // ──────────────────────────────────────────── PTY
 const ptySpawn = z.object({
@@ -608,6 +609,9 @@ const setSessionSlotsSchema = z.object({
 // Full field-level rules live in lib/agentPersonaSchema.cjs, mirroring
 // AgentPersonaSaveInput (src/preload/api.d.ts) field-for-field.
 const agentsSavePersona = AgentPersonaSaveSchema;
+const macrosSave = MacroSaveSchema;
+const macrosDelete = MacroDeleteSchema;
+const macrosSetProject = MacroSetProjectSchema;
 
 // ──────────────────────────────────────────── Memory tool (Bundle C, cycle 3)
 // Workspace-scoped markdown store at ~/.claude/projects/<ws>/memory/.
@@ -989,12 +993,6 @@ const appGitBranch = z.object({
   cwd: z.string().min(1).max(4096),
 }).passthrough();
 
-// build:resolve-target — see src/main/lib/buildTarget.cjs. cwd is a trusted
-// TAB cwd, not validatePath'd here (same invariant as appGitBranch above).
-const buildResolveTarget = z.object({
-  cwd: z.string().min(1).max(4096),
-}).passthrough();
-
 // git:status / git:file-status — see src/main/git.cjs. cwd is validatePath'd
 // inside the handler (allowedRoots = home), so the schema only enforces shape.
 const gitStatus = z.object({
@@ -1119,7 +1117,6 @@ module.exports = {
     voiceSetRecording,
     appTestFireHook,
     appGitBranch,
-    buildResolveTarget,
     gitStatus,
     gitFileStatus,
     repoAnalyze,
@@ -1165,6 +1162,9 @@ module.exports = {
     chatExternalSend,
     exchangesList,
     agentsSavePersona,
+    macrosSave,
+    macrosDelete,
+    macrosSetProject,
     agentsGetPersonaBody,
     agentsResolveModelInfo,
     modelsCatalog,

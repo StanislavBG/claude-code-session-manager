@@ -14,15 +14,10 @@
 A `.test.cjs` under `src/**/__tests__` that is not listed in `vitest.config.ts` silently never runs.
 Every such file gets one `include` line in the same change that creates it.
 
-Enforcement: `npm run lint:unregistered-tests` (`scripts/check-unregistered-tests.cjs`; part of `npm run lint`).
-
-The guard scans `src/`, `scripts/` and `web/` (excluding `node_modules`, `dist`) for
-`*.test.{cjs,ts,tsx}` and `*.spec.cjs` under any `__tests__` segment, and checks both
-directions: a test on disk absent from `include` fails, and a literal `include` entry with
-no file on disk fails too. `VITEST_CONFIG_PATH` (or a CLI arg) points it at another config.
-
-Known debt: the `node:test` files under `src/main/__tests__` are allowlisted in
-`check-unregistered-tests.cjs` (vitest cannot run them; run with `node --test`). A later PRD resolves this.
+Enforcement: `vitest.config.ts`'s `include` is glob-based (`src/**/__tests__/**/*.test.cjs`,
+`scripts/**/__tests__/**/*.test.cjs`, `web/**/__tests__/**/*.test.cjs`, plus the renderer
+`.test.ts`/`.test.tsx`/`.spec.ts` globs) — any new `__tests__` file matching those globs is
+picked up automatically; no separate registration step or lint guard.
 
 ## Running one file
 

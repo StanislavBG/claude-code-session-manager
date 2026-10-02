@@ -17,7 +17,6 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | check-main-ts-check.cjs | `npm run lint:main-ts-check` (in `lint`) — `tsconfig.main.json` `include` ⇔ `// @ts-check` first line, both directions; explicit list only, `checkJs` false | no |
 | check-renderer-storage.cjs | `npm run lint:renderer-storage` (in `lint`) — ratchet-bans `localStorage.`/`sessionStorage.` in `src/renderer` outside an explicit ALLOWLIST (Epic stateless-ui-review) | no |
 | check-tracked-filenames.cjs | `npm run lint:filenames` (in `lint`) — fails on tracked paths with Windows-illegal chars, trailing dot/space, or reserved device names | no |
-| check-unregistered-tests.cjs | `npm run lint:unregistered-tests` (in `lint`) | no |
 | check-unstable-selectors.cjs | `npm run lint:selectors` (in `lint`) | no |
 | cleanup-nested-queue-stubs.cjs | manual one-shot; dispatches to cleanup-worktree-ops-stubs.cjs | no |
 | cleanup-worktree-ops-stubs.cjs | via cleanup-nested-queue-stubs.cjs | no |

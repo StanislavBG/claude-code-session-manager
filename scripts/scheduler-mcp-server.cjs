@@ -505,8 +505,8 @@ async function handleCallTool(request) {
       // than letting an ungated PRD reach disk.
       if (!Array.isArray(args?.gate) || args.gate.length === 0 || !Array.isArray(args?.files) || args.files.length === 0) {
         return errorResult(
-          'scheduler_create_prd needs "gate" (the commands that prove this PRD is done, each starting with '
-          + '"timeout <seconds>", or ["none"]) and "files" (the repo-relative files this PRD may change). '
+          'scheduler_create_prd needs "gate" (the commands that prove this PRD is done, with each && step '
+          + 'starting with "timeout <seconds>", or ["none"]) and "files" (the repo-relative files this PRD may change). '
           + 'Add both and call again.',
         );
       }

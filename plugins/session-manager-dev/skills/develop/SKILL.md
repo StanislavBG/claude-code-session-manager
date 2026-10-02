@@ -104,15 +104,15 @@ failure modes have different fixes:
 10. **Show the plan once**, as a table (#, PRD, files, gate, dependsOn, estimate), not PRD
     drafts. Queue at once when the Epic is `feature` or `bug` and scope is clear; otherwise ask
     one approval question, once.
-11. Before the first `scheduler_create_prd` call, run `git -C <project> rev-parse HEAD` and keep
-    the SHA. **Walk the pre-queue checklist** (last section of PRD_AUTHORING.md), then queue each
-    PRD with `scheduler_create_prd`, the validate PRD last.
+11. Before the first `scheduler_create_prd` call, run `git -C "$SM_PROJECT_ROOT" rev-parse HEAD`
+    and keep the SHA. **Walk the pre-queue checklist** (last section of PRD_AUTHORING.md), then
+    queue each PRD with `scheduler_create_prd`, the validate PRD last.
 12. **Read the warnings each call returns before the next call.** Warnings do not block. If a
     gate or files warning shows a real mistake, archive that PRD with `scheduler_archive_prd` and
-    queue it again under a new slug, before you queue the PRDs that depend on it. Why:
-    `scheduler_update_prd` cannot change gate or files. Never change a PRD only to silence a
-    warning. The validate PRD's none-gate warning and its size warning (8 or more criteria) are
-    expected. Then post one short message: each PRD's number and slug, the validate slug, the
+    queue it again under a new slug, before you queue the PRDs that depend on it. Why: a new
+    call checks the gate and files again; `scheduler_update_prd` does not check them. Never
+    change a PRD only to silence a warning. The validate PRD's none-gate warning and its size
+    warning (8 or more criteria) are expected. Then post one short message: each PRD's number and slug, the validate slug, the
     warnings you kept, and that no per-PRD check will come from this session.
 13. **Never stop for review after queueing.** Why: the validator is the review.
 
@@ -132,8 +132,9 @@ failure modes have different fixes:
 | `quietMachine` | Only for timing measurements. |
 
 Never pass `parallelGroup`; it is ignored. The API writes the frontmatter, the `# Files` and
-`# Gate` sections and the standards pointer. Do not write them yourself, and do not put a gate
-fence (three backticks + `gate`) in the goal, notes or criteria — the API rejects that.
+`# Gate` sections and the standards pointer. Do not write them yourself. Do not put a gate
+fence (three backticks + `gate`), a `# Gate` heading or a `# Files` heading in any text field —
+the API rejects that.
 
 ### gate rules
 
@@ -152,7 +153,9 @@ fence (three backticks + `gate`) in the goal, notes or criteria — the API reje
 7. Keep each entry on one line, at most 500 chars, with plain spaces between words.
 8. Use `["none"]` only for docs or config with no runnable check. Write exactly `none`. Never
    mix `none` with commands.
-9. A leading `TMPDIR=$(mktemp -d) ` and `NAME=value` words are allowed before the command.
+9. Put `NAME=value` words before `timeout`, never after it, for example
+   `CI=1 timeout 300 npm test`. A leading `TMPDIR=$(mktemp -d) ` is allowed but not needed: the
+   scheduler gives each gate its own TMPDIR.
 
 ### files rules
 
@@ -225,7 +228,8 @@ Rules:
          reports it, and the fix wave covers it.
       2. Its spec is wrong: fix it with `scheduler_update_prd`, then call `scheduler_reset_job`
          (add `force: true` if it is skipped). Always edit first. Why: a reset job can start on
-         the next tick.
+         the next tick. The tool does not check the new body, so copy the `# Gate` and
+         `# Files` sections unchanged unless they are what is wrong.
       3. Its spec is right: call `scheduler_reset_job` (add `force: true` if it is skipped).
       4. Another PRD or a human already did the work: confirm it in the tree, then call
          `scheduler_archive_prd`. Archiving marks it completed and frees the PRDs that depend on
@@ -234,9 +238,8 @@ Rules:
    2. **A validator verdict.** Read its record. A `REFUTED` PRD, or a Critical or Important
       finding, means a fix wave: one `behavior` or `wire` PRD per finding plus a new validate
       PRD. Never fix inline.
-   3. **A VALIDATION REQUEST**, only when the plan has no validate PRD. Answer it as "The
-      validate PRD" section says.
-   Fix a PRD the validator covers only through the fix wave, never inline.
+   3. **A VALIDATION REQUEST**, only when the plan has no validate PRD. Follow the steps in the
+      request.
 4. **Done** = the latest validator marked every PRD `VERIFIED`, no Critical or Important
    finding is open, and its record is committed. Never "done with caveats": a REFUTED PRD gets
    a fix wave or an explicit human decision to stop.

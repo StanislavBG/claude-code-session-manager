@@ -64,12 +64,15 @@ function readIfExists(file) {
 /**
  * Writes the shim pair under `<homeDir>/.claude/session-manager/bin`.
  * Each file is written only when its content differs from what's already on
- * disk, and the launcher's mode is set to 0755 unconditionally (even on a
- * no-op run) so a permission change outside this function self-heals on the
- * next call. Never throws: returns `{ok:true, changed, path}` (`path` is the
- * launcher path) on success, `{ok:false, error}` on failure, and
- * `{ok:false, skipped:true}` on win32, where there is no POSIX shell to run
- * the launcher.
+ * disk. The launcher's own write sets its mode to 0755 on the temp file
+ * BEFORE the rename, so the path at `launcherDest` never exists without the
+ * exec bit — a gate that races the install can only ever see "not there yet"
+ * or "there and runnable", never "there but exit 126". The chmod right after
+ * is a second, unconditional pass (even on a no-op run) so a permission
+ * change made outside this function self-heals on the next call. Never
+ * throws: returns `{ok:true, changed, path}` (`path` is the launcher path) on
+ * success, `{ok:false, error}` on failure, and `{ok:false, skipped:true}` on
+ * win32, where there is no POSIX shell to run the launcher.
  */
 async function ensureTimeoutShim({ homeDir = os.homedir(), execPath = process.execPath } = {}) {
   if (process.platform === 'win32') return { ok: false, skipped: true };
@@ -86,9 +89,11 @@ async function ensureTimeoutShim({ homeDir = os.homedir(), execPath = process.ex
       changed = true;
     }
     if (readIfExists(launcherDest) !== launcherContent) {
-      await writeTextAtomic(launcherDest, launcherContent);
+      await writeTextAtomic(launcherDest, launcherContent, { mode: 0o755 });
       changed = true;
     }
+    // Repairs a mode changed by hand; the write above already set 0o755
+    // before the rename, so this is a no-op in the common case.
     fs.chmodSync(launcherDest, 0o755);
     return { ok: true, changed, path: launcherDest };
   } catch (err) {

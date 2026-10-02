@@ -5681,11 +5681,13 @@ function pickRunDir() {
 // macOS ships no `timeout` command, but a PRD gate command starts with
 // `timeout <seconds> ...`. ensureTimeoutShimOnce() installs a dependency-free
 // stand-in (see lib/timeoutShim.cjs) once per process — not once per job — so
-// every later executeJob call reuses the same cached promise instead of
-// re-checking the files on disk. It never throws and never blocks or fails a
-// spawn: a failed install just logs one line and leaves the PATH addition
-// pointing at a shim dir that may have nothing in it yet, no worse than
-// today's no-shim-at-all. SM_TIMEOUT_SHIM_DISABLE=1 skips it outright.
+// most executeJob calls reuse the same cached promise instead of re-checking
+// the files on disk. A failed install clears that cache, so the NEXT spawn
+// retries the install instead of running shim-less for the rest of the
+// process. It never throws and never blocks or fails a spawn: a failed
+// install just logs one line and leaves the PATH addition pointing at a shim
+// dir that may have nothing in it yet, no worse than today's
+// no-shim-at-all. SM_TIMEOUT_SHIM_DISABLE=1 skips it outright.
 let timeoutShimEnsured = null;
 function ensureTimeoutShimOnce() {
   if (process.env.SM_TIMEOUT_SHIM_DISABLE === '1') return Promise.resolve();
@@ -5694,10 +5696,12 @@ function ensureTimeoutShimOnce() {
       (result) => {
         if (!result.ok && !result.skipped) {
           console.error(`[scheduler] could not install the timeout shim: ${result.error}`);
+          timeoutShimEnsured = null;
         }
       },
       (err) => {
         console.error(`[scheduler] could not install the timeout shim: ${err?.message ?? err}`);
+        timeoutShimEnsured = null;
       },
     );
   }

@@ -34,25 +34,74 @@ const claudeStub = require('../../../tests/helpers/claudeStub.cjs');
 let tmpHome;
 let originalHome;
 let spawnInvestigation;
-let HEADLESS_DISALLOWED_TOOLS;
+let _mutateForTests;
+let tickQueue;
+
+// Set by the test, right after it creates them, so afterAll can wait for the
+// onExit handler's in-flight work before removing tmpHome, then do the
+// cleanup itself (see afterAll).
+let pendingCwd = null;
+let pendingRunDir = null;
+let pendingLogPath = null;
+
+// Copied from HEADLESS_DISALLOWED_TOOLS in scheduler.cjs (about line 5622) —
+// a literal, not an import of the list under test. Comparing against the
+// same binding the production code exports would still pass if that list
+// were ever emptied by mistake; a literal catches it.
+const EXPECTED_HEADLESS_DISALLOWED_TOOLS = [
+  'ScheduleWakeup',
+  'CronCreate',
+  'CronDelete',
+  'CronList',
+  'Monitor',
+  'AskUserQuestion',
+  'EnterPlanMode',
+  'ExitPlanMode',
+  'EnterWorktree',
+  'ExitWorktree',
+];
 
 beforeAll(() => {
   originalHome = process.env.HOME;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-investigation-spawn-'));
   process.env.HOME = tmpHome;
-  ({ spawnInvestigation, HEADLESS_DISALLOWED_TOOLS } = require('../scheduler.cjs'));
+  ({ spawnInvestigation, _mutateForTests, tickQueue } = require('../scheduler.cjs'));
 });
+
+// Polls `logPath` for `substring` — at most 5s, every 25ms — instead of
+// trusting a fixed sleep to have been long enough. Fails with a clear
+// message on timeout rather than hanging or silently racing.
+async function waitForLogLine(logPath, substring, { timeoutMs = 5000, intervalMs = 25 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const text = fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf8') : '';
+    if (text.includes(substring)) return text;
+    if (Date.now() >= deadline) {
+      throw new Error(`HALT: "${substring}" never appeared in ${logPath} after ${timeoutMs}ms`);
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
 
 afterAll(async () => {
   // spawnInvestigation's onExit handler (fired when the child process exits,
   // AFTER this file's waitForMarker already observed the marker it wrote)
   // kicks off its own mutate()/tickQueue() calls fire-and-forget — same
   // shape scheduler-looks-done.test.cjs documents for reverifyNeedsReview's
-  // own call to spawnInvestigation. Give that in-flight work a moment to
-  // settle onto tmpHome before HOME is restored and tmpHome is removed, or
-  // it can race either one (observed: an intermittent ENOTEMPTY tearing down
-  // the shared vitest sandbox home when this wait was absent).
-  await new Promise((r) => setTimeout(r, 500));
+  // own call to spawnInvestigation. Wait for the condition that work needs
+  // to have settled, instead of a fixed sleep: first the handler's own
+  // "investigation exit code=" log line, then our own mutate()/tickQueue()
+  // calls — which queue strictly behind the handler's fire-and-forget ones,
+  // so ours only resolve once theirs already have. Only then is it safe to
+  // remove tmpHome, or the two can race (observed: an intermittent ENOTEMPTY
+  // tearing down the shared vitest sandbox home when this wait was absent).
+  if (pendingLogPath) {
+    await waitForLogLine(pendingLogPath, 'investigation exit code=');
+  }
+  if (typeof _mutateForTests === 'function') await _mutateForTests(() => {}).catch(() => {});
+  if (typeof tickQueue === 'function') await tickQueue().catch(() => {});
+  if (pendingCwd) fs.rmSync(pendingCwd, { recursive: true, force: true });
+  if (pendingRunDir) fs.rmSync(pendingRunDir, { recursive: true, force: true });
   process.env.HOME = originalHome;
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
@@ -96,6 +145,7 @@ async function waitForMarker(markerPath) {
 
 test('spawnInvestigation: the real probe child carries --disallowedTools, the timeout-shim PATH, and CLAUDE_CODE_DISABLE_BACKGROUND_TASKS', async () => {
   const cwd = fs.mkdtempSync(path.join(tmpHome, 'sm-investigation-cwd-'));
+  pendingCwd = cwd; // afterAll cleans this up, after waiting for onExit to settle
   git(['init', '-b', 'main'], cwd);
   git(['config', 'user.email', 'test@example.com'], cwd);
   git(['config', 'user.name', 'Test'], cwd);
@@ -105,6 +155,7 @@ test('spawnInvestigation: the real probe child carries --disallowedTools, the ti
 
   fs.mkdirSync(path.join(tmpHome, '.claude'), { recursive: true });
   const runDir = fs.mkdtempSync(path.join(tmpHome, '.claude', 'sm-investigation-run-'));
+  pendingRunDir = runDir; // afterAll cleans this up, after waiting for onExit to settle
   process.env.SM_CLAUDE_BIN = writeClaudeStub();
 
   // status 'failed' (not 'needs_review') with none of the resume-recovery /
@@ -112,27 +163,28 @@ test('spawnInvestigation: the real probe child carries --disallowedTools, the ti
   // pre-spawn guard in spawnInvestigation falls through so it reaches the
   // real spawn.
   const job = { slug: '99-example-lockdown-probe', status: 'failed', cwd };
+  // scheduler.cjs's spawnInvestigation builds this same path (about line
+  // 6601) — the onExit handler's final log line lands here.
+  pendingLogPath = path.join(runDir, `${job.slug}.investigation.log`);
 
-  try {
-    const result = await spawnInvestigation(job, runDir);
-    expect(result).toEqual({ deferred: false });
+  const result = await spawnInvestigation(job, runDir);
+  expect(result).toEqual({ deferred: false });
 
-    const marker = await waitForMarker(path.join(cwd, 'investigation-argv.marker'));
+  const marker = await waitForMarker(path.join(cwd, 'investigation-argv.marker'));
 
-    const idx = marker.argv.indexOf('--disallowedTools');
-    expect(idx).toBeGreaterThanOrEqual(0);
-    expect(marker.argv[idx + 1]).toBe(HEADLESS_DISALLOWED_TOOLS.join(','));
-    // Never last, never right before the prompt: the variadic list must be
-    // ended by another flag.
-    expect(marker.argv[idx + 2]).toMatch(/^--/);
+  const idx = marker.argv.indexOf('--disallowedTools');
+  expect(idx).toBeGreaterThanOrEqual(0);
+  expect(marker.argv[idx + 1]).toBe(EXPECTED_HEADLESS_DISALLOWED_TOOLS.join(','));
+  // Never last, never right before the prompt: the variadic list must be
+  // ended by another flag.
+  expect(marker.argv[idx + 2]).toMatch(/^--/);
 
-    // A headless run has no later turn to receive a background task's report.
-    expect(marker.disableBackgroundTasks).toBe('1');
+  // A headless run has no later turn to receive a background task's report.
+  expect(marker.disableBackgroundTasks).toBe('1');
 
-    const shimDir = path.join(tmpHome, '.claude', 'session-manager', 'bin');
-    expect(marker.path.split(path.delimiter)).toContain(shimDir);
-  } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
-    fs.rmSync(runDir, { recursive: true, force: true });
-  }
+  const shimDir = path.join(tmpHome, '.claude', 'session-manager', 'bin');
+  expect(marker.path.split(path.delimiter)).toContain(shimDir);
+  // cwd/runDir cleanup happens in afterAll, after the onExit handler's own
+  // fire-and-forget work (triggered by the child exiting, which may still be
+  // in flight here) has settled — removing them here would race that work.
 });

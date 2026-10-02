@@ -65,19 +65,25 @@ test('a new nested path (a/b/c.json, none of it exists) under a symlinked dir re
   expect(resolved).toBe(path.join(realBase, 'a', 'b', 'c.json'));
 });
 
-test('a root given through a symlink and the same root given by its real path both accept the same target', () => {
+test('a root given through a symlink and the same root given by its real path both accept the same target, resolved to the real path either way', () => {
   const realRoot = mkRealDir('sm-configrealresolve-root-');
   const linkRoot = mkSymlink(realRoot);
-  const target = path.join(realRoot, 'nested', 'f.json');
+  // The target itself is reached THROUGH the symlink here (unlike the real
+  // path used below) — this is what makes the case fail if realResolve were
+  // ever swapped back for a plain path.resolve: path.resolve would return
+  // the target's lexical, still-symlinked form, which matches neither the
+  // real root string validatePath checks it against nor targetViaReal below.
+  const targetViaLink = path.join(linkRoot, 'nested', 'f.json');
+  const targetViaReal = path.join(realRoot, 'nested', 'f.json');
 
   config.addAllowedRoot(linkRoot);
-  const viaLinkRegistration = config.validatePath(target);
+  const viaLinkRegistration = config.validatePath(targetViaLink);
 
   config.addAllowedRoot(realRoot);
-  const viaRealRegistration = config.validatePath(target);
+  const viaRealRegistration = config.validatePath(targetViaReal);
 
-  expect(viaLinkRegistration).toBe(target);
-  expect(viaRealRegistration).toBe(target);
+  expect(viaLinkRegistration).toBe(targetViaReal);
+  expect(viaRealRegistration).toBe(targetViaReal);
 });
 
 // Regression case: the actual bug only shows up when os.tmpdir() itself is

@@ -19,20 +19,13 @@
  */
 'use strict';
 
-const { execFile } = require('node:child_process');
 const gitWorktree = require('./gitWorktree.cjs');
+const { execGit: sharedExecGit } = require('./gitExec.cjs');
 
+// Thin re-shape over the shared gitExec.execGit — kept so call sites below
+// (positional `timeout`, no `-C` prefix needed) don't all need touching.
 function execGit(cwd, args, timeout = 20_000) {
-  return new Promise((resolve, reject) => {
-    execFile('git', ['-C', cwd, ...args], { timeout, windowsHide: true, encoding: 'utf8' }, (err, stdout, stderr) => {
-      if (err) {
-        err.stderrText = stderr;
-        reject(err);
-        return;
-      }
-      resolve(stdout || '');
-    });
-  });
+  return sharedExecGit(cwd, args, { timeout });
 }
 
 /** List every local branch under `refs/heads/sm-job/*`. Never throws. */

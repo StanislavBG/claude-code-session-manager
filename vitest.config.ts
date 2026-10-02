@@ -205,6 +205,7 @@ export default defineConfig({
       'src/main/__tests__/scheduler-verify-prd-path.test.cjs',
       'src/main/__tests__/scheduler-fix-plan-path.test.cjs',
       'src/main/lib/__tests__/jobWorktree.test.cjs',
+      'src/main/lib/__tests__/gitExec.test.cjs',
       'src/main/lib/__tests__/gitWorktree.test.cjs',
       'src/main/lib/__tests__/gitWorktreeStrayRefLanding.test.cjs',
       'src/main/lib/__tests__/gitWorktreeSalvage.test.cjs',

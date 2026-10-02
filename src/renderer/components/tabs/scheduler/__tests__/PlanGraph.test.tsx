@@ -226,7 +226,7 @@ describe('Graph mode — stage columns and rows', () => {
     const retry = pair.querySelector<HTMLElement>('[data-testid="stage-retry"]')!
     expect(retry.textContent).toBe('Retry #402')
     act(() => retry.click())
-    expect(api.schedule.resetJob).toHaveBeenCalledWith('402-f')
+    expect(api.schedule.resetJob).toHaveBeenCalledWith('402-f', '/p')
     const review = pair.querySelector<HTMLElement>('[data-testid="stage-review"]')!
     expect(review.textContent).toBe('Review #418')
     act(() => review.click())
@@ -254,7 +254,7 @@ describe('Graph mode — stage columns and rows', () => {
     open('2-f')
     const reset = q(el, '[data-slug="2-f"] button').find((b) => b.textContent === 'reset to pending →')!
     act(() => reset.click())
-    expect(api.schedule.resetJob).toHaveBeenCalledWith('2-f')
+    expect(api.schedule.resetJob).toHaveBeenCalledWith('2-f', '/p')
     act(() => q(el, '[data-slug="2-f"] button').find((b) => b.textContent === 'view log →')!.click())
     expect(api.schedule.readLog).toHaveBeenCalledWith('r8', '2-f')
   })

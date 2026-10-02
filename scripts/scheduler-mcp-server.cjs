@@ -171,11 +171,11 @@ const TOOLS = [
         implementationNotes: { type: 'string', description: 'File paths, patterns, and constraints the executor needs' },
         gate: {
           type: 'array', items: { type: 'string' },
-          description: 'REQUIRED. Commands that prove this PRD is done. The scheduler re-runs them. One command per entry, run in order; each must exit 0. Start each with `timeout <seconds>`. Join steps with &&. No pipes, redirects, ; or &. Use ["none"] only for docs or config with no runnable check.',
+          description: 'REQUIRED. Commands that prove this PRD is done. The scheduler re-runs them without a shell. One command per entry, run in order; each must exit 0. Start each with `timeout <seconds>`. Join steps with &&. Outside single quotes, no | < > ; & ` $ \\ * ? [ ] ( ) { } or !. Use ["none"], exactly, only for docs or config with no runnable check.',
         },
         files: {
           type: 'array', items: { type: 'string' },
-          description: 'REQUIRED. Repo-relative files or folders (end a folder with /) this PRD may change. PRDs that run at the same time must not share files; chain them with dependsOn instead.',
+          description: 'REQUIRED. Repo-relative files or folders (end a folder with /) this PRD may change. No absolute paths, .. or . segments, globs, backslashes or backticks. PRDs that run at the same time must not share files; chain them with dependsOn instead.',
         },
         outOfScope: { type: 'array', items: { type: 'string' }, description: 'Optional: what NOT to build' },
         slug: { type: 'string', description: 'Optional kebab-case slug; derived from title if omitted' },

@@ -89,10 +89,29 @@ function reportExists(key, runsDir = schedulerPaths.runsDir()) {
 
 const DEFAULT_GATE_TIMEOUT_MS = 300_000;
 
+// Any whitespace other than a plain space/tab, or a control char other than
+// tab — refused everywhere a gate chain is checked, quoted or not. Why: a
+// shell and this tokenizer must see the same bytes; plain `/\s/` would miss a
+// no-break space, U+2028/U+2029 or U+FEFF, which a shell treats as ordinary
+// (non-separator) characters inside a word.
+const FOREIGN_WHITESPACE_RE = /[^\S \t]|[\u0000-\u0008\u000A-\u001F\u007F]/;
+
+// Chars a shell treats specially — refused outside quotes. `#` and `~` are
+// handled on their own (they are fine in the middle of a word).
+const UNQUOTED_BAD_CHARS = '|<>;&`$\\*?[](){}!';
+
 /**
- * Quote-aware tokenizer for ONE command segment — no shell. Returns the argv
- * tokens, or null when an unquoted shell metacharacter survives (pipe,
- * redirect, `;`, lone `&`, backtick, `$(`/`${`) or a quote is unbalanced.
+ * Quote-aware tokenizer for ONE command segment — no shell. Returns
+ * `{ ok: true, tokens }`, or `{ ok: false, error }` when the segment needs a
+ * shell to run the same way a human would read it. Rules enforced (see
+ * explainChain's doc comment for the full numbered list):
+ *   - Outside quotes, only a space or tab separates words.
+ *   - Outside quotes, any char in UNQUOTED_BAD_CHARS is refused.
+ *   - An unquoted word may not start with `#` or `~`; `~` right after an
+ *     unquoted `=` or `:` is refused too (`a#b`, `HEAD~1` are fine).
+ *   - Inside double quotes, `$`, backtick and `\` are refused — a shell
+ *     would expand them. Inside single quotes, everything is literal.
+ *   - An unclosed quote is refused.
  * Complexity: O(n) over the segment's characters.
  */
 function tokenizeNoShell(seg) {
@@ -100,25 +119,51 @@ function tokenizeNoShell(seg) {
   let cur = '';
   let inTok = false;
   let quote = null;
+  let atWordStart = true;
+  let afterEqualsOrColon = false;
   for (let i = 0; i < seg.length; i++) {
     const c = seg[i];
     if (quote) {
-      if (c === quote) quote = null;
-      else cur += c;
+      if (c === quote) { quote = null; continue; }
+      if (quote === '"' && (c === '$' || c === '`' || c === '\\')) {
+        return { ok: false, error: `has "${c}" inside double quotes. A shell would expand it; the scheduler would not. Use single quotes.` };
+      }
+      cur += c;
       continue;
     }
-    if (c === '"' || c === "'") { quote = c; inTok = true; continue; }
-    if (/\s/.test(c)) {
+    if (c === '"' || c === "'") {
+      quote = c;
+      inTok = true;
+      atWordStart = false;
+      afterEqualsOrColon = false;
+      continue;
+    }
+    if (c === ' ' || c === '\t') {
       if (inTok) { tokens.push(cur); cur = ''; inTok = false; }
+      atWordStart = true;
+      afterEqualsOrColon = false;
       continue;
     }
-    if ('|<>;&`'.includes(c) || (c === '$' && (seg[i + 1] === '(' || seg[i + 1] === '{'))) return null;
+    if (c === '#' && atWordStart) {
+      return { ok: false, error: 'has a word that starts with "#". A shell reads it as a comment. Quote it.' };
+    }
+    if (c === '~' && (atWordStart || afterEqualsOrColon)) {
+      return {
+        ok: false,
+        error: 'has "~" at the start of a word or after "=" or ":". A shell would turn it into the home folder; the scheduler would not. Write the full path, or quote it.',
+      };
+    }
+    if (UNQUOTED_BAD_CHARS.includes(c)) {
+      return { ok: false, error: `has an unquoted "${c}". The scheduler runs gate commands without a shell. Put it inside single quotes, or move the check into a test file.` };
+    }
     cur += c;
     inTok = true;
+    atWordStart = false;
+    afterEqualsOrColon = c === '=' || c === ':';
   }
-  if (quote) return null;
+  if (quote) return { ok: false, error: 'has an unclosed quote.' };
   if (inTok) tokens.push(cur);
-  return tokens;
+  return { ok: true, tokens };
 }
 
 /**
@@ -145,37 +190,83 @@ function splitOnAndAnd(text) {
 }
 
 /**
- * Parse one `&&` chain into [{argv, timeoutMs, env, raw}]. Returns [] when any
- * segment is empty or needs a shell — a half-parsed gate must never run.
- * A leading `timeout N` (or `Ns`) token sets timeoutMs; leading literal
- * `NAME=value` tokens become env (a `TMPDIR=` assignment is dropped — the
- * shadow runner always supplies its own isolated TMPDIR; its value is
- * typically the un-runnable `$(mktemp -d)`, which is handled here without a
- * shell by simply never evaluating it).
+ * Explain whether a `&&`-joined command chain is a gate the scheduler can run
+ * without a shell, step by step. Rules, checked in this order (each failure
+ * returns its own `error`):
+ *   1. Any whitespace other than a plain space/tab, or a stray control char,
+ *      anywhere in the text (quoted or not).
+ *   2. An empty step (`a && && b`, a trailing `&&`).
+ *   3-9. tokenizeNoShell's rules, applied to each step in turn.
+ *   10. A step with no command left after `NAME=value` words and `timeout N`.
+ * "Start of a word" means the first char after a separator or the start of
+ * the step, when that char is unquoted — a word may mix quoted and unquoted
+ * parts, as in bash (`a'b c'd` is one word `ab cd`).
+ *
+ * @param {string} text
+ * @returns {{ok:true, steps:Array<{argv:string[],timeoutMs:number,env:object,raw:string}>, timeoutGiven:boolean[]}|{ok:false, error:string}}
  */
-function parseChain(text) {
-  const out = [];
-  for (const seg of splitOnAndAnd(text)) {
-    const raw = seg.trim();
-    if (!raw) return [];
-    // A dropped TMPDIR=$(mktemp -d) prefix is the one substitution we accept.
-    const stripped = raw.replace(/^TMPDIR=\$\(mktemp -d\)\s+/, '');
-    const tokens = tokenizeNoShell(stripped);
-    if (!tokens || !tokens.length) return [];
+function explainChain(text) {
+  if (FOREIGN_WHITESPACE_RE.test(text)) {
+    return {
+      ok: false,
+      error: 'has a character that is not a plain space or tab (for example a no-break space or a line break). Retype it.',
+    };
+  }
+
+  const steps = [];
+  const timeoutGiven = [];
+  const segs = splitOnAndAnd(text);
+  for (let i = 0; i < segs.length; i++) {
+    const stepNo = i + 1;
+    const raw = segs[i].trim();
+    if (!raw) return { ok: false, error: `step ${stepNo} is empty. Check the "&&" joins.` };
+    // A dropped TMPDIR=$(mktemp -d) prefix is the one substitution we accept
+    // — the shadow runner always supplies its own isolated TMPDIR, so the
+    // un-runnable `$(mktemp -d)` is handled here by simply never evaluating it.
+    const stripped = raw.replace(/^TMPDIR=\$\(mktemp -d\)[ \t]+/, '');
+    const tokenized = tokenizeNoShell(stripped);
+    if (!tokenized.ok) return { ok: false, error: tokenized.error };
+    const tokens = tokenized.tokens;
     const env = {};
     while (tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0])) {
       const [k, ...rest] = tokens.shift().split('=');
       if (k !== 'TMPDIR') env[k] = rest.join('=');
     }
     let timeoutMs = DEFAULT_GATE_TIMEOUT_MS;
+    let hadTimeout = false;
     if (tokens[0] === 'timeout' && /^\d+s?$/.test(tokens[1] || '')) {
       timeoutMs = parseInt(tokens[1], 10) * 1000;
       tokens.splice(0, 2);
+      hadTimeout = true;
     }
-    if (!tokens.length) return [];
-    out.push({ argv: tokens, timeoutMs, env, raw });
+    if (!tokens.length) return { ok: false, error: `step ${stepNo} has no command after "timeout" or NAME=value.` };
+    steps.push({ argv: tokens, timeoutMs, env, raw });
+    timeoutGiven.push(hadTimeout);
   }
-  return out;
+  return { ok: true, steps, timeoutGiven };
+}
+
+/**
+ * Parse one `&&` chain into [{argv, timeoutMs, env, raw}]. Returns [] when any
+ * step is empty or needs a shell — a half-parsed gate must never run. See
+ * explainChain for the rules and the reason behind each refusal.
+ */
+function parseChain(text) {
+  const r = explainChain(text);
+  return r.ok ? r.steps : [];
+}
+
+/**
+ * True when `entry` is the literal opt-out `"none"` (case-insensitive, outer
+ * whitespace ignored) — nothing else. A near-miss (`"none."`, `"'none'"`,
+ * `"NONE!"`) is NOT none; a caller that accepts a quoted YAML form strips the
+ * quotes first (see readExplicitGate).
+ *
+ * @param {unknown} entry
+ * @returns {boolean}
+ */
+function isNoneGate(entry) {
+  return typeof entry === 'string' && /^none$/i.test(entry.trim());
 }
 
 /** Locate the `# Acceptance criteria` lines (whole body when the heading is absent). */
@@ -215,7 +306,10 @@ function readExplicitGate(prdText) {
       const m = fmLines[i].match(/^gate:\s*(.*)$/);
       if (!m) continue;
       const rest = m[1].trim();
-      if (/^(['"]?)none\1$/i.test(rest)) return { kind: 'none' };
+      // YAML quoting ('none' / "none") still reads as the opt-out — strip a
+      // matching pair of outer quotes, if present, before the isNoneGate test.
+      const unquotedRest = rest.replace(/^(['"])(.*)\1$/, '$2');
+      if (isNoneGate(unquotedRest)) return { kind: 'none' };
       const chains = [];
       if (rest.startsWith('[') && rest.endsWith(']')) {
         // Inline list — items may hold commas inside quotes, so split quote-aware.
@@ -241,7 +335,7 @@ function readExplicitGate(prdText) {
   const fence = prdText.match(/^```gate[ \t]*\r?\n([\s\S]*?)^```/m);
   if (fence) {
     const chains = fence[1].split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
-    if (chains.length === 1 && /^none$/i.test(chains[0])) return { kind: 'none' };
+    if (chains.length === 1 && isNoneGate(chains[0])) return { kind: 'none' };
     if (chains.length) return { kind: 'commands', chains };
   }
   return null;
@@ -775,6 +869,8 @@ module.exports = {
   extractAcCommand,
   extractAcSequence,
   parseChain,
+  explainChain,
+  isNoneGate,
   resolveGate,
   runGateSequence,
   extractSection,

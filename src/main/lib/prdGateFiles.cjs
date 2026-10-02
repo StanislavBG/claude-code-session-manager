@@ -15,7 +15,7 @@
  * No I/O, no scheduler imports — pure string-in, string/array-out.
  */
 
-const { parseChain } = require('./definitionOfDone.cjs');
+const { parseChain, explainChain, isNoneGate } = require('./definitionOfDone.cjs');
 
 const GATE_MIN_ENTRIES = 1;
 const GATE_MAX_ENTRIES = 10;
@@ -26,6 +26,16 @@ const FILES_ENTRY_MAX_CHARS = 300;
 
 const NONE_GATE_WARNING =
   'Gate is none: the scheduler cannot re-check this PRD. Use none only for docs or config with no runnable check.';
+
+// Same whitespace/control-char rule explainChain's rule 1 uses
+// (definitionOfDone.cjs), minus tab — a tab has no legitimate place in a
+// repo-relative file path.
+const FILES_FOREIGN_WHITESPACE_RE = /[^\S ]|[\u0000-\u0008\u000A-\u001F\u007F]/;
+
+// Chars stripped from a gate entry's first word before comparing it to
+// "none" — quotes, plus the punctuation a typo or trailing comment tends to
+// add (`none.`, `"none"`, `none!`).
+const NONE_PUNCT_STRIP_RE = /^[.,;:!?()[\]{}#'"]+|[.,;:!?()[\]{}#'"]+$/g;
 
 /** Cut a string to 80 chars for an error message, marking truncation with "…". */
 function cut80(s) {
@@ -38,17 +48,14 @@ function entryError(field, index, entry, rule) {
 }
 
 /**
- * True when `raw` (a parseChain step's original segment text) starts with
- * `timeout <seconds>` after the optional `TMPDIR=$(mktemp -d) ` prefix and
- * any leading `NAME=value` words — mirrors parseChain's own prefix-stripping
- * so the missing-timeout warning lines up with what parseChain actually ran.
+ * True when `entry` reads as a typo'd "none" opt-out (`none.`, `"none"`,
+ * `none # docs`, `NONE!`) but is not the exact opt-out itself. The exact
+ * opt-out (isNoneGate) is never a near-miss.
  */
-function stepStartsWithTimeout(raw) {
-  let s = raw.trim().replace(/^TMPDIR=\$\(mktemp -d\)\s+/, '');
-  while (/^[A-Za-z_][A-Za-z0-9_]*=\S*\s+/.test(s)) {
-    s = s.replace(/^[A-Za-z_][A-Za-z0-9_]*=\S*\s+/, '');
-  }
-  return /^timeout\s+\d+(\s|$)/.test(s);
+function isNearMissNone(entry) {
+  if (isNoneGate(entry)) return false;
+  const firstWord = entry.split(/[ \t]+/)[0] ?? '';
+  return /^none$/i.test(firstWord.replace(NONE_PUNCT_STRIP_RE, ''));
 }
 
 /**
@@ -72,7 +79,9 @@ function validateGate(gate) {
 
   // Per-entry shape rules — run uniformly over every entry, including "none"
   // (it trivially satisfies all of them; the none/mixed semantics are a
-  // separate check below).
+  // separate check below). explainChain's result is kept per entry so the
+  // missing-timeout warning pass below never re-parses.
+  const explainedByEntry = [];
   for (let i = 0; i < trimmed.length; i++) {
     const entry = trimmed[i];
     const idx = i + 1;
@@ -91,17 +100,22 @@ function validateGate(gate) {
     if (entry.startsWith('#')) {
       return { ok: false, error: entryError('gate', idx, entry, 'must not start with "#" — the fence parser drops lines starting with "#".') };
     }
-    if (!parseChain(entry).length) {
+    if (isNearMissNone(entry)) {
       return {
         ok: false,
-        error: entryError('gate', idx, entry, 'no pipes, redirects, ";", "&", backticks, "$(" or "${". Join steps with "&&".'),
+        error: entryError('gate', idx, entry, 'write exactly none, with nothing else, for a PRD with no runnable check.'),
       };
     }
+    const explained = explainChain(entry);
+    if (!explained.ok) {
+      return { ok: false, error: entryError('gate', idx, entry, explained.error) };
+    }
+    explainedByEntry.push(explained);
   }
 
   // "none" semantics: alone it's the opt-out; mixed with anything else it's
   // an error (one PRD cannot be both "no gate" and "here is a gate").
-  const noneIdx = trimmed.findIndex((e) => /^none$/i.test(e));
+  const noneIdx = trimmed.findIndex((e) => isNoneGate(e));
   if (noneIdx !== -1) {
     if (trimmed.length > 1) {
       return {
@@ -118,14 +132,14 @@ function validateGate(gate) {
   // Missing-timeout warning (never rejects) — a step without one can hang
   // the run.
   const warnings = [];
-  trimmed.forEach((entry, i) => {
-    for (const step of parseChain(entry)) {
-      if (!stepStartsWithTimeout(step.raw)) {
+  explainedByEntry.forEach((explained, i) => {
+    explained.steps.forEach((step, stepIdx) => {
+      if (!explained.timeoutGiven[stepIdx]) {
         warnings.push(
           `gate entry ${i + 1} step "${cut80(step.raw)}" does not start with "timeout <seconds>" — a step without a timeout can hang the run.`,
         );
       }
-    }
+    });
   });
 
   return { ok: true, commands: trimmed, warnings };
@@ -136,7 +150,7 @@ function validateGate(gate) {
  *
  * @param {unknown} files
  * @returns {{ok:true, files:string[]}|{ok:false, error:string}}
- *   files is deduped (exact match, order preserved) with one leading `./`
+ *   files is deduped (exact match, order preserved) with every leading `./`
  *   stripped per entry.
  */
 function validateFiles(files) {
@@ -165,17 +179,44 @@ function validateFiles(files) {
     if (/[\r\n]/.test(entry)) {
       return { ok: false, error: entryError('files', idx, entry, 'must not contain a newline.') };
     }
-    if (entry.startsWith('/') || entry.startsWith('~') || entry.startsWith('\\') || /^[A-Za-z]:/.test(entry)) {
-      return { ok: false, error: entryError('files', idx, entry, 'must be repo-relative — absolute paths are not allowed.') };
+    if (FILES_FOREIGN_WHITESPACE_RE.test(entry)) {
+      return {
+        ok: false,
+        error: entryError('files', idx, entry, 'has a character that is not a plain space (for example a tab, a no-break space, or a line break). Retype it.'),
+      };
     }
-    if (entry.split('/').includes('..')) {
-      return { ok: false, error: entryError('files', idx, entry, 'must not contain a ".." path segment.') };
+    if (entry.includes('\\')) {
+      return { ok: false, error: entryError('files', idx, entry, 'use "/" between folders, not "\\".') };
+    }
+    if (entry.includes('`')) {
+      return { ok: false, error: entryError('files', idx, entry, 'must not contain a backtick.') };
+    }
+    if (entry.startsWith('-')) {
+      return { ok: false, error: entryError('files', idx, entry, 'must not start with "-".') };
+    }
+    if (entry.startsWith('/') || entry.startsWith('~') || /^[A-Za-z]:/.test(entry)) {
+      return { ok: false, error: entryError('files', idx, entry, 'must be repo-relative — absolute paths are not allowed.') };
     }
     if (entry.includes('*') || entry.includes('?')) {
       return { ok: false, error: entryError('files', idx, entry, 'must not contain "*" or "?" (no globs).') };
     }
 
-    const normalized = entry.startsWith('./') ? entry.slice(2) : entry;
+    let normalized = entry;
+    while (normalized.startsWith('./')) normalized = normalized.slice(2);
+    if (normalized.length === 0) {
+      return { ok: false, error: entryError('files', idx, entry, 'is empty after removing "./".') };
+    }
+    const segments = normalized.split('/');
+    if (segments.includes('..')) {
+      return { ok: false, error: entryError('files', idx, entry, 'must not contain a ".." path segment.') };
+    }
+    if (segments.includes('.')) {
+      return { ok: false, error: entryError('files', idx, entry, 'must not contain a "." path segment.') };
+    }
+    if (normalized.includes('//')) {
+      return { ok: false, error: entryError('files', idx, entry, 'must not contain an empty path segment ("//").') };
+    }
+
     if (!seen.has(normalized)) {
       seen.add(normalized);
       out.push(normalized);
@@ -212,7 +253,7 @@ function renderFilesSection(files) {
  * @returns {string[]}
  */
 function renderGateSection(commandsOrNone) {
-  const isNone = commandsOrNone.length === 1 && /^none$/i.test(commandsOrNone[0]);
+  const isNone = commandsOrNone.length === 1 && isNoneGate(commandsOrNone[0]);
   if (isNone) {
     return [
       '# Gate', '',

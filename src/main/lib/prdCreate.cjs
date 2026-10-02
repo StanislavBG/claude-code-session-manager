@@ -33,7 +33,7 @@ const { isFixPlanSlug } = require('./fixPlanSlug.cjs');
 const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
 const { sizingWarnings } = require('./prdSizing.cjs');
 const { validateGate, validateFiles, renderFilesSection, renderGateSection } = require('./prdGateFiles.cjs');
-const { resolveGate, parseChain } = require('./definitionOfDone.cjs');
+const { resolveGate, parseChain, isNoneGate } = require('./definitionOfDone.cjs');
 
 // A caller-supplied slug that already starts with its own `NN-` (e.g.
 // "254-perf-x") used to silently become the double-prefixed row
@@ -359,6 +359,40 @@ async function createPrd(input, remote) {
     }
   }
 
+  // Fake-heading guard (gate-and-files-in-PRD-body unit): a caller-supplied
+  // free-text field that itself contains a "# Gate" or "# Files" heading line
+  // would, after buildPrdBody splices in the real section below, read as TWO
+  // Gate/Files sections — readExplicitGate takes the FIRST fence/heading it
+  // finds, so the fake one would silently win and the executor would see the
+  // wrong gate. Checked before NN allocation so a refusal burns no number.
+  const HEADING_LINE_RE = /^ {0,3}#{1,6}[ \t]+(gate|files)[ \t]*#*[ \t]*$/i;
+  function headingGuardError(fieldLabel, text) {
+    if (typeof text !== 'string') return null;
+    for (const line of text.split(/\r\n|\r|\n/)) {
+      if (HEADING_LINE_RE.test(line)) {
+        return `The ${fieldLabel} text has a "# Gate" or "# Files" heading. The API writes those sections ` +
+          'from the gate and files fields. Remove the heading and call again.';
+      }
+    }
+    return null;
+  }
+  for (const [fieldLabel, text] of [['goal', input.goal], ['implementation notes', input.implementationNotes]]) {
+    const headingError = headingGuardError(fieldLabel, text);
+    if (headingError) return { ok: false, status: 400, error: headingError };
+  }
+  if (Array.isArray(input.acceptanceCriteria)) {
+    for (const entry of input.acceptanceCriteria) {
+      const headingError = headingGuardError('acceptance criteria', entry);
+      if (headingError) return { ok: false, status: 400, error: headingError };
+    }
+  }
+  if (Array.isArray(input.outOfScope)) {
+    for (const entry of input.outOfScope) {
+      const headingError = headingGuardError('out of scope', entry);
+      if (headingError) return { ok: false, status: 400, error: headingError };
+    }
+  }
+
   // Gate + files validation (gate-and-files-in-PRD-body unit): fail-closed,
   // checked BEFORE NN allocation so a refusal burns no number — same posture
   // as the artifactPaths checks above. The actual shape rules live in
@@ -512,7 +546,7 @@ async function createPrd(input, remote) {
   // text — and the scheduler would silently re-run the wrong gate. Caught
   // here, before the write, rather than discovered later from a job log.
   if (gateCommands) {
-    const expectedSource = gateCommands.length === 1 && /^none$/i.test(gateCommands[0]) ? 'none' : 'explicit';
+    const expectedSource = gateCommands.length === 1 && isNoneGate(gateCommands[0]) ? 'none' : 'explicit';
     const expectedSequence = expectedSource === 'none' ? [] : gateCommands.flatMap(parseChain);
     const resolved = resolveGate(body);
     const matches = resolved.source === expectedSource
@@ -521,8 +555,9 @@ async function createPrd(input, remote) {
       return {
         ok: false,
         status: 400,
-        error: 'The PRD text already holds a gate fence (```gate), so the scheduler would read the wrong gate. '
-          + 'Remove it from the goal, notes or criteria and call again.',
+        error: 'The PRD text already holds a gate fence (three backticks + gate), so the scheduler would read '
+          + 'the wrong gate. Remove it from the goal, implementation notes, acceptance criteria, out of scope '
+          + 'or files, and call again.',
       };
     }
   }
@@ -588,7 +623,7 @@ async function createPrd(input, remote) {
     // gate-and-files-in-PRD-body unit: honest echo of what was actually
     // validated and rendered, same spirit as `note` above — never a fabricated status.
     gate: {
-      source: gateCommands ? (gateCommands.length === 1 && /^none$/i.test(gateCommands[0]) ? 'none' : 'explicit') : 'absent',
+      source: gateCommands ? (gateCommands.length === 1 && isNoneGate(gateCommands[0]) ? 'none' : 'explicit') : 'absent',
       commands: gateCommands || [],
     },
     files: filesList || [],

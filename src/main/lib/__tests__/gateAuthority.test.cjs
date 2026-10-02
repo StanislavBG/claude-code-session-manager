@@ -23,8 +23,10 @@ function baseParams(overrides = {}) {
     },
     gate: { source: 'ac-line', sequence: [{ argv: ['npm', 'run', 'test'] }], ...gate },
     outcome: { status: 'green', ...outcome },
+    evidenceOk: true,
     ancestorOk: true,
     cleanOk: true,
+    headStable: true,
     env: {},
     ...rest,
   };
@@ -60,17 +62,27 @@ test('check 3: no-landed-commit — missing or empty', () => {
   assert.deepEqual(decideGateAuthority(empty), { complete: false, reason: 'no-landed-commit' });
 });
 
-test('check 4: commit-not-on-head when ancestorOk is false', () => {
+test('check 4: commit-not-from-this-run when evidenceOk is false', () => {
+  const params = { ...baseParams(), evidenceOk: false };
+  assert.deepEqual(decideGateAuthority(params), { complete: false, reason: 'commit-not-from-this-run' });
+});
+
+test('check 5: commit-not-on-head when ancestorOk is false', () => {
   const params = { ...baseParams(), ancestorOk: false };
   assert.deepEqual(decideGateAuthority(params), { complete: false, reason: 'commit-not-on-head' });
 });
 
-test('check 5: tree-dirty when cleanOk is false', () => {
+test('check 6: tree-dirty when cleanOk is false', () => {
   const params = { ...baseParams(), cleanOk: false };
   assert.deepEqual(decideGateAuthority(params), { complete: false, reason: 'tree-dirty' });
 });
 
-test('check 6: no-gate — absent source, and an explicit source with an empty sequence', () => {
+test('check 7: head-moved-during-gate when headStable is false', () => {
+  const params = { ...baseParams(), headStable: false };
+  assert.deepEqual(decideGateAuthority(params), { complete: false, reason: 'head-moved-during-gate' });
+});
+
+test('check 8: no-gate — absent source, and an explicit source with an empty sequence', () => {
   const absent = baseParams({ gate: { source: 'absent', sequence: [] } });
   assert.deepEqual(decideGateAuthority(absent), { complete: false, reason: 'no-gate' });
 
@@ -78,12 +90,27 @@ test('check 6: no-gate — absent source, and an explicit source with an empty s
   assert.deepEqual(decideGateAuthority(emptySequence), { complete: false, reason: 'no-gate' });
 });
 
-test('check 7: gate-not-green when the re-run outcome is not green', () => {
+test('check 9: gate-not-green when the re-run outcome is not green', () => {
   const red = baseParams({ outcome: { status: 'red' } });
   assert.deepEqual(decideGateAuthority(red), { complete: false, reason: 'gate-not-green' });
 
   const unavailable = baseParams({ outcome: { status: 'unavailable' } });
   assert.deepEqual(decideGateAuthority(unavailable), { complete: false, reason: 'gate-not-green' });
+});
+
+test('check order: evidenceOk wins over ancestorOk, cleanOk and headStable all failing at once', () => {
+  const params = { ...baseParams(), evidenceOk: false, ancestorOk: false, cleanOk: false, headStable: false };
+  assert.deepEqual(decideGateAuthority(params), { complete: false, reason: 'commit-not-from-this-run' });
+});
+
+test('check order: ancestorOk wins over cleanOk and headStable both failing, once evidenceOk passes', () => {
+  const params = { ...baseParams(), ancestorOk: false, cleanOk: false, headStable: false };
+  assert.deepEqual(decideGateAuthority(params), { complete: false, reason: 'commit-not-on-head' });
+});
+
+test('check order: cleanOk wins over headStable failing too, once evidenceOk and ancestorOk pass', () => {
+  const params = { ...baseParams(), cleanOk: false, headStable: false };
+  assert.deepEqual(decideGateAuthority(params), { complete: false, reason: 'tree-dirty' });
 });
 
 test('defaults env to process.env when not passed', () => {

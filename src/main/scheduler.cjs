@@ -7384,6 +7384,10 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           source: 'spawnJob:dispatch',
         });
         delete s.jobs[idx].heldReason;
+        // A fresh dispatch means any gateShadow on this row was computed for
+        // an earlier runId/startedAt — never let it linger and read as this
+        // run's result.
+        delete s.jobs[idx].gateShadow;
         s.jobs[idx].runId = runId;
         s.jobs[idx].startedAt = new Date().toISOString();
         // Dispatch-phase breadcrumb (PRD: dispatch-region diagnostic
@@ -11222,22 +11226,58 @@ async function computeLooksDone(job, fetchedCwds) {
   return { commits: attributed.commits, paths, detectedAt: new Date().toISOString(), rule: attributed.rule };
 }
 
+// Dirty, non-ignored tracked+untracked paths at `cwd`, app-owned churn
+// stripped (stripAppOwnedChurn) — null on any git failure, never thrown.
+// runGateShadow calls this once before the gate and once after, so it can
+// tell a tree that was clean throughout from one a foreign write (or the
+// gate command itself) touched mid-gate. Deliberately no
+// `--untracked-files=no`: an uncommitted new file left by a shared-tree job
+// must count as dirty here (see decideGateAuthority's cleanOk).
+async function gateTreeDirt(cwd) {
+  try {
+    return stripAppOwnedChurn(parsePorcelain(await execGitAt(cwd, ['status', '--porcelain'])));
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Shadow gate (observation only): run a needs_review row's authored gate at
- * the project's current HEAD and record what it WOULD have decided as
- * `gateShadow` on the verdicts sidecar and the row. Changes NO status, takes
- * no slot (not a claude -p run — runGateSequence keeps one shadow gate in
- * flight machine-wide). Never called from finalize: only the reverify pass.
- * Returns the recorded gateShadow, or null when nothing was recorded (already
- * recorded at this HEAD, PRD unreadable, or another shadow gate is running).
+ * Shadow gate: run a needs_review row's authored gate at the project's
+ * current HEAD and record what it decided as `gateShadow`, on the verdicts
+ * sidecar and the row. For every verdict this is observation only — status
+ * never changes from it alone. For the three verdicts in
+ * GATE_AUTHORITY_VERDICTS, with a landed commit that is git-verified evidence
+ * from THIS dispatch (never an older run's stale sha — see
+ * resolveLandedCommitEvidence) that is also an ancestor of HEAD recorded
+ * before the gate ran, a green re-run against that EXACT tree (HEAD unmoved,
+ * tracked+untracked tree clean, both before and after the gate ran) is gate
+ * AUTHORITY: it completes the row with no human in the loop. Any other
+ * result — stale/missing evidence, the commit not an ancestor, a dirty tree,
+ * HEAD moving mid-gate, no gate, or a non-green outcome — leaves status
+ * untouched.
+ *
+ * Takes no slot (not a claude -p run — runGateSequence keeps one shadow gate
+ * in flight machine-wide). Never called from finalize: only the reverify
+ * pass. `gateShadow.definitive` marks whether this result is settled: true
+ * only for a clean-throughout, HEAD-unmoved run with a real pass/fail outcome
+ * — the only shape worth trusting indefinitely. Anything else (a dirty tree,
+ * a moved HEAD, or an unavailable outcome) is recorded but re-run on the very
+ * next pick instead of being memoized as settled.
+ *
+ * Returns the recorded gateShadow, or null when nothing was recorded (HEAD
+ * unreadable — there is no tree to bind the result to —, already recorded
+ * definitively at this HEAD, PRD unreadable, or another shadow gate is
+ * running).
  */
 async function runGateShadow(job) {
   if (!job || !job.slug || !job.cwd) return null;
   const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
   let prdText;
   try { prdText = fs.readFileSync(prdPath, 'utf8'); } catch { return null; }
-  const head = await gitHead(job.cwd);
-  if (job.gateShadow && job.gateShadow.head === head) return null;
+  const headBefore = await gitHead(job.cwd);
+  if (!headBefore) return null; // no tree to bind the result to
+  if (job.gateShadow && job.gateShadow.head === headBefore && job.gateShadow.definitive === true) return null;
+  const dirtBefore = await gateTreeDirt(job.cwd);
   const gate = resolveGate(prdText);
   let outcome;
   if (gate.source === 'none') outcome = { status: 'unavailable', reason: 'gate-opt-out', results: [] };
@@ -11247,13 +11287,24 @@ async function runGateShadow(job) {
     if (r.status === 'busy') return null;
     outcome = r;
   }
-  const gateShadow = { ...outcome, head, source: gate.source, ranAt: new Date().toISOString() };
+  const headAfter = await gitHead(job.cwd);
+  const dirtAfter = await gateTreeDirt(job.cwd);
+  const headStable = headAfter !== null && headAfter === headBefore;
+  const cleanOk = Array.isArray(dirtBefore) && dirtBefore.length === 0
+    && Array.isArray(dirtAfter) && dirtAfter.length === 0;
+  // "A real pass or fail" — an unavailable outcome (opt-out, no parseable
+  // gate) is never definitive even at a clean, unmoved tree: it says nothing
+  // about done-ness, so it must stay eligible for retry once the PRD gains a
+  // real gate. `busy` never reaches here (returns early above).
+  const definitive = headStable && cleanOk && (outcome.status === 'green' || outcome.status === 'red');
+  const gateShadow = { ...outcome, head: headBefore, source: gate.source, ranAt: new Date().toISOString(), definitive };
 
   // Gate authority: a green re-run may complete the row outright, but only
   // for transcript-noise verdicts with a landed commit — every other park
   // (including no verdict at all) falls through to the plain observe-only
-  // path below, unchanged. ancestorOk/cleanOk are ground-truth git checks,
-  // never trusted from anything the job itself reported.
+  // path above, unchanged. evidenceOk/ancestorOk/cleanOk/headStable are all
+  // ground-truth git checks against job.startedAt and headBefore — never
+  // trusted from anything the job itself reported.
   let decision = null;
   if (
     job.verifierVerdict
@@ -11261,15 +11312,20 @@ async function runGateShadow(job) {
     && typeof job.landedCommit === 'string'
     && job.landedCommit.length > 0
   ) {
+    // resolveLandedCommitEvidence skips its own time check when sinceIso is
+    // empty — so a missing/unparseable startedAt must refuse here, never
+    // fall through to "no time bound at all".
+    const startedAtMs = typeof job.startedAt === 'string' ? Date.parse(job.startedAt) : NaN;
+    let evidenceOk = false;
+    if (Number.isFinite(startedAtMs)) {
+      try { evidenceOk = await resolveLandedCommitEvidence(job.cwd, job.landedCommit, job.startedAt); } catch { evidenceOk = false; }
+    }
     let ancestorOk = false;
-    try { ancestorOk = await landedCommitIsAncestorOfHead(job.cwd, job.landedCommit); } catch { ancestorOk = false; }
-    let cleanOk = false;
     try {
-      const status = await execGitAt(job.cwd, ['status', '--porcelain', '--untracked-files=no']);
-      const dirty = stripAppOwnedChurn(parsePorcelain(status));
-      cleanOk = Array.isArray(dirty) && dirty.length === 0;
-    } catch { cleanOk = false; }
-    decision = decideGateAuthority({ job, gate, outcome, ancestorOk, cleanOk });
+      await execGitAt(job.cwd, ['merge-base', '--is-ancestor', job.landedCommit, headBefore], { timeout: 10_000 });
+      ancestorOk = true;
+    } catch { ancestorOk = false; }
+    decision = decideGateAuthority({ job, gate, outcome, evidenceOk, ancestorOk, cleanOk, headStable });
     gateShadow.authority = decision;
   }
 
@@ -11285,19 +11341,32 @@ async function runGateShadow(job) {
     }
   }
 
+  const headShort = headBefore ? headBefore.slice(0, 7) : 'unknown';
+
   // Resolve inside the SAME mutate that records the shadow, re-checking the
-  // row is still needs_review with the SAME verdict it had when `decision`
-  // was computed — a park can change underneath this async function (heal,
-  // human reset) between the gate run above and this write landing.
+  // live row still matches the snapshot `job` on status, verdict, runId AND
+  // startedAt — a park can change underneath this async function (heal,
+  // human reset, a fresh dispatch of the same slug) between the gate run and
+  // this write landing, and any such change invalidates both the plain
+  // observation and the authority decision alike, so the whole result is
+  // dropped rather than written onto a row it was never computed for.
   let resolved = null;
   await mutate((s) => {
     for (const j of s.jobs) {
-      if (j.slug !== job.slug || j.status !== 'needs_review') continue;
+      if (j.slug !== job.slug) continue;
+      const unchanged = j.status === 'needs_review'
+        && j.verifierVerdict === job.verifierVerdict
+        && j.runId === job.runId
+        && j.startedAt === job.startedAt;
+      if (!unchanged) {
+        console.log(`[scheduler] gate authority: ${job.slug} result dropped — row changed under the gate`);
+        continue;
+      }
       j.gateShadow = gateShadow;
-      if (!decision?.complete || j.verifierVerdict !== job.verifierVerdict) continue;
+      if (!decision?.complete) continue;
       const v = j.verifierVerdict;
       transitionJob(j, 'completed', {
-        reason: `gate re-run green at ${head.slice(0, 7)}; verdict ${v} overridden`,
+        reason: `gate re-run green at ${headShort}; verdict ${v} overridden`,
         source: 'gateAuthoritative',
       });
       j.error = null;
@@ -11310,8 +11379,8 @@ async function runGateShadow(job) {
     try { await archiveCompletedPrd(resolved.slug, resolved.cwd); } catch (e) {
       console.error('[scheduler] gate authority archive error', resolved.slug, e);
     }
-    appendAuditEvent('needs_review_gate_resolved', { slug: resolved.slug, cwd: resolved.cwd, verdict: resolved.verdict, head });
-    console.log(`[scheduler] gate authority: ${resolved.slug} completed — gate re-run green at ${head.slice(0, 7)}, verdict ${resolved.verdict} overridden`);
+    appendAuditEvent('needs_review_gate_resolved', { slug: resolved.slug, cwd: resolved.cwd, verdict: resolved.verdict, head: headBefore });
+    console.log(`[scheduler] gate authority: ${resolved.slug} completed — gate re-run green at ${headShort}, verdict ${resolved.verdict} overridden`);
   }
   await broadcast();
   return gateShadow;

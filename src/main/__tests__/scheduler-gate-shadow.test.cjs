@@ -1,6 +1,11 @@
 /**
  * scheduler-gate-shadow.test.cjs — the shadow gate records `gateShadow` on the
- * verdicts sidecar and the row, and NEVER changes a status.
+ * verdicts sidecar and the row. For most verdicts that is observation only:
+ * status never changes. For the three gate-authority verdicts, with a landed
+ * commit proven to be evidence from THIS dispatch (not a stale sha) and the
+ * exact tree the gate ran against (HEAD unmoved, tree clean, both before and
+ * after), a green re-run DOES complete the row — see the "gate authority"
+ * tests below.
  *
  * HOME is overridden BEFORE requiring scheduler.cjs (top-level consts bake in
  * os.homedir() — see scheduler-looks-done.test.cjs).
@@ -33,6 +38,14 @@ const { auditLogPath } = require('../lib/auditLog.cjs');
 
 function git(args, cwd) { return execFileSync('git', args, { cwd, encoding: 'utf8' }); }
 
+// A standalone script, never inside any test repo (so it never pollutes a
+// test's own git status), that a gate command can invoke to dirty a tracked
+// file mid-gate. Single-quoted in the gate strings below so neither this path
+// nor the target path needs to be free of shell-ish characters for
+// tokenizeNoShell to parse — see definitionOfDone.cjs.
+const dirtyFileScript = path.join(tmpHome, 'dirty-file.cjs');
+fs.writeFileSync(dirtyFileScript, 'require("fs").writeFileSync(process.argv[2], "dirtied\\n");\n');
+
 function setup(name, gateBody) {
   const cwd = path.join(tmpHome, name);
   fs.mkdirSync(cwd, { recursive: true });
@@ -58,7 +71,12 @@ function setup(name, gateBody) {
   const stateDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
   fs.mkdirSync(stateDir, { recursive: true });
   const queuePath = path.join(stateDir, 'queue.json');
-  const job = { slug, status: 'needs_review', cwd, runId, verifierVerdict: 'transcript_errors', startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() };
+  // Backdated 60s: resolveLandedCommitEvidence (via evidenceOk) requires the
+  // landed commit's committer date to be AT OR AFTER startedAt. The init
+  // commit above and this timestamp are otherwise within the same second, and
+  // git truncates committer dates to whole seconds, so an un-backdated
+  // startedAt is flaky — it can land AFTER the commit it is meant to predate.
+  const job = { slug, status: 'needs_review', cwd, runId, verifierVerdict: 'transcript_errors', startedAt: new Date(Date.now() - 60_000).toISOString(), finishedAt: new Date().toISOString() };
   fs.writeFileSync(queuePath, JSON.stringify({ jobs: [job] }, null, 2));
   return { cwd, slug, job, verdictsPath, queuePath };
 }
@@ -199,9 +217,20 @@ test('gate authority: a verdict outside the eligible set is never considered, ev
   assert.equal(row.verifierVerdict, 'shared_tree_reverted');
 });
 
-test('gate authority: a landed commit that is not an ancestor of HEAD blocks completion', async () => {
+test('gate authority: a real commit on a side branch, not on HEAD, blocks completion', async () => {
   const t = setup('authNotAncestor', ac('timeout 30 node -e "process.exit(0)"'));
-  t.job.landedCommit = 'f'.repeat(40); // well-formed sha, not actually in this repo
+  const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], t.cwd).trim();
+  git(['checkout', '-q', '-b', 'side'], t.cwd);
+  fs.writeFileSync(path.join(t.cwd, 'side.txt'), 'x\n');
+  // Stage only the new file — `-A` would also sweep up the untracked
+  // session-manager-operations/ tree (the PRD + queue.json setup() wrote),
+  // and checking back out would then delete it: it's tracked on `side` but
+  // absent from the original branch's tree.
+  git(['add', 'side.txt'], t.cwd);
+  git(['commit', '-q', '-m', 'side commit'], t.cwd);
+  const sideSha = headSha(t.cwd); // real, resolvable commit — just not on HEAD
+  git(['checkout', '-q', branch], t.cwd);
+  t.job.landedCommit = sideSha;
 
   const rec = await runGateShadow(t.job);
   assert.equal(rec.status, 'green');
@@ -261,4 +290,159 @@ test('the trigger re-picks a row whose gateShadow is stale once HEAD has moved',
   assert.equal(row.gateShadow.head, t.job.landedCommit, 'the trigger re-ran the shadow at the new HEAD, not the stale one');
   assert.equal(row.gateShadow.status, 'green');
   assert.equal(row.status, 'completed', 'the fresh green re-run completed it in the same pass');
+});
+
+// ─── Gate authority: this run's commit only (evidenceOk) ───────────────────
+
+test('gate authority: no_verdict_sentinel also completes on a green re-run with a commit after startedAt', async () => {
+  const t = setup('authNoVerdictSentinel', ac('timeout 30 node -e "process.exit(0)"'));
+  t.job.verifierVerdict = 'no_verdict_sentinel';
+  t.job.landedCommit = headSha(t.cwd);
+  persistJob(t);
+
+  const rec = await runGateShadow(t.job);
+  assert.equal(rec.status, 'green');
+  assert.deepEqual(rec.authority, { complete: true, reason: 'gate-green' });
+
+  const row = JSON.parse(fs.readFileSync(t.queuePath, 'utf8')).jobs.find((j) => j.slug === t.slug);
+  assert.equal(row.status, 'completed');
+});
+
+test('gate authority: abandoned_background_task also completes on a green re-run with a commit after startedAt', async () => {
+  const t = setup('authAbandonedTask', ac('timeout 30 node -e "process.exit(0)"'));
+  t.job.verifierVerdict = 'abandoned_background_task';
+  t.job.landedCommit = headSha(t.cwd);
+  persistJob(t);
+
+  const rec = await runGateShadow(t.job);
+  assert.equal(rec.status, 'green');
+  assert.deepEqual(rec.authority, { complete: true, reason: 'gate-green' });
+
+  const row = JSON.parse(fs.readFileSync(t.queuePath, 'utf8')).jobs.find((j) => j.slug === t.slug);
+  assert.equal(row.status, 'completed');
+});
+
+test('gate authority: a landedCommit committed before startedAt is refused as not from this run', async () => {
+  const t = setup('authStaleCommit', ac('timeout 30 node -e "process.exit(0)"'));
+  t.job.landedCommit = headSha(t.cwd); // the init commit
+  t.job.startedAt = new Date(Date.now() + 60_000).toISOString(); // forward of the init commit — an older run's commit
+  persistJob(t);
+
+  const rec = await runGateShadow(t.job);
+  assert.equal(rec.status, 'green');
+  assert.deepEqual(rec.authority, { complete: false, reason: 'commit-not-from-this-run' });
+
+  const row = JSON.parse(fs.readFileSync(t.queuePath, 'utf8')).jobs.find((j) => j.slug === t.slug);
+  assert.equal(row.status, 'needs_review');
+});
+
+test('gate authority: a missing startedAt is refused as not from this run', async () => {
+  const t = setup('authNoStartedAt', ac('timeout 30 node -e "process.exit(0)"'));
+  t.job.landedCommit = headSha(t.cwd);
+  delete t.job.startedAt;
+  persistJob(t);
+
+  const rec = await runGateShadow(t.job);
+  assert.equal(rec.status, 'green');
+  assert.deepEqual(rec.authority, { complete: false, reason: 'commit-not-from-this-run' });
+
+  const row = JSON.parse(fs.readFileSync(t.queuePath, 'utf8')).jobs.find((j) => j.slug === t.slug);
+  assert.equal(row.status, 'needs_review');
+});
+
+// ─── Gate authority: bound to the exact tree the gate ran on ───────────────
+
+test('gate authority: an untracked file blocks completion and is not definitive', async () => {
+  const t = setup('authUntracked', ac('timeout 30 node -e "process.exit(0)"'));
+  t.job.landedCommit = headSha(t.cwd);
+  fs.writeFileSync(path.join(t.cwd, 'untracked.txt'), 'new, never committed\n');
+
+  const rec = await runGateShadow(t.job);
+  assert.equal(rec.status, 'green');
+  assert.equal(rec.definitive, false);
+  assert.deepEqual(rec.authority, { complete: false, reason: 'tree-dirty' });
+
+  const row = JSON.parse(fs.readFileSync(t.queuePath, 'utf8')).jobs.find((j) => j.slug === t.slug);
+  assert.equal(row.status, 'needs_review');
+});
+
+test('gate authority: the gate command itself dirtying a tracked file blocks completion and is not definitive', async () => {
+  const name = 'authDirtiesDuringGate';
+  const cwd = path.join(tmpHome, name); // setup() computes the identical path internally
+  const t = setup(name, ac(`timeout 30 node '${dirtyFileScript}' '${path.join(cwd, 'README.md')}'`));
+  t.job.landedCommit = headSha(t.cwd);
+
+  const rec = await runGateShadow(t.job);
+  assert.equal(rec.status, 'green');
+  assert.equal(rec.definitive, false);
+  assert.deepEqual(rec.authority, { complete: false, reason: 'tree-dirty' });
+
+  const row = JSON.parse(fs.readFileSync(t.queuePath, 'utf8')).jobs.find((j) => j.slug === t.slug);
+  assert.equal(row.status, 'needs_review');
+});
+
+test('gate authority: the gate command making a commit moves HEAD and blocks completion', async () => {
+  const t = setup('authHeadMovesDuringGate', ac('timeout 30 git commit --allow-empty -q -m midgate'));
+  t.job.landedCommit = headSha(t.cwd);
+
+  const rec = await runGateShadow(t.job);
+  assert.equal(rec.status, 'green');
+  assert.equal(rec.definitive, false);
+  assert.deepEqual(rec.authority, { complete: false, reason: 'head-moved-during-gate' });
+
+  const row = JSON.parse(fs.readFileSync(t.queuePath, 'utf8')).jobs.find((j) => j.slug === t.slug);
+  assert.equal(row.status, 'needs_review');
+});
+
+// ─── Memoization: only a definitive result is trusted without re-running ───
+
+test('memo: a non-definitive refusal at an unchanged HEAD is re-run on the next call, not skipped', async () => {
+  const t = setup('memoNonDefinitive', ac('timeout 30 node -e "process.exit(0)"'));
+  t.job.landedCommit = headSha(t.cwd);
+  fs.writeFileSync(path.join(t.cwd, 'untracked.txt'), 'x\n'); // keeps the tree dirty across both calls
+
+  const rec1 = await runGateShadow(t.job);
+  assert.equal(rec1.definitive, false);
+  t.job.gateShadow = rec1; // the row now carries forward exactly what was just recorded
+
+  const rec2 = await runGateShadow(t.job);
+  assert.ok(rec2, 'a non-definitive memo must not short-circuit the next call to null');
+  assert.equal(rec2.definitive, false);
+});
+
+test('memo: a definitive red at an unchanged HEAD short-circuits the next call to null', async () => {
+  const t = setup('memoDefinitiveRed', ac('timeout 30 node -e "process.exit(3)"'));
+  t.job.landedCommit = headSha(t.cwd);
+
+  const rec1 = await runGateShadow(t.job);
+  assert.equal(rec1.status, 'red');
+  assert.equal(rec1.definitive, true);
+  t.job.gateShadow = rec1;
+
+  const rec2 = await runGateShadow(t.job);
+  assert.equal(rec2, null, 'a definitive result at the same HEAD is not re-run');
+});
+
+// ─── Final mutate: drop the result if the row changed under the gate ───────
+
+test('gate authority: a runId change under the gate drops the result entirely, no gateShadow written', async () => {
+  const t = setup('authRunIdChangesUnderGate', ac('timeout 30 node -e "process.exit(0)"'));
+  t.job.landedCommit = headSha(t.cwd);
+  const jobSnapshot = { ...t.job };
+
+  // Simulate the row being re-dispatched (new runId + startedAt) while the
+  // shadow gate for the OLD snapshot is still in flight: this mutate lands on
+  // disk before runGateShadow's own final mutate reads the row back.
+  t.job.runId = 'a-different-run';
+  t.job.startedAt = new Date().toISOString();
+  persistJob(t);
+
+  const rec = await runGateShadow(jobSnapshot);
+  assert.equal(rec.status, 'green');
+  assert.deepEqual(rec.authority, { complete: true, reason: 'gate-green' }, 'the decision is still computed for the snapshot it ran against');
+
+  const row = JSON.parse(fs.readFileSync(t.queuePath, 'utf8')).jobs.find((j) => j.slug === t.slug);
+  assert.equal(row.status, 'needs_review', 'the live row (new dispatch) is untouched');
+  assert.equal(row.runId, 'a-different-run');
+  assert.equal('gateShadow' in row, false, 'the stale result is dropped entirely, not written onto the new dispatch');
 });

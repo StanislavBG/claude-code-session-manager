@@ -18,15 +18,12 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | check-renderer-storage.cjs | `npm run lint:renderer-storage` (in `lint`) — ratchet-bans `localStorage.`/`sessionStorage.` in `src/renderer` outside an explicit ALLOWLIST (Epic stateless-ui-review) | no |
 | check-tracked-filenames.cjs | `npm run lint:filenames` (in `lint`) — fails on tracked paths with Windows-illegal chars, trailing dot/space, or reserved device names | no |
 | check-unstable-selectors.cjs | `npm run lint:selectors` (in `lint`) | no |
-| cleanup-nested-queue-stubs.cjs | manual one-shot; dispatches to cleanup-worktree-ops-stubs.cjs | no |
-| cleanup-worktree-ops-stubs.cjs | via cleanup-nested-queue-stubs.cjs | no |
 | health.sh | manual; `local-project-health` skill's lookup path (`npm run health` uses src/main/health.cjs) | no |
 | install-scheduler-mcp-user-scope.sh | manual (`seedSchedulerMcp.cjs` does the same on first boot, or on the next boot after its marker file is deleted) | no |
 | install-scheduler-watchdog.sh | manual; installs the systemd user timer (cron fallback) | no |
 | mint-epic.cjs | manual; joins an existing Epic and prints its prds dir | yes |
 | ops-sweep.cjs | `ops-sweep` SKILL.md (`node "$SM_ROOT/scripts/ops-sweep.cjs" <cwd>`) | yes |
 | postinstall.cjs | npm `postinstall` | yes |
-| probe-electron-helper-comm.cjs | manual probe (Linux, xvfb) | no |
 | refresh-vad-assets.mjs | `npm run refresh:vad-assets` | no |
 | replay-verdicts.cjs | manual, dev-only, read-only | no |
 | scheduler-mcp-server.cjs | registered as an MCP server (`seedSchedulerMcp.cjs`, `send-feedback` SKILL.md) | yes |
@@ -50,10 +47,6 @@ The four `hooks/guard-*.cjs` are adopted by reference, not copied: `src/main/lib
 
 - `ops-sweep.cjs` is the portable sweep: it requires a target-project cwd argument and works on any project's ops folder.
 - `audit-ops-hygiene.cjs` holds this repo's own patterns and is not portable.
-
-## Cleanup dispatch
-
-`cleanup-nested-queue-stubs.cjs` removes nested queue shards and then dispatches to `cleanup-worktree-ops-stubs.cjs` (its `main()`), which handles the worktree-side stubs.
 
 Bench numbers are machine-relative — compare runs on the same machine only; there are no pass/fail thresholds.
 

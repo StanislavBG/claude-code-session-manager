@@ -80,8 +80,3 @@ export async function hasCompletedTour(): Promise<boolean> {
   if (!prefs.hydrated) await prefs.hydrate()
   return useUiChromePrefs.getState().tourCompletedAt != null
 }
-
-/** Clears the completion flag. Exposed for the command palette / debug. */
-export function resetTour(): void {
-  useUiChromePrefs.getState().setTourCompletedAt(null)
-}

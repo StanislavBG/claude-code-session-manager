@@ -39,8 +39,6 @@ export interface ProjectAction {
   tooltip: string
 }
 
-const VALID_TAGS = new Set<string>(TAG_LIBRARY.map((t) => t.tag))
-
 /** The persona's mission tag for an Action-spawned Session. A persona may carry
  *  several tags (the Agent<->Tag relationship is many-to-many); the first one in
  *  TAG_LIBRARY order wins so the choice is stable rather than file-order
@@ -100,10 +98,4 @@ export function projectActions(personas: readonly AgentPersona[], cwd: string | 
     if (a) out.push(a)
   }
   return out.sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()))
-}
-
-/** True when `tag` is one this app knows — used by the Agent Library editor to
- *  warn about a hand-edited persona file carrying an unknown tag. */
-export function isKnownTag(tag: string): boolean {
-  return VALID_TAGS.has(tag)
 }

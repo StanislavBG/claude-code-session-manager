@@ -283,12 +283,6 @@ export function groupTabsByCwd(tabs: SessionTab[]): { cwd: string; tabs: Session
   return order.map((cwd) => ({ cwd, tabs: byCwd.get(cwd)! }))
 }
 
-/** Selector hook: derives project groups from the live tabs array. */
-export function useProjectGroups(): { cwd: string; tabs: SessionTab[] }[] {
-  const tabs = useSessions((s) => s.tabs)
-  return groupTabsByCwd(tabs)
-}
-
 /**
  * Hydrate the store from disk on boot, then wire up autosave. Persists only
  * the durable fields (id, sessionId, cwd, label, presetId) — pid,

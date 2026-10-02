@@ -198,11 +198,6 @@ export async function loadEngagePresets(): Promise<SessionPreset[]> {
   }
 }
 
-/** Invalidate the engage preset cache (e.g., after file change). */
-export function clearEngageCache(): void {
-  _engageCache = null
-}
-
 /** Look up a preset by id across both build and engage lists. */
 export async function findPreset(presetId: string): Promise<SessionPreset | null> {
   const build = DEFAULT_PRESETS.find((p) => p.id === presetId)

@@ -1215,8 +1215,8 @@ async function getCurrentBranch(cwd) {
  * `branch` is byte-identical to what's still sitting dirty in `cwd` right
  * now — i.e. the branch committed exactly the carried WIP and nothing more.
  * Extracted out of `integrateBranch` (identical logic, same content-verify
- * safety reasoning documented there) so `jobLanding.cjs`'s checkout-free Epic
- * path can reuse the same classification before ever attempting a land.
+ * safety reasoning documented there) so a checkout-free Epic land path can
+ * reuse the same classification before ever attempting a land.
  * Never throws — any read failure (including no `carriedPaths`) is reported
  * as `false`, the safer default that falls through to a real integration
  * attempt rather than silently dropping a commit.

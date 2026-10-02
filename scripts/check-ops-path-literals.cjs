@@ -33,8 +33,6 @@ const ALLOWLIST = new Map([
   ['scripts/ops-sweep.cjs', "portable across target projects: builds the ops root of an arbitrary targetCwd, cannot import that project's resolver"],
   ['scripts/audit-ops-hygiene.cjs', 'standalone CLI audit script run against a project cwd; not part of the app runtime'],
   ['scripts/check-doc-hierarchy.cjs', 'standalone lint that walks the repo tree for ops docs; no runtime resolver needed'],
-  ['scripts/cleanup-worktree-ops-stubs.cjs', 'one-shot cleanup that matches stray ops dirnames inside worktrees; must not normalize them away'],
-  ['scripts/cleanup-nested-queue-stubs.cjs', 'one-shot cleanup that detects the doubled ops dirname; must not normalize it away'],
   ['scripts/hooks/lib/guard-inline-implementation-policy.cjs', 'required by guard-inline-implementation.cjs, installed to ~/.claude/session-manager/hooks via shim; runs outside the repo and cannot require opsOwnership'],
 ])
 

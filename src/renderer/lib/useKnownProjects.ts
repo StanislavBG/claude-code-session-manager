@@ -181,11 +181,6 @@ async function runEnrichment(rows: ProjectRow[], token: number): Promise<void> {
   })
 }
 
-/** Forces a fresh scan next tick — used after an out-of-band change (e.g. archive) that the cache can't infer on its own. */
-export function refreshKnownProjects(): void {
-  scannedForHome = null
-}
-
 export function useKnownProjects() {
   const home = useHomeDir()
   const [, forceRender] = useState(0)

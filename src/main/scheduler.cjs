@@ -8827,7 +8827,13 @@ async function tickBody(gen, { bypassLoadGate }) {
     if (batch.length === 0) {
       // Queue drained — run the definition-of-done gate fire-and-forget.
       // Non-blocking: does not hold the mutate lock; errors are logged, not thrown.
-      runDefinitionOfDoneOnDrain(state, { cancelToken }).catch((err) => {
+      // resolvePrdPath mirrors every other verify call site in this file (e.g.
+      // computeLooksDone, runGateShadow): try the live Epic-scoped dir first,
+      // then the archived twin — never the retired flat dir.
+      runDefinitionOfDoneOnDrain(state, {
+        cancelToken,
+        resolvePrdPath: async (job) => (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job),
+      }).catch((err) => {
         console.log(`[scheduler] dod-drain: ${err?.message ?? String(err)}`);
       });
       if (holdReason) return recordTick({ fired: false, reason: 'held', detail: holdReason }, { holds });

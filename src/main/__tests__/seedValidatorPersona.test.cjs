@@ -92,18 +92,15 @@ test('a homedir whose marker already lists the first three receives validator.md
 
   expect(fs.readFileSync(path.join(agentsDir(), 'validator.md'), 'utf8')).toBe(fs.readFileSync(seedSrc('validator'), 'utf8'));
 
-  // architect and project-home-builder's bundled seedVersion is 1 — same as the
-  // implicit version an unstamped installed file reads as — so they stay byte-identical.
-  for (const name of ['architect', 'project-home-builder']) {
+  // None of the three bodies matches anything this app has ever shipped
+  // (they're hand-written placeholders), so the upgrade pass leaves all
+  // three alone no matter what their seedVersion is — a missing stamp is no
+  // longer by itself a reason to overwrite a file a person may have written.
+  for (const name of ['architect', 'dev-lead', 'project-home-builder']) {
     expect(fs.readFileSync(path.join(agentsDir(), `${name}.md`), 'utf8')).toBe(preExisting[name]);
   }
-  // dev-lead's bundled seedVersion is 2 — the unstamped installed file is stale, so
-  // the upgrade pass replaces it, backing up the old content first.
-  expect(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8')).toBe(fs.readFileSync(seedSrc('dev-lead'), 'utf8'));
-  const backupDir = path.join(agentsDir(), '.backup');
-  const backups = fs.readdirSync(backupDir).filter((f) => f.startsWith('dev-lead.'));
-  expect(backups.length).toBe(1);
-  expect(fs.readFileSync(path.join(backupDir, backups[0]), 'utf8')).toBe(preExisting['dev-lead']);
+  expect(fs.existsSync(path.join(agentsDir(), '.backup'))).toBe(false);
+  expect(fs.existsSync(path.join(tmpHome, '.claude', 'session-manager', 'persona-backups'))).toBe(false);
 
   const marker = JSON.parse(fs.readFileSync(mPath, 'utf8'));
   expect(marker.seeded.sort()).toEqual([...ALL_PERSONAS].sort());

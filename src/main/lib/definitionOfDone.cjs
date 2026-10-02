@@ -400,7 +400,8 @@ function extractAcSequence(prdBody) {
 /**
  * The single-command view of the gate, as the original `timeout NNN cmd …`
  * string, or null when the gate is absent or is a multi-command chain
- * (reverifyAc runs one command; the chain is the shadow runner's job).
+ * (reverifyAc runs the whole sequence; this view is for callers that only
+ * ever handle one command).
  *
  * @param {string} prdBody  PRD markdown with frontmatter already stripped.
  * @returns {string|null}
@@ -411,70 +412,98 @@ function extractAcCommand(prdBody) {
 }
 
 /**
- * Re-run the AC test command for a single completed job and report the result.
+ * Re-run a completed job's authored gate and report whether it still holds.
  *
- * Never touches queue.json or spawns claude — only re-runs the already-authored
- * test command. That is what keeps this function loop-safe and cheap.
+ * Finds the PRD with `resolvePrdPath(job)`, a caller-injected async function
+ * that returns an absolute path or null. This never guesses a path itself.
+ * Why: a PRD lives in its Epic's `prds/` dir while queued and moves to that
+ * Epic's `prds-archived/` sibling once it completes — only the caller (which
+ * knows about Epics and archiving) can say which one applies.
+ *
+ * Runs the resolved gate with `runGateSequence`, the same runner the
+ * scheduler's shadow gate uses: `&&` semantics, each run gets its own
+ * isolated TMPDIR and `CI=1`, and at most one gate runs machine-wide at a
+ * time. This never spawns `claude` and never writes to queue.json — it only
+ * re-runs the already-authored gate command.
+ *
+ * Result `status` meanings:
+ *   - `pass`         the gate went green.
+ *   - `fail`         a gate step exited non-zero, and it did not time out.
+ *   - `unverifiable` nothing ran, or the result can't be trusted. `reason`
+ *     says which: `no-prd-resolver` (opts.resolvePrdPath was not given),
+ *     `prd-not-found` (resolver returned null/threw), `prd-unreadable`
+ *     (resolved path doesn't exist or can't be read), `no-parseable-gate`
+ *     (PRD opted out with `gate: none`, or has no gate the scheduler can
+ *     run), `cwd-missing` (job.cwd no longer exists), `busy` (another gate
+ *     is already running — see runGateSequence), `gate-unavailable` (a step
+ *     could not even start), or `timeout` (a step hit its own `timeout N`
+ *     and was killed — not evidence either way, so it is not reported as a
+ *     failure).
  *
  * @param {{ slug: string, cwd: string }} job
- * @param {{ timeoutMs?: number, prdsDir?: string }} opts
- *   timeoutMs  Hard kill ceiling for the child (default 60s).
- *   prdsDir    Override PRD directory (for tests). Defaults to the job's own
- *              per-project PRDs dir (resolvePrdWriteDir(job.cwd)).
- * @returns {Promise<{ slug: string, status: 'pass'|'fail'|'unverifiable', code: number|null, ms: number }>}
+ * @param {{ resolvePrdPath?: (job: object) => (string|null|Promise<string|null>) }} opts
+ *   resolvePrdPath  Finds the PRD's current absolute path for this job.
+ *                    Required — with none, the result is always unverifiable.
+ * @returns {Promise<{ slug: string, status: 'pass'|'fail'|'unverifiable', code: number|null, ms: number, reason?: string }>}
  */
-async function reverifyAc(job, { timeoutMs = 60_000, prdsDir } = {}) {
-  const resolvedPrdsDir = prdsDir ?? (job.cwd ? resolvePrdWriteDir(job.cwd) : null);
+async function reverifyAc(job, { resolvePrdPath } = {}) {
   const startNs = process.hrtime.bigint();
 
   function elapsedMs() {
     return Math.round(Number(process.hrtime.bigint() - startNs) / 1e6);
   }
 
-  function unverifiable() {
-    return { slug: job.slug, status: 'unverifiable', code: null, ms: elapsedMs() };
+  function unverifiable(reason) {
+    return { slug: job.slug, status: 'unverifiable', code: null, ms: elapsedMs(), reason };
   }
 
   // Guard: cwd must exist (target project may have been deleted).
   try {
     fs.statSync(job.cwd);
   } catch {
-    return unverifiable();
+    return unverifiable('cwd-missing');
   }
 
+  if (typeof resolvePrdPath !== 'function') return unverifiable('no-prd-resolver');
+
+  let prdPath;
+  try {
+    prdPath = await resolvePrdPath(job);
+  } catch {
+    prdPath = null;
+  }
+  if (!prdPath) return unverifiable('prd-not-found');
+
   // Read the raw PRD text, frontmatter included, and resolve its gate the
-  // same way the shadow gate does. resolveGate already turns any leading
-  // `timeout N` into `timeoutMs`, so this never spawns a `timeout` binary —
-  // that binary does not exist on macOS, which is why every AC re-run here
-  // used to report 'unverifiable' on this platform.
-  const prdPath = path.join(resolvedPrdsDir, `${job.slug}.md`);
+  // same way the shadow gate does.
   let raw;
   try {
     raw = fs.readFileSync(prdPath, 'utf8');
   } catch {
-    return unverifiable();
+    return unverifiable('prd-unreadable');
   }
 
   const { source, sequence } = resolveGate(raw);
-  if (source === 'none' || source === 'absent' || !sequence.length) return unverifiable();
+  if (source === 'none' || source === 'absent' || !sequence.length) return unverifiable('no-parseable-gate');
 
-  // `&&` semantics: stop at the first step that does not pass. This re-runs
-  // the SAME authored gate sequence, not a separate single-command heuristic.
-  for (const step of sequence) {
-    const result = await runOneGateCommand(
-      { ...step, timeoutMs: Math.min(step.timeoutMs, timeoutMs) },
-      { cwd: job.cwd, env: process.env },
-    );
-    if (result.status === 'unavailable') return unverifiable();
-    if (result.status === 'fail') {
-      return { slug: job.slug, status: 'fail', code: result.code, ms: elapsedMs() };
-    }
-  }
-  return { slug: job.slug, status: 'pass', code: 0, ms: elapsedMs() };
+  const result = await runGateSequence(sequence, { cwd: job.cwd });
+  if (result.status === 'green') return { slug: job.slug, status: 'pass', code: 0, ms: elapsedMs() };
+  if (result.status === 'busy') return unverifiable('busy');
+  if (result.status === 'unavailable') return unverifiable('gate-unavailable');
+
+  // status === 'red': a step exited non-zero. A step that was killed for
+  // running past its own `timeout N` is not trustworthy evidence of a real
+  // failure (the machine may just be slow right now), so it is reported as
+  // unverifiable instead of fail — same reasoning reverifyAc has always used
+  // for a step that couldn't even start.
+  const timedOutStep = result.results.find((r) => r.timedOut);
+  if (timedOutStep) return unverifiable('timeout');
+  const failedStep = result.results.find((r) => r.status === 'fail');
+  return { slug: job.slug, status: 'fail', code: failedStep ? failedStep.code : null, ms: elapsedMs() };
 }
 
 /**
- * Re-run AC commands sequentially over a batch of completed jobs.
+ * Re-run AC gates sequentially over a batch of completed jobs.
  *
  * Sequential execution respects the machine's max-3-concurrent rule — a drain
  * event that fires reverifyBatch is already consuming one slot; sequential
@@ -488,13 +517,12 @@ async function reverifyAc(job, { timeoutMs = 60_000, prdsDir } = {}) {
  * by the scheduler queue size, not user-scaled data).
  *
  * @param {Array<{ slug: string, cwd: string }>} jobs
- * @param {{ timeoutMs?: number, batchTimeoutMs?: number, prdsDir?: string }} opts
- *   timeoutMs       Per-job kill ceiling (default 60s).
+ * @param {{ batchTimeoutMs?: number, resolvePrdPath?: (job: object) => (string|null|Promise<string|null>) }} opts
  *   batchTimeoutMs  Total wall-time cap for the whole batch (default 10m).
- *   prdsDir         Override PRD directory (for tests).
+ *   resolvePrdPath  Forwarded to reverifyAc for every job — see its doc comment.
  * @returns {Promise<Array<{ slug: string, status: string, code: number|null, ms: number }>>}
  */
-async function reverifyBatch(jobs, { timeoutMs = 60_000, batchTimeoutMs = 600_000, prdsDir } = {}) {
+async function reverifyBatch(jobs, { batchTimeoutMs = 600_000, resolvePrdPath } = {}) {
   const batchStartNs = process.hrtime.bigint();
   const results = [];
 
@@ -504,7 +532,7 @@ async function reverifyBatch(jobs, { timeoutMs = 60_000, batchTimeoutMs = 600_00
       results.push({ slug: job.slug, status: 'unverifiable', code: null, ms: 0 });
       continue;
     }
-    const result = await reverifyAc(job, { timeoutMs, prdsDir });
+    const result = await reverifyAc(job, { resolvePrdPath });
     results.push(result);
   }
 

@@ -274,23 +274,24 @@ function ResponseEvent({
   const displayText = expanded && fullText ? fullText : (event.text ?? '')
   const displayHtml = useMemo(() => renderChatMarkdown(displayText), [displayText])
   // A 'response' event with outcome 'needs_review' is written exclusively by
-  // scheduler.cjs's notifyNeedsReview for a root-cause report rcaReport.cjs
-  // filed (see that function's own doc comment) — it is a question routed
-  // back to THIS Epic, not a status update, so it gets its own amber
-  // treatment + an explicit marker rather than blending into ordinary
-  // assistant prose or the neutral STATUS_TONE.needs_review pill used
-  // elsewhere for PRD status chips.
-  const isQuestionForHuman = event.outcome === 'needs_review'
+  // scheduler.cjs's flushDueReviewNotices (immediate-notify kill switch:
+  // notifyNeedsReview) once a parked job's self-heal ladder gives up or its
+  // hold time passes — see that function's own doc comment. It is a
+  // scheduler notice routed back to THIS Epic, not a status update, so it
+  // gets its own amber treatment + an explicit marker rather than blending
+  // into ordinary assistant prose or the neutral STATUS_TONE.needs_review
+  // pill used elsewhere for PRD status chips.
+  const isSchedulerNotice = event.outcome === 'needs_review'
   // PRD 987 — fold the Epic's own validation verdict (PRD 986's
   // event.validation) into the tone: a job that self-reported 'completed'
   // but hasn't been verified by this Epic renders in the neutral CLAIMED
   // tone, never green on its own say-so.
-  const validatedStatus = event.outcome && !isQuestionForHuman
+  const validatedStatus = event.outcome && !isSchedulerNotice
     ? resolveValidatedStatus(event.outcome, event.validation)
     : null
   const tone = validatedStatus ? STATUS_TONE[validatedStatus] : null
-  const accessibleLabel = isQuestionForHuman
-    ? `Question routed back from a scheduler run${event.prdSlug ? ` (PRD ${event.prdSlug})` : ''}: ${event.text ?? ''}`
+  const accessibleLabel = isSchedulerNotice
+    ? `Scheduler notice from a stopped PRD${event.prdSlug ? ` (PRD ${event.prdSlug})` : ''}: ${event.text ?? ''}`
     : event.prdSlug && tone
       ? `PRD ${event.prdSlug} — ${tone.label}`
       : undefined
@@ -300,20 +301,20 @@ function ResponseEvent({
       data-testid="epic-response-event"
       aria-label={accessibleLabel}
       className={`break-words text-center text-[11px] ${
-        isQuestionForHuman
+        isSchedulerNotice
           ? `border ${AMBER_TINT} ${AMBER_TEXT} rounded-lg px-2.5 py-1.5`
           : tone
             ? `${tone.bg} ${tone.text} rounded-lg px-2 py-1`
             : 'text-fg-faint'
       }`}
     >
-      {isQuestionForHuman && (
+      {isSchedulerNotice && (
         <div
           className={`mb-1 flex items-center justify-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-wide ${AMBER_TEXT}`}
           data-testid="epic-response-question-marker"
         >
-          <span aria-hidden="true">❓</span>
-          Question aimed at you
+          <span aria-hidden="true">⚠️</span>
+          Scheduler notice — PRD stopped
         </div>
       )}
       <span aria-hidden="true">— </span>

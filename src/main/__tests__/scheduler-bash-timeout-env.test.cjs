@@ -51,8 +51,8 @@ afterEach(() => {
   delete process.env.SM_CLAUDE_BIN;
 });
 
-// Stub `claude` binary: dumps the two env vars it received into a marker
-// file, then emits a stream-json success result and exits 0.
+// Stub `claude` binary: dumps the env vars it received into a marker file,
+// then emits a stream-json success result and exits 0.
 function writeClaudeStub() {
   return claudeStub.writeClaudeStub({ body: `
     const fs = require('fs');
@@ -60,6 +60,7 @@ function writeClaudeStub() {
     fs.writeFileSync(path.join(process.cwd(), 'env.marker'), JSON.stringify({
       BASH_DEFAULT_TIMEOUT_MS: process.env.BASH_DEFAULT_TIMEOUT_MS,
       BASH_MAX_TIMEOUT_MS: process.env.BASH_MAX_TIMEOUT_MS,
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS,
     }), 'utf8');
     process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok' }) + '\\n');
     process.exit(0);
@@ -94,6 +95,8 @@ test('executeJob spawns the executor child with BASH_DEFAULT_TIMEOUT_MS and BASH
     const marker = JSON.parse(fs.readFileSync(path.join(mainCwd, 'env.marker'), 'utf8'));
     expect(marker.BASH_DEFAULT_TIMEOUT_MS).toBe(String(BASH_DEFAULT_TIMEOUT_MS));
     expect(marker.BASH_MAX_TIMEOUT_MS).toBe(String(BASH_MAX_TIMEOUT_MS));
+    // A headless run has no later turn to receive a background task's report.
+    expect(marker.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS).toBe('1');
   } finally {
     fs.rmSync(mainCwd, { recursive: true, force: true });
     fs.rmSync(runDir, { recursive: true, force: true });

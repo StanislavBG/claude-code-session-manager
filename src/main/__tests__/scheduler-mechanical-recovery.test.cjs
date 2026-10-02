@@ -45,7 +45,14 @@ function git(args, cwd) {
 
 function initRepo(dir) {
   fs.mkdirSync(dir, { recursive: true });
-  git(['init', '-q'], dir);
+  git(['init', '-q', '-b', 'master'], dir);
+  // resolveDefaultBranch (gitWorktree.cjs) falls back to `git config --get
+  // init.defaultBranch` when there's no origin/HEAD — which, unpinned, picks
+  // up this Mac's Xcode SYSTEM gitconfig (init.defaultBranch=main) regardless
+  // of the branch -b master just created, so it must be overridden locally
+  // too or expectedBranch disagrees with HEAD on every job row that leaves
+  // baseBranch unset.
+  git(['config', 'init.defaultBranch', 'master'], dir);
   git(['config', 'user.email', 'test@example.com'], dir);
   git(['config', 'user.name', 'Test'], dir);
   fs.writeFileSync(path.join(dir, 'a.txt'), 'original a\n', 'utf8');
@@ -254,4 +261,103 @@ test('performMechanicalRecovery: a branch that no longer exists is handled witho
   expect(jobs[0].status).toBe('needs_review');
   expect(jobs[0].mechanicalRecoveryAttempted).toBe(true);
   expect(jobs[0].error).toMatch(/not found/);
+});
+
+test('performMechanicalRecovery: a stray checkout lands via ref, stamps landedCommit, and still completes the job', async () => {
+  const projectCwd = path.join(tmpHome, 'proj-stray-ref');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd, 'proj-stray-ref-slug');
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], projectCwd).trim();
+
+  const slug = 'fix-plan-stray-ref';
+  const branch = jobWorktree.branchNameFor(slug);
+  git(['checkout', '-q', '-b', branch], projectCwd);
+  fs.writeFileSync(path.join(projectCwd, 'c.txt'), 'from the fix plan\n', 'utf8');
+  git(['add', '-A'], projectCwd);
+  git(['commit', '-q', '-m', 'fix plan work'], projectCwd);
+  const branchHead = git(['rev-parse', branch], projectCwd).trim();
+  // The checkout ends up on a THIRD branch, neither the job branch nor the
+  // default branch — the "main checkout busy on something else" case
+  // allowRefLanding exists for, not the ordinary in-checkout merge path the
+  // other tests above exercise.
+  git(['checkout', '-q', defaultBranch], projectCwd);
+  git(['checkout', '-q', '-b', 'stray'], projectCwd);
+
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug,
+      status: 'needs_review',
+      cwd: projectCwd,
+      verifierVerdict: 'worktree_integration_failed',
+      investigationDepth: 2,
+      error: 'worktree branch integration FAILED (merge failed) — branch preserved for manual recovery',
+    },
+  ]);
+
+  const target = selectMechanicalRecoveryTarget({ slug, cwd: projectCwd, status: 'needs_review', verifierVerdict: 'worktree_integration_failed' });
+  expect(target).not.toBeNull();
+
+  await performMechanicalRecovery({ slug, cwd: projectCwd }, target);
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  expect(jobs).toHaveLength(1);
+  expect(jobs[0].status).toBe('completed');
+  expect(jobs[0].verifierVerdict).toBeUndefined();
+  expect(jobs[0].mechanicalRecoveryAttempted).toBe(true);
+  expect(jobs[0].landedCommit).toBe(branchHead);
+
+  // The checkout never moved off 'stray' — its working tree has no c.txt —
+  // while the default branch REF itself advanced to contain the commit.
+  expect(git(['symbolic-ref', '--short', 'HEAD'], projectCwd).trim()).toBe('stray');
+  expect(fs.existsSync(path.join(projectCwd, 'c.txt'))).toBe(false);
+  expect(git(['rev-parse', defaultBranch], projectCwd).trim()).toBe(branchHead);
+  expect(git(['show', `${defaultBranch}:c.txt`], projectCwd)).toBe('from the fix plan\n');
+  // The branch, now landed, is cleaned up.
+  const branchList = git(['branch', '--list', branch], projectCwd);
+  expect(branchList.trim()).toBe('');
+});
+
+test('performMechanicalRecovery: a stray checkout with carried-WIP-only commits stays needs_review, branch preserved', async () => {
+  const projectCwd = path.join(tmpHome, 'proj-stray-ref-carried');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd, 'proj-stray-ref-carried-slug');
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], projectCwd).trim();
+
+  const slug = 'fix-plan-stray-ref-carried';
+  const branch = jobWorktree.branchNameFor(slug);
+  git(['checkout', '-q', '-b', branch], projectCwd);
+  fs.writeFileSync(path.join(projectCwd, 'carried.txt'), 'carried content\n', 'utf8');
+  git(['add', '-A'], projectCwd);
+  git(['commit', '-q', '-m', 'fix plan work (carried path only)'], projectCwd);
+  git(['checkout', '-q', defaultBranch], projectCwd);
+  git(['checkout', '-q', '-b', 'stray'], projectCwd);
+
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug,
+      status: 'needs_review',
+      cwd: projectCwd,
+      verifierVerdict: 'worktree_integration_failed',
+      investigationDepth: 2,
+      carriedPaths: ['carried.txt'],
+      error: 'worktree branch integration FAILED (merge failed) — branch preserved for manual recovery',
+    },
+  ]);
+
+  const target = selectMechanicalRecoveryTarget({
+    slug, cwd: projectCwd, status: 'needs_review', verifierVerdict: 'worktree_integration_failed', carriedPaths: ['carried.txt'],
+  });
+  expect(target).not.toBeNull();
+  expect(target.carriedPaths).toEqual(['carried.txt']);
+
+  await performMechanicalRecovery({ slug, cwd: projectCwd }, target);
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  expect(jobs[0].status).toBe('needs_review');
+  expect(jobs[0].mechanicalRecoveryAttempted).toBe(true);
+  expect(jobs[0].error).toMatch(/Mechanical recovery retry failed/);
+  // Carried-WIP-only is a refusal, not a success — the branch is preserved
+  // for manual recovery, same as a real conflict.
+  const branchList2 = git(['branch', '--list', branch], projectCwd);
+  expect(branchList2.trim()).not.toBe('');
 });

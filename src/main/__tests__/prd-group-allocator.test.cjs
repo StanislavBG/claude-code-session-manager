@@ -82,9 +82,9 @@ test('reservation markers are counted toward max-NN so a crash mid-allocation ca
 
 test('deliberate parallel siblings sharing one existing NN are unaffected by the allocator (main regression risk)', async () => {
   const dir = await mkTmpPrdsDir();
-  // Three independent PRDs deliberately opting into the SAME group, exactly
-  // as /develop's SKILL.md contract allows — authored directly by filename,
-  // never through allocateParallelGroup.
+  // Three legacy PRDs sharing one NN (the retired same-NN-means-parallel
+  // convention; PRD_AUTHORING.md §13 now forbids it) — authored directly by
+  // filename, never through allocateParallelGroup.
   await fsp.writeFile(path.join(dir, '545-scheduler-tick-stall-after-job-failure.md'), '---\ncwd: ~/Projects/session-manager\n---\nBody A\n');
   await fsp.writeFile(path.join(dir, '545-filetree-show-hidden-default-and-persist.md'), '---\ncwd: ~/Projects/session-manager\n---\nBody B\n');
   await fsp.writeFile(path.join(dir, '545-editor-tab-close-shortcut-and-close-right.md'), '---\ncwd: ~/Projects/session-manager\n---\nBody C\n');

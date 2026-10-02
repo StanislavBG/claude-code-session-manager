@@ -7,7 +7,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { extractAcSequence, extractAcCommand, resolveGate } = require('../definitionOfDone.cjs');
+const { extractAcSequence, extractAcCommand, resolveGate, parseChain, explainChain } = require('../definitionOfDone.cjs');
 const fixtures = require('./gateFixtures.json');
 
 const ac = (...lines) => ['# Acceptance criteria', '', ...lines, '', '# Out of scope', ''].join('\n');
@@ -50,6 +50,31 @@ test('an empty segment (dangling &&) is unparseable', () => {
   assert.deepEqual(extractAcSequence(ac('- [ ] `timeout 60 npm run a &&`')), []);
 });
 
+test('parseChain returns [] for a syntax a shell would read differently', () => {
+  for (const bad of [
+    '$HOME', '"$HOME"', '"$(id)"', '`id`', 'a\\ b', 'src/*.cjs', 'a?b', '[a]', '{a,b}',
+    '(x)', '!x', '#c', '~/x', '--dir=~/x', 'PATH=a:~/b',
+    'echo hi', 'echo hi', 'echo a &&', 'timeout 10',
+  ]) {
+    assert.deepEqual(parseChain(bad), [], bad);
+  }
+});
+
+test('parseChain keeps HEAD~1 and a single-quoted pipe as literal argv items', () => {
+  const seq1 = parseChain('timeout 10 git diff HEAD~1 --stat');
+  assert.deepEqual(seq1[0].argv, ['git', 'diff', 'HEAD~1', '--stat']);
+  const seq2 = parseChain("timeout 30 rg -n 'a|b' src/");
+  assert.deepEqual(seq2[0].argv, ['rg', '-n', 'a|b', 'src/']);
+});
+
+test('explainChain reports timeoutGiven per step', () => {
+  assert.deepEqual(explainChain('timeout 10 node x.js').timeoutGiven, [true]);
+  assert.deepEqual(explainChain('npx vitest run src/x.test.cjs').timeoutGiven, [false]);
+  assert.deepEqual(explainChain('timeout 10s node x.js').timeoutGiven, [true]);
+  assert.deepEqual(explainChain('FOO="a b" timeout 10 node x.js').timeoutGiven, [true]);
+  assert.deepEqual(explainChain('timeout 10 node a.js && node b.js').timeoutGiven, [true, false]);
+});
+
 test('frontmatter gate: list takes priority over the AC line', () => {
   const text = '---\ntitle: t\ngate:\n  - timeout 10 npm run one\n  - "timeout 20 npm run two && timeout 30 npm run three"\n---\n' +
     ac('- [ ] `timeout 999 npm run ignored`');
@@ -75,6 +100,13 @@ test('gate: none is an explicit opt-out, distinct from absent', () => {
   assert.equal(none.source, 'none');
   assert.deepEqual(none.sequence, []);
   assert.equal(resolveGate(ac('- [ ] prose only')).source, 'absent');
+});
+
+test('a bare AC-line command is a guess; a backtick span is not', () => {
+  const bare = resolveGate(ac('- [ ] timeout 300 npm run typecheck passes'));
+  assert.equal(bare.source, 'ac-line-guess');
+  assert.ok(bare.sequence.length > 0);
+  assert.equal(resolveGate(ac('- [ ] `timeout 300 npm run typecheck` passes')).source, 'ac-line');
 });
 
 test('extractAcCommand delegates: single command → original string, chain → null', () => {

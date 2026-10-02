@@ -59,7 +59,7 @@ test('denies ScheduleWakeup inside a headless scheduler run', () => {
   const parsed = decideInRun({ tool_name: 'ScheduleWakeup', tool_input: { delaySeconds: 600, reason: 'wait', noop: false } }, IN_RUN);
   expect(parsed.hookSpecificOutput.permissionDecision).toBe('deny');
   expect(parsed.hookSpecificOutput.permissionDecisionReason).toContain('never re-queue or self-schedule');
-  expect(parsed.hookSpecificOutput.permissionDecisionReason).toContain('standards.md:85');
+  expect(parsed.hookSpecificOutput.permissionDecisionReason).toContain('standards.md (Execution discipline)');
 });
 
 test('denies CronCreate inside a headless scheduler run', () => {

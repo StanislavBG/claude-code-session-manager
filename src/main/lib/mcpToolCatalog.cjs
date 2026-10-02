@@ -45,7 +45,7 @@ const MCP_TOOL_CATALOG = [
     whenToUse: 'Use after diagnosing why a job is stuck (e.g. via scheduler_get_prd/scheduler_list_jobs) and deciding it should re-run from pending.',
     whenNotToUse: 'Do not use as a first move on a "needs_review" job without reading it first — reset just clears status, it does not answer the question the job raised.',
     exampleArgs: { slug: 'add-mcp-tool-catalog', force: false },
-    notes: 'Refuses a job whose status is already "completed" unless force:true is passed — resetting a completed job re-executes already-shipped work.',
+    notes: 'force:true is needed to reset a job whose status is already "completed" or "skipped" — resetting a completed job re-executes already-shipped work; resetting a skipped job overrides the scheduler\'s (or a human\'s) choice not to run it.',
   },
   {
     name: 'scheduler_pause',
@@ -101,7 +101,14 @@ const MCP_TOOL_CATALOG = [
       + 'files this PRD produces that are NOT meant to be committed (git-excluded), they are stat-checked on '
       + 'disk by the verifier, and declaring them is the ONLY way an artifact-only PRD can pass the finish '
       + 'protocol without a commit. Each requires the other (the write is refused if only one is given), and '
-      + 'no path may contain "..".',
+      + 'no path may contain "..". '
+      + '`gate` and `files` are REQUIRED on every call — the tool refuses a call missing either. `gate` lists '
+      + '1-10 commands that prove this PRD is done (each starting with `timeout <seconds>`, joined with `&&`, '
+      + 'no shell metacharacters), or exactly `["none"]` for a PRD with no runnable check; the scheduler '
+      + 're-runs these commands and reads them back from the rendered `# Gate` section verbatim, so a stray '
+      + '```gate fence anywhere else in the PRD text is rejected. `files` lists the 1-50 repo-relative files '
+      + 'or folders this PRD may change; PRDs that can run at the same time must not share a file — chain '
+      + 'them with `dependsOn` instead.',
     whenToUse: 'Use whenever new work should be queued into an already-approved Epic — this is the /develop path.',
     whenNotToUse: 'TWO DISTINCT FAILURE MODES if this tool is not usable — do not conflate them: '
       + '(a) this tool call is PRESENT in your tool list but ERRORS as app-not-running / admin '
@@ -120,10 +127,12 @@ const MCP_TOOL_CATALOG = [
     exampleArgs: {
       title: 'Add unit tests for the retry backoff helper',
       cwd: '/home/bilko/Projects/session-manager',
-      estimateMinutes: 30,
+      estimateMinutes: 10,
       goal: 'Cover retryWithBackoff.cjs edge cases (zero retries, max-delay clamp) that currently have no test.',
-      acceptanceCriteria: ['New test file exercises zero-retry and max-delay-clamp cases', 'timeout 300 npm run typecheck passes', 'timeout 600 npm run test:unit passes'],
+      acceptanceCriteria: ['New test file exercises zero-retry and max-delay-clamp cases', 'Typecheck passes', 'Unit tests pass'],
       implementationNotes: 'See src/main/lib/retryWithBackoff.cjs and its existing __tests__ sibling for the pattern to extend.',
+      gate: ['timeout 300 npm run typecheck', 'timeout 600 npm run test:unit'],
+      files: ['src/main/lib/retryWithBackoff.cjs', 'src/main/lib/__tests__/retryWithBackoff.test.cjs'],
       sourcePromptId: 'epic-id-of-an-already-approved-session',
     },
     notes: 'See /develop.',
@@ -155,17 +164,17 @@ const MCP_TOOL_CATALOG = [
   {
     name: 'scheduler_update_prd',
     group: 'scheduler',
-    purpose: "THE ONLY SUPPORTED WAY to edit a NOT-yet-running PRD's frontmatter and/or body via the session-manager "
-      + 'app\'s admin API. Refuses once a queue row exists for the slug and its status is anything but "pending" '
-      + '(running/completed/failed/needs_review) — editing the spec under a live or already-finished executor is refused, '
-      + 'not silently applied. Only recognized frontmatter keys (title, cwd, estimateMinutes, parallelGroup, '
+    purpose: "THE ONLY SUPPORTED WAY to edit a PRD's frontmatter and/or body. Works while the job is pending, "
+      + 'quarantined, needs_review, failed or skipped, or has no queue row yet. Refuses a running job (wait, or '
+      + 'cancel it first) and a completed one (queue a new PRD). '
+      + 'Only recognized frontmatter keys (title, cwd, estimateMinutes, parallelGroup, '
       + 'sourcePromptId, sourceTabId, tag, dependsOn) may be patched; unrecognized keys round-trip unchanged. '
       + 'Patching dependsOn to a non-empty array replaces it wholesale (validated against existing PRD slugs, '
       + 'same resolver scheduler_create_prd uses); patching it to an explicit empty array CLEARS the dependency — '
       + 'the safe way to fix a wrong dependsOn without archiving (which marks the PRD completed and wrongly frees its dependents).',
-    whenToUse: 'Use to correct a PRD scope/estimate/tag before it starts running — e.g. before resetting a needs_review job whose spec needs to change.',
-    whenNotToUse: 'Do not use once the job is running or terminal (completed/failed/needs_review) without first resetting it back to pending — the route refuses the edit.',
-    exampleArgs: { slug: 'add-mcp-tool-catalog', frontmatter: { estimateMinutes: 45 } },
+    whenToUse: 'Use to fix a PRD\'s spec before it runs, or to fix a parked (needs_review or failed) or skipped PRD before you reset it with scheduler_reset_job.',
+    whenNotToUse: 'Do not use on a running or completed job. Do not reset first and edit second: the reset job can start before the edit lands.',
+    exampleArgs: { slug: 'add-mcp-tool-catalog', frontmatter: { estimateMinutes: 8 } },
     notes: null,
   },
   {
@@ -197,7 +206,7 @@ const MCP_TOOL_CATALOG = [
       + "parallelGroup changes, its NN- filename prefix) via the session-manager app's admin API.",
     whenToUse: 'Use to correct an estimate or renumber a PRD file after it was created.',
     whenNotToUse: 'Do not use parallelGroup as an ordering/dependency barrier — it is only a unique-per-PRD display hint; use dependsOn on scheduler_create_prd/scheduler_update_prd for real ordering.',
-    exampleArgs: { items: [{ slug: 'add-mcp-tool-catalog', estimateMinutes: 30 }] },
+    exampleArgs: { items: [{ slug: 'add-mcp-tool-catalog', estimateMinutes: 10 }] },
     notes: null,
   },
   {
@@ -295,11 +304,11 @@ const MCP_RECIPES = [
     id: 'unstick-needs-review-job',
     title: 'Unstick a job stuck in needs_review',
     steps: [
-      'Call scheduler_list_prds with status:"needs_review" (or scheduler_list_jobs) to find the stuck slug.',
-      'Call scheduler_get_prd with that slug to read its full frontmatter + body and understand the question it raised.',
-      'If the PRD spec needs to change, call scheduler_update_prd with the slug and a frontmatter/body patch — this is only accepted while the job is not yet running or terminal.',
-      'Call scheduler_reset_job with { slug } to clear the needs_review status back to pending — force is only required if the job had already reached "completed".',
-      'The next scheduler reconcile pass re-queues the job; confirm with scheduler_list_jobs or scheduler_list_prds.',
+      'Call scheduler_list_prds with status:"needs_review" (or scheduler_list_jobs) to find the slug.',
+      'Call scheduler_get_prd with that slug to read the PRD and why it parked.',
+      'If the spec is wrong, call scheduler_update_prd with the slug and a frontmatter/body patch. It works while the job is pending, quarantined, needs_review, failed or skipped.',
+      'Then call scheduler_reset_job with { slug } to set the job back to pending. Pass force:true when the job is skipped. Always edit first, then reset: a reset job can start on the next tick.',
+      'The next scheduler pass runs it again. Confirm with scheduler_list_jobs or scheduler_list_prds.',
     ],
   },
   {

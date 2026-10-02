@@ -54,9 +54,13 @@ test('the absent-tool branch explicitly forbids hand-writing and says STOP', () 
   expect(nearby).toMatch(/misconfiguration/i);
 });
 
-test('the present-but-erroring branch is the only one pointed at the manual-write fallback', () => {
+test('the present-but-erroring branch also stops and forbids hand-writing a PRD file', () => {
   const text = readSkill();
-  expect(text).toMatch(/Fallback for case \(a\) only/);
+  const presentIdx = text.search(/tool PRESENT but ERRORS/i);
+  expect(presentIdx).toBeGreaterThan(-1);
+  const nearby = text.slice(presentIdx, presentIdx + 600);
+  expect(nearby).toMatch(/STOP/);
+  expect(nearby).toMatch(/[Dd]o not write any PRD file/);
 });
 
 test('the standalone preflight check appears before PRD composition begins', () => {
@@ -64,7 +68,8 @@ test('the standalone preflight check appears before PRD composition begins', () 
   expect(text).toMatch(/Preflight — confirm the tool is even in your tool list/);
 });
 
-test('a preflight-tool-registration fix is named for the human (user-scope claude mcp add)', () => {
+test('a preflight-tool-registration fix is named for the human (delete the seed marker, restart)', () => {
   const text = readSkill();
-  expect(text).toMatch(/claude mcp add session-manager-scheduler --scope\s*\n?\s*user/);
+  expect(text).toMatch(/\.scheduler-mcp-seeded/);
+  expect(text).toMatch(/restarts the app/);
 });

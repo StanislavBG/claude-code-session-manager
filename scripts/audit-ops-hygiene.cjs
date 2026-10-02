@@ -19,8 +19,8 @@
  * anything is actually lost.
  *
  * Pattern E — PRDs authored outside the sanctioned `scheduler_create_prd` MCP
- * tool (the /develop skill's manual-write fallback is meant to be a rare,
- * flagged last resort — see CLAUDE.md's "PRD authoring is API-only"). Every
+ * tool (a hand-written PRD file is never sanctioned — see CLAUDE.md's "PRD
+ * authoring is API-only"). Every
  * API-created PRD gets a `prd_create` record in the machine-wide audit log
  * (`~/.claude/session-manager/audit-log.jsonl`, `src/main/lib/auditLog.cjs`)
  * keyed by cwd+slug. This check is deliberately narrow: it only inspects PRD
@@ -231,7 +231,7 @@ function auditPatternE() {
     unattributed,
     verdict: unattributed.length === 0
       ? 'CLEAN: every untracked (not-yet-committed) PRD has a matching prd_create record.'
-      : 'INVESTIGATE: untracked PRD(s) with no matching prd_create audit event — likely hand-authored via the /develop manual-write fallback (bypassing scheduler_create_prd). Confirm the bypass was reported and verify the file by hand.',
+      : 'INVESTIGATE: untracked PRD(s) with no matching prd_create audit event — likely hand-authored, bypassing scheduler_create_prd. Hand-writing a PRD is never sanctioned; confirm how this file was created.',
   };
 }
 

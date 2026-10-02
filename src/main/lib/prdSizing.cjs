@@ -5,7 +5,8 @@
  * jobs finishing in <=10 min, yet nothing at the authoring gate flags an oversized PRD before
  * it lands. `sizingWarnings` is the single rule set; prdCreate.cjs's createPrd() surfaces its
  * output in the create-prd response, and scheduler-mcp-server.cjs's scheduler_create_prd
- * handler prints it as a "Sizing warnings:" block. Warnings never block a write.
+ * handler prints it as part of a "Warnings:" block (merged with the gate/files warnings
+ * from prdGateFiles.cjs). Warnings never block a write.
  */
 'use strict';
 

@@ -47,14 +47,20 @@ const _inFlight = new Set();
  *
  * @param {{ paused: object|null, jobs: Array }} state   Scheduler queue state.
  * @param {{
- *   cancelToken?: { cancelled: boolean },
- *   prdsDir?:     string,
- *   runsDir?:     string,
+ *   cancelToken?:     { cancelled: boolean },
+ *   prdsDir?:         string,
+ *   runsDir?:         string,
+ *   resolvePrdPath?:  (job: object) => (string|null|Promise<string|null>),
  * }} opts
+ *   prdsDir         Forwarded to flagRiskySurfaces only (its own PRD lookup).
+ *   resolvePrdPath  Forwarded to reverifyBatch/reverifyAc — finds each job's
+ *                   PRD across the live Epic dir and its archive. Required
+ *                   for a real AC re-run; with none, every job in the report
+ *                   comes back unverifiable (see reverifyAc's doc comment).
  * @returns {Promise<void>}
  */
 async function runDefinitionOfDoneOnDrain(state, opts = {}) {
-  const { cancelToken = {}, prdsDir, runsDir } = opts;
+  const { cancelToken = {}, prdsDir, runsDir, resolvePrdPath } = opts;
 
   if (process.env.SM_DOD_DISABLE === '1') return;
   if (state.paused) return;
@@ -82,7 +88,7 @@ async function runDefinitionOfDoneOnDrain(state, opts = {}) {
 
   _inFlight.add(key);
   try {
-    const acResults = await reverifyBatch(completedJobs, { prdsDir });
+    const acResults = await reverifyBatch(completedJobs, { resolvePrdPath });
     // Re-check after the slow await — scheduler may have stopped mid-flight.
     if (cancelToken.cancelled) return;
     const riskFlags = flagRiskySurfaces(completedJobs, { prdsDir });

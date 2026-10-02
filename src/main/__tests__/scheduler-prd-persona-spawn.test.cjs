@@ -24,6 +24,23 @@ let originalHome;
 let executeJob;
 let buildClaudeSpawnArgs;
 
+// Copied from HEADLESS_DISALLOWED_TOOLS in scheduler.cjs (about line 5622) —
+// a literal, not an import of the list under test. Comparing against the
+// same binding the production code exports would still pass if that list
+// were ever emptied by mistake; a literal catches it.
+const EXPECTED_HEADLESS_DISALLOWED_TOOLS = [
+  'ScheduleWakeup',
+  'CronCreate',
+  'CronDelete',
+  'CronList',
+  'Monitor',
+  'AskUserQuestion',
+  'EnterPlanMode',
+  'ExitPlanMode',
+  'EnterWorktree',
+  'ExitWorktree',
+];
+
 beforeAll(() => {
   originalHome = process.env.HOME;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-prd-persona-spawn-'));
@@ -59,6 +76,16 @@ test('buildClaudeSpawnArgs: model is never omitted even without a systemPrompt',
   const idx = args.indexOf('--model');
   expect(idx).toBeGreaterThanOrEqual(0);
   expect(args[idx + 1]).toBe('sonnet');
+});
+
+test('buildClaudeSpawnArgs: --disallowedTools carries the frozen headless list and is immediately followed by another flag', () => {
+  const args = buildClaudeSpawnArgs({ prompt: 'x', model: 'sonnet', sessionId: 'sid', resume: false });
+  const idx = args.indexOf('--disallowedTools');
+  expect(idx).toBeGreaterThanOrEqual(0);
+  expect(args[idx + 1]).toBe(EXPECTED_HEADLESS_DISALLOWED_TOOLS.join(','));
+  // Never last, never right before the prompt: the variadic list must be
+  // ended by another flag.
+  expect(args[idx + 2]).toMatch(/^--/);
 });
 
 // ---------- real spawn: persona actually reaches the child process ----------
@@ -132,6 +159,10 @@ test('executeJob: a job with no agentType at all runs unaffected (no persona, so
   expect(argv).not.toContain('--append-system-prompt');
   const modelIdx = argv.indexOf('--model');
   expect(argv[modelIdx + 1]).toBe('sonnet');
+  // The headless lockdown applies to every job, not just persona-driven ones.
+  const dtIdx = argv.indexOf('--disallowedTools');
+  expect(dtIdx).toBeGreaterThanOrEqual(0);
+  expect(argv[dtIdx + 1]).toBe(EXPECTED_HEADLESS_DISALLOWED_TOOLS.join(','));
 });
 
 // ---------- persona effort → --effort ----------

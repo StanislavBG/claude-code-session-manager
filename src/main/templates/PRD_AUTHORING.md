@@ -1,515 +1,235 @@
-<!-- PRD_AUTHORING.md v3 -->
+<!-- PRD_AUTHORING.md v4 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
-This guide codifies lessons from two stuck-job incidents (fizzpop poll-hang, etch-engine post-AC overrun) into enforceable rules every PRD MUST follow. Violating these rules costs real money and wastes hours waiting at a terminal.
+Rule: every PRD you queue follows the rules below.
+Why: two real stuck jobs (fizzpop poll-hang, etch-engine post-AC overrun) cost hours of wall-clock time and real money.
 
-Before queueing a new PRD, run through the §10 checklist at the bottom.
+Before queueing, run the §15 checklist at the bottom. It is last on purpose — check it last.
 
 ---
 
 ## §1 Bounded waits, never unbounded polls
 
-**Summary:** Every `until`/`while` loop that makes network calls or waits for external state MUST have a hard iteration cap that surfaces non-zero on exhaustion.
+Rule: every `until`/`while` loop that polls a network call or external state needs a hard iteration cap. On exhaustion, print a diagnostic line and move on — never spin forever.
+Why: `106-fizzpop-publish` polled `curl .../health | jq .uptime` for a value that could never drop (a static-content deploy doesn't restart the API). It hung 2h47m until the 4h watchdog killed it.
 
-**Anti-example** (verbatim from `106-fizzpop-publish.md`):
+Pattern:
 ```bash
-# WRONG — what 106-fizzpop-publish did
-PREV=288694
-until [ "$(curl -s https://bilko.run/api/health | jq .uptime)" -lt "$PREV" ]; do
-  sleep 15
-done
-# Outcome: 2h47m hang because static-content Render deploys never restart the Node API
-# so `uptime` never dropped. Loop hung until the 4h watchdog SIGKILLed.
-```
-
-**Recommended pattern:**
-```bash
-# RIGHT — bounded, surfaces failure cleanly
 for i in $(seq 1 20); do
-  if curl -sf https://bilko.run/projects/fizzpop/ > /dev/null; then
-    echo "deploy live (attempt $i)"; break
+  if curl -sf https://example.com/health > /dev/null; then
+    echo "live (attempt $i)"; break
   fi
-  echo "waiting for deploy ($i/20)..."
-  sleep 15
+  echo "waiting ($i/20)..."; sleep 15
 done
-# Smoke test downstream will diagnose the real failure if the deploy didn't land.
+# Continue regardless — the smoke test (§3) catches a real failure.
 ```
 
-**Rule:** Every `until`/`while` network-or-state poll MUST use `for i in $(seq 1 N); do ...; done` with a hard cap. Recommended cap: 20 × 15 s = 5 min for HTTP polls. On exhaustion, print a diagnostic line and continue (let the smoke test below catch the real failure).
+Recommended cap: 20 × 15s = 5 min for HTTP polls. Never use an uptime/restart signal to detect a static-content deploy — check the actual URL that should be live.
 
 ---
 
-## §2 Don't add work past the acceptance checklist
+## §2 Stop at the acceptance checklist
 
-**Summary:** Once every AC line is ticked, write the result and exit. Do not add polish, fixtures, generators, or "while we're here" improvements not enumerated in the PRD.
+Rule: once every acceptance-criteria line is checked, follow the finish protocol (§11) and stop. Do not add polish, fixtures, or "while we're here" work that isn't an AC line.
+Why: `112-etch-engine` declared success at 17:44 UTC, then ran an unbounded fixture search until a user killed it at 20:28 — 2h44m of token burn on work no AC line asked for.
 
-**Anti-example** (verbatim from `112-etch-engine.md`):
+Executor: if more work seems valuable, name it in your report as a follow-up. Do not do it, and do not queue it. Why: only the planner queues work.
+
+---
+
+## §3 Verify with a real test, not a spin-wait
+
+Rule: after a deploy, migration, or build step, run a command that exits non-zero on failure (`curl -sf`, `npm test`, `tsc --noEmit`).
+Why: a poll that waits for a condition hides the real error; a test command shows it.
+
 ```bash
-# WRONG — what 112-etch-engine did after declaring success
-for (let seed = 100; seed < 50000 && !found; seed++) {
-  const result = generateRandom({ size, rng, maxAttempts: 3 });
-  if (result.ok && result.solution) { found = true; ... }
-}
-# Outcome: 2h44m of token burn looking for fixtures the AC did not require.
-# The agent had emitted result-success at 17:44 UTC; the bonus loop ran until 20:28.
-```
-
-**Rule:** Once every AC line is checked, write the result and exit 0. If bonus work seems genuinely valuable, write a follow-up PRD and reference it in the result. Do not add any work not explicitly enumerated in an AC line.
-
----
-
-## §3 Smoke tests verify; spin-waits don't
-
-**Summary:** Prefer "do thing, run a test that asserts thing happened" over "do thing, spin until I detect thing happened."
-
-**Rule:** After a deployment, migration, or build step, run an actual test command (`curl -sf`, `npm test`, `pnpm typecheck`) that exits non-zero on failure. A spin-wait that polls for a condition hides the failure mode; a test command surfaces the exact error.
-
-**Pattern:**
-```bash
-# Deploy step above (bounded, §1)
-# Smoke test — will exit 1 with a clear message if deploy failed:
-curl -sf https://bilko.run/projects/fizzpop/ > /dev/null || { echo "smoke test FAILED: fizzpop not reachable"; exit 1; }
+curl -sf https://example.com/projects/foo/ > /dev/null \
+  || { echo "smoke test FAILED: foo not reachable"; exit 1; }
 ```
 
 ---
 
-## §4 Bound any generator/search loop with max-attempts and surface-on-exhaustion
+## §4 Bound search and generator loops
 
-**Summary:** When iterating a search space (fixtures, seeds, brute-force), declare the maximum search size in the PRD AC and surface and HALT on exhaustion.
+Rule: when you iterate a search space (fixtures, seeds, brute force), the acceptance criteria must state the max attempts. On exhaustion, print a HALT line and exit 1 — never loop past the stated bound.
+Why: the same etch-engine loop (§2) had no bound in its AC, so nothing told the executor when to stop.
 
-**Anti-example:** Same etch-engine fixture generator from §2 — `for (let seed = 100; seed < 50000 ...)` with no AC line constraining it.
-
-**Rule:** When iterating a search space, the PRD AC MUST state the bound explicitly ("up to 1000 seeds; if exhausted, surface and HALT"). The executor knows when to give up and moves on rather than burning tokens indefinitely.
-
-**Pattern:**
 ```ts
-let found = false;
-for (let seed = 0; seed < MAX_SEEDS && !found; seed++) {
-  // ...
-}
+for (let seed = 0; seed < MAX_SEEDS && !found; seed++) { /* ... */ }
 if (!found) {
-  console.error(`HALT: exhausted ${MAX_SEEDS} seeds without finding a valid fixture`);
+  console.error(`HALT: exhausted ${MAX_SEEDS} seeds without a valid fixture`);
   process.exit(1);
 }
 ```
 
 ---
 
-## §5 Render/deploy waits are bounded and always followed by a smoke test
+## §5 Frontmatter
 
-**Summary:** Render (and similar) deploys may take 2–10 minutes and may silently fail. Always bound the wait and follow it with a live endpoint test.
+Rule: every PRD needs these fields.
+1. `title` — one line, plain English.
+2. `cwd` — the Epic's project root, as an absolute path or `~/…`. The API always sets it to the Epic's project, whatever you pass. To work in another project, open an Epic in that project. The folder must exist when you queue.
+3. `estimateMinutes` — a realistic integer. Most PRDs take 5–10 minutes (§8) — don't inflate it.
 
-**Pattern:**
-```bash
-DEPLOY_OK=0
-for i in $(seq 1 20); do
-  if curl -sf https://bilko.run/projects/<slug>/ > /dev/null; then
-    DEPLOY_OK=1; echo "deploy live (attempt $i)"; break
-  fi
-  echo "waiting for deploy ($i/20)..."
-  sleep 15
-done
-# Continue regardless. Smoke test below catches the real failure.
-if [ $DEPLOY_OK -eq 0 ]; then
-  echo "WARNING: deploy not detected after 20 attempts; continuing to smoke test"
-fi
-curl -sf https://bilko.run/projects/<slug>/ > /dev/null || { echo "SMOKE TEST FAILED"; exit 1; }
-```
+`parallelGroup` is deprecated and ignored. `dependsOn: [<slug>, ...]` is the only ordering primitive.
 
-**Rule:** A static-content deploy on Render does NOT restart the backend API. Never use `uptime` or process-restart signals to detect a static-content deploy — use the actual URL that should be live.
+`planId` is written by the API, never by you. It groups PRDs into the plan (wave) they belong to: an `append` PRD, or one with an explicit `dependsOn`, inherits the `planId` of the PRD it attaches behind; a fresh PRD mints a new one.
+
+Artifact-only PRDs (`deliverable: artifact` + `artifactPaths: [...]`) — use this ONLY when every deliverable is a file the repo deliberately git-excludes, so "no commit" is the correct outcome, not a miss.
+1. Every artifact path is listed in `artifactPaths` and is relative, never `..`.
+2. Each file must be non-empty and written during the run window — the verifier stat-checks it on disk.
+3. The tree must still end clean. A declared artifact excuses the missing commit, not a stray tracked edit.
+4. Both fields are required together — passing one without the other is refused.
+
+Why: PRD `816-prepare-157-copy-citation-extras-patch` wrote its patch into a git-excluded folder with no way to declare that, and parked `needs_review` twice.
 
 ---
 
-## §6 Frontmatter rules
+## §6 Gate and files
 
-**Summary:** Required keys are `title`, `cwd` (absolute path), `estimateMinutes`. Default to letting the filename `NN-` prefix drive grouping.
+Both fields are required in every `scheduler_create_prd` call.
 
-**Required frontmatter:**
-```yaml
----
-title: <one line, plain English>
-cwd: ~/Projects/<target-repo>
-estimateMinutes: 10
----
-```
+### gate
 
-**Cross-machine portability:** Write `cwd` as `~/Projects/<name>` — the parser expands `~` to `os.homedir()` at ingest time, so the same PRD file works on Linux (`/home/<u>/...`) and macOS (`/Users/<u>/...`). Absolute paths (e.g. `/home/bilko/Projects/foo`) are passed through unchanged and will break on any machine with a different home directory.
+1. 1–10 commands. The scheduler re-runs them, in order, after the executor finishes. Each must exit 0.
+2. Start each `&&` step with `timeout <seconds>`, for example `timeout 300 npm test && timeout 120 npm run lint`. Why: a command without a timeout can hang the run.
+3. Join steps inside one entry with `&&`.
+4. The scheduler runs gate commands without a shell, so shell syntax is refused. Outside single quotes, do not use `|` `<` `>` `;` `&` (only `&&` between steps), backticks, `$`, `\`, `*`, `?`, `[`, `]`, `(`, `)`, `{`, `}` or `!`. Inside double quotes, `$`, backticks and `\` are refused too.
+5. Do not start a word with `#` or `~`, and do not put `~` right after `=` or `:`. `HEAD~1` is fine.
+6. Put text with these characters inside single quotes, for example `rg -n 'a|b' src/`. A check that needs a shell belongs in a test file that the gate runs.
+7. Keep each entry on one line, at most 500 chars, with plain spaces between words.
+8. Use `["none"]` only for docs or config with no runnable check. Write exactly `none`. Never mix `none` with commands.
+9. Put `NAME=value` words before `timeout`, never after it, for example `CI=1 timeout 300 npm test`. A leading `TMPDIR=$(mktemp -d) ` is allowed but not needed: the scheduler gives each gate its own TMPDIR.
 
-**Rules:**
-- `cwd` MUST point to the target project. Prefer `~/...` for portability; only use an absolute path if you have a specific reason to pin to one machine.
-- **`cwd` MUST already exist on disk at queue time.** The scheduler runs a dead-cwd guard (`fs.accessSync(cwd, fs.constants.X_OK)` in `src/main/scheduler.cjs:669-680`) *before* spawning the child, so a PRD whose `cwd` references a not-yet-created directory will exit with `-1: cwd no longer exists` and the body will never run — even if the first step of the body would have created the directory. If the PRD's purpose is to create a brand-new sibling project at `~/Projects/<new-slug>/`, point `cwd` at the parent (`~/Projects`) and make the first executable step `mkdir -p ~/Projects/<new-slug> && cd ~/Projects/<new-slug>`.
-- `estimateMinutes` is used for ETA display; include a realistic estimate (note: empirical median is ~10 min, p90 ~20 min — avoid wildly inflated estimates that hide real outliers).
-- `parallelGroup` is DEPRECATED and ignored (PRD 832) — `dependsOn: [<slug>, …]` is the only ordering primitive; numbers are unique per project.
+### files
 
-### `planId` (API-owned — never pass it)
+1. 1–50 repo-relative paths. A folder ends with `/`.
+2. No absolute paths, no `~` at the start, no `..` or `.` segments, no `*` or `?`, no `\` or backticks, no leading `-`. Use `/` between folders.
+3. PRDs that can run at the same time must not share a file. If two PRDs touch the same file, chain them with `dependsOn`.
 
-`planId` is a frontmatter key that `createPrd` stamps on every PRD: the durable identity of the plan (wave) the PRD belongs to. An `append` PRD (or one with an explicit `dependsOn`) inherits the planId of the PRD(s) it attaches behind; a first-ever or `new-head` PRD mints a fresh one. The Scheduler tracker groups by it, so a second plan in one Epic is a recorded fact, not a re-derivation. Callers never pass or hand-write it — `scheduler_create_prd` ignores it. PRDs without one (pre-stamp) fall back to dependency-graph grouping.
+### What the API writes
 
-### Artifact-only PRDs
+The API writes the frontmatter and renders two body sections from the fields above: `# Files` (right after `# Acceptance criteria`) and `# Gate` (after `# Out of scope`, before `## Engineering standards`). Do not write those two sections yourself. Do not put a gate fence (three backticks + `gate`), a `# Gate` heading or a `# Files` heading in any text field — the API rejects that. For `["none"]`, the Gate section says the PRD has no runnable check and to verify each AC line by reading the files, with the fence holding the single word `none`.
 
-Use `deliverable: artifact` + `artifactPaths: [a, b]` (both passed to `scheduler_create_prd`) ONLY when every deliverable is a file the target repo deliberately git-excludes (e.g. patches/notes under `session-manager-operations/review-records/`, matched by `.git/info/exclude`), so "no commit" is the correct outcome.
+### Acceptance criteria
 
-- Every artifact path must be named in `artifactPaths`; an unlisted file is invisible to the verifier. Each path is relative, never contains `..`.
-- The artifact must be non-empty and written during the run window — the verifier stat-checks it on disk (verdict `pass_no_commit_artifact_verified`; window = start−60s..finish+120s).
-- The run must still leave the working tree clean — declaring artifacts excuses the missing commit, not stray tracked edits. The commit guard enforces this: the `pass_no_commit_artifact_verified` verdict stands the guard down only when nothing tracked was left dirty; any uncommitted tracked change still parks as `uncommitted_changes`.
-- Both fields are required together: the write is refused if only one is given.
-
-Incident: sigma PRD `816-prepare-157-copy-citation-extras-patch` (2026-09-20) wrote its patch into a git-excluded folder; with no way to declare that, two runs both parked in `needs_review`.
+Plain, checkable statements. Commands go in `gate`, not in the criteria.
 
 ---
 
 ## §7 Self-containment
 
-**Summary:** The PRD body is the executor's entire context. It runs as `claude -p "<body>"` with no conversation history.
+Rule: the PRD body is the executor's entire context — it runs as `claude -p "<body>"` with no conversation history. Include exact file paths, signatures, library versions, and any sibling PRD not to duplicate. Never write "the conversation" or "the design doc" — if the executor would need to search for an answer, put the answer in the PRD.
 
-**Rule:** Include exact file paths, function signatures if they save a Read, library versions, and the name of any sibling PRD the executor must NOT duplicate. Do not reference "the conversation", "what we discussed", "the design doc", or any other external context. If the executor would need to search for something, include the answer.
+A short Epic-context digest is prepended automatically for orientation only — never load-bearing; write the body as if it won't be there.
 
-**Epic context digest is additive, not a dependency (PRD 958):** when a job's `epicId` resolves to a known Epic in that project's `active-index.json`, the scheduler prepends a short digest of the Epic's own session (goal text + recent turns, built by `src/main/lib/epicContextDigest.cjs`'s `buildContextDigest`) to the `-p` prompt sent to the executor — the on-disk PRD `.md` file itself is never rewritten. This exists purely to orient the executor faster; it is never load-bearing. The digest is a silent no-op when the Epic doesn't resolve, and any failure building it is caught and logged, never blocking dispatch. Every PRD body must still stand on its own per the rule above — write it as if the digest will not be there.
+The executor can't ask you anything: no `ScheduleWakeup`, Cron, Monitor, `AskUserQuestion`, plan mode, or worktree tools; background tasks are off (a `timeout` command is always on PATH — the app installs a shim on macOS). It must never stop to ask a question — it makes the safest reasonable call and reports it, so write the PRD so that call is obvious.
 
 ---
 
-## §8 Scope sizing — target ≤10 min, ceiling 15 (data-driven, 2026-09)
+## §8 Scope sizing — target ≤10 min, ceiling 15
 
-**Summary:** One PRD ≈ **≤10 wall-clock minutes** of work. Empirically (2026-09 calibration) wall p50 = **7.8 min**, 60% of runs ≤ 10 min; authored estimates ran 4× too high. **If you project >15 min, SPLIT.**
+Rule: one PRD is ≤10 wall-clock minutes of work. If you project more than 15, split it into sequential PRDs and link them with `dependsOn`.
+Why: 2026-09 data put wall p50 at 7.8 min, with 60% of runs ≤10 min — authored estimates ran 4× too high.
 
-**Rule:** Split larger work into sequential PRDs; reference the dependency in `# Implementation notes`. e2e/publish work is the failure tail: **shard test suites to one spec per PRD; never run a full suite or an endpoint-polling publish in a single PRD** (§1/§5).
+e2e and publish work is the long tail: shard test suites to one spec per PRD. Never run a full suite, or an endpoint-polling publish, in a single PRD (see §1/§3).
 
 ---
 
 ## §9 Failure surfacing
 
-**Summary:** Prefer `exit 1` with a one-line diagnosis over silent retries. Note: a `rateLimited` exit-1 is the scheduler's benign auto-pause (it auto-resumes at the next 5h reset), NOT an authoring failure — don't engineer retry logic for it.
-
-**Rule:** When a step fails, print a single diagnostic line and exit 1. The scheduler marks the job `failed` and the investigator Claude reads the log. A clean failure message is worth more than a 15-minute silent retry loop. Do not swallow errors with `|| true` unless the failure is genuinely non-fatal and you explain why.
+Rule: when a step fails, print one diagnostic line and exit 1. Don't swallow errors with `|| true` unless the failure is genuinely non-fatal — say why inline when you do.
+Why: a clean failure is worth more than a 15-minute silent retry loop; the scheduler marks the job `failed` and the investigator reads the log.
 
 ```bash
-# RIGHT
 npm test || { echo "HALT: npm test failed — see above"; exit 1; }
-
-# WRONG
-npm test || true   # silently continues even if tests are broken
 ```
+
+Note: a `rateLimited` exit-1 is the scheduler's own benign auto-pause (it resumes at the next 5h reset) — don't engineer retry logic for it.
 
 ---
 
-## §10 Pre-queue checklist (the litany)
+## §10 Negative-assertion checks must exit 0 on the clean case
+
+Rule: a check that asserts something is ABSENT must exit 0 when it's absent. Write it as `if <detector>; then echo HALT...; exit 1; fi` — never leave the no-match path carrying the non-zero exit.
+Why: `grep` exits 1 when it finds nothing. PRD `62-x-trader-doctrine` cleaned up correctly, but its sanity `grep` for a banned phrase found nothing, exited 1, and a perfect run was flagged `needs_review` by the verifier's `transcript_errors` check.
+
+```bash
+if grep -rniE "banned phrase" path/; then
+  echo "HALT: banned phrase still present"; exit 1
+fi
+echo "clean"
+```
+
+Applies to `grep`, `rg`, `diff` (exits 1 on any difference), and any custom detector.
+
+---
+
+## §11 End green, and trust the verdict line
+
+Rule: order the run so the acceptance/test gate is the LAST command. Run any intentionally-failing step (a TDD red test, an expected-nonzero probe) EARLY, and capture its output (`2>&1 | tail` inside a conditional) so a bare `Traceback`/`is_error` never lands in the final part of the transcript.
+Why: the post-run verifier scans the transcript and downgrades to `needs_review` on error markers — it can't tell an intentional failure from a real one.
+
+```bash
+# RIGHT — red demo first and captured, green gate last
+timeout 120 python -m pytest tests/test_repro.py::test_bug 2>&1 | tail -3 || true   # expected red
+# ... implement the fix ...
+timeout 300 pytest -q   # LAST thing the run does
+```
+
+The scheduler appends a finish protocol after your PRD's own steps — you never write it: review, then the `# Gate` commands (§6), then commit only the exact paths you created or changed for this PRD, then the verdict line — `SCHEDULER_VERDICT: PASS` once the gate is green and the commit landed, else `SCHEDULER_VERDICT: FAIL <one-line reason>`. The verifier trusts a truthful `PASS` plus a landed commit over stray transcript markers. Never print `PASS` on a red gate.
+
+---
+
+## §12 Don't strand mid-run probe errors; annotate expected timeouts
+
+Rule: a throwaway probe that errors (a bad quote, a wrong kwarg) must be re-run corrected right after, or annotated `# expected/handled: <why>` on the next line — never left stranded. Prefer a temp `.py` file over a fragile inline `python -c` one-liner.
+
+Rule: an *expected* `timeout` cap (a long ingest/scan you expect to hit it) is success-with-note, not a bare `Exit code 124` — branch on it explicitly:
+```bash
+timeout 120 python -m project.ingest --all || { rc=$?
+  [ $rc -eq 124 ] && echo "hit time cap — partial, rows persist; OK" \
+                  || { echo "HALT: ingest failed rc=$rc"; exit 1; }; }
+```
+Why: both a stranded probe traceback and a bare `Exit code 124` read as failure to the verifier even when the committed work is correct and green (PRDs 77, 80 — 2026-06-13).
+
+---
+
+## §13 Queueing PRDs from external automation
+
+Decision: is the session-manager app running on this machine right now?
+- Yes → call the `scheduler_create_prd` MCP tool, with the usual fields (`title`, `cwd`, `estimateMinutes`, `sourcePromptId`, `goal`, `acceptanceCriteria`, `implementationNotes`) plus `gate` and `files` (§6).
+- No → stop. Ask the human to start the app, then call the tool again. Never write the PRD file by hand: the scheduler quarantines a file the API did not write, and it never runs.
+
+It only works while the app is running — closing it removes the admin port/token, and the call fails with `session-manager app is not running (admin API unreachable)`.
+
+---
+
+## §14 A parked job may resolve itself now
+
+Rule: if a job parks `needs_review` with verdict `transcript_errors`, `no_verdict_sentinel`, or `abandoned_background_task`, do nothing first. The scheduler re-runs the gate on its own and completes the job once the gate is green, the commit is on HEAD, and the tracked tree is clean.
+Why: those three verdicts mean the transcript looked noisy, not that the work was wrong.
+
+Rule: a park caused by a DIFFERENT actor already finishing the same objective (a sibling PRD, a human) does not self-heal this way. Why: the job has no landed commit of its own. Confirm in the tree that the work is really done, then call `scheduler_archive_prd` with the slug. Archiving marks the job completed and frees the PRDs that depend on it. Never hand-edit `queue.json`: the scheduler and the watchdog both write it. Archiving clears a stale label; it does not fix a real bug.
+
+Known gap: `pass_no_commit` ("already correct, nothing to commit") isn't yet in the self-heal list above for the general case.
+
+---
+
+## §15 Pre-queue checklist (the litany)
 
 Before queueing a new PRD, verify each of these:
 
-- [ ] **§1 Bounded waits:** Every `until`/`while` poll has a `for i in $(seq 1 N)` cap ≤ 20 iterations.
-- [ ] **Every command bounded:** Every test/build/dev-server/deploy command is wrapped in `timeout` (typecheck/unit 300s, e2e 120s, `curl --max-time 15`). No bare `playwright test` / `vite` / `pnpm dev` / `curl … | head`.
-- [ ] **§2 No bonus work:** AC list is the only source of work. No "while we're here" additions.
-- [ ] **§3 Smoke tests + verify-before-done:** Every deploy/migration step is followed by a test command that exits 1 on failure. Run the AC test command once before declaring done; never end the run on a red test.
-- [ ] **§4 Bounded generators:** Any search/seed loop has an explicit `MAX_ATTEMPTS` constant and surfaces failure on exhaustion.
-- [ ] **§5 Render deploys:** Deploy waits use a live URL check, not uptime/restart signals.
-- [ ] **§6 Frontmatter:** `title`, `cwd` (`~/Projects/<name>` preferred; path MUST exist on this machine), `estimateMinutes` present. `parallelGroup` is deprecated — use `dependsOn` for ordering.
-- [ ] **§7 Self-contained:** No references to "the conversation" or external context. Paths and identifiers are inline. Body is clean UTF-8 — **no NUL/control bytes** (paste-from-PDF crashes the spawn). Quick check: `grep -qP '\x00' file && echo BAD`.
-- [ ] **§8 Scope:** Targets ≤10 min, ceiling 15. If projected larger, split. e2e/publish sharded to one spec per PRD.
-- [ ] **§9 Failure surfacing:** Errors exit 1 with a diagnostic line. No silent `|| true` swallows. (`rateLimited` exit-1 is benign auto-pause, not a failure.)
-- [ ] **§11 Negative-assertion checks:** Any "this should produce NO output / NO match" check (a `grep` that should find nothing, a "no leftover X" guard) is written as an inverted conditional that exits 0 on the clean case. A bare `grep` whose success is "no match" exits 1 and trips the verifier `transcript_errors` downgrade even when the run is perfect.
-- [ ] **§12 End green:** The acceptance/test gate is the LAST thing the run does; any intentionally-failing step (TDD red test, expected-nonzero probe) runs EARLY, never after the gate, and is captured (`2>&1 | tail` inside a conditional) so it doesn't surface as a bare `is_error`/`Traceback` in the final portion of the transcript.
-- [ ] **§13 Recover/annotate errors & expected timeouts:** A throwaway probe that errors is re-run corrected (or annotated `# expected/handled`) right after — never left stranded; prefer a temp `.py` over a fragile inline `python -c`. An *expected* `timeout` cap (a long ingest/scan) handles exit 124 explicitly as success-with-note, not a bare `Exit code 124`. Both prevent the `transcript_errors` downgrade of a green deliverable.
-
----
-
-## §11 Negative-assertion checks must exit 0 on the clean case
-
-**Summary:** A check that asserts the *absence* of something must return exit 0 when the
-thing is absent. The classic trap is `grep`: it exits **1 when it finds no match**. If your
-AC says "verify no banned phrase remains" and you write a bare `grep`, the *success* path
-(nothing found) surfaces as `is_error=true` in the transcript — and the verifier's
-`transcript_errors` heuristic downgrades the whole run to `needs_review` even though it did
-everything right.
-
-**This actually happened** (PRD `62-x-trader-doctrine`, 2026-06-13): the doctrine was cleaned
-correctly and committed, but the AC's sanity grep —
-`grep -rniE "building in public|..." data/pipelines/x_session/` — found nothing, exited 1,
-and a perfect run was flagged for review. Self-inflicted, by the PRD author.
-
-```bash
-# WRONG — exits 1 (is_error) exactly when the check PASSES
-grep -rniE "building in public|indie hacker" data/pipelines/x_session/
-
-# RIGHT — inverted: "found banned phrase" is the failure, "clean" exits 0
-if grep -rniE "building in public|indie hacker" data/pipelines/x_session/; then
-  echo "HALT: banned builder framing still present (see matches above)"; exit 1
-fi
-echo "clean: no banned framing"
-
-# ALSO RIGHT — grep -q with negation, when you don't need to see the matches
-grep -rqniE "building in public|indie hacker" data/pipelines/x_session/ \
-  && { echo "HALT: banned framing present"; exit 1; } || echo "clean"
-```
-
-**Rule:** Whenever an AC line is phrased as "verify there are no…", "confirm X does not
-appear", "no leftover…", write it as `if <detector>; then echo HALT…; exit 1; fi`. Never let
-the no-match/empty-output path be the one that carries a non-zero exit. Applies to `grep`,
-`rg`, `find ... | grep`, `diff` (exits 1 on differences), and any custom detector.
-
----
-
-## §12 End green, and trust the verdict sentinel
-
-**Summary:** The post-run verifier (`runVerify.cjs`) scans the transcript and downgrades to
-`needs_review` on error markers (`Traceback`+`Error`, `FAIL`/`FATAL`, a tool `is_error` in the
-final portion of the run). It cannot tell an *intentional* failure from a real one. Two rules
-keep legitimate runs from false-tripping it.
-
-**12a — Run the green gate LAST.** Order the run so the final command is the acceptance/test
-gate. Do any intentionally-failing step EARLY:
-
-```bash
-# WRONG — red test reproduced AFTER the work; its Traceback lands late in the transcript
-pytest -q                      # all green
-python -m pytest tests/test_repro.py::test_bug   # ← TDD red demo, errors, trips verifier
-
-# RIGHT — red demo first (and captured), green gate last
-python -m pytest tests/test_repro.py::test_bug 2>&1 | tail -3 || true   # expected red, captured
-# ... implement the fix ...
-timeout 300 pytest -q          # ← LAST thing the run does; ends green
-```
-
-If you must show a failure late, capture it (`… 2>&1 | tail` inside a conditional, or assert
-on the captured text) so a raw `Traceback`/`is_error` never hits the transcript bare.
-
-**12b — The `SCHEDULER_VERDICT` sentinel is authoritative; emit it truthfully.** The scheduler's
-FINISH PROTOCOL ends by printing `SCHEDULER_VERDICT: PASS` once the AC gate is green AND the
-commit landed (else `SCHEDULER_VERDICT: FAIL <reason>` + `exit 1`). The verifier treats
-`PASS` + a commit landed during the run as the **authoritative** signal and overrides incidental
-transcript markers — this is what lets a deliberately-reproduced red test (PRD 77) or a grep
-result containing "Error" (PRD 68) finish `completed` instead of `needs_review`. **Never print
-`PASS` on a red gate.** The sentinel is only a safety net while it tells the truth; a lying
-`PASS` converts the verifier from "catches false failures" into "ships silent failures."
-
-**This actually happened** (PRDs 68 + 77, 2026-06-13): both committed correct work with green
-suites, but 77's `systematic-debugging` red-test repro and 68's grep-"Error" substring each
-tripped `transcript_errors → needs_review`, and the self-heal pass kept re-deriving the same
-verdict from the immutable log — stuck indefinitely. §12 (end-green + authoritative sentinel)
-is the structural fix.
-
----
-
-## §13 Don't strand mid-run probe errors; annotate expected timeouts
-
-**Summary:** §12 keeps the *final* portion of the transcript green. §13 covers the *middle* —
-two executor habits that strand a bare `Traceback`/`Error`/`Exit code` the verifier then flags,
-even when the deliverable is correct and committed.
-
-**13a — A throwaway probe that errors must recover or be annotated in place.** Exploratory
-`python -c`/`bash` probes that error (a quoting/f-string slip, a wrong kwarg, a bad path) leave a
-bare traceback. Re-run the corrected probe immediately, or print `# expected/handled: <why>` on
-the next line, so recovery is adjacent (the heuristic looks for recovery within ~10 lines).
-Prefer a small temp `.py` file over a fragile multi-quote `python -c` one-liner — inline
-f-string/quoting errors are the top source of stranded probe tracebacks.
-
-```bash
-# WRONG — inline f-string slip strands a SyntaxError, then you move on
-python -c 'print(f"{p["title"]!r[:40]}")'        # SyntaxError, bare in transcript
-
-# RIGHT — write the probe to a temp file (no shell-quote minefield), or annotate
-cat > /tmp/probe.py <<'PY'
-print(repr(p["title"])[:40])
-PY
-python /tmp/probe.py || echo "# expected/handled: probe only, not part of the deliverable"
-```
-
-**13b — An *expected* `timeout` cap is success-with-note, not a bare `Exit code 124`.** Capping a
-genuinely long task you expect to hit the cap (a full-universe ingest, a long scan) is the
-correct §1/§8 behavior — but a bare `Exit code 124` reads as failure to the verifier. Branch on
-124 explicitly:
-
-```bash
-timeout 120 python -m project.ingest --all || { rc=$?
-  [ $rc -eq 124 ] && echo "hit time cap — idempotent/partial; rows persist incrementally; OK" \
-                  || { echo "HALT: ingest failed rc=$rc"; exit 1; }; }
-```
-
-For work that legitimately needs longer than a safe cap, run it in the background and poll a
-bounded number of times (§1) rather than capping the foreground command.
-
-**This actually happened** (PRDs 77 + 80, 2026-06-13): 77 stranded an inline-`python -c` f-string
-`SyntaxError` from a throwaway permalink probe; 80 surfaced a bare `Exit code 124` from a
-`timeout`-capped full-universe EDGAR ingest. Both committed correct, green, AC-complete work
-(77's cursor-hold fix; 80's 6 EDGAR rows + installed cron) yet were downgraded to `needs_review`
-on the incidental middle-of-run markers. 13a/13b keep the middle of the transcript clean.
-
-## §14 Queueing PRDs from external automation
-
-**Summary:** A downstream project (Connector Atlas, `gh-issue-5`) wanted a Slack-feedback → PRD
-loop but had no documented programmatic queueing path. This section is that path.
-
-**Decision, up front:** Is the session-manager Electron app running on this machine right now?
-- **Yes** → call the `scheduler_create_prd` MCP tool.
-- **No** → write the PRD file by hand into the prds directory, and accept the collision risk
-  described below.
-
-### The `scheduler_create_prd` MCP tool
-
-Wraps `POST /admin/scheduler/create-prd` on the loopback admin API
-(`src/main/lib/localAdminHttp.cjs` + `src/main/lib/prdCreate.cjs`, PRD 549/688) via `scripts/scheduler-mcp-server.cjs`, registered in this
-repo's `.mcp.json` as the `session-manager-scheduler` MCP server. An external project wanting to
-call it from its own automation needs the equivalent MCP server registration pointing at this
-repo's `scripts/scheduler-mcp-server.cjs`, or can call the admin HTTP route directly (same
-request/response shape) using the token at `~/.claude/session-manager/admin-api.json`.
-
-**Input** (validated server-side by `ipcSchemas.cjs`'s `schemas.schedulerCreatePrd`):
-
-| field | type | required | notes |
-|---|---|---|---|
-| `title` | string | yes | one-line title, no newlines |
-| `cwd` | string | yes | absolute path to the target project; validated via `config.cjs`'s `validatePath` (allowedRoots = home dir) |
-| `estimateMinutes` | number | yes | integer wall-clock estimate |
-| `goal` | string | yes | 2–4 sentences: what the executor builds and why |
-| `acceptanceCriteria` | string[] | yes | 1–100 entries, each one verifiable checklist line |
-| `implementationNotes` | string | yes | file paths, patterns, constraints the executor needs |
-| `outOfScope` | string[] | no | what NOT to build |
-| `slug` | string | no | kebab-case; derived from `title` if omitted |
-| `parallelGroup` | number | no | opt into an existing `NN` group instead of allocating a new one |
-
-**Return** (`{nn, filename, status}`, per `prdCreate.cjs`'s registerAdminRoute):
-```json
-{ "nn": 550, "filename": "550-my-feature.md", "status": "queued" }
-```
-On failure the tool returns `{ ok: false, error: "..." }` (e.g. `409` if `filename` already
-exists, `400` if `cwd` is rejected by `validatePath` or the payload fails schema validation).
-
-**Worked example** (MCP tool call, e.g. from Claude Code or any MCP client):
-```json
-{
-  "tool": "scheduler_create_prd",
-  "arguments": {
-    "title": "Sync Slack #feedback channel into feedback intake",
-    "cwd": "~/Projects/connector-atlas",
-    "estimateMinutes": 20,
-    "goal": "Pull unread messages from the #feedback Slack channel and materialize each as a feedback file, deduped against already-tracked message ts.",
-    "acceptanceCriteria": [
-      "New feedback files land in connector-atlas's own feedback intake folder, one per undeduped message",
-      "Each file's `source` field is `slack-<channel>-<ts>` for future dedup",
-      "timeout 300 npm run typecheck passes"
-    ],
-    "implementationNotes": "Use the Slack Web API conversations.history endpoint; token lives in connector-atlas's own secrets store, not session-manager's."
-  }
-}
-```
-Server-side, this atomically allocates the `NN` prefix (`allocateParallelGroup()`, PRD 548),
-appends the engineering standards block, and writes the PRD file — the same shape `/develop`
-produces by hand.
-
-### The app-must-be-running caveat (read this first)
-
-**`scheduler_create_prd` only works while the session-manager Electron app is running on this
-machine.** The admin server it depends on (`src/main/lib/localAdminHttp.cjs`) is hosted *inside* the
-Electron process — it binds a loopback port and writes its token to
-`~/.claude/session-manager/admin-api.json` on app boot (see `CLAUDE.md`'s `localAdminHttp.cjs`
-architecture entry) and stops existing the moment the app quits — it is not a standalone daemon.
-If the app is closed, `scheduler-mcp-server.cjs` cannot read a live port/token and every call
-returns the error `session-manager app is not running (admin API unreachable) — start it first`.
-This is the single most likely point of confusion for an automation author who assumes the tool
-is a normal always-on API — it is not; it is a convenience surface hosted by a desktop app that
-the user may or may not have open.
-
-### Fallback: writing the PRD file directly
-
-When the app is not running, first join the EXISTING, already-human-approved Epic you're already
-working inside — `node <session-manager-repo>/scripts/mint-epic.cjs <cwd> <epic-id>`; its last
-stdout line is the prds dir. This only joins; it never creates an Epic, and errors out if
-`<epic-id>` doesn't already exist — get a human to create/approve the Epic first (New Epic UI, or
-`/propose-epic` + Approve & start) if it doesn't. Then write `<NN>-<slug>.md` by hand into that
-`<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/` dir (the flat `scheduler/prds/` is RETIRED and auto-archived unexecuted at boot), add `sourcePromptId: <epic-id>` to the frontmatter so the job keeps its Epic linkage, following the frontmatter rules in §6 and the
-body conventions the rest of this guide describes (`# Goal`, `# Acceptance criteria`,
-`# Implementation notes`, `## Engineering standards` inlined verbatim — see `/develop`'s output
-for the exact shape). **Trade-off:** this path has no atomic `NN` allocation. The tool's
-`allocateParallelGroup()` (PRD 548) exists specifically to close a race where two writers pick
-the same `NN` at once; a hand-written file bypasses that reservation entirely, so if another
-writer (a human, `/develop`, or another automation) picks the same `NN` around the same time, one
-file silently shadows or is shadowed by the other's number. Pick an `NN` by scanning ALL of the
-project's prds dirs (`scheduler/epics/*/prds/` and `prds-archived/`) for the current max and
-incrementing, and treat a collision as possible, not merely theoretical. NN is strictly unique
-per project (PRD 832) — NEVER reuse an existing number to signal "runs in parallel"; that
-convention is retired. Express ordering with `dependsOn: [<slug>, ...]` frontmatter (the job is
-eligible once every listed slug's queue row is completed); independent PRDs omit it and the
-scheduler may run them concurrently.
-
-### Ownership boundary
-
-Projects own their own source adapters — Slack, GitHub, Linear, email, whatever inbound channel
-they read. Session-manager owns the queueing API (`scheduler_create_prd` / the admin route) and
-nothing upstream of it. Session-manager does not host, run, or import another project's adapter
-code; the adapter runs entirely inside the calling project (its own cron, its own credentials,
-its own filtering/triage logic) and only reaches into session-manager at the single, narrow
-`scheduler_create_prd` call.
-
-### Why project-supplied `automation-hooks.js` was declined
-
-Connector Atlas's third ask was a mechanism to drop a project-supplied `automation-hooks.js` file
-that session-manager would load and execute in-process on a timer. This was declined, and should
-not be re-proposed:
-
-- It would grant main-process privileges (full filesystem access, IPC, the admin server's own
-  token) to arbitrary code from any project directory, invoked on a schedule the *project*
-  controls rather than the *user*.
-- It inverts this project's core invariants: `config.cjs`'s `validatePath` gate on every
-  filesystem path, `ipcSchemas.cjs`'s zod-validated IPC boundary, and `CLAUDE.md`'s Avoid-list
-  ban on `shell: true` outside the two features that legitimately need it. A loaded-and-executed
-  project JS file has no equivalent boundary to pass through — it *is* the process.
-- The supported extension point is the MCP tool described above, called from *outside* the
-  session-manager process by the project's own cron/automation. That keeps the privilege boundary
-  where it already is (the loopback admin server, token-authed, narrow three-route surface) rather
-  than dissolving it.
-
-### Reference implementation of this exact loop
-
-The proposal → approve → `/develop` → queue path is a working example of this
-shape, landed 2026-07-14 (`feat(process-feedback): sync open GitHub issues into the feedback
-intake`, commit `352b89c`). It syncs open GitHub issues into `session-manager-operations/feedback/`
-(deduped on a `gh-issue-<N>` token), then processes each item through the same triage → `/develop`
-→ queue path the rest of this guide documents. An external project building a Slack (or any
-other) adapter should follow the same source → triage → queue shape, ending at
-`scheduler_create_prd` (app running) or a hand-written PRD file (app closed) as described above.
-
-## §15 Resolving a `failed`/`needs_review` job whose target work is already done
-
-**Symptom:** a job lands in `failed` or `needs_review` even though its actual objective was
-already satisfied — either by a sibling/concurrent job that finished the same work first (a
-duplicate PRD racing another one), or by an out-of-band actor (a human, another agent) reaching
-the same target state before the scheduler's run even started. The job's own transcript may be
-completely accurate (`SCHEDULER_VERDICT: PASS but no commit landed during the run window`) — the
-"failure" is a stale queue entry, not broken work.
-
-**Do NOT hand-edit `queue.json` to fix the status.** It's a live file the running Electron
-scheduler process (and the external watchdog) both read and write; a manual edit races the app's
-own save cycle and risks a torn write. There is also no supported IPC/CLI surface today to flip a
-single job's `status` field directly.
-
-**The safe, supported remediation — confirmed working live (2026-07-18):** archive the job's PRD
-*source file*, not the queue entry. `reconcile()` (`src/main/scheduler.cjs`) runs on every queue
-read/tick and drops any `queue.json` job entry whose PRD `.md` no longer exists in `prds/` — so
-archiving the file is sufficient; you never touch `queue.json` yourself.
-
-```js
-// From this repo's root (session-manager), or anywhere queueOps.cjs is reachable:
-const q = require('./src/main/queueOps.cjs');
-await q.archiveMany(['<slug-of-the-stale-job>']);
-// Atomic rename to prds-archived/<ISO>/<slug>.md — reversible, path-contained,
-// no queue.json write. The next reconcile() (within one scheduler tick, ~10-15s
-// observed) drops the matching queue.json job entry automatically.
-```
-
-This is the exact mechanism `schedule:clear-queue`'s IPC handler uses internally, just scoped to
-one slug instead of "every non-running job" — safe to call from outside Electron (no admin API
-needed) since `queueOps.cjs`'s `archiveMany` is a plain exported function, not IPC-gated.
-
-**When to use this vs. requeueing a retry:** only when you've confirmed the target state is
-already correct (read the failed job's own transcript/log — did it conclude "nothing left to
-do"? did a sibling job's commit already land the same objective? does an independent check like
-`gh pr view <n> --json mergeable` already show the desired end state?). If the target state is
-genuinely NOT yet reached, fix and requeue instead — archiving does not fix an actual bug, it
-only clears a stale status label for already-completed work.
-
-**Known gap this doesn't cover:** the verifier's `pass_no_commit` classification (a run that
-concludes "PASS, no code change needed" gets flagged `needs_review` as if it were suspicious)
-does not yet special-case "another actor already satisfied this PRD's postcondition" for
-externally-checkable targets (e.g. a `gh pr view`-mergeable branch). `RESCANNABLE_VERDICTS`
-already includes `pass_no_commit` for one narrow case (fix-plan jobs, exempted 2026-07-12) but
-not the general case. See `session-manager-operations/feedback/processed/` for the tracked
-follow-up on softening this classification for merge-style PRDs with a checkable postcondition.
+- [ ] **§1 Bounded waits:** every poll loop has a `for i in $(seq 1 N)` cap ≤20 iterations; no uptime/restart signal used to detect a static-content deploy.
+- [ ] **Every command bounded:** every test/build/deploy command is wrapped in `timeout` (typecheck/unit 300s, e2e 120s, `curl --max-time 15`).
+- [ ] **§2 No bonus work:** the AC list is the only source of work.
+- [ ] **§3 Verify, don't poll:** every deploy/migration step is followed by a test command that exits 1 on failure; the AC test command ran green once before you declare done.
+- [ ] **§4 Bounded generators:** any search/seed loop has an explicit max and surfaces failure on exhaustion.
+- [ ] **§5 Frontmatter:** `title`, `cwd` (exists on this machine), `estimateMinutes` present; `dependsOn` used for ordering, not `parallelGroup`.
+- [ ] **§6 Gate and files:** `gate` follows every rule in §6 (or is `["none"]` alone); `files` is 1–50 repo-relative paths, no overlap with a concurrent PRD.
+- [ ] **§7 Self-contained:** no reference to "the conversation" or outside context; paths/identifiers inline; clean UTF-8, no NUL bytes (`grep -qP '\x00' file && echo BAD`).
+- [ ] **§8 Scope:** targets ≤10 min, ceiling 15; e2e/publish sharded to one spec per PRD.
+- [ ] **§9 Failure surfacing:** errors exit 1 with a diagnostic line; no silent `|| true`.
+- [ ] **§10 Negative assertions:** every "should find nothing" check is inverted to exit 0 on the clean case.
+- [ ] **§11 End green:** the gate runs last; any intentional failure runs early and is captured.
+- [ ] **§12 No stranded probes:** a probe error is corrected or annotated; an expected `timeout` cap branches on exit 124.

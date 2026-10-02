@@ -264,6 +264,8 @@ export interface AgentPersona {
   /** "<Department> — <Human title>" (e.g. "Engineering — Architect"), free text — drives
    *  department grouping in the New Epic Agent picker. Optional/null when not set. */
   title?: string | null;
+  /** Bundled-persona version stamp (seedAgentPersonas.cjs). Null for a persona that was never seeded, or has no stamp. */
+  seedVersion?: number | null;
   path: string;
   body: string;
   /** Project names (basename of cwd) whose currently-open tab overlays this agent. */
@@ -293,6 +295,8 @@ export interface AgentPersonaSaveInput {
   title?: string;
   /** Open project name: write that project's frontmatter-only override (only `model`/`effort` are used) instead of the global file. */
   projectName?: string;
+  /** Bundled-persona version stamp (seedAgentPersonas.cjs). Omit to carry over the existing file's stamp unchanged. */
+  seedVersion?: number;
   body: string;
 }
 

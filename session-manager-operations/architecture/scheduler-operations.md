@@ -125,6 +125,13 @@ different algorithm.
 | 5 | **reverify** | `reverifyNeedsReview()` (`scheduler.cjs`), run once on boot and every 10 minutes (`shouldRunPeriodicReverify` gate) via `rescheduleInterval`. Re-runs the verifier over stale `needs_review`/`failed` rows and computes a `looksDone` annotation (a later commit touching the PRD's declared paths). | Genuinely stale + still-passing verdict → `completed` (source `reverifyNeedsReview:heal`). A row with `looksDone` but no direct heal path is left for rung 6. |
 | 6 | **bounded auto-resolve / manual-reset** | `applyNeedsReviewAutoResolve`, gated by `selectExhaustedNeedsReviewTargets`: an exhausted-auto-fix or guard-parked row that has sat `needs_review` for `NEEDS_REVIEW_RESOLVE_MS` (30 min). | `looksDone` → `completed`. Otherwise up to `NEEDS_REVIEW_RESOLVE_CAP=2` requeues to `pending`; the cap-exhausted pass auto-`skip`s the row (`needsReviewAutoResolvedSkip`) so a `dependsOn` chain behind it still drains. Anything not matching one of the sources above (an explicit human `scheduler_reset_job`) buckets as `manual-reset` in the ledger. |
 
+Gate authority is not a seventh rung. It runs inside the shadow gate (`runGateShadow`) that rung 5
+already fires in the background, decided by `decideGateAuthority` (`lib/gateAuthority.cjs`). A
+needs_review park with verdict `transcript_errors`, `no_verdict_sentinel` or
+`abandoned_background_task` completes on its own when the gate re-run is green, the landed commit is
+on HEAD, and the tracked tree is clean. Kill switch: `SM_GATE_AUTHORITATIVE_DISABLE=1`. Every other
+verdict keeps the shadow gate observation-only, exactly as before.
+
 ## 5. The reap/orphan path and its git-evidence gate
 
 `reapDeadRunningJobs()` (`scheduler.cjs`) scans `queue.json` (never the in-memory
@@ -172,6 +179,26 @@ human clears it via Resume/Run now.
 A finished step's row leaves `queue.json` (`archiveCompletedPrd` + `reconcile()`'s `if (!p)` terminal-drop), so live rows alone shrink a completed plan to its live remainder. Plan bands therefore build from live rows merged with the Epic's archived PRDs (`lib/archivedPlanRows.ts`), the same history `epicDerive.ts`'s `epicPrds` always showed. One Epic may hold several plans (waves), keyed by the stamped `planId` (connected-component derivation is the fallback for PRDs without one): a follow-up that `dependsOn` an earlier step appends to that plan; an independent one opens a new plan. The band header states `N steps · M done` from the plan's own rows, so a shrinking band is never mistaken for a lost plan.
 
 ## 8. What recovers automatically vs what needs a human
+
+**The human-facing notice is quiet and grouped, not immediate.** A park into
+`needs_review` records a notice on the job row (`reviewNotice.cjs`'s
+`buildReviewNotice`) and sends nothing yet — the ladder above almost always
+heals it first. A human reset (`resetJobFields`) deletes that notice outright,
+so a re-park afterward starts a fresh hold clock; a rung-6 ladder requeue does
+not reset it, so the clock survives one more lap — it is still the same
+unresolved episode. The authoring Epic gets exactly ONE message per (project,
+Epic, cause) group, sent only when the ladder gives up on a row (an
+auto-resolve skip, rung 6) or the row has sat `needs_review` with no
+resolution for `SM_REVIEW_NOTICE_HOLD_MINUTES` (default 240 minutes) — a
+not-yet-due row only joins that group once it has sat for at least 30 minutes
+itself (`SWEEP_MIN_AGE_MINUTES`), so the ladder's early rungs get a fair
+chance first. `scheduler.cjs`'s `flushDueReviewNotices` is the sole sender; it
+groups every row sharing the same cause into one plain-language message,
+names any pending PRD the group still blocks via `dependsOn` instead of
+always claiming nothing is waiting, and retries a send that errors up to 3
+times, then stamps it sent anyway so a dead Epic cannot loop forever. Kill
+switch `SM_REVIEW_NOTICE_IMMEDIATE=1` restores the old immediate, ungrouped
+notify-at-park-time behavior, for local debugging.
 
 **Automatic, no operator action required:** the starvation watchdog forcing a tick (§3); rungs
 1, 2, 4, 5, and the bounded part of rung 6 of the needs_review ladder (§4); the reap/orphan

@@ -95,10 +95,15 @@ test('a machine already fully seeded under the old done:true marker only picks u
 
   await seedAgentPersonas({ logger: silentLogger() });
 
-  // Pre-existing files from the old run are untouched...
+  // Neither body matches anything this app has ever shipped (they're
+  // hand-written placeholders), so the upgrade pass leaves both alone no
+  // matter what their seedVersion is — a missing stamp is no longer by
+  // itself a reason to overwrite a file a person may have written.
   expect(fs.readFileSync(path.join(agentsDir(), 'architect.md'), 'utf8')).toBe('old architect content\n');
   expect(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8')).toBe('old dev-lead content\n');
-  // ...but the newly added persona is delivered.
+  expect(fs.existsSync(path.join(agentsDir(), '.backup'))).toBe(false);
+  expect(fs.existsSync(path.join(tmpHome, '.claude', 'session-manager', 'persona-backups'))).toBe(false);
+  // ...but the newly added persona is still delivered.
   expect(fs.existsSync(path.join(agentsDir(), 'project-home-builder.md'))).toBe(true);
 
   const marker = JSON.parse(fs.readFileSync(mPath, 'utf8'));
@@ -181,4 +186,242 @@ test('SM_SEED_AGENT_PERSONAS_DISABLE=1 short-circuits', async () => {
 
   expect(fs.existsSync(agentsDir())).toBe(false);
   expect(fs.existsSync(markerPath())).toBe(false);
+});
+
+// --- upgrade pass ---------------------------------------------------------
+//
+// The upgrade pass only replaces an installed file once its body is proven
+// to match a version this app actually shipped (`shippedSeeds`). These
+// tests inject a fake `shippedSeeds` list instead of the real
+// `lib/shippedPersonaSeeds.cjs`, so a fixture body doesn't need to be one of
+// dev-lead's real historical bodies — just a body whose hash the fake entry
+// declares as shipped.
+
+const OLD_BODY = 'old dev-lead body';
+
+function hashBody(bodyText) {
+  const crypto = require('node:crypto');
+  return crypto.createHash('sha256').update(bodyText.trim()).digest('hex');
+}
+
+/** A fake shippedSeeds list whose sole dev-lead entry matches OLD_BODY and carries `fm`. */
+function fakeDevLeadSeeds(fm) {
+  return { 'dev-lead': [{ commit: 'fake0000', bodySha256: hashBody(OLD_BODY), fm }] };
+}
+
+/** An installed dev-lead file over OLD_BODY, with `fmLines` extra frontmatter lines and an implicit seedVersion: 1. */
+function installedDevLead(fmLines) {
+  return ['---', 'name: dev-lead', ...fmLines, 'seedVersion: 1', '---', '', OLD_BODY, ''].join('\n');
+}
+
+test('upgrade uses the bundled model when the installed value only matches the shipped default', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), installedDevLead(['model: fable']));
+
+  await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
+
+  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { fm, body } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
+  expect(fm.model).toBe('sonnet'); // 'fable' was just the old shipped default here, not a user choice
+  expect(fm.seedVersion).toBe('2'); // bundled stamp, not the installed file's old one
+  expect(body).toContain('## Run contract'); // bundled body replaced the old one
+});
+
+test('upgrade keeps an installed model no shipped version ever had', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), installedDevLead(['model: us.anthropic.claude-sonnet-5']));
+
+  await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
+
+  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { fm } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
+  expect(fm.model).toBe('us.anthropic.claude-sonnet-5');
+});
+
+test('upgrade keeps a user-removed model line removed, not re-added from the bundled default', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), installedDevLead([])); // no model: line at all
+
+  await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
+
+  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { fm } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
+  expect(fm.model).toBeUndefined();
+});
+
+test('upgrade keeps frontmatter keys the bundled persona never had', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), installedDevLead(['model: fable', 'color: blue', 'tags: a, b']));
+
+  await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
+
+  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { fm } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
+  expect(fm.color).toBe('blue');
+  expect(fm.tags).toBe('a, b');
+});
+
+test('upgrade normalizes a CRLF installed file and writes LF output', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  const crlf = installedDevLead(['model: fable']).replace(/\n/g, '\r\n');
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), crlf);
+
+  await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
+
+  const out = fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8');
+  expect(out).not.toContain('\r');
+  expect(out).toContain('## Run contract');
+});
+
+test('upgrade preserves a model value containing regex-replacement syntax verbatim', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), installedDevLead(['model: $& and $1 and $$']));
+
+  await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
+
+  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { fm } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
+  expect(fm.model).toBe('$& and $1 and $$');
+});
+
+test('an installed seedVersion: with an empty value reads as 1, so a bundled seedVersion 2 still upgrades it', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  const installed = ['---', 'name: dev-lead', 'model: fable', 'seedVersion:', '---', '', OLD_BODY, ''].join('\n');
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), installed);
+
+  await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
+
+  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { fm } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
+  expect(fm.seedVersion).toBe('2');
+});
+
+test('the upgrade backs up the pre-upgrade file content by hash, outside the agents dir', async () => {
+  // Pre-seed the marker as fully delivered so the first-seed pass (which also
+  // runs every call) short-circuits instead of seeding the other three
+  // missing personas — isolates agentsDir() to just the file this test wrote.
+  const mPath = markerPath();
+  fs.mkdirSync(path.dirname(mPath), { recursive: true });
+  fs.writeFileSync(mPath, JSON.stringify({ seeded: ALL_PERSONAS, attempts: 0, ts: '2026-01-01T00:00:00.000Z' }));
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  const installed = installedDevLead(['model: fable']);
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), installed);
+
+  await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
+
+  const backupsDir = path.join(tmpHome, '.claude', 'session-manager', 'persona-backups');
+  const backups = fs.readdirSync(backupsDir).filter((f) => f.startsWith('dev-lead.'));
+  expect(backups.length).toBe(1);
+  expect(backups[0]).toMatch(/^dev-lead\.[0-9a-f]{12}\.md$/);
+  expect(fs.readFileSync(path.join(backupsDir, backups[0]), 'utf8')).toBe(installed);
+  // Never inside ~/.claude/agents — Claude Code loads every file there recursively,
+  // so a backup kept there would load as a second agent under the same name.
+  expect(fs.existsSync(path.join(agentsDir(), '.backup'))).toBe(false);
+  expect(fs.readdirSync(agentsDir()).sort()).toEqual(['dev-lead.md']);
+});
+
+test('a second upgrade attempt with the same pre-upgrade content writes no second backup', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  const seeds = fakeDevLeadSeeds({ model: 'fable' });
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), installedDevLead(['model: fable']));
+
+  await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: seeds });
+  // The same stale content reappears (e.g. a second machine, or a restore) — upgrade again.
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), installedDevLead(['model: fable']));
+  await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: seeds });
+
+  const backupsDir = path.join(tmpHome, '.claude', 'session-manager', 'persona-backups');
+  const backups = fs.readdirSync(backupsDir).filter((f) => f.startsWith('dev-lead.'));
+  expect(backups.length).toBe(1);
+});
+
+test('a write failure (agents dir symlinked outside the allowed roots) never leaves an orphan backup', async () => {
+  const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'persona-outside-'));
+  try {
+    fs.mkdirSync(path.join(tmpHome, '.claude'), { recursive: true });
+    fs.symlinkSync(outsideDir, agentsDir()); // ~/.claude/agents -> outside the temp HOME
+    const installed = installedDevLead(['model: fable']);
+    fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), installed); // through the symlink
+
+    const seeds = fakeDevLeadSeeds({ model: 'fable' });
+    await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: seeds });
+    await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: seeds }); // run twice
+
+    expect(fs.readFileSync(path.join(outsideDir, 'dev-lead.md'), 'utf8')).toBe(installed);
+    expect(fs.existsSync(path.join(tmpHome, '.claude', 'session-manager', 'persona-backups'))).toBe(false);
+  } finally {
+    fs.rmSync(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test("every bundled persona's body hash is present in the real shipped-seed manifest", () => {
+  const { personaBodyHash } = require('../seedAgentPersonas.cjs');
+  const { SHIPPED_PERSONA_SEEDS } = require('../lib/shippedPersonaSeeds.cjs');
+  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+
+  for (const name of ALL_PERSONAS) {
+    const raw = fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', `${name}.md`), 'utf8');
+    const hash = personaBodyHash(raw);
+    const { fm } = splitFrontmatter(raw);
+    const expectedFm = { ...fm };
+    delete expectedFm.name;
+    delete expectedFm.seedVersion;
+    const entries = SHIPPED_PERSONA_SEEDS[name] ?? [];
+    const match = entries.find((e) => e.bodySha256 === hash);
+    if (!match) {
+      throw new Error(
+        `No shipped-seed entry for ${name} matches its current bundled body. Paste this into shippedPersonaSeeds.cjs:\n` +
+        JSON.stringify({ commit: '<fill in>', bodySha256: hash, fm: expectedFm }, null, 2)
+      );
+    }
+    expect(match.fm).toEqual(expectedFm);
+  }
+});
+
+test('an installed persona already at the bundled seedVersion is left untouched by the upgrade pass', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  const bundledDevLead = fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', 'dev-lead.md'), 'utf8');
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), bundledDevLead);
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  expect(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8')).toBe(bundledDevLead);
+  expect(fs.existsSync(path.join(agentsDir(), '.backup'))).toBe(false);
+});
+
+test('an installed persona at a newer seedVersion than bundled is left untouched by the upgrade pass', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  const newer = ['---', 'name: dev-lead', 'seedVersion: 99', '---', '', 'from the future', ''].join('\n');
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), newer);
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  expect(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8')).toBe(newer);
+  expect(fs.existsSync(path.join(agentsDir(), '.backup'))).toBe(false);
+});
+
+test('SM_SEED_AGENT_PERSONAS_DISABLE=1 also skips the upgrade pass for a pre-existing stale file', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), 'old dev-lead content\n');
+  process.env.SM_SEED_AGENT_PERSONAS_DISABLE = '1';
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  expect(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8')).toBe('old dev-lead content\n');
+  expect(fs.existsSync(path.join(agentsDir(), '.backup'))).toBe(false);
+});
+
+test('the upgrade pass runs even when the marker says every persona is already seeded and attempts are exhausted', async () => {
+  const { MAX_ATTEMPTS } = require('../seedAgentPersonas.cjs');
+  const mPath = markerPath();
+  fs.mkdirSync(path.dirname(mPath), { recursive: true });
+  fs.writeFileSync(mPath, JSON.stringify({ seeded: ALL_PERSONAS, attempts: MAX_ATTEMPTS, ts: '2026-01-01T00:00:00.000Z' }));
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  fs.writeFileSync(path.join(agentsDir(), 'dev-lead.md'), installedDevLead(['model: fable']));
+
+  await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
+
+  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { body } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
+  expect(body).toContain('## Run contract'); // upgraded despite the marker being "done" and attempts exhausted
 });

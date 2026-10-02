@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 /**
- * mint-epic.cjs — CLI wrapper over lib/epicMint.cjs's JOIN path, for PRD
- * authors working without the app's admin API (the /develop skill's
- * manual-write fallback).
+ * mint-epic.cjs — CLI wrapper over lib/epicMint.cjs's JOIN path, for joining
+ * an existing Epic without the app's admin API running.
  *
  * This script never creates an Epic. It only resolves an EXISTING Epic's
  * prds/ write directory. An Epic comes into existence in exactly one place —

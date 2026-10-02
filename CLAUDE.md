@@ -105,15 +105,15 @@ Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/
 [`code-map.md`](session-manager-operations/architecture/code-map.md),
 [`scheduler/README.md`](session-manager-operations/scheduler/README.md).
 
-- **PRD authoring is API-only** — `scheduler_create_prd` is the sole sanctioned way to write a PRD.
-  Hand-writing is a degraded last resort (app not running); report it visibly.
+- **PRD authoring is API-only** — `scheduler_create_prd` is the only way to write a PRD.
+  App not running? Stop and ask the human to start it; never hand-write one.
 - Flat `scheduler/prds/` is **RETIRED** — auto-consolidated into `prds-archived/` on every `reconcile()` pass.
 - Before writing a PRD, read
   [`PRD_AUTHORING.md`](src/main/templates/PRD_AUTHORING.md) —
   rules from two real stuck-job incidents + a pre-queue checklist (§15).
 - **Guard hooks adopt by REFERENCE via a stable shim** (`guardShims.cjs`,
   `~/.claude/session-manager/hooks/guard-*.cjs`) — readiness banner installs all four.
-- A `needs_review` park self-heals first; the authoring Epic gets one grouped notice only after the ladder fails — never mints new work.
+- A `needs_review` park self-heals first; its Epic gets one grouped notice when the ladder fails or the hold ends — never mints work.
 - The Scheduler nav row is **PROJECT-face only** — every route it renders is cwd-derived.
 - Stuck queue or a parked `needs_review`? See
   [`scheduler-operations.md`](session-manager-operations/architecture/scheduler-operations.md) — recovery

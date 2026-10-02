@@ -22,9 +22,9 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | cleanup-nested-queue-stubs.cjs | manual one-shot; dispatches to cleanup-worktree-ops-stubs.cjs | no |
 | cleanup-worktree-ops-stubs.cjs | via cleanup-nested-queue-stubs.cjs | no |
 | health.sh | manual; `local-project-health` skill's lookup path (`npm run health` uses src/main/health.cjs) | no |
-| install-scheduler-mcp-user-scope.sh | manual (`seedSchedulerMcp.cjs` does the same at app start) | no |
+| install-scheduler-mcp-user-scope.sh | manual (`seedSchedulerMcp.cjs` does the same on first boot, or on the next boot after its marker file is deleted) | no |
 | install-scheduler-watchdog.sh | manual; installs the systemd user timer (cron fallback) | no |
-| mint-epic.cjs | PRD_AUTHORING.md manual-write fallback | yes |
+| mint-epic.cjs | manual; joins an existing Epic and prints its prds dir | yes |
 | ops-sweep.cjs | `ops-sweep` SKILL.md (`node "$SM_ROOT/scripts/ops-sweep.cjs" <cwd>`) | yes |
 | postinstall.cjs | npm `postinstall` | yes |
 | probe-electron-helper-comm.cjs | manual probe (Linux, xvfb) | no |

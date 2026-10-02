@@ -83,6 +83,27 @@ test('resetJobFields: force:true overrides the guard on a skipped job', () => {
   expect(job.landedCommit).toBe('abc1234');
 });
 
+test('resetJobFields: clears looksDone and evidenceScannedAt from a needs_review row, but keeps landedCommit', () => {
+  const job = makeJob('needs_review', {
+    looksDone: {
+      commits: ['abc1234'],
+      paths: ['src/x.cjs'],
+      detectedAt: '2026-10-01T00:00:00.000Z',
+      rule: 'test-rule',
+    },
+    evidenceScannedAt: '2026-10-01T00:00:00.000Z',
+  });
+  const result = resetJobFields(job, 'retry reason');
+  expect(result).toBe(true);
+  // This run's completion evidence must not survive a reset — an old run's
+  // looksDone must never complete the NEXT run (applyNeedsReviewAutoResolve
+  // completes on looksDone alone), and a stale evidenceScannedAt must not
+  // block the next park's own scan.
+  expect(job.looksDone).toBeUndefined();
+  expect(job.evidenceScannedAt).toBeUndefined();
+  expect(job.landedCommit).toBe('abc1234');
+});
+
 for (const status of ['pending', 'running', 'failed', 'needs_review']) {
   test(`resetJobFields: resets normally for non-terminal status '${status}'`, () => {
     const job = makeJob(status);

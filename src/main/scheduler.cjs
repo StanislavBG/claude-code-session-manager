@@ -4165,6 +4165,14 @@ function resetJobFields(job, errorMsg, opts = {}) {
   // resetJobFields — it transitions the row directly — so that requeue
   // correctly keeps the same clock, because it is still the same episode.
   delete job.reviewNotice;
+  // This run's completion evidence, not durable across a reset — an old
+  // run's looksDone must never complete the NEXT run
+  // (applyNeedsReviewAutoResolve completes on looksDone alone), and a stale
+  // evidenceScannedAt must not block the next park's own scan.
+  // computeLooksDone only counts commits since job.startedAt, so the next
+  // park re-scans fresh once this run's own startedAt is set.
+  delete job.looksDone;
+  delete job.evidenceScannedAt;
   // Deliberately NOT deleting job.landedCommit: it must outlive a reset so a
   // re-fired run of this same slug can pass it to verifyRun as
   // priorLandedCommit (pass_no_commit_prior_run_verified exemption).
@@ -7482,10 +7490,14 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           source: 'spawnJob:dispatch',
         });
         delete s.jobs[idx].heldReason;
-        // A fresh dispatch means any gateShadow on this row was computed for
-        // an earlier runId/startedAt — never let it linger and read as this
-        // run's result.
+        // A fresh dispatch means any gateShadow, looksDone, or
+        // evidenceScannedAt on this row was computed for an earlier
+        // runId/startedAt — never let any of them linger and read as this
+        // run's result (looksDone stale here would let rung 6 complete this
+        // run on the PREVIOUS run's evidence).
         delete s.jobs[idx].gateShadow;
+        delete s.jobs[idx].looksDone;
+        delete s.jobs[idx].evidenceScannedAt;
         s.jobs[idx].runId = runId;
         s.jobs[idx].startedAt = new Date().toISOString();
         // Dispatch-phase breadcrumb (PRD: dispatch-region diagnostic

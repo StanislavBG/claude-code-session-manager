@@ -39,6 +39,7 @@ const {
   applyNeedsReviewAutoResolve,
   NEEDS_REVIEW_RESOLVE_CAP,
   needsReviewAutoResolveDisabled,
+  resetJobFields,
 } = require('../scheduler.cjs');
 
 const { pickForProject } = require('../lib/schedulerBatch.cjs');
@@ -154,6 +155,27 @@ test('applyNeedsReviewAutoResolve race-guards against a row that moved off needs
   const job = exhaustedJob({ status: 'completed', exhaustedResolveAttempts: 0 });
   assert.equal(applyNeedsReviewAutoResolve(job), null);
   assert.equal(job.status, 'completed'); // untouched
+});
+
+test('reset after a looksDone park must not let rung 6 complete the next run', () => {
+  // Run 1 parked needs_review and the reverify pass stamped looksDone on it.
+  const job = exhaustedJob({
+    exhaustedResolveAttempts: 1,
+    looksDone: { commits: ['abc1234'], paths: ['src/main/scheduler.cjs'], detectedAt: new Date().toISOString() },
+  });
+  // The planner edits the PRD and resets the row (IPC/MCP reset) — this must
+  // drop run 1's looksDone/evidenceScannedAt (fix-looksdone), not just the
+  // generic run fields.
+  resetJobFields(job, 'reset after needs_review park');
+  assert.equal(job.looksDone, undefined);
+  // Run 2 parks needs_review again, in the same eligible shape the other
+  // tests in this file use — but genuinely with no looksDone evidence of
+  // its own yet (computeLooksDone hasn't re-scanned this new run).
+  job.status = 'needs_review';
+  const outcome = applyNeedsReviewAutoResolve(job);
+  assert.notEqual(outcome, 'completed');
+  assert.notEqual(job.status, 'completed');
+  assert.equal(outcome, 'requeued');
 });
 
 // --- chain drain: the actual point of this PRD ---

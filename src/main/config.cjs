@@ -128,11 +128,16 @@ function validatePath(abs) {
   throw new Error(`Path outside allowed boundaries: ${real}`);
 }
 
-// Paths that are allowed as write destinations.
+// Paths that are allowed as write destinations. Built from the REALPATH of
+// home because validateWrite compares against a realpath — on macOS a HOME
+// under os.tmpdir() (/var → /private/var) otherwise never matches.
+const REAL_HOME = (() => {
+  try { return fs.realpathSync(os.homedir()); } catch { return os.homedir(); }
+})();
 const WRITE_PREFIXES = [
-  path.join(os.homedir(), '.claude'),
-  path.join(os.homedir(), '.claude.json'), // global MCP servers config
-  path.join(os.homedir(), '.config', 'claude-code'),
+  path.join(REAL_HOME, '.claude'),
+  path.join(REAL_HOME, '.claude.json'), // global MCP servers config
+  path.join(REAL_HOME, '.config', 'claude-code'),
 ];
 
 /**

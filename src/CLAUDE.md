@@ -31,7 +31,7 @@ machines on first boot; `templates/PRD_AUTHORING.md` is seeded into consuming pr
   (Only `PRD_AUTHORING.md` is present today.)
 - **CommonJS only** in `main/` and `preload/` (`.cjs`); no ES modules there.
 - **`src/main` never requires from `scripts/`** — tooling depends on the app, not the reverse.
-- **Tests in `main/**/__tests__/*.test.cjs` are hand-registered** in `vitest.config.ts`; an
-  unlisted file silently never runs. See [`tests/README.md`](../tests/README.md).
+- **Tests in `main/**/__tests__/*.test.cjs` are picked up by glob** in `vitest.config.ts`
+  — keep new tests under an `__tests__/` dir or they never run. See [`tests/README.md`](../tests/README.md).
 - Changing `api.d.ts` means updating the mirroring zod schema by hand; nothing generates it.
 - **Main typecheck ratchet**: `tsconfig.main.json` type-checks only its explicit `include` allowlist (files also start with `// @ts-check`, enforced by npm run lint:main-ts-check; `checkJs` is off so transitive requires are not dragged in) — to add a file, list it in `include`, add `// @ts-check`, get `npm run typecheck` green with JSDoc types (no `any`/`@ts-ignore`).

@@ -86,6 +86,21 @@ test('an invalid tag value fails', () => {
   expect(() => assertValidPromptSession(badTag)).toThrow(/tag/);
 });
 
+test('a legacy bilko-host-publisher tag is dropped (treated as absent), never thrown', () => {
+  const legacyTag = {
+    id: 'epic-abc12345',
+    cwd: '/home/bilko/Projects/session-manager',
+    goalText: 'do the thing',
+    claudeSessionId: 'c1b2a3d4-0000-0000-0000-000000000000',
+    status: 'active',
+    createdAt: '2026-08-02T00:00:00.000Z',
+    completedAt: null,
+    tag: 'bilko-host-publisher',
+  };
+  const result = assertValidPromptSession(legacyTag);
+  expect(result.tag).toBeUndefined();
+});
+
 test('a source object missing its required producer fails', () => {
   const badSource = {
     id: 'epic-abc12345',

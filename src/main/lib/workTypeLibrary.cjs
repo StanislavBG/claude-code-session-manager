@@ -27,10 +27,15 @@ const WORK_TYPES = Object.freeze([
   'discussion',
   'build',
   'project-home-builder',
-  'bilko-host-publisher',
 ]);
 
 const WorkTypeSchema = z.enum(WORK_TYPES);
+
+// Tag ids that used to be in WORK_TYPES and must still parse on an old
+// on-disk Epic/persona record — never thrown on, always dropped. Single
+// source of truth for promptSessionSchema.cjs / agentPersonaSchema.cjs's
+// legacy-drop preprocessing.
+const LEGACY_WORK_TYPES = Object.freeze(['bilko-host-publisher']);
 
 // A 'discussion'-tagged ticket never reaches PRD authoring (a domain
 // invariant unrelated to the Epic/PRD tag unification above), so the PRD
@@ -45,4 +50,5 @@ module.exports = {
   WorkTypeSchema,
   PRD_WORK_TYPES,
   PrdWorkTypeSchema,
+  LEGACY_WORK_TYPES,
 };

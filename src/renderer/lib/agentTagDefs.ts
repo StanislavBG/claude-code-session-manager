@@ -64,19 +64,6 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
       '`project_home_write` is unavailable or errors, report that plainly and STOP — never build ' +
       'infrastructure in this project as a workaround.',
   },
-  'bilko-host-publisher': {
-    description:
-      "Publishes this project's Project Home page (home.html) to bilko.run as a static-path listing via the bilko-host MCP's gated publish pipeline.",
-    initialPromptTemplate:
-      'You are publishing this project to bilko.run. Read ' +
-      '`session-manager-operations/architecture/bilko-host-integration.md` first — it is the ' +
-      'source of truth for the pipeline, the bundle path, and the non-negotiables (ship the ' +
-      'Project Home page verbatim; never bypass a failing gate on your own initiative). ' +
-      'Call `bilko-host__get_host_contract` and read ' +
-      '`~/Projects/Bilko/mcp-host-server/src/gates/*.ts` live before publishing — never assume a ' +
-      "cached understanding of the gates, they can change independently of this app's release " +
-      'cycle. Then follow `.claude/agents/bilko-host-publisher.md` as your operating protocol.',
-  },
 }
 
 /**

@@ -23,7 +23,7 @@
 'use strict';
 
 const { z } = require('zod');
-const { WorkTypeSchema } = require('./workTypeLibrary.cjs');
+const { WorkTypeSchema, LEGACY_WORK_TYPES } = require('./workTypeLibrary.cjs');
 const { PERSONA_NAME_RE, ALL_PROJECTS } = require('../agentLibrary.cjs');
 
 // Bounded free-text fields — generous for legitimate persona authoring while
@@ -53,7 +53,13 @@ const AgentPersonaSaveSchema = z.object({
   model: BoundedString,
   effort: BoundedString.optional(),
   color: BoundedString,
-  tags: z.array(WorkTypeSchema),
+  // A legacy tag value (e.g. the retired 'bilko-host-publisher') must keep
+  // loading on an old on-disk persona — dropped silently, never thrown. Any
+  // other unknown value still fails via WorkTypeSchema.
+  tags: z.preprocess(
+    (v) => (Array.isArray(v) ? v.filter((t) => !(typeof t === 'string' && LEGACY_WORK_TYPES.includes(t))) : v),
+    z.array(WorkTypeSchema),
+  ),
   projects: z.array(ProjectEntrySchema).optional(),
   action: z.string().max(20000).optional(),
   actionLabel: BoundedString.optional(),

@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "bilko-host": {
-      "command": "node",
-      "args": ["/home/bilko/Projects/Bilko/mcp-host-server/dist/server.js"]
-    }
-  }
-}

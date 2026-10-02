@@ -51,11 +51,11 @@ for live sibling consumers.
   `~/.claude/agents/*.md` (Claude Code's own precedence, per `src/main/agentLibrary.cjs`);
   `src/seed/agents/` is the shipped source for the four personas
   `src/main/seedAgentPersonas.cjs` copies into `~/.claude/agents/` on first boot (see its
-  `PERSONAS` list); `builder` and `bilko-host-publisher` have no seed source
-  and exist only as this repo's overlays. Tracked on purpose: `.claude/settings.json` (guard
+  `PERSONAS` list); `builder` has no seed source
+  and exists only as this repo's overlay. Tracked on purpose: `.claude/settings.json` (guard
   hooks) plus the `builder.md`/`project-home-builder.md` overlays (auditable edits) —
-  `bilko-host-publisher.md` is untracked despite being in use; nothing else under `.claude/` is.
-- `.mcp.json` at the repo root registers only `bilko-host` — the scheduler MCP server
-  (`session-manager-scheduler`) is registered at USER scope in `~/.claude.json`, not here.
+  nothing else under `.claude/` is.
+- The scheduler MCP server (`session-manager-scheduler`) is registered at USER scope in
+  `~/.claude.json`, not in this repo.
 - A skill may run headless via a scheduled PRD in another project — don't rely on
   interactive-session-only features; check `/develop`'s scheduler flow first.

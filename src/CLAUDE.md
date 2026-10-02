@@ -1,6 +1,6 @@
 # src/ — scoped context
 
-Part of the **DESKTOP HARNESS** partition, except `main/{bilkoHost,bilkoHostCore,projectPages}.cjs`
+Part of the **DESKTOP HARNESS** partition, except `main/projectPages.cjs`
 (**WEB PRESENCE**) — see
 [`project-partition.md`](../session-manager-operations/architecture/project-partition.md).
 

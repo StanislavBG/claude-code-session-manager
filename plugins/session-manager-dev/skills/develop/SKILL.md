@@ -51,24 +51,18 @@ Read `~/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md` before writing
 
 Before drafting, check that `mcp__session-manager-scheduler__scheduler_create_prd` is in your
 tools. Why: drafts made first are wasted. It is the only sanctioned way to write a PRD. Its two
-failure modes have opposite answers:
+failure modes have different fixes:
 
 - **(a) Tool PRESENT but ERRORS** because the session-manager app is not running. A validation
-  error is not this case: fix the input and retry.
+  error is not this case: fix the input and retry. **STOP. Do not write any PRD file.** Tell the
+  human to start the app, then retry the same call. Why: a PRD file the API did not write is
+  quarantined and never runs.
 - **(b) Tool ABSENT from your tool list.** The `session-manager-scheduler` MCP server is not
   registered: a **misconfiguration**, not an offline app.
   **STOP. Do not write any PRD file.** Tell the human. The app registers the server at user
-  scope when it starts; if it is still missing, the human runs
-  `claude mcp add session-manager-scheduler --scope user -- node "$SM_ROOT/scripts/scheduler-mcp-server.cjs"`
-  (`$SM_ROOT` = the installed package root, four folders above this skill's folder) and opens
-  a new session. Never add a project `.mcp.json` entry yourself. Why: it brings back per-repo
-  drift.
-
-**Fallback for case (a) only.** Hand-write the file as the "Fallback: writing the PRD file
-directly" section of PRD_AUTHORING.md says, ending with the `## Engineering standards` pointer
-the API writes (`standards.md`'s absolute path). Your report must say visibly: the app was not
-running, you hand-wrote the file, its exact path, and that a human must check it. Why: the
-API's checks did not run.
+  scope the first time it starts. If it is still missing, the human deletes
+  `~/.claude/session-manager/.scheduler-mcp-seeded`, restarts the app, and opens a new session.
+  Never add a project `.mcp.json` entry yourself. Why: it brings back per-repo drift.
 
 ### Steps
 
@@ -96,8 +90,9 @@ API's checks did not run.
    pass. Each goal's first sentence names its type, in chain order: `primitive` (new helper
    and its test), `wire` (adopt it at named call sites), `behavior` (one function's logic and
    its test), `migration` (mechanical change), `doc`, `validate`.
-7. **Keep each PRD small**: at most 3 edited files, 1 new file, 6 criteria. A new helper and its
-   first caller are two PRDs. Most PRDs take 5–10 executor minutes; past estimates were 3–5×
+7. **Keep each PRD small**: at most 3 edited files, 1 new file, 6 criteria. The validate PRD is
+   exempt: it has one criterion per PRD, plus the record. A new helper and its first caller are
+   two PRDs. Most PRDs take 5–10 executor minutes; past estimates were 3–5×
    too high. Never estimate over 15; split. Why: the kill budget floors at 45 minutes, so a low
    estimate never starves a run.
 8. **Make each PRD self-contained.** The executor sees only the PRD and the project. Notes are
@@ -109,11 +104,16 @@ API's checks did not run.
 10. **Show the plan once**, as a table (#, PRD, files, gate, dependsOn, estimate), not PRD
     drafts. Queue at once when the Epic is `feature` or `bug` and scope is clear; otherwise ask
     one approval question, once.
-11. **Walk the pre-queue checklist** (last section of PRD_AUTHORING.md), then queue each PRD
-    with `scheduler_create_prd`, the validate PRD last.
-12. **Fix each warning** the API returns with `scheduler_update_prd`, or say why you keep it.
-    Then post one short message: each PRD's number and slug, the validate slug, and that no
-    per-PRD check will come from this session.
+11. Before the first `scheduler_create_prd` call, run `git -C <project> rev-parse HEAD` and keep
+    the SHA. **Walk the pre-queue checklist** (last section of PRD_AUTHORING.md), then queue each
+    PRD with `scheduler_create_prd`, the validate PRD last.
+12. **Read the warnings each call returns before the next call.** Warnings do not block. If a
+    gate or files warning shows a real mistake, archive that PRD with `scheduler_archive_prd` and
+    queue it again under a new slug, before you queue the PRDs that depend on it. Why:
+    `scheduler_update_prd` cannot change gate or files. Never change a PRD only to silence a
+    warning. The validate PRD's none-gate warning and its size warning (8 or more criteria) are
+    expected. Then post one short message: each PRD's number and slug, the validate slug, the
+    warnings you kept, and that no per-PRD check will come from this session.
 13. **Never stop for review after queueing.** Why: the validator is the review.
 
 ### PRD fields
@@ -124,7 +124,7 @@ API's checks did not run.
 | `gate`, `files` | **REQUIRED.** Rules below. The tool refuses a call without them. |
 | `estimateMinutes` | Honest: 5–10, never over 15. |
 | `sourcePromptId` | Always `<epic-id>`. Never rely on the server's fallback. |
-| `cwd` | Always the project's absolute path (`$SM_PROJECT_ROOT`). |
+| `cwd` | The Epic's project root, as an absolute path or `~/…`. The API always uses the Epic's project, whatever you pass. To work in another project, open an Epic there. |
 | `dependsOn` | Slugs that must finish first. The only ordering tool. |
 | `disposition` | Only when the API asks. `append` waits behind the Epic's unfinished PRDs; `new-head` may run now, so only when no files are shared. |
 | `slug` | Optional kebab-case without an `NN-` prefix. The API picks the number. |
@@ -188,7 +188,8 @@ End every plan with exactly one validate PRD:
    (`session-manager-operations/scheduler/epics/<epic-id>/prds/<NN>-<slug>.md` while queued,
    `prds-archived/` beside it once done; find it by slug). The last: write and commit
    `session-manager-operations/reviews/validation/<epic-id>/<validate-slug>.md`.
-5. Notes: "Work as the validator persona — the procedure is your system prompt."
+5. Notes: "Work as the validator persona — the procedure is your system prompt." and a line
+   `Base: <sha>`, the SHA from step 11.
 6. `gate: ["none"]`; `files`: the record path. Why: the validator re-runs each PRD's gate
    itself, and a REFUTED PRD is still a successful validation.
 
@@ -217,13 +218,25 @@ Rules:
    check-in events; leave them alone.
 2. Do not re-queue or reset on a single park or a rate-limit pause. Why: the scheduler may
    still heal it; a duplicate races the healed run.
-3. Act only on two signals:
-   1. **A grouped scheduler notice** (needs_review). Read each file on its `Reports:` line. Fix
-      each PRD on its `PRDs:` line (`scheduler_update_prd`, then `scheduler_reset_job`) or drop
-      it (`scheduler_archive_prd`). A parked validator arrives this way too.
+3. Act only on these signals:
+   1. **A grouped scheduler notice** (needs_review). Read each file on its `Reports:` line. For
+      each PRD on its `PRDs:` line, take the first case that fits:
+      1. It is skipped and the plan's validate PRD has not run yet: do nothing. The validator
+         reports it, and the fix wave covers it.
+      2. Its spec is wrong: fix it with `scheduler_update_prd`, then call `scheduler_reset_job`
+         (add `force: true` if it is skipped). Always edit first. Why: a reset job can start on
+         the next tick.
+      3. Its spec is right: call `scheduler_reset_job` (add `force: true` if it is skipped).
+      4. Another PRD or a human already did the work: confirm it in the tree, then call
+         `scheduler_archive_prd`. Archiving marks it completed and frees the PRDs that depend on
+         it.
+      A parked validator arrives this way too.
    2. **A validator verdict.** Read its record. A `REFUTED` PRD, or a Critical or Important
       finding, means a fix wave: one `behavior` or `wire` PRD per finding plus a new validate
       PRD. Never fix inline.
+   3. **A VALIDATION REQUEST**, only when the plan has no validate PRD. Answer it as "The
+      validate PRD" section says.
+   Fix a PRD the validator covers only through the fix wave, never inline.
 4. **Done** = the latest validator marked every PRD `VERIFIED`, no Critical or Important
    finding is open, and its record is committed. Never "done with caveats": a REFUTED PRD gets
    a fix wave or an explicit human decision to stop.
@@ -234,11 +247,11 @@ Rules:
 2. The validation record path.
 3. Minor findings deferred.
 4. Anything still open.
-5. Any fallback used, warning kept or validator skipped.
+5. Any warning kept or validator skipped.
 
 ## Never
 
-- Write a PRD anywhere the API does not. `data/prds/`, `docs/prds/`,
+- Write a PRD by hand, or anywhere the API does not. `data/prds/`, `docs/prds/`,
   `~/.claude/session-manager/scheduled-plans/prds/` and the retired flat
   `session-manager-operations/scheduler/prds/` never run.
 - Combine unrelated features in one PRD.

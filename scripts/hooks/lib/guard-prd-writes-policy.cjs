@@ -78,7 +78,7 @@ function decide(payload) {
     const reason = [
       `Direct ${toolName} to a session-manager-operations/scheduler/ path is blocked.`,
       `PRDs must be authored through the scheduler API, not a raw file write — use the "${suggested}" MCP tool instead.`,
-      'If the Session Manager app is not running (the admin API this MCP tool talks to only exists while it is), the degraded fallback documented in the develop skill applies: hand-write the file as a last resort and say so visibly in your report.',
+      'If the Session Manager app is not running (the admin API this MCP tool talks to only exists while it is), stop: ask the human to start the app, then retry the MCP tool. Never hand-write a PRD file.',
     ].join(' ');
     return buildDeny(reason);
   } catch (e) {

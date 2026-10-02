@@ -30,10 +30,10 @@ Recommended cap: 20 × 15s = 5 min for HTTP polls. Never use an uptime/restart s
 
 ## §2 Stop at the acceptance checklist
 
-Rule: once every acceptance-criteria line is checked, write the result and exit 0. Do not add polish, fixtures, or "while we're here" work that isn't an AC line.
+Rule: once every acceptance-criteria line is checked, follow the finish protocol (§11) and stop. Do not add polish, fixtures, or "while we're here" work that isn't an AC line.
 Why: `112-etch-engine` declared success at 17:44 UTC, then ran an unbounded fixture search until a user killed it at 20:28 — 2h44m of token burn on work no AC line asked for.
 
-If bonus work seems genuinely valuable, write a follow-up PRD and name it in your result. Don't do it now.
+If more work seems valuable, name it in your report as a follow-up. Never queue it, and never do it now. Why: only the planner queues work.
 
 ---
 
@@ -68,7 +68,7 @@ if (!found) {
 
 Rule: every PRD needs these fields.
 1. `title` — one line, plain English.
-2. `cwd` — target project's path. Prefer `~/Projects/<name>` (expanded at ingest; an absolute path breaks on another machine). Must exist on disk at queue time — the scheduler checks before spawning, so a PRD that creates its own `cwd` as step 1 never runs. For a brand-new sibling project, point `cwd` at the parent dir and make step 1 `mkdir -p ~/Projects/<new-slug> && cd` into it.
+2. `cwd` — the Epic's project root, as an absolute path or `~/…`. The API always sets it to the Epic's project, whatever you pass. To work in another project, open an Epic in that project. The folder must exist when you queue.
 3. `estimateMinutes` — a realistic integer. Most PRDs take 5–10 minutes (§8) — don't inflate it.
 
 `parallelGroup` is deprecated and ignored. `dependsOn: [<slug>, ...]` is the only ordering primitive.
@@ -109,7 +109,7 @@ Both fields are required in every `scheduler_create_prd` call.
 
 ### What the API writes
 
-The API writes the frontmatter and renders two body sections from the fields above: `# Files` (right after `# Acceptance criteria`) and `# Gate` (after `# Out of scope`, before `## Engineering standards`). Do not write those two sections yourself, and do not put a gate fence (three backticks + `gate`) in the goal, notes, or criteria — the API rejects that. For `["none"]`, the Gate section says the PRD has no runnable check and to verify each AC line by reading the files, with the fence holding the single word `none`. §13's Fallback shows the exact rendered shape — you only need it when writing the file by hand.
+The API writes the frontmatter and renders two body sections from the fields above: `# Files` (right after `# Acceptance criteria`) and `# Gate` (after `# Out of scope`, before `## Engineering standards`). Do not write those two sections yourself, and do not put a gate fence (three backticks + `gate`) in the goal, notes, or criteria — the API rejects that. For `["none"]`, the Gate section says the PRD has no runnable check and to verify each AC line by reading the files, with the fence holding the single word `none`.
 
 ### Acceptance criteria
 
@@ -172,12 +172,12 @@ Why: the post-run verifier scans the transcript and downgrades to `needs_review`
 
 ```bash
 # RIGHT — red demo first and captured, green gate last
-python -m pytest tests/test_repro.py::test_bug 2>&1 | tail -3 || true   # expected red
+timeout 120 python -m pytest tests/test_repro.py::test_bug 2>&1 | tail -3 || true   # expected red
 # ... implement the fix ...
 timeout 300 pytest -q   # LAST thing the run does
 ```
 
-The scheduler appends a finish protocol after your PRD's own steps — you never write it: review, then the `# Gate` commands (§6), then commit the exact `# Files` paths, then the verdict line — `SCHEDULER_VERDICT: PASS` once the gate is green and the commit landed, else `SCHEDULER_VERDICT: FAIL <one-line reason>`. The verifier trusts a truthful `PASS` plus a landed commit over stray transcript markers. Never print `PASS` on a red gate.
+The scheduler appends a finish protocol after your PRD's own steps — you never write it: review, then the `# Gate` commands (§6), then commit only the exact paths you created or changed for this PRD, then the verdict line — `SCHEDULER_VERDICT: PASS` once the gate is green and the commit landed, else `SCHEDULER_VERDICT: FAIL <one-line reason>`. The verifier trusts a truthful `PASS` plus a landed commit over stray transcript markers. Never print `PASS` on a red gate.
 
 ---
 
@@ -198,41 +198,10 @@ Why: both a stranded probe traceback and a bare `Exit code 124` read as failure 
 ## §13 Queueing PRDs from external automation
 
 Decision: is the session-manager app running on this machine right now?
-- Yes → call the `scheduler_create_prd` MCP tool, with the usual fields (`title`, `cwd`, `estimateMinutes`, `goal`, `acceptanceCriteria`, `implementationNotes`) plus `gate` and `files` (§6).
-- No → use the fallback below, and accept the collision risk it describes.
+- Yes → call the `scheduler_create_prd` MCP tool, with the usual fields (`title`, `cwd`, `estimateMinutes`, `sourcePromptId`, `goal`, `acceptanceCriteria`, `implementationNotes`) plus `gate` and `files` (§6).
+- No → stop. Ask the human to start the app, then call the tool again. Never write the PRD file by hand: the scheduler quarantines a file the API did not write, and it never runs.
 
 It only works while the app is running — closing it removes the admin port/token, and the call fails with `session-manager app is not running (admin API unreachable)`.
-
-### Fallback: writing the PRD file directly
-
-1. Join the EXISTING, already-approved Epic you're in: `node <session-manager-repo>/scripts/mint-epic.cjs <cwd> <epic-id>` — last stdout line is the prds dir. This only joins; get a human to create the Epic first if it doesn't exist.
-2. Write `<NN>-<slug>.md` by hand into that dir, with `sourcePromptId: <epic-id>` in the frontmatter, following §5's rules and this guide's body shape (`# Goal`, `# Acceptance criteria`, `# Files`, `# Implementation notes`, `# Out of scope`, `# Gate`, `## Engineering standards`).
-3. There is no API to render `# Files`, `# Gate` or `## Engineering standards` here — write them yourself, in this exact shape (use the absolute path of the `/develop` skill's `standards.md`):
-
-    # Files
-
-    Change only these files. If the work needs another file, change it and say why in your report.
-
-    - src/a.cjs
-    - src/lib/
-
-    # Gate
-
-    Run these commands last, in order. Each must exit 0.
-
-    ```gate
-    timeout 300 npm run typecheck
-    timeout 600 npx vitest run src/x.test.cjs
-    ```
-
-    ## Engineering standards
-
-    Your system prompt carries the ordered run contract.
-    `/abs/path/to/develop/standards.md` holds the reasoning behind each contract line (Performance, Debugging,
-    API reuse, TDD, Execution discipline) — read the section a line points at when it is unclear;
-    do not re-read the whole file every run.
-
-4. Pick `NN` by scanning every `scheduler/epics/*/prds/` and `prds-archived/` dir for the current max, plus one — this path has no atomic allocation, so a collision with another writer is possible, not theoretical. Never reuse a number to mean "runs in parallel"; use `dependsOn` for ordering.
 
 ---
 
@@ -241,12 +210,7 @@ It only works while the app is running — closing it removes the admin port/tok
 Rule: if a job parks `needs_review` with verdict `transcript_errors`, `no_verdict_sentinel`, or `abandoned_background_task`, do nothing first. The scheduler re-runs the gate on its own and completes the job once the gate is green, the commit is on HEAD, and the tracked tree is clean.
 Why: those three verdicts mean the transcript looked noisy, not that the work was wrong.
 
-Rule: a park caused by a DIFFERENT actor already finishing the same objective (a sibling PRD, a human) does not self-heal this way — the gate was never red. Confirm the target state is really done, then archive the PRD's source file. Never hand-edit `queue.json` — a live file the scheduler and watchdog both write.
-```js
-const q = require('./src/main/queueOps.cjs');
-await q.archiveMany(['<slug-of-the-stale-job>']);
-```
-The next `reconcile()` tick drops the matching queue entry once the file is gone. Only do this after confirming the work is really done — archiving clears a stale label, it doesn't fix a real bug.
+Rule: a park caused by a DIFFERENT actor already finishing the same objective (a sibling PRD, a human) does not self-heal this way. Why: the job has no landed commit of its own. Confirm in the tree that the work is really done, then call `scheduler_archive_prd` with the slug. Archiving marks the job completed and frees the PRDs that depend on it. Never hand-edit `queue.json`: the scheduler and the watchdog both write it. Archiving clears a stale label; it does not fix a real bug.
 
 Known gap: `pass_no_commit` ("already correct, nothing to commit") isn't yet in the self-heal list above for the general case.
 

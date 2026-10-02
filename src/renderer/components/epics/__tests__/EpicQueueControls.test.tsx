@@ -206,8 +206,9 @@ describe('EpicQueueControls', () => {
     // Hot keys first, the widget after it — the pane's only two sections.
     expect(hotkeys!.compareDocumentPosition(widget!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(hotkeys!.textContent).toContain('Hot keys')
-    // Both Actions live in the Hot keys section, not loose in the pane.
+    // The hot keys bar lives in the Hot keys section, not loose in the pane.
     expect(hotkeys!.querySelector('[data-testid="session-actions-bar"]')).not.toBeNull()
+    expect(hotkeys!.querySelector('[data-testid="epic-queue-build"]')).toBeNull()
   })
 
   it('makes the filter strip the widget\'s head bar — inside it, above the tiles', () => {

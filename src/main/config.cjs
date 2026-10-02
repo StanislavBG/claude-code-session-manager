@@ -25,6 +25,7 @@ const logs = require('./logs.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { expandHome } = require('./lib/expandHome.cjs');
 const { listReferencedFiles } = require('./lib/importReferences.cjs');
+const atomicFs = require('./lib/atomicFs.cjs');
 
 /** Map<absPath, {watcher, refCount}> — one chokidar watcher per path. */
 const watchers = new Map();
@@ -260,21 +261,7 @@ async function writeTextAtomic(abs, text, opts = {}) {
   const real = validatePath(expandHome(abs));
   validateWrite(real);
   assertOpsWrite(real, opts.writer);
-  const dir = path.dirname(real);
-  await fsp.mkdir(dir, { recursive: true });
-  const tmp = `${real}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  try {
-    await fsp.writeFile(tmp, text, opts.mode ? { encoding: 'utf8', mode: opts.mode } : 'utf8');
-    if (opts.mode) {
-      // chmod explicitly because some platforms ignore the mode arg on
-      // writeFile when the file pre-exists.
-      try { await fsp.chmod(tmp, opts.mode); } catch { /* */ }
-    }
-    await fsp.rename(tmp, real);
-  } catch (e) {
-    try { await fsp.unlink(tmp); } catch { /* tmp never created or already gone */ }
-    throw e;
-  }
+  await atomicFs.writeTextAtomic(real, text, opts);
   const stat = await fsp.stat(real);
   return { ok: true, mtimeMs: stat.mtimeMs };
 }
@@ -315,16 +302,7 @@ function writeJsonSync(abs, data, opts = {}) {
   const real = validatePath(expandHome(abs));
   validateWrite(real);
   assertOpsWrite(real, opts.writer);
-  const dir = path.dirname(real);
-  fs.mkdirSync(dir, { recursive: true });
-  const tmp = `${real}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  try {
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8');
-    fs.renameSync(tmp, real);
-  } catch (e) {
-    try { fs.unlinkSync(tmp); } catch { /* tmp never created or already gone */ }
-    throw e;
-  }
+  atomicFs.writeJsonAtomicSync(real, data, opts);
   const stat = fs.statSync(real);
   return { ok: true, mtimeMs: stat.mtimeMs };
 }

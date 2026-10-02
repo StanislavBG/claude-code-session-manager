@@ -40,6 +40,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { readTail } = require('./fileTail.cjs');
+const atomicFs = require('./atomicFs.cjs');
 
 const LAUNCH_FAILURE_KINDS = Object.freeze({
   /** HTTP 400 naming a thinking/effort/config parameter the model rejects — the issue-#11 signature. */
@@ -329,9 +330,7 @@ function writeOutcomeSidecar(runDir, slug, outcome) {
   if (!runDir || !slug) return null;
   const p = path.join(runDir, `${slug}.outcome.json`);
   try {
-    const tmp = `${p}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify({ slug, writtenAt: new Date().toISOString(), ...outcome }, null, 2));
-    fs.renameSync(tmp, p);
+    atomicFs.writeJsonAtomicSync(p, { slug, writtenAt: new Date().toISOString(), ...outcome }, { newline: false });
     return p;
   } catch {
     return null;

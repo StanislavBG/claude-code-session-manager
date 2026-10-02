@@ -35,6 +35,7 @@ const { resolveEpicPrdWriteDir } = require('./prdLocations.cjs');
 const { assertOpsWrite } = require('./opsOwnership.cjs');
 const { appendAuditEvent } = require('./auditLog.cjs');
 const { mirrorEpicStatus, removeEpicMirror } = require('./epicStatusMirror.cjs');
+const atomicFs = require('./atomicFs.cjs');
 const telemetryCounters = require('./telemetryCounters.cjs');
 // Required as the module object (not destructured) so a test can
 // monkeypatch promptSessionSchema.assertValidPromptSession in place to
@@ -106,10 +107,7 @@ function writeActiveIndex(cwd, index) {
   // holds a narrow delegation for active-index.json only (opsOwnership.cjs).
   assertOpsWrite(activeIndexPath(cwd), 'scheduler');
   const file = activeIndexPath(cwd);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(index, null, 2));
-  fs.renameSync(tmp, file);
+  atomicFs.writeJsonAtomicSync(file, index, { newline: false });
 }
 
 // index.sessions/index.events are plain objects parsed from JSON — bracket

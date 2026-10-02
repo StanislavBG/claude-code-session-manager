@@ -15,6 +15,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { resolvePrdWriteDir } = require('./prdLocations.cjs');
 const schedulerPaths = require('./schedulerPaths.cjs');
+const atomicFs = require('./atomicFs.cjs');
 
 // Regex identifying meta/dod slugs that must NOT influence the batchKey.
 // This is the load-bearing loop-avoidance filter: when the gate job itself
@@ -647,18 +648,9 @@ function flagRiskySurfaces(jobs, { prdsDir, gitTimeoutMs = 10_000 } = {}) {
 }
 
 // ─── Atomic write helper ───────────────────────────────────────────────────────
-// Re-implements the tmp+rename recipe from config.cjs writeTextAtomic (sync
-// variant), avoiding an import of Electron IPC code in a pure-node context.
-// Cross-ref: src/main/config.cjs writeJsonSync (same pattern).
+// Delegates to atomicFs.cjs's tmp+rename recipe (pure-node, no Electron import).
 function _writeFileAtomic(absPath, text) {
-  const tmp = `${absPath}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  try {
-    fs.writeFileSync(tmp, text, 'utf8');
-    fs.renameSync(tmp, absPath);
-  } catch (err) {
-    try { fs.unlinkSync(tmp); } catch { /* tmp never created or already gone */ }
-    throw err;
-  }
+  atomicFs.writeTextAtomicSync(absPath, text);
 }
 
 const STATUS_EMOJI = { pass: '✅', fail: '❌', unverifiable: '⚠️' };

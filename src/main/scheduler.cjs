@@ -186,6 +186,7 @@ const quietMachineLease = require('./lib/quietMachineLease.cjs');
 const runtimeState = require('./lib/schedulerRuntimeState.cjs');
 const jobWorktree = require('./lib/jobWorktree.cjs');
 const gitWorktree = require('./lib/gitWorktree.cjs');
+const sharedGitExec = require('./lib/gitExec.cjs');
 const { buildJobWorktreeIsLive } = require('./lib/jobWorktreeBootLive.cjs');
 const { buildTerminalOrphanIsLive } = require('./lib/jobWorktreeTerminalOrphanLive.cjs');
 const { reconcileEpicWorktreesOnBoot } = require('./lib/epicWorktreeBoot.cjs');
@@ -5480,22 +5481,11 @@ function selectLeftoverQuarantineTarget(job) {
   return { slug: job.slug, cwd: job.cwd, paths };
 }
 
+// Delegates to the shared gitExec.execGit (gitExec.cjs has zero requires of
+// scheduler.cjs/gitWorktree.cjs, so no cycle) — semantics match: execFile
+// with an argv array, same timeout default, same env-merge-over-process.env.
 function execGitAt(cwd, args, { env, timeout = 20_000 } = {}) {
-  return new Promise((resolve, reject) => {
-    execFile(
-      'git',
-      ['-C', cwd, ...args],
-      { timeout, windowsHide: true, encoding: 'utf8', env: env ? { ...process.env, ...env } : process.env },
-      (err, stdout, stderr) => {
-        if (err) {
-          err.stderrText = stderr;
-          reject(err);
-          return;
-        }
-        resolve(stdout || '');
-      },
-    );
-  });
+  return sharedGitExec.execGit(cwd, args, { timeout, env });
 }
 
 async function pathExistsInTree(cwd, treeish, p) {

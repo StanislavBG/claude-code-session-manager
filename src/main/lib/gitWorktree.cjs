@@ -53,9 +53,9 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { execFile } = require('node:child_process');
 const { OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 const schedulerPaths = require('./schedulerPaths.cjs');
+const sharedGitExec = require('./gitExec.cjs');
 
 // Per-kind configuration. Roots are kept OUTSIDE any project's own tree
 // (os.tmpdir(), not `<cwd>/.git/...`) so a managed worktree never shows up in
@@ -227,22 +227,12 @@ const worktreeCapLockChain = { job: Promise.resolve(), epic: Promise.resolve() }
 const observedWorktreeCountCache = { job: { count: null, at: 0 }, epic: { count: null, at: 0 } };
 const OBSERVED_WORKTREE_COUNT_TTL_MS = 2000;
 
-function execGit(args, { cwd, timeout = 20_000 } = {}) {
-  return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, timeout, windowsHide: true, encoding: 'utf8' }, (err, stdout, stderr) => {
-      if (err) {
-        err.stderrText = stderr;
-        // Some git subcommands (e.g. `diff --no-index`) exit non-zero to mean
-        // "found a difference", not "failed" — stdout still carries the real
-        // result in that case, so callers that need it can recover it off
-        // the rejected error rather than losing it.
-        err.stdoutText = stdout;
-        reject(err);
-        return;
-      }
-      resolve(stdout || '');
-    });
-  });
+// Thin re-shape over the shared gitExec.execGit (cwd-first signature) —
+// kept so the ~40 call sites below (args-first, `{ cwd, timeout }`) don't
+// all need touching. Semantics (timeout/maxBuffer/env, execFile with an
+// argv array, stderrText/stdoutText on error) now live in gitExec.cjs.
+function execGit(args, { cwd, timeout = 20_000, maxBuffer, env } = {}) {
+  return sharedGitExec.execGit(cwd, args, { timeout, maxBuffer, env });
 }
 
 // Unquote a single git porcelain v1 path token. Git wraps a path in double
@@ -1662,20 +1652,11 @@ async function isBranchMergedIntoHead(cwd, branch) {
   }
 }
 
-/** Parse `git worktree list --porcelain` into `[{ worktree, branch }]`. */
-function parseWorktreeListPorcelain(text) {
-  const entries = [];
-  let cur = null;
-  for (const line of String(text || '').split('\n')) {
-    if (line.startsWith('worktree ')) {
-      cur = { worktree: line.slice('worktree '.length).trim(), branch: null };
-      entries.push(cur);
-    } else if (line.startsWith('branch ') && cur) {
-      cur.branch = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '');
-    }
-  }
-  return entries;
-}
+// Alias — the real implementation now lives in gitExec.cjs
+// (parseWorktreePorcelain) so it can be shared below both this module and
+// scheduler.cjs in the require graph. Name kept for the many existing
+// `gitWorktree.parseWorktreeListPorcelain` call sites/tests.
+const parseWorktreeListPorcelain = sharedGitExec.parseWorktreePorcelain;
 
 /** Strips a kind's branch prefix off a branch name, returning the bare
  *  key (slug/epicId), or null if the branch doesn't carry that prefix. */
@@ -2110,6 +2091,9 @@ async function checkTargetRefNotCheckedOut({ cwd, targetRef }) {
   } catch (e) {
     return { ok: false, reason: `git worktree list failed: ${(e && (e.stderrText || e.message)) || e}` };
   }
+  // NOT parseWorktreeListPorcelain here on purpose — that helper strips the
+  // `refs/heads/` prefix, but targetRef (below) is always compared in full
+  // `refs/heads/...` form (normalizeTargetRef), so this needs the raw ref.
   const checkedOutRefs = new Set(
     worktreeListOut.split('\n').filter((l) => l.startsWith('branch ')).map((l) => l.slice('branch '.length).trim()),
   );

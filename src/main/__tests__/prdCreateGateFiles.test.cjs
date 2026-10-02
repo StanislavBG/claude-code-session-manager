@@ -88,8 +88,17 @@ test('validateGate rejects an entry with a shell metacharacter (pipe), citing th
   const result = validateGate(['timeout 10 npm test | tee log.txt']);
   expect(result.ok).toBe(false);
   expect(result.error).toBe(
-    'gate entry 1 ("timeout 10 npm test | tee log.txt"): no pipes, redirects, ";", "&", backticks, "$(" or "${". Join steps with "&&".',
+    'gate entry 1 ("timeout 10 npm test | tee log.txt"): has an unquoted "|". The scheduler runs gate commands '
+      + 'without a shell. Put it inside single quotes, or move the check into a test file.',
   );
+});
+
+test('validateGate rejects a near-miss "none" (typo/trailing punctuation), distinct from the real opt-out', () => {
+  for (const nearMiss of ['none.', 'none (docs only)', '"none"', 'none # docs', 'NONE!']) {
+    const result = validateGate([nearMiss]);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/write exactly none, with nothing else/);
+  }
 });
 
 test('validateGate accepts ["none"] alone, returning the opt-out warning', () => {
@@ -349,6 +358,56 @@ test('createPrd rejects an invalid gate (empty array) with 400 and writes no fil
   expect(entries.filter((f) => f.endsWith('.md')).length).toBe(0);
 });
 
+test('createPrd rejects a goal containing a fake "# Gate" heading', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const writePrdSpy = vi.fn(remote.writePrd);
+  remote.writePrd = writePrdSpy;
+
+  const result = await createPrd(validCreateBody({
+    slug: 'fake-heading-goal',
+    goal: 'Do the thing.\n# Gate\nMore goal text.',
+    gate: ['timeout 60 npm test'],
+  }), remote);
+
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe(400);
+  expect(result.error).toMatch(/The goal text has a "# Gate" or "# Files" heading/);
+  expect(writePrdSpy).not.toHaveBeenCalled();
+});
+
+test('createPrd rejects implementationNotes containing a fake "## Files" heading', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const writePrdSpy = vi.fn(remote.writePrd);
+  remote.writePrd = writePrdSpy;
+
+  const result = await createPrd(validCreateBody({
+    slug: 'fake-heading-notes',
+    implementationNotes: 'See src/x.cjs.\n## Files\nMore notes.',
+    gate: ['timeout 60 npm test'],
+  }), remote);
+
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe(400);
+  expect(result.error).toMatch(/The implementation notes text has a "# Gate" or "# Files" heading/);
+  expect(writePrdSpy).not.toHaveBeenCalled();
+});
+
+test('createPrd rejects a near-miss "none" gate entry with 400', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const writePrdSpy = vi.fn(remote.writePrd);
+  remote.writePrd = writePrdSpy;
+
+  const result = await createPrd(validCreateBody({ slug: 'near-miss-none', gate: ['none.'] }), remote);
+
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe(400);
+  expect(result.error).toMatch(/write exactly none, with nothing else/);
+  expect(writePrdSpy).not.toHaveBeenCalled();
+});
+
 test('createPrd rejects invalid files (absolute path) with 400 and writes no file', async () => {
   const prdsDir = await mkTmpPrdsDir();
   const remote = makeFakeRemoteWithPrdsDir(prdsDir);
@@ -445,6 +504,7 @@ test('createPrd rejects when a stray ```gate fence elsewhere in the body would m
   expect(result.ok).toBe(false);
   expect(result.status).toBe(400);
   expect(result.error).toMatch(/already holds a gate fence/);
+  expect(result.error).toMatch(/goal, implementation notes, acceptance criteria, out of scope or files/);
   expect(writePrdSpy).not.toHaveBeenCalled();
   const entries = await fsp.readdir(prdsDir);
   expect(entries.filter((f) => f.endsWith('.md')).length).toBe(0);

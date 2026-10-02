@@ -7,7 +7,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { extractAcSequence, extractAcCommand, resolveGate } = require('../definitionOfDone.cjs');
+const { extractAcSequence, extractAcCommand, resolveGate, parseChain, explainChain } = require('../definitionOfDone.cjs');
 const fixtures = require('./gateFixtures.json');
 
 const ac = (...lines) => ['# Acceptance criteria', '', ...lines, '', '# Out of scope', ''].join('\n');
@@ -48,6 +48,31 @@ test('any surviving shell metacharacter makes the whole gate unparseable (no she
 
 test('an empty segment (dangling &&) is unparseable', () => {
   assert.deepEqual(extractAcSequence(ac('- [ ] `timeout 60 npm run a &&`')), []);
+});
+
+test('parseChain returns [] for a syntax a shell would read differently', () => {
+  for (const bad of [
+    '$HOME', '"$HOME"', '"$(id)"', '`id`', 'a\\ b', 'src/*.cjs', 'a?b', '[a]', '{a,b}',
+    '(x)', '!x', '#c', '~/x', '--dir=~/x', 'PATH=a:~/b',
+    'echo hi', 'echo hi', 'echo a &&', 'timeout 10',
+  ]) {
+    assert.deepEqual(parseChain(bad), [], bad);
+  }
+});
+
+test('parseChain keeps HEAD~1 and a single-quoted pipe as literal argv items', () => {
+  const seq1 = parseChain('timeout 10 git diff HEAD~1 --stat');
+  assert.deepEqual(seq1[0].argv, ['git', 'diff', 'HEAD~1', '--stat']);
+  const seq2 = parseChain("timeout 30 rg -n 'a|b' src/");
+  assert.deepEqual(seq2[0].argv, ['rg', '-n', 'a|b', 'src/']);
+});
+
+test('explainChain reports timeoutGiven per step', () => {
+  assert.deepEqual(explainChain('timeout 10 node x.js').timeoutGiven, [true]);
+  assert.deepEqual(explainChain('npx vitest run src/x.test.cjs').timeoutGiven, [false]);
+  assert.deepEqual(explainChain('timeout 10s node x.js').timeoutGiven, [true]);
+  assert.deepEqual(explainChain('FOO="a b" timeout 10 node x.js').timeoutGiven, [true]);
+  assert.deepEqual(explainChain('timeout 10 node a.js && node b.js').timeoutGiven, [true, false]);
 });
 
 test('frontmatter gate: list takes priority over the AC line', () => {

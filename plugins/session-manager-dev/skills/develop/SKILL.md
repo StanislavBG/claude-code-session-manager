@@ -141,19 +141,24 @@ fence (three backticks + `gate`) in the goal, notes or criteria — the API reje
 2. Start each command with `timeout <seconds>`. Why: a command without a timeout can hang the
    run.
 3. Join steps inside one entry with `&&`.
-4. No pipes, redirects, `;`, `&`, backticks, `$(` or `${`. Why: the scheduler runs gate
-   commands without a shell.
-5. Do not start an entry with `#`. Keep each entry on one line, at most 500 chars.
-6. Use `["none"]` only for docs or config with no runnable check. Never mix `none` with
-   commands.
-7. A leading `TMPDIR=$(mktemp -d) ` and `NAME=value` words are allowed before the command.
-
-A check that needs a shell belongs in a test file that the gate runs.
+4. The scheduler runs gate commands without a shell, so shell syntax is refused. Outside single
+   quotes, do not use `|` `<` `>` `;` `&` (only `&&` between steps), backticks, `$`, `\`, `*`,
+   `?`, `[`, `]`, `(`, `)`, `{`, `}` or `!`. Inside double quotes, `$`, backticks and `\` are
+   refused too.
+5. Do not start a word with `#` or `~`, and do not put `~` right after `=` or `:`. `HEAD~1` is
+   fine.
+6. Put text with these characters inside single quotes, for example `rg -n 'a|b' src/`. A check
+   that needs a shell belongs in a test file that the gate runs.
+7. Keep each entry on one line, at most 500 chars, with plain spaces between words.
+8. Use `["none"]` only for docs or config with no runnable check. Write exactly `none`. Never
+   mix `none` with commands.
+9. A leading `TMPDIR=$(mktemp -d) ` and `NAME=value` words are allowed before the command.
 
 ### files rules
 
 1. 1–50 repo-relative paths. A folder ends with `/`.
-2. No absolute paths, no `~`, no `..`, no `*` or `?`.
+2. No absolute paths, no `~` at the start, no `..` or `.` segments, no `*` or `?`, no `\` or
+   backticks, no leading `-`. Use `/` between folders.
 3. PRDs that can run at the same time must not share a file. If two PRDs touch the same file,
    chain them with `dependsOn`.
 

@@ -93,9 +93,10 @@ together, since `npm install` is the single distribution mechanism for the whole
 
 ## `session-manager-operations/` namespaces
 
-All 11 namespaces (`architecture`, `design-mocks`, `feedback` [retired],
-`HUMAN_LEARN`, `logs`, `manual`, `project-brief`, `project-pages`, `prompt-sessions`, `reviews`,
-`scheduler`) are **OPERATIONS STATE** — that partition *is* `session-manager-operations/`. Which
+All 13 namespaces (`architecture`, `design-mocks`, `feedback` [retired],
+`HUMAN_LEARN`, `logs`, `manual`, `memory-clusters`, `project-brief`, `project-pages`,
+`prompt-sessions`, `reviews`, `scheduler`, `ui-prefs`) are **OPERATIONS STATE** — that partition
+*is* `session-manager-operations/`. Which
 of them has an app-owned single writer vs. is skill-authored is [CLAUDE.md](../../CLAUDE.md)'s
 `OWNERS` enumeration under Domain model — not restated here.
 

@@ -22,6 +22,7 @@ const os = require('node:os');
 const { z } = require('zod');
 const { assertInsideHome } = require('./lib/insideHome.cjs');
 const { expandHome } = require('./lib/expandHome.cjs');
+const atomicFs = require('./lib/atomicFs.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
 
 /**
@@ -163,11 +164,7 @@ async function writeFile(filePath, content) {
     return { ok: false, error: e.message };
   }
   try {
-    const dir = path.dirname(resolved);
-    await fsp.mkdir(dir, { recursive: true });
-    const tmp = `${resolved}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    await fsp.writeFile(tmp, content, 'utf8');
-    await fsp.rename(tmp, resolved);
+    await atomicFs.writeTextAtomic(resolved, content);
     return { ok: true, error: null };
   } catch (e) {
     return { ok: false, error: e.message };

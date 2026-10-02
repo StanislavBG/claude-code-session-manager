@@ -20,6 +20,7 @@ const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./prdFront
 const { resolvePrdWriteDir, resolvePrdsDirs } = require('./prdLocations.cjs');
 const { projectQueuePath } = require('./queueStore.cjs');
 const { expandHome } = require('./expandHome.cjs');
+const atomicFs = require('./atomicFs.cjs');
 
 /**
  * Move every `.md` file in legacyPrdsDir whose frontmatter `cwd` resolves to
@@ -262,9 +263,7 @@ async function legacyAdoptExistingPrds() {
         fm.createdVia = 'legacy-adopted';
         fm.issuedAt = issuedAt;
         const newRaw = serializePrdFile(fm, body);
-        const tmp = `${filePath}.tmp-${process.pid}`;
-        await fsp.writeFile(tmp, newRaw, 'utf8');
-        await fsp.rename(tmp, filePath);
+        await atomicFs.writeTextAtomic(filePath, newRaw);
         stamped += 1;
       } catch (e) {
         if (e?.code === 'ENOENT') continue; // raced with a concurrent mover/archiver

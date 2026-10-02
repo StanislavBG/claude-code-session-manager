@@ -28,6 +28,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { sessionSlotsConfigPath } = require('./schedulerPaths.cjs');
 const { appendAuditEvent } = require('./auditLog.cjs');
+const atomicFs = require('./atomicFs.cjs');
 const { isProvablyDead, DEFAULT_GRACE_MS } = require('./reservationExpiry.cjs');
 
 const MIN_SLOTS = 0;
@@ -57,10 +58,7 @@ function setCap(cap) {
     throw new Error(`sessionSlots.setCap: cap must be an integer in [${MIN_SLOTS}, ${MAX_SLOTS}]`);
   }
   const configPath = sessionSlotsConfigPath();
-  fs.mkdirSync(path.dirname(configPath), { recursive: true });
-  const tmp = `${configPath}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ cap: n }, null, 2));
-  fs.renameSync(tmp, configPath);
+  atomicFs.writeJsonAtomicSync(configPath, { cap: n });
   for (const fn of listeners) {
     try { fn(); } catch { /* a consumer's pump error is its own problem */ }
   }

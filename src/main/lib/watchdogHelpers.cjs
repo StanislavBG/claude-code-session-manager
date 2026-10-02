@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const schedulerPaths = require('./schedulerPaths.cjs');
 const { isRestartingMarkerActive } = require('./upgradeDrain.cjs');
+const atomicFs = require('./atomicFs.cjs');
 
 
 
@@ -213,12 +214,9 @@ function readRelaunchState(statePath = schedulerPaths.watchdogRelaunchStatePath(
   }
 }
 
-/** Atomic write: tmp-<pid>-<ts> → rename (mirrors config.cjs writeJsonSync). */
+/** Atomic write via atomicFs.cjs (mirrors config.cjs writeJsonSync). */
 function writeRelaunchState(statePath, state) {
-  fs.mkdirSync(path.dirname(statePath), { recursive: true });
-  const tmpPath = `${statePath}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmpPath, statePath);
+  atomicFs.writeJsonAtomicSync(statePath, state);
 }
 
 function logRelaunchLine(logPath, message) {
@@ -343,12 +341,9 @@ function readStampDate(stampPath) {
   }
 }
 
-/** Atomic write: tmp-<pid>-<ts> → rename (mirrors config.cjs writeJsonSync). */
+/** Atomic write via atomicFs.cjs (mirrors config.cjs writeJsonSync). */
 function writeStampDate(stampPath, date) {
-  fs.mkdirSync(path.dirname(stampPath), { recursive: true });
-  const tmpPath = `${stampPath}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmpPath, date, 'utf8');
-  fs.renameSync(tmpPath, stampPath);
+  atomicFs.writeTextAtomicSync(stampPath, date);
 }
 
 /**

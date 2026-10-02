@@ -6,6 +6,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawn, execFileSync } = require('node:child_process');
 const { cleanChildEnv, pathWithUserBins } = require('./cleanEnv.cjs');
+const atomicFs = require('./atomicFs.cjs');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./claudeBin.cjs');
 
 const CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
@@ -160,10 +161,7 @@ async function writeCredentials(rawData, freshOauth, source = 'file') {
     writeKeychainRaw(JSON.stringify(next));
     return;
   }
-  const tmp = `${CREDS_PATH}.${process.pid}.${Date.now()}.tmp`;
-  await fsp.writeFile(tmp, JSON.stringify(next, null, 2), { encoding: 'utf8', mode: 0o600 });
-  try { await fsp.chmod(tmp, 0o600); } catch { /* umask may have already set it */ }
-  await fsp.rename(tmp, CREDS_PATH);
+  await atomicFs.writeJsonAtomic(CREDS_PATH, next, { mode: 0o600, newline: false });
 }
 
 function appendRefreshLog(entry) {

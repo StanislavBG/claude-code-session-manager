@@ -90,6 +90,11 @@ test('check 8: no-gate — absent source, and an explicit source with an empty s
   assert.deepEqual(decideGateAuthority(emptySequence), { complete: false, reason: 'no-gate' });
 });
 
+test('check 8: no-gate — a guessed bare AC-line gate is never trusted, even when green', () => {
+  const guessed = baseParams({ gate: { source: 'ac-line-guess', sequence: [{ argv: ['npm', 'run'] }] } });
+  assert.deepEqual(decideGateAuthority(guessed), { complete: false, reason: 'no-gate' });
+});
+
 test('check 9: gate-not-green when the re-run outcome is not green', () => {
   const red = baseParams({ outcome: { status: 'red' } });
   assert.deepEqual(decideGateAuthority(red), { complete: false, reason: 'gate-not-green' });

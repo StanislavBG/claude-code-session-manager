@@ -348,7 +348,7 @@ function readExplicitGate(prdText) {
  * `timeout N`). Accepts the PRD with or without frontmatter.
  *
  * @param {string} prdText
- * @returns {{ source: 'none'|'explicit'|'ac-line'|'absent', sequence: Array<{argv:string[], timeoutMs:number, env:object, raw:string}> }}
+ * @returns {{ source: 'none'|'explicit'|'ac-line'|'ac-line-guess'|'absent', sequence: Array<{argv:string[], timeoutMs:number, env:object, raw:string}> }}
  */
 function resolveGate(prdText) {
   if (!prdText || typeof prdText !== 'string') return { source: 'absent', sequence: [] };
@@ -379,7 +379,9 @@ function resolveGate(prdText) {
       while (tokens.length > 4 && /^[a-z]+$/.test(tokens[tokens.length - 1])) tokens.pop();
       segs[segs.length - 1] = tokens.join(' ');
       const seq = parseChain(segs.join('&&'));
-      if (seq.length) return { source: 'ac-line', sequence: seq };
+      // The command's end is a guess here ("timeout 300 npm run typecheck
+      // passes" becomes `npm run`), so gate authority never trusts it.
+      if (seq.length) return { source: 'ac-line-guess', sequence: seq };
     }
   }
   return { source: 'absent', sequence: [] };

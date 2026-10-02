@@ -33,7 +33,7 @@ Recommended cap: 20 × 15s = 5 min for HTTP polls. Never use an uptime/restart s
 Rule: once every acceptance-criteria line is checked, follow the finish protocol (§11) and stop. Do not add polish, fixtures, or "while we're here" work that isn't an AC line.
 Why: `112-etch-engine` declared success at 17:44 UTC, then ran an unbounded fixture search until a user killed it at 20:28 — 2h44m of token burn on work no AC line asked for.
 
-If more work seems valuable, name it in your report as a follow-up. Never queue it, and never do it now. Why: only the planner queues work.
+Executor: if more work seems valuable, name it in your report as a follow-up. Do not do it, and do not queue it. Why: only the planner queues work.
 
 ---
 
@@ -99,7 +99,7 @@ Both fields are required in every `scheduler_create_prd` call.
 6. Put text with these characters inside single quotes, for example `rg -n 'a|b' src/`. A check that needs a shell belongs in a test file that the gate runs.
 7. Keep each entry on one line, at most 500 chars, with plain spaces between words.
 8. Use `["none"]` only for docs or config with no runnable check. Write exactly `none`. Never mix `none` with commands.
-9. A leading `TMPDIR=$(mktemp -d) ` and `NAME=value` words are allowed before the command.
+9. Put `NAME=value` words before `timeout`, never after it, for example `CI=1 timeout 300 npm test`. A leading `TMPDIR=$(mktemp -d) ` is allowed but not needed: the scheduler gives each gate its own TMPDIR.
 
 ### files
 
@@ -109,7 +109,7 @@ Both fields are required in every `scheduler_create_prd` call.
 
 ### What the API writes
 
-The API writes the frontmatter and renders two body sections from the fields above: `# Files` (right after `# Acceptance criteria`) and `# Gate` (after `# Out of scope`, before `## Engineering standards`). Do not write those two sections yourself, and do not put a gate fence (three backticks + `gate`) in the goal, notes, or criteria — the API rejects that. For `["none"]`, the Gate section says the PRD has no runnable check and to verify each AC line by reading the files, with the fence holding the single word `none`.
+The API writes the frontmatter and renders two body sections from the fields above: `# Files` (right after `# Acceptance criteria`) and `# Gate` (after `# Out of scope`, before `## Engineering standards`). Do not write those two sections yourself. Do not put a gate fence (three backticks + `gate`), a `# Gate` heading or a `# Files` heading in any text field — the API rejects that. For `["none"]`, the Gate section says the PRD has no runnable check and to verify each AC line by reading the files, with the fence holding the single word `none`.
 
 ### Acceptance criteria
 
@@ -226,7 +226,7 @@ Before queueing a new PRD, verify each of these:
 - [ ] **§3 Verify, don't poll:** every deploy/migration step is followed by a test command that exits 1 on failure; the AC test command ran green once before you declare done.
 - [ ] **§4 Bounded generators:** any search/seed loop has an explicit max and surfaces failure on exhaustion.
 - [ ] **§5 Frontmatter:** `title`, `cwd` (exists on this machine), `estimateMinutes` present; `dependsOn` used for ordering, not `parallelGroup`.
-- [ ] **§6 Gate and files:** `gate` is 1–10 timeout-wrapped commands (or `["none"]` alone), no shell operators; `files` is 1–50 repo-relative paths, no overlap with a concurrent PRD.
+- [ ] **§6 Gate and files:** `gate` follows every rule in §6 (or is `["none"]` alone); `files` is 1–50 repo-relative paths, no overlap with a concurrent PRD.
 - [ ] **§7 Self-contained:** no reference to "the conversation" or outside context; paths/identifiers inline; clean UTF-8, no NUL bytes (`grep -qP '\x00' file && echo BAD`).
 - [ ] **§8 Scope:** targets ≤10 min, ceiling 15; e2e/publish sharded to one spec per PRD.
 - [ ] **§9 Failure surfacing:** errors exit 1 with a diagnostic line; no silent `|| true`.

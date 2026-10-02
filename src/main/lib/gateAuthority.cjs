@@ -81,6 +81,8 @@ function decideGateAuthority({ job, gate, outcome, evidenceOk, ancestorOk, clean
   }
   const gateSource = gate?.source;
   const gateSequence = gate?.sequence;
+  // 'ac-line-guess' (a bare AC line whose command end was guessed) is never
+  // trusted: a cut-short command like `npm run` can pass vacuously.
   const hasGate = (gateSource === 'explicit' || gateSource === 'ac-line') && Array.isArray(gateSequence) && gateSequence.length > 0;
   if (!hasGate) {
     return { complete: false, reason: 'no-gate' };

@@ -102,6 +102,13 @@ test('gate: none is an explicit opt-out, distinct from absent', () => {
   assert.equal(resolveGate(ac('- [ ] prose only')).source, 'absent');
 });
 
+test('a bare AC-line command is a guess; a backtick span is not', () => {
+  const bare = resolveGate(ac('- [ ] timeout 300 npm run typecheck passes'));
+  assert.equal(bare.source, 'ac-line-guess');
+  assert.ok(bare.sequence.length > 0);
+  assert.equal(resolveGate(ac('- [ ] `timeout 300 npm run typecheck` passes')).source, 'ac-line');
+});
+
 test('extractAcCommand delegates: single command → original string, chain → null', () => {
   assert.equal(extractAcCommand(ac('- [ ] `timeout 60 npm test`')), 'timeout 60 npm test');
   assert.equal(extractAcCommand(ac('- [ ] `timeout 60 npm a && timeout 60 npm b`')), null);

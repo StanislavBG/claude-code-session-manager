@@ -46,11 +46,21 @@ function mintEventId() {
 /**
  * If `sourcePromptId` resolves to a known, still-active PromptSession under
  * `cwd`'s active-index.json, appends a 'response' event chained to that
- * session's current tail and returns true. Returns false (never throws) for
- * every case the caller must fall back on: missing cwd/id, no index file,
- * unknown id, a completed session, an empty event chain, or any I/O error —
- * so notifyOriginatingTab's existing tab-external-ticket path stays the
- * safety net, not a special case.
+ * session's current tail and returns `{ ok: true }`. Returns `{ ok: false,
+ * reason }` (never throws) for every case the caller must fall back on:
+ *
+ *   'missing-args' — cwd or sourcePromptId not given.
+ *   'no-index'     — no active-index.json for this cwd, or it has no data.
+ *   'no-session'   — sourcePromptId is not a known session.
+ *   'not-active'   — the session exists but has already completed.
+ *   'no-events'    — the session has no event chain to append onto.
+ *   'error'        — a caught exception (e.g. a disk read/write failure).
+ *
+ * `'error'` is the only reason worth retrying — every other reason means the
+ * session or event chain genuinely is not there to append to, and trying
+ * again later cannot change that. flushDueReviewNotices (scheduler.cjs)
+ * uses exactly that split to decide whether to hold a notice back for one
+ * more pass or give up on it.
  *
  * The optional 4th argument stamps `prdSlug`/`outcome` onto the appended
  * event (PRD 976) — which PRD checked in and whether it completed, failed,
@@ -64,19 +74,20 @@ function mintEventId() {
  * `undefined`-valued keys, so events appended without them serialize
  * identically to before.
  */
-async function appendResponseEventIfKnown(cwd, sourcePromptId, text, meta = {}) {
-  if (!cwd || !sourcePromptId) return false;
+async function appendResponseEventWithReason(cwd, sourcePromptId, text, meta = {}) {
+  if (!cwd || !sourcePromptId) return { ok: false, reason: 'missing-args' };
   const path = promptSessionActiveIndexPath(cwd);
   try {
     return await withPathLock(path, async () => {
       const result = await config.readJson(path);
-      if (!result.exists || !result.data) return false;
+      if (!result.exists || !result.data) return { ok: false, reason: 'no-index' };
       const data = result.data;
       const session = data.sessions && data.sessions[sourcePromptId];
-      if (!session || session.status !== 'active') return false;
+      if (!session) return { ok: false, reason: 'no-session' };
+      if (session.status !== 'active') return { ok: false, reason: 'not-active' };
       const events = (data.events && data.events[sourcePromptId]) || [];
       const tail = events.length > 0 ? events[events.length - 1] : null;
-      if (!tail) return false;
+      if (!tail) return { ok: false, reason: 'no-events' };
       const event = {
         id: mintEventId(),
         promptSessionId: sourcePromptId,
@@ -91,16 +102,29 @@ async function appendResponseEventIfKnown(cwd, sourcePromptId, text, meta = {}) 
       data.events[sourcePromptId] = [...events, event];
       await config.writeJson(path, data, { writer: 'scheduler' });
       broadcast(EVENT_APPENDED_CHANNEL, { cwd, promptSessionId: sourcePromptId, event });
-      return true;
+      return { ok: true };
     });
   } catch (e) {
-    console.error('[promptSessionEvents] appendResponseEventIfKnown error', cwd, sourcePromptId, e);
-    return false;
+    console.error('[promptSessionEvents] appendResponseEventWithReason error', cwd, sourcePromptId, e);
+    return { ok: false, reason: 'error' };
   }
+}
+
+/**
+ * appendResponseEventIfKnown(cwd, sourcePromptId, text, meta) → Promise<boolean>
+ *
+ * Boolean-only wrapper around appendResponseEventWithReason, for every
+ * caller that only needs "did it go out", not why — notifyOriginatingTab's
+ * existing tab-external-ticket fallback stays keyed on this boolean.
+ */
+async function appendResponseEventIfKnown(cwd, sourcePromptId, text, meta = {}) {
+  const result = await appendResponseEventWithReason(cwd, sourcePromptId, text, meta);
+  return result.ok;
 }
 
 module.exports = {
   appendResponseEventIfKnown,
+  appendResponseEventWithReason,
   promptSessionActiveIndexPath,
   attachWindow,
   EVENT_APPENDED_CHANNEL,

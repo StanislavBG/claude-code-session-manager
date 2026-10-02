@@ -17,11 +17,33 @@
  * scheduler.cjs's flushDueReviewNotices is the only caller that actually
  * sends — this module stays fs/network-free so it is unit-testable without
  * touching queue.json or the Epic event store.
+ *
+ * Each park is one episode with one hold clock. scheduler.cjs's
+ * resetJobFields deletes `job.reviewNotice` outright, so a human reset always
+ * starts the next park's clock fresh — it never inherits a stale
+ * `firstParkedAt` from days earlier. A rung-6 ladder requeue goes through
+ * `transitionJob` directly, not `resetJobFields`, so that requeue keeps the
+ * same clock on purpose (it is still the same unresolved episode).
+ *
+ * The sent message also says plainly whether the group still blocks other
+ * work: formatReviewNotice names any `pending` row whose `dependsOn` names a
+ * still-`needs_review` row in the group, instead of always claiming nothing
+ * is waiting. And a row that is not yet due on its own only joins a due
+ * group — "sweeps in" — once it has sat for SWEEP_MIN_AGE_MINUTES, so a row
+ * that parked seconds ago is never announced before the ladder's early rungs
+ * get a chance to run.
  */
 
 // Default hold before an un-resolved needs_review park gets its own grouped
 // notice, in minutes. Overridable via SM_REVIEW_NOTICE_HOLD_MINUTES.
 const DEFAULT_HOLD_MINUTES = 240;
+
+// Same dependsOn slug-matching rule schedulerBatch.cjs's findBlockingDep uses
+// at run time (exact slug first, else bare-name after stripping one leading
+// `NN-`) — reused here, not reimplemented, so formatReviewNotice's "blocks"
+// wording can never disagree with what actually holds a dependent `pending`
+// row in the real queue.
+const { bareSlug } = require('./depSlugResolve.cjs');
 
 /**
  * buildReviewNotice({ job, report, epicId, now, prior }) → ReviewNotice
@@ -38,7 +60,9 @@ const DEFAULT_HOLD_MINUTES = 240;
  * reviewNotice, if any) as long as that prior notice is still unsent — a
  * re-park of the SAME unresolved episode (e.g. one more ladder attempt that
  * also fails) must not restart the hold clock. Once a notice has been sent,
- * a later park starts a fresh clock.
+ * a later park starts a fresh clock — and so does a later park after a human
+ * reset, because resetJobFields deletes the notice outright, so `prior` is
+ * `undefined` and this falls to the same `now` default.
  */
 function buildReviewNotice({ job, report, epicId, now, prior } = {}) {
   const cause = `${job?.verifierVerdict || 'unknown'}${job?.integrationFailureKind ? `:${job.integrationFailureKind}` : ''}`;
@@ -56,6 +80,25 @@ function buildReviewNotice({ job, report, epicId, now, prior } = {}) {
   };
 }
 
+// A not-yet-due row only joins a due group ("sweeps in") once it has sat
+// `needs_review` for at least this long. Why: the self-heal ladder
+// (scheduler-operations.md §4) needs about 30 minutes to work through its
+// early rungs, so sweeping in a row seconds after it parked would announce
+// it before the ladder ever got a chance to self-heal it. A row that is due
+// ON ITS OWN (its own hold expired, or a skipped auto-resolve) is never held
+// back by this rule — see isDue below.
+const SWEEP_MIN_AGE_MINUTES = 30;
+
+// Milliseconds since reviewNotice.firstParkedAt, or 0 for a missing/
+// unparsable timestamp (fail young — never treat a bad timestamp as old
+// enough to sweep in early).
+function parkedAgeMs(j, now) {
+  const firstParkedAt = j.reviewNotice && j.reviewNotice.firstParkedAt;
+  if (!firstParkedAt) return 0;
+  const parkedMs = Date.parse(firstParkedAt);
+  return Number.isFinite(parkedMs) ? now - parkedMs : 0;
+}
+
 /**
  * selectDueReviewNotices(jobs, { now, holdMs }) → [{ cwd, epicId, cause, jobs }]
  *
@@ -69,7 +112,10 @@ function buildReviewNotice({ job, report, epicId, now, prior } = {}) {
  * message per distinct cause per Epic, not one per PRD. Once any row in a
  * key is due, every other unsent candidate sharing that same key is swept
  * into the SAME group even if it individually hasn't reached its own due
- * condition yet, so a cause that affects several PRDs is reported once.
+ * condition yet, so a cause that affects several PRDs is reported once —
+ * except a swept-in `needs_review` row must itself be at least
+ * SWEEP_MIN_AGE_MINUTES old (parkedAgeMs); a row due on its own skips that
+ * check entirely.
  */
 function selectDueReviewNotices(jobs = [], { now = Date.now(), holdMs = DEFAULT_HOLD_MINUTES * 60000 } = {}) {
   const isCandidate = (j) => Boolean(
@@ -96,11 +142,15 @@ function selectDueReviewNotices(jobs = [], { now = Date.now(), holdMs = DEFAULT_
   }
   if (dueKeys.size === 0) return [];
 
+  const sweepMinAgeMs = SWEEP_MIN_AGE_MINUTES * 60000;
   const groupsByKey = new Map();
   for (const j of list) {
     if (!isCandidate(j)) continue;
     const key = keyOf(j);
     if (!dueKeys.has(key)) continue;
+    // Not due on its own, and too young to sweep in — leave it for a later
+    // pass, once either its own hold expires or it ages past the sweep gate.
+    if (!isDue(j) && parkedAgeMs(j, now) < sweepMinAgeMs) continue;
     if (!groupsByKey.has(key)) {
       groupsByKey.set(key, { cwd: j.cwd ?? null, epicId: j.reviewNotice.epicId ?? null, cause: j.reviewNotice.cause ?? null, jobs: [] });
     }
@@ -142,18 +192,49 @@ function ladderSummaryFor(jobs) {
   return phrases.length ? phrases.join(', ') : 'nothing yet';
 }
 
+// The pending rows (from the FULL job list, not just this group) that a
+// still-`needs_review` row in the group blocks. A dep slug "names" a group
+// row when it matches that row's slug exactly, or by bare name (same rule as
+// findBlockingDep). Only rows in the group's own cwd are considered — a
+// dependsOn chain never crosses projects. Returns a sorted, de-duplicated
+// list of the blocked rows' slugs.
+function blockedDependents(group, jobs) {
+  const blockingSlugs = (group.jobs ?? [])
+    .filter((j) => j.status === 'needs_review')
+    .map((j) => j.slug)
+    .filter(Boolean);
+  if (!blockingSlugs.length) return [];
+  const namesABlockingSlug = (depSlug) => blockingSlugs.some(
+    (slug) => depSlug === slug || bareSlug(depSlug) === bareSlug(slug),
+  );
+  const blocked = new Set();
+  for (const p of jobs ?? []) {
+    if (p.status !== 'pending' || p.cwd !== group.cwd) continue;
+    if ((p.dependsOn ?? []).some(namesABlockingSlug)) blocked.add(p.slug);
+  }
+  return [...blocked].sort();
+}
+
 /**
- * formatReviewNotice(group) → plain-text message body for the authoring
- * Epic's event chain. `group` is one entry from selectDueReviewNotices().
+ * formatReviewNotice(group, { jobs }) → plain-text message body for the
+ * authoring Epic's event chain. `group` is one entry from
+ * selectDueReviewNotices(). `jobs` is the FULL live job list (every status,
+ * every project) — needed to find any `pending` row this group still blocks;
+ * omit it (or pass `[]`) to always get the "nothing is waiting" wording,
+ * e.g. from a caller that only has the group itself.
  */
-function formatReviewNotice(group) {
-  const jobs = group.jobs ?? [];
-  const slugs = jobs.map((j) => j.slug).filter(Boolean);
-  const reportPaths = jobs.map((j) => j.reviewNotice?.reportPath).filter(Boolean);
+function formatReviewNotice(group, { jobs = [] } = {}) {
+  const groupJobs = group.jobs ?? [];
+  const slugs = groupJobs.map((j) => j.slug).filter(Boolean);
+  const reportPaths = groupJobs.map((j) => j.reviewNotice?.reportPath).filter(Boolean);
+  const blocked = blockedDependents(group, jobs);
+  const waitingLine = blocked.length
+    ? `These PRDs block ${blocked.length} other PRD(s) until they are fixed, reset or archived: ${blocked.join(', ')}.`
+    : 'The rest of the plan keeps running. Nothing is waiting on you unless you want to act.';
   const lines = [
-    `${jobs.length} PRD(s) stopped for the same reason: ${humanCauseFor(group.cause)}.`,
-    `The scheduler already tried to fix this on its own: ${ladderSummaryFor(jobs)}.`,
-    'The rest of the plan keeps running. Nothing is waiting on you unless you want to act.',
+    `${groupJobs.length} PRD(s) stopped for the same reason: ${humanCauseFor(group.cause)}.`,
+    `The scheduler already tried to fix this on its own: ${ladderSummaryFor(groupJobs)}.`,
+    waitingLine,
     `PRDs: ${slugs.join(', ')}`,
   ];
   if (reportPaths.length) lines.push(`Reports: ${reportPaths.join(', ')}`);

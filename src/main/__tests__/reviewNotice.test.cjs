@@ -140,15 +140,35 @@ test('two due rows sharing (cwd, epicId, cause) land in one group', () => {
   expect(groups[0].jobs.map((j) => j.slug).sort()).toEqual(['job-a', 'job-b']);
 });
 
-test('a not-yet-due row is swept into the group once a sibling with the same key is due', () => {
+test('a not-yet-due row at least 30 minutes old is swept into the group once a sibling with the same key is due', () => {
   const due = parkedJob({ slug: 'job-due', status: 'skipped', needsReviewAutoResolvedSkip: true });
   const notYetDue = parkedJob({
     slug: 'job-not-yet',
-    reviewNotice: { ...parkedJob().reviewNotice, firstParkedAt: new Date(NOW - 1000).toISOString() },
+    reviewNotice: { ...parkedJob().reviewNotice, firstParkedAt: new Date(NOW - 40 * 60000).toISOString() },
   });
   const groups = selectDueReviewNotices([due, notYetDue], { now: NOW, holdMs: HOLD_MS });
   expect(groups).toHaveLength(1);
   expect(groups[0].jobs.map((j) => j.slug).sort()).toEqual(['job-due', 'job-not-yet']);
+});
+
+test('a not-yet-due row under 30 minutes old is never swept in, even when a sibling with the same key is due', () => {
+  const due = parkedJob({ slug: 'job-due', status: 'skipped', needsReviewAutoResolvedSkip: true });
+  const tooYoung = parkedJob({
+    slug: 'job-too-young',
+    reviewNotice: { ...parkedJob().reviewNotice, firstParkedAt: new Date(NOW - 10 * 60000).toISOString() },
+  });
+  const groups = selectDueReviewNotices([due, tooYoung], { now: NOW, holdMs: HOLD_MS });
+  expect(groups).toHaveLength(1);
+  expect(groups[0].jobs.map((j) => j.slug)).toEqual(['job-due']);
+});
+
+test('a row due on its own (hold expired) is never held back by the sweep-in age gate', () => {
+  // Same scenario as "a needs_review row past the hold time is due" above,
+  // but worth pinning here too: isDue short-circuits before parkedAgeMs is
+  // ever consulted for a row that is due on its own — the 30-minute gate
+  // only ever holds back a row being swept into someone else's group.
+  const groups = selectDueReviewNotices([parkedJob()], { now: NOW, holdMs: HOLD_MS });
+  expect(groups).toHaveLength(1);
 });
 
 test('rows with a different cwd, epicId, or cause never merge into the same group', () => {
@@ -213,6 +233,43 @@ test('formatReviewNotice lists every non-null reportPath on the Reports line', (
     ],
   };
   expect(formatReviewNotice(group)).toContain('Reports: /runs/1/root-cause-1-a.md');
+});
+
+test('formatReviewNotice names a pending row the group blocks via dependsOn', () => {
+  const group = {
+    cwd: '/proj', epicId: 'epic-1', cause: 'uncommitted_changes',
+    jobs: [{ slug: '1-a', status: 'needs_review', reviewNotice: {} }],
+  };
+  const jobs = [...group.jobs, { slug: '2-b', status: 'pending', cwd: '/proj', dependsOn: ['1-a'] }];
+  const text = formatReviewNotice(group, { jobs });
+  expect(text).toContain('These PRDs block 1 other PRD(s) until they are fixed, reset or archived: 2-b.');
+  expect(text).not.toContain('Nothing is waiting');
+});
+
+test('formatReviewNotice matches a dependsOn entry by bare name, same rule as findBlockingDep', () => {
+  const group = {
+    cwd: '/proj', epicId: 'epic-1', cause: 'uncommitted_changes',
+    jobs: [{ slug: '12-foo', status: 'needs_review', reviewNotice: {} }],
+  };
+  const jobs = [...group.jobs, { slug: '2-b', status: 'pending', cwd: '/proj', dependsOn: ['foo'] }];
+  const text = formatReviewNotice(group, { jobs });
+  expect(text).toContain('block 1 other PRD(s)');
+  expect(text).toContain('2-b');
+});
+
+test('formatReviewNotice keeps the "nothing is waiting" wording when no pending row depends on a blocking row', () => {
+  const group = {
+    cwd: '/proj', epicId: 'epic-1', cause: 'uncommitted_changes',
+    jobs: [{ slug: '1-a', status: 'needs_review', reviewNotice: {} }],
+  };
+  const jobs = [...group.jobs, { slug: '2-b', status: 'pending', cwd: '/proj', dependsOn: ['9-unrelated'] }];
+  const text = formatReviewNotice(group, { jobs });
+  expect(text).toContain('The rest of the plan keeps running. Nothing is waiting on you unless you want to act.');
+});
+
+test('formatReviewNotice defaults to the "nothing is waiting" wording when jobs is omitted', () => {
+  const group = { cwd: '/proj', epicId: 'epic-1', cause: 'uncommitted_changes', jobs: [{ slug: '1-a', status: 'needs_review', reviewNotice: {} }] };
+  expect(formatReviewNotice(group)).toContain('Nothing is waiting on you unless you want to act.');
 });
 
 // --- holdMsFromEnv ---

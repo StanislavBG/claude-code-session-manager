@@ -91,6 +91,16 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         tools: "Read, Grep, Glob, Bash, Edit, Write",
       },
     },
+    {
+      commit: "535b04f8",
+      bodySha256: "91232cfd7ce5fb1dc608ff639a07dcb1c5c13c22502ae4790f51707f498ec917",
+      fm: {
+        description: "Executes exactly one already-scoped PRD at a time, headless, start to finish — reads the PRD's Goal/Acceptance Criteria/Implementation notes and standards.md, implements it, verifies against its own AC, and reports. Has no visibility into the overall plan — that's architect's job. This is the default persona a scheduled PRD runs as: the scheduler resolves a PRD's `agentType` frontmatter field (default `dev-lead`) to this file and launches the headless executor AS this persona via `--append-system-prompt`.",
+        model: "sonnet",
+        title: "Engineering — Software Engineer",
+        tools: "Read, Grep, Glob, Bash, Edit, Write",
+      },
+    },
   ],
   "project-home-builder": [
     {
@@ -148,6 +158,16 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
       bodySha256: "512ec61490f6b652268bedc2aebd07fb4aafe8df53cfed38bb728348a29f29cc",
       fm: {
         description: "Validates a finished PLAN (the PRDs that share one planId) once, after its last PRD lands — re-runs each PRD's gate, checks every acceptance criterion against the real tree, reviews the plan's combined diff, and reports one VERIFIED/REFUTED verdict per PRD via sentinel lines. Runs headless as a scheduled PRD (agentType: validator); never edits product code and never queues work.",
+        model: "sonnet",
+        title: "Engineering — Plan Validator",
+        tools: "Read, Grep, Glob, Bash",
+      },
+    },
+    {
+      commit: "535b04f8",
+      bodySha256: "5aeaf796a30ac98bdce440a6fcd088e1c776ae762f2778327439ab8d75a2de94",
+      fm: {
+        description: "Validates a finished PLAN (the PRDs its validate PRD lists) once, after its last PRD lands — re-runs each PRD's gate, checks every acceptance criterion against the real tree, reviews the plan's combined diff, and reports one VERIFIED/REFUTED verdict per PRD via sentinel lines. Runs headless as a scheduled PRD (agentType: validator); never edits product code and never queues work.",
         model: "sonnet",
         title: "Engineering — Plan Validator",
         tools: "Read, Grep, Glob, Bash",

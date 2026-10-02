@@ -20,7 +20,6 @@ Classes: **LAW-RATIONALE** (linked from root `CLAUDE.md`) · **REFERENCE** (subs
 | [scheduler-operations.md](scheduler-operations.md) | dispatch, recovery ladder, diagnosis table | LAW-RATIONALE |
 | [telemetry.md](telemetry.md) | anonymous telemetry data model and dedup | LAW-RATIONALE |
 | [application-menu.md](application-menu.md) | Electron application menu structure | REFERENCE |
-| [bilko-host-integration.md](bilko-host-integration.md) | Host-on-Bilko.run tab spec — `runtime-read` via `src/renderer/lib/agentTagDefs.ts` | REFERENCE |
 | [heap-snapshot-diagnostics.md](heap-snapshot-diagnostics.md) | renderer heap-snapshot procedure | RUNBOOK |
 | [build-target.json](build-target.json) | **live runtime config** read by `src/main/lib/buildTarget.cjs`, `.claude/agents/builder.md` and the builder plugin skill — never move it | — |
 

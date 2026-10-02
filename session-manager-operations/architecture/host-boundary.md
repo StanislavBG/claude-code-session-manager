@@ -111,40 +111,23 @@ that partition's producers should be building *toward* once `git subtree split -
 gates, serving infrastructure:
 - A publish gate blocked by host-side misconfiguration or a missing host devDependency.
 - A Clerk auth failure, a Stripe webhook/entitlement bug, a relay outage or protocol issue.
-- A request to add/adjust a registry entry, budget, or redirect that only the host's `bilko-host`
-  MCP can perform.
+- A request to add/adjust a registry entry, budget, or redirect that only Bilko's own hosting
+  tooling can perform.
 
 **Never route to Bilko — this is `/develop` here, or blocked on the extraction:**
 - Our marketing copy, our feature descriptions, our page layout/UX.
 - Our product's URL structure or route consolidation — deciding how `/products/session-manager/*`
   or `/projects/session-manager/*` should be organized is a call about **our** product's shape, not
   the host's. Only the mechanical registration/redirect steps that implement that decision belong to
-  Bilko, via the `bilko-host` MCP, once the decision is made here.
+  Bilko, through its own static-path publish tooling, once the decision is made here.
 - Our bundle bytes, our manual content, our Field Manual chapters.
 
 **Worked example — 2026-09-12 misfire.** A session filed a URL-consolidation Epic against Bilko,
 asking the *host* to restructure Session Manager's own product routes (the `/products/session-manager/*`
 sub-paths documented above). That was ours to decide — this doc's "Target end state" section above
 is the decision — and the only Bilko-facing action it should ever produce is the mechanical
-redirect/registry change once we've decided the target, executed through the `bilko-host` MCP like
-any other static-path publish, not as a proposal asking Bilko to design our routes for us.
-
-## Publish gates currently blocking us
-
-The gates below are recorded in `session-manager-operations/bilko-host/publish-state.json` (PRD 1146's publish attempt,
-2026-09-11). That file is machine-local runtime state, untracked and absent from a fresh clone, so it is quoted
-rather than linked. Excerpt: `status: "publish-failed"`, `lastError: "publish blocked by gate(s): budget, a11y ... manifest, golden, and audit gates all passed."`. The two gates (below) are **HOST-LEGITIMATE** — host-side config/tooling
-gaps, legitimate `/send-feedback` candidates once this PRD's scope closes (not opened by this PRD):
-
-- **`budget` gate**: `app_budgets.max_size_gz_bytes` is `195000` for slug `session-manager`, below
-  the already-live bundle's own declared `1072016` bytes — host-contract.md documents this exact
-  failure mode by name: *"A budget below what is already live for that slug is a dead gate ...
-  `session-manager` sat in exactly that state (195 KB budget vs a live 1,072,016-byte bundle)."*
-  The `OVERSIZE_BUDGETS` raise-if-lower upsert Bilko built to fix this class of bug evidently hasn't
-  been applied (or re-applied) to our row. Host's data, host's fix.
-- **`a11y` gate**: blocked on `playwright not installed — run: pnpm add playwright` — a missing
-  devDependency in `~/Projects/Bilko` itself, not this repo (publish-state.json's own note: *"host-repo
-  tooling gap in ~/Projects/Bilko, not this repo"*).
+redirect/registry change once we've decided the target, executed through Bilko's own static-path
+publish tooling, not as a proposal asking Bilko to design our routes for us.
 
 ## Related docs
 

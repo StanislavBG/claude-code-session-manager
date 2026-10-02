@@ -22,9 +22,7 @@ namespace (`src/main/lib/opsOwnership.cjs`), so that route is the only sanctione
 
 `src/main/projectPages.cjs` is read-only: `project-pages:get` plus a per-cwd
 watcher that pushes `project-pages:changed` to Project Home, which shows the
-page in a sandboxed frame. The Host-on-Bilko.run tab also reads `home.html` as
-its default root document (see
-[`bilko-host-integration.md`](../architecture/bilko-host-integration.md)).
+page in a sandboxed frame.
 
 Exactly one artifact exists: `home.html`. The old `output/<lens>.html` lens
 directory is retired — nothing writes or reads it (a non-`home` lens document

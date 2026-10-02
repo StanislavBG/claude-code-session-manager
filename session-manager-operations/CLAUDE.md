@@ -5,7 +5,7 @@ Part of the **OPERATIONS STATE** partition — see
 
 ## What's here
 
-14 namespaces, no top-level files. Governance is the **SINGLE-WRITER LAW**
+13 namespaces, no top-level files. Governance is the **SINGLE-WRITER LAW**
 (`src/main/lib/opsOwnership.cjs`): every namespace has exactly ONE owning
 writer; everyone else reads. Fail-closed — an undeclared writer throws.
 Adding a namespace or writer is a deliberate edit to that file. Build ops
@@ -13,7 +13,7 @@ paths only via its `opsPath()`.
 
 - **Owned** (in `OWNERS`, app-owned runtime state): `prompt-sessions` →
   epics · `scheduler` → scheduler · `project-brief` → project-home ·
-  `logs` → logs · `bilko-host` → bilko-host · `memory-clusters` →
+  `logs` → logs · `memory-clusters` →
   memory-clusters · `ui-prefs` → ui-prefs · `project-pages` → project-home
   (admin render route only; a Builder Epic's own authoring stays ungoverned
   — see [`project-pages/README.md`](project-pages/README.md)).
@@ -33,7 +33,6 @@ Epic lifecycle is specified exactly once, at
 | Namespace | Governance | Purpose | Retention | README |
 | --- | --- | --- | --- | --- |
 | `architecture` | not owned | reference docs root CLAUDE.md links to | keep indefinitely | none |
-| `bilko-host` | OWNERS → bilko-host | dist/ bundle prep + publish-state for bilko.run | keep indefinitely | [link](bilko-host/README.md) |
 | `design-mocks` | not owned | design mock artifacts, incl. project-pages component library | keep indefinitely | none (nested per-bundle) |
 | `feedback` | retired 2026-08-02 | former feedback intake, superseded by New Epic | n/a — retired | [link](feedback/README.md) |
 | `HUMAN_LEARN` | not owned | human-readable knowledge-base pages | keep indefinitely | none |

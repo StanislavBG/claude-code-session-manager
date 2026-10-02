@@ -103,6 +103,7 @@ export default defineConfig({
       'src/main/__tests__/prdFrontmatterAgentType.test.cjs',
       'src/main/__tests__/prdFrontmatterDependsOn.test.cjs',
       'src/main/__tests__/prdUpdateDependsOn.test.cjs',
+      'src/main/__tests__/prdRepairParked.test.cjs',
       'src/main/__tests__/prdFrontmatterDisposition.test.cjs',
       'src/main/lib/__tests__/prdDisposition.test.cjs',
       'src/main/__tests__/prdCreateDisposition.test.cjs',

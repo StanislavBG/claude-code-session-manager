@@ -133,7 +133,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         slug: { type: 'string', description: 'PRD slug of the job to reset' },
-        force: { type: 'boolean', description: 'Required to reset a job whose status is already "completed"' },
+        force: { type: 'boolean', description: 'Required to reset a job whose status is already "completed" or "skipped"' },
         cwd: { type: 'string', description: 'Optional: the PRD project cwd, narrows/speeds the search' },
       },
       required: ['slug'],

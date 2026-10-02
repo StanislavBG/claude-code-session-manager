@@ -45,7 +45,7 @@ const MCP_TOOL_CATALOG = [
     whenToUse: 'Use after diagnosing why a job is stuck (e.g. via scheduler_get_prd/scheduler_list_jobs) and deciding it should re-run from pending.',
     whenNotToUse: 'Do not use as a first move on a "needs_review" job without reading it first — reset just clears status, it does not answer the question the job raised.',
     exampleArgs: { slug: 'add-mcp-tool-catalog', force: false },
-    notes: 'Refuses a job whose status is already "completed" unless force:true is passed — resetting a completed job re-executes already-shipped work.',
+    notes: 'force:true is needed to reset a job whose status is already "completed" or "skipped" — resetting a completed job re-executes already-shipped work; resetting a skipped job overrides the scheduler\'s (or a human\'s) choice not to run it.',
   },
   {
     name: 'scheduler_pause',
@@ -164,16 +164,16 @@ const MCP_TOOL_CATALOG = [
   {
     name: 'scheduler_update_prd',
     group: 'scheduler',
-    purpose: "THE ONLY SUPPORTED WAY to edit a NOT-yet-running PRD's frontmatter and/or body via the session-manager "
-      + 'app\'s admin API. Refuses once a queue row exists for the slug and its status is anything but "pending" '
-      + '(running/completed/failed/needs_review) — editing the spec under a live or already-finished executor is refused, '
-      + 'not silently applied. Only recognized frontmatter keys (title, cwd, estimateMinutes, parallelGroup, '
+    purpose: "THE ONLY SUPPORTED WAY to edit a PRD's frontmatter and/or body. Works while the job is pending, "
+      + 'quarantined, needs_review, failed or skipped, or has no queue row yet. Refuses a running job (wait, or '
+      + 'cancel it first) and a completed one (queue a new PRD). '
+      + 'Only recognized frontmatter keys (title, cwd, estimateMinutes, parallelGroup, '
       + 'sourcePromptId, sourceTabId, tag, dependsOn) may be patched; unrecognized keys round-trip unchanged. '
       + 'Patching dependsOn to a non-empty array replaces it wholesale (validated against existing PRD slugs, '
       + 'same resolver scheduler_create_prd uses); patching it to an explicit empty array CLEARS the dependency — '
       + 'the safe way to fix a wrong dependsOn without archiving (which marks the PRD completed and wrongly frees its dependents).',
-    whenToUse: 'Use to correct a PRD scope/estimate/tag before it starts running — e.g. before resetting a needs_review job whose spec needs to change.',
-    whenNotToUse: 'Do not use once the job is running or terminal (completed/failed/needs_review) without first resetting it back to pending — the route refuses the edit.',
+    whenToUse: 'Use to fix a PRD\'s spec before it runs, or to fix a parked (needs_review or failed) or skipped PRD before you reset it with scheduler_reset_job.',
+    whenNotToUse: 'Do not use on a running or completed job. Do not reset first and edit second: the reset job can start before the edit lands.',
     exampleArgs: { slug: 'add-mcp-tool-catalog', frontmatter: { estimateMinutes: 8 } },
     notes: null,
   },
@@ -304,11 +304,11 @@ const MCP_RECIPES = [
     id: 'unstick-needs-review-job',
     title: 'Unstick a job stuck in needs_review',
     steps: [
-      'Call scheduler_list_prds with status:"needs_review" (or scheduler_list_jobs) to find the stuck slug.',
-      'Call scheduler_get_prd with that slug to read its full frontmatter + body and understand the question it raised.',
-      'If the PRD spec needs to change, call scheduler_update_prd with the slug and a frontmatter/body patch — this is only accepted while the job is not yet running or terminal.',
-      'Call scheduler_reset_job with { slug } to clear the needs_review status back to pending — force is only required if the job had already reached "completed".',
-      'The next scheduler reconcile pass re-queues the job; confirm with scheduler_list_jobs or scheduler_list_prds.',
+      'Call scheduler_list_prds with status:"needs_review" (or scheduler_list_jobs) to find the slug.',
+      'Call scheduler_get_prd with that slug to read the PRD and why it parked.',
+      'If the spec is wrong, call scheduler_update_prd with the slug and a frontmatter/body patch. It works while the job is pending, quarantined, needs_review, failed or skipped.',
+      'Then call scheduler_reset_job with { slug } to set the job back to pending. Pass force:true when the job is skipped. Always edit first, then reset: a reset job can start on the next tick.',
+      'The next scheduler pass runs it again. Confirm with scheduler_list_jobs or scheduler_list_prds.',
     ],
   },
   {

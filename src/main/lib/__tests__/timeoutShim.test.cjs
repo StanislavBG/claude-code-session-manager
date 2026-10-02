@@ -70,6 +70,47 @@ test('--preserve-status reports 128+signal instead of 124 when the command is ki
   expect(r.status).toBe(143); // 128 + SIGTERM(15)
 });
 
+test('-s 99 (not a real signal number) is a usage error, exit 125', () => {
+  const r = runShim(['-s', '99', '5', process.execPath, '-e', '0']);
+  expect(r.status).toBe(125);
+  expect(r.stderr).toMatch(/invalid signal '99'/);
+});
+
+test('--signal= with an empty value is a usage error, exit 125 (not a silent default)', () => {
+  const r = runShim(['--signal=', '5', process.execPath, '-e', '0']);
+  expect(r.status).toBe(125);
+  expect(r.stderr).toMatch(/invalid signal/);
+});
+
+test.each(['KILL', '9', 'sigterm'])(
+  '-s %s is accepted (the command finishes before DURATION, so no usage error)',
+  (sig) => {
+    const r = runShim(['-s', sig, '5', process.execPath, '-e', 'process.exit(0)']);
+    expect(r.status).toBe(0);
+  },
+);
+
+test('-k 0 means no kill-after at all — a command that ignores the main signal and exits on its own is not killed early', () => {
+  // DURATION (0.1s) elapses well before the command's own 200ms exit, so the
+  // main signal (default TERM) is sent; the command ignores it. With the
+  // bug, -k 0 would arm a kill-after timer with a 0ms delay, which fires
+  // immediately and SIGKILLs the command. --preserve-status surfaces the
+  // command's REAL exit status (0) instead of the usual 124-on-timeout, so a
+  // premature kill is visible as 137 instead of being masked by 124 either way.
+  const r = runShim([
+    '--preserve-status', '-k', '0', '0.1', process.execPath,
+    '-e', "process.on('SIGTERM',()=>{});setTimeout(()=>process.exit(0),200);",
+  ]);
+  expect(r.status).toBe(0);
+}, 10000);
+
+test('a DURATION above the setTimeout int32 cap (e.g. 30d) does not fire immediately', () => {
+  // Old bug: Node clamps an out-of-range setTimeout delay to ~1ms, so
+  // `timeout 30d cmd` killed `cmd` almost instantly instead of waiting.
+  const r = runShim(['30d', process.execPath, '-e', 'setTimeout(()=>{},200)']);
+  expect(r.status).toBe(0);
+}, 10000);
+
 test('kills a grandchild too, by signalling the whole process group', () => {
   const dir = mkTmp('sm-timeout-shim-pg-');
   const pidFile = path.join(dir, 'grandchild.pid');
@@ -115,6 +156,42 @@ test('the installed launcher runs end-to-end', async () => {
   const r = spawnSync(shimPath(homeDir), ['5', process.execPath, '-e', 'process.exit(3)'], { encoding: 'utf8' });
   expect(r.status).toBe(3);
 });
+
+test('the written launcher falls back to running the script as Node under Electron (ELECTRON_RUN_AS_NODE=1) when no node is on PATH', async () => {
+  const homeDir = mkTmp('sm-timeout-shim-home-');
+  const fakeElectronPath = '/Applications/Fake Electron.app/Contents/MacOS/Electron';
+  await ensureTimeoutShim({ homeDir, execPath: fakeElectronPath });
+
+  const launcherText = fs.readFileSync(shimPath(homeDir), 'utf8');
+  expect(launcherText).toMatch(/command -v node/);
+  expect(launcherText).toContain('ELECTRON_RUN_AS_NODE=1');
+  // execPath is single-quoted for POSIX sh, so a space in the path (as in a
+  // real "*.app/Contents/MacOS/Electron" path) stays one argument.
+  expect(launcherText).toContain(`'${fakeElectronPath}'`);
+});
+
+test('the installed launcher runs end-to-end when homeDir and execPath both contain a space, and no node is on PATH', async () => {
+  const homeDir = mkTmp('sm timeout shim home-');
+  const execDir = mkTmp('a b-');
+  const spacedExecPath = path.join(execDir, 'node');
+  fs.symlinkSync(process.execPath, spacedExecPath);
+  await ensureTimeoutShim({ homeDir, execPath: spacedExecPath });
+
+  // Standard-utils-only PATH: the launcher script itself still needs
+  // `dirname`/`command` (not shell builtins on every /bin/sh), but neither
+  // stock directory ships a `node` binary, so `command -v node` fails and
+  // the launcher takes the quoted-execPath fallback branch instead of the
+  // plain `exec node ...` one. Same PATH the withTimeoutShimOnPath test
+  // below uses.
+  const env = { ...process.env, PATH: ['/usr/bin', '/bin'].join(path.delimiter) };
+  const launcher = shimPath(homeDir);
+
+  const r1 = spawnSync(launcher, ['5', spacedExecPath, '-e', 'process.exit(3)'], { encoding: 'utf8', env });
+  expect(r1.status).toBe(3);
+
+  const r2 = spawnSync(launcher, ['1', spacedExecPath, '-e', 'setTimeout(()=>{},5000)'], { encoding: 'utf8', env });
+  expect(r2.status).toBe(124);
+}, 15000);
 
 test('withTimeoutShimOnPath appends the shim dir once, with no duplicate', () => {
   const homeDir = path.join(os.tmpdir(), 'sm-timeout-shim-fake-home');

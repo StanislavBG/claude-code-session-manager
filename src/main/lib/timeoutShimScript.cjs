@@ -15,12 +15,26 @@
  *
  * Usage: timeout [OPTION] DURATION COMMAND [ARG]...
  *
+ * This covers only the GNU `timeout` forms a PRD gate actually uses. It adds
+ * no option GNU timeout lacks.
+ *
  * DURATION is a number (float allowed), optionally suffixed s/m/h/d
- * (default s). 0 means no limit.
+ * (default s). 0 means no limit. A duration above Node's signed-32-bit
+ * setTimeout cap (2,147,483,647 ms, about 24.8 days) is re-armed in chunks —
+ * see setLongTimeout below — rather than passed straight to setTimeout,
+ * which would silently fire after 1ms instead of waiting.
  *
  * Options: -s/--signal=SIGNAL (name or number, with or without the SIG
  * prefix; default TERM), -k/--kill-after=DURATION, --foreground,
  * --preserve-status, -v/--verbose, --help, --version, -- to end options.
+ *
+ * SIGNAL must name a real signal: a number must be a nonzero value from
+ * os.constants.signals, and a name must match a key of os.constants.signals
+ * once uppercased and SIG-prefixed. Anything else — including an empty
+ * value, e.g. `--signal=` — is a usage error (exit 125), never a silent
+ * fallback to the default. --kill-after=0 means no kill-after at all (same
+ * as omitting -k), matching GNU: it does not arm a timer that fires
+ * immediately.
  *
  * Rule: on timeout, signal the whole process group, not just the direct
  * child. Why: a child that is itself a wrapper (a shell, a test runner) can
@@ -76,11 +90,18 @@ function parseDurationMs(token) {
 
 /** Normalizes a signal option value (name with or without SIG prefix, or a
  *  number) to what node:child_process.kill expects. Returns null when the
- *  value names no known signal. */
+ *  value names no known signal — including an empty value, which is a usage
+ *  error, not a request for the default (the default is applied by
+ *  parseArgs's own initial `opts.signal = 'SIGTERM'`, before this function
+ *  ever runs). A numeric value is valid only when it is a nonzero entry of
+ *  os.constants.signals — not just any digit string. */
 function normalizeSignal(raw) {
-  if (raw == null || raw === '') return 'SIGTERM';
   const token = String(raw).trim();
-  if (/^\d+$/.test(token)) return Number(token);
+  if (/^\d+$/.test(token)) {
+    const n = Number(token);
+    if (n === 0 || !Object.values(os.constants.signals).includes(n)) return null;
+    return n;
+  }
   let name = token.toUpperCase();
   if (!name.startsWith('SIG')) name = `SIG${name}`;
   if (!(name in os.constants.signals)) return null;
@@ -89,6 +110,36 @@ function normalizeSignal(raw) {
 
 function signalNumber(sigName) {
   return os.constants.signals[sigName] || 0;
+}
+
+// Node's setTimeout takes a signed 32-bit ms value. A delay above
+// MAX_SETTIMEOUT_MS (2,147,483,647 ms, about 24.8 days) wraps and fires
+// after 1ms instead of waiting — so `timeout 30d cmd` would kill `cmd`
+// immediately. setLongTimeout re-arms in MAX_SETTIMEOUT_MS chunks until the
+// full delay has elapsed, then calls `fn` once. Returns a handle for
+// clearLongTimeout; one handle covers every chunk, so clearing mid-wait
+// still works.
+const MAX_SETTIMEOUT_MS = 2_147_483_647;
+
+function setLongTimeout(fn, ms) {
+  const handle = { timer: null, cancelled: false };
+  function arm(remaining) {
+    const step = Math.min(remaining, MAX_SETTIMEOUT_MS);
+    handle.timer = setTimeout(() => {
+      if (handle.cancelled) return;
+      const left = remaining - step;
+      if (left > 0) arm(left);
+      else fn();
+    }, step);
+  }
+  arm(Math.max(0, ms));
+  return handle;
+}
+
+function clearLongTimeout(handle) {
+  if (!handle) return;
+  handle.cancelled = true;
+  if (handle.timer) clearTimeout(handle.timer);
 }
 
 /** Pure argv parser. Returns either {help:true}, {version:true},
@@ -161,8 +212,8 @@ function main() {
   function finish(code) {
     if (settled) return;
     settled = true;
-    if (timer) clearTimeout(timer);
-    if (killAfterTimer) clearTimeout(killAfterTimer);
+    if (timer) clearLongTimeout(timer);
+    if (killAfterTimer) clearLongTimeout(killAfterTimer);
     for (const sig of FORWARDED_SIGNALS) process.removeListener(sig, forwardHandlers[sig]);
     process.exit(code);
   }
@@ -187,12 +238,14 @@ function main() {
   }
 
   if (durationMs > 0) {
-    timer = setTimeout(() => {
+    timer = setLongTimeout(() => {
       timedOut = true;
       if (opts.verbose) process.stderr.write(`timeout: sending signal ${String(signal)} to command '${command}'\n`);
       killGroup(signal);
-      if (killAfterMs != null) {
-        killAfterTimer = setTimeout(() => {
+      // killAfterMs === 0 means "no kill-after", same as -k not given at
+      // all — GNU timeout never arms a kill timer that fires immediately.
+      if (killAfterMs != null && killAfterMs > 0) {
+        killAfterTimer = setLongTimeout(() => {
           killAfterFired = true;
           if (opts.verbose) process.stderr.write(`timeout: sending signal KILL to command '${command}'\n`);
           killGroup('SIGKILL');

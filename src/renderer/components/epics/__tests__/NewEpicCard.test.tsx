@@ -963,6 +963,27 @@ describe('NewEpicCard', () => {
       })
     })
   })
+
+  it('front face shows no model/effort controls; they live in the grounding runtime panel', async () => {
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    const front = el.querySelector('[data-testid="new-epic-front"]') as HTMLElement
+    expect(front.querySelector('[data-testid="new-epic-runtime-override"]')).toBeNull()
+    expect(front.querySelector('[data-testid="new-epic-model-override"]')).toBeNull()
+    expect(front.querySelector('[data-testid="new-epic-effort-override"]')).toBeNull()
+    expect(el.querySelector('[data-testid="new-epic-runtime-panel"]')).not.toBeNull()
+    expect(el.querySelector('[data-testid="new-epic-runtime-panel"] [data-testid="new-epic-runtime-override"]')).not.toBeNull()
+  })
+
+  it('shows the short subtitle with an info tip', async () => {
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    const front = el.querySelector('[data-testid="new-epic-front"]') as HTMLElement
+    expect(front.textContent).toContain('One goal per Epic — sent as the first message when you start.')
+    const info = front.querySelector('[data-testid="new-epic-subtitle-info"]') as HTMLButtonElement
+    expect(info).not.toBeNull()
+    expect(info.title).toContain('fixed for the life of its session')
+  })
 })
 
 describe('NewEpicCard per-Epic model / effort override', () => {

@@ -16,7 +16,10 @@ import { agentTagDef } from '../../lib/agentTagDefs'
 import { tagLibraryEntry, TAG_GROUP_ORDER, type EpicTag } from '../../lib/tagLibrary'
 import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, type ContextInjectionKey } from '../../lib/contextInjections'
 import { Badge } from '../ui/Badge'
+import { Tooltip } from '../ui/Tooltip'
 import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallGuardResult } from '../../../preload/api'
+
+const SUBTITLE_DETAIL = 'One goal per Epic — fixed for the life of its session. The title and objective are sent as the first message the moment you start it, so the agent is already working when it opens.'
 
 /** Missions offered when the selected persona declares no `tags:` of its own
  *  (or the Agent Library is empty) — the three general-purpose ones. */
@@ -522,9 +525,9 @@ export function NewEpicCard({
             resizes/jumps mid-flip and the two faces can never visually overlap.
             Each face scrolls its own body independently when content is tall. */}
         <div
-          className="relative w-full transition-transform duration-500"
+          className="relative w-full transition-[transform,height] duration-500"
           style={{
-            height: 'min(760px, 84vh)',
+            height: advanced ? 'min(760px, 84vh)' : 'min(600px, 84vh)',
             transformStyle: 'preserve-3d',
             transform: advanced ? 'rotateY(180deg)' : 'none',
           }}
@@ -549,8 +552,18 @@ export function NewEpicCard({
               What are we trying to achieve?
             </h2>
             <p className="my-2 mb-[18px] text-[13.5px] leading-[1.55] text-fg-dim">
-              One goal per Epic — fixed for the life of its session. The title and objective are sent
-              as the first message the moment you start it, so the agent is already working when it opens.
+              One goal per Epic — sent as the first message when you start.
+              <Tooltip align="bottom-center" content={SUBTITLE_DETAIL}>
+                <button
+                  type="button"
+                  data-testid="new-epic-subtitle-info"
+                  title={SUBTITLE_DETAIL}
+                  aria-label="About this goal"
+                  className="ml-1.5 inline-grid h-[18px] w-[18px] place-items-center rounded-full border border-line align-middle font-mono text-[10.5px] text-fg-faint hover:text-fg"
+                >
+                  i
+                </button>
+              </Tooltip>
             </p>
             <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
 
@@ -571,15 +584,7 @@ export function NewEpicCard({
                   ))}
                 </select>
               </label>
-            ) : (
-              <div
-                data-testid="new-prompt-cwd-static"
-                className="mb-2.5 flex items-center gap-1.5 font-mono text-[11px] text-fg-faint"
-              >
-                <span className="uppercase tracking-[0.09em]">Project</span>
-                <span className="text-fg-dim">{compactPath(effectiveCwd)}</span>
-              </div>
-            )}
+            ) : null}
 
             {readiness && !readiness.ok && (
               <div
@@ -614,13 +619,13 @@ export function NewEpicCard({
               </div>
             )}
 
-            <div className="mb-3.5 grid grid-cols-2 gap-3.5">
+            <div className="mb-3.5 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3.5">
               <div className="min-w-0">
                 <div
                   className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
                   title="Who runs this session — from the Agent Library (~/.claude/agents)."
                 >
-                  1 · agent — who is working
+                  Agent
                 </div>
                 <div className="grid min-w-0 gap-1">
                   {selectedAgent && (
@@ -656,9 +661,9 @@ export function NewEpicCard({
                   className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
                   title="The session's mission — from the Tag Library. Sets how eagerly /develop fires."
                 >
-                  2 · mission — how they work
+                  Mission
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <div className="inline-flex rounded-[10px] border border-line bg-bg p-0.5">
                   {missionTags.map((t) => {
                     const on = tag === t
                     return (
@@ -666,9 +671,10 @@ export function NewEpicCard({
                         key={t}
                         type="button"
                         data-testid={`new-epic-kind-${t}`}
+                        aria-pressed={on}
                         onClick={() => setTag(t)}
                         className={`rounded-md px-2.5 py-1 text-xs font-medium ${
-                          on ? 'bg-bg text-fg ring-1 ring-inset ring-line font-semibold' : 'text-fg-faint'
+                          on ? 'bg-bg-hi text-fg font-semibold shadow-sm' : 'text-fg-dim'
                         }`}
                       >
                         {tagLibraryEntry(t).label}
@@ -676,30 +682,11 @@ export function NewEpicCard({
                     )
                   })}
                 </div>
-                <div className="mt-2 border-l-2 border-accent-muted pl-2.5 text-[12.5px] leading-[1.5] text-fg-dim">
-                  {selectedTagMission}
-                  <div className="mt-1 font-mono text-[11px] text-fg-faint">
-                    {runtimeInfo ? (
-                      <EffectiveRuntimeLine info={runtimeInfo} />
-                    ) : selectedAgent?.model && selectedAgent.model !== 'inherit' ? (
-                      selectedAgent.model
-                    ) : (
-                      'sonnet'
-                    )}
-                    {selectedAgent ? ` · ${selectedAgent.tools.join(' ') || 'no tool restriction'}` : ''}
-                  </div>
-                  <EpicRuntimeOverride
-                    cwd={effectiveCwd || null}
-                    personaModel={selectedAgent?.model ?? null}
-                    personaEffort={selectedAgent?.effort ?? null}
-                    model={modelOverride}
-                    effort={effortOverride}
-                    onModel={setModelOverride}
-                    onEffort={setEffortOverride}
-                  />
-                </div>
               </div>
             </div>
+            <p className="mb-3.5 text-[12.5px] leading-[1.5] text-fg-dim" data-testid="new-epic-mission-description">
+              {selectedTagMission}
+            </p>
 
             <input
               data-testid="new-epic-title"
@@ -716,7 +703,7 @@ export function NewEpicCard({
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
               onPaste={(e) => attachPastedFiles(e, att)}
-              placeholder="The objective, in a sentence or two — this is sent as the first instruction. ⌘V to attach a screenshot."
+              placeholder="The objective, in a sentence or two — sent as the first instruction. ⌘V to attach a screenshot."
               className="mb-3 w-full resize-y appearance-none rounded-[10px] border border-line bg-bg px-[13px] py-[11px] text-[13px] leading-[1.55] text-fg outline-none"
             />
 
@@ -787,6 +774,15 @@ export function NewEpicCard({
             <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
 
             <div className="mb-3 rounded-[10px] border border-line bg-bg px-3 py-2.5">
+              {!showProjectSelector && (
+                <div
+                  data-testid="new-prompt-cwd-static"
+                  className="mb-2.5 flex items-center gap-1.5 font-mono text-[11px] text-fg-faint"
+                >
+                  <span className="uppercase tracking-[0.09em]">Project</span>
+                  <span className="text-fg-dim">{compactPath(effectiveCwd)}</span>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-fg">
                   <span className="h-1.5 w-1.5 rotate-45 rounded-sm" style={{ background: selectedAgent ? agentDot(selectedAgent.name) : '#8a7a60' }} />
@@ -807,6 +803,29 @@ export function NewEpicCard({
                 {' · '}
                 {tagLibraryEntry(tag).developEagerness}
               </div>
+            </div>
+
+            <div className="mb-3 rounded-[10px] border border-line bg-bg px-3 py-2.5" data-testid="new-epic-runtime-panel">
+              <div className="mb-1.5 text-[12.5px] font-semibold text-fg">Runtime</div>
+              <div className="font-mono text-[11px] text-fg-faint">
+                {runtimeInfo ? (
+                  <EffectiveRuntimeLine info={runtimeInfo} />
+                ) : selectedAgent?.model && selectedAgent.model !== 'inherit' ? (
+                  selectedAgent.model
+                ) : (
+                  'sonnet'
+                )}
+                {selectedAgent ? ` · ${selectedAgent.tools.join(' ') || 'no tool restriction'}` : ''}
+              </div>
+              <EpicRuntimeOverride
+                cwd={effectiveCwd || null}
+                personaModel={selectedAgent?.model ?? null}
+                personaEffort={selectedAgent?.effort ?? null}
+                model={modelOverride}
+                effort={effortOverride}
+                onModel={setModelOverride}
+                onEffort={setEffortOverride}
+              />
             </div>
 
             {/* Context Injections — Session-Manager-authored text, independent

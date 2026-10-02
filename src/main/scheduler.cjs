@@ -4079,15 +4079,21 @@ async function clearPause(source) {
 /**
  * Mutate a job in place to "pending" with cleared run metadata.
  *
- * Refuses (no-ops, returns false) on a job already in a terminal success
- * state ('completed') unless opts.force is true — resetting a completed job
- * re-fires the PRD and re-executes already-shipped work (the false-failure
- * class PRD 812-workbench-review-nits-cleanup demonstrated: a completed job
- * was reset to pending and re-ran a correct no-op that then got flagged
- * needs_review). All internal call sites operate on jobs that are still
- * 'running'/'failed' at the point they call this, so the guard is a no-op
- * for them; only an external reset request (IPC/admin API) can target an
- * already-'completed' job, and that path is exactly what this guards.
+ * Refuses (no-ops, returns false) on a job already in one of two terminal
+ * statuses, unless opts.force is true:
+ *   - 'completed': the work already shipped. Resetting it re-fires the PRD
+ *     and re-executes already-shipped work (the false-failure class PRD
+ *     812-workbench-review-nits-cleanup demonstrated: a completed job was
+ *     reset to pending and re-ran a correct no-op that then got flagged
+ *     needs_review).
+ *   - 'skipped': the scheduler or a human already chose not to run this job.
+ *     force:true is the deliberate override for that choice.
+ * resetRefusalMessage() (right below) names the one of these two that
+ * applies, for the two external callers that report a refusal to a caller.
+ * All internal call sites operate on jobs that are still 'running'/'failed'
+ * at the point they call this, so the guard is a no-op for them; only an
+ * external reset request (IPC/admin API) can target an already-'completed'
+ * or already-'skipped' job, and that path is exactly what this guards.
  */
 function resetJobFields(job, errorMsg, opts = {}) {
   if ((job.status === 'completed' || job.status === 'skipped') && opts.force !== true) return false;
@@ -4151,6 +4157,29 @@ function resetJobFields(job, errorMsg, opts = {}) {
   // re-fired run of this same slug can pass it to verifyRun as
   // priorLandedCommit (pass_no_commit_prior_run_verified exemption).
   return true;
+}
+
+/**
+ * Plain-word refusal message for a reset that resetJobFields' terminal-
+ * status guard blocked. One branch per status that guard can refuse, plus a
+ * generic fallback for any other status a caller might pass in (defensive —
+ * resetJobFields today only refuses 'completed' and 'skipped').
+ *
+ * `canForce` tells the message whether force:true is actually available to
+ * the caller: true for the admin/MCP resetJob (force threads through), false
+ * for the renderer IPC schedule:reset-job (no force option there — see that
+ * handler's own comment for why).
+ */
+function resetRefusalMessage(status, { canForce } = {}) {
+  if (status === 'completed') {
+    return `job already completed — resetting it would re-execute shipped work; archive the PRD instead${canForce ? ', or pass force:true' : ''}`;
+  }
+  if (status === 'skipped') {
+    return canForce
+      ? 'job was skipped — pass force:true to run it again'
+      : 'job was skipped — only scheduler_reset_job with force:true can run it again';
+  }
+  return `job status is "${status}" — it cannot be reset now`;
 }
 
 /**
@@ -11900,18 +11929,21 @@ function registerScheduleHandlers() {
     if (!(await safeSlugPath(slug))) return { ok: false, error: 'invalid slug' };
     const outcome = await mutate((state) => {
       const idx = state.jobs.findIndex((j) => j.slug === slug);
-      if (idx < 0) return 'not-found';
+      if (idx < 0) return { kind: 'not-found' };
       // Guard is in resetJobFields: refuses to reset an already-'completed'
-      // job, which would otherwise re-fire a PRD whose deliverable already
-      // landed (see resetJobFields' doc comment for the incident).
-      return resetJobFields(state.jobs[idx], null, { source: 'ipc:schedule:reset-job' }) ? 'ok' : 'refused';
+      // or already-'skipped' job without force:true (see its doc comment for
+      // why each is refused). This handler never passes force — there is no
+      // force option on the renderer IPC path — so resetRefusalMessage's
+      // canForce:false tells the caller to use scheduler_reset_job instead.
+      const status = state.jobs[idx].status;
+      if (!resetJobFields(state.jobs[idx], null, { source: 'ipc:schedule:reset-job' })) {
+        return { kind: 'refused', status };
+      }
+      return { kind: 'ok' };
     });
-    if (outcome === 'not-found') return { ok: false, error: 'not found' };
-    if (outcome === 'refused') {
-      return {
-        ok: false,
-        error: 'job already completed — resetting it would re-execute shipped work; archive the PRD instead',
-      };
+    if (outcome.kind === 'not-found') return { ok: false, error: 'not found' };
+    if (outcome.kind === 'refused') {
+      return { ok: false, error: resetRefusalMessage(outcome.status, { canForce: false }) };
     }
     await broadcast({ flush: true });
     return { ok: true };
@@ -12893,18 +12925,18 @@ const remote = {
       const idx = state.jobs.findIndex((j) => j.slug === slug && (!opts.cwd || j.cwd === opts.cwd));
       if (idx < 0) return { kind: 'not-found' };
       // Terminal-status guard lives in resetJobFields itself; force:true
-      // threads through to override it.
+      // threads through to override it. Capture the pre-reset status here
+      // (inside the same mutate callback) so a refusal can report exactly
+      // which status blocked it, via resetRefusalMessage below.
+      const status = state.jobs[idx].status;
       if (!resetJobFields(state.jobs[idx], null, { force: opts.force === true, source: 'remote:resetJob' })) {
-        return { kind: 'refused' };
+        return { kind: 'refused', status };
       }
       return { kind: 'ok' };
     });
     if (outcome.kind === 'not-found') return { ok: false, error: 'not found' };
     if (outcome.kind === 'refused') {
-      return {
-        ok: false,
-        error: 'job already completed — resetting it would re-execute shipped work; archive the PRD instead, or pass force:true',
-      };
+      return { ok: false, error: resetRefusalMessage(outcome.status, { canForce: true }) };
     }
     await broadcast({ flush: true });
     return { ok: true, slug, status: 'pending' };
@@ -13005,20 +13037,32 @@ const remote = {
     }
   },
 
-  // Edits a NOT-yet-running PRD's frontmatter and/or body in place, refusing
-  // once a queue row exists for it and that row is anything but 'pending'
-  // (running/completed/failed/needs_review — editing the spec under a live
-  // or already-finished executor would silently rewrite history). Reuses
+  // Edits a PRD's frontmatter and/or body in place. Works when there is no
+  // queue row yet, and when the row's status is 'pending', 'quarantined',
+  // 'needs_review', 'failed', or 'skipped'. None of those have a live
+  // executor reading the file right now, so a rewrite is safe. A parked
+  // (needs_review/failed) or skipped job is exactly the planner-repair case:
+  // fix the spec here, then reset the job with scheduler_reset_job, which
+  // clears the old run fields. 'quarantined' is also editable for a second
+  // reason: it's the ONLY way a quarantined PRD's createdVia stamp gets
+  // written (the adopt action below), so refusing it here would make
+  // quarantine irreversible through the API. Refuses 'running' (a live
+  // executor could read the file mid-edit) and 'completed' (the work already
+  // landed — queue a new PRD instead of rewriting a finished one). Reuses
   // prdFrontmatter.cjs's parsePrdFile/serializePrdFile round-trip pair (PRD
   // 1024) so unrecognized keys (e.g. dependsOn) and untouched recognized
   // keys' original line formatting survive unchanged.
   async updatePrd({ slug, cwd, frontmatter, body }) {
     const job = await this.getJob(slug);
-    // 'quarantined' is also editable: it's the ONLY way a quarantined PRD's
-    // createdVia stamp gets written (the adopt action below), so refusing it
-    // here would make quarantine irreversible through the API.
-    if (job && job.status !== 'pending' && job.status !== 'quarantined') {
-      return { ok: false, error: `job status is "${job.status}" — only a not-yet-running PRD (status "pending"/"quarantined", or no queue row yet) may be edited` };
+    const EDITABLE_JOB_STATUSES = new Set(['pending', 'quarantined', 'needs_review', 'failed', 'skipped']);
+    if (job && !EDITABLE_JOB_STATUSES.has(job.status)) {
+      if (job.status === 'running') {
+        return { ok: false, error: 'job status is "running" — wait for it to end, or stop it with scheduler_cancel_job, then edit it.' };
+      }
+      if (job.status === 'completed') {
+        return { ok: false, error: 'job status is "completed" — its work already landed. Queue a new PRD for more work.' };
+      }
+      return { ok: false, error: `job status is "${job.status}" — this PRD cannot be edited now.` };
     }
 
     // Write-time FK check for a patched dependsOn (PRD 1124), reusing the
@@ -13418,6 +13462,7 @@ module.exports = {
   SCHEDULER_BOOTED_AT,
   SCHEDULER_CODE_SHA,
   resetJobFields,
+  resetRefusalMessage,
   executeJob,
   killOrphanClaudePid,
   prdArchivedSkipResult,

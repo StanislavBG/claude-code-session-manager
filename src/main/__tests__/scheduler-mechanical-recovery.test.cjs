@@ -316,3 +316,48 @@ test('performMechanicalRecovery: a stray checkout lands via ref, stamps landedCo
   const branchList = git(['branch', '--list', branch], projectCwd);
   expect(branchList.trim()).toBe('');
 });
+
+test('performMechanicalRecovery: a stray checkout with carried-WIP-only commits stays needs_review, branch preserved', async () => {
+  const projectCwd = path.join(tmpHome, 'proj-stray-ref-carried');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd, 'proj-stray-ref-carried-slug');
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], projectCwd).trim();
+
+  const slug = 'fix-plan-stray-ref-carried';
+  const branch = jobWorktree.branchNameFor(slug);
+  git(['checkout', '-q', '-b', branch], projectCwd);
+  fs.writeFileSync(path.join(projectCwd, 'carried.txt'), 'carried content\n', 'utf8');
+  git(['add', '-A'], projectCwd);
+  git(['commit', '-q', '-m', 'fix plan work (carried path only)'], projectCwd);
+  git(['checkout', '-q', defaultBranch], projectCwd);
+  git(['checkout', '-q', '-b', 'stray'], projectCwd);
+
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug,
+      status: 'needs_review',
+      cwd: projectCwd,
+      verifierVerdict: 'worktree_integration_failed',
+      investigationDepth: 2,
+      carriedPaths: ['carried.txt'],
+      error: 'worktree branch integration FAILED (merge failed) — branch preserved for manual recovery',
+    },
+  ]);
+
+  const target = selectMechanicalRecoveryTarget({
+    slug, cwd: projectCwd, status: 'needs_review', verifierVerdict: 'worktree_integration_failed', carriedPaths: ['carried.txt'],
+  });
+  expect(target).not.toBeNull();
+  expect(target.carriedPaths).toEqual(['carried.txt']);
+
+  await performMechanicalRecovery({ slug, cwd: projectCwd }, target);
+
+  const jobs = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs;
+  expect(jobs[0].status).toBe('needs_review');
+  expect(jobs[0].mechanicalRecoveryAttempted).toBe(true);
+  expect(jobs[0].error).toMatch(/Mechanical recovery retry failed/);
+  // Carried-WIP-only is a refusal, not a success — the branch is preserved
+  // for manual recovery, same as a real conflict.
+  const branchList2 = git(['branch', '--list', branch], projectCwd);
+  expect(branchList2.trim()).not.toBe('');
+});

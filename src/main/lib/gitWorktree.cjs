@@ -1209,6 +1209,40 @@ async function getCurrentBranch(cwd) {
 }
 
 /**
+ * True when `branch`'s ONLY committed changes (relative to `cwd`'s HEAD)
+ * touch paths in `carriedPaths` (the human's carried-over base-tree WIP from
+ * `createWorktree`) AND every one of those changed paths' committed blob on
+ * `branch` is byte-identical to what's still sitting dirty in `cwd` right
+ * now — i.e. the branch committed exactly the carried WIP and nothing more.
+ * Extracted out of `integrateBranch` (identical logic, same content-verify
+ * safety reasoning documented there) so `jobLanding.cjs`'s checkout-free Epic
+ * path can reuse the same classification before ever attempting a land.
+ * Never throws — any read failure (including no `carriedPaths`) is reported
+ * as `false`, the safer default that falls through to a real integration
+ * attempt rather than silently dropping a commit.
+ */
+async function isCarriedWipOnly({ cwd, branch, carriedPaths }) {
+  if (!Array.isArray(carriedPaths) || !carriedPaths.length) return false;
+  try {
+    let mergeBase = '';
+    try {
+      mergeBase = (await execGit(['merge-base', 'HEAD', branch], { cwd, timeout: 10_000 })).trim();
+    } catch {
+      mergeBase = '';
+    }
+    const changedOut = await execGit(['diff', `${mergeBase || 'HEAD'}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
+    const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (changed.length && changed.every((p) => carriedPaths.includes(p))) {
+      const allIdentical = await pathsIdenticalToBranch({ cwd, branch, paths: changed });
+      if (allIdentical) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Integrate a branch back into `cwd`'s current HEAD — fast-forward when
  * possible, a real merge commit when the main tree advanced underneath (a
  * sibling job/Epic merged first) since the worktree was created. Returns
@@ -1252,46 +1286,20 @@ async function getCurrentBranch(cwd) {
  * `expectedBranch`'s ref instead of refusing (still never touches any
  * checkout) — only `performMechanicalRecovery` opts into this; every other
  * caller keeps today's refusal.
- */
-/**
- * True when `branch`'s ONLY committed changes (relative to `cwd`'s HEAD)
- * touch paths in `carriedPaths` (the human's carried-over base-tree WIP from
- * `createWorktree`) AND every one of those changed paths' committed blob on
- * `branch` is byte-identical to what's still sitting dirty in `cwd` right
- * now — i.e. the branch committed exactly the carried WIP and nothing more.
- * Extracted out of `integrateBranch` (identical logic, same content-verify
- * safety reasoning documented there) so `jobLanding.cjs`'s checkout-free Epic
- * path can reuse the same classification before ever attempting a land.
- * Never throws — any read failure (including no `carriedPaths`) is reported
- * as `false`, the safer default that falls through to a real integration
- * attempt rather than silently dropping a commit.
  *
- * `baseRef` (default `HEAD`) is what `branch` is compared against. Default
- * keeps today's behavior. Pass the expected base branch instead when `cwd`'s
- * actual HEAD is on something else — e.g. integrateBranch's stray-checkout
- * ref-landing path, where HEAD is NOT the ref being landed onto.
+ * The ref-landing path refuses the same way — reports, never lands — in
+ * three more cases: `cwd`'s HEAD is detached (a plain detached checkout and
+ * a mid-rebase one both read back as `null` from `getCurrentBranch`, and the
+ * two can't be told apart, so both are refused); `expectedBranch` is being
+ * rebased in ANY worktree of this repo, not only checked out in one (the
+ * rebase scan inside `checkTargetRefNotCheckedOut`) — a later `git rebase
+ * --abort`/`--continue` there would otherwise undo or outrun the ref move
+ * this path just made; or `branch`'s only committed changes touch
+ * `carriedPaths` — judged by path membership alone here, unlike the
+ * in-checkout path's `isCarriedWipOnly`, because `cwd` is on some other
+ * branch and has no working tree this path could trust to content-verify
+ * against.
  */
-async function isCarriedWipOnly({ cwd, branch, carriedPaths, baseRef = 'HEAD' }) {
-  if (!Array.isArray(carriedPaths) || !carriedPaths.length) return false;
-  try {
-    let mergeBase = '';
-    try {
-      mergeBase = (await execGit(['merge-base', baseRef, branch], { cwd, timeout: 10_000 })).trim();
-    } catch {
-      mergeBase = '';
-    }
-    const changedOut = await execGit(['diff', `${mergeBase || baseRef}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
-    const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
-    if (changed.length && changed.every((p) => carriedPaths.includes(p))) {
-      const allIdentical = await pathsIdenticalToBranch({ cwd, branch, paths: changed });
-      if (allIdentical) return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
-
 async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranch, allowRefLanding = false }) {
   if (!cwd || !branch) return { ok: false, reason: 'missing cwd/branch' };
 
@@ -1319,12 +1327,19 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     if (!allowRefLanding || process.env.SM_REF_LANDING_DISABLE === '1') {
       return strayCheckoutFailure;
     }
+    // A detached HEAD is indistinguishable from a mid-rebase one — both read
+    // back as `null` from getCurrentBranch — and a ref move under a paused
+    // rebase gets undone the moment that rebase ends (`--abort`) or outrun
+    // (`--continue`). We cannot tell the two apart, so neither is landed.
+    if (currentBranch === null) {
+      return strayCheckoutFailure;
+    }
     // The checkout is busy on some OTHER branch (a human, or a sibling job's
     // own worktree-free promotion) — land straight onto `expectedBranch`'s
     // ref instead of refusing outright. Never touches `cwd`'s working tree,
     // index, or HEAD: `integrateOntoRef` is a pure object-database CAS. Only
     // `performMechanicalRecovery` opts into this today (`allowRefLanding:
-    // true`) — the first-pass integrate (scheduler.cjs, around line 6949)
+    // true`) — the first-pass integrate (scheduler.cjs's `finalizeJobWorktree`)
     // must keep refusing here, because it finds the landed commit by
     // watching HEAD move, which a ref-only land never does.
     let refBranchHead;
@@ -1342,14 +1357,35 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
     if (refMergeBase && refMergeBase === refBranchHead) {
       return { ok: true, integrated: false, reason: 'branch has no new commits' };
     }
-    if (await isCarriedWipOnly({ cwd, branch, carriedPaths, baseRef: expectedBranch })) {
-      return { ok: true, integrated: false, reason: 'carried-wip-only' };
+    // Carried-WIP shortcut, path membership only: `cwd` is on `actualBranch`,
+    // not `expectedBranch`, so there is no trustworthy working tree here to
+    // content-verify against (isCarriedWipOnly's approach, used by the
+    // in-checkout path below). Refusing instead of reporting a false
+    // "carried-wip-only" matters because the caller (performMechanicalRecovery)
+    // treats that reason as safe to delete the job branch — a wrong guess
+    // would discard real work. A branch that changed carried paths AND other
+    // paths still lands below, same as the in-checkout path.
+    if (Array.isArray(carriedPaths) && carriedPaths.length) {
+      try {
+        const changedOut = await execGit(['diff', `${refMergeBase || expectedBranch}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
+        const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
+        if (changed.length && changed.every((p) => carriedPaths.includes(p))) {
+          return strayCheckoutFailure;
+        }
+      } catch {
+        // Diff failed — fall through to the normal ref landing below, same
+        // as every other "never throws" rule in this function.
+      }
     }
     const refResult = await integrateOntoRef({
       cwd, targetRef: `refs/heads/${expectedBranch}`, branch, message: mergeMessage,
     });
     if (refResult.ok) {
-      return { ok: true, integrated: true, fastForward: false, viaRef: true, sha: refResult.sha || refBranchHead };
+      // Spread refResult first so a fast-forward keeps `fastForward: true`
+      // and a merge commit keeps `mergeCommit: true` — this used to
+      // hard-code `fastForward: false` on every success, misreporting a
+      // plain fast-forward as a merge.
+      return { ...refResult, viaRef: true, sha: refResult.sha || refBranchHead };
     }
     if (refResult.failureKind === 'target_checked_out') {
       return strayCheckoutFailure;
@@ -1360,7 +1396,6 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
         reason: `merge failed (likely a real content conflict): ${refResult.reason}`,
         failureKind: 'content_conflict',
         conflictedPaths: refResult.conflictedPaths || [],
-        baseHeadSha: await tryResolveCommit(cwd, expectedBranch),
       };
     }
     return strayCheckoutFailure;
@@ -1478,10 +1513,14 @@ async function cleanupWorktree({ kind, cwd, dir, branch, keepBranch }) {
     try { await execGit(['branch', '-D', branch], { cwd, timeout: 10_000 }); } catch { /* already gone */ }
   }
   try { await execGit(['worktree', 'prune'], { cwd, timeout: 10_000 }); } catch { /* best effort */ }
-  // A checkout the expiry pass already released must not be counted down twice.
+  // A checkout the expiry pass already released must not be counted down
+  // twice, and neither must a dir-less call (e.g. mechanical recovery's
+  // branch-only cleanup after the worktree dir was already freed by the
+  // job's own earlier finalize) — no `dir` means this call never held a
+  // counted slot to begin with.
   const alreadyExpired = dir ? expiredCheckoutDirs.delete(dir) : false;
   if (dir) registeredCheckouts.delete(dir);
-  if (!alreadyExpired) activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
+  if (dir && !alreadyExpired) activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
 }
 
 /**
@@ -2023,6 +2062,28 @@ function normalizeTargetRef(targetRef) {
 }
 
 /**
+ * Reads `<adminDir>/rebase-merge/head-name` or `.../rebase-apply/head-name`
+ * (git uses exactly one of the two backends per paused rebase) and returns
+ * its trimmed content — the `refs/heads/...` ref that rebase will update
+ * when it finishes — or `null` when neither file exists (no rebase paused in
+ * this admin dir). ENOENT/ENOTDIR on a read means "not that backend," not a
+ * failure; any other error (permissions, I/O) propagates so the caller can
+ * fail closed instead of silently treating an unreadable admin dir as
+ * rebase-free.
+ */
+async function pausedRebaseHeadRef(adminDir) {
+  for (const rel of ['rebase-merge/head-name', 'rebase-apply/head-name']) {
+    try {
+      return (await fsp.readFile(path.join(adminDir, rel), 'utf8')).trim();
+    } catch (e) {
+      if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) continue;
+      throw e;
+    }
+  }
+  return null;
+}
+
+/**
  * Fetches `git worktree list --porcelain` fresh and refuses when
  * `targetRef` (already normalized to `refs/heads/...`) is checked out in any
  * worktree — see integrateOntoRef's header. Split out so each retry
@@ -2030,6 +2091,17 @@ function normalizeTargetRef(targetRef) {
  * process could check `targetRef` out into a worktree in between two of our
  * own retry attempts, and a guard that only ran once before the retry loop
  * would miss that.
+ *
+ * Also refuses when `targetRef` is mid-rebase in any worktree of this repo,
+ * checked out there or not: a paused rebase detaches HEAD, so `git worktree
+ * list`'s `branch` line goes missing for the SAME worktree this guard most
+ * needs to catch — the check above would otherwise pass and the ref would
+ * move, only for `git rebase --abort` to reset it back (losing the landed
+ * commit) or `--continue` to leave it stale. Reads each worktree's own admin
+ * dir directly instead of running git inside it, because a worktree's
+ * checkout directory can be gone while its admin dir under the shared
+ * `.git` still holds the paused rebase's state. Fails closed: any read
+ * error here is also a refusal, never a silent pass.
  */
 async function checkTargetRefNotCheckedOut({ cwd, targetRef }) {
   let worktreeListOut;
@@ -2048,6 +2120,39 @@ async function checkTargetRefNotCheckedOut({ cwd, targetRef }) {
       reason: `${targetRef} is checked out in a worktree — updating it directly would desync that working tree`,
     };
   }
+
+  let gitCommonDirOut;
+  try {
+    gitCommonDirOut = await execGit(['rev-parse', '--git-common-dir'], { cwd, timeout: 10_000 });
+  } catch (e) {
+    return { ok: false, reason: `git rev-parse --git-common-dir failed: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+  const sharedGitDir = path.resolve(cwd, gitCommonDirOut.trim());
+  const worktreesDir = path.join(sharedGitDir, 'worktrees');
+  const adminDirs = [sharedGitDir];
+  try {
+    for (const entry of await fsp.readdir(worktreesDir)) adminDirs.push(path.join(worktreesDir, entry));
+  } catch (e) {
+    if (!(e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'))) {
+      return { ok: false, reason: `reading ${worktreesDir} failed: ${(e && e.message) || e}` };
+    }
+  }
+  for (const adminDir of adminDirs) {
+    let pausedRef;
+    try {
+      pausedRef = await pausedRebaseHeadRef(adminDir);
+    } catch (e) {
+      return { ok: false, reason: `reading rebase state under ${adminDir} failed: ${(e && e.message) || e}` };
+    }
+    if (pausedRef && pausedRef === targetRef) {
+      return {
+        ok: false,
+        failureKind: 'target_checked_out',
+        reason: `${targetRef} is being rebased in a worktree — moving it now would be undone when that rebase ends`,
+      };
+    }
+  }
+
   return { ok: true };
 }
 

@@ -87,7 +87,7 @@ const { createBroadcastCoalescer } = require('./lib/broadcastCoalescer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
-const { appendResponseEventIfKnown } = require('./promptSessionEvents.cjs');
+const { appendResponseEventIfKnown, appendResponseEventWithReason } = require('./promptSessionEvents.cjs');
 const { buildReviewNotice, selectDueReviewNotices, formatReviewNotice, holdMsFromEnv } = require('./lib/reviewNotice.cjs');
 const { maybeEnqueueValidationPrompt } = require('./lib/epicValidationHook.cjs');
 const { parseValidationSentinels } = require('./lib/validationSentinels.cjs');
@@ -4153,6 +4153,14 @@ function resetJobFields(job, errorMsg, opts = {}) {
   delete job.blockedByForeignWip;
   delete job.foreignWipBlockedPaths;
   delete job.foreignWipBlockCount;
+  // A reset starts a new episode: whatever this row's last needs_review park
+  // was about is over, so a later park must start its own hold clock from
+  // scratch rather than inheriting a stale firstParkedAt from days earlier
+  // (reviewNotice.cjs's own doc explains why that matters). The rung-6
+  // ladder requeue (applyNeedsReviewAutoResolve) does NOT call
+  // resetJobFields — it transitions the row directly — so that requeue
+  // correctly keeps the same clock, because it is still the same episode.
+  delete job.reviewNotice;
   // Deliberately NOT deleting job.landedCommit: it must outlive a reset so a
   // re-fired run of this same slug can pass it to verifyRun as
   // priorLandedCommit (pass_no_commit_prior_run_verified exemption).
@@ -4683,7 +4691,10 @@ async function notifyOriginatingTab(job, {
  * flushDueReviewNotices send one grouped message once the self-heal ladder
  * gives up or the hold time passes. This function now only runs under the
  * SM_REVIEW_NOTICE_IMMEDIATE=1 kill switch (same park-time call site, for
- * local debugging) — it is otherwise dead code outside its own tests.
+ * local debugging) — it is otherwise dead code outside its own tests. That
+ * call site stamps `reviewNotice.sentAt` itself afterward, and only when
+ * this returns true AND the row's live notice still matches the one it just
+ * built — never on the strength of this function's return value alone.
  */
 async function notifyNeedsReview(job, report, {
   parsePrdRaw = prdParser.parsePrdRaw,
@@ -4724,24 +4735,42 @@ let reviewNoticeFlushPending = null;
 /**
  * flushDueReviewNotices() → Promise<void>
  *
- * The only path that still calls appendResponseEventIfKnown for a
- * needs_review park (outside the SM_REVIEW_NOTICE_IMMEDIATE=1 kill switch
- * above notifyNeedsReview). Reads the live queue, asks reviewNotice.cjs's
- * selectDueReviewNotices which (cwd, Epic, cause) groups have gone quiet —
- * the ladder gave up (needsReviewAutoResolvedSkip) or the hold time passed
- * (holdMsFromEnv) — and sends each group ONE message via formatReviewNotice.
+ * The only path that still sends a needs_review notice (outside the
+ * SM_REVIEW_NOTICE_IMMEDIATE=1 kill switch above notifyNeedsReview). Reads
+ * the live queue, asks reviewNotice.cjs's selectDueReviewNotices which (cwd,
+ * Epic, cause) groups have gone quiet — the ladder gave up
+ * (needsReviewAutoResolvedSkip) or the hold time passed (holdMsFromEnv) —
+ * and sends each group ONE message via formatReviewNotice, passing the
+ * tick's own full job list so the message can name any `pending` row the
+ * group still blocks.
  *
- * Every row in a group is marked sent (reviewNotice.sentAt) even when the
- * send itself returned false: a deleted Epic must not cause a resend on
- * every tick, and the RCA report already on disk is still the full record.
+ * The default sender is appendResponseEventWithReason, which reports WHY a
+ * send didn't land instead of collapsing every case to `false`. An injected
+ * sender (tests) may still return a plain boolean — `true` is treated as ok,
+ * `false` as a refusal with reason `'refused'` — and a sender that throws is
+ * treated as reason `'error'`.
+ *
+ * What each outcome does to reviewNotice.sentAt, per row still at its
+ * snapshotted (firstParkedAt, cause) and still needs_review/skipped live:
+ *   - ok, or a refusal with any reason OTHER than 'error': stamp sentAt now.
+ *     A refusal is logged (today it was silent) but is otherwise treated as
+ *     permanent — a deleted Epic or a completed session will never un-refuse
+ *     itself, so resending every tick forever would help no one.
+ *   - 'error' (an exception, e.g. a disk hiccup): do NOT stamp. Increment
+ *     reviewNotice.sendErrors instead, so the next pass retries. Once that
+ *     reaches 3, stamp sentAt anyway, set sendFailed: true, and log it —
+ *     retry a transient failure, but never loop on it forever.
+ * A group with no resolved Epic/cwd never calls the sender at all — same
+ * "report only" shape as before — and every row in it is stamped
+ * unconditionally, same as a successful send.
  *
  * Single-flight via reviewNoticeFlushPending: a call while one is already in
  * flight returns the SAME promise instead of starting a second pass over the
- * same rows. Never throws — a bad read or a disk error just leaves the
- * notice for the next pass to retry.
+ * same rows. Never throws — a bad read just leaves the notice for the next
+ * pass to retry.
  */
 async function flushDueReviewNotices({
-  appendResponseEvent = appendResponseEventIfKnown,
+  appendResponseEvent = appendResponseEventWithReason,
   now = Date.now(),
 } = {}) {
   if (reviewNoticeFlushPending) return reviewNoticeFlushPending;
@@ -4751,23 +4780,67 @@ async function flushDueReviewNotices({
       if (state.unreadable) return;
       const groups = selectDueReviewNotices(state.jobs || [], { now, holdMs: holdMsFromEnv() });
       for (const group of groups) {
+        const slugs = new Set(group.jobs.map((j) => j.slug));
+        // Snapshot each row's own (firstParkedAt, cause) as it was when THIS
+        // message was built — the mutate below only touches a row whose live
+        // notice still matches its own snapshot, so a row that re-parked
+        // with a new episode between this read and that mutate is left
+        // alone rather than wrongly marked sent for a notice that never
+        // described it.
+        const snapshotBySlug = new Map(group.jobs.map((j) => [
+          j.slug,
+          { firstParkedAt: j.reviewNotice?.firstParkedAt ?? null, cause: j.reviewNotice?.cause ?? null },
+        ]));
+        const sentAt = new Date(now).toISOString();
+        const stampIfLiveMatches = (s, apply) => {
+          for (const j of s.jobs) {
+            if (!slugs.has(j.slug) || !j.reviewNotice || j.reviewNotice.sentAt) continue;
+            if (j.status !== 'needs_review' && j.status !== 'skipped') continue;
+            const snap = snapshotBySlug.get(j.slug);
+            if (j.reviewNotice.firstParkedAt !== snap.firstParkedAt || j.reviewNotice.cause !== snap.cause) continue;
+            apply(j);
+          }
+        };
+
         if (!group.epicId || !group.cwd) {
           console.log(`[scheduler] flushDueReviewNotices: no authoring Epic for ${group.jobs.map((j) => j.slug).join(', ')}, report only`);
-        } else {
-          await appendResponseEvent(group.cwd, group.epicId, formatReviewNotice(group), {
+          await mutate((s) => {
+            stampIfLiveMatches(s, (j) => { j.reviewNotice.sentAt = sentAt; });
+          }).catch(() => {});
+          continue;
+        }
+
+        let outcome;
+        try {
+          const result = await appendResponseEvent(group.cwd, group.epicId, formatReviewNotice(group, { jobs: state.jobs }), {
             prdSlug: group.jobs[0].slug,
             outcome: 'needs_review',
             validation: 'unvalidated',
-          }).catch((e) => {
-            console.error('[scheduler] flushDueReviewNotices appendResponseEvent error', group.epicId, e);
           });
+          outcome = typeof result === 'boolean' ? { ok: result, reason: result ? undefined : 'refused' } : result;
+        } catch (e) {
+          console.error('[scheduler] flushDueReviewNotices appendResponseEvent error', group.epicId, e);
+          outcome = { ok: false, reason: 'error' };
         }
-        const slugs = new Set(group.jobs.map((j) => j.slug));
-        const sentAt = new Date(now).toISOString();
+
+        if (!outcome.ok && outcome.reason !== 'error') {
+          console.warn(`[scheduler] flushDueReviewNotices: send refused (${outcome.reason}) for ${group.jobs.map((j) => j.slug).join(', ')}`);
+        }
+
         await mutate((s) => {
-          for (const j of s.jobs) {
-            if (slugs.has(j.slug) && j.reviewNotice && !j.reviewNotice.sentAt) j.reviewNotice.sentAt = sentAt;
-          }
+          stampIfLiveMatches(s, (j) => {
+            if (outcome.ok || outcome.reason !== 'error') {
+              j.reviewNotice.sentAt = sentAt;
+              return;
+            }
+            const sendErrors = (j.reviewNotice.sendErrors ?? 0) + 1;
+            j.reviewNotice.sendErrors = sendErrors;
+            if (sendErrors >= 3) {
+              j.reviewNotice.sentAt = sentAt;
+              j.reviewNotice.sendFailed = true;
+              console.error(`[scheduler] flushDueReviewNotices: giving up on ${j.slug} after ${sendErrors} send errors`);
+            }
+          });
         }).catch(() => {});
       }
     } catch (e) {
@@ -8428,23 +8501,40 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           // classification (e.g. selectAutoFixTargets excluding 'archive')
           // and flushDueReviewNotices routes on the notice, neither re-parsing
           // the RCA markdown nor losing the notice to a lost race.
+          let builtNotice = null;
           await mutate((s) => {
             const j = s.jobs.find((x) => x.slug === needsReviewRcaSnapshot.slug);
             applyRcaClassification(j, report);
-            if (j) {
+            // Write the notice only while the row is still the SAME
+            // needs_review episode this RCA was filed for — a row a human
+            // already reset, or that moved on before this async write
+            // lands, must not get a stale notice grafted back onto it.
+            if (j && j.status === 'needs_review') {
               j.reviewNotice = buildReviewNotice({ job: j, report, epicId, now: new Date().toISOString(), prior: j.reviewNotice });
+              builtNotice = j.reviewNotice;
             }
-          }).catch(() => {});
+          }).catch((e) => {
+            console.error('[scheduler] writeRcaReport reviewNotice mutate error', needsReviewRcaSnapshot.slug, e);
+          });
           // Quiet by default (this PRD): the notice recorded above waits for
           // flushDueReviewNotices to send it, grouped, once the ladder gives
           // up or the hold time passes. SM_REVIEW_NOTICE_IMMEDIATE=1 restores
           // the old immediate-notify behavior, for local debugging.
           if (process.env.SM_REVIEW_NOTICE_IMMEDIATE === '1') {
-            await notifyNeedsReview(needsReviewRcaSnapshot, report);
-            await mutate((s) => {
-              const j = s.jobs.find((x) => x.slug === needsReviewRcaSnapshot.slug);
-              if (j && j.reviewNotice) j.reviewNotice.sentAt = new Date().toISOString();
-            }).catch(() => {});
+            const sent = await notifyNeedsReview(needsReviewRcaSnapshot, report);
+            if (sent && builtNotice) {
+              await mutate((s) => {
+                const j = s.jobs.find((x) => x.slug === needsReviewRcaSnapshot.slug);
+                // Stamp only if the live notice is still the exact one just
+                // sent — a re-park between the send and this mutate must not
+                // be marked sent for a notice that never went out.
+                if (j && j.reviewNotice && j.reviewNotice.firstParkedAt === builtNotice.firstParkedAt && j.reviewNotice.cause === builtNotice.cause) {
+                  j.reviewNotice.sentAt = new Date().toISOString();
+                }
+              }).catch((e) => {
+                console.error('[scheduler] writeRcaReport immediate-stamp mutate error', needsReviewRcaSnapshot.slug, e);
+              });
+            }
           }
         })
         .catch((e) => {
@@ -12383,8 +12473,9 @@ function rescheduleIntervalTick() {
         // catches internally).
         flushDueReviewNotices().catch(() => {});
       });
-  } else if (s.jobs.some((j) => j.reviewNotice && !j.reviewNotice.sentAt)) {
-    // Ladder didn't fire this tick (row ineligible for auto-resolve, or SM_NEEDS_REVIEW_AUTORESOLVE_DISABLE=1) — flush any notice whose hold already expired, reusing this tick's own snapshot for the guard so a tick with nothing unsent reads nothing extra.
+  } else if (s.jobs.some((j) => j.reviewNotice && !j.reviewNotice.sentAt
+    && (j.status === 'needs_review' || (j.status === 'skipped' && j.needsReviewAutoResolvedSkip)))) {
+    // Ladder didn't fire this tick (row ineligible for auto-resolve, or SM_NEEDS_REVIEW_AUTORESOLVE_DISABLE=1) — flush any notice whose hold already expired, reusing this tick's own snapshot for the guard so a tick with nothing unsent reads nothing extra. Status-checked so a row that healed (e.g. a human reset, or a later run that completed) with a leftover unsent notice from a past episode no longer costs a queue read every tick — resetJobFields already deletes the notice outright, but this guard stays defensive in case a notice is ever left behind some other way.
     flushDueReviewNotices().catch(() => {});
   }
 }

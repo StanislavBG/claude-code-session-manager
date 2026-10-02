@@ -183,14 +183,22 @@ A finished step's row leaves `queue.json` (`archiveCompletedPrd` + `reconcile()`
 **The human-facing notice is quiet and grouped, not immediate.** A park into
 `needs_review` records a notice on the job row (`reviewNotice.cjs`'s
 `buildReviewNotice`) and sends nothing yet — the ladder above almost always
-heals it first. The authoring Epic gets exactly ONE message per (project,
+heals it first. A human reset (`resetJobFields`) deletes that notice outright,
+so a re-park afterward starts a fresh hold clock; a rung-6 ladder requeue does
+not reset it, so the clock survives one more lap — it is still the same
+unresolved episode. The authoring Epic gets exactly ONE message per (project,
 Epic, cause) group, sent only when the ladder gives up on a row (an
 auto-resolve skip, rung 6) or the row has sat `needs_review` with no
-resolution for `SM_REVIEW_NOTICE_HOLD_MINUTES` (default 240 minutes).
-`scheduler.cjs`'s `flushDueReviewNotices` is the sole sender; it groups every
-row sharing the same cause into one plain-language message rather than one
-message per PRD. Kill switch `SM_REVIEW_NOTICE_IMMEDIATE=1` restores the old
-immediate, ungrouped notify-at-park-time behavior, for local debugging.
+resolution for `SM_REVIEW_NOTICE_HOLD_MINUTES` (default 240 minutes) — a
+not-yet-due row only joins that group once it has sat for at least 30 minutes
+itself (`SWEEP_MIN_AGE_MINUTES`), so the ladder's early rungs get a fair
+chance first. `scheduler.cjs`'s `flushDueReviewNotices` is the sole sender; it
+groups every row sharing the same cause into one plain-language message,
+names any pending PRD the group still blocks via `dependsOn` instead of
+always claiming nothing is waiting, and retries a send that errors up to 3
+times, then stamps it sent anyway so a dead Epic cannot loop forever. Kill
+switch `SM_REVIEW_NOTICE_IMMEDIATE=1` restores the old immediate, ungrouped
+notify-at-park-time behavior, for local debugging.
 
 **Automatic, no operator action required:** the starvation watchdog forcing a tick (§3); rungs
 1, 2, 4, 5, and the bounded part of rung 6 of the needs_review ladder (§4); the reap/orphan

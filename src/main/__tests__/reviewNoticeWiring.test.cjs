@@ -100,6 +100,18 @@ function parkedJob(overrides = {}) {
   };
 }
 
+// --- resetJobFields: fresh clock per episode ---
+
+test('resetJobFields deletes reviewNotice, so a later park starts a fresh hold clock', () => {
+  const job = parkedJob();
+  expect(job.reviewNotice).toBeTruthy();
+
+  const result = scheduler.resetJobFields(job, 'human reset');
+
+  expect(result).toBe(true);
+  expect(job.reviewNotice).toBeUndefined();
+});
+
 // --- flushDueReviewNotices: quiet at park time ---
 
 test('a freshly parked row, still inside the hold window, is not sent', async () => {
@@ -228,6 +240,68 @@ test('two overlapping calls share one pass over the queue — only one send happ
   expect(appendResponseEvent).toHaveBeenCalledTimes(1);
 });
 
+// --- send outcomes: retry a transient error, stamp on any other refusal ---
+
+test('a send that throws leaves sentAt unset and increments sendErrors', async () => {
+  const job = parkedJob({ status: 'skipped', needsReviewAutoResolvedSkip: true });
+  mockQueueStore([job]);
+  const appendResponseEvent = vi.fn().mockRejectedValue(new Error('boom'));
+
+  await scheduler.flushDueReviewNotices({ appendResponseEvent, now: NOW });
+
+  expect(job.reviewNotice.sentAt).toBeNull();
+  expect(job.reviewNotice.sendErrors).toBe(1);
+  expect(job.reviewNotice.sendFailed).toBeUndefined();
+});
+
+test('after 3 send errors, sentAt is stamped anyway and sendFailed is set', async () => {
+  const job = parkedJob({ status: 'skipped', needsReviewAutoResolvedSkip: true });
+  mockQueueStore([job]);
+  const appendResponseEvent = vi.fn().mockRejectedValue(new Error('boom'));
+
+  await scheduler.flushDueReviewNotices({ appendResponseEvent, now: NOW });
+  expect(job.reviewNotice.sendErrors).toBe(1);
+  expect(job.reviewNotice.sentAt).toBeNull();
+
+  await scheduler.flushDueReviewNotices({ appendResponseEvent, now: NOW });
+  expect(job.reviewNotice.sendErrors).toBe(2);
+  expect(job.reviewNotice.sentAt).toBeNull();
+
+  await scheduler.flushDueReviewNotices({ appendResponseEvent, now: NOW });
+  expect(job.reviewNotice.sendErrors).toBe(3);
+  expect(job.reviewNotice.sentAt).not.toBeNull();
+  expect(job.reviewNotice.sendFailed).toBe(true);
+});
+
+test('a refusal other than error (e.g. not-active) still stamps sentAt, with no retry', async () => {
+  const job = parkedJob({ status: 'skipped', needsReviewAutoResolvedSkip: true });
+  mockQueueStore([job]);
+  const appendResponseEvent = vi.fn().mockResolvedValue({ ok: false, reason: 'not-active' });
+
+  await scheduler.flushDueReviewNotices({ appendResponseEvent, now: NOW });
+
+  expect(job.reviewNotice.sentAt).not.toBeNull();
+  expect(job.reviewNotice.sendErrors).toBeUndefined();
+});
+
+test('a row whose notice changed (new firstParkedAt) between read and stamp is not stamped', async () => {
+  const job = parkedJob({ status: 'skipped', needsReviewAutoResolvedSkip: true });
+  mockQueueStore([job]);
+  const originalFirstParkedAt = job.reviewNotice.firstParkedAt;
+  // Mutate the SAME job object the mutate() below will re-read, from inside
+  // the send itself — simulating a concurrent re-park (a new episode, with
+  // its own fresh clock) landing between this group's read and the stamp.
+  const appendResponseEvent = vi.fn().mockImplementation(async () => {
+    job.reviewNotice = { ...job.reviewNotice, firstParkedAt: new Date(NOW + 1).toISOString(), sentAt: null };
+    return true;
+  });
+
+  await scheduler.flushDueReviewNotices({ appendResponseEvent, now: NOW });
+
+  expect(job.reviewNotice.firstParkedAt).not.toBe(originalFirstParkedAt);
+  expect(job.reviewNotice.sentAt).toBeNull();
+});
+
 // --- rescheduleIntervalTick: the hold-expiry gap ---
 //
 // Before this fix, flushDueReviewNotices only ran from inside the ladder's
@@ -255,16 +329,19 @@ test('rescheduleIntervalTick flushes a notice whose hold expired when the ladder
 
   try {
     scheduler.rescheduleIntervalTick();
-    // The else-branch calls flushDueReviewNotices() with no override, same as
-    // the ladder's own .finally() call site — single-flight means awaiting it
-    // here joins that SAME in-flight pass rather than starting a second one.
-    await scheduler.flushDueReviewNotices();
+    // rescheduleIntervalTick's else-branch fires flushDueReviewNotices() as
+    // fire-and-forget — it is never awaited here. Wait for ITS effect
+    // instead of calling flushDueReviewNotices a second time by hand: a
+    // manual call would make this test pass even if the tick's own flush
+    // call were deleted entirely, which is exactly the bug this test exists
+    // to catch.
+    await vi.waitFor(() => {
+      expect(readMerged).toHaveBeenCalled();
+      expect(job.reviewNotice.sentAt).not.toBeNull();
+    });
   } finally {
     delete process.env.SM_REVERIFY_PERIODIC_DISABLE;
   }
-
-  expect(readMerged).toHaveBeenCalled();
-  expect(job.reviewNotice.sentAt).not.toBeNull();
 });
 
 test('rescheduleIntervalTick does not flush when no row carries an unsent notice', () => {

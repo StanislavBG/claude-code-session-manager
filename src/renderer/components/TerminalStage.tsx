@@ -57,14 +57,3 @@ export function TerminalStage({ visible = true }: TerminalStageProps) {
     </div>
   )
 }
-
-export function NoSession() {
-  return (
-    <div className="h-full flex items-center justify-center text-fg-faint text-xs">
-      <div className="text-center">
-        <div className="mb-2">no active session</div>
-        <div>click <span className="text-fg-dim">+ new session</span> in the sidebar to start one</div>
-      </div>
-    </div>
-  )
-}

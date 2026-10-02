@@ -10,12 +10,10 @@ import {
   CATALOG_SKILLS,
   CATALOG_PLUGINS,
   CATALOG_HOOKS,
-  CATALOG_AGENTS,
   CATALOG_PERMS_PRESETS,
   CATALOG_PROMPT_PRESETS,
   type CatalogMcp,
   type CatalogHook,
-  type CatalogAgent,
   type CatalogPermissionPreset,
   type CatalogPromptPreset,
   type PromptPresetCategory,
@@ -507,87 +505,6 @@ export function HooksLibrary() {
                 ) : (
                   <button disabled={busy === h.id} onClick={() => install(h)} className="px-2 py-0.5 text-xs border border-accent rounded text-accent hover:bg-accent hover:text-bg">{busy === h.id ? '…' : 'install'}</button>
                 )}
-              </div>
-            </div>
-          )
-        })}
-        {items.length === 0 && <EmptyState title="no matches" />}
-      </div>
-    </div>
-  )
-}
-
-/* ----------------------------------------------------------- Agents library */
-
-export function AgentsLibrary() {
-  const home = useHomeDir()
-  const [installed, setInstalled] = useState<Set<string>>(new Set())
-  const [busy, setBusy] = useState<string | null>(null)
-  const [flash, setFlash] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [query, setQuery] = useState('')
-
-  const refresh = async () => {
-    if (!home) return
-    const r = await window.api.config.listDir(`${home}/.claude/agents`, { filesOnly: true })
-    const names = new Set<string>()
-    for (const e of r.entries) {
-      if (e.name.endsWith('.md')) names.add(e.name.replace(/\.md$/, ''))
-    }
-    setInstalled(names)
-  }
-
-  useEffect(() => {
-    refresh()
-  }, [home])
-
-  const items = useMemo(
-    () => CATALOG_AGENTS.filter((a) => matches(query, a.id, a.name, a.description)),
-    [query]
-  )
-
-  const install = async (a: CatalogAgent) => {
-    if (!home) return
-    setBusy(a.id)
-    setError(null)
-    const path = `${home}/.claude/agents/${a.id}.md`
-    const write = await window.api.config.writeText(path, a.content)
-    setBusy(null)
-    if (!write.ok) {
-      setError(write.error ?? 'write failed')
-      return
-    }
-    setFlash(`installed ${a.id}`)
-    setTimeout(() => setFlash(null), 2500)
-    refresh()
-  }
-
-  if (!home) return <EmptyState title="loading…" />
-
-  return (
-    <div className="h-full flex flex-col">
-      <LibraryToolbar query={query} onQueryChange={setQuery} count={items.length} total={CATALOG_AGENTS.length} />
-      {(flash || error) && (
-        <div className={`px-4 py-2 text-xs border-b border-line ${error ? 'text-red-400 bg-red-950/20' : 'text-accent bg-bg-elev'}`}>
-          {error ?? flash}
-        </div>
-      )}
-      <div className="flex-1 overflow-auto divide-y divide-line">
-        {items.map((a) => {
-          const on = installed.has(a.id)
-          return (
-            <div key={a.id} className="px-4 py-3 flex items-start gap-3 hover:bg-bg-elev/50">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-fg text-xs font-medium">{a.name}</span>
-                  {a.tools && <Badge tone="dim">{a.tools.split(',').length} tools</Badge>}
-                  {on && <Badge tone="accent">installed</Badge>}
-                </div>
-                <div className="text-fg-dim text-xs mt-0.5">{a.description}</div>
-                <div className="text-fg-faint text-[10px] font-mono mt-1 truncate">~/.claude/agents/{a.id}.md</div>
-              </div>
-              <div className="flex gap-1 shrink-0">
-                <button disabled={busy === a.id} onClick={() => install(a)} className="px-2 py-0.5 text-xs border border-accent rounded text-accent hover:bg-accent hover:text-bg">{busy === a.id ? '…' : on ? 'overwrite' : 'install'}</button>
               </div>
             </div>
           )

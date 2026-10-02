@@ -60,6 +60,14 @@ function setNativeValue(el: HTMLInputElement | HTMLTextAreaElement, value: strin
   el.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
+function pickAgent(el: HTMLElement, name: string) {
+  const select = el.querySelector('[data-testid="new-epic-agent-select"]') as HTMLSelectElement
+  act(() => {
+    select.value = name
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+}
+
 beforeEach(() => {
   useToast.setState({ toasts: [], history: [] } as never)
   usePromptSessions.setState({ sessions: {}, events: {} })
@@ -288,7 +296,7 @@ describe('NewEpicCard', () => {
     expect(el.textContent).not.toContain('Default')
     // No 'architect' in this library, so the first persona is pinned instead —
     // the "who is working" slot always names a real agent.
-    const builder = el.querySelector('[data-testid="new-epic-agent-builder"]') as HTMLButtonElement
+    const builder = el.querySelector('[data-testid="new-epic-agent-builder"]') as HTMLElement
     expect(builder.getAttribute('data-selected')).toBe('true')
     expect(el.querySelector('[data-testid="new-epic-agent-debugger"]')).not.toBeNull()
   })
@@ -302,13 +310,12 @@ describe('NewEpicCard', () => {
     await act(async () => {})
 
     // Pinned as the one "who is working" — position is the signal, no accent ring.
-    const architectBtn = el.querySelector('[data-testid="new-epic-agent-architect"]') as HTMLButtonElement
+    const architectBtn = el.querySelector('[data-testid="new-epic-agent-architect"]') as HTMLElement
     expect(architectBtn.getAttribute('data-selected')).toBe('true')
-    expect(architectBtn.className).not.toContain('border-accent')
     expect(el.querySelector('[data-testid="new-epic-agent-default"]')).toBeNull()
-    // ...and it is not also repeated in the "available agents by role" list.
+    // ...and it is not also repeated in the dropdown's option list.
     expect(el.querySelectorAll('[data-testid="new-epic-agent-architect"]').length).toBe(1)
-    expect((el.querySelector('[data-testid="new-epic-agent-builder"]') as HTMLButtonElement)
+    expect((el.querySelector('[data-testid="new-epic-agent-builder"]') as HTMLElement)
       .getAttribute('data-selected')).toBe('false')
 
     const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
@@ -353,8 +360,7 @@ describe('NewEpicCard', () => {
     const goal = el.querySelector('[data-testid="new-epic-goal"]') as HTMLTextAreaElement
     act(() => setNativeValue(goal, 'Cut the next release'))
 
-    const builderBtn = el.querySelector('[data-testid="new-epic-agent-builder"]') as HTMLButtonElement
-    act(() => builderBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    pickAgent(el, 'builder')
 
     const create = el.querySelector('[data-testid="new-epic-create"]') as HTMLButtonElement
     act(() => create.dispatchEvent(new MouseEvent('click', { bubbles: true })))
@@ -410,15 +416,13 @@ describe('NewEpicCard', () => {
     expect(el.querySelector('[data-testid="new-epic-kind-feature"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="new-epic-kind-build"]')).toBeNull()
 
-    const builderBtn = el.querySelector('[data-testid="new-epic-agent-builder"]') as HTMLButtonElement
-    await act(async () => { builderBtn.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    pickAgent(el, 'builder')
     expect(el.querySelector('[data-testid="new-epic-kind-build"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="new-epic-kind-feature"]')).toBeNull()
     // The invalidated 'feature' pick snaps to the new agent's only mission.
     expect(el.textContent).toContain(agentTagDef('build').description)
 
-    const phb = el.querySelector('[data-testid="new-epic-agent-project-home-builder"]') as HTMLButtonElement
-    await act(async () => { phb.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    pickAgent(el, 'project-home-builder')
     expect(el.querySelector('[data-testid="new-epic-kind-project-home-builder"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="new-epic-kind-build"]')).toBeNull()
   })
@@ -504,14 +508,13 @@ describe('NewEpicCard', () => {
     expect(persistedOpeningPrompt).toContain(inputSection!.text)
   })
 
-  it('truncates a long real persona description instead of forcing the row to overflow', async () => {
+  it('truncates a long real persona role/description instead of forcing the row to overflow', async () => {
     // Regression for a real bug: a flex row's children default to
-    // min-width:auto, so `truncate` on the description span silently did
-    // nothing until the row (and the whole two-column grid) was given
-    // min-w-0 all the way down — with the short mock personas used
-    // elsewhere in this file that never showed up, but a real persona like
-    // project-home-builder's full-sentence description blew the layout out
-    // sideways in the actual app.
+    // min-width:auto, so `truncate` on the role span silently did nothing
+    // until the row was given min-w-0 all the way down — with the short mock
+    // personas used elsewhere in this file that never showed up, but a real
+    // persona like project-home-builder's full-sentence description blew the
+    // layout out sideways in the actual app.
     listPersonasSpy.mockResolvedValue([
       {
         name: 'project-home-builder',
@@ -529,12 +532,10 @@ describe('NewEpicCard', () => {
     const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
     await act(async () => {})
 
-    const row = el.querySelector('[data-testid="new-epic-agent-project-home-builder"]') as HTMLButtonElement
-    expect(row.className).toContain('min-w-0')
-    const descriptionSpan = Array.from(row.querySelectorAll('span')).find((s) => s.textContent?.includes('Generates a project'))
-    expect(descriptionSpan).toBeTruthy()
-    expect(descriptionSpan!.className).toContain('truncate')
-    expect(descriptionSpan!.className).toContain('min-w-0')
+    const picker = el.querySelector('[data-testid="new-epic-agent-picker"]') as HTMLElement
+    const roleSpan = Array.from(picker.querySelectorAll('span')).find((s) => s.textContent?.includes('Generates a project'))
+    expect(roleSpan).toBeTruthy()
+    expect(roleSpan!.className).toContain('truncate')
   })
 
   it('defaults the "delegate implementation" injection ON for feature/bug and OFF for discussion, flipping when the tag changes', async () => {
@@ -1030,7 +1031,7 @@ describe('NewEpicCard per-Epic model / effort override', () => {
     const el = await mountWithGoal()
     pick(el, 'model', 'haiku')
     pick(el, 'effort', 'max')
-    click(el.querySelector('[data-testid="new-epic-agent-builder"]')!)
+    pickAgent(el, 'builder')
     await submit(el)
     const payload = createPayload()
     expect(payload.agentType).toBe('builder')

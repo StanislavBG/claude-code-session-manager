@@ -18,6 +18,7 @@ import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, type ContextInjectionKey }
 import { Badge } from '../ui/Badge'
 import { Tooltip } from '../ui/Tooltip'
 import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallGuardResult } from '../../../preload/api'
+import { AgentPicker, agentDot } from './AgentPicker'
 
 const SUBTITLE_DETAIL = 'One goal per Epic — fixed for the life of its session. The title and objective are sent as the first message the moment you start it, so the agent is already working when it opens.'
 
@@ -112,70 +113,6 @@ function defaultContextInjectionsForTag(t: EpicTag): Record<ContextInjectionKey,
 function missionTagsForAgent(agent: AgentPersona | null): EpicTag[] {
   const known = (agent?.tags ?? []).filter((t): t is EpicTag => TAG_GROUP_ORDER.includes(t as EpicTag))
   return known.length ? known : FALLBACK_MISSION_TAGS
-}
-
-/** Deterministic dot color per agent name, same hashed-palette idea
- *  sched-primitives.tsx's ProjectTag uses for project dots — a stable,
- *  content-derived color rather than a fixed per-row index (so the same
- *  persona always gets the same dot across renders/sessions). */
-const AGENT_DOT_PALETTE = ['#b85c34', '#a3441f', '#6f7d52', '#8a7a60', '#7a6a8a', '#5f7a7d', '#c96442', '#4f7d72']
-function agentDot(name: string): string {
-  let h = 0
-  for (let i = 0; i < name.length; i += 1) h = (h * 31 + name.charCodeAt(i)) >>> 0
-  return AGENT_DOT_PALETTE[h % AGENT_DOT_PALETTE.length]
-}
-
-/** Fixed department display order, mid-startup shape (decided 2026-08-02) —
- *  Engineering leads/executors first (most-picked), specialist reviewers
- *  fold into Engineering too (same department, narrower title), then the
- *  other functions in roughly headcount order for a small shop. Any
- *  persona whose `title` doesn't parse as "<Department> — <role>" (or has
- *  no title at all) falls into its own trailing "Other" group rather than
- *  being silently dropped. */
-const DEPARTMENT_ORDER = ['Engineering', 'Product', 'Design', 'Quality', 'Platform', 'Growth']
-
-/** Groups personas by the department prefix of their `title` field
- *  ("<Department> — <role>"), in DEPARTMENT_ORDER, with anything
- *  untitled/unrecognized collected into a trailing "Other" group. Pure —
- *  no IO, safe to call on every render. */
-function groupAgentsByDepartment(agents: AgentPersona[]): Array<{ department: string; agents: AgentPersona[] }> {
-  const byDept = new Map<string, AgentPersona[]>()
-  for (const a of agents) {
-    const dept = a.title?.split(' — ')[0]?.trim() || 'Other'
-    if (!byDept.has(dept)) byDept.set(dept, [])
-    byDept.get(dept)!.push(a)
-  }
-  const known = DEPARTMENT_ORDER.filter((d) => byDept.has(d)).map((department) => ({ department, agents: byDept.get(department)! }))
-  const unknown = [...byDept.keys()].filter((d) => !DEPARTMENT_ORDER.includes(d)).sort()
-    .map((department) => ({ department, agents: byDept.get(department)! }))
-  return [...known, ...unknown]
-}
-
-/** One persona row. Same shape whether it's the pinned "who is working" tile
- *  or one of the alternatives below it — the pinned one deliberately carries
- *  NO accent ring: sitting under "1 · agent — who is working", separated from
- *  "available agents by role", is already the whole selection signal. */
-function AgentTile({ agent, pinned, onPick }: { agent: AgentPersona; pinned: boolean; onPick: () => void }) {
-  return (
-    <button
-      type="button"
-      data-testid={`new-epic-agent-${agent.name}`}
-      data-selected={pinned ? 'true' : 'false'}
-      onClick={onPick}
-      className={`flex min-w-0 items-center gap-2 rounded-lg border border-line px-2.5 py-1.5 text-left ${
-        pinned ? 'bg-bg-elev' : 'bg-bg'
-      }`}
-    >
-      <span className="h-1.5 w-1.5 flex-shrink-0 rotate-45 rounded-sm" style={{ background: agentDot(agent.name) }} />
-      <span className={`flex-shrink-0 font-mono text-xs ${pinned ? 'font-semibold' : 'font-medium'} text-fg`}>{agent.name}</span>
-      {agent.title && (
-        <span className="flex-shrink-0 text-[10.5px] text-fg-faint">{agent.title.split(' — ')[1]}</span>
-      )}
-      {agent.description && (
-        <span className="min-w-0 flex-1 truncate text-right text-[11px] text-fg-faint">{agent.description}</span>
-      )}
-    </button>
-  )
 }
 
 /**
@@ -627,34 +564,14 @@ export function NewEpicCard({
                 >
                   Agent
                 </div>
-                <div className="grid min-w-0 gap-1">
-                  {selectedAgent && (
-                    <AgentTile agent={selectedAgent} pinned onPick={() => {}} />
-                  )}
-                  {(agents ?? []).length > 0 && (
-                    <div className="mt-2.5 font-mono text-[10px] uppercase tracking-[0.08em] text-fg-faint">
-                      available agents by role
-                    </div>
-                  )}
-                  {groupAgentsByDepartment((agents ?? []).filter((a) => a.name !== agentName)).map((group) => (
-                    <div key={group.department} className="contents">
-                      <div className="mt-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-fg-faint">
-                        {group.department}
-                      </div>
-                      {group.agents.map((a) => (
-                        <AgentTile
-                          key={a.name}
-                          agent={a}
-                          pinned={false}
-                          onPick={() => {
-                            agentTouchedRef.current = true
-                            setAgentName(a.name)
-                          }}
-                        />
-                      ))}
-                    </div>
-                  ))}
-                </div>
+                <AgentPicker
+                  agents={agents ?? []}
+                  value={agentName}
+                  onChange={(name) => {
+                    agentTouchedRef.current = true
+                    setAgentName(name)
+                  }}
+                />
               </div>
               <div className="min-w-0">
                 <div

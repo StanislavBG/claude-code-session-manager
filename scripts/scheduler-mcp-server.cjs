@@ -171,7 +171,7 @@ const TOOLS = [
         implementationNotes: { type: 'string', description: 'File paths, patterns, and constraints the executor needs' },
         gate: {
           type: 'array', items: { type: 'string' },
-          description: 'REQUIRED. Commands that prove this PRD is done. The scheduler re-runs them without a shell. One command per entry, run in order; each must exit 0. Start each with `timeout <seconds>`. Join steps with &&. Outside single quotes, no | < > ; & ` $ \\ * ? [ ] ( ) { } or !. Use ["none"], exactly, only for docs or config with no runnable check.',
+          description: 'REQUIRED. Commands that prove this PRD is done. The scheduler re-runs them without a shell. One command per entry, run in order; each must exit 0. Start each && step with `timeout <seconds>`. Join steps with &&. Outside single quotes, no | < > ; & ` $ \\ * ? [ ] ( ) { } or !. Use ["none"], exactly, only for docs or config with no runnable check.',
         },
         files: {
           type: 'array', items: { type: 'string' },

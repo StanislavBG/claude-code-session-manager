@@ -92,7 +92,7 @@ Both fields are required in every `scheduler_create_prd` call.
 ### gate
 
 1. 1–10 commands. The scheduler re-runs them, in order, after the executor finishes. Each must exit 0.
-2. Start each command with `timeout <seconds>`. Why: a command without a timeout can hang the run.
+2. Start each `&&` step with `timeout <seconds>`, for example `timeout 300 npm test && timeout 120 npm run lint`. Why: a command without a timeout can hang the run.
 3. Join steps inside one entry with `&&`.
 4. The scheduler runs gate commands without a shell, so shell syntax is refused. Outside single quotes, do not use `|` `<` `>` `;` `&` (only `&&` between steps), backticks, `$`, `\`, `*`, `?`, `[`, `]`, `(`, `)`, `{`, `}` or `!`. Inside double quotes, `$`, backticks and `\` are refused too.
 5. Do not start a word with `#` or `~`, and do not put `~` right after `=` or `:`. `HEAD~1` is fine.

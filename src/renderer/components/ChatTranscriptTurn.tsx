@@ -1100,7 +1100,6 @@ function TurnComponent({
     return (
       <div className="group grid justify-items-end gap-1">
         <div className="flex items-center gap-2">
-          <span className="font-mono text-[10.5px] text-fg-faint">you · {formatAgo(turn.at, Date.now())}</span>
           {hasPreamble && (
             <button
               type="button"
@@ -1131,7 +1130,10 @@ function TurnComponent({
             {split!.preamble}
           </div>
         )}
-        <div className="max-w-[80%] break-words rounded-tl-lg rounded-tr-lg rounded-bl-lg rounded-br-sm bg-accent/15 px-3 py-2 text-sm text-fg whitespace-pre-wrap">
+        <div
+          title={`you · ${formatAgo(turn.at, Date.now())}`}
+          className="max-w-[80%] break-words rounded-2xl bg-fg px-3 py-2 text-sm text-bg whitespace-pre-wrap"
+        >
           {shownText}
         </div>
         {onQuote && (
@@ -1336,10 +1338,10 @@ function TurnComponent({
   // a normal completed one rather than only being flagged via a small chip.
   const isIncomplete = !!(turn.attribution?.isApiErrorMessage || turn.attribution?.interruptedByShutdown)
   const bubbleCorners = 'rounded-tl-sm rounded-tr-lg rounded-br-lg rounded-bl-lg'
-  const bubbleTone = isIncomplete ? `${ERROR_TINT} ${ERROR_TEXT}` : 'border-line bg-elev text-fg'
+  const bodyTone = isIncomplete ? ERROR_TEXT : 'text-fg'
   return (
     <div className="group flex max-w-[90%] items-start gap-2">
-      <div className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-lg border border-line bg-elev text-xs font-semibold text-accent">
+      <div className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md bg-accent text-xs font-semibold text-white">
         C
       </div>
       <div className="min-w-0 flex-1">
@@ -1387,7 +1389,7 @@ function TurnComponent({
           <>
             <div
               ref={bodyRef}
-              className={`prose-chat border px-3 py-2 text-sm leading-relaxed ${bubbleTone} ${bubbleCorners} ${isPlan ? 'prose-chat--plan' : ''}`}
+              className={`prose-chat text-sm leading-relaxed ${bodyTone} ${isPlan ? 'prose-chat--plan' : ''}`}
               onClick={(e) => { void handleChatLinkClick(e, cwd) }}
               dangerouslySetInnerHTML={{ __html: shownHtml }}
             />

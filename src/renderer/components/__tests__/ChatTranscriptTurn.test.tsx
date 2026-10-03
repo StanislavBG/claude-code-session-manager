@@ -272,3 +272,86 @@ describe('Turn — assistant diff card (PRD chat-turn-diff-rendering)', () => {
     expect(el.textContent).toContain('Just some prose, no edits.')
   })
 })
+
+describe('Turn — chat turn visuals restyle (PRD chat-turn-visuals)', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  afterEach(() => {
+    if (root && container) {
+      act(() => root!.unmount())
+      container.remove()
+    }
+    container = null
+    root = null
+    delete (window as unknown as { api?: unknown }).api
+  })
+
+  it('renders the assistant avatar as a filled accent square with no border', async () => {
+    installWindowApiMock()
+    const { Turn } = await import('../ChatTranscriptTurn')
+
+    const el = mount(
+      createElement(Turn, {
+        turn: { id: 't-assistant', role: 'assistant', text: 'Hello there.', at: Date.now() } as any,
+        cwd: '/tmp/proj',
+        tabId: 'tab-1',
+        sessionId: 'sess-1',
+      }),
+    )
+
+    const avatar = Array.from(el.querySelectorAll('div')).find((d) => d.textContent === 'C')!
+    expect(avatar).not.toBeUndefined()
+    expect(avatar.className).toContain('rounded-md')
+    expect(avatar.className).toContain('bg-accent')
+    expect(avatar.className).toContain('text-white')
+    expect(avatar.className).not.toContain('border')
+    expect(avatar.className).not.toContain('bg-elev')
+  })
+
+  it('renders the assistant prose body with no bordered/bg-elev bubble wrapper', async () => {
+    installWindowApiMock()
+    const { Turn } = await import('../ChatTranscriptTurn')
+
+    const el = mount(
+      createElement(Turn, {
+        turn: { id: 't-assistant-2', role: 'assistant', text: 'Plain prose reply.', at: Date.now() } as any,
+        cwd: '/tmp/proj',
+        tabId: 'tab-1',
+        sessionId: 'sess-1',
+      }),
+    )
+
+    const body = el.querySelector('.prose-chat')!
+    expect(body).not.toBeNull()
+    expect(body.className).not.toContain('border')
+    expect(body.className).not.toContain('bg-elev')
+    expect(body.className).not.toContain('bg-bg-elev')
+    expect(body.textContent).toContain('Plain prose reply.')
+  })
+
+  it('renders the user bubble dark/right-aligned with no "you · ago" label row, time moved to title', async () => {
+    installWindowApiMock()
+    const { Turn } = await import('../ChatTranscriptTurn')
+
+    const el = mount(
+      createElement(Turn, {
+        turn: { id: 't-user', role: 'user', text: 'Hi, please help.', at: Date.now() } as any,
+        cwd: '/tmp/proj',
+        tabId: 'tab-1',
+        sessionId: 'sess-1',
+        onQuote: () => {},
+      }),
+    )
+
+    expect(el.textContent).not.toContain('you ·')
+    const bubble = Array.from(el.querySelectorAll('div')).find((d) => d.textContent === 'Hi, please help.')!
+    expect(bubble).not.toBeUndefined()
+    expect(bubble.className).toContain('bg-fg')
+    expect(bubble.className).toContain('text-bg')
+    expect(bubble.className).toContain('rounded-2xl')
+    expect(bubble.getAttribute('title')).toMatch(/^you ·/)
+    expect(el.querySelector('[data-testid="chat-turn-quote"]')).not.toBeNull()
+  })
+})

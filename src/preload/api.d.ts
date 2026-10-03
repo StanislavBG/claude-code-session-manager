@@ -1332,6 +1332,8 @@ export interface ProjectPagesGetResult {
   html: string | null;
   /** home.html's mtime, or null when `html` is null. */
   mtimeMs: number | null;
+  /** project-pages/demo-video/index.html's absolute path + mtime, or null when it does not exist. Load it via smfile:// — never pass its HTML across IPC. */
+  demoVideo: { path: string; mtimeMs: number } | null;
 }
 
 // ────────────────────────────────────────────── Per-subagent memory

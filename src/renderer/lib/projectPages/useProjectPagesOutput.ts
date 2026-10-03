@@ -1,9 +1,11 @@
 /**
  * Single fetch of session-manager-operations/project-pages/home.html for the
- * active project as `{html, mtimeMs}` (null until the file exists). Subscribes
- * to the main process's per-cwd watcher ('project-pages:changed') so a fresh
- * write updates live. A cwd the main process can't watch resolves `{ok:false}`
- * — silently no-op.
+ * active project as `{html, mtimeMs}` (null until the file exists), plus
+ * whether demo-video/index.html exists (`{path, mtimeMs}` — path only, so its
+ * HTML never crosses IPC; load it via smfile://). Subscribes to the main
+ * process's per-cwd watcher ('project-pages:changed') so a fresh write
+ * updates live. A cwd the main process can't watch resolves `{ok:false}` —
+ * silently no-op.
  */
 import { useEffect, useState } from 'react'
 import { toast } from '../../state/toast'
@@ -14,12 +16,17 @@ export interface ProjectPagesOutput {
   mtimeMs: number | null
 }
 
+export type ProjectPagesDemoVideo = { path: string; mtimeMs: number } | null
+
 function toOutput(res: ProjectPagesGetResult): ProjectPagesOutput | null {
   return res.html === null ? null : { html: res.html, mtimeMs: res.mtimeMs }
 }
 
-export function useProjectPagesOutput(cwd: string | null): { output: ProjectPagesOutput | null; loaded: boolean } {
+export function useProjectPagesOutput(
+  cwd: string | null,
+): { output: ProjectPagesOutput | null; demoVideo: ProjectPagesDemoVideo; loaded: boolean } {
   const [output, setOutput] = useState<ProjectPagesOutput | null>(null)
+  const [demoVideo, setDemoVideo] = useState<ProjectPagesDemoVideo>(null)
   const [loaded, setLoaded] = useState(false)
 
   useEffect(() => {
@@ -31,6 +38,7 @@ export function useProjectPagesOutput(cwd: string | null): { output: ProjectPage
       .then((res) => {
         if (cancelled) return
         setOutput(toOutput(res))
+        setDemoVideo(res.demoVideo)
         setLoaded(true)
       })
       .catch((err) => {
@@ -49,6 +57,7 @@ export function useProjectPagesOutput(cwd: string | null): { output: ProjectPage
     const unsubscribe = window.api.projectPages.onChanged((payload) => {
       if (payload.cwd !== cwd) return
       setOutput(toOutput(payload))
+      setDemoVideo(payload.demoVideo)
       setLoaded(true)
     })
     return () => {
@@ -57,5 +66,5 @@ export function useProjectPagesOutput(cwd: string | null): { output: ProjectPage
     }
   }, [cwd])
 
-  return { output, loaded }
+  return { output, demoVideo, loaded }
 }

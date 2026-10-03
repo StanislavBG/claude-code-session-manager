@@ -26,6 +26,22 @@ function homePath(cwd) {
   return opsPath(cwd, 'project-pages', 'home.html');
 }
 
+function demoVideoPath(cwd) {
+  return opsPath(cwd, 'project-pages', 'demo-video', 'index.html');
+}
+
+/** -> { path: string, mtimeMs: number } | null */
+async function getDemoVideo(realCwd) {
+  const file = demoVideoPath(realCwd);
+  try {
+    const stat = await fs.promises.stat(file);
+    return { path: file, mtimeMs: stat.mtimeMs };
+  } catch (e) {
+    if (e.code === 'ENOENT') return null;
+    throw e;
+  }
+}
+
 /**
  * Resolve `cwd`'s home.html path, treating the opsOwnership "ephemeral cwd"
  * throw (a tmpdir/linked-worktree project root) as "no path available"
@@ -40,14 +56,15 @@ function tryHomePath(realCwd) {
   }
 }
 
-/** -> { html: string|null, mtimeMs: number|null } */
+/** -> { html: string|null, mtimeMs: number|null, demoVideo: {path, mtimeMs}|null } */
 async function get({ cwd }) {
   const realCwd = config.validatePath(cwd);
   const { file, ephemeral } = tryHomePath(realCwd);
-  if (ephemeral) return { html: null, mtimeMs: null };
+  if (ephemeral) return { html: null, mtimeMs: null, demoVideo: null };
   const res = await config.readText(file);
-  if (!res.exists) return { html: null, mtimeMs: null };
-  return { html: res.text, mtimeMs: res.mtimeMs };
+  const demoVideo = await getDemoVideo(realCwd);
+  if (!res.exists) return { html: null, mtimeMs: null, demoVideo };
+  return { html: res.text, mtimeMs: res.mtimeMs, demoVideo };
 }
 
 // ─── Push channel ─────────────────────────────────────────────────────────
@@ -90,21 +107,31 @@ async function watchOutput(cwd) {
   const dir = path.dirname(file);
   fs.mkdirSync(dir, { recursive: true });
 
+  const demoVideoFile = demoVideoPath(realCwd);
   const push = async (changedPath) => {
-    if (changedPath && path.resolve(changedPath) !== path.resolve(file)) return; // only home.html
+    // Only home.html or demo-video/index.html — ignore every other sibling file.
+    if (changedPath) {
+      const resolved = path.resolve(changedPath);
+      if (resolved !== path.resolve(file) && resolved !== path.resolve(demoVideoFile)) return;
+    }
     let result;
     try {
       result = await get({ cwd: realCwd });
     } catch {
       return; // best-effort; the renderer keeps its last-known output
     }
-    sendIfAlive(mainWindow, 'project-pages:changed', { cwd: realCwd, html: result.html, mtimeMs: result.mtimeMs });
+    sendIfAlive(mainWindow, 'project-pages:changed', {
+      cwd: realCwd,
+      html: result.html,
+      mtimeMs: result.mtimeMs,
+      demoVideo: result.demoVideo,
+    });
   };
 
   const watcher = chokidar.watch(dir, {
     ignoreInitial: true,
     persistent: true,
-    depth: 0,
+    depth: 1,
     // Same 50ms/25ms shape config.cjs's generic watcher uses.
     awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 25 },
   });

@@ -48,6 +48,15 @@ function writeHome(cwd, html) {
   fs.writeFileSync(path.join(pagesDir(cwd), 'home.html'), html);
 }
 
+function demoVideoDir(cwd) {
+  return path.join(pagesDir(cwd), 'demo-video');
+}
+
+function writeDemoVideo(cwd, html) {
+  fs.mkdirSync(demoVideoDir(cwd), { recursive: true });
+  fs.writeFileSync(path.join(demoVideoDir(cwd), 'index.html'), html);
+}
+
 function makeFakeWindow(sent) {
   return {
     isDestroyed: () => false,
@@ -72,12 +81,13 @@ test('get() returns the home.html text and its mtimeMs', async () => {
   const result = await get({ cwd });
   expect(result.html).toBe('<html>HOME</html>');
   expect(typeof result.mtimeMs).toBe('number');
-  expect(Object.keys(result).sort()).toEqual(['html', 'mtimeMs']);
+  expect(result.demoVideo).toBeNull();
+  expect(Object.keys(result).sort()).toEqual(['demoVideo', 'html', 'mtimeMs']);
 });
 
-test('get() with no home.html returns {html: null, mtimeMs: null} — no shipped default', async () => {
+test('get() with no home.html returns {html: null, mtimeMs: null, demoVideo: null} — no shipped default', async () => {
   const cwd = await mkTmpCwd();
-  expect(await get({ cwd })).toEqual({ html: null, mtimeMs: null });
+  expect(await get({ cwd })).toEqual({ html: null, mtimeMs: null, demoVideo: null });
 });
 
 test('get() ignores legacy manifest/lens files — only home.html counts', async () => {
@@ -86,12 +96,29 @@ test('get() ignores legacy manifest/lens files — only home.html counts', async
   fs.mkdirSync(out, { recursive: true });
   fs.writeFileSync(path.join(out, 'home.html'), 'OLD');
   fs.writeFileSync(path.join(out, 'manifest.json'), '{"generatedAt":"2026-08-02T00:00:00.000Z"}');
-  expect(await get({ cwd })).toEqual({ html: null, mtimeMs: null });
+  expect(await get({ cwd })).toEqual({ html: null, mtimeMs: null, demoVideo: null });
 });
 
 test('get() with an ephemeral cwd (os.tmpdir() itself) returns null instead of throwing', async () => {
   config.addAllowedRoot(os.tmpdir());
-  expect(await get({ cwd: os.tmpdir() })).toEqual({ html: null, mtimeMs: null });
+  expect(await get({ cwd: os.tmpdir() })).toEqual({ html: null, mtimeMs: null, demoVideo: null });
+});
+
+test('get() returns demoVideo {path, mtimeMs} when demo-video/index.html exists', async () => {
+  const cwd = await mkTmpCwd();
+  writeHome(cwd, '<html>HOME</html>');
+  writeDemoVideo(cwd, '<html>VIDEO</html>');
+  const result = await get({ cwd });
+  expect(result.demoVideo).not.toBeNull();
+  expect(result.demoVideo.path).toBe(fs.realpathSync(path.join(demoVideoDir(cwd), 'index.html')));
+  expect(typeof result.demoVideo.mtimeMs).toBe('number');
+});
+
+test('get() returns demoVideo: null when demo-video/index.html does not exist', async () => {
+  const cwd = await mkTmpCwd();
+  writeHome(cwd, '<html>HOME</html>');
+  const result = await get({ cwd });
+  expect(result.demoVideo).toBeNull();
 });
 
 test('watchOutput() on an ephemeral cwd refuses instead of crashing', async () => {
@@ -131,6 +158,30 @@ test('watchOutput() pushes {cwd, html, mtimeMs} on project-pages:changed when ho
   expect(typeof last.payload.mtimeMs).toBe('number');
   // summary.json alone must not have produced a push carrying no html
   expect(sent.every((m) => m.payload.html === '<html>HOME</html>')).toBe(true);
+
+  unwatchOutput(cwd);
+  expect(_outputWatchers.size).toBe(0);
+}, 10_000);
+
+test('watchOutput() pushes on a write to demo-video/index.html, ignoring other demo-video files', async () => {
+  const cwd = await mkTmpCwd();
+  const sent = [];
+  attachWindow(makeFakeWindow(sent));
+
+  writeHome(cwd, '<html>HOME</html>');
+  expect(await watchOutput(cwd)).toEqual({ ok: true });
+
+  fs.mkdirSync(demoVideoDir(cwd), { recursive: true });
+  fs.writeFileSync(path.join(demoVideoDir(cwd), 'other.txt'), 'nope');
+  writeDemoVideo(cwd, '<html>VIDEO</html>');
+  await waitFor(() => sent.length > 0);
+
+  expect(sent.length).toBeGreaterThan(0);
+  for (const msg of sent) expect(msg.channel).toBe('project-pages:changed');
+  const last = sent[sent.length - 1];
+  expect(last.payload.demoVideo).not.toBeNull();
+  expect(last.payload.demoVideo.path).toBe(fs.realpathSync(path.join(demoVideoDir(cwd), 'index.html')));
+  expect(typeof last.payload.demoVideo.mtimeMs).toBe('number');
 
   unwatchOutput(cwd);
   expect(_outputWatchers.size).toBe(0);

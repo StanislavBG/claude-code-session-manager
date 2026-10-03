@@ -133,12 +133,22 @@ function worktreeMainRootOf(cwd) {
   return null;
 }
 
+// A root may be a symlink (macOS os.tmpdir() is /var -> /private/var) while callers hand us
+// either spelling (config.validatePath returns realpaths). Match on both the raw and the
+// canonical spelling of the root.
+function rootSpellings(root) {
+  const abs = path.resolve(root);
+  let real = abs;
+  try { real = fs.realpathSync(abs); } catch { /* root not created yet — raw spelling only */ }
+  return real === abs ? [abs] : [abs, real];
+}
+
 function isExactlyTmpdir(absCwd) {
-  return absCwd === path.resolve(os.tmpdir());
+  return rootSpellings(os.tmpdir()).includes(absCwd);
 }
 
 function isUnderManagedWorktreeRoot(absCwd) {
-  return ['job', 'epic'].map((k) => path.resolve(schedulerPaths.worktreeRoot(k))).some((root) => {
+  return ['job', 'epic'].flatMap((k) => rootSpellings(schedulerPaths.worktreeRoot(k))).some((root) => {
     const rel = path.relative(root, absCwd);
     return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
   });

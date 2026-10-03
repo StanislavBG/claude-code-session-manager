@@ -29,6 +29,20 @@ test('blocking_paths stamps kind only; no failure clears stale fields', () => {
   assert.equal('integrationFailureKind' in row, false);
 });
 
+test('stamps stray_checkout expected/actual branch', () => {
+  const row = { slug: 'x' };
+  stampIntegrationFailure(row, {
+    ok: false, failureKind: 'stray_checkout', expectedBranch: 'feat/json-display', actualBranch: 'main',
+  });
+  assert.equal(row.integrationFailureKind, 'stray_checkout');
+  assert.equal(row.integrationExpectedBranch, 'feat/json-display');
+  assert.equal(row.integrationActualBranch, 'main');
+  stampIntegrationFailure(row, null);
+  assert.equal('integrationFailureKind' in row, false);
+  assert.equal('integrationExpectedBranch' in row, false);
+  assert.equal('integrationActualBranch' in row, false);
+});
+
 test('RCA markdown names the subtype and conflicted paths', () => {
   const job = {
     slug: 'x', runId: 'r', integrationFailureKind: 'content_conflict',

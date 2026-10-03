@@ -115,7 +115,9 @@ function inspectGit(start) {
   } catch {
     return { shape: 'unknown', dir: entry.dir, mainRoot: null, reason: `worktree admin back-reference missing (${adminGitdirFile})` };
   }
-  if (path.resolve(backRef) !== path.resolve(gitPath)) {
+  // git records realpaths, so compare canonical spellings (macOS /var -> /private/var).
+  const canon = (q) => { try { return fs.realpathSync(q); } catch { return path.resolve(q); } };
+  if (path.resolve(backRef) !== path.resolve(gitPath) && canon(backRef) !== canon(gitPath)) {
     return { shape: 'unknown', dir: entry.dir, mainRoot: null, reason: `worktree admin back-reference points elsewhere (${adminGitdirFile})` };
   }
   return { shape: 'worktree', dir: entry.dir, mainRoot: candidateMain, reason: 'linked worktree, back-reference verified' };
@@ -133,12 +135,22 @@ function worktreeMainRootOf(cwd) {
   return null;
 }
 
+// A root may be a symlink (macOS os.tmpdir() is /var -> /private/var) while callers hand us
+// either spelling (config.validatePath returns realpaths). Match on both the raw and the
+// canonical spelling of the root.
+function rootSpellings(root) {
+  const abs = path.resolve(root);
+  let real = abs;
+  try { real = fs.realpathSync(abs); } catch { /* root not created yet — raw spelling only */ }
+  return real === abs ? [abs] : [abs, real];
+}
+
 function isExactlyTmpdir(absCwd) {
-  return absCwd === path.resolve(os.tmpdir());
+  return rootSpellings(os.tmpdir()).includes(absCwd);
 }
 
 function isUnderManagedWorktreeRoot(absCwd) {
-  return ['job', 'epic'].map((k) => path.resolve(schedulerPaths.worktreeRoot(k))).some((root) => {
+  return ['job', 'epic'].flatMap((k) => rootSpellings(schedulerPaths.worktreeRoot(k))).some((root) => {
     const rel = path.relative(root, absCwd);
     return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
   });

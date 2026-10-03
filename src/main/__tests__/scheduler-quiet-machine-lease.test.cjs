@@ -20,7 +20,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const claudeStub = require('../../../tests/helpers/claudeStub.cjs');
-const { execFileSync } = require('node:child_process');
+const { git, initRepo, registerActiveProject } = require('./_helpers/schedulerHarness.cjs');
 
 let tmpHome;
 let originalHome;
@@ -29,30 +29,9 @@ let spawnJob;
 let quietMachineLease;
 let pickNextBatch;
 
-function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' });
-}
-
-function initRepo(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-  git(['init', '-q'], dir);
-  git(['config', 'user.email', 'test@example.com'], dir);
-  git(['config', 'user.name', 'Test'], dir);
-  fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n', 'utf8');
-  git(['add', '-A'], dir);
-  git(['commit', '-q', '-m', 'initial'], dir);
-}
-
 // See scheduler-inplace-salvage.test.cjs's identical helper: readQueue()'s
 // per-project discovery walks ~/.claude/projects/*/*.jsonl transcripts for a
 // `cwd` field to find known project queue.json shards.
-function registerActiveProject(cwd) {
-  const projectsDir = path.join(tmpHome, '.claude', 'projects');
-  const slugDir = path.join(projectsDir, `fake-project-slug-${path.basename(cwd)}`);
-  fs.mkdirSync(slugDir, { recursive: true });
-  fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
-}
-
 // Every real scheduler row is born from a real PRD .md file — reconcile()'s
 // auto-archive-drop path (a terminal job whose slug has no on-disk PRD
 // anywhere is treated as "archived on purpose": dropped from queue.json and

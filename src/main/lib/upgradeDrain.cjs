@@ -24,6 +24,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const schedulerPaths = require('./schedulerPaths.cjs');
+const atomicFs = require('./atomicFs.cjs');
 
 // Observed max job run is 240 min; 4 h converts a stuck drain to an abort.
 const DEFAULT_DRAIN_DEADLINE_MS = 4 * 60 * 60_000;
@@ -32,19 +33,12 @@ const DEFAULT_DRAIN_DEADLINE_MS = 4 * 60 * 60_000;
 const RESTARTING_MARKER_TTL_MS = 5 * 60_000;
 
 function writeJsonAtomicSync(file, value) {
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmp, JSON.stringify(value, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmp, file);
+  atomicFs.writeJsonAtomicSync(file, value);
 }
 
 function readJsonSafe(file) {
-  try {
-    const v = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return v && typeof v === 'object' ? v : null;
-  } catch {
-    return null;
-  }
+  const v = atomicFs.readJsonOrSync(file, null);
+  return v && typeof v === 'object' ? v : null;
 }
 
 // ---------- request file ----------

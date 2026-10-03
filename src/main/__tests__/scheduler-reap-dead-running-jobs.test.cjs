@@ -32,7 +32,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { git, initRepo, writeRunLog } = require('./_helpers/schedulerHarness.cjs');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'reap-dead-running-jobs-test-'));
 process.env.HOME = tmpHome;
@@ -46,20 +46,6 @@ const { auditLogPath } = require('../lib/auditLog.cjs');
 // invisible to readQueue() for the rest of that window. Bust explicitly
 // after registering a new project so each test sees its own fixture.
 const { bustCwdCache } = require('../lib/queueStore.cjs');
-
-function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' });
-}
-
-function initRepo(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-  git(['init', '-q'], dir);
-  git(['config', 'user.email', 'test@example.com'], dir);
-  git(['config', 'user.name', 'Test'], dir);
-  fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n', 'utf8');
-  git(['add', '-A'], dir);
-  git(['commit', '-q', '-m', 'initial'], dir);
-}
 
 function registerActiveProject(cwd) {
   const projectsDir = path.join(tmpHome, '.claude', 'projects');
@@ -92,12 +78,6 @@ function writeProjectQueue(cwd, jobs) {
     if (job && job.slug) writeFixturePrd(job.cwd || cwd, job.slug);
   }
   return path.join(stateDir, 'queue.json');
-}
-
-function writeRunLog(runId, slug, lines) {
-  const runDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId);
-  fs.mkdirSync(runDir, { recursive: true });
-  fs.writeFileSync(path.join(runDir, `${slug}.log`), lines.join('\n') + '\n');
 }
 
 test('reapDeadRunningJobs reconciles a queue.json row stuck at status:running with a dead pid, even when runningSet does not name its slug (desync repro)', async () => {

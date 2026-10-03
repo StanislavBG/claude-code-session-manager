@@ -23,7 +23,7 @@
 'use strict';
 
 const { z } = require('zod');
-const { WorkTypeSchema } = require('./workTypeLibrary.cjs');
+const { WorkTypeSchema, LEGACY_WORK_TYPES } = require('./workTypeLibrary.cjs');
 const { PERSONA_NAME_RE, ALL_PROJECTS } = require('../agentLibrary.cjs');
 
 // Bounded free-text fields — generous for legitimate persona authoring while
@@ -53,13 +53,24 @@ const AgentPersonaSaveSchema = z.object({
   model: BoundedString,
   effort: BoundedString.optional(),
   color: BoundedString,
-  tags: z.array(WorkTypeSchema),
+  // A legacy tag value (e.g. the retired 'bilko-host-publisher') must keep
+  // loading on an old on-disk persona — dropped silently, never thrown. Any
+  // other unknown value still fails via WorkTypeSchema.
+  tags: z.preprocess(
+    (v) => (Array.isArray(v) ? v.filter((t) => !(typeof t === 'string' && LEGACY_WORK_TYPES.includes(t))) : v),
+    z.array(WorkTypeSchema),
+  ),
   projects: z.array(ProjectEntrySchema).optional(),
   action: z.string().max(20000).optional(),
   actionLabel: BoundedString.optional(),
   title: BoundedString.optional(),
   // Set = write this project's frontmatter-only override (model/effort only) instead of the global file.
   projectName: BoundedString.optional(),
+  // Bundled-persona version stamp (seedAgentPersonas.cjs). Omit to carry over
+  // the existing file's stamp unchanged — see agentLibrary.cjs's savePersona.
+  // Without this field zod's default "strip unknown keys" behavior would
+  // silently drop it from a save payload that did carry one.
+  seedVersion: z.number().int().optional(),
   // Unbounded — a persona's body is arbitrary system-prompt prose.
   body: z.string(),
 });

@@ -92,9 +92,15 @@ test('a homedir whose marker already lists the first three receives validator.md
 
   expect(fs.readFileSync(path.join(agentsDir(), 'validator.md'), 'utf8')).toBe(fs.readFileSync(seedSrc('validator'), 'utf8'));
 
+  // None of the three bodies matches anything this app has ever shipped
+  // (they're hand-written placeholders), so the upgrade pass leaves all
+  // three alone no matter what their seedVersion is — a missing stamp is no
+  // longer by itself a reason to overwrite a file a person may have written.
   for (const name of ['architect', 'dev-lead', 'project-home-builder']) {
     expect(fs.readFileSync(path.join(agentsDir(), `${name}.md`), 'utf8')).toBe(preExisting[name]);
   }
+  expect(fs.existsSync(path.join(agentsDir(), '.backup'))).toBe(false);
+  expect(fs.existsSync(path.join(tmpHome, '.claude', 'session-manager', 'persona-backups'))).toBe(false);
 
   const marker = JSON.parse(fs.readFileSync(mPath, 'utf8'));
   expect(marker.seeded.sort()).toEqual([...ALL_PERSONAS].sort());

@@ -16,7 +16,11 @@ import { agentTagDef } from '../../lib/agentTagDefs'
 import { tagLibraryEntry, TAG_GROUP_ORDER, type EpicTag } from '../../lib/tagLibrary'
 import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, type ContextInjectionKey } from '../../lib/contextInjections'
 import { Badge } from '../ui/Badge'
+import { Tooltip } from '../ui/Tooltip'
 import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallGuardResult } from '../../../preload/api'
+import { AgentPicker, agentDot } from './AgentPicker'
+
+const SUBTITLE_DETAIL = 'One goal per Epic — fixed for the life of its session. The title and objective are sent as the first message the moment you start it, so the agent is already working when it opens.'
 
 /** Missions offered when the selected persona declares no `tags:` of its own
  *  (or the Agent Library is empty) — the three general-purpose ones. */
@@ -109,70 +113,6 @@ function defaultContextInjectionsForTag(t: EpicTag): Record<ContextInjectionKey,
 function missionTagsForAgent(agent: AgentPersona | null): EpicTag[] {
   const known = (agent?.tags ?? []).filter((t): t is EpicTag => TAG_GROUP_ORDER.includes(t as EpicTag))
   return known.length ? known : FALLBACK_MISSION_TAGS
-}
-
-/** Deterministic dot color per agent name, same hashed-palette idea
- *  sched-primitives.tsx's ProjectTag uses for project dots — a stable,
- *  content-derived color rather than a fixed per-row index (so the same
- *  persona always gets the same dot across renders/sessions). */
-const AGENT_DOT_PALETTE = ['#b85c34', '#a3441f', '#6f7d52', '#8a7a60', '#7a6a8a', '#5f7a7d', '#c96442', '#4f7d72']
-function agentDot(name: string): string {
-  let h = 0
-  for (let i = 0; i < name.length; i += 1) h = (h * 31 + name.charCodeAt(i)) >>> 0
-  return AGENT_DOT_PALETTE[h % AGENT_DOT_PALETTE.length]
-}
-
-/** Fixed department display order, mid-startup shape (decided 2026-08-02) —
- *  Engineering leads/executors first (most-picked), specialist reviewers
- *  fold into Engineering too (same department, narrower title), then the
- *  other functions in roughly headcount order for a small shop. Any
- *  persona whose `title` doesn't parse as "<Department> — <role>" (or has
- *  no title at all) falls into its own trailing "Other" group rather than
- *  being silently dropped. */
-const DEPARTMENT_ORDER = ['Engineering', 'Product', 'Design', 'Quality', 'Platform', 'Growth']
-
-/** Groups personas by the department prefix of their `title` field
- *  ("<Department> — <role>"), in DEPARTMENT_ORDER, with anything
- *  untitled/unrecognized collected into a trailing "Other" group. Pure —
- *  no IO, safe to call on every render. */
-function groupAgentsByDepartment(agents: AgentPersona[]): Array<{ department: string; agents: AgentPersona[] }> {
-  const byDept = new Map<string, AgentPersona[]>()
-  for (const a of agents) {
-    const dept = a.title?.split(' — ')[0]?.trim() || 'Other'
-    if (!byDept.has(dept)) byDept.set(dept, [])
-    byDept.get(dept)!.push(a)
-  }
-  const known = DEPARTMENT_ORDER.filter((d) => byDept.has(d)).map((department) => ({ department, agents: byDept.get(department)! }))
-  const unknown = [...byDept.keys()].filter((d) => !DEPARTMENT_ORDER.includes(d)).sort()
-    .map((department) => ({ department, agents: byDept.get(department)! }))
-  return [...known, ...unknown]
-}
-
-/** One persona row. Same shape whether it's the pinned "who is working" tile
- *  or one of the alternatives below it — the pinned one deliberately carries
- *  NO accent ring: sitting under "1 · agent — who is working", separated from
- *  "available agents by role", is already the whole selection signal. */
-function AgentTile({ agent, pinned, onPick }: { agent: AgentPersona; pinned: boolean; onPick: () => void }) {
-  return (
-    <button
-      type="button"
-      data-testid={`new-epic-agent-${agent.name}`}
-      data-selected={pinned ? 'true' : 'false'}
-      onClick={onPick}
-      className={`flex min-w-0 items-center gap-2 rounded-lg border border-line px-2.5 py-1.5 text-left ${
-        pinned ? 'bg-bg-elev' : 'bg-bg'
-      }`}
-    >
-      <span className="h-1.5 w-1.5 flex-shrink-0 rotate-45 rounded-sm" style={{ background: agentDot(agent.name) }} />
-      <span className={`flex-shrink-0 font-mono text-xs ${pinned ? 'font-semibold' : 'font-medium'} text-fg`}>{agent.name}</span>
-      {agent.title && (
-        <span className="flex-shrink-0 text-[10.5px] text-fg-faint">{agent.title.split(' — ')[1]}</span>
-      )}
-      {agent.description && (
-        <span className="min-w-0 flex-1 truncate text-right text-[11px] text-fg-faint">{agent.description}</span>
-      )}
-    </button>
-  )
 }
 
 /**
@@ -522,9 +462,9 @@ export function NewEpicCard({
             resizes/jumps mid-flip and the two faces can never visually overlap.
             Each face scrolls its own body independently when content is tall. */}
         <div
-          className="relative w-full transition-transform duration-500"
+          className="relative w-full transition-[transform,height] duration-500"
           style={{
-            height: 'min(760px, 84vh)',
+            height: advanced ? 'min(760px, 84vh)' : 'min(600px, 84vh)',
             transformStyle: 'preserve-3d',
             transform: advanced ? 'rotateY(180deg)' : 'none',
           }}
@@ -549,8 +489,18 @@ export function NewEpicCard({
               What are we trying to achieve?
             </h2>
             <p className="my-2 mb-[18px] text-[13.5px] leading-[1.55] text-fg-dim">
-              One goal per Epic — fixed for the life of its session. The title and objective are sent
-              as the first message the moment you start it, so the agent is already working when it opens.
+              One goal per Epic — sent as the first message when you start.
+              <Tooltip align="bottom-center" content={SUBTITLE_DETAIL}>
+                <button
+                  type="button"
+                  data-testid="new-epic-subtitle-info"
+                  title={SUBTITLE_DETAIL}
+                  aria-label="About this goal"
+                  className="ml-1.5 inline-grid h-[18px] w-[18px] place-items-center rounded-full border border-line align-middle font-mono text-[10.5px] text-fg-faint hover:text-fg"
+                >
+                  i
+                </button>
+              </Tooltip>
             </p>
             <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
 
@@ -571,15 +521,7 @@ export function NewEpicCard({
                   ))}
                 </select>
               </label>
-            ) : (
-              <div
-                data-testid="new-prompt-cwd-static"
-                className="mb-2.5 flex items-center gap-1.5 font-mono text-[11px] text-fg-faint"
-              >
-                <span className="uppercase tracking-[0.09em]">Project</span>
-                <span className="text-fg-dim">{compactPath(effectiveCwd)}</span>
-              </div>
-            )}
+            ) : null}
 
             {readiness && !readiness.ok && (
               <div
@@ -614,51 +556,31 @@ export function NewEpicCard({
               </div>
             )}
 
-            <div className="mb-3.5 grid grid-cols-2 gap-3.5">
+            <div className="mb-3.5 grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3.5">
               <div className="min-w-0">
                 <div
                   className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
                   title="Who runs this session — from the Agent Library (~/.claude/agents)."
                 >
-                  1 · agent — who is working
+                  Agent
                 </div>
-                <div className="grid min-w-0 gap-1">
-                  {selectedAgent && (
-                    <AgentTile agent={selectedAgent} pinned onPick={() => {}} />
-                  )}
-                  {(agents ?? []).length > 0 && (
-                    <div className="mt-2.5 font-mono text-[10px] uppercase tracking-[0.08em] text-fg-faint">
-                      available agents by role
-                    </div>
-                  )}
-                  {groupAgentsByDepartment((agents ?? []).filter((a) => a.name !== agentName)).map((group) => (
-                    <div key={group.department} className="contents">
-                      <div className="mt-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-fg-faint">
-                        {group.department}
-                      </div>
-                      {group.agents.map((a) => (
-                        <AgentTile
-                          key={a.name}
-                          agent={a}
-                          pinned={false}
-                          onPick={() => {
-                            agentTouchedRef.current = true
-                            setAgentName(a.name)
-                          }}
-                        />
-                      ))}
-                    </div>
-                  ))}
-                </div>
+                <AgentPicker
+                  agents={agents ?? []}
+                  value={agentName}
+                  onChange={(name) => {
+                    agentTouchedRef.current = true
+                    setAgentName(name)
+                  }}
+                />
               </div>
               <div className="min-w-0">
                 <div
                   className="mb-1.5 font-mono text-[10.5px] font-semibold uppercase tracking-[0.09em] text-fg-faint"
                   title="The session's mission — from the Tag Library. Sets how eagerly /develop fires."
                 >
-                  2 · mission — how they work
+                  Mission
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <div className="inline-flex rounded-[10px] border border-line bg-bg p-0.5">
                   {missionTags.map((t) => {
                     const on = tag === t
                     return (
@@ -666,9 +588,10 @@ export function NewEpicCard({
                         key={t}
                         type="button"
                         data-testid={`new-epic-kind-${t}`}
+                        aria-pressed={on}
                         onClick={() => setTag(t)}
                         className={`rounded-md px-2.5 py-1 text-xs font-medium ${
-                          on ? 'bg-bg text-fg ring-1 ring-inset ring-line font-semibold' : 'text-fg-faint'
+                          on ? 'bg-bg-hi text-fg font-semibold shadow-sm' : 'text-fg-dim'
                         }`}
                       >
                         {tagLibraryEntry(t).label}
@@ -676,30 +599,11 @@ export function NewEpicCard({
                     )
                   })}
                 </div>
-                <div className="mt-2 border-l-2 border-accent-muted pl-2.5 text-[12.5px] leading-[1.5] text-fg-dim">
-                  {selectedTagMission}
-                  <div className="mt-1 font-mono text-[11px] text-fg-faint">
-                    {runtimeInfo ? (
-                      <EffectiveRuntimeLine info={runtimeInfo} />
-                    ) : selectedAgent?.model && selectedAgent.model !== 'inherit' ? (
-                      selectedAgent.model
-                    ) : (
-                      'sonnet'
-                    )}
-                    {selectedAgent ? ` · ${selectedAgent.tools.join(' ') || 'no tool restriction'}` : ''}
-                  </div>
-                  <EpicRuntimeOverride
-                    cwd={effectiveCwd || null}
-                    personaModel={selectedAgent?.model ?? null}
-                    personaEffort={selectedAgent?.effort ?? null}
-                    model={modelOverride}
-                    effort={effortOverride}
-                    onModel={setModelOverride}
-                    onEffort={setEffortOverride}
-                  />
-                </div>
               </div>
             </div>
+            <p className="mb-3.5 text-[12.5px] leading-[1.5] text-fg-dim" data-testid="new-epic-mission-description">
+              {selectedTagMission}
+            </p>
 
             <input
               data-testid="new-epic-title"
@@ -716,7 +620,7 @@ export function NewEpicCard({
               value={goal}
               onChange={(e) => setGoal(e.target.value)}
               onPaste={(e) => attachPastedFiles(e, att)}
-              placeholder="The objective, in a sentence or two — this is sent as the first instruction. ⌘V to attach a screenshot."
+              placeholder="The objective, in a sentence or two — sent as the first instruction. ⌘V to attach a screenshot."
               className="mb-3 w-full resize-y appearance-none rounded-[10px] border border-line bg-bg px-[13px] py-[11px] text-[13px] leading-[1.55] text-fg outline-none"
             />
 
@@ -787,6 +691,15 @@ export function NewEpicCard({
             <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden pr-1">
 
             <div className="mb-3 rounded-[10px] border border-line bg-bg px-3 py-2.5">
+              {!showProjectSelector && (
+                <div
+                  data-testid="new-prompt-cwd-static"
+                  className="mb-2.5 flex items-center gap-1.5 font-mono text-[11px] text-fg-faint"
+                >
+                  <span className="uppercase tracking-[0.09em]">Project</span>
+                  <span className="text-fg-dim">{compactPath(effectiveCwd)}</span>
+                </div>
+              )}
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="inline-flex items-center gap-1.5 font-mono text-xs font-semibold text-fg">
                   <span className="h-1.5 w-1.5 rotate-45 rounded-sm" style={{ background: selectedAgent ? agentDot(selectedAgent.name) : '#8a7a60' }} />
@@ -807,6 +720,29 @@ export function NewEpicCard({
                 {' · '}
                 {tagLibraryEntry(tag).developEagerness}
               </div>
+            </div>
+
+            <div className="mb-3 rounded-[10px] border border-line bg-bg px-3 py-2.5" data-testid="new-epic-runtime-panel">
+              <div className="mb-1.5 text-[12.5px] font-semibold text-fg">Runtime</div>
+              <div className="font-mono text-[11px] text-fg-faint">
+                {runtimeInfo ? (
+                  <EffectiveRuntimeLine info={runtimeInfo} />
+                ) : selectedAgent?.model && selectedAgent.model !== 'inherit' ? (
+                  selectedAgent.model
+                ) : (
+                  'sonnet'
+                )}
+                {selectedAgent ? ` · ${selectedAgent.tools.join(' ') || 'no tool restriction'}` : ''}
+              </div>
+              <EpicRuntimeOverride
+                cwd={effectiveCwd || null}
+                personaModel={selectedAgent?.model ?? null}
+                personaEffort={selectedAgent?.effort ?? null}
+                model={modelOverride}
+                effort={effortOverride}
+                onModel={setModelOverride}
+                onEffort={setEffortOverride}
+              />
             </div>
 
             {/* Context Injections — Session-Manager-authored text, independent

@@ -22,6 +22,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { registerActiveProject } = require('./_helpers/schedulerHarness.cjs');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'quarantine-autoresolve-test-'));
 process.env.HOME = tmpHome;
@@ -44,13 +45,6 @@ function quarantinedJob(overrides = {}) {
     statusHistory: [{ to: 'quarantined', at: new Date(Date.now() - 90 * MIN_MS).toISOString() }],
     ...overrides,
   };
-}
-
-function registerActiveProject(cwd) {
-  const projectsDir = path.join(tmpHome, '.claude', 'projects');
-  const slugDir = path.join(projectsDir, `fake-project-slug-${path.basename(cwd)}`);
-  fs.mkdirSync(slugDir, { recursive: true });
-  fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
 }
 
 function makeFixtureProject(prefix) {

@@ -36,6 +36,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { assertOpsWrite, opsPath } = require('./opsOwnership.cjs');
+const atomicFs = require('./atomicFs.cjs');
 
 // The old machine-wide map. Read-only from here on (migration source only) —
 // never written again, and deliberately never deleted so unmigrated projects
@@ -76,10 +77,7 @@ function readPerProjectConfigFile(cwd) {
 function writePerProjectConfig(cwd, config, writer = 'epics') {
   const file = perProjectConfigPath(cwd);
   assertOpsWrite(file, writer);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(config, null, 2) + '\n');
-  fs.renameSync(tmp, file);
+  atomicFs.writeJsonAtomicSync(file, config);
 }
 
 /**

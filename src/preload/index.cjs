@@ -9,7 +9,6 @@ contextBridge.exposeInMainWorld('api', {
     engageRulesPath: () => ipcRenderer.invoke('app:engage-rules-path'),
     pickDirectory: () => ipcRenderer.invoke('app:pick-directory'),
     gitBranch: (cwd) => ipcRenderer.invoke('app:git-branch', { cwd }),
-    resolveBuildTarget: (cwd) => ipcRenderer.invoke('build:resolve-target', { cwd }),
     rebootApp: (opts) => ipcRenderer.send('app:reboot-app', opts),
     archiveProject: (encoded) => ipcRenderer.invoke('app:archive-project', { encoded }),
     testFireHook: (args) => ipcRenderer.invoke('app:test-fire-hook', args),
@@ -27,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
     installPrdWriteGuard: (cwd) => ipcRenderer.invoke('app:install-prd-write-guard', { cwd }),
     installDestructiveGitGuard: (cwd) => ipcRenderer.invoke('app:install-destructive-git-guard', { cwd }),
     installInlineImplementationGuard: (cwd) => ipcRenderer.invoke('app:install-inline-implementation-guard', { cwd }),
+    installSelfScheduleGuard: (cwd) => ipcRenderer.invoke('app:install-self-schedule-guard', { cwd }),
     onNewSession: (handler) => {
       const listener = () => handler();
       ipcRenderer.on('app:new-session', listener);
@@ -115,6 +115,18 @@ contextBridge.exposeInMainWorld('api', {
       const listener = () => handler();
       ipcRenderer.on('agents:changed', listener);
       return () => ipcRenderer.removeListener('agents:changed', listener);
+    },
+  },
+  macros: {
+    list: () => ipcRenderer.invoke('macros:list'),
+    save: (payload) => ipcRenderer.invoke('macros:save', payload),
+    delete: (payload) => ipcRenderer.invoke('macros:delete', payload),
+    setProject: (payload) => ipcRenderer.invoke('macros:set-project', payload),
+    // Fired after any save/delete/set-project so every subscriber re-fetches list().
+    onChanged: (handler) => {
+      const listener = () => handler();
+      ipcRenderer.on('macros:changed', listener);
+      return () => ipcRenderer.removeListener('macros:changed', listener);
     },
   },
   models: {
@@ -239,7 +251,7 @@ contextBridge.exposeInMainWorld('api', {
     worktreeBase: () => ipcRenderer.invoke('schedule:worktree-base'),
     setSessionSlots: (cap) => ipcRenderer.invoke('schedule:set-session-slots', { cap }),
     setConfig: (partial) => ipcRenderer.invoke('schedule:set-config', partial),
-    resetJob: (slug) => ipcRenderer.invoke('schedule:reset-job', { slug }),
+    resetJob: (slug, cwd) => ipcRenderer.invoke('schedule:reset-job', cwd ? { slug, cwd } : { slug }),
     runNow: () => ipcRenderer.invoke('schedule:run-now'),
     forceTick: () => ipcRenderer.invoke('schedule:force-tick'),
     pause: () => ipcRenderer.invoke('schedule:pause'),
@@ -335,13 +347,6 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('project-pages:changed', listener);
       return () => ipcRenderer.removeListener('project-pages:changed', listener);
     },
-  },
-  bilkoHost: {
-    get: (cwd) => ipcRenderer.invoke('bilko-host:get', { cwd }),
-    prepareBundle: (cwd, slug) => ipcRenderer.invoke('bilko-host:prepare-bundle', { cwd, slug }),
-    addDocument: (cwd, subpath, title, source) =>
-      ipcRenderer.invoke('bilko-host:add-document', { cwd, subpath, title, source }),
-    removeDocument: (cwd, id) => ipcRenderer.invoke('bilko-host:remove-document', { cwd, id }),
   },
   promptSessionTranscript: {
     append: (cwd, epicId, turn) =>

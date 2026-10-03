@@ -64,8 +64,8 @@ export interface EpicIntakeFields {
    * from `groundingBoard.ts`'s `summarizeGroundingBoard`. Placed after the
    * Actor line and before the Mission template — who, then what they're
    * standing on, then what they're here to do. Omitted entirely when absent
-   * (e.g. callers that never computed a grounding board, like EpicQueue's
-   * scripted 'build' Epic).
+   * (e.g. callers that never computed a grounding board, e.g. resumed
+   * Epics).
    */
   inputSummary?: string
   /**
@@ -74,8 +74,8 @@ export interface EpicIntakeFields {
    * in the New Epic card's advanced grounding board. `true` includes that
    * key's `text` right after the Actor line (extends "who's acting" with
    * "how they generally behave" before Input/Mission). Defaults to omitted
-   * (no injection) for callers that don't pass it — e.g. EpicQueue's
-   * scripted 'build' Epic.
+   * (no injection) for callers that don't pass it — e.g. hot-key
+   * macro launches (SessionActionsBar).
    */
   contextInjections?: Partial<Record<keyof typeof CONTEXT_INJECTIONS, boolean>>
 }

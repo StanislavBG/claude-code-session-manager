@@ -14,7 +14,7 @@
 'use strict';
 
 const { z } = require('zod');
-const { WorkTypeSchema } = require('./workTypeLibrary.cjs');
+const { WorkTypeSchema, LEGACY_WORK_TYPES } = require('./workTypeLibrary.cjs');
 
 // Mirrors EpicTag (src/renderer/lib/tagLibrary.ts:10) — the Epic-level
 // mission tag. Epic tag and PRD tag (ipcSchemas.cjs's scheduleRetagPrd `tag`
@@ -22,6 +22,14 @@ const { WorkTypeSchema } = require('./workTypeLibrary.cjs');
 // WorkTypeSchema from workTypeLibrary.cjs rather than each declaring their
 // own enum literal.
 const EpicTagSchema = WorkTypeSchema;
+
+// A legacy tag value (e.g. the retired 'bilko-host-publisher') must keep
+// loading on an old on-disk Epic — dropped silently (treated as absent),
+// never thrown. Any other unknown value still fails via EpicTagSchema.
+const LegacyAwareEpicTagSchema = z.preprocess(
+  (v) => (typeof v === 'string' && LEGACY_WORK_TYPES.includes(v) ? undefined : v),
+  EpicTagSchema.optional(),
+);
 
 // Mirrors EpicSource (src/renderer/state/promptSessions.ts:22-27).
 const EpicSourceSchema = z.object({
@@ -69,7 +77,7 @@ const PromptSessionSchema = z.object({
   createdAt: z.string(),
   completedAt: z.string().nullable(),
   resumedFromId: z.string().nullable().optional(),
-  tag: EpicTagSchema.optional(),
+  tag: LegacyAwareEpicTagSchema,
   openingPrompt: z.string().nullable().optional(),
   source: EpicSourceSchema.optional(),
   agentType: z.string().optional(),

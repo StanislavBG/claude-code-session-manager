@@ -133,7 +133,7 @@ const TOOLS = [
       type: 'object',
       properties: {
         slug: { type: 'string', description: 'PRD slug of the job to reset' },
-        force: { type: 'boolean', description: 'Required to reset a job whose status is already "completed"' },
+        force: { type: 'boolean', description: 'Required to reset a job whose status is already "completed" or "skipped"' },
         cwd: { type: 'string', description: 'Optional: the PRD project cwd, narrows/speeds the search' },
       },
       required: ['slug'],
@@ -162,13 +162,21 @@ const TOOLS = [
       properties: {
         title: { type: 'string', description: 'One-line human-readable title' },
         cwd: { type: 'string', description: 'Absolute path to the target project (where claude -p will run). Optional inside an Epic session — the server resolves the real project from the calling session (originClaudeSessionId/sourcePromptId) when omitted.' },
-        estimateMinutes: { type: 'number', description: 'Integer wall-clock estimate in minutes' },
+        estimateMinutes: { type: 'number', description: 'Integer wall-clock estimate in minutes. Most PRDs take 5-10; never over 15 (split instead)' },
         goal: { type: 'string', description: '2-4 sentences: what the executor will build and why' },
         acceptanceCriteria: {
           type: 'array', items: { type: 'string' },
           description: 'Each entry is one verifiable checklist line',
         },
         implementationNotes: { type: 'string', description: 'File paths, patterns, and constraints the executor needs' },
+        gate: {
+          type: 'array', items: { type: 'string' },
+          description: 'REQUIRED. Commands that prove this PRD is done. The scheduler re-runs them without a shell. One command per entry, run in order; each must exit 0. Start each && step with `timeout <seconds>`. Join steps with &&. Outside single quotes, no | < > ; & ` $ \\ * ? [ ] ( ) { } or !. Use ["none"], exactly, only for docs or config with no runnable check.',
+        },
+        files: {
+          type: 'array', items: { type: 'string' },
+          description: 'REQUIRED. Repo-relative files or folders (end a folder with /) this PRD may change. No absolute paths, .. or . segments, globs, backslashes or backticks. PRDs that run at the same time must not share files; chain them with dependsOn instead.',
+        },
         outOfScope: { type: 'array', items: { type: 'string' }, description: 'Optional: what NOT to build' },
         slug: { type: 'string', description: 'Optional kebab-case slug; derived from title if omitted' },
         parallelGroup: { type: 'number', description: 'DEPRECATED and ignored (PRD 832): numbers are strictly unique per project; use dependsOn for ordering' },
@@ -194,7 +202,7 @@ const TOOLS = [
           description: 'Optional: set true only when this PRD\'s acceptance criteria are wall-clock/timing measurements (frame time, performance fences) that CPU contention from concurrent jobs would invalidate. The scheduler dispatches it only once zero other jobs are running machine-wide, and holds every other job off the whole slot pool for its run — a whole-machine exclusive lease, not a per-project one. If the machine never goes quiet within the configured wait window (default 30 minutes), it dispatches anyway and is marked degraded. Opt-in only; omit for ordinary PRDs.',
         },
       },
-      required: ['title', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes'],
+      required: ['title', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes', 'gate', 'files'],
     },
   },
   {
@@ -490,6 +498,18 @@ async function handleCallTool(request) {
           + 'If more work is genuinely needed, say so in your final result text — the authoring Epic decides whether to queue it.',
         );
       }
+      // Required-fields refusal (gate-and-files-in-PRD-body unit): checked
+      // right after the headless-refusal check above, before any payload
+      // forwarding — 74% of parked jobs had no gate the scheduler could
+      // read, so the tool itself refuses a call missing either field rather
+      // than letting an ungated PRD reach disk.
+      if (!Array.isArray(args?.gate) || args.gate.length === 0 || !Array.isArray(args?.files) || args.files.length === 0) {
+        return errorResult(
+          'scheduler_create_prd needs "gate" (the commands that prove this PRD is done, with each && step '
+          + 'starting with "timeout <seconds>", or ["none"]) and "files" (the repo-relative files this PRD may change). '
+          + 'Add both and call again.',
+        );
+      }
       // If the caller (the model) didn't pass sourcePromptId, forward this
       // process's own SM_CHAT_SESSION_ID (set by chatRunner.cjs on the
       // parent claude -p process this MCP server inherited its env from) so
@@ -515,11 +535,20 @@ async function handleCallTool(request) {
         ? ' — PRD file written; the queue row is derived on the next scheduler reconcile pass, not by this call.'
         : '';
       let text = JSON.stringify(result) + note;
-      // Sizing warnings (PRD 1403) are advisory only — never block the write,
-      // just surfaced here so the authoring session can decide to split the
-      // PRD before confirming it. See prdSizing.cjs.
+      // Warnings (PRD 1403 sizing + gate-and-files-in-PRD-body absent/none-gate
+      // warnings) are advisory only — never block the write, just surfaced
+      // here so the authoring session can decide to split or re-queue before
+      // confirming it. See prdSizing.cjs and prdGateFiles.cjs.
       if (Array.isArray(result?.warnings) && result.warnings.length > 0) {
-        text += `\nSizing warnings:\n${result.warnings.map((w) => `- ${w}`).join('\n')}`;
+        text += `\nWarnings:\n${result.warnings.map((w) => `- ${w}`).join('\n')}`;
+      }
+      // Echo the gate and files the API actually recorded, same honesty
+      // standard as `note` above — not a repeat of the caller's own input.
+      if (result?.gate) {
+        text += `\nGate (${result.gate.source}): ${result.gate.commands.join(' && ')}`;
+      }
+      if (Array.isArray(result?.files)) {
+        text += `\nFiles: ${result.files.join(', ')}`;
       }
       return { content: [{ type: 'text', text }] };
     }

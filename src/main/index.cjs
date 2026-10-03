@@ -42,6 +42,7 @@ const epicWorktreeMint = require('./lib/epicWorktreeMint.cjs');
 const epicWorktreeMerge = require('./lib/epicWorktreeMerge.cjs');
 const epicWorktreeProjectConfig = require('./lib/epicWorktreeProjectConfig.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
+const macroLibrary = require('./lib/macroLibrary.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const agentEffortResolve = require('./lib/agentEffortResolve.cjs');
 const { resolveEffectiveModelInfo } = require('./lib/effectiveModelInfo.cjs');
@@ -52,7 +53,6 @@ const upgradeDrain = require('./lib/upgradeDrain.cjs');
 const { writeGuardShims } = require('./lib/guardShims.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES } = require('./lib/mcpToolCatalog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
-const { resolveBuildTarget } = require('./lib/buildTarget.cjs');
 const crossProjectFeedback = require('./lib/crossProjectFeedback.cjs');
 const adminHttp = createAdminHttp();
 scheduler.registerAdminRoutes(adminHttp);
@@ -88,7 +88,6 @@ const memoryTool = require('./memoryTool.cjs');
 const { registerMemoryAggregateIpc } = require('./memoryAggregate.cjs');
 const { registerProjectBriefIpc } = require('./projectBrief.cjs');
 const { registerProjectPagesIpc, attachWindow: attachProjectPagesWindow, closeAllOutputWatchers: closeAllProjectPagesWatchers } = require('./projectPages.cjs');
-const { registerBilkoHostIpc } = require('./bilkoHost.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { computeEpicDelegationStats } = require('./lib/epicDelegationStats.cjs');
 const agentMemory = require('./agentMemory.cjs');
@@ -551,6 +550,28 @@ ipcMain.handle('agents:remove-override', async (_e, payload) => {
   broadcastAgentsChanged();
   return result;
 });
+// Macro library (macroLibrary.cjs): global machine-local one-click sidebar
+// macros (agent + tag + prompt). Store path is fixed in-module; the renderer
+// never supplies it. Mutations broadcast `macros:changed`.
+function broadcastMacrosChanged() {
+  sendIfAlive(mainWindow, 'macros:changed', {});
+}
+ipcMain.handle('macros:list', () => macroLibrary.listMacros());
+ipcMain.handle('macros:save', validated(schemas.macrosSave, async (payload) => {
+  const macro = await macroLibrary.saveMacro(payload);
+  broadcastMacrosChanged();
+  return macro;
+}));
+ipcMain.handle('macros:delete', validated(schemas.macrosDelete, async (payload) => {
+  const result = await macroLibrary.deleteMacro(payload);
+  broadcastMacrosChanged();
+  return result;
+}));
+ipcMain.handle('macros:set-project', validated(schemas.macrosSetProject, async (payload) => {
+  const result = await macroLibrary.setMacroProject(payload);
+  if (result.ok) broadcastMacrosChanged();
+  return result;
+}));
 // New Epic AIM composer (epicIntake.ts's `agentBody`/`agentPath`): unlike
 // list-personas above (global dir only), this honors the project-overlay-
 // then-global precedence so an Epic's opening prompt carries the persona
@@ -877,13 +898,6 @@ ipcMain.handle('app:git-branch', validated(schemas.appGitBranch, async ({ cwd })
   });
 }));
 
-// Resolves a project's publish target for 'build'-tagged Epics — see
-// lib/buildTarget.cjs. Null means the Build toolbar button should be disabled
-// (no explicit config, no auto-discoverable publishable package.json).
-ipcMain.handle('build:resolve-target', validated(schemas.buildResolveTarget, ({ cwd }) => {
-  return resolveBuildTarget(cwd);
-}));
-
 // Containment check for the open-in-{editor,finder,terminal} handlers lives
 // in lib/insideHome.cjs — single chokepoint for the /home/bilkoEVIL prefix-trap.
 // Editor / finder / terminal logic lives in lib/openExternalApp.cjs.
@@ -983,7 +997,6 @@ epicWorktreeProjectConfig.registerEpicWorktreeProjectConfigHandlers();
 registerMemoryAggregateIpc();
 registerProjectBriefIpc();
 registerProjectPagesIpc();
-registerBilkoHostIpc();
 ipcMain.handle('promptSessionTranscript:append', validated(schemas.promptSessionTranscriptAppend, async ({ cwd, epicId, role, text, at, eventId }) => {
   const ok = await promptSessionTranscript.appendTurn(cwd, epicId, { role, text, at, eventId });
   return { ok };

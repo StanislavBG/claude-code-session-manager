@@ -18,17 +18,14 @@ import { test, expect, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { makeFixtureCwd: harnessMakeFixtureCwd } = require('./_helpers/schedulerHarness.cjs');
 const { remote } = require('../scheduler.cjs');
 const { ensureEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epicMint.cjs');
 const config = require('../config.cjs');
 
 const tmpDirs = [];
 
-function makeFixtureCwd() {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-writeprd-epic-rollback-'));
-  tmpDirs.push(cwd);
-  return cwd;
-}
+const makeFixtureCwd = () => harnessMakeFixtureCwd('sm-writeprd-epic-rollback-', tmpDirs);
 
 afterEach(() => {
   while (tmpDirs.length) {

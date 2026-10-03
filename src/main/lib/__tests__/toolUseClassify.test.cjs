@@ -51,3 +51,23 @@ test('Edit block missing file_path yields no diff', () => {
   const result = classifyToolUse(block);
   expect(result.diff).toBeUndefined();
 });
+
+test('classifies a Skill block by its input.skill', () => {
+  expect(classifyToolUse({ name: 'Skill', input: { skill: 'code-review', args: '--fix' } }))
+    .toEqual({ kind: 'skill', label: 'code-review' });
+});
+
+test('falls back to label "skill" when a Skill block has no input.skill', () => {
+  expect(classifyToolUse({ name: 'Skill', input: {} })).toEqual({ kind: 'skill', label: 'skill' });
+  expect(classifyToolUse({ name: 'Skill' })).toEqual({ kind: 'skill', label: 'skill' });
+});
+
+test('classifies an mcp__ prefixed tool, stripping the prefix', () => {
+  expect(classifyToolUse({ name: 'mcp__sqlite__query', input: {} }))
+    .toEqual({ kind: 'mcp', label: 'sqlite__query' });
+});
+
+test('classifies a plain built-in tool by its name', () => {
+  expect(classifyToolUse({ name: 'Bash', input: { command: 'ls' } }))
+    .toEqual({ kind: 'tool', label: 'Bash' });
+});

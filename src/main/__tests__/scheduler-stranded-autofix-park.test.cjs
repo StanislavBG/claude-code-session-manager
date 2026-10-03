@@ -34,6 +34,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { registerActiveProject } = require('./_helpers/schedulerHarness.cjs');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'stranded-autofix-park-test-'));
 process.env.HOME = tmpHome;
@@ -57,7 +58,6 @@ const {
   NEEDS_REVIEW_RESOLVE_CAP,
 } = require('../scheduler.cjs');
 const { resolvePrdWriteDir } = require('../lib/prdLocations.cjs');
-const { bustCwdCache } = require('../lib/queueStore.cjs');
 
 const MIN_MS = 60_000;
 const THRESHOLD_MS = 30 * MIN_MS;
@@ -65,13 +65,6 @@ const THRESHOLD_MS = 30 * MIN_MS;
 // findPrdDir (via resolvePrdsDirs -> allProjectCwds) only discovers a PRD
 // dir under a cwd it already knows about — same registration computeLooksDone
 // needs in scheduler-looks-done.test.cjs / scheduler-guard-verdict-autoresolve.test.cjs.
-function registerActiveProject(cwd, slug) {
-  const slugDir = path.join(tmpHome, '.claude', 'projects', slug);
-  fs.mkdirSync(slugDir, { recursive: true });
-  fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
-  bustCwdCache();
-}
-
 // Replays the live 1218-fo-01 tuple: needs_review, verifierVerdict
 // transcript_errors, exitCode 0, a landed commit, autoFixAttempted true,
 // autoFixOutcome undefined, statusHistory ending in the exact

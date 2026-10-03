@@ -130,7 +130,7 @@ describe('AlmanacSidebar', () => {
       expect(text).not.toContain('One-off utilities')
 
       // …but every project-face row is still there, in NAV_ITEMS order.
-      for (const label of ['Project Home', 'Sessions', 'File Explorer', 'Scheduler', 'Memory', 'Host on Bilko.run']) {
+      for (const label of ['Project Home', 'Sessions', 'File Explorer', 'Scheduler', 'Memory']) {
         expect(text).toContain(label)
       }
     } finally {

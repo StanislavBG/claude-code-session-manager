@@ -69,8 +69,6 @@ function installWindowApiMock(personas: AgentPersona[] = PERSONAS) {
         }
       }),
     },
-    // The Action-scope field lists this machine's known projects (useKnownProjects
-    // -> useHomeDir), so the persona editor now needs these two reads to mount.
     app: { homeDir: vi.fn().mockResolvedValue('/home/bilko') },
     config: {
       listDir: vi.fn().mockResolvedValue([]),
@@ -142,6 +140,20 @@ describe('AgentLibrary', () => {
     })
     expect(el.textContent).toContain('Diagnose a failing test.')
     expect(el.textContent).toContain('no open project overlays this agent')
+  })
+
+  it('has no Action section, and a save passes existing projects/action/actionLabel through untouched', async () => {
+    const actionPersona: AgentPersona = { ...PERSONAS[0], projects: ['*'], action: 'Sweep it.', actionLabel: 'Sweep' }
+    const { api } = installWindowApiMock([actionPersona, PERSONAS[1]])
+    const el = await mount()
+    expect(el.textContent).not.toContain('action — appears in')
+    expect(el.textContent).not.toContain('every project')
+    const tag = Array.from(el.querySelectorAll('button')).find((b) => /^#/.test(b.textContent ?? ''))!
+    await act(async () => { tag.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve() })
+    const save = Array.from(el.querySelectorAll('button')).find((b) => /^save$/i.test(b.textContent ?? ''))!
+    await act(async () => { save.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve() })
+    expect(api.agents.savePersona).toHaveBeenCalledTimes(1)
+    expect(api.agents.savePersona.mock.calls[0][0]).toMatchObject({ projects: ['*'], action: 'Sweep it.', actionLabel: 'Sweep' })
   })
 
   it('filters the list by name', async () => {

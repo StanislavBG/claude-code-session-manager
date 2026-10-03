@@ -62,16 +62,6 @@ export function useEffectiveSettings() {
   return useEffectiveSettingsFor(cwd)
 }
 
-/** Read a leaf string from an EffectiveNode at the given path. */
-export function readLeafString(
-  node: EffectiveNode,
-  path: string[]
-): string | null {
-  const leaf = getAtPath(node, path)
-  if (!leaf || leaf.kind !== 'leaf') return null
-  return typeof leaf.value === 'string' ? leaf.value : null
-}
-
 /**
  * Read a leaf string with its winning scope. When `source` is null, no scope
  * defined this key — the pill should render "default" rather than an empty

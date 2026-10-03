@@ -17,6 +17,7 @@ const path = require('node:path');
 const config = require('../config.cjs');
 const {
   appendResponseEventIfKnown,
+  appendResponseEventWithReason,
   promptSessionActiveIndexPath,
   attachWindow,
   EVENT_APPENDED_CHANNEL,
@@ -211,6 +212,74 @@ test('appending without { prdSlug, outcome } persists an event with neither key 
   // Also assert the raw JSON text has no undefined-valued keys serialized in.
   expect(raw).not.toMatch(/"prdSlug"/);
   expect(raw).not.toMatch(/"outcome"/);
+});
+
+// --- appendResponseEventWithReason: one test per reason, and the wrapper ---
+
+test('appendResponseEventWithReason reports missing-args when cwd or sourcePromptId is missing', async () => {
+  expect(await appendResponseEventWithReason(null, 'psess-1', 'hi')).toEqual({ ok: false, reason: 'missing-args' });
+  expect(await appendResponseEventWithReason(cwd, null, 'hi')).toEqual({ ok: false, reason: 'missing-args' });
+});
+
+test('appendResponseEventWithReason reports no-index when no active-index.json exists for the cwd', async () => {
+  expect(await appendResponseEventWithReason(cwd, 'psess-unknown', 'hi')).toEqual({ ok: false, reason: 'no-index' });
+});
+
+test('appendResponseEventWithReason reports no-session when sourcePromptId is not in the index', async () => {
+  await writeIndex({ sessions: {}, events: {} });
+  expect(await appendResponseEventWithReason(cwd, 'psess-unknown', 'hi')).toEqual({ ok: false, reason: 'no-session' });
+});
+
+test('appendResponseEventWithReason reports not-active when the session has already completed', async () => {
+  await writeIndex({
+    sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'completed' } },
+    events: { 'psess-1': [{ id: 'pevt-1', promptSessionId: 'psess-1', kind: 'prompt', causedByEventId: null, at: '2026-01-01T00:00:00.000Z' }] },
+  });
+  expect(await appendResponseEventWithReason(cwd, 'psess-1', 'hi')).toEqual({ ok: false, reason: 'not-active' });
+});
+
+test('appendResponseEventWithReason reports no-events when the session has no event chain to append onto', async () => {
+  await writeIndex({
+    sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'active' } },
+    events: { 'psess-1': [] },
+  });
+  expect(await appendResponseEventWithReason(cwd, 'psess-1', 'hi')).toEqual({ ok: false, reason: 'no-events' });
+});
+
+test('appendResponseEventWithReason reports error when the write throws', async () => {
+  await writeIndex({
+    sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'active' } },
+    events: { 'psess-1': [{ id: 'pevt-1', promptSessionId: 'psess-1', kind: 'prompt', causedByEventId: null, at: '2026-01-01T00:00:00.000Z' }] },
+  });
+  const spy = vi.spyOn(config, 'writeJson').mockRejectedValueOnce(new Error('disk full'));
+  try {
+    expect(await appendResponseEventWithReason(cwd, 'psess-1', 'hi')).toEqual({ ok: false, reason: 'error' });
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test('appendResponseEventWithReason returns { ok: true } on success, with no reason key', async () => {
+  await writeIndex({
+    sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'active' } },
+    events: { 'psess-1': [{ id: 'pevt-1', promptSessionId: 'psess-1', kind: 'prompt', causedByEventId: null, at: '2026-01-01T00:00:00.000Z' }] },
+  });
+  const result = await appendResponseEventWithReason(cwd, 'psess-1', 'hi');
+  expect(result).toEqual({ ok: true });
+});
+
+test('appendResponseEventIfKnown stays a plain boolean wrapper, true or false, over every reason', async () => {
+  const missingArgs = await appendResponseEventIfKnown(cwd, null, 'hi');
+  expect(missingArgs).toBe(false);
+  expect(typeof missingArgs).toBe('boolean');
+
+  await writeIndex({
+    sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'active' } },
+    events: { 'psess-1': [{ id: 'pevt-1', promptSessionId: 'psess-1', kind: 'prompt', causedByEventId: null, at: '2026-01-01T00:00:00.000Z' }] },
+  });
+  const ok = await appendResponseEventIfKnown(cwd, 'psess-1', 'hi');
+  expect(ok).toBe(true);
+  expect(typeof ok).toBe('boolean');
 });
 
 test('does not throw broadcasting before a window is attached, or after it is destroyed', async () => {

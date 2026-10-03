@@ -8,7 +8,6 @@ release
 # false-positive is replayed byte-for-byte, not reconstructed from memory.
 !src/main/__tests__/fixtures/*.log
 .DS_Store
-e2e/.cache
 test-results
 playwright-report
 .env
@@ -18,7 +17,6 @@ playwright-report
 .claude/agents/*
 !.claude/agents/builder.md
 !.claude/agents/project-home-builder.md
-!.claude/agents/bilko-host-publisher.md
 # Tracked deliberately (unlike settings.local.json): the guard-prd-writes
 # PreToolUse hook must be active for every clone/worktree/headless scheduler
 # run against this repo, not just this machine's local config — see
@@ -42,3 +40,14 @@ skill-proposals/
 # dev checkout / job worktree has no build-info.json, so
 # src/main/lib/buildIdentity.cjs falls back to a live git read instead.
 src/main/build-info.json
+
+# Operational runtime state — written continuously by the scheduler / Epic
+# store, machine-local, never source. Authored docs under
+# session-manager-operations/ (architecture, manual, design-mocks, reviews,
+# project-brief, project-pages, HUMAN_LEARN, CLAUDE.md) stay tracked.
+session-manager-operations/scheduler/
+session-manager-operations/prompt-sessions/
+session-manager-operations/feedback/
+session-manager-operations/logs/
+session-manager-operations/ui-prefs/
+session-manager-operations/memory-clusters/

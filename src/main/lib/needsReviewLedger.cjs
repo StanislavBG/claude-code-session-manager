@@ -60,7 +60,7 @@ function classifyLadderRung({ source, reason } = {}) {
   if (s === 'spawnInvestigation:start' || s === 'spawnJob:auto-promote' || s === 'reverifyNeedsReview:auto-promote') {
     return 'auto-fix';
   }
-  if (s === 'reverifyNeedsReview:heal' || s === 'needsReviewAutoResolve') return 'reverify';
+  if (s === 'reverifyNeedsReview:heal' || s === 'needsReviewAutoResolve' || s === 'gateAuthoritative') return 'reverify';
   // No transitionJob call site resolves needs_review with a 'quarantine'
   // source today (performLeftoverQuarantine cleans up leftover paths without
   // itself changing job.status — the row stays needs_review until a later

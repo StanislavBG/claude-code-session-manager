@@ -81,7 +81,7 @@ describe('dataModelErd', () => {
         'scheduleConfig', 'runLog', 'agentPersona', 'tag', 'memoryEntry',
         'memoryCluster', 'agentMemoryEntry', 'claudeTranscript', 'transcriptEvent',
         'historyRollupDay', 'billingUsage', 'projectBrief', 'projectPages',
-        'bilkoPublishState', 'settingsScope', 'layoutEnvelope', 'opsNamespace',
+        'settingsScope', 'layoutEnvelope', 'opsNamespace',
         'mcpServerRegistry', 'pluginRegistry', 'systemPrompt', 'skillsAndCommands',
         'mcpStatusProbe', 'uiPrefs',
       ].sort(),
@@ -99,7 +99,6 @@ describe('dataModelErd', () => {
       ['prompt-sessions', 'epics'],
       ['scheduler/', 'scheduler'],
       ['project-brief', 'project-home'],
-      ['bilko-host', 'bilko-host'],
       ['project-pages', 'project-home'],
       ['memory-clusters', 'memory-clusters'],
     ]

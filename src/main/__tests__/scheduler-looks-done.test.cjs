@@ -28,7 +28,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { git, initRepo, registerActiveProject, writeProjectQueue, writeRunLog } = require('./_helpers/schedulerHarness.cjs');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'looks-done-test-'));
 process.env.HOME = tmpHome;
@@ -54,20 +54,6 @@ const { reverifyNeedsReview, computeLooksDone, applyNeedsReviewAutoResolve, find
 const { resolveEpicPrdWriteDir } = require('../lib/prdLocations.cjs');
 const { bustCwdCache } = require('../lib/queueStore.cjs');
 
-function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' });
-}
-
-function initRepo(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-  git(['init', '-q'], dir);
-  git(['config', 'user.email', 'test@example.com'], dir);
-  git(['config', 'user.name', 'Test'], dir);
-  fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n', 'utf8');
-  git(['add', '-A'], dir);
-  git(['commit', '-q', '-m', 'initial'], dir);
-}
-
 // -b main pins the branch name regardless of the host's init.defaultBranch
 // config — findSatisfyingCommitOnMain's tests need a deterministic 'main' ref.
 function initRepoOnMain(dir) {
@@ -86,27 +72,6 @@ function commitFile(dir, relPath, content, message) {
   fs.writeFileSync(abs, content);
   git(['add', relPath], dir);
   git(['commit', '-q', '-m', message], dir);
-}
-
-function registerActiveProject(cwd, slug) {
-  const projectsDir = path.join(tmpHome, '.claude', 'projects');
-  const slugDir = path.join(projectsDir, slug);
-  fs.mkdirSync(slugDir, { recursive: true });
-  fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
-  bustCwdCache();
-}
-
-function writeProjectQueue(cwd, jobs) {
-  const stateDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
-  fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({ jobs }, null, 2));
-  return path.join(stateDir, 'queue.json');
-}
-
-function writeRunLog(runId, slug, lines) {
-  const runDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId);
-  fs.mkdirSync(runDir, { recursive: true });
-  fs.writeFileSync(path.join(runDir, `${slug}.log`), lines.join('\n') + '\n');
 }
 
 // Epic-scoped, not the legacy flat prds/ dir: the flat dir is retired and

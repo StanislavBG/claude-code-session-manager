@@ -553,25 +553,6 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
         'The tag taxonomy itself is read-only here — change an existing Epic\'s tag from its queue row menu, not from this page. The agent↔tag assignment, though, is editable from either Tag Library or Agent Library.',
       ],
     },
-  'bilko-host': {
-      headline: 'Host on Bilko.run — publish this project\'s Project Home page',
-      intro: 'Turns this project\'s already-generated Project Home page (home.html) into a live static-path listing on bilko.run, using the bilko-host MCP\'s existing gated publish pipeline (manifest/budget/golden/a11y/audit checks) — never a second, competing hosting mechanism.',
-      sections: [
-        {
-          title: 'What it shows',
-          items: [
-            { term: 'Status', body: 'not-published → bundle-ready → publishing → published/publish-failed, mirroring the on-disk publish-state.json a bilko-host-publisher Epic writes.' },
-            { term: 'Slug', body: 'The bilko.run/projects/<slug>/ path this project would publish to — defaults from package.json\'s name.' },
-            { term: 'Bundle', body: 'Size, build time, and git sha of the dist/ bundle Prepare Bundle last wrote.' },
-          ],
-        },
-      ],
-      tips: [
-        'Project face only — publishing is always scoped to the active project\'s tab.',
-        'Requires a generated Project Home page first — Project Home\'s "Generate Now" produces it.',
-        'Publish never bypasses a failing gate automatically — a human always decides whether to override.',
-      ],
-    },
   'data-model': {
       headline: 'Data Model — an ERD of what Session Manager actually persists',
       intro: 'A hand-maintained diagram of the app\'s own storage: entities, their on-disk path/format, the single-writer owner if one is declared, their fields, and how they relate. It is a mirror of the real shapes in code (lib/dataModelErd.ts), not a live scanner — it can drift if a shape changes without an update.',

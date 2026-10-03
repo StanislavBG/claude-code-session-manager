@@ -167,7 +167,7 @@ describe('layout.ts navFace (Two-Face LeftNav — real state, not derived from f
   // to it from the "Queued" card, the Needs-you "View in Scheduler" button and
   // the footer's paused pill. Without this, those land on a project-scoped
   // screen with the Home sidebar beside it and no row lit.
-  it.each(['project-home', 'terminal', 'scheduler', 'memory', 'bilko-host'])(
+  it.each(['project-home', 'terminal', 'scheduler', 'memory'])(
     'openPanel("%s") asserts navFace "project" even from "home"',
     (key) => {
       useLayout.setState({ navFace: 'home' })

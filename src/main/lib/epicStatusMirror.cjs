@@ -15,18 +15,19 @@
  * file this module targets; a live (proposed/active) Epic gets a sparse
  * mirror here instead, later overwritten wholesale by the real archive.
  *
- * Raw fs tmp+rename — NOT config.cjs's `writeJson` — so this module stays
+ * Uses atomicFs.cjs (NOT config.cjs's `writeJson`) so this module stays
  * requirable from epicMint.cjs, which is deliberately Electron-free (its own
  * header: "so the external watchdog scripts can require it"; config.cjs
- * requires 'electron' at module load). The write shape matches config.cjs's
- * writeJson exactly (`JSON.stringify(data, null, 2) + '\n'`, `<path>.tmp-
- * <pid>` then rename) so main-process callers (activeIndexMerge.cjs) and
- * epicMint.cjs never diverge in format despite using different write paths.
+ * requires 'electron' at module load — atomicFs.cjs does not). The write
+ * shape matches config.cjs's writeJson exactly (`JSON.stringify(data, null,
+ * 2) + '\n'`, tmp-then-rename) so main-process callers (activeIndexMerge.cjs)
+ * and epicMint.cjs never diverge in format despite using different write
+ * paths — both go through the same atomicFs primitive now.
  */
 
 const fs = require('node:fs');
-const path = require('node:path');
 const { assertOpsWrite, opsPath } = require('./opsOwnership.cjs');
+const atomicFs = require('./atomicFs.cjs');
 
 function epicMirrorPath(cwd, epicId) {
   return opsPath(cwd, 'prompt-sessions', `${epicId}.json`);
@@ -74,10 +75,7 @@ function mirrorEpicStatus(cwd, epicId, { session = null, status = null, archived
     archivedAt: archivedAt ?? existing.archivedAt ?? null,
     indexedAt: new Date().toISOString(),
   };
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  const tmp = `${file}.tmp-${process.pid}`;
-  fs.writeFileSync(tmp, JSON.stringify(merged, null, 2) + '\n');
-  fs.renameSync(tmp, file);
+  atomicFs.writeJsonAtomicSync(file, merged);
 }
 
 /**

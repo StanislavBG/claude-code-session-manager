@@ -11,7 +11,7 @@
 
 'use strict';
 
-import { test, expect, beforeEach, afterEach, vi } from 'vitest';
+import { test, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -40,10 +40,23 @@ function initRepo(dir) {
   git(['commit', '-q', '-m', 'initial'], dir);
 }
 
+// One template repo built once; each case gets a cheap recursive copy instead
+// of paying git init + 2 config + add + commit (5 git spawns) per case.
+let templateRoot;
+let templateRepo;
+beforeAll(() => {
+  templateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-gitworktree-tpl-'));
+  templateRepo = path.join(templateRoot, 'repo');
+  initRepo(templateRepo);
+});
+afterAll(() => {
+  if (templateRoot) fs.rmSync(templateRoot, { recursive: true, force: true });
+});
+
 beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-gitworktree-'));
   repoCwd = path.join(tmpRoot, 'repo');
-  initRepo(repoCwd);
+  fs.cpSync(templateRepo, repoCwd, { recursive: true });
   // Every sweep below runs against THIS throwaway root, never the live job-worktree root.
   originalWorktreeRoot = process.env.SM_WORKTREE_ROOT;
   process.env.SM_WORKTREE_ROOT = path.join(tmpRoot, 'worktrees');
@@ -67,8 +80,12 @@ afterEach(async () => {
   restore('SM_EPIC_WORKTREE_DISABLE', originalEpicDisable);
   restore('SM_EPIC_WORKTREE_MAX', originalEpicMax);
   // Best-effort: prune any worktree either kind's tests created before removing the repo.
-  try { await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job' }); } catch { /* ignore */ }
-  try { await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'epic' }); } catch { /* ignore */ }
+  // Every worktree lives under tmpRoot/worktrees and tmpRoot is removed below, so the sweeps
+  // are only needed when a case actually created worktrees.
+  if (fs.existsSync(process.env.SM_WORKTREE_ROOT)) {
+    try { await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job' }); } catch { /* ignore */ }
+    try { await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'epic' }); } catch { /* ignore */ }
+  }
   restore('SM_WORKTREE_ROOT', originalWorktreeRoot);
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });
@@ -1289,6 +1306,91 @@ test('[guard] resolveDefaultBranch resolves a sensible default (the sole local b
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
 });
 
+// ──────────────────────────────────────────── recorded base-branch integration (PRD: integrate-onto-recorded-base-branch)
+
+test('[base-branch] integrates onto recorded feature base branch when the checkout legitimately sits on a non-default branch', async () => {
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  git(['checkout', '-b', 'feat/json-display'], repoCwd);
+
+  const slug = 'test-slug-base-feature';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+  expect(worktree.baseBranch).toBe('feat/json-display');
+
+  fs.writeFileSync(path.join(worktree.dir, 'feature-output.txt'), 'job output\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit on feature checkout'], worktree.dir);
+
+  // The checkout stays on the feature branch the whole time — never the repo default.
+  expect(await gitWorktree.getCurrentBranch(repoCwd)).toBe('feat/json-display');
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug, baseBranch: worktree.baseBranch });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(fs.existsSync(path.join(repoCwd, 'feature-output.txt'))).toBe(true);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+  git(['checkout', defaultBranch], repoCwd);
+  git(['branch', '-D', 'feat/json-display'], repoCwd);
+});
+
+test('[base-branch] refuses with stray_checkout when HEAD moved off the recorded base branch', async () => {
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  git(['checkout', '-b', 'feat/json-display'], repoCwd);
+
+  const slug = 'test-slug-base-moved';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+  expect(worktree.baseBranch).toBe('feat/json-display');
+
+  fs.writeFileSync(path.join(worktree.dir, 'feature-output-2.txt'), 'job output\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit on feature checkout'], worktree.dir);
+
+  // The checkout moves off the recorded base branch before integration runs.
+  git(['checkout', defaultBranch], repoCwd);
+  const headBefore = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  const statusBefore = git(['status', '--porcelain'], repoCwd);
+
+  const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug, baseBranch: worktree.baseBranch });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.failureKind).toBe('stray_checkout');
+  expect(outcome.expectedBranch).toBe('feat/json-display');
+  expect(outcome.actualBranch).toBe(defaultBranch);
+  expect(outcome.reason).toMatch(/^refusing to integrate: HEAD is on "/);
+  expect(outcome.reason).toContain('feat/json-display');
+
+  // Refusing must not touch git state: no checkout/reset/switch performed.
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(headBefore);
+  expect(git(['status', '--porcelain'], repoCwd)).toBe(statusBefore);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+  try { git(['branch', '-D', worktree.branch], repoCwd); } catch { /* best-effort */ }
+  git(['branch', '-D', 'feat/json-display'], repoCwd);
+});
+
+test('[base-branch] ignores an sm-job/ recorded base and falls back to the repo default branch', async () => {
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  const slug = 'test-slug-base-sm-job-ignored';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(worktree.ok).toBe(true);
+
+  fs.writeFileSync(path.join(worktree.dir, 'sm-job-base-ignored.txt'), 'job output\n', 'utf8');
+  git(['add', '-A'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  // repoCwd sits on the real default branch — an sm-job/* baseBranch value
+  // (e.g. read back off a stale job row) must be treated the same as no
+  // baseBranch at all, falling back to resolveDefaultBranch(cwd).
+  const outcome = await gitWorktree.integrateJobBranch({
+    cwd: repoCwd, branch: worktree.branch, slug, baseBranch: 'sm-job/leftover-from-a-prior-run',
+  });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(await gitWorktree.getCurrentBranch(repoCwd)).toBe(defaultBranch);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
+});
+
 test('[guard][epic] integrateEpicBranch inherits the same guard and still merges cleanly when HEAD is on the default branch', async () => {
   const epicId = 'test-epic-guard-ok';
   const worktree = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId });
@@ -1475,4 +1577,351 @@ test('[job] integrateBranch bails the whole merge when only some conflicted path
   expect(fs.existsSync(path.join(repoCwd, '.git', 'MERGE_HEAD'))).toBe(false);
 
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+// ──────────────────────────────────────────── integrateOntoRef / ensureLandBranch (checkout-free integration)
+
+/**
+ * Advances `branchName` (an already-existing, NOT checked-out branch) by one
+ * commit writing `files`, via a throwaway worktree that is removed again
+ * immediately — leaving `branchName` advanced but still unattached to any
+ * worktree, so a later test can target it as an `integrateOntoRef` ref
+ * without it ever being "checked out" at assertion time.
+ */
+function advanceDetachedBranch(branchName, files, message) {
+  try { git(['rev-parse', '--verify', '--quiet', branchName], repoCwd); } catch { git(['branch', branchName], repoCwd); }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-land-setup-'));
+  git(['worktree', 'add', dir, branchName], repoCwd);
+  for (const [f, c] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+    fs.writeFileSync(path.join(dir, f), c, 'utf8');
+  }
+  git(['add', '-A'], dir);
+  git(['commit', '-q', '-m', message || 'advance'], dir);
+  const sha = git(['rev-parse', 'HEAD'], dir).trim();
+  git(['worktree', 'remove', '--force', dir], repoCwd);
+  return sha;
+}
+
+test('[integrateOntoRef] fast-forwards targetRef when it is an ancestor of branch', async () => {
+  const baseSha = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  git(['branch', 'sm-land/ff-test', baseSha], repoCwd);
+
+  const slug = 'test-integrate-ff';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'job-only.txt'), 'job output\n', 'utf8');
+  git(['add', 'job-only.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+  const branchSha = git(['rev-parse', 'HEAD'], worktree.dir).trim();
+
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: 'refs/heads/sm-land/ff-test', branch: worktree.branch, message: 'ff test',
+  });
+  expect(outcome).toEqual({ ok: true, integrated: true, fastForward: true, sha: branchSha });
+  expect(git(['rev-parse', 'refs/heads/sm-land/ff-test'], repoCwd).trim()).toBe(branchSha);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] builds a real merge commit when target and branch diverged on different files', async () => {
+  const targetTip = advanceDetachedBranch('sm-land/merge-test', { 'target-only.txt': 'target content\n' }, 'target advances');
+
+  const slug = 'test-integrate-merge';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'job-only.txt'), 'job content\n', 'utf8');
+  git(['add', 'job-only.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job advances'], worktree.dir);
+  const branchTip = git(['rev-parse', 'HEAD'], worktree.dir).trim();
+
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: 'refs/heads/sm-land/merge-test', branch: worktree.branch, message: 'merge test',
+  });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(outcome.mergeCommit).toBe(true);
+  expect(outcome.sha).toBeTruthy();
+
+  expect(git(['rev-parse', 'refs/heads/sm-land/merge-test'], repoCwd).trim()).toBe(outcome.sha);
+  const parents = git(['log', '-1', '--format=%P', outcome.sha], repoCwd).trim().split(' ');
+  expect(parents.sort()).toEqual([targetTip, branchTip].sort());
+  expect(git(['show', `${outcome.sha}:target-only.txt`], repoCwd)).toBe('target content\n');
+  expect(git(['show', `${outcome.sha}:job-only.txt`], repoCwd)).toBe('job content\n');
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] a content conflict returns conflictedPaths and leaves targetRef unchanged', async () => {
+  const targetTip = advanceDetachedBranch('sm-land/conflict-test', { 'README.md': 'target edit\n' }, 'target edits README');
+
+  const slug = 'test-integrate-conflict';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'README.md'), 'job edit\n', 'utf8');
+  git(['add', 'README.md'], worktree.dir);
+  git(['commit', '-q', '-m', 'job edits README'], worktree.dir);
+
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: 'refs/heads/sm-land/conflict-test', branch: worktree.branch, message: 'conflict test',
+  });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.failureKind).toBe('content_conflict');
+  expect(outcome.conflictedPaths).toEqual(['README.md']);
+  expect(git(['rev-parse', 'refs/heads/sm-land/conflict-test'], repoCwd).trim()).toBe(targetTip);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] refuses when targetRef is checked out in a worktree, leaving it untouched', async () => {
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  const headBefore = git(['rev-parse', 'HEAD'], repoCwd).trim();
+
+  const slug = 'test-integrate-checked-out';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'job-only.txt'), 'job content\n', 'utf8');
+  git(['add', 'job-only.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: `refs/heads/${defaultBranch}`, branch: worktree.branch, message: 'refuse test',
+  });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.failureKind).toBe('target_checked_out');
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(headBefore);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] a short targetRef (no refs/heads/ prefix) is normalized before the checked-out guard runs, refusing target_checked_out on the currently checked-out branch', async () => {
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+  const headBefore = git(['rev-parse', 'HEAD'], repoCwd).trim();
+
+  const slug = 'test-integrate-short-checked-out';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'job-only.txt'), 'job content\n', 'utf8');
+  git(['add', 'job-only.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  // Short name, exactly what a caller holding just an epicId/branch name
+  // (not the full refs/heads/... form) would pass.
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: defaultBranch, branch: worktree.branch, message: 'short ref test',
+  });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.failureKind).toBe('target_checked_out');
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(headBefore);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] a short targetRef fast-forwards correctly once normalized to refs/heads/...', async () => {
+  const baseSha = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  git(['branch', 'sm-land/short-ff-test', baseSha], repoCwd);
+
+  const slug = 'test-integrate-short-ff';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'job-only.txt'), 'job output\n', 'utf8');
+  git(['add', 'job-only.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+  const branchSha = git(['rev-parse', 'HEAD'], worktree.dir).trim();
+
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: 'sm-land/short-ff-test', branch: worktree.branch, message: 'short ff test',
+  });
+  expect(outcome).toEqual({ ok: true, integrated: true, fastForward: true, sha: branchSha });
+  expect(git(['rev-parse', 'refs/heads/sm-land/short-ff-test'], repoCwd).trim()).toBe(branchSha);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] rejects a targetRef outside refs/heads/ (e.g. a tag ref) rather than silently prefixing it', async () => {
+  const slug = 'test-integrate-non-heads-ref';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: 'refs/tags/v1', branch: worktree.branch, message: 'bad ref test',
+  });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toMatch(/refs\/heads/);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] a non-race update-ref failure (the ref never moved) is reported once as update_ref_failed, not retried 3x into ref_race', async () => {
+  const slug = 'test-integrate-update-ref-fails';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'job-only.txt'), 'job content\n', 'utf8');
+  git(['add', 'job-only.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  // targetRef doesn't exist yet, so this hits the create-only CAS. Make the
+  // refs/heads directory itself read-only (not just its .git/refs parent —
+  // the file being created lives directly inside refs/heads, so that's the
+  // directory whose write permission actually gates the create) so the real
+  // `git update-ref` invocation fails for a reason that has NOTHING to do
+  // with a concurrent ref update — the ref genuinely never moves (stays
+  // nonexistent) across the failure, which is exactly the case the fix must
+  // classify as a real, explicit failure instead of burning all 3 retries
+  // and reporting the (misleading) ref_race. A flat (non-nested) branch name
+  // is used so no intermediate directory needs to already exist.
+  const refsHeadsDir = path.join(repoCwd, '.git', 'refs', 'heads');
+  fs.chmodSync(refsHeadsDir, 0o555);
+  try {
+    const outcome = await gitWorktree.integrateOntoRef({
+      cwd: repoCwd, targetRef: 'refs/heads/perm-denied-test', branch: worktree.branch, message: 'perm test',
+    });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.failureKind).toBe('update_ref_failed');
+    expect(outcome.reason).toBeTruthy();
+  } finally {
+    fs.chmodSync(refsHeadsDir, 0o755);
+  }
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] a targetRef that exists but does not resolve to a commit is an explicit failure, not a create-only attempt', async () => {
+  // Point sm-land/blob-ref at a blob (not a commit) — a ref that legitimately
+  // exists but isn't a commit. Modern `git update-ref` refuses to write a
+  // non-commit object to a branch ref outright, so the loose ref file is
+  // written directly on disk instead, bypassing that validation the same
+  // way a corrupted/hand-edited ref would.
+  const blobOid = execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: repoCwd, input: 'not a commit\n', encoding: 'utf8' }).trim();
+  const blobRefPath = path.join(repoCwd, '.git', 'refs', 'heads', 'sm-land', 'blob-ref');
+  fs.mkdirSync(path.dirname(blobRefPath), { recursive: true });
+  fs.writeFileSync(blobRefPath, `${blobOid}\n`, 'utf8');
+
+  const slug = 'test-integrate-non-commit-ref';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'job-only.txt'), 'job content\n', 'utf8');
+  git(['add', 'job-only.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job commit'], worktree.dir);
+
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: 'refs/heads/sm-land/blob-ref', branch: worktree.branch, message: 'non-commit ref test',
+  });
+  expect(outcome.ok).toBe(false);
+  expect(outcome.reason).toMatch(/does not resolve to a commit/);
+  // Untouched — still pointing at the original blob.
+  expect(git(['cat-file', '-t', 'refs/heads/sm-land/blob-ref'], repoCwd).trim()).toBe('blob');
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] is a no-op (integrated:false) when branch has no new commits', async () => {
+  const baseSha = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  git(['branch', 'sm-land/noop-test', baseSha], repoCwd);
+
+  const slug = 'test-integrate-noop';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: 'refs/heads/sm-land/noop-test', branch: worktree.branch, message: 'noop test',
+  });
+  expect(outcome).toEqual({ ok: true, integrated: false, reason: 'branch has no new commits' });
+  expect(git(['rev-parse', 'refs/heads/sm-land/noop-test'], repoCwd).trim()).toBe(baseSha);
+
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[integrateOntoRef] the human checkout working tree, index, and HEAD are byte-for-byte unchanged', async () => {
+  const targetTip = advanceDetachedBranch('sm-land/unchanged-test', { 'target-only.txt': 'target content\n' }, 'target advances');
+
+  const slug = 'test-integrate-unchanged';
+  const worktree = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  fs.writeFileSync(path.join(worktree.dir, 'job-only.txt'), 'job content\n', 'utf8');
+  git(['add', 'job-only.txt'], worktree.dir);
+  git(['commit', '-q', '-m', 'job advances'], worktree.dir);
+
+  // The human's own checkout is left mid-edit (uncommitted, untracked) —
+  // integrateOntoRef must not touch any of it, since it operates entirely on
+  // refs/objects, never the working tree/index.
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'human is mid-edit\n', 'utf8');
+  fs.writeFileSync(path.join(repoCwd, 'scratch.txt'), 'untracked scratch\n', 'utf8');
+
+  const statusBefore = git(['status', '--porcelain'], repoCwd);
+  const headBefore = git(['rev-parse', 'HEAD'], repoCwd).trim();
+
+  const outcome = await gitWorktree.integrateOntoRef({
+    cwd: repoCwd, targetRef: 'refs/heads/sm-land/unchanged-test', branch: worktree.branch, message: 'unchanged test',
+  });
+  expect(outcome.ok).toBe(true);
+  expect(outcome.integrated).toBe(true);
+  expect(outcome.mergeCommit).toBe(true);
+
+  const statusAfter = git(['status', '--porcelain'], repoCwd);
+  const headAfter = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  expect(statusAfter).toBe(statusBefore);
+  expect(headAfter).toBe(headBefore);
+  expect(fs.readFileSync(path.join(repoCwd, 'README.md'), 'utf8')).toBe('human is mid-edit\n');
+  expect(git(['rev-parse', 'refs/heads/sm-land/unchanged-test'], repoCwd).trim()).toBe(outcome.sha);
+  expect(outcome.sha).not.toBe(targetTip);
+
+  fs.rmSync(path.join(repoCwd, 'scratch.txt'), { force: true });
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
+test('[ensureLandBranch] creates sm-land/<epicId> at the default branch tip, and a second call is idempotent', async () => {
+  const headSha = git(['rev-parse', 'HEAD'], repoCwd).trim();
+
+  const first = await gitWorktree.ensureLandBranch({ cwd: repoCwd, epicId: 'epic-abc' });
+  expect(first).toEqual({ ok: true, ref: 'refs/heads/sm-land/epic-abc', branch: 'sm-land/epic-abc', created: true });
+  expect(git(['rev-parse', 'refs/heads/sm-land/epic-abc'], repoCwd).trim()).toBe(headSha);
+
+  const second = await gitWorktree.ensureLandBranch({ cwd: repoCwd, epicId: 'epic-abc' });
+  expect(second).toEqual({ ok: true, ref: 'refs/heads/sm-land/epic-abc', branch: 'sm-land/epic-abc', created: false });
+  expect(git(['rev-parse', 'refs/heads/sm-land/epic-abc'], repoCwd).trim()).toBe(headSha);
+});
+
+test('[ensureLandBranch] rejects an epicId whose sanitized form would differ from the input — no silent stripping', async () => {
+  // 'epic/1 two!' would previously have been silently stripped down to
+  // 'epic1two' — two DIFFERENT epicIds (e.g. 'epic/1 two!' and 'epic1two')
+  // must never be allowed to collide on the same land branch.
+  const result = await gitWorktree.ensureLandBranch({ cwd: repoCwd, epicId: 'epic/1 two!' });
+  expect(result.ok).toBe(false);
+  expect(result.reason).toMatch(/not a safe branch-name component/);
+
+  const empty = await gitWorktree.ensureLandBranch({ cwd: repoCwd, epicId: '!!!' });
+  expect(empty).toEqual({ ok: false, reason: expect.any(String) });
+});
+
+test('[ensureLandBranch] rejects epicIds shaped like ".." / ".lock" suffix / leading "." / leading "-"', async () => {
+  const cases = ['a..b', 'epic.lock', '.hidden', '-flag-shaped'];
+  for (const epicId of cases) {
+    const result = await gitWorktree.ensureLandBranch({ cwd: repoCwd, epicId });
+    expect(result.ok).toBe(false);
+  }
+});
+
+test('[ensureLandBranch] accepts an epicId that is already a safe branch-name component, unchanged', async () => {
+  const result = await gitWorktree.ensureLandBranch({ cwd: repoCwd, epicId: 'epic_1.two-3' });
+  expect(result.ok).toBe(true);
+  expect(result.branch).toBe('sm-land/epic_1.two-3');
+});
+
+test('landBranchNameFor returns null (never a mangled name) for an unsafe epicId, and the sm-land/ prefix + epicId verbatim for a safe one', () => {
+  expect(gitWorktree.landBranchNameFor('safe-epic.123')).toBe('sm-land/safe-epic.123');
+  expect(gitWorktree.landBranchNameFor('bad id!')).toBe(null);
+  expect(gitWorktree.landBranchNameFor('')).toBe(null);
+  expect(gitWorktree.landBranchNameFor(null)).toBe(null);
+});
+
+test('[createWorktree fromRef] forks the worktree from fromRef instead of HEAD, and skips WIP carry-over', async () => {
+  const featureTip = advanceDetachedBranch('feature-fromref', { 'feature-file.txt': 'feature content\n' }, 'feature commit');
+  const defaultBranch = git(['symbolic-ref', '--short', 'HEAD'], repoCwd).trim();
+
+  // Dirty the human's own checkout so a normal (no-fromRef) create would carry it over.
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'human dirty edit\n', 'utf8');
+
+  const result = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'fromref-test', fromRef: 'feature-fromref' });
+  expect(result.ok).toBe(true);
+  expect(result.forkedFrom).toBe('feature-fromref');
+  expect(result.baseBranch).toBe(defaultBranch);
+  expect(result.carriedPaths).toEqual([]);
+  expect(fs.existsSync(path.join(result.dir, 'feature-file.txt'))).toBe(true);
+  expect(fs.readFileSync(path.join(result.dir, 'feature-file.txt'), 'utf8')).toBe('feature content\n');
+  // The human's dirty README edit must NOT have been carried into the fork.
+  expect(fs.readFileSync(path.join(result.dir, 'README.md'), 'utf8')).toBe('hello\n');
+  expect(git(['rev-parse', 'HEAD'], result.dir).trim()).toBe(featureTip);
+
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'hello\n', 'utf8'); // restore for afterEach's clean teardown
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: result.dir, branch: result.branch });
 });

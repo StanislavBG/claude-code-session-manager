@@ -47,8 +47,9 @@ function makeFakeRemote({ jobs = [] } = {}) {
     async listJobs() {
       return jobs.map((j) => ({ slug: j.slug, title: j.title, status: j.status, cwd: j.cwd }));
     },
-    // Mirrors the real scheduler.cjs remote.resetJob's force-guard so this
-    // fake exercises the SAME contract the admin route promises callers.
+    // Mirrors the real scheduler.cjs remote.resetJob's force-guard (both
+    // terminal statuses it refuses without force:true) so this fake
+    // exercises the SAME contract the admin route promises callers.
     async resetJob(slug, opts = {}) {
       const job = jobs.find((j) => j.slug === slug);
       if (!job) return { ok: false, error: 'not found' };
@@ -57,6 +58,9 @@ function makeFakeRemote({ jobs = [] } = {}) {
           ok: false,
           error: 'job already completed — resetting it would re-execute shipped work; archive the PRD instead, or pass force:true',
         };
+      }
+      if (job.status === 'skipped' && opts.force !== true) {
+        return { ok: false, error: 'job was skipped — pass force:true to run it again' };
       }
       job.status = 'pending';
       job.runId = null;
@@ -183,6 +187,40 @@ test('POST /admin/scheduler/reset-job on a completed job without force refuses a
 
 test('POST /admin/scheduler/reset-job on a completed job WITH force:true resets it', async () => {
   const job = { slug: '10-foo', title: 'Foo', status: 'completed', cwd: '/tmp/foo', runId: 'run-1' };
+  const remote = makeFakeRemote({ jobs: [job] });
+  const { admin, port, token } = await startWithRemote(remote);
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/reset-job', token, body: { slug: '10-foo', force: true },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: true, slug: '10-foo', status: 'pending' });
+    expect(job.status).toBe('pending');
+    expect(job.runId).toBe(null);
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/reset-job on a skipped job without force refuses and does not mutate', async () => {
+  const job = { slug: '10-foo', title: 'Foo', status: 'skipped', cwd: '/tmp/foo', runId: 'run-1' };
+  const remote = makeFakeRemote({ jobs: [job] });
+  const { admin, port, token } = await startWithRemote(remote);
+  try {
+    const res = await request(port, {
+      method: 'POST', path: '/admin/scheduler/reset-job', token, body: { slug: '10-foo' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.json).toEqual({ ok: false, error: 'job was skipped — pass force:true to run it again' });
+    expect(job.status).toBe('skipped');
+    expect(job.runId).toBe('run-1');
+  } finally {
+    await admin.stop();
+  }
+});
+
+test('POST /admin/scheduler/reset-job on a skipped job WITH force:true resets it', async () => {
+  const job = { slug: '10-foo', title: 'Foo', status: 'skipped', cwd: '/tmp/foo', runId: 'run-1' };
   const remote = makeFakeRemote({ jobs: [job] });
   const { admin, port, token } = await startWithRemote(remote);
   try {

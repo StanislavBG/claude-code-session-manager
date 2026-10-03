@@ -6,9 +6,10 @@
  * 'pending' re-fires the PRD and re-executes already-shipped work (the
  * incident: PRD 812-workbench-review-nits-cleanup was reset and re-run this
  * way, burning a full claude -p job + Opus investigation over a correct
- * no-op). resetJobFields must refuse (no-op) on a 'completed' job unless
- * opts.force is true, and must still reset normally for every non-terminal
- * status (pending/running/failed/needs_review).
+ * no-op). A 'skipped' job was already deliberately not run, by the
+ * scheduler or a human. resetJobFields must refuse (no-op) on a 'completed'
+ * or 'skipped' job unless opts.force is true, and must still reset normally
+ * for every non-terminal status (pending/running/failed/needs_review).
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-reset-job-fields-guard.test.cjs
  */
@@ -56,6 +57,50 @@ test('resetJobFields: force:true overrides the guard on a completed job', () => 
   expect(job.verifierVerdict).toBeUndefined();
   // landedCommit must survive even a forced reset — it feeds the
   // pass_no_commit_prior_run_verified exemption on a later re-run.
+  expect(job.landedCommit).toBe('abc1234');
+});
+
+test('resetJobFields: refuses and does not mutate a skipped job', () => {
+  const job = makeJob('skipped');
+  const snapshot = { ...job };
+  const result = resetJobFields(job, 'some error');
+  expect(result).toBe(false);
+  expect(job).toEqual(snapshot);
+});
+
+test('resetJobFields: force:true overrides the guard on a skipped job', () => {
+  const job = makeJob('skipped');
+  const result = resetJobFields(job, 'forced reset', { force: true });
+  expect(result).toBe(true);
+  expect(job.status).toBe('pending');
+  expect(job.runId).toBeNull();
+  expect(job.startedAt).toBeNull();
+  expect(job.finishedAt).toBeNull();
+  expect(job.exitCode).toBeNull();
+  expect(job.error).toBe('forced reset');
+  expect(job.runtime).toBeUndefined();
+  expect(job.verifierVerdict).toBeUndefined();
+  expect(job.landedCommit).toBe('abc1234');
+});
+
+test('resetJobFields: clears looksDone and evidenceScannedAt from a needs_review row, but keeps landedCommit', () => {
+  const job = makeJob('needs_review', {
+    looksDone: {
+      commits: ['abc1234'],
+      paths: ['src/x.cjs'],
+      detectedAt: '2026-10-01T00:00:00.000Z',
+      rule: 'test-rule',
+    },
+    evidenceScannedAt: '2026-10-01T00:00:00.000Z',
+  });
+  const result = resetJobFields(job, 'retry reason');
+  expect(result).toBe(true);
+  // This run's completion evidence must not survive a reset — an old run's
+  // looksDone must never complete the NEXT run (applyNeedsReviewAutoResolve
+  // completes on looksDone alone), and a stale evidenceScannedAt must not
+  // block the next park's own scan.
+  expect(job.looksDone).toBeUndefined();
+  expect(job.evidenceScannedAt).toBeUndefined();
   expect(job.landedCommit).toBe('abc1234');
 });
 

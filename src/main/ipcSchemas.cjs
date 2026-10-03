@@ -13,6 +13,7 @@ const { PromptSessionSchema, EpicTagSchema, EpicSourceSchema, EpicIntakeSectionS
 const { PrdWorkTypeSchema } = require('./lib/workTypeLibrary.cjs');
 const { PERSONA_NAME_RE } = require('./agentLibrary.cjs');
 const { AgentPersonaSaveSchema } = require('./lib/agentPersonaSchema.cjs');
+const { MacroSaveSchema, MacroDeleteSchema, MacroSetProjectSchema } = require('./lib/macroLibrary.cjs');
 
 // ──────────────────────────────────────────── PTY
 const ptySpawn = z.object({
@@ -282,6 +283,15 @@ const scheduleSlug = z.object({
   slug: z.string().regex(SCHEDULE_SLUG_RE),
 });
 
+// reset-job: slug + optional cwd — narrows the match to one project's job
+// row so two different projects' slugs that happen to collide (slugs carry
+// no cwd salt) don't cross-reset. Mirrors remote.resetJob's own cwd filter
+// in scheduler.cjs.
+const scheduleResetJob = z.object({
+  slug: z.string().regex(SCHEDULE_SLUG_RE),
+  cwd: z.string().min(1).max(4096).optional(),
+});
+
 const scheduleReadLog = z.object({
   slug: z.string().regex(SCHEDULE_SLUG_RE),
   runId: z.string().regex(SCHEDULE_RUN_ID_RE),
@@ -409,6 +419,17 @@ const schedulerCreatePrd = z.object({
   // invalidate. See prdCreate.cjs's buildPrdBody and schedulerBatch.cjs's
   // pickNextBatch.
   quietMachine: z.boolean().optional(),
+  // Commands that prove this PRD is done (gate-and-files-in-PRD-body unit) —
+  // rendered verbatim as the `# Gate` body section's ```gate fence and read
+  // back by definitionOfDone.cjs's resolveGate/parseChain. ['none'] opts out
+  // for docs/config PRDs with no runnable check. Shape-validated (length,
+  // chars, no-shell, none-is-alone) by prdGateFiles.cjs's validateGate, not
+  // here — this schema only bounds array size and element type.
+  gate: z.array(z.string()).min(1).max(10).optional(),
+  // Repo-relative files/folders this PRD may change — rendered verbatim as
+  // the `# Files` body section. Validated (repo-relative, no .., no globs)
+  // by prdGateFiles.cjs's validateFiles, not here.
+  files: z.array(z.string()).min(1).max(50).optional(),
 });
 
 // Renderer-facing counterpart to adminPrdFrontmatterPatch's dependsOn/
@@ -588,6 +609,9 @@ const setSessionSlotsSchema = z.object({
 // Full field-level rules live in lib/agentPersonaSchema.cjs, mirroring
 // AgentPersonaSaveInput (src/preload/api.d.ts) field-for-field.
 const agentsSavePersona = AgentPersonaSaveSchema;
+const macrosSave = MacroSaveSchema;
+const macrosDelete = MacroDeleteSchema;
+const macrosSetProject = MacroSetProjectSchema;
 
 // ──────────────────────────────────────────── Memory tool (Bundle C, cycle 3)
 // Workspace-scoped markdown store at ~/.claude/projects/<ws>/memory/.
@@ -706,30 +730,6 @@ const projectHomeAdminWriteBody = z.object({
   html: z.string(),
 }).strict();
 
-// ──────────────────────────────────────────── Host on Bilko.run
-// Same validation split: real path validation is config.cjs's validatePath
-// at first fs access in bilkoHost.cjs — these schemas only bound wire shape.
-const bilkoHostCwd = z.object({
-  cwd: z.string().min(1).max(4096),
-}).strict();
-const bilkoHostPrepareBundle = z.object({
-  cwd: z.string().min(1).max(4096),
-  slug: z.string().min(1).max(64).regex(/^[a-z0-9-]+$/, 'slug must be lowercase kebab-case'),
-}).strict();
-const BILKO_HOST_DOCUMENT_SOURCE = z.union([
-  z.object({ kind: z.literal('project-page-lens'), lens: z.enum(['home', 'marketing', 'feature', 'architecture']) }).strict(),
-  z.object({ kind: z.literal('file'), path: z.string().min(1).max(4096) }).strict(),
-]);
-const bilkoHostAddDocument = z.object({
-  cwd: z.string().min(1).max(4096),
-  subpath: z.string().min(1).max(200),
-  title: z.string().min(1).max(200),
-  source: BILKO_HOST_DOCUMENT_SOURCE,
-}).strict();
-const bilkoHostRemoveDocument = z.object({
-  cwd: z.string().min(1).max(4096),
-  id: z.string().min(1).max(200),
-}).strict();
 const projectBriefSetPin = z.object({
   cwd: z.string().min(1).max(4096),
   block: PROJECT_BRIEF_BLOCK,
@@ -993,12 +993,6 @@ const appGitBranch = z.object({
   cwd: z.string().min(1).max(4096),
 }).passthrough();
 
-// build:resolve-target — see src/main/lib/buildTarget.cjs. cwd is a trusted
-// TAB cwd, not validatePath'd here (same invariant as appGitBranch above).
-const buildResolveTarget = z.object({
-  cwd: z.string().min(1).max(4096),
-}).passthrough();
-
 // git:status / git:file-status — see src/main/git.cjs. cwd is validatePath'd
 // inside the handler (allowedRoots = home), so the schema only enforces shape.
 const gitStatus = z.object({
@@ -1100,6 +1094,7 @@ module.exports = {
     sessionsPayload,
     layoutEnvelope,
     scheduleSlug,
+    scheduleResetJob,
     scheduleReadLog,
     scheduleWritePrd,
     schedulerCreatePrd,
@@ -1122,7 +1117,6 @@ module.exports = {
     voiceSetRecording,
     appTestFireHook,
     appGitBranch,
-    buildResolveTarget,
     gitStatus,
     gitFileStatus,
     repoAnalyze,
@@ -1138,10 +1132,6 @@ module.exports = {
     projectBriefCwd,
     projectPagesCwd,
     projectHomeAdminWriteBody,
-    bilkoHostCwd,
-    bilkoHostPrepareBundle,
-    bilkoHostAddDocument,
-    bilkoHostRemoveDocument,
     projectBriefSetPin,
     projectBriefUpdate,
     promptSessionTranscriptAppend,
@@ -1172,6 +1162,9 @@ module.exports = {
     chatExternalSend,
     exchangesList,
     agentsSavePersona,
+    macrosSave,
+    macrosDelete,
+    macrosSetProject,
     agentsGetPersonaBody,
     agentsResolveModelInfo,
     modelsCatalog,

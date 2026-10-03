@@ -28,7 +28,6 @@ const McpServers = lazy(() => import('./tabs/McpServers').then((m) => ({ default
 const Hooks = lazy(() => import('./tabs/Hooks').then((m) => ({ default: m.Hooks })))
 const AgentLibrary = lazy(() => import('./tabs/AgentLibrary').then((m) => ({ default: m.AgentLibrary })))
 const TagLibrary = lazy(() => import('./tabs/TagLibrary').then((m) => ({ default: m.TagLibrary })))
-const HostBilko = lazy(() => import('./tabs/HostBilko').then((m) => ({ default: m.HostBilko })))
 const DataModel = lazy(() => import('./tabs/DataModel').then((m) => ({ default: m.DataModel })))
 
 const SCREEN_LOADING_FALLBACK = <div className="p-6 text-xs text-fg-faint">Loading…</div>
@@ -71,7 +70,6 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'settings':      { title: 'Settings',                  intro: 'Theme, voice input, billing window, density. Per-scope JSON with schema validation.' },
   'agent-library': { title: 'Agent Library',                 intro: 'Agents are the ACTOR of the AIM framework every session opens with — "you are acting as …". Every persona on this machine lives here: global definitions in ~/.claude/agents, plus which currently-open projects override them locally. Give a persona a project scope and an opening instruction and it also becomes an Action — a one-click button in that project’s Sessions toolbar that starts a session already grounded on it. Create, edit, duplicate, or delete a persona; each change writes the matching file on disk.' },
   'tag-library':   { title: 'Tag Library',                   intro: 'Every session intent tag, its meaning, and its /develop-eagerness default. Assign or remove which agent personas carry each tag.' },
-  'bilko-host':    { title: 'Host on Bilko.run',              intro: 'Publish this project\'s generated Marketing page to bilko.run as a static-path listing, via the bilko-host MCP\'s gated publish pipeline.' },
   // Tools — promoted from modals in v0.13.1.
   'voice':            { title: 'Voice & microphone',  intro: 'On-device transcription, push-to-talk hotkey, device selection, and TTS toggle.' },
   'data-model':       { title: 'Data Model',           intro: 'A hand-maintained ERD of what Session Manager actually persists — storage paths, single-writer owners, and how entities relate.' },
@@ -140,7 +138,6 @@ function computeScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode
       case 'settings':      return <LazyScreen><Settings /></LazyScreen>
       case 'agent-library': return <LazyScreen><AgentLibrary /></LazyScreen>
       case 'tag-library':   return <LazyScreen><TagLibrary /></LazyScreen>
-      case 'bilko-host':    return <LazyScreen><HostBilko /></LazyScreen>
       case 'data-model':    return <LazyScreen><DataModel /></LazyScreen>
       // Former-modal tools rendered with variant="page" so they paint inline
       // with no overlay/portal. Pass a noop onClose since the route owns

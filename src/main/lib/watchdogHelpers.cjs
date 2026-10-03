@@ -7,6 +7,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const schedulerPaths = require('./schedulerPaths.cjs');
 const { isRestartingMarkerActive } = require('./upgradeDrain.cjs');
+const { pidAlive: pidAliveCore } = require('./pidAlive.cjs');
+const atomicFs = require('./atomicFs.cjs');
 
 
 
@@ -142,23 +144,14 @@ function evaluateDispatchLiveness(entry, now = Date.now(), { deadMs = DEFAULT_DI
 /**
  * isPidAlive(pid) → boolean
  *
- * Plain liveness check via process.kill(pid, 0) (no signal sent). Single
- * source of truth for the "is this recorded pid still alive" check used by
- * checkAppLiveness's defense-in-depth relaunch gate.
- *
- * EPERM (pid exists, owned by another user) counts as alive — only ESRCH
- * (no such process) means dead. Watchdog and app run as the same user in
- * practice, so this distinction rarely matters here, but treating EPERM as
- * "dead" would be wrong on its face (the process demonstrably exists).
+ * Thin alias over pidAlive.cjs's shared pidAlive() — single source of truth
+ * for the "is this recorded pid still alive" check used by
+ * checkAppLiveness's defense-in-depth relaunch gate. Kept as a named export
+ * here (rather than inlining the require at every call site) so existing
+ * imports of `isPidAlive` from this module keep working unchanged.
  */
 function isPidAlive(pid) {
-  if (typeof pid !== 'number' || !Number.isFinite(pid)) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return e?.code === 'EPERM';
-  }
+  return pidAliveCore(pid);
 }
 
 // Offline queue.json reconciliation (orphaned 'running' jobs whose pid died
@@ -213,12 +206,9 @@ function readRelaunchState(statePath = schedulerPaths.watchdogRelaunchStatePath(
   }
 }
 
-/** Atomic write: tmp-<pid>-<ts> → rename (mirrors config.cjs writeJsonSync). */
+/** Atomic write via atomicFs.cjs (mirrors config.cjs writeJsonSync). */
 function writeRelaunchState(statePath, state) {
-  fs.mkdirSync(path.dirname(statePath), { recursive: true });
-  const tmpPath = `${statePath}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2) + '\n', 'utf8');
-  fs.renameSync(tmpPath, statePath);
+  atomicFs.writeJsonAtomicSync(statePath, state);
 }
 
 function logRelaunchLine(logPath, message) {
@@ -343,12 +333,9 @@ function readStampDate(stampPath) {
   }
 }
 
-/** Atomic write: tmp-<pid>-<ts> → rename (mirrors config.cjs writeJsonSync). */
+/** Atomic write via atomicFs.cjs (mirrors config.cjs writeJsonSync). */
 function writeStampDate(stampPath, date) {
-  fs.mkdirSync(path.dirname(stampPath), { recursive: true });
-  const tmpPath = `${stampPath}.tmp-${process.pid}-${Date.now()}`;
-  fs.writeFileSync(tmpPath, date, 'utf8');
-  fs.renameSync(tmpPath, stampPath);
+  atomicFs.writeTextAtomicSync(stampPath, date);
 }
 
 /**

@@ -37,6 +37,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { writeRunLog } = require('./_helpers/schedulerHarness.cjs');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'reverify-guard-test-'));
 process.env.HOME = tmpHome;
@@ -47,12 +48,6 @@ const {
   selectAutoFixTargets,
   selectMechanicalRecoveryTarget,
 } = require('../scheduler.cjs');
-
-function writeRunLog(runId, slug, lines) {
-  const runDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId);
-  fs.mkdirSync(runDir, { recursive: true });
-  fs.writeFileSync(path.join(runDir, `${slug}.log`), lines.join('\n') + '\n');
-}
 
 test('a lone unverified-shaped failed row (no needs_review sibling) fires the periodic pass', () => {
   writeRunLog('run-guard-1', '4056-outcome-stats', ['[scheduler] starting 4056-outcome-stats']); // no result event

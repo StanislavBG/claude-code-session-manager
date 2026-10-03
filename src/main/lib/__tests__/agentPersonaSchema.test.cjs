@@ -52,6 +52,12 @@ test('a persona with an uppercase/spaced name is rejected', () => {
   expect(() => assertValidAgentPersonaSave(badName)).toThrow(/name/);
 });
 
+test('a legacy bilko-host-publisher tag is dropped from the tags array (treated as absent), never thrown', () => {
+  const legacyTag = validPersona({ tags: ['feature', 'bilko-host-publisher', 'bug'] });
+  const result = assertValidAgentPersonaSave(legacyTag);
+  expect(result.tags).toEqual(['feature', 'bug']);
+});
+
 test('a persona with only the required fields parses', () => {
   const minimal = {
     name: 'minimal-agent',

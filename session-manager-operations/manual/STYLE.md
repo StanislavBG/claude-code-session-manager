@@ -203,7 +203,6 @@ written here. A term that couldn't be verified against real source was dropped, 
 | File Explorer | The built-in file browser and editor. | File Explorer |
 | History | A record of past Sessions, with cost and usage over time. | History |
 | Voice | Talk to your agents with your microphone instead of typing. | Voice |
-| Host on Bilko.run | Publish a project's overview page to the public web. | Host on Bilko.run |
 
 ## Honesty rules
 

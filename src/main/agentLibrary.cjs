@@ -66,8 +66,13 @@ function decodeLine(s) {
  * instruction that button sends into the new session, and `actionLabel`
  * overrides the button's caption (defaults to the persona name). Claude Code
  * ignores all three; only this app reads them.
+ *
+ * `seedVersion` is seedAgentPersonas.cjs's bundled-persona stamp — an
+ * integer, present only on the four bundled personas. Written through
+ * unchanged (not Claude-Code-visible either) so a save from the Agent
+ * Library editor never erases the stamp a hand-edit should keep intact.
  */
-function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, body }) {
+function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, body }) {
   const lines = ['---', `name: ${name}`];
   if (description) lines.push(`description: ${description}`);
   if (tools && tools.length) lines.push(`tools: ${tools.join(', ')}`);
@@ -79,6 +84,7 @@ function serializePersona({ name, description, tools, model, effort, color, tags
   if (action) lines.push(`action: ${encodeLine(action)}`);
   if (actionLabel) lines.push(`actionLabel: ${encodeLine(actionLabel)}`);
   if (title) lines.push(`title: ${title}`);
+  if (typeof seedVersion === 'number' && Number.isFinite(seedVersion)) lines.push(`seedVersion: ${seedVersion}`);
   lines.push('---', '');
   return lines.join('\n') + (body || '').trim() + '\n';
 }
@@ -142,6 +148,7 @@ async function savePersona({
   action,
   actionLabel,
   title,
+  seedVersion,
   body,
   projectName,
   globalDir = path.join(os.homedir(), '.claude', 'agents'),
@@ -156,7 +163,19 @@ async function savePersona({
     return saveOverlay({ name, projectName, model, effort, loadSessions, validatePath, writeTextAtomic });
   }
   const target = validatePath(path.join(globalDir, `${name}.md`));
-  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, body });
+  // The Agent Library editor's form has no `seedVersion` field, so a save
+  // through it never passes one explicitly — carry over whatever stamp the
+  // existing file already has rather than silently erasing it. An explicit
+  // `seedVersion` argument (e.g. the seeder's own future callers) still wins.
+  let resolvedSeedVersion = seedVersion;
+  if (resolvedSeedVersion === undefined) {
+    try {
+      const existing = splitFrontmatter(fsSync.readFileSync(target, 'utf8'));
+      const existingVersion = Number(existing.fm.seedVersion);
+      if (Number.isFinite(existingVersion)) resolvedSeedVersion = existingVersion;
+    } catch { /* no existing file (or unreadable) — nothing to carry over */ }
+  }
+  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion: resolvedSeedVersion, body });
   await writeTextAtomic(target, text);
   if (originalName && originalName !== name) {
     const oldReal = validatePath(path.join(globalDir, `${originalName}.md`));
@@ -301,6 +320,7 @@ async function listPersonas({
       action: decodeLine(fm.action) || null,
       actionLabel: decodeLine(fm.actionLabel) || null,
       title: fm.title || null,
+      seedVersion: fm.seedVersion !== undefined && Number.isFinite(Number(fm.seedVersion)) ? Number(fm.seedVersion) : null,
       path: real,
       body: body.trim(),
       overridingProjects,

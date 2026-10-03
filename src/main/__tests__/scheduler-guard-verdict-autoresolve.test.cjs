@@ -42,7 +42,7 @@ const path = require('node:path');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-verdict-autoresolve-test-'));
 process.env.HOME = tmpHome;
 
-const { execFileSync } = require('node:child_process');
+const { git, initRepo, registerActiveProject, writeProjectQueue } = require('./_helpers/schedulerHarness.cjs');
 
 const {
   selectExhaustedNeedsReviewTargets,
@@ -57,7 +57,6 @@ const {
 
 const { pickForProject } = require('../lib/schedulerBatch.cjs');
 const { resolvePrdWriteDir } = require('../lib/prdLocations.cjs');
-const { bustCwdCache } = require('../lib/queueStore.cjs');
 
 const MIN_MS = 60_000;
 const THRESHOLD_MS = 30 * MIN_MS;
@@ -229,40 +228,12 @@ test('(d) a dependsOn chain drains once a guard-parked blocker (no auto-fix, no 
 
 // --- end-to-end: reverifyNeedsReview computes looksDone for a guard-parked row ---
 
-function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' });
-}
-
-function initRepo(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-  git(['init', '-q'], dir);
-  git(['config', 'user.email', 'test@example.com'], dir);
-  git(['config', 'user.name', 'Test'], dir);
-  fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n', 'utf8');
-  git(['add', '-A'], dir);
-  git(['commit', '-q', '-m', 'initial'], dir);
-}
-
 function commitFile(dir, relPath, content, message) {
   const abs = path.join(dir, relPath);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, content);
   git(['add', relPath], dir);
   git(['commit', '-q', '-m', message], dir);
-}
-
-function registerActiveProject(cwd, slug) {
-  const slugDir = path.join(tmpHome, '.claude', 'projects', slug);
-  fs.mkdirSync(slugDir, { recursive: true });
-  fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
-  bustCwdCache();
-}
-
-function writeProjectQueue(cwd, jobs) {
-  const stateDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
-  fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({ jobs }, null, 2));
-  return path.join(stateDir, 'queue.json');
 }
 
 function writePrd(cwd, slug, body) {

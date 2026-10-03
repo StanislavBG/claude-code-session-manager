@@ -18,7 +18,7 @@
  *     an already-written PRD's disposition from the Scheduler UI. Uses
  *     computeDispositionRewrite() to validate the rewrite is safe before
  *     handing the new dependsOn to remote.updatePrd (which itself refuses a
- *     non-pending/quarantined row — see scheduler.cjs's updatePrd).
+ *     'running' or 'completed' row — see scheduler.cjs's updatePrd).
  *
  * `rows` throughout is the same shape listPrdsInternal() already produces:
  * { slug, status, dependsOn }. dependsOn entries are resolved against `rows`
@@ -151,7 +151,7 @@ function wouldCreateCycle(rows, slug, newDependsOn) {
  * behind another chain" action). Pure — returns the new dependsOn value on
  * success; the caller (scheduler.cjs's IPC handler) is responsible for
  * actually persisting it via remote.updatePrd, which independently refuses
- * a non-pending/quarantined row (defense in depth, not duplicated here).
+ * a 'running' or 'completed' row (defense in depth, not duplicated here).
  *
  * Refuses (ok: false) when:
  *   - `slug` isn't a known row.

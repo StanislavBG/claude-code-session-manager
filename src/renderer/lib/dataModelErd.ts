@@ -375,7 +375,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       { name: 'sourcePromptId', type: 'string', optional: true, key: 'fk', ref: 'epic.id', note: 'frontmatter intent — can disagree with epicId' },
       { name: 'sourceTabId', type: 'string', optional: true },
       { name: 'estimateMinutes', type: 'number' },
-      { name: 'tag', type: "'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'bilko-host-publisher'", optional: true, key: 'fk', ref: 'tag.tag' },
+      { name: 'tag', type: "'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder'", optional: true, key: 'fk', ref: 'tag.tag' },
       { name: 'dependsOn', type: 'string[]', optional: true, key: 'fk', ref: 'prd.slug', note: 'the SOLE ordering primitive' },
       { name: 'goal', type: 'string' },
       { name: 'acceptanceCriteria', type: 'string[]' },
@@ -538,7 +538,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
     },
     summary: 'The closed 5-taxonomy union — Epic creation is agentType (who) + tag (what), two independent selections.',
     fields: [
-      { name: 'tag', type: "'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'bilko-host-publisher'", key: 'pk' },
+      { name: 'tag', type: "'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder'", key: 'pk' },
       { name: 'label', type: 'string' },
       { name: 'description', type: 'string' },
       { name: 'developEagerness', type: "'expected-default' | 'available-not-assumed'" },
@@ -716,25 +716,6 @@ export const ERD_ENTITIES: ErdEntity[] = [
     ],
   },
   {
-    id: 'bilkoPublishState',
-    name: 'BilkoHostPublishState',
-    group: 'brief',
-    store: {
-      path: '<cwd>/session-manager-operations/bilko-host/publish-state.json',
-      format: 'json',
-      writer: 'bilko-host',
-      definedIn: 'src/renderer/lib/bilkoHost.ts + bilko-host MCP ',
-    },
-    summary: 'The bilko.run relay is intentionally still live — never delete or decommission it.',
-    fields: [
-      { name: 'status', type: "'not-published' | 'bundle-ready' | 'publishing' | 'published' | 'publish-failed'" },
-      { name: 'slug', type: 'string' },
-      { name: 'url', type: 'string', optional: true },
-      { name: 'lastAttemptAt', type: 'string', optional: true },
-      { name: 'lastError', type: 'string', optional: true },
-    ],
-  },
-  {
     id: 'settingsScope',
     name: 'Settings (scoped)',
     group: 'config',
@@ -778,8 +759,8 @@ export const ERD_ENTITIES: ErdEntity[] = [
     },
     summary: 'Fail-closed — a new top-level ops folder must land in OWNERS (or the deliberately-unowned list) in the same PR that creates it.',
     fields: [
-      { name: 'namespace', type: 'string', key: 'pk', note: "e.g. 'prompt-sessions', 'scheduler', 'project-brief', 'bilko-host'" },
-      { name: 'writer', type: 'string', note: "e.g. 'epics', 'scheduler', 'project-home', 'bilko-host'" },
+      { name: 'namespace', type: 'string', key: 'pk', note: "e.g. 'prompt-sessions', 'scheduler', 'project-brief'" },
+      { name: 'writer', type: 'string', note: "e.g. 'epics', 'scheduler', 'project-home'" },
     ],
   },
   {
@@ -973,7 +954,6 @@ export const ERD_RELATIONS: ErdRelation[] = [
   { from: 'projectBrief', to: 'project', cardinality: '1-1', label: 'describes' },
   { from: 'projectBrief', to: 'epic', cardinality: 'N-1', via: 'areas[].epic', label: 'traces to', optional: true },
   { from: 'projectPages', to: 'project', cardinality: '1-1', label: 'generated for' },
-  { from: 'bilkoPublishState', to: 'project', cardinality: '1-1', label: 'publishes' },
   { from: 'settingsScope', to: 'project', cardinality: 'N-1', label: 'scoped to', optional: true },
   { from: 'layoutEnvelope', to: 'tab', cardinality: '1-N', label: 'panels for' },
   { from: 'opsNamespace', to: 'epic', cardinality: '1-N', label: 'governs writes' },

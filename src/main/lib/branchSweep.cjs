@@ -19,20 +19,13 @@
  */
 'use strict';
 
-const { execFile } = require('node:child_process');
 const gitWorktree = require('./gitWorktree.cjs');
+const { execGit: sharedExecGit } = require('./gitExec.cjs');
 
+// Thin re-shape over the shared gitExec.execGit — kept so call sites below
+// (positional `timeout`, no `-C` prefix needed) don't all need touching.
 function execGit(cwd, args, timeout = 20_000) {
-  return new Promise((resolve, reject) => {
-    execFile('git', ['-C', cwd, ...args], { timeout, windowsHide: true, encoding: 'utf8' }, (err, stdout, stderr) => {
-      if (err) {
-        err.stderrText = stderr;
-        reject(err);
-        return;
-      }
-      resolve(stdout || '');
-    });
-  });
+  return sharedExecGit(cwd, args, { timeout });
 }
 
 /** List every local branch under `refs/heads/sm-job/*`. Never throws. */
@@ -114,7 +107,15 @@ async function sweepStrandedJobBranches({ cwd, jobs, attemptedBranches }) {
       continue;
     }
     attempted.add(attemptKey);
-    const integration = await gitWorktree.integrateJobBranch({ cwd, branch, slug: slug || branch });
+    // baseBranch: read off the job row when one still exists (the crash-between-
+    // commit-and-integrate case this sweep exists for) so integration targets the
+    // SAME branch the checkout was actually on when the worktree was created —
+    // not whatever cwd happens to sit on during this sweep pass. A fully orphaned
+    // branch (no row at all) has nothing to read, so it falls back to
+    // resolveDefaultBranch(cwd), same as before.
+    const integration = await gitWorktree.integrateJobBranch({
+      cwd, branch, slug: slug || branch, baseBranch: (row && row.worktreeBaseBranch) || null,
+    });
     results.push({ branch, slug, action: integration.ok ? 'integrated' : 'conflict', integration });
   }
   return { results };

@@ -18,6 +18,7 @@ const {
   selectResumeRecoveryTarget,
   buildResumeRecoveryPreamble,
   buildClaudeSpawnArgs,
+  HEADLESS_DISALLOWED_TOOLS,
   selectAutoFixTargets,
   spawnInvestigation,
 } = require('../scheduler.cjs');
@@ -139,6 +140,16 @@ test('buildClaudeSpawnArgs: --model is always explicitly pinned, both modes', ()
     const modelIdx = args.indexOf('--model');
     expect(modelIdx).toBeGreaterThanOrEqual(0);
     expect(args[modelIdx + 1]).toBe('sonnet');
+  }
+});
+
+test('buildClaudeSpawnArgs: --disallowedTools carries the frozen headless list and is immediately followed by another flag, both modes', () => {
+  for (const resume of [true, false]) {
+    const args = buildClaudeSpawnArgs({ prompt: 'x', model: 'sonnet', sessionId: 'sid', resume });
+    const idx = args.indexOf('--disallowedTools');
+    expect(idx).toBeGreaterThanOrEqual(0);
+    expect(args[idx + 1]).toBe(HEADLESS_DISALLOWED_TOOLS.join(','));
+    expect(args[idx + 2]).toMatch(/^--/);
   }
 });
 

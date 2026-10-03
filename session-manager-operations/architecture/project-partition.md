@@ -11,7 +11,7 @@
 | Partition | What it is | Who consumes it |
 | --- | --- | --- |
 | **DESKTOP HARNESS** | The Electron app itself: main/preload/renderer, build config, tests, dev tooling. | End users running `npx claude-code-session-manager`; contributors developing the app. |
-| **WEB PRESENCE** | Code in THIS repo that produces content displayed on bilko.run. The pages themselves live in `~/Projects/Bilko`, a sibling repo — see below. | bilko.run visitors; the `bilko-host-publisher` / `project-home-builder` agent personas. |
+| **WEB PRESENCE** | Code in THIS repo that produces content displayed on bilko.run. The pages themselves live in `~/Projects/Bilko`, a sibling repo — see below. | bilko.run visitors; the `project-home-builder` agent persona. |
 | **AGENT LAYER** | Skills, hooks, and MCP tooling this repo ships so OTHER repos can adopt session-manager's dev workflow. The npm `files` array is the only shipping mechanism for this partition — a moved path not also updated there silently drops from the next `npx` install. | Other projects' Claude Code sessions, by npm install or by-reference stable shim (`~/.claude/session-manager/hooks/`) — never just this repo. |
 | **OPERATIONS STATE** | `session-manager-operations/` — per-project runtime state and docs, governed by the single-writer law. Not code. | This app's own main process (owned namespaces) and skills/humans (unowned namespaces). |
 
@@ -33,7 +33,7 @@ Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
 | `CLAUDE.md`, `tsconfig.json`, `vite.config.ts`, `vitest.config.ts`, `tailwind.config.js`, `postcss.config.js`, `playwright.config.ts`, `package.json`, `package-lock.json`, `.gitignore`, `LICENSE` | DESKTOP HARNESS | Root build/governance config. |
 | `plugins/` | AGENT LAYER | `plugins/session-manager-dev/skills/` — the skills this repo ships (list the directory for the current set). |
 | `.claude-plugin/` | AGENT LAYER | Marketplace manifest for the `session-manager-dev` plugin. |
-| `.mcp.json` | AGENT LAYER | Registers only `bilko-host`. The scheduler MCP server (`scripts/scheduler-mcp-server.cjs`) is registered at user scope in `~/.claude.json` (installed by `scripts/install-scheduler-mcp-user-scope.sh`), not here. |
+| `.mcp.json` | AGENT LAYER | Empty today. The scheduler MCP server (`scripts/scheduler-mcp-server.cjs`) is registered at user scope in `~/.claude.json` (installed by `scripts/install-scheduler-mcp-user-scope.sh`), not here. |
 | `web/` | WEB PRESENCE | Physical home of the partition's producers (`project-pages/`, `manual/`, `remote-app/`) — see [`web/README.md`](../../web/README.md). |
 | `web-remote/` | WEB PRESENCE | `app/` moved to `web/remote-app/` (PRD 1184). See [web-remote/CLAUDE.md](../../web-remote/CLAUDE.md) — only `relay/` (dead) remains here. |
 | `session-manager-operations/` | OPERATIONS STATE | See namespace table below. |
@@ -45,7 +45,7 @@ Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
 
 | Folder | Partition | Note |
 | --- | --- | --- |
-| `src/main/` | DESKTOP HARNESS | **Except** `bilkoHost.cjs`, `bilkoHostCore.cjs`, `projectPages.cjs` → WEB PRESENCE (producers of the bilko.run project page). Also holds `lib/activeSessions.cjs` and `lib/watchdogHelpers.cjs`, moved here from the scripts folder's old helper subdirectory. |
+| `src/main/` | DESKTOP HARNESS | **Except** `projectPages.cjs` → WEB PRESENCE (producer of the bilko.run project page). Also holds `lib/activeSessions.cjs` and `lib/watchdogHelpers.cjs`, moved here from the scripts folder's old helper subdirectory. |
 | `src/preload/` | DESKTOP HARNESS | |
 | `src/renderer/` | DESKTOP HARNESS | **Except** `lib/projectPages/` → WEB PRESENCE (compiled into the bilko.run page bundle by `web/project-pages/build-renderer.mjs`; `web/project-pages/generate-font-data.mjs` writes `library/fontData.ts` there). |
 | `src/seed/` | DESKTOP HARNESS | |
@@ -93,9 +93,10 @@ together, since `npm install` is the single distribution mechanism for the whole
 
 ## `session-manager-operations/` namespaces
 
-All 12 namespaces (`architecture`, `bilko-host`, `design-mocks`, `feedback` [retired],
-`HUMAN_LEARN`, `logs`, `manual`, `project-brief`, `project-pages`, `prompt-sessions`, `reviews`,
-`scheduler`) are **OPERATIONS STATE** — that partition *is* `session-manager-operations/`. Which
+All 13 namespaces (`architecture`, `design-mocks`, `feedback` [retired],
+`HUMAN_LEARN`, `logs`, `manual`, `memory-clusters`, `project-brief`, `project-pages`,
+`prompt-sessions`, `reviews`, `scheduler`, `ui-prefs`) are **OPERATIONS STATE** — that partition
+*is* `session-manager-operations/`. Which
 of them has an app-owned single writer vs. is skill-authored is [CLAUDE.md](../../CLAUDE.md)'s
 `OWNERS` enumeration under Domain model — not restated here.
 

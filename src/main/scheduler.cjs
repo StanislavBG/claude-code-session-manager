@@ -55,8 +55,15 @@ const { execFile, execFileSync } = require('node:child_process');
 const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
+const { ensureTimeoutShim, withTimeoutShimOnPath } = require('./lib/timeoutShim.cjs');
 const supervisor = require('./supervisor.cjs');
 const { resolveClaudeBin, claudeSpawnTarget, probeClaudeVersion } = require('./lib/claudeBin.cjs');
+const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claudeCliCaps.cjs');
+// Fire-and-forget priming — by the time the first job dispatches, the cached
+// probe result is almost always already warm for buildClaudeSpawnArgs's sync
+// callers; async spawn sites still `await ensureCliCapsProbed()` themselves
+// as the authoritative guarantee.
+ensureCliCapsProbed().catch(() => {});
 const launchFailure = require('./lib/launchFailure.cjs');
 const { appendError } = require('./lib/opsErrorLog.cjs');
 const { readTail } = require('./lib/fileTail.cjs');
@@ -69,6 +76,7 @@ const { resolveProjectRoot } = require('./lib/opsOwnership.cjs');
 const { sweepStrandedJobBranches } = require('./lib/branchSweep.cjs');
 const { detectRateLimitInLog } = require('./lib/rateLimitDetect.cjs');
 const { stripAppOwnedChurn } = require('./lib/jobDirtFilter.cjs');
+const { GATE_AUTHORITY_VERDICTS, decideGateAuthority } = require('./lib/gateAuthority.cjs');
 const { resolveBindingRateLimitReset } = require('./lib/rateLimitWindow.cjs');
 const { isResetFresh, bindingWindow, degradedBudget } = require('./lib/usageCircuit.cjs');
 const { computeQueueHealth } = require('./lib/queueHealth.cjs');
@@ -79,7 +87,8 @@ const { createBroadcastCoalescer } = require('./lib/broadcastCoalescer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
-const { appendResponseEventIfKnown } = require('./promptSessionEvents.cjs');
+const { appendResponseEventIfKnown, appendResponseEventWithReason } = require('./promptSessionEvents.cjs');
+const { buildReviewNotice, selectDueReviewNotices, formatReviewNotice, holdMsFromEnv } = require('./lib/reviewNotice.cjs');
 const { maybeEnqueueValidationPrompt } = require('./lib/epicValidationHook.cjs');
 const { parseValidationSentinels } = require('./lib/validationSentinels.cjs');
 const { hasDownstreamValidator } = require('./lib/planValidator.cjs');
@@ -145,7 +154,7 @@ const queueOps = require('./queueOps.cjs');
 // Plain Node module, no Electron dependency; queuePath/prdsDir defaults already
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
-const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath } = require('./lib/prdLocations.cjs');
+const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath, ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/agentEffortResolve.cjs');
@@ -177,6 +186,7 @@ const quietMachineLease = require('./lib/quietMachineLease.cjs');
 const runtimeState = require('./lib/schedulerRuntimeState.cjs');
 const jobWorktree = require('./lib/jobWorktree.cjs');
 const gitWorktree = require('./lib/gitWorktree.cjs');
+const sharedGitExec = require('./lib/gitExec.cjs');
 const { buildJobWorktreeIsLive } = require('./lib/jobWorktreeBootLive.cjs');
 const { buildTerminalOrphanIsLive } = require('./lib/jobWorktreeTerminalOrphanLive.cjs');
 const { reconcileEpicWorktreesOnBoot } = require('./lib/epicWorktreeBoot.cjs');
@@ -272,113 +282,118 @@ const BASH_MAX_TIMEOUT_MS = 900_000; // 15 min — must stay below IDLE_OUTPUT_K
 // Value lives in reaperHelpers.cjs (imported above) so the external watchdog
 // shares the exact same budget — both increment the same j.orphanRetries field.
 
-// Appended to every scheduled job prompt so the queue can be RELIED ON to finish
-// work to a consistent bar: review → security-review → verify → commit. Enforced
-// centrally here (not per-PRD) so it applies to every current and future PRD.
-// The commit step is also backstopped by the post-run commit guard below: a
-// clean exit that leaves uncommitted changes is downgraded to needs_review.
+// Appended to every scheduled job prompt so every PRD finishes the same way:
+// review → security review → verify → commit → verdict line. It lives here,
+// not in each PRD, so it covers every current and future PRD. The post-run
+// commit guard backs up the commit step: a clean exit that leaves
+// uncommitted changes is downgraded to needs_review.
 //
 // PRD 1408: a plan that ends in its own trailing `validator` job (PRD
-// 1405/1407) already re-reviews every work-item's diff once, so asking EVERY
-// work-item to also run /code-review + /security-review inline is duplicate
-// review work — and the dominant cost tail on multi-file PRDs. buildFinishProtocol
-// derives a `reviewInRun: false` variant that collapses those two steps into
-// one deferral note and renumbers the rest, sharing every other word
-// byte-for-byte with the default (`reviewInRun: true`, which is exactly
-// FINISH_PROTOCOL) via the head/review-steps/tail pieces below.
+// 1405/1407) already reviews every work item's diff once, so asking EVERY
+// work item to also run /code-review + /security-review is duplicate work
+// and the main cost tail on multi-file PRDs. buildFinishProtocol builds a
+// `reviewInRun: false` variant that folds those two steps into one deferral
+// note and renumbers the rest. Every other word is shared byte-for-byte with
+// the default (`reviewInRun: true`, which is exactly FINISH_PROTOCOL) through
+// the head / review-steps / tail pieces below.
+//
+// Plain words on purpose: short sentences, one rule each, rule first, then
+// "Why:". Tests pin the load-bearing tokens (SYNCHRONOUSLY, background Bash,
+// Monitor, TaskOutput, ScheduleWakeup, "no later turn", `timeout <n>`,
+// `git add <path>`, the SCHEDULER_VERDICT lines) — keep them exact. No line
+// of this text may START with SCHEDULER_VERDICT: or FOREIGN_WIP_PATHS: —
+// runVerify's scanners are line-anchored.
 function buildFinishHead(verifyStepNum) {
   return `
 
 ---
-# SCHEDULER FINISH PROTOCOL (mandatory — runs AFTER the work above)
+# SCHEDULER FINISH PROTOCOL (required — do this after the work above)
 
-Once every acceptance-criteria line above is satisfied, finish in this EXACT
-sequence. Do not stop before the commit lands; committing is part of the job.
+When every acceptance criterion above is met, do the steps below in order.
+Do not stop before your commit lands. The commit is part of the job.
 
-RUN VERIFICATION IN THE FOREGROUND — this applies to the whole run, not just
-step ${verifyStepNum} below: every test/typecheck/lint/build command you run, whether while
-implementing the AC or during VERIFY, must run SYNCHRONOUSLY and you must wait
-for it to return. Never start a verification command as a background task
-(no background Bash) and then call Monitor, TaskOutput, or ScheduleWakeup to
-pick up its result later — a headless \`claude -p\` run has no later turn, so
-nothing ever delivers that notification and the run dies mid-verification with
-no commit and no verdict. Your foreground Bash budget for this run is
-${BASH_DEFAULT_TIMEOUT_MS / 1000}s by default, up to ${BASH_MAX_TIMEOUT_MS / 1000}s max
-— size your own \`timeout <n>\` wrapper (e.g. \`timeout ${Math.floor(BASH_MAX_TIMEOUT_MS / 1000)} npm test\`)
-to fit inside that ceiling; if a gate command still cannot finish inside
-budget, stop and emit SCHEDULER_VERDICT: FAIL with the reason instead of
-deferring it.
+Do not stop to ask a question. No one can answer it: this run has no later
+turn. If something is unclear, make the safest reasonable choice, say what you
+chose in your final report, and finish. If you truly cannot go on, end with the
+verdict line SCHEDULER_VERDICT: FAIL and the reason.
+
+Run every check in the foreground. This rule covers the whole run, not only step ${verifyStepNum}.
+It covers every test, typecheck, lint and build command, while you build and while you verify.
+- Run each command SYNCHRONOUSLY and wait for it to return.
+- Never start a check as a background task (no background Bash).
+- Never call Monitor, TaskOutput or ScheduleWakeup to collect a result later.
+  Why: a headless \`claude -p\` run has no later turn. Nothing will deliver
+  that result, and the run ends with no commit and no verdict.
+- Your foreground Bash limit is ${BASH_DEFAULT_TIMEOUT_MS / 1000}s by default and ${BASH_MAX_TIMEOUT_MS / 1000}s at most.
+  Wrap long commands to fit inside it, for example \`timeout ${Math.floor(BASH_MAX_TIMEOUT_MS / 1000)} npm test\`.
+- If a check still cannot finish in time, stop and end with the verdict line
+  SCHEDULER_VERDICT: FAIL and the reason. Do not put it off.
 
 `;
 }
 
-const FINISH_REVIEW_STEPS_IN_RUN = `1. CODE REVIEW — run \`/code-review --fix\` on your changes and apply the fixes it
-   surfaces (correctness first). For any finding you judge a false positive, say
-   why in your result; do not silently skip it. If \`/code-review\` is not
-   available in this environment, do an equivalent careful self-review instead.
-2. SECURITY REVIEW — run \`/security-review\` and address every finding (or
-   justify it). If unavailable, self-review the diff for injection, secrets,
-   path traversal, and unsafe input handling.
+const FINISH_REVIEW_STEPS_IN_RUN = `1. CODE REVIEW — run \`/code-review --fix\` on your changes. Apply the fixes it finds,
+   correctness first. If you think a finding is wrong, say why in your final report.
+   Do not skip a finding silently. If \`/code-review\` is not available here,
+   review your own diff with the same care.
+2. SECURITY REVIEW — run \`/security-review\` and fix every finding, or explain
+   why it is safe. If it is not available, check your diff yourself for
+   injection, secrets, path traversal and unsafe input handling.
 `;
 
-const FINISH_REVIEW_STEP_DEFERRED = `1. REVIEW — code and security review for this plan run once, in its trailing validator job. Do NOT run /code-review or /security-review here.
+const FINISH_REVIEW_STEP_DEFERRED = `1. REVIEW — skip it in this run. The plan's trailing validator job reviews code and security once, for the whole plan. Do NOT run /code-review or /security-review here.
 `;
 
 function buildFinishTail({ verifyStepNum, commitStepNum, verdictStepNum }) {
-  return `${verifyStepNum}. VERIFY — run the project's OWN check commands (typecheck / lint / tests — the
-   project's CLAUDE.md names them; infer from the repo if not) and make them
-   pass. Do not assume npm; use whatever the target project uses.
-${commitStepNum}. COMMIT — the queue can run several jobs against this SAME working tree at
-   once. Do NOT stage the whole working tree in one blanket/wildcard git-add
-   sweep — that captures whatever a concurrent sibling job is mid-writing and
-   mis-attributes its work to this commit, corrupting both jobs' verdicts.
-   Stage only the exact paths YOU created or modified for this PRD, then
-   commit: \`git add <path> [<path>...] && git commit -m "<type>(<scope>): <summary>"\`.
-   Your own work must still never be left uncommitted — this only changes
-   which paths get staged, never whether you commit.
-${verdictStepNum}. VERDICT SENTINEL — as the LAST LINE of your final result text, emit exactly
-   one of these lines (no trailing text after it):
+  return `${verifyStepNum}. VERIFY — run every command in the PRD's \`# Gate\` section, in order, in the
+   foreground. Each must exit 0. If the PRD has no \`# Gate\` section, run the
+   project's own typecheck, lint and test commands instead. The project's
+   CLAUDE.md names them; if it does not, find them in the repo. Do not assume npm.
+${commitStepNum}. COMMIT — stage only the exact paths you created or changed for this PRD,
+   then commit:
+     \`git add <path> [<path>...] && git commit -m "<type>(<scope>): <summary>"\`
+   Never stage the whole tree with a wildcard or blanket git add.
+   Why: other jobs may be writing files in this same working tree right now.
+   A blanket add puts their half-done work in your commit and breaks both
+   jobs' verdicts. Always commit your own work: this rule changes what you
+   stage, never whether you commit.
+${verdictStepNum}. VERDICT LINE — end your final report with exactly one of these lines.
+   Put nothing after it, except the FOREIGN_WIP_PATHS line described below.
      SCHEDULER_VERDICT: PASS
      SCHEDULER_VERDICT: FAIL <one-line reason>
      SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP
-   Print PASS only when the AC gate is green AND the commit from step ${commitStepNum} landed.
-   Print FAIL (and exit 1) if the AC gate was red or the commit could not land.
-   NEVER print PASS on a red AC gate — a lying PASS turns the verifier from a
-   false-failure catcher into a silent-failure shipper. A truthful PASS + a
-   landed commit lets the verifier override incidental transcript noise (grep
-   results containing "Error", a TDD red-test run early in the session, debug
-   Tracebacks) so those do not false-trip a needs_review downgrade.
-   Print BLOCKED_BY_FOREIGN_WIP (and exit 1) ONLY when your own AC gate failed
-   because it ran against a SIBLING job's in-flight, uncommitted file — never
-   because of your own regression — AND every failing path is one this prompt
-   already disclosed to you as foreign (see the "FOREIGN WORKING-TREE STATE"
-   section above, if present). It MUST be accompanied by a second line naming
-   every such path:
-     FOREIGN_WIP_PATHS: <path1>, <path2>, ...
-   The scheduler independently validates every listed path against the exact
-   foreign-WIP manifest it disclosed to you. Only list a path that (a) this
-   prompt already told you is foreign WIP, not yours, AND (b) is why your own
-   AC gate failed — never a path you own, and never a path that failed for
-   some other reason of your own making. Any listed path NOT in that manifest
-   downgrades this whole verdict back to FAIL, with your claim rejected. This
-   is not an escape hatch for your own broken code: claiming it for a
-   regression you introduced, or for a path you never received as foreign
-   WIP, is a lying verdict exactly like a false PASS.
+   - Print PASS only when the gate is green AND the commit from step ${commitStepNum} landed.
+   - Print FAIL when the gate is red or the commit could not land.
+   - Never print PASS on a red gate. Why: a false PASS ships broken work that
+     no one notices. A true PASS plus a landed commit lets the scheduler ignore
+     harmless noise in your transcript, such as grep hits for "Error", an early
+     red test run, or debug tracebacks.
+   - Print BLOCKED_BY_FOREIGN_WIP ONLY when your gate failed because of a
+     sibling job's unfinished, uncommitted file — never because of your own
+     change — AND every failing path is one this prompt already listed as
+     foreign (see the "FOREIGN WORKING-TREE STATE" section above, if present).
+     Add a second line that names every such path:
+       FOREIGN_WIP_PATHS: <path1>, <path2>, ...
+     The scheduler checks each listed path against the list it gave you. List
+     a path only if (a) this prompt told you it is foreign work, not yours,
+     and (b) it is why your gate failed. One path that is not on that list
+     turns the whole verdict back into FAIL. Claiming this for your own bug is
+     a false verdict, just like a false PASS.
 
-A job that exits with uncommitted changes is treated as INCOMPLETE and flagged
-for review. Do NOT add work beyond the acceptance criteria — this protocol is the
-only post-AC work. If a review finding can't be fixed within scope, commit what
-you have, describe the finding in the commit body, and note the follow-up in your
-final result.`;
+A job that ends with uncommitted changes counts as INCOMPLETE and is flagged
+for review. Do not add work beyond the acceptance criteria: these steps are the
+only work after them. If you cannot fix a review finding within scope, commit
+what you have, describe the finding in the commit body, and note the follow-up
+in your final report.`;
 }
 
 /**
  * buildFinishProtocol({ reviewInRun }) → string
  *
  * `reviewInRun: true` (default) is byte-for-byte FINISH_PROTOCOL: steps 1-5
- * are CODE REVIEW, SECURITY REVIEW, VERIFY, COMMIT, VERDICT SENTINEL.
+ * are CODE REVIEW, SECURITY REVIEW, VERIFY, COMMIT, VERDICT LINE.
  * `reviewInRun: false` collapses the two review steps into one deferral note
- * (step 1) and renumbers VERIFY/COMMIT/VERDICT SENTINEL to 2-4 — used when
+ * (step 1) and renumbers VERIFY/COMMIT/VERDICT LINE to 2-4 — used when
  * `hasDownstreamValidator` (lib/planValidator.cjs) finds this job's diff will
  * be re-reviewed once by the plan's own trailing validator job, so asking
  * every work-item to also run /code-review + /security-review inline is
@@ -1176,7 +1191,15 @@ function archivedPrdPathForJob(job) {
  */
 async function archivedTwinExists(job) {
   const slug = job && job.slug;
-  for (const dir of listArchivedPrdDirs((job && job.cwd) || DEFAULT_PROJECT_CWD)) {
+  const dirs = [...listArchivedPrdDirs((job && job.cwd) || DEFAULT_PROJECT_CWD)];
+  // Epic-in-non-git-parent case (see prdLocations.ancestorEpicDirs' header
+  // comment): job.cwd's own project never sees the ancestor Epic's archive
+  // dir via listArchivedPrdDirs, so also walk up from job.cwd for this
+  // job's EXACT epicId.
+  if (job && job.cwd && job.epicId) {
+    dirs.push(...ancestorEpicArchivedPrdDirs(job.cwd, job.epicId));
+  }
+  for (const dir of dirs) {
     const candidate = safeSlugPathIn(dir, slug);
     if (!candidate) continue;
     try {
@@ -1234,6 +1257,41 @@ async function findPrdDir(slug) {
 }
 
 /**
+ * Job-aware widening of findPrdDir: tries the ordinary global candidate
+ * search first (unchanged), then a stored absolute PRD path on the row (if
+ * the queue schema ever carries one — checked defensively), then walks up
+ * to 3 ancestor directories above `job.cwd` for that EXACT `job.epicId`'s
+ * `prds` dir (prdLocations.ancestorEpicPrdDirs).
+ *
+ * Fixes the incident where an Epic lives in a non-git PARENT folder P
+ * (P/session-manager-operations/scheduler/epics/<epicId>/prds/*.md) but its
+ * PRDs' frontmatter `cwd` is the sub-repo P/repo — P is never itself a
+ * tracked project cwd, so findPrdDir's candidatePrdsDirs() never visits it
+ * and the job was wrongly retired as `prd-missing`. epicId is matched
+ * exactly (never a glob); every path is built with path.join, never string
+ * concatenation with user input.
+ */
+async function findPrdDirForJob(job) {
+  const viaGlobalSearch = await findPrdDir(job && job.slug);
+  if (viaGlobalSearch) return viaGlobalSearch;
+  if (job && typeof job.prdPath === 'string' && job.prdPath) {
+    try {
+      await fsp.access(job.prdPath);
+      return path.dirname(job.prdPath);
+    } catch { /* stored path stale — fall through to the ancestor walk */ }
+  }
+  if (job && job.cwd && job.epicId) {
+    for (const dir of ancestorEpicPrdDirs(job.cwd, job.epicId)) {
+      try {
+        await fsp.access(path.join(dir, `${job.slug}.md`));
+        return dir;
+      } catch { /* not here — try the next ancestor */ }
+    }
+  }
+  return null;
+}
+
+/**
  * Resolve `<dir>/<slug>.md` for a directory already known to contain (or be
  * about to receive) the slug, and enforce path containment. Returns the
  * absolute path on success, null on slug-escape attempts. The zod schema
@@ -1245,6 +1303,26 @@ function safeSlugPathIn(dir, slug) {
   const resolved = path.resolve(path.join(dir, `${slug}.md`));
   if (!resolved.startsWith(dir + path.sep)) return null;
   return resolved;
+}
+
+/**
+ * Realpath of a PRDs dir for the symlink-containment re-checks below, or null
+ * when `dir` or any component between it and its project cwd (the parent of
+ * `session-manager-operations`) is a symlink. Why: comparing a file's realpath
+ * against the RAW dir rejected every PRD under a symlinked path (macOS tmpdir
+ * /var → /private/var), but trusting realpath(dir) alone lets a rogue job swap
+ * `epics/<id>/prds` for a symlink to e.g. ~/.claude and write there. Symlinks
+ * ABOVE the project cwd (a symlinked home or project folder) stay allowed.
+ */
+async function realPrdsDir(dir) {
+  const marker = `${path.sep}session-manager-operations${path.sep}`;
+  const idx = (dir + path.sep).lastIndexOf(marker);
+  const stop = idx === -1 ? path.dirname(dir) : dir.slice(0, idx);
+  for (let p = dir; p.length > stop.length; p = path.dirname(p)) {
+    const st = await fsp.lstat(p).catch(() => null);
+    if (st && st.isSymbolicLink()) return null;
+  }
+  try { return await fsp.realpath(dir); } catch { return null; }
 }
 
 /**
@@ -1288,6 +1366,18 @@ async function resolveSlugOrReason(slug, cwd) {
   const p = safeSlugPathIn(dir, slug);
   if (!p) return { ok: false, reason: 'not-found' };
   return { ok: true, path: p };
+}
+
+/**
+ * Shared row-match predicate for a reset-job request: slugs carry no cwd
+ * salt, so two different projects can independently produce the identical
+ * slug. Both the renderer-facing `schedule:reset-job` IPC handler and
+ * remote.resetJob (admin/MCP) go through this one predicate so a cwd-bearing
+ * caller always resets THAT project's job, never just any row matching the
+ * string.
+ */
+function jobMatchesSlugAndCwd(j, slug, cwd) {
+  return j.slug === slug && (!cwd || j.cwd === cwd);
 }
 
 /** Actionable message for `resolveSlugOrReason`'s 'not-found' reason. */
@@ -3618,13 +3708,17 @@ let drainActive = false;
 
 function drainDeferredInvestigation() {
   if (drainActive || runtimeState.investigationCount() >= MAX_CONCURRENT_INVESTIGATIONS) return;
-  const next = deferredInvestigations.entries().next();
-  if (next.done) return;
-  const [slug, ctx] = next.value;
-  deferredInvestigations.delete(slug);
-  spawnInvestigation(ctx.failedJob, ctx.runDir).catch((e) => {
-    console.error('[scheduler] drained investigation error', slug, e);
-  });
+  // Skip the slug the background gate shadow is still deciding (gateShadowSlug,
+  // set near reverifyNeedsReview's pick) — leave it queued rather than drain it
+  // out from under the gate. Take the first OTHER entry instead, in queue order.
+  for (const [slug, ctx] of deferredInvestigations) {
+    if (slug === gateShadowSlug) continue;
+    deferredInvestigations.delete(slug);
+    spawnInvestigation(ctx.failedJob, ctx.runDir).catch((e) => {
+      console.error('[scheduler] drained investigation error', slug, e);
+    });
+    return;
+  }
 }
 let cancelToken = { cancelled: false };
 // Last memory-gate observation; included in snapshot for renderer visibility.
@@ -4022,15 +4116,21 @@ async function clearPause(source) {
 /**
  * Mutate a job in place to "pending" with cleared run metadata.
  *
- * Refuses (no-ops, returns false) on a job already in a terminal success
- * state ('completed') unless opts.force is true — resetting a completed job
- * re-fires the PRD and re-executes already-shipped work (the false-failure
- * class PRD 812-workbench-review-nits-cleanup demonstrated: a completed job
- * was reset to pending and re-ran a correct no-op that then got flagged
- * needs_review). All internal call sites operate on jobs that are still
- * 'running'/'failed' at the point they call this, so the guard is a no-op
- * for them; only an external reset request (IPC/admin API) can target an
- * already-'completed' job, and that path is exactly what this guards.
+ * Refuses (no-ops, returns false) on a job already in one of two terminal
+ * statuses, unless opts.force is true:
+ *   - 'completed': the work already shipped. Resetting it re-fires the PRD
+ *     and re-executes already-shipped work (the false-failure class PRD
+ *     812-workbench-review-nits-cleanup demonstrated: a completed job was
+ *     reset to pending and re-ran a correct no-op that then got flagged
+ *     needs_review).
+ *   - 'skipped': the scheduler or a human already chose not to run this job.
+ *     force:true is the deliberate override for that choice.
+ * resetRefusalMessage() (right below) names the one of these two that
+ * applies, for the two external callers that report a refusal to a caller.
+ * All internal call sites operate on jobs that are still 'running'/'failed'
+ * at the point they call this, so the guard is a no-op for them; only an
+ * external reset request (IPC/admin API) can target an already-'completed'
+ * or already-'skipped' job, and that path is exactly what this guards.
  */
 function resetJobFields(job, errorMsg, opts = {}) {
   if ((job.status === 'completed' || job.status === 'skipped') && opts.force !== true) return false;
@@ -4090,10 +4190,49 @@ function resetJobFields(job, errorMsg, opts = {}) {
   delete job.blockedByForeignWip;
   delete job.foreignWipBlockedPaths;
   delete job.foreignWipBlockCount;
+  // A reset starts a new episode: whatever this row's last needs_review park
+  // was about is over, so a later park must start its own hold clock from
+  // scratch rather than inheriting a stale firstParkedAt from days earlier
+  // (reviewNotice.cjs's own doc explains why that matters). The rung-6
+  // ladder requeue (applyNeedsReviewAutoResolve) does NOT call
+  // resetJobFields — it transitions the row directly — so that requeue
+  // correctly keeps the same clock, because it is still the same episode.
+  delete job.reviewNotice;
+  // This run's completion evidence, not durable across a reset — an old
+  // run's looksDone must never complete the NEXT run
+  // (applyNeedsReviewAutoResolve completes on looksDone alone), and a stale
+  // evidenceScannedAt must not block the next park's own scan.
+  // computeLooksDone only counts commits since job.startedAt, so the next
+  // park re-scans fresh once this run's own startedAt is set.
+  delete job.looksDone;
+  delete job.evidenceScannedAt;
   // Deliberately NOT deleting job.landedCommit: it must outlive a reset so a
   // re-fired run of this same slug can pass it to verifyRun as
   // priorLandedCommit (pass_no_commit_prior_run_verified exemption).
   return true;
+}
+
+/**
+ * Plain-word refusal message for a reset that resetJobFields' terminal-
+ * status guard blocked. One branch per status that guard can refuse, plus a
+ * generic fallback for any other status a caller might pass in (defensive —
+ * resetJobFields today only refuses 'completed' and 'skipped').
+ *
+ * `canForce` tells the message whether force:true is actually available to
+ * the caller: true for the admin/MCP resetJob (force threads through), false
+ * for the renderer IPC schedule:reset-job (no force option there — see that
+ * handler's own comment for why).
+ */
+function resetRefusalMessage(status, { canForce } = {}) {
+  if (status === 'completed') {
+    return `job already completed — resetting it would re-execute shipped work; archive the PRD instead${canForce ? ', or pass force:true' : ''}`;
+  }
+  if (status === 'skipped') {
+    return canForce
+      ? 'job was skipped — pass force:true to run it again'
+      : 'job was skipped — only scheduler_reset_job with force:true can run it again';
+  }
+  return `job status is "${status}" — it cannot be reset now`;
 }
 
 /**
@@ -4591,6 +4730,16 @@ async function notifyOriginatingTab(job, {
  * non-active session and returns false. Nothing here can create an Epic — if
  * no open authoring Epic exists, the root-cause report in the run directory
  * is the whole record and the Scheduler tab is where it surfaces.
+ *
+ * Quiet by default (this PRD): the park path no longer calls this at park
+ * time. It records a `reviewNotice` on the job row instead and lets
+ * flushDueReviewNotices send one grouped message once the self-heal ladder
+ * gives up or the hold time passes. This function now only runs under the
+ * SM_REVIEW_NOTICE_IMMEDIATE=1 kill switch (same park-time call site, for
+ * local debugging) — it is otherwise dead code outside its own tests. That
+ * call site stamps `reviewNotice.sentAt` itself afterward, and only when
+ * this returns true AND the row's live notice still matches the one it just
+ * built — never on the strength of this function's return value alone.
  */
 async function notifyNeedsReview(job, report, {
   parsePrdRaw = prdParser.parsePrdRaw,
@@ -4619,6 +4768,133 @@ async function notifyNeedsReview(job, report, {
     console.error('[scheduler] notifyNeedsReview error', job?.slug, e);
     return false;
   }
+}
+
+// Single-flight guard for flushDueReviewNotices — same shape as
+// gateShadowPending above: a module-level flag rather than a class, so two
+// triggers landing close together (an auto-resolve skip right next to the
+// heartbeat interval) read-modify-write queue.json in series, never racing
+// each other over the same rows.
+let reviewNoticeFlushPending = null;
+
+/**
+ * flushDueReviewNotices() → Promise<void>
+ *
+ * The only path that still sends a needs_review notice (outside the
+ * SM_REVIEW_NOTICE_IMMEDIATE=1 kill switch above notifyNeedsReview). Reads
+ * the live queue, asks reviewNotice.cjs's selectDueReviewNotices which (cwd,
+ * Epic, cause) groups have gone quiet — the ladder gave up
+ * (needsReviewAutoResolvedSkip) or the hold time passed (holdMsFromEnv) —
+ * and sends each group ONE message via formatReviewNotice, passing the
+ * tick's own full job list so the message can name any `pending` row the
+ * group still blocks.
+ *
+ * The default sender is appendResponseEventWithReason, which reports WHY a
+ * send didn't land instead of collapsing every case to `false`. An injected
+ * sender (tests) may still return a plain boolean — `true` is treated as ok,
+ * `false` as a refusal with reason `'refused'` — and a sender that throws is
+ * treated as reason `'error'`.
+ *
+ * What each outcome does to reviewNotice.sentAt, per row still at its
+ * snapshotted (firstParkedAt, cause) and still needs_review/skipped live:
+ *   - ok, or a refusal with any reason OTHER than 'error': stamp sentAt now.
+ *     A refusal is logged (today it was silent) but is otherwise treated as
+ *     permanent — a deleted Epic or a completed session will never un-refuse
+ *     itself, so resending every tick forever would help no one.
+ *   - 'error' (an exception, e.g. a disk hiccup): do NOT stamp. Increment
+ *     reviewNotice.sendErrors instead, so the next pass retries. Once that
+ *     reaches 3, stamp sentAt anyway, set sendFailed: true, and log it —
+ *     retry a transient failure, but never loop on it forever.
+ * A group with no resolved Epic/cwd never calls the sender at all — same
+ * "report only" shape as before — and every row in it is stamped
+ * unconditionally, same as a successful send.
+ *
+ * Single-flight via reviewNoticeFlushPending: a call while one is already in
+ * flight returns the SAME promise instead of starting a second pass over the
+ * same rows. Never throws — a bad read just leaves the notice for the next
+ * pass to retry.
+ */
+async function flushDueReviewNotices({
+  appendResponseEvent = appendResponseEventWithReason,
+  now = Date.now(),
+} = {}) {
+  if (reviewNoticeFlushPending) return reviewNoticeFlushPending;
+  reviewNoticeFlushPending = (async () => {
+    try {
+      const state = await readQueue();
+      if (state.unreadable) return;
+      const groups = selectDueReviewNotices(state.jobs || [], { now, holdMs: holdMsFromEnv() });
+      for (const group of groups) {
+        const slugs = new Set(group.jobs.map((j) => j.slug));
+        // Snapshot each row's own (firstParkedAt, cause) as it was when THIS
+        // message was built — the mutate below only touches a row whose live
+        // notice still matches its own snapshot, so a row that re-parked
+        // with a new episode between this read and that mutate is left
+        // alone rather than wrongly marked sent for a notice that never
+        // described it.
+        const snapshotBySlug = new Map(group.jobs.map((j) => [
+          j.slug,
+          { firstParkedAt: j.reviewNotice?.firstParkedAt ?? null, cause: j.reviewNotice?.cause ?? null },
+        ]));
+        const sentAt = new Date(now).toISOString();
+        const stampIfLiveMatches = (s, apply) => {
+          for (const j of s.jobs) {
+            if (!slugs.has(j.slug) || !j.reviewNotice || j.reviewNotice.sentAt) continue;
+            if (j.status !== 'needs_review' && j.status !== 'skipped') continue;
+            const snap = snapshotBySlug.get(j.slug);
+            if (j.reviewNotice.firstParkedAt !== snap.firstParkedAt || j.reviewNotice.cause !== snap.cause) continue;
+            apply(j);
+          }
+        };
+
+        if (!group.epicId || !group.cwd) {
+          console.log(`[scheduler] flushDueReviewNotices: no authoring Epic for ${group.jobs.map((j) => j.slug).join(', ')}, report only`);
+          await mutate((s) => {
+            stampIfLiveMatches(s, (j) => { j.reviewNotice.sentAt = sentAt; });
+          }).catch(() => {});
+          continue;
+        }
+
+        let outcome;
+        try {
+          const result = await appendResponseEvent(group.cwd, group.epicId, formatReviewNotice(group, { jobs: state.jobs }), {
+            prdSlug: group.jobs[0].slug,
+            outcome: 'needs_review',
+            validation: 'unvalidated',
+          });
+          outcome = typeof result === 'boolean' ? { ok: result, reason: result ? undefined : 'refused' } : result;
+        } catch (e) {
+          console.error('[scheduler] flushDueReviewNotices appendResponseEvent error', group.epicId, e);
+          outcome = { ok: false, reason: 'error' };
+        }
+
+        if (!outcome.ok && outcome.reason !== 'error') {
+          console.warn(`[scheduler] flushDueReviewNotices: send refused (${outcome.reason}) for ${group.jobs.map((j) => j.slug).join(', ')}`);
+        }
+
+        await mutate((s) => {
+          stampIfLiveMatches(s, (j) => {
+            if (outcome.ok || outcome.reason !== 'error') {
+              j.reviewNotice.sentAt = sentAt;
+              return;
+            }
+            const sendErrors = (j.reviewNotice.sendErrors ?? 0) + 1;
+            j.reviewNotice.sendErrors = sendErrors;
+            if (sendErrors >= 3) {
+              j.reviewNotice.sentAt = sentAt;
+              j.reviewNotice.sendFailed = true;
+              console.error(`[scheduler] flushDueReviewNotices: giving up on ${j.slug} after ${sendErrors} send errors`);
+            }
+          });
+        }).catch(() => {});
+      }
+    } catch (e) {
+      console.error('[scheduler] flushDueReviewNotices error', e);
+    } finally {
+      reviewNoticeFlushPending = null;
+    }
+  })();
+  return reviewNoticeFlushPending;
 }
 
 /** Scan the tail of a job's log for a network-outage signal: the structured
@@ -5040,10 +5316,16 @@ function stampIntegrationFailure(row, integration) {
     else delete row.integrationConflictPaths;
     if (integration.baseHeadSha) row.integrationBaseHeadSha = integration.baseHeadSha;
     else delete row.integrationBaseHeadSha;
+    if (integration.expectedBranch) row.integrationExpectedBranch = integration.expectedBranch;
+    else delete row.integrationExpectedBranch;
+    if (integration.actualBranch) row.integrationActualBranch = integration.actualBranch;
+    else delete row.integrationActualBranch;
   } else {
     delete row.integrationFailureKind;
     delete row.integrationConflictPaths;
     delete row.integrationBaseHeadSha;
+    delete row.integrationExpectedBranch;
+    delete row.integrationActualBranch;
   }
 }
 
@@ -5121,7 +5403,13 @@ function selectMechanicalRecoveryTarget(job, currentHeadSha = null) {
   if (job.mechanicalRecoveryAttempted === true) return null;
   if (isMechanicalRecoveryFutile(job, currentHeadSha)) return null;
   const cwd = job.cwd || DEFAULT_PROJECT_CWD;
-  return { slug: job.slug, cwd, branch: jobWorktree.branchNameFor(job.slug), carriedPaths: job.carriedPaths || [] };
+  return {
+    slug: job.slug,
+    cwd,
+    branch: jobWorktree.branchNameFor(job.slug),
+    carriedPaths: job.carriedPaths || [],
+    baseBranch: job.worktreeBaseBranch || null,
+  };
 }
 
 /**
@@ -5140,7 +5428,7 @@ function selectMechanicalRecoveryTarget(job, currentHeadSha = null) {
  */
 async function performMechanicalRecovery(job, target) {
   const integration = await jobWorktree.integrateJobBranch({
-    cwd: target.cwd, branch: target.branch, slug: target.slug, carriedPaths: target.carriedPaths,
+    cwd: target.cwd, branch: target.branch, slug: target.slug, carriedPaths: target.carriedPaths, baseBranch: target.baseBranch, allowRefLanding: true,
   });
   if (integration.ok) {
     await jobWorktree.cleanupJobWorktree({ cwd: target.cwd, dir: undefined, branch: target.branch, keepBranch: false });
@@ -5151,6 +5439,7 @@ async function performMechanicalRecovery(job, target) {
     if (!j) return;
     j.mechanicalRecoveryAttempted = true;
     if (integration.ok) {
+      if (integration.viaRef) j.landedCommit = integration.sha;
       if (transitionJob(j, 'completed', {
         reason: `mechanical recovery: ${target.branch} re-integrated successfully`,
         source: 'scheduler:mechanicalRecovery',
@@ -5166,6 +5455,9 @@ async function performMechanicalRecovery(job, target) {
     }
   });
   if (integration.ok) {
+    if (integration.viaRef) {
+      console.log(`[scheduler] mechanical-recovery: ${job.slug} landed onto the base ref directly; the main checkout was busy on another branch and was never touched.`);
+    }
     console.log(`[scheduler] mechanical-recovery: ${job.slug} → completed (branch ${target.branch} re-integrated)`);
     if (becameCompleted) await archiveCompletedPrd(job.slug, job.cwd);
   } else {
@@ -5209,22 +5501,11 @@ function selectLeftoverQuarantineTarget(job) {
   return { slug: job.slug, cwd: job.cwd, paths };
 }
 
+// Delegates to the shared gitExec.execGit (gitExec.cjs has zero requires of
+// scheduler.cjs/gitWorktree.cjs, so no cycle) — semantics match: execFile
+// with an argv array, same timeout default, same env-merge-over-process.env.
 function execGitAt(cwd, args, { env, timeout = 20_000 } = {}) {
-  return new Promise((resolve, reject) => {
-    execFile(
-      'git',
-      ['-C', cwd, ...args],
-      { timeout, windowsHide: true, encoding: 'utf8', env: env ? { ...process.env, ...env } : process.env },
-      (err, stdout, stderr) => {
-        if (err) {
-          err.stderrText = stderr;
-          reject(err);
-          return;
-        }
-        resolve(stdout || '');
-      },
-    );
-  });
+  return sharedGitExec.execGit(cwd, args, { timeout, env });
 }
 
 async function pathExistsInTree(cwd, treeish, p) {
@@ -5467,6 +5748,26 @@ async function performLeftoverQuarantine(job, paths, headBefore = null) {
   });
 }
 
+// A headless `claude -p` run has no later turn. A tool that waits for a
+// later turn (ScheduleWakeup, the Cron tools, Monitor) or for a human
+// (AskUserQuestion, plan mode) stalls the run: it ends with no commit and no
+// verdict, and the job parks in needs_review. EnterWorktree/ExitWorktree wait
+// on a worktree handoff that never comes back in a headless run either.
+// Agent and Skill stay allowed: the finish protocol runs /code-review and
+// /security-review, both of which dispatch sub-agents.
+const HEADLESS_DISALLOWED_TOOLS = Object.freeze([
+  'ScheduleWakeup',
+  'CronCreate',
+  'CronDelete',
+  'CronList',
+  'Monitor',
+  'AskUserQuestion',
+  'EnterPlanMode',
+  'ExitPlanMode',
+  'EnterWorktree',
+  'ExitWorktree',
+]);
+
 /**
  * Pure argv builder for a `claude -p` child spawn, shared so the
  * resume-vs-fresh-session choice is made in exactly one place. `resume`
@@ -5478,6 +5779,9 @@ async function performLeftoverQuarantine(job, paths, headBefore = null) {
  * persona body, resolved by agentModelResolve.cjs's resolvePrdPersonaForSpawn),
  * is passed as `--append-system-prompt` so the executor IS that persona at
  * launch rather than being asked in prose to adopt one.
+ * `--disallowedTools` takes a variadic list, so another flag must always
+ * follow it to end that list — `--output-format` does, right after. Never
+ * put `--disallowedTools` last or right before the prompt.
  */
 function buildClaudeSpawnArgs({ prompt, model, effort, sessionId, resume, systemPrompt }) {
   return [
@@ -5486,6 +5790,8 @@ function buildClaudeSpawnArgs({ prompt, model, effort, sessionId, resume, system
     ...effortArgs(effort),
     ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
     '--dangerously-skip-permissions',
+    ...headlessPermissionArgs(),
+    '--disallowedTools', HEADLESS_DISALLOWED_TOOLS.join(','),
     '--output-format', 'stream-json',
     '--verbose',
     ...(resume ? ['--resume', sessionId] : ['--session-id', sessionId]),
@@ -5506,6 +5812,36 @@ function pickRunDir() {
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const dir = path.join(schedulerPaths.runsDir(), ts);
   return { runId: ts, dir };
+}
+
+// macOS ships no `timeout` command, but a PRD gate command starts with
+// `timeout <seconds> ...`. ensureTimeoutShimOnce() installs a dependency-free
+// stand-in (see lib/timeoutShim.cjs) once per process — not once per job — so
+// most executeJob calls reuse the same cached promise instead of re-checking
+// the files on disk. A failed install clears that cache, so the NEXT spawn
+// retries the install instead of running shim-less for the rest of the
+// process. It never throws and never blocks or fails a spawn: a failed
+// install just logs one line and leaves the PATH addition pointing at a shim
+// dir that may have nothing in it yet, no worse than today's
+// no-shim-at-all. SM_TIMEOUT_SHIM_DISABLE=1 skips it outright.
+let timeoutShimEnsured = null;
+function ensureTimeoutShimOnce() {
+  if (process.env.SM_TIMEOUT_SHIM_DISABLE === '1') return Promise.resolve();
+  if (!timeoutShimEnsured) {
+    timeoutShimEnsured = ensureTimeoutShim().then(
+      (result) => {
+        if (!result.ok && !result.skipped) {
+          console.error(`[scheduler] could not install the timeout shim: ${result.error}`);
+          timeoutShimEnsured = null;
+        }
+      },
+      (err) => {
+        console.error(`[scheduler] could not install the timeout shim: ${err?.message ?? err}`);
+        timeoutShimEnsured = null;
+      },
+    );
+  }
+  return timeoutShimEnsured;
 }
 
 /**
@@ -5585,11 +5921,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     prompt = buildResumeRecoveryPreamble({ dirtyPaths: resumeTarget.dirtyPaths, salvagePatch: resumeTarget.salvagePatch });
   } else {
   // Read full PRD body fresh from disk (queue stored only the preview).
-  // Resolve through findPrdDir's full candidate search (legacy flat dir +
-  // every project's Epic-scoped dirs) first, so the common case — a live
-  // Epic-scoped PRD — is a first-try hit instead of probing the retired flat
-  // dir and only then falling back.
-  const resolvedDir = await findPrdDir(job.slug);
+  // Resolve through findPrdDirForJob's full candidate search (legacy flat
+  // dir + every project's Epic-scoped dirs, then a stored absolute prd path,
+  // then an ancestor-folder Epic walk above job.cwd) first, so the common
+  // case — a live Epic-scoped PRD — is a first-try hit instead of probing
+  // the retired flat dir and only then falling back.
+  const resolvedDir = await findPrdDirForJob(job);
   prdPath = resolvedDir ? path.join(resolvedDir, `${job.slug}.md`) : prdPathForJob(job);
   try {
     const parsed = await parsePrd(prdPath);
@@ -5603,8 +5940,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // The project-scoped dir isn't the only place a PRD source can live — a
     // writer that hasn't migrated to prdLocations.cjs yet (or a not-yet-run
     // boot migration) can leave it in the legacy global dir. Fall back to
-    // findPrdDir's full candidate search before failing the job outright.
-    const fallbackDir = await findPrdDir(job.slug);
+    // findPrdDirForJob's full candidate search before failing the job outright.
+    const fallbackDir = await findPrdDirForJob(job);
     if (fallbackDir) {
       const fallbackPath = path.join(fallbackDir, `${job.slug}.md`);
       safeLog(`[scheduler] PRD not in project dir; found ${job.slug}.md in ${fallbackDir}\n`);
@@ -5739,6 +6076,13 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   const personaEffort = resolveEpicEffort({ cwd, agentType: job.agentType }).effort;
   safeLog(`[scheduler] agentType=${job.agentType || '(none)'} persona=${personaResolution.personaPath || '(fallback — no persona applied)'} model=${personaResolution.model}${personaEffort ? ` effort=${personaEffort}` : ''}\n`);
 
+  // Authoritative guarantee that buildClaudeSpawnArgs (a pure sync helper,
+  // called below via withChildAndLog) sees a resolved --permission-prompts
+  // probe result — the module-load priming above is a warm-cache head start,
+  // not a correctness guarantee on its own.
+  await ensureCliCapsProbed();
+  await ensureTimeoutShimOnce();
+
   return await new Promise((resolve) => {
     const claudeBin = resolveClaudeBin();
     // Strip Claude Code env and secrets that leak in when session-manager is
@@ -5759,8 +6103,11 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // `launchEnv` is the launch circuit breaker's degraded-mode env (e.g.
     // MAX_THINKING_TOKENS=0 while an outdated CLI's thinking parameter is
     // being rejected — lib/launchFailure.cjs); applied last so it wins.
+    // SM_TIMEOUT_SHIM_DISABLE=1 is the kill switch for the PATH addition
+    // below — paired with the install skip inside ensureTimeoutShimOnce().
+    const timeoutShimEnabled = process.env.SM_TIMEOUT_SHIM_DISABLE !== '1';
     const childEnv = cleanChildEnv({
-      PATH: pathWithUserBins(),
+      PATH: timeoutShimEnabled ? withTimeoutShimOnPath(pathWithUserBins()) : pathWithUserBins(),
       SM_PROJECT_ROOT: cwd,
       SM_SCHEDULER_JOB_SLUG: job.slug,
       SM_SCHEDULER_JOB_MAY_QUEUE: job.agentType === 'architect' ? '1' : '0',
@@ -5768,6 +6115,13 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
       ...(launchEnv && typeof launchEnv === 'object' ? launchEnv : {}),
     });
+    // Set AFTER cleanChildEnv returns, never inside the object passed to it:
+    // cleanChildEnv strips every CLAUDE_CODE_*-prefixed key from its own
+    // merged result (see cleanEnv.cjs), so setting it there would delete its
+    // own addition. A headless run has no later turn, so a background task
+    // it starts has nothing to report back to — same stall as a tool that
+    // waits for one.
+    childEnv.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = '1';
     if (launchEnv && Object.keys(launchEnv).length) {
       safeLog(`[scheduler] launch mitigation env applied: ${Object.entries(launchEnv).map(([k, v]) => `${k}=${v}`).join(' ')}\n`);
     }
@@ -6339,6 +6693,14 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
     console.log(`[scheduler] skip investigation: ${failedJob.slug} is mechanical-recovery eligible`);
     return { deferred: false };
   }
+  // stray_checkout is environmental (the project's own checkout sits off the
+  // expected base branch) — no fix-plan PRD can ever land against it; a human
+  // must fix the checkout. Authoring one anyway just re-hits the same refusal
+  // on every retry, forever blocking dependents.
+  if (failedJob.integrationFailureKind === 'stray_checkout') {
+    console.log(`[scheduler] skip investigation: ${failedJob.slug} integration blocked by stray checkout (environmental)`);
+    return { deferred: false };
+  }
   if (isFixPlanBeyondDepthCap(failedJob.slug, failedJob.investigationDepth, failedJob.isFixPlan)) {
     console.log(`[scheduler] skip investigation: ${failedJob.slug} is a fix plan at/beyond depth cap (depth=${failedJob.investigationDepth ?? 'none'})`);
     return { deferred: false };
@@ -6448,18 +6810,51 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   // the whole probe duration — previously this left the job's persisted
   // status frozen at 'failed'/'needs_review' the entire time, which read as
   // "nothing is happening" even though an Opus process was actively running.
+  //
+  // Live-row check, in the SAME mutate: `failedJob` can be a stale snapshot
+  // (the deferred-investigation path keeps one from the moment the slot was
+  // busy) and the row underneath it can have moved on — most commonly the
+  // background gate shadow completed it in this same pass. Re-check the row
+  // actually read here, not the snapshot the caller passed in: it must
+  // exist, its live status must still be 'needs_review' or 'failed', and
+  // transitionJob must accept the move. Fail closed on any of the three —
+  // never spawn a probe for a row that is already finished or gone.
+  let liveCheck = { ok: false, status: 'gone' };
   await mutate((s) => {
     const j = s.jobs.find((x) => x.slug === failedJob.slug);
-    if (j) transitionJob(j, 'investigating', { reason: 'spawning investigation probe', source: 'spawnInvestigation:start' });
+    if (!j) return;
+    const statusEligible = j.status === 'needs_review' || j.status === 'failed';
+    const transitioned = transitionJob(j, 'investigating', { reason: 'spawning investigation probe', source: 'spawnInvestigation:start' });
+    liveCheck = { ok: statusEligible && transitioned, status: j.status };
   });
+  if (!liveCheck.ok) {
+    const msg = `[scheduler] skip investigation: ${failedJob.slug} is now ${liveCheck.status} — not probing`;
+    console.log(msg);
+    safeLog(`${msg}\n`);
+    closeFd();
+    releaseSlot();
+    return { deferred: false };
+  }
   await broadcast({ flush: true });
 
+  await ensureCliCapsProbed();
+  await ensureTimeoutShimOnce();
   const claudeBin = resolveClaudeBin();
+  // SM_TIMEOUT_SHIM_DISABLE=1 is the kill switch for the PATH addition below —
+  // paired with the install skip inside ensureTimeoutShimOnce().
+  const timeoutShimEnabled = process.env.SM_TIMEOUT_SHIM_DISABLE !== '1';
   const childEnv = cleanChildEnv({
-    PATH: pathWithUserBins(), // Homebrew/user bins for macOS
+    PATH: timeoutShimEnabled ? withTimeoutShimOnPath(pathWithUserBins()) : pathWithUserBins(), // Homebrew/user bins for macOS
     BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
     BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
   });
+  // Set AFTER cleanChildEnv returns, never inside the object passed to it:
+  // cleanChildEnv strips every CLAUDE_CODE_*-prefixed key from its own merged
+  // result (see cleanEnv.cjs), so setting it there would delete its own
+  // addition. A headless run has no later turn, so a background task it
+  // starts has nothing to report back to — same stall as a tool that waits
+  // for one.
+  childEnv.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = '1';
 
   // Investigation needs only a deadman watchdog — no idle-tail or result-tail
   // since investigations are short-running Opus probes with a hard ceiling.
@@ -6487,6 +6882,8 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
         '-p', prompt,
         '--model', 'opus',
         '--dangerously-skip-permissions',
+        ...headlessPermissionArgs(),
+        '--disallowedTools', HEADLESS_DISALLOWED_TOOLS.join(','),
         '--output-format', 'stream-json',
         '--verbose',
         '--session-id', sessionId,
@@ -6867,7 +7264,7 @@ async function finalizeJobWorktree({ job, runDir, worktree, guardCwd, carriedPat
         console.log(`[scheduler] ${job.slug}: salvaged ${salvage.bytes} byte(s) of uncommitted worktree diff to ${salvagePath}`);
       }
     }
-    const integration = await jw.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug, carriedPaths });
+    const integration = await jw.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug, carriedPaths, baseBranch: worktree.baseBranch });
     if (integration.ok && integration.reason === 'carried-wip-only') {
       console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} touched only carried base WIP paths — skipping merge (carried-wip-only)`);
     }
@@ -7115,6 +7512,14 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           source: 'spawnJob:dispatch',
         });
         delete s.jobs[idx].heldReason;
+        // A fresh dispatch means any gateShadow, looksDone, or
+        // evidenceScannedAt on this row was computed for an earlier
+        // runId/startedAt — never let any of them linger and read as this
+        // run's result (looksDone stale here would let rung 6 complete this
+        // run on the PREVIOUS run's evidence).
+        delete s.jobs[idx].gateShadow;
+        delete s.jobs[idx].looksDone;
+        delete s.jobs[idx].evidenceScannedAt;
         s.jobs[idx].runId = runId;
         s.jobs[idx].startedAt = new Date().toISOString();
         // Dispatch-phase breadcrumb (PRD: dispatch-region diagnostic
@@ -7246,12 +7651,18 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     // recorded on the job row so integration can exclude these paths from
     // the branch diff below, and so it's queryable from the queue.
     const carriedPaths = (worktree.ok && Array.isArray(worktree.carriedPaths)) ? worktree.carriedPaths : [];
-    if (carriedPaths.length) {
-      await mutate((s) => {
-        const idx = s.jobs.findIndex((x) => x.slug === job.slug);
-        if (idx >= 0) s.jobs[idx].carriedPaths = carriedPaths;
-      });
-    }
+    // baseBranch (createWorktree, this PRD) — the branch `cwd` was actually on
+    // when the worktree forked, threaded onto the job row so a later mechanical
+    // recovery retries integration against the SAME target, not whatever `cwd`
+    // happens to sit on by then.
+    const worktreeBaseBranch = (worktree.ok && typeof worktree.baseBranch === 'string' && worktree.baseBranch) ? worktree.baseBranch : null;
+    await mutate((s) => {
+      const idx = s.jobs.findIndex((x) => x.slug === job.slug);
+      if (idx < 0) return;
+      if (carriedPaths.length) s.jobs[idx].carriedPaths = carriedPaths;
+      if (worktreeBaseBranch) s.jobs[idx].worktreeBaseBranch = worktreeBaseBranch;
+      else delete s.jobs[idx].worktreeBaseBranch;
+    });
 
     // Integrate the job's branch back into guardCwd's own HEAD, THEN tear the
     // worktree checkout down — both must happen BEFORE any git read below
@@ -8138,14 +8549,56 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
         annotations: needsReviewRcaSnapshot.verifierAnnotations,
       })
         .then(async (report) => {
-          // Persist the classification onto the parked job row so the scheduler
-          // can route on it (e.g. selectAutoFixTargets excluding 'archive')
-          // without re-parsing the RCA markdown on every pass.
+          // Resolve the authoring Epic the same way notifyNeedsReview does —
+          // the review notice needs the same epicId so flushDueReviewNotices
+          // can route the eventual grouped message to the right place.
+          let epicId = null;
+          try {
+            const prd = await resolveNotifyPrd(needsReviewRcaSnapshot, prdParser.parsePrdRaw);
+            epicId = prd?.sourcePromptId || needsReviewRcaSnapshot.epicId || null;
+          } catch {
+            epicId = null;
+          }
+          // Persist the RCA classification AND the review notice onto the
+          // parked job row in the SAME mutate — the scheduler routes on the
+          // classification (e.g. selectAutoFixTargets excluding 'archive')
+          // and flushDueReviewNotices routes on the notice, neither re-parsing
+          // the RCA markdown nor losing the notice to a lost race.
+          let builtNotice = null;
           await mutate((s) => {
             const j = s.jobs.find((x) => x.slug === needsReviewRcaSnapshot.slug);
             applyRcaClassification(j, report);
-          }).catch(() => {});
-          return notifyNeedsReview(needsReviewRcaSnapshot, report);
+            // Write the notice only while the row is still the SAME
+            // needs_review episode this RCA was filed for — a row a human
+            // already reset, or that moved on before this async write
+            // lands, must not get a stale notice grafted back onto it.
+            if (j && j.status === 'needs_review') {
+              j.reviewNotice = buildReviewNotice({ job: j, report, epicId, now: new Date().toISOString(), prior: j.reviewNotice });
+              builtNotice = j.reviewNotice;
+            }
+          }).catch((e) => {
+            console.error('[scheduler] writeRcaReport reviewNotice mutate error', needsReviewRcaSnapshot.slug, e);
+          });
+          // Quiet by default (this PRD): the notice recorded above waits for
+          // flushDueReviewNotices to send it, grouped, once the ladder gives
+          // up or the hold time passes. SM_REVIEW_NOTICE_IMMEDIATE=1 restores
+          // the old immediate-notify behavior, for local debugging.
+          if (process.env.SM_REVIEW_NOTICE_IMMEDIATE === '1') {
+            const sent = await notifyNeedsReview(needsReviewRcaSnapshot, report);
+            if (sent && builtNotice) {
+              await mutate((s) => {
+                const j = s.jobs.find((x) => x.slug === needsReviewRcaSnapshot.slug);
+                // Stamp only if the live notice is still the exact one just
+                // sent — a re-park between the send and this mutate must not
+                // be marked sent for a notice that never went out.
+                if (j && j.reviewNotice && j.reviewNotice.firstParkedAt === builtNotice.firstParkedAt && j.reviewNotice.cause === builtNotice.cause) {
+                  j.reviewNotice.sentAt = new Date().toISOString();
+                }
+              }).catch((e) => {
+                console.error('[scheduler] writeRcaReport immediate-stamp mutate error', needsReviewRcaSnapshot.slug, e);
+              });
+            }
+          }
         })
         .catch((e) => {
           console.error('[scheduler] writeRcaReport error', job.slug, e);
@@ -8527,7 +8980,13 @@ async function tickBody(gen, { bypassLoadGate }) {
     if (batch.length === 0) {
       // Queue drained — run the definition-of-done gate fire-and-forget.
       // Non-blocking: does not hold the mutate lock; errors are logged, not thrown.
-      runDefinitionOfDoneOnDrain(state, { cancelToken }).catch((err) => {
+      // resolvePrdPath mirrors every other verify call site in this file (e.g.
+      // computeLooksDone, runGateShadow): try the live Epic-scoped dir first,
+      // then the archived twin — never the retired flat dir.
+      runDefinitionOfDoneOnDrain(state, {
+        cancelToken,
+        resolvePrdPath: async (job) => (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job),
+      }).catch((err) => {
         console.log(`[scheduler] dod-drain: ${err?.message ?? String(err)}`);
       });
       if (holdReason) return recordTick({ fired: false, reason: 'held', detail: holdReason }, { holds });
@@ -10922,22 +11381,58 @@ async function computeLooksDone(job, fetchedCwds) {
   return { commits: attributed.commits, paths, detectedAt: new Date().toISOString(), rule: attributed.rule };
 }
 
+// Dirty, non-ignored tracked+untracked paths at `cwd`, app-owned churn
+// stripped (stripAppOwnedChurn) — null on any git failure, never thrown.
+// runGateShadow calls this once before the gate and once after, so it can
+// tell a tree that was clean throughout from one a foreign write (or the
+// gate command itself) touched mid-gate. Deliberately no
+// `--untracked-files=no`: an uncommitted new file left by a shared-tree job
+// must count as dirty here (see decideGateAuthority's cleanOk).
+async function gateTreeDirt(cwd) {
+  try {
+    return stripAppOwnedChurn(parsePorcelain(await execGitAt(cwd, ['status', '--porcelain'])));
+  } catch {
+    return null;
+  }
+}
+
 /**
- * Shadow gate (observation only): run a needs_review row's authored gate at
- * the project's current HEAD and record what it WOULD have decided as
- * `gateShadow` on the verdicts sidecar and the row. Changes NO status, takes
- * no slot (not a claude -p run — runGateSequence keeps one shadow gate in
- * flight machine-wide). Never called from finalize: only the reverify pass.
- * Returns the recorded gateShadow, or null when nothing was recorded (already
- * recorded at this HEAD, PRD unreadable, or another shadow gate is running).
+ * Shadow gate: run a needs_review row's authored gate at the project's
+ * current HEAD and record what it decided as `gateShadow`, on the verdicts
+ * sidecar and the row. For every verdict this is observation only — status
+ * never changes from it alone. For the three verdicts in
+ * GATE_AUTHORITY_VERDICTS, with a landed commit that is git-verified evidence
+ * from THIS dispatch (never an older run's stale sha — see
+ * resolveLandedCommitEvidence) that is also an ancestor of HEAD recorded
+ * before the gate ran, a green re-run against that EXACT tree (HEAD unmoved,
+ * tracked+untracked tree clean, both before and after the gate ran) is gate
+ * AUTHORITY: it completes the row with no human in the loop. Any other
+ * result — stale/missing evidence, the commit not an ancestor, a dirty tree,
+ * HEAD moving mid-gate, no gate, or a non-green outcome — leaves status
+ * untouched.
+ *
+ * Takes no slot (not a claude -p run — runGateSequence keeps one shadow gate
+ * in flight machine-wide). Never called from finalize: only the reverify
+ * pass. `gateShadow.definitive` marks whether this result is settled: true
+ * only for a clean-throughout, HEAD-unmoved run with a real pass/fail outcome
+ * — the only shape worth trusting indefinitely. Anything else (a dirty tree,
+ * a moved HEAD, or an unavailable outcome) is recorded but re-run on the very
+ * next pick instead of being memoized as settled.
+ *
+ * Returns the recorded gateShadow, or null when nothing was recorded (HEAD
+ * unreadable — there is no tree to bind the result to —, already recorded
+ * definitively at this HEAD, PRD unreadable, or another shadow gate is
+ * running).
  */
 async function runGateShadow(job) {
   if (!job || !job.slug || !job.cwd) return null;
   const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
   let prdText;
   try { prdText = fs.readFileSync(prdPath, 'utf8'); } catch { return null; }
-  const head = await gitHead(job.cwd);
-  if (job.gateShadow && job.gateShadow.head === head) return null;
+  const headBefore = await gitHead(job.cwd);
+  if (!headBefore) return null; // no tree to bind the result to
+  if (job.gateShadow && job.gateShadow.head === headBefore && job.gateShadow.definitive === true) return null;
+  const dirtBefore = await gateTreeDirt(job.cwd);
   const gate = resolveGate(prdText);
   let outcome;
   if (gate.source === 'none') outcome = { status: 'unavailable', reason: 'gate-opt-out', results: [] };
@@ -10947,7 +11442,48 @@ async function runGateShadow(job) {
     if (r.status === 'busy') return null;
     outcome = r;
   }
-  const gateShadow = { ...outcome, head, source: gate.source, ranAt: new Date().toISOString() };
+  const headAfter = await gitHead(job.cwd);
+  const dirtAfter = await gateTreeDirt(job.cwd);
+  const headStable = headAfter !== null && headAfter === headBefore;
+  const cleanOk = Array.isArray(dirtBefore) && dirtBefore.length === 0
+    && Array.isArray(dirtAfter) && dirtAfter.length === 0;
+  // "A real pass or fail" — an unavailable outcome (opt-out, no parseable
+  // gate) is never definitive even at a clean, unmoved tree: it says nothing
+  // about done-ness, so it must stay eligible for retry once the PRD gains a
+  // real gate. `busy` never reaches here (returns early above).
+  const definitive = headStable && cleanOk && (outcome.status === 'green' || outcome.status === 'red');
+  const gateShadow = { ...outcome, head: headBefore, source: gate.source, ranAt: new Date().toISOString(), definitive };
+
+  // Gate authority: a green re-run may complete the row outright, but only
+  // for transcript-noise verdicts with a landed commit — every other park
+  // (including no verdict at all) falls through to the plain observe-only
+  // path above, unchanged. evidenceOk/ancestorOk/cleanOk/headStable are all
+  // ground-truth git checks against job.startedAt and headBefore — never
+  // trusted from anything the job itself reported.
+  let decision = null;
+  if (
+    job.verifierVerdict
+    && GATE_AUTHORITY_VERDICTS.includes(job.verifierVerdict)
+    && typeof job.landedCommit === 'string'
+    && job.landedCommit.length > 0
+  ) {
+    // resolveLandedCommitEvidence skips its own time check when sinceIso is
+    // empty — so a missing/unparseable startedAt must refuse here, never
+    // fall through to "no time bound at all".
+    const startedAtMs = typeof job.startedAt === 'string' ? Date.parse(job.startedAt) : NaN;
+    let evidenceOk = false;
+    if (Number.isFinite(startedAtMs)) {
+      try { evidenceOk = await resolveLandedCommitEvidence(job.cwd, job.landedCommit, job.startedAt); } catch { evidenceOk = false; }
+    }
+    let ancestorOk = false;
+    try {
+      await execGitAt(job.cwd, ['merge-base', '--is-ancestor', job.landedCommit, headBefore], { timeout: 10_000 });
+      ancestorOk = true;
+    } catch { ancestorOk = false; }
+    decision = decideGateAuthority({ job, gate, outcome, evidenceOk, ancestorOk, cleanOk, headStable });
+    gateShadow.authority = decision;
+  }
+
   const runId = job.runId || resolveRunId(job);
   if (runId) {
     const verdictsPath = path.join(schedulerPaths.runsDir(), runId, `${job.slug}.verdicts.json`);
@@ -10959,17 +11495,121 @@ async function runGateShadow(job) {
       try { atomicWriteJsonSync(verdictsPath, { ...existing, gateShadow }); } catch { /* best-effort */ }
     }
   }
+
+  const headShort = headBefore ? headBefore.slice(0, 7) : 'unknown';
+
+  // Resolve inside the SAME mutate that records the shadow, re-checking the
+  // live row still matches the snapshot `job` on status, verdict, runId AND
+  // startedAt — a park can change underneath this async function (heal,
+  // human reset, a fresh dispatch of the same slug) between the gate run and
+  // this write landing, and any such change invalidates both the plain
+  // observation and the authority decision alike, so the whole result is
+  // dropped rather than written onto a row it was never computed for.
+  let resolved = null;
   await mutate((s) => {
     for (const j of s.jobs) {
-      if (j.slug === job.slug && j.status === 'needs_review') j.gateShadow = gateShadow;
+      if (j.slug !== job.slug) continue;
+      const unchanged = j.status === 'needs_review'
+        && j.verifierVerdict === job.verifierVerdict
+        && j.runId === job.runId
+        && j.startedAt === job.startedAt;
+      if (!unchanged) {
+        console.log(`[scheduler] gate authority: ${job.slug} result dropped — row changed under the gate`);
+        continue;
+      }
+      j.gateShadow = gateShadow;
+      if (!decision?.complete) continue;
+      const v = j.verifierVerdict;
+      transitionJob(j, 'completed', {
+        reason: `gate re-run green at ${headShort}; verdict ${v} overridden`,
+        source: 'gateAuthoritative',
+      });
+      j.error = null;
+      delete j.verifierVerdict;
+      delete j.looksDone;
+      resolved = { slug: j.slug, cwd: j.cwd, verdict: v };
     }
   });
+  if (resolved) {
+    try { await archiveCompletedPrd(resolved.slug, resolved.cwd); } catch (e) {
+      console.error('[scheduler] gate authority archive error', resolved.slug, e);
+    }
+    appendAuditEvent('needs_review_gate_resolved', { slug: resolved.slug, cwd: resolved.cwd, verdict: resolved.verdict, head: headBefore });
+    console.log(`[scheduler] gate authority: ${resolved.slug} completed — gate re-run green at ${headShort}, verdict ${resolved.verdict} overridden`);
+  }
   await broadcast();
   return gateShadow;
 }
 
 // Tail of the last background shadow gate — lets tests (and only tests) await it.
 let gateShadowPending = null;
+// The slug the background shadow gate is currently deciding, from the pick
+// below until that gate run finishes. Lets the auto-fix loop (and the
+// deferred-investigation drain) skip this one row while the gate still has
+// it — one row gets one recovery attempt at a time.
+let gateShadowSlug = null;
+
+/**
+ * Pure: picks the one needs_review row reverifyNeedsReview's background
+ * shadow gate should run this pass, or null when none qualifies. No I/O:
+ * `headByCwd` is a Map of cwd -> HEAD sha (or null), pre-fetched by the
+ * caller with `gitHead` (which never rejects, so building it needs no
+ * try/catch — a cwd whose read failed just maps to null here).
+ *
+ * A row is never picked when its cwd's HEAD is unknown (null) — there is
+ * nothing to compare a recorded gateShadow against.
+ *
+ * Tier 1, skipped when `authorityDisabled`: a stale, gate-authority-eligible
+ * row — verdict in GATE_AUTHORITY_VERDICTS, a non-empty landedCommit, and
+ * stale (no gateShadow, or one at a different HEAD, or one not marked
+ * `definitive`). Ordered so a row that never got a shadow run goes first,
+ * then the oldest `gateShadow.ranAt` (an unparseable or missing `ranAt`
+ * sorts as oldest), then queue order. Rule first, why second: the old pick
+ * took the first stale row in queue order with no rotation, so in a busy
+ * plan one row whose gate stays red forever could crowd out every other
+ * row's turn (review finding #8).
+ *
+ * Tier 2: the first needs_review row with no gateShadow at all, in queue
+ * order — today's plain observe-only rule, unchanged.
+ *
+ * Returns the first tier-1 row, else the tier-2 row, else null.
+ */
+function selectGateShadowTarget(jobs, headByCwd, { authorityDisabled = false } = {}) {
+  const eligible = jobs.filter((j) => {
+    if (j.status !== 'needs_review') return false;
+    const head = headByCwd.get(j.cwd);
+    return typeof head === 'string' && head.length > 0;
+  });
+
+  const isStale = (j) => {
+    const head = headByCwd.get(j.cwd);
+    return !j.gateShadow || j.gateShadow.head !== head || j.gateShadow.definitive !== true;
+  };
+
+  if (!authorityDisabled) {
+    const ranAtMs = (j) => {
+      const t = j.gateShadow ? Date.parse(j.gateShadow.ranAt) : NaN;
+      return Number.isFinite(t) ? t : -Infinity; // never-run or unparseable sorts oldest
+    };
+    const tier1 = eligible.filter((j) => isStale(j)
+      && j.verifierVerdict
+      && GATE_AUTHORITY_VERDICTS.includes(j.verifierVerdict)
+      && typeof j.landedCommit === 'string'
+      && j.landedCommit.length > 0);
+    if (tier1.length) {
+      const ranked = tier1
+        .map((j, i) => ({ j, i, neverRun: !j.gateShadow, ranAt: ranAtMs(j) }))
+        .sort((a, b) => {
+          if (a.neverRun !== b.neverRun) return a.neverRun ? -1 : 1;
+          if (a.ranAt !== b.ranAt) return a.ranAt - b.ranAt;
+          return a.i - b.i; // tie: queue order
+        });
+      return ranked[0].j;
+    }
+  }
+
+  return eligible.find((j) => !j.gateShadow) ?? null;
+}
 
 async function reverifyNeedsReview() {
   const snap = await readQueue();
@@ -11097,15 +11737,48 @@ async function reverifyNeedsReview() {
       }
     }
   }
-  // Shadow gate (observation only): at most ONE needs_review row per pass,
-  // fired in the background so a 15-minute gate never stalls this pass.
+  // Shadow gate (observation only, or — for a transcript-noise verdict with
+  // a landed commit — gate AUTHORITY: a green re-run completes the row). At
+  // most one needs_review row per pass, fired in the background so a long
+  // gate never stalls this pass. selectGateShadowTarget does the picking: a
+  // never-run or stale authority-eligible row first (oldest shadow run
+  // first), else the first row that never got a shadow run at all — so one
+  // row whose gate stays red forever can't crowd out every other row's turn.
+  // gateShadowSlug names the picked row for as long as its gate is running,
+  // so the auto-fix loop below (and the deferred-investigation drain) can
+  // leave that one row alone — the gate is cheap and goes first; a probe
+  // only gets the row if the gate didn't resolve it.
+  //
+  // The pick itself is async (it reads HEAD per candidate's cwd), so it runs
+  // inside its own promise, `pick`, resolved before `gateShadowPending`
+  // chains the gate run after it. `gateShadowPending` is still assigned
+  // synchronously, before any await, exactly as before — otherwise a second
+  // pass starting before this one's pick resolves could choose a target of
+  // its own too, breaking the single-flight rule.
+  let pick = null;
   if (!gateShadowPending && process.env.SM_GATE_SHADOW_DISABLE !== '1') {
-    const gateTarget = snap.jobs.find((j) => j.status === 'needs_review' && !j.gateShadow);
-    if (gateTarget) {
-      gateShadowPending = runGateShadow(gateTarget)
-        .catch((e) => { console.error('[scheduler] gate shadow error', gateTarget.slug, e); })
-        .finally(() => { gateShadowPending = null; });
-    }
+    pick = (async () => {
+      const needsReview = snap.jobs.filter((j) => j.status === 'needs_review');
+      const headByCwd = new Map();
+      for (const cwd of new Set(needsReview.map((j) => j.cwd))) {
+        headByCwd.set(cwd, await gitHead(cwd));
+      }
+      return selectGateShadowTarget(snap.jobs, headByCwd, {
+        authorityDisabled: process.env.SM_GATE_AUTHORITATIVE_DISABLE === '1',
+      });
+    })();
+    gateShadowPending = pick
+      .then((gateTarget) => {
+        if (!gateTarget) return;
+        gateShadowSlug = gateTarget.slug;
+        return runGateShadow(gateTarget);
+      })
+      .catch((e) => { console.error('[scheduler] gate shadow error', gateShadowSlug, e); })
+      .finally(() => {
+        gateShadowPending = null;
+        gateShadowSlug = null;
+        drainDeferredInvestigation();
+      });
   }
   if (evidenceScanned.length) {
     const scannedSet = new Set(evidenceScanned);
@@ -11329,9 +12002,14 @@ async function reverifyNeedsReview() {
   // MAX_CONCURRENT_INVESTIGATIONS (queues the rest for retry), so this loop
   // cannot fan out past the cap regardless of how many targets are selected.
   if (process.env.SM_AUTOFIX_DISABLE !== '1') {
+    // If this pass started a gate-shadow pick above, wait for it — it only
+    // reads HEADs, so this is a short wait, not the gate run itself — then
+    // drop its target from this loop's candidates. The gate gets first shot
+    // at that one row; a probe only takes it if the gate didn't resolve it.
+    if (pick) await pick;
     const targets = selectAutoFixTargets(queueForResumeAndAutofix.jobs, {
       fixSlugExists: (s) => candidatePrdsDirs().some((dir) => fs.existsSync(path.join(dir, `${s}.md`))),
-    });
+    }).filter((job) => job.slug !== gateShadowSlug);
     for (const job of targets) {
       const runId = job.runId || resolveRunId(job);
       const runDir = path.join(schedulerPaths.runsDir(), runId);
@@ -11549,22 +12227,25 @@ function registerScheduleHandlers() {
     return { ok: true, config };
   }));
 
-  ipcMain.handle('schedule:reset-job', validated(schemas.scheduleSlug, async ({ slug }) => {
+  ipcMain.handle('schedule:reset-job', validated(schemas.scheduleResetJob, async ({ slug, cwd }) => {
     if (!(await safeSlugPath(slug))) return { ok: false, error: 'invalid slug' };
     const outcome = await mutate((state) => {
-      const idx = state.jobs.findIndex((j) => j.slug === slug);
-      if (idx < 0) return 'not-found';
+      const idx = state.jobs.findIndex((j) => jobMatchesSlugAndCwd(j, slug, cwd));
+      if (idx < 0) return { kind: 'not-found' };
       // Guard is in resetJobFields: refuses to reset an already-'completed'
-      // job, which would otherwise re-fire a PRD whose deliverable already
-      // landed (see resetJobFields' doc comment for the incident).
-      return resetJobFields(state.jobs[idx], null, { source: 'ipc:schedule:reset-job' }) ? 'ok' : 'refused';
+      // or already-'skipped' job without force:true (see its doc comment for
+      // why each is refused). This handler never passes force — there is no
+      // force option on the renderer IPC path — so resetRefusalMessage's
+      // canForce:false tells the caller to use scheduler_reset_job instead.
+      const status = state.jobs[idx].status;
+      if (!resetJobFields(state.jobs[idx], null, { source: 'ipc:schedule:reset-job' })) {
+        return { kind: 'refused', status };
+      }
+      return { kind: 'ok' };
     });
-    if (outcome === 'not-found') return { ok: false, error: 'not found' };
-    if (outcome === 'refused') {
-      return {
-        ok: false,
-        error: 'job already completed — resetting it would re-execute shipped work; archive the PRD instead',
-      };
+    if (outcome.kind === 'not-found') return { ok: false, error: 'not found' };
+    if (outcome.kind === 'refused') {
+      return { ok: false, error: resetRefusalMessage(outcome.status, { canForce: false }) };
     }
     await broadcast({ flush: true });
     return { ok: true };
@@ -11996,7 +12677,18 @@ function rescheduleIntervalTick() {
           );
         }
       }
-    }).catch(() => {});
+    }).catch(() => {})
+      .finally(() => {
+        // An auto-resolve skip just made a notice due in THIS pass — flush
+        // right away instead of waiting for the next one. Fire-and-forget:
+        // never blocks this tick, never throws (flushDueReviewNotices
+        // catches internally).
+        flushDueReviewNotices().catch(() => {});
+      });
+  } else if (s.jobs.some((j) => j.reviewNotice && !j.reviewNotice.sentAt
+    && (j.status === 'needs_review' || (j.status === 'skipped' && j.needsReviewAutoResolvedSkip)))) {
+    // Ladder didn't fire this tick (row ineligible for auto-resolve, or SM_NEEDS_REVIEW_AUTORESOLVE_DISABLE=1) — flush any notice whose hold already expired, reusing this tick's own snapshot for the guard so a tick with nothing unsent reads nothing extra. Status-checked so a row that healed (e.g. a human reset, or a later run that completed) with a leftover unsent notice from a past episode no longer costs a queue read every tick — resetJobFields already deletes the notice outright, but this guard stays defensive in case a notice is ever left behind some other way.
+    flushDueReviewNotices().catch(() => {});
   }
 }
 
@@ -12401,7 +13093,8 @@ const remote = {
       // realpath resolves symlinks; re-check boundary to block a rogue agent job
       // that places a symlink inside the PRDs dir pointing outside the safe root.
       const real = await fsp.realpath(filePath);
-      if (!real.startsWith(dir + path.sep)) {
+      const realDir = await realPrdsDir(dir);
+      if (!realDir || !real.startsWith(realDir + path.sep)) {
         return { ok: false, error: 'invalid slug' };
       }
       const text = await fsp.readFile(real, 'utf8');
@@ -12478,7 +13171,8 @@ const remote = {
       // re-assert containment; also reject the target if it is already a
       // symlink.
       const realParent = await fsp.realpath(path.dirname(resolved));
-      if (realParent !== dir && !realParent.startsWith(dir + path.sep)) {
+      const realDir = await realPrdsDir(dir);
+      if (!realDir || (realParent !== realDir && !realParent.startsWith(realDir + path.sep))) {
         return { ok: false, error: 'invalid slug' };
       }
       const existing = await fsp.lstat(resolved).catch(() => null);
@@ -12529,25 +13223,23 @@ const remote = {
       return { ok: false, error: resolved.reason === 'invalid-slug' ? 'invalid slug' : unknownSlugMessage(slug) };
     }
     const outcome = await mutate((state) => {
-      // Same cwd filter as resolveSlugOrReason's file lookup above — slugs are
-      // derived from title text with no cwd salt, so two different projects
-      // can independently produce the identical slug; an opts.cwd caller must
-      // reset THAT project's job, not just any queue row matching the string.
-      const idx = state.jobs.findIndex((j) => j.slug === slug && (!opts.cwd || j.cwd === opts.cwd));
+      // Same cwd filter as the schedule:reset-job IPC handler above and
+      // resolveSlugOrReason's file lookup — see jobMatchesSlugAndCwd's header.
+      const idx = state.jobs.findIndex((j) => jobMatchesSlugAndCwd(j, slug, opts.cwd));
       if (idx < 0) return { kind: 'not-found' };
       // Terminal-status guard lives in resetJobFields itself; force:true
-      // threads through to override it.
+      // threads through to override it. Capture the pre-reset status here
+      // (inside the same mutate callback) so a refusal can report exactly
+      // which status blocked it, via resetRefusalMessage below.
+      const status = state.jobs[idx].status;
       if (!resetJobFields(state.jobs[idx], null, { force: opts.force === true, source: 'remote:resetJob' })) {
-        return { kind: 'refused' };
+        return { kind: 'refused', status };
       }
       return { kind: 'ok' };
     });
     if (outcome.kind === 'not-found') return { ok: false, error: 'not found' };
     if (outcome.kind === 'refused') {
-      return {
-        ok: false,
-        error: 'job already completed — resetting it would re-execute shipped work; archive the PRD instead, or pass force:true',
-      };
+      return { ok: false, error: resetRefusalMessage(outcome.status, { canForce: true }) };
     }
     await broadcast({ flush: true });
     return { ok: true, slug, status: 'pending' };
@@ -12623,7 +13315,8 @@ const remote = {
       // Symlink defense, matching readPrd/writePrd's comment: safeSlugPathIn
       // is lexical and does not resolve symlinks.
       const real = await fsp.realpath(filePath);
-      if (!real.startsWith(dir + path.sep)) return { ok: false, error: 'invalid slug' };
+      const realDir = await realPrdsDir(dir);
+      if (!realDir || !real.startsWith(realDir + path.sep)) return { ok: false, error: 'invalid slug' };
       const [raw, parsed] = await Promise.all([fsp.readFile(real, 'utf8'), prdParser.parsePrdRaw(real)]);
       return {
         ok: true,
@@ -12648,20 +13341,32 @@ const remote = {
     }
   },
 
-  // Edits a NOT-yet-running PRD's frontmatter and/or body in place, refusing
-  // once a queue row exists for it and that row is anything but 'pending'
-  // (running/completed/failed/needs_review — editing the spec under a live
-  // or already-finished executor would silently rewrite history). Reuses
+  // Edits a PRD's frontmatter and/or body in place. Works when there is no
+  // queue row yet, and when the row's status is 'pending', 'quarantined',
+  // 'needs_review', 'failed', or 'skipped'. None of those have a live
+  // executor reading the file right now, so a rewrite is safe. A parked
+  // (needs_review/failed) or skipped job is exactly the planner-repair case:
+  // fix the spec here, then reset the job with scheduler_reset_job, which
+  // clears the old run fields. 'quarantined' is also editable for a second
+  // reason: it's the ONLY way a quarantined PRD's createdVia stamp gets
+  // written (the adopt action below), so refusing it here would make
+  // quarantine irreversible through the API. Refuses 'running' (a live
+  // executor could read the file mid-edit) and 'completed' (the work already
+  // landed — queue a new PRD instead of rewriting a finished one). Reuses
   // prdFrontmatter.cjs's parsePrdFile/serializePrdFile round-trip pair (PRD
   // 1024) so unrecognized keys (e.g. dependsOn) and untouched recognized
   // keys' original line formatting survive unchanged.
   async updatePrd({ slug, cwd, frontmatter, body }) {
     const job = await this.getJob(slug);
-    // 'quarantined' is also editable: it's the ONLY way a quarantined PRD's
-    // createdVia stamp gets written (the adopt action below), so refusing it
-    // here would make quarantine irreversible through the API.
-    if (job && job.status !== 'pending' && job.status !== 'quarantined') {
-      return { ok: false, error: `job status is "${job.status}" — only a not-yet-running PRD (status "pending"/"quarantined", or no queue row yet) may be edited` };
+    const EDITABLE_JOB_STATUSES = new Set(['pending', 'quarantined', 'needs_review', 'failed', 'skipped']);
+    if (job && !EDITABLE_JOB_STATUSES.has(job.status)) {
+      if (job.status === 'running') {
+        return { ok: false, error: 'job status is "running" — wait for it to end, or stop it with scheduler_cancel_job, then edit it.' };
+      }
+      if (job.status === 'completed') {
+        return { ok: false, error: 'job status is "completed" — its work already landed. Queue a new PRD for more work.' };
+      }
+      return { ok: false, error: `job status is "${job.status}" — this PRD cannot be edited now.` };
     }
 
     // Write-time FK check for a patched dependsOn (PRD 1124), reusing the
@@ -12715,7 +13420,8 @@ const remote = {
       // target that is itself already a symlink — a rogue job could plant
       // one inside the PRDs dir pointing outside the safe root.
       const real = await fsp.realpath(filePath);
-      if (!real.startsWith(dir + path.sep)) return { ok: false, error: 'invalid slug' };
+      const realDir = await realPrdsDir(dir);
+      if (!realDir || !real.startsWith(realDir + path.sep)) return { ok: false, error: 'invalid slug' };
       const existing = await fsp.lstat(filePath).catch(() => null);
       if (existing && existing.isSymbolicLink()) return { ok: false, error: 'invalid slug' };
       raw = await fsp.readFile(real, 'utf8');
@@ -12959,6 +13665,7 @@ module.exports = {
   reverifyNeedsReview,
   runGateShadow,
   awaitGateShadowIdle: async () => { while (gateShadowPending) await gateShadowPending; },
+  selectGateShadowTarget,
   shouldRunPeriodicReverify,
   findStuckFailedJobs,
   STUCK_FAILED_ESCALATE_MS,
@@ -13038,6 +13745,7 @@ module.exports = {
   registerAdminRoutes,
   notifyOriginatingTab,
   notifyNeedsReview,
+  flushDueReviewNotices,
   isNotifiableTerminalStatus,
   extractResultTextFromLog,
   candidatePrdsDirs,
@@ -13048,6 +13756,7 @@ module.exports = {
   archivedPrdPathForJob,
   archivedTwinExists,
   findPrdDir,
+  findPrdDirForJob,
   resolveVerifyPrdPath,
   resolveFixPlanPath,
   resolveNotifyPrd,
@@ -13059,6 +13768,8 @@ module.exports = {
   SCHEDULER_BOOTED_AT,
   SCHEDULER_CODE_SHA,
   resetJobFields,
+  resetRefusalMessage,
+  jobMatchesSlugAndCwd,
   executeJob,
   killOrphanClaudePid,
   prdArchivedSkipResult,
@@ -13090,6 +13801,7 @@ module.exports = {
   selectResumeRecoveryTarget,
   buildResumeRecoveryPreamble,
   buildClaudeSpawnArgs,
+  HEADLESS_DISALLOWED_TOOLS,
   spawnResumeRecovery,
   selectMechanicalRecoveryTarget,
   isMechanicalRecoveryFutile,

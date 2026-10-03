@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
 import { createElement } from 'react'
-import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { createRoot, type Root } from 'react-dom/client'
+import { describe, it, expect, vi } from 'vitest'
 import { act } from 'react-dom/test-utils'
 import { Settings } from '../Settings'
 import { useLayout } from '../../../state/layout'
-import { useSessions, type SessionTab } from '../../../state/sessions'
-import { useConfig } from '../../../state/config'
+import { useSessions } from '../../../state/sessions'
+import { HOME, PROJECT_CWD, PROJECT_TAB, useNavfaceHarness, activeScope, clickScope, viewTabLabels, clickViewTab } from './_navfaceHarness'
 
 /**
  * Settings's scope switcher defaults from the NavFace
@@ -14,22 +13,6 @@ import { useConfig } from '../../../state/config'
  * 'project' (falling back to 'user' if no active-tab cwd resolves). Mirrors
  * Permissions.navface.test.tsx's auto-default-unless-manually-touched coverage.
  */
-
-const HOME = '/home/bilko'
-const PROJECT_CWD = '/home/bilko/Projects/alpha'
-
-const PROJECT_TAB: SessionTab = {
-  id: 'tab-alpha',
-  sessionId: 'tab-alpha',
-  label: 'alpha',
-  cwd: PROJECT_CWD,
-  pid: null,
-  status: 'dormant',
-  exitCode: null,
-  startupCommand: null,
-  presetId: null,
-  generation: 0,
-}
 
 function installWindowApiMock() {
   const raw = JSON.stringify({}, null, 2) + '\n'
@@ -69,49 +52,7 @@ function installWindowApiMock() {
   return api
 }
 
-let container: HTMLDivElement | null = null
-let root: Root | null = null
-
-async function mount() {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-  await act(async () => {
-    root!.render(createElement(Settings))
-    await Promise.resolve()
-    await Promise.resolve()
-  })
-  return container
-}
-
-const SCOPE_LABELS = ['User', 'Project', 'Local']
-
-function activeScope(el: HTMLElement): string | null {
-  const btn = Array.from(el.querySelectorAll('button')).find(
-    (b) => SCOPE_LABELS.includes(b.textContent?.trim() ?? '') && b.classList.contains('bg-bg-hi'),
-  )
-  return btn?.textContent?.trim() ?? null
-}
-
-function clickScope(el: HTMLElement, label: string) {
-  const btn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.trim() === label)
-  ;(btn as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
-}
-
-beforeEach(() => {
-  installWindowApiMock()
-  useLayout.setState({ navFace: 'home' })
-  useSessions.setState({ tabs: [], activeTabId: null })
-  useConfig.setState({ files: {}, watchRefs: {} })
-})
-
-afterEach(() => {
-  act(() => root?.unmount())
-  container?.remove()
-  container = null
-  root = null
-  delete (window as unknown as { api?: unknown }).api
-})
+const { mount } = useNavfaceHarness(Settings, installWindowApiMock)
 
 describe('Settings NavFace-driven default scope', () => {
   it('mounts at navFace=home with scope defaulted to user', async () => {
@@ -246,17 +187,6 @@ describe('Settings scope note states which real file is being edited', () => {
     expect(el.querySelector('[data-testid="settings-scope-note"]')).toBeNull()
   })
 })
-
-function viewTabLabels(el: HTMLElement): string[] {
-  const toolbar = el.querySelector('.flex.rounded.border.border-line.overflow-hidden')
-  return Array.from(toolbar?.querySelectorAll('button') ?? []).map((b) => b.textContent?.trim() ?? '')
-}
-
-function clickViewTab(el: HTMLElement, label: string) {
-  const toolbar = el.querySelector('.flex.rounded.border.border-line.overflow-hidden')
-  const btn = Array.from(toolbar?.querySelectorAll('button') ?? []).find((b) => b.textContent?.trim() === label)
-  ;(btn as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
-}
 
 describe('Settings Telemetry/Session Manager tabs are Home-only', () => {
   // SettingsTelemetry (~/.claude/session-manager/otel.json) and

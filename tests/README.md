@@ -5,28 +5,20 @@
 | Home | Runner | Registration |
 | --- | --- | --- |
 | `tests/unit/*.spec.ts` | vitest | glob-covered — drop a file in, it runs |
-| `src/**/__tests__/*.test.cjs` | vitest | **HAND-REGISTERED**, one line each in `vitest.config.ts` `include` |
+| `src/**/__tests__/*.test.cjs` | vitest | glob-covered by `vitest.config.ts` `include` — drop a file in, it runs |
 | `src/renderer/**/*.test.ts(x)` | vitest | glob-covered |
-| Playwright: `e2e/*.spec.mjs` (chat-restart, mic, watchers) + `tests/e2e` + `tests/smoke` + `tests/golden.spec.ts` | Playwright (`playwright.config.ts`) | `testMatch` globs; `web-remote/**` and `web/remote-app/**` are ignored |
+| Playwright: `tests/e2e` (incl. `chat-restart.spec.mjs`) + `tests/smoke` | Playwright (`playwright.config.ts`) | `testMatch` globs; `web-remote/**` and `web/remote-app/**` are ignored |
 
 ## Registration law
 
-A `.test.cjs` under `src/**/__tests__` that is not listed in `vitest.config.ts` silently never runs.
-Every such file gets one `include` line in the same change that creates it.
-
-Enforcement: `npm run lint:unregistered-tests` (`scripts/check-unregistered-tests.cjs`; part of `npm run lint`).
-
-The guard scans `src/`, `scripts/` and `web/` (excluding `node_modules`, `dist`) for
-`*.test.{cjs,ts,tsx}` and `*.spec.cjs` under any `__tests__` segment, and checks both
-directions: a test on disk absent from `include` fails, and a literal `include` entry with
-no file on disk fails too. `VITEST_CONFIG_PATH` (or a CLI arg) points it at another config.
-
-Known debt: the `node:test` files under `src/main/__tests__` are allowlisted in
-`check-unregistered-tests.cjs` (vitest cannot run them; run with `node --test`). A later PRD resolves this.
+Enforcement: `vitest.config.ts`'s `include` is glob-based (`src/**/__tests__/**/*.test.cjs`,
+`scripts/**/__tests__/**/*.test.cjs`, `web/**/__tests__/**/*.test.cjs`, plus the renderer
+`.test.ts`/`.test.tsx`/`.spec.ts` globs) — any new `__tests__` file matching those globs is
+picked up automatically; no separate registration step or lint guard.
 
 ## Running one file
 
-- vitest: `timeout 120 npx vitest run <path>`
+- vitest: `npx vitest run <path>`
 - Playwright (Linux): `xvfb-run -a timeout 600 npx playwright test <path>`
 
 Never run the whole e2e suite casually. Running `test:unit` from inside a job worktree
@@ -72,13 +64,11 @@ CI (`.github/workflows/ci.yml`), job `ci` (ubuntu, Node 20): `npm ci` → `npm r
 
 ## Notes on specific specs
 
-- `tests/golden.spec.ts` reads the gitignored `session-manager-operations/bilko-host/dist/`; it
-  skips itself when `index.html` is absent.
 - `tests/smoke/darwin-boot.spec.ts` has no platform guard: on Linux it runs as a free extra boot smoke.
 
 ## Scratch
 
-`test-results/` and `e2e/.cache` are gitignored and safe to delete.
+`test-results/` is gitignored and safe to delete.
 
 ## Not run from root
 

@@ -35,6 +35,7 @@ const path = require('node:path');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { readTail } = require('./fileTail.cjs');
 const { resolvePrdWriteDir } = require('./prdLocations.cjs');
+const atomicFs = require('./atomicFs.cjs');
 
 // ─── VERDICT_LABELS — deliberate duplicate ──────────────────────────────────
 // Mirrors src/renderer/components/tabs/scheduler/sched-primitives.tsx:123-131.
@@ -396,15 +397,12 @@ async function writeRcaReport({ job, runDir, verdict, annotations, investigation
       job, verdict, meta, logTail, acText, failureClass, investigationText, annotations,
     });
 
-    // Raw fs (not config.cjs's writeTextAtomic) for the same reason the rest
-    // of this lib uses it: the run directory lives under
+    // atomicFs.cjs (not config.cjs's writeTextAtomic) for the same reason the
+    // rest of this lib uses it: the run directory lives under
     // ~/.claude/session-manager/scheduled-plans/runs/, which is Session-Manager
     // runtime state, not an OWNERS namespace under a project's operations root.
     const reportPath = path.join(runDir, `root-cause-${job.slug}.md`);
-    fs.mkdirSync(runDir, { recursive: true });
-    const tmp = `${reportPath}.tmp-${process.pid}`;
-    fs.writeFileSync(tmp, markdown);
-    fs.renameSync(tmp, reportPath);
+    atomicFs.writeTextAtomicSync(reportPath, markdown);
 
     const summary = rcaSummaryLine(job, verdict);
     const recoveryAction = recoveryActionFor(failureClass);

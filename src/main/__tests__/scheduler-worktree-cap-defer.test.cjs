@@ -176,6 +176,9 @@ test('a job held behind the worktree cap stays pending with a heldReason, is nev
     expect(row).toBeTruthy();
     expect(row.status).toBe('completed');
     expect(row.heldReason).toBeUndefined();
+    expect(row.gateShadow).toBeUndefined();
+    expect(row.looksDone).toBeUndefined();
+    expect(row.evidenceScannedAt).toBeUndefined();
   } finally {
     fs.rmSync(projectCwd, { recursive: true, force: true });
     fs.rmSync(runDir, { recursive: true, force: true });

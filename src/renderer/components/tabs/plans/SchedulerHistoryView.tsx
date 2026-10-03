@@ -259,7 +259,7 @@ function HistoryRow({ job }: { job: ScheduleJob }) {
               {job.status !== 'pending' && (
                 <button
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); void window.api.schedule.resetJob(job.slug) }}
+                  onClick={(e) => { e.stopPropagation(); void window.api.schedule.resetJob(job.slug, job.cwd ?? undefined) }}
                   className="text-[13px] font-semibold text-fg-dim hover:text-fg bg-transparent border-0 p-0 cursor-pointer"
                 >
                   reset to pending →

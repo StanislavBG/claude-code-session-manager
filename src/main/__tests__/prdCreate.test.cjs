@@ -77,7 +77,7 @@ test('buildPrdBody emits required frontmatter keys and body sections in order', 
   expect(body).toMatch(/Your system prompt carries the ordered run contract/);
   // the pointer block mentions "Execution discipline" by name, but must not
   // inline the full standards.md prose (e.g. its Performance-section rules)
-  expect(body.includes('Lay out hot data contiguously')).toBeFalsy();
+  expect(body.includes('State an explicit hypothesis before each debugging action')).toBeFalsy();
 });
 
 test('buildPrdBody emits agentType: dev-lead by default when omitted (PRD 1114)', () => {
@@ -286,7 +286,7 @@ test('POST /admin/scheduler/create-prd with a valid payload writes a file with f
     expect(written).toMatch(/## Engineering standards/);
     // must point at STANDARDS_PATH rather than inline standards.md
     expect(written.includes(STANDARDS_PATH)).toBeTruthy();
-    expect(written.includes('Lay out hot data contiguously')).toBeFalsy();
+    expect(written.includes('State an explicit hypothesis before each debugging action')).toBeFalsy();
   } finally {
     await admin.stop();
   }
@@ -694,6 +694,8 @@ test('createPrd resolves a worktree cwd to the main tree and joins the Epic whos
   const mainRepo = path.join(tmpRoot, 'main');
   const worktreeDir = path.join(tmpRoot, 'worktree', 'epic-1');
   config.addAllowedRoot(mainRepo);
+  // The worktree cwd is a sibling of mainRepo; the live app registers it when the Epic PTY spawns.
+  config.addAllowedRoot(worktreeDir);
   try {
     initRepo(mainRepo);
     fs.mkdirSync(path.dirname(worktreeDir), { recursive: true });
@@ -718,10 +720,12 @@ test('createPrd resolves a worktree cwd to the main tree and joins the Epic whos
 
     expect(result.ok).toBe(true);
     // Resolved and passed to the remote as the MAIN tree, never the worktree.
-    expect(receivedCwds.every((c) => c === mainRepo)).toBe(true);
+    // git reports the symlink-resolved root (macOS tmpdir /var -> /private/var).
+    const realMainRepo = fs.realpathSync(mainRepo);
+    expect(receivedCwds.every((c) => c === mainRepo || c === realMainRepo)).toBe(true);
     const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
     expect(written).toMatch(/sourcePromptId: epic-1/);
-    expect(written).toMatch(new RegExp(`cwd: ${mainRepo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    expect([`cwd: ${mainRepo}`, `cwd: ${realMainRepo}`].some((needle) => written.includes(needle))).toBe(true);
   } finally {
     await fsp.rm(tmpRoot, { recursive: true, force: true });
   }

@@ -25,6 +25,7 @@ const logs = require('./logs.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { expandHome } = require('./lib/expandHome.cjs');
 const { listReferencedFiles } = require('./lib/importReferences.cjs');
+const atomicFs = require('./lib/atomicFs.cjs');
 
 /** Map<absPath, {watcher, refCount}> — one chokidar watcher per path. */
 const watchers = new Map();
@@ -38,22 +39,41 @@ function attachWindow(w) {
 
 /**
  * Resolve a path to its realpath, handling non-existent files by resolving
- * the parent directory instead. Prevents symlink traversal attacks.
+ * the nearest existing ancestor directory instead. Prevents symlink
+ * traversal attacks.
+ *
+ * A fresh target can be missing more than one directory level, for example
+ * "<tmpdir>/session-manager-operations/prompt-sessions/x.json" right after
+ * `mkdtemp`, where neither `session-manager-operations` nor
+ * `prompt-sessions` exists yet. Walk up one directory at a time until one
+ * exists, realpath that ancestor, then join every segment below it back on.
+ * Why: stopping after a single parent hop returns the lexical (not
+ * realpath'd) path on macOS, where `os.tmpdir()` sits under `/var`, a
+ * symlink to `/private/var`. The caller's root check then compares that
+ * unresolved `/var/...` path against a sibling root that DID resolve to
+ * `/private/var/...` and always rejects it, even for paths that belong
+ * squarely inside the allowed root.
  */
 function realResolve(abs) {
   const lex = path.resolve(expandHome(abs));
   try {
     return fs.realpathSync(lex);
   } catch (e) {
-    if (e.code === 'ENOENT') {
-      const parent = path.dirname(lex);
-      try {
-        return path.join(fs.realpathSync(parent), path.basename(lex));
-      } catch {
-        return lex;
-      }
+    if (e.code !== 'ENOENT') throw e;
+  }
+  const tail = [path.basename(lex)];
+  let dir = path.dirname(lex);
+  for (;;) {
+    try {
+      const realDir = fs.realpathSync(dir);
+      return path.join(realDir, ...tail.reverse());
+    } catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+      const parentDir = path.dirname(dir);
+      if (parentDir === dir) return lex; // hit the filesystem root; give up safely
+      tail.push(path.basename(dir));
+      dir = parentDir;
     }
-    throw e;
   }
 }
 
@@ -108,11 +128,16 @@ function validatePath(abs) {
   throw new Error(`Path outside allowed boundaries: ${real}`);
 }
 
-// Paths that are allowed as write destinations.
+// Paths that are allowed as write destinations. Built from the REALPATH of
+// home because validateWrite compares against a realpath — on macOS a HOME
+// under os.tmpdir() (/var → /private/var) otherwise never matches.
+const REAL_HOME = (() => {
+  try { return fs.realpathSync(os.homedir()); } catch { return os.homedir(); }
+})();
 const WRITE_PREFIXES = [
-  path.join(os.homedir(), '.claude'),
-  path.join(os.homedir(), '.claude.json'), // global MCP servers config
-  path.join(os.homedir(), '.config', 'claude-code'),
+  path.join(REAL_HOME, '.claude'),
+  path.join(REAL_HOME, '.claude.json'), // global MCP servers config
+  path.join(REAL_HOME, '.config', 'claude-code'),
 ];
 
 /**
@@ -241,21 +266,7 @@ async function writeTextAtomic(abs, text, opts = {}) {
   const real = validatePath(expandHome(abs));
   validateWrite(real);
   assertOpsWrite(real, opts.writer);
-  const dir = path.dirname(real);
-  await fsp.mkdir(dir, { recursive: true });
-  const tmp = `${real}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  try {
-    await fsp.writeFile(tmp, text, opts.mode ? { encoding: 'utf8', mode: opts.mode } : 'utf8');
-    if (opts.mode) {
-      // chmod explicitly because some platforms ignore the mode arg on
-      // writeFile when the file pre-exists.
-      try { await fsp.chmod(tmp, opts.mode); } catch { /* */ }
-    }
-    await fsp.rename(tmp, real);
-  } catch (e) {
-    try { await fsp.unlink(tmp); } catch { /* tmp never created or already gone */ }
-    throw e;
-  }
+  await atomicFs.writeTextAtomic(real, text, opts);
   const stat = await fsp.stat(real);
   return { ok: true, mtimeMs: stat.mtimeMs };
 }
@@ -296,16 +307,7 @@ function writeJsonSync(abs, data, opts = {}) {
   const real = validatePath(expandHome(abs));
   validateWrite(real);
   assertOpsWrite(real, opts.writer);
-  const dir = path.dirname(real);
-  fs.mkdirSync(dir, { recursive: true });
-  const tmp = `${real}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  try {
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8');
-    fs.renameSync(tmp, real);
-  } catch (e) {
-    try { fs.unlinkSync(tmp); } catch { /* tmp never created or already gone */ }
-    throw e;
-  }
+  atomicFs.writeJsonAtomicSync(real, data, opts);
   const stat = fs.statSync(real);
   return { ok: true, mtimeMs: stat.mtimeMs };
 }
@@ -510,4 +512,5 @@ module.exports = {
   registerPromptSessionsRoot,
   validatePath,
   validateWrite,
+  realResolve,
 };

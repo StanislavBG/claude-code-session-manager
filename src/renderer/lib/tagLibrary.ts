@@ -7,7 +7,7 @@
  * (tone/color) and `epicQueueControls.ts` (group order) both import the tag
  * list from here rather than keeping their own copies.
  */
-export type EpicTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'bilko-host-publisher'
+export type EpicTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder'
 
 export type DevelopEagerness = 'expected-default' | 'available-not-assumed'
 
@@ -68,14 +68,6 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
       'Reads a project and writes its one-page Project Home overview (home.html) via the project-home-builder local agent and the project_home_write tool. Decomposition into PRDs is the expected next step, same as feature/bug/build.',
     developEagerness: 'expected-default',
     developsVia: 'project-home-builder agent protocol (not /develop)',
-  },
-  {
-    tag: 'bilko-host-publisher',
-    label: 'Bilko Host Publisher',
-    description:
-      'Publishes this project\'s Project Home page (home.html) to bilko.run via the bilko-host MCP\'s gated static-path publish pipeline — see session-manager-operations/architecture/bilko-host-integration.md. Running the publish sequence is the expected next step, same as feature/bug/build.',
-    developEagerness: 'expected-default',
-    developsVia: 'bilko-host-publisher agent protocol (not /develop)',
   },
 ]
 

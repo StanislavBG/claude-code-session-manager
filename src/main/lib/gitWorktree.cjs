@@ -53,9 +53,9 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
-const { execFile } = require('node:child_process');
 const { OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 const schedulerPaths = require('./schedulerPaths.cjs');
+const sharedGitExec = require('./gitExec.cjs');
 
 // Per-kind configuration. Roots are kept OUTSIDE any project's own tree
 // (os.tmpdir(), not `<cwd>/.git/...`) so a managed worktree never shows up in
@@ -110,6 +110,27 @@ function configFor(kind) {
   const cfg = KIND_CONFIG[kind];
   if (!cfg) throw new Error(`gitWorktree: unknown kind "${kind}" (expected 'job' or 'epic')`);
   return cfg;
+}
+
+// Per-Epic integration branch prefix (checkout-free landing — see
+// integrateOntoRef/ensureLandBranch below). Not a `kind` in KIND_CONFIG's
+// sense (no worktree root, no cap) — it never backs a `git worktree add`
+// checkout — but it IS one of our own managed prefixes for every place that
+// decides "is this branch ours", so it's declared once, here, alongside the
+// job/epic prefixes it sits next to.
+const LAND_BRANCH_PREFIX = 'sm-land/';
+
+/** True when `b` is one of OUR OWN managed branches — a job/epic worktree
+ *  branch (KIND_CONFIG's `branchPrefix`) or an `sm-land/*` integration
+ *  branch. Hoisted out of `integrateBranch` so every caller that needs to
+ *  tell "ours" from "a real project branch" (integrateBranch's baseBranch
+ *  fallback, ensureLandBranch's baseBranch fallback) shares one definition
+ *  instead of drifting apart. */
+function isOwnManagedBranch(b) {
+  return typeof b === 'string' && b.length > 0 && (
+    Object.values(KIND_CONFIG).some((c) => b.startsWith(c.branchPrefix))
+    || b.startsWith(LAND_BRANCH_PREFIX)
+  );
 }
 
 function worktreeRootFor(kind) {
@@ -206,22 +227,12 @@ const worktreeCapLockChain = { job: Promise.resolve(), epic: Promise.resolve() }
 const observedWorktreeCountCache = { job: { count: null, at: 0 }, epic: { count: null, at: 0 } };
 const OBSERVED_WORKTREE_COUNT_TTL_MS = 2000;
 
-function execGit(args, { cwd, timeout = 20_000 } = {}) {
-  return new Promise((resolve, reject) => {
-    execFile('git', args, { cwd, timeout, windowsHide: true, encoding: 'utf8' }, (err, stdout, stderr) => {
-      if (err) {
-        err.stderrText = stderr;
-        // Some git subcommands (e.g. `diff --no-index`) exit non-zero to mean
-        // "found a difference", not "failed" — stdout still carries the real
-        // result in that case, so callers that need it can recover it off
-        // the rejected error rather than losing it.
-        err.stdoutText = stdout;
-        reject(err);
-        return;
-      }
-      resolve(stdout || '');
-    });
-  });
+// Thin re-shape over the shared gitExec.execGit (cwd-first signature) —
+// kept so the ~40 call sites below (args-first, `{ cwd, timeout }`) don't
+// all need touching. Semantics (timeout/maxBuffer/env, execFile with an
+// argv array, stderrText/stdoutText on error) now live in gitExec.cjs.
+function execGit(args, { cwd, timeout = 20_000, maxBuffer, env } = {}) {
+  return sharedGitExec.execGit(cwd, args, { timeout, maxBuffer, env });
 }
 
 // Unquote a single git porcelain v1 path token. Git wraps a path in double
@@ -784,7 +795,10 @@ async function reserveWorktreeSlot(kind) {
 /**
  * Create a linked worktree on a fresh branch checked out from the main
  * tree's current HEAD. Returns `{ ok: true, dir, branch, baseCwd,
- * carriedPaths }` on success, or `{ ok: false, reason }` — the reason is
+ * carriedPaths, baseBranch }` on success (`baseBranch` is `cwd`'s branch at
+ * creation time — `null` on a detached HEAD — so integration later targets
+ * the branch the checkout actually started from, not whatever `cwd` sits on
+ * by the time the job finishes), or `{ ok: false, reason }` — the reason is
  * always a short, human-readable string meant to be logged verbatim so a
  * fallback to running in place is never silent.
  *
@@ -805,8 +819,22 @@ async function reserveWorktreeSlot(kind) {
  * failure, git error) is a normal, expected outcome for a project that
  * hasn't opted into — or currently can't support — isolation, not an
  * exceptional one.
+ *
+ * `fromRef` (optional) forks the checkout from that ref instead of HEAD —
+ * used by the checkout-free `sm-land/<epicId>` integration path, where a
+ * job's worktree should start from the shared land branch rather than
+ * whatever the human's own checkout happens to be on. Only used when it
+ * actually resolves to a commit; an unresolvable `fromRef` silently falls
+ * back to HEAD, same as omitting it. `baseBranch` on the result always stays
+ * the human checkout's OWN branch (never the land ref) — integration still
+ * needs to know what the human was really on, `forkedFrom` carries the ref
+ * the worktree content itself came from. The base-tree WIP carry-over
+ * (`captureAndCarryBaseDiff`) is skipped whenever `fromRef` resolved: the
+ * human's dirty diff is relative to their OWN tree, not `fromRef`'s, so
+ * applying it here would silently misplace or conflict with content that has
+ * nothing to do with it.
  */
-async function createWorktree({ kind, cwd, key }) {
+async function createWorktree({ kind, cwd, key, fromRef }) {
   configFor(kind); // throws on an unknown kind before anything else runs
   if (!cwd || typeof cwd !== 'string') return { ok: false, reason: 'no cwd provided' };
   if (!key || typeof key !== 'string') return { ok: false, reason: 'no key provided' };
@@ -814,7 +842,20 @@ async function createWorktree({ kind, cwd, key }) {
 
   if (!(await isGitRepo(cwd))) return { ok: false, reason: 'not a git repository' };
 
+  const baseBranch = await getCurrentBranch(cwd);
   const baseWasClean = await isBaseTreeClean(cwd);
+
+  // Resolved to a commit SHA — never the bare ref/branch NAME — before it's
+  // handed to `git worktree add` below: a name could keep moving (or, for a
+  // '-'-prefixed name, be read as an option rather than a positional arg)
+  // between this resolution and the actual checkout; a SHA pins exactly the
+  // commit this call decided on. `forkedFrom` on the result still carries
+  // the original NAME (never the SHA) — that's the human-readable "what ref
+  // did this fork from" a caller wants to log/display.
+  let resolvedFromRefSha = null;
+  if (typeof fromRef === 'string' && fromRef) {
+    resolvedFromRefSha = await tryResolveCommit(cwd, `${fromRef}^{commit}`);
+  }
 
   // Cap check + slot reservation as a single atomic step, per kind — see
   // reserveWorktreeSlot's header. Released again below on any failure path
@@ -824,6 +865,7 @@ async function createWorktree({ kind, cwd, key }) {
 
   const dir = worktreeDirFor(kind, cwd, key);
   const branch = branchNameFor(kind, key);
+  const worktreeSource = resolvedFromRefSha || 'HEAD';
   try {
     await fsp.mkdir(path.dirname(dir), { recursive: true });
     // Defensive: a same-key leftover from a prior crashed run (same slug/id
@@ -831,14 +873,14 @@ async function createWorktree({ kind, cwd, key }) {
     // with `git worktree add`'s own branch/path checks.
     await removeWorktreeDir(cwd, dir);
     try { await execGit(['branch', '-D', branch], { cwd, timeout: 10_000 }); } catch { /* didn't exist */ }
-    await execGit(['worktree', 'add', '-b', branch, dir, 'HEAD'], { cwd, timeout: 30_000 });
+    await execGit(['worktree', 'add', '-b', branch, dir, worktreeSource], { cwd, timeout: 30_000 });
   } catch (e) {
     activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
     return { ok: false, reason: `git worktree add failed: ${(e && (e.stderrText || e.message)) || e}` };
   }
 
   let carriedPaths = [];
-  if (!baseWasClean) {
+  if (!resolvedFromRefSha && !baseWasClean) {
     // Routed through module.exports (not the bare local function) so tests
     // can substitute a failing carry-over without needing a real git-apply
     // conflict fixture — see gitWorktree.test.cjs's carry-over-failure case.
@@ -853,7 +895,9 @@ async function createWorktree({ kind, cwd, key }) {
   }
 
   registeredCheckouts.set(dir, { kind, branch });
-  return { ok: true, dir, branch, baseCwd: cwd, carriedPaths };
+  const result = { ok: true, dir, branch, baseCwd: cwd, carriedPaths, baseBranch };
+  if (resolvedFromRefSha) result.forkedFrom = fromRef;
+  return result;
 }
 
 /**
@@ -1155,6 +1199,40 @@ async function getCurrentBranch(cwd) {
 }
 
 /**
+ * True when `branch`'s ONLY committed changes (relative to `cwd`'s HEAD)
+ * touch paths in `carriedPaths` (the human's carried-over base-tree WIP from
+ * `createWorktree`) AND every one of those changed paths' committed blob on
+ * `branch` is byte-identical to what's still sitting dirty in `cwd` right
+ * now — i.e. the branch committed exactly the carried WIP and nothing more.
+ * Extracted out of `integrateBranch` (identical logic, same content-verify
+ * safety reasoning documented there) so a checkout-free Epic land path can
+ * reuse the same classification before ever attempting a land.
+ * Never throws — any read failure (including no `carriedPaths`) is reported
+ * as `false`, the safer default that falls through to a real integration
+ * attempt rather than silently dropping a commit.
+ */
+async function isCarriedWipOnly({ cwd, branch, carriedPaths }) {
+  if (!Array.isArray(carriedPaths) || !carriedPaths.length) return false;
+  try {
+    let mergeBase = '';
+    try {
+      mergeBase = (await execGit(['merge-base', 'HEAD', branch], { cwd, timeout: 10_000 })).trim();
+    } catch {
+      mergeBase = '';
+    }
+    const changedOut = await execGit(['diff', `${mergeBase || 'HEAD'}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
+    const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (changed.length && changed.every((p) => carriedPaths.includes(p))) {
+      const allIdentical = await pathsIdenticalToBranch({ cwd, branch, paths: changed });
+      if (allIdentical) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Integrate a branch back into `cwd`'s current HEAD — fast-forward when
  * possible, a real merge commit when the main tree advanced underneath (a
  * sibling job/Epic merged first) since the worktree was created. Returns
@@ -1174,26 +1252,143 @@ async function getCurrentBranch(cwd) {
  * the base tree still holding that same path dirty.
  *
  * Refuses outright — before touching any other git state — when `cwd`'s
- * HEAD is not on the repo's own default branch (resolved via
- * `resolveDefaultBranch`, never hardcoded to `main`) or is detached. A
- * stray checkout onto some other branch (e.g. a leftover `sm-job/*` branch
- * from a prior run) would otherwise make every subsequent merge-base/merge
- * silently target the WRONG tree, producing merge "conflicts" that are
- * really just wrong-base artifacts (RCA: starry-night-ships, 2026-09-12).
- * This refusal never checks out, resets, or switches anything — it only
- * reports; a human fixes the checkout.
+ * HEAD is not on the expected target branch or is detached. The expected
+ * target is `baseBranch` (the branch `cwd` was actually on when the
+ * worktree was created, per `createWorktree`) when it is a non-empty string
+ * that doesn't start with one of OUR OWN managed branch prefixes (KIND_CONFIG's
+ * `branchPrefix`, i.e. `sm-job/`/`sm-epic/` — read from the same config
+ * createWorktree/branchNameFor use, so a prefix rename can never drift the two
+ * apart) — a leftover managed-branch value is never a legitimate integration
+ * target, so it falls back the same as no baseBranch at all); otherwise it
+ * falls back to `resolveDefaultBranch(cwd)` (never hardcoded to `main`) —
+ * today's pre-PRD behavior for callers that don't pass `baseBranch` (e.g.
+ * `branchSweep.cjs`'s orphan sweep, which has no job row to read it from).
+ * A checkout that has moved off the expected target since the worktree was
+ * created (e.g. a leftover `sm-job/*` branch from a prior run) would
+ * otherwise make every subsequent merge-base/merge silently target the
+ * WRONG tree, producing merge "conflicts" that are really just wrong-base
+ * artifacts (RCA: starry-night-ships, 2026-09-12) — still guarded here
+ * because an `sm-*` baseBranch is rejected as an expected target, and a HEAD
+ * that moved after the worktree forked is refused regardless of what
+ * baseBranch was recorded. This refusal never checks out, resets, or
+ * switches anything — it only reports (`failureKind: 'stray_checkout'`); a
+ * human fixes the checkout. Pass `allowRefLanding: true` to land onto
+ * `expectedBranch`'s ref instead of refusing (still never touches any
+ * checkout) — only `performMechanicalRecovery` opts into this; every other
+ * caller keeps today's refusal.
+ *
+ * The ref-landing path refuses the same way — reports, never lands — in
+ * three more cases: `cwd`'s HEAD is detached (a plain detached checkout and
+ * a mid-rebase one both read back as `null` from `getCurrentBranch`, and the
+ * two can't be told apart, so both are refused); `expectedBranch` is being
+ * rebased in ANY worktree of this repo, not only checked out in one (the
+ * rebase scan inside `checkTargetRefNotCheckedOut`) — a later `git rebase
+ * --abort`/`--continue` there would otherwise undo or outrun the ref move
+ * this path just made; or `branch`'s only committed changes touch
+ * `carriedPaths` — judged by path membership alone here, unlike the
+ * in-checkout path's `isCarriedWipOnly`, because `cwd` is on some other
+ * branch and has no working tree this path could trust to content-verify
+ * against.
  */
-async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
+async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranch, allowRefLanding = false }) {
   if (!cwd || !branch) return { ok: false, reason: 'missing cwd/branch' };
 
-  const defaultBranch = await resolveDefaultBranch(cwd);
+  const expectedBranch = (typeof baseBranch === 'string' && baseBranch && !isOwnManagedBranch(baseBranch))
+    ? baseBranch
+    : await resolveDefaultBranch(cwd);
+  // Hoisted above the stray-checkout check: both the ref-landing path below
+  // and the normal in-checkout merge path further down land with this exact
+  // text, and must never drift apart on it.
+  const mergeMessage = kind === 'epic'
+    ? `merge epic ${key || branch}`
+    // Preserves the exact job-kind message the pre-generalization jobWorktree.cjs
+    // used, so a job's merge-commit text never changes under this refactor.
+    : `merge scheduler job ${key || branch}`;
   const currentBranch = await getCurrentBranch(cwd);
-  if (currentBranch !== defaultBranch) {
-    const actual = currentBranch === null ? 'detached HEAD' : currentBranch;
-    return {
+  if (currentBranch !== expectedBranch) {
+    const actualBranch = currentBranch === null ? 'detached HEAD' : currentBranch;
+    const strayCheckoutFailure = {
       ok: false,
-      reason: `refusing to integrate: HEAD is on "${actual}", not the repo's default branch "${defaultBranch}" — a stray checkout must be fixed before integration can proceed`,
+      failureKind: 'stray_checkout',
+      expectedBranch,
+      actualBranch,
+      reason: `refusing to integrate: HEAD is on "${actualBranch}", not the expected base branch "${expectedBranch}" — a stray checkout must be fixed before integration can proceed`,
     };
+    if (!allowRefLanding || process.env.SM_REF_LANDING_DISABLE === '1') {
+      return strayCheckoutFailure;
+    }
+    // A detached HEAD is indistinguishable from a mid-rebase one — both read
+    // back as `null` from getCurrentBranch — and a ref move under a paused
+    // rebase gets undone the moment that rebase ends (`--abort`) or outrun
+    // (`--continue`). We cannot tell the two apart, so neither is landed.
+    if (currentBranch === null) {
+      return strayCheckoutFailure;
+    }
+    // The checkout is busy on some OTHER branch (a human, or a sibling job's
+    // own worktree-free promotion) — land straight onto `expectedBranch`'s
+    // ref instead of refusing outright. Never touches `cwd`'s working tree,
+    // index, or HEAD: `integrateOntoRef` is a pure object-database CAS. Only
+    // `performMechanicalRecovery` opts into this today (`allowRefLanding:
+    // true`) — the first-pass integrate (scheduler.cjs's `finalizeJobWorktree`)
+    // must keep refusing here, because it finds the landed commit by
+    // watching HEAD move, which a ref-only land never does.
+    let refBranchHead;
+    try {
+      refBranchHead = (await execGit(['rev-parse', branch], { cwd, timeout: 10_000 })).trim();
+    } catch {
+      return strayCheckoutFailure;
+    }
+    let refMergeBase = '';
+    try {
+      refMergeBase = (await execGit(['merge-base', expectedBranch, branch], { cwd, timeout: 10_000 })).trim();
+    } catch {
+      refMergeBase = '';
+    }
+    if (refMergeBase && refMergeBase === refBranchHead) {
+      return { ok: true, integrated: false, reason: 'branch has no new commits' };
+    }
+    // Carried-WIP shortcut, path membership only: `cwd` is on `actualBranch`,
+    // not `expectedBranch`, so there is no trustworthy working tree here to
+    // content-verify against (isCarriedWipOnly's approach, used by the
+    // in-checkout path below). Refusing instead of reporting a false
+    // "carried-wip-only" matters because the caller (performMechanicalRecovery)
+    // treats that reason as safe to delete the job branch — a wrong guess
+    // would discard real work. A branch that changed carried paths AND other
+    // paths still lands below, same as the in-checkout path.
+    if (Array.isArray(carriedPaths) && carriedPaths.length) {
+      try {
+        const changedOut = await execGit(['diff', `${refMergeBase || expectedBranch}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
+        const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
+        if (changed.length && changed.every((p) => carriedPaths.includes(p))) {
+          return strayCheckoutFailure;
+        }
+      } catch {
+        // Diff failed — fall through to the normal ref landing below, same
+        // as every other "never throws" rule in this function.
+      }
+    }
+    const refResult = await integrateOntoRef({
+      cwd, targetRef: `refs/heads/${expectedBranch}`, branch, message: mergeMessage,
+    });
+    if (refResult.ok) {
+      // Spread refResult first so a fast-forward keeps `fastForward: true`
+      // and a merge commit keeps `mergeCommit: true` — this used to
+      // hard-code `fastForward: false` on every success, misreporting a
+      // plain fast-forward as a merge.
+      return { ...refResult, viaRef: true, sha: refResult.sha || refBranchHead };
+    }
+    if (refResult.failureKind === 'target_checked_out') {
+      return strayCheckoutFailure;
+    }
+    if (refResult.failureKind === 'content_conflict') {
+      return {
+        ok: false,
+        reason: `merge failed (likely a real content conflict): ${refResult.reason}`,
+        failureKind: 'content_conflict',
+        conflictedPaths: refResult.conflictedPaths || [],
+      };
+    }
+    return strayCheckoutFailure;
   }
 
   let branchHead;
@@ -1212,34 +1407,17 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
     return { ok: true, integrated: false, reason: 'branch has no new commits' };
   }
 
-  if (Array.isArray(carriedPaths) && carriedPaths.length) {
-    try {
-      const changedOut = await execGit(['diff', `${mergeBase || 'HEAD'}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
-      const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
-      if (changed.length && changed.every((p) => carriedPaths.includes(p))) {
-        // Path membership alone is NOT enough: a job that legitimately edits
-        // the SAME file the base tree had carried-in WIP on (e.g. this
-        // repo's own scheduler.cjs churns queue.json/active-index.json while
-        // jobs run) would otherwise have its real commit misclassified as
-        // "just the carried WIP" and dropped — the caller treats
-        // `integrated: false` as safe-to-delete-the-branch, so that commit
-        // would be gone for good, worse than the ordinary merge-conflict
-        // path (branch kept, flagged for manual recovery) this shortcut is
-        // supposed to be a safe subset of. Content-verify: only when every
-        // changed path's committed blob on `branch` is byte-identical to
-        // what's STILL sitting dirty in `cwd` right now proves the job
-        // committed exactly the carried WIP and nothing more. Any mismatch
-        // (including a read failure — fail toward the safer default) falls
-        // through to the normal merge attempt below instead of skipping.
-        const allIdentical = await pathsIdenticalToBranch({ cwd, branch, paths: changed });
-        if (allIdentical) {
-          return { ok: true, integrated: false, reason: 'carried-wip-only' };
-        }
-      }
-    } catch {
-      // Best-effort classification only — if the diff can't be read, fall
-      // through to the normal integration attempt below.
-    }
+  // Path membership alone is NOT enough: a job that legitimately edits the
+  // SAME file the base tree had carried-in WIP on (e.g. this repo's own
+  // scheduler.cjs churns queue.json/active-index.json while jobs run) would
+  // otherwise have its real commit misclassified as "just the carried WIP"
+  // and dropped — the caller treats `integrated: false` as
+  // safe-to-delete-the-branch, so that commit would be gone for good, worse
+  // than the ordinary merge-conflict path (branch kept, flagged for manual
+  // recovery) this shortcut is supposed to be a safe subset of. See
+  // `isCarriedWipOnly` above for the content-verify logic.
+  if (await isCarriedWipOnly({ cwd, branch, carriedPaths })) {
+    return { ok: true, integrated: false, reason: 'carried-wip-only' };
   }
 
   try {
@@ -1249,11 +1427,6 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths }) {
     // Main tree advanced since the worktree branched (a sibling job/Epic
     // merged first) — a real merge commit still lands the branch's commit(s).
   }
-  const mergeMessage = kind === 'epic'
-    ? `merge epic ${key || branch}`
-    // Preserves the exact job-kind message the pre-generalization jobWorktree.cjs
-    // used, so a job's merge-commit text never changes under this refactor.
-    : `merge scheduler job ${key || branch}`;
   try {
     await execGit(['merge', '--no-ff', '--no-edit', '-m', mergeMessage, branch], { cwd, timeout: 30_000 });
     return { ok: true, integrated: true, mergeCommit: true };
@@ -1330,10 +1503,14 @@ async function cleanupWorktree({ kind, cwd, dir, branch, keepBranch }) {
     try { await execGit(['branch', '-D', branch], { cwd, timeout: 10_000 }); } catch { /* already gone */ }
   }
   try { await execGit(['worktree', 'prune'], { cwd, timeout: 10_000 }); } catch { /* best effort */ }
-  // A checkout the expiry pass already released must not be counted down twice.
+  // A checkout the expiry pass already released must not be counted down
+  // twice, and neither must a dir-less call (e.g. mechanical recovery's
+  // branch-only cleanup after the worktree dir was already freed by the
+  // job's own earlier finalize) — no `dir` means this call never held a
+  // counted slot to begin with.
   const alreadyExpired = dir ? expiredCheckoutDirs.delete(dir) : false;
   if (dir) registeredCheckouts.delete(dir);
-  if (!alreadyExpired) activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
+  if (dir && !alreadyExpired) activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
 }
 
 /**
@@ -1475,20 +1652,11 @@ async function isBranchMergedIntoHead(cwd, branch) {
   }
 }
 
-/** Parse `git worktree list --porcelain` into `[{ worktree, branch }]`. */
-function parseWorktreeListPorcelain(text) {
-  const entries = [];
-  let cur = null;
-  for (const line of String(text || '').split('\n')) {
-    if (line.startsWith('worktree ')) {
-      cur = { worktree: line.slice('worktree '.length).trim(), branch: null };
-      entries.push(cur);
-    } else if (line.startsWith('branch ') && cur) {
-      cur.branch = line.slice('branch '.length).trim().replace(/^refs\/heads\//, '');
-    }
-  }
-  return entries;
-}
+// Alias — the real implementation now lives in gitExec.cjs
+// (parseWorktreePorcelain) so it can be shared below both this module and
+// scheduler.cjs in the require graph. Name kept for the many existing
+// `gitWorktree.parseWorktreeListPorcelain` call sites/tests.
+const parseWorktreeListPorcelain = sharedGitExec.parseWorktreePorcelain;
 
 /** Strips a kind's branch prefix off a branch name, returning the bare
  *  key (slug/epicId), or null if the branch doesn't carry that prefix. */
@@ -1650,7 +1818,10 @@ async function reconcileWorktreesOnBoot(cwds, opts = {}) {
       if (isLive && key && (await isLive(key, entry))) continue;
       await removeWorktreeDir(cwd, entry.worktree);
       checkoutsRemoved++;
-      if (entry.branch) {
+      // sm-land/* is the per-Epic integration branch, never a throwaway
+      // worktree branch — even if something else checked it out onto a
+      // worktree under this kind's root, this sweep must never delete it.
+      if (entry.branch && !entry.branch.startsWith(LAND_BRANCH_PREFIX)) {
         try { await execGit(['branch', '-D', entry.branch], { cwd, timeout: 10_000 }); } catch { /* already gone */ }
       }
     }
@@ -1674,13 +1845,399 @@ async function reconcileWorktreesOnBoot(cwds, opts = {}) {
   return totals;
 }
 
+// ──────────────────────────────────────────── checkout-free integration (integrateOntoRef / ensureLandBranch)
+
+/** `git rev-parse --verify --quiet <spec>`, trimmed — null (never throws) on
+ *  any failure, e.g. `spec` doesn't resolve to a commit. */
+async function tryResolveCommit(cwd, spec) {
+  try {
+    const out = await execGit(['rev-parse', '--verify', '--quiet', spec], { cwd, timeout: 10_000 });
+    return out.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Runs `git merge-tree --write-tree --name-only --no-messages <targetRef>
+ * <branch>` and classifies the result — never throws. Confirmed against a
+ * real repo (git 2.39.5): a clean merge exits 0 with the resulting tree OID
+ * as the only stdout line; a content conflict exits 1 with the tree OID on
+ * line 1 followed by one conflicted path per line; anything else (including
+ * exit 129 / an "unknown option" stderr, git < 2.38's signature for not
+ * supporting `--write-tree` at all) is a hard failure.
+ */
+async function runMergeTreeWriteTree({ cwd, oldSha, branchSha }) {
+  try {
+    // Resolved SHAs, never ref/branch NAMES: (1) keeps the tree content this
+    // computes and the parents `git commit-tree` later stamps always in sync
+    // with the exact objects decided on above — a name could resolve to a
+    // DIFFERENT object by the time this runs if something else moved it
+    // between the earlier resolution and this call; (2) a branch/ref name
+    // starting with '-' (e.g. an epicId-derived branch) would otherwise be
+    // read as an option by `git merge-tree`, not a positional argument.
+    const out = await execGit(
+      ['merge-tree', '--write-tree', '--name-only', '--no-messages', oldSha, branchSha],
+      { cwd, timeout: 30_000 },
+    );
+    return { ok: true, treeOid: (out.split('\n')[0] || '').trim() };
+  } catch (e) {
+    const stderrText = (e && e.stderrText) || '';
+    const stdoutText = (e && e.stdoutText) || '';
+    if (e && e.code === 129 || /unknown option/i.test(stderrText)) {
+      return {
+        ok: false,
+        failureKind: 'git_too_old',
+        reason: `git merge-tree --write-tree is unsupported by this git (need >= 2.38): ${stderrText || e.message}`,
+      };
+    }
+    if (e && e.code === 1) {
+      const lines = stdoutText.split('\n').map((l) => l.trim());
+      const conflictedPaths = Array.from(new Set(lines.slice(1).filter(Boolean))).sort();
+      return {
+        ok: false,
+        failureKind: 'content_conflict',
+        conflictedPaths,
+        reason: `merge-tree conflict on: ${conflictedPaths.join(', ')}`,
+      };
+    }
+    return { ok: false, reason: `git merge-tree --write-tree failed: ${stderrText || e.message}` };
+  }
+}
+
+/**
+ * One computation attempt for `integrateOntoRef` — resolves both tips fresh,
+ * decides ff vs merge-commit vs no-op, and lands the result via a
+ * compare-and-swap `git update-ref`. Returns `{ retry: true }` (never `ok`)
+ * when the CAS lost a race against a concurrent ref update — the caller
+ * recomputes from scratch, since a stale `oldSha` invalidates everything
+ * derived from it (the ff-vs-merge decision, the merge-tree/commit-tree
+ * inputs). Every other return is terminal: a real `{ ok: true/false, ... }`.
+ */
+async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
+  const branchSha = await tryResolveCommit(cwd, `${branch}^{commit}`);
+  if (!branchSha) return { ok: false, reason: `branch "${branch}" not found` };
+
+  // Resolve the ref itself (any object type) separately from its `^{commit}`
+  // form: a ref that exists but doesn't resolve to a commit (points at a
+  // blob/tree, or a corrupt/annotated-non-commit ref) must be an explicit
+  // failure, never silently treated as "doesn't exist yet" — that would run
+  // the create-only CAS below and stomp the ref's existing (non-commit)
+  // value instead of refusing.
+  const targetRefExists = await tryResolveCommit(cwd, targetRef);
+  const oldSha = await tryResolveCommit(cwd, `${targetRef}^{commit}`);
+  if (targetRefExists && !oldSha) {
+    return { ok: false, reason: `targetRef "${targetRef}" exists but does not resolve to a commit` };
+  }
+
+  if (oldSha === branchSha) {
+    return { ok: true, integrated: false, reason: 'branch has no new commits' };
+  }
+
+  // Retries only when `targetRef` actually moved since `oldSha` was read
+  // (a real CAS race a fresh attempt can resolve); otherwise the update-ref
+  // failure is real (bad ref name, permissions, disk) and reported as such
+  // rather than silently retried forever.
+  async function updateRefOrClassify(args) {
+    try {
+      await execGit(['update-ref', ...args], { cwd, timeout: 10_000 });
+      return { ok: true };
+    } catch (e) {
+      const stderrText = (e && (e.stderrText || e.message)) || String(e);
+      const nowSha = await tryResolveCommit(cwd, `${targetRef}^{commit}`);
+      if (nowSha !== oldSha) return { retry: true };
+      return { ok: false, failureKind: 'update_ref_failed', reason: stderrText };
+    }
+  }
+
+  if (!oldSha) {
+    // targetRef doesn't exist yet — a create-only CAS is the correct
+    // fast-forward: everything on branch is new relative to an empty ref.
+    const outcome = await updateRefOrClassify([targetRef, branchSha, '']);
+    if (outcome.retry) return { retry: true };
+    if (!outcome.ok) return outcome;
+    return { ok: true, integrated: true, fastForward: true, sha: branchSha };
+  }
+
+  let isAncestor;
+  try {
+    await execGit(['merge-base', '--is-ancestor', oldSha, branchSha], { cwd, timeout: 10_000 });
+    isAncestor = true;
+  } catch (e) {
+    if (e && e.code === 1) {
+      isAncestor = false;
+    } else {
+      return { ok: false, reason: `merge-base --is-ancestor failed: ${(e && (e.stderrText || e.message)) || e}` };
+    }
+  }
+
+  if (isAncestor) {
+    const outcome = await updateRefOrClassify([targetRef, branchSha, oldSha]);
+    if (outcome.retry) return { retry: true };
+    if (!outcome.ok) return outcome;
+    return { ok: true, integrated: true, fastForward: true, sha: branchSha };
+  }
+
+  const mergeTreeResult = await runMergeTreeWriteTree({ cwd, oldSha, branchSha });
+  if (!mergeTreeResult.ok) return mergeTreeResult;
+
+  const commitTreeArgs = ['commit-tree', mergeTreeResult.treeOid, '-p', oldSha, '-p', branchSha, '-m', message];
+  let newSha;
+  try {
+    newSha = (await execGit(commitTreeArgs, { cwd, timeout: 15_000 })).trim();
+  } catch (e) {
+    const stderrText = (e && (e.stderrText || e.message)) || String(e);
+    if (!/Please tell me who you are/i.test(stderrText)) {
+      return { ok: false, reason: `git commit-tree failed: ${stderrText}` };
+    }
+    try {
+      newSha = (await execGit(
+        ['-c', 'user.name=Session Manager Scheduler', '-c', 'user.email=scheduler@session-manager.local', ...commitTreeArgs],
+        { cwd, timeout: 15_000 },
+      )).trim();
+    } catch (e2) {
+      return { ok: false, reason: `git commit-tree failed: ${(e2 && (e2.stderrText || e2.message)) || e2}` };
+    }
+  }
+
+  const outcome = await updateRefOrClassify([targetRef, newSha, oldSha]);
+  if (outcome.retry) return { retry: true };
+  if (!outcome.ok) return outcome;
+  return { ok: true, integrated: true, mergeCommit: true, sha: newSha };
+}
+
+/**
+ * Lands `branch` onto `targetRef` WITHOUT touching any working tree, index,
+ * or HEAD — no `git checkout`, no `git merge`, nothing in any human's or
+ * job's own checkout ever moves. Fast-forwards via a compare-and-swap `git
+ * update-ref` when `targetRef` is an ancestor of `branch`; otherwise builds a
+ * merge commit entirely in the object database (`git merge-tree --write-tree`
+ * + `git commit-tree`) and lands IT via the same CAS. This is the foundation
+ * for a per-Epic `sm-land/<epicId>` integration branch that scheduler jobs
+ * can land onto regardless of what the human's own checkout is doing.
+ *
+ * Refuses up front (`failureKind: 'target_checked_out'`, nothing touched) if
+ * `targetRef` is checked out in ANY worktree of this repo — updating a
+ * checked-out branch's ref out from under `git worktree list` would desync
+ * that working tree's HEAD from its own index, which no compare-and-swap can
+ * detect or prevent (a worktree's HEAD isn't a ref-race participant here).
+ *
+ * A CAS loss (the ref moved between our read and our write — a sibling
+ * caller landed first) retries the WHOLE computation, up to 3 attempts total,
+ * before giving up with `failureKind: 'ref_race'`.
+ */
+/**
+ * Normalizes `targetRef` to a full `refs/heads/...` name: a short name like
+ * `sm-land/x` becomes `refs/heads/sm-land/x`; a value already under
+ * `refs/heads/` passes through unchanged; anything else that already starts
+ * with `refs/` (e.g. `refs/tags/x`, `refs/remotes/x`) is rejected — it is not
+ * a local branch and prefixing `refs/heads/` onto it would silently target
+ * the wrong ref. Returns null on any non-normalizable input (including a
+ * non-string/empty value). Pure — never touches git or disk.
+ */
+function normalizeTargetRef(targetRef) {
+  if (typeof targetRef !== 'string' || !targetRef) return null;
+  if (targetRef.startsWith('refs/heads/')) return targetRef;
+  if (targetRef.startsWith('refs/')) return null;
+  return `refs/heads/${targetRef}`;
+}
+
+/**
+ * Reads `<adminDir>/rebase-merge/head-name` or `.../rebase-apply/head-name`
+ * (git uses exactly one of the two backends per paused rebase) and returns
+ * its trimmed content — the `refs/heads/...` ref that rebase will update
+ * when it finishes — or `null` when neither file exists (no rebase paused in
+ * this admin dir). ENOENT/ENOTDIR on a read means "not that backend," not a
+ * failure; any other error (permissions, I/O) propagates so the caller can
+ * fail closed instead of silently treating an unreadable admin dir as
+ * rebase-free.
+ */
+async function pausedRebaseHeadRef(adminDir) {
+  for (const rel of ['rebase-merge/head-name', 'rebase-apply/head-name']) {
+    try {
+      return (await fsp.readFile(path.join(adminDir, rel), 'utf8')).trim();
+    } catch (e) {
+      if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) continue;
+      throw e;
+    }
+  }
+  return null;
+}
+
+/**
+ * Fetches `git worktree list --porcelain` fresh and refuses when
+ * `targetRef` (already normalized to `refs/heads/...`) is checked out in any
+ * worktree — see integrateOntoRef's header. Split out so each retry
+ * iteration in integrateOntoRef re-checks this from scratch: a sibling
+ * process could check `targetRef` out into a worktree in between two of our
+ * own retry attempts, and a guard that only ran once before the retry loop
+ * would miss that.
+ *
+ * Also refuses when `targetRef` is mid-rebase in any worktree of this repo,
+ * checked out there or not: a paused rebase detaches HEAD, so `git worktree
+ * list`'s `branch` line goes missing for the SAME worktree this guard most
+ * needs to catch — the check above would otherwise pass and the ref would
+ * move, only for `git rebase --abort` to reset it back (losing the landed
+ * commit) or `--continue` to leave it stale. Reads each worktree's own admin
+ * dir directly instead of running git inside it, because a worktree's
+ * checkout directory can be gone while its admin dir under the shared
+ * `.git` still holds the paused rebase's state. Fails closed: any read
+ * error here is also a refusal, never a silent pass.
+ */
+async function checkTargetRefNotCheckedOut({ cwd, targetRef }) {
+  let worktreeListOut;
+  try {
+    worktreeListOut = await execGit(['worktree', 'list', '--porcelain'], { cwd, timeout: 15_000 });
+  } catch (e) {
+    return { ok: false, reason: `git worktree list failed: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+  // NOT parseWorktreeListPorcelain here on purpose — that helper strips the
+  // `refs/heads/` prefix, but targetRef (below) is always compared in full
+  // `refs/heads/...` form (normalizeTargetRef), so this needs the raw ref.
+  const checkedOutRefs = new Set(
+    worktreeListOut.split('\n').filter((l) => l.startsWith('branch ')).map((l) => l.slice('branch '.length).trim()),
+  );
+  if (checkedOutRefs.has(targetRef)) {
+    return {
+      ok: false,
+      failureKind: 'target_checked_out',
+      reason: `${targetRef} is checked out in a worktree — updating it directly would desync that working tree`,
+    };
+  }
+
+  let gitCommonDirOut;
+  try {
+    gitCommonDirOut = await execGit(['rev-parse', '--git-common-dir'], { cwd, timeout: 10_000 });
+  } catch (e) {
+    return { ok: false, reason: `git rev-parse --git-common-dir failed: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+  const sharedGitDir = path.resolve(cwd, gitCommonDirOut.trim());
+  const worktreesDir = path.join(sharedGitDir, 'worktrees');
+  const adminDirs = [sharedGitDir];
+  try {
+    for (const entry of await fsp.readdir(worktreesDir)) adminDirs.push(path.join(worktreesDir, entry));
+  } catch (e) {
+    if (!(e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'))) {
+      return { ok: false, reason: `reading ${worktreesDir} failed: ${(e && e.message) || e}` };
+    }
+  }
+  for (const adminDir of adminDirs) {
+    let pausedRef;
+    try {
+      pausedRef = await pausedRebaseHeadRef(adminDir);
+    } catch (e) {
+      return { ok: false, reason: `reading rebase state under ${adminDir} failed: ${(e && e.message) || e}` };
+    }
+    if (pausedRef && pausedRef === targetRef) {
+      return {
+        ok: false,
+        failureKind: 'target_checked_out',
+        reason: `${targetRef} is being rebased in a worktree — moving it now would be undone when that rebase ends`,
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
+async function integrateOntoRef({ cwd, targetRef, branch, message }) {
+  if (!cwd || typeof cwd !== 'string') return { ok: false, reason: 'no cwd provided' };
+  if (!targetRef || typeof targetRef !== 'string') return { ok: false, reason: 'no targetRef provided' };
+  if (!branch || typeof branch !== 'string') return { ok: false, reason: 'no branch provided' };
+  if (!(await isGitRepo(cwd))) return { ok: false, reason: 'not a git repository' };
+
+  const normalizedTargetRef = normalizeTargetRef(targetRef);
+  if (!normalizedTargetRef) {
+    return { ok: false, reason: `targetRef "${targetRef}" is not a refs/heads/... branch ref (or a short name that normalizes to one)` };
+  }
+  try {
+    await execGit(['check-ref-format', normalizedTargetRef], { cwd, timeout: 10_000 });
+  } catch (e) {
+    return { ok: false, reason: `targetRef "${targetRef}" failed check-ref-format: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+
+  const mergeMessage = (typeof message === 'string' && message) || `integrate ${branch} onto ${normalizedTargetRef}`;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const guard = await checkTargetRefNotCheckedOut({ cwd, targetRef: normalizedTargetRef });
+    if (!guard.ok) return guard;
+    const result = await attemptIntegrateOntoRef({ cwd, targetRef: normalizedTargetRef, branch, message: mergeMessage });
+    if (!result.retry) return result;
+  }
+  return { ok: false, failureKind: 'ref_race' };
+}
+
+/**
+ * Validates `epicId` is ALREADY a safe branch-name component and prefixes it
+ * with `sm-land/` — the single definition of an Epic's land-branch name, so
+ * `ensureLandBranch` and any future caller never drift apart on how an
+ * epicId becomes a branch name.
+ *
+ * Returns null (never a silently-mangled name) when `epicId` is not a
+ * string, is empty, contains any character outside `[A-Za-z0-9._-]`,
+ * contains `..`, ends with `.lock`, or starts with `.` or `-` — the same
+ * shapes `git check-ref-format`/a shell arg parser would choke on or
+ * misinterpret. A caller that gets null must treat the epicId as rejected,
+ * not retry with a stripped-down version of it: silently stripping invalid
+ * characters would let two different epicIds collide on the same land
+ * branch (e.g. `"a/b"` and `"ab"` both sanitizing to `"ab"`).
+ */
+function landBranchNameFor(epicId) {
+  if (typeof epicId !== 'string' || !epicId) return null;
+  if (!/^[A-Za-z0-9._-]+$/.test(epicId)) return null;
+  if (epicId.includes('..')) return null;
+  if (epicId.endsWith('.lock')) return null;
+  if (epicId.startsWith('.') || epicId.startsWith('-')) return null;
+  return `${LAND_BRANCH_PREFIX}${epicId}`;
+}
+
+/**
+ * Ensures the per-Epic integration branch `sm-land/<epicId>` exists, creating
+ * it (via a create-only CAS `git update-ref`, never `git checkout`/`git
+ * branch -f`) at the tip of `baseBranch` when absent. `baseBranch` falls back
+ * to `resolveDefaultBranch(cwd)` when it's falsy or one of our OWN managed
+ * branches (`isOwnManagedBranch` — an `sm-job/*`/`sm-epic/*`/`sm-land/*` value
+ * is never a legitimate base, same reasoning `integrateBranch` already
+ * applies to its own baseBranch fallback).
+ *
+ * Idempotent: a second call for the same epicId is a no-op (`created:
+ * false`), including the race where a concurrent caller created it between
+ * our existence check and our own create-only CAS.
+ */
+async function ensureLandBranch({ cwd, epicId, baseBranch }) {
+  if (!cwd || typeof cwd !== 'string') return { ok: false, reason: 'no cwd provided' };
+
+  const branch = landBranchNameFor(epicId);
+  if (!branch) return { ok: false, reason: `epicId "${epicId}" is not a safe branch-name component` };
+  const ref = `refs/heads/${branch}`;
+
+  const existingSha = await tryResolveCommit(cwd, `${ref}^{commit}`);
+  if (existingSha) return { ok: true, ref, branch, created: false };
+
+  const base = (typeof baseBranch === 'string' && baseBranch && !isOwnManagedBranch(baseBranch))
+    ? baseBranch
+    : await resolveDefaultBranch(cwd);
+  const baseSha = await tryResolveCommit(cwd, `${base}^{commit}`);
+  if (!baseSha) return { ok: false, reason: `base branch "${base}" not found` };
+
+  try {
+    await execGit(['update-ref', ref, baseSha, ''], { cwd, timeout: 10_000 });
+    return { ok: true, ref, branch, created: true };
+  } catch (e) {
+    // A concurrent caller may have created it between our check above and
+    // this create-only CAS — re-check before treating it as a real failure.
+    const nowSha = await tryResolveCommit(cwd, `${ref}^{commit}`);
+    if (nowSha) return { ok: true, ref, branch, created: false };
+    return { ok: false, reason: `update-ref create failed: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+}
+
 // ──────────────────────────────────────────── kind-scoped convenience wrappers
 
-async function createJobWorktree({ cwd, slug }) {
-  return createWorktree({ kind: 'job', cwd, key: slug });
+async function createJobWorktree({ cwd, slug, fromRef }) {
+  return createWorktree({ kind: 'job', cwd, key: slug, fromRef });
 }
-async function integrateJobBranch({ cwd, branch, slug, carriedPaths }) {
-  return integrateBranch({ kind: 'job', cwd, branch, key: slug, carriedPaths });
+async function integrateJobBranch({ cwd, branch, slug, carriedPaths, baseBranch, allowRefLanding }) {
+  return integrateBranch({ kind: 'job', cwd, branch, key: slug, carriedPaths, baseBranch, allowRefLanding });
 }
 async function cleanupJobWorktree({ cwd, dir, branch, keepBranch }) {
   return cleanupWorktree({ kind: 'job', cwd, dir, branch, keepBranch });
@@ -1695,8 +2252,8 @@ async function salvageJobDirtyDelta({ cwd, paths, outFile }) {
 async function createEpicWorktree({ cwd, epicId }) {
   return createWorktree({ kind: 'epic', cwd, key: epicId });
 }
-async function integrateEpicBranch({ cwd, branch, epicId }) {
-  return integrateBranch({ kind: 'epic', cwd, branch, key: epicId });
+async function integrateEpicBranch({ cwd, branch, epicId, baseBranch }) {
+  return integrateBranch({ kind: 'epic', cwd, branch, key: epicId, baseBranch });
 }
 async function cleanupEpicWorktree({ cwd, dir, branch, keepBranch }) {
   return cleanupWorktree({ kind: 'epic', cwd, dir, branch, keepBranch });
@@ -1719,6 +2276,7 @@ module.exports = {
   pathsIdenticalToBranch,
   resolveDefaultBranch,
   getCurrentBranch,
+  isCarriedWipOnly,
   integrateBranch,
   cleanupWorktree,
   salvageWorktreeDiff,
@@ -1734,6 +2292,12 @@ module.exports = {
   reserveWorktreeSlot,
   expireDeadWorktreeRegistrations,
   reclaimTerminalJobOrphans,
+  // Checkout-free integration primitives — land a branch onto a ref without
+  // touching any working tree/index/HEAD (see integrateOntoRef's header).
+  isOwnManagedBranch,
+  integrateOntoRef,
+  landBranchNameFor,
+  ensureLandBranch,
   // Job-kind convenience wrappers — same call shape jobWorktree.cjs has
   // always exposed.
   createJobWorktree,

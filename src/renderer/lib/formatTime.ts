@@ -35,17 +35,6 @@ export function formatClock(ms: number): string {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' })
 }
 
-/** "Xs ago" / "Xm ago" — coarser than formatRelative, used by Overview's
- *  freshness widgets where we always want the trailing " ago" suffix. */
-export function formatAgoSec(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000))
-  if (s < 60) return `${s}s ago`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  return `${h}h ago`
-}
-
 /** "never" / "just now" / "Xm ago" relative to a clock time. */
 export function formatAgo(ms: number | null, now: number): string {
   if (ms === null) return 'never'

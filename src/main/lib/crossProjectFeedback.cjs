@@ -69,9 +69,9 @@ const { OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 const { resolveProjectContext } = require('./projectRootResolve.cjs');
 
 /** Only these three Epic tags make sense for an inbound report — they are
- *  exactly the tags that route through /develop (tagLibrary.ts). 'build',
- *  'project-home-builder' and 'bilko-host-publisher' name dedicated local
- *  pipelines and are meaningless as a request from another project. */
+ *  exactly the tags that route through /develop (tagLibrary.ts). 'build' and
+ *  'project-home-builder' name dedicated local pipelines and are meaningless
+ *  as a request from another project. */
 const FEEDBACK_TAGS = Object.freeze(['bug', 'feature', 'discussion']);
 const DEFAULT_FEEDBACK_TAG = 'discussion';
 

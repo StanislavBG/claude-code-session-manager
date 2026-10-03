@@ -130,7 +130,7 @@ describe('Scheduler 2A — control → API wiring', () => {
     await mount()
     await openRow('3-fail')
     await click(btn('view log →')); expect(api.schedule.readLog).toHaveBeenCalledWith('run-3', '3-fail')
-    await click(btn('reset to pending →')); expect(api.schedule.resetJob).toHaveBeenCalledWith('3-fail')
+    await click(btn('reset to pending →')); expect(api.schedule.resetJob).toHaveBeenCalledWith('3-fail', '/p')
     await openRow('4-quar')
     await click(btn('adopt PRD →')); expect(api.schedule.adoptPrd).toHaveBeenCalledWith('4-quar')
     await openRow('2-pend')

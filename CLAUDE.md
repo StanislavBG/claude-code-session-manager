@@ -46,10 +46,10 @@ Electron 42 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand 
 - `npm run dev` — Vite + Electron with HMR. `SM_DEV=1` set automatically.
 - `npm run build` — renderer build into `dist/`.
 - `npm run typecheck` — `tsc --noEmit`. Must pass before commits.
-- `npm run test:unit` — `vitest run`. Single file: `timeout 120 npx vitest run <path>`. NOT `node --test`
+- `npm run test:unit` — `vitest run`. Single file: `npx vitest run <path>` (no `timeout` on macOS). NOT `node --test`
   (can't resolve TS renderer imports).
 - `npm run test:e2e` — Playwright Electron under `xvfb-run` (Linux).
-- `npm run lint` — unstable selectors + conditional hooks (blank-screen guards) + unregistered tests + doc hierarchy (`lint:docs`); run with typecheck.
+- `npm run lint` — unstable selectors + conditional hooks (blank-screen guards) + doc hierarchy (`lint:docs`); run with typecheck.
 - `npm run health` — `src/main/health.cjs` (exit 0 = GREEN); entry point for `/local-project-health`.
 - `npm publish` — `prepublishOnly` = project-pages build + logic build + gate + `vite build`. Tag `latest`.
   Published as `claude-code-session-manager`; [distribution detail](session-manager-operations/architecture/conventions.md#distribution).
@@ -83,9 +83,9 @@ Any new feature touching sessions, navigation, or per-project state must map ont
 - **Cross-project feedback lands as a `proposed` Epic in the RECEIVING project** (`crossProjectFeedback.cjs`,
   `feedback_open_session` MCP tool, `session-manager-dev:send-feedback` skill). `toCwd === fromCwd` is
   rejected — that's `/develop`.
-- **An ACTION is an Agent persona given a project scope**, not a fourth concept — `projects:`/`action:`/
-  `actionLabel:` frontmatter renders a button in that project's Sessions toolbar. Pressing it is the same act
-  as pressing New Session, through the same mint authority.
+- **A MACRO is a saved (agent, tag, prompt) hot key** — machine-local library (`macroLibrary.cjs`,
+  `~/.claude/session-manager/macros.json`), shown per project in the Sessions HOT KEYS strip. Pressing it is the
+  same act as New Session, through the same mint authority.
 - **Settings (System/Project/Local) is substrate, not per-Epic curation.** If a behavior should differ per
   Epic, it is a Tag, an Agent persona, or a future PRD — never a plain Settings edit. `model` + `effort` are
   carved out per-Epic (persona frontmatter wins over the Settings default).
@@ -105,15 +105,15 @@ Runs PRDs from `<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/
 [`code-map.md`](session-manager-operations/architecture/code-map.md),
 [`scheduler/README.md`](session-manager-operations/scheduler/README.md).
 
-- **PRD authoring is API-only** — `scheduler_create_prd` is the sole sanctioned way to write a PRD.
-  Hand-writing is a degraded last resort (app not running); report it visibly.
+- **PRD authoring is API-only** — `scheduler_create_prd` is the only way to write a PRD.
+  App not running? Stop and ask the human to start it; never hand-write one.
 - Flat `scheduler/prds/` is **RETIRED** — auto-consolidated into `prds-archived/` on every `reconcile()` pass.
 - Before writing a PRD, read
   [`PRD_AUTHORING.md`](src/main/templates/PRD_AUTHORING.md) —
-  rules from two real stuck-job incidents + a pre-queue checklist (§10).
+  rules from two real stuck-job incidents + a pre-queue checklist (§15).
 - **Guard hooks adopt by REFERENCE via a stable shim** (`guardShims.cjs`,
   `~/.claude/session-manager/hooks/guard-*.cjs`) — readiness banner installs all four.
-- A job parked in `needs_review` is a **question**, routed back to the authoring Epic — never mints new work.
+- A `needs_review` park self-heals first; its Epic gets one grouped notice when the ladder fails or the hold ends — never mints work.
 - The Scheduler nav row is **PROJECT-face only** — every route it renders is cwd-derived.
 - Stuck queue or a parked `needs_review`? See
   [`scheduler-operations.md`](session-manager-operations/architecture/scheduler-operations.md) — recovery
@@ -148,7 +148,7 @@ Each of these is a real incident, with the post-mortem in
 - **Declaring a hook below a top-level early return** — React #300/#310 → pane dies into its error boundary.
   `npm run lint:hooks`.
 - Adding `shell: true` to `child_process.spawn` outside `watchers.cjs`/`app:test-fire-hook`.
-- Re-implementing tmp+rename atomic writes — use `config.cjs`'s `writeJson`/`writeTextAtomic`.
+- Re-implementing tmp+rename atomic writes — use `lib/atomicFs.cjs`.
 - Reading remote URLs in prod — `createWindow` fails if `dist/index.html` is missing.
 - Adding a new LeftNav tab before checking whether an existing surface owns that data — pruned once at
   ~31 destinations with overlap.

@@ -18,6 +18,7 @@ const { ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
+const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claudeCliCaps.cjs');
 const { withProcRole } = require('./lib/cleanEnv.cjs');
 const { extractJson } = require('./lib/extractJson.cjs');
 const { assertInsideHome } = require('./lib/insideHome.cjs');
@@ -86,7 +87,8 @@ function parseDocEdit(rawStdout) {
 }
 
 /** Spawn `claude -p`, capture stdout. Resolves {ok, out, err, error} — never throws. */
-function runClaude(prompt, { model = 'sonnet', timeoutMs = 90_000, systemPrompt = null } = {}) {
+async function runClaude(prompt, { model = 'sonnet', timeoutMs = 90_000, systemPrompt = null } = {}) {
+  await ensureCliCapsProbed();
   return new Promise((resolve) => {
     let bin;
     try { bin = resolveClaudeBin(); } catch (e) { resolve({ ok: false, error: `claude not found: ${e?.message}` }); return; }
@@ -94,6 +96,7 @@ function runClaude(prompt, { model = 'sonnet', timeoutMs = 90_000, systemPrompt 
       '-p', prompt,
       '--model', model,
       '--dangerously-skip-permissions',
+      ...headlessPermissionArgs(),
       '--output-format', 'text',
     ];
     if (systemPrompt) args.push('--append-system-prompt', systemPrompt);

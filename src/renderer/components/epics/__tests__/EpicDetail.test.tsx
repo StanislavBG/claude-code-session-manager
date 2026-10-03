@@ -484,7 +484,7 @@ describe('EpicDetail (PRD 827)', () => {
     expect(responseEvents[1].getAttribute('aria-label')).toBeNull()
   })
 
-  it('CORE: a response event with outcome "needs_review" (rcaReport.cjs\'s routed question) renders amber-tinted and marked as a question aimed at the human, distinct from an ordinary completed/failed outcome', async () => {
+  it('CORE: a response event with outcome "needs_review" (a grouped scheduler notice) renders amber-tinted and marked as a scheduler notice, distinct from an ordinary completed/failed outcome', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
@@ -505,11 +505,11 @@ describe('EpicDetail (PRD 827)', () => {
     const responseEvent = el.querySelector('[data-testid="epic-response-event"]')!
     expect(responseEvent).toBeTruthy()
     expect(responseEvent.querySelector('[data-testid="epic-response-question-marker"]')?.textContent).toContain(
-      'Question aimed at you',
+      'Scheduler notice — PRD stopped',
     )
     // AMBER_TEXT/AMBER_TINT (not STATUS_TONE.needs_review's neutral butter pill).
     expect(responseEvent.className).toMatch(/#8e641a/)
-    expect(responseEvent.getAttribute('aria-label')).toContain('Question routed back from a scheduler run')
+    expect(responseEvent.getAttribute('aria-label')).toContain('Scheduler notice from a stopped PRD')
   })
 
   it('renders the "closed" event as a terminator rule (EventDivider), not plain centered text', async () => {
@@ -888,7 +888,13 @@ describe('EpicDetail (PRD 827)', () => {
     expect(el.querySelector('[data-testid="epic-live-turn"]')).toBeNull()
   })
 
-  it('tones the dispatched-PRD chip green with "completed" wording when its queue job is completed', async () => {
+  it.each([
+    { name: 'green "completed"', slug: '5-widget', status: 'completed', validation: undefined, words: ['completed'], tone: 'bg-sage' },
+    { name: 'yellow "needs review"', slug: '6-widget', status: 'needs_review', validation: undefined, words: ['needs review'], tone: 'bg-butter' },
+    { name: 'red "failed"', slug: '7-widget', status: 'failed', validation: undefined, words: ['failed'], tone: 'bg-accent' },
+    { name: 'verified green', slug: '974-verified-widget', status: 'completed', validation: 'verified', words: ['verified'], tone: 'bg-sage' },
+    { name: 'refuted red', slug: '976-refuted-widget', status: 'completed', validation: 'refuted', words: ['refuted'], tone: 'bg-accent' },
+  ])('dispatched-PRD chip tone: $name for job status $status / validation $validation', async ({ slug, status, validation, words, tone }) => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { useScheduleState } = await import('../../../state/scheduleState')
@@ -899,62 +905,29 @@ describe('EpicDetail (PRD 827)', () => {
     usePromptSessions.getState().appendPromptSessionEvent(session.id, {
       kind: 'prd_created',
       causedByEventId: initialEvent.id,
-      prdSlug: '5-widget',
+      prdSlug: slug,
     })
-    useScheduleState.setState({ snapshot: { jobs: [{ slug: '5-widget', status: 'completed' } as any] } as any, loaded: true })
+    if (validation) {
+      const afterCreate = usePromptSessions.getState().events[session.id].slice(-1)[0]
+      usePromptSessions.getState().appendPromptSessionEvent(session.id, {
+        kind: 'response',
+        causedByEventId: afterCreate.id,
+        text: `PRD ${slug} finished: completed. Check Scheduler for details.`,
+        prdSlug: slug,
+        outcome: 'completed',
+        validation,
+      } as any)
+    }
+    useScheduleState.setState({ snapshot: { jobs: [{ slug, status } as any] } as any, loaded: true })
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
 
     const chip = el.querySelector('[data-testid="epic-prd-event"] button')!
-    expect(chip.getAttribute('title')).toContain('completed')
-    expect(chip.getAttribute('aria-label')).toContain('completed')
-    expect(chip.className).toContain('bg-sage')
-  })
-
-  it('tones the dispatched-PRD chip yellow with "needs review" wording when its queue job is needs_review', async () => {
-    installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useScheduleState } = await import('../../../state/scheduleState')
-    const { EpicDetail } = await import('../EpicDetail')
-
-    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
-    const initialEvent = usePromptSessions.getState().events[session.id][0]
-    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
-      kind: 'prd_created',
-      causedByEventId: initialEvent.id,
-      prdSlug: '6-widget',
-    })
-    useScheduleState.setState({ snapshot: { jobs: [{ slug: '6-widget', status: 'needs_review' } as any] } as any, loaded: true })
-
-    const el = mount(createElement(EpicDetail, { promptSession: session }))
-
-    const chip = el.querySelector('[data-testid="epic-prd-event"] button')!
-    expect(chip.getAttribute('title')).toContain('needs review')
-    expect(chip.getAttribute('aria-label')).toContain('needs review')
-    expect(chip.className).toContain('bg-butter')
-  })
-
-  it('tones the dispatched-PRD chip red with "failed" wording when its queue job is failed', async () => {
-    installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useScheduleState } = await import('../../../state/scheduleState')
-    const { EpicDetail } = await import('../EpicDetail')
-
-    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
-    const initialEvent = usePromptSessions.getState().events[session.id][0]
-    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
-      kind: 'prd_created',
-      causedByEventId: initialEvent.id,
-      prdSlug: '7-widget',
-    })
-    useScheduleState.setState({ snapshot: { jobs: [{ slug: '7-widget', status: 'failed' } as any] } as any, loaded: true })
-
-    const el = mount(createElement(EpicDetail, { promptSession: session }))
-
-    const chip = el.querySelector('[data-testid="epic-prd-event"] button')!
-    expect(chip.getAttribute('title')).toContain('failed')
-    expect(chip.getAttribute('aria-label')).toContain('failed')
-    expect(chip.className).toContain('bg-accent')
+    for (const w of words) {
+      expect(chip.getAttribute('title')).toContain(w)
+      expect(chip.getAttribute('aria-label')).toContain(w)
+    }
+    expect(chip.className).toContain(tone)
   })
 
   it('falls back to the neutral "ready to run" tone with no crash when the PRD has no matching queue job', async () => {
@@ -1016,77 +989,11 @@ describe('EpicDetail (PRD 827)', () => {
     expect(chip.className).not.toContain('bg-sage')
   })
 
-  it('the dispatched-PRD chip renders green with a "verified" label once the Epic validates the completed job', async () => {
-    installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useScheduleState } = await import('../../../state/scheduleState')
-    const { EpicDetail } = await import('../EpicDetail')
-
-    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
-    const initialEvent = usePromptSessions.getState().events[session.id][0]
-    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
-      kind: 'prd_created',
-      causedByEventId: initialEvent.id,
-      prdSlug: '974-verified-widget',
-    })
-    const afterCreate = usePromptSessions.getState().events[session.id].slice(-1)[0]
-    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
-      kind: 'response',
-      causedByEventId: afterCreate.id,
-      text: 'PRD 974-verified-widget finished: completed. Check Scheduler for details.',
-      prdSlug: '974-verified-widget',
-      outcome: 'completed',
-      validation: 'verified',
-    })
-    useScheduleState.setState({
-      snapshot: { jobs: [{ slug: '974-verified-widget', status: 'completed' } as any] } as any,
-      loaded: true,
-    })
-
-    const el = mount(createElement(EpicDetail, { promptSession: session }))
-
-    const chip = el.querySelector('[data-testid="epic-prd-event"] button')!
-    expect(chip.getAttribute('title')).toContain('verified')
-    expect(chip.getAttribute('aria-label')).toContain('verified')
-    expect(chip.className).toContain('bg-sage')
-  })
-
-  it('the dispatched-PRD chip renders red with a "refuted" label when the Epic refutes a claimed-completed job', async () => {
-    installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useScheduleState } = await import('../../../state/scheduleState')
-    const { EpicDetail } = await import('../EpicDetail')
-
-    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
-    const initialEvent = usePromptSessions.getState().events[session.id][0]
-    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
-      kind: 'prd_created',
-      causedByEventId: initialEvent.id,
-      prdSlug: '976-refuted-widget',
-    })
-    const afterCreate = usePromptSessions.getState().events[session.id].slice(-1)[0]
-    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
-      kind: 'response',
-      causedByEventId: afterCreate.id,
-      text: 'PRD 976-refuted-widget finished: completed. Check Scheduler for details.',
-      prdSlug: '976-refuted-widget',
-      outcome: 'completed',
-      validation: 'refuted',
-    })
-    useScheduleState.setState({
-      snapshot: { jobs: [{ slug: '976-refuted-widget', status: 'completed' } as any] } as any,
-      loaded: true,
-    })
-
-    const el = mount(createElement(EpicDetail, { promptSession: session }))
-
-    const chip = el.querySelector('[data-testid="epic-prd-event"] button')!
-    expect(chip.getAttribute('title')).toContain('refuted')
-    expect(chip.getAttribute('aria-label')).toContain('refuted')
-    expect(chip.className).toContain('bg-accent')
-  })
-
-  it('CORE (PRD 987): a response event with outcome completed but validation unvalidated renders the CLAIMED tone in its accessible label, never "completed"', async () => {
+  it.each([
+    { validation: 'unvalidated', slug: '972-claimed' },
+    { validation: 'verified', slug: '974-verified' },
+    { validation: 'refuted', slug: '976-refuted' },
+  ])('response event with outcome completed / validation $validation renders the right accessible label and tone', async ({ validation, slug }) => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
@@ -1097,66 +1004,25 @@ describe('EpicDetail (PRD 827)', () => {
     usePromptSessions.getState().appendPromptSessionEvent(session.id, {
       kind: 'response',
       causedByEventId: initialEvent.id,
-      text: 'PRD 972-claimed finished: completed. Check Scheduler for details.',
-      prdSlug: '972-claimed',
+      text: `PRD ${slug} finished: completed. Check Scheduler for details.`,
+      prdSlug: slug,
       outcome: 'completed',
-      validation: 'unvalidated',
-    })
+      validation,
+    } as any)
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
 
-    const responseEvent = el.querySelector('[data-testid="epic-response-event"]')!
-    expect(responseEvent.getAttribute('aria-label')).toContain('claimed')
-    expect(responseEvent.getAttribute('aria-label')).toContain('not yet verified')
-    expect(responseEvent.getAttribute('aria-label')).not.toBe('PRD 972-claimed — completed')
-  })
-
-  it('a response event with validation verified renders "verified" in green', async () => {
-    installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
-
-    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
-    const initialEvent = usePromptSessions.getState().events[session.id][0]
-
-    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
-      kind: 'response',
-      causedByEventId: initialEvent.id,
-      text: 'PRD 974-verified finished: completed. Check Scheduler for details.',
-      prdSlug: '974-verified',
-      outcome: 'completed',
-      validation: 'verified',
-    })
-
-    const el = mount(createElement(EpicDetail, { promptSession: session }))
-
-    const responseEvent = el.querySelector('[data-testid="epic-response-event"]')!
-    expect(responseEvent.getAttribute('aria-label')).toBe('PRD 974-verified — verified')
-    expect(responseEvent.className).toContain('bg-sage')
-  })
-
-  it('a response event with validation refuted renders "refuted" in red', async () => {
-    installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
-
-    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
-    const initialEvent = usePromptSessions.getState().events[session.id][0]
-
-    usePromptSessions.getState().appendPromptSessionEvent(session.id, {
-      kind: 'response',
-      causedByEventId: initialEvent.id,
-      text: 'PRD 976-refuted finished: completed. Check Scheduler for details.',
-      prdSlug: '976-refuted',
-      outcome: 'completed',
-      validation: 'refuted',
-    })
-
-    const el = mount(createElement(EpicDetail, { promptSession: session }))
-
-    const responseEvent = el.querySelector('[data-testid="epic-response-event"]')!
-    expect(responseEvent.getAttribute('aria-label')).toBe('PRD 976-refuted — refuted')
-    expect(responseEvent.className).toContain('bg-accent')
+    const label = el.querySelector('[data-testid="epic-response-event"]')!.getAttribute('aria-label')
+    const cls = el.querySelector('[data-testid="epic-response-event"]')!.className
+    if (validation === 'unvalidated') {
+      // CORE (PRD 987): CLAIMED tone, never plain "completed"
+      expect(label).toContain('claimed')
+      expect(label).toContain('not yet verified')
+      expect(label).not.toBe('PRD 972-claimed — completed')
+    } else {
+      expect(label).toBe(`PRD ${slug} — ${validation}`)
+      expect(cls).toContain(validation === 'verified' ? 'bg-sage' : 'bg-accent')
+    }
   })
 
   it('shows the goal as seed context with no crash when there are no chat turns yet', async () => {

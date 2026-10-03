@@ -204,14 +204,23 @@ export function PlanBand({ plan, mode = 'graph', now, hidden, indexBySlug, headC
           {expanded ? '▾' : '▸'}
         </button>
         <span className="font-mono text-[11.5px] text-fg-faint shrink-0">{pad2(plan.index)}</span>
-        <span className="font-serif text-[15px] font-bold text-fg truncate shrink-0 max-w-[320px]" title={plan.label} data-testid="plan-label">{plan.label}</span>
+        <span
+          className="font-serif text-[15px] font-bold text-fg truncate shrink-0 max-w-[320px]"
+          title={plan.epicLabel !== plan.label ? `${plan.label} — ${plan.epicLabel}` : plan.label}
+          data-testid="plan-label"
+        >{plan.label}</span>
         <span data-testid="plan-chip" className={`shrink-0 rounded-sm px-1.5 py-[1px] text-[10px] font-bold tracking-wide ${chip.cls}`}>{chip.label}</span>
         <span aria-hidden="true" className="shrink-0 w-px h-[16px] bg-rule-structural" />
         <span className="font-mono text-[11.5px] text-fg-faint truncate min-w-0" data-testid="plan-meta">
-          {project} · {plan.prdCount} PRD{plan.prdCount === 1 ? '' : 's'} · {plan.stageCount} stage{plan.stageCount === 1 ? '' : 's'}
-        </span>
-        <span className="font-mono text-[11.5px] text-fg-dim shrink-0" data-testid="plan-step-count">
-          {plan.prdCount} step{plan.prdCount === 1 ? '' : 's'} · {plan.doneCount} done
+          {plan.validateSlug != null && plan.epicLabel !== plan.label ? (
+            <>
+              {project} · {plan.epicLabel} · {plan.prdCount} PRD{plan.prdCount === 1 ? '' : 's'} · {plan.width} wide · {plan.stageCount} stage{plan.stageCount === 1 ? '' : 's'}
+            </>
+          ) : (
+            <>
+              {project} · {plan.prdCount} PRD{plan.prdCount === 1 ? '' : 's'}{plan.width > 1 ? ` · ${plan.width} wide` : ''} · {plan.stageCount} stage{plan.stageCount === 1 ? '' : 's'}
+            </>
+          )}
         </span>
         <InfoDot title={`${plan.doneCount} done · ${plan.runningCount} running · ${plan.heldCount} held · ${plan.blockedCount} blocked`} />
         <span className="ml-auto font-mono text-[11.5px] text-fg-dim shrink-0" data-testid="plan-progress-label">

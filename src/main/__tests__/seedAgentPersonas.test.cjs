@@ -54,7 +54,7 @@ function silentLogger() {
   return { log: () => {}, warn: () => {} };
 }
 
-const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator'];
+const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder'];
 
 test('fresh seed writes every persona file', async () => {
   await seedAgentPersonas({ logger: silentLogger() });
@@ -144,11 +144,7 @@ test('a corrupt/unparseable marker file still seeds correctly', async () => {
   }
 });
 
-test('the bundled project-home-builder persona contains no session-manager-repo paths', () => {
-  const content = fs.readFileSync(
-    path.join(__dirname, '..', '..', 'seed', 'agents', 'project-home-builder.md'),
-    'utf8'
-  );
+test('the bundled project-home-builder and demo-video-builder personas contain no session-manager-repo paths', () => {
   const forbidden = [
     'session-manager-operations/architecture/',
     '.claude/agents/',
@@ -156,8 +152,14 @@ test('the bundled project-home-builder persona contains no session-manager-repo 
     'scripts/',
     'npm run build:project-pages',
   ];
-  for (const substr of forbidden) {
-    expect(content).not.toContain(substr);
+  for (const name of ['project-home-builder', 'demo-video-builder']) {
+    const content = fs.readFileSync(
+      path.join(__dirname, '..', '..', 'seed', 'agents', `${name}.md`),
+      'utf8'
+    );
+    for (const substr of forbidden) {
+      expect(content).not.toContain(substr);
+    }
   }
 });
 

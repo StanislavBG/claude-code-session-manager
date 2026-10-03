@@ -88,6 +88,10 @@ Electron 42 with a CommonJS main process and a Vite-built React 18 renderer. xte
 
 ## Contributing / development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, pre-PR checks, and how to open an issue/PR,
+and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards. Report security issues
+via [SECURITY.md](SECURITY.md), not a public issue.
+
 ```bash
 git clone https://github.com/StanislavBG/claude-code-session-manager
 cd claude-code-session-manager

@@ -1,17 +1,26 @@
 /**
  * ProjectHome — the hosted Project Home document for the active project
- * (NavKey `project-home`): nothing but `ProjectPagesSection`, the single
- * generated home.html view and its Generate/Regenerate button.
- * Don't reintroduce a second hosted iframe or hand-written blocks here.
+ * (NavKey `project-home`): nothing but `ProjectPagesSection`, driven by every
+ * `surface: 'project-home'` Macro (Project Home + Demo Video, plus any
+ * custom ones) pressed through the same `useMacroLaunch` authority the
+ * Sessions HOT KEYS strip uses. Don't reintroduce a second hosted iframe or
+ * hand-written blocks here.
  */
 
 import { memo } from 'react'
 import { useSessions } from '../../../state/sessions'
 import { useProjectPagesOutput } from '../../../lib/projectPages/useProjectPagesOutput'
-import { useBuilderEpic } from '../../../lib/projectPages/useBuilderEpic'
+import { useMacros, macrosForProject } from '../../../lib/useMacros'
+import { useAgentPersonas } from '../../../lib/useAgentPersonas'
+import { useMacroLaunch } from '../../../lib/useMacroLaunch'
+import { setPendingPromptSessionId } from '../../../lib/promptSessionDeepLink'
 import { EmptyState } from '../../ui/EmptyState'
-import { toast } from '../../../state/toast'
 import { ProjectPagesSection } from './projectpages/ProjectPagesSection'
+
+function navigateToEpic(id: string): void {
+  setPendingPromptSessionId(id)
+  window.dispatchEvent(new CustomEvent('sm:navigate', { detail: 'terminal' }))
+}
 
 function ProjectHomeComponent() {
   const tabs = useSessions((s) => s.tabs)
@@ -20,15 +29,15 @@ function ProjectHomeComponent() {
 
   const cwd = activeTab?.cwd ?? null
 
-  // One fetch of session-manager-operations/project-pages/home.html.
-  const { output, loaded } = useProjectPagesOutput(cwd)
-  const { generate } = useBuilderEpic(cwd)
-
-  const handleGenerate = () => {
-    generate().catch((err: unknown) => {
-      toast.error(err instanceof Error ? err.message : String(err))
-    })
-  }
+  // One fetch of session-manager-operations/project-pages/home.html (+ demo video).
+  const { output, demoVideo, loaded } = useProjectPagesOutput(cwd)
+  const library = useMacros()
+  const macros = macrosForProject(library, cwd, 'project-home')
+  const personas = useAgentPersonas()
+  const { launch, launching } = useMacroLaunch(navigateToEpic, personas, {
+    resumeActive: true,
+    requireReadiness: true,
+  })
 
   if (!activeTab) {
     return <EmptyState title="Open a project to see its brief" />
@@ -37,7 +46,14 @@ function ProjectHomeComponent() {
   return (
     <div className="h-full overflow-auto">
       <div className="mx-auto max-w-[1080px] px-[34px] py-[26px] text-fg">
-        <ProjectPagesSection output={output} loaded={loaded} onGenerate={handleGenerate} />
+        <ProjectPagesSection
+          output={output}
+          demoVideo={demoVideo}
+          loaded={loaded}
+          macros={macros}
+          launching={launching}
+          onLaunch={launch}
+        />
       </div>
     </div>
   )

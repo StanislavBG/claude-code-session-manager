@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { ProjectPagesSection } from '../ProjectPagesSection'
+import type { Macro } from '../../../../../../preload/api'
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -22,42 +23,146 @@ afterEach(() => {
   root = null
 })
 
+function macro(over: Partial<Macro> = {}): Macro {
+  return {
+    id: 'builtin-project-home',
+    label: 'Project Home',
+    agentName: 'project-home-builder',
+    tag: 'project-home-builder',
+    prompt: 'Generate it.',
+    projects: ['*'],
+    surface: 'project-home',
+    createdAt: '',
+    updatedAt: '',
+    ...over,
+  }
+}
+
+const HOME_MACRO = macro()
+const DEMO_MACRO = macro({ id: 'builtin-demo-video', label: 'Demo Video', agentName: 'demo-video-builder' })
+const MACROS = [HOME_MACRO, DEMO_MACRO]
+
 describe('ProjectPagesSection', () => {
   it('renders nothing while loaded is false', () => {
-    const el = mount(<ProjectPagesSection output={null} loaded={false} onGenerate={() => {}} />)
+    const el = mount(
+      <ProjectPagesSection
+        output={null}
+        demoVideo={null}
+        loaded={false}
+        macros={MACROS}
+        launching={null}
+        onLaunch={() => {}}
+      />,
+    )
     expect(el.textContent).toBe('')
   })
 
-  it('shows the empty state with one Generate button when there is no home.html', () => {
-    const onGenerate = vi.fn()
-    const el = mount(<ProjectPagesSection output={null} loaded onGenerate={onGenerate} />)
-    expect(el.textContent).not.toContain('No Project Home yet')
-    expect(el.textContent).not.toContain('No home page has been generated')
+  it('shows the empty state with one button per macro when nothing is generated', () => {
+    const onLaunch = vi.fn()
+    const el = mount(
+      <ProjectPagesSection
+        output={null}
+        demoVideo={null}
+        loaded
+        macros={MACROS}
+        launching={null}
+        onLaunch={onLaunch}
+      />,
+    )
     expect(el.querySelector('iframe')).toBeNull()
-    const buttons = Array.from(el.querySelectorAll('button'))
-    expect(buttons).toHaveLength(1)
+    expect(el.querySelector('[data-testid="project-home-view"]')).toBeNull()
+    const buttons = Array.from(el.querySelectorAll('[data-testid="project-home-macro"]'))
+    expect(buttons).toHaveLength(2)
     expect(buttons[0].textContent).toContain('Generate Project Home')
-    act(() => buttons[0].click())
-    expect(onGenerate).toHaveBeenCalledTimes(1)
+    expect(buttons[1].textContent).toContain('Generate Demo Video')
+    act(() => (buttons[0] as HTMLButtonElement).click())
+    expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO)
   })
 
-  it('renders home.html in a sandboxed iframe with a generated chip and a Regenerate button', () => {
-    const onGenerate = vi.fn()
+  it('shows Regenerate + home.html when only the overview exists, with no view switch', () => {
+    const onLaunch = vi.fn()
     const html = '<!DOCTYPE html><html><body>HOME</body></html>'
     const el = mount(
-      <ProjectPagesSection output={{ html, mtimeMs: Date.now() - 3 * 60_000 }} loaded onGenerate={onGenerate} />,
+      <ProjectPagesSection
+        output={{ html, mtimeMs: Date.now() - 3 * 60_000 }}
+        demoVideo={null}
+        loaded
+        macros={MACROS}
+        launching={null}
+        onLaunch={onLaunch}
+      />,
     )
+    expect(el.querySelector('[data-testid="project-home-view"]')).toBeNull()
     const iframe = el.querySelector('iframe') as HTMLIFrameElement
-    expect(iframe.getAttribute('sandbox')).toBe('allow-same-origin')
     expect(iframe.getAttribute('srcdoc')).toBe(html)
+    expect(el.querySelector('[data-testid="demo-video-frame"]')).toBeNull()
     expect(el.textContent).toContain('generated 3m ago')
-    expect(el.textContent).not.toContain('Shipped default')
-    expect(el.textContent).not.toContain('No home page has been generated')
-    expect(el.querySelectorAll('iframe')).toHaveLength(1)
-    const buttons = Array.from(el.querySelectorAll('button'))
-    expect(buttons).toHaveLength(1)
-    expect(buttons[0].textContent).toContain('Regenerate')
-    act(() => buttons[0].click())
-    expect(onGenerate).toHaveBeenCalledTimes(1)
+    const buttons = Array.from(el.querySelectorAll('[data-testid="project-home-macro"]'))
+    expect(buttons[0].textContent).toContain('Regenerate Project Home')
+    expect(buttons[1].textContent).toContain('Generate Demo Video')
+    act(() => (buttons[1] as HTMLButtonElement).click())
+    expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO)
+  })
+
+  it('shows the demo video (not overview) when only a demo video exists', () => {
+    const el = mount(
+      <ProjectPagesSection
+        output={null}
+        demoVideo={{ path: '/tmp/demo/index.html', mtimeMs: Date.now() - 60_000 }}
+        loaded
+        macros={MACROS}
+        launching={null}
+        onLaunch={() => {}}
+      />,
+    )
+    expect(el.querySelector('[data-testid="demo-video-frame"]')).not.toBeNull()
+    expect(el.textContent).toContain('generated 1m ago')
+    const buttons = Array.from(el.querySelectorAll('[data-testid="project-home-macro"]'))
+    expect(buttons[0].textContent).toContain('Generate Project Home')
+    expect(buttons[1].textContent).toContain('Regenerate Demo Video')
+  })
+
+  it('switches between overview and demo video via the view switch when both exist', () => {
+    const html = '<!DOCTYPE html><html><body>HOME</body></html>'
+    const el = mount(
+      <ProjectPagesSection
+        output={{ html, mtimeMs: Date.now() }}
+        demoVideo={{ path: '/tmp/demo/index.html', mtimeMs: Date.now() }}
+        loaded
+        macros={MACROS}
+        launching={null}
+        onLaunch={() => {}}
+      />,
+    )
+    expect(el.querySelector('iframe[title="Project Home"]')).not.toBeNull()
+    expect(el.querySelector('[data-testid="demo-video-frame"]')).toBeNull()
+
+    const switchEl = el.querySelector('[data-testid="project-home-view"]') as HTMLElement
+    const [overviewBtn, demoBtn] = Array.from(switchEl.querySelectorAll('button'))
+    expect(overviewBtn.textContent).toBe('Overview')
+    expect(demoBtn.textContent).toBe('Demo video')
+
+    act(() => demoBtn.click())
+    expect(el.querySelector('[data-testid="demo-video-frame"]')).not.toBeNull()
+    expect(el.querySelector('iframe[title="Project Home"]')).toBeNull()
+
+    act(() => overviewBtn.click())
+    expect(el.querySelector('iframe[title="Project Home"]')).not.toBeNull()
+  })
+
+  it('disables every macro button while launching', () => {
+    const el = mount(
+      <ProjectPagesSection
+        output={null}
+        demoVideo={null}
+        loaded
+        macros={MACROS}
+        launching="builtin-project-home"
+        onLaunch={() => {}}
+      />,
+    )
+    const buttons = Array.from(el.querySelectorAll('[data-testid="project-home-macro"]')) as HTMLButtonElement[]
+    expect(buttons.every((b) => b.disabled)).toBe(true)
+    expect(buttons[0].textContent).toContain('Starting…')
   })
 })

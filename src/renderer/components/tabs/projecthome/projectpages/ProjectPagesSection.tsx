@@ -1,60 +1,145 @@
 /**
- * Project Home's single-page view: a lone Generate
- * button until project-pages/home.html exists, then that one file in a
- * sandboxed iframe with a "generated <ago>" chip and a Regenerate button.
+ * Project Home's single-page view: one button per `surface: 'project-home'`
+ * Macro (Generate/Regenerate, depending on whether that macro's own artifact
+ * exists), plus — once at least one artifact exists — a two-view segmented
+ * switch between the generated Overview (home.html) and the Demo video.
  *
- * `output`/`loaded` come from ProjectHome's single `useProjectPagesOutput`
- * call; `onGenerate` is ProjectHome's `useBuilderEpic().generate` wrapper.
+ * `output`/`demoVideo`/`loaded` come from ProjectHome's single
+ * `useProjectPagesOutput` call; `macros`/`launching`/`onLaunch` come from its
+ * `useMacroLaunch` wiring. Purely presentational — no store access here.
  */
+import { useState } from 'react'
 import { formatAgo } from '../../../../lib/formatTime'
 import { AlmanacIcon } from '../../../layout/AlmanacIcon'
 import { HtmlFrame } from './HtmlFrame'
-import type { ProjectPagesOutput } from '../../../../lib/projectPages/useProjectPagesOutput'
+import { DemoVideoFrame } from './DemoVideoFrame'
+import type { ProjectPagesOutput, ProjectPagesDemoVideo } from '../../../../lib/projectPages/useProjectPagesOutput'
+import type { Macro } from '../../../../../preload/api'
 
 const BUTTON_CLASS =
-  'inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-bg-hi cursor-pointer hover:bg-accent-dark'
+  'inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-bg-hi cursor-pointer hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed'
 
-function GenerateButton({ label, onGenerate }: { label: string; onGenerate: () => void }) {
+function macroButtonLabel(macro: Macro, hasHome: boolean, hasDemo: boolean): string {
+  if (macro.id === 'builtin-project-home') return hasHome ? `Regenerate ${macro.label}` : `Generate ${macro.label}`
+  if (macro.id === 'builtin-demo-video') return hasDemo ? `Regenerate ${macro.label}` : `Generate ${macro.label}`
+  return macro.label
+}
+
+function MacroButton({
+  macro,
+  hasHome,
+  hasDemo,
+  launching,
+  onLaunch,
+}: {
+  macro: Macro
+  hasHome: boolean
+  hasDemo: boolean
+  launching: string | null
+  onLaunch: (macro: Macro) => void
+}) {
   return (
-    <button type="button" onClick={onGenerate} className={BUTTON_CLASS}>
+    <button
+      type="button"
+      data-testid="project-home-macro"
+      data-macro-id={macro.id}
+      disabled={launching !== null}
+      onClick={() => onLaunch(macro)}
+      className={BUTTON_CLASS}
+    >
       <span className="inline-flex">
         <AlmanacIcon name="sparkle" size={14} />
       </span>
-      {label}
+      {launching === macro.id ? 'Starting…' : macroButtonLabel(macro, hasHome, hasDemo)}
     </button>
+  )
+}
+
+type View = 'overview' | 'demo'
+
+function ViewSwitch({ view, onChange }: { view: View; onChange: (v: View) => void }) {
+  const options: { value: View; label: string }[] = [
+    { value: 'overview', label: 'Overview' },
+    { value: 'demo', label: 'Demo video' },
+  ]
+  return (
+    <div
+      data-testid="project-home-view"
+      className="flex gap-0.5 p-0.5 rounded bg-bg-elev shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] text-[11px]"
+    >
+      {options.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          onClick={() => onChange(opt.value)}
+          className={`px-2 py-1 rounded whitespace-nowrap font-semibold ${
+            view === opt.value ? 'bg-bg-hi text-fg shadow-sm' : 'text-fg-faint hover:text-fg'
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
   )
 }
 
 export function ProjectPagesSection({
   output,
+  demoVideo,
   loaded,
-  onGenerate,
+  macros,
+  launching,
+  onLaunch,
 }: {
   output: ProjectPagesOutput | null
+  demoVideo: ProjectPagesDemoVideo
   loaded: boolean
-  onGenerate: () => void
+  macros: Macro[]
+  launching: string | null
+  onLaunch: (macro: Macro) => void
 }) {
+  const [view, setView] = useState<View>('overview')
+
   if (!loaded) return null
 
-  if (!output) {
+  const hasHome = !!output
+  const hasDemo = !!demoVideo
+
+  if (!hasHome && !hasDemo) {
     return (
       <div className="flex justify-center py-16">
-        <GenerateButton label="Generate Project Home" onGenerate={onGenerate} />
+        <div className="flex flex-col items-center gap-2.5">
+          {macros.map((m) => (
+            <MacroButton key={m.id} macro={m} hasHome={hasHome} hasDemo={hasDemo} launching={launching} onLaunch={onLaunch} />
+          ))}
+        </div>
       </div>
     )
   }
 
+  const activeView: View = hasDemo && (!hasHome || view === 'demo') ? 'demo' : 'overview'
+  const chipMtimeMs = activeView === 'demo' ? demoVideo!.mtimeMs : output!.mtimeMs
+
   return (
     <div>
-      <div className="mb-2 flex items-center justify-end gap-2.5">
-        <span className="font-mono text-[10.5px] text-fg-faint">generated {formatAgo(output.mtimeMs, Date.now())}</span>
-        <GenerateButton label="Regenerate" onGenerate={onGenerate} />
+      <div className="mb-2 flex items-center justify-between gap-2.5">
+        {hasDemo ? <ViewSwitch view={activeView} onChange={setView} /> : <div />}
+        <div className="flex items-center gap-2.5">
+          <span className="font-mono text-[10.5px] text-fg-faint">generated {formatAgo(chipMtimeMs, Date.now())}</span>
+          {macros.map((m) => (
+            <MacroButton key={m.id} macro={m} hasHome={hasHome} hasDemo={hasDemo} launching={launching} onLaunch={onLaunch} />
+          ))}
+        </div>
       </div>
       <div
         className="overflow-hidden rounded-xl border border-line bg-bg-hi"
         style={{ height: 'calc(100vh - 200px)', minHeight: 520 }}
       >
-        <HtmlFrame title="Project Home" html={output.html} />
+        {activeView === 'overview' ? (
+          <HtmlFrame title="Project Home" html={output!.html} />
+        ) : (
+          <DemoVideoFrame path={demoVideo!.path} mtimeMs={demoVideo!.mtimeMs} />
+        )}
       </div>
     </div>
   )

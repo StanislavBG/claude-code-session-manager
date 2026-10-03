@@ -69,16 +69,21 @@ never calls out to a network TTS service.
 - Use **Piper** (`pip install piper-tts`, MIT-licensed, small ONNX voices, no GPU needed) for the
   voice. If `python3 -m pip` isn't on PATH, bootstrap it first: `curl -sS
   https://bootstrap.pypa.io/get-pip.py | python3 - --user --break-system-packages`, then
-  `python3 -m pip install --user --break-system-packages piper-tts`. Pull one voice once, e.g.
-  `en_US-amy-medium` from `https://huggingface.co/rhasspy/piper-voices` (`.onnx` + `.onnx.json`).
-  Kokoro-82M (Apache-2.0) sounds a step better but needs PyTorch and a much larger model
-  download — prefer it only when you have the time/bandwidth budget for it.
+  `python3 -m pip install --user --break-system-packages piper-tts`. Pull one voice once — use
+  a **`-high`** quality tier, e.g. `en_US-lessac-high` from
+  `https://huggingface.co/rhasspy/piper-voices` (`.onnx` + `.onnx.json`, ~115 MB). A `-medium`
+  voice (e.g. `en_US-amy-medium`) downloads faster but sounds noticeably more robotic — confirmed
+  by ear in the session that wrote this policy; don't downgrade to `-medium` just to save the
+  download unless bandwidth genuinely doesn't allow it. Kokoro-82M (Apache-2.0) is a further step
+  up but needs PyTorch and an even larger download — prefer it only when you have that budget.
 - Synthesize one short line per scene (`python3 -m piper -m <voice>.onnx -c <voice>.onnx.json -f
   sceneN.wav`), sized to fit that scene's on-screen hold time. Lay the scene clips onto one
-  mono 22050 Hz track at each scene's start offset, encode the result with `ffmpeg -ar 16000 -c:a
-  libmp3lame -b:a 20k` (mono, ~16 kbps is plenty for speech and keeps the whole track under
-  ~80 KB), then base64 it into a single `<audio src="data:audio/mpeg;base64,...">` tag. Keep the
-  whole document — markup plus audio — under the 2 MB cap.
+  mono 22050 Hz track at each scene's start offset, encode the result with `ffmpeg -c:a
+  libmp3lame -b:a 64k` **at the voice's native sample rate — do not downsample to 16 kHz or drop
+  below ~48 kbps; both make speech sound crushed/robotic for only a small size win** (a 30 s
+  mono track at 64 kbps is still only ~235 KB). Base64 it into a single `<audio
+  src="data:audio/mpeg;base64,...">` tag. Keep the whole document — markup plus audio — under
+  the 2 MB cap (plenty of headroom at this bitrate).
 - Wire `play()`/`pause()`/`seek(t)` to the `<audio>` element too (`audio.currentTime = t` on
   seek) so the narration never drifts from the visual clock, and start muted-fallback: call
   `.play()` on load, and on rejection (autoplay-blocked browsers) show a small "tap for sound"

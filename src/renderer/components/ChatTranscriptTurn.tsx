@@ -211,6 +211,41 @@ export function runLabel(run: ToolUseRun): string {
   return run.count > 1 ? `${run.label} ×${run.count}` : run.label
 }
 
+const TOOL_CHIP_LABEL_MAX = 40
+
+function toolChipBasename(path: string): string {
+  const idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return idx >= 0 ? path.slice(idx + 1) : path
+}
+
+// "what did the agent actually do" — "Read <basename>", "Glob/Grep <pattern>",
+// "Bash <first word>", or the bare tool name when there's no usable target
+// (an unrecognized tool, or no detail at all). `detail` is the CLI's raw
+// tool_use input (command/description/pattern/file_path) carried over IPC by
+// chatRunner.cjs; `diff.filePath` (Edit/Write only) takes priority since it's
+// already a validated file path.
+export function toolChipLabel(toolUse: ToolUseTrace): string {
+  const target = toolUse.diff?.filePath ?? toolUse.detail
+  if (!target) return toolUse.label
+  switch (toolUse.label) {
+    case 'Read':
+    case 'Edit':
+    case 'Write':
+      return `${toolUse.label} ${toolChipBasename(target)}`
+    case 'Glob':
+    case 'Grep':
+      return `${toolUse.label} ${target}`
+    case 'Bash':
+      return `${toolUse.label} ${target.split(/\s+/)[0]}`
+    default:
+      return toolUse.label
+  }
+}
+
+function truncateToolChipLabel(label: string): string {
+  return label.length > TOOL_CHIP_LABEL_MAX ? `${label.slice(0, TOOL_CHIP_LABEL_MAX - 1)}…` : label
+}
+
 export function ToolUseTraceStrip({
   items,
   running = false,
@@ -257,18 +292,23 @@ export function CollapsibleToolStrip({
   if (!items?.length) return null
   const runs = collapseToolUseRuns(items)
   const n = items.length
+  const preview = items
+    .slice(0, 3)
+    .map((u) => truncateToolChipLabel(toolChipLabel(u)))
+    .join(' · ')
+  const collapsedLabel = `${preview} · ${n}${n === 1 ? ' tool' : ' tools'}`
   return (
     <div className="mb-1.5">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         data-testid="tool-strip-toggle"
-        className="inline-flex items-center gap-1.5 rounded border border-line bg-elev px-2 py-1 font-mono text-[11px] text-fg-dim hover:bg-hi"
+        className="inline-flex items-center gap-1.5 bg-bg-elev rounded px-1.5 py-1 font-mono text-[11px] text-fg-dim hover:bg-hi"
       >
         <span className={`inline-block transition-transform ${open ? 'rotate-90' : ''}`} aria-hidden="true">
           ▸
         </span>
-        <span>{(running ? 'working · ' : 'used ') + n + (n === 1 ? ' tool' : ' tools')}</span>
+        <span>{collapsedLabel}</span>
         {running && <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />}
       </button>
       {open && (
@@ -1324,6 +1364,16 @@ function TurnComponent({
   const filePaths = extractFilePaths(shownText)
   const isPlan = hasMarkdownList(shownText)
   const isRunning = presentation === 'working'
+  // The single in-flight progress row (data-testid="turn-working-row" below)
+  // replaces what used to be three competing signals — the header 'running'
+  // dot, this strip's own 'working · N tools' text, and the plain 'working…'
+  // bubble. latestToolUse is the most recent entry in liveToolUses while
+  // streaming (see EpicDetail's live-turn construction), so the row can name
+  // what the agent is doing right now, not just that it's doing something.
+  const latestToolUse = turn.toolUses?.length ? turn.toolUses[turn.toolUses.length - 1] : undefined
+  const workingLabel = latestToolUse
+    ? `working · ${toolChipLabel(latestToolUse)} · ${turn.toolUses!.length} tools`
+    : 'working…'
   // Live bubble: the text grows on every delta, so re-parse at most every
   // LIVE_MARKDOWN_THROTTLE_MS and keep every prefix out of the shared cache.
   const markdownSrc = useThrottledValue(shownText, LIVE_MARKDOWN_THROTTLE_MS, streaming)
@@ -1348,12 +1398,6 @@ function TurnComponent({
         <div className="mb-1.5 flex items-center gap-2 font-mono text-[10.5px] text-fg-faint">
           <span>claude · {formatAgo(turn.at, Date.now())}</span>
           <AttributionChips attribution={turn.attribution} />
-          {isRunning && (
-            <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] font-semibold text-accent">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
-              running
-            </span>
-          )}
           {turn.outcome && <span className="font-mono text-[10.5px] font-semibold text-sage">{turn.outcome}</span>}
           {onQuote && presentation === 'text' && (
             <button
@@ -1374,12 +1418,13 @@ function TurnComponent({
           <ToolUseTraceStrip items={turn.toolUses} running={presentation === 'working'} />
         )}
         {toolStripVariant !== 'hidden' && <DiffCards items={turn.toolUses} />}
-        {presentation === 'working' ? (
-          <div className={`border border-line bg-elev px-3 py-2 text-sm text-fg-dim ${bubbleCorners}`}>
-            <span className="inline-flex items-center gap-2">
-              <span className="h-2 w-2 animate-pulse rounded-full bg-accent" />
-              working…
-            </span>
+        {isRunning ? (
+          <div
+            data-testid="turn-working-row"
+            className="inline-flex items-center gap-1.5 font-mono text-[10.5px] font-semibold text-accent"
+          >
+            <span className="h-2 w-2 animate-pulse rounded-full bg-accent" aria-hidden="true" />
+            <span>{workingLabel}</span>
           </div>
         ) : presentation === 'placeholder' ? (
           <div className={`border border-line bg-elev px-3 py-2 text-sm italic text-fg-dim ${bubbleCorners}`}>

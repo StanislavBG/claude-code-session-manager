@@ -30,7 +30,7 @@
  *   chat:run:queued     { tabId, sessionId, position }   — waiting behind a busy lane
  *   chat:run:started    { tabId, sessionId }
  *   chat:run:output     { tabId, delta }
- *   chat:run:tool-use   { tabId, id, kind, label }
+ *   chat:run:tool-use   { tabId, id, kind, label, detail }
  *   chat:run:complete   { tabId, sessionId, finalMessage }
  *   chat:run:needs-input { tabId, sessionId, questions, raw }
  *   chat:run:error      { tabId, sessionId, message }
@@ -736,9 +736,10 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
             if (!silent) broadcast('chat:run:output', { tabId, delta: block.text });
           } else if (block.type === 'tool_use' && typeof block.name === 'string') {
             const classified = classifyToolUse(block);
-            recentToolUses.push({ ...classified, detail: describeToolUseInput(block) });
+            const detail = describeToolUseInput(block);
+            recentToolUses.push({ ...classified, detail });
             if (recentToolUses.length > RECENT_TOOL_USE_LIMIT) recentToolUses.shift();
-            if (!silent) broadcast('chat:run:tool-use', { tabId, id: block.id, ...classified });
+            if (!silent) broadcast('chat:run:tool-use', { tabId, id: block.id, ...classified, detail });
           }
         }
       } else if (event.type === 'user') {

@@ -1488,6 +1488,9 @@ export interface ChatRunToolUseEvent {
   label: string;
   /** Populated only for Edit/Write tool_use blocks; undefined for every other kind. */
   diff?: { filePath: string; oldText?: string; newText?: string };
+  /** The tool_use input's command/description/pattern/file_path, whichever applies —
+   *  empty string when the tool took none of those. */
+  detail?: string;
 }
 
 export interface ChatRunNeedsInputEvent {

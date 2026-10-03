@@ -83,3 +83,38 @@ describe('Turn streaming gate', () => {
     expect(spy.calls.some((c) => (c.opts as { cache?: boolean } | undefined)?.cache === false)).toBe(false)
   })
 })
+
+// A live/in-flight turn (empty text, runActive) used to show THREE competing
+// "running" signals — the header dot, CollapsibleToolStrip's own 'working ·
+// N tools' text, and a separate 'working…' bubble. They now collapse into
+// one data-testid="turn-working-row".
+describe('Turn — single working-row indicator while streaming', () => {
+  const liveEmpty = (toolUses?: Array<{ id: string; kind: 'tool'; label: string; detail?: string }>): ChatTurn => ({
+    id: 'e-live-empty',
+    role: 'assistant',
+    text: '',
+    at: 1,
+    toolUses,
+  })
+
+  it('shows "working…" with no tool activity yet, and no other running signal', () => {
+    mount(liveEmpty(), true)
+    const rows = host!.querySelectorAll('[data-testid="turn-working-row"]')
+    expect(rows.length).toBe(1)
+    expect(rows[0].textContent).toContain('working…')
+    expect(host!.textContent).not.toContain('running')
+  })
+
+  it('names the latest tool + running count once a tool has fired', () => {
+    mount(
+      liveEmpty([
+        { id: 'tu-1', kind: 'tool', label: 'Read', detail: 'CLAUDE.md' },
+        { id: 'tu-2', kind: 'tool', label: 'Glob', detail: 'ops/macros/**' },
+      ]),
+      true,
+    )
+    const rows = host!.querySelectorAll('[data-testid="turn-working-row"]')
+    expect(rows.length).toBe(1)
+    expect(rows[0].textContent).toBe('working · Glob ops/macros/** · 2 tools')
+  })
+})

@@ -62,6 +62,85 @@ function mount(el: React.ReactElement) {
 
 const CONSENT_NOTICE_TEXT = 'This session needs interactive consent for an MCP server before it can continue.'
 
+describe('toolChipLabel', () => {
+  it('Read -> "Read <basename>"', async () => {
+    const { toolChipLabel } = await import('../ChatTranscriptTurn')
+    expect(
+      toolChipLabel({ id: 't-1', kind: 'tool', label: 'Read', detail: 'session-manager-operations/CLAUDE.md' }),
+    ).toBe('Read CLAUDE.md')
+  })
+
+  it('Glob/Grep -> "<ToolName> <pattern>"', async () => {
+    const { toolChipLabel } = await import('../ChatTranscriptTurn')
+    expect(toolChipLabel({ id: 't-2', kind: 'tool', label: 'Glob', detail: 'ops/macros/**' })).toBe(
+      'Glob ops/macros/**',
+    )
+    expect(toolChipLabel({ id: 't-3', kind: 'tool', label: 'Grep', detail: 'toolChipLabel' })).toBe(
+      'Grep toolChipLabel',
+    )
+  })
+
+  it('Bash -> "Bash <first word>"', async () => {
+    const { toolChipLabel } = await import('../ChatTranscriptTurn')
+    expect(toolChipLabel({ id: 't-4', kind: 'tool', label: 'Bash', detail: 'npm run typecheck' })).toBe('Bash npm')
+  })
+
+  it('unknown tool -> tool name', async () => {
+    const { toolChipLabel } = await import('../ChatTranscriptTurn')
+    expect(toolChipLabel({ id: 't-5', kind: 'tool', label: 'TodoWrite', detail: 'ignored' })).toBe('TodoWrite')
+    expect(toolChipLabel({ id: 't-6', kind: 'tool', label: 'Bash' })).toBe('Bash')
+  })
+
+  it('prefers diff.filePath over detail for Edit/Write', async () => {
+    const { toolChipLabel } = await import('../ChatTranscriptTurn')
+    expect(
+      toolChipLabel({
+        id: 't-7',
+        kind: 'tool',
+        label: 'Edit',
+        detail: 'ignored',
+        diff: { filePath: 'src/foo/Bar.tsx', oldText: 'a', newText: 'b' },
+      }),
+    ).toBe('Edit Bar.tsx')
+  })
+})
+
+describe('CollapsibleToolStrip — collapsed label shows real tool activity', () => {
+  beforeEach(() => {
+    vi.resetModules()
+  })
+
+  afterEach(() => {
+    if (root && container) {
+      act(() => root!.unmount())
+      container.remove()
+    }
+    container = null
+    root = null
+  })
+
+  it('joins the first 3 tool labels, with a trailing total count beyond 3', async () => {
+    const { CollapsibleToolStrip } = await import('../ChatTranscriptTurn')
+    const el = mount(
+      createElement(CollapsibleToolStrip, {
+        items: [
+          { id: 'tu-1', kind: 'tool', label: 'Read', detail: 'CLAUDE.md' },
+          { id: 'tu-2', kind: 'tool', label: 'Read', detail: 'ProjectHome.tsx' },
+          { id: 'tu-3', kind: 'tool', label: 'Glob', detail: 'ops/macros/**' },
+          { id: 'tu-4', kind: 'tool', label: 'Bash', detail: 'npm test' },
+        ] as any,
+      }),
+    )
+    const toggle = el.querySelector('[data-testid="tool-strip-toggle"]')!
+    expect(toggle.textContent).toBe('▸Read CLAUDE.md · Read ProjectHome.tsx · Glob ops/macros/** · 4 tools')
+    expect(toggle.className).toContain('font-mono')
+    expect(toggle.className).toContain('text-[11px]')
+    expect(toggle.className).toContain('bg-bg-elev')
+    expect(toggle.className).toContain('rounded')
+    expect(toggle.className).toContain('px-1.5')
+  })
+})
+
 describe('Turn — consent-notice Retry button', () => {
   beforeEach(() => {
     vi.resetModules()

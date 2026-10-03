@@ -800,7 +800,10 @@ describe('EpicDetail (PRD 827)', () => {
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
 
-    expect(el.textContent).toContain('you · just now')
+    // The user bubble's "you · <age>" caption moved to its title attribute
+    // (chat-turn-visuals restyle) — it's no longer in the visible text.
+    const userBubble = Array.from(el.querySelectorAll('div')).find((d) => d.textContent === 'Hello')!
+    expect(userBubble.getAttribute('title')).toContain('you · just now')
     expect(el.textContent).toContain('claude · just now')
   })
 
@@ -852,7 +855,7 @@ describe('EpicDetail (PRD 827)', () => {
     const live = el.querySelector('[data-testid="epic-live-turn"]')
     expect(live).not.toBeNull()
     expect(live!.textContent).toContain('Working on it')
-    expect(live!.querySelector('[data-testid="tool-strip-toggle"]')?.textContent).toContain('used 1 tool')
+    expect(live!.querySelector('[data-testid="tool-strip-toggle"]')?.textContent).toContain('Bash · 1 tool')
   })
 
   it('replaces the live bubble with the finished turn on chat:run:complete, with no duplicated text', async () => {

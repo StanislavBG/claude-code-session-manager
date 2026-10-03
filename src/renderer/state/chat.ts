@@ -41,6 +41,9 @@ export interface ToolUseTrace {
   label: string
   /** Populated only for Edit/Write tool_use events; undefined for every other kind. */
   diff?: { filePath: string; oldText?: string; newText?: string }
+  /** The tool_use input's command/description/pattern/file_path, whichever applies —
+   *  empty string when the tool took none of those. Drives toolChipLabel(). */
+  detail?: string
 }
 
 export interface ChatTurn {
@@ -1311,8 +1314,8 @@ if (typeof window !== 'undefined' && window.api?.chat) {
   window.api.chat.onOutput(({ tabId, delta }) => {
     patch(tabId, (c) => ({ ...c, stream: c.stream + delta }))
   })
-  window.api.chat.onToolUse(({ tabId, id, kind, label, diff }) => {
-    patch(tabId, (c) => ({ ...c, liveToolUses: [...c.liveToolUses, { id, kind, label, diff }] }))
+  window.api.chat.onToolUse(({ tabId, id, kind, label, diff, detail }) => {
+    patch(tabId, (c) => ({ ...c, liveToolUses: [...c.liveToolUses, { id, kind, label, diff, detail }] }))
   })
   window.api.chat.onComplete(({ tabId, finalMessage }) => {
     capturePromptSessionTurn(tabId, 'assistant', finalMessage)

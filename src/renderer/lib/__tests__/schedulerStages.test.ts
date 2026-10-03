@@ -259,3 +259,33 @@ describe('buildPlans planId grouping', () => {
     expect(ps.map((p) => p.prdCount).sort()).toEqual([1, 2])
   })
 })
+
+describe('buildPlans canonicalizes bare-named dependsOn', () => {
+  const bareJobs = (planId: string | undefined) => [
+    job('1-a', { planId, dependsOn: [] }),
+    job('2-b', { planId, dependsOn: ['a'] }),
+    job('3-c', { planId, dependsOn: ['a'] }),
+    job('4-d', { planId, dependsOn: ['a'] }),
+    job('5-e', { planId, dependsOn: ['b', 'c', 'd'] }),
+  ]
+  it('with planId: one plan, 5 PRDs, 3 stages, stage 2 holds 3 rows', () => {
+    const ps = plans(bareJobs('pl-1'))
+    expect(ps.length).toBe(1)
+    expect(ps[0].prdCount).toBe(5)
+    expect(ps[0].stageCount).toBe(3)
+    const stage2 = ps[0].stages.find((s) => s.n === 2)!
+    expect(stage2.rows.length).toBe(3)
+  })
+  it('without planId (fallback derivation): still one plan, 3 stages', () => {
+    const ps = plans(bareJobs(undefined))
+    expect(ps.length).toBe(1)
+    expect(ps[0].stageCount).toBe(3)
+  })
+})
+
+describe('summarizeQueue canonicalizes bare-named dependsOn', () => {
+  it('a pending job whose bare dep is pending is NOT ready — only the dep-free row counts', () => {
+    const js = [job('1-a'), job('2-b', { dependsOn: ['a'] })]
+    expect(summarizeQueue(js, NOW).readyNow).toBe(1)
+  })
+})

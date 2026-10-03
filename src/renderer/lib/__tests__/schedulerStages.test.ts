@@ -289,3 +289,49 @@ describe('summarizeQueue canonicalizes bare-named dependsOn', () => {
     expect(summarizeQueue(js, NOW).readyNow).toBe(1)
   })
 })
+
+describe('buildPlans validate-defined groups', () => {
+  it('one validate PRD claims its transitive closure across three different planIds into one plan', () => {
+    const ps = plans([
+      job('1-a', { planId: 'pl-1' }),
+      job('2-b', { planId: 'pl-2' }),
+      job('3-c', { planId: 'pl-3' }),
+      job('4-validate-x', { title: 'Validate: Ship X', dependsOn: ['1-a', '2-b', '3-c'] }),
+    ])
+    expect(ps).toHaveLength(1)
+    const p = ps[0]
+    expect(p.prdCount).toBe(4)
+    expect(p.stageCount).toBe(2)
+    expect(p.width).toBe(3)
+    expect(p.label).toBe('Ship X')
+    expect(p.validateSlug).toBe('4-validate-x')
+  })
+
+  it('two validate PRDs: earlier one claims the shared row first; every row lands in exactly one plan', () => {
+    const ps = plans([
+      job('5-validate-one', { title: 'Validate: One' }),
+      job('8-y', { dependsOn: ['5-validate-one'] }),
+      job('9-validate-two', { title: 'Validate: Two', dependsOn: ['8-y'] }),
+    ])
+    expect(ps).toHaveLength(2)
+    const slugCounts = new Map<string, number>()
+    for (const p of ps) for (const s of p.stages) for (const r of s.rows) {
+      slugCounts.set(r.slug, (slugCounts.get(r.slug) ?? 0) + 1)
+    }
+    expect([...slugCounts.values()]).toEqual([1, 1, 1])
+    const oneGroup = ps.find((p) => p.validateSlug === '5-validate-one')!
+    const twoGroup = ps.find((p) => p.validateSlug === '9-validate-two')!
+    expect(oneGroup.stages.flatMap((s) => s.rows.map((r) => r.slug))).toEqual(['5-validate-one'])
+    expect(twoGroup.stages.flatMap((s) => s.rows.map((r) => r.slug)).sort()).toEqual(['8-y', '9-validate-two'])
+  })
+
+  it('an Epic with no validate rows produces the same plan count/labels as the planId fallback', () => {
+    const ps = plans([
+      job('1-a', { planId: 'pl-1' }),
+      job('2-b', { planId: 'pl-1', dependsOn: ['1-a'] }),
+      job('3-c', { planId: 'pl-2', dependsOn: ['2-b'] }),
+    ])
+    expect(ps.map((p) => p.prdCount)).toEqual([1, 2])
+    expect(ps.every((p) => p.validateSlug === null)).toBe(true)
+  })
+})

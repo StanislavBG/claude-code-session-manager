@@ -36,22 +36,46 @@ function MacroButton({
   hasHome: boolean
   hasDemo: boolean
   launching: string | null
-  onLaunch: (macro: Macro) => void
+  onLaunch: (macro: Macro, extraInstructions?: string) => void
 }) {
+  const [extra, setExtra] = useState('')
+  const disabled = launching !== null
+  const showExtraInput = hasHome || hasDemo
+
+  const fire = () => {
+    const trimmed = extra.trim()
+    onLaunch(macro, trimmed || undefined)
+    setExtra('')
+  }
+
   return (
-    <button
-      type="button"
-      data-testid="project-home-macro"
-      data-macro-id={macro.id}
-      disabled={launching !== null}
-      onClick={() => onLaunch(macro)}
-      className={BUTTON_CLASS}
-    >
-      <span className="inline-flex">
-        <AlmanacIcon name="sparkle" size={14} />
-      </span>
-      {launching === macro.id ? 'Starting…' : macroButtonLabel(macro, hasHome, hasDemo)}
-    </button>
+    <div className="inline-flex items-center gap-1.5">
+      {showExtraInput && (
+        <input
+          type="text"
+          data-testid="project-home-macro-extra"
+          data-macro-id={macro.id}
+          value={extra}
+          onChange={(e) => setExtra(e.target.value)}
+          disabled={disabled}
+          placeholder="Optional: extra instructions for this regeneration"
+          className="rounded-lg border border-line bg-bg-hi px-2.5 py-2 text-xs text-fg placeholder:text-fg-faint disabled:opacity-40 disabled:cursor-not-allowed"
+        />
+      )}
+      <button
+        type="button"
+        data-testid="project-home-macro"
+        data-macro-id={macro.id}
+        disabled={disabled}
+        onClick={fire}
+        className={BUTTON_CLASS}
+      >
+        <span className="inline-flex">
+          <AlmanacIcon name="sparkle" size={14} />
+        </span>
+        {launching === macro.id ? 'Starting…' : macroButtonLabel(macro, hasHome, hasDemo)}
+      </button>
+    </div>
   )
 }
 
@@ -96,7 +120,7 @@ export function ProjectPagesSection({
   loaded: boolean
   macros: Macro[]
   launching: string | null
-  onLaunch: (macro: Macro) => void
+  onLaunch: (macro: Macro, extraInstructions?: string) => void
 }) {
   const [view, setView] = useState<View>('overview')
 

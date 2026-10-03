@@ -76,7 +76,7 @@ describe('ProjectPagesSection', () => {
     expect(buttons[0].textContent).toContain('Generate Project Home')
     expect(buttons[1].textContent).toContain('Generate Demo Video')
     act(() => (buttons[0] as HTMLButtonElement).click())
-    expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO)
+    expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, undefined)
   })
 
   it('shows Regenerate + home.html when only the overview exists, with no view switch', () => {
@@ -101,7 +101,7 @@ describe('ProjectPagesSection', () => {
     expect(buttons[0].textContent).toContain('Regenerate Project Home')
     expect(buttons[1].textContent).toContain('Generate Demo Video')
     act(() => (buttons[1] as HTMLButtonElement).click())
-    expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO)
+    expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, undefined)
   })
 
   it('shows the demo video (not overview) when only a demo video exists', () => {
@@ -148,6 +148,89 @@ describe('ProjectPagesSection', () => {
 
     act(() => overviewBtn.click())
     expect(el.querySelector('iframe[title="Project Home"]')).not.toBeNull()
+  })
+
+  it('does not show the extra-instructions input on first-generation (no artifact yet)', () => {
+    const el = mount(
+      <ProjectPagesSection
+        output={null}
+        demoVideo={null}
+        loaded
+        macros={MACROS}
+        launching={null}
+        onLaunch={() => {}}
+      />,
+    )
+    expect(el.querySelector('[data-testid="project-home-macro-extra"]')).toBeNull()
+  })
+
+  it('submits Regenerate with an empty extra-instructions field exactly as before', () => {
+    const onLaunch = vi.fn()
+    const html = '<!DOCTYPE html><html><body>HOME</body></html>'
+    const el = mount(
+      <ProjectPagesSection
+        output={{ html, mtimeMs: Date.now() }}
+        demoVideo={null}
+        loaded
+        macros={MACROS}
+        launching={null}
+        onLaunch={onLaunch}
+      />,
+    )
+    const input = el.querySelector('[data-testid="project-home-macro-extra"][data-macro-id="builtin-project-home"]')
+    expect(input).not.toBeNull()
+    const button = el.querySelector(
+      '[data-testid="project-home-macro"][data-macro-id="builtin-project-home"]',
+    ) as HTMLButtonElement
+    act(() => button.click())
+    expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, undefined)
+  })
+
+  it('submits Regenerate with extra instructions, then clears the field', () => {
+    const onLaunch = vi.fn()
+    const html = '<!DOCTYPE html><html><body>HOME</body></html>'
+    const el = mount(
+      <ProjectPagesSection
+        output={{ html, mtimeMs: Date.now() }}
+        demoVideo={null}
+        loaded
+        macros={MACROS}
+        launching={null}
+        onLaunch={onLaunch}
+      />,
+    )
+    const input = el.querySelector(
+      '[data-testid="project-home-macro-extra"][data-macro-id="builtin-project-home"]',
+    ) as HTMLInputElement
+    const button = el.querySelector(
+      '[data-testid="project-home-macro"][data-macro-id="builtin-project-home"]',
+    ) as HTMLButtonElement
+
+    const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+    act(() => {
+      setValue.call(input, '  focus on the onboarding flow  ')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    act(() => button.click())
+    expect(onLaunch).toHaveBeenCalledWith(HOME_MACRO, 'focus on the onboarding flow')
+    expect(input.value).toBe('')
+  })
+
+  it('disables the extra-instructions input while launching, matching the button', () => {
+    const el = mount(
+      <ProjectPagesSection
+        output={{ html: '<!DOCTYPE html><html><body>HOME</body></html>', mtimeMs: Date.now() }}
+        demoVideo={null}
+        loaded
+        macros={MACROS}
+        launching="builtin-project-home"
+        onLaunch={() => {}}
+      />,
+    )
+    const input = el.querySelector(
+      '[data-testid="project-home-macro-extra"][data-macro-id="builtin-project-home"]',
+    ) as HTMLInputElement
+    expect(input.disabled).toBe(true)
   })
 
   it('disables every macro button while launching', () => {

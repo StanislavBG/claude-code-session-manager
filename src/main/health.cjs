@@ -815,7 +815,7 @@ async function check(opts = {}) {
 
   // 1.7. Check test infrastructure exists.
   const hasPlaywright = fs.existsSync(path.join(PROJECT_ROOT, 'playwright.config.ts'));
-  const hasE2E = fs.existsSync(path.join(PROJECT_ROOT, 'e2e'));
+  const hasE2E = fs.existsSync(path.join(PROJECT_ROOT, 'tests', 'e2e'));
   status.components.test_infrastructure = {
     ok: hasPlaywright && hasE2E,
     playwright: hasPlaywright,

@@ -33,7 +33,7 @@ const { createAdminHttp } = require('./lib/localAdminHttp.cjs');
 const prdCreate = require('./lib/prdCreate.cjs');
 const prdAdminRoutes = require('./lib/prdAdminRoutes.cjs');
 const projectHomeAdminRoutes = require('./lib/projectHomeAdminRoutes.cjs');
-const { smfileResponseHeaders } = require('./lib/smfileHeaders.cjs');
+const { smfileResponseHeaders, shouldBlockFrameNavigation } = require('./lib/smfileHeaders.cjs');
 const { appendAuditEvent } = require('./lib/auditLog.cjs');
 const chatRunner = require('./chatRunner.cjs');
 const promptSessionEvents = require('./promptSessionEvents.cjs');
@@ -454,6 +454,21 @@ function createWindow() {
   // must be unwound first to avoid refcount ratcheting.
   mainWindow.webContents.on('did-start-navigation', () => {
     configMgr.releaseWatchesForSender(mainWindow.webContents.id);
+  });
+
+  // CSP (frame-src/connect-src) does not govern a subframe navigating itself —
+  // a demo-video document could still exfiltrate data via meta refresh or
+  // `location.href = 'https://…'`. Block any such navigation out of an
+  // smfile:// demo-video subframe.
+  mainWindow.webContents.on('will-frame-navigate', (details) => {
+    if (shouldBlockFrameNavigation({
+      isMainFrame: details.isMainFrame,
+      currentUrl: details.frame?.url,
+      targetUrl: details.url,
+    })) {
+      details.preventDefault();
+      console.warn('[main] blocked will-frame-navigate to', details.url);
+    }
   });
 
   mainWindow.webContents.on('context-menu', (_e, params) => {

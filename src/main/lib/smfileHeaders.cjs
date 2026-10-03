@@ -33,4 +33,34 @@ function smfileResponseHeaders(realPath, contentType) {
   return headers;
 }
 
-module.exports = { DEMO_VIDEO_CSP_HEADER, smfileResponseHeaders };
+/**
+ * Guards against a demo-video document exfiltrating data by navigating its
+ * own sandboxed iframe (meta refresh, `location.href = 'https://…'`), which
+ * the CSP response header does not govern — `frame-src`/`connect-src` don't
+ * stop a top-level navigation of the subframe itself.
+ * @param {{ isMainFrame: boolean, currentUrl: string, targetUrl: string }} params
+ * @returns {boolean}
+ */
+function shouldBlockFrameNavigation({ isMainFrame, currentUrl, targetUrl }) {
+  if (isMainFrame) return false;
+  if (typeof currentUrl !== 'string' || !currentUrl.startsWith('smfile:')) return false;
+
+  let pathname;
+  try {
+    // Same normalisation as smfileResponseHeaders below: on Windows the
+    // absolute path (and therefore the smfile:// URL built from it) uses
+    // backslashes, which the forward-slash DEMO_VIDEO_PATH_MARKER would
+    // otherwise never match — silently disabling this guard on win32.
+    pathname = decodeURIComponent(new URL(currentUrl).pathname).replace(/\\/g, '/');
+  } catch {
+    return false;
+  }
+  if (!pathname.includes(DEMO_VIDEO_PATH_MARKER)) return false;
+
+  if (typeof targetUrl !== 'string') return false;
+  if (targetUrl.startsWith('smfile:')) return false;
+  if (targetUrl === 'about:blank' || targetUrl === 'about:srcdoc') return false;
+  return true;
+}
+
+module.exports = { DEMO_VIDEO_CSP_HEADER, smfileResponseHeaders, shouldBlockFrameNavigation };

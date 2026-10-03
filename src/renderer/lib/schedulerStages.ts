@@ -18,7 +18,7 @@
 import type { ScheduleJob } from '../../preload/api'
 import type { PromptSession } from '../state/promptSessions'
 import { buildBacklogTree, flattenBacklogNodes, type BacklogBlocker } from './backlogTree'
-import { canonicalizeDependsOn } from './depSlugResolve'
+import { bareSlug, canonicalizeDependsOn } from './depSlugResolve'
 import { splitTitleAndGoal } from './epicDerive'
 import { prdNumber } from '../components/tabs/scheduler/sched-primitives'
 
@@ -79,6 +79,13 @@ export interface Plan {
    *  plan, or a plan that just had a PRD appended, is index 1 — ties by epicId then waveIndex. */
   index: number
   label: string
+  /** The Epic title the label used before validate-defined grouping existed. */
+  epicLabel: string
+  /** Slug of the validate PRD that defines this plan's membership, or null when the plan was
+   *  derived from planId/weakComponents instead. */
+  validateSlug: string | null
+  /** Max row count of any stage — how parallel the widest point of the plan is. */
+  width: number
   status: PlanStatus
   prdCount: number
   stageCount: number
@@ -249,6 +256,78 @@ function planGroups<N extends { row: { slug: string; planId?: string | null; dep
   return weakComponents(nodes, inEpic)
 }
 
+interface SectionGroup<N> {
+  nodes: N[]
+  /** Slug of the validate PRD that claimed this group, or null for a planId/weakComponents group. */
+  validateSlug: string | null
+}
+
+/**
+ * Iterative (stack-based), cycle-safe transitive dependsOn closure of `start`, restricted to
+ * `inEpic` nodes not already in `claimed`. Mutates `claimed` with every slug it visits,
+ * including `start`, so a slug is never claimed by more than one caller. O(V+E) over the walk.
+ */
+function claimClosure<N extends { row: { slug: string; dependsOn?: string[] | null } }>(
+  start: N,
+  nodeBySlug: Map<string, N>,
+  inEpic: Set<string>,
+  claimed: Set<string>,
+): N[] {
+  const result: N[] = []
+  const stack: N[] = [start]
+  claimed.add(start.row.slug)
+  while (stack.length > 0) {
+    const n = stack.pop()!
+    result.push(n)
+    for (const d of n.row.dependsOn ?? []) {
+      if (inEpic.has(d) && !claimed.has(d)) {
+        claimed.add(d)
+        const dn = nodeBySlug.get(d)
+        if (dn) stack.push(dn)
+      }
+    }
+  }
+  return result
+}
+
+/**
+ * One Epic section's plan groups — validate-defined first. A row whose bareSlug starts with
+ * `validate-` claims itself plus its whole transitive in-Epic dependsOn closure, processed in
+ * ascending PRD number so a lower-numbered validate PRD's closure is claimed before a later one
+ * can reach the same row. Whatever is left unclaimed falls back to `planGroups` (planId, else
+ * weakComponents), applied only to that remainder. Every row lands in exactly one group.
+ */
+function sectionGroups<N extends { row: { slug: string; planId?: string | null; dependsOn?: string[] | null } }>(
+  nodes: N[],
+  inEpic: Set<string>,
+): SectionGroup<N>[] {
+  const nodeBySlug = new Map(nodes.map((n) => [n.row.slug, n]))
+  const claimed = new Set<string>()
+  const groups: SectionGroup<N>[] = []
+
+  const validateNodes = nodes
+    .filter((n) => bareSlug(n.row.slug).startsWith('validate-'))
+    .sort((a, b) => byPriority({ slug: a.row.slug }, { slug: b.row.slug }))
+
+  for (const vn of validateNodes) {
+    if (claimed.has(vn.row.slug)) continue
+    groups.push({ nodes: claimClosure(vn, nodeBySlug, inEpic, claimed), validateSlug: vn.row.slug })
+  }
+
+  const remaining = nodes.filter((n) => !claimed.has(n.row.slug))
+  if (remaining.length > 0) {
+    const remainingSlugs = new Set(remaining.map((n) => n.row.slug))
+    for (const g of planGroups(remaining, remainingSlugs)) groups.push({ nodes: g, validateSlug: null })
+  }
+
+  return groups
+}
+
+/** Strips a leading `Validate` + optional `:`/`-`/whitespace (any mix, case-insensitive). */
+function stripValidatePrefix(title: string): string {
+  return title.replace(/^validate[\s:-]*/i, '').trim()
+}
+
 /**
  * Groups `jobs` into Plans (one per weakly-connected wave of an Epic) with complete Stage lists.
  * Cross-Epic dependsOn edges never affect staging. Cycle members get
@@ -276,7 +355,8 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
     const inEpic = new Set(allNodes.map((n) => n.row.slug))
     const nodeBySlug = new Map(allNodes.map((n) => [n.row.slug, n]))
     const sectionPlans: Array<Plan & { _firstNum: number; _lastNum: number; _firstSlug: string }> = []
-    for (const nodes of planGroups(allNodes, inEpic)) {
+    for (const group of sectionGroups(allNodes, inEpic)) {
+      const nodes = group.nodes
 
       // ── stage depth: memoized DFS; cyclic rows ignore edges to other cyclic rows.
       const inPlan = new Set(nodes.map((n) => n.row.slug)) // explicit planId groups may have cross-plan edges: never stage across them
@@ -403,12 +483,18 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
 
       const firstNum = rows.reduce((m, r) => Math.min(m, numOf(r.slug)), Infinity)
       const lastNum = rows.reduce((m, r) => Math.max(m, numOf(r.slug)), -Infinity)
+      // A known Epic's goalText is `${title}\n\n${goal}` — the plan header shows just the human title.
+      const epicLabel = section.known ? splitTitleAndGoal(section.label).title : section.label
+      const validateRow = group.validateSlug ? rows.find((r) => r.slug === group.validateSlug) : undefined
+      const label = validateRow ? (stripValidatePrefix(validateRow.title) || epicLabel) : epicLabel
       sectionPlans.push({
         epicId: section.epicId,
         waveIndex: 0,
         index: 0,
-        // A known Epic's goalText is `${title}\n\n${goal}` — the plan header shows just the human title.
-        label: section.known ? splitTitleAndGoal(section.label).title : section.label,
+        label,
+        epicLabel,
+        validateSlug: group.validateSlug,
+        width: stages.reduce((m, s) => Math.max(m, s.rows.length), 0),
         status: planStatusOf(rows),
         prdCount: rows.length,
         stageCount,
@@ -424,14 +510,16 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
       })
     }
 
-    // Wave ordinal: components ordered by lowest PRD number (ties: first slug). The label only
-    // shows the wave when the Epic really has more than one plan.
+    // Wave ordinal: components ordered by lowest PRD number (ties: first slug). The
+    // ` · plan i/N` suffix only applies to plans NOT defined by a validate PRD, and N counts only
+    // those — a validate-defined plan already carries its own goal in its label.
     sectionPlans.sort(byFirst)
-    sectionPlans.forEach((p, i) => {
-      p.waveIndex = i + 1
-      if (sectionPlans.length > 1) p.label = `${p.label} · plan ${i + 1}/${sectionPlans.length}`
-      plans.push(p)
+    sectionPlans.forEach((p, i) => { p.waveIndex = i + 1 })
+    const suffixTargets = sectionPlans.filter((p) => p.validateSlug === null)
+    suffixTargets.forEach((p, i) => {
+      if (suffixTargets.length > 1) p.label = `${p.label} · plan ${i + 1}/${suffixTargets.length}`
     })
+    for (const p of sectionPlans) plans.push(p)
   }
 
   // Newest-first: a plan that just had a PRD appended (raising its highest PRD number) bubbles

@@ -1306,6 +1306,26 @@ function safeSlugPathIn(dir, slug) {
 }
 
 /**
+ * Realpath of a PRDs dir for the symlink-containment re-checks below, or null
+ * when `dir` or any component between it and its project cwd (the parent of
+ * `session-manager-operations`) is a symlink. Why: comparing a file's realpath
+ * against the RAW dir rejected every PRD under a symlinked path (macOS tmpdir
+ * /var → /private/var), but trusting realpath(dir) alone lets a rogue job swap
+ * `epics/<id>/prds` for a symlink to e.g. ~/.claude and write there. Symlinks
+ * ABOVE the project cwd (a symlinked home or project folder) stay allowed.
+ */
+async function realPrdsDir(dir) {
+  const marker = `${path.sep}session-manager-operations${path.sep}`;
+  const idx = (dir + path.sep).lastIndexOf(marker);
+  const stop = idx === -1 ? path.dirname(dir) : dir.slice(0, idx);
+  for (let p = dir; p.length > stop.length; p = path.dirname(p)) {
+    const st = await fsp.lstat(p).catch(() => null);
+    if (st && st.isSymbolicLink()) return null;
+  }
+  try { return await fsp.realpath(dir); } catch { return null; }
+}
+
+/**
  * Locate an EXISTING `<slug>.md` across every candidate PRD dir and return
  * its safe, containment-checked absolute path — or null if the slug isn't
  * found anywhere (or would escape its containing dir).
@@ -13073,8 +13093,8 @@ const remote = {
       // realpath resolves symlinks; re-check boundary to block a rogue agent job
       // that places a symlink inside the PRDs dir pointing outside the safe root.
       const real = await fsp.realpath(filePath);
-      const realDir = await fsp.realpath(dir);
-      if (!real.startsWith(realDir + path.sep)) {
+      const realDir = await realPrdsDir(dir);
+      if (!realDir || !real.startsWith(realDir + path.sep)) {
         return { ok: false, error: 'invalid slug' };
       }
       const text = await fsp.readFile(real, 'utf8');
@@ -13151,8 +13171,8 @@ const remote = {
       // re-assert containment; also reject the target if it is already a
       // symlink.
       const realParent = await fsp.realpath(path.dirname(resolved));
-      const realDir = await fsp.realpath(dir);
-      if (realParent !== realDir && !realParent.startsWith(realDir + path.sep)) {
+      const realDir = await realPrdsDir(dir);
+      if (!realDir || (realParent !== realDir && !realParent.startsWith(realDir + path.sep))) {
         return { ok: false, error: 'invalid slug' };
       }
       const existing = await fsp.lstat(resolved).catch(() => null);
@@ -13295,8 +13315,8 @@ const remote = {
       // Symlink defense, matching readPrd/writePrd's comment: safeSlugPathIn
       // is lexical and does not resolve symlinks.
       const real = await fsp.realpath(filePath);
-      const realDir = await fsp.realpath(dir);
-      if (!real.startsWith(realDir + path.sep)) return { ok: false, error: 'invalid slug' };
+      const realDir = await realPrdsDir(dir);
+      if (!realDir || !real.startsWith(realDir + path.sep)) return { ok: false, error: 'invalid slug' };
       const [raw, parsed] = await Promise.all([fsp.readFile(real, 'utf8'), prdParser.parsePrdRaw(real)]);
       return {
         ok: true,
@@ -13400,8 +13420,8 @@ const remote = {
       // target that is itself already a symlink — a rogue job could plant
       // one inside the PRDs dir pointing outside the safe root.
       const real = await fsp.realpath(filePath);
-      const realDir = await fsp.realpath(dir);
-      if (!real.startsWith(realDir + path.sep)) return { ok: false, error: 'invalid slug' };
+      const realDir = await realPrdsDir(dir);
+      if (!realDir || !real.startsWith(realDir + path.sep)) return { ok: false, error: 'invalid slug' };
       const existing = await fsp.lstat(filePath).catch(() => null);
       if (existing && existing.isSymbolicLink()) return { ok: false, error: 'invalid slug' };
       raw = await fsp.readFile(real, 'utf8');

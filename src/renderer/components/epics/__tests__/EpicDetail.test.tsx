@@ -1159,6 +1159,92 @@ describe('EpicDetail (PRD 827)', () => {
     expect(seed!.textContent).toContain('A brand new Epic with no turns')
   })
 
+  describe('Detail dial + hidden-events divider (PRD 1468)', () => {
+    it('CORE: the active verbosity segment is filled accent, inactive segments are dim text', async () => {
+      installWindowApiMock()
+      const { usePromptSessions } = await import('../../../state/promptSessions')
+      const { EpicDetail } = await import('../EpicDetail')
+
+      const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+      // Default verbosity is 'standard' (CHAT_VERBOSITY_DEFAULT).
+      const active = el.querySelector('[data-testid="epic-verbosity-standard"]') as HTMLButtonElement
+      expect(active.className).toContain('bg-accent')
+      expect(active.className).toContain('text-white')
+
+      const inactive = el.querySelector('[data-testid="epic-verbosity-raw"]') as HTMLButtonElement
+      expect(inactive.className).not.toContain('bg-accent')
+      expect(inactive.className).toContain('text-fg-dim')
+
+      expect(el.querySelector('[data-testid="epic-verbosity-hidden-count"]')).toBeNull()
+    })
+
+    it('reads "conversation" with no count when nothing is hidden', async () => {
+      installWindowApiMock()
+      const { usePromptSessions } = await import('../../../state/promptSessions')
+      const { useChat } = await import('../../../state/chat')
+      const { EpicDetail } = await import('../EpicDetail')
+
+      const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+      useChat.setState({
+        chats: {
+          [session.id]: {
+            turns: [{ id: 't-user', role: 'user', text: 'do the thing', at: 1000 }],
+            running: false,
+            stream: '',
+            queuedPosition: 0,
+          } as any,
+        },
+      })
+
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+      const divider = el.querySelector('[data-testid="epic-hidden-events-divider"]') as HTMLElement
+      expect(divider).not.toBeNull()
+      expect(divider.textContent).toContain('conversation')
+      expect(divider.textContent).not.toContain('hidden')
+    })
+
+    it('CORE: shows the hidden-events divider text and reveals the hidden level on click', async () => {
+      installWindowApiMock()
+      const { usePromptSessions } = await import('../../../state/promptSessions')
+      const { useChat } = await import('../../../state/chat')
+      const { EpicDetail } = await import('../EpicDetail')
+
+      const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+      useChat.setState({
+        chats: {
+          [session.id]: {
+            turns: [
+              { id: 't-user', role: 'user', text: 'do the thing', at: 1000 },
+              // 'tool_use' is a DETAIL-level event — hidden at the default
+              // 'standard' verbosity (chatVerbosity.ts's DETAIL_EVENT_KINDS).
+              { id: 't-tool', role: 'event', kind: 'tool_use', text: 'Bash', at: 1500 },
+              { id: 't-assistant', role: 'assistant', text: 'done', at: 2000 },
+            ],
+            running: false,
+            stream: '',
+            queuedPosition: 0,
+          } as any,
+        },
+      })
+
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+      const divider = el.querySelector('[data-testid="epic-hidden-events-divider"]') as HTMLButtonElement
+      expect(divider).not.toBeNull()
+      expect(divider.textContent).toContain('conversation · 1 low-level events hidden')
+
+      act(() => divider.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+
+      // Revealed to 'detail' — the dial's active segment moves, and the
+      // divider reports nothing left hidden.
+      expect((el.querySelector('[data-testid="epic-verbosity-detail"]') as HTMLElement).className).toContain('bg-accent')
+      expect((el.querySelector('[data-testid="epic-hidden-events-divider"]') as HTMLElement).textContent).toBe('conversation')
+    })
+  })
+
   describe('Epic-intake AIM card (PRD session-chat-conversion-into-simplified-chat)', () => {
     it('CORE: renders the first turn as the AIM briefing card when the Epic carries composeEpicIntake sections', async () => {
       installWindowApiMock()

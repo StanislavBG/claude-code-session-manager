@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useChat, attachTranscriptFeed, detachTranscriptFeed, type ChatTurn } from '../../state/chat'
 import { buildEpicTimeline } from '../../lib/epicTimeline'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
@@ -14,7 +14,6 @@ import { EpicIntakeCard } from './EpicIntakeCard'
 import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
 import { useEffectiveModelInfo } from '../../lib/effectiveModelInfo'
 import { formatEffectiveRuntimeLine, formatCompactRuntime } from './EffectiveRuntimeLine'
-import { ViewTabs } from '../ui/ViewTabs'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { RunLogViewer } from '../tabs/plans/RunLogViewer'
 import { formatAgo, formatDuration, formatTimingLabel } from '../../lib/formatTime'
@@ -515,15 +514,16 @@ interface Props {
  */
 function VerbosityDial({
   value,
-  hiddenCount,
   onChange,
 }: {
   value: ChatVerbosity
-  hiddenCount: number
   onChange: (level: ChatVerbosity) => void
 }) {
   return (
     <div className="flex items-center gap-2" data-testid="epic-verbosity-dial">
+      <span className="font-mono text-[10.5px] text-fg-faint" data-testid="epic-verbosity-dial-label">
+        Detail
+      </span>
       <div className="flex overflow-hidden rounded-md border border-line">
         {CHAT_VERBOSITY_DISPLAY_ORDER.map((level) => (
           <button
@@ -534,20 +534,71 @@ function VerbosityDial({
             aria-pressed={value === level}
             aria-label={`Verbosity level ${levelNumber(level)}, ${CHAT_VERBOSITY_META[level].label}`}
             data-testid={`epic-verbosity-${level}`}
-            className={`flex items-baseline gap-1 px-2 py-1 font-mono text-[10.5px] font-semibold uppercase tracking-wide ${
-              value === level ? 'bg-accent/15 text-accent' : 'bg-bg-hi text-fg-faint hover:bg-hi hover:text-fg-dim'
+            className={`px-2 py-1 font-mono text-[10.5px] font-semibold uppercase tracking-wide ${
+              value === level ? 'bg-accent text-white' : 'text-fg-dim hover:bg-hi'
             }`}
           >
-            <span className="text-[9px] opacity-60">{levelNumber(level)}</span>
             {CHAT_VERBOSITY_META[level].label}
           </button>
         ))}
       </div>
-      {hiddenCount > 0 && (
-        <span className="font-mono text-[10.5px] text-fg-faint" data-testid="epic-verbosity-hidden-count">
-          {hiddenCount} hidden
-        </span>
-      )}
+    </div>
+  )
+}
+
+/**
+ * Centred hairline divider at the top of the Discussion conversation (after
+ * the opening-prompt turn/launch-briefing card) — the honest "some of this
+ * feed is filtered" signal, replacing the dial's old inline "N hidden"
+ * counter. Clicking performs the same reveal as the footer's
+ * epic-verbosity-reveal button (jump to the quietest level that shows
+ * everything currently hidden) — a no-op when nothing is hidden.
+ */
+function HiddenEventsDivider({ hiddenCount, onReveal }: { hiddenCount: number; onReveal: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onReveal}
+      data-testid="epic-hidden-events-divider"
+      className="flex w-full items-center gap-3 text-left"
+    >
+      <span className="h-px flex-1 bg-rule" aria-hidden="true" />
+      <span className="shrink-0 font-mono text-[10.5px] text-fg-faint">
+        {hiddenCount > 0 ? `conversation · ${hiddenCount} low-level events hidden` : 'conversation'}
+      </span>
+      <span className="h-px flex-1 bg-rule" aria-hidden="true" />
+    </button>
+  )
+}
+
+/**
+ * Plain underlined text tabs for the Discussion/PRDs/Runs switch — local to
+ * EpicDetail (not the shared ViewTabs.tsx pill switcher other screens use;
+ * this surface's target design is a text-tab row, not a bordered pill group).
+ */
+function DetailTabs({
+  options,
+  active,
+  onChange,
+}: {
+  options: { key: ViewKey; label: string }[]
+  active: ViewKey
+  onChange: (v: ViewKey) => void
+}) {
+  return (
+    <div className="flex items-center gap-4" role="tablist">
+      {options.map(({ key, label }) => (
+        <button
+          key={key}
+          type="button"
+          role="tab"
+          aria-selected={active === key}
+          onClick={() => onChange(key)}
+          className={`pb-1 text-[13px] ${active === key ? 'border-b-2 border-fg font-semibold text-fg' : 'text-fg-dim'}`}
+        >
+          {label}
+        </button>
+      ))}
     </div>
   )
 }
@@ -719,7 +770,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
     .join(' · ')
 
   const views: { key: ViewKey; label: string }[] = [
-    { key: 'discussion', label: `Discussion ${timeline.length}` },
+    { key: 'discussion', label: 'Discussion' },
     { key: 'prds', label: `PRDs ${attachedPrds.length}` },
     { key: 'runs', label: `Runs ${epicRuns.length}` },
   ]
@@ -947,13 +998,11 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
 
         {mode === 'chat' && (
           <div className="flex flex-wrap items-center gap-3 border-t border-line pt-2">
-            <ViewTabs options={views} active={view} onChange={setView} />
+            <DetailTabs options={views} active={view} onChange={setView} />
             {view === 'discussion' && (
-              <VerbosityDial
-                value={verbosity}
-                hiddenCount={hiddenCount}
-                onChange={(level) => setEpicVerbosity(epicId, level)}
-              />
+              <div className="ml-auto">
+                <VerbosityDial value={verbosity} onChange={(level) => setEpicVerbosity(epicId, level)} />
+              </div>
             )}
           </div>
         )}
@@ -999,78 +1048,94 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
               </div>
             )}
 
-            {timeline.map((item) => {
-              if (item.kind === 'turn') {
-                const t = item.turn
-                const { index: i, precedingUserPrompt } = item
-                // The Epic's very first turn IS its opening prompt — when
-                // this Epic carries composeEpicIntake's structured sections
-                // (absent on Epics minted before this field existed, or on
-                // ones whose opening prompt carried none), render it as the
-                // AIM briefing card instead of the ordinary flat-text bubble.
-                // Renders from `sections` data only, never by re-parsing
-                // `t.text`.
-                if (i === 0 && t.role === 'user' && promptSession.sections && promptSession.sections.length > 0) {
+            {timeline.map((item, timelineIdx) => {
+              const node = (() => {
+                if (item.kind === 'turn') {
+                  const t = item.turn
+                  const { index: i, precedingUserPrompt } = item
+                  // The Epic's very first turn IS its opening prompt — when
+                  // this Epic carries composeEpicIntake's structured sections
+                  // (absent on Epics minted before this field existed, or on
+                  // ones whose opening prompt carried none), render it as the
+                  // AIM briefing card instead of the ordinary flat-text bubble.
+                  // Renders from `sections` data only, never by re-parsing
+                  // `t.text`.
+                  if (i === 0 && t.role === 'user' && promptSession.sections && promptSession.sections.length > 0) {
+                    return (
+                      <div key={t.id} id={`epic-detail-turn-${t.id}`} className="min-w-0">
+                        <EpicIntakeCard
+                          sections={promptSession.sections}
+                          at={t.at}
+                          openingPrompt={promptSession.openingPrompt ?? t.text}
+                        />
+                      </div>
+                    )
+                  }
                   return (
                     <div key={t.id} id={`epic-detail-turn-${t.id}`} className="min-w-0">
-                      <EpicIntakeCard
-                        sections={promptSession.sections}
-                        at={t.at}
-                        openingPrompt={promptSession.openingPrompt ?? t.text}
+                      <Turn
+                        turn={t}
+                        cwd={cwd}
+                        tabId={epicId}
+                        sessionId={sessionId}
+                        runActive={running && t.role === 'assistant' && i === lastAssistantIndex}
+                        consentActionDisabled={running}
+                        enableRawSessionActions={false}
+                        inlineFilePreview
+                        toolStripVariant={toolStripVariant}
+                        clampBodyChars={i === 0 && t.role === 'user' ? openingClamp : clampBodyChars}
+                        injectedPreamble={injectedPreamble}
+                        needsDecisionStyle
+                        precedingUserPrompt={precedingUserPrompt}
+                        onQuote={onQuote}
                       />
                     </div>
                   )
                 }
+                const e = item.event
+                if (e.kind === 'prd_created') {
+                  const prdJob = scheduleJobs.find((j) => j.slug === e.prdSlug) ?? null
+                  const validation = e.prdSlug ? latestValidationBySlug.get(e.prdSlug) : undefined
+                  const prdStatus = prdStatusFor(prdJob, validation)
+                  const tone = STATUS_TONE[prdStatus]
+                  const prdStatusLabel = `PRD "${e.prdSlug}" — ${tone.label} — open in Scheduler`
+                  return (
+                    <div key={e.id} data-testid="epic-prd-event" className="flex justify-center">
+                      <button
+                        type="button"
+                        onClick={() => openPrdSlug(e.prdSlug!)}
+                        title={prdStatusLabel}
+                        aria-label={prdStatusLabel}
+                        className={`rounded-full px-2.5 py-1 font-mono text-[11px] hover:brightness-95 ${tone.bg} ${tone.text}${tone.border ? ' ring-1 ring-inset ring-line' : ' border border-transparent'}`}
+                      >
+                        → dispatched to PRD #{e.prdSlug}
+                      </button>
+                    </div>
+                  )
+                }
+                if (e.kind === 'response') {
+                  return <ResponseEvent key={e.id} event={e} cwd={cwd} epicId={epicId} />
+                }
                 return (
-                  <div key={t.id} id={`epic-detail-turn-${t.id}`} className="min-w-0">
-                    <Turn
-                      turn={t}
-                      cwd={cwd}
-                      tabId={epicId}
-                      sessionId={sessionId}
-                      runActive={running && t.role === 'assistant' && i === lastAssistantIndex}
-                      consentActionDisabled={running}
-                      enableRawSessionActions={false}
-                      inlineFilePreview
-                      toolStripVariant={toolStripVariant}
-                      clampBodyChars={i === 0 && t.role === 'user' ? openingClamp : clampBodyChars}
-                      injectedPreamble={injectedPreamble}
-                      needsDecisionStyle
-                      precedingUserPrompt={precedingUserPrompt}
-                      onQuote={onQuote}
+                  <div key={e.id} data-testid="epic-closed-event">
+                    <EventDivider label="epic" value="closed" />
+                  </div>
+                )
+              })()
+              if (timelineIdx === 0) {
+                return (
+                  <Fragment key="timeline-item-0">
+                    {node}
+                    <HiddenEventsDivider
+                      hiddenCount={hiddenCount}
+                      onReveal={() => {
+                        if (revealLevel) setEpicVerbosity(epicId, revealLevel)
+                      }}
                     />
-                  </div>
+                  </Fragment>
                 )
               }
-              const e = item.event
-              if (e.kind === 'prd_created') {
-                const prdJob = scheduleJobs.find((j) => j.slug === e.prdSlug) ?? null
-                const validation = e.prdSlug ? latestValidationBySlug.get(e.prdSlug) : undefined
-                const prdStatus = prdStatusFor(prdJob, validation)
-                const tone = STATUS_TONE[prdStatus]
-                const prdStatusLabel = `PRD "${e.prdSlug}" — ${tone.label} — open in Scheduler`
-                return (
-                  <div key={e.id} data-testid="epic-prd-event" className="flex justify-center">
-                    <button
-                      type="button"
-                      onClick={() => openPrdSlug(e.prdSlug!)}
-                      title={prdStatusLabel}
-                      aria-label={prdStatusLabel}
-                      className={`rounded-full px-2.5 py-1 font-mono text-[11px] hover:brightness-95 ${tone.bg} ${tone.text}${tone.border ? ' ring-1 ring-inset ring-line' : ' border border-transparent'}`}
-                    >
-                      → dispatched to PRD #{e.prdSlug}
-                    </button>
-                  </div>
-                )
-              }
-              if (e.kind === 'response') {
-                return <ResponseEvent key={e.id} event={e} cwd={cwd} epicId={epicId} />
-              }
-              return (
-                <div key={e.id} data-testid="epic-closed-event">
-                  <EventDivider label="epic" value="closed" />
-                </div>
-              )
+              return node
             })}
 
             {/* Honest footer for what the dial is holding back — a filtered

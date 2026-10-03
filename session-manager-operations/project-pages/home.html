@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>claude-code-session-manager — Project Home</title>
+<style>
+:root{--bg:#0f1115;--card:#171a21;--fg:#e6e8ee;--mut:#9aa3b2;--acc:#7aa2ff;--bd:#272c37}
+@media(prefers-color-scheme:light){:root{--bg:#f6f7f9;--card:#fff;--fg:#1a1d24;--mut:#5b6474;--acc:#2f5bd8;--bd:#dfe3ea}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,sans-serif}
+main{max-width:920px;margin:0 auto;padding:40px 24px 64px}
+h1{font-size:28px;margin:0 0 4px}h2{font-size:18px;margin:32px 0 10px;color:var(--acc)}
+.sub{color:var(--mut);margin:0 0 16px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:16px 18px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+code,pre{font-family:ui-monospace,Menlo,monospace;font-size:13px}
+pre{background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:12px;overflow:auto}
+code{background:var(--card);border:1px solid var(--bd);border-radius:4px;padding:1px 5px}
+pre code{border:0;padding:0;background:none}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:6px 8px;border-bottom:1px solid var(--bd);vertical-align:top}
+th{color:var(--mut);font-weight:600}
+.tag{display:inline-block;border:1px solid var(--bd);border-radius:99px;padding:1px 10px;font-size:12px;color:var(--mut);margin-right:6px}
+ul{padding-left:20px;margin:6px 0}
+</style></head><body><main>
+<h1>claude-code-session-manager</h1>
+<p class="sub">Local cockpit for the Claude Code CLI — an Electron desktop app.</p>
+<span class="tag">v0.89.0</span><span class="tag">MIT</span><span class="tag">Linux &amp; macOS</span><span class="tag">Electron 42 · React 18 · Vite</span>
+
+<h2>What it is</h2>
+<div class="card">Wraps the <code>claude</code> CLI in one desktop window: a multi-tab terminal, a configuration surface for the files Claude Code reads, a scheduler that runs queued PRDs as headless <code>claude -p</code> jobs, local voice dictation, and live transcript observability. New tabs open as a lightweight chat box and stay dormant (no PTY, no <code>claude</code> process) until the first message is sent.</div>
+
+<h2>Who it is for</h2>
+<div class="card">People who already use the <code>claude</code> CLI and want to run several sessions at once, edit its config in a UI, queue overnight work, and dictate with a microphone. The README describes it as a single-author hobby project with anonymous, opt-out telemetry (<code>SM_TELEMETRY=0</code>).</div>
+
+<h2>Key features</h2>
+<div class="grid">
+<div class="card"><b>Dormant tabs + chat</b><br>Headless chat engine over <code>claude -p</code> stream-json with resume; hydrate to a terminal on demand. <code>--simple</code> gives a single-terminal mode.</div>
+<div class="card"><b>Scheduler / PRD queue</b><br>PRDs under <code>session-manager-operations/scheduler/epics/&lt;epic-id&gt;/prds/</code> become headless jobs; authored via the <code>scheduler_create_prd</code> MCP tool.</div>
+<div class="card"><b>Config surface</b><br>Hooks (29 events, test-fire runner), plugins, MCP servers (5 transports), memory, settings with 4-scope drift display.</div>
+<div class="card"><b>Voice</b><br>Local Whisper ASR plus Silero VAD in a Web Worker; push-to-talk, continuous listening, barge-in. Nothing leaves the machine.</div>
+<div class="card"><b>Command palette</b><br>Cmd-K, grouped into session, voice, scheduler, config and nav bands.</div>
+</div>
+
+<h2>Domain model</h2>
+<div class="card"><ul>
+<li><b>TAB = cwd = Main Project</b> — one tab per project.</li>
+<li><b>EPIC</b> — one unit of work (user-facing name "Sessions"), 1:1 with a claude session, run in its own git worktree (<code>sm-epic/&lt;id&gt;</code>).</li>
+<li>Epics are created by an actor (<code>agentType</code>) and a mission (<code>tag</code>); every Epic is born <code>proposed</code>, and only a human pressing New Epic mints one.</li>
+<li>Per-project state lives under <code>&lt;cwd&gt;/session-manager-operations/</code>, each namespace with a single owning writer.</li>
+</ul></div>
+
+<h2>Repository structure</h2>
+<table>
+<tr><th>Path</th><th>Contents</th></tr>
+<tr><td><code>src/main/</code></td><td>Electron main process (<code>.cjs</code>): scheduler, chatRunner, pty, config, health, MCP seeding, lib/</td></tr>
+<tr><td><code>src/preload/</code></td><td>Preload bridge (<code>.cjs</code>)</td></tr>
+<tr><td><code>src/renderer/</code></td><td>React + Tailwind + zustand UI, xterm terminals</td></tr>
+<tr><td><code>src/seed/</code></td><td>Seed content</td></tr>
+<tr><td><code>plugins/</code>, <code>bin/</code>, <code>scripts/</code></td><td>Plugins, CLI entry, build/lint scripts</td></tr>
+<tr><td><code>tests/</code>, <code>e2e/</code></td><td>Vitest unit tests, Playwright Electron e2e</td></tr>
+<tr><td><code>web/</code>, <code>web-remote/</code></td><td>Web presence, manual build, remote app / relay</td></tr>
+<tr><td><code>session-manager-operations/</code></td><td>Per-project ops state and architecture docs</td></tr>
+</table>
+
+<h2>Run it</h2>
+<pre><code># end users
+npx claude-code-session-manager@latest
+npx claude-code-session-manager@latest --simple   # single terminal
+
+# from a checkout
+npm install
+npm run dev      # Vite + Electron with HMR</code></pre>
+<p class="sub">First launch downloads Electron (~200 MB) and rebuilds <code>node-pty</code>.</p>
+
+<h2>Key commands</h2>
+<table>
+<tr><td><code>npm run dev</code></td><td>Vite + Electron with HMR</td></tr>
+<tr><td><code>npm run build</code></td><td>Renderer build into <code>dist/</code></td></tr>
+<tr><td><code>npm run typecheck</code></td><td><code>tsc --noEmit</code></td></tr>
+<tr><td><code>npm run test:unit</code></td><td>Vitest</td></tr>
+<tr><td><code>npm run test:e2e</code></td><td>Playwright Electron under <code>xvfb-run</code></td></tr>
+<tr><td><code>npm run lint</code></td><td>Selector, hook, unregistered-test, doc-hierarchy and ops-path checks</td></tr>
+<tr><td><code>npm run health</code></td><td><code>src/main/health.cjs</code>; exit 0 = GREEN</td></tr>
+<tr><td><code>npm run manual:build</code></td><td>Build the manual</td></tr>
+</table>
+
+<h2>Project laws worth knowing</h2>
+<div class="card"><ul>
+<li>The app is free and open-core; the Field Manual is the only paid artifact.</li>
+<li>No CommonJS in the renderer, no ES modules in main.</li>
+<li>Every <code>claude -p</code> call site must pin <code>--model</code> and acquire a slot from <code>lib/sessionSlots.cjs</code>.</li>
+<li>Full rules: <code>CLAUDE.md</code> and <code>session-manager-operations/architecture/</code>.</li>
+</ul></div>
+
+<p class="sub" style="margin-top:32px">Generated from package.json (v0.89.0), README.md and CLAUDE.md. Repository history: 1,289 commits.</p>
+</main></body></html>

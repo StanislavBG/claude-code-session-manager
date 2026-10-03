@@ -33,6 +33,7 @@ const { createAdminHttp } = require('./lib/localAdminHttp.cjs');
 const prdCreate = require('./lib/prdCreate.cjs');
 const prdAdminRoutes = require('./lib/prdAdminRoutes.cjs');
 const projectHomeAdminRoutes = require('./lib/projectHomeAdminRoutes.cjs');
+const { smfileResponseHeaders } = require('./lib/smfileHeaders.cjs');
 const { appendAuditEvent } = require('./lib/auditLog.cjs');
 const chatRunner = require('./chatRunner.cjs');
 const promptSessionEvents = require('./promptSessionEvents.cjs');
@@ -1276,7 +1277,7 @@ app.whenReady().then(async () => {
       const buf = await fs.promises.readFile(realPath);
       const ext = path.extname(realPath).toLowerCase();
       const type = SMFILE_MIME[ext] || 'application/octet-stream';
-      return new Response(buf, { headers: { 'content-type': type } });
+      return new Response(buf, { headers: smfileResponseHeaders(realPath, type) });
     } catch (err) {
       return new Response(`smfile error: ${err && err.message}`, { status: 404 });
     }

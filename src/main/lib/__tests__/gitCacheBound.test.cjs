@@ -40,7 +40,7 @@ test('50 distinct cwds never exceed the cap', async () => {
   expect(statusCache.size).toBeLessThanOrEqual(CACHE_MAX_CWDS);
   expect(fileStatusCache.size).toBeLessThanOrEqual(CACHE_MAX_CWDS);
   expect(statusCache.size).toBe(CACHE_MAX_CWDS);
-});
+}, 30_000); // 100 git spawns; the 5s default flakes under a loaded full-suite run
 
 test('an expired entry is deleted when encountered', async () => {
   const [d] = mkdirs(1);

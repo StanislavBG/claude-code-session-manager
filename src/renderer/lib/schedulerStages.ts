@@ -18,6 +18,7 @@
 import type { ScheduleJob } from '../../preload/api'
 import type { PromptSession } from '../state/promptSessions'
 import { buildBacklogTree, flattenBacklogNodes, type BacklogBlocker } from './backlogTree'
+import { canonicalizeDependsOn } from './depSlugResolve'
 import { splitTitleAndGoal } from './epicDerive'
 import { prdNumber } from '../components/tabs/scheduler/sched-primitives'
 
@@ -255,18 +256,19 @@ function planGroups<N extends { row: { slug: string; planId?: string | null; dep
  */
 export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
   if (jobs.length === 0) return []
+  const cj = canonicalizeDependsOn(jobs)
   const now = opts.now ?? Date.now()
-  const avgMs = opts.avgDurationMs ?? averageDurationMs(jobs)
+  const avgMs = opts.avgDurationMs ?? averageDurationMs(cj)
   const conc = Math.max(1, opts.concurrency ?? 1)
-  const bySlug = new Map(jobs.map((j) => [j.slug, j]))
+  const bySlug = new Map(cj.map((j) => [j.slug, j]))
 
   // Global ETA position: ready pending rows in dispatch order.
   const ready = (j: ScheduleJob) =>
     j.status === 'pending' && (j.dependsOn ?? []).every((d) => bySlug.get(d) === undefined || bySlug.get(d)!.status === 'completed')
   const aheadIdx = new Map<string, number>()
-  jobs.filter(ready).sort(byPriority).forEach((j, i) => aheadIdx.set(j.slug, i))
+  cj.filter(ready).sort(byPriority).forEach((j, i) => aheadIdx.set(j.slug, i))
 
-  const sections = buildBacklogTree(jobs, opts.sessions, jobs)
+  const sections = buildBacklogTree(cj, opts.sessions, cj)
   const plans: Array<Plan & { _firstNum: number; _lastNum: number; _firstSlug: string }> = []
 
   for (const section of sections) {
@@ -444,10 +446,11 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
 
 /** KPI-band aggregates. `now` only anchors "done today" (local calendar day). */
 export function summarizeQueue(jobs: ScheduleJob[], now: number = Date.now()): QueueSummary {
-  const bySlug = new Map(jobs.map((j) => [j.slug, j]))
+  const cj = canonicalizeDependsOn(jobs)
+  const bySlug = new Map(cj.map((j) => [j.slug, j]))
   const today = new Date(now).toDateString()
   let readyNow = 0, totalQueued = 0, failedCount = 0, needsReviewCount = 0, quarantined = 0, doneToday = 0, inFlight = 0
-  for (const j of jobs) {
+  for (const j of cj) {
     if (j.status === 'pending') {
       totalQueued++
       const d = j.dependsOn ?? []
@@ -460,7 +463,7 @@ export function summarizeQueue(jobs: ScheduleJob[], now: number = Date.now()): Q
   }
   let needsYouStage: number | null = null
   if (failedCount + needsReviewCount + quarantined > 0) {
-    for (const p of buildPlans(jobs, { sessions: {}, now })) {
+    for (const p of buildPlans(cj, { sessions: {}, now })) {
       for (const s of p.stages) {
         if (s.rows.some((r) => isAttention(r.status))) {
           if (needsYouStage === null || s.n < needsYouStage) needsYouStage = s.n

@@ -10,6 +10,7 @@ import { AlmanacIcon } from './layout/AlmanacIcon'
 import { projectNameFromCwd, InfoDot } from './tabs/scheduler/sched-primitives'
 import { buildHeadChoicesBySlug, sectionHeadChoices } from './tabs/scheduler/DispositionControl'
 import { buildBacklogTree, flattenBacklogNodes } from '../lib/backlogTree'
+import { canonicalizeDependsOn } from '../lib/depSlugResolve'
 import { buildPlans } from '../lib/schedulerStages'
 import { mergeArchivedPlanRows } from '../lib/archivedPlanRows'
 import { useScheduledPrds } from '../lib/useScheduledPrds'
@@ -230,7 +231,9 @@ export function SchedulePanel({ scopeCwd = null, navigate, filterText, planMode 
     // DIFFERENT project doesn't render as a false "blocked by X (missing)"
     // warning — see buildBacklogTree's own doc comment. Only snap.jobs
     // (cwd-scoped) is rendered as this view's sections/rows.
-    () => (snap ? buildBacklogTree(snap.jobs, sessions, rawSnap?.jobs) : []),
+    () => (snap
+      ? buildBacklogTree(canonicalizeDependsOn(snap.jobs), sessions, rawSnap?.jobs ? canonicalizeDependsOn(rawSnap.jobs) : undefined)
+      : []),
     [snap, sessions, rawSnap],
   )
 

@@ -35,9 +35,9 @@ function loadDeps() {
     const { NodeTracerProvider } = require('@opentelemetry/sdk-trace-node');
     const { BatchSpanProcessor } = require('@opentelemetry/sdk-trace-base');
     const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
-    const { Resource } = require('@opentelemetry/resources');
-    const { SemanticResourceAttributes } = require('@opentelemetry/semantic-conventions');
-    return { api, NodeTracerProvider, BatchSpanProcessor, OTLPTraceExporter, Resource, SemanticResourceAttributes };
+    const { resourceFromAttributes } = require('@opentelemetry/resources');
+    const { ATTR_SERVICE_NAME } = require('@opentelemetry/semantic-conventions');
+    return { api, NodeTracerProvider, BatchSpanProcessor, OTLPTraceExporter, resourceFromAttributes, ATTR_SERVICE_NAME };
   } catch (err) {
     return { error: err };
   }
@@ -83,7 +83,7 @@ async function init({ endpoint, headers, serviceName, includeContent: ic } = {})
     return { ok: false, error: lastError };
   }
 
-  const { NodeTracerProvider, BatchSpanProcessor, OTLPTraceExporter, Resource, SemanticResourceAttributes } = deps;
+  const { NodeTracerProvider, BatchSpanProcessor, OTLPTraceExporter, resourceFromAttributes, ATTR_SERVICE_NAME } = deps;
 
   try {
     const exporter = new OTLPTraceExporter({
@@ -91,11 +91,11 @@ async function init({ endpoint, headers, serviceName, includeContent: ic } = {})
       headers: typeof headers === 'object' && headers ? headers : {},
     });
     const tp = new NodeTracerProvider({
-      resource: new Resource({
-        [SemanticResourceAttributes.SERVICE_NAME]: String(serviceName || 'session-manager'),
+      resource: resourceFromAttributes({
+        [ATTR_SERVICE_NAME]: String(serviceName || 'session-manager'),
       }),
+      spanProcessors: [new BatchSpanProcessor(exporter)],
     });
-    tp.addSpanProcessor(new BatchSpanProcessor(exporter));
     // Note: we deliberately do NOT call tp.register() — that installs a global
     // tracer provider, which would intercept any other OTEL user in the
     // process. We only want to emit our own spans, so we use the provider

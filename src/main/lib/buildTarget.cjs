@@ -21,9 +21,9 @@
  * daemon whose "release" is bump VERSION, write the changelog, tag, and flag
  * that the live server needs a restart. That requires reading CLAUDE.md and
  * git history and exercising judgment, so discovery lives in the agent: a
- * `null` here means **not configured yet**, and the UI turns it into a
- * "Set Up Build" bootstrap session (`src/renderer/lib/buildAction.ts`) that
- * probes the project and writes the config, rather than a disabled button.
+ * `null` here means **not configured yet**; the builder skill probes the
+ * project and writes the config. No IPC or UI calls this resolver today;
+ * builds start from a user-created Macro (e.g. agent `builder`, tag `build`).
  */
 'use strict';
 

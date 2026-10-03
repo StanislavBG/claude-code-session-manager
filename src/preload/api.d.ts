@@ -1,13 +1,5 @@
 import type { PromptSession } from '../renderer/state/promptSessions';
 
-export interface BuildTarget {
-  registry: string;
-  packageName: string;
-  versionBumpPolicy: string;
-  gates: string[];
-  discovered?: boolean;
-}
-
 export interface ActionOutcome {
   ok: boolean;
   kind?: 'info' | 'warn' | 'error';
@@ -241,6 +233,28 @@ export interface McpCatalogResult {
  *  same Epic-mission taxonomy, reused here since an Agent persona's `tags` field is that
  *  same concept, not a free-form string list. */
 export type AgentPersonaTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder';
+
+/** One user-defined sidebar HOT KEYS macro (macroLibrary.cjs). `projects` = absolute cwds or `'*'` (every project). */
+export interface Macro {
+  id: string;
+  label: string;
+  agentName: string;
+  tag: AgentPersonaTag;
+  prompt: string;
+  projects: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Omit `id` to create; set it to update an existing macro. */
+export interface MacroSaveInput {
+  id?: string;
+  label: string;
+  agentName: string;
+  tag: AgentPersonaTag;
+  prompt: string;
+  projects?: string[];
+}
 
 /** One global `~/.claude/agents/<name>.md` persona, per the Agent Library nav page. */
 export interface AgentPersona {
@@ -1514,8 +1528,6 @@ export interface SessionManagerAPI {
     engageRulesPath: () => Promise<string | null>;
     pickDirectory: () => Promise<string | null>;
     gitBranch: (cwd: string) => Promise<string | null>;
-    /** Publish target for 'build'-tagged Epics — null disables the Build toolbar button. */
-    resolveBuildTarget: (cwd: string) => Promise<BuildTarget | null>;
     /** Default: request a drain-first restart. `force: true` restarts immediately, killing running jobs. */
     rebootApp: (opts?: { force?: boolean }) => void;
     testFireHook: (args: TestFireHookArgs) => Promise<TestFireHookResult>;
@@ -1640,6 +1652,15 @@ export interface SessionManagerAPI {
       source: 'persona' | 'persona-overlay' | 'inherit' | null;
     }>;
     /** Fires after any save/delete/removeOverride — subscribers should re-fetch listPersonas(). */
+    onChanged: (handler: () => void) => () => void;
+  };
+  macros: {
+    list: () => Promise<Macro[]>;
+    save: (payload: MacroSaveInput) => Promise<Macro>;
+    delete: (payload: { id: string }) => Promise<{ ok: boolean }>;
+    /** Add/remove one project cwd. A macro shown in every project (`'*'`) cannot be narrowed: `{ ok: false, error: 'macro is shown in every project' }`. */
+    setProject: (payload: { id: string; cwd: string; enabled: boolean }) => Promise<{ ok: true; macro: Macro } | { ok: false; error: string }>;
+    /** Fires after any save/delete/setProject — re-fetch list(). */
     onChanged: (handler: () => void) => () => void;
   };
   models: {

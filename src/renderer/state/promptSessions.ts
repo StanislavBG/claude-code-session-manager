@@ -94,7 +94,7 @@ export interface PromptSession {
    *  goal, reference(s). Lets the Epic's first turn render a structured AIM
    *  briefing card instead of regex-parsing the flat string back apart.
    *  Absent on Epics minted before this field existed, and on any Epic whose
-   *  opening prompt carried no sections (e.g. EpicQueue's scripted 'build'
+   *  opening prompt carried no sections (e.g. a resumed/archived
    *  Epic) — those fall back to rendering `openingPrompt`/`goalText` as a
    *  single block. */
   sections?: EpicIntakeSection[]
@@ -273,8 +273,8 @@ interface PromptSessionsState {
     /** Full opening-prompt body + its labeled sections (epicIntake.ts's
      *  composeEpicIntake) — persisted on the minted Epic alongside goalText
      *  so its first turn can render the AIM briefing card. Omitted by
-     *  callers that never composed a full opening prompt (resumeArchived,
-     *  EpicQueue's scripted 'build' Epic). */
+     *  callers that never composed a full opening prompt (resumeArchived).
+     *  Hot-key macro launches do compose one. */
     openingPrompt?: string,
     sections?: EpicIntakeSection[],
     /** New Session card's per-Epic runtime overrides — forwarded as IPC fields; main writes the record. */
@@ -354,7 +354,7 @@ type AuditEventKind =
 
 /** Fire-and-forget: an IPC failure logs a console warning and never blocks or
  *  rejects the store mutation it accompanies. `source` traces which renderer
- *  surface initiated the transition (NewEpicCard, EpicQueue Run Build, the
+ *  surface initiated the transition (NewEpicCard, SessionActionsBar macro launches, the
  *  approve bar, etc) — see auditLog.cjs's doc comment for why this exists. */
 function emitAuditEvent(kind: AuditEventKind, fields: { cwd: string; epicId: string; source: string }): void {
   if (typeof window === 'undefined' || !window.api?.auditLog?.append) return

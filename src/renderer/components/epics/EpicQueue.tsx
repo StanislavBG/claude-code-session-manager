@@ -13,8 +13,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Z } from '../../lib/zLayers'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
-import { useSessions } from '../../state/sessions'
-import { useChat } from '../../state/chat'
 import { useEpicTerminal } from '../../state/epicTerminal'
 import { toast } from '../../state/toast'
 import {
@@ -30,132 +28,7 @@ import { EpicStatusChip, EpicKindTag, EpicInboundTag, EpicWorktreeChip, epicStat
 import { inboundFeedbackOrigin } from '../../lib/epicOrigin'
 import { EmptyState } from '../ui/EmptyState'
 import { formatAgo } from '../../lib/formatTime'
-import { composeEpicIntake } from '../../lib/epicIntake'
-import { useBuildTarget } from '../../lib/useBuildTarget'
-import {
-  BUILD_RELEASE_GOAL_TEXT,
-  BUILD_SETUP_GOAL_TEXT,
-  buildActionDisabled,
-  buildActionLabel,
-  buildActionMode,
-  buildActionTooltip,
-} from '../../lib/buildAction'
 import { SessionActionsBar } from './SessionActionsBar'
-
-/** Any other 'build'-tagged Epic for this cwd that hasn't been marked
- *  completed yet — used to stop "Build Project" from spawning a second,
- *  redundant build Epic while one is already running. Returns a reference
- *  into the store's own session objects (not a fresh allocation) so this
- *  stays a stable zustand selector. */
-function useInFlightBuildEpic(cwd: string | null): PromptSession | null {
-  return usePromptSessions((s) => {
-    if (!cwd) return null
-    for (const key in s.sessions) {
-      const session = s.sessions[key]
-      if (session.cwd === cwd && session.tag === 'build' && session.status !== 'completed') return session
-    }
-    return null
-  })
-}
-
-/** Toolbar action (not per-row — Builder isn't scoped to one Epic): creates a
- *  brand-new 'build'-tagged Epic via the same creation path NewEpicCard's
- *  submit uses, and auto-sends its opening prompt so a fresh, isolated agent
- *  session starts immediately.
- *
- *  Two goals, one button (`lib/buildAction.ts` owns the decision): with a
- *  resolved target it's a release run; with none it's **Set Up Build**, a
- *  bootstrap Epic that probes the project read-only, writes build-target.json
- *  plus the `.claude/agents/builder.md` overlay and stops for a human. Only a
- *  missing project tab (or an unfinished lookup) actually disables it — "no
- *  target" is a bootstrap state, not a capability denial. If a build Epic for
- *  this cwd is already in flight, both entry points open it instead of
- *  minting a second one. */
-function useBuildAction(onSelect: (id: string) => void) {
-  const activeTabCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
-  const { target, resolving } = useBuildTarget(activeTabCwd)
-  const [creating, setCreating] = useState(false)
-  const inFlight = useInFlightBuildEpic(activeTabCwd)
-  // Actor for the 'build' Epic — same lookup-by-name pattern
-  // ProjectPagesSection.tsx already uses for its own dedicated-pipeline
-  // agent, so Build Epics get an Actor line instead of opening on Default.
-  const [builderPersona, setBuilderPersona] = useState<{ name: string; description: string | null } | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    const listPersonas = window.api?.agents?.listPersonas
-    if (!listPersonas) return
-    listPersonas()
-      .then((list) => {
-        if (cancelled) return
-        const found = list.find((a) => a.name === 'builder')
-        setBuilderPersona(found ? { name: found.name, description: found.description } : null)
-      })
-      .catch(() => {
-        if (!cancelled) setBuilderPersona(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-  // Reaching an in-flight build Epic must stay possible even when the
-  // project currently has no resolvable publish target — the guard's whole
-  // point is getting the user back to that Epic, not blocking them.
-  const mode = buildActionMode({ cwd: activeTabCwd, resolving, target, inFlight, creating })
-  const disabled = buildActionDisabled(mode)
-  const label = buildActionLabel(mode)
-  const tooltip = buildActionTooltip(mode)
-
-  /** Shared creation sequence for both entry points: mints the fresh
-   *  'build'-tagged Epic and approves it out of `proposed`. Callers decide
-   *  what happens to `openingPrompt` next (auto-send vs. leave in the
-   *  composer as a draft). The goal is the release protocol when the project
-   *  has a target and the bootstrap protocol when it doesn't — same Epic
-   *  shape, same `build` tag, so the in-flight guard covers both. */
-  const createBuildEpic = async () => {
-    if (!activeTabCwd) return null
-    const { goalText, openingPrompt } = composeEpicIntake({
-      title: '',
-      goal: target ? BUILD_RELEASE_GOAL_TEXT : BUILD_SETUP_GOAL_TEXT,
-      tag: 'build',
-      agentName: builderPersona?.name,
-      agentDescription: builderPersona?.description ?? undefined,
-    })
-    const session = builderPersona
-      ? await usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'EpicQueue Run Build', builderPersona.name)
-      : await usePromptSessions.getState().createPromptSession(activeTabCwd, goalText, 'build', 'EpicQueue Run Build')
-    usePromptSessions.getState().approveProposed(session.id, 'EpicQueue Run Build')
-    return { session, openingPrompt }
-  }
-
-  const handleClick = async () => {
-    if (!activeTabCwd || creating) return
-    if (inFlight) {
-      onSelect(inFlight.id)
-      toast.info('A Build session is already in flight for this project — opening it.')
-      return
-    }
-    if (disabled) return
-    setCreating(true)
-    try {
-      const created = await createBuildEpic()
-      if (!created) return
-      const { session, openingPrompt } = created
-      useChat.getState().send({
-        tabId: session.id,
-        sessionId: session.claudeSessionId,
-        cwd: activeTabCwd,
-        prompt: openingPrompt,
-      })
-      onSelect(session.id)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  return { disabled, inFlight, label, tooltip, handleClick }
-}
 
 const STATUS_ORDER: EpicDisplayStatus[] = ['proposed', 'failed', 'attention', 'running', 'needs', 'queued', 'active', 'completed']
 
@@ -517,16 +390,6 @@ function RowMenuButton({
   )
 }
 
-/** Toolbar — one button per Action, no dropdown. The fixed "+ New Session"
- *  and "Run Build" entries plus one project-scoped Agent Library persona each
- *  (see `SessionActionsBar` / `lib/projectActions.ts`). Build's own gating
- *  stays here because it owns the publish-target + in-flight-dedup logic a
- *  generic Action can't express; the bar just renders what it's handed. */
-function ActionsToolbar({ onNew, onSelect }: { onNew: () => void; onSelect: (id: string) => void }) {
-  const build = useBuildAction(onSelect)
-  return <SessionActionsBar onNew={onNew} onSelect={onSelect} build={build} />
-}
-
 function QueueRow({ epic, snapshots, events, status, selected, compact, now, onSelect, pinned = false, onPin }: QueueRowProps) {
   const [editing, setEditing] = useState(false)
   const age = activityAgeLabel(epic.id, epic, events, now)
@@ -758,22 +621,21 @@ export function EpicQueue({
   return (
     <aside className="w-[352px] h-full shrink-0 border-r border-line bg-bg-elev flex flex-col min-h-0">
       {/* ── Section 1 · HOT KEYS ──────────────────────────────────────────
-          One button per Action, the whole width. "Per project" is literal and
-          already real: besides + New Session and Build, the list is one button
-          per Agent Library persona scoped to this cwd (`projects:` in
-          ~/.claude/agents/<name>.md → lib/projectActions.ts), so a project
-          customizes its hot keys by editing personas, not a pane-local list. */}
+          One button per hot key, the whole width: "+ New Session" plus the
+          project's Macros (macro library, rendered by `SessionActionsBar`).
+          "Per project" is literal — a project customizes its hot keys by
+          editing its macros, not a pane-local list. */}
       <div className="px-3.5 pt-3 pb-2.5 flex flex-col gap-2 border-b border-line" data-testid="epic-queue-hotkeys">
         <div className="flex items-center gap-2">
           <span className="font-mono text-[10.5px] font-semibold tracking-[1.1px] uppercase text-fg-faint">Hot keys</span>
           <span
             className="font-mono text-[10px] text-fg-faint"
-            title="Per project: each Agent Library persona scoped to this project with an action: line gets its own button here."
+            title="Per project: hot keys are + New Session plus this project's Macros (macro library)."
           >
             per project
           </span>
         </div>
-        <ActionsToolbar onNew={onNew} onSelect={onSelect} />
+        <SessionActionsBar onNew={onNew} onSelect={onSelect} />
       </div>
 
       {/* ── Section 2 · THE SESSIONS WIDGET ───────────────────────────────

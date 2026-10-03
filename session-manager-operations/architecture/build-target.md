@@ -1,6 +1,6 @@
 # build-target.json — a project's release destination
 
-`build-target.json` is what the Sessions toolbar's Build button reads to decide whether a
+`build-target.json` is what the builder agent reads to learn whether a
 project knows how to ship itself. One file per project, at:
 
 ```
@@ -35,20 +35,17 @@ not merely add to it. (Example: the isolated-worktree publish technique exists b
 `vite build` reads the working directory; a project with no build step should say so and skip
 it rather than cargo-cult it.)
 
-## The three states of the Build button
+## How builds start
 
 `resolveBuildTarget()` returns a target or `null`, and `null` means **not configured yet** —
-never "this project cannot be built". `src/renderer/lib/buildAction.ts` turns that into:
+never "this project cannot be built". There is no Build button and no IPC for the resolver:
+a build is started from a user-created Macro (HOT KEYS strip), e.g. agent `builder`,
+tag `build`, prompt "Build and publish this project". The builder agent reads this file (or
+probes the project and proposes one) and stops for human approval before any first release.
 
-| Resolver says | Button | Press does |
-| --- | --- | --- |
-| a target | **Run Build** | release run (`/builder`) |
-| `null` | **Set Up Build** | bootstrap session — probes the project read-only, writes this file *and* the `.claude/agents/builder.md` overlay, then **stops for human approval** |
-| (a build session already open) | **Open Build** | re-opens it |
-
-The bootstrap session never publishes. A human gate between discovery and first execution is
-mandatory: writing a build target and immediately executing a release against it, on a project
-the agent just met, is how you get an accidental `npm publish`.
+A human gate between discovery and first execution is mandatory: writing a build target and
+immediately executing a release against it, on a project the agent just met, is how you get
+an accidental `npm publish`.
 
 ## Why the resolver doesn't sniff pyproject.toml / Cargo.toml / go.mod
 

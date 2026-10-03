@@ -4,7 +4,6 @@
  * sched-primitives.tsx) — single source of truth for status/kind styling,
  * consumed by EpicQueue (left pane) and the detail pane PRDs sibling.
  */
-import type { ReactNode } from 'react'
 import type { PromptSession } from '../../state/promptSessions'
 import type { EpicDisplayStatus } from '../../lib/epicDerive'
 import type { InboundFeedbackOrigin } from '../../lib/epicOrigin'
@@ -153,7 +152,7 @@ export function EpicInboundTag({ origin, small }: { origin: InboundFeedbackOrigi
  * (`worktree` only carries dir/branch/baseCwd/status/conflictReason) and
  * this app's own convention is real data only, never a fabricated number.
  */
-const WORKTREE_TONE: Record<
+export const WORKTREE_TONE: Record<
   NonNullable<PromptSession['worktree']>['status'],
   { bg: string; text: string; dot: string; label: string }
 > = {
@@ -199,47 +198,3 @@ export function EpicWorktreeChip({ worktree, small }: { worktree: PromptSession[
   )
 }
 
-// ─── EpicAgentTag ────────────────────────────────────────────────────────────
-/**
- * Read-only readout of "which Agent (and, when resolved, which model) is
- * this Epic actually running as" — the session-specific counterpart to
- * EpicKindTag, so this fact lives inside the Epic (EPICS is Session Home)
- * rather than only in Agent Library. Purely presentational: `model` arrives
- * fully composed by the caller (a plain string, or a richer node such as
- * EffectiveRuntimeLine carrying its own provenance tooltip) — this component
- * never formats model info itself, and `onClick` is the caller's read-only
- * jump-to-definition into Agent Library; it never edits anything itself.
- */
-export function EpicAgentTag({
-  agentType,
-  model,
-  modelTitle,
-  onClick,
-  small,
-}: {
-  agentType: string
-  /** Fully composed by the caller. Omit/null when there is nothing to show. */
-  model?: ReactNode
-  /** Plain-text mirror of `model`'s content, folded into the button's OWN
-   *  title so hovering anywhere on the tag — not just the inner model node —
-   *  surfaces the same info, matching the old plain-string contract's
-   *  full-tag tooltip. */
-  modelTitle?: string | null
-  onClick?: () => void
-  small?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={`Agent: ${agentType}${modelTitle ? ` — ${modelTitle}` : ''} — click to open in Agent Library`}
-      data-testid="epic-agent-tag"
-      className={`inline-flex items-center gap-1 rounded font-mono font-semibold uppercase tracking-wide ring-1 ring-inset ring-hive-teal/40 text-hive-teal whitespace-nowrap hover:bg-hive-teal/10 ${
-        small ? 'px-1.5 py-0.5 text-[9.5px]' : 'px-[7px] py-[3px] text-[10.5px]'
-      }`}
-    >
-      {agentType}
-      {model && <span className="normal-case tracking-normal text-fg-faint">· {model}</span>}
-    </button>
-  )
-}

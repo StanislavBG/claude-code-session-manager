@@ -3,7 +3,7 @@ import { createElement } from 'react'
 import { describe, it, expect, afterEach } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { EffectiveRuntimeLine } from '../EffectiveRuntimeLine'
+import { EffectiveRuntimeLine, formatCompactRuntime } from '../EffectiveRuntimeLine'
 import type { EffectiveModelInfo } from '../../../lib/effectiveModelInfo'
 
 /**
@@ -130,5 +130,43 @@ describe('EffectiveRuntimeLine', () => {
   it('reports an Epic-level override with its own "this session" provenance', () => {
     const el = mount(info({ epicModel: 'claude-opus-5', effortLevel: 'max', effortSource: 'epic' }))
     expect(el.textContent).toBe('opus → claude-opus-5 (this session) · effort max (this session)')
+  })
+})
+
+describe('formatCompactRuntime', () => {
+  it('pinned concrete id: condenses to the model family, not the full resolved id', () => {
+    expect(formatCompactRuntime(info({ modelAlias: 'claude-opus-5', resolvedModelId: 'claude-opus-5', resolvedFrom: null }))).toBe(
+      'architect · opus',
+    )
+  })
+
+  it('resolved with effort: "<agent> · <model> · effort <level>"', () => {
+    expect(
+      formatCompactRuntime(
+        info({ modelAlias: 'opus', modelSource: 'persona', resolvedModelId: 'claude-opus-5', resolvedFrom: 'scheduler-run', effortLevel: 'high', effortSource: 'user' }),
+      ),
+    ).toBe('architect · opus · effort high')
+  })
+
+  it('inherit: condenses the resolved model to its family rather than "inherited"', () => {
+    expect(
+      formatCompactRuntime(info({ modelAlias: null, modelSource: 'inherit', resolvedModelId: 'claude-sonnet-5', resolvedFrom: 'transcript' })),
+    ).toBe('architect · sonnet')
+  })
+
+  it('fallback: dangling persona shows the fallback model, not "persona not found"', () => {
+    expect(formatCompactRuntime(info({ modelAlias: null, modelSource: 'fallback', resolvedModelId: null, resolvedFrom: null }))).toBe(
+      'architect · sonnet',
+    )
+  })
+
+  it('effort-null: omits the effort segment entirely rather than showing "model default"', () => {
+    const text = formatCompactRuntime(info({ modelAlias: 'opus', modelSource: 'persona', resolvedModelId: 'claude-opus-5', effortLevel: null, effortSource: null }))
+    expect(text).toBe('architect · opus')
+    expect(text).not.toContain('effort')
+  })
+
+  it('Epic-level override: model family + "this session" effort, same precedence as the verbose line', () => {
+    expect(formatCompactRuntime(info({ epicModel: 'claude-opus-5', effortLevel: 'max', effortSource: 'epic' }))).toBe('architect · opus · effort max')
   })
 })

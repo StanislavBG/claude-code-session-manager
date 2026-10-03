@@ -8,10 +8,11 @@ import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsC
 
 /**
  * PRD 1035 — surfacing the per-Epic git worktree isolation checkpoint
- * (PRDs 1032-1034) in the UI: the EpicWorktreeChip status readout and the
- * EpicDetail conflict banner + Resolve-in-Terminal action. There is no manual
- * "Merge to main" / "Retry merge" button — merging is done in git. Mirrors
- * EpicDetail.test.tsx's window.api stub pattern.
+ * (PRDs 1032-1034) in the UI: EpicDetail's compact meta line (branch, with a
+ * status suffix when not plain 'active') and its conflict banner +
+ * Resolve-in-Terminal action. There is no manual "Merge to main" / "Retry
+ * merge" button — merging is done in git. Mirrors EpicDetail.test.tsx's
+ * window.api stub pattern.
  */
 
 vi.mock('@xterm/xterm', () => {
@@ -145,15 +146,13 @@ describe('Epic worktree isolation UI (PRD 1035)', () => {
     root = null
   })
 
-  it('EpicDetail shows "shared tree" when the Epic has no worktree', async () => {
+  it('EpicDetail shows no compact meta line when the Epic has no worktree, no branch, and no agent', async () => {
     installWindowApiMock()
     const { el } = await mountActiveEpicWithWorktree(undefined)
-    const chip = el.querySelector('[data-testid="epic-worktree-chip"]')
-    expect(chip).not.toBeNull()
-    expect(chip!.textContent).toBe('shared tree')
+    expect(el.querySelector('[data-testid="epic-detail-meta-line"]')).toBeNull()
   })
 
-  it('EpicDetail shows the isolated branch chip and NO "Merge to main" button when worktree.status is active', async () => {
+  it('EpicDetail shows the branch in the compact meta line and NO "Merge to main" button when worktree.status is active', async () => {
     installWindowApiMock()
     const { el } = await mountActiveEpicWithWorktree({
       dir: '/tmp/worktrees/epic-x',
@@ -161,8 +160,8 @@ describe('Epic worktree isolation UI (PRD 1035)', () => {
       baseCwd: '/tmp/proj',
       status: 'active',
     })
-    const chip = el.querySelector('[data-testid="epic-worktree-chip"]')
-    expect(chip!.textContent).toContain('sm-epic/epic-x')
+    const metaLine = el.querySelector('[data-testid="epic-detail-meta-line"]')
+    expect(metaLine!.textContent).toContain('sm-epic/epic-x')
     expect(el.querySelector('[data-testid="epic-merge-to-main"]')).toBeNull()
     expect(el.querySelector('[data-testid="epic-worktree-conflict-banner"]')).toBeNull()
   })

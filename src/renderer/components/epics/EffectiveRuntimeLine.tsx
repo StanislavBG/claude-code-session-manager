@@ -67,14 +67,38 @@ function modelSegment(info: EffectiveModelInfo): ModelSegment {
 
 /**
  * Pure formatter behind EffectiveRuntimeLine — exported so a caller that
- * needs a plain string (e.g. EpicAgentTag's own button `title`, which can't
- * hold a ReactNode) renders the identical text instead of a second,
+ * needs a plain string (e.g. EpicDetail's own agent button `title`, which
+ * can't hold a ReactNode) renders the identical text instead of a second,
  * divergent copy of this logic.
  */
 export function formatEffectiveRuntimeLine(info: EffectiveModelInfo): { text: string; title: string } {
   const model = modelSegment(info)
   const effort = formatEffortSegment(info.effortLevel, info.effortSource)
   return { text: `${model.text} · ${effort}`, title: `${model.title} ${effort}. ${effortProvenanceNote(info.effortSource)}` }
+}
+
+/** The short model identifier for the compact header line — alias/id
+ *  collapsed to its family where one is recognizable, falling back to the
+ *  raw string (never the full resolved/provenance detail formatEffectiveRuntimeLine carries). */
+function compactModelText(info: EffectiveModelInfo): string {
+  if (info.epicModel) return modelFamily(info.epicModel) ?? info.epicModel
+  if (info.modelSource === 'fallback') return FALLBACK_DISPLAY_MODEL
+  const raw = info.modelAlias ?? info.resolvedModelId
+  if (!raw) return 'inherited'
+  return modelFamily(raw) ?? raw
+}
+
+/**
+ * Condensed single-line form for the Epic detail header's mono meta string —
+ * "<agent> · <model alias or family> · effort <level>", effort segment
+ * omitted entirely when none is set. The full verbose formatEffectiveRuntimeLine
+ * text (resolved id, pinned/inherited/fallback provenance) is kept as the
+ * caller's tooltip rather than folded in here.
+ */
+export function formatCompactRuntime(info: EffectiveModelInfo): string {
+  const parts = [info.agentType, compactModelText(info)]
+  if (info.effortLevel) parts.push(`effort ${info.effortLevel}`)
+  return parts.join(' · ')
 }
 
 /**

@@ -80,7 +80,7 @@ const { writeJsonSync, writeTextAtomic, validatePath, validateWrite } = require(
 const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
 const { SHIPPED_PERSONA_SEEDS } = require('./lib/shippedPersonaSeeds.cjs');
 
-const PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator'];
+const PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder'];
 // What `{ done: true }` (the pre-seeded-set marker format) meant: only these two personas existed
 // in PERSONAS at the time. Fixed, not derived from the current PERSONAS array above — otherwise
 // every future persona added to PERSONAS would retroactively count as already delivered to a

@@ -115,7 +115,9 @@ function inspectGit(start) {
   } catch {
     return { shape: 'unknown', dir: entry.dir, mainRoot: null, reason: `worktree admin back-reference missing (${adminGitdirFile})` };
   }
-  if (path.resolve(backRef) !== path.resolve(gitPath)) {
+  // git records realpaths, so compare canonical spellings (macOS /var -> /private/var).
+  const canon = (q) => { try { return fs.realpathSync(q); } catch { return path.resolve(q); } };
+  if (path.resolve(backRef) !== path.resolve(gitPath) && canon(backRef) !== canon(gitPath)) {
     return { shape: 'unknown', dir: entry.dir, mainRoot: null, reason: `worktree admin back-reference points elsewhere (${adminGitdirFile})` };
   }
   return { shape: 'worktree', dir: entry.dir, mainRoot: candidateMain, reason: 'linked worktree, back-reference verified' };

@@ -76,6 +76,6 @@ describe('plan band header', () => {
       // Newest-first: plans[1] is the archived 6-step chain (plans[0] is the 10-b1 follow-up).
       <PlanBand plan={plans[1]} now={0} hidden={new Set()} indexBySlug={new Map()} headChoicesBySlug={new Map()} onRowFocused={() => {}} />,
     ))
-    expect(el.querySelector('[data-testid="plan-step-count"]')!.textContent).toBe('6 steps · 6 done')
+    expect(el.querySelector('[data-testid="plan-progress-label"]')!.textContent).toBe('6/6')
   })
 })

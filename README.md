@@ -105,6 +105,8 @@ npm run test:e2e     # Playwright Electron under xvfb-run (Linux)
 
 PRs welcome. Before authoring a scheduler PRD, read [`src/main/templates/PRD_AUTHORING.md`](src/main/templates/PRD_AUTHORING.md) — the two stuck-job postmortems in there will save you tokens.
 
+Enjoying Session Manager? [☕ Buy me a coffee](https://bilko.run/coffee) — the app stays free either way.
+
 ## License
 
 MIT. Built by one person on evenings and weekends.

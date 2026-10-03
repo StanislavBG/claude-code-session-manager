@@ -730,6 +730,13 @@ const projectHomeAdminWriteBody = z.object({
   html: z.string(),
 }).strict();
 
+// Mirrors projectHomeAdminWriteBody; content limits (network-check rejections,
+// size cap, duration meta) live in projectHomeAdminRoutes.cjs's validateDemoVideoHtml.
+const projectDemoVideoAdminWriteBody = z.object({
+  cwd: z.string().min(1).max(4096).optional(),
+  html: z.string(),
+}).strict();
+
 const projectBriefSetPin = z.object({
   cwd: z.string().min(1).max(4096),
   block: PROJECT_BRIEF_BLOCK,
@@ -1132,6 +1139,7 @@ module.exports = {
     projectBriefCwd,
     projectPagesCwd,
     projectHomeAdminWriteBody,
+    projectDemoVideoAdminWriteBody,
     projectBriefSetPin,
     projectBriefUpdate,
     promptSessionTranscriptAppend,

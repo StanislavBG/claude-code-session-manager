@@ -13073,7 +13073,8 @@ const remote = {
       // realpath resolves symlinks; re-check boundary to block a rogue agent job
       // that places a symlink inside the PRDs dir pointing outside the safe root.
       const real = await fsp.realpath(filePath);
-      if (!real.startsWith(dir + path.sep)) {
+      const realDir = await fsp.realpath(dir);
+      if (!real.startsWith(realDir + path.sep)) {
         return { ok: false, error: 'invalid slug' };
       }
       const text = await fsp.readFile(real, 'utf8');
@@ -13150,7 +13151,8 @@ const remote = {
       // re-assert containment; also reject the target if it is already a
       // symlink.
       const realParent = await fsp.realpath(path.dirname(resolved));
-      if (realParent !== dir && !realParent.startsWith(dir + path.sep)) {
+      const realDir = await fsp.realpath(dir);
+      if (realParent !== realDir && !realParent.startsWith(realDir + path.sep)) {
         return { ok: false, error: 'invalid slug' };
       }
       const existing = await fsp.lstat(resolved).catch(() => null);
@@ -13293,7 +13295,8 @@ const remote = {
       // Symlink defense, matching readPrd/writePrd's comment: safeSlugPathIn
       // is lexical and does not resolve symlinks.
       const real = await fsp.realpath(filePath);
-      if (!real.startsWith(dir + path.sep)) return { ok: false, error: 'invalid slug' };
+      const realDir = await fsp.realpath(dir);
+      if (!real.startsWith(realDir + path.sep)) return { ok: false, error: 'invalid slug' };
       const [raw, parsed] = await Promise.all([fsp.readFile(real, 'utf8'), prdParser.parsePrdRaw(real)]);
       return {
         ok: true,
@@ -13397,7 +13400,8 @@ const remote = {
       // target that is itself already a symlink — a rogue job could plant
       // one inside the PRDs dir pointing outside the safe root.
       const real = await fsp.realpath(filePath);
-      if (!real.startsWith(dir + path.sep)) return { ok: false, error: 'invalid slug' };
+      const realDir = await fsp.realpath(dir);
+      if (!real.startsWith(realDir + path.sep)) return { ok: false, error: 'invalid slug' };
       const existing = await fsp.lstat(filePath).catch(() => null);
       if (existing && existing.isSymbolicLink()) return { ok: false, error: 'invalid slug' };
       raw = await fsp.readFile(real, 'utf8');

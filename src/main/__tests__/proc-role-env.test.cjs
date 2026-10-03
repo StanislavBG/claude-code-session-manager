@@ -84,7 +84,8 @@ describe('real spawn paths carry SM_PROC_ROLE', () => {
 });
 
 describe('scripts/sm-ps.cjs', () => {
-  test('--json lists a tagged stub child (and its descendant) with role, slug, project root', async () => {
+  // Linux-only by design: sm-ps reads /proc/<pid>/environ, which macOS lacks (scripts/sm-ps.cjs header).
+  test.skipIf(process.platform !== 'linux')('--json lists a tagged stub child (and its descendant) with role, slug, project root', async () => {
     const env = cleanChildEnv({ SM_SCHEDULER_JOB_SLUG: 'fixture-slug', SM_PROJECT_ROOT: '/fixture/root' });
     // outer sh forks an inner sleep, so we also assert descendants are included
     const child = spawn('/bin/sh', ['-c', 'sleep 30 & wait'], { env, stdio: 'ignore' });

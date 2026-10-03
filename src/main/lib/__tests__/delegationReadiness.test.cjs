@@ -113,17 +113,17 @@ async function makeGreenFixtures() {
         {
           matcher: 'Write|Edit|NotebookEdit',
           hooks: [
-            { type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` },
-            { type: 'command', command: `node ${INLINE_IMPLEMENTATION_GUARD_SCRIPT}` },
+            { type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` },
+            { type: 'command', command: `node "${INLINE_IMPLEMENTATION_GUARD_SCRIPT}"` },
           ],
         },
         {
           matcher: 'Bash',
-          hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }],
+          hooks: [{ type: 'command', command: `node "${DESTRUCTIVE_GIT_GUARD_SCRIPT}"` }],
         },
         {
           matcher: 'ScheduleWakeup|CronCreate|Task|Agent',
-          hooks: [{ type: 'command', command: `node ${SELF_SCHEDULE_GUARD_SCRIPT}` }],
+          hooks: [{ type: 'command', command: `node "${SELF_SCHEDULE_GUARD_SCRIPT}"` }],
         },
       ],
     },
@@ -511,13 +511,13 @@ test('destructive-git-guard: fails independently when the hook is missing', asyn
         {
           matcher: 'Write|Edit|NotebookEdit',
           hooks: [
-            { type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` },
-            { type: 'command', command: `node ${INLINE_IMPLEMENTATION_GUARD_SCRIPT}` },
+            { type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` },
+            { type: 'command', command: `node "${INLINE_IMPLEMENTATION_GUARD_SCRIPT}"` },
           ],
         },
         {
           matcher: 'ScheduleWakeup|CronCreate|Task|Agent',
-          hooks: [{ type: 'command', command: `node ${SELF_SCHEDULE_GUARD_SCRIPT}` }],
+          hooks: [{ type: 'command', command: `node "${SELF_SCHEDULE_GUARD_SCRIPT}"` }],
         },
       ],
     },
@@ -538,7 +538,7 @@ test('destructive-git-guard: fails when the hook names a script that does not ex
       PreToolUse: [
         {
           matcher: 'Write|Edit|NotebookEdit',
-          hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }],
+          hooks: [{ type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` }],
         },
         {
           matcher: 'Bash',
@@ -561,7 +561,7 @@ test('installDestructiveGitGuard: writes the canonical STABLE-SHIM-path entry an
       PreToolUse: [
         {
           matcher: 'Write|Edit|NotebookEdit',
-          hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }],
+          hooks: [{ type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` }],
         },
       ],
     },
@@ -577,7 +577,7 @@ test('installDestructiveGitGuard: writes the canonical STABLE-SHIM-path entry an
   const written = JSON.parse(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'));
   // The pre-existing Write|Edit|NotebookEdit matcher (and its hook) survives untouched.
   expect(written.hooks.PreToolUse).toContainEqual(
-    { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] },
+    { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` }] },
   );
   expect(written.hooks.PreToolUse).toContainEqual(
     { matcher: 'Bash', hooks: [{ type: 'command', command: shimCommand }] },
@@ -598,7 +598,7 @@ test('installDestructiveGitGuard: flips destructive-git-guard FAIL -> PASS on a 
   await writeJson(settingsPath, {
     hooks: {
       PreToolUse: [
-        { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] },
+        { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` }] },
       ],
     },
   });
@@ -650,7 +650,7 @@ test('installDestructiveGitGuard: repairs a broken entry in place rather than du
       PreToolUse: [
         {
           matcher: 'Write|Edit|NotebookEdit',
-          hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }],
+          hooks: [{ type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` }],
         },
         {
           matcher: 'Bash',
@@ -708,15 +708,15 @@ test('inline-implementation-guard: fails independently when the hook is missing 
       PreToolUse: [
         {
           matcher: 'Write|Edit|NotebookEdit',
-          hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }],
+          hooks: [{ type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` }],
         },
         {
           matcher: 'Bash',
-          hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }],
+          hooks: [{ type: 'command', command: `node "${DESTRUCTIVE_GIT_GUARD_SCRIPT}"` }],
         },
         {
           matcher: 'ScheduleWakeup|CronCreate|Task|Agent',
-          hooks: [{ type: 'command', command: `node ${SELF_SCHEDULE_GUARD_SCRIPT}` }],
+          hooks: [{ type: 'command', command: `node "${SELF_SCHEDULE_GUARD_SCRIPT}"` }],
         },
       ],
     },
@@ -740,13 +740,13 @@ test('inline-implementation-guard: fails with the "would silently guard nothing"
         {
           matcher: 'Write|Edit|NotebookEdit',
           hooks: [
-            { type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` },
+            { type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` },
             { type: 'command', command: 'node /does/not/exist/guard-inline-implementation.cjs' },
           ],
         },
         {
           matcher: 'Bash',
-          hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }],
+          hooks: [{ type: 'command', command: `node "${DESTRUCTIVE_GIT_GUARD_SCRIPT}"` }],
         },
       ],
     },
@@ -779,8 +779,8 @@ test('installInlineImplementationGuard: appends into the EXISTING Write|Edit|Not
     someUnrelatedTopLevelKey: { nested: [1, 2, 3], note: 'do not touch' },
     hooks: {
       PreToolUse: [
-        { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] },
-        { matcher: 'Bash', hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }] },
+        { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` }] },
+        { matcher: 'Bash', hooks: [{ type: 'command', command: `node "${DESTRUCTIVE_GIT_GUARD_SCRIPT}"` }] },
       ],
     },
   };
@@ -801,12 +801,12 @@ test('installInlineImplementationGuard: appends into the EXISTING Write|Edit|Not
   const writeMatchers = written.hooks.PreToolUse.filter((m) => m.matcher === 'Write|Edit|NotebookEdit');
   expect(writeMatchers).toHaveLength(1);
   expect(writeMatchers[0].hooks).toEqual([
-    { type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` },
+    { type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` },
     { type: 'command', command: inlineShimCommand },
   ]);
   // The unrelated Bash matcher and every unrelated top-level key survive untouched.
   expect(written.hooks.PreToolUse).toContainEqual(
-    { matcher: 'Bash', hooks: [{ type: 'command', command: `node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}` }] },
+    { matcher: 'Bash', hooks: [{ type: 'command', command: `node "${DESTRUCTIVE_GIT_GUARD_SCRIPT}"` }] },
   );
   expect(written.someUnrelatedTopLevelKey).toEqual(seeded.someUnrelatedTopLevelKey);
 
@@ -821,7 +821,7 @@ test('installInlineImplementationGuard: is idempotent — running it twice leave
   await writeJson(path.join(cwd, '.claude', 'settings.json'), {
     hooks: {
       PreToolUse: [
-        { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] },
+        { matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` }] },
       ],
     },
   });
@@ -849,7 +849,7 @@ test('installInlineImplementationGuard: repairs an entry pointing at a now-nonex
         {
           matcher: 'Write|Edit|NotebookEdit',
           hooks: [
-            { type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` },
+            { type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` },
             { type: 'command', command: 'node /does/not/exist/guard-inline-implementation.cjs' },
           ],
         },
@@ -983,7 +983,7 @@ test('installInlineImplementationGuard: refuses when its guard script is missing
 test('installInlineImplementationGuard: uses the ABSOLUTE stable-shim path, never a vendored copy — and the shim itself resolves by REFERENCE, not a copy', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();
   await writeJson(path.join(cwd, '.claude', 'settings.json'), {
-    hooks: { PreToolUse: [{ matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${PRD_WRITE_GUARD_SCRIPT}` }] }] },
+    hooks: { PreToolUse: [{ matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node "${PRD_WRITE_GUARD_SCRIPT}"` }] }] },
   });
 
   const r = await installInlineImplementationGuard({ cwd, homeDir });

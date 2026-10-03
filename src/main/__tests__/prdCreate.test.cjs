@@ -694,6 +694,8 @@ test('createPrd resolves a worktree cwd to the main tree and joins the Epic whos
   const mainRepo = path.join(tmpRoot, 'main');
   const worktreeDir = path.join(tmpRoot, 'worktree', 'epic-1');
   config.addAllowedRoot(mainRepo);
+  // The worktree cwd is a sibling of mainRepo; the live app registers it when the Epic PTY spawns.
+  config.addAllowedRoot(worktreeDir);
   try {
     initRepo(mainRepo);
     fs.mkdirSync(path.dirname(worktreeDir), { recursive: true });
@@ -718,10 +720,12 @@ test('createPrd resolves a worktree cwd to the main tree and joins the Epic whos
 
     expect(result.ok).toBe(true);
     // Resolved and passed to the remote as the MAIN tree, never the worktree.
-    expect(receivedCwds.every((c) => c === mainRepo)).toBe(true);
+    // git reports the symlink-resolved root (macOS tmpdir /var -> /private/var).
+    const realMainRepo = fs.realpathSync(mainRepo);
+    expect(receivedCwds.every((c) => c === mainRepo || c === realMainRepo)).toBe(true);
     const written = await fsp.readFile(path.join(prdsDir, result.filename), 'utf8');
     expect(written).toMatch(/sourcePromptId: epic-1/);
-    expect(written).toMatch(new RegExp(`cwd: ${mainRepo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    expect([`cwd: ${mainRepo}`, `cwd: ${realMainRepo}`].some((needle) => written.includes(needle))).toBe(true);
   } finally {
     await fsp.rm(tmpRoot, { recursive: true, force: true });
   }

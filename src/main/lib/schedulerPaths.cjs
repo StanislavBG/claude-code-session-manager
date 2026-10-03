@@ -23,8 +23,28 @@ const os = require('node:os');
 const path = require('node:path');
 
 function isUnder(child, parent) {
-  const rel = path.relative(path.resolve(parent), path.resolve(child));
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  const within = (c, p) => {
+    const rel = path.relative(p, c);
+    return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+  };
+  const c = path.resolve(child);
+  const p = path.resolve(parent);
+  if (within(c, p)) return true;
+  // Symlinked roots (macOS os.tmpdir() /var -> /private/var): also compare canonical spellings.
+  return within(realpathDeepest(c), realpathDeepest(p));
+}
+
+/** realpath of the deepest existing ancestor + the not-yet-existing tail. Never throws. */
+function realpathDeepest(abs) {
+  let head = abs;
+  const tail = [];
+  for (;;) {
+    try { return path.join(fs.realpathSync(head), ...tail.reverse()); } catch { /* walk up */ }
+    const up = path.dirname(head);
+    if (up === head) return abs;
+    tail.push(path.basename(head));
+    head = up;
+  }
 }
 
 /**

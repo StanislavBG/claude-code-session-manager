@@ -126,9 +126,19 @@ function reportToTelemetry({ cwd, scope, level, tabId, epicId, tags, message }) 
   } catch { /* telemetry must never break the caller — this is the sole error funnel */ }
 }
 
+// realpath of the deepest existing ancestor + the not-yet-existing tail, so a cwd that was
+// never created still compares in the same spelling as a symlinked root (macOS /var -> /private/var).
 function realOrResolved(p) {
   const abs = path.resolve(p);
-  try { return fs.realpathSync(abs); } catch { return abs; }
+  let head = abs;
+  const tail = [];
+  for (;;) {
+    try { return path.join(fs.realpathSync(head), ...tail.reverse()); } catch { /* walk up */ }
+    const up = path.dirname(head);
+    if (up === head) return abs;
+    tail.push(path.basename(head));
+    head = up;
+  }
 }
 
 function isInside(child, parent) {

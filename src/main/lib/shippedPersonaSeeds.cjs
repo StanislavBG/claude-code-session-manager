@@ -121,6 +121,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         tools: "Read, Grep, Glob, Bash, Write, Edit",
       },
     },
+    {
+      commit: "e2cdd120",
+      bodySha256: "8cef2256f31d1d166a305923388d1d0d2f4f099275df24d869decc35a6cb11bb",
+      fm: {
+        description: "Reads a project and writes ONE self-contained overview page (home.html) for its Project Home tab, then saves it with a single project_home_write call.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit",
+        title: "Project Home — Builder",
+        model: "sonnet",
+        effort: "medium",
+      },
+    },
   ],
   "validator": [
     {

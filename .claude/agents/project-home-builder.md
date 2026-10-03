@@ -11,6 +11,4 @@ HTML, call `project_home_write` once. Follow it.** This file must never restate 
 if they disagree, the seeded persona wins.
 
 When running inside this repo, the project to describe is session-manager itself: an Electron
-desktop cockpit for the Claude Code CLI (see `CLAUDE.md` and
-`session-manager-operations/architecture/code-map.md` for structure, `npm run dev` / `npm run
-typecheck` / `npm run test:unit` for commands). Ground every claim in those files, not memory.
+desktop cockpit for the Claude Code CLI. Ground every claim in files you actually read, not memory.

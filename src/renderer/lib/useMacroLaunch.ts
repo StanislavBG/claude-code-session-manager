@@ -30,7 +30,7 @@ export function useMacroLaunch(
   const activeTabCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
   const [launching, setLaunching] = useState<string | null>(null)
 
-  const launch = async (macro: Macro) => {
+  const launch = async (macro: Macro, extraInstructions?: string) => {
     if (!activeTabCwd || launching) return
 
     if (opts?.resumeActive) {
@@ -76,9 +76,11 @@ export function useMacroLaunch(
         }
       }
 
+      const trimmedExtra = extraInstructions?.trim()
+      const goal = trimmedExtra ? `${macro.prompt}\n\nAdditional instructions: ${trimmedExtra}` : macro.prompt
       const { goalText, openingPrompt, sections } = composeEpicIntake({
         title: macro.label,
-        goal: macro.prompt,
+        goal,
         tag: macro.tag,
         agentName: macro.agentName,
         agentDescription: persona?.description ?? undefined,

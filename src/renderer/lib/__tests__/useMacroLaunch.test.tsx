@@ -47,14 +47,15 @@ async function mount(el: React.ReactElement) {
   return container
 }
 
-function Harness({ personas, opts, onSelect }: {
+function Harness({ personas, opts, onSelect, extraInstructions }: {
   personas: AgentPersona[]
   opts?: { resumeActive?: boolean; requireReadiness?: boolean }
   onSelect: (id: string) => void
+  extraInstructions?: string
 }) {
   const { launch, launching } = useMacroLaunch(onSelect, personas, opts)
   return (
-    <button type="button" disabled={launching !== null} onClick={() => void launch(macro())}>
+    <button type="button" disabled={launching !== null} onClick={() => void launch(macro(), extraInstructions)}>
       Launch
     </button>
   )
@@ -98,6 +99,27 @@ describe('useMacroLaunch', () => {
     expect(approveProposedSpy).toHaveBeenCalledWith(created.id, 'SessionActionsBar scout')
     expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({ tabId: created.id, cwd: CWD }))
     expect(onSelect).toHaveBeenCalledWith(created.id)
+  })
+
+  it('extraInstructions omitted or blank: goal is unchanged', async () => {
+    const onSelect = vi.fn()
+    const el = await mount(<Harness personas={[persona()]} onSelect={onSelect} extraInstructions="   " />)
+    await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+
+    const [, goalText] = createPromptSessionSpy.mock.calls[0]
+    expect(goalText).toBe('Sweep\n\nSweep it.\nSecond line')
+  })
+
+  it('extraInstructions provided: appended as an Additional instructions paragraph', async () => {
+    const onSelect = vi.fn()
+    const el = await mount(
+      <Harness personas={[persona()]} onSelect={onSelect} extraInstructions="  focus on the auth flow  " />,
+    )
+    await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+
+    const [, goalText, , , , openingPrompt] = createPromptSessionSpy.mock.calls[0]
+    expect(goalText).toBe('Sweep\n\nSweep it.\nSecond line\n\nAdditional instructions: focus on the auth flow')
+    expect(openingPrompt).toContain('Additional instructions: focus on the auth flow')
   })
 
   it('resumeActive: an active Epic for the same (cwd, agentName, tag) is resumed, nothing minted', async () => {

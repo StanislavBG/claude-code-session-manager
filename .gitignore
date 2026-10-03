@@ -8,7 +8,6 @@ release
 # false-positive is replayed byte-for-byte, not reconstructed from memory.
 !src/main/__tests__/fixtures/*.log
 .DS_Store
-e2e/.cache
 test-results
 playwright-report
 .env

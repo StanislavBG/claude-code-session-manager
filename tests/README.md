@@ -7,7 +7,7 @@
 | `tests/unit/*.spec.ts` | vitest | glob-covered — drop a file in, it runs |
 | `src/**/__tests__/*.test.cjs` | vitest | **HAND-REGISTERED**, one line each in `vitest.config.ts` `include` |
 | `src/renderer/**/*.test.ts(x)` | vitest | glob-covered |
-| Playwright: `e2e/*.spec.mjs` (chat-restart, mic, watchers) + `tests/e2e` + `tests/smoke` | Playwright (`playwright.config.ts`) | `testMatch` globs; `web-remote/**` and `web/remote-app/**` are ignored |
+| Playwright: `tests/e2e` (incl. `chat-restart.spec.mjs`) + `tests/smoke` | Playwright (`playwright.config.ts`) | `testMatch` globs; `web-remote/**` and `web/remote-app/**` are ignored |
 
 ## Registration law
 

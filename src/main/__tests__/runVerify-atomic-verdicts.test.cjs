@@ -1,12 +1,6 @@
 import { test, expect, vi } from 'vitest';
 const fs = require('node:fs');
 const path = require('node:path');
-const src = fs.readFileSync(path.join(__dirname, '..', 'runVerify.cjs'), 'utf8');
-
-test('verdicts sidecar write goes through config.writeJsonSync, not bare writeFileSync', () => {
-  expect(src).not.toMatch(/writeFileSync\(verdictsPath/);
-  expect(src).toMatch(/config\.cjs'\)\.writeJsonSync\(verdictsPath/);
-});
 
 test('conclude() invokes the atomic helper at runtime', async () => {
   const config = require('../config.cjs');

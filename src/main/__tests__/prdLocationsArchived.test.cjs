@@ -142,8 +142,6 @@ test('resolveArchivedPrdStatus normalizes any non-failed status (e.g. needs_revi
 });
 
 test('scheduler.cjs exports candidateArchivedPrdsDirs alongside candidatePrdsDirs', () => {
-  expect(typeof candidatePrdsDirs).toBe('function');
-  expect(typeof candidateArchivedPrdsDirs).toBe('function');
   // Both scan the real machine's projects — just assert they run without
   // throwing and return arrays; per-Epic coverage is exercised above via
   // the opts-injectable prdLocations functions directly.

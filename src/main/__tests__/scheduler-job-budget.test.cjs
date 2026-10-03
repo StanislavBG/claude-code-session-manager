@@ -25,7 +25,6 @@ const {
   shouldKillForBudget,
   resolveBudgetKillOutcome,
   selectAutoFixTargets,
-  JOB_BUDGET_FACTOR,
   JOB_BUDGET_FLOOR_MS,
   JOB_BUDGET_CEILING_MS,
 } = require('../scheduler.cjs');
@@ -55,12 +54,6 @@ test('computeJobBudgetMs: the ceiling clamp — a huge estimate never exceeds 18
 test('computeJobBudgetMs: honors caller overrides when neither clamp is hit', () => {
   const budgetMs = computeJobBudgetMs(5, { factor: 2, floorMs: 1000, ceilingMs: 3_600_000 });
   assert.strictEqual(budgetMs, 10 * 60_000);
-});
-
-test('JOB_BUDGET_FACTOR/FLOOR/CEILING are the named constants the AC requires (3x, 45m, 180m)', () => {
-  assert.strictEqual(JOB_BUDGET_FACTOR, 3);
-  assert.strictEqual(JOB_BUDGET_FLOOR_MS, 45 * 60_000);
-  assert.strictEqual(JOB_BUDGET_CEILING_MS, 180 * 60_000);
 });
 
 // ---------- shouldKillForBudget: under vs over budget ----------

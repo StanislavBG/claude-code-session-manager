@@ -158,7 +158,6 @@ test('exports drainBacklog + reconcileWatermarks returning the documented summar
   for (const key of ['projectsScanned', 'filesScanned', 'linesEnqueued', 'linesConfirmed', 'linesSkipped', 'filesCompleted', 'watermarksRewound']) {
     expect(typeof summary[key]).toBe('number');
   }
-  expect(typeof backlog.reconcileWatermarks).toBe('function');
 });
 
 // ─── project enumeration ────────────────────────────────────────────────

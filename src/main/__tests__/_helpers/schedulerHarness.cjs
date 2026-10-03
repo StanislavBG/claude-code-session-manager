@@ -9,7 +9,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const claudeStub = require('../../../../tests/helpers/claudeStub.cjs');
 
 function git(args, cwd) {
   return execFileSync('git', args, { cwd, encoding: 'utf8' });
@@ -23,25 +22,6 @@ function initRepo(dir) {
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n', 'utf8');
   git(['add', '-A'], dir);
   git(['commit', '-q', '-m', 'initial'], dir);
-}
-
-function mkTmp(prefix) {
-  return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-}
-
-function cleanup(...dirs) {
-  for (const d of dirs) if (d) fs.rmSync(d, { recursive: true, force: true });
-}
-
-/** Set env keys (value undefined deletes); returns a restore() function. */
-function withEnv(vars) {
-  const saved = {};
-  for (const k of Object.keys(vars)) saved[k] = process.env[k];
-  const apply = (k, v) => { if (v === undefined) delete process.env[k]; else process.env[k] = v; };
-  for (const [k, v] of Object.entries(vars)) apply(k, v);
-  return function restore() {
-    for (const k of Object.keys(saved)) apply(k, saved[k]);
-  };
 }
 
 /**
@@ -78,12 +58,6 @@ function writeRunLog(runId, slug, lines) {
   fs.writeFileSync(path.join(runDir, `${slug}.log`), lines.join('\n') + '\n');
 }
 
-module.exports = {
-  git, initRepo, mkTmp, cleanup, withEnv, registerActiveProject,
-  writeProjectQueue, makeFixtureCwd, writeRunLog,
-  writeClaudeStub: claudeStub.writeClaudeStub,
-};
-
 /**
  * Drop cached src/main modules so a merged test file's describe blocks each
  * load scheduler.cjs & co. fresh under their own HOME (one file == one
@@ -95,4 +69,9 @@ function clearMainModuleCache() {
     if (k.startsWith(root) && !k.includes(`${path.sep}__tests__${path.sep}`)) delete require.cache[k];
   }
 }
-module.exports.clearMainModuleCache = clearMainModuleCache;
+
+module.exports = {
+  git, initRepo, registerActiveProject,
+  writeProjectQueue, makeFixtureCwd, writeRunLog,
+  clearMainModuleCache,
+};

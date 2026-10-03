@@ -289,6 +289,12 @@ describe('prdFrontmatter round-trip', () => {
   })
 })
 
+describe('renderer planId garbage', () => {
+  it('renderer parser ignores a garbage planId', () => {
+    expect(parsePrdFile('---\ntitle: p\nplanId: a b, [c]\n---\nx\n').frontmatter.planId).toBeUndefined()
+  })
+})
+
 describe('prdFrontmatter planId round-trip (renderer + main parser)', () => {
   const text = '---\ntitle: p\ncwd: /tmp\nestimateMinutes: 5\ndisposition: append\nplanId: pl-abc123-ff00aa\n---\nbody\n'
   it('renderer parser round-trips planId byte-identical', () => {

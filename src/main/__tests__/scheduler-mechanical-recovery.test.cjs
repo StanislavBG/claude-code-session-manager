@@ -28,7 +28,6 @@ import { test, expect, beforeEach, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
 const { git, writeProjectQueue } = require('./_helpers/schedulerHarness.cjs');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-mechanical-recovery-test-'));

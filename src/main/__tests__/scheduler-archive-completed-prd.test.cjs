@@ -17,15 +17,12 @@ import { test, expect, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { makeFixtureCwd: harnessMakeFixtureCwd } = require('./_helpers/schedulerHarness.cjs');
 const { archiveCompletedPrd, prdDirForCwd } = require('../scheduler.cjs');
 
 const tmpDirs = [];
 
-function makeFixtureCwd() {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-archive-prd-'));
-  tmpDirs.push(cwd);
-  return cwd;
-}
+const makeFixtureCwd = () => harnessMakeFixtureCwd('sm-archive-prd-', tmpDirs);
 
 afterEach(() => {
   while (tmpDirs.length) {

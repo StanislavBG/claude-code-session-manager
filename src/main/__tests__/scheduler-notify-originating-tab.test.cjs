@@ -1,343 +1,438 @@
-/**
- * scheduler-notify-originating-tab.test.cjs — unit tests for
- * notifyOriginatingTab (PRD 761): on a job's terminal completed/failed
- * transition, push a short status prompt into the chat tab that originated
- * it via enqueueExternalPrompt (PRD 753).
- *
- * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-notify-originating-tab.test.cjs
- */
-
 'use strict';
 
-import { test, expect, vi } from 'vitest';
-const { notifyOriginatingTab, isNotifiableTerminalStatus } = require('../scheduler.cjs');
+import { beforeAll, describe, expect, test, vi } from 'vitest';
+const { clearMainModuleCache } = require('./_helpers/schedulerHarness.cjs');
 
-test('isNotifiableTerminalStatus: completed and failed are notifiable', () => {
-  expect(isNotifiableTerminalStatus('completed')).toBe(true);
-  expect(isNotifiableTerminalStatus('failed')).toBe(true);
-});
+describe("tab", () => {
+  beforeAll(() => { clearMainModuleCache(); });
 
-test('isNotifiableTerminalStatus: needs_review is not notifiable (may still auto-fix)', () => {
-  expect(isNotifiableTerminalStatus('needs_review')).toBe(false);
-});
+  /**
+   * scheduler-notify-originating-tab.test.cjs — unit tests for
+   * notifyOriginatingTab (PRD 761): on a job's terminal completed/failed
+   * transition, push a short status prompt into the chat tab that originated
+   * it via enqueueExternalPrompt (PRD 753).
+   *
+   * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-notify-originating-tab.test.cjs
+   */
 
-test('isNotifiableTerminalStatus: a rateLimited exit never reaches an effectiveStatus (undefined) and is not notifiable', () => {
-  // spawnJob's treatAsPending branch (rateLimited || paused for rate_limit)
-  // resets the job to pending and returns before effectiveStatus is ever
-  // computed — so this hook is only ever evaluated with undefined/pending,
-  // never with a real status, on that path.
-  expect(isNotifiableTerminalStatus(undefined)).toBe(false);
-  expect(isNotifiableTerminalStatus('pending')).toBe(false);
-});
+  const { notifyOriginatingTab, isNotifiableTerminalStatus } = require('../scheduler.cjs');
 
-test('resolves via sourceTabId when present on the PRD frontmatter', async () => {
-  const sendPrompt = vi.fn();
-  const parsePrdRaw = vi.fn(async () => ({ sourceTabId: 'tab-from-frontmatter' }));
-  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+  test('isNotifiableTerminalStatus: completed and failed are notifiable', () => {
+    expect(isNotifiableTerminalStatus('completed')).toBe(true);
+    expect(isNotifiableTerminalStatus('failed')).toBe(true);
+  });
 
-  await notifyOriginatingTab(
-    { slug: '761-notify', status: 'completed', cwd: '/some/cwd' },
-    { parsePrdRaw, loadSessions, sendPrompt },
-  );
+  test('isNotifiableTerminalStatus: needs_review is not notifiable (may still auto-fix)', () => {
+    expect(isNotifiableTerminalStatus('needs_review')).toBe(false);
+  });
 
-  expect(loadSessions).not.toHaveBeenCalled();
-  expect(sendPrompt).toHaveBeenCalledTimes(1);
-  expect(sendPrompt).toHaveBeenCalledWith(
-    'tab-from-frontmatter',
-    expect.stringContaining('761-notify'),
-  );
-});
+  test('isNotifiableTerminalStatus: a rateLimited exit never reaches an effectiveStatus (undefined) and is not notifiable', () => {
+    // spawnJob's treatAsPending branch (rateLimited || paused for rate_limit)
+    // resets the job to pending and returns before effectiveStatus is ever
+    // computed — so this hook is only ever evaluated with undefined/pending,
+    // never with a real status, on that path.
+    expect(isNotifiableTerminalStatus(undefined)).toBe(false);
+    expect(isNotifiableTerminalStatus('pending')).toBe(false);
+  });
 
-test('falls back to the first open tab whose cwd matches the job cwd', async () => {
-  const sendPrompt = vi.fn();
-  const parsePrdRaw = vi.fn(async () => ({ sourceTabId: null }));
-  const loadSessions = vi.fn(async () => ({
-    tabs: [
-      { id: 'tab-other', cwd: '/other/cwd' },
-      { id: 'tab-match', cwd: '/some/cwd' },
-      { id: 'tab-second-match', cwd: '/some/cwd' },
-    ],
-  }));
+  test('resolves via sourceTabId when present on the PRD frontmatter', async () => {
+    const sendPrompt = vi.fn();
+    const parsePrdRaw = vi.fn(async () => ({ sourceTabId: 'tab-from-frontmatter' }));
+    const loadSessions = vi.fn(async () => ({ tabs: [] }));
 
-  await notifyOriginatingTab(
-    { slug: '761-notify', status: 'failed', cwd: '/some/cwd' },
-    { parsePrdRaw, loadSessions, sendPrompt },
-  );
-
-  expect(sendPrompt).toHaveBeenCalledTimes(1);
-  expect(sendPrompt).toHaveBeenCalledWith('tab-match', expect.stringContaining('761-notify'));
-});
-
-test('no-ops without throwing when neither sourceTabId nor a cwd-matching tab resolves', async () => {
-  const sendPrompt = vi.fn();
-  const parsePrdRaw = vi.fn(async () => ({ sourceTabId: null }));
-  const loadSessions = vi.fn(async () => ({ tabs: [{ id: 'tab-other', cwd: '/unrelated' }] }));
-
-  await expect(
-    notifyOriginatingTab(
+    await notifyOriginatingTab(
       { slug: '761-notify', status: 'completed', cwd: '/some/cwd' },
       { parsePrdRaw, loadSessions, sendPrompt },
-    ),
-  ).resolves.not.toThrow();
+    );
 
-  expect(sendPrompt).not.toHaveBeenCalled();
-});
+    expect(loadSessions).not.toHaveBeenCalled();
+    expect(sendPrompt).toHaveBeenCalledTimes(1);
+    expect(sendPrompt).toHaveBeenCalledWith(
+      'tab-from-frontmatter',
+      expect.stringContaining('761-notify'),
+    );
+  });
 
-test('no-ops when parsing the PRD frontmatter throws', async () => {
-  const sendPrompt = vi.fn();
-  const parsePrdRaw = vi.fn(async () => { throw new Error('ENOENT'); });
-  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+  test('falls back to the first open tab whose cwd matches the job cwd', async () => {
+    const sendPrompt = vi.fn();
+    const parsePrdRaw = vi.fn(async () => ({ sourceTabId: null }));
+    const loadSessions = vi.fn(async () => ({
+      tabs: [
+        { id: 'tab-other', cwd: '/other/cwd' },
+        { id: 'tab-match', cwd: '/some/cwd' },
+        { id: 'tab-second-match', cwd: '/some/cwd' },
+      ],
+    }));
 
-  await expect(
-    notifyOriginatingTab(
-      { slug: '761-notify', status: 'completed', cwd: '/some/cwd' },
+    await notifyOriginatingTab(
+      { slug: '761-notify', status: 'failed', cwd: '/some/cwd' },
       { parsePrdRaw, loadSessions, sendPrompt },
-    ),
-  ).resolves.not.toThrow();
+    );
 
-  expect(sendPrompt).not.toHaveBeenCalled();
-});
+    expect(sendPrompt).toHaveBeenCalledTimes(1);
+    expect(sendPrompt).toHaveBeenCalledWith('tab-match', expect.stringContaining('761-notify'));
+  });
 
-// PRD 814: a dev-work ticket's completion notification routes into its own
-// PromptSession's event chain instead of an unrelated tab, when the PRD's
-// sourcePromptId resolves to a known, still-active PromptSession.
-test('routes into the known PromptSession event chain and never falls back to a tab prompt', async () => {
-  const sendPrompt = vi.fn();
-  const appendResponseEvent = vi.fn(async () => true);
-  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1', sourceTabId: 'tab-x' }));
-  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+  test('no-ops without throwing when neither sourceTabId nor a cwd-matching tab resolves', async () => {
+    const sendPrompt = vi.fn();
+    const parsePrdRaw = vi.fn(async () => ({ sourceTabId: null }));
+    const loadSessions = vi.fn(async () => ({ tabs: [{ id: 'tab-other', cwd: '/unrelated' }] }));
 
-  await notifyOriginatingTab(
-    { slug: '814-notify', status: 'completed', cwd: '/some/cwd' },
-    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
-  );
+    await expect(
+      notifyOriginatingTab(
+        { slug: '761-notify', status: 'completed', cwd: '/some/cwd' },
+        { parsePrdRaw, loadSessions, sendPrompt },
+      ),
+    ).resolves.not.toThrow();
 
-  expect(appendResponseEvent).toHaveBeenCalledWith(
-    '/some/cwd',
-    'psess-1',
-    expect.stringContaining('814-notify'),
-    { prdSlug: '814-notify', outcome: 'completed', validation: 'unvalidated' },
-  );
-  expect(sendPrompt).not.toHaveBeenCalled();
-});
+    expect(sendPrompt).not.toHaveBeenCalled();
+  });
 
-test('falls back to the tab-external-ticket path when sourcePromptId does not resolve to a known PromptSession', async () => {
-  const sendPrompt = vi.fn();
-  const appendResponseEvent = vi.fn(async () => false);
-  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-unknown', sourceTabId: 'tab-x' }));
-  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+  test('no-ops when parsing the PRD frontmatter throws', async () => {
+    const sendPrompt = vi.fn();
+    const parsePrdRaw = vi.fn(async () => { throw new Error('ENOENT'); });
+    const loadSessions = vi.fn(async () => ({ tabs: [] }));
 
-  await notifyOriginatingTab(
-    { slug: '814-notify', status: 'completed', cwd: '/some/cwd' },
-    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
-  );
+    await expect(
+      notifyOriginatingTab(
+        { slug: '761-notify', status: 'completed', cwd: '/some/cwd' },
+        { parsePrdRaw, loadSessions, sendPrompt },
+      ),
+    ).resolves.not.toThrow();
 
-  expect(appendResponseEvent).toHaveBeenCalled();
-  expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
-});
+    expect(sendPrompt).not.toHaveBeenCalled();
+  });
 
-test('falls back to the tab-external-ticket path when the PRD has no sourcePromptId at all (pre-813 PRD)', async () => {
-  const sendPrompt = vi.fn();
-  const appendResponseEvent = vi.fn(async () => true);
-  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: null, sourceTabId: 'tab-x' }));
-  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+  // PRD 814: a dev-work ticket's completion notification routes into its own
+  // PromptSession's event chain instead of an unrelated tab, when the PRD's
+  // sourcePromptId resolves to a known, still-active PromptSession.
+  test('routes into the known PromptSession event chain and never falls back to a tab prompt', async () => {
+    const sendPrompt = vi.fn();
+    const appendResponseEvent = vi.fn(async () => true);
+    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1', sourceTabId: 'tab-x' }));
+    const loadSessions = vi.fn(async () => ({ tabs: [] }));
 
-  await notifyOriginatingTab(
-    { slug: '814-notify', status: 'completed', cwd: '/some/cwd' },
-    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
-  );
-
-  expect(appendResponseEvent).not.toHaveBeenCalled();
-  expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
-});
-
-// PRD 854: a PRD dispatched straight from an Epic's own composer
-// (dispatchPromptSessionToPrd) never sets sourceTabId — only sourcePromptId.
-// If the Epic has since gone completed (appendResponseEvent returns false),
-// the fallback must still target sourcePromptId itself as the chat:external-
-// send id, since the renderer now resolves that id against known Epics too.
-test('falls back to sourcePromptId as the external-send target when sourceTabId is absent', async () => {
-  const sendPrompt = vi.fn();
-  const appendResponseEvent = vi.fn(async () => false);
-  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'epic-1', sourceTabId: null }));
-  const loadSessions = vi.fn(async () => ({ tabs: [] }));
-
-  await notifyOriginatingTab(
-    { slug: '854-notify', status: 'completed', cwd: '/some/cwd' },
-    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
-  );
-
-  expect(appendResponseEvent).toHaveBeenCalled();
-  expect(loadSessions).not.toHaveBeenCalled();
-  expect(sendPrompt).toHaveBeenCalledWith('epic-1', expect.stringContaining('854-notify'));
-});
-
-test('falls back to the tab-external-ticket path when appendResponseEvent itself throws', async () => {
-  const sendPrompt = vi.fn();
-  const appendResponseEvent = vi.fn(async () => { throw new Error('disk error'); });
-  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1', sourceTabId: 'tab-x' }));
-  const loadSessions = vi.fn(async () => ({ tabs: [] }));
-
-  await expect(
-    notifyOriginatingTab(
+    await notifyOriginatingTab(
       { slug: '814-notify', status: 'completed', cwd: '/some/cwd' },
       { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
-    ),
-  ).resolves.not.toThrow();
+    );
 
-  expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
+    expect(appendResponseEvent).toHaveBeenCalledWith(
+      '/some/cwd',
+      'psess-1',
+      expect.stringContaining('814-notify'),
+      { prdSlug: '814-notify', outcome: 'completed', validation: 'unvalidated' },
+    );
+    expect(sendPrompt).not.toHaveBeenCalled();
+  });
+
+  test('falls back to the tab-external-ticket path when sourcePromptId does not resolve to a known PromptSession', async () => {
+    const sendPrompt = vi.fn();
+    const appendResponseEvent = vi.fn(async () => false);
+    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-unknown', sourceTabId: 'tab-x' }));
+    const loadSessions = vi.fn(async () => ({ tabs: [] }));
+
+    await notifyOriginatingTab(
+      { slug: '814-notify', status: 'completed', cwd: '/some/cwd' },
+      { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
+    );
+
+    expect(appendResponseEvent).toHaveBeenCalled();
+    expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
+  });
+
+  test('falls back to the tab-external-ticket path when the PRD has no sourcePromptId at all (pre-813 PRD)', async () => {
+    const sendPrompt = vi.fn();
+    const appendResponseEvent = vi.fn(async () => true);
+    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: null, sourceTabId: 'tab-x' }));
+    const loadSessions = vi.fn(async () => ({ tabs: [] }));
+
+    await notifyOriginatingTab(
+      { slug: '814-notify', status: 'completed', cwd: '/some/cwd' },
+      { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
+    );
+
+    expect(appendResponseEvent).not.toHaveBeenCalled();
+    expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
+  });
+
+  // PRD 854: a PRD dispatched straight from an Epic's own composer
+  // (dispatchPromptSessionToPrd) never sets sourceTabId — only sourcePromptId.
+  // If the Epic has since gone completed (appendResponseEvent returns false),
+  // the fallback must still target sourcePromptId itself as the chat:external-
+  // send id, since the renderer now resolves that id against known Epics too.
+  test('falls back to sourcePromptId as the external-send target when sourceTabId is absent', async () => {
+    const sendPrompt = vi.fn();
+    const appendResponseEvent = vi.fn(async () => false);
+    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'epic-1', sourceTabId: null }));
+    const loadSessions = vi.fn(async () => ({ tabs: [] }));
+
+    await notifyOriginatingTab(
+      { slug: '854-notify', status: 'completed', cwd: '/some/cwd' },
+      { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
+    );
+
+    expect(appendResponseEvent).toHaveBeenCalled();
+    expect(loadSessions).not.toHaveBeenCalled();
+    expect(sendPrompt).toHaveBeenCalledWith('epic-1', expect.stringContaining('854-notify'));
+  });
+
+  test('falls back to the tab-external-ticket path when appendResponseEvent itself throws', async () => {
+    const sendPrompt = vi.fn();
+    const appendResponseEvent = vi.fn(async () => { throw new Error('disk error'); });
+    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1', sourceTabId: 'tab-x' }));
+    const loadSessions = vi.fn(async () => ({ tabs: [] }));
+
+    await expect(
+      notifyOriginatingTab(
+        { slug: '814-notify', status: 'completed', cwd: '/some/cwd' },
+        { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent },
+      ),
+    ).resolves.not.toThrow();
+
+    expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
+  });
+
+  // ─── PRD 985: real path resolution ───────────────────────────────────────────
+  // Every test above injects a stubbed `parsePrdRaw`, which is exactly why the
+  // bug PRD 985 fixes shipped green: notifyOriginatingTab resolved its PRD via
+  // prdPathForJob → the RETIRED flat `scheduler/prds/` dir (today only
+  // `.reserved-NNN` stubs, no PRDs), and archiveCompletedPrd renames the file
+  // into `prds-archived/` immediately BEFORE notify runs anyway. `prd` was
+  // therefore always null on the completed path and no response event was ever
+  // appended. These two tests use the REAL parsePrdRaw against a temp tree so
+  // the resolution logic itself is covered, not mocked away.
+
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const nodePath = require('node:path');
+
+  function makeEpicTree({ epicId, slug, archived }) {
+    const cwd = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'sm-notify-985-'));
+    const dir = nodePath.join(
+      cwd, 'session-manager-operations', 'scheduler', 'epics', epicId,
+      archived ? 'prds-archived' : 'prds',
+    );
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      nodePath.join(dir, `${slug}.md`),
+      `---\ntitle: notify 985\ncwd: ${cwd}\nsourcePromptId: ${epicId}\n---\n\nbody\n`,
+      'utf8',
+    );
+    return cwd;
+  }
+
+  test('PRD 985: an ARCHIVED-only PRD still routes its check-in to the authoring Epic', async () => {
+    const epicId = 'psess-985-archived';
+    const slug = '985-archived-twin';
+    const cwd = makeEpicTree({ epicId, slug, archived: true });
+
+    const appendResponseEvent = vi.fn(async () => true);
+    const appendTranscriptTurn = vi.fn(async () => {});
+    const sendPrompt = vi.fn();
+    const loadSessions = vi.fn(async () => ({ tabs: [] }));
+
+    // NOTE: no parsePrdRaw override — the real one runs against the temp tree.
+    await notifyOriginatingTab(
+      { slug, status: 'completed', cwd, epicId: null },
+      { loadSessions, sendPrompt, appendResponseEvent, appendTranscriptTurn, readResultFromLog: () => null },
+    );
+
+    expect(appendResponseEvent).toHaveBeenCalledTimes(1);
+    expect(appendResponseEvent).toHaveBeenCalledWith(
+      cwd, epicId, expect.stringContaining(slug),
+      expect.objectContaining({ prdSlug: slug, outcome: 'completed' }),
+    );
+    expect(appendTranscriptTurn).toHaveBeenCalledWith(cwd, epicId, expect.anything());
+    expect(sendPrompt).not.toHaveBeenCalled();
+  });
+
+  test('PRD 985: a PRD missing entirely still routes via the job row\'s own epicId', async () => {
+    const cwd = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'sm-notify-985-none-'));
+    const appendResponseEvent = vi.fn(async () => true);
+    const appendTranscriptTurn = vi.fn(async () => {});
+    const sendPrompt = vi.fn();
+    const loadSessions = vi.fn(async () => ({ tabs: [] }));
+
+    await notifyOriginatingTab(
+      { slug: '985-no-prd-on-disk', status: 'failed', cwd, epicId: 'psess-985-from-queue-row' },
+      { loadSessions, sendPrompt, appendResponseEvent, appendTranscriptTurn, readResultFromLog: () => null },
+    );
+
+    expect(appendResponseEvent).toHaveBeenCalledWith(
+      cwd, 'psess-985-from-queue-row', expect.stringContaining('985-no-prd-on-disk'),
+      expect.objectContaining({ prdSlug: '985-no-prd-on-disk', outcome: 'failed' }),
+    );
+    expect(appendTranscriptTurn).toHaveBeenCalledWith(cwd, 'psess-985-from-queue-row', expect.anything());
+  });
+
+  // ─── PRD 1407: validator jobs stamp verdicts onto the authoring Epic ────────
+  // A completed validator job's result text carries one `VALIDATION: <slug>
+  // VERIFIED|REFUTED` line per PRD it checked. Each parsed verdict becomes its
+  // own response event BEFORE the validator's own (still-unvalidated)
+  // check-in, and the validator's check-in never enqueues a validation prompt
+  // for itself.
+  test('PRD 1407: a validator job with two sentinel lines appends two verdict events plus its own check-in, and never enqueues validation', async () => {
+    const sendPrompt = vi.fn();
+    const appendResponseEvent = vi.fn(async () => true);
+    const appendTranscriptTurn = vi.fn(async () => {});
+    const enqueueValidation = vi.fn();
+    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-validator-1' }));
+    const loadSessions = vi.fn(async () => ({ tabs: [] }));
+    const readResultFromLog = vi.fn(() => [
+      'VALIDATION: 111-alpha VERIFIED',
+      'VALIDATION: 222-beta REFUTED — missing coverage',
+    ].join('\n'));
+
+    await notifyOriginatingTab(
+      { slug: '1407-validator-run', status: 'completed', cwd: '/some/cwd', agentType: 'validator' },
+      {
+        parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent,
+        appendTranscriptTurn, readResultFromLog, enqueueValidation,
+      },
+    );
+
+    expect(appendResponseEvent).toHaveBeenCalledTimes(3);
+    expect(appendResponseEvent).toHaveBeenNthCalledWith(
+      1, '/some/cwd', 'psess-validator-1', expect.stringContaining('111-alpha'),
+      { prdSlug: '111-alpha', outcome: 'completed', validation: 'verified' },
+    );
+    expect(appendResponseEvent).toHaveBeenNthCalledWith(
+      2, '/some/cwd', 'psess-validator-1', expect.stringContaining('222-beta'),
+      { prdSlug: '222-beta', outcome: 'completed', validation: 'refuted' },
+    );
+    expect(appendResponseEvent).toHaveBeenNthCalledWith(
+      3, '/some/cwd', 'psess-validator-1', expect.stringContaining('1407-validator-run'),
+      { prdSlug: '1407-validator-run', outcome: 'completed', validation: 'unvalidated' },
+    );
+    expect(enqueueValidation).not.toHaveBeenCalled();
+  });
+
+  // ─── PRD 1408: a downstream validator suppresses the per-PRD validation ask ─
+  test('skips enqueueValidation when loadJobs reports a pending validator row depending on this job', async () => {
+    const sendPrompt = vi.fn();
+    const appendResponseEvent = vi.fn(async () => true);
+    const enqueueValidation = vi.fn();
+    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1' }));
+    const loadSessions = vi.fn(async () => ({ tabs: [] }));
+    const loadJobs = vi.fn(async () => ([
+      { slug: '1408-work-item' },
+      { slug: '1408-validate', agentType: 'validator', status: 'pending', dependsOn: ['1408-work-item'] },
+    ]));
+
+    await notifyOriginatingTab(
+      { slug: '1408-work-item', status: 'completed', cwd: '/some/cwd' },
+      { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, enqueueValidation, loadJobs },
+    );
+
+    expect(appendResponseEvent).toHaveBeenCalledTimes(1);
+    expect(loadJobs).toHaveBeenCalledTimes(1);
+    expect(enqueueValidation).not.toHaveBeenCalled();
+  });
+
+  test('still enqueues validation when loadJobs reports no downstream validator', async () => {
+    const sendPrompt = vi.fn();
+    const appendResponseEvent = vi.fn(async () => true);
+    const enqueueValidation = vi.fn();
+    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1' }));
+    const loadSessions = vi.fn(async () => ({ tabs: [] }));
+    const loadJobs = vi.fn(async () => ([{ slug: '1408-work-item' }]));
+
+    await notifyOriginatingTab(
+      { slug: '1408-work-item', status: 'completed', cwd: '/some/cwd' },
+      { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, enqueueValidation, loadJobs },
+    );
+
+    expect(appendResponseEvent).toHaveBeenCalledTimes(1);
+    expect(enqueueValidation).toHaveBeenCalledTimes(1);
+  });
 });
 
-// ─── PRD 985: real path resolution ───────────────────────────────────────────
-// Every test above injects a stubbed `parsePrdRaw`, which is exactly why the
-// bug PRD 985 fixes shipped green: notifyOriginatingTab resolved its PRD via
-// prdPathForJob → the RETIRED flat `scheduler/prds/` dir (today only
-// `.reserved-NNN` stubs, no PRDs), and archiveCompletedPrd renames the file
-// into `prds-archived/` immediately BEFORE notify runs anyway. `prd` was
-// therefore always null on the completed path and no response event was ever
-// appended. These two tests use the REAL parsePrdRaw against a temp tree so
-// the resolution logic itself is covered, not mocked away.
+describe("transcript", () => {
+  beforeAll(() => { clearMainModuleCache(); });
 
-const fs = require('node:fs');
-const os = require('node:os');
-const nodePath = require('node:path');
+  /**
+   * scheduler-notify-originating-tab-transcript.test.cjs — unit tests for the
+   * PRD 863 addition to notifyOriginatingTab: persisting the job's real
+   * result text (read from the run's log) to the durable per-Epic transcript
+   * store, independent of the existing short-status-chip notification.
+   *
+   * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-notify-originating-tab-transcript.test.cjs
+   */
 
-function makeEpicTree({ epicId, slug, archived }) {
-  const cwd = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'sm-notify-985-'));
-  const dir = nodePath.join(
-    cwd, 'session-manager-operations', 'scheduler', 'epics', epicId,
-    archived ? 'prds-archived' : 'prds',
-  );
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(
-    nodePath.join(dir, `${slug}.md`),
-    `---\ntitle: notify 985\ncwd: ${cwd}\nsourcePromptId: ${epicId}\n---\n\nbody\n`,
-    'utf8',
-  );
-  return cwd;
-}
+  const { notifyOriginatingTab, extractResultTextFromLog } = require('../scheduler.cjs');
 
-test('PRD 985: an ARCHIVED-only PRD still routes its check-in to the authoring Epic', async () => {
-  const epicId = 'psess-985-archived';
-  const slug = '985-archived-twin';
-  const cwd = makeEpicTree({ epicId, slug, archived: true });
+  test('extractResultTextFromLog returns null for a missing log path', () => {
+    expect(extractResultTextFromLog(null)).toBeNull();
+    expect(extractResultTextFromLog('/does/not/exist.log')).toBeNull();
+  });
 
-  const appendResponseEvent = vi.fn(async () => true);
-  const appendTranscriptTurn = vi.fn(async () => {});
-  const sendPrompt = vi.fn();
-  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+  test('appends the job result text to the transcript store when sourcePromptId is known', async () => {
+    const appendTranscriptTurn = vi.fn(async () => true);
+    const readResultFromLog = vi.fn(() => 'the real agent result text');
+    const appendResponseEvent = vi.fn(async () => true);
+    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-abc' }));
 
-  // NOTE: no parsePrdRaw override — the real one runs against the temp tree.
-  await notifyOriginatingTab(
-    { slug, status: 'completed', cwd, epicId: null },
-    { loadSessions, sendPrompt, appendResponseEvent, appendTranscriptTurn, readResultFromLog: () => null },
-  );
+    await notifyOriginatingTab(
+      { slug: '863-transcript', status: 'completed', cwd: '/some/cwd', runId: 'run-1' },
+      { parsePrdRaw, appendResponseEvent, appendTranscriptTurn, readResultFromLog },
+    );
 
-  expect(appendResponseEvent).toHaveBeenCalledTimes(1);
-  expect(appendResponseEvent).toHaveBeenCalledWith(
-    cwd, epicId, expect.stringContaining(slug),
-    expect.objectContaining({ prdSlug: slug, outcome: 'completed' }),
-  );
-  expect(appendTranscriptTurn).toHaveBeenCalledWith(cwd, epicId, expect.anything());
-  expect(sendPrompt).not.toHaveBeenCalled();
-});
+    expect(appendTranscriptTurn).toHaveBeenCalledTimes(1);
+    expect(appendTranscriptTurn).toHaveBeenCalledWith('/some/cwd', 'psess-abc', {
+      role: 'assistant',
+      text: 'the real agent result text',
+      eventId: 'prd-result:863-transcript:run-1',
+    });
+  });
 
-test('PRD 985: a PRD missing entirely still routes via the job row\'s own epicId', async () => {
-  const cwd = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'sm-notify-985-none-'));
-  const appendResponseEvent = vi.fn(async () => true);
-  const appendTranscriptTurn = vi.fn(async () => {});
-  const sendPrompt = vi.fn();
-  const loadSessions = vi.fn(async () => ({ tabs: [] }));
+  test('falls back to the short status message when the run log has no result text', async () => {
+    const appendTranscriptTurn = vi.fn(async () => true);
+    const readResultFromLog = vi.fn(() => null);
+    const appendResponseEvent = vi.fn(async () => true);
+    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-abc' }));
 
-  await notifyOriginatingTab(
-    { slug: '985-no-prd-on-disk', status: 'failed', cwd, epicId: 'psess-985-from-queue-row' },
-    { loadSessions, sendPrompt, appendResponseEvent, appendTranscriptTurn, readResultFromLog: () => null },
-  );
+    await notifyOriginatingTab(
+      { slug: '863-fallback', status: 'completed', cwd: '/some/cwd', runId: 'run-1' },
+      { parsePrdRaw, appendResponseEvent, appendTranscriptTurn, readResultFromLog },
+    );
 
-  expect(appendResponseEvent).toHaveBeenCalledWith(
-    cwd, 'psess-985-from-queue-row', expect.stringContaining('985-no-prd-on-disk'),
-    expect.objectContaining({ prdSlug: '985-no-prd-on-disk', outcome: 'failed' }),
-  );
-  expect(appendTranscriptTurn).toHaveBeenCalledWith(cwd, 'psess-985-from-queue-row', expect.anything());
-});
+    expect(appendTranscriptTurn).toHaveBeenCalledWith(
+      '/some/cwd',
+      'psess-abc',
+      expect.objectContaining({ text: expect.stringContaining('863-fallback') }),
+    );
+  });
 
-// ─── PRD 1407: validator jobs stamp verdicts onto the authoring Epic ────────
-// A completed validator job's result text carries one `VALIDATION: <slug>
-// VERIFIED|REFUTED` line per PRD it checked. Each parsed verdict becomes its
-// own response event BEFORE the validator's own (still-unvalidated)
-// check-in, and the validator's check-in never enqueues a validation prompt
-// for itself.
-test('PRD 1407: a validator job with two sentinel lines appends two verdict events plus its own check-in, and never enqueues validation', async () => {
-  const sendPrompt = vi.fn();
-  const appendResponseEvent = vi.fn(async () => true);
-  const appendTranscriptTurn = vi.fn(async () => {});
-  const enqueueValidation = vi.fn();
-  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-validator-1' }));
-  const loadSessions = vi.fn(async () => ({ tabs: [] }));
-  const readResultFromLog = vi.fn(() => [
-    'VALIDATION: 111-alpha VERIFIED',
-    'VALIDATION: 222-beta REFUTED — missing coverage',
-  ].join('\n'));
+  test('a throwing transcript append never breaks the existing notification path', async () => {
+    const appendTranscriptTurn = vi.fn(async () => {
+      throw new Error('disk full');
+    });
+    const readResultFromLog = vi.fn(() => 'result text');
+    const appendResponseEvent = vi.fn(async () => true);
+    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-abc' }));
 
-  await notifyOriginatingTab(
-    { slug: '1407-validator-run', status: 'completed', cwd: '/some/cwd', agentType: 'validator' },
-    {
-      parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent,
-      appendTranscriptTurn, readResultFromLog, enqueueValidation,
-    },
-  );
+    await expect(
+      notifyOriginatingTab(
+        { slug: '863-safe', status: 'completed', cwd: '/some/cwd', runId: 'run-1' },
+        { parsePrdRaw, appendResponseEvent, appendTranscriptTurn, readResultFromLog },
+      ),
+    ).resolves.toBeUndefined();
 
-  expect(appendResponseEvent).toHaveBeenCalledTimes(3);
-  expect(appendResponseEvent).toHaveBeenNthCalledWith(
-    1, '/some/cwd', 'psess-validator-1', expect.stringContaining('111-alpha'),
-    { prdSlug: '111-alpha', outcome: 'completed', validation: 'verified' },
-  );
-  expect(appendResponseEvent).toHaveBeenNthCalledWith(
-    2, '/some/cwd', 'psess-validator-1', expect.stringContaining('222-beta'),
-    { prdSlug: '222-beta', outcome: 'completed', validation: 'refuted' },
-  );
-  expect(appendResponseEvent).toHaveBeenNthCalledWith(
-    3, '/some/cwd', 'psess-validator-1', expect.stringContaining('1407-validator-run'),
-    { prdSlug: '1407-validator-run', outcome: 'completed', validation: 'unvalidated' },
-  );
-  expect(enqueueValidation).not.toHaveBeenCalled();
-});
+    expect(appendResponseEvent).toHaveBeenCalledTimes(1);
+  });
 
-// ─── PRD 1408: a downstream validator suppresses the per-PRD validation ask ─
-test('skips enqueueValidation when loadJobs reports a pending validator row depending on this job', async () => {
-  const sendPrompt = vi.fn();
-  const appendResponseEvent = vi.fn(async () => true);
-  const enqueueValidation = vi.fn();
-  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1' }));
-  const loadSessions = vi.fn(async () => ({ tabs: [] }));
-  const loadJobs = vi.fn(async () => ([
-    { slug: '1408-work-item' },
-    { slug: '1408-validate', agentType: 'validator', status: 'pending', dependsOn: ['1408-work-item'] },
-  ]));
+  test('no cwd on the job skips the transcript append but does not throw', async () => {
+    const appendTranscriptTurn = vi.fn(async () => true);
+    const readResultFromLog = vi.fn(() => 'result text');
+    const appendResponseEvent = vi.fn(async () => true);
+    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-abc' }));
 
-  await notifyOriginatingTab(
-    { slug: '1408-work-item', status: 'completed', cwd: '/some/cwd' },
-    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, enqueueValidation, loadJobs },
-  );
+    await notifyOriginatingTab(
+      { slug: '863-nocwd', status: 'completed', cwd: null, runId: 'run-1' },
+      { parsePrdRaw, appendResponseEvent, appendTranscriptTurn, readResultFromLog },
+    );
 
-  expect(appendResponseEvent).toHaveBeenCalledTimes(1);
-  expect(loadJobs).toHaveBeenCalledTimes(1);
-  expect(enqueueValidation).not.toHaveBeenCalled();
-});
-
-test('still enqueues validation when loadJobs reports no downstream validator', async () => {
-  const sendPrompt = vi.fn();
-  const appendResponseEvent = vi.fn(async () => true);
-  const enqueueValidation = vi.fn();
-  const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1' }));
-  const loadSessions = vi.fn(async () => ({ tabs: [] }));
-  const loadJobs = vi.fn(async () => ([{ slug: '1408-work-item' }]));
-
-  await notifyOriginatingTab(
-    { slug: '1408-work-item', status: 'completed', cwd: '/some/cwd' },
-    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, enqueueValidation, loadJobs },
-  );
-
-  expect(appendResponseEvent).toHaveBeenCalledTimes(1);
-  expect(enqueueValidation).toHaveBeenCalledTimes(1);
+    expect(appendTranscriptTurn).not.toHaveBeenCalled();
+  });
 });

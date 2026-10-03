@@ -29,6 +29,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
+const { git, writeProjectQueue } = require('./_helpers/schedulerHarness.cjs');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-mechanical-recovery-test-'));
 process.env.HOME = tmpHome;
@@ -38,10 +39,6 @@ const {
   selectMechanicalRecoveryTarget, performMechanicalRecovery, MECHANICALLY_RESOLVABLE_VERDICTS,
 } = scheduler;
 const jobWorktree = require('../lib/jobWorktree.cjs');
-
-function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' });
-}
 
 function initRepo(dir) {
   fs.mkdirSync(dir, { recursive: true });
@@ -58,13 +55,6 @@ function initRepo(dir) {
   fs.writeFileSync(path.join(dir, 'a.txt'), 'original a\n', 'utf8');
   git(['add', '-A'], dir);
   git(['commit', '-q', '-m', 'initial'], dir);
-}
-
-function writeProjectQueue(cwd, jobs) {
-  const stateDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
-  fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({ jobs }, null, 2));
-  return path.join(stateDir, 'queue.json');
 }
 
 function registerActiveProject(cwd, slugDirName) {

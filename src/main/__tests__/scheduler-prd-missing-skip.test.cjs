@@ -19,6 +19,7 @@ import { test, expect, beforeAll, afterAll } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { registerActiveProject, writeProjectQueue } = require('./_helpers/schedulerHarness.cjs');
 
 let tmpHome;
 let originalHome;
@@ -88,20 +89,6 @@ test('a job whose PRD source exists but is unreadable for a non-ENOENT reason st
     fs.rmSync(runDir, { recursive: true, force: true });
   }
 });
-
-function registerActiveProject(cwd) {
-  const projectsDir = path.join(tmpHome, '.claude', 'projects');
-  const slugDir = path.join(projectsDir, `fake-project-slug-${path.basename(cwd)}`);
-  fs.mkdirSync(slugDir, { recursive: true });
-  fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
-}
-
-function writeProjectQueue(cwd, jobs) {
-  const stateDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
-  fs.mkdirSync(stateDir, { recursive: true });
-  fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({ jobs }, null, 2));
-  return path.join(stateDir, 'queue.json');
-}
 
 // This test's whole premise is a PRD source missing EVERYWHERE — so the row
 // this produces is exactly what reconcile()'s auto-archive-drop path treats

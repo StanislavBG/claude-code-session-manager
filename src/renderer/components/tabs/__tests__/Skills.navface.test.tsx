@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
 import { createElement } from 'react'
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
-import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { Skills } from '../Skills'
 import { useLayout } from '../../../state/layout'
-import { useSessions, type SessionTab } from '../../../state/sessions'
-import { useConfig } from '../../../state/config'
+import { useSessions } from '../../../state/sessions'
+import { HOME, PROJECT_CWD, PROJECT_TAB, useNavfaceHarness, activeScope, clickScope, viewTabLabels, clickViewTab } from './_navfaceHarness'
 
 /**
  * Skills's scope switcher defaults from the NavFace
@@ -20,22 +19,6 @@ import { useConfig } from '../../../state/config'
 vi.mock('../../ui/MarkdownEditor', () => ({
   MarkdownEditor: () => createElement('div', { 'data-testid': 'markdown-editor' }),
 }))
-
-const HOME = '/home/bilko'
-const PROJECT_CWD = '/home/bilko/Projects/alpha'
-
-const PROJECT_TAB: SessionTab = {
-  id: 'tab-alpha',
-  sessionId: 'tab-alpha',
-  label: 'alpha',
-  cwd: PROJECT_CWD,
-  pid: null,
-  status: 'dormant',
-  exitCode: null,
-  startupCommand: null,
-  presetId: null,
-  generation: 0,
-}
 
 function installWindowApiMock() {
   const api = {
@@ -56,49 +39,7 @@ function installWindowApiMock() {
   return api
 }
 
-let container: HTMLDivElement | null = null
-let root: Root | null = null
-
-async function mount() {
-  container = document.createElement('div')
-  document.body.appendChild(container)
-  root = createRoot(container)
-  await act(async () => {
-    root!.render(createElement(Skills))
-    await Promise.resolve()
-    await Promise.resolve()
-  })
-  return container
-}
-
-const SCOPE_LABELS = ['User', 'Project', 'Local']
-
-function activeScope(el: HTMLElement): string | null {
-  const btn = Array.from(el.querySelectorAll('button')).find(
-    (b) => SCOPE_LABELS.includes(b.textContent?.trim() ?? '') && b.classList.contains('bg-bg-hi'),
-  )
-  return btn?.textContent?.trim() ?? null
-}
-
-function clickScope(el: HTMLElement, label: string) {
-  const btn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.trim() === label)
-  ;(btn as HTMLButtonElement).dispatchEvent(new MouseEvent('click', { bubbles: true }))
-}
-
-beforeEach(() => {
-  installWindowApiMock()
-  useLayout.setState({ navFace: 'home' })
-  useSessions.setState({ tabs: [], activeTabId: null })
-  useConfig.setState({ files: {}, watchRefs: {} })
-})
-
-afterEach(() => {
-  act(() => root?.unmount())
-  container?.remove()
-  container = null
-  root = null
-  delete (window as unknown as { api?: unknown }).api
-})
+const { mount } = useNavfaceHarness(Skills, installWindowApiMock)
 
 describe('Skills NavFace-driven default scope', () => {
   it('mounts at navFace=home with scope defaulted to user', async () => {

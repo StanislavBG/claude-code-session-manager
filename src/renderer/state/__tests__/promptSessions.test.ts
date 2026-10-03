@@ -182,36 +182,79 @@ describe('promptSessions.ts', () => {
     expect(chain[0].causedByEventId).toBeNull()
   })
 
-  it('rejects an event whose causedByEventId points at a non-existent event', async () => {
+  it.each([
+    {
+      name: 'an event whose causedByEventId points at a non-existent event',
+      attempt: async (store: any) => {
+        const session = await store.createPromptSession('/proj', 'Ship the feature')
+        return store.appendPromptSessionEvent(session.id, {
+          kind: 'prd_created',
+          causedByEventId: 'does-not-exist',
+          prdSlug: '999-bogus',
+        })
+      },
+    },
+    {
+      name: 'a second null-caused event once the session already has a first event',
+      attempt: async (store: any) => {
+        const session = await store.createPromptSession('/proj', 'Ship the feature')
+        return store.appendPromptSessionEvent(session.id, {
+          kind: 'prompt',
+          causedByEventId: null,
+          text: 'a second unrelated prompt',
+        })
+      },
+    },
+    {
+      name: "a causedByEventId that is valid in a different session's chain",
+      attempt: async (store: any, usePromptSessions: any) => {
+        const sessionA = await store.createPromptSession('/proj', 'Goal A')
+        const sessionB = await store.createPromptSession('/proj', 'Goal B')
+        const eventFromA = usePromptSessions.getState().events[sessionA.id][0]
+        return store.appendPromptSessionEvent(sessionB.id, {
+          kind: 'prd_created',
+          causedByEventId: eventFromA.id,
+          prdSlug: '902-cross-session',
+        })
+      },
+    },
+    {
+      // Only the current tail may be referenced; a second event caused by the
+      // (now stale) prompt event must be rejected.
+      name: 'branching: causedByEventId must be the current tail, not an earlier event',
+      attempt: async (store: any, usePromptSessions: any) => {
+        const session = await store.createPromptSession('/proj', 'Ship the feature')
+        const promptEvent = usePromptSessions.getState().events[session.id][0]
+        store.appendPromptSessionEvent(session.id, {
+          kind: 'prd_created',
+          causedByEventId: promptEvent.id,
+          prdSlug: '900-first',
+        })
+        return store.appendPromptSessionEvent(session.id, {
+          kind: 'prd_created',
+          causedByEventId: promptEvent.id,
+          prdSlug: '901-branch',
+        })
+      },
+    },
+    {
+      name: 'a prd_created event with no prdSlug',
+      attempt: async (store: any, usePromptSessions: any) => {
+        const session = await store.createPromptSession('/proj', 'Ship the feature')
+        const promptEvent = usePromptSessions.getState().events[session.id][0]
+        return store.appendPromptSessionEvent(session.id, {
+          kind: 'prd_created',
+          causedByEventId: promptEvent.id,
+        })
+      },
+    },
+  ])('rejects $name', async ({ attempt }) => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    const session = await store.createPromptSession('/proj', 'Ship the feature')
-
-    expect(() =>
-      store.appendPromptSessionEvent(session.id, {
-        kind: 'prd_created',
-        causedByEventId: 'does-not-exist',
-        prdSlug: '999-bogus',
-      }),
-    ).toThrow()
-  })
-
-  it('rejects a second null-caused event once the session already has a first event', async () => {
-    installWindowApiMock()
-    const { usePromptSessions } = await import('../promptSessions')
-    const store = usePromptSessions.getState()
-
-    const session = await store.createPromptSession('/proj', 'Ship the feature')
-
-    expect(() =>
-      store.appendPromptSessionEvent(session.id, {
-        kind: 'prompt',
-        causedByEventId: null,
-        text: 'a second unrelated prompt',
-      }),
-    ).toThrow()
+    // Sync throw from appendPromptSessionEvent surfaces as a rejection of the async attempt.
+    await expect(attempt(store, usePromptSessions)).rejects.toThrow()
   })
 
   it('rejects an event for a promptSessionId that was never created', async () => {
@@ -223,67 +266,6 @@ describe('promptSessions.ts', () => {
         kind: 'prompt',
         causedByEventId: null,
         text: 'orphan',
-      }),
-    ).toThrow()
-  })
-
-  it('rejects a causedByEventId that is valid in a different session\'s chain', async () => {
-    installWindowApiMock()
-    const { usePromptSessions } = await import('../promptSessions')
-    const store = usePromptSessions.getState()
-
-    const sessionA = await store.createPromptSession('/proj', 'Goal A')
-    const sessionB = await store.createPromptSession('/proj', 'Goal B')
-    const eventFromA = usePromptSessions.getState().events[sessionA.id][0]
-
-    expect(() =>
-      store.appendPromptSessionEvent(sessionB.id, {
-        kind: 'prd_created',
-        causedByEventId: eventFromA.id,
-        prdSlug: '902-cross-session',
-      }),
-    ).toThrow()
-  })
-
-  it('rejects branching: causedByEventId must be the current tail, not an earlier event', async () => {
-    installWindowApiMock()
-    const { usePromptSessions } = await import('../promptSessions')
-    const store = usePromptSessions.getState()
-
-    const session = await store.createPromptSession('/proj', 'Ship the feature')
-    const events = usePromptSessions.getState().events[session.id]
-    const promptEvent = events[0]
-
-    store.appendPromptSessionEvent(session.id, {
-      kind: 'prd_created',
-      causedByEventId: promptEvent.id,
-      prdSlug: '900-first',
-    })
-
-    // A second event also caused by the (now stale) prompt event must be
-    // rejected — only the current tail may be referenced.
-    expect(() =>
-      store.appendPromptSessionEvent(session.id, {
-        kind: 'prd_created',
-        causedByEventId: promptEvent.id,
-        prdSlug: '901-branch',
-      }),
-    ).toThrow()
-  })
-
-  it('rejects a prd_created event with no prdSlug', async () => {
-    installWindowApiMock()
-    const { usePromptSessions } = await import('../promptSessions')
-    const store = usePromptSessions.getState()
-
-    const session = await store.createPromptSession('/proj', 'Ship the feature')
-    const events = usePromptSessions.getState().events[session.id]
-    const promptEvent = events[0]
-
-    expect(() =>
-      store.appendPromptSessionEvent(session.id, {
-        kind: 'prd_created',
-        causedByEventId: promptEvent.id,
       }),
     ).toThrow()
   })
@@ -1513,106 +1495,88 @@ describe('audit log emission (PRD 940)', () => {
     vi.unstubAllGlobals()
   })
 
-  it('createPromptSession fires an epic_create audit event with cwd/epicId/source', async () => {
-    const api = installWindowApiMock()
-    const { usePromptSessions } = await import('../promptSessions')
-
-    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature', undefined, 'NewEpicCard')
-
-    expect(api.auditLog.append).toHaveBeenCalledWith('epic_create', {
-      cwd: '/proj',
-      epicId: session.id,
+  it.each([
+    {
+      name: 'createPromptSession fires an epic_create audit event with cwd/epicId/source',
+      event: 'epic_create',
       source: 'NewEpicCard',
-    })
-  })
-
-  it('createPromptSession defaults source to "unknown" when the caller omits it', async () => {
-    const api = installWindowApiMock()
-    const { usePromptSessions } = await import('../promptSessions')
-
-    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
-
-    expect(api.auditLog.append).toHaveBeenCalledWith('epic_create', {
-      cwd: '/proj',
-      epicId: session.id,
+      run: async (s: any) => {
+        const e = await s.createPromptSession('/proj', 'Ship the feature', undefined, 'NewEpicCard')
+        return { cwd: '/proj', epicId: e.id }
+      },
+    },
+    {
+      name: 'createPromptSession defaults source to "unknown" when the caller omits it',
+      event: 'epic_create',
       source: 'unknown',
-    })
-  })
-
-  it('approveProposed fires an epic_approve audit event', async () => {
-    const api = installWindowApiMock()
-    const { usePromptSessions } = await import('../promptSessions')
-
-    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
-    api.auditLog.append.mockClear()
-    usePromptSessions.getState().approveProposed(session.id, 'EpicApprovalBar')
-
-    expect(api.auditLog.append).toHaveBeenCalledWith('epic_approve', {
-      cwd: '/proj',
-      epicId: session.id,
+      run: async (s: any) => {
+        const e = await s.createPromptSession('/proj', 'Ship the feature')
+        return { cwd: '/proj', epicId: e.id }
+      },
+    },
+    {
+      name: 'approveProposed fires an epic_approve audit event',
+      event: 'epic_approve',
       source: 'EpicApprovalBar',
-    })
-  })
-
-  it('markCompleted fires an epic_complete audit event', async () => {
-    const api = installWindowApiMock()
-    const { usePromptSessions } = await import('../promptSessions')
-
-    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
-    api.auditLog.append.mockClear()
-    await usePromptSessions.getState().markCompleted(session.id, 'EpicDetail')
-
-    expect(api.auditLog.append).toHaveBeenCalledWith('epic_complete', {
-      cwd: '/proj',
-      epicId: session.id,
+      run: async (s: any, api: any) => {
+        const e = await s.createPromptSession('/proj', 'Ship the feature')
+        api.auditLog.append.mockClear()
+        s.approveProposed(e.id, 'EpicApprovalBar')
+        return { cwd: '/proj', epicId: e.id }
+      },
+    },
+    {
+      name: 'markCompleted fires an epic_complete audit event',
+      event: 'epic_complete',
       source: 'EpicDetail',
-    })
-  })
-
-  it('deleteEpic fires an epic_delete audit event', async () => {
-    const api = installWindowApiMock()
-    const { usePromptSessions } = await import('../promptSessions')
-
-    const session = await usePromptSessions.getState().createPromptSession('/proj', 'Throwaway')
-    api.auditLog.append.mockClear()
-    await usePromptSessions.getState().deleteEpic(session.id, 'EpicQueue row menu')
-
-    expect(api.auditLog.append).toHaveBeenCalledWith('epic_delete', {
-      cwd: '/proj',
-      epicId: session.id,
+      run: async (s: any, api: any) => {
+        const e = await s.createPromptSession('/proj', 'Ship the feature')
+        api.auditLog.append.mockClear()
+        await s.markCompleted(e.id, 'EpicDetail')
+        return { cwd: '/proj', epicId: e.id }
+      },
+    },
+    {
+      name: 'deleteEpic fires an epic_delete audit event',
+      event: 'epic_delete',
       source: 'EpicQueue row menu',
-    })
-  })
-
-  it('resumeArchived fires an epic_resume audit event for the new Epic id', async () => {
-    const api = installWindowApiMock()
-    const { usePromptSessions } = await import('../promptSessions')
-
-    const archived = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
-    await usePromptSessions.getState().markCompleted(archived.id)
-    api.auditLog.append.mockClear()
-    const resumed = await usePromptSessions.getState().resumeArchived(archived.id, 'EpicDetail')
-
-    expect(api.auditLog.append).toHaveBeenCalledWith('epic_resume', {
-      cwd: resumed.cwd,
-      epicId: resumed.id,
+      run: async (s: any, api: any) => {
+        const e = await s.createPromptSession('/proj', 'Throwaway')
+        api.auditLog.append.mockClear()
+        await s.deleteEpic(e.id, 'EpicQueue row menu')
+        return { cwd: '/proj', epicId: e.id }
+      },
+    },
+    {
+      name: 'resumeArchived fires an epic_resume audit event for the new Epic id',
+      event: 'epic_resume',
       source: 'EpicDetail',
-    })
-  })
-
-  it('duplicateEpic fires an epic_duplicate audit event for the new Epic id', async () => {
+      run: async (s: any, api: any) => {
+        const archived = await s.createPromptSession('/proj', 'Ship the feature')
+        await s.markCompleted(archived.id)
+        api.auditLog.append.mockClear()
+        const resumed = await s.resumeArchived(archived.id, 'EpicDetail')
+        return { cwd: resumed.cwd, epicId: resumed.id }
+      },
+    },
+    {
+      name: 'duplicateEpic fires an epic_duplicate audit event for the new Epic id',
+      event: 'epic_duplicate',
+      source: 'EpicQueue row menu',
+      run: async (s: any, api: any) => {
+        const src = await s.createPromptSession('/proj', 'Shared goal', 'feature')
+        api.auditLog.append.mockClear()
+        const copy = await s.duplicateEpic(src.id, 'EpicQueue row menu')
+        return { cwd: src.cwd, epicId: copy.id }
+      },
+    },
+  ])('$name', async ({ event, source, run }) => {
     const api = installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
 
-    const source = await usePromptSessions.getState().createPromptSession('/proj', 'Shared goal', 'feature')
-    api.auditLog.append.mockClear()
-    const copy = await usePromptSessions.getState().duplicateEpic(source.id, 'EpicQueue row menu')
+    const { cwd, epicId } = await run(usePromptSessions.getState(), api)
 
-    expect(api.auditLog.append).toHaveBeenCalledWith('epic_duplicate', {
-      cwd: source.cwd,
-      epicId: copy.id,
-      source: 'EpicQueue row menu',
-    })
+    expect(api.auditLog.append).toHaveBeenCalledWith(event, { cwd, epicId, source })
   })
 
   it('audit IPC failure logs a console warning and never rejects the store mutation', async () => {

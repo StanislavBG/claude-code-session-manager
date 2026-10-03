@@ -47,6 +47,18 @@ new work. **report** = your final message to the human.
 
 Read `~/.claude/session-manager/scheduled-plans/PRD_AUTHORING.md` before writing PRDs.
 
+### Plan objective
+
+One goal = one validate PRD = one plan card on the Scheduler. Why: the Scheduler groups a plan
+card as the validate PRD plus everything it transitively depends on.
+The validate PRD's title is the card title, so write it as `Validate: <plain-language goal>`.
+Keep one goal per validate PRD; a second goal is a second plan, with its own validate PRD.
+Prefer wide over deep: PRDs that share no files run in parallel; only chain two PRDs on a real
+file or output dependency, never to express reading order alone.
+A follow-up or fix PRD for the same goal depends on that plan's open PRDs instead of starting
+an unrelated root. Why: it keeps the fix inside the same card rather than minting a second,
+unrelated one.
+
 ### Preflight — confirm the tool is even in your tool list
 
 Before drafting, check that `mcp__session-manager-scheduler__scheduler_create_prd` is in your
@@ -101,7 +113,8 @@ failure modes have different fixes:
    needs another PRD's output.
 9. **Write plain, checkable criteria.** Each names a file, a symbol and the result; one names
    the test file and tests. Commands go in `gate`. No open-ended "grep X and update" lines.
-10. **Show the plan once**, as a table (#, PRD, files, gate, dependsOn, estimate), not PRD
+10. **Show the plan once**: the plan goal line, the stage view (for example `Stage 1: A ∥ B →
+    Stage 2: C → validate`), and a table (#, PRD, files, gate, dependsOn, estimate) — not PRD
     drafts. Queue at once when the Epic is `feature` or `bug` and scope is clear; otherwise ask
     one approval question, once.
 11. Before the first `scheduler_create_prd` call, run `git -C "$SM_PROJECT_ROOT" rev-parse HEAD`
@@ -183,7 +196,8 @@ paths → verdict line.
 End every plan with exactly one validate PRD:
 
 1. `agentType: "validator"`, `tag: "build"`, `estimateMinutes: 10`, slug
-   `validate-<short-plan-name>`.
+   `validate-<short-plan-name>`. Its title is the plan goal shown on the Scheduler card, so
+   write it as `Validate: <plain-language goal>`.
 2. `dependsOn`: every other slug in the plan. Past the cap of 100, only the sinks (PRDs nothing
    depends on). Why: `dependsOn` is walked transitively.
 3. Goal: the plan's slugs and titles.

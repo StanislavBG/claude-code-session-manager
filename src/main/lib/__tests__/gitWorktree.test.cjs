@@ -11,7 +11,7 @@
 
 'use strict';
 
-import { test, expect, beforeEach, afterEach, vi } from 'vitest';
+import { test, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -40,10 +40,23 @@ function initRepo(dir) {
   git(['commit', '-q', '-m', 'initial'], dir);
 }
 
+// One template repo built once; each case gets a cheap recursive copy instead
+// of paying git init + 2 config + add + commit (5 git spawns) per case.
+let templateRoot;
+let templateRepo;
+beforeAll(() => {
+  templateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-gitworktree-tpl-'));
+  templateRepo = path.join(templateRoot, 'repo');
+  initRepo(templateRepo);
+});
+afterAll(() => {
+  if (templateRoot) fs.rmSync(templateRoot, { recursive: true, force: true });
+});
+
 beforeEach(() => {
   tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-gitworktree-'));
   repoCwd = path.join(tmpRoot, 'repo');
-  initRepo(repoCwd);
+  fs.cpSync(templateRepo, repoCwd, { recursive: true });
   // Every sweep below runs against THIS throwaway root, never the live job-worktree root.
   originalWorktreeRoot = process.env.SM_WORKTREE_ROOT;
   process.env.SM_WORKTREE_ROOT = path.join(tmpRoot, 'worktrees');
@@ -67,8 +80,12 @@ afterEach(async () => {
   restore('SM_EPIC_WORKTREE_DISABLE', originalEpicDisable);
   restore('SM_EPIC_WORKTREE_MAX', originalEpicMax);
   // Best-effort: prune any worktree either kind's tests created before removing the repo.
-  try { await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job' }); } catch { /* ignore */ }
-  try { await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'epic' }); } catch { /* ignore */ }
+  // Every worktree lives under tmpRoot/worktrees and tmpRoot is removed below, so the sweeps
+  // are only needed when a case actually created worktrees.
+  if (fs.existsSync(process.env.SM_WORKTREE_ROOT)) {
+    try { await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job' }); } catch { /* ignore */ }
+    try { await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'epic' }); } catch { /* ignore */ }
+  }
   restore('SM_WORKTREE_ROOT', originalWorktreeRoot);
   fs.rmSync(tmpRoot, { recursive: true, force: true });
 });

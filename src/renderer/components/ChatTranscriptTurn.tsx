@@ -1413,7 +1413,7 @@ function TurnComponent({
           )}
         </div>
         {toolStripVariant === 'hidden' ? null : toolStripVariant === 'collapsible' ? (
-          <CollapsibleToolStrip items={turn.toolUses} running={presentation === 'working'} />
+          isRunning ? null : <CollapsibleToolStrip items={turn.toolUses} />
         ) : (
           <ToolUseTraceStrip items={turn.toolUses} running={presentation === 'working'} />
         )}

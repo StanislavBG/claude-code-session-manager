@@ -42,14 +42,26 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-function mount(turn: ChatTurn, streaming: boolean) {
+function mount(
+  turn: ChatTurn,
+  streaming: boolean,
+  opts?: { runActive?: boolean; toolStripVariant?: 'inline' | 'collapsible' | 'hidden' },
+) {
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
   const render = (t: ChatTurn) =>
     act(() => {
       root!.render(
-        createElement(Turn, { turn: t, cwd: '/tmp', tabId: 't', sessionId: 's', runActive: true, streaming }),
+        createElement(Turn, {
+          turn: t,
+          cwd: '/tmp',
+          tabId: 't',
+          sessionId: 's',
+          runActive: opts?.runActive ?? true,
+          streaming,
+          toolStripVariant: opts?.toolStripVariant,
+        }),
       )
     })
   render(turn)
@@ -116,5 +128,30 @@ describe('Turn — single working-row indicator while streaming', () => {
     const rows = host!.querySelectorAll('[data-testid="turn-working-row"]')
     expect(rows.length).toBe(1)
     expect(rows[0].textContent).toBe('working · Glob ops/macros/** · 2 tools')
+  })
+})
+
+// chat-tool-chip-working-row: the collapsible tool-use chip has its own
+// pulsing dot, so a running turn must not show it alongside the
+// turn-working-row — two stacked "running" signals. The chip appears once
+// the turn finishes.
+describe('Turn — collapsible tool strip suppressed while running', () => {
+  const toolUses = [
+    { id: 'tu-1', kind: 'tool' as const, label: 'Read', detail: 'CLAUDE.md' },
+    { id: 'tu-2', kind: 'tool' as const, label: 'Glob', detail: 'ops/macros/**' },
+  ]
+
+  it('running turn: exactly one turn-working-row, zero tool-strip-toggle', () => {
+    const turn: ChatTurn = { id: 'e-running', role: 'assistant', text: '', at: 1, toolUses }
+    mount(turn, false, { runActive: true, toolStripVariant: 'collapsible' })
+    expect(host!.querySelectorAll('[data-testid="turn-working-row"]').length).toBe(1)
+    expect(host!.querySelectorAll('[data-testid="tool-strip-toggle"]').length).toBe(0)
+  })
+
+  it('finished turn: tool-strip-toggle shown, no working row', () => {
+    const turn: ChatTurn = { id: 'e-done', role: 'assistant', text: 'all done', at: 1, toolUses }
+    mount(turn, false, { runActive: false, toolStripVariant: 'collapsible' })
+    expect(host!.querySelectorAll('[data-testid="tool-strip-toggle"]').length).toBe(1)
+    expect(host!.querySelectorAll('[data-testid="turn-working-row"]').length).toBe(0)
   })
 })

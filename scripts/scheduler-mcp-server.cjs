@@ -14,6 +14,9 @@
  *   project_home_write({ cwd?, html }) -> POST /admin/project-home/write
  *   project_demo_video_write({ cwd?, html }) -> POST /admin/project-home/demo-video/write
  *
+ *   macro_list({ cwd? }) -> GET  /admin/macros?cwd=<encoded>
+ *   macro_save({ cwd?, id?, label, agentName, tag, prompt }) -> POST /admin/macros/save
+ *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
  * requiring scheduler.cjs/localAdminHttp.cjs directly. The admin server IS the
@@ -396,6 +399,32 @@ const TOOLS = [
     },
   },
   {
+    name: 'macro_list',
+    description: descriptionFor('macro_list'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
+      },
+    },
+  },
+  {
+    name: 'macro_save',
+    description: descriptionFor('macro_save'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
+        id: { type: 'string', description: 'Optional: id of an existing macro (already visible to this project) to update. Omit to create a new macro scoped to this project.' },
+        label: { type: 'string', description: 'Short label shown on the HOT KEYS button.' },
+        agentName: { type: 'string', description: 'Persona to run the macro as (e.g. "builder").' },
+        tag: { type: 'string', description: 'Mission tag for the macro.' },
+        prompt: { type: 'string', description: 'The opening prompt the macro sends.' },
+      },
+      required: ['label', 'agentName', 'tag', 'prompt'],
+    },
+  },
+  {
     name: 'session_manager_help',
     description: descriptionFor('session_manager_help'),
     inputSchema: {
@@ -625,6 +654,24 @@ async function handleCallTool(request) {
       }
       const cwd = resolveCwdArg(args);
       const result = await adminRequest('POST', '/admin/project-home/demo-video/write', { cwd, html: args.html });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'macro_list') {
+      const cwd = resolveCwdArg(args);
+      const result = await adminRequest('GET', `/admin/macros?cwd=${encodeURIComponent(cwd)}`);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'macro_save') {
+      const missing = ['label', 'agentName', 'tag', 'prompt'].filter(
+        (field) => !args || typeof args[field] !== 'string',
+      );
+      if (missing.length > 0) {
+        return errorResult(`missing or invalid required argument(s): ${missing.join(', ')}`);
+      }
+      const cwd = resolveCwdArg(args);
+      const payload = { cwd, label: args.label, agentName: args.agentName, tag: args.tag, prompt: args.prompt };
+      if (typeof args.id === 'string' && args.id) payload.id = args.id;
+      const result = await adminRequest('POST', '/admin/macros/save', payload);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'session_manager_help') {

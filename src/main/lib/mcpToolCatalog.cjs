@@ -23,7 +23,7 @@ const { z } = require('zod');
 
 const CatalogEntrySchema = z.object({
   name: z.string().min(1),
-  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home']),
+  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros']),
   purpose: z.string().min(1),
   whenToUse: z.string().min(1),
   whenNotToUse: z.string().min(1),
@@ -292,6 +292,41 @@ const MCP_TOOL_CATALOG = [
     },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
       + 'The document is CSP-stamped after it is written, so the viewer sandbox is the real network fence — these checks are defence in depth.',
+  },
+  {
+    name: 'macro_list',
+    group: 'macros',
+    purpose: "List this project's HOT KEYS macros — the saved (agent, tag, prompt) one-click buttons shown "
+      + "in the Sessions tab's HOT KEYS strip, via the session-manager app's admin API.",
+    whenToUse: 'Use to see what macros already exist for this project (including machine-wide `*` macros and '
+      + 'built-ins) before deciding whether to add or update one.',
+    whenNotToUse: 'WHEN NOT TO USE IT: macros are scoped to the caller\'s own project — this only ever returns '
+      + "macros visible to the resolved cwd, never another project's.",
+    exampleArgs: { cwd: '/home/bilko/Projects/session-manager' },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted.",
+  },
+  {
+    name: 'macro_save',
+    group: 'macros',
+    purpose: "Create or update one of this project's HOT KEYS macros — a saved (agentName, tag, prompt) "
+      + 'one-click button — via the session-manager app\'s admin API, through the same macroLibrary.cjs store '
+      + 'the Sessions HOT KEYS strip reads from.',
+    whenToUse: 'Pass `id` to update an existing macro already visible to this project; omit `id` to create a new '
+      + 'one scoped to this project. Use for things like a "Publish git + npm" macro a human will press '
+      + 'repeatedly, when they have asked for that macro to exist.',
+    whenNotToUse: 'WHEN NOT TO USE IT: macros are scoped to the caller\'s own project — this call is refused if '
+      + '`id` resolves to a macro not visible to this project. Built-in macros (`id` starting with `builtin-`) '
+      + "cannot be edited through this route. A macro is a HUMAN's one-click button, not a task runner — never "
+      + 'create or update one unless the human has actually asked for that macro to exist.',
+    exampleArgs: {
+      cwd: '/home/bilko/Projects/session-manager',
+      label: 'Publish git + npm',
+      agentName: 'builder',
+      tag: 'feature',
+      prompt: 'Run the full publish flow: commit, bump version, gate, npm publish, push.',
+    },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or "
+      + 'process.cwd()) when omitted. label, agentName, tag and prompt are all required strings.',
   },
   {
     name: 'session_manager_help',

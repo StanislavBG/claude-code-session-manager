@@ -1,15 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { EpicIntakeSection } from '../../lib/epicIntake'
-import { TurnFrame } from '../ChatTranscriptTurn'
+import { estimateTokens } from '../../lib/estimateTokens'
 
 /**
- * AIM briefing card — the Epic's first turn, rendered from the structured
- * `sections` composeEpicIntake now emits (epicIntake.ts) instead of the flat
- * `openingPrompt` string. A body renderer inside the existing three-zone
- * TurnFrame (chat-turn-three-zone-frame), never a new frame: the header shows
- * a badge + timestamp (TurnFrame's own header zone), the body is one
- * collapsible card per section KIND, and the footer's Copy button copies the
- * exact wire-identical `openingPrompt` (TurnFrame's own footer zone).
+ * Launch briefing card — the Epic's first turn, rendered from the structured
+ * `sections` composeEpicIntake emits (epicIntake.ts) instead of the flat
+ * `openingPrompt` string. Collapsed to a header + chip row by default so the
+ * conversation starts higher on screen; Show (or a chip) reveals the section
+ * bodies below.
  *
  * CORE: renders from `sections` data only — never regex-parses the flat
  * `openingPrompt` string back apart. Only used when `sections` is present and
@@ -19,7 +17,7 @@ import { TurnFrame } from '../ChatTranscriptTurn'
 
 const GROUP_LABEL: Record<EpicIntakeSection['kind'], string> = {
   actor: 'Actor',
-  'persona-body': 'Persona notes',
+  'persona-body': 'Persona',
   injection: 'Injections',
   input: 'Input',
   mission: 'Mission',
@@ -28,10 +26,10 @@ const GROUP_LABEL: Record<EpicIntakeSection['kind'], string> = {
 }
 
 // actor/mission are the load-bearing "who + what this Epic is for" lines —
-// open by default. injection/input are ambient framing the human rarely
-// needs to re-read — collapsed to a one-line summary with a count. goal is
-// the human's own ask, so it opens too; reference is metadata like
-// injection/input.
+// open by default once the card is expanded. injection/input are ambient
+// framing the human rarely needs to re-read — collapsed to a one-line
+// summary with a count. goal is the human's own ask, so it opens too;
+// reference is metadata like injection/input.
 const DEFAULT_EXPANDED: Record<EpicIntakeSection['kind'], boolean> = {
   actor: true,
   'persona-body': false,
@@ -85,19 +83,30 @@ function oneLineSummary(items: EpicIntakeSection[]): string {
   return `${items.length} items`
 }
 
-function SectionCard({ group }: { group: SectionGroup }) {
+function SectionCard({
+  group,
+  open,
+  onToggle,
+  innerRef,
+}: {
+  group: SectionGroup
+  open: boolean
+  onToggle: () => void
+  innerRef: (el: HTMLDivElement | null) => void
+}) {
   const long = groupChars(group.items) > LONG_SECTION_CHARS
-  const [open, setOpen] = useState(DEFAULT_EXPANDED[group.kind] && !long)
   const count = group.items.length
   return (
     <div
+      ref={innerRef}
+      tabIndex={-1}
       className="overflow-hidden rounded-lg border border-line"
       data-testid="epic-intake-section"
       data-section-kind={group.kind}
     >
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={onToggle}
         data-testid="epic-intake-section-toggle"
         className="flex w-full items-center gap-1.5 bg-elev px-2.5 py-1.5 font-mono text-[11px] font-semibold text-fg-dim hover:bg-hi"
       >
@@ -138,7 +147,7 @@ function SectionCard({ group }: { group: SectionGroup }) {
 
 export function EpicIntakeCard({
   sections,
-  at,
+  at: _at,
   openingPrompt,
 }: {
   sections: EpicIntakeSection[]
@@ -146,25 +155,99 @@ export function EpicIntakeCard({
   openingPrompt: string
 }) {
   const groups = groupSections(sections)
+  const tokens = estimateTokens(openingPrompt)
+  const [expanded, setExpanded] = useState(false)
+  const [openKinds, setOpenKinds] = useState<Partial<Record<EpicIntakeSection['kind'], boolean>>>({})
+  const [focusKind, setFocusKind] = useState<EpicIntakeSection['kind'] | null>(null)
+  const sectionRefs = useRef<Partial<Record<EpicIntakeSection['kind'], HTMLDivElement>>>({})
+
+  useEffect(() => {
+    if (!focusKind) return
+    const el = sectionRefs.current[focusKind]
+    if (el) {
+      if (typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'nearest' })
+      el.focus()
+    }
+    setFocusKind(null)
+  }, [focusKind, expanded])
+
+  // A long section starts collapsed regardless of its kind's default, same
+  // guard LONG_SECTION_CHARS enforced before this state moved up from
+  // SectionCard — Show reveals the list, it doesn't force every body open.
+  function isOpen(group: SectionGroup): boolean {
+    const long = groupChars(group.items) > LONG_SECTION_CHARS
+    return openKinds[group.kind] ?? (DEFAULT_EXPANDED[group.kind] && !long)
+  }
+
+  function toggleSection(group: SectionGroup) {
+    setOpenKinds((prev) => ({ ...prev, [group.kind]: !isOpen(group) }))
+  }
+
+  function handleShowToggle() {
+    setExpanded((prev) => !prev)
+  }
+
+  function handleChipClick(kind: EpicIntakeSection['kind']) {
+    setExpanded(true)
+    setOpenKinds((prev) => ({ ...prev, [kind]: true }))
+    setFocusKind(kind)
+  }
+
   return (
-    <TurnFrame
-      badge={
-        <span
-          data-testid="epic-intake-badge"
-          className="rounded border border-accent/40 bg-accent/10 px-1.5 py-0.5 text-[10px] font-semibold text-accent"
-        >
-          AIM briefing
-        </span>
-      }
-      timestamp={at}
-      copyText={openingPrompt}
-      testId="epic-intake-card"
+    <div
+      data-testid="epic-intake-card"
+      className="rounded-card border border-dashed border-sage/40 bg-sage/5"
     >
-      <div className="grid gap-1.5" data-testid="epic-intake-card-sections">
+      <div className="flex items-start justify-between gap-3 px-3 py-2">
+        <div className="min-w-0">
+          <div data-testid="epic-intake-badge" className="font-mono text-[10px] font-semibold uppercase tracking-wide text-sage-dark">
+            Launch briefing
+          </div>
+          <p className="mt-0.5 text-xs text-fg-faint">Sent to the agent at start — not part of the conversation</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="whitespace-nowrap font-mono text-[11px] text-fg-faint">
+            {groups.length} sections · {tokens.toLocaleString()} tok
+          </span>
+          <button
+            type="button"
+            data-testid="epic-intake-toggle"
+            onClick={handleShowToggle}
+            className="whitespace-nowrap font-mono text-[11px] font-semibold text-accent hover:underline"
+          >
+            {expanded ? 'Hide ▴' : 'Show ▾'}
+          </button>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1.5 px-3 pb-2.5">
         {groups.map((g) => (
-          <SectionCard key={g.kind} group={g} />
+          <button
+            key={g.kind}
+            type="button"
+            data-testid="epic-intake-chip"
+            data-chip-kind={g.kind}
+            onClick={() => handleChipClick(g.kind)}
+            className="rounded border border-sage/40 bg-sage/10 px-1.5 py-0.5 font-mono text-[10px] text-sage-dark hover:bg-sage/20"
+          >
+            {GROUP_LABEL[g.kind]}
+          </button>
         ))}
       </div>
-    </TurnFrame>
+      {expanded && (
+        <div className="grid gap-1.5 px-3 pb-3" data-testid="epic-intake-card-sections">
+          {groups.map((g) => (
+            <SectionCard
+              key={g.kind}
+              group={g}
+              open={isOpen(g)}
+              onToggle={() => toggleSection(g)}
+              innerRef={(el) => {
+                if (el) sectionRefs.current[g.kind] = el
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

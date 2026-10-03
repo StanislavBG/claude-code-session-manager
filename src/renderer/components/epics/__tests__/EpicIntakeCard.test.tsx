@@ -2,26 +2,17 @@
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import type { EpicIntakeSection } from '../../../lib/epicIntake'
 
 /**
- * EpicIntakeCard — the Epic's first turn rendered as a structured AIM
- * briefing card from composeEpicIntake's `sections` (epicIntake.ts), a body
- * renderer inside the shared TurnFrame three-zone layout rather than a new
- * frame. Covers: section-kind grouping/order, default expand state per kind,
- * the never-regex-parse-openingPrompt guarantee, and the flat-fallback path
- * EpicDetail takes for an Epic with no `sections` at all.
+ * EpicIntakeCard — the Epic's first turn rendered as a compact "Launch
+ * briefing" card from composeEpicIntake's `sections` (epicIntake.ts).
+ * Collapsed by default (header + chips only); Show or a chip reveals the
+ * section bodies. Covers: badge/subtitle/count text, default-collapsed
+ * state, chip-click expansion, and the never-regex-parse-openingPrompt
+ * guarantee.
  */
-
-function installWindowApiMock() {
-  const api = {
-    transcripts: { readRef: vi.fn(async () => ({ ok: false as const })) },
-    clipboard: { writeText: vi.fn(async () => ({ ok: true })) },
-  }
-  ;(window as unknown as { api: typeof api }).api = api
-  return api
-}
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
@@ -51,7 +42,7 @@ const FULL_SECTIONS: EpicIntakeSection[] = [
 const OPENING_PROMPT_STAND_IN = 'THIS-IS-THE-FLAT-OPENING-PROMPT-NEVER-PARSED-FOR-DISPLAY'
 
 describe('EpicIntakeCard', () => {
-  beforeEach(() => installWindowApiMock())
+  beforeEach(() => {})
   afterEach(() => {
     if (root && container) {
       act(() => root!.unmount())
@@ -59,12 +50,47 @@ describe('EpicIntakeCard', () => {
     }
     container = null
     root = null
-    delete (window as unknown as { api?: unknown }).api
   })
 
-  it('CORE: renders one section card per kind, in the same order composeEpicIntake emits them', async () => {
+  it('CORE: renders the Launch briefing badge, subtitle, and section/token count', async () => {
     const { EpicIntakeCard } = await import('../EpicIntakeCard')
     const el = mount(createElement(EpicIntakeCard, { sections: FULL_SECTIONS, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
+
+    expect(el.querySelector('[data-testid="epic-intake-badge"]')?.textContent).toBe('Launch briefing')
+    expect(el.textContent).toContain('Sent to the agent at start — not part of the conversation')
+
+    // 6 groups: two 'reference' sections collapse into one group/chip.
+    const expectedTokens = Math.ceil(OPENING_PROMPT_STAND_IN.length / 4)
+    expect(el.textContent).toContain(`6 sections · ${expectedTokens.toLocaleString()} tok`)
+  })
+
+  it('CORE: one chip per section group, in the same order composeEpicIntake emits them, with persona-body labeled "Persona"', async () => {
+    const { EpicIntakeCard } = await import('../EpicIntakeCard')
+    const sections: EpicIntakeSection[] = [
+      ...FULL_SECTIONS,
+      { kind: 'persona-body', label: 'Persona notes', text: 'Be terse.' },
+    ]
+    const el = mount(createElement(EpicIntakeCard, { sections, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
+    const chips = Array.from(el.querySelectorAll('[data-testid="epic-intake-chip"]'))
+    expect(chips.map((c) => c.textContent)).toEqual(['Actor', 'Injections', 'Input', 'Mission', 'Goal', 'References', 'Persona'])
+  })
+
+  it('CORE: collapsed by default — no section body or chip-triggered content renders until Show or a chip is clicked', async () => {
+    const { EpicIntakeCard } = await import('../EpicIntakeCard')
+    const el = mount(createElement(EpicIntakeCard, { sections: FULL_SECTIONS, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
+
+    expect(el.querySelector('[data-testid="epic-intake-section"]')).toBeNull()
+    expect(el.querySelector('[data-testid="epic-intake-section-body"]')).toBeNull()
+    expect(el.querySelector('[data-testid="epic-intake-toggle"]')?.textContent).toBe('Show ▾')
+  })
+
+  it('CORE: clicking Show reveals every section group and flips the toggle to Hide', async () => {
+    const { EpicIntakeCard } = await import('../EpicIntakeCard')
+    const el = mount(createElement(EpicIntakeCard, { sections: FULL_SECTIONS, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
+    const toggle = el.querySelector('[data-testid="epic-intake-toggle"]') as HTMLButtonElement
+    act(() => toggle.click())
+
+    expect(toggle.textContent).toBe('Hide ▴')
     const cards = Array.from(el.querySelectorAll('[data-testid="epic-intake-section"]'))
     expect(cards.map((c) => c.getAttribute('data-section-kind'))).toEqual([
       'actor',
@@ -76,50 +102,22 @@ describe('EpicIntakeCard', () => {
     ])
   })
 
-  it('CORE: actor and mission are expanded by default; injection and input are collapsed to a one-line summary with a count', async () => {
+  it('CORE: clicking a chip expands the card and opens that section specifically', async () => {
     const { EpicIntakeCard } = await import('../EpicIntakeCard')
     const el = mount(createElement(EpicIntakeCard, { sections: FULL_SECTIONS, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
-    const byKind = (kind: string) => el.querySelector(`[data-section-kind="${kind}"]`)!
 
-    expect(byKind('actor').querySelector('[data-testid="epic-intake-section-body"]')).toBeTruthy()
-    expect(byKind('mission').querySelector('[data-testid="epic-intake-section-body"]')).toBeTruthy()
+    const injectionChip = el.querySelector('[data-chip-kind="injection"]') as HTMLButtonElement
+    await act(async () => {
+      injectionChip.click()
+      await Promise.resolve()
+    })
 
-    const injectionCard = byKind('injection')
-    expect(injectionCard.querySelector('[data-testid="epic-intake-section-body"]')).toBeFalsy()
-    expect(injectionCard.querySelector('[data-testid="epic-intake-section-summary"]')?.textContent).toContain(
-      'Work concisely and verify before claiming done.',
-    )
-
-    const inputCard = byKind('input')
-    expect(inputCard.querySelector('[data-testid="epic-intake-section-body"]')).toBeFalsy()
-    expect(inputCard.querySelector('[data-testid="epic-intake-section-summary"]')?.textContent).toContain('Grounding:')
+    const injectionSection = el.querySelector('[data-section-kind="injection"]')!
+    expect(injectionSection.querySelector('[data-testid="epic-intake-section-body"]')).toBeTruthy()
+    expect(injectionSection.textContent).toContain('Work concisely and verify before claiming done.')
   })
 
-  it('CORE: the reference group collapses two references into one card showing a count, expandable to both', async () => {
-    const { EpicIntakeCard } = await import('../EpicIntakeCard')
-    const el = mount(createElement(EpicIntakeCard, { sections: FULL_SECTIONS, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
-    const refCard = el.querySelector('[data-section-kind="reference"]')!
-    expect(refCard.textContent).toContain('· 2')
-    const toggle = refCard.querySelector('[data-testid="epic-intake-section-toggle"]') as HTMLButtonElement
-    expect(refCard.querySelector('[data-testid="epic-intake-section-body"]')).toBeFalsy()
-    act(() => toggle.click())
-    const body = refCard.querySelector('[data-testid="epic-intake-section-body"]')
-    expect(body).toBeTruthy()
-    expect(body?.textContent).toContain('Reference: /tmp/log.txt')
-    expect(body?.textContent).toContain('Reference: /tmp/trace.txt')
-  })
-
-  it('EDGE: clicking a collapsed card toggle expands it, and clicking again collapses it', async () => {
-    const { EpicIntakeCard } = await import('../EpicIntakeCard')
-    const el = mount(createElement(EpicIntakeCard, { sections: FULL_SECTIONS, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
-    const inputToggle = el.querySelector('[data-section-kind="input"] [data-testid="epic-intake-section-toggle"]') as HTMLButtonElement
-    act(() => inputToggle.click())
-    expect(el.querySelector('[data-section-kind="input"] [data-testid="epic-intake-section-body"]')).toBeTruthy()
-    act(() => inputToggle.click())
-    expect(el.querySelector('[data-section-kind="input"] [data-testid="epic-intake-section-body"]')).toBeFalsy()
-  })
-
-  it('EDGE: a caller passing only the mandatory goal section renders a single card, not an error', async () => {
+  it('EDGE: a caller passing only the mandatory goal section renders a single chip, not an error', async () => {
     const { EpicIntakeCard } = await import('../EpicIntakeCard')
     const el = mount(
       createElement(EpicIntakeCard, {
@@ -128,44 +126,22 @@ describe('EpicIntakeCard', () => {
         openingPrompt: 'Fix the thing.',
       }),
     )
-    const cards = el.querySelectorAll('[data-testid="epic-intake-section"]')
-    expect(cards).toHaveLength(1)
-    expect(cards[0].getAttribute('data-section-kind')).toBe('goal')
+    const chips = el.querySelectorAll('[data-testid="epic-intake-chip"]')
+    expect(chips).toHaveLength(1)
+    expect(chips[0].textContent).toBe('Goal')
   })
 
   it('CORE: never falls back to prose-parsing openingPrompt — rendered text comes only from `sections`', async () => {
     const { EpicIntakeCard } = await import('../EpicIntakeCard')
     const el = mount(createElement(EpicIntakeCard, { sections: FULL_SECTIONS, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
-    // The flat stand-in string never appears anywhere in the rendered
-    // section content — the only place it can legitimately surface is the
-    // footer's hidden Copy payload, never in visible section text.
-    const sectionsRoot = el.querySelector('[data-testid="epic-intake-card-sections"]')
-    expect(sectionsRoot?.textContent).not.toContain(OPENING_PROMPT_STAND_IN)
-    // And every visible section body text traces back to a `sections` entry
-    // verbatim, not a substring cut out of the flat prompt.
+    expect(el.textContent).not.toContain(OPENING_PROMPT_STAND_IN)
+
+    const toggle = el.querySelector('[data-testid="epic-intake-toggle"]') as HTMLButtonElement
+    act(() => toggle.click())
     expect(el.textContent).toContain('You are acting as the "debugger" agent: Diagnoses failures.')
     expect(el.textContent).toContain('You are diagnosing a reported bug.')
   })
 
-  it('CORE: the footer Copy button copies the exact openingPrompt, not a section', async () => {
-    const api = installWindowApiMock()
-    const { EpicIntakeCard } = await import('../EpicIntakeCard')
-    const el = mount(createElement(EpicIntakeCard, { sections: FULL_SECTIONS, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
-    const copyBtn = el.querySelector('[data-testid="turn-raw-footer-copy"]') as HTMLButtonElement
-    expect(copyBtn).toBeTruthy()
-    await act(async () => {
-      copyBtn.click()
-      await Promise.resolve()
-    })
-    expect(api.clipboard.writeText).toHaveBeenCalledWith(OPENING_PROMPT_STAND_IN)
-  })
-
-  it('CORE: renders inside the shared TurnFrame — a header badge + timestamp zone', async () => {
-    const { EpicIntakeCard } = await import('../EpicIntakeCard')
-    const el = mount(createElement(EpicIntakeCard, { sections: FULL_SECTIONS, at: Date.now(), openingPrompt: OPENING_PROMPT_STAND_IN }))
-    expect(el.querySelector('[data-testid="turn-frame-header"]')).toBeTruthy()
-    expect(el.querySelector('[data-testid="epic-intake-badge"]')?.textContent).toBe('AIM briefing')
-  })
   it('CORE: a multi-thousand-word Goal collapses to a thin one-line summary instead of rendering in full', async () => {
     const { EpicIntakeCard } = await import('../EpicIntakeCard')
     const huge = `Rewrite the importer. ${'word '.repeat(2000)}`
@@ -176,8 +152,9 @@ describe('EpicIntakeCard', () => {
         openingPrompt: huge,
       }),
     )
-    // Collapsed: summary line present, body absent — despite goal's
-    // DEFAULT_EXPANDED being true for a short goal.
+    const toggle = el.querySelector('[data-testid="epic-intake-toggle"]') as HTMLButtonElement
+    act(() => toggle.click())
+
     expect(el.querySelector('[data-testid="epic-intake-section-body"]')).toBeNull()
     const summary = el.querySelector('[data-testid="epic-intake-section-summary"]')!
     expect(summary.textContent!.length).toBeLessThan(120)
@@ -194,24 +171,11 @@ describe('EpicIntakeCard', () => {
         openingPrompt: huge,
       }),
     )
-    const toggle = el.querySelector('[data-testid="epic-intake-section-toggle"]') as HTMLButtonElement
-    act(() => toggle.click())
+    act(() => (el.querySelector('[data-testid="epic-intake-toggle"]') as HTMLButtonElement).click())
+    const sectionToggle = el.querySelector('[data-testid="epic-intake-section-toggle"]') as HTMLButtonElement
+    act(() => sectionToggle.click())
     const body = el.querySelector('[data-testid="epic-intake-section-body"]')!
     expect(body.textContent).toContain('Rewrite the importer.')
     expect(body.className).toContain('overflow-y-auto')
-  })
-
-  it('EDGE: a SHORT goal still opens by default — the collapse is length-driven, not kind-driven', async () => {
-    const { EpicIntakeCard } = await import('../EpicIntakeCard')
-    const el = mount(
-      createElement(EpicIntakeCard, {
-        sections: [{ kind: 'goal', label: 'Goal', text: 'Fix the thing.' }],
-        at: Date.now(),
-        openingPrompt: 'Fix the thing.',
-      }),
-    )
-    const body = el.querySelector('[data-testid="epic-intake-section-body"]')!
-    expect(body.textContent).toContain('Fix the thing.')
-    expect(body.className).not.toContain('overflow-y-auto')
   })
 })

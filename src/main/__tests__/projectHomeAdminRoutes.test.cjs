@@ -1,7 +1,8 @@
 /**
- * projectHomeAdminRoutes.test.cjs — lib/projectHomeAdminRoutes.cjs's single
- * route, POST /admin/project-home/write {cwd, html}, and its self-contained-
- * HTML validator.
+ * projectHomeAdminRoutes.test.cjs — lib/projectHomeAdminRoutes.cjs's two
+ * routes (POST /admin/project-home/write and
+ * POST /admin/project-home/demo-video/write, both {cwd, html}) and their
+ * self-contained-HTML validators.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/projectHomeAdminRoutes.test.cjs
  */
@@ -14,7 +15,15 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const config = require('../config.cjs');
-const { registerAdminRoute, validateHomeHtml, MAX_HTML_BYTES } = require('../lib/projectHomeAdminRoutes.cjs');
+const {
+  registerAdminRoute,
+  validateHomeHtml,
+  validateDemoVideoHtml,
+  injectCsp,
+  DEMO_VIDEO_CSP,
+  MAX_HTML_BYTES,
+  MAX_DEMO_VIDEO_BYTES,
+} = require('../lib/projectHomeAdminRoutes.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -66,10 +75,16 @@ function makeFakeAdminHttp() {
 
 const GOOD_HTML = '<!DOCTYPE html><html><head><style>body{background:url(data:image/png;base64,AAAA)}</style></head><body><script>1+1</script></body></html>';
 
-test('registers exactly one route: POST /admin/project-home/write', () => {
+const GOOD_DEMO_VIDEO_HTML = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="15"></head>'
+  + '<body><canvas id="c"></canvas><script>const ctx = document.getElementById("c").getContext("2d"); ctx.fillRect(0,0,10,10);</script></body></html>';
+
+test('registers exactly two routes: POST /admin/project-home/write and .../demo-video/write', () => {
   const adminHttp = makeFakeAdminHttp();
   registerAdminRoute(adminHttp);
-  expect([...adminHttp.routes.keys()]).toEqual(['POST /admin/project-home/write']);
+  expect([...adminHttp.routes.keys()]).toEqual([
+    'POST /admin/project-home/write',
+    'POST /admin/project-home/demo-video/write',
+  ]);
 });
 
 test('valid html is written atomically to project-pages/home.html', async () => {
@@ -174,4 +189,89 @@ test('one-file contract: project-pages holds exactly home.html after one write a
   await adminHttp.call('POST', '/admin/project-home/write', { body: { cwd, html: '<p>second, different</p>' } });
   expect(fs.readdirSync(pagesDir)).toEqual(['home.html']);
   expect(fs.readFileSync(path.join(pagesDir, 'home.html'), 'utf8')).toBe('<p>second, different</p>');
+});
+
+// ───────────────────────────────── POST /admin/project-home/demo-video/write
+
+test('valid demo-video html is written atomically to project-pages/demo-video/index.html with the CSP injected, home.html untouched', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  await adminHttp.call('POST', '/admin/project-home/write', { body: { cwd, html: GOOD_HTML } });
+
+  const { status, body } = await adminHttp.call('POST', '/admin/project-home/demo-video/write', { body: { cwd, html: GOOD_DEMO_VIDEO_HTML } });
+  expect(status).toBe(200);
+  expect(body.ok).toBe(true);
+
+  const target = path.join(fs.realpathSync(cwd), 'session-manager-operations', 'project-pages', 'demo-video', 'index.html');
+  expect(body.path).toBe(target);
+  const written = fs.readFileSync(target, 'utf8');
+  const headMatch = written.match(/<head[^>]*>([\s\S]*)/i);
+  expect(headMatch).toBeTruthy();
+  expect(headMatch[1].startsWith(DEMO_VIDEO_CSP)).toBe(true);
+
+  const homeTarget = path.join(fs.realpathSync(cwd), 'session-manager-operations', 'project-pages', 'home.html');
+  expect(fs.readFileSync(homeTarget, 'utf8')).toBe(GOOD_HTML);
+});
+
+test('injectCsp creates <head> when absent and replaces an existing CSP meta', () => {
+  const noHead = injectCsp('<html><body>x</body></html>');
+  expect(noHead).toBe(`<html><head>${DEMO_VIDEO_CSP}</head><body>x</body></html>`);
+
+  const existingCsp = '<html><head><meta http-equiv="Content-Security-Policy" content="default-src *"><title>t</title></head><body>x</body></html>';
+  const replaced = injectCsp(existingCsp);
+  expect(replaced).toBe(`<html><head>${DEMO_VIDEO_CSP}<title>t</title></head><body>x</body></html>`);
+});
+
+test.each([
+  ['empty', ''],
+  ['whitespace only', '  \n '],
+  ['script src (remote)', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script src="https://cdn.example.com/x.js"></script></body></html>`],
+  ['fetch(', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>fetch('/x')</script></body></html>`],
+  ['XMLHttpRequest', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>new XMLHttpRequest()</script></body></html>`],
+  ['WebSocket', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>new WebSocket('wss://x')</script></body></html>`],
+  ['EventSource', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>new EventSource('/x')</script></body></html>`],
+  ['sendBeacon', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>navigator.sendBeacon('/x')</script></body></html>`],
+  ['dynamic import(', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>import('/x.js')</script></body></html>`],
+  ['importScripts', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>importScripts('/x.js')</script></body></html>`],
+  ['<iframe', `<html><head><meta name="sm-demo-duration" content="10"></head><body><iframe src="data:text/html,x"></iframe></body></html>`],
+  ['<object', `<html><head><meta name="sm-demo-duration" content="10"></head><body><object data="x"></object></body></html>`],
+  ['<embed', `<html><head><meta name="sm-demo-duration" content="10"></head><body><embed src="x"></body></html>`],
+  ['window.open', `<html><head><meta name="sm-demo-duration" content="10"></head><body><script>window.open('/x')</script></body></html>`],
+  ['href= http', `<html><head><meta name="sm-demo-duration" content="10"></head><body><a href="https://example.com">x</a></body></html>`],
+  ['src= protocol-relative', `<html><head><meta name="sm-demo-duration" content="10"></head><body><img src="//example.com/a.png"></body></html>`],
+  ['missing duration meta', '<html><head></head><body><p>x</p></body></html>'],
+  ['duration 31 (above range)', '<html><head><meta name="sm-demo-duration" content="31"></head><body><p>x</p></body></html>'],
+  ['duration 4 (below range)', '<html><head><meta name="sm-demo-duration" content="4"></head><body><p>x</p></body></html>'],
+])('rejects %s with 400 and writes nothing', async (_label, html) => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const { status, body } = await adminHttp.call('POST', '/admin/project-home/demo-video/write', { body: { cwd, html } });
+  expect(status).toBe(400);
+  expect(body.ok).toBe(false);
+  expect(fs.existsSync(path.join(cwd, 'session-manager-operations', 'project-pages', 'demo-video'))).toBe(false);
+});
+
+test('rejects demo-video html over 2MB', async () => {
+  const cwd = await mkProjectCwd();
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const html = 'a'.repeat(MAX_DEMO_VIDEO_BYTES + 1);
+  const { status, body } = await adminHttp.call('POST', '/admin/project-home/demo-video/write', { body: { cwd, html } });
+  expect(status).toBe(400);
+  expect(body.error).toContain('limit');
+});
+
+test('demo-video route: relative cwd is a 400', async () => {
+  const adminHttp = makeFakeAdminHttp();
+  registerAdminRoute(adminHttp);
+  const res = await adminHttp.call('POST', '/admin/project-home/demo-video/write', { body: { cwd: 'relative/dir', html: GOOD_DEMO_VIDEO_HTML } });
+  expect(res.status).toBe(400);
+});
+
+test('validateDemoVideoHtml accepts GOOD_DEMO_VIDEO_HTML and exact-boundary durations 5 and 30', () => {
+  expect(validateDemoVideoHtml(GOOD_DEMO_VIDEO_HTML)).toBeNull();
+  expect(validateDemoVideoHtml('<html><head><meta name="sm-demo-duration" content="5"></head><body>x</body></html>')).toBeNull();
+  expect(validateDemoVideoHtml('<html><head><meta name="sm-demo-duration" content="30"></head><body>x</body></html>')).toBeNull();
 });

@@ -48,10 +48,11 @@ const OWNERS = Object.freeze({
   'scheduler': 'scheduler',
   // Project Home owns the synthesized Brief (generate + hand-edit).
   'project-brief': 'project-home',
-  // Project Home owns project-pages/home.html, written only via the
-  // project_home_write MCP tool -> /admin/project-home/write route
-  // (config.cjs's writeTextAtomic). See
-  // session-manager-operations/project-pages/README.md.
+  // Project Home owns project-pages/home.html and project-pages/demo-video/
+  // index.html, written only via the project_home_write ->
+  // /admin/project-home/write and project_demo_video_write ->
+  // /admin/project-home/demo-video/write routes (config.cjs's
+  // writeTextAtomic). See session-manager-operations/project-pages/README.md.
   'project-pages': 'project-home',
   // Structured per-tab error log lines (JSONL), tagged for tracing/analysis.
   'logs': 'logs',

@@ -12,7 +12,9 @@ React 18 + Vite renderer. Layout (no per-file lists — `ls` it):
 - `lib/` — pure helpers and hooks · `state/` — zustand stores · `data/` — static data
 - `public/vad/` — self-hosted voice-activity assets · `testUtils/` — test helpers
 
-**`lib/projectPages/` holds two hooks** (`useBuilderEpic.ts`, `useProjectPagesOutput.ts`) for the single-`home.html` Project Home; the old `web/project-pages` build toolchain was removed.
+**Project Home's two artifacts (`home.html`, `demo-video/index.html`) are driven by
+`lib/useMacroLaunch.ts`** (shared with `SessionActionsBar`) **and `lib/projectPages/useProjectPagesOutput.ts`**;
+the old `web/project-pages` build toolchain was removed.
 
 **Tab registry = four files that change together:** `lib/navKey.ts` (`NavKey` union),
 `lib/screenKeys.ts`, `components/screenComponents.tsx`, `lib/navGroups.ts` (`NAV_ITEMS`). The

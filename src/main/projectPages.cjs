@@ -1,12 +1,15 @@
 'use strict';
 
 /**
- * projectPages.cjs — read-only backend for Project Home. The whole feature is
- * ONE self-contained HTML file, `session-manager-operations/project-pages/
- * home.html`, written by the `project_home_write` admin route
- * (lib/projectHomeAdminRoutes.cjs). This module only reads it: get() plus a
- * refcounted per-cwd watcher that pushes `project-pages:changed`. It never
- * writes content (watch()'s mkdir creates an empty directory only).
+ * projectPages.cjs — read-only backend for Project Home. Project Home has two
+ * self-contained generated artifacts under
+ * `session-manager-operations/project-pages/`: `home.html` (written by the
+ * `project_home_write` admin route) and `demo-video/index.html` (written by
+ * the `project_demo_video_write` admin route) — both in
+ * lib/projectHomeAdminRoutes.cjs. This module only reads them: get() returns
+ * home.html's content plus the demo video's { path, mtimeMs }, and a
+ * refcounted per-cwd watcher pushes `project-pages:changed` for either. It
+ * never writes content (watch()'s mkdir creates an empty directory only).
  */
 
 const { ipcMain } = require('electron');

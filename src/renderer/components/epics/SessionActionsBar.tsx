@@ -14,65 +14,17 @@
  * creation path.
  */
 import { useState } from 'react'
-import { usePromptSessions } from '../../state/promptSessions'
-import { useSessions } from '../../state/sessions'
-import { useChat } from '../../state/chat'
 import { toast } from '../../state/toast'
-import { composeEpicIntake } from '../../lib/epicIntake'
 import { useAgentPersonas } from '../../lib/useAgentPersonas'
 import { useMacros, macrosForProject } from '../../lib/useMacros'
+import { useMacroLaunch } from '../../lib/useMacroLaunch'
 import { normalizeCwd } from '../../lib/knownProjectAggregate'
-import type { AgentPersona, Macro } from '../../../preload/api'
+import type { Macro } from '../../../preload/api'
 import { MacroEditor } from './MacroEditor'
 
 const BTN =
   'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] font-semibold border transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
 const SECONDARY = `${BTN} bg-bg-hi text-fg-dim border-line hover:text-fg`
-
-/** Creates + starts the Session a Macro button stands for. Mint -> approve -> send. */
-export function useMacroLaunch(onSelect: (id: string) => void, personas: AgentPersona[]) {
-  const activeTabCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
-  const [launching, setLaunching] = useState<string | null>(null)
-
-  const launch = async (macro: Macro) => {
-    if (!activeTabCwd || launching) return
-    const persona = personas.find((p) => p.name === macro.agentName)
-    // Empty list = personas still loading (or none): proceed with a thinner
-    // prompt rather than block. Once loaded, a missing agent must not mint.
-    if (!persona && personas.length > 0) {
-      toast.error(`Agent ${macro.agentName} not found \u2014 edit the macro`)
-      return
-    }
-    setLaunching(macro.id)
-    try {
-      const { goalText, openingPrompt, sections } = composeEpicIntake({
-        title: macro.label,
-        goal: macro.prompt,
-        tag: macro.tag,
-        agentName: macro.agentName,
-        agentDescription: persona?.description ?? undefined,
-      })
-      const src = `SessionActionsBar ${macro.agentName}`
-      const session = await usePromptSessions
-        .getState()
-        .createPromptSession(activeTabCwd, goalText, macro.tag, src, macro.agentName, openingPrompt, sections)
-      usePromptSessions.getState().approveProposed(session.id, src)
-      useChat.getState().send({
-        tabId: session.id,
-        sessionId: session.claudeSessionId,
-        cwd: activeTabCwd,
-        prompt: openingPrompt,
-      })
-      onSelect(session.id)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLaunching(null)
-    }
-  }
-
-  return { launch, launching, cwd: activeTabCwd }
-}
 
 function macroTooltip(m: Macro): string {
   const first = m.prompt.split('\n').find((l) => l.trim()) ?? ''

@@ -12,6 +12,7 @@
  *   feedback_open_session({ ... }) -> POST /admin/feedback/open-session
  *
  *   project_home_write({ cwd?, html }) -> POST /admin/project-home/write
+ *   project_demo_video_write({ cwd?, html }) -> POST /admin/project-home/demo-video/write
  *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
@@ -376,6 +377,25 @@ const TOOLS = [
     },
   },
   {
+    name: 'project_demo_video_write',
+    description: descriptionFor('project_demo_video_write'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        cwd: { type: 'string', description: "Optional: absolute path to the target project. Defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted." },
+        html: {
+          type: 'string',
+          description: 'The complete self-contained HTML/JS document for a 30-second-or-less demo video (<= 2MB). '
+            + 'It is rejected for: being empty; <script src>, <link href=http*>, @import, or url(http*) (no remote references); '
+            + 'fetch/XMLHttpRequest/WebSocket/EventSource/sendBeacon/dynamic import/importScripts/<iframe>/<object>/<embed>/window.open/'
+            + 'any http(s)/// src or href (no network-capable APIs — the document is CSP-fenced after it is written); '
+            + 'or missing a <meta name="sm-demo-duration" content="N"> tag with 5 <= N <= 30.',
+        },
+      },
+      required: ['html'],
+    },
+  },
+  {
     name: 'session_manager_help',
     description: descriptionFor('session_manager_help'),
     inputSchema: {
@@ -597,6 +617,14 @@ async function handleCallTool(request) {
       }
       const cwd = resolveCwdArg(args);
       const result = await adminRequest('POST', '/admin/project-home/write', { cwd, html: args.html });
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'project_demo_video_write') {
+      if (!args || typeof args.html !== 'string' || args.html.length === 0) {
+        return errorResult('missing required argument: html');
+      }
+      const cwd = resolveCwdArg(args);
+      const result = await adminRequest('POST', '/admin/project-home/demo-video/write', { cwd, html: args.html });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'session_manager_help') {

@@ -78,8 +78,8 @@ test.each(MCP_TOOL_CATALOG)('$name composeDescription joins purpose/whenToUse/wh
   expect(composeDescription(entry).length).toBeGreaterThan(0);
 });
 
-test('project-home group is exactly the single project_home_write tool', () => {
-  expect(MCP_TOOL_CATALOG.filter((e) => e.group === 'project-home').map((e) => e.name)).toEqual(['project_home_write']);
+test('project-home group is project_home_write and project_demo_video_write', () => {
+  expect(MCP_TOOL_CATALOG.filter((e) => e.group === 'project-home').map((e) => e.name)).toEqual(['project_home_write', 'project_demo_video_write']);
 });
 
 test('MCP_RECIPES covers queue-work, unstick-needs-review, and hand-off-to-another-project', () => {

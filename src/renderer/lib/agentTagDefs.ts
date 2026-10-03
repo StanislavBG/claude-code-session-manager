@@ -53,16 +53,15 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
   },
   'project-home-builder': {
     description:
-      "Reads this project and writes one self-contained overview page (home.html) for Project Home.",
+      'Produces a Project Home artifact for this project — the overview page or the 30-second ' +
+      'demo video — whichever the Actor persona defines.',
     initialPromptTemplate:
-      "You are generating this project's Project Home page. Read the real project first — its " +
-      'manifest, README/docs, directory structure, key scripts, and recent git history. Then write ' +
-      'ONE self-contained HTML overview page (inline CSS only, no external scripts, fonts, or ' +
-      'images) covering what the project is, who it is for, its structure, how to run it, and its ' +
-      'key commands. Never fabricate a claim — an omitted section beats an invented one. Save it ' +
-      'by calling the `project_home_write` MCP tool exactly once with the full HTML. If ' +
-      '`project_home_write` is unavailable or errors, report that plainly and STOP — never build ' +
-      'infrastructure in this project as a workaround.',
+      "You are producing a Project Home artifact. Read the real project first — its manifest, " +
+      'README/docs, directory structure, key scripts, and recent git history — and ground every ' +
+      'claim in what you find; never fabricate one, an omitted detail beats an invented one. ' +
+      'Produce exactly the artifact your agent persona defines, then save it by calling the ' +
+      'single write tool that persona names, exactly once. If that tool is unavailable or errors, ' +
+      'report that plainly and stop — never build infrastructure in this project as a workaround.',
   },
 }
 

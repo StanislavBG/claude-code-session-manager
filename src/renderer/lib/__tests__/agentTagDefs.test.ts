@@ -28,12 +28,18 @@ const FORBIDDEN_REPO_PATH_SUBSTRINGS = [
 ]
 
 describe('AGENT_TAG_DEFS project-home-builder template', () => {
-  it('names only the project_home_write tool, no repo-relative paths, and never falls back to /develop', () => {
+  it('no repo-relative paths, never falls back to /develop, and defers the artifact and write tool to the persona', () => {
     const template = AGENT_TAG_DEFS['project-home-builder'].initialPromptTemplate
     for (const forbidden of FORBIDDEN_REPO_PATH_SUBSTRINGS) {
       expect(template).not.toContain(forbidden)
     }
     expect(template).not.toContain('/develop')
-    expect(template).toContain('project_home_write')
+  })
+
+  it('is artifact-agnostic: defers the exact artifact and write tool to the Actor persona', () => {
+    const template = AGENT_TAG_DEFS['project-home-builder'].initialPromptTemplate
+    expect(template).not.toContain('project_home_write')
+    expect(template).not.toContain('home.html')
+    expect(template).toContain('persona')
   })
 })

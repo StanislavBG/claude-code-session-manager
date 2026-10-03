@@ -100,7 +100,14 @@
     "node": ">=22.12.0"
   },
   "overrides": {
-    "dompurify": "^3.4.8"
+    "dompurify": "^3.4.8",
+    "@hono/node-server": "^1.19.15",
+    "fast-uri": "^3.1.8",
+    "hono": "^4.13.7",
+    "ip-address": "^10.7.1",
+    "qs": "^6.16.0",
+    "tar": "^7.5.21",
+    "undici": "^7.29.1"
   },
   "os": [
     "darwin",

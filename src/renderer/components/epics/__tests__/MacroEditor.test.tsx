@@ -57,7 +57,7 @@ describe('MacroEditor', () => {
   })
 
   const pressed = () => Array.from(container.querySelectorAll('[data-testid="macro-tag"]')).filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.getAttribute('data-tag'))
-  const mac = (over: Partial<Macro> = {}): Macro => ({ id: 'm', label: 'L', agentName: 'architect', tag: 'bug', prompt: 'p', projects: [CWD], createdAt: '', updatedAt: '', ...over })
+  const mac = (over: Partial<Macro> = {}): Macro => ({ id: 'm', label: 'L', agentName: 'architect', tag: 'bug', prompt: 'p', projects: [CWD], surface: 'sessions', createdAt: '', updatedAt: '', ...over })
   function pickAgent(name: string) {
     const sel = q('new-epic-agent-select') as HTMLSelectElement
     act(() => {

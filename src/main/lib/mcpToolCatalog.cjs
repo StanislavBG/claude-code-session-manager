@@ -271,6 +271,29 @@ const MCP_TOOL_CATALOG = [
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted.",
   },
   {
+    name: 'project_demo_video_write',
+    group: 'project-home',
+    purpose: "Write this project's 30-second demo video — ONE self-contained HTML/JS document — to "
+      + "session-manager-operations/project-pages/demo-video/index.html via the session-manager app's admin API. "
+      + 'The only write path for the demo video.',
+    whenToUse: 'Use when asked to generate or refresh the demo video. Compose the whole document yourself '
+      + '(inline <style>/<script>, data: URIs for assets, CSS/JS-driven animation) from what is really true about '
+      + 'the project, declare its length with <meta name="sm-demo-duration" content="N"> (5-30 seconds), then '
+      + 'pass the full document as `html`.',
+    whenNotToUse: 'Never fabricate content — every claim must trace to something concrete in the project. The '
+      + 'document must be self-contained and non-network-capable: the call is rejected for empty input, more than '
+      + '2MB, any <script src>, <link href="http…">, @import, or url(http…) (no remote references); any '
+      + 'fetch/XMLHttpRequest/WebSocket/EventSource/sendBeacon/dynamic import/importScripts/<iframe>/<object>/'
+      + '<embed>/window.open/http(s)-pointing src or href (no network-capable APIs); or a missing/out-of-range '
+      + 'sm-demo-duration meta tag.',
+    exampleArgs: {
+      cwd: '/home/bilko/Projects/session-manager',
+      html: '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="30"></head><body><h1>Example</h1></body></html>',
+    },
+    notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
+      + 'The document is CSP-stamped after it is written, so the viewer sandbox is the real network fence — these checks are defence in depth.',
+  },
+  {
     name: 'session_manager_help',
     group: 'help',
     purpose: 'THE ENTRY POINT — call this tool FIRST whenever you are unsure which session-manager-scheduler '

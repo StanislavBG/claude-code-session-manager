@@ -181,3 +181,82 @@ test('project_home_write returns the app-not-running error when the admin API is
   expect(result.isError).toBe(true);
   expect(result.content[0].text).toBe(NOT_RUNNING_ERROR);
 });
+
+const DEMO_VIDEO_TOOL_NAME = 'project_demo_video_write';
+
+test('project_demo_video_write is listed in TOOLS with html required and cwd optional', async () => {
+  const homeDir = await mkTmp();
+  const { TOOLS } = requireServerWithHome(homeDir);
+  const tool = TOOLS.find((t) => t.name === DEMO_VIDEO_TOOL_NAME);
+  expect(tool).toBeTruthy();
+  expect(tool.inputSchema.type).toBe('object');
+  expect(tool.inputSchema.properties.cwd).toBeTruthy();
+  expect(tool.inputSchema.properties.html).toBeTruthy();
+  expect(tool.inputSchema.required).toEqual(['html']);
+});
+
+test('project_demo_video_write description equals the catalog-composed string', async () => {
+  const homeDir = await mkTmp();
+  const { TOOLS } = requireServerWithHome(homeDir);
+  const tool = TOOLS.find((t) => t.name === DEMO_VIDEO_TOOL_NAME);
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === DEMO_VIDEO_TOOL_NAME);
+  expect(entry).toBeTruthy();
+  expect(entry.group).toBe('project-home');
+  expect(tool.description).toBe(composeDescription(entry));
+});
+
+test('project_demo_video_write dispatches POST /admin/project-home/demo-video/write with cwd+html', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true, path: '/abs/demo-video/index.html', bytes: 12 });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const html = '<!DOCTYPE html><html></html>';
+  const result = await callTool(handleCallTool, DEMO_VIDEO_TOOL_NAME, { cwd: '/home/bilko/Projects/session-manager', html });
+  expect(result.isError).toBeFalsy();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].method).toBe('POST');
+  expect(requests[0].url).toBe('/admin/project-home/demo-video/write');
+  expect(requests[0].body).toEqual({ cwd: '/home/bilko/Projects/session-manager', html });
+});
+
+test('project_demo_video_write defaults cwd to SM_PROJECT_ROOT when omitted', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+
+  originalProjectRoot = process.env.SM_PROJECT_ROOT ?? null;
+  process.env.SM_PROJECT_ROOT = '/home/bilko/Projects/session-manager/session-manager-operations/scheduler/epics/some-epic/worktree';
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  await callTool(handleCallTool, DEMO_VIDEO_TOOL_NAME, { html: '<p>x</p>' });
+  expect(requests).toHaveLength(1);
+  expect(requests[0].body.cwd).toBe(process.env.SM_PROJECT_ROOT);
+});
+
+test('project_demo_video_write requires a non-empty html', async () => {
+  const homeDir = await mkTmp();
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  for (const args of [{ cwd: '/x' }, { cwd: '/x', html: '' }]) {
+    const result = await callTool(handleCallTool, DEMO_VIDEO_TOOL_NAME, args);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('html');
+  }
+});
+
+test('project_demo_video_write surfaces a 4xx admin error to the caller', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: false, error: 'html must declare <meta name="sm-demo-duration" ...>' });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const result = await callTool(handleCallTool, DEMO_VIDEO_TOOL_NAME, { html: '<p>x</p>' });
+  expect(requests).toHaveLength(1);
+  expect(result.content[0].text).toContain('sm-demo-duration');
+});

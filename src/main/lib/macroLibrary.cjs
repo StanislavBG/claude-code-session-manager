@@ -43,6 +43,7 @@ const { EpicTagSchema } = require('./promptSessionSchema.cjs');
 const { WORK_TYPES } = require('./workTypeLibrary.cjs');
 const { PERSONA_NAME_RE } = require('./personaMerge.cjs');
 const { schedulerHome } = require('./schedulerPaths.cjs');
+const { BUILTIN_MACROS } = require('./builtinMacros.cjs');
 
 const ALL_PROJECTS = '*';
 const STORE_VERSION = 1;
@@ -57,6 +58,7 @@ const AbsolutePathSchema = z.string().max(1024).refine(
 );
 const MacroProjectEntrySchema = z.union([z.literal(ALL_PROJECTS), AbsolutePathSchema]);
 const MacroProjectsSchema = z.array(MacroProjectEntrySchema).max(200);
+const MacroSurfaceSchema = z.enum(['sessions', 'project-home']);
 
 const MacroSchema = z.object({
   id: MacroIdSchema,
@@ -65,6 +67,9 @@ const MacroSchema = z.object({
   tag: EpicTagSchema,
   prompt: MacroPromptSchema,
   projects: MacroProjectsSchema,
+  surface: MacroSurfaceSchema.default('sessions'),
+  builtin: z.boolean().optional(),
+  builtinVersion: z.number().int().optional(),
   createdAt: z.string().min(1).max(64),
   updatedAt: z.string().min(1).max(64),
 });
@@ -75,7 +80,11 @@ const MacroSaveSchema = z.object({
   agentName: MacroAgentNameSchema,
   tag: EpicTagSchema,
   prompt: MacroPromptSchema,
-  projects: MacroProjectsSchema.default([]),
+  // Omitted (not merely `[]`) means "leave projects unchanged" on update, so a
+  // label/prompt-only edit of a macro (builtin or otherwise) can't silently
+  // wipe its visibility back to no projects. `undefined` on create means [].
+  projects: MacroProjectsSchema.optional(),
+  surface: MacroSurfaceSchema.optional(),
 });
 
 const MacroDeleteSchema = z.object({ id: MacroIdSchema });
@@ -185,6 +194,73 @@ async function writeStore(filePath, macros) {
   await writeJsonAtomic(filePath, { version: STORE_VERSION, macros });
 }
 
+function resolveBuiltins(opts) {
+  return opts && Object.prototype.hasOwnProperty.call(opts, 'builtins') ? opts.builtins : BUILTIN_MACROS;
+}
+
+/**
+ * Pure. Seeds any `builtins` entry missing from `macros` (as `builtin: true`),
+ * and upgrades a stored built-in that is behind the shipped `builtinVersion`
+ * AND was never user-edited (`updatedAt === createdAt`). A user-edited
+ * built-in is left untouched. Returns `{ macros, changed }`.
+ */
+function ensureBuiltins(macros, builtins) {
+  if (!builtins || builtins.length === 0) return { macros, changed: false };
+  let changed = false;
+  const next = macros.slice();
+  const now = new Date().toISOString();
+  for (const b of builtins) {
+    const idx = next.findIndex((m) => m.id === b.id);
+    if (idx === -1) {
+      next.push({
+        id: b.id,
+        label: b.label,
+        agentName: b.agentName,
+        tag: b.tag,
+        prompt: b.prompt,
+        projects: b.projects.slice(),
+        surface: b.surface,
+        builtin: true,
+        builtinVersion: b.builtinVersion,
+        createdAt: now,
+        updatedAt: now,
+      });
+      changed = true;
+      continue;
+    }
+    const stored = next[idx];
+    const storedVersion = stored.builtinVersion || 0;
+    const neverEdited = stored.updatedAt === stored.createdAt;
+    if (storedVersion < b.builtinVersion && neverEdited) {
+      next[idx] = {
+        ...stored,
+        label: b.label,
+        agentName: b.agentName,
+        tag: b.tag,
+        prompt: b.prompt,
+        surface: b.surface,
+        builtinVersion: b.builtinVersion,
+        updatedAt: stored.createdAt,
+      };
+      changed = true;
+    }
+  }
+  return { macros: next, changed };
+}
+
+/** Apply builtin seeding/upgrades, writing only when something changed. */
+async function applyBuiltins(filePath, macros, opts) {
+  const { macros: next, changed } = ensureBuiltins(macros, resolveBuiltins(opts));
+  if (!changed) return { macros, failed: false };
+  try {
+    await writeStore(filePath, next);
+  } catch (err) {
+    console.warn('[macroLibrary] could not persist built-in macro seeding:', err && err.message);
+    return { macros, failed: false };
+  }
+  return { macros: next, failed: false };
+}
+
 // --- migration --------------------------------------------------------------
 
 function isValidProject(p) {
@@ -246,7 +322,7 @@ async function migrateFromPersonas(opts) {
  */
 async function loadStore(filePath, opts) {
   const cur = await readStore(filePath);
-  if (cur.state === 'ok') return { macros: cur.macros, failed: false };
+  if (cur.state === 'ok') return applyBuiltins(filePath, cur.macros, opts);
   if (cur.state === 'unreadable') return { macros: [], failed: true };
   if (cur.state === 'corrupt') {
     const quarantine = `${filePath}.corrupt-${Date.now()}`;
@@ -263,7 +339,7 @@ async function loadStore(filePath, opts) {
       console.warn('[macroLibrary] could not write fresh macros.json:', err && err.message);
       return { macros: [], failed: true };
     }
-    return { macros: [], failed: false };
+    return applyBuiltins(filePath, [], opts);
   }
   // missing: migrate once
   const seeded = await migrateFromPersonas(opts);
@@ -274,7 +350,7 @@ async function loadStore(filePath, opts) {
     console.warn('[macroLibrary] could not write migrated macros.json:', err && err.message);
     return { macros: seeded, failed: true };
   }
-  return { macros: seeded, failed: false };
+  return applyBuiltins(filePath, seeded, opts);
 }
 
 // --- public API -------------------------------------------------------------
@@ -283,8 +359,11 @@ async function loadStore(filePath, opts) {
 async function listMacros(opts = {}) {
   const filePath = resolvePath(opts);
   const first = await readStore(filePath);
-  if (first.state === 'ok') return first.macros;
-  // Missing/corrupt: repair inside the write chain so racing callers don't double-seed.
+  if (first.state === 'ok') {
+    const { changed } = ensureBuiltins(first.macros, resolveBuiltins(opts));
+    if (!changed) return first.macros;
+  }
+  // Missing/corrupt/needs-seeding: repair inside the write chain so racing callers don't double-seed.
   return serialize(async () => (await loadStore(filePath, opts)).macros);
 }
 
@@ -305,14 +384,24 @@ async function saveMacro(input, opts = {}) {
   return serialize(async () => {
     const macros = await loadForWrite(filePath, opts);
     const now = new Date().toISOString();
-    const projects = normalizeProjects(parsed.projects);
     let saved;
     if (parsed.id) {
       const idx = macros.findIndex((m) => m.id === parsed.id);
       if (idx === -1) throw new Error(`macro not found: ${parsed.id}`);
-      saved = { ...macros[idx], label: parsed.label, agentName: parsed.agentName, tag: parsed.tag, prompt: parsed.prompt, projects, updatedAt: now };
+      const projects = parsed.projects !== undefined ? normalizeProjects(parsed.projects) : macros[idx].projects;
+      saved = {
+        ...macros[idx],
+        label: parsed.label,
+        agentName: parsed.agentName,
+        tag: parsed.tag,
+        prompt: parsed.prompt,
+        projects,
+        surface: parsed.surface ?? macros[idx].surface,
+        updatedAt: now,
+      };
       macros[idx] = saved;
     } else {
+      const projects = parsed.projects !== undefined ? normalizeProjects(parsed.projects) : [];
       saved = {
         id: newId(parsed.label, new Set(macros.map((m) => m.id))),
         label: parsed.label,
@@ -320,6 +409,7 @@ async function saveMacro(input, opts = {}) {
         tag: parsed.tag,
         prompt: parsed.prompt,
         projects,
+        surface: parsed.surface ?? 'sessions',
         createdAt: now,
         updatedAt: now,
       };
@@ -336,6 +426,8 @@ async function deleteMacro(input, opts = {}) {
   const filePath = resolvePath(opts);
   return serialize(async () => {
     const macros = await loadForWrite(filePath, opts);
+    const target = macros.find((m) => m.id === id);
+    if (target && target.builtin) throw new Error('built-in macros cannot be deleted');
     const next = macros.filter((m) => m.id !== id);
     if (next.length !== macros.length) await writeStore(filePath, next);
     return { ok: true };
@@ -361,6 +453,7 @@ async function setMacroProject(input, opts = {}) {
       if (enabled) return { ok: true, macro };
       return { ok: false, error: 'macro is shown in every project' };
     }
+    if (macro.builtin && !enabled) return { ok: false, error: 'built-in macro visibility cannot be narrowed' };
     const has = macro.projects.includes(target);
     if (enabled === has) return { ok: true, macro };
     const projects = enabled ? [...macro.projects, target] : macro.projects.filter((p) => p !== target);
@@ -383,4 +476,5 @@ module.exports = {
   deleteMacro,
   setMacroProject,
   defaultFilePath,
+  ensureBuiltins,
 };

@@ -19,7 +19,9 @@ let opts;
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'macros-'));
   filePath = path.join(dir, 'macros.json');
-  opts = { filePath, listPersonas: async () => [] };
+  // builtins: [] keeps existing tests' expectations unaffected by the seeded
+  // built-in macros (covered separately below).
+  opts = { filePath, listPersonas: async () => [], builtins: [] };
 });
 afterEach(() => {
   fs.rmSync(dir, { recursive: true, force: true });
@@ -93,7 +95,7 @@ test('invalid entries dropped', async () => {
 test('corrupt file is preserved, library starts empty, migration not re-run', async () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   const listPersonas = vi.fn(async () => [{ name: 'builder', projects: ['/p'], action: 'x', tags: [] }]);
-  const o = { filePath, listPersonas };
+  const o = { filePath, listPersonas, builtins: [] };
   fs.writeFileSync(filePath, '{not json');
   expect(await lib.listMacros(o)).toEqual([]);
   expect(listPersonas).not.toHaveBeenCalled();
@@ -116,7 +118,7 @@ test('migration seeds from personas once', async () => {
     { name: 'mixed', projects: ['rel/path', '/p//two/'], action: 'Mix', tags: ['discussion', 'bug'] },
     { name: 'allrel', projects: ['rel', './x'], action: 'Nope', tags: [] },
   ]);
-  const o = { filePath, listPersonas };
+  const o = { filePath, listPersonas, builtins: [] };
   const first = await lib.listMacros(o);
   expect(first).toHaveLength(3);
   expect(warn).toHaveBeenCalled();
@@ -140,7 +142,7 @@ test('migration failure writes nothing and retries next call', async () => {
     if (fail) throw new Error('boom');
     return [{ name: 'builder', projects: ['/p'], action: 'Build it', tags: ['build'] }];
   });
-  const o = { filePath, listPersonas };
+  const o = { filePath, listPersonas, builtins: [] };
   expect(await lib.listMacros(o)).toEqual([]);
   expect(fs.existsSync(filePath)).toBe(false);
   await expect(lib.saveMacro(base(), o)).rejects.toThrow(/unavailable/);
@@ -189,4 +191,118 @@ test('concurrent saves both persist', async () => {
   const listed = await lib.listMacros(opts);
   expect(listed).toHaveLength(8);
   expect(new Set(listed.map((m) => m.id))).toEqual(new Set(results.map((m) => m.id)));
+});
+
+// --- surface + builtins -----------------------------------------------------
+
+const TEST_BUILTINS_V1 = Object.freeze([
+  Object.freeze({
+    id: 'builtin-test-one',
+    label: 'Test One',
+    agentName: 'test-builder',
+    tag: 'build',
+    surface: 'project-home',
+    projects: ['*'],
+    builtinVersion: 1,
+    prompt: 'v1 prompt',
+  }),
+]);
+
+const TEST_BUILTINS_V2 = Object.freeze([
+  { ...TEST_BUILTINS_V1[0], label: 'Test One v2', prompt: 'v2 prompt', builtinVersion: 2 },
+]);
+
+test('surface defaults to sessions and round-trips', async () => {
+  const created = await lib.saveMacro(base(), opts);
+  expect(created.surface).toBe('sessions');
+  const listed = await lib.listMacros(opts);
+  expect(listed.find((m) => m.id === created.id).surface).toBe('sessions');
+
+  const updated = await lib.saveMacro({ ...base({ label: 'Ship' }), id: created.id, surface: 'project-home' }, opts);
+  expect(updated.surface).toBe('project-home');
+  const keep = await lib.saveMacro({ ...base({ label: 'Ship2' }), id: created.id }, opts);
+  expect(keep.surface).toBe('project-home');
+});
+
+test('builtin flag cannot be set via saveMacro', async () => {
+  const created = await lib.saveMacro({ ...base(), builtin: true }, opts);
+  expect(created.builtin).toBeUndefined();
+});
+
+test('seeds built-ins into a missing store', async () => {
+  const o = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V1 };
+  const listed = await lib.listMacros(o);
+  expect(listed).toHaveLength(1);
+  expect(listed[0]).toMatchObject({
+    id: 'builtin-test-one',
+    label: 'Test One',
+    prompt: 'v1 prompt',
+    surface: 'project-home',
+    builtin: true,
+    builtinVersion: 1,
+  });
+  expect(listed[0].createdAt).toBe(listed[0].updatedAt);
+  const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  expect(onDisk.macros).toHaveLength(1);
+});
+
+test('seeds built-ins into an existing store that lacks them', async () => {
+  const createdUser = await lib.saveMacro(base(), opts);
+  const o = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V1 };
+  const listed = await lib.listMacros(o);
+  expect(listed).toHaveLength(2);
+  expect(listed.map((m) => m.id).sort()).toEqual([createdUser.id, 'builtin-test-one'].sort());
+});
+
+test('no double seed under concurrent listMacros', async () => {
+  const o = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V1 };
+  await Promise.all([lib.listMacros(o), lib.listMacros(o), lib.listMacros(o)]);
+  const listed = await lib.listMacros(o);
+  expect(listed).toHaveLength(1);
+  const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  expect(onDisk.macros).toHaveLength(1);
+});
+
+test('upgrades an unedited built-in to the shipped version', async () => {
+  const oV1 = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V1 };
+  await lib.listMacros(oV1);
+  const oV2 = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V2 };
+  const listed = await lib.listMacros(oV2);
+  const upgraded = listed.find((m) => m.id === 'builtin-test-one');
+  expect(upgraded).toMatchObject({ label: 'Test One v2', prompt: 'v2 prompt', builtinVersion: 2 });
+  expect(upgraded.createdAt).toBe(upgraded.updatedAt);
+});
+
+test('leaves a user-edited built-in untouched', async () => {
+  const oV1 = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V1 };
+  await lib.listMacros(oV1);
+  await new Promise((r) => setTimeout(r, 5));
+  const edited = await lib.saveMacro({ ...base({ label: 'My Custom Label' }), id: 'builtin-test-one' }, oV1);
+  expect(edited.createdAt).not.toBe(edited.updatedAt);
+
+  const oV2 = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V2 };
+  const listed = await lib.listMacros(oV2);
+  const stillEdited = listed.find((m) => m.id === 'builtin-test-one');
+  expect(stillEdited).toMatchObject({ label: 'My Custom Label', builtinVersion: 1 });
+});
+
+test('built-in macros cannot be deleted', async () => {
+  const o = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V1 };
+  await lib.listMacros(o);
+  await expect(lib.deleteMacro({ id: 'builtin-test-one' }, o)).rejects.toThrow(/built-in macros cannot be deleted/);
+});
+
+test('setMacroProject on a built-in keeps the wildcard behaviour', async () => {
+  const o = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V1 };
+  await lib.listMacros(o);
+  const r = await lib.setMacroProject({ id: 'builtin-test-one', cwd: '/x', enabled: false }, o);
+  expect(r).toEqual({ ok: false, error: 'macro is shown in every project' });
+});
+
+test('real BUILTIN_MACROS seed as expected', async () => {
+  const o = { filePath, listPersonas: async () => [] };
+  const listed = await lib.listMacros(o);
+  expect(listed.map((m) => m.id).sort()).toEqual(['builtin-demo-video', 'builtin-project-home']);
+  const projectHome = listed.find((m) => m.id === 'builtin-project-home');
+  expect(projectHome).toMatchObject({ label: 'Project Home', agentName: 'project-home-builder', tag: 'project-home-builder', surface: 'project-home' });
 });

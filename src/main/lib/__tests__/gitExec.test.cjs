@@ -11,6 +11,7 @@ import { test, expect, beforeEach, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { execGit, parseWorktreePorcelain } = require('../gitExec.cjs');
 
 let tmpRoot;
@@ -47,8 +48,13 @@ test('execGit never shells out through a string — argv array only', async () =
 });
 
 test('execGit respects a short timeout', async () => {
-  await expect(execGit(tmpRoot, ['--version'], { timeout: 1 })).rejects.toBeTruthy();
-});
+  // `git cat-file --batch` blocks reading stdin until fed input or killed —
+  // unlike `--version`, which can exit in under 1ms on a fast machine and
+  // make the timeout race nondeterministic. execFile leaves the child's
+  // stdin pipe open and never writes to it, so this blocks reliably.
+  execFileSync('git', ['init', '-q'], { cwd: tmpRoot });
+  await expect(execGit(tmpRoot, ['cat-file', '--batch'], { timeout: 200 })).rejects.toBeTruthy();
+}, 3000);
 
 test('parseWorktreePorcelain parses a simple single-worktree listing', () => {
   const fixture = [

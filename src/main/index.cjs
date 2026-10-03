@@ -33,6 +33,7 @@ const { createAdminHttp } = require('./lib/localAdminHttp.cjs');
 const prdCreate = require('./lib/prdCreate.cjs');
 const prdAdminRoutes = require('./lib/prdAdminRoutes.cjs');
 const projectHomeAdminRoutes = require('./lib/projectHomeAdminRoutes.cjs');
+const macroAdminRoutes = require('./lib/macroAdminRoutes.cjs');
 const { smfileResponseHeaders, shouldBlockFrameNavigation } = require('./lib/smfileHeaders.cjs');
 const { appendAuditEvent } = require('./lib/auditLog.cjs');
 const chatRunner = require('./chatRunner.cjs');
@@ -60,6 +61,7 @@ scheduler.registerAdminRoutes(adminHttp);
 prdCreate.registerAdminRoute(adminHttp, scheduler.remote);
 prdAdminRoutes.registerAdminRoute(adminHttp, scheduler.remote);
 projectHomeAdminRoutes.registerAdminRoute(adminHttp);
+macroAdminRoutes.registerAdminRoute(adminHttp, { onChanged: () => broadcastMacrosChanged() });
 chatRunner.registerAdminRoute(adminHttp);
 // Project-to-project feedback conduit — the app is the only process holding
 // several projects' operations roots open, so it performs the cross-folder

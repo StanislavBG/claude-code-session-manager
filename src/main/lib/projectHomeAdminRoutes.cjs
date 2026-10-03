@@ -243,4 +243,5 @@ module.exports = {
   DEMO_VIDEO_CSP,
   MAX_HTML_BYTES,
   MAX_DEMO_VIDEO_BYTES,
+  resolveCwd,
 };

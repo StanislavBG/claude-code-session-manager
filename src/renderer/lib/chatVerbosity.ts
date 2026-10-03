@@ -199,10 +199,14 @@ export const ASSISTANT_CLAMP_CHARS: Record<ChatVerbosity, number | null> = {
 }
 
 /**
- * Whether a COMPLETED assistant turn's tool-use strip (and the Edit/Write
- * diff cards riding on it) renders at this level. Tool cards are a level-1/2
- * affordance; at 'standard' file changes still surface via the separate
- * `attachment/edited_text_file` event turns, which carry their own DiffCard.
+ * Whether a COMPLETED assistant turn's tool-use strip renders at this level,
+ * COLLAPSED to its one-line chip ("▸ Read CLAUDE.md · Glob … · 3 tools") at
+ * 'standard' and expandable in full at 'detail'/'raw' — EpicDetail's
+ * `toolStripVariant` is what maps this boolean to 'collapsible' vs. 'hidden'.
+ * 'standard' means "what changed, not how" for the EVENT-turn tool cards
+ * (DETAIL_EVENT_KINDS above), but the collapsed chip is a one-line receipt
+ * that an assistant turn did work, not the work itself — so it stays visible
+ * down to 'standard'. Only 'brief'/'summary' (conversation-only) hide it.
  *
  * Does NOT apply to the in-flight bubble: while a run is streaming, its strip
  * ("working · N tools") is the only progress signal there is, so EpicDetail
@@ -210,7 +214,7 @@ export const ASSISTANT_CLAMP_CHARS: Record<ChatVerbosity, number | null> = {
  * the dial governs the record of what happened, never live interaction.
  */
 export function showsToolStrip(level: ChatVerbosity): boolean {
-  return verbosityRank(level) >= verbosityRank('detail')
+  return verbosityRank(level) >= verbosityRank('standard')
 }
 
 /** chatRunner's injected prompt preamble (lib/promptPreamble.ts) renders

@@ -159,10 +159,10 @@ describe('filterTurnsByVerbosity', () => {
 })
 
 describe('per-level affordances', () => {
-  it('CORE: the assistant tool strip follows the same 1-2 rule as tool event cards', () => {
+  it('CORE: the assistant tool strip shows (collapsed at standard) down to level 3, hidden below', () => {
     expect(showsToolStrip('raw')).toBe(true)
     expect(showsToolStrip('detail')).toBe(true)
-    expect(showsToolStrip('standard')).toBe(false)
+    expect(showsToolStrip('standard')).toBe(true)
     expect(showsToolStrip('brief')).toBe(false)
     expect(showsToolStrip('summary')).toBe(false)
   })

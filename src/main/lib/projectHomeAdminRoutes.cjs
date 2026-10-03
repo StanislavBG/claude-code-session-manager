@@ -54,6 +54,15 @@ const NETWORK_CHECKS = [
   { re: /<embed\b/i, message: '<embed> is not allowed' },
   { re: /\bwindow\.open\b/i, message: 'window.open is not allowed' },
   { re: /\b(?:src|href)\s*=\s*["']?\s*(?:https?:)?\/\//i, message: 'src=/href= pointing at http(s): or // is not allowed' },
+  { re: /["'`](?:fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon|open|importScripts)["'`]/i, message: 'computed/bracket access to a network API (e.g. window["fetch"]) is not allowed' },
+  { re: /\bWorker\s*\(/i, message: 'Worker(...) is not allowed' },
+  { re: /\bSharedWorker\b/i, message: 'SharedWorker is not allowed' },
+  { re: /\bserviceWorker\b/i, message: 'serviceWorker is not allowed' },
+  { re: /rel\s*=\s*["']?\s*(?:prefetch|preconnect|dns-prefetch|preload)/i, message: 'rel="prefetch|preconnect|dns-prefetch|preload" is not allowed' },
+  { re: /\beval\s*\(/i, message: 'eval(...) is not allowed' },
+  { re: /\bFunction\s*\(/i, message: 'Function(...) is not allowed' },
+  { re: /<base\b/i, message: '<base> is not allowed' },
+  { re: /<form\b/i, message: '<form> is not allowed' },
 ];
 
 const DURATION_META_RE = /<meta\b[^>]*\bname\s*=\s*["']sm-demo-duration["'][^>]*\bcontent\s*=\s*["'](\d+)["'][^>]*>/i;
@@ -95,18 +104,17 @@ function validateDemoVideoHtml(html) {
 }
 
 /**
- * Stamps DEMO_VIDEO_CSP in as the first child of <head> (replacing any CSP
- * meta already present), creating <head> if the document has none.
+ * Strips any existing CSP meta and a leading doctype, then returns the CSP
+ * as the very first element after a fresh `<!DOCTYPE html>` — a position no
+ * decoy `<head` text, HTML comment, or string literal in the document can
+ * influence. The HTML parser folds a <meta> emitted right after the doctype
+ * into the implicitly-created <head>, and a later <html>/<head> start tag is
+ * merged/ignored, so the CSP still applies to the whole document.
  */
 function injectCsp(html) {
-  const stripped = html.replace(/<meta\b[^>]*\bhttp-equiv\s*=\s*["']Content-Security-Policy["'][^>]*>\s*/gi, '');
-  if (/<head\b[^>]*>/i.test(stripped)) {
-    return stripped.replace(/<head\b[^>]*>/i, (openTag) => `${openTag}${DEMO_VIDEO_CSP}`);
-  }
-  if (/<html\b[^>]*>/i.test(stripped)) {
-    return stripped.replace(/<html\b[^>]*>/i, (openTag) => `${openTag}<head>${DEMO_VIDEO_CSP}</head>`);
-  }
-  return `<head>${DEMO_VIDEO_CSP}</head>${stripped}`;
+  const withoutCsp = html.replace(/<meta\b[^>]*\bhttp-equiv\s*=\s*["']Content-Security-Policy["'][^>]*>\s*/gi, '');
+  const withoutDoctype = withoutCsp.replace(/^\s*<!DOCTYPE\b[^>]*>\s*/i, '');
+  return `<!DOCTYPE html>${DEMO_VIDEO_CSP}${withoutDoctype}`;
 }
 
 /** Same definition crossProjectFeedback.cjs uses for "is this a Session

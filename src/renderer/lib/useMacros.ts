@@ -8,11 +8,20 @@ import { normalizeCwd } from './knownProjectAggregate'
 
 const EMPTY: Macro[] = []
 
-/** Macros shown in `cwd`: absolute-cwd match or `'*'`, sorted by label (case-insensitive). */
-export function macrosForProject(macros: readonly Macro[], cwd: string | null | undefined): Macro[] {
+/**
+ * Macros shown in `cwd` for `surface` (default `'sessions'`): absolute-cwd match or `'*'`,
+ * restricted to macros whose `surface` (missing = `'sessions'`) matches, sorted by label
+ * (case-insensitive).
+ */
+export function macrosForProject(
+  macros: readonly Macro[],
+  cwd: string | null | undefined,
+  surface: 'sessions' | 'project-home' = 'sessions',
+): Macro[] {
   if (!cwd) return []
   const here = normalizeCwd(cwd)
   return macros
+    .filter((m) => (m.surface ?? 'sessions') === surface)
     .filter((m) => m.projects.some((p) => p === '*' || normalizeCwd(p) === here))
     .sort((a, b) => a.label.toLowerCase().localeCompare(b.label.toLowerCase()))
 }

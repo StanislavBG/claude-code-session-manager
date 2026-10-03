@@ -242,6 +242,12 @@ export interface Macro {
   tag: AgentPersonaTag;
   prompt: string;
   projects: string[];
+  /** Which strip shows this macro. Defaults to `'sessions'` when absent. */
+  surface: 'sessions' | 'project-home';
+  /** True for a seeded, machine-authored macro (e.g. the built-in Project Home actions). */
+  builtin?: boolean;
+  /** Bumped by the seed when a builtin macro's definition changes, to reseed it. */
+  builtinVersion?: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -254,6 +260,7 @@ export interface MacroSaveInput {
   tag: AgentPersonaTag;
   prompt: string;
   projects?: string[];
+  surface?: 'sessions' | 'project-home';
 }
 
 /** One global `~/.claude/agents/<name>.md` persona, per the Agent Library nav page. */

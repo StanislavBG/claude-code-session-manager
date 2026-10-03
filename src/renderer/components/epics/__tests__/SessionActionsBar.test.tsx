@@ -27,7 +27,7 @@ function persona(over: Partial<AgentPersona> = {}): AgentPersona {
 function macro(over: Partial<Macro> = {}): Macro {
   return {
     id: 'm1', label: 'Sweep', agentName: 'scout', tag: 'bug', prompt: 'Sweep it.\nSecond line', projects: [CWD],
-    createdAt: '', updatedAt: '', ...over,
+    surface: 'sessions', createdAt: '', updatedAt: '', ...over,
   }
 }
 

@@ -164,8 +164,48 @@ describe('EpicComposer', () => {
   it('keeps the paste hint inside the prompt itself', () => {
     const el = mount(createElement(EpicComposer, { epic: epic(), snapshots: snapshots() }))
     const textarea = el.querySelector('[data-testid="epic-composer-textarea"]') as HTMLTextAreaElement
-    expect(textarea.placeholder).toContain('⌘V to attach a screenshot')
+    expect(textarea.placeholder).toBe('Queue a follow-up… ⌘V to attach a screenshot')
     expect(textarea.rows).toBe(1)
+  })
+
+  it('mounts the mic and attach buttons as descendants of the single input wrapper', () => {
+    const el = mount(createElement(EpicComposer, { epic: epic(), snapshots: snapshots() }))
+    const wrapper = el.querySelector('[data-testid="epic-composer-input"]') as HTMLElement
+    expect(wrapper).not.toBeNull()
+    expect(wrapper.querySelector('[data-testid="epic-composer-mic"]')).not.toBeNull()
+    expect(wrapper.querySelector('[data-testid="epic-composer-attach"]')).not.toBeNull()
+    expect(wrapper.querySelector('[data-testid="epic-composer-textarea"]')).not.toBeNull()
+  })
+
+  it('clicking mic still calls useVoice startRecording', async () => {
+    const startRecordingSpy = vi.spyOn(useVoice.getState(), 'startRecording')
+    const el = mount(createElement(EpicComposer, { epic: epic(), snapshots: snapshots() }))
+    const micBtn = el.querySelector('[data-testid="epic-composer-mic"]') as HTMLButtonElement
+    await act(async () => {
+      micBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await vi.waitFor(() => expect(capturedVoiceOpts).not.toBeNull())
+    })
+    expect(startRecordingSpy).toHaveBeenCalledWith('epic-1', expect.any(Object))
+  })
+
+  it('renders the attachments tray and quote strip above the input wrapper', () => {
+    const el = mount(
+      createElement(EpicComposer, { epic: epic(), snapshots: snapshots(), quote: 'earlier claude reply' }),
+    )
+    const fileInput = el.querySelector('[data-testid="epic-composer-attach-input"]') as HTMLInputElement
+    const file = new File(['x'], 'shot.png', { type: 'image/png' })
+    Object.defineProperty(fileInput, 'files', { value: [file] })
+    act(() => fileInput.dispatchEvent(new Event('change', { bubbles: true })))
+
+    const html = el.innerHTML
+    const trayIdx = html.indexOf('shot.png')
+    const quoteIdx = html.indexOf('epic-composer-quote-strip')
+    const inputIdx = html.indexOf('epic-composer-input"')
+    expect(trayIdx).toBeGreaterThan(-1)
+    expect(quoteIdx).toBeGreaterThan(-1)
+    expect(inputIdx).toBeGreaterThan(-1)
+    expect(trayIdx).toBeLessThan(inputIdx)
+    expect(quoteIdx).toBeLessThan(inputIdx)
   })
 
   it('adds and removes an attachment chip', () => {

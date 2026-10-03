@@ -4,7 +4,6 @@ import { useChat } from '../../state/chat'
 import type { PromptSession } from '../../state/promptSessions'
 import { epicDisplayStatus, type EpicSnapshots } from '../../lib/epicDerive'
 import { AttachButton, AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
-import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { useVoice, selectCanRecord } from '../../state/voice'
 import { copyFor } from '../../lib/voiceCopy'
 import { takePendingEpicDraft } from '../../lib/epicDraftText'
@@ -164,52 +163,54 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
 
       <div className="flex items-end gap-2">
         <div
-          className="flex h-[44px] shrink-0 items-center overflow-hidden rounded-[10px] border border-line bg-bg-hi"
-          data-testid="epic-composer-input-tools"
+          data-testid="epic-composer-input"
+          className="relative flex-1 rounded-xl border border-line bg-bg-hi"
         >
-          <button
-            type="button"
-            data-testid="epic-composer-mic"
-            onClick={onMicClick}
-            disabled={voiceGate.reason === 'unsupported'}
-            aria-pressed={dictating}
-            aria-label={micLabel}
-            title={micLabel}
-            className={`grid h-full w-10 place-items-center ${
-              dictating ? 'text-red-400' : isRecording ? 'text-fg-faint' : 'text-accent hover:text-accent/80'
-            }`}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="9" y="1" width="6" height="12" rx="3" />
-              <path d="M5 10a7 7 0 0 0 14 0" />
-              <line x1="12" y1="17" x2="12" y2="21" />
-              <line x1="8" y1="21" x2="16" y2="21" />
-            </svg>
-          </button>
-          <span className="h-full w-px bg-line" aria-hidden="true" />
-          <AttachButton
-            att={att}
-            testId="epic-composer-attach"
-            className="grid h-full w-10 place-items-center text-fg-dim hover:text-fg"
+          <textarea
+            ref={textareaRef}
+            data-testid="epic-composer-textarea"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={onKeyDown}
+            onPaste={(e) => attachPastedFiles(e, att)}
+            rows={1}
+            placeholder="Queue a follow-up… ⌘V to attach a screenshot"
+            className="min-h-[44px] max-h-[160px] w-full resize-none overflow-y-auto rounded-xl bg-transparent px-3 py-2.5 pr-[72px] text-[13px] leading-relaxed text-fg placeholder:text-fg-faint focus:outline-none"
           />
+          <div className="absolute bottom-1.5 right-2 flex items-center gap-1.5">
+            <button
+              type="button"
+              data-testid="epic-composer-mic"
+              onClick={onMicClick}
+              disabled={voiceGate.reason === 'unsupported'}
+              aria-pressed={dictating}
+              aria-label={micLabel}
+              title={micLabel}
+              className={`grid h-7 w-7 place-items-center rounded-md ${
+                dictating ? 'text-red-400' : isRecording ? 'text-fg-faint' : 'text-fg-faint hover:text-fg'
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="9" y="1" width="6" height="12" rx="3" />
+                <path d="M5 10a7 7 0 0 0 14 0" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+              </svg>
+            </button>
+            <AttachButton
+              att={att}
+              testId="epic-composer-attach"
+              className="grid h-7 w-7 place-items-center rounded-md text-fg-faint hover:text-fg"
+              size={14}
+            />
+          </div>
         </div>
-        <textarea
-          ref={textareaRef}
-          data-testid="epic-composer-textarea"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={onKeyDown}
-          onPaste={(e) => attachPastedFiles(e, att)}
-          rows={1}
-          placeholder={running ? 'Queue a follow-up… — ⌘V to attach a screenshot' : `Add to "${epic.goalText}" — Enter to send, ⌘V to attach a screenshot`}
-          className="min-h-[44px] max-h-[160px] flex-1 resize-none overflow-y-auto rounded-[10px] border border-line bg-bg-hi px-3 py-2.5 text-[13px] leading-relaxed text-fg placeholder:text-fg-faint focus:border-accent/50 focus:outline-none"
-        />
         {running && (
           <button
             type="button"
             data-testid="epic-composer-cancel"
             onClick={() => window.api.chat.cancel(epic.id)}
-            className="h-[44px] shrink-0 px-1 text-[12.5px] font-semibold text-delta-bad hover:text-delta-bad/80"
+            className="h-[44px] shrink-0 px-2 text-[13px] font-medium text-accent hover:text-accent/80"
           >
             Cancel
           </button>
@@ -219,11 +220,10 @@ export function EpicComposer({ epic, snapshots, onSent, quote, onClearQuote }: P
           data-testid="epic-composer-send"
           onClick={() => void submit()}
           disabled={!canSend || sending}
-          className={`inline-flex h-[44px] shrink-0 items-center gap-1.5 rounded-[10px] px-5 text-[13px] font-semibold ${
-            canSend && !sending ? 'bg-accent text-white hover:bg-accent/90' : 'bg-bg-hi text-fg-faint'
+          className={`h-[44px] shrink-0 rounded-xl px-5 text-[13px] font-semibold ${
+            canSend && !sending ? 'bg-fg text-bg hover:bg-fg/90' : 'bg-bg-hi text-fg-faint'
           }`}
         >
-          <AlmanacIcon name="send" size={13} />
           {running ? 'Queue' : 'Send'}
         </button>
       </div>

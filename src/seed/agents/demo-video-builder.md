@@ -66,24 +66,27 @@ Narrate the storyboard captions with a short, pleasant on-device voice track —
 block the video on it. Generate it at build time, not at playback time; the shipped document
 never calls out to a network TTS service.
 
-- Use **Piper** (`pip install piper-tts`, MIT-licensed, small ONNX voices, no GPU needed) for the
-  voice. If `python3 -m pip` isn't on PATH, bootstrap it first: `curl -sS
-  https://bootstrap.pypa.io/get-pip.py | python3 - --user --break-system-packages`, then
-  `python3 -m pip install --user --break-system-packages piper-tts`. Pull one voice once — use
-  a **`-high`** quality tier, e.g. `en_US-lessac-high` from
-  `https://huggingface.co/rhasspy/piper-voices` (`.onnx` + `.onnx.json`, ~115 MB). A `-medium`
-  voice (e.g. `en_US-amy-medium`) downloads faster but sounds noticeably more robotic — confirmed
-  by ear in the session that wrote this policy; don't downgrade to `-medium` just to save the
-  download unless bandwidth genuinely doesn't allow it. Kokoro-82M (Apache-2.0) is a further step
-  up but needs PyTorch and an even larger download — prefer it only when you have that budget.
-- Synthesize one short line per scene (`python3 -m piper -m <voice>.onnx -c <voice>.onnx.json -f
-  sceneN.wav`), sized to fit that scene's on-screen hold time. Lay the scene clips onto one
-  mono 22050 Hz track at each scene's start offset, encode the result with `ffmpeg -c:a
-  libmp3lame -b:a 64k` **at the voice's native sample rate — do not downsample to 16 kHz or drop
-  below ~48 kbps; both make speech sound crushed/robotic for only a small size win** (a 30 s
-  mono track at 64 kbps is still only ~235 KB). Base64 it into a single `<audio
-  src="data:audio/mpeg;base64,...">` tag. Keep the whole document — markup plus audio — under
-  the 2 MB cap (plenty of headroom at this bitrate).
+- Use **Kokoro-82M via the `kokoro-onnx` package** (`pip install kokoro-onnx`, Apache-2.0,
+  ONNX runtime only — no PyTorch needed despite earlier guidance here claiming otherwise;
+  confirmed by running it for real). If `python3 -m pip` isn't on PATH, bootstrap it first:
+  `curl -sS https://bootstrap.pypa.io/get-pip.py | python3 - --user --break-system-packages`,
+  then `python3 -m pip install --user --break-system-packages kokoro-onnx soundfile`. Pull the
+  model once: `kokoro-v1.0.onnx` (~325 MB) + `voices-v1.0.bin` (~28 MB) from
+  `https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/`. Use the
+  **`af_heart`** voice — by ear, clearly more natural than Piper, including Piper's `-high`
+  tier. `Kokoro(model, voices).create(line, voice='af_heart', speed=1.0, lang='en-us')` returns
+  `(samples, sample_rate)` (24000 Hz); write each scene's line with `soundfile.write`. If
+  `kokoro-onnx`/its model download genuinely isn't available (offline, no bandwidth for a
+  ~350 MB pull), fall back to **Piper** (`pip install piper-tts`) with a `-high` voice tier
+  (e.g. `en_US-lessac-high`, not `-medium` — `-medium` reads as noticeably robotic) from
+  `https://huggingface.co/rhasspy/piper-voices`.
+- Synthesize one short line per scene, sized to fit that scene's on-screen hold time. Lay the
+  scene clips onto one mono track (at the model's native sample rate) at each scene's start
+  offset, encode the result with `ffmpeg -c:a libmp3lame -b:a 64k` **at that native sample
+  rate — do not downsample or drop below ~48 kbps; both make speech sound crushed/robotic for
+  only a small size win** (a 30 s mono track at 64 kbps is still only ~235 KB). Base64 it into
+  a single `<audio src="data:audio/mpeg;base64,...">` tag. Keep the whole document — markup
+  plus audio — under the 2 MB cap (plenty of headroom at this bitrate).
 - Wire `play()`/`pause()`/`seek(t)` to the `<audio>` element too (`audio.currentTime = t` on
   seek) so the narration never drifts from the visual clock, and start muted-fallback: call
   `.play()` on load, and on rejection (autoplay-blocked browsers) show a small "tap for sound"

@@ -17,16 +17,13 @@ import { test, expect, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { makeFixtureCwd: harnessMakeFixtureCwd } = require('./_helpers/schedulerHarness.cjs');
 const { archivedTwinExists, archivedPrdPathForJob, prdDirForCwd } = require('../scheduler.cjs');
 const { listArchivedPrdDirs } = require('../lib/prdLocations.cjs');
 
 const tmpDirs = [];
 
-function makeFixtureCwd() {
-  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-archived-twin-'));
-  tmpDirs.push(cwd);
-  return cwd;
-}
+const makeFixtureCwd = () => harnessMakeFixtureCwd('sm-archived-twin-', tmpDirs);
 
 afterEach(() => {
   while (tmpDirs.length) {

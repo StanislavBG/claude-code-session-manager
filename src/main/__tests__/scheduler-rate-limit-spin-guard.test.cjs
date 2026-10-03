@@ -29,6 +29,7 @@ const os = require('node:os');
 const path = require('node:path');
 const claudeStub = require('../../../tests/helpers/claudeStub.cjs');
 const { execFileSync } = require('node:child_process');
+const { git, initRepo } = require('./_helpers/schedulerHarness.cjs');
 
 let tmpHome;
 let originalHome;
@@ -56,20 +57,6 @@ afterAll(() => {
 afterEach(() => {
   delete process.env.SM_CLAUDE_BIN;
 });
-
-function git(args, cwd) {
-  return execFileSync('git', args, { cwd, encoding: 'utf8' });
-}
-
-function initRepo(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-  git(['init', '-q'], dir);
-  git(['config', 'user.email', 'test@example.com'], dir);
-  git(['config', 'user.name', 'Test'], dir);
-  fs.writeFileSync(path.join(dir, 'README.md'), 'hello\n', 'utf8');
-  git(['add', '-A'], dir);
-  git(['commit', '-q', '-m', 'initial'], dir);
-}
 
 function registerActiveProject(cwd) {
   const projectsDir = path.join(tmpHome, '.claude', 'projects');

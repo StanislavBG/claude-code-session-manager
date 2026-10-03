@@ -186,7 +186,7 @@ describe('EpicDetail (PRD 827)', () => {
     })
   })
 
-  it('caps the header title and goal with an inner scroll so a huge opening prompt cannot crowd out the transcript', async () => {
+  it('caps the header title with an inner scroll so a huge title cannot crowd out the transcript', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
@@ -200,13 +200,46 @@ describe('EpicDetail (PRD 827)', () => {
     const h1 = el.querySelector('[data-testid="epic-detail-title"]') as HTMLElement
     expect(h1.className).toContain('max-h-')
     expect(h1.className).toContain('overflow-y-auto')
+    expect(h1.className).toContain('font-serif')
     expect(h1.getAttribute('title')).toBe(title)
-    const goal = el.querySelector('[data-testid="epic-detail-goal"]') as HTMLElement
-    expect(goal.className).toContain('max-h-')
-    expect(goal.className).toContain('overflow-y-auto')
   })
 
-  it('renders the Agent+model chip with the persona name and evidence-backed concrete model when the persona has an explicit override', async () => {
+  it('clamps the goal to one line by default and offers a "more" toggle for a long goal', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+    const longGoal = 'A very long goal sentence. '.repeat(10) // > 120 chars
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', `Ship it\n\n${longGoal}`, 'feature')
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const goal = el.querySelector('[data-testid="epic-detail-goal"]') as HTMLElement
+    expect(goal.className).toContain('line-clamp-1')
+    const more = el.querySelector('[data-testid="epic-detail-goal-more"]') as HTMLButtonElement
+    expect(more).not.toBeNull()
+    expect(more.textContent).toBe('more')
+
+    act(() => more.click())
+    expect((el.querySelector('[data-testid="epic-detail-goal"]') as HTMLElement).className).not.toContain('line-clamp-1')
+    const less = el.querySelector('[data-testid="epic-detail-goal-more"]') as HTMLButtonElement
+    expect(less.textContent).toBe('less')
+
+    act(() => less.click())
+    expect((el.querySelector('[data-testid="epic-detail-goal"]') as HTMLElement).className).toContain('line-clamp-1')
+  })
+
+  it('omits the "more" toggle when the goal is short enough to fit on one line', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it\n\nGet it out the door.', 'feature')
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    expect(el.querySelector('[data-testid="epic-detail-goal-more"]')).toBeNull()
+  })
+
+  it('renders the Agent chip with the persona name and a condensed model family when the persona has an explicit override', async () => {
     installWindowApiMock({
       runtimeInfo: { modelAlias: 'claude-sonnet-4-5', modelSource: 'persona', resolvedModelId: 'claude-sonnet-4-5', resolvedFrom: 'transcript' },
     })
@@ -221,11 +254,10 @@ describe('EpicDetail (PRD 827)', () => {
 
     const chip = el.querySelector('[data-testid="epic-agent-tag"]')
     expect(chip).not.toBeNull()
-    expect(chip?.textContent).toContain('architect')
-    expect(chip?.textContent).toContain('Sonnet 4.5')
-    // The tag's OWN title (not just the inner span's) carries the model info,
-    // so hovering anywhere on the tag — not only its inner model text —
-    // surfaces it, matching the pre-existing full-tag tooltip contract.
+    expect(chip?.textContent).toBe('architect · sonnet')
+    // The tag's title carries the full verbose, evidence-backed line (not the
+    // condensed text shown in the button itself) — hovering surfaces it,
+    // matching formatEffectiveRuntimeLine's own text.
     expect(chip?.getAttribute('title')).toContain('Sonnet 4.5')
   })
 
@@ -244,8 +276,7 @@ describe('EpicDetail (PRD 827)', () => {
 
     const chip = el.querySelector('[data-testid="epic-agent-tag"]')
     expect(chip).not.toBeNull()
-    expect(chip?.textContent).toContain('dev-lead')
-    expect(chip?.textContent).toContain('inherited')
+    expect(chip?.textContent).toBe('dev-lead · inherited')
   })
 
   it('renders no Agent chip at all when the Epic has no agentType', async () => {
@@ -262,7 +293,7 @@ describe('EpicDetail (PRD 827)', () => {
     expect(el.querySelector('[data-testid="epic-agent-tag"]')).toBeNull()
   })
 
-  it('renders the Epic cwd\'s branch next to the ProjectTag when useBranch resolves one', async () => {
+  it('renders the Epic cwd\'s branch in the compact meta line when useBranch resolves one', async () => {
     installWindowApiMock({ branch: 'epic/contextual-chat' })
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
@@ -272,12 +303,12 @@ describe('EpicDetail (PRD 827)', () => {
     const el = mount(createElement(EpicDetail, { promptSession: session }))
     await flushAsync(2)
 
-    const branchEl = el.querySelector('[data-testid="epic-detail-branch"]')
-    expect(branchEl).not.toBeNull()
-    expect(branchEl?.textContent).toBe('⎇ epic/contextual-chat')
+    const metaLine = el.querySelector('[data-testid="epic-detail-meta-line"]')
+    expect(metaLine).not.toBeNull()
+    expect(metaLine?.textContent).toBe('epic/contextual-chat')
   })
 
-  it('hides the branch line cleanly when useBranch resolves null', async () => {
+  it('hides the compact meta line cleanly when there is no agent and useBranch resolves null', async () => {
     installWindowApiMock({ branch: null })
     const { usePromptSessions } = await import('../../../state/promptSessions')
     const { EpicDetail } = await import('../EpicDetail')
@@ -287,7 +318,96 @@ describe('EpicDetail (PRD 827)', () => {
     const el = mount(createElement(EpicDetail, { promptSession: session }))
     await flushAsync(2)
 
-    expect(el.querySelector('[data-testid="epic-detail-branch"]')).toBeNull()
+    expect(el.querySelector('[data-testid="epic-detail-meta-line"]')).toBeNull()
+  })
+
+  it('CORE: the compact meta line joins agent · model · effort · branch into one mono string, with the agent segment staying clickable', async () => {
+    installWindowApiMock({
+      branch: 'sm-epic/introduce-second-action',
+      runtimeInfo: {
+        modelAlias: 'opus',
+        modelSource: 'persona',
+        resolvedModelId: 'claude-opus-5',
+        resolvedFrom: 'transcript',
+        personaEffort: 'medium',
+        personaEffortSource: 'persona',
+      },
+    })
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature', undefined, 'architect')
+    const session = usePromptSessions.getState().approveProposed(proposed.id)!
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+    await flushAsync(2)
+
+    const metaLine = el.querySelector('[data-testid="epic-detail-meta-line"]') as HTMLElement
+    expect(metaLine).not.toBeNull()
+    expect(metaLine.className).toContain('font-mono')
+    expect(metaLine.className).toContain('truncate')
+    expect(metaLine.textContent).toBe('architect · opus · effort medium · sm-epic/introduce-second-action')
+
+    const agentBtn = metaLine.querySelector('[data-testid="epic-agent-tag"]') as HTMLButtonElement
+    expect(agentBtn).not.toBeNull()
+    expect(agentBtn.tagName).toBe('BUTTON')
+  })
+
+  it('suffixes the branch segment with the worktree status when it is not the normal active/isolated state', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    usePromptSessions.setState({
+      sessions: {
+        ...usePromptSessions.getState().sessions,
+        [session.id]: {
+          ...session,
+          worktree: { dir: '/tmp/wt', branch: 'sm-epic/foo', baseCwd: '/tmp/proj', status: 'needs_merge_resolution' },
+        },
+      },
+    })
+    const withWorktree = usePromptSessions.getState().sessions[session.id]
+
+    const el = mount(createElement(EpicDetail, { promptSession: withWorktree }))
+    await flushAsync(2)
+
+    expect(el.querySelector('[data-testid="epic-detail-meta-line"]')?.textContent).toBe('sm-epic/foo (merge conflict)')
+  })
+
+  it('CORE: the turns-ago caption counts only user+assistant turns, not transcript-feed event turns', async () => {
+    installWindowApiMock()
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useChat } = await import('../../../state/chat')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const now = Date.now()
+    useChat.setState({
+      chats: {
+        [session.id]: {
+          turns: [
+            { id: 't-user', role: 'user', text: 'do the thing', at: now - 20_000 },
+            { id: 't-assistant', role: 'assistant', text: 'done', at: now - 10_000 },
+            { id: 't-event', role: 'event', text: 'tool_use', at: now - 5_000, kind: 'tool_use' },
+          ],
+          running: false,
+          stream: '',
+          queuedPosition: 0,
+        } as any,
+      },
+    })
+
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const turnsAgo = el.querySelector('[data-testid="epic-detail-turns-ago"]') as HTMLElement
+    expect(turnsAgo).not.toBeNull()
+    expect(turnsAgo.textContent).toMatch(/^2 turns · /)
+    expect(turnsAgo.textContent).not.toMatch(/^3 turns/)
+    expect(turnsAgo.getAttribute('title')).toContain('opened')
+    expect(turnsAgo.getAttribute('title')).toContain('tool calls')
+    expect(turnsAgo.getAttribute('title')).toContain(`session ${session.claudeSessionId}`)
   })
 
   it('renders "Resume" instead of "Mark completed" for a completed Epic', async () => {

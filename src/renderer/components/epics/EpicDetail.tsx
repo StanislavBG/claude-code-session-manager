@@ -6,14 +6,14 @@ import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal, type EpicTerminalMode } from '../../state/epicTerminal'
 import { EpicTerminalPane } from './EpicTerminalPane'
 import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
-import { EpicStatusChip, EpicKindTag, EpicAgentTag, EpicWorktreeChip } from './epic-primitives'
+import { EpicStatusChip, EpicKindTag, WORKTREE_TONE } from './epic-primitives'
 import { EpicQueuePanel } from './EpicQueuePanel'
-import { ProjectTag, PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, resolveValidatedStatus, STATUS_TONE, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
+import { PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, resolveValidatedStatus, STATUS_TONE, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
 import { Turn, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTurn'
 import { EpicIntakeCard } from './EpicIntakeCard'
 import { openPrdSlug, openAgentLibrary } from '../../lib/epicNav'
 import { useEffectiveModelInfo } from '../../lib/effectiveModelInfo'
-import { EffectiveRuntimeLine, formatEffectiveRuntimeLine } from './EffectiveRuntimeLine'
+import { formatEffectiveRuntimeLine, formatCompactRuntime } from './EffectiveRuntimeLine'
 import { ViewTabs } from '../ui/ViewTabs'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { RunLogViewer } from '../tabs/plans/RunLogViewer'
@@ -93,15 +93,6 @@ const EMPTY_JOBS: ScheduleJob[] = []
 const EMPTY_TURNS: ChatTurn[] = []
 
 type ViewKey = 'discussion' | 'prds' | 'runs'
-
-function MetaItem({ label, value }: { label: string; value: string }) {
-  return (
-    <span className="inline-flex items-baseline gap-1.5 text-xs" data-testid="epic-meta-item">
-      <span className="text-fg-faint">{label}</span>
-      <span className="font-mono font-semibold text-fg-dim">{value}</span>
-    </span>
-  )
-}
 
 /**
  * The Epic's h1, editable in place — the ONE surface where a session's title
@@ -602,6 +593,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const [view, setView] = useState<ViewKey>('discussion')
   const prds = useScheduledPrds()
   const [markingCompleted, setMarkingCompleted] = useState(false)
+  const [goalExpanded, setGoalExpanded] = useState(false)
   const scrollRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -633,27 +625,8 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // Tab state resets to Discussion on every Epic change.
   useEffect(() => {
     setView('discussion')
+    setGoalExpanded(false)
   }, [epicId])
-
-  // Delegation drift readout ("N PRDs · M inline") — derived at read time
-  // in the main process from the Epic's own live prds/ dir + its own claude
-  // session transcript (epicDelegationStats.cjs); this component only holds
-  // the fetched result, never walks the filesystem itself.
-  const [delegationStats, setDelegationStats] = useState<{ prdsQueued: number; inlineEdits: number } | null>(null)
-  useEffect(() => {
-    let cancelled = false
-    window.api.epicDelegationStats
-      .get(cwd, epicId, sessionId)
-      .then((stats) => {
-        if (!cancelled) setDelegationStats(stats)
-      })
-      .catch(() => {
-        if (!cancelled) setDelegationStats(null)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [cwd, epicId, sessionId])
 
   // Raw slices only — never derive inside the selector (zustand v5 compares
   // snapshots by reference; a freshly-built value re-renders forever).
@@ -712,13 +685,38 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const attachedPrds = epicPrds(epicId, snapshots)
   const stats = epicStats(epicId, snapshots)
 
-  const projectName = cwd.replace(/\/+$/, '').split('/').filter(Boolean).pop() ?? cwd
   const branch = useBranch(cwd)
   // Job row is the source of truth for Runs (not the PRD join) so a job
   // whose PRD file was later archived still lists.
   const epicRuns = scheduleJobs.filter((j) => j.sourcePromptId === epicId)
 
   const { title, goal } = splitTitleAndGoal(promptSession.goalText)
+
+  // Compact header meta line: worktree branch, suffixed with its status only
+  // when that status isn't the normal isolated/active one. Hidden on a
+  // completed Epic — same guard the old `!isCompleted && <EpicWorktreeChip
+  // .../>` applied and EpicQueue.tsx's row still applies (`status !==
+  // 'completed'`): a merged/disabled worktree's branch/dir is already torn
+  // down, so surfacing it indefinitely here would just be stale.
+  const worktreeBranch = !isCompleted ? promptSession.worktree?.branch ?? branch : null
+  const worktreeStatus = promptSession.worktree?.status
+  const branchText = worktreeBranch
+    ? `${worktreeBranch}${worktreeStatus && worktreeStatus !== 'active' ? ` (${WORKTREE_TONE[worktreeStatus].label})` : ''}`
+    : null
+
+  // Title-row turn count: user+assistant turns only — `turns` also carries
+  // 'event'/'question'/'error'/'notice' roles (transcript-feed ingestion),
+  // which would inflate a reader-facing "N turns" count.
+  const conversationTurnCount = turns.filter((t) => t.role === 'user' || t.role === 'assistant').length
+  const turnsAgoText = `${conversationTurnCount} turns · ${formatWhen(lastActivityAt(promptSession, sessionEvents, turns))}`
+  const turnsAgoTitle = [
+    `opened ${formatWhen(promptSession.createdAt)}`,
+    `${stats?.toolCalls ?? 0} tool calls`,
+    stats?.tokens ? `${stats.tokens} tokens` : null,
+    `session ${sessionId}`,
+  ]
+    .filter(Boolean)
+    .join(' · ')
 
   const views: { key: ViewKey; label: string }[] = [
     { key: 'discussion', label: `Discussion ${timeline.length}` },
@@ -809,46 +807,60 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
       <header className="shrink-0 border-b border-line px-5 pt-4">
         <div className="flex items-start gap-3.5">
           <div className="min-w-0">
-            <div className="mb-1.5 flex items-center gap-2" data-testid="epic-detail-tags">
+            <div className="mb-1.5 flex items-center gap-2 min-w-0" data-testid="epic-detail-tags">
               <EpicStatusChip status={status} />
               <EpicKindTag kind={promptSession.tag} />
-              {!isCompleted && <EpicWorktreeChip worktree={promptSession.worktree} />}
-              {agentType && (
-                <EpicAgentTag
-                  agentType={agentType}
-                  model={runtimeInfo ? <EffectiveRuntimeLine info={runtimeInfo} /> : null}
-                  modelTitle={runtimeInfo ? formatEffectiveRuntimeLine(runtimeInfo).text : null}
-                  onClick={() => openAgentLibrary(agentType)}
-                />
-              )}
-              <ProjectTag cwd={cwd} name={projectName} />
-              {branch && (
-                <span className="font-mono text-xs text-fg-faint" data-testid="epic-detail-branch">
-                  ⎇ {branch}
-                </span>
-              )}
-              {delegationStats && (
+              {(agentType || branchText) && (
                 <span
-                  className={`font-mono text-[10.5px] ${
-                    delegationStats.inlineEdits > 0 && delegationStats.prdsQueued === 0 ? 'text-amber-400' : 'text-fg-faint'
-                  }`}
-                  data-testid="epic-delegation-stats"
-                  title="PRDs queued in this Epic's own prds/ dir vs. Write/Edit tool calls against application source in its own transcript"
+                  className="font-mono text-[11px] text-fg-dim truncate"
+                  data-testid="epic-detail-meta-line"
                 >
-                  {delegationStats.prdsQueued} {delegationStats.prdsQueued === 1 ? 'PRD' : 'PRDs'} · {delegationStats.inlineEdits} inline
+                  {agentType && (
+                    <button
+                      type="button"
+                      onClick={() => openAgentLibrary(agentType)}
+                      title={`Agent: ${agentType}${runtimeInfo ? ` — ${formatEffectiveRuntimeLine(runtimeInfo).text}` : ''} — click to open in Agent Library`}
+                      data-testid="epic-agent-tag"
+                      className="hover:text-fg"
+                    >
+                      {runtimeInfo ? formatCompactRuntime(runtimeInfo) : agentType}
+                    </button>
+                  )}
+                  {branchText && (agentType ? ` · ${branchText}` : branchText)}
                 </span>
               )}
             </div>
-            <EpicTitle epicId={epicId} title={title} goal={goal} />
+            <div className="flex items-baseline gap-2">
+              <EpicTitle epicId={epicId} title={title} goal={goal} />
+              <span
+                className="font-mono text-[11px] text-fg-faint whitespace-nowrap"
+                data-testid="epic-detail-turns-ago"
+                title={turnsAgoTitle}
+              >
+                {turnsAgoText}
+              </span>
+            </div>
             {/* Read-only by design: this paragraph is the session's first
                 prompt, already sent — see EpicTitle's header comment. */}
             {goal && (
-              <p
-                className="m-0 mt-1.5 max-h-[8.5em] max-w-[700px] overflow-y-auto overscroll-contain text-[13.5px] leading-relaxed text-fg-dim"
-                data-testid="epic-detail-goal"
-              >
-                {goal}
-              </p>
+              <div className="mt-1.5 max-w-[700px]">
+                <p
+                  className={`m-0 text-[13.5px] leading-relaxed text-fg-dim ${goalExpanded ? '' : 'line-clamp-1'}`}
+                  data-testid="epic-detail-goal"
+                >
+                  {goal}
+                </p>
+                {goal.length > 120 && (
+                  <button
+                    type="button"
+                    onClick={() => setGoalExpanded((v) => !v)}
+                    data-testid="epic-detail-goal-more"
+                    className="text-[11px] font-semibold text-accent hover:underline"
+                  >
+                    {goalExpanded ? 'less' : 'more'}
+                  </button>
+                )}
+              </div>
             )}
           </div>
           <div className="ml-auto flex shrink-0 gap-1.5">
@@ -932,32 +944,6 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
             </div>
           </div>
         )}
-
-        <div className="mt-3 flex flex-wrap items-center gap-4 border-t border-line pb-2.5 pt-2.5" data-testid="epic-meta">
-          <MetaItem label="opened" value={formatWhen(promptSession.createdAt)} />
-          <MetaItem label="last activity" value={formatWhen(lastActivityAt(promptSession, sessionEvents, turns))} />
-          {stats && <MetaItem label="turns" value={String(stats.turns)} />}
-          {stats && <MetaItem label="tool calls" value={String(stats.toolCalls)} />}
-          {stats?.tokens && <MetaItem label="tokens" value={stats.tokens} />}
-          {/* The Epic IS this claude session — surface the id so it's
-              unambiguous which session scheduler PRDs post their completion
-              responses back to (notifyOriginatingTab keys off it). */}
-          <button
-            type="button"
-            onClick={() => {
-              void navigator.clipboard?.writeText(sessionId).then(
-                () => toast.info('Session id copied'),
-                () => toast.error('Copy failed'),
-              )
-            }}
-            title={`claude session ${sessionId} — click to copy. Scheduler PRDs dispatched from this Epic post their completion responses back into this session's thread.`}
-            data-testid="epic-session-id"
-            className="inline-flex items-baseline gap-1.5 text-xs hover:text-fg"
-          >
-            <span className="text-fg-faint">session</span>
-            <span className="font-mono font-semibold text-fg-dim">{sessionId.slice(0, 8)}…</span>
-          </button>
-        </div>
 
         {mode === 'chat' && (
           <div className="flex flex-wrap items-center gap-3 border-t border-line pt-2">

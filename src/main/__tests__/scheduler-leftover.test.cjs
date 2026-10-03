@@ -4,7 +4,10 @@ import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'vitest
 const { clearMainModuleCache } = require('./_helpers/schedulerHarness.cjs');
 
 describe("fields", () => {
-  beforeAll(() => { clearMainModuleCache(); });
+  beforeAll(() => {
+    clearMainModuleCache();
+    ({ leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP } = require('../scheduler.cjs'));
+  });
 
   /**
    * scheduler-leftover-fields.test.cjs — leftoverFieldsFrom/applyLeftoverFields,
@@ -14,10 +17,12 @@ describe("fields", () => {
    * left uncommitted work must be visually distinct from one that left
    * nothing).
    *
-   * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-leftover-fields.test.cjs
+   * Run: npx vitest run src/main/__tests__/scheduler-leftover.test.cjs
    */
 
-  const { leftoverFieldsFrom, applyLeftoverFields, LEFTOVER_PATHS_CAP } = require('../scheduler.cjs');
+  let leftoverFieldsFrom;
+  let applyLeftoverFields;
+  let LEFTOVER_PATHS_CAP;
 
   test('leftoverFieldsFrom: null when the path list is null (git status unavailable) — never treated as "left nothing"', () => {
     expect(leftoverFieldsFrom(null)).toBeNull();
@@ -58,7 +63,11 @@ describe("fields", () => {
 });
 
 describe("quarantine", () => {
-  beforeAll(() => { clearMainModuleCache(); });
+  beforeAll(() => {
+    clearMainModuleCache();
+    scheduler = require('../scheduler.cjs');
+    ({ selectLeftoverQuarantineTarget, quarantineLeftovers } = scheduler);
+  });
 
   /**
    * scheduler-leftover-quarantine.test.cjs — PRD 1128: once resume-first
@@ -72,16 +81,16 @@ describe("quarantine", () => {
    * quarantineLeftovers is the git plumbing, exercised against a real
    * throwaway repo under os.tmpdir() (same pattern as gitWorktree.test.cjs).
    *
-   * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-leftover-quarantine.test.cjs
+   * Run: npx vitest run src/main/__tests__/scheduler-leftover.test.cjs
    */
 
   const fs = require('node:fs');
   const os = require('node:os');
   const path = require('node:path');
-  const { execFileSync } = require('node:child_process');
   const { git } = require('./_helpers/schedulerHarness.cjs');
-  const scheduler = require('../scheduler.cjs');
-  const { selectLeftoverQuarantineTarget, quarantineLeftovers } = scheduler;
+  let scheduler;
+  let selectLeftoverQuarantineTarget;
+  let quarantineLeftovers;
 
   let tmpRoot;
   let repoCwd;

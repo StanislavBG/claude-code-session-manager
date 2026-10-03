@@ -4,7 +4,10 @@ import { beforeAll, describe, expect, test, vi } from 'vitest';
 const { clearMainModuleCache } = require('./_helpers/schedulerHarness.cjs');
 
 describe("tab", () => {
-  beforeAll(() => { clearMainModuleCache(); });
+  beforeAll(() => {
+    clearMainModuleCache();
+    ({ notifyOriginatingTab, isNotifiableTerminalStatus } = require('../scheduler.cjs'));
+  });
 
   /**
    * scheduler-notify-originating-tab.test.cjs — unit tests for
@@ -12,10 +15,11 @@ describe("tab", () => {
    * transition, push a short status prompt into the chat tab that originated
    * it via enqueueExternalPrompt (PRD 753).
    *
-   * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-notify-originating-tab.test.cjs
+   * Run: npx vitest run src/main/__tests__/scheduler-notify-originating-tab.test.cjs
    */
 
-  const { notifyOriginatingTab, isNotifiableTerminalStatus } = require('../scheduler.cjs');
+  let notifyOriginatingTab;
+  let isNotifiableTerminalStatus;
 
   test('isNotifiableTerminalStatus: completed and failed are notifiable', () => {
     expect(isNotifiableTerminalStatus('completed')).toBe(true);
@@ -349,7 +353,10 @@ describe("tab", () => {
 });
 
 describe("transcript", () => {
-  beforeAll(() => { clearMainModuleCache(); });
+  beforeAll(() => {
+    clearMainModuleCache();
+    ({ notifyOriginatingTab, extractResultTextFromLog } = require('../scheduler.cjs'));
+  });
 
   /**
    * scheduler-notify-originating-tab-transcript.test.cjs — unit tests for the
@@ -357,10 +364,11 @@ describe("transcript", () => {
    * result text (read from the run's log) to the durable per-Epic transcript
    * store, independent of the existing short-status-chip notification.
    *
-   * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-notify-originating-tab-transcript.test.cjs
+   * Run: npx vitest run src/main/__tests__/scheduler-notify-originating-tab.test.cjs
    */
 
-  const { notifyOriginatingTab, extractResultTextFromLog } = require('../scheduler.cjs');
+  let notifyOriginatingTab;
+  let extractResultTextFromLog;
 
   test('extractResultTextFromLog returns null for a missing log path', () => {
     expect(extractResultTextFromLog(null)).toBeNull();

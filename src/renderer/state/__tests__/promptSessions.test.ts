@@ -185,44 +185,53 @@ describe('promptSessions.ts', () => {
   it.each([
     {
       name: 'an event whose causedByEventId points at a non-existent event',
-      attempt: async (store: any) => {
+      setup: async (store: any) => {
         const session = await store.createPromptSession('/proj', 'Ship the feature')
-        return store.appendPromptSessionEvent(session.id, {
-          kind: 'prd_created',
-          causedByEventId: 'does-not-exist',
-          prdSlug: '999-bogus',
-        })
+        return {
+          sessionId: session.id,
+          event: {
+            kind: 'prd_created',
+            causedByEventId: 'does-not-exist',
+            prdSlug: '999-bogus',
+          },
+        }
       },
     },
     {
       name: 'a second null-caused event once the session already has a first event',
-      attempt: async (store: any) => {
+      setup: async (store: any) => {
         const session = await store.createPromptSession('/proj', 'Ship the feature')
-        return store.appendPromptSessionEvent(session.id, {
-          kind: 'prompt',
-          causedByEventId: null,
-          text: 'a second unrelated prompt',
-        })
+        return {
+          sessionId: session.id,
+          event: {
+            kind: 'prompt',
+            causedByEventId: null,
+            text: 'a second unrelated prompt',
+          },
+        }
       },
     },
     {
       name: "a causedByEventId that is valid in a different session's chain",
-      attempt: async (store: any, usePromptSessions: any) => {
+      setup: async (store: any, usePromptSessions: any) => {
         const sessionA = await store.createPromptSession('/proj', 'Goal A')
         const sessionB = await store.createPromptSession('/proj', 'Goal B')
         const eventFromA = usePromptSessions.getState().events[sessionA.id][0]
-        return store.appendPromptSessionEvent(sessionB.id, {
-          kind: 'prd_created',
-          causedByEventId: eventFromA.id,
-          prdSlug: '902-cross-session',
-        })
+        return {
+          sessionId: sessionB.id,
+          event: {
+            kind: 'prd_created',
+            causedByEventId: eventFromA.id,
+            prdSlug: '902-cross-session',
+          },
+        }
       },
     },
     {
       // Only the current tail may be referenced; a second event caused by the
       // (now stale) prompt event must be rejected.
       name: 'branching: causedByEventId must be the current tail, not an earlier event',
-      attempt: async (store: any, usePromptSessions: any) => {
+      setup: async (store: any, usePromptSessions: any) => {
         const session = await store.createPromptSession('/proj', 'Ship the feature')
         const promptEvent = usePromptSessions.getState().events[session.id][0]
         store.appendPromptSessionEvent(session.id, {
@@ -230,31 +239,39 @@ describe('promptSessions.ts', () => {
           causedByEventId: promptEvent.id,
           prdSlug: '900-first',
         })
-        return store.appendPromptSessionEvent(session.id, {
-          kind: 'prd_created',
-          causedByEventId: promptEvent.id,
-          prdSlug: '901-branch',
-        })
+        return {
+          sessionId: session.id,
+          event: {
+            kind: 'prd_created',
+            causedByEventId: promptEvent.id,
+            prdSlug: '901-branch',
+          },
+        }
       },
     },
     {
       name: 'a prd_created event with no prdSlug',
-      attempt: async (store: any, usePromptSessions: any) => {
+      setup: async (store: any, usePromptSessions: any) => {
         const session = await store.createPromptSession('/proj', 'Ship the feature')
         const promptEvent = usePromptSessions.getState().events[session.id][0]
-        return store.appendPromptSessionEvent(session.id, {
-          kind: 'prd_created',
-          causedByEventId: promptEvent.id,
-        })
+        return {
+          sessionId: session.id,
+          event: {
+            kind: 'prd_created',
+            causedByEventId: promptEvent.id,
+          },
+        }
       },
     },
-  ])('rejects $name', async ({ attempt }) => {
+  ])('rejects $name', async ({ setup }) => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../promptSessions')
     const store = usePromptSessions.getState()
 
-    // Sync throw from appendPromptSessionEvent surfaces as a rejection of the async attempt.
-    await expect(attempt(store, usePromptSessions)).rejects.toThrow()
+    const { sessionId, event } = await setup(store, usePromptSessions)
+
+    // Only the rejecting call is inside expect; a sync throw surfaces as a rejection of the async wrapper.
+    await expect((async () => store.appendPromptSessionEvent(sessionId, event as never))()).rejects.toThrow()
   })
 
   it('rejects an event for a promptSessionId that was never created', async () => {

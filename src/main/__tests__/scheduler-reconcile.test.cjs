@@ -26,7 +26,7 @@ describe("cwd-preserve", () => {
    * prdLocations.deriveProjectCwdFromPrdPath rather than nulling to
    * DEFAULT_PROJECT_CWD).
    *
-   * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-reconcile-cwd-preserve.test.cjs
+   * Run: npx vitest run src/main/__tests__/scheduler-reconcile.test.cjs
    */
 
   const fs = require('node:fs');
@@ -117,7 +117,7 @@ describe("history-backfill", () => {
    * reconcile() must now backfill history.jsonl for exactly this case before
    * dropping the row.
    *
-   * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-reconcile-history-backfill.test.cjs
+   * Run: npx vitest run src/main/__tests__/scheduler-reconcile.test.cjs
    */
 
   const fs = require('node:fs');
@@ -230,7 +230,7 @@ describe("invalid-repair", () => {
    * reconcile's PRD/history discovery (prdLocations.cjs, queueHistory.cjs)
    * only scans cwds it can find that way.
    *
-   * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-reconcile-invalid-repair.test.cjs
+   * Run: npx vitest run src/main/__tests__/scheduler-reconcile.test.cjs
    */
 
   const fs = require('node:fs');
@@ -416,7 +416,7 @@ describe("quarantine", () => {
    *
    * Mirrors scheduler-reconcile-invalid-repair.test.cjs's HOME-isolation setup.
    *
-   * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-reconcile-quarantine.test.cjs
+   * Run: npx vitest run src/main/__tests__/scheduler-reconcile.test.cjs
    */
 
   const fs = require('node:fs');

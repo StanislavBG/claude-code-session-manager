@@ -58,7 +58,6 @@ const {
   NEEDS_REVIEW_RESOLVE_CAP,
 } = require('../scheduler.cjs');
 const { resolvePrdWriteDir } = require('../lib/prdLocations.cjs');
-const { bustCwdCache } = require('../lib/queueStore.cjs');
 
 const MIN_MS = 60_000;
 const THRESHOLD_MS = 30 * MIN_MS;

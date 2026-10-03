@@ -42,7 +42,6 @@ const path = require('node:path');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-verdict-autoresolve-test-'));
 process.env.HOME = tmpHome;
 
-const { execFileSync } = require('node:child_process');
 const { git, initRepo, registerActiveProject, writeProjectQueue } = require('./_helpers/schedulerHarness.cjs');
 
 const {
@@ -58,7 +57,6 @@ const {
 
 const { pickForProject } = require('../lib/schedulerBatch.cjs');
 const { resolvePrdWriteDir } = require('../lib/prdLocations.cjs');
-const { bustCwdCache } = require('../lib/queueStore.cjs');
 
 const MIN_MS = 60_000;
 const THRESHOLD_MS = 30 * MIN_MS;

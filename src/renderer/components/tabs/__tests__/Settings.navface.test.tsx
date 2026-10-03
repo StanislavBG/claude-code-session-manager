@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createElement } from 'react'
-import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { act } from 'react-dom/test-utils'
 import { Settings } from '../Settings'
 import { useLayout } from '../../../state/layout'

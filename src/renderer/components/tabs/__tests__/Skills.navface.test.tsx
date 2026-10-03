@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { createElement } from 'react'
-import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { act } from 'react-dom/test-utils'
 import { Skills } from '../Skills'
 import { useLayout } from '../../../state/layout'
 import { useSessions } from '../../../state/sessions'
-import { HOME, PROJECT_CWD, PROJECT_TAB, useNavfaceHarness, activeScope, clickScope, viewTabLabels, clickViewTab } from './_navfaceHarness'
+import { HOME, PROJECT_CWD, PROJECT_TAB, useNavfaceHarness, activeScope, clickScope } from './_navfaceHarness'
 
 /**
  * Skills's scope switcher defaults from the NavFace

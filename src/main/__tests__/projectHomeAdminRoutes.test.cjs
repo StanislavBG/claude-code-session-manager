@@ -308,6 +308,57 @@ test("validateDemoVideoHtml rejects the validator's demonstrated bypass: comment
   expect(rejection).toMatch(/network-capable/);
 });
 
+test('validateDemoVideoHtml rejects meta refresh navigation', () => {
+  const html = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="10">'
+    + '<meta http-equiv="refresh" content="0;url=https://attacker/exfiltrate"></head>'
+    + '<body>x</body></html>';
+  const rejection = validateDemoVideoHtml(html);
+  expect(rejection).not.toBeNull();
+  expect(rejection).toMatch(/network-capable/);
+});
+
+test('validateDemoVideoHtml rejects location.href/assign/replace navigation', () => {
+  const base = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="10"></head><body><script>';
+  const tail = '</script></body></html>';
+  expect(validateDemoVideoHtml(`${base}location.href = "https://attacker.example"${tail}`)).toMatch(/network-capable/);
+  expect(validateDemoVideoHtml(`${base}location.assign("https://attacker.example")${tail}`)).toMatch(/network-capable/);
+  expect(validateDemoVideoHtml(`${base}location.replace("https://attacker.example")${tail}`)).toMatch(/network-capable/);
+  expect(validateDemoVideoHtml(`${base}location = "https://attacker.example"${tail}`)).toMatch(/network-capable/);
+});
+
+test('validateDemoVideoHtml does not reject "allocation" or a strict equality check on location', () => {
+  const html = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="10"></head>'
+    + '<body><canvas id="c"></canvas><script>'
+    + 'const allocation = 1; if (allocation === 1 && typeof location === "object") { console.log(allocation); }'
+    + '</script></body></html>';
+  expect(validateDemoVideoHtml(html)).toBeNull();
+});
+
+test('validateDemoVideoHtml rejects document.location', () => {
+  const html = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="10"></head>'
+    + '<body><script>document.location = "https://attacker.example"</script></body></html>';
+  const rejection = validateDemoVideoHtml(html);
+  expect(rejection).not.toBeNull();
+  expect(rejection).toMatch(/network-capable/);
+});
+
+test('validateDemoVideoHtml rejects top./parent. property access', () => {
+  const topHtml = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="10"></head>'
+    + '<body><script>top.location = "https://attacker.example"</script></body></html>';
+  expect(validateDemoVideoHtml(topHtml)).toMatch(/network-capable/);
+  const parentHtml = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="10"></head>'
+    + '<body><script>parent.location = "https://attacker.example"</script></body></html>';
+  expect(validateDemoVideoHtml(parentHtml)).toMatch(/network-capable/);
+});
+
+test('validateDemoVideoHtml rejects anchor tags with http(s)/protocol-relative/javascript hrefs', () => {
+  const base = '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="10"></head><body>';
+  const tail = '</body></html>';
+  expect(validateDemoVideoHtml(`${base}<a href="https://attacker.example">go</a>${tail}`)).toMatch(/network-capable/);
+  expect(validateDemoVideoHtml(`${base}<a href="//attacker.example">go</a>${tail}`)).toMatch(/network-capable/);
+  expect(validateDemoVideoHtml(`${base}<a href="javascript:alert(1)">go</a>${tail}`)).toMatch(/network-capable/);
+});
+
 test('injectCsp places the CSP meta immediately after the doctype even with a comment-decoy <head>', () => {
   const decoy = '<!DOCTYPE html><html>'
     + '<!-- decoy: <head> this is not a real head tag, just a comment -->'

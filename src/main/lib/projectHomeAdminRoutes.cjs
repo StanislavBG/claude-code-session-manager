@@ -63,6 +63,11 @@ const NETWORK_CHECKS = [
   { re: /\bFunction\s*\(/i, message: 'Function(...) is not allowed' },
   { re: /<base\b/i, message: '<base> is not allowed' },
   { re: /<form\b/i, message: '<form> is not allowed' },
+  { re: /http-equiv\s*=\s*["']?refresh/i, message: 'meta refresh is not allowed' },
+  { re: /\blocation\s*(?:\.\s*(?:href|assign|replace)\b|=[^=])/i, message: 'location.href/assign/replace/= navigation is not allowed' },
+  { re: /\bdocument\.location\b/i, message: 'document.location is not allowed' },
+  { re: /\b(?:top|parent)\./i, message: 'top./parent. property access is not allowed' },
+  { re: /<a\b[^>]*\bhref\s*=\s*["']?\s*(?:https?:|\/\/|javascript:)/i, message: '<a href="http(s):|//|javascript:…"> is not allowed' },
 ];
 
 const DURATION_META_RE = /<meta\b[^>]*\bname\s*=\s*["']sm-demo-duration["'][^>]*\bcontent\s*=\s*["'](\d+)["'][^>]*>/i;

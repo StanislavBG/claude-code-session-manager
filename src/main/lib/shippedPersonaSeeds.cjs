@@ -253,6 +253,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         effort: "medium",
       },
     },
+    {
+      commit: "pending2",
+      bodySha256: "f663bd4f82ce140dd23d8a9760c1ad7237c99b741fc0f96dd66c41932df192ca",
+      fm: {
+        description: "30-second self-contained HTML/JS demo video for Project Home, saved via project_demo_video_write.",
+        tools: "Read, Grep, Glob, Bash, Write, Edit",
+        title: "Project Home — Demo Video",
+        model: "sonnet",
+        effort: "medium",
+      },
+    },
   ],
 });
 

@@ -73,8 +73,11 @@ never calls out to a network TTS service.
   then `python3 -m pip install --user --break-system-packages kokoro-onnx soundfile`. Pull the
   model once: `kokoro-v1.0.onnx` (~325 MB) + `voices-v1.0.bin` (~28 MB) from
   `https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/`. Use the
-  **`af_heart`** voice — by ear, clearly more natural than Piper, including Piper's `-high`
-  tier. `Kokoro(model, voices).create(line, voice='af_heart', speed=1.0, lang='en-us')` returns
+  **`af_heart`** or **`af_bella`** voice (both are Kokoro's top-rated English voices and read
+  as clearly more natural than Piper, including Piper's `-high` tier — but which one of the
+  two sounds better is a taste call, not a settled fact; if the human reacts to a generated
+  video with "still not it," try the other one before reaching for a different library).
+  `Kokoro(model, voices).create(line, voice='af_heart', speed=1.0, lang='en-us')` returns
   `(samples, sample_rate)` (24000 Hz); write each scene's line with `soundfile.write`. If
   `kokoro-onnx`/its model download genuinely isn't available (offline, no bandwidth for a
   ~350 MB pull), fall back to **Piper** (`pip install piper-tts`) with a `-high` voice tier

@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v4 -->
+<!-- PRD_AUTHORING.md v5 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -73,7 +73,7 @@ Rule: every PRD needs these fields.
 
 `parallelGroup` is deprecated and ignored. `dependsOn: [<slug>, ...]` is the only ordering primitive.
 
-`planId` is written by the API, never by you. It groups PRDs into the plan (wave) they belong to: an `append` PRD, or one with an explicit `dependsOn`, inherits the `planId` of the PRD it attaches behind; a fresh PRD mints a new one.
+`planId` is written by the API, never by you. It groups PRDs into the plan (wave) they belong to: an `append` PRD, or one with an explicit `dependsOn`, inherits the `planId` of the PRD it attaches behind; a fresh PRD mints a new one. The Scheduler groups a plan card as a validate PRD (slug `validate-*`) plus everything it depends on, titled by that PRD's title.
 
 Artifact-only PRDs (`deliverable: artifact` + `artifactPaths: [...]`) — use this ONLY when every deliverable is a file the repo deliberately git-excludes, so "no commit" is the correct outcome, not a miss.
 1. Every artifact path is listed in `artifactPaths` and is relative, never `..`.

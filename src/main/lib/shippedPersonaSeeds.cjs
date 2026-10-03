@@ -39,6 +39,18 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         tools: "Read, Grep, Glob, Bash, Edit, Write",
       },
     },
+    {
+      commit: "767c3b8e",
+      bodySha256: "40a4d41445e7fdb128f4f1d8d3eef88b857ca466726b3719b36cb69933f09168",
+      fm: {
+        description: "The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.",
+        model: "opus",
+        effort: "medium",
+        tags: "feature, bug, discussion",
+        title: "Engineering — Architect",
+        tools: "Read, Grep, Glob, Bash, Edit, Write",
+      },
+    },
   ],
   "dev-lead": [
     {
@@ -97,6 +109,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
       fm: {
         description: "Executes exactly one already-scoped PRD at a time, headless, start to finish — reads the PRD's Goal/Acceptance Criteria/Implementation notes and standards.md, implements it, verifies against its own AC, and reports. Has no visibility into the overall plan — that's architect's job. This is the default persona a scheduled PRD runs as: the scheduler resolves a PRD's `agentType` frontmatter field (default `dev-lead`) to this file and launches the headless executor AS this persona via `--append-system-prompt`.",
         model: "sonnet",
+        title: "Engineering — Software Engineer",
+        tools: "Read, Grep, Glob, Bash, Edit, Write",
+      },
+    },
+    {
+      commit: "767c3b8e",
+      bodySha256: "91232cfd7ce5fb1dc608ff639a07dcb1c5c13c22502ae4790f51707f498ec917",
+      fm: {
+        description: "Executes exactly one already-scoped PRD at a time, headless, start to finish — reads the PRD's Goal/Acceptance Criteria/Implementation notes and standards.md, implements it, verifies against its own AC, and reports. Has no visibility into the overall plan — that's architect's job. This is the default persona a scheduled PRD runs as: the scheduler resolves a PRD's `agentType` frontmatter field (default `dev-lead`) to this file and launches the headless executor AS this persona via `--append-system-prompt`.",
+        model: "sonnet",
+        effort: "medium",
         title: "Engineering — Software Engineer",
         tools: "Read, Grep, Glob, Bash, Edit, Write",
       },

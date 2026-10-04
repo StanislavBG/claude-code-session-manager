@@ -167,11 +167,15 @@ function scanOneProjectDirSync(projDir) {
  *
  * The first scan of a given projectsDir is synchronous (readdirSync of
  * projectsDir, then per project dir as above) and its result is cached.
- * Every call after that is stale-while-revalidate: a fresh cache entry is
- * returned as-is; an expired one is ALSO returned as-is (the stale record),
- * while startAsyncRefresh kicks off at most one background fs.promises
- * rescan to refresh it for the next caller. Returns null when projectsDir is
- * missing/unreadable and no record has ever been cached for it.
+ * A fresh cache entry (same dirMtimeMs, within TTL) is returned as-is.
+ * Once the dir's own mtime changes (a project dir was added/removed), the
+ * next call rescans synchronously and returns the new result — a stale
+ * record would otherwise hide a just-registered project from this caller.
+ * Only when dirMtimeMs is unchanged and the TTL has expired is the stale
+ * record returned as-is, with startAsyncRefresh kicking off at most one
+ * background fs.promises rescan to refresh it for the next caller. Returns
+ * null when projectsDir is missing/unreadable and no record has ever been
+ * cached for it.
  */
 function scanProjectsDir(projectsDir) {
   let dirMtimeMs;
@@ -190,15 +194,17 @@ function scanProjectsDir(projectsDir) {
     return cached.records;
   }
 
-  // A prior successful scan exists: serve it stale and refresh in the
-  // background rather than blocking this synchronous caller.
-  if (cached) {
+  // Same mtime, TTL expired: a prior successful scan exists and the dir
+  // itself hasn't changed, so serve it stale and refresh in the background
+  // rather than blocking this synchronous caller.
+  if (cached && cached.dirMtimeMs === dirMtimeMs) {
     startAsyncRefresh(projectsDir);
     return cached.records;
   }
 
-  // First-ever scan of this projectsDir: must be synchronous, since no
-  // record exists yet to serve stale.
+  // Either the first-ever scan of this projectsDir, or the dir's mtime
+  // changed (a project was added/removed) — must be synchronous, since a
+  // stale record would hide the change from this caller.
   let slugs;
   try { slugs = fs.readdirSync(projectsDir); } catch { rawScanCache.delete(projectsDir); return null; }
 

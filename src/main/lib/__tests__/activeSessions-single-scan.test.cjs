@@ -177,7 +177,7 @@ test('expired cache: 5 concurrent callers trigger exactly one async rescan', asy
   }
 });
 
-test('next call after the async rescan resolves sees new projects', async () => {
+test('a new project dir added within the TTL window (bumping the dir mtime) is seen synchronously on the very next call', () => {
   const base = tmpDir();
   try {
     const projectsDir = path.join(base, 'projects');
@@ -189,20 +189,56 @@ test('next call after the async rescan resolves sees new projects', async () => 
     const before = allProjectCwds({ projectsDir });
     assert.equal(before.length, 1);
 
+    // Still within the TTL window — only projectsDir's own mtime changes.
+    const cwdB = path.join(base, 'proj-b');
+    fs.mkdirSync(cwdB);
+    writeTranscript(projectsDir, 'slug-b', 'b.jsonl', cwdB, 1000);
+
+    const readdirSpy = vi.spyOn(fs, 'readdirSync');
+    const after = allProjectCwds({ projectsDir });
+    assert.ok(readdirSpy.mock.calls.length > 0, 'an mtime change must trigger a synchronous rescan');
+    assert.ok(
+      after.includes(cwdA) && after.includes(cwdB),
+      'the new project must be visible on the very next call, not deferred to an async refresh',
+    );
+
+    const active = activeProjectCwds(90, { projectsDir });
+    assert.ok(active.includes(cwdB), 'activeProjectCwds must also see the new project synchronously');
+  } finally {
+    vi.restoreAllMocks();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('next call after the async rescan resolves sees an updated cwd (same dirMtime, TTL expiry only)', async () => {
+  const base = tmpDir();
+  try {
+    const projectsDir = path.join(base, 'projects');
+    const cwdA = path.join(base, 'proj-a');
+    const cwdA2 = path.join(base, 'proj-a-moved');
+    fs.mkdirSync(cwdA);
+    const fp = writeTranscript(projectsDir, 'slug-a', 'a.jsonl', cwdA, 5 * 60 * 1000);
+
+    bustProjectCwdCache();
+    const before = allProjectCwds({ projectsDir });
+    assert.deepEqual(before, [cwdA]);
+
     const future = Date.now() + 130_000;
     vi.spyOn(Date, 'now').mockReturnValue(future);
     try {
-      const cwdB = path.join(base, 'proj-b');
-      fs.mkdirSync(cwdB);
-      writeTranscript(projectsDir, 'slug-b', 'b.jsonl', cwdB, 1000);
+      // Rewrite the existing transcript's cwd in place — this changes the
+      // file's own mtime but NOT projectsDir's mtime (no entries added or
+      // removed), so this is a pure TTL-expiry case, not an mtime change.
+      fs.mkdirSync(cwdA2);
+      fs.writeFileSync(fp, JSON.stringify({ cwd: cwdA2 }) + '\n');
 
       const stale = allProjectCwds({ projectsDir }); // expired: stale + triggers rescan
-      assert.equal(stale.length, 1, 'still the stale record, new project not yet visible');
+      assert.deepEqual(stale, before, 'still the stale record, updated cwd not yet visible');
 
       await __waitForPendingRefresh(projectsDir);
 
       const fresh = allProjectCwds({ projectsDir });
-      assert.ok(fresh.includes(cwdA) && fresh.includes(cwdB), 'rescan must pick up the new project');
+      assert.deepEqual(fresh, [cwdA2], 'rescan must pick up the updated cwd');
     } finally {
       vi.restoreAllMocks();
     }

@@ -51,9 +51,37 @@ process.env.HOME = tmpHome;
 // (e.g. scheduler-shard-quarantine.test.cjs).
 process.env.SM_AUTOFIX_DISABLE = '1';
 
-const { reverifyNeedsReview, computeLooksDone, applyNeedsReviewAutoResolve, findSatisfyingCommitOnMain } = require('../scheduler.cjs');
+const schedulerModule = require('../scheduler.cjs');
+const { reverifyNeedsReview, computeLooksDone, applyNeedsReviewAutoResolve, findSatisfyingCommitOnMain } = schedulerModule;
 const { resolveEpicPrdWriteDir } = require('../lib/prdLocations.cjs');
 const { bustCwdCache } = require('../lib/queueStore.cjs');
+
+// ROOT CAUSE of the 'heals exactly as today' quarantine flake under full-suite
+// load: every reverifyNeedsReview() healed/looksDone branch ends with a bare
+// `await broadcast()`, which (per broadcastCoalescer.cjs) only arms a 200ms
+// setTimeout — it does NOT await reconcile() inline. That timer fires
+// detached from any test's own await chain, often during a LATER test in
+// this same file (confirmed via a temporary diagnostic spy: a stray
+// reconcile() fired mid-'findSatisfyingCommitOnMain' with jobs=[], minting
+// `[scheduler] reconcile: quarantining unstamped PRD 42-both-paths ...`).
+// reconcile()'s own 'no createdVia provenance' quarantine gate
+// (scheduler.cjs's reconcile(), ~line 3317) mints a fresh 'quarantined' row
+// for ANY PRD file reconcile finds on disk with no matching queue row at
+// the instant it scans — including this file's own 20-clean-feature PRD
+// during the narrow, unguarded gap between reverifyNeedsReview()'s heal
+// mutate() (row flips to 'completed') and its *un-awaited-by-mutate*
+// archiveCompletedPrd() call actually unlinking the PRD file. Under heavy
+// load that gap widens enough for a stray timer-fired reconcile() to land
+// inside it, re-discover the still-on-disk PRD with (at that instant) no
+// row it recognizes as already resolved, and overwrite 'completed' with
+// 'quarantined' moments later. getPayload() calls `module.exports.reconcile`
+// (not the bare local binding) specifically so tests can intercept it — see
+// that call site's own comment — so stubbing the seam here, file-wide, is
+// the sanctioned way to remove this real async side-channel without
+// touching scheduler.cjs: no test in this file asserts on reconcile()'s
+// side effects, only on reverifyNeedsReview's direct return value/queue
+// mutations (same rationale as the pre-existing SM_AUTOFIX_DISABLE above).
+globalThis.vi.spyOn(schedulerModule, 'reconcile').mockResolvedValue(undefined);
 
 // -b main pins the branch name regardless of the host's init.defaultBranch
 // config — findSatisfyingCommitOnMain's tests need a deterministic 'main' ref.

@@ -2,7 +2,7 @@
 import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
+import { describe, expect, it, beforeAll, beforeEach, afterEach, vi } from 'vitest'
 import { flushAsync } from '../../../testUtils/domFlush'
 import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsCreate'
 
@@ -11,10 +11,21 @@ import { fakePromptSessionsCreate } from '../../../testUtils/fakePromptSessionsC
  * Discussion view, superseding PromptSessionConversation.tsx as the Epic
  * conversation surface (retirement itself is PRD 829, not here).
  *
- * window.api is stubbed via vi.resetModules + dynamic import, mirroring
- * PromptSessionConversation.test.tsx's pattern — chat.ts/promptSessions.ts's
+ * window.api is stubbed once in beforeAll, before EpicDetail/promptSessions
+ * (whose module-load IPC wiring only fires if window.api exists at import
+ * time) are themselves imported exactly once — chat.ts/promptSessions.ts's
  * module-load IPC wiring only fires if window.api exists at import time.
+ * Each test re-stubs window.api when it needs different mock responses
+ * (installWindowApiMock reassigns window.api; functions read it at call
+ * time, not at import time). Store state is reset between tests instead of
+ * re-importing the modules (PRD 1510).
  */
+
+let usePromptSessions: typeof import('../../../state/promptSessions').usePromptSessions
+let _resetForTests: typeof import('../../../state/promptSessions')._resetForTests
+let useChat: typeof import('../../../state/chat').useChat
+let useScheduleState: typeof import('../../../state/scheduleState').useScheduleState
+let EpicDetail: typeof import('../EpicDetail').EpicDetail
 
 function installWindowApiMock(opts: {
   branch?: string | null
@@ -94,9 +105,18 @@ function mount(el: React.ReactElement) {
 }
 
 describe('EpicDetail (PRD 827)', () => {
+  beforeAll(async () => {
+    installWindowApiMock()
+    ;({ usePromptSessions, _resetForTests } = await import('../../../state/promptSessions'))
+    ;({ useChat } = await import('../../../state/chat'))
+    ;({ useScheduleState } = await import('../../../state/scheduleState'))
+    ;({ EpicDetail } = await import('../EpicDetail'))
+  })
+
   beforeEach(() => {
-    vi.resetModules()
-    delete (window as unknown as { api?: unknown }).api
+    _resetForTests()
+    useChat.setState({ chats: {} })
+    useScheduleState.setState({ snapshot: null, loaded: false })
   })
 
   afterEach(() => {
@@ -104,12 +124,11 @@ describe('EpicDetail (PRD 827)', () => {
     container?.remove()
     container = null
     root = null
+    vi.restoreAllMocks()
   })
 
   it('renders status/kind chips and "Mark completed" for an active Epic', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it\n\nGet it out the door.', 'feature')
     const session = usePromptSessions.getState().approveProposed(proposed.id)!
@@ -131,8 +150,6 @@ describe('EpicDetail (PRD 827)', () => {
   describe('editable title (full view)', () => {
     async function mountEpic() {
       installWindowApiMock()
-      const { usePromptSessions } = await import('../../../state/promptSessions')
-      const { EpicDetail } = await import('../EpicDetail')
       const proposed = await usePromptSessions
         .getState()
         .createPromptSession('/tmp/proj', 'Ship it\n\nGet it out the door.', 'feature')
@@ -188,8 +205,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('caps the header title with an inner scroll so a huge title cannot crowd out the transcript', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
     const title = 'A short title'
     const session = await usePromptSessions
       .getState()
@@ -206,8 +221,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('clamps the goal to one line by default and offers a "more" toggle for a long goal', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
     const longGoal = 'A very long goal sentence. '.repeat(10) // > 120 chars
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', `Ship it\n\n${longGoal}`, 'feature')
 
@@ -230,8 +243,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('omits the "more" toggle when the goal is short enough to fit on one line', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it\n\nGet it out the door.', 'feature')
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
@@ -243,8 +254,6 @@ describe('EpicDetail (PRD 827)', () => {
     installWindowApiMock({
       runtimeInfo: { modelAlias: 'claude-sonnet-4-5', modelSource: 'persona', resolvedModelId: 'claude-sonnet-4-5', resolvedFrom: 'transcript' },
     })
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature', undefined, 'architect')
     const session = usePromptSessions.getState().approveProposed(proposed.id)!
@@ -265,8 +274,6 @@ describe('EpicDetail (PRD 827)', () => {
     installWindowApiMock({
       runtimeInfo: { modelAlias: null, modelSource: 'inherit', resolvedModelId: null, resolvedFrom: null },
     })
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature', undefined, 'dev-lead')
     const session = usePromptSessions.getState().approveProposed(proposed.id)!
@@ -281,8 +288,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('renders no Agent chip at all when the Epic has no agentType', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const session = usePromptSessions.getState().approveProposed(proposed.id)!
@@ -295,10 +300,11 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('renders the Epic cwd\'s branch in the compact meta line when useBranch resolves one', async () => {
     installWindowApiMock({ branch: 'epic/contextual-chat' })
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
-    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    // Unique cwd: useBranch.ts caches git-branch lookups per cwd for 30s —
+    // a cwd shared with another test's differently-stubbed branch would read
+    // that test's cached value instead of this test's mock.
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj-branch-a', 'Ship it', 'feature')
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
     await flushAsync(2)
@@ -310,10 +316,8 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('hides the compact meta line cleanly when there is no agent and useBranch resolves null', async () => {
     installWindowApiMock({ branch: null })
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
-    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj-branch-null', 'Ship it', 'feature')
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
     await flushAsync(2)
@@ -333,10 +337,8 @@ describe('EpicDetail (PRD 827)', () => {
         personaEffortSource: 'persona',
       },
     })
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
-    const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature', undefined, 'architect')
+    const proposed = await usePromptSessions.getState().createPromptSession('/tmp/proj-branch-b', 'Ship it', 'feature', undefined, 'architect')
     const session = usePromptSessions.getState().approveProposed(proposed.id)!
 
     const el = mount(createElement(EpicDetail, { promptSession: session }))
@@ -355,8 +357,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('suffixes the branch segment with the worktree status when it is not the normal active/isolated state', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     usePromptSessions.setState({
@@ -378,9 +378,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('CORE: the turns-ago caption counts only user+assistant turns, not transcript-feed event turns', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const now = Date.now()
@@ -412,8 +409,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('renders "Resume" instead of "Mark completed" for a completed Epic', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Fix the bug', 'bug')
     usePromptSessions.setState({
@@ -432,9 +427,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('interleaves chat turns and prd_created events by timestamp in the Discussion view', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const initialEvent = usePromptSessions.getState().events[session.id][0]
@@ -485,9 +477,6 @@ describe('EpicDetail (PRD 827)', () => {
     // must be suppressed since the Turn already shows the same text in full;
     // a genuinely out-of-band 'response' (no matching turn) must still render.
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const initialEvent = usePromptSessions.getState().events[session.id][0]
@@ -536,9 +525,6 @@ describe('EpicDetail (PRD 827)', () => {
     // must match the truncated, stripped ResponseEvent text against the
     // stop-signal-stripped form of the Turn's text, not the raw Turn text.
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const initialEvent = usePromptSessions.getState().events[session.id][0]
@@ -576,8 +562,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('tones a response event\'s accessible text by outcome, and falls back to neutral when outcome is absent', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const initialEvent = usePromptSessions.getState().events[session.id][0]
@@ -606,8 +590,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('CORE: a response event with outcome "needs_review" (a grouped scheduler notice) renders amber-tinted and marked as a scheduler notice, distinct from an ordinary completed/failed outcome', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const initialEvent = usePromptSessions.getState().events[session.id][0]
@@ -634,8 +616,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('renders the "closed" event as a terminator rule (EventDivider), not plain centered text', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const initialEvent = usePromptSessions.getState().events[session.id][0]
@@ -654,9 +634,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('wires onQuote into the Discussion timeline\'s Turn so its hover Quote button reports the turn text', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
@@ -681,9 +658,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('omits the Quote button entirely when onQuote is not passed', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
@@ -703,9 +677,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('renders a needs-input turn with the red "NEEDS YOUR DECISION" styling', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
@@ -738,9 +709,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('clicking a needs-input option button submits the answer through chat.send', async () => {
     const { api } = installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
@@ -779,9 +747,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('renders "claude · <age>" and "you · <age>" captions above turns', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
@@ -809,8 +774,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('resets the view tab back to Discussion when the Epic changes', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const sessionA = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic A', 'feature')
     const sessionB = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic B', 'feature')
@@ -831,9 +794,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('renders the accumulating chat.stream as a live assistant bubble while a turn is in flight', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
@@ -860,9 +820,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('replaces the live bubble with the finished turn on chat:run:complete, with no duplicated text', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
@@ -907,9 +864,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('suppresses the empty live bubble while chat:run:queued (queued-position indicator was superseded by EpicQueuePanel)', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
@@ -934,9 +888,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('resets to no live bubble on chat:run:error (stream cleared, running false)', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     useChat.setState({
@@ -980,9 +931,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('keys the live bubble by epic id — switching Epics does not leak the previous partial stream', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useChat } = await import('../../../state/chat')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const sessionA = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic A', 'feature')
     const sessionB = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Epic B', 'feature')
@@ -1019,9 +967,6 @@ describe('EpicDetail (PRD 827)', () => {
     { name: 'refuted red', slug: '976-refuted-widget', status: 'completed', validation: 'refuted', words: ['refuted'], tone: 'bg-accent' },
   ])('dispatched-PRD chip tone: $name for job status $status / validation $validation', async ({ slug, status, validation, words, tone }) => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useScheduleState } = await import('../../../state/scheduleState')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const initialEvent = usePromptSessions.getState().events[session.id][0]
@@ -1055,9 +1000,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('falls back to the neutral "ready to run" tone with no crash when the PRD has no matching queue job', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useScheduleState } = await import('../../../state/scheduleState')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const initialEvent = usePromptSessions.getState().events[session.id][0]
@@ -1078,9 +1020,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('CORE (PRD 987): the dispatched-PRD chip renders the CLAIMED tone — never green — when the job self-reports completed but the Epic has not yet verified it', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { useScheduleState } = await import('../../../state/scheduleState')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const initialEvent = usePromptSessions.getState().events[session.id][0]
@@ -1118,8 +1057,6 @@ describe('EpicDetail (PRD 827)', () => {
     { validation: 'refuted', slug: '976-refuted' },
   ])('response event with outcome completed / validation $validation renders the right accessible label and tone', async ({ validation, slug }) => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
     const initialEvent = usePromptSessions.getState().events[session.id][0]
@@ -1150,8 +1087,6 @@ describe('EpicDetail (PRD 827)', () => {
 
   it('shows the goal as seed context with no crash when there are no chat turns yet', async () => {
     installWindowApiMock()
-    const { usePromptSessions } = await import('../../../state/promptSessions')
-    const { EpicDetail } = await import('../EpicDetail')
 
     const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'A brand new Epic with no turns', 'discussion')
 
@@ -1165,8 +1100,6 @@ describe('EpicDetail (PRD 827)', () => {
   describe('Detail dial + hidden-events divider (PRD 1468)', () => {
     it('CORE: the active verbosity segment is filled accent, inactive segments are dim text', async () => {
       installWindowApiMock()
-      const { usePromptSessions } = await import('../../../state/promptSessions')
-      const { EpicDetail } = await import('../EpicDetail')
 
       const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
       const el = mount(createElement(EpicDetail, { promptSession: session }))
@@ -1185,9 +1118,6 @@ describe('EpicDetail (PRD 827)', () => {
 
     it('reads "conversation" with no count when nothing is hidden', async () => {
       installWindowApiMock()
-      const { usePromptSessions } = await import('../../../state/promptSessions')
-      const { useChat } = await import('../../../state/chat')
-      const { EpicDetail } = await import('../EpicDetail')
 
       const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
       useChat.setState({
@@ -1211,9 +1141,6 @@ describe('EpicDetail (PRD 827)', () => {
 
     it('CORE: shows the hidden-events divider text and reveals the hidden level on click', async () => {
       installWindowApiMock()
-      const { usePromptSessions } = await import('../../../state/promptSessions')
-      const { useChat } = await import('../../../state/chat')
-      const { EpicDetail } = await import('../EpicDetail')
 
       const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
       useChat.setState({
@@ -1251,9 +1178,6 @@ describe('EpicDetail (PRD 827)', () => {
   describe('Epic-intake AIM card (PRD session-chat-conversion-into-simplified-chat)', () => {
     it('CORE: renders the first turn as the AIM briefing card when the Epic carries composeEpicIntake sections', async () => {
       installWindowApiMock()
-      const { usePromptSessions } = await import('../../../state/promptSessions')
-      const { useChat } = await import('../../../state/chat')
-      const { EpicDetail } = await import('../EpicDetail')
 
       const openingPrompt = 'You are acting as the "debugger" agent: desc.\n\nGoal: Fix it\n\nDetails.'
       const session = await usePromptSessions.getState().createPromptSession(
@@ -1289,9 +1213,6 @@ describe('EpicDetail (PRD 827)', () => {
 
     it('EDGE: falls back to the flat-text Turn bubble when the Epic has no `sections` field (a pre-existing Epic)', async () => {
       installWindowApiMock()
-      const { usePromptSessions } = await import('../../../state/promptSessions')
-      const { useChat } = await import('../../../state/chat')
-      const { EpicDetail } = await import('../EpicDetail')
 
       // createPromptSession with no openingPrompt/sections args mirrors every
       // Epic minted before this PRD — the field is simply absent on the
@@ -1319,9 +1240,6 @@ describe('EpicDetail (PRD 827)', () => {
 
     it('EDGE: a non-first user turn never renders as the AIM card even when the Epic carries sections', async () => {
       installWindowApiMock()
-      const { usePromptSessions } = await import('../../../state/promptSessions')
-      const { useChat } = await import('../../../state/chat')
-      const { EpicDetail } = await import('../EpicDetail')
 
       const session = await usePromptSessions.getState().createPromptSession(
         '/tmp/proj',

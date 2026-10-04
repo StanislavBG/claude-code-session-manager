@@ -996,3 +996,10 @@ if (typeof window !== 'undefined' && window.api?.promptSessions) {
     usePromptSessions.getState().mergeAppendedEvent(cwd, promptSessionId, event)
   })
 }
+
+/** Test-only — clears in-memory session/event state between tests that
+ *  import this module once instead of via vi.resetModules() per test
+ *  (EpicDetail.test.tsx). */
+export function _resetForTests(): void {
+  usePromptSessions.setState({ sessions: {}, events: {}, focusedEpicId: null })
+}

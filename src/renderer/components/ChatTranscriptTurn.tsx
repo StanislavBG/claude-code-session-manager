@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { linkifyFilePaths, extractFilePaths } from '../lib/chatFileLinks'
+import { linkifyCodeUrls } from '../lib/chatCodeUrlLinks'
 import { useChat, type ChatTurn, type ToolUseTrace } from '../state/chat'
 import { fullSignalText, fullSignalNames, isToolFamilyKind } from '../lib/chatSignals'
 import { formatBytes } from '../lib/formatBytes'
@@ -1142,6 +1143,7 @@ function TurnComponent({
   useEffect(() => {
     if (turn.role === 'assistant' && presentation === 'text' && bodyRef.current) {
       linkifyFilePaths(bodyRef.current)
+      linkifyCodeUrls(bodyRef.current)
     }
   }, [turn.role, presentation, turn.text, clampBodyChars, bodyExpanded])
 

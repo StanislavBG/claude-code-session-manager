@@ -847,6 +847,24 @@ async function computeCommittedDuringRun(cwd, headBefore, headAfter, startedAt, 
 }
 
 /**
+ * Which commit does this run get credit for? A worktree-isolated run shares the
+ * main checkout with concurrent jobs, so a HEAD move there may be someone else's
+ * integration — credit comes only from this run's own integration result. An
+ * in-place run keeps the HEAD-delta / time-window behaviour.
+ */
+function resolveRunCommitAttribution({ ranInWorktree, integratedSha, headBefore, headAtExit, committedInWindow }) {
+  if (ranInWorktree) {
+    const landedCommit = integratedSha || null;
+    return { landedCommit, committedDuringRun: Boolean(landedCommit) };
+  }
+  const headMoved = Boolean(headBefore && headAtExit && headBefore !== headAtExit);
+  return {
+    landedCommit: headMoved ? headAtExit : null,
+    committedDuringRun: headMoved || Boolean(committedInWindow),
+  };
+}
+
+/**
  * Read-only check: is a job's `sm-job/<slug>` worktree branch already fully
  * integrated into `cwd`'s current HEAD — i.e. every commit on the branch is
  * an ancestor of (or equal to) HEAD? Mirrors gitWorktree.cjs's own
@@ -7249,6 +7267,7 @@ async function finalizeJobWorktree({ job, runDir, worktree, guardCwd, carriedPat
   let worktreeIntegrationDetail = null;
   let mergeAutoResolved = null;
   let mergeAutoResolvedPaths = null;
+  let integratedSha = null;
   try {
     worktreeLeftoverDirty = (await uncommitted(worktree.dir)) || [];
     // Salvage the worktree's full diff (tracked + untracked) to the run
@@ -7273,6 +7292,7 @@ async function finalizeJobWorktree({ job, runDir, worktree, guardCwd, carriedPat
       worktreeIntegrationDetail = integration;
       console.error(`[scheduler] ${job.slug}: worktree branch integration FAILED (${integration.reason}) — branch ${worktree.branch} preserved in ${guardCwd} for manual recovery`);
     } else if (integration.integrated) {
+      integratedSha = integration.sha || null;
       console.log(`[scheduler] ${job.slug}: worktree branch ${worktree.branch} integrated into ${guardCwd}${integration.mergeCommit ? ' (merge commit)' : ' (fast-forward)'}`);
       if (integration.autoResolved) {
         mergeAutoResolved = integration.autoResolved;
@@ -7294,7 +7314,7 @@ async function finalizeJobWorktree({ job, runDir, worktree, guardCwd, carriedPat
       await jw.cleanupJobWorktree({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
     } catch { /* already reported above */ }
   }
-  return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths };
+  return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha };
 }
 
 /**
@@ -7686,6 +7706,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     // self-healed rather than silently looking like an ordinary merge.
     let mergeAutoResolved = null;
     let mergeAutoResolvedPaths = null;
+    let integratedSha = null;
     // A job's uncommitted-work patch, whichever isolation mode produced it —
     // set by EITHER branch below, never both (worktree.ok picks exactly one
     // shape for the whole run). Named generically (not "worktree...") because
@@ -7721,7 +7742,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       }, reviewInRun);
     } finally {
       if (worktree.ok) {
-        ({ worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths } =
+        ({ worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha } =
           await finalizeJobWorktree({ job, runDir, worktree, guardCwd, carriedPaths }));
       } else {
         // In-place run (non-git cwd, cap reached, env-disabled, or a carry-over
@@ -7873,15 +7894,27 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       // Used by the sentinel override: SCHEDULER_VERDICT: PASS + a landed
       // commit together override incidental transcript noise verdicts.
       const headAtExit = await gitHead(guardCwd);
-      const committedDuringRun = await computeCommittedDuringRun(
-        guardCwd,
-        guardHeadBefore,
+      // Worktree runs: attribution comes only from this run's own integration
+      // (a concurrent job's commit moving shared HEAD must not count).
+      const committedInWindow = worktree.ok
+        ? false
+        : await computeCommittedDuringRun(
+          guardCwd,
+          guardHeadBefore,
+          headAtExit,
+          job.startedAt,
+          new Date().toISOString(),
+        );
+      const attribution = resolveRunCommitAttribution({
+        ranInWorktree: Boolean(worktree.ok),
+        integratedSha,
+        headBefore: guardHeadBefore,
         headAtExit,
-        job.startedAt,
-        new Date().toISOString(),
-      );
-      if (guardHeadBefore && headAtExit && headAtExit !== guardHeadBefore) {
-        jobLandedCommitThisRun = headAtExit;
+        committedInWindow,
+      });
+      const committedDuringRun = attribution.committedDuringRun;
+      if (attribution.landedCommit) {
+        jobLandedCommitThisRun = attribution.landedCommit;
       }
 
       const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
@@ -7955,7 +7988,9 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           (j) => j.slug !== job.slug && j.status === 'running' && (j.cwd || defaultCwd) === guardCwd,
         );
         const guardHeadAfter = await gitHead(guardCwd);
-        const jobSelfCommitted = guardHeadBefore && guardHeadAfter && guardHeadAfter !== guardHeadBefore;
+        const jobSelfCommitted = worktree.ok
+          ? Boolean(jobLandedCommitThisRun)
+          : guardHeadBefore && guardHeadAfter && guardHeadAfter !== guardHeadBefore;
         const guardVerdict = commitGuardVerdict({
           newlyDirty,
           siblingRunning,
@@ -13595,6 +13630,7 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
 module.exports = {
   reportSchedulerError,
   finalizeJobWorktree,
+  resolveRunCommitAttribution,
   worktreeIntegrationVerdict,
   guardedTick,
   rescheduleIntervalTick,

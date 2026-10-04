@@ -31,7 +31,7 @@
     "dist/assets/",
     "dist/vad/",
     "README.md",
-    "!src/main/**/__tests__/**"
+    "!src/**/__tests__/**"
   ],
   "scripts": {
     "dev": "concurrently -k -n vite,electron -c magenta,cyan \"npm:dev:renderer\" \"npm:dev:electron\"",
@@ -134,7 +134,6 @@
     "@opentelemetry/semantic-conventions": "^1.43.0",
     "chokidar": "^4.0.1",
     "electron": "42.11.10",
-    "marked": "^14.0.0",
     "node-pty": "^1.2.0-beta.12",
     "zod": "^3.23.8"
   },
@@ -159,6 +158,7 @@
     "dompurify": "^3.4.8",
     "esbuild": "^0.25.12",
     "jsdom": "^29.1.1",
+    "marked": "^14.0.0",
     "monaco-editor": "0.55.1",
     "onnxruntime-web": "^1.24.3",
     "postcss": "^8.4.49",

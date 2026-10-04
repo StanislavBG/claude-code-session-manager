@@ -100,6 +100,12 @@ test(
     // every guard script individually (see the entries above).
     const draggedInTests = [...packedPaths].filter((p) => p.startsWith('scripts/hooks/__tests__/'));
     expect(draggedInTests, `npm pack must not ship guard test fixtures: ${draggedInTests.join(', ')}`).toEqual([]);
+
+    // Every __tests__ dir anywhere under src must be excluded (PRD 1525) —
+    // not just src/main/**/__tests__/**, which left src/preload/__tests__/
+    // shipping to every npx install.
+    const shippedTestDirs = [...packedPaths].filter((p) => p.includes('/__tests__/'));
+    expect(shippedTestDirs, `npm pack must not ship any __tests__ dir: ${shippedTestDirs.join(', ')}`).toEqual([]);
   },
   240000,
 );

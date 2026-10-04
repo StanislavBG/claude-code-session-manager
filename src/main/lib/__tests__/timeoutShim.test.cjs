@@ -61,9 +61,17 @@ test('exits 125 on a malformed DURATION', () => {
 test('-k escalates to KILL (137) when the command ignores the first signal', () => {
   // OPTIONs precede DURATION (`timeout [OPTION] DURATION COMMAND ...`): -k's
   // own duration comes first, then the main duration, then the command.
-  const r = runShim(['-k', '0.2', '0.2', process.execPath, '-e', "process.on('SIGTERM',()=>{});setInterval(()=>{},1000);"]);
+  //
+  // The main DURATION (1.5s) is well above how long a node child can take to
+  // even install its SIGTERM handler under heavy CPU contention (observed
+  // failure under 12-way load: the handler isn't installed yet when the
+  // default-DURATION signal arrives, so the child dies from the unhandled
+  // signal instead of ignoring it — status 143 instead of the escalated
+  // 137). The child ignores SIGTERM forever, so there is no upper bound to
+  // respect on the other side.
+  const r = runShim(['-k', '0.3', '1.5', process.execPath, '-e', "process.on('SIGTERM',()=>{});setInterval(()=>{},1000);"]);
   expect(r.status).toBe(137);
-});
+}, 10000);
 
 test('--preserve-status reports 128+signal instead of 124 when the command is killed', () => {
   const r = runShim(['--preserve-status', '0.2', process.execPath, '-e', 'setInterval(()=>{},1000)']);
@@ -91,18 +99,25 @@ test.each(['KILL', '9', 'sigterm'])(
 );
 
 test('-k 0 means no kill-after at all — a command that ignores the main signal and exits on its own is not killed early', () => {
-  // DURATION (0.1s) elapses well before the command's own 200ms exit, so the
+  // DURATION (1s) elapses well before the command's own 3s exit, so the
   // main signal (default TERM) is sent; the command ignores it. With the
   // bug, -k 0 would arm a kill-after timer with a 0ms delay, which fires
   // immediately and SIGKILLs the command. --preserve-status surfaces the
   // command's REAL exit status (0) instead of the usual 124-on-timeout, so a
   // premature kill is visible as 137 instead of being masked by 124 either way.
+  //
+  // DURATION and the command's own exit delay are both raised (from 0.1s/
+  // 200ms) with a wide margin between them: under heavy CPU contention (12
+  // busy loops across 14 cores), a node child can take hundreds of ms just
+  // to install its SIGTERM handler, so a tight gap let the main signal
+  // arrive before the handler was installed — observed as a spurious 143
+  // (unhandled-signal death) instead of the 0 this test proves.
   const r = runShim([
-    '--preserve-status', '-k', '0', '0.1', process.execPath,
-    '-e', "process.on('SIGTERM',()=>{});setTimeout(()=>process.exit(0),200);",
+    '--preserve-status', '-k', '0', '1', process.execPath,
+    '-e', "process.on('SIGTERM',()=>{});setTimeout(()=>process.exit(0),3000);",
   ]);
   expect(r.status).toBe(0);
-}, 10000);
+}, 15000);
 
 test('a DURATION above the setTimeout int32 cap (e.g. 30d) does not fire immediately', () => {
   // Old bug: Node clamps an out-of-range setTimeout delay to ~1ms, so

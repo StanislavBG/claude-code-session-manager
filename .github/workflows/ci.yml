@@ -17,7 +17,6 @@ jobs:
       - run: npm audit --omit=dev --audit-level=moderate
       - run: npm run typecheck
       - run: npm run lint
-      - run: npm run test:unit
       # e2e launches the PROD app (SM_E2E, not SM_DEV) → createWindow loads
       # dist/index.html (src/main/index.cjs:340-350), which hard-fails when dist
       # is missing. Build it before e2e or every test dies at launchApp.ts:56.
@@ -29,6 +28,28 @@ jobs:
           SM_E2E: '1'
           SM_SUPERVISOR_DISABLE: '1'
           SM_MOCK_BILLING_KIND: 'ok'
+
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      # Vitest's experimental.fsModuleCache (vitest.config.ts) persists
+      # transformed modules here across runs; restoring it per shard avoids
+      # re-transforming all 601 files every CI run.
+      - uses: actions/cache@v4
+        with:
+          path: node_modules/.experimental-vitest-cache
+          key: vitest-fs-module-cache-${{ hashFiles('package-lock.json') }}-shard${{ matrix.shard }}
+      - run: npx vitest run --shard=${{ matrix.shard }}/3
 
   # Mac startup paths (Homebrew claude bin, /Users -> /System/Volumes/Data/Users
   # symlink, dock activation) were uncovered until v0.10.0 shipped broken.

@@ -7,13 +7,20 @@ export default defineConfig({
     // heavy renderer suites call vi.resetModules() then `await import(...)` a
     // component with a large import graph inside the test body, so the FIRST
     // assertion pays a cold transform of that whole graph. A full run measures
-    // ~128 s of import + ~59 s of transform across 291 files, so on a loaded
+    // 601 files / 5,956 tests, 2:03 wall measured 2026-10-04, so on a loaded
     // machine those files time out non-deterministically (observed:
     // EpicDetail.terminalMode.test.tsx failing on one run and passing on the
     // next with no code change). Raised globally rather than per-file — the
     // shape is common to every resetModules+dynamic-import suite, and a real
     // hang still fails, just 10 s later.
     testTimeout: 15_000,
+    // Persists transformed modules under node_modules/.experimental-vitest-cache
+    // between runs instead of re-transforming all 601 files every time (Vitest
+    // 4.1.6 `experimental.fsModuleCache`). CI restores that directory via
+    // actions/cache (see .github/workflows/ci.yml) so each shard starts warm.
+    experimental: {
+      fsModuleCache: true,
+    },
     include: [
       'tests/unit/**/*.spec.ts',
       'src/renderer/**/*.test.ts',

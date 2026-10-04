@@ -43,13 +43,14 @@ const TAIL_BYTES = 64 * 1024;
 // Safety cap on distinct cwds to bound result set size. O(1) extra space.
 const MAX_CWDS = 50;
 
-// activeProjectCwds' scan is a readdirSync of every dir under ~/.claude
-// /projects (2209 dirs / 8.8 GB observed) plus a statSync per transcript —
-// ~270 ms warm. reconcile() calls into it (directly or via allProjectCwds)
-// several times per pass, so cache the resolved cwd list keyed on the
-// resolved argument TUPLE (projectsDir, maxAgeMin, maxCwds) — never on
-// `!opts`, since allProjectCwds always constructs an options object and that
-// guard would cache nothing on the hottest path.
+// The disk scan (readdirSync of every dir under ~/.claude/projects — 2209
+// dirs / 8.8 GB observed — plus a statSync per transcript, ~270 ms warm) is
+// the expensive part. allProjectCwds() and activeProjectCwds() used to each
+// pay their own full scan under separate (projectsDir, maxAgeMin, maxCwds)
+// cache keys even though they read the same on-disk facts. Now the scan runs
+// ONCE per projectsDir and is cached as a flat per-project record
+// {rawCwd, newestMtimeMs}; every view (any maxAgeMin/maxCwds combination)
+// filters/sorts that one record in memory instead of touching disk again.
 //
 // Invalidation: projectsDir's own mtime (bumps when a project DIRECTORY is
 // added/removed — NOT when an existing transcript gains a line, which is
@@ -60,11 +61,11 @@ const MAX_CWDS = 50;
 // one pass never re-scans cold. Cached arrays are frozen — shared, never mutated.
 const CACHE_TTL_MS = 120_000;
 const EMPTY_CWDS = Object.freeze([]);
-const cwdScanCache = new Map(); // key -> { dirMtimeMs, cachedAt, result }
+const rawScanCache = new Map(); // projectsDir -> { dirMtimeMs, cachedAt, records }
 
 /** Forces the next activeProjectCwds/allProjectCwds call to rescan. */
 function bustProjectCwdCache() {
-  cwdScanCache.clear();
+  rawScanCache.clear();
 }
 
 // The ops-root folder name. A transcript's `cwd` can point INSIDE it whenever
@@ -120,42 +121,82 @@ function readTailLines(filePath, maxBytes) {
 }
 
 /**
- * activeProjectCwds(maxAgeMin = 90, opts?) → string[]
+ * scanProjectsDir(projectsDir) → {rawCwd, newestMtimeMs}[] | null
  *
- * Returns distinct, on-disk project cwds that have an open/active session
- * within the last maxAgeMin minutes.
- *
- * Sole detection path: scan ~/.claude/projects/*​/  for transcript *.jsonl
- *   files modified within maxAgeMin, read `cwd` from the last parseable line
- *   of the newest transcript per project dir.
- *   Complexity: O(P × L) over P project dirs, each bounded-tail read (64 KB).
- *
- * opts (for testing):
- *   projectsDir   — override the default ~/.claude/projects path
- *   tmpDropRoots  — override the tmp guard's drop roots (default TMP_DROP_ROOTS)
+ * The one disk scan: readdirSync of projectsDir, then per project dir the
+ * newest *.jsonl's mtime plus its last parseable `cwd`. Cached per
+ * projectsDir (mtime-keyed, TTL backstop) so repeated calls — from
+ * activeProjectCwds, allProjectCwds, or both — pay this cost at most once per
+ * window. Returns null when projectsDir is missing/unreadable.
  */
-function activeProjectCwds(maxAgeMin = 90, {
-  projectsDir = path.join(HOME, '.claude', 'projects'),
-  maxCwds = MAX_CWDS,
-  tmpDropRoots = TMP_DROP_ROOTS,
-} = {}) {
-  const cacheKey = [projectsDir, maxAgeMin, maxCwds].join('|');
+function scanProjectsDir(projectsDir) {
   let dirMtimeMs;
   try {
     dirMtimeMs = fs.statSync(projectsDir).mtimeMs;
   } catch {
-    // Missing/unreadable dir: nothing to scan, and any prior cache entry for
-    // this key must not survive to be handed back once the dir later
-    // appears — drop it rather than caching this empty result.
-    cwdScanCache.delete(cacheKey);
-    return EMPTY_CWDS;
+    // Missing/unreadable dir: any prior cache entry must not survive to be
+    // handed back once the dir later appears — drop it rather than caching
+    // this empty result.
+    rawScanCache.delete(projectsDir);
+    return null;
   }
-  const cached = cwdScanCache.get(cacheKey);
+  const cached = rawScanCache.get(projectsDir);
   const now0 = Date.now();
   if (cached && cached.dirMtimeMs === dirMtimeMs && now0 - cached.cachedAt < CACHE_TTL_MS) {
-    return cached.result;
+    return cached.records;
   }
 
+  let slugs;
+  try { slugs = fs.readdirSync(projectsDir); } catch { rawScanCache.delete(projectsDir); return null; }
+
+  const records = [];
+  for (const slug of slugs) {
+    const projDir = path.join(projectsDir, slug);
+    let entries;
+    try {
+      entries = fs.readdirSync(projDir).filter((f) => f.endsWith('.jsonl'));
+    } catch { continue; }
+
+    // Find the most recently modified transcript in this project dir.
+    let newestPath = null;
+    let newestMtimeMs = 0;
+    for (const tf of entries) {
+      const fp = path.join(projDir, tf);
+      try {
+        const st = fs.statSync(fp);
+        if (st.mtimeMs > newestMtimeMs) {
+          newestMtimeMs = st.mtimeMs;
+          newestPath = fp;
+        }
+      } catch { continue; }
+    }
+    if (!newestPath) continue;
+
+    // Read `cwd` from the last parseable line of the transcript.
+    const tlines = readTailLines(newestPath, TAIL_BYTES);
+    let rawCwd = null;
+    for (let i = tlines.length - 1; i >= 0; i--) {
+      let row;
+      try { row = JSON.parse(tlines[i]); } catch { continue; }
+      if (row.cwd) { rawCwd = row.cwd; break; }
+    }
+    if (rawCwd) records.push({ rawCwd, newestMtimeMs });
+  }
+
+  Object.freeze(records);
+  rawScanCache.set(projectsDir, { dirMtimeMs, cachedAt: now0, records });
+  return records;
+}
+
+/**
+ * deriveCwds(records, maxAgeMin, maxCwds, tmpDropRoots) → string[]
+ *
+ * Filters/sorts a scanProjectsDir() record into the view activeProjectCwds/
+ * allProjectCwds promise: age cutoff, ops-root/worktree normalization,
+ * dedup, existence check, and the maxCwds cap — identical semantics to the
+ * old per-call scan, now performed in memory against the shared record.
+ */
+function deriveCwds(records, maxAgeMin, maxCwds, tmpDropRoots) {
   // maxAgeMin === Infinity means "every project ever seen, no recency filter"
   // (allProjectCwds below). Date.now() - Infinity is -Infinity, which every
   // mtime clears — spelled out here because it reads like an accident.
@@ -199,46 +240,39 @@ function activeProjectCwds(maxAgeMin = 90, {
     result.push(cwd);
   }
 
-  // Scan ~/.claude/projects/*/  transcript *.jsonl files.
-  let slugs;
-  try { slugs = fs.readdirSync(projectsDir); } catch { cwdScanCache.delete(cacheKey); return Object.freeze(result); }
-
-  for (const slug of slugs) {
+  for (const { rawCwd, newestMtimeMs } of records) {
     if (result.length >= maxCwds) break;
-    const projDir = path.join(projectsDir, slug);
-    let entries;
-    try {
-      entries = fs.readdirSync(projDir).filter((f) => f.endsWith('.jsonl'));
-    } catch { continue; }
-
-    // Find the most recently modified transcript in this project dir.
-    let newestPath = null;
-    let newestMtimeMs = 0;
-    for (const tf of entries) {
-      const fp = path.join(projDir, tf);
-      try {
-        const st = fs.statSync(fp);
-        if (st.mtimeMs > newestMtimeMs) {
-          newestMtimeMs = st.mtimeMs;
-          newestPath = fp;
-        }
-      } catch { continue; }
-    }
-
-    if (!newestPath || newestMtimeMs < cutoffMs) continue;
-
-    // Read `cwd` from the last parseable line of the transcript.
-    const tlines = readTailLines(newestPath, TAIL_BYTES);
-    for (let i = tlines.length - 1; i >= 0; i--) {
-      let row;
-      try { row = JSON.parse(tlines[i]); } catch { continue; }
-      if (row.cwd) { addCwd(row.cwd); break; }
-    }
+    if (newestMtimeMs < cutoffMs) continue;
+    addCwd(rawCwd);
   }
 
-  Object.freeze(result);
-  cwdScanCache.set(cacheKey, { dirMtimeMs, cachedAt: now0, result });
-  return result;
+  return Object.freeze(result);
+}
+
+/**
+ * activeProjectCwds(maxAgeMin = 90, opts?) → string[]
+ *
+ * Returns distinct, on-disk project cwds that have an open/active session
+ * within the last maxAgeMin minutes.
+ *
+ * Sole detection path: scan ~/.claude/projects/*​/  for transcript *.jsonl
+ *   files modified within maxAgeMin, read `cwd` from the last parseable line
+ *   of the newest transcript per project dir.
+ *   Complexity: O(P × L) over P project dirs, each bounded-tail read (64 KB) —
+ *   paid once per TTL window (see scanProjectsDir), shared across views.
+ *
+ * opts (for testing):
+ *   projectsDir   — override the default ~/.claude/projects path
+ *   tmpDropRoots  — override the tmp guard's drop roots (default TMP_DROP_ROOTS)
+ */
+function activeProjectCwds(maxAgeMin = 90, {
+  projectsDir = path.join(HOME, '.claude', 'projects'),
+  maxCwds = MAX_CWDS,
+  tmpDropRoots = TMP_DROP_ROOTS,
+} = {}) {
+  const records = scanProjectsDir(projectsDir);
+  if (!records) return EMPTY_CWDS;
+  return deriveCwds(records, maxAgeMin, maxCwds, tmpDropRoots);
 }
 
 /**

@@ -14,6 +14,7 @@ const { performance } = require('node:perf_hooks');
 
 const { __usageForOneForTest: usageForOne, __usageCacheForTest: usageCache } = require('../../src/main/transcripts.cjs');
 const { LRUCache } = require('../../src/main/lib/lruCache.cjs');
+const { allProjectCwds, activeProjectCwds, bustProjectCwdCache } = require('../../src/main/lib/activeSessions.cjs');
 
 const REPS = 9;
 const FIXTURE_BYTES = 15 * 1024 * 1024;
@@ -51,6 +52,40 @@ async function benchUsage(dir) {
     tail.push(await timeAsync(() => usageForOne(file)));
   }
   return { cold, tail, bytes: written };
+}
+
+// Synthetic ~/.claude/projects tree: 2,000 project dirs, one transcript each,
+// mirroring the shape activeSessions.cjs scans in production (PRD 1518).
+function benchActiveSessions() {
+  const DIRS = 2000;
+  const projectsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-bench-projects-'));
+  try {
+    for (let i = 0; i < DIRS; i++) {
+      const projDir = path.join(projectsDir, `slug-${i}`);
+      fs.mkdirSync(projDir, { recursive: true });
+      const cwd = path.join(projectsDir, `cwd-${i}`);
+      fs.mkdirSync(cwd, { recursive: true });
+      fs.writeFileSync(path.join(projDir, 'session.jsonl'), JSON.stringify({ cwd }) + '\n');
+    }
+
+    const cold = [];
+    const warm = [];
+    for (let r = 0; r < REPS; r++) {
+      bustProjectCwdCache();
+      let t = performance.now();
+      allProjectCwds({ projectsDir });
+      activeProjectCwds(90, { projectsDir });
+      cold.push(performance.now() - t);
+
+      t = performance.now();
+      allProjectCwds({ projectsDir });
+      activeProjectCwds(90, { projectsDir });
+      warm.push(performance.now() - t);
+    }
+    return { cold, warm, dirs: DIRS };
+  } finally {
+    fs.rmSync(projectsDir, { recursive: true, force: true });
+  }
 }
 
 function benchPs() {
@@ -94,6 +129,7 @@ async function main() {
   }
   const ps = benchPs();
   const lru = benchLru();
+  const activeSessions = benchActiveSessions();
 
   const rows = [
     [`usageForOne cold full parse (${(usage.bytes / 1048576).toFixed(1)} MB)`, median(usage.cold)],
@@ -101,12 +137,14 @@ async function main() {
     ['execFileSync ps -eo (pre-PRD-1353 per-job-exit block)', median(ps)],
     [`LRUCache set x${lru.ops} @ cap 200`, median(lru.set)],
     [`LRUCache get x${lru.ops} @ cap 200`, median(lru.get)],
+    [`allProjectCwds+activeProjectCwds cold (${activeSessions.dirs} dirs)`, median(activeSessions.cold)],
+    [`allProjectCwds+activeProjectCwds warm (${activeSessions.dirs} dirs)`, median(activeSessions.warm)],
   ];
   console.log(`| bench | median ms (n=${REPS}) |\n| --- | --- |`);
   for (const [name, ms] of rows) console.log(`| ${name} | ${fmt(ms)} |`);
 
   if (jsonPath) {
-    fs.writeFileSync(jsonPath, JSON.stringify({ reps: REPS, node: process.version, usage, ps, lru }, null, 2));
+    fs.writeFileSync(jsonPath, JSON.stringify({ reps: REPS, node: process.version, usage, ps, lru, activeSessions }, null, 2));
   }
 }
 

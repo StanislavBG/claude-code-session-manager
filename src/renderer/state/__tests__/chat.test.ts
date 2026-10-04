@@ -6,7 +6,103 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
  * ephemeral `started` flag — that ephemeral flag is what produced the
  * "Session ID <uuid> is already in use" bug after a reload. window.api is
  * mocked here since vitest runs this suite in a node environment.
+ *
+ * chat.ts wires its chatRunner event handlers (onComplete/onNeedsInput/...)
+ * exactly once, at module load, guarded by `typeof window !== 'undefined'`.
+ * To import the store module once for the whole file (instead of
+ * vi.resetModules() + a fresh dynamic import per test) that one-time wiring
+ * has to see window.api BEFORE the static import below runs — vi.hoisted
+ * guarantees its callback executes ahead of every import statement.
  */
+const sharedWindowApi = vi.hoisted(() => {
+  type NeedsInputHandler = (e: { tabId: string; sessionId: string; questions: string[]; answerBody: string; raw: string }) => void
+  type CompleteHandler = (e: { tabId: string; sessionId: string; finalMessage: string }) => void
+  type ErrorHandler = (e: { tabId: string; sessionId: string; message: string }) => void
+  type ExternalSendHandler = (e: { tabId: string; prompt: string }) => void
+
+  const handlers: {
+    needsInput: NeedsInputHandler | null
+    complete: CompleteHandler | null
+    error: ErrorHandler | null
+    externalSend: ExternalSendHandler | null
+  } = { needsInput: null, complete: null, error: null, externalSend: null }
+
+  const api = {
+    chat: {
+      run: vi.fn().mockResolvedValue(undefined),
+      cancel: vi.fn(),
+      onQueued: vi.fn(),
+      onRunStarted: vi.fn(),
+      onOutput: vi.fn(),
+      onToolUse: vi.fn(),
+      onComplete: vi.fn((handler: CompleteHandler) => {
+        handlers.complete = handler
+        return () => { handlers.complete = null }
+      }),
+      onNeedsInput: vi.fn((handler: NeedsInputHandler) => {
+        handlers.needsInput = handler
+        return () => { handlers.needsInput = null }
+      }),
+      onError: vi.fn((handler: ErrorHandler) => {
+        handlers.error = handler
+        return () => { handlers.error = null }
+      }),
+      onNotice: vi.fn(),
+      onExternalSend: vi.fn((handler: ExternalSendHandler) => {
+        handlers.externalSend = handler
+        return () => { handlers.externalSend = null }
+      }),
+      classifyTicket: vi.fn(async (_payload: { text: string }): Promise<'inline' | 'develop'> => 'inline'),
+      createPrd: vi.fn(
+        async (
+          _payload: unknown,
+        ): Promise<{ ok: true; nn: number; filename: string } | { ok: false; status: number; error: string }> => ({
+          ok: true,
+          nn: 42,
+          filename: '42-fake-prd.md',
+        }),
+      ),
+    },
+    transcripts: {
+      pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'),
+    },
+    config: {
+      exists: vi.fn().mockResolvedValue(false),
+      readJson: vi.fn().mockResolvedValue({ exists: false, data: null }),
+    },
+    logs: { write: vi.fn() },
+    promptSessionTranscript: {
+      append: vi.fn().mockResolvedValue({ ok: true }),
+      read: vi.fn().mockResolvedValue({ turns: [] }),
+    },
+  }
+  vi.stubGlobal('window', { api })
+  return { api, handlers }
+})
+
+import { useChat, isChainResolved } from '../chat'
+import { useSessions } from '../sessions'
+import { usePromptSessions } from '../promptSessions'
+import { useToast } from '../toast'
+import { useEpicTerminal } from '../epicTerminal'
+
+// Snapshot each store once, right after import, so beforeEach can restore
+// pristine state without paying a fresh module-graph load (vi.resetModules)
+// per test — the prior ~73 dynamic imports across this file's 50 tests were
+// the dominant cost.
+const initialChatState = useChat.getState()
+const initialSessionsState = useSessions.getState()
+const initialPromptSessionsState = usePromptSessions.getState()
+const initialToastState = useToast.getState()
+const initialEpicTerminalState = useEpicTerminal.getState()
+
+beforeEach(() => {
+  useChat.setState(initialChatState, true)
+  useSessions.setState(initialSessionsState, true)
+  usePromptSessions.setState(initialPromptSessionsState, true)
+  useToast.setState(initialToastState, true)
+  useEpicTerminal.setState(initialEpicTerminalState, true)
+})
 
 function installWindowApiMock(opts: {
   transcriptExists: boolean
@@ -16,80 +112,46 @@ function installWindowApiMock(opts: {
   // falls back to this when a tab's PromptSession hasn't hydrated into memory yet.
   activeIndexOnDisk?: { sessions: Record<string, unknown>; events: Record<string, unknown> }
 }) {
-  const run = vi.fn().mockResolvedValue(undefined)
-  const classifyTicket = vi.fn(opts.classifyTicket ?? (async () => 'inline' as const))
-  const createPrd = vi.fn(opts.createPrd ?? (async () => ({ ok: true as const, nn: 42, filename: '42-fake-prd.md' })))
-  const readJson = vi.fn().mockResolvedValue(
+  const { api, handlers } = sharedWindowApi
+  const { chat, transcripts, config, logs, promptSessionTranscript } = api
+
+  // Reset call history (not the onComplete/onNeedsInput/onError/onExternalSend
+  // registrations themselves — those were wired once at chat.ts module load
+  // and must keep pointing at the same handlers for the rest of the suite).
+  chat.run.mockClear().mockResolvedValue(undefined)
+  chat.cancel.mockClear()
+  chat.onQueued.mockClear()
+  chat.onRunStarted.mockClear()
+  chat.onOutput.mockClear()
+  chat.onToolUse.mockClear()
+  chat.onNotice.mockClear()
+  chat.classifyTicket.mockClear().mockImplementation(opts.classifyTicket ?? (async () => 'inline' as const))
+  chat.createPrd.mockClear().mockImplementation(opts.createPrd ?? (async () => ({ ok: true as const, nn: 42, filename: '42-fake-prd.md' })))
+  transcripts.pathFor.mockClear()
+  config.exists.mockClear().mockResolvedValue(opts.transcriptExists)
+  config.readJson.mockClear().mockResolvedValue(
     opts.activeIndexOnDisk ? { exists: true, data: opts.activeIndexOnDisk } : { exists: false, data: null },
   )
-  let needsInputHandler: ((e: { tabId: string; sessionId: string; questions: string[]; answerBody: string; raw: string }) => void) | null = null
-  let completeHandler: ((e: { tabId: string; sessionId: string; finalMessage: string }) => void) | null = null
-  let errorHandler: ((e: { tabId: string; sessionId: string; message: string }) => void) | null = null
-  let externalSendHandler: ((e: { tabId: string; prompt: string }) => void) | null = null
-  const api = {
-    chat: {
-      run,
-      cancel: vi.fn(),
-      onQueued: vi.fn(),
-      onRunStarted: vi.fn(),
-      onOutput: vi.fn(),
-      onToolUse: vi.fn(),
-      onComplete: vi.fn((handler) => {
-        completeHandler = handler
-        return () => { completeHandler = null }
-      }),
-      onNeedsInput: vi.fn((handler) => {
-        needsInputHandler = handler
-        return () => { needsInputHandler = null }
-      }),
-      onError: vi.fn((handler) => {
-        errorHandler = handler
-        return () => { errorHandler = null }
-      }),
-      onNotice: vi.fn(),
-      onExternalSend: vi.fn((handler) => {
-        externalSendHandler = handler
-        return () => { externalSendHandler = null }
-      }),
-      classifyTicket,
-      createPrd,
-    },
-    transcripts: {
-      pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'),
-    },
-    config: {
-      exists: vi.fn().mockResolvedValue(opts.transcriptExists),
-      readJson,
-    },
-    logs: { write: vi.fn() },
-    promptSessionTranscript: {
-      append: vi.fn().mockResolvedValue({ ok: true }),
-      read: vi.fn().mockResolvedValue({ turns: [] }),
-    },
-  }
-  vi.stubGlobal('window', { api })
+  logs.write.mockClear()
+  promptSessionTranscript.append.mockClear()
+  promptSessionTranscript.read.mockClear()
+
   return {
     api,
-    run,
-    classifyTicket,
-    createPrd,
-    readJson,
-    getNeedsInputHandler: () => needsInputHandler,
-    getCompleteHandler: () => completeHandler,
-    getErrorHandler: () => errorHandler,
-    getExternalSendHandler: () => externalSendHandler,
+    run: chat.run,
+    classifyTicket: chat.classifyTicket,
+    createPrd: chat.createPrd,
+    readJson: config.readJson,
+    getNeedsInputHandler: () => handlers.needsInput,
+    getCompleteHandler: () => handlers.complete,
+    getErrorHandler: () => handlers.error,
+    getExternalSendHandler: () => handlers.externalSend,
   }
 }
 
 describe('chat.ts send() resume decision', () => {
-  beforeEach(() => {
-    vi.resetModules()
-    vi.unstubAllGlobals()
-  })
-
   it('resumes when a transcript file already exists on disk', async () => {
     const { api, run } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 'tab-1', sessionId: 'sess-1', cwd: '/proj', prompt: 'hello' })
     await vi.waitFor(() => expect(run).toHaveBeenCalled())
@@ -102,7 +164,6 @@ describe('chat.ts send() resume decision', () => {
 
   it('creates fresh when no transcript file exists on disk', async () => {
     const { api, run } = installWindowApiMock({ transcriptExists: false })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 'tab-2', sessionId: 'sess-2', cwd: '/proj', prompt: 'hello' })
     await vi.waitFor(() => expect(run).toHaveBeenCalled())
@@ -115,14 +176,8 @@ describe('chat.ts send() resume decision', () => {
 })
 
 describe('chat.ts resetThread()', () => {
-  beforeEach(() => {
-    vi.resetModules()
-    vi.unstubAllGlobals()
-  })
-
   it('clears turns and run state for the tab', async () => {
     installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.setState({
       chats: {
@@ -150,14 +205,8 @@ describe('chat.ts resetThread()', () => {
 })
 
 describe('chat.ts pushNotice()', () => {
-  beforeEach(() => {
-    vi.resetModules()
-    vi.unstubAllGlobals()
-  })
-
   it('appends a notice turn without touching running/stream/liveToolUses', async () => {
     installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.setState({
       chats: {
@@ -190,15 +239,8 @@ describe('chat.ts pushNotice()', () => {
 })
 
 describe('chat.ts onExternalSend listener (PRD 753)', () => {
-  beforeEach(() => {
-    vi.resetModules()
-    vi.unstubAllGlobals()
-  })
-
   it('resolves the tab from useSessions and hands off to send() when the tab is open', async () => {
     const { api, run } = installWindowApiMock({ transcriptExists: true })
-    const { useSessions } = await import('../sessions')
-    const { useChat } = await import('../chat')
 
     useSessions.setState({
       tabs: [
@@ -231,9 +273,6 @@ describe('chat.ts onExternalSend listener (PRD 753)', () => {
 
   it('no-ops and logs a warning naming both lookups when neither a tab nor an Epic matches', async () => {
     const { api, run } = installWindowApiMock({ transcriptExists: true })
-    const { useSessions } = await import('../sessions')
-    const { usePromptSessions } = await import('../promptSessions')
-    await import('../chat')
 
     useSessions.setState({ tabs: [] })
     usePromptSessions.setState({ sessions: {}, events: {} })
@@ -251,9 +290,6 @@ describe('chat.ts onExternalSend listener (PRD 753)', () => {
 
   it('resolves the target from usePromptSessions and hands off to send() when it is an active Epic', async () => {
     const { api, run } = installWindowApiMock({ transcriptExists: true })
-    const { useSessions } = await import('../sessions')
-    const { usePromptSessions } = await import('../promptSessions')
-    const { useChat } = await import('../chat')
 
     useSessions.setState({ tabs: [] })
     usePromptSessions.setState({
@@ -290,9 +326,6 @@ describe('chat.ts onExternalSend listener (PRD 753)', () => {
 
   it('durably captures the user prompt and the assistant reply for a chat tab that is a known Epic', async () => {
     const { api, getCompleteHandler } = installWindowApiMock({ transcriptExists: true })
-    const { useSessions } = await import('../sessions')
-    const { usePromptSessions } = await import('../promptSessions')
-    const { useChat } = await import('../chat')
 
     useSessions.setState({ tabs: [] })
     usePromptSessions.setState({
@@ -344,8 +377,6 @@ describe('chat.ts onExternalSend listener (PRD 753)', () => {
 
   it('does not attempt a durable capture for a chat tab that is not a known Epic', async () => {
     const { api, run, getCompleteHandler } = installWindowApiMock({ transcriptExists: true })
-    const { usePromptSessions } = await import('../promptSessions')
-    const { useChat } = await import('../chat')
 
     usePromptSessions.setState({ sessions: {}, events: {} })
 
@@ -358,9 +389,6 @@ describe('chat.ts onExternalSend listener (PRD 753)', () => {
 
   it('refuses a completed/archived Epic instead of resuming its dead claudeSessionId', async () => {
     const { api, run } = installWindowApiMock({ transcriptExists: true })
-    const { useSessions } = await import('../sessions')
-    const { usePromptSessions } = await import('../promptSessions')
-    await import('../chat')
 
     useSessions.setState({ tabs: [] })
     usePromptSessions.setState({
@@ -391,14 +419,8 @@ describe('chat.ts onExternalSend listener (PRD 753)', () => {
 })
 
 describe('chat.ts onNeedsInput()', () => {
-  beforeEach(() => {
-    vi.resetModules()
-    vi.unstubAllGlobals()
-  })
-
   it('pushes an answer turn then a question turn when answerBody is non-empty', async () => {
     const { getNeedsInputHandler } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.setState({
       chats: {
@@ -433,7 +455,6 @@ describe('chat.ts onNeedsInput()', () => {
 
   it('pushes only a question turn when answerBody is empty', async () => {
     const { getNeedsInputHandler } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.setState({
       chats: {
@@ -456,7 +477,6 @@ describe('chat.ts onNeedsInput()', () => {
 
   it('finalizes the run\'s ticket as "needs-input" (not "done") and clears it on the next send()', async () => {
     const { run, getNeedsInputHandler } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     // A fresh send establishes an activeTicket for the run that will stall.
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'do the risky thing' })
@@ -490,14 +510,8 @@ describe('chat.ts onNeedsInput()', () => {
 })
 
 describe('chat.ts assistant turn outcome label', () => {
-  beforeEach(() => {
-    vi.resetModules()
-    vi.unstubAllGlobals()
-  })
-
   it('sets outcome "Landed" on the assistant turn from a normal successful completion', async () => {
     const { run, getCompleteHandler } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'do the thing' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -511,7 +525,6 @@ describe('chat.ts assistant turn outcome label', () => {
 
   it('does not set outcome on an errored run', async () => {
     const { run, getErrorHandler } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'do the thing' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -525,7 +538,6 @@ describe('chat.ts assistant turn outcome label', () => {
 
   it('does not set outcome on the intermediate answerBody turn of a needs-input round', async () => {
     const { getNeedsInputHandler } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.setState({
       chats: {
@@ -555,14 +567,8 @@ describe('chat.ts assistant turn outcome label', () => {
 })
 
 describe('chat.ts prompt queue', () => {
-  beforeEach(() => {
-    vi.resetModules()
-    vi.unstubAllGlobals()
-  })
-
   it('queues a second prompt sent while running instead of dropping it', async () => {
     const { run } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -584,7 +590,6 @@ describe('chat.ts prompt queue', () => {
 
   it('dequeues and dispatches the next queued ticket, FIFO, once the running turn completes', async () => {
     const { run, getCompleteHandler } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -617,7 +622,6 @@ describe('chat.ts prompt queue', () => {
       transcriptExists: true,
       classifyTicket: async () => 'inline',
     })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -641,7 +645,6 @@ describe('chat.ts prompt queue', () => {
       transcriptExists: true,
       classifyTicket: async () => 'develop',
     })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -675,8 +678,6 @@ describe('chat.ts prompt queue', () => {
       transcriptExists: true,
       classifyTicket: async () => 'develop',
     })
-    const { useChat } = await import('../chat')
-    const { usePromptSessions } = await import('../promptSessions')
     usePromptSessions.setState({
       sessions: {
         t1: {
@@ -726,8 +727,6 @@ describe('chat.ts prompt queue', () => {
       createPrd: async () => ({ ok: true, nn: 7, filename: '7-build-a-whole-feature.md' }),
       activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: {} },
     })
-    const { useChat } = await import('../chat')
-    const { usePromptSessions } = await import('../promptSessions')
     const createSpy = vi.spyOn(usePromptSessions.getState(), 'createPromptSession')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
@@ -781,7 +780,6 @@ describe('chat.ts prompt queue', () => {
       createPrd: async () => { throw new Error('write failed') },
       activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: {} },
     })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -815,7 +813,6 @@ describe('chat.ts prompt queue', () => {
       createPrd: async () => ({ ok: false, status: 400, error: 'cwd rejected' }),
       activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: {} },
     })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -850,8 +847,6 @@ describe('chat.ts prompt queue', () => {
       createPrd: async () => ({ ok: true, nn: 22, filename: '22-real-prd.md' }),
       activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: { t1: [tailEvent] } },
     })
-    const { useChat } = await import('../chat')
-    const { usePromptSessions } = await import('../promptSessions')
     // Force the PromptSession's own event-chain append to throw (e.g. a
     // stale tail) — the PRD file was still written successfully by this
     // point, so this must never surface as a 'failed' ticket.
@@ -890,7 +885,6 @@ describe('chat.ts prompt queue', () => {
       createPrd: async () => ({ ok: true, nn: 9, filename: '9-fix-a-bug.md' }),
       activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: {} },
     })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -914,7 +908,6 @@ describe('chat.ts prompt queue', () => {
 
   it('carries the composer-selected tag into the fresh-send activeTicket (not just the queued path)', async () => {
     const { run } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first', tag: 'feature' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -929,7 +922,6 @@ describe('chat.ts prompt queue', () => {
       transcriptExists: true,
       classifyTicket: () => classifyGate,
     })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -957,8 +949,6 @@ describe('chat.ts prompt queue', () => {
     const { run, classifyTicket, createPrd, getExternalSendHandler, getCompleteHandler } = installWindowApiMock({
       transcriptExists: true,
     })
-    const { useChat } = await import('../chat')
-    const { useSessions } = await import('../sessions')
     useSessions.setState({
       tabs: [{ id: 't1', sessionId: 's1', cwd: '/proj' } as any],
     } as any)
@@ -990,19 +980,11 @@ describe('chat.ts prompt queue', () => {
 })
 
 describe('chat.ts resolveDispatchPromptSessionId is join-only, never mints (2026-08-02 incident regression)', () => {
-  beforeEach(() => {
-    vi.resetModules()
-    vi.unstubAllGlobals()
-  })
-
   it('(a) non-Epic tab + "develop" verdict + no chainRootId: refuses instead of minting — createPromptSession/createPrd never called, ticket fails, toast fires', async () => {
     const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
       transcriptExists: true,
       classifyTicket: async () => 'develop',
     })
-    const { useChat } = await import('../chat')
-    const { usePromptSessions } = await import('../promptSessions')
-    const { useToast } = await import('../toast')
     const createSpy = vi.spyOn(usePromptSessions.getState(), 'createPromptSession')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
@@ -1031,9 +1013,6 @@ describe('chat.ts resolveDispatchPromptSessionId is join-only, never mints (2026
       transcriptExists: true,
       classifyTicket: async () => 'develop',
     })
-    const { useChat } = await import('../chat')
-    const { usePromptSessions } = await import('../promptSessions')
-    const { useToast } = await import('../toast')
     const createSpy = vi.spyOn(usePromptSessions.getState(), 'createPromptSession')
 
     // ticketHistory has NO entry for 'missing-root' — the chain root is gone
@@ -1082,8 +1061,6 @@ describe('chat.ts resolveDispatchPromptSessionId is join-only, never mints (2026
       createPrd: async () => ({ ok: true, nn: 99, filename: '99-joined-epic-prd.md' }),
       activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: {} },
     })
-    const { useChat } = await import('../chat')
-    const { usePromptSessions } = await import('../promptSessions')
     const createSpy = vi.spyOn(usePromptSessions.getState(), 'createPromptSession')
 
     // Confirm this Epic is genuinely absent from the in-memory store up front.
@@ -1121,9 +1098,6 @@ describe('chat.ts resolveDispatchPromptSessionId is join-only, never mints (2026
       transcriptExists: true,
       classifyTicket: async () => 'develop',
     })
-    const { useChat } = await import('../chat')
-    const { useSessions } = await import('../sessions')
-    const { usePromptSessions } = await import('../promptSessions')
     useSessions.setState({
       tabs: [{ id: 't1', sessionId: 's1', cwd: '/proj' } as any],
     } as any)
@@ -1154,13 +1128,11 @@ describe('chat.ts resolveDispatchPromptSessionId is join-only, never mints (2026
 
 describe('chat.ts isChainResolved() (PRD 775)', () => {
   it('is unresolved when the ticket has no prdSlugs', async () => {
-    const { isChainResolved } = await import('../chat')
     expect(isChainResolved({ prdSlugs: [] } as any, [])).toBe(false)
     expect(isChainResolved({} as any, [])).toBe(false)
   })
 
   it('is unresolved when at least one slug lacks a completed job', async () => {
-    const { isChainResolved } = await import('../chat')
     const ticket = { prdSlugs: ['a', 'b'] } as any
     expect(isChainResolved(ticket, [{ slug: 'a', status: 'completed' }])).toBe(false)
     expect(
@@ -1172,7 +1144,6 @@ describe('chat.ts isChainResolved() (PRD 775)', () => {
   })
 
   it('is resolved once every slug in prdSlugs has scheduler job status "completed"', async () => {
-    const { isChainResolved } = await import('../chat')
     const ticket = { prdSlugs: ['a', 'b'] } as any
     expect(
       isChainResolved(ticket, [
@@ -1187,16 +1158,8 @@ describe('chat.ts open-chain selection for the composer picker (PRD 775)', () =>
   // Mirrors the filter TerminalChat.tsx applies to build its picker list:
   // dispatched-to-prd ROOT tickets (no chainRootId) that are NOT resolved.
   function openChains(history: any[], jobs: { slug: string; status: string }[]) {
-    return history.filter((t) => t.status === 'dispatched-to-prd' && !t.chainRootId && !isChainResolvedRef!(t, jobs))
+    return history.filter((t) => t.status === 'dispatched-to-prd' && !t.chainRootId && !isChainResolved(t, jobs))
   }
-  let isChainResolvedRef: ((t: any, jobs: any[]) => boolean) | undefined
-
-  beforeEach(async () => {
-    vi.resetModules()
-    vi.unstubAllGlobals()
-    const { isChainResolved } = await import('../chat')
-    isChainResolvedRef = isChainResolved
-  })
 
   it('yields no open chains (defaults to "New item") when ticketHistory has no dispatched-to-prd tickets', () => {
     expect(openChains([{ id: 't1', status: 'done' }], [])).toEqual([])
@@ -1219,18 +1182,12 @@ describe('chat.ts open-chain selection for the composer picker (PRD 775)', () =>
 })
 
 describe('chat.ts chain continuation (PRD 775)', () => {
-  beforeEach(() => {
-    vi.resetModules()
-    vi.unstubAllGlobals()
-  })
-
   it('continuing an open chain: sourcePromptId is the ROOT ticket id, and the new slug is appended to the ROOT ticket\'s prdSlugs (not the follow-up ticket\'s)', async () => {
     const { run, classifyTicket, createPrd, getCompleteHandler } = installWindowApiMock({
       transcriptExists: true,
       classifyTicket: async () => 'develop',
       createPrd: async () => ({ ok: true, nn: 10, filename: '10-second-prd.md' }),
     })
-    const { useChat } = await import('../chat')
 
     // Seed ticketHistory with an already-dispatched, unresolved root chain.
     useChat.setState({
@@ -1307,8 +1264,6 @@ describe('chat.ts chain continuation (PRD 775)', () => {
       classifyTicket: async () => 'develop',
       createPrd: async () => ({ ok: true, nn: 11, filename: '11-independent-prd.md' }),
     })
-    const { useChat } = await import('../chat')
-    const { usePromptSessions } = await import('../promptSessions')
     const createSpy = vi.spyOn(usePromptSessions.getState(), 'createPromptSession')
 
     useChat.setState({
@@ -1386,8 +1341,6 @@ describe('chat.ts chain continuation (PRD 775)', () => {
       createPrd: async () => ({ ok: true, nn: 20, filename: '20-first-prd.md' }),
       activeIndexOnDisk: { sessions: { t1: epicOnDisk }, events: {} },
     })
-    const { useChat } = await import('../chat')
-    const { usePromptSessions } = await import('../promptSessions')
     const createSpy = vi.spyOn(usePromptSessions.getState(), 'createPromptSession')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'kick off 1' })
@@ -1406,14 +1359,8 @@ describe('chat.ts chain continuation (PRD 775)', () => {
 })
 
 describe('chat.ts dispatchSend() activeTicket (immediate send)', () => {
-  beforeEach(() => {
-    vi.resetModules()
-    vi.unstubAllGlobals()
-  })
-
   it('sets an activeTicket for the very first/immediate send, not only for a dequeued one', async () => {
     const { run } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -1434,7 +1381,6 @@ describe('chat.ts dispatchSend() activeTicket (immediate send)', () => {
 
   it('folds the immediate-send activeTicket into ticketHistory as "done" on completion', async () => {
     const { run, getCompleteHandler } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -1450,14 +1396,8 @@ describe('chat.ts dispatchSend() activeTicket (immediate send)', () => {
 })
 
 describe('chat.ts queue-panel ticket lifecycle (PRD 750)', () => {
-  beforeEach(() => {
-    vi.resetModules()
-    vi.unstubAllGlobals()
-  })
-
   it('keeps a queued ticket visible in queue (status queued) while another turn is running', async () => {
     const { run } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -1475,7 +1415,6 @@ describe('chat.ts queue-panel ticket lifecycle (PRD 750)', () => {
       transcriptExists: true,
       classifyTicket: async () => 'inline',
     })
-    const { useChat } = await import('../chat')
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
@@ -1499,42 +1438,17 @@ describe('chat.ts queue-panel ticket lifecycle (PRD 750)', () => {
   })
 
   it('finalizes the in-flight ticket as "failed" (not "done") when the run errors', async () => {
-    const run = vi.fn().mockResolvedValue(undefined)
-    const classifyTicket = vi.fn(async () => 'inline' as const)
-    let errorHandler: ((e: { tabId: string; sessionId: string; message: string }) => void) | null = null
-    let completeHandler: ((e: { tabId: string; sessionId: string; finalMessage: string }) => void) | null = null
-    vi.stubGlobal('window', {
-      api: {
-        chat: {
-          run,
-          cancel: vi.fn(),
-          onQueued: vi.fn(),
-          onRunStarted: vi.fn(),
-          onOutput: vi.fn(),
-          onToolUse: vi.fn(),
-          onComplete: vi.fn((h) => { completeHandler = h; return () => { completeHandler = null } }),
-          onNeedsInput: vi.fn(),
-          onError: vi.fn((h) => { errorHandler = h; return () => { errorHandler = null } }),
-          onNotice: vi.fn(),
-          onExternalSend: vi.fn(),
-          classifyTicket,
-        },
-        transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl') },
-        config: { exists: vi.fn().mockResolvedValue(true) },
-        logs: { write: vi.fn() },
-      },
-    })
-    const { useChat } = await import('../chat')
+    const { run, getCompleteHandler, getErrorHandler } = installWindowApiMock({ transcriptExists: true })
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'first' })
     await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
 
     useChat.getState().send({ tabId: 't1', sessionId: 's1', cwd: '/proj', prompt: 'second' })
-    completeHandler!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
+    getCompleteHandler()!({ tabId: 't1', sessionId: 's1', finalMessage: 'done with first' })
 
     await vi.waitFor(() => expect(useChat.getState().get('t1').activeTicket?.status).toBe('running'))
 
-    errorHandler!({ tabId: 't1', sessionId: 's1', message: 'boom' })
+    getErrorHandler()!({ tabId: 't1', sessionId: 's1', message: 'boom' })
 
     await vi.waitFor(() => expect(useChat.getState().get('t1').activeTicket).toBeNull())
     const history = useChat.getState().get('t1').ticketHistory ?? []
@@ -1543,16 +1457,8 @@ describe('chat.ts queue-panel ticket lifecycle (PRD 750)', () => {
 })
 
 describe('chat.ts send() refuses while an Epic Terminal-mode PTY is attached (PRD 831)', () => {
-  beforeEach(() => {
-    vi.resetModules()
-    vi.unstubAllGlobals()
-  })
-
   it('blocks send and toasts an error when useEpicTerminal reports the tab attached', async () => {
     const { run } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
-    const { useEpicTerminal } = await import('../epicTerminal')
-    const { useToast } = await import('../toast')
 
     useEpicTerminal.getState().setAttached('epic-1', true)
 
@@ -1567,8 +1473,6 @@ describe('chat.ts send() refuses while an Epic Terminal-mode PTY is attached (PR
 
   it('sends normally once the Epic is detached again', async () => {
     const { run } = installWindowApiMock({ transcriptExists: true })
-    const { useChat } = await import('../chat')
-    const { useEpicTerminal } = await import('../epicTerminal')
 
     useEpicTerminal.getState().setAttached('epic-1', true)
     useEpicTerminal.getState().setAttached('epic-1', false)

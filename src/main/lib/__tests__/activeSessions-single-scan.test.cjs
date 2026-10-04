@@ -10,9 +10,12 @@
 import { vi } from 'vitest';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { activeProjectCwds, allProjectCwds, bustProjectCwdCache } = require('../activeSessions.cjs');
+const {
+  activeProjectCwds, allProjectCwds, bustProjectCwdCache, __waitForPendingRefresh,
+} = require('../activeSessions.cjs');
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'active-sessions-single-scan-'));
@@ -60,6 +63,38 @@ test('allProjectCwds then activeProjectCwds within the TTL perform exactly one d
   }
 });
 
+test('a rescan error keeps the old record and never throws into the synchronous caller', async () => {
+  const base = tmpDir();
+  try {
+    const projectsDir = path.join(base, 'projects');
+    const cwdA = path.join(base, 'proj-a');
+    fs.mkdirSync(cwdA);
+    writeTranscript(projectsDir, 'slug-a', 'a.jsonl', cwdA, 5 * 60 * 1000);
+
+    bustProjectCwdCache();
+    const warm = allProjectCwds({ projectsDir });
+
+    const future = Date.now() + 130_000;
+    vi.spyOn(Date, 'now').mockReturnValue(future);
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const readdirPromiseSpy = vi.spyOn(fsp, 'readdir').mockImplementation(() => Promise.reject(new Error('boom')));
+    try {
+      const stale = allProjectCwds({ projectsDir });
+      assert.deepEqual(stale, warm, 'a failing rescan must not disturb the synchronous, stale-serving caller');
+
+      await __waitForPendingRefresh(projectsDir);
+
+      const afterFailedRescan = allProjectCwds({ projectsDir });
+      assert.deepEqual(afterFailedRescan, warm, 'the old record must survive a rescan error');
+      assert.ok(errSpy.mock.calls.length >= 1, 'a rescan error must be logged once');
+    } finally {
+      vi.restoreAllMocks();
+    }
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test('maxCwds cap is applied per-view, identically to the old per-call semantics', () => {
   const base = tmpDir();
   try {
@@ -81,7 +116,7 @@ test('maxCwds cap is applied per-view, identically to the old per-call semantics
   }
 });
 
-test('after TTL expiry, the next call rescans', () => {
+test('after TTL expiry, the next call returns the stale record synchronously (no readdirSync) and kicks off an async rescan', async () => {
   const base = tmpDir();
   try {
     const projectsDir = path.join(base, 'projects');
@@ -90,15 +125,84 @@ test('after TTL expiry, the next call rescans', () => {
     writeTranscript(projectsDir, 'slug-a', 'a.jsonl', cwdA, 5 * 60 * 1000);
 
     bustProjectCwdCache();
-    allProjectCwds({ projectsDir }); // warm the cache
+    const warm = allProjectCwds({ projectsDir }); // warm the cache (first scan is sync)
 
     try {
       const future = Date.now() + 130_000; // > the 120s TTL
       vi.spyOn(Date, 'now').mockReturnValue(future);
 
       const readdirSpy = vi.spyOn(fs, 'readdirSync');
-      allProjectCwds({ projectsDir });
-      assert.ok(readdirSpy.mock.calls.length > 0, 'TTL expiry must force a rescan on the next call');
+      const stale = allProjectCwds({ projectsDir });
+      assert.deepEqual(stale, warm, 'expired cache must return the stale record, not block/rescan');
+      assert.equal(readdirSpy.mock.calls.length, 0, 'the expired-cache call must not perform a synchronous scan');
+    } finally {
+      vi.restoreAllMocks();
+    }
+
+    await __waitForPendingRefresh(projectsDir);
+    const after = allProjectCwds({ projectsDir });
+    assert.deepEqual(after, warm, 'data is unchanged, so the refreshed record must match');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('expired cache: 5 concurrent callers trigger exactly one async rescan', async () => {
+  const base = tmpDir();
+  try {
+    const projectsDir = path.join(base, 'projects');
+    const cwdA = path.join(base, 'proj-a');
+    fs.mkdirSync(cwdA);
+    writeTranscript(projectsDir, 'slug-a', 'a.jsonl', cwdA, 5 * 60 * 1000);
+
+    bustProjectCwdCache();
+    allProjectCwds({ projectsDir }); // warm the cache synchronously
+
+    const readdirPromiseSpy = vi.spyOn(fsp, 'readdir');
+    try {
+      const future = Date.now() + 130_000;
+      vi.spyOn(Date, 'now').mockReturnValue(future);
+
+      for (let i = 0; i < 5; i++) allProjectCwds({ projectsDir });
+
+      await __waitForPendingRefresh(projectsDir);
+      // One rescan == one fsp.readdir(projectsDir) call (the top-level dir listing).
+      const topLevelCalls = readdirPromiseSpy.mock.calls.filter((args) => args[0] === projectsDir);
+      assert.equal(topLevelCalls.length, 1, `expected exactly 1 async top-level rescan, got ${topLevelCalls.length}`);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('next call after the async rescan resolves sees new projects', async () => {
+  const base = tmpDir();
+  try {
+    const projectsDir = path.join(base, 'projects');
+    const cwdA = path.join(base, 'proj-a');
+    fs.mkdirSync(cwdA);
+    writeTranscript(projectsDir, 'slug-a', 'a.jsonl', cwdA, 5 * 60 * 1000);
+
+    bustProjectCwdCache();
+    const before = allProjectCwds({ projectsDir });
+    assert.equal(before.length, 1);
+
+    const future = Date.now() + 130_000;
+    vi.spyOn(Date, 'now').mockReturnValue(future);
+    try {
+      const cwdB = path.join(base, 'proj-b');
+      fs.mkdirSync(cwdB);
+      writeTranscript(projectsDir, 'slug-b', 'b.jsonl', cwdB, 1000);
+
+      const stale = allProjectCwds({ projectsDir }); // expired: stale + triggers rescan
+      assert.equal(stale.length, 1, 'still the stale record, new project not yet visible');
+
+      await __waitForPendingRefresh(projectsDir);
+
+      const fresh = allProjectCwds({ projectsDir });
+      assert.ok(fresh.includes(cwdA) && fresh.includes(cwdB), 'rescan must pick up the new project');
     } finally {
       vi.restoreAllMocks();
     }

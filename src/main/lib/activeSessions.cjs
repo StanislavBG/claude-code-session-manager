@@ -9,6 +9,7 @@
 // which PRD 356-retire purges along with its capture hook.
 
 const fs = require('node:fs');
+const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { KIND_CONFIG: WORKTREE_KIND_CONFIG } = require('./gitWorktree.cjs');
@@ -59,9 +60,16 @@ const MAX_CWDS = 50;
 // scheduler/prdParser.cjs's dirCache and queueHistory.cjs's historyCacheKey.
 // TTL sits above the 60 s dispatch-loop interval (scheduler POLL_INTERVAL_MS) so
 // one pass never re-scans cold. Cached arrays are frozen — shared, never mutated.
+// Stale-while-revalidate: once a projectsDir has been scanned at least once,
+// an expired cache entry is served to the (synchronous) caller as-is, and at
+// most one background fs.promises rescan is kicked off to refresh it. Only
+// the very first scan of a given projectsDir pays the synchronous cost —
+// every expiry after that is a cache read plus a fire-and-forget refresh.
 const CACHE_TTL_MS = 120_000;
+// Bounds how many project dirs the async rescan reads concurrently.
+const RESCAN_CONCURRENCY = 32;
 const EMPTY_CWDS = Object.freeze([]);
-const rawScanCache = new Map(); // projectsDir -> { dirMtimeMs, cachedAt, records }
+const rawScanCache = new Map(); // projectsDir -> { dirMtimeMs, cachedAt, records, refreshPromise }
 
 /** Forces the next activeProjectCwds/allProjectCwds call to rescan. */
 function bustProjectCwdCache() {
@@ -121,13 +129,49 @@ function readTailLines(filePath, maxBytes) {
 }
 
 /**
+ * scanOneProjectDirSync(projDir) → {rawCwd, newestMtimeMs} | null
+ * Newest *.jsonl's mtime plus its last parseable `cwd`, for one project dir.
+ */
+function scanOneProjectDirSync(projDir) {
+  let entries;
+  try {
+    entries = fs.readdirSync(projDir).filter((f) => f.endsWith('.jsonl'));
+  } catch { return null; }
+
+  let newestPath = null;
+  let newestMtimeMs = 0;
+  for (const tf of entries) {
+    const fp = path.join(projDir, tf);
+    try {
+      const st = fs.statSync(fp);
+      if (st.mtimeMs > newestMtimeMs) {
+        newestMtimeMs = st.mtimeMs;
+        newestPath = fp;
+      }
+    } catch { continue; }
+  }
+  if (!newestPath) return null;
+
+  const tlines = readTailLines(newestPath, TAIL_BYTES);
+  let rawCwd = null;
+  for (let i = tlines.length - 1; i >= 0; i--) {
+    let row;
+    try { row = JSON.parse(tlines[i]); } catch { continue; }
+    if (row.cwd) { rawCwd = row.cwd; break; }
+  }
+  return rawCwd ? { rawCwd, newestMtimeMs } : null;
+}
+
+/**
  * scanProjectsDir(projectsDir) → {rawCwd, newestMtimeMs}[] | null
  *
- * The one disk scan: readdirSync of projectsDir, then per project dir the
- * newest *.jsonl's mtime plus its last parseable `cwd`. Cached per
- * projectsDir (mtime-keyed, TTL backstop) so repeated calls — from
- * activeProjectCwds, allProjectCwds, or both — pay this cost at most once per
- * window. Returns null when projectsDir is missing/unreadable.
+ * The first scan of a given projectsDir is synchronous (readdirSync of
+ * projectsDir, then per project dir as above) and its result is cached.
+ * Every call after that is stale-while-revalidate: a fresh cache entry is
+ * returned as-is; an expired one is ALSO returned as-is (the stale record),
+ * while startAsyncRefresh kicks off at most one background fs.promises
+ * rescan to refresh it for the next caller. Returns null when projectsDir is
+ * missing/unreadable and no record has ever been cached for it.
  */
 function scanProjectsDir(projectsDir) {
   let dirMtimeMs;
@@ -146,46 +190,153 @@ function scanProjectsDir(projectsDir) {
     return cached.records;
   }
 
+  // A prior successful scan exists: serve it stale and refresh in the
+  // background rather than blocking this synchronous caller.
+  if (cached) {
+    startAsyncRefresh(projectsDir);
+    return cached.records;
+  }
+
+  // First-ever scan of this projectsDir: must be synchronous, since no
+  // record exists yet to serve stale.
   let slugs;
   try { slugs = fs.readdirSync(projectsDir); } catch { rawScanCache.delete(projectsDir); return null; }
 
   const records = [];
   for (const slug of slugs) {
-    const projDir = path.join(projectsDir, slug);
-    let entries;
-    try {
-      entries = fs.readdirSync(projDir).filter((f) => f.endsWith('.jsonl'));
-    } catch { continue; }
-
-    // Find the most recently modified transcript in this project dir.
-    let newestPath = null;
-    let newestMtimeMs = 0;
-    for (const tf of entries) {
-      const fp = path.join(projDir, tf);
-      try {
-        const st = fs.statSync(fp);
-        if (st.mtimeMs > newestMtimeMs) {
-          newestMtimeMs = st.mtimeMs;
-          newestPath = fp;
-        }
-      } catch { continue; }
-    }
-    if (!newestPath) continue;
-
-    // Read `cwd` from the last parseable line of the transcript.
-    const tlines = readTailLines(newestPath, TAIL_BYTES);
-    let rawCwd = null;
-    for (let i = tlines.length - 1; i >= 0; i--) {
-      let row;
-      try { row = JSON.parse(tlines[i]); } catch { continue; }
-      if (row.cwd) { rawCwd = row.cwd; break; }
-    }
-    if (rawCwd) records.push({ rawCwd, newestMtimeMs });
+    const rec = scanOneProjectDirSync(path.join(projectsDir, slug));
+    if (rec) records.push(rec);
   }
 
   Object.freeze(records);
-  rawScanCache.set(projectsDir, { dirMtimeMs, cachedAt: now0, records });
+  rawScanCache.set(projectsDir, { dirMtimeMs, cachedAt: now0, records, refreshPromise: null });
   return records;
+}
+
+/**
+ * readTailLinesAsync(filePath, maxBytes) → Promise<string[]>
+ * fs.promises counterpart of readTailLines, used only by the async rescan.
+ */
+async function readTailLinesAsync(filePath, maxBytes) {
+  let buf;
+  let fh;
+  try {
+    const stat = await fsp.stat(filePath);
+    if (stat.size === 0) return [];
+    const readSize = Math.min(maxBytes, stat.size);
+    fh = await fsp.open(filePath, 'r');
+    buf = Buffer.alloc(readSize);
+    await fh.read(buf, 0, readSize, stat.size - readSize);
+  } catch {
+    return [];
+  } finally {
+    if (fh) await fh.close().catch(() => {});
+  }
+  return buf.toString('utf8').split('\n').filter((l) => l.trim());
+}
+
+/**
+ * scanOneProjectDirAsync(projDir) → Promise<{rawCwd, newestMtimeMs} | null>
+ * fs.promises counterpart of scanOneProjectDirSync, used only by the async rescan.
+ */
+async function scanOneProjectDirAsync(projDir) {
+  let entries;
+  try {
+    entries = (await fsp.readdir(projDir)).filter((f) => f.endsWith('.jsonl'));
+  } catch { return null; }
+
+  let newestPath = null;
+  let newestMtimeMs = 0;
+  for (const tf of entries) {
+    const fp = path.join(projDir, tf);
+    try {
+      const st = await fsp.stat(fp);
+      if (st.mtimeMs > newestMtimeMs) {
+        newestMtimeMs = st.mtimeMs;
+        newestPath = fp;
+      }
+    } catch { continue; }
+  }
+  if (!newestPath) return null;
+
+  const tlines = await readTailLinesAsync(newestPath, TAIL_BYTES);
+  let rawCwd = null;
+  for (let i = tlines.length - 1; i >= 0; i--) {
+    let row;
+    try { row = JSON.parse(tlines[i]); } catch { continue; }
+    if (row.cwd) { rawCwd = row.cwd; break; }
+  }
+  return rawCwd ? { rawCwd, newestMtimeMs } : null;
+}
+
+/**
+ * rescanProjectsDirAsync(projectsDir) → Promise<{dirMtimeMs, records}>
+ * The background counterpart of the first-scan branch in scanProjectsDir:
+ * same semantics, entirely fs.promises, with the per-project-dir reads
+ * bounded to RESCAN_CONCURRENCY in flight at once. A top-level failure
+ * (missing dir, unreadable) is left to throw/reject — startAsyncRefresh's
+ * caller catches it, logs once, and keeps the old cached record.
+ */
+async function rescanProjectsDirAsync(projectsDir) {
+  const dirMtimeMs = (await fsp.stat(projectsDir)).mtimeMs;
+  const slugs = await fsp.readdir(projectsDir);
+
+  const records = [];
+  let nextIdx = 0;
+  async function worker() {
+    for (;;) {
+      const i = nextIdx++;
+      if (i >= slugs.length) return;
+      const rec = await scanOneProjectDirAsync(path.join(projectsDir, slugs[i]));
+      if (rec) records.push(rec);
+    }
+  }
+  const workerCount = Math.min(RESCAN_CONCURRENCY, slugs.length);
+  await Promise.all(Array.from({ length: workerCount }, worker));
+
+  Object.freeze(records);
+  return { dirMtimeMs, records };
+}
+
+/**
+ * startAsyncRefresh(projectsDir) → Promise<void>
+ * Kicks off at most one in-flight background rescan per projectsDir — later
+ * calls while one is in flight get back the same promise instead of starting
+ * another. On success the cache entry is swapped atomically; on failure the
+ * old record is kept and the error is logged once. Never throws/rejects
+ * into a synchronous caller — scanProjectsDir never awaits this.
+ */
+function startAsyncRefresh(projectsDir) {
+  const entry = rawScanCache.get(projectsDir);
+  if (!entry) return Promise.resolve();
+  if (entry.refreshPromise) return entry.refreshPromise;
+
+  const promise = rescanProjectsDirAsync(projectsDir)
+    .then((result) => {
+      const current = rawScanCache.get(projectsDir);
+      if (!current) return; // busted mid-flight; nothing to swap into
+      rawScanCache.set(projectsDir, {
+        dirMtimeMs: result.dirMtimeMs, cachedAt: Date.now(), records: result.records, refreshPromise: null,
+      });
+    })
+    .catch((err) => {
+      console.error(`[activeSessions] async rescan of ${projectsDir} failed, keeping stale record: ${err.message}`);
+      const current = rawScanCache.get(projectsDir);
+      if (current) current.refreshPromise = null;
+    });
+
+  entry.refreshPromise = promise;
+  return promise;
+}
+
+/**
+ * __waitForPendingRefresh(projectsDir) → Promise<void>
+ * Test-only hook: awaits the in-flight async rescan for projectsDir, if any.
+ * Resolves immediately when no refresh is in flight.
+ */
+function __waitForPendingRefresh(projectsDir) {
+  const entry = rawScanCache.get(projectsDir);
+  return entry && entry.refreshPromise ? entry.refreshPromise : Promise.resolve();
 }
 
 /**
@@ -300,4 +451,5 @@ module.exports = {
   projectRootOf,
   worktreeMainRootOf,
   bustProjectCwdCache,
+  __waitForPendingRefresh,
 };

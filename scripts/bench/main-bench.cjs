@@ -14,7 +14,9 @@ const { performance } = require('node:perf_hooks');
 
 const { __usageForOneForTest: usageForOne, __usageCacheForTest: usageCache } = require('../../src/main/transcripts.cjs');
 const { LRUCache } = require('../../src/main/lib/lruCache.cjs');
-const { allProjectCwds, activeProjectCwds, bustProjectCwdCache } = require('../../src/main/lib/activeSessions.cjs');
+const {
+  allProjectCwds, activeProjectCwds, bustProjectCwdCache, __waitForPendingRefresh,
+} = require('../../src/main/lib/activeSessions.cjs');
 
 const REPS = 9;
 const FIXTURE_BYTES = 15 * 1024 * 1024;
@@ -56,7 +58,7 @@ async function benchUsage(dir) {
 
 // Synthetic ~/.claude/projects tree: 2,000 project dirs, one transcript each,
 // mirroring the shape activeSessions.cjs scans in production (PRD 1518).
-function benchActiveSessions() {
+async function benchActiveSessions() {
   const DIRS = 2000;
   const projectsDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-bench-projects-'));
   try {
@@ -70,6 +72,8 @@ function benchActiveSessions() {
 
     const cold = [];
     const warm = [];
+    const warmAfterExpiry = [];
+    const realNow = Date.now;
     for (let r = 0; r < REPS; r++) {
       bustProjectCwdCache();
       let t = performance.now();
@@ -81,8 +85,23 @@ function benchActiveSessions() {
       allProjectCwds({ projectsDir });
       activeProjectCwds(90, { projectsDir });
       warm.push(performance.now() - t);
+
+      // Stale-while-revalidate: once a scan exists, a call past the 120s TTL
+      // must return the cached record synchronously (and only kick off a
+      // background async rescan) — measure that synchronous call alone.
+      // activeProjectCwds' default maxCwds (50) matches its real callers
+      // (heartbeatTick et al.), unlike allProjectCwds' 500-cap sweep.
+      Date.now = () => realNow() + 130_000;
+      try {
+        t = performance.now();
+        activeProjectCwds(90, { projectsDir });
+        warmAfterExpiry.push(performance.now() - t);
+      } finally {
+        Date.now = realNow;
+      }
+      await __waitForPendingRefresh(projectsDir); // settle before rmSync/next rep
     }
-    return { cold, warm, dirs: DIRS };
+    return { cold, warm, warmAfterExpiry, dirs: DIRS };
   } finally {
     fs.rmSync(projectsDir, { recursive: true, force: true });
   }
@@ -129,7 +148,7 @@ async function main() {
   }
   const ps = benchPs();
   const lru = benchLru();
-  const activeSessions = benchActiveSessions();
+  const activeSessions = await benchActiveSessions();
 
   const rows = [
     [`usageForOne cold full parse (${(usage.bytes / 1048576).toFixed(1)} MB)`, median(usage.cold)],
@@ -139,6 +158,7 @@ async function main() {
     [`LRUCache get x${lru.ops} @ cap 200`, median(lru.get)],
     [`allProjectCwds+activeProjectCwds cold (${activeSessions.dirs} dirs)`, median(activeSessions.cold)],
     [`allProjectCwds+activeProjectCwds warm (${activeSessions.dirs} dirs)`, median(activeSessions.warm)],
+    [`activeProjectCwds warm-after-TTL-expiry, stale served sync (${activeSessions.dirs} dirs)`, median(activeSessions.warmAfterExpiry)],
   ];
   console.log(`| bench | median ms (n=${REPS}) |\n| --- | --- |`);
   for (const [name, ms] of rows) console.log(`| ${name} | ${fmt(ms)} |`);

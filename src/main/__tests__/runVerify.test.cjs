@@ -1038,7 +1038,7 @@ test('sentinel FAIL + committedDuringRun:true → transcript_errors (FAIL never 
       allJobs: [],
       committedDuringRun: true,
     });
-    assert.equal(verdict.verdict, 'transcript_errors', `FAIL sentinel must not override to clean, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.verdict, 'sentinel_fail', `FAIL sentinel must not override to clean, got ${verdict.verdict}: ${verdict.reason}`);
     assert.equal(verdict.downgradeTo, 'needs_review');
   } finally {
     rmdir(tmp);
@@ -1087,7 +1087,7 @@ test('pre-sentinel heal: committed + SCHEDULER_VERDICT: FAIL + allowPreSentinelH
       committedDuringRun: true,
       allowPreSentinelHeal: true,
     });
-    assert.equal(verdict.verdict, 'transcript_errors', `FAIL sentinel must block pre-sentinel heal, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.verdict, 'sentinel_fail', `FAIL sentinel must block pre-sentinel heal, got ${verdict.verdict}: ${verdict.reason}`);
     assert.equal(verdict.downgradeTo, 'needs_review');
   } finally {
     rmdir(tmp);

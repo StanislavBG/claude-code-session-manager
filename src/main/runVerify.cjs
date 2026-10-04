@@ -550,6 +550,28 @@ function scanSentinel(resultEvent, events) {
 }
 
 /**
+ * One-line reason after `SCHEDULER_VERDICT: FAIL` (same two-source scan order
+ * as scanSentinel). Trimmed, capped at 300 chars; '' when absent.
+ */
+function scanSentinelReason(resultEvent, events) {
+  const RE = /^SCHEDULER_VERDICT:\s*FAIL\b[ \t]*([^\n]*)/m;
+  const clip = (m) => m[1].trim().slice(0, 300);
+  if (resultEvent && resultEvent.resultText) {
+    const m = resultEvent.resultText.match(RE);
+    if (m) return clip(m);
+  }
+  let lastToolResult = null;
+  for (const ev of events) {
+    if (ev.kind === 'tool_result') lastToolResult = ev;
+  }
+  if (lastToolResult && lastToolResult.content) {
+    const m = lastToolResult.content.match(RE);
+    if (m) return clip(m);
+  }
+  return '';
+}
+
+/**
  * Scan for a `FOREIGN_WIP_PATHS: <comma-separated paths>` evidence line —
  * the mandatory companion to a `SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP`
  * sentinel (see FINISH_PROTOCOL in scheduler.cjs). Same two-source scan order
@@ -1079,6 +1101,20 @@ async function verifyRun({
     // Scan for the SCHEDULER_VERDICT sentinel emitted by the finish protocol.
     const sentinel = scanSentinel(resultEvent, events);
 
+    // An explicit executor FAIL is always blocking — outranks every other
+    // verdict and every override below (early return). Transcript issues are
+    // kept as annotations so nothing is lost.
+    if (sentinel === 'fail') {
+      const failReason = scanSentinelReason(resultEvent, events);
+      const kept = [...annotations, ...issues.map((i) => ({ verdict: i.verdict, reason: i.reason }))];
+      return conclude(
+        'sentinel_fail',
+        'executor reported SCHEDULER_VERDICT: FAIL' + (failReason ? ': ' + failReason : ''),
+        'needs_review',
+        { sentinel, ...(kept.length ? { annotations: kept } : {}) },
+      );
+    }
+
     // Ground truth outranks heuristics: an exit-0 run that landed a commit
     // ATTRIBUTABLE TO THIS RUN (spawnJob's own guardHeadBefore/headAtExit
     // delta, or the repo-wide committedDuringRun window scan) and never
@@ -1377,6 +1413,7 @@ module.exports = {
   checkDeps,
   parseLog,
   scanSentinel,
+  scanSentinelReason,
   scanForeignWipPathsClaim,
   isMergeMainSlug,
   extractMergeMainPrNumber,

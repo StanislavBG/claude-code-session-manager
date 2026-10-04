@@ -148,7 +148,7 @@ test('non-zero exit → transcript_errors (evidence never applies to a failing r
 });
 
 // (c) the pristine, byte-for-byte-unmodified fixture — its own real FAIL sentinel — keeps today's behavior.
-test('explicit FAIL sentinel (the real, unmodified fixture) → transcript_errors byte-for-byte', async () => {
+test('explicit FAIL sentinel (the real, unmodified fixture) → sentinel_fail', async () => {
   const tmp = makeTmpDir();
   const repo = makeTmpGitRepo();
   try {
@@ -163,7 +163,7 @@ test('explicit FAIL sentinel (the real, unmodified fixture) → transcript_error
       jobLandedCommitThisRun: LANDED_COMMIT,
       exitCode: 0,
     });
-    assert.equal(verdict.verdict, 'transcript_errors', `expected transcript_errors, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.verdict, 'sentinel_fail', `expected sentinel_fail, got ${verdict.verdict}: ${verdict.reason}`);
     assert.equal(verdict.downgradeTo, 'needs_review');
     assert.equal(verdict.sentinel, 'fail');
   } finally { rmdir(tmp); rmdir(repo); }

@@ -50,6 +50,7 @@ const VERDICT_LABELS = {
   no_verdict_sentinel: 'no commit or verdict sentinel',
   abandoned_background_task: 'abandoned auto-backgrounded task',
   pass_no_commit: 'PASS sentinel but no commit landed',
+  sentinel_fail: 'executor reported SCHEDULER_VERDICT: FAIL',
   pass_no_commit_already_shipped: 'PASS with no commit — deliverables already shipped',
   pass_no_commit_prior_run_verified: 'PASS with no commit — prior run of this slug already landed the work',
   silent_no_op: 'no commit, clean tree — no evidence of work',

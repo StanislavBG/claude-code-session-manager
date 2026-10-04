@@ -252,6 +252,7 @@ export const VERDICT_LABELS: Record<string, string> = {
   no_verdict_sentinel: 'no commit or verdict sentinel',
   abandoned_background_task: 'abandoned auto-backgrounded task',
   pass_no_commit: 'PASS sentinel but no commit landed',
+  sentinel_fail: 'executor reported SCHEDULER_VERDICT: FAIL',
   silent_no_op: 'no commit, clean tree — no evidence of work',
   blocked_by_foreign_wip_streak: "blocked by a sibling job's foreign WIP 3x in a row",
 }

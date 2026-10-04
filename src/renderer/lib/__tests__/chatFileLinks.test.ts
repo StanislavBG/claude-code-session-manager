@@ -69,6 +69,30 @@ describe('linkifyFilePaths', () => {
   })
 })
 
+describe('bare domain names are not file paths', () => {
+  it('does not wrap bilko.run or www.example.com', () => {
+    const container = mount('<p>visit bilko.run and www.example.com today</p>')
+    const before = container.innerHTML
+    linkifyFilePaths(container)
+
+    expect(container.querySelector(`[${FILE_LINK_ATTR}]`)).toBeNull()
+    expect(container.innerHTML).toBe(before)
+  })
+
+  it('does not extract bilko.run or www.example.com', () => {
+    expect(extractFilePaths('visit bilko.run and www.example.com today')).toEqual([])
+  })
+
+  it('still wraps CLAUDE.md and src/app.run', () => {
+    const container = mount('<p>edit CLAUDE.md and src/app.run now</p>')
+    linkifyFilePaths(container)
+
+    const attrs = [...container.querySelectorAll(`[${FILE_LINK_ATTR}]`)].map((e) => e.getAttribute(FILE_LINK_ATTR))
+    expect(attrs).toEqual(['CLAUDE.md', 'src/app.run'])
+    expect(extractFilePaths('edit CLAUDE.md and src/app.run now')).toEqual(['CLAUDE.md', 'src/app.run'])
+  })
+})
+
 describe('resolveFileLinkTarget', () => {
   it('resolves a relative path against cwd', () => {
     expect(resolveFileLinkTarget('src/foo.ts', '/home/user/project')).toEqual({

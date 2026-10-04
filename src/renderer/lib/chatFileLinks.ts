@@ -30,6 +30,13 @@ const ALL_CAPS_WITH_UNDERSCORE_RE = /^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+$/
  * A token with a path separator is trusted as-is; only extensionless-looking,
  * separator-free tokens get the extra scrutiny.
  */
+// A separator-free token ending in a web TLD (e.g. "bilko.run") is a domain name
+// in prose, not a file — FILE_LINK_RE can't tell them apart, and the Editor can't open it.
+const DOMAIN_TLDS = new Set([
+  'com', 'org', 'net', 'io', 'dev', 'run', 'ai', 'co', 'app', 'me', 'us', 'uk', 'de',
+  'info', 'xyz', 'site', 'tech', 'cloud',
+])
+
 function isPlausibleFilePath(pathPart: string): boolean {
   const filePath = pathPart.replace(/(?::\d+)+$/, '')
   if (filePath.includes('/')) return true
@@ -37,6 +44,7 @@ function isPlausibleFilePath(pathPart: string): boolean {
   const ext = dot === -1 ? '' : filePath.slice(dot + 1)
   if (!ext || ext.length > MAX_EXTENSION_LENGTH) return false
   if (ALL_CAPS_WITH_UNDERSCORE_RE.test(ext)) return false
+  if (DOMAIN_TLDS.has(ext.toLowerCase())) return false
   return true
 }
 

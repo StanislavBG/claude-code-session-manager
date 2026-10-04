@@ -17,8 +17,14 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          'monaco-editor': ['monaco-editor'],
+        // A manualChunks *array* entry (the previous `{ 'monaco-editor': ['monaco-editor'] }`)
+        // resolves 'monaco-editor' to its full package entry and force-includes it — and
+        // everything it statically imports (every basic language + the ts/css/html workers) —
+        // as its own rollup entry point, regardless of what the app actually imports from it.
+        // A function instead only groups modules rollup *already* reached via the real import
+        // graph, so lib/monaco.ts's per-language imports actually control what ships.
+        manualChunks(id) {
+          if (id.includes('/node_modules/monaco-editor/')) return 'monaco-editor'
         },
       },
     },

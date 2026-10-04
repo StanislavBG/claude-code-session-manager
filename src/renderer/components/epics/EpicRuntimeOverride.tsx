@@ -1,7 +1,7 @@
 import { Choice } from '../ui/Choice'
 import { useModelCatalog } from '../../lib/useModelCatalog'
 import { modelFamily } from '../../lib/prettyModel'
-import { MODELS, EFFORTS } from '../tabs/AgentLibrary'
+import { MODELS, EFFORTS } from '../../lib/agentRuntimeOptions'
 
 /** The default option — writes no field on the Epic, so the persona's own value applies. */
 const AGENT_DEFAULT = "agent's setting"

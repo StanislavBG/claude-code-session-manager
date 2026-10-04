@@ -15,6 +15,7 @@ import { useAgentsDirWatch } from '../../lib/useAgentsDirWatch'
 import { modelFamily } from '../../lib/prettyModel'
 import { modelSupportsEffort } from '../../lib/effortSupport'
 import { useSessions } from '../../state/sessions'
+import { MODELS, EFFORTS } from '../../lib/agentRuntimeOptions'
 
 /**
  * Agent Library — list+detail editor over `~/.claude/agents/*.md` personas.
@@ -37,11 +38,7 @@ import { useSessions } from '../../state/sessions'
  * from the persona) is no longer editable here; saves pass it through untouched.
  */
 
-// Static fallback only — rendered when the live catalog is unavailable (ModelPicker).
-export const MODELS = ['inherit', 'haiku', 'sonnet', 'opus', 'fable'] as const
-// Static fallback only — rendered when the live catalog is unavailable (EffortPicker).
-export const EFFORTS = ['inherit', 'low', 'medium', 'high', 'xhigh', 'max'] as const
-const TOOLS = ['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'WebFetch', 'WebSearch', 'Task']
+const TOOLS =['Read', 'Grep', 'Glob', 'Bash', 'Write', 'Edit', 'WebFetch', 'WebSearch', 'Task']
 const COLORS = ['', 'red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink']
 const COLOR_SWATCH: Record<string, string> = {
   red: '#c0392b', orange: '#b85c34', yellow: '#c9a227', green: '#6f7d52',

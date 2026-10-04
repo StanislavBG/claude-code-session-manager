@@ -202,8 +202,10 @@ End every plan with exactly one validate PRD:
    depends on). Why: `dependsOn` is walked transitively.
 3. Goal: the plan's slugs and titles.
 4. Criteria: one per PRD, naming its file
-   (`session-manager-operations/scheduler/epics/<epic-id>/prds/<NN>-<slug>.md` while queued,
-   `prds-archived/` beside it once done; find it by slug). The last: write and commit
+   (`$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/<epic-id>/prds/<NN>-<slug>.md`
+   while queued, `prds-archived/` (possibly a timestamped subfolder) beside it once done; find
+   it by slug. Why: `session-manager-operations/scheduler/` is gitignored, so it is never in
+   the validator's job worktree. The last: write and commit
    `session-manager-operations/reviews/validation/<epic-id>/<validate-slug>.md`.
 5. Notes: "Work as the validator persona — the procedure is your system prompt." and a line
    `Base: <sha>`, the SHA from step 11.

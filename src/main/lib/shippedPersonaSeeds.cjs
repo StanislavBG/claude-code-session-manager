@@ -207,6 +207,16 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         tools: "Read, Grep, Glob, Bash",
       },
     },
+    {
+      commit: "<fill in>",
+      bodySha256: "ca159cd47ac4b618af842c6ccd59107fac4a34b0efcfa5dfe7d06875736156ed",
+      fm: {
+        description: "Validates a finished PLAN (the PRDs its validate PRD lists) once, after its last PRD lands — re-runs each PRD's gate, checks every acceptance criterion against the real tree, reviews the plan's combined diff, and reports one VERIFIED/REFUTED verdict per PRD via sentinel lines. Runs headless as a scheduled PRD (agentType: validator); never edits product code and never queues work.",
+        model: "sonnet",
+        title: "Engineering — Plan Validator",
+        tools: "Read, Grep, Glob, Bash",
+      },
+    },
   ],
   "demo-video-builder": [
     {

@@ -120,3 +120,14 @@ test('the seeded validator body is under AGENT_BODY_CHAR_CAP and contains both r
   expect(trimmed).not.toContain('Report explicitly:');
   expect(trimmed.endsWith('report them.')).toBe(true);
 });
+
+test('the seeded validator body resolves PRD files under SM_PROJECT_ROOT, not the job worktree', () => {
+  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const raw = fs.readFileSync(seedSrc('validator'), 'utf8');
+  const { body } = splitFrontmatter(raw);
+  const trimmed = body.trim();
+
+  expect(trimmed).toContain('$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/');
+  expect(trimmed).toContain('prds-archived/');
+  expect(trimmed).not.toContain('session-manager-operations/scheduler/epics/<epic>/prds/` while queued');
+});

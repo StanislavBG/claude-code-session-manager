@@ -28,6 +28,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { git, initRepo, registerActiveProject, writeProjectQueue, writeRunLog } = require('./_helpers/schedulerHarness.cjs');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'looks-done-test-'));
@@ -66,12 +67,31 @@ function initRepoOnMain(dir) {
   git(['commit', '-q', '-m', 'initial'], dir);
 }
 
-function commitFile(dir, relPath, content, message) {
+// dateSecs, when given, pins GIT_AUTHOR_DATE/GIT_COMMITTER_DATE (epoch seconds) so
+// commit ordering relative to a recorded since/startedAt/queuedAt is deterministic
+// instead of relying on wall-clock sleeps past git --since's 1s resolution.
+function commitFile(dir, relPath, content, message, dateSecs) {
   const abs = path.join(dir, relPath);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, content);
   git(['add', relPath], dir);
-  git(['commit', '-q', '-m', message], dir);
+  if (dateSecs == null) {
+    git(['commit', '-q', '-m', message], dir);
+    return;
+  }
+  execFileSync('git', ['commit', '-q', '-m', message], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_DATE: `@${dateSecs} +0000`,
+      GIT_COMMITTER_DATE: `@${dateSecs} +0000`,
+    },
+  });
+}
+
+function afterSecs(isoDate, offset) {
+  return Math.floor(Date.parse(isoDate) / 1000) + offset;
 }
 
 // Epic-scoped, not the legacy flat prds/ dir: the flat dir is retired and
@@ -98,10 +118,6 @@ function readTerminalRow(queuePath, projectCwd, slug) {
   if (!fs.existsSync(historyPath)) return undefined;
   const lines = fs.readFileSync(historyPath, 'utf8').trim().split('\n').filter(Boolean);
   return lines.map((l) => JSON.parse(l)).reverse().find((j) => j.slug === slug);
-}
-
-async function wait(ms) {
-  await new Promise((r) => setTimeout(r, ms));
 }
 
 // Every test in this file shares ONE tmpHome (see the module-level mkdtempSync
@@ -150,11 +166,10 @@ test('failed + no result event (unverified-shaped) + later commit touching decla
   ]);
   writeRunLog('run-171', '171-example', ['[scheduler] starting 171-example']); // no result event
 
-  await wait(1100); // git --since has 1s resolution
   // Must name this job's own slug to be attributable (see
   // attributeLandedCommits's 'slug trailer' rule) — path overlap alone is no
   // longer evidence.
-  commitFile(projectCwd, 'src/foo.js', 'hello', 'fix 171-example');
+  commitFile(projectCwd, 'src/foo.js', 'hello', 'fix 171-example', afterSecs(startedAt, 2));
 
   await reverifyNeedsReview();
 
@@ -194,8 +209,13 @@ test('failed + a real result event (genuine gate failure) → not a candidate, s
     JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: 'tests failed' }),
   ]);
 
-  await wait(1100);
-  commitFile(projectCwd, 'src/bar.js', 'hello', 'unrelated later commit touching the declared path');
+  commitFile(
+    projectCwd,
+    'src/bar.js',
+    'hello',
+    'unrelated later commit touching the declared path',
+    afterSecs(startedAt, 2)
+  );
 
   await reverifyNeedsReview();
 
@@ -263,8 +283,7 @@ test('computeLooksDone: no declared paths on the PRD → null, never fabricates 
   ].join('\n'));
 
   const startedAt = new Date().toISOString();
-  await wait(1100);
-  commitFile(projectCwd, 'src/whatever.js', 'x', 'some later commit');
+  commitFile(projectCwd, 'src/whatever.js', 'x', 'some later commit', afterSecs(startedAt, 2));
 
   const job = { slug: '09-no-paths', cwd: projectCwd, startedAt };
   const looksDone = await computeLooksDone(job);
@@ -342,8 +361,7 @@ test('findSatisfyingCommitOnMain: single declared path, satisfying commit lands 
   ].join('\n'));
 
   const queuedAt = new Date().toISOString();
-  await wait(1100);
-  commitFile(projectCwd, 'src/real-work.js', 'hello', 'fix real-work');
+  commitFile(projectCwd, 'src/real-work.js', 'hello', 'fix real-work', afterSecs(queuedAt, 2));
 
   const job = { slug: '40-single-path', cwd: projectCwd, queuedAt };
   const commits = await findSatisfyingCommitOnMain(job);
@@ -360,10 +378,15 @@ test('findSatisfyingCommitOnMain: two declared paths but only ONE lands → [] (
   ].join('\n'));
 
   const queuedAt = new Date().toISOString();
-  await wait(1100);
   // Only the incidentally-cited context file gets a later, UNRELATED commit
   // — the actual target path (src/real-work.js) never lands.
-  commitFile(projectCwd, 'src/main/hotfile.js', 'unrelated change', 'unrelated commit');
+  commitFile(
+    projectCwd,
+    'src/main/hotfile.js',
+    'unrelated change',
+    'unrelated commit',
+    afterSecs(queuedAt, 2)
+  );
 
   const job = { slug: '41-partial-path', cwd: projectCwd, queuedAt };
   const commits = await findSatisfyingCommitOnMain(job);
@@ -380,9 +403,14 @@ test('findSatisfyingCommitOnMain: two declared paths, BOTH land → returns sati
   ].join('\n'));
 
   const queuedAt = new Date().toISOString();
-  await wait(1100);
-  commitFile(projectCwd, 'src/real-work.js', 'hello', 'fix real-work');
-  commitFile(projectCwd, 'src/main/hotfile.js', 'hello', 'fix hotfile too');
+  commitFile(projectCwd, 'src/real-work.js', 'hello', 'fix real-work', afterSecs(queuedAt, 2));
+  commitFile(
+    projectCwd,
+    'src/main/hotfile.js',
+    'hello',
+    'fix hotfile too',
+    afterSecs(queuedAt, 3)
+  );
 
   const job = { slug: '42-both-paths', cwd: projectCwd, queuedAt };
   const commits = await findSatisfyingCommitOnMain(job);
@@ -433,11 +461,16 @@ test('sibling PRD commit on the same declared path is not attributable — compu
   ].join('\n'));
 
   const startedAt = new Date().toISOString();
-  await wait(1100);
   // Sibling job B's commit: touches job A's declared path, but names neither
   // job A's slug nor any `sm-job/1204-job-a` branch, and job A's row carries
   // no landedCommit of its own.
-  commitFile(projectCwd, 'src/main/scheduler.cjs', 'sibling change', 'feat(scheduler): restructure the backlog into Epic groups (1205-job-b)');
+  commitFile(
+    projectCwd,
+    'src/main/scheduler.cjs',
+    'sibling change',
+    'feat(scheduler): restructure the backlog into Epic groups (1205-job-b)',
+    afterSecs(startedAt, 2)
+  );
 
   const jobA = {
     slug: '1204-job-a',
@@ -469,12 +502,23 @@ test('this job\'s OWN attributable commit (landedCommit) still produces looksDon
   ].join('\n'));
 
   const startedAt = new Date().toISOString();
-  await wait(1100);
   // A sibling commit lands on the same path first...
-  commitFile(projectCwd, 'src/main/scheduler.cjs', 'sibling change', 'feat(scheduler): unrelated sibling work');
+  commitFile(
+    projectCwd,
+    'src/main/scheduler.cjs',
+    'sibling change',
+    'feat(scheduler): unrelated sibling work',
+    afterSecs(startedAt, 2)
+  );
   // ...then this job's OWN commit lands, exactly as spawnJob's finalize step
   // would have recorded it on job.landedCommit.
-  commitFile(projectCwd, 'src/main/scheduler.cjs', 'this job\'s own change', 'fix(scheduler): attribution fix');
+  commitFile(
+    projectCwd,
+    'src/main/scheduler.cjs',
+    'this job\'s own change',
+    'fix(scheduler): attribution fix',
+    afterSecs(startedAt, 3)
+  );
   const ownSha = git(['rev-parse', 'HEAD'], projectCwd).trim();
 
   const jobA = {

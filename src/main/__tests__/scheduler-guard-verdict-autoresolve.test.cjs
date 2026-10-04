@@ -38,6 +38,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-verdict-autoresolve-test-'));
 process.env.HOME = tmpHome;
@@ -228,12 +229,31 @@ test('(d) a dependsOn chain drains once a guard-parked blocker (no auto-fix, no 
 
 // --- end-to-end: reverifyNeedsReview computes looksDone for a guard-parked row ---
 
-function commitFile(dir, relPath, content, message) {
+// dateSecs, when given, pins GIT_AUTHOR_DATE/GIT_COMMITTER_DATE (epoch seconds) so
+// commit ordering relative to a recorded startedAt is deterministic instead of
+// relying on wall-clock sleeps past git --since's 1s resolution.
+function commitFile(dir, relPath, content, message, dateSecs) {
   const abs = path.join(dir, relPath);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, content);
   git(['add', relPath], dir);
-  git(['commit', '-q', '-m', message], dir);
+  if (dateSecs == null) {
+    git(['commit', '-q', '-m', message], dir);
+    return;
+  }
+  execFileSync('git', ['commit', '-q', '-m', message], {
+    cwd: dir,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_DATE: `@${dateSecs} +0000`,
+      GIT_COMMITTER_DATE: `@${dateSecs} +0000`,
+    },
+  });
+}
+
+function afterSecs(isoDate, offset) {
+  return Math.floor(Date.parse(isoDate) / 1000) + offset;
 }
 
 function writePrd(cwd, slug, body) {
@@ -241,10 +261,6 @@ function writePrd(cwd, slug, body) {
   fs.mkdirSync(dir, { recursive: true });
   const text = `---\ntitle: Test PRD\ncwd: ${cwd}\nestimateMinutes: 30\n---\n${body}\n`;
   fs.writeFileSync(path.join(dir, `${slug}.md`), text);
-}
-
-async function wait(ms) {
-  await new Promise((r) => setTimeout(r, ms));
 }
 
 test('reverifyNeedsReview computes looksDone for a guard-parked (silent_no_op) row with no auto-fix history', async () => {
@@ -272,12 +288,17 @@ test('reverifyNeedsReview computes looksDone for a guard-parked (silent_no_op) r
     },
   ]);
 
-  await wait(1100); // git --since has 1s resolution
   // Must be attributable to THIS job (see attributeLandedCommits) — path
   // overlap alone is no longer evidence. The row's own `landedCommit`
   // ('deadbeef') is a stale/unresolvable placeholder, so this falls to the
   // 'slug trailer' rule by naming the job's own slug in the commit message.
-  commitFile(projectCwd, 'src/thing.js', 'hello', 'the actual fix for 1181-guard-parked landed');
+  commitFile(
+    projectCwd,
+    'src/thing.js',
+    'hello',
+    'the actual fix for 1181-guard-parked landed',
+    afterSecs(startedAt, 2)
+  );
 
   await reverifyNeedsReview();
 
@@ -314,8 +335,7 @@ test('reverifyNeedsReview never computes looksDone for a worktree_integration_fa
     },
   ]);
 
-  await wait(1100);
-  commitFile(projectCwd, 'src/thing.js', 'hello', 'unrelated later commit');
+  commitFile(projectCwd, 'src/thing.js', 'hello', 'unrelated later commit', afterSecs(startedAt, 2));
 
   await reverifyNeedsReview();
 
@@ -332,10 +352,21 @@ test('reverifyNeedsReview heals a stale shared_tree_reverted row (autoFixAttempt
   writePrd(projectCwd, '1229-stale-shared-tree', '# Implementation notes\nEdit `src/thing.js`.');
 
   const startedAt = new Date(Date.now() - 5000).toISOString();
-  await wait(1100);
-  commitFile(projectCwd, 'src/thing.js', 'job work', 'the job own commit');
+  commitFile(
+    projectCwd,
+    'src/thing.js',
+    'job work',
+    'the job own commit',
+    afterSecs(startedAt, 2)
+  );
   const landed = git(['rev-parse', 'HEAD'], projectCwd).trim();
-  commitFile(projectCwd, 'docs/unrelated.md', 'human', 'human commit after the job');
+  commitFile(
+    projectCwd,
+    'docs/unrelated.md',
+    'human',
+    'human commit after the job',
+    afterSecs(startedAt, 3)
+  );
 
   const queuePath = writeProjectQueue(projectCwd, [
     {

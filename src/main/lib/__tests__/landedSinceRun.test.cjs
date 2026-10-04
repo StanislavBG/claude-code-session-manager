@@ -33,19 +33,29 @@ function mkRepoOnMain() {
   return dir;
 }
 
-function commitFile(dir, relPath, content, message) {
+// dateSecs, when given, pins GIT_AUTHOR_DATE/GIT_COMMITTER_DATE (epoch seconds) so
+// commit ordering relative to a recorded `since` is deterministic instead of relying
+// on wall-clock sleeps past git --since's 1s resolution.
+function commitFile(dir, relPath, content, message, dateSecs) {
   const abs = path.join(dir, relPath);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
   fs.writeFileSync(abs, content);
   execFileSync('git', ['-C', dir, 'add', relPath]);
-  execFileSync('git', ['-C', dir, 'commit', '-q', '-m', message]);
+  const env =
+    dateSecs == null
+      ? process.env
+      : {
+          ...process.env,
+          GIT_AUTHOR_DATE: `@${dateSecs} +0000`,
+          GIT_COMMITTER_DATE: `@${dateSecs} +0000`,
+        };
+  execFileSync('git', ['-C', dir, 'commit', '-q', '-m', message], { env });
 }
 
 test('finds a commit landed after sinceIso that touches a declared path', async () => {
   const dir = mkRepo();
   const since = new Date().toISOString();
-  await new Promise((r) => setTimeout(r, 1100)); // git --since has 1s resolution
-  commitFile(dir, 'src/foo.js', 'hello', 'touch foo');
+  commitFile(dir, 'src/foo.js', 'hello', 'touch foo', Math.floor(Date.parse(since) / 1000) + 2);
   const shas = await landedSinceRun(dir, since, ['src/foo.js']);
   assert.strictEqual(shas.length, 1);
 });
@@ -53,8 +63,13 @@ test('finds a commit landed after sinceIso that touches a declared path', async 
 test('ignores a commit that does not touch any declared path', async () => {
   const dir = mkRepo();
   const since = new Date().toISOString();
-  await new Promise((r) => setTimeout(r, 1100));
-  commitFile(dir, 'src/unrelated.js', 'hello', 'touch unrelated');
+  commitFile(
+    dir,
+    'src/unrelated.js',
+    'hello',
+    'touch unrelated',
+    Math.floor(Date.parse(since) / 1000) + 2
+  );
   const shas = await landedSinceRun(dir, since, ['src/foo.js']);
   assert.deepStrictEqual(shas, []);
 });
@@ -87,29 +102,29 @@ test('has a bounded default timeout', () => {
 
 test('landedOnMainSince: finds a commit on main after sinceIso touching a declared path', async () => {
   const dir = mkRepoOnMain();
-  commitFile(dir, 'README.md', 'hello', 'initial');
-  const since = new Date().toISOString();
-  await new Promise((r) => setTimeout(r, 1100));
-  commitFile(dir, 'src/foo.js', 'hello', 'fix foo');
+  const nowSecs = Math.floor(Date.now() / 1000);
+  commitFile(dir, 'README.md', 'hello', 'initial', nowSecs - 10);
+  const since = new Date(nowSecs * 1000).toISOString();
+  commitFile(dir, 'src/foo.js', 'hello', 'fix foo', nowSecs + 2);
   const shas = await landedOnMainSince(dir, since, ['src/foo.js']);
   assert.strictEqual(shas.length, 1);
 });
 
 test('landedOnMainSince: ignores a commit that does not touch any declared path', async () => {
   const dir = mkRepoOnMain();
-  commitFile(dir, 'README.md', 'hello', 'initial');
-  const since = new Date().toISOString();
-  await new Promise((r) => setTimeout(r, 1100));
-  commitFile(dir, 'src/unrelated.js', 'hello', 'touch unrelated');
+  const nowSecs = Math.floor(Date.now() / 1000);
+  commitFile(dir, 'README.md', 'hello', 'initial', nowSecs - 10);
+  const since = new Date(nowSecs * 1000).toISOString();
+  commitFile(dir, 'src/unrelated.js', 'hello', 'touch unrelated', nowSecs + 2);
   const shas = await landedOnMainSince(dir, since, ['src/foo.js']);
   assert.deepStrictEqual(shas, []);
 });
 
 test('landedOnMainSince: a commit older than sinceIso is not evidence', async () => {
   const dir = mkRepoOnMain();
-  commitFile(dir, 'src/foo.js', 'hello', 'fix foo');
-  await new Promise((r) => setTimeout(r, 1100));
-  const since = new Date().toISOString();
+  const nowSecs = Math.floor(Date.now() / 1000);
+  commitFile(dir, 'src/foo.js', 'hello', 'fix foo', nowSecs - 10);
+  const since = new Date(nowSecs * 1000).toISOString();
   const shas = await landedOnMainSince(dir, since, ['src/foo.js']);
   assert.deepStrictEqual(shas, []);
 });

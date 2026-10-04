@@ -1422,14 +1422,16 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
 
   try {
     await execGit(['merge', '--ff-only', branch], { cwd, timeout: 30_000 });
-    return { ok: true, integrated: true, fastForward: true };
+    // The branch tip we fast-forwarded to, read from the branch ref (not HEAD,
+    // which a concurrent writer may already have moved).
+    return { ok: true, integrated: true, fastForward: true, sha: await tryResolveCommit(cwd, `${branch}^{commit}`) };
   } catch {
     // Main tree advanced since the worktree branched (a sibling job/Epic
     // merged first) — a real merge commit still lands the branch's commit(s).
   }
   try {
     await execGit(['merge', '--no-ff', '--no-edit', '-m', mergeMessage, branch], { cwd, timeout: 30_000 });
-    return { ok: true, integrated: true, mergeCommit: true };
+    return { ok: true, integrated: true, mergeCommit: true, sha: await readHeadSha(cwd) };
   } catch (e) {
     const stderrText = (e && (e.stderrText || e.message)) || String(e);
     // git refuses this class of merge before ever touching MERGE_HEAD, so
@@ -1452,6 +1454,7 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
             ok: true,
             integrated: true,
             mergeCommit: true,
+            sha: await readHeadSha(cwd),
             autoResolved: 'identical_working_tree_duplicates',
             resolvedPaths: allPaths,
           };
@@ -1479,7 +1482,7 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
           await resolveByConcatenation({ cwd, paths });
           await execGit(['add', ...paths], { cwd, timeout: 30_000 });
           await execGit(['commit', '-m', mergeMessage], { cwd, timeout: 30_000 });
-          return { ok: true, integrated: true, mergeCommit: true, autoResolved: 'pure_addition_concat', resolvedPaths: paths };
+          return { ok: true, integrated: true, mergeCommit: true, sha: await readHeadSha(cwd), autoResolved: 'pure_addition_concat', resolvedPaths: paths };
         }
       } catch { /* fall through to the abort */ }
     }

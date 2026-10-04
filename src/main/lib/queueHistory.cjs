@@ -236,11 +236,96 @@ async function readHistoryFile(target, cap) {
 let historyCacheKey = null;
 let historyCacheMap = null;
 
+// Per-file byte-offset cache backing historyTerminalBySlug's incremental
+// read: path -> { ino, size, offset, map }. `map` is this file's own
+// slug -> record result as of `offset` bytes; `offset` always sits on a
+// line boundary (the byte right after the last consumed '\n') so a partial
+// trailing line never gets counted as consumed.
+const perFileCache = new Map();
+
+/**
+ * needs_review_entry/needs_review_resolution lines (needsReviewLedger.cjs)
+ * share this file but aren't a job's terminal record — skip them, or a
+ * needs_review episode logged for a slug AFTER its real terminal row (e.g.
+ * it re-parked on a later run) would overwrite a true 'completed' with a
+ * kind-less, status-less row read as "not terminal".
+ */
+function applyTerminalLines(text, map) {
+  if (!text) return;
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const j = JSON.parse(line);
+      if (j?.kind && j.kind !== 'terminal') continue;
+      if (j?.slug) map.set(j.slug, { status: j.status, finishedAt: j.finishedAt, landedCommit: j.landedCommit ?? null });
+    } catch {
+      // corrupt/partial line — ignore
+    }
+  }
+}
+
+/**
+ * Returns this one file's slug -> record map, reading only the bytes
+ * appended since the last call when possible. Falls back to a full
+ * re-parse when the file is new to the cache, its inode changed, or its
+ * size went backwards (rotation/truncation).
+ */
+async function readFileTerminalMap(target, stat) {
+  const cached = perFileCache.get(target);
+  const { ino, size } = stat;
+
+  if (cached && cached.ino === ino && size >= cached.size) {
+    if (size === cached.size) return cached.map;
+
+    const len = size - cached.offset;
+    const fh = await fsp.open(target, 'r');
+    let buf;
+    try {
+      buf = Buffer.alloc(len);
+      await fh.read(buf, 0, len, cached.offset);
+    } finally {
+      await fh.close();
+    }
+
+    // Stop at the last complete newline — a partial trailing line (still
+    // being written) is left unconsumed so the next pass re-reads it once
+    // it's whole, instead of permanently skipping or mis-parsing it.
+    const lastNl = buf.lastIndexOf(0x0a);
+    const map = new Map(cached.map);
+    let offset = cached.offset;
+    if (lastNl !== -1) {
+      applyTerminalLines(buf.subarray(0, lastNl + 1).toString('utf8'), map);
+      offset = cached.offset + lastNl + 1;
+    }
+    const updated = { ino, size, offset, map };
+    perFileCache.set(target, updated);
+    return map;
+  }
+
+  // Full (re)parse: first time seeing this path, its inode changed, or it
+  // shrank (log rotation/truncation) — the existing offset is no longer
+  // trustworthy.
+  let text = '';
+  try {
+    text = await fsp.readFile(target, 'utf8');
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  const map = new Map();
+  applyTerminalLines(text, map);
+  const lastNl = Buffer.from(text, 'utf8').lastIndexOf(0x0a);
+  const offset = lastNl === -1 ? 0 : lastNl + 1;
+  perFileCache.set(target, { ino, size, offset, map });
+  return map;
+}
+
 /**
  * Full-file scan of history.jsonl, returning slug -> { status, finishedAt }
  * for the most recently appended record of each slug. O(H) where H is the
  * line count of history.jsonl; cached by the file's mtime so a reconcile()
- * pass with no new archives since the last call is O(1).
+ * pass with no new archives since the last call is O(1). When the mtime
+ * check misses, each file is re-read incrementally via readFileTerminalMap
+ * rather than re-parsed from byte zero.
  *
  * Exists so reconcile() can tell "this on-disk PRD's job row already left
  * jobs[] into history — do not resurrect it as a fresh pending job" apart
@@ -248,36 +333,22 @@ let historyCacheMap = null;
  */
 async function historyTerminalBySlug() {
   const paths = historyPaths();
-  const mtimes = await Promise.all(paths.map(async (p2) => {
-    try { return (await fsp.stat(p2)).mtimeMs; } catch { return -1; }
+  const stats = await Promise.all(paths.map(async (p2) => {
+    try { return await fsp.stat(p2); } catch { return null; }
   }));
-  const cacheKey = paths.map((p2, i) => `${p2}:${mtimes[i]}`).join('|');
+  const cacheKey = paths.map((p2, i) => `${p2}:${stats[i] ? stats[i].mtimeMs : -1}`).join('|');
   if (cacheKey === historyCacheKey && historyCacheMap) return historyCacheMap;
 
   const map = new Map();
-  for (const p2 of paths) {
-    let text = '';
-    try {
-      text = await fsp.readFile(p2, 'utf8');
-    } catch (e) {
-      if (e.code !== 'ENOENT') throw e;
+  for (let i = 0; i < paths.length; i++) {
+    const p2 = paths[i];
+    const stat = stats[i];
+    if (!stat) {
+      perFileCache.delete(p2);
+      continue;
     }
-    if (!text) continue;
-    for (const line of text.split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        const j = JSON.parse(line);
-        // needs_review_entry/needs_review_resolution lines (needsReviewLedger.cjs)
-        // share this file but aren't a job's terminal record — skip them, or a
-        // needs_review episode logged for a slug AFTER its real terminal row
-        // (e.g. it re-parked on a later run) would overwrite a true 'completed'
-        // with a kind-less, status-less row read as "not terminal".
-        if (j?.kind && j.kind !== 'terminal') continue;
-        if (j?.slug) map.set(j.slug, { status: j.status, finishedAt: j.finishedAt, landedCommit: j.landedCommit ?? null });
-      } catch {
-        // corrupt/partial line — ignore
-      }
-    }
+    const fileMap = await readFileTerminalMap(p2, stat);
+    for (const [slug, rec] of fileMap) map.set(slug, rec);
   }
   historyCacheKey = cacheKey;
   historyCacheMap = map;

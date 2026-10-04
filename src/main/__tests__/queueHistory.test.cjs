@@ -338,6 +338,86 @@ test('completedSlugsForCwd: returns an empty Set when the project has no history
   expect(slugs.size).toBe(0);
 });
 
+// ---------- historyTerminalBySlug incremental byte-offset cache ----------
+//
+// PRD 1520: historyTerminalBySlug used to re-read and JSON.parse the whole
+// history.jsonl on every mtime change. These guard the offset-cache that
+// now reads only the bytes appended since the last call.
+
+test('historyTerminalBySlug: incremental update after an append matches a full re-parse', async () => {
+  const a = old({ slug: 'inc-a', status: 'completed', runId: 'ria' });
+  await queueHistory.appendHistory([a]);
+  const first = await queueHistory.historyTerminalBySlug();
+  expect(first.get('inc-a')).toEqual({ status: 'completed', finishedAt: a.finishedAt, landedCommit: null });
+
+  const b = old({ slug: 'inc-b', status: 'failed', runId: 'rib' });
+  await queueHistory.appendHistory([b]);
+  const second = await queueHistory.historyTerminalBySlug(); // incremental path
+  expect(second.get('inc-a')).toEqual({ status: 'completed', finishedAt: a.finishedAt, landedCommit: null });
+  expect(second.get('inc-b')).toEqual({ status: 'failed', finishedAt: b.finishedAt, landedCommit: null });
+
+  // A fresh module instance (no perFileCache warm) forced to full-parse the
+  // same file must land on the identical map.
+  delete require.cache[require.resolve('../lib/queueHistory.cjs')];
+  const freshModule = require('../lib/queueHistory.cjs');
+  const fullParse = await freshModule.historyTerminalBySlug();
+  expect(Array.from(fullParse.entries()).sort()).toEqual(Array.from(second.entries()).sort());
+});
+
+test('historyTerminalBySlug: a partial trailing line (no newline yet) is not consumed until it completes', async () => {
+  const a = old({ slug: 'partial-a', status: 'completed', runId: 'rpa' });
+  await queueHistory.appendHistory([a]);
+
+  const target = queueHistory.historyPath();
+  const partialLine = `{"slug":"partial-b","status":"completed","runId":"rpb","finishedAt":"${new Date(NOW).toISOString()}"`; // no closing brace, no trailing newline
+  fs.appendFileSync(target, partialLine);
+
+  const first = await queueHistory.historyTerminalBySlug();
+  expect(first.has('partial-a')).toBe(true);
+  expect(first.has('partial-b')).toBe(false);
+
+  // Complete the line; the previously-unconsumed partial bytes plus the
+  // completion must now parse as one whole line.
+  fs.appendFileSync(target, '}\n');
+  const second = await queueHistory.historyTerminalBySlug();
+  expect(second.get('partial-b')).toEqual({ status: 'completed', finishedAt: new Date(NOW).toISOString(), landedCommit: null });
+});
+
+test('historyTerminalBySlug: truncation (file shrinks) forces a full re-parse instead of an out-of-range incremental read', async () => {
+  const a = old({ slug: 'trunc-a', status: 'completed', runId: 'rta' });
+  const b = old({ slug: 'trunc-b', status: 'failed', runId: 'rtb' });
+  await queueHistory.appendHistory([a, b]);
+  const first = await queueHistory.historyTerminalBySlug();
+  expect(first.has('trunc-a')).toBe(true);
+  expect(first.has('trunc-b')).toBe(true);
+
+  // Simulate rotation: file shrinks back down to just one record.
+  const target = queueHistory.historyPath();
+  const c = old({ slug: 'trunc-c', status: 'completed', runId: 'rtc' });
+  fs.writeFileSync(target, JSON.stringify(c) + '\n', 'utf8');
+
+  const second = await queueHistory.historyTerminalBySlug();
+  expect(second.has('trunc-a')).toBe(false);
+  expect(second.has('trunc-b')).toBe(false);
+  expect(second.get('trunc-c')).toEqual({ status: 'completed', finishedAt: c.finishedAt, landedCommit: null });
+});
+
+test('historyTerminalBySlug: a malformed line is skipped on the incremental path, same as a full parse', async () => {
+  const a = old({ slug: 'mal-a', status: 'completed', runId: 'rma' });
+  await queueHistory.appendHistory([a]);
+  await queueHistory.historyTerminalBySlug(); // warm the per-file offset cache
+
+  const target = queueHistory.historyPath();
+  fs.appendFileSync(target, 'not-json-at-all\n');
+  const b = old({ slug: 'mal-b', status: 'completed', runId: 'rmb' });
+  fs.appendFileSync(target, JSON.stringify(b) + '\n');
+
+  const map = await queueHistory.historyTerminalBySlug();
+  expect(map.get('mal-a')).toEqual({ status: 'completed', finishedAt: a.finishedAt, landedCommit: null });
+  expect(map.get('mal-b')).toEqual({ status: 'completed', finishedAt: b.finishedAt, landedCommit: null });
+  expect(map.size).toBe(2);
+});
+
 test('completedSlugsForCwd: ignores needs_review ledger lines even when they are the newest line for a completed slug', async () => {
   const projectCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-1122-ledger-'));
   await queueHistory.appendHistory([

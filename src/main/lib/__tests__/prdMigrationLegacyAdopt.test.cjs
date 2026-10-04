@@ -9,7 +9,7 @@
  * relies on resolvePrdsDirs(), which discovers projects via
  * ~/.claude/projects transcripts.
  *
- * Run: timeout 60 npx vitest run src/main/__tests__/prdMigrationLegacyAdopt.test.cjs
+ * Run: timeout 60 npx vitest run src/main/lib/__tests__/prdMigrationLegacyAdopt.test.cjs
  */
 
 'use strict';
@@ -28,8 +28,8 @@ beforeAll(() => {
   originalHome = process.env.HOME;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-legacy-adopt-home-'));
   process.env.HOME = tmpHome;
-  ({ legacyAdoptExistingPrds } = require('../lib/prdMigration.cjs'));
-  ({ parsePrdFile } = require('../lib/prdFrontmatter.cjs'));
+  ({ legacyAdoptExistingPrds } = require('../prdMigration.cjs'));
+  ({ parsePrdFile } = require('../prdFrontmatter.cjs'));
 });
 
 afterAll(() => {

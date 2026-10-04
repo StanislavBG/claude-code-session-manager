@@ -4,21 +4,22 @@
  * project's `<cwd>/session-manager-operations/scheduler/prds/`, based on
  * each file's frontmatter `cwd`.
  *
- * Run: timeout 120 npx vitest run src/main/__tests__/prdMigration.test.cjs
+ * Run: timeout 120 npx vitest run src/main/lib/__tests__/prdMigration.test.cjs
  */
 
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { migratePrds } = require('../lib/prdMigration.cjs');
-const { resolvePrdWriteDir } = require('../lib/prdLocations.cjs');
+const { migratePrds, resetFlatDirSweepCacheForTests } = require('../prdMigration.cjs');
+const { resolvePrdWriteDir } = require('../prdLocations.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
+  resetFlatDirSweepCacheForTests();
   while (tmpDirs.length) {
     const d = tmpDirs.pop();
     await fsp.rm(d, { recursive: true, force: true });
@@ -181,7 +182,7 @@ test('migratePrds moves multiple PRDs to different projects independently', asyn
  * 980-fix-chat-typed-event-renderers.md sat there with status `running`.
  * ------------------------------------------------------------------------ */
 
-const { consolidateFlatPrds, LIVE_JOB_STATUSES } = require('../lib/prdMigration.cjs');
+const { consolidateFlatPrds, LIVE_JOB_STATUSES } = require('../prdMigration.cjs');
 
 function opsRoot(root) {
   return path.join(root, 'session-manager-operations', 'scheduler');
@@ -346,4 +347,61 @@ test('consolidateFlatPrds FAILS CLOSED on an unparseable queue.json', async () =
 test('consolidateFlatPrds returns the full shape when the flat dir is missing', async () => {
   const r = await consolidateFlatPrds(newRoot());
   expect(r).toEqual({ moved: 0, failed: [], skipped: [] });
+});
+
+/* ------------------------------------------------------------------------ *
+ * PRD 1519 — per-cwd mtime cache: a cwd whose flat dir is absent or
+ * unchanged since the last successful sweep must skip readdir + the
+ * queue.json parse entirely, re-checked only via a cheap stat.
+ * ------------------------------------------------------------------------ */
+
+test('consolidateFlatPrds performs no readdir of an unchanged cwd on the second pass', async () => {
+  const root = newRoot();
+  await makeFlatProject(root, ['960-live.md']);
+  await writeQueue(root, [{ slug: '960-live', status: 'pending' }]);
+
+  await consolidateFlatPrds(root);
+
+  const readdirSpy = vi.spyOn(fsp, 'readdir');
+  const second = await consolidateFlatPrds(root);
+
+  expect(readdirSpy).not.toHaveBeenCalled();
+  expect(second.skipped).toEqual([
+    { file: '960-live.md', reason: 'live queue job — source must survive' },
+  ]);
+  readdirSpy.mockRestore();
+});
+
+test('consolidateFlatPrds sweeps again once a file is added to flat prds/ (mtime invalidation)', async () => {
+  const root = newRoot();
+  const flat = await makeFlatProject(root, ['961-done.md']);
+  await writeQueue(root, [{ slug: '961-done', status: 'completed' }]);
+
+  const first = await consolidateFlatPrds(root);
+  expect(first.moved).toBe(1);
+
+  await fsp.writeFile(path.join(flat, '962-new.md'), '---\ntitle: new\n---\n# Goal\n', 'utf8');
+  await writeQueue(root, [{ slug: '961-done', status: 'completed' }, { slug: '962-new', status: 'completed' }]);
+
+  const second = await consolidateFlatPrds(root);
+
+  expect(second.moved).toBe(1);
+  expect(fs.existsSync(path.join(opsRoot(root), 'prds-archived', '962-new.md'))).toBe(true);
+});
+
+test('consolidateFlatPrds caches a missing dir as absent and re-checks it only via a cheap stat', async () => {
+  const root = newRoot();
+
+  const first = await consolidateFlatPrds(root);
+  expect(first).toEqual({ moved: 0, failed: [], skipped: [] });
+
+  const readdirSpy = vi.spyOn(fsp, 'readdir');
+  const statSpy = vi.spyOn(fsp, 'stat');
+  const second = await consolidateFlatPrds(root);
+
+  expect(second).toEqual({ moved: 0, failed: [], skipped: [] });
+  expect(readdirSpy).not.toHaveBeenCalled();
+  expect(statSpy).toHaveBeenCalled();
+  readdirSpy.mockRestore();
+  statSpy.mockRestore();
 });

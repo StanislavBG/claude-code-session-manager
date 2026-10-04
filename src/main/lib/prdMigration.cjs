@@ -166,13 +166,55 @@ function slugForPrdFile(name) {
   return name.slice(0, -3);
 }
 
+/**
+ * Per-cwd cache of the flat prds/ dir's last-swept state, keyed by cwd.
+ * {exists, mtimeMs, failed, skipped} — failed/skipped are the RESIDUAL
+ * (still-in-place) files from the last real sweep, so a cache hit can report
+ * them again without re-reading anything. `moved` is deliberately NOT cached:
+ * it is a count of actions taken during a pass, and a pass that does no work
+ * (cache hit) always reports moved: 0, never replays a stale move count.
+ *
+ * Perf win (PRD: flatPrdSweep phase, p50 1.3s/max 5.7s over up to 500 cwds
+ * per reconcile): a cwd whose flat dir is absent or whose mtime hasn't
+ * changed since the last successful sweep skips the readdir AND the
+ * liveSlugsForCwd() queue.json parse entirely — only a cheap stat runs.
+ */
+const flatDirSweepCache = new Map();
+
+/** Test-only: clear the per-cwd flat-dir sweep cache between test cases. */
+function resetFlatDirSweepCacheForTests() {
+  flatDirSweepCache.clear();
+}
+
 async function consolidateFlatPrds(cwd, opts = {}) {
   const flatDir = resolvePrdWriteDir(cwd);
   const archiveDir = path.join(path.dirname(flatDir), 'prds-archived');
+
+  let mtimeMs;
+  try {
+    mtimeMs = (await fsp.stat(flatDir)).mtimeMs;
+  } catch (e) {
+    if (e?.code !== 'ENOENT') throw e;
+    mtimeMs = null;
+  }
+
+  if (mtimeMs === null) {
+    flatDirSweepCache.set(cwd, { exists: false, mtimeMs: null, failed: [], skipped: [] });
+    return { moved: 0, failed: [], skipped: [] };
+  }
+
+  const cached = flatDirSweepCache.get(cwd);
+  if (cached && cached.exists && cached.mtimeMs === mtimeMs) {
+    // Unchanged since the last successful sweep — no readdir, no queue.json
+    // parse. Report the same residual (still-blocked/still-failed) files.
+    return { moved: 0, failed: cached.failed, skipped: cached.skipped };
+  }
+
   let entries;
   try {
     entries = await fsp.readdir(flatDir);
   } catch {
+    flatDirSweepCache.set(cwd, { exists: false, mtimeMs: null, failed: [], skipped: [] });
     return { moved: 0, failed: [], skipped: [] };
   }
 
@@ -188,6 +230,8 @@ async function consolidateFlatPrds(cwd, opts = {}) {
       if (!name.endsWith('.md') || name.startsWith('.')) continue;
       skipped.push({ file: name, reason: 'queue state unreadable — cannot prove no live job' });
     }
+    // Never cache a fail-closed read as settled — queue state may become
+    // readable on the very next pass and must be re-parsed, not replayed.
     return { moved: 0, failed, skipped };
   }
 
@@ -211,6 +255,19 @@ async function consolidateFlatPrds(cwd, opts = {}) {
       failed.push({ file: name, reason: e?.message ?? 'move failed' });
     }
   }
+
+  // Re-stat after the sweep: renames just mutated the dir's own mtime, so the
+  // cached value must reflect the post-sweep state, not the one we read in.
+  let postMtimeMs = null;
+  try {
+    postMtimeMs = (await fsp.stat(flatDir)).mtimeMs;
+  } catch { /* removed concurrently — leave uncached, next pass re-checks */ }
+  if (postMtimeMs !== null) {
+    flatDirSweepCache.set(cwd, { exists: true, mtimeMs: postMtimeMs, failed, skipped });
+  } else {
+    flatDirSweepCache.delete(cwd);
+  }
+
   return { moved, failed, skipped };
 }
 
@@ -275,4 +332,10 @@ async function legacyAdoptExistingPrds() {
   return { stamped, failed };
 }
 
-module.exports = { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds, LIVE_JOB_STATUSES };
+module.exports = {
+  migratePrds,
+  consolidateFlatPrds,
+  legacyAdoptExistingPrds,
+  LIVE_JOB_STATUSES,
+  resetFlatDirSweepCacheForTests,
+};

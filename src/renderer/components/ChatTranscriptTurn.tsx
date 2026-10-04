@@ -44,7 +44,7 @@ function copyToClipboard(text: string, onDone: (ok: boolean) => void): void {
     .catch(() => onDone(false))
 }
 
-function UrlCallout({ url }: { url: string }) {
+export function UrlCallout({ url }: { url: string }) {
   const [copied, setCopied] = useState(false)
   const onCopy = () => {
     copyToClipboard(url, (ok) => {
@@ -56,12 +56,29 @@ function UrlCallout({ url }: { url: string }) {
       }
     })
   }
+  const onOpen = async () => {
+    if (!/^https?:\/\//i.test(url)) return
+    try {
+      const r = await window.api.shell.open({ as: 'external', url })
+      if (r && r.ok === false) toast.error(`Could not open link: ${r.error ?? 'unknown error'}`)
+    } catch (err) {
+      toast.error(`Could not open link: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
   return (
     <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-line bg-elev px-2.5 py-1.5 text-xs">
       <span aria-hidden className="text-fg-dim">
         🔗
       </span>
-      <span className="min-w-0 flex-1 truncate font-mono text-fg-dim">{url}</span>
+      <button
+        type="button"
+        onClick={() => { void onOpen() }}
+        title="Open in browser"
+        data-testid="chat-url-callout-open"
+        className="min-w-0 flex-1 cursor-pointer truncate text-left font-mono text-fg-dim hover:text-fg hover:underline"
+      >
+        {url}
+      </button>
       <button
         onClick={onCopy}
         className="shrink-0 rounded border border-line px-2 py-0.5 text-[11px] text-fg-dim hover:bg-hi hover:text-fg"

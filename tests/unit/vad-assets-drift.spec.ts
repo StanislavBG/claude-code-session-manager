@@ -8,17 +8,31 @@ const vadDir = path.join(root, 'src/renderer/public/vad')
 const ortDist = path.join(root, 'node_modules/onnxruntime-web/dist')
 const ortWasm = (dir: string) => fs.readdirSync(dir).filter((f) => f.startsWith('ort-wasm')).sort()
 
+// @ricky0123/vad-web imports `onnxruntime-web/wasm`, which resolves to this
+// bundle — it references only the simd-threaded pair, so only that pair
+// needs to be vendored.
+const RESOLVED_ORT_BUNDLE = path.join(root, 'node_modules/onnxruntime-web/dist/ort.wasm.bundle.min.mjs')
+const VENDORED_SET = ['ort-wasm-simd-threaded.mjs', 'ort-wasm-simd-threaded.wasm']
+
 describe('vendored VAD ort-wasm assets', () => {
   it('are byte-identical to node_modules/onnxruntime-web/dist (run `npm run refresh:vad-assets` after a version bump)', () => {
-    const installed = JSON.parse(fs.readFileSync(path.join(root, 'node_modules/onnxruntime-web/package.json'), 'utf8')).version
     const vendored = ortWasm(vadDir)
     expect(vendored.length).toBeGreaterThan(0)
     const drifted = vendored.filter((f) => {
       const src = path.join(ortDist, f)
       return !fs.existsSync(src) || !fs.readFileSync(src).equals(fs.readFileSync(path.join(vadDir, f)))
     })
-    expect(drifted, `vendored ort-wasm drifted from onnxruntime-web@${installed}: ${drifted.join(', ')}`).toEqual([])
-    expect(ortWasm(ortDist)).toEqual(vendored)
+    expect(drifted, `vendored ort-wasm drifted from onnxruntime-web: ${drifted.join(', ')}`).toEqual([])
+  })
+
+  it('vendors exactly the simd-threaded pair, not every ort-wasm variant', () => {
+    expect(ortWasm(vadDir)).toEqual(VENDORED_SET)
+  })
+
+  it('the onnxruntime-web module VAD resolves references no dropped jsep/jspi/asyncify filename', () => {
+    const bundle = fs.readFileSync(RESOLVED_ORT_BUNDLE, 'utf8')
+    const referencedWasmFiles = [...new Set([...bundle.matchAll(/ort-wasm[^"'/]*\.(?:wasm|mjs)/g)].map((m) => m[0]))].sort()
+    expect(referencedWasmFiles).toEqual(VENDORED_SET)
   })
 })
 

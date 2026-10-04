@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Derives src/renderer/public/vad/ from the installed dependencies so the
 // self-hosted VAD assets can never drift from the ORT JS Vite bundles:
-//   ort-wasm-*  <- node_modules/onnxruntime-web/dist  (the same package
-//                  @ricky0123/vad-web imports as `onnxruntime-web/wasm`)
+//   ort-wasm-simd-threaded.{wasm,mjs} <- node_modules/onnxruntime-web/dist
+//                  (the only variant onnxruntime-web/wasm's bundle references;
+//                  @ricky0123/vad-web imports that subpath)
 //   silero/worklet <- node_modules/@ricky0123/vad-web/dist
 // Guarded by tests/unit/vad-assets-drift.spec.ts. Complexity: O(files).
 import fs from 'node:fs'
@@ -14,9 +15,9 @@ const dest = path.join(root, 'src/renderer/public/vad')
 const ortDist = path.join(root, 'node_modules/onnxruntime-web/dist')
 const vadDist = path.join(root, 'node_modules/@ricky0123/vad-web/dist')
 
-const ortFiles = fs.readdirSync(ortDist).filter((f) => /^ort-wasm.*\.(wasm|mjs)$/.test(f))
+const ortFiles = fs.readdirSync(ortDist).filter((f) => /^ort-wasm-simd-threaded\.(wasm|mjs)$/.test(f))
 if (ortFiles.length === 0) {
-  console.error(`HALT: no ort-wasm-* files in ${ortDist} — run npm install`)
+  console.error(`HALT: no ort-wasm-simd-threaded.* files in ${ortDist} — run npm install`)
   process.exit(1)
 }
 fs.mkdirSync(dest, { recursive: true })

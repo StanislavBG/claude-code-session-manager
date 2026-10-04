@@ -244,7 +244,10 @@ async function networkFetchUsage() {
 
   if (result.kind === 'ok') {
     cache = { data: result.data, fetchedAt: Date.now(), sourceCredsExpiresAt: result.data.credentialsExpiresAt };
-    persistCache(cache).catch(() => {});
+    // Awaited so fetchUsage() never resolves while this write is still
+    // in-flight — a fire-and-forget write here outlived its test's afterEach
+    // rmSync of HOME, causing a flaky ENOTEMPTY under CPU load.
+    await persistCache(cache).catch(() => {});
     retryNotBeforeMs = 0;
     lastRateLimitedResult = null;
     circuit.recordSuccess(result.data);

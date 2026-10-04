@@ -10,12 +10,18 @@
  * the render CLI works end to end there and that every generated HTML file
  * is genuinely self-contained.
  *
+ * `npm pack` walks the whole package tree (~124MB of dist/ under a full
+ * build), so this file shares a single real pack across every test that
+ * only needs the resulting file list or tarball (PRD 1507). Only the
+ * build-info test needs a second pack, to see the file list change after
+ * writeBuildInfo() runs. Total: 2 `npm pack` invocations per file run.
+ *
  * Run: timeout 300 npx vitest run scripts/__tests__/package-files.test.cjs
  */
 
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, beforeAll, afterAll, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -51,16 +57,36 @@ const REQUIRED_PATHS = [
 const { GUARD_NAMES } = require('../../src/main/lib/guardShims.cjs');
 const GUARD_SCRIPT_PATHS = GUARD_NAMES.map((n) => `scripts/hooks/${n}`);
 
+const buildInfoPath = path.join(REPO_ROOT, 'src', 'main', 'build-info.json');
+
+let packDest;
+let sharedFiles; // file list from the one real pack, taken with build-info.json absent
+let tarballPath;
+let buildInfoPreexisting;
+
+beforeAll(() => {
+  packDest = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-pack-dest-'));
+  buildInfoPreexisting = fs.existsSync(buildInfoPath) ? fs.readFileSync(buildInfoPath, 'utf8') : null;
+  fs.rmSync(buildInfoPath, { force: true });
+
+  const raw = execFileSync(
+    'npm',
+    ['pack', '--ignore-scripts', '--json', '--pack-destination', packDest],
+    { cwd: REPO_ROOT, timeout: 240000, encoding: 'utf8' },
+  );
+  const [{ files, filename }] = JSON.parse(raw);
+  sharedFiles = files;
+  tarballPath = path.join(packDest, filename);
+}, 240000);
+
+afterAll(() => {
+  if (packDest) fs.rmSync(packDest, { recursive: true, force: true });
+});
+
 test(
   'npm pack --dry-run includes every file required by the scheduler MCP server and the delegation-readiness guard scripts',
   () => {
-    const raw = execFileSync(
-      'npm',
-      ['pack', '--dry-run', '--ignore-scripts', '--json'],
-      { cwd: REPO_ROOT, timeout: 240000, encoding: 'utf8' },
-    );
-    const [{ files }] = JSON.parse(raw);
-    const packedPaths = new Set(files.map((f) => f.path));
+    const packedPaths = new Set(sharedFiles.map((f) => f.path));
 
     const missing = [...REQUIRED_PATHS, ...GUARD_SCRIPT_PATHS].filter((p) => !packedPaths.has(p));
     expect(
@@ -81,20 +107,12 @@ test(
 test(
   'build-info.json is gitignored, absent from a clean pack, and packed after scripts/write-build-info.cjs runs',
   () => {
-    const buildInfoPath = path.join(REPO_ROOT, 'src', 'main', 'build-info.json');
-    const preexisting = fs.existsSync(buildInfoPath) ? fs.readFileSync(buildInfoPath, 'utf8') : null;
-
     try {
-      fs.rmSync(buildInfoPath, { force: true });
       expect(
         execFileSync('git', ['check-ignore', 'src/main/build-info.json'], { cwd: REPO_ROOT, encoding: 'utf8' }).trim(),
       ).toBe('src/main/build-info.json');
 
-      const rawBefore = execFileSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], {
-        cwd: REPO_ROOT, timeout: 120000, encoding: 'utf8',
-      });
-      const [{ files: filesBefore }] = JSON.parse(rawBefore);
-      expect(filesBefore.some((f) => f.path === 'src/main/build-info.json')).toBe(false);
+      expect(sharedFiles.some((f) => f.path === 'src/main/build-info.json')).toBe(false);
 
       // eslint-disable-next-line global-require
       const { writeBuildInfo } = require('../write-build-info.cjs');
@@ -107,8 +125,8 @@ test(
       const [{ files: filesAfter }] = JSON.parse(rawAfter);
       expect(filesAfter.some((f) => f.path === 'src/main/build-info.json')).toBe(true);
     } finally {
-      if (preexisting === null) fs.rmSync(buildInfoPath, { force: true });
-      else fs.writeFileSync(buildInfoPath, preexisting);
+      if (buildInfoPreexisting === null) fs.rmSync(buildInfoPath, { force: true });
+      else fs.writeFileSync(buildInfoPath, buildInfoPreexisting);
     }
   },
   240000,
@@ -131,10 +149,9 @@ test('package.json "files" would fail this same check if scripts/hooks were drop
 });
 
 // ---------------------------------------------------------------------------
-// Real-tarball, real-unpack proof for the guard scripts. `npm pack --dry-run`
-// (above) never runs a real pack; this unpacks an actual tarball outside the
-// repo and asserts the guard scripts survive it — the simulated-install proof
-// for the "guards are dead on every npx install" regression.
+// Real-tarball, real-unpack proof for the guard scripts. Reuses the tarball
+// from the shared beforeAll pack — the simulated-install proof for the
+// "guards are dead on every npx install" regression.
 const tmpDirs = [];
 afterEach(() => {
   while (tmpDirs.length) fs.rmSync(tmpDirs.pop(), { recursive: true, force: true });
@@ -149,14 +166,6 @@ function mkTmp(prefix) {
 test(
   'a real tarball, unpacked outside this repo, contains every guard script',
   () => {
-    const packDest = mkTmp('sm-pack-dest-');
-    const raw = execFileSync(
-      'npm',
-      ['pack', '--ignore-scripts', '--json', '--pack-destination', packDest],
-      { cwd: REPO_ROOT, timeout: 120000, encoding: 'utf8' },
-    );
-    const [{ filename }] = JSON.parse(raw);
-    const tarballPath = path.join(packDest, filename);
     expect(fs.existsSync(tarballPath)).toBe(true);
 
     const unpackRoot = mkTmp('sm-unpack-');

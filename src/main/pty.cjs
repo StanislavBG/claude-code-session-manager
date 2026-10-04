@@ -35,6 +35,15 @@ const PKG_DIR = path.join(__dirname, '..', '..');
 // chatty sessions can't balloon main-process memory.
 const REPLAY_BUFFER_MAX = 256 * 1024;
 
+// Coalescing window for pty:data IPC sends. A busy terminal emits thousands
+// of tiny node-pty onData chunks/sec; each used to cost its own main->renderer
+// IPC serialization + xterm write task. Buffering for a few ms and flushing
+// once collapses that into a handful of sends/sec with no visible latency.
+const PTY_FLUSH_MS = 8;
+// Immediate-flush size cap so a single burst (e.g. `cat` on a big file) can't
+// grow the buffer unbounded while waiting for the timer.
+const PTY_FLUSH_MAX_BYTES = 64 * 1024;
+
 /**
  * ANSI-formatted terminal text explaining a native-module / immediate-exit
  * failure and exactly how to fix it. Written straight into the tab's output so
@@ -77,7 +86,33 @@ class PtyManager {
     // reload — would read as the session having been wiped. Bounded ring so a
     // long-lived session can't grow this without limit.
     this.buffers = new Map();
+    // tabId -> pending un-sent output, flushed on a timer or size cap (see
+    // PTY_FLUSH_MS / PTY_FLUSH_MAX_BYTES / #flushOutput below).
+    this.outBuffers = new Map();
+    this.flushTimers = new Map(); // tabId -> Timeout
     this.window = null;
+  }
+
+  /** Send any pending buffered output for `tabId` now, and clear its timer. */
+  #flushOutput(tabId) {
+    const timer = this.flushTimers.get(tabId);
+    if (timer) {
+      clearTimeout(timer);
+      this.flushTimers.delete(tabId);
+    }
+    const pending = this.outBuffers.get(tabId);
+    if (pending) {
+      this.outBuffers.delete(tabId);
+      sendIfAlive(this.window, `pty:data:${tabId}`, pending);
+    }
+  }
+
+  /** Discard pending buffered output for `tabId` without sending (kill/dispose). */
+  #dropOutput(tabId) {
+    const timer = this.flushTimers.get(tabId);
+    if (timer) clearTimeout(timer);
+    this.flushTimers.delete(tabId);
+    this.outBuffers.delete(tabId);
   }
 
   attachWindow(window) {
@@ -251,7 +286,16 @@ class PtyManager {
     proc.onData((data) => {
       gotData = true;
       this.#appendReplay(tabId, data);
-      sendIfAlive(this.window, `pty:data:${tabId}`, data);
+      const next = (this.outBuffers.get(tabId) ?? '') + data;
+      if (next.length >= PTY_FLUSH_MAX_BYTES) {
+        this.outBuffers.set(tabId, next);
+        this.#flushOutput(tabId);
+      } else {
+        this.outBuffers.set(tabId, next);
+        if (!this.flushTimers.has(tabId)) {
+          this.flushTimers.set(tabId, setTimeout(() => this.#flushOutput(tabId), PTY_FLUSH_MS));
+        }
+      }
     });
 
     proc.onExit(({ exitCode, signal }) => {
@@ -262,8 +306,12 @@ class PtyManager {
         console.log('[pty] suppressed exit broadcast for killed tabId=', tabId);
         this.sessions.delete(tabId);
         this.buffers.delete(tabId);
+        this.#dropOutput(tabId);
         return;
       }
+      // Flush any still-buffered output BEFORE the exit event so the renderer
+      // sees every byte the process produced, in order.
+      this.#flushOutput(tabId);
       // Fast-exit detector: a shell that dies in <1.2s with a non-zero status
       // and never printed anything almost certainly couldn't exec (broken
       // node-pty spawn-helper / ABI on macOS). Explain it in the tab instead of
@@ -341,6 +389,7 @@ class PtyManager {
       }
       this.sessions.delete(tabId);
       this.buffers.delete(tabId);
+      this.#dropOutput(tabId);
     }
   }
 

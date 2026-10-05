@@ -52,6 +52,7 @@ const { extractJson } = require('./lib/extractJson.cjs');
 const { classifyPromptTicket } = require('./lib/classifyPromptTicket.cjs');
 const sessionSlots = require('./lib/sessionSlots.cjs');
 const opsErrorLog = require('./lib/opsErrorLog.cjs');
+const { killTree, detachedSpawnOpts } = require('./lib/killTree.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/agentEffortResolve.cjs');
 const { planEpicSpawn } = require('./lib/epicSpawnPlan.cjs');
@@ -629,9 +630,8 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       if (killed) return;
       killed = true;
       if (!child) return;
-      // Negative pid targets the process group (requires detached: true)
-      try { process.kill(-child.pid, sig); }
-      catch { try { child.kill(sig); } catch { /* already dead */ } }
+      // Group kill on POSIX / taskkill /T on win32 (requires detachedSpawnOpts at spawn)
+      if (!killTree(child.pid, sig)) { try { child.kill(sig); } catch { /* already dead */ } }
     };
 
     const cancelFn = () => {
@@ -696,7 +696,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
         cwd: execCwd,
         env: childEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
-        detached: true, // own process group so killTree can SIGTERM descendants
+        ...detachedSpawnOpts(), // own process group so killTree can SIGTERM descendants
       });
     } catch (err) {
       clearTimeout(killTimer);

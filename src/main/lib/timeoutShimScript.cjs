@@ -222,16 +222,28 @@ function main() {
   // spawned, without detaching further, dies too); fall back to the direct
   // pid only when the group signal itself fails (e.g. --foreground, where
   // the child shares OUR group rather than leading its own).
+  // Inlined (not require('./killTree.cjs')): this script is copied to ~ and
+  // runs standalone, so it cannot resolve app-relative modules. win32 has no
+  // process groups, so taskkill /T /F stands in for the group signal.
   function killGroup(sig) {
+    if (process.platform === 'win32') {
+      try {
+        require('node:child_process').spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+      } catch {
+        try { process.kill(child.pid, sig); } catch { /* already gone */ }
+      }
+      return;
+    }
     try {
-      process.kill(-child.pid, sig);
+      const groupPid = -child.pid; // negative pid = whole POSIX process group
+      process.kill(groupPid, sig);
     } catch {
       try { process.kill(child.pid, sig); } catch { /* already gone */ }
     }
   }
 
   try {
-    child = spawn(command, commandArgs, { stdio: 'inherit', detached: !opts.foreground });
+    child = spawn(command, commandArgs, { stdio: 'inherit', detached: !opts.foreground, windowsHide: true });
   } catch (err) {
     finish(err && err.code === 'EACCES' ? 126 : 127);
     return;

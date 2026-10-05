@@ -365,7 +365,7 @@ test('installPrdWriteGuard: writes the canonical STABLE-SHIM-path entry and turn
   const r = await installPrdWriteGuard({ cwd, homeDir });
   expect(r.ok).toBe(true);
   expect(r.action).toBe('installed');
-  const shimCommand = `node ${guardShimPath('guard-prd-writes.cjs', homeDir)}`;
+  const shimCommand = `node "${guardShimPath('guard-prd-writes.cjs', homeDir)}"`;
   expect(r.command).toBe(shimCommand);
   // The shim path survives app upgrades; it must never be the raw app-root script.
   expect(r.command).not.toBe(`node ${PRD_WRITE_GUARD_SCRIPT}`);
@@ -418,7 +418,7 @@ test('installPrdWriteGuard: repairs a hook pointing at a dead ephemeral _npx cac
   const r = await installPrdWriteGuard({ cwd, homeDir });
   expect(r.ok).toBe(true);
   expect(r.action).toBe('repaired');
-  const shimCommand = `node ${guardShimPath('guard-prd-writes.cjs', homeDir)}`;
+  const shimCommand = `node "${guardShimPath('guard-prd-writes.cjs', homeDir)}"`;
   expect(r.command).toBe(shimCommand);
 
   const written = JSON.parse(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'));
@@ -439,7 +439,7 @@ test('checkPrdWriteGuard: reports red — not a false green — when an installe
   await fsp.rm(path.join(cwd, '.claude', 'settings.json'));
   const r = await installPrdWriteGuard({ cwd, homeDir });
   expect(r.ok).toBe(true);
-  expect(r.command).toBe(`node ${guardShimPath('guard-prd-writes.cjs', homeDir)}`);
+  expect(r.command).toBe(`node "${guardShimPath('guard-prd-writes.cjs', homeDir)}"`);
   const healthy = await checkDelegationReadiness({ cwd, homeDir });
   expect(healthy.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
 
@@ -461,7 +461,7 @@ test('checkPrdWriteGuard: accepts BOTH a direct app-root path and the stable shi
   const shimResult = await writeGuardShims({ homeDir });
   expect(shimResult.ok).toBe(true);
   await writeJson(path.join(cwd, '.claude', 'settings.json'), {
-    hooks: { PreToolUse: [{ matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node ${guardShimPath('guard-prd-writes.cjs', homeDir)}` }] }] },
+    hooks: { PreToolUse: [{ matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command: `node "${guardShimPath('guard-prd-writes.cjs', homeDir)}"` }] }] },
   });
   const viaShim = await checkDelegationReadiness({ cwd, homeDir });
   expect(viaShim.checks.find((c) => c.id === 'prd-write-guard').ok).toBe(true);
@@ -570,7 +570,7 @@ test('installDestructiveGitGuard: writes the canonical STABLE-SHIM-path entry an
   const r = await installDestructiveGitGuard({ cwd, homeDir });
   expect(r.ok).toBe(true);
   expect(r.action).toBe('installed');
-  const shimCommand = `node ${guardShimPath('guard-destructive-git.cjs', homeDir)}`;
+  const shimCommand = `node "${guardShimPath('guard-destructive-git.cjs', homeDir)}"`;
   expect(r.command).toBe(shimCommand);
   expect(r.command).not.toBe(`node ${DESTRUCTIVE_GIT_GUARD_SCRIPT}`);
 
@@ -617,7 +617,7 @@ test('installDestructiveGitGuard: flips destructive-git-guard FAIL -> PASS on a 
   const bash = written.hooks.PreToolUse.filter((m) => m.matcher === 'Bash');
   expect(bash).toHaveLength(1);
   // By reference to the stable shim — never a copy inside the target cwd.
-  const shimCommand = `node ${guardShimPath('guard-destructive-git.cjs', homeDir)}`;
+  const shimCommand = `node "${guardShimPath('guard-destructive-git.cjs', homeDir)}"`;
   expect(bash[0].hooks).toEqual([{ type: 'command', command: shimCommand }]);
   expect(path.isAbsolute(DESTRUCTIVE_GIT_GUARD_SCRIPT)).toBe(true);
   expect(DESTRUCTIVE_GIT_GUARD_SCRIPT.startsWith(cwd + path.sep)).toBe(false);
@@ -666,7 +666,7 @@ test('installDestructiveGitGuard: repairs a broken entry in place rather than du
   const written = JSON.parse(fs.readFileSync(path.join(cwd, '.claude', 'settings.json'), 'utf8'));
   const bashMatchers = written.hooks.PreToolUse.filter((m) => m.matcher === 'Bash');
   expect(bashMatchers).toHaveLength(1);
-  expect(bashMatchers[0].hooks).toEqual([{ type: 'command', command: `node ${guardShimPath('guard-destructive-git.cjs', homeDir)}` }]);
+  expect(bashMatchers[0].hooks).toEqual([{ type: 'command', command: `node "${guardShimPath('guard-destructive-git.cjs', homeDir)}"` }]);
 });
 
 test('installDestructiveGitGuard: refuses on unparseable settings rather than discarding them', async () => {
@@ -793,7 +793,7 @@ test('installInlineImplementationGuard: appends into the EXISTING Write|Edit|Not
   });
 
   const r = await installInlineImplementationGuard({ cwd, homeDir });
-  const inlineShimCommand = `node ${guardShimPath('guard-inline-implementation.cjs', homeDir)}`;
+  const inlineShimCommand = `node "${guardShimPath('guard-inline-implementation.cjs', homeDir)}"`;
   expect(r).toMatchObject({ ok: true, action: 'installed', settingsPath, command: inlineShimCommand });
 
   const written = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
@@ -865,7 +865,7 @@ test('installInlineImplementationGuard: repairs an entry pointing at a now-nonex
   expect(writeMatchers).toHaveLength(1);
   const inlineHooks = writeMatchers[0].hooks.filter((h) => h.command.includes('guard-inline-implementation'));
   expect(inlineHooks).toHaveLength(1);
-  expect(inlineHooks[0].command).toBe(`node ${guardShimPath('guard-inline-implementation.cjs', homeDir)}`);
+  expect(inlineHooks[0].command).toBe(`node "${guardShimPath('guard-inline-implementation.cjs', homeDir)}"`);
 });
 
 test('installInlineImplementationGuard: refuses on unparseable settings rather than discarding them', async () => {
@@ -989,7 +989,7 @@ test('installInlineImplementationGuard: uses the ABSOLUTE stable-shim path, neve
   const r = await installInlineImplementationGuard({ cwd, homeDir });
   const shimFile = guardShimPath('guard-inline-implementation.cjs', homeDir);
   expect(path.isAbsolute(shimFile)).toBe(true);
-  expect(r.command).toBe(`node ${shimFile}`);
+  expect(r.command).toBe(`node "${shimFile}"`);
   expect(shimFile.startsWith(cwd + path.sep)).toBe(false);
   expect(fs.existsSync(path.join(cwd, 'scripts'))).toBe(false);
 
@@ -1173,3 +1173,53 @@ test('delegationReadiness.cjs source contains no raw NUL byte', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'delegationReadiness.cjs'));
   expect(src.includes(0)).toBe(false);
 });
+
+test('guard: legacy `node <shim>` and packaged ELECTRON_RUN_AS_NODE forms are both recognised', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  await writeGuardShims({ homeDir });
+  const shim = guardShimPath('guard-prd-writes.cjs', homeDir);
+  const forms = [
+    `node ${shim}`,
+    `node "${shim}"`,
+    `ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${shim}"`,
+  ];
+  for (const command of forms) {
+    await writeJson(path.join(cwd, '.claude', 'settings.json'), {
+      hooks: { PreToolUse: [{ matcher: 'Write|Edit|NotebookEdit', hooks: [{ type: 'command', command }] }] },
+    });
+    const result = await checkDelegationReadiness({ cwd, homeDir });
+    expect(result.checks.find((c) => c.id === 'prd-write-guard').ok, command).toBe(true);
+  }
+}, 15_000);
+
+test('packaged mode: installed guard command and scheduler-mcp fix use the app runtime', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  process.env.SM_FORCE_PACKAGED = '1';
+  try {
+    const res = await installPrdWriteGuard({ cwd, homeDir });
+    expect(res.ok).toBe(true);
+    const shim = guardShimPath('guard-prd-writes.cjs', homeDir);
+    expect(res.command).toBe(`ELECTRON_RUN_AS_NODE=1 "${process.execPath}" "${shim}"`);
+
+    await fsp.rm(path.join(homeDir, '.claude.json'));
+    const result = await checkDelegationReadiness({ cwd, homeDir });
+    const fix = result.checks.find((c) => c.id === 'scheduler-mcp').fix;
+    expect(fix).toContain('-e ELECTRON_RUN_AS_NODE=1 --');
+    expect(fix).toContain(`"${process.execPath}"`);
+  } finally {
+    delete process.env.SM_FORCE_PACKAGED;
+  }
+}, 15_000);
+
+test('scheduler-mcp: accepts a registration using execPath + ELECTRON_RUN_AS_NODE=1', async () => {
+  const { homeDir, cwd, scriptPath } = await makeGreenFixtures();
+  await writeJson(path.join(homeDir, '.claude.json'), {
+    mcpServers: {
+      'session-manager-scheduler': {
+        type: 'stdio', command: process.execPath, args: [scriptPath], env: { ELECTRON_RUN_AS_NODE: '1' },
+      },
+    },
+  });
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  expect(result.checks.find((c) => c.id === 'scheduler-mcp').ok).toBe(true);
+}, 15_000);

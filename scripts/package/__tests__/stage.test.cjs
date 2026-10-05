@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-const { stagePackageJson } = require('../stage.cjs');
+const nodePath = require('node:path');
+const { stagePackageJson, npmInvocation } = require('../stage.cjs');
 
 const rootPkg = () => ({
   name: 'x',
@@ -27,5 +28,29 @@ describe('stagePackageJson', () => {
     const input = rootPkg();
     stagePackageJson(input);
     expect(input).toEqual(rootPkg());
+  });
+});
+
+describe('npmInvocation', () => {
+  it('uses node + npm_execpath when it is a .js/.cjs file', () => {
+    expect(npmInvocation({ npm_execpath: '/x/npm-cli.js' }, 'win32')).toEqual({
+      command: process.execPath,
+      args: ['/x/npm-cli.js'],
+    });
+    expect(npmInvocation({ npm_execpath: '/x/npm.cjs' }, 'linux')).toEqual({
+      command: process.execPath,
+      args: ['/x/npm.cjs'],
+    });
+  });
+  it('on win32 without npm_execpath runs npm-cli.js beside the node binary', () => {
+    expect(npmInvocation({}, 'win32')).toEqual({
+      command: process.execPath,
+      args: [
+        nodePath.join(nodePath.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js'),
+      ],
+    });
+  });
+  it('on POSIX without npm_execpath falls back to bare npm', () => {
+    expect(npmInvocation({}, 'linux')).toEqual({ command: 'npm', args: [] });
   });
 });

@@ -1,5 +1,15 @@
 import type { PromptSession } from '../renderer/state/promptSessions';
 
+/** Mirrors the item shape returned by main/lib/prereqs.cjs checkPrereqs(). */
+export interface PrereqItem {
+  id: string;
+  label: string;
+  ok: boolean;
+  version: string | null;
+  detail: string | null;
+  fix: { command: string; shell: 'sh' | 'powershell'; url?: string } | null;
+}
+
 export interface ActionOutcome {
   ok: boolean;
   kind?: 'info' | 'warn' | 'error';
@@ -1550,6 +1560,10 @@ export interface SessionManagerAPI {
     /** Boot diagnostic — resolved claude binary path + whether it was found
      *  on disk (false means spawn will rely on PATH and may ENOENT). */
     claudeBinStatus: () => Promise<{ resolved: string; foundOnDisk: boolean }>;
+    /** Fresh prerequisite probe (git, claude CLI, auth, Git Bash on Windows). */
+    prereqs: () => Promise<PrereqItem[]>;
+    /** Opens the OS terminal running the item's official install command (looked up main-side by id). */
+    prereqsRunFix: (id: string) => Promise<{ ok: true; opener: string } | { ok: false; error: string }>;
     /** Boot diagnostic — assertCwdInsideHome(os.homedir()) result. ok=false
      *  on macOS symlinked-/Users mismatch and blocks all session spawns. */
     homeSelfCheck: () => Promise<{ ok: boolean; error?: string; realCwd?: string }>;

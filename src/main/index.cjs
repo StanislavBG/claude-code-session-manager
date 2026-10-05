@@ -102,7 +102,8 @@ const { registerDocEditHandlers, attachWindow: attachDocEditWindow } = require('
 const { listExchanges } = require('./exchanges.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');
-const { openInEditor, openFileInEditor, openInFinder, openInTerminal } = require('./lib/openExternalApp.cjs');
+const { openInEditor, openFileInEditor, openInFinder, openInTerminal, runInTerminal } = require('./lib/openExternalApp.cjs');
+const { checkPrereqs } = require('./lib/prereqs.cjs');
 const { rebuildActiveIndex } = require('./lib/activeIndexRebuild.cjs');
 const { activeIndexPath: promptSessionsActiveIndexPath } = require('./lib/epicMint.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
@@ -726,6 +727,15 @@ ipcMain.handle('app:engage-rules-path', () => process.env.SESSION_MANAGER_ENGAGE
 // on disk or the home self-check failed (e.g. macOS /Users symlink mismatch).
 ipcMain.handle('app:claude-bin-status', () => bootClaudeBin);
 ipcMain.handle('app:home-self-check', () => bootHomeSelfCheck);
+ipcMain.handle('app:prereqs', async () => await checkPrereqs());
+// Renderer sends only an id; the command always comes from a fresh main-side probe.
+ipcMain.handle('app:prereqs-run-fix', async (_e, id) => {
+  const items = await checkPrereqs();
+  const item = typeof id === 'string' ? items.find((i) => i.id === id) : undefined;
+  if (!item) throw new Error(`unknown prereq id: ${String(id)}`);
+  if (!item.fix || !item.fix.command) throw new Error(`prereq ${id} has no fix command`);
+  return runInTerminal({ command: item.fix.command, shell: item.fix.shell });
+});
 // First-boot seeder outcomes ('done' | 'pending' | 'exhausted' per seeder),
 // read live from each seeder's own marker file — see seedStatus.cjs.
 ipcMain.handle('app:seed-status', () => getSeedStatus());

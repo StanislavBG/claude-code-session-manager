@@ -11,6 +11,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const { schemas, validated } = require('./ipcSchemas.cjs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
+const { applyLoginShellPath } = require('./lib/loginShellPath.cjs');
 const { terminateLosingInstance } = require('./lib/singleInstanceGuard.cjs');
 const { acquireSchedulerOwnership, releaseSchedulerOwnership } = require('./lib/instanceLock.cjs');
 const { manager: ptyManager, registerPtyHandlers } = require('./pty.cjs');
@@ -1189,6 +1190,18 @@ app.whenReady().then(async () => {
     // our block-mode systemd-inhibit so the next idle window stays covered.
     onSuspendWhileAlive: () => { stopSystemdInhibit(); startSystemdInhibit(); },
   });
+
+  // A Finder/Dock-launched packaged app inherits a minimal PATH; adopt the
+  // login shell's so node/git/claude resolve like in the user's terminal.
+  // Must run before resolveClaudeBin() and before any pty/scheduler/MCP spawn.
+  if (process.platform !== 'win32' && process.env.SM_SKIP_LOGIN_SHELL_PATH !== '1') {
+    try {
+      const loginPath = await applyLoginShellPath();
+      logs.writeLine({ scope: 'main', level: 'info', message: 'login-shell PATH', meta: loginPath });
+    } catch (err) {
+      logs.writeLine({ scope: 'main', level: 'warn', message: 'login-shell PATH failed', meta: { error: String(err && err.message || err) } });
+    }
+  }
 
   // Boot-time detection 1: surface `claude` binary resolution so a missing
   // install becomes visible to the renderer instead of failing silently on

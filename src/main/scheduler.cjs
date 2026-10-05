@@ -82,6 +82,7 @@ const { isResetFresh, bindingWindow, degradedBudget } = require('./lib/usageCirc
 const { computeQueueHealth } = require('./lib/queueHealth.cjs');
 const { createLoadGate, topCpuConsumers } = require('./lib/loadGate.cjs');
 const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
+const { killTree, detachedSpawnOpts } = require('./lib/killTree.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { createBroadcastCoalescer } = require('./lib/broadcastCoalescer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');
@@ -2814,6 +2815,8 @@ function killOrphanClaudePid(pid, recordedIdentity = null) {
     && isDifferentProcess(recordedIdentity, procIdentityOf(pid))) {
     return 'mismatch';
   }
+  // win32 has no /proc or `ps`: the identity heuristic can't run, so never reap.
+  if (process.platform === 'win32') return 'unknown';
   let cmdline = '';
   try {
     cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
@@ -2824,12 +2827,10 @@ function killOrphanClaudePid(pid, recordedIdentity = null) {
     } catch { return 'unknown'; }
   }
   if (!/\bclaude\b/.test(cmdline)) return 'mismatch';
-  try { process.kill(-pid, 'SIGTERM'); }
-  catch { try { process.kill(pid, 'SIGTERM'); } catch { /* race: died between checks */ } }
+  killTree(pid, 'SIGTERM');
   setTimeout(() => {
     try { process.kill(pid, 0); } catch { return; /* already gone */ }
-    try { process.kill(-pid, 'SIGKILL'); }
-    catch { try { process.kill(pid, 'SIGKILL'); } catch { /* race */ } }
+    killTree(pid, 'SIGKILL');
   }, 5000).unref?.();
   return 'killed';
 }
@@ -6347,10 +6348,10 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           ...(jobSpawn.argv0 ? { argv0: jobSpawn.argv0 } : {}),
           // detached:true puts the child in its own process group so we can kill
           // the entire descendant tree (including any stray background bashes the
-          // agent spawned) with `process.kill(-pid)`. Without this, child.kill()
+          // agent spawned) with killTree(pid). Without this, child.kill()
           // only kills the immediate `claude` process, leaving orphaned subprocs
           // that keep the parent alive (the 2026-05-10 cellar-publish hang).
-          detached: true,
+          ...detachedSpawnOpts(),
         },
       },
       watchdogs: [resultTailWatchdog, deadmanWatchdog, idleTailWatchdog, budgetWatchdog],
@@ -9788,9 +9789,7 @@ function bootRowPid(j, logPathOf) {
 }
 
 function signalAdoptedGroup(pgid, signal, pid) {
-  try { process.kill(-pgid, signal); } catch {
-    try { process.kill(pid, signal); } catch { /* already dead */ }
-  }
+  if (!killTree(pgid, signal)) killTree(pid, signal);
 }
 
 async function superviseAdoptedRunsPass(jobs) {

@@ -16,6 +16,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const path = require('node:path');
 const claudeBin = require('./claudeBin.cjs');
+const { isPackagedApp } = require('./appRuntime.cjs');
 
 function resolveElectronApp() {
   try {
@@ -39,12 +40,13 @@ function resolvePackageVersion() {
 }
 
 /**
- * 'npx' when the app path lives inside an npm/npx cache dir, 'dev' when
+ * 'installer' for a packaged app build, 'npx' when the app path lives inside an npm/npx cache dir, 'dev' when
  * SM_DEV is set, else 'unknown'. Injectable so tests never depend on real
  * process state.
  */
-function resolveInstallChannel({ appPath = null, devFlag = !!process.env.SM_DEV } = {}) {
+function resolveInstallChannel({ appPath = null, devFlag = !!process.env.SM_DEV, packaged } = {}) {
   if (devFlag) return 'dev';
+  if (isPackagedApp(typeof packaged === 'boolean' ? { packaged } : undefined)) return 'installer';
   if (typeof appPath === 'string' && /[\\/](\.npm|_npx|npm-cache|npx-cache)[\\/]/i.test(appPath)) {
     return 'npx';
   }

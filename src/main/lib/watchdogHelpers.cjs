@@ -9,6 +9,7 @@ const schedulerPaths = require('./schedulerPaths.cjs');
 const { isRestartingMarkerActive } = require('./upgradeDrain.cjs');
 const { pidAlive: pidAliveCore } = require('./pidAlive.cjs');
 const atomicFs = require('./atomicFs.cjs');
+const { isPackagedApp } = require('./appRuntime.cjs');
 
 
 
@@ -230,14 +231,32 @@ function logRelaunchLine(logPath, message) {
  * (short-lived) process doesn't block on the launched app and the app
  * survives the watchdog exiting.
  */
-function defaultSpawnRelaunch({ logPath = schedulerPaths.watchdogRelaunchLogPath() } = {}) {
-  const { spawn } = require('node:child_process');
+/**
+ * relaunchSpec(opts?) — what the watchdog spawns to bring the app back.
+ * Packaged installer builds have no npx: relaunch the app binary itself.
+ * @param {{ packaged?: boolean, execPath?: string }} [opts]
+ * @returns {{ command: string, args: string[], packaged: boolean }}
+ */
+function relaunchSpec(opts) {
+  if (isPackagedApp(opts)) {
+    return { command: (opts && opts.execPath) || process.execPath, args: [], packaged: true };
+  }
+  return { command: 'npx', args: ['claude-code-session-manager@latest'], packaged: false };
+}
+
+function defaultSpawnRelaunch({ logPath = schedulerPaths.watchdogRelaunchLogPath(), packaged, execPath, spawnFn } = {}) {
+  const spawn = spawnFn || require('node:child_process').spawn;
+  const spec = relaunchSpec({ packaged, execPath });
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
   const fd = fs.openSync(logPath, 'a');
   try {
-    const child = spawn('npx', ['claude-code-session-manager@latest'], {
+    const env = { ...process.env };
+    // The watchdog may itself run as node via the app binary; the relaunched app must not.
+    if (spec.packaged) delete env.ELECTRON_RUN_AS_NODE;
+    const child = spawn(spec.command, spec.args, {
       detached: true,
       stdio: ['ignore', fd, fd],
+      env,
     });
     child.on('error', (e) => {
       logRelaunchLine(logPath, `spawn error: ${e?.message}`);
@@ -460,6 +479,7 @@ module.exports = {
   readRelaunchState,
   writeRelaunchState,
   defaultSpawnRelaunch,
+  relaunchSpec,
   maybeRelaunchApp,
   DEFAULT_MAX_AGE_MS,
   DEFAULT_DISPATCH_DEAD_MS,

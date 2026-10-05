@@ -267,6 +267,8 @@ function writeFirstPaintFailureLog() {
   }
 }
 
+const { isPackagedApp } = require('./lib/appRuntime.cjs');
+
 function resolveNpx() {
   const isWin = process.platform === 'win32';
   try {
@@ -374,6 +376,14 @@ async function performReboot() {
   // Bounded-lifetime marker: the watchdog must not relaunch a second instance
   // during this deliberate exit window (single-instance-lock race).
   upgradeDrain.markRestarting();
+  if (isPackagedApp()) {
+    // Installer build: no npx — restart the app binary in place.
+    logReboot('packaged build: app.relaunch()');
+    app.relaunch();
+    runShutdownCleanup();   // app.exit bypasses will-quit
+    app.exit(0);
+    return;
+  }
   let childOk = false;
   try {
     const child = relaunchViaNpx();

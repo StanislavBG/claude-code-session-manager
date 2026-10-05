@@ -20,6 +20,7 @@ const { addAllowedRoot } = require('./config.cjs');
 const { aliasedShellBin } = require('./lib/smProcNames.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { checkInsideHome } = require('./lib/insideHome.cjs');
+const { defaultShell } = require('./lib/defaultShell.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const opsErrorLog = require('./lib/opsErrorLog.cjs');
 const { planEpicSpawn } = require('./lib/epicSpawnPlan.cjs');
@@ -51,11 +52,29 @@ const PTY_FLUSH_MAX_BYTES = 64 * 1024;
  */
 function nativeModuleHelp(reason) {
   const mac = process.platform === 'darwin';
-  const lines = [
+  const head = [
     '',
     `\x1b[1;33m[session-manager] Terminal could not start.\x1b[0m`,
     `\x1b[33m${reason}\x1b[0m`,
     '',
+  ];
+  if (process.platform === 'win32') {
+    return (
+      [
+        ...head,
+        `This is almost always a damaged install (the node-pty native module`,
+        `is missing or does not match this build). Reinstall session-manager:`,
+        '',
+        `  - Installed app: run the latest installer again.`,
+        `  - npm package:   \x1b[36mnpm install -g claude-code-session-manager@latest\x1b[0m`,
+        '',
+        `Then quit and reopen session-manager.`,
+        '',
+      ].join('\r\n') + '\r\n'
+    );
+  }
+  const lines = [
+    ...head,
     `This is almost always the node-pty native module not matching this`,
     `Electron build. Rebuild it once:`,
     '',
@@ -210,8 +229,8 @@ class PtyManager {
       SM_PROJECT_ROOT: cwd,
     });
 
-    const shell = process.env.SHELL || '/bin/bash';
-    console.log('[pty] spawning shell', shell);
+    const shell = defaultShell({ platform: process.platform, env: process.env, exists: fs.existsSync });
+    console.log('[pty] spawning shell', shell.file);
     // Tab ID = claudeSessionId (see CLAUDE.md), and Chat/Terminal are two views over ONE session,
     // so this asks the same decision function chatRunner.cjs does (epicSpawnPlan.cjs). `cwd`
     // itself is NEVER repointed; only this actual PTY spawn option is (epicSpawnCwd.cjs's
@@ -255,7 +274,8 @@ class PtyManager {
       // job's descendants; no shell in a job's process tree is ever spawned
       // through here, so that detection is unaffected. Non-bash/zsh shells and
       // any alias failure fall back to the real path.
-      proc = pty.spawn(aliasedShellBin(shell), ['-il'], {
+      const shellFile = process.platform === 'win32' ? shell.file : aliasedShellBin(shell.file);
+      proc = pty.spawn(shellFile, shell.args, {
         name: 'xterm-256color',
         cols,
         rows,

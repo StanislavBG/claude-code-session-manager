@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react'
 
-export type UpdateStatus = { current: string; latest: string | null; behind: boolean }
+export type UpdateStatus = {
+  current: string
+  latest: string | null
+  behind: boolean
+  channel?: 'npm' | 'installer'
+  downloadUrl?: string | null
+}
 
 const POLL_INTERVAL_MS = 6 * 60 * 60 * 1000
 

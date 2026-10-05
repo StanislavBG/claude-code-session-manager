@@ -25,6 +25,7 @@ import { useBranch } from '../../lib/useBranch'
 import { usageTitle, utilPercent } from '../../lib/usageWindow'
 import { useSessionSlots } from '../../lib/useSessionSlots'
 import { useUpdateStatus } from '../../lib/useUpdateStatus'
+import { useToast } from '../../state/toast'
 import { SlotDots } from '../ui/SlotDots'
 import type { NavKey } from '../../lib/navKey'
 
@@ -43,6 +44,7 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
   const branch = useBranch(tab?.cwd ?? null)
   const slots = useSessionSlots()
   const update = useUpdateStatus()
+  const showToast = useToast((s) => s.show)
   // Force re-render every 60s so the "X min ago" + remaining tick.
   const [, tick] = useState(0)
   useEffect(() => {
@@ -162,7 +164,23 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
         )}
       </button>
 
-      {update?.behind && update.latest ? (
+      {update?.behind && update.latest && update.channel === 'installer' ? (
+        <button
+          type="button"
+          className="text-amber-300 hover:underline"
+          title={`v${update.current} → v${update.latest}`}
+          data-testid="footer-version"
+          onClick={() => {
+            const url = update.downloadUrl
+            if (!url) return
+            window.api.shell.open({ as: 'external', url }).catch(() => {
+              showToast('error', `Couldn't open URL: ${url}`)
+            })
+          }}
+        >
+          Download v{update.latest}
+        </button>
+      ) : update?.behind && update.latest ? (
         <span
           className="text-amber-300"
           title="A newer version is published — update the app. A stale npx cache can pin an old version."

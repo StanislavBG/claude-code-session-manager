@@ -19,7 +19,7 @@ function mk(over = {}) {
 describe('getUpdateStatus', () => {
   it('fresh fetch populates the cache and reports behind', async () => {
     const t = mk();
-    expect(await getUpdateStatus({ deps: t.deps })).toEqual({ current: '0.89.0', latest: '0.91.1', behind: true });
+    expect(await getUpdateStatus({ deps: t.deps })).toEqual({ current: '0.89.0', latest: '0.91.1', behind: true, channel: 'npm' });
     expect(t.fetchJson).toHaveBeenCalledWith('https://registry.npmjs.org/-/package/pkg-x/dist-tags', 3000);
     expect(JSON.parse(fs.readFileSync(t.cache, 'utf8'))).toEqual({ checkedAt: 1_000_000, latest: '0.91.1' });
   });
@@ -42,13 +42,56 @@ describe('getUpdateStatus', () => {
   });
   it('offline falls back to latest null', async () => {
     const t = mk({ fetchJson: vi.fn().mockRejectedValue(new Error('ENOTFOUND')) });
-    expect(await getUpdateStatus({ deps: t.deps })).toEqual({ current: '0.89.0', latest: null, behind: false });
+    expect(await getUpdateStatus({ deps: t.deps })).toEqual({ current: '0.89.0', latest: null, behind: false, channel: 'npm' });
   });
   it('SM_UPDATE_CHECK=0 and E2E short-circuit with no network call', async () => {
     for (const env of [{ SM_UPDATE_CHECK: '0' }, { SM_E2E: '1' }]) {
       const t = mk({ env });
-      expect(await getUpdateStatus({ deps: t.deps })).toEqual({ current: '0.89.0', latest: null, behind: false });
+      expect(await getUpdateStatus({ deps: t.deps })).toEqual({ current: '0.89.0', latest: null, behind: false, channel: 'npm' });
       expect(t.fetchJson).not.toHaveBeenCalled();
+    }
+  });
+});
+
+describe('getUpdateStatus (installer channel)', () => {
+  const GH = 'https://api.github.com/repos/StanislavBG/claude-code-session-manager/releases/latest';
+  const rel = (over) => vi.fn().mockResolvedValue({ tag_name: 'v0.91.1', html_url: 'https://github.com/x/releases/tag/v0.91.1', ...over });
+  it('newer release → behind, installer channel, downloadUrl', async () => {
+    const fetchJson = rel();
+    const t = mk({ isPackaged: () => true, fetchJson });
+    expect(await getUpdateStatus({ deps: t.deps })).toEqual({
+      current: '0.89.0', latest: '0.91.1', behind: true, channel: 'installer',
+      downloadUrl: 'https://github.com/x/releases/tag/v0.91.1',
+    });
+    expect(fetchJson).toHaveBeenCalledWith(GH, 3000);
+    expect(fs.existsSync(path.join(t.dir, 'update-check-github.json'))).toBe(true);
+    expect(fs.existsSync(t.cache)).toBe(false);
+  });
+  it('equal release → not behind', async () => {
+    const t = mk({ isPackaged: () => true, app: { getVersion: () => '0.91.1', getPath: () => fs.mkdtempSync(path.join(os.tmpdir(), 'upd-')) }, fetchJson: rel() });
+    const r = await getUpdateStatus({ deps: t.deps });
+    expect(r.behind).toBe(false);
+    expect(r.channel).toBe('installer');
+  });
+  it('cache hit makes no network call and keeps downloadUrl', async () => {
+    const fetchJson = rel();
+    const t = mk({ isPackaged: () => true, fetchJson });
+    await getUpdateStatus({ deps: t.deps });
+    fetchJson.mockClear();
+    const r = await getUpdateStatus({ deps: t.deps });
+    expect(fetchJson).not.toHaveBeenCalled();
+    expect(r.downloadUrl).toBe('https://github.com/x/releases/tag/v0.91.1');
+  });
+  it('malformed, failing, or offline responses yield the unknown shape', async () => {
+    const unknown = { current: '0.89.0', latest: null, behind: false, channel: 'installer' };
+    for (const fetchJson of [
+      vi.fn().mockResolvedValue({}),
+      vi.fn().mockResolvedValue(null),
+      vi.fn().mockResolvedValue({ tag_name: 5 }),
+      vi.fn().mockRejectedValue(new Error('HTTP 404')),
+    ]) {
+      const t = mk({ isPackaged: () => true, fetchJson });
+      expect(await getUpdateStatus({ deps: t.deps })).toEqual(unknown);
     }
   });
 });

@@ -30,12 +30,7 @@ const { PROC_NAMES, setProcessTitle } = require('../src/main/lib/smProcNames.cjs
 setProcessTitle(PROC_NAMES.mcpServer);
 const path = require('node:path');
 const fsp = require('node:fs/promises');
-const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
-const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
-const {
-  ListToolsRequestSchema,
-  CallToolRequestSchema,
-} = require('@modelcontextprotocol/sdk/types.js');
+const { createStdioServer } = require('../src/main/lib/mcpStdioServer.cjs');
 const { PRD_WORK_TYPES } = require('../src/main/lib/workTypeLibrary.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES, composeDescription } = require('../src/main/lib/mcpToolCatalog.cjs');
 
@@ -437,13 +432,6 @@ const TOOLS = [
   },
 ];
 
-const server = new Server(
-  { name: 'session-manager-scheduler', version: '1.0.0' },
-  { capabilities: { tools: {} } }
-);
-
-server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
-
 // Named + exported (see module.exports below) so mcpToolCatalog.test.cjs's
 // sibling can exercise session_manager_help's argument handling directly —
 // mocking node:fs/promises + global.fetch to drive adminRequest — without
@@ -713,11 +701,13 @@ async function handleCallTool(request) {
   }
 }
 
-server.setRequestHandler(CallToolRequestSchema, handleCallTool);
-
 async function main() {
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+  createStdioServer({
+    name: 'session-manager-scheduler',
+    version: '1.0.0',
+    listTools: () => TOOLS,
+    callTool: (params) => handleCallTool({ params }),
+  }).start();
 }
 
 // Guarded so mcpToolCatalog.test.cjs can `require()` this file to read TOOLS

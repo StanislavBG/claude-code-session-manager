@@ -57,8 +57,8 @@ describe('bin/node-floor.cjs', () => {
 
 describe('engines.node floor', () => {
   // The launcher's runtime path: `require('electron')` -> electron/install.js ->
-  // @electron/get (ESM). scripts/postinstall.cjs runs @electron/rebuild.
-  const runtimePkgs = ['electron', '@electron/get', '@electron/rebuild']
+  // @electron/get (ESM).
+  const runtimePkgs = ['electron', '@electron/get']
 
   it.each(runtimePkgs)('is not below %s\'s own engines.node', (name) => {
     // Read the file directly: @electron/get's `exports` map doesn't expose ./package.json.

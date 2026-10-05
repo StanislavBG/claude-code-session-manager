@@ -16,6 +16,7 @@ const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { resolvePrdWriteDir } = require('./prdLocations.cjs');
 const schedulerPaths = require('./schedulerPaths.cjs');
 const atomicFs = require('./atomicFs.cjs');
+const { resolveSpawn } = require('./winSpawn.cjs');
 
 // Regex identifying meta/dod slugs that must NOT influence the batchKey.
 // This is the load-bearing loop-avoidance filter: when the gate job itself
@@ -771,10 +772,13 @@ function runOneGateCommand(cmd, { cwd, env }) {
     const label = cmd.argv.join(' ');
     let child;
     try {
-      child = spawn(cmd.argv[0], cmd.argv.slice(1), {
+      const childEnv = { ...env, ...cmd.env };
+      const sp = resolveSpawn(cmd.argv[0], cmd.argv.slice(1), { env: childEnv });
+      child = spawn(sp.command, sp.args, {
         cwd,
-        env: { ...env, ...cmd.env },
+        env: childEnv,
         stdio: ['ignore', 'pipe', 'pipe'],
+        ...(sp.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
         // No shell:true — the sequence was tokenized by tokenizeNoShell.
       });
     } catch {

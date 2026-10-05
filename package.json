@@ -52,6 +52,7 @@
     "bench:renderer": "vitest run --config vitest.bench.config.ts",
     "test:e2e": "xvfb-run -a playwright test",
     "smoke:darwin": "playwright test tests/smoke/darwin-boot.spec.ts",
+    "smoke:packaged": "playwright test tests/smoke/packaged-boot.spec.ts",
     "refresh:vad-assets": "node scripts/refresh-vad-assets.mjs",
     "health": "node src/main/health.cjs",
     "manual:check": "node web/manual/build.mjs --check",

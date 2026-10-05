@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('api', {
     // Boot diagnostics (v0.10.1) — renderer polls at mount to surface
     // missing-claude-bin / home-symlink-mismatch as toasts.
     claudeBinStatus: () => ipcRenderer.invoke('app:claude-bin-status'),
+    prereqs: () => ipcRenderer.invoke('app:prereqs'),
+    prereqsRunFix: (id) => ipcRenderer.invoke('app:prereqs-run-fix', id),
     homeSelfCheck: () => ipcRenderer.invoke('app:home-self-check'),
     seedStatus: () => ipcRenderer.invoke('app:seed-status'),
     delegationReadiness: (cwd) => ipcRenderer.invoke('app:delegation-readiness', { cwd }),

@@ -49,11 +49,11 @@ function findCommand(name) {
  *
  * @returns {Promise<{ ok: true, opener: string } | { ok: false, error: string }>}
  */
-function spawnDetached(cmd, args, opener = cmd) {
+function spawnDetached(cmd, args, opener = cmd, spawnFn = spawn) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(cmd, args, { detached: true, stdio: 'ignore', env: cleanChildEnv() });
+      child = spawnFn(cmd, args, { detached: true, stdio: 'ignore', env: cleanChildEnv() });
     } catch (e) {
       resolve({ ok: false, error: `failed to launch ${opener}: ${e?.message ?? e}` });
       return;
@@ -156,4 +156,41 @@ async function openInTerminal({ cwd }) {
   return { ok: false, error: 'no terminal found' };
 }
 
-module.exports = { spawnDetached, findCommand, openInEditor, openFileInEditor, openInFinder, openInTerminal };
+/** Escape a string for use inside an AppleScript double-quoted literal. */
+const appleScriptQuote = (s) => `"${String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+
+/**
+ * Run a command in a visible OS terminal so the user sees and controls it
+ * (password prompts, installer dialogs). `command` MUST come from main-side
+ * code, never from the renderer. argv arrays only — never shell:true.
+ *
+ * @param {{ command: string, shell?: 'sh' | 'powershell' }} opts
+ * @param {{ platform?: string, spawn?: Function, find?: (n: string) => string | null }} [deps]
+ * @returns {Promise<{ ok: true, opener: string } | { ok: false, error: string }>}
+ */
+async function runInTerminal({ command, shell: shellKind }, deps = {}) {
+  const { platform = process.platform, spawn: spawnFn = spawn, find = findCommand } = deps;
+  if (typeof command !== 'string' || !command.trim()) return { ok: false, error: 'empty command' };
+  if (platform === 'darwin') {
+    const script = `tell application "Terminal"\nactivate\ndo script ${appleScriptQuote(command)}\nend tell`;
+    return spawnDetached('osascript', ['-e', script], 'Terminal.app', spawnFn);
+  }
+  if (platform === 'win32') {
+    return spawnDetached('cmd.exe',
+      ['/d', '/c', 'start', '', 'powershell.exe', '-NoExit', '-Command', command],
+      'powershell', spawnFn);
+  }
+  if (platform === 'linux') {
+    const inner = `${command}; exec bash`;
+    for (const t of ['gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm']) {
+      if (!find(t)) continue;
+      const args = t === 'gnome-terminal'
+        ? ['--', 'bash', '-lc', inner]
+        : ['-e', 'bash', '-lc', inner];
+      return spawnDetached(t, args, t, spawnFn);
+    }
+  }
+  return { ok: false, error: 'no terminal found' };
+}
+
+module.exports = { spawnDetached, findCommand, openInEditor, openFileInEditor, openInFinder, openInTerminal, runInTerminal };

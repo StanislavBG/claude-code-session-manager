@@ -24,6 +24,7 @@ const { writeJson, addAllowedRoot } = require('../config.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./cleanEnv.cjs');
 const { shimPath: guardShimPath, resolveShimTarget, ensureGuardShimsOrError } = require('./guardShims.cjs');
 const { resolveProjectRoot } = require('./opsOwnership.cjs');
+const { nodeShellCommand } = require('./appRuntime.cjs');
 
 const SCHEDULER_MCP_NAME = 'session-manager-scheduler';
 const DEV_PLUGIN_ENABLED_KEY = 'session-manager-dev@session-manager';
@@ -49,7 +50,14 @@ function readJsonSafe(absPath, fallback) {
   }
 }
 
-const SCHEDULER_MCP_FIX_CMD = `claude mcp add ${SCHEDULER_MCP_NAME} --scope user -- node ${SCHEDULER_MCP_SERVER_SCRIPT}`;
+/** Lazy (not a module-load constant) so tests can toggle packaged mode. */
+function schedulerMcpFixCmd() {
+  const cmd = nodeShellCommand(SCHEDULER_MCP_SERVER_SCRIPT);
+  const m = /^ELECTRON_RUN_AS_NODE=1 (.*)$/.exec(cmd);
+  return m
+    ? `claude mcp add ${SCHEDULER_MCP_NAME} --scope user -e ELECTRON_RUN_AS_NODE=1 -- ${m[1]}`
+    : `claude mcp add ${SCHEDULER_MCP_NAME} --scope user -- ${cmd}`;
+}
 
 /**
  * `ok` must mean "an agent in this project can actually reach a working
@@ -79,7 +87,7 @@ function checkSchedulerMcp({ cwd, homeDir }) {
         detail: !isAbsolute
           ? `user-scope ${SCHEDULER_MCP_NAME} registration points at a non-absolute script path (${scriptArg})`
           : `user-scope ${SCHEDULER_MCP_NAME} registration points at a script that no longer exists (${scriptArg})`,
-        fix: SCHEDULER_MCP_FIX_CMD,
+        fix: schedulerMcpFixCmd(),
       };
     }
     return {
@@ -106,7 +114,7 @@ function checkSchedulerMcp({ cwd, homeDir }) {
     label: 'Scheduler MCP server registered',
     ok: false,
     detail: `no ${SCHEDULER_MCP_NAME} entry in ~/.claude.json or ${cwd}/.mcp.json`,
-    fix: SCHEDULER_MCP_FIX_CMD,
+    fix: schedulerMcpFixCmd(),
   };
 }
 
@@ -476,7 +484,7 @@ function checkGuard(def, { cwd, homeDir = os.homedir() }) {
     detail,
     fix: ok
       ? null
-      : `Add a PreToolUse hook to ${cwd}/.claude/settings.json matching ${def.matcher} that runs node ${guardShimPath(def.scriptBasename, homeDir)}${def.nudge ? ' (a nudge, not a hard gate)' : ''}`,
+      : `Add a PreToolUse hook to ${cwd}/.claude/settings.json matching ${def.matcher} that runs ${nodeShellCommand(guardShimPath(def.scriptBasename, homeDir))}${def.nudge ? ' (a nudge, not a hard gate)' : ''}`,
     fixAction: ok ? null : def.fixActionId,
   };
 }
@@ -549,7 +557,7 @@ async function installGuard(def, { cwd, homeDir = os.homedir(), skipShimEnsure =
   }
   const settings = (existing && typeof existing === 'object' && !Array.isArray(existing)) ? existing : {};
 
-  const command = `node ${guardShimPath(def.scriptBasename, homeDir)}`;
+  const command = nodeShellCommand(guardShimPath(def.scriptBasename, homeDir));
   const hooks = (settings.hooks && typeof settings.hooks === 'object') ? settings.hooks : {};
   const preToolUse = Array.isArray(hooks.PreToolUse) ? hooks.PreToolUse.slice() : [];
 

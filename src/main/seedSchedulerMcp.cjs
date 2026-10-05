@@ -38,6 +38,7 @@ const { spawn } = require('node:child_process');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
 const { writeJsonSync } = require('./config.cjs');
+const { nodeSpawnSpec } = require('./lib/appRuntime.cjs');
 
 const SERVER_NAME = 'session-manager-scheduler';
 const MAX_ATTEMPTS = 3; // give a transient first-boot failure a few chances
@@ -102,6 +103,14 @@ function scriptPathMissing() {
   }
 }
 
+/** argv for `claude mcp add`: system `node` in dev/npx, the app binary with
+ *  ELECTRON_RUN_AS_NODE=1 when packaged (an installer user may have no Node). */
+function mcpAddArgv(serverPath) {
+  const spec = nodeSpawnSpec(serverPath);
+  const envFlags = Object.entries(spec.env).flatMap(([k, v]) => ['-e', `${k}=${v}`]);
+  return ['mcp', 'add', SERVER_NAME, '--scope', 'user', ...envFlags, '--', spec.command, ...spec.args];
+}
+
 /** Run `claude mcp add session-manager-scheduler --scope user -- node <serverPath>`.
  *  No shell:true — argv array passed directly to spawn. */
 function runClaudeMcpAdd(serverPath) {
@@ -111,7 +120,7 @@ function runClaudeMcpAdd(serverPath) {
     try {
       proc = spawn(
         target.command,
-        ['mcp', 'add', SERVER_NAME, '--scope', 'user', '--', 'node', serverPath],
+        mcpAddArgv(serverPath),
         {
           ...(target.argv0 ? { argv0: target.argv0 } : {}),
           cwd: os.homedir(),
@@ -200,4 +209,4 @@ async function seedSchedulerMcp({ logger = console, addFn = runClaudeMcpAdd, rem
   }
 }
 
-module.exports = { seedSchedulerMcp, markerPath, MAX_ATTEMPTS, serverScriptPath, SERVER_NAME };
+module.exports = { seedSchedulerMcp, mcpAddArgv, markerPath, MAX_ATTEMPTS, serverScriptPath, SERVER_NAME };

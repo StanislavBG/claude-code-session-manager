@@ -209,3 +209,24 @@ test('marker done + user-scope script path exists -> healthy, no repair attempte
   expect(removeCalled).toBe(false);
   expect(addCalled).toBe(false);
 });
+
+test('mcpAddArgv: not packaged keeps the `-- node <script>` argv', () => {
+  delete process.env.SM_FORCE_PACKAGED;
+  const { mcpAddArgv } = require('../seedSchedulerMcp.cjs');
+  expect(mcpAddArgv('/x/server.cjs')).toEqual([
+    'mcp', 'add', 'session-manager-scheduler', '--scope', 'user', '--', 'node', '/x/server.cjs',
+  ]);
+});
+
+test('mcpAddArgv: packaged uses process.execPath with ELECTRON_RUN_AS_NODE=1', () => {
+  process.env.SM_FORCE_PACKAGED = '1';
+  try {
+    const { mcpAddArgv } = require('../seedSchedulerMcp.cjs');
+    expect(mcpAddArgv('/x/server.cjs')).toEqual([
+      'mcp', 'add', 'session-manager-scheduler', '--scope', 'user',
+      '-e', 'ELECTRON_RUN_AS_NODE=1', '--', process.execPath, '/x/server.cjs',
+    ]);
+  } finally {
+    delete process.env.SM_FORCE_PACKAGED;
+  }
+});

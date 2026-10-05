@@ -49,11 +49,11 @@ function findCommand(name) {
  *
  * @returns {Promise<{ ok: true, opener: string } | { ok: false, error: string }>}
  */
-function spawnDetached(cmd, args, opener = cmd, spawnFn = spawn) {
+function spawnDetached(cmd, args, opener = cmd, spawnFn = spawn, extraOpts = {}) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawnFn(cmd, args, { detached: true, stdio: 'ignore', env: cleanChildEnv() });
+      child = spawnFn(cmd, args, { detached: true, stdio: 'ignore', env: cleanChildEnv(), ...extraOpts });
     } catch (e) {
       resolve({ ok: false, error: `failed to launch ${opener}: ${e?.message ?? e}` });
       return;
@@ -116,12 +116,16 @@ async function openFileInEditor({ path: abs, line, col, editor }) {
 }
 
 /**
- * Open a directory in the OS file manager (Finder on macOS, Nautilus etc on Linux).
+ * Open a directory in the OS file manager (Finder on macOS, Nautilus etc on Linux,
+ * explorer.exe on Windows).
  *
  * @param {{ cwd: string }} opts
+ * @param {{ platform?: string, spawn?: Function }} [deps]
  * @returns {Promise<{ ok: true, opener: string } | { ok: false, error: string }>}
  */
-async function openInFinder({ cwd }) {
+async function openInFinder({ cwd }, deps = {}) {
+  const { platform = process.platform, spawn: spawnFn = spawn } = deps;
+  if (platform === 'win32') return spawnDetached('explorer.exe', [cwd], 'explorer', spawnFn);
   const errStr = await shell.openPath(cwd);
   if (errStr) return { ok: false, error: errStr };
   return { ok: true, opener: 'shell' };
@@ -132,26 +136,36 @@ async function openInFinder({ cwd }) {
  *
  * Linux: tries gnome-terminal → konsole → xfce4-terminal → xterm.
  * macOS: delegates to Terminal.app via `open -a`.
+ * Windows: `wt.exe -d <cwd>` when on PATH, else powershell.exe -NoExit in a new
+ * console via `cmd.exe /d /c start`.
  *
  * Arg shapes per terminal are preserved verbatim from index.cjs (AC impl note):
  *   gnome-terminal  → ['--working-directory=<cwd>']
  *   others          → ['-e', "bash -c \"cd '<cwd>' && exec bash\""]
  *
  * @param {{ cwd: string }} opts
+ * @param {{ platform?: string, spawn?: Function, findCommand?: (n: string) => string | null }} [deps]
  * @returns {Promise<{ ok: true, opener: string } | { ok: false, error: string }>}
  */
-async function openInTerminal({ cwd }) {
-  if (process.platform === 'linux') {
+async function openInTerminal({ cwd }, deps = {}) {
+  const { platform = process.platform, spawn: spawnFn = spawn, findCommand: find = findCommand } = deps;
+  if (platform === 'linux') {
     const terms = ['gnome-terminal', 'konsole', 'xfce4-terminal', 'xterm'];
     for (const t of terms) {
-      if (!findCommand(t)) continue;
+      if (!find(t)) continue;
       const args = t === 'gnome-terminal'
         ? ['--working-directory=' + cwd]
         : ['-e', `bash -c "cd '${cwd.replace(/'/g, "'\\''")}' && exec bash"`];
-      return spawnDetached(t, args);
+      return spawnDetached(t, args, t, spawnFn);
     }
-  } else if (process.platform === 'darwin') {
-    return spawnDetached('open', ['-a', 'Terminal', cwd], 'Terminal.app');
+  } else if (platform === 'darwin') {
+    return spawnDetached('open', ['-a', 'Terminal', cwd], 'Terminal.app', spawnFn);
+  } else if (platform === 'win32') {
+    if (find('wt.exe')) return spawnDetached('wt.exe', ['-d', cwd], 'wt', spawnFn);
+    const setLoc = `Set-Location -LiteralPath '${cwd.replace(/'/g, "''")}'`;
+    return spawnDetached('cmd.exe',
+      ['/d', '/c', 'start', '', 'powershell.exe', '-NoExit', '-Command', setLoc],
+      'powershell', spawnFn, { windowsHide: true });
   }
   return { ok: false, error: 'no terminal found' };
 }

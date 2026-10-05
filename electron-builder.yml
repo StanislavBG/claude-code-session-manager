@@ -1,0 +1,40 @@
+appId: run.bilko.session-manager
+productName: Session Manager
+directories:
+  app: release/stage
+  output: release/out
+  buildResources: build
+electronVersion: 42.11.10
+asar: false
+npmRebuild: false
+icon: build/icon.png
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: false
+  artifactName: Session-Manager-mac-${arch}.${ext}
+win:
+  target:
+    - target: nsis
+      arch: [x64, arm64]
+  artifactName: Session-Manager-win-${arch}.${ext}
+nsis:
+  oneClick: true
+  perMachine: false
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Development
+  artifactName: Session-Manager-linux-${arch}.${ext}
+publish:
+  provider: github
+  owner: StanislavBG
+  repo: claude-code-session-manager

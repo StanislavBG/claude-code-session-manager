@@ -690,9 +690,11 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // real-time NDJSON streaming; stderr piped for error-message capture.
     let thisChild;
     try {
-      const target = claudeSpawnTarget('chat', sessionId, claudeBin);
-      thisChild = spawn(target.command, buildArgs(resumeFlag), {
+      const chatArgs = buildArgs(resumeFlag);
+      const target = claudeSpawnTarget('chat', sessionId, claudeBin, chatArgs);
+      thisChild = spawn(target.command, target.args || chatArgs, {
         ...(target.argv0 ? { argv0: target.argv0 } : {}),
+        ...(target.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
         cwd: execCwd,
         env: childEnv,
         stdio: ['ignore', 'pipe', 'pipe'],

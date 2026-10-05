@@ -81,9 +81,22 @@ const ROLE_ALIASES = { job: 'sm-claude-job', chat: 'sm-claude-chat', aux: 'sm-cl
  * @param {'job'|'chat'|'aux'} role
  * @param {string} [detail] argv0 label detail (job slug / epic session id)
  * @param {string} [realBin] defaults to resolveClaudeBin()
- * @returns {{ command: string, argv0?: string }} spread `argv0` into spawn options
+ * @param {string[]} [args] the claude argv; only needed so a Windows .cmd/.bat shim can be wrapped
+ * @param {{ platform?: string, env?: Record<string, string|undefined>, exists?: (p: string) => boolean }} [winOpts] injectable for tests
+ * @returns {{ command: string, argv0?: string, args?: string[], windowsVerbatimArguments?: boolean }}
+ *   spread `argv0` into spawn options; when `args` is present spawn with it instead of the caller's argv
  */
-function claudeSpawnTarget(role, detail, realBin = resolveClaudeBin()) {
+function claudeSpawnTarget(role, detail, realBin = resolveClaudeBin(), args = [], winOpts = {}) {
+  const base = baseSpawnTarget(role, detail, realBin);
+  const platform = winOpts.platform || process.platform;
+  if (platform !== 'win32' || !/\.(cmd|bat)$/i.test(base.command)) return base;
+  // Node refuses to spawn a .cmd/.bat without a shell (EINVAL) — wrap in cmd.exe argv.
+  const { resolveSpawn } = require('./winSpawn.cjs');
+  const wrapped = resolveSpawn(base.command, args, { platform, ...(winOpts.env ? { env: winOpts.env } : {}), ...(winOpts.exists ? { exists: winOpts.exists } : {}) });
+  return { ...base, ...wrapped };
+}
+
+function baseSpawnTarget(role, detail, realBin) {
   if (process.env.SM_CLAUDE_BIN) return { command: realBin };
   const alias = ROLE_ALIASES[role];
   if (!alias) return { command: realBin };
@@ -133,8 +146,8 @@ function probeClaudeVersion({ now = Date.now(), execFileImpl } = {}) {
       // it, and the binary must never be handed the caller's working tree —
       // a stub `claude` (tests point SM_CLAUDE_BIN at one) that writes
       // markers or commits into process.cwd() once did so in the real repo.
-      const target = claudeSpawnTarget('aux', 'version', bin);
-      execFile(target.command, ['--version'], { timeout: VERSION_PROBE_TIMEOUT_MS, windowsHide: true, cwd: os.tmpdir(), ...(target.argv0 ? { argv0: target.argv0 } : {}) }, (err, stdout) => {
+      const target = claudeSpawnTarget('aux', 'version', bin, ['--version']);
+      execFile(target.command, target.args || ['--version'], { timeout: VERSION_PROBE_TIMEOUT_MS, windowsHide: true, cwd: os.tmpdir(), ...(target.argv0 ? { argv0: target.argv0 } : {}), ...(target.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}) }, (err, stdout) => {
         if (err) return done(null);
         const m = /(\d+\.\d+\.\d+[^\s]*)/.exec(String(stdout || ''));
         done(m ? m[1] : (String(stdout || '').trim() || null));

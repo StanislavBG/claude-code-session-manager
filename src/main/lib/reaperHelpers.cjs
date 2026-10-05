@@ -30,9 +30,11 @@ const { pidAlive } = require('./pidAlive.cjs');
  * Conservative by design: a false negative (live process treated as dead) is
  * far worse than a late reap.
  */
-function claudePidAlive(pid) {
+function claudePidAlive(pid, { platform = process.platform } = {}) {
   if (!pid || typeof pid !== 'number' || pid <= 1) return false;
   if (!pidAlive(pid)) return false;
+  // Windows has no /proc — cannot verify identity, so never call it dead.
+  if (platform === 'win32') return true;
   try {
     const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
     return /\bclaude\b/.test(cmd);
@@ -73,7 +75,8 @@ function claudePidAlive(pid) {
  * — i.e. exactly today's behaviour (fail toward terminalizing), never a hang
  * or a thrown error propagating to the caller.
  */
-function findLiveProcessForJob(job, { worktreeDir, runCwd } = {}) {
+function findLiveProcessForJob(job, { worktreeDir, runCwd, platform = process.platform } = {}) {
+  if (platform === 'win32') return null; // no /proc — skip every read
   const slug = job?.slug;
   let entries;
   try {

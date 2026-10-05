@@ -116,6 +116,7 @@ function createLoadGate({
   auditIntervalMs = AUDIT_INTERVAL_MS,
   escalateAfterMs = JOB_OVERRUN_FLOOR_MS,
   releaseWindowMs = RELEASE_WINDOW_MS,
+  platform = process.platform,
 } = {}) {
   let lastAuditAt = null; // null = never audited; the first gated tick always audits
   let gatedSince = null;
@@ -124,6 +125,21 @@ function createLoadGate({
 
   function evaluate({ bypass = false } = {}) {
     const t = now();
+    if (platform === 'win32') {
+      // os.loadavg() is always [0,0,0] on Windows — the gate is open, not computed.
+      last = {
+        gated: false,
+        bypassed: false,
+        ratio: 0,
+        threshold: typeof threshold === 'function' ? threshold() : threshold,
+        loadavg1: null,
+        cores: cores(),
+        gatedSinceMs: 0,
+        reason: 'loadavg-unavailable-win32',
+        at: new Date(t).toISOString(),
+      };
+      return { ...last, shouldAudit: false, escalate: false };
+    }
     const [l1] = loadavg();
     const c = cores();
     const th = typeof threshold === 'function' ? threshold() : threshold;

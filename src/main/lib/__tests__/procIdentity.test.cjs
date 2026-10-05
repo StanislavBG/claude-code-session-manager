@@ -117,3 +117,38 @@ describe('procIdentity.isDifferentProcess — fail-closed decision', () => {
     expect(isDifferentProcess(legacy, complete())).toBe(false);
   });
 });
+
+describe('procIdentity.identity — win32 PowerShell path', () => {
+  it('parses StartTime (5.1 /Date()/ form) and ProcessName via injected execFile', () => {
+    const calls = [];
+    const execFile = (cmd, args, opts) => {
+      calls.push({ cmd, args, opts });
+      return JSON.stringify({ StartTime: '/Date(1700000000000)/', ProcessName: 'claude' });
+    };
+    const id = identity(321, { platform: 'win32', execFile });
+    expect(id).toEqual({ pid: 321, startTicks: 1700000000000, cmdline: 'claude', complete: true });
+    expect(calls[0].cmd).toBe('powershell.exe');
+    expect(calls[0].args).toEqual(['-NoProfile', '-Command', 'Get-Process -Id 321 | Select-Object StartTime,ProcessName | ConvertTo-Json']);
+    expect(calls[0].opts.windowsHide).toBe(true);
+    expect(calls[0].opts.timeout).toBe(5000);
+  });
+
+  it('parses an ISO StartTime', () => {
+    const execFile = () => JSON.stringify({ StartTime: '2026-01-02T03:04:05.000Z', ProcessName: 'node' });
+    const id = identity(5, { platform: 'win32', execFile });
+    expect(id.startTicks).toBe(Date.parse('2026-01-02T03:04:05.000Z'));
+    expect(id.complete).toBe(true);
+  });
+
+  it('returns unknown when the process is missing / times out (execFile throws)', () => {
+    const execFile = () => { throw new Error('ETIMEDOUT'); };
+    expect(identity(7, { platform: 'win32', execFile })).toEqual({ pid: 7, startTicks: null, cmdline: null, complete: false });
+  });
+
+  it('returns unknown on unparseable output', () => {
+    const execFile = () => 'not json';
+    expect(identity(7, { platform: 'win32', execFile }).complete).toBe(false);
+    const execFile2 = () => JSON.stringify({ StartTime: 'garbage', ProcessName: 'x' });
+    expect(identity(7, { platform: 'win32', execFile: execFile2 }).complete).toBe(false);
+  });
+});

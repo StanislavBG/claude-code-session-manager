@@ -24,7 +24,7 @@ const {
   selectReapableJobs, mapOutcomeToGateOutcome, classifyRunOutcome,
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome,
   isAlreadySatisfiedOnMain, resolvePidlessFailureOverride,
-  readSpawnedPidFromLog, isLogFresh,
+  readSpawnedPidFromLog, isLogFresh, claudePidAlive,
 } = require('../reaperHelpers.cjs');
 const { detectRateLimitInLog } = require('../rateLimitDetect.cjs');
 
@@ -656,5 +656,25 @@ describe('basics (claudePidAlive, classifyRunOutcome edge cases)', () => {
 
   test('classifyRunOutcome: nonexistent file → no_result (readTail swallows I/O errors)', () => {
     assert.equal(classifyRunOutcome('/nonexistent/path/that/cannot/exist.log'), 'no_result');
+  });
+});
+
+describe('win32 fail-safe (no /proc)', () => {
+  test('claudePidAlive on win32 never says dead for a live pid (cannot verify)', () => {
+    assert.equal(claudePidAlive(process.pid, { platform: 'win32' }), true);
+  });
+
+  test('findLiveProcessForJob on win32 skips /proc and returns null without throwing', () => {
+    assert.equal(findLiveProcessForJob({ slug: 'x' }, { worktreeDir: '/tmp/x', platform: 'win32' }), null);
+  });
+});
+
+describe('loadGate win32', () => {
+  test('reports open with reason loadavg-unavailable-win32', () => {
+    const { createLoadGate } = require('../loadGate.cjs');
+    const g = createLoadGate({ platform: 'win32', loadavg: () => [99, 99, 99], cores: () => 1, threshold: 1 });
+    const r = g.evaluate();
+    assert.equal(r.gated, false);
+    assert.equal(r.reason, 'loadavg-unavailable-win32');
   });
 });

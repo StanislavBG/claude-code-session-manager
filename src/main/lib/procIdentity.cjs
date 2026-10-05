@@ -97,12 +97,47 @@ function identityFromPs(pid) {
   return { pid, startTicks, cmdline, complete: startTicks !== null && cmdline !== null };
 }
 
-/** identity(pid) → {pid, startTicks, cmdline, complete}. Never throws. */
-function identity(pid) {
+/** PowerShell serialises DateTime as "\/Date(ms)\/" (5.1) or ISO-8601 (7+). */
+function parseWinStartTime(v) {
+  if (typeof v === 'string') {
+    const m = /^\/Date\((-?\d+)\)\/$/.exec(v.trim());
+    if (m) return Number(m[1]);
+    const ms = Date.parse(v);
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (v && typeof v === 'object' && typeof v.value === 'string') return parseWinStartTime(v.value);
+  return null;
+}
+
+function identityFromPowerShell(pid, execFile) {
+  const unknown = { pid, startTicks: null, cmdline: null, complete: false };
+  let out;
+  try {
+    out = execFile(
+      'powershell.exe',
+      ['-NoProfile', '-Command', `Get-Process -Id ${pid} | Select-Object StartTime,ProcessName | ConvertTo-Json`],
+      { encoding: 'utf8', windowsHide: true, timeout: 5000 },
+    );
+    const parsed = JSON.parse(String(out));
+    const startTicks = parseWinStartTime(parsed && parsed.StartTime);
+    const name = parsed && typeof parsed.ProcessName === 'string' ? parsed.ProcessName.trim() : '';
+    const cmdline = name || null;
+    return { pid, startTicks, cmdline, complete: startTicks !== null && cmdline !== null };
+  } catch {
+    return unknown; // missing process, timeout, or unparseable output
+  }
+}
+
+/**
+ * identity(pid, opts?) → {pid, startTicks, cmdline, complete}. Never throws.
+ * opts.platform / opts.execFile (sync, execFileSync-shaped) are injectable for tests.
+ */
+function identity(pid, { platform = process.platform, execFile = execFileSync } = {}) {
   if (!Number.isInteger(pid) || pid <= 0) {
     return { pid, startTicks: null, cmdline: null, complete: false };
   }
   try {
+    if (platform === 'win32') return identityFromPowerShell(pid, execFile);
     return hasProc() ? identityFromProc(pid) : identityFromPs(pid);
   } catch {
     return { pid, startTicks: null, cmdline: null, complete: false };

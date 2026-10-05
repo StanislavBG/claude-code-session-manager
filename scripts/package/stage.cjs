@@ -25,6 +25,20 @@ function stagePackageJson(rootPkg) {
   return out;
 }
 
+// Node refuses to spawn .cmd shims without a shell (EINVAL), so run npm's JS
+// entry point with the current node binary instead.
+function npmInvocation(env, platform) {
+  const execpath = env.npm_execpath;
+  if (execpath && /\.c?js$/.test(execpath)) {
+    return { command: process.execPath, args: [execpath] };
+  }
+  if (platform === 'win32') {
+    const cli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    return { command: process.execPath, args: [cli] };
+  }
+  return { command: 'npm', args: [] };
+}
+
 function main() {
   const root = path.resolve(__dirname, '..', '..');
   const stage = path.join(root, 'release', 'stage');
@@ -49,14 +63,15 @@ function main() {
     JSON.stringify(stagePackageJson(rootPkg), null, 2) + '\n',
   );
 
-  const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-  execFileSync(npm, ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], {
+  const npm = npmInvocation(process.env, process.platform);
+  const installArgs = ['install', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'];
+  execFileSync(npm.command, [...npm.args, ...installArgs], {
     cwd: stage,
     stdio: 'inherit',
   });
   console.log(`staged ${stage}`);
 }
 
-module.exports = { stagePackageJson };
+module.exports = { stagePackageJson, npmInvocation };
 
 if (require.main === module) main();

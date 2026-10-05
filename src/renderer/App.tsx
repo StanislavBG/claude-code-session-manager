@@ -14,6 +14,7 @@ import { Toast } from './components/ui/Toast'
 import { TourOverlay } from './components/TourOverlay'
 import { useTour, hasCompletedTour } from './state/tour'
 import { toast } from './state/toast'
+import { PrereqChecklist } from './components/ui/PrereqChecklist'
 import { installConfigChangeListener } from './state/config'
 import { installMonacoSchemas } from './components/ui/JsonEditor'
 import { useSessions, hydrateSessions } from './state/sessions'
@@ -379,14 +380,6 @@ export function App() {
 
     // Boot diagnostics (v0.10.1) — surface bad startup state as a toast.
     // Otherwise the data only lives in the boot-fail log file no one reads.
-    window.api.app.claudeBinStatus().then((r) => {
-      if (!r.foundOnDisk) {
-        toast.warn(
-          'Claude binary not found at any known path — sessions will rely on $PATH and may fail to spawn. Install via `npm i -g @anthropic-ai/claude-code` if spawn fails.',
-        )
-      }
-    }).catch(() => { /* main-process churn during boot; ignore */ })
-
     window.api.app.homeSelfCheck().then((r) => {
       if (!r.ok) {
         toast.error(
@@ -667,6 +660,7 @@ export function App() {
           outer container shifts the rest of the app down by the banner's
           28px height so TabBar stays visible. */}
       <RecordingStatus />
+      <PrereqChecklist />
       <TabBar />
       <div className="flex-1 flex min-h-0">
         <AlmanacSidebar

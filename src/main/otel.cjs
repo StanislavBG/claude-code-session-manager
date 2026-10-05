@@ -8,58 +8,36 @@
  * plan text, and agent prompts are excluded unless `includeContent` is on
  * (matches upstream OTEL_LOG_USER_PROMPTS opt-in).
  *
- * The OTEL SDK is required lazily — if any of the @opentelemetry/* packages
- * fail to load, the module is left in an inert state and `recordTranscriptEvent`
- * becomes a no-op. The app must keep working without telemetry.
- *
- * Threading: the BatchSpanProcessor batches/sends spans on its own timer; we
- * never block the transcript flush.
+ * Spans are POSTed as OTLP/HTTP JSON by lib/otlpTraceExporter.cjs (zero
+ * dependencies). recordSpan() only queues; the exporter batches/sends on its
+ * own unref()'d timer, so we never block the transcript flush. The app must
+ * keep working without telemetry: a failed export is surfaced, never thrown.
  */
 
 const otelSettings = require('./otelSettings.cjs');
+const { createOtlpTraceExporter } = require('./lib/otlpTraceExporter.cjs');
 
-let provider = null;
-let tracer = null;
+let exporter = null;
 let enabled = false;
 let includeContent = false;
 let lastError = null;
 let initialized = false;
 
 /**
- * Lazy-require all @opentelemetry/* packages. Returns null if any are missing.
- * We catch the per-require so a partial install doesn't half-init.
- */
-function loadDeps() {
-  try {
-    const api = require('@opentelemetry/api');
-    const { NodeTracerProvider } = require('@opentelemetry/sdk-trace-node');
-    const { BatchSpanProcessor } = require('@opentelemetry/sdk-trace-base');
-    const { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
-    const { resourceFromAttributes } = require('@opentelemetry/resources');
-    const { ATTR_SERVICE_NAME } = require('@opentelemetry/semantic-conventions');
-    return { api, NodeTracerProvider, BatchSpanProcessor, OTLPTraceExporter, resourceFromAttributes, ATTR_SERVICE_NAME };
-  } catch (err) {
-    return { error: err };
-  }
-}
-
-/**
- * Tear down any existing provider. Best-effort — flushes pending spans on a
+ * Tear down any existing exporter. Best-effort — flushes pending spans on a
  * 2s ceiling so a wedged exporter doesn't block app shutdown / config reload.
  */
 async function shutdown() {
-  if (!provider) {
+  if (!exporter) {
     enabled = false;
-    tracer = null;
     return;
   }
-  const p = provider;
-  provider = null;
-  tracer = null;
+  const e = exporter;
+  exporter = null;
   enabled = false;
   try {
     await Promise.race([
-      p.shutdown(),
+      e.shutdown(),
       new Promise((resolve) => setTimeout(resolve, 2000)),
     ]);
   } catch (err) {
@@ -68,7 +46,7 @@ async function shutdown() {
 }
 
 /**
- * Configure the tracer provider. Tears down any prior provider first so a
+ * Configure the exporter. Tears down any prior exporter first so a
  * settings change reliably re-points at the new endpoint.
  *
  * Returns { ok, error?: string } — the renderer surfaces `error` in the UI.
@@ -77,31 +55,13 @@ async function init({ endpoint, headers, serviceName, includeContent: ic } = {})
   await shutdown();
   initialized = true;
 
-  const deps = loadDeps();
-  if (deps.error) {
-    lastError = `OTEL packages unavailable: ${deps.error.message}`;
-    return { ok: false, error: lastError };
-  }
-
-  const { NodeTracerProvider, BatchSpanProcessor, OTLPTraceExporter, resourceFromAttributes, ATTR_SERVICE_NAME } = deps;
-
   try {
-    const exporter = new OTLPTraceExporter({
+    exporter = createOtlpTraceExporter({
       url: String(endpoint || 'http://localhost:4318/v1/traces'),
       headers: typeof headers === 'object' && headers ? headers : {},
+      serviceName: String(serviceName || 'session-manager'),
+      scopeName: 'session-manager-transcripts',
     });
-    const tp = new NodeTracerProvider({
-      resource: resourceFromAttributes({
-        [ATTR_SERVICE_NAME]: String(serviceName || 'session-manager'),
-      }),
-      spanProcessors: [new BatchSpanProcessor(exporter)],
-    });
-    // Note: we deliberately do NOT call tp.register() — that installs a global
-    // tracer provider, which would intercept any other OTEL user in the
-    // process. We only want to emit our own spans, so we use the provider
-    // directly via getTracer().
-    provider = tp;
-    tracer = tp.getTracer('session-manager-transcripts');
     includeContent = !!ic;
     enabled = true;
     lastError = null;
@@ -205,11 +165,11 @@ function pruneAttrs(obj) {
 
 /**
  * Emit a 0-duration span for one classified transcript event.
- * Synchronous + non-blocking: the BatchSpanProcessor handles network I/O
+ * Synchronous + non-blocking: the exporter handles network I/O
  * on its own schedule.
  */
 function recordTranscriptEvent({ tabId, tabCwd, kind, data, ts }) {
-  if (!enabled || !tracer) return;
+  if (!enabled || !exporter) return;
   try {
     const startTime = typeof ts === 'number' ? ts : Date.now();
     const attrs = pruneAttrs({
@@ -218,11 +178,7 @@ function recordTranscriptEvent({ tabId, tabCwd, kind, data, ts }) {
       kind,
       ...attrsFor(kind, data),
     });
-    const span = tracer.startSpan(`transcript.${kind}`, {
-      startTime,
-      attributes: attrs,
-    });
-    span.end(startTime);
+    exporter.recordSpan({ name: `transcript.${kind}`, timeMs: startTime, attributes: attrs });
   } catch (err) {
     // A failure here must never break transcript ingestion. Log once-ish.
     if (!recordTranscriptEvent._warned) {

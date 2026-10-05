@@ -22,6 +22,7 @@
  */
 'use strict';
 
+const path = require('node:path');
 const { z } = require('zod');
 const { WorkTypeSchema, LEGACY_WORK_TYPES } = require('./workTypeLibrary.cjs');
 const { PERSONA_NAME_RE, ALL_PROJECTS } = require('../agentLibrary.cjs');
@@ -35,8 +36,13 @@ const BoundedString = z.string().max(2000);
 // `projects` entries are either the `'*'` sentinel (every project) or an
 // absolute path — agentLibrary.cjs's openProjects always deals in absolute
 // cwds, and a relative entry could never match one.
+/** @param {string} v @param {NodeJS.Platform} [platform] */
+function isAbsoluteForPlatform(v, platform = process.platform) {
+  return (platform === 'win32' ? path.win32 : path.posix).isAbsolute(v);
+}
+
 const ProjectEntrySchema = z.string().refine(
-  (v) => v === ALL_PROJECTS || v.startsWith('/'),
+  (/** @type {string} */ v) => v === ALL_PROJECTS || isAbsoluteForPlatform(v),
   `must be "${ALL_PROJECTS}" or an absolute path`,
 );
 
@@ -95,4 +101,5 @@ function assertValidAgentPersonaSave(persona) {
 module.exports = {
   AgentPersonaSaveSchema,
   assertValidAgentPersonaSave,
+  isAbsoluteForPlatform,
 };

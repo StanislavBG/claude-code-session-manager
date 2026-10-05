@@ -92,7 +92,12 @@ async function mapWithConcurrency(items, limit, fn) {
 
 // ── date helpers ──────────────────────────────────────────────────────────────
 
-function decodeCwd(encoded) {
+function decodeCwd(encoded, platform = process.platform) {
+  // encodeCwd turns `C:\\Users\\Me` into `C--Users-Me`: drive letter, then `--`.
+  if (platform === 'win32') {
+    const m = /^([A-Za-z])--(.*)$/.exec(encoded);
+    if (m) return m[1] + ':\\' + m[2].replace(/-+/g, '\\');
+  }
   return '/' + encoded.replace(/-+/g, '/');
 }
 
@@ -944,6 +949,7 @@ module.exports = {
   remote,
   MODEL_PRICING,
   finalizeClosedDays,
+  decodeCwd,
   refreshIntradayToday,
   computeIntradayBuckets,
   // exported for tests

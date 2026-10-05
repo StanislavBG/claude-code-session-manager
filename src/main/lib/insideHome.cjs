@@ -19,7 +19,8 @@
  * resolved at startup we keep going with the literal value — boot-time
  * self-check in index.cjs surfaces that to the user.
  *
- * Linux + darwin only. No Windows path handling.
+ * win32: containment compares lower-cased, path.win32-normalized paths; UNC
+ * (`\\server\share`) and `\\?\` paths are always outside home.
  */
 'use strict';
 
@@ -52,8 +53,18 @@ function resolveTarget(p) {
   }
 }
 
-function isContained(realPath) {
-  return realPath === HOME_REAL || realPath.startsWith(HOME_REAL + path.sep);
+function isContainedWin32(target, home) {
+  // UNC and \\?\ / \\.\ prefixes can alias any location — never inside home.
+  if (/^[\\/]{2}/.test(target)) return false;
+  const strip = (v) => path.win32.normalize(v).toLowerCase().replace(/[\\/]+$/, '');
+  const t = strip(target);
+  const h = strip(home);
+  return t === h || t.startsWith(h + '\\');
+}
+
+function isContained(realPath, home = HOME_REAL, platform = process.platform) {
+  if (platform === 'win32') return isContainedWin32(realPath, home);
+  return realPath === home || realPath.startsWith(home + path.sep);
 }
 
 function assertInsideHome(p) {
@@ -88,4 +99,4 @@ function checkInsideHome(p) {
   return { ok: true, realPath };
 }
 
-module.exports = { assertInsideHome, checkInsideHome };
+module.exports = { assertInsideHome, checkInsideHome, isContained };

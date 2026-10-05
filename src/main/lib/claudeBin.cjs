@@ -17,27 +17,51 @@ const os = require('node:os');
 
 let cached = null;
 
-function resolveClaudeBin() {
+/**
+ * @param {{ platform?: string, env?: Record<string, string|undefined>, homedir?: string,
+ *   accessSync?: (p: string, mode?: number) => void }} [opts] injectable for tests;
+ *   passing any opts bypasses the process-lifetime cache.
+ */
+function resolveClaudeBin(opts) {
   // Explicit override wins and is never cached — lets operators pin a binary
   // and lets tests point the runner at a controllable stub process.
   if (process.env.SM_CLAUDE_BIN) return process.env.SM_CLAUDE_BIN;
-  if (cached) return cached;
-  // Merged candidate list — was forked in scheduler vs pluginInstall before.
-  const home = os.homedir();
-  const candidates = [
-    path.join(home, '.claude', 'local', 'claude'),    // Claude Code bundled install
-    path.join(home, '.local', 'bin', 'claude'),       // user pip-style install
-    path.join(home, '.npm-global', 'bin', 'claude'),  // user npm-global
-    '/usr/local/bin/claude',
-    '/opt/homebrew/bin/claude',
-    '/usr/bin/claude',
-  ];
-  for (const c of candidates) {
-    try { fs.accessSync(c, fs.constants.X_OK); cached = c; return c; } catch { /* */ }
+  const injected = !!opts;
+  if (!injected && cached) return cached;
+  const platform = (opts && opts.platform) || process.platform;
+  const env = (opts && opts.env) || process.env;
+  const home = (opts && opts.homedir) || os.homedir();
+  const accessSync = (opts && opts.accessSync) || fs.accessSync;
+  let candidates;
+  let mode;
+  if (platform === 'win32') {
+    const w = path.win32;
+    candidates = [];
+    if (env.USERPROFILE) candidates.push(w.join(env.USERPROFILE, '.local', 'bin', 'claude.exe')); // native installer
+    if (env.APPDATA) candidates.push(w.join(env.APPDATA, 'npm', 'claude.cmd'));
+    if (env.LOCALAPPDATA) candidates.push(w.join(env.LOCALAPPDATA, 'Programs', 'claude', 'claude.exe'));
+    mode = fs.constants.F_OK; // X_OK is meaningless on Windows
+  } else {
+    // Merged candidate list — was forked in scheduler vs pluginInstall before.
+    candidates = [
+      path.join(home, '.claude', 'local', 'claude'),    // Claude Code bundled install
+      path.join(home, '.local', 'bin', 'claude'),       // user pip-style install
+      path.join(home, '.npm-global', 'bin', 'claude'),  // user npm-global
+      '/usr/local/bin/claude',
+      '/opt/homebrew/bin/claude',
+      '/usr/bin/claude',
+    ];
+    mode = fs.constants.X_OK;
   }
-  cached = 'claude';
-  return cached;
+  for (const c of candidates) {
+    try { accessSync(c, mode); if (!injected) cached = c; return c; } catch { /* */ }
+  }
+  if (!injected) cached = 'claude';
+  return 'claude';
 }
+
+/** Test hook — forget the cached resolution. */
+function __resetForTests() { cached = null; }
 
 // ---------- process naming ----------
 //
@@ -127,4 +151,4 @@ function resetClaudeVersionCache() {
   versionCache = { at: 0, value: null, inflight: null };
 }
 
-module.exports = { resolveClaudeBin, claudeSpawnTarget, probeClaudeVersion, resetClaudeVersionCache };
+module.exports = { resolveClaudeBin, __resetForTests, claudeSpawnTarget, probeClaudeVersion, resetClaudeVersionCache };

@@ -11,8 +11,21 @@ const SECRET_KEY_RE = /^(?:.*_)?(TOKEN|API_?KEY|SECRET|PASSWORD|AUTHORIZATION|CO
  * so pty.cjs and pluginInstall.cjs can't drift (one of them was missing
  * /opt/homebrew and broke plugin install on Apple Silicon).
  */
-function userBinDirs() {
-  const home = os.homedir();
+function userBinDirs(opts) {
+  const platform = (opts && opts.platform) || process.platform;
+  if (platform === 'win32') {
+    const env = (opts && opts.env) || process.env;
+    const w = path.win32;
+    const dirs = [];
+    if (env.USERPROFILE) dirs.push(w.join(env.USERPROFILE, '.local', 'bin'));
+    if (env.APPDATA) dirs.push(w.join(env.APPDATA, 'npm'));
+    if (env.ProgramFiles) {
+      dirs.push(w.join(env.ProgramFiles, 'Git', 'cmd'));
+      dirs.push(w.join(env.ProgramFiles, 'nodejs'));
+    }
+    return dirs;
+  }
+  const home = (opts && opts.homedir) || os.homedir();
   return [
     path.join(home, '.claude', 'local'),
     path.join(home, '.local', 'bin'),
@@ -29,10 +42,20 @@ function userBinDirs() {
  *  value to put in a spawned child's PATH so `claude`, node, git, etc. resolve
  *  on macOS even under a stripped Finder/Dock PATH. Appended (not prepended) so
  *  a user's version manager (nvm/asdf/volta/mise) earlier in PATH still wins and
- *  isn't shadowed by /opt/homebrew. */
-function pathWithUserBins() {
-  const base = process.env.PATH || '';
-  return base ? `${base}:${userBinDirs().join(':')}` : userBinDirs().join(':');
+ *  isn't shadowed by /opt/homebrew. Windows: ';' delimiter, and PATH is read
+ *  case-insensitively (the variable is usually `Path`). */
+function pathWithUserBins(opts) {
+  const platform = (opts && opts.platform) || process.platform;
+  const env = (opts && opts.env) || process.env;
+  const win = platform === 'win32';
+  const delim = win ? ';' : ':';
+  let base = env.PATH || '';
+  if (win && !base) {
+    const key = Object.keys(env).find((k) => k.toUpperCase() === 'PATH');
+    base = (key && env[key]) || '';
+  }
+  const dirs = userBinDirs({ ...(opts || {}), platform, env }).join(delim);
+  return base && dirs ? `${base}${delim}${dirs}` : base || dirs;
 }
 
 /**

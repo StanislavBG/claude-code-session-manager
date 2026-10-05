@@ -73,3 +73,30 @@ jobs:
           SM_E2E: '1'
           SM_SUPERVISOR_DISABLE: '1'
           SM_MOCK_BILLING_KIND: 'ok'
+
+  # Nothing proved the Windows port until this job: typecheck, the win32 unit
+  # tests, then a boot of the packaged win-unpacked app.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npx vitest run src/main/lib/__tests__/claudeBin-win32.test.cjs src/main/lib/__tests__/defaultShell.test.cjs src/main/lib/__tests__/killTree.test.cjs src/main/lib/__tests__/winPaths.test.cjs src/main/lib/__tests__/winSpawn.test.cjs src/main/lib/__tests__/openExternalApp-win32.test.cjs src/main/lib/__tests__/appRuntime.test.cjs src/main/lib/__tests__/prereqs.test.cjs
+        shell: bash
+      - run: node scripts/package/stage.cjs
+        shell: bash
+      - run: npx electron-builder --config electron-builder.yml --win dir --publish never
+        shell: bash
+      - run: npx playwright install chromium
+        shell: bash
+      - run: npm run smoke:packaged
+        shell: bash
+        env:
+          SM_PACKAGED_BIN: release/out/win-unpacked/Session Manager.exe

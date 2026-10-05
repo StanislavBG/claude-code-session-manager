@@ -75,15 +75,16 @@ function nativeModuleHelp(reason) {
   }
   const lines = [
     ...head,
-    `This is almost always the node-pty native module not matching this`,
-    `Electron build. Rebuild it once:`,
+    `node-pty ships prebuilt binaries for macOS, Linux and Windows on x64 and`,
+    `arm64. This machine is \x1b[36m${process.platform}-${process.arch}\x1b[0m. If the module failed to load, the`,
+    `install is probably damaged. Reinstall session-manager:`,
     '',
-    `  \x1b[36mcd ${PKG_DIR}\x1b[0m`,
-    `  \x1b[36mnpx electron-rebuild -f -w node-pty\x1b[0m`,
+    `  \x1b[36mnpm i -g claude-code-session-manager@latest\x1b[0m`,
+    `  (or re-run the npx command)`,
     '',
-    mac ? `macOS: if the rebuild fails, install the compiler first:` : '',
-    mac ? `  \x1b[36mxcode-select --install\x1b[0m` : '',
-    mac ? '' : '',
+    `On any other platform node-pty compiles from source and needs build tools:`,
+    mac ? `  macOS: \x1b[36mxcode-select --install\x1b[0m` : `  Linux: build-essential + python3`,
+    '',
     `Then quit and reopen session-manager.`,
     '',
   ].filter((l) => l !== '');

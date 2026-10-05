@@ -29,10 +29,10 @@ Single-author hobby project. Linux and macOS only. Free, MIT, anonymous opt-out 
 npx claude-code-session-manager@latest
 ```
 
-Linux and macOS only. Needs Node.js 22.12+ (Electron 42's installer needs it) and Claude Code installed and signed in — Claude Code's native installer does not bring Node with it. The first launch downloads Electron (~200 MB) and runs `electron-rebuild` on `node-pty` so it links against the bundled Electron ABI. Subsequent launches are instant from the npx cache.
+Linux and macOS only. Needs Node.js 22.12+ (Electron 42's installer needs it) and Claude Code installed and signed in — Claude Code's native installer does not bring Node with it. The first launch downloads Electron (~200 MB) and uses node-pty's prebuilt terminal binary (no compiler needed on supported platforms). Subsequent launches are instant from the npx cache.
 
-macOS needs Xcode Command Line Tools: `xcode-select --install`.
-Linux needs `build-essential` and `python3` for the rebuild.
+Only on platforms without a node-pty prebuild: macOS needs Xcode Command Line Tools (`xcode-select --install`).
+Linux needs `build-essential` and `python3` in that case.
 
 ## Quick start
 

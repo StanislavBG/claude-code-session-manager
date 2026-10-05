@@ -68,8 +68,8 @@ separately. After any `onnxruntime-web` bump: run the refresh script and commit 
 > Moved from `CLAUDE.md` on 2026-09-12 to make room for the `project-partition.md` table row.
 
 Published as `claude-code-session-manager` on npm (`npx claude-code-session-manager@latest`).
-`bin/cli.cjs` spawns the bundled Electron binary; `postinstall` runs `electron-rebuild` for
-`node-pty`. Linux+darwin only.
+`bin/cli.cjs` spawns the bundled Electron binary; `node-pty` is loaded from its N-API
+prebuilds, with no postinstall step. Linux+darwin only.
 
 **Simple mode**: `--simple` boots a chrome-free single-terminal cockpit (`app:launch-mode` IPC →
 `SimpleShell.tsx`, `DEFAULT_PRESETS[0]`; no persisted-tab hydration).

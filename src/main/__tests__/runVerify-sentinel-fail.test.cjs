@@ -8,7 +8,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
-const { verifyRun } = require('../runVerify.cjs');
+const { verifyRun, parseLog } = require('../runVerify.cjs');
 
 let writeSpy;
 beforeAll(() => {
@@ -98,4 +98,13 @@ test('(e) PASS + commit + no hits stays clean (regression)', async () => {
   const { verdict } = await run('SCHEDULER_VERDICT: PASS', false, { committedDuringRun: true });
   assert.equal(verdict.verdict, 'clean');
   assert.equal(verdict.downgradeTo, null);
+});
+
+test('parseLog extracts deduplicated transcriptCommitShas from committed gitOperation events', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'parselog-shas-'));
+  const mk = (sha, kind) => ({ type: 'user', tool_use_result: { gitOperation: { commit: { sha, kind } } } });
+  writeLog(dir, 's', [mk('347641f', 'committed'), mk('347641f', 'committed'), mk('abc1234', 'amended'), mk('9999999', 'committed')]);
+  const r = parseLog(path.join(dir, 's.log'));
+  assert.deepEqual(r.transcriptCommitShas, ['347641f', '9999999']);
+  assert.equal(r.transcriptCommitLanded, true);
 });

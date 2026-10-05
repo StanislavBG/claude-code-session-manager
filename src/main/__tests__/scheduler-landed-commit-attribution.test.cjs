@@ -41,6 +41,37 @@ test('in-place run: legacy behaviour unchanged', () => {
   );
 });
 
+test('in-place run: foreign commit in range, sibling overlap, no transcript sha gives null', () => {
+  assert.deepEqual(
+    resolveRunCommitAttribution({
+      ranInWorktree: false, integratedSha: null, headBefore: 'aaa', headAtExit: 'fff',
+      committedInWindow: true, rangeCommits: ['f'.repeat(40)], transcriptCommitShas: [], siblingOverlap: true,
+    }),
+    { landedCommit: null, committedDuringRun: false },
+  );
+});
+
+test('in-place run: own transcript short sha resolves to the full range sha', () => {
+  const own = '347641f' + '0'.repeat(33);
+  assert.deepEqual(
+    resolveRunCommitAttribution({
+      ranInWorktree: false, integratedSha: null, headBefore: 'aaa', headAtExit: own,
+      committedInWindow: true, rangeCommits: ['f'.repeat(40), own], transcriptCommitShas: ['347641f'], siblingOverlap: true,
+    }),
+    { landedCommit: own, committedDuringRun: true },
+  );
+});
+
+test('in-place run: no transcript shas and no sibling overlap keeps legacy HEAD delta', () => {
+  assert.deepEqual(
+    resolveRunCommitAttribution({
+      ranInWorktree: false, integratedSha: null, headBefore: 'aaa', headAtExit: 'bbb',
+      committedInWindow: false, rangeCommits: ['b'.repeat(40)], transcriptCommitShas: [], siblingOverlap: false,
+    }),
+    { landedCommit: 'bbb', committedDuringRun: true },
+  );
+});
+
 function finalizeWith(integration) {
   return finalizeJobWorktree({
     job: { slug: 'x' },

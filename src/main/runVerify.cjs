@@ -168,13 +168,14 @@ function parseLog(logPath) {
   try {
     text = fs.readFileSync(logPath, 'utf8');
   } catch (e) {
-    return { events: [], resultEvent: null, error: e.message };
+    return { events: [], resultEvent: null, error: e.message, transcriptCommitShas: [] };
   }
 
   const events = [];
   let resultEvent = null;
   let seq = 0;
   let transcriptCommitLanded = false;
+  const transcriptCommitShaSet = new Set();
 
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
@@ -194,6 +195,8 @@ function parseLog(logPath) {
     }
     if (obj.tool_use_result?.gitOperation?.commit?.kind === 'committed') {
       transcriptCommitLanded = true;
+      const sha = obj.tool_use_result.gitOperation.commit.sha;
+      if (typeof sha === 'string' && sha) transcriptCommitShaSet.add(sha);
     }
 
     // Final result event.
@@ -245,7 +248,7 @@ function parseLog(logPath) {
     }
   }
 
-  return { events, resultEvent, error: null, transcriptCommitLanded };
+  return { events, resultEvent, error: null, transcriptCommitLanded, transcriptCommitShas: [...transcriptCommitShaSet] };
 }
 
 // Stable, narrow substrings of the harness's auto-background tool_result text

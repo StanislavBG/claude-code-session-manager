@@ -852,16 +852,43 @@ async function computeCommittedDuringRun(cwd, headBefore, headAfter, startedAt, 
  * integration — credit comes only from this run's own integration result. An
  * in-place run keeps the HEAD-delta / time-window behaviour.
  */
-function resolveRunCommitAttribution({ ranInWorktree, integratedSha, headBefore, headAtExit, committedInWindow }) {
+function resolveRunCommitAttribution({
+  ranInWorktree, integratedSha, headBefore, headAtExit, committedInWindow,
+  rangeCommits, transcriptCommitShas, siblingOverlap,
+}) {
   if (ranInWorktree) {
     const landedCommit = integratedSha || null;
     return { landedCommit, committedDuringRun: Boolean(landedCommit) };
   }
-  const headMoved = Boolean(headBefore && headAtExit && headBefore !== headAtExit);
-  return {
-    landedCommit: headMoved ? headAtExit : null,
-    committedDuringRun: headMoved || Boolean(committedInWindow),
-  };
+  const shas = Array.isArray(transcriptCommitShas) ? transcriptCommitShas.filter(Boolean) : [];
+  if (shas.length === 0 && !siblingOverlap) {
+    const headMoved = Boolean(headBefore && headAtExit && headBefore !== headAtExit);
+    return {
+      landedCommit: headMoved ? headAtExit : null,
+      committedDuringRun: headMoved || Boolean(committedInWindow),
+    };
+  }
+  // Shared tree with possible siblings (or transcript evidence): credit only a
+  // commit in the range that this run's own transcript reported.
+  const own = (Array.isArray(rangeCommits) ? rangeCommits : [])
+    .find((c) => shas.some((sha) => c.startsWith(sha)));
+  const landedCommit = own || null;
+  return { landedCommit, committedDuringRun: Boolean(landedCommit) };
+}
+
+/** Full shas in `before..after` (newest first); [] on any error. Never throws. */
+function gitRangeCommits(cwd, before, after) {
+  return new Promise((resolve) => {
+    if (!cwd || !before || !after || before === after) { resolve([]); return; }
+    execFile(
+      'git', ['-C', cwd, 'rev-list', `${before}..${after}`],
+      { timeout: 10_000, windowsHide: true },
+      (err, out) => {
+        if (err) { resolve([]); return; }
+        resolve(String(out || '').split('\n').map((l) => l.trim()).filter(Boolean));
+      },
+    );
+  });
 }
 
 /**
@@ -7905,12 +7932,35 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           job.startedAt,
           new Date().toISOString(),
         );
+      let rangeCommits = [];
+      let transcriptCommitShas = [];
+      let siblingOverlap = false;
+      if (!worktree.ok) {
+        rangeCommits = await gitRangeCommits(guardCwd, guardHeadBefore, headAtExit);
+        transcriptCommitShas = parseLog(path.join(runDir, `${job.slug}.log`)).transcriptCommitShas || [];
+        const overlapState = await readQueue().catch(() => ({ jobs: [] }));
+        const myStart = Date.parse(job.startedAt) || 0;
+        const myEnd = Date.now();
+        siblingOverlap = (overlapState.jobs || []).some((j) => {
+          if (j.slug === job.slug || (j.cwd || defaultCwd) !== guardCwd) return false;
+          if (j.status === 'running') return true;
+          const jStart = Date.parse(j.startedAt);
+          const jEnd = Date.parse(j.finishedAt);
+          if (!Number.isFinite(jStart) && !Number.isFinite(jEnd)) return false;
+          const s0 = Number.isFinite(jStart) ? jStart : jEnd;
+          const e0 = Number.isFinite(jEnd) ? jEnd : jStart;
+          return s0 <= myEnd && e0 >= myStart;
+        });
+      }
       const attribution = resolveRunCommitAttribution({
         ranInWorktree: Boolean(worktree.ok),
         integratedSha,
         headBefore: guardHeadBefore,
         headAtExit,
         committedInWindow,
+        rangeCommits,
+        transcriptCommitShas,
+        siblingOverlap,
       });
       const committedDuringRun = attribution.committedDuringRun;
       if (attribution.landedCommit) {

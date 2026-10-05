@@ -6322,7 +6322,15 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
 
     // Distinct comm (`sm-claude-job`) + slug-labelled argv0 for System Monitor.
     // Both keep the word `claude`, which the /\bclaude\b/ reaper gates need.
-    const jobSpawn = claudeSpawnTarget('job', job.slug, claudeBin);
+    const jobArgs = buildClaudeSpawnArgs({
+      prompt,
+      model: personaResolution.model,
+      effort: personaEffort,
+      sessionId,
+      resume: !!resumeTarget,
+      systemPrompt: personaResolution.systemPrompt,
+    });
+    const jobSpawn = claudeSpawnTarget('job', job.slug, claudeBin, jobArgs);
 
     const { child } = withChildAndLog({
       fd,
@@ -6334,18 +6342,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         // Resume mode passes `--resume <sessionId>` (reconnect to the SAME
         // session) INSTEAD of `--session-id <sessionId>` (mint a new one) —
         // never both, see buildClaudeSpawnArgs.
-        args: buildClaudeSpawnArgs({
-          prompt,
-          model: personaResolution.model,
-          effort: personaEffort,
-          sessionId,
-          resume: !!resumeTarget,
-          systemPrompt: personaResolution.systemPrompt,
-        }),
+        args: jobSpawn.args || jobArgs,
         options: {
           cwd: spawnCwd,
           env: childEnv,
           ...(jobSpawn.argv0 ? { argv0: jobSpawn.argv0 } : {}),
+          ...(jobSpawn.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
           // detached:true puts the child in its own process group so we can kill
           // the entire descendant tree (including any stray background bashes the
           // agent spawned) with killTree(pid). Without this, child.kill()

@@ -32,6 +32,7 @@ linux:
   target:
     - target: AppImage
       arch: [x64]
+  executableName: session-manager
   category: Development
   artifactName: Session-Manager-linux-${arch}.${ext}
 publish:

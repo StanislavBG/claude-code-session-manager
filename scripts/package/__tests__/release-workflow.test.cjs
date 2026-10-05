@@ -43,4 +43,17 @@ describe('release.yml', () => {
     expect(yml).toContain('CSC_IDENTITY_AUTO_DISCOVERY=false')
     expect(yml).toContain('-c.mac.notarize=true')
   })
+  it('matrixes windows-latest with dist:win and smokes the unpacked exe before publishing', () => {
+    expect(yml).toContain('os: windows-latest')
+    expect(yml).toContain('script: dist:win')
+    expect(yml).toContain('release/out/win-unpacked/Session Manager.exe')
+    expect(yml.indexOf('release/out/win-unpacked')).toBeLessThan(yml.indexOf('--publish always'))
+  })
+  it('signs Windows with WIN_CSC_* secrets and falls back to unsigned when absent', () => {
+    expect(yml).toContain('secrets.WIN_CSC_LINK')
+    expect(yml).toContain('secrets.WIN_CSC_KEY_PASSWORD')
+    expect(yml).toContain('Configure Windows signing')
+    expect(yml).toMatch(/matrix\.os == 'windows-latest'[\s\S]*?-z "\$WIN_CSC_LINK"/)
+    expect(yml).toContain('No WIN_CSC_LINK: building unsigned')
+  })
 })

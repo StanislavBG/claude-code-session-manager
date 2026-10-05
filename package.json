@@ -125,7 +125,8 @@
   },
   "os": [
     "darwin",
-    "linux"
+    "linux",
+    "win32"
   ],
   "dependencies": {
     "chokidar": "^4.0.1",

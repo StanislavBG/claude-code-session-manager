@@ -52,6 +52,7 @@
 
 const fs = require('node:fs');
 const { spawn, execFile } = require('node:child_process');
+const { killTree } = require('./killTree.cjs');
 
 // Injectable for tests (enumeration-failure coverage).
 const deps = { execFile };
@@ -150,6 +151,7 @@ function openLog(logPath) {
 // Async: resolves to the survivors list, rejects on ps failure/timeout. O(P) in
 // the process table, off the main event loop.
 function enumerateProcessGroupSurvivors(pgid) {
+  // ps -eo is Linux-only; on win32 (and macOS) report the empty/unknown result without spawning ps.
   if (process.platform !== 'linux') return Promise.resolve([]);
   if (!pgid || pgid <= 1) return Promise.resolve([]);
   return new Promise((resolve, reject) => {
@@ -182,12 +184,14 @@ function sweepChildProcessGroup(child, detached, safeLog) {
   if (!child || !child.pid || child.pid <= 1) return null;
   // Defensive: never target the Session Manager process's own group.
   if (child.pid === process.pid) return null;
+  // win32 has no process groups; taskkill on an already-exited pid risks hitting a reused pid.
+  if (process.platform === 'win32') return null;
 
   const pid = child.pid;
   const kill = () => {
-    try { process.kill(-pid, 'SIGTERM'); } catch { /* ESRCH: empty group, the normal case */ }
+    killTree(pid, 'SIGTERM'); // ESRCH on an empty group is the normal case
     const t = setTimeout(() => {
-      try { process.kill(-pid, 'SIGKILL'); } catch { /* ESRCH: empty group, the normal case */ }
+      killTree(pid, 'SIGKILL');
     }, POST_EXIT_GROUP_SWEEP_GRACE_MS);
     if (t.unref) t.unref();
   };
@@ -219,13 +223,9 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
     killTree(signal) {
       const c = ctx.child;
       if (!c) return false;
-      // Negative pid targets the whole process group (requires detached: true at spawn).
-      // Falls back to direct kill if the process is not a group leader.
-      try { process.kill(-c.pid, signal); return true; }
-      catch {
-        try { process.kill(c.pid, signal); return true; }
-        catch { return false; /* already dead */ }
-      }
+      // Whole process group on POSIX / taskkill /T on win32 (requires detachedSpawnOpts at spawn);
+      // killTree falls back to the bare pid if the process is not a group leader.
+      return killTree(c.pid, signal, { log: safeLog });
     },
     addTimer(t) { extraTimers.push(t); },
   };
@@ -315,7 +315,7 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
   const cancel = () => {
     clearAllTimers();
     // Best-effort kill; ignore errors (process may already be gone).
-    try { process.kill(-child.pid, 'SIGKILL'); } catch {
+    if (!killTree(child.pid, 'SIGKILL', { log: safeLog })) {
       try { child.kill('SIGKILL'); } catch { /* */ }
     }
   };

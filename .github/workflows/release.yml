@@ -28,13 +28,6 @@ jobs:
       contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -43,31 +36,53 @@ jobs:
           cache: 'npm'
       - run: npm ci
 
-      # Signing + notarization switch on only when their secrets exist.
-      - name: Configure macOS signing
-        if: matrix.os == 'macos-latest'
+      # Signing vars are exported to later steps ONLY when their secret is non-empty:
+      # an empty CSC_LINK / APPLE_API_KEY reaches electron-builder as "" and resolves
+      # as a path (the repo dir) -> "not a file". Secrets enter via this step's env only.
+      - name: Export signing configuration
+        shell: bash
+        env:
+          SECRET_CSC_LINK: ${{ secrets.CSC_LINK }}
+          SECRET_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          SECRET_WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          SECRET_WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          SECRET_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          SECRET_APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          SECRET_APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           EXTRA=""
-          if [ -z "$CSC_LINK" ]; then
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if [ -n "$SECRET_CSC_LINK" ]; then
+              echo "CSC_LINK=$SECRET_CSC_LINK" >> "$GITHUB_ENV"
+              if [ -n "$SECRET_CSC_KEY_PASSWORD" ]; then
+                echo "CSC_KEY_PASSWORD=$SECRET_CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
+              fi
+              if [ -n "$SECRET_APPLE_API_KEY" ] && [ -n "$SECRET_APPLE_API_KEY_ID" ] && [ -n "$SECRET_APPLE_API_ISSUER" ]; then
+                KEY_FILE="$RUNNER_TEMP/AuthKey_$SECRET_APPLE_API_KEY_ID.p8"
+                (umask 077; printf '%s\n' "$SECRET_APPLE_API_KEY" > "$KEY_FILE")
+                echo "APPLE_API_KEY=$KEY_FILE" >> "$GITHUB_ENV"
+                echo "APPLE_API_KEY_ID=$SECRET_APPLE_API_KEY_ID" >> "$GITHUB_ENV"
+                echo "APPLE_API_ISSUER=$SECRET_APPLE_API_ISSUER" >> "$GITHUB_ENV"
+                EXTRA="-c.mac.notarize=true"
+              fi
+            else
+              echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+              echo "No CSC_LINK: building unsigned"
+            fi
+          elif [ "$RUNNER_OS" = "Windows" ]; then
+            if [ -n "$SECRET_WIN_CSC_LINK" ]; then
+              echo "WIN_CSC_LINK=$SECRET_WIN_CSC_LINK" >> "$GITHUB_ENV"
+              if [ -n "$SECRET_WIN_CSC_KEY_PASSWORD" ]; then
+                echo "WIN_CSC_KEY_PASSWORD=$SECRET_WIN_CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
+              fi
+            else
+              echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+              echo "No WIN_CSC_LINK: building unsigned"
+            fi
+          else
             echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
-            echo "No CSC_LINK: building unsigned"
-          elif [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_KEY_ID" ] && [ -n "$APPLE_API_ISSUER" ]; then
-            EXTRA="-c.mac.notarize=true"
           fi
           echo "EXTRA_BUILDER_ARGS=$EXTRA" >> "$GITHUB_ENV"
-
-      # Windows signs with WIN_CSC_*; without them build unsigned, and blank the
-      # mac CSC_* pair so electron-builder never tries to sign the exe with it.
-      - name: Configure Windows signing
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        run: |
-          if [ -z "$WIN_CSC_LINK" ]; then
-            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
-            echo "CSC_LINK=" >> "$GITHUB_ENV"
-            echo "CSC_KEY_PASSWORD=" >> "$GITHUB_ENV"
-            echo "No WIN_CSC_LINK: building unsigned"
-          fi
 
       # Smoke runs against an unpacked app, before anything is published.
       - name: Build unpacked app (macOS)

@@ -29,6 +29,18 @@ Single-author hobby project. Linux and macOS only. Free, MIT, anonymous opt-out 
 npx claude-code-session-manager@latest
 ```
 
+### Installers
+
+Prefer a double-click install? Download from [GitHub Releases](https://github.com/StanislavBG/claude-code-session-manager/releases/latest):
+
+- **Mac** — `.dmg` (Apple Silicon and Intel)
+- **Windows** — `.exe`
+- **Linux** — `AppImage`
+
+The installer needs no Node.js, compiler or Electron download. git and the Claude Code CLI are detected on first launch and installed from the in-app Setup checklist using their official installers.
+
+### npx
+
 Linux and macOS only. Needs Node.js 22.12+ (Electron 42's installer needs it) and Claude Code installed and signed in — Claude Code's native installer does not bring Node with it. The first launch downloads Electron (~200 MB) and uses node-pty's prebuilt terminal binary (no compiler needed on supported platforms). Subsequent launches are instant from the npx cache.
 
 Only on platforms without a node-pty prebuild: macOS needs Xcode Command Line Tools (`xcode-select --install`).

@@ -92,6 +92,18 @@ to ask for reconfirmation once `builder:gate` has passed.
     Confirm the reported version matches `<version>` and `latest` points to it (unless the
     project intentionally publishes to a different dist-tag).
 
+11. **Post-publish: verify the installer release.** Pushing `v<version>` (step 8) triggers
+    `.github/workflows/release.yml`. Confirm the tag push succeeded, then poll (bounded: at most
+    20 tries x 30 s, never open-ended):
+    ```
+    for i in $(seq 1 20); do
+      gh release view v<version> --json assets --jq '.assets[].name' && break
+      sleep 30
+    done
+    ```
+    Check the asset names include a `.dmg`, an `.exe` and an `.AppImage`. Report any that are
+    missing (or that the release never appeared); do not retry beyond the bound.
+
 ## On any step failing
 
 Stop at that step. Do not proceed. Report which step failed and its output. If the worktree

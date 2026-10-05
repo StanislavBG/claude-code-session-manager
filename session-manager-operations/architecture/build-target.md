@@ -131,3 +131,15 @@ Two things a bootstrap probe has to handle that the npm path has no analogue for
   than failing.
 - **The isolated-worktree publish technique is npm-specific**, so the overlay must be able to
   override an inherited instruction by name.
+
+## Installer artifacts
+
+`.github/workflows/release.yml` triggers on `v*` tags and attaches installers to the GitHub Release
+(names from `electron-builder.yml`):
+
+- `Session-Manager-mac-<arch>.dmg` (arm64 and x64)
+- `Session-Manager-win-<arch>.exe`
+- `Session-Manager-linux-<arch>.AppImage`
+
+Signing secrets (`CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`)
+are optional: without `CSC_LINK` the workflow builds unsigned (`CSC_IDENTITY_AUTO_DISCOVERY=false`).

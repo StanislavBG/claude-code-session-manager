@@ -1,0 +1,77 @@
+name: Release
+# Builds electron-builder installers on native runners and publishes them to the
+# GitHub Release for the pushed v* tag. Windows is added by PRD win-enable-installer.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            script: dist:mac
+          - os: ubuntu-latest
+            script: dist:linux
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+
+      # Signing + notarization switch on only when their secrets exist.
+      - name: Configure macOS signing
+        if: matrix.os == 'macos-latest'
+        run: |
+          EXTRA=""
+          if [ -z "$CSC_LINK" ]; then
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            echo "No CSC_LINK: building unsigned"
+          elif [ -n "$APPLE_API_KEY" ] && [ -n "$APPLE_API_KEY_ID" ] && [ -n "$APPLE_API_ISSUER" ]; then
+            EXTRA="-c.mac.notarize=true"
+          fi
+          echo "EXTRA_BUILDER_ARGS=$EXTRA" >> "$GITHUB_ENV"
+
+      # Smoke runs against an unpacked app, before anything is published.
+      - name: Build unpacked app (macOS)
+        if: matrix.os == 'macos-latest'
+        run: npm run dist:stage && npx electron-builder --config electron-builder.yml --mac dir --arm64 --publish never
+      - name: Packaged smoke (macOS)
+        if: matrix.os == 'macos-latest'
+        run: npm run smoke:packaged
+        env:
+          SM_PACKAGED_BIN: release/out/mac-arm64/Session Manager.app/Contents/MacOS/Session Manager
+      - name: Build unpacked app (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run dist:linux-dir
+      - name: Install Playwright
+        if: matrix.os == 'ubuntu-latest'
+        run: npx playwright install --with-deps chromium
+      - name: Packaged smoke (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run --auto-servernum npm run smoke:packaged
+        env:
+          SM_PACKAGED_BIN: release/out/linux-unpacked/session-manager
+
+      - name: Build and publish installers
+        run: npm run ${{ matrix.script }} -- --publish always -c.publish.releaseType=release $EXTRA_BUILDER_ARGS

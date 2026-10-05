@@ -40,6 +40,7 @@ describe('release.yml', () => {
     for (const s of ['CSC_LINK', 'CSC_KEY_PASSWORD', 'APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER']) {
       expect(yml).toContain(`secrets.${s}`)
     }
+    expect(yml).toContain('-n "$SECRET_CSC_LINK"')
     expect(yml).toContain('CSC_IDENTITY_AUTO_DISCOVERY=false')
     expect(yml).toContain('-c.mac.notarize=true')
   })
@@ -52,8 +53,29 @@ describe('release.yml', () => {
   it('signs Windows with WIN_CSC_* secrets and falls back to unsigned when absent', () => {
     expect(yml).toContain('secrets.WIN_CSC_LINK')
     expect(yml).toContain('secrets.WIN_CSC_KEY_PASSWORD')
-    expect(yml).toContain('Configure Windows signing')
-    expect(yml).toMatch(/matrix\.os == 'windows-latest'[\s\S]*?-z "\$WIN_CSC_LINK"/)
+    expect(yml).toContain('Export signing configuration')
     expect(yml).toContain('No WIN_CSC_LINK: building unsigned')
+  })
+  it('never exports signing secrets as job-level env (empty string resolves as a path)', () => {
+    const names = ['CSC_LINK', 'CSC_KEY_PASSWORD', 'WIN_CSC_LINK', 'WIN_CSC_KEY_PASSWORD', 'APPLE_API_KEY', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER']
+    for (const n of names) {
+      expect(yml).not.toMatch(new RegExp(`^\\s*${n}:\\s*\\$\\{\\{`, 'm'))
+    }
+    const jobEnv = yml.slice(yml.indexOf('    env:\n'), yml.indexOf('    steps:'))
+    for (const n of names) expect(jobEnv).not.toContain(n)
+  })
+  it('has a bash step that exports each signing var to GITHUB_ENV only when non-empty', () => {
+    expect(yml).toContain('name: Export signing configuration')
+    const step = yml.slice(yml.indexOf('name: Export signing configuration'), yml.indexOf('# Smoke runs'))
+    expect(step).toContain('shell: bash')
+    for (const n of ['CSC_LINK', 'CSC_KEY_PASSWORD', 'WIN_CSC_LINK', 'WIN_CSC_KEY_PASSWORD', 'APPLE_API_KEY_ID', 'APPLE_API_ISSUER']) {
+      expect(step).toMatch(new RegExp(`-n "\\$SECRET_${n}"`))
+      expect(step).toContain(`${n}=`)
+    }
+    expect(step).toContain('CSC_IDENTITY_AUTO_DISCOVERY=false')
+    expect(step).toContain('RUNNER_TEMP')
+    expect(step).toContain('.p8')
+    expect(step).toMatch(/-n "\$SECRET_APPLE_API_KEY" \] && \[ -n "\$SECRET_APPLE_API_KEY_ID" \] && \[ -n "\$SECRET_APPLE_API_ISSUER"/)
+    expect(step).toContain('-c.mac.notarize=true')
   })
 })

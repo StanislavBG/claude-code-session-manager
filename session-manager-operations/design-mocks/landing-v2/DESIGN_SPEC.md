@@ -782,3 +782,14 @@ session-manager (`sm:`) or Bilko (`bilko:`) repo paths.
   and separate.
 - **Registry card copy** in bilko:`src/config/tools.ts` and `src/data/packages.ts`: owned by
   the free-manual change, not this page.
+
+## 2026-10-05 — price tag carries download buttons, not the npx command
+
+The price tag now carries download buttons (Mac, Mac Intel, Windows, all releases) instead of
+the `npx` install command and its copy button. `priceTag.command*`, the copy/copied/failed
+labels, the copy-related aria keys and `meta.installCommand` are removed from `copy.json`;
+`priceTag.platforms` is "MAC · WINDOWS". Why: the installers bundle Node and Electron, so
+visitors no longer need Node or a terminal, and the app's Setup checklist installs git and
+Claude Code on first launch. The Price tag / Copy button sections above describe the retired
+npx layout and are superseded by `copy.json` where they differ. The end-card copy keys are
+unchanged here.

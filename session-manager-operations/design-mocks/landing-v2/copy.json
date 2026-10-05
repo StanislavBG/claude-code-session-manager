@@ -3,8 +3,7 @@
   "meta": {
     "documentTitle": "Session Manager — bilko.run",
     "manualHref": "/products/session-manager/manual",
-    "chapterHrefTemplate": "/products/session-manager/manual#{slug}",
-    "installCommand": "npx claude-code-session-manager@latest"
+    "chapterHrefTemplate": "/products/session-manager/manual#{slug}"
   },
   "header": {
     "wordmark": "Session Manager",
@@ -45,19 +44,30 @@
     "kicker": "THE APP",
     "price": "$0",
     "line": "free, and stays free.",
-    "platforms": "MAC · LINUX",
-    "commandPrompt": "$",
-    "command": "npx claude-code-session-manager@latest",
-    "copyLabel": "Copy the install command",
-    "copiedLabel": "Copied — now paste it in your terminal",
-    "copyFailedLabel": "Couldn't copy — select it above",
-    "note": "Node 22.12+, Claude Code signed in? Paste & go.",
+    "platforms": "MAC · WINDOWS",
+    "downloads": {
+      "mac": {
+        "label": "Download for Mac",
+        "href": "https://github.com/StanislavBG/claude-code-session-manager/releases/latest/download/Session-Manager-mac-arm64.dmg"
+      },
+      "macIntel": {
+        "label": "Intel Mac? Get the Intel build",
+        "href": "https://github.com/StanislavBG/claude-code-session-manager/releases/latest/download/Session-Manager-mac-x64.dmg"
+      },
+      "windows": {
+        "label": "Download for Windows",
+        "href": "https://github.com/StanislavBG/claude-code-session-manager/releases/latest/download/Session-Manager-win-x64.exe"
+      },
+      "allReleases": {
+        "label": "All releases & Linux →",
+        "href": "https://github.com/StanislavBG/claude-code-session-manager/releases/latest"
+      }
+    },
+    "note": "Free installer — no Node or terminal needed. First launch helps you set up Claude Code.",
+    "unsignedNote": "Unsigned preview build: on Mac, right-click → Open the first time; on Windows, click More info → Run anyway.",
     "aria": {
       "region": "Price and install",
-      "platforms": "Runs on macOS and Linux",
-      "commandBox": "Install command",
-      "copiedStatus": "Install command copied to your clipboard.",
-      "copyFailedStatus": "Couldn't copy automatically. Select the command and copy it yourself."
+      "platforms": "Runs on macOS and Windows"
     }
   },
   "partsBin": {

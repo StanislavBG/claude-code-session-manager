@@ -64,7 +64,7 @@ function isContainedWin32(target, home) {
 
 function isContained(realPath, home = HOME_REAL, platform = process.platform) {
   if (platform === 'win32') return isContainedWin32(realPath, home);
-  return realPath === home || realPath.startsWith(home + path.sep);
+  return realPath === home || realPath.startsWith(home + path.posix.sep);
 }
 
 function assertInsideHome(p) {

@@ -13,9 +13,10 @@ const SECRET_KEY_RE = /^(?:.*_)?(TOKEN|API_?KEY|SECRET|PASSWORD|AUTHORIZATION|CO
  */
 function userBinDirs(opts) {
   const platform = (opts && opts.platform) || process.platform;
+  const P = platform === 'win32' ? path.win32 : path.posix;
   if (platform === 'win32') {
     const env = (opts && opts.env) || process.env;
-    const w = path.win32;
+    const w = P;
     const dirs = [];
     if (env.USERPROFILE) dirs.push(w.join(env.USERPROFILE, '.local', 'bin'));
     if (env.APPDATA) dirs.push(w.join(env.APPDATA, 'npm'));
@@ -27,9 +28,9 @@ function userBinDirs(opts) {
   }
   const home = (opts && opts.homedir) || os.homedir();
   return [
-    path.join(home, '.claude', 'local'),
-    path.join(home, '.local', 'bin'),
-    path.join(home, '.npm-global', 'bin'),
+    P.join(home, '.claude', 'local'),
+    P.join(home, '.local', 'bin'),
+    P.join(home, '.npm-global', 'bin'),
     '/opt/homebrew/bin',
     '/opt/homebrew/sbin',
     '/usr/local/bin',
@@ -48,7 +49,7 @@ function pathWithUserBins(opts) {
   const platform = (opts && opts.platform) || process.platform;
   const env = (opts && opts.env) || process.env;
   const win = platform === 'win32';
-  const delim = win ? ';' : ':';
+  const delim = (win ? path.win32 : path.posix).delimiter;
   let base = env.PATH || '';
   if (win && !base) {
     const key = Object.keys(env).find((k) => k.toUpperCase() === 'PATH');

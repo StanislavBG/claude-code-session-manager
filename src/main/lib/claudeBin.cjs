@@ -32,10 +32,11 @@ function resolveClaudeBin(opts) {
   const env = (opts && opts.env) || process.env;
   const home = (opts && opts.homedir) || os.homedir();
   const accessSync = (opts && opts.accessSync) || fs.accessSync;
+  const P = platform === 'win32' ? path.win32 : path.posix;
   let candidates;
   let mode;
   if (platform === 'win32') {
-    const w = path.win32;
+    const w = P;
     candidates = [];
     if (env.USERPROFILE) candidates.push(w.join(env.USERPROFILE, '.local', 'bin', 'claude.exe')); // native installer
     if (env.APPDATA) candidates.push(w.join(env.APPDATA, 'npm', 'claude.cmd'));
@@ -44,9 +45,9 @@ function resolveClaudeBin(opts) {
   } else {
     // Merged candidate list — was forked in scheduler vs pluginInstall before.
     candidates = [
-      path.join(home, '.claude', 'local', 'claude'),    // Claude Code bundled install
-      path.join(home, '.local', 'bin', 'claude'),       // user pip-style install
-      path.join(home, '.npm-global', 'bin', 'claude'),  // user npm-global
+      P.join(home, '.claude', 'local', 'claude'),    // Claude Code bundled install
+      P.join(home, '.local', 'bin', 'claude'),       // user pip-style install
+      P.join(home, '.npm-global', 'bin', 'claude'),  // user npm-global
       '/usr/local/bin/claude',
       '/opt/homebrew/bin/claude',
       '/usr/bin/claude',

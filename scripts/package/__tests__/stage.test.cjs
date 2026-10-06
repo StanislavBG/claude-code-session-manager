@@ -31,6 +31,26 @@ describe('stagePackageJson', () => {
   });
 });
 
+describe('assertNoStagedElectron', () => {
+  const { assertNoStagedElectron } = require('../stage.cjs');
+  const fs = require('node:fs');
+  const os = require('node:os');
+  it('returns null when node_modules/electron is absent', () => {
+    const d = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'stage-t-'));
+    try {
+      fs.mkdirSync(nodePath.join(d, 'node_modules', 'node-pty'), { recursive: true });
+      expect(assertNoStagedElectron(d)).toBeNull();
+    } finally { fs.rmSync(d, { recursive: true, force: true }); }
+  });
+  it('returns a diagnostic when node_modules/electron exists', () => {
+    const d = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'stage-t-'));
+    try {
+      fs.mkdirSync(nodePath.join(d, 'node_modules', 'electron'), { recursive: true });
+      expect(assertNoStagedElectron(d)).toMatch(/electron/);
+    } finally { fs.rmSync(d, { recursive: true, force: true }); }
+  });
+});
+
 describe('npmInvocation', () => {
   it('uses node + npm_execpath when it is a .js/.cjs file', () => {
     expect(npmInvocation({ npm_execpath: '/x/npm-cli.js' }, 'win32')).toEqual({

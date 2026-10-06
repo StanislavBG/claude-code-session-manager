@@ -19,12 +19,16 @@ test.skip(!PACKAGED_BIN, 'SM_PACKAGED_BIN is not set')
 
 test('packaged: app boots and renderer mounts', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-packaged-boot-'))
+  // An inherited ELECTRON_RUN_AS_NODE would put the packaged exe into node mode.
+  const env: Record<string, string | undefined> = { ...process.env }
+  delete env.ELECTRON_RUN_AS_NODE
   const app: ElectronApplication = await electron.launch({
     executablePath: path.resolve(PACKAGED_BIN as string),
     env: {
-      ...process.env,
+      ...env,
       HOME: home,
       USERPROFILE: home,
+      SM_BOOT_DIAG: '1',
       SM_E2E: '1',
       SM_SUPERVISOR_DISABLE: '1',
       SM_MOCK_BILLING_KIND: 'ok',

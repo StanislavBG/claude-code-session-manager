@@ -69,9 +69,22 @@ function main() {
     cwd: stage,
     stdio: 'inherit',
   });
+  const bad = assertNoStagedElectron(stage);
+  if (bad) {
+    console.error(bad);
+    process.exit(1);
+  }
   console.log(`staged ${stage}`);
 }
 
-module.exports = { stagePackageJson, npmInvocation };
+// Returns a diagnostic string if the npm `electron` package leaked into the
+// staged node_modules (broken prune), else null.
+function assertNoStagedElectron(stage) {
+  const leaked = path.join(stage, 'node_modules', 'electron');
+  if (!fs.existsSync(leaked)) return null;
+  return `stage: ${leaked} exists — the npm "electron" package must not be bundled into the packaged app (broken prune; check REMOVED_DEPS and transitive deps)`;
+}
+
+module.exports = { stagePackageJson, npmInvocation, assertNoStagedElectron };
 
 if (require.main === module) main();

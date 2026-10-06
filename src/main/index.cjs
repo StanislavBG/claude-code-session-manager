@@ -1,3 +1,15 @@
+// Boot diagnostic (SM_BOOT_DIAG=1, set by the packaged smoke): one stderr line that
+// shows whether `electron` resolved to the built-in module or ran in node mode.
+if (process.env.SM_BOOT_DIAG === '1') {
+  try {
+    const e = require('electron');
+    let userData;
+    try { userData = String(e.app.getPath('userData')); } catch (err) { userData = `error: ${err && err.message}`; }
+    process.stderr.write(`[boot-diag] platform=${process.platform} electron=${process.versions.electron} typeof electron=${typeof e} typeof electron.app=${typeof (e && e.app)} ELECTRON_RUN_AS_NODE=${process.env.ELECTRON_RUN_AS_NODE} execPath=${process.execPath} __dirname=${__dirname} userData=${userData}\n`);
+  } catch (err) {
+    process.stderr.write(`[boot-diag] failed: ${err && err.message}\n`);
+  }
+}
 const { PROC_NAMES, setProcessTitle, inhibitHolderShell } = require('./lib/smProcNames.cjs');
 // Self-describing `comm` in System Monitor (pn-03). process.argv is a JS copy
 // made at startup, so the argv-memory overwrite below never affects the

@@ -69,8 +69,16 @@ function startCrashReporter(deps = {}) {
   const fsImpl = deps.fs || fs;
   const log = deps.log || ((msg) => console.warn(msg));
   try {
+    const reasons = [];
     const getDir = (name) => {
-      try { const d = a.getPath(name); return typeof d === 'string' ? d.trim() : ''; } catch { return ''; }
+      try {
+        const d = a.getPath(name);
+        if (typeof d === 'string') return d.trim();
+        reasons.push(`${name}: non-string ${typeof d}`);
+      } catch (err) {
+        reasons.push(`${name}: ${err && err.message}`);
+      }
+      return '';
     };
     let dir = getDir('crashDumps');
     let fellBack = false;
@@ -79,7 +87,7 @@ function startCrashReporter(deps = {}) {
       if (userData) { dir = path.join(userData, 'Crashpad'); fellBack = true; }
     }
     if (!dir) {
-      log('[crash-diag] no crashDumps/userData path; crash reporter skipped');
+      log('[crash-diag] no crashDumps/userData path; crash reporter skipped' + (reasons.length ? ` (${reasons.join('; ')})` : ''));
       return;
     }
     fsImpl.mkdirSync(dir, { recursive: true });

@@ -42,6 +42,16 @@ const crashDiagnostics = require('./crashDiagnostics.cjs');
 // seedSchedulerMcp, timeoutShim) sets it only in a child's env / launcher text,
 // or deletes it from a copied env — none writes the main process.env, so it
 // cannot leak into Electron's own children (crashpad handler included).
+// Chromium can't resolve known folders under a stripped Windows profile; pin an explicit
+// userData path first (never allowed to stop boot).
+try {
+  require('./lib/winUserData.cjs').ensureWinUserDataPath({
+    app: require('electron').app, env: process.env, platform: process.platform, fs: require('node:fs'), os: require('node:os'),
+    log: (m) => process.stderr.write(`${m}\n`),
+  });
+} catch (err) {
+  process.stderr.write(`[win-userdata] fallback failed: ${err && err.message}\n`);
+}
 crashDiagnostics.startCrashReporter();
 const voiceHotkey = require('./voiceHotkey.cjs');
 const voiceWizard = require('./voiceWizard.cjs');

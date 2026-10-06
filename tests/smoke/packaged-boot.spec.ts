@@ -22,12 +22,16 @@ test('packaged: app boots and renderer mounts', async () => {
   // An inherited ELECTRON_RUN_AS_NODE would put the packaged exe into node mode.
   const env: Record<string, string | undefined> = { ...process.env }
   delete env.ELECTRON_RUN_AS_NODE
+  // Overriding USERPROFILE on win32 leaves Chromium unable to resolve known folders
+  // (boot diag: "Failed to get 'userData' path", exit 0x80000003), so isolate there
+  // with --user-data-dir instead.
+  const isWin = process.platform === 'win32'
   const app: ElectronApplication = await electron.launch({
     executablePath: path.resolve(PACKAGED_BIN as string),
+    args: isWin ? [`--user-data-dir=${home}`] : [],
     env: {
       ...env,
-      HOME: home,
-      USERPROFILE: home,
+      ...(isWin ? {} : { HOME: home, USERPROFILE: home }),
       SM_BOOT_DIAG: '1',
       SM_E2E: '1',
       SM_SUPERVISOR_DISABLE: '1',

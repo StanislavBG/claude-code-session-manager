@@ -10,7 +10,6 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 const path = require('node:path');
-const os = require('node:os');
 const fs = require('node:fs');
 const { resolveClaudeBin, __resetForTests } = require('../claudeBin.cjs');
 const { userBinDirs, pathWithUserBins } = require('../cleanEnv.cjs');
@@ -94,17 +93,17 @@ describe('userBinDirs / pathWithUserBins', () => {
   });
 
   it('posix output is byte-identical to the legacy list and join', () => {
-    const home = os.homedir();
+    const homedir = '/h';
     const legacy = [
-      path.join(home, '.claude', 'local'),
-      path.join(home, '.local', 'bin'),
-      path.join(home, '.npm-global', 'bin'),
+      path.posix.join(homedir, '.claude', 'local'),
+      path.posix.join(homedir, '.local', 'bin'),
+      path.posix.join(homedir, '.npm-global', 'bin'),
       '/opt/homebrew/bin', '/opt/homebrew/sbin', '/usr/local/bin', '/usr/bin', '/bin',
     ];
     for (const platform of ['linux', 'darwin']) {
-      expect(userBinDirs({ platform })).toEqual(legacy);
-      expect(pathWithUserBins({ platform, env: { PATH: '/x:/y' } })).toBe(`/x:/y:${legacy.join(':')}`);
-      expect(pathWithUserBins({ platform, env: {} })).toBe(legacy.join(':'));
+      expect(userBinDirs({ platform, homedir })).toEqual(legacy);
+      expect(pathWithUserBins({ platform, homedir, env: { PATH: '/x:/y' } })).toBe(`/x:/y:${legacy.join(':')}`);
+      expect(pathWithUserBins({ platform, homedir, env: {} })).toBe(legacy.join(':'));
     }
   });
 });

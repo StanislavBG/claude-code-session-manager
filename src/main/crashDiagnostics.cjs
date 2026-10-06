@@ -56,15 +56,43 @@ function sentinelFile() {
 // crashes (NOT OOM — a SIGKILL leaves no dump). Local-only, never uploaded.
 // Must run before the app is ready, so call this at module require time from
 // index.cjs's top level.
-function startCrashReporter() {
+//
+// On Windows Electron relaunches this exe as the crashpad handler with
+// --database=<crashDumps path>; an empty path makes the handler exit with
+// "--database is required" and the browser process self-terminates before any
+// window opens. So we resolve a non-empty dir first, and skip start() entirely
+// if we cannot — crash reporting must never be able to stop boot.
+// `deps` is injectable for tests; the runtime call signature is unchanged.
+function startCrashReporter(deps = {}) {
+  const a = deps.app || app;
+  const reporter = deps.crashReporter || crashReporter;
+  const fsImpl = deps.fs || fs;
+  const log = deps.log || ((msg) => console.warn(msg));
   try {
-    crashReporter.start({
+    const getDir = (name) => {
+      try { const d = a.getPath(name); return typeof d === 'string' ? d.trim() : ''; } catch { return ''; }
+    };
+    let dir = getDir('crashDumps');
+    let fellBack = false;
+    if (!dir) {
+      const userData = getDir('userData');
+      if (userData) { dir = path.join(userData, 'Crashpad'); fellBack = true; }
+    }
+    if (!dir) {
+      log('[crash-diag] no crashDumps/userData path; crash reporter skipped');
+      return;
+    }
+    fsImpl.mkdirSync(dir, { recursive: true });
+    if (fellBack) a.setPath('crashDumps', dir);
+    reporter.start({
       productName: 'claude-code-session-manager',
       companyName: 'session-manager',
       uploadToServer: false,
       compress: true,
     });
-  } catch { /* best-effort: diagnostics must never break boot */ }
+  } catch (err) {
+    try { (deps.log || ((m) => console.warn(m)))(`[crash-diag] crash reporter skipped: ${err && err.message}`); } catch { /* ignore */ }
+  }
 }
 
 // Snapshot per-process memory. app.getAppMetrics() returns one entry per

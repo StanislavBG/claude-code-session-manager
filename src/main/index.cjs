@@ -26,6 +26,10 @@ const crashDiagnostics = require('./crashDiagnostics.cjs');
 // Start the local minidump collector before app-ready (required by Electron).
 // Catches renderer/GPU SIGSEGV/SIGABRT; OOM-kills leave no dump but are caught
 // by the sentinel + render-process-gone hooks in crashDiagnostics.init().
+// ELECTRON_RUN_AS_NODE audit: every src/main site (appRuntime, watchdogHelpers,
+// seedSchedulerMcp, timeoutShim) sets it only in a child's env / launcher text,
+// or deletes it from a copied env — none writes the main process.env, so it
+// cannot leak into Electron's own children (crashpad handler included).
 crashDiagnostics.startCrashReporter();
 const voiceHotkey = require('./voiceHotkey.cjs');
 const voiceWizard = require('./voiceWizard.cjs');

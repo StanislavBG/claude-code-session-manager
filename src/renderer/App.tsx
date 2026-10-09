@@ -24,7 +24,8 @@ import { useWatchers } from './state/watchers'
 import { startBillingPolling } from './state/billing'
 import { startSchedulePolling } from './state/scheduleState'
 import { DEFAULT_PRESETS, renderCommand, resolvePresetCwd } from './lib/presets'
-import { createPickedSession, openOrStartProject } from './lib/createPickedSession'
+import { createPickedSession } from './lib/createPickedSession'
+import { StartProjectDialog } from './components/StartProjectDialog'
 import { useVoiceTTS } from './lib/useVoiceTTS'
 import { useVoice, type HotkeyMode } from './state/voice'
 import { isRecognitionSupported } from './lib/speechRecognition'
@@ -34,6 +35,14 @@ import { log } from './lib/logger'
 // Module-scope once-flag for the unsupported warning. Survives StrictMode
 // double-effect; resets only on full reload.
 let unsupportedLogged = false
+
+/** Parent directory of `p` (strips trailing separators); '' when there is none. */
+function parentDirOf(p: string): string {
+  const t = p.replace(/[\\/]+$/, '')
+  const i = Math.max(t.lastIndexOf('/'), t.lastIndexOf('\\'))
+  if (i < 0) return ''
+  return i === 0 ? t.slice(0, 1) : t.slice(0, i)
+}
 
 export function App() {
   // Subscribe to density at the app root so the body-class side effect wires
@@ -206,22 +215,26 @@ export function App() {
   const hotkeyModeRef = useRef<HotkeyMode>('hold')
 
   // "Open / Start Project" (renamed from "+ New session", 2026-07-31): TAB =
-  // project folder, one tab per project. Browse to an existing folder to open
-  // it (the native picker's New Folder button covers "start"), then land on
-  // the Epics view where the project's work is actually managed. Cancelling
-  // the picker still opens the Epics landing so the button never dead-ends.
-  const handleNewSession = useCallback(() => {
-    void openOrStartProject()
-      .catch(() => null)
-      .finally(() => {
-        // Land on the Epics view (not the opened tab's chat), matching the
-        // comment above. Opens the workspace explicitly instead of clearing
-        // activeTabId, so the freshly opened project's tab stays SELECTED
-        // while the workspace is what's displayed (PRD 833 I5).
-        useLayout.getState().setEpicsWorkspaceOpen(true)
-        useLayout.getState().openProjectPanel('terminal')
-      })
+  // project folder, one tab per project. The button opens StartProjectDialog:
+  // open an existing folder (native picker) or START a new one by name (the
+  // Linux picker has no New Folder button). On open we land on the Epics view
+  // where the project's work is actually managed; Cancel/ESC just closes.
+  const [startProjectOpen, setStartProjectOpen] = useState(false)
+  const [homeDir, setHomeDir] = useState('')
+  useEffect(() => {
+    void window.api.app.homeDir().then(setHomeDir).catch(() => undefined)
   }, [])
+  const handleNewSession = useCallback(() => setStartProjectOpen(true), [])
+  const handleProjectOpened = useCallback(() => {
+    setStartProjectOpen(false)
+    // Opens the workspace explicitly instead of clearing activeTabId, so the
+    // freshly opened project's tab stays SELECTED while the workspace is what's
+    // displayed (PRD 833 I5).
+    useLayout.getState().setEpicsWorkspaceOpen(true)
+    useLayout.getState().openProjectPanel('terminal')
+  }, [])
+  const handleStartProjectClose = useCallback(() => setStartProjectOpen(false), [])
+  const startProjectParent = activeTab ? parentDirOf(activeTab.cwd) || homeDir : homeDir
 
   // Eager preload of the speech model + permission subscription.
   // Lifted here from VoiceButton so the model warms even if the user never
@@ -714,6 +727,12 @@ export function App() {
         </div>
       </div>
       <AlmanacFooter onNavigate={navigate} />
+      <StartProjectDialog
+        open={startProjectOpen}
+        onClose={handleStartProjectClose}
+        onOpened={handleProjectOpened}
+        defaultParentDir={startProjectParent}
+      />
 
       {/* v0.13.1 — all former-modal tools render as full pages via the
        *  per-screen panel registry (layout.ts). No App-level modal mounts

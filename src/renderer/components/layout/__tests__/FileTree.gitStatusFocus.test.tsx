@@ -23,6 +23,7 @@ function installWindowApiMock(fileStatus: ReturnType<typeof vi.fn>) {
       list: vi.fn().mockResolvedValue({ ok: true, entries: [] }),
     },
     git: { fileStatus },
+    config: { watch: vi.fn(), unwatch: vi.fn(), onChanged: vi.fn(() => () => {}) },
   }
   ;(window as unknown as { api: typeof api }).api = api
 }

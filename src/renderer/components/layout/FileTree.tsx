@@ -25,7 +25,8 @@ import { extOf, IMAGE_EXTS } from '../../state/editor'
 import { toast } from '../../state/toast'
 import { copyText } from '../../lib/clipboard'
 import { usePanelFocus, usePanelFocusRef } from '../../lib/panelFocus'
-import { readUiPrefs, writeUiPrefsPatch } from '../../lib/uiPrefs'
+import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
+import { readUiPrefs,writeUiPrefsPatch } from '../../lib/uiPrefs'
 import { readUiSettingsPrefs, writeUiSettingsPrefs } from '../../lib/uiSettingsPrefs'
 
 // Persist which folders are expanded, per-cwd, in the active project's own
@@ -135,6 +136,15 @@ async function tryLoadGitStatus(cwd: string): Promise<GitStatusMap> {
   } catch {
     return {}
   }
+}
+
+const MAX_WATCHED_PATHS = 64
+const WATCH_DEBOUNCE_MS = 250
+const WATCH_OPTS = { depth: 0 } as const
+// useConfigDirWatch echoes paths with doubled/trailing slashes collapsed.
+function normalizeDir(p: string): string {
+  const collapsed = p.replace(/\/{2,}/g, '/')
+  return collapsed.length > 1 ? collapsed.replace(/\/+$/, '') : collapsed
 }
 
 interface ContextMenuState {
@@ -327,6 +337,64 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     }, 5000)
     return () => window.clearInterval(id)
   }, [cwd, focused])
+
+  // Live refresh: watch the root plus each expanded folder NON-recursively
+  // (depth 0) so a file written by the CLI, a terminal or another app shows up.
+  // Never recursive — on the Home face the root is the user's home folder.
+  // Capped: the root, then the most recently expanded folders (Set insertion
+  // order is expansion order).
+  const watchPaths = useMemo(() => {
+    if (!cwd) return []
+    const rest = [...expanded].filter((p) => p !== cwd)
+    return [cwd, ...rest.slice(-(MAX_WATCHED_PATHS - 1))]
+  }, [cwd, expanded])
+  const capWarnedRef = useRef(false)
+  useEffect(() => {
+    if (!cwd || expanded.size + 1 <= MAX_WATCHED_PATHS || capWarnedRef.current) return
+    capWarnedRef.current = true
+    console.warn(`FileTree: watching only ${MAX_WATCHED_PATHS} of ${expanded.size + 1} folders (cap reached)`)
+  }, [cwd, expanded])
+
+  // Per-folder debounce timers + folders whose refresh was deferred because an
+  // inline rename/create edit box was open.
+  const watchTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>())
+  const pendingRefreshRef = useRef(new Set<string>())
+  const editingRef = useRef(false)
+  editingRef.current = renaming !== null || createPrompt !== null
+  const runRefreshRef = useRef<(path: string) => void>(() => {})
+  runRefreshRef.current = (path: string) => {
+    if (path !== normalizeDir(cwd) && !expandedRef.current.has(path)) return  // collapsed since
+    if (editingRef.current) { pendingRefreshRef.current.add(path); return }
+    if (path === normalizeDir(cwd)) void reloadAndRestore([...expandedRef.current])
+    else void refreshNode(path)
+  }
+  useConfigDirWatch(watchPaths, (changed) => {
+    if (changed !== normalizeDir(cwd) && !expandedRef.current.has(changed)) return
+    const timers = watchTimersRef.current
+    const existing = timers.get(changed)
+    if (existing) clearTimeout(existing)
+    timers.set(changed, setTimeout(() => {
+      timers.delete(changed)
+      runRefreshRef.current(changed)
+    }, WATCH_DEBOUNCE_MS))
+  }, WATCH_OPTS)
+  // Flush deferred refreshes once the edit box closes.
+  useEffect(() => {
+    if (renaming !== null || createPrompt !== null) return
+    const pending = [...pendingRefreshRef.current]
+    pendingRefreshRef.current.clear()
+    for (const p of pending) runRefreshRef.current(p)
+  }, [renaming, createPrompt])
+  // Drop every pending timer on unmount and on cwd change.
+  useEffect(() => {
+    const timers = watchTimersRef.current
+    const pending = pendingRefreshRef.current
+    return () => {
+      for (const t of timers.values()) clearTimeout(t)
+      timers.clear()
+      pending.clear()
+    }
+  }, [cwd])
 
   // Close context menu on outside click / escape.
   useEffect(() => {

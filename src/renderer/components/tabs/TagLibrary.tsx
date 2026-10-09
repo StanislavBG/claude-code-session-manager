@@ -7,15 +7,9 @@ import { ticketTagTone } from '../../lib/ticketDisplay'
 import { agentTagDef } from '../../lib/agentTagDefs'
 import { toast } from '../../state/toast'
 import { useAgentsDirWatch } from '../../lib/useAgentsDirWatch'
+import { toKnownTags, toPersonaSaveInput } from '../../lib/personaSavePayload'
 import type { AgentPersona, AgentPersonaTag } from '../../../preload/api'
 
-// The write-side schema (agentPersonaSchema.cjs) only accepts these — mirrors AgentLibrary.tsx's
-// own KNOWN_PERSONA_TAGS/toKnownTags (each file keeps a component-local copy per this app's
-// "renderer stores/components are islands" convention; both derive from the same TAG_LIBRARY).
-const KNOWN_PERSONA_TAGS = new Set<string>(TAG_LIBRARY.map((t) => t.tag))
-function toKnownTags(tags: string[]): AgentPersonaTag[] {
-  return tags.filter((t): t is AgentPersonaTag => KNOWN_PERSONA_TAGS.has(t))
-}
 
 /**
  * Tag Library — read-only directory of the Epic intent-tag taxonomy, plus a
@@ -77,19 +71,10 @@ function TagLibraryComponent() {
 
   const assign = async (persona: AgentPersona, tag: AgentPersonaTag) => {
     try {
-      await window.api.agents.savePersona({
-        name: persona.name,
-        originalName: persona.name,
-        description: persona.description ?? '',
-        tools: persona.tools,
-        model: persona.model ?? 'inherit',
-        color: persona.color ?? '',
-        // Drop any tag that isn't in the closed WorkType union — a persona already carrying a
-        // stale/foreign tag (permitted on read) must not fail agentPersonaSchema.cjs's
-        // write-side validation just because that leftover tag rode along.
-        tags: toKnownTags([...persona.tags, tag]),
-        body: persona.body,
-      })
+      // toKnownTags drops stale/foreign tags (permitted on read) that would fail agentPersonaSchema.cjs.
+      await window.api.agents.savePersona(
+        toPersonaSaveInput(persona, { tags: toKnownTags([...persona.tags, tag]) }),
+      )
       setAdding(false)
       await load()
     } catch (e) {
@@ -99,16 +84,9 @@ function TagLibraryComponent() {
 
   const unassign = async (persona: AgentPersona, tag: AgentPersonaTag) => {
     try {
-      await window.api.agents.savePersona({
-        name: persona.name,
-        originalName: persona.name,
-        description: persona.description ?? '',
-        tools: persona.tools,
-        model: persona.model ?? 'inherit',
-        color: persona.color ?? '',
-        tags: toKnownTags(persona.tags.filter((t) => t !== tag)),
-        body: persona.body,
-      })
+      await window.api.agents.savePersona(
+        toPersonaSaveInput(persona, { tags: toKnownTags(persona.tags.filter((t) => t !== tag)) }),
+      )
       await load()
     } catch (e) {
       toast.error((e as Error).message || 'failed to remove tag')

@@ -143,6 +143,70 @@ describe('TagLibrary', () => {
     expect(api.agents.savePersona).toHaveBeenCalledWith(expect.objectContaining({ name: 'debugger', tags: ['bug'] }))
   })
 
+  describe('preserves non-tag persona fields on save', () => {
+    const RICH: AgentPersona = {
+      name: 'rich',
+      description: 'Has every optional field.',
+      tools: ['Read'],
+      model: 'sonnet',
+      effort: 'medium',
+      color: 'blue',
+      tags: ['feature'],
+      projects: ['*'],
+      action: 'run-it',
+      actionLabel: 'Run it',
+      title: 'Rich Persona',
+      path: '/home/bilko/.claude/agents/rich.md',
+      body: 'You are rich.',
+      overridingProjects: [],
+    }
+    const preserved = {
+      effort: 'medium',
+      title: 'Rich Persona',
+      projects: ['*'],
+      action: 'run-it',
+      actionLabel: 'Run it',
+    }
+
+    it('assign keeps effort, title, projects, action and actionLabel', async () => {
+      const { api } = installWindowApiMock([RICH])
+      const el = await mount()
+      const bugRow = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('#bug'))
+      await act(async () => {
+        bugRow!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+      const addBtn = Array.from(el.querySelectorAll('button')).find((b) => b.textContent?.includes('+ assign agent'))
+      await act(async () => {
+        addBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+      const select = el.querySelector('select') as HTMLSelectElement
+      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
+      await act(async () => {
+        nativeSetter.call(select, 'rich')
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+        await Promise.resolve()
+      })
+      expect(api.agents.savePersona).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'rich', tags: ['feature', 'bug'], ...preserved }),
+      )
+    })
+
+    it('unassign keeps effort, title, projects, action and actionLabel', async () => {
+      const { api } = installWindowApiMock([RICH])
+      const el = await mount()
+      const removeBtn = Array.from(el.querySelectorAll('button')).find((b) => b.title === 'Remove this tag from the agent')
+      await act(async () => {
+        removeBtn!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+        await Promise.resolve()
+      })
+      expect(api.agents.savePersona).toHaveBeenCalledWith(
+        expect.objectContaining({ name: 'rich', tags: [], ...preserved }),
+      )
+    })
+  })
+
   it('re-fetches personas when agents:changed fires — Agent Library edits the same file from its own side', async () => {
     const { api, emitChanged } = installWindowApiMock()
     await mount()

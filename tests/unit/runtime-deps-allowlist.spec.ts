@@ -26,12 +26,12 @@ function walk(dir: string, out: string[] = []): string[] {
 
 /** The published package's "Dependencies" count stays at 4. */
 describe('runtime dependency allowlist', () => {
-  it('ships exactly chokidar, electron, node-pty, zod', () => {
+  it('ships exactly chokidar, electron, node-pty, ws, zod', () => {
     expect(
       Object.keys(pkg.dependencies).sort(),
       'Adding a runtime dependency is a deliberate decision: it ships to every user. ' +
         'Dev deps are bundled by Vite and do not ship — put it in devDependencies unless shipped main/preload/bin code requires it at runtime.',
-    ).toEqual(['chokidar', 'electron', 'node-pty', 'zod'])
+    ).toEqual(['chokidar', 'electron', 'node-pty', 'ws', 'zod'])
   })
 
   it('no shipped code requires a removed package', () => {

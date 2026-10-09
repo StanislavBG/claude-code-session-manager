@@ -139,6 +139,7 @@ const configListDir = z.object({
 });
 
 const configWatch = z.array(z.string().min(1).max(4096));
+const configWatchOpts = z.object({ depth: z.number().int().min(0).max(2) }).strict().optional();
 
 const configParseImports = z.object({ path: z.string().min(1).max(4096) });
 
@@ -1211,6 +1212,7 @@ module.exports = {
     configWriteText,
     configListDir,
     configWatch,
+    configWatchOpts,
     configParseImports,
     sessionsPayload,
     layoutEnvelope,

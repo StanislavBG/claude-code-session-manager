@@ -27,9 +27,9 @@ const { expandHome } = require('./lib/expandHome.cjs');
 const { listReferencedFiles } = require('./lib/importReferences.cjs');
 const atomicFs = require('./lib/atomicFs.cjs');
 
-/** Map<absPath, {watcher, refCount}> — one chokidar watcher per path. */
+/** Map<watchKey, {watcher, refCount}> — one chokidar watcher per path (+ depth, see watchKeyOf). */
 const watchers = new Map();
-/** Map<senderId, Map<absPath, count>> — per-sender watch contributions for reload teardown. */
+/** Map<senderId, Map<watchKey, count>> — per-sender watch contributions for reload teardown. */
 const senderWatches = new Map();
 let window = null;
 
@@ -380,26 +380,34 @@ function normalizePathKey(p) {
   return path.resolve(expandHome(p));
 }
 
+/** Watcher-map key: the resolved path, plus a depth suffix for non-default (bounded) watches. */
+function watchKeyOf(key, depth) {
+  return depth === undefined ? key : `${key}\u0000d${depth}`;
+}
+
 /**
  * Watch one or more absolute paths. Each call increments a refcount per path.
  * Unwatch decrements; when refcount hits zero the underlying watcher is closed.
  * Fires IPC event `config:changed` with {path, mtimeMs, kind} on any change.
  */
-function watch(paths, senderId) {
+function watch(paths, senderId, opts) {
+  const depth = opts?.depth;
   for (const rawPath of paths) {
     validatePath(expandHome(rawPath)); // security check — throws if out of bounds
     const key = normalizePathKey(rawPath);
+    const mapKey = watchKeyOf(key, depth);
     if (senderId != null) {
       if (!senderWatches.has(senderId)) senderWatches.set(senderId, new Map());
       const sm = senderWatches.get(senderId);
-      sm.set(key, (sm.get(key) || 0) + 1);
+      sm.set(mapKey, (sm.get(mapKey) || 0) + 1);
     }
-    const existing = watchers.get(key);
+    const existing = watchers.get(mapKey);
     if (existing) {
       existing.refCount++;
       continue;
     }
     const w = chokidar.watch(key, {
+      ...(depth === undefined ? {} : { depth }),
       ignoreInitial: true,
       persistent: true,
       awaitWriteFinish: { stabilityThreshold: 50, pollInterval: 25 },
@@ -420,13 +428,13 @@ function watch(paths, senderId) {
     w.on('error', (err) => {
       console.warn('[config] watcher error for', key, err.message);
     });
-    watchers.set(key, { watcher: w, refCount: 1 });
+    watchers.set(mapKey, { watcher: w, refCount: 1 });
   }
 }
 
-function unwatch(paths, senderId) {
+function unwatch(paths, senderId, opts) {
   for (const rawPath of paths) {
-    const key = normalizePathKey(rawPath);
+    const key = watchKeyOf(normalizePathKey(rawPath), opts?.depth);
     if (senderId != null) {
       const sm = senderWatches.get(senderId);
       if (sm) {
@@ -489,8 +497,8 @@ function registerConfigHandlers() {
       return { ok: false, error: e.message };
     }
   }));
-  ipcMain.on('config:watch', (e, { paths }) => { try { s.configWatch.parse(paths); watch(paths, e.sender.id); } catch (err) { logs.writeLine({ level: 'warn', scope: 'config', message: 'config:watch schema reject', meta: { error: err?.message } }); } });
-  ipcMain.on('config:unwatch', (e, { paths }) => { try { s.configWatch.parse(paths); unwatch(paths, e.sender.id); } catch (err) { logs.writeLine({ level: 'warn', scope: 'config', message: 'config:unwatch schema reject', meta: { error: err?.message } }); } });
+  ipcMain.on('config:watch', (e, { paths, opts }) => { try { s.configWatch.parse(paths); s.configWatchOpts.parse(opts); watch(paths, e.sender.id, opts); } catch (err) { logs.writeLine({ level: 'warn', scope: 'config', message: 'config:watch schema reject', meta: { error: err?.message } }); } });
+  ipcMain.on('config:unwatch', (e, { paths, opts }) => { try { s.configWatch.parse(paths); s.configWatchOpts.parse(opts); unwatch(paths, e.sender.id, opts); } catch (err) { logs.writeLine({ level: 'warn', scope: 'config', message: 'config:unwatch schema reject', meta: { error: err?.message } }); } });
 }
 
 module.exports = {
@@ -498,6 +506,8 @@ module.exports = {
   registerConfigHandlers,
   closeAllWatchers,
   releaseWatchesForSender,
+  watch,
+  unwatch,
   // exported for tests / direct use
   readJson,
   readText,

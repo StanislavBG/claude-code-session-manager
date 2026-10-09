@@ -18,6 +18,7 @@
     "src/main/lib/scheduleJobSchema.cjs",
     "src/main/lib/customerFeedbackClient.cjs",
     "src/main/lib/customerFeedbackInbox.cjs",
+    "src/main/lib/customerFeedbackIpc.cjs",
     "src/main/ipcSchemas.cjs"
   ]
 }

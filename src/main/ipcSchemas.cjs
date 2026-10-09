@@ -1051,6 +1051,20 @@ const telemetrySetConfig = z.object({
   schemaVersion: z.literal(1),
 });
 
+const customerFeedbackSubmit = z.object({
+  title: z.string().max(120),
+  body: z.string().max(4000),
+  tag: z.enum(['bug', 'feature', 'discussion']),
+});
+const customerFeedbackMarkSeen = z.object({ ids: z.array(z.string().max(200)).max(500).optional() });
+const customerFeedbackInboxList = z.object({ includeHidden: z.boolean().optional() });
+const customerFeedbackInboxSetStatus = z.object({
+  id: z.string().max(200),
+  status: z.enum(['open', 'in_progress', 'resolved', 'wontfix']),
+  note: z.string().max(500).optional(),
+});
+const customerFeedbackInboxLinkEpic = z.object({ id: z.string().max(200), epicId: z.string().max(200) });
+
 /**
  * Wrap an IPC handler with schema validation. Returns a new handler that
  * parses the payload before calling the original. On invalid payload throws
@@ -1180,6 +1194,11 @@ module.exports = {
     agentsResolveEpicEffort,
     delegationReadinessCwd,
     telemetrySetConfig,
+    customerFeedbackSubmit,
+    customerFeedbackMarkSeen,
+    customerFeedbackInboxList,
+    customerFeedbackInboxSetStatus,
+    customerFeedbackInboxLinkEpic,
   },
   validated,
 };

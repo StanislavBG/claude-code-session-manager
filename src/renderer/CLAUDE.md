@@ -20,6 +20,8 @@ the old `web/project-pages` build toolchain was removed.
 `lib/screenKeys.ts`, `components/screenComponents.tsx`, `lib/navGroups.ts` (`NAV_ITEMS`). The
 count is whatever `NAV_ITEMS` says — never write a literal in a doc.
 
+**Every nav page has a steward subagent** — `.claude/agents/page-<NavKey>.md`; its principles and modes are in [`page-stewards.md`](../../session-manager-operations/architecture/page-stewards.md). Ask that steward to review a change to its page.
+
 **Generated — never hand-edit:** `public/vad/` via `npm run refresh:vad-assets` (copies every
 `ort-wasm*` file plus silero/worklet; drift-tested); `data/claude-settings-schema.json` via
 `npm run sync:settings-schema`.

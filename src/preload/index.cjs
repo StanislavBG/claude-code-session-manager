@@ -150,8 +150,8 @@ contextBridge.exposeInMainWorld('api', {
     writeText: (path, text, writer) => ipcRenderer.invoke('config:write-text', { path, text, writer }),
     listDir: (path, opts) => ipcRenderer.invoke('config:list-dir', { path, opts }),
     exists: (path) => ipcRenderer.invoke('config:exists', { path }),
-    watch: (paths) => ipcRenderer.send('config:watch', { paths }),
-    unwatch: (paths) => ipcRenderer.send('config:unwatch', { paths }),
+    watch: (paths, opts) => ipcRenderer.send('config:watch', { paths, opts }),
+    unwatch: (paths, opts) => ipcRenderer.send('config:unwatch', { paths, opts }),
     parseImports: (path) => ipcRenderer.invoke('config:parse-imports', { path }),
     onChanged: (handler) => {
       const listener = (_e, info) => handler(info);

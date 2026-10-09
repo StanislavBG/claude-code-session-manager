@@ -25,22 +25,26 @@ function normalizeConfigPath(p: string): string {
  * (Agent/Tag Library, Skills, Plugins) rather than caching file content in
  * the `useConfig` store.
  */
-export function useConfigDirWatch(paths: Array<string | null | undefined>, onChange: () => void) {
+export function useConfigDirWatch(
+  paths: Array<string | null | undefined>,
+  onChange: (changedPath: string) => void,
+  opts?: { depth?: 0 | 1 | 2 },
+) {
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
 
   const resolved = Array.from(new Set(paths.filter((p): p is string => !!p).map(normalizeConfigPath)))
-  const key = resolved.slice().sort().join('\u0000')
+  const key = resolved.slice().sort().join('\u0000') + `\u0001${opts?.depth ?? ''}`
 
   useEffect(() => {
     if (resolved.length === 0) return
-    window.api.config.watch(resolved)
+    window.api.config.watch(resolved, opts)
     const unsubscribe = window.api.config.onChanged((info) => {
-      if (resolved.includes(info.path)) onChangeRef.current()
+      if (resolved.includes(info.path)) onChangeRef.current(info.path)
     })
     return () => {
       unsubscribe()
-      window.api.config.unwatch(resolved)
+      window.api.config.unwatch(resolved, opts)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])

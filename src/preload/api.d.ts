@@ -1815,8 +1815,8 @@ export interface SessionManagerAPI {
     writeText: (path: string, text: string, writer?: OpsWriter) => Promise<WriteResult>;
     listDir: (path: string, opts?: { filesOnly?: boolean; dirsOnly?: boolean; includeHidden?: boolean }) => Promise<ListDirResult>;
     exists: (path: string) => Promise<boolean>;
-    watch: (paths: string[]) => void;
-    unwatch: (paths: string[]) => void;
+    watch: (paths: string[], opts?: { depth?: 0 | 1 | 2 }) => void;
+    unwatch: (paths: string[], opts?: { depth?: 0 | 1 | 2 }) => void;
     onChanged: (handler: (info: ConfigChangedEvent) => void) => () => void;
     parseImports: (path: string) => Promise<{ ok: true; imports: ImportRef[] } | { ok: false; error: string }>;
   };

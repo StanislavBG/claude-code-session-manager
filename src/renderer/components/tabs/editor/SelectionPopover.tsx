@@ -9,7 +9,9 @@
  * Positioning is viewport-fixed, clamped to stay inside the pane.
  */
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { copyText } from '../../../lib/clipboard'
+import { useToast } from '../../../state/toast'
 import { Z_VALUE } from '../../../lib/zLayers'
 import type { SelectionRect } from './useDocEdit'
 
@@ -25,6 +27,7 @@ const GAP = 8
 interface Props {
   phase: 'popover' | 'listening' | 'review' | 'thinking' | 'diff'
   rect: SelectionRect
+  selectedText: string
   diff: { before: string; after: string } | null
   transcript: string
   modelStatus: string | null
@@ -63,8 +66,23 @@ function clampedStyle(rect: SelectionRect): React.CSSProperties {
   }
 }
 
-export function SelectionPopover({ phase, rect, diff, transcript, modelStatus, onQuickAction, onRunCustom, onListen, onSendHeard, onCancel, onAccept, onReject, onRetry }: Props) {
+export function SelectionPopover({ phase, rect, selectedText, diff, transcript, modelStatus, onQuickAction, onRunCustom, onListen, onSendHeard, onCancel, onAccept, onReject, onRetry }: Props) {
   const [custom, setCustom] = useState('')
+  const [copied, setCopied] = useState(false)
+  const showToast = useToast((s) => s.show)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (copiedTimer.current) clearTimeout(copiedTimer.current) }, [])
+
+  const copySelection = async () => {
+    const ok = await copyText(selectedText)
+    if (!ok) {
+      showToast('error', 'Copy failed')
+      return
+    }
+    setCopied(true)
+    if (copiedTimer.current) clearTimeout(copiedTimer.current)
+    copiedTimer.current = setTimeout(() => setCopied(false), 1500)
+  }
 
   const submitCustom = () => {
     const trimmed = custom.trim()
@@ -83,6 +101,14 @@ export function SelectionPopover({ phase, rect, diff, transcript, modelStatus, o
         <div className="p-2">
           <div className="flex items-center justify-between mb-2">
             <div className="flex flex-wrap gap-1">
+              <button
+                onClick={copySelection}
+                data-testid="doc-edit-copy"
+                className="px-2 py-1 text-[11px] rounded border border-line text-fg-dim hover:text-fg hover:bg-bg-hi"
+                title="Copy the selected text"
+              >
+                {copied ? 'Copied' : 'Copy'}
+              </button>
               <button
                 onClick={onListen}
                 data-testid="doc-edit-voice"
@@ -106,7 +132,6 @@ export function SelectionPopover({ phase, rect, diff, transcript, modelStatus, o
             </button>
           </div>
           <input
-            autoFocus
             value={custom}
             onChange={(e) => setCustom(e.target.value)}
             onKeyDown={(e) => {

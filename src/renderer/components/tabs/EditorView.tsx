@@ -529,6 +529,7 @@ function EditorViewComponent() {
           <SelectionPopover
             phase={docEdit.state.phase}
             rect={docEdit.state.selection.rect}
+            selectedText={docEdit.state.selection.text}
             diff={docEdit.state.diff}
             transcript={docEdit.state.transcript}
             modelStatus={docEdit.state.modelStatus}

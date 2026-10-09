@@ -195,6 +195,31 @@ describe('SchedulerTopBands — title band wiring', () => {
   })
 })
 
+describe('SchedulerTopBands — agent pause banner', () => {
+  const agentPause = (by: unknown, resumeAt: string | null) =>
+    useScheduleState.setState({ snapshot: fixture({ paused: { reason: 'agent', since: new Date(NOW).toISOString(), resumeAt, by } as never }) })
+  const text = () => container.querySelector('[data-testid="pause-banner"]')!.textContent ?? ''
+
+  it('names the project, the reason and the countdown', async () => {
+    agentPause({ originClaudeSessionId: 's1', cwd: '/home/u/Projects/Burrow', reason: 'fixing the queue' }, new Date(NOW + 30 * 60_000).toISOString())
+    await mount()
+    expect(text()).toMatch(/^Paused by an agent in Burrow — "fixing the queue" — auto-resumes in .+\. Click Resume to restart now\./)
+  })
+
+  it('omits the reason clause and falls back to another session', async () => {
+    agentPause({ originClaudeSessionId: null, cwd: null, reason: null }, new Date(NOW + 30 * 60_000).toISOString())
+    await mount()
+    expect(text()).toMatch(/^Paused by an agent in another session — auto-resumes in /)
+    expect(text()).not.toContain('"')
+  })
+
+  it('shows resume pending when resumeAt has elapsed', async () => {
+    agentPause({ originClaudeSessionId: 's1', cwd: '/x/Self', reason: 'r' }, new Date(NOW - 60_000).toISOString())
+    await mount()
+    expect(text()).toContain('Paused by an agent in Self — "r" — auto-resume pending.')
+  })
+})
+
 describe('SchedulerTopBands — concurrency + policy', () => {
   it('stepper calls setSessionSlots clamped to [0,10]', async () => {
     await mount()

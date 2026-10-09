@@ -758,7 +758,7 @@ export interface ScheduleJobStatusHistoryEntry {
   at: string;
 }
 
-export type SchedulePauseReason = 'rate_limit' | 'auth' | 'network' | 'manual' | 'reset_failure';
+export type SchedulePauseReason = 'rate_limit' | 'auth' | 'network' | 'manual' | 'agent' | 'reset_failure';
 
 export interface SchedulePauseInfo {
   reason: SchedulePauseReason;
@@ -767,6 +767,8 @@ export interface SchedulePauseInfo {
   /** ISO timestamp at which auto-resume will fire (typically next 5h reset).
    *  null means "indefinite — wait for manual Run now". */
   resumeAt: string | null;
+  /** Present when reason is 'agent': who paused and why. */
+  by?: { originClaudeSessionId: string | null; cwd: string | null; reason: string | null } | null;
 }
 
 export interface ScheduleHealthSnapshot {

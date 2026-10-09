@@ -804,6 +804,8 @@ by this section.
 
 ### Pages
 
+Page 3 is the Field Manual — see the section below.
+
 - Page 1 "cover": hero (headline, body, CTA row) + price tag + the two rust stripes.
 - Page 2 "parts": the Parts Bin panel alone.
 - The header (58px) is NOT part of either page: it stays fixed on top in canvas mode and does
@@ -888,3 +890,122 @@ In `layout.ts`, unit-tested:
 PageDown, dot and button turn to page 2 and back; `#parts` deep link; Arrow keys inside the
 tablist still move tabs and do not turn the page; inert inactive page; reduced motion; and
 390x844 reflow shows both sections stacked with no horizontal overflow.
+
+## 2026-10-08 — the Field Manual is the book's next page
+
+The Field Manual reader (`src/pages/ManualPage.tsx`) wore generic Bilko site chrome. It becomes
+page 3 of the book: reached by turning past the Parts Bin, styled with the same `.smlp-` paper/ink/rust
+design. Out of scope: chapter content, manual server routes, downloads.
+
+### Chrome
+
+- The route `/products/session-manager/manual` moves OUTSIDE `<Layout/>` in `src/App.tsx`, like the
+  landing: no Bilko site chrome.
+- The manual's root element carries `smlp-root smlm-root` and `ManualPage.tsx` imports
+  `src/styles/session-manager-landing.css`, so it inherits the landing tokens, resets, paper + dot
+  background and fonts (`usePageFonts`).
+- The landing `Header` moves to `src/pages/session-manager-landing/Header.tsx` with a prop
+  `current: 'landing' | 'manual'`. On the manual the right-hand link reads `book.backToApp` and goes to
+  `/products/session-manager`; the header is `position: sticky; top: 0`.
+- Manual-only styles live in a new `src/styles/session-manager-manual.css`: every class is prefixed
+  `.smlm-`, every selector sits under `.smlm-root`.
+
+### Manual page layout
+
+Desktop = `useLayoutMode().mode === 'canvas'`.
+
+- Under the header: a 52px back row, centred, holding a `.smlp-turn` button `book.toParts` with an up chevron.
+- Then a two-column book spread: max-width 1360px, `margin: 0 auto`, `padding: 0 40px 40px`, gap 30px,
+  columns `300px minmax(0,1fr)`.
+- Left, the chapter rail: sticky, top 70px, styled like the Parts Bin tablist. Part headings are mono 11px
+  uppercase rust, letter-spacing .1em. Chapter rows are 44px tall: mono 2-digit number + title at 17px.
+  Active row = ink fill with paper text; others transparent with a 1.5px ink border on hover.
+- Right, the page card: `--smlp-card` background, 2px ink border, `4px 4px 0` ink shadow, a rust tape strip
+  at the top-left like `.smlp-chapter__tape`, padding 48px 56px.
+- Inside the card: a mono line `book.chapterOfTemplate`; a ghost chapter number (serif 200px, `--smlp-ghost`,
+  absolutely positioned top-right, `aria-hidden`); then the chapter prose in `.smlm-prose`:
+  Source Serif 4 19px/1.65 `--smlp-body`, max-width 68ch, h1 serif 44px ink, h2 serif 28px ink, links rust
+  underlined, code mono 0.9em on `--smlp-sand` with 2px 5px padding, pre with a 1.5px ink border on `--smlp-card`.
+- The manual intro (title, summary, version line, chapter count, downloads) becomes a title block above the
+  spread: serif 52px title, downloads as buttons styled like the price tag's download buttons.
+- Prev/next at the bottom of the card are `.smlp-turn` buttons (chevron up = previous, chevron down = next)
+  showing the chapter titles.
+
+### Reaching the manual
+
+Files: `SessionManagerPage.tsx`, `PartsBin.tsx`, `session-manager-landing/Header.tsx`,
+`session-manager-landing.css`.
+
+- Page 2 shrinks its panel bottom margin from 28px to 64px and gets a turn button `book.toManual` with a down
+  chevron, centred 18px above the page bottom.
+- A downward turn on page 2 — wheel (`createWheelTurner` +1), swipe up (`swipeDirection` +1),
+  PageDown/ArrowDown/Space — book-turns forward to the manual chapter of the Parts Bin tab currently selected.
+  `PartsBin` gets an `onTabChange(index)` prop; the page keeps the index in a ref. End stays on page 2.
+- Unmodified left-clicks on the chapter card link and on the header manual link are intercepted
+  (`preventDefault`) and book-turn forward to their href. Any modified click (ctrl/meta/shift/alt, middle
+  button) falls through to the native plain `<a href>` — links stay plain anchors.
+- The page dots nav gains a third item: an `<a>` styled as a dot, `aria-label={book.aria.manualDot}`, href the manual.
+
+### Leaving the manual
+
+Files: `ManualPage.tsx`, `session-manager-landing/Header.tsx`, `SessionManagerPage.tsx`.
+
+- The back row button and the header link book-turn BACK to `/products/session-manager#parts` (the landing
+  reads `#parts` on mount and opens page 2 with no internal animation).
+- On desktop the manual renders the same 3-dot nav, `position: fixed; right: 8px; top: 50%;
+  transform: translateY(-50%)`: dot 1 → `/products/session-manager` (back turn), dot 2 → `#parts` (back turn),
+  dot 3 = current (`aria-current="page"`).
+- Chapter switches inside the manual (rail, prev/next, in-body cross-references) book-turn forward when the
+  target chapter index is greater, back when smaller.
+
+### Book turn
+
+File: `src/pages/session-manager-landing/bookTurn.ts` (DOM-light, unit-tested); CSS in
+`session-manager-landing.css`.
+
+- `turnBook(dir: 'forward' | 'back', update: () => void | Promise<void>, opts?: { animate?: boolean }): Promise<void>`.
+  If `animate !== false` and `document.startViewTransition` exists, run
+  `document.startViewTransition({ update, types: ['book-' + dir] })`, falling back to the function form plus a
+  `data-book-turn` attribute on `<html>` when the object form throws; otherwise just await `update()`.
+- `bookNavigate(navigate, href, dir)` = `turnBook` with an update that preloads the target page chunk
+  (`import('../ManualPage.js')` for manual hrefs), calls `flushSync(() => navigate(href))`, then awaits the
+  ready signal.
+- `shouldInterceptClick(e)` = button 0, no modifier keys, anchor target not `_blank`.
+- CSS (a commented exception to the `.smlp-root` scoping rule, gated by the type selector): forward —
+  `::view-transition-old(root)` on top rotates `perspective(2400px) rotateX(0)` → `rotateX(-100deg)` around its
+  top edge (`transform-origin: 50% 0`) with brightness 1 → 0.65, the new page static underneath; back —
+  `::view-transition-new(root)` on top rotates from `rotateX(-100deg)` to `0`, old static underneath.
+  700ms `cubic-bezier(.2,.7,.2,1)`. `prefers-reduced-motion: reduce` → a 150ms crossfade.
+- Reflow mode calls `turnBook` with `animate: false`.
+
+### Ready signal
+
+In `bookTurn.ts`: `markBookPageReady()` / `waitForBookPageReady(timeoutMs = 1500): Promise<void>`.
+
+- `ManualPage.tsx` calls `markBookPageReady` after a chapter's HTML has rendered (or the unavailable/error state);
+  `SessionManagerPage.tsx` calls it in a mount effect.
+- The turn's update resolves on the signal or the timeout, whichever is first — the snapshot never shows
+  "Loading the manual…" for a fast load and never hangs.
+
+### Reflow
+
+No dots, no flip animation (navigation is instant). The manual is a single column: the existing chapter
+`<select>` stays, the page card loses its shadow and uses padding 24px 20px, prose 18px
+(`session-manager-manual.css`).
+
+### Accessibility
+
+- The manual's main is `<main aria-label={book.aria.manualPage}>`.
+- The chapter rail is a `<nav aria-label="Chapters">` with `aria-current="page"` on the active row.
+- After a chapter turn, focus moves to the chapter's first heading (`tabIndex -1`,
+  `focus({ preventScroll: true })`) and the window scrolls to the top of the card.
+
+### Tests
+
+- `tests/session-manager-book.test.ts` covers `turnBook` (with and without `startViewTransition`, object-form
+  throw fallback, `animate: false`), `shouldInterceptClick`, and `waitForBookPageReady` (signal first, timeout first).
+- `e2e/session-manager-manual.spec.ts` covers: the manual renders the landing header and no Bilko site chrome;
+  wheel and PageDown on page 2 reach the manual at the selected tab's chapter; the chapter card link reaches its
+  chapter; ctrl-click is not intercepted; back row and dot 2 return to the landing on page 2; chapter switching via
+  rail and next; 390x844 reflow single column with no horizontal overflow.
+- `e2e/session-manager-landing.spec.ts` expects 3 dot items.

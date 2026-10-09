@@ -10,7 +10,11 @@
  *   micro-file   <=2 tests, <=40 lines, shares a relative module with another test file
  *   prd-named    file name carries a PRD/plan number
  *
- * Usage: node scripts/test-quality/smells.cjs [--json]
+ * Usage: node scripts/test-quality/smells.cjs [--json] [--root <dir>]
+ *        node scripts/test-quality/smells.cjs --check <allowlist.json> [--root <dir>]
+ *
+ * --check ratchets source-text and no-assert: a flagged file must be allowlisted, and an
+ * allowlist entry whose file is gone or no longer has the smell must be removed.
  */
 
 const fs = require('node:fs');
@@ -387,9 +391,52 @@ function formatTable(result) {
   return lines.join('\n');
 }
 
-module.exports = { scanTestSource, scanRepo, sharedModulesOf, SMELL_ORDER };
+const RATCHETED = ['source-text', 'no-assert'];
+
+/** Pure ratchet: returns diagnostic lines (empty = clean) for a scanRepo result vs an allowlist. */
+function check(allowlist, scan) {
+  const byFile = new Map(scan.files.map((f) => [f.file, f]));
+  const findings = [];
+  for (const smell of RATCHETED) {
+    const allowed = new Set((allowlist && allowlist[smell]) || []);
+    for (const f of scan.files) {
+      if (f.smells.includes(smell) && !allowed.has(f.file)) {
+        findings.push(`${f.file}: new ${smell} smell (fix the test; do not add it to the allowlist)`);
+      }
+    }
+    for (const rel of [...allowed].sort()) {
+      const f = byFile.get(rel);
+      if (!f) findings.push(`${rel}: allowlisted for ${smell} but the file no longer exists — remove it from the allowlist`);
+      else if (!f.smells.includes(smell)) findings.push(`${rel}: allowlisted for ${smell} but no longer has it — remove it from the allowlist`);
+    }
+  }
+  return findings;
+}
+
+module.exports = { scanTestSource, scanRepo, sharedModulesOf, check, SMELL_ORDER };
 
 if (require.main === module) {
-  const result = scanRepo(process.cwd());
-  console.log(process.argv.includes('--json') ? JSON.stringify(result) : formatTable(result));
+  const argv = process.argv.slice(2);
+  const flagValue = (name) => {
+    const i = argv.indexOf(name);
+    return i >= 0 ? argv[i + 1] : undefined;
+  };
+  const root = path.resolve(flagValue('--root') || process.cwd());
+  const result = scanRepo(root);
+  if (argv.includes('--check')) {
+    const listPath = flagValue('--check');
+    if (!listPath) {
+      console.error('smells: --check requires an allowlist path');
+      process.exit(1);
+    }
+    const allowlist = JSON.parse(fs.readFileSync(path.resolve(root, listPath), 'utf8'));
+    const findings = check(allowlist, result);
+    if (findings.length) {
+      for (const f of findings) console.error(f);
+      process.exit(1);
+    }
+    console.log('smells --check: OK');
+  } else {
+    console.log(argv.includes('--json') ? JSON.stringify(result) : formatTable(result));
+  }
 }

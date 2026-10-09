@@ -1,0 +1,19 @@
+{
+  "source-text": [
+    "src/main/__tests__/loginShellPathBoot.test.cjs",
+    "src/main/__tests__/procname-sm-processes.test.cjs",
+    "src/main/__tests__/scheduleJobTransitionsGrep.test.cjs",
+    "src/main/__tests__/scheduler-killtree-adoption.test.cjs",
+    "src/main/__tests__/seedAgentPersonas.test.cjs",
+    "src/main/__tests__/workTypeLibrary.test.cjs",
+    "src/main/lib/__tests__/delegationReadiness.test.cjs",
+    "tests/unit/atomic-write.spec.ts"
+  ],
+  "no-assert": [
+    "scripts/hooks/__tests__/guard-destructive-git.test.cjs",
+    "src/main/__tests__/chat-cancel-terminal.test.cjs",
+    "src/main/__tests__/scheduler-no-dead-end-status.test.cjs",
+    "src/renderer/lib/__tests__/agentTagDefs.test.ts",
+    "src/renderer/state/__tests__/billing.test.ts"
+  ]
+}

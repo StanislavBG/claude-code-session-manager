@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 import { describe, it, expect } from 'vitest';
 
 const { scanTestSource, scanRepo, sharedModulesOf } = require('../smells.cjs');
@@ -112,5 +113,34 @@ describe('smells scanner', () => {
     const by = Object.fromEntries(files.map((f) => [f.file, f]));
     expect(by['src/main/__tests__/scheduler-killtree-adoption.test.cjs'].smells).toContain('source-text');
     expect(by['src/main/lib/__tests__/atomicFs.test.cjs'].smells).not.toContain('source-text');
+  });
+
+  it('--check fails on new offenders and stale entries, passes when clean', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'smells-check-'));
+    try {
+      for (const rel of ['src/main/__tests__/source-text.test.cjs', 'src/main/__tests__/clean.test.cjs']) {
+        const abs = path.join(root, rel);
+        fs.mkdirSync(path.dirname(abs), { recursive: true });
+        fs.writeFileSync(abs, FIXTURES[rel].text);
+      }
+      const run = (allowlist) => {
+        fs.writeFileSync(path.join(root, 'allow.json'), JSON.stringify(allowlist));
+        return spawnSync(process.execPath, [path.join(__dirname, '..', 'smells.cjs'), '--check', 'allow.json', '--root', root], { encoding: 'utf8' });
+      };
+      const fresh = run({ 'source-text': [], 'no-assert': [] });
+      expect(fresh.status).toBe(1);
+      expect(fresh.stderr).toContain('src/main/__tests__/source-text.test.cjs: new source-text');
+
+      const stale = run({ 'source-text': ['src/main/__tests__/source-text.test.cjs'], 'no-assert': ['src/main/__tests__/clean.test.cjs', 'src/main/__tests__/gone.test.cjs'] });
+      expect(stale.status).toBe(1);
+      expect(stale.stderr).toContain('clean.test.cjs: allowlisted for no-assert but no longer has it — remove it from the allowlist');
+      expect(stale.stderr).toContain('gone.test.cjs: allowlisted for no-assert but the file no longer exists — remove it from the allowlist');
+
+      const clean = run({ 'source-text': ['src/main/__tests__/source-text.test.cjs'], 'no-assert': [] });
+      expect(clean.status).toBe(0);
+      expect(clean.stdout).toContain('OK');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

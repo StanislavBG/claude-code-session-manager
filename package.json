@@ -67,7 +67,8 @@
     "lint:main-ts-check": "node scripts/check-main-ts-check.cjs",
     "lint:filenames": "node scripts/check-tracked-filenames.cjs",
     "lint:renderer-storage": "node scripts/check-renderer-storage.cjs",
-    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:docs && npm run lint:paths && npm run lint:any && npm run lint:main-ts-check && npm run lint:filenames && npm run lint:renderer-storage",
+    "lint:test-smells": "node scripts/test-quality/smells.cjs --check tests/quality/smell-allowlist.json",
+    "lint": "npm run lint:selectors && npm run lint:hooks && npm run lint:docs && npm run lint:paths && npm run lint:any && npm run lint:main-ts-check && npm run lint:filenames && npm run lint:renderer-storage && npm run lint:test-smells",
     "sync:settings-schema": "node scripts/sync-settings-schema.cjs"
   },
   "keywords": [

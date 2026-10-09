@@ -92,7 +92,7 @@ function listPureTests() {
     .sort();
 }
 
-module.exports = { listPureTests, INCLUDE_GLOBS, SIDE_EFFECT_PATTERNS };
+module.exports = { listPureTests, listIncludedFiles, INCLUDE_GLOBS, SIDE_EFFECT_PATTERNS };
 
 if (require.main === module) {
   for (const f of listPureTests()) {

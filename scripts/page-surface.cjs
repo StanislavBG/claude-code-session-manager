@@ -270,4 +270,143 @@ function classifyPages(root) {
   return out;
 }
 
-module.exports = { listPages, importGraph, classifyPages, resolveSpecifier, apiMap, apiUsage, handlerFiles };
+const SKIP_DIRS = new Set(['node_modules', 'dist']);
+
+/** Repo-relative test files under src/ and tests/unit/: renderer, tests/unit specs, and main .cjs tests. */
+function listTestFiles(root) {
+  const out = [];
+  const visit = (dirRel) => {
+    let entries;
+    try { entries = fs.readdirSync(path.join(root, dirRel), { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (SKIP_DIRS.has(e.name)) continue;
+      const rel = dirRel + '/' + e.name;
+      if (e.isDirectory()) { visit(rel); continue; }
+      const renderer = rel.startsWith('src/renderer/') && (/\/__tests__\//.test(rel) || /\.(test|spec)\.tsx?$/.test(rel));
+      const unit = rel.startsWith('tests/unit/') && /\.spec\.ts$/.test(rel);
+      const main = rel.startsWith('src/') && !rel.startsWith('src/renderer/') && /\/__tests__\//.test(rel) && /\.test\.cjs$/.test(rel);
+      if (renderer || unit || main) out.push(rel);
+    }
+  };
+  visit('src');
+  visit('tests/unit');
+  return out.sort();
+}
+
+/** Direct (non-transitive) resolved imports/requires of one file. */
+function directImports(root, rel) {
+  const text = fs.readFileSync(path.join(root, rel), 'utf8');
+  const dir = path.dirname(path.join(root, rel));
+  const specs = new Set(ts.preProcessFile(text, true, true).importedFiles.map((f) => f.fileName));
+  if (rel.endsWith('.cjs')) {
+    for (const m of text.matchAll(/require\(\s*['"](\.[^'"]+)['"]\s*\)/g)) specs.add(m[1]);
+  }
+  const out = new Set();
+  for (const s of specs) {
+    const r = resolveSpecifier(dir, s, root);
+    if (r) out.add(r);
+  }
+  return [...out];
+}
+
+function verdicts(root) {
+  const map = new Map();
+  try {
+    const summary = JSON.parse(fs.readFileSync(path.join(root, 'tests/quality/summary.json'), 'utf8'));
+    for (const f of summary.files || []) map.set(f.file, { verdict: f.verdict, reasons: f.reasons || [] });
+  } catch { /* missing or unreadable summary → every test is unmeasured */ }
+  return map;
+}
+
+/** Attributes tests to pages, stores them as classified[key].tests, and returns classified. */
+function pageTests(root, classified) {
+  const owner = new Map();
+  const mainPages = new Map();
+  for (const [key, page] of Object.entries(classified)) {
+    for (const f of page.owned) owner.set(f, key);
+    const seen = new Set();
+    for (const a of page.api) for (const m of a.main) if (!seen.has(m)) {
+      seen.add(m);
+      if (!mainPages.has(m)) mainPages.set(m, new Set());
+      mainPages.get(m).add(key);
+    }
+    page.tests = [];
+  }
+  const scores = verdicts(root);
+  for (const file of listTestFiles(root)) {
+    const keys = new Set();
+    for (const dep of directImports(root, file)) {
+      if (file.endsWith('.test.cjs') && !file.startsWith('src/renderer/')) {
+        const pages = mainPages.get(dep);
+        if (pages && pages.size === 1) keys.add([...pages][0]);
+      } else if (owner.has(dep)) keys.add(owner.get(dep));
+    }
+    const v = scores.get(file) || { verdict: 'unmeasured', reasons: [] };
+    for (const key of keys) classified[key].tests.push({ file, verdict: v.verdict, reasons: v.reasons });
+  }
+  for (const page of Object.values(classified)) page.tests.sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  return classified;
+}
+
+/** Methods in the owned-file api of 2+ pages: { method, channel, pages }, most pages first. */
+function duplicates(classified) {
+  const by = new Map();
+  for (const [key, page] of Object.entries(classified)) {
+    for (const a of page.api) {
+      if (!by.has(a.method)) by.set(a.method, { method: a.method, channel: a.channel, pages: [] });
+      by.get(a.method).pages.push(key);
+    }
+  }
+  return [...by.values()]
+    .filter((d) => d.pages.length >= 2)
+    .map((d) => ({ ...d, pages: d.pages.sort() }))
+    .sort((a, b) => b.pages.length - a.pages.length || (a.method < b.method ? -1 : a.method > b.method ? 1 : 0));
+}
+
+function textReport(page, c) {
+  const L = [];
+  L.push(`${page.key}  ${page.label}  faces=${page.faces.join(',') || '-'}  entry=${page.entry || '-'}`);
+  L.push('', `owned (${c.owned.length}):`, ...c.owned.map((f) => '  ' + f));
+  L.push('', `shared (${c.shared.length}):`, ...c.shared.map((s) => `  ${s.file}  [${s.pages.join(', ')}]`));
+  L.push('', `api (${c.api.length}):`, ...c.api.map((a) => `  ${a.method} -> ${a.channel ?? '-'} -> ${a.main.join(', ') || '-'}`));
+  L.push('', `shared api (${c.sharedApi.length}):`, ...c.sharedApi.map((a) => `  ${a.method} -> ${a.channel ?? '-'} -> ${a.main.join(', ') || '-'}`));
+  L.push('', `tests (${c.tests.length}):`, ...c.tests.map((t) => `  ${t.file}  ${t.verdict}${t.reasons.length ? ' (' + t.reasons.join(', ') + ')' : ''}`));
+  return L.join('\n');
+}
+
+function main(argv) {
+  const root = path.join(__dirname, '..');
+  const json = argv.includes('--json');
+  const key = argv.find((a) => !a.startsWith('--'));
+  const pages = listPages(root);
+  const out = (s) => process.stdout.write(s + '\n');
+  if (argv.includes('--list')) {
+    if (json) return out(JSON.stringify(pages, null, 2));
+    return pages.forEach((p) => out(`${p.key}\t${p.label}\t${p.faces.join(',')}\t${p.entry || '-'}`));
+  }
+  if (!argv.includes('--duplicates')) {
+    const page = pages.find((p) => p.key === key);
+    if (!page) {
+      process.stderr.write(`page-surface: unknown NavKey '${key ?? ''}'\n`);
+      process.exit(2);
+    }
+  }
+  const classified = pageTests(root, classifyPages(root));
+  if (argv.includes('--duplicates')) {
+    const d = duplicates(classified);
+    if (json) return out(JSON.stringify(d, null, 2));
+    return d.forEach((x) => out(`${x.method} -> ${x.channel ?? '-'}  (${x.pages.length}) ${x.pages.join(', ')}`));
+  }
+  const page = pages.find((p) => p.key === key);
+  const c = classified[key];
+  if (!c) {
+    process.stderr.write(`page-surface: NavKey '${key}' has no renderer entry\n`);
+    process.exit(2);
+  }
+  if (json) return out(JSON.stringify({ ...page, ...c }, null, 2));
+  out(textReport(page, c));
+}
+
+module.exports = { listPages, importGraph, classifyPages, resolveSpecifier, apiMap, apiUsage, handlerFiles, pageTests, duplicates, main };
+
+if (require.main === module) main(process.argv.slice(2));

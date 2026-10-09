@@ -11,9 +11,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { listPages, importGraph, classifyPages, apiMap, apiUsage, handlerFiles } = require('../page-surface.cjs');
+const { execFileSync, spawnSync } = require('node:child_process');
+const { listPages, importGraph, classifyPages, apiMap, apiUsage, handlerFiles, pageTests, duplicates } = require('../page-surface.cjs');
 
 const ROOT = path.resolve(__dirname, '../..');
+const SCRIPT = path.join(ROOT, 'scripts/page-surface.cjs');
+const cli = (...args) => execFileSync(process.execPath, [SCRIPT, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
 
 describe('real repo', () => {
   const pages = listPages(ROOT);
@@ -95,5 +98,47 @@ describe('fixture', () => {
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+describe('tests + duplicates', () => {
+  const c = classifyPages(ROOT);
+  pageTests(ROOT, c);
+
+  test('pageTests attaches verdicts to attributed tests', () => {
+    const all = Object.values(c).flatMap((p) => p.tests);
+    expect(all.length).toBeGreaterThan(0);
+    for (const t of all) {
+      expect(typeof t.verdict).toBe('string');
+      expect(Array.isArray(t.reasons)).toBe(true);
+    }
+    for (const p of Object.values(c)) expect(p.tests.map((t) => t.file)).toEqual(p.tests.map((t) => t.file).slice().sort());
+  });
+
+  test('duplicates lists agents.savePersona across both library pages', () => {
+    const d = duplicates(c);
+    const hit = d.find((x) => x.method === 'agents.savePersona');
+    expect(hit.channel).toBe('agents:save-persona');
+    expect(hit.pages).toEqual(expect.arrayContaining(['agent-library', 'tag-library']));
+    for (let i = 1; i < d.length; i++) expect(d[i - 1].pages.length).toBeGreaterThanOrEqual(d[i].pages.length);
+  });
+});
+
+describe('cli', () => {
+  test('<key> --json has owned, api and tests', () => {
+    const r = JSON.parse(cli('skills', '--json'));
+    expect(Array.isArray(r.owned)).toBe(true);
+    expect(Array.isArray(r.api)).toBe(true);
+    expect(Array.isArray(r.tests)).toBe(true);
+  });
+
+  test('--duplicates --json includes agents.savePersona', () => {
+    expect(JSON.parse(cli('--duplicates', '--json')).some((d) => d.method === 'agents.savePersona')).toBe(true);
+  });
+
+  test('unknown key exits 2', () => {
+    const r = spawnSync(process.execPath, [SCRIPT, 'nope-page'], { encoding: 'utf8' });
+    expect(r.status).toBe(2);
+    expect(r.stderr).toContain("page-surface: unknown NavKey 'nope-page'");
   });
 });

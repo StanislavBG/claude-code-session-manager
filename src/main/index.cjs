@@ -128,6 +128,7 @@ const git = require('./git.cjs');
 const heapSnapshot = require('./heapSnapshot.cjs');
 const filesIpc = require('./files.cjs');
 const { registerDocEditHandlers, attachWindow: attachDocEditWindow } = require('./docEdit.cjs');
+const webRemote = require('./webRemote.cjs');
 const { listExchanges } = require('./exchanges.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');
@@ -395,6 +396,7 @@ async function performReboot() {
     scheduler.attachWindow(mainWindow);
     watchers.attachWindow(mainWindow);
     pluginInstall.attachWindow(mainWindow);
+    webRemote.attachWindow(mainWindow);
     chatRunner.attachWindow(mainWindow);
     promptSessionEvents.attachWindow(mainWindow);
     attachDocEditWindow(mainWindow);
@@ -1095,6 +1097,7 @@ agentMemory.registerAgentMemoryHandlers();
 git.register(ipcMain);
 filesIpc.registerFilesHandlers();
 registerDocEditHandlers();
+webRemote.registerRemoteHandlers();
 chatRunner.registerChatHandlers();
 
 // Direct in-process PRD authoring for a queued PromptTicket classified
@@ -1454,6 +1457,7 @@ app.whenReady().then(async () => {
   scheduler.attachWindow(mainWindow);
   watchers.attachWindow(mainWindow);
   pluginInstall.attachWindow(mainWindow);
+  webRemote.attachWindow(mainWindow);
   chatRunner.attachWindow(mainWindow);
   promptSessionEvents.attachWindow(mainWindow);
   attachDocEditWindow(mainWindow);
@@ -1483,6 +1487,9 @@ app.whenReady().then(async () => {
   // throws. SM_SEED_DEV_PLUGIN_DISABLE=1 to opt out.
   seedDevPlugin({ logger: console, writeLog: logs.writeLine }).catch((e) => {
     logs.writeLine({ scope: 'seed-dev-plugin', level: 'error', message: 'seed failed', meta: { error: e?.message } });
+  });
+  webRemote.init().catch((e) => {
+    logs.writeLine({ scope: 'webRemote', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });
   // First-boot default: seed the bundled Architect + Dev Lead Agent personas
   // into ~/.claude/agents/ so the Agent Library isn't empty on a fresh
@@ -1594,6 +1601,7 @@ let teardownDone = false;
 function runShutdownCleanup() {
   if (teardownDone) return;          // idempotent — will-quit may still fire after an app.exit path
   teardownDone = true;
+  webRemote.destroy();
   // Mark a clean exit so the next boot can distinguish a graceful quit from an
   // OOM-kill / native crash (which leaves the sentinel `open`).
   crashDiagnostics.markCleanShutdown();

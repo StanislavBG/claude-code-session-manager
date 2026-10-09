@@ -32,6 +32,11 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | sm-ps.cjs | manual process-tree inspector | no |
 | sync-settings-schema.cjs | `npm run sync:settings-schema` | no |
 | write-build-info.cjs | npm `prepack` and `prepublishOnly` | no |
+| test-quality/smells.cjs | `npm run lint:test-smells` (in `lint`) — static test-smell scan; ratchets source-text/no-assert against `tests/quality/smell-allowlist.json` | no |
+| test-quality/coverage-map.cjs | manual, dev-only — per-test-file v8 coverage and unique-coverage attribution | no |
+| test-quality/mutants.cjs | manual, dev-only — seeded mutation sampler; which test files kill which mutants | no |
+| test-quality/coverage-guard.cjs | manual, dev-only — `--base <ref>`; fails if a test-only diff drops covered statements/branches | no |
+| test-quality/report.cjs | manual, dev-only — keep/review/merge/bloat verdict per test file from the coverage map | no |
 | hooks/guard-destructive-git.cjs | `.claude/settings.json` PreToolUse + shim | yes |
 | hooks/guard-inline-implementation.cjs | `.claude/settings.json` PreToolUse + shim | yes |
 | hooks/guard-prd-writes.cjs | `.claude/settings.json` PreToolUse + shim | yes |

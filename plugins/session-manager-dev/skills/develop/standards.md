@@ -39,6 +39,11 @@
 - Do not write production code without a test asserting the behavior it adds.
 - (Interactive sessions: the `test-driven-development` skill has the full red-green-refactor
   workflow. Headless PRD runs can't load it — the three rules above are the load-bearing core.)
+- Put the red test in the nearest existing scenario test for that workflow.
+- Create a new test file only for a new module or a new workflow.
+- Name tests and files by behaviour, never by PRD id.
+- Never assert on production source text; a static invariant is a `scripts/check-*.cjs` lint.
+- Full rubric (what is bloat, how to delete safely): the `## Test value — good test vs bloat` section of `tests/README.md`.
 
 ## Visual design (UI/visual acceptance criteria)
 

@@ -62,6 +62,47 @@ CI (`.github/workflows/ci.yml`), job `ci` (ubuntu, Node 20): `npm ci` → `npm r
 `SM_MOCK_BILLING_KIND=ok`). Job `smoke-darwin` (macOS): `npm ci` → `typecheck` → `lint` → `build` →
 `npm run smoke:darwin`.
 
+## Test value — good test vs bloat
+
+A test earns its place only if deleting it would let a bug through. That means it has unique
+coverage (a statement or branch no other test runs) or unique mutant kills (an injected bug no
+other test catches).
+
+Prefer one scenario test per workflow. It drives public entrypoints — an IPC handler, an admin
+route, a CLI, or an exported module API — with real fs in the sandbox HOME and the claude stub
+at the process boundary. Extend the existing scenario test; do not add a new file for each fix.
+Playwright e2e is for UI flows only and never runs under the scheduler.
+
+### What counts as bloat
+
+- Zero unique coverage and zero unique kills.
+- Source-text change detectors: tests that read a production file and assert on its text. A
+  static invariant belongs in a `scripts/check-*.cjs` lint, not a unit test.
+- Mock-call-only assertions: every `expect` is a `toHaveBeenCalled` variant, so no behaviour is checked.
+- Micro-files that fragment one module's tests across many small files.
+
+### Tools
+
+All live in `scripts/test-quality/` and are dev-only.
+
+| Tool | Command | Use |
+| --- | --- | --- |
+| smells.cjs | `node scripts/test-quality/smells.cjs [--json]` | Static smell scan per test file |
+| coverage-map.cjs | `node scripts/test-quality/coverage-map.cjs --all --out test-results/test-quality/coverage-map.json` | Per-file v8 coverage and unique coverage |
+| mutants.cjs | `node scripts/test-quality/mutants.cjs <srcFile> --seed 1 --out <before.json>` | Seeded mutation sample; shows which test files kill which mutants |
+| coverage-guard.cjs | `node scripts/test-quality/coverage-guard.cjs --base <sha>` | Exit 0 = no covered statement or branch dropped; 1 = dropped keys listed; 2 = diff touches non-test source |
+| report.cjs | `node scripts/test-quality/report.cjs --map test-results/test-quality/coverage-map.json` | keep / review / merge / bloat verdict per file, plus consolidation clusters |
+| lint:test-smells | `npm run lint:test-smells` | Ratchet: source-text and no-assert smells may only shrink (`tests/quality/smell-allowlist.json`) |
+
+### Reduction rule
+
+Delete or merge a test only when both hold:
+
+1. `node scripts/test-quality/coverage-guard.cjs --base <sha>` exits 0, where `<sha>` is the commit before your change.
+2. `mutants.cjs` run with the same `--seed` (and `<srcFile>`) before and after shows no mutant that was killed before and survives after.
+
+If either fails, keep the test or move its assertions into the scenario test first.
+
 ## Notes on specific specs
 
 - `tests/smoke/darwin-boot.spec.ts` has no platform guard: on Linux it runs as a free extra boot smoke.

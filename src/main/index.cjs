@@ -22,6 +22,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const { schemas, validated } = require('./ipcSchemas.cjs');
+const { createProjectFolder } = require('./lib/projectFolder.cjs');
 const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
 const { applyLoginShellPath } = require('./lib/loginShellPath.cjs');
 const { terminateLosingInstance } = require('./lib/singleInstanceGuard.cjs');
@@ -771,9 +772,9 @@ ipcMain.handle('app:seed-status', () => getSeedStatus());
 ipcMain.handle('app:pick-directory', async () => {
   console.log('[main] pick-directory invoked');
   const result = await dialog.showOpenDialog(mainWindow, {
-    // createDirectory enables the picker's "New Folder" affordance (macOS;
-    // the GTK chooser has its own) — this is the "Start Project" path:
-    // create a fresh folder in place, open it as the project's TAB.
+    // createDirectory is macOS-only (it adds the picker's "New Folder"
+    // button there). Linux/Windows users create folders via the in-app
+    // Start new project form (app:create-project-folder, below).
     properties: ['openDirectory', 'createDirectory'],
     defaultPath: os.homedir(),
     title: 'Open a project folder — or create a new one to start a project',
@@ -782,6 +783,12 @@ ipcMain.handle('app:pick-directory', async () => {
   if (result.canceled || result.filePaths.length === 0) return null;
   return result.filePaths[0];
 });
+
+ipcMain.handle('app:create-project-folder', validated(schemas.appCreateProjectFolder, async (payload) => {
+  const result = await createProjectFolder(payload);
+  console.log('[main] create-project-folder', result.ok ? 'ok' : result.code, JSON.stringify({ parentDir: payload.parentDir, name: payload.name }));
+  return result;
+}));
 
 ipcMain.on('app:reboot-app', (_e, opts) => { rebootApp({ force: opts?.force === true }).catch((e) => logReboot(`reboot failed: ${e?.message}`)); });
 

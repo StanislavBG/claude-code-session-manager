@@ -160,3 +160,26 @@ describe('archiveProject schema', () => {
     expect(schemas.archiveProject.safeParse({}).success).toBe(false)
   })
 })
+
+// ──────────────────────────────────────────── app:create-project-folder
+describe('appCreateProjectFolder schema', () => {
+  it('accepts { parentDir, name }', () => {
+    expect(schemas.appCreateProjectFolder.safeParse({ parentDir: '/home/user', name: 'my-project' }).success).toBe(true)
+  })
+
+  it('rejects missing name', () => {
+    expect(schemas.appCreateProjectFolder.safeParse({ parentDir: '/home/user' }).success).toBe(false)
+  })
+
+  it('rejects empty name', () => {
+    expect(schemas.appCreateProjectFolder.safeParse({ parentDir: '/home/user', name: '' }).success).toBe(false)
+  })
+
+  it('rejects extra keys (strict)', () => {
+    expect(schemas.appCreateProjectFolder.safeParse({ parentDir: '/home/user', name: 'x', extra: 1 }).success).toBe(false)
+  })
+
+  it('rejects parentDir exceeding 4096 chars', () => {
+    expect(schemas.appCreateProjectFolder.safeParse({ parentDir: '/' + 'a'.repeat(4096), name: 'x' }).success).toBe(false)
+  })
+})

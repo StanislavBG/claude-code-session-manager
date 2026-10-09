@@ -687,6 +687,13 @@ const delegationReadinessCwd = z.object({
   cwd: z.string().min(1).max(4096),
 }).strict();
 
+// app:create-project-folder — name semantics (separators, '..') are checked in
+// lib/projectFolder.cjs, not here.
+const appCreateProjectFolder = z.object({
+  parentDir: z.string().min(1).max(4096),
+  name: z.string().min(1).max(255),
+}).strict();
+
 // ──────────────────────────────────────────── Agent persona body (New Epic AIM)
 const agentsGetPersonaBody = z.object({
   cwd: z.string().min(1).max(4096),
@@ -1193,6 +1200,7 @@ module.exports = {
     agentsResolveEpicModel,
     agentsResolveEpicEffort,
     delegationReadinessCwd,
+    appCreateProjectFolder,
     telemetrySetConfig,
     customerFeedbackSubmit,
     customerFeedbackMarkSeen,

@@ -143,7 +143,12 @@ const TOOLS = [
   {
     name: 'scheduler_pause',
     description: descriptionFor('scheduler_pause'),
-    inputSchema: { type: 'object', properties: {} },
+    inputSchema: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', description: 'Why you are pausing — shown to the human.' },
+      },
+    },
   },
   {
     name: 'scheduler_resume',
@@ -476,7 +481,14 @@ async function handleCallTool(request) {
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_pause' || name === 'scheduler_resume') {
-      const result = await adminRequest('POST', `/admin/scheduler/${name === 'scheduler_pause' ? 'pause' : 'resume'}`, {});
+      const body = name === 'scheduler_pause'
+        ? {
+            originClaudeSessionId: process.env.SM_CHAT_SESSION_ID ?? null,
+            cwd: process.cwd(),
+            reason: args && typeof args.reason === 'string' ? args.reason : undefined,
+          }
+        : {};
+      const result = await adminRequest('POST', `/admin/scheduler/${name === 'scheduler_pause' ? 'pause' : 'resume'}`, body);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_list_jobs') {

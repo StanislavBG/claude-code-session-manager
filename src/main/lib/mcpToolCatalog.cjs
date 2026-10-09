@@ -50,11 +50,11 @@ const MCP_TOOL_CATALOG = [
   {
     name: 'scheduler_pause',
     group: 'scheduler',
-    purpose: "Pause the scheduler (user-initiated) via the session-manager app's admin API.",
-    whenToUse: 'Use to stop NEW job dispatch on request (e.g. before a risky change). Running jobs are never killed.',
-    whenNotToUse: 'Do not use to cancel a running job (use scheduler_cancel_job) or as a workaround for a stuck queue.',
-    exampleArgs: {},
-    notes: 'A manual pause survives app restart and is never auto-cleared by the rate-limit timer or network recovery — only scheduler_resume clears it.',
+    purpose: "Pause NEW job dispatch for every project on this machine (machine-wide, not per-repo) via the session-manager app's admin API.",
+    whenToUse: 'Use only when the human asks you to stop dispatch everywhere, or for a machine-wide emergency. Pass a `reason`. Running jobs are never killed.',
+    whenNotToUse: "NEVER use it to protect one repo's git/branch state or a single Epic's work — it freezes every project's scheduler. Do not use it to cancel a running job (use scheduler_cancel_job) or as a workaround for a stuck queue.",
+    exampleArgs: { reason: 'machine-wide emergency: disk full' },
+    notes: 'An agent pause auto-expires after 30 minutes, is cleared on app restart, and is audited with the caller (session id + cwd). A human pause outranks it and is only cleared by scheduler_resume.',
   },
   {
     name: 'scheduler_resume',

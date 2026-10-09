@@ -19,6 +19,7 @@ Classes: **LAW-RATIONALE** (linked from root `CLAUDE.md`) · **REFERENCE** (subs
 | [host-boundary.md](host-boundary.md) | host-vs-ours boundary and routing rule | LAW-RATIONALE |
 | [scheduler-operations.md](scheduler-operations.md) | dispatch, recovery ladder, diagnosis table | LAW-RATIONALE |
 | [telemetry.md](telemetry.md) | anonymous telemetry data model and dedup | LAW-RATIONALE |
+| [customer-feedback.md](customer-feedback.md) | {F} customer feedback: three stores, bilko.run wire contract, lifecycle | REFERENCE |
 | [application-menu.md](application-menu.md) | Electron application menu structure | REFERENCE |
 | [heap-snapshot-diagnostics.md](heap-snapshot-diagnostics.md) | renderer heap-snapshot procedure | RUNBOOK |
 | [build-target.json](build-target.json) | **live runtime config** read by `src/main/lib/buildTarget.cjs`, `.claude/agents/builder.md` and the builder plugin skill — never move it | — |

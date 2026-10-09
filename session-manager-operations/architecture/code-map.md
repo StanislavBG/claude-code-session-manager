@@ -18,6 +18,7 @@
 - `pty.cjs` — node-pty per tab, keyed by renderer-generated UUID = claudeSessionId.
 - `ipcSchemas.cjs` — zod schemas validate IPC payloads at the main-process boundary.
 - `lib/telemetrySettings.cjs` / `lib/machineProfile.cjs` / `lib/telemetryClient.cjs` / `lib/telemetryBacklog.cjs` — anonymous, on-by-default product telemetry to bilko.run (distinct from the OTEL transcript exporter above): consent + install identity, the anonymous machine-class profile, the egress client (queue/sent-set/dedup/backoff), and the pre-existing error-log backlog drainer (byte-offset watermarks). Full data model, lifecycle, and dedup mechanisms: [`telemetry.md`](telemetry.md).
+- `lib/customerFeedbackClient.cjs` / `lib/customerFeedbackInbox.cjs` / `lib/customerFeedbackIpc.cjs` / `lib/customerFeedbackAdminRoutes.cjs` — in-app {F} customer feedback: customer submit + status lookup, owner inbox pull/set-status/link-epic, renderer IPC, and the admin routes behind the `customer_feedback_*` MCP tools. Stores, wire contract, lifecycle: [`customer-feedback.md`](customer-feedback.md).
 - `queueOps.cjs` — scheduler PRD queue linter (unbounded-loop + post-AC overrun detection) + archive + retag.
 - `pluginInstall.cjs` — hidden-pty plugin install via `claude plugin install <slug>`. Slug regex `/^[a-z0-9][a-z0-9\-/]*$/`, 5 min kill ceiling, single in-flight per slug.
 - `memoryTool.cjs` — workspace-scoped memories CRUD for the `memory_20250818` tool.

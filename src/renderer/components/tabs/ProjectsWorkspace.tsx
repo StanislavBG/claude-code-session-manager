@@ -68,6 +68,7 @@ function ProjectsWorkspaceComponent() {
   const { projects, openProject, archiveProjectByCwd } = useKnownProjects()
   const pinned = useProjectsPrefs((s) => s.pinned)
   const togglePin = useProjectsPrefs((s) => s.togglePin)
+  useEffect(() => { void useProjectsPrefs.getState().hydrate() }, [])
 
   const sortedRows = [...projects].sort((a, b) =>
     (pinned[b.cwd] ? 1 : 0) - (pinned[a.cwd] ? 1 : 0))

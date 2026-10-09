@@ -1,132 +1,85 @@
 import { create } from 'zustand'
+import { toast } from './toast'
 
-export type SortCol = 'project' | 'sessions' | 'last' | 'size'
-export type SortDir = 'asc' | 'desc'
-export type RecentFilter = 'all' | '7d' | '30d'
-
-interface PersistedPrefs {
+interface ProjectsPrefsState {
   /** Keyed by the project's cwd — a project IS its working directory. */
   pinned: Record<string, boolean>
-  sort: { col: SortCol; dir: SortDir }
-  recentFilter: RecentFilter
-  hasRemote: boolean | null
-  hasClaudemd: boolean | null
-  pinnedOnly: boolean
-  search: string
-  editor: string
-}
-
-interface ProjectsPrefsState extends PersistedPrefs {
   hydrated: boolean
   hydrate: () => Promise<void>
   togglePin: (cwd: string) => void
-  setSort: (col: SortCol) => void
-  setRecentFilter: (f: RecentFilter) => void
-  setHasRemote: (v: boolean | null) => void
-  setHasClaudemd: (v: boolean | null) => void
-  setPinnedOnly: (v: boolean) => void
-  setSearch: (v: string) => void
-  setEditor: (v: string) => void
 }
 
 const FILE = '~/.claude/session-manager/projects-prefs.json'
 
-const DEFAULT_DIRS: Record<SortCol, SortDir> = {
-  project: 'asc',
-  sessions: 'desc',
-  last: 'desc',
-  size: 'desc',
+// Every read-modify-write funnels through this queue so two quick toggles
+// cannot interleave and drop each other's change (same shape as
+// lib/uiSettingsPrefs.ts's writeUiSettingsPrefs).
+let queue: Promise<void> = Promise.resolve()
+let hydratePromise: Promise<void> | null = null
+
+function enqueue(task: () => Promise<void>): Promise<void> {
+  const run = queue.then(task)
+  queue = run.catch(() => {})
+  return run
 }
 
-function persist(get: () => ProjectsPrefsState): void {
-  const s = get()
-  const payload: PersistedPrefs = {
-    pinned: s.pinned,
-    sort: s.sort,
-    recentFilter: s.recentFilter,
-    hasRemote: s.hasRemote,
-    hasClaudemd: s.hasClaudemd,
-    pinnedOnly: s.pinnedOnly,
-    search: s.search,
-    editor: s.editor,
+/** Reads the file fresh; a missing file is an empty pin set, any other failure rejects. */
+async function readPinned(): Promise<Record<string, boolean>> {
+  const r = await window.api.config.readJson(FILE)
+  if (r.exists && r.data && typeof r.data === 'object') {
+    const p = (r.data as { pinned?: unknown }).pinned
+    if (p && typeof p === 'object') return { ...(p as Record<string, boolean>) }
   }
-  window.api.config.writeJson(FILE, payload).catch(() => {})
+  return {}
 }
 
-export const useProjectsPrefs = create<ProjectsPrefsState>((set, get) => ({
+/** Resolves once every queued pin read/write has settled. */
+export function __flushProjectsPrefsForTests(): Promise<void> {
+  return queue
+}
+
+/** Forgets the in-flight/finished hydrate so a test can hydrate afresh. */
+export function __resetProjectsPrefsHydrateForTests(): void {
+  hydratePromise = null
+}
+
+export const useProjectsPrefs = create<ProjectsPrefsState>((set) => ({
   pinned: {},
-  sort: { col: 'last', dir: 'desc' },
-  recentFilter: 'all',
-  hasRemote: null,
-  hasClaudemd: null,
-  pinnedOnly: false,
-  search: '',
-  editor: 'auto',
   hydrated: false,
 
-  hydrate: async () => {
-    try {
-      const r = await window.api.config.readJson(FILE)
-      if (r.exists && r.data && typeof r.data === 'object') {
-        const d = r.data as Partial<PersistedPrefs>
-        set({
-          pinned: d.pinned ?? {},
-          sort: d.sort ?? { col: 'last', dir: 'desc' },
-          recentFilter: d.recentFilter ?? 'all',
-          hasRemote: d.hasRemote ?? null,
-          hasClaudemd: d.hasClaudemd ?? null,
-          pinnedOnly: d.pinnedOnly ?? false,
-          search: d.search ?? '',
-          editor: d.editor ?? 'auto',
-          hydrated: true,
-        })
-        return
+  hydrate: () => {
+    if (hydratePromise) return hydratePromise
+    hydratePromise = enqueue(async () => {
+      try {
+        set({ pinned: await readPinned(), hydrated: true })
+      } catch (err) {
+        console.warn('projectsPrefs: could not read launcher pins', err)
+        set({ hydrated: true })
       }
-    } catch {}
-    set({ hydrated: true })
+    })
+    return hydratePromise
   },
 
   togglePin: (cwd) => {
-    const next = { ...get().pinned, [cwd]: !get().pinned[cwd] }
-    set({ pinned: next })
-    persist(get)
-  },
-
-  setSort: (col) => {
-    const s = get()
-    const dir: SortDir =
-      s.sort.col === col ? (s.sort.dir === 'asc' ? 'desc' : 'asc') : DEFAULT_DIRS[col]
-    set({ sort: { col, dir } })
-    persist(get)
-  },
-
-  setRecentFilter: (recentFilter) => {
-    set({ recentFilter })
-    persist(get)
-  },
-
-  setHasRemote: (hasRemote) => {
-    set({ hasRemote })
-    persist(get)
-  },
-
-  setHasClaudemd: (hasClaudemd) => {
-    set({ hasClaudemd })
-    persist(get)
-  },
-
-  setPinnedOnly: (pinnedOnly) => {
-    set({ pinnedOnly })
-    persist(get)
-  },
-
-  setSearch: (search) => {
-    set({ search })
-    persist(get)
-  },
-
-  setEditor: (editor) => {
-    set({ editor })
-    persist(get)
+    void enqueue(async () => {
+      let lastRead: Record<string, boolean>
+      try {
+        lastRead = await readPinned()
+      } catch (err) {
+        console.warn('projectsPrefs: could not read launcher pins', err)
+        toast.error('Could not update pinned projects: the preferences file is unreadable.')
+        return
+      }
+      const next = { ...lastRead }
+      if (next[cwd]) delete next[cwd]
+      else next[cwd] = true
+      try {
+        await window.api.config.writeJson(FILE, { pinned: next })
+        set({ pinned: next })
+      } catch (err) {
+        set({ pinned: lastRead })
+        toast.error(`Could not save pinned projects: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    })
   },
 }))

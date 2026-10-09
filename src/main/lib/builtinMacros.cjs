@@ -30,9 +30,9 @@ const BUILTIN_MACROS = Object.freeze([
     tag: 'project-home-builder',
     surface: 'project-home',
     projects: ['*'],
-    builtinVersion: 2,
+    builtinVersion: 3,
     prompt:
-      'Generate a 30-second demo video for this project as one self-contained HTML/JavaScript animation that presents its main goals and key features, grounded only in what you read in the repository, with a matching on-device narration track per the audio policy in the persona. Save it with a single project_demo_video_write call.',
+      'Generate a 30-second demo video for this project as one self-contained HTML/JavaScript animation that presents its main goals and key features, grounded only in what you read in the repository, with a matching on-device narration track: narrate with Kokoro (kokoro-onnx) using a natural female (af_heart) or male (am_michael) voice per the audio policy in the persona. Save it with a single project_demo_video_write call passing htmlPath.',
   }),
 ]);
 

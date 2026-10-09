@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { listPages, importGraph, classifyPages } = require('../page-surface.cjs');
+const { listPages, importGraph, classifyPages, apiMap, apiUsage, handlerFiles } = require('../page-surface.cjs');
 
 const ROOT = path.resolve(__dirname, '../..');
 
@@ -38,6 +38,38 @@ describe('real repo', () => {
     expect(sharedFiles).not.toContain('src/renderer/components/tabs/Hooks.tsx');
     expect(skills.owned).toEqual([...skills.owned].sort());
     for (const s of skills.shared) expect(s.pages.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test('apiMap reads channels from the preload', () => {
+    const map = apiMap(ROOT);
+    expect(map.get('config.listDir')).toBe('config:list-dir');
+    expect(map.get('agents.savePersona')).toBe('agents:save-persona');
+  });
+
+  test('handlerFiles finds the main-process handler', () => {
+    expect(handlerFiles(ROOT, 'config:list-dir')).toContain('src/main/config.cjs');
+    expect(handlerFiles(ROOT, null)).toEqual([]);
+  });
+
+  test('classifyPages attaches api usage per page', () => {
+    const c = classifyPages(ROOT);
+    const skills = [...c.skills.api, ...c.skills.sharedApi].find((a) => a.method === 'config.listDir');
+    expect(skills).toBeTruthy();
+    expect(skills.main).toContain('src/main/config.cjs');
+    expect(c.skills.unresolvedApiRefs).toEqual(expect.any(Number));
+    expect(c['agent-library'].api.map((a) => a.method)).toContain('agents.savePersona');
+  });
+});
+
+describe('apiUsage', () => {
+  test('handles optional chaining and counts unresolved references', () => {
+    const text = [
+      'window.api.config.listDir(a)',
+      'window.api?.agents?.savePersona(b)',
+      'window.api.config.listDir(c)',
+      'const api = window.api',
+    ].join('\n');
+    expect(apiUsage(text)).toEqual({ methods: ['agents.savePersona', 'config.listDir'], unresolved: 1 });
   });
 });
 

@@ -5,3 +5,4 @@ mb-manual-chrome 99dade2 refactor(session-manager): manual reader wears the land
 mb-manual-book-page 7ec60af feat(session-manager): field manual reads as the landing book's next page
 mb-e2e-and-screens c85fd61 test(session-manager): e2e for landing ↔ field manual book turns (fixed manual reflow header overflow at 390px in session-manager-manual.css; mid-turn shot taken with startViewTransition available)
 mb-fix-sticky-header-and-flip-fallback 4a8a6db fix(session-manager): sticky manual header, standalone flip fallback rules
+mb-manual-one-long-page 3188782 feat(session-manager): field manual is one long page

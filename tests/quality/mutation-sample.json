@@ -1,0 +1,550 @@
+{
+  "max": 20,
+  "seed": 1,
+  "modules": [
+    {
+      "src": "src/main/lib/atomicFs.cjs",
+      "mutants": [
+        {
+          "id": "src/main/lib/atomicFs.cjs:33:37:true->false",
+          "line": 33,
+          "op": "true->false",
+          "killedBy": [
+            "src/main/lib/__tests__/atomicFs.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/atomicFs.cjs:39:11:if->if-not",
+          "line": 39,
+          "op": "if->if-not",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/atomicFs.cjs:42:11:if->if-not",
+          "line": 42,
+          "op": "if->if-not",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/atomicFs.cjs:55:34:true->false",
+          "line": 55,
+          "op": "true->false",
+          "killedBy": [
+            "src/main/lib/__tests__/atomicFs.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/atomicFs.cjs:61:11:if->if-not",
+          "line": 61,
+          "op": "if->if-not",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/atomicFs.cjs:64:11:if->if-not",
+          "line": 64,
+          "op": "if->if-not",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/atomicFs.cjs:75:52:true->false",
+          "line": 75,
+          "op": "true->false",
+          "killedBy": [
+            "src/main/lib/__tests__/atomicFs.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/atomicFs.cjs:91:9:if->if-not",
+          "line": 91,
+          "op": "if->if-not",
+          "killedBy": [
+            "src/main/lib/__tests__/atomicFs.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/atomicFs.cjs:91:20:===->!==",
+          "line": 91,
+          "op": "===->!==",
+          "killedBy": [
+            "src/main/lib/__tests__/atomicFs.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/atomicFs.cjs:101:9:if->if-not",
+          "line": 101,
+          "op": "if->if-not",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/atomicFs.cjs:101:20:===->!==",
+          "line": 101,
+          "op": "===->!==",
+          "killedBy": [],
+          "survived": true
+        }
+      ],
+      "tests": {
+        "src/main/lib/__tests__/atomicFs.test.cjs": {
+          "kills": 5,
+          "uniqueKills": 5
+        }
+      }
+    },
+    {
+      "src": "src/main/lib/epicMint.cjs",
+      "mutants": [
+        {
+          "id": "src/main/lib/epicMint.cjs:90:63:&&->||",
+          "line": 90,
+          "op": "&&->||",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:91:46:===->!==",
+          "line": 91,
+          "op": "===->!==",
+          "killedBy": [
+            "src/main/lib/__tests__/activeIndexRebuild.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:98:26:&&->||",
+          "line": 98,
+          "op": "&&->||",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:98:54:===->!==",
+          "line": 98,
+          "op": "===->!==",
+          "killedBy": [
+            "src/main/lib/__tests__/activeIndexRebuild.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:98:67:&&->||",
+          "line": 98,
+          "op": "&&->||",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:195:51:||->&&",
+          "line": 195,
+          "op": "||->&&",
+          "killedBy": [
+            "src/main/__tests__/epicMintTelemetryTap.test.cjs",
+            "src/main/lib/__tests__/activeIndexRebuild.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:229:26:!==->===",
+          "line": 229,
+          "op": "!==->===",
+          "killedBy": [
+            "src/main/__tests__/epicMintTelemetryTap.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:246:9:if->if-not",
+          "line": 246,
+          "op": "if->if-not",
+          "killedBy": [
+            "src/main/__tests__/epicMintTelemetryTap.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:246:24:&&->||",
+          "line": 246,
+          "op": "&&->||",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:248:11:if->if-not",
+          "line": 248,
+          "op": "if->if-not",
+          "killedBy": [
+            "src/main/__tests__/epicMintTelemetryTap.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:248:57:||->&&",
+          "line": 248,
+          "op": "||->&&",
+          "killedBy": [
+            "src/main/__tests__/epicMintTelemetryTap.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:248:77:===->!==",
+          "line": 248,
+          "op": "===->!==",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:281:16:!==->===",
+          "line": 281,
+          "op": "!==->===",
+          "killedBy": [
+            "src/main/__tests__/epicMintTelemetryTap.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:295:9:if->if-not",
+          "line": 295,
+          "op": "if->if-not",
+          "killedBy": [
+            "src/main/__tests__/epicMintTelemetryTap.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:339:24:===->!==",
+          "line": 339,
+          "op": "===->!==",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:339:37:&&->||",
+          "line": 339,
+          "op": "&&->||",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:340:38:&&->||",
+          "line": 340,
+          "op": "&&->||",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:366:46:||->&&",
+          "line": 366,
+          "op": "||->&&",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:384:39:true->false",
+          "line": 384,
+          "op": "true->false",
+          "killedBy": [
+            "src/main/__tests__/epicMintTelemetryTap.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/epicMint.cjs:386:39:true->false",
+          "line": 386,
+          "op": "true->false",
+          "killedBy": [
+            "src/main/__tests__/epicMintTelemetryTap.test.cjs"
+          ],
+          "survived": false
+        }
+      ],
+      "tests": {
+        "src/main/lib/__tests__/activeIndexRebuild.test.cjs": {
+          "kills": 3,
+          "uniqueKills": 2
+        },
+        "src/main/__tests__/epicMintTelemetryTap.test.cjs": {
+          "kills": 9,
+          "uniqueKills": 8
+        }
+      }
+    },
+    {
+      "src": "src/main/lib/opsOwnership.cjs",
+      "mutants": [
+        {
+          "id": "src/main/lib/opsOwnership.cjs:101:64:false->true",
+          "line": 101,
+          "op": "false->true",
+          "killedBy": [
+            "src/main/lib/__tests__/opsOwnership.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:107:7:if->if-not",
+          "line": 107,
+          "op": "if->if-not",
+          "killedBy": [
+            "src/main/__tests__/configWriteBoundaryOwners.test.cjs",
+            "src/main/__tests__/memoryAggregate.test.cjs",
+            "src/main/__tests__/opsErrorLog.test.cjs",
+            "src/main/lib/__tests__/cwdClassify.test.cjs",
+            "src/main/lib/__tests__/opsOwnership.test.cjs",
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:107:42:true->false",
+          "line": 107,
+          "op": "true->false",
+          "killedBy": [],
+          "survived": true
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:108:19:true->false",
+          "line": 108,
+          "op": "true->false",
+          "killedBy": [
+            "src/main/lib/__tests__/cwdClassify.test.cjs",
+            "src/main/lib/__tests__/opsOwnership.test.cjs",
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:115:60:===->!==",
+          "line": 115,
+          "op": "===->!==",
+          "killedBy": [
+            "src/main/lib/__tests__/opsOwnership.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:146:7:if->if-not",
+          "line": 146,
+          "op": "if->if-not",
+          "killedBy": [
+            "src/main/__tests__/configWriteBoundaryOwners.test.cjs",
+            "src/main/__tests__/memoryAggregate.test.cjs",
+            "src/main/__tests__/opsErrorLog.test.cjs",
+            "src/main/lib/__tests__/cwdClassify.test.cjs",
+            "src/main/lib/__tests__/opsOwnership.test.cjs",
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:155:7:if->if-not",
+          "line": 155,
+          "op": "if->if-not",
+          "killedBy": [
+            "src/main/__tests__/configWriteBoundaryOwners.test.cjs",
+            "src/main/__tests__/memoryAggregate.test.cjs",
+            "src/main/__tests__/opsErrorLog.test.cjs",
+            "src/main/lib/__tests__/cwdClassify.test.cjs",
+            "src/main/lib/__tests__/opsOwnership.test.cjs",
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:155:14:===->!==",
+          "line": 155,
+          "op": "===->!==",
+          "killedBy": [
+            "src/main/__tests__/configWriteBoundaryOwners.test.cjs",
+            "src/main/__tests__/memoryAggregate.test.cjs",
+            "src/main/__tests__/opsErrorLog.test.cjs",
+            "src/main/lib/__tests__/cwdClassify.test.cjs",
+            "src/main/lib/__tests__/opsOwnership.test.cjs",
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:156:62:true->false",
+          "line": 156,
+          "op": "true->false",
+          "killedBy": [
+            "src/main/lib/__tests__/opsOwnership.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:177:7:if->if-not",
+          "line": 177,
+          "op": "if->if-not",
+          "killedBy": [
+            "src/main/lib/__tests__/cwdClassify.test.cjs",
+            "src/main/lib/__tests__/opsOwnership.test.cjs",
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:185:9:if->if-not",
+          "line": 185,
+          "op": "if->if-not",
+          "killedBy": [
+            "src/main/__tests__/configWriteBoundaryOwners.test.cjs",
+            "src/main/__tests__/memoryAggregate.test.cjs",
+            "src/main/__tests__/opsErrorLog.test.cjs",
+            "src/main/lib/__tests__/cwdClassify.test.cjs",
+            "src/main/lib/__tests__/opsOwnership.test.cjs",
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:185:24:!==->===",
+          "line": 185,
+          "op": "!==->===",
+          "killedBy": [
+            "src/main/__tests__/configWriteBoundaryOwners.test.cjs",
+            "src/main/__tests__/memoryAggregate.test.cjs",
+            "src/main/__tests__/opsErrorLog.test.cjs",
+            "src/main/lib/__tests__/cwdClassify.test.cjs",
+            "src/main/lib/__tests__/opsOwnership.test.cjs",
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:189:24:true->false",
+          "line": 189,
+          "op": "true->false",
+          "killedBy": [
+            "src/main/lib/__tests__/opsOwnership.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:198:9:if->if-not",
+          "line": 198,
+          "op": "if->if-not",
+          "killedBy": [
+            "src/main/__tests__/configWriteBoundaryOwners.test.cjs",
+            "src/main/__tests__/memoryAggregate.test.cjs",
+            "src/main/__tests__/opsErrorLog.test.cjs",
+            "src/main/lib/__tests__/cwdClassify.test.cjs",
+            "src/main/lib/__tests__/opsOwnership.test.cjs",
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:206:9:if->if-not",
+          "line": 206,
+          "op": "if->if-not",
+          "killedBy": [
+            "src/main/__tests__/configWriteBoundaryOwners.test.cjs",
+            "src/main/__tests__/memoryAggregate.test.cjs",
+            "src/main/__tests__/opsErrorLog.test.cjs",
+            "src/main/lib/__tests__/cwdClassify.test.cjs",
+            "src/main/lib/__tests__/opsOwnership.test.cjs",
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:206:14:===->!==",
+          "line": 206,
+          "op": "===->!==",
+          "killedBy": [
+            "src/main/__tests__/configWriteBoundaryOwners.test.cjs",
+            "src/main/__tests__/memoryAggregate.test.cjs",
+            "src/main/__tests__/opsErrorLog.test.cjs",
+            "src/main/lib/__tests__/cwdClassify.test.cjs",
+            "src/main/lib/__tests__/opsOwnership.test.cjs",
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:255:12:||->&&",
+          "line": 255,
+          "op": "||->&&",
+          "killedBy": [
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:255:26:!==->===",
+          "line": 255,
+          "op": "!==->===",
+          "killedBy": [
+            "src/main/__tests__/configWriteBoundaryOwners.test.cjs",
+            "src/main/__tests__/memoryAggregate.test.cjs",
+            "src/main/__tests__/opsErrorLog.test.cjs",
+            "src/main/lib/__tests__/cwdClassify.test.cjs",
+            "src/main/lib/__tests__/opsOwnership.test.cjs",
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:259:32:&&->||",
+          "line": 259,
+          "op": "&&->||",
+          "killedBy": [
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        },
+        {
+          "id": "src/main/lib/opsOwnership.cjs:270:7:if->if-not",
+          "line": 270,
+          "op": "if->if-not",
+          "killedBy": [
+            "src/main/__tests__/configWriteBoundaryOwners.test.cjs",
+            "src/main/__tests__/memoryAggregate.test.cjs",
+            "src/main/__tests__/opsErrorLog.test.cjs",
+            "src/main/lib/__tests__/cwdClassify.test.cjs",
+            "src/main/lib/__tests__/opsOwnership.test.cjs",
+            "src/main/lib/__tests__/opsRootResolve.test.cjs"
+          ],
+          "survived": false
+        }
+      ],
+      "tests": {
+        "src/main/lib/__tests__/opsOwnership.test.cjs": {
+          "kills": 17,
+          "uniqueKills": 4
+        },
+        "src/main/__tests__/configWriteBoundaryOwners.test.cjs": {
+          "kills": 11,
+          "uniqueKills": 0
+        },
+        "src/main/__tests__/memoryAggregate.test.cjs": {
+          "kills": 11,
+          "uniqueKills": 0
+        },
+        "src/main/__tests__/opsErrorLog.test.cjs": {
+          "kills": 11,
+          "uniqueKills": 0
+        },
+        "src/main/lib/__tests__/cwdClassify.test.cjs": {
+          "kills": 13,
+          "uniqueKills": 0
+        },
+        "src/main/lib/__tests__/opsRootResolve.test.cjs": {
+          "kills": 15,
+          "uniqueKills": 2
+        }
+      }
+    }
+  ]
+}

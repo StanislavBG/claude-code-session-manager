@@ -4,3 +4,4 @@
 
 - f5c13fc feat(session-manager): page-turn helpers for the two-page landing
 - cb1b3a7 feat(session-manager): landing splits into a cover page and a parts-bin page
+- b2c7833 feat(session-manager): vertical page flip between the landing cover and parts bin

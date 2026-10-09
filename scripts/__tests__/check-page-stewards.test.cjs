@@ -65,6 +65,13 @@ test('missing persona not in PENDING is one violation; PENDING excuses it', () =
   expect(scan(root, { pages, pending: new Map([['alpha', 'r']]) })).toEqual([]);
 });
 
-test('PENDING holds the 18 nav keys', () => {
-  expect(PENDING.size).toBe(18);
+test('stale PENDING entry whose persona exists is one violation', () => {
+  write('page-alpha.md', persona());
+  const v = scan(root, { pages, pending: new Map([['alpha', 'x']]) });
+  expect(v).toHaveLength(1);
+  expect(v[0].message).toContain('remove it from PENDING');
+});
+
+test('PENDING holds exactly the 4 project-face keys', () => {
+  expect([...PENDING.keys()].sort()).toEqual(['memory', 'project-home', 'scheduler', 'terminal']);
 });

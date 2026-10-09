@@ -3,7 +3,8 @@
 
 // Every nav page has a steward subagent `.claude/agents/page-<key>.md`; the charter is
 // session-manager-operations/architecture/page-stewards.md. Ratchet: PENDING only excuses a
-// MISSING persona (an existing one is always validated) and may only shrink.
+// MISSING persona (an existing one is always validated and its PENDING entry is a violation),
+// so it may only shrink.
 // Complexity: O(pages + agent files) — one stat/read per page, one directory listing.
 
 const fs = require('fs')
@@ -15,11 +16,7 @@ const CHARTER = 'session-manager-operations/architecture/page-stewards.md'
 
 // page key -> reason its steward persona may still be absent.
 const PENDING = new Map(
-  [
-    'overview', 'project-home', 'terminal', 'projects', 'scheduler', 'history', 'system-prompt',
-    'skills', 'plugins', 'mcp', 'hooks', 'memory', 'permissions', 'settings', 'agent-library',
-    'tag-library', 'voice', 'data-model',
-  ].map((k) => [k, 'steward persona not yet created']),
+  ['project-home', 'terminal', 'scheduler', 'memory'].map((k) => [k, 'project-face steward not yet created']),
 )
 
 // Returns { fm: {key: value}, body } or null when the --- fence is not opened and closed.
@@ -68,6 +65,7 @@ function scan(root, { pages = listPages(root), pending = PENDING } = {}) {
       if (!pending.has(key)) violations.push({ file: rel, message: `${key}: missing steward persona ${rel}` })
       continue
     }
+    if (pending.has(key)) violations.push({ file: rel, message: `${key}: in PENDING but ${rel} exists — remove it from PENDING` })
     violations.push(...validate(key, rel, text))
   }
   let entries = []

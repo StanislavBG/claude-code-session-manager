@@ -11,6 +11,7 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | audit-ops-hygiene.cjs | manual; named in `ops-sweep` SKILL.md | yes |
 | bench/main-bench.cjs | `npm run bench` (main-process micro-benches, plain Node); renderer half is `npm run bench:renderer` (`tests/bench/`, `vitest.bench.config.ts`, not in `test:unit`) | no |
 | page-surface.cjs | manual and by the page steward personas `.claude/agents/page-*.md`; derives a page's owned/shared files, window.api methods, main handlers and tests | no |
+| check-page-stewards.cjs | `npm run lint:page-stewards` (in `lint`) — every nav page has a valid `.claude/agents/page-<key>.md` steward persona; ratchets PENDING | no |
 | check-conditional-hooks.cjs | `npm run lint:hooks` (in `lint`) | no |
 | check-epic-transcripts.cjs | manual read-only diagnostic (`--json`); also surfaced as a non-fatal warning in `npm run health` | no |
 | check-doc-hierarchy.cjs | `npm run lint:docs` (in `lint`) | no |

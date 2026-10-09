@@ -9,25 +9,21 @@ import { FileTree } from '../layout/FileTree'
 import { EditorView } from './EditorView'
 import { Tooltip } from '../ui/Tooltip'
 import { compactPath } from '../../lib/compactPath'
+import { readUiSettingsPrefs, writeUiSettingsPrefs, type UiSettingsPrefs } from '../../lib/uiSettingsPrefs'
+import { toast } from '../../state/toast'
 
-const SPLIT_KEY = 'sm.projects.splitPct'
+function saveLayoutPrefs(patch: UiSettingsPrefs): void {
+  writeUiSettingsPrefs(patch).catch(() => toast.error("Couldn't save File Explorer layout."))
+}
+
 const SPLIT_DEFAULT = 33
 const SPLIT_MIN = 20
 const SPLIT_MAX = 60
 
-const COLLAPSED_KEY = 'sm.projects.fileTreeCollapsed'
 const RAIL_WIDTH = 32
 
-function loadSplitPct(): number {
-  try {
-    const v = parseFloat(localStorage.getItem(SPLIT_KEY) ?? '')
-    if (Number.isFinite(v)) return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, v))
-  } catch { /* ignore */ }
-  return SPLIT_DEFAULT
-}
-
-function loadCollapsed(): boolean {
-  try { return localStorage.getItem(COLLAPSED_KEY) === '1' } catch { return false }
+function clampSplit(v: number): number {
+  return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, v))
 }
 
 function ProjectsWorkspaceComponent() {
@@ -47,16 +43,22 @@ function ProjectsWorkspaceComponent() {
   useEffect(() => {
     if (navFace !== 'home' || homeDir) return
     let cancelled = false
-    window.api.app.homeDir().then((dir) => { if (!cancelled) setHomeDir(dir) }).catch(() => {})
+    window.api.app.homeDir().then((dir) => { if (!cancelled) setHomeDir(dir) }).catch((err) => { console.warn('ProjectsWorkspace: app.homeDir() failed', err) })
     return () => { cancelled = true }
   }, [navFace, homeDir])
   const rootCwd = navFace === 'home' ? homeDir : (activeTab?.cwd ?? null)
 
-  const [pct, setPct] = useState<number>(() => loadSplitPct())
-  const [collapsed, setCollapsed] = useState<boolean>(() => loadCollapsed())
+  // Layout prefs live on disk (ui-settings-prefs.json). First paint uses the
+  // defaults; the saved values apply once the read resolves, unless the user
+  // has already touched the control in the meantime.
+  const [pct, setPct] = useState<number>(SPLIT_DEFAULT)
+  const [collapsed, setCollapsed] = useState<boolean>(false)
+  const layoutTouched = useRef(false)
   const [launcherOpen, setLauncherOpen] = useState(false)
   const pctRef = useRef(pct)
   pctRef.current = pct
+  const collapsedRef = useRef(collapsed)
+  collapsedRef.current = collapsed
   const containerRef = useRef<HTMLDivElement>(null)
   const launcherRef = useRef<HTMLDivElement>(null)
 
@@ -69,6 +71,18 @@ function ProjectsWorkspaceComponent() {
   const pinned = useProjectsPrefs((s) => s.pinned)
   const togglePin = useProjectsPrefs((s) => s.togglePin)
   useEffect(() => { void useProjectsPrefs.getState().hydrate() }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    void readUiSettingsPrefs().then((p) => {
+      if (cancelled || layoutTouched.current) return
+      if (typeof p.projectsSplitPct === 'number' && Number.isFinite(p.projectsSplitPct)) {
+        setPct(clampSplit(p.projectsSplitPct))
+      }
+      if (typeof p.projectsFileTreeCollapsed === 'boolean') setCollapsed(p.projectsFileTreeCollapsed)
+    })
+    return () => { cancelled = true }
+  }, [])
 
   const sortedRows = [...projects].sort((a, b) =>
     (pinned[b.cwd] ? 1 : 0) - (pinned[a.cwd] ? 1 : 0))
@@ -90,6 +104,7 @@ function ProjectsWorkspaceComponent() {
 
   const startResize = useCallback((e: React.PointerEvent) => {
     e.preventDefault()
+    layoutTouched.current = true
     const startX = e.clientX
     const startPct = pctRef.current
     let lastPct = startPct
@@ -98,7 +113,7 @@ function ProjectsWorkspaceComponent() {
       if (!container) return
       const rect = container.getBoundingClientRect()
       const delta = ev.clientX - startX
-      lastPct = Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, startPct + (delta / rect.width) * 100))
+      lastPct = clampSplit(startPct + (delta / rect.width) * 100)
       setPct(lastPct)
     }
     const onUp = () => {
@@ -106,7 +121,7 @@ function ProjectsWorkspaceComponent() {
       window.removeEventListener('pointerup', onUp)
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
-      try { localStorage.setItem(SPLIT_KEY, String(lastPct)) } catch { /* ignore */ }
+      saveLayoutPrefs({ projectsSplitPct: lastPct })
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
@@ -115,16 +130,16 @@ function ProjectsWorkspaceComponent() {
   }, [])
 
   const resetSplit = useCallback(() => {
+    layoutTouched.current = true
     setPct(SPLIT_DEFAULT)
-    try { localStorage.setItem(SPLIT_KEY, String(SPLIT_DEFAULT)) } catch { /* ignore */ }
+    saveLayoutPrefs({ projectsSplitPct: SPLIT_DEFAULT })
   }, [])
 
   const toggleCollapsed = useCallback(() => {
-    setCollapsed((v) => {
-      const next = !v
-      try { localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0') } catch { /* ignore */ }
-      return next
-    })
+    layoutTouched.current = true
+    const next = !collapsedRef.current
+    setCollapsed(next)
+    saveLayoutPrefs({ projectsFileTreeCollapsed: next })
   }, [])
 
   if (collapsed) {

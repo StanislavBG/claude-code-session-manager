@@ -36,6 +36,8 @@ export interface UiSettingsPrefs {
     budgetCapUsd?: number
   }
   fileTreeShowHidden?: boolean
+  projectsSplitPct?: number
+  projectsFileTreeCollapsed?: boolean
 }
 
 export const UI_SETTINGS_PREFS_FILE = '~/.claude/session-manager/ui-settings-prefs.json'

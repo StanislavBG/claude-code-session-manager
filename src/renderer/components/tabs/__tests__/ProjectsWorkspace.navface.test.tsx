@@ -40,12 +40,20 @@ vi.mock('../../../lib/useKnownProjects', () => ({
 
 let container: HTMLDivElement | null = null
 let root: Root | null = null
+let prefsFile: Record<string, unknown> = {}
+let writeJson: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   useSessions.setState({ tabs: [], activeTabId: null })
   useLayout.setState({ navFace: 'project' })
+  prefsFile = {}
+  writeJson = vi.fn().mockResolvedValue(undefined)
   ;(globalThis as any).window.api = {
     app: { homeDir: vi.fn().mockResolvedValue('/home/testuser') },
+    config: {
+      readJson: vi.fn(async () => ({ exists: true, data: prefsFile })),
+      writeJson,
+    },
   }
 })
 
@@ -103,5 +111,27 @@ describe('ProjectsWorkspace root folder by navFace', () => {
     const el = await mount(<ProjectsWorkspace />)
     const stub = el.querySelector('[data-testid="file-tree-stub"]')
     expect(stub?.getAttribute('data-cwd')).toBe('/home/testuser')
+  })
+})
+
+describe('ProjectsWorkspace layout prefs on disk', () => {
+  it('applies saved split width and collapsed state, and writes the toggle back', async () => {
+    prefsFile = { projectsSplitPct: 45, projectsFileTreeCollapsed: true }
+    useSessions.setState({
+      tabs: [{ id: 't1', cwd: '/home/testuser/p', label: 'p', status: 'running', pid: 1 } as any],
+      activeTabId: 't1',
+    })
+    const el = await mount(<ProjectsWorkspace />)
+    expect(el.querySelector('[data-testid="projects-file-tree-pane"]')).toBeNull()
+    await act(async () => {
+      ;(el.querySelector('[data-testid="projects-file-tree-rail-toggle"]') as HTMLElement).click()
+    })
+    await flushAsync()
+    const pane = el.querySelector('[data-testid="projects-file-tree-pane"]') as HTMLElement
+    expect(pane.style.width).toBe('45%')
+    expect(writeJson).toHaveBeenCalledWith(
+      expect.stringContaining('ui-settings-prefs.json'),
+      expect.objectContaining({ projectsFileTreeCollapsed: false }),
+    )
   })
 })

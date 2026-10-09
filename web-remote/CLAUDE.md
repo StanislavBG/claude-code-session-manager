@@ -25,7 +25,7 @@ Part of the **WEB PRESENCE** partition — see
   `~/Projects/Bilko/server/sm-relay/router.ts`, a different, diverged file.
 - Do **not** decommission, delete, or route around **the bilko.run relay itself** (the deployed
   service, not this dead folder) — root `CLAUDE.md`'s law: *"The bilko.run relay stays live —
-  desktop half of web remote removed 2026-08-06 (restore `b014cc2`)."* That law is about the
+  desktop bridge `src/main/webRemote.cjs`, UI Settings → Phone remote."* That law is about the
   running production relay, unaffected by anything in this folder.
 - Do not assume `~/Projects/Bilko` is in scope for changes made while working in this repo — it's
   a separate repo; see root `CLAUDE.md`'s Out-of-scope conventions for cross-repo boundaries.

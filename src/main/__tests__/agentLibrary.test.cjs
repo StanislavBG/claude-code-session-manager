@@ -212,6 +212,30 @@ test('savePersona without a seedVersion argument carries over an existing stamp'
   expect(text).toContain('New body.');
 });
 
+const base = { tools: [], model: 'inherit', color: '', validatePath: identityValidatePath, writeTextAtomic: fakeWriteTextAtomic };
+
+test('savePersona re-save without title/projects/action/actionLabel keeps the existing values', async () => {
+  const globalDir = await mkTmp('sm-agent-library-carry-');
+  await savePersona({ ...base, name: 'carry-agent', description: 'd', body: 'B.', globalDir, title: 'My Title', projects: ['/a/b', '*'], action: 'Do: the "thing"', actionLabel: 'Go' });
+  await savePersona({ ...base, name: 'carry-agent', description: 'd2', body: 'B2.', globalDir });
+  const [p] = (await listPersonas({ globalDir, loadSessions: async () => ({ tabs: [] }), validatePath: identityValidatePath })).filter((x) => x.name === 'carry-agent');
+  expect(p.title).toBe('My Title');
+  expect(p.projects).toEqual(['/a/b', '*']);
+  expect(p.action).toBe('Do: the "thing"');
+  expect(p.actionLabel).toBe('Go');
+});
+
+test('savePersona with an explicit empty projects array clears projects; explicit values win', async () => {
+  const globalDir = await mkTmp('sm-agent-library-carry-clear-');
+  await savePersona({ ...base, name: 'clear-agent', description: 'd', body: 'B.', globalDir, title: 'T', projects: ['/a'], action: 'A', actionLabel: 'L' });
+  await savePersona({ ...base, name: 'clear-agent', description: 'd', body: 'B.', globalDir, projects: [], title: 'T2' });
+  const text = await fsp.readFile(path.join(globalDir, 'clear-agent.md'), 'utf8');
+  expect(text).not.toContain('projects:');
+  expect(text).toContain('title: T2');
+  expect(text).toContain('action: A');
+  expect(text).toContain('actionLabel: L');
+});
+
 test('savePersona for a brand-new persona writes no seedVersion line', async () => {
   const globalDir = await mkTmp('sm-agent-library-seedversion-new-');
   await savePersona({

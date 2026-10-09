@@ -163,19 +163,30 @@ async function savePersona({
     return saveOverlay({ name, projectName, model, effort, loadSessions, validatePath, writeTextAtomic });
   }
   const target = validatePath(path.join(globalDir, `${name}.md`));
-  // The Agent Library editor's form has no `seedVersion` field, so a save
-  // through it never passes one explicitly — carry over whatever stamp the
-  // existing file already has rather than silently erasing it. An explicit
-  // `seedVersion` argument (e.g. the seeder's own future callers) still wins.
+  // A caller that omits seedVersion/title/projects/action/actionLabel (the
+  // Agent Library form has no seedVersion field) must not erase what the
+  // existing file holds — carry each undefined one over. An explicit value,
+  // including `projects: []`, still wins. `effort` is deliberately not
+  // carried: omitted means "write no effort line".
   let resolvedSeedVersion = seedVersion;
-  if (resolvedSeedVersion === undefined) {
+  let resolvedTitle = title;
+  let resolvedProjects = projects;
+  let resolvedAction = action;
+  let resolvedActionLabel = actionLabel;
+  if ([seedVersion, title, projects, action, actionLabel].some((v) => v === undefined)) {
     try {
-      const existing = splitFrontmatter(fsSync.readFileSync(target, 'utf8'));
-      const existingVersion = Number(existing.fm.seedVersion);
-      if (Number.isFinite(existingVersion)) resolvedSeedVersion = existingVersion;
+      const { fm } = splitFrontmatter(fsSync.readFileSync(target, 'utf8'));
+      if (resolvedSeedVersion === undefined) {
+        const existingVersion = Number(fm.seedVersion);
+        if (Number.isFinite(existingVersion)) resolvedSeedVersion = existingVersion;
+      }
+      if (resolvedTitle === undefined && fm.title) resolvedTitle = fm.title;
+      if (resolvedProjects === undefined && fm.projects) resolvedProjects = parseTools(fm.projects);
+      if (resolvedAction === undefined && fm.action) resolvedAction = decodeLine(fm.action);
+      if (resolvedActionLabel === undefined && fm.actionLabel) resolvedActionLabel = decodeLine(fm.actionLabel);
     } catch { /* no existing file (or unreadable) — nothing to carry over */ }
   }
-  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion: resolvedSeedVersion, body });
+  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, body });
   await writeTextAtomic(target, text);
   if (originalName && originalName !== name) {
     const oldReal = validatePath(path.join(globalDir, `${originalName}.md`));

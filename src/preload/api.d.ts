@@ -317,12 +317,13 @@ export interface AgentPersonaSaveInput {
   effort?: string;
   color: string;
   tags: AgentPersonaTag[];
-  /** Project cwds (or the `'*'` sentinel) this persona's Action button appears in. */
+  /** Project cwds (or the `'*'` sentinel) this persona's Action button appears in. Omit to keep the existing file's value; `[]` clears it. */
   projects?: string[];
-  /** Opening instruction sent by this persona's Action button. */
+  /** Opening instruction sent by this persona's Action button. Omit to keep the existing file's value. */
   action?: string;
-  /** Caption override for this persona's Action button. */
+  /** Caption override for this persona's Action button. Omit to keep the existing file's value. */
   actionLabel?: string;
+  /** Omit to keep the existing file's value. */
   title?: string;
   /** Open project name: write that project's frontmatter-only override (only `model`/`effort` are used) instead of the global file. */
   projectName?: string;

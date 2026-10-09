@@ -9,6 +9,7 @@ import { FileTree } from '../layout/FileTree'
 import { EditorView } from './EditorView'
 import { Tooltip } from '../ui/Tooltip'
 import { compactPath } from '../../lib/compactPath'
+import { useHomeDir } from '../../lib/useHomeDir'
 import { readUiSettingsPrefs, writeUiSettingsPrefs, type UiSettingsPrefs } from '../../lib/uiSettingsPrefs'
 import { toast } from '../../state/toast'
 
@@ -39,13 +40,7 @@ function ProjectsWorkspaceComponent() {
   // File Explorer from the Home sidebar never depends on (or implies) a
   // selected project.
   const navFace = useLayout((s) => s.navFace)
-  const [homeDir, setHomeDir] = useState<string | null>(null)
-  useEffect(() => {
-    if (navFace !== 'home' || homeDir) return
-    let cancelled = false
-    window.api.app.homeDir().then((dir) => { if (!cancelled) setHomeDir(dir) }).catch((err) => { console.warn('ProjectsWorkspace: app.homeDir() failed', err) })
-    return () => { cancelled = true }
-  }, [navFace, homeDir])
+  const homeDir = useHomeDir()
   const rootCwd = navFace === 'home' ? homeDir : (activeTab?.cwd ?? null)
 
   // Layout prefs live on disk (ui-settings-prefs.json). First paint uses the
@@ -179,7 +174,7 @@ function ProjectsWorkspaceComponent() {
             className="flex-1 min-w-0 px-3 py-1.5 text-[11.5px] text-fg-dim font-mono flex items-center gap-1 hover:bg-bg-hi transition-colors"
           >
             <span className="flex-1 truncate text-left">
-              {rootCwd ? compactPath(rootCwd) : 'Projects'}
+              {rootCwd ? compactPath(rootCwd, homeDir) : 'Projects'}
             </span>
             <span className="text-fg-faint shrink-0 text-[10px]">{launcherOpen ? '▲' : '▼'}</span>
           </button>
@@ -200,7 +195,7 @@ function ProjectsWorkspaceComponent() {
                 <div className="px-3 py-2 text-[11.5px] text-fg-faint">No projects found.</div>
               ) : (
                 sortedRows.map((row) => {
-                  const label = compactPath(row.cwd)
+                  const label = compactPath(row.cwd, homeDir)
                   return (
                     <div key={row.cwd} data-testid="projects-launcher-row" className="flex items-center gap-1 px-2 py-1 hover:bg-bg-hi group">
                       <Tooltip content={pinned[row.cwd] ? 'Unpin' : 'Pin to top'}>
@@ -240,7 +235,7 @@ function ProjectsWorkspaceComponent() {
         {rootCwd ? (
           <>
             <div className="px-3 py-2 border-b border-line text-[11.5px] text-fg-faint font-mono truncate shrink-0" title={rootCwd}>
-              {compactPath(rootCwd)}
+              {compactPath(rootCwd, homeDir)}
             </div>
             <div className="flex-1 min-h-0 overflow-auto">
               <FileTree cwd={rootCwd} activeTabId={activeTab?.id ?? null} onPreviewFile={openInline} />

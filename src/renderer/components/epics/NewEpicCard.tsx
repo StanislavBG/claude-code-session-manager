@@ -3,6 +3,7 @@ import { usePromptSessions, type PromptSession } from '../../state/promptSession
 import { useSessions } from '../../state/sessions'
 import { useKnownProjects } from '../../lib/useKnownProjects'
 import { compactPath } from '../../lib/compactPath'
+import { useHomeDir } from '../../lib/useHomeDir'
 import { resolveEpicProject } from '../../lib/epicProjectScope'
 import { AttachButton, AttachTray, attachPastedFiles, resolveAttachmentPaths, useAttachments } from './attachments'
 import { composeEpicIntake } from '../../lib/epicIntake'
@@ -170,6 +171,7 @@ export function NewEpicCard({
     setEffortOverride('')
   }, [agentName])
   const [home, setHome] = useState<string | null>(null)
+  const cachedHome = useHomeDir()
   const [board, setBoard] = useState<GroundingGroup[] | null>(null)
   // "Can this project actually delegate?" (delegation-readiness-probe) —
   // re-fetched whenever effectiveCwd changes, never polled on an interval.
@@ -517,7 +519,7 @@ export function NewEpicCard({
                 >
                   {knownCwds.length === 0 && <option value="">No known projects</option>}
                   {knownCwds.map((c) => (
-                    <option key={c} value={c}>{compactPath(c)}</option>
+                    <option key={c} value={c}>{compactPath(c, cachedHome)}</option>
                   ))}
                 </select>
               </label>
@@ -697,7 +699,7 @@ export function NewEpicCard({
                   className="mb-2.5 flex items-center gap-1.5 font-mono text-[11px] text-fg-faint"
                 >
                   <span className="uppercase tracking-[0.09em]">Project</span>
-                  <span className="text-fg-dim">{compactPath(effectiveCwd)}</span>
+                  <span className="text-fg-dim">{compactPath(effectiveCwd, cachedHome)}</span>
                 </div>
               )}
               <div className="flex flex-wrap items-center gap-1.5">

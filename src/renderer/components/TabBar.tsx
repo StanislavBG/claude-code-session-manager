@@ -5,12 +5,16 @@ import { useLayout } from '../state/layout'
 import { AlmanacIcon } from './layout/AlmanacIcon'
 import { useTabDragReorder } from './useTabDragReorder'
 import { useDocumentVisible } from '../lib/useDocumentVisible'
+import { useCustomerFeedback, unseenStatusCount } from '../state/customerFeedback'
+import { CustomerFeedbackPanel } from './customerFeedback/CustomerFeedbackPanel'
 
 /**
  * TabBar — the TOP information bar.
  *
  * Deliberately limited to navigation only: the machine "Home" pill plus one
- * tab per open project (TAB = cwd = Main Project). It used to also carry an
+ * tab per open project (TAB = cwd = Main Project). The one deliberate
+ * non-navigation entry point is the far-right "{F}" feedback button — a user
+ * action (send feedback), not status. It used to also carry an
  * app-name + version block on the right, which duplicated the version already
  * shown in AlmanacFooter and made the strip do two jobs; app identity lives in
  * the native window title and the footer's version chip. Don't re-add branding,
@@ -49,6 +53,16 @@ export function TabBar() {
   // stays lit for the whole Home browsing session instead of only on the
   // literal Overview screen.
   const machineHomeActive = useLayout((s) => s.navFace === 'home')
+  const feedbackItems = useCustomerFeedback((s) => s.items)
+  const feedbackPanelOpen = useCustomerFeedback((s) => s.panelOpen)
+  const togglePanel = useCustomerFeedback((s) => s.togglePanel)
+  const loadFeedback = useCustomerFeedback((s) => s.load)
+  const feedbackUnseen = unseenStatusCount(feedbackItems) > 0
+
+  // Load once on mount so the unseen dot works before the panel is ever opened.
+  useEffect(() => {
+    void loadFeedback()
+  }, [loadFeedback])
 
   // Re-render the badge layer once a second so the 30s activity window can
   // expire on its own — lastLineAt itself doesn't change when no new line
@@ -172,6 +186,24 @@ export function TabBar() {
           )
         })}
       </div>
+      <span className="w-px self-stretch my-1.5 bg-line" />
+      <button
+        onClick={togglePanel}
+        title="Send feedback"
+        aria-label="Send feedback"
+        aria-expanded={feedbackPanelOpen}
+        data-testid="tabbar-customer-feedback"
+        className="relative flex items-center px-3.5 py-1.5 mb-1 rounded-full text-[13px] font-mono shrink-0 transition-colors text-fg-dim hover:text-fg hover:bg-bg-hi/40"
+      >
+        {'{F}'}
+        {feedbackUnseen && (
+          <span
+            className="absolute top-1 right-1.5 w-1.5 h-1.5 rounded-full bg-accent"
+            data-testid="customer-feedback-unseen-dot"
+          />
+        )}
+      </button>
+      <CustomerFeedbackPanel />
     </div>
   )
 }

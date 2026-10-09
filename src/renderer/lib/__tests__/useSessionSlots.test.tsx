@@ -146,10 +146,26 @@ describe('setSessionSlots — single write path', () => {
     expect(setSlots).toHaveBeenCalledWith(10)
   })
 
-  it('applies no clamp when no snapshot is cached yet', async () => {
+  it('fetches a snapshot first when none is cached, then clamps to its bounds', async () => {
+    const { sessionSlots, setSlots } = installWriteMock()
+    sessionSlots.mockResolvedValue({
+      total: 2, inUse: 0, holders: [], min: 1, max: 4, default: 2, envOverride: false,
+    })
+    await setSessionSlots(9)
+    expect(setSlots).toHaveBeenCalledWith(4)
+  })
+
+  it('clamps to the IPC schema bounds [0, 10] when the fallback poll fails', async () => {
+    const { sessionSlots, setSlots } = installWriteMock()
+    sessionSlots.mockRejectedValue(new Error('no snapshot'))
+    await setSessionSlots(25)
+    expect(setSlots).toHaveBeenCalledWith(10)
+  })
+
+  it('rounds non-integer input before clamping', async () => {
     const { setSlots } = installWriteMock()
-    await setSessionSlots(99)
-    expect(setSlots).toHaveBeenCalledWith(99)
+    await setSessionSlots(2.6)
+    expect(setSlots).toHaveBeenCalledWith(3)
   })
 
   it('re-polls sessionSlots() after a successful set', async () => {

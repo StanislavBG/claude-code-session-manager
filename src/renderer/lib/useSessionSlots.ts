@@ -39,9 +39,18 @@ async function pollOnce(): Promise<void> {
   }
 }
 
-// The single write path for the machine-wide slot count: clamps to the snapshot's own bounds, re-polls, re-throws.
+// Last-resort bounds when no snapshot can be fetched; mirrors `setSessionSlotsSchema`
+// (cap 0..10) in src/main/ipcSchemas.cjs.
+const SLOTS_SCHEMA_MIN = 0
+const SLOTS_SCHEMA_MAX = 10
+
+// The single write path for the machine-wide slot count: rounds, clamps to the snapshot's own bounds
+// (fetching one first if uncached), re-polls, re-throws.
 export async function setSessionSlots(n: number): Promise<void> {
-  const clamped = snapshot ? Math.min(snapshot.max, Math.max(snapshot.min, n)) : n
+  if (!snapshot) await pollOnce()
+  const min = snapshot ? snapshot.min : SLOTS_SCHEMA_MIN
+  const max = snapshot ? snapshot.max : SLOTS_SCHEMA_MAX
+  const clamped = Math.min(max, Math.max(min, Math.round(n)))
   await window.api.schedule.setSessionSlots(clamped)
   await pollOnce()
 }

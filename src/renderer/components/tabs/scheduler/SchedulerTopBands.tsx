@@ -137,7 +137,16 @@ const BTN = 'px-2.5 py-1.5 rounded border border-line text-[12.5px] font-medium 
 
 // ─── Alerts — pause reason + circuit-breaker banners (full-bleed strips) ────
 
-function pauseMessage(reason: string, resumeAt: string | null, now: number): string {
+type PauseBy = { originClaudeSessionId: string | null; cwd: string | null; reason: string | null } | null | undefined
+
+function pauseMessage(reason: string, resumeAt: string | null, now: number, by?: PauseBy): string {
+  if (reason === 'agent') {
+    const project = by?.cwd?.split('/').filter(Boolean).pop() || 'another session'
+    const why = by?.reason ? ` — "${by.reason}"` : ''
+    const remaining = resumeAt ? new Date(resumeAt).getTime() - now : null
+    const eta = remaining == null ? '' : remaining > 0 ? ` — auto-resumes in ${formatRelative(remaining)}` : ' — auto-resume pending'
+    return `Paused by an agent in ${project}${why}${eta}. Click Resume to restart now.`
+  }
   if (reason === 'auth') return 'Scheduler paused: Claude sign-in expired or invalid. Restart the app or re-run `claude login`, then Resume.'
   if (reason === 'rate_limit') {
     if (resumeAt) {
@@ -166,7 +175,7 @@ function SchedulerAlerts({ now }: { now: number }) {
     <>
       {paused && (
         <div data-testid="pause-banner" className={`${strip} ${isErrorPause ? red : amber}`}>
-          <span className="flex-1 leading-snug">{pauseMessage(paused.reason, paused.resumeAt, now)}</span>
+          <span className="flex-1 leading-snug">{pauseMessage(paused.reason, paused.resumeAt, now, paused.by)}</span>
           <button type="button" onClick={() => window.api.schedule.resume()} className={btn}>Resume</button>
         </div>
       )}

@@ -213,6 +213,17 @@ contextBridge.exposeInMainWorld('api', {
     recentRecords: () => ipcRenderer.invoke('telemetry:recent-records'),
     flushNow: () => ipcRenderer.invoke('telemetry:flush-now'),
   },
+  customerFeedback: {
+    submit: (p) => ipcRenderer.invoke('customerFeedback:submit', p),
+    list: () => ipcRenderer.invoke('customerFeedback:list'),
+    refreshStatus: () => ipcRenderer.invoke('customerFeedback:refresh-status'),
+    markSeen: (p) => ipcRenderer.invoke('customerFeedback:mark-seen', p),
+    ownerInfo: () => ipcRenderer.invoke('customerFeedback:owner-info'),
+    inboxPull: () => ipcRenderer.invoke('customerFeedback:inbox-pull'),
+    inboxList: (p) => ipcRenderer.invoke('customerFeedback:inbox-list', p),
+    inboxSetStatus: (p) => ipcRenderer.invoke('customerFeedback:inbox-set-status', p),
+    inboxLinkEpic: (p) => ipcRenderer.invoke('customerFeedback:inbox-link-epic', p),
+  },
   // Diagnostic only — no handler is registered unless the main process was
   // launched with SM_HEAP_SNAPSHOT=1, so this rejects by default.
   diagnostics: {

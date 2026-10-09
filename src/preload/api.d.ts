@@ -474,6 +474,44 @@ export interface OtelSetConfigResult {
   status: OtelStatus;
 }
 
+// Customer feedback — client submissions + owner inbox. Shapes mirror
+// src/main/lib/customerFeedbackClient.cjs and customerFeedbackInbox.cjs.
+export type CustomerFeedbackTag = 'bug' | 'feature' | 'discussion';
+export type CustomerFeedbackStatus = 'open' | 'in_progress' | 'resolved' | 'wontfix';
+
+export interface CustomerFeedbackItem {
+  id: string;
+  receipt: string | null;
+  tag: CustomerFeedbackTag;
+  title: string;
+  body: string;
+  submittedAt: number;
+  status: CustomerFeedbackStatus;
+  statusNote: string | null;
+  statusAt: number | string | null;
+  seenStatusAt: number | string | null;
+}
+
+export interface CustomerFeedbackInboxItem {
+  id: string;
+  receivedAt: string | number | null;
+  tag: CustomerFeedbackTag;
+  title: string;
+  body: string;
+  clientVersion: string | null;
+  clientPlatform: string | null;
+  moderation: string | null;
+  status: CustomerFeedbackStatus;
+  statusNote: string | null;
+  statusAt: string | number | null;
+  epicId: string | null;
+}
+
+export interface CustomerFeedbackOwnerInfo {
+  ownerMode: boolean;
+  projectCwd: string | null;
+}
+
 // Product telemetry (bilko.run) — anonymous, on-by-default, opt-out. See
 // session-manager-operations/architecture/telemetry.md for the data model.
 export interface TelemetryConfig {
@@ -1765,6 +1803,30 @@ export interface SessionManagerAPI {
     setConfig: (cfg: OtelConfig) => Promise<OtelSetConfigResult>;
     status: () => Promise<OtelStatus>;
     configPath: () => Promise<string>;
+  };
+  customerFeedback: {
+    submit: (p: { title: string; body: string; tag: CustomerFeedbackTag }) => Promise<
+      { ok: true; item: CustomerFeedbackItem } | { ok: false; error: string }
+    >;
+    list: () => Promise<CustomerFeedbackItem[]>;
+    refreshStatus: () => Promise<
+      { ok: true; updated: number; unsupported?: true } | { ok: false; error: string }
+    >;
+    /** Omit `ids` to mark everything seen. Resolves to the updated items. */
+    markSeen: (p: { ids?: string[] }) => Promise<CustomerFeedbackItem[]>;
+    ownerInfo: () => Promise<CustomerFeedbackOwnerInfo>;
+    inboxPull: () => Promise<
+      { ok: true; fetched: number; pages: number } | { ok: false; error: string }
+    >;
+    inboxList: (p: { includeHidden?: boolean }) => Promise<
+      { ok: true; items: CustomerFeedbackInboxItem[] } | { ok: false; error: string }
+    >;
+    inboxSetStatus: (p: { id: string; status: CustomerFeedbackStatus; note?: string }) => Promise<
+      { ok: true; item: CustomerFeedbackInboxItem | null } | { ok: false; error: string }
+    >;
+    inboxLinkEpic: (p: { id: string; epicId: string }) => Promise<
+      { ok: true } | { ok: false; error: string }
+    >;
   };
   telemetry: {
     getConfig: () => Promise<TelemetryConfig>;

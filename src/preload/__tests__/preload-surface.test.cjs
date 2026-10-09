@@ -66,3 +66,28 @@ test('schedule.resetJob sends cwd only when given', async () => {
   assert.deepStrictEqual(calls[0].payload, { slug: 'my-slug' });
   assert.deepStrictEqual(calls[1].payload, { slug: 'my-slug', cwd: '/tmp/proj' });
 });
+
+test('customerFeedback exposes nine methods wired to customerFeedback:* channels', async () => {
+  const expected = {
+    submit: 'customerFeedback:submit',
+    list: 'customerFeedback:list',
+    refreshStatus: 'customerFeedback:refresh-status',
+    markSeen: 'customerFeedback:mark-seen',
+    ownerInfo: 'customerFeedback:owner-info',
+    inboxPull: 'customerFeedback:inbox-pull',
+    inboxList: 'customerFeedback:inbox-list',
+    inboxSetStatus: 'customerFeedback:inbox-set-status',
+    inboxLinkEpic: 'customerFeedback:inbox-link-epic',
+  };
+  assert.deepStrictEqual(Object.keys(exposedApi.customerFeedback).sort(), Object.keys(expected).sort());
+  for (const [method, channel] of Object.entries(expected)) {
+    invokeCalls.length = 0;
+    const payload = { probe: method };
+    await exposedApi.customerFeedback[method](payload);
+    assert.strictEqual(invokeCalls.length, 1);
+    assert.strictEqual(invokeCalls[0].channel, channel);
+  }
+  invokeCalls.length = 0;
+  await exposedApi.customerFeedback.submit({ title: 't', body: 'b', tag: 'bug' });
+  assert.deepStrictEqual(invokeCalls[0].payload, { title: 't', body: 'b', tag: 'bug' });
+});

@@ -74,6 +74,18 @@ export function LiveTranscript() {
               <SubmitCountdown />
             </div>
           )}
+          {isRecording && (
+            <button
+              type="button"
+              data-testid="live-transcript-stop"
+              aria-label="Stop microphone"
+              title="Stop microphone"
+              onClick={() => useVoice.getState().stopRecording()}
+              className="shrink-0 pointer-events-auto rounded px-1.5 text-base leading-none text-fg-dim hover:text-fg"
+            >
+              ×
+            </button>
+          )}
         </div>
       </div>
     </div>

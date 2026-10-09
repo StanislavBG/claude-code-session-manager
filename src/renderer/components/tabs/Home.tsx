@@ -30,9 +30,8 @@ import { useLayout } from '../../state/layout'
 import { usePromptSessions } from '../../state/promptSessions'
 import { useChat } from '../../state/chat'
 import { useChatSignals } from '../../lib/useChatSignals'
-import { useHomeDir } from '../../lib/useHomeDir'
 import { shellQuote } from '../../lib/presets'
-import { candidatePath, useKnownProjects } from '../../lib/useKnownProjects'
+import { candidatePath, useKnownProjects, type RecentRow } from '../../lib/useKnownProjects'
 import { buildHomeProjectRows, type HomeProjectRow } from '../../lib/homeProjectRows'
 import { projectNameFromCwd } from '../../lib/knownProjectAggregate'
 import { activeSessionRows, recentSessionEpicTitle, type ActiveSessionRow } from '../../lib/homeSessionRows'
@@ -54,7 +53,7 @@ import { formatEffortSegment } from '../../lib/effectiveModelInfo'
 import { ERD_ENTITIES } from '../../lib/dataModelErd'
 import { ticketTagTone } from '../../lib/ticketDisplay'
 import { toast } from '../../state/toast'
-import type { DirEntry, ScheduleJob } from '../../../preload/api'
+import type { ScheduleJob } from '../../../preload/api'
 
 const EMPTY_JOBS: ScheduleJob[] = []
 
@@ -756,58 +755,11 @@ function useHydrateKnownEpics(): void {
 // ────────────────────────────────────────────────────────────────────
 // Recent sessions
 // ────────────────────────────────────────────────────────────────────
-interface RecentRow {
-  sessionId: string
-  projectEncoded: string
-  path: string
-  mtimeMs: number
-  sizeBytes: number
-}
-
-function useRecentSessions(limit = 4): { rows: RecentRow[]; loading: boolean } {
-  const home = useHomeDir()
-  const [rows, setRows] = useState<RecentRow[]>([])
-  const [loading, setLoading] = useState(true)
-  useEffect(() => {
-    if (!home) return
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      try {
-        const projects = await window.api.config.listDir(`${home}/.claude/projects`, { dirsOnly: true })
-        const all: RecentRow[] = []
-        for (const proj of projects.entries as DirEntry[]) {
-          if (cancelled) return
-          const files = await window.api.config.listDir(proj.path, { filesOnly: true })
-          for (const f of files.entries as DirEntry[]) {
-            if (!f.name.endsWith('.jsonl')) continue
-            all.push({
-              sessionId: f.name.replace(/\.jsonl$/, ''),
-              projectEncoded: proj.name,
-              path: f.path,
-              mtimeMs: f.mtimeMs,
-              sizeBytes: f.size,
-            })
-          }
-        }
-        all.sort((a, b) => b.mtimeMs - a.mtimeMs)
-        if (!cancelled) setRows(all.slice(0, limit))
-      } catch (e) {
-        console.error('[Home] recent-sessions scan failed:', e)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [home, limit])
-  return { rows, loading }
-}
-
 const RECENT_SESSIONS_GRID = '92px minmax(0,1.2fr) minmax(0,1fr) 80px 74px 78px'
 
 export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
-  const { rows, loading } = useRecentSessions(5)
-  const { projects } = useKnownProjects()
+  const { projects, recentSessions, loading } = useKnownProjects()
+  const rows = recentSessions.slice(0, 5)
   const addTab = useSessions((s) => s.addTab)
   const sessions = usePromptSessions((s) => s.sessions)
   const [drawerRow, setDrawerRow] = useState<RecentRow | null>(null)

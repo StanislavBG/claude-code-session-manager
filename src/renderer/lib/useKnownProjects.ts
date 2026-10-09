@@ -14,6 +14,17 @@ export interface ProjectRow {
   sizeBytes: number
 }
 
+export interface RecentRow {
+  sessionId: string
+  projectEncoded: string
+  path: string
+  mtimeMs: number
+  sizeBytes: number
+}
+
+/** How many newest transcripts the scan keeps for the Dashboard's Recent sessions. */
+export const RECENT_SESSIONS_KEEP = 20
+
 export interface EnrichmentState extends ProjectDetails {
   cwd: string | null
 }
@@ -61,6 +72,8 @@ export async function resolveProjectCwd(projectFolder: string): Promise<string |
 // Mirrors useHomeDir.ts's cached-singleton-with-subscribers shape.
 interface KnownProjectsState {
   rows: ProjectRow[]
+  /** Newest transcripts across every folder, taken from the scan's own listings. */
+  recentSessions: RecentRow[]
   enriched: Record<string, EnrichmentState>
   loading: boolean
   /**
@@ -71,7 +84,7 @@ interface KnownProjectsState {
   resolving: boolean
 }
 
-let state: KnownProjectsState = { rows: [], enriched: {}, loading: true, resolving: true }
+let state: KnownProjectsState = { rows: [], recentSessions: [], enriched: {}, loading: true, resolving: true }
 const subscribers = new Set<() => void>()
 let scannedForHome: string | null = null
 let scanToken = 0
@@ -108,9 +121,19 @@ async function runScan(home: string): Promise<void> {
     const r = await window.api.config.listDir(`${home}/.claude/projects`, { dirsOnly: true })
     if (token !== scanToken) return
     const entries = r.entries as DirEntry[]
+    const recent: RecentRow[] = []
     const next = await mapWithConcurrency(entries, SCAN_CONCURRENCY, async (e): Promise<ProjectRow> => {
       const files = await window.api.config.listDir(e.path, { filesOnly: true })
       const jsonl = (files.entries as DirEntry[]).filter((f) => f.name.endsWith('.jsonl'))
+      for (const f of jsonl) {
+        recent.push({
+          sessionId: f.name.replace(/\.jsonl$/, ''),
+          projectEncoded: e.name,
+          path: f.path,
+          mtimeMs: f.mtimeMs,
+          sizeBytes: f.size,
+        })
+      }
       const lastSession = jsonl.reduce((m, f) => Math.max(m, f.mtimeMs), 0)
       const sizeBytes = jsonl.reduce((s, f) => s + f.size, 0)
       return {
@@ -124,7 +147,14 @@ async function runScan(home: string): Promise<void> {
     })
     if (token !== scanToken) return
     next.sort((a, b) => b.lastSession - a.lastSession)
-    setState({ rows: next, enriched: {}, loading: false, resolving: true })
+    recent.sort((a, b) => b.mtimeMs - a.mtimeMs)
+    setState({
+      rows: next,
+      recentSessions: recent.slice(0, RECENT_SESSIONS_KEEP),
+      enriched: {},
+      loading: false,
+      resolving: true,
+    })
     void runEnrichment(next, token)
   } catch (err) {
     console.error('[useKnownProjects] scan failed:', err)
@@ -199,7 +229,7 @@ export function useKnownProjects() {
     void runScan(home)
   }, [home])
 
-  const { rows, enriched, loading, resolving } = state
+  const { rows, recentSessions, enriched, loading, resolving } = state
 
   // One row per unique cwd — the app's project identity. Every "list the
   // projects" surface consumes THIS, not `rows` (which is one entry per
@@ -263,5 +293,5 @@ export function useKnownProjects() {
     return last
   }
 
-  return { rows, enriched, projects, loading, resolving, openProject, openInSession, archiveProject, archiveProjectByCwd }
+  return { rows, recentSessions, enriched, projects, loading, resolving, openProject, openInSession, archiveProject, archiveProjectByCwd }
 }

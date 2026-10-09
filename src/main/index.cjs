@@ -95,6 +95,7 @@ chatRunner.registerAdminRoute(adminHttp);
 // several projects' operations roots open, so it performs the cross-folder
 // write (lib/crossProjectFeedback.cjs).
 crossProjectFeedback.registerAdminRoute(adminHttp);
+require('./lib/customerFeedbackAdminRoutes.cjs').registerAdminRoute(adminHttp);
 const supervisor = require('./supervisor.cjs');
 const watchers = require('./watchers.cjs');
 const queueOps = require('./queueOps.cjs');

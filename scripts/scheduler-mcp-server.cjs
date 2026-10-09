@@ -16,6 +16,8 @@
  *
  *   macro_list({ cwd? }) -> GET  /admin/macros?cwd=<encoded>
  *   macro_save({ cwd?, id?, label, agentName, tag, prompt }) -> POST /admin/macros/save
+ *   customer_feedback_list({ pull?, includeHidden? }) -> GET  /admin/customer-feedback/inbox
+ *   customer_feedback_set_status({ id, status, note? }) -> POST /admin/customer-feedback/status
  *
  * This is a separate process from the Electron app — it only ever reaches
  * it over the token-authed loopback HTTP API in admin-api.json, never by
@@ -420,6 +422,30 @@ const TOOLS = [
     },
   },
   {
+    name: 'customer_feedback_list',
+    description: descriptionFor('customer_feedback_list'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pull: { type: 'boolean', description: 'Fetch new items from the feedback service before listing. Default true.' },
+        includeHidden: { type: 'boolean', description: 'Include moderated-away items. Default false.' },
+      },
+    },
+  },
+  {
+    name: 'customer_feedback_set_status',
+    description: descriptionFor('customer_feedback_set_status'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Feedback item id (from customer_feedback_list).' },
+        status: { type: 'string', enum: ['open', 'in_progress', 'resolved', 'wontfix'], description: 'New status.' },
+        note: { type: 'string', description: 'Optional short note shown to the customer.' },
+      },
+      required: ['id', 'status'],
+    },
+  },
+  {
     name: 'session_manager_help',
     description: descriptionFor('session_manager_help'),
     inputSchema: {
@@ -660,6 +686,24 @@ async function handleCallTool(request) {
       const payload = { cwd, label: args.label, agentName: args.agentName, tag: args.tag, prompt: args.prompt };
       if (typeof args.id === 'string' && args.id) payload.id = args.id;
       const result = await adminRequest('POST', '/admin/macros/save', payload);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'customer_feedback_list') {
+      const qs = new URLSearchParams();
+      if (!args || args.pull !== false) qs.set('pull', '1');
+      if (args && args.includeHidden === true) qs.set('includeHidden', '1');
+      const result = await adminRequest('GET', `/admin/customer-feedback/inbox?${qs.toString()}`);
+      if (result?.ok === false) return errorResult(result.error ?? 'customer_feedback_list failed');
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'customer_feedback_set_status') {
+      if (!args || typeof args.id !== 'string' || !args.id || typeof args.status !== 'string') {
+        return errorResult('missing or invalid required argument(s): id, status');
+      }
+      const payload = { id: args.id, status: args.status };
+      if (typeof args.note === 'string' && args.note) payload.note = args.note;
+      const result = await adminRequest('POST', '/admin/customer-feedback/status', payload);
+      if (result?.ok === false) return errorResult(result.error ?? 'customer_feedback_set_status failed');
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'session_manager_help') {

@@ -40,7 +40,7 @@ import { buildNeedsYouRows, type NeedsYouRow } from '../../lib/homeNeedsYou'
 import { setPendingPromptSessionId } from '../../lib/promptSessionDeepLink'
 import { projectColorFor } from '../../lib/projectColor'
 import { openProjectTab } from '../../lib/homeOpenProject'
-import { useSessionSlots, type SlotSnapshot } from '../../lib/useSessionSlots'
+import { useSessionSlots, setSessionSlots, type SlotSnapshot } from '../../lib/useSessionSlots'
 import { UsageMeters } from './home/UsageMeters'
 import { HomeSessionDrawer, type DrawerKeyVal, type DrawerTailLine } from './home/HomeSessionDrawer'
 import { NewEpicProjectDrawer } from './home/NewEpicProjectDrawer'
@@ -642,8 +642,8 @@ function SessionSlotCapControl({ slots }: { slots: SlotSnapshot | null }) {
   const commit = (n: number) => {
     setPending(n)
     setSaving(true)
-    window.api.schedule.setSessionSlots(n)
-      .catch(() => { /* Toast is reserved for user-triggered actions; snapshot poll will resync display */ })
+    setSessionSlots(n)
+      .catch((err) => { toast.error(`Could not set session slots: ${err instanceof Error ? err.message : String(err)}`) })
       .finally(() => { setSaving(false); setPending(null) })
   }
 

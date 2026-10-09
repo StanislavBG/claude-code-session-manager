@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Toggle } from '../ui/Toggle'
 import { EmptyState } from '../ui/EmptyState'
+import { copyText } from '../../lib/clipboard'
+import { toast } from '../../state/toast'
 import type {
   OtelConfig,
   OtelStatus,
@@ -288,11 +290,12 @@ function ProductTelemetrySection() {
   }
 
   const onCopyInstallId = async () => {
-    try {
-      await navigator.clipboard.writeText(cfg.installId)
+    if (await copyText(cfg.installId)) {
       setCopyLabel('Copied')
       setTimeout(() => setCopyLabel('Copy'), 1500)
-    } catch { /* clipboard denied — non-fatal */ }
+    } else {
+      toast.error('Could not copy install id to the clipboard')
+    }
   }
 
   const onSendNow = async () => {

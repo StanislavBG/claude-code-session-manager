@@ -912,6 +912,8 @@ design. Out of scope: chapter content, manual server routes, downloads.
 
 ### Manual page layout
 
+Superseded by the one-long-page section below.
+
 Desktop = `useLayoutMode().mode === 'canvas'`.
 
 - Under the header: a 52px back row, centred, holding a `.smlp-turn` button `book.toParts` with an up chevron.
@@ -947,6 +949,8 @@ Files: `SessionManagerPage.tsx`, `PartsBin.tsx`, `session-manager-landing/Header
 - The page dots nav gains a third item: an `<a>` styled as a dot, `aria-label={book.aria.manualDot}`, href the manual.
 
 ### Leaving the manual
+
+Superseded by the one-long-page section below.
 
 Files: `ManualPage.tsx`, `session-manager-landing/Header.tsx`, `SessionManagerPage.tsx`.
 
@@ -995,12 +999,16 @@ No dots, no flip animation (navigation is instant). The manual is a single colum
 
 ### Accessibility
 
+Superseded by the one-long-page section below.
+
 - The manual's main is `<main aria-label={book.aria.manualPage}>`.
 - The chapter rail is a `<nav aria-label="Chapters">` with `aria-current="page"` on the active row.
 - After a chapter turn, focus moves to the chapter's first heading (`tabIndex -1`,
   `focus({ preventScroll: true })`) and the window scrolls to the top of the card.
 
 ### Tests
+
+Superseded by the one-long-page section below.
 
 - `tests/session-manager-book.test.ts` covers `turnBook` (with and without `startViewTransition`, object-form
   throw fallback, `animate: false`), `shouldInterceptClick`, and `waitForBookPageReady` (signal first, timeout first).
@@ -1009,3 +1017,16 @@ No dots, no flip animation (navigation is instant). The manual is a single colum
   chapter; ctrl-click is not intercepted; back row and dot 2 return to the landing on page 2; chapter switching via
   rail and next; 390x844 reflow single column with no horizontal overflow.
 - `e2e/session-manager-landing.spec.ts` expects 3 dot items.
+
+## 2026-10-08 (later) — the manual is one long page
+
+The owner decided the Field Manual is ONE long scrolling page. This supersedes the rail, chapter switching and
+chapter flips of the section above. Flips stay only between the landing and the manual.
+
+- The book is exactly 3 pages: landing, Parts Bin, manual.
+- The manual renders every chapter in TOC order as `<section id=slug>` inside one page card (max-width 960px,
+  centred).
+- A compact two-column contents list of plain `#slug` anchors replaces the chapter rail and the mobile `<select>`.
+- No prev/next and no chapter flips: nothing inside the manual book-turns.
+- Deep links scroll to the section; the ready signal fires after it renders.
+- The back row, the dots and the header back link keep their back turns to the landing.

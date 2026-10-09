@@ -3,7 +3,7 @@ import { createElement } from 'react'
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { useSessionSlots, __resetSessionSlotsForTests } from '../useSessionSlots'
+import { useSessionSlots, setSessionSlots, __resetSessionSlotsForTests } from '../useSessionSlots'
 import { PanelFocusProvider } from '../panelFocus'
 import { useLayout } from '../../state/layout'
 
@@ -113,5 +113,58 @@ describe('useSessionSlots — shared poller', () => {
       await Promise.resolve()
     })
     expect(sessionSlots).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('setSessionSlots — single write path', () => {
+  function installWriteMock(setImpl: () => Promise<unknown> = () => Promise.resolve()) {
+    const sessionSlots = vi.fn().mockResolvedValue({
+      total: 5, inUse: 1, holders: [], min: 0, max: 10, default: 5, envOverride: false,
+    })
+    const setSlots = vi.fn(setImpl)
+    ;(window as unknown as { api: unknown }).api = {
+      schedule: { sessionSlots, setSessionSlots: setSlots },
+    }
+    return { sessionSlots, setSlots }
+  }
+
+  async function mountConsumer() {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    await act(async () => {
+      root!.render(createElement(Consumer))
+      await Promise.resolve()
+    })
+  }
+
+  it('clamps a value above max to the snapshot max', async () => {
+    const { setSlots } = installWriteMock()
+    await mountConsumer()
+    await act(async () => { await setSessionSlots(99) })
+    expect(setSlots).toHaveBeenCalledTimes(1)
+    expect(setSlots).toHaveBeenCalledWith(10)
+  })
+
+  it('applies no clamp when no snapshot is cached yet', async () => {
+    const { setSlots } = installWriteMock()
+    await setSessionSlots(99)
+    expect(setSlots).toHaveBeenCalledWith(99)
+  })
+
+  it('re-polls sessionSlots() after a successful set', async () => {
+    const { sessionSlots } = installWriteMock()
+    await mountConsumer()
+    sessionSlots.mockClear()
+    await act(async () => { await setSessionSlots(3) })
+    expect(sessionSlots).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects the returned promise when the write fails', async () => {
+    const { sessionSlots } = installWriteMock(() => Promise.reject(new Error('boom')))
+    await mountConsumer()
+    sessionSlots.mockClear()
+    await expect(setSessionSlots(3)).rejects.toThrow('boom')
+    expect(sessionSlots).not.toHaveBeenCalled()
   })
 })

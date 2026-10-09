@@ -39,6 +39,13 @@ async function pollOnce(): Promise<void> {
   }
 }
 
+// The single write path for the machine-wide slot count: clamps to the snapshot's own bounds, re-polls, re-throws.
+export async function setSessionSlots(n: number): Promise<void> {
+  const clamped = snapshot ? Math.min(snapshot.max, Math.max(snapshot.min, n)) : n
+  await window.api.schedule.setSessionSlots(clamped)
+  await pollOnce()
+}
+
 /**
  * Idempotent: a second/third consumer registering while the poller is
  * already running is a no-op, so N mounted-and-focused consumers still

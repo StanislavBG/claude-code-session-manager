@@ -17,6 +17,7 @@ import { mergeScopes, setAtPath } from '../../lib/mergeScopes'
 import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
 import { SettingsTelemetry } from './SettingsTelemetry'
+import { SettingsRemote } from './SettingsRemote'
 import { SettingsAppPrefs } from './SettingsAppPrefs'
 import { SettingsEpicIsolation } from './SettingsEpicIsolation'
 
@@ -67,7 +68,7 @@ function SettingsComponent() {
   const prevNavFaceRef = useRef(navFace)
 
   const [scope, setScope] = useState<Scope>(() => (navFace === 'project' && cwd ? 'project' : 'user'))
-  const [view, setView] = useState<'effective' | 'tree' | 'raw' | 'telemetry' | 'app'>('effective')
+  const [view, setView] = useState<'effective' | 'tree' | 'raw' | 'telemetry' | 'remote' | 'app'>('effective')
 
   // Settings is now HOME-only in the sidebar (navGroups.ts), and every nav
   // path that focuses it asserts navFace: 'home' — but a background split
@@ -93,7 +94,7 @@ function SettingsComponent() {
   // was already selected, so the toolbar never shows an active tab that's no
   // longer in its own options list.
   useEffect(() => {
-    if (navFace === 'project' && (view === 'telemetry' || view === 'app')) setView('effective')
+    if (navFace === 'project' && (view === 'telemetry' || view === 'remote' || view === 'app')) setView('effective')
   }, [navFace, view])
 
   const handleScopeChange = (next: Scope) => {
@@ -157,13 +158,13 @@ function SettingsComponent() {
               // are hidden on the Project face rather than just left visible
               // with identical content.
               ...(navFace === 'home'
-                ? [{ key: 'telemetry', label: 'Telemetry' }, { key: 'app', label: 'Session Manager' }] as const
+                ? [{ key: 'telemetry', label: 'Telemetry' }, { key: 'remote', label: 'Phone remote' }, { key: 'app', label: 'Session Manager' }] as const
                 : []),
             ]}
             active={view}
             onChange={setView}
           />
-          {view !== 'telemetry' && view !== 'app' && (
+          {view !== 'telemetry' && view !== 'remote' && view !== 'app' && (
             <>
               <span className="mx-2 text-fg-faint">·</span>
               <ScopeSwitcher
@@ -195,7 +196,7 @@ function SettingsComponent() {
         </>
       }
       footer={
-        view !== 'telemetry' && view !== 'app' && activePath && file ? (
+        view !== 'telemetry' && view !== 'remote' && view !== 'app' && activePath && file ? (
           <SaveBar
             dirty={file.dirty}
             busy={file.busy}
@@ -217,6 +218,8 @@ function SettingsComponent() {
     >
       {view === 'telemetry' ? (
         <SettingsTelemetry />
+      ) : view === 'remote' ? (
+        <SettingsRemote />
       ) : view === 'app' ? (
         <SettingsAppPrefs />
       ) : (

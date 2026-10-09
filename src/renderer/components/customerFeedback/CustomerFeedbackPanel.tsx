@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Z } from '../../lib/zLayers'
 import { useCustomerFeedback } from '../../state/customerFeedback'
+import { CustomerFeedbackInbox } from './CustomerFeedbackInbox'
 import type { CustomerFeedbackStatus, CustomerFeedbackTag } from '../../../preload/api'
 
 const STATUS_LABEL: Record<CustomerFeedbackStatus, string> = {
@@ -40,6 +41,7 @@ export function CustomerFeedbackPanel() {
   const loadOwnerInfo = useCustomerFeedback((s) => s.loadOwnerInfo)
   const refreshStatus = useCustomerFeedback((s) => s.refreshStatus)
   const markSeen = useCustomerFeedback((s) => s.markSeen)
+  const ownerMode = useCustomerFeedback((s) => s.ownerInfo?.ownerMode === true)
   const [entered, setEntered] = useState(false)
 
   const sorted = useMemo(() => [...items].sort((a, b) => b.submittedAt - a.submittedAt), [items])
@@ -203,7 +205,7 @@ export function CustomerFeedbackPanel() {
             )}
           </section>
         </div>
-        {/* owner inbox mounts here (cf-owner-inbox-ui) */}
+        {ownerMode && <CustomerFeedbackInbox />}
       </aside>
     </div>
   )

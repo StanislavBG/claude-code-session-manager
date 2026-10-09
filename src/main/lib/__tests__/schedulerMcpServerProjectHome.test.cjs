@@ -184,7 +184,7 @@ test('project_home_write returns the app-not-running error when the admin API is
 
 const DEMO_VIDEO_TOOL_NAME = 'project_demo_video_write';
 
-test('project_demo_video_write is listed in TOOLS with html required and cwd optional', async () => {
+test('project_demo_video_write is listed in TOOLS with html/htmlPath optional and cwd optional', async () => {
   const homeDir = await mkTmp();
   const { TOOLS } = requireServerWithHome(homeDir);
   const tool = TOOLS.find((t) => t.name === DEMO_VIDEO_TOOL_NAME);
@@ -192,7 +192,8 @@ test('project_demo_video_write is listed in TOOLS with html required and cwd opt
   expect(tool.inputSchema.type).toBe('object');
   expect(tool.inputSchema.properties.cwd).toBeTruthy();
   expect(tool.inputSchema.properties.html).toBeTruthy();
-  expect(tool.inputSchema.required).toEqual(['html']);
+  expect(tool.inputSchema.properties.htmlPath.type).toBe('string');
+  expect(tool.inputSchema.required ?? []).not.toContain('html');
 });
 
 test('project_demo_video_write description equals the catalog-composed string', async () => {
@@ -238,7 +239,7 @@ test('project_demo_video_write defaults cwd to SM_PROJECT_ROOT when omitted', as
   expect(requests[0].body.cwd).toBe(process.env.SM_PROJECT_ROOT);
 });
 
-test('project_demo_video_write requires a non-empty html', async () => {
+test('project_demo_video_write requires html or htmlPath', async () => {
   const homeDir = await mkTmp();
   const { handleCallTool } = requireServerWithHome(homeDir);
   for (const args of [{ cwd: '/x' }, { cwd: '/x', html: '' }]) {
@@ -259,4 +260,62 @@ test('project_demo_video_write surfaces a 4xx admin error to the caller', async 
   const result = await callTool(handleCallTool, DEMO_VIDEO_TOOL_NAME, { html: '<p>x</p>' });
   expect(requests).toHaveLength(1);
   expect(result.content[0].text).toContain('sm-demo-duration');
+});
+
+test('project_demo_video_write htmlPath posts the file contents verbatim', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+  const dir = await mkTmp();
+  const file = path.join(dir, 'demo.html');
+  const html = '<!DOCTYPE html><html><body>data:audio/wav;base64,' + 'QUJD'.repeat(1000) + ' é</body></html>';
+  await fsp.writeFile(file, html, 'utf8');
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const result = await callTool(handleCallTool, DEMO_VIDEO_TOOL_NAME, { cwd: '/proj', htmlPath: file });
+  expect(result.isError).toBeFalsy();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].url).toBe('/admin/project-home/demo-video/write');
+  expect(requests[0].body).toEqual({ cwd: '/proj', html });
+});
+
+test('project_demo_video_write rejects bad html/htmlPath combinations without calling the admin API', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+  const dir = await mkTmp();
+  const good = path.join(dir, 'ok.html');
+  await fsp.writeFile(good, '<p>x</p>', 'utf8');
+  const txt = path.join(dir, 'a.txt');
+  await fsp.writeFile(txt, '<p>x</p>', 'utf8');
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const cases = [
+    { html: '<p>x</p>', htmlPath: good },
+    {},
+    { htmlPath: 'relative/demo.html' },
+    { htmlPath: txt },
+    { htmlPath: path.join(dir, 'missing.html') },
+    { htmlPath: dir + '.html' },
+  ];
+  for (const args of cases) {
+    const result = await callTool(handleCallTool, DEMO_VIDEO_TOOL_NAME, { cwd: '/proj', ...args });
+    expect(result.isError).toBe(true);
+  }
+  expect(requests).toHaveLength(0);
+});
+
+test('project_demo_video_write rejects an htmlPath over 2MB', async () => {
+  const homeDir = await mkTmp();
+  const dir = await mkTmp();
+  const big = path.join(dir, 'big.html');
+  await fsp.writeFile(big, 'a'.repeat(2 * 1024 * 1024 + 1), 'utf8');
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const result = await callTool(handleCallTool, DEMO_VIDEO_TOOL_NAME, { cwd: '/proj', htmlPath: big });
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text).toContain('exceeds');
 });

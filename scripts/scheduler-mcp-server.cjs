@@ -12,7 +12,7 @@
  *   feedback_open_session({ ... }) -> POST /admin/feedback/open-session
  *
  *   project_home_write({ cwd?, html }) -> POST /admin/project-home/write
- *   project_demo_video_write({ cwd?, html }) -> POST /admin/project-home/demo-video/write
+ *   project_demo_video_write({ cwd?, html? | htmlPath? }) -> POST /admin/project-home/demo-video/write
  *
  *   macro_list({ cwd? }) -> GET  /admin/macros?cwd=<encoded>
  *   macro_save({ cwd?, id?, label, agentName, tag, prompt }) -> POST /admin/macros/save
@@ -53,6 +53,24 @@ const HELP_POINTER = ' — call session_manager_help for the correct usage';
 function withPointer(text) {
   const str = String(text);
   return str.endsWith(HELP_POINTER) ? str : str + HELP_POINTER;
+}
+
+const MAX_DEMO_VIDEO_BYTES = 2 * 1024 * 1024;
+
+/** Reads a local .html/.htm file for project_demo_video_write; errors carry only the reason, never file contents. */
+async function readDemoVideoHtmlFile(p) {
+  if (typeof p !== 'string' || !path.isAbsolute(p)) return { error: 'htmlPath must be an absolute path' };
+  if (!/\.html?$/i.test(p)) return { error: 'htmlPath must end in .html or .htm' };
+  try {
+    const st = await fsp.stat(p);
+    if (!st.isFile()) return { error: 'htmlPath is not a regular file' };
+    if (st.size > MAX_DEMO_VIDEO_BYTES) return { error: `htmlPath file exceeds ${MAX_DEMO_VIDEO_BYTES} bytes` };
+    const html = await fsp.readFile(p, 'utf8');
+    if (html.length === 0) return { error: 'htmlPath file is empty' };
+    return { html };
+  } catch (err) {
+    return { error: `cannot read htmlPath: ${err && err.code ? err.code : 'read failed'}` };
+  }
 }
 
 function errorResult(text) {
@@ -396,8 +414,13 @@ const TOOLS = [
             + 'any http(s)/// src or href (no network-capable APIs — the document is CSP-fenced after it is written); '
             + 'or missing a <meta name="sm-demo-duration" content="N"> tag with 5 <= N <= 30.',
         },
+        htmlPath: {
+          type: 'string',
+          description: 'Absolute path to a local .html/.htm file holding the complete document (same rules as html; <= 2MB). '
+            + 'Prefer this when the document embeds a base64 narration/image data URI — the server reads the file, so the large payload never passes through the model. Give exactly one of html / htmlPath.',
+        },
       },
-      required: ['html'],
+      
     },
   },
   {
@@ -675,11 +698,22 @@ async function handleCallTool(request) {
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'project_demo_video_write') {
-      if (!args || typeof args.html !== 'string' || args.html.length === 0) {
-        return errorResult('missing required argument: html');
+      const hasHtml = !!args && args.html !== undefined && args.html !== null && args.html !== '';
+      const hasPath = !!args && args.htmlPath !== undefined && args.htmlPath !== null && args.htmlPath !== '';
+      if (hasHtml === hasPath) {
+        return errorResult('provide exactly one of html or htmlPath');
+      }
+      let html;
+      if (hasPath) {
+        const loaded = await readDemoVideoHtmlFile(args.htmlPath);
+        if (loaded.error) return errorResult(loaded.error);
+        html = loaded.html;
+      } else {
+        if (typeof args.html !== 'string') return errorResult('missing required argument: html');
+        html = args.html;
       }
       const cwd = resolveCwdArg(args);
-      const result = await adminRequest('POST', '/admin/project-home/demo-video/write', { cwd, html: args.html });
+      const result = await adminRequest('POST', '/admin/project-home/demo-video/write', { cwd, html });
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'macro_list') {

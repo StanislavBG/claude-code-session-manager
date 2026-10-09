@@ -263,7 +263,8 @@ const MCP_TOOL_CATALOG = [
       + 'The only write path for Project Home.',
     whenToUse: 'Use when asked to generate or refresh the project home page. Compose the whole page yourself '
       + '(inline <style>/<script>, data: URIs for assets) from what is really true about the project, then '
-      + 'pass the full document as `html`.',
+      + 'pass the full document as `html` for small documents. When it embeds a base64 audio/image data URI '
+      + '(large payload), write the file to disk with a build script and pass its absolute path as `htmlPath` instead.',
     whenNotToUse: 'Never fabricate content — every claim must trace to something concrete in the project. The '
       + 'document must be self-contained: the call is rejected for empty input, more than 1MB, any '
       + '<script src>, <link href="http…">, @import, or url(http…) — no network egress.',
@@ -291,6 +292,7 @@ const MCP_TOOL_CATALOG = [
       html: '<!DOCTYPE html><html><head><meta name="sm-demo-duration" content="30"></head><body><h1>Example</h1></body></html>',
     },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
+      + 'Give exactly one of `html` / `htmlPath` (absolute .html/.htm file, <= 2MB); prefer `htmlPath` for base64 data URIs. '
       + 'The document is CSP-stamped after it is written, so the viewer sandbox is the real network fence — these checks are defence in depth.',
   },
   {

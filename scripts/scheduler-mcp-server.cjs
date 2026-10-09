@@ -420,7 +420,6 @@ const TOOLS = [
             + 'Prefer this when the document embeds a base64 narration/image data URI — the server reads the file, so the large payload never passes through the model. Give exactly one of html / htmlPath.',
         },
       },
-      
     },
   },
   {

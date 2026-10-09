@@ -263,8 +263,7 @@ const MCP_TOOL_CATALOG = [
       + 'The only write path for Project Home.',
     whenToUse: 'Use when asked to generate or refresh the project home page. Compose the whole page yourself '
       + '(inline <style>/<script>, data: URIs for assets) from what is really true about the project, then '
-      + 'pass the full document as `html` for small documents. When it embeds a base64 audio/image data URI '
-      + '(large payload), write the file to disk with a build script and pass its absolute path as `htmlPath` instead.',
+      + 'pass the full document as `html`.',
     whenNotToUse: 'Never fabricate content — every claim must trace to something concrete in the project. The '
       + 'document must be self-contained: the call is rejected for empty input, more than 1MB, any '
       + '<script src>, <link href="http…">, @import, or url(http…) — no network egress.',
@@ -280,7 +279,8 @@ const MCP_TOOL_CATALOG = [
     whenToUse: 'Use when asked to generate or refresh the demo video. Compose the whole document yourself '
       + '(inline <style>/<script>, data: URIs for assets, CSS/JS-driven animation) from what is really true about '
       + 'the project, declare its length with <meta name="sm-demo-duration" content="N"> (5-30 seconds), then '
-      + 'pass the full document as `html`.',
+      + 'pass the document as `html` or — preferred when it embeds a base64 audio/image data URI — write it to a '
+      + 'local .html file and pass its absolute path as `htmlPath`.',
     whenNotToUse: 'Never fabricate content — every claim must trace to something concrete in the project. The '
       + 'document must be self-contained and non-network-capable: the call is rejected for empty input, more than '
       + '2MB, any <script src>, <link href="http…">, @import, or url(http…) (no remote references); any '

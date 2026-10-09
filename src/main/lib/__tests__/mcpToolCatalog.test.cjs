@@ -105,3 +105,13 @@ test.each(MCP_TOOL_CATALOG)('$name exampleArgs satisfies its own inputSchema req
     expect(entry.exampleArgs[key]).not.toBeUndefined();
   }
 });
+
+test('htmlPath guidance lives only on project_demo_video_write', () => {
+  const textOf = (name) => {
+    const e = MCP_TOOL_CATALOG.find((x) => x.name === name);
+    return [e.purpose, e.whenToUse, e.whenNotToUse, e.notes].filter(Boolean).join(' ');
+  };
+  expect(textOf('project_home_write')).not.toContain('htmlPath');
+  const demo = MCP_TOOL_CATALOG.find((x) => x.name === 'project_demo_video_write');
+  expect(demo.whenToUse).toContain('htmlPath');
+});

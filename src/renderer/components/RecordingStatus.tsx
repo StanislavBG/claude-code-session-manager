@@ -14,6 +14,7 @@ import { Z } from '../lib/zLayers'
  */
 export function RecordingStatus() {
   const isRecording = useVoice((s) => s.isRecording || s.externalRecording)
+  const storeRecording = useVoice((s) => s.isRecording)
   if (!isRecording) return null
   return (
     <div
@@ -27,6 +28,17 @@ export function RecordingStatus() {
         aria-hidden="true"
       />
       <span>Recording — speech is being captured locally</span>
+      {storeRecording && (
+        <button
+          type="button"
+          data-testid="recording-status-stop"
+          aria-label="Stop microphone"
+          onClick={() => useVoice.getState().stopRecording()}
+          className="ml-auto border border-red-700 hover:bg-red-900 text-red-100 rounded px-2"
+        >
+          Stop ×
+        </button>
+      )}
     </div>
   )
 }

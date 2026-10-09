@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { PrereqItem } from '../../../preload/api'
 import { useToast } from '../../state/toast'
 import { Z } from '../../lib/zLayers'
+import { copyText } from '../../lib/clipboard'
 
 /**
  * Boot-time Setup checklist. Renders nothing while every prerequisite is ok
@@ -40,8 +41,8 @@ export function PrereqChecklist() {
   }, [])
 
   const copy = useCallback((command: string) => {
-    navigator.clipboard?.writeText(command).catch((e) => {
-      useToast.getState().show('error', `Copy failed: ${e instanceof Error ? e.message : String(e)}`)
+    void copyText(command).then((ok) => {
+      if (!ok) useToast.getState().show('error', 'Copy failed')
     })
   }, [])
 

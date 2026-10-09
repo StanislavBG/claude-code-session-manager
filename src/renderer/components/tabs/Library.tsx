@@ -4,6 +4,7 @@ import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { distinctPlaceholders, fillPlaceholders, type Placeholder } from '../../lib/mcpPlaceholders'
 import { useHomeDir } from '../../lib/useHomeDir'
+import { copyText } from '../../lib/clipboard'
 import { toast } from '../../state/toast'
 import {
   CATALOG_MCP,
@@ -1055,9 +1056,11 @@ function CopyBtn({ text, label }: { text: string; label: string }) {
   return (
     <button
       onClick={() => {
-        navigator.clipboard.writeText(text)
-        setCopied(true)
-        setTimeout(() => setCopied(false), 1500)
+        void copyText(text).then((ok) => {
+          if (!ok) { toast.error('Copy failed'); return }
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        })
       }}
       className="px-2 py-0.5 text-xs border border-accent/50 rounded text-accent hover:bg-accent hover:text-bg"
     >

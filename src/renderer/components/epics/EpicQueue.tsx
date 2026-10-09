@@ -12,6 +12,7 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Z } from '../../lib/zLayers'
+import { copyText } from '../../lib/clipboard'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
 import { useEpicTerminal } from '../../state/epicTerminal'
 import { toast } from '../../state/toast'
@@ -287,10 +288,10 @@ function useRowMenuItems(
     {
       label: 'Copy session ID',
       onSelect: () => {
-        void navigator.clipboard?.writeText(epic.id).then(
-          () => toast.info('Session id copied'),
-          () => toast.error('Copy failed'),
-        )
+        void copyText(epic.id).then((ok) => {
+          if (ok) toast.info('Session id copied')
+          else toast.error('Copy failed')
+        })
       },
     },
     { label: 'Rename title', onSelect: () => onEdit() },

@@ -13,6 +13,8 @@ const path = require('node:path');
 const ts = require('typescript');
 
 const NAV_GROUPS = 'src/renderer/lib/navGroups.ts';
+const PRELOAD = 'src/preload/index.cjs';
+const IPC_CALLS = new Set(['invoke', 'send', 'sendSync', 'on', 'once']);
 const SCREEN_COMPONENTS = 'src/renderer/components/screenComponents.tsx';
 const WRAPPERS = new Set(['LazyScreen', 'Suspense', 'SectionFrame', 'Fragment']);
 const ASSET_EXT = new Set(['.css', '.scss', '.svg', '.png', '.jpg', '.gif', '.json', '.wasm', '.onnx', '.md', '.html', '.txt']);
@@ -143,6 +145,81 @@ function importGraph(root, file, cache = new Map()) {
   return [...seen].sort();
 }
 
+/** '<ns>.<method>' → IPC channel (or null), read from the preload's `exposeInMainWorld('api', …)`. */
+function apiMap(root) {
+  const sf = parse(root, PRELOAD, ts.ScriptKind.JS);
+  const map = new Map();
+  const channelOf = (node) => {
+    let channel = null;
+    walk(node, (c) => {
+      if (channel !== null || !ts.isCallExpression(c) || !ts.isPropertyAccessExpression(c.expression)) return;
+      const callee = c.expression;
+      if (!ts.isIdentifier(callee.expression) || callee.expression.text !== 'ipcRenderer' || !IPC_CALLS.has(callee.name.text)) return;
+      const first = c.arguments[0];
+      if (first && ts.isStringLiteralLike(first)) channel = first.text;
+    });
+    return channel;
+  };
+  const nameOf = (m) => (m.name && (ts.isIdentifier(m.name) || ts.isStringLiteralLike(m.name)) ? m.name.text : null);
+  walk(sf, (n) => {
+    if (!ts.isCallExpression(n) || n.expression.getText(sf) !== 'contextBridge.exposeInMainWorld') return;
+    const [name, api] = n.arguments;
+    if (!name || !ts.isStringLiteralLike(name) || name.text !== 'api' || !api || !ts.isObjectLiteralExpression(api)) return;
+    for (const ns of api.properties) {
+      const nsName = ts.isPropertyAssignment(ns) ? nameOf(ns) : null;
+      if (!nsName || !ts.isObjectLiteralExpression(ns.initializer)) continue;
+      for (const m of ns.initializer.properties) {
+        if (!ts.isPropertyAssignment(m) && !ts.isMethodDeclaration(m)) continue;
+        const mName = nameOf(m);
+        if (mName) map.set(nsName + '.' + mName, channelOf(m));
+      }
+    }
+  });
+  return map;
+}
+
+/** `window.api.<ns>.<method>` references in a source text; `unresolved` = other `window.api` mentions. */
+function apiUsage(text) {
+  const found = new Set();
+  let resolved = 0;
+  for (const m of text.matchAll(/\bwindow\.api\??\.([A-Za-z_$][\w$]*)\??\.([A-Za-z_$][\w$]*)/g)) {
+    found.add(m[1] + '.' + m[2]);
+    resolved++;
+  }
+  const total = (text.match(/\bwindow\.api\b/g) || []).length;
+  return { methods: [...found].sort(), unresolved: total - resolved };
+}
+
+const mainTexts = new Map(); // root → Map(rel → text), read once per root
+
+function mainFiles(root) {
+  let files = mainTexts.get(root);
+  if (files) return files;
+  files = new Map();
+  const visit = (dirRel) => {
+    for (const e of fs.readdirSync(path.join(root, dirRel), { withFileTypes: true })) {
+      if (e.name === '__tests__' || e.name === 'node_modules') continue;
+      const rel = dirRel + '/' + e.name;
+      if (e.isDirectory()) visit(rel);
+      else if (e.name.endsWith('.cjs')) files.set(rel, fs.readFileSync(path.join(root, rel), 'utf8'));
+    }
+  };
+  visit('src/main');
+  mainTexts.set(root, files);
+  return files;
+}
+
+/** Repo-relative src/main .cjs files that quote `channel` as a string literal. */
+function handlerFiles(root, channel) {
+  if (!channel) return [];
+  const needles = ["'", '"', '`'].map((q) => q + channel + q);
+  const out = [];
+  for (const [rel, text] of mainFiles(root)) {
+    if (needles.some((n) => text.includes(n))) out.push(rel);
+  }
+  return out.sort();
+}
+
 function classifyPages(root) {
   const cache = new Map();
   const reach = new Map();
@@ -157,6 +234,7 @@ function classifyPages(root) {
       reachers.get(f).push(key);
     }
   }
+  const channels = apiMap(root);
   const out = {};
   for (const [key, files] of reach) {
     const owned = [], shared = [];
@@ -165,9 +243,31 @@ function classifyPages(root) {
       if (pages.length === 1) owned.push(f);
       else shared.push({ file: f, pages });
     }
-    out[key] = { owned, shared };
+    const used = (list) => {
+      const methods = new Set();
+      let unresolved = 0;
+      for (const f of list) {
+        const u = apiUsage(fs.readFileSync(path.join(root, f), 'utf8'));
+        u.methods.forEach((m) => methods.add(m));
+        unresolved += u.unresolved;
+      }
+      return { methods: [...methods].sort(), unresolved };
+    };
+    const own = used(owned);
+    const shr = used(shared.map((s) => s.file));
+    const entry = (method) => {
+      const channel = channels.get(method) ?? null;
+      return { method, channel, main: handlerFiles(root, channel) };
+    };
+    out[key] = {
+      owned,
+      shared,
+      api: own.methods.map(entry),
+      sharedApi: shr.methods.filter((m) => !own.methods.includes(m)).map(entry),
+      unresolvedApiRefs: own.unresolved + shr.unresolved,
+    };
   }
   return out;
 }
 
-module.exports = { listPages, importGraph, classifyPages, resolveSpecifier };
+module.exports = { listPages, importGraph, classifyPages, resolveSpecifier, apiMap, apiUsage, handlerFiles };

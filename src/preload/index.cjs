@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('api', {
     cwd: () => ipcRenderer.invoke('app:cwd'),
     engageRulesPath: () => ipcRenderer.invoke('app:engage-rules-path'),
     pickDirectory: () => ipcRenderer.invoke('app:pick-directory'),
+    createProjectFolder: (parentDir, name) => ipcRenderer.invoke('app:create-project-folder', { parentDir, name }),
     gitBranch: (cwd) => ipcRenderer.invoke('app:git-branch', { cwd }),
     rebootApp: (opts) => ipcRenderer.send('app:reboot-app', opts),
     archiveProject: (encoded) => ipcRenderer.invoke('app:archive-project', { encoded }),

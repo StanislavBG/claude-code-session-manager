@@ -1578,6 +1578,10 @@ export interface ChatExternalSendEvent {
   prompt: string;
 }
 
+export type CreateProjectFolderResult =
+  | { ok: true; path: string }
+  | { ok: false; code: 'invalid-name' | 'invalid-parent' | 'exists' | 'io'; error: string; path?: string };
+
 export interface SessionManagerAPI {
   app: {
     version: () => Promise<string>;
@@ -1587,6 +1591,8 @@ export interface SessionManagerAPI {
     cwd: () => Promise<string>;
     engageRulesPath: () => Promise<string | null>;
     pickDirectory: () => Promise<string | null>;
+    /** Create `<parentDir>/<name>` for a new project; main validates the name. */
+    createProjectFolder: (parentDir: string, name: string) => Promise<CreateProjectFolderResult>;
     gitBranch: (cwd: string) => Promise<string | null>;
     /** Default: request a drain-first restart. `force: true` restarts immediately, killing running jobs. */
     rebootApp: (opts?: { force?: boolean }) => void;

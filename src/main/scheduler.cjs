@@ -4047,8 +4047,11 @@ function nextRapidRateLimitCount(prevCount, { rateLimited, durationMs }) {
  * either, which used to leave an indefinite pause with no resume timer at
  * all (a queue that never comes back on its own) — this covers both.
  */
+const AGENT_PAUSE_TTL_MS = 30 * 60_000;
+
 function computeEffectiveResumeAt(reason, resumeAtIso, nowMs = Date.now()) {
   if (resumeAtIso && isResetFresh(resumeAtIso, nowMs)) return resumeAtIso;
+  if (reason === 'agent') return new Date(nowMs + AGENT_PAUSE_TTL_MS).toISOString();
   if (reason === 'network' || reason === 'rate_limit') {
     return new Date(nowMs + 30 * 60_000).toISOString();
   }
@@ -4067,15 +4070,16 @@ function computeResumeDelay(effectiveResumeAtIso, nowMs = Date.now()) {
 }
 
 async function setPaused(reason, resumeAtIso, opts = {}) {
-  const { observedAt = null, force = false } = opts;
+  const { observedAt = null, force = false, by = null } = opts;
   const isManual = reason === 'manual';
+  const isAgent = reason === 'agent';
   // Honor manual-override cooldown: if the user cleared a pause within the
   // last 5 minutes, suppress auto-pause re-engagement UNLESS this pause is
   // backed by a fresh observation (a run that started after the clear) or is
   // forced (the rapid-repeat hard pause, which the cooldown cannot suppress).
   // A user-initiated 'manual' pause is never an auto-detection, so the cooldown
   // (which exists to ignore STALE auto-detections) does not apply to it.
-  if (!isManual && isCooldownSuppressed({ pauseClearedManuallyAt, now: Date.now(), observedAt, force })) {
+  if (!isManual && !isAgent && isCooldownSuppressed({ pauseClearedManuallyAt, now: Date.now(), observedAt, force })) {
     console.log(`[scheduler] setPaused(${reason}) suppressed by manual override cooldown`);
     return;
   }
@@ -4088,6 +4092,7 @@ async function setPaused(reason, resumeAtIso, opts = {}) {
   // 'manual' never arms a resume timer: only schedule:resume / run-now clears it.
   const effectiveResumeAt = isManual ? null : computeEffectiveResumeAt(reason, resumeAtIso);
 
+  let committed = null;
   const kept = await mutate((s) => {
     // A user pause outranks every auto-pause (rate_limit/auth/network): the
     // auto path must not overwrite it, or its resume timer would auto-clear it.
@@ -4097,12 +4102,15 @@ async function setPaused(reason, resumeAtIso, opts = {}) {
     } else {
       s.paused = { reason, since: new Date().toISOString(), resumeAt: effectiveResumeAt || null };
     }
+    if (by && isAgent) s.paused.by = by;
+    committed = { reason: s.paused.reason, resumeAt: s.paused.resumeAt ?? null, by: s.paused.by ?? null };
     return false;
   });
   if (kept) {
     console.log(`[scheduler] setPaused(${reason}) ignored: a manual pause is in force`);
     return;
   }
+  if (committed) appendAuditEvent('scheduler_pause', committed);
   await broadcast({ flush: true });
   cancelToken.cancelled = true;
   if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
@@ -4123,6 +4131,7 @@ async function setPaused(reason, resumeAtIso, opts = {}) {
 async function clearPause(source) {
   if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
   const humanOverride = source === 'manual' || source === 'run-now';
+  let clearedReason = null;
   const wasPaused = await mutate((s) => {
     // A human Resume / Run now also re-closes every launch circuit breaker:
     // the operator is asserting the environment is fixed (CLI updated,
@@ -4135,9 +4144,11 @@ async function clearPause(source) {
     }
     if (!s.paused) return false;
     console.log(`[scheduler] clearPause (${source || 'manual'})`);
+    clearedReason = s.paused.reason ?? null;
     s.paused = null;
     return true;
   });
+  if (wasPaused) appendAuditEvent('scheduler_resume', { source: source || 'manual', clearedReason });
   // Un-cancel the tick guard on every recovery path, not just runDueJobs().
   applyPauseCleared(wasPaused, cancelToken);
   if (wasPaused) lastPauseClearedAt = Date.now();
@@ -12948,7 +12959,10 @@ async function init() {
     // happens when the app was closed across the reset window.
     const boot = await readQueue();
     await clearStaleDrainAtBoot(boot);
-    if (boot.paused && boot.paused.resumeAt && new Date(boot.paused.resumeAt).getTime() <= Date.now()) {
+    if (boot.paused && (boot.paused.reason === 'manual' || boot.paused.reason === 'agent')) {
+      console.log(`[scheduler] boot: clearing persisted '${boot.paused.reason}' pause so dispatch runs`);
+      await clearPause('boot');
+    } else if (boot.paused && boot.paused.resumeAt && new Date(boot.paused.resumeAt).getTime() <= Date.now()) {
       await clearPause('boot-elapsed');
     } else if (boot.paused && boot.paused.resumeAt) {
       // Re-arm the resume timer (lost across restart).
@@ -13293,8 +13307,15 @@ const remote = {
   // User-initiated pause/resume — the admin-route/MCP twins of the
   // schedule:pause / schedule:resume IPC handlers, through the same setPaused /
   // clearPause. Pause stops NEW dispatch only; running jobs are never touched.
-  async pause() {
-    await setPaused('manual', null);
+  async pause(opts = {}) {
+    const str = (v, max = 300) => (typeof v === 'string' && v ? v.slice(0, max) : null);
+    await setPaused('agent', null, {
+      by: {
+        originClaudeSessionId: str(opts.originClaudeSessionId),
+        cwd: str(opts.cwd, 1000),
+        reason: str(opts.reason),
+      },
+    });
     return { ok: true };
   },
 
@@ -13650,7 +13671,20 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
   });
 
   adminHttp.registerRoute('POST', '/admin/scheduler/pause', async (req, res) => {
-    sendJson(res, 200, await remoteObj.pause());
+    const raw = await readBody(req);
+    let parsed;
+    try {
+      parsed = raw ? JSON.parse(raw) : {};
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+      return;
+    }
+    if (!parsed || typeof parsed !== 'object') parsed = {};
+    sendJson(res, 200, await remoteObj.pause({
+      originClaudeSessionId: parsed.originClaudeSessionId,
+      cwd: parsed.cwd,
+      reason: parsed.reason,
+    }));
   });
 
   adminHttp.registerRoute('POST', '/admin/scheduler/resume', async (req, res) => {

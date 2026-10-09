@@ -1,7 +1,7 @@
 /**
  * scheduler-manual-pause.test.cjs — user-initiated pause (schedule:pause /
  * POST /admin/scheduler/pause). A 'manual' pause stops NEW dispatch, never
- * kills running jobs, survives restart, and is cleared only by an explicit
+ * kills running jobs, is cleared at app boot, and otherwise only by an explicit
  * Resume / Run now — never by the rate-limit reset timer or network recovery.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/scheduler-manual-pause.test.cjs
@@ -94,13 +94,11 @@ test('a running job survives a pause untouched', async () => {
   expect(row.runId).toBe('r1');
 });
 
-test('a manual pause survives restart (re-read from disk; boot never clears it)', async () => {
+test('a manual pause is cleared at boot (clearPause("boot"))', async () => {
   await scheduler.setPaused('manual', null);
-  const onDisk = await queueStore.readMerged(); // what a fresh process reads at boot
-  expect(onDisk.paused.reason).toBe('manual');
-  // Boot only clears a pause whose resumeAt has elapsed / re-arms one with a
-  // resumeAt; a manual pause has none, so neither branch applies.
-  expect(onDisk.paused.resumeAt).toBeNull();
+  expect((await queueStore.readMerged()).paused.reason).toBe('manual');
+  await scheduler.clearPause('boot');
+  expect((await queueStore.readMerged()).paused).toBeNull();
 });
 
 test('resume clears a manual pause', async () => {
@@ -112,7 +110,7 @@ test('resume clears a manual pause', async () => {
 
 test('remote.pause / remote.resume are the admin-route twins of the IPC handlers', async () => {
   expect(await scheduler.remote.pause()).toEqual({ ok: true });
-  expect((await queueStore.readMerged()).paused.reason).toBe('manual');
+  expect((await queueStore.readMerged()).paused.reason).toBe('agent');
   expect(await scheduler.remote.resume()).toEqual({ ok: true });
   expect((await queueStore.readMerged()).paused).toBeNull();
 });

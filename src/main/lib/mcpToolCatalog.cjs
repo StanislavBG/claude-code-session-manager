@@ -23,7 +23,7 @@ const { z } = require('zod');
 
 const CatalogEntrySchema = z.object({
   name: z.string().min(1),
-  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros']),
+  group: z.enum(['scheduler', 'chat', 'feedback', 'help', 'project-home', 'macros', 'customer-feedback']),
   purpose: z.string().min(1),
   whenToUse: z.string().min(1),
   whenNotToUse: z.string().min(1),
@@ -292,6 +292,31 @@ const MCP_TOOL_CATALOG = [
     },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or process.cwd()) when omitted. "
       + 'The document is CSP-stamped after it is written, so the viewer sandbox is the real network fence — these checks are defence in depth.',
+  },
+  {
+    name: 'customer_feedback_list',
+    group: 'customer-feedback',
+    purpose: "List the customers' feedback in the owner's local inbox (bug / feature / discussion items submitted "
+      + 'from the {F} feedback panel), optionally pulling new items from the feedback service first.',
+    whenToUse: 'Use to inspect what customers have submitted and each item\'s status. `pull` defaults to true '
+      + '(fetch new items first); pass `includeHidden: true` to include moderated-away items.',
+    whenNotToUse: 'WHEN NOT TO USE IT: this only works on the owner\'s machine (it needs the owner token) and is read-only. '
+      + 'Turning an item into an Epic is done by the human via Open as Epic in the {F} feedback panel — there is no tool '
+      + 'for it. A finding that belongs to another local project uses feedback_open_session instead.',
+    exampleArgs: { pull: true, includeHidden: false },
+    notes: 'Returns { ok, items, pulled? }. Not-configured machines get { ok:false, error } as an error result.',
+  },
+  {
+    name: 'customer_feedback_set_status',
+    group: 'customer-feedback',
+    purpose: 'Set the status of one customer feedback item (open | in_progress | resolved | wontfix) with an optional '
+      + 'note the customer sees, via the session-manager app\'s admin API.',
+    whenToUse: 'Use after inspecting an item with customer_feedback_list, to mark it in progress, resolved, or wontfix.',
+    whenNotToUse: 'WHEN NOT TO USE IT: this changes status only. Turning an item into an Epic is done by the human via '
+      + 'Open as Epic in the {F} feedback panel — there is no tool for it. Cross-project findings use '
+      + 'feedback_open_session. Never mark an item resolved unless the work has actually landed.',
+    exampleArgs: { id: 'fb_123', status: 'resolved', note: 'Fixed in 0.97.0' },
+    notes: 'The note is shown to the customer; keep it short (the inbox enforces a maximum length).',
   },
   {
     name: 'macro_list',

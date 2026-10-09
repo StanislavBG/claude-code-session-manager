@@ -16,6 +16,7 @@
     "src/main/lib/promptSessionSchema.cjs",
     "src/main/lib/agentPersonaSchema.cjs",
     "src/main/lib/scheduleJobSchema.cjs",
+    "src/main/lib/customerFeedbackAdminRoutes.cjs",
     "src/main/lib/customerFeedbackClient.cjs",
     "src/main/lib/customerFeedbackInbox.cjs",
     "src/main/lib/customerFeedbackIpc.cjs",

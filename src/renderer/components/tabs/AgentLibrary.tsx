@@ -6,7 +6,8 @@ import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { Choice } from '../ui/Choice'
 import { toast } from '../../state/toast'
-import type { AgentPersona, AgentPersonaSaveInput, AgentPersonaTag } from '../../../preload/api'
+import type { AgentPersona, AgentPersonaSaveInput } from '../../../preload/api'
+import { toKnownTags, toPersonaSaveInput } from '../../lib/personaSavePayload'
 import { TAG_LIBRARY } from '../../lib/tagLibrary'
 import { ticketTagTone } from '../../lib/ticketDisplay'
 import { takePendingPersonaName } from '../../lib/agentLibraryDeepLink'
@@ -53,7 +54,7 @@ interface Draft {
   effort: string
   color: string
   // string[], not AgentPersonaTag[] — mirrors AgentPersona.tags (read path stays permissive;
-  // a loaded persona may carry a stale/foreign tag). Filtered down to KNOWN_PERSONA_TAGS at
+  // a loaded persona may carry a stale/foreign tag). Filtered down to the known tags at
   // save time so the write-side schema (agentPersonaSchema.cjs's closed WorkType union) never
   // rejects a save just because the persona already had an unrecognized tag on disk.
   tags: string[]
@@ -74,13 +75,6 @@ function toDraft(p: AgentPersona): Draft {
 }
 
 const BLANK_DRAFT: Draft = { name: 'new-agent', description: '', tools: ['Read', 'Grep'], model: 'inherit', effort: 'inherit', color: '', tags: [], body: '' }
-
-// The write-side schema (agentPersonaSchema.cjs) only accepts these — a persona loaded with a
-// foreign tag must have it dropped before save, not merely re-sent verbatim (see Draft.tags).
-const KNOWN_PERSONA_TAGS = new Set<string>(TAG_LIBRARY.map((t) => t.tag))
-function toKnownTags(tags: string[]): AgentPersonaTag[] {
-  return tags.filter((t): t is AgentPersonaTag => KNOWN_PERSONA_TAGS.has(t))
-}
 
 /** Tooltip for the list's override badge: per project, which keys a frontmatter-only overlay sets, or "full body". */
 function overrideSummary(p: AgentPersona): string {
@@ -188,9 +182,9 @@ function AgentLibraryComponent() {
     setBusy(true)
     try {
       const existing = isNew ? null : saved
-      const payload: AgentPersonaSaveInput = {
+      const editorFields: AgentPersonaSaveInput = {
         name: obj.name,
-        originalName: isNew ? undefined : saved?.name,
+        originalName: existing?.name,
         description: obj.description,
         tools: obj.tools,
         model: obj.model,
@@ -200,13 +194,11 @@ function AgentLibraryComponent() {
         // loaded with a stale/foreign tag (permitted on read) must not make every future save
         // of that persona fail agentPersonaSchema.cjs's validation.
         tags: toKnownTags(obj.tags),
-        // The editor no longer exposes Action fields, but savePersona rewrites the whole file
-        // (omitting them would wipe them) — pass an existing persona's values through untouched.
-        projects: existing?.projects ?? undefined,
-        action: existing?.action ?? undefined,
-        actionLabel: existing?.actionLabel ?? undefined,
         body: obj.body,
       }
+      // savePersona rewrites the whole file, so an existing persona is the base: title and the
+      // legacy projects/action/actionLabel keys (not editable here) pass through untouched.
+      const payload: AgentPersonaSaveInput = existing ? toPersonaSaveInput(existing, editorFields) : editorFields
       await window.api.agents.savePersona(payload)
       toast.info(isNew ? `created ${obj.name}` : `saved ${obj.name}`)
       setDraft(null); setCreating(false)

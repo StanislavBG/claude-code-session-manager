@@ -235,4 +235,22 @@ describe('AgentLibrary', () => {
     expect(pinnedChipAfterRerender).toBeTruthy()
     expect(pinnedChipAfterRerender!.className).toContain('bg-accent/15')
   })
+
+  it('editing the description of a persona with a title saves the same title', async () => {
+    const titled: AgentPersona = { ...PERSONAS[0], title: 'Engineering — Software Engineer' }
+    const { api } = installWindowApiMock([titled, PERSONAS[1]])
+    const el = await mount()
+    const field = el.querySelector('textarea, input[value="Watch git history and drive the next publish."]') as HTMLTextAreaElement | HTMLInputElement
+    const proto = field instanceof window.HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
+    const nativeSetter = Object.getOwnPropertyDescriptor(proto, 'value')!.set!
+    await act(async () => {
+      nativeSetter.call(field, 'Edited description.')
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+      await Promise.resolve()
+    })
+    const save = Array.from(el.querySelectorAll('button')).find((b) => /^save$/i.test(b.textContent ?? ''))!
+    await act(async () => { save.dispatchEvent(new MouseEvent('click', { bubbles: true })); await Promise.resolve() })
+    expect(api.agents.savePersona).toHaveBeenCalledTimes(1)
+    expect(api.agents.savePersona.mock.calls[0][0]).toMatchObject({ description: 'Edited description.', title: 'Engineering — Software Engineer' })
+  })
 })

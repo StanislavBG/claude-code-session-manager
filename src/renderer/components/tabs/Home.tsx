@@ -37,6 +37,7 @@ import { projectNameFromCwd } from '../../lib/knownProjectAggregate'
 import { activeSessionRows, recentSessionEpicTitle, type ActiveSessionRow } from '../../lib/homeSessionRows'
 import { buildNeedsYouRows, type NeedsYouRow } from '../../lib/homeNeedsYou'
 import { setPendingPromptSessionId } from '../../lib/promptSessionDeepLink'
+import { runSchedulerNow } from '../../lib/schedulerActions'
 import { projectColorFor } from '../../lib/projectColor'
 import { openProjectTab } from '../../lib/homeOpenProject'
 import { useSessionSlots, setSessionSlots, type SlotSnapshot } from '../../lib/useSessionSlots'
@@ -348,6 +349,16 @@ function Hero({
 // `legend` panel (variants/home-a.jsx), but every line below describes a
 // REAL wired action in this codebase — no fictional Pace chart / breakdown
 // popovers, which this Epic deliberately did not build (see file header).
+//
+// Hand-written, so it drifts silently. Rule: change an entry in the same
+// commit as the behavior it describes. Source of truth per entry:
+//   Usage card         — tabs/home/UsageMeters.tsx, lib/usageWindow.ts
+//   Queued job         — QueuedCard (this file), tabs/home/QueuedJobPopover.tsx
+//   Needs-you row      — lib/homeNeedsYou.ts (the needs-you rows in this file)
+//   Active session row — lib/homeSessionRows.ts, ActiveSessionsCard (this file)
+//   Recent row         — lib/homeSessionRows.ts, lib/useKnownProjects.ts
+//   Project row        — lib/homeProjectRows.ts, lib/homeOpenProject.ts
+//   New session        — lib/homeOpenProject.ts, the New session picker in this file
 // ────────────────────────────────────────────────────────────────────
 const INTERACTIONS_LEGEND: { term: string; description: string }[] = [
   { term: 'Usage card', description: 'Read-only — shows the live 5-hour and weekly billing windows. Not clickable.' },
@@ -575,8 +586,7 @@ export function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void })
   const [openSlug, setOpenSlug] = useState<string | null>(null)
 
   const runNow = () => {
-    window.api.schedule.runNow()
-      .catch((err) => toast.error(err instanceof Error ? err.message : String(err)))
+    void runSchedulerNow()
     setOpenSlug(null)
   }
 

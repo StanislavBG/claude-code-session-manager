@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Z } from '../lib/zLayers'
+import { runSchedulerNow } from '../lib/schedulerActions'
 import { createPortal } from 'react-dom'
 import { useSessions } from '../state/sessions'
 import { useVoice } from '../state/voice'
@@ -117,7 +118,7 @@ export function buildCommands(): Command[] {
       id: 'scheduler-run-now',
       label: 'Scheduler — Run now',
       section: 'scheduler',
-      run: async () => { await window.api.schedule.runNow() },
+      run: async () => { await runSchedulerNow() },
     },
     {
       id: 'scheduler-force-tick',

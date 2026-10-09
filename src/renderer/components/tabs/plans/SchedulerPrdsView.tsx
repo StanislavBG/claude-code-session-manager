@@ -5,6 +5,7 @@ import { EmptyState } from '../../ui/EmptyState'
 import { Modal } from '../../ui/Modal'
 import { Tooltip } from '../../ui/Tooltip'
 import { serializePrdFile } from '../../../lib/prdFrontmatter'
+import { runSchedulerNow } from '../../../lib/schedulerActions'
 import { formatAgo } from '../../../lib/formatTime'
 import { toast } from '../../../state/toast'
 import { useScheduleState } from '../../../state/scheduleState'
@@ -372,7 +373,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
             <TBtn
               label="Run now"
               tip="Run all pending jobs immediately"
-              onClick={() => { window.api.schedule.runNow() }}
+              onClick={() => { void runSchedulerNow() }}
             />
             <TBtn
               label={showLog ? 'Hide log' : 'Last run log'}
@@ -545,7 +546,7 @@ export function SchedulerPrdsView({ scopeCwd = null }: { scopeCwd?: string | nul
                     <div className="flex flex-col gap-2 items-stretch px-[18px] py-4">
                       <button
                         type="button"
-                        onClick={() => window.api.schedule.runNow()}
+                        onClick={() => { void runSchedulerNow() }}
                         disabled={isRunning}
                         className="bg-fg text-bg rounded-lg px-[18px] py-2 text-[13px] font-semibold whitespace-nowrap disabled:opacity-50"
                       >

@@ -78,7 +78,7 @@ const { detectRateLimitInLog } = require('./lib/rateLimitDetect.cjs');
 const { stripAppOwnedChurn } = require('./lib/jobDirtFilter.cjs');
 const { GATE_AUTHORITY_VERDICTS, decideGateAuthority } = require('./lib/gateAuthority.cjs');
 const { resolveBindingRateLimitReset } = require('./lib/rateLimitWindow.cjs');
-const { isResetFresh, bindingWindow, degradedBudget } = require('./lib/usageCircuit.cjs');
+const { isResetFresh, bindingWindow, degradedBudget, meterFailureBudget } = require('./lib/usageCircuit.cjs');
 const { computeQueueHealth } = require('./lib/queueHealth.cjs');
 const { createLoadGate, topCpuConsumers } = require('./lib/loadGate.cjs');
 const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
@@ -3499,8 +3499,11 @@ function recordObservedReset(resetIso) {
 /** Pure: this poll/executor cycle's conservative budget while the meter is degraded. */
 function computeDegradedBudget() {
   return degradedBudget(lastGoodUsagePayload, {
-    observed429: lastFailureKind === 'meter_rate_limited',
-    resetsAt: cachedNextReset,
+    // Only an executor-observed rate limit (the paused.reason === 'rate_limit'
+    // path) may pin utilization; a 429 from the METER says nothing about the
+    // account. That pause already holds dispatch itself, so no evidence here.
+    observed429: false,
+    resetsAt: null,
     now: Date.now(),
     configuredCap: sessionSlots.snapshot().total,
   });
@@ -10388,8 +10391,17 @@ async function pollLoop() {
       // Don't update firstNon429FailureAt — 429s don't count toward the 30-min network-pause threshold.
       backoffMs = nextBackoffMs(backoffMs);
       backoffNextAt = Date.now() + backoffMs;
-      applyDegradedBudget();
-      console.log(`[scheduler] billing meter rate-limited (HTTP 429) — firing on degraded budget (util=${cachedUtilization}%, cap=${degradedConcurrencyCapValue}) (failure #${consecutiveFailures}); retry in ${backoffMs / 1000}s`);
+      const cachedBudget = meterFailureBudget({ cachedPayload: r.cached, staleSinceMs: r.staleSince, now: Date.now() });
+      if (cachedBudget) {
+        // Meter 429 ≠ account limit: trust the recent cached reading, full slot pool.
+        lastGoodUsagePayload = r.cached;
+        cachedUtilization = cachedBudget.utilization;
+        cachedBindingWindowName = cachedBudget.name;
+        degradedConcurrencyCapValue = null;
+      } else {
+        applyDegradedBudget();
+      }
+      console.log(`[scheduler] billing meter rate-limited (HTTP 429) — firing on ${cachedBudget ? 'cached' : 'degraded'} budget (util=${cachedUtilization}%, cap=${degradedConcurrencyCapValue}) (failure #${consecutiveFailures}); retry in ${backoffMs / 1000}s`);
       warnFailureStreakIfNeeded();
       persistSchedulerState();
       const cur = await readQueue();

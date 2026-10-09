@@ -137,6 +137,20 @@ function degradedBudget(lastGoodPayload, executorEvidence = {}) {
   return { utilization, concurrencyCap };
 }
 
+/**
+ * Budget while the METER (not the account) is rate-limited: a 429 from the
+ * usage endpoint says nothing about account usage, so a recent-enough cached
+ * payload is trusted as-is. Returns `{ utilization, degraded: false }` from
+ * the cache, or null (no/old cache) so the caller falls back to degradedBudget().
+ */
+function meterFailureBudget({ cachedPayload, staleSinceMs, now = Date.now(), maxStaleMs = 30 * 60 * 1000 } = {}) {
+  if (!cachedPayload || !Number.isFinite(staleSinceMs)) return null;
+  if (now - staleSinceMs > maxStaleMs) return null;
+  const window = bindingWindow(cachedPayload);
+  if (!Number.isFinite(window.utilization)) return null;
+  return { utilization: window.utilization, degraded: false, name: window.name };
+}
+
 /** Wraps `fn` so concurrent callers awaiting an in-flight call share one promise. */
 function singleFlight(fn) {
   let inFlight = null;
@@ -229,6 +243,7 @@ module.exports = {
   isResetFresh,
   bindingWindow,
   degradedBudget,
+  meterFailureBudget,
   degradedConcurrencyCap,
   singleFlight,
 };

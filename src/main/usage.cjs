@@ -302,10 +302,18 @@ async function fetchUsage() {
   }
 
   if (lastRateLimitedResult && retryNotBeforeMs && Date.now() < retryNotBeforeMs) {
-    return { ...lastRateLimitedResult, suppressed: true };
+    return withCachedPayload({ ...lastRateLimitedResult, suppressed: true });
   }
 
-  return singleFlightNetworkFetch();
+  return withCachedPayload(await singleFlightNetworkFetch());
+}
+
+/** Attaches the last good payload (+ its age anchor) to a 429 so callers can keep using it. */
+function withCachedPayload(r) {
+  if (r && r.kind === 'meter_rate_limited' && cache && cache.data) {
+    return { ...r, cached: cache.data, staleSince: cache.fetchedAt };
+  }
+  return r;
 }
 
 function registerBillingHandlers() {

@@ -15,6 +15,7 @@ import { clampTurnText } from '../lib/chatVerbosity'
 import { splitInjectedPreamble, describeInjectedBlocks } from '../lib/promptPreamble'
 import { splitStopSignal } from '../lib/stopSignal'
 import { formatAgo } from '../lib/formatTime'
+import { copyText as writeClipboard } from '../lib/clipboard'
 import { MarkdownPreview } from './tabs/editor/MarkdownPreview'
 import { InlineConsentTerminal } from './InlineConsentTerminal'
 import { type Attribution } from '../lib/chatAttribution'
@@ -34,21 +35,10 @@ function hasMarkdownList(text: string): boolean {
   return HAS_LIST_RE.test(text)
 }
 
-// Electron's permission handler (index.cjs) only grants media/audioCapture/
-// microphone, so navigator.clipboard.writeText() always rejects here — write
-// through the main-process IPC path instead (already used correctly by the
-// Recorder-export Copy-to-clipboard feature, PRD 412).
-function copyToClipboard(text: string, onDone: (ok: boolean) => void): void {
-  window.api.clipboard
-    .writeText(text)
-    .then((r) => onDone(!!r?.ok))
-    .catch(() => onDone(false))
-}
-
 export function UrlCallout({ url }: { url: string }) {
   const [copied, setCopied] = useState(false)
   const onCopy = () => {
-    copyToClipboard(url, (ok) => {
+    void writeClipboard(url).then((ok) => {
       if (ok) {
         setCopied(true)
         setTimeout(() => setCopied(false), 1100)
@@ -119,7 +109,7 @@ function FileCallout({
   const [previewText, setPreviewText] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const onCopy = () => {
-    copyToClipboard(path, (ok) => {
+    void writeClipboard(path).then((ok) => {
       if (ok) {
         setCopied(true)
         setTimeout(() => setCopied(false), 1100)
@@ -539,7 +529,7 @@ export function TurnRawFooter({
   const onCopy = () => {
     const text = rawOpen && rawText ? rawText : (copyText ?? '')
     if (!text) return
-    copyToClipboard(text, (ok) => {
+    void writeClipboard(text).then((ok) => {
       if (ok) {
         setCopied(true)
         setTimeout(() => setCopied(false), 1100)

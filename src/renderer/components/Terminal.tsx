@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import { useSessions } from '../state/sessions'
 import { useEditor } from '../state/editor'
 import { toast } from '../state/toast'
+import { copyText } from '../lib/clipboard'
 import { mountTerminalSettings, DEFAULT_TERMINAL_SETTINGS, TERMINAL_THEMES } from '../lib/terminalSettings'
 import { EpicsWorkspace } from './epics/EpicsWorkspace'
 import { fetchTerminalDigest } from '../lib/terminalDigest'
@@ -146,7 +147,7 @@ export function Terminal({ tabId, cwd }: Props) {
       if (e.ctrlKey && !e.shiftKey && !e.metaKey && (e.key === 'c' || e.key === 'C')) {
         const sel = term.getSelection()
         if (sel) {
-          navigator.clipboard.writeText(sel).catch(() => {})
+          void copyText(sel)
           term.clearSelection()
           return false
         }
@@ -155,7 +156,7 @@ export function Terminal({ tabId, cwd }: Props) {
       if (e.ctrlKey && e.shiftKey && e.key === 'C') {
         const sel = term.getSelection()
         if (sel) {
-          navigator.clipboard.writeText(sel).catch(() => {})
+          void copyText(sel)
           return false
         }
       }

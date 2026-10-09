@@ -13,6 +13,7 @@ import { useState } from 'react'
 import { Z } from '../../../lib/zLayers'
 import { useEditor } from '../../../state/editor'
 import { toast } from '../../../state/toast'
+import { copyText } from '../../../lib/clipboard'
 import { useActiveTab } from '../../../lib/useActiveTab'
 
 function basename(p: string): string {
@@ -100,12 +101,8 @@ export function DocumentMenu({ path, onRenamed, onDeleted }: Props) {
   const copyAsMarkdown = async () => {
     closeMenu()
     const text = buffer ?? ''
-    try {
-      await navigator.clipboard.writeText(text)
-      toast.info(`Copied ${text.length} chars`)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : `Couldn't copy ${name}`)
-    }
+    if (await copyText(text)) toast.info(`Copied ${text.length} chars`)
+    else toast.error(`Couldn't copy ${name}`)
   }
 
   const addToClaudeContext = () => {

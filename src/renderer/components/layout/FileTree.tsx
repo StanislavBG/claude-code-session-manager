@@ -23,6 +23,7 @@ import { Z } from '../../lib/zLayers'
 import type { FileEntry, GitFileStatusMap, GitFileStatusType } from '../../../preload/api'
 import { extOf, IMAGE_EXTS } from '../../state/editor'
 import { toast } from '../../state/toast'
+import { copyText } from '../../lib/clipboard'
 import { usePanelFocus, usePanelFocusRef } from '../../lib/panelFocus'
 import { readUiPrefs, writeUiPrefsPatch } from '../../lib/uiPrefs'
 import { readUiSettingsPrefs, writeUiSettingsPrefs } from '../../lib/uiSettingsPrefs'
@@ -606,7 +607,11 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
           onNewFolder={() => { setCreatePrompt({ parent: menu.node.path, kind: 'folder' }); setMenu(null) }}
           onOpenExternal={() => { window.api.shell.open({ as: 'openPath', path: menu.node.path }); setMenu(null) }}
           onShowInFinder={() => { window.api.shell.open({ as: 'revealPath', path: menu.node.path }); setMenu(null) }}
-          onCopyPath={() => { navigator.clipboard?.writeText(menu.node.path); setMenu(null) }}
+          onCopyPath={() => {
+            const p = menu.node.path
+            void copyText(p).then((ok) => { if (!ok) toast.error(`Couldn't copy path`) })
+            setMenu(null)
+          }}
           onSendToChat={() => { sendPathToChat(menu.node.path); setMenu(null) }}
         />
       )}

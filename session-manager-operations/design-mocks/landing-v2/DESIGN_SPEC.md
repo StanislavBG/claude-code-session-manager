@@ -223,6 +223,8 @@ canvas: offX = max(0, (vw - 1440*s) / 2), offY = max(0, (vh - 860*s) / 2)
 
 ### Canvas layout (1440x860, from the mock)
 
+> The Parts Bin bullet below is superseded by [2026-10-08 — two pages with a vertical page flip](#2026-10-08--two-pages-with-a-vertical-page-flip): the Parts Bin is no longer on the cover.
+
 - **Stripes:** two 40px rust bars at `left:1174` and `left:1226` (flanking the tag string at
   x=1220), `top:58` to the bottom, z-index 0 and `aria-hidden`. They are canvas-only; the
   mock's `stripes` prop is always on.
@@ -444,7 +446,7 @@ button hides the inactive labels with `display:none` and is as wide as its curre
   - the body as `<p>`;
   - bullets as a `<ul>`. Each `<li>` carries the `+` badge (`aria-hidden`).
   - The ghost number is `aria-hidden`.
-- **State:** the index starts at 0. There is no URL or hash sync in v1.
+- **State:** the index starts at 0. There is no URL or hash sync in v1. (Superseded for the page: see the Hash subsection of the 2026-10-08 section; the page, not the tab, syncs to `#parts`.)
 
 ### Chapter card (aside)
 
@@ -793,3 +795,96 @@ visitors no longer need Node or a terminal, and the app's Setup checklist instal
 Claude Code on first launch. The Price tag / Copy button sections above describe the retired
 npx layout and are superseded by `copy.json` where they differ. The end-card copy keys are
 unchanged here.
+
+## 2026-10-08 — two pages with a vertical page flip
+
+The cover was crowded, so the canvas is split into two "pages" that flip vertically like a book.
+The Parts Bin is no longer on the cover; the old "Canvas layout" Parts Bin bullet is superseded
+by this section.
+
+### Pages
+
+- Page 1 "cover": hero (headline, body, CTA row) + price tag + the two rust stripes.
+- Page 2 "parts": the Parts Bin panel alone.
+- The header (58px) is NOT part of either page: it stays fixed on top in canvas mode and does
+  not flip. The film dialog is unchanged.
+
+### Canvas geometry
+
+- The canvas stays 1440x860 with the same `layoutMode()` scale rule. Below the header is a page
+  stack 1440x802 (`.smlp-pages`); each page (`.smlp-page`) is absolutely positioned at inset 0
+  of the stack.
+- Cover: the hero row fills the page, content vertically centred (grid `align-content: center`),
+  same columns as today (`minmax(0,1fr) 360px`, gap 40, side padding 40). The stripes run the
+  full page height. A "turn" button sits centred 28px above the cover's bottom edge: `pages.next`
+  text plus a down chevron, ink 600, no card.
+- Parts page: a 52px top row with a centred "back" button (`pages.prev` with an up chevron),
+  then the Parts Bin panel with margin `0 40px 28px` filling the rest (722px tall). In that
+  taller panel the tabs grow to 44px tall with gap 6, the tab label is 17px, the middle column
+  title grows to 40px and the ghost number to 200px; the aside keeps its width (300).
+- Page dots: a vertical nav of 2 buttons fixed at the canvas right edge (centre x=1418),
+  vertically centred on the page stack, 12px dots inside 32x32 hit areas, active = ink fill,
+  inactive = ink 2px ring.
+
+### Flip
+
+- The stack has `perspective: 2400px`. The parts page always sits underneath; the cover sits on top.
+- Turning to page 2: the cover rotates around its TOP edge (`transform-origin: 50% 0`) from
+  `rotateX(0)` to `rotateX(-100deg)` with `backface-visibility: hidden`, plus a shading overlay
+  on the cover going 0 → 0.35 ink opacity, 700ms `cubic-bezier(.2,.7,.2,1)`. Turning back runs
+  it in reverse.
+- While a flip runs, further turn requests are ignored.
+- `prefers-reduced-motion: reduce` replaces the rotation with a 150ms opacity crossfade.
+
+### Inputs (canvas only)
+
+- Wheel: accumulate `deltaY` (`deltaMode` 1 → ×16, 2 → ×860) and turn once when |sum| ≥ 80.
+  After a turn, ignore wheel events until 450ms pass with no wheel event (absorbs trackpad
+  inertia). The listener is non-passive and calls `preventDefault`.
+- Keys: PageDown, ArrowDown, Space → next; PageUp, ArrowUp, Shift+Space → previous; Home →
+  page 1; End → page 2. Ignored when ctrl/meta/alt is held, when the film dialog is open, when
+  the event target is inside `[role=tablist]`, an input/textarea/select/contenteditable, or (Space
+  only) a button or link.
+- Touch: on `touchend`, a vertical swipe with |dy| ≥ 60 and |dy| > |dx| turns (swipe up = next).
+- Clicking a dot, the turn button or the back button turns.
+
+### Hash
+
+- Page 2 ⇔ `#parts`. Turning writes it with `history.replaceState` (page 1 clears the hash,
+  keeping path and query).
+- Loading with `#parts` opens page 2 with no animation.
+- A `hashchange` event turns to the matching page.
+
+### Accessibility
+
+- Each page is a `<section aria-label>` (`pages.aria.cover` / `pages.aria.parts`); the inactive
+  page gets `inert` and `aria-hidden="true"`.
+- The dots are a `<nav aria-label={pages.aria.nav}>` of buttons labelled by
+  `pages.aria.goToTemplate`, with `aria-current="page"` on the active one.
+- After a turn started by a button or a key, focus moves to the new page's first heading (h1 on
+  the cover; the Parts Bin h2 on page 2) via `tabIndex -1` + `focus({ preventScroll: true })`.
+
+### Reflow
+
+No flip. Both pages render stacked in normal document scroll, cover first; the parts section has
+`id="parts"` so `#parts` scrolls there natively. The dots, the turn button and the back button
+are not rendered. Everything else in the existing Reflow layout section stays as is.
+
+### Pure helpers
+
+In `layout.ts`, unit-tested:
+
+- `PAGE_COUNT = 2`
+- `pageForKey(key: string, shift: boolean, current: number): number | null`
+- `createWheelTurner(opts?: { threshold?: number; quietMs?: number }): (deltaY: number, deltaMode: number, now: number) => -1 | 0 | 1`
+- `swipeDirection(dx: number, dy: number): -1 | 0 | 1`
+- `pageFromHash(hash: string): number`
+- `hashForPage(page: number): string` (`'#parts'` or `''`)
+
+### Tests
+
+`tests/session-manager-landing.test.ts` covers every pure helper and the `pages` copy shape.
+`e2e/session-manager-landing.spec.ts` covers: cover shows no Parts Bin at 1440x860; wheel,
+PageDown, dot and button turn to page 2 and back; `#parts` deep link; Arrow keys inside the
+tablist still move tabs and do not turn the page; inert inactive page; reduced motion; and
+390x844 reflow shows both sections stacked with no horizontal overflow.

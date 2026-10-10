@@ -75,8 +75,10 @@ export function EpicApprovalBar({ epic }: { epic: PromptSession }) {
           data-testid="epic-approval-inbound-note"
           className="mb-2.5 max-w-[760px] text-[12.5px] leading-relaxed text-amber-300/90"
         >
-          Proposed by another project — <span className="font-mono">{inbound.fromCwd}</span>. That agent has not
-          read this codebase, so verify the claim here before approving.
+          Proposed by project <span className="font-mono">{inbound.label}</span>
+          {inbound.seriesLabel ? <> ({inbound.seriesLabel})</> : null} — <span className="font-mono">{inbound.fromCwd}</span>.
+          Review the Why, Plan and Acceptance criteria above before approving. That agent has not read this
+          codebase, so verify the claim here before approving.
         </p>
       )}
       <div className="flex items-center gap-2">

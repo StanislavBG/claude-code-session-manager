@@ -6,7 +6,8 @@ import { useScheduleState } from '../../state/scheduleState'
 import { useEpicTerminal, type EpicTerminalMode } from '../../state/epicTerminal'
 import { EpicTerminalPane } from './EpicTerminalPane'
 import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
-import { EpicStatusChip, EpicKindTag, WORKTREE_TONE } from './epic-primitives'
+import { EpicStatusChip, EpicKindTag, WORKTREE_TONE, InboundProposalCard } from './epic-primitives'
+import { inboundFeedbackOrigin, inboundSeriesSiblings } from '../../lib/epicOrigin'
 import { EpicQueuePanel } from './EpicQueuePanel'
 import { PrdStatusPill, SchBadge, verdictLabel, prdStatusFor, resolveValidatedStatus, STATUS_TONE, type PrdDisplayStatus } from '../tabs/scheduler/sched-primitives'
 import { Turn, EventDivider, AMBER_TINT, AMBER_TEXT } from '../ChatTranscriptTurn'
@@ -612,6 +613,11 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const hydrate = useChat((s) => s.hydrate)
   const sessions = usePromptSessions((s) => s.sessions)
   const sessionEvents = usePromptSessions((s) => s.events[epicId]) ?? EMPTY_EVENTS
+  const isInboundProposal = promptSession.status === 'proposed' && inboundFeedbackOrigin(promptSession) !== null
+  const proposalSiblings = useMemo(
+    () => (isInboundProposal ? inboundSeriesSiblings(promptSession, Object.values(sessions)) : []),
+    [isInboundProposal, promptSession, sessions],
+  )
   const markCompleted = usePromptSessions((s) => s.markCompleted)
   const resumeArchived = usePromptSessions((s) => s.resumeArchived)
   const appendPromptSessionEvent = usePromptSessions((s) => s.appendPromptSessionEvent)
@@ -1036,7 +1042,11 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
               </div>
             )}
 
-            {timeline.length === 0 && !running && (
+            {timeline.length === 0 && !running && isInboundProposal && (
+              <InboundProposalCard epic={promptSession} siblings={proposalSiblings} />
+            )}
+
+            {timeline.length === 0 && !running && !isInboundProposal && (
               <div
                 // A goal can run to thousands of words; cap the placeholder's
                 // height so it scrolls inside its own box rather than pushing

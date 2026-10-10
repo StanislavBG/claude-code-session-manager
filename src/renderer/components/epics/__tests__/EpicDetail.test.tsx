@@ -1097,6 +1097,48 @@ describe('EpicDetail (PRD 827)', () => {
     expect(seed!.textContent).toContain('A brand new Epic with no turns')
   })
 
+  describe('inbound proposal card in the empty proposed Epic', () => {
+    const PROPOSAL = {
+      motivation: 'Contract drift.',
+      originAsk: null,
+      plan: ['Step one'],
+      acceptanceCriteria: ['AC one'],
+      outOfScope: [],
+      series: null,
+    }
+    const proposed = async (source?: unknown) => {
+      installWindowApiMock()
+      const base = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Inbound title', 'discussion')
+      return { ...base, status: 'proposed', source } as typeof base
+    }
+    const inboundSource = (proposal?: unknown) => ({
+      producer: 'cross-project-feedback',
+      fromCwd: '/home/u/Projects/sender',
+      ...(proposal ? { proposal } : {}),
+    })
+
+    it('renders the proposal card instead of epic-seed-goal for a proposed inbound Epic', async () => {
+      const session = await proposed(inboundSource(PROPOSAL))
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+      expect(el.querySelector('[data-testid="inbound-proposal-card"]')).not.toBeNull()
+      expect(el.querySelector('[data-testid="epic-seed-goal"]')).toBeNull()
+    })
+
+    it('still renders epic-seed-goal for a proposed local Epic', async () => {
+      const session = await proposed(undefined)
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+      expect(el.querySelector('[data-testid="epic-seed-goal"]')).not.toBeNull()
+      expect(el.querySelector('[data-testid="inbound-proposal-card"]')).toBeNull()
+    })
+
+    it('renders the legacy report for an inbound Epic without a structured proposal', async () => {
+      const session = await proposed(inboundSource())
+      const el = mount(createElement(EpicDetail, { promptSession: session }))
+      expect(el.querySelector('[data-testid="inbound-proposal-report"]')).not.toBeNull()
+      expect(el.querySelector('[data-testid="epic-seed-goal"]')).toBeNull()
+    })
+  })
+
   describe('Detail dial + hidden-events divider (PRD 1468)', () => {
     it('CORE: the active verbosity segment is filled accent, inactive segments are dim text', async () => {
       installWindowApiMock()

@@ -47,6 +47,7 @@ const SKILL_MD = `---\nname: my-skill\ndescription: Does the skill thing. More d
 const AGENT_MD = `---\nname: my-agent\ndescription: Reviews things carefully.\n---\nAgent body.\n`
 
 function installWindowApiMock() {
+  const agentFiles: Record<string, string> = { 'my-agent.md': AGENT_MD }
   const changedHandlers: Array<(e: { path: string; mtimeMs: number; kind: 'change' }) => void> = []
   const api = {
     app: { homeDir: vi.fn().mockResolvedValue(HOME) },
@@ -54,7 +55,8 @@ function installWindowApiMock() {
       exists: vi.fn(async (path: string) => {
         return (
           path === `${PLUGIN_PATH}/.claude-plugin/plugin.json` ||
-          path === `${PLUGIN_PATH}/skills` // not used by exists, harmless
+          path === `${PLUGIN_PATH}/agents` ||
+          path === `${PLUGIN_PATH}/skills`
         )
       }),
       readJson: vi.fn(async (path: string) => {
@@ -70,8 +72,9 @@ function installWindowApiMock() {
         if (path === `${PLUGIN_PATH}/skills/my-skill/SKILL.md`) {
           return { exists: true, text: SKILL_MD, mtimeMs: 0, error: null }
         }
-        if (path === `${PLUGIN_PATH}/agents/my-agent.md`) {
-          return { exists: true, text: AGENT_MD, mtimeMs: 0, error: null }
+        const agentName = path.startsWith(`${PLUGIN_PATH}/agents/`) ? path.slice(`${PLUGIN_PATH}/agents/`.length) : null
+        if (agentName && agentFiles[agentName] !== undefined) {
+          return { exists: true, text: agentFiles[agentName], mtimeMs: 0, error: null }
         }
         return { exists: false, text: '', mtimeMs: 0, error: null }
       }),
@@ -97,16 +100,14 @@ function installWindowApiMock() {
           return {
             ok: true,
             error: null,
-            entries: [
-              {
-                name: 'my-agent.md',
-                path: `${PLUGIN_PATH}/agents/my-agent.md`,
-                isDirectory: false,
-                isFile: true,
-                mtimeMs: 0,
-                size: 0,
-              },
-            ],
+            entries: Object.keys(agentFiles).map((name) => ({
+              name,
+              path: `${PLUGIN_PATH}/agents/${name}`,
+              isDirectory: false,
+              isFile: true,
+              mtimeMs: 0,
+              size: 0,
+            })),
           }
         }
         return { ok: true, error: null, entries: [] }
@@ -125,7 +126,9 @@ function installWindowApiMock() {
   ;(window as unknown as { api: typeof api }).api = api
   const fireChange = () =>
     changedHandlers.forEach((h) => h({ path: `${HOME}/.claude/plugins/installed_plugins.json`, mtimeMs: 1, kind: 'change' }))
-  return Object.assign(api, { fireChange })
+  const fireAt = (path: string) =>
+    changedHandlers.forEach((h) => h({ path, mtimeMs: 1, kind: 'change' }))
+  return Object.assign(api, { fireChange, fireAt, agentFiles })
 }
 
 const flush = () => flushAsync(5)
@@ -399,5 +402,114 @@ describe('Plugins drill-in page', () => {
     expect(rows.find((r) => r.textContent?.includes('demo'))).toBeTruthy()
     expect(rows.find((r) => r.textContent?.includes('bare'))?.textContent).toContain('inspection failed')
     act(() => root.unmount())
+  })
+
+  describe('live detail reload', () => {
+    const NEW_AGENT_MD = `---\nname: new-agent\ndescription: Freshly added.\n---\n`
+    const DEBOUNCE_MS = 250
+
+    const openAgents = async (api: ReturnType<typeof installWindowApiMock>, root: ReturnType<typeof createRoot>) => {
+      await openDemoDrillIn(root)
+      const agentsButton = Array.from(container.querySelectorAll('button')).find((b) =>
+        b.textContent?.trim().startsWith('Agents'),
+      ) as HTMLButtonElement
+      act(() => {
+        agentsButton.click()
+      })
+      await flush()
+      api.config.listDir.mockClear()
+    }
+    const advance = async (ms: number) => {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(ms)
+      })
+      await flushAsync(30)
+    }
+    const agentListCalls = (api: ReturnType<typeof installWindowApiMock>) =>
+      api.config.listDir.mock.calls.filter((c) => c[0] === `${PLUGIN_PATH}/agents`).length
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('reloads once after a change on agents/ and shows the new agent; rapid events coalesce; close unwatches', async () => {
+      const api = installWindowApiMock()
+      const root = createRoot(container)
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      await openAgents(api, root)
+
+      expect(api.config.watch).toHaveBeenCalledWith(
+        expect.arrayContaining([`${PLUGIN_PATH}/agents`, `${PLUGIN_PATH}/.claude-plugin/plugin.json`]),
+        { depth: 0 },
+      )
+      const watched = api.config.watch.mock.calls.at(-1)![0] as string[]
+      expect(watched.every((p) => p.startsWith(PLUGIN_PATH))).toBe(true)
+      expect(watched).not.toContain(`${PLUGIN_PATH}/commands`)
+
+      api.agentFiles['new-agent.md'] = NEW_AGENT_MD
+      for (let i = 0; i < 10; i++) {
+        act(() => api.fireAt(`${PLUGIN_PATH}/agents`))
+        await advance(20)
+      }
+      expect(agentListCalls(api)).toBe(0)
+      expect(container.textContent).toContain('my-agent')
+      await advance(DEBOUNCE_MS)
+
+      expect(agentListCalls(api)).toBe(1)
+      expect(container.textContent).toContain('new-agent')
+      expect(container.textContent).toContain('Freshly added.')
+
+      const backLink = Array.from(container.querySelectorAll('button')).find((b) =>
+        b.textContent?.includes('Plugins'),
+      ) as HTMLButtonElement
+      api.config.unwatch.mockClear()
+      act(() => backLink.click())
+      await flush()
+      expect(api.config.unwatch).toHaveBeenCalledWith(expect.arrayContaining([`${PLUGIN_PATH}/agents`]), { depth: 0 })
+      act(() => root.unmount())
+    })
+
+    it('keeps the previous detail and toasts when a reload fails', async () => {
+      const api = installWindowApiMock()
+      const root = createRoot(container)
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      await openAgents(api, root)
+
+      api.config.readText.mockRejectedValue(new Error('EIO'))
+      act(() => api.fireAt(`${PLUGIN_PATH}/agents`))
+      await advance(DEBOUNCE_MS)
+
+      expect(toastError).toHaveBeenCalledTimes(1)
+      expect(String(toastError.mock.calls[0][0])).toContain('EIO')
+      expect(container.textContent).toContain('Reviews things carefully.')
+      act(() => root.unmount())
+    })
+
+    it('follows an in-flight reload with at most one trailing reload', async () => {
+      const api = installWindowApiMock()
+      const root = createRoot(container)
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+      await openAgents(api, root)
+
+      const baseline = api.config.listDir.getMockImplementation()!
+      let release!: () => void
+      const gate = new Promise<void>((r) => (release = r))
+      api.config.listDir.mockImplementationOnce(async (...a: Parameters<typeof baseline>) => {
+        await gate
+        return baseline(...a)
+      })
+      act(() => api.fireAt(`${PLUGIN_PATH}/agents`))
+      await advance(DEBOUNCE_MS)
+      act(() => api.fireAt(`${PLUGIN_PATH}/agents`))
+      await advance(DEBOUNCE_MS)
+      act(() => api.fireAt(`${PLUGIN_PATH}/agents`))
+      await advance(DEBOUNCE_MS)
+      expect(container.textContent).toContain('my-agent')
+
+      release()
+      await advance(DEBOUNCE_MS)
+      expect(agentListCalls(api)).toBe(2)
+      act(() => root.unmount())
+    })
   })
 })

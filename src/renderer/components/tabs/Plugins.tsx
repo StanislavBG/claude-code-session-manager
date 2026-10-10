@@ -412,6 +412,18 @@ interface McpEntry {
   description: string | null
 }
 
+const DETAIL_RELOAD_DEBOUNCE_MS = 250
+/** Plugin component locations (relative to the install path) that feed the drill-in. */
+const COMPONENT_WATCH_SUFFIXES = [
+  'hooks/hooks.json',
+  '.mcp.json',
+  '.lsp.json',
+  'agents',
+  'skills',
+  'commands',
+  '.claude-plugin/plugin.json',
+] as const
+
 type SectionKey = 'skills' | 'agents' | 'mcp' | 'hooks' | 'monitors' | 'lsp' | 'files'
 
 /**
@@ -436,50 +448,61 @@ function PluginHomePage({
   const [browsingSkill, setBrowsingSkill] = useState<PluginSkillEntry | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
+  const [watchPaths, setWatchPaths] = useState<string[]>([])
+  const loadSeq = useRef(0)
+  const activePicked = useRef(false)
+
+  const loadDetail = useCallback(async () => {
     if (!home) return
-    let cancelled = false
-    ;(async () => {
-      setLoading(true)
-      try {
-        const [skillsDir, agentFiles, mcpJson, binFiles] = await Promise.all([
-          resolveInstalledPluginSkillsDir(row.name, row.path, home),
-          listOrEmpty(`${row.path}/agents`, { filesOnly: true }),
-          row.hasMcp ? window.api.config.readJson(`${row.path}/.mcp.json`) : Promise.resolve(null),
-          listOrEmpty(`${row.path}/bin`, { filesOnly: true }),
-        ])
+    const seq = ++loadSeq.current
+    try {
+      const [skillsDir, agentFiles, mcpJson, binFiles, existing] = await Promise.all([
+        resolveInstalledPluginSkillsDir(row.name, row.path, home),
+        listOrEmpty(`${row.path}/agents`, { filesOnly: true }),
+        row.hasMcp ? window.api.config.readJson(`${row.path}/.mcp.json`) : Promise.resolve(null),
+        listOrEmpty(`${row.path}/bin`, { filesOnly: true }),
+        Promise.all(
+          COMPONENT_WATCH_SUFFIXES.map(async (suffix) =>
+            (await window.api.config.exists(`${row.path}/${suffix}`)) ? `${row.path}/${suffix}` : null,
+          ),
+        ),
+      ])
 
-        const skillEntries = skillsDir ? await listPluginSkills(skillsDir) : []
+      const skillEntries = skillsDir ? await listPluginSkills(skillsDir) : []
 
-        const agentMdFiles = agentFiles.filter((f) => f.endsWith('.md'))
-        const agentReads = await Promise.all(
-          agentMdFiles.map((name) => window.api.config.readText(`${row.path}/agents/${name}`)),
-        )
-        const agentEntries: AgentEntry[] = []
-        agentMdFiles.forEach((name, i) => {
-          const r = agentReads[i]
-          if (!r.exists) return
-          const meta = parseSkillMeta(r.text)
-          agentEntries.push({ id: name, name: meta.name ?? name.replace(/\.md$/, ''), description: meta.description })
-        })
+      const agentMdFiles = agentFiles.filter((f) => f.endsWith('.md'))
+      const agentReads = await Promise.all(
+        agentMdFiles.map((name) => window.api.config.readText(`${row.path}/agents/${name}`)),
+      )
+      const agentEntries: AgentEntry[] = []
+      agentMdFiles.forEach((name, i) => {
+        const r = agentReads[i]
+        if (!r.exists) return
+        const meta = parseSkillMeta(r.text)
+        agentEntries.push({ id: name, name: meta.name ?? name.replace(/\.md$/, ''), description: meta.description })
+      })
 
-        const mcpEntries: McpEntry[] = []
-        if (mcpJson && mcpJson.exists && !mcpJson.parseError && mcpJson.data && typeof mcpJson.data === 'object') {
-          const servers = (mcpJson.data as Record<string, unknown>).mcpServers
-          if (servers && typeof servers === 'object') {
-            for (const [name, def] of Object.entries(servers as Record<string, unknown>)) {
-              const command =
-                def && typeof def === 'object' ? (def as Record<string, unknown>).command : undefined
-              mcpEntries.push({ id: name, name, description: typeof command === 'string' ? command : null })
-            }
+      const mcpEntries: McpEntry[] = []
+      if (mcpJson && mcpJson.exists && !mcpJson.parseError && mcpJson.data && typeof mcpJson.data === 'object') {
+        const servers = (mcpJson.data as Record<string, unknown>).mcpServers
+        if (servers && typeof servers === 'object') {
+          for (const [name, def] of Object.entries(servers as Record<string, unknown>)) {
+            const command =
+              def && typeof def === 'object' ? (def as Record<string, unknown>).command : undefined
+            mcpEntries.push({ id: name, name, description: typeof command === 'string' ? command : null })
           }
         }
+      }
 
-        if (cancelled) return
-        setSkills(skillEntries)
-        setAgents(agentEntries)
-        setMcpServers(mcpEntries)
-        setFiles(binFiles)
+      if (seq !== loadSeq.current) return
+      setSkills(skillEntries)
+      setAgents(agentEntries)
+      setMcpServers(mcpEntries)
+      setFiles(binFiles)
+      const nextWatch = existing.filter((p): p is string => p !== null)
+      setWatchPaths((prev) => (prev.join('\0') === nextWatch.join('\0') ? prev : nextWatch))
+      if (!activePicked.current) {
+        activePicked.current = true
         setActive(
           skillEntries.length > 0
             ? 'skills'
@@ -495,21 +518,57 @@ function PluginHomePage({
                       ? 'lsp'
                       : 'files',
         )
-      } catch (err) {
-        if (cancelled) return
-        toast.error(`Failed to load plugin contents: ${err instanceof Error ? err.message : String(err)}`)
-        setSkills([])
-        setAgents([])
-        setMcpServers([])
-        setFiles([])
-      } finally {
-        if (!cancelled) setLoading(false)
       }
-    })()
-    return () => {
-      cancelled = true
+    } catch (err) {
+      if (seq !== loadSeq.current) return
+      toast.error(`Failed to load plugin contents: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      if (seq === loadSeq.current) setLoading(false)
     }
   }, [row.path, row.name, row.hasMcp, row.hooks, row.monitors, row.hasLsp, home])
+
+  useEffect(() => {
+    setLoading(true)
+    void loadDetail()
+    return () => {
+      loadSeq.current += 1
+    }
+  }, [loadDetail])
+
+  // Coalesce change bursts (250 ms), and never run two reloads at once: a
+  // change landing mid-reload queues exactly one trailing reload.
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const reloading = useRef(false)
+  const reloadAgain = useRef(false)
+  const runReload = useCallback(async () => {
+    if (reloading.current) {
+      reloadAgain.current = true
+      return
+    }
+    reloading.current = true
+    try {
+      do {
+        reloadAgain.current = false
+        await loadDetail()
+      } while (reloadAgain.current)
+    } finally {
+      reloading.current = false
+    }
+  }, [loadDetail])
+  const onComponentChange = useCallback(() => {
+    if (reloadTimer.current) clearTimeout(reloadTimer.current)
+    reloadTimer.current = setTimeout(() => {
+      reloadTimer.current = null
+      void runReload()
+    }, DETAIL_RELOAD_DEBOUNCE_MS)
+  }, [runReload])
+  useEffect(
+    () => () => {
+      if (reloadTimer.current) clearTimeout(reloadTimer.current)
+    },
+    [],
+  )
+  useConfigDirWatch(watchPaths, onComponentChange, { depth: 0 })
 
   const sections: Array<{ key: SectionKey; label: string; count: number }> = [
     { key: 'skills', label: 'Skills', count: skills.length },

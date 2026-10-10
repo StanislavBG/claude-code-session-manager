@@ -234,6 +234,12 @@ contextBridge.exposeInMainWorld('api', {
     aggregate: (req) => ipcRenderer.invoke('history:aggregate', req),
     scanProjects: () => ipcRenderer.invoke('history:scan-projects'),
     dashboard: (req) => ipcRenderer.invoke('history:dashboard', req),
+    // Fired (throttled) after main appends new days to the rollup.
+    onUpdated: (handler) => {
+      const listener = () => handler();
+      ipcRenderer.on('history:updated', listener);
+      return () => ipcRenderer.removeListener('history:updated', listener);
+    },
   },
   files: {
     list: (path, showHidden) => ipcRenderer.invoke('files:list', { path, showHidden }),

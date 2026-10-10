@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { RemoteMachinesSection } from '../RemoteMachinesSection'
 import { useToast } from '../../../state/toast'
+import { useLayout } from '../../../state/layout'
 import type { RemoteMachinePeer } from '../../../../preload/api'
 
 let container: HTMLDivElement | null = null
@@ -97,6 +98,27 @@ describe('RemoteMachinesSection', () => {
     expect(api.connect).toHaveBeenCalledWith('p1')
     await click(q('remote-machine-revoke'))
     expect(api.remove).toHaveBeenCalledWith('p1')
+  })
+
+  it('has no inline terminal/sessions buttons even when online', async () => {
+    peers = [peer({ status: 'authenticated' })]
+    await mount()
+    expect(q('remote-machine-terminal')).toBeNull()
+    expect(q('remote-machine-sessions')).toBeNull()
+  })
+
+  it('open-view button routes to the remote view when a peer is paired', async () => {
+    const openPanel = vi.fn()
+    useLayout.setState({ openPanel })
+    peers = [peer()]
+    await mount()
+    await click(q('remote-machines-open-view'))
+    expect(openPanel).toHaveBeenCalledWith('remote')
+  })
+
+  it('hides the open-view button with no peers', async () => {
+    await mount()
+    expect(q('remote-machines-open-view')).toBeNull()
   })
 
   it('unsubscribes from status on unmount', async () => {

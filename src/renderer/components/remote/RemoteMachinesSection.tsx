@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useToast } from '../../state/toast'
+import { useLayout } from '../../state/layout'
 import { Badge } from '../ui/Badge'
 import { SectionLabel, PillButton, RemoteCard, RevokeButton, SasBanner, EmptyState } from './remoteUi'
-import { RemoteTerminalPanel } from './RemoteTerminalPanel'
-import { RemoteSessionsPanel } from './RemoteSessionsPanel'
 import { useRemotePeers } from './useRemotePeers'
 import type { RemoteMachinePeer, RemoteClientStatus, RemoteClientDevice } from '../../../preload/api'
 
@@ -12,23 +11,18 @@ const errMsg = (e: unknown) => (e as Error)?.message || String(e)
 
 const UNPAIRED_REASONS = ['relay_client_unpaired', 'token_revoked']
 
-type OpenPanel = { peerId: string; kind: 'terminal' | 'sessions' } | null
-
 function MachineCard({
-  peer, panel, onConnect, onRevoke, onTogglePanel, onConfirmSas,
+  peer, onConnect, onRevoke, onConfirmSas,
 }: {
   peer: RemoteMachinePeer
-  panel: OpenPanel
   onConnect: (id: string) => void
   onRevoke: (id: string) => void
-  onTogglePanel: (id: string, kind: 'terminal' | 'sessions') => void
   onConfirmSas: (id: string) => void
 }) {
   const online = peer.status === 'authenticated'
   const unavailable = peer.status === 'failed' && peer.reason === UNAVAILABLE
   const connecting = peer.status === 'connecting'
   const lastSeen = new Date(peer.pairedAt).toLocaleString()
-  const open = panel?.peerId === peer.peerId ? panel.kind : null
   return (
     <div className="space-y-2" data-testid="remote-machine-row">
       <RemoteCard
@@ -39,20 +33,11 @@ function MachineCard({
         subtitle={`${peer.peerId} · last seen ${lastSeen}`}
         action={
           <div className="flex items-center gap-2 shrink-0">
-            {online ? (
-              <>
-                <PillButton testId="remote-machine-terminal" icon="terminal" onClick={() => onTogglePanel(peer.peerId, 'terminal')}>
-                  Open terminal
-                </PillButton>
-                <PillButton testId="remote-machine-sessions" onClick={() => onTogglePanel(peer.peerId, 'sessions')}>
-                  Sessions
-                </PillButton>
-              </>
-            ) : !unavailable && peer.status !== 'pending_sas' ? (
+            {!online && !unavailable && peer.status !== 'pending_sas' && (
               <PillButton testId="remote-machine-connect" disabled={connecting} onClick={() => onConnect(peer.peerId)}>
                 {connecting ? 'Connecting…' : 'Connect'}
               </PillButton>
-            ) : null}
+            )}
             <RevokeButton testId="remote-machine-revoke" onClick={() => onRevoke(peer.peerId)}>Revoke</RevokeButton>
           </div>
         }
@@ -72,10 +57,6 @@ function MachineCard({
           onConfirm={() => onConfirmSas(peer.peerId)}
         />
       )}
-      {open === 'terminal' && (
-        <RemoteTerminalPanel peerId={peer.peerId} machineName={peer.machineName} cwd="" onClose={() => onTogglePanel(peer.peerId, 'terminal')} />
-      )}
-      {open === 'sessions' && <RemoteSessionsPanel peerId={peer.peerId} machineName={peer.machineName} />}
     </div>
   )
 }
@@ -217,7 +198,7 @@ function ClientPairing({
 /** Settings → Phone remote: paired remote Session Managers (desktop-to-desktop). */
 export function RemoteMachinesSection() {
   const showToast = useToast((s) => s.show)
-  const [panel, setPanel] = useState<OpenPanel>(null)
+  const openPanel = useLayout((s) => s.openPanel)
   const [paired, setPaired] = useState(false)
 
   const readAuth = useCallback(async () => {
@@ -236,18 +217,20 @@ export function RemoteMachinesSection() {
 
   useEffect(() => { void readAuth() }, [readAuth])
 
-  const onRevoke = useCallback(async (peerId: string) => {
-    await revoke(peerId)
-    setPanel((cur) => (cur?.peerId === peerId ? null : cur))
-  }, [revoke])
-
-  const onTogglePanel = useCallback((peerId: string, kind: 'terminal' | 'sessions') => {
-    setPanel((cur) => (cur?.peerId === peerId && cur.kind === kind ? null : { peerId, kind }))
-  }, [])
+  const onRevoke = useCallback((peerId: string) => revoke(peerId), [revoke])
 
   return (
     <div data-testid="remote-machines">
-      <SectionLabel right={peers.length > 0 ? <span className="text-[11.5px] text-fg-faint">{peers.length} paired</span> : undefined}>
+      <SectionLabel
+        right={peers.length > 0 ? (
+          <div className="flex items-center gap-2">
+            <span className="text-[11.5px] text-fg-faint">{peers.length} paired</span>
+            <PillButton testId="remote-machines-open-view" onClick={() => openPanel('remote')}>
+              Open Remote view
+            </PillButton>
+          </div>
+        ) : undefined}
+      >
         Remote machines
       </SectionLabel>
       <ClientPairing paired={paired} peers={peers} onAuthChanged={() => { void readAuth() }} onAdded={() => { void refresh() }} />
@@ -259,10 +242,8 @@ export function RemoteMachinesSection() {
             <MachineCard
               key={p.peerId}
               peer={p}
-              panel={panel}
               onConnect={onConnect}
               onRevoke={onRevoke}
-              onTogglePanel={onTogglePanel}
               onConfirmSas={onConfirmSas}
             />
           ))}

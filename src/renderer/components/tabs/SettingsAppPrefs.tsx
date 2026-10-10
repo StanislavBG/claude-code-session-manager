@@ -2,6 +2,7 @@ import { rawModelOptions, useRawSessionModel } from '../../lib/rawSessionModel'
 import { useModelCatalog } from '../../lib/useModelCatalog'
 import { useDensity } from '../../lib/useDensity'
 import { Choice } from '../ui/Choice'
+import { SettingsUpdates } from './SettingsUpdates'
 
 const DENSITY_LABELS = { compact: 'Compact', roomy: 'Roomy' }
 
@@ -46,6 +47,8 @@ export function SettingsAppPrefs() {
           </span>
         </div>
       </section>
+
+      <SettingsUpdates />
     </div>
   )
 }

@@ -1639,7 +1639,16 @@ export interface WebRemoteStatus {
   e2eState: 'idle' | 'pending_sas' | 'authenticated' | 'failed';
   /** 6-digit Short Authentication String pending user confirmation, or null. */
   pendingSas: string | null;
+  /** Every connected client's E2E state (no key material). */
+  clients: WebRemoteClientStatus[];
   devices: WebRemoteDevice[];
+}
+
+export interface WebRemoteClientStatus {
+  key: string;
+  clientId: string | null;
+  state: 'idle' | 'pending_sas' | 'authenticated' | 'failed';
+  pendingSas: string | null;
 }
 
 export interface WebRemotePairResult {
@@ -2180,8 +2189,9 @@ export interface SessionManagerAPI {
     /** Subscribe to the completion event broadcast after revokeAll. */
     onRevokedAll: (handler: (ev: { revokedCount: number }) => void) => () => void;
     /** Confirm that the SAS shown on the desktop matches the browser — marks the
-     *  E2E session as authenticated and unblocks MUTATE-tier commands. */
-    confirmSas: () => Promise<WebRemoteMutationResult>;
+     *  E2E session as authenticated and unblocks MUTATE-tier commands. Pass the
+     *  client's `key` when several clients are pending (else `ambiguous_pending_sas`). */
+    confirmSas: (clientKey?: string) => Promise<WebRemoteMutationResult>;
   };
   chat: {
     /** Spawn a headless `claude -p` run for a tab. Results arrive via the on* listeners. */

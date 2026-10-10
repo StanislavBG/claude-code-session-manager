@@ -237,12 +237,26 @@ function anyAuthenticated() {
   return _clients.authenticated().length > 0;
 }
 
-// Client the confirm-sas IPC acts on: 'legacy' if pending, else the only pending client.
-function pendingClient() {
-  const legacy = _clients.get(LEGACY_CLIENT_KEY);
-  if (legacy && legacy.e2e.state === 'pending_sas') return legacy;
-  const pending = _clients.values().filter((r) => r.e2e.state === 'pending_sas');
-  return pending.length === 1 ? pending[0] : null;
+// Every client currently awaiting SAS confirmation.
+function pendingClients() {
+  return _clients.values().filter((r) => r.e2e.state === 'pending_sas');
+}
+
+const MAX_PINNED_PEER_KEYS = 20;
+
+// True when `pubKey` is pinned on `device` (new list, or the legacy single key — read-only compat).
+function isPinnedPeerKey(device, pubKey) {
+  if (!pubKey) return false;
+  if (device.verifiedPeerPubKey && device.verifiedPeerPubKey === pubKey) return true;
+  return Array.isArray(device.verifiedPeerPubKeys) && device.verifiedPeerPubKeys.some((p) => p && p.pubKey === pubKey);
+}
+
+// Append a pin (never removing another client's), dedupe by pubKey, keep the newest MAX.
+function addPinnedPeerKey(device, pubKey, clientId) {
+  const prev = Array.isArray(device.verifiedPeerPubKeys) ? device.verifiedPeerPubKeys : [];
+  const next = prev.filter((p) => p && p.pubKey !== pubKey);
+  next.push({ pubKey, clientId: clientId ?? null, pinnedAt: new Date().toISOString() });
+  return next.slice(-MAX_PINNED_PEER_KEYS);
 }
 
 // ─── WebSocket lifecycle ──────────────────────────────────────────────────────
@@ -264,6 +278,12 @@ function computeStatus(cfg) {
     e2eAuthenticated: connected && authed !== null,
     e2eState: connected ? e2eState : 'idle',
     pendingSas: connected && !authed && pending ? pending.e2e.pendingSas : null,
+    clients: _clients.values().map((r) => ({
+      key: r.key,
+      clientId: r.clientId ?? null,
+      state: r.e2e.state,
+      pendingSas: r.e2e.state === 'pending_sas' ? r.e2e.pendingSas : null,
+    })),
     devices: (cfg.devices || []).map(({ deviceId, deviceName, issuedAt, lastConnectedAt }) => ({
       deviceId, deviceName, issuedAt, lastConnectedAt,
     })),
@@ -914,7 +934,7 @@ async function handleMessage(raw, device) {
       // manually SAS-confirmed once, skip pending_sas and auto-authenticate — the
       // user already verified this browser. A different/first-seen pubKey always
       // falls through to the manual pending_sas flow below, unchanged.
-      if (device.verifiedPeerPubKey && device.verifiedPeerPubKey === browserPubKey) {
+      if (isPinnedPeerKey(device, browserPubKey)) {
         client.e2e = makeState('authenticated', sessionKey, null);
         finalizeE2eAuthenticated('E2E session auto-authenticated — pinned browser key matched', client);
         respond(id, undefined, 'e2e:ready', client);
@@ -1242,6 +1262,7 @@ async function pair(otp) {
     // Set once a browser's SAS is manually confirmed; TOFU-pinned for auto-trust
     // on future reconnects from the same (deviceId, browserPubKey) pair.
     verifiedPeerPubKey: null,
+    verifiedPeerPubKeys: [],
   }];
 
   await saveConfig({ ...cfg, devices });
@@ -1304,8 +1325,19 @@ function registerRemoteHandlers() {
   // User confirmed that the SAS shown on both desktop and browser match.
   // Returns ok:false if the session is not in the pending_sas state (e.g. key
   // missing, already failed, already authenticated, or reconnected).
-  ipcMain.handle('webRemote:confirm-sas', async () => {
-    const target = pendingClient() || _clients.get(LEGACY_CLIENT_KEY) || makeClientlessState();
+  ipcMain.handle('webRemote:confirm-sas', validated(schemas.webRemoteConfirmSas, async (arg) => {
+    const clientKey = arg?.clientKey;
+    let target;
+    if (clientKey !== undefined) {
+      target = _clients.get(clientKey) || makeClientlessState();
+    } else {
+      const pending = pendingClients();
+      if (pending.length > 1) {
+        logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'confirm-sas rejected — multiple clients pending', meta: { pending: pending.length } });
+        return { ok: false, error: 'ambiguous_pending_sas' };
+      }
+      target = pending[0] || _clients.get(LEGACY_CLIENT_KEY) || makeClientlessState();
+    }
     const { ok, error, next } = confirmSasLogic(target.e2e);
     if (!ok) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'confirm-sas rejected — wrong state', meta: { state: target.e2e.state, error } });
@@ -1313,12 +1345,14 @@ function registerRemoteHandlers() {
     }
     target.e2e = next;
     // Pin this browser's pubkey to the device so future reconnects with the same
-    // key auto-authenticate (see e2e:hello above) instead of re-prompting forever.
+    // key auto-authenticate (see e2e:hello above). Appends; other clients' pins stay.
     if (target.peerPubKey && target.deviceId) {
       try {
         const cfg = await loadConfig();
         const devices = (cfg.devices || []).map((d) =>
-          d.deviceId === target.deviceId ? { ...d, verifiedPeerPubKey: target.peerPubKey } : d
+          d.deviceId === target.deviceId
+            ? { ...d, verifiedPeerPubKeys: addPinnedPeerKey(d, target.peerPubKey, target.clientId) }
+            : d
         );
         await saveConfig({ ...cfg, devices });
       } catch (e) {
@@ -1330,7 +1364,7 @@ function registerRemoteHandlers() {
     // SESSION_LIST_PUSH_MS for the first useful data.
     finalizeE2eAuthenticated('E2E session authenticated — SAS confirmed by user', target);
     return { ok: true };
-  });
+  }));
 
   ipcMain.handle('webRemote:enable', async () => {
     const cfg = await loadConfig();
@@ -1434,6 +1468,7 @@ module.exports = {
     getDispatchMap,
     buildRemoteSessionList,
     setWs: (ws) => { _ws = ws; },
+    invalidateConfigCache,
     setE2eAuthenticated: (key, clientKey = LEGACY_CLIENT_KEY) => {
       _clients.getOrCreate(clientKey).e2e = makeState('authenticated', key, null);
     },

@@ -158,6 +158,60 @@ describe('web-remote multi-client E2E', () => {
   })
 })
 
+describe('web-remote per-client SAS pins', () => {
+  const deviceKeys = genP256KeyPairB64()
+  const deviceId = 'device-pins'
+  const device = {
+    deviceId, deviceToken: 'tok', e2ePrivateKey: deviceKeys.priv, e2ePublicKey: deviceKeys.pub,
+    deviceName: 'Pins', issuedAt: new Date(0).toISOString(), lastConnectedAt: null, verifiedPeerPubKey: null,
+  }
+  const sent = []
+  const fakeWs = { readyState: 1, send: (m) => sent.push(JSON.parse(m)), terminate: () => {} }
+  const hello = (conn, pub, id, clientId) => webRemote._internal.handleMessage(
+    JSON.stringify({ type: 'e2e:hello', id, fromConn: conn, fromClientId: clientId, payload: { pubKey: pub } }), device)
+
+  it('confirms one client at a time, keeps both pins, auto-authenticates pinned keys', async () => {
+    await writeConfig({ remoteEnabled: true, remoteControlEnabled: false, devices: [device] })
+    webRemote.__test.invalidateConfigCache()
+    webRemote._internal.resetE2e()
+    webRemote.__test.setWs(fakeWs)
+    const a = generateE2EKeyPair()
+    const b = generateE2EKeyPair()
+    await hello('connA', a.e2ePublicKey, 'hA', 'desktop-1')
+    await hello('connB', b.e2ePublicKey, 'hB', null)
+
+    const status = await handlers.get('webRemote:get-status')()
+    expect(status.clients.map((c) => [c.key, c.clientId, c.state]).sort()).toEqual([
+      ['connA', 'desktop-1', 'pending_sas'], ['connB', null, 'pending_sas'],
+    ])
+    expect(JSON.stringify(status.clients)).not.toContain(a.e2ePublicKey)
+
+    expect(await handlers.get('webRemote:confirm-sas')({}, undefined)).toEqual({ ok: false, error: 'ambiguous_pending_sas' })
+
+    expect(await handlers.get('webRemote:confirm-sas')({}, { clientKey: 'connA' })).toEqual({ ok: true })
+    expect(webRemote._internal.getE2eState('connA').state).toBe('authenticated')
+    expect(webRemote._internal.getE2eState('connB').state).toBe('pending_sas')
+    let pins = (await readConfig()).devices[0].verifiedPeerPubKeys
+    expect(pins.map((p) => p.pubKey)).toEqual([a.e2ePublicKey])
+    expect(pins[0].clientId).toBe('desktop-1')
+
+    // Single remaining pending client: no clientKey needed.
+    expect(await handlers.get('webRemote:confirm-sas')({}, undefined)).toEqual({ ok: true })
+    pins = (await readConfig()).devices[0].verifiedPeerPubKeys
+    expect(pins.map((p) => p.pubKey).sort()).toEqual([a.e2ePublicKey, b.e2ePublicKey].sort())
+
+    // Re-hello from either pinned key auto-authenticates.
+    webRemote._internal.resetE2e()
+    const pinnedDevice = { ...device, verifiedPeerPubKeys: pins }
+    for (const [conn, kp] of [['connA', a], ['connB', b]]) {
+      await webRemote._internal.handleMessage(JSON.stringify({
+        type: 'e2e:hello', id: `r-${conn}`, fromConn: conn, payload: { pubKey: kp.e2ePublicKey },
+      }), pinnedDevice)
+      expect(webRemote._internal.getE2eState(conn).state).toBe('authenticated')
+    }
+  })
+})
+
 describe('web-remote per-client PTY streams', () => {
   const deviceKeys = genP256KeyPairB64()
   const device = {

@@ -226,9 +226,9 @@ export function SettingsRemote() {
     }
   }
 
-  const handleConfirmSas = async () => {
+  const handleConfirmSas = async (clientKey?: string) => {
     try {
-      const result = await window.api.webRemote.confirmSas()
+      const result = await window.api.webRemote.confirmSas(clientKey)
       if (!result?.ok) {
         showToast('error', `SAS confirm failed: ${result?.error ?? 'unexpected state — reconnect the mobile app'}`)
       }
@@ -248,6 +248,7 @@ export function SettingsRemote() {
   const e2eAuthenticated = status?.e2eAuthenticated ?? false
   const e2eState = status?.e2eState ?? 'idle'
   const pendingSas = status?.pendingSas ?? null
+  const pendingClients = (status?.clients ?? []).filter((c) => c.state === 'pending_sas' && c.pendingSas)
   const devices = status?.devices ?? []
 
   const active = enabled && connected
@@ -261,9 +262,24 @@ export function SettingsRemote() {
 
   return (
     <div data-testid="settings-remote" className="p-4 max-w-[760px] space-y-[22px]">
-      {pendingSas && (
-        <SasBanner testId="settings-remote-sas" codeTestId="settings-remote-sas-code" confirmTestId="settings-remote-sas-confirm" code={pendingSas} onConfirm={handleConfirmSas} />
-      )}
+      {pendingClients.length > 0
+        ? pendingClients.map((c, i) => (
+            <div key={c.key} data-testid="settings-remote-sas-row">
+              {pendingClients.length > 1 && (
+                <div className="text-[12px] font-semibold text-fg-dim mb-1">{c.clientId ?? 'Phone'}</div>
+              )}
+              <SasBanner
+                testId={i === 0 ? 'settings-remote-sas' : undefined}
+                codeTestId={i === 0 ? 'settings-remote-sas-code' : undefined}
+                confirmTestId={i === 0 ? 'settings-remote-sas-confirm' : undefined}
+                code={c.pendingSas as string}
+                onConfirm={() => handleConfirmSas(c.key)}
+              />
+            </div>
+          ))
+        : pendingSas && (
+            <SasBanner testId="settings-remote-sas" codeTestId="settings-remote-sas-code" confirmTestId="settings-remote-sas-confirm" code={pendingSas} onConfirm={() => handleConfirmSas()} />
+          )}
 
       {e2eState === 'failed' && (
         <div className="flex items-center gap-3.5 px-5 py-4 rounded-2xl border border-[#eccdbe] bg-[#f8e8e0]">

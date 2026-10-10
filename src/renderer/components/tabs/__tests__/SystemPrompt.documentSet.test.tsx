@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { useConfig } from '../../../state/config'
 import { flushAsync } from '../../../testUtils/domFlush'
+import { estimateTokens } from '../../../lib/estimateTokens'
 
 /**
  * System Prompt is a document SET — `~/.claude/CLAUDE.md` plus every file it
@@ -156,5 +157,51 @@ describe('SystemPrompt renders its document set through the shared document view
     expect(pane(el).getAttribute('data-readonly')).toBe('true')
     expect(el.querySelector('[data-testid="system-prompt-missing-note"]')).not.toBeNull()
     expect(Array.from(el.querySelectorAll('button')).some((b) => /save/i.test(b.textContent ?? ''))).toBe(false)
+  })
+
+  describe('imports stay live', () => {
+    const NEW = `${HOME}/Projects/Agents/shared/new.md`
+    const NEW_IMPORT = { path: NEW, exists: true, ok: true, sizeBytes: 5, tokenEstimate: 2 }
+    const sleep = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)) })
+    const diskChange = (raw: string) => act(async () => {
+      const f = useConfig.getState().files[ROOT]
+      useConfig.setState({ files: { ...useConfig.getState().files, [ROOT]: { ...f, diskRaw: raw, draftRaw: raw } } })
+      await flushAsync(3)
+    })
+
+    it('re-parses and lists a newly added @import after the root disk text changes', async () => {
+      const el = await mount()
+      await sleep(350) // let the post-load debounced parse settle
+      expect(rows(el)).toHaveLength(2)
+
+      ;(window as any).api.config.parseImports.mockResolvedValue({ ok: true, imports: [...IMPORTS, NEW_IMPORT], error: null })
+      await diskChange(`${TEXT[ROOT]}@${NEW}\n`)
+      await sleep(350)
+      await flushAsync(3)
+
+      expect(rows(el)).toHaveLength(3)
+    })
+
+    it('a burst of root changes causes a single parse', async () => {
+      const el = await mount()
+      await sleep(350)
+      const parse = (window as any).api.config.parseImports as ReturnType<typeof vi.fn>
+      parse.mockClear()
+
+      await diskChange('# one\n')
+      await diskChange('# two\n')
+      expect(parse).not.toHaveBeenCalled()
+      await sleep(350)
+
+      expect(parse).toHaveBeenCalledTimes(1)
+      expect(el).toBeTruthy()
+    })
+
+    it('shows the shared estimateTokens count for the document on screen', async () => {
+      const el = await mount()
+      const text = '# abc' // 5 chars: Math.round gives 1, the shared Math.ceil gives 2
+      await diskChange(text)
+      expect(el.textContent).toContain(`~${estimateTokens(text).toLocaleString()} tokens`)
+    })
   })
 })

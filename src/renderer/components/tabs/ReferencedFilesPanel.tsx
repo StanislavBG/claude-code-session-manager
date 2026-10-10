@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from '../../state/toast'
+import { useConfig } from '../../state/config'
 import type { ImportRef } from '../../../preload/api'
 
 interface Props {
@@ -10,6 +11,9 @@ interface Props {
   /** A row was picked. `null` means the root document (`activePath`) itself. */
   onSelect: (ref: ImportRef | null) => void
 }
+
+/** A burst of external writes to the root file collapses into one re-parse. */
+const REPARSE_DEBOUNCE_MS = 300
 
 function basename(path: string): string {
   return path.split('/').pop() || path
@@ -34,7 +38,7 @@ function basename(path: string): string {
  */
 export function ReferencedFilesPanel({ activePath, selectedPath, onSelect }: Props) {
   const [imports, setImports] = useState<ImportRef[]>([])
-  // Monotonic generation counter, bumped every time activePath changes.
+  // Monotonic generation counter, bumped every time a parse is issued.
   // In-flight fetches capture the generation they were issued under and
   // compare against the current one on resolve — unlike comparing raw
   // activePath values, this can't false-positive on an A->B->A round trip (a
@@ -46,31 +50,51 @@ export function ReferencedFilesPanel({ activePath, selectedPath, onSelect }: Pro
   const onSelectRef = useRef(onSelect)
   onSelectRef.current = onSelect
 
+  // The root file's saved disk text (not the unsaved draft): when a save or an
+  // external edit adds, removes or breaks an import, this changes and the rail
+  // re-parses. Undefined until the store has loaded the file.
+  const diskRaw = useConfig((s) => (activePath ? s.files[activePath]?.diskRaw : undefined))
+  const parsedPathRef = useRef<string | null>(null)
+
+  // A different root file: the previously-selected import belongs to the
+  // previous chain; drop back to the root document rather than leaving the
+  // host pointed at a document that may not be in the new chain at all.
+  useEffect(() => {
+    onSelectRef.current(null)
+  }, [activePath])
+
   useEffect(() => {
     generationRef.current += 1
-    // The previously-selected import belongs to the previous root file; drop
-    // back to the root document rather than leaving the host pointed at a
-    // document that may not be in the new chain at all.
-    onSelectRef.current(null)
     if (!activePath) {
+      parsedPathRef.current = null
       setImports([])
       return
     }
-    const generation = generationRef.current
+    // First parse for a path runs at once; later ones (disk text changed) wait
+    // out the debounce so a burst of writes costs one parse.
+    const immediate = parsedPathRef.current !== activePath
+    parsedPathRef.current = activePath
     let cancelled = false
-    window.api.config.parseImports(activePath).then((res) => {
-      if (cancelled || generationRef.current !== generation) return
-      if (res.ok) {
-        setImports(res.imports)
-      } else {
-        setImports([])
-        toast.error(res.error || 'failed to parse @-imports')
-      }
-    })
+    const run = () => {
+      generationRef.current += 1
+      const generation = generationRef.current
+      window.api.config.parseImports(activePath).then((res) => {
+        if (cancelled || generationRef.current !== generation) return
+        if (res.ok) {
+          setImports(res.imports)
+        } else {
+          setImports([])
+          toast.error(res.error || 'failed to parse @-imports')
+        }
+      })
+    }
+    const timer = immediate ? null : setTimeout(run, REPARSE_DEBOUNCE_MS)
+    if (immediate) run()
     return () => {
       cancelled = true
+      if (timer) clearTimeout(timer)
     }
-  }, [activePath])
+  }, [activePath, diskRaw])
 
   if (imports.length === 0 || !activePath) return null
 

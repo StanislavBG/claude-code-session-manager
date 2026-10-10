@@ -1601,6 +1601,8 @@ export interface RemoteMachinePeer {
   pairedAt: string;
   clientPublicKey: string;
   verifiedDevicePubKey: string | null;
+  /** process.platform of the remote machine, last known (null until first authenticated). */
+  os: string | null;
   status: string;
   reason: string | null;
   sas: string | null;

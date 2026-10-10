@@ -33,7 +33,7 @@ afterEach(() => {
 })
 
 /** Fake agent: owns the device keypair, answers e2e:hello, serves cmd:app:version. */
-function makeAgent({ respond = true } = {}) {
+function makeAgent({ respond = true, info = { version: '9.9.9', platform: 'win32' } } = {}) {
   const kp = generateE2EKeyPair()
   const agent = {
     kp,
@@ -58,7 +58,7 @@ function makeAgent({ respond = true } = {}) {
           const plain = decryptBox(msg.payload.nonce, msg.payload.ciphertext, agent.sessionKey)
           const inner = JSON.parse(plain)
           agent.lastCmd = inner
-          const out = { type: `resp:${inner.id}`, id: inner.id, payload: { version: '9.9.9' }, ts: Date.now() }
+          const out = { type: `resp:${inner.id}`, id: inner.id, payload: inner.type === 'cmd:app:info' ? info : { version: '9.9.9' }, ts: Date.now() }
           ws.emit('message', JSON.stringify({ type: 'e2e:box', id: inner.id, payload: encryptBox(JSON.stringify(out), agent.sessionKey) }))
         }
       }
@@ -256,5 +256,42 @@ describe('remoteClient', () => {
     client.removePeer('p1')
     expect(agent.sockets[0].readyState).toBe(3)
     expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).peers).toEqual([])
+  })
+
+  it('learns and persists the remote os on authentication, surviving a disconnect', async () => {
+    const agent = makeAgent()
+    const { client, configPath } = setup(agent)
+    expect(client.listPeers()[0].os).toBeNull()
+    await connectToSas(client)
+    client.confirmSas('p1')
+    await until(() => client.listPeers()[0].os === 'win32')
+    expect(JSON.parse(fs.readFileSync(configPath, 'utf8')).peers[0].os).toBe('win32')
+    expect(client.listPeers()[0].clientPrivateKey).toBeUndefined()
+    expect(agent.sockets[0].sent.filter((m) => m.type === 'e2e:box')).toHaveLength(1)
+    agent.sockets[0].emit('message', JSON.stringify({ type: 'error', code: 'device_offline' }))
+    expect(client.getStatus('p1').status).toBe('failed')
+    expect(client.listPeers()[0].os).toBe('win32')
+  })
+
+  it('a rejected cmd:app:info leaves the peer authenticated with os null', async () => {
+    const agent = makeAgent({ info: { error: 'unknown_command' } })
+    const { client } = setup(agent)
+    await connectToSas(client)
+    client.confirmSas('p1')
+    await until(() => agent.lastCmd?.type === 'cmd:app:info')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(client.getStatus('p1').status).toBe('authenticated')
+    expect(client.listPeers()[0].os).toBeNull()
+  })
+
+  it('an unanswered cmd:app:info times out without failing the connection', async () => {
+    const agent = makeAgent({ respond: false })
+    const { client } = setup(agent)
+    await connectToSas(client)
+    vi.useFakeTimers()
+    client.confirmSas('p1')
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(client.getStatus('p1').status).toBe('authenticated')
+    expect(client.listPeers()[0].os).toBeNull()
   })
 })

@@ -514,6 +514,12 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('chat:external-send', listener);
       return () => ipcRenderer.removeListener('chat:external-send', listener);
     },
+    /** Fires when a paired phone asks main to start a new Session. */
+    onExternalNewSession: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('chat:external-new-session', listener);
+      return () => ipcRenderer.removeListener('chat:external-new-session', listener);
+    },
     /** Classify a queued PromptTicket's text as 'inline' or 'develop'. */
     classifyTicket: (payload) => ipcRenderer.invoke('chat:classify-ticket', payload),
     /** Author a mechanical draft PRD from a queued PromptTicket classified 'develop'. */

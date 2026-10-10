@@ -43,6 +43,8 @@ interface PluginRow {
   hasMcp: boolean
   /** Part of the `installed_plugins.json` key after `@`; the marketplace the plugin came from. */
   marketplace?: string
+  /** Set when inspecting this plugin's directory threw; the row is listed with this marker instead of failing the list. */
+  error?: string
 }
 
 interface InstalledPluginEntry {
@@ -74,6 +76,7 @@ function PluginsComponent() {
   const home = useHomeDir()
   const [rows, setRows] = useState<PluginRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [view, setView] = useState<PluginsView>('installed')
   const [seedStatus, setSeedStatus] = useState<SeedStatus | null>(null)
@@ -99,46 +102,67 @@ function PluginsComponent() {
   // installed_plugins.json, e.g. `claude plugin install` run outside this
   // app, was invisible until reload).
   const loadSeq = useRef(0)
+  const hasRows = useRef(false)
   const loadRows = useCallback(async () => {
     // Bumped before the early return too, so a still-in-flight call from a
     // since-unset `home` can never win a race against a later valid call.
     const seq = ++loadSeq.current
     if (!home) return
-    setLoading(true)
-    const next: PluginRow[] = []
+    // Only the first load (no rows yet) blanks the page; a refresh keeps the
+    // current rows and any open drill-in mounted until the new list resolves.
+    if (!hasRows.current) setLoading(true)
+    const manifestPath = `${home}/.claude/plugins/installed_plugins.json`
+    let next: PluginRow[] = []
+    let failure: string | null = null
     try {
-      const r = await window.api.config.readJson(`${home}/.claude/plugins/installed_plugins.json`)
-      if (r.exists && !r.parseError && r.data && typeof r.data === 'object') {
+      const r = await window.api.config.readJson(manifestPath)
+      if (r.exists && r.parseError) {
+        failure = `could not parse installed_plugins.json${r.error ? `: ${r.error}` : ''}`
+      } else if (r.exists && r.data && typeof r.data === 'object') {
         const manifest = r.data as InstalledPluginsManifest
+        const jobs: Array<{ name: string; marketplace: string | undefined; entry: InstalledPluginEntry }> = []
         for (const [key, entries] of Object.entries(manifest.plugins ?? {})) {
           if (!Array.isArray(entries)) continue
-          const name = key.split('@')[0]
-          const marketplace = key.split('@')[1]
+          const [name, marketplace] = key.split('@')
           for (const entry of entries) {
             if (!entry?.installPath) continue
-            const dirEntry: DirEntry = {
-              name,
-              path: entry.installPath,
-              isDirectory: true,
-              isFile: false,
-              mtimeMs: 0,
-              size: 0,
-            }
-            const row = await inspectPluginDir(dirEntry)
-            if (!row.manifest?.version) {
-              row.manifest = { ...(row.manifest ?? {}), version: entry.version }
-            }
-            row.marketplace = marketplace
-            next.push(row)
+            jobs.push({ name, marketplace, entry })
           }
         }
+        next = await mapWithConcurrency(jobs, INSPECT_CONCURRENCY, async ({ name, marketplace, entry }) => {
+          const dirEntry: DirEntry = {
+            name,
+            path: entry.installPath,
+            isDirectory: true,
+            isFile: false,
+            mtimeMs: 0,
+            size: 0,
+          }
+          let row: PluginRow
+          try {
+            row = await inspectPluginDir(dirEntry)
+          } catch (err) {
+            row = failedPluginRow(dirEntry, err instanceof Error ? err.message : String(err))
+          }
+          if (!row.manifest?.version) {
+            row.manifest = { ...(row.manifest ?? {}), version: entry.version }
+          }
+          row.marketplace = marketplace
+          return row
+        })
       }
-    } catch {
-      // Missing/unparseable manifest → empty list, no throw.
+    } catch (err) {
+      failure = `could not read installed_plugins.json: ${err instanceof Error ? err.message : String(err)}`
     }
     if (loadSeq.current !== seq) return
-    next.sort((a, b) => a.name.localeCompare(b.name))
-    setRows(next)
+    setLoadError(failure)
+    if (failure) {
+      toast.error(`Plugins: ${failure}`)
+    } else {
+      next.sort((a, b) => a.name.localeCompare(b.name))
+      hasRows.current = next.length > 0
+      setRows(next)
+    }
     setLoading(false)
   }, [home])
 
@@ -198,6 +222,7 @@ function PluginsComponent() {
             r.binCount > 0 ? `${r.binCount} bin` : null,
             r.hasLsp ? 'lsp' : null,
             r.hasMcp ? 'mcp' : null,
+            r.error ? 'inspection failed' : null,
           ]
             .filter(Boolean)
             .join(' · ') || '—'}
@@ -252,9 +277,15 @@ function PluginsComponent() {
       }
     >
       {seedBanner}
-      {loading ? (
+      {loadError ? (
+        <div role="alert" className="shrink-0 px-3 py-2 border-b border-line bg-red-950/20 text-xs text-red-300">
+          {loadError}
+          {rows.length > 0 ? ' — showing the last known list' : null}
+        </div>
+      ) : null}
+      {loading && rows.length === 0 ? (
         <EmptyState title="scanning plugins…" />
-      ) : selectedRow ? (
+      ) : loadError && rows.length === 0 ? null : selectedRow ? (
         <PluginHomePage key={selectedRow.path} row={selectedRow} home={home} onBack={() => setSelected(null)} />
       ) : (
         <div className="flex flex-col h-full">
@@ -736,6 +767,29 @@ function ContentRow({
       </div>
     </Tag>
   )
+}
+
+const INSPECT_CONCURRENCY = 4
+
+/** Order-preserving map with at most `limit` calls in flight. */
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let cursor = 0
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const i = cursor++
+      out[i] = await fn(items[i])
+    }
+  })
+  await Promise.all(workers)
+  return out
+}
+
+function failedPluginRow(e: DirEntry, error: string): PluginRow {
+  return {
+    name: e.name, path: e.path, mtimeMs: e.mtimeMs, hasManifest: false, manifest: null, hasLsp: false,
+    monitors: 0, hooks: 0, agents: 0, skills: 0, binCount: 0, hasMcp: false, error,
+  }
 }
 
 async function inspectPluginDir(e: DirEntry): Promise<PluginRow> {

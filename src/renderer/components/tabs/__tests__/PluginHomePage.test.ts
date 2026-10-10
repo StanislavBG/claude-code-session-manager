@@ -47,6 +47,7 @@ const SKILL_MD = `---\nname: my-skill\ndescription: Does the skill thing. More d
 const AGENT_MD = `---\nname: my-agent\ndescription: Reviews things carefully.\n---\nAgent body.\n`
 
 function installWindowApiMock() {
+  const changedHandlers: Array<(e: { path: string; mtimeMs: number; kind: 'change' }) => void> = []
   const api = {
     app: { homeDir: vi.fn().mockResolvedValue(HOME) },
     config: {
@@ -112,14 +113,19 @@ function installWindowApiMock() {
       }),
       watch: vi.fn(),
       unwatch: vi.fn(),
-      onChanged: vi.fn(() => () => {}),
+      onChanged: vi.fn((h: (e: { path: string; mtimeMs: number; kind: 'change' }) => void) => {
+        changedHandlers.push(h)
+        return () => {}
+      }),
     },
     shell: {
       open: vi.fn().mockResolvedValue({ ok: true }),
     },
   }
   ;(window as unknown as { api: typeof api }).api = api
-  return api
+  const fireChange = () =>
+    changedHandlers.forEach((h) => h({ path: `${HOME}/.claude/plugins/installed_plugins.json`, mtimeMs: 1, kind: 'change' }))
+  return Object.assign(api, { fireChange })
 }
 
 const flush = () => flushAsync(5)
@@ -280,6 +286,118 @@ describe('Plugins drill-in page', () => {
     // No author/license/homepage keys since manifest is absent.
     expect(text).not.toContain('AUTHOR')
 
+    act(() => root.unmount())
+  })
+
+  const openDemoDrillIn = async (root: ReturnType<typeof createRoot>) => {
+    act(() => {
+      root.render(createElement(Plugins))
+    })
+    await flush()
+    const demoRow = Array.from(container.querySelectorAll('tr[data-row-key]')).find((r) =>
+      r.textContent?.includes('demo'),
+    ) as HTMLElement
+    act(() => {
+      demoRow.click()
+    })
+    await flush()
+  }
+  let Plugins: typeof import('../Plugins').Plugins
+  let toastError: ReturnType<typeof vi.spyOn>
+  beforeEach(async () => {
+    const { toast } = await import('../../../state/toast')
+    toastError = vi.spyOn(toast, 'error').mockImplementation(() => '')
+    ;({ Plugins } = await import('../Plugins'))
+  })
+
+  it('keeps the open drill-in mounted, with its selected section, across an external manifest change', async () => {
+    const api = installWindowApiMock()
+    const root = createRoot(container)
+    await openDemoDrillIn(root)
+
+    const agentsButton = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.trim().startsWith('Agents'),
+    ) as HTMLButtonElement
+    act(() => {
+      agentsButton.click()
+    })
+    await flush()
+    expect(container.textContent).toContain('Reviews things carefully.')
+
+    // Hold the re-read open so the refresh is observably in flight.
+    const baseline = api.config.readJson.getMockImplementation()!
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    api.config.readJson.mockImplementation(async (path: string) => {
+      if (path === `${HOME}/.claude/plugins/installed_plugins.json`) await gate
+      return baseline(path)
+    })
+    act(() => api.fireChange())
+    await flush()
+    expect(container.textContent).not.toContain('scanning plugins')
+    expect(container.textContent).toContain('Reviews things carefully.')
+
+    release()
+    await flush()
+    expect(container.textContent).not.toContain('scanning plugins')
+    expect(container.textContent).toContain('Reviews things carefully.')
+    expect(container.querySelector('table')).toBeFalsy()
+    act(() => root.unmount())
+  })
+
+  it('shows an error state (not the empty state) and toasts once for an unparseable installed_plugins.json', async () => {
+    const api = installWindowApiMock()
+    api.config.readJson.mockImplementation(
+      async () =>
+        ({ exists: true, parseError: true, data: null, mtimeMs: 0, error: 'Unexpected token' }) as never,
+    )
+    const root = createRoot(container)
+    act(() => {
+      root.render(createElement(Plugins))
+    })
+    await flush()
+
+    expect(toastError).toHaveBeenCalledTimes(1)
+    expect(String(toastError.mock.calls[0][0])).toContain('installed_plugins.json')
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('installed_plugins.json')
+    expect(container.textContent).not.toContain('no plugins installed')
+    act(() => root.unmount())
+  })
+
+  it('keeps previous rows visible when a refresh fails', async () => {
+    const api = installWindowApiMock()
+    const root = createRoot(container)
+    act(() => {
+      root.render(createElement(Plugins))
+    })
+    await flush()
+    api.config.readJson.mockRejectedValue(new Error('EIO'))
+    act(() => api.fireChange())
+    await flush()
+
+    expect(toastError).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('[role="alert"]')).toBeTruthy()
+    expect(container.querySelectorAll('tr[data-row-key]').length).toBe(2)
+    act(() => root.unmount())
+  })
+
+  it('lists the other plugins when one plugin inspection throws', async () => {
+    const api = installWindowApiMock()
+    const baseline = api.config.exists.getMockImplementation()!
+    api.config.exists.mockImplementation(async (path: string) => {
+      if (path.startsWith(NO_MANIFEST_PATH)) throw new Error('EACCES')
+      return baseline(path)
+    })
+    const root = createRoot(container)
+    act(() => {
+      root.render(createElement(Plugins))
+    })
+    await flush()
+
+    const rows = Array.from(container.querySelectorAll('tr[data-row-key]'))
+    expect(rows.length).toBe(2)
+    expect(rows.find((r) => r.textContent?.includes('demo'))).toBeTruthy()
+    expect(rows.find((r) => r.textContent?.includes('bare'))?.textContent).toContain('inspection failed')
     act(() => root.unmount())
   })
 })

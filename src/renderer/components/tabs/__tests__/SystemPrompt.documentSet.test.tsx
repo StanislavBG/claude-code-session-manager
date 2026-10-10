@@ -4,6 +4,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { useConfig } from '../../../state/config'
+import { useToast } from '../../../state/toast'
 import { flushAsync } from '../../../testUtils/domFlush'
 import { estimateTokens } from '../../../lib/estimateTokens'
 
@@ -11,6 +12,9 @@ import { estimateTokens } from '../../../lib/estimateTokens'
  * System Prompt is a document SET — `~/.claude/CLAUDE.md` plus every file it
  * `@`-imports — rendered through the app's own document view, one document at
  * a time, with the imports editable rather than read-only peeks.
+ *
+ * The import rail (ReferencedFilesPanel) is exercised here through the page rather
+ * than in isolation.
  *
  * The pane is stubbed (Monaco doesn't render in jsdom) so these assertions can
  * see which path the host handed it, what text, and whether it was read-only.
@@ -94,6 +98,7 @@ const click = async (node: HTMLElement) => {
 beforeEach(() => {
   installWindowApiMock()
   useConfig.setState({ files: {}, watchRefs: {} })
+  useToast.setState({ toasts: [] })
 })
 
 afterEach(() => {
@@ -111,6 +116,9 @@ describe('SystemPrompt renders its document set through the shared document view
     expect(pane(el).getAttribute('data-readonly')).toBe('false')
     expect(el.querySelector('[data-testid="referenced-files-rail"]')).not.toBeNull()
     expect(rows(el)).toHaveLength(2)
+    // Nothing imported is open yet, so the root row is the marked one.
+    expect(el.querySelector('[data-testid="referenced-file-root"]')?.getAttribute('aria-current')).toBe('true')
+    expect(rows(el)[0].getAttribute('aria-current')).toBe('false')
   })
 
   it('selecting an import opens THAT file in the same pane, editable', async () => {
@@ -120,6 +128,11 @@ describe('SystemPrompt renders its document set through the shared document view
     expect(pane(el).getAttribute('data-path')).toBe(CORE)
     expect(pane(el).getAttribute('data-readonly')).toBe('false')
     expect(pane(el).textContent).toBe(TEXT[CORE])
+    // The rail marks the open document, and only that one.
+    const rootRow = el.querySelector('[data-testid="referenced-file-root"]') as HTMLElement
+    expect(rootRow.getAttribute('aria-current')).toBe('false')
+    expect(rows(el)[0].getAttribute('aria-current')).toBe('true')
+    expect(rows(el)[1].getAttribute('aria-current')).toBe('false')
     // The import is loaded and watched like any other edited file.
     expect((window as any).api.config.watch.mock.calls.flatMap((c: any[]) => c[0])).toContain(CORE)
   })
@@ -156,6 +169,8 @@ describe('SystemPrompt renders its document set through the shared document view
     expect(pane(el).getAttribute('data-path')).toBe(GONE)
     expect(pane(el).getAttribute('data-readonly')).toBe('true')
     expect(el.querySelector('[data-testid="system-prompt-missing-note"]')).not.toBeNull()
+    expect(rows(el)[1].querySelector('[data-testid="referenced-file-missing"]')).not.toBeNull()
+    expect(rows(el)[0].querySelector('[data-testid="referenced-file-missing"]')).toBeNull()
     expect(Array.from(el.querySelectorAll('button')).some((b) => /save/i.test(b.textContent ?? ''))).toBe(false)
   })
 
@@ -202,6 +217,47 @@ describe('SystemPrompt renders its document set through the shared document view
       const text = '# abc' // 5 chars: Math.round gives 1, the shared Math.ceil gives 2
       await diskChange(text)
       expect(el.textContent).toContain(`~${estimateTokens(text).toLocaleString()} tokens`)
+    })
+
+    it('does not resurrect a stale parse that resolves after a newer one', async () => {
+      const STALE = `${HOME}/Projects/Agents/shared/STALE.md`
+      const parse = (window as any).api.config.parseImports as ReturnType<typeof vi.fn>
+      let resolveStale: (v: unknown) => void = () => {}
+      parse.mockImplementationOnce(() => new Promise((r) => { resolveStale = r })) // first parse, kept pending
+      const el = await mount()
+
+      parse.mockResolvedValue({ ok: true, imports: [...IMPORTS, NEW_IMPORT], error: null })
+      await diskChange(`${TEXT[ROOT]}@${NEW}\n`)
+      await sleep(350)
+      await flushAsync(3)
+      expect(rows(el)).toHaveLength(3)
+
+      await act(async () => {
+        resolveStale({ ok: true, imports: [{ path: STALE, exists: true, ok: true, sizeBytes: 1, tokenEstimate: 1 }], error: null })
+        await flushAsync(3)
+      })
+
+      expect(el.textContent).not.toContain('STALE.md')
+      expect(el.textContent).toContain('new.md')
+      expect(rows(el)).toHaveLength(3)
+    })
+
+    it('surfaces a parseImports failure as an error toast and shows no rail', async () => {
+      ;(window as any).api.config.parseImports.mockResolvedValue({ ok: false, imports: [], error: 'ipc boom' })
+      const el = await mount()
+
+      expect(useToast.getState().toasts.map((t) => [t.kind, t.message])).toContainEqual(['error', 'ipc boom'])
+      expect(el.querySelector('[data-testid="referenced-files-rail"]')).toBeNull()
+      expect(pane(el).getAttribute('data-path')).toBe(ROOT)
+    })
+
+    it('renders no rail at all when the root file imports nothing', async () => {
+      ;(window as any).api.config.parseImports.mockResolvedValue({ ok: true, imports: [], error: null })
+      const el = await mount()
+
+      expect(el.querySelector('[data-testid="referenced-files-rail"]')).toBeNull()
+      expect(rows(el)).toHaveLength(0)
+      expect(pane(el).getAttribute('data-path')).toBe(ROOT)
     })
   })
 })

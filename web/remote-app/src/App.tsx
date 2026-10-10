@@ -185,11 +185,14 @@ function AppInner() {
             <div className="text-3xl font-mono tracking-[0.3em] text-accent mb-4 select-all">
               {pendingSas.sas}
             </div>
+            <p className="text-ink-mute mb-3 text-xs">
+              Now click “Codes match — confirm” on your computer (Settings → Phone remote). Your sessions appear once you do.
+            </p>
             <button
               onClick={clearPendingSas}
               className="px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-semibold hover:opacity-90 active:opacity-80 transition-opacity"
             >
-              Codes match — dismiss
+              Got it
             </button>
           </div>
         </div>

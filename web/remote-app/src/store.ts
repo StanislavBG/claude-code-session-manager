@@ -20,6 +20,8 @@ interface AppState {
   // E2E security state
   /** SAS pending user confirmation: { deviceId, sas } or null. */
   pendingSas: { deviceId: string; sas: string } | null;
+  /** True from SAS display until the desktop confirms (first event:session:list). */
+  awaitingDesktopConfirm: boolean;
   /** Device IDs whose relay-served pubKey diverged from the pinned value (TOFU). */
   keyMismatchDeviceIds: string[];
 
@@ -56,6 +58,7 @@ export const useStore = create<AppState>((set) => ({
   navOpen: false,
 
   pendingSas: null,
+  awaitingDesktopConfirm: false,
   keyMismatchDeviceIds: [],
 
   setMe: (me) => set({ me }),
@@ -71,7 +74,7 @@ export const useStore = create<AppState>((set) => ({
       // Keep the current selection if it still exists, else pick the first session.
       const stillThere = sessions.some((x) => x.tabId === s.selectedTabId);
       const selectedTabId = stillThere ? s.selectedTabId : (sessions[0]?.tabId ?? null);
-      return { sessions, selectedTabId };
+      return { sessions, selectedTabId, awaitingDesktopConfirm: false };
     }),
   selectTab: (selectedTabId) => set({ selectedTabId, navOpen: false }),
   setTabState: (tabId, state) =>
@@ -81,10 +84,11 @@ export const useStore = create<AppState>((set) => ({
   setNavOpen: (navOpen) => set({ navOpen }),
   reset: () => set({
     sessions: [], selectedTabId: null, stateByTab: {}, summaryByTab: {},
-    activeDeviceId: null, navOpen: false,
+    activeDeviceId: null, navOpen: false, awaitingDesktopConfirm: false,
   }),
 
-  setPendingSas: (pendingSas) => set({ pendingSas }),
+  setPendingSas: (pendingSas) =>
+    set(pendingSas ? { pendingSas, awaitingDesktopConfirm: true } : { pendingSas }),
   clearPendingSas: () => set({ pendingSas: null }),
   addKeyMismatch: (deviceId) =>
     set((s) => ({

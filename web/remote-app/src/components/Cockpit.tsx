@@ -16,7 +16,7 @@ interface Props {
  * the left-nav is a slide-over drawer on small screens.
  */
 export default function Cockpit({ socket, deviceId }: Props) {
-  const { wsConnected, navOpen, setNavOpen, selectedTabId, sessions } = useStore();
+  const { wsConnected, navOpen, setNavOpen, selectedTabId, sessions, awaitingDesktopConfirm } = useStore();
   const selected = sessions.find((s) => s.tabId === selectedTabId) ?? null;
 
   return (
@@ -58,7 +58,11 @@ export default function Cockpit({ socket, deviceId }: Props) {
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-ink-mute text-sm px-6 text-center font-serif italic">
-              {sessions.length ? 'Select a session from the menu.' : 'No active sessions on this device yet.'}
+              {sessions.length
+                ? 'Select a session from the menu.'
+                : awaitingDesktopConfirm
+                  ? 'Waiting for you to confirm the 6-digit code on your computer (Settings → Phone remote)…'
+                  : 'No active sessions on this device yet.'}
             </div>
           )}
         </main>

@@ -48,6 +48,8 @@ interface PluginRow {
   hasMcp: boolean
   /** Part of the `installed_plugins.json` key after `@`; the marketplace the plugin came from. */
   marketplace?: string
+  /** `scope` of this install in `installed_plugins.json` (user / project / local). */
+  scope?: string
   /** Set when inspecting this plugin's directory threw; the row is listed with this marker instead of failing the list. */
   error?: string
 }
@@ -72,8 +74,9 @@ const pluginProvInput = (r: PluginRow): ProvenanceInput => ({
 })
 
 /**
- * Plugins are directories under `~/.claude/plugins/<name>/` that bundle skills,
- * subagents, and hooks. We enumerate them and show their manifest + contents
+ * Installed plugins come from `~/.claude/plugins/installed_plugins.json` (written by the `claude` CLI; installs
+ * happen via the Library view or `claude plugin install`). Each entry's `installPath` bundles skills,
+ * subagents, and hooks. We show its manifest + contents
  * as a read-only inspector for now (plugin editing would duplicate the Skills/
  * Subagents/Hooks tabs' UI — out of scope here).
  */
@@ -153,6 +156,7 @@ function PluginsComponent() {
             row.manifest = { ...(row.manifest ?? {}), version: entry.version }
           }
           row.marketplace = marketplace
+          row.scope = entry.scope
           return row
         })
       }
@@ -201,6 +205,13 @@ function PluginsComponent() {
       header: 'origin',
       render: (r) => <ProvenanceBadge interactive={false} input={pluginProvInput(r)} />,
       width: '7rem',
+    },
+    {
+      key: 'scope',
+      header: 'scope',
+      render: (r) =>
+        r.scope ? <span data-testid="plugin-scope">{r.scope}</span> : <span className="text-fg-faint">—</span>,
+      width: '5rem',
     },
     {
       key: 'version',
@@ -306,7 +317,7 @@ function PluginsComponent() {
                 <>
                   no plugins installed
                   <div className="mt-2 text-fg-faint">
-                    drop a plugin into <code>~/.claude/plugins/</code>
+                    install one from the Library view or run <code>claude plugin install</code>
                   </div>
                 </>
               }
@@ -465,7 +476,7 @@ function PluginHomePage({
     try {
       const { manifest } = await readPluginManifest(row.path)
       const [skillsDir, comps, binFiles] = await Promise.all([
-        resolveInstalledPluginSkillsDir(row.name, row.path, home),
+        resolveInstalledPluginSkillsDir(row.path),
         resolvePluginComponents(row.path, manifest),
         listOrEmpty(`${row.path}/bin`, { filesOnly: true }),
       ])
@@ -872,13 +883,13 @@ async function inspectPluginDir(e: DirEntry): Promise<PluginRow> {
     }
   }
 
-  const [comps, binList, skillsList] = await Promise.all([
+  const [comps, binList, skillsDir] = await Promise.all([
     resolvePluginComponents(e.path, manifest),
     listOrEmpty(`${e.path}/bin`, { filesOnly: true }),
-    listOrEmpty(`${e.path}/skills`, { dirsOnly: true }),
+    resolveInstalledPluginSkillsDir(e.path),
   ])
   const binCount = binList.length
-  const skills = skillsList.length
+  const skills = skillsDir ? (await listPluginSkills(skillsDir)).length : 0
 
   return {
     name: e.name,

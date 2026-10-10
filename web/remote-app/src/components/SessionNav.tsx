@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useStore } from '../store';
 import type { SessionMeta, SessionState } from '../types';
 import { StateDot, StatePill } from './StatePane';
+import DesktopClientsPanel from './DesktopClientsPanel';
 
 /** Short last path segment for a cwd, e.g. /home/me/Projects/foo → foo */
 function projectName(cwd?: string): string {
@@ -94,6 +95,7 @@ export default function SessionNav() {
         <div className="px-4 py-4 text-center text-xs text-ink-mute">
           {sessions.length} session{sessions.length === 1 ? '' : 's'} reachable from this device.
         </div>
+        <DesktopClientsPanel />
       </nav>
     </>
   );

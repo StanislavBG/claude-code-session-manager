@@ -83,6 +83,14 @@ const DEFAULT_FEEDBACK_AGENT = 'architect';
 const MAX_TITLE_CHARS = 200;
 const MAX_BODY_CHARS = 20000;
 const MAX_REFERENCES = 20;
+const MAX_MOTIVATION_CHARS = 2000;
+const MAX_LIST_ITEMS = 20;
+const MAX_LIST_ITEM_CHARS = 500;
+const MAX_SERIES_KEY_CHARS = 60;
+const MAX_SERIES_TITLE_CHARS = 120;
+const MAX_SERIES_TOTAL = 50;
+const MAX_ORIGIN_ASK_CHARS = 300;
+const KEBAB_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** Bound on how many `~/.claude/projects/` folders listFeedbackTargets will
  *  resolve. That directory accumulates one folder per path the CLI was ever
@@ -128,6 +136,29 @@ function isSessionManagerProject(cwd) {
 }
 
 /**
+ * resolveOriginAsk(fromCwd, fromEpicId) → string | null
+ *
+ * The sending Epic's own human goal (single line, ≤ 300 chars), read from the
+ * sender project's active-index.json. Never throws: a missing Epic or an
+ * unreadable file is just "no origin known".
+ */
+function resolveOriginAsk(fromCwd, fromEpicId) {
+  if (!fromCwd || !fromEpicId) return null;
+  try {
+    const sessions = readActiveIndex(fromCwd).sessions;
+    if (!Object.prototype.hasOwnProperty.call(sessions, fromEpicId)) return null;
+    const goal = singleLine(sessions[fromEpicId] && sessions[fromEpicId].goalText);
+    return goal ? goal.slice(0, MAX_ORIGIN_ASK_CHARS) : null;
+  } catch {
+    return null;
+  }
+}
+
+function seriesLine(series) {
+  return series ? `Part ${series.index} of ${series.total} — ${singleLine(series.title)}` : '';
+}
+
+/**
  * composeFeedbackIntake({ fromCwd, fromEpicId, title, body, referencePaths })
  *   → { goalText, openingPrompt, sections }
  *
@@ -160,6 +191,12 @@ function composeFeedbackIntake({
   agentName = DEFAULT_FEEDBACK_AGENT,
   agentDescription = null,
   referencePaths = [],
+  originAsk = null,
+  motivation = '',
+  plan = [],
+  acceptanceCriteria = [],
+  outOfScope = [],
+  series = null,
 } = {}) {
   const trimmedTitle = singleLine(title);
   const trimmedBody = String(body ?? '').trim();
@@ -174,21 +211,36 @@ function composeFeedbackIntake({
     });
   }
 
+  const fromPath = singleLine(fromCwd);
+  const fromName = path.basename(fromPath) || fromPath;
   const origin = fromEpicId
-    ? `${singleLine(fromCwd)} (session ${singleLine(fromEpicId)})`
-    : singleLine(fromCwd);
+    ? `${fromName} (${fromPath}, session ${singleLine(fromEpicId)})`
+    : `${fromName} (${fromPath})`;
+  const askClause = originAsk ? ` It was raised while working on: ${singleLine(originAsk)}.` : '';
   sections.push({
     kind: 'input',
     label: 'Input',
     text:
-      `This session is INBOUND FEEDBACK from another project: ${origin}. `
+      `This session is INBOUND FEEDBACK from another project: ${origin}.${askClause} `
       + 'Nobody in this project wrote the report below — an agent working in that project did, and it '
       + 'may be wrong about this codebase. Verify the claim against the code here before acting on it, '
       + 'and if it does not hold, say so and close the session rather than building against it.',
     source: fromCwd,
   });
 
-  const goalBody = trimmedTitle ? `Goal: ${trimmedTitle}\n\n${trimmedBody}` : trimmedBody;
+  const trimmedMotivation = String(motivation ?? '').trim();
+  const blocks = [];
+  if (series) blocks.push(seriesLine(series));
+  if (trimmedMotivation) blocks.push(`## Why\n${trimmedMotivation}`);
+  if (plan.length) blocks.push(`## Proposed plan\n${plan.map((x, i) => `${i + 1}. ${singleLine(x)}`).join('\n')}`);
+  if (acceptanceCriteria.length) {
+    blocks.push(`## Acceptance criteria\n${acceptanceCriteria.map((x) => `- [ ] ${singleLine(x)}`).join('\n')}`);
+  }
+  if (outOfScope.length) blocks.push(`## Out of scope\n${outOfScope.map((x) => `- ${singleLine(x)}`).join('\n')}`);
+  blocks.push(`## Details\n${trimmedBody}`);
+  const structured = blocks.join('\n\n');
+
+  const goalBody = trimmedTitle ? `Goal: ${trimmedTitle}\n\n${structured}` : structured;
   sections.push({ kind: 'goal', label: 'Goal', text: goalBody });
 
   for (const p of referencePaths) {
@@ -203,7 +255,7 @@ function composeFeedbackIntake({
     return out + sep + s.text;
   }, '');
 
-  const bodyText = trimmedTitle ? `${trimmedTitle}\n\n${trimmedBody}` : trimmedBody;
+  const bodyText = trimmedTitle ? `${trimmedTitle}\n\n${structured}` : structured;
   const refLines = referencePaths.map((p) => `Reference: ${singleLine(p)}`);
   const goalText = refLines.length ? `${bodyText}\n\n${refLines.join('\n')}` : bodyText;
 
@@ -235,6 +287,66 @@ function validateFeedbackInput(input = {}) {
   const tag = input.tag ?? DEFAULT_FEEDBACK_TAG;
   if (!FEEDBACK_TAGS.includes(tag)) {
     return bad(400, `tag must be one of ${FEEDBACK_TAGS.join(' | ')} (got ${JSON.stringify(tag)})`);
+  }
+
+  const motivation = typeof input.motivation === 'string' ? input.motivation.trim() : '';
+  if (!motivation) {
+    return bad(400, 'motivation is required — WHY this is needed, in the sending human\'s terms, so the receiving human can judge it');
+  }
+  if (motivation.length > MAX_MOTIVATION_CHARS) {
+    return bad(400, `motivation is ${motivation.length} chars; cap is ${MAX_MOTIVATION_CHARS}`);
+  }
+
+  const listPurpose = {
+    plan: 'the ordered steps you propose the receiving project take',
+    acceptanceCriteria: 'the checkable conditions that mean this is done',
+    outOfScope: 'what this proposal deliberately does not cover',
+  };
+  const lists = {};
+  for (const field of ['plan', 'acceptanceCriteria', 'outOfScope']) {
+    const raw = input[field];
+    if (raw === undefined || raw === null) { lists[field] = []; continue; }
+    if (!Array.isArray(raw)) return bad(400, `${field} must be an array of strings (${listPurpose[field]})`);
+    if (raw.length > MAX_LIST_ITEMS) {
+      return bad(400, `${field} has ${raw.length} items; cap is ${MAX_LIST_ITEMS} (${listPurpose[field]})`);
+    }
+    const items = [];
+    for (const item of raw) {
+      const t = typeof item === 'string' ? item.trim() : '';
+      if (!t) return bad(400, `${field} items must be non-blank strings (${listPurpose[field]})`);
+      if (t.length > MAX_LIST_ITEM_CHARS) {
+        return bad(400, `a ${field} item is ${t.length} chars; cap is ${MAX_LIST_ITEM_CHARS}`);
+      }
+      items.push(t);
+    }
+    lists[field] = items;
+  }
+  if (lists.acceptanceCriteria.length === 0) {
+    return bad(400, `acceptanceCriteria is required with at least one item — ${listPurpose.acceptanceCriteria}`);
+  }
+  if (tag === 'feature' && lists.plan.length === 0) {
+    return bad(400, `plan is required with at least one item when tag is 'feature' — ${listPurpose.plan}`);
+  }
+
+  let series = null;
+  if (input.series !== undefined && input.series !== null) {
+    const sr = input.series;
+    const sbad = (why) => bad(400, `series ${why} (series groups one request split across several proposals: { key, title, index, total })`);
+    if (typeof sr !== 'object' || Array.isArray(sr)) return sbad('must be an object');
+    const key = typeof sr.key === 'string' ? sr.key : '';
+    if (!key || key.length > MAX_SERIES_KEY_CHARS || !KEBAB_RE.test(key)) {
+      return sbad(`key must be kebab-case, ≤ ${MAX_SERIES_KEY_CHARS} chars`);
+    }
+    const stitle = typeof sr.title === 'string' ? sr.title.trim() : '';
+    if (!stitle || stitle.length > MAX_SERIES_TITLE_CHARS) {
+      return sbad(`title must be non-blank, ≤ ${MAX_SERIES_TITLE_CHARS} chars`);
+    }
+    if (!Number.isInteger(sr.index) || sr.index < 1) return sbad('index must be an integer ≥ 1');
+    if (!Number.isInteger(sr.total) || sr.total < 2 || sr.total > MAX_SERIES_TOTAL) {
+      return sbad(`total must be an integer 2..${MAX_SERIES_TOTAL}`);
+    }
+    if (sr.index > sr.total) return sbad('index must be ≤ total');
+    series = { key, title: stitle, index: sr.index, total: sr.total };
   }
 
   const referencePaths = Array.isArray(input.referencePaths) ? input.referencePaths : [];
@@ -293,6 +405,11 @@ function validateFeedbackInput(input = {}) {
       title,
       body,
       tag,
+      motivation,
+      plan: lists.plan,
+      acceptanceCriteria: lists.acceptanceCriteria,
+      outOfScope: lists.outOfScope,
+      series,
       referencePaths: referencePaths.map((p) => String(p)),
       fromEpicId: input.fromEpicId ? String(input.fromEpicId) : null,
       agentType: input.agentType ? String(input.agentType) : DEFAULT_FEEDBACK_AGENT,
@@ -337,6 +454,8 @@ async function openFeedbackSession(input, deps = {}) {
     } catch { /* unresolvable — the proposal still delivers, just without a receipt */ }
   }
 
+  const originAsk = resolveOriginAsk(v.fromCwd, v.fromEpicId);
+
   const { goalText, openingPrompt, sections } = composeFeedbackIntake({
     fromCwd: v.fromCwd,
     fromEpicId: v.fromEpicId,
@@ -345,6 +464,12 @@ async function openFeedbackSession(input, deps = {}) {
     agentName: v.agentType,
     agentDescription: v.agentDescription,
     referencePaths: v.referencePaths,
+    originAsk,
+    motivation: v.motivation,
+    plan: v.plan,
+    acceptanceCriteria: v.acceptanceCriteria,
+    outOfScope: v.outOfScope,
+    series: v.series,
   });
 
   // The Epic's stored identity is the one-line title, not the whole report —
@@ -363,6 +488,14 @@ async function openFeedbackSession(input, deps = {}) {
         producer: 'cross-project-feedback',
         fromCwd: v.fromCwd,
         ...(v.fromEpicId ? { fromEpicId: v.fromEpicId } : {}),
+        proposal: {
+          motivation: v.motivation,
+          originAsk,
+          plan: v.plan,
+          acceptanceCriteria: v.acceptanceCriteria,
+          outOfScope: v.outOfScope,
+          series: v.series,
+        },
       },
       mintAuthority: MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK,
     });
@@ -377,6 +510,7 @@ async function openFeedbackSession(input, deps = {}) {
     fromEpicId: v.fromEpicId,
     tag: v.tag,
     title: v.title,
+    series: v.series,
   });
 
   let receiptOnOriginEpic = false;
@@ -385,7 +519,9 @@ async function openFeedbackSession(input, deps = {}) {
       receiptOnOriginEpic = await appendReceipt(
         v.fromCwd,
         v.fromEpicId,
-        `Feedback delivered to ${v.toCwd} as a proposed session (${minted.epicId}): "${v.title}". `
+        `Feedback delivered to ${v.toCwd} as a proposed session (${minted.epicId}): "${v.title}"`
+        + (v.series ? ` [${seriesLine(v.series)}]` : '')
+        + '. '
         + 'It will not run until a human in that project approves it.',
       );
     } catch {
@@ -545,6 +681,7 @@ module.exports = {
   resolveProjectsDir,
   isSessionManagerProject,
   composeFeedbackIntake,
+  resolveOriginAsk,
   validateFeedbackInput,
   openFeedbackSession,
   listFeedbackTargets,

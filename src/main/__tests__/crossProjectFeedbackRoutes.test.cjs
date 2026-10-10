@@ -125,7 +125,14 @@ test('POST /admin/feedback/open-session is registered and delivers', async () =>
   const res = await request({
     method: 'POST',
     path: '/admin/feedback/open-session',
-    body: { toCwd: to, fromCwd: from, title: 'Route smoke', body: 'Delivered over real HTTP.' },
+    body: {
+      toCwd: to,
+      fromCwd: from,
+      title: 'Route smoke',
+      body: 'Delivered over real HTTP.',
+      motivation: 'Prove the route carries the structured contract.',
+      acceptanceCriteria: ['Epic lands proposed'],
+    },
   });
   expect(res.status).toBe(200);
   expect(res.json.ok).toBe(true);
@@ -135,6 +142,7 @@ test('POST /admin/feedback/open-session is registered and delivers', async () =>
   const epic = readActiveIndex(to).sessions[res.json.epicId];
   expect(epic.status).toBe('proposed');
   expect(epic.source.producer).toBe('cross-project-feedback');
+  expect(epic.source.proposal.motivation).toBe('Prove the route carries the structured contract.');
 });
 
 test('a refusal comes back as a 400 with the reason, not a 500 or a silent 200', async () => {
@@ -142,7 +150,10 @@ test('a refusal comes back as a 400 with the reason, not a 500 or a silent 200',
   const res = await request({
     method: 'POST',
     path: '/admin/feedback/open-session',
-    body: { toCwd: p, fromCwd: p, title: 'Same project', body: 'Should be refused.' },
+    body: {
+      toCwd: p, fromCwd: p, title: 'Same project', body: 'Should be refused.',
+      motivation: 'm', acceptanceCriteria: ['c'],
+    },
   });
   expect(res.status).toBe(400);
   expect(res.json.ok).toBe(false);

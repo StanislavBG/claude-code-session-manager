@@ -3,7 +3,7 @@ import type { Measure } from '../../../../lib/analyticsViewModel'
 import { formatMeasureValue } from './Headline'
 import { pct, int } from '../../../../lib/analyticsFormat'
 import { projectColorFor } from '../../../../lib/projectColor'
-import { projectNameFromCwd } from '../../scheduler/sched-primitives'
+import { projectNameFromCwd } from '../../../../lib/knownProjectAggregate'
 import { CARD, SectionHead } from './analytics-primitives'
 
 interface Props {
@@ -48,7 +48,7 @@ export function Ranking({ rows, measure, selected, onSelect }: Props) {
                 <td className="px-3 py-2 font-mono text-fg-dim">
                   <span className="inline-flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
-                    {projectNameFromCwd(row.projectDir) ?? row.projectDir}
+                    {projectNameFromCwd(row.projectDir)}
                   </span>
                 </td>
                 <td className="px-3 py-2 w-32">

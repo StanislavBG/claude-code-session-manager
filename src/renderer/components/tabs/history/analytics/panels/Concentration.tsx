@@ -1,6 +1,6 @@
 import type { ProjectRankRow } from '../../../../../lib/analyticsViewModel'
 import { projectColorFor } from '../../../../../lib/projectColor'
-import { projectNameFromCwd } from '../../../scheduler/sched-primitives'
+import { projectNameFromCwd } from '../../../../../lib/knownProjectAggregate'
 import { CARD, SectionHead } from '../analytics-primitives'
 
 interface Props {
@@ -25,7 +25,7 @@ export function Concentration({ rows }: Props) {
               <div
                 key={r.projectDir}
                 style={{ width: `${Math.max(r.sharePct, 0.5)}%`, backgroundColor: projectColorFor(r.projectDir) }}
-                title={`${projectNameFromCwd(r.projectDir) ?? r.projectDir} · ${r.sharePct.toFixed(1)}%`}
+                title={`${projectNameFromCwd(r.projectDir)} · ${r.sharePct.toFixed(1)}%`}
               />
             ))}
           </div>
@@ -34,7 +34,7 @@ export function Concentration({ rows }: Props) {
               <div key={r.projectDir} className="flex items-center justify-between text-[11px] font-mono">
                 <span className="flex items-center gap-1.5 text-fg-dim truncate">
                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: projectColorFor(r.projectDir) }} />
-                  {projectNameFromCwd(r.projectDir) ?? r.projectDir}
+                  {projectNameFromCwd(r.projectDir)}
                 </span>
                 <span className="text-fg-faint">{r.sharePct.toFixed(1)}%</span>
               </div>

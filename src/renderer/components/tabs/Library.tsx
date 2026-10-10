@@ -6,6 +6,7 @@ import { distinctPlaceholders, fillPlaceholders, type Placeholder } from '../../
 import { useHomeDir } from '../../lib/useHomeDir'
 import { copyText } from '../../lib/clipboard'
 import { toast } from '../../state/toast'
+import { useConfig } from '../../state/config'
 import {
   CATALOG_MCP,
   CATALOG_SKILLS,
@@ -621,22 +622,30 @@ const CATEGORY_LABELS: Record<PromptPresetCategory, string> = {
 
 export function PromptPresetsLibrary() {
   const home = useHomeDir()
-  const [existing, setExisting] = useState<string>('')
   const [busy, setBusy] = useState<string | null>(null)
   const [flash, setFlash] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState('')
 
   const path = home ? `${home}/.claude/CLAUDE.md` : null
 
-  const refresh = async () => {
-    if (!path) return
-    const r = await window.api.config.readText(path)
-    setExisting(r.text)
-  }
+  // One source of truth: the same useConfig entry the System Prompt editor
+  // edits. `existing` is the current disk text; `dirty` means the editor holds
+  // unsaved edits that a preset write would otherwise be built around.
+  const file = useConfig((s) => (path ? s.files[path] : undefined))
+  const loadText = useConfig((s) => s.loadText)
+  const setDraft = useConfig((s) => s.setDraft)
+  const saveText = useConfig((s) => s.saveText)
+  const revert = useConfig((s) => s.revert)
+  const watchFile = useConfig((s) => s.watchFile)
+  const unwatchFile = useConfig((s) => s.unwatchFile)
+  const existing = file?.diskRaw ?? ''
+  const dirty = !!file?.dirty
 
   useEffect(() => {
-    refresh()
+    if (!path) return
+    loadText(path, true)
+    watchFile(path)
+    return () => { unwatchFile(path) }
   }, [path])
 
   const activeIds = useMemo(() => new Set(readActivePresetIds(existing)), [existing])
@@ -645,18 +654,25 @@ export function PromptPresetsLibrary() {
     [existing]
   )
 
-  const cleanupUnmanaged = async () => {
-    if (!path || unmanagedConflicts.length === 0) return
-    setError(null)
-    const next = stripUnmanagedSections(existing, unmanagedConflicts)
-    const write = await window.api.config.writeText(path, next)
-    if (!write.ok) {
-      setError(write.error ?? 'write failed')
-      return
+  /** Write `next` through the store; a failed save toasts and drops the draft. */
+  const writeThroughStore = async (next: string): Promise<boolean> => {
+    if (!path) return false
+    setDraft(path, next)
+    const res = await saveText(path)
+    if (!res.ok) {
+      revert(path)
+      toast.error(`Could not save CLAUDE.md: ${res.error ?? 'write failed'}`)
+      return false
     }
+    return true
+  }
+
+  const cleanupUnmanaged = async () => {
+    if (!path || dirty || unmanagedConflicts.length === 0) return
+    const ok = await writeThroughStore(stripUnmanagedSections(existing, unmanagedConflicts))
+    if (!ok) return
     setFlash(`removed ${unmanagedConflicts.length} unmanaged section(s)`)
     setTimeout(() => setFlash(null), 3000)
-    refresh()
   }
 
   const items = useMemo(
@@ -678,20 +694,14 @@ export function PromptPresetsLibrary() {
   }, [items])
 
   const toggle = async (p: CatalogPromptPreset) => {
-    if (!path) return
+    if (!path || dirty) return
     setBusy(p.id)
-    setError(null)
-    const next = togglePreset(existing, p.id, CATALOG_PROMPT_PRESETS)
-    const write = await window.api.config.writeText(path, next)
-    setBusy(null)
-    if (!write.ok) {
-      setError(write.error ?? 'write failed')
-      return
-    }
     const nowActive = !activeIds.has(p.id)
+    const ok = await writeThroughStore(togglePreset(existing, p.id, CATALOG_PROMPT_PRESETS))
+    setBusy(null)
+    if (!ok) return
     setFlash(nowActive ? `enabled "${p.name}"` : `disabled "${p.name}"`)
     setTimeout(() => setFlash(null), 2500)
-    refresh()
   }
 
   if (!home) return <EmptyState title="loading…" />
@@ -738,14 +748,13 @@ export function PromptPresetsLibrary() {
           className="bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg w-56"
         />
       </div>
-      {(flash || error) && (
-        <div
-          className={`px-4 py-2 text-xs border-b border-line ${
-            error ? 'text-red-400 bg-red-950/20' : 'text-accent bg-bg-elev'
-          }`}
-        >
-          {error ?? flash}
+      {dirty && (
+        <div className="px-4 py-2 text-xs border-b border-line text-yellow-500/90 bg-yellow-950/20">
+          The System Prompt editor has unsaved changes. Save or discard them before changing presets.
         </div>
+      )}
+      {flash && (
+        <div className="px-4 py-2 text-xs border-b border-line text-accent bg-bg-elev">{flash}</div>
       )}
       {unmanagedConflicts.length > 0 && (
         <div className="px-4 py-2 text-xs border-b border-line bg-yellow-950/20 flex items-start gap-3">
@@ -760,6 +769,7 @@ export function PromptPresetsLibrary() {
           </div>
           <button
             onClick={cleanupUnmanaged}
+            disabled={dirty}
             className="shrink-0 px-3 py-1 text-xs border border-yellow-600/60 rounded text-yellow-400 hover:bg-yellow-600 hover:text-bg"
           >
             remove {unmanagedConflicts.length} section{unmanagedConflicts.length > 1 ? 's' : ''}
@@ -778,6 +788,7 @@ export function PromptPresetsLibrary() {
               activeIds={activeIds}
               existing={existing}
               busy={busy}
+              locked={dirty}
               onToggle={toggle}
             />
           ))}
@@ -793,6 +804,7 @@ function PresetCategorySection({
   activeIds,
   existing,
   busy,
+  locked,
   onToggle,
 }: {
   title: string
@@ -800,6 +812,7 @@ function PresetCategorySection({
   activeIds: Set<string>
   existing: string
   busy: string | null
+  locked: boolean
   onToggle: (p: CatalogPromptPreset) => void
 }) {
   const [open, setOpen] = useState(true)
@@ -850,7 +863,7 @@ function PresetCategorySection({
                 </div>
                 <div className="flex gap-1 shrink-0">
                   <button
-                    disabled={busy === p.id}
+                    disabled={busy === p.id || locked}
                     onClick={() => onToggle(p)}
                     className={`px-3 py-0.5 text-xs rounded border transition-colors ${
                       on

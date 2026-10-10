@@ -165,3 +165,53 @@ describe('Skills remove', () => {
     expect(buttonByText(el, 'confirm')).toBeUndefined()
   })
 })
+
+describe('Skills list errors', () => {
+  const errorState = (el: HTMLElement) => el.querySelector('[data-testid="skills-list-error"]')
+
+  it('shows an error state (not the empty state) and toasts once when the skills base cannot be listed', async () => {
+    const { api } = installApi()
+    api.config.listDir.mockImplementation((async (path: string) =>
+      path === SKILLS_DIR
+        ? { ok: false, error: 'EACCES: permission denied', entries: [] }
+        : { ok: true, error: null, entries: [] }) as never)
+    const err = vi.spyOn(toast, 'error').mockImplementation(() => '')
+    const el = await mount()
+    expect(errorState(el)).not.toBeNull()
+    expect(el.textContent).toContain(SKILLS_DIR)
+    expect(el.textContent).not.toContain('no skills or commands')
+    expect(err).toHaveBeenCalledTimes(1)
+    expect(err.mock.calls[0][0]).toContain(SKILLS_DIR)
+  })
+
+  it('survives a rejected listDir without an unhandled rejection and toasts', async () => {
+    const { api } = installApi()
+    api.config.listDir.mockRejectedValue(new Error('ipc boom'))
+    const err = vi.spyOn(toast, 'error').mockImplementation(() => '')
+    const unhandled = vi.fn()
+    process.on('unhandledRejection', unhandled)
+    const el = await mount()
+    await new Promise((r) => setTimeout(r, 0))
+    process.off('unhandledRejection', unhandled)
+    expect(unhandled).not.toHaveBeenCalled()
+    expect(err).toHaveBeenCalled()
+    expect(err.mock.calls[0][0]).toContain('ipc boom')
+    expect(errorState(el)).not.toBeNull()
+  })
+
+  it('still lists the skills that loaded when one read fails', async () => {
+    const { api, disk } = installApi()
+    const base = api.config.readText.getMockImplementation()!
+    api.config.readText.mockImplementation(async (path: string) => {
+      if (path === TWO) throw new Error('read denied')
+      return base(path)
+    })
+    void disk
+    const err = vi.spyOn(toast, 'error').mockImplementation(() => '')
+    const el = await mount()
+    expect(el.textContent).toContain('skill-one')
+    expect(err).toHaveBeenCalledTimes(1)
+    expect(err.mock.calls[0][0]).toContain(TWO)
+    expect(errorState(el)).toBeNull()
+  })
+})

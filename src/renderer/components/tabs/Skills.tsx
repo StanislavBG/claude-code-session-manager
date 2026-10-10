@@ -11,7 +11,7 @@ import { useConfig } from '../../state/config'
 import { useActiveTab } from '../../lib/useActiveTab'
 import { useHomeDir } from '../../lib/useHomeDir'
 import { useLayout } from '../../state/layout'
-import { listSkillEntries } from '../../lib/listSkills'
+import { listSkillEntries, type SkillListError } from '../../lib/listSkills'
 import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
 import type { Scope } from '../../lib/scopes'
 import type { DirEntry } from '../../../preload/api'
@@ -63,6 +63,8 @@ function SkillsComponent() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [view, setView] = useState<'installed' | 'library'>('installed')
   const [filter, setFilter] = useState('')
+  // Paths that failed to list on the latest load — drives the inline error state.
+  const [loadErrors, setLoadErrors] = useState<SkillListError[]>([])
   // Path of the skill whose inline "remove?" confirmation is open.
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
 
@@ -105,37 +107,51 @@ function SkillsComponent() {
     const seq = ++loadSeq.current
     if (!bases) {
       setItems([])
+      setLoadErrors([])
       return
     }
     const next: Item[] = []
-    // Skills: subdirs containing SKILL.md, possibly nested under a
-    // namespace dir (e.g. ~/.claude/skills/user/<name>/SKILL.md).
-    const skillEntries = await listSkillEntries(bases.skills)
-    for (const s of skillEntries) {
-      next.push({
-        kind: 'skills',
-        scope,
-        name: s.name,
-        path: s.path,
-        dir: s.dir,
-        disabled: readSkillDisabled(s.text),
-        description: parseSkillMeta(s.text).description ?? undefined,
-      })
+    const errors: SkillListError[] = []
+    try {
+      // Skills: subdirs containing SKILL.md, possibly nested under a
+      // namespace dir (e.g. ~/.claude/skills/user/<name>/SKILL.md).
+      const skills = await listSkillEntries(bases.skills)
+      errors.push(...skills.errors)
+      for (const s of skills.entries) {
+        next.push({
+          kind: 'skills',
+          scope,
+          name: s.name,
+          path: s.path,
+          dir: s.dir,
+          disabled: readSkillDisabled(s.text),
+          description: parseSkillMeta(s.text).description ?? undefined,
+        })
+      }
+    } catch (e) {
+      errors.push({ path: bases.skills, error: e instanceof Error ? e.message : String(e) })
     }
-    // Commands: each .md file is a command.
-    const cmdsDir = await window.api.config.listDir(bases.commands, { filesOnly: true })
-    for (const e of cmdsDir.entries as DirEntry[]) {
-      if (!e.name.endsWith('.md')) continue
-      next.push({
-        kind: 'commands',
-        scope,
-        name: e.name.replace(/\.md$/, ''),
-        path: e.path,
-        dir: null,
-        disabled: false,
-      })
+    try {
+      // Commands: each .md file is a command.
+      const cmdsDir = await window.api.config.listDir(bases.commands, { filesOnly: true })
+      if (!cmdsDir.ok) errors.push({ path: bases.commands, error: cmdsDir.error ?? 'failed to list directory' })
+      for (const e of cmdsDir.entries as DirEntry[]) {
+        if (!e.name.endsWith('.md')) continue
+        next.push({
+          kind: 'commands',
+          scope,
+          name: e.name.replace(/\.md$/, ''),
+          path: e.path,
+          dir: null,
+          disabled: false,
+        })
+      }
+    } catch (e) {
+      errors.push({ path: bases.commands, error: e instanceof Error ? e.message : String(e) })
     }
     if (loadSeq.current !== seq) return
+    for (const e of errors) toast.error(`Could not read ${e.path}: ${e.error}`)
+    setLoadErrors(errors)
     next.sort((a, b) =>
       a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'skills' ? -1 : 1
     )
@@ -400,6 +416,13 @@ function SkillsComponent() {
                   setSaveError(null)
                   setDraft(selectedPath, v)
                 }}
+              />
+            </div>
+          ) : items.length === 0 && loadErrors.length > 0 ? (
+            <div data-testid="skills-list-error">
+              <EmptyState
+                title="could not list skills or commands"
+                hint={loadErrors.map((e) => `${e.path}: ${e.error}`).join('\n')}
               />
             </div>
           ) : (

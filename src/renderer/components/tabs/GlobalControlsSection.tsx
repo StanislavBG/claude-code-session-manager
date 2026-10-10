@@ -81,7 +81,7 @@ export function GlobalControlsSection({ navigate }: GlobalControlsSectionProps) 
     if (!home) return
     let cancelled = false
     ;(async () => {
-      const entries = await listSkillEntries(`${home}/.claude/skills`)
+      const { entries } = await listSkillEntries(`${home}/.claude/skills`)
       if (!cancelled) setSkillsCount(entries.length)
     })()
     return () => {

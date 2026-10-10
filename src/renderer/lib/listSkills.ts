@@ -15,6 +15,8 @@ export interface SkillListResult {
   errors: SkillListError[]
 }
 
+const READ_CONCURRENCY = 6
+
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 
 /**
@@ -33,7 +35,6 @@ export async function listSkillEntries(
   opts: { nested?: boolean } = {},
 ): Promise<SkillListResult> {
   const nested = opts.nested ?? true
-  const entries: SkillEntry[] = []
   const errors: SkillListError[] = []
   const list = async (path: string) => {
     try {
@@ -48,29 +49,39 @@ export async function listSkillEntries(
       return []
     }
   }
+  // At most READ_CONCURRENCY readText calls in flight across the whole walk.
+  let active = 0
+  const waiting: Array<() => void> = []
   const read = async (path: string) => {
+    if (active >= READ_CONCURRENCY) await new Promise<void>((r) => waiting.push(r))
+    active++
     try {
       return await window.api.config.readText(path)
     } catch (e) {
       errors.push({ path, error: msg(e) })
       return null
+    } finally {
+      active--
+      waiting.shift()?.()
     }
   }
-  for (const e of await list(base)) {
-    const skillPath = `${e.path}/SKILL.md`
-    const directSkill = await read(skillPath)
-    if (directSkill?.exists) {
-      entries.push({ name: e.name, path: skillPath, dir: e.path, text: directSkill.text })
-      continue
-    }
-    if (!nested) continue
-    for (const ne of await list(e.path)) {
-      const nestedPath = `${ne.path}/SKILL.md`
-      const nestedSkill = await read(nestedPath)
-      if (nestedSkill?.exists) {
-        entries.push({ name: ne.name, path: nestedPath, dir: ne.path, text: nestedSkill.text })
-      }
-    }
-  }
-  return { entries, errors }
+  const perEntry = await Promise.all(
+    (await list(base)).map(async (e): Promise<SkillEntry[]> => {
+      const skillPath = `${e.path}/SKILL.md`
+      const directSkill = await read(skillPath)
+      if (directSkill?.exists) return [{ name: e.name, path: skillPath, dir: e.path, text: directSkill.text }]
+      if (!nested) return []
+      const found = await Promise.all(
+        (await list(e.path)).map(async (ne): Promise<SkillEntry | null> => {
+          const nestedPath = `${ne.path}/SKILL.md`
+          const nestedSkill = await read(nestedPath)
+          return nestedSkill?.exists
+            ? { name: ne.name, path: nestedPath, dir: ne.path, text: nestedSkill.text }
+            : null
+        }),
+      )
+      return found.filter((x): x is SkillEntry => x !== null)
+    }),
+  )
+  return { entries: perEntry.flat(), errors }
 }

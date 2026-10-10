@@ -218,7 +218,23 @@ async function getDeviceTicket(deviceToken) {
 
 // ─── E2E state helpers ────────────────────────────────────────────────────────
 
+// tabId → unsubscribe fn for the PtyManager output listener streaming to the peer.
+const _remotePtyStreams = new Map();
+
+function stopRemotePtyStream(tabId) {
+  const unsub = _remotePtyStreams.get(tabId);
+  _remotePtyStreams.delete(tabId);
+  if (unsub) {
+    try { unsub(); } catch { /* listener already gone */ }
+  }
+}
+
+function stopAllRemotePtyStreams() {
+  for (const tabId of [..._remotePtyStreams.keys()]) stopRemotePtyStream(tabId);
+}
+
 function resetE2e(state = 'idle') {
+  stopAllRemotePtyStreams();
   _e2e = makeState(state);
   _e2ePeerPubKey = null;
   _e2eDeviceId = null;
@@ -308,6 +324,7 @@ function scheduleReconnect() {
 async function disconnect() {
   cancelReconnect();
   stopHeartbeat();
+  stopAllRemotePtyStreams();
   resetE2e();
   if (_ws) {
     const ws = _ws;
@@ -427,6 +444,7 @@ async function connect() {
 }
 
 async function handleTokenRevoked(deviceId) {
+  stopAllRemotePtyStreams();
   logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'token revoked', meta: { deviceId } });
   const cfg = await loadConfig();
   const devices = (cfg.devices || []).filter((d) => d.deviceId !== deviceId);
@@ -973,7 +991,25 @@ function getDispatchMap() {
       // remotely-controlled 8 KiB string to spawn is a landmine if pty.cjs
       // ever uses it. Remote callers have no legitimate need for it.
       const { startupCommand: _ignored, ...safePayload } = parsed;
-      return ptyManager.spawn(safePayload);
+      const result = await ptyManager.spawn(safePayload);
+      // Stream output to the peer — replaces any prior subscription for this tab.
+      // Chunk contents are sensitive: never logged.
+      const tabId = safePayload.tabId;
+      stopRemotePtyStream(tabId);
+      const unsub = ptyManager.addOutputListener(
+        tabId,
+        (_id, data) => {
+          if (_e2e.state !== 'authenticated' || !loadConfigSync().remoteEnabled) return;
+          pushEvent('event:pty:data', { tabId, data });
+        },
+        (_id, info) => {
+          if (_remotePtyStreams.get(tabId) === unsub) _remotePtyStreams.delete(tabId);
+          if (_e2e.state !== 'authenticated' || !loadConfigSync().remoteEnabled) return;
+          pushEvent('event:pty:exit', { tabId, exitCode: info?.exitCode, signal: info?.signal });
+        },
+      );
+      _remotePtyStreams.set(tabId, unsub);
+      return result;
     },
 
     'cmd:pty:write': async (payload) => {
@@ -989,6 +1025,7 @@ function getDispatchMap() {
 
     'cmd:pty:kill': async (payload) => {
       const parsed = schemas.ptyTabId.parse(payload);
+      stopRemotePtyStream(parsed.tabId);
       ptyManager.kill(parsed.tabId);
       return { ok: true };
     },
@@ -1091,6 +1128,7 @@ async function pair(otp) {
 }
 
 async function revokeDevice(deviceId) {
+  stopAllRemotePtyStreams();
   invalidateConfigCache();
   const cfg = await loadConfig();
   const devices = (cfg.devices || []).filter((d) => d.deviceId !== deviceId);
@@ -1115,6 +1153,7 @@ async function revokeDevice(deviceId) {
  * This is the local-side "kill everything" action (ADR §4.1).
  */
 async function revokeAllDevices() {
+  stopAllRemotePtyStreams();
   const cfg = await loadConfig();
   const revokedCount = (cfg.devices || []).length;
   await saveConfig({ ...cfg, remoteEnabled: false, devices: [] });
@@ -1261,5 +1300,12 @@ module.exports = {
     handleMessage,
     resetE2e,
     getE2eState: () => _e2e,
+  },
+  __test: {
+    getDispatchMap,
+    setWs: (ws) => { _ws = ws; },
+    setE2eAuthenticated: (key) => { _e2e = makeState('authenticated', key, null); },
+    revokeAllDevices,
+    streamCount: () => _remotePtyStreams.size,
   },
 };

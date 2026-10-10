@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
-import type { HistoryDashboardDay, HistoryDashboardResult, HistoryDashboardTotals } from '../../../preload/api'
+import type { HistoryDashboardDay, HistoryDashboardResult } from '../../../preload/api'
 import { facetSlice } from '../../lib/historyFacet'
 import { buildHeadline, buildProjectRows, measureValue, type Measure } from '../../lib/analyticsViewModel'
 import { buildUsageCsv } from '../../lib/usageCsv'
 import { toast } from '../../state/toast'
 import { fetchHistoryTotals } from '../../lib/historyTotals'
+import { sumDayTotals } from '../../lib/historyMath'
 import { useLayout } from '../../state/layout'
 import { useSessions } from '../../state/sessions'
 import { useKnownProjects } from '../../lib/useKnownProjects'
@@ -18,7 +19,7 @@ import { BudgetStrip } from './history/analytics/BudgetStrip'
 import { ProjectFacet } from './history/analytics/ProjectFacet'
 import { StackedTrend } from './history/analytics/StackedTrend'
 import { Ranking } from './history/analytics/Ranking'
-import { ProjectDrill, type DrillModelBucket } from './history/analytics/ProjectDrill'
+import { ProjectDrill } from './history/analytics/ProjectDrill'
 import { ModelMix } from './history/analytics/panels/ModelMix'
 import { Concentration } from './history/analytics/panels/Concentration'
 import { CachePanel } from './history/analytics/panels/CachePanel'
@@ -30,13 +31,6 @@ const DEFAULT_MEASURE: Measure = 'spend'
 const DEFAULT_RANGE: RangeDays = 30
 /** Module-level so the `days` fallback is reference-stable across renders. */
 const EMPTY_DAYS: HistoryDashboardDay[] = []
-
-function emptyTotals(): HistoryDashboardTotals {
-  return {
-    promptCount: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
-    toolCallCount: 0, sessionCount: 0, errorCount: 0, activeMinutes: 0, estimatedCostUsd: 0,
-  }
-}
 
 export function HistoryDashboard() {
   const [measure, setMeasureState] = useState<Measure>(DEFAULT_MEASURE)
@@ -196,33 +190,11 @@ export function HistoryDashboard() {
 
   const selectedDrill = useMemo(() => {
     if (!raw || !selected) return null
-    const totals = emptyTotals()
-    const byModel: Record<string, DrillModelBucket> = {}
+    const rows = days.flatMap((day) => (day.byProject[selected] ? [day.byProject[selected]] : []))
+    const { byModel, ...totals } = sumDayTotals(rows)
     const toolBreakdown: Record<string, number> = {}
-    for (const day of days) {
-      const row = day.byProject[selected]
-      if (!row) continue
-      totals.promptCount += row.promptCount
-      totals.inputTokens += row.inputTokens
-      totals.outputTokens += row.outputTokens
-      totals.cacheReadTokens += row.cacheReadTokens
-      totals.cacheCreationTokens += row.cacheCreationTokens
-      totals.toolCallCount += row.toolCallCount
-      totals.sessionCount += row.sessionCount
-      totals.errorCount += row.errorCount
-      totals.activeMinutes += row.activeMinutes
-      totals.estimatedCostUsd += row.estimatedCostUsd
-      for (const [modelId, mb] of Object.entries(row.byModel)) {
-        const dst = byModel[modelId] ?? (byModel[modelId] = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 })
-        dst.inputTokens += mb.inputTokens
-        dst.outputTokens += mb.outputTokens
-        dst.cacheReadTokens += mb.cacheReadTokens
-        dst.cacheCreationTokens += mb.cacheCreationTokens
-        dst.costUsd += mb.costUsd
-      }
-      for (const [tool, cnt] of Object.entries(row.toolBreakdown)) {
-        toolBreakdown[tool] = (toolBreakdown[tool] ?? 0) + cnt
-      }
+    for (const row of rows) {
+      for (const [tool, cnt] of Object.entries(row.toolBreakdown)) toolBreakdown[tool] = (toolBreakdown[tool] ?? 0) + cnt
     }
     return { totals, byModel, toolBreakdown }
   }, [raw, days, selected])
@@ -254,22 +226,8 @@ export function HistoryDashboard() {
   function handleExport() {
     if (!raw) return
     const csvDays = filteredDays.map((d) => {
-      let costUsd = 0, inputTokens = 0, outputTokens = 0, cacheCreationTokens = 0, cacheReadTokens = 0
-      const byModel: Record<string, DrillModelBucket> = {}
-      for (const row of Object.values(d.byProject)) {
-        costUsd += row.estimatedCostUsd
-        inputTokens += row.inputTokens
-        outputTokens += row.outputTokens
-        cacheCreationTokens += row.cacheCreationTokens
-        cacheReadTokens += row.cacheReadTokens
-        for (const [modelId, mb] of Object.entries(row.byModel)) {
-          const dst = byModel[modelId] ?? (byModel[modelId] = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 0 })
-          dst.inputTokens += mb.inputTokens
-          dst.outputTokens += mb.outputTokens
-          dst.cacheReadTokens += mb.cacheReadTokens
-          dst.cacheCreationTokens += mb.cacheCreationTokens
-        }
-      }
+      const { byModel, estimatedCostUsd: costUsd, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens } =
+        sumDayTotals(Object.values(d.byProject))
       return { date: d.date, costUsd, inputTokens, outputTokens, cacheCreationTokens, cacheReadTokens, byModel }
     })
     const csv = buildUsageCsv(csvDays)

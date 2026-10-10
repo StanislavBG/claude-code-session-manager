@@ -2,6 +2,8 @@ import type {
   MeResponse,
   DevicesResponse,
   OtpResponse,
+  ClientOtpResponse,
+  ClientsResponse,
   WsTicketResponse,
 } from './types';
 
@@ -68,6 +70,18 @@ export async function getWsTicket(): Promise<WsTicketResponse> {
 
 export async function revokeDevice(deviceId: string): Promise<void> {
   await apiFetch<unknown>(`/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
+}
+
+export async function requestClientOtp(): Promise<ClientOtpResponse> {
+  return apiFetch<ClientOtpResponse>('/client-otp', { method: 'POST' });
+}
+
+export async function getClients(): Promise<ClientsResponse> {
+  return apiFetch<ClientsResponse>('/clients');
+}
+
+export async function revokeClient(clientId: string): Promise<void> {
+  await apiFetch<unknown>(`/clients/${encodeURIComponent(clientId)}`, { method: 'DELETE' });
 }
 
 export { ApiError };

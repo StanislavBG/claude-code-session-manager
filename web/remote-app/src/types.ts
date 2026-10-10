@@ -21,6 +21,22 @@ export interface OtpResponse {
   code: string;
 }
 
+export interface ClientOtpResponse {
+  code: string;
+}
+
+export interface DesktopClient {
+  clientId: string;
+  email: string;
+  clientName: string | null;
+  issuedAt: string;
+  expiresAt: string;
+}
+
+export interface ClientsResponse {
+  clients: DesktopClient[];
+}
+
 export interface WsTicketResponse {
   ticket: string;
 }

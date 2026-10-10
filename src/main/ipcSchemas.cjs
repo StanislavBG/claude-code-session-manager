@@ -944,6 +944,19 @@ const chatExternalSend = z.object({
   ),
 });
 
+// Phone-initiated new Session. cwd/agentName are re-checked against the open
+// tabs / persona list in webRemote.cjs before anything touches the filesystem.
+const remoteSessionCreate = z.object({
+  cwd: z.string().min(1).max(4096),
+  agentName: z.string().regex(/^[A-Za-z0-9._-]{1,64}$/),
+  tag: EpicTagSchema,
+  title: z.string().min(1).max(120),
+  prompt: z.string().min(1).refine(
+    (s) => Buffer.byteLength(s, 'utf8') <= CHAT_PROMPT_MAX_BYTES,
+    `prompt must be ≤ ${CHAT_PROMPT_MAX_BYTES} bytes`,
+  ),
+});
+
 // ──────────────────────────────────────────── Web Remote
 // OTP is 8 uppercase alphanumeric chars (case-insensitive entry, normalised to upper in handler).
 const WEB_REMOTE_OTP_RE = /^[A-Z0-9]{8}$/i;
@@ -1150,6 +1163,8 @@ const SAS_GATED_READS = new Set([
   'cmd:history:aggregate',
   // subscribe initiates a live stream of session state/summary — sensitive.
   'cmd:session:subscribe',
+  // Picker data (projects, personas, tags, macros) for the phone's New Session.
+  'cmd:session:options',
   // NOTE: cmd:exchanges:list is intentionally NOT allowlisted — webRemote.cjs has
   // no dispatch handler for it, so an allowlist entry would only fail closed with
   // an opaque reject. Re-add here together with the handler when remote exchanges
@@ -1175,6 +1190,8 @@ const MUTATE_COMMANDS = new Set([
   // Pushes a prompt into an open tab's chat queue — a real mutation of that
   // tab's session, same tier as pty:write.
   'cmd:chat:send',
+  // Starts a new Session on the desktop via the renderer's launchSession.
+  'cmd:session:create',
 ]);
 
 const ALLOWED_COMMANDS = new Set([...READ_COMMANDS, ...SAS_GATED_READS, ...MUTATE_COMMANDS]);
@@ -1284,6 +1301,7 @@ module.exports = {
     chatCancel,
     chatClassifyTicket,
     chatExternalSend,
+    remoteSessionCreate,
     exchangesList,
     agentsSavePersona,
     macrosSave,

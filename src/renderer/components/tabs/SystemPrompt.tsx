@@ -8,6 +8,7 @@ import { useConfig } from '../../state/config'
 import { CLAUDE_MD_SCOPES } from '../../lib/scopes'
 import { PromptPresetsLibrary, ViewSwitcher } from './Library'
 import { useHomeDir } from '../../lib/useHomeDir'
+import { estimateTokens } from '../../lib/estimateTokens'
 import type { ImportRef } from '../../../preload/api'
 
 /**
@@ -42,11 +43,6 @@ const USER_SCOPE_NOTE = {
   title: 'User system prompt',
   body:
     'This is the real ~/.claude/CLAUDE.md on disk — the instructions the claude CLI loads into every session it starts on this machine, in every project. A project\'s own CLAUDE.md / CLAUDE.local.md are read from that project\'s directory when a session launches there; they are not edited here.',
-}
-
-/** Rough token estimate: ~4 chars per token for English prose. */
-function estimateTokens(text: string): number {
-  return Math.round(text.length / 4)
 }
 
 function SystemPromptComponent() {

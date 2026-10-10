@@ -162,6 +162,18 @@ describe('Plugins drill-in page', () => {
     ) as HTMLElement
     expect(demoRow).toBeTruthy()
 
+    // Description renders as a bounded muted line under the name when the
+    // manifest has one, and the name cell is just the name when it has none.
+    const descDiv = demoRow.querySelector('td div.truncate.text-fg-faint') as HTMLElement | null
+    expect(descDiv?.textContent).toBe(DEMO_MANIFEST.description)
+    expect(descDiv?.getAttribute('title')).toBe(DEMO_MANIFEST.description)
+    expect((descDiv?.parentElement as HTMLElement).style.maxWidth).toBeTruthy()
+    const bareRow = Array.from(container.querySelectorAll('tr[data-row-key]')).find((r) =>
+      r.textContent?.includes('bare'),
+    ) as HTMLElement
+    expect(bareRow.querySelector('td')?.textContent).toBe('bare')
+    expect(bareRow.querySelector('td div.truncate.text-fg-faint')).toBeFalsy()
+
     act(() => {
       demoRow.click()
     })
@@ -206,6 +218,33 @@ describe('Plugins drill-in page', () => {
     expect(container.querySelector('table')).toBeTruthy()
 
     expect(api.config.readJson).toHaveBeenCalled()
+    act(() => root.unmount())
+  })
+
+  it('re-lists and shows a newly installed plugin when installed_plugins.json changes', async () => {
+    const api = installWindowApiMock()
+    const { Plugins } = await import('../Plugins')
+    const root = createRoot(container)
+    act(() => {
+      root.render(createElement(Plugins))
+    })
+    await flush()
+    expect(container.textContent).not.toContain('fresh')
+
+    const plugins = INSTALLED_MANIFEST.plugins as Record<string, unknown>
+    plugins['fresh@marketplace-a'] = [
+      { scope: 'user', installPath: `${HOME}/.claude/plugins/fresh`, version: '9.9.9', installedAt: '', lastUpdated: '' },
+    ]
+    try {
+      act(() => api.fireChange())
+      await flush()
+      const freshRow = Array.from(container.querySelectorAll('tr[data-row-key]')).find((r) =>
+        r.textContent?.includes('fresh'),
+      )
+      expect(freshRow).toBeTruthy()
+    } finally {
+      delete plugins['fresh@marketplace-a']
+    }
     act(() => root.unmount())
   })
 

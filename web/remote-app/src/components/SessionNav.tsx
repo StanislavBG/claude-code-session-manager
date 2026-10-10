@@ -1,8 +1,10 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useStore } from '../store';
 import type { SessionMeta, SessionState } from '../types';
 import { StateDot, StatePill } from './StatePane';
 import DesktopClientsPanel from './DesktopClientsPanel';
+import NewSessionSheet from './NewSessionSheet';
+import type { RelaySocket } from '../ws';
 
 /** Short last path segment for a cwd, e.g. /home/me/Projects/foo → foo */
 function projectName(cwd?: string): string {
@@ -15,7 +17,9 @@ function projectName(cwd?: string): string {
  * Collapsible left-nav: sessions grouped by project (cwd), live sessions first.
  * Slide-over drawer on mobile; tap a session to select + subscribe.
  */
-export default function SessionNav() {
+export default function SessionNav({ socket = null, deviceId = '' }: { socket?: RelaySocket | null; deviceId?: string }) {
+  const [sheet, setSheet] = useState<{ cwd: string; project: string } | null>(null);
+  const [notice, setNotice] = useState(false);
   const { sessions, selectedTabId, selectTab, stateByTab, navOpen, setNavOpen } = useStore();
 
   const groups = useMemo(() => {
@@ -65,7 +69,21 @@ export default function SessionNav() {
         )}
         {groups.map(([project, list]) => (
           <div key={project} className="px-3 py-1">
-            <div className="px-1 py-1.5 text-xs font-mono font-medium text-ink-mute truncate">{project}</div>
+            <div className="flex items-center gap-2 px-1 py-1.5">
+              <div className="flex-1 text-xs font-mono font-medium text-ink-mute truncate">{project}</div>
+              {(() => {
+                const cwd = list.find((x) => x.kind === 'project')?.cwd;
+                return cwd ? (
+                  <button
+                    onClick={() => setSheet({ cwd, project })}
+                    className="text-xs font-semibold text-accent min-h-touch px-1"
+                    aria-label={`New session in ${project}`}
+                  >
+                    + New session
+                  </button>
+                ) : null;
+              })()}
+            </div>
             <div className="flex flex-col gap-2">
               {list.map((s) => {
                 const active = s.tabId === selectedTabId;
@@ -96,6 +114,19 @@ export default function SessionNav() {
           {sessions.length} session{sessions.length === 1 ? '' : 's'} reachable from this device.
         </div>
         <DesktopClientsPanel />
+        {notice && (
+          <div className="px-4 pb-3 text-xs text-sage" role="status">Starting on your computer…</div>
+        )}
+        {sheet && (
+          <NewSessionSheet
+            socket={socket}
+            deviceId={deviceId}
+            cwd={sheet.cwd}
+            project={sheet.project}
+            onClose={() => setSheet(null)}
+            onStarted={() => setNotice(true)}
+          />
+        )}
       </nav>
     </>
   );

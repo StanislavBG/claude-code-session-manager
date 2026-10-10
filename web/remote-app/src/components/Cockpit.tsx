@@ -46,7 +46,7 @@ export default function Cockpit({ socket, deviceId }: Props) {
 
       <div className="flex flex-1 overflow-hidden relative">
         {/* Left-nav drawer */}
-        <SessionNav />
+        <SessionNav socket={socket} deviceId={deviceId} />
 
         {/* Main: 3-pane split */}
         <main className="flex-1 flex flex-col min-w-0">

@@ -6,7 +6,7 @@
  */
 import type { PromptSession } from '../../state/promptSessions'
 import type { EpicDisplayStatus } from '../../lib/epicDerive'
-import type { InboundFeedbackOrigin } from '../../lib/epicOrigin'
+import { inboundFeedbackOrigin, type InboundFeedbackOrigin, type inboundSeriesSiblings } from '../../lib/epicOrigin'
 
 // ─── EpicStatusChip ──────────────────────────────────────────────────────────
 const STATUS_TONE: Record<EpicDisplayStatus, { bg: string; text: string; dot: string; ring?: boolean; label: string }> = {
@@ -140,6 +140,118 @@ export function EpicInboundTag({ origin, small }: { origin: InboundFeedbackOrigi
       <span aria-hidden="true">↘</span>
       <span className="truncate">{origin.label}</span>
     </span>
+  )
+}
+
+// ─── InboundProposalCard ─────────────────────────────────────────────────────
+const PROPOSAL_HEADING = 'font-mono text-[10.5px] font-semibold uppercase tracking-wide text-fg-dim'
+const PROPOSAL_BODY = 'text-[12.5px] leading-relaxed text-fg-dim'
+
+/**
+ * Full proposal for an Epic that arrived through the cross-project feedback
+ * conduit: who sent it, why, the plan, acceptance criteria, out-of-scope and
+ * series position — so the human decides on Approve & start from the whole
+ * report, not the one-line title. Legacy Epics (no structured proposal) fall
+ * back to the goal-section / openingPrompt report text. Pure presentational:
+ * the caller passes `siblings` (inboundSeriesSiblings), no store reads.
+ */
+export function InboundProposalCard({
+  epic,
+  siblings,
+}: {
+  epic: PromptSession
+  siblings: ReturnType<typeof inboundSeriesSiblings>
+}) {
+  const origin = inboundFeedbackOrigin(epic)
+  if (!origin) return null
+  const proposal = origin.proposal
+  const from = (
+    <div data-testid="inbound-proposal-from" className="flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span className={PROPOSAL_HEADING}>From</span>
+      <span title={origin.fromCwd} className="font-mono text-[12px] font-semibold text-amber-300">
+        ↘ {origin.label}
+      </span>
+      {proposal?.originAsk ? (
+        <span className="text-[12px] text-fg-faint">raised while working on {proposal.originAsk}</span>
+      ) : null}
+    </div>
+  )
+  const rootCls = 'mb-3 max-w-[760px] space-y-2.5 rounded-md border border-line bg-bg-hi px-3.5 py-3'
+
+  if (!proposal) {
+    const goal = epic.sections?.find((s) => s.kind === 'goal')?.text
+    const report = goal || epic.openingPrompt || epic.goalText
+    return (
+      <section data-testid="inbound-proposal-card" className={rootCls}>
+        {from}
+        <div
+          data-testid="inbound-proposal-report"
+          className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap text-[12px] leading-relaxed text-fg-dim"
+        >
+          {report}
+        </div>
+      </section>
+    )
+  }
+
+  const section = (testid: string, heading: string, body: React.ReactNode) => (
+    <div data-testid={testid}>
+      <div className={`mb-1 ${PROPOSAL_HEADING}`}>{heading}</div>
+      {body}
+    </div>
+  )
+  return (
+    <section data-testid="inbound-proposal-card" className={rootCls}>
+      {from}
+      {origin.seriesLabel ? (
+        <span
+          data-testid="inbound-proposal-series"
+          className="inline-flex items-center rounded ring-1 ring-inset ring-amber-400/40 px-[7px] py-[3px] font-mono text-[10.5px] font-semibold uppercase tracking-wide text-amber-300"
+        >
+          {origin.seriesLabel}
+        </span>
+      ) : null}
+      {siblings.length > 1 ? (
+        <ul data-testid="inbound-proposal-siblings" className="space-y-0.5 text-[12px] text-fg-faint">
+          {siblings.map((sib) => (
+            <li
+              key={sib.id}
+              aria-current={sib.id === epic.id ? 'true' : undefined}
+              className={sib.id === epic.id ? 'font-semibold text-fg-dim' : undefined}
+            >
+              {`${sib.index}/${proposal.series?.total ?? siblings.length} ${sib.goalText} ${sib.status}`}
+              {sib.id === epic.id ? ' ← this' : ''}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div className="max-h-[50vh] space-y-2.5 overflow-y-auto">
+        {section('inbound-proposal-why', 'Why', <p className={PROPOSAL_BODY}>{proposal.motivation}</p>)}
+        {section(
+          'inbound-proposal-plan',
+          'Proposed plan',
+          <ol className={`list-decimal space-y-0.5 pl-5 ${PROPOSAL_BODY}`}>
+            {proposal.plan.map((step, i) => <li key={i}>{step}</li>)}
+          </ol>,
+        )}
+        {section(
+          'inbound-proposal-criteria',
+          'Acceptance criteria',
+          <ul className={`list-disc space-y-0.5 pl-5 ${PROPOSAL_BODY}`}>
+            {proposal.acceptanceCriteria.map((c, i) => <li key={i}>{c}</li>)}
+          </ul>,
+        )}
+        {proposal.outOfScope.length > 0
+          ? section(
+              'inbound-proposal-out-of-scope',
+              'Out of scope',
+              <ul className={`list-disc space-y-0.5 pl-5 ${PROPOSAL_BODY}`}>
+                {proposal.outOfScope.map((o, i) => <li key={i}>{o}</li>)}
+              </ul>,
+            )
+          : null}
+      </div>
+    </section>
   )
 }
 

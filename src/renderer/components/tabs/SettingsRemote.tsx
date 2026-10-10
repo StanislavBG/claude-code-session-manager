@@ -395,9 +395,9 @@ export function SettingsRemote() {
         <SectionLabel>Pair a device</SectionLabel>
         {pairingStep === 'idle' ? (
           <div className="flex items-center justify-between gap-4 bg-bg-hi border border-line rounded-2xl px-5 py-[18px]">
-            <div className="text-[13.5px] text-fg-dim leading-relaxed max-w-[420px]">
-              Open the <strong className="text-fg font-semibold">web app</strong> on your phone and tap{' '}
-              <strong className="text-fg font-semibold">Add Device</strong> to get an 8-character code, then enter it here.
+            <div data-testid="settings-remote-pair-hint" className="text-[13.5px] text-fg-dim leading-relaxed max-w-[420px]">
+              On your phone open <strong className="text-fg font-semibold">bilko.run/projects/session-manager</strong>, sign in, and tap{' '}
+              <strong className="text-fg font-semibold">Generate pairing code</strong>. Enter the 8-character code here.
             </div>
             <PillButton testId="settings-remote-pair-start" kind="soft" icon="link" onClick={() => setPairingStep('enter-otp')}>Pair Device…</PillButton>
           </div>

@@ -81,6 +81,14 @@ describe('SettingsRemote', () => {
     expect(api.enable).toHaveBeenCalledTimes(1)
   })
 
+  it('pair hint names the real phone URL and button', async () => {
+    await mount()
+    const text = q('settings-remote-pair-hint')!.textContent ?? ''
+    expect(text).toContain('Generate pairing code')
+    expect(text).toContain('bilko.run/projects/session-manager')
+    expect(text).not.toContain('Add Device')
+  })
+
   it('submits the pairing code', async () => {
     await mount()
     await click(q('settings-remote-pair-start'))

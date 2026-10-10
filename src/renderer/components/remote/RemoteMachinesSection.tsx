@@ -4,6 +4,7 @@ import { Badge } from '../ui/Badge'
 import { SectionLabel, PillButton, RemoteCard, RevokeButton, SasBanner, EmptyState } from './remoteUi'
 import { RemoteTerminalPanel } from './RemoteTerminalPanel'
 import { RemoteSessionsPanel } from './RemoteSessionsPanel'
+import { useRemotePeers } from './useRemotePeers'
 import type { RemoteMachinePeer, RemoteClientStatus, RemoteClientDevice } from '../../../preload/api'
 
 const UNAVAILABLE = 'relay_client_auth_unavailable'
@@ -216,7 +217,6 @@ function ClientPairing({
 /** Settings → Phone remote: paired remote Session Managers (desktop-to-desktop). */
 export function RemoteMachinesSection() {
   const showToast = useToast((s) => s.show)
-  const [peers, setPeers] = useState<RemoteMachinePeer[]>([])
   const [panel, setPanel] = useState<OpenPanel>(null)
   const [paired, setPaired] = useState(false)
 
@@ -228,52 +228,18 @@ export function RemoteMachinesSection() {
     }
   }, [showToast])
 
-  const refresh = useCallback(async () => {
-    try {
-      setPeers(await window.api.remoteClient.list())
-    } catch (e) {
-      showToast('error', errMsg(e))
-    }
-  }, [showToast])
+  const onStatusEvent = useCallback((s: RemoteClientStatus) => {
+    if (s.reason && UNPAIRED_REASONS.includes(s.reason)) void readAuth()
+  }, [readAuth])
 
-  useEffect(() => {
-    void refresh()
-    void readAuth()
-    const unsub = window.api.remoteClient.onStatus((s: RemoteClientStatus) => {
-      if (s.reason && UNPAIRED_REASONS.includes(s.reason)) void readAuth()
-      setPeers((prev) => prev.map((p) => (p.peerId === s.peerId ? { ...p, status: s.status, reason: s.reason, sas: s.sas } : p)))
-    })
-    return () => { unsub() }
-  }, [refresh, readAuth])
+  const { peers, refresh, connect: onConnect, confirmSas: onConfirmSas, revoke } = useRemotePeers(onStatusEvent)
 
-  const onConnect = useCallback(async (peerId: string) => {
-    try {
-      const r = await window.api.remoteClient.connect(peerId)
-      setPeers((prev) => prev.map((p) => (p.peerId === peerId ? { ...p, status: r.status, reason: r.reason, sas: r.sas } : p)))
-    } catch (e) {
-      showToast('error', errMsg(e))
-    }
-  }, [showToast])
-
-  const onConfirmSas = useCallback(async (peerId: string) => {
-    try {
-      const r = await window.api.remoteClient.confirmSas(peerId)
-      if (!r.ok) showToast('error', r.reason ?? 'SAS confirmation failed')
-      await refresh()
-    } catch (e) {
-      showToast('error', errMsg(e))
-    }
-  }, [showToast, refresh])
+  useEffect(() => { void readAuth() }, [readAuth])
 
   const onRevoke = useCallback(async (peerId: string) => {
-    try {
-      await window.api.remoteClient.remove(peerId)
-      setPanel((cur) => (cur?.peerId === peerId ? null : cur))
-      await refresh()
-    } catch (e) {
-      showToast('error', errMsg(e))
-    }
-  }, [showToast, refresh])
+    await revoke(peerId)
+    setPanel((cur) => (cur?.peerId === peerId ? null : cur))
+  }, [revoke])
 
   const onTogglePanel = useCallback((peerId: string, kind: 'terminal' | 'sessions') => {
     setPanel((cur) => (cur?.peerId === peerId && cur.kind === kind ? null : { peerId, kind }))

@@ -9,7 +9,7 @@
 > rebuild one. Past buyers keep their entitlement rows.
 
 This repo ships the app only. The public marketing page at **bilko.run/products/session-manager** (hero,
-feature Parts Bin, the app's `$0` price tag + install command, links into the free Field Manual) and the
+feature Parts Bin, the app's `$0` price tag — Mac + Windows installers, then the `npx` one-liner — links into the free Field Manual) and the
 npm-package registry entry (`Session Manager` card on bilko.run/projects) live in a **separate sibling
 repo**: `~/Projects/Bilko/` (git remote `origin` → `StanislavBG/bilko-run`, **not** `content-grade`). Bilko
 is Stanislav's own multi-project *hosting platform* — the App-Store-style host for bilko.run — not a
@@ -20,6 +20,8 @@ Key files in `~/Projects/Bilko/` for session-manager's listing:
   nothing: no checkout, no email form, and the only price on it is the app's `$0`. Every visible string
   lives in `session-manager-landing/copy.ts`, mirrored from this repo's
   [`design-mocks/landing-v2/copy.json`](../design-mocks/landing-v2/copy.json) — edit there first.
+  Only the price tag carries `npx` (restored 2026-10-10); the film end card, the /projects hub card and
+  the Field Manual stay installer-only.
 - `src/pages/ManualPage.tsx` + `server/routes/manual.ts` — the free Field Manual reader at
   `/products/session-manager/manual`; every chapter and every download is public.
 - `src/lib/sessionManagerCheckout.ts` — **deleted** 2026-09-25 with the buy flow.

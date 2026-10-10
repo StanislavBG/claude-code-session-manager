@@ -80,15 +80,17 @@ describe('engines.node floor', () => {
     expect(readme).toContain(`Needs Node.js ${major}.${minor}+`)
   })
 
-  it('landing-page price-tag note says the installer needs no Node', () => {
+  it('landing-page price-tag notes: installer needs no Node, npx command states the floor', () => {
     const copy = JSON.parse(
       fs.readFileSync(
         path.join(repoRoot, 'session-manager-operations/design-mocks/landing-v2/copy.json'),
         'utf8',
       ),
-    ) as { priceTag: { note: string } }
+    ) as { priceTag: { note: string; commandNote: string } }
     expect(copy.priceTag.note).toContain('no Node')
     expect(copy.priceTag.note).not.toMatch(/Node \d+\.\d+\+/)
+    const [major, minor] = nodeFloor()!
+    expect(copy.priceTag.commandNote).toContain(`Node ${major}.${minor}+`)
   })
 })
 

@@ -3,7 +3,8 @@ import { createElement } from 'react'
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { ActiveSessionsCard } from '../Home'
+import { ActiveSessionsCard, DataModelCard } from '../Home'
+import { ERD_ENTITIES } from '../../../lib/dataModelErd'
 import { useScheduleState } from '../../../state/scheduleState'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { useChat } from '../../../state/chat'
@@ -110,5 +111,25 @@ describe('ActiveSessionsCard drawer wiring', () => {
       await Promise.resolve()
     })
     expect(document.querySelector('[data-testid="home-drawer"]')).toBeNull()
+  })
+})
+
+describe('DataModelCard', () => {
+  it('renders the live entity count and navigates to data-model on click', async () => {
+    const onNavigate = vi.fn()
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    root = createRoot(container)
+    await act(async () => {
+      root!.render(createElement(DataModelCard, { onNavigate }))
+      await Promise.resolve()
+    })
+    expect(container.textContent).toContain(`${ERD_ENTITIES.length} entities`)
+    const btn = container.querySelector('[data-testid="home-data-model-card"]') as HTMLButtonElement
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    expect(onNavigate).toHaveBeenCalledWith('data-model')
   })
 })

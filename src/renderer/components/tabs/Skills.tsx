@@ -63,6 +63,8 @@ function SkillsComponent() {
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const [view, setView] = useState<'installed' | 'library'>('installed')
   const [filter, setFilter] = useState('')
+  // Path of the skill whose inline "remove?" confirmation is open.
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null)
 
   const scopeRoots = useMemo(() => {
     if (!home) return null
@@ -172,8 +174,9 @@ function SkillsComponent() {
       return
     }
     setItems((prev) => prev.map((i) => (i.path === item.path ? { ...i, disabled } : i)))
-    // Refresh the editor if this skill is open so its frontmatter reflects disk.
-    if (files[item.path]) void loadText(item.path)
+    // Refresh the editor if this skill is open so its frontmatter reflects
+    // disk. keepDirty: a draft typed while the write was in flight survives.
+    if (useConfig.getState().files[item.path]) void useConfig.getState().loadText(item.path, true)
   }
 
   // Uninstall a skill by deleting its directory. Trash-backed (recoverable) and
@@ -182,9 +185,7 @@ function SkillsComponent() {
   // the skill out of the active set entirely.
   async function removeSkill(item: Item) {
     if (!item.dir) return
-    if (!window.confirm(
-      `Remove skill "${item.name}"?\n\nIts folder moves to the trash (recoverable); reinstall any time from the Library.`
-    )) return
+    setConfirmRemove(null)
     const r = await window.api.files.delete(item.dir)
     if (!r.ok) {
       toast.error(r.error ?? 'failed to remove skill')
@@ -192,11 +193,12 @@ function SkillsComponent() {
     }
     toast.info(`Removed "${item.name}" — moved to trash`)
     unwatchFile(item.path)
-    setItems((prev) => prev.filter((i) => i.path !== item.path))
-    setSelectedPath((cur) => {
-      if (cur !== item.path) return cur
-      const remaining = items.filter((i) => i.path !== item.path)
-      return remaining[0]?.path ?? null
+    // Selection is derived from the fresh list inside the updater, never from
+    // the `items` captured when the (async) remove started.
+    setItems((prev) => {
+      const remaining = prev.filter((i) => i.path !== item.path)
+      setSelectedPath((cur) => (cur !== item.path ? cur : remaining[0]?.path ?? null))
+      return remaining
     })
   }
 
@@ -340,14 +342,37 @@ function SkillsComponent() {
                               <span className="w-1 h-1 rounded-full bg-accent" />
                             )}
                             {showToggle && (
-                              <Toggle
-                                checked={!i.disabled}
-                                onChange={(v) => void toggleSkillDisabled(i, !v)}
-                              />
+                              <span
+                                title={files[i.path]?.dirty ? 'This skill has unsaved edits — save or revert before toggling' : undefined}
+                              >
+                                <Toggle
+                                  checked={!i.disabled}
+                                  disabled={!!files[i.path]?.dirty}
+                                  onChange={(v) => void toggleSkillDisabled(i, !v)}
+                                />
+                              </span>
                             )}
-                            {i.kind === 'skills' && (
+                            {i.kind === 'skills' && confirmRemove === i.path && (
+                              <span className="flex items-center gap-1">
+                                <button
+                                  onClick={() => void removeSkill(i)}
+                                  title={`Remove ${i.name} — moves the folder to trash; reinstall from the Library`}
+                                  className="text-[10px] font-semibold text-red-400 hover:text-red-300"
+                                >
+                                  confirm
+                                </button>
+                                <button
+                                  onClick={() => setConfirmRemove(null)}
+                                  title="Cancel"
+                                  className="text-[10px] text-fg-faint hover:text-fg"
+                                >
+                                  cancel
+                                </button>
+                              </span>
+                            )}
+                            {i.kind === 'skills' && confirmRemove !== i.path && (
                               <button
-                                onClick={(e) => { e.stopPropagation(); void removeSkill(i) }}
+                                onClick={(e) => { e.stopPropagation(); setConfirmRemove(i.path) }}
                                 title="Remove skill — moves the folder to trash; reinstall from the Library"
                                 aria-label={`Remove ${i.name}`}
                                 className="text-fg-faint hover:text-red-400 leading-none px-0.5"

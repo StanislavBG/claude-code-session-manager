@@ -288,3 +288,60 @@ describe('Skills list refresh load', () => {
     expect(peak).toBeLessThanOrEqual(6)
   })
 })
+
+describe('Skills config watch', () => {
+  const COMMANDS_DIR = `${HOME}/.claude/commands`
+  const flat = (calls: unknown[][]) => calls.flatMap((c) => c[0] as string[])
+
+  it('watches the user-scope skills and commands directories on mount, unwatches on unmount', async () => {
+    const { api } = installApi()
+    await mount()
+    expect(flat(api.config.watch.mock.calls)).toEqual(expect.arrayContaining([SKILLS_DIR, COMMANDS_DIR]))
+    act(() => root?.unmount())
+    root = null
+    expect(flat(api.config.unwatch.mock.calls)).toEqual(expect.arrayContaining([SKILLS_DIR, COMMANDS_DIR]))
+  })
+
+  it('shows a skill added on disk after config:changed fires for the skills directory', async () => {
+    const { api, disk } = installApi()
+    const el = await mount()
+    expect(el.textContent).toContain('skill-one')
+    expect(el.textContent).not.toContain('skill-three')
+
+    const THREE = `${SKILLS_DIR}/skill-three/SKILL.md`
+    disk[THREE] = md('skill-three')
+    const base = api.config.listDir.getMockImplementation()!
+    api.config.listDir.mockImplementation((async (path: string, opts?: { dirsOnly?: boolean }) => {
+      const res = await base(path, opts)
+      if (path === SKILLS_DIR && opts?.dirsOnly) {
+        const extra = { name: 'skill-three', path: `${SKILLS_DIR}/skill-three`, isDirectory: true, isFile: false, mtimeMs: 0, size: 0 }
+        return { ...res, entries: [...res.entries, extra] }
+      }
+      return res
+    }) as never)
+
+    vi.useFakeTimers()
+    try {
+      ;(api.config.onChanged.mock.calls as unknown as Array<[(i: { path: string }) => void]>).forEach(([cb]) => cb({ path: SKILLS_DIR }))
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400)
+        await flush()
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(el.textContent).toContain('skill-three')
+  })
+})
+
+describe('Skills sidebar description', () => {
+  it('shows the frontmatter description under a skill that has one and nothing under one that does not', async () => {
+    const { disk } = installApi()
+    disk[TWO] = ['---', 'name: skill-two', '---', '', 'body'].join('\n')
+    const el = await mount()
+    expect(el.textContent).toContain('skill-one desc')
+    const row = buttonByText(el, 'skill-two')
+    expect(row).toBeTruthy()
+    expect(row!.textContent).toBe('skill-two')
+  })
+})

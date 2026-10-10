@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { ReadJsonResult, ReadTextResult } from '../../preload/api'
+import { toast } from './toast'
 
 /**
  * Per-file config cache. Keyed by absolute path. Tracks the on-disk snapshot
@@ -19,11 +20,17 @@ export interface FileState {
   parseError: string | null
   loadError: string | null
   mtimeMs: number
+  /** mtimeMs of the disk read the draft is based on; a save is refused if the file is newer. */
+  baseMtimeMs?: number
   /** True when draftRaw !== diskRaw. */
   dirty: boolean
   /** True while an async load/save is in flight. */
   busy: boolean
   lastSavedAt: number | null
+}
+
+export interface SaveOptions {
+  force?: boolean
 }
 
 interface ConfigState {
@@ -35,8 +42,9 @@ interface ConfigState {
   loadText: (path: string, keepDirty?: boolean) => Promise<void>
   setDraft: (path: string, raw: string) => void
   revert: (path: string) => void
-  saveJson: (path: string) => Promise<{ ok: boolean; error?: string }>
-  saveText: (path: string) => Promise<{ ok: boolean; error?: string }>
+  /** Refuses with `error: 'conflict'` if the file changed on disk since the draft's base; `force` overwrites. */
+  saveJson: (path: string, opts?: SaveOptions) => Promise<{ ok: boolean; error?: string }>
+  saveText: (path: string, opts?: SaveOptions) => Promise<{ ok: boolean; error?: string }>
   watchFile: (path: string) => void
   unwatchFile: (path: string) => void
   /** Called when main emits a change event for a path we're watching. */
@@ -53,6 +61,7 @@ function blank(path: string): FileState {
     parseError: null,
     loadError: null,
     mtimeMs: 0,
+    baseMtimeMs: 0,
     dirty: false,
     busy: false,
     lastSavedAt: null,
@@ -74,6 +83,7 @@ function applyJsonRead(f: FileState, r: ReadJsonResult, keepDirty: boolean): Fil
   if (!keepDirty || !f.dirty) {
     next.draftRaw = r.raw
     next.dirty = false
+    next.baseMtimeMs = r.mtimeMs
   } else {
     next.dirty = next.draftRaw !== next.diskRaw
   }
@@ -94,10 +104,15 @@ function applyTextRead(f: FileState, r: ReadTextResult, keepDirty: boolean): Fil
   if (!keepDirty || !f.dirty) {
     next.draftRaw = r.text
     next.dirty = false
+    next.baseMtimeMs = r.mtimeMs
   } else {
     next.dirty = next.draftRaw !== next.diskRaw
   }
   return next
+}
+
+function conflictMessage(path: string): string {
+  return `${path} changed on disk since you opened it. Reload to merge, or save again to overwrite.`
 }
 
 export const useConfig = create<ConfigState>((set, get) => ({
@@ -134,7 +149,7 @@ export const useConfig = create<ConfigState>((set, get) => ({
     })
   },
 
-  saveJson: async (path) => {
+  saveJson: async (path, opts) => {
     const cur = get().files[path]
     if (!cur) return { ok: false, error: 'not loaded' }
     // Validate JSON before writing.
@@ -143,6 +158,13 @@ export const useConfig = create<ConfigState>((set, get) => ({
       parsed = cur.draftRaw.trim() === '' ? {} : JSON.parse(cur.draftRaw)
     } catch (e) {
       return { ok: false, error: `invalid JSON: ${(e as Error).message}` }
+    }
+    if (!opts?.force) {
+      const disk = await window.api.config.readJson(path)
+      if (disk.exists && disk.mtimeMs > (cur.baseMtimeMs ?? 0)) {
+        toast.error(conflictMessage(path))
+        return { ok: false, error: 'conflict' }
+      }
     }
     set({ files: { ...get().files, [path]: { ...cur, busy: true } } })
     const res = await window.api.config.writeJson(path, parsed)
@@ -159,9 +181,16 @@ export const useConfig = create<ConfigState>((set, get) => ({
     return { ok: true }
   },
 
-  saveText: async (path) => {
+  saveText: async (path, opts) => {
     const cur = get().files[path]
     if (!cur) return { ok: false, error: 'not loaded' }
+    if (!opts?.force) {
+      const disk = await window.api.config.readText(path)
+      if (disk.exists && disk.mtimeMs > (cur.baseMtimeMs ?? 0)) {
+        toast.error(conflictMessage(path))
+        return { ok: false, error: 'conflict' }
+      }
+    }
     set({ files: { ...get().files, [path]: { ...cur, busy: true } } })
     const res = await window.api.config.writeText(path, cur.draftRaw)
     if (!res.ok) {

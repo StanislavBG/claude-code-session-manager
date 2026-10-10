@@ -3,7 +3,7 @@ import { usd, tok, int, min } from '../../../../lib/analyticsFormat'
 import { measureValue } from '../../../../lib/analyticsViewModel'
 import { prettyModel } from '../../../../lib/prettyModel'
 import { projectColorFor } from '../../../../lib/projectColor'
-import { projectNameFromCwd } from '../../scheduler/sched-primitives'
+import { projectNameFromCwd } from '../../../../lib/knownProjectAggregate'
 import { CARD, SectionHead } from './analytics-primitives'
 
 export interface DrillModelBucket {
@@ -33,7 +33,7 @@ export function ProjectDrill({ projectDir, totals, byModel, toolBreakdown, onCle
     <div className={`${CARD} p-4`}>
       <SectionHead
         kicker="04 · drill in"
-        title={projectNameFromCwd(projectDir) ?? projectDir}
+        title={projectNameFromCwd(projectDir)}
         right={<button onClick={onClear} className="text-[11px] text-fg-faint hover:text-fg font-mono">clear ✕</button>}
       />
       <div className="flex items-center gap-1.5 -mt-2 mb-3">

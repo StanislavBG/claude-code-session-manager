@@ -1,5 +1,5 @@
 import { projectColorFor } from '../../../../lib/projectColor'
-import { projectNameFromCwd } from '../../scheduler/sched-primitives'
+import { projectNameFromCwd } from '../../../../lib/knownProjectAggregate'
 
 export interface FacetChipData {
   projectDir: string
@@ -34,7 +34,7 @@ export function ProjectFacet({ chips, keep, onToggle, onIsolate, onShowAll }: Pr
             className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[11px] font-mono border ${active ? 'border-line text-fg-dim bg-bg-hi' : 'border-line text-fg-faint opacity-40 hover:opacity-70'}`}
           >
             <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: projectColorFor(chip.projectDir) }} />
-            {projectNameFromCwd(chip.projectDir) ?? chip.projectDir}
+            {projectNameFromCwd(chip.projectDir)}
           </button>
         )
       })}

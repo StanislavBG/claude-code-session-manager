@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { computeStackedBands, type StackedDayInput, type StackedMode } from '../../../../lib/stackedBands'
 import { projectColorFor } from '../../../../lib/projectColor'
-import { projectNameFromCwd } from '../../scheduler/sched-primitives'
+import { projectNameFromCwd } from '../../../../lib/knownProjectAggregate'
 import { tok, usd } from '../../../../lib/analyticsFormat'
 import type { Measure } from '../../../../lib/analyticsViewModel'
 import { CARD, MUTEBAND_HEX, SectionHead } from './analytics-primitives'
@@ -95,7 +95,7 @@ export function StackedTrend({ days, measure, selected, onSelect }: Props) {
                 className="cursor-pointer"
                 onClick={() => onSelect(selected === band.projectDir ? null : band.projectDir)}
               >
-                <title>{projectNameFromCwd(band.projectDir) ?? band.projectDir}</title>
+                <title>{projectNameFromCwd(band.projectDir)}</title>
               </polygon>
             )
           })

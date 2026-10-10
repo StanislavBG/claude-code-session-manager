@@ -620,4 +620,93 @@ describe('Plugins drill-in page', () => {
       act(() => root.unmount())
     })
   })
+
+  describe('skill count and install scope', () => {
+    const jsonRes = (data: unknown) => ({ exists: true, parseError: false, data, mtimeMs: 0, error: null })
+    const dirEntry = (dir: string, name: string) => ({
+      name, path: `${dir}/${name}`, isDirectory: true, isFile: false, mtimeMs: 0, size: 0,
+    })
+    const rowFor = (name: string) =>
+      Array.from(container.querySelectorAll('tr[data-row-key]')).find((r) => r.textContent?.includes(name)) as HTMLElement
+
+    it('shows the same skill count in the row and the list when only some folders hold a SKILL.md', async () => {
+      const api = installWindowApiMock()
+      const list = api.config.listDir.getMockImplementation()!
+      const text = api.config.readText.getMockImplementation()!
+      api.config.listDir.mockImplementation(async (path: string, opts?: { filesOnly?: boolean; dirsOnly?: boolean }) => {
+        if (path === `${PLUGIN_PATH}/skills` && opts?.dirsOnly) {
+          return { ok: true, error: null, entries: ['alpha', 'beta', 'empty'].map((n) => dirEntry(path, n)) } as never
+        }
+        return list(path, opts)
+      })
+      api.config.readText.mockImplementation(async (path: string) => {
+        const m = /\/skills\/(alpha|beta)\/SKILL\.md$/.exec(path)
+        if (m) return { exists: true, text: `---\nname: ${m[1]}\ndescription: d.\n---\n`, mtimeMs: 0, error: null }
+        return text(path)
+      })
+      const { Plugins } = await import('../Plugins')
+      const root = createRoot(container)
+      act(() => root.render(createElement(Plugins)))
+      await flush()
+
+      const demo = rowFor('demo')
+      expect(demo.textContent).toContain('2 skills')
+      expect(demo.textContent).not.toContain('3 skills')
+      act(() => demo.click())
+      await flush()
+      const skillsButton = Array.from(container.querySelectorAll('button')).find((b) =>
+        b.textContent?.trim().startsWith('Skills'),
+      ) as HTMLButtonElement
+      expect(skillsButton.textContent).toContain('2')
+      expect(container.textContent).toContain('alpha')
+      expect(container.textContent).toContain('beta')
+      expect(container.textContent).not.toContain('empty')
+      act(() => root.unmount())
+    })
+
+    it('renders each install scope so same-name installs are distinguishable', async () => {
+      const api = installWindowApiMock()
+      const PROJECT_PATH = `${HOME}/proj/.claude/plugins/demo`
+      const json = api.config.readJson.getMockImplementation()!
+      api.config.readJson.mockImplementation(async (path: string) => {
+        if (path === `${HOME}/.claude/plugins/installed_plugins.json`) {
+          return jsonRes({
+            version: 1,
+            plugins: {
+              'demo@marketplace-a': [
+                { scope: 'user', installPath: PLUGIN_PATH, version: '1.2.3', installedAt: '', lastUpdated: '' },
+                { scope: 'project', installPath: PROJECT_PATH, version: '1.2.3', installedAt: '', lastUpdated: '' },
+              ],
+            },
+          }) as never
+        }
+        return json(path)
+      })
+      const { Plugins } = await import('../Plugins')
+      const root = createRoot(container)
+      act(() => root.render(createElement(Plugins)))
+      await flush()
+
+      const rows = Array.from(container.querySelectorAll('tr[data-row-key]'))
+      expect(rows).toHaveLength(2)
+      const scopeCells = rows.map((r) => r.querySelector('[data-testid="plugin-scope"]')?.textContent)
+      expect([...scopeCells].sort()).toEqual(['project', 'user'])
+      act(() => root.unmount())
+    })
+
+    it('empty state names the real install sources, not a drop-in directory', async () => {
+      const api = installWindowApiMock()
+      const json = api.config.readJson.getMockImplementation()!
+      api.config.readJson.mockImplementation(async (path: string) =>
+        path === `${HOME}/.claude/plugins/installed_plugins.json` ? (jsonRes({ version: 1, plugins: {} }) as never) : json(path),
+      )
+      const { Plugins } = await import('../Plugins')
+      const root = createRoot(container)
+      act(() => root.render(createElement(Plugins)))
+      await flush()
+      expect(container.textContent).toContain('claude plugin install')
+      expect(container.textContent).not.toContain('drop a plugin')
+      act(() => root.unmount())
+    })
+  })
 })

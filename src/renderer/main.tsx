@@ -1,6 +1,7 @@
 import ReactDOM from 'react-dom/client'
 import { App } from './App'
 import { runApiBootCheck } from './lib/apiBootCheck'
+import { registerRemoteNewSession } from './lib/remoteNewSession'
 import './styles.css'
 
 // Surface otherwise-silent async failures as [renderer] lines instead of the
@@ -33,6 +34,8 @@ if (typeof (window as unknown as { api?: unknown }).api === 'undefined') {
 // feature, with a useless `Cannot read properties of undefined` deep in the
 // bundle.
 runApiBootCheck()
+
+if (typeof window.api?.chat?.onExternalNewSession === 'function') registerRemoteNewSession()
 
 // NOTE: StrictMode is intentionally disabled. The Terminal component owns an
 // xterm instance tied to a PTY process in the main process; StrictMode's

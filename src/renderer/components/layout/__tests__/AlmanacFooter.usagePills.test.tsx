@@ -20,6 +20,7 @@ beforeEach(() => {
   ;(globalThis as unknown as { __APP_VERSION__: string }).__APP_VERSION__ = '0.0.0-test'
   ;(window as unknown as { api: unknown }).api = {
     app: { gitBranch: vi.fn().mockResolvedValue(null) },
+    updater: { status: vi.fn().mockResolvedValue(null), onStatus: vi.fn().mockReturnValue(() => {}) },
   }
   container = document.createElement('div')
   document.body.appendChild(container)

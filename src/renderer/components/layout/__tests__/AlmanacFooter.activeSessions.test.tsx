@@ -19,6 +19,7 @@ let root: Root
 function setSlots(sessionSlots: ReturnType<typeof vi.fn> | null) {
   ;(window as unknown as { api: unknown }).api = {
     app: { gitBranch: vi.fn().mockResolvedValue(null) },
+    updater: { status: vi.fn().mockResolvedValue(null), onStatus: vi.fn().mockReturnValue(() => {}) },
     schedule: sessionSlots ? { sessionSlots } : undefined,
   }
 }

@@ -91,3 +91,28 @@ test('customerFeedback exposes nine methods wired to customerFeedback:* channels
   await exposedApi.customerFeedback.submit({ title: 't', body: 'b', tag: 'bug' });
   assert.deepStrictEqual(invokeCalls[0].payload, { title: 't', body: 'b', tag: 'bug' });
 });
+
+test('updater namespace exposes six methods wired to updater:* channels', async () => {
+  const u = exposedApi.updater;
+  assert.ok(u, 'expected exposedApi.updater');
+  assert.deepStrictEqual(
+    Object.keys(u).sort(),
+    ['cancelDeferred', 'check', 'install', 'onStatus', 'setEnabled', 'status'],
+  );
+  const cases = [
+    ['status', [], 'updater:status', undefined],
+    ['check', [], 'updater:check', undefined],
+    ['install', [true], 'updater:install', { force: true }],
+    ['install', ['yes'], 'updater:install', { force: false }],
+    ['cancelDeferred', [], 'updater:cancel-deferred', undefined],
+    ['setEnabled', [false], 'updater:set-enabled', { enabled: false }],
+  ];
+  for (const [method, args, channel, payload] of cases) {
+    invokeCalls.length = 0;
+    await u[method](...args);
+    assert.strictEqual(invokeCalls.length, 1);
+    assert.strictEqual(invokeCalls[0].channel, channel);
+    assert.deepStrictEqual(invokeCalls[0].payload, payload);
+  }
+  assert.strictEqual(typeof u.onStatus(() => {}), 'function');
+});

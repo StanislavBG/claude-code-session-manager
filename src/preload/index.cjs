@@ -422,6 +422,18 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('remoteClient:event', listener);
     },
   },
+  updater: {
+    status: () => ipcRenderer.invoke('updater:status'),
+    check: () => ipcRenderer.invoke('updater:check'),
+    install: (force) => ipcRenderer.invoke('updater:install', { force: force === true }),
+    cancelDeferred: () => ipcRenderer.invoke('updater:cancel-deferred'),
+    setEnabled: (enabled) => ipcRenderer.invoke('updater:set-enabled', { enabled }),
+    onStatus: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('updater:status', listener);
+      return () => ipcRenderer.removeListener('updater:status', listener);
+    },
+  },
   webRemote: {
     /** Current connection state (no token values). */
     getStatus: () => ipcRenderer.invoke('webRemote:get-status'),

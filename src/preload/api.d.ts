@@ -1,6 +1,21 @@
 import type { PromptSession } from '../renderer/state/promptSessions';
 
 /** Mirrors the item shape returned by main/lib/prereqs.cjs checkPrereqs(). */
+export type AutoUpdaterState =
+  | 'unsupported' | 'disabled' | 'idle' | 'checking'
+  | 'downloading' | 'ready' | 'deferred' | 'error';
+
+export type AutoUpdaterStatus = {
+  state: AutoUpdaterState;
+  current: string;
+  latest: string | null;
+  progress: number | null;
+  error: string | null;
+  busyReason: string | null;
+  lastCheckedAt: number | null;
+  enabled: boolean;
+};
+
 export interface PrereqItem {
   id: string;
   label: string;
@@ -2172,6 +2187,14 @@ export interface SessionManagerAPI {
     send: (peerId: string, type: string, payload?: unknown) => Promise<unknown>;
     onStatus: (handler: (status: RemoteClientStatus) => void) => () => void;
     onEvent: (handler: (ev: RemoteClientEvent) => void) => () => void;
+  };
+  updater: {
+    status: () => Promise<AutoUpdaterStatus>;
+    check: () => Promise<AutoUpdaterStatus>;
+    install: (force?: boolean) => Promise<{ ok: boolean; error?: string }>;
+    cancelDeferred: () => Promise<AutoUpdaterStatus>;
+    setEnabled: (enabled: boolean) => Promise<AutoUpdaterStatus>;
+    onStatus: (handler: (status: AutoUpdaterStatus) => void) => () => void;
   };
   webRemote: {
     getStatus: () => Promise<WebRemoteStatus>;

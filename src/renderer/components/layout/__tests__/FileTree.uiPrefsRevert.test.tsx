@@ -11,8 +11,12 @@ import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { FileTree } from '../FileTree'
 import { useToast } from '../../../state/toast'
+import { PanelFocusProvider } from '../../../lib/panelFocus'
+import { useLayout } from '../../../state/layout'
 
 const CWD = '/tmp/project'
+const PANEL_ID = 'files-under-test'
+const PREFS_PATH = '~/.claude/session-manager/ui-settings-prefs.json'
 
 let changedListener: ((info: { path: string }) => void) | null = null
 let rootEntries: string[] = []
@@ -20,12 +24,20 @@ const watch = vi.fn()
 const unwatch = vi.fn()
 const list = vi.fn()
 
-function installApi(writeJson: ReturnType<typeof vi.fn>) {
+const fileStatus = vi.fn()
+const defaultReadJson = () => vi.fn().mockResolvedValue({ exists: false, data: null })
+
+function installApi(
+  writeJson: ReturnType<typeof vi.fn>,
+  readJson: ReturnType<typeof vi.fn> = defaultReadJson(),
+) {
   changedListener = null
   rootEntries = []
   watch.mockReset()
   unwatch.mockReset()
   list.mockReset()
+  fileStatus.mockReset()
+  fileStatus.mockResolvedValue({})
   list.mockImplementation(async (p: string) => ({
     ok: true,
     entries: p === CWD
@@ -37,9 +49,9 @@ function installApi(writeJson: ReturnType<typeof vi.fn>) {
   }))
   ;(window as unknown as { api: unknown }).api = {
     files: { list },
-    git: { fileStatus: vi.fn().mockResolvedValue({}) },
+    git: { fileStatus },
     config: {
-      readJson: vi.fn().mockResolvedValue({ exists: false, data: null }),
+      readJson,
       writeJson,
       watch,
       unwatch,
@@ -56,12 +68,18 @@ const rootListCalls = () => list.mock.calls.filter((c) => c[0] === CWD).length
 let container: HTMLDivElement | null = null
 let root: Root | null = null
 
-async function mount() {
+async function mount(opts: { focused?: boolean } = {}) {
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
+  const tree = createElement(FileTree, { cwd: CWD })
   await act(async () => {
-    root!.render(createElement(FileTree, { cwd: CWD }))
+    if (opts.focused === undefined) {
+      root!.render(tree)
+    } else {
+      useLayout.setState({ focusedPanelId: opts.focused ? PANEL_ID : 'somewhere-else' })
+      root!.render(createElement(PanelFocusProvider, { panelId: PANEL_ID, children: tree }))
+    }
     await Promise.resolve()
     await Promise.resolve()
     await Promise.resolve()
@@ -75,7 +93,12 @@ afterEach(() => {
   container = null
   root = null
   delete (window as unknown as { api?: unknown }).api
+  vi.useRealTimers()
 })
+
+const hiddenToggle = (c: HTMLElement) =>
+  c.querySelector('button[title="Hide hidden files"], button[title="Show hidden files"]') as HTMLButtonElement
+const lastListHidden = () => list.mock.calls[list.mock.calls.length - 1][1]
 
 describe('FileTree expanded-folder persistence — revert on rejected write', () => {
   it('reverts the expansion and toasts when writeUiPrefsPatch rejects', async () => {
@@ -132,5 +155,75 @@ describe('FileTree expanded-folder persistence — revert on rejected write', ()
     act(() => root?.unmount())
     root = null
     expect(unwatch).toHaveBeenCalledWith([CWD], { depth: 0 })
+  })
+})
+
+describe('FileTree git-status interval — panel-focus gating', () => {
+  it('does not poll git status while the panel is unfocused', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    installApi(vi.fn().mockResolvedValue(undefined))
+    await mount({ focused: false })
+    fileStatus.mockClear()
+
+    await act(async () => {
+      vi.advanceTimersByTime(20_000)
+      await Promise.resolve()
+    })
+
+    expect(fileStatus).not.toHaveBeenCalled()
+  })
+
+  it('refreshes immediately on regaining focus, then resumes ticking', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    installApi(vi.fn().mockResolvedValue(undefined))
+    await mount({ focused: false })
+    fileStatus.mockClear()
+
+    await act(async () => {
+      useLayout.setState({ focusedPanelId: PANEL_ID })
+      await Promise.resolve()
+    })
+    expect(fileStatus).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(5000)
+      await Promise.resolve()
+    })
+    expect(fileStatus).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('FileTree hidden-files toggle — hydrate and persist', () => {
+  it('defaults to showing hidden files when never set', async () => {
+    installApi(vi.fn().mockResolvedValue(undefined))
+    const c = await mount()
+    expect(hiddenToggle(c).title).toBe('Hide hidden files')
+    expect(lastListHidden()).toBe(true)
+  })
+
+  it.each([false, true])('honors an explicitly stored fileTreeShowHidden=%s', async (stored) => {
+    installApi(
+      vi.fn().mockResolvedValue(undefined),
+      vi.fn().mockResolvedValue({ exists: true, data: { fileTreeShowHidden: stored } }),
+    )
+    const c = await mount()
+    await vi.waitFor(() => {
+      expect(hiddenToggle(c).title).toBe(stored ? 'Hide hidden files' : 'Show hidden files')
+    })
+    expect(lastListHidden()).toBe(stored)
+  })
+
+  it('persists a toggle through the machine-wide ui-settings-prefs file', async () => {
+    const writeJson = vi.fn().mockResolvedValue(undefined)
+    installApi(writeJson)
+    const c = await mount()
+    await act(async () => {
+      hiddenToggle(c).dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    await vi.waitFor(() => expect(writeJson).toHaveBeenCalledWith(
+      PREFS_PATH,
+      expect.objectContaining({ fileTreeShowHidden: false }),
+    ))
   })
 })

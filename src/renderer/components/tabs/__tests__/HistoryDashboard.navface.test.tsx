@@ -96,11 +96,18 @@ function buildRaw(): HistoryDashboardResult {
   }
 }
 
+const updatedHandlers = new Set<() => void>()
+
 function installWindowApiMock() {
+  updatedHandlers.clear()
   const store: Record<string, unknown> = {}
   const api = {
     history: {
       dashboard: vi.fn().mockResolvedValue(buildRaw()),
+      onUpdated: vi.fn((cb: () => void) => {
+        updatedHandlers.add(cb)
+        return () => { updatedHandlers.delete(cb) }
+      }),
     },
     config: {
       readJson: vi.fn(async () => ({ exists: Object.keys(store).length > 0, data: { ...store } })),
@@ -469,5 +476,80 @@ describe('HistoryDashboard drill panel + CSV export — shared day-total sums', 
     // day 1 = alpha + beta: in 107, out 53, cw 22, cr 11, total 193, hit 11/140.
     expect(lines[1]).toBe('2026-07-29,1.7500,107,53,22,11,193,7.9,2,' + prettyModel('claude-opus-4'))
     expect(lines[2]).toBe('2026-07-30,0.5000,10,5,2,1,18,7.7,1,' + prettyModel('claude-opus-4'))
+  })
+})
+
+describe('HistoryDashboard live refresh — onUpdated / focus / visibility', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  const calls = () => (window as unknown as { api: { history: { dashboard: ReturnType<typeof vi.fn> } } }).api.history.dashboard.mock.calls.length
+
+  async function settle(ms: number) {
+    await act(async () => { await vi.advanceTimersByTimeAsync(ms) })
+  }
+
+  it('an onUpdated signal triggers exactly one refetch, after the throttle gap', async () => {
+    await mount(<HistoryDashboard />)
+    expect(calls()).toBe(1)
+    vi.useFakeTimers()
+    await act(async () => { for (const h of [...updatedHandlers]) h() })
+    expect(calls()).toBe(1)
+    await settle(30_000)
+    expect(calls()).toBe(2)
+    await settle(60_000)
+    expect(calls()).toBe(2)
+  })
+
+  it('20 rapid signals give at most 2 fetches', async () => {
+    await mount(<HistoryDashboard />)
+    vi.useFakeTimers()
+    await settle(31_000)
+    const before = calls()
+    await act(async () => {
+      for (let i = 0; i < 20; i++) for (const h of [...updatedHandlers]) h()
+    })
+    await settle(60_000)
+    expect(calls() - before).toBeLessThanOrEqual(2)
+    expect(calls() - before).toBeGreaterThanOrEqual(1)
+  })
+
+  it('window focus and a visible visibilitychange also signal a refetch', async () => {
+    await mount(<HistoryDashboard />)
+    vi.useFakeTimers()
+    await settle(31_000)
+    const before = calls()
+    await act(async () => { window.dispatchEvent(new Event('focus')) })
+    expect(calls()).toBe(before + 1)
+    await settle(31_000)
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
+    expect(calls()).toBe(before + 2)
+  })
+
+  it('a failed background refetch keeps the data on screen', async () => {
+    const el = await mount(<HistoryDashboard />)
+    const api = (window as unknown as { api: { history: { dashboard: ReturnType<typeof vi.fn> } } }).api
+    api.history.dashboard.mockRejectedValue(new Error('boom'))
+    vi.useFakeTimers()
+    await settle(31_000)
+    await act(async () => { for (const h of [...updatedHandlers]) h() })
+    expect(api.history.dashboard).toHaveBeenCalledTimes(2)
+    expect(isolateBtn(el, ALPHA_CWD)).not.toBeNull()
+  })
+
+  it('unmount removes the onUpdated, focus and visibilitychange listeners', async () => {
+    const addWin = vi.spyOn(window, 'addEventListener')
+    const rmWin = vi.spyOn(window, 'removeEventListener')
+    const addDoc = vi.spyOn(document, 'addEventListener')
+    const rmDoc = vi.spyOn(document, 'removeEventListener')
+    await mount(<HistoryDashboard />)
+    expect(updatedHandlers.size).toBe(1)
+    const focusFn = addWin.mock.calls.find((c) => c[0] === 'focus')![1]
+    const visFn = addDoc.mock.calls.find((c) => c[0] === 'visibilitychange')![1]
+    await act(async () => { root!.unmount() })
+    root = null
+    expect(updatedHandlers.size).toBe(0)
+    expect(rmWin).toHaveBeenCalledWith('focus', focusFn)
+    expect(rmDoc).toHaveBeenCalledWith('visibilitychange', visFn)
+    ;[addWin, rmWin, addDoc, rmDoc].forEach((s) => s.mockRestore())
   })
 })

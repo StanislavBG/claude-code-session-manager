@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { EmptyState } from '../ui/EmptyState'
 import type { HistoryDashboardDay, HistoryDashboardResult } from '../../../preload/api'
 import { facetSlice } from '../../lib/historyFacet'
@@ -29,6 +29,8 @@ const MEASURES: Measure[] = ['in', 'out', 'total', 'prompts', 'sessions', 'time'
 const RANGES: RangeDays[] = [30, 60, 90, 0]
 const DEFAULT_MEASURE: Measure = 'spend'
 const DEFAULT_RANGE: RangeDays = 30
+/** Minimum gap between signal-driven refetches. */
+const REFETCH_MIN_GAP_MS = 30_000
 /** Module-level so the `days` fallback is reference-stable across renders. */
 const EMPTY_DAYS: HistoryDashboardDay[] = []
 
@@ -112,18 +114,67 @@ export function HistoryDashboard() {
   const [loading, setLoading] = useState(true)
   const [tick, setTick] = useState(0)
 
-  useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    fetchHistoryTotals(range).then((r) => {
-      if (cancelled) return
+  // Live refresh: `runFetch` is the one fetch path. A response is applied only
+  // when it is `ok` and still matches the current range, so a failed or stale
+  // fetch never blanks the page. `inFlightRef` counts fetches so signals can
+  // skip while one is running.
+  const rangeRef = useRef(range)
+  rangeRef.current = range
+  const aliveRef = useRef(true)
+  const inFlightRef = useRef(0)
+  const lastFetchRef = useRef(0)
+  const trailingRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const runFetch = useCallback((quiet: boolean) => {
+    const forRange = rangeRef.current
+    inFlightRef.current += 1
+    lastFetchRef.current = Date.now()
+    fetchHistoryTotals(forRange).then((r) => {
+      inFlightRef.current -= 1
+      if (!aliveRef.current || forRange !== rangeRef.current) return
       setLoading(false)
       if (r.ok) { setRaw(r.data); return }
-      toast.error(`History analytics failed to load: ${r.error}`)
       // Deliberately does not clear `raw` — the last good payload stays on screen.
+      if (!quiet) toast.error(`History analytics failed to load: ${r.error}`)
     })
-    return () => { cancelled = true }
-  }, [range, tick])
+  }, [])
+
+  // Range change and the Refresh button (tick) force an immediate fetch.
+  useEffect(() => {
+    aliveRef.current = true
+    setLoading(true)
+    runFetch(false)
+  }, [range, tick, runFetch])
+
+  // Signals (rollup appended, window focus, tab visible) refetch at most once
+  // per REFETCH_MIN_GAP_MS and never while another fetch is in flight;
+  // otherwise one trailing refetch is scheduled, so a burst collapses to two.
+  useEffect(() => {
+    const request = () => {
+      if (!aliveRef.current) return
+      const wait = lastFetchRef.current + REFETCH_MIN_GAP_MS - Date.now()
+      if (inFlightRef.current === 0 && wait <= 0) {
+        runFetch(true)
+        return
+      }
+      if (trailingRef.current) return
+      trailingRef.current = setTimeout(() => {
+        trailingRef.current = null
+        request()
+      }, Math.max(wait, 1000))
+    }
+    const onVisible = () => { if (document.visibilityState === 'visible') request() }
+    const unsubscribe = window.api.history.onUpdated(request)
+    window.addEventListener('focus', request)
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      aliveRef.current = false
+      unsubscribe()
+      window.removeEventListener('focus', request)
+      document.removeEventListener('visibilitychange', onVisible)
+      if (trailingRef.current) { clearTimeout(trailingRef.current); trailingRef.current = null }
+    }
+  }, [runFetch])
 
   // Reset the Home-face facet + selection when the range changes so a stale
   // project key from a prior range doesn't linger in `homeKeep`. Skips the

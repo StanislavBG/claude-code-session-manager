@@ -15,7 +15,7 @@ let statusHandler: (s: unknown) => void
 
 const peer = (o: Partial<RemoteMachinePeer> = {}): RemoteMachinePeer => ({
   peerId: 'p1', deviceId: 'd1', machineName: 'Win-PC', pairedAt: '2026-10-01T00:00:00Z',
-  clientPublicKey: 'k', verifiedDevicePubKey: null, status: 'disconnected', reason: null, sas: null, ...o,
+  clientPublicKey: 'k', verifiedDevicePubKey: null, os: null, status: 'disconnected', reason: null, sas: null, ...o,
 })
 
 function Probe() {

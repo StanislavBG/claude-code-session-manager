@@ -62,7 +62,7 @@ function createRemoteClient({ relayAuth = relayClientAuth, wsFactory = defaultWs
     if (!s) {
       s = {
         status: 'idle', reason: null, sas: null, ws: null, sessionKey: null,
-        devicePubKey: null, pending: new Map(), attempt: 0,
+        devicePubKey: null, pending: new Map(), attempt: 0, osRequested: false,
       };
       runtime.set(peerId, s);
     }
@@ -100,6 +100,7 @@ function createRemoteClient({ relayAuth = relayClientAuth, wsFactory = defaultWs
       clientPrivateKey: kp.e2ePrivateKey,
       clientPublicKey: kp.e2ePublicKey,
       verifiedDevicePubKey: null,
+      os: null,
     };
     peers.push(peer);
     savePeers(peers);
@@ -114,6 +115,21 @@ function createRemoteClient({ relayAuth = relayClientAuth, wsFactory = defaultWs
   function getStatus(peerId) {
     const s = rt(peerId);
     return { status: s.status, reason: s.reason, sas: s.sas };
+  }
+
+  // Fire-and-forget, once per connection: remember the remote's platform so the
+  // Remote view can show it offline. Any failure leaves `os` untouched.
+  function learnOs(peerId, s) {
+    if (s.osRequested) return;
+    s.osRequested = true;
+    send(peerId, 'cmd:app:info').then((res) => {
+      if (typeof res?.platform === 'string' && res.platform) updatePeer(peerId, { os: res.platform });
+    }).catch(() => { /* older remote or timeout: never fails the connection */ });
+  }
+
+  function markAuthenticated(peerId, s) {
+    s.status = 'authenticated';
+    learnOs(peerId, s);
   }
 
   function rawSend(ws, msg) {
@@ -176,9 +192,11 @@ function createRemoteClient({ relayAuth = relayClientAuth, wsFactory = defaultWs
         fail(peerId, 'e2e_derivation_failed');
         return;
       }
-      s.status = peer.verifiedDevicePubKey && peer.verifiedDevicePubKey === s.devicePubKey
-        ? 'authenticated'
-        : 'pending_sas';
+      if (peer.verifiedDevicePubKey && peer.verifiedDevicePubKey === s.devicePubKey) {
+        markAuthenticated(peerId, s);
+      } else {
+        s.status = 'pending_sas';
+      }
       return;
     }
     if (msg.type === 'e2e:box') {
@@ -203,6 +221,7 @@ function createRemoteClient({ relayAuth = relayClientAuth, wsFactory = defaultWs
     s.sessionKey = null;
     s.sas = null;
     s.reason = null;
+    s.osRequested = false;
     s.status = 'connecting';
 
     let ticket;
@@ -255,7 +274,7 @@ function createRemoteClient({ relayAuth = relayClientAuth, wsFactory = defaultWs
     const s = rt(peerId);
     if (s.status !== 'pending_sas' || !s.devicePubKey) return { ok: false, reason: 'not_pending_sas' };
     updatePeer(peerId, { verifiedDevicePubKey: s.devicePubKey });
-    s.status = 'authenticated';
+    markAuthenticated(peerId, s);
     return { ok: true };
   }
 

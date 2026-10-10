@@ -1,7 +1,5 @@
 'use strict';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-const fs = require('node:fs');
-const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { isAutoUpdateSupported, createAutoUpdater, CHECK_INTERVAL_MS } = require('../autoUpdater.cjs');
 
@@ -168,8 +166,11 @@ describe('createAutoUpdater', () => {
     expect(au.status().error).toBe('boom');
   });
 
-  it('module source never calls setFeedURL', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'autoUpdater.cjs'), 'utf8');
-    expect(src.includes('setFeedURL')).toBe(false);
+  it('never calls setFeedURL', async () => {
+    const { updater, au } = mk();
+    au.start();
+    await vi.advanceTimersByTimeAsync(0);
+    await au.checkNow();
+    expect(updater.setFeedURL.mock.calls).toEqual([]);
   });
 });

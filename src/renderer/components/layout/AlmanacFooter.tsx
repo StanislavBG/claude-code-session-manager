@@ -1,7 +1,9 @@
 /**
  * AlmanacFooter — paper-warm window footer that replaces StatusBar.
  * One 30px strip: connected dot · session (5h) + weekly (7d) usage · branch ·
- * last activity · todos · session-slot dots · version chip (amber `v<cur> → v<latest>`
+ * last activity · todos · session-slot dots · version chip (amber "Update ready —
+ * restart to install" button when the in-app auto-updater has a downloaded update, via
+ * lib/useAutoUpdater.ts; otherwise amber `v<cur> → v<latest>` / `Download v<latest>`
  * when the running build is behind npm `latest`, via lib/useUpdateStatus.ts).
  *
  * Both usage pills read the same windows Home's UsageMeters render
@@ -25,6 +27,7 @@ import { useBranch } from '../../lib/useBranch'
 import { usageTitle, utilPercent } from '../../lib/usageWindow'
 import { useSessionSlots } from '../../lib/useSessionSlots'
 import { useUpdateStatus } from '../../lib/useUpdateStatus'
+import { useAutoUpdater } from '../../lib/useAutoUpdater'
 import { useToast } from '../../state/toast'
 import { SlotDots } from '../ui/SlotDots'
 import type { NavKey } from '../../lib/navKey'
@@ -44,6 +47,7 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
   const branch = useBranch(tab?.cwd ?? null)
   const slots = useSessionSlots()
   const update = useUpdateStatus()
+  const auto = useAutoUpdater()
   const showToast = useToast((s) => s.show)
   // Force re-render every 60s so the "X min ago" + remaining tick.
   const [, tick] = useState(0)
@@ -51,6 +55,19 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
     const id = setInterval(() => tick((n) => n + 1), 60_000)
     return () => clearInterval(id)
   }, [])
+
+  const installUpdate = async () => {
+    const latest = auto?.latest ?? ''
+    try {
+      const res = (await window.api.updater.install(false)) as { status?: { state: string; busyReason: string | null } }
+      const st = res?.status ?? (await window.api.updater.status())
+      if (st?.state === 'deferred') {
+        showToast('info', `Update v${latest} will install when ${st.busyReason ?? 'running jobs'} finish`)
+      }
+    } catch (err) {
+      showToast('error', err instanceof Error ? err.message : String(err))
+    }
+  }
 
   const todos = live?.todos ?? []
   const [todosOpen, setTodosOpen] = useState(false)
@@ -164,7 +181,27 @@ export function AlmanacFooter({ onNavigate }: AlmanacFooterProps) {
         )}
       </button>
 
-      {update?.behind && update.latest && update.channel === 'installer' ? (
+      {auto?.state === 'ready' ? (
+        <button
+          type="button"
+          className="text-amber-300 hover:underline"
+          title="A new version is downloaded. Click to restart and install — running jobs are waited for first."
+          data-testid="footer-version"
+          onClick={() => { void installUpdate() }}
+        >
+          Update ready — restart to install v{auto.latest}
+        </button>
+      ) : auto?.state === 'deferred' ? (
+        <span
+          className="text-amber-300"
+          title={`Waiting for ${auto.busyReason ?? 'running jobs'} to finish before restarting`}
+          data-testid="footer-version"
+        >
+          v{auto.latest} installs when idle
+        </span>
+      ) : auto?.state === 'downloading' ? (
+        <span className="text-fg-dim" data-testid="footer-version">Downloading v{auto.latest}…</span>
+      ) : update?.behind && update.latest && update.channel === 'installer' ? (
         <button
           type="button"
           className="text-amber-300 hover:underline"

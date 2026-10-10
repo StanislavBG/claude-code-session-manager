@@ -130,6 +130,7 @@ const filesIpc = require('./files.cjs');
 const { registerDocEditHandlers, attachWindow: attachDocEditWindow } = require('./docEdit.cjs');
 const webRemote = require('./webRemote.cjs');
 const { registerRemoteClientHandlers } = require('./remoteClientIpc.cjs');
+const { registerUpdaterIpc } = require('./updaterIpc.cjs');
 const { listExchanges } = require('./exchanges.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');
@@ -1100,6 +1101,11 @@ filesIpc.registerFilesHandlers();
 registerDocEditHandlers();
 webRemote.registerRemoteHandlers();
 registerRemoteClientHandlers(() => mainWindow);
+try {
+  registerUpdaterIpc({ ipcMain, getWindow: () => mainWindow, ptyManager });
+} catch (e) {
+  logs.writeLine({ scope: 'main', level: 'error', message: 'updater IPC registration failed', meta: { error: e?.message } });
+}
 chatRunner.registerChatHandlers();
 
 // Direct in-process PRD authoring for a queued PromptTicket classified

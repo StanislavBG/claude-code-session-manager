@@ -339,6 +339,14 @@ const ORPHAN_REQUEUE_CAP = 5;
  *    diverted into `recovered` exactly like a `findLiveProcess` hit.
  * Both default to a no-op when omitted, so existing callers/tests are
  * unaffected.
+ *
+ * `finalizeOwned` (optional, `(job) → boolean`) covers the dead-PID shape:
+ * a claude child exits BEFORE its spawnJob() has integrated the worktree
+ * branch and written the terminal row, so for that whole window the row is
+ * 'running' with a dead pid. Reaping it then races the fast-forward merge and
+ * parks landed work as reaped_without_integration (family-frame 137,
+ * 2026-10-10: park + merge in the same second). A true return skips the row
+ * with a warning; the caller bounds how long it may keep answering true.
  */
 /**
  * Pure, never-throws formatter for the dispatch-phase breadcrumb appended to
@@ -400,7 +408,7 @@ function resolvePidlessFailureOverride(job) {
 }
 
 function selectReapableJobs(jobs, now, {
-  pidAlive, grace, findLiveProcess, getLogMtimeMs, getLogPid, logFreshWindowMs,
+  pidAlive, grace, findLiveProcess, getLogMtimeMs, getLogPid, logFreshWindowMs, finalizeOwned,
 } = {}) {
   const reapable = [];
   const warnings = [];
@@ -410,6 +418,10 @@ function selectReapableJobs(jobs, now, {
     const pid = j.runtime?.pid;
     if (pid) {
       if (pidAlive(pid)) continue;
+      if (typeof finalizeOwned === 'function' && finalizeOwned(j)) {
+        warnings.push({ slug: j.slug, reason: `pid ${pid} exited but its spawnJob is still finalizing (integration in flight)` });
+        continue;
+      }
       reapable.push({ slug: j.slug, pid, pidless: false });
       continue;
     }

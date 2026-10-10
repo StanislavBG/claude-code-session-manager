@@ -213,7 +213,9 @@ End every plan with exactly one validate PRD:
    itself, and a REFUTED PRD is still a successful validation.
 
 The validator prints `VALIDATION: <slug> VERIFIED` or `VALIDATION: <slug> REFUTED — <reason>`
-per PRD. While it is pending, the scheduler skips per-PRD validation prompts and in-run review.
+per PRD. While it is pending, the scheduler skips per-PRD validation prompts and in-run review —
+but only for PRDs that finish AFTER it is queued; queue the validate PRD right after the plan's
+first PRDs, not last, or the early finishers still each send a VALIDATION REQUEST.
 
 If the API rejects `agentType: "validator"`, the persona is not installed: keep the plan
 queued, say so, ask the human to restart the app, and answer each VALIDATION REQUEST the

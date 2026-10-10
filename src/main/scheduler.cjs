@@ -9856,6 +9856,18 @@ async function superviseAdoptedRunsPass(jobs) {
   }
 }
 
+// A dead-pid row whose spawnJob() is still in flight (slug in runningSet) is
+// mid-finalize: integrating its sm-job branch, then writing the terminal row.
+// Reaping it races that merge (family-frame 137, 2026-10-10). The bound keeps
+// a wedged spawnJob from shielding its row forever — past it, reap as before.
+const FINALIZE_OWNERSHIP_MAX_MS = 30 * 60_000;
+const finalizeOwnedSince = new Map();
+function spawnJobStillFinalizing(slug, now) {
+  if (!runningSet.has(slug)) return false;
+  if (!finalizeOwnedSince.has(slug)) finalizeOwnedSince.set(slug, now);
+  return now - finalizeOwnedSince.get(slug) < FINALIZE_OWNERSHIP_MAX_MS;
+}
+
 async function reapDeadRunningJobs() {
   try {
     // Do NOT gate on runningSet: spawnJob()'s finally block unconditionally
@@ -9881,7 +9893,11 @@ async function reapDeadRunningJobs() {
       getLogPid: (j) => readSpawnedPidFromLog(logPathForJob(j)),
       getLogMtimeMs: (j) => readLogMtimeMs(logPathForJob(j)),
       logFreshWindowMs: IDLE_OUTPUT_KILL_MS,
+      finalizeOwned: (j) => spawnJobStillFinalizing(j.slug, Date.now()),
     });
+    for (const slug of finalizeOwnedSince.keys()) {
+      if (!runningSet.has(slug)) finalizeOwnedSince.delete(slug);
+    }
     for (const w of warnings) {
       console.warn(`[scheduler] reapDeadRunningJobs: ${w.reason} slug=${w.slug} — leaving row alone`);
     }

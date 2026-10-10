@@ -157,3 +157,127 @@ describe('web-remote multi-client E2E', () => {
     expect(sent).toHaveLength(0)
   })
 })
+
+describe('web-remote per-client PTY streams', () => {
+  const deviceKeys = genP256KeyPairB64()
+  const device = {
+    deviceId: 'device-streams',
+    deviceToken: 'tok',
+    e2ePrivateKey: deviceKeys.priv,
+    e2ePublicKey: deviceKeys.pub,
+    deviceName: 'Streams',
+    issuedAt: new Date(0).toISOString(),
+    lastConnectedAt: null,
+    verifiedPeerPubKey: null,
+  }
+  const listeners = new Map() // tabId -> Set<{onData,onExit}>
+  const sent = []
+  const fakeWs = { readyState: 1, send: (m) => sent.push(JSON.parse(m)), terminate: () => {} }
+  const keyA = crypto.randomBytes(32)
+  const keyB = crypto.randomBytes(32)
+
+  const emit = (tabId, data) => { for (const l of [...(listeners.get(tabId) || [])]) l.onData(tabId, data) }
+  const live = (tabId) => (listeners.get(tabId) || new Set()).size
+  const cmd = (conn, key, type, id, payload) => {
+    const inner = { type, id, payload, ts: 1 }
+    const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), key)
+    return webRemote._internal.handleMessage(
+      JSON.stringify({ type: 'e2e:box', id, fromConn: conn, payload: { nonce, ciphertext } }), device)
+  }
+  const spawn = (conn, key, tabId) =>
+    cmd(conn, key, 'cmd:pty:spawn', `sp-${conn}-${tabId}`, { tabId, cwd: os.homedir(), cols: 80, rows: 24 })
+  const dataBoxes = () => sent.filter((m) => m.type === 'e2e:box' && m.toConn)
+
+  async function readAudit() {
+    const out = []
+    const walk = async (d) => {
+      for (const e of await fsp.readdir(d, { withFileTypes: true }).catch(() => [])) {
+        const f = path.join(d, e.name)
+        if (e.isDirectory()) await walk(f)
+        else if (/remote-audit-.*\.log$/.test(e.name)) out.push(await fsp.readFile(f, 'utf8'))
+      }
+    }
+    await walk(tmpHome)
+    return out.join('\n')
+  }
+
+  async function setup() {
+    const ptyPath = require.resolve('../pty.cjs')
+    require.cache[ptyPath] = {
+      id: ptyPath, filename: ptyPath, loaded: true,
+      exports: {
+        manager: {
+          spawn: async () => ({ ok: true }),
+          kill: () => {}, write: () => {}, resize: () => {},
+          addOutputListener(tabId, onData, onExit) {
+            const entry = { onData, onExit }
+            if (!listeners.has(tabId)) listeners.set(tabId, new Set())
+            listeners.get(tabId).add(entry)
+            return () => listeners.get(tabId)?.delete(entry)
+          },
+        },
+      },
+    }
+    await fsp.mkdir(path.join(tmpHome, '.claude', 'session-manager', 'logs'), { recursive: true })
+    await writeConfig({ remoteEnabled: true, remoteControlEnabled: true, devices: [device] })
+    await handlers.get('webRemote:enable-control')() // saveConfig also refreshes the config cache
+    webRemote._internal.resetE2e()
+    webRemote.__test.setWs(fakeWs)
+    webRemote.__test.setE2eAuthenticated(keyA, 'connA')
+    webRemote.__test.setE2eAuthenticated(keyB, 'connB')
+    sent.length = 0
+    await spawn('connA', keyA, 'tabA')
+    await spawn('connB', keyB, 'tabB')
+    sent.length = 0
+  }
+
+  it('routes PTY output only to the client that spawned it', async () => {
+    await setup()
+    expect(webRemote.__test.streamCount()).toBe(2)
+    emit('tabA', 'secret-a')
+    const boxes = dataBoxes()
+    expect(boxes).toHaveLength(1)
+    expect(boxes[0].toConn).toBe('connA')
+    const { payload } = boxes[0]
+    const ev = JSON.parse(decryptBox(payload.nonce, payload.ciphertext, keyA))
+    expect(ev.type).toBe('event:pty:data')
+    expect(ev.payload).toEqual({ tabId: 'tabA', data: 'secret-a' })
+    expect(decryptBox(payload.nonce, payload.ciphertext, keyB)).toBeFalsy()
+  })
+
+  it('event:client:disconnected tears down only that client', async () => {
+    await setup()
+    await webRemote._internal.handleMessage(JSON.stringify({
+      type: 'event:client:disconnected', fromConn: 'connA', fromClientId: 'cidA', reason: 'closed',
+    }), device)
+    expect(live('tabA')).toBe(0)
+    expect(live('tabB')).toBe(1)
+    expect(webRemote.__test.streamCount()).toBe(1)
+    sent.length = 0
+    emit('tabA', 'late-a')
+    expect(sent).toHaveLength(0)
+    emit('tabB', 'still-b')
+    expect(dataBoxes().map((m) => m.toConn)).toEqual(['connB'])
+    expect(await readAudit()).toMatch(/client:disconnected\s+deviceId=device-streams\s+client=connA\s+msgId=-\s+result=reason=closed/)
+  })
+
+  it('disable-control tears down every client stream', async () => {
+    await setup()
+    expect(webRemote.__test.streamCount()).toBe(2)
+    await handlers.get('webRemote:disable-control')()
+    expect(webRemote.__test.streamCount()).toBe(0)
+    expect(live('tabA') + live('tabB')).toBe(0)
+    sent.length = 0
+    emit('tabA', 'x')
+    emit('tabB', 'y')
+    expect(sent).toHaveLength(0)
+  })
+
+  it('audit lines name the issuing client', async () => {
+    await setup()
+    await spawn('connB', keyB, 'tabB2')
+    const text = await readAudit()
+    expect(text).toMatch(/cmd:pty:spawn\s+deviceId=device-streams\s+client=connA\s+msgId=sp-connA-tabA\s+result=ok/)
+    expect(text).toMatch(/cmd:pty:spawn\s+deviceId=device-streams\s+client=connB\s+msgId=sp-connB-tabB2\s+result=ok/)
+  })
+})

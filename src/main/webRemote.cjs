@@ -142,14 +142,14 @@ async function saveConfig(data) {
 
 // ─── Audit log ────────────────────────────────────────────────────────────────
 
-// Format: <ISO>  <type>  deviceId=<id>  msgId=<uuid>  result=ok|error:<code>
+// Format: <ISO>  <type>  deviceId=<id>  client=<clientId|connKey|->  msgId=<uuid>  result=ok|error:<code>
 // NEVER log token values or payload content.
-async function auditLog(ts, type, deviceId, msgId, result) {
+async function auditLog(ts, type, deviceId, msgId, result, client) {
   try {
     const ymd = ts.slice(0, 10);
     const logPath = path.join(AUDIT_LOG_DIR, `remote-audit-${ymd}.log`);
     const clean = (s) => String(s ?? '').replace(/[\r\n\t]+/g, ' ').slice(0, 200);
-    const line = `${ts}  ${clean(type)}  deviceId=${clean(deviceId) || '-'}  msgId=${clean(msgId) || '-'}  result=${result}\n`;
+    const line = `${ts}  ${clean(type)}  deviceId=${clean(deviceId) || '-'}  client=${clean(client && (client.clientId || client.key)) || '-'}  msgId=${clean(msgId) || '-'}  result=${result}\n`;
     const handle = await fsp.open(logPath, 'a', 0o600);
     try {
       await handle.write(line);
@@ -217,25 +217,9 @@ async function getDeviceTicket(deviceToken) {
 
 // ─── E2E state helpers ────────────────────────────────────────────────────────
 
-// tabId → unsubscribe fn for the PtyManager output listener streaming to the peer.
-const _remotePtyStreams = new Map();
-
-function stopRemotePtyStream(tabId) {
-  const unsub = _remotePtyStreams.get(tabId);
-  _remotePtyStreams.delete(tabId);
-  if (unsub) {
-    try { unsub(); } catch { /* listener already gone */ }
-  }
-}
-
-function stopAllRemotePtyStreams() {
-  for (const tabId of [..._remotePtyStreams.keys()]) stopRemotePtyStream(tabId);
-}
-
 // Tear down every client session (connection-level reset).
 function resetE2e() {
-  stopAllRemotePtyStreams();
-  _clients.teardownAll();
+  teardownAllClients();
 }
 
 // Mark one client's session failed without touching any other client.
@@ -349,7 +333,6 @@ function scheduleReconnect() {
 async function disconnect() {
   cancelReconnect();
   stopHeartbeat();
-  stopAllRemotePtyStreams();
   resetE2e();
   if (_ws) {
     const ws = _ws;
@@ -424,7 +407,7 @@ async function connect() {
     broadcastStatus();
     // v2: begin pushing the live session list once connected.
     // Reset diff-guard so the new client always receives a full session-list push.
-    _lastSessionListJson = null;
+    for (const c of _clients.values()) c.lastSessionListJson = null;
     startSessionListPush();
   });
 
@@ -469,7 +452,7 @@ async function connect() {
 }
 
 async function handleTokenRevoked(deviceId) {
-  stopAllRemotePtyStreams();
+  teardownAllClients();
   logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'token revoked', meta: { deviceId } });
   const cfg = await loadConfig();
   const devices = (cfg.devices || []).filter((d) => d.deviceId !== deviceId);
@@ -491,28 +474,46 @@ const SESSION_INIT_TAIL_BYTES = 512 * 1024; // bound the initial read
 
 const _sessionWatchers = new Map(); // tabId → watcher
 let _sessionListTimer = null;
-let _lastSessionListJson = null; // diff-guard: skip push when snapshot unchanged
 
-/** Push an unsolicited event to the browser(s). Encrypts when an E2E key is active. */
-function pushEvent(type, payload) {
+/** Push an unsolicited event to ONE client, E2E-encrypted with its key and unicast via toConn. */
+function pushEventTo(client, type, payload) {
   if (!_ws || _ws.readyState !== WebSocket.OPEN) return;
+  if (!client || client.e2e.state !== 'authenticated' || !client.e2e.sessionKey) return;
   const inner = { type, id: crypto.randomUUID(), payload, ts: Date.now() };
   try {
-    const targets = _clients.authenticated().filter((c) => c.e2e.sessionKey);
-    if (targets.length === 0) {
-      // No E2E session anywhere → legacy plaintext; a pending-only client gets nothing.
-      if (!_clients.values().some((c) => c.e2e.sessionKey)) _ws.send(JSON.stringify(inner));
-      return;
-    }
-    for (const c of targets) {
-      const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), c.e2e.sessionKey);
-      const out = { type: 'e2e:box', id: inner.id, payload: { nonce, ciphertext }, ts: Date.now() };
-      if (c.key !== LEGACY_CLIENT_KEY) out.toConn = c.key;
-      _ws.send(JSON.stringify(out));
-    }
+    const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), client.e2e.sessionKey);
+    const out = { type: 'e2e:box', id: inner.id, payload: { nonce, ciphertext }, ts: Date.now() };
+    if (client.key !== LEGACY_CLIENT_KEY) out.toConn = client.key;
+    _ws.send(JSON.stringify(out));
   } catch (e) {
     logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'pushEvent failed', meta: { type, error: e?.message } });
   }
+}
+
+/** Authenticated clients subscribed to a tab's session state/summary. */
+function subscribersOf(tabId) {
+  return _clients.authenticated().filter((c) => c.subscriptions.has(tabId));
+}
+
+/** Stop every shared session watcher that no client subscribes to any more. */
+function pruneSessionWatchers() {
+  for (const tabId of Array.from(_sessionWatchers.keys())) {
+    if (!_clients.values().some((c) => c.subscriptions.has(tabId))) stopSessionWatch(tabId);
+  }
+}
+
+/** Tear down one client (its PTY streams + subscriptions) without touching others. */
+function teardownClient(key) {
+  const rec = _clients.teardown(key);
+  pruneSessionWatchers();
+  return rec;
+}
+
+/** Tear down every client — no client keeps a PTY stream or subscription afterwards. */
+function teardownAllClients() {
+  const n = _clients.teardownAll();
+  pruneSessionWatchers();
+  return n;
 }
 
 /** Extract concatenated text from an assistant transcript line, or '' if none. */
@@ -610,8 +611,8 @@ async function pollSessionWatcher(w) {
   if (nextState && nextState !== w.state) {
     w.state = nextState;
     // Guard: don't push state if SAS not yet confirmed (watcher may outlive an auth reset).
-    if (anyAuthenticated()) {
-      pushEvent('event:session:state', { tabId: w.tabId, state: w.state, since: Date.now() });
+    for (const c of subscribersOf(w.tabId)) {
+      pushEventTo(c, 'event:session:state', { tabId: w.tabId, state: w.state, since: Date.now() });
     }
   }
   if (newAssistantText && newMsgId !== w.lastMsgId) {
@@ -708,7 +709,7 @@ async function pushSessionList() {
     // Don't push before SAS is confirmed — session cwds/titles are sensitive user data.
     // A relay that completes e2e:hello before the user confirms the SAS would otherwise
     // receive the full session list immediately (same threat SAS_GATED_READS blocks for
-    // cmd:sessions:load). Guard here so _lastSessionListJson is not poisoned either.
+    // cmd:sessions:load). Guard here so client.lastSessionListJson is not poisoned either.
     if (!anyAuthenticated()) return;
     const sessionsStore = require('./sessionsStore.cjs');
     const data = await sessionsStore.load();
@@ -721,9 +722,11 @@ async function pushSessionList() {
     }));
     const payload = { sessions, activeTabId: data?.activeTabId ?? null };
     const json = JSON.stringify(payload);
-    if (json === _lastSessionListJson) return;
-    _lastSessionListJson = json;
-    pushEvent('event:session:list', payload);
+    for (const c of _clients.authenticated()) {
+      if (json === c.lastSessionListJson) continue;
+      c.lastSessionListJson = json;
+      pushEventTo(c, 'event:session:list', payload);
+    }
   } catch (e) {
     logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'pushSessionList failed', meta: { error: e?.message } });
   }
@@ -748,14 +751,16 @@ const SUMMARY_MIN_CHARS = 280; // below this, push raw — not worth an API call
  * completed turn per subscribed tab (~$1/$5 per 1M tokens).
  */
 async function maybeSummarize(w) {
-  // Guard: don't push summaries (session transcript content) before SAS confirmed.
-  if (!anyAuthenticated()) return;
+  // Guard: summaries (session transcript content) go only to SAS-confirmed subscribers.
+  if (subscribersOf(w.tabId).length === 0) return;
   const text = w.lastAssistantText;
   if (!text) return;
   const ofMessageId = w.lastMsgId;
 
   if (text.length < SUMMARY_MIN_CHARS) {
-    pushEvent('event:session:summary', { tabId: w.tabId, summary: text, ofMessageId, model: 'raw', ts: Date.now() });
+    for (const c of subscribersOf(w.tabId)) {
+      pushEventTo(c, 'event:session:summary', { tabId: w.tabId, summary: text, ofMessageId, model: 'raw', ts: Date.now() });
+    }
     return;
   }
 
@@ -763,11 +768,13 @@ async function maybeSummarize(w) {
   if (degraded) {
     logs.writeLine({ scope: 'webRemote', level: 'warn', message: `summary degraded: ${degraded}`, meta: {} });
   }
-  pushEvent('event:session:summary', {
-    tabId: w.tabId, summary, ofMessageId, model,
-    ...(degraded ? { degraded } : {}),
-    ts: Date.now(),
-  });
+  for (const c of subscribersOf(w.tabId)) {
+    pushEventTo(c, 'event:session:summary', {
+      tabId: w.tabId, summary, ofMessageId, model,
+      ...(degraded ? { degraded } : {}),
+      ts: Date.now(),
+    });
+  }
 }
 
 /**
@@ -776,10 +783,10 @@ async function maybeSummarize(w) {
  * status, and flush the session list immediately rather than waiting for the
  * next SESSION_LIST_PUSH_MS tick.
  */
-function finalizeE2eAuthenticated(logMessage) {
+function finalizeE2eAuthenticated(logMessage, client) {
   logs.writeLine({ scope: 'webRemote', level: 'info', message: logMessage });
   broadcastStatus();
-  _lastSessionListJson = null;
+  if (client) client.lastSessionListJson = null;
   pushSessionList().catch(() => {});
 }
 
@@ -819,6 +826,19 @@ async function handleMessage(raw, device) {
       _ws = null;
       try { ws?.terminate(); } catch { /* */ }
       handleTokenRevoked(device.deviceId).catch(() => {});
+    }
+    return;
+  }
+
+  // Relay notice that a browser closed: tear down only that client. Never a command.
+  if (type === 'event:client:disconnected') {
+    const key = _clients.clientKeyOf({ fromConn: envelope.fromConn ?? payload?.fromConn });
+    if (key !== LEGACY_CLIENT_KEY) {
+      const reason = envelope.reason ?? payload?.reason;
+      const rec = teardownClient(key);
+      await auditLog(new Date().toISOString(), 'client:disconnected', device.deviceId, id,
+        `reason=${String(reason ?? '-').replace(/[^\w:.-]/g, '_').slice(0, 40)}`, rec || { key });
+      broadcastStatus();
     }
     return;
   }
@@ -870,7 +890,7 @@ async function handleMessage(raw, device) {
       }
     } catch (e) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'e2e:hello peer key validation failed — session dropped', meta: { error: e?.message } });
-      await auditLog(new Date().toISOString(), 'e2e:hello', device.deviceId, undefined, 'error:invalid_peer_key');
+      await auditLog(new Date().toISOString(), 'e2e:hello', device.deviceId, undefined, 'error:invalid_peer_key', client);
       failClient(client); // surface key-validation failure to UI — user must reconnect
       broadcastStatus();
       return;
@@ -896,7 +916,7 @@ async function handleMessage(raw, device) {
       // falls through to the manual pending_sas flow below, unchanged.
       if (device.verifiedPeerPubKey && device.verifiedPeerPubKey === browserPubKey) {
         client.e2e = makeState('authenticated', sessionKey, null);
-        finalizeE2eAuthenticated('E2E session auto-authenticated — pinned browser key matched');
+        finalizeE2eAuthenticated('E2E session auto-authenticated — pinned browser key matched', client);
         respond(id, undefined, 'e2e:ready', client);
         return;
       }
@@ -958,21 +978,21 @@ async function dispatchEnvelope(envelope, device, client) {
   // Kill switch — re-reads config with 1s TTL
   const cfg = await loadConfig();
   if (!cfg.remoteEnabled) {
-    await auditLog(ts, type, device.deviceId, id, 'error:disabled');
+    await auditLog(ts, type, device.deviceId, id, 'error:disabled', client);
     respond(id, { error: 'rejected' }, undefined, client); // opaque — reason stays in audit log only
     return;
   }
 
   // Allowlist check — reject unknown cmd:* types with opaque error (oracle prevention)
   if (!ALLOWED_COMMANDS.has(type)) {
-    await auditLog(ts, type, device.deviceId, id, 'error:not_allowed');
+    await auditLog(ts, type, device.deviceId, id, 'error:not_allowed', client);
     respond(id, { error: 'rejected' }, undefined, client);
     return;
   }
 
   // MUTATE tier gate — write/exec commands require remoteControlEnabled=true (default false)
   if (MUTATE_COMMANDS.has(type) && !cfg.remoteControlEnabled) {
-    await auditLog(ts, type, device.deviceId, id, 'error:not_allowed');
+    await auditLog(ts, type, device.deviceId, id, 'error:not_allowed', client);
     respond(id, { error: 'rejected' }, undefined, client); // opaque — reason stays in audit log only
     return;
   }
@@ -982,7 +1002,7 @@ async function dispatchEnvelope(envelope, device, client) {
   // from exfiltrating session lists, PRDs, run logs, or transcript summaries
   // by completing the ECDH handshake without the user's knowledge.
   if ((MUTATE_COMMANDS.has(type) || SAS_GATED_READS.has(type)) && client.e2e.state !== 'authenticated') {
-    await auditLog(ts, type, device.deviceId, id, 'error:e2e_not_authenticated');
+    await auditLog(ts, type, device.deviceId, id, 'error:e2e_not_authenticated', client);
     respond(id, { error: 'rejected' }, undefined, client); // opaque — reason stays in audit log only
     return;
   }
@@ -990,11 +1010,11 @@ async function dispatchEnvelope(envelope, device, client) {
   // Dispatch
   let result;
   try {
-    result = await dispatchCommand(type, payload ?? {});
-    await auditLog(ts, type, device.deviceId, id, 'ok');
+    result = await dispatchCommand(type, payload ?? {}, client);
+    await auditLog(ts, type, device.deviceId, id, 'ok', client);
   } catch (e) {
     const code = e?.name === 'ZodError' ? 'schema_invalid' : 'dispatch_error';
-    await auditLog(ts, type, device.deviceId, id, `error:${code}`);
+    await auditLog(ts, type, device.deviceId, id, `error:${code}`, client);
     result = { error: 'rejected' }; // opaque on-wire — reason stays in audit log only
   }
 
@@ -1028,6 +1048,14 @@ function respond(msgId, payload, typeOverride, client) {
   }
 }
 
+function stopClientPtyStream(client, tabId) {
+  const unsub = client.ptyStreams.get(tabId);
+  client.ptyStreams.delete(tabId);
+  if (unsub) {
+    try { unsub(); } catch { /* listener already gone */ }
+  }
+}
+
 // Lazy-loaded dispatch map — avoids circular require at module load time.
 let _dispatchMap = null;
 
@@ -1048,7 +1076,8 @@ function getDispatchMap() {
       return sessionsStore.save(parsed);
     },
 
-    'cmd:pty:spawn': async (payload) => {
+    'cmd:pty:spawn': async (payload, reqClient) => {
+      const client = reqClient || _clients.getOrCreate(LEGACY_CLIENT_KEY);
       const parsed = schemas.ptySpawn.parse(payload);
       // Path safety — validatePath rejects anything outside home dir.
       validatePath(parsed.cwd);
@@ -1060,20 +1089,20 @@ function getDispatchMap() {
       // Stream output to the peer — replaces any prior subscription for this tab.
       // Chunk contents are sensitive: never logged.
       const tabId = safePayload.tabId;
-      stopRemotePtyStream(tabId);
+      stopClientPtyStream(client, tabId);
       const unsub = ptyManager.addOutputListener(
         tabId,
         (_id, data) => {
-          if (!anyAuthenticated() || !loadConfigSync().remoteEnabled) return;
-          pushEvent('event:pty:data', { tabId, data });
+          if (client.e2e.state !== 'authenticated' || !loadConfigSync().remoteEnabled) return;
+          pushEventTo(client, 'event:pty:data', { tabId, data });
         },
         (_id, info) => {
-          if (_remotePtyStreams.get(tabId) === unsub) _remotePtyStreams.delete(tabId);
-          if (!anyAuthenticated() || !loadConfigSync().remoteEnabled) return;
-          pushEvent('event:pty:exit', { tabId, exitCode: info?.exitCode, signal: info?.signal });
+          if (client.ptyStreams.get(tabId) === unsub) client.ptyStreams.delete(tabId);
+          if (client.e2e.state !== 'authenticated' || !loadConfigSync().remoteEnabled) return;
+          pushEventTo(client, 'event:pty:exit', { tabId, exitCode: info?.exitCode, signal: info?.signal });
         },
       );
-      _remotePtyStreams.set(tabId, unsub);
+      client.ptyStreams.set(tabId, unsub);
       return result;
     },
 
@@ -1088,9 +1117,11 @@ function getDispatchMap() {
       return { ok: true };
     },
 
-    'cmd:pty:kill': async (payload) => {
+    'cmd:pty:kill': async (payload, reqClient) => {
       const parsed = schemas.ptyTabId.parse(payload);
-      stopRemotePtyStream(parsed.tabId);
+      // Kill ends the PTY itself, so every client's stream for it ends.
+      for (const c of _clients.values()) stopClientPtyStream(c, parsed.tabId);
+      void reqClient;
       ptyManager.kill(parsed.tabId);
       return { ok: true };
     },
@@ -1104,16 +1135,20 @@ function getDispatchMap() {
       app.getVersion(),
 
     // v2 mobile: start/stop pushing live state + summary for a session.
-    'cmd:session:subscribe': async (payload) => {
+    'cmd:session:subscribe': async (payload, reqClient) => {
+      const client = reqClient || _clients.getOrCreate(LEGACY_CLIENT_KEY);
       const parsed = schemas.sessionSubscribe.parse(payload);
       validatePath(parsed.cwd); // home-dir boundary before any fs access
       startSessionWatch(parsed.tabId, parsed.cwd);
+      client.subscriptions.add(parsed.tabId);
       return { ok: true };
     },
 
-    'cmd:session:unsubscribe': async (payload) => {
+    'cmd:session:unsubscribe': async (payload, reqClient) => {
+      const client = reqClient || _clients.getOrCreate(LEGACY_CLIENT_KEY);
       const parsed = schemas.ptyTabId.parse(payload);
-      stopSessionWatch(parsed.tabId);
+      client.subscriptions.delete(parsed.tabId);
+      pruneSessionWatchers();
       return { ok: true };
     },
 
@@ -1157,11 +1192,11 @@ function getDispatchMap() {
   return _dispatchMap;
 }
 
-async function dispatchCommand(type, payload) {
+async function dispatchCommand(type, payload, client) {
   const map = getDispatchMap();
   const handler = map[type];
   if (!handler) throw new Error(`no handler for ${type}`);
-  return handler(payload);
+  return handler(payload, client);
 }
 
 // ─── Pairing ─────────────────────────────────────────────────────────────────
@@ -1220,7 +1255,7 @@ async function pair(otp) {
 }
 
 async function revokeDevice(deviceId) {
-  stopAllRemotePtyStreams();
+  teardownAllClients();
   invalidateConfigCache();
   const cfg = await loadConfig();
   const devices = (cfg.devices || []).filter((d) => d.deviceId !== deviceId);
@@ -1245,7 +1280,7 @@ async function revokeDevice(deviceId) {
  * This is the local-side "kill everything" action (ADR §4.1).
  */
 async function revokeAllDevices() {
-  stopAllRemotePtyStreams();
+  teardownAllClients();
   const cfg = await loadConfig();
   const revokedCount = (cfg.devices || []).length;
   await saveConfig({ ...cfg, remoteEnabled: false, devices: [] });
@@ -1293,7 +1328,7 @@ function registerRemoteHandlers() {
     // Flush the session list immediately — the push loop was suppressed while
     // state !== 'authenticated', so the mobile app would otherwise wait up to
     // SESSION_LIST_PUSH_MS for the first useful data.
-    finalizeE2eAuthenticated('E2E session authenticated — SAS confirmed by user');
+    finalizeE2eAuthenticated('E2E session authenticated — SAS confirmed by user', target);
     return { ok: true };
   });
 
@@ -1323,6 +1358,7 @@ function registerRemoteHandlers() {
   ipcMain.handle('webRemote:disable-control', async () => {
     const cfg = await loadConfig();
     await saveConfig({ ...cfg, remoteControlEnabled: false });
+    teardownAllClients(); // no client keeps a PTY stream once control is off
     broadcastStatus();
     return { ok: true };
   });
@@ -1402,6 +1438,6 @@ module.exports = {
       _clients.getOrCreate(clientKey).e2e = makeState('authenticated', key, null);
     },
     revokeAllDevices,
-    streamCount: () => _remotePtyStreams.size,
+    streamCount: () => _clients.values().reduce((n, c) => n + c.ptyStreams.size, 0),
   },
 };

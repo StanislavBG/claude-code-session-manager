@@ -631,6 +631,41 @@ function stopAllSessionWatches() {
   if (_sessionListTimer) { clearInterval(_sessionListTimer); _sessionListTimer = null; }
 }
 
+/**
+ * Pure builder for the phone's session list: one project entry per tab, then
+ * each tab's ACTIVE Epics (from active-index.json via readIndex). Never throws.
+ */
+function buildRemoteSessionList(tabs, readIndex) {
+  const out = [];
+  const seenEpics = new Set();
+  for (const tab of Array.isArray(tabs) ? tabs : []) {
+    if (!tab) continue;
+    const project = tab.label || path.basename(tab.cwd || '');
+    out.push({ kind: 'project', tabId: tab.sessionId, cwd: tab.cwd, title: tab.label || tab.cwd, project });
+    let sessions = null;
+    try { sessions = readIndex(tab.cwd)?.sessions; } catch { sessions = null; }
+    if (!sessions || typeof sessions !== 'object') continue;
+    for (const epic of Object.values(sessions)) {
+      if (!epic || epic.status !== 'active') continue;
+      if (typeof epic.claudeSessionId !== 'string' || !epic.claudeSessionId) continue;
+      if (seenEpics.has(epic.id)) continue;
+      seenEpics.add(epic.id);
+      const firstLine = typeof epic.goalText === 'string' ? epic.goalText.split('\n')[0].trim().slice(0, 80).trim() : '';
+      out.push({
+        kind: 'epic',
+        tabId: epic.claudeSessionId,
+        epicId: epic.id,
+        cwd: epic.worktree?.dir || epic.cwd,
+        title: firstLine || epic.id,
+        project,
+        tag: epic.tag,
+        agentType: epic.agentType,
+      });
+    }
+  }
+  return out;
+}
+
 /** Push the current session list (reuses sessionsStore — the canonical source). */
 async function pushSessionList() {
   try {
@@ -646,13 +681,12 @@ async function pushSessionList() {
     if (_e2e.state !== 'authenticated') return;
     const sessionsStore = require('./sessionsStore.cjs');
     const data = await sessionsStore.load();
-    // Normalize persisted tabs → SessionMeta. tabId === sessionId so it
+    // Tabs + their ACTIVE Epics → SessionMeta. tabId === claude sessionId so it
     // matches the transcript JSONL name used by cmd:session:subscribe.
-    const sessions = (data?.tabs ?? []).map((t) => ({
-      tabId: t.sessionId,
-      cwd: t.cwd,
-      title: t.label || t.cwd,
-      state: _sessionWatchers.get(t.sessionId)?.state ?? null,
+    const { readActiveIndex } = require('./lib/epicMint.cjs');
+    const sessions = buildRemoteSessionList(data?.tabs ?? [], readActiveIndex).map((s) => ({
+      ...s,
+      state: _sessionWatchers.get(s.tabId)?.state ?? null,
     }));
     const payload = { sessions, activeTabId: data?.activeTabId ?? null };
     const json = JSON.stringify(payload);
@@ -1303,6 +1337,7 @@ module.exports = {
   },
   __test: {
     getDispatchMap,
+    buildRemoteSessionList,
     setWs: (ws) => { _ws = ws; },
     setE2eAuthenticated: (key) => { _e2e = makeState('authenticated', key, null); },
     revokeAllDevices,

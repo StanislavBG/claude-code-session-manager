@@ -1931,6 +1931,8 @@ export interface SessionManagerAPI {
     aggregate: (req?: HistoryAggregateRequest) => Promise<HistoryAggregateResult>;
     scanProjects: () => Promise<SessionScanResult>;
     dashboard: (req: HistoryDashboardRequest) => Promise<HistoryDashboardResult>;
+    /** Fires (throttled to 1/5 s) when main appends days to the rollup. Returns unsubscribe. */
+    onUpdated: (handler: () => void) => () => void;
   };
   schedule: {
     state: () => Promise<ScheduleStateSnapshot>;

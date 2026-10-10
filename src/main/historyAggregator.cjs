@@ -6,6 +6,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { schemas } = require('./ipcSchemas.cjs');
 const historyRollup = require('./lib/historyRollup.cjs');
+const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 const PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
 const PARSE_BUDGET_MS = 2_000;
@@ -51,6 +52,47 @@ function resolvePricingKey(modelId) {
 // ── LRU cache ─────────────────────────────────────────────────────────────────
 // Shared implementation: lib/lruCache.cjs (re-exported below for existing callers).
 const { LRUCache } = require('./lib/lruCache.cjs');
+
+// ── history:updated broadcast ─────────────────────────────────────────────────
+// Open History pages re-fetch on this event. Throttled leading+trailing so a
+// backfill burst announces its first and last write only.
+const HISTORY_UPDATED_THROTTLE_MS = 5000;
+let historyNotifyTimer = null;
+let historyNotifyPending = false;
+
+function broadcastHistoryUpdated() {
+  try {
+    const { BrowserWindow } = require('electron');
+    for (const win of BrowserWindow.getAllWindows()) sendIfAlive(win, 'history:updated', {});
+  } catch {
+    // Never let a failed broadcast break aggregation.
+  }
+}
+
+function notifyHistoryUpdated() {
+  if (historyNotifyTimer) {
+    historyNotifyPending = true;
+    return;
+  }
+  broadcastHistoryUpdated();
+  const arm = () => {
+    historyNotifyTimer = setTimeout(() => {
+      historyNotifyTimer = null;
+      if (historyNotifyPending) {
+        historyNotifyPending = false;
+        broadcastHistoryUpdated();
+        arm();
+      }
+    }, HISTORY_UPDATED_THROTTLE_MS);
+    if (historyNotifyTimer.unref) historyNotifyTimer.unref();
+  };
+  arm();
+}
+
+async function appendRollupAndNotify(entries) {
+  await historyRollup.appendRollupDays(entries);
+  if (entries.length) notifyHistoryUpdated();
+}
 
 /**
  * Cache for parseJSONL results.
@@ -574,7 +616,7 @@ async function finalizeClosedDays({ budgetMs, dryRun = false } = {}) {
   }
 
   if (!dryRun) {
-    await historyRollup.appendRollupDays(entries);
+    await appendRollupAndNotify(entries);
   }
   return { finalizedDates: partial ? [] : Array.from(dates), partial };
 }
@@ -741,7 +783,7 @@ async function refreshIntradayToday() {
 
   const entries = [];
   for (const b of buckets.values()) entries.push(...bucketToRollupLines(b));
-  if (entries.length) await historyRollup.appendRollupDays(entries);
+  if (entries.length) await appendRollupAndNotify(entries);
 
   return { date: today, projectsUpdated: buckets.size, strategy: INTRADAY_STRATEGY };
 }
@@ -859,7 +901,7 @@ async function aggregate(req) {
     if (b.date < today) backfillEntries.push(...bucketToRollupLines(b));
   }
   if (backfillEntries.length) {
-    await historyRollup.appendRollupDays(backfillEntries);
+    await appendRollupAndNotify(backfillEntries);
   }
 
   const rollupRows = rollupMapToRows(rollupMap, finalizedDates);
@@ -951,6 +993,7 @@ module.exports = {
   finalizeClosedDays,
   decodeCwd,
   refreshIntradayToday,
+  appendRollupAndNotify,
   computeIntradayBuckets,
   // exported for tests
   scanAggrLines,

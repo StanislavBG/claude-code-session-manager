@@ -970,6 +970,12 @@ function enqueueExternalPrompt(tabId, prompt) {
   broadcast('chat:external-send', { tabId, prompt });
 }
 
+// Asks the renderer to start a new Session (same launchSession a macro press
+// uses) on behalf of the paired phone. Payload is pre-validated by the caller.
+function requestExternalNewSession(payload) {
+  broadcast('chat:external-new-session', payload);
+}
+
 /**
  * Registers the admin-HTTP entry point for enqueueExternalPrompt, mirroring
  * prdCreate.cjs's registerAdminRoute pattern (auth is the injected transport's
@@ -1050,5 +1056,6 @@ module.exports = {
   WARN_CEILING_MS,
   __setExecutor,
   enqueueExternalPrompt,
+  requestExternalNewSession,
   registerAdminRoute,
 };

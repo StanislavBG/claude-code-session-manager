@@ -1094,6 +1094,33 @@ function getDispatchMap() {
       chatRunner.enqueueExternalPrompt(parsed.tabId, parsed.prompt);
       return { ok: true };
     },
+
+    'cmd:session:options': async () => {
+      const { EpicTagSchema } = require('./lib/promptSessionSchema.cjs');
+      const agentLibrary = require('./agentLibrary.cjs');
+      const macroLibrary = require('./lib/macroLibrary.cjs');
+      const { tabs } = await sessionsStore.load();
+      const personas = await agentLibrary.listPersonas();
+      return {
+        projects: tabs.map((t) => ({ cwd: t.cwd, title: t.label })),
+        agents: personas.map((a) => ({ name: a.name, description: a.description })),
+        tags: EpicTagSchema.options,
+        macros: await macroLibrary.listMacros(),
+      };
+    },
+
+    // Input boundary: cwd must be exactly an open tab's cwd and agentName a
+    // listed persona, checked before the payload goes anywhere near the fs.
+    'cmd:session:create': async (payload) => {
+      const parsed = schemas.remoteSessionCreate.parse(payload);
+      const agentLibrary = require('./agentLibrary.cjs');
+      const { tabs } = await sessionsStore.load();
+      if (!tabs.some((t) => t.cwd === parsed.cwd)) throw new Error('cwd is not an open project');
+      const personas = await agentLibrary.listPersonas();
+      if (!personas.some((a) => a.name === parsed.agentName)) throw new Error('unknown agent');
+      chatRunner.requestExternalNewSession(parsed);
+      return { ok: true };
+    },
   };
 
   return _dispatchMap;

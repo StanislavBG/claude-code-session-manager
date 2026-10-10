@@ -20,6 +20,8 @@ const WS_OPEN = 1;
 
 // The relay closes a revoked desktop client's socket with this code.
 const CLOSE_TOKEN_REVOKED = 4001;
+// Relay errors that end the handshake with a reason the UI can explain.
+const FATAL_RELAY_ERRORS = new Set(['device_offline', 'not_your_device']);
 
 function defaultWsFactory(url) {
   const WebSocket = require('ws');
@@ -149,6 +151,8 @@ function createRemoteClient({ relayAuth = relayClientAuth, wsFactory = defaultWs
       if (code === 'token_revoked') {
         try { relayAuth.clearToken?.(); } catch { /* best effort */ }
         fail(peerId, 'token_revoked');
+      } else if (FATAL_RELAY_ERRORS.has(code)) {
+        fail(peerId, code);
       }
       return;
     }

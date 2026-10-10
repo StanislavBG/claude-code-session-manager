@@ -221,6 +221,25 @@ describe('remoteClient', () => {
     expect(clearToken).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['device_offline', 'not_your_device'])('relay %s error fails the peer with that reason', async (code) => {
+    const agent = makeAgent()
+    const { client, clearToken } = setupWithClear(agent)
+    await connectToSas(client)
+    agent.sockets[0].emit('message', JSON.stringify({ type: 'error', code }))
+    expect(client.getStatus('p1').status).toBe('failed')
+    expect(client.getStatus('p1').reason).toBe(code)
+    expect(clearToken).not.toHaveBeenCalled()
+  })
+
+  it('relay rate_limited error leaves the status unchanged', async () => {
+    const agent = makeAgent()
+    const { client } = setupWithClear(agent)
+    await connectToSas(client)
+    const before = client.getStatus('p1').status
+    agent.sockets[0].emit('message', JSON.stringify({ type: 'error', code: 'rate_limited' }))
+    expect(client.getStatus('p1').status).toBe(before)
+  })
+
   it('a normal 1000 close returns to idle without clearing the token', async () => {
     const agent = makeAgent()
     const { client, clearToken } = setupWithClear(agent)

@@ -19,6 +19,9 @@ import { SkillsLibrary, ViewSwitcher } from './Library'
 import { readSkillDisabled, setSkillDisabled, parseSkillMeta } from '../../lib/skillFrontmatter'
 import { toast } from '../../state/toast'
 
+const WATCH_DEBOUNCE_MS = 250
+const SELF_SAVE_WINDOW_MS = 2000
+
 type Kind = 'skills' | 'commands'
 
 function roots(home: string, cwd: string | null) {
@@ -166,7 +169,53 @@ function SkillsComponent() {
   // loadItems after the component is gone.
   useEffect(() => () => { loadSeq.current += 1 }, [])
 
-  useConfigDirWatch(bases ? [bases.skills, bases.commands] : [], loadItems)
+  // Watch-driven re-lists: debounced, never restarting a load in flight (one
+  // trailing load follows it), and skipped when the event is the echo of this
+  // page's own just-saved SKILL.md (the list cannot have changed).
+  const loadItemsRef = useRef(loadItems)
+  loadItemsRef.current = loadItems
+  const itemsRef = useRef(items)
+  itemsRef.current = items
+  const selectedPathRef = useRef(selectedPath)
+  selectedPathRef.current = selectedPath
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const loadInFlight = useRef(false)
+  const loadPending = useRef(false)
+  const runLoad = useCallback(async () => {
+    if (loadInFlight.current) {
+      loadPending.current = true
+      return
+    }
+    loadInFlight.current = true
+    try {
+      await loadItemsRef.current()
+    } finally {
+      loadInFlight.current = false
+    }
+    if (loadPending.current) {
+      loadPending.current = false
+      void runLoad()
+    }
+  }, [])
+  useEffect(() => () => {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current)
+  }, [])
+  const onWatchEvent = useCallback((changedPath: string) => {
+    const sel = selectedPathRef.current
+    const selItem = sel ? itemsRef.current.find((i) => i.path === sel) : null
+    const savedAt = sel ? useConfig.getState().files[sel]?.lastSavedAt : null
+    if (
+      selItem?.dir && savedAt && Date.now() - savedAt < SELF_SAVE_WINDOW_MS &&
+      (changedPath === selItem.dir || selItem.dir.startsWith(`${changedPath}/`))
+    ) return
+    if (debounceTimer.current) clearTimeout(debounceTimer.current)
+    debounceTimer.current = setTimeout(() => {
+      debounceTimer.current = null
+      void runLoad()
+    }, WATCH_DEBOUNCE_MS)
+  }, [runLoad])
+
+  useConfigDirWatch(bases ? [bases.skills, bases.commands] : [], onWatchEvent)
 
   const files = useConfig((s) => s.files)
   const loadText = useConfig((s) => s.loadText)

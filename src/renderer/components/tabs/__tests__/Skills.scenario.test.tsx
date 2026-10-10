@@ -215,3 +215,76 @@ describe('Skills list errors', () => {
     expect(errorState(el)).toBeNull()
   })
 })
+
+describe('Skills list refresh load', () => {
+  const skillsLists = (api: ReturnType<typeof installApi>['api']) =>
+    api.config.listDir.mock.calls.filter((c) => c[0] === SKILLS_DIR && c[1]?.dirsOnly).length
+  const emit = (api: ReturnType<typeof installApi>['api'], path: string) =>
+    (api.config.onChanged.mock.calls as unknown as Array<[(i: { path: string }) => void]>).forEach(([cb]) => cb({ path }))
+
+  it('coalesces 20 rapid change events into one re-list', async () => {
+    const { api } = installApi()
+    await mount()
+    const before = skillsLists(api)
+    vi.useFakeTimers()
+    try {
+      for (let i = 0; i < 20; i++) emit(api, SKILLS_DIR)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400)
+        await flush()
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(skillsLists(api) - before).toBe(1)
+  })
+
+  it('skips the re-list for the echo of its own just-saved skill', async () => {
+    const { api } = installApi()
+    await mount()
+    const before = skillsLists(api)
+    act(() => {
+      const f = useConfig.getState().files[ONE]
+      useConfig.setState({ files: { ...useConfig.getState().files, [ONE]: { ...f, lastSavedAt: Date.now() } } })
+    })
+    vi.useFakeTimers()
+    try {
+      emit(api, SKILLS_DIR)
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(400)
+        await flush()
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(skillsLists(api) - before).toBe(0)
+  })
+
+  it('keeps at most 6 readText calls in flight', async () => {
+    const { api } = installApi()
+    const names = Array.from({ length: 20 }, (_, i) => `s${i}`)
+    api.config.listDir.mockImplementation((async (path: string, opts?: { dirsOnly?: boolean }) =>
+      path === SKILLS_DIR && opts?.dirsOnly
+        ? {
+            ok: true,
+            error: null,
+            entries: names.map((n) => ({ name: n, path: `${SKILLS_DIR}/${n}`, isDirectory: true, isFile: false, mtimeMs: 0, size: 0 })),
+          }
+        : { ok: true, error: null, entries: [] }) as never)
+    let inFlight = 0
+    let peak = 0
+    api.config.readText.mockImplementation((async (path: string) => {
+      inFlight++
+      peak = Math.max(peak, inFlight)
+      await new Promise((r) => setTimeout(r, 2))
+      inFlight--
+      return { exists: true, text: md(path), mtimeMs: 0, error: null }
+    }) as never)
+    await mount()
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100))
+    })
+    expect(peak).toBeGreaterThan(1)
+    expect(peak).toBeLessThanOrEqual(6)
+  })
+})

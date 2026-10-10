@@ -4,6 +4,7 @@ import { createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { BudgetStrip } from '../BudgetStrip'
+import { writeHistoryAnalyticsPrefs } from '../../../../../lib/historyAnalyticsPrefs'
 import { useToast } from '../../../../../state/toast'
 import type { HistoryDashboardDay } from '../../../../../../preload/api'
 
@@ -103,5 +104,35 @@ describe('BudgetStrip', () => {
     })
     expect(capInput().value).toBe('50')
     expect(useToast.getState().toasts.some((t) => t.kind === 'error')).toBe(true)
+  })
+
+  it('serializes a cap change overlapping a measure write so the persisted prefs keep both fields', async () => {
+    store.history = { measure: 'spend', range: 30 }
+    const release: Array<() => void> = []
+    writeJson.mockImplementation((_path: string, data: unknown) => new Promise((resolve) => {
+      release.push(() => {
+        store = { ...(data as Record<string, unknown>) }
+        resolve({ ok: true, mtimeMs: Date.now() })
+      })
+    }))
+
+    // HistoryDashboard writes measure/range while BudgetStrip writes the cap.
+    let measureWrite!: Promise<void>
+    await act(async () => {
+      measureWrite = writeHistoryAnalyticsPrefs({ measure: 'sessions' })
+      await vi.waitFor(() => expect(release).toHaveLength(1))
+      setNativeValue(capInput(), '75')
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(release).toHaveLength(1)
+
+    await act(async () => {
+      release[0]()
+      await measureWrite
+      await vi.waitFor(() => expect(release).toHaveLength(2))
+      release[1]()
+      await new Promise((r) => setTimeout(r, 0))
+    })
+    expect(store).toEqual({ history: { measure: 'sessions', range: 30, budgetCapUsd: 75 } })
   })
 })

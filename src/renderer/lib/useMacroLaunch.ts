@@ -1,6 +1,6 @@
 /**
- * Creates + starts the Session a Macro button stands for. Mint -> approve ->
- * send — the one path both SessionActionsBar (Sessions workspace) and
+ * Creates + starts the Session a Macro button stands for. Delegates mint -> approve ->
+ * send to launchSession — the one path both SessionActionsBar (Sessions workspace) and
  * Project Home share for pressing a macro. Lifted out of SessionActionsBar.tsx
  * (PRD 1459) so Project Home can press macros through the same authority
  * instead of re-deriving it.
@@ -17,9 +17,8 @@
 import { useState } from 'react'
 import { usePromptSessions } from '../state/promptSessions'
 import { useSessions } from '../state/sessions'
-import { useChat } from '../state/chat'
 import { toast } from '../state/toast'
-import { composeEpicIntake } from './epicIntake'
+import { launchSession } from './launchSession'
 import type { AgentPersona, Macro } from '../../preload/api'
 
 export function useMacroLaunch(
@@ -78,25 +77,16 @@ export function useMacroLaunch(
 
       const trimmedExtra = extraInstructions?.trim()
       const goal = trimmedExtra ? `${macro.prompt}\n\nAdditional instructions: ${trimmedExtra}` : macro.prompt
-      const { goalText, openingPrompt, sections } = composeEpicIntake({
+      const result = await launchSession({
+        cwd: activeTabCwd,
+        agentName: macro.agentName,
+        tag: macro.tag,
         title: macro.label,
         goal,
-        tag: macro.tag,
-        agentName: macro.agentName,
         agentDescription: persona?.description ?? undefined,
+        source: `SessionActionsBar ${macro.agentName}`,
       })
-      const src = `SessionActionsBar ${macro.agentName}`
-      const session = await usePromptSessions
-        .getState()
-        .createPromptSession(activeTabCwd, goalText, macro.tag, src, macro.agentName, openingPrompt, sections)
-      usePromptSessions.getState().approveProposed(session.id, src)
-      useChat.getState().send({
-        tabId: session.id,
-        sessionId: session.claudeSessionId,
-        cwd: activeTabCwd,
-        prompt: openingPrompt,
-      })
-      onSelect(session.id)
+      onSelect(result.epicId)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err))
     } finally {

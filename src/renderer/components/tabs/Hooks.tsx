@@ -19,6 +19,7 @@ import { mergeScopes, getAtPath, setAtPath } from '../../lib/mergeScopes'
 import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
 import { Tooltip } from '../ui/Tooltip'
+import { toast } from '../../state/toast'
 import { HOOK_EVENT_DOCS } from '../../data/hookEventDocs'
 import type { TestFireHookResult } from '../../../preload/api'
 
@@ -133,10 +134,18 @@ interface HookGroup {
 
 type HooksConfig = Partial<Record<HookEvent, HookGroup[]>>
 
+const INVALID_JSON_MSG =
+  'This settings file has invalid JSON. Fix it in the Settings raw editor first; Hooks will not overwrite it.'
+
+/** A blank draft is a not-yet-created file ({}); anything unparseable or not a plain object is an error. */
 function parseFull(raw: string): { full: Record<string, unknown>; hooks: HooksConfig; err: string | null } {
   if (raw.trim() === '') return { full: {}, hooks: {}, err: null }
   try {
-    const full = JSON.parse(raw) as Record<string, unknown>
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { full: {}, hooks: {}, err: 'settings file is not a JSON object' }
+    }
+    const full = parsed as Record<string, unknown>
     return { full, hooks: (full.hooks as HooksConfig) ?? {}, err: null }
   } catch (e) {
     return { full: {}, hooks: {}, err: (e as Error).message }
@@ -233,16 +242,12 @@ function HooksComponent() {
   const overrideInto = (nodePath: string[], value: unknown) => {
     const target = scopePaths[scope]
     if (!target) return
-    setSaveError(null)
-    const draft = files[target]?.draftRaw ?? ''
-    let current: Record<string, unknown> = {}
-    if (draft.trim()) {
-      try {
-        current = JSON.parse(draft) as Record<string, unknown>
-      } catch {
-        current = {}
-      }
+    const { full: current, err: draftErr } = parseFull(files[target]?.draftRaw ?? '')
+    if (draftErr) {
+      toast.error(INVALID_JSON_MSG)
+      return
     }
+    setSaveError(null)
     const nextHooks = setAtPath(current.hooks ?? {}, nodePath, value)
     const next = { ...current, hooks: nextHooks }
     setDraft(target, JSON.stringify(next, null, 2) + '\n')
@@ -286,6 +291,10 @@ function HooksComponent() {
   )
 
   const updateHooks = (next: HooksConfig) => {
+    if (err) {
+      toast.error(INVALID_JSON_MSG)
+      return
+    }
     setSaveError(null)
     setDraft(path, serialize(full, next))
   }
@@ -358,6 +367,11 @@ function HooksComponent() {
         />
       ) : (
       <div className="flex flex-col h-full">
+      {err ? (
+        <div role="alert" className="px-3 py-2 border-b border-line text-xs text-red-400">
+          {INVALID_JSON_MSG} ({err})
+        </div>
+      ) : null}
       {unknownCount > 0 ? (
         <div className="px-3 py-2 border-b border-line text-xs bg-bg-elev text-fg-dim">
           <span className="text-yellow-400">⚠</span> {unknownCount} hook(s) configured under
@@ -421,7 +435,8 @@ function HooksComponent() {
               <h3 className="text-xs uppercase tracking-wider text-fg">{selectedEvent}</h3>
               <button
                 onClick={addGroup}
-                className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi"
+                disabled={!!err}
+                className="px-2 py-0.5 text-xs border border-line rounded text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 + add group
               </button>
@@ -498,13 +513,15 @@ function HookGroupEditor({
         <span className="text-xs text-fg-faint w-16">matcher</span>
         <input
           value={group.matcher ?? ''}
+          disabled={jsonInvalid}
           onChange={(e) => onChange({ ...group, matcher: e.target.value })}
           placeholder="tool name regex or exact match (optional)"
           className="flex-1 bg-bg border border-line rounded px-2 py-0.5 text-xs text-fg font-mono"
         />
         <button
           onClick={onRemove}
-          className="text-fg-faint hover:text-red-400 text-xs"
+          disabled={jsonInvalid}
+          className="text-fg-faint hover:text-red-400 text-xs disabled:opacity-40"
           title="remove group"
         >
           × group
@@ -522,7 +539,8 @@ function HookGroupEditor({
       ))}
       <button
         onClick={addHook}
-        className="text-xs text-fg-faint hover:text-fg"
+        disabled={jsonInvalid}
+        className="text-xs text-fg-faint hover:text-fg disabled:opacity-40"
       >
         + add hook
       </button>
@@ -574,6 +592,7 @@ function HookRuleEditor({
       <div className="flex items-center gap-2">
         <select
           value={rule.type}
+          disabled={jsonInvalid}
           onChange={(e) => onChange({ type: e.target.value as HookType })}
           className="bg-bg border border-line rounded px-1 py-0.5 text-xs text-fg"
         >
@@ -586,6 +605,7 @@ function HookRuleEditor({
         <ProvenanceBadge interactive={false} input={provInput} />
         <input
           value={value}
+          disabled={jsonInvalid}
           onChange={(e) => onChange({ ...rule, [valueKey]: e.target.value })}
           placeholder={placeholderFor(rule.type)}
           className={`flex-1 bg-bg border rounded px-2 py-0.5 text-xs text-fg font-mono ${
@@ -602,6 +622,7 @@ function HookRuleEditor({
         ) : null}
         <input
           value={rule.timeout ?? ''}
+          disabled={jsonInvalid}
           onChange={(e) =>
             onChange({ ...rule, timeout: e.target.value ? Number(e.target.value) : undefined })
           }
@@ -618,7 +639,7 @@ function HookRuleEditor({
             test fire
           </button>
         ) : null}
-        <button onClick={onRemove} className="text-fg-faint hover:text-red-400 text-xs">
+        <button onClick={onRemove} disabled={jsonInvalid} className="text-fg-faint hover:text-red-400 text-xs disabled:opacity-40">
           ×
         </button>
       </div>
@@ -627,6 +648,7 @@ function HookRuleEditor({
           <span className="text-xs text-fg-faint w-12">args</span>
           <input
             value={argsText}
+            disabled={jsonInvalid}
             onChange={(e) =>
               onChange({
                 ...rule,
@@ -644,6 +666,7 @@ function HookRuleEditor({
         <span className="text-xs text-fg-faint w-12">term</span>
         <input
           value={rule.terminalSequence ?? ''}
+          disabled={jsonInvalid}
           onChange={(e) =>
             onChange({ ...rule, terminalSequence: e.target.value || undefined })
           }

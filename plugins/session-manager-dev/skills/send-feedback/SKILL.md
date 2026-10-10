@@ -10,7 +10,7 @@ description: >-
   user says "/send-feedback", "send this to <project>", "file this against
   <other repo>", "tell <project> about this", or "this is a bug in X, not
   here". NOT for work in the project you are already in — that is /develop.
-  Keywords: feedback, cross-project, project to project, another repo, sibling
+  Keywords: feedback, proposal, plan, cross-project, project to project, another repo, sibling
   project, hand off, file against, route finding, x-folder.
 ---
 
@@ -72,22 +72,48 @@ If the project you want is **absent**, it has simply never been opened in
 Session Manager. Do not invent a path and do not create the directory. Tell the
 human: "open `<project>` in Session Manager once, then I can send this."
 
-### 3. Write the report for a stranger
+### 3. Write the proposal for the human who must approve it
 
-The reader has never seen your code and cannot run it. A report that says "the
-usual timeout thing again" is worthless across a repo boundary. Include, in
-this order:
+The reader is a human in another repo who has never seen your code, cannot run
+it, and must decide from the proposal alone whether to approve. A report that
+says "the usual timeout thing again" is worthless across a repo boundary. Fill
+each field:
 
-- **Symptom** — what actually happened, with the real error text or output.
-- **Where you observed it** — your project, the call site, the version/commit
-  if you know it.
-- **What you expected** — the contract you thought you were relying on.
-- **Suspected cause** — name a file in *their* repo if you have a candidate;
-  say "I couldn't locate it from here" if you don't. Never fabricate a path.
+- **`motivation`** (required, <=2000 chars) — *why* this matters, in the
+  originating human's own terms (the goal they are pursuing), not the agent's
+  internal reasoning. The receiver should be able to judge worth from this alone.
+- **`plan`** (ordered steps, <=20; **required when `tag` is `feature`**) — what
+  you propose the receiving project do, in order. Concrete enough to approve or
+  reject step by step.
+- **`acceptanceCriteria`** (required, 1-20) — checkable outcomes that tell the
+  receiver the work is done. Each must be verifiable, not "works well".
+- **`outOfScope`** (optional, <=20) — what this proposal deliberately does not
+  ask for, so approval doesn't grow.
+- **`body`** (required, <=20000 chars) — supporting evidence, not the pitch:
+  - **Symptom** — what actually happened, with the real error text or output.
+  - **Where you observed it** — your project, the call site, the version/commit
+    if you know it.
+  - **What you expected** — the contract you thought you were relying on.
+  - **Suspected cause** — name a file in *their* repo if you have a candidate;
+    say "I couldn't locate it from here" if you don't. Never fabricate a path.
+
+Do not pass the sender Epic's own goal: the server records it automatically as
+`originAsk`.
 
 Attach real absolute paths worth reading via `referencePaths` rather than
 pasting large files into the body (there is a 20 000-char body cap; the cap is
 a signal, not an obstacle to route around).
+
+#### Multi-part requests
+
+Prefer **ONE proposal carrying the whole plan**: the receiver approves one
+thing and sees every step. Split only when the parts are independently
+approvable (each makes sense and ships without the others). When you split, send
+every part with the same `series` `{key, title, total}` (`key` kebab-case
+<=60, `title` <=120, `total` 2-50) and a correct `index` (1..total), and put a
+one-paragraph summary of the overall plan inside each part's `motivation` so any
+single part is understandable alone. A bare "step 5/7" with no overall plan is
+exactly what this rule exists to prevent.
 
 ### 4. Deliver
 
@@ -96,7 +122,12 @@ feedback_open_session({
   toCwd:   "<absolute cwd from step 2>",
   fromCwd: "<your project's absolute cwd>",
   title:   "<one line — this becomes their queue row>",
-  body:    "<the report from step 3>",
+  motivation: "<why this matters, in the human's terms>",
+  plan: ["<step 1>", "<step 2>"],              // required when tag is feature
+  acceptanceCriteria: ["<checkable outcome>"], // at least one
+  outOfScope: ["<what this does not ask for>"],  // optional
+  series: { key: "d2d-rollout", title: "D2D rollout", index: 2, total: 7 }, // optional, multi-part only
+  body:    "<supporting evidence from step 3>",
   tag:     "bug" | "feature" | "discussion",   // default: discussion
   referencePaths: ["/abs/path", ...],          // optional
 })
@@ -116,7 +147,9 @@ where the finding went.
 ### 5. Report honestly
 
 Say exactly this much: the proposal was **delivered as a proposed session** in
-`<toCwd>`, and it runs only if a human there presses **Approve & start**.
+`<toCwd>`, and it runs only if a human there presses **Approve & start**. That
+human sees the motivation, plan and acceptance criteria on the proposal before
+approving.
 
 Do **not** say the other project has been notified-and-is-working-on-it, that
 the bug is filed/fixed/assigned, or that you'll follow up when they respond.

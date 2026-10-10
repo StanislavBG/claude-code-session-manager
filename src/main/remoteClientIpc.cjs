@@ -7,16 +7,23 @@
  * and `remoteClient:event`.
  */
 
+const os = require('node:os');
 const { ipcMain } = require('electron');
 const { z } = require('zod');
 const { remoteClient } = require('./remoteClient.cjs');
+const { relayClientAuth } = require('./lib/relayClientAuth.cjs');
 const { ALLOWED_COMMANDS } = require('./ipcSchemas.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 const STATUS_POLL_MS = 1000;
 
 const peerId = z.string().min(1).max(128);
+const pairCode = z.string().trim()
+  .transform((c) => c.replace(/[-\s]/g, '').toUpperCase())
+  .refine((c) => /^[A-Za-z0-9]{8}$/.test(c), { message: 'invalid_code' });
 const schemas = {
+  pair: z.object({ code: pairCode, clientName: z.string().max(64).optional() }),
+  add: z.object({ deviceId: z.string().min(1).max(128), machineName: z.string().min(1).max(64) }),
   peer: z.object({ peerId }),
   send: z.object({
     peerId,
@@ -29,7 +36,7 @@ function validated(schema, handler) {
   return (_event, payload) => handler(schema.parse(payload));
 }
 
-function registerRemoteClientHandlers(getWindow, client = remoteClient) {
+function registerRemoteClientHandlers(getWindow, client = remoteClient, auth = relayClientAuth) {
   const unsubs = new Map(); // peerId -> unsubscribe for event forwarding
   const lastStatus = new Map(); // peerId -> serialized status
 
@@ -90,6 +97,31 @@ function registerRemoteClientHandlers(getWindow, client = remoteClient) {
 
   ipcMain.handle('remoteClient:send', validated(schemas.send, ({ peerId: id, type, payload }) =>
     client.send(id, type, payload)));
+
+  ipcMain.handle('remoteClient:auth-status', () => ({ paired: auth.isPaired(), clientId: auth.getClientId() }));
+
+  ipcMain.handle('remoteClient:pair', validated(schemas.pair, ({ code, clientName }) =>
+    auth.pair(code, clientName ?? os.hostname())));
+
+  ipcMain.handle('remoteClient:unpair', () => {
+    auth.clearToken();
+    return { ok: true };
+  });
+
+  ipcMain.handle('remoteClient:devices', async () => {
+    try {
+      return { ok: true, devices: await auth.listDevices() };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  });
+
+  ipcMain.handle('remoteClient:add', validated(schemas.add, ({ deviceId, machineName }) => {
+    const { clientPrivateKey: _omit, ...peer } = client.addPeer({ peerId: deviceId, deviceId, machineName });
+    ensureForwarding(deviceId);
+    publishStatus(deviceId);
+    return peer;
+  }));
 
   return () => {
     clearInterval(timer);

@@ -13,6 +13,14 @@ const client = {
   removePeer: vi.fn(),
   send: vi.fn(async () => ({ ok: true })),
   onEvent: vi.fn(() => () => {}),
+  addPeer: vi.fn((p) => ({ ...p, clientPrivateKey: 'secret' })),
+};
+const auth = {
+  isPaired: vi.fn(() => true),
+  getClientId: vi.fn(() => 'c1'),
+  pair: vi.fn(async () => ({ ok: true, clientId: 'c1' })),
+  clearToken: vi.fn(),
+  listDevices: vi.fn(async () => [{ deviceId: 'd1' }]),
 };
 
 function stub(rel, exports) {
@@ -39,15 +47,16 @@ beforeEach(() => {
   sends.length = 0;
   handlers.clear();
   dispose?.();
-  dispose = registerRemoteClientHandlers(() => ({}));
+  dispose = registerRemoteClientHandlers(() => ({}), client, auth);
 });
 afterAll(() => dispose?.());
 
 describe('remoteClientIpc', () => {
-  it('registers all five channels', () => {
+  it('registers all ten channels', () => {
     expect([...handlers.keys()].sort()).toEqual([
-      'remoteClient:confirm-sas', 'remoteClient:connect', 'remoteClient:list',
-      'remoteClient:remove', 'remoteClient:send',
+      'remoteClient:add', 'remoteClient:auth-status', 'remoteClient:confirm-sas',
+      'remoteClient:connect', 'remoteClient:devices', 'remoteClient:list', 'remoteClient:pair',
+      'remoteClient:remove', 'remoteClient:send', 'remoteClient:unpair',
     ]);
   });
 
@@ -78,5 +87,34 @@ describe('remoteClientIpc', () => {
     cb({ type: 'event:pty:data', payload: { d: 1 } });
     expect(sends).toContainEqual({ channel: 'remoteClient:event', payload: { peerId: 'p1', type: 'event:pty:data', payload: { d: 1 } } });
     expect(sends.some((s) => s.channel === 'remoteClient:status' && s.payload.peerId === 'p1')).toBe(true);
+  });
+
+  it('forwards a normalized pairing code', async () => {
+    await expect(call('remoteClient:pair', { code: ' ab12-cd34 ', clientName: 'box' })).resolves.toEqual({ ok: true, clientId: 'c1' });
+    expect(auth.pair).toHaveBeenCalledWith('AB12CD34', 'box');
+  });
+
+  it('rejects a malformed code without calling auth.pair', () => {
+    expect(() => call('remoteClient:pair', { code: 'short' })).toThrow();
+    expect(() => call('remoteClient:pair', { code: 'AB12CD3!' })).toThrow();
+    expect(auth.pair).not.toHaveBeenCalled();
+  });
+
+  it('maps a devices failure to {ok:false,error}', async () => {
+    auth.listDevices.mockRejectedValueOnce(new Error('relay_client_unpaired'));
+    await expect(call('remoteClient:devices')).resolves.toEqual({ ok: false, error: 'relay_client_unpaired' });
+  });
+
+  it('reports auth status and unpairs', async () => {
+    expect(call('remoteClient:auth-status')).toEqual({ paired: true, clientId: 'c1' });
+    expect(call('remoteClient:unpair')).toEqual({ ok: true });
+    expect(auth.clearToken).toHaveBeenCalled();
+  });
+
+  it('adds a peer without clientPrivateKey', () => {
+    const peer = call('remoteClient:add', { deviceId: 'd1', machineName: 'Desk' });
+    expect(client.addPeer).toHaveBeenCalledWith({ peerId: 'd1', deviceId: 'd1', machineName: 'Desk' });
+    expect(peer).toEqual({ peerId: 'd1', deviceId: 'd1', machineName: 'Desk' });
+    expect(() => call('remoteClient:add', { deviceId: '', machineName: 'x' })).toThrow();
   });
 });

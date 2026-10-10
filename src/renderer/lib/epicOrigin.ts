@@ -12,7 +12,7 @@
  * the read side, kept pure so the chip's text is testable without rendering.
  */
 
-import type { PromptSession } from '../state/promptSessions'
+import type { InboundProposal, PromptSession } from '../state/promptSessions'
 
 export interface InboundFeedbackOrigin {
   /** Absolute cwd of the project that sent this proposal. */
@@ -24,6 +24,10 @@ export interface InboundFeedbackOrigin {
   label: string
   /** Hover text: the full path, and the honest caveat that goes with it. */
   title: string
+  /** Structured plan from the sender; null for legacy/malformed Epics. */
+  proposal: InboundProposal | null
+  /** 'Part 5 of 7 · Series title', or null when not part of a series. */
+  seriesLabel: string | null
 }
 
 /** Last non-empty path segment, POSIX or Windows separators. Falls back to
@@ -46,6 +50,8 @@ export function inboundFeedbackOrigin(epic: Pick<PromptSession, 'source'>): Inbo
   if (!source || source.producer !== 'cross-project-feedback') return null
   const fromCwd = source.fromCwd
   if (!fromCwd) return null
+  const proposal = normalizeProposal(source.proposal)
+  const series = proposal?.series ?? null
   return {
     fromCwd,
     ...(source.fromEpicId ? { fromEpicId: source.fromEpicId } : {}),
@@ -53,6 +59,58 @@ export function inboundFeedbackOrigin(epic: Pick<PromptSession, 'source'>): Inbo
     title:
       `Proposed by another project: ${fromCwd}`
       + (source.fromEpicId ? ` (session ${source.fromEpicId})` : '')
+      + (proposal?.originAsk ? ` — raised while working on: ${proposal.originAsk}` : '')
       + '. Verify the claim against this codebase before approving — the sender has not read it.',
+    proposal,
+    seriesLabel: series ? `Part ${series.index} of ${series.total} · ${series.title}` : null,
   }
+}
+
+const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string')
+
+/** Defensive read of a stored proposal: null when absent or structurally
+ *  wrong; a malformed `series` alone only drops the series. */
+function normalizeProposal(raw: unknown): InboundProposal | null {
+  if (!raw || typeof raw !== 'object') return null
+  const p = raw as Record<string, unknown>
+  if (typeof p.motivation !== 'string') return null
+  if (!isStringArray(p.plan) || !isStringArray(p.acceptanceCriteria) || !isStringArray(p.outOfScope)) return null
+  const s = p.series as Record<string, unknown> | null | undefined
+  const series =
+    s && typeof s === 'object'
+    && typeof s.key === 'string' && typeof s.title === 'string'
+    && Number.isInteger(s.index) && Number.isInteger(s.total)
+      ? { key: s.key, title: s.title, index: s.index as number, total: s.total as number }
+      : null
+  return {
+    motivation: p.motivation,
+    originAsk: typeof p.originAsk === 'string' && p.originAsk ? p.originAsk : null,
+    plan: p.plan,
+    acceptanceCriteria: p.acceptanceCriteria,
+    outOfScope: p.outOfScope,
+    series,
+  }
+}
+
+export interface InboundSeriesSibling {
+  id: string
+  index: number
+  status: PromptSession['status']
+  goalText: string
+}
+
+/** Epics in `epics` that share this Epic's proposal series key, by index.
+ *  [] when the Epic has no series. Complexity: O(n log n). */
+export function inboundSeriesSiblings(
+  epic: Pick<PromptSession, 'source'>,
+  epics: ReadonlyArray<Pick<PromptSession, 'id' | 'status' | 'goalText' | 'source'>>,
+): InboundSeriesSibling[] {
+  const key = normalizeProposal(epic.source?.proposal)?.series?.key
+  if (!key) return []
+  const out: InboundSeriesSibling[] = []
+  for (const e of epics) {
+    const s = normalizeProposal(e.source?.proposal)?.series
+    if (s && s.key === key) out.push({ id: e.id, index: s.index, status: e.status, goalText: e.goalText })
+  }
+  return out.sort((a, b) => a.index - b.index)
 }

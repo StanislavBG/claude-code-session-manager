@@ -23,6 +23,15 @@ import type { EpicIntakeSection } from '../lib/epicIntake'
  *  producer: a session in ANOTHER project deposited this Epic here as a
  *  'proposed' feedback proposal (src/main/lib/crossProjectFeedback.cjs). It
  *  still runs nothing until a human here presses Approve & start. */
+export interface InboundProposal {
+  motivation: string
+  originAsk: string | null
+  plan: string[]
+  acceptanceCriteria: string[]
+  outOfScope: string[]
+  series: { key: string; title: string; index: number; total: number } | null
+}
+
 export interface EpicSource {
   producer: 'new-epic-ui' | 'scheduler-dispatch' | 'cross-project-feedback'
   prdSlug?: string
@@ -32,6 +41,8 @@ export interface EpicSource {
   fromCwd?: string
   /** 'cross-project-feedback' only — the sending Epic's id, if it had one. */
   fromEpicId?: string
+  /** 'cross-project-feedback' only — structured plan; absent on legacy Epics. */
+  proposal?: InboundProposal
 }
 
 export interface PromptSession {

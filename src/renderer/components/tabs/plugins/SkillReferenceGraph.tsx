@@ -2,8 +2,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import ForceGraph2D, { type NodeObject } from 'react-force-graph-2d'
 import type { PluginSkillEntry, SkillEdge } from '../../../lib/pluginSkills'
 
-const ACCENT = '#b85c34'
-const DIM = '#8a7a60'
+// Fallbacks only: the live colours come from the CSS custom properties below.
+const ACCENT_FALLBACK = '#b85c34'
+const DIM_FALLBACK = '#8a7a60'
+
+function readCssVar(name: string, fallback: string): string {
+  try {
+    const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+    return value || fallback
+  } catch {
+    return fallback
+  }
+}
 
 export function SkillReferenceGraph({
   skills,
@@ -16,6 +26,8 @@ export function SkillReferenceGraph({
   selectedId: string | null
   onSelect: (id: string) => void
 }) {
+  const accent = useMemo(() => readCssVar('--accent', ACCENT_FALLBACK), [])
+  const dim = useMemo(() => readCssVar('--fg-faint', DIM_FALLBACK), [])
   const containerRef = useRef<HTMLDivElement>(null)
   const [size, setSize] = useState({ width: 640, height: 420 })
 
@@ -49,7 +61,7 @@ export function SkillReferenceGraph({
         height={size.height}
         nodeId="id"
         nodeLabel="name"
-        nodeColor={(node: NodeObject) => (node.id === selectedId ? ACCENT : DIM)}
+        nodeColor={(node: NodeObject) => (node.id === selectedId ? accent : dim)}
         linkDirectionalArrowLength={4}
         linkDirectionalArrowRelPos={1}
         onNodeClick={(node: NodeObject) => onSelect(String(node.id))}

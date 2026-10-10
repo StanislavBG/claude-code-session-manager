@@ -115,3 +115,15 @@ test('htmlPath guidance lives only on project_demo_video_write', () => {
   const demo = MCP_TOOL_CATALOG.find((x) => x.name === 'project_demo_video_write');
   expect(demo.whenToUse).toContain('htmlPath');
 });
+
+test('feedback_open_session advertises the structured proposal contract', () => {
+  const tool = TOOLS.find((t) => t.name === 'feedback_open_session');
+  expect(tool.inputSchema.required).toEqual(['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body']);
+  expect(tool.inputSchema.properties.series.required).toEqual(['key', 'title', 'index', 'total']);
+  expect(tool.inputSchema.properties.plan.description).toMatch(/feature/);
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'feedback_open_session');
+  expect(entry.exampleArgs).toHaveProperty('motivation');
+  expect(entry.exampleArgs).toHaveProperty('acceptanceCriteria');
+  expect(entry.exampleArgs).toHaveProperty('plan');
+  expect(entry.exampleArgs).toHaveProperty('series');
+});

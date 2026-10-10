@@ -365,9 +365,36 @@ const TOOLS = [
           description: 'Absolute cwd of YOUR project (the sender). Must differ from toCwd.',
         },
         title: { type: 'string', description: 'One line naming the finding — becomes the receiving queue row' },
+        motivation: {
+          type: 'string',
+          description: 'WHY this is needed, in the originating human\'s terms (max 2000 chars). Lead with this — the approving human reads it first. When a request is split into a series, summarise the overall plan here.',
+        },
+        plan: {
+          type: 'array', items: { type: 'string' },
+          description: "Ordered proposed steps (max 20). REQUIRED when tag is 'feature'.",
+        },
+        acceptanceCriteria: {
+          type: 'array', items: { type: 'string' },
+          description: 'How the receiving human will know this is done (1-20 items).',
+        },
+        outOfScope: {
+          type: 'array', items: { type: 'string' },
+          description: 'Optional: what this proposal deliberately does not cover (max 20).',
+        },
+        series: {
+          type: 'object',
+          description: 'Optional: set on EVERY proposal when one request is split into several. Share the same key/title/total across them; index is this proposal\'s position.',
+          properties: {
+            key: { type: 'string', description: 'Shared kebab-case series id (max 60 chars)' },
+            title: { type: 'string', description: 'Shared series title (max 120 chars)' },
+            index: { type: 'integer', description: 'This proposal\'s 1-based position in the series' },
+            total: { type: 'integer', description: 'Number of proposals in the series (2-50)' },
+          },
+          required: ['key', 'title', 'index', 'total'],
+        },
         body: {
           type: 'string',
-          description: 'The report itself: symptom, where observed, expected behavior, suspected cause. Self-contained — the reader cannot see your project.',
+          description: 'Supporting detail: evidence, symptom, where observed, references. Self-contained — the reader cannot see your project — but no longer the whole report; motivation/plan/acceptanceCriteria carry the proposal.',
         },
         tag: {
           type: 'string',
@@ -384,7 +411,7 @@ const TOOLS = [
           description: 'Optional absolute paths worth reading, appended as Reference lines',
         },
       },
-      required: ['toCwd', 'fromCwd', 'title', 'body'],
+      required: ['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body'],
     },
   },
   {

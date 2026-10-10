@@ -88,9 +88,11 @@ export function RevokeButton({
 }
 
 export function SasBanner({
-  code, onConfirm, testId, codeTestId, confirmTestId,
+  code, onConfirm, testId, codeTestId, confirmTestId, peer = 'browser',
 }: {
   code: string
+  /** What the code is compared with: 'browser' (phone) or 'other machine' (desktop peer). */
+  peer?: string
   onConfirm: () => void
   testId?: string
   codeTestId?: string
@@ -102,7 +104,7 @@ export function SasBanner({
         <AlmanacIcon name="shield" size={20} />
       </span>
       <div className="flex-1 min-w-0 text-sm text-fg">
-        <strong className="font-semibold">Verify E2E session.</strong> Compare this code with the browser — they must match.
+        <strong className="font-semibold">Verify E2E session.</strong> Compare this code with the {peer} — they must match.
         <div data-testid={codeTestId} className="my-2 text-3xl font-mono tracking-[0.3em] text-center text-accent select-all">{code}</div>
         <p className="text-[12.5px] text-fg-faint mb-3">
           If the codes match, confirm below. Mutating commands are blocked until confirmed.

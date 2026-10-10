@@ -60,7 +60,10 @@ beforeEach(() => {
     onTokenRevoked: vi.fn(() => unsubs.revoked),
     onRevokedAll: vi.fn(() => unsubs.revokedAll),
   }
-  ;(window as unknown as { api: unknown }).api = { webRemote: api }
+  ;(window as unknown as { api: unknown }).api = {
+    webRemote: api,
+    remoteClient: { list: vi.fn(async () => []), onStatus: vi.fn(() => vi.fn()) },
+  }
   useToast.setState({ toasts: [], history: [], unreadCount: 0 })
 })
 
@@ -146,5 +149,15 @@ describe('SettingsRemote', () => {
     expect(unsubs.revoked).toHaveBeenCalled()
     expect(unsubs.revokedAll).toHaveBeenCalled()
     root = null
+  })
+
+  it('mounts Remote machines after Paired devices and before the audit log', async () => {
+    status = { ...baseStatus, enabled: true, devices: [{ deviceId: 'dev-42', deviceName: 'Phone', issuedAt: '2026-10-01T00:00:00Z' } as WebRemoteStatus['devices'][number]] }
+    await mount()
+    const device = q('settings-remote-device')!
+    const machines = q('remote-machines')!
+    const audit = q('settings-remote-audit-toggle')!
+    expect(device.compareDocumentPosition(machines) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(machines.compareDocumentPosition(audit) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 })

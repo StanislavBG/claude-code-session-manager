@@ -11,15 +11,15 @@
 
 const fsp = require('node:fs/promises');
 const path = require('node:path');
+const os = require('node:os');
 const config = require('../config.cjs');
-const { schedulerHome } = require('./schedulerPaths.cjs');
 
 const SCHEMA_VERSION = 1;
 const DEFAULTS = Object.freeze({ enabled: true, schemaVersion: SCHEMA_VERSION });
 const KNOWN_KEYS = new Set(Object.keys(DEFAULTS));
 
 function storePath() {
-  return path.join(schedulerHome(), 'updater.json');
+  return path.join(os.homedir(), '.claude', 'session-manager', 'updater.json');
 }
 
 function isValid(cfg) {

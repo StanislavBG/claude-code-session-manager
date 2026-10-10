@@ -15,6 +15,7 @@ import { EffectiveTree } from '../ui/EffectiveTree'
 import { mergeScopes, getAtPath, setAtPath } from '../../lib/mergeScopes'
 import { parseScopedJson } from '../../lib/parseScopedJson'
 import { settingsSchema } from '../../lib/settingsSchema'
+import { toast } from '../../state/toast'
 
 type PermissionList = 'allow' | 'deny' | 'ask'
 const LISTS: PermissionList[] = ['allow', 'deny', 'ask']
@@ -27,12 +28,20 @@ interface PermissionsShape {
   additionalDirectories?: string[]
 }
 
+const INVALID_JSON_MSG =
+  'This settings file has invalid JSON. Fix it in the Settings raw editor first; Permissions will not overwrite it.'
+
+/** A blank draft is a not-yet-created file ({}); anything unparseable or not a plain object is an error. */
 function parsePerms(raw: string): { perms: PermissionsShape; full: Record<string, unknown>; err: string | null } {
   if (raw.trim() === '') return { perms: {}, full: {}, err: null }
   try {
-    const full = JSON.parse(raw) as Record<string, unknown>
-    const perms = (full.permissions as PermissionsShape) ?? {}
-    return { perms, full, err: null }
+    const full: unknown = JSON.parse(raw)
+    if (full === null || typeof full !== 'object' || Array.isArray(full)) {
+      return { perms: {}, full: {}, err: 'settings file is not a JSON object' }
+    }
+    const obj = full as Record<string, unknown>
+    const perms = (obj.permissions as PermissionsShape) ?? {}
+    return { perms, full: obj, err: null }
   } catch (e) {
     return { perms: {}, full: {}, err: (e as Error).message }
   }
@@ -118,16 +127,12 @@ function PermissionsComponent() {
   const overrideInto = (path: string[], value: unknown) => {
     const target = scopePaths[scope]
     if (!target) return
-    setSaveError(null)
-    const draft = files[target]?.draftRaw ?? ''
-    let current: Record<string, unknown> = {}
-    if (draft.trim()) {
-      try {
-        current = JSON.parse(draft) as Record<string, unknown>
-      } catch {
-        current = {}
-      }
+    const { full: current, err: draftErr } = parsePerms(files[target]?.draftRaw ?? '')
+    if (draftErr) {
+      toast.error(INVALID_JSON_MSG)
+      return
     }
+    setSaveError(null)
     const nextPerms = setAtPath(current.permissions ?? {}, path, value)
     const next = { ...current, permissions: nextPerms }
     setDraft(target, JSON.stringify(next, null, 2) + '\n')
@@ -147,6 +152,10 @@ function PermissionsComponent() {
 
   const updatePerms = (next: PermissionsShape) => {
     if (!activePath) return
+    if (err) {
+      toast.error(INVALID_JSON_MSG)
+      return
+    }
     setSaveError(null)
     setDraft(activePath, serialize(full, next))
   }
@@ -228,6 +237,11 @@ function PermissionsComponent() {
         />
       ) : activePath && file ? (
         <div className="p-4 space-y-5 max-w-3xl">
+          {err && (
+            <div role="alert" className="text-xs text-red-400 border border-red-400/40 rounded px-3 py-2">
+              {INVALID_JSON_MSG} ({err})
+            </div>
+          )}
           <ModeSelector
             value={perms.defaultMode ?? 'default'}
             onChange={(mode) => updatePerms({ ...perms, defaultMode: mode })}
@@ -237,12 +251,14 @@ function PermissionsComponent() {
               key={list}
               list={list}
               rules={perms[list] ?? []}
+              disabled={!!err}
               onAdd={(v) => addRule(list, v)}
               onRemove={(i) => removeRule(list, i)}
             />
           ))}
           <AdditionalDirs
             dirs={perms.additionalDirectories ?? []}
+            disabled={!!err}
             onChange={(dirs) => updatePerms({ ...perms, additionalDirectories: dirs })}
           />
         </div>
@@ -296,9 +312,11 @@ function RuleList({
   rules,
   onAdd,
   onRemove,
+  disabled,
 }: {
   list: PermissionList
   rules: string[]
+  disabled: boolean
   onAdd: (v: string) => void
   onRemove: (i: number) => void
 }) {
@@ -315,6 +333,7 @@ function RuleList({
       <div className="flex gap-2 mb-2">
         <input
           value={input}
+          disabled={disabled}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -334,7 +353,7 @@ function RuleList({
             onAdd(input)
             setInput('')
           }}
-          disabled={!input.trim()}
+          disabled={disabled || !input.trim()}
           className="px-2.5 py-1 border border-line rounded text-xs text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-40"
         >
           add
@@ -368,8 +387,10 @@ function RuleList({
 function AdditionalDirs({
   dirs,
   onChange,
+  disabled,
 }: {
   dirs: string[]
+  disabled: boolean
   onChange: (d: string[]) => void
 }) {
   const [input, setInput] = useState('')
@@ -379,6 +400,7 @@ function AdditionalDirs({
       <div className="flex gap-2 mb-2">
         <input
           value={input}
+          disabled={disabled}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && input.trim()) {

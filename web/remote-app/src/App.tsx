@@ -180,7 +180,7 @@ function AppInner() {
           <div className="max-w-sm mx-auto text-center">
             <p className="font-serif text-xl font-semibold text-ink mb-1">Verify E2E session</p>
             <p className="text-ink-mute mb-3 text-xs">
-              Confirm the desktop (Remote tab) shows the same 6-digit code:
+              Confirm the desktop (Settings → Phone remote) shows the same 6-digit code:
             </p>
             <div className="text-3xl font-mono tracking-[0.3em] text-accent mb-4 select-all">
               {pendingSas.sas}

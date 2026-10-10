@@ -12,7 +12,7 @@ const IcoLink = ({ size = 42 }: { size?: number }) => (
 
 /**
  * Shown when signed in but no paired device is online. Generates a pairing code
- * to enter in the desktop Session Manager's Remote tab.
+ * to enter in the desktop Session Manager's Settings → Phone remote.
  */
 export default function ConnectScreen({
   socket: _socket, onRefresh,
@@ -60,8 +60,8 @@ export default function ConnectScreen({
 
       <h1 className="font-serif text-[34px] font-semibold tracking-tight text-center mt-5 mb-2">Pair this phone</h1>
       <p className="text-center text-[14.5px] text-ink-soft leading-relaxed mb-7">
-        On your desktop open <strong className="text-ink font-semibold">Configure → Remote</strong>, then enter
-        the code below and enable remote control.
+        On your desktop open <strong className="text-ink font-semibold">Settings → Phone remote</strong>, turn on
+        remote control, then click Pair Device… and enter the code below.
       </p>
 
       {/* code cells (shown once generated) */}
@@ -81,8 +81,8 @@ export default function ConnectScreen({
       {code ? (
         <ol className="text-sm text-ink-soft list-decimal list-inside space-y-1 mb-2 max-w-xs mx-auto">
           <li>Open Session Manager on your computer.</li>
-          <li>Go to the <span className="text-ink font-semibold">Remote</span> tab.</li>
-          <li>Enter this code and enable remote.</li>
+          <li>Go to <span className="text-ink font-semibold">Settings → Phone remote</span> and turn on 'Allow remote control from the web'.</li>
+          <li>Click 'Pair Device…' and enter this code.</li>
         </ol>
       ) : (
         <button

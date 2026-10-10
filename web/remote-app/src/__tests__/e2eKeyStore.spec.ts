@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 
+// Node global at test time; @types/node is not installed in this project.
+declare const Buffer: { from(data: Uint8Array): { toString(enc: string): string } };
+
 async function freshModule() {
   vi.resetModules();
   return import('../e2eKeyStore');

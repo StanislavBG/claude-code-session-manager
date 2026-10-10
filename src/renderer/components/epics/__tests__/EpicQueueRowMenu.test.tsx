@@ -89,10 +89,11 @@ function clickMenuItem(menu: HTMLElement, label: string) {
 }
 
 beforeEach(() => {
-  Object.defineProperty(navigator, 'clipboard', {
-    value: { writeText: vi.fn().mockResolvedValue(undefined) },
-    configurable: true,
-  })
+  // copyText() writes through the main-process IPC path, not navigator.clipboard.
+  ;(window as any).api = {
+    ...(window as any).api,
+    clipboard: { writeText: vi.fn().mockResolvedValue({ ok: true }) },
+  }
 })
 
 afterEach(() => {
@@ -158,7 +159,7 @@ describe('EpicQueue row menu', () => {
     clickMenuItem(menu, 'Copy session ID')
     await flushAsync(2)
 
-    expect(navigator.clipboard.writeText).toHaveBeenCalledWith('epic-copy-me')
+    expect((window as any).api.clipboard.writeText).toHaveBeenCalledWith('epic-copy-me')
   })
 
   it('Mark completed calls the store markCompleted with the epic id', () => {

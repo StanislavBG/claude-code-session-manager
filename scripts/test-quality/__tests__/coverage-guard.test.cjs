@@ -2,9 +2,9 @@
  * coverage-guard.test.cjs — end-to-end: the real CLI against commits made in a
  * detached temp worktree of HEAD.
  *
- * Fixture module: src/renderer/lib/estimateTokens.ts. It is the single
- * coverer-by-name: only src/renderer/lib/__tests__/estimateTokens.test.ts
- * mentions "estimateTokens" among test files (verified by grep).
+ * Fixture module: src/renderer/lib/compactPath.ts. It is the single
+ * coverer-by-name: only src/renderer/lib/__tests__/compactPath.test.ts
+ * mentions "compactPath" among test files (verified by grep).
  *
  * Run: timeout 400 npx vitest run scripts/test-quality/__tests__/coverage-guard.test.cjs
  */
@@ -19,8 +19,8 @@ const { execFileSync, spawnSync } = require('node:child_process');
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const CLI = path.join(REPO_ROOT, 'scripts/test-quality/coverage-guard.cjs');
-const SRC = 'src/renderer/lib/estimateTokens.ts';
-const TEST = 'src/renderer/lib/__tests__/estimateTokens.test.ts';
+const SRC = 'src/renderer/lib/compactPath.ts';
+const TEST = 'src/renderer/lib/__tests__/compactPath.test.ts';
 
 const git = (cwd, ...args) =>
   execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], {
@@ -80,7 +80,7 @@ test('deleting the only covering test fails the guard and names the module', () 
 
 test('renaming the test with identical content passes', () => {
   commitFrom(
-    () => git(wt, 'mv', TEST, TEST.replace('estimateTokens.test', 'estimateTokensRenamed.test')),
+    () => git(wt, 'mv', TEST, TEST.replace('compactPath.test', 'compactPathRenamed.test')),
     'rename test',
   );
   const r = runGuard();

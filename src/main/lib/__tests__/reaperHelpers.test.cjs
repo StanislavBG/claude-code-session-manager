@@ -678,3 +678,22 @@ describe('loadGate win32', () => {
     assert.equal(r.reason, 'loadavg-unavailable-win32');
   });
 });
+
+// ---------- finalizeOwned (family-frame 137, 2026-10-10) ----------
+
+test('dead pid + spawnJob still finalizing → skipped with a warning, not reaped', () => {
+  const jobs = [{ slug: 'merging', status: 'running', runtime: { pid: 4242 }, startedAt: agoMin(5) }];
+  const { reapable, warnings } = selectReapableJobs(jobs, NOW, {
+    pidAlive: alwaysDead, grace: GRACE, finalizeOwned: (j) => j.slug === 'merging',
+  });
+  assert.deepStrictEqual(reapable, []);
+  assert.strictEqual(warnings.length, 1);
+  assert.match(warnings[0].reason, /still finalizing/);
+});
+
+test('dead pid + finalizeOwned false → reaped as before', () => {
+  const jobs = [{ slug: 'orphan', status: 'running', runtime: { pid: 4242 }, startedAt: agoMin(5) }];
+  const { reapable } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysDead, grace: GRACE, finalizeOwned: () => false });
+  assert.strictEqual(reapable.length, 1);
+  assert.strictEqual(reapable[0].pidless, false);
+});

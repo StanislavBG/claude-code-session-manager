@@ -4,12 +4,27 @@ import { useLayout } from '../../state/layout'
 import { Badge } from '../ui/Badge'
 import { SectionLabel, PillButton, RemoteCard, RevokeButton, SasBanner, EmptyState } from './remoteUi'
 import { useRemotePeers } from './useRemotePeers'
+import { useUpdateStatus } from '../../lib/useUpdateStatus'
 import type { RemoteMachinePeer, RemoteClientStatus, RemoteClientDevice } from '../../../preload/api'
 
 const UNAVAILABLE = 'relay_client_auth_unavailable'
 const errMsg = (e: unknown) => (e as Error)?.message || String(e)
 
 const UNPAIRED_REASONS = ['relay_client_unpaired', 'token_revoked']
+
+const parseVersion = (v: string): number[] | null => {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v.trim())
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+}
+
+/** True only when both parse as major.minor.patch and `a` is strictly newer than `b`. */
+function isNewerVersion(a: string, b: string): boolean {
+  const x = parseVersion(a)
+  const y = parseVersion(b)
+  if (!x || !y) return false
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i]
+  return false
+}
 
 function MachineCard({
   peer, onConnect, onRevoke, onConfirmSas,
@@ -20,6 +35,20 @@ function MachineCard({
   onConfirmSas: (id: string) => void
 }) {
   const online = peer.status === 'authenticated'
+  const [remoteVersion, setRemoteVersion] = useState<string | null>(null)
+  const latest = useUpdateStatus()?.latest ?? null
+
+  useEffect(() => {
+    if (!online) { setRemoteVersion(null); return }
+    let cancelled = false
+    // passive display: a failed or non-string result just renders nothing
+    window.api.remoteClient.send(peer.peerId, 'cmd:app:version')
+      .then((v: unknown) => { if (!cancelled) setRemoteVersion(typeof v === 'string' ? v : null) })
+      .catch(() => { if (!cancelled) setRemoteVersion(null) })
+    return () => { cancelled = true }
+  }, [peer.peerId, online])
+
+  const updateAvailable = remoteVersion != null && latest != null && isNewerVersion(latest, remoteVersion)
   const unavailable = peer.status === 'failed' && peer.reason === UNAVAILABLE
   const connecting = peer.status === 'connecting'
   const lastSeen = new Date(peer.pairedAt).toLocaleString()
@@ -42,6 +71,16 @@ function MachineCard({
           </div>
         }
       />
+      {remoteVersion && (
+        <p data-testid="remote-machine-version" className="text-[12.5px] leading-snug text-fg-faint">
+          v{remoteVersion}
+        </p>
+      )}
+      {updateAvailable && (
+        <p data-testid="remote-machine-update-available" className="text-[12.5px] leading-snug text-fg-faint">
+          {`Update available on ${peer.machineName} (v${remoteVersion} → v${latest}) — update it on that machine`}
+        </p>
+      )}
       {unavailable && (
         <p data-testid="remote-machine-unavailable" className="text-[12.5px] leading-snug text-fg-faint">
           The bilko.run relay does not support desktop clients yet

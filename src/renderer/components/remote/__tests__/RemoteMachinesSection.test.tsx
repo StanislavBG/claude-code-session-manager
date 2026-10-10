@@ -6,6 +6,7 @@ import { act } from 'react-dom/test-utils'
 import { RemoteMachinesSection } from '../RemoteMachinesSection'
 import { useToast } from '../../../state/toast'
 import { useLayout } from '../../../state/layout'
+import { __resetUpdateStatusForTests } from '../../../lib/useUpdateStatus'
 import type { RemoteMachinePeer } from '../../../../preload/api'
 
 let container: HTMLDivElement | null = null
@@ -32,6 +33,7 @@ const click = async (el: HTMLElement | null) => {
 
 beforeEach(() => {
   peers = []
+  __resetUpdateStatusForTests()
   api = {
     list: vi.fn(async () => peers),
     connect: vi.fn(async () => ({ status: 'connecting', reason: null, sas: null })),
@@ -177,6 +179,48 @@ describe('RemoteMachinesSection', () => {
     await click(q('remote-client-add'))
     expect(api.add).toHaveBeenCalledWith('abcdef1234567890', 'Machine abcdef12')
     expect(api.list.mock.calls.length).toBeGreaterThan(1)
+  })
+
+  describe('remote version display', () => {
+    const setLatest = (latest: string | null) => {
+      ;(window as unknown as { api: { app: unknown } }).api.app = {
+        updateStatus: vi.fn(async () => ({ current: '0.109.0', latest, behind: false })),
+      }
+    }
+
+    it('shows the remote version and an update note when latest is newer', async () => {
+      setLatest('0.109.0')
+      api.send.mockImplementation(async () => '0.108.0')
+      peers = [peer({ status: 'authenticated' })]
+      await mount()
+      await act(async () => { await Promise.resolve() })
+      expect(api.send).toHaveBeenCalledWith('p1', 'cmd:app:version')
+      expect(q('remote-machine-version')!.textContent).toBe('v0.108.0')
+      const note = q('remote-machine-update-available')!
+      expect(note.textContent).toBe('Update available on Win-PC (v0.108.0 → v0.109.0) — update it on that machine')
+      expect(note.querySelector('button, a')).toBeNull()
+    })
+
+    it('shows the version but no note when versions are equal', async () => {
+      setLatest('0.108.0')
+      api.send.mockImplementation(async () => '0.108.0')
+      peers = [peer({ status: 'authenticated' })]
+      await mount()
+      await act(async () => { await Promise.resolve() })
+      expect(q('remote-machine-version')!.textContent).toBe('v0.108.0')
+      expect(q('remote-machine-update-available')).toBeNull()
+    })
+
+    it('shows neither and does not toast when the send rejects', async () => {
+      setLatest('0.109.0')
+      api.send.mockImplementation(async () => { throw new Error('boom') })
+      peers = [peer({ status: 'authenticated' })]
+      await mount()
+      await act(async () => { await Promise.resolve() })
+      expect(q('remote-machine-version')).toBeNull()
+      expect(q('remote-machine-update-available')).toBeNull()
+      expect(useToast.getState().toasts).toHaveLength(0)
+    })
   })
 
   it('token_revoked status re-shows the pairing form', async () => {

@@ -1606,6 +1606,15 @@ export interface RemoteMachinePeer {
   sas: string | null;
 }
 
+export interface RemoteClientDevice {
+  deviceId: string;
+  email: string;
+  issuedAt: string;
+  expiresAt: string;
+  isOnline: boolean;
+  devicePubKey: string;
+}
+
 export interface RemoteClientStatus {
   peerId: string;
   status: string;
@@ -2144,6 +2153,11 @@ export interface SessionManagerAPI {
     connect: (peerId: string) => Promise<{ status: string; reason: string | null; sas: string | null }>;
     confirmSas: (peerId: string) => Promise<{ ok: boolean; reason?: string }>;
     remove: (peerId: string) => Promise<{ ok: boolean }>;
+    authStatus: () => Promise<{ paired: boolean; clientId: string | null }>;
+    pair: (code: string, clientName?: string) => Promise<{ ok: boolean; clientId?: string; error?: string }>;
+    unpair: () => Promise<{ ok: boolean }>;
+    devices: () => Promise<{ ok: boolean; devices?: RemoteClientDevice[]; error?: string }>;
+    add: (deviceId: string, machineName: string) => Promise<RemoteMachinePeer>;
     send: (peerId: string, type: string, payload?: unknown) => Promise<unknown>;
     onStatus: (handler: (status: RemoteClientStatus) => void) => () => void;
     onEvent: (handler: (ev: RemoteClientEvent) => void) => () => void;

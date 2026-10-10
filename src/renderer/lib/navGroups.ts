@@ -66,6 +66,7 @@ export const NAV_ITEMS: NavGroupItem[] = [
   // per-project copy of it was a second door onto the same cross-project
   // screen. Reachable from the Home face only.
   { key: 'history',    group: 'Workspace', label: 'History',    icon: 'history',      hint: 'Spend, tokens and time across every project', faces: HOME },
+  { key: 'remote',     group: 'Workspace', label: 'Remote',     icon: 'terminal',     hint: 'Session Managers on your other computers — their projects, sessions and terminals', faces: HOME },
 
   // Configure
   { key: 'system-prompt', group: 'Configure', label: 'System Prompt', icon: 'system-prompt', hint: 'Your ~/.claude/CLAUDE.md — house rules for every session on this machine', faces: HOME },

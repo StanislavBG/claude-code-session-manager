@@ -18,6 +18,7 @@ import { NAV_GROUP_BY_KEY } from '../lib/navGroups'
 // body / recording indicator).
 const Skills = lazy(() => import('./tabs/Skills').then((m) => ({ default: m.Skills })))
 const History = lazy(() => import('./tabs/History').then((m) => ({ default: m.History })))
+const RemoteMachines = lazy(() => import('./tabs/RemoteMachines').then((m) => ({ default: m.RemoteMachines })))
 const Scheduler = lazy(() => import('./tabs/Scheduler').then((m) => ({ default: m.Scheduler })))
 const Settings = lazy(() => import('./tabs/Settings').then((m) => ({ default: m.Settings })))
 const Permissions = lazy(() => import('./tabs/Permissions').then((m) => ({ default: m.Permissions })))
@@ -57,6 +58,7 @@ interface PageConfig {
 
 const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'skills':        { title: 'Reusable instructions',     intro: 'Skills are scoped pieces of context that Claude loads on demand. Add new ones, audit what is live, or disable a skill that is misbehaving.' },
+  'remote':        { title: 'Remote machines',           intro: 'Open a Session Manager running on another computer — its projects, active sessions and a terminal. Pair or revoke machines in Settings → Phone remote.' },
   'history':       { title: 'Spend, tokens and time',    intro: 'Estimated spend, tokens, prompts and active time across every project — by project, model and day. Export any range to CSV.' },
   // 'scheduler' intentionally omitted: Scheduler owns its own full-bleed editorial header
   // (eyebrow + serif h1 + intro paragraph). Adding it here would double-render the heading.
@@ -128,6 +130,7 @@ function computeScreenComponent(active: NavKey, ctx: ScreenRenderCtx): ReactNode
     switch (active) {
       case 'skills':        return <LazyScreen><Skills /></LazyScreen>
       case 'history':       return <LazyScreen><History /></LazyScreen>
+      case 'remote':        return <LazyScreen><RemoteMachines onOpenSettings={() => ctx.onNavigate?.('settings')} /></LazyScreen>
       case 'scheduler':     return <LazyScreen><Scheduler navigate={ctx.onNavigate} /></LazyScreen>
       case 'plugins':       return <LazyScreen><Plugins /></LazyScreen>
       case 'mcp':           return <LazyScreen><McpServers /></LazyScreen>

@@ -419,6 +419,20 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       'Sort by size to find runaway transcript folders — a multi-hundred-MB project usually means many long sessions, safe to archive if you don\'t need them.',
     ],
   },
+  'remote': {
+    headline: 'Session Managers on your other computers',
+    intro:
+      'Pick a paired machine to browse its projects and active sessions, or open a terminal on it. Pairing and revoking machines happens in Settings → Phone remote.',
+    sections: [
+      {
+        title: 'Using it',
+        items: [
+          { term: 'Machines', body: 'The switcher lists every paired computer with its OS and whether it is online right now.' },
+          { term: 'Sessions / Terminal', body: 'Sessions shows what the selected machine is running; Terminal opens a shell there.' },
+        ],
+      },
+    ],
+  },
   'history': {
     headline: 'Every individual Claude session you\'ve ever run, ready to resume',
     intro:

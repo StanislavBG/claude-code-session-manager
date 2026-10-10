@@ -21,7 +21,7 @@ describe('getNavItemsForFace', () => {
   const HOME_ONLY = [
     'overview', 'plugins', 'voice', 'agent-library', 'tag-library',
     'system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings',
-    'history', 'data-model',
+    'history', 'data-model', 'remote',
   ]
   const PROJECT_ONLY = ['project-home', 'memory', 'terminal', 'scheduler']
   const BOTH = ['projects']
@@ -169,8 +169,13 @@ describe('memory is project-only', () => {
   })
 })
 
-// ('remote' nav row retired with the web-remote feature removal, 2026-08-06 —
-// the NavKey literal no longer exists, so absence is enforced by the type system.)
+describe('remote is a home-only Workspace row', () => {
+  it('NAV_ITEMS tags remote with faces: [home] and group Workspace', () => {
+    const item = NAV_ITEMS.find((i) => i.key === 'remote')
+    expect(item?.faces).toEqual(['home'])
+    expect(item?.group).toBe('Workspace')
+  })
+})
 
 describe('scheduler is project-only (removed from the Home face), retired standalone sm-config folded in here', () => {
   // Every Scheduler route is cwd-scoped (PRDs under

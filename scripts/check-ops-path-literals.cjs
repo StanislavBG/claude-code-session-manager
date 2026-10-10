@@ -71,6 +71,7 @@ const LIVE_ROOT_ALLOWLIST = new Map([
   ['src/main/lib/telemetryBacklog.cjs', 'telemetry-watermarks.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
   ['src/main/lib/telemetryClient.cjs', 'telemetry spool under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
   ['src/main/lib/updaterSettings.cjs', 'updater.json (auto-update toggle) under ~/.claude/session-manager; not a scheduler root'],
+  ['src/main/lib/updaterSettings.cjs', 'updater.json (auto-update toggle) under ~/.claude/session-manager; not a scheduler root'],
   // Tests that deliberately assert the default (unredirected) location.
   ['src/main/__tests__/heapSnapshot.test.cjs', 'asserts the default snapshot dir'],
   ['src/main/lib/__tests__/delegationReadiness.test.cjs', 'builds a fake job-worktree cwd string to classify; touches no disk'],

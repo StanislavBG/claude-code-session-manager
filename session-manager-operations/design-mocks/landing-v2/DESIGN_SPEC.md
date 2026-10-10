@@ -796,6 +796,20 @@ Claude Code on first launch. The Price tag / Copy button sections above describe
 npx layout and are superseded by `copy.json` where they differ. The end-card copy keys are
 unchanged here.
 
+## 2026-10-10 — the npx one-liner returns as the price tag's third option
+
+Owner decision: the price tag offers three ways in — Download for Mac, Download for Windows, then
+the `npx claude-code-session-manager@latest` command with its copy button. `priceTag.commandPrompt`,
+`command`, `copyLabel`, `copiedLabel`, `copyFailedLabel`, `commandNote` and
+`priceTag.aria.commandBox`, `copiedStatus`, `copyFailedStatus` are back in `copy.json`, with the
+same strings as before the 2026-10-05 removal. The installer buttons stay first and unchanged; the
+command is for visitors who already have Node 22.12+ and Claude Code (sm:`package.json` `engines.node:
+>=22.12.0`). Scope is the price tag only: the film end card, the bilko.run/projects hub card and the
+Field Manual stay installer-only, and `meta.installCommand` stays removed. The Price tag / Copy
+button sections above apply again to the command box, except that `copyFailedLabel` has no end-card
+variant. Mirrored by bilko:`src/pages/session-manager-landing/copy.ts` (Epic
+session-manager-page-add-back-the-npx-install-as-cfc175af).
+
 ## 2026-10-08 — two pages with a vertical page flip
 
 The cover was crowded, so the canvas is split into two "pages" that flip vertically like a book.

@@ -6,6 +6,7 @@
  * `~/.claude/plugins/<name>/skills/` layout, which is a legacy fallback.
  */
 import { parseSkillMeta } from './skillFrontmatter'
+import { listSkillEntries } from './listSkills'
 
 export interface PluginSkillEntry {
   id: string
@@ -57,23 +58,18 @@ export async function resolveInstalledPluginSkillsDir(
 }
 
 export async function listPluginSkills(skillsDir: string): Promise<PluginSkillEntry[]> {
-  const listed = await window.api.config.listDir(skillsDir, { dirsOnly: true })
-  const entries: PluginSkillEntry[] = []
-  for (const e of listed.entries) {
-    const skillMdPath = `${e.path}/SKILL.md`
-    const r = await window.api.config.readText(skillMdPath)
-    if (!r.exists) continue
-    const meta = parseSkillMeta(r.text)
-    entries.push({
+  const { entries } = await listSkillEntries(skillsDir, { nested: false })
+  return entries.map((e) => {
+    const meta = parseSkillMeta(e.text)
+    return {
       id: e.name,
       name: meta.name,
       description: meta.description,
-      dir: e.path,
-      path: skillMdPath,
+      dir: e.dir,
+      path: e.path,
       body: meta.body,
-    })
-  }
-  return entries
+    }
+  })
 }
 
 export interface SkillEdge {

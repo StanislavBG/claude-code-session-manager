@@ -4,6 +4,7 @@ import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { distinctPlaceholders, fillPlaceholders, type Placeholder } from '../../lib/mcpPlaceholders'
 import { useHomeDir } from '../../lib/useHomeDir'
+import { listSkillEntries } from '../../lib/listSkills'
 import { copyText } from '../../lib/clipboard'
 import { toast } from '../../state/toast'
 import { useConfig } from '../../state/config'
@@ -226,8 +227,8 @@ export function SkillsLibrary() {
 
   const refresh = async () => {
     if (!home) return
-    const r = await window.api.config.listDir(`${home}/.claude/skills`, { dirsOnly: true })
-    setInstalled(new Set(r.entries.map((e) => e.name)))
+    const { entries } = await listSkillEntries(`${home}/.claude/skills`)
+    setInstalled(new Set(entries.map((e) => e.name)))
   }
 
   useEffect(() => {

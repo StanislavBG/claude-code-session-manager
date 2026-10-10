@@ -20,14 +20,19 @@ const msg = (e: unknown) => (e instanceof Error ? e.message : String(e))
 /**
  * Walks a skills root dir (e.g. ~/.claude/skills), returning every skill
  * found — either a direct subdir containing SKILL.md, or one level deeper
- * under a namespace dir (e.g. <root>/user/<name>/SKILL.md). Shared by
+ * under a namespace dir (e.g. <root>/user/<name>/SKILL.md) unless
+ * `nested: false` (default true). The only skills-folder walker. Shared by
  * Skills.tsx (full listing) and GlobalControlsSection.tsx (count only) so
  * skill-discovery rules can't silently diverge between the two.
  *
  * Failures (listDir `ok: false`, rejected readText) are returned in `errors`
  * alongside whatever did list; callers decide how to surface them.
  */
-export async function listSkillEntries(base: string): Promise<SkillListResult> {
+export async function listSkillEntries(
+  base: string,
+  opts: { nested?: boolean } = {},
+): Promise<SkillListResult> {
+  const nested = opts.nested ?? true
   const entries: SkillEntry[] = []
   const errors: SkillListError[] = []
   const list = async (path: string) => {
@@ -58,6 +63,7 @@ export async function listSkillEntries(base: string): Promise<SkillListResult> {
       entries.push({ name: e.name, path: skillPath, dir: e.path, text: directSkill.text })
       continue
     }
+    if (!nested) continue
     for (const ne of await list(e.path)) {
       const nestedPath = `${ne.path}/SKILL.md`
       const nestedSkill = await read(nestedPath)

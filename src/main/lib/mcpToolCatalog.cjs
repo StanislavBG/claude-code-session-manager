@@ -238,15 +238,24 @@ const MCP_TOOL_CATALOG = [
       + 'opening prompt and stamped with where it came from. Session Manager performs the cross-folder '
       + 'write; you never write another project\'s files yourself.',
     whenToUse: 'Use when work in this project surfaces something that is genuinely another project\'s to fix. '
-      + 'Write the report for a reader who has never seen your project: state the symptom, where you '
-      + 'observed it, what you expected, and (if you know) the file in THEIR repo that looks responsible. '
-      + 'Never assume they can see your code.',
+      + 'Write for a human who must approve it and has never seen your project. Lead with WHY: `motivation` '
+      + 'in the originating human\'s terms. Then give the full `plan` (required for tag "feature") and '
+      + '`acceptanceCriteria`; put evidence, symptom and references in `body`. Name the file in THEIR repo '
+      + 'that looks responsible if you know it. When one request is split into several proposals, send '
+      + 'them ALL with one shared `series` {key, title, total} (plus each one\'s `index`) and summarise '
+      + 'the overall plan in each motivation.',
     whenNotToUse: 'WHEN NOT TO USE IT: for work in the project you are ALREADY in, run /develop inside the Epic you '
       + 'are already in — this tool refuses toCwd === fromCwd outright.',
     exampleArgs: {
       toCwd: '/home/bilko/Projects/other-project',
       fromCwd: '/home/bilko/Projects/session-manager',
       title: 'Cross-project contract mismatch in the shared admin API',
+      tag: 'feature',
+      motivation: 'The human wants X to work across both projects; today Y breaks because Z, so the shared admin API needs W.',
+      plan: ['Add field F to the admin API response', 'Update the validator to accept F', 'Cover F with a contract test'],
+      acceptanceCriteria: ['Admin API returns F', 'Contract test for F passes'],
+      outOfScope: ['Migrating existing records'],
+      series: { key: 'shared-admin-api-f', title: 'Shared admin API field F', index: 1, total: 2 },
       body: 'Symptom: X. Observed while doing Y in session-manager. Expected: Z. Suspected file: <path in their repo>.',
     },
     notes: 'WHAT THIS DOES NOT DO: it does not start anything, queue a PRD, or spend a token. The session '

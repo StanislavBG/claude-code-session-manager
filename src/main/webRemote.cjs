@@ -1091,6 +1091,15 @@ function getDispatchMap() {
     'cmd:sessions:load': async () =>
       sessionsStore.load(),
 
+    'cmd:sessions:list': async () => {
+      const { readActiveIndex } = require('./lib/epicMint.cjs');
+      const data = await sessionsStore.load();
+      return {
+        sessions: buildRemoteSessionList(data?.tabs ?? [], readActiveIndex),
+        activeTabId: data?.activeTabId ?? null,
+      };
+    },
+
     'cmd:sessions:save': async (payload) => {
       const parsed = schemas.sessionsPayload.parse(payload);
       return sessionsStore.save(parsed);
@@ -1153,6 +1162,9 @@ function getDispatchMap() {
 
     'cmd:app:version': async () =>
       app.getVersion(),
+
+    'cmd:app:info': async () =>
+      ({ version: app.getVersion(), platform: process.platform }),
 
     // v2 mobile: start/stop pushing live state + summary for a session.
     'cmd:session:subscribe': async (payload, reqClient) => {

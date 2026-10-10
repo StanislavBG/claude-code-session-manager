@@ -1155,9 +1155,11 @@ function validated(schema, handler) {
 //
 // Ungated READ_COMMANDS (justify each):
 //   cmd:app:version      — exposes only the app semver string; no user data.
+//   cmd:app:info         — exposes only app semver + OS platform string; no user data.
 //   cmd:session:unsubscribe — teardown lifecycle; returns nothing sensitive.
 const READ_COMMANDS = new Set([
   'cmd:app:version',
+  'cmd:app:info',
   // v2 mobile: unsubscribe is a teardown lifecycle call with no data payload.
   'cmd:session:unsubscribe',
 ]);
@@ -1165,6 +1167,8 @@ const READ_COMMANDS = new Set([
 // Sensitive reads — return user data; require SAS confirmation same as MUTATE.
 const SAS_GATED_READS = new Set([
   'cmd:sessions:load',
+  // Same data as the event:session:list push (projects + their active Epics).
+  'cmd:sessions:list',
   'cmd:history:aggregate',
   // subscribe initiates a live stream of session state/summary — sensitive.
   'cmd:session:subscribe',

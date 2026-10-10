@@ -5,6 +5,7 @@ import { facetSlice } from '../../lib/historyFacet'
 import { buildHeadline, buildProjectRows, measureValue, type Measure } from '../../lib/analyticsViewModel'
 import { buildUsageCsv } from '../../lib/usageCsv'
 import { toast } from '../../state/toast'
+import { fetchHistoryTotals } from '../../lib/historyTotals'
 import { useLayout } from '../../state/layout'
 import { useSessions } from '../../state/sessions'
 import { useKnownProjects } from '../../lib/useKnownProjects'
@@ -120,14 +121,13 @@ export function HistoryDashboard() {
   useEffect(() => {
     let cancelled = false
     setLoading(true)
-    window.api.history.dashboard({ rangeDays: range })
-      .then((r) => { if (!cancelled) { setRaw(r); setLoading(false) } })
-      .catch((e: unknown) => {
-        if (cancelled) return
-        setLoading(false)
-        toast.error(`History analytics failed to load: ${String(e)}`)
-        // Deliberately does not clear `raw` — the last good payload stays on screen.
-      })
+    fetchHistoryTotals(range).then((r) => {
+      if (cancelled) return
+      setLoading(false)
+      if (r.ok) { setRaw(r.data); return }
+      toast.error(`History analytics failed to load: ${r.error}`)
+      // Deliberately does not clear `raw` — the last good payload stays on screen.
+    })
     return () => { cancelled = true }
   }, [range, tick])
 

@@ -9,6 +9,19 @@ import { usePromptSessions } from '../../../../state/promptSessions'
 import type { ScheduleStateSnapshot } from '../../../../../preload/api'
 
 const NOW = Date.now()
+const TODAY = (() => {
+  const d = new Date(NOW)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+})()
+// 30-day totals deliberately differ from today's row: the KPI must show today only.
+const DASHBOARD = {
+  totals: { estimatedCostUsd: 99, inputTokens: 9_000_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+  days: [
+    { date: '2000-01-01', byProject: { old: { estimatedCostUsd: 90, inputTokens: 8_000_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 } } },
+    { date: TODAY, byProject: { p: { estimatedCostUsd: 8.4, inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 4_000_000, cacheCreationTokens: 0 } } },
+  ],
+}
 const job = (slug: string, status: string, extra: Record<string, unknown> = {}) => ({
   slug, title: slug, status, cwd: '/p', parallelGroup: 1, dependsOn: [], ...extra,
 })
@@ -84,9 +97,7 @@ beforeEach(() => {
   api.schedule.resume.mockResolvedValue({ ok: true })
   api.schedule.setSessionSlots.mockResolvedValue({})
   api.schedule.setConfig.mockResolvedValue({ ok: true })
-  api.history.dashboard.mockResolvedValue({
-    totals: { estimatedCostUsd: 8.4, inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 4_000_000, cacheCreationTokens: 0 },
-  })
+  api.history.dashboard.mockResolvedValue(DASHBOARD)
   ;(window as unknown as { api: unknown }).api = api
   useScheduleState.setState({ snapshot: fixture() })
   usePromptSessions.setState({ sessions: {}, events: {} })
@@ -145,7 +156,7 @@ describe('SchedulerTopBands — KPI cells', () => {
     await mount()
     expect(q('kpi-done-spend').textContent).toBe('—')
     await act(async () => {
-      resolve({ totals: { estimatedCostUsd: 8.4, inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 4_000_000, cacheCreationTokens: 0 } })
+      resolve(DASHBOARD)
       await Promise.resolve(); await Promise.resolve()
     })
     expect(q('kpi-done-spend').textContent).toBe('$8.40 · 5.1M tok')

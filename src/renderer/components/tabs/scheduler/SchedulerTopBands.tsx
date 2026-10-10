@@ -8,7 +8,7 @@ import { setSessionSlots } from '../../../lib/useSessionSlots'
 import { useDocumentVisible } from '../../../lib/useDocumentVisible'
 import { formatAgo, formatRelative } from '../../../lib/formatTime'
 import { windowKindLabel } from '../../../lib/usageWindow'
-import { withTimeout } from '../../../lib/withTimeout'
+import { fetchHistoryTotals, formatSpend, summarizeSpend } from '../../../lib/historyTotals'
 import { buildPlans, summarizeQueue } from '../../../lib/schedulerStages'
 import { computeStatus } from './computeStatus'
 import { LearningBody } from '../../LearningPanel'
@@ -127,13 +127,6 @@ function wordFor(kind: ScheduleQueueHealthVerdict['kind'] | null, paused: boolea
   return paused ? 'paused' : inFlight > 0 ? 'running' : 'idle'
 }
 
-function fmtTok(n: number): string {
-  if (n >= 1e9) return `${(n / 1e9).toFixed(1)}B`
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
-  if (n >= 1e3) return `${Math.round(n / 1e3)}k`
-  return String(n)
-}
-
 const BTN = 'px-2.5 py-1.5 rounded border border-line text-[12.5px] font-medium text-fg-dim hover:text-fg hover:bg-bg-hi disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap'
 
 // ─── Alerts — pause reason + circuit-breaker banners (full-bleed strips) ────
@@ -248,15 +241,13 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
 
   useEffect(() => {
     let alive = true
-    // Promise.resolve().then: a synchronous throw (api not ready) is swallowed too.
-    withTimeout(Promise.resolve().then(() => window.api.history.dashboard({ rangeDays: 30 })), 5_000, 'history.dashboard')
-      .then((r) => {
-        if (!alive) return
-        const t = r.totals
-        const tok = t.inputTokens + t.outputTokens + t.cacheReadTokens + t.cacheCreationTokens
-        setSpend(`$${t.estimatedCostUsd.toFixed(2)} · ${fmtTok(tok)} tok`)
-      })
-      .catch(() => { /* best-effort by design — stays '—' */ })
+    fetchHistoryTotals(30).then((r) => {
+      if (!alive || !r.ok) return // best-effort by design — stays '—'
+      const d = new Date()
+      const pad = (n: number) => String(n).padStart(2, '0')
+      const day = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+      setSpend(formatSpend(summarizeSpend(r.data, { day })))
+    })
     return () => { alive = false }
   }, [])
 

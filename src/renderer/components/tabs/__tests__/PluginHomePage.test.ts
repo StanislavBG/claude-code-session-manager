@@ -404,6 +404,114 @@ describe('Plugins drill-in page', () => {
     act(() => root.unmount())
   })
 
+  describe('manifest-declared components', () => {
+    type Api = ReturnType<typeof installWindowApiMock>
+    const jsonRes = (data: unknown) => ({ exists: true, parseError: false, data, mtimeMs: 0, error: null })
+    const fileEntry = (dir: string, name: string) => ({
+      name, path: `${dir}/${name}`, isDirectory: false, isFile: true, mtimeMs: 0, size: 0,
+    })
+
+    /** Overlay disk content for the demo plugin on top of the default mock. */
+    const overlay = (
+      api: Api,
+      disk: { manifest?: unknown; mcpJson?: unknown; dirs?: Record<string, string[]>; text?: Record<string, string> },
+    ) => {
+      const json = api.config.readJson.getMockImplementation()!
+      const list = api.config.listDir.getMockImplementation()!
+      const text = api.config.readText.getMockImplementation()!
+      api.config.readJson.mockImplementation(async (path: string) => {
+        if (disk.manifest !== undefined && path === `${PLUGIN_PATH}/.claude-plugin/plugin.json`) {
+          return jsonRes(disk.manifest) as never
+        }
+        if (disk.mcpJson !== undefined && path === `${PLUGIN_PATH}/.mcp.json`) return jsonRes(disk.mcpJson) as never
+        return json(path)
+      })
+      api.config.listDir.mockImplementation(async (path: string, opts?: { filesOnly?: boolean; dirsOnly?: boolean }) => {
+        const names = disk.dirs?.[path]
+        if (names && opts?.filesOnly) return { ok: true, error: null, entries: names.map((n) => fileEntry(path, n)) }
+        return list(path, opts)
+      })
+      api.config.readText.mockImplementation(async (path: string) => {
+        const t = disk.text?.[path]
+        if (t !== undefined) return { exists: true, text: t, mtimeMs: 0, error: null }
+        return text(path)
+      })
+    }
+
+    const openSection = async (label: string) => {
+      const root = createRoot(container)
+      await openDemoDrillIn(root)
+      const btn = Array.from(container.querySelectorAll('button')).find((b) =>
+        b.textContent?.trim().startsWith(label),
+      ) as HTMLButtonElement | undefined
+      if (btn && !btn.disabled) {
+        act(() => btn.click())
+        await flush()
+      }
+      return root
+    }
+
+    it('lists servers declared inline in plugin.json mcpServers', async () => {
+      const api = installWindowApiMock()
+      overlay(api, { manifest: { ...DEMO_MANIFEST, mcpServers: { inline: { command: 'node-inline' } } } })
+      const root = await openSection('MCP server')
+      expect(container.textContent).toContain('inline')
+      expect(container.textContent).toContain('node-inline')
+      act(() => root.unmount())
+    })
+
+    it('lists commands from a custom commands path declared in plugin.json', async () => {
+      const api = installWindowApiMock()
+      overlay(api, {
+        manifest: { ...DEMO_MANIFEST, commands: './custom-cmds' },
+        dirs: { [`${PLUGIN_PATH}/custom-cmds`]: ['deploy.md', 'notes.txt'] },
+        text: { [`${PLUGIN_PATH}/custom-cmds/deploy.md`]: '---\ndescription: Ships it.\n---\nbody\n' },
+      })
+      const root = await openSection('Commands')
+      expect(container.textContent).toContain('deploy')
+      expect(container.textContent).toContain('Ships it.')
+      expect(container.textContent).not.toContain('notes')
+      act(() => root.unmount())
+    })
+
+    it('lists servers from a bare-map .mcp.json', async () => {
+      const api = installWindowApiMock()
+      const exists = api.config.exists.getMockImplementation()!
+      api.config.exists.mockImplementation(async (p: string) => p === `${PLUGIN_PATH}/.mcp.json` || exists(p))
+      overlay(api, { mcpJson: { alpha: { command: 'run-alpha' }, beta: { url: 'https://beta.example' } } })
+      const root = await openSection('MCP server')
+      expect(container.textContent).toContain('alpha')
+      expect(container.textContent).toContain('run-alpha')
+      expect(container.textContent).toContain('beta')
+      act(() => root.unmount())
+    })
+
+    it('ignores a manifest path that escapes the plugin root, with a warning', async () => {
+      const api = installWindowApiMock()
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      overlay(api, {
+        manifest: { ...DEMO_MANIFEST, commands: ['../escape'] },
+        dirs: { [`${HOME}/.claude/plugins/escape`]: ['evil.md'] },
+      })
+      const root = await openSection('Commands')
+      expect(container.textContent).not.toContain('evil')
+      expect(api.config.listDir.mock.calls.some((c) => String(c[0]).includes('escape'))).toBe(false)
+      expect(warn).toHaveBeenCalled()
+      expect(String(warn.mock.calls[0][0])).toContain('../escape')
+      warn.mockRestore()
+      act(() => root.unmount())
+    })
+
+    it('does not crash on a wrong-typed hooks value in plugin.json', async () => {
+      const api = installWindowApiMock()
+      overlay(api, { manifest: { ...DEMO_MANIFEST, hooks: 42, commands: 7, mcpServers: 'x' } })
+      const root = await openSection('Agents')
+      expect(container.textContent).toContain('my-agent')
+      expect(toastError).not.toHaveBeenCalled()
+      act(() => root.unmount())
+    })
+  })
+
   describe('live detail reload', () => {
     const NEW_AGENT_MD = `---\nname: new-agent\ndescription: Freshly added.\n---\n`
     const DEBOUNCE_MS = 250

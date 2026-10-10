@@ -24,7 +24,11 @@ interface PluginManifest {
   homepage?: string
   repository?: string
   license?: string
-  mcpServers?: Record<string, unknown>
+  /** Component declarations: a relative path, an array of paths, or (hooks/mcpServers) an inline object. */
+  commands?: unknown
+  agents?: unknown
+  hooks?: unknown
+  mcpServers?: unknown
 }
 
 interface PluginRow {
@@ -38,6 +42,7 @@ interface PluginRow {
   monitors: number
   hooks: number
   agents: number
+  commands: number
   skills: number
   binCount: number
   hasMcp: boolean
@@ -216,6 +221,7 @@ function PluginsComponent() {
         <span className="font-mono text-fg-faint text-xs">
           {[
             r.agents > 0 ? `${r.agents} agents` : null,
+            r.commands > 0 ? `${r.commands} commands` : null,
             r.skills > 0 ? `${r.skills} skills` : null,
             r.hooks > 0 ? `${r.hooks} hooks` : null,
             r.monitors > 0 ? `${r.monitors} monitors` : null,
@@ -424,7 +430,7 @@ const COMPONENT_WATCH_SUFFIXES = [
   '.claude-plugin/plugin.json',
 ] as const
 
-type SectionKey = 'skills' | 'agents' | 'mcp' | 'hooks' | 'monitors' | 'lsp' | 'files'
+type SectionKey = 'skills' | 'agents' | 'commands' | 'mcp' | 'hooks' | 'monitors' | 'lsp' | 'files'
 
 /**
  * Full-page plugin drill-in ("mockup 2a"): one-line header, thin meta strip,
@@ -442,6 +448,7 @@ function PluginHomePage({
 }) {
   const [skills, setSkills] = useState<PluginSkillEntry[]>([])
   const [agents, setAgents] = useState<AgentEntry[]>([])
+  const [commands, setCommands] = useState<AgentEntry[]>([])
   const [mcpServers, setMcpServers] = useState<McpEntry[]>([])
   const [files, setFiles] = useState<string[]>([])
   const [active, setActive] = useState<SectionKey>('skills')
@@ -456,47 +463,28 @@ function PluginHomePage({
     if (!home) return
     const seq = ++loadSeq.current
     try {
-      const [skillsDir, agentFiles, mcpJson, binFiles, existing] = await Promise.all([
+      const { manifest } = await readPluginManifest(row.path)
+      const [skillsDir, comps, binFiles] = await Promise.all([
         resolveInstalledPluginSkillsDir(row.name, row.path, home),
-        listOrEmpty(`${row.path}/agents`, { filesOnly: true }),
-        row.hasMcp ? window.api.config.readJson(`${row.path}/.mcp.json`) : Promise.resolve(null),
+        resolvePluginComponents(row.path, manifest),
         listOrEmpty(`${row.path}/bin`, { filesOnly: true }),
-        Promise.all(
-          COMPONENT_WATCH_SUFFIXES.map(async (suffix) =>
-            (await window.api.config.exists(`${row.path}/${suffix}`)) ? `${row.path}/${suffix}` : null,
-          ),
-        ),
       ])
-
       const skillEntries = skillsDir ? await listPluginSkills(skillsDir) : []
-
-      const agentMdFiles = agentFiles.filter((f) => f.endsWith('.md'))
-      const agentReads = await Promise.all(
-        agentMdFiles.map((name) => window.api.config.readText(`${row.path}/agents/${name}`)),
+      const [agentEntries, commandEntries] = await Promise.all([
+        readMdEntries(comps.agentFiles),
+        readMdEntries(comps.commandFiles),
+      ])
+      const mcpEntries: McpEntry[] = comps.mcpServers
+      const existing = await Promise.all(
+        [...new Set([...COMPONENT_WATCH_SUFFIXES.map((x) => `${row.path}/${x}`), ...comps.sourcePaths])].map(
+          async (p) => ((await window.api.config.exists(p)) ? p : null),
+        ),
       )
-      const agentEntries: AgentEntry[] = []
-      agentMdFiles.forEach((name, i) => {
-        const r = agentReads[i]
-        if (!r.exists) return
-        const meta = parseSkillMeta(r.text)
-        agentEntries.push({ id: name, name: meta.name ?? name.replace(/\.md$/, ''), description: meta.description })
-      })
-
-      const mcpEntries: McpEntry[] = []
-      if (mcpJson && mcpJson.exists && !mcpJson.parseError && mcpJson.data && typeof mcpJson.data === 'object') {
-        const servers = (mcpJson.data as Record<string, unknown>).mcpServers
-        if (servers && typeof servers === 'object') {
-          for (const [name, def] of Object.entries(servers as Record<string, unknown>)) {
-            const command =
-              def && typeof def === 'object' ? (def as Record<string, unknown>).command : undefined
-            mcpEntries.push({ id: name, name, description: typeof command === 'string' ? command : null })
-          }
-        }
-      }
 
       if (seq !== loadSeq.current) return
       setSkills(skillEntries)
       setAgents(agentEntries)
+      setCommands(commandEntries)
       setMcpServers(mcpEntries)
       setFiles(binFiles)
       const nextWatch = existing.filter((p): p is string => p !== null)
@@ -508,6 +496,8 @@ function PluginHomePage({
             ? 'skills'
             : agentEntries.length > 0
               ? 'agents'
+              : commandEntries.length > 0
+                ? 'commands'
               : mcpEntries.length > 0
                 ? 'mcp'
                 : row.hooks > 0
@@ -525,7 +515,7 @@ function PluginHomePage({
     } finally {
       if (seq === loadSeq.current) setLoading(false)
     }
-  }, [row.path, row.name, row.hasMcp, row.hooks, row.monitors, row.hasLsp, home])
+  }, [row.path, row.name, row.hooks, row.monitors, row.hasLsp, home])
 
   useEffect(() => {
     setLoading(true)
@@ -573,6 +563,7 @@ function PluginHomePage({
   const sections: Array<{ key: SectionKey; label: string; count: number }> = [
     { key: 'skills', label: 'Skills', count: skills.length },
     { key: 'agents', label: 'Agents', count: agents.length },
+    { key: 'commands', label: 'Commands', count: commands.length },
     { key: 'mcp', label: 'MCP server', count: mcpServers.length },
     { key: 'hooks', label: 'Hooks', count: row.hooks },
     { key: 'monitors', label: 'Monitors', count: row.monitors },
@@ -692,6 +683,7 @@ function PluginHomePage({
               row={row}
               skills={skills}
               agents={agents}
+              commands={commands}
               mcpServers={mcpServers}
               files={files}
               onOpenSkill={setBrowsingSkill}
@@ -708,6 +700,7 @@ function SectionContent({
   row,
   skills,
   agents,
+  commands,
   mcpServers,
   files,
   onOpenSkill,
@@ -716,6 +709,7 @@ function SectionContent({
   row: PluginRow
   skills: PluginSkillEntry[]
   agents: AgentEntry[]
+  commands: AgentEntry[]
   mcpServers: McpEntry[]
   files: string[]
   onOpenSkill: (skill: PluginSkillEntry) => void
@@ -742,6 +736,16 @@ function SectionContent({
       <div>
         {agents.map((a, i) => (
           <ContentRow key={a.id} n={i + 1} name={a.name ?? a.id} description={a.description} />
+        ))}
+      </div>
+    )
+  }
+  if (active === 'commands') {
+    if (commands.length === 0) return <EmptyState title="no components" />
+    return (
+      <div>
+        {commands.map((c, i) => (
+          <ContentRow key={c.id} n={i + 1} name={c.name ?? c.id} description={c.description} />
         ))}
       </div>
     )
@@ -847,32 +851,16 @@ async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T)
 function failedPluginRow(e: DirEntry, error: string): PluginRow {
   return {
     name: e.name, path: e.path, mtimeMs: e.mtimeMs, hasManifest: false, manifest: null, hasLsp: false,
-    monitors: 0, hooks: 0, agents: 0, skills: 0, binCount: 0, hasMcp: false, error,
+    monitors: 0, hooks: 0, agents: 0, commands: 0, skills: 0, binCount: 0, hasMcp: false, error,
   }
 }
 
 async function inspectPluginDir(e: DirEntry): Promise<PluginRow> {
-  // Docs locate the manifest under `.claude-plugin/plugin.json`; some installs
-  // still use root-level `plugin.json` — try both, prefer the canonical path.
-  let manifestPath = `${e.path}/.claude-plugin/plugin.json`
-  let hasManifest = await window.api.config.exists(manifestPath)
-  if (!hasManifest) {
-    manifestPath = `${e.path}/plugin.json`
-    hasManifest = await window.api.config.exists(manifestPath)
-  }
-  let manifest: PluginManifest | null = null
-  if (hasManifest) {
-    const r = await window.api.config.readJson(manifestPath)
-    if (r.exists && !r.parseError && r.data && typeof r.data === 'object') {
-      manifest = r.data as PluginManifest
-    }
-  }
+  const { hasManifest, manifest } = await readPluginManifest(e.path)
 
-  const [hasLsp, hasMcp, hasMonitorsFile, hasHooksFile] = await Promise.all([
+  const [hasLsp, hasMonitorsFile] = await Promise.all([
     window.api.config.exists(`${e.path}/.lsp.json`),
-    window.api.config.exists(`${e.path}/.mcp.json`),
     window.api.config.exists(`${e.path}/monitors/monitors.json`),
-    window.api.config.exists(`${e.path}/hooks/hooks.json`),
   ])
 
   let monitors = 0
@@ -884,35 +872,11 @@ async function inspectPluginDir(e: DirEntry): Promise<PluginRow> {
     }
   }
 
-  let hooks = 0
-  if (hasHooksFile) {
-    const r = await window.api.config.readJson(`${e.path}/hooks/hooks.json`)
-    if (r.data && typeof r.data === 'object') {
-      const obj = r.data as Record<string, unknown>
-      // hooks.json mirrors settings.json's `hooks` shape: keyed by event.
-      hooks = Object.values(obj).reduce<number>((acc, ev) => {
-        if (!Array.isArray(ev)) return acc
-        return (
-          acc +
-          ev.reduce<number>(
-            (a, g) =>
-              a +
-              (Array.isArray((g as { hooks?: unknown[] }).hooks)
-                ? (g as { hooks: unknown[] }).hooks.length
-                : 0),
-            0,
-          )
-        )
-      }, 0)
-    }
-  }
-
-  const [agentsList, binList, skillsList] = await Promise.all([
-    listOrEmpty(`${e.path}/agents`, { filesOnly: true }),
+  const [comps, binList, skillsList] = await Promise.all([
+    resolvePluginComponents(e.path, manifest),
     listOrEmpty(`${e.path}/bin`, { filesOnly: true }),
     listOrEmpty(`${e.path}/skills`, { dirsOnly: true }),
   ])
-  const agents = agentsList.filter((f) => f.endsWith('.md')).length
   const binCount = binList.length
   const skills = skillsList.length
 
@@ -924,12 +888,167 @@ async function inspectPluginDir(e: DirEntry): Promise<PluginRow> {
     manifest,
     hasLsp,
     monitors,
-    hooks,
-    agents,
+    hooks: comps.hooks,
+    agents: comps.agentFiles.length,
+    commands: comps.commandFiles.length,
     skills,
     binCount,
-    hasMcp,
+    hasMcp: comps.mcpServers.length > 0,
   }
+}
+
+/** Docs locate the manifest under `.claude-plugin/plugin.json`; some installs still use root-level `plugin.json`. */
+async function readPluginManifest(root: string): Promise<{ hasManifest: boolean; manifest: PluginManifest | null }> {
+  let manifestPath = `${root}/.claude-plugin/plugin.json`
+  let hasManifest = await window.api.config.exists(manifestPath)
+  if (!hasManifest) {
+    manifestPath = `${root}/plugin.json`
+    hasManifest = await window.api.config.exists(manifestPath)
+  }
+  if (!hasManifest) return { hasManifest, manifest: null }
+  const r = await window.api.config.readJson(manifestPath)
+  const ok = r.exists && !r.parseError && r.data && typeof r.data === 'object' && !Array.isArray(r.data)
+  return { hasManifest, manifest: ok ? (r.data as PluginManifest) : null }
+}
+
+const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+
+/**
+ * Resolve a manifest-declared relative path against the plugin root. Returns null (one console.warn) when it
+ * escapes the root; absolute paths are accepted only inside the root.
+ */
+function resolveInRoot(root: string, declared: string): string | null {
+  const rel = declared.startsWith('/') ? (declared.startsWith(`${root}/`) ? declared.slice(root.length + 1) : null) : declared
+  if (rel === null) return warnEscape(declared)
+  const parts: string[] = []
+  for (const seg of rel.split('/')) {
+    if (seg === '' || seg === '.') continue
+    if (seg !== '..') parts.push(seg)
+    else if (parts.pop() === undefined) return warnEscape(declared)
+  }
+  return parts.length > 0 ? `${root}/${parts.join('/')}` : root
+}
+
+function warnEscape(declared: string): null {
+  console.warn(`[plugins] ignoring manifest path outside the plugin root: ${declared}`)
+  return null
+}
+
+/** A manifest component value as a list of path strings; wrong-typed values (and non-string items) yield none. */
+function declaredPaths(v: unknown): string[] {
+  if (typeof v === 'string') return [v]
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+}
+
+/** Server map from `{ mcpServers: {...} }` or a bare map whose every value has a `command` or `url`. */
+function parseMcpServers(data: unknown): Record<string, unknown> | null {
+  if (!isRecord(data)) return null
+  if (isRecord(data.mcpServers)) return data.mcpServers
+  const values = Object.values(data)
+  const bare = values.length > 0 && values.every((d) => isRecord(d) && (typeof d.command === 'string' || typeof d.url === 'string'))
+  return bare ? data : null
+}
+
+/** Hook-event map from a `hooks.json` body, with or without a wrapping `hooks` key. */
+function countHooks(data: unknown): number {
+  if (!isRecord(data)) return 0
+  const events = isRecord(data.hooks) ? data.hooks : data
+  return Object.values(events).reduce<number>((acc, ev) => {
+    if (!Array.isArray(ev)) return acc
+    return acc + ev.reduce<number>((a, g) => a + (isRecord(g) && Array.isArray(g.hooks) ? g.hooks.length : 0), 0)
+  }, 0)
+}
+
+interface ResolvedComponents {
+  commandFiles: string[]
+  agentFiles: string[]
+  hooks: number
+  mcpServers: McpEntry[]
+  /** Every location consulted, for the live-reload watch. */
+  sourcePaths: string[]
+}
+
+/**
+ * Components from the manifest's own declarations first, then the default locations, deduped by resolved path.
+ * Parses defensively: a malformed manifest value is ignored, never thrown.
+ */
+async function resolvePluginComponents(root: string, manifest: PluginManifest | null): Promise<ResolvedComponents> {
+  const locations = (declared: unknown, fallback: string): string[] => {
+    const out = new Set<string>()
+    for (const d of declaredPaths(declared)) {
+      const p = resolveInRoot(root, d)
+      if (p) out.add(p)
+    }
+    out.add(`${root}/${fallback}`)
+    return [...out]
+  }
+  const mdFiles = async (paths: string[]): Promise<string[]> => {
+    const out = new Set<string>()
+    for (const p of paths) {
+      if (p.endsWith('.md')) out.add(p)
+      else for (const n of await listOrEmpty(p, { filesOnly: true })) if (n.endsWith('.md')) out.add(`${p}/${n}`)
+    }
+    return [...out]
+  }
+  const readJsonData = async (p: string): Promise<unknown> => {
+    try {
+      const r = await window.api.config.readJson(p)
+      return r.exists && !r.parseError ? r.data : null
+    } catch {
+      return null
+    }
+  }
+
+  const commandPaths = locations(manifest?.commands, 'commands')
+  const agentPaths = locations(manifest?.agents, 'agents')
+  const hookDecl = manifest?.hooks
+  const hookPaths = locations(typeof hookDecl === 'string' || Array.isArray(hookDecl) ? hookDecl : undefined, 'hooks/hooks.json')
+  const mcpDecl = manifest?.mcpServers
+  const mcpPaths = locations(typeof mcpDecl === 'string' || Array.isArray(mcpDecl) ? mcpDecl : undefined, '.mcp.json')
+
+  const [commandFiles, agentFiles, hookBodies, mcpBodies] = await Promise.all([
+    mdFiles(commandPaths),
+    mdFiles(agentPaths),
+    Promise.all(hookPaths.map(readJsonData)),
+    Promise.all(mcpPaths.map(readJsonData)),
+  ])
+
+  const hooks = [...(isRecord(hookDecl) ? [hookDecl] : []), ...hookBodies].reduce<number>((n, b) => n + countHooks(b), 0)
+
+  const servers = new Map<string, McpEntry>()
+  for (const body of [...(isRecord(mcpDecl) ? [mcpDecl] : []), ...mcpBodies]) {
+    for (const [name, def] of Object.entries(parseMcpServers(body) ?? {})) {
+      if (servers.has(name)) continue
+      const command = isRecord(def) ? def.command : undefined
+      const url = isRecord(def) ? def.url : undefined
+      servers.set(name, {
+        id: name,
+        name,
+        description: typeof command === 'string' ? command : typeof url === 'string' ? url : null,
+      })
+    }
+  }
+
+  return {
+    commandFiles,
+    agentFiles,
+    hooks,
+    mcpServers: [...servers.values()],
+    sourcePaths: [...commandPaths, ...agentPaths, ...hookPaths, ...mcpPaths],
+  }
+}
+
+/** Name + description of each `.md` component file (name defaults to the file's basename). */
+async function readMdEntries(files: string[]): Promise<AgentEntry[]> {
+  const reads = await Promise.all(files.map((f) => window.api.config.readText(f)))
+  const out: AgentEntry[] = []
+  files.forEach((f, i) => {
+    if (!reads[i].exists) return
+    const base = f.slice(f.lastIndexOf('/') + 1)
+    const meta = parseSkillMeta(reads[i].text)
+    out.push({ id: f, name: meta.name ?? base.replace(/\.md$/, ''), description: meta.description })
+  })
+  return out
 }
 
 async function listOrEmpty(

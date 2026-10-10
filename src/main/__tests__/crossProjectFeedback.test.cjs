@@ -21,6 +21,7 @@ const path = require('node:path');
 const config = require('../config.cjs');
 const {
   composeFeedbackIntake,
+  resolveOriginAsk,
   validateFeedbackInput,
   openFeedbackSession,
   listFeedbackTargets,
@@ -61,6 +62,8 @@ function payload(toCwd, fromCwd, overrides = {}) {
     fromCwd,
     title: 'Relay drops the session-state frame on reconnect',
     body: 'Symptom: after a relay reconnect the first session-state frame is silently discarded.',
+    motivation: 'Phone users lose their first frame after every reconnect.',
+    acceptanceCriteria: ['First frame after reconnect is delivered'],
     ...overrides,
   };
 }
@@ -119,6 +122,182 @@ test('caps the body so one call cannot write an unbounded blob into another proj
 });
 
 // ---------------------------------------------------------------------------
+// Structured proposal contract
+// ---------------------------------------------------------------------------
+
+const SERIES = { key: 'd2d-remote', title: 'Desktop-to-desktop remote', index: 5, total: 7 };
+
+test('refuses a missing/blank motivation, naming the field', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  for (const motivation of [undefined, '   ']) {
+    const r = validateFeedbackInput(payload(to, from, { motivation }));
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe(400);
+    expect(r.error).toMatch(/motivation/);
+    expect(r.error).toMatch(/why/i);
+  }
+  expect(validateFeedbackInput(payload(to, from, { motivation: 'x'.repeat(2001) })).error).toMatch(/motivation.*2000/);
+});
+
+test('refuses empty or missing acceptanceCriteria', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  for (const acceptanceCriteria of [undefined, []]) {
+    const r = validateFeedbackInput(payload(to, from, { acceptanceCriteria }));
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe(400);
+    expect(r.error).toMatch(/acceptanceCriteria/);
+    expect(r.error).toMatch(/done|verify|accept/i);
+  }
+});
+
+test('requires a plan only when tag is feature', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  for (const plan of [undefined, []]) {
+    const r = validateFeedbackInput(payload(to, from, { tag: 'feature', plan }));
+    expect(r.ok).toBe(false);
+    expect(r.error).toMatch(/plan/);
+  }
+  expect(validateFeedbackInput(payload(to, from, { tag: 'feature', plan: ['do it'] })).ok).toBe(true);
+  expect(validateFeedbackInput(payload(to, from, { tag: 'bug' })).ok).toBe(true);
+});
+
+test('enforces list caps and non-blank string items', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  for (const field of ['plan', 'acceptanceCriteria', 'outOfScope']) {
+    const tooMany = validateFeedbackInput(payload(to, from, { [field]: Array.from({ length: 21 }, () => 'a') }));
+    expect(tooMany.ok).toBe(false);
+    expect(tooMany.error).toMatch(new RegExp(field));
+    const tooLong = validateFeedbackInput(payload(to, from, { [field]: ['x'.repeat(501)] }));
+    expect(tooLong.ok).toBe(false);
+    expect(tooLong.error).toMatch(new RegExp(field));
+    const blank = validateFeedbackInput(payload(to, from, { [field]: ['ok', '  '] }));
+    expect(blank.ok).toBe(false);
+    expect(blank.error).toMatch(new RegExp(field));
+    const nonString = validateFeedbackInput(payload(to, from, { [field]: [3] }));
+    expect(nonString.ok).toBe(false);
+  }
+});
+
+test('validates series shape', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const bad = [
+    { ...SERIES, key: 'Not Kebab' },
+    { ...SERIES, key: 'a'.repeat(61) },
+    { ...SERIES, title: '  ' },
+    { ...SERIES, title: 'x'.repeat(121) },
+    { ...SERIES, index: 0 },
+    { ...SERIES, index: 1.5 },
+    { ...SERIES, total: 1 },
+    { ...SERIES, total: 51 },
+    { ...SERIES, index: 8 },
+    'nope',
+  ];
+  for (const series of bad) {
+    const r = validateFeedbackInput(payload(to, from, { series }));
+    expect(r.ok).toBe(false);
+    expect(r.status).toBe(400);
+    expect(r.error).toMatch(/series/);
+  }
+  const ok = validateFeedbackInput(payload(to, from, { series: SERIES }));
+  expect(ok.ok).toBe(true);
+  expect(ok.value.series).toEqual(SERIES);
+});
+
+test('composeFeedbackIntake renders sections in order', () => {
+  const { openingPrompt, goalText } = composeFeedbackIntake({
+    fromCwd: '/work/sender-proj', fromEpicId: 'e1', title: 'T', body: 'FREE BODY',
+    originAsk: 'make remote work',
+    motivation: 'WHY TEXT',
+    plan: ['first', 'second'],
+    acceptanceCriteria: ['crit a', 'crit b'],
+    outOfScope: ['not this'],
+    series: SERIES,
+  });
+  const idx = [
+    'Part 5 of 7 — Desktop-to-desktop remote',
+    '## Why',
+    '## Proposed plan',
+    '## Acceptance criteria',
+    '## Out of scope',
+    '## Details',
+    'FREE BODY',
+  ].map((m) => openingPrompt.indexOf(m));
+  expect(idx.every((i) => i >= 0)).toBe(true);
+  expect([...idx].sort((a, b) => a - b)).toEqual(idx);
+  expect(openingPrompt).toContain('1. first\n2. second');
+  expect(openingPrompt).toContain('- [ ] crit a\n- [ ] crit b');
+  expect(openingPrompt).toContain('Goal: T');
+  expect(openingPrompt).toContain('sender-proj');
+  expect(openingPrompt).toContain('/work/sender-proj');
+  expect(openingPrompt).toContain('raised while working on: make remote work');
+  expect(goalText).toContain('## Why');
+  expect(goalText).toContain('FREE BODY');
+});
+
+test('composeFeedbackIntake omits empty optional sections', () => {
+  const { openingPrompt } = composeFeedbackIntake({
+    fromCwd: '/from', title: 'T', body: 'B', motivation: 'M', acceptanceCriteria: ['c'],
+  });
+  expect(openingPrompt).not.toContain('## Proposed plan');
+  expect(openingPrompt).not.toContain('## Out of scope');
+  expect(openingPrompt).not.toContain('raised while working on');
+  expect(openingPrompt).not.toMatch(/Part \d+ of/);
+  expect(openingPrompt).toContain('## Why');
+  expect(openingPrompt).toContain('## Details');
+});
+
+test('resolveOriginAsk reads the sending Epic goalText, single-line and truncated', async () => {
+  const from = await mkProject();
+  const idxPath = path.join(from, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
+  fs.mkdirSync(path.dirname(idxPath), { recursive: true });
+  fs.writeFileSync(idxPath, JSON.stringify({
+    sessions: {
+      a: { goalText: 'line one\nline two' },
+      b: { goalText: 'y'.repeat(400) },
+    },
+  }));
+  expect(resolveOriginAsk(from, 'a')).toBe('line one line two');
+  expect(resolveOriginAsk(from, 'b')).toHaveLength(300);
+  expect(resolveOriginAsk(from, 'missing')).toBeNull();
+  expect(resolveOriginAsk(from, null)).toBeNull();
+  expect(resolveOriginAsk('/definitely/not/there', 'a')).toBeNull();
+  fs.writeFileSync(idxPath, '{not json');
+  expect(resolveOriginAsk(from, 'a')).toBeNull();
+});
+
+test('openFeedbackSession stores source.proposal with originAsk from the sender Epic', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const idxPath = path.join(from, 'session-manager-operations', 'prompt-sessions', 'active-index.json');
+  fs.mkdirSync(path.dirname(idxPath), { recursive: true });
+  fs.writeFileSync(idxPath, JSON.stringify({ sessions: { 'sender-epic': { goalText: 'Ship D2D remote' } } }));
+  const calls = [];
+  const r = await openFeedbackSession(
+    payload(to, from, {
+      fromEpicId: 'sender-epic', tag: 'feature', plan: ['p1'], outOfScope: ['o1'], series: SERIES,
+    }),
+    { appendResponseEventIfKnown: async (...args) => { calls.push(args); return true; } },
+  );
+  expect(r.ok).toBe(true);
+  const epic = readActiveIndex(to).sessions[r.epicId];
+  expect(epic.source.proposal).toEqual({
+    motivation: 'Phone users lose their first frame after every reconnect.',
+    originAsk: 'Ship D2D remote',
+    plan: ['p1'],
+    acceptanceCriteria: ['First frame after reconnect is delivered'],
+    outOfScope: ['o1'],
+    series: SERIES,
+  });
+  expect(epic.openingPrompt).toContain('raised while working on: Ship D2D remote');
+  expect(calls[0][2]).toContain('Part 5 of 7');
+});
+
+// ---------------------------------------------------------------------------
 // Delivery
 // ---------------------------------------------------------------------------
 
@@ -141,7 +320,18 @@ test('delivers a PROPOSED Epic into the receiving project, never an active one',
   // And it is a valid PromptSession — the same schema a hand-created Epic
   // must satisfy, including the extended EpicSource producer.
   expect(() => assertValidPromptSession(epic)).not.toThrow();
-  expect(epic.source).toEqual({ producer: 'cross-project-feedback', fromCwd: from });
+  expect(epic.source).toEqual({
+    producer: 'cross-project-feedback',
+    fromCwd: from,
+    proposal: {
+      motivation: 'Phone users lose their first frame after every reconnect.',
+      originAsk: null,
+      plan: [],
+      acceptanceCriteria: ['First frame after reconnect is delivered'],
+      outOfScope: [],
+      series: null,
+    },
+  });
   expect(epic.tag).toBe('discussion');
   expect(epic.agentType).toBe('architect');
 });

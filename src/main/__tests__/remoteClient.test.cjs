@@ -175,12 +175,59 @@ describe('remoteClient', () => {
     await expect(client.send('p1', 'cmd:app:version', {})).rejects.toThrow('not_connected')
   })
 
-  it('default relayAuth fails with relay_client_auth_unavailable', async () => {
-    const client = createRemoteClient({ configPath: tmpConfig() })
+  it('fails with relay_client_auth_unavailable when relayAuth cannot mint a ticket', async () => {
+    const relayAuth = {
+      getBrowserTicket: async () => { throw new Error('relay_client_auth_unavailable') },
+      getDevicePubKey: async () => 'unused',
+    }
+    const client = createRemoteClient({ relayAuth, wsFactory: () => { throw new Error('no network') }, configPath: tmpConfig() })
     client.addPeer({ peerId: 'p1', deviceId: DEVICE_ID })
     const s = await client.connect('p1')
     expect(s.status).toBe('failed')
     expect(s.reason).toBe('relay_client_auth_unavailable')
+  })
+
+  function setupWithClear(agent) {
+    const clearToken = vi.fn()
+    const relayAuth = {
+      getBrowserTicket: async () => 'secret-ticket',
+      getDevicePubKey: async () => agent.kp.e2ePublicKey,
+      clearToken,
+    }
+    const client = createRemoteClient({ relayAuth, wsFactory: (u) => agent.factory(u), configPath: tmpConfig() })
+    client.addPeer({ peerId: 'p1', deviceId: DEVICE_ID })
+    return { client, clearToken }
+  }
+
+  it('close code 4001 clears the token and fails with token_revoked', async () => {
+    const agent = makeAgent({ respond: false })
+    const { client, clearToken } = setupWithClear(agent)
+    await connectToSas(client)
+    const p = client.send('p1', 'cmd:app:version', {})
+    const assertion = expect(p).rejects.toThrow('token_revoked')
+    agent.sockets[0].emit('close', 4001, Buffer.from('token_revoked'))
+    await assertion
+    expect(client.getStatus('p1').status).toBe('failed')
+    expect(client.getStatus('p1').reason).toBe('token_revoked')
+    expect(clearToken).toHaveBeenCalledTimes(1)
+  })
+
+  it('relay token_revoked error message clears the token and fails', async () => {
+    const agent = makeAgent()
+    const { client, clearToken } = setupWithClear(agent)
+    await connectToSas(client)
+    agent.sockets[0].emit('message', JSON.stringify({ type: 'error', code: 'token_revoked' }))
+    expect(client.getStatus('p1').reason).toBe('token_revoked')
+    expect(clearToken).toHaveBeenCalledTimes(1)
+  })
+
+  it('a normal 1000 close returns to idle without clearing the token', async () => {
+    const agent = makeAgent()
+    const { client, clearToken } = setupWithClear(agent)
+    await connectToSas(client)
+    agent.sockets[0].emit('close', 1000, Buffer.from(''))
+    expect(client.getStatus('p1').status).toBe('idle')
+    expect(clearToken).not.toHaveBeenCalled()
   })
 
   it('removePeer closes the socket and deletes the entry', async () => {

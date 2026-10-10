@@ -11,17 +11,15 @@ const { claudeHome } = require('./lib/schedulerPaths.cjs');
 const { writeJsonAtomicSync, readJsonOrSync } = require('./lib/atomicFs.cjs');
 const { generateE2EKeyPair, deriveSessionKey, deriveSas, encryptBox, decryptBox } = require('./lib/remoteE2eCrypto.cjs');
 const { ALLOWED_COMMANDS } = require('./ipcSchemas.cjs');
+const { relayClientAuth } = require('./lib/relayClientAuth.cjs');
 
 // Hard-coded wss:// — same relay URL as webRemote.cjs, no plaintext downgrade.
 const RELAY_WSS_URL = 'wss://bilko.run/projects/session-manager/relay';
 const SEND_TIMEOUT_MS = 15_000;
 const WS_OPEN = 1;
 
-/** Default relay auth: the bilko.run relay has no desktop-client auth yet. */
-const defaultRelayAuth = {
-  async getBrowserTicket() { throw new Error('relay_client_auth_unavailable'); },
-  async getDevicePubKey() { throw new Error('relay_client_auth_unavailable'); },
-};
+// The relay closes a revoked desktop client's socket with this code.
+const CLOSE_TOKEN_REVOKED = 4001;
 
 function defaultWsFactory(url) {
   const WebSocket = require('ws');
@@ -32,7 +30,7 @@ function defaultConfigPath() {
   return path.join(claudeHome(), 'session-manager', 'remote-peers.json');
 }
 
-function createRemoteClient({ relayAuth = defaultRelayAuth, wsFactory = defaultWsFactory, configPath } = {}) {
+function createRemoteClient({ relayAuth = relayClientAuth, wsFactory = defaultWsFactory, configPath } = {}) {
   const file = configPath || defaultConfigPath();
   /** @type {Map<string, any>} peerId -> runtime state */
   const runtime = new Map();
@@ -148,7 +146,10 @@ function createRemoteClient({ relayAuth = defaultRelayAuth, wsFactory = defaultW
     }
     if (msg.type === 'error') {
       const code = msg.code || msg.payload?.code;
-      if (code === 'token_revoked') fail(peerId, 'token_revoked');
+      if (code === 'token_revoked') {
+        try { relayAuth.clearToken?.(); } catch { /* best effort */ }
+        fail(peerId, 'token_revoked');
+      }
       return;
     }
     if (msg.type === 'auth:ok') {
@@ -230,8 +231,13 @@ function createRemoteClient({ relayAuth = defaultRelayAuth, wsFactory = defaultW
     }
     s.ws = ws;
     ws.on('message', (data) => { if (s.ws === ws) handleMessage(peerId, s, peer, data); });
-    ws.on('close', () => {
+    ws.on('close', (code) => {
       if (s.ws !== ws) return;
+      if (code === CLOSE_TOKEN_REVOKED) {
+        try { relayAuth.clearToken?.(); } catch { /* best effort */ }
+        fail(peerId, 'token_revoked');
+        return;
+      }
       s.ws = null;
       s.sessionKey = null;
       failPending(s, new Error('connection_closed'));

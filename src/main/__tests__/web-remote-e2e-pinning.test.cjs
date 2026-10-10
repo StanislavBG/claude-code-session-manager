@@ -132,7 +132,7 @@ describe('web-remote E2E SAS pinning', () => {
     expect(webRemote._internal.getE2eState().state).toBe('pending_sas')
   })
 
-  it('2) a manual confirm-sas persists the connected device\'s verifiedPeerPubKey', async () => {
+  it('2) a manual confirm-sas persists the connected device\'s verifiedPeerPubKeys entry', async () => {
     const confirmSas = handlers.get('webRemote:confirm-sas')
     expect(typeof confirmSas).toBe('function')
 
@@ -142,7 +142,7 @@ describe('web-remote E2E SAS pinning', () => {
 
     const cfg = await readConfig()
     const persisted = cfg.devices.find((d) => d.deviceId === deviceId)
-    expect(persisted.verifiedPeerPubKey).toBe(browserA.pub)
+    expect(persisted.verifiedPeerPubKeys.map((p) => p.pubKey)).toEqual([browserA.pub])
   })
 
   it('3) a second e2e:hello presenting the SAME browserPubKey auto-authenticates (no confirm-sas)', async () => {
@@ -153,7 +153,7 @@ describe('web-remote E2E SAS pinning', () => {
 
     const cfg = await readConfig()
     const device = cfg.devices.find((d) => d.deviceId === deviceId)
-    expect(device.verifiedPeerPubKey).toBe(browserA.pub)
+    expect(device.verifiedPeerPubKeys.map((p) => p.pubKey)).toEqual([browserA.pub])
 
     await webRemote._internal.handleMessage(
       JSON.stringify({ type: 'e2e:hello', id: 'm2', payload: { pubKey: browserA.pub } }),
@@ -169,7 +169,7 @@ describe('web-remote E2E SAS pinning', () => {
 
     const cfg = await readConfig()
     const device = cfg.devices.find((d) => d.deviceId === deviceId)
-    expect(device.verifiedPeerPubKey).toBe(browserA.pub) // still pinned to A, not B
+    expect(device.verifiedPeerPubKeys.map((p) => p.pubKey)).toEqual([browserA.pub]) // still pinned to A, not B
 
     await webRemote._internal.handleMessage(
       JSON.stringify({ type: 'e2e:hello', id: 'm3', payload: { pubKey: browserB.pub } }),

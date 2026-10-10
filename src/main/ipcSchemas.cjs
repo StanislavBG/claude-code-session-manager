@@ -970,6 +970,11 @@ const webRemoteRevokeDevice = z.object({
   deviceId: z.string().regex(DEVICE_ID_RE),
 }).strict();
 
+// Optional payload: omit (undefined) to confirm the single pending client.
+const webRemoteConfirmSas = z.object({
+  clientKey: z.string().max(64).optional(),
+}).strict().optional();
+
 const webRemoteAuditTail = z.object({
   lines: z.number().int().min(1).max(500).optional(),
 }).strict();
@@ -1210,6 +1215,7 @@ module.exports = {
     webRemotePair,
     webRemoteRevokeDevice,
     webRemoteAuditTail,
+    webRemoteConfirmSas,
     sessionSubscribe,
     ptySpawn,
     ptyTabId,

@@ -453,7 +453,7 @@ contextBridge.exposeInMainWorld('api', {
     },
     /** Revoke ALL paired devices and tear down every session immediately. */
     revokeAll: () => ipcRenderer.invoke('webRemote:revoke-all'),
-    confirmSas: () => ipcRenderer.invoke('webRemote:confirm-sas'),
+    confirmSas: (clientKey) => ipcRenderer.invoke('webRemote:confirm-sas', clientKey ? { clientKey } : undefined),
     /** Push event when revokeAll completes (main broadcasts webRemote:revoked-all). */
     onRevokedAll: (handler) => {
       const listener = (_e, payload) => handler(payload);

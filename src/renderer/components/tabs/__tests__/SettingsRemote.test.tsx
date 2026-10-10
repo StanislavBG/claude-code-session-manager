@@ -18,6 +18,7 @@ const baseStatus: WebRemoteStatus = {
   e2eAuthenticated: false,
   e2eState: 'idle',
   pendingSas: null,
+  clients: [],
   devices: [],
 }
 

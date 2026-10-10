@@ -31,6 +31,7 @@ const { claudeHome } = require('./lib/schedulerPaths.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
 const { summarize: _sharedSummarize } = require('./lib/summarize.cjs');
 const { makeState, confirmSas: confirmSasLogic } = require('./lib/e2eStateMachine.cjs');
+const { createClientSessions, LEGACY_CLIENT_KEY } = require('./lib/remoteClientSessions.cjs');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -86,12 +87,10 @@ let _destroyed = false; // set at app shutdown to stop reconnect loops
 
 // E2E session state — reset on each new WS connection.
 // .state: 'idle' | 'pending_sas' | 'authenticated' | 'failed'
-let _e2e = makeState();
-// Browser SPKI pubkey (base64url) that produced the current _e2e session, and the
-// deviceId it was received on — tracked so a manual SAS confirmation can pin it to
-// that device's `verifiedPeerPubKey` for auto-trust on future reconnects.
-let _e2ePeerPubKey = null;
-let _e2eDeviceId = null;
+// One record per connected client (keyed by relay-stamped fromConn, else 'legacy').
+// Each holds its own ECDH session key + SAS state, the browser pubkey that produced
+// it, and the deviceId it arrived on (for TOFU pinning on manual SAS confirmation).
+const _clients = createClientSessions();
 
 // ─── Config helpers ───────────────────────────────────────────────────────────
 
@@ -233,28 +232,54 @@ function stopAllRemotePtyStreams() {
   for (const tabId of [..._remotePtyStreams.keys()]) stopRemotePtyStream(tabId);
 }
 
-function resetE2e(state = 'idle') {
+// Tear down every client session (connection-level reset).
+function resetE2e() {
   stopAllRemotePtyStreams();
-  _e2e = makeState(state);
-  _e2ePeerPubKey = null;
-  _e2eDeviceId = null;
+  _clients.teardownAll();
+}
+
+// Mark one client's session failed without touching any other client.
+function failClient(client) {
+  client.e2e = makeState('failed');
+  client.peerPubKey = null;
+  client.deviceId = null;
+}
+
+function makeClientlessState() {
+  return { e2e: makeState() };
+}
+
+function anyAuthenticated() {
+  return _clients.authenticated().length > 0;
+}
+
+// Client the confirm-sas IPC acts on: 'legacy' if pending, else the only pending client.
+function pendingClient() {
+  const legacy = _clients.get(LEGACY_CLIENT_KEY);
+  if (legacy && legacy.e2e.state === 'pending_sas') return legacy;
+  const pending = _clients.values().filter((r) => r.e2e.state === 'pending_sas');
+  return pending.length === 1 ? pending[0] : null;
 }
 
 // ─── WebSocket lifecycle ──────────────────────────────────────────────────────
 
 // Single source of truth for the status payload shape shared by the
 // broadcast push (webRemote:status) and the get-status IPC pull — both must
-// report the same connected/e2e/device view of `cfg` + `_ws`/`_e2e` module state.
+// report the same connected/e2e/device view of `cfg` + `_ws`/`_clients` module state.
 function computeStatus(cfg) {
   const connected = _ws !== null && _ws.readyState === WebSocket.OPEN;
+  const authed = _clients.authenticated()[0] || null;
+  const pending = _clients.values().find((r) => r.e2e.state === 'pending_sas') || null;
+  const shown = authed || pending || _clients.values()[0] || null;
+  const e2eState = shown ? shown.e2e.state : 'idle';
   return {
     enabled: cfg.remoteEnabled,
     remoteControlEnabled: cfg.remoteControlEnabled ?? false,
     connected,
-    e2eActive: connected && _e2e.sessionKey !== null,
-    e2eAuthenticated: connected && _e2e.state === 'authenticated',
-    e2eState: connected ? _e2e.state : 'idle',
-    pendingSas: connected && _e2e.state === 'pending_sas' ? _e2e.pendingSas : null,
+    e2eActive: connected && _clients.values().some((r) => r.e2e.sessionKey !== null),
+    e2eAuthenticated: connected && authed !== null,
+    e2eState: connected ? e2eState : 'idle',
+    pendingSas: connected && !authed && pending ? pending.e2e.pendingSas : null,
     devices: (cfg.devices || []).map(({ deviceId, deviceName, issuedAt, lastConnectedAt }) => ({
       deviceId, deviceName, issuedAt, lastConnectedAt,
     })),
@@ -473,11 +498,17 @@ function pushEvent(type, payload) {
   if (!_ws || _ws.readyState !== WebSocket.OPEN) return;
   const inner = { type, id: crypto.randomUUID(), payload, ts: Date.now() };
   try {
-    if (_e2e.sessionKey) {
-      const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), _e2e.sessionKey);
-      _ws.send(JSON.stringify({ type: 'e2e:box', id: inner.id, payload: { nonce, ciphertext }, ts: Date.now() }));
-    } else {
-      _ws.send(JSON.stringify(inner));
+    const targets = _clients.authenticated().filter((c) => c.e2e.sessionKey);
+    if (targets.length === 0) {
+      // No E2E session anywhere → legacy plaintext; a pending-only client gets nothing.
+      if (!_clients.values().some((c) => c.e2e.sessionKey)) _ws.send(JSON.stringify(inner));
+      return;
+    }
+    for (const c of targets) {
+      const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), c.e2e.sessionKey);
+      const out = { type: 'e2e:box', id: inner.id, payload: { nonce, ciphertext }, ts: Date.now() };
+      if (c.key !== LEGACY_CLIENT_KEY) out.toConn = c.key;
+      _ws.send(JSON.stringify(out));
     }
   } catch (e) {
     logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'pushEvent failed', meta: { type, error: e?.message } });
@@ -579,7 +610,7 @@ async function pollSessionWatcher(w) {
   if (nextState && nextState !== w.state) {
     w.state = nextState;
     // Guard: don't push state if SAS not yet confirmed (watcher may outlive an auth reset).
-    if (_e2e.state === 'authenticated') {
+    if (anyAuthenticated()) {
       pushEvent('event:session:state', { tabId: w.tabId, state: w.state, since: Date.now() });
     }
   }
@@ -678,7 +709,7 @@ async function pushSessionList() {
     // A relay that completes e2e:hello before the user confirms the SAS would otherwise
     // receive the full session list immediately (same threat SAS_GATED_READS blocks for
     // cmd:sessions:load). Guard here so _lastSessionListJson is not poisoned either.
-    if (_e2e.state !== 'authenticated') return;
+    if (!anyAuthenticated()) return;
     const sessionsStore = require('./sessionsStore.cjs');
     const data = await sessionsStore.load();
     // Tabs + their ACTIVE Epics → SessionMeta. tabId === claude sessionId so it
@@ -718,7 +749,7 @@ const SUMMARY_MIN_CHARS = 280; // below this, push raw — not worth an API call
  */
 async function maybeSummarize(w) {
   // Guard: don't push summaries (session transcript content) before SAS confirmed.
-  if (_e2e.state !== 'authenticated') return;
+  if (!anyAuthenticated()) return;
   const text = w.lastAssistantText;
   if (!text) return;
   const ofMessageId = w.lastMsgId;
@@ -740,7 +771,7 @@ async function maybeSummarize(w) {
 }
 
 /**
- * Shared finish-up for any path that transitions _e2e into 'authenticated'
+ * Shared finish-up for any path that transitions a client's e2e state into 'authenticated'
  * (manual SAS confirmation or pinned-key auto-trust): log, broadcast the new
  * status, and flush the session list immediately rather than waiting for the
  * next SESSION_LIST_PUSH_MS tick.
@@ -792,6 +823,9 @@ async function handleMessage(raw, device) {
     return;
   }
 
+  // Per-client E2E record, keyed by the relay-stamped fromConn (else 'legacy').
+  const client = _clients.getOrCreate(_clients.clientKeyOf(envelope), { clientId: envelope.fromClientId ?? null });
+
   // ── E2E key exchange ───────────────────────────────────────────────────────
   // Browser sends e2e:hello with its ephemeral P-256 public key (SPKI base64url).
   // We compute the shared session key and acknowledge.
@@ -837,7 +871,7 @@ async function handleMessage(raw, device) {
     } catch (e) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'e2e:hello peer key validation failed — session dropped', meta: { error: e?.message } });
       await auditLog(new Date().toISOString(), 'e2e:hello', device.deviceId, undefined, 'error:invalid_peer_key');
-      resetE2e('failed'); // surface key-validation failure to UI — user must reconnect
+      failClient(client); // surface key-validation failure to UI — user must reconnect
       broadcastStatus();
       return;
     }
@@ -849,31 +883,31 @@ async function handleMessage(raw, device) {
       } catch (sasErr) {
         // SAS derivation failed — session cannot be verified by the user.
         // Mark failed so confirm-sas returns ok:false and the UI prompts retry.
-        resetE2e('failed');
+        failClient(client);
         logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'E2E SAS derivation failed — session marked failed', meta: { error: sasErr?.message } });
         broadcastStatus();
         return;
       }
-      _e2ePeerPubKey = browserPubKey;
-      _e2eDeviceId = device.deviceId;
+      client.peerPubKey = browserPubKey;
+      client.deviceId = device.deviceId;
       // TOFU pinning: if this exact (deviceId, browserPubKey) pair was already
       // manually SAS-confirmed once, skip pending_sas and auto-authenticate — the
       // user already verified this browser. A different/first-seen pubKey always
       // falls through to the manual pending_sas flow below, unchanged.
       if (device.verifiedPeerPubKey && device.verifiedPeerPubKey === browserPubKey) {
-        _e2e = makeState('authenticated', sessionKey, null);
+        client.e2e = makeState('authenticated', sessionKey, null);
         finalizeE2eAuthenticated('E2E session auto-authenticated — pinned browser key matched');
-        respond(id, undefined, 'e2e:ready');
+        respond(id, undefined, 'e2e:ready', client);
         return;
       }
-      _e2e = makeState('pending_sas', sessionKey, pendingSas);
+      client.e2e = makeState('pending_sas', sessionKey, pendingSas);
       logs.writeLine({ scope: 'webRemote', level: 'info', message: 'E2E session key established — SAS pending confirmation' });
       broadcastStatus();
       // Acknowledge with e2e:ready (unencrypted — session just started)
-      respond(id, undefined, 'e2e:ready');
+      respond(id, undefined, 'e2e:ready', client);
     } catch (e) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'E2E key derivation failed', meta: { error: e?.message } });
-      resetE2e('failed');
+      failClient(client);
       broadcastStatus();
     }
     return;
@@ -881,13 +915,13 @@ async function handleMessage(raw, device) {
 
   // ── Decrypt e2e:box messages ──────────────────────────────────────────────
   if (type === 'e2e:box') {
-    if (!_e2e.sessionKey) {
+    if (!client.e2e.sessionKey) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'e2e:box received but no session key — dropping' });
       return;
     }
     const { nonce, ciphertext } = payload || {};
     if (!nonce || !ciphertext) return;
-    const plaintext = decryptBox(nonce, ciphertext, _e2e.sessionKey);
+    const plaintext = decryptBox(nonce, ciphertext, client.e2e.sessionKey);
     if (!plaintext) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'e2e:box decryption failed (auth tag mismatch)' });
       return;
@@ -900,7 +934,7 @@ async function handleMessage(raw, device) {
       return;
     }
     // Dispatch as if it arrived unencrypted
-    await dispatchEnvelope(inner, device);
+    await dispatchEnvelope(inner, device, client);
     return;
   }
 
@@ -908,14 +942,14 @@ async function handleMessage(raw, device) {
   if (!type.startsWith('cmd:')) return;
   // After E2E is established, reject plaintext commands — a malicious relay cannot
   // silently downgrade the session by stripping e2e:hello (PENTEST.md §H1).
-  if (_e2e.sessionKey) {
+  if (client.e2e.sessionKey) {
     logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'plaintext cmd rejected — e2e session active' });
     return;
   }
-  await dispatchEnvelope(envelope, device);
+  await dispatchEnvelope(envelope, device, client);
 }
 
-async function dispatchEnvelope(envelope, device) {
+async function dispatchEnvelope(envelope, device, client) {
   const { type, id, payload } = envelope;
   if (typeof type !== 'string' || !type.startsWith('cmd:')) return;
 
@@ -925,21 +959,21 @@ async function dispatchEnvelope(envelope, device) {
   const cfg = await loadConfig();
   if (!cfg.remoteEnabled) {
     await auditLog(ts, type, device.deviceId, id, 'error:disabled');
-    respond(id, { error: 'rejected' }); // opaque — reason stays in audit log only
+    respond(id, { error: 'rejected' }, undefined, client); // opaque — reason stays in audit log only
     return;
   }
 
   // Allowlist check — reject unknown cmd:* types with opaque error (oracle prevention)
   if (!ALLOWED_COMMANDS.has(type)) {
     await auditLog(ts, type, device.deviceId, id, 'error:not_allowed');
-    respond(id, { error: 'rejected' });
+    respond(id, { error: 'rejected' }, undefined, client);
     return;
   }
 
   // MUTATE tier gate — write/exec commands require remoteControlEnabled=true (default false)
   if (MUTATE_COMMANDS.has(type) && !cfg.remoteControlEnabled) {
     await auditLog(ts, type, device.deviceId, id, 'error:not_allowed');
-    respond(id, { error: 'rejected' }); // opaque — reason stays in audit log only
+    respond(id, { error: 'rejected' }, undefined, client); // opaque — reason stays in audit log only
     return;
   }
 
@@ -947,9 +981,9 @@ async function dispatchEnvelope(envelope, device) {
   // user confirms the SAS on the desktop. This prevents a compromised relay
   // from exfiltrating session lists, PRDs, run logs, or transcript summaries
   // by completing the ECDH handshake without the user's knowledge.
-  if ((MUTATE_COMMANDS.has(type) || SAS_GATED_READS.has(type)) && _e2e.state !== 'authenticated') {
+  if ((MUTATE_COMMANDS.has(type) || SAS_GATED_READS.has(type)) && client.e2e.state !== 'authenticated') {
     await auditLog(ts, type, device.deviceId, id, 'error:e2e_not_authenticated');
-    respond(id, { error: 'rejected' }); // opaque — reason stays in audit log only
+    respond(id, { error: 'rejected' }, undefined, client); // opaque — reason stays in audit log only
     return;
   }
 
@@ -964,10 +998,10 @@ async function dispatchEnvelope(envelope, device) {
     result = { error: 'rejected' }; // opaque on-wire — reason stays in audit log only
   }
 
-  respond(id, result);
+  respond(id, result, undefined, client);
 }
 
-function respond(msgId, payload, typeOverride) {
+function respond(msgId, payload, typeOverride, client) {
   if (!_ws || _ws.readyState !== WebSocket.OPEN) return;
   const responseType = typeOverride || (msgId ? `resp:${msgId}` : undefined);
   if (!responseType) return;
@@ -980,18 +1014,15 @@ function respond(msgId, payload, typeOverride) {
   };
 
   try {
-    // Encrypt the response if a session key is active.
-    if (_e2e.sessionKey && !typeOverride) {
-      const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), _e2e.sessionKey);
-      _ws.send(JSON.stringify({
-        type: 'e2e:box',
-        id: msgId,
-        payload: { nonce, ciphertext },
-        ts: Date.now(),
-      }));
-    } else {
-      _ws.send(JSON.stringify(inner));
-    }
+    // Encrypt with the requesting client's key; unicast via toConn for relay-stamped clients.
+    const out = client && client.e2e.sessionKey && !typeOverride
+      ? (() => {
+          const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), client.e2e.sessionKey);
+          return { type: 'e2e:box', id: msgId, payload: { nonce, ciphertext }, ts: Date.now() };
+        })()
+      : inner;
+    if (client && client.key !== LEGACY_CLIENT_KEY) out.toConn = client.key;
+    _ws.send(JSON.stringify(out));
   } catch (e) {
     logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'respond send failed', meta: { error: e?.message } });
   }
@@ -1033,12 +1064,12 @@ function getDispatchMap() {
       const unsub = ptyManager.addOutputListener(
         tabId,
         (_id, data) => {
-          if (_e2e.state !== 'authenticated' || !loadConfigSync().remoteEnabled) return;
+          if (!anyAuthenticated() || !loadConfigSync().remoteEnabled) return;
           pushEvent('event:pty:data', { tabId, data });
         },
         (_id, info) => {
           if (_remotePtyStreams.get(tabId) === unsub) _remotePtyStreams.delete(tabId);
-          if (_e2e.state !== 'authenticated' || !loadConfigSync().remoteEnabled) return;
+          if (!anyAuthenticated() || !loadConfigSync().remoteEnabled) return;
           pushEvent('event:pty:exit', { tabId, exitCode: info?.exitCode, signal: info?.signal });
         },
       );
@@ -1239,19 +1270,20 @@ function registerRemoteHandlers() {
   // Returns ok:false if the session is not in the pending_sas state (e.g. key
   // missing, already failed, already authenticated, or reconnected).
   ipcMain.handle('webRemote:confirm-sas', async () => {
-    const { ok, error, next } = confirmSasLogic(_e2e);
+    const target = pendingClient() || _clients.get(LEGACY_CLIENT_KEY) || makeClientlessState();
+    const { ok, error, next } = confirmSasLogic(target.e2e);
     if (!ok) {
-      logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'confirm-sas rejected — wrong state', meta: { state: _e2e.state, error } });
+      logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'confirm-sas rejected — wrong state', meta: { state: target.e2e.state, error } });
       return { ok: false, error };
     }
-    _e2e = next;
+    target.e2e = next;
     // Pin this browser's pubkey to the device so future reconnects with the same
     // key auto-authenticate (see e2e:hello above) instead of re-prompting forever.
-    if (_e2ePeerPubKey && _e2eDeviceId) {
+    if (target.peerPubKey && target.deviceId) {
       try {
         const cfg = await loadConfig();
         const devices = (cfg.devices || []).map((d) =>
-          d.deviceId === _e2eDeviceId ? { ...d, verifiedPeerPubKey: _e2ePeerPubKey } : d
+          d.deviceId === target.deviceId ? { ...d, verifiedPeerPubKey: target.peerPubKey } : d
         );
         await saveConfig({ ...cfg, devices });
       } catch (e) {
@@ -1360,13 +1392,15 @@ module.exports = {
   _internal: {
     handleMessage,
     resetE2e,
-    getE2eState: () => _e2e,
+    getE2eState: (clientKey = LEGACY_CLIENT_KEY) => (_clients.get(clientKey) || { e2e: makeState() }).e2e,
   },
   __test: {
     getDispatchMap,
     buildRemoteSessionList,
     setWs: (ws) => { _ws = ws; },
-    setE2eAuthenticated: (key) => { _e2e = makeState('authenticated', key, null); },
+    setE2eAuthenticated: (key, clientKey = LEGACY_CLIENT_KEY) => {
+      _clients.getOrCreate(clientKey).e2e = makeState('authenticated', key, null);
+    },
     revokeAllDevices,
     streamCount: () => _remotePtyStreams.size,
   },

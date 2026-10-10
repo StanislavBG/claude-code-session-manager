@@ -22,11 +22,16 @@ export default function SessionNav() {
       st && st !== 'idle' && st !== 'unknown' ? 0 : 1;
     const byProject = new Map<string, SessionMeta[]>();
     for (const s of sessions) {
-      const key = projectName(s.cwd);
+      const key = s.project ?? projectName(s.cwd);
       (byProject.get(key) ?? byProject.set(key, []).get(key)!).push(s);
     }
+    const kindRank = (s: SessionMeta) => (s.kind === 'project' ? 0 : 1);
     for (const list of byProject.values()) {
-      list.sort((a, b) => liveRank(stateByTab[a.tabId]) - liveRank(stateByTab[b.tabId]));
+      list.sort(
+        (a, b) =>
+          kindRank(a) - kindRank(b) ||
+          liveRank(stateByTab[a.tabId]) - liveRank(stateByTab[b.tabId]),
+      );
     }
     return [...byProject.entries()].sort((a, b) => a[0].localeCompare(b[0]));
   }, [sessions, stateByTab]);
@@ -76,8 +81,8 @@ export default function SessionNav() {
                   >
                     <StateDot state={st} />
                     <div className="flex-1 min-w-0">
-                      <div className="text-[15px] font-semibold text-ink truncate">{s.title || projectName(s.cwd)}</div>
-                      <div className="font-mono text-[11.5px] text-ink-mute truncate">{s.tabId.slice(0, 12)}</div>
+                      <div className="text-[15px] font-semibold text-ink truncate">{s.kind === 'project' ? 'Main' : s.title || projectName(s.cwd)}</div>
+                      <div className="font-mono text-[11.5px] text-ink-mute truncate">{s.kind === 'epic' && s.tag ? s.tag : s.tabId.slice(0, 12)}</div>
                     </div>
                     <StatePill state={st} />
                   </button>

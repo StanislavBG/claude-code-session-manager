@@ -52,6 +52,11 @@ export interface SessionMeta {
   cwd?: string;
   title?: string;
   state?: SessionState | null;
+  kind?: 'project' | 'epic';
+  epicId?: string;         // epic entries: id the desktop resolves for cmd:chat:send
+  project?: string;
+  tag?: string;
+  agentType?: string;
 }
 
 export interface SessionSummary {

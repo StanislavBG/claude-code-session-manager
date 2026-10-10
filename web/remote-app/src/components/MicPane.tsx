@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RelaySocket } from '../ws';
+import { useStore } from '../store';
 
 interface Props {
   socket: RelaySocket | null;
@@ -33,12 +34,13 @@ const IcoX = () => (
 );
 
 /**
- * Pane 3: voice (Web Speech) → editable text → cmd:pty:write on the local session.
+ * Pane 3: voice (Web Speech) → editable text → cmd:chat:send on the session.
  * Falls back to a plain text box when SpeechRecognition is unavailable (iOS Safari).
  * No audio leaves the browser; STT runs in the browser. A recording indicator is
  * shown whenever the mic is live (privacy invariant).
  */
 export default function MicPane({ socket, deviceId, tabId }: Props) {
+  const sessions = useStore((st) => st.sessions);
   const [text, setText] = useState('');
   const [listening, setListening] = useState(false);
   const [sending, setSending] = useState(false);
@@ -74,10 +76,12 @@ export default function MicPane({ socket, deviceId, tabId }: Props) {
   const send = async (msg?: string) => {
     const data = (msg ?? text).trim();
     if (!data || !socket) return;
+    const s = sessions.find((x) => x.tabId === tabId);
+    if (!s) { setErr('Session no longer available'); return; }
     setSending(true);
     setErr(null);
     try {
-      await socket.sendCommand('cmd:pty:write', deviceId, { tabId, data: data + '\n' });
+      await socket.sendCommand('cmd:chat:send', deviceId, { tabId: s.epicId ?? s.tabId, prompt: data });
       setText('');
       setSheetOpen(false);
     } catch (e: any) {

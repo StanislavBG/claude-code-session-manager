@@ -1594,6 +1594,31 @@ export interface WebRemoteDevice {
   lastConnectedAt: string | null;
 }
 
+export interface RemoteMachinePeer {
+  peerId: string;
+  deviceId: string;
+  machineName: string;
+  pairedAt: string;
+  clientPublicKey: string;
+  verifiedDevicePubKey: string | null;
+  status: string;
+  reason: string | null;
+  sas: string | null;
+}
+
+export interface RemoteClientStatus {
+  peerId: string;
+  status: string;
+  reason: string | null;
+  sas: string | null;
+}
+
+export interface RemoteClientEvent {
+  peerId: string;
+  type: string;
+  payload: unknown;
+}
+
 export interface WebRemoteStatus {
   enabled: boolean;
   remoteControlEnabled: boolean;
@@ -2113,6 +2138,15 @@ export interface SessionManagerAPI {
      *  Same 5s cache as status(). Designed for a file-tree sidebar where the
      *  renderer needs per-row badges without a separate git call per file. */
     fileStatus: (cwd: string) => Promise<GitFileStatusMap>;
+  };
+  remoteClient: {
+    list: () => Promise<RemoteMachinePeer[]>;
+    connect: (peerId: string) => Promise<{ status: string; reason: string | null; sas: string | null }>;
+    confirmSas: (peerId: string) => Promise<{ ok: boolean; reason?: string }>;
+    remove: (peerId: string) => Promise<{ ok: boolean }>;
+    send: (peerId: string, type: string, payload?: unknown) => Promise<unknown>;
+    onStatus: (handler: (status: RemoteClientStatus) => void) => () => void;
+    onEvent: (handler: (ev: RemoteClientEvent) => void) => () => void;
   };
   webRemote: {
     getStatus: () => Promise<WebRemoteStatus>;

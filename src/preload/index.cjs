@@ -398,6 +398,25 @@ contextBridge.exposeInMainWorld('api', {
     status: (cwd) => ipcRenderer.invoke('git:status', { cwd }),
     fileStatus: (cwd) => ipcRenderer.invoke('git:file-status', { cwd }),
   },
+  remoteClient: {
+    /** Paired remote machines merged with live connection status. */
+    list: () => ipcRenderer.invoke('remoteClient:list'),
+    connect: (peerId) => ipcRenderer.invoke('remoteClient:connect', { peerId }),
+    /** Confirm the short authentication string matches the remote machine. */
+    confirmSas: (peerId) => ipcRenderer.invoke('remoteClient:confirm-sas', { peerId }),
+    remove: (peerId) => ipcRenderer.invoke('remoteClient:remove', { peerId }),
+    send: (peerId, type, payload) => ipcRenderer.invoke('remoteClient:send', { peerId, type, payload }),
+    onStatus: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('remoteClient:status', listener);
+      return () => ipcRenderer.removeListener('remoteClient:status', listener);
+    },
+    onEvent: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('remoteClient:event', listener);
+      return () => ipcRenderer.removeListener('remoteClient:event', listener);
+    },
+  },
   webRemote: {
     /** Current connection state (no token values). */
     getStatus: () => ipcRenderer.invoke('webRemote:get-status'),

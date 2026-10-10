@@ -129,6 +129,7 @@ const heapSnapshot = require('./heapSnapshot.cjs');
 const filesIpc = require('./files.cjs');
 const { registerDocEditHandlers, attachWindow: attachDocEditWindow } = require('./docEdit.cjs');
 const webRemote = require('./webRemote.cjs');
+const { registerRemoteClientHandlers } = require('./remoteClientIpc.cjs');
 const { listExchanges } = require('./exchanges.cjs');
 const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
 const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');
@@ -1098,6 +1099,7 @@ git.register(ipcMain);
 filesIpc.registerFilesHandlers();
 registerDocEditHandlers();
 webRemote.registerRemoteHandlers();
+registerRemoteClientHandlers(() => mainWindow);
 chatRunner.registerChatHandlers();
 
 // Direct in-process PRD authoring for a queued PromptTicket classified

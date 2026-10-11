@@ -1,18 +1,10 @@
+import { formatAgo } from '../../lib/formatTime'
 import type { BillingFetchResult } from '../../../preload/api'
-
-function formatStaleDuration(since: number): string {
-  const ms = Date.now() - since
-  if (ms < 60_000) return 'just now'
-  const m = Math.floor(ms / 60_000)
-  if (m < 60) return `${m}m ago`
-  const h = Math.floor(m / 60)
-  return `${h}h ${m % 60}m ago`
-}
 
 export function StaleChip({ since, error: _error, onRetry }: { since: number; error: string; onRetry: () => void }) {
   return (
     <div className="flex items-center justify-between mb-3 border border-yellow-800/40 rounded px-3 py-1.5 bg-yellow-950/20 text-xs text-yellow-300">
-      <span>stale · last updated {formatStaleDuration(since)}</span>
+      <span>stale · last updated {formatAgo(since, Date.now())}</span>
       <button onClick={onRetry} className="ml-3 underline hover:no-underline">Retry</button>
     </div>
   )

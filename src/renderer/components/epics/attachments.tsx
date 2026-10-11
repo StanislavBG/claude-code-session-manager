@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from '../../state/toast'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
+import { formatBytes } from '../../lib/formatBytes'
 
 export interface AttachmentItem {
   id: string
@@ -25,11 +26,6 @@ export interface AttachmentsState {
   add: (files: FileList | File[]) => void
   remove: (id: string) => void
   clear: () => void
-}
-
-function formatSize(bytes: number): string {
-  if (!bytes) return '—'
-  return bytes > 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`
 }
 
 /** Shared attach-tray state — paste/drop/file-picker references for the New
@@ -59,7 +55,7 @@ export function useAttachments(): AttachmentsState {
       return {
         id: Math.random().toString(36).slice(2),
         name: f.name || 'pasted-image.png',
-        size: formatSize(f.size),
+        size: formatBytes(f.size),
         url: f.type.startsWith('image/') ? URL.createObjectURL(f) : null,
         path: realPath || f.name || 'pasted-image.png',
         hasRealPath: Boolean(realPath),

@@ -349,6 +349,11 @@ links"), which forbids `href="/manual"` in the page and every landing file and p
 truth guard. The header is a `<header>` landmark. The S tile and ALPHA are presentational;
 ALPHA reads as the text "ALPHA".
 
+**Deviation — tip link (not in the Claude Design mock):** the header also renders
+`header.coffeeLink` linking to `header.coffeeHref` (`/coffee`, i.e. `bilko.run/coffee`), a host
+Fastify route that 302s to the live $5 Stripe payment link (Bilko PRD 1235). It is the one
+`*Href` exempt from the `/products/session-manager/` pin above; the host test skips it by key.
+
 ### Account chip
 
 - **Signed in (`<SignedIn>`):** the design's pill. `useUser()` provides

@@ -88,6 +88,7 @@ const { createBroadcastCoalescer } = require('./lib/broadcastCoalescer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');
 const reviewLadder = require('./scheduler/reviewLadder.cjs');
 const gitTreeGuard = require('./scheduler/gitTreeGuard.cjs');
+const prdPaths = require('./scheduler/prdPaths.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { appendResponseEventIfKnown, appendResponseEventWithReason } = require('./promptSessionEvents.cjs');
@@ -157,7 +158,7 @@ const queueOps = require('./queueOps.cjs');
 // Plain Node module, no Electron dependency; queuePath/prdsDir defaults already
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
-const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath, ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs } = require('./lib/prdLocations.cjs');
+const { listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath } = require('./lib/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
 const agentModelResolve = require('./lib/agentModelResolve.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/agentEffortResolve.cjs');
@@ -199,7 +200,6 @@ const adoptedRunSupervisor = require('./lib/adoptedRunSupervisor.cjs');
 const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdFrontmatter.cjs');
 const { resolveDepSlug, findNearMatches } = require('./lib/depSlugResolve.cjs');
 const { computeDispositionRewrite, mintPlanId, resolveInheritedPlanId } = require('./lib/prdDisposition.cjs');
-const { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds } = require('./lib/prdMigration.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
 
 // Captured once at module load so every run's meta sidecar can record how
@@ -532,117 +532,6 @@ function biasJobOomScore(pid) {
 // `<job.cwd>/session-manager-operations/scheduler/prds/` via prdLocations.cjs.
 
 /**
- * Every PRD-source directory currently in play: the legacy global dir (still
- * searched so a not-yet-migrated file is never invisible) plus every active
- * project's own PRDs dir. Used by scans that enumerate PRDs across projects
- * (reconcile, list-prds, lint, rescan).
- */
-function candidatePrdsDirs() {
-  return [schedulerPaths.prdsRoot(), ...resolvePrdsDirs()];
-}
-
-/**
- * Every `prds-archived/` dir across every project (the sibling-of-source
- * layout archiveCompletedPrd writes into — see that function's comment).
- * Used only by list-prds so the PRDs/Runs tabs can show an Epic's REAL
- * historical PRD count, not just its currently-pending one. Deliberately
- * excludes the flat legacy PRDS_ARCHIVE_DIR (manual `schedule:archive-prd`
- * timestamped-subdir layout) — that path is for a different, unused-by-
- * any-renderer manual archive flow, not Epic-scoped completion archiving.
- */
-function candidateArchivedPrdsDirs() {
-  return resolveArchivedPrdsDirs();
-}
-
-/**
- * Resolve an archived PRD's real terminal outcome for `schedule:list-prds`:
- * its live queue.json row (if the job hasn't aged out yet), else its
- * history.jsonl row, else 'completed' — archiveCompletedPrd only ever
- * archives a job whose effective status is 'completed' (a 'failed' job's
- * PRD source stays in the live prds/ dir), so 'completed' is a safe
- * default, not a guess; the live/history lookups are defensive in case
- * that archiving invariant ever changes. Exported as a pure function (no
- * IPC/fs) so this fallback chain is unit-testable without an Electron
- * harness.
- */
-function resolveArchivedPrdStatus(slug, liveStatusBySlug, histBySlug) {
-  const resolved = liveStatusBySlug.get(slug) ?? histBySlug.get(slug)?.status ?? 'completed';
-  return resolved === 'failed' ? 'failed' : 'completed';
-}
-
-/** The PRD-source directory for a given job cwd (falls back to DEFAULT_PROJECT_CWD). */
-function prdDirForCwd(cwd) {
-  return resolvePrdWriteDir(cwd || DEFAULT_PROJECT_CWD);
-}
-
-/**
- * Absolute path to `<job's project PRDs dir>/<job.slug>.md`. Resolves to
- * `resolvePrdWriteDir(cwd)` — the RETIRED flat
- * `<cwd>/session-manager-operations/scheduler/prds/` dir, which holds only
- * zero-byte `.reserved-NNN` stubs and no PRD source for any Epic-scoped PRD
- * (see resolveNotifyPrd's and resolveVerifyPrdPath's doc comments, PRD 985
- * and 991). Do NOT reach for this in new code — use `findPrdDir(slug)` (via
- * `resolveVerifyPrdPath`/`resolveNotifyPrd`, or directly for a fresh path)
- * instead. The one legitimate remaining caller is executeJob's `prdPath`
- * (~line 2235), which only falls back to this AFTER `findPrdDir` already
- * came up empty — a real miss, not a resolution shortcut — matching this
- * function's genuinely-legacy semantics rather than a bug. (PRD 991 also
- * removed the two verify call sites and buildInvestigationPrompt's
- * originalBody read from this list — all three now go through
- * resolveVerifyPrdPath instead.)
- */
-function prdPathForJob(job) {
-  return path.join(prdDirForCwd(job && job.cwd), `${job && job.slug}.md`);
-}
-
-/**
- * Absolute path to a job's archived-twin `<slug>.md`. Resolves to the first
- * archive dir (across the flat legacy layout and every Epic's own sibling
- * archive — see listArchivedPrdDirs) that actually contains the slug, falling
- * back to the flat `prds-archived/<slug>.md` path when none do (this fallback
- * is only ever used for its string value — logging/note text in
- * prdArchivedSkipResult — never as an existence check).
- */
-function archivedPrdPathForJob(job) {
-  const slug = job && job.slug;
-  const flatPath = path.join(prdDirForCwd(job && job.cwd), '..', 'prds-archived', `${slug}.md`);
-  for (const dir of listArchivedPrdDirs((job && job.cwd) || DEFAULT_PROJECT_CWD)) {
-    const candidate = safeSlugPathIn(dir, slug);
-    if (candidate && fs.existsSync(candidate)) return candidate;
-  }
-  return flatPath;
-}
-
-/**
- * True if a job's PRD has already been archived — in the flat legacy
- * `prds-archived/` dir OR in the Epic-scoped sibling archive dir every new
- * PRD actually lands in (archiveCompletedPrd archives into the source PRD's
- * OWN parent's prds-archived/, which for an Epic PRD is inside that Epic).
- * A queue entry whose PRD moved to either is stale — the work already
- * shipped — not a genuine missing-PRD failure.
- */
-async function archivedTwinExists(job) {
-  const slug = job && job.slug;
-  const dirs = [...listArchivedPrdDirs((job && job.cwd) || DEFAULT_PROJECT_CWD)];
-  // Epic-in-non-git-parent case (see prdLocations.ancestorEpicDirs' header
-  // comment): job.cwd's own project never sees the ancestor Epic's archive
-  // dir via listArchivedPrdDirs, so also walk up from job.cwd for this
-  // job's EXACT epicId.
-  if (job && job.cwd && job.epicId) {
-    dirs.push(...ancestorEpicArchivedPrdDirs(job.cwd, job.epicId));
-  }
-  for (const dir of dirs) {
-    const candidate = safeSlugPathIn(dir, slug);
-    if (!candidate) continue;
-    try {
-      await fsp.access(candidate);
-      return true;
-    } catch { /* not here — try the next archive dir */ }
-  }
-  return false;
-}
-
-/**
  * Build the non-failure result + run meta for a queued job whose PRD source
  * is gone. Shared by both PRD-read failure exits in executeJob so the
  * stale-skip logic isn't duplicated. Two reasons, both exitCode: 0 (no RCA
@@ -659,7 +548,7 @@ function prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd,
   const msg = reason === 'prd-missing'
     ? 'PRD source no longer exists on disk — retiring stale queue entry'
     : (() => {
-        const archivedTwin = archivedPrdPathForJob(job);
+        const archivedTwin = prdPaths.archivedPrdPathForJob(job);
         return `PRD already archived (${archivedTwin}) — work shipped; retiring stale queue entry`;
       })();
   safeLog(`[scheduler] ${msg}\n`);
@@ -670,179 +559,6 @@ function prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd,
     note: msg, startedAt, finishedAt, durationMs: 0, ...SCHEDULER_META_IDENTITY,
   });
   return { exitCode: 0, durationMs: 0, skipped: reason, note: msg, sessionId };
-}
-
-/**
- * Search every candidate PRD dir for `<slug>.md` (legacy dir first, then
- * each active project's dir). Returns the containing dir, or null if the
- * slug isn't found anywhere. Used by slug-only callers (IPC handlers) that
- * don't have a job's cwd on hand.
- */
-async function findPrdDir(slug) {
-  for (const dir of candidatePrdsDirs()) {
-    try {
-      await fsp.access(path.join(dir, `${slug}.md`));
-      return dir;
-    } catch { /* not here — try the next candidate dir */ }
-  }
-  return null;
-}
-
-/**
- * Job-aware widening of findPrdDir: tries the ordinary global candidate
- * search first (unchanged), then a stored absolute PRD path on the row (if
- * the queue schema ever carries one — checked defensively), then walks up
- * to 3 ancestor directories above `job.cwd` for that EXACT `job.epicId`'s
- * `prds` dir (prdLocations.ancestorEpicPrdDirs).
- *
- * Fixes the incident where an Epic lives in a non-git PARENT folder P
- * (P/session-manager-operations/scheduler/epics/<epicId>/prds/*.md) but its
- * PRDs' frontmatter `cwd` is the sub-repo P/repo — P is never itself a
- * tracked project cwd, so findPrdDir's candidatePrdsDirs() never visits it
- * and the job was wrongly retired as `prd-missing`. epicId is matched
- * exactly (never a glob); every path is built with path.join, never string
- * concatenation with user input.
- */
-async function findPrdDirForJob(job) {
-  const viaGlobalSearch = await findPrdDir(job && job.slug);
-  if (viaGlobalSearch) return viaGlobalSearch;
-  if (job && typeof job.prdPath === 'string' && job.prdPath) {
-    try {
-      await fsp.access(job.prdPath);
-      return path.dirname(job.prdPath);
-    } catch { /* stored path stale — fall through to the ancestor walk */ }
-  }
-  if (job && job.cwd && job.epicId) {
-    for (const dir of ancestorEpicPrdDirs(job.cwd, job.epicId)) {
-      try {
-        await fsp.access(path.join(dir, `${job.slug}.md`));
-        return dir;
-      } catch { /* not here — try the next ancestor */ }
-    }
-  }
-  return null;
-}
-
-/**
- * Resolve `<dir>/<slug>.md` for a directory already known to contain (or be
- * about to receive) the slug, and enforce path containment. Returns the
- * absolute path on success, null on slug-escape attempts. The zod schema
- * for slugs already blocks `..` because the SLUG_RE excludes `/`, but
- * defense-in-depth: a second containment check after path.resolve costs
- * nothing and catches future regex laxity.
- */
-function safeSlugPathIn(dir, slug) {
-  const resolved = path.resolve(path.join(dir, `${slug}.md`));
-  if (!resolved.startsWith(dir + path.sep)) return null;
-  return resolved;
-}
-
-/**
- * Realpath of a PRDs dir for the symlink-containment re-checks below, or null
- * when `dir` or any component between it and its project cwd (the parent of
- * `session-manager-operations`) is a symlink. Why: comparing a file's realpath
- * against the RAW dir rejected every PRD under a symlinked path (macOS tmpdir
- * /var → /private/var), but trusting realpath(dir) alone lets a rogue job swap
- * `epics/<id>/prds` for a symlink to e.g. ~/.claude and write there. Symlinks
- * ABOVE the project cwd (a symlinked home or project folder) stay allowed.
- */
-async function realPrdsDir(dir) {
-  const marker = `${path.sep}session-manager-operations${path.sep}`;
-  const idx = (dir + path.sep).lastIndexOf(marker);
-  const stop = idx === -1 ? path.dirname(dir) : dir.slice(0, idx);
-  for (let p = dir; p.length > stop.length; p = path.dirname(p)) {
-    const st = await fsp.lstat(p).catch(() => null);
-    if (st && st.isSymbolicLink()) return null;
-  }
-  try { return await fsp.realpath(dir); } catch { return null; }
-}
-
-/**
- * Locate an EXISTING `<slug>.md` across every candidate PRD dir and return
- * its safe, containment-checked absolute path — or null if the slug isn't
- * found anywhere (or would escape its containing dir).
- */
-async function safeSlugPath(slug) {
-  const dir = await findPrdDir(slug);
-  if (!dir) return null;
-  return safeSlugPathIn(dir, slug);
-}
-
-/**
- * The two distinct failure modes safeSlugPath collapses into one nullable
- * return (the defect this fixes — see the PRD that added this helper's
- * Goal): a slug that fails SCHEDULE_SLUG_RE is a caller mistake ("invalid
- * slug"), while a well-formed slug that exists in no candidate PRD dir is a
- * lookup miss ("unknown slug") — an agent retrying the first as if it were
- * the second (or vice versa) burns a turn on the wrong fix. Returns
- * `{ ok: true, path }` or `{ ok: false, reason: 'invalid-slug' | 'not-found' }`.
- * `cwd`, if given, narrows the search to that one project's own PRD dirs
- * (prdDirForCwd + its Epic-scoped dirs — same pattern as getPrdParsed);
- * omitted, it searches every candidate dir machine-wide via findPrdDir.
- */
-async function resolveSlugOrReason(slug, cwd) {
-  if (!SCHEDULE_SLUG_RE.test(slug)) return { ok: false, reason: 'invalid-slug' };
-  if (cwd) {
-    for (const dir of [prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)]) {
-      const p = safeSlugPathIn(dir, slug);
-      if (!p) continue;
-      try {
-        await fsp.access(p);
-        return { ok: true, path: p };
-      } catch { /* not in this dir — try the next candidate */ }
-    }
-    return { ok: false, reason: 'not-found' };
-  }
-  const dir = await findPrdDir(slug);
-  if (!dir) return { ok: false, reason: 'not-found' };
-  const p = safeSlugPathIn(dir, slug);
-  if (!p) return { ok: false, reason: 'not-found' };
-  return { ok: true, path: p };
-}
-
-/**
- * Shared row-match predicate for a reset-job request: slugs carry no cwd
- * salt, so two different projects can independently produce the identical
- * slug. Both the renderer-facing `schedule:reset-job` IPC handler and
- * remote.resetJob (admin/MCP) go through this one predicate so a cwd-bearing
- * caller always resets THAT project's job, never just any row matching the
- * string.
- */
-function jobMatchesSlugAndCwd(j, slug, cwd) {
-  return j.slug === slug && (!cwd || j.cwd === cwd);
-}
-
-/** Actionable message for `resolveSlugOrReason`'s 'not-found' reason. */
-function unknownSlugMessage(slug) {
-  return `unknown slug "${slug}": no PRD file with that name in any known project — call scheduler_list_prds (optionally with cwd) to see what exists`;
-}
-
-/**
- * Move a completed job's `<slug>.md` out of its PRD dir into that dir's
- * sibling `prds-archived/`, so a finished slug can't be re-fired by the
- * scheduler. Sibling-of-source (not the hard-coded legacy PRDS_ARCHIVE_DIR)
- * so a per-project PRD (`<cwd>/session-manager-operations/scheduler/prds/`)
- * archives into that SAME project's `prds-archived/`, not the global legacy
- * one — PRDS_ARCHIVE_DIR only happens to coincide with this for the legacy
- * PRDS_DIR. Mirrors the `schedule:clear-queue` archive logic (same
- * containment check). Non-throwing: a missing source file (already archived
- * or already gone) is a silent no-op, and any other error is logged as a
- * warning — an archive failure must never break job-completion bookkeeping.
- */
-async function archiveCompletedPrd(slug, cwd) {
-  try {
-    const srcDir = (await findPrdDir(slug)) ?? prdDirForCwd(cwd);
-    const src = safeSlugPathIn(srcDir, slug);
-    if (!src) return;
-    const archiveDir = path.join(srcDir, '..', 'prds-archived');
-    await fsp.mkdir(archiveDir, { recursive: true });
-    const dst = path.join(archiveDir, `${slug}.md`);
-    await fsp.rename(src, dst);
-  } catch (e) {
-    if (e?.code !== 'ENOENT') {
-      logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'archiveCompletedPrd: rename failed', meta: { slug, error: e?.message } });
-    }
-  }
 }
 
 /**
@@ -900,169 +616,6 @@ function ensureDirs() {
       write: (abs, text) => config.writeTextAtomic(abs, text, { writer: 'scheduler' }),
     }).catch(() => { /* non-fatal, same as below */ });
   } catch { /* non-fatal: the guide is a convenience, not load-bearing for a run */ }
-}
-
-/**
- * One-time, idempotent migration (PRD 808): move every PRD source .md file
- * still sitting in the legacy global PRDS_DIR into its own project's
- * `<cwd>/session-manager-operations/scheduler/prds/`, based on that PRD's
- * own frontmatter `cwd`. Runs at every boot — a no-op fs.readdir once
- * nothing is left to move. Files migratePrds couldn't resolve (missing/
- * unparseable cwd, cwd not on disk) are left in place and logged as a
- * warning — never silently dropped — so a human can fix the frontmatter.
- */
-/**
- * consolidateAllFlatPrds(cwds) — run consolidateFlatPrds() over every given
- * project cwd, logging outcomes. Called from TWO places: once at boot (over
- * every historical project, via runPrdMigration below) AND at the top of
- * every reconcile() call (over every project reconcile itself would
- * otherwise scan), BEFORE reconcile scans the flat dir for PRD sources. The
- * reconcile()-level call is what makes "anything written to the retired flat
- * prds/ dir is swept into prds-archived/ without being executed" actually
- * true regardless of which of reconcile's several callers (tickQueue's poll,
- * job completion, the schedule:rescan/schedule:adopt-prd IPC handlers,
- * broadcast()'s coalescer, rescheduleTimer) triggers the pass — schedule:state
- * no longer reconciles on read. A PRD dropped in the flat dir has no
- * queue row yet at that point, so it is never in LIVE_JOB_STATUSES and this
- * sweep archives it before reconcile can ever turn it into a pending job.
- */
-async function consolidateAllFlatPrds(cwds, skipCwds) {
-  for (const cwd of cwds) {
-    if (skipCwds?.has(cwd)) continue; // torn shard: its PRDs are not ours to touch this pass
-    try {
-      const c = await consolidateFlatPrds(cwd);
-      if (c.moved > 0) {
-        console.log(`[scheduler] flat-PRD consolidation: archived ${c.moved} file(s) in ${cwd}`);
-      }
-      for (const f of c.failed) {
-        logs.writeLine({
-          level: 'warn', scope: 'scheduler',
-          message: `flat-PRD consolidation: could not archive ${f.file}`,
-          meta: { cwd, reason: f.reason },
-        });
-      }
-      // Deliberately left behind because a live job still points at them
-      // (PRD 992). Logged so a permanently-stuck flat PRD is visible rather
-      // than looking like a clean consolidation.
-      for (const s of c.skipped ?? []) {
-        logs.writeLine({
-          level: 'info', scope: 'scheduler',
-          message: `flat-PRD consolidation: left ${s.file} in place`,
-          meta: { cwd, reason: s.reason },
-        });
-      }
-    } catch (e) {
-      logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'flat-PRD consolidation failed', meta: { cwd, error: e?.message } });
-    }
-  }
-}
-
-async function runPrdMigration() {
-  let result;
-  try {
-    result = await migratePrds(schedulerPaths.prdsRoot());
-  } catch (e) {
-    logs.writeLine({ level: 'error', scope: 'scheduler', message: 'PRD migration failed', meta: { error: e?.message } });
-    return null;
-  }
-  console.log(`[scheduler] PRD migration: moved ${result.moved}, skipped ${result.skipped}`);
-  if (result.unresolved.length > 0) {
-    logs.writeLine({
-      level: 'warn',
-      scope: 'scheduler',
-      message: `PRD migration: ${result.unresolved.length} file(s) left in legacy dir`,
-      meta: { legacyDir: schedulerPaths.prdsRoot(), unresolved: result.unresolved },
-    });
-    for (const u of result.unresolved) {
-      console.warn(`[scheduler] PRD migration: left ${u.file} in legacy dir (${u.reason})`);
-    }
-  }
-
-  // Phase 2 (2026-07-31 domain-model decision): the flat per-project
-  // `scheduler/prds/` dir is retired — new PRDs are epic-scoped, and anything
-  // still sitting flat consolidates into `prds-archived/` for later special
-  // processing. Queue rows for moved files are reaped by the archived-twin
-  // retirement. Idempotent per project; failures are logged, never fatal.
-  // (This boot-time pass is redundant with the one reconcile() now also runs
-  // on every pass, but stays here so a fresh boot's very first log line
-  // still reports the initial sweep — see consolidateAllFlatPrds's own
-  // comment for why reconcile() is the load-bearing call site.)
-  //
-  // Deferred off scheduler.init()'s synchronous critical path: allProjectCwds()
-  // is a synchronous ~270ms directory scan, and awaiting it inline here
-  // competed with the renderer's first IPC round trips (schedule.state,
-  // billing.fetch, teams.list) for the event loop during boot. Dropping the
-  // await doesn't weaken the consolidation guarantee — consolidateAllFlatPrds
-  // also runs at the top of every reconcile() (see its own comment above),
-  // and a flat PRD can only ever execute via tickQueue, which always
-  // reconciles first, so nothing dropped in the flat dir can run before a
-  // reconcile() pass sweeps it regardless of whether this boot-time pass has
-  // finished yet.
-  setImmediate(() => {
-    consolidateAllFlatPrds(allProjectCwds()).catch((e) => {
-      logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'deferred flat-PRD consolidation failed', meta: { error: e?.message } });
-    });
-  });
-
-  // Rollout migration for the PRD-authoring-lockdown feature: stamp every
-  // pre-existing PRD as legacy-adopted BEFORE reconcile() ever runs its
-  // provenance gate against it. Must run every boot (idempotent, cheap
-  // scan-and-skip) rather than once — a project opened for the first time
-  // after this shipped still has pre-existing unstamped PRDs the very first
-  // time reconcile() sees them.
-  try {
-    const adopted = await legacyAdoptExistingPrds();
-    if (adopted.stamped > 0) {
-      console.log(`[scheduler] legacy-adopt migration: stamped ${adopted.stamped} pre-existing PRD(s) as createdVia=legacy-adopted`);
-    }
-    for (const f of adopted.failed) {
-      logs.writeLine({ level: 'warn', scope: 'scheduler', message: 'legacy-adopt migration: could not stamp PRD', meta: f });
-    }
-  } catch (e) {
-    logs.writeLine({ level: 'error', scope: 'scheduler', message: 'legacy-adopt migration failed', meta: { error: e?.message } });
-  }
-
-  return result;
-}
-
-// Matches only numbered timestamp backups (queue.json.bak-<epoch>), not the
-// bare `queue.json.bak` single-shot copy some older code paths left behind.
-const QUEUE_BAK_RE = /^queue\.json\.bak-\d+$/;
-const QUEUE_BAK_KEEP = 5;
-
-/**
- * Sweeps accumulated queue.json.bak-<epoch> files down to the newest
- * QUEUE_BAK_KEEP, deleting the rest. Runs at boot. `entries` comes from
- * fs.readdir(ROOT), so every candidate path is already contained in ROOT.
- */
-async function sweepQueueBackups() {
-  let entries;
-  try {
-    entries = await fsp.readdir(schedulerPaths.scheduledPlansRoot());
-  } catch {
-    return;
-  }
-  const baks = entries.filter((f) => QUEUE_BAK_RE.test(f));
-  if (baks.length <= QUEUE_BAK_KEEP) return;
-
-  baks.sort((a, b) => {
-    const ta = Number(a.slice('queue.json.bak-'.length));
-    const tb = Number(b.slice('queue.json.bak-'.length));
-    return tb - ta; // newest (largest epoch) first
-  });
-  const toDelete = baks.slice(QUEUE_BAK_KEEP);
-  let removed = 0;
-  for (const f of toDelete) {
-    try {
-      await fsp.unlink(path.join(schedulerPaths.scheduledPlansRoot(), f));
-      removed++;
-    } catch (e) {
-      console.warn('[scheduler] backup sweep: unlink failed', f, e?.message);
-    }
-  }
-  if (removed > 0) {
-    console.log(`[scheduler] backup sweep: removed ${removed} old queue.json.bak-* file(s), kept ${QUEUE_BAK_KEEP}`);
-  }
 }
 
 // Atomic JSON write helpers delegate to config.cjs's shared implementation.
@@ -1680,8 +1233,8 @@ async function autoResolveQuarantine(job, ageMs) {
 
   let createdVia = null;
   try {
-    const resolvedDir = await findPrdDir(job.slug);
-    const prdPath = resolvedDir ? path.join(resolvedDir, `${job.slug}.md`) : prdPathForJob(job);
+    const resolvedDir = await prdPaths.findPrdDir(job.slug);
+    const prdPath = resolvedDir ? path.join(resolvedDir, `${job.slug}.md`) : prdPaths.prdPathForJob(job);
     const parsed = await parsePrd(prdPath);
     createdVia = parsed.createdVia ?? null;
   } catch { /* unreadable/gone — no provenance found, so it stays "lacking" */ }
@@ -2113,7 +1666,7 @@ const parsePrd = prdParser.parsePrd;
 // preserving the single-dir cache's steady-state zero-read fast path.
 async function listPrdFiles(skipCwds) {
   ensureDirs();
-  const dirs = candidatePrdsDirs();
+  const dirs = prdPaths.candidatePrdsDirs();
   const perDir = await Promise.all(dirs.map((dir) => prdParser.listPrdFiles(dir)));
   let files = perDir.flat();
   // A quarantined project has no job rows this pass; scanning its PRDs would
@@ -2139,7 +1692,7 @@ function quarantinedCwdSet(state) {
  * and just reuse the NN prefix.
  */
 async function allocateParallelGroup(cwd) {
-  const dir = prdDirForCwd(cwd);
+  const dir = prdPaths.prdDirForCwd(cwd);
   await fsp.mkdir(dir, { recursive: true });
   // PRD 832: numbers are unique across the WHOLE project, not just the
   // allocator's bookkeeping dir — scan every Epic prds/ dir plus the
@@ -2149,7 +1702,7 @@ async function allocateParallelGroup(cwd) {
   const targetCwd = cwd || DEFAULT_PROJECT_CWD;
   const extraDirs = [
     ...listEpicPrdDirs(targetCwd),
-    path.join(prdDirForCwd(targetCwd), '..', 'prds-archived'),
+    path.join(prdPaths.prdDirForCwd(targetCwd), '..', 'prds-archived'),
   ];
   let extraFloor = 0;
   for (const d of extraDirs) {
@@ -2309,7 +1862,7 @@ async function reconcile(state) {
   // instead of ever reaching the onDisk scan below.
   let phaseStartMs = Date.now();
   const skipCwds = quarantinedCwdSet(state);
-  await consolidateAllFlatPrds(allProjectCwds(), skipCwds);
+  await prdPaths.consolidateAllFlatPrds(allProjectCwds(), skipCwds);
   phaseMs.flatPrdSweep = Date.now() - phaseStartMs;
 
   phaseStartMs = Date.now();
@@ -2390,7 +1943,7 @@ async function reconcile(state) {
         // going merely-not-visible must survive too — quarantine is meant to
         // be loud and reversible, never a silent drop (see this function's
         // header comment on the 2026-08-01 outage a silent skip caused).
-        if (job.status === 'pending' && (await archivedTwinExists(job))) {
+        if (job.status === 'pending' && (await prdPaths.archivedTwinExists(job))) {
           console.log(`[scheduler] reconcile: retiring pending job ${job.slug} — PRD already archived (work landed elsewhere)`);
           continue;
         }
@@ -3877,7 +3430,7 @@ async function resolveNotifyPrd(job, parsePrdRaw) {
     const parsed = await parsePrdRaw(livePath).catch(() => null);
     if (parsed) return parsed;
   }
-  const archivedPath = archivedPrdPathForJob(job);
+  const archivedPath = prdPaths.archivedPrdPathForJob(job);
   if (!archivedPath) return null;
   return await parsePrdRaw(archivedPath).catch(() => null);
 }
@@ -3898,8 +3451,8 @@ async function resolveNotifyPrd(job, parsePrdRaw) {
  */
 async function resolveVerifyPrdPath(job) {
   if (!job || !job.slug) return null;
-  const liveDir = await findPrdDir(job.slug).catch(() => null);
-  return liveDir ? safeSlugPathIn(liveDir, job.slug) : null;
+  const liveDir = await prdPaths.findPrdDir(job.slug).catch(() => null);
+  return liveDir ? prdPaths.safeSlugPathIn(liveDir, job.slug) : null;
 }
 
 /**
@@ -3929,7 +3482,7 @@ async function resolveFixPlanPath(failedJob) {
   const baseSlug = failedJob.slug.replace(/^\d+-/, '');
   const group = failedJob.parallelGroup ?? 99;
   const fixSlug = `${String(group).padStart(2, '0')}-fix-${baseSlug}`;
-  const fixPath = path.join(livePrdDir ?? prdDirForCwd(failedJob.cwd), `${fixSlug}.md`);
+  const fixPath = path.join(livePrdDir ?? prdPaths.prdDirForCwd(failedJob.cwd), `${fixSlug}.md`);
   return { fixPath, fixSlug, group, livePrdDir };
 }
 
@@ -4120,7 +3673,7 @@ async function notifyOriginatingTab(job, {
                   cwd: job.cwd || null,
                   epicId,
                   prdSlug: job.slug,
-                  prdPath: prd?.path || archivedPrdPathForJob(job) || null,
+                  prdPath: prd?.path || prdPaths.archivedPrdPathForJob(job) || null,
                   outcome: job.status,
                   eventValidation: 'unvalidated',
                 },
@@ -4435,7 +3988,7 @@ function classifyFailureOutcome({ exitCode, networkError, durationMs, transientR
  */
 async function findSatisfyingCommitOnMain(job) {
   if (!job?.queuedAt) return [];
-  const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
+  const prdPath = (await resolveVerifyPrdPath(job)) ?? prdPaths.archivedPrdPathForJob(job);
   const paths = declaredPathsForPrd(prdPath);
   if (!paths.length) return [];
   await gitTreeGuard.fetchAllRefs(job.cwd);
@@ -4810,7 +4363,7 @@ async function performMechanicalRecovery(job, target) {
       console.log(`[scheduler] mechanical-recovery: ${job.slug} landed onto the base ref directly; the main checkout was busy on another branch and was never touched.`);
     }
     console.log(`[scheduler] mechanical-recovery: ${job.slug} → completed (branch ${target.branch} re-integrated)`);
-    if (becameCompleted) await archiveCompletedPrd(job.slug, job.cwd);
+    if (becameCompleted) await prdPaths.archiveCompletedPrd(job.slug, job.cwd);
   } else {
     console.error(`[scheduler] mechanical-recovery: ${job.slug} → retry failed: ${integration.reason}`);
   }
@@ -5245,8 +4798,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // then an ancestor-folder Epic walk above job.cwd) first, so the common
   // case — a live Epic-scoped PRD — is a first-try hit instead of probing
   // the retired flat dir and only then falling back.
-  const resolvedDir = await findPrdDirForJob(job);
-  prdPath = resolvedDir ? path.join(resolvedDir, `${job.slug}.md`) : prdPathForJob(job);
+  const resolvedDir = await prdPaths.findPrdDirForJob(job);
+  prdPath = resolvedDir ? path.join(resolvedDir, `${job.slug}.md`) : prdPaths.prdPathForJob(job);
   try {
     const parsed = await parsePrd(prdPath);
     // The review → security-review → verify → commit finish sequence is
@@ -5260,7 +4813,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // writer that hasn't migrated to prdLocations.cjs yet (or a not-yet-run
     // boot migration) can leave it in the legacy global dir. Fall back to
     // findPrdDirForJob's full candidate search before failing the job outright.
-    const fallbackDir = await findPrdDirForJob(job);
+    const fallbackDir = await prdPaths.findPrdDirForJob(job);
     if (fallbackDir) {
       const fallbackPath = path.join(fallbackDir, `${job.slug}.md`);
       safeLog(`[scheduler] PRD not in project dir; found ${job.slug}.md in ${fallbackDir}\n`);
@@ -5276,7 +4829,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         // parsePrd (ENOENT) with no archived twin — also a stale row, not a
         // real failure. Anything else (malformed/unreadable PRD) is a real
         // failure and keeps exitCode: -1.
-        if (await archivedTwinExists(job)) {
+        if (await prdPaths.archivedTwinExists(job)) {
           return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-archived');
         }
         if (e2 && e2.code === 'ENOENT') {
@@ -5293,7 +4846,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       // leaked test fixture) with no archived twin — retire as stale rather
       // than a hard failure. Anything else (a real read/parse error) still
       // fails the job.
-      if (await archivedTwinExists(job)) {
+      if (await prdPaths.archivedTwinExists(job)) {
         return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-archived');
       }
       if (e && e.code === 'ENOENT') {
@@ -6063,7 +5616,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   let originalBody = '';
   const { fixPath, fixSlug, group, livePrdDir } = await resolveFixPlanPath(failedJob);
   try {
-    const originalPath = livePrdDir ? path.join(livePrdDir, `${failedJob.slug}.md`) : archivedPrdPathForJob(failedJob);
+    const originalPath = livePrdDir ? path.join(livePrdDir, `${failedJob.slug}.md`) : prdPaths.archivedPrdPathForJob(failedJob);
     originalBody = (await parsePrd(originalPath)).body;
   } catch {
     originalBody = failedJob.bodyPreview || '(original PRD missing from disk)';
@@ -7234,7 +6787,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
         jobLandedCommitThisRun = attribution.landedCommit;
       }
 
-      const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
+      const prdPath = (await resolveVerifyPrdPath(job)) ?? prdPaths.archivedPrdPathForJob(job);
       const stateForDeps = await readQueue();
       // priorLandedCommit: the commit a PREVIOUS run of this same slug landed,
       // if any — prefer the live jobs[] row (survives a resetJob, see
@@ -7813,7 +7366,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
             // investigation fires (mirrors reverifyNeedsReview's auto-fix section)
             // so the periodic pass 10 min later sees it already attempted and
             // does not spawn a duplicate.
-            const fixSlugExists = (slug) => candidatePrdsDirs().some((dir) => fs.existsSync(path.join(dir, `${slug}.md`)));
+            const fixSlugExists = (slug) => prdPaths.candidatePrdsDirs().some((dir) => fs.existsSync(path.join(dir, `${slug}.md`)));
             if (
               process.env.SM_AUTOFIX_DISABLE !== '1' &&
               reviewLadder.isEligibleForImmediateAutoFix(s.jobs[i2], s.jobs, fixSlugExists)
@@ -7861,7 +7414,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       }
     });
     for (const { slug, cwd } of newlyCompletedPrds) {
-      await archiveCompletedPrd(slug, cwd);
+      await prdPaths.archiveCompletedPrd(slug, cwd);
     }
     await broadcast({ flush: true });
 
@@ -8337,7 +7890,7 @@ async function tickBody(gen, { bypassLoadGate }) {
       // then the archived twin — never the retired flat dir.
       runDefinitionOfDoneOnDrain(state, {
         cancelToken,
-        resolvePrdPath: async (job) => (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job),
+        resolvePrdPath: async (job) => (await resolveVerifyPrdPath(job)) ?? prdPaths.archivedPrdPathForJob(job),
       }).catch((err) => {
         console.log(`[scheduler] dod-drain: ${err?.message ?? String(err)}`);
       });
@@ -9984,7 +9537,7 @@ async function attributeLandedCommits(job, pathCommits, cwd) {
  * @returns {Promise<{commits: string[], paths: string[], detectedAt: string, rule: string} | null>}
  */
 async function computeLooksDone(job, fetchedCwds) {
-  const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
+  const prdPath = (await resolveVerifyPrdPath(job)) ?? prdPaths.archivedPrdPathForJob(job);
   const paths = declaredPathsForPrd(prdPath);
   if (!paths.length) return null;
   if (!fetchedCwds || !fetchedCwds.has(job.cwd)) {
@@ -10043,7 +9596,7 @@ async function gateTreeDirt(cwd) {
  */
 async function runGateShadow(job) {
   if (!job || !job.slug || !job.cwd) return null;
-  const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
+  const prdPath = (await resolveVerifyPrdPath(job)) ?? prdPaths.archivedPrdPathForJob(job);
   let prdText;
   try { prdText = fs.readFileSync(prdPath, 'utf8'); } catch { return null; }
   const headBefore = await gitTreeGuard.gitHead(job.cwd);
@@ -10148,7 +9701,7 @@ async function runGateShadow(job) {
     }
   });
   if (resolved) {
-    try { await archiveCompletedPrd(resolved.slug, resolved.cwd); } catch (e) {
+    try { await prdPaths.archiveCompletedPrd(resolved.slug, resolved.cwd); } catch (e) {
       console.error('[scheduler] gate authority archive error', resolved.slug, e);
     }
     appendAuditEvent('needs_review_gate_resolved', { slug: resolved.slug, cwd: resolved.cwd, verdict: resolved.verdict, head: headBefore });
@@ -10234,7 +9787,7 @@ async function reverifyNeedsReview() {
       continue;
     }
     const runDir = path.join(schedulerPaths.runsDir(), job.runId || reviewLadder.resolveRunId(job));
-    const prdPath = (await resolveVerifyPrdPath(job)) ?? archivedPrdPathForJob(job);
+    const prdPath = (await resolveVerifyPrdPath(job)) ?? prdPaths.archivedPrdPathForJob(job);
     // Derive committedDuringRun from the recorded run window. The live
     // commit-guard uses gitTreeGuard.gitHead() (before/after HEAD diff); here the run is
     // already over so we query git log filtered to [startedAt, finishedAt+60s].
@@ -10379,7 +9932,7 @@ async function reverifyNeedsReview() {
       }
     });
     for (const { slug, cwd } of healedPrds) {
-      await archiveCompletedPrd(slug, cwd);
+      await prdPaths.archiveCompletedPrd(slug, cwd);
     }
     console.log(`[scheduler] boot reverify: healed ${healed.length} stale needs_review → completed (${healed.join(', ')})`);
     await broadcast();
@@ -10420,7 +9973,7 @@ async function reverifyNeedsReview() {
     }
   });
   for (const { slug, cwd } of promotedPrds) {
-    await archiveCompletedPrd(slug, cwd);
+    await prdPaths.archiveCompletedPrd(slug, cwd);
   }
   if (promoted.length) {
     console.log(`[scheduler] boot reverify: auto-promoted ${promoted.length} original(s): ${promoted.join(', ')}`);
@@ -10564,7 +10117,7 @@ async function reverifyNeedsReview() {
     // at that one row; a probe only takes it if the gate didn't resolve it.
     if (pick) await pick;
     const targets = reviewLadder.selectAutoFixTargets(queueForResumeAndAutofix.jobs, {
-      fixSlugExists: (s) => candidatePrdsDirs().some((dir) => fs.existsSync(path.join(dir, `${s}.md`))),
+      fixSlugExists: (s) => prdPaths.candidatePrdsDirs().some((dir) => fs.existsSync(path.join(dir, `${s}.md`))),
     }).filter((job) => job.slug !== gateShadowSlug);
     for (const job of targets) {
       const runId = job.runId || reviewLadder.resolveRunId(job);
@@ -10784,9 +10337,9 @@ function registerScheduleHandlers() {
   }));
 
   ipcMain.handle('schedule:reset-job', validated(schemas.scheduleResetJob, async ({ slug, cwd }) => {
-    if (!(await safeSlugPath(slug))) return { ok: false, error: 'invalid slug' };
+    if (!(await prdPaths.safeSlugPath(slug))) return { ok: false, error: 'invalid slug' };
     const outcome = await mutate((state) => {
-      const idx = state.jobs.findIndex((j) => jobMatchesSlugAndCwd(j, slug, cwd));
+      const idx = state.jobs.findIndex((j) => prdPaths.jobMatchesSlugAndCwd(j, slug, cwd));
       if (idx < 0) return { kind: 'not-found' };
       // Guard is in resetJobFields: refuses to reset an already-'completed'
       // or already-'skipped' job without force:true (see its doc comment for
@@ -10813,7 +10366,7 @@ function registerScheduleHandlers() {
   // one-click adopt action too, not just a direct fs write. Only a
   // 'quarantined' row is eligible — see reconcile()'s provenance gate.
   ipcMain.handle('schedule:adopt-prd', validated(schemas.scheduleSlug, async ({ slug }) => {
-    if (!(await safeSlugPath(slug))) return { ok: false, kind: 'error', message: 'invalid slug' };
+    if (!(await prdPaths.safeSlugPath(slug))) return { ok: false, kind: 'error', message: 'invalid slug' };
     const state = await readQueue();
     const job = state.jobs.find((j) => j.slug === slug);
     if (!job) return { ok: false, kind: 'error', message: 'not found' };
@@ -10844,7 +10397,7 @@ function registerScheduleHandlers() {
   // before delegating to the same remote.updatePrd every other PRD edit
   // path uses — see that method's own comment in this file.
   ipcMain.handle('schedule:set-prd-disposition', validated(schemas.scheduleSetPrdDisposition, async ({ slug, cwd, disposition, dependsOn }) => {
-    if (!(await safeSlugPath(slug))) return { ok: false, kind: 'error', message: 'invalid slug' };
+    if (!(await prdPaths.safeSlugPath(slug))) return { ok: false, kind: 'error', message: 'invalid slug' };
     const result = await remote.setPrdDisposition({ slug, cwd, disposition, dependsOn });
     if (!result.ok) return { ok: false, kind: 'error', message: result.error ?? 'disposition change failed' };
     appendAuditEvent('scheduler_prd_disposition_set', { slug, cwd: cwd ?? null, disposition, source: 'ipc:schedule:set-prd-disposition' });
@@ -10905,7 +10458,7 @@ function registerScheduleHandlers() {
     let archived = 0;
     const archiveNoteBySlug = new Map();
     for (const job of victims) {
-      const srcDir = await findPrdDir(job.slug) ?? prdDirForCwd(job.cwd);
+      const srcDir = await prdPaths.findPrdDir(job.slug) ?? prdPaths.prdDirForCwd(job.cwd);
       const src = path.resolve(path.join(srcDir, `${job.slug}.md`));
       if (!src.startsWith(srcDir + path.sep)) continue;
       const dst = path.join(archiveDir, `${job.slug}.md`);
@@ -10947,7 +10500,7 @@ function registerScheduleHandlers() {
   });
 
   ipcMain.handle('schedule:read-prd', validated(schemas.scheduleSlug, async ({ slug }) => {
-    const filePath = await safeSlugPath(slug);
+    const filePath = await prdPaths.safeSlugPath(slug);
     if (!filePath) return { ok: false, error: 'invalid slug' };
     try {
       const text = await fsp.readFile(filePath, 'utf8');
@@ -10978,9 +10531,9 @@ function registerScheduleHandlers() {
     // template, authored before the user fills in `cwd`) falls back to the
     // legacy global dir until it's re-saved with a real cwd and migrated by
     // the next reconcile-driven scan.
-    const dir = (await findPrdDir(data.slug)) ?? schedulerPaths.prdsRoot();
+    const dir = (await prdPaths.findPrdDir(data.slug)) ?? schedulerPaths.prdsRoot();
     if (dir === schedulerPaths.prdsRoot()) ensureDirs();
-    const resolved = safeSlugPathIn(dir, data.slug);
+    const resolved = prdPaths.safeSlugPathIn(dir, data.slug);
     if (!resolved) return { ok: false, error: 'invalid slug' };
     try {
       await config.writeTextAtomic(resolved, data.body, { writer: 'scheduler' });
@@ -11276,8 +10829,8 @@ async function init() {
     } catch (e) {
       console.error('[scheduler] legacy queue split failed', e?.message);
     }
-    await runPrdMigration();
-    sweepQueueBackups().catch((e) => console.warn('[scheduler] backup sweep failed', e?.message));
+    await prdPaths.runPrdMigration();
+    prdPaths.sweepQueueBackups().catch((e) => console.warn('[scheduler] backup sweep failed', e?.message));
 
     // Hydrate cached state from the sidecar before any scheduling decisions.
     loadSchedulerState();
@@ -11389,7 +10942,7 @@ async function init() {
       }
     });
     for (const { slug, cwd } of bootReconciledCompletions) {
-      await archiveCompletedPrd(slug, cwd);
+      await prdPaths.archiveCompletedPrd(slug, cwd);
     }
 
     // Proven-alive rows stay `running` and are never signalled (the boot worktree
@@ -11584,12 +11137,12 @@ async function listPrdsInternal() {
   // Live PRDs first, so an archived duplicate (shouldn't exist, but a
   // stale rename copy is possible) never shadows the still-runnable live
   // entry.
-  for (const dir of candidatePrdsDirs()) {
+  for (const dir of prdPaths.candidatePrdsDirs()) {
     await readDirInto(dir, { archived: false });
   }
 
   const archivedStart = out.length;
-  for (const dir of candidateArchivedPrdsDirs()) {
+  for (const dir of prdPaths.candidateArchivedPrdsDirs()) {
     await readDirInto(dir, { archived: true });
   }
 
@@ -11614,7 +11167,7 @@ async function listPrdsInternal() {
     if (i < archivedStart) {
       entry.status = liveStatusBySlug.get(entry.slug) ?? null;
     } else {
-      entry.archivedStatus = resolveArchivedPrdStatus(entry.slug, liveStatusBySlug, histBySlug);
+      entry.archivedStatus = prdPaths.resolveArchivedPrdStatus(entry.slug, liveStatusBySlug, histBySlug);
       entry.status = entry.archivedStatus;
     }
   }
@@ -11637,22 +11190,22 @@ const remote = {
       // The slug may live in the legacy flat dir or any Epic's prds/ under
       // this project; probe local dirs, defaulting to the flat dir (callers
       // use a miss there as the "doesn't exist yet" signal on create).
-      const localDirs = [prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)];
+      const localDirs = [prdPaths.prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)];
       dir = localDirs.find((d) => {
-        const p = safeSlugPathIn(d, slug);
+        const p = prdPaths.safeSlugPathIn(d, slug);
         return p && fs.existsSync(p);
-      }) ?? prdDirForCwd(cwd);
+      }) ?? prdPaths.prdDirForCwd(cwd);
     } else {
-      dir = await findPrdDir(slug);
+      dir = await prdPaths.findPrdDir(slug);
     }
     if (!dir) return { ok: false, error: 'invalid slug' };
-    const filePath = safeSlugPathIn(dir, slug);
+    const filePath = prdPaths.safeSlugPathIn(dir, slug);
     if (!filePath) return { ok: false, error: 'invalid slug' };
     try {
       // realpath resolves symlinks; re-check boundary to block a rogue agent job
       // that places a symlink inside the PRDs dir pointing outside the safe root.
       const real = await fsp.realpath(filePath);
-      const realDir = await realPrdsDir(dir);
+      const realDir = await prdPaths.realPrdsDir(dir);
       if (!realDir || !real.startsWith(realDir + path.sep)) {
         return { ok: false, error: 'invalid slug' };
       }
@@ -11674,9 +11227,9 @@ const remote = {
       // (legacy flat dir or any Epic's prds/); otherwise this is a CREATE,
       // and every new PRD belongs to an Epic (CLAUDE.md domain model) — mint
       // one from the body's frontmatter title/tag.
-      const localDirs = [prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)];
+      const localDirs = [prdPaths.prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)];
       for (const d of localDirs) {
-        const candidate = safeSlugPathIn(d, slug);
+        const candidate = prdPaths.safeSlugPathIn(d, slug);
         if (candidate && fs.existsSync(candidate)) { dir = d; break; }
       }
       if (!dir) {
@@ -11711,14 +11264,14 @@ const remote = {
       }
       await fsp.mkdir(dir, { recursive: true });
     } else {
-      dir = (await findPrdDir(slug)) ?? schedulerPaths.prdsRoot();
+      dir = (await prdPaths.findPrdDir(slug)) ?? schedulerPaths.prdsRoot();
       if (dir === schedulerPaths.prdsRoot()) ensureDirs();
     }
 
     // writePrd only ever JOINS an existing Epic now (no mintAuthority
     // above) — it can never mint one, so there is no orphaned-mint case left
     // to roll back here (contrast the old PRD 825/851 cleanup, removed).
-    const resolved = safeSlugPathIn(dir, slug);
+    const resolved = prdPaths.safeSlugPathIn(dir, slug);
     if (!resolved) {
       return { ok: false, error: 'invalid slug' };
     }
@@ -11730,7 +11283,7 @@ const remote = {
       // re-assert containment; also reject the target if it is already a
       // symlink.
       const realParent = await fsp.realpath(path.dirname(resolved));
-      const realDir = await realPrdsDir(dir);
+      const realDir = await prdPaths.realPrdsDir(dir);
       if (!realDir || (realParent !== realDir && !realParent.startsWith(realDir + path.sep))) {
         return { ok: false, error: 'invalid slug' };
       }
@@ -11784,14 +11337,14 @@ const remote = {
   },
 
   async resetJob(slug, opts = {}) {
-    const resolved = await resolveSlugOrReason(slug, opts.cwd);
+    const resolved = await prdPaths.resolveSlugOrReason(slug, opts.cwd);
     if (!resolved.ok) {
-      return { ok: false, error: resolved.reason === 'invalid-slug' ? 'invalid slug' : unknownSlugMessage(slug) };
+      return { ok: false, error: resolved.reason === 'invalid-slug' ? 'invalid slug' : prdPaths.unknownSlugMessage(slug) };
     }
     const outcome = await mutate((state) => {
       // Same cwd filter as the schedule:reset-job IPC handler above and
       // resolveSlugOrReason's file lookup — see jobMatchesSlugAndCwd's header.
-      const idx = state.jobs.findIndex((j) => jobMatchesSlugAndCwd(j, slug, opts.cwd));
+      const idx = state.jobs.findIndex((j) => prdPaths.jobMatchesSlugAndCwd(j, slug, opts.cwd));
       if (idx < 0) return { kind: 'not-found' };
       // Terminal-status guard lives in resetJobFields itself; force:true
       // threads through to override it. Capture the pre-reset status here
@@ -11856,22 +11409,22 @@ const remote = {
     let dir = null;
     let filePath = null;
     if (cwd) {
-      for (const d of [prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)]) {
-        const p = safeSlugPathIn(d, slug);
+      for (const d of [prdPaths.prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)]) {
+        const p = prdPaths.safeSlugPathIn(d, slug);
         if (p && fs.existsSync(p)) { dir = d; filePath = p; break; }
       }
       if (!filePath) {
         for (const d of listArchivedPrdDirs(cwd)) {
-          const p = safeSlugPathIn(d, slug);
+          const p = prdPaths.safeSlugPathIn(d, slug);
           if (p && fs.existsSync(p)) { dir = d; filePath = p; break; }
         }
       }
     } else {
-      dir = await findPrdDir(slug);
-      filePath = dir ? safeSlugPathIn(dir, slug) : null;
+      dir = await prdPaths.findPrdDir(slug);
+      filePath = dir ? prdPaths.safeSlugPathIn(dir, slug) : null;
       if (!filePath) {
-        for (const d of candidateArchivedPrdsDirs()) {
-          const p = safeSlugPathIn(d, slug);
+        for (const d of prdPaths.candidateArchivedPrdsDirs()) {
+          const p = prdPaths.safeSlugPathIn(d, slug);
           if (p && fs.existsSync(p)) { dir = d; filePath = p; break; }
         }
       }
@@ -11881,7 +11434,7 @@ const remote = {
       // Symlink defense, matching readPrd/writePrd's comment: safeSlugPathIn
       // is lexical and does not resolve symlinks.
       const real = await fsp.realpath(filePath);
-      const realDir = await realPrdsDir(dir);
+      const realDir = await prdPaths.realPrdsDir(dir);
       if (!realDir || !real.startsWith(realDir + path.sep)) return { ok: false, error: 'invalid slug' };
       const [raw, parsed] = await Promise.all([fsp.readFile(real, 'utf8'), prdParser.parsePrdRaw(real)]);
       return {
@@ -11968,13 +11521,13 @@ const remote = {
     let dir = null;
     let filePath = null;
     if (cwd) {
-      for (const d of [prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)]) {
-        const p = safeSlugPathIn(d, slug);
+      for (const d of [prdPaths.prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)]) {
+        const p = prdPaths.safeSlugPathIn(d, slug);
         if (p && fs.existsSync(p)) { dir = d; filePath = p; break; }
       }
     } else {
-      dir = await findPrdDir(slug);
-      filePath = dir ? safeSlugPathIn(dir, slug) : null;
+      dir = await prdPaths.findPrdDir(slug);
+      filePath = dir ? prdPaths.safeSlugPathIn(dir, slug) : null;
     }
     if (!filePath) return { ok: false, error: 'PRD not found' };
 
@@ -11986,7 +11539,7 @@ const remote = {
       // target that is itself already a symlink — a rogue job could plant
       // one inside the PRDs dir pointing outside the safe root.
       const real = await fsp.realpath(filePath);
-      const realDir = await realPrdsDir(dir);
+      const realDir = await prdPaths.realPrdsDir(dir);
       if (!realDir || !real.startsWith(realDir + path.sep)) return { ok: false, error: 'invalid slug' };
       const existing = await fsp.lstat(filePath).catch(() => null);
       if (existing && existing.isSymbolicLink()) return { ok: false, error: 'invalid slug' };
@@ -12279,28 +11832,15 @@ module.exports = {
   flushDueReviewNotices,
   isNotifiableTerminalStatus,
   extractResultTextFromLog,
-  candidatePrdsDirs,
-  candidateArchivedPrdsDirs,
-  resolveArchivedPrdStatus,
-  prdDirForCwd,
-  prdPathForJob,
-  archivedPrdPathForJob,
-  archivedTwinExists,
-  findPrdDir,
-  findPrdDirForJob,
   resolveVerifyPrdPath,
   resolveFixPlanPath,
   resolveNotifyPrd,
-  runPrdMigration,
-  consolidateAllFlatPrds,
   shouldSkipInvestigationForCleanRun,
-  archiveCompletedPrd,
   retireCompletedSlugs,
   SCHEDULER_BOOTED_AT,
   SCHEDULER_CODE_SHA,
   resetJobFields,
   resetRefusalMessage,
-  jobMatchesSlugAndCwd,
   executeJob,
   killOrphanClaudePid,
   prdArchivedSkipResult,

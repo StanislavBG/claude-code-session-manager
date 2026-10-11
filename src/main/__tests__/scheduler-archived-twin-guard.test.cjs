@@ -18,7 +18,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { makeFixtureCwd: harnessMakeFixtureCwd } = require('./_helpers/schedulerHarness.cjs');
-const { archivedTwinExists, archivedPrdPathForJob, prdDirForCwd } = require('../scheduler.cjs');
+const { archivedTwinExists, archivedPrdPathForJob, prdDirForCwd } = require('../scheduler/prdPaths.cjs');
 const { listArchivedPrdDirs } = require('../lib/prdLocations.cjs');
 
 const tmpDirs = [];

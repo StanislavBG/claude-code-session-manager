@@ -32,7 +32,7 @@ const {
   resolveEpicPrdWriteDir,
   deriveEpicIdFromPrdPath,
 } = require('../lib/prdLocations.cjs');
-const { candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus } = require('../scheduler.cjs');
+const { candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus } = require('../scheduler/prdPaths.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {

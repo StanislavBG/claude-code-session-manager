@@ -41,7 +41,8 @@ beforeAll(() => {
 
   // Load AFTER HOME is stubbed — scheduler.cjs snapshots os.homedir() into
   // PRDS_DIR at module load, not lazily.
-  ({ findPrdDir, PRDS_DIR } = require('../scheduler.cjs'));
+  ({ PRDS_DIR } = require('../scheduler.cjs'));
+  ({ findPrdDir } = require('../scheduler/prdPaths.cjs'));
 
   // Hard guard: never let this test write into the real scheduler root.
   if (!PRDS_DIR.startsWith(tmpHome)) {

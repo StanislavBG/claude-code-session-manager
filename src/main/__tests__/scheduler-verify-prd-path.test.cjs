@@ -40,7 +40,8 @@ beforeAll(() => {
 
   // Load AFTER HOME is stubbed — scheduler.cjs snapshots os.homedir() into
   // PRDS_DIR at module load, not lazily (see scheduler-find-prd-dir.test.cjs).
-  ({ resolveVerifyPrdPath, archivedPrdPathForJob, PRDS_DIR } = require('../scheduler.cjs'));
+  ({ resolveVerifyPrdPath, PRDS_DIR } = require('../scheduler.cjs'));
+  ({ archivedPrdPathForJob } = require('../scheduler/prdPaths.cjs'));
 
   if (!PRDS_DIR.startsWith(tmpHome)) {
     throw new Error(`refusing to run: PRDS_DIR (${PRDS_DIR}) is not under the temp HOME (${tmpHome})`);

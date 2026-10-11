@@ -12,9 +12,9 @@
  *  - prdLocations.ancestorEpicPrdDirs / ancestorEpicArchivedPrdDirs walk up
  *    from a sub-repo cwd to find the EXACT epicId's prds / prds-archived dir
  *    in an ancestor folder (bounded hops, exact-match, path.join only).
- *  - scheduler.findPrdDirForJob resolves the live PRD through that ancestor
+ *  - prdPaths.findPrdDirForJob resolves the live PRD through that ancestor
  *    walk (job not skipped, PRD found).
- *  - scheduler.archivedTwinExists resolves an archived twin the same way.
+ *  - prdPaths.archivedTwinExists resolves an archived twin the same way.
  *  - A genuinely missing PRD (no live file, no archived twin, anywhere) is
  *    still not found — same "skip as stale" outcome as before this fix.
  *  - epicId containing a path separator or '..' is rejected outright, never
@@ -31,7 +31,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs } = require('../lib/prdLocations.cjs');
-const { findPrdDirForJob, archivedTwinExists } = require('../scheduler.cjs');
+const { findPrdDirForJob, archivedTwinExists } = require('../scheduler/prdPaths.cjs');
 
 const tmpDirs = [];
 

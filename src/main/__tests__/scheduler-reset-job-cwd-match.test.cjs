@@ -13,7 +13,7 @@
 'use strict';
 
 import { test, expect } from 'vitest';
-const { jobMatchesSlugAndCwd } = require('../scheduler.cjs');
+const { jobMatchesSlugAndCwd } = require('../scheduler/prdPaths.cjs');
 
 test('matches on slug alone when no cwd is given', () => {
   const job = { slug: 'my-slug', cwd: '/projects/a' };

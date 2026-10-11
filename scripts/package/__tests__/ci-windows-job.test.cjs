@@ -16,6 +16,7 @@ const UNIT_FILES = [
   'src/main/lib/__tests__/openExternalApp-win32.test.cjs',
   'src/main/lib/__tests__/appRuntime.test.cjs',
   'src/main/lib/__tests__/prereqs.test.cjs',
+  'src/main/lib/__tests__/autoUpdater.test.cjs',
 ]
 
 describe('ci.yml windows job', () => {

@@ -6,7 +6,7 @@
  *   2. Schema-invalid payloads throw ZodError before any handler runs.
  *   3. Path-bearing commands (cmd:pty:spawn) pass cwd through validatePath.
  *   4. Kill-switch: commands are refused when remoteEnabled = false.
- *   5. All 13 allowlisted command types are present in the set.
+ *   5. All 15 allowlisted command types are present in the set.
  *   6. Destructive pty commands live in the MUTATE tier, not READ.
  *   7. Sensitive READ commands (SAS_GATED_READS) are not in the plain READ tier.
  */

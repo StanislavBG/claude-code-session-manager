@@ -107,6 +107,12 @@ If either fails, keep the test or move its assertions into the scenario test fir
 
 - `tests/smoke/darwin-boot.spec.ts` has no platform guard: on Linux it runs as a free extra boot smoke.
 
+## E2E budget
+
+`tests/e2e` is for critical user flows only; `npm run lint:e2e-budget` caps the spec count (`E2E_SPEC_CEILING` in `scripts/check-e2e-budget.cjs`).
+New coverage defaults to unit/RTL tests, not Electron launches.
+Raising the ceiling requires deleting or merging an existing spec first.
+
 ## Scratch
 
 `test-results/` is gitignored and safe to delete.

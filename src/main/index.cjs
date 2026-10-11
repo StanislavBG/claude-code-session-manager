@@ -1402,7 +1402,7 @@ app.whenReady().then(async () => {
     console.log(`[main] scheduler ownership held by pid ${ownership.holderPid} — running scheduler-passive (no reconciliation, no admin server)`);
     logs.writeLine({ scope: 'scheduler', level: 'info', message: 'scheduler-passive: ownership held by another instance', meta: { holderPid: ownership.holderPid } });
   }
-  // First-boot default: install the bundled session-manager-dev plugin (its 10
+  // First-boot default: install the bundled session-manager-dev plugin (its 3
   // dev skills) from the app's own marketplace. One-shot + idempotent; never
   // throws. SM_SEED_DEV_PLUGIN_DISABLE=1 to opt out.
   seedDevPlugin({ logger: console, writeLog: logs.writeLine }).catch((e) => {

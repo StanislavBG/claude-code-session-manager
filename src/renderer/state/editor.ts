@@ -12,6 +12,7 @@
 import { create } from 'zustand'
 import { useSessions } from './sessions'
 import { readUiPrefs, writeUiPrefsPatch, type EditorSessionPrefs } from '../lib/uiPrefs'
+import { basename } from '../lib/basename'
 
 export interface OpenFile {
   path: string
@@ -72,10 +73,6 @@ interface EditorState {
    *  touches buffers/baselines/dirty (restored files are re-read from disk by
    *  hydrateEditorSession, not seeded from any persisted buffer). */
   restoreSession: (session: { openFiles: string[]; activeFilePath: string | null; viewModeByPath: Record<string, string> }) => void
-}
-
-function basename(p: string): string {
-  return p.split('/').filter(Boolean).pop() || p
 }
 
 /** Neighbor to activate after closing `path` (right, else left, else null). */

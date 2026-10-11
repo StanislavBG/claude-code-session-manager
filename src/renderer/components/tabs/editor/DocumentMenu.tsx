@@ -15,10 +15,7 @@ import { useEditor } from '../../../state/editor'
 import { toast } from '../../../state/toast'
 import { copyText } from '../../../lib/clipboard'
 import { useActiveTab } from '../../../lib/useActiveTab'
-
-function basename(p: string): string {
-  return p.split('/').filter(Boolean).pop() || p
-}
+import { basename } from '../../../lib/basename'
 
 interface Props {
   path: string

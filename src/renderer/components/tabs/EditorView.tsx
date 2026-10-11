@@ -52,6 +52,7 @@ import { SelectionPopover } from './editor/SelectionPopover'
 import { AssistantRail } from './editor/AssistantRail'
 import { DocumentMenu } from './editor/DocumentMenu'
 import { DisplayPopover } from './editor/DisplayPopover'
+import { basename } from '../../lib/basename'
 
 // Lazy-loaded so Tiptap (~150 KB gz) is not bundled for users who never
 // switch a markdown file into Wysiwyg mode.
@@ -62,10 +63,6 @@ const TiptapBody = lazy(() =>
 interface BinaryInfo { binary: true; size: number; mime: string; reason: string }
 type LoadState = 'loading' | 'ready' | { error: string } | BinaryInfo
 interface CursorInfo { line: number; col: number; selected: number }
-
-function basename(p: string): string {
-  return p.split('/').filter(Boolean).pop() || p
-}
 
 function omitKeys<T>(obj: Record<string, T>, keys: string[]): Record<string, T> {
   if (!keys.length) return obj

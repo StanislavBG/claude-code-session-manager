@@ -33,6 +33,7 @@ import { MarkdownPreview } from './MarkdownPreview'
 import { MarkdownToolbar } from './MarkdownToolbar'
 import { DocOutline } from './DocOutline'
 import { EditorStatusBar } from './EditorStatusBar'
+import { basename } from '../../../lib/basename'
 
 interface CursorInfo { line: number; col: number; selected: number }
 
@@ -51,10 +52,6 @@ interface Props {
   headerRight?: React.ReactNode
   /** Hide the word/char/cursor status strip (a host that already shows metrics). */
   hideStatusBar?: boolean
-}
-
-function basename(p: string): string {
-  return p.split('/').filter(Boolean).pop() || p
 }
 
 export function DocumentEditorPane({

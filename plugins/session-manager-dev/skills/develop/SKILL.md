@@ -41,7 +41,7 @@ new work. **report** = your final message to the human.
    `scheduler_create_prd` with your own text is not delegation.
 5. **Never restate the engineering rules.** They live in `standards.md` beside this file, with
    the reasons behind the run rules. Interactive work uses the `test-driven-development`,
-   `systematic-debugging` and `requesting-code-review` skills. Why: one copy never goes stale.
+   `systematic-debugging` skills and the built-in `/code-review` for review. Why: one copy never goes stale.
 
 ## Phase 1 — plan and queue
 

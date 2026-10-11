@@ -33,15 +33,9 @@ const JUNCTIONS = [
   'web/remote-app/CLAUDE.md',
   'web-remote/CLAUDE.md',
   'plugins/CLAUDE.md',
-  'docs/README.md',
   `${OPS}/CLAUDE.md`,
   `${OPS}/architecture/README.md`,
 ]
-
-// Junctions whose authoring PRD has not landed yet. Kept in JUNCTIONS (the
-// lint is meant to fail until they exist) but excluded from the gate.
-// TODO(docs-readme-junction PRD, unqueued): docs/README.md does not exist yet.
-const PENDING = new Set(['docs/README.md'])
 
 const failures = []
 const fail = (msg) => failures.push(msg)
@@ -79,7 +73,6 @@ const manifest = [...JUNCTIONS]
 for (const ns of listDirs(path.join(ROOT, OPS)).sort()) manifest.push(`${OPS}/${ns}/README.md`)
 for (const f of manifest) {
   if (exists(f)) continue
-  if (PENDING.has(f)) { console.log(`doc-hierarchy: note: pending junction not yet landed (excluded): ${f}`); continue }
   fail(`missing junction: ${f}`)
 }
 
@@ -137,7 +130,7 @@ if (exists('CLAUDE.md')) {
       const links = [...firstCell.matchAll(/\]\(([^)\s#]+)/g)].map((m) => m[1])
       const paths = links.length ? links : [...firstCell.matchAll(/`([^`]+\.md)`/g)].map((m) => m[1])
       for (const p of paths) {
-        if (/^(https?:|mailto:|file:)/i.test(p) || PENDING.has(p)) continue
+        if (/^(https?:|mailto:|file:)/i.test(p)) continue
         if (!exists(p)) fail(`CLAUDE.md: scoped-MD row does not resolve: ${p}`)
       }
     }

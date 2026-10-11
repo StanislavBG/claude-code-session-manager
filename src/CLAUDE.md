@@ -11,8 +11,8 @@ Part of the **DESKTOP HARNESS** partition, except `main/projectPages.cjs`
 - `preload/` — `api.d.ts` is the hand-maintained IPC contract. `main/lib/agentPersonaSchema.cjs`,
   `main/lib/scheduleJobSchema.cjs` and `main/ipcSchemas.cjs` (zod) mirror it by interface
   NAME (`ScheduleJob`, `AgentPersonaSaveInput`, …) — cite names, never line numbers.
-- `renderer/` — React app; has its own [`CLAUDE.md`](renderer/CLAUDE.md) (may not exist yet).
-- `seed/agents/` — the four personas `main/seedAgentPersonas.cjs` copies to `~/.claude/agents`.
+- `renderer/` — React app; has its own [`CLAUDE.md`](renderer/CLAUDE.md).
+- `seed/agents/` — the personas `main/seedAgentPersonas.cjs` copies to `~/.claude/agents`.
 - `../bin/cli.cjs` — the npx launcher.
 
 Per-file rationale:

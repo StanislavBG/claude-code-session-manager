@@ -33,7 +33,7 @@ before changing anything in that area.** Reference docs, all under `session-mana
 | [`src/CLAUDE.md`](src/CLAUDE.md), [`src/renderer/CLAUDE.md`](src/renderer/CLAUDE.md) | main/preload, renderer |
 | [`scripts/README.md`](scripts/README.md), [`tests/README.md`](tests/README.md) | scripts, tests |
 | [`web/README.md`](web/README.md), [`web/remote-app/CLAUDE.md`](web/remote-app/CLAUDE.md), [`web-remote/CLAUDE.md`](web-remote/CLAUDE.md) | web presence, remote app, relay |
-| [`plugins/CLAUDE.md`](plugins/CLAUDE.md), `docs/README.md` | plugins, docs |
+| [`plugins/CLAUDE.md`](plugins/CLAUDE.md) | plugins |
 | [`session-manager-operations/CLAUDE.md`](session-manager-operations/CLAUDE.md), [`architecture/README.md`](session-manager-operations/architecture/README.md) | ops root, architecture |
 
 ## Stack

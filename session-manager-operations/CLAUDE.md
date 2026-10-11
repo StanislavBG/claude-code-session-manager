@@ -33,16 +33,16 @@ Epic lifecycle is specified exactly once, at
 | Namespace | Governance | Purpose | Retention | README |
 | --- | --- | --- | --- | --- |
 | `architecture` | not owned | reference docs root CLAUDE.md links to | keep indefinitely | none |
-| `design-mocks` | not owned | design mock artifacts, incl. project-pages component library | keep indefinitely | none (nested per-bundle) |
+| `design-mocks` | not owned | design mock artifacts, incl. project-pages component library | keep indefinitely [link](design-mocks/README.md) |
 | `feedback` | retired 2026-08-02 | former feedback intake, superseded by New Epic | n/a — retired | [link](feedback/README.md) |
-| `HUMAN_LEARN` | not owned | human-readable knowledge-base pages | keep indefinitely | none |
+| `HUMAN_LEARN` | not owned | human-readable knowledge-base pages | keep indefinitely | [link](HUMAN_LEARN/README.md) |
 | `logs` | OWNERS → logs | per-tab JSONL error log | append-only, unpruned | [link](logs/README.md) |
 | `manual` | not owned | authoring source for the free Field Manual | keep indefinitely | [link](manual/README.md) |
 | `memory-clusters` | OWNERS → memory-clusters | per-project memory-cluster cache | regenerated on demand | [link](memory-clusters/README.md) |
 | `project-brief` | OWNERS → project-home | synthesized per-project Brief | keep indefinitely | [link](project-brief/README.md) |
 | `project-pages` | OWNERS → project-home (render route only) | generated static Project Page artifacts | regenerated on demand | [link](project-pages/README.md) |
 | `prompt-sessions` | OWNERS → epics | durable Epic (PromptSession) store | keep indefinitely | [link](prompt-sessions/README.md) |
-| `reviews` | not owned | frozen audit-trail review docs, incl. `validation/<epic-id>/` plan records committed by validator jobs | keep indefinitely | none |
+| `reviews` | not owned | frozen audit-trail review docs, incl. `validation/<epic-id>/` plan records committed by validator jobs | keep indefinitely | [link](reviews/README.md) |
 | `scheduler` | OWNERS → scheduler | PRD sources + queue/history state | keep indefinitely | [link](scheduler/README.md) |
 | `ui-prefs` | OWNERS → ui-prefs | per-project UI state | keep indefinitely | [link](ui-prefs/README.md) |
 

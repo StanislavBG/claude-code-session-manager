@@ -13,20 +13,39 @@
 
 const { readTail } = require('../util/fileTail.cjs');
 
-/** Scan the tail of a job's log for the canonical rate-limit signal. We look
- *  at the last 16 KB — final result event always lands at the end. Covers
- *  both unified-window rate-limit types (five_hour, seven_day), the raw
- *  429 status, and the two human-readable limit-message phrasings the CLI
- *  emits ("You've hit your limit" / "You've reached your <model> limit"). */
+/** Scan the tail of a job's log for a GENUINE rate-limit rejection. Parses the
+ *  last 16 KB line by line as JSON (non-JSON / partial lines are skipped) and
+ *  returns true only for: (a) a rate_limit_event whose rate_limit_info.status
+ *  is 'rejected'; (b) a result event with api_error_status 429; (c) an
+ *  is_error result event whose `result` text is the CLI's limit message
+ *  ("You've hit your ... limit" / "You've reached your ... limit").
+ *
+ *  Never substring-match the raw text: informational rate_limit_event lines
+ *  (status 'allowed' / 'allowed_warning') carry rateLimitType on every run, so
+ *  the old substring match turned any non-zero exit (e.g. a watchdog SIGTERM,
+ *  exit 143) into a machine-wide rate_limit pause (2026-10-11 incident: 4-day
+ *  pause at 58% weekly). Tool output may also mention 429 or "rate limit". */
 function detectRateLimitInLog(logPath) {
   try {
     const text = readTail(logPath, 16384);
     if (!text) return false;
-    return /"rateLimitType":"five_hour"/.test(text)
-      || /"rateLimitType":"seven_day"/.test(text)
-      || /"api_error_status":429/.test(text)
-      || /You'?ve hit your limit/.test(text)
-      || /You'?ve reached your .* limit/.test(text);
+    for (const line of text.split('\n')) {
+      const t = line.trim();
+      if (!t || t[0] !== '{') continue;
+      let ev;
+      try { ev = JSON.parse(t); } catch { continue; }
+      if (!ev || typeof ev !== 'object') continue;
+      if (ev.type === 'rate_limit_event') {
+        if (ev.rate_limit_info && ev.rate_limit_info.status === 'rejected') return true;
+      } else if (ev.type === 'result') {
+        if (ev.api_error_status === 429) return true;
+        if (ev.is_error === true && typeof ev.result === 'string'
+          && (/You'?ve hit your .*limit/.test(ev.result) || /You'?ve reached your .* limit/.test(ev.result))) {
+          return true;
+        }
+      }
+    }
+    return false;
   } catch {
     return false;
   }

@@ -242,13 +242,13 @@ function writeTmpLog(contents) {
   return p;
 }
 
-test('detectRateLimitInLog: rateLimitType":"five_hour" variant', () => {
-  const p = writeTmpLog('{"type":"result","rate_limit_info":{"rateLimitType":"five_hour"}}\n');
-  assert.strictEqual(detectRateLimitInLog(p), true);
+test('detectRateLimitInLog: a bare allowed five_hour rate_limit_event is NOT rate-limited', () => {
+  const p = writeTmpLog('{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour"}}\n');
+  assert.strictEqual(detectRateLimitInLog(p), false);
 });
 
-test('detectRateLimitInLog: rateLimitType":"seven_day" variant (missed pre-PRD-1117)', () => {
-  const p = writeTmpLog('{"type":"rate_limit_event","rate_limit_info":{"rateLimitType":"seven_day","unifiedWindows":{"five_hour":{"utilization":0}}}}\n');
+test('detectRateLimitInLog: status rejected seven_day rate_limit_event IS rate-limited', () => {
+  const p = writeTmpLog('{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","rateLimitType":"seven_day","unifiedWindows":{"five_hour":{"utilization":0}}}}\n');
   assert.strictEqual(detectRateLimitInLog(p), true);
 });
 
@@ -258,7 +258,7 @@ test('detectRateLimitInLog: api_error_status":429 variant', () => {
 });
 
 test('detectRateLimitInLog: "You\'ve reached your <model> limit" variant (missed pre-PRD-1117)', () => {
-  const p = writeTmpLog('{"type":"result","result":"You\'ve reached your Fable limit. Switch to another model."}\n');
+  const p = writeTmpLog('{"type":"result","is_error":true,"result":"You\'ve reached your Fable limit. Switch to another model."}\n');
   assert.strictEqual(detectRateLimitInLog(p), true);
 });
 
@@ -305,6 +305,14 @@ test('classifyRunOutcome: the same allowed_warning tail on an ERRORED run classi
     '{"type":"result","subtype":"success","is_error":true,"api_error_status":429,"result":"You\'ve reached your Fable limit."}',
   ].join('\n') + '\n');
   assert.strictEqual(classifyRunOutcome(p), 'rate_limited');
+});
+
+test('classifyRunOutcome: an allowed-only log with no success result is no_result, not rate_limited', () => {
+  const p = writeTmpLog([
+    '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour"}}',
+    '[scheduler] exit code=143 (raw code=143 signal=null) duration=2705s',
+  ].join('\n') + '\n');
+  assert.strictEqual(classifyRunOutcome(p), 'no_result');
 });
 
 test('classifyRunOutcome: a clean success log still classifies as success', () => {

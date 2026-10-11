@@ -35,7 +35,7 @@ function makeSpawnSpy() {
 // only the `now` passed to maybeRelaunchApp (which drives debounce/cap math)
 // is offset from that same anchor.
 //
-// isPidAlive() treats EPERM (pid exists, owned by another user — e.g. pid 1)
+// pidAlive() treats EPERM (pid exists, owned by another user — e.g. pid 1)
 // as alive, so a genuinely-dead pid must actually be gone (ESRCH), not just
 // inaccessible. Spawn a short-lived same-user child and use its exited pid —
 // guaranteed ESRCH under our own uid, unlike a hardcoded low pid number.

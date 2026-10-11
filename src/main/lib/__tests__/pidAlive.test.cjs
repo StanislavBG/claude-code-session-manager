@@ -1,7 +1,7 @@
 /**
  * pidAlive.test.cjs — the single shared "is this pid alive" predicate now
- * reused by watchdogHelpers.cjs (isPidAlive), reservationExpiry.cjs
- * (defaultPidAlive), instanceLock.cjs (pidAlive), and reaperHelpers.cjs's
+ * reused by watchdogHelpers.cjs, reservationExpiry.cjs,
+ * instanceLock.cjs (pidAlive), and reaperHelpers.cjs's
  * claudePidAlive existence check.
  *
  * Run: timeout 120 npx vitest run src/main/lib/__tests__/pidAlive.test.cjs

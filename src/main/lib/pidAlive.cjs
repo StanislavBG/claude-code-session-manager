@@ -6,7 +6,7 @@
  * Four independent copies of this exact check had drifted apart:
  * reaperHelpers.cjs's claudePidAlive (bug: caught EPERM and returned false,
  * never crediting a pid it couldn't signal but which demonstrably exists),
- * watchdogHelpers.cjs's isPidAlive, reservationExpiry.cjs's defaultPidAlive,
+ * watchdogHelpers.cjs's old pid check, reservationExpiry.cjs's old one,
  * and instanceLock.cjs's pidAlive (these three already treated EPERM as
  * alive, but each reimplemented the same three lines). This module is now
  * the one place the rule lives; the others re-export thin aliases so every

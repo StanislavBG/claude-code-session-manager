@@ -13,6 +13,7 @@
  */
 
 import type { InboundProposal, PromptSession } from '../state/promptSessions'
+import { basename } from './basename'
 
 export interface InboundFeedbackOrigin {
   /** Absolute cwd of the project that sent this proposal. */
@@ -28,13 +29,6 @@ export interface InboundFeedbackOrigin {
   proposal: InboundProposal | null
   /** 'Part 5 of 7 · Series title', or null when not part of a series. */
   seriesLabel: string | null
-}
-
-/** Last non-empty path segment, POSIX or Windows separators. Falls back to
- *  the whole string when there is no separator to split on. */
-function baseName(p: string): string {
-  const parts = p.split(/[\\/]+/).filter(Boolean)
-  return parts.length ? parts[parts.length - 1] : p
 }
 
 /**
@@ -55,7 +49,7 @@ export function inboundFeedbackOrigin(epic: Pick<PromptSession, 'source'>): Inbo
   return {
     fromCwd,
     ...(source.fromEpicId ? { fromEpicId: source.fromEpicId } : {}),
-    label: baseName(fromCwd),
+    label: basename(fromCwd),
     title:
       `Proposed by another project: ${fromCwd}`
       + (source.fromEpicId ? ` (session ${source.fromEpicId})` : '')

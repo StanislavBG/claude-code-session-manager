@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Badge } from '../ui/Badge'
 import { useToast } from '../../state/toast'
+import { basename } from '../../lib/basename'
 import { EmptyState, PillButton, RemoteCard, SectionLabel } from './remoteUi'
 
 /** Sessions open on a paired remote Session Manager + a chat prompt box (cmd:sessions:list, falling back to cmd:sessions:load / cmd:chat:send). */
@@ -27,11 +28,6 @@ type LoadState = 'loading' | 'ready' | 'error'
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
-}
-
-function baseName(cwd: string): string {
-  const parts = cwd.replace(/\/+$/, '').split('/')
-  return parts[parts.length - 1] || cwd
 }
 
 export function RemoteSessionsPanel({ peerId, machineName, onOpenTerminal }: {
@@ -64,7 +60,7 @@ export function RemoteSessionsPanel({ peerId, machineName, onOpenTerminal }: {
           tabId: t.sessionId,
           cwd: t.cwd,
           title: t.label || t.cwd,
-          project: t.label || baseName(t.cwd),
+          project: t.label || basename(t.cwd),
         }))
       }
       if (id !== reqId.current) return
@@ -85,7 +81,7 @@ export function RemoteSessionsPanel({ peerId, machineName, onOpenTerminal }: {
   const groups = useMemo(() => {
     const byProject = new Map<string, RemoteRow[]>()
     for (const r of rows) {
-      const key = r.project || baseName(r.cwd)
+      const key = r.project || basename(r.cwd)
       ;(byProject.get(key) ?? byProject.set(key, []).get(key)!).push(r)
     }
     const kindRank = (r: RemoteRow) => (r.kind === 'project' ? 0 : 1)

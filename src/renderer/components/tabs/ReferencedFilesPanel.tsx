@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from '../../state/toast'
 import { useConfig } from '../../state/config'
+import { basename } from '../../lib/basename'
 import type { ImportRef } from '../../../preload/api'
 
 interface Props {
@@ -14,10 +15,6 @@ interface Props {
 
 /** A burst of external writes to the root file collapses into one re-parse. */
 const REPARSE_DEBOUNCE_MS = 300
-
-function basename(path: string): string {
-  return path.split('/').pop() || path
-}
 
 /**
  * The document rail beside the CLAUDE.md editor: the root file itself, then

@@ -233,6 +233,97 @@ describe('ProjectPagesSection', () => {
     expect(input.disabled).toBe(true)
   })
 
+  describe('demo video style picker', () => {
+    const HTML = '<!DOCTYPE html><html><body>HOME</body></html>'
+    const STYLE = '[data-testid="project-home-demo-style"]'
+
+    function mountPopulated(onLaunch = vi.fn(), launching: string | null = null) {
+      return mount(
+        <ProjectPagesSection
+          output={{ html: HTML, mtimeMs: Date.now() }}
+          demoVideo={{ path: '/tmp/demo/index.html', mtimeMs: Date.now() }}
+          loaded
+          macros={MACROS}
+          launching={launching}
+          onLaunch={onLaunch}
+        />,
+      )
+    }
+
+    function pick(select: HTMLSelectElement, value: string) {
+      const setValue = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')!.set!
+      act(() => {
+        setValue.call(select, value)
+        select.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+    }
+
+    function demoButton(el: HTMLElement) {
+      return el.querySelector(
+        '[data-testid="project-home-macro"][data-macro-id="builtin-demo-video"]',
+      ) as HTMLButtonElement
+    }
+
+    it('renders the select only for the demo-video macro in the empty state', () => {
+      const el = mount(
+        <ProjectPagesSection output={null} demoVideo={null} loaded macros={MACROS} launching={null} onLaunch={() => {}} />,
+      )
+      const selects = el.querySelectorAll(STYLE)
+      expect(selects).toHaveLength(1)
+      const select = selects[0] as HTMLSelectElement
+      expect(select.getAttribute('aria-label')).toBe('Video style')
+      expect(Array.from(select.options).map((o) => o.textContent)).toEqual([
+        'Auto',
+        'Professional',
+        'Fun',
+        'Animated whiteboard',
+        'Kinetic typography',
+      ])
+      expect(select.value).toBe('Auto')
+    })
+
+    it('renders the select only for the demo-video macro in the populated state', () => {
+      const el = mountPopulated()
+      expect(el.querySelectorAll(STYLE)).toHaveLength(1)
+    })
+
+    it('passes "Video style: Fun" when extra is empty', () => {
+      const onLaunch = vi.fn()
+      const el = mountPopulated(onLaunch)
+      pick(el.querySelector(STYLE) as HTMLSelectElement, 'Fun')
+      act(() => demoButton(el).click())
+      expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video style: Fun')
+    })
+
+    it('appends trimmed extra text after the style line', () => {
+      const onLaunch = vi.fn()
+      const el = mountPopulated(onLaunch)
+      pick(el.querySelector(STYLE) as HTMLSelectElement, 'Animated whiteboard')
+      const input = el.querySelector(
+        '[data-testid="project-home-macro-extra"][data-macro-id="builtin-demo-video"]',
+      ) as HTMLInputElement
+      const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+      act(() => {
+        setValue.call(input, '  shorter ')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      act(() => demoButton(el).click())
+      expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video style: Animated whiteboard\nshorter')
+    })
+
+    it('leaves args unchanged with Auto', () => {
+      const onLaunch = vi.fn()
+      const el = mountPopulated(onLaunch)
+      act(() => demoButton(el).click())
+      expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, undefined)
+    })
+
+    it('disables the select while launching', () => {
+      const el = mountPopulated(vi.fn(), 'builtin-demo-video')
+      expect((el.querySelector(STYLE) as HTMLSelectElement).disabled).toBe(true)
+    })
+  })
+
   it('disables every macro button while launching', () => {
     const el = mount(
       <ProjectPagesSection

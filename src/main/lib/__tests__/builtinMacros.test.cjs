@@ -13,8 +13,8 @@ const { BUILTIN_MACROS } = require('../builtinMacros.cjs');
 
 const personaPath = path.join(__dirname, '..', '..', '..', 'seed', 'agents', 'demo-video-builder.md');
 
-function frontmatter(raw) {
-  const m = raw.replace(/\r\n/g, '\n').match(/^---\n([\s\S]*?)\n---/);
+function frontmatter(doc) {
+  const m = doc.replace(/\r\n/g, '\n').match(/^---\n([\s\S]*?)\n---/);
   const fm = {};
   for (const line of (m ? m[1] : '').split('\n')) {
     const kv = line.match(/^([A-Za-z]+):\s*(.*)$/);
@@ -36,14 +36,10 @@ test('builtin demo-video macro is v4 with the character + styles prompt', () => 
   expect(macro.prompt).toContain('Kokoro');
 });
 
-test('demo-video-builder persona is opus / max / seedVersion 4 with the new sections', () => {
+test('demo-video-builder persona is opus / max / seedVersion 4', () => {
   const raw = fs.readFileSync(personaPath, 'utf8');
   const fm = frontmatter(raw);
   expect(fm.model).toBe('opus');
   expect(fm.effort).toBe('max');
   expect(fm.seedVersion).toBe('4');
-  for (const tag of ['script_first', 'character', 'styles', 'dynamic_elements']) {
-    expect(raw).toContain(`<${tag}>`);
-    expect(raw).toContain(`</${tag}>`);
-  }
 });

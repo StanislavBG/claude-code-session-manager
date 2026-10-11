@@ -19,6 +19,8 @@ import type { Macro } from '../../../../../preload/api'
 const BUTTON_CLASS =
   'inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-xs font-semibold text-bg-hi cursor-pointer hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed'
 
+const DEMO_VIDEO_STYLES = ['Auto', 'Professional', 'Fun', 'Animated whiteboard', 'Kinetic typography'] as const
+
 function macroButtonLabel(macro: Macro, hasHome: boolean, hasDemo: boolean): string {
   if (macro.id === 'builtin-project-home') return hasHome ? `Regenerate ${macro.label}` : `Generate ${macro.label}`
   if (macro.id === 'builtin-demo-video') return hasDemo ? `Regenerate ${macro.label}` : `Generate ${macro.label}`
@@ -39,17 +41,37 @@ function MacroButton({
   onLaunch: (macro: Macro, extraInstructions?: string) => void
 }) {
   const [extra, setExtra] = useState('')
+  const [style, setStyle] = useState<string>('Auto')
   const disabled = launching !== null
   const showExtraInput = hasHome || hasDemo
+  const showStyle = macro.id === 'builtin-demo-video'
 
   const fire = () => {
     const trimmed = extra.trim()
-    onLaunch(macro, trimmed || undefined)
+    const styleLine = showStyle && style !== 'Auto' ? `Video style: ${style}` : ''
+    const combined = [styleLine, trimmed].filter(Boolean).join('\n')
+    onLaunch(macro, combined || undefined)
     setExtra('')
   }
 
   return (
     <div className="inline-flex items-center gap-1.5">
+      {showStyle && (
+        <select
+          data-testid="project-home-demo-style"
+          aria-label="Video style"
+          value={style}
+          onChange={(e) => setStyle(e.target.value)}
+          disabled={disabled}
+          className="rounded-lg border border-line bg-bg-hi px-2.5 py-2 text-xs text-fg disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {DEMO_VIDEO_STYLES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </select>
+      )}
       {showExtraInput && (
         <input
           type="text"

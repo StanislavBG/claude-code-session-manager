@@ -30,7 +30,7 @@ const run = () => spawnSync(process.execPath, [SCRIPT, root], { encoding: 'utf8'
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-hier-'));
   for (const f of FILES) write(f, '# doc\n');
-  write('CLAUDE.md', '> **SIZE BUDGET — 12,000 chars**\n\n## Scoped MDs\n\n| Path | Scope |\n| --- | --- |\n| [`src/CLAUDE.md`](src/CLAUDE.md) | main |\n');
+  write('CLAUDE.md', '> **SIZE BUDGET — 12,000 chars**\n\n## Scoped MDs\n\n| Path | Scope |\n| --- | --- |\n| [`src/CLAUDE.md`](src/CLAUDE.md) | main |\n' + FILES.filter((f) => f !== 'src/CLAUDE.md').map((f) => `[${f}](${f})\n`).join(''));
 });
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -80,4 +80,17 @@ test('file:// link fails', () => {
   const r = run();
   expect(r.status).toBe(1);
   expect(r.stderr).toContain('plugins/CLAUDE.md: file:// link');
+});
+
+test('reachable nested markdown passes; orphan fails; exempt-prefix orphan passes', () => {
+  write('docs/extra.md', '# extra\n');
+  let r = run();
+  expect(r.status).toBe(1);
+  expect(r.stderr).toContain('docs/extra.md: orphan markdown');
+  write('web/README.md', 'see [extra](../docs/extra.md#top)\n');
+  r = run();
+  expect(r.status, r.stderr).toBe(0);
+  write('src/seed/x.md', '# seeded\n');
+  r = run();
+  expect(r.status, r.stderr).toBe(0);
 });

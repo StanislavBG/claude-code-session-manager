@@ -107,6 +107,8 @@ If either fails, keep the test or move its assertions into the scenario test fir
 
 - `tests/smoke/darwin-boot.spec.ts` has no platform guard: on Linux it runs as a free extra boot smoke.
 
+Test-quality reports: [`quality/MUTATION.md`](quality/MUTATION.md), [`quality/REPORT.md`](quality/REPORT.md).
+
 ## E2E budget
 
 `tests/e2e` is for critical user flows only; `npm run lint:e2e-budget` caps the spec count (`E2E_SPEC_CEILING` in `scripts/check-e2e-budget.cjs`).

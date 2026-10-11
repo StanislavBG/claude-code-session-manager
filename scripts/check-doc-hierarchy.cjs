@@ -8,19 +8,38 @@
 //     SIZE BUDGET (health.cjs's parseClaudeMdBudget/evaluateClaudeMdBudget);
 //  3. every relative markdown link in the junctions + architecture/*.md resolves;
 //  4. no file:// link in those files;
-//  5. every path in the root CLAUDE.md "Scoped MDs" table resolves.
+//  5. every path in the root CLAUDE.md "Scoped MDs" table resolves;
+//  6. every tracked *.md is reachable by relative links from root CLAUDE.md
+//     (tree-DAG), except files under EXEMPT_PREFIXES.
 //
 // Root dir: first CLI argument or SM_DOC_ROOT (tests point it at a scratch
 // tree); defaults to the repo. Complexity: O(files x links), all small.
 
 const fs = require('fs')
-const { spawnSync } = require('child_process')
+const { spawnSync, execFileSync } = require('child_process')
 const path = require('path')
 const { parseClaudeMdBudget, evaluateClaudeMdBudget } = require('../src/main/health.cjs')
 
 const ROOT = path.resolve(process.argv[2] || process.env.SM_DOC_ROOT || path.join(__dirname, '..'))
 const OPS = 'session-manager-operations'
 const NESTED_CLAUDE_MD_MAX_BYTES = 4000
+
+// Markdown the reachability check (6) does not require a link to.
+const EXEMPT_PREFIXES = [
+  'session-manager-operations/reviews/', // historical
+  'session-manager-operations/design-mocks/', // historical
+  'session-manager-operations/HUMAN_LEARN/', // historical
+  'src/seed/', // seeded
+  'plugins/session-manager-dev/skills/', // tool-loaded
+  '.claude/agents/', // tool-loaded
+  'web/promo-video/', // historical
+  'src/main/templates/', // seeded
+  '.github/', // github
+  'README.md', // github (repo landing page)
+  'CODE_OF_CONDUCT.md', // github
+  'CONTRIBUTING.md', // github
+  'SECURITY.md', // github
+]
 
 const JUNCTIONS = [
   'CLAUDE.md',
@@ -134,6 +153,50 @@ if (exists('CLAUDE.md')) {
         if (!exists(p)) fail(`CLAUDE.md: scoped-MD row does not resolve: ${p}`)
       }
     }
+  }
+}
+
+// (6) reachability from root CLAUDE.md
+function listMarkdown() {
+  try {
+    const out = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', '*.md'], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    return out.split('\0').filter(Boolean)
+  } catch { /* not a git repo: walk */ }
+  const out = []
+  const walk = (dir) => {
+    let entries
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (e.name === 'node_modules' || e.name === '.git') continue
+      const p = path.join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (e.name.endsWith('.md')) out.push(rel(p))
+    }
+  }
+  walk(ROOT)
+  return out
+}
+
+if (exists('CLAUDE.md')) {
+  const reached = new Set(['CLAUDE.md'])
+  const queue = ['CLAUDE.md']
+  while (queue.length) {
+    const f = queue.shift()
+    const abs = path.join(ROOT, f)
+    const text = stripCode(fs.readFileSync(abs, 'utf8'))
+    for (const m of text.matchAll(/\]\(\s*<?([^)\s>]+)/g)) {
+      if (/^[a-z][a-z0-9+.-]*:/i.test(m[1])) continue
+      const p = m[1].split('#')[0].split('?')[0]
+      if (!p.toLowerCase().endsWith('.md')) continue
+      const target = path.resolve(path.dirname(abs), p)
+      if (!target.startsWith(ROOT + path.sep) || !fs.existsSync(target) || !fs.statSync(target).isFile()) continue
+      const r = rel(target)
+      if (!reached.has(r)) { reached.add(r); queue.push(r) }
+    }
+  }
+  for (const f of listMarkdown().sort()) {
+    if (reached.has(f) || EXEMPT_PREFIXES.some((x) => f.startsWith(x))) continue
+    fail(`${f}: orphan markdown, not reachable by links from CLAUDE.md`)
   }
 }
 

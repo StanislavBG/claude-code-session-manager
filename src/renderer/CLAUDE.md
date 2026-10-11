@@ -40,4 +40,5 @@ vitest — no registration needed.
   for. A namespace missing there is not proof it is unused.
 - Blank-screen laws (selectors, hooks, z-ladder) live in the root
   [`CLAUDE.md`](../../CLAUDE.md) Avoid list — not restated here.
+- Scheduler tab control inventory: [`CONTROL_MAP.md`](components/tabs/scheduler/CONTROL_MAP.md).
 - Per-file rationale: [`code-map.md`](../../session-manager-operations/architecture/code-map.md).

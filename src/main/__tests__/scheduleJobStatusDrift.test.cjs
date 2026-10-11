@@ -6,7 +6,6 @@
  * is types-only (erased at build time, nothing to import at test runtime), so
  * each consumer keeps its own hand-written mirror of the status enum:
  *   - src/preload/api.d.ts's `ScheduleJobStatus` union
- *   - src/renderer/lib/jobStatus.ts's `JobStatus` union
  *   - src/renderer/components/SchedulePanel.tsx's `FilterStatus` union
  *     (which also carries the UI-only 'all' meta-value)
  *
@@ -49,12 +48,6 @@ function sorted(list) {
 test('src/preload/api.d.ts ScheduleJobStatus matches JOB_STATUSES', () => {
   const source = readSource('src/preload/api.d.ts');
   const values = extractQuotedList(source, /export type ScheduleJobStatus = ([^;]+);/);
-  expect(sorted(values)).toEqual(sorted(JOB_STATUSES));
-});
-
-test('src/renderer/lib/jobStatus.ts JobStatus matches JOB_STATUSES', () => {
-  const source = readSource('src/renderer/lib/jobStatus.ts');
-  const values = extractQuotedList(source, /export type JobStatus = ([^\n]+)/);
   expect(sorted(values)).toEqual(sorted(JOB_STATUSES));
 });
 

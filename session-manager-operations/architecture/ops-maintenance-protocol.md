@@ -9,7 +9,7 @@ is the repeatable protocol for detecting and resolving that drift.
 
 Two things implement this protocol today: `scripts/audit-ops-hygiene.cjs` (session-manager's own
 repo, hardcodes this project's OWNERS vocabulary — Patterns C/D/E/F, its own, not this doc's) and
-`scripts/ops-sweep.cjs` plus the `session-manager-dev:ops-sweep` skill (portable, runs against ANY
+`scripts/ops-sweep.cjs` (run `node scripts/ops-sweep.cjs <cwd>`; portable, runs against ANY
 project's `session-manager-operations/`, including one with no CLAUDE.md at all — Pattern H below).
 **Both are built and runnable today.** The only unbuilt piece is a scheduled/cron cadence — see
 Cadence.
@@ -94,7 +94,7 @@ retention/prune/expire language in its README (or no README at all).
 referential integrity. Renamed to the next free letter, H.)*
 
 This protocol was authored by reading *this* project's own CLAUDE.md and code. **This part is
-built**: `scripts/ops-sweep.cjs` plus the `session-manager-dev:ops-sweep` skill run it against ANY
+built**: `scripts/ops-sweep.cjs` (`node scripts/ops-sweep.cjs <cwd>`) runs it against ANY
 project's `session-manager-operations/` — including one with a different OWNERS vocabulary than
 session-manager's own, or no CLAUDE.md at all. Only a scheduled/cron cadence remains unbuilt (see
 Cadence). Portability constraints a sweep run against another project must honor:
@@ -131,7 +131,7 @@ report shape and does not emit any of these `type` values.
 
 ## Cadence
 
-`/ops-sweep` — the skill plus `scripts/ops-sweep.cjs` — is built and runnable today, on demand,
+`node scripts/ops-sweep.cjs <cwd>` is built and runnable today, on demand,
 against any project. The only unbuilt piece is a scheduled cadence: no cron trigger exists yet.
 Suggested cadence once that's built: monthly per active project, plus triggered whenever a new
 top-level folder appears under a project's `session-manager-operations/` (Pattern B is cheap to

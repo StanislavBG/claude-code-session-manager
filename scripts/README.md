@@ -20,7 +20,6 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | check-renderer-storage.cjs | `npm run lint:renderer-storage` (in `lint`) — ratchet-bans `localStorage.`/`sessionStorage.` in `src/renderer` outside an explicit ALLOWLIST (Epic stateless-ui-review) | no |
 | check-tracked-filenames.cjs | `npm run lint:filenames` (in `lint`) — fails on tracked paths with Windows-illegal chars, trailing dot/space, or reserved device names | no |
 | check-unstable-selectors.cjs | `npm run lint:selectors` (in `lint`) | no |
-| health.sh | manual; `local-project-health` skill's lookup path (`npm run health` uses src/main/health.cjs) | no |
 | install-scheduler-mcp-user-scope.sh | manual (`seedSchedulerMcp.cjs` does the same on first boot, or on the next boot after its marker file is deleted) | no |
 | install-scheduler-watchdog.sh | manual; installs the systemd user timer (cron fallback) | no |
 | mint-epic.cjs | manual; joins an existing Epic and prints its prds dir | yes |

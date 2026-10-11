@@ -175,6 +175,12 @@ human clears it via Resume/Run now.
 | Epic shows 1 step in the Scheduler tracker after its plan completed | The Epic's PRDs in `prds-archived/` (`scheduler_list_prds`, or `epicPrds` in the Epic detail) vs the plan band's `N steps · M done` header | Not data loss — `reconcile()`'s terminal-drop removes a finished step's `queue.json` row when `archiveCompletedPrd` moves its PRD. Bands must merge archived PRDs back in (`mergeArchivedPlanRows`); if the header total is below the archived count, that merge regressed. Guard: `trackerStepParity.test.tsx` |
 | Every project shows paused (agent)/(manual) | `audit-log.jsonl` entries of `kind: scheduler_pause` — the `by` field names the calling session/cwd | Resume via the Scheduler Resume button or `scheduler_resume`. An agent pause auto-expires after 30 minutes and is cleared on app restart |
 | `utilization-held` at 100% / `slots-exhausted` with 2 running while real usage is low | `~/.claude/session-manager-reboot.log` for `billing meter rate-limited (HTTP 429)`; `billing-cache.json` for the real percentages | Usage meter 429 treated as an account limit (fixed by PRD 1647): a meter 429 now uses a ≤30-min-old cached reading with the full slot pool; only an executor-observed `rate_limit` pause pins utilization. No cache / older cache still runs the degraded budget (cap 2) |
+| `rate_limit` pause to the weekly reset while `billing-cache.json` shows usage well below threshold | The run log for a `rate_limit_event` with `status "rejected"` — none means the pause was spurious | Pre-fix substring detection treated `allowed` events as rejections (2026-10-11, 4-day pause at 58% weekly). Resume via the Scheduler Resume button or `scheduler_resume` |
+
+### Usage threshold vs rate_limit pause
+
+- `config.utilizationThreshold` (default 90, editable 0-100 via "pause above" on the Scheduler band; 95 is allowed) governs only the `when-available` `utilization-held` hold. `maybeLaunchWhenAvailable` compares it to the binding window — the HIGHEST of the unscoped 5-hour and weekly percents — and holds new dispatches at/above it. To pause only near 95% weekly, set it to 95.
+- It never sets a pause. A `paused.reason: rate_limit` comes only from an executor-observed rejection and resumes at the rejected window's reset, or after 30 minutes when billing shows every window below the threshold.
 
 ### Plan bands read live rows PLUS archived PRDs
 

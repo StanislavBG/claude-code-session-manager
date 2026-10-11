@@ -469,7 +469,7 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
                   min={0}
                   max={100}
                   testId="kpi-threshold"
-                  title="Fire only when 5h utilization is below this percent — click to edit"
+                  title="Holds new dispatches when the highest of the 5-hour and weekly usage windows is at/above this percent (when-available policy only). Not the executor rate-limit pause — click to edit"
                   onCommit={(n) => window.api.schedule.setConfig({ utilizationThreshold: n })}
                 />
               </span>

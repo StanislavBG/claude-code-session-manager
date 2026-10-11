@@ -22,6 +22,7 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | check-unstable-selectors.cjs | `npm run lint:selectors` (in `lint`) | no |
 | install-scheduler-mcp-user-scope.sh | manual (`seedSchedulerMcp.cjs` does the same on first boot, or on the next boot after its marker file is deleted) | no |
 | install-scheduler-watchdog.sh | manual; installs the systemd user timer (cron fallback) | no |
+| move-modules.cjs | manual; `node scripts/move-modules.cjs <mapping.json> [root] [--dry-run]` — idempotent codemod that git-mvs `src/main/lib` modules (+ their tests) into subfolders and rewrites every relative require and `lib/<m>.cjs` path string | no |
 | mint-epic.cjs | manual; joins an existing Epic and prints its prds dir | yes |
 | ops-sweep.cjs | `ops-sweep` SKILL.md (`node "$SM_ROOT/scripts/ops-sweep.cjs" <cwd>`) | yes |
 | postinstall.cjs | npm `postinstall` | yes |

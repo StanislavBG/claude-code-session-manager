@@ -83,6 +83,39 @@ test('uses the LAST rate_limit_event in the log, not the first', () => {
   assert.strictEqual(resolveBindingRateLimitReset(logPath), 999);
 });
 
+test('rejected five_hour event → five_hour reset, not the later seven_day reset', () => {
+  const logPath = writeTmpLog([
+    '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1791174000,"rateLimitType":"five_hour","overageStatus":"rejected","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":1.04,"resetsAt":1791174000},"seven_day":{"utilization":0.84,"resetsAt":1791478800}}}}',
+  ]);
+  assert.strictEqual(resolveBindingRateLimitReset(logPath), 1791174000);
+});
+
+test('rejected seven_day event → seven_day reset (window lookup when top-level resetsAt absent)', () => {
+  const logPath = writeTmpLog([
+    { type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'seven_day', unifiedWindows: {
+      five_hour: { utilization: 0.2, resetsAt: 1791174000 },
+      seven_day: { utilization: 1.01, resetsAt: 1791478800 },
+    } } },
+  ]);
+  assert.strictEqual(resolveBindingRateLimitReset(logPath), 1791478800);
+});
+
+test('allowed-only log (job 1309 shape), seven_day 0.56 → null', () => {
+  const logPath = writeTmpLog([
+    '{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1791757800,"rateLimitType":"five_hour","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.35,"resetsAt":1791757800},"seven_day":{"utilization":0.56,"resetsAt":1792083600}}}}',
+  ]);
+  assert.strictEqual(resolveBindingRateLimitReset(logPath), null);
+});
+
+test('allowed event with a window over 1.0 (overage) → null', () => {
+  const logPath = writeTmpLog([
+    { type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', unifiedWindows: {
+      seven_day: { utilization: 1.1, resetsAt: 1792083600 },
+    } } },
+  ]);
+  assert.strictEqual(resolveBindingRateLimitReset(logPath), null);
+});
+
 test('missing file → null (best-effort, matches readTail contract)', () => {
   assert.strictEqual(resolveBindingRateLimitReset('/nonexistent/path/job.log'), null);
 });

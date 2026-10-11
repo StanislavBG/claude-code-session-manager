@@ -21,17 +21,21 @@ const { readTail } = require('../util/fileTail.cjs');
 const TAIL_BYTES = 64 * 1024;
 
 /**
- * Scans a run log's tail for rate_limit_event entries and returns the
- * UNIX-seconds resetsAt of the window that actually bound (utilization >= 1.0)
- * in the LAST such event. When multiple windows bind in that event, the
- * latest resetsAt wins. Returns null when no rate_limit_event is found, or
- * none of its windows are at/above 1.0 utilization.
+ * Scans a run log's tail for rate_limit_event entries. The REJECTED event is
+ * authoritative (2026-10-11 incident: an allowed-only log with a seven_day
+ * window pause landed on the seven_day reset 4 days out): if any event has
+ * status 'rejected', the LAST one's reset wins — rate_limit_info.resetsAt, else
+ * unifiedWindows[rateLimitType].resetsAt. Otherwise, a last event carrying a
+ * status (allowed / allowed_warning) yields null, even if a window shows
+ * utilization >= 1.0 (overage is not a rejection). Legacy: a last event with
+ * no status falls back to the latest resetsAt among windows at utilization >= 1.0.
  */
 function resolveBindingRateLimitReset(logPath) {
   const text = readTail(logPath, TAIL_BYTES);
   if (!text) return null;
 
-  let lastWindows = null;
+  let lastRejected = null;
+  let lastEvent = null;
   for (const line of text.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed || trimmed[0] !== '{') continue;
@@ -41,12 +45,20 @@ function resolveBindingRateLimitReset(logPath) {
     } catch {
       continue;
     }
-    const windows = event?.rate_limit_info?.unifiedWindows;
-    if (event?.type === 'rate_limit_event' && windows && typeof windows === 'object') {
-      lastWindows = windows;
-    }
+    if (event?.type !== 'rate_limit_event' || !event.rate_limit_info) continue;
+    lastEvent = event.rate_limit_info;
+    if (lastEvent.status === 'rejected') lastRejected = lastEvent;
   }
-  if (!lastWindows) return null;
+
+  if (lastRejected) {
+    if (typeof lastRejected.resetsAt === 'number') return lastRejected.resetsAt;
+    const typed = lastRejected.unifiedWindows?.[lastRejected.rateLimitType]?.resetsAt;
+    return typeof typed === 'number' ? typed : null;
+  }
+  if (!lastEvent || lastEvent.status !== undefined) return null;
+
+  const lastWindows = lastEvent.unifiedWindows;
+  if (!lastWindows || typeof lastWindows !== 'object') return null;
 
   let latestBoundReset = null;
   for (const window of Object.values(lastWindows)) {

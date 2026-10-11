@@ -1,7 +1,7 @@
 /**
  * health.cjs — health check for session-manager Electron app.
  * Verifies: app startup, IPC responsiveness, scheduler health, watchers active.
- * Exported as check() for /local-project-health skill.
+ * Exported as check(); run via `npm run health`.
  */
 
 const fs = require('node:fs');
@@ -643,7 +643,7 @@ function evaluateBuildFreshness({ running = null, installedOnDisk = null, repoHe
  * names the cause and the fix (`claude login`).
  *
  * NON-CRITICAL by design: reported in components.credentials + issues so
- * /local-project-health shows it, but it does not flip status.ok — health must
+ * `npm run health` shows it, but it does not flip status.ok — health must
  * not hard-fail a repo checkout just because THIS machine's token lapsed, and
  * an expired token is an operator action (re-login), not a code defect. Maps:
  *   kind 'auth'   → not ok, actionable `claude login` message (the real block)

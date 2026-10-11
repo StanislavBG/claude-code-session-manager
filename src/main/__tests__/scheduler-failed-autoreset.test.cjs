@@ -23,11 +23,7 @@ const path = require('node:path');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'failed-autoreset-test-'));
 process.env.HOME = tmpHome;
 
-const {
-  selectFailedAutoResetTargets,
-  FAILED_AUTORESET_CAP,
-  failedAutoResetDisabled,
-} = require('../scheduler.cjs');
+const { selectFailedAutoResetTargets, FAILED_AUTORESET_CAP, failedAutoResetDisabled } = require('../scheduler/reviewLadder.cjs');
 
 const MIN_MS = 60_000;
 const THRESHOLD_MS = 10 * MIN_MS;

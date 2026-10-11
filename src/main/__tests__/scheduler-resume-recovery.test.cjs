@@ -14,14 +14,8 @@
 'use strict';
 
 import { test, expect, afterEach } from 'vitest';
-const {
-  selectResumeRecoveryTarget,
-  buildResumeRecoveryPreamble,
-  buildClaudeSpawnArgs,
-  HEADLESS_DISALLOWED_TOOLS,
-  selectAutoFixTargets,
-  spawnInvestigation,
-} = require('../scheduler.cjs');
+const { buildResumeRecoveryPreamble, buildClaudeSpawnArgs, HEADLESS_DISALLOWED_TOOLS, spawnInvestigation } = require('../scheduler.cjs');
+const { selectResumeRecoveryTarget, selectAutoFixTargets } = require('../scheduler/reviewLadder.cjs');
 
 const savedDisable = process.env.SM_RESUME_RECOVERY_DISABLE;
 afterEach(() => {

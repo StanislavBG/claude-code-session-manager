@@ -18,17 +18,8 @@
 // vitest, NOT node:test — this repo's suite is vitest-only (CLAUDE.md).
 import { test } from 'vitest';
 const assert = require('node:assert/strict');
-const {
-  computeJobBudgetMs,
-  classifyBudgetKill,
-  isJobBudgetExempt,
-  shouldKillForBudget,
-  resolveBudgetKillOutcome,
-  selectAutoFixTargets,
-  JOB_BUDGET_FACTOR,
-  JOB_BUDGET_FLOOR_MS,
-  JOB_BUDGET_CEILING_MS,
-} = require('../scheduler.cjs');
+const { computeJobBudgetMs, classifyBudgetKill, isJobBudgetExempt, shouldKillForBudget, resolveBudgetKillOutcome, JOB_BUDGET_FACTOR, JOB_BUDGET_FLOOR_MS, JOB_BUDGET_CEILING_MS } = require('../scheduler.cjs');
+const { selectAutoFixTargets } = require('../scheduler/reviewLadder.cjs');
 
 // ---------- computeJobBudgetMs: both clamps ----------
 

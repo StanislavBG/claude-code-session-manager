@@ -8,12 +8,8 @@
 
 import { test } from 'vitest';
 const assert = require('node:assert/strict');
-const {
-  selectAutoFixTargets, isUnresolvableNeedsReview, isRescanCandidate,
-  healTargetForFix, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH,
-  isEligibleForImmediateAutoFix, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor,
-  applyRcaClassification,
-} = require('../scheduler.cjs');
+const { healTargetForFix, applyRcaClassification } = require('../scheduler.cjs');
+const { selectAutoFixTargets, isUnresolvableNeedsReview, isRescanCandidate, isFixPlanBeyondDepthCap, MAX_INVESTIGATION_DEPTH, isEligibleForImmediateAutoFix, isExhaustedAutoFix, isPlanUnqueued, fixSlugFor } = require('../scheduler/reviewLadder.cjs');
 
 const noSiblingOnDisk = () => false;
 const noRunDir = () => null;

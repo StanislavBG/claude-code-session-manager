@@ -32,12 +32,7 @@ const { writeRunLog } = require('./_helpers/schedulerHarness.cjs');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'stuck-failed-escalation-test-'));
 process.env.HOME = tmpHome;
 
-const {
-  findStuckFailedJobs,
-  STUCK_FAILED_ESCALATE_MS,
-  stuckFailedEscalationDisabled,
-  isRescanCandidate,
-} = require('../scheduler.cjs');
+const { findStuckFailedJobs, STUCK_FAILED_ESCALATE_MS, stuckFailedEscalationDisabled, isRescanCandidate } = require('../scheduler/reviewLadder.cjs');
 
 const DAY_MS = 24 * 60 * 60_000;
 

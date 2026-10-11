@@ -26,24 +26,8 @@ process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'default-eligible-heal-
 const PROJECT_CWD = path.join(process.env.HOME, 'project');
 fs.mkdirSync(PROJECT_CWD, { recursive: true });
 
-const {
-  isRescanCandidate,
-  isTranscriptRescannable,
-  isStrandedAutoFixPark,
-  isEligibleForNeedsReviewAutoResolve,
-  shouldRunPeriodicReverify,
-  selectEvidenceScanTargets,
-  selectAutoFixTargets,
-  selectMechanicalRecoveryTarget,
-  selectResumeRecoveryTarget,
-  applyNeedsReviewAutoResolve,
-  RESCAN_EXCLUDED_VERDICTS,
-  RESCANNABLE_VERDICTS,
-  EVIDENCE_SCAN_MAX_PER_PASS,
-  EVIDENCE_SCAN_MIN_INTERVAL_MS,
-  REVERIFY_INTERVAL_MS,
-  NEEDS_REVIEW_RESOLVE_CAP,
-} = require('../scheduler.cjs');
+const { applyNeedsReviewAutoResolve } = require('../scheduler.cjs');
+const { isRescanCandidate, isTranscriptRescannable, isStrandedAutoFixPark, isEligibleForNeedsReviewAutoResolve, shouldRunPeriodicReverify, selectEvidenceScanTargets, selectAutoFixTargets, selectMechanicalRecoveryTarget, selectResumeRecoveryTarget, RESCAN_EXCLUDED_VERDICTS, RESCANNABLE_VERDICTS, EVIDENCE_SCAN_MAX_PER_PASS, EVIDENCE_SCAN_MIN_INTERVAL_MS, REVERIFY_INTERVAL_MS, NEEDS_REVIEW_RESOLVE_CAP } = require('../scheduler/reviewLadder.cjs');
 const { evaluateBlockingParkHealth } = require('../health.cjs');
 
 const row = (o = {}) => ({ slug: '10-x', status: 'needs_review', runId: 'r1', cwd: PROJECT_CWD, ...o });

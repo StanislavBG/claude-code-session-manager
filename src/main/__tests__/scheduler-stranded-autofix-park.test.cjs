@@ -46,17 +46,8 @@ process.env.HOME = tmpHome;
 const PROJECT_CWD = path.join(tmpHome, 'project');
 fs.mkdirSync(PROJECT_CWD, { recursive: true });
 
-const {
-  isStrandedAutoFixPark,
-  isExhaustedAutoFix,
-  isGuardParkedWithoutAutoFix,
-  isEligibleForNeedsReviewAutoResolve,
-  selectExhaustedNeedsReviewTargets,
-  applyNeedsReviewAutoResolve,
-  computeLooksDone,
-  fixSlugFor,
-  NEEDS_REVIEW_RESOLVE_CAP,
-} = require('../scheduler.cjs');
+const { applyNeedsReviewAutoResolve, computeLooksDone } = require('../scheduler.cjs');
+const { isStrandedAutoFixPark, isExhaustedAutoFix, isGuardParkedWithoutAutoFix, isEligibleForNeedsReviewAutoResolve, selectExhaustedNeedsReviewTargets, fixSlugFor, NEEDS_REVIEW_RESOLVE_CAP } = require('../scheduler/reviewLadder.cjs');
 const { resolvePrdWriteDir } = require('../lib/prdLocations.cjs');
 
 const MIN_MS = 60_000;

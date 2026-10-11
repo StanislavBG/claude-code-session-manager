@@ -34,9 +34,8 @@ const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-mechanical-recovery-te
 process.env.HOME = tmpHome;
 
 const scheduler = require('../scheduler.cjs');
-const {
-  selectMechanicalRecoveryTarget, performMechanicalRecovery, MECHANICALLY_RESOLVABLE_VERDICTS,
-} = scheduler;
+const { performMechanicalRecovery } = scheduler;
+const { selectMechanicalRecoveryTarget, MECHANICALLY_RESOLVABLE_VERDICTS } = require('../scheduler/reviewLadder.cjs');
 const jobWorktree = require('../lib/jobWorktree.cjs');
 
 function initRepo(dir) {

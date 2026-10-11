@@ -42,12 +42,7 @@ const { writeRunLog } = require('./_helpers/schedulerHarness.cjs');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'reverify-guard-test-'));
 process.env.HOME = tmpHome;
 
-const {
-  shouldRunPeriodicReverify,
-  isRescanCandidate,
-  selectAutoFixTargets,
-  selectMechanicalRecoveryTarget,
-} = require('../scheduler.cjs');
+const { shouldRunPeriodicReverify, isRescanCandidate, selectAutoFixTargets, selectMechanicalRecoveryTarget } = require('../scheduler/reviewLadder.cjs');
 
 test('a lone unverified-shaped failed row (no needs_review sibling) fires the periodic pass', () => {
   writeRunLog('run-guard-1', '4056-outcome-stats', ['[scheduler] starting 4056-outcome-stats']); // no result event

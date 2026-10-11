@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest'
 import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
-const { isRescanCandidate } = require('../../src/main/scheduler.cjs') as {
+const { isRescanCandidate } = require('../../src/main/scheduler/reviewLadder.cjs') as {
   isRescanCandidate: (job: unknown) => boolean
 }
 

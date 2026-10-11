@@ -33,7 +33,8 @@ const { execFileSync } = require('node:child_process');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gate-pick-test-'));
 process.env.HOME = tmpHome;
 
-const { selectGateShadowTarget, spawnInvestigation } = require('../scheduler.cjs');
+const { spawnInvestigation } = require('../scheduler.cjs');
+const { selectGateShadowTarget } = require('../scheduler/reviewLadder.cjs');
 const { bustCwdCache } = require('../lib/queueStore.cjs');
 const runtimeState = require('../lib/schedulerRuntimeState.cjs');
 const { GATE_AUTHORITY_VERDICTS } = require('../lib/gateAuthority.cjs');

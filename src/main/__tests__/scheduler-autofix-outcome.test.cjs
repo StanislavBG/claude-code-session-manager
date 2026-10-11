@@ -23,9 +23,7 @@
 'use strict';
 
 import { test, expect } from 'vitest';
-const {
-  selectAutoFixTargets, isExhaustedAutoFix, isPlanUnqueued, isFixPlanDead, fixSlugFor,
-} = require('../scheduler.cjs');
+const { selectAutoFixTargets, isExhaustedAutoFix, isPlanUnqueued, isFixPlanDead, fixSlugFor } = require('../scheduler/reviewLadder.cjs');
 
 const noSiblingOnDisk = () => false;
 

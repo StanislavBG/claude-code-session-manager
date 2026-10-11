@@ -34,13 +34,8 @@ process.env.HOME = tmpHome;
 const PROJECT_CWD = path.join(tmpHome, 'project');
 fs.mkdirSync(PROJECT_CWD, { recursive: true });
 
-const {
-  selectExhaustedNeedsReviewTargets,
-  applyNeedsReviewAutoResolve,
-  NEEDS_REVIEW_RESOLVE_CAP,
-  needsReviewAutoResolveDisabled,
-  resetJobFields,
-} = require('../scheduler.cjs');
+const { applyNeedsReviewAutoResolve, resetJobFields } = require('../scheduler.cjs');
+const { selectExhaustedNeedsReviewTargets, NEEDS_REVIEW_RESOLVE_CAP, needsReviewAutoResolveDisabled } = require('../scheduler/reviewLadder.cjs');
 
 const { pickForProject } = require('../lib/schedulerBatch.cjs');
 

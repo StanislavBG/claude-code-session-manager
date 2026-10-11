@@ -19,7 +19,7 @@
 'use strict';
 
 import { test, expect } from 'vitest';
-const { healRefusalReason } = require('../scheduler.cjs');
+const { healRefusalReason } = require('../scheduler/reviewLadder.cjs');
 
 const CLEAN = { verdict: 'clean', reason: 'no issues detected' };
 

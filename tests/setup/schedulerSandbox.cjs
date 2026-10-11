@@ -16,6 +16,10 @@
 // ESM import (vite-node transforms .cjs setup files like the tests; require('vitest') is rejected).
 import { inject, afterEach } from 'vitest';
 
+// A unit run launched from inside a scheduled job inherits the job's identity env;
+// scrub it so tests see a neutral process. Tests that need these set them explicitly.
+for (const k of ['SM_SCHEDULER_JOB_SLUG', 'SM_SCHEDULER_JOB_MAY_QUEUE', 'SM_PROC_ROLE', 'SM_PROJECT_ROOT']) delete process.env[k];
+
 const env = inject('schedulerSandbox');
 if (env) {
   Object.assign(process.env, env);

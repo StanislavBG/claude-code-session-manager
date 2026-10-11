@@ -46,8 +46,10 @@ src/main/build-info.json
 # store, machine-local, never source. Authored docs under
 # session-manager-operations/ (architecture, manual, design-mocks, reviews,
 # project-brief, project-pages, HUMAN_LEARN, CLAUDE.md) stay tracked.
-session-manager-operations/scheduler/
-session-manager-operations/prompt-sessions/
+session-manager-operations/scheduler/*
+!session-manager-operations/scheduler/README.md
+session-manager-operations/prompt-sessions/*
+!session-manager-operations/prompt-sessions/README.md
 session-manager-operations/feedback/
 session-manager-operations/logs/
 session-manager-operations/ui-prefs/

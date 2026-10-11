@@ -11,7 +11,7 @@ by reading `package.json` directly if that file isn't present yet). Codified fro
 session that ran this exact sequence 4 times by hand, publishing session-manager
 v0.45.1 → v0.47.1 to npm — this skill turns that proven manual procedure into a reusable one.
 
-**Naming convention** (same as `pr-review-sweep` and `issue-address`): sub-skill directories
+**Naming convention**: sub-skill directories
 are prefixed `0-`, `1-`, ... in execution order, so a plain directory listing sorts in DAG
 order without opening any file. The invocable `name:` field stays a clean colon-scoped
 identifier (`builder:diff`) without the numeric prefix.
@@ -83,8 +83,7 @@ identifier (`builder:diff`) without the numeric prefix.
 
 Each step is its own file so it shows up as its own invocation in whatever surface tracks
 skill/tool calls, and so a step can be changed (a different gate command, a new registry
-target) without touching the others — same rationale as `pr-review-sweep` and
-`issue-address`.
+target) without touching the others.
 
 ## What this skill is not
 

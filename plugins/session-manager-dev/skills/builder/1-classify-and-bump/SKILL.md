@@ -26,8 +26,8 @@ commits still means minor; one breaking marker anywhere means major).
 If a meaningful fraction of the commit list has no recognizable `type:` prefix at all (not
 just an unconventional scope — genuinely no prefix, e.g. a bare "wip" or "updates"), **do
 not guess**. Say so explicitly and ask the user which bump to apply, listing the
-unclassifiable commits. This mirrors `pr-review-sweep:classify`'s needs-decision carve-out —
-guessing wrong here ships an incorrect semver bump that's hard to walk back once published.
+unclassifiable commits. This is a needs-decision carve-out: classification stops for a human call instead of
+proceeding — guessing wrong here ships an incorrect semver bump that's hard to walk back once published.
 
 ## Output
 

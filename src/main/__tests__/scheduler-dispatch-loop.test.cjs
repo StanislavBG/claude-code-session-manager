@@ -33,7 +33,7 @@ afterAll(() => {
 });
 
 test('with the billing poll backed off to 480 s, a pending row is still ticked within 30 s', async () => {
-  const { startDispatchLoop } = require('../lib/dispatchLoop.cjs');
+  const { startDispatchLoop } = require('../lib/scheduler/dispatchLoop.cjs');
   await scheduler.writeQueue({
     jobs: [{ slug: `9004-dispatch-loop-${process.pid}`, title: 'x', cwd: tmpHome, status: 'pending', dependsOn: [] }],
     config: {},

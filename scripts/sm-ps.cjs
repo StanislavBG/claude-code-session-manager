@@ -2,7 +2,7 @@
 /**
  * sm-ps.cjs — "what is this process?" for Session Manager's process tree.
  *
- * Lists our renamed processes (comm from lib/smProcNames.cjs / lib/claudeBin.cjs),
+ * Lists our renamed processes (comm from lib/process/smProcNames.cjs / lib/claude/claudeBin.cjs),
  * every process carrying SM_PROC_ROLE in its environment, and all their
  * descendants — which includes the MCP servers `claude` spawns (node/python) that
  * we cannot rename. Those inherit our env, so /proc/<pid>/environ attributes them
@@ -19,7 +19,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { PROC_NAMES } = require('../src/main/lib/smProcNames.cjs');
+const { PROC_NAMES } = require('../src/main/lib/process/smProcNames.cjs');
 
 const ROLE_VAR = 'SM_PROC_ROLE';
 const ATTR_VARS = {

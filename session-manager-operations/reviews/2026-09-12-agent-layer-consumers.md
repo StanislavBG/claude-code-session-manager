@@ -170,7 +170,7 @@ Read `package.json`, `bin/cli.cjs`, and `scripts/postinstall.cjs` directly (not 
 ## How the guard paths actually get INTO another repo's settings.json
 
 **Superseded by the stable-shim mechanism (2026-09-12) — this section described the pre-shim
-write; kept for history, corrected mechanism below.** `src/main/lib/delegationReadiness.cjs`
+write; kept for history, corrected mechanism below.** `src/main/lib/epic/delegationReadiness.cjs`
 still computes the four agent-layer script paths via `path.resolve(__dirname, '..', '..', '..',
 'scripts', ...)` into constants (`PRD_WRITE_GUARD_SCRIPT`, `DESTRUCTIVE_GIT_GUARD_SCRIPT`,
 `INLINE_IMPLEMENTATION_GUARD_SCRIPT`, `SCHEDULER_MCP_SERVER_SCRIPT`), but the guard installers

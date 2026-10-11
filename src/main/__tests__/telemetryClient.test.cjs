@@ -80,11 +80,11 @@ function freshClient(home, profileOverrides) {
   // by pointing the spool at this test's own isolated tmp dir (never a real
   // user's ~/.claude/session-manager).
   process.env.SM_TELEMETRY_SPOOL = path.join(home, '.claude', 'session-manager');
-  for (const p of ['../lib/telemetryClient.cjs', '../config.cjs', '../lib/telemetrySettings.cjs', '../lib/machineProfile.cjs']) {
+  for (const p of ['../lib/telemetry/telemetryClient.cjs', '../config.cjs', '../lib/telemetry/telemetrySettings.cjs', '../lib/machineProfile.cjs']) {
     const resolved = require.resolve(p);
     delete require.cache[resolved];
   }
-  const client = require('../lib/telemetryClient.cjs');
+  const client = require('../lib/telemetry/telemetryClient.cjs');
   const profile = fakeProfile(profileOverrides);
   client._setMachineProfileBuilder(async () => profile);
   return client;
@@ -500,9 +500,9 @@ test('cadence: 23h of hourly ticks send nothing, the tick past 24h sends once an
 
   // Seed lastDailyFlushAt = now, simulating a boot flush that already ran.
   process.env.HOME = home;
-  delete require.cache[require.resolve('../lib/telemetrySettings.cjs')];
+  delete require.cache[require.resolve('../lib/telemetry/telemetrySettings.cjs')];
   delete require.cache[require.resolve('../config.cjs')];
-  const telemetrySettings = require('../lib/telemetrySettings.cjs');
+  const telemetrySettings = require('../lib/telemetry/telemetrySettings.cjs');
   const seedNow = Date.now();
   await telemetrySettings.save({
     ...telemetrySettings.DEFAULTS,
@@ -877,10 +877,10 @@ test('appendRecord() is a no-op under a test runner unless SM_TELEMETRY_SPOOL is
   const home = await mkHome();
   process.env.HOME = home;
   delete process.env.SM_TELEMETRY_SPOOL;
-  for (const p of ['../lib/telemetryClient.cjs', '../config.cjs', '../lib/telemetrySettings.cjs', '../lib/machineProfile.cjs']) {
+  for (const p of ['../lib/telemetry/telemetryClient.cjs', '../config.cjs', '../lib/telemetry/telemetrySettings.cjs', '../lib/machineProfile.cjs']) {
     delete require.cache[require.resolve(p)];
   }
-  const client = require('../lib/telemetryClient.cjs');
+  const client = require('../lib/telemetry/telemetryClient.cjs');
   client._setMachineProfileBuilder(async () => fakeProfile());
 
   expect(process.env.VITEST).toBeTruthy();

@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { resolveEpicEffort, effortArgs } = require('../lib/agentEffortResolve.cjs');
+const { resolveEpicEffort, effortArgs } = require('../lib/claude/agentEffortResolve.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {

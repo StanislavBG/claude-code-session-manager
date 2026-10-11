@@ -71,7 +71,7 @@ test('LIVE_ROOT_LITERAL: home/tmp join in src/main, tests/ (incl. .ts) fails wit
 });
 
 test('LIVE_ROOT_LITERAL: resolver, self, allowlisted, comments, and non-root joins pass', () => {
-  write('src/main/lib/schedulerPaths.cjs', LIVE);
+  write('src/main/lib/scheduler/schedulerPaths.cjs', LIVE);
   write('scripts/check-ops-path-literals.cjs', LIVE);
   write('scripts/allowed.cjs', LIVE);
   write('src/main/comment.cjs', `// ${LIVE}`);

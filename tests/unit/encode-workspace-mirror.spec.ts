@@ -3,7 +3,7 @@ import { createRequire } from 'node:module'
 import { encodeWorkspace } from '../../src/renderer/lib/encodeWorkspace'
 
 const requireCjs = createRequire(import.meta.url)
-const { encodeCwd } = requireCjs('../../src/main/lib/encodeCwd.cjs') as {
+const { encodeCwd } = requireCjs('../../src/main/lib/util/encodeCwd.cjs') as {
   encodeCwd: (cwd: string | null) => string
 }
 

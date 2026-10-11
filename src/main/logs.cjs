@@ -1,7 +1,7 @@
 const { app, ipcMain } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
-const opsErrorLog = require('./lib/opsErrorLog.cjs');
+const opsErrorLog = require('./lib/telemetry/opsErrorLog.cjs');
 
 // Rolling daily files under <userData>/logs/. Anything mtime'd older than
 // RETENTION_MS is pruned at boot; we never compact mid-session, since the

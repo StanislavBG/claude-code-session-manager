@@ -19,7 +19,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const { deriveEpicIdFromPrdPath, resolveEpicPrdWriteDir } = require('../lib/prdLocations.cjs');
+const { deriveEpicIdFromPrdPath, resolveEpicPrdWriteDir } = require('../lib/prd/prdLocations.cjs');
 const { parsePrdRaw, _resetCache } = require('../scheduler/prdParser.cjs');
 const { reconcileSourcePromptId } = require('../scheduler.cjs');
 

@@ -44,7 +44,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { verifyRun } = require('../src/main/runVerify.cjs');
 
-const { runsDir } = require('../src/main/lib/schedulerPaths.cjs');
+const { runsDir } = require('../src/main/lib/scheduler/schedulerPaths.cjs');
 
 const PARK_VERDICTS = new Set(['transcript_errors', 'verify_unavailable']);
 

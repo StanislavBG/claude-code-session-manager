@@ -1,6 +1,6 @@
 /**
  * scheduleJobStatusDrift.test.cjs — guards the mirrored copies of
- * JOB_STATUSES (src/main/lib/scheduleJobSchema.cjs) against silent drift.
+ * JOB_STATUSES (src/main/lib/scheduler/scheduleJobSchema.cjs) against silent drift.
  *
  * The renderer cannot require a .cjs module directly, and src/preload/api.d.ts
  * is types-only (erased at build time, nothing to import at test runtime), so
@@ -23,7 +23,7 @@
 import { test, expect } from 'vitest';
 const fs = require('node:fs');
 const path = require('node:path');
-const { JOB_STATUSES } = require('../lib/scheduleJobSchema.cjs');
+const { JOB_STATUSES } = require('../lib/scheduler/scheduleJobSchema.cjs');
 
 const ROOT = path.join(__dirname, '..', '..', '..');
 

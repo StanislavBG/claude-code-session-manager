@@ -74,8 +74,8 @@ Commit `5f46fd32` (`docs(security): add SECURITY.md and enable private vulnerabi
 (`SECURITY.md` only).
 
 - `SECURITY.md` has all four required sections (Supported versions, Reporting a vulnerability, What to expect,
-  Scope) plus a "Security-relevant surfaces" section citing `src/main/lib/localAdminHttp.cjs`,
-  `src/main/pty.cjs`, `src/main/lib/runClaudeP.cjs` — all three paths verified to exist
+  Scope) plus a "Security-relevant surfaces" section citing `src/main/lib/feedback-remote/localAdminHttp.cjs`,
+  `src/main/pty.cjs`, `src/main/lib/claude/runClaudeP.cjs` — all three paths verified to exist
   (`test -f` on each → OK).
 - Reporting link is `https://github.com/StanislavBG/claude-code-session-manager/security/advisories/new`; no
   personal email address anywhere in the file (`grep -nE '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'

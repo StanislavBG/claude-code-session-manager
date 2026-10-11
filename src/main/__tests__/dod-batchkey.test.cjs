@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
-const { batchKey, reportPathFor, reportExists } = require('../lib/definitionOfDone.cjs');
+const { batchKey, reportPathFor, reportExists } = require('../lib/scheduler/definitionOfDone.cjs');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 

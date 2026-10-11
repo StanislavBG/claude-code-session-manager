@@ -124,7 +124,7 @@ const AGENT_BODY_CHAR_CAP = 6000
 
 /** Strips a leading YAML frontmatter block (`---\n...\n---`), no-op when the
  *  text doesn't open with one. Mirrors the detection rule in
- *  `src/main/lib/prdFrontmatter.cjs`'s `splitFrontmatter` (main can't import
+ *  `src/main/lib/prd/prdFrontmatter.cjs`'s `splitFrontmatter` (main can't import
  *  this renderer module — no ES modules in main — so the same small rule is
  *  duplicated here rather than shared). */
 function stripFrontmatter(raw: string): string {

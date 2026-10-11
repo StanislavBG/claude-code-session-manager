@@ -48,7 +48,7 @@ Writes:
 - The Phone remote section drives `src/main/webRemote.cjs`. The bilko.run relay stays live: never decommission or
   hide it from here (root `CLAUDE.md`).
 - Telemetry is anonymous, on by default and opt-out (`SM_TELEMETRY=0`); see
-  `session-manager-operations/architecture/telemetry.md` and `src/main/lib/telemetrySettings.cjs`.
+  `session-manager-operations/architecture/telemetry.md` and `src/main/lib/telemetry/telemetrySettings.cjs`.
 - App prefs persist to disk through `src/renderer/state/uiChromePrefs.ts`, `src/renderer/lib/uiSettingsPrefs.ts` and
   `src/renderer/lib/appPrefs.ts`, never browser storage (`npm run lint:renderer-storage`).
 

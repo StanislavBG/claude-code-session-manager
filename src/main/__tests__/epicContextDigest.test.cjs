@@ -1,6 +1,6 @@
 /**
  * epicContextDigest.test.cjs — unit tests for buildContextDigest
- * (lib/epicContextDigest.cjs), which composes an Epic's goalText
+ * (lib/epic/epicContextDigest.cjs), which composes an Epic's goalText
  * (active-index.json, via epicMint.cjs) with its most-recent transcript
  * turns (promptSessionTranscript.cjs) into a bounded, real digest string.
  *
@@ -13,8 +13,8 @@ import { test, expect, afterEach } from 'vitest';
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { buildContextDigest, composeExecutorPrompt } = require('../lib/epicContextDigest.cjs');
-const { ensureEpic, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epicMint.cjs');
+const { buildContextDigest, composeExecutorPrompt } = require('../lib/epic/epicContextDigest.cjs');
+const { ensureEpic, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epic/epicMint.cjs');
 const { appendTurn } = require('../promptSessionTranscript.cjs');
 const config = require('../config.cjs');
 

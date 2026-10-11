@@ -54,7 +54,7 @@ beforeAll(() => {
   fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager'), { recursive: true });
   fs.mkdirSync(path.join(tmpHome, '.claude', 'projects'), { recursive: true });
   scheduler = require('../scheduler.cjs');
-  queueStore = require('../lib/queueStore.cjs');
+  queueStore = require('../lib/scheduler/queueStore.cjs');
   billing = require('../usage.cjs');
   originalFetchUsage = billing.fetchUsage;
 });

@@ -34,7 +34,7 @@ Writes:
 ## Page invariants
 
 - Personas are the real `~/.claude/agents/<name>.md` files plus project overlays at `<cwd>/.claude/agents/<name>.md`.
-  The two are merged only by `resolveMergedPersona` in `src/main/lib/personaMerge.cjs`; there is never a second merge.
+  The two are merged only by `resolveMergedPersona` in `src/main/lib/persona-macro/personaMerge.cjs`; there is never a second merge.
 - The page is a full CRUD editor, not read-only (root `CLAUDE.md`, domain law). Every write goes through
   `window.api.agents.savePersona` / `deletePersona` / `removeOverride`, handled in `src/main/agentLibrary.cjs`
   and serialized by `serializePersona` there.
@@ -47,7 +47,7 @@ Writes:
   `src/renderer/lib/effortSupport.ts`; the static lists in `src/renderer/lib/agentRuntimeOptions.ts` are only
   the catalog-null fallback.
 - The `tags` field is the single source of truth shared with Tag Library, and only values in `TAG_LIBRARY`
-  (`src/renderer/lib/tagLibrary.ts`) are accepted by `src/main/lib/agentPersonaSchema.cjs`.
+  (`src/renderer/lib/tagLibrary.ts`) are accepted by `src/main/lib/persona-macro/agentPersonaSchema.cjs`.
 - Persona frontmatter follows Claude Code's agent format; legacy `projects:`/`action:`/`actionLabel:` keys are
   passed through untouched, never edited here.
 

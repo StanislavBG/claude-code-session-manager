@@ -7,7 +7,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const { extractAcSequence, extractAcCommand, resolveGate, parseChain, explainChain } = require('../definitionOfDone.cjs');
+const { extractAcSequence, extractAcCommand, resolveGate, parseChain, explainChain } = require('../scheduler/definitionOfDone.cjs');
 const fixtures = require('./gateFixtures.json');
 
 const ac = (...lines) => ['# Acceptance criteria', '', ...lines, '', '# Out of scope', ''].join('\n');

@@ -52,7 +52,7 @@ const MODULES_TO_RELOAD = [
   '../usage.cjs',
   '../config.cjs',
   '../lib/credentials.cjs',
-  '../lib/usageCircuit.cjs',
+  '../lib/claude/usageCircuit.cjs',
 ];
 
 function purgeRequireCache() {

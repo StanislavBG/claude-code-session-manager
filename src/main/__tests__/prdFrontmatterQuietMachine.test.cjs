@@ -16,7 +16,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const { parsePrdFile, serializePrdFile } = require('../lib/prdFrontmatter.cjs');
+const { parsePrdFile, serializePrdFile } = require('../lib/prd/prdFrontmatter.cjs');
 const { parsePrdRaw, _resetCache } = require('../scheduler/prdParser.cjs');
 
 function mkTmpPrdsDir() {

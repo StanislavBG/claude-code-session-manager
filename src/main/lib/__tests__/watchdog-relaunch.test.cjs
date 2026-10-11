@@ -13,7 +13,7 @@ const {
   readLastHeartbeat,
   readRelaunchState,
   DEFAULT_MAX_RELAUNCH_ATTEMPTS,
-} = require('../watchdogHelpers.cjs');
+} = require('../scheduler/watchdogHelpers.cjs');
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'watchdog-relaunch-test-'));

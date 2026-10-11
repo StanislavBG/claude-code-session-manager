@@ -11,7 +11,7 @@
 // Run: timeout 120 npx vitest run src/main/__tests__/schedulerBatchRootBlocker.test.cjs
 
 const assert = require('node:assert/strict');
-const { pickForProject, DEFAULT_PROJECT_CWD } = require('../lib/schedulerBatch.cjs');
+const { pickForProject, DEFAULT_PROJECT_CWD } = require('../lib/scheduler/schedulerBatch.cjs');
 
 const CWD = DEFAULT_PROJECT_CWD;
 

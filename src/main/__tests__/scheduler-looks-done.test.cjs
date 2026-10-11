@@ -53,8 +53,8 @@ process.env.SM_AUTOFIX_DISABLE = '1';
 
 const schedulerModule = require('../scheduler.cjs');
 const { reverifyNeedsReview, computeLooksDone, applyNeedsReviewAutoResolve, findSatisfyingCommitOnMain } = schedulerModule;
-const { resolveEpicPrdWriteDir } = require('../lib/prdLocations.cjs');
-const { bustCwdCache } = require('../lib/queueStore.cjs');
+const { resolveEpicPrdWriteDir } = require('../lib/prd/prdLocations.cjs');
+const { bustCwdCache } = require('../lib/scheduler/queueStore.cjs');
 
 // ROOT CAUSE of the 'heals exactly as today' quarantine flake under full-suite
 // load: every reverifyNeedsReview() healed/looksDone branch ends with a bare

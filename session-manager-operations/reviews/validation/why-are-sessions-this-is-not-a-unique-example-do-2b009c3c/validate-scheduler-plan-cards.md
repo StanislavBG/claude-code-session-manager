@@ -21,7 +21,7 @@ bumps). Commits per PRD, found via `git log --oneline 6e833690..3271278a -- <pat
 
 - `src/renderer/lib/depSlugResolve.ts:12-14,21-25,38-64` — `bareSlug`, `resolveDepSlug`,
   `canonicalizeDependsOn` all present with exactly the signatures the AC asked for.
-  `resolveDepSlug` mirrors `src/main/lib/depSlugResolve.cjs:17-29`'s rule verbatim (exact match
+  `resolveDepSlug` mirrors `src/main/lib/prd/depSlugResolve.cjs:17-29`'s rule verbatim (exact match
   first, else bare-name match). `canonicalizeDependsOn` builds one `Set<string>` of all slugs
   and one `Map<bareSlug, string[]>` up front (`depSlugResolve.ts:48-56`), then does a single
   pass over jobs/deps — O(jobs + deps), no nested scan. It returns the same object reference

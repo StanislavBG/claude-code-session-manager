@@ -15,7 +15,7 @@ Each artifact has exactly one writer route, reached through its own MCP tool:
 - `project_home_write` -> `POST /admin/project-home/write` -> `home.html`
 - `project_demo_video_write` -> `POST /admin/project-home/demo-video/write` -> `demo-video/index.html`
 
-Both routes live in `src/main/lib/projectHomeAdminRoutes.cjs` and write as writer
+Both routes live in `src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs` and write as writer
 `project-home` — `project-pages` is an `OWNERS` namespace
 (`src/main/lib/opsOwnership.cjs`), so these two routes are the only sanctioned writers.
 
@@ -50,7 +50,7 @@ outside `$HOME` never renders a demo video even if `demo-video/index.html` exist
 ## Who triggers generation
 
 Project Home's two buttons are the built-in Macros in
-`src/main/lib/builtinMacros.cjs`, launched through the same `useMacroLaunch` authority
+`src/main/lib/persona-macro/builtinMacros.cjs`, launched through the same `useMacroLaunch` authority
 the Sessions HOT KEYS strip uses:
 
 - `builtin-project-home` — agent `project-home-builder`, writes via `project_home_write`.

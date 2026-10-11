@@ -18,10 +18,10 @@ const path = require('node:path');
 const http = require('node:http');
 const {
   validateGate, validateFiles, renderFilesSection, renderGateSection,
-} = require('../lib/prdGateFiles.cjs');
-const { buildPrdBody, createPrd, registerAdminRoute } = require('../lib/prdCreate.cjs');
-const { resolveGate } = require('../lib/definitionOfDone.cjs');
-const { createAdminHttp } = require('../lib/localAdminHttp.cjs');
+} = require('../lib/prd/prdGateFiles.cjs');
+const { buildPrdBody, createPrd, registerAdminRoute } = require('../lib/prd/prdCreate.cjs');
+const { resolveGate } = require('../lib/scheduler/definitionOfDone.cjs');
+const { createAdminHttp } = require('../lib/feedback-remote/localAdminHttp.cjs');
 const config = require('../config.cjs');
 const prdParser = require('../scheduler/prdParser.cjs');
 

@@ -13,7 +13,7 @@ import type { NavKey } from '../../lib/navKey'
  * model (CLAUDE.md): the scheduler is scoped to TAB → EPIC → PRD; caps,
  * limits, and runtime policy belong to Session-Manager itself:
  *
- *   - the machine-wide claude -p session pool (lib/sessionSlots.cjs)
+ *   - the machine-wide claude -p session pool (lib/scheduler/sessionSlots.cjs)
  *   - where the global runtime state lives on disk
  *
  * Fire policy / utilization threshold / concurrency cap are deliberately

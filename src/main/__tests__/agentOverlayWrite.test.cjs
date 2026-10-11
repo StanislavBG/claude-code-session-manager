@@ -14,7 +14,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { savePersona, listPersonas, getPersonaBody } = require('../agentLibrary.cjs');
-const { resolvePrdPersonaForSpawn } = require('../lib/agentModelResolve.cjs');
+const { resolvePrdPersonaForSpawn } = require('../lib/claude/agentModelResolve.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {

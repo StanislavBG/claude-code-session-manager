@@ -32,9 +32,9 @@ installed there. The main surfaces worth knowing about:
 
 - **Local admin API** — a loopback-only (`127.0.0.1`) HTTP server, bound to an OS-assigned
   ephemeral port, protected by a bearer token regenerated every app boot.
-  See [`src/main/lib/localAdminHttp.cjs`](src/main/lib/localAdminHttp.cjs).
+  See [`src/main/lib/feedback-remote/localAdminHttp.cjs`](src/main/lib/feedback-remote/localAdminHttp.cjs).
 - **Terminal sessions** — interactive shells spawned via `node-pty`.
   See [`src/main/pty.cjs`](src/main/pty.cjs).
 - **Scheduler `claude -p` jobs** — headless `claude` CLI processes the scheduler spawns to
   execute queued PRDs.
-  See [`src/main/lib/runClaudeP.cjs`](src/main/lib/runClaudeP.cjs).
+  See [`src/main/lib/claude/runClaudeP.cjs`](src/main/lib/claude/runClaudeP.cjs).

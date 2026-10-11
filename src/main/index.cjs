@@ -10,7 +10,7 @@ if (process.env.SM_BOOT_DIAG === '1') {
     process.stderr.write(`[boot-diag] failed: ${err && err.message}\n`);
   }
 }
-const { PROC_NAMES, setProcessTitle, inhibitHolderShell } = require('./lib/smProcNames.cjs');
+const { PROC_NAMES, setProcessTitle, inhibitHolderShell } = require('./lib/process/smProcNames.cjs');
 // Self-describing `comm` in System Monitor (pn-03). process.argv is a JS copy
 // made at startup, so the argv-memory overwrite below never affects the
 // `process.argv.includes('--simple')` read further down.
@@ -23,10 +23,10 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const { schemas, validated } = require('./ipcSchemas.cjs');
 const { createProjectFolder } = require('./lib/projectFolder.cjs');
-const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
-const { applyLoginShellPath } = require('./lib/loginShellPath.cjs');
-const { terminateLosingInstance } = require('./lib/singleInstanceGuard.cjs');
-const { acquireSchedulerOwnership, releaseSchedulerOwnership } = require('./lib/instanceLock.cjs');
+const { cleanChildEnv } = require('./lib/process/cleanEnv.cjs');
+const { applyLoginShellPath } = require('./lib/process/loginShellPath.cjs');
+const { terminateLosingInstance } = require('./lib/process/singleInstanceGuard.cjs');
+const { acquireSchedulerOwnership, releaseSchedulerOwnership } = require('./lib/process/instanceLock.cjs');
 const { manager: ptyManager, registerPtyHandlers } = require('./pty.cjs');
 const configMgr = require('./config.cjs');
 const transcripts = require('./transcripts.cjs');
@@ -57,30 +57,30 @@ crashDiagnostics.startCrashReporter();
 const voiceHotkey = require('./voiceHotkey.cjs');
 const voiceWizard = require('./voiceWizard.cjs');
 const scheduler = require('./scheduler.cjs');
-const { createAdminHttp } = require('./lib/localAdminHttp.cjs');
-const prdCreate = require('./lib/prdCreate.cjs');
-const prdAdminRoutes = require('./lib/prdAdminRoutes.cjs');
-const projectHomeAdminRoutes = require('./lib/projectHomeAdminRoutes.cjs');
-const macroAdminRoutes = require('./lib/macroAdminRoutes.cjs');
+const { createAdminHttp } = require('./lib/feedback-remote/localAdminHttp.cjs');
+const prdCreate = require('./lib/prd/prdCreate.cjs');
+const prdAdminRoutes = require('./lib/prd/prdAdminRoutes.cjs');
+const projectHomeAdminRoutes = require('./lib/feedback-remote/projectHomeAdminRoutes.cjs');
+const macroAdminRoutes = require('./lib/feedback-remote/macroAdminRoutes.cjs');
 const { smfileResponseHeaders, shouldBlockFrameNavigation } = require('./lib/smfileHeaders.cjs');
-const { appendAuditEvent } = require('./lib/auditLog.cjs');
+const { appendAuditEvent } = require('./lib/telemetry/auditLog.cjs');
 const chatRunner = require('./chatRunner.cjs');
 const promptSessionEvents = require('./promptSessionEvents.cjs');
-const activeIndexMerge = require('./lib/activeIndexMerge.cjs');
-const promptSessionsCreateEpic = require('./lib/promptSessionsCreateEpic.cjs');
-const customerFeedbackIpc = require('./lib/customerFeedbackIpc.cjs');
-const epicWorktreeMint = require('./lib/epicWorktreeMint.cjs');
-const epicWorktreeMerge = require('./lib/epicWorktreeMerge.cjs');
-const epicWorktreeProjectConfig = require('./lib/epicWorktreeProjectConfig.cjs');
-const macroLibrary = require('./lib/macroLibrary.cjs');
-const { resolveModelCatalog } = require('./lib/modelCatalog.cjs');
-const { checkDelegationReadiness, ensureGuardsInstalled, installPrdWriteGuard, installDestructiveGitGuard, installInlineImplementationGuard, installSelfScheduleGuard } = require('./lib/delegationReadiness.cjs');
+const activeIndexMerge = require('./lib/epic/activeIndexMerge.cjs');
+const promptSessionsCreateEpic = require('./lib/epic/promptSessionsCreateEpic.cjs');
+const customerFeedbackIpc = require('./lib/feedback-remote/customerFeedbackIpc.cjs');
+const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
+const epicWorktreeMerge = require('./lib/epic/epicWorktreeMerge.cjs');
+const epicWorktreeProjectConfig = require('./lib/epic/epicWorktreeProjectConfig.cjs');
+const macroLibrary = require('./lib/persona-macro/macroLibrary.cjs');
+const { resolveModelCatalog } = require('./lib/claude/modelCatalog.cjs');
+const { checkDelegationReadiness, ensureGuardsInstalled, installPrdWriteGuard, installDestructiveGitGuard, installInlineImplementationGuard, installSelfScheduleGuard } = require('./lib/epic/delegationReadiness.cjs');
 const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
-const upgradeDrain = require('./lib/upgradeDrain.cjs');
+const upgradeDrain = require('./lib/scheduler/upgradeDrain.cjs');
 const { writeGuardShims } = require('./lib/guardShims.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES } = require('./lib/mcpToolCatalog.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
-const crossProjectFeedback = require('./lib/crossProjectFeedback.cjs');
+const crossProjectFeedback = require('./lib/feedback-remote/crossProjectFeedback.cjs');
 const adminHttp = createAdminHttp();
 scheduler.registerAdminRoutes(adminHttp);
 prdCreate.registerAdminRoute(adminHttp, scheduler.remote);
@@ -90,9 +90,9 @@ macroAdminRoutes.registerAdminRoute(adminHttp, { onChanged: () => broadcastMacro
 chatRunner.registerAdminRoute(adminHttp);
 // Project-to-project feedback conduit — the app is the only process holding
 // several projects' operations roots open, so it performs the cross-folder
-// write (lib/crossProjectFeedback.cjs).
+// write (lib/feedback-remote/crossProjectFeedback.cjs).
 crossProjectFeedback.registerAdminRoute(adminHttp);
-require('./lib/customerFeedbackAdminRoutes.cjs').registerAdminRoute(adminHttp);
+require('./lib/feedback-remote/customerFeedbackAdminRoutes.cjs').registerAdminRoute(adminHttp);
 const supervisor = require('./supervisor.cjs');
 const watchers = require('./watchers.cjs');
 const queueOps = require('./queueOps.cjs');
@@ -104,17 +104,17 @@ const { getSeedStatus } = require('./seedStatus.cjs');
 const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
 const { registerHistoryAggregatorHandlers, finalizeClosedDays, refreshIntradayToday } = require('./historyAggregator.cjs');
-const runLogRetention = require('./lib/runLogRetention.cjs');
+const runLogRetention = require('./lib/scheduler/runLogRetention.cjs');
 const { registerHistoryDashboardHandlers } = require('./historyDashboard.cjs');
-const { tryAcquireLock, releaseLock, DEFAULT_LOCK_PATH } = require('./lib/watchdogHelpers.cjs');
+const { tryAcquireLock, releaseLock, DEFAULT_LOCK_PATH } = require('./lib/scheduler/watchdogHelpers.cjs');
 const { createIntradayRefresh } = require('./lib/intradayRefresh.cjs');
-const schedulerConfig = require('./lib/schedulerConfig.cjs');
+const schedulerConfig = require('./lib/scheduler/schedulerConfig.cjs');
 const memoryTool = require('./memoryTool.cjs');
 const { registerMemoryAggregateIpc } = require('./memoryAggregate.cjs');
 const { registerProjectBriefIpc } = require('./projectBrief.cjs');
 const { registerProjectPagesIpc, attachWindow: attachProjectPagesWindow, closeAllOutputWatchers: closeAllProjectPagesWatchers } = require('./projectPages.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
-const { computeEpicDelegationStats } = require('./lib/epicDelegationStats.cjs');
+const { computeEpicDelegationStats } = require('./lib/epic/epicDelegationStats.cjs');
 const agentMemory = require('./agentMemory.cjs');
 const git = require('./git.cjs');
 const heapSnapshot = require('./heapSnapshot.cjs');
@@ -126,12 +126,12 @@ const { registerAgentsHandlers } = require('./agentsIpc.cjs');
 const { registerTelemetryHandlers } = require('./telemetryIpc.cjs');
 const { registerUpdaterIpc } = require('./updaterIpc.cjs');
 const { listExchanges } = require('./exchanges.cjs');
-const { resolveClaudeBin } = require('./lib/claudeBin.cjs');
+const { resolveClaudeBin } = require('./lib/claude/claudeBin.cjs');
 const { checkInsideHome, assertInsideHome } = require('./lib/insideHome.cjs');
 const { openInEditor, openFileInEditor, openInFinder, openInTerminal, runInTerminal } = require('./lib/openExternalApp.cjs');
 const { checkPrereqs } = require('./lib/prereqs.cjs');
-const { rebuildActiveIndex } = require('./lib/activeIndexRebuild.cjs');
-const { activeIndexPath: promptSessionsActiveIndexPath } = require('./lib/epicMint.cjs');
+const { rebuildActiveIndex } = require('./lib/epic/activeIndexRebuild.cjs');
+const { activeIndexPath: promptSessionsActiveIndexPath } = require('./lib/epic/epicMint.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
 const { scheduleBootSelfHeal } = require('./lib/bootSelfHeal.cjs');
 
@@ -348,7 +348,7 @@ function relaunchViaNpx() {
 
 /**
  * rebootApp({force}) — restart is a REQUEST that drains first and never kills
- * (lib/upgradeDrain.cjs): dispatch pauses, running jobs finish, then the
+ * (lib/scheduler/upgradeDrain.cjs): dispatch pauses, running jobs finish, then the
  * scheduler's heartbeat-driven drain calls performReboot(). `force: true`
  * keeps the old immediate behaviour (kills running executors) for humans who
  * accept the cost.
@@ -474,7 +474,7 @@ function createWindow() {
     // known project has already accumulated, marking exactly what's
     // CONFIRMED delivered. Fired after the window is shown (never blocks
     // startup) and yields between files internally. See telemetryBacklog.cjs.
-    require('./lib/telemetryBacklog.cjs')
+    require('./lib/telemetry/telemetryBacklog.cjs')
       .bootDrain({ appVersion: app.getVersion() })
       .catch((e) => {
         logs.writeLine({ scope: 'telemetry', level: 'warn', message: 'telemetryBacklog.bootDrain failed', meta: { error: e?.message } });
@@ -639,7 +639,7 @@ ipcMain.handle('app:delegation-readiness', validated(schemas.delegationReadiness
 // session-manager-operations/logs/errors-<date>.jsonl, same shape as every
 // other structured error line.
 function logGuardInstallAttempt(guard, cwd, outcome) {
-  const opsErrorLog = require('./lib/opsErrorLog.cjs');
+  const opsErrorLog = require('./lib/telemetry/opsErrorLog.cjs');
   opsErrorLog.appendError({
     cwd,
     scope: 'delegationReadinessGuardInstall',
@@ -1204,14 +1204,14 @@ app.whenReady().then(async () => {
 
   process.on('uncaughtException', (err) => {
     try {
-      require('./lib/telemetryClient.cjs').reportError({ name: 'uncaughtException', msg: err?.message, stack: err?.stack });
+      require('./lib/telemetry/telemetryClient.cjs').reportError({ name: 'uncaughtException', msg: err?.message, stack: err?.stack });
     } catch { /* telemetry must never break the existing handling below */ }
     logs.writeLine({ scope: 'main', level: 'error', message: 'uncaughtException', meta: { error: err?.message, stack: err?.stack } });
   });
   process.on('unhandledRejection', (reason) => {
     const r = reason instanceof Error ? { error: reason.message, stack: reason.stack } : { reason: String(reason) };
     try {
-      require('./lib/telemetryClient.cjs').reportError({ name: 'unhandledRejection', msg: r.error || r.reason, stack: r.stack });
+      require('./lib/telemetry/telemetryClient.cjs').reportError({ name: 'unhandledRejection', msg: r.error || r.reason, stack: r.stack });
     } catch { /* telemetry must never break the existing handling below */ }
     logs.writeLine({ scope: 'main', level: 'error', message: 'unhandledRejection', meta: r });
   });
@@ -1219,7 +1219,7 @@ app.whenReady().then(async () => {
   // Telemetry boot sequence: flush('boot') always, flush('version-change')
   // when detected, and the once-per-machine install upsert (app_installs) when
   // due (version bump or 30-day liveness heartbeat). See telemetryBoot.cjs.
-  require('./lib/telemetryBoot.cjs')
+  require('./lib/telemetry/telemetryBoot.cjs')
     .bootSequence({
       appVersion: app.getVersion(),
       installChannel: require('./lib/machineProfile.cjs').resolveInstallChannel({ appPath: app.getAppPath() }),
@@ -1472,7 +1472,7 @@ app.whenReady().then(async () => {
   }, 30_000);
   // Keep TODAY's rollup line current so the History dashboard never needs to
   // fall back to a live transcript scan. Shares the same O_EXCL lock file as
-  // the external watchdog's finalize pass (src/main/lib/watchdogHelpers.cjs)
+  // the external watchdog's finalize pass (src/main/lib/scheduler/watchdogHelpers.cjs)
   // so the two never interleave writes to the rollup; a contended lock just
   // means this tick's refresh is skipped (harmless — the next tick retries).
   const intradayTimer = setInterval(runIntradayRefresh, schedulerConfig.HISTORY_INTRADAY_REFRESH_MS);
@@ -1575,5 +1575,5 @@ app.on('before-quit', () => {
   // Best-effort delivery attempt for whatever telemetry accumulated this run.
   // flush() only removes records it actually delivered — an interrupted or
   // failed attempt leaves the queue file intact for the next boot's flush.
-  require('./lib/telemetryClient.cjs').flush('quit').catch(() => {});
+  require('./lib/telemetry/telemetryClient.cjs').flush('quit').catch(() => {});
 });

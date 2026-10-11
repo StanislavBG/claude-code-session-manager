@@ -152,7 +152,7 @@ Verified by direct grep (not from the sub-agent report alone): `rawSessionModel.
 |---|---|---|---|
 | `billing-cache.json` | `src/main/usage.cjs:107,146` | Cached Claude Code billing/usage totals | GLOBAL, single file |
 | `scheduled-plans/queue.json` | `src/main/scheduler.cjs:271,560` | The scheduler's job queue (all projects) | GLOBAL, single file |
-| `scheduled-plans/prds/<slug>.md` | write via `remote.writePrd` (`scheduler.cjs:3370`, called from `src/main/lib/prdCreate.cjs:140`); rename/edit via `config.writeTextAtomic` (`src/main/queueOps.cjs:421`) | Individual PRD bodies | one file per PRD, colocated in one global dir |
+| `scheduled-plans/prds/<slug>.md` | write via `remote.writePrd` (`scheduler.cjs:3370`, called from `src/main/lib/prd/prdCreate.cjs:140`); rename/edit via `config.writeTextAtomic` (`src/main/queueOps.cjs:421`) | Individual PRD bodies | one file per PRD, colocated in one global dir |
 | `scheduled-plans/prds-archived/<ISO-ts>/<slug>.md` | `src/main/queueOps.cjs:45,220` (`fsp.rename`, not `writeJson`) | Archived/completed PRDs | per-PRD |
 | `scheduled-plans/runs/<runId>/<slug>.meta.json` | `src/main/scheduler.cjs:269,1344,1366,1388,1537,1563` | Per-job-run execution metadata (exit code, timing, sessionId, error) | per job run |
 | `scheduler-state.json` | `src/main/scheduler.cjs:272,486` (verified: `486` writes via `config.writeJsonSync`) | Global scheduler runtime state | GLOBAL, single file |
@@ -163,7 +163,7 @@ Verified by direct grep (not from the sub-agent report alone): `rawSessionModel.
 | `browser/history.json` | `src/main/browserView.cjs:34-35,64` | In-app browser tab URL/nav history | GLOBAL, single file |
 | `browser/zoom.json` | `src/main/browserView.cjs:36,297` | In-app browser zoom factor | GLOBAL, single file |
 | `browser-agent-api.json` (+ `.dev.json`/`.e2e.json`) | `src/main/browserAgentServer.cjs:47,58,61,126,133` | Local browser-agent HTTP server port+token (chmod 0600) | GLOBAL, mode-scoped |
-| `admin-api.json` (+ `.dev.json`/`.e2e.json`) | `src/main/lib/localAdminHttp.cjs:41,53,56,118,125` | Local admin HTTP server port+token (chmod 0600) | GLOBAL, mode-scoped |
+| `admin-api.json` (+ `.dev.json`/`.e2e.json`) | `src/main/lib/feedback-remote/localAdminHttp.cjs:41,53,56,118,125` | Local admin HTTP server port+token (chmod 0600) | GLOBAL, mode-scoped |
 | `web-remote.json` | `src/main/webRemote.cjs:44-46,242` | Web-remote pairing/device config (chmod 0600) | GLOBAL, single file |
 | `logs/remote-audit-<YYYYMMDD>.log` | `src/main/webRemote.cjs:47-49,250,253` | Web-remote audit log (`fs.appendFile`, not writeJson — noted for completeness) | GLOBAL, day-partitioned |
 | `history-rollup.jsonl` | `src/main/lib/historyRollup.cjs:32,132` | Compacted history-run aggregates | GLOBAL, single JSONL file |

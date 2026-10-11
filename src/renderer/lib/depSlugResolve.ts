@@ -1,5 +1,5 @@
 /**
- * depSlugResolve — renderer-side port of src/main/lib/depSlugResolve.cjs's
+ * depSlugResolve — renderer-side port of src/main/lib/prd/depSlugResolve.cjs's
  * `dependsOn` slug-resolution rule, so the Scheduler UI can match a
  * bare-authored dependsOn entry (e.g. `web-export-preset-and-git`) to the
  * real, NN-prefixed job slug the allocator handed its sibling PRD (e.g.

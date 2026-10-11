@@ -11,7 +11,7 @@
 // Run: timeout 120 npx vitest run src/main/__tests__/scheduler-cross-project-batch.test.cjs
 
 const assert = require('node:assert/strict');
-const { pickNextBatch } = require('../lib/schedulerBatch.cjs');
+const { pickNextBatch } = require('../lib/scheduler/schedulerBatch.cjs');
 
 function job(slug, status, cwd, parallelGroup) {
   return { slug, status, cwd, parallelGroup, dependsOn: [] };

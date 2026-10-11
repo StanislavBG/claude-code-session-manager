@@ -20,7 +20,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { makeFixtureCwd: harnessMakeFixtureCwd } = require('./_helpers/schedulerHarness.cjs');
 const { remote } = require('../scheduler.cjs');
-const { ensureEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epicMint.cjs');
+const { ensureEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epic/epicMint.cjs');
 const config = require('../config.cjs');
 
 const tmpDirs = [];

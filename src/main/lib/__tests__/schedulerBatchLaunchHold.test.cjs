@@ -2,16 +2,16 @@
 
 // Run: timeout 120 npx vitest run src/main/lib/__tests__/schedulerBatchLaunchHold.test.cjs
 //
-// The launch circuit breaker (lib/launchFailure.cjs, issue #11) hands the
+// The launch circuit breaker (lib/scheduler/launchFailure.cjs, issue #11) hands the
 // picker a Map of slug → hold reason. A held row must be invisible to every
 // pick — it must NOT shadow a pickable sibling behind it, must not make a
 // project a round-robin candidate on its own, and must not be offered as a
 // quiet-machine job — while still surfacing as a per-row hold for the UI.
 
 const assert = require('node:assert/strict');
-const { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD } = require('../schedulerBatch.cjs');
+const { pickForProject, pickNextBatch, DEFAULT_PROJECT_CWD } = require('../scheduler/schedulerBatch.cjs');
 const { computeLaunchHolds } = require('../../scheduler.cjs');
-const lf = require('../launchFailure.cjs');
+const lf = require('../scheduler/launchFailure.cjs');
 
 const CWD = DEFAULT_PROJECT_CWD;
 

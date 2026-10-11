@@ -14,7 +14,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const counters = require('../telemetryCounters.cjs');
+const counters = require('../telemetry/telemetryCounters.cjs');
 
 const tmpDirs = [];
 let originalHome;
@@ -42,11 +42,11 @@ async function mkHome() {
 }
 
 function freshClient() {
-  for (const p of ['../telemetryClient.cjs', '../../config.cjs', '../telemetrySettings.cjs', '../machineProfile.cjs']) {
+  for (const p of ['../telemetry/telemetryClient.cjs', '../../config.cjs', '../telemetry/telemetrySettings.cjs', '../machineProfile.cjs']) {
     const resolved = require.resolve(p);
     delete require.cache[resolved];
   }
-  const client = require('../telemetryClient.cjs');
+  const client = require('../telemetry/telemetryClient.cjs');
   client._setMachineProfileBuilder(async () => ({
     appVersion: '0.83.0', platform: 'linux', arch: 'x64', machineDigest: 'deadbeefcafe',
   }));

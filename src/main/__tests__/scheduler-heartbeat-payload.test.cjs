@@ -10,9 +10,9 @@
 
 import { test, expect, beforeEach, vi } from 'vitest';
 const fs = require('node:fs');
-const schedulerPaths = require('../lib/schedulerPaths.cjs');
+const schedulerPaths = require('../lib/scheduler/schedulerPaths.cjs');
 const scheduler = require('../scheduler.cjs');
-const { heartbeatFresh } = require('../lib/watchdogHelpers.cjs');
+const { heartbeatFresh } = require('../lib/scheduler/watchdogHelpers.cjs');
 const { readFreshHeartbeat } = require('../health.cjs');
 
 const HB = () => schedulerPaths.heartbeatPath();

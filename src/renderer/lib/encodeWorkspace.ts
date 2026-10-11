@@ -1,5 +1,5 @@
 /**
- * Renderer-side mirror of main/lib/encodeCwd.cjs.
+ * Renderer-side mirror of main/lib/util/encodeCwd.cjs.
  *
  * The Memory tab needs to derive the workspace label BEFORE calling
  * memory.list() so the toolbar can show "Workspace · <label>" while the
@@ -7,7 +7,7 @@
  * loading state.
  *
  * Invariant: this function MUST produce the same output as
- * `src/main/lib/encodeCwd.cjs::encodeCwd(cwd)`. Pinned by
+ * `src/main/lib/util/encodeCwd.cjs::encodeCwd(cwd)`. Pinned by
  * tests/unit/encode-workspace-mirror.spec.ts.
  */
 export function encodeWorkspace(cwd: string | null): string {

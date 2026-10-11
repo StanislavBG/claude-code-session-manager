@@ -35,7 +35,7 @@ beforeAll(() => {
   ({ manager } = require('../pty.cjs'));
   nodePty = require('node-pty');
   originalSpawn = nodePty.spawn;
-  telemetryCounters = require('../lib/telemetryCounters.cjs');
+  telemetryCounters = require('../lib/telemetry/telemetryCounters.cjs');
 });
 
 afterAll(() => {

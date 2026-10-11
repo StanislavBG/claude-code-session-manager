@@ -11,7 +11,7 @@
 // Exit: 0 = no findings, 1 = findings. --json prints only the findings array.
 
 const { allProjectCwds } = require('../src/main/lib/activeSessions.cjs')
-const { scanEpicTranscripts } = require('../src/main/lib/epicTranscriptDiagnostic.cjs')
+const { scanEpicTranscripts } = require('../src/main/lib/epic/epicTranscriptDiagnostic.cjs')
 
 const json = process.argv.includes('--json')
 // The resolver logs progress via console.log; keep stdout clean for --json.

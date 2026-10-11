@@ -23,7 +23,7 @@ const path = require('node:path');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-opsroot-home-'));
 process.env.HOME = tmpHome;
 
-const queueStore = require('../queueStore.cjs');
+const queueStore = require('../scheduler/queueStore.cjs');
 
 const tmpDirs = [tmpHome];
 afterEach(async () => {

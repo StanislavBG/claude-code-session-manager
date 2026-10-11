@@ -35,8 +35,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn } = require('node:child_process');
-const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
-const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
+const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs');
 const { writeJsonSync } = require('./config.cjs');
 const { nodeSpawnSpec } = require('./lib/appRuntime.cjs');
 

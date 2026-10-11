@@ -30,7 +30,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs } = require('../lib/prdLocations.cjs');
+const { ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs } = require('../lib/prd/prdLocations.cjs');
 const { findPrdDirForJob, archivedTwinExists } = require('../scheduler/prdPaths.cjs');
 
 const tmpDirs = [];

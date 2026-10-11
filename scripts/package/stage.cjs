@@ -11,7 +11,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 const REMOVED_DEPS = ['electron', '@electron/rebuild'];
-// Read at runtime by src/main/lib/modelCatalog.cjs but not in package.json `files`.
+// Read at runtime by src/main/lib/claude/modelCatalog.cjs but not in package.json `files`.
 const EXTRA_PATHS = ['src/renderer/data/'];
 
 function stagePackageJson(rootPkg) {

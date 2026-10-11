@@ -40,7 +40,7 @@ function emit(tabId, data) {
 }
 
 function decryptAll() {
-  const { decryptBox } = require('../lib/remoteE2eCrypto.cjs')
+  const { decryptBox } = require('../lib/feedback-remote/remoteE2eCrypto.cjs')
   return sent.map((m) => {
     expect(m.type).toBe('e2e:box')
     return JSON.parse(decryptBox(m.payload.nonce, m.payload.ciphertext, sessionKey))

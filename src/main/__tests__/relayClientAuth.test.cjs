@@ -11,7 +11,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
-const { createRelayClientAuth, RELAY_CLIENT_API_BASE } = require('../lib/relayClientAuth.cjs')
+const { createRelayClientAuth, RELAY_CLIENT_API_BASE } = require('../lib/feedback-remote/relayClientAuth.cjs')
 
 const tmpDirs = []
 function tmpTokenPath() {

@@ -68,7 +68,7 @@ beforeAll(() => {
   fs.mkdirSync(path.join(tmpHome, '.claude', 'projects'), { recursive: true });
   scheduler = require('../scheduler.cjs');
   starvation = require('../scheduler/starvation.cjs');
-  queueStore = require('../lib/queueStore.cjs');
+  queueStore = require('../lib/scheduler/queueStore.cjs');
 });
 
 afterAll(() => {

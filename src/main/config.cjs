@@ -23,9 +23,9 @@ const { assertOpsWrite, opsPath, OWNERS } = require('./lib/opsOwnership.cjs');
 const chokidar = require('chokidar');
 const logs = require('./logs.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
-const { expandHome } = require('./lib/expandHome.cjs');
+const { expandHome } = require('./lib/util/expandHome.cjs');
 const { listReferencedFiles } = require('./lib/importReferences.cjs');
-const atomicFs = require('./lib/atomicFs.cjs');
+const atomicFs = require('./lib/util/atomicFs.cjs');
 
 /** Map<watchKey, {watcher, refCount}> — one chokidar watcher per path (+ depth, see watchKeyOf). */
 const watchers = new Map();

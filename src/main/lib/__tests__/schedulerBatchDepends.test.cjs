@@ -11,7 +11,7 @@
 
 // vitest globals (test) — same convention as the other .cjs tests.
 const assert = require('node:assert/strict');
-const { pickForProject, findBlockingDep, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('../schedulerBatch.cjs');
+const { pickForProject, findBlockingDep, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('../scheduler/schedulerBatch.cjs');
 
 const CWD = DEFAULT_PROJECT_CWD;
 

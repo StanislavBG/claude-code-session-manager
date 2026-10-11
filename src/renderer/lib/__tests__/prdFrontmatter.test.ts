@@ -304,7 +304,7 @@ describe('prdFrontmatter planId round-trip (renderer + main parser)', () => {
   })
   it('main parser round-trips planId byte-identical and drops garbage', async () => {
     // @ts-expect-error — CJS main module has no type declarations
-    const main = await import('../../../main/lib/prdFrontmatter.cjs') as any
+    const main = await import('../../../main/lib/prd/prdFrontmatter.cjs') as any
     const { frontmatter, body } = main.parsePrdFile(text)
     expect(frontmatter.planId).toBe('pl-abc123-ff00aa')
     expect(main.serializePrdFile(frontmatter, body)).toBe(text)

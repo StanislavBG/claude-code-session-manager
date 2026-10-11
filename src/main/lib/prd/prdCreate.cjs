@@ -1,0 +1,695 @@
+/**
+ * prdCreate.cjs — PRD-body builder + create-prd admin HTTP route (PRD 549,
+ * gh-issue-6; route consolidated here from the former standalone admin HTTP
+ * server module by PRD 689). buildPrdBody/deriveSlugFromTitle/readStandards are pure
+ * functions: no filesystem writes, no NN allocation, no HTTP. registerAdminRoute
+ * owns orchestration (auth is the injected transport's job, cwd validation
+ * via config.cjs's validatePath, NN allocation via the injected remote,
+ * writing via remote.writePrd -> config.cjs's writeTextAtomic).
+ *
+ * Neither this route nor the /develop skill embeds standards.md's contents
+ * anymore — both just point the headless executor at STANDARDS_PATH with an
+ * instruction to read it before starting. There's nothing to go stale: the
+ * executor always reads the live file at run time, same one-concept-one-
+ * implementation reasoning that keeps the two PRD-creation paths (admin
+ * HTTP route, chat:create-prd IPC) in sync.
+ */
+'use strict';
+
+const fsp = require('node:fs/promises');
+const path = require('node:path');
+const { schemas, PRD_CREATE_SLUG_RE } = require('../../ipcSchemas.cjs');
+const { kebabCase } = require('../util/kebabCase.cjs');
+const config = require('../../config.cjs');
+const { expandHome } = require('../util/expandHome.cjs');
+const { readBody, sendJson } = require('../feedback-remote/localAdminHttp.cjs');
+const { readActiveIndex } = require('../epic/epicMint.cjs');
+const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
+const { resolveProjectContext } = require('../projectRootResolve.cjs');
+const { fixChainDepthOf, baseSlugOf } = require('../scheduler/fixChainDepth.cjs');
+const { DEFAULT_PRD_AGENT_TYPE, assertAgentTypeWritable } = require('./prdAgentType.cjs');
+const { resolveDepSlug, findNearMatches } = require('./depSlugResolve.cjs');
+const { isFixPlanSlug } = require('../scheduler/fixPlanSlug.cjs');
+const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
+const { sizingWarnings } = require('./prdSizing.cjs');
+const { validateGate, validateFiles, renderFilesSection, renderGateSection } = require('./prdGateFiles.cjs');
+const { resolveGate, parseChain, isNoneGate } = require('../scheduler/definitionOfDone.cjs');
+
+// A caller-supplied slug that already starts with its own `NN-` (e.g.
+// "254-perf-x") used to silently become the double-prefixed row
+// "254-254-perf-x" once allocateParallelGroup() prepended the REAL
+// allocated NN — PRD_CREATE_SLUG_RE only enforces kebab-case shape, so it
+// never caught this. Refused outright rather than auto-stripped: silently
+// rewriting the caller's slug would hide the same mistake the old behavior
+// hid, just one layer further down.
+const SLUG_HAS_NN_PREFIX_RE = /^(\d+)-/;
+
+// Fix-chain depth cap (PRD 1113): a fix-of-a-fix (depth >= 2) is refused at
+// this shared write path rather than caught later — scheduler.cjs's
+// MAX_INVESTIGATION_DEPTH=1 caps the auto-fix loop's OWN recursion the same
+// way, so the two limits must stay numerically consistent (depth 1 allowed,
+// depth 2 refused). This guard exists because that auto-fix cap only ever
+// sees PRDs `spawnInvestigation` itself authors; a human or planner session
+// authoring a `*-fix-fix-*` slug through this API bypasses it entirely —
+// which is exactly what happened on starry-night-ships (see PRD 1113's Goal).
+const FIX_CHAIN_DEPTH_CAP = 1;
+
+const STANDARDS_PATH = path.join(
+  __dirname, '..', '..', '..', '..',
+  'plugins', 'session-manager-dev', 'skills', 'develop', 'standards.md',
+);
+
+async function readStandards() {
+  return fsp.readFile(STANDARDS_PATH, 'utf8');
+}
+
+/** Lowercase, kebab-case, strip anything outside [a-z0-9-], cap at 60 chars. */
+function deriveSlugFromTitle(title) {
+  return kebabCase(String(title), { maxLen: 60 });
+}
+
+/**
+ * Build the full PRD markdown body (frontmatter + required sections + a
+ * pointer at the engineering standards file), matching the body shape
+ * PRD_AUTHORING.md §13 documents: frontmatter, then Goal / Acceptance
+ * criteria / Files / Implementation notes / Out of scope / Gate /
+ * Engineering standards, in order.
+ */
+function buildPrdBody(input) {
+  const {
+    title, cwd, estimateMinutes, goal, acceptanceCriteria,
+    implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId,
+    gate, files,
+  } = input;
+
+  // No `parallelGroup` frontmatter key (PRD_AUTHORING.md §5) — the NN-
+  // filename prefix is the single source of truth for grouping; adding a
+  // second one here would let the two drift out of sync.
+  const fmLines = ['---', `title: ${title}`, `cwd: ${cwd}`, `estimateMinutes: ${estimateMinutes}`];
+  // Provenance stamp (PRD-authoring lockdown): every PRD written through this
+  // function — the sole in-process implementation behind both the admin
+  // HTTP create-prd route and the renderer's chat:create-prd IPC handler —
+  // carries proof it was authored via the API, not a bare Write/Edit tool
+  // call. scheduler.cjs's reconcile() refuses to run a discovered PRD with no
+  // `createdVia` (quarantines it instead); this line is why every
+  // API-created PRD is exempt. Stamped here, not left to a caller, so the
+  // guarantee can't be forgotten by a future route.
+  fmLines.push('createdVia: scheduler-api', `issuedAt: ${new Date().toISOString()}`);
+  // Optional, additive: traces this PRD back to the PromptTicket (PRD 748)
+  // that was classified 'develop' and spawned it (PRD 749).
+  if (sourcePromptId) fmLines.push(`sourcePromptId: ${sourcePromptId}`);
+  // Optional, additive: the tab that queued this PRD, read back by
+  // scheduler.cjs at job completion (PRD 761) to route a status prompt.
+  if (sourceTabId) fmLines.push(`sourceTabId: ${sourceTabId}`);
+  // Optional, additive: the user-selected Feature/Bug tag (PRD 774) carried
+  // through from the originating PromptTicket — deterministic, never LLM-classified.
+  if (tag) fmLines.push(`tag: ${tag}`);
+  // WHO executes this PRD — distinct from `tag` (the WORK TYPE, above).
+  // Always emitted (unlike tag): a PRD with no agentType is ambiguous about
+  // who runs it, so createPrd() fills in DEFAULT_PRD_AGENT_TYPE ('dev-lead')
+  // before calling this function when the caller omitted one. Validated at
+  // write time by createPrd() via prdAgentType.cjs's assertAgentTypeWritable
+  // — this function only serializes, it never validates.
+  fmLines.push(`agentType: ${agentType || DEFAULT_PRD_AGENT_TYPE}`);
+  // Explicit ordering (PRD 832): replaces the retired shared-NN convention.
+  if (dependsOn && dependsOn.length) fmLines.push(`dependsOn: [${dependsOn.join(', ')}]`);
+  // Wave-authoring decision (scheduler wave-disposition PRD) — only ever set
+  // when createPrd() actually had a disposition to record (see the call
+  // site above); a first-ever PRD in an Epic, or one with its own explicit
+  // dependsOn, has nothing to decide against and omits this key.
+  if (disposition) fmLines.push(`disposition: ${disposition}`);
+  // Durable wave identity — owned by createPrd() (never a caller input), so
+  // buildPlans groups by it instead of re-deriving from the live dependsOn graph.
+  if (isValidPlanId(planId)) fmLines.push(`planId: ${planId}`);
+  // Artifact-only declaration — validated by createPrd() before this runs.
+  if (deliverable) fmLines.push(`deliverable: ${deliverable}`);
+  if (artifactPaths && artifactPaths.length) fmLines.push(`artifactPaths: [${artifactPaths.join(', ')}]`);
+  // Opt-in exclusive-lease flag (PRD 1107): serializes this job against
+  // every other job machine-wide for its run, for a PRD whose acceptance
+  // criteria are wall-clock/timing measurements that CPU contention from
+  // sibling jobs would otherwise invalidate. Only emitted when true — see
+  // prdFrontmatter.cjs's applyKey for the matching "only true opts in" parse.
+  if (quietMachine === true) fmLines.push('quietMachine: true');
+  fmLines.push('---', '');
+
+  const acLines = acceptanceCriteria.map((line) => `- [ ] ${line}`).join('\n');
+  const oosSource = outOfScope && outOfScope.length ? outOfScope : ['(none)'];
+  const oosLines = oosSource.map((line) => `- ${line}`).join('\n');
+
+  const standardsPointer = [
+    'Your system prompt carries the ordered run contract.',
+    `\`${STANDARDS_PATH}\` holds the reasoning behind each contract line (Performance, Debugging,`,
+    'API reuse, TDD, Execution discipline) — read the section a line points at when it is unclear;',
+    'do not re-read the whole file every run.',
+  ].join('\n');
+
+  // `# Files` sits right after Acceptance criteria; `# Gate` sits after Out
+  // of scope, before Engineering standards (gate-and-files-in-PRD-body unit).
+  // Each section appears only when its field is given. Only the MCP tool
+  // refuses a call without them; createPrd() (so the HTTP route and the IPC
+  // handler too) just warns when either is absent.
+  const bodyLines = [
+    '# Goal', '', goal, '',
+    '# Acceptance criteria', '', acLines, '',
+  ];
+  if (files && files.length) bodyLines.push(...renderFilesSection(files));
+  bodyLines.push(
+    '# Implementation notes', '', implementationNotes, '',
+    '# Out of scope', '', oosLines, '',
+  );
+  if (gate && gate.length) bodyLines.push(...renderGateSection(gate));
+  bodyLines.push('## Engineering standards', '', standardsPointer, '');
+
+  return `${fmLines.join('\n')}${bodyLines.join('\n')}`;
+}
+
+/**
+ * Best-effort fallback for a PRD queued via the scheduler_create_prd MCP tool
+ * from inside an Epic's own headless chat session, when the model's tool
+ * call omitted `sourcePromptId` — the exact gap that let PRDs 866/867 mint
+ * two unrelated sibling Epics instead of joining the Epic that was actually
+ * driving the conversation (2026-08-01). `claudeSessionId` is this process's
+ * `originClaudeSessionId` input (chatRunner.cjs's SM_CHAT_SESSION_ID env var,
+ * inherited down to the MCP server child); looked up against `cwd`'s
+ * active-index.json for the Epic whose own claudeSessionId matches (domain
+ * model: Epic:claude-session is 1:1). Returns null for a non-Epic tab (plain
+ * SessionTab chat) or when the id is stale/unknown — never throws, since this
+ * is strictly a convenience default and a miss must fall back to minting a
+ * normal Epic exactly like today.
+ */
+function resolveSourcePromptIdFromClaudeSession(cwd, claudeSessionId) {
+  if (!claudeSessionId) return null;
+  const { sessions } = readActiveIndex(cwd);
+  for (const session of Object.values(sessions)) {
+    if (session && session.claudeSessionId === claudeSessionId) return session.id;
+  }
+  return null;
+}
+
+/**
+ * Core create-PRD orchestration: cwd validation, slug derivation, NN
+ * allocation, existing-file collision check, body build, write. Shared by
+ * both the admin HTTP route (registerAdminRoute, used by the MCP tool) and
+ * the renderer-facing IPC handler (chat:create-prd, index.cjs) so the
+ * validation/write logic lives in exactly one place (API-reuse standard).
+ * `input` must already be schema-validated by the caller (schemas.schedulerCreatePrd).
+ * `remote` is scheduler.cjs's remote object (allocateParallelGroup/readPrd/writePrd/listPrds).
+ *
+ * Returns `{ ok: true, nn, filename }` on success, or `{ ok: false, status, error }`
+ * on failure — `status` is the HTTP status code the caller should map errors to
+ * (400/409/500), left to the caller since only the HTTP route needs it.
+ */
+async function createPrd(input, remote) {
+  // cwd is untrusted AND, since this PRD, optional — a caller inside an
+  // Epic's git worktree naturally passes its worktree pwd (or omits cwd
+  // entirely and relies on originClaudeSessionId/sourcePromptId). Resolve the
+  // real project + owning Epic server-side BEFORE any validation: a worktree
+  // cwd currently PASSES config.validatePath and then reads the WRONG
+  // active-index.json (a git-tracked snapshot frozen at branch time), which
+  // is why "the Epic got lost" reports keep recurring even though the Epic
+  // never left main's index. See projectRootResolve.cjs's header.
+  const rawCwd = input.cwd ? expandHome(input.cwd) : null;
+  const originProjectRoot = input.originProjectRoot ? expandHome(input.originProjectRoot) : null;
+  const resolved = resolveProjectContext({
+    cwd: rawCwd,
+    originClaudeSessionId: input.originClaudeSessionId,
+    // Only ask the resolver to hunt for the project BY Epic id when no cwd
+    // (nor a trusted SM_PROJECT_ROOT hint) was supplied at all — an explicit
+    // cwd that merely needs worktree/ops-path normalization is already fixed
+    // by projectRootOf above, so the common already-correct-cwd call (cwd +
+    // sourcePromptId both supplied) never pays for a cross-project scan.
+    epicId: (rawCwd || originProjectRoot) ? undefined : input.sourcePromptId,
+    originProjectRoot,
+  });
+
+  if (!resolved.cwd) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'cwd is required — pass cwd explicitly, or originClaudeSessionId/sourcePromptId that resolves '
+        + 'to an existing, already-approved Epic (create/approve an Epic first)',
+    };
+  }
+
+  // A resolved Epic's own project cwd always wins over the supplied/hinted
+  // one — see resolveProjectContext's header. `cwd` below is that final,
+  // already-normalized (worktree -> main tree) value.
+  const cwd = resolved.cwd;
+  let realCwd;
+  try {
+    realCwd = config.validatePath(cwd);
+  } catch (e) {
+    return { ok: false, status: 400, error: `cwd rejected: ${e?.message ?? 'outside allowed roots'}` };
+  }
+  // Register this project's cwd as a write-allowed root (config.cjs's
+  // validateWrite gate). Chat-only Epics (headless claude -p, no Terminal
+  // PTY ever spawned for this cwd) reach this code path without pty.cjs's
+  // addAllowedRoot call ever having run — without this, every PRD write for
+  // such a project fails with "Write outside allowed write boundaries" even
+  // though validatePath (the read boundary) just passed above.
+  config.addAllowedRoot(realCwd);
+  input = { ...input, cwd };
+
+  if (resolved.epicId) {
+    input = { ...input, sourcePromptId: resolved.epicId };
+  } else if (!input.sourcePromptId && input.originClaudeSessionId) {
+    // Fallback kept for the narrow case a caller passes originClaudeSessionId
+    // but resolveProjectContext (which also scans cross-project) somehow
+    // missed it — resolveSourcePromptIdFromClaudeSession is the single-cwd
+    // primitive resolveProjectContext itself is built from, so this can only
+    // ever be a no-op in practice; kept for defense-in-depth, not duplicated logic.
+    const fallback = resolveSourcePromptIdFromClaudeSession(cwd, input.originClaudeSessionId);
+    if (fallback) input = { ...input, sourcePromptId: fallback };
+  }
+
+  // Wave-disposition decision point (scheduler wave-disposition PRD): only
+  // matters for a PRD that would become a ROOT of its own wave — one the
+  // caller didn't already give an explicit dependsOn (that already fixes
+  // its position in some chain) — joining an Epic whose sourcePromptId this
+  // PRD shares. See prdDisposition.cjs's header for the full contract.
+  if (input.sourcePromptId && (!input.dependsOn || input.dependsOn.length === 0)) {
+    let epicRows = [];
+    try {
+      const listing = await remote.listPrds({ cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER });
+      epicRows = (listing?.prds ?? []).filter((p) => p.sourcePromptId === input.sourcePromptId);
+    } catch (e) {
+      console.warn(`[prdCreate] disposition resolution skipped (listPrds failed): ${e?.message ?? e}`);
+    }
+    if (epicRows.some((p) => isIncomplete(p.status))) {
+      let disposition = input.disposition ?? null;
+      if (!disposition) {
+        // A headless PRD executor's own job has SM_SCHEDULER_JOB_SLUG set on
+        // its env (scheduler.cjs stamps every spawned job's child env with
+        // it) — no human is present to ask, so the conservative default
+        // ('append') applies and is logged as a default, never as a silent
+        // choice. Anything else (a live interactive Epic chat session, or a
+        // direct admin-route call) is refused instead of guessed — see this
+        // PRD's AC2.
+        const nonInteractive = Boolean(process.env.SM_SCHEDULER_JOB_SLUG);
+        if (!nonInteractive) {
+          return {
+            ok: false,
+            status: 400,
+            error: `Epic ${input.sourcePromptId} already has incomplete PRDs — pass disposition: "append" ` +
+              '(extend the existing chain behind its current tail) or "new-head" (an independent root, ' +
+              'eligible to run in parallel) to record this wave\'s relationship to the existing plan.',
+          };
+        }
+        disposition = 'append';
+        console.warn(`[prdCreate] disposition defaulted to "append" for a non-interactive caller (epic ${input.sourcePromptId})`);
+        appendAuditEvent('prd_disposition_defaulted', { cwd: input.cwd, epicId: input.sourcePromptId, disposition });
+      }
+      if (disposition === 'append') {
+        // Only the Epic's still-incomplete rows count as "the active plan" to
+        // append behind — a completed, undepended-upon row would otherwise
+        // also read as a terminal, silently attaching this wave to already-
+        // finished work instead of purely the current chain's live tail(s).
+        const terminals = resolveChainTerminals(epicRows.filter((p) => isIncomplete(p.status)));
+        if (terminals.length) input = { ...input, dependsOn: terminals };
+      }
+      input = { ...input, disposition };
+    }
+  }
+
+  if (input.slug) {
+    const nnMatch = SLUG_HAS_NN_PREFIX_RE.exec(input.slug);
+    if (nnMatch) {
+      return {
+        ok: false,
+        status: 400,
+        error: `slug "${input.slug}" already starts with a numeric prefix "${nnMatch[1]}-" — the allocator ` +
+          `owns the NN- prefix, not the caller. Pass the bare name instead (e.g. "${input.slug.slice(nnMatch[0].length)}").`,
+      };
+    }
+  }
+
+  const slug = input.slug || deriveSlugFromTitle(input.title);
+  if (!slug || !PRD_CREATE_SLUG_RE.test(slug)) {
+    return { ok: false, status: 400, error: 'could not derive a valid kebab-case slug from title; supply "slug" explicitly' };
+  }
+
+  // NN allocation is delegated to allocateParallelGroup() (PRD 548) via the
+  // injected remote — never re-derived here. `parallelGroup` input is
+  // DEPRECATED (PRD 832, user decision 2026-07-31): numbers are strictly
+  // unique per project; ordering is expressed via `dependsOn` frontmatter,
+  // never by sharing a number. An explicit parallelGroup is ignored.
+  if (input.parallelGroup != null) {
+    console.warn(`[prdCreate] parallelGroup input is deprecated and ignored (got ${input.parallelGroup}) — numbers are unique per project; use dependsOn for ordering`);
+  }
+  // Artifact-only declaration (deliverable + artifactPaths): fail-closed,
+  // checked BEFORE the NN allocation so a refusal burns no number.
+  const hasArtifactPaths = Array.isArray(input.artifactPaths) && input.artifactPaths.length > 0;
+  if (input.deliverable != null && input.deliverable !== 'artifact') {
+    return { ok: false, status: 400, error: 'deliverable must be exactly "artifact" when given' };
+  }
+  if (input.deliverable === 'artifact' && !hasArtifactPaths) {
+    return { ok: false, status: 400, error: 'deliverable: "artifact" requires a non-empty artifactPaths — name every git-excluded file this PRD produces' };
+  }
+  if (input.artifactPaths != null && input.deliverable !== 'artifact') {
+    return { ok: false, status: 400, error: 'artifactPaths requires deliverable: "artifact" — artifactPaths given without it' };
+  }
+  if (hasArtifactPaths) {
+    for (const ap of input.artifactPaths) {
+      if (typeof ap !== 'string' || !ap.trim() || /[\r\n,\[\]]/.test(ap)) {
+        return { ok: false, status: 400, error: `artifactPaths entry ${JSON.stringify(ap)} must be a non-empty single-line path without commas or brackets` };
+      }
+      if (ap.includes('..')) {
+        return { ok: false, status: 400, error: `artifactPaths entry "${ap}" must not contain ".."` };
+      }
+    }
+  }
+
+  // Fake-heading guard (gate-and-files-in-PRD-body unit): a caller-supplied
+  // free-text field that itself contains a "# Gate" or "# Files" heading line
+  // would, after buildPrdBody splices in the real section below, read as TWO
+  // Gate/Files sections — readExplicitGate takes the FIRST fence/heading it
+  // finds, so the fake one would silently win and the executor would see the
+  // wrong gate. Checked before NN allocation so a refusal burns no number.
+  const HEADING_LINE_RE = /^ {0,3}#{1,6}[ \t]+(gate|files)[ \t]*#*[ \t]*$/i;
+  function headingGuardError(fieldLabel, text) {
+    if (typeof text !== 'string') return null;
+    for (const line of text.split(/\r\n|\r|\n/)) {
+      if (HEADING_LINE_RE.test(line)) {
+        return `The ${fieldLabel} text has a "# Gate" or "# Files" heading. The API writes those sections ` +
+          'from the gate and files fields. Remove the heading and call again.';
+      }
+    }
+    return null;
+  }
+  for (const [fieldLabel, text] of [['goal', input.goal], ['implementation notes', input.implementationNotes]]) {
+    const headingError = headingGuardError(fieldLabel, text);
+    if (headingError) return { ok: false, status: 400, error: headingError };
+  }
+  if (Array.isArray(input.acceptanceCriteria)) {
+    for (const entry of input.acceptanceCriteria) {
+      const headingError = headingGuardError('acceptance criteria', entry);
+      if (headingError) return { ok: false, status: 400, error: headingError };
+    }
+  }
+  if (Array.isArray(input.outOfScope)) {
+    for (const entry of input.outOfScope) {
+      const headingError = headingGuardError('out of scope', entry);
+      if (headingError) return { ok: false, status: 400, error: headingError };
+    }
+  }
+
+  // Gate + files validation (gate-and-files-in-PRD-body unit): fail-closed,
+  // checked BEFORE NN allocation so a refusal burns no number — same posture
+  // as the artifactPaths checks above. The actual shape rules live in
+  // prdGateFiles.cjs (pure, no I/O); this is just the accumulate-and-return glue.
+  const extraWarnings = [];
+  let gateCommands;
+  if (input.gate !== undefined) {
+    const gateValidation = validateGate(input.gate);
+    if (!gateValidation.ok) {
+      return { ok: false, status: 400, error: gateValidation.error };
+    }
+    gateCommands = gateValidation.commands;
+    extraWarnings.push(...gateValidation.warnings);
+  } else {
+    extraWarnings.push('No gate: the scheduler cannot re-check this PRD.');
+  }
+  let filesList;
+  if (input.files !== undefined) {
+    const filesValidation = validateFiles(input.files);
+    if (!filesValidation.ok) {
+      return { ok: false, status: 400, error: filesValidation.error };
+    }
+    filesList = filesValidation.files;
+  } else {
+    extraWarnings.push('No files list: the executor is not told which files it may change.');
+  }
+
+  const nn = await remote.allocateParallelGroup(input.cwd);
+  const filenameSlug = `${nn}-${slug}`;
+
+  // Fix-chain depth guard (PRD 1113): refuse a fix-of-a-fix before it's ever
+  // written. depth >= 2 means the base job has already failed to close via
+  // at least one prior fix attempt for reasons a repeat attempt won't
+  // resolve — checked first so this distinct, human-escalation error still
+  // wins over the more general fix-plan-slug guard below for that shape.
+  const chainDepth = fixChainDepthOf(filenameSlug);
+  if (chainDepth > FIX_CHAIN_DEPTH_CAP) {
+    const base = baseSlugOf(filenameSlug);
+    return {
+      ok: false,
+      status: 409,
+      error: `Fix-chain depth cap exceeded: "${base}" has already failed to close ${chainDepth} time(s) for ` +
+        `infrastructure reasons (refusing to write "${filenameSlug}.md" at depth ${chainDepth}). Authoring a ` +
+        'deeper fix PRD is not the correct response — stop and surface this to a human instead of retrying again.',
+    };
+  }
+
+  // Fix-plan-slug collision guard (PRD 1131): a caller-supplied or
+  // title-derived slug that happens to start with "fix-" collides with the
+  // scheduler's own NN-fix-... naming convention for fix plans it authors
+  // itself (spawnInvestigation) — and that shape carries real special-case
+  // semantics (depth-capped auto-investigation eligibility,
+  // commitGuardVerdict's zero-edit exemption) that a PRD authored through
+  // this API never asked for. Refused outright, not silently renamed, same
+  // fail-closed posture as the SLUG_HAS_NN_PREFIX_RE check above (PRD 1126:
+  // "126-fix-plan-death-reopens-parent" was wrongly stamped
+  // investigationDepth before it ever ran and had to be withdrawn). This
+  // subsumes the depth-1 case the chain-depth guard above deliberately let
+  // through (MAX_INVESTIGATION_DEPTH=1 means a first fix-plan is legitimate
+  // — but only when spawnInvestigation authors it, never through this API).
+  if (isFixPlanSlug(filenameSlug)) {
+    return {
+      ok: false,
+      status: 400,
+      error: `slug "${filenameSlug}" collides with the reserved NN-fix-... fix-plan naming convention ` +
+        '(reserved for PRDs the scheduler\'s own investigation loop authors itself). Reword the title/slug ' +
+        'so it does not start with "fix-" — e.g. "resolve-x" or "repair-x" instead of "fix-x".',
+    };
+  }
+
+  // An explicit `parallelGroup` bypasses allocateParallelGroup()'s
+  // collision-proof reservation, so re-check for an existing file at
+  // this exact destination before writing — remote.writePrd itself has
+  // no existence guard (by design, it doubles as the edit-in-place
+  // path for Scheduler UI PRD edits), so "create" must not silently
+  // clobber an existing job's PRD.
+  const existing = await remote.readPrd(filenameSlug, input.cwd);
+  if (existing?.ok) {
+    return { ok: false, status: 409, error: `PRD already exists: ${filenameSlug}.md` };
+  }
+
+  // Write-time FK check (throw on write, report on read — see
+  // prdAgentType.cjs's header): a caller-supplied agentType that doesn't
+  // resolve to a readable persona file is rejected before anything is
+  // written, naming the available personas. A no-op when agentType is
+  // omitted — buildPrdBody fills in DEFAULT_PRD_AGENT_TYPE for that case,
+  // and the default persona is trusted without a lookup.
+  if (input.agentType) {
+    try {
+      await assertAgentTypeWritable(input.cwd, input.agentType);
+    } catch (e) {
+      return { ok: false, status: 400, error: e?.message ?? 'invalid agentType' };
+    }
+  }
+
+  // Write-time FK check for dependsOn (report on read / throw on write — see
+  // prdAgentType.cjs's header): every entry must resolve to a PRD that
+  // actually exists in this project, using the SAME resolution rule
+  // schedulerBatch.cjs's findBlockingDep applies at run time (exact slug,
+  // else bare-name after stripping one leading `NN-`) — a dep that
+  // validates here is guaranteed to be a dep findBlockingDep can actually
+  // see later. A listPrds() read failure is skipped-with-a-warning, never a
+  // write outage: an I/O hiccup on the read side must not block every PRD
+  // write in the project.
+  let depRows = null;
+  if (input.dependsOn && input.dependsOn.length) {
+    let listing;
+    try {
+      listing = await remote.listPrds({ cwd: input.cwd, fields: 'full', limit: Number.MAX_SAFE_INTEGER });
+    } catch (e) {
+      console.warn(`[prdCreate] dependsOn validation skipped (listPrds failed): ${e?.message ?? e}`);
+      listing = null;
+    }
+    if (listing) {
+      depRows = listing.prds ?? [];
+      const candidateSlugs = depRows.map((p) => p.slug);
+      for (const dep of input.dependsOn) {
+        if (resolveDepSlug(dep, candidateSlugs).length > 0) continue;
+        const near = findNearMatches(dep, candidateSlugs);
+        const suggestion = near.length ? ` Closest existing slug(s): ${near.join(', ')}.` : '';
+        return {
+          ok: false,
+          status: 400,
+          error: `dependsOn entry "${dep}" does not resolve to any existing PRD in this project.${suggestion} ` +
+            'Pass the bare name (preferred) or the exact NN-prefixed slug of an existing PRD.',
+        };
+      }
+    }
+  }
+
+  // planId is API-owned: any caller-supplied value is discarded. Inherited from the
+  // resolved dependencies (append terminals or explicit dependsOn) using the FK-check
+  // listing above; otherwise (first-ever / new-head / legacy deps) freshly minted.
+  let planId = null;
+  if (input.dependsOn && input.dependsOn.length && depRows) {
+    const inherited = resolveInheritedPlanId(input.dependsOn, depRows);
+    planId = inherited.planId;
+    if (inherited.diverged) {
+      console.warn(`[prdCreate] dependsOn spans plans ${inherited.diverged.join(', ')} — inheriting ${planId} (lowest-numbered dependency)`);
+    }
+  }
+  if (!planId) planId = mintPlanId();
+
+  const body = buildPrdBody({ ...input, planId, gate: gateCommands, files: filesList });
+
+  // Read-back check (gate-and-files-in-PRD-body unit): the whole point of a
+  // declared gate is that the scheduler's own reader (resolveGate/parseChain
+  // in definitionOfDone.cjs) gets back exactly what was declared. A stray
+  // ```gate fence elsewhere in the body (goal/notes/criteria/out-of-scope)
+  // would otherwise win — readExplicitGate takes the FIRST fence in the
+  // text — and the scheduler would silently re-run the wrong gate. Caught
+  // here, before the write, rather than discovered later from a job log.
+  if (gateCommands) {
+    const expectedSource = gateCommands.length === 1 && isNoneGate(gateCommands[0]) ? 'none' : 'explicit';
+    const expectedSequence = expectedSource === 'none' ? [] : gateCommands.flatMap(parseChain);
+    const resolved = resolveGate(body);
+    const matches = resolved.source === expectedSource
+      && JSON.stringify(resolved.sequence) === JSON.stringify(expectedSequence);
+    if (!matches) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'The PRD text already holds a gate fence (three backticks + gate), so the scheduler would read '
+          + 'the wrong gate. Remove it from the goal, implementation notes, acceptance criteria, out of scope '
+          + 'or files, and call again.',
+      };
+    }
+  }
+
+  const writeResult = await remote.writePrd(filenameSlug, body, input.cwd);
+  if (!writeResult?.ok) {
+    return { ok: false, status: 500, error: writeResult?.error ?? 'write failed' };
+  }
+
+  // Trace-back point for "who/what created this PRD" (auditLog.cjs) — every
+  // PRD write, whether from the admin/MCP route or the renderer's chat:create-prd
+  // IPC handler, lands one record here regardless of outcome path above.
+  appendAuditEvent('prd_create', {
+    cwd: input.cwd,
+    slug: filenameSlug,
+    title: input.title,
+    sourcePromptId: input.sourcePromptId ?? null,
+    sourceTabId: input.sourceTabId ?? null,
+  });
+
+  // PRD 1446: writePrd() succeeding used to just promise "the next scheduler
+  // reconcile pass (~1 minute)" adopts this file — but nothing reliably ran
+  // that pass (the 60s pollLoop only reaches reconcile() via
+  // maybeLaunchWhenAvailable, which returns early while zero rows are
+  // pending; the 10-minute rescheduleTimer could itself stall behind a slow
+  // billing fetch). Trigger one reconcile immediately through the EXISTING
+  // broadcast-coalescer seam (remote.requestReconcile(), same one resetJob
+  // already uses) instead of waiting on either. Best-effort: a reconcile
+  // failure here must not fail a write that already landed on disk — the
+  // PRD file is real regardless, and the next scheduled pass still adopts
+  // it if this one didn't stick.
+  let enqueued = false;
+  if (typeof remote.requestReconcile === 'function') {
+    try {
+      await remote.requestReconcile();
+      if (typeof remote.getJob === 'function') {
+        enqueued = Boolean(await remote.getJob(filenameSlug));
+      }
+    } catch (e) {
+      console.warn(`[prdCreate] immediate requestReconcile failed (non-fatal, next scheduled pass will adopt it): ${e?.message ?? e}`);
+    }
+  }
+
+  // No `status` field here, and never one named 'queued' — that string was
+  // handed straight to callers as if it were a real ScheduleJob status, and
+  // is exactly how the 1021/1022 incident's invalid `"status": "queued"`
+  // rows got onto disk (this route's own response was the most likely
+  // source). A PRD is a queue row's SOURCE, not the row itself: writePrd
+  // only ever joins an Epic and writes the .md file — the queue row above
+  // is created separately, by reconcile(). `enqueued` reflects whether that
+  // reconcile pass (triggered synchronously above) actually produced the
+  // row before this function returned — it is not a fabricated status.
+  return {
+    ok: true,
+    nn,
+    filename: `${filenameSlug}.md`,
+    prdPath: writeResult.path ?? null,
+    epicId: writeResult.epicId ?? null,
+    enqueued,
+    note: enqueued
+      ? 'PRD file written and adopted into the queue as a pending row'
+      : 'PRD file written; the queue row is derived by the next scheduler reconcile pass, not created here',
+    // gate-and-files-in-PRD-body unit: honest echo of what was actually
+    // validated and rendered, same spirit as `note` above — never a fabricated status.
+    gate: {
+      source: gateCommands ? (gateCommands.length === 1 && isNoneGate(gateCommands[0]) ? 'none' : 'explicit') : 'absent',
+      commands: gateCommands || [],
+    },
+    files: filesList || [],
+    // Advisory only (PRD 1403 sizing warnings + gate-and-files-in-PRD-body
+    // absent/none-gate warnings) — never blocks the write. See prdSizing.cjs
+    // and prdGateFiles.cjs.
+    warnings: [...extraWarnings, ...sizingWarnings(input)],
+  };
+}
+
+/**
+ * Registers the create-prd admin HTTP route (PRD 689 — moved verbatim out of
+ * the former standalone admin HTTP server module's handleRequest, no behavior
+ * change) against an injected localAdminHttp.cjs transport. `remote` is
+ * scheduler.cjs's remote object, passed explicitly (not required directly) so
+ * this stays testable without booting Electron, matching that former
+ * module's original dependency-injection pattern.
+ */
+function registerAdminRoute(adminHttp, remote) {
+  adminHttp.registerRoute('POST', '/admin/scheduler/create-prd', async (req, res) => {
+    const raw = await readBody(req);
+    let parsed;
+    try {
+      parsed = raw ? JSON.parse(raw) : {};
+    } catch {
+      sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+      return;
+    }
+
+    let input;
+    try {
+      input = schemas.schedulerCreatePrd.parse(parsed);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: 'invalid PRD payload', details: e?.issues ?? e?.message });
+      return;
+    }
+
+    const result = await createPrd(input, remote);
+    if (!result.ok) {
+      sendJson(res, result.status, { ok: false, error: result.error });
+      return;
+    }
+
+    // Mirror createPrd()'s own honest shape verbatim — never re-add a
+    // 'status' field here. See createPrd's return above for why.
+    sendJson(res, 200, {
+      nn: result.nn,
+      filename: result.filename,
+      prdPath: result.prdPath ?? null,
+      epicId: result.epicId ?? null,
+      enqueued: result.enqueued,
+      note: result.note,
+      gate: result.gate,
+      files: result.files,
+      warnings: result.warnings,
+    });
+  });
+}
+
+module.exports = {
+  PRD_CREATE_SLUG_RE,
+  STANDARDS_PATH,
+  readStandards,
+  deriveSlugFromTitle,
+  buildPrdBody,
+  resolveSourcePromptIdFromClaudeSession,
+  createPrd,
+  registerAdminRoute,
+};

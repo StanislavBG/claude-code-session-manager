@@ -2,7 +2,7 @@
  * reconcileTiming.test.cjs — proves reconcile() (src/main/scheduler.cjs)
  * records a per-phase timing breakdown and emits exactly one warn-level
  * `logs.writeLine` when a pass exceeds RECONCILE_SLOW_PASS_MS
- * (src/main/lib/schedulerConfig.cjs), and stays silent on a normal-speed
+ * (src/main/lib/scheduler/schedulerConfig.cjs), and stays silent on a normal-speed
  * pass. Before this, diagnosing a slow reconcile pass (the
  * "schedule.state timed out after 5000ms" toast) required hand-timing the
  * filesystem scans from a throwaway script.
@@ -35,9 +35,9 @@ beforeAll(() => {
   process.env.HOME = tmpHome;
 
   scheduler = require('../scheduler.cjs');
-  queueHistory = require('../lib/queueHistory.cjs');
+  queueHistory = require('../lib/scheduler/queueHistory.cjs');
   logs = require('../logs.cjs');
-  ({ RECONCILE_SLOW_PASS_MS } = require('../lib/schedulerConfig.cjs'));
+  ({ RECONCILE_SLOW_PASS_MS } = require('../lib/scheduler/schedulerConfig.cjs'));
 
   if (!scheduler.PRDS_DIR.startsWith(tmpHome)) {
     throw new Error(`refusing to run: PRDS_DIR (${scheduler.PRDS_DIR}) is not under the temp HOME (${tmpHome})`);

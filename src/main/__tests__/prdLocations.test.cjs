@@ -17,7 +17,7 @@ const {
   resolvePrdsDirs,
   resolveEpicPrdWriteDir,
   listEpicPrdDirs,
-} = require('../lib/prdLocations.cjs');
+} = require('../lib/prd/prdLocations.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {

@@ -1,7 +1,7 @@
 'use strict';
 
 import { describe, it, expect, afterEach } from 'vitest';
-const { claudeSpawnTarget } = require('../claudeBin.cjs');
+const { claudeSpawnTarget } = require('../claude/claudeBin.cjs');
 
 const CMD = 'C:\\Users\\u\\AppData\\Roaming\\npm\\claude.cmd';
 const EXE = 'C:\\Users\\u\\.local\\bin\\claude.exe';

@@ -1,5 +1,5 @@
 /**
- * reviewNotice.test.cjs — unit tests for src/main/lib/reviewNotice.cjs, the
+ * reviewNotice.test.cjs — unit tests for src/main/lib/scheduler/reviewNotice.cjs, the
  * pure helpers behind the quiet, grouped needs_review notice: a park records
  * a notice and sends nothing; one grouped message goes out only once the
  * self-heal ladder gives up (an auto-resolve skip) or the hold time passes.
@@ -16,7 +16,7 @@ const {
   selectDueReviewNotices,
   formatReviewNotice,
   holdMsFromEnv,
-} = require('../lib/reviewNotice.cjs');
+} = require('../lib/scheduler/reviewNotice.cjs');
 
 // --- buildReviewNotice ---
 

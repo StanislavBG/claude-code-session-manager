@@ -7,7 +7,7 @@
 'use strict';
 
 import { test, expect } from 'vitest';
-const { SIZING_LIMITS, sizingWarnings } = require('../lib/prdSizing.cjs');
+const { SIZING_LIMITS, sizingWarnings } = require('../lib/prd/prdSizing.cjs');
 
 function compliantInput(overrides = {}) {
   return {

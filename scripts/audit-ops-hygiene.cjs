@@ -22,7 +22,7 @@
  * tool (a hand-written PRD file is never sanctioned — see CLAUDE.md's "PRD
  * authoring is API-only"). Every
  * API-created PRD gets a `prd_create` record in the machine-wide audit log
- * (`~/.claude/session-manager/audit-log.jsonl`, `src/main/lib/auditLog.cjs`)
+ * (`~/.claude/session-manager/audit-log.jsonl`, `src/main/lib/telemetry/auditLog.cjs`)
  * keyed by cwd+slug. This check is deliberately narrow: it only inspects PRD
  * `.md` files `git status` reports as UNTRACKED (never committed yet) — a
  * PRD's file mtime is USELESS as a "recently authored" signal because these
@@ -43,7 +43,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
-const { auditLogPath } = require('../src/main/lib/schedulerPaths.cjs');
+const { auditLogPath } = require('../src/main/lib/scheduler/schedulerPaths.cjs');
 const projectCwd = process.argv[2] || process.cwd();
 const OPS_ROOT = path.join(projectCwd, 'session-manager-operations');
 const SESSIONS_DIR = path.join(OPS_ROOT, 'prompt-sessions');
@@ -246,8 +246,8 @@ function auditPatternE() {
  * something this script repairs. Read-only, same as every other pattern here.
  */
 function auditPatternF() {
-  const { WORK_TYPES } = require('../src/main/lib/workTypeLibrary.cjs');
-  const { personaFileExists } = require('../src/main/lib/epicMint.cjs');
+  const { WORK_TYPES } = require('../src/main/lib/prd/workTypeLibrary.cjs');
+  const { personaFileExists } = require('../src/main/lib/epic/epicMint.cjs');
 
   const index = readJson(path.join(SESSIONS_DIR, 'active-index.json'), null);
   const sessions = index && typeof index.sessions === 'object' && index.sessions ? index.sessions : {};

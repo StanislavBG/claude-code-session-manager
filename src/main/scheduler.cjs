@@ -48,41 +48,41 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { AsyncLocalStorage } = require('node:async_hooks');
-const { startDispatchLoop } = require('./lib/dispatchLoop.cjs');
-const schedulerPaths = require('./lib/schedulerPaths.cjs');
+const { startDispatchLoop } = require('./lib/scheduler/dispatchLoop.cjs');
+const schedulerPaths = require('./lib/scheduler/schedulerPaths.cjs');
 const { randomUUID } = require('node:crypto');
 const { execFile, execFileSync } = require('node:child_process');
 const { ipcMain } = require('electron');
 const billing = require('./usage.cjs');
-const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
-const { ensureTimeoutShim, withTimeoutShimOnPath } = require('./lib/timeoutShim.cjs');
+const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs');
+const { ensureTimeoutShim, withTimeoutShimOnPath } = require('./lib/process/timeoutShim.cjs');
 const supervisor = require('./supervisor.cjs');
-const { resolveClaudeBin, claudeSpawnTarget, probeClaudeVersion } = require('./lib/claudeBin.cjs');
-const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claudeCliCaps.cjs');
+const { resolveClaudeBin, claudeSpawnTarget, probeClaudeVersion } = require('./lib/claude/claudeBin.cjs');
+const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/claudeCliCaps.cjs');
 // Fire-and-forget priming — by the time the first job dispatches, the cached
 // probe result is almost always already warm for buildClaudeSpawnArgs's sync
 // callers; async spawn sites still `await ensureCliCapsProbed()` themselves
 // as the authoritative guarantee.
 ensureCliCapsProbed().catch(() => {});
-const launchFailure = require('./lib/launchFailure.cjs');
-const { appendError } = require('./lib/opsErrorLog.cjs');
-const { readTail } = require('./lib/fileTail.cjs');
+const launchFailure = require('./lib/scheduler/launchFailure.cjs');
+const { appendError } = require('./lib/telemetry/opsErrorLog.cjs');
+const { readTail } = require('./lib/util/fileTail.cjs');
 const {
   claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs,
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome, resolveCommitGuardOutcome,
   readSpawnedPidFromLog, readLogMtimeMs,
-} = require('./lib/reaperHelpers.cjs');
+} = require('./lib/scheduler/reaperHelpers.cjs');
 const { resolveProjectRoot } = require('./lib/opsOwnership.cjs');
-const { sweepStrandedJobBranches } = require('./lib/branchSweep.cjs');
-const { detectRateLimitInLog } = require('./lib/rateLimitDetect.cjs');
-const { stripAppOwnedChurn } = require('./lib/jobDirtFilter.cjs');
-const { GATE_AUTHORITY_VERDICTS, decideGateAuthority } = require('./lib/gateAuthority.cjs');
-const { resolveBindingRateLimitReset } = require('./lib/rateLimitWindow.cjs');
-const { isResetFresh, bindingWindow, degradedBudget, meterFailureBudget } = require('./lib/usageCircuit.cjs');
-const { computeQueueHealth } = require('./lib/queueHealth.cjs');
-const { createLoadGate, topCpuConsumers } = require('./lib/loadGate.cjs');
-const { openLog, withChildAndLog } = require('./lib/childWithLog.cjs');
-const { killTree, detachedSpawnOpts } = require('./lib/killTree.cjs');
+const { sweepStrandedJobBranches } = require('./lib/git/branchSweep.cjs');
+const { detectRateLimitInLog } = require('./lib/claude/rateLimitDetect.cjs');
+const { stripAppOwnedChurn } = require('./lib/scheduler/jobDirtFilter.cjs');
+const { GATE_AUTHORITY_VERDICTS, decideGateAuthority } = require('./lib/scheduler/gateAuthority.cjs');
+const { resolveBindingRateLimitReset } = require('./lib/claude/rateLimitWindow.cjs');
+const { isResetFresh, bindingWindow, degradedBudget, meterFailureBudget } = require('./lib/claude/usageCircuit.cjs');
+const { computeQueueHealth } = require('./lib/scheduler/queueHealth.cjs');
+const { createLoadGate, topCpuConsumers } = require('./lib/scheduler/loadGate.cjs');
+const { openLog, withChildAndLog } = require('./lib/process/childWithLog.cjs');
+const { killTree, detachedSpawnOpts } = require('./lib/process/killTree.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { createBroadcastCoalescer } = require('./lib/broadcastCoalescer.cjs');
 const prdParser = require('./scheduler/prdParser.cjs');
@@ -94,20 +94,20 @@ const prdPaths = require('./scheduler/prdPaths.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { appendResponseEventIfKnown, appendResponseEventWithReason } = require('./promptSessionEvents.cjs');
-const { buildReviewNotice, selectDueReviewNotices, formatReviewNotice, holdMsFromEnv } = require('./lib/reviewNotice.cjs');
-const { maybeEnqueueValidationPrompt } = require('./lib/epicValidationHook.cjs');
-const { parseValidationSentinels } = require('./lib/validationSentinels.cjs');
-const { hasDownstreamValidator } = require('./lib/planValidator.cjs');
+const { buildReviewNotice, selectDueReviewNotices, formatReviewNotice, holdMsFromEnv } = require('./lib/scheduler/reviewNotice.cjs');
+const { maybeEnqueueValidationPrompt } = require('./lib/epic/epicValidationHook.cjs');
+const { parseValidationSentinels } = require('./lib/scheduler/validationSentinels.cjs');
+const { hasDownstreamValidator } = require('./lib/prd/planValidator.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { verifyRun, parseLog, scanSentinel, scanForeignWipPathsClaim } = require('./runVerify.cjs');
-const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/terminalRunOutcome.cjs');
-const { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan } = require('./lib/fixPlanSlug.cjs');
-const { landedSinceRun, landedOnMainSince } = require('./lib/landedSinceRun.cjs');
-const { declaredPathsForPrd } = require('./lib/prdDeclaredPaths.cjs');
-const { identity: procIdentityOf, isDifferentProcess } = require('./lib/procIdentity.cjs');
+const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/scheduler/terminalRunOutcome.cjs');
+const { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan } = require('./lib/scheduler/fixPlanSlug.cjs');
+const { landedSinceRun, landedOnMainSince } = require('./lib/scheduler/landedSinceRun.cjs');
+const { declaredPathsForPrd } = require('./lib/prd/prdDeclaredPaths.cjs');
+const { identity: procIdentityOf, isDifferentProcess } = require('./lib/process/procIdentity.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated, SCHEDULE_SLUG_RE } = require('./ipcSchemas.cjs');
-const { readBody, sendJson } = require('./lib/localAdminHttp.cjs');
+const { readBody, sendJson } = require('./lib/feedback-remote/localAdminHttp.cjs');
 const {
   POLL_INTERVAL_MS,
   USAGE_REFRESH_INTERVAL_MS,
@@ -119,7 +119,7 @@ const {
   INVESTIGATION_MAX_MS,
   STARVATION_ESCALATE_MS,
   STARVE_ESCALATION_MS,
-} = require('./lib/schedulerConfig.cjs');
+} = require('./lib/scheduler/schedulerConfig.cjs');
 const QUARANTINE_ESCALATE_MS = process.env.SM_QUARANTINE_ESCALATE_HOURS
   ? Number(process.env.SM_QUARANTINE_ESCALATE_HOURS) * 60 * 60_000
   : QUARANTINE_ESCALATE_MS_DEFAULT;
@@ -127,26 +127,26 @@ const QUARANTINE_ESCALATE_MS = process.env.SM_QUARANTINE_ESCALATE_HOURS
 // `budgetWarning` stamp on its row (see the budget watchdog below) so the
 // renderer can warn BEFORE the kill, not only after.
 const BUDGET_WARNING_FRACTION = 0.75;
-const { pickForProject, pickNextBatch, findStarvedProjects, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/schedulerBatch.cjs');
-const { runDefinitionOfDoneOnDrain } = require('./lib/dodDrainHook.cjs');
-const { writeRcaReport, extractRcaBlock } = require('./lib/rcaReport.cjs');
-const queueHistory = require('./lib/queueHistory.cjs');
-const { resolveGate, runGateSequence } = require('./lib/definitionOfDone.cjs');
+const { pickForProject, pickNextBatch, findStarvedProjects, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/scheduler/schedulerBatch.cjs');
+const { runDefinitionOfDoneOnDrain } = require('./lib/scheduler/dodDrainHook.cjs');
+const { writeRcaReport, extractRcaBlock } = require('./lib/scheduler/rcaReport.cjs');
+const queueHistory = require('./lib/scheduler/queueHistory.cjs');
+const { resolveGate, runGateSequence } = require('./lib/scheduler/definitionOfDone.cjs');
 const queueOps = require('./queueOps.cjs');
 // Feedback-auto-PRD sweep — formerly only run by the external scheduler-watchdog
 // while the app was down (PRD 686 moved it in-app so it also runs while alive).
 // Plain Node module, no Electron dependency; queuePath/prdsDir defaults already
 // match ROOT/QUEUE_PATH below since both resolve the same ~/.claude/session-manager
 // home-dir layout.
-const { listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath } = require('./lib/prdLocations.cjs');
-const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epicMint.cjs');
-const agentModelResolve = require('./lib/agentModelResolve.cjs');
-const { resolveEpicEffort, effortArgs } = require('./lib/agentEffortResolve.cjs');
-const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduleJobTransitions.cjs');
-const { buildContextDigest, composeExecutorPrompt } = require('./lib/epicContextDigest.cjs');
-const { JOB_STATUSES } = require('./lib/scheduleJobSchema.cjs');
-const { appendAuditEvent } = require('./lib/auditLog.cjs');
-const { withTimeout } = require('./lib/withTimeout.cjs');
+const { listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath } = require('./lib/prd/prdLocations.cjs');
+const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epic/epicMint.cjs');
+const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
+const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
+const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduler/scheduleJobTransitions.cjs');
+const { buildContextDigest, composeExecutorPrompt } = require('./lib/epic/epicContextDigest.cjs');
+const { JOB_STATUSES } = require('./lib/scheduler/scheduleJobSchema.cjs');
+const { appendAuditEvent } = require('./lib/telemetry/auditLog.cjs');
+const { withTimeout } = require('./lib/util/withTimeout.cjs');
 
 // ---------- origin session resolution (PRD 832) ----------
 // An Epic IS a tagged claude session — job rows carry the originating
@@ -165,21 +165,21 @@ function resolveOriginSessionId(cwd, epicId) {
   const session = entry.sessions[epicId];
   return session && typeof session.claudeSessionId === 'string' ? session.claudeSessionId : null;
 }
-const sessionSlots = require('./lib/sessionSlots.cjs');
-const quietMachineLease = require('./lib/quietMachineLease.cjs');
-const runtimeState = require('./lib/schedulerRuntimeState.cjs');
-const jobWorktree = require('./lib/jobWorktree.cjs');
-const gitWorktree = require('./lib/gitWorktree.cjs');
-const sharedGitExec = require('./lib/gitExec.cjs');
-const { buildJobWorktreeIsLive } = require('./lib/jobWorktreeBootLive.cjs');
-const { buildTerminalOrphanIsLive } = require('./lib/jobWorktreeTerminalOrphanLive.cjs');
-const { reconcileEpicWorktreesOnBoot } = require('./lib/epicWorktreeBoot.cjs');
-const queueStore = require('./lib/queueStore.cjs');
-const supervisorRecord = require('./lib/jobSupervisorRecord.cjs');
-const adoptedRunSupervisor = require('./lib/adoptedRunSupervisor.cjs');
-const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prdFrontmatter.cjs');
-const { resolveDepSlug, findNearMatches } = require('./lib/depSlugResolve.cjs');
-const { computeDispositionRewrite, mintPlanId, resolveInheritedPlanId } = require('./lib/prdDisposition.cjs');
+const sessionSlots = require('./lib/scheduler/sessionSlots.cjs');
+const quietMachineLease = require('./lib/scheduler/quietMachineLease.cjs');
+const runtimeState = require('./lib/scheduler/schedulerRuntimeState.cjs');
+const jobWorktree = require('./lib/git/jobWorktree.cjs');
+const gitWorktree = require('./lib/git/gitWorktree.cjs');
+const sharedGitExec = require('./lib/git/gitExec.cjs');
+const { buildJobWorktreeIsLive } = require('./lib/git/jobWorktreeBootLive.cjs');
+const { buildTerminalOrphanIsLive } = require('./lib/git/jobWorktreeTerminalOrphanLive.cjs');
+const { reconcileEpicWorktreesOnBoot } = require('./lib/epic/epicWorktreeBoot.cjs');
+const queueStore = require('./lib/scheduler/queueStore.cjs');
+const supervisorRecord = require('./lib/scheduler/jobSupervisorRecord.cjs');
+const adoptedRunSupervisor = require('./lib/scheduler/adoptedRunSupervisor.cjs');
+const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prd/prdFrontmatter.cjs');
+const { resolveDepSlug, findNearMatches } = require('./lib/prd/depSlugResolve.cjs');
+const { computeDispositionRewrite, mintPlanId, resolveInheritedPlanId } = require('./lib/prd/prdDisposition.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
 
 // Captured once at module load so every run's meta sidecar can record how
@@ -195,7 +195,7 @@ const SCHEDULER_BOOTED_AT = new Date().toISOString();
 // non-walking git read only in a dev checkout / job worktree — see
 // src/main/lib/buildIdentity.cjs's header.
 const { resolveBuildIdentity, readInstalledBuildInfo } = require('./lib/buildIdentity.cjs');
-const upgradeDrain = require('./lib/upgradeDrain.cjs');
+const upgradeDrain = require('./lib/scheduler/upgradeDrain.cjs');
 const SCHEDULER_BUILD_IDENTITY = resolveBuildIdentity({ bootedAt: SCHEDULER_BOOTED_AT });
 const SCHEDULER_CODE_SHA = SCHEDULER_BUILD_IDENTITY.codeSha;
 // Spread into EVERY metaPath writer below (grep `metaPath` for the full
@@ -377,7 +377,7 @@ in your final report.`;
  * are CODE REVIEW, SECURITY REVIEW, VERIFY, COMMIT, VERDICT LINE.
  * `reviewInRun: false` collapses the two review steps into one deferral note
  * (step 1) and renumbers VERIFY/COMMIT/VERDICT LINE to 2-4 — used when
- * `hasDownstreamValidator` (lib/planValidator.cjs) finds this job's diff will
+ * `hasDownstreamValidator` (lib/prd/planValidator.cjs) finds this job's diff will
  * be re-reviewed once by the plan's own trailing validator job, so asking
  * every work-item to also run /code-review + /security-review inline is
  * redundant review work.
@@ -393,11 +393,11 @@ function buildFinishProtocol({ reviewInRun = true } = {}) {
 
 const FINISH_PROTOCOL = buildFinishProtocol({ reviewInRun: true });
 
-// Machine-wide roots resolve lazily via lib/schedulerPaths.cjs (SM_SCHEDULER_HOME
+// Machine-wide roots resolve lazily via lib/scheduler/schedulerPaths.cjs (SM_SCHEDULER_HOME
 // override) — never module-scope consts. The ROOT/PRDS_DIR/RUNS_DIR/
 // SCHEDULER_STATE_PATH exports below are lazy getters over the same resolver.
 const HEARTBEAT_MAX_BYTES = 1024 * 1024;
-// DEFAULT_PROJECT_CWD imported from lib/schedulerBatch.cjs (single source of truth).
+// DEFAULT_PROJECT_CWD imported from lib/scheduler/schedulerBatch.cjs (single source of truth).
 
 // Each headless claude -p job can shell out to tsc/vite/pytest and grow well
 // past 1 GB at peak; reserve 2.5 GB per running+pending slot. Raised from 1.5 GB
@@ -603,7 +603,7 @@ function ensureDirs() {
 // callback that must flush meta.json before resolving) — replacing with async
 // would deadlock the exit path.
 const config = require('./config.cjs');
-const { seedAuthoringGuide } = require('./lib/prdAuthoringSeed.cjs');
+const { seedAuthoringGuide } = require('./lib/prd/prdAuthoringSeed.cjs');
 const atomicWriteJsonSync = (p, data) => config.writeJsonSync(p, data);
 
 // ---------- scheduler-state.json (sidecar) ----------
@@ -702,7 +702,7 @@ function heartbeatBuild() {
   return { version, codeSha, builtAt };
 }
 
-// ---------- upgrade drain driver (lib/upgradeDrain.cjs) ----------
+// ---------- upgrade drain driver (lib/scheduler/upgradeDrain.cjs) ----------
 
 // Set by index.cjs: performs the actual app teardown + relaunch + exit.
 let restartHandler = null;
@@ -1063,7 +1063,7 @@ function flagUnreadable(state) {
   return state;
 }
 
-// Storage is FEDERATED (lib/queueStore.cjs, 2026-07-31): per-project job
+// Storage is FEDERATED (lib/scheduler/queueStore.cjs, 2026-07-31): per-project job
 // shards under `<cwd>/session-manager-operations/scheduler/state/queue.json`
 // plus one machine-runtime file (config/paused/lastRunAt). Reads merge every
 // shard into the single state object all downstream logic already expects;
@@ -1817,7 +1817,7 @@ async function reconcile(state) {
     // template) or the absence of any createdVia stamp at all (legacy
     // fallback, matching the "no provenance = trust the name" rule the
     // quarantine gate below already applies) — never merely because the
-    // slug looks like one. See lib/fixPlanSlug.cjs's header for why (PRD
+    // slug looks like one. See lib/scheduler/fixPlanSlug.cjs's header for why (PRD
     // 1126: a scheduler_create_prd-authored PRD whose slug happened to start
     // with "fix-" was wrongly stamped investigationDepth before it ever ran).
     // Persisted onto the queue row so every later consumer
@@ -2173,7 +2173,7 @@ let stallToasted = new Map();
 // gone: it scanned each active project's session-manager-operations/feedback/
 // and auto-queued a /process-feedback PRD. Both the folder and that skill are
 // retired, and nothing auto-creates work any more — a parked job is surfaced
-// back into the Epic that authored its PRD instead. See lib/rcaReport.cjs.)
+// back into the Epic that authored its PRD instead. See lib/scheduler/rcaReport.cjs.)
 // In-memory set of slugs currently spawned in this process. Prevents
 // double-spawn when runDueJobs() is called while jobs are in flight.
 const runningSet = new Set();
@@ -2204,7 +2204,7 @@ function drainDeferredInvestigation() {
 let cancelToken = { cancelled: false };
 // Last memory-gate observation; included in snapshot for renderer visibility.
 let lastMemGate = null;
-// CPU-load launch gate (PRD 1085, lib/loadGate.cjs) — innermost launch
+// CPU-load launch gate (PRD 1085, lib/scheduler/loadGate.cjs) — innermost launch
 // predicate after pool → project cap → memory. Withholds launches only.
 const loadGate = createLoadGate();
 
@@ -2795,7 +2795,7 @@ function isBootRowAlive(j, {
  * classified run outcome: success/failed finalize terminally; no_result/unknown
  * re-queues to pending bounded by ORPHAN_REQUEUE_CAP. The status-mutation
  * semantics (and the cap-exhaustion boundary) match the now-deleted
- * reconcileQueueOffline (src/main/lib/watchdogHelpers.cjs) verbatim; killNote
+ * reconcileQueueOffline (src/main/lib/scheduler/watchdogHelpers.cjs) verbatim; killNote
  * plumbing differs slightly (see call sites) since this path always knows
  * pid liveness up front rather than re-checking per tick.
  *
@@ -3141,7 +3141,7 @@ async function notifyOriginatingTab(job, {
         // status transition or the response-event append (which already
         // happened above). All gating (kill-switch SM_EPIC_VALIDATION_DISABLE,
         // active-Epic check, once-per-(epicId, prdSlug), loop guard, slot-pool
-        // routing) lives in lib/epicValidationHook.cjs.
+        // routing) lives in lib/epic/epicValidationHook.cjs.
         //
         // PRD 1407: a validator job's own check-in never enqueues a
         // validation prompt for itself — it IS the plan's validation pass,
@@ -4145,7 +4145,7 @@ function pickRunDir() {
 
 // macOS ships no `timeout` command, but a PRD gate command starts with
 // `timeout <seconds> ...`. ensureTimeoutShimOnce() installs a dependency-free
-// stand-in (see lib/timeoutShim.cjs) once per process — not once per job — so
+// stand-in (see lib/process/timeoutShim.cjs) once per process — not once per job — so
 // most executeJob calls reuse the same cached promise instead of re-checking
 // the files on disk. A failed install clears that cache, so the NEXT spawn
 // retries the install instead of running shim-less for the rest of the
@@ -4431,7 +4431,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // persona whose whole job is decomposition may still queue.
     // `launchEnv` is the launch circuit breaker's degraded-mode env (e.g.
     // MAX_THINKING_TOKENS=0 while an outdated CLI's thinking parameter is
-    // being rejected — lib/launchFailure.cjs); applied last so it wins.
+    // being rejected — lib/scheduler/launchFailure.cjs); applied last so it wins.
     // SM_TIMEOUT_SHIM_DISABLE=1 is the kill switch for the PATH addition
     // below — paired with the install skip inside ensureTimeoutShimOnce().
     const timeoutShimEnabled = process.env.SM_TIMEOUT_SHIM_DISABLE !== '1';
@@ -4773,13 +4773,13 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   });
 }
 
-// pickNextBatch and pickForProject are defined in lib/schedulerBatch.cjs and
+// pickNextBatch and pickForProject are defined in lib/scheduler/schedulerBatch.cjs and
 // required at the top of this file. Group-ordering gates are evaluated per
 // project (keyed by cwd) so jobs in different repos run concurrently up to
 // the cap; within one project, sequential-group semantics are preserved.
 
 // isFixPlanSlug/classifyDiscoveredFixPlan/resolveIsFixPlan now live in
-// lib/fixPlanSlug.cjs (PRD 1131) — see that module's header for why slug
+// lib/scheduler/fixPlanSlug.cjs (PRD 1131) — see that module's header for why slug
 // shape alone is no longer sufficient to classify a fix plan.
 
 
@@ -5034,7 +5034,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
       return { deferred: false };
     }
   }
-  // A drain (lib/upgradeDrain.cjs) admits no NEW work: queue instead of spawning.
+  // A drain (lib/scheduler/upgradeDrain.cjs) admits no NEW work: queue instead of spawning.
   if (drainActive || runtimeState.investigationCount() >= MAX_CONCURRENT_INVESTIGATIONS) {
     // Queue for retry when a slot frees rather than dropping — otherwise a failed
     // job (never 'needs_review', so reverifyNeedsReview won't retry it) would
@@ -5358,7 +5358,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
 /**
  * computeLaunchHolds(state) → Map<slug, reason>
  *
- * The launch circuit breaker's per-tick view (lib/launchFailure.cjs, issue
+ * The launch circuit breaker's per-tick view (lib/scheduler/launchFailure.cjs, issue
  * #11): every pending row whose persona is blocked is held with its reason;
  * when a persona's backoff has elapsed exactly ONE of its pending rows is
  * left pickable (the half-open probe) and the rest are held behind it. A
@@ -5655,7 +5655,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       await broadcast({ flush: true });
       return;
     }
-    // Launch circuit breaker (lib/launchFailure.cjs, issue #11). Re-evaluated
+    // Launch circuit breaker (lib/scheduler/launchFailure.cjs, issue #11). Re-evaluated
     // here, not just in tickQueue, because the block can change between the
     // pick and this dispatch (another job's probe just failed). 'blocked' →
     // hold the row; 'probe' → this job is the single half-open probe and is
@@ -7206,7 +7206,7 @@ async function tickBody(gen, { bypassLoadGate }) {
       console.log('[scheduler] tickQueue skipped: paused');
       return recordTick({ fired: false, reason: 'paused' }, { detail: 'scheduler paused' });
     }
-    // Upgrade drain (lib/upgradeDrain.cjs): a separate field from `paused`, so a
+    // Upgrade drain (lib/scheduler/upgradeDrain.cjs): a separate field from `paused`, so a
     // rate-limit pause can't overwrite it. Nothing new dispatches; running and
     // investigating rows finish.
     if (state.drain?.active) {
@@ -7701,7 +7701,7 @@ async function runBranchSweep(jobs) {
  * skipped too (spawn may still be mid-flight) — see selectReapableJobs for
  * the full predicate. Exported so unit tests can invoke it directly.
  */
-// Adopted-run supervision (see lib/adoptedRunSupervisor.cjs). In-memory by
+// Adopted-run supervision (see lib/scheduler/adoptedRunSupervisor.cjs). In-memory by
 // design: the supervisors die with this process, and the next boot re-arms.
 const adoptedSupervisors = new Map();
 
@@ -9319,13 +9319,13 @@ function registerScheduleHandlers() {
     return buildScheduleStatePayload(state);
   });
 
-  // Session-Manager-wide claude -p slot pool (lib/sessionSlots.cjs) —
+  // Session-Manager-wide claude -p slot pool (lib/scheduler/sessionSlots.cjs) —
   // read-only diagnostic surface for the Home widget and the global
   // configuration tab.
   ipcMain.handle('schedule:session-slots', () => sessionSlots.snapshot());
 
   // Read-only: where Epic/job git worktrees (and so their CLI transcript encodings) live.
-  ipcMain.handle('schedule:worktree-base', () => require('./lib/schedulerPaths.cjs').worktreeBase());
+  ipcMain.handle('schedule:worktree-base', () => require('./lib/scheduler/schedulerPaths.cjs').worktreeBase());
 
   // Home-tab control for the same pool: user-set cap in [0, 10], default 5.
   // 0 pauses new claude -p launches machine-wide without killing anything
@@ -10769,7 +10769,7 @@ const remote = {
   },
 
   // Exposes the module-level allocateParallelGroup (PRD 548) to callers that
-  // only hold the `remote` object (lib/prdCreate.cjs's create-prd route) —
+  // only hold the `remote` object (lib/prd/prdCreate.cjs's create-prd route) —
   // reuses the same allocator the file-based /develop authoring path relies
   // on implicitly, rather than re-deriving NN here.
   allocateParallelGroup,
@@ -10970,7 +10970,7 @@ module.exports = {
 };
 
 // Lazy path getters: resolved from SM_SCHEDULER_HOME at each read, never frozen
-// at require time (see lib/schedulerPaths.cjs).
+// at require time (see lib/scheduler/schedulerPaths.cjs).
 for (const [name, resolve] of [
   ['ROOT', schedulerPaths.scheduledPlansRoot],
   ['PRDS_DIR', schedulerPaths.prdsRoot],

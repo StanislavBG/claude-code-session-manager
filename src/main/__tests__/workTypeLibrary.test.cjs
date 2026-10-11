@@ -14,7 +14,7 @@
 import { test, expect } from 'vitest';
 const fs = require('node:fs');
 const path = require('node:path');
-const { WORK_TYPES, WorkTypeSchema } = require('../lib/workTypeLibrary.cjs');
+const { WORK_TYPES, WorkTypeSchema } = require('../lib/prd/workTypeLibrary.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const TAG_LIBRARY_PATH = path.join(REPO_ROOT, 'src/renderer/lib/tagLibrary.ts');
@@ -76,7 +76,7 @@ test('ipcSchemas.cjs no longer hardcodes the full-taxonomy tag z.enum literal', 
 });
 
 test('scheduler-mcp-server.cjs requires PRD_WORK_TYPES rather than hardcoding a tag enum literal, and imports it exactly twice (scheduler_create_prd + scheduler_update_prd)', () => {
-  const { PRD_WORK_TYPES } = require('../lib/workTypeLibrary.cjs');
+  const { PRD_WORK_TYPES } = require('../lib/prd/workTypeLibrary.cjs');
   const src = fs.readFileSync(SCHEDULER_MCP_SERVER_PATH, 'utf8');
   expect(src).toMatch(/require\(['"].*workTypeLibrary\.cjs['"]\)/);
   const occurrences = [...src.matchAll(/enum:\s*PRD_WORK_TYPES/g)].length;

@@ -28,7 +28,7 @@ beforeAll(() => {
   fs.mkdirSync(path.join(tmpHome, '.claude', 'projects'), { recursive: true });
   scheduler = require('../scheduler.cjs');
   billing = require('../usage.cjs');
-  circuit = require('../lib/usageCircuit.cjs');
+  circuit = require('../lib/claude/usageCircuit.cjs');
   originalFetchUsage = billing.fetchUsage;
 });
 

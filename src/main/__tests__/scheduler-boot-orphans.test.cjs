@@ -2,7 +2,7 @@
  * scheduler-boot-orphans.test.cjs — boot-time reconciliation of 'running' jobs
  * left behind by an app crash/restart (PRD 686: consolidated in from the
  * external watchdog's reconcileQueueOffline(), which is now deleted from
- * src/main/lib/watchdogHelpers.cjs).
+ * src/main/lib/scheduler/watchdogHelpers.cjs).
  *
  * Covers:
  *   - a proven-alive row is ADOPTED (left running, never signalled) and only
@@ -22,12 +22,12 @@ const path = require('node:path');
 
 const {
   writeSupervisorRecord,
-} = require('../lib/jobSupervisorRecord.cjs');
+} = require('../lib/scheduler/jobSupervisorRecord.cjs');
 const {
   partitionBootOrphans,
   applyOrphanOutcome,
 } = require('../scheduler.cjs');
-const { ORPHAN_REQUEUE_CAP } = require('../lib/reaperHelpers.cjs');
+const { ORPHAN_REQUEUE_CAP } = require('../lib/scheduler/reaperHelpers.cjs');
 
 function spawnStub() {
   return spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' });

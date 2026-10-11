@@ -7,9 +7,9 @@
 
 const { schemas, validated } = require('./ipcSchemas.cjs');
 const agentLibrary = require('./agentLibrary.cjs');
-const agentModelResolve = require('./lib/agentModelResolve.cjs');
-const agentEffortResolve = require('./lib/agentEffortResolve.cjs');
-const { resolveEffectiveModelInfo } = require('./lib/effectiveModelInfo.cjs');
+const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
+const agentEffortResolve = require('./lib/claude/agentEffortResolve.cjs');
+const { resolveEffectiveModelInfo } = require('./lib/claude/effectiveModelInfo.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 /**

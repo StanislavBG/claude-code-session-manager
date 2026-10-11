@@ -205,7 +205,7 @@ calls (zod-validated in `src/main/ipcSchemas.cjs`, exposed via preload like the 
   helper `lib/encodeWorkspace.ts` mirrors); `git -C <cwd> rev-list --count HEAD` (bounded,
   tolerate non-git). `drift: true` on a source whose mtime > `synthesizedAt`.
 - `projectBrief:refresh { cwd }` → runs the synthesis. MUST acquire a machine session slot from
-  `src/main/lib/sessionSlots.cjs` first (the ≤3 `claude -p` pool; reject with a clear error if
+  `src/main/lib/scheduler/sessionSlots.cjs` first (the ≤3 `claude -p` pool; reject with a clear error if
   none free — surfaced as a toast). Prompt feeds: CLAUDE.md text, Epic goalTexts + statuses
   (active + archived), last ~50 `git log --oneline` lines, a depth-2 `ls` of src/, and the
   frozen content of pinned blocks with the instruction to return them unchanged. Writes

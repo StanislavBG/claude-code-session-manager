@@ -48,7 +48,7 @@ fs.mkdirSync(PROJECT_CWD, { recursive: true });
 
 const { applyNeedsReviewAutoResolve, computeLooksDone } = require('../scheduler.cjs');
 const { isStrandedAutoFixPark, isExhaustedAutoFix, isGuardParkedWithoutAutoFix, isEligibleForNeedsReviewAutoResolve, selectExhaustedNeedsReviewTargets, fixSlugFor, NEEDS_REVIEW_RESOLVE_CAP } = require('../scheduler/reviewLadder.cjs');
-const { resolvePrdWriteDir } = require('../lib/prdLocations.cjs');
+const { resolvePrdWriteDir } = require('../lib/prd/prdLocations.cjs');
 
 const MIN_MS = 60_000;
 const THRESHOLD_MS = 30 * MIN_MS;

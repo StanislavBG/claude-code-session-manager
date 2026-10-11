@@ -8,7 +8,7 @@
 // (same convention as check-unregistered-tests.cjs). Dev-only: not in package.json `files`.
 //
 // Second rule, LIVE_ROOT_LITERAL: once every scheduler root resolves through
-// src/main/lib/schedulerPaths.cjs, a new os.homedir()/os.tmpdir() join spelling a scheduler-root
+// src/main/lib/scheduler/schedulerPaths.cjs, a new os.homedir()/os.tmpdir() join spelling a scheduler-root
 // segment (session-manager, scheduled-plans, <x>-worktrees) is how the split-brain returns.
 // Scanned across src/main, scripts, tests (incl. __tests__ and .ts); per-file allowlist below.
 // This file is excluded by SELF_REL, so its own pattern strings never self-match.
@@ -36,7 +36,7 @@ const ALLOWLIST = new Map([
   ['scripts/hooks/lib/guard-inline-implementation-policy.cjs', 'required by guard-inline-implementation.cjs, installed to ~/.claude/session-manager/hooks via shim; runs outside the repo and cannot require opsOwnership'],
 ])
 
-const SCHEDULER_PATHS_REL = 'src/main/lib/schedulerPaths.cjs'
+const SCHEDULER_PATHS_REL = 'src/main/lib/scheduler/schedulerPaths.cjs'
 const LIVE_SCAN_DIRS = ['src/main', 'scripts', 'tests']
 const LIVE_SKIP_DIRS = new Set(['node_modules', 'dist'])
 const LIVE_FILE_RE = /\.(?:cjs|mjs|js|ts|tsx)$/
@@ -58,7 +58,7 @@ const LIVE_ROOT_ALLOWLIST = new Map([
   ['src/main/index.cjs', 'main-process log dir under ~/.claude/session-manager/logs, not a scheduler root'],
   ['src/main/layoutStore.cjs', 'workbench-layout.json: app state, not a scheduler root'],
   ['src/main/lib/credentials.cjs', 'credential-refresh log next to ~/.claude/.credentials.json, not a scheduler root'],
-  ['src/main/lib/epicWorktreeProjectConfig.cjs', 'per-project epic-worktree config file under ~/.claude/session-manager; not a scheduler root'],
+  ['src/main/lib/epic/epicWorktreeProjectConfig.cjs', 'per-project epic-worktree config file under ~/.claude/session-manager; not a scheduler root'],
   ['src/main/lib/summarize.cjs', 'reads web-remote.json config; not a scheduler root'],
   ['src/main/seedAgentPersonas.cjs', 'seed marker file under ~/.claude/session-manager; not a scheduler root'],
   ['src/main/seedDevPlugin.cjs', 'seed marker file under ~/.claude/session-manager; not a scheduler root'],
@@ -67,18 +67,18 @@ const LIVE_ROOT_ALLOWLIST = new Map([
   ['src/main/sessionsStore.cjs', 'tabs.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
   ['src/main/otelSettings.cjs', 'otel.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
   ['src/main/voiceSettings.cjs', 'voice.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
-  ['src/main/lib/telemetrySettings.cjs', 'telemetry.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
-  ['src/main/lib/telemetryBacklog.cjs', 'telemetry-watermarks.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
-  ['src/main/lib/telemetryClient.cjs', 'telemetry spool under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
+  ['src/main/lib/telemetry/telemetrySettings.cjs', 'telemetry.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
+  ['src/main/lib/telemetry/telemetryBacklog.cjs', 'telemetry-watermarks.json under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
+  ['src/main/lib/telemetry/telemetryClient.cjs', 'telemetry spool under ~/.claude/session-manager, plus its ~/.config/session-manager migration-source literal; not a scheduler root'],
   ['src/main/lib/updaterSettings.cjs', 'updater.json (auto-update toggle) under ~/.claude/session-manager; not a scheduler root'],
   ['src/main/lib/updaterSettings.cjs', 'updater.json (auto-update toggle) under ~/.claude/session-manager; not a scheduler root'],
   // Tests that deliberately assert the default (unredirected) location.
   ['src/main/__tests__/heapSnapshot.test.cjs', 'asserts the default snapshot dir'],
-  ['src/main/lib/__tests__/delegationReadiness.test.cjs', 'builds a fake job-worktree cwd string to classify; touches no disk'],
-  ['src/main/lib/__tests__/schedulerPaths.test.cjs', 'asserts the resolver default location'],
+  ['src/main/lib/epic/__tests__/delegationReadiness.test.cjs', 'builds a fake job-worktree cwd string to classify; touches no disk'],
+  ['src/main/lib/scheduler/__tests__/schedulerPaths.test.cjs', 'asserts the resolver default location'],
   ['src/main/lib/__tests__/schedulerPathsWorktree.test.cjs', 'asserts the worktree-root default location'],
-  ['src/main/lib/__tests__/sessionSlots.test.cjs', 'asserts the default slot-config location'],
-  ['src/main/lib/__tests__/telemetryBacklog.test.cjs', 'builds a fake ephemeral worktree path string; touches no disk'],
+  ['src/main/lib/scheduler/__tests__/sessionSlots.test.cjs', 'asserts the default slot-config location'],
+  ['src/main/lib/telemetry/__tests__/telemetryBacklog.test.cjs', 'builds a fake ephemeral worktree path string; touches no disk'],
   ['scripts/hooks/__tests__/guard-destructive-git.test.cjs', 'builds fake job/epic worktree cwd strings for the guard hook'],
   ['tests/e2e/scheduler-a11y.spec.ts', 'e2e drives the real app at its default scheduler root'],
   ['tests/e2e/scheduler-archive.spec.ts', 'e2e drives the real app at its default scheduler root'],

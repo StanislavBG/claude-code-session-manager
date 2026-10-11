@@ -15,7 +15,7 @@
 | scripts/__tests__/ops-sweep-claude-md-fallback.test.cjs | timeout (120 s cap) (120 s) |
 | scripts/__tests__/package-files.test.cjs | timeout (120 s cap) (120 s) |
 | scripts/test-quality/__tests__/smells.test.cjs | failed (31 s) |
-| src/main/lib/__tests__/agentPersonaSchema.test.cjs | timeout (120 s cap) (120 s) |
+| src/main/lib/persona-macro/__tests__/agentPersonaSchema.test.cjs | timeout (120 s cap) (120 s) |
 | src/main/lib/__tests__/appRuntime.test.cjs | timeout (120 s cap) (120 s) |
 | src/main/lib/__tests__/buildIdentity.test.cjs | failed (116 s) |
 | src/main/lib/__tests__/schedulerMcpServerGateFiles.test.cjs | failed (17 s) |
@@ -75,26 +75,26 @@ Map HEAD: eec9b6144ba63180260e25baba6aee208168fd5d
 
 | src | test files | merge/bloat |
 | --- | ---: | ---: |
-| src/main/lib/schedulerPaths.cjs | 334 | 106 |
+| src/main/lib/scheduler/schedulerPaths.cjs | 334 | 106 |
 | src/main/lib/opsOwnership.cjs | 301 | 98 |
 | src/main/lib/cwdClassify.cjs | 298 | 96 |
-| src/main/lib/atomicFs.cjs | 304 | 93 |
+| src/main/lib/util/atomicFs.cjs | 304 | 93 |
 | src/main/lib/ephemeralCwd.cjs | 281 | 91 |
-| src/main/lib/gitExec.cjs | 267 | 85 |
-| src/main/lib/expandHome.cjs | 262 | 85 |
-| src/main/lib/personaImportHealth.cjs | 262 | 85 |
+| src/main/lib/git/gitExec.cjs | 267 | 85 |
+| src/main/lib/util/expandHome.cjs | 262 | 85 |
+| src/main/lib/persona-macro/personaImportHealth.cjs | 262 | 85 |
 | src/main/lib/importReferences.cjs | 261 | 85 |
 | src/main/config.cjs | 260 | 85 |
-| src/main/lib/opsErrorLog.cjs | 260 | 85 |
+| src/main/lib/telemetry/opsErrorLog.cjs | 260 | 85 |
 | src/main/lib/sendToRenderer.cjs | 260 | 85 |
 | src/main/logs.cjs | 260 | 85 |
-| src/main/lib/gitWorktree.cjs | 266 | 84 |
-| src/main/lib/workTypeLibrary.cjs | 260 | 84 |
+| src/main/lib/git/gitWorktree.cjs | 266 | 84 |
+| src/main/lib/prd/workTypeLibrary.cjs | 260 | 84 |
 | src/main/lib/activeSessions.cjs | 256 | 80 |
-| src/main/lib/auditLog.cjs | 249 | 78 |
-| src/main/lib/prdFrontmatter.cjs | 225 | 75 |
-| src/main/lib/prdLocations.cjs | 241 | 74 |
-| src/main/lib/telemetryCounters.cjs | 231 | 72 |
+| src/main/lib/telemetry/auditLog.cjs | 249 | 78 |
+| src/main/lib/prd/prdFrontmatter.cjs | 225 | 75 |
+| src/main/lib/prd/prdLocations.cjs | 241 | 74 |
+| src/main/lib/telemetry/telemetryCounters.cjs | 231 | 72 |
 
 ## Smell counts
 

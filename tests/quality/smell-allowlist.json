@@ -6,7 +6,7 @@
     "src/main/__tests__/scheduler-killtree-adoption.test.cjs",
     "src/main/__tests__/seedAgentPersonas.test.cjs",
     "src/main/__tests__/workTypeLibrary.test.cjs",
-    "src/main/lib/__tests__/delegationReadiness.test.cjs",
+    "src/main/lib/epic/__tests__/delegationReadiness.test.cjs",
     "tests/unit/atomic-write.spec.ts"
   ],
   "no-assert": [

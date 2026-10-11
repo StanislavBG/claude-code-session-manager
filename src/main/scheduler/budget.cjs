@@ -8,18 +8,18 @@
 
 const fsp = require('node:fs/promises');
 const path = require('node:path');
-const { claudePidAlive } = require('../lib/reaperHelpers.cjs');
-const queueHistory = require('../lib/queueHistory.cjs');
-const { listArchivedPrdDirs } = require('../lib/prdLocations.cjs');
-const { LEGAL_TRANSITIONS } = require('../lib/scheduleJobTransitions.cjs');
-const { DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('../lib/schedulerBatch.cjs');
+const { claudePidAlive } = require('../lib/scheduler/reaperHelpers.cjs');
+const queueHistory = require('../lib/scheduler/queueHistory.cjs');
+const { listArchivedPrdDirs } = require('../lib/prd/prdLocations.cjs');
+const { LEGAL_TRANSITIONS } = require('../lib/scheduler/scheduleJobTransitions.cjs');
+const { DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('../lib/scheduler/schedulerBatch.cjs');
 const {
   JOB_OVERRUN_FACTOR: JOB_OVERRUN_FACTOR_DEFAULT,
   JOB_OVERRUN_FLOOR_MS: JOB_OVERRUN_FLOOR_MS_DEFAULT,
   JOB_BUDGET_FACTOR: JOB_BUDGET_FACTOR_DEFAULT,
   JOB_BUDGET_FLOOR_MS: JOB_BUDGET_FLOOR_MS_DEFAULT,
   JOB_BUDGET_CEILING_MS: JOB_BUDGET_CEILING_MS_DEFAULT,
-} = require('../lib/schedulerConfig.cjs');
+} = require('../lib/scheduler/schedulerConfig.cjs');
 
 // Shared by every SM_*-env-overridable numeric constant below (bare factors
 // use unitMs=1; minute-denominated knobs use unitMs=60_000) — one parse rule

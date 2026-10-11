@@ -15,7 +15,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const opsErrorLog = require('../lib/opsErrorLog.cjs');
+const opsErrorLog = require('../lib/telemetry/opsErrorLog.cjs');
 
 function mkTmpProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'sm-opslog-test-'));
@@ -91,7 +91,7 @@ test('under vitest, a real project root is refused: no file written, no telemetr
   const logsBefore = fs.existsSync(path.join(repoRoot, 'session-manager-operations', 'logs'))
     ? fs.readdirSync(path.join(repoRoot, 'session-manager-operations', 'logs')).map((f) => [f, fs.statSync(path.join(repoRoot, 'session-manager-operations', 'logs', f)).mtimeMs])
     : null;
-  const telemetryPath = require.resolve('../lib/telemetryClient.cjs');
+  const telemetryPath = require.resolve('../lib/telemetry/telemetryClient.cjs');
   const saved = require.cache[telemetryPath];
   let calls = 0;
   require.cache[telemetryPath] = { id: telemetryPath, filename: telemetryPath, loaded: true, exports: { reportError: () => { calls++; }, logLine: () => { calls++; } } };

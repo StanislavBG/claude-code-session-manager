@@ -1,6 +1,6 @@
 /**
  * promptSessionsCreateEpicHandler.test.cjs — unit tests for the
- * 'promptSessions:create-epic' IPC handler (lib/promptSessionsCreateEpic.cjs),
+ * 'promptSessions:create-epic' IPC handler (lib/epic/promptSessionsCreateEpic.cjs),
  * PRD 953: an additive-only IPC channel letting the renderer mint an Epic
  * through main's own ensureEpic() instead of hand-constructing the
  * PromptSession record itself. Nothing in the app calls this yet.
@@ -21,8 +21,8 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { schemas, validated } = require('../ipcSchemas.cjs');
-const { createEpicViaIpc } = require('../lib/promptSessionsCreateEpic.cjs');
-const { readActiveIndex } = require('../lib/epicMint.cjs');
+const { createEpicViaIpc } = require('../lib/epic/promptSessionsCreateEpic.cjs');
+const { readActiveIndex } = require('../lib/epic/epicMint.cjs');
 const { PromptSessionSchema } = require('../lib/promptSessionSchema.cjs');
 const config = require('../config.cjs');
 
@@ -130,7 +130,7 @@ test('two requests with identical goalText for the same cwd mint two distinct Ep
 // The renderer can send an arbitrary `cwd` string over IPC — config.cjs's
 // validatePath (allowedRoots = home dir + every cwd a TAB has opened) is the
 // boundary every other renderer-facing path IPC already passes through
-// (config:read-json/write-json, lib/activeIndexMerge.cjs's own merge); this
+// (config:read-json/write-json, lib/epic/activeIndexMerge.cjs's own merge); this
 // handler must be gated by the same boundary rather than handing an
 // unvalidated path straight to epicMint.cjs's raw `fs` writes.
 test('a cwd outside every allowed root is rejected before anything is minted', async () => {

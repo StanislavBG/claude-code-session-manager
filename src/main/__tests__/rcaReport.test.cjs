@@ -1,5 +1,5 @@
 /**
- * rcaReport.test.cjs — unit tests for src/main/lib/rcaReport.cjs.
+ * rcaReport.test.cjs — unit tests for src/main/lib/scheduler/rcaReport.cjs.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/rcaReport.test.cjs
  */
@@ -19,7 +19,7 @@ let rcaReport;
 // (allowedRoots/WRITE_PREFIXES). Node's require cache must be purged per test
 // so each test's tmpHome takes effect — vi.resetModules() only resets vitest's
 // ESM graph, not require().
-const MODULES_TO_RELOAD = ['../lib/rcaReport.cjs', '../config.cjs'];
+const MODULES_TO_RELOAD = ['../lib/scheduler/rcaReport.cjs', '../config.cjs'];
 
 function purgeRequireCache() {
   for (const m of MODULES_TO_RELOAD) {
@@ -33,7 +33,7 @@ beforeEach(() => {
   process.env.HOME = tmpHome;
   delete process.env.SM_RCA_DISABLE;
   purgeRequireCache();
-  rcaReport = require('../lib/rcaReport.cjs');
+  rcaReport = require('../lib/scheduler/rcaReport.cjs');
 });
 
 afterEach(() => {

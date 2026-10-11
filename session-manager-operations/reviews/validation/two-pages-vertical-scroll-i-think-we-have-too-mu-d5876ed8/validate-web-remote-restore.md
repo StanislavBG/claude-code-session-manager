@@ -12,7 +12,7 @@ Gates re-run (all exit 0): `npm run typecheck`, `npm run lint`, `npm run lint:do
 - `tests/unit/webRemoteCommandSets.spec.ts` present and passes.
 
 ## wr-restore-bridge-module — VERIFIED (with caveat, see Important #1)
-- `webRemote.cjs` diff vs b014cc2^ is only `claudeHome()` replacing `os.homedir()/.claude` for CONFIG_PATH/AUDIT_LOG_DIR (HEAD helper `lib/schedulerPaths.cjs`). Adaptation is sensible.
+- `webRemote.cjs` diff vs b014cc2^ is only `claudeHome()` replacing `os.homedir()/.claude` for CONFIG_PATH/AUDIT_LOG_DIR (HEAD helper `lib/scheduler/schedulerPaths.cjs`). Adaptation is sensible.
 - Specs ipc-web-remote, webRemoteAuthGate, webRemoteSasState: identical to b014cc2^ except an added exports test in ipc-web-remote.spec.ts:275-296 (registerRemoteHandlers/attachWindow/init/destroy). All pass.
 - KDF labels: `webRemote.cjs:109` `sm-e2e-v1`, `:131` `sm-sas-v1`; phone app `web/remote-app/src/ws.ts:130,182` same labels. Match.
 - Relay URLs: `webRemote.cjs:41-43` `https://bilko.run`, `/api/sm-relay`, `wss://bilko.run/projects/session-manager/relay`; phone app `api.ts:8-13` is same-origin bilko.run, REST under `/api/sm-relay`. Consistent.

@@ -4,11 +4,11 @@
  * hook the normal quit-event chain into and can leave a zombie process
  * running indefinitely (found live: three orphaned instances over a day).
  *
- * Source: src/main/lib/singleInstanceGuard.cjs.
+ * Source: src/main/lib/process/singleInstanceGuard.cjs.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { terminateLosingInstance } = require('../../src/main/lib/singleInstanceGuard.cjs')
+const { terminateLosingInstance } = require('../../src/main/lib/process/singleInstanceGuard.cjs')
 
 describe('terminateLosingInstance', () => {
   afterEach(() => {

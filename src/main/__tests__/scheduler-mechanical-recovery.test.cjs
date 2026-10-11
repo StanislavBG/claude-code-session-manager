@@ -36,7 +36,7 @@ process.env.HOME = tmpHome;
 const scheduler = require('../scheduler.cjs');
 const { performMechanicalRecovery } = scheduler;
 const { selectMechanicalRecoveryTarget, MECHANICALLY_RESOLVABLE_VERDICTS } = require('../scheduler/reviewLadder.cjs');
-const jobWorktree = require('../lib/jobWorktree.cjs');
+const jobWorktree = require('../lib/git/jobWorktree.cjs');
 
 function initRepo(dir) {
   fs.mkdirSync(dir, { recursive: true });

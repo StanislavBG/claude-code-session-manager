@@ -21,7 +21,7 @@ import type { EpicIntakeSection } from '../lib/epicIntake'
  *  SINGLE-CREATOR LAW); 'scheduler-dispatch' appears only on join-only calls
  *  kept for audit symmetry. 'cross-project-feedback' is the one other minting
  *  producer: a session in ANOTHER project deposited this Epic here as a
- *  'proposed' feedback proposal (src/main/lib/crossProjectFeedback.cjs). It
+ *  'proposed' feedback proposal (src/main/lib/feedback-remote/crossProjectFeedback.cjs). It
  *  still runs nothing until a human here presses Approve & start. */
 export interface InboundProposal {
   motivation: string
@@ -67,7 +67,7 @@ export interface PromptSession {
    *  archived session's claudeSessionId is dead and never reused. */
   resumedFromId?: string | null
   /** Epic-level intent tag. Every Epic — human-created via New Epic or
-   *  automated — is constructed by src/main/lib/epicMint.cjs's ensureEpic();
+   *  automated — is constructed by src/main/lib/epic/epicMint.cjs's ensureEpic();
    *  the renderer never builds this field itself, only receives and stores
    *  the record ensureEpic returns (createPromptSession's
    *  window.api.promptSessions.create call). */
@@ -75,11 +75,11 @@ export interface PromptSession {
   /** Full first-prompt body, when it differs from the display `goalText`
    *  (a proposal filed by automation: goalText is a one-line title, this is
    *  the RCA/analysis body). Sent verbatim on approval; falls back to
-   *  goalText when absent. Constructed by src/main/lib/epicMint.cjs's
+   *  goalText when absent. Constructed by src/main/lib/epic/epicMint.cjs's
    *  ensureEpic() for every Epic, same as `tag` above. */
   openingPrompt?: string | null
   /** Which surface minted this Epic, for tracing it back to its origin.
-   *  Constructed by src/main/lib/epicMint.cjs's ensureEpic() for every Epic;
+   *  Constructed by src/main/lib/epic/epicMint.cjs's ensureEpic() for every Epic;
    *  absent on older Epics predating this field. */
   source?: EpicSource
   /** Name of the Agent Library persona (`~/.claude/agents/<name>.md`) chosen to
@@ -110,7 +110,7 @@ export interface PromptSession {
    *  single block. */
   sections?: EpicIntakeSection[]
   /** This Epic's isolated `git worktree` checkout, when one was created for
-   *  it (`sm-epic/<id>` branch, src/main/lib/gitWorktree.cjs's
+   *  it (`sm-epic/<id>` branch, src/main/lib/git/gitWorktree.cjs's
    *  createEpicWorktree). Absent when the project isn't a git repo, worktree
    *  isolation is disabled, or (until the next PRD in this chain wires
    *  minting) simply not created yet — this field is a passthrough read/write
@@ -125,7 +125,7 @@ export interface PromptSession {
     status: 'active' | 'needs_merge_resolution' | 'merged' | 'disabled'
     /** Set alongside `status: 'needs_merge_resolution'` — the reason
      *  gitWorktree.cjs's `integrateEpicBranch` returned for the real
-     *  conflict (PRD 1034/lib/epicWorktreeMerge.cjs), so a conflict banner
+     *  conflict (PRD 1034/lib/epic/epicWorktreeMerge.cjs), so a conflict banner
      *  reopened later (not just right after the button click that produced
      *  it) still has real data to show, never a placeholder. Cleared
      *  (omitted) whenever status moves off `needs_merge_resolution`. */
@@ -147,7 +147,7 @@ export interface PromptSessionArchive {
   events: PromptSessionEvent[]
   transcript: string
   archivedAt: string
-  /** Status mirror fields (see src/main/lib/epicStatusMirror.cjs) — copies of
+  /** Status mirror fields (see src/main/lib/epic/epicStatusMirror.cjs) — copies of
    *  `session.status`/`session.cwd` plus a write timestamp, kept at the TOP
    *  level so activeIndexRebuild.cjs can read every prompt-sessions/<id>.json
    *  file uniformly without reaching into the nested `session` shape, which
@@ -432,7 +432,7 @@ const indexBackedIds = new Set<string>()
 /** Persists a cwd's active-session slice — called after every mutation so a
  *  reload never loses in-progress work. Sends only THIS renderer's own
  *  in-memory contribution to the main-process merge IPC
- *  (lib/activeIndexMerge.cjs's mergeActiveIndex, over
+ *  (lib/epic/activeIndexMerge.cjs's mergeActiveIndex, over
  *  window.api.promptSessions.mergeActiveIndex) rather than doing a
  *  read-merge-write itself. Moved main-side (was a renderer-side
  *  read-merge-write, commit 3d12e19) to close two holes that survived the

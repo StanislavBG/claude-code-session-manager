@@ -21,7 +21,7 @@ import { inboundFeedbackOrigin } from '../../lib/epicOrigin'
 
 export function EpicApprovalBar({ epic }: { epic: PromptSession }) {
   const [busy, setBusy] = useState(false)
-  // A proposal from ANOTHER project (src/main/lib/crossProjectFeedback.cjs).
+  // A proposal from ANOTHER project (src/main/lib/feedback-remote/crossProjectFeedback.cjs).
   // This is the exact moment that fact matters: the sender's agent has never
   // read this codebase, so the claim below is unverified here.
   const inbound = inboundFeedbackOrigin(epic)

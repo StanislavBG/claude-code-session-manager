@@ -24,8 +24,8 @@
 
 import { test, expect } from 'vitest';
 const scheduler = require('../scheduler.cjs');
-const prdCreate = require('../lib/prdCreate.cjs');
-const prdAdminRoutes = require('../lib/prdAdminRoutes.cjs');
+const prdCreate = require('../lib/prd/prdCreate.cjs');
+const prdAdminRoutes = require('../lib/prd/prdAdminRoutes.cjs');
 
 // Every PRD-lifecycle capability the codebase can perform, mapped to the
 // admin HTTP route that must exist for it. `ipcChannel` is informational

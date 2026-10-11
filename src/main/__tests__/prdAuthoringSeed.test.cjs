@@ -2,7 +2,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { seedAuthoringGuide } = require('../lib/prdAuthoringSeed.cjs');
+const { seedAuthoringGuide } = require('../lib/prd/prdAuthoringSeed.cjs');
 
 const write = async (abs, text) => fs.writeFileSync(abs, text, 'utf8');
 

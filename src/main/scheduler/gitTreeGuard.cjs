@@ -8,8 +8,8 @@
 const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { execFile, execFileSync } = require('node:child_process');
-const gitWorktree = require('../lib/gitWorktree.cjs');
-const sharedGitExec = require('../lib/gitExec.cjs');
+const gitWorktree = require('../lib/git/gitWorktree.cjs');
+const sharedGitExec = require('../lib/git/gitExec.cjs');
 const { resolveProjectRoot } = require('../lib/opsOwnership.cjs');
 
 // Unquote a single git porcelain v1 path token. Defined once in

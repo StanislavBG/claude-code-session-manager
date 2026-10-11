@@ -14,7 +14,7 @@ const fsp = require('node:fs/promises')
 const path = require('node:path')
 const os = require('node:os')
 const crypto = require('node:crypto')
-const { generateE2EKeyPair, deriveSessionKey, encryptBox, decryptBox } = require('../lib/remoteE2eCrypto.cjs')
+const { generateE2EKeyPair, deriveSessionKey, encryptBox, decryptBox } = require('../lib/feedback-remote/remoteE2eCrypto.cjs')
 
 /** Generate a P-256 keypair in the same encoding webRemote.cjs uses (SPKI/PKCS8, base64url). */
 function genP256KeyPairB64() {

@@ -40,7 +40,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { parsePrdFile } = require('./lib/prdFrontmatter.cjs');
+const { parsePrdFile } = require('./lib/prd/prdFrontmatter.cjs');
 
 const VERDICTS_SCHEMA_VERSION = 1;
 

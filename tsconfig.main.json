@@ -14,12 +14,12 @@
   },
   "include": [
     "src/main/lib/promptSessionSchema.cjs",
-    "src/main/lib/agentPersonaSchema.cjs",
-    "src/main/lib/scheduleJobSchema.cjs",
-    "src/main/lib/customerFeedbackAdminRoutes.cjs",
-    "src/main/lib/customerFeedbackClient.cjs",
-    "src/main/lib/customerFeedbackInbox.cjs",
-    "src/main/lib/customerFeedbackIpc.cjs",
+    "src/main/lib/persona-macro/agentPersonaSchema.cjs",
+    "src/main/lib/scheduler/scheduleJobSchema.cjs",
+    "src/main/lib/feedback-remote/customerFeedbackAdminRoutes.cjs",
+    "src/main/lib/feedback-remote/customerFeedbackClient.cjs",
+    "src/main/lib/feedback-remote/customerFeedbackInbox.cjs",
+    "src/main/lib/feedback-remote/customerFeedbackIpc.cjs",
     "src/main/ipcSchemas.cjs"
   ]
 }

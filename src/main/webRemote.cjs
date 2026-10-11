@@ -27,11 +27,11 @@ const fs = require('node:fs');
 const { writeTextAtomic, validatePath } = require('./config.cjs');
 const logs = require('./logs.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
-const { claudeHome } = require('./lib/schedulerPaths.cjs');
+const { claudeHome } = require('./lib/scheduler/schedulerPaths.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
 const { summarize: _sharedSummarize } = require('./lib/summarize.cjs');
 const { makeState, confirmSas: confirmSasLogic } = require('./lib/e2eStateMachine.cjs');
-const { createClientSessions, LEGACY_CLIENT_KEY } = require('./lib/remoteClientSessions.cjs');
+const { createClientSessions, LEGACY_CLIENT_KEY } = require('./lib/feedback-remote/remoteClientSessions.cjs');
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -69,8 +69,8 @@ const MSG_MAX_BYTES = 256 * 1024;
 const { ALLOWED_COMMANDS, MUTATE_COMMANDS, SAS_GATED_READS } = require('./ipcSchemas.cjs');
 
 // ─── E2E encryption helpers (P-256 ECDH + AES-256-GCM, ADR §5.2) ────────────
-// Implemented in ./lib/remoteE2eCrypto.cjs (shared with the desktop client role).
-const { generateE2EKeyPair, deriveSessionKey, deriveSas, encryptBox, decryptBox } = require('./lib/remoteE2eCrypto.cjs');
+// Implemented in ./lib/feedback-remote/remoteE2eCrypto.cjs (shared with the desktop client role).
+const { generateE2EKeyPair, deriveSessionKey, deriveSas, encryptBox, decryptBox } = require('./lib/feedback-remote/remoteE2eCrypto.cjs');
 
 // ─── Module state ────────────────────────────────────────────────────────────
 
@@ -735,7 +735,7 @@ async function pushSessionList() {
     const data = await sessionsStore.load();
     // Tabs + their ACTIVE Epics → SessionMeta. tabId === claude sessionId so it
     // matches the transcript JSONL name used by cmd:session:subscribe.
-    const { readActiveIndex } = require('./lib/epicMint.cjs');
+    const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
     const sessions = buildRemoteSessionList(data?.tabs ?? [], readActiveIndex).map((s) => ({
       ...s,
       state: _sessionWatchers.get(s.tabId)?.state ?? null,
@@ -1092,7 +1092,7 @@ function getDispatchMap() {
       sessionsStore.load(),
 
     'cmd:sessions:list': async () => {
-      const { readActiveIndex } = require('./lib/epicMint.cjs');
+      const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
       const data = await sessionsStore.load();
       return {
         sessions: buildRemoteSessionList(data?.tabs ?? [], readActiveIndex),
@@ -1196,7 +1196,7 @@ function getDispatchMap() {
     'cmd:session:options': async () => {
       const { EpicTagSchema } = require('./lib/promptSessionSchema.cjs');
       const agentLibrary = require('./agentLibrary.cjs');
-      const macroLibrary = require('./lib/macroLibrary.cjs');
+      const macroLibrary = require('./lib/persona-macro/macroLibrary.cjs');
       const { tabs } = await sessionsStore.load();
       const personas = await agentLibrary.listPersonas();
       return {

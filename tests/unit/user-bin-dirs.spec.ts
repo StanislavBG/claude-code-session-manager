@@ -7,11 +7,11 @@
  * list drops Homebrew (as two call sites previously did), `claude`/node/git
  * ENOENT and "nothing works" on a Mac. Lock the dirs in.
  *
- * Source: src/main/lib/cleanEnv.cjs.
+ * Source: src/main/lib/process/cleanEnv.cjs.
  */
 import { describe, it, expect } from 'vitest'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { userBinDirs, pathWithUserBins } = require('../../src/main/lib/cleanEnv.cjs')
+const { userBinDirs, pathWithUserBins } = require('../../src/main/lib/process/cleanEnv.cjs')
 
 describe('userBinDirs', () => {
   it('includes Apple Silicon Homebrew bin + sbin', () => {

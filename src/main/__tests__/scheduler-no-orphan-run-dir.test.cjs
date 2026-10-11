@@ -27,7 +27,7 @@ beforeAll(() => {
   process.env.HOME = tmpHome;
   originalSlots = process.env.SM_SESSION_SLOTS;
   scheduler = require('../scheduler.cjs');
-  sessionSlots = require('../lib/sessionSlots.cjs');
+  sessionSlots = require('../lib/scheduler/sessionSlots.cjs');
 });
 
 afterAll(() => {

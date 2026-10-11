@@ -15,9 +15,9 @@ const {
   STATUS_HISTORY_CAP,
   getRefusedTransitionCount,
   _resetRefusedTransitionCountForTests,
-} = require('../lib/scheduleJobTransitions.cjs');
-const auditLog = require('../lib/auditLog.cjs');
-const queueHistory = require('../lib/queueHistory.cjs');
+} = require('../lib/scheduler/scheduleJobTransitions.cjs');
+const auditLog = require('../lib/telemetry/auditLog.cjs');
+const queueHistory = require('../lib/scheduler/queueHistory.cjs');
 
 function uniqueSlug(label) {
   return `test-${label}-${crypto.randomUUID().slice(0, 8)}`;
@@ -251,7 +251,7 @@ test('needs_review resolution: transitioning OUT of needs_review appends a paire
 });
 
 test('a slug that parks twice produces two independent entry/resolution pairs, not one merged episode', () => {
-  const { reduceNeedsReviewLedger } = require('../lib/needsReviewLedger.cjs');
+  const { reduceNeedsReviewLedger } = require('../lib/scheduler/needsReviewLedger.cjs');
   const slug = uniqueSlug('nr-twice');
   const job = { slug, cwd: '/tmp/proj', status: 'running', runId: 'run-A' };
 

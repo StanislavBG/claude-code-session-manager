@@ -7,7 +7,7 @@
  */
 
 const fs = require('node:fs');
-const { walkImports } = require('./personaImportHealth.cjs');
+const { walkImports } = require('./persona-macro/personaImportHealth.cjs');
 
 // Maps walkImports' result shape to what the renderer panel needs per file:
 // resolved path, existence, size, a rough token estimate, and overall health.

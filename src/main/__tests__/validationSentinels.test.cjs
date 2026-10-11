@@ -10,7 +10,7 @@
 'use strict';
 
 import { test, expect } from 'vitest';
-const { parseValidationSentinels } = require('../lib/validationSentinels.cjs');
+const { parseValidationSentinels } = require('../lib/scheduler/validationSentinels.cjs');
 
 test('parses a VERIFIED line with no reason', () => {
   expect(parseValidationSentinels('VALIDATION: 123-foo VERIFIED')).toEqual([

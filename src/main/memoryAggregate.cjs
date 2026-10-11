@@ -22,9 +22,9 @@
 const { ipcMain } = require('electron');
 const path = require('node:path');
 const os = require('node:os');
-const { encodeCwd } = require('./lib/encodeCwd.cjs');
-const { extractJson } = require('./lib/extractJson.cjs');
-const { runClaudeP } = require('./lib/runClaudeP.cjs');
+const { encodeCwd } = require('./lib/util/encodeCwd.cjs');
+const { extractJson } = require('./lib/util/extractJson.cjs');
+const { runClaudeP } = require('./lib/claude/runClaudeP.cjs');
 const { writeJson } = require('./config.cjs');
 const config = require('./config.cjs');
 const { opsPath } = require('./lib/opsOwnership.cjs');

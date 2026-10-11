@@ -5,7 +5,7 @@ Base: `de0c756c`. PRD: `prds-archived/1482-gitexec-timeout-test-deterministic.md
 
 ## Commits in scope
 
-`git log --oneline de0c756c..HEAD -- src/main/lib/__tests__/gitExec.test.cjs src/main/lib/gitExec.cjs`:
+`git log --oneline de0c756c..HEAD -- src/main/lib/git/__tests__/gitExec.test.cjs src/main/lib/git/gitExec.cjs`:
 
 ```
 7eba4b44 fix(gitExec.test): make timeout test deterministic
@@ -19,19 +19,19 @@ touches only `package.json`/`package-lock.json` and is unrelated to this PRD.)
 Evidence per acceptance criterion:
 
 - **AC1** (test blocks on a command that waits on stdin, 200ms timeout, rejects, vitest timeout
-  well under 5s): `src/main/lib/__tests__/gitExec.test.cjs:50-57` — `execFileSync('git', ['init',
+  well under 5s): `src/main/lib/git/__tests__/gitExec.test.cjs:50-57` — `execFileSync('git', ['init',
   '-q'], { cwd: tmpRoot })` then `execGit(tmpRoot, ['cat-file', '--batch'], { timeout: 200 })`
   wrapped in `expect(...).rejects.toBeTruthy()`, with a per-test vitest timeout of `3000`ms
   (3rd arg to `test(...)`, line 57) — well under 5s.
 - **AC2** (`gitExec.cjs` unchanged unless justified): `git diff de0c756c..HEAD --
-  src/main/lib/gitExec.cjs` — empty diff, confirmed unchanged. Commit message
+  src/main/lib/git/gitExec.cjs` — empty diff, confirmed unchanged. Commit message
   (`7eba4b44`) explicitly notes why no change was needed: `execFile` already leaves the child's
   stdin pipe open, which is what makes `cat-file --batch` block reliably.
 - **AC3** (gate passes 3x in a row): re-ran the gate fresh in this validation session (the prior
   dev-lead's run is not reusable evidence) —
 
   ```
-  $ timeout 120 npx vitest run src/main/lib/__tests__/gitExec.test.cjs   (x3)
+  $ timeout 120 npx vitest run src/main/lib/git/__tests__/gitExec.test.cjs   (x3)
   Test Files  1 passed (1)   Tests  8 passed (8)   — run 1, Duration 348ms
   Test Files  1 passed (1)   Tests  8 passed (8)   — run 2, Duration 382ms
   Test Files  1 passed (1)   Tests  8 passed (8)   — run 3, Duration 391ms
@@ -51,7 +51,7 @@ is green 3/3 on a fresh run.
 ```
  package-lock.json                       |  4 ++--
  package.json                            |  2 +-
- src/main/lib/__tests__/gitExec.test.cjs | 10 ++++++++--
+ src/main/lib/git/__tests__/gitExec.test.cjs | 10 ++++++++--
  3 files changed, 8 insertions(+), 5 deletions(-)
 ```
 

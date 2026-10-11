@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest'
 
 const {
   generateE2EKeyPair, deriveSessionKey, deriveSas, encryptBox, decryptBox,
-} = require('../lib/remoteE2eCrypto.cjs')
+} = require('../lib/feedback-remote/remoteE2eCrypto.cjs')
 
 const deviceId = 'device-abc-123'
 

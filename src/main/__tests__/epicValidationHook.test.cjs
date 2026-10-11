@@ -25,7 +25,7 @@ const {
   maybeEnqueueValidationPrompt,
   buildValidationPrompt,
   __resetForTests,
-} = require('../lib/epicValidationHook.cjs');
+} = require('../lib/epic/epicValidationHook.cjs');
 const { notifyOriginatingTab } = require('../scheduler.cjs');
 
 const EPIC = 'epic-986';

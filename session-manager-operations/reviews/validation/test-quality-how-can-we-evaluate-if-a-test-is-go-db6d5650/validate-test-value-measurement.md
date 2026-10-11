@@ -18,7 +18,7 @@ The job worktree had no `node_modules`, so I symlinked the main checkout's (giti
 ## tq-mutation-sampler (1656) — VERIFIED
 - `mutants.cjs` is present with the operators, dirty-tree exit 2, finally-restore and signal handlers.
 - Gate: mutants.test.cjs, 3 tests passed. This includes the CLI run on atomicFs and the SIGTERM test.
-- `sha256sum -c` of `src/main/lib/atomicFs.cjs` before vs after the run: OK, byte-identical. `git diff --quiet` on the file also exits 0.
+- `sha256sum -c` of `src/main/lib/util/atomicFs.cjs` before vs after the run: OK, byte-identical. `git diff --quiet` on the file also exits 0.
 - Caveat (Important, see Findings): the default `--map` path uses `listIncludedFiles`, so it inherits the 210-file gap.
 
 ## tq-coverage-guard (1657) — VERIFIED

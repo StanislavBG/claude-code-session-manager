@@ -10,7 +10,7 @@ Note: `timeout` binary absent on macOS; commands ran foreground without wrapper.
 - `npm run typecheck` (tsc renderer + main) → exit 0.
 
 ## 18-remove-bilko-publisher-tag — VERIFIED
-- Commit 913e5538. Only remaining `bilko-host-publisher` refs: `src/main/lib/workTypeLibrary.cjs:38` (`LEGACY_WORK_TYPES`), `promptSessionSchema.cjs:26`, `agentPersonaSchema.cjs:56` (legacy-drop comments), and tests `promptSessionSchema.test.cjs:89-98`, `agentPersonaSchema.test.cjs:55-56`, `workTypeLibrary.test.cjs:65` — all the deliberate legacy tolerance the AC requires.
+- Commit 913e5538. Only remaining `bilko-host-publisher` refs: `src/main/lib/prd/workTypeLibrary.cjs:38` (`LEGACY_WORK_TYPES`), `promptSessionSchema.cjs:26`, `agentPersonaSchema.cjs:56` (legacy-drop comments), and tests `promptSessionSchema.test.cjs:89-98`, `agentPersonaSchema.test.cjs:55-56`, `workTypeLibrary.test.cjs:65` — all the deliberate legacy tolerance the AC requires.
 - Legacy-drop tests present and passing in full run; no renderer tag-map / api.d.ts / dataModelErd / opsOwnership hits (whole-tree rg below).
 
 ## 23-remove-bilko-host-backend — VERIFIED

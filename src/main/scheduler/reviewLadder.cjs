@@ -7,13 +7,13 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const schedulerPaths = require('../lib/schedulerPaths.cjs');
-const jobWorktree = require('../lib/jobWorktree.cjs');
-const { classifyRunOutcome } = require('../lib/reaperHelpers.cjs');
-const { COMPLETED_EQUIVALENT_VERDICTS } = require('../lib/terminalRunOutcome.cjs');
-const { resolveIsFixPlan } = require('../lib/fixPlanSlug.cjs');
-const { GATE_AUTHORITY_VERDICTS } = require('../lib/gateAuthority.cjs');
-const { DEFAULT_PROJECT_CWD } = require('../lib/schedulerBatch.cjs');
+const schedulerPaths = require('../lib/scheduler/schedulerPaths.cjs');
+const jobWorktree = require('../lib/git/jobWorktree.cjs');
+const { classifyRunOutcome } = require('../lib/scheduler/reaperHelpers.cjs');
+const { COMPLETED_EQUIVALENT_VERDICTS } = require('../lib/scheduler/terminalRunOutcome.cjs');
+const { resolveIsFixPlan } = require('../lib/scheduler/fixPlanSlug.cjs');
+const { GATE_AUTHORITY_VERDICTS } = require('../lib/scheduler/gateAuthority.cjs');
+const { DEFAULT_PROJECT_CWD } = require('../lib/scheduler/schedulerBatch.cjs');
 
 /**
  * Resume-first recovery (PRD 1111). A job parked in needs_review with verdict
@@ -206,7 +206,7 @@ const MAX_INVESTIGATION_DEPTH = 1;
  * migration. Non-fix-plan jobs are never capped here.
  *
  * `isFixPlan` (PRD 1131) is the job's own persisted classification stamp
- * (see lib/fixPlanSlug.cjs's resolveIsFixPlan) — an explicit true/false wins
+ * (see lib/scheduler/fixPlanSlug.cjs's resolveIsFixPlan) — an explicit true/false wins
  * over the slug; only a row with the field entirely absent (persisted
  * before this change shipped) falls back to the legacy slug-only heuristic.
  * Exported for tests.

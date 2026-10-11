@@ -24,9 +24,9 @@
  *
  * Enforcement points (every write path into the ops root calls assertOpsWrite):
  *   - config.cjs writeTextAtomic / writeBinaryAtomic / writeJson / writeJsonSync
- *   - lib/epicMint.cjs      (raw fs tmp+rename)
- *   - lib/queueStore.cjs    (raw fs tmp+rename)
- *   - lib/opsErrorLog.cjs   (raw fs append, JSONL error log)
+ *   - lib/epic/epicMint.cjs      (raw fs tmp+rename)
+ *   - lib/scheduler/queueStore.cjs    (raw fs tmp+rename)
+ *   - lib/telemetry/opsErrorLog.cjs   (raw fs append, JSONL error log)
  * Renderer callers declare their writer id through the IPC payload.
  */
 

@@ -49,7 +49,7 @@ beforeAll(() => {
   fs.mkdirSync(PROJECT_CWD, { recursive: true });
 
   scheduler = require('../scheduler.cjs');
-  queueStore = require('../lib/queueStore.cjs');
+  queueStore = require('../lib/scheduler/queueStore.cjs');
 });
 
 afterAll(() => {

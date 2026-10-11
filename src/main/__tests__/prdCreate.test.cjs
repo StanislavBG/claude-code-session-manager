@@ -25,8 +25,8 @@ const {
   registerAdminRoute,
   createPrd,
   resolveSourcePromptIdFromClaudeSession,
-} = require('../lib/prdCreate.cjs');
-const { createAdminHttp } = require('../lib/localAdminHttp.cjs');
+} = require('../lib/prd/prdCreate.cjs');
+const { createAdminHttp } = require('../lib/feedback-remote/localAdminHttp.cjs');
 const config = require('../config.cjs');
 const prdParser = require('../scheduler/prdParser.cjs');
 
@@ -782,7 +782,7 @@ test('createPrd with neither cwd nor a resolvable Epic fails with a clear cwd-re
 });
 
 // ──────────────────────────────────────────── PRD 1113: fix-chain depth guard
-// at the authoring boundary. lib/prdCreate.cjs's createPrd() is the shared
+// at the authoring boundary. lib/prd/prdCreate.cjs's createPrd() is the shared
 // write path behind both scheduler_create_prd (MCP) and chat:create-prd
 // (IPC) — enforcing here covers both callers with one check.
 

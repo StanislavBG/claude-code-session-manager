@@ -11,8 +11,8 @@
 
 import { test, expect, afterEach, beforeEach } from 'vitest';
 
-const countersPath = require.resolve('../lib/telemetryCounters.cjs');
-const transitionsPath = require.resolve('../lib/scheduleJobTransitions.cjs');
+const countersPath = require.resolve('../lib/telemetry/telemetryCounters.cjs');
+const transitionsPath = require.resolve('../lib/scheduler/scheduleJobTransitions.cjs');
 
 let calls;
 
@@ -37,35 +37,35 @@ function freshJob(status) {
 }
 
 test('running -> completed fires scheduler.job.finish once with { status: "completed" }', () => {
-  const { transitionJob } = require('../lib/scheduleJobTransitions.cjs');
+  const { transitionJob } = require('../lib/scheduler/scheduleJobTransitions.cjs');
   const job = freshJob('running');
   expect(transitionJob(job, 'completed', { reason: 'run succeeded', source: 'test' })).toBe(true);
   expect(calls).toEqual([{ status: 'completed' }]);
 });
 
 test('running -> failed fires scheduler.job.finish once with { status: "failed" }', () => {
-  const { transitionJob } = require('../lib/scheduleJobTransitions.cjs');
+  const { transitionJob } = require('../lib/scheduler/scheduleJobTransitions.cjs');
   const job = freshJob('running');
   transitionJob(job, 'failed', { reason: 'run failed', source: 'test' });
   expect(calls).toEqual([{ status: 'failed' }]);
 });
 
 test('running -> pending (retry) does NOT fire scheduler.job.finish', () => {
-  const { transitionJob } = require('../lib/scheduleJobTransitions.cjs');
+  const { transitionJob } = require('../lib/scheduler/scheduleJobTransitions.cjs');
   const job = freshJob('running');
   transitionJob(job, 'pending', { reason: 'transient retry', source: 'test' });
   expect(calls).toEqual([]);
 });
 
 test('pending -> running (dispatch) does NOT fire scheduler.job.finish', () => {
-  const { transitionJob } = require('../lib/scheduleJobTransitions.cjs');
+  const { transitionJob } = require('../lib/scheduler/scheduleJobTransitions.cjs');
   const job = freshJob('pending');
   transitionJob(job, 'running', { reason: 'dispatch', source: 'test' });
   expect(calls).toEqual([]);
 });
 
 test('an illegal (refused) transition does NOT fire scheduler.job.finish', () => {
-  const { transitionJob } = require('../lib/scheduleJobTransitions.cjs');
+  const { transitionJob } = require('../lib/scheduler/scheduleJobTransitions.cjs');
   const job = freshJob('completed');
   expect(transitionJob(job, 'running', { reason: 'bogus', source: 'test' })).toBe(false);
   expect(calls).toEqual([]);

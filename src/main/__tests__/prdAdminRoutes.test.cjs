@@ -32,9 +32,9 @@ beforeAll(() => {
   // Load AFTER HOME is stubbed — scheduler.cjs/config.cjs snapshot
   // os.homedir() into module-level constants at load time, not lazily.
   scheduler = require('../scheduler.cjs');
-  prdAdminRoutes = require('../lib/prdAdminRoutes.cjs');
+  prdAdminRoutes = require('../lib/prd/prdAdminRoutes.cjs');
   config = require('../config.cjs');
-  ({ createAdminHttp } = require('../lib/localAdminHttp.cjs'));
+  ({ createAdminHttp } = require('../lib/feedback-remote/localAdminHttp.cjs'));
 
   if (!scheduler.PRDS_DIR.startsWith(tmpHome)) {
     throw new Error(`refusing to run: PRDS_DIR (${scheduler.PRDS_DIR}) is not under the temp HOME (${tmpHome})`);
@@ -495,7 +495,7 @@ test('POST /admin/scheduler/reset-job with cwd resets the SAME-slug job belongin
   const projDirB = path.join(tmpHome, '.claude', 'projects', 'fake-project-slug-b');
   fs.mkdirSync(projDirB, { recursive: true });
   fs.writeFileSync(path.join(projDirB, 'session.jsonl'), `${JSON.stringify({ cwd: cwdB })}\n`, 'utf8');
-  const { bustCwdCache } = require('../lib/queueStore.cjs');
+  const { bustCwdCache } = require('../lib/scheduler/queueStore.cjs');
   bustCwdCache();
   const slug = uniqueSlug('collision-slug');
   const epicId = 'epic-reset-collision';

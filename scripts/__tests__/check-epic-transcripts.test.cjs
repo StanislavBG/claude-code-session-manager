@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { encodeCwd } = require('../../src/main/lib/encodeCwd.cjs');
+const { encodeCwd } = require('../../src/main/lib/util/encodeCwd.cjs');
 
 const SCRIPT = path.resolve(__dirname, '../check-epic-transcripts.cjs');
 let home;

@@ -15,7 +15,7 @@ files were deleted or migrated. Re-runnable via `node scripts/audit-ops-hygiene.
 (only the NN-allocator dotfiles `.max-allocated-group` / `.reserved-*`, which are expected to
 stay — `consolidateFlatPrds` explicitly skips dotfiles). `prds-archived/` still holds 179.
 
-**Root cause, from reading the code** (`src/main/lib/prdMigration.cjs`,
+**Root cause, from reading the code** (`src/main/lib/prd/prdMigration.cjs`,
 `src/main/scheduler.cjs`):
 
 - `resolvePrdWriteDir` (the flat-dir path) is explicitly commented "remains read-only during the

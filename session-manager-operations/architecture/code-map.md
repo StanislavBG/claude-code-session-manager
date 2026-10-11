@@ -7,23 +7,23 @@
 
 **Main process** (`src/main/*.cjs`):
 - `index.cjs` — BrowserWindow + IPC registration. Navigation locked: `setWindowOpenHandler` denies, `will-navigate` allows only the dev URL.
-- `config.cjs` — fs layer. **All paths go through `validatePath` (allowedRoots = home dir)**. Atomic writes delegate to `lib/atomicFs.cjs`. Chokidar watchers refcounted per absolute path.
+- `config.cjs` — fs layer. **All paths go through `validatePath` (allowedRoots = home dir)**. Atomic writes delegate to `lib/util/atomicFs.cjs`. Chokidar watchers refcounted per absolute path.
 - `transcripts.cjs` — tails `~/.claude/projects/<encoded-cwd>/<sessionUuid>.jsonl`, classifies events, ring-buffers per tab, broadcasts `transcript:event:<tabId>`.
 - `memoryAggregate.cjs` — Memory Clusters backend. Reads one project's workspace memories (the store `memoryTool.cjs` owns) and, on explicit `refresh: true` only, runs one cost-gated `claude -p` pass that groups them into clusters with `[[wikilink]]` connections. Cache: `<cwd>/session-manager-operations/memory-clusters/clusters.json`.
 - `chatRunner.cjs` — runs a dormant Terminal tab's chat command as a headless `claude -p --output-format stream-json` job (first command `--session-id`, later `--resume`). FIFO queue at concurrency 1 (`SM_CHAT_CONCURRENCY`, clamp [1,3]). Stop-signal protocol `<<<SM_NEEDS_INPUT>>>`+JSON lets a run ask questions.
-- `scheduler.cjs` — runs each active project's PRDs (`<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/`, resolved via `lib/prdLocations.cjs`) as `claude -p` jobs; per-project queue/history live in `<cwd>/session-manager-operations/scheduler/state/`. Dispatch, the `needs_review` ladder, and reap/orphan machinery: [`scheduler-operations.md`](scheduler-operations.md).
+- `scheduler.cjs` — runs each active project's PRDs (`<cwd>/session-manager-operations/scheduler/epics/<epic-id>/prds/`, resolved via `lib/prd/prdLocations.cjs`) as `claude -p` jobs; per-project queue/history live in `<cwd>/session-manager-operations/scheduler/state/`. Dispatch, the `needs_review` ladder, and reap/orphan machinery: [`scheduler-operations.md`](scheduler-operations.md).
 - `supervisor.cjs` — every 15 min, Opus probe per running job; SIGTERMs descendant bash on stuck poll-loops without killing the agent. Cost-gated by `SM_SUPERVISOR_DISABLE`.
-- `lib/dodDrainHook.cjs` — definition-of-done gate, fired fire-and-forget at queue-drain: re-verifies each completed PRD's AC, flags risky surfaces, writes `runs/<ts>/definition-of-done-<key>.md`. Idempotent per completed set (`batchKey` + `reportExists`). Skipped when paused or cancelled. Kill-switch: `SM_DOD_DISABLE=1`.
+- `lib/scheduler/dodDrainHook.cjs` — definition-of-done gate, fired fire-and-forget at queue-drain: re-verifies each completed PRD's AC, flags risky surfaces, writes `runs/<ts>/definition-of-done-<key>.md`. Idempotent per completed set (`batchKey` + `reportExists`). Skipped when paused or cancelled. Kill-switch: `SM_DOD_DISABLE=1`.
 - `scripts/scheduler-watchdog.cjs` + `scripts/scheduler-watchdog.sh` — external check-and-exit watchdog (systemd user timer or cron): heartbeat-gated liveness check, then relaunch if stale-and-dead. Queue reconciliation lives in `scheduler.cjs`, not here. Install via `scripts/install-scheduler-watchdog.sh` (`SM_WATCHDOG_DRYRUN=1` previews).
 - `webRemote.cjs` — desktop half of Web Remote (bridge to the bilko.run relay for the phone app); UI is Settings → Phone remote.
 - `pty.cjs` — node-pty per tab, keyed by renderer-generated UUID = claudeSessionId.
 - `ipcSchemas.cjs` — zod schemas validate IPC payloads at the main-process boundary.
-- `lib/telemetrySettings.cjs` / `lib/machineProfile.cjs` / `lib/telemetryClient.cjs` / `lib/telemetryBacklog.cjs` — anonymous, on-by-default telemetry to bilko.run: consent + identity, machine-class profile, egress client, error-log backlog drainer. Detail: [`telemetry.md`](telemetry.md).
-- `lib/customerFeedbackClient.cjs` / `lib/customerFeedbackInbox.cjs` / `lib/customerFeedbackIpc.cjs` / `lib/customerFeedbackAdminRoutes.cjs` — in-app customer feedback: submit + status lookup, owner inbox, renderer IPC, admin routes behind the `customer_feedback_*` MCP tools. Detail: [`customer-feedback.md`](customer-feedback.md).
+- `lib/telemetry/telemetrySettings.cjs` / `lib/machineProfile.cjs` / `lib/telemetry/telemetryClient.cjs` / `lib/telemetry/telemetryBacklog.cjs` — anonymous, on-by-default telemetry to bilko.run: consent + identity, machine-class profile, egress client, error-log backlog drainer. Detail: [`telemetry.md`](telemetry.md).
+- `lib/feedback-remote/customerFeedbackClient.cjs` / `lib/feedback-remote/customerFeedbackInbox.cjs` / `lib/feedback-remote/customerFeedbackIpc.cjs` / `lib/feedback-remote/customerFeedbackAdminRoutes.cjs` — in-app customer feedback: submit + status lookup, owner inbox, renderer IPC, admin routes behind the `customer_feedback_*` MCP tools. Detail: [`customer-feedback.md`](customer-feedback.md).
 - `queueOps.cjs` — scheduler PRD queue linter (unbounded-loop + post-AC overrun detection) + archive + retag.
 - `pluginInstall.cjs` — hidden-pty plugin install via `claude plugin install <slug>`. Slug regex `/^[a-z0-9][a-z0-9\-/]*$/`, 5 min kill ceiling, single in-flight per slug.
 - `memoryTool.cjs` — workspace-scoped memories CRUD for the `memory_20250818` tool.
-- `lib/localAdminHttp.cjs` — loopback-only, token-authed HTTP admin API (token in `~/.claude/session-manager/admin-api.json`). Wrapped as MCP tools by `scripts/scheduler-mcp-server.cjs`; those tools work only while the Electron app runs.
+- `lib/feedback-remote/localAdminHttp.cjs` — loopback-only, token-authed HTTP admin API (token in `~/.claude/session-manager/admin-api.json`). Wrapped as MCP tools by `scripts/scheduler-mcp-server.cjs`; those tools work only while the Electron app runs.
 
 **Renderer** (`src/renderer/`):
 - `state/config.ts` — per-path FileState with dirty tracking, backed by `config.cjs` IPC.

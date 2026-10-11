@@ -67,7 +67,7 @@ beforeAll(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-investigation-spawn-'));
   process.env.HOME = tmpHome;
   ({ spawnInvestigation, _mutateForTests, tickQueue } = require('../scheduler.cjs'));
-  ({ bustCwdCache } = require('../lib/queueStore.cjs'));
+  ({ bustCwdCache } = require('../lib/scheduler/queueStore.cjs'));
 });
 
 // Polls `logPath` for `substring` — at most 5s, every 25ms — instead of

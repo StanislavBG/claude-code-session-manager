@@ -45,7 +45,7 @@ Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
 
 | Folder | Partition | Note |
 | --- | --- | --- |
-| `src/main/` | DESKTOP HARNESS | **Except** `projectPages.cjs` → WEB PRESENCE (producer of the bilko.run project page). Also holds `lib/activeSessions.cjs` and `lib/watchdogHelpers.cjs`, moved here from the scripts folder's old helper subdirectory. |
+| `src/main/` | DESKTOP HARNESS | **Except** `projectPages.cjs` → WEB PRESENCE (producer of the bilko.run project page). Also holds `lib/activeSessions.cjs` and `lib/scheduler/watchdogHelpers.cjs`, moved here from the scripts folder's old helper subdirectory. |
 | `src/preload/` | DESKTOP HARNESS | |
 | `src/renderer/` | DESKTOP HARNESS | **Except** `lib/projectPages/` → WEB PRESENCE (compiled into the bilko.run page bundle by `web/project-pages/build-renderer.mjs`; `web/project-pages/generate-font-data.mjs` writes `library/fontData.ts` there). |
 | `src/seed/` | DESKTOP HARNESS | |

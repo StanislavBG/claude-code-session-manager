@@ -218,7 +218,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       path: '<cwd>/session-manager-operations/prompt-sessions/active-index.json -> sessions[id]',
       format: 'json',
       writer: 'epics',
-      definedIn: 'src/main/lib/epicMint.cjs (ensureEpic) + src/renderer/state/promptSessions.ts ',
+      definedIn: 'src/main/lib/epic/epicMint.cjs (ensureEpic) + src/renderer/state/promptSessions.ts ',
     },
     summary: 'The central aggregate root — created in exactly ONE place, a human pressing New Epic.',
     fields: [
@@ -257,7 +257,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       path: '<cwd>/session-manager-operations/prompt-sessions/active-index.json -> events[]',
       format: 'json',
       writer: 'epics',
-      definedIn: 'src/renderer/state/promptSessions.ts + src/main/lib/activeIndexMerge.cjs ',
+      definedIn: 'src/renderer/state/promptSessions.ts + src/main/lib/epic/activeIndexMerge.cjs ',
     },
     summary: "One step in an Epic's Prompt → PRD → Response → ... → Closed chain.",
     fields: [
@@ -319,7 +319,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       path: '<cwd>/session-manager-operations/prompt-sessions/epic-worktree-config.json',
       format: 'json',
       writer: 'epics',
-      definedIn: 'src/main/lib/epicWorktreeProjectConfig.cjs ',
+      definedIn: 'src/main/lib/epic/epicWorktreeProjectConfig.cjs ',
     },
     summary: "Per-project 'disable Epic worktree isolation' toggle, read by gitWorktree.cjs's isWorktreeDisabled('epic', cwd) on every worktree creation attempt.",
     fields: [
@@ -364,7 +364,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       path: '<cwd>/session-manager-operations/scheduler/epics/<epicId>/prds/<slug>.md',
       format: 'markdown',
       writer: 'scheduler',
-      definedIn: 'src/main/lib/prdLocations.cjs + scheduler_create_prd MCP tool ',
+      definedIn: 'src/main/lib/prd/prdLocations.cjs + scheduler_create_prd MCP tool ',
     },
     summary: 'PRD authoring is API-only via the scheduler_create_prd MCP tool — a PRD joins an EXISTING Epic and never conjures one.',
     fields: [
@@ -397,7 +397,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       path: '<cwd>/session-manager-operations/scheduler/state/queue.json -> jobs[]',
       format: 'json',
       writer: 'scheduler',
-      definedIn: 'src/main/lib/queueStore.cjs + src/main/lib/scheduleJobSchema.cjs ',
+      definedIn: 'src/main/lib/scheduler/queueStore.cjs + src/main/lib/scheduler/scheduleJobSchema.cjs ',
     },
     summary: 'dependsOn is the SOLE ordering primitive — parallelGroup is a display hint, never a barrier.',
     fields: [
@@ -424,7 +424,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       { name: 'statusHistory', type: 'ScheduleJobStatusHistoryEntry[]', optional: true },
     ],
     notes: [
-      'Every launch must take a slot from lib/sessionSlots.cjs — the single machine-wide concurrency limit.',
+      'Every launch must take a slot from lib/scheduler/sessionSlots.cjs — the single machine-wide concurrency limit.',
       '--model is always pinned on every claude -p call site.',
       'A job in needs_review is a QUESTION routed back to the authoring Epic and never creates work on its own.',
     ],
@@ -437,7 +437,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       path: '<cwd>/session-manager-operations/scheduler/state/queue.json -> jobs[].statusHistory[]',
       format: 'json',
       writer: 'scheduler',
-      definedIn: 'src/main/lib/scheduleJobTransitions.cjs ',
+      definedIn: 'src/main/lib/scheduler/scheduleJobTransitions.cjs ',
     },
     summary: 'Bounded trail (~20 entries) of accepted status transitions for one ScheduleJob.',
     fields: [
@@ -456,7 +456,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       path: '<cwd>/session-manager-operations/scheduler/state/history.jsonl',
       format: 'jsonl',
       writer: 'scheduler',
-      definedIn: 'src/main/lib/queueStore.cjs ',
+      definedIn: 'src/main/lib/scheduler/queueStore.cjs ',
     },
     summary: 'Terminal jobs aged out of queue.json land here, one JSON object per line.',
     fields: [
@@ -475,7 +475,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       path: '<cwd>/session-manager-operations/scheduler/state/queue.json -> config',
       format: 'json',
       writer: 'scheduler',
-      definedIn: 'src/main/lib/schedulerConfig.cjs ',
+      definedIn: 'src/main/lib/scheduler/schedulerConfig.cjs ',
     },
     summary: 'Per-project auto-fire policy and utilization gate.',
     fields: [
@@ -507,7 +507,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
     store: {
       path: '~/.claude/agents/<name>.md',
       format: 'markdown',
-      definedIn: 'src/main/agentLibrary.cjs + src/main/lib/agentPersonaSchema.cjs ',
+      definedIn: 'src/main/agentLibrary.cjs + src/main/lib/persona-macro/agentPersonaSchema.cjs ',
     },
     summary: 'One global persona — an ACTION is this same persona given a project scope, not a fourth concept.',
     fields: [
@@ -707,7 +707,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       path: '<cwd>/session-manager-operations/project-pages/ (home.html)',
       format: 'directory',
       writer: 'project-home',
-      definedIn: 'project_home_write MCP tool (src/main/lib/projectHomeAdminRoutes.cjs)',
+      definedIn: 'project_home_write MCP tool (src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs)',
     },
     summary: 'One self-contained overview page, written only via project_home_write.',
     fields: [

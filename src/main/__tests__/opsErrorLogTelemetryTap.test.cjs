@@ -13,7 +13,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const opsErrorLog = require('../lib/opsErrorLog.cjs');
+const opsErrorLog = require('../lib/telemetry/opsErrorLog.cjs');
 
 const tmpDirs = [];
 let originalHome;
@@ -27,7 +27,7 @@ afterEach(async () => {
     if (originalWorktreeRoot === null) delete process.env.SM_WORKTREE_ROOT; else process.env.SM_WORKTREE_ROOT = originalWorktreeRoot;
     originalWorktreeRoot = undefined;
   }
-  const telemetryPath = require.resolve('../lib/telemetryClient.cjs');
+  const telemetryPath = require.resolve('../lib/telemetry/telemetryClient.cjs');
   delete require.cache[telemetryPath];
   const activeSessionsPath = require.resolve('../lib/activeSessions.cjs');
   delete require.cache[activeSessionsPath];
@@ -50,7 +50,7 @@ function readLines(cwd) {
 }
 
 function stubTelemetryClient(exportsObj) {
-  const telemetryPath = require.resolve('../lib/telemetryClient.cjs');
+  const telemetryPath = require.resolve('../lib/telemetry/telemetryClient.cjs');
   require.cache[telemetryPath] = { id: telemetryPath, filename: telemetryPath, loaded: true, exports: exportsObj };
 }
 
@@ -101,7 +101,7 @@ test('an ephemeral cwd yields zero local lines but one telemetry record, with a 
   // resolve through the same code path regardless of TMPDIR.
   originalWorktreeRoot = process.env.SM_WORKTREE_ROOT === undefined ? null : process.env.SM_WORKTREE_ROOT;
   process.env.SM_WORKTREE_ROOT = mkTmpProject();
-  const { KIND_CONFIG } = require('../lib/gitWorktree.cjs');
+  const { KIND_CONFIG } = require('../lib/git/gitWorktree.cjs');
   const worktreeCwd = path.join(KIND_CONFIG.epic.root, 'fakehash', 'fake-epic-id');
   const realRoot = '/home/bilko/Projects/real-project';
 
@@ -139,11 +139,11 @@ test('a realistic error with an absolute path and a prompt-like string never rea
   // test's real telemetryClient call actually persists into an isolated dir.
   process.env.SM_TELEMETRY_SPOOL = path.join(home, '.claude', 'session-manager');
 
-  for (const p of ['../lib/telemetryClient.cjs', '../config.cjs', '../lib/telemetrySettings.cjs', '../lib/machineProfile.cjs']) {
+  for (const p of ['../lib/telemetry/telemetryClient.cjs', '../config.cjs', '../lib/telemetry/telemetrySettings.cjs', '../lib/machineProfile.cjs']) {
     const resolved = require.resolve(p);
     delete require.cache[resolved];
   }
-  const client = require('../lib/telemetryClient.cjs');
+  const client = require('../lib/telemetry/telemetryClient.cjs');
   client._setMachineProfileBuilder(async () => ({
     appVersion: '0.83.0', platform: 'linux', arch: 'x64', machineDigest: 'deadbeefcafe',
   }));

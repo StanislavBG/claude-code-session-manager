@@ -12,19 +12,19 @@ Landed commits: `70b1efac` (1416), `05d9aa75` (1416 merge), `b39c868a` (1417), `
 
 | AC | Evidence |
 | --- | --- |
-| Transitive reachability (validator → sink → job) | `src/main/lib/planValidator.cjs:62-76` — BFS over `validator.dependsOn`, expanding via `rowsForSlug(slug).dependsOn` each iteration |
+| Transitive reachability (validator → sink → job) | `src/main/lib/prd/planValidator.cjs:62-76` — BFS over `validator.dependsOn`, expanding via `rowsForSlug(slug).dependsOn` each iteration |
 | Existing direct/non-pending/self/null cases still pass unchanged | `src/main/__tests__/planValidator.test.cjs:12-71` — the 6 pre-existing tests are untouched (diff only appends after line 71) |
-| Cycle-safe (visited set) | `src/main/lib/planValidator.cjs:63,67-68` — `visited` Set checked/populated before recursion into a slug's deps |
+| Cycle-safe (visited set) | `src/main/lib/prd/planValidator.cjs:63,67-68` — `visited` Set checked/populated before recursion into a slug's deps |
 | New tests: 2-hop, 3-hop, unrelated branch, cycle | `src/main/__tests__/planValidator.test.cjs:73-114` — four new tests present, one per case |
 | Gate: `timeout 120 npx vitest run src/main/__tests__/planValidator.test.cjs` and `npm run typecheck` | Ran `timeout 300 npx vitest run src/main/__tests__/planValidator.test.cjs src/main/__tests__/ipcSchemas-dependsOn.test.cjs` → `Test Files 2 passed (2)`, `Tests 15 passed (15)`. `timeout 300 npm run typecheck` → exit 0, no output (both `tsc --noEmit` invocations clean) |
 
 Implementation note beyond the AC list: the walk also reuses `depSlugResolve.cjs`'s `bareSlug`
-matcher (`src/main/lib/planValidator.cjs:11,44-57`) and scopes by `job.cwd`
-(`src/main/lib/planValidator.cjs:40-42`), covered by
+matcher (`src/main/lib/prd/planValidator.cjs:11,44-57`) and scopes by `job.cwd`
+(`src/main/lib/prd/planValidator.cjs:40-42`), covered by
 `src/main/__tests__/planValidator.test.cjs:116-124` (cross-project bare-slug collision → false).
 Not in the PRD's AC list verbatim but was explicit in the Implementation notes ("reuse whatever
 matcher... scope... to job.cwd"), and the matching rule was checked directly against
-`src/main/lib/depSlugResolve.cjs:27-31`'s `resolveDepSlug` (exact-then-bare) — same precedence.
+`src/main/lib/prd/depSlugResolve.cjs:27-31`'s `resolveDepSlug` (exact-then-bare) — same precedence.
 
 ## 1417 — raise-dependson-cap-to-100
 
@@ -58,7 +58,7 @@ finds a single file), so the Implementation notes' "update elsewhere" contingenc
 ## Diff review
 
 `git diff 67cd2bed..54165e03` (base commit before this plan, through the last PRD's commit) —
-6 files, +175/-18: `src/main/lib/planValidator.cjs`, `src/main/__tests__/planValidator.test.cjs`,
+6 files, +175/-18: `src/main/lib/prd/planValidator.cjs`, `src/main/__tests__/planValidator.test.cjs`,
 `src/main/ipcSchemas.cjs`, `src/main/__tests__/ipcSchemas-dependsOn.test.cjs`, `vitest.config.ts`,
 `plugins/session-manager-dev/skills/develop/SKILL.md`. Self-reviewed (`/code-review` and
 `/security-review` are not in this persona's toolset — Read/Grep/Glob/Bash only — so this is a

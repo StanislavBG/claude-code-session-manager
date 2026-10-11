@@ -3,8 +3,8 @@
 // module's functions at path.win32 while a 'linux' platform is injected.
 const path = require('node:path');
 import { test, expect, afterEach } from 'vitest';
-const { resolveClaudeBin } = require('../claudeBin.cjs');
-const { userBinDirs, pathWithUserBins } = require('../cleanEnv.cjs');
+const { resolveClaudeBin } = require('../claude/claudeBin.cjs');
+const { userBinDirs, pathWithUserBins } = require('../process/cleanEnv.cjs');
 const { isContained } = require('../insideHome.cjs');
 
 // normalize/relative are left alone: path.posix.join calls the shared normalize internally.

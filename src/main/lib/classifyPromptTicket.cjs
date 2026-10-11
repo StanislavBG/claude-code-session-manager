@@ -16,8 +16,8 @@
  */
 
 const { spawn } = require('node:child_process');
-const { resolveClaudeBin, claudeSpawnTarget } = require('./claudeBin.cjs');
-const { cleanChildEnv, pathWithUserBins } = require('./cleanEnv.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./claude/claudeBin.cjs');
+const { cleanChildEnv, pathWithUserBins } = require('./process/cleanEnv.cjs');
 
 const CLASSIFY_TIMEOUT_MS = 30_000;
 const CLASSIFY_MODEL = 'sonnet';

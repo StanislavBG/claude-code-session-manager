@@ -10,8 +10,8 @@
 import { test, expect } from 'vitest';
 const { isContained } = require('../insideHome.cjs');
 const { decodeCwd } = require('../../historyAggregator.cjs');
-const { isAbsoluteForPlatform } = require('../agentPersonaSchema.cjs');
-const { encodeCwd } = require('../encodeCwd.cjs');
+const { isAbsoluteForPlatform } = require('../persona-macro/agentPersonaSchema.cjs');
+const { encodeCwd } = require('../util/encodeCwd.cjs');
 
 test('insideHome win32: case-insensitive containment', () => {
   expect(isContained('C:\\Users\\Me\\proj', 'c:\\users\\me', 'win32')).toBe(true);

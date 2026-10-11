@@ -35,7 +35,7 @@ beforeAll(() => {
   process.env.HOME = tmpHome;
 
   ({ executeJob, FINISH_PROTOCOL } = require('../scheduler.cjs'));
-  ({ buildContextDigest } = require('../lib/epicContextDigest.cjs'));
+  ({ buildContextDigest } = require('../lib/epic/epicContextDigest.cjs'));
 });
 
 afterAll(() => {
@@ -182,9 +182,9 @@ test('a digest build failure is caught and never blocks dispatch', async () => {
     // to re-require it so it picks up the stub (mirrors exchanges.test.cjs's
     // summarize.cjs stubbing pattern) — only scheduler.cjs's own cache entry
     // is cleared, not its whole dependency tree.
-    const digestPath = require.resolve('../lib/epicContextDigest.cjs');
+    const digestPath = require.resolve('../lib/epic/epicContextDigest.cjs');
     const realDigestModule = require.cache[digestPath];
-    const { composeExecutorPrompt: realComposeExecutorPrompt } = require('../lib/epicContextDigest.cjs');
+    const { composeExecutorPrompt: realComposeExecutorPrompt } = require('../lib/epic/epicContextDigest.cjs');
     require.cache[digestPath] = {
       id: digestPath,
       filename: digestPath,

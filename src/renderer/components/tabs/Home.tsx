@@ -876,7 +876,7 @@ function absoluteTime(ms: number): string {
 
 // ────────────────────────────────────────────────────────────────────
 // Active sessions — the machine-wide `claude -p` session-slot pool
-// (lib/sessionSlots.cjs) joined against running scheduler jobs / chat runs.
+// (lib/scheduler/sessionSlots.cjs) joined against running scheduler jobs / chat runs.
 // ────────────────────────────────────────────────────────────────────
 
 export function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {

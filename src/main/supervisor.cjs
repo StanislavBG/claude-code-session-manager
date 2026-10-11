@@ -16,10 +16,10 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawn, execFileSync } = require('node:child_process');
 const { ipcMain } = require('electron');
-const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
-const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claudeCliCaps.cjs');
-const { withProcRole } = require('./lib/cleanEnv.cjs');
-const schedulerPaths = require('./lib/schedulerPaths.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
+const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/claudeCliCaps.cjs');
+const { withProcRole } = require('./lib/process/cleanEnv.cjs');
+const schedulerPaths = require('./lib/scheduler/schedulerPaths.cjs');
 
 const HOME = os.homedir();
 const SUPERVISOR_LOG_PATH = path.join(HOME, '.claude', 'session-manager', 'supervisor.log');
@@ -103,7 +103,7 @@ function getChildBashCmdlines(jobPid) {
 
 // ─── Log tail helpers ───────────────────────────────────────────────────────
 
-const { readTail: readTailBytes } = require('./lib/fileTail.cjs');
+const { readTail: readTailBytes } = require('./lib/util/fileTail.cjs');
 
 /**
  * Skim the last 16 KB of a run log for the most recent assistant/user/result

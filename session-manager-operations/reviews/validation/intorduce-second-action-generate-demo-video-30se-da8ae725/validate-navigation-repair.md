@@ -10,7 +10,7 @@ Base: `2efa9e34` (per this PRD's implementation notes). Two repair commits land
 
 Combined diff (`git diff --stat 2efa9e34..HEAD` over the two PRDs' own files): 5 files,
 +179/-3 — `src/main/lib/smfileHeaders.cjs`, `src/main/lib/__tests__/smfileHeaders.test.cjs`,
-`src/main/index.cjs`, `src/main/lib/projectHomeAdminRoutes.cjs`,
+`src/main/index.cjs`, `src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs`,
 `src/main/__tests__/projectHomeAdminRoutes.test.cjs`. No files outside each PRD's declared
 `# Files` section changed.
 
@@ -47,7 +47,7 @@ since this job worktree doesn't carry it — same pattern noted in `validate-rep
 
 ## repair-demo-video-refresh-checks (1480) — VERIFIED; meta-refresh exploit re-run against landed code
 
-- `src/main/lib/projectHomeAdminRoutes.cjs:66-70` — `NETWORK_CHECKS` gained exactly the 5
+- `src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs:66-70` — `NETWORK_CHECKS` gained exactly the 5
   patterns the AC lists: `http-equiv\s*=\s*["']?refresh`, the `location.(href|assign|replace)`/`location\s*=` pattern,
   `document\.location`, `\b(?:top|parent)\.`, and the `<a href="http(s):|//|javascript:…">` pattern.
   Confirmed byte-for-byte via `git diff` against the AC's regex text.

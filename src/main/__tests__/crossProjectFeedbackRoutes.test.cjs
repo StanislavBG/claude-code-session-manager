@@ -1,6 +1,6 @@
 /**
  * crossProjectFeedbackRoutes.test.cjs — the HTTP hop for the project-to-project
- * conduit (lib/crossProjectFeedback.cjs's registerAdminRoute).
+ * conduit (lib/feedback-remote/crossProjectFeedback.cjs's registerAdminRoute).
  *
  * Why this is its own file. crossProjectFeedback.test.cjs drives
  * openFeedbackSession() directly, and the MCP tool definitions live in
@@ -27,9 +27,9 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const config = require('../config.cjs');
-const { createAdminHttp, TOKEN_PATH } = require('../lib/localAdminHttp.cjs');
-const crossProjectFeedback = require('../lib/crossProjectFeedback.cjs');
-const { readActiveIndex } = require('../lib/epicMint.cjs');
+const { createAdminHttp, TOKEN_PATH } = require('../lib/feedback-remote/localAdminHttp.cjs');
+const crossProjectFeedback = require('../lib/feedback-remote/crossProjectFeedback.cjs');
+const { readActiveIndex } = require('../lib/epic/epicMint.cjs');
 
 // Never let start() overwrite the RUNNING app's admin-api.json — that orphans
 // scheduler-mcp-server.cjs until an app restart (the incident documented in

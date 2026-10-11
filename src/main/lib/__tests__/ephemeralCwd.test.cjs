@@ -19,7 +19,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { isEphemeralCwd } = require('../ephemeralCwd.cjs');
-const { KIND_CONFIG } = require('../gitWorktree.cjs');
+const { KIND_CONFIG } = require('../git/gitWorktree.cjs');
 
 const tmpDirs = [];
 

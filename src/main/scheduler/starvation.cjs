@@ -5,8 +5,8 @@
  */
 'use strict';
 
-const launchFailure = require('../lib/launchFailure.cjs');
-const { STARVE_ESCALATION_MS } = require('../lib/schedulerConfig.cjs');
+const launchFailure = require('../lib/scheduler/launchFailure.cjs');
+const { STARVE_ESCALATION_MS } = require('../lib/scheduler/schedulerConfig.cjs');
 
 /**
  * computeBlockedChains(jobs) → [{ cwd, blockedBy, blocked }]
@@ -275,7 +275,7 @@ function classifyQueueStarvationByProject({ jobs, paused, runningSet: runningSlu
  * non-dispatch before slot/dependency causes are even considered):
  *   'paused'         — the scheduler itself is paused.
  *   'launch-blocked' — a pending row's persona has an active circuit-breaker
- *                       entry (lib/launchFailure.cjs).
+ *                       entry (lib/scheduler/launchFailure.cjs).
  *   'idle'           — nothing pending in this scope.
  *   'saturated'      — pending work exists but every session slot is in use.
  *   'blocked'        — nothing running, slots free, every pending row's

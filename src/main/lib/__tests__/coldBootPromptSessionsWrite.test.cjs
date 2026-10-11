@@ -6,7 +6,7 @@
  * validateWrite() explicitly skips the homedir root (a project cwd must be
  * registered via addAllowedRoot() before writeJson()/writeTextAtomic() will
  * accept a write under it). addAllowedRoot's only callers used to be pty.cjs
- * (Terminal spawn) and lib/prdCreate.cjs — never the Epic persistence path —
+ * (Terminal spawn) and lib/prd/prdCreate.cjs — never the Epic persistence path —
  * so on a cold boot, before any Terminal/PRD activity for a project, both
  * mergeActiveIndex's own write and the renderer's Epic-archive write
  * (config:write-json of promptSessionArchivePath) were silently rejected.
@@ -26,8 +26,8 @@ import { test, expect, afterEach } from 'vitest';
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { mergeActiveIndex } = require('../activeIndexMerge.cjs');
-const { readActiveIndex } = require('../epicMint.cjs');
+const { mergeActiveIndex } = require('../epic/activeIndexMerge.cjs');
+const { readActiveIndex } = require('../epic/epicMint.cjs');
 const config = require('../../config.cjs');
 
 const tmpDirs = [];

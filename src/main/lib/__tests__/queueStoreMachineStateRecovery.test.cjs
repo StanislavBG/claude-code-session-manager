@@ -34,7 +34,7 @@ const FIXTURE = path.join(__dirname, 'fixtures', 'scheduler-machine.json.corrupt
 // require.cache — purge it directly (same pattern as historyRollup.test.cjs)
 // or every test after the first keeps pointing at the FIRST test's tmpHome.
 function purgeRequireCache() {
-  try { delete require.cache[require.resolve('../queueStore.cjs')]; } catch { /* not loaded yet */ }
+  try { delete require.cache[require.resolve('../scheduler/queueStore.cjs')]; } catch { /* not loaded yet */ }
 }
 
 const realHome = process.env.HOME;
@@ -48,7 +48,7 @@ beforeEach(() => {
   fs.mkdirSync(path.join(tmpHome, 'Projects', 'session-manager'), { recursive: true });
   process.env.HOME = tmpHome;
   purgeRequireCache();
-  queueStore = require('../queueStore.cjs');
+  queueStore = require('../scheduler/queueStore.cjs');
   machineStatePath = queueStore.MACHINE_STATE_PATH;
   expect(machineStatePath.startsWith(tmpHome)).toBe(true); // sanity: never the real file
 });

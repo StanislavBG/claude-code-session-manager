@@ -56,7 +56,7 @@ export function splitStopSignal(text: string): SplitStopSignal | null {
   return { body: text.slice(0, idx).trim(), signalBlock: text.slice(idx) }
 }
 
-/** Minimal balanced-`{...}` JSON extractor — mirrors `main/lib/extractJson.cjs`. */
+/** Minimal balanced-`{...}` JSON extractor — mirrors `main/lib/util/extractJson.cjs`. */
 function extractJson(text: string): unknown {
   if (!text) return null
   const start = text.indexOf('{')

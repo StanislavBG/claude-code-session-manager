@@ -6,7 +6,7 @@
  * `session-manager-operations/project-pages/`: `home.html` (written by the
  * `project_home_write` admin route) and `demo-video/index.html` (written by
  * the `project_demo_video_write` admin route) — both in
- * lib/projectHomeAdminRoutes.cjs. This module only reads them: get() returns
+ * lib/feedback-remote/projectHomeAdminRoutes.cjs. This module only reads them: get() returns
  * home.html's content plus the demo video's { path, mtimeMs }, and a
  * refcounted per-cwd watcher pushes `project-pages:changed` for either. It
  * never writes content (watch()'s mkdir creates an empty directory only).

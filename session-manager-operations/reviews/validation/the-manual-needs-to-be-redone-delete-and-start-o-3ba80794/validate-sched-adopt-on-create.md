@@ -29,7 +29,7 @@ $ TMPDIR=/tmp/validate-scratch-1447 timeout 300 npx vitest run src/main/__tests_
 Per-AC evidence:
 
 - **AC1** (`createPrd` triggers one reconcile through an EXISTING entry point, no second
-  reconcile implementation) — `src/main/lib/prdCreate.cjs:494-504` calls
+  reconcile implementation) — `src/main/lib/prd/prdCreate.cjs:494-504` calls
   `remote.requestReconcile()`; `src/main/scheduler.cjs:12509-12511` defines it as
   `async requestReconcile() { await broadcast({ flush: true }); }` — the identical
   `broadcast({flush:true})` seam `resetJob` already uses, which flushes
@@ -67,7 +67,7 @@ Promise.race falling back to cachedNextReset" wording exactly.
 ## Combined diff review
 
 `git diff c8efc980..4dbe2d6c --stat`: 4 files, +272/-8
-(`src/main/__tests__/prdCreateAdoption.test.cjs` new; `src/main/lib/prdCreate.cjs`,
+(`src/main/__tests__/prdCreateAdoption.test.cjs` new; `src/main/lib/prd/prdCreate.cjs`,
 `src/main/scheduler.cjs`, `vitest.config.ts` touched). Full diff reviewed inline (no
 `/code-review` or `/security-review` slash command available in this headless environment —
 self-reviewed instead).

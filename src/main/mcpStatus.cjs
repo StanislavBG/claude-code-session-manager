@@ -10,8 +10,8 @@
  */
 
 const { spawn } = require('node:child_process');
-const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
-const { withProcRole } = require('./lib/cleanEnv.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
+const { withProcRole } = require('./lib/process/cleanEnv.cjs');
 
 const PROBE_TIMEOUT_MS = 30_000;
 

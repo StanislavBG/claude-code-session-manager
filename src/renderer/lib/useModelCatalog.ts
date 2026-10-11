@@ -1,6 +1,6 @@
 /**
  * useModelCatalog(cwd) — the renderer half of the live model/effort catalog
- * (models:catalog → src/main/lib/modelCatalog.cjs). Module-scope per-cwd cache so
+ * (models:catalog → src/main/lib/claude/modelCatalog.cjs). Module-scope per-cwd cache so
  * every component mounting it for one cwd shares a single IPC round-trip. Never
  * throws: an IPC failure degrades to `catalog: null` (consumers use their own
  * static fallback) and is not cached, so the next mount retries. Fresh-on-mount

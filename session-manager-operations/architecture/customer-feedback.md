@@ -17,7 +17,7 @@ are also used; owner mode = a token resolves, see store 3).
 | | |
 | --- | --- |
 | Path | `~/.claude/session-manager/customer-feedback.json` |
-| Owning module | `src/main/lib/customerFeedbackClient.cjs` |
+| Owning module | `src/main/lib/feedback-remote/customerFeedbackClient.cjs` |
 | Write mode | Atomic (`atomicFs.writeJsonAtomic`, mode `0o600`) via a serialized in-process read-modify-write queue |
 | Primary key | `items[].id` (host-assigned feedback id) |
 | Cap / eviction | `MAX_ITEMS` 500, newest-first; oldest sliced off on write |
@@ -43,7 +43,7 @@ Envelope: `{ schemaVersion: 1, items: FeedbackItem[] }`. A missing or corrupt fi
 | | |
 | --- | --- |
 | Path | `~/.claude/session-manager/customer-feedback-inbox.json` |
-| Owning module | `src/main/lib/customerFeedbackInbox.cjs` |
+| Owning module | `src/main/lib/feedback-remote/customerFeedbackInbox.cjs` |
 | Write mode | Atomic (`writeJsonAtomic`, mode `0o600`) via a serialized read-modify-write queue; sorted newest-`receivedAt`-first on every write |
 | Primary key | `items[].id` (pull upserts by id) |
 | Cap / eviction | `MAX_ITEMS` 2000, newest-first |
@@ -69,7 +69,7 @@ Envelope: `{ schemaVersion: 1, items: InboxItem[], nextSince: string|null, nextM
 | | |
 | --- | --- |
 | Path | `~/.claude/session-manager/customer-feedback-owner.json` |
-| Owning module | `src/main/lib/customerFeedbackInbox.cjs` (**read-only** — `loadOwnerConfig`; nothing in the app writes it, the owner authors it by hand) |
+| Owning module | `src/main/lib/feedback-remote/customerFeedbackInbox.cjs` (**read-only** — `loadOwnerConfig`; nothing in the app writes it, the owner authors it by hand) |
 | Write mode | None from the app |
 | Primary key | Singleton file — one row |
 | Cap / eviction | None |
@@ -152,9 +152,9 @@ IPC channels (`customerFeedbackIpc.cjs`): `customerFeedback:` `submit`, `list`, 
 
 | Module | Role |
 | --- | --- |
-| `src/main/lib/customerFeedbackClient.cjs` | customer submit / list / status refresh / markSeen; store 1 |
-| `src/main/lib/customerFeedbackInbox.cjs` | owner pull / list / setStatus / linkEpic; stores 2 and 3 |
-| `src/main/lib/customerFeedbackIpc.cjs` | renderer IPC handlers + boot status refresh |
-| `src/main/lib/customerFeedbackAdminRoutes.cjs` | loopback admin routes behind the two MCP tools |
+| `src/main/lib/feedback-remote/customerFeedbackClient.cjs` | customer submit / list / status refresh / markSeen; store 1 |
+| `src/main/lib/feedback-remote/customerFeedbackInbox.cjs` | owner pull / list / setStatus / linkEpic; stores 2 and 3 |
+| `src/main/lib/feedback-remote/customerFeedbackIpc.cjs` | renderer IPC handlers + boot status refresh |
+| `src/main/lib/feedback-remote/customerFeedbackAdminRoutes.cjs` | loopback admin routes behind the two MCP tools |
 | `src/renderer/state/customerFeedback.ts` | zustand store |
 | `src/renderer/components/customerFeedback/` | `CustomerFeedbackPanel.tsx`, `CustomerFeedbackInbox.tsx` |

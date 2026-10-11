@@ -7,7 +7,7 @@
 - Command: `node scripts/test-quality/mutants.cjs <src> --max 20 --seed 1`
 - Raw data: `mutation-sample.json`
 
-## src/main/lib/atomicFs.cjs
+## src/main/lib/util/atomicFs.cjs
 
 Mutants run: 11 | killed: 5 | survived: 6 | kill rate: 45.5%
 
@@ -22,9 +22,9 @@ Survivors:
 
 | test file | kills | uniqueKills |
 | --- | --- | --- |
-| src/main/lib/__tests__/atomicFs.test.cjs | 5 | 5 |
+| src/main/lib/util/__tests__/atomicFs.test.cjs | 5 | 5 |
 
-## src/main/lib/epicMint.cjs
+## src/main/lib/epic/epicMint.cjs
 
 Mutants run: 20 | killed: 11 | survived: 9 | kill rate: 55.0%
 
@@ -43,7 +43,7 @@ Survivors:
 | test file | kills | uniqueKills |
 | --- | --- | --- |
 | src/main/__tests__/epicMintTelemetryTap.test.cjs | 9 | 8 |
-| src/main/lib/__tests__/activeIndexRebuild.test.cjs | 3 | 2 |
+| src/main/lib/epic/__tests__/activeIndexRebuild.test.cjs | 3 | 2 |
 
 ## src/main/lib/opsOwnership.cjs
 

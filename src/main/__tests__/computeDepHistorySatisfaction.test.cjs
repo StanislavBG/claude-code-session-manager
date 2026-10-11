@@ -10,8 +10,8 @@ const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-1122-home-'));
 process.env.HOME = tmpHome;
 
 const scheduler = require('../scheduler/budget.cjs');
-const queueHistory = require('../lib/queueHistory.cjs');
-const { DEP_HISTORY_FAIL_OPEN } = require('../lib/schedulerBatch.cjs');
+const queueHistory = require('../lib/scheduler/queueHistory.cjs');
+const { DEP_HISTORY_FAIL_OPEN } = require('../lib/scheduler/schedulerBatch.cjs');
 
 function tmpProjectCwd(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));

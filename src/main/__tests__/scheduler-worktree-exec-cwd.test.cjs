@@ -3,7 +3,7 @@
  * criterion: when a job is isolated into a worktree, its PRD file, queue
  * state, and run logs must still resolve to the MAIN tree, never the
  * worktree — `session-manager-operations/` is resolved from a `cwd` param
- * (lib/prdLocations.cjs), so a naive cwd swap would give the job a
+ * (lib/prd/prdLocations.cjs), so a naive cwd swap would give the job a
  * different, empty ops root and orphan its own PRD.
  *
  * Drives executeJob's real `execCwd` parameter (the 5th arg scheduler.cjs

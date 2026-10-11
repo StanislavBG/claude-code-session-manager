@@ -9,7 +9,7 @@
 // touches the ordinary dispatch path for a PRD that doesn't opt in.
 
 const assert = require('node:assert/strict');
-const { pickNextBatch } = require('../schedulerBatch.cjs');
+const { pickNextBatch } = require('../scheduler/schedulerBatch.cjs');
 
 const CWD_A = '/home/user/Projects/project-a';
 const CWD_B = '/home/user/Projects/project-b';

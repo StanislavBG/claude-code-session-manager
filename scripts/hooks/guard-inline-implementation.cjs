@@ -30,7 +30,7 @@
  * ── Install (per-project, NOT machine-wide) ─────────────────────────────
  * Adopted by REFERENCE through the stable shim
  * `~/.claude/session-manager/hooks/guard-inline-implementation.cjs`, written by
- * src/main/lib/guardShims.cjs (installed by src/main/lib/delegationReadiness.cjs's
+ * src/main/lib/guardShims.cjs (installed by src/main/lib/epic/delegationReadiness.cjs's
  * installInlineImplementationGuard(), via "Fix it" on the New Epic readiness
  * banner). Never vendor: do not copy this file or hardcode an absolute path to it.
  * The example below is THIS repo's own `.claude/settings.json` (relative command,

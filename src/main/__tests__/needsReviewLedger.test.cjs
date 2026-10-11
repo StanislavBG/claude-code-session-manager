@@ -1,5 +1,5 @@
 /**
- * needsReviewLedger.test.cjs — unit tests for src/main/lib/needsReviewLedger.cjs's
+ * needsReviewLedger.test.cjs — unit tests for src/main/lib/scheduler/needsReviewLedger.cjs's
  * pure ladder-rung classification, line builders, and rollup reduction.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/needsReviewLedger.test.cjs
@@ -13,7 +13,7 @@ const {
   buildNeedsReviewEntryLine,
   buildNeedsReviewResolutionLine,
   reduceNeedsReviewLedger,
-} = require('../lib/needsReviewLedger.cjs');
+} = require('../lib/scheduler/needsReviewLedger.cjs');
 
 // ---------- classifyLadderRung ----------
 

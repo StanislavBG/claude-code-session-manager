@@ -36,7 +36,7 @@ const { scoreMemories } = require('./lib/memoryStale.cjs');
 const MAX_FILE_BYTES = 1024 * 1024; // 1 MiB
 const MAX_ENTRIES = 1000;
 
-const { encodeCwd: encodeWorkspace } = require('./lib/encodeCwd.cjs');
+const { encodeCwd: encodeWorkspace } = require('./lib/util/encodeCwd.cjs');
 
 function memoryRoot() {
   return path.join(os.homedir(), '.claude', 'projects');

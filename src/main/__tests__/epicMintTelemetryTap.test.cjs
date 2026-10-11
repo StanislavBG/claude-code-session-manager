@@ -12,8 +12,8 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 
-const countersPath = require.resolve('../lib/telemetryCounters.cjs');
-const epicMintPath = require.resolve('../lib/epicMint.cjs');
+const countersPath = require.resolve('../lib/telemetry/telemetryCounters.cjs');
+const epicMintPath = require.resolve('../lib/epic/epicMint.cjs');
 
 let calls;
 const tmpDirs = [];
@@ -45,7 +45,7 @@ async function mkCwd() {
 }
 
 test('a genuine mint fires epic.create exactly once', async () => {
-  const { ensureEpic, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epicMint.cjs');
+  const { ensureEpic, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epic/epicMint.cjs');
   const cwd = await mkCwd();
   const result = await ensureEpic(cwd, { mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI, goalText: 'do the thing' });
   expect(result.created).toBe(true);
@@ -53,7 +53,7 @@ test('a genuine mint fires epic.create exactly once', async () => {
 });
 
 test('joining an existing open Epic does NOT fire epic.create', async () => {
-  const { ensureEpic, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epicMint.cjs');
+  const { ensureEpic, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epic/epicMint.cjs');
   const cwd = await mkCwd();
   const minted = await ensureEpic(cwd, { mintAuthority: MINT_AUTHORITY_NEW_EPIC_UI, goalText: 'do the thing' });
   calls.length = 0;

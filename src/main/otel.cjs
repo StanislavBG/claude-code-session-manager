@@ -8,14 +8,14 @@
  * plan text, and agent prompts are excluded unless `includeContent` is on
  * (matches upstream OTEL_LOG_USER_PROMPTS opt-in).
  *
- * Spans are POSTed as OTLP/HTTP JSON by lib/otlpTraceExporter.cjs (zero
+ * Spans are POSTed as OTLP/HTTP JSON by lib/telemetry/otlpTraceExporter.cjs (zero
  * dependencies). recordSpan() only queues; the exporter batches/sends on its
  * own unref()'d timer, so we never block the transcript flush. The app must
  * keep working without telemetry: a failed export is surfaced, never thrown.
  */
 
 const otelSettings = require('./otelSettings.cjs');
-const { createOtlpTraceExporter } = require('./lib/otlpTraceExporter.cjs');
+const { createOtlpTraceExporter } = require('./lib/telemetry/otlpTraceExporter.cjs');
 
 let exporter = null;
 let enabled = false;

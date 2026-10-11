@@ -16,10 +16,10 @@ const config = require('./config.cjs');
 // activeIndexPath/withPathLock come from epicMint.cjs so this module's
 // read-modify-write of active-index.json (appendResponseEventIfKnown, below)
 // serializes through the EXACT SAME lock instance as ensureEpic/
-// appendPrdCreatedEvent and lib/activeIndexMerge.cjs's mergeActiveIndex — one
+// appendPrdCreatedEvent and lib/epic/activeIndexMerge.cjs's mergeActiveIndex — one
 // lock across all three writers of this file, not three independent maps
 // that could still interleave a stale read-modify-write past each other.
-const { activeIndexPath: promptSessionActiveIndexPath, withPathLock } = require('./lib/epicMint.cjs');
+const { activeIndexPath: promptSessionActiveIndexPath, withPathLock } = require('./lib/epic/epicMint.cjs');
 
 // IPC channel broadcast whenever an event is appended to a PromptSession's
 // chain from the main process (currently only the scheduler's response-event

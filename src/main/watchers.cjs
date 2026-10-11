@@ -14,7 +14,7 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
-const { cleanChildEnv } = require('./lib/cleanEnv.cjs');
+const { cleanChildEnv } = require('./lib/process/cleanEnv.cjs');
 const { checkInsideHome } = require('./lib/insideHome.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 

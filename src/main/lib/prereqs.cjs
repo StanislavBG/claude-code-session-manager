@@ -11,8 +11,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { promisify } = require('node:util');
 const childProcess = require('node:child_process');
-const { pathWithUserBins } = require('./cleanEnv.cjs');
-const { resolveClaudeBin } = require('./claudeBin.cjs');
+const { pathWithUserBins } = require('./process/cleanEnv.cjs');
+const { resolveClaudeBin } = require('./claude/claudeBin.cjs');
 const { readCredentials } = require('./credentials.cjs');
 
 const PROBE_TIMEOUT_MS = 5000;

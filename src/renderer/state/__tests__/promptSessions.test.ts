@@ -1413,7 +1413,7 @@ describe('renameEpic / duplicateEpic / deleteEpic', () => {
 
 // The read-merge-write itself (disk preservation, memory-wins-on-collision,
 // removal tombstones/resurrection guard, event union, corrupt-disk fallback,
-// mint-during-persist) moved main-side to lib/activeIndexMerge.cjs — see
+// mint-during-persist) moved main-side to lib/epic/activeIndexMerge.cjs — see
 // src/main/__tests__/activeIndexMerge.test.cjs for that coverage. These tests
 // only verify persistActiveIndex computes and forwards the correct
 // CONTRIBUTION to the main-process merge IPC.

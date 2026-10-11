@@ -24,7 +24,7 @@ beforeAll(() => {
   process.env.HOME = tmpHome;
   process.env.SM_JOB_WORKTREE_DISABLE = '1';
   scheduler = require('../scheduler.cjs');
-  queueStore = require('../lib/queueStore.cjs');
+  queueStore = require('../lib/scheduler/queueStore.cjs');
 });
 
 afterAll(() => {
@@ -67,7 +67,7 @@ test('manual outranks agent: agent is a no-op during manual, manual replaces age
 });
 
 test('pause and resume are audited; resume only when a pause was cleared', async () => {
-  const audit = require('../lib/auditLog.cjs');
+  const audit = require('../lib/telemetry/auditLog.cjs');
   const spy = [];
   const orig = audit.appendAuditEvent;
   // scheduler captured appendAuditEvent by destructuring, so assert via the log file instead

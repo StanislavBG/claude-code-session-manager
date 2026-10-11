@@ -44,7 +44,7 @@ describe("cwd-preserve", () => {
     tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-reconcile-cwd-preserve-'));
     process.env.HOME = tmpHome;
     ({ reconcile } = require('../scheduler.cjs'));
-    ({ DEFAULT_PROJECT_CWD } = require('../lib/schedulerBatch.cjs'));
+    ({ DEFAULT_PROJECT_CWD } = require('../lib/scheduler/schedulerBatch.cjs'));
   });
 
   afterAll(() => {
@@ -249,7 +249,7 @@ describe("invalid-repair", () => {
     process.env.HOME = tmpHome;
 
     scheduler = require('../scheduler.cjs');
-    queueStore = require('../lib/queueStore.cjs');
+    queueStore = require('../lib/scheduler/queueStore.cjs');
 
     if (!scheduler.PRDS_DIR.startsWith(tmpHome)) {
       throw new Error(`refusing to run: PRDS_DIR (${scheduler.PRDS_DIR}) is not under the temp HOME (${tmpHome})`);
@@ -326,7 +326,7 @@ describe("invalid-repair", () => {
       // require time, so spying on the module's export property after the
       // fact wouldn't intercept scheduler.cjs's already-bound reference —
       // assert against the real (tmpHome-isolated) audit log file instead.
-      const { auditLogPath } = require('../lib/auditLog.cjs');
+      const { auditLogPath } = require('../lib/telemetry/auditLog.cjs');
       expect(auditLogPath().startsWith(tmpHome)).toBe(true);
 
       queueStore.bustCwdCache();
@@ -435,7 +435,7 @@ describe("quarantine", () => {
     process.env.HOME = tmpHome;
 
     scheduler = require('../scheduler.cjs');
-    queueStore = require('../lib/queueStore.cjs');
+    queueStore = require('../lib/scheduler/queueStore.cjs');
 
     if (!scheduler.PRDS_DIR.startsWith(tmpHome)) {
       throw new Error(`refusing to run: PRDS_DIR (${scheduler.PRDS_DIR}) is not under the temp HOME (${tmpHome})`);
@@ -478,7 +478,7 @@ describe("quarantine", () => {
       fs.writeFileSync(path.join(stateDir, 'queue.json'), JSON.stringify({ jobs: [] }, null, 2), 'utf8');
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const { auditLogPath } = require('../lib/auditLog.cjs');
+      const { auditLogPath } = require('../lib/telemetry/auditLog.cjs');
 
       queueStore.bustCwdCache();
       const state = { jobs: [], invalidJobs: [], paused: null };
@@ -621,14 +621,14 @@ describe("quarantine", () => {
       // logic the IPC handler/admin route call (parsePrdFile/serializePrdFile
       // round-trip), rather than hand-writing raw text, to exercise the real
       // round-trip path this feature depends on.
-      const { parsePrdFile, serializePrdFile } = require('../lib/prdFrontmatter.cjs');
+      const { parsePrdFile, serializePrdFile } = require('../lib/prd/prdFrontmatter.cjs');
       const raw = fs.readFileSync(prdPath, 'utf8');
       const { frontmatter: fm, body } = parsePrdFile(raw);
       fm.createdVia = 'legacy-adopted';
       fm.issuedAt = '2026-08-07T01:00:00.000Z';
       fs.writeFileSync(prdPath, serializePrdFile(fm, body), 'utf8');
 
-      const { auditLogPath } = require('../lib/auditLog.cjs');
+      const { auditLogPath } = require('../lib/telemetry/auditLog.cjs');
       queueStore.bustCwdCache();
       const state = { jobs: [quarantinedRow], invalidJobs: [], paused: null };
       await scheduler.reconcile(state);

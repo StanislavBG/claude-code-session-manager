@@ -28,7 +28,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { writeJsonAtomic } = require('../queueStore.cjs');
+const { writeJsonAtomic } = require('../scheduler/queueStore.cjs');
 
 // Node's fs.promises writeFile-style chunking writes large buffers in ~512KB
 // pieces, awaiting each one — large enough here to guarantee the short

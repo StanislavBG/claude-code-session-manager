@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { KIND_CONFIG: WORKTREE_KIND_CONFIG } = require('./gitWorktree.cjs');
+const { KIND_CONFIG: WORKTREE_KIND_CONFIG } = require('./git/gitWorktree.cjs');
 const { OPS_ROOT_DIR } = require('./opsOwnership.cjs');
 const { classifyCwd, worktreeMainRootOf } = require('./cwdClassify.cjs');
 

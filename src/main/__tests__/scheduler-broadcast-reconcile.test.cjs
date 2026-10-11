@@ -41,7 +41,7 @@ beforeAll(() => {
   process.env.HOME = tmpHome;
 
   scheduler = require('../scheduler.cjs');
-  queueStore = require('../lib/queueStore.cjs');
+  queueStore = require('../lib/scheduler/queueStore.cjs');
 
   if (!scheduler.PRDS_DIR.startsWith(tmpHome)) {
     throw new Error(`refusing to run: PRDS_DIR (${scheduler.PRDS_DIR}) is not under the temp HOME (${tmpHome})`);

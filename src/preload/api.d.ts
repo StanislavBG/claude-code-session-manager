@@ -254,7 +254,7 @@ export interface McpCatalogResult {
   recipes: McpRecipe[];
 }
 
-/** Mirrors WorkType (src/main/lib/workTypeLibrary.cjs) / EpicTag (tagLibrary.ts) — the
+/** Mirrors WorkType (src/main/lib/prd/workTypeLibrary.cjs) / EpicTag (tagLibrary.ts) — the
  *  same Epic-mission taxonomy, reused here since an Agent persona's `tags` field is that
  *  same concept, not a free-form string list. */
 export type AgentPersonaTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder';
@@ -491,7 +491,7 @@ export interface OtelSetConfigResult {
 }
 
 // Customer feedback — client submissions + owner inbox. Shapes mirror
-// src/main/lib/customerFeedbackClient.cjs and customerFeedbackInbox.cjs.
+// src/main/lib/feedback-remote/customerFeedbackClient.cjs and customerFeedbackInbox.cjs.
 export type CustomerFeedbackTag = 'bug' | 'feature' | 'discussion';
 export type CustomerFeedbackStatus = 'open' | 'in_progress' | 'resolved' | 'wontfix';
 
@@ -610,7 +610,7 @@ export interface ScheduleConfig {
   schemaVersion: 1;
 }
 
-/** Mirrors JOB_STATUSES (src/main/lib/scheduleJobSchema.cjs) — the single
+/** Mirrors JOB_STATUSES (src/main/lib/scheduler/scheduleJobSchema.cjs) — the single
  *  source of truth asserted at read time by queueStore.cjs's shapeJobs. This
  *  file can't require that .cjs module (types-only, erased at build time),
  *  so this union is a manually-kept copy; drift from JOB_STATUSES (and from
@@ -868,7 +868,7 @@ export interface ScheduleJobHold {
   reason?: string | null;
 }
 
-/** Why a headless run never got a model turn (lib/launchFailure.cjs, issue #11). */
+/** Why a headless run never got a model turn (lib/scheduler/launchFailure.cjs, issue #11). */
 export type ScheduleLaunchFailureKind =
   | 'model_config_rejected'
   | 'bad_request'
@@ -2266,22 +2266,22 @@ export interface SessionManagerAPI {
      *  live instead of waiting for a restart. */
     onEventAppended: (handler: (e: PromptSessionEventAppendedPayload) => void) => () => void;
     /** Main-side read-merge-write of a cwd's active-index.json
-     *  (lib/activeIndexMerge.cjs) — persistActiveIndex sends only its own
+     *  (lib/epic/activeIndexMerge.cjs) — persistActiveIndex sends only its own
      *  in-memory contribution for the cwd; disk stays main's truth, merged
      *  inside the same lock epicMint.cjs's ensureEpic serializes through. */
     mergeActiveIndex: (payload: PromptSessionsMergeActiveIndexPayload) => Promise<PromptSessionsMergeActiveIndexResult>;
     /** Mints a brand-new 'proposed' Epic through main's own ensureEpic()
-     *  (lib/promptSessionsCreateEpic.cjs) instead of the renderer
+     *  (lib/epic/promptSessionsCreateEpic.cjs) instead of the renderer
      *  hand-constructing the PromptSession record itself. Unused today —
      *  additive step 1 of a two-PRD chain; a later PRD routes
      *  createPromptSession through this. */
     create: (payload: PromptSessionsCreateEpicPayload) => Promise<PromptSessionsCreateEpicResult>;
     /** Creates this Epic's isolated `git worktree` checkout
-     *  (lib/epicWorktreeMint.cjs) — resolves to the `worktree` field shape on
+     *  (lib/epic/epicWorktreeMint.cjs) — resolves to the `worktree` field shape on
      *  success, or null on any failure (never rejects). */
     createWorktree: (payload: PromptSessionsCreateWorktreePayload) => Promise<PromptSessionsCreateWorktreeResult | null>;
     /** Folds an Epic's isolated git worktree branch back into its owning
-     *  project's main tree (lib/epicWorktreeMerge.cjs) — the ONLY point
+     *  project's main tree (lib/epic/epicWorktreeMerge.cjs) — the ONLY point
      *  where PRD 1033's per-Epic isolation resolves back into the shared
      *  tree. Never rejects. */
     mergeToMain: (payload: PromptSessionsMergeToMainPayload) => Promise<PromptSessionsMergeToMainResult>;

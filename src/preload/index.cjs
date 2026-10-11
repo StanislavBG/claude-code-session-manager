@@ -553,12 +553,12 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('promptSession:event-appended', listener);
     },
     /** Main-side read-merge-write of a cwd's active-index.json
-     *  (lib/activeIndexMerge.cjs) — replaces persistActiveIndex's old
+     *  (lib/epic/activeIndexMerge.cjs) — replaces persistActiveIndex's old
      *  renderer-side read-merge-write. Payload carries only this renderer's
      *  own in-memory contribution for the cwd; disk stays main's truth. */
     mergeActiveIndex: (payload) => ipcRenderer.invoke('promptSessions:merge-active-index', payload),
     /** Mints a brand-new 'proposed' Epic through main's own ensureEpic()
-     *  (lib/promptSessionsCreateEpic.cjs) instead of the renderer
+     *  (lib/epic/promptSessionsCreateEpic.cjs) instead of the renderer
      *  hand-constructing the PromptSession record itself. Unused today —
      *  additive step 1 of a two-PRD chain; a later PRD routes
      *  createPromptSession through this. */
@@ -571,7 +571,7 @@ contextBridge.exposeInMainWorld('api', {
     createWorktree: (payload) => ipcRenderer.invoke('promptSessions:create-worktree', payload),
     /** Folds an Epic's isolated git worktree branch back into its owning
      *  project's main tree (main-side gitWorktree.cjs's integrateEpicBranch,
-     *  via lib/epicWorktreeMerge.cjs) — the ONLY point where PRD 1033's
+     *  via lib/epic/epicWorktreeMerge.cjs) — the ONLY point where PRD 1033's
      *  per-Epic isolation resolves back into the shared tree. Never rejects:
      *  resolves `{ ok: true, status: 'merged', integrated }` on a clean
      *  merge (worktree cleaned up), or `{ ok: false, status:

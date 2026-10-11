@@ -37,7 +37,6 @@ afterAll(() => {
 // bare names, resolved lazily against the module loaded in beforeAll.
 const acquireSchedulerOwnership = (...args) => instanceLock.acquireSchedulerOwnership(...args);
 const releaseSchedulerOwnership = (...args) => instanceLock.releaseSchedulerOwnership(...args);
-const pidAlive = (...args) => instanceLock.pidAlive(...args);
 const lockPath = (...args) => instanceLock.lockPath(...args);
 
 function readAuditEvents() {
@@ -113,13 +112,6 @@ describe('instanceLock (PRD 834)', () => {
     fs.writeFileSync(lockPath(), 'not json {');
     const res = acquireSchedulerOwnership();
     expect(res.owner).toBe(true);
-  });
-
-  it('pidAlive: own pid alive, absurd pid dead', () => {
-    expect(pidAlive(process.pid)).toBe(true);
-    expect(pidAlive(2 ** 30)).toBe(false);
-    expect(pidAlive(-5)).toBe(false);
-    expect(pidAlive(0)).toBe(false);
   });
 
   it('a legacy lock ({pid, startedAt} only, no identity) is respected while its pid is alive', () => {

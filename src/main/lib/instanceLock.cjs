@@ -30,20 +30,13 @@ const path = require('node:path');
 const { identity, isDifferentProcess } = require('./procIdentity.cjs');
 const { instanceLockPath } = require('./schedulerPaths.cjs');
 const { appendAuditEvent } = require('./auditLog.cjs');
-const { pidAlive: pidAliveCore } = require('./pidAlive.cjs');
+const { pidAlive } = require('./pidAlive.cjs');
 
 // Env override is for unit tests only (isolates the lock from the real
 // ~/.claude of the machine running the suite).
 function lockPath() {
   return process.env.SM_SCHEDULER_LOCK_PATH
     || instanceLockPath();
-}
-
-// Thin alias over pidAlive.cjs's shared pidAlive() — kept as its own named
-// export (rather than inlining the require at every call site) so existing
-// imports of `pidAlive` from this module keep working unchanged.
-function pidAlive(pid) {
-  return pidAliveCore(pid);
 }
 
 function readLock() {
@@ -121,4 +114,4 @@ function releaseSchedulerOwnership() {
   } catch { /* nothing to release */ }
 }
 
-module.exports = { acquireSchedulerOwnership, releaseSchedulerOwnership, pidAlive, lockPath };
+module.exports = { acquireSchedulerOwnership, releaseSchedulerOwnership, lockPath };

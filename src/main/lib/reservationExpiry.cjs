@@ -13,23 +13,16 @@ const { pidAlive } = require('./pidAlive.cjs');
 
 const DEFAULT_GRACE_MS = 10 * 60 * 1000;
 
-// Thin alias over pidAlive.cjs's shared pidAlive() — kept as its own named
-// export (rather than inlining the require at every call site) so existing
-// imports of `defaultPidAlive` from this module keep working unchanged.
-function defaultPidAlive(pid) {
-  return pidAlive(pid);
-}
-
 /**
  * @param {{ claimedAt: number, pid: number|null }} res
  * @param {{ live: boolean, pidAlive?: (pid:number)=>boolean, now: number, graceMs?: number }} ctx
  */
-function isProvablyDead(res, { live, pidAlive = defaultPidAlive, now, graceMs = DEFAULT_GRACE_MS }) {
+function isProvablyDead(res, { live, pidAlive: isAlive = pidAlive, now, graceMs = DEFAULT_GRACE_MS }) {
   if (live) return false;
   // Made after the pass began (i.e. this tick) — never expire it.
   if (!Number.isFinite(res.claimedAt) || res.claimedAt > now) return false;
-  if (Number.isInteger(res.pid) && res.pid > 0) return !pidAlive(res.pid);
+  if (Number.isInteger(res.pid) && res.pid > 0) return !isAlive(res.pid);
   return now - res.claimedAt > graceMs;
 }
 
-module.exports = { isProvablyDead, defaultPidAlive, DEFAULT_GRACE_MS };
+module.exports = { isProvablyDead, DEFAULT_GRACE_MS };

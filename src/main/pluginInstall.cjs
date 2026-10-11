@@ -229,6 +229,32 @@ async function install({ slug, marketplace }) {
   }
 }
 
+/**
+ * Refresh an already-installed plugin to the marketplace's current version.
+ * Subcommands confirmed from `claude plugin marketplace --help` / `claude plugin --help`:
+ * `claude plugin marketplace update <name>` then `claude plugin update <slug>@<name>`.
+ * Same pty spawn path as install(); no shell.
+ */
+async function update({ slug, marketplaceName }) {
+  if (typeof slug !== 'string' || !SLUG_RE.test(slug) || slug.length > 128 ||
+      typeof marketplaceName !== 'string' || !MKT_NAME_RE.test(marketplaceName) || marketplaceName.length > 128) {
+    return { ok: false, exitCode: -1, error: 'invalid slug or marketplace' };
+  }
+  if (inFlight.has(slug)) {
+    return { ok: false, exitCode: -1, error: 'install already in progress' };
+  }
+  inFlight.set(slug, null);
+  const register = (proc) => inFlight.set(slug, proc);
+  const unregister = () => inFlight.set(slug, null);
+  try {
+    const refreshed = await runStep({ slug, args: ['plugin', 'marketplace', 'update', marketplaceName], register, unregister });
+    if (!refreshed.ok) return refreshed;
+    return await runStep({ slug, args: ['plugin', 'update', `${slug}@${marketplaceName}`], register, unregister });
+  } finally {
+    inFlight.delete(slug);
+  }
+}
+
 function registerPluginInstallHandlers() {
   ipcMain.handle('plugins:install', async (_e, payload) => {
     // safeParse to preserve the existing `{ ok:false, exitCode:-1, error }`
@@ -257,4 +283,4 @@ function registerPluginInstallHandlers() {
   });
 }
 
-module.exports = { registerPluginInstallHandlers, attachWindow, install, bundledMarketplaceDir };
+module.exports = { registerPluginInstallHandlers, attachWindow, install, update, bundledMarketplaceDir };

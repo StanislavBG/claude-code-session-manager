@@ -20,7 +20,7 @@ const {
   evaluatePerProjectStall,
   TICK_STALL_THRESHOLD_MS,
 } = require('../health.cjs');
-const { computeStallSummary } = require('../scheduler.cjs');
+const { computeStallSummary } = require('../scheduler/budget.cjs');
 
 test('computeProjectProblemCounts: breaks down failed/needs_review/quarantined by project, ignores healthy statuses', () => {
   const jobs = [

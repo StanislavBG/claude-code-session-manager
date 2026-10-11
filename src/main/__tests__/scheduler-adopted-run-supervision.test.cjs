@@ -12,7 +12,7 @@
 import { test, expect, vi, beforeEach, afterEach } from 'vitest';
 const { superviseAdoptedRuns, evaluateAdoptedRun } = require('../lib/adoptedRunSupervisor.cjs');
 const quietMachineLease = require('../lib/quietMachineLease.cjs');
-const { classifyBudgetKill } = require('../scheduler.cjs');
+const { classifyBudgetKill } = require('../scheduler/budget.cjs');
 
 const MIN = 60_000;
 const T0 = Date.parse('2026-09-18T12:00:00Z');

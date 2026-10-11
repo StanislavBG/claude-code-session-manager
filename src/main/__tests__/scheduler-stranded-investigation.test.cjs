@@ -20,7 +20,8 @@
 // vitest, NOT node:test — this repo's suite is vitest-only (CLAUDE.md).
 import { test } from 'vitest';
 const assert = require('node:assert/strict');
-const { findStrandedInvestigations, INVESTIGATION_MAX_MS } = require('../scheduler.cjs');
+const { findStrandedInvestigations } = require('../scheduler/budget.cjs');
+const { INVESTIGATION_MAX_MS } = require('../scheduler.cjs');
 
 const NOW = Date.parse('2026-09-01T12:00:00.000Z');
 const agoMin = (m) => new Date(NOW - m * 60_000).toISOString();

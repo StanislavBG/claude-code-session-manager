@@ -66,7 +66,8 @@ describe("quarantine", () => {
   beforeAll(() => {
     clearMainModuleCache();
     scheduler = require('../scheduler.cjs');
-    ({ selectLeftoverQuarantineTarget, quarantineLeftovers } = scheduler);
+    ({ quarantineLeftovers } = scheduler);
+    ({ selectLeftoverQuarantineTarget } = require('../scheduler/budget.cjs'));
   });
 
   /**

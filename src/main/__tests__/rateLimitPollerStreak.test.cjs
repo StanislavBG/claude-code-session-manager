@@ -25,7 +25,7 @@ const {
   BACKOFF_MAX_MS,
   FAILURE_STREAK_WARN_THRESHOLD,
   FAILURE_STREAK_ESCALATION_MS,
-} = require('../scheduler.cjs');
+} = require('../scheduler/budget.cjs');
 
 test('nextBackoffMs starts at 30s from a zero/falsy backoff', () => {
   expect(nextBackoffMs(0)).toBe(30_000);

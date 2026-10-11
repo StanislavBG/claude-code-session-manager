@@ -20,7 +20,7 @@ import path from 'node:path';
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-1286-home-'));
 process.env.HOME = tmpHome;
 
-const scheduler = require('../scheduler.cjs');
+const scheduler = require('../scheduler/budget.cjs');
 const { pickNextBatch } = require('../lib/schedulerBatch.cjs');
 const { evaluateUnresolvableDepHealth } = require('../health.cjs');
 

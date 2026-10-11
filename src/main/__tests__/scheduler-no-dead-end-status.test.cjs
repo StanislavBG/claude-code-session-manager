@@ -33,7 +33,8 @@ const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'no-dead-end-status-test-'
 process.env.HOME = tmpHome;
 
 const { JOB_STATUSES } = require('../lib/scheduleJobSchema.cjs');
-const { selectQuarantineAutoResolveTargets, QUARANTINE_RESOLVE_CAP, findStrandedInvestigations, INVESTIGATION_MAX_MS } = require('../scheduler.cjs');
+const { selectQuarantineAutoResolveTargets, QUARANTINE_RESOLVE_CAP, findStrandedInvestigations } = require('../scheduler/budget.cjs');
+const { INVESTIGATION_MAX_MS } = require('../scheduler.cjs');
 const { selectFailedAutoResetTargets, FAILED_AUTORESET_CAP, selectExhaustedNeedsReviewTargets, NEEDS_REVIEW_RESOLVE_CAP } = require('../scheduler/reviewLadder.cjs');
 const { selectReapableJobs } = require('../lib/reaperHelpers.cjs');
 const { pickForProject } = require('../lib/schedulerBatch.cjs');

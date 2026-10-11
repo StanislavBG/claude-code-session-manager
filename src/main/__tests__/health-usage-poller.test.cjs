@@ -23,7 +23,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 const { evaluateUsagePollerHealth, loadUsagePollerState } = require('../health.cjs');
-const { FAILURE_STREAK_ESCALATION_MS } = require('../scheduler.cjs');
+const { FAILURE_STREAK_ESCALATION_MS } = require('../scheduler/budget.cjs');
 
 test('missing state (fresh install / poller never ran) is ok, not applicable', () => {
   expect(evaluateUsagePollerHealth(null)).toEqual({ ok: true, applicable: false });

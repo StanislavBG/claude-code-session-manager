@@ -29,10 +29,10 @@ process.env.HOME = tmpHome;
 
 const {
   selectQuarantineAutoResolveTargets,
-  autoResolveQuarantine,
   QUARANTINE_RESOLVE_CAP,
   quarantineAutoResolveDisabled,
-} = require('../scheduler.cjs');
+} = require('../scheduler/budget.cjs');
+const { autoResolveQuarantine } = require('../scheduler.cjs');
 
 const MIN_MS = 60_000;
 const THRESHOLD_MS = 60 * MIN_MS;

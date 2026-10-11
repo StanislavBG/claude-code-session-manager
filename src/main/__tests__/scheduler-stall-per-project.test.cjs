@@ -19,7 +19,8 @@
 // silently doesn't exist. node:assert works fine inside a vitest run.
 import { test } from 'vitest';
 const assert = require('node:assert/strict');
-const { computeStallSummary, findStaleQuarantinedJobs, QUARANTINE_ESCALATE_MS } = require('../scheduler.cjs');
+const { computeStallSummary, findStaleQuarantinedJobs } = require('../scheduler/budget.cjs');
+const { QUARANTINE_ESCALATE_MS } = require('../scheduler.cjs');
 
 test('computeStallSummary: burrow fully stalled (quarantined only) while another project is busy — machine-wide false, burrow true', () => {
   const state = {

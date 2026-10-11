@@ -23,8 +23,8 @@ const {
   findOverrunningJobs,
   JOB_OVERRUN_FACTOR,
   JOB_OVERRUN_FLOOR_MS,
-  resetJobFields,
-} = require('../scheduler.cjs');
+} = require('../scheduler/budget.cjs');
+const { resetJobFields } = require('../scheduler.cjs');
 
 const NOW = Date.parse('2026-08-08T12:00:00.000Z');
 const agoMin = (m) => new Date(NOW - m * 60_000).toISOString();

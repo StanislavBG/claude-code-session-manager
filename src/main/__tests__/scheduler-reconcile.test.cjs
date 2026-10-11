@@ -315,7 +315,7 @@ describe("invalid-repair", () => {
       // Stall detector must flag the PRE-repair state: the queue holds a
       // (quarantined) job but nothing is running or pending and it isn't
       // paused — this is exactly the condition that was silent for 4+ hours.
-      const preRepairStall = scheduler.computeStallSummary(state);
+      const preRepairStall = require('../scheduler/budget.cjs').computeStallSummary(state);
       expect(preRepairStall.stalled).toBe(true);
       expect(preRepairStall.total).toBe(1);
       expect(preRepairStall.running).toBe(0);
@@ -348,7 +348,7 @@ describe("invalid-repair", () => {
       expect(auditedRepair).toBe(true);
 
       // Post-repair, the same condition must no longer read as stalled.
-      const postRepairStall = scheduler.computeStallSummary(state);
+      const postRepairStall = require('../scheduler/budget.cjs').computeStallSummary(state);
       expect(postRepairStall.stalled).toBe(false);
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });

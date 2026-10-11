@@ -2048,16 +2048,32 @@ function getNextResetCached() {
  * (usageCircuit.isResetFresh): a stale reset must never arm a resume timer
  * that already elapsed (that's the 30-second-nap bug computeEffectiveResumeAt
  * below also guards against), so a stale value here returns null and lets
- * the caller's 30-minute fallback take over instead.
+ * the caller's 30-minute fallback take over instead. The billing fallback is
+ * used only when its binding reading is at/above `threshold` — a 58% weekly
+ * reading once paused the queue to the weekly reset 4 days out (2026-10-11);
+ * an unknown/non-finite reading returns null so the 30-minute fallback applies.
  */
-function resolveRateLimitPauseReset(logPath, billingResetIso, nowMs = Date.now()) {
+function resolveRateLimitPauseReset(logPath, billingResetIso, nowMs = Date.now(), { billingUtilization, threshold } = {}) {
   const logReset = resolveBindingRateLimitReset(logPath);
   if (logReset != null) {
     const iso = new Date(logReset * 1000).toISOString();
     if (isResetFresh(iso, nowMs)) return iso;
   }
-  if (billingResetIso && isResetFresh(billingResetIso, nowMs)) return billingResetIso;
+  if (
+    billingResetIso
+    && Number.isFinite(billingUtilization)
+    && Number.isFinite(threshold)
+    && billingUtilization >= threshold
+    && isResetFresh(billingResetIso, nowMs)
+  ) return billingResetIso;
   return null;
+}
+
+/** Logs when a fresh billing reset was discarded because its reading is under threshold. */
+function logBillingResetRejected(billingResetIso, billingUtilization, threshold) {
+  if (!billingResetIso || !Number.isFinite(threshold)) return;
+  if (Number.isFinite(billingUtilization) && billingUtilization >= threshold) return;
+  console.log(`[scheduler] rate_limit pause: billing binding window at ${Number.isFinite(billingUtilization) ? `${billingUtilization}%` : 'unknown'} < ${threshold}% — using 30-min fallback, not ${billingResetIso}`);
 }
 
 /**
@@ -6077,7 +6093,10 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       billing.usageCircuit.recordFailure('executor_429');
       const logPath = path.join(runDir, `${job.slug}.log`);
       const billingResetIso = await billingResetForPause();
-      const resetIso = resolveRateLimitPauseReset(logPath, billingResetIso);
+      const pauseState = await readQueue().catch(() => null);
+      const pauseThreshold = pauseState?.config?.utilizationThreshold;
+      const resetIso = resolveRateLimitPauseReset(logPath, billingResetIso, Date.now(), { billingUtilization: cachedUtilization, threshold: pauseThreshold });
+      if (resetIso == null) logBillingResetRejected(billingResetIso, cachedUtilization, pauseThreshold);
       const observedAt = dispatchStartedAtMs;
       const prevCount = consecutiveRapidRateLimitsBySlug.get(job.slug) || 0;
       const nextCount = nextRapidRateLimitCount(prevCount, { rateLimited: true, durationMs: res.durationMs });
@@ -7875,7 +7894,9 @@ async function reapDeadRunningJobs() {
       billing.usageCircuit.recordFailure('executor_429');
       const triggering = dead.find((d) => d.outcome === 'rate_limited');
       const billingResetIso = await billingResetForPause();
-      const resetIso = resolveRateLimitPauseReset(triggering.logPath, billingResetIso);
+      const pauseThreshold = state.config?.utilizationThreshold;
+      const resetIso = resolveRateLimitPauseReset(triggering.logPath, billingResetIso, Date.now(), { billingUtilization: cachedUtilization, threshold: pauseThreshold });
+      if (resetIso == null) logBillingResetRejected(billingResetIso, cachedUtilization, pauseThreshold);
       const triggeringRow = triggering ? state.jobs.find((x) => x.slug === triggering.slug) : null;
       const observedAtMs = triggeringRow?.startedAt ? Date.parse(triggeringRow.startedAt) : null;
       // Same rapid-repeat circuit breaker spawnJob's own res.rateLimited

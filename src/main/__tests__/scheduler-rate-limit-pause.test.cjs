@@ -54,7 +54,7 @@ test('resolveRateLimitPauseReset: prefers the log-derived seven-day reset over t
 });
 
 test('resolveRateLimitPauseReset: falls back to the billing reset when the log yields none', () => {
-  const resetIso = resolveRateLimitPauseReset('/nonexistent/path/job.log', FIVE_HOUR_ISO, FIXTURE_NOW);
+  const resetIso = resolveRateLimitPauseReset('/nonexistent/path/job.log', FIVE_HOUR_ISO, FIXTURE_NOW, { billingUtilization: 95, threshold: 90 });
   assert.strictEqual(resetIso, FIVE_HOUR_ISO);
 });
 
@@ -73,6 +73,53 @@ test('resolveRateLimitPauseReset: log yields nothing and the billing reset has a
   const longAfter = Date.parse('2026-09-15T00:00:00.000Z');
   const resetIso = resolveRateLimitPauseReset('/nonexistent/path/job.log', FIVE_HOUR_ISO, longAfter);
   assert.strictEqual(resetIso, null);
+});
+
+const fs = require('node:fs');
+const os = require('node:os');
+
+function writeLog(lines) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-pause-'));
+  const p = path.join(dir, 'job.log');
+  fs.writeFileSync(p, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
+  return p;
+}
+
+test('resolveRateLimitPauseReset: under-threshold billing reading (58% < 90%) -> null -> 30-minute fallback, not the weekly reset', () => {
+  const now = FIXTURE_NOW;
+  const weeklyIso = new Date(now + 4 * 24 * 3600_000).toISOString();
+  const logPath = writeLog([{ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day' } }]);
+  const resetIso = resolveRateLimitPauseReset(logPath, weeklyIso, now, { billingUtilization: 58, threshold: 90 });
+  assert.strictEqual(resetIso, null);
+  assert.strictEqual(computeEffectiveResumeAt('rate_limit', resetIso, now), new Date(now + 30 * 60_000).toISOString());
+});
+
+test('resolveRateLimitPauseReset: at/above-threshold billing reading (96%) -> the billing reset', () => {
+  const now = FIXTURE_NOW;
+  const weeklyIso = new Date(now + 4 * 24 * 3600_000).toISOString();
+  const logPath = writeLog([{ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day' } }]);
+  assert.strictEqual(resolveRateLimitPauseReset(logPath, weeklyIso, now, { billingUtilization: 96, threshold: 90 }), weeklyIso);
+});
+
+test('resolveRateLimitPauseReset: a rejected five_hour log event wins regardless of billingUtilization', () => {
+  const now = FIXTURE_NOW;
+  const fiveSec = Math.floor(now / 1000) + 3 * 3600;
+  const sevenSec = Math.floor(now / 1000) + 4 * 24 * 3600;
+  const logPath = writeLog([{ type: 'rate_limit_event', rate_limit_info: {
+    status: 'rejected', resetsAt: fiveSec, rateLimitType: 'five_hour',
+    unifiedWindows: { five_hour: { utilization: 1.04, resetsAt: fiveSec }, seven_day: { utilization: 0.84, resetsAt: sevenSec } },
+  } }]);
+  const billingIso = new Date(sevenSec * 1000).toISOString();
+  const expected = new Date(fiveSec * 1000).toISOString();
+  assert.strictEqual(resolveRateLimitPauseReset(logPath, billingIso, now, { billingUtilization: 12, threshold: 90 }), expected);
+  assert.strictEqual(resolveRateLimitPauseReset(logPath, billingIso, now), expected);
+});
+
+test('resolveRateLimitPauseReset: unknown billingUtilization -> null (never pause for days on an unknown reading)', () => {
+  const now = FIXTURE_NOW;
+  const weeklyIso = new Date(now + 4 * 24 * 3600_000).toISOString();
+  assert.strictEqual(resolveRateLimitPauseReset('/nonexistent/path/job.log', weeklyIso, now, { threshold: 90 }), null);
+  assert.strictEqual(resolveRateLimitPauseReset('/nonexistent/path/job.log', weeklyIso, now, { billingUtilization: undefined, threshold: 90 }), null);
 });
 
 test('computeEffectiveResumeAt: rate_limit with no resumeAt gets the same bounded 30-minute fallback as network', () => {

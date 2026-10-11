@@ -20,6 +20,7 @@ import type { PromptSession } from '../state/promptSessions'
 import { buildBacklogTree, flattenBacklogNodes, type BacklogBlocker } from './backlogTree'
 import { bareSlug, canonicalizeDependsOn } from './depSlugResolve'
 import { splitTitleAndGoal } from './epicDerive'
+import { formatDuration } from './formatTime'
 import { prdNumber } from '../components/tabs/scheduler/sched-primitives'
 
 export type PlanStatus = 'active' | 'queued' | 'done' | 'draft'
@@ -118,17 +119,6 @@ const isRunning = (s: string) => s === 'running' || s === 'investigating'
 const isAttention = (s: string) => s === 'failed' || s === 'needs_review' || s === 'quarantined'
 const isStuckBlocker = (s: string | null) => s === 'failed' || s === 'needs_review' || s === 'quarantined'
 
-/** '4m12s' / '42s' / '1h05m'. */
-export function formatElapsed(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000))
-  const h = Math.floor(total / 3600)
-  const m = Math.floor((total % 3600) / 60)
-  const s = total % 60
-  if (h > 0) return `${h}h${String(m).padStart(2, '0')}m`
-  if (m > 0) return `${m}m${String(s).padStart(2, '0')}s`
-  return `${s}s`
-}
-
 /** '~now' / '~42s' / '~2m' / '~3h18m'. */
 export function formatEta(ms: number): string {
   if (ms <= 5_000) return '~now'
@@ -142,7 +132,7 @@ export function formatEta(ms: number): string {
  *  live per-second tick in PrdRow reuses this instead of forking the formula. */
 export function runningTrailing(j: ScheduleJob, elapsedMs: number): string {
   const est = j.estimateMinutes ? j.estimateMinutes * 60_000 : null
-  return est ? `${Math.min(99, Math.floor((elapsedMs / est) * 100))}%` : formatElapsed(elapsedMs)
+  return est ? `${Math.min(99, Math.floor((elapsedMs / est) * 100))}%` : formatDuration(elapsedMs)
 }
 
 function averageDurationMs(jobs: ScheduleJob[]): number {
@@ -412,7 +402,7 @@ export function buildPlans(jobs: ScheduleJob[], opts: PlanOpts): Plan[] {
         let c: Classified
         if (isDone(s)) {
           const d = j.startedAt && j.finishedAt ? Date.parse(j.finishedAt) - Date.parse(j.startedAt) : NaN
-          c = { kind: 'done', trailing: d > 0 ? formatElapsed(d) : '', held: false, blocked: false }
+          c = { kind: 'done', trailing: d > 0 ? formatDuration(d) : '', held: false, blocked: false }
         } else if (isRunning(s)) {
           const el = j.startedAt ? Math.max(0, now - Date.parse(j.startedAt)) : null
           c = { kind: 'running', trailing: el === null ? '' : runningTrailing(j, el), held: false, blocked: false }

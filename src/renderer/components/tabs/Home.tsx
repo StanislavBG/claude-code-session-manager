@@ -54,6 +54,7 @@ import { formatEffortSegment } from '../../lib/effectiveModelInfo'
 import { ERD_ENTITIES } from '../../lib/dataModelErd'
 import { ticketTagTone } from '../../lib/ticketDisplay'
 import { toast } from '../../state/toast'
+import { formatAgo } from '../../lib/formatTime'
 import type { ScheduleJob } from '../../../preload/api'
 
 const EMPTY_JOBS: ScheduleJob[] = []
@@ -733,7 +734,7 @@ function ProjectsCard({ projectRows }: { projectRows: HomeProjectRow[] }) {
               {p.liveCount > 0 ? (
                 <span className="font-mono text-[11px] text-accent whitespace-nowrap">{p.liveCount} live</span>
               ) : (
-                <span className="font-mono text-[11px] text-fg-faint whitespace-nowrap">{relativeTime(p.lastActivityMs)}</span>
+                <span className="font-mono text-[11px] text-fg-faint whitespace-nowrap">{formatAgo(p.lastActivityMs, Date.now())}</span>
               )}
             </button>
           ))}
@@ -796,7 +797,7 @@ export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
         { label: 'Session', value: drawerRow.sessionId },
         { label: 'Project', value: resolveCwd(drawerRow.projectEncoded) },
         { label: 'Epic', value: drawerEpicTitle ?? '—' },
-        { label: 'Last activity', value: `${absoluteTime(drawerRow.mtimeMs)} (${relativeTime(drawerRow.mtimeMs)})` },
+        { label: 'Last activity', value: `${absoluteTime(drawerRow.mtimeMs)} (${formatAgo(drawerRow.mtimeMs, Date.now())})` },
         { label: 'Size', value: `${Math.round(drawerRow.sizeBytes / 1024)}k` },
       ]
     : []
@@ -837,7 +838,7 @@ export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
               <span className="text-[11.5px] text-fg-faint font-mono text-right">
                 {Math.round(r.sizeBytes / 1024)}k
               </span>
-              <span className="text-[11px] text-fg-faint font-mono text-right">{relativeTime(r.mtimeMs)}</span>
+              <span className="text-[11px] text-fg-faint font-mono text-right">{formatAgo(r.mtimeMs, Date.now())}</span>
               <span
                 className="justify-self-end text-[12px] font-semibold px-[11px] py-[5px] rounded-lg text-sage bg-[#e5ecd8]"
                 title={`Open ${r.sessionId.slice(0, 8)}…`}
@@ -871,14 +872,6 @@ export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
 
 function absoluteTime(ms: number): string {
   return new Date(ms).toLocaleString()
-}
-
-function relativeTime(ms: number): string {
-  const diff = Date.now() - ms
-  if (diff < 60_000) return 'just now'
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
-  return `${Math.floor(diff / 86_400_000)}d ago`
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -945,7 +938,7 @@ export function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
         { label: 'Kind', value: drawerRow.kind },
         { label: 'Epic', value: drawerRow.epicTitle ?? '—' },
         { label: 'Project', value: drawerRow.project ?? '—' },
-        { label: 'Started', value: `${absoluteTime(new Date(drawerRow.at).getTime())} (${relativeTime(new Date(drawerRow.at).getTime())})` },
+        { label: 'Started', value: `${absoluteTime(new Date(drawerRow.at).getTime())} (${formatAgo(new Date(drawerRow.at).getTime(), Date.now())})` },
       ]
     : []
 
@@ -985,7 +978,7 @@ export function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
                 )}
               </span>
               <span className="flex items-center gap-3.5 shrink-0">
-                <span className="font-mono text-[11px] text-fg-faint">{relativeTime(new Date(row.at).getTime())}</span>
+                <span className="font-mono text-[11px] text-fg-faint">{formatAgo(new Date(row.at).getTime(), Date.now())}</span>
                 {row.openTarget && (
                   <span
                     onClick={(e) => { e.stopPropagation(); open(row) }}

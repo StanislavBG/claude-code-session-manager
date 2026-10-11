@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import type { ScheduleJob } from '../../../preload/api'
-import { buildPlans, summarizeQueue, criticalPath, formatElapsed, formatEta } from '../schedulerStages'
+import { buildPlans, summarizeQueue, criticalPath, formatEta } from '../schedulerStages'
+import { formatDuration } from '../formatTime'
 
 const NOW = Date.parse('2026-09-19T12:00:00Z')
 let seq = 0
@@ -228,7 +229,7 @@ describe('criticalPath', () => {
 
 describe('formatters', () => {
   it('elapsed / eta', () => {
-    expect(formatElapsed(252_000)).toBe('4m12s'); expect(formatElapsed(3_900_000)).toBe('1h05m')
+    expect(formatDuration(252_000)).toBe('4m12s'); expect(formatDuration(3_900_000)).toBe('1h05m')
     expect(formatEta(1000)).toBe('~now'); expect(formatEta(120_000)).toBe('~2m'); expect(formatEta(11_880_000)).toBe('~3h18m')
   })
 })

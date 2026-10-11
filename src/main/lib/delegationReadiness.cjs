@@ -25,6 +25,7 @@ const { cleanChildEnv, pathWithUserBins } = require('./cleanEnv.cjs');
 const { shimPath: guardShimPath, resolveShimTarget, ensureGuardShimsOrError } = require('./guardShims.cjs');
 const { resolveProjectRoot } = require('./opsOwnership.cjs');
 const { nodeShellCommand } = require('./appRuntime.cjs');
+const { readJsonOrSync } = require('./atomicFs.cjs');
 
 const SCHEDULER_MCP_NAME = 'session-manager-scheduler';
 const DEV_PLUGIN_ENABLED_KEY = 'session-manager-dev@session-manager';
@@ -40,15 +41,6 @@ const SELF_SCHEDULE_GUARD_MATCHER = 'ScheduleWakeup|CronCreate|Task|Agent';
 const LIVE_PROBE_TIMEOUT_MS = 10_000;
 const LIVE_PROBE_TTL_MS = 60_000;
 const REQUIRED_LIVE_TOOLS = ['scheduler_create_prd', 'session_manager_help'];
-
-/** Read + JSON.parse a file, returning `fallback` on any read/parse failure. */
-function readJsonSafe(absPath, fallback) {
-  try {
-    return JSON.parse(fs.readFileSync(absPath, 'utf8'));
-  } catch {
-    return fallback;
-  }
-}
 
 /** Lazy (not a module-load constant) so tests can toggle packaged mode. */
 function schedulerMcpFixCmd() {
@@ -68,10 +60,10 @@ function schedulerMcpFixCmd() {
  * which is the incident this PRD closes.
  */
 function checkSchedulerMcp({ cwd, homeDir }) {
-  const userConfig = readJsonSafe(path.join(homeDir, '.claude.json'), null);
+  const userConfig = readJsonOrSync(path.join(homeDir, '.claude.json'), null);
   const userEntry = userConfig?.mcpServers?.[SCHEDULER_MCP_NAME];
 
-  const projectConfig = readJsonSafe(path.join(cwd, '.mcp.json'), null);
+  const projectConfig = readJsonOrSync(path.join(cwd, '.mcp.json'), null);
   const projectHas = !!projectConfig?.mcpServers?.[SCHEDULER_MCP_NAME];
 
   if (userEntry) {
@@ -129,10 +121,10 @@ function checkSchedulerMcp({ cwd, homeDir }) {
  * (enableAllProjectMcpServers), not something this probe decides.
  */
 function checkSchedulerMcpProjectDuplicate({ cwd, homeDir }) {
-  const userConfig = readJsonSafe(path.join(homeDir, '.claude.json'), null);
+  const userConfig = readJsonOrSync(path.join(homeDir, '.claude.json'), null);
   const userHas = !!userConfig?.mcpServers?.[SCHEDULER_MCP_NAME];
 
-  const projectConfig = readJsonSafe(path.join(cwd, '.mcp.json'), null);
+  const projectConfig = readJsonOrSync(path.join(cwd, '.mcp.json'), null);
   const projectHas = !!projectConfig?.mcpServers?.[SCHEDULER_MCP_NAME];
 
   const warn = userHas && projectHas;
@@ -289,7 +281,7 @@ async function checkSchedulerMcpLive({ cwd, homeDir, schedulerMcpCheck }) {
   // executed the moment its cwd is merely probed, bypassing that approval
   // entirely. Auto-approving project-scope servers is explicitly out of
   // scope for this probe — see this PRD's "Out of scope".
-  const userConfig = readJsonSafe(path.join(homeDir, '.claude.json'), null);
+  const userConfig = readJsonOrSync(path.join(homeDir, '.claude.json'), null);
   const entry = userConfig?.mcpServers?.[SCHEDULER_MCP_NAME];
 
   if (!entry?.command) {
@@ -312,7 +304,7 @@ async function checkSchedulerMcpLive({ cwd, homeDir, schedulerMcpCheck }) {
 }
 
 function checkDevPlugin({ homeDir }) {
-  const settings = readJsonSafe(path.join(homeDir, '.claude', 'settings.json'), null);
+  const settings = readJsonOrSync(path.join(homeDir, '.claude', 'settings.json'), null);
   const ok = settings?.enabledPlugins?.[DEV_PLUGIN_ENABLED_KEY] === true;
 
   return {
@@ -444,7 +436,7 @@ const GUARD_DEFS = {
  * while reporting green" failure mode, one hop downstream of the hook command.
  */
 function checkGuard(def, { cwd, homeDir = os.homedir() }) {
-  const settings = readJsonSafe(path.join(cwd, '.claude', 'settings.json'), null);
+  const settings = readJsonOrSync(path.join(cwd, '.claude', 'settings.json'), null);
   const preToolUse = Array.isArray(settings?.hooks?.PreToolUse) ? settings.hooks.PreToolUse : [];
 
   let mentioned = false;
@@ -536,7 +528,7 @@ async function installGuard(def, { cwd, homeDir = os.homedir(), skipShimEnsure =
   // documents for PromptSession archive writes. `cwd` here IS a project root.
   addAllowedRoot(cwd);
 
-  const existing = fs.existsSync(settingsPath) ? readJsonSafe(settingsPath, undefined) : {};
+  const existing = fs.existsSync(settingsPath) ? readJsonOrSync(settingsPath, undefined) : {};
   if (existing === undefined) {
     // Unparseable settings — refuse rather than silently discarding whatever
     // the human has in there.
@@ -629,7 +621,7 @@ async function installSelfScheduleGuard({ cwd, homeDir = os.homedir(), skipShimE
 
 /**
  * Runs all eight delegation-readiness checks for `cwd`. Every filesystem read
- * is wrapped (readJsonSafe / try-catch) so a missing or unparseable file
+ * is wrapped (readJsonOrSync / try-catch) so a missing or unparseable file
  * yields ok:false with a detail, never a thrown exception. Async because
  * scheduler-mcp-live genuinely spawns a process and waits on it (bounded by
  * LIVE_PROBE_TIMEOUT_MS, and memoized per registration signature so repeat

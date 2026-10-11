@@ -32,11 +32,8 @@ const DEFAULT_DRAIN_DEADLINE_MS = 4 * 60 * 60_000;
 // relaunch is picked up by the watchdog again.
 const RESTARTING_MARKER_TTL_MS = 5 * 60_000;
 
-function writeJsonAtomicSync(file, value) {
-  atomicFs.writeJsonAtomicSync(file, value);
-}
-
-function readJsonSafe(file) {
+/** Object-or-null view over atomicFs.readJsonOrSync (arrays/scalars → null). */
+function readJsonObject(file) {
   const v = atomicFs.readJsonOrSync(file, null);
   return v && typeof v === 'object' ? v : null;
 }
@@ -44,7 +41,7 @@ function readJsonSafe(file) {
 // ---------- request file ----------
 
 function readRestartRequest(file = schedulerPaths.restartRequestPath()) {
-  return readJsonSafe(file);
+  return readJsonObject(file);
 }
 
 /**
@@ -60,7 +57,7 @@ function requestRestart({ reason, requestedBy } = {}, { file = schedulerPaths.re
     requestedBy: typeof requestedBy === 'string' && requestedBy ? requestedBy : 'unknown',
     requestedAt: new Date(now).toISOString(),
   };
-  writeJsonAtomicSync(file, request);
+  atomicFs.writeJsonAtomicSync(file, request);
   return request;
 }
 
@@ -69,7 +66,7 @@ function stampDrainCompleted(now = Date.now(), file = schedulerPaths.restartRequ
   const existing = readRestartRequest(file);
   if (!existing) return null;
   const stamped = { ...existing, drainCompletedAt: new Date(now).toISOString() };
-  writeJsonAtomicSync(file, stamped);
+  atomicFs.writeJsonAtomicSync(file, stamped);
   return stamped;
 }
 
@@ -151,7 +148,7 @@ function installedBuildDiffers({ running, installed } = {}) {
 // ---------- restarting marker (watchdog) ----------
 
 function markRestarting({ file = schedulerPaths.restartingMarkerPath(), now = Date.now(), ttlMs = RESTARTING_MARKER_TTL_MS } = {}) {
-  writeJsonAtomicSync(file, { pid: process.pid, at: now, expiresAt: now + ttlMs });
+  atomicFs.writeJsonAtomicSync(file, { pid: process.pid, at: now, expiresAt: now + ttlMs });
 }
 
 function clearRestartingMarker(file = schedulerPaths.restartingMarkerPath()) {
@@ -160,7 +157,7 @@ function clearRestartingMarker(file = schedulerPaths.restartingMarkerPath()) {
 
 /** True while the marker exists and has not expired (bounded lifetime). */
 function isRestartingMarkerActive({ file = schedulerPaths.restartingMarkerPath(), now = Date.now() } = {}) {
-  const m = readJsonSafe(file);
+  const m = readJsonObject(file);
   return Boolean(m) && typeof m.expiresAt === 'number' && now < m.expiresAt;
 }
 

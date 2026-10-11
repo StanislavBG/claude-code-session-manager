@@ -648,12 +648,6 @@ function flagRiskySurfaces(jobs, { prdsDir, gitTimeoutMs = 10_000 } = {}) {
   return results;
 }
 
-// ─── Atomic write helper ───────────────────────────────────────────────────────
-// Delegates to atomicFs.cjs's tmp+rename recipe (pure-node, no Electron import).
-function _writeFileAtomic(absPath, text) {
-  atomicFs.writeTextAtomicSync(absPath, text);
-}
-
 const STATUS_EMOJI = { pass: '✅', fail: '❌', unverifiable: '⚠️' };
 
 /**
@@ -751,7 +745,7 @@ function writeReport(key, { acResults = [], riskFlags = [], runsDir } = {}) {
   ].join('\n');
 
   fs.mkdirSync(dir, { recursive: true });
-  _writeFileAtomic(reportPath, report);
+  atomicFs.writeTextAtomicSync(reportPath, report);
 
   return reportPath;
 }
@@ -882,7 +876,7 @@ function readWatermark(runsDir = schedulerPaths.runsDir()) {
  */
 function writeWatermark(lastFinishedAt, runsDir = schedulerPaths.runsDir()) {
   fs.mkdirSync(runsDir, { recursive: true });
-  _writeFileAtomic(
+  atomicFs.writeTextAtomicSync(
     path.join(runsDir, WATERMARK_FILENAME),
     JSON.stringify({ lastFinishedAt }, null, 2)
   );

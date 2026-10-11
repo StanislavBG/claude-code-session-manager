@@ -211,6 +211,70 @@ describe('useMacroLaunch', () => {
     ).toBe(true)
   })
 
+  describe('cost confirmation', () => {
+    let confirmSpy: ReturnType<typeof vi.spyOn>
+    beforeEach(() => {
+      confirmSpy = vi.spyOn(window, 'confirm')
+    })
+    afterEach(() => {
+      confirmSpy.mockRestore()
+    })
+
+    it('max effort + confirm declined: nothing is minted or readiness-checked', async () => {
+      confirmSpy.mockReturnValue(false)
+      const onSelect = vi.fn()
+      const el = await mount(
+        <Harness personas={[persona({ effort: 'max' })]} opts={{ requireReadiness: true }} onSelect={onSelect} />,
+      )
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+
+      expect(confirmSpy).toHaveBeenCalledTimes(1)
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+      expect(sendSpy).not.toHaveBeenCalled()
+      expect(onSelect).not.toHaveBeenCalled()
+      expect((globalThis as any).window.api.app.delegationReadiness).not.toHaveBeenCalled()
+    })
+
+    it('max effort + confirm accepted: launches exactly once', async () => {
+      confirmSpy.mockReturnValue(true)
+      const onSelect = vi.fn()
+      const el = await mount(<Harness personas={[persona({ effort: 'max' })]} onSelect={onSelect} />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+
+      expect(confirmSpy).toHaveBeenCalledTimes(1)
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      expect(onSelect).toHaveBeenCalledTimes(1)
+    })
+
+    it('medium effort: no confirm, launches', async () => {
+      const onSelect = vi.fn()
+      const el = await mount(<Harness personas={[persona({ effort: 'medium' })]} onSelect={onSelect} />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+
+      expect(confirmSpy).not.toHaveBeenCalled()
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('resumeActive with an existing active Epic + max effort: never prompts', async () => {
+      usePromptSessions.setState({
+        sessions: {
+          existing: {
+            id: 'existing', cwd: CWD, goalText: 'Sweep', claudeSessionId: 'sess-1', status: 'active',
+            createdAt: '2026-08-02T00:00:00.000Z', completedAt: null, tag: 'bug', agentType: 'scout',
+          } as any,
+        },
+      })
+      const onSelect = vi.fn()
+      const el = await mount(
+        <Harness personas={[persona({ effort: 'max' })]} opts={{ resumeActive: true }} onSelect={onSelect} />,
+      )
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+
+      expect(confirmSpy).not.toHaveBeenCalled()
+      expect(onSelect).toHaveBeenCalledWith('existing')
+    })
+  })
+
   it('default behaviour: a missing persona in an empty (still-loading) list does NOT block', async () => {
     const onSelect = vi.fn()
     const el = await mount(<Harness personas={[]} onSelect={onSelect} />)

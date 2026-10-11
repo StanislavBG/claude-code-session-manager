@@ -13,12 +13,16 @@
  *     `window.api.app.delegationReadiness` reports not-ready.
  * Both default off, so SessionActionsBar's own byte-for-byte behaviour is
  * unaffected by their existence.
+ *
+ * A persona at xhigh/max effort needs a window.confirm (macroCostWarning) before
+ * minting; cancelling mints nothing. Resuming an active Epic never prompts.
  */
 import { useState } from 'react'
 import { usePromptSessions } from '../state/promptSessions'
 import { useSessions } from '../state/sessions'
 import { toast } from '../state/toast'
 import { launchSession } from './launchSession'
+import { macroCostWarning } from './macroCost'
 import type { AgentPersona, Macro } from '../../preload/api'
 
 export function useMacroLaunch(
@@ -52,6 +56,9 @@ export function useMacroLaunch(
       toast.error(`Agent ${macro.agentName} not found — edit the macro`)
       return
     }
+
+    const costWarning = macroCostWarning(macro, persona)
+    if (costWarning && !window.confirm(costWarning)) return
 
     setLaunching(macro.id)
     try {

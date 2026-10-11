@@ -242,7 +242,7 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
   useEffect(() => {
     let alive = true
     fetchHistoryTotals(30).then((r) => {
-      if (!alive || !r.ok) return // best-effort by design — stays '—'
+      if (!alive || !r.ok || !r.data) return // best-effort by design — stays '—'
       const d = new Date()
       const pad = (n: number) => String(n).padStart(2, '0')
       const day = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`

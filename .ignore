@@ -1,0 +1,5 @@
+# Read by ripgrep only (Claude Code Grep/Glob); git and validators still see these tracked records by path.
+# Hides stale historical markdown from agent searches:
+session-manager-operations/reviews/
+session-manager-operations/design-mocks/
+session-manager-operations/HUMAN_LEARN/

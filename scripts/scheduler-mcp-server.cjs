@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * scheduler-mcp-server.cjs — stdio MCP server wrapping PRD 448's loopback
- * admin HTTP API (src/main/lib/localAdminHttp.cjs). Exposes two tools:
+ * admin HTTP API (src/main/lib/feedback-remote/localAdminHttp.cjs). Exposes two tools:
  *
  *   scheduler_reset_job({ slug }) -> POST /admin/scheduler/reset-job
  *   scheduler_list_jobs()         -> GET  /admin/scheduler/jobs
@@ -28,12 +28,12 @@
 'use strict';
 
 // Name this process first (pn-03): otherwise it shows as a bare `node`.
-const { PROC_NAMES, setProcessTitle } = require('../src/main/lib/smProcNames.cjs');
+const { PROC_NAMES, setProcessTitle } = require('../src/main/lib/process/smProcNames.cjs');
 setProcessTitle(PROC_NAMES.mcpServer);
 const path = require('node:path');
 const fsp = require('node:fs/promises');
 const { createStdioServer } = require('../src/main/lib/mcpStdioServer.cjs');
-const { PRD_WORK_TYPES } = require('../src/main/lib/workTypeLibrary.cjs');
+const { PRD_WORK_TYPES } = require('../src/main/lib/prd/workTypeLibrary.cjs');
 const { MCP_TOOL_CATALOG, MCP_RECIPES, composeDescription } = require('../src/main/lib/mcpToolCatalog.cjs');
 
 const CATALOG_BY_NAME = new Map(MCP_TOOL_CATALOG.map((entry) => [entry.name, entry]));
@@ -44,7 +44,7 @@ function descriptionFor(toolName) {
   return composeDescription(entry);
 }
 
-const { adminTokenPath } = require('../src/main/lib/schedulerPaths.cjs');
+const { adminTokenPath } = require('../src/main/lib/scheduler/schedulerPaths.cjs');
 
 // Defined once so every failure path points to the same next call, verbatim
 // — never paste this sentence at each return site (PRD: session_manager_help).

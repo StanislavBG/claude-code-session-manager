@@ -10,10 +10,10 @@ const { z } = require('zod');
 const os = require('node:os');
 const path = require('node:path');
 const { PromptSessionSchema, EpicTagSchema, EpicSourceSchema, EpicIntakeSectionSchema } = require('./lib/promptSessionSchema.cjs');
-const { PrdWorkTypeSchema } = require('./lib/workTypeLibrary.cjs');
+const { PrdWorkTypeSchema } = require('./lib/prd/workTypeLibrary.cjs');
 const { PERSONA_NAME_RE } = require('./agentLibrary.cjs');
-const { AgentPersonaSaveSchema } = require('./lib/agentPersonaSchema.cjs');
-const { MacroSaveSchema, MacroDeleteSchema, MacroSetProjectSchema } = require('./lib/macroLibrary.cjs');
+const { AgentPersonaSaveSchema } = require('./lib/persona-macro/agentPersonaSchema.cjs');
+const { MacroSaveSchema, MacroDeleteSchema, MacroSetProjectSchema } = require('./lib/persona-macro/macroLibrary.cjs');
 
 // ──────────────────────────────────────────── PTY
 const ptySpawn = z.object({
@@ -144,7 +144,7 @@ const configWatchOpts = z.object({ depth: z.number().int().min(0).max(2) }).stri
 const configParseImports = z.object({ path: z.string().min(1).max(4096) });
 
 // ──────────────────────────────────────────── PromptSessions (Epics) active-index merge
-// lib/activeIndexMerge.cjs's read-merge-write, invoked over IPC by the
+// lib/epic/activeIndexMerge.cjs's read-merge-write, invoked over IPC by the
 // renderer's persistActiveIndex (state/promptSessions.ts) instead of that
 // module doing its own config:read-json/config:write-json round trip. Payload
 // carries only the CALLING renderer's in-memory contribution for this cwd —
@@ -204,7 +204,7 @@ const promptSessionsMergeActiveIndex = z.object({
   source: z.literal('epics'),
 });
 
-// Renderer entry point for main's ensureEpic() (lib/promptSessionsCreateEpic.cjs)
+// Renderer entry point for main's ensureEpic() (lib/epic/promptSessionsCreateEpic.cjs)
 // — additive step 1 of a two-PRD chain; unused by the app until the next PRD
 // routes state/promptSessions.ts's createPromptSession through it. `tag`/
 // `source` reuse promptSessionSchema.cjs's own enums rather than retyping
@@ -226,14 +226,14 @@ const promptSessionsCreateEpic = z.object({
 });
 
 // Renderer entry point for creating an Epic's isolated git worktree
-// (lib/epicWorktreeMint.cjs) at the proposed->active transition — PRD 1033.
+// (lib/epic/epicWorktreeMint.cjs) at the proposed->active transition — PRD 1033.
 const promptSessionsCreateWorktree = z.object({
   cwd: z.string().min(1).max(4096),
   epicId: z.string().regex(PROMPT_SESSION_ID_RE),
 });
 
 // Renderer entry point for folding an Epic's isolated git worktree branch
-// back into its owning project's main tree (lib/epicWorktreeMerge.cjs) — PRD
+// back into its owning project's main tree (lib/epic/epicWorktreeMerge.cjs) — PRD
 // 1034, the ONLY point where the per-Epic isolation PRD 1033 wires resolves.
 // `branch`/`dir` are supplied by the caller (the renderer's own in-memory
 // `session.worktree`) rather than re-derived from active-index.json, since
@@ -253,7 +253,7 @@ const promptSessionsMergeToMain = z.object({
 });
 
 // Renderer entry points for the per-project "disable Epic worktree
-// isolation" UI toggle (lib/epicWorktreeProjectConfig.cjs) — PRD 1035.
+// isolation" UI toggle (lib/epic/epicWorktreeProjectConfig.cjs) — PRD 1035.
 const promptSessionsGetWorktreeDisabled = z.object({
   cwd: z.string().min(1).max(4096),
 });
@@ -415,7 +415,7 @@ const schedulerCreatePrd = z.object({
   // User-selected work-type tag (PRD 774; independence from the parent
   // Epic's own tag confirmed PRD 1041) — deterministic, never LLM-classified.
   // Epic tag and PRD tag draw on the same WorkType vocabulary
-  // (lib/workTypeLibrary.cjs) but are independent values; 'discussion' is
+  // (lib/prd/workTypeLibrary.cjs) but are independent values; 'discussion' is
   // excluded here for the same reason adminPrdFrontmatterPatch excludes it
   // below — a discussion-tagged Epic never reaches PRD authoring.
   tag: PrdWorkTypeSchema.optional(),
@@ -618,7 +618,7 @@ const setSessionSlotsSchema = z.object({
 // agents:save-persona — the Agent entity (Agent/WorkType/Epic/PRD/Job ERD)
 // had no boundary validation until this schema; Epic and Job each got theirs
 // only after a production incident (see scheduleJobSchema.cjs's header).
-// Full field-level rules live in lib/agentPersonaSchema.cjs, mirroring
+// Full field-level rules live in lib/persona-macro/agentPersonaSchema.cjs, mirroring
 // AgentPersonaSaveInput (src/preload/api.d.ts) field-for-field.
 const agentsSavePersona = AgentPersonaSaveSchema;
 const macrosSave = MacroSaveSchema;

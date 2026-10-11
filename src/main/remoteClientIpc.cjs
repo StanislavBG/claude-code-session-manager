@@ -11,7 +11,7 @@ const os = require('node:os');
 const { ipcMain } = require('electron');
 const { z } = require('zod');
 const { remoteClient } = require('./remoteClient.cjs');
-const { relayClientAuth } = require('./lib/relayClientAuth.cjs');
+const { relayClientAuth } = require('./lib/feedback-remote/relayClientAuth.cjs');
 const { ALLOWED_COMMANDS } = require('./ipcSchemas.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 

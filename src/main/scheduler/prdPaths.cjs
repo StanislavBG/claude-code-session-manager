@@ -9,12 +9,12 @@
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const path = require('node:path');
-const schedulerPaths = require('../lib/schedulerPaths.cjs');
+const schedulerPaths = require('../lib/scheduler/schedulerPaths.cjs');
 const logs = require('../logs.cjs');
 const { SCHEDULE_SLUG_RE } = require('../ipcSchemas.cjs');
-const { DEFAULT_PROJECT_CWD } = require('../lib/schedulerBatch.cjs');
-const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs, ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs } = require('../lib/prdLocations.cjs');
-const { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds } = require('../lib/prdMigration.cjs');
+const { DEFAULT_PROJECT_CWD } = require('../lib/scheduler/schedulerBatch.cjs');
+const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs, ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs } = require('../lib/prd/prdLocations.cjs');
+const { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds } = require('../lib/prd/prdMigration.cjs');
 const { allProjectCwds } = require('../lib/activeSessions.cjs');
 
 /**

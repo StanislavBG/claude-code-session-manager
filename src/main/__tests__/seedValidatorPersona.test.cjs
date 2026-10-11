@@ -107,8 +107,8 @@ test('a homedir whose marker already lists the first three receives validator.md
 });
 
 test('the seeded validator body is under AGENT_BODY_CHAR_CAP and contains both required sentinel lines', () => {
-  const { AGENT_BODY_CHAR_CAP } = require('../lib/agentModelResolve.cjs');
-  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { AGENT_BODY_CHAR_CAP } = require('../lib/claude/agentModelResolve.cjs');
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const raw = fs.readFileSync(seedSrc('validator'), 'utf8');
   const { body } = splitFrontmatter(raw);
   const trimmed = body.trim();
@@ -122,7 +122,7 @@ test('the seeded validator body is under AGENT_BODY_CHAR_CAP and contains both r
 });
 
 test('the seeded validator body resolves PRD files under SM_PROJECT_ROOT, not the job worktree', () => {
-  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const raw = fs.readFileSync(seedSrc('validator'), 'utf8');
   const { body } = splitFrontmatter(raw);
   const trimmed = body.trim();

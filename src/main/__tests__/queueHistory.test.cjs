@@ -1,5 +1,5 @@
 /**
- * queueHistory.test.cjs — unit tests for src/main/lib/queueHistory.cjs and
+ * queueHistory.test.cjs — unit tests for src/main/lib/scheduler/queueHistory.cjs and
  * scheduler.cjs's selectHistoryJobs merge.
  *
  * Run: timeout 300 npx vitest run src/main/__tests__/queueHistory.test.cjs
@@ -51,8 +51,8 @@ beforeEach(() => {
   );
 
   // Fresh require per test so HISTORY_PATH's target file starts clean.
-  delete require.cache[require.resolve('../lib/queueHistory.cjs')];
-  queueHistory = require('../lib/queueHistory.cjs');
+  delete require.cache[require.resolve('../lib/scheduler/queueHistory.cjs')];
+  queueHistory = require('../lib/scheduler/queueHistory.cjs');
   try { fs.unlinkSync(queueHistory.historyPath()); } catch { /* ok if absent */ }
 });
 
@@ -358,8 +358,8 @@ test('historyTerminalBySlug: incremental update after an append matches a full r
 
   // A fresh module instance (no perFileCache warm) forced to full-parse the
   // same file must land on the identical map.
-  delete require.cache[require.resolve('../lib/queueHistory.cjs')];
-  const freshModule = require('../lib/queueHistory.cjs');
+  delete require.cache[require.resolve('../lib/scheduler/queueHistory.cjs')];
+  const freshModule = require('../lib/scheduler/queueHistory.cjs');
   const fullParse = await freshModule.historyTerminalBySlug();
   expect(Array.from(fullParse.entries()).sort()).toEqual(Array.from(second.entries()).sort());
 });

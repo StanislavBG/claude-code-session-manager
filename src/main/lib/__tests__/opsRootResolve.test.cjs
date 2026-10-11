@@ -16,7 +16,7 @@ const path = require('node:path');
 const {
   resolveProjectRoot, resolveOpsRoot, opsPath, assertOpsWrite, OPS_ROOT_DIR,
 } = require('../opsOwnership.cjs');
-const { KIND_CONFIG } = require('../gitWorktree.cjs');
+const { KIND_CONFIG } = require('../git/gitWorktree.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {

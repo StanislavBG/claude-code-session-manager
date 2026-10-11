@@ -3,7 +3,7 @@
 Base: e1f3518e1ac14d0b82613c3268eb74a50d2eda52. Commits: 8891557c (1816), fe825390 (1817), dc226e25 (1818), 82ae10ee (1819). PRD files read from `prds-archived/`.
 
 ## demo-video-character-styles-opus — REFUTED
-- `src/main/lib/builtinMacros.cjs:35` builtinVersion 4; prompt has "Generate a character and cute animated JavaScript video", theme/purpose, script-first, four style names, `Video style: <name>`, Kokoro, `project_demo_video_write` + `htmlPath` — OK.
+- `src/main/lib/persona-macro/builtinMacros.cjs:35` builtinVersion 4; prompt has "Generate a character and cute animated JavaScript video", theme/purpose, script-first, four style names, `Video style: <name>`, Kokoro, `project_demo_video_write` + `htmlPath` — OK.
 - `src/seed/agents/demo-video-builder.md:6-8` model opus, effort max, seedVersion 4 — OK. Four new sections `<script_first>`, `<character>`, `<styles>`, `<dynamic_elements>` present, content matches notes — OK.
 - **FAIL: `<audio_policy>` content is not preserved verbatim.** The diff truncated the file mid-sentence at `:162` (`- Save the built file by path (see \`<process>`). The rest of that bullet (`\` step 6). Never retype the base64 audio…`), the closing `</audio_policy>` and the opening `<process>` tag are gone. `grep -n 'audio_policy>\|<process>'` shows no `</audio_policy>` and no standalone `<process>`; `</process>` remains at `:182`. v3 had them at lines 120-124.
 - shippedPersonaSeeds.cjs:279,290: v3 (e477754c) and v4 (`seed-v4`, sha 247f5244…) entries present; the v4 hash was computed over the corrupted body, so it pins the defect.
@@ -29,7 +29,7 @@ Base: e1f3518e1ac14d0b82613c3268eb74a50d2eda52. Commits: 8891557c (1816), fe8253
 ### Critical
 - (none)
 ### Important
-- `src/seed/agents/demo-video-builder.md:162` — truncated bullet; `</audio_policy>` and `<process>` tags missing (see 1816). The persona's process section is unopened and the audio-policy bullet lost its tail, including the "never retype base64 audio" warning and the pointer to the save step. Fix: restore the v3 text of that bullet, `</audio_policy>`, blank line, `<process>`; then regenerate the v4 entry in `src/main/lib/shippedPersonaSeeds.cjs:290` (hash will change).
+- `src/seed/agents/demo-video-builder.md:162` — truncated bullet; `</audio_policy>` and `<process>` tags missing (see 1816). The persona's process section is unopened and the audio-policy bullet lost its tail, including the "never retype base64 audio" warning and the pointer to the save step. Fix: restore the v3 text of that bullet, `</audio_policy>`, blank line, `<process>`; then regenerate the v4 entry in `src/main/lib/persona-macro/shippedPersonaSeeds.cjs:290` (hash will change).
 ### Minor
 - `builtinMacros.test.cjs` has no tag-balance assertion for the persona; add one (every `<x>` has `</x>`) to stop recurrence.
 - Pre-existing, not from this plan: `:97` has an unclosed backtick around `<audio_policy>` (also in v3 line 55).

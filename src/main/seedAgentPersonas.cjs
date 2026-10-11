@@ -12,7 +12,7 @@
  *    `seedVersion` frontmatter stamp (missing counts as 1) against the
  *    bundled file's own stamp. Same or higher stays untouched. Lower checks
  *    the installed file's body against every body this app has ever shipped
- *    for that persona (`lib/shippedPersonaSeeds.cjs`). No match means a
+ *    for that persona (`lib/persona-macro/shippedPersonaSeeds.cjs`). No match means a
  *    person wrote or edited that file; it is left alone and the skip is
  *    logged. Why: a lower stamp alone does not prove the file is a stale
  *    shipped copy — only a body match does. A match replaces the installed
@@ -77,8 +77,8 @@ const path = require('node:path');
 const os = require('node:os');
 const crypto = require('node:crypto');
 const { writeJsonSync, writeTextAtomic, validatePath, validateWrite } = require('./config.cjs');
-const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
-const { SHIPPED_PERSONA_SEEDS } = require('./lib/shippedPersonaSeeds.cjs');
+const { splitFrontmatter } = require('./lib/prd/prdFrontmatter.cjs');
+const { SHIPPED_PERSONA_SEEDS } = require('./lib/persona-macro/shippedPersonaSeeds.cjs');
 
 const PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder'];
 // What `{ done: true }` (the pre-seeded-set marker format) meant: only these two personas existed
@@ -140,7 +140,7 @@ function normalizeNewlines(text) {
   return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
 
-/** sha256 hex of a persona's body only (frontmatter stripped, newlines normalized, trimmed) — the key the upgrade pass matches against `lib/shippedPersonaSeeds.cjs`. */
+/** sha256 hex of a persona's body only (frontmatter stripped, newlines normalized, trimmed) — the key the upgrade pass matches against `lib/persona-macro/shippedPersonaSeeds.cjs`. */
 function personaBodyHash(text) {
   const { body } = splitFrontmatter(normalizeNewlines(text));
   return crypto.createHash('sha256').update(body.trim()).digest('hex');
@@ -269,7 +269,7 @@ function buildUpgradedPersona(bundledText, installedText, matches) {
  * Replaces a stale installed persona with the current bundled one, once per
  * boot, for every name in `PERSONAS` whose installed file is both PRESENT
  * and behind the bundled `seedVersion` AND whose body matches a body this
- * app has shipped before (`shippedSeeds`, normally `lib/shippedPersonaSeeds.cjs`
+ * app has shipped before (`shippedSeeds`, normally `lib/persona-macro/shippedPersonaSeeds.cjs`
  * — injectable so tests can supply a fake list). See this file's header for
  * the full rule, and `buildUpgradedPersona` for how frontmatter keys merge.
  * Never overwrites a same-or-newer installed file, or one whose body never

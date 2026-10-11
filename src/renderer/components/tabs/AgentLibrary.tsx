@@ -698,7 +698,7 @@ function EffortPicker({ value, model, onChange, label = 'effort', testIdPrefix =
 
 /**
  * PROJECT OVERRIDE — the ACTIVE project's runtime model/effort for this persona, written as a
- * frontmatter-only overlay at `<cwd>/.claude/agents/<name>.md` (no body; lib/personaMerge.cjs inherits the
+ * frontmatter-only overlay at `<cwd>/.claude/agents/<name>.md` (no body; lib/persona-macro/personaMerge.cjs inherits the
  * rest from the global persona). Deliberately a separate block from the global rows above it: those edit
  * `~/.claude/agents/<name>.md` for the whole machine, these edit only this project's file. Each picker writes
  * on change (no draft/Save step) so the two scopes never share a Save button.

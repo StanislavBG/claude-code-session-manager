@@ -23,7 +23,7 @@
 import { test, expect } from 'vitest';
 const { commitGuardVerdict } = require('../scheduler.cjs');
 const { selectAutoFixTargets } = require('../scheduler/reviewLadder.cjs');
-const { resolveCommitGuardOutcome, isAlreadySatisfiedOnMain } = require('../lib/reaperHelpers.cjs');
+const { resolveCommitGuardOutcome, isAlreadySatisfiedOnMain } = require('../lib/scheduler/reaperHelpers.cjs');
 
 const noSiblingOnDisk = () => false;
 

@@ -50,8 +50,8 @@ function resolvePricingKey(modelId) {
 }
 
 // ── LRU cache ─────────────────────────────────────────────────────────────────
-// Shared implementation: lib/lruCache.cjs (re-exported below for existing callers).
-const { LRUCache } = require('./lib/lruCache.cjs');
+// Shared implementation: lib/util/lruCache.cjs (re-exported below for existing callers).
+const { LRUCache } = require('./lib/util/lruCache.cjs');
 
 // ── history:updated broadcast ─────────────────────────────────────────────────
 // Open History pages re-fetch on this event. Throttled leading+trailing so a

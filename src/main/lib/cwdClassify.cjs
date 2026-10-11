@@ -41,7 +41,7 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const schedulerPaths = require('./schedulerPaths.cjs');
+const schedulerPaths = require('./scheduler/schedulerPaths.cjs');
 
 const OPS_DIRNAME = 'session-manager-operations';
 const WORKTREES_MARKER = `${path.sep}.git${path.sep}worktrees${path.sep}`;

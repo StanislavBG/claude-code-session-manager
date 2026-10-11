@@ -41,7 +41,7 @@ Gates: every PRD's own gate was a vitest run. The job worktree has no installed 
 
 ## Cross-checks
 1. **Single-creator law holds.**
-   - `lib/epicMint.cjs:74` `MINT_AUTHORITIES` still has exactly two entries. The diff touches no epicMint file.
+   - `lib/epic/epicMint.cjs:74` `MINT_AUTHORITIES` still has exactly two entries. The diff touches no epicMint file.
    - The phone path is `requestExternalNewSession` → renderer listener → `launchSession` → `createPromptSession`. `useMacroLaunch` calls the same `launchSession`. No new mint token was added.
 2. **Tiers and allow-lists hold.**
    - `cmd:session:create` is in `MUTATE_COMMANDS` and `cmd:session:options` is in `SAS_GATED_READS`.

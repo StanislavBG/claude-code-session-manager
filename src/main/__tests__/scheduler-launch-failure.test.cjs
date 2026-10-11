@@ -36,7 +36,7 @@ beforeAll(() => {
   process.env.HOME = tmpHome;
   fs.mkdirSync(path.join(tmpHome, '.claude'), { recursive: true });
   ({ executeJob, handleLaunchFailure, applyLaunchFailure, writeQueue } = require('../scheduler.cjs'));
-  queueStore = require('../lib/queueStore.cjs');
+  queueStore = require('../lib/scheduler/queueStore.cjs');
 });
 
 afterAll(() => {

@@ -1,6 +1,6 @@
 /**
  * crossProjectFeedback.test.cjs — the project-to-project conduit
- * (lib/crossProjectFeedback.cjs).
+ * (lib/feedback-remote/crossProjectFeedback.cjs).
  *
  * The point of these tests is the SAFETY ENVELOPE, not the happy path: this
  * module is the second (and only other) holder of an ensureEpic mint
@@ -27,8 +27,8 @@ const {
   listFeedbackTargets,
   isSessionManagerProject,
   MAX_BODY_CHARS,
-} = require('../lib/crossProjectFeedback.cjs');
-const { readActiveIndex, MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK, MINT_AUTHORITIES } = require('../lib/epicMint.cjs');
+} = require('../lib/feedback-remote/crossProjectFeedback.cjs');
+const { readActiveIndex, MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK, MINT_AUTHORITIES } = require('../lib/epic/epicMint.cjs');
 const { assertValidPromptSession } = require('../lib/promptSessionSchema.cjs');
 
 const tmpDirs = [];
@@ -434,7 +434,7 @@ test('there are exactly two mint authorities', () => {
 test('this authority cannot mint an already-active Epic — BORN-PROPOSED still applies', async () => {
   const to = await mkProject();
   const from = await mkProject();
-  const { ensureEpic } = require('../lib/epicMint.cjs');
+  const { ensureEpic } = require('../lib/epic/epicMint.cjs');
   await expect(
     ensureEpic(to, {
       goalText: 'sneak in active',

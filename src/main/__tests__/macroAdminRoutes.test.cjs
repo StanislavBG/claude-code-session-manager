@@ -1,5 +1,5 @@
 /**
- * macroAdminRoutes.test.cjs — lib/macroAdminRoutes.cjs's two routes
+ * macroAdminRoutes.test.cjs — lib/feedback-remote/macroAdminRoutes.cjs's two routes
  * (GET /admin/macros?cwd=… and POST /admin/macros/save {cwd, id?, label,
  * agentName, tag, prompt}), backed by a temp macros.json via macroLibrary's
  * `{ filePath }` option.
@@ -15,7 +15,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const config = require('../config.cjs');
-const { registerAdminRoute } = require('../lib/macroAdminRoutes.cjs');
+const { registerAdminRoute } = require('../lib/feedback-remote/macroAdminRoutes.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -116,7 +116,7 @@ test('list filters by cwd and includes * macros', async () => {
   await adminHttp.call('POST', '/admin/macros/save', {
     body: { cwd: cwdA, label: 'A only', agentName: 'builder', tag: 'build', prompt: 'do a' },
   });
-  const macroLibrary = require('../lib/macroLibrary.cjs');
+  const macroLibrary = require('../lib/persona-macro/macroLibrary.cjs');
   await macroLibrary.saveMacro({ label: 'Everywhere', agentName: 'builder', tag: 'build', prompt: 'do everywhere', projects: ['*'] }, { filePath });
 
   const resA = await adminHttp.call('GET', '/admin/macros', { query: { cwd: cwdA } });

@@ -15,7 +15,7 @@ scoped to this worktree's branch).
 
 | AC | Evidence |
 | --- | --- |
-| `registerAdminRoute(adminHttp, { onChanged })` registers GET `/admin/macros` + POST `/admin/macros/save` | `src/main/lib/macroAdminRoutes.cjs:108-110`; asserted by test `registers GET /admin/macros and POST /admin/macros/save` |
+| `registerAdminRoute(adminHttp, { onChanged })` registers GET `/admin/macros` + POST `/admin/macros/save` | `src/main/lib/feedback-remote/macroAdminRoutes.cjs:108-110`; asserted by test `registers GET /admin/macros and POST /admin/macros/save` |
 | save resolves cwd via `projectHomeAdminRoutes.resolveCwd`; create always `projects:[resolvedCwd]`, `surface:'sessions'`; rejects `builtin-*` id (400), unknown id (400), foreign-project update (400); field validation via `MacroSaveSchema` | `macroAdminRoutes.cjs:58-62` (builtin-id check), `:71-78` (schema parse → 400 on zod error), `:80-89` (unknown-id / foreign-project checks), `:91` (create sets `projects`/`surface`) |
 | success calls `onChanged()` once, returns `{ok:true, macro}`; wired in `index.cjs` next to `projectHomeAdminRoutes`, passing `broadcastMacrosChanged` | `macroAdminRoutes.cjs:93-94`; `src/main/index.cjs:64` — `macroAdminRoutes.registerAdminRoute(adminHttp, { onChanged: () => broadcastMacrosChanged() })`; `broadcastMacrosChanged` is a hoisted `function` declaration (`index.cjs:574`) so the forward reference at line 64 is safe |
 | new test `macroAdminRoutes.test.cjs` covers create→projects=[cwd], list filters by cwd + `*`, builtin refused, foreign-project update refused, non-absolute cwd refused, `onChanged` called exactly once on success / never on failure | `src/main/__tests__/macroAdminRoutes.test.cjs` (9 tests, all present) |
@@ -53,8 +53,8 @@ $ timeout 300 npm run typecheck   # same run as above, shared across both PRDs �
 
 `git diff --stat 90ddb082b2..HEAD`: 7 files, +640/-1 — exactly the union of both PRDs' declared
 `# Files` sections (`scripts/scheduler-mcp-server.cjs`, `src/main/index.cjs`,
-`src/main/lib/macroAdminRoutes.cjs`, `src/main/lib/mcpToolCatalog.cjs`,
-`src/main/lib/projectHomeAdminRoutes.cjs`, and the two new test files). No out-of-scope files,
+`src/main/lib/feedback-remote/macroAdminRoutes.cjs`, `src/main/lib/mcpToolCatalog.cjs`,
+`src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs`, and the two new test files). No out-of-scope files,
 no scope creep (macro-delete, renderer changes, and `*`-creation via admin API were all
 explicitly out of scope and none appear in the diff).
 

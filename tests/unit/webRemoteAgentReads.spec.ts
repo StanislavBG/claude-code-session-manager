@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 const require = createRequire(import.meta.url)
 const { READ_COMMANDS, SAS_GATED_READS, ALLOWED_COMMANDS } = require('../../src/main/ipcSchemas.cjs')
 const sessionsStore = require('../../src/main/sessionsStore.cjs')
-const epicMint = require('../../src/main/lib/epicMint.cjs')
+const epicMint = require('../../src/main/lib/epic/epicMint.cjs')
 // Outside Electron require('electron') is a path string; stub it so `app` exists.
 const electronPath = require.resolve('electron')
 require.cache[electronPath] = {

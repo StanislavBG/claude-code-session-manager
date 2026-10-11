@@ -79,7 +79,7 @@ yet. No code prunes these today, and none should be added without a proposed Epi
 
 Intended contents: every **not-yet-archived** Epic for this cwd — i.e. `proposed` *and* `active`.
 Completed Epics move to their own archive file (below) and drop out of here. Both writers agree:
-`lib/epicMint.cjs` (main) and `persistActiveIndex` (renderer) both keep `proposed` and `active`
+`lib/epic/epicMint.cjs` (main) and `persistActiveIndex` (renderer) both keep `proposed` and `active`
 rows for this cwd (gaps 1–3 closed by 2026-09 — see git history).
 
 `PromptSession` (real fields, from `src/renderer/state/promptSessions.ts:10-40`):
@@ -137,7 +137,7 @@ Written once, at completion, by `markCompleted()`. `PromptSessionArchive`
 
 Sole writer per `src/main/lib/opsOwnership.cjs`'s `OWNERS` table: **`epics`**. Every write from
 the renderer declares this writer id through the IPC payload (`config.writeJson(path, data,
-'epics')`); `lib/epicMint.cjs` writes `active-index.json` directly via `fs` for the same reason.
+'epics')`); `lib/epic/epicMint.cjs` writes `active-index.json` directly via `fs` for the same reason.
 
 **Declared delegation** (`opsOwnership.cjs`'s `DELEGATIONS` table): the **`scheduler`** writer may
 write `active-index.json` — and only that one file, at its top level — because the scheduler
@@ -165,7 +165,7 @@ Epic's stage reads this field.
 
 | Status | Meaning | Entered by | Spends tokens |
 | --- | --- | --- | --- |
-| `proposed` | Not started — the human opened the Epic, or a cross-project finding was routed here, but it has not started. | One of the two declared mint authorities (`lib/epicMint.cjs`'s `MINT_AUTHORITIES`), both going through `ensureEpic(..., { mintAuthority })`: the New Epic IPC handler (`lib/promptSessionsCreateEpic.cjs`, `mintAuthority: 'new-epic-ui'`), or `src/main/lib/crossProjectFeedback.cjs` (`mintAuthority: 'cross-project-feedback'`) landing feedback from another project | No |
+| `proposed` | Not started — the human opened the Epic, or a cross-project finding was routed here, but it has not started. | One of the two declared mint authorities (`lib/epic/epicMint.cjs`'s `MINT_AUTHORITIES`), both going through `ensureEpic(..., { mintAuthority })`: the New Epic IPC handler (`lib/epic/promptSessionsCreateEpic.cjs`, `mintAuthority: 'new-epic-ui'`), or `src/main/lib/feedback-remote/crossProjectFeedback.cjs` (`mintAuthority: 'cross-project-feedback'`) landing feedback from another project | No |
 | `active` | The Epic's session is running. It authors PRDs and receives scheduler updates. | Human presses **Approve & start**, or finishes the draft — the same transition | Yes |
 | `completed` | Archived. `claudeSessionId` is dead and never reused. | `markCompleted()`, or **Discard** on a proposal | No |
 
@@ -248,7 +248,7 @@ and takes the shared `proposed → active` transition, `epicDisplayStatus` no lo
 ### Transitions in detail
 
 1. **Proposed** — every Epic is born `proposed`, minted through `ensureEpic(...,
-   { mintAuthority })` by one of the two declared mint authorities (`lib/epicMint.cjs`'s
+   { mintAuthority })` by one of the two declared mint authorities (`lib/epic/epicMint.cjs`'s
    `MINT_AUTHORITIES`): the New Epic UI, or `crossProjectFeedback.cjs` landing a finding from
    another project. Nothing runs and nothing is spent until **Approve & start**. **Discard**
    archives the proposal (`markCompleted`) instead of deleting it, so a rejection stays auditable.

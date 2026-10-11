@@ -99,7 +99,7 @@ All 7 PRDs are archived (`prds-archived/`); each mapped to exactly one commit, i
 
 ### Minor
 - **`src/renderer/components/epics/EpicComposer.tsx:177` — placeholder no longer varies by `running`.** Previously the idle placeholder read `Add to "<goal>" — Enter to send…`; now it is always `'Queue a follow-up… ⌘V to attach a screenshot'`. This is not a defect relative to this plan — PRD 1467's AC literally mandates the single fixed string with no conditional — but it is a UX regression worth a human decision if the context-aware idle placeholder was valued.
-- **`src/main/lib/epicDelegationStats.cjs` and its IPC handler/schema/preload binding — now dead code.** PRD 1464 removed the delegation-stat chip and its `useEffect` fetch from `EpicDetail.tsx` (outside this PRD's stated file list, called out in the commit message as a code-review-driven fix), but the backend plumbing it called was left in place with no renderer caller. Six+ test files still stub `epicDelegationStats.get`. Not a correctness bug — a cleanup opportunity for a future PRD if the feature is permanently gone.
+- **`src/main/lib/epic/epicDelegationStats.cjs` and its IPC handler/schema/preload binding — now dead code.** PRD 1464 removed the delegation-stat chip and its `useEffect` fetch from `EpicDetail.tsx` (outside this PRD's stated file list, called out in the commit message as a code-review-driven fix), but the backend plumbing it called was left in place with no renderer caller. Six+ test files still stub `epicDelegationStats.get`. Not a correctness bug — a cleanup opportunity for a future PRD if the feature is permanently gone.
 
 ## Security review
 

@@ -7,7 +7,7 @@ Base: 07ad77be (known). Commits: 6590c36a (1767), 3ebdaa2f (1768). PRD files fou
 - Project entry shape `{kind,tabId,cwd,title,project}` — `webRemote.cjs:646`; Epic entry shape — `:660-669` (cwd = `worktree?.dir || cwd`, title = first line, trimmed, max 80, fallback `epic.id`, plus project/tag/agentType).
 - Only `status==='active'` with non-empty `claudeSessionId` — `:653-655`; dedupe by Epic id via `seenEpics` — `:656-657`.
 - readIndex throw/no sessions → project entry alone, never throws — `:647-649` (try/catch + `continue`).
-- `pushSessionList` uses `buildRemoteSessionList(data.tabs, readActiveIndex)` and merges watcher state by tabId — `:684-690`; kill-switch / `_e2e.state !== 'authenticated'` guard untouched (`:681`). `readActiveIndex` already exported — `src/main/lib/epicMint.cjs:449`, so that file needed no change.
+- `pushSessionList` uses `buildRemoteSessionList(data.tabs, readActiveIndex)` and merges watcher state by tabId — `:684-690`; kill-switch / `_e2e.state !== 'authenticated'` guard untouched (`:681`). `readActiveIndex` already exported — `src/main/lib/epic/epicMint.cjs:449`, so that file needed no change.
 - Spec `tests/unit/webRemoteEpicList.spec.ts` present.
 - Gate (re-run): `vitest run webRemoteEpicList + webRemoteCommandSets + webRemoteAuthGate` → 3 files, 26 tests passed; `npm run typecheck` exit 0 (needed the main checkout's `node_modules` symlinked temporarily, since the job worktree has none; symlink removed).
 

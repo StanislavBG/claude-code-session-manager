@@ -18,8 +18,8 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
-const { runDefinitionOfDoneOnDrain } = require('../lib/dodDrainHook.cjs');
-const { readWatermark } = require('../lib/definitionOfDone.cjs');
+const { runDefinitionOfDoneOnDrain } = require('../lib/scheduler/dodDrainHook.cjs');
+const { readWatermark } = require('../lib/scheduler/definitionOfDone.cjs');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 

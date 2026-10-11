@@ -261,7 +261,7 @@ test('spawn() still refuses session_unreachable without any node-pty spawn', () 
 });
 
 test('planEpicSpawn with a REAL on-disk index: project-root caller resumes, vanished-worktree caller is refused spawn_cwd_missing', () => {
-  const { planEpicSpawn, __resetForTests } = require('../lib/epicSpawnPlan.cjs');
+  const { planEpicSpawn, __resetForTests } = require('../lib/epic/epicSpawnPlan.cjs');
   __resetForTests();
   const projectRoot = fs.mkdtempSync(path.join(tmpHome, 'sm-plan-root-'));
   const deadWt = path.join(os.tmpdir(), 'sm-plan-dead-worktree-xyz');

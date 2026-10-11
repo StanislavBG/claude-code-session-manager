@@ -12,8 +12,8 @@ Environment notes: the job worktree had no `node_modules`, so I symlinked the ma
 - Gate: `npx vitest run src/main/lib/__tests__/mcpStdioServer.test.cjs` → 8 passed.
 
 ## 1549-otlp-json-exporter-primitive — VERIFIED
-- `src/main/lib/otlpTraceExporter.cjs` exports `createOtlpTraceExporter` returning `{recordSpan, flush, shutdown, stats}`; hex ids via `crypto.randomBytes`, nanos as BigInt decimal string, kind 1, `service.name` resource attr, scope name; queue overflow drops oldest and counts; failed POST sets `lastError`/`failed` and never rejects; shutdown races `timeoutMs`.
-- Gate: `npx vitest run src/main/lib/__tests__/otlpTraceExporter.test.cjs` → 5 passed.
+- `src/main/lib/telemetry/otlpTraceExporter.cjs` exports `createOtlpTraceExporter` returning `{recordSpan, flush, shutdown, stats}`; hex ids via `crypto.randomBytes`, nanos as BigInt decimal string, kind 1, `service.name` resource attr, scope name; queue overflow drops oldest and counts; failed POST sets `lastError`/`failed` and never rejects; shutdown races `timeoutMs`.
+- Gate: `npx vitest run src/main/lib/telemetry/__tests__/otlpTraceExporter.test.cjs` → 5 passed.
 
 ## 1550-pty-guidance-no-electron-rebuild — VERIFIED
 - `src/main/pty.cjs:78-86` prebuilt-binary text + `xcode-select --install` / build-essential+python3 fallback; `grep electron-rebuild` in pty.cjs, README.md, conventions.md → no hits.

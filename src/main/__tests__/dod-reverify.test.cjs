@@ -13,7 +13,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
-const { extractAcCommand, reverifyAc, reverifyBatch, runGateSequence } = require('../lib/definitionOfDone.cjs');
+const { extractAcCommand, reverifyAc, reverifyBatch, runGateSequence } = require('../lib/scheduler/definitionOfDone.cjs');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -71,9 +71,9 @@ test('extractAcCommand: extracts timeout from raw (non-backtick) AC line', () =>
   const body = [
     '# Acceptance criteria',
     '',
-    '- [ ] timeout 60 node -c src/main/lib/definitionOfDone.cjs',
+    '- [ ] timeout 60 node -c src/main/lib/scheduler/definitionOfDone.cjs',
   ].join('\n');
-  assert.strictEqual(extractAcCommand(body), 'timeout 60 node -c src/main/lib/definitionOfDone.cjs');
+  assert.strictEqual(extractAcCommand(body), 'timeout 60 node -c src/main/lib/scheduler/definitionOfDone.cjs');
 });
 
 test('extractAcCommand: returns first timeout command when multiple AC lines match', () => {

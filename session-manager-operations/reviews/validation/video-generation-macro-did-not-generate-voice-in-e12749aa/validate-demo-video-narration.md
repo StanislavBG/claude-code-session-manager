@@ -17,8 +17,8 @@ Base: e477754c (commits 063187bf, fe658303, merge 4b0c4139). Gates re-run in a w
 - seedVersion 3; audio_policy names kokoro-onnx / Kokoro-82M, af_heart (alt af_bella), am_michael (alt am_fenrir), lang='en-us': src/seed/agents/demo-video-builder.md:8, 60-75.
 - Full build recipe (per-scene synth, offsets, WAV, ffmpeg libmp3lame 64k @24000 Hz, base64 into `<audio>`, writes demo.html) and shared cache `~/.cache/kokoro-onnx` (download only if missing): demo-video-builder.md:66-112.
 - process step 6 / output contract save once with `{ htmlPath }`; silent fallback only on genuine install/download failure with the failing command named: demo-video-builder.md:127-145.
-- v3 seed entry appended, v2 kept: src/main/lib/shippedPersonaSeeds.cjs:277-287 (seedAgentPersonas test passes, so the sha matches the body).
-- Macro builtinVersion 3; prompt names Kokoro, af_heart/am_michael, single call with `htmlPath`: src/main/lib/builtinMacros.cjs:33-35.
+- v3 seed entry appended, v2 kept: src/main/lib/persona-macro/shippedPersonaSeeds.cjs:277-287 (seedAgentPersonas test passes, so the sha matches the body).
+- Macro builtinVersion 3; prompt names Kokoro, af_heart/am_michael, single call with `htmlPath`: src/main/lib/persona-macro/builtinMacros.cjs:33-35.
 - Consistency: the argument name `htmlPath` is identical in the persona, the macro prompt, the MCP schema (scheduler-mcp-server.cjs:417) and the catalog notes.
 - Gate: vitest (3 files) and typecheck pass.
 

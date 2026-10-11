@@ -27,7 +27,7 @@ Classes: **LAW-RATIONALE** (linked from root `CLAUDE.md`) · **REFERENCE** (subs
 
 ## Generated copy
 
-`project-pages-pipeline.md` (`runtime-read`, served via `src/main/lib/projectHomeAdminRoutes.cjs`) is copied
+`project-pages-pipeline.md` (`runtime-read`, served via `src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs`) is copied
 byte-for-byte to `src/main/templates/` by `web/project-pages/assets.cjs` (`npm run build:project-pages-assets`)
 and drift-gated by `web/project-pages/publish-gate.cjs` in `prepublishOnly`. Never hand-edit the copy, never
 dedupe the pair. (Not yet present in this folder at the time of writing — add its table row when it lands.)

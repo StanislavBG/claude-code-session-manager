@@ -23,7 +23,7 @@ const os = require('node:os');
 const { ipcMain } = require('electron');
 const { refreshIfNeeded, expiresAtMs } = require('./lib/credentials.cjs');
 const { writeJson } = require('./config.cjs');
-const { createUsageCircuit, singleFlight } = require('./lib/usageCircuit.cjs');
+const { createUsageCircuit, singleFlight } = require('./lib/claude/usageCircuit.cjs');
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 

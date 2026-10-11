@@ -31,7 +31,7 @@ const {
   resolvePrdsDirs,
   resolveEpicPrdWriteDir,
   deriveEpicIdFromPrdPath,
-} = require('../lib/prdLocations.cjs');
+} = require('../lib/prd/prdLocations.cjs');
 const { candidatePrdsDirs, candidateArchivedPrdsDirs, resolveArchivedPrdStatus } = require('../scheduler/prdPaths.cjs');
 
 const tmpDirs = [];

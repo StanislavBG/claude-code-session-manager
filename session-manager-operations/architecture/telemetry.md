@@ -25,7 +25,7 @@ install, one queue, one identity, regardless of how many project tabs are open).
 | | |
 | --- | --- |
 | Path | `~/.claude/session-manager/telemetry.json` |
-| Owning module | `src/main/lib/telemetrySettings.cjs` |
+| Owning module | `src/main/lib/telemetry/telemetrySettings.cjs` |
 | Write mode | Atomic (tmp + rename via `config.cjs`'s `writeTextAtomic`), serialized through an in-process write queue |
 | Primary key | Singleton file — one row |
 | Cap / eviction | None (fixed-shape config object) |
@@ -50,7 +50,7 @@ no username, no hostname.
 | | |
 | --- | --- |
 | Path | `~/.claude/session-manager/telemetry-queue.jsonl` |
-| Owning module | `src/main/lib/telemetryClient.cjs` |
+| Owning module | `src/main/lib/telemetry/telemetryClient.cjs` |
 | Write mode | **Append** on ingest (`persistAppendLine`); **full atomic rewrite** after a successful send or a cap eviction (`persistQueueFull`) |
 | Primary key | `recordId` (one JSON object per line: `{ recordId, channel, wire }`) |
 | Cap / eviction | Oldest-first, bounded by `QUEUE_CAP_COUNT` (5000) and `QUEUE_CAP_BYTES` (5 MB) |
@@ -65,7 +65,7 @@ the moment it was queued (see Privacy model below).
 | | |
 | --- | --- |
 | Path | `~/.claude/session-manager/telemetry-sent.json` |
-| Owning module | `src/main/lib/telemetryClient.cjs` |
+| Owning module | `src/main/lib/telemetry/telemetryClient.cjs` |
 | Write mode | Atomic (`config.cjs`'s `writeJson`) |
 | Primary key | `ids: string[]` — an ordered set of `recordId`s |
 | Cap / eviction | Oldest-first, bounded by `SENT_CAP` (5000) |
@@ -76,7 +76,7 @@ the moment it was queued (see Privacy model below).
 | | |
 | --- | --- |
 | Path | `~/.claude/session-manager/telemetry-watermarks.json` |
-| Owning module | `src/main/lib/telemetryBacklog.cjs` |
+| Owning module | `src/main/lib/telemetry/telemetryBacklog.cjs` |
 | Write mode | Atomic (`config.cjs`'s `writeJson`), rewritten after each file's drain step |
 | Primary key | `"<projectHash>/<filename>"` (e.g. `a1b2c3d4e5f6/errors-2026-08-01.jsonl`) |
 | Cap / eviction | None — one entry per project-log-file pair ever seen; a `completedAt` stamp on entries older than the 30-day retention floor keeps them cheap to skip (stat only, never re-read) |

@@ -10,8 +10,8 @@
 'use strict';
 
 import { test, expect, vi, beforeEach, afterEach } from 'vitest';
-const { superviseAdoptedRuns, evaluateAdoptedRun } = require('../lib/adoptedRunSupervisor.cjs');
-const quietMachineLease = require('../lib/quietMachineLease.cjs');
+const { superviseAdoptedRuns, evaluateAdoptedRun } = require('../lib/scheduler/adoptedRunSupervisor.cjs');
+const quietMachineLease = require('../lib/scheduler/quietMachineLease.cjs');
 const { classifyBudgetKill } = require('../scheduler/budget.cjs');
 
 const MIN = 60_000;

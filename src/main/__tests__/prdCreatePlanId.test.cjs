@@ -14,9 +14,9 @@ const os = require('node:os');
 const path = require('node:path');
 const config = require('../config.cjs');
 const prdParser = require('../scheduler/prdParser.cjs');
-const { parsePrdFile } = require('../lib/prdFrontmatter.cjs');
-const { createPrd } = require('../lib/prdCreate.cjs');
-const { resolveInheritedPlanId, isValidPlanId } = require('../lib/prdDisposition.cjs');
+const { parsePrdFile } = require('../lib/prd/prdFrontmatter.cjs');
+const { createPrd } = require('../lib/prd/prdCreate.cjs');
+const { resolveInheritedPlanId, isValidPlanId } = require('../lib/prd/prdDisposition.cjs');
 
 async function mkTmpPrdsDir() {
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-planid-create-prd-'));

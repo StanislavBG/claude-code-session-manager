@@ -108,7 +108,7 @@ beforeAll(() => {
   process.env.HOME = tmpHome;
   originalMax = process.env.SM_JOB_WORKTREE_MAX;
   ({ spawnJob } = require('../scheduler.cjs'));
-  gitWorktree = require('../lib/gitWorktree.cjs');
+  gitWorktree = require('../lib/git/gitWorktree.cjs');
 });
 
 afterAll(() => {
@@ -221,7 +221,7 @@ test('a non-git cwd still falls back to running in place (unchanged behaviour â€
     // discoverable only by reading queue.json afterwards â€” it must also land
     // as a warn line in the durable ops error log, naming the slug, cwd, and
     // reason.
-    const { todayFile } = require('../lib/opsErrorLog.cjs');
+    const { todayFile } = require('../lib/telemetry/opsErrorLog.cjs');
     const errorLogPath = todayFile(projectCwd);
     expect(fs.existsSync(errorLogPath)).toBe(true);
     const logLines = fs.readFileSync(errorLogPath, 'utf8').trim().split('\n').map((l) => JSON.parse(l));

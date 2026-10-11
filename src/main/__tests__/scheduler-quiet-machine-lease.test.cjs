@@ -94,8 +94,8 @@ beforeAll(() => {
   originalDisable = process.env.SM_JOB_WORKTREE_DISABLE;
   process.env.SM_JOB_WORKTREE_DISABLE = '1';
   ({ spawnJob, reapDeadRunningJobs } = require('../scheduler.cjs'));
-  ({ pickNextBatch } = require('../lib/schedulerBatch.cjs'));
-  quietMachineLease = require('../lib/quietMachineLease.cjs');
+  ({ pickNextBatch } = require('../lib/scheduler/schedulerBatch.cjs'));
+  quietMachineLease = require('../lib/scheduler/quietMachineLease.cjs');
 });
 
 afterAll(() => {

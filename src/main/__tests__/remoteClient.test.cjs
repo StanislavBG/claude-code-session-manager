@@ -15,7 +15,7 @@ const path = require('node:path')
 const { EventEmitter } = require('node:events')
 const {
   generateE2EKeyPair, deriveSessionKey, deriveSas, encryptBox, decryptBox,
-} = require('../lib/remoteE2eCrypto.cjs')
+} = require('../lib/feedback-remote/remoteE2eCrypto.cjs')
 const { createRemoteClient } = require('../remoteClient.cjs')
 
 const DEVICE_ID = 'dev-agent-1'

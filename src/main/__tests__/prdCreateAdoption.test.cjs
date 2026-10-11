@@ -66,7 +66,7 @@ beforeAll(() => {
   scheduler = require('../scheduler.cjs');
   usage = require('../usage.cjs');
   config = require('../config.cjs');
-  ({ createPrd } = require('../lib/prdCreate.cjs'));
+  ({ createPrd } = require('../lib/prd/prdCreate.cjs'));
 
   if (!scheduler.PRDS_DIR.startsWith(tmpHome)) {
     throw new Error(`refusing to run: PRDS_DIR (${scheduler.PRDS_DIR}) is not under the temp HOME (${tmpHome})`);

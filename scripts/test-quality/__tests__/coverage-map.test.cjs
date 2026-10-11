@@ -16,7 +16,7 @@ const { attribute } = require('../coverage-map.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const CLI = path.join(REPO_ROOT, 'scripts/test-quality/coverage-map.cjs');
-const A = 'src/main/lib/__tests__/atomicFs.test.cjs';
+const A = 'src/main/lib/util/__tests__/atomicFs.test.cjs';
 const B = 'src/main/lib/__tests__/queueStoreAtomicWrite.test.cjs';
 
 test('CLI maps two real test files and attributes unique coverage', () => {
@@ -33,7 +33,7 @@ test('CLI maps two real test files and attributes unique coverage', () => {
     const map = JSON.parse(fs.readFileSync(out, 'utf8'));
     // queueStore.cjs does not import atomicFs.cjs (it has its own tmp+rename), so B's
     // covered source is queueStore.cjs, not atomicFs.cjs.
-    const expectedSrc = { [A]: 'src/main/lib/atomicFs.cjs', [B]: 'src/main/lib/queueStore.cjs' };
+    const expectedSrc = { [A]: 'src/main/lib/util/atomicFs.cjs', [B]: 'src/main/lib/scheduler/queueStore.cjs' };
     for (const f of [A, B]) {
       expect(map.files[f].passed).toBe(true);
       expect(Object.keys(map.files[f].coverage)).toContain(expectedSrc[f]);

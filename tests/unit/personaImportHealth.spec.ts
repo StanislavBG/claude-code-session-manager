@@ -4,14 +4,14 @@
  * in checkPersonaImports() detecting broken/chained/cyclic imports using a
  * temp-directory fixture — never the real home directory.
  *
- * Source: src/main/lib/personaImportHealth.cjs.
+ * Source: src/main/lib/persona-macro/personaImportHealth.cjs.
  */
 import { describe, it, expect, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { checkPersonaImports } = require('../../src/main/lib/personaImportHealth.cjs')
+const { checkPersonaImports } = require('../../src/main/lib/persona-macro/personaImportHealth.cjs')
 
 describe('checkPersonaImports', () => {
   let dir: string

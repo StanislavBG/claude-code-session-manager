@@ -44,20 +44,20 @@
 
 const { spawn } = require('node:child_process');
 const { ipcMain } = require('electron');
-const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
-const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
+const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs');
 const { recordExchange } = require('./exchanges.cjs');
 const { classifyToolUse } = require('./lib/toolUseClassify.cjs');
-const { extractJson } = require('./lib/extractJson.cjs');
+const { extractJson } = require('./lib/util/extractJson.cjs');
 const { classifyPromptTicket } = require('./lib/classifyPromptTicket.cjs');
-const sessionSlots = require('./lib/sessionSlots.cjs');
-const opsErrorLog = require('./lib/opsErrorLog.cjs');
-const { killTree, detachedSpawnOpts } = require('./lib/killTree.cjs');
-const agentModelResolve = require('./lib/agentModelResolve.cjs');
-const { resolveEpicEffort, effortArgs } = require('./lib/agentEffortResolve.cjs');
-const { planEpicSpawn } = require('./lib/epicSpawnPlan.cjs');
+const sessionSlots = require('./lib/scheduler/sessionSlots.cjs');
+const opsErrorLog = require('./lib/telemetry/opsErrorLog.cjs');
+const { killTree, detachedSpawnOpts } = require('./lib/process/killTree.cjs');
+const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
+const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
+const { planEpicSpawn } = require('./lib/epic/epicSpawnPlan.cjs');
 const logs = require('./logs.cjs');
-const { createHeadTailBuffer } = require('./lib/headTailBuffer.cjs');
+const { createHeadTailBuffer } = require('./lib/util/headTailBuffer.cjs');
 
 // Caps on per-run stream buffers (a run can last hours).
 const STDERR_TAIL_MAX = 64 * 1024;
@@ -424,7 +424,7 @@ function pump() {
     if (idx === -1) break;
     // The chat lane cap is a POLICY bound; actual capacity comes from the
     // Session-Manager-wide slot pool shared with the scheduler
-    // (lib/sessionSlots.cjs). No slot → everyone keeps waiting; the next
+    // (lib/scheduler/sessionSlots.cjs). No slot → everyone keeps waiting; the next
     // settle() in either subsystem re-pumps.
     const slotToken = sessionSlots.acquire(`chat:${waiting[idx].tabId}`);
     if (!slotToken) break;
@@ -982,7 +982,7 @@ function requestExternalNewSession(payload) {
  * job; this only owns route logic + body parsing).
  */
 function registerAdminRoute(adminHttp) {
-  const { readBody, sendJson } = require('./lib/localAdminHttp.cjs');
+  const { readBody, sendJson } = require('./lib/feedback-remote/localAdminHttp.cjs');
   const { schemas } = require('./ipcSchemas.cjs');
 
   adminHttp.registerRoute('POST', '/admin/chat/send-prompt', async (req, res) => {

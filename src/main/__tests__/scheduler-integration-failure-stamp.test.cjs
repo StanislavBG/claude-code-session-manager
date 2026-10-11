@@ -11,7 +11,7 @@
 import { test } from 'vitest';
 const assert = require('node:assert/strict');
 const { stampIntegrationFailure } = require('../scheduler.cjs');
-const { buildRcaMarkdown } = require('../lib/rcaReport.cjs');
+const { buildRcaMarkdown } = require('../lib/scheduler/rcaReport.cjs');
 
 test('stamps content_conflict kind and conflicted paths', () => {
   const row = { slug: 'x' };

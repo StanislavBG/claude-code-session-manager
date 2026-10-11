@@ -1,7 +1,7 @@
 'use strict';
 
 // Name this process first (pn-03): otherwise it shows as a bare `node`.
-const { PROC_NAMES, setProcessTitle } = require('../src/main/lib/smProcNames.cjs');
+const { PROC_NAMES, setProcessTitle } = require('../src/main/lib/process/smProcNames.cjs');
 setProcessTitle(PROC_NAMES.watchdog);
 
 // scheduler-watchdog.cjs — external check-and-exit watchdog for session-manager.
@@ -33,9 +33,9 @@ const {
   maybeFinalizeHistory,
   maybeRelaunchApp,
   DEFAULT_MAX_AGE_MS,
-} = require('../src/main/lib/watchdogHelpers.cjs');
-const schedulerPaths = require('../src/main/lib/schedulerPaths.cjs');
-const { appendAuditEvent } = require('../src/main/lib/auditLog.cjs');
+} = require('../src/main/lib/scheduler/watchdogHelpers.cjs');
+const schedulerPaths = require('../src/main/lib/scheduler/schedulerPaths.cjs');
+const { appendAuditEvent } = require('../src/main/lib/telemetry/auditLog.cjs');
 
 // ---------- paths ----------
 

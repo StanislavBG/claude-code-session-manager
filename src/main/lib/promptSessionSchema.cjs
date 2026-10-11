@@ -14,7 +14,7 @@
 'use strict';
 
 const { z } = require('zod');
-const { WorkTypeSchema, LEGACY_WORK_TYPES } = require('./workTypeLibrary.cjs');
+const { WorkTypeSchema, LEGACY_WORK_TYPES } = require('./prd/workTypeLibrary.cjs');
 
 // Mirrors EpicTag (src/renderer/lib/tagLibrary.ts:10) — the Epic-level
 // mission tag. Epic tag and PRD tag (ipcSchemas.cjs's scheduleRetagPrd `tag`

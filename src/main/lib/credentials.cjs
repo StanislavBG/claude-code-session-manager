@@ -5,9 +5,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const { spawn, execFileSync } = require('node:child_process');
-const { cleanChildEnv, pathWithUserBins } = require('./cleanEnv.cjs');
-const atomicFs = require('./atomicFs.cjs');
-const { resolveClaudeBin, claudeSpawnTarget } = require('./claudeBin.cjs');
+const { cleanChildEnv, pathWithUserBins } = require('./process/cleanEnv.cjs');
+const atomicFs = require('./util/atomicFs.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./claude/claudeBin.cjs');
 
 const CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 

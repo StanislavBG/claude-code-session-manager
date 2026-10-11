@@ -38,14 +38,14 @@ const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'reap-dead-running-jobs-te
 process.env.HOME = tmpHome;
 
 const { reapDeadRunningJobs, PIDLESS_SPAWN_GRACE_MS } = require('../scheduler.cjs');
-const { auditLogPath } = require('../lib/auditLog.cjs');
+const { auditLogPath } = require('../lib/telemetry/auditLog.cjs');
 // queueStore's cwd discovery is cached for 30s (queueStore.cjs's CACHE_MS) —
 // a project registered by THIS test after an earlier test already populated
 // that cache (and didn't itself bust it, e.g. because it found nothing
 // reapable and returned before ever calling writeQueue) would otherwise be
 // invisible to readQueue() for the rest of that window. Bust explicitly
 // after registering a new project so each test sees its own fixture.
-const { bustCwdCache } = require('../lib/queueStore.cjs');
+const { bustCwdCache } = require('../lib/scheduler/queueStore.cjs');
 
 function registerActiveProject(cwd) {
   const projectsDir = path.join(tmpHome, '.claude', 'projects');

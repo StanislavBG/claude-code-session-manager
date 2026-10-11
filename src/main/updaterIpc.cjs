@@ -28,7 +28,7 @@ function defaultDeps() {
     platform: process.platform,
     env: process.env,
     settings: require('./lib/updaterSettings.cjs'),
-    sessionSlots: require('./lib/sessionSlots.cjs'),
+    sessionSlots: require('./lib/scheduler/sessionSlots.cjs'),
     currentVersion: () => require('electron').app.getVersion(),
     log: (message, meta) => {
       try {

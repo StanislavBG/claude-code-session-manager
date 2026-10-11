@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
-const { relaunchSpec, defaultSpawnRelaunch } = require('../watchdogHelpers.cjs');
+const { relaunchSpec, defaultSpawnRelaunch } = require('../scheduler/watchdogHelpers.cjs');
 const { resolveInstallChannel } = require('../machineProfile.cjs');
 
 describe('packaged relaunch + install channel', () => {

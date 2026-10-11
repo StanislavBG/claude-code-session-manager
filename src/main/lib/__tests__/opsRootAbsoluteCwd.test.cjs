@@ -28,7 +28,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const queueStore = require('../queueStore.cjs');
+const queueStore = require('../scheduler/queueStore.cjs');
 const { activeProjectCwds } = require('../activeSessions.cjs');
 
 const tmpDirs = [];
@@ -186,7 +186,7 @@ test('projectStateDir fails closed on an ops-internal cwd, naming the offending 
 // (`gitdir: <main>/.git/worktrees/<name>`) back to `<main>`.
 
 const { worktreeMainRootOf } = require('../activeSessions.cjs');
-const { KIND_CONFIG: WORKTREE_KIND_CONFIG } = require('../gitWorktree.cjs');
+const { KIND_CONFIG: WORKTREE_KIND_CONFIG } = require('../git/gitWorktree.cjs');
 
 // A worktree's MAIN tree root must live outside os.tmpdir() for these fixtures
 // to double as a realistic "real project" for the tmp-drop-guard tests below

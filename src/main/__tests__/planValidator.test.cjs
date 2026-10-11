@@ -7,7 +7,7 @@
 'use strict';
 
 import { test, expect } from 'vitest';
-const { hasDownstreamValidator } = require('../lib/planValidator.cjs');
+const { hasDownstreamValidator } = require('../lib/prd/planValidator.cjs');
 
 test('true when a pending validator row depends on the job', () => {
   const job = { slug: '111-alpha' };

@@ -1,5 +1,5 @@
 /**
- * runLogRetention.test.cjs — unit tests for src/main/lib/runLogRetention.cjs.
+ * runLogRetention.test.cjs — unit tests for src/main/lib/scheduler/runLogRetention.cjs.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/runLogRetention.test.cjs
  *
@@ -23,7 +23,7 @@ const {
   runningRunIdsFromJobs,
   isLiveJob,
   runBootSweep,
-} = require('../lib/runLogRetention.cjs');
+} = require('../lib/scheduler/runLogRetention.cjs');
 
 let runsDir;
 
@@ -308,7 +308,7 @@ test('applyRetention: enabled=true with no liveKeys/jobs falls back to reading t
   makeRun('2020-05-01T00-00-00-000Z', 'fallback-slug', { finishedAt: now - 400 * DAY_MS });
   makeRun('2020-06-01T00-00-00-000Z', 'fallback-slug', { finishedAt: now - 1 * DAY_MS }); // most recent, unrelated
 
-  const queueStore = require('../lib/queueStore.cjs');
+  const queueStore = require('../lib/scheduler/queueStore.cjs');
   const original = queueStore.readMergedSync;
   queueStore.readMergedSync = () => ({
     jobs: [{ slug: 'fallback-slug', runId: '2020-05-01T00-00-00-000Z', status: 'running' }],
@@ -330,7 +330,7 @@ test('runBootSweep: reads queueStore ONCE and threads its jobs explicitly into a
   makeRun('2020-02-01T00-00-00-000Z', 'boot-slug', { finishedAt: now - 390 * DAY_MS }); // live, protected
   makeRun('2026-01-01T00-00-00-000Z', 'boot-slug', { finishedAt: now - 1 * DAY_MS }); // most recent
 
-  const queueStore = require('../lib/queueStore.cjs');
+  const queueStore = require('../lib/scheduler/queueStore.cjs');
   const original = queueStore.readMergedSync;
   let calls = 0;
   queueStore.readMergedSync = () => {
@@ -363,7 +363,7 @@ test('runBootSweep: dry-run when config has no opt-in', () => {
   makeRun('2020-01-01T00-00-00-000Z', 'noop-slug', { finishedAt: now - 400 * DAY_MS });
   makeRun('2026-01-01T00-00-00-000Z', 'noop-slug', { finishedAt: now - 1 * DAY_MS });
 
-  const queueStore = require('../lib/queueStore.cjs');
+  const queueStore = require('../lib/scheduler/queueStore.cjs');
   const original = queueStore.readMergedSync;
   queueStore.readMergedSync = () => ({ config: {}, jobs: [] });
   try {
@@ -380,7 +380,7 @@ test('runBootSweep: a deletion failure (permission error) is caught, logged in r
   const dir = makeRun('2020-01-01T00-00-00-000Z', 'fail-slug', { finishedAt: now - 400 * DAY_MS });
   makeRun('2026-01-01T00-00-00-000Z', 'fail-slug', { finishedAt: now - 1 * DAY_MS });
 
-  const queueStore = require('../lib/queueStore.cjs');
+  const queueStore = require('../lib/scheduler/queueStore.cjs');
   const original = queueStore.readMergedSync;
   queueStore.readMergedSync = () => ({
     config: { schedulerRunLogRetention: { enabled: true, policy: { maxAgeDays: 7 } } },
@@ -471,7 +471,7 @@ test('applyRetention: dry-run path (enabled=false) never reads queueStore for li
   makeRun('2020-05-01T00-00-00-000Z', 'no-touch-slug', { finishedAt: now - 400 * DAY_MS });
   makeRun('2020-06-01T00-00-00-000Z', 'no-touch-slug', { finishedAt: now - 1 * DAY_MS });
 
-  const queueStore = require('../lib/queueStore.cjs');
+  const queueStore = require('../lib/scheduler/queueStore.cjs');
   const original = queueStore.readMergedSync;
   let called = false;
   queueStore.readMergedSync = () => {

@@ -1,5 +1,5 @@
 /**
- * prdAgentType.test.cjs — the PRD `agentType` FK (lib/prdAgentType.cjs):
+ * prdAgentType.test.cjs — the PRD `agentType` FK (lib/prd/prdAgentType.cjs):
  * throw on write, report on read, mirroring agentModelResolve.cjs's/
  * epicMint.cjs's established convention for the Epic-level agentType FK.
  *
@@ -18,8 +18,8 @@ const {
   DEFAULT_PRD_AGENT_TYPE,
   assertAgentTypeWritable,
   reportDanglingAgentTypeOnce,
-} = require('../lib/prdAgentType.cjs');
-const { todayFile } = require('../lib/opsErrorLog.cjs');
+} = require('../lib/prd/prdAgentType.cjs');
+const { todayFile } = require('../lib/telemetry/opsErrorLog.cjs');
 
 async function mkTmpDir(prefix) {
   return fsp.mkdtemp(path.join(os.tmpdir(), prefix));

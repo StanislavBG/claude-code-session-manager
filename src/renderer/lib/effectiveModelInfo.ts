@@ -1,7 +1,7 @@
 /**
  * effectiveModelInfo.ts — the renderer half of "what will this Epic actually
  * run as": composes the main process's persona/evidence resolver
- * (agents:resolve-model-info, src/main/lib/effectiveModelInfo.cjs) with the
+ * (agents:resolve-model-info, src/main/lib/claude/effectiveModelInfo.cjs) with the
  * effort-level half: a persona-sourced effort (from the main half) wins,
  * else the pure scope-chain read over settings.json already owned by
  * useEffectiveSettings.ts (that hook's `readLeafWithSource` was written for

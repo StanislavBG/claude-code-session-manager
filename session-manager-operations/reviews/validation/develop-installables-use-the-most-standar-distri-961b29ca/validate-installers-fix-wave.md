@@ -5,7 +5,7 @@ Gate note: the worktree has no `node_modules`; gates were re-run from a `git arc
 Reviews: `/code-review` and `/security-review` were not run as separate tools; I self-reviewed the diff.
 
 ## 1584 win-claude-cmd-spawn — VERIFIED
-- AC1: `src/main/lib/claudeBin.cjs:89-98` wraps through `resolveSpawn` only when platform is win32 and the base command ends in `.cmd`/`.bat`. Otherwise it returns `base` unchanged, so POSIX output is the same object as before (test `claudeCmdSpawn.test.cjs` "POSIX" asserts `toEqual({command})`).
+- AC1: `src/main/lib/claude/claudeBin.cjs:89-98` wraps through `resolveSpawn` only when platform is win32 and the base command ends in `.cmd`/`.bat`. Otherwise it returns `base` unchanged, so POSIX output is the same object as before (test `claudeCmdSpawn.test.cjs` "POSIX" asserts `toEqual({command})`).
 - AC2: job spawn `scheduler.cjs:6333,6345,6350` (args from `jobSpawn.args || jobArgs`, passes `windowsVerbatimArguments`); chat `chatRunner.cjs:693-697`; version probe `claudeBin.cjs:149-150`. All three use the spec.
 - AC3: no `shell: true` added. The only grep hit in chatRunner is an existing comment at line 599 saying there is none.
 - AC4: `claudeCmdSpawn.test.cjs` has 4 tests: win32 `.cmd` -> `/d /s /c`, `SM_CLAUDE_BIN` `.cmd`, win32 `.exe` passthrough, POSIX passthrough.

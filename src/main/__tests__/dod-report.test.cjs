@@ -13,7 +13,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
-const { flagRiskySurfaces, writeReport } = require('../lib/definitionOfDone.cjs');
+const { flagRiskySurfaces, writeReport } = require('../lib/scheduler/definitionOfDone.cjs');
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 

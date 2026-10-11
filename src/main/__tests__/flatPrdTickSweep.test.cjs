@@ -34,7 +34,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { consolidateAllFlatPrds } = require('../scheduler/prdPaths.cjs');
-const { resolvePrdWriteDir, resolvePrdsDirs } = require('../lib/prdLocations.cjs');
+const { resolvePrdWriteDir, resolvePrdsDirs } = require('../lib/prd/prdLocations.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {

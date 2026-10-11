@@ -26,7 +26,7 @@ const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
-const opsErrorLog = require('../lib/opsErrorLog.cjs');
+const opsErrorLog = require('../lib/telemetry/opsErrorLog.cjs');
 const { isEphemeralCwd } = require('../lib/ephemeralCwd.cjs');
 const { resolveProjectContext } = require('../lib/projectRootResolve.cjs');
 
@@ -341,7 +341,7 @@ function fakeProfile(overrides = {}) {
   };
 }
 
-const HOME_DEPENDENT_MODULES = ['../lib/telemetryClient.cjs', '../config.cjs', '../lib/telemetrySettings.cjs', '../lib/machineProfile.cjs'];
+const HOME_DEPENDENT_MODULES = ['../lib/telemetry/telemetryClient.cjs', '../config.cjs', '../lib/telemetry/telemetrySettings.cjs', '../lib/machineProfile.cjs'];
 
 /** A fresh telemetryClient bound to `home`, simulating a real relaunch: only on-disk state carries over. */
 function freshClient(home, profileOverrides) {
@@ -353,22 +353,22 @@ function freshClient(home, profileOverrides) {
     const resolved = require.resolve(p);
     delete require.cache[resolved];
   }
-  const client = require('../lib/telemetryClient.cjs');
+  const client = require('../lib/telemetry/telemetryClient.cjs');
   client._setMachineProfileBuilder(async () => fakeProfile(profileOverrides));
   return client;
 }
 
 /** telemetryBoot.cjs is loaded separately since it has its own dep-resolution (not through telemetryClient's profile builder). */
 function freshBoot() {
-  const resolved = require.resolve('../lib/telemetryBoot.cjs');
+  const resolved = require.resolve('../lib/telemetry/telemetryBoot.cjs');
   delete require.cache[resolved];
-  return require('../lib/telemetryBoot.cjs');
+  return require('../lib/telemetry/telemetryBoot.cjs');
 }
 
 function freshBacklog() {
-  const resolved = require.resolve('../lib/telemetryBacklog.cjs');
+  const resolved = require.resolve('../lib/telemetry/telemetryBacklog.cjs');
   delete require.cache[resolved];
-  return require('../lib/telemetryBacklog.cjs');
+  return require('../lib/telemetry/telemetryBacklog.cjs');
 }
 
 function makeBacklogDeps({ telemetryClient, config, tabCwds }) {
@@ -541,7 +541,7 @@ test('the install record arrives at app_installs with every mapped field present
   await client.reportInstall(profile);
   await client.flush('manual');
 
-  const settings = require('../lib/telemetrySettings.cjs');
+  const settings = require('../lib/telemetry/telemetrySettings.cjs');
   const persisted = await settings.load();
   const row = stubServer.state.installsById.get(persisted.installId);
   expect(row).toBeDefined();
@@ -578,7 +578,7 @@ test('the install upsert fires once per app version and once per 30-day heartbea
   async function simulatedLaunch({ now, appVersion }) {
     const client = freshClient(home, { appVersion });
     const boot = freshBoot();
-    const telemetrySettings = require('../lib/telemetrySettings.cjs');
+    const telemetrySettings = require('../lib/telemetry/telemetrySettings.cjs');
     if (!installId) installId = (await telemetrySettings.load()).installId;
     await boot.bootSequence({
       now,
@@ -764,8 +764,8 @@ test('cadence: 23h of idle ticks send nothing; the tick past 24h sends exactly o
   const home = await mkHome();
 
   process.env.HOME = home;
-  for (const p of ['../lib/telemetrySettings.cjs', '../config.cjs']) delete require.cache[require.resolve(p)];
-  const telemetrySettings = require('../lib/telemetrySettings.cjs');
+  for (const p of ['../lib/telemetry/telemetrySettings.cjs', '../config.cjs']) delete require.cache[require.resolve(p)];
+  const telemetrySettings = require('../lib/telemetry/telemetrySettings.cjs');
   const seedNow = Date.now();
   await telemetrySettings.save({
     ...telemetrySettings.DEFAULTS,

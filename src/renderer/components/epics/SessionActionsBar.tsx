@@ -7,7 +7,7 @@
  *
  * Pressing a Macro button is the same act as pressing "+ New Session" and
  * filling the card in — it goes through the one Epic-minting IPC handler that
- * holds MINT_AUTHORITY_NEW_EPIC_UI (see `src/main/lib/epicMint.cjs`), composes
+ * holds MINT_AUTHORITY_NEW_EPIC_UI (see `src/main/lib/epic/epicMint.cjs`), composes
  * its opening prompt through `composeEpicIntake` (Actor = the macro's agent,
  * Mission = its tag, Goal = its prompt), approves it out of `proposed`, and
  * sends that prompt. A shortcut around the New Session card, never a second

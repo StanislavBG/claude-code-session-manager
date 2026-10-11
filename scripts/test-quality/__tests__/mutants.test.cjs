@@ -17,7 +17,7 @@ const { buildMap } = require('../coverage-map.cjs');
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const CLI = path.join(REPO_ROOT, 'scripts/test-quality/mutants.cjs');
-const SRC = 'src/main/lib/atomicFs.cjs';
+const SRC = 'src/main/lib/util/atomicFs.cjs';
 const SRC_ABS = path.join(REPO_ROOT, SRC);
 
 let dir;

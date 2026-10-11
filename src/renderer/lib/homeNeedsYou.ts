@@ -11,7 +11,7 @@
 // unit-testable without mocking zustand — same shape as homeSessionRows.ts.
 import { projectNameFromCwd } from './homeProjectRows'
 
-// Mirrors QUARANTINE_ESCALATE_MS in src/main/lib/schedulerConfig.cjs — that
+// Mirrors QUARANTINE_ESCALATE_MS in src/main/lib/scheduler/schedulerConfig.cjs — that
 // side is authoritative for the warn-log escalation
 // (scheduler.cjs's findStaleQuarantinedJobs); this only decides when a
 // quarantined row's Home tone/label switches from "needs adoption" to

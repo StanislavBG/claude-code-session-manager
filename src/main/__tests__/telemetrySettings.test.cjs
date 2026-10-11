@@ -30,10 +30,10 @@ afterEach(async () => {
 
 async function freshModule(home) {
   process.env.HOME = home;
-  const modPath = require.resolve('../lib/telemetrySettings.cjs');
+  const modPath = require.resolve('../lib/telemetry/telemetrySettings.cjs');
   delete require.cache[modPath];
   delete require.cache[require.resolve('../config.cjs')];
-  return require('../lib/telemetrySettings.cjs');
+  return require('../lib/telemetry/telemetrySettings.cjs');
 }
 
 async function mkHome() {

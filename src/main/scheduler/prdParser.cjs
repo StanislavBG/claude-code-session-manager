@@ -17,9 +17,9 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
-const { deriveEpicIdFromPrdPath } = require('../lib/prdLocations.cjs');
-const { reportDanglingAgentTypeOnce } = require('../lib/prdAgentType.cjs');
+const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+const { deriveEpicIdFromPrdPath } = require('../lib/prd/prdLocations.cjs');
+const { reportDanglingAgentTypeOnce } = require('../lib/prd/prdAgentType.cjs');
 
 /**
  * Expand a PRD `cwd` value to an absolute path.
@@ -112,7 +112,7 @@ async function parsePrdRaw(filePath) {
     // buildInvestigationPrompt). Only a literal `true` opts in, matching
     // quietMachine's parse semantics below; reconcile() is the sole reader
     // that turns this (plus createdVia's absence) into a fix-plan verdict —
-    // see lib/fixPlanSlug.cjs's classifyDiscoveredFixPlan.
+    // see lib/scheduler/fixPlanSlug.cjs's classifyDiscoveredFixPlan.
     isFixPlan: fm.isFixPlan === 'true',
     // WHO executes this PRD (persona name) — distinct from `tag` (work
     // type). Absent on every PRD authored before this field existed; the

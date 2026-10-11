@@ -24,7 +24,7 @@
 
 import { test, expect } from 'vitest';
 const { commitGuardVerdict } = require('../scheduler.cjs');
-const { resolveIsFixPlan } = require('../lib/fixPlanSlug.cjs');
+const { resolveIsFixPlan } = require('../lib/scheduler/fixPlanSlug.cjs');
 
 test('commitGuardVerdict: legitimate no-op verdict (pass_no_commit_already_shipped) + concurrent dirt → no flag (655 incident)', () => {
   const verifyResult = {

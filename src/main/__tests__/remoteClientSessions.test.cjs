@@ -8,7 +8,7 @@
 
 import { describe, it, expect, vi } from 'vitest'
 
-const { createClientSessions, clientKeyOf, LEGACY_CLIENT_KEY } = require('../lib/remoteClientSessions.cjs')
+const { createClientSessions, clientKeyOf, LEGACY_CLIENT_KEY } = require('../lib/feedback-remote/remoteClientSessions.cjs')
 
 describe('clientKeyOf', () => {
   it('uses fromConn when valid', () => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * mint-epic.cjs — CLI wrapper over lib/epicMint.cjs's JOIN path, for joining
+ * mint-epic.cjs — CLI wrapper over lib/epic/epicMint.cjs's JOIN path, for joining
  * an existing Epic without the app's admin API running.
  *
  * This script never creates an Epic. It only resolves an EXISTING Epic's
@@ -19,7 +19,7 @@
  */
 'use strict';
 
-const { ensureEpic } = require('../src/main/lib/epicMint.cjs');
+const { ensureEpic } = require('../src/main/lib/epic/epicMint.cjs');
 
 const [cwd, epicId] = process.argv.slice(2);
 if (!cwd || !epicId) {

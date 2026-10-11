@@ -40,7 +40,7 @@ timer that calls it directly on a fixed cadence** — every call is a reaction t
 ### `lastRunAt` vs `lastDispatchAttemptAt`
 
 Two different claims, both machine-wide fields on `scheduler-machine.json`
-(`shapeMachine`, `src/main/lib/queueStore.cjs`):
+(`shapeMachine`, `src/main/lib/scheduler/queueStore.cjs`):
 
 | Field | Stamped | Proves |
 | --- | --- | --- |
@@ -55,7 +55,7 @@ the ticking mechanism itself has stopped being invoked (the real stall).**
 
 ## 2. The slot pool — the one machine-wide concurrency cap
 
-`src/main/lib/sessionSlots.cjs` is the ONLY concurrency limit the picker answers to
+`src/main/lib/scheduler/sessionSlots.cjs` is the ONLY concurrency limit the picker answers to
 (`tickQueue`'s slot gate in `scheduler.cjs`; its comment confirms a former private `concurrencyCap` of 3 was retired
 in favor of this pool — see commit `4c8916d`).
 
@@ -69,7 +69,7 @@ in favor of this pool — see commit `4c8916d`).
   fields, but no dispatch code reads `config.concurrencyCap` after `4c8916d`. Don't diagnose a
   slot ceiling off that field; read `sessionSlots.snapshot()` (`scheduler_list_jobs` / `npm run
   health`) instead.
-- A **separate, secondary** cap exists per job/Epic worktree (`src/main/lib/gitWorktree.cjs`,
+- A **separate, secondary** cap exists per job/Epic worktree (`src/main/lib/git/gitWorktree.cjs`,
   `getMaxConcurrentWorktrees`) — the job-kind default is floored at
   `sessionSlots.totalSlots()` so raising the slot pool can never silently strand jobs without
   worktree isolation. Its in-memory counter (`activeWorktreeCount`) is **self-healing**:
@@ -109,7 +109,7 @@ exactly as a human Run-now (§2) skips it.
 ## 4. The `needs_review` recovery ladder
 
 Six named rungs, defined once as the closed set `LADDER_RUNGS`
-(`src/main/lib/needsReviewLedger.cjs`) and classified from the `source` string every
+(`src/main/lib/scheduler/needsReviewLedger.cjs`) and classified from the `source` string every
 `transitionJob` call carries (`classifyLadderRung`). The gauntlet at
 the same-tick park path in `scheduler.cjs` (`transitionJob` callers) tries rungs 1-3 same-tick, immediately on park; rung 4 fires same-tick
 if 1-3 don't apply; rung 5 (`reverifyNeedsReview`) is the periodic catch-all for anything the
@@ -126,7 +126,7 @@ different algorithm.
 | 6 | **bounded auto-resolve / manual-reset** | `applyNeedsReviewAutoResolve`, gated by `selectExhaustedNeedsReviewTargets`: an exhausted-auto-fix or guard-parked row that has sat `needs_review` for `NEEDS_REVIEW_RESOLVE_MS` (30 min). | `looksDone` → `completed`. Otherwise up to `NEEDS_REVIEW_RESOLVE_CAP=2` requeues to `pending`; the cap-exhausted pass auto-`skip`s the row (`needsReviewAutoResolvedSkip`) so a `dependsOn` chain behind it still drains. Anything not matching one of the sources above (an explicit human `scheduler_reset_job`) buckets as `manual-reset` in the ledger. |
 
 Gate authority is not a seventh rung. It runs inside the shadow gate (`runGateShadow`) that rung 5
-already fires in the background, decided by `decideGateAuthority` (`lib/gateAuthority.cjs`). A
+already fires in the background, decided by `decideGateAuthority` (`lib/scheduler/gateAuthority.cjs`). A
 needs_review park with verdict `transcript_errors`, `no_verdict_sentinel` or
 `abandoned_background_task` completes on its own when the gate re-run is green, the landed commit is
 on HEAD, and the tracked tree is clean. Kill switch: `SM_GATE_AUTHORITATIVE_DISABLE=1`. Every other
@@ -152,7 +152,7 @@ was still reaped `failed` because the reaper only ever judged spawn bookkeeping
 
 Full narrative + operator guidance already lives in
 [`scheduler/README.md`](../scheduler/README.md#launch-circuit-breaker-non-runs-are-not-failures)
-— read that first. The mechanics, in `src/main/lib/launchFailure.cjs`: a state machine keyed by
+— read that first. The mechanics, in `src/main/lib/scheduler/launchFailure.cjs`: a state machine keyed by
 launch persona (`launchBlockKeyFor`, keyed on `agentType`) — **closed → open/blocked
 (exponential backoff, `armLaunchBlock`, capped at `BACKOFF_CAP_MS=1h`) →
 half-open/probe (exactly one job through once backoff elapses, `evaluateLaunchGate`)

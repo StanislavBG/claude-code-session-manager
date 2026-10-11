@@ -7,7 +7,7 @@
 'use strict';
 
 import { test, expect } from 'vitest';
-const { registerAdminRoute } = require('../lib/customerFeedbackAdminRoutes.cjs');
+const { registerAdminRoute } = require('../lib/feedback-remote/customerFeedbackAdminRoutes.cjs');
 
 function makeFakeAdminHttp() {
   const routes = new Map();

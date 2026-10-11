@@ -26,8 +26,8 @@
 const { app, powerSaveBlocker, powerMonitor, crashReporter } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
-const { reportCrash } = require('./lib/crashTelemetry.cjs');
-const { createLoopDelayMonitor, stallVerdict } = require('./lib/loopDelay.cjs');
+const { reportCrash } = require('./lib/telemetry/crashTelemetry.cjs');
+const { createLoopDelayMonitor, stallVerdict } = require('./lib/util/loopDelay.cjs');
 
 let logs = null;
 let getPowerBlockerId = () => -1;

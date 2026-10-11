@@ -14,7 +14,7 @@ const {
   maybeFinalizeHistory,
   tryAcquireLock,
   releaseLock,
-} = require('../watchdogHelpers.cjs');
+} = require('../scheduler/watchdogHelpers.cjs');
 
 function tmpFile() {
   return path.join(os.tmpdir(), `watchdog-test-${process.pid}-${Math.floor(Math.random() * 1e9)}.log`);

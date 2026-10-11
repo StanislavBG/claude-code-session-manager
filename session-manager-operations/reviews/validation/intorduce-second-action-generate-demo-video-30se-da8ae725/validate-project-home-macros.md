@@ -13,7 +13,7 @@ MacroEditor, DemoVideoFrame) — 10 files / 151 tests, all passed. `lint:docs` (
 artifacts' own gate) is included in the `npm run lint` run above and passed.
 
 End-to-end wiring confirmed by reading the code (not just tests): `BUILTIN_MACROS` in
-`src/main/lib/builtinMacros.cjs` has `builtin-demo-video.agentName === 'demo-video-builder'`;
+`src/main/lib/persona-macro/builtinMacros.cjs` has `builtin-demo-video.agentName === 'demo-video-builder'`;
 `'demo-video-builder'` is in `PERSONAS` (`src/main/seedAgentPersonas.cjs:83`); the MCP tool
 `project_demo_video_write` (`scripts/scheduler-mcp-server.cjs:380-381,622`) posts to
 `/admin/project-home/demo-video/write`, registered in `projectHomeAdminRoutes.cjs`; `projectPages.cjs`
@@ -22,7 +22,7 @@ exposes `demoVideo` from `get()`/watcher; `ProjectHome.tsx` wires `useProjectPag
 
 ## macro-surface-and-builtins (1450) — VERIFIED
 
-- `src/main/lib/builtinMacros.cjs` exports `BUILTIN_MACROS`, two frozen entries exactly matching
+- `src/main/lib/persona-macro/builtinMacros.cjs` exports `BUILTIN_MACROS`, two frozen entries exactly matching
   the AC (ids, labels, agentName/tag/surface/projects/builtinVersion/prompt text verbatim).
 - `macroLibrary.cjs:63-72` — `MacroSchema` has `surface: MacroSurfaceSchema.default('sessions')`,
   `builtin`, `builtinVersion`; `MacroSaveSchema:77-87` has optional `surface`, no `builtin` field
@@ -31,7 +31,7 @@ exposes `demoVideo` from `get()`/watcher; `ProjectHome.tsx` wires `useProjectPag
   stored built-in behind `builtinVersion`, leaves a user-edited one untouched; wired into
   `loadStore`'s `serialize()` chain (`:253`, `:363`).
 - `deleteMacro:424-430` throws `'built-in macros cannot be deleted'` for `target.builtin`.
-- Gate: `timeout 300 npx vitest run src/main/lib/__tests__/macroLibrary.test.cjs` — passed (part
+- Gate: `timeout 300 npx vitest run src/main/lib/persona-macro/__tests__/macroLibrary.test.cjs` — passed (part
   of the 116-test sweep above).
 
 ## macro-surface-renderer (1451) — VERIFIED
@@ -170,7 +170,7 @@ exposes `demoVideo` from `get()`/watcher; `ProjectHome.tsx` wires `useProjectPag
 
 ## Findings
 
-**Critical — `src/main/lib/projectHomeAdminRoutes.cjs`:46-67,95-102 — the demo-video network
+**Critical — `src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs`:46-67,95-102 — the demo-video network
 fence (regex rejection list + CSP injection) is bypassable in one crafted document, defeating
 both the stated defence-in-depth layer and the stated "real control."**
 
@@ -204,7 +204,7 @@ own per `projectHomeAdminRoutes.cjs`'s own doc comment) does nothing to stop —
 "single network fence" the PRD's own comment (`:16-18`) says this route exists to prevent.
 Not a fix the validator should make — routing to the owning PRD/plan is the architect's call.
 
-**Minor — `src/main/lib/projectHomeAdminRoutes.cjs`'s `NETWORK_CHECKS` omits a few
+**Minor — `src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs`'s `NETWORK_CHECKS` omits a few
 network-capable surfaces present in modern browsers** (`navigator.sendBeacon` is covered, but
 `new Worker(...)`, `new SharedWorker(...)`, `<link rel="prefetch"/"preconnect">`, and
 `document.write` of a remote-looking string are not). Given the CSP (`connect-src 'none'`,

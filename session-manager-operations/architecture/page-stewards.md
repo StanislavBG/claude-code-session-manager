@@ -31,7 +31,7 @@ cache or export. Examples: `~/.claude/CLAUDE.md`, `~/.claude/settings.json`, `~/
 `window.api` → main.
 
 **Precedent:** main resolves paths through `validatePath` in `src/main/config.cjs` and writes through
-`src/main/lib/atomicFs.cjs`.
+`src/main/lib/util/atomicFs.cjs`.
 
 How to check: for every value shown, name the file it came from. For every save, name the file written and
 confirm the CLI reads that exact path.

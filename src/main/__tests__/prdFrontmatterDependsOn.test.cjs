@@ -18,7 +18,7 @@
 
 import { test, expect } from 'vitest';
 
-const { parsePrdFile, serializePrdFile, RECOGNIZED_KEYS } = require('../lib/prdFrontmatter.cjs');
+const { parsePrdFile, serializePrdFile, RECOGNIZED_KEYS } = require('../lib/prd/prdFrontmatter.cjs');
 
 test('dependsOn is a recognized key', () => {
   expect(RECOGNIZED_KEYS.has('dependsOn')).toBe(true);

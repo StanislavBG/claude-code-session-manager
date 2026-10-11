@@ -17,12 +17,12 @@
 const { ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
-const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
-const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claudeCliCaps.cjs');
-const { withProcRole } = require('./lib/cleanEnv.cjs');
-const { extractJson } = require('./lib/extractJson.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
+const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/claudeCliCaps.cjs');
+const { withProcRole } = require('./lib/process/cleanEnv.cjs');
+const { extractJson } = require('./lib/util/extractJson.cjs');
 const { assertInsideHome } = require('./lib/insideHome.cjs');
-const { expandHome } = require('./lib/expandHome.cjs');
+const { expandHome } = require('./lib/util/expandHome.cjs');
 const chatRunner = require('./chatRunner.cjs');
 
 // System prompt sets the role server-side so the selection is treated as

@@ -35,10 +35,10 @@ session-manager-operations/scheduler/
 ```
 
 Every new PRD belongs to an Epic — `resolveEpicPrdWriteDir(cwd, epicId)` in
-`src/main/lib/prdLocations.cjs` is the sole write destination for new PRDs
+`src/main/lib/prd/prdLocations.cjs` is the sole write destination for new PRDs
 (`epics/<epic-id>/prds/`). The flat `scheduler/prds/` directory is read-only during the
 transition: on scheduler boot, `runPrdMigration()` (`scheduler.cjs`) calls
-`consolidateFlatPrds(cwd)` (`lib/prdMigration.cjs`) to auto-move anything still sitting flat into
+`consolidateFlatPrds(cwd)` (`lib/prd/prdMigration.cjs`) to auto-move anything still sitting flat into
 `prds-archived/` so it isn't picked up as new work but stays recoverable. Never write a new PRD
 into the flat directory — mint or join an Epic first (`scripts/mint-epic.cjs`, or the
 `scheduler_create_prd` MCP tool), which resolves the correct `epics/<epic-id>/prds/` path for you.
@@ -83,7 +83,7 @@ here via `projectHistoryPath(cwd)`); one line per completed run.
 ## Ownership
 
 Sole writer per `src/main/lib/opsOwnership.cjs`'s `OWNERS` table: **`scheduler`**. Every write
-path — `lib/queueStore.cjs`'s `writeJsonAtomic`/`writeJsonAtomicSync`, `lib/epicMint.cjs`'s PRD-dir
+path — `lib/scheduler/queueStore.cjs`'s `writeJsonAtomic`/`writeJsonAtomicSync`, `lib/epic/epicMint.cjs`'s PRD-dir
 creation, PRD-source writes — calls `assertOpsWrite(file, 'scheduler')` before touching disk. There
 is no cross-writer delegation *into* this namespace (the one declared delegation in
 `opsOwnership.cjs`'s `DELEGATIONS` table runs the other direction: `scheduler` is the delegated
@@ -96,9 +96,9 @@ writer for one file in `prompt-sessions/`, not the other way around — see that
   not a per-project one.
 - `~/.claude/session-manager/scheduled-plans/runs/` — run logs (execution artifacts of this
   machine's runner) and `PRD_AUTHORING.md`.
-- The session-slot pool (`lib/sessionSlots.cjs`) — the machine-wide `claude -p` cap every
+- The session-slot pool (`lib/scheduler/sessionSlots.cjs`) — the machine-wide `claude -p` cap every
   scheduler job and chat run shares: default 5, ceiling 10
-  (`DEFAULT_SLOTS`/`MAX_SLOTS` in `src/main/lib/sessionSlots.cjs`), adjustable from Home
+  (`DEFAULT_SLOTS`/`MAX_SLOTS` in `src/main/lib/scheduler/sessionSlots.cjs`), adjustable from Home
   (`schedule:set-session-slots` IPC, `sessionSlots.setCap`) unless overridden by the
   `SM_SESSION_SLOTS` env var.
 
@@ -141,7 +141,7 @@ overloaded API), not a failed PRD. GitHub issue #11 (macOS, 2026-09-02) had 12 o
 in one project recorded as `failed` with `error: null` this way, each followed by an
 investigation probe that died identically.
 
-`src/main/lib/launchFailure.cjs` classifies it (`classifyLaunchFailure`) and
+`src/main/lib/scheduler/launchFailure.cjs` classifies it (`classifyLaunchFailure`) and
 `scheduler.cjs` routes it:
 
 - The row returns to `pending` with the API's own message as `error`, a `launchFailure`

@@ -122,7 +122,7 @@ export function EpicKindTag({ kind, small }: { kind: PromptSession['tag']; small
 /**
  * "Proposed by another project" chip. Rendered next to EpicKindTag on any
  * Epic that arrived through the cross-project feedback conduit
- * (src/main/lib/crossProjectFeedback.cjs), so the human deciding whether to
+ * (src/main/lib/feedback-remote/crossProjectFeedback.cjs), so the human deciding whether to
  * press Approve & start can see the claim came from an agent that has never
  * read this codebase. Returns null for every locally-created Epic, so callers
  * render it unconditionally on `inboundFeedbackOrigin(epic)`.

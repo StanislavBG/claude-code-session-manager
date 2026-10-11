@@ -13,7 +13,7 @@ const { execFileSync } = require('node:child_process');
 const { performance } = require('node:perf_hooks');
 
 const { __usageForOneForTest: usageForOne, __usageCacheForTest: usageCache } = require('../../src/main/transcripts.cjs');
-const { LRUCache } = require('../../src/main/lib/lruCache.cjs');
+const { LRUCache } = require('../../src/main/lib/util/lruCache.cjs');
 const {
   allProjectCwds, activeProjectCwds, bustProjectCwdCache, __waitForPendingRefresh,
 } = require('../../src/main/lib/activeSessions.cjs');

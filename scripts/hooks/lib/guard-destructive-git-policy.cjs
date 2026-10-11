@@ -23,7 +23,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 
-// Duplicated from src/main/lib/gitWorktree.cjs's KIND_CONFIG — see
+// Duplicated from src/main/lib/git/gitWorktree.cjs's KIND_CONFIG — see
 // guard-destructive-git.cjs's header for why this is a deliberate
 // duplication, not a require. Same SM_WORKTREE_ROOT-else-tmpdir base as
 // schedulerPaths.worktreeBase().

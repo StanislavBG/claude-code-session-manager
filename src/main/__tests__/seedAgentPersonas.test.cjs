@@ -164,15 +164,15 @@ test('the bundled project-home-builder and demo-video-builder personas contain n
 });
 
 test('seeded dev-lead persona pins an executor-tier model', () => {
-  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const raw = fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', 'dev-lead.md'), 'utf8');
   const { fm } = splitFrontmatter(raw);
   expect(fm.model).toBe('sonnet');
 });
 
 test('seeded dev-lead body fits AGENT_BODY_CHAR_CAP and carries the run contract', () => {
-  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
-  const { AGENT_BODY_CHAR_CAP } = require('../lib/agentModelResolve.cjs');
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const { AGENT_BODY_CHAR_CAP } = require('../lib/claude/agentModelResolve.cjs');
   const raw = fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', 'dev-lead.md'), 'utf8');
   const { body } = splitFrontmatter(raw);
   const trimmed = body.trim();
@@ -195,7 +195,7 @@ test('SM_SEED_AGENT_PERSONAS_DISABLE=1 short-circuits', async () => {
 // The upgrade pass only replaces an installed file once its body is proven
 // to match a version this app actually shipped (`shippedSeeds`). These
 // tests inject a fake `shippedSeeds` list instead of the real
-// `lib/shippedPersonaSeeds.cjs`, so a fixture body doesn't need to be one of
+// `lib/persona-macro/shippedPersonaSeeds.cjs`, so a fixture body doesn't need to be one of
 // dev-lead's real historical bodies — just a body whose hash the fake entry
 // declares as shipped.
 
@@ -222,7 +222,7 @@ test('upgrade uses the bundled model when the installed value only matches the s
 
   await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
 
-  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const { fm, body } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
   expect(fm.model).toBe('sonnet'); // 'fable' was just the old shipped default here, not a user choice
   expect(fm.seedVersion).toBe('3'); // bundled stamp, not the installed file's old one
@@ -235,7 +235,7 @@ test('upgrade keeps an installed model no shipped version ever had', async () =>
 
   await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
 
-  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const { fm } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
   expect(fm.model).toBe('us.anthropic.claude-sonnet-5');
 });
@@ -246,7 +246,7 @@ test('upgrade keeps a user-removed model line removed, not re-added from the bun
 
   await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
 
-  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const { fm } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
   expect(fm.model).toBeUndefined();
 });
@@ -257,7 +257,7 @@ test('upgrade keeps frontmatter keys the bundled persona never had', async () =>
 
   await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
 
-  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const { fm } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
   expect(fm.color).toBe('blue');
   expect(fm.tags).toBe('a, b');
@@ -281,7 +281,7 @@ test('upgrade preserves a model value containing regex-replacement syntax verbat
 
   await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
 
-  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const { fm } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
   expect(fm.model).toBe('$& and $1 and $$');
 });
@@ -293,7 +293,7 @@ test('an installed seedVersion: with an empty value reads as 1, so a bundled see
 
   await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
 
-  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const { fm } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
   expect(fm.seedVersion).toBe('3');
 });
@@ -358,8 +358,8 @@ test('a write failure (agents dir symlinked outside the allowed roots) never lea
 
 test("every bundled persona's body hash is present in the real shipped-seed manifest", () => {
   const { personaBodyHash } = require('../seedAgentPersonas.cjs');
-  const { SHIPPED_PERSONA_SEEDS } = require('../lib/shippedPersonaSeeds.cjs');
-  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { SHIPPED_PERSONA_SEEDS } = require('../lib/persona-macro/shippedPersonaSeeds.cjs');
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
 
   for (const name of ALL_PERSONAS) {
     const raw = fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', `${name}.md`), 'utf8');
@@ -426,7 +426,7 @@ test('the upgrade pass runs even when the marker says every persona is already s
 
   await seedAgentPersonas({ logger: silentLogger(), shippedSeeds: fakeDevLeadSeeds({ model: 'fable' }) });
 
-  const { splitFrontmatter } = require('../lib/prdFrontmatter.cjs');
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const { body } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
   expect(body).toContain('## Run contract'); // upgraded despite the marker being "done" and attempts exhausted
 });

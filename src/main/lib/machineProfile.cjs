@@ -15,7 +15,7 @@
 const os = require('node:os');
 const crypto = require('node:crypto');
 const path = require('node:path');
-const claudeBin = require('./claudeBin.cjs');
+const claudeBin = require('./claude/claudeBin.cjs');
 const { isPackagedApp } = require('./appRuntime.cjs');
 
 function resolveElectronApp() {

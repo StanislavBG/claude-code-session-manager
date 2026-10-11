@@ -36,13 +36,13 @@ Writes:
 ## Page invariants
 
 - The tag taxonomy is a closed union: `EpicTag` in `src/renderer/lib/tagLibrary.ts`, mirrored by `WORK_TYPES` in
-  `src/main/lib/workTypeLibrary.cjs`, kept in sync by `src/main/__tests__/workTypeLibrary.test.cjs`. Adding a tag is
+  `src/main/lib/prd/workTypeLibrary.cjs`, kept in sync by `src/main/__tests__/workTypeLibrary.test.cjs`. Adding a tag is
   a domain-model change (root `CLAUDE.md`), never a UI convenience.
 - The page is a full CRUD editor over tag assignment, not read-only (root `CLAUDE.md`, Domain model laws).
 - Tag is the Mission (what) and `agentType` is the Actor (who): two independent selections at Epic creation
   (`session-manager-operations/architecture/domain-model.md`). Keep the Tag and Agent libraries separate concepts
   even where they share persona storage.
-- Persona writes are validated by `src/main/lib/agentPersonaSchema.cjs`; a stale or foreign tag on a persona must be
+- Persona writes are validated by `src/main/lib/persona-macro/agentPersonaSchema.cjs`; a stale or foreign tag on a persona must be
   dropped before save (`toKnownTags` in the entry) rather than failing that schema.
 - The page is Home-face and machine-wide, so only the global agents directory is watched, with no per-project overlay.
   Reloads are sequence-guarded so a stale response never overwrites a fresher one.

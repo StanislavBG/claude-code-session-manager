@@ -44,7 +44,7 @@ test('no bare `.status = ` assignment on a job object outside scheduleJobTransit
 
 test('scheduler.cjs references transitionJob (the chokepoint is actually wired up)', () => {
   const content = fs.readFileSync(SCHEDULER_PATH, 'utf8');
-  expect(content).toMatch(/require\(['"]\.\/lib\/scheduleJobTransitions\.cjs['"]\)/);
+  expect(content).toMatch(/require\(['"]\.\/lib\/scheduler\/scheduleJobTransitions\.cjs['"]\)/);
   // At least as many call sites as the PRD's own enumerated list — guards
   // against someone reverting individual sites back to bare assignment
   // without reintroducing the literal `.status = ` grep hit (e.g. swapping

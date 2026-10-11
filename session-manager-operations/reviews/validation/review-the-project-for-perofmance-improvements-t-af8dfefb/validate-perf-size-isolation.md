@@ -14,7 +14,7 @@ All gates below were re-run in `/home/bilko/Projects/session-manager` (the main 
 ## 1508 — perf-tests-git-dates-not-sleeps — VERIFIED
 
 - `grep -c 'wait(1100)'` across the three files → 0; diff shows `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE` env passed to the commit helpers in all three.
-- `timeout 300 npx vitest run src/main/__tests__/scheduler-looks-done.test.cjs src/main/lib/__tests__/landedSinceRun.test.cjs src/main/__tests__/scheduler-guard-verdict-autoresolve.test.cjs` → 3 files / 42 passed, **Duration 1.05s** (baseline ~25s combined per the commit message).
+- `timeout 300 npx vitest run src/main/__tests__/scheduler-looks-done.test.cjs src/main/lib/scheduler/__tests__/landedSinceRun.test.cjs src/main/__tests__/scheduler-guard-verdict-autoresolve.test.cjs` → 3 files / 42 passed, **Duration 1.05s** (baseline ~25s combined per the commit message).
 - No production file touched (`git diff --stat` confirms only the three test files).
 
 ## 1509 — perf-vitest-fs-module-cache-ci-shard — VERIFIED
@@ -37,7 +37,7 @@ All gates below were re-run in `/home/bilko/Projects/session-manager` (the main 
 
 ## 1522 — repair-flaky-timeoutshim-otel-under-load — VERIFIED, with an environment caveat (see Findings)
 
-- `src/main/lib/__tests__/timeoutShim.test.cjs` — diff widens the gap between `DURATION` and the child's own handler-install race (commit `6b296755`). Re-run: all timeoutShim tests in the file pass.
+- `src/main/lib/process/__tests__/timeoutShim.test.cjs` — diff widens the gap between `DURATION` and the child's own handler-install race (commit `6b296755`). Re-run: all timeoutShim tests in the file pass.
 - `src/main/__tests__/otel.test.cjs` 'init resolves ok against an unreachable endpoint' **fails** when re-run now: `{ error: "resourceFromAttributes is not a function", ok: false }` instead of `{ ok: true }`.
   - Root-caused independently: `package.json`/`package-lock.json` pin `@opentelemetry/resources: ^2.11.0` (which exports `resourceFromAttributes`, used by `src/main/otel.cjs:38,94`), but this machine's installed `node_modules/@opentelemetry/resources` is `1.30.1` (`npm ls` shows `invalid: "^2.11.0" from the root project`). `git show 2ca4f607:package.json` already pinned `^2.11.0` — this node_modules/lockfile drift **predates the whole plan's base commit** and is not something any of the 18 PRDs introduced.
   - This matches the dev-lead's own diagnosis in commit `6b296755`'s message ("a stale/mismatched @opentelemetry/resources install... not a race in otel.cjs's init()") — independently confirmed correct.
@@ -85,13 +85,13 @@ All gates below were re-run in `/home/bilko/Projects/session-manager` (the main 
 
 ## 1519 — perf-flat-prd-sweep-mtime-gate — VERIFIED
 
-- `src/main/lib/prdMigration.cjs` adds the per-cwd `{exists, mtimeMs}` cache described in the PRD; test files were moved from `src/main/__tests__/` to `src/main/lib/__tests__/` to match the PRD's stated path (noted in commit `018628e9`, `scheduler.cjs` left untouched as the PRD allowed).
-- `timeout 300 npx vitest run src/main/lib/__tests__/prdMigration.test.cjs src/main/lib/__tests__/prdMigrationLegacyAdopt.test.cjs` → 2 files / 31 passed, 228ms.
+- `src/main/lib/prd/prdMigration.cjs` adds the per-cwd `{exists, mtimeMs}` cache described in the PRD; test files were moved from `src/main/__tests__/` to `src/main/lib/__tests__/` to match the PRD's stated path (noted in commit `018628e9`, `scheduler.cjs` left untouched as the PRD allowed).
+- `timeout 300 npx vitest run src/main/lib/prd/__tests__/prdMigration.test.cjs src/main/lib/__tests__/prdMigrationLegacyAdopt.test.cjs` → 2 files / 31 passed, 228ms.
 - Also directly ruled out as a cause of the full-suite regression found under 1526: swapping only commit `018628e9`'s `prdMigration.cjs` onto the base commit (base + this one file) left `scheduler-reconcile.test.cjs`, `scheduler-mechanical-recovery.test.cjs`, `scheduler-quarantine-autoresolve.test.cjs`, `prdCreateAdoption.test.cjs` all green — confirming 1519 is not implicated.
 
 ## 1520 — perf-history-terminal-incremental-parse — VERIFIED (PRD's own Gate path is wrong — Minor finding)
 
-- `src/main/lib/queueHistory.cjs` adds the `{offset, size, ino, map}` per-file cache described in the PRD.
+- `src/main/lib/scheduler/queueHistory.cjs` adds the `{offset, size, ino, map}` per-file cache described in the PRD.
 - The PRD's `# Gate` and `# Files` sections cite `src/main/lib/__tests__/queueHistory.test.cjs`, which does not exist. The real, pre-existing test file is `src/main/__tests__/queueHistory.test.cjs` (no `/lib/` segment; confirmed via `find`). Ran the real path: `timeout 300 npx vitest run src/main/__tests__/queueHistory.test.cjs` → 1 file / 31 passed, 272ms.
 - Minor finding: the PRD's authored Gate command would hard-fail ("No test files found, exiting with code 1") if ever re-run literally. See Findings.
 
@@ -168,7 +168,7 @@ See the full writeup and reproduction steps under "1526" above. Confirmed via gi
 ### Minor — PRD 1520's own `# Files`/`# Gate` sections cite a path that does not exist
 
 - **File**: PRD text (`1520-perf-history-terminal-incremental-parse.md`), referencing `src/main/lib/__tests__/queueHistory.test.cjs`
-- **Summary**: The real, pre-existing test file is `src/main/__tests__/queueHistory.test.cjs` (no `/lib/` segment). The source file `src/main/lib/queueHistory.cjs` the PRD also lists is correct; only the test path is wrong.
+- **Summary**: The real, pre-existing test file is `src/main/__tests__/queueHistory.test.cjs` (no `/lib/` segment). The source file `src/main/lib/scheduler/queueHistory.cjs` the PRD also lists is correct; only the test path is wrong.
 - **Failure scenario**: Re-running this PRD's literal Gate command gets "No test files found, exiting with code 1" even though the actual test suite (31 tests) is green.
 - **Recommendation**: No code change needed (the landed commit correctly ran the test at its real path); fix the archived PRD text if it is ever reused as a template.
 

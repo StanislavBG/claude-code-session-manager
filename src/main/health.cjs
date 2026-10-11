@@ -9,25 +9,25 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
-const { POLL_INTERVAL_MS, loadGateThreshold } = require('./lib/schedulerConfig.cjs');
+const { POLL_INTERVAL_MS, loadGateThreshold } = require('./lib/scheduler/schedulerConfig.cjs');
 const { opsPath } = require('./lib/opsOwnership.cjs');
-const { effectivePaused } = require('./lib/upgradeDrain.cjs');
-const { checkPersonaImports } = require('./lib/personaImportHealth.cjs');
-const { checkDelegationReadiness } = require('./lib/delegationReadiness.cjs');
-const { resolvePrdsDirs } = require('./lib/prdLocations.cjs');
-const { migratePrds } = require('./lib/prdMigration.cjs');
-const queueStore = require('./lib/queueStore.cjs');
-const schedulerPaths = require('./lib/schedulerPaths.cjs');
-const { evaluateDispatchLiveness } = require('./lib/watchdogHelpers.cjs');
+const { effectivePaused } = require('./lib/scheduler/upgradeDrain.cjs');
+const { checkPersonaImports } = require('./lib/persona-macro/personaImportHealth.cjs');
+const { checkDelegationReadiness } = require('./lib/epic/delegationReadiness.cjs');
+const { resolvePrdsDirs } = require('./lib/prd/prdLocations.cjs');
+const { migratePrds } = require('./lib/prd/prdMigration.cjs');
+const queueStore = require('./lib/scheduler/queueStore.cjs');
+const schedulerPaths = require('./lib/scheduler/schedulerPaths.cjs');
+const { evaluateDispatchLiveness } = require('./lib/scheduler/watchdogHelpers.cjs');
 const { computeStallSummary, computeDepHistorySatisfaction, FAILURE_STREAK_ESCALATION_MS } = require('./scheduler/budget.cjs');
 const { classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS } = require('./scheduler/starvation.cjs');
 const { REVERIFY_INTERVAL_MS } = require('./scheduler/reviewLadder.cjs');
-const { findStarvedProjects, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/schedulerBatch.cjs');
-const { auditLogPath, readTail } = require('./lib/auditLog.cjs');
+const { findStarvedProjects, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/scheduler/schedulerBatch.cjs');
+const { auditLogPath, readTail } = require('./lib/telemetry/auditLog.cjs');
 const { resolveBuildIdentity } = require('./lib/buildIdentity.cjs');
-const { computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/runLogRetention.cjs');
+const { computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/scheduler/runLogRetention.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
-const { scanEpicTranscripts } = require('./lib/epicTranscriptDiagnostic.cjs');
+const { scanEpicTranscripts } = require('./lib/epic/epicTranscriptDiagnostic.cjs');
 
 const MAX_LOG_AGE_MS = 5 * 60_000; // 5 min — warn if no logs this old
 const PROJECT_ROOT = path.resolve(__dirname, '../..');
@@ -108,7 +108,7 @@ function evaluateTickLiveness(queueState, heartbeat, now, runningCount) {
   // sessionSlots pool is the only limit. Read it lazily so this stays a pure
   // function of its args when a caller supplies slotCap explicitly.
   const concurrencyCap = queueState.slotCap
-    ?? (() => { try { return require('./lib/sessionSlots.cjs').totalSlots(); } catch { return Infinity; } })();
+    ?? (() => { try { return require('./lib/scheduler/sessionSlots.cjs').totalSlots(); } catch { return Infinity; } })();
 
   if (pending.length === 0) return { stalled: false, reason: 'no-pending-jobs' };
   if (effectivePaused(queueState)) return { stalled: false, reason: queueState.paused ? 'paused' : 'draining' };
@@ -899,7 +899,7 @@ async function check(opts = {}) {
       path: queuePath,
       jobs: Object.keys(queueState.jobs || {}).length,
       running: runningCount,
-      // Deliberate restart drain (lib/upgradeDrain.cjs) — reported so it is never read as a stall.
+      // Deliberate restart drain (lib/scheduler/upgradeDrain.cjs) — reported so it is never read as a stall.
       drain: queueState.drain?.active ? { since: queueState.drain.since ?? null, requestedAt: queueState.drain.requestedAt ?? null } : null,
       failed: failedCount,
       needsReview: needsReviewCount,

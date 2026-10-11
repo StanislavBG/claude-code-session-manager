@@ -25,7 +25,7 @@ beforeAll(() => {
   process.env.HOME = tmpHome;
   process.env.SM_JOB_WORKTREE_DISABLE = '1';
   scheduler = require('../scheduler.cjs');
-  queueStore = require('../lib/queueStore.cjs');
+  queueStore = require('../lib/scheduler/queueStore.cjs');
 });
 
 afterAll(() => {

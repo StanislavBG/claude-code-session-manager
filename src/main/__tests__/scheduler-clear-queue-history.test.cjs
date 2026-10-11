@@ -25,8 +25,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const queueHistory = require('../lib/queueHistory.cjs');
-const { projectHistoryPath } = require('../lib/queueStore.cjs');
+const queueHistory = require('../lib/scheduler/queueHistory.cjs');
+const { projectHistoryPath } = require('../lib/scheduler/queueStore.cjs');
 const scheduler = require('../scheduler.cjs');
 
 let tmpCwd;

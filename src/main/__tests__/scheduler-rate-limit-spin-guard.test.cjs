@@ -44,7 +44,7 @@ beforeAll(() => {
   // real wall-clock overhead this test does not need to pay 40 times over.
   process.env.SM_JOB_WORKTREE_DISABLE = '1';
   scheduler = require('../scheduler.cjs');
-  queueStore = require('../lib/queueStore.cjs');
+  queueStore = require('../lib/scheduler/queueStore.cjs');
 });
 
 afterAll(() => {

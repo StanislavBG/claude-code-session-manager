@@ -32,12 +32,12 @@ const path = require('node:path');
 const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'no-dead-end-status-test-'));
 process.env.HOME = tmpHome;
 
-const { JOB_STATUSES } = require('../lib/scheduleJobSchema.cjs');
+const { JOB_STATUSES } = require('../lib/scheduler/scheduleJobSchema.cjs');
 const { selectQuarantineAutoResolveTargets, QUARANTINE_RESOLVE_CAP, findStrandedInvestigations } = require('../scheduler/budget.cjs');
 const { INVESTIGATION_MAX_MS } = require('../scheduler.cjs');
 const { selectFailedAutoResetTargets, FAILED_AUTORESET_CAP, selectExhaustedNeedsReviewTargets, NEEDS_REVIEW_RESOLVE_CAP } = require('../scheduler/reviewLadder.cjs');
-const { selectReapableJobs } = require('../lib/reaperHelpers.cjs');
-const { pickForProject } = require('../lib/schedulerBatch.cjs');
+const { selectReapableJobs } = require('../lib/scheduler/reaperHelpers.cjs');
+const { pickForProject } = require('../lib/scheduler/schedulerBatch.cjs');
 
 const MIN_MS = 60_000;
 

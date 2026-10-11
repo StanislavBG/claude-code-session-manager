@@ -48,8 +48,8 @@ const { git, initRepo, registerActiveProject, writeProjectQueue } = require('./_
 const { applyNeedsReviewAutoResolve, reverifyNeedsReview } = require('../scheduler.cjs');
 const { selectExhaustedNeedsReviewTargets, NEEDS_REVIEW_RESOLVE_CAP, GUARD_VERDICT_EVIDENCE_ELIGIBLE, isGuardParkedWithoutAutoFix, isEligibleForNeedsReviewAutoResolve, isExhaustedAutoFix } = require('../scheduler/reviewLadder.cjs');
 
-const { pickForProject } = require('../lib/schedulerBatch.cjs');
-const { resolvePrdWriteDir } = require('../lib/prdLocations.cjs');
+const { pickForProject } = require('../lib/scheduler/schedulerBatch.cjs');
+const { resolvePrdWriteDir } = require('../lib/prd/prdLocations.cjs');
 
 const MIN_MS = 60_000;
 const THRESHOLD_MS = 30 * MIN_MS;

@@ -7,7 +7,7 @@ Live check requested by the PRD: **confirmed**. From this job worktree, `find "$
 
 ## Commits since base
 
-`git log --oneline 0cda1b51..HEAD -- src/seed/agents/validator.md src/main/lib/shippedPersonaSeeds.cjs src/main/__tests__/seedValidatorPersona.test.cjs`:
+`git log --oneline 0cda1b51..HEAD -- src/seed/agents/validator.md src/main/lib/persona-macro/shippedPersonaSeeds.cjs src/main/__tests__/seedValidatorPersona.test.cjs`:
 ```
 15b5249f fix(validator): resolve PRD files under $SM_PROJECT_ROOT, not the gitignored worktree path
 ```
@@ -25,8 +25,8 @@ Both PRDs landed on `sm-job/1536-validate-validator-prd-paths` HEAD `2b0b27c3` (
 | --- | --- |
 | `## Inputs` paragraph names `$SM_PROJECT_ROOT/.../epics/<epic>/`, `prds/` / `prds-archived/` (or timestamped subfolder), find-by-slug example, and states the folder is gitignored so never in the job worktree | `src/seed/agents/validator.md:14` — full paragraph present verbatim: `"PRD files live under \`$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/<epic>/\` — \`prds/\` while queued, \`prds-archived/\` (or a timestamped subfolder of it) once terminal; find by slug, e.g. \`find "$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/<epic>" -name '*<slug>.md'\`. This folder is gitignored, so it is never present in the job worktree — don't look for it there."` |
 | Same paragraph gives the queue.json/history.jsonl fallback, Minor (not Important) finding | `src/seed/agents/validator.md:14` — `"If a PRD file is missing, fall back to \`$SM_PROJECT_ROOT/session-manager-operations/scheduler/state/queue.json\` / \`history.jsonl\` for that slug's \`landedCommit\`, and record the missing file as a Minor (not Important) finding."` |
-| `seedVersion: 3`; body still ends `report them.`; under `AGENT_BODY_CHAR_CAP` | `src/seed/agents/validator.md:7` — `seedVersion: 3`. Body ends `"- Do the review once; do not loop on findings — report them."` (line 39). Measured body length (content after frontmatter, trimmed): 3302 chars, vs. `AGENT_BODY_CHAR_CAP = 6000` (`src/main/lib/agentModelResolve.cjs:184`). |
-| `shippedPersonaSeeds.cjs` `validator` array gains the new version's entry; manifest test passes | `src/main/lib/shippedPersonaSeeds.cjs:210-219` — new entry `bodySha256: "ca159cd47ac4b618af842c6ccd59107fac4a34b0efcfa5dfe7d06875736156ed"` appended after the prior 4 entries, same `fm` shape, `commit: "<fill in>"` placeholder as the PRD's own step 2 instructed when the commit isn't known yet. |
+| `seedVersion: 3`; body still ends `report them.`; under `AGENT_BODY_CHAR_CAP` | `src/seed/agents/validator.md:7` — `seedVersion: 3`. Body ends `"- Do the review once; do not loop on findings — report them."` (line 39). Measured body length (content after frontmatter, trimmed): 3302 chars, vs. `AGENT_BODY_CHAR_CAP = 6000` (`src/main/lib/claude/agentModelResolve.cjs:184`). |
+| `shippedPersonaSeeds.cjs` `validator` array gains the new version's entry; manifest test passes | `src/main/lib/persona-macro/shippedPersonaSeeds.cjs:210-219` — new entry `bodySha256: "ca159cd47ac4b618af842c6ccd59107fac4a34b0efcfa5dfe7d06875736156ed"` appended after the prior 4 entries, same `fm` shape, `commit: "<fill in>"` placeholder as the PRD's own step 2 instructed when the commit isn't known yet. |
 | New pinning test in `seedValidatorPersona.test.cjs`; both test files pass | `src/main/__tests__/seedValidatorPersona.test.cjs:124-131` — `test('the seeded validator body resolves PRD files under SM_PROJECT_ROOT, not the job worktree', ...)` asserts `$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/` and `prds-archived/` present, and the old worktree-relative phrase absent. |
 
 **Gate** (run from `$SM_PROJECT_ROOT`, same HEAD `2b0b27c3` as this worktree — this worktree has no `node_modules` installed, so the identical-commit main checkout was used instead):
@@ -53,7 +53,7 @@ Gate: `none` (doc-only PRD) — the per-criterion file reads above are the whole
 ```
 plugins/session-manager-dev/skills/develop/SKILL.md              |  6 ++++--
 src/main/__tests__/seedValidatorPersona.test.cjs                 | 11 +++++++++++
-src/main/lib/shippedPersonaSeeds.cjs                              | 10 ++++++++++
+src/main/lib/persona-macro/shippedPersonaSeeds.cjs                              | 10 ++++++++++
 src/seed/agents/validator.md                                      |  4 ++--
 4 files changed, 27 insertions(+), 4 deletions(-)
 ```

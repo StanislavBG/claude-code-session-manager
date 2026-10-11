@@ -8,10 +8,10 @@
 const { schemas, validated } = require('./ipcSchemas.cjs');
 const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
-const telemetrySettings = require('./lib/telemetrySettings.cjs');
-const telemetryClient = require('./lib/telemetryClient.cjs');
-const telemetryBacklog = require('./lib/telemetryBacklog.cjs');
-const telemetryConsent = require('./lib/telemetryConsent.cjs');
+const telemetrySettings = require('./lib/telemetry/telemetrySettings.cjs');
+const telemetryClient = require('./lib/telemetry/telemetryClient.cjs');
+const telemetryBacklog = require('./lib/telemetry/telemetryBacklog.cjs');
+const telemetryConsent = require('./lib/telemetry/telemetryConsent.cjs');
 
 /**
  * @param {{ ipcMain: any }} opts

@@ -11,8 +11,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 const path = require('node:path');
 const fs = require('node:fs');
-const { resolveClaudeBin, __resetForTests } = require('../claudeBin.cjs');
-const { userBinDirs, pathWithUserBins } = require('../cleanEnv.cjs');
+const { resolveClaudeBin, __resetForTests } = require('../claude/claudeBin.cjs');
+const { userBinDirs, pathWithUserBins } = require('../process/cleanEnv.cjs');
 
 const W = path.win32;
 const winEnv = {

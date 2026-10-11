@@ -13,7 +13,7 @@
 
 import { test, expect } from 'vitest';
 
-const { parsePrdFile, serializePrdFile, RECOGNIZED_KEYS } = require('../lib/prdFrontmatter.cjs');
+const { parsePrdFile, serializePrdFile, RECOGNIZED_KEYS } = require('../lib/prd/prdFrontmatter.cjs');
 
 test('disposition is a recognized key', () => {
   expect(RECOGNIZED_KEYS.has('disposition')).toBe(true);

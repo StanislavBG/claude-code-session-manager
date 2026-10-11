@@ -21,8 +21,8 @@ const os = require('node:os');
 
 const { z } = require('zod');
 const { assertInsideHome } = require('./lib/insideHome.cjs');
-const { expandHome } = require('./lib/expandHome.cjs');
-const atomicFs = require('./lib/atomicFs.cjs');
+const { expandHome } = require('./lib/util/expandHome.cjs');
+const atomicFs = require('./lib/util/atomicFs.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
 
 /**

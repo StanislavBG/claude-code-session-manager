@@ -9,10 +9,10 @@ const job = start === -1 ? '' : yml.slice(start)
 
 const UNIT_FILES = [
   'src/main/lib/__tests__/claudeBin-win32.test.cjs',
-  'src/main/lib/__tests__/defaultShell.test.cjs',
-  'src/main/lib/__tests__/killTree.test.cjs',
+  'src/main/lib/process/__tests__/defaultShell.test.cjs',
+  'src/main/lib/process/__tests__/killTree.test.cjs',
   'src/main/lib/__tests__/winPaths.test.cjs',
-  'src/main/lib/__tests__/winSpawn.test.cjs',
+  'src/main/lib/process/__tests__/winSpawn.test.cjs',
   'src/main/lib/__tests__/openExternalApp-win32.test.cjs',
   'src/main/lib/__tests__/appRuntime.test.cjs',
   'src/main/lib/__tests__/prereqs.test.cjs',

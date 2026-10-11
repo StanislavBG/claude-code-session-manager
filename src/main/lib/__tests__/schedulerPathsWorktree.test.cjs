@@ -13,8 +13,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const gitWorktree = require('../gitWorktree.cjs');
-const schedulerPaths = require('../schedulerPaths.cjs');
+const gitWorktree = require('../git/gitWorktree.cjs');
+const schedulerPaths = require('../scheduler/schedulerPaths.cjs');
 const { isEphemeralCwd } = require('../ephemeralCwd.cjs');
 
 let scratch;

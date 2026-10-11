@@ -37,7 +37,7 @@ fs.mkdirSync(PROJECT_CWD, { recursive: true });
 const { applyNeedsReviewAutoResolve, resetJobFields } = require('../scheduler.cjs');
 const { selectExhaustedNeedsReviewTargets, NEEDS_REVIEW_RESOLVE_CAP, needsReviewAutoResolveDisabled } = require('../scheduler/reviewLadder.cjs');
 
-const { pickForProject } = require('../lib/schedulerBatch.cjs');
+const { pickForProject } = require('../lib/scheduler/schedulerBatch.cjs');
 
 const MIN_MS = 60_000;
 const THRESHOLD_MS = 30 * MIN_MS;

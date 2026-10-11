@@ -15,9 +15,9 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { ensureEpic, removeEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epicMint.cjs');
-const { mergeActiveIndex } = require('../lib/activeIndexMerge.cjs');
-const { epicMirrorPath } = require('../lib/epicStatusMirror.cjs');
+const { ensureEpic, removeEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epic/epicMint.cjs');
+const { mergeActiveIndex } = require('../lib/epic/activeIndexMerge.cjs');
+const { epicMirrorPath } = require('../lib/epic/epicStatusMirror.cjs');
 const config = require('../config.cjs');
 
 const tmpDirs = [];

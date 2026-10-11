@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { createRequire } from 'node:module'
 
 const requireCjs = createRequire(import.meta.url)
-const { classifyFailure, stripHarnessInitEvents } = requireCjs('../../src/main/lib/rcaReport.cjs')
+const { classifyFailure, stripHarnessInitEvents } = requireCjs('../../src/main/lib/scheduler/rcaReport.cjs')
 
 // Real init line shape from sigma run 2026-09-20T18-17-03-476Z (tools list abbreviated).
 const INIT_LINE =

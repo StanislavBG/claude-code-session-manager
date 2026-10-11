@@ -35,9 +35,9 @@ process.env.HOME = tmpHome;
 
 const { spawnInvestigation } = require('../scheduler.cjs');
 const { selectGateShadowTarget } = require('../scheduler/reviewLadder.cjs');
-const { bustCwdCache } = require('../lib/queueStore.cjs');
-const runtimeState = require('../lib/schedulerRuntimeState.cjs');
-const { GATE_AUTHORITY_VERDICTS } = require('../lib/gateAuthority.cjs');
+const { bustCwdCache } = require('../lib/scheduler/queueStore.cjs');
+const runtimeState = require('../lib/scheduler/schedulerRuntimeState.cjs');
+const { GATE_AUTHORITY_VERDICTS } = require('../lib/scheduler/gateAuthority.cjs');
 
 const VERDICT = GATE_AUTHORITY_VERDICTS[0]; // 'transcript_errors'
 

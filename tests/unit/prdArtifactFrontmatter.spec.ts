@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { parsePrdFile, serializePrdFile } = require('../../src/main/lib/prdFrontmatter.cjs');
+const { parsePrdFile, serializePrdFile } = require('../../src/main/lib/prd/prdFrontmatter.cjs');
 
 const wrap = (fm: string) => `---\n${fm}\n---\n# Goal\nbody\n`;
 

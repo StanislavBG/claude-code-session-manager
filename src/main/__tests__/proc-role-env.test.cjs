@@ -12,8 +12,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 
-const { cleanChildEnv, withProcRole, inferProcRole } = require('../lib/cleanEnv.cjs');
-const { runClaudeP } = require('../lib/runClaudeP.cjs');
+const { cleanChildEnv, withProcRole, inferProcRole } = require('../lib/process/cleanEnv.cjs');
+const { runClaudeP } = require('../lib/claude/runClaudeP.cjs');
 const { runDocEdit } = require('../docEdit.cjs');
 
 const SM_PS = path.join(__dirname, '..', '..', '..', 'scripts', 'sm-ps.cjs');

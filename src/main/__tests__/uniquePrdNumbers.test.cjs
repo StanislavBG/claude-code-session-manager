@@ -15,7 +15,7 @@ const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-832-home-'));
 process.env.HOME = tmpHome;
 
 const prdParser = require('../scheduler/prdParser.cjs');
-const { pickForProject } = require('../lib/schedulerBatch.cjs');
+const { pickForProject } = require('../lib/scheduler/schedulerBatch.cjs');
 
 function tmpdir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'sm-832-'));

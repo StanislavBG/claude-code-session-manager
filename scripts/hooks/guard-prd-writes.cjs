@@ -40,12 +40,12 @@
  * ── Adopting this hook in a DIFFERENT (non-session-manager) project ──────
  * DON'T HAND-WRITE THIS. Session Manager installs it: open New Session in
  * that project and press "Fix it" on the readiness banner's PRD-write-guard
- * row (src/main/lib/delegationReadiness.cjs's installPrdWriteGuard, which
+ * row (src/main/lib/epic/delegationReadiness.cjs's installPrdWriteGuard, which
  * merges into any existing hooks block instead of clobbering it).
  *
  * Adopted by REFERENCE through the stable shim
  * `~/.claude/session-manager/hooks/guard-prd-writes.cjs`, written by
- * src/main/lib/guardShims.cjs (installed by src/main/lib/delegationReadiness.cjs).
+ * src/main/lib/guardShims.cjs (installed by src/main/lib/epic/delegationReadiness.cjs).
  * The shim carries no guard logic — it reads `app-root.json` and require()s this
  * file from the currently running app, so an app upgrade never breaks an adopter.
  * Never vendor: do not copy this file into another repo, and do not hardcode an

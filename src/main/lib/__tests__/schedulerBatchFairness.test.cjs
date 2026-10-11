@@ -12,7 +12,7 @@
 const assert = require('node:assert/strict');
 const {
   pickNextBatch, enqueueTimestamp, findStarvedProjects,
-} = require('../schedulerBatch.cjs');
+} = require('../scheduler/schedulerBatch.cjs');
 
 const A = '/home/user/Projects/starry-night-ships';
 const B = '/home/user/Projects/social-signals-trader';

@@ -28,7 +28,7 @@
 const path = require('node:path');
 const config = require('../config.cjs');
 
-const { historyRollupPath } = require('./schedulerPaths.cjs');
+const { historyRollupPath } = require('./scheduler/schedulerPaths.cjs');
 const COMPACT_THRESHOLD_BYTES = 5 * 1024 * 1024;
 
 const TOTALS_MODEL_ID = '';

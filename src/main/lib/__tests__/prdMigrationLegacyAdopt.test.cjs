@@ -28,8 +28,8 @@ beforeAll(() => {
   originalHome = process.env.HOME;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-legacy-adopt-home-'));
   process.env.HOME = tmpHome;
-  ({ legacyAdoptExistingPrds } = require('../prdMigration.cjs'));
-  ({ parsePrdFile } = require('../prdFrontmatter.cjs'));
+  ({ legacyAdoptExistingPrds } = require('../prd/prdMigration.cjs'));
+  ({ parsePrdFile } = require('../prd/prdFrontmatter.cjs'));
 });
 
 afterAll(() => {

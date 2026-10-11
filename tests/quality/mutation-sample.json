@@ -3,90 +3,90 @@
   "seed": 1,
   "modules": [
     {
-      "src": "src/main/lib/atomicFs.cjs",
+      "src": "src/main/lib/util/atomicFs.cjs",
       "mutants": [
         {
-          "id": "src/main/lib/atomicFs.cjs:33:37:true->false",
+          "id": "src/main/lib/util/atomicFs.cjs:33:37:true->false",
           "line": 33,
           "op": "true->false",
           "killedBy": [
-            "src/main/lib/__tests__/atomicFs.test.cjs"
+            "src/main/lib/util/__tests__/atomicFs.test.cjs"
           ],
           "survived": false
         },
         {
-          "id": "src/main/lib/atomicFs.cjs:39:11:if->if-not",
+          "id": "src/main/lib/util/atomicFs.cjs:39:11:if->if-not",
           "line": 39,
           "op": "if->if-not",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/atomicFs.cjs:42:11:if->if-not",
+          "id": "src/main/lib/util/atomicFs.cjs:42:11:if->if-not",
           "line": 42,
           "op": "if->if-not",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/atomicFs.cjs:55:34:true->false",
+          "id": "src/main/lib/util/atomicFs.cjs:55:34:true->false",
           "line": 55,
           "op": "true->false",
           "killedBy": [
-            "src/main/lib/__tests__/atomicFs.test.cjs"
+            "src/main/lib/util/__tests__/atomicFs.test.cjs"
           ],
           "survived": false
         },
         {
-          "id": "src/main/lib/atomicFs.cjs:61:11:if->if-not",
+          "id": "src/main/lib/util/atomicFs.cjs:61:11:if->if-not",
           "line": 61,
           "op": "if->if-not",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/atomicFs.cjs:64:11:if->if-not",
+          "id": "src/main/lib/util/atomicFs.cjs:64:11:if->if-not",
           "line": 64,
           "op": "if->if-not",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/atomicFs.cjs:75:52:true->false",
+          "id": "src/main/lib/util/atomicFs.cjs:75:52:true->false",
           "line": 75,
           "op": "true->false",
           "killedBy": [
-            "src/main/lib/__tests__/atomicFs.test.cjs"
+            "src/main/lib/util/__tests__/atomicFs.test.cjs"
           ],
           "survived": false
         },
         {
-          "id": "src/main/lib/atomicFs.cjs:91:9:if->if-not",
+          "id": "src/main/lib/util/atomicFs.cjs:91:9:if->if-not",
           "line": 91,
           "op": "if->if-not",
           "killedBy": [
-            "src/main/lib/__tests__/atomicFs.test.cjs"
+            "src/main/lib/util/__tests__/atomicFs.test.cjs"
           ],
           "survived": false
         },
         {
-          "id": "src/main/lib/atomicFs.cjs:91:20:===->!==",
+          "id": "src/main/lib/util/atomicFs.cjs:91:20:===->!==",
           "line": 91,
           "op": "===->!==",
           "killedBy": [
-            "src/main/lib/__tests__/atomicFs.test.cjs"
+            "src/main/lib/util/__tests__/atomicFs.test.cjs"
           ],
           "survived": false
         },
         {
-          "id": "src/main/lib/atomicFs.cjs:101:9:if->if-not",
+          "id": "src/main/lib/util/atomicFs.cjs:101:9:if->if-not",
           "line": 101,
           "op": "if->if-not",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/atomicFs.cjs:101:20:===->!==",
+          "id": "src/main/lib/util/atomicFs.cjs:101:20:===->!==",
           "line": 101,
           "op": "===->!==",
           "killedBy": [],
@@ -94,66 +94,66 @@
         }
       ],
       "tests": {
-        "src/main/lib/__tests__/atomicFs.test.cjs": {
+        "src/main/lib/util/__tests__/atomicFs.test.cjs": {
           "kills": 5,
           "uniqueKills": 5
         }
       }
     },
     {
-      "src": "src/main/lib/epicMint.cjs",
+      "src": "src/main/lib/epic/epicMint.cjs",
       "mutants": [
         {
-          "id": "src/main/lib/epicMint.cjs:90:63:&&->||",
+          "id": "src/main/lib/epic/epicMint.cjs:90:63:&&->||",
           "line": 90,
           "op": "&&->||",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/epicMint.cjs:91:46:===->!==",
+          "id": "src/main/lib/epic/epicMint.cjs:91:46:===->!==",
           "line": 91,
           "op": "===->!==",
           "killedBy": [
-            "src/main/lib/__tests__/activeIndexRebuild.test.cjs"
+            "src/main/lib/epic/__tests__/activeIndexRebuild.test.cjs"
           ],
           "survived": false
         },
         {
-          "id": "src/main/lib/epicMint.cjs:98:26:&&->||",
+          "id": "src/main/lib/epic/epicMint.cjs:98:26:&&->||",
           "line": 98,
           "op": "&&->||",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/epicMint.cjs:98:54:===->!==",
+          "id": "src/main/lib/epic/epicMint.cjs:98:54:===->!==",
           "line": 98,
           "op": "===->!==",
           "killedBy": [
-            "src/main/lib/__tests__/activeIndexRebuild.test.cjs"
+            "src/main/lib/epic/__tests__/activeIndexRebuild.test.cjs"
           ],
           "survived": false
         },
         {
-          "id": "src/main/lib/epicMint.cjs:98:67:&&->||",
+          "id": "src/main/lib/epic/epicMint.cjs:98:67:&&->||",
           "line": 98,
           "op": "&&->||",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/epicMint.cjs:195:51:||->&&",
+          "id": "src/main/lib/epic/epicMint.cjs:195:51:||->&&",
           "line": 195,
           "op": "||->&&",
           "killedBy": [
             "src/main/__tests__/epicMintTelemetryTap.test.cjs",
-            "src/main/lib/__tests__/activeIndexRebuild.test.cjs"
+            "src/main/lib/epic/__tests__/activeIndexRebuild.test.cjs"
           ],
           "survived": false
         },
         {
-          "id": "src/main/lib/epicMint.cjs:229:26:!==->===",
+          "id": "src/main/lib/epic/epicMint.cjs:229:26:!==->===",
           "line": 229,
           "op": "!==->===",
           "killedBy": [
@@ -162,7 +162,7 @@
           "survived": false
         },
         {
-          "id": "src/main/lib/epicMint.cjs:246:9:if->if-not",
+          "id": "src/main/lib/epic/epicMint.cjs:246:9:if->if-not",
           "line": 246,
           "op": "if->if-not",
           "killedBy": [
@@ -171,14 +171,14 @@
           "survived": false
         },
         {
-          "id": "src/main/lib/epicMint.cjs:246:24:&&->||",
+          "id": "src/main/lib/epic/epicMint.cjs:246:24:&&->||",
           "line": 246,
           "op": "&&->||",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/epicMint.cjs:248:11:if->if-not",
+          "id": "src/main/lib/epic/epicMint.cjs:248:11:if->if-not",
           "line": 248,
           "op": "if->if-not",
           "killedBy": [
@@ -187,7 +187,7 @@
           "survived": false
         },
         {
-          "id": "src/main/lib/epicMint.cjs:248:57:||->&&",
+          "id": "src/main/lib/epic/epicMint.cjs:248:57:||->&&",
           "line": 248,
           "op": "||->&&",
           "killedBy": [
@@ -196,14 +196,14 @@
           "survived": false
         },
         {
-          "id": "src/main/lib/epicMint.cjs:248:77:===->!==",
+          "id": "src/main/lib/epic/epicMint.cjs:248:77:===->!==",
           "line": 248,
           "op": "===->!==",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/epicMint.cjs:281:16:!==->===",
+          "id": "src/main/lib/epic/epicMint.cjs:281:16:!==->===",
           "line": 281,
           "op": "!==->===",
           "killedBy": [
@@ -212,7 +212,7 @@
           "survived": false
         },
         {
-          "id": "src/main/lib/epicMint.cjs:295:9:if->if-not",
+          "id": "src/main/lib/epic/epicMint.cjs:295:9:if->if-not",
           "line": 295,
           "op": "if->if-not",
           "killedBy": [
@@ -221,35 +221,35 @@
           "survived": false
         },
         {
-          "id": "src/main/lib/epicMint.cjs:339:24:===->!==",
+          "id": "src/main/lib/epic/epicMint.cjs:339:24:===->!==",
           "line": 339,
           "op": "===->!==",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/epicMint.cjs:339:37:&&->||",
+          "id": "src/main/lib/epic/epicMint.cjs:339:37:&&->||",
           "line": 339,
           "op": "&&->||",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/epicMint.cjs:340:38:&&->||",
+          "id": "src/main/lib/epic/epicMint.cjs:340:38:&&->||",
           "line": 340,
           "op": "&&->||",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/epicMint.cjs:366:46:||->&&",
+          "id": "src/main/lib/epic/epicMint.cjs:366:46:||->&&",
           "line": 366,
           "op": "||->&&",
           "killedBy": [],
           "survived": true
         },
         {
-          "id": "src/main/lib/epicMint.cjs:384:39:true->false",
+          "id": "src/main/lib/epic/epicMint.cjs:384:39:true->false",
           "line": 384,
           "op": "true->false",
           "killedBy": [
@@ -258,7 +258,7 @@
           "survived": false
         },
         {
-          "id": "src/main/lib/epicMint.cjs:386:39:true->false",
+          "id": "src/main/lib/epic/epicMint.cjs:386:39:true->false",
           "line": 386,
           "op": "true->false",
           "killedBy": [
@@ -268,7 +268,7 @@
         }
       ],
       "tests": {
-        "src/main/lib/__tests__/activeIndexRebuild.test.cjs": {
+        "src/main/lib/epic/__tests__/activeIndexRebuild.test.cjs": {
           "kills": 3,
           "uniqueKills": 2
         },

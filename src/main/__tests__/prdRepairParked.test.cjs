@@ -42,7 +42,7 @@ beforeAll(() => {
   process.env.HOME = tmpHome;
 
   scheduler = require('../scheduler.cjs');
-  queueStore = require('../lib/queueStore.cjs');
+  queueStore = require('../lib/scheduler/queueStore.cjs');
   config = require('../config.cjs');
   ({ resetRefusalMessage } = scheduler);
 

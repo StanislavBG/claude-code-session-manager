@@ -30,8 +30,8 @@ try {
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
-const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
-const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claudeBin.cjs');
+const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs');
+const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
 

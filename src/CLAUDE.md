@@ -8,8 +8,8 @@ Part of the **DESKTOP HARNESS** partition, except `main/projectPages.cjs`
 
 - `main/` — Electron main process. Entry modules (`index.cjs`, `scheduler.cjs`, …), `lib/`
   (shared helpers, schemas, guard shims), `scheduler/prdParser.cjs`, `templates/`, `__tests__/`.
-- `preload/` — `api.d.ts` is the hand-maintained IPC contract. `main/lib/agentPersonaSchema.cjs`,
-  `main/lib/scheduleJobSchema.cjs` and `main/ipcSchemas.cjs` (zod) mirror it by interface
+- `preload/` — `api.d.ts` is the hand-maintained IPC contract. `main/lib/persona-macro/agentPersonaSchema.cjs`,
+  `main/lib/scheduler/scheduleJobSchema.cjs` and `main/ipcSchemas.cjs` (zod) mirror it by interface
   NAME (`ScheduleJob`, `AgentPersonaSaveInput`, …) — cite names, never line numbers.
 - `renderer/` — React app; has its own [`CLAUDE.md`](renderer/CLAUDE.md).
 - `seed/agents/` — the personas `main/seedAgentPersonas.cjs` copies to `~/.claude/agents`.

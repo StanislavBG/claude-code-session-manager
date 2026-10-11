@@ -31,8 +31,8 @@ beforeAll(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-transcripts-wt-home-'));
   process.env.HOME = tmpHome;
   tr = require('../transcripts.cjs');
-  resolver = require('../lib/epicTranscriptPath.cjs');
-  ({ encodeCwd } = require('../lib/encodeCwd.cjs'));
+  resolver = require('../lib/epic/epicTranscriptPath.cjs');
+  ({ encodeCwd } = require('../lib/util/encodeCwd.cjs'));
 });
 
 afterAll(() => {

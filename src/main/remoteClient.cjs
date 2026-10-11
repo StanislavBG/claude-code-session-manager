@@ -7,11 +7,11 @@
 
 const crypto = require('node:crypto');
 const path = require('node:path');
-const { claudeHome } = require('./lib/schedulerPaths.cjs');
-const { writeJsonAtomicSync, readJsonOrSync } = require('./lib/atomicFs.cjs');
-const { generateE2EKeyPair, deriveSessionKey, deriveSas, encryptBox, decryptBox } = require('./lib/remoteE2eCrypto.cjs');
+const { claudeHome } = require('./lib/scheduler/schedulerPaths.cjs');
+const { writeJsonAtomicSync, readJsonOrSync } = require('./lib/util/atomicFs.cjs');
+const { generateE2EKeyPair, deriveSessionKey, deriveSas, encryptBox, decryptBox } = require('./lib/feedback-remote/remoteE2eCrypto.cjs');
 const { ALLOWED_COMMANDS } = require('./ipcSchemas.cjs');
-const { relayClientAuth } = require('./lib/relayClientAuth.cjs');
+const { relayClientAuth } = require('./lib/feedback-remote/relayClientAuth.cjs');
 
 // Hard-coded wss:// — same relay URL as webRemote.cjs, no plaintext downgrade.
 const RELAY_WSS_URL = 'wss://bilko.run/projects/session-manager/relay';

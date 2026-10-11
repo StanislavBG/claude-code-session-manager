@@ -5,7 +5,7 @@
  * The scheduler's private `concurrencyCap` is retired: the machine-wide
  * sessionSlots pool is the ONLY concurrency limit, so effectiveConcurrency
  * now reports the pool (and its SM_SESSION_SLOTS override), not a config
- * field. See lib/sessionSlots.cjs's charter — caps belong to Session-Manager,
+ * field. See lib/scheduler/sessionSlots.cjs's charter — caps belong to Session-Manager,
  * not to each consumer.
  *
  * Run: timeout 300 npx vitest run src/main/__tests__/scheduler-effective-concurrency.test.cjs
@@ -15,7 +15,7 @@
 
 import { test, expect, beforeEach, afterEach } from 'vitest';
 const { buildScheduleStatePayload } = require('../scheduler.cjs');
-const sessionSlots = require('../lib/sessionSlots.cjs');
+const sessionSlots = require('../lib/scheduler/sessionSlots.cjs');
 
 const ENV_KEY = 'SM_SESSION_SLOTS';
 let savedEnv;

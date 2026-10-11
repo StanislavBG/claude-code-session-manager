@@ -1,5 +1,5 @@
 /**
- * extractJson.test.cjs — unit tests for lib/extractJson.cjs, the shared
+ * extractJson.test.cjs — unit tests for lib/util/extractJson.cjs, the shared
  * brace-matching JSON extractor used by memoryAggregate.cjs and
  * chatRunner.cjs's parseStopSignal.
  *
@@ -10,7 +10,7 @@
 
 import { test } from 'vitest';
 const assert = require('node:assert/strict');
-const { extractJson } = require('../lib/extractJson.cjs');
+const { extractJson } = require('../lib/util/extractJson.cjs');
 
 test('plain JSON object → parsed object', () => {
   assert.deepEqual(extractJson('{"a":1}'), { a: 1 });

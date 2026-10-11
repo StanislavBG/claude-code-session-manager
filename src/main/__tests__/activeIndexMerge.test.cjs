@@ -1,6 +1,6 @@
 /**
  * activeIndexMerge.test.cjs — unit tests for the main-process read-merge-write
- * of a cwd's prompt-sessions/active-index.json (lib/activeIndexMerge.cjs),
+ * of a cwd's prompt-sessions/active-index.json (lib/epic/activeIndexMerge.cjs),
  * moved here from the renderer (state/promptSessions.ts's old
  * persistActiveIndex, commit 3d12e19) so the merge runs inside the same
  * withPathLock instance epicMint.cjs's ensureEpic already serializes through.
@@ -20,8 +20,8 @@ import { test, expect, afterEach } from 'vitest';
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { mergeActiveIndex } = require('../lib/activeIndexMerge.cjs');
-const { ensureEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epicMint.cjs');
+const { mergeActiveIndex } = require('../lib/epic/activeIndexMerge.cjs');
+const { ensureEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epic/epicMint.cjs');
 const { appendResponseEventIfKnown } = require('../promptSessionEvents.cjs');
 const config = require('../config.cjs');
 

@@ -14,7 +14,7 @@ const { execFileSync, spawn } = require('node:child_process');
 const path = require('node:path');
 const fsp = require('node:fs/promises');
 const { shell } = require('electron');
-const { cleanChildEnv } = require('./cleanEnv.cjs');
+const { cleanChildEnv } = require('./process/cleanEnv.cjs');
 
 // IMAGE_RE — extensions opened in the OS default viewer, not a code editor.
 // Keep in sync with the comment in index.cjs open-file-in-editor handler.

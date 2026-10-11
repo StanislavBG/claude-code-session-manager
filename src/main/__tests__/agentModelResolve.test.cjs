@@ -19,7 +19,7 @@ const {
   findAgentTypeByClaudeSessionId,
   readOverlayAwarePersonaModel,
   resolvePrdPersonaForSpawn,
-} = require('../lib/agentModelResolve.cjs');
+} = require('../lib/claude/agentModelResolve.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -132,7 +132,7 @@ test('readOverlayAwarePersonaModel returns null (does not throw) for a persona d
   expect(() => readOverlayAwarePersonaModel('deleted-persona', { globalDir, validatePath: noopValidatePath, cwd })).not.toThrow();
   expect(readOverlayAwarePersonaModel('deleted-persona', { globalDir, validatePath: noopValidatePath, cwd })).toBeNull();
 
-  const { todayFile } = require('../lib/opsErrorLog.cjs');
+  const { todayFile } = require('../lib/telemetry/opsErrorLog.cjs');
   const lines = fs.readFileSync(todayFile(cwd), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const matches = lines.filter((l) => l.message.includes('deleted-persona'));
   // Logged once despite two readOverlayAwarePersonaModel calls above — dedup key is (cwd, agentType).
@@ -179,7 +179,7 @@ test('resolvePrdPersonaForSpawn falls back without throwing when agentType no lo
   await expect(call()).resolves.toEqual({ model: FALLBACK_MODEL, systemPrompt: null, personaPath: null });
   await call(); // second call must not log a second line (dedup)
 
-  const { todayFile } = require('../lib/opsErrorLog.cjs');
+  const { todayFile } = require('../lib/telemetry/opsErrorLog.cjs');
   const lines = fs.readFileSync(todayFile(cwd), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const matches = lines.filter((l) => l.message.includes('ghost-persona'));
   expect(matches).toHaveLength(1);
@@ -245,7 +245,7 @@ test('resolveEpicModel falls back to FALLBACK_MODEL (never throws) for a danglin
   expect(call()).toBe(FALLBACK_MODEL);
   call(); // second call must not log a second line (dedup per (cwd, agentType))
 
-  const { todayFile } = require('../lib/opsErrorLog.cjs');
+  const { todayFile } = require('../lib/telemetry/opsErrorLog.cjs');
   const lines = fs.readFileSync(todayFile(cwd), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
   const matches = lines.filter((l) => l.message.includes('ghost-persona'));
   expect(matches).toHaveLength(1);

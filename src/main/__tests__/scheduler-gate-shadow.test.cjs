@@ -31,10 +31,10 @@ process.env.HOME = tmpHome;
 process.env.SM_AUTOFIX_DISABLE = '1';
 
 const { runGateShadow, reverifyNeedsReview, awaitGateShadowIdle } = require('../scheduler.cjs');
-const { runGateSequence } = require('../lib/definitionOfDone.cjs');
-const { resolveEpicPrdWriteDir } = require('../lib/prdLocations.cjs');
-const { bustCwdCache } = require('../lib/queueStore.cjs');
-const { auditLogPath } = require('../lib/auditLog.cjs');
+const { runGateSequence } = require('../lib/scheduler/definitionOfDone.cjs');
+const { resolveEpicPrdWriteDir } = require('../lib/prd/prdLocations.cjs');
+const { bustCwdCache } = require('../lib/scheduler/queueStore.cjs');
+const { auditLogPath } = require('../lib/telemetry/auditLog.cjs');
 
 function git(args, cwd) { return execFileSync('git', args, { cwd, encoding: 'utf8' }); }
 

@@ -21,8 +21,8 @@ const fsp = require('node:fs/promises');
 const fsSync = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
-const { resolveMergedPersona, PERSONA_NAME_RE } = require('./lib/personaMerge.cjs');
+const { splitFrontmatter } = require('./lib/prd/prdFrontmatter.cjs');
+const { resolveMergedPersona, PERSONA_NAME_RE } = require('./lib/persona-macro/personaMerge.cjs');
 const configMgr = require('./config.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
 
@@ -36,7 +36,7 @@ function parseTools(raw) {
 const ALL_PROJECTS = '*';
 
 /**
- * Frontmatter values are single-line (see lib/prdFrontmatter.cjs) but an
+ * Frontmatter values are single-line (see lib/prd/prdFrontmatter.cjs) but an
  * Action's opening instruction is genuinely multi-line prose (the builder
  * action is `/builder\n\n<instruction>`). Encode newlines as a literal `\n`
  * two-char sequence on the way out, decode on the way in — one place, so the
@@ -92,7 +92,7 @@ function serializePersona({ name, description, tools, model, effort, color, tags
 /**
  * Project OVERRIDE write: a frontmatter-only overlay at
  * `<cwd>/.claude/agents/<name>.md` carrying ONLY the overridden `model` /
- * `effort` keys and no body (lib/personaMerge.cjs inherits everything else
+ * `effort` keys and no body (lib/persona-macro/personaMerge.cjs inherits everything else
  * from the global persona). Keys already in an existing frontmatter-only
  * overlay are preserved; an existing overlay that has a BODY is refused so a
  * full-body overlay is never silently converted. Both keys unset removes the
@@ -344,7 +344,7 @@ async function listPersonas({
 
 /**
  * Reads a persona for `epicIntake.ts`'s `agentBody` input and the PRD spawn
- * path, through the shared overlay-over-global MERGE (lib/personaMerge.cjs —
+ * path, through the shared overlay-over-global MERGE (lib/persona-macro/personaMerge.cjs —
  * see its header for the rules). Returns `{ path, text, fm, body, fromOverlay,
  * bodySource, provenance, overlayIssue }` where `fm`/`body` are the MERGED
  * view, `provenance[key]` says which frontmatter keys came from the overlay,

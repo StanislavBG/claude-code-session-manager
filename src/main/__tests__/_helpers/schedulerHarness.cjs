@@ -35,7 +35,7 @@ function registerActiveProject(cwd, slug) {
   const slugDir = path.join(projectsDir, slug || `fake-project-slug-${path.basename(cwd)}`);
   fs.mkdirSync(slugDir, { recursive: true });
   fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
-  if (slug) require('../../lib/queueStore.cjs').bustCwdCache();
+  if (slug) require('../../lib/scheduler/queueStore.cjs').bustCwdCache();
 }
 
 function writeProjectQueue(cwd, jobs) {

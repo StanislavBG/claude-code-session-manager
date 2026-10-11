@@ -40,12 +40,12 @@ Commit: `9b16deb5` (child), merged at `55b3ffd0` — `src/main/scheduler.cjs`,
 
 ## PRD 1444 — liveness-persistent-tick-wedged-is-dead
 
-Commit: `a5fd8274` — `src/main/lib/watchdogHelpers.cjs`,
+Commit: `a5fd8274` — `src/main/lib/scheduler/watchdogHelpers.cjs`,
 `src/main/lib/__tests__/watchdog-helpers.test.cjs`.
 
 **Verdict: VERIFIED**
 
-- AC1 (`DEFAULT_TICK_WEDGED_DEAD_MS` export, new param, branch ordering) — `src/main/lib/watchdogHelpers.cjs:99` `const DEFAULT_TICK_WEDGED_DEAD_MS = 10 * 60_000;`, exported at `:479`; `:120` signature adds `wedgedDeadMs = DEFAULT_TICK_WEDGED_DEAD_MS`; the branch at `:129-134` runs after the fresh-heartbeat (`:121-124`), dispatch-field (`:126`), and paused/draining (`:127-128`) checks, and before the `pendingDispatchable` check (`:135`) — exact required ordering.
+- AC1 (`DEFAULT_TICK_WEDGED_DEAD_MS` export, new param, branch ordering) — `src/main/lib/scheduler/watchdogHelpers.cjs:99` `const DEFAULT_TICK_WEDGED_DEAD_MS = 10 * 60_000;`, exported at `:479`; `:120` signature adds `wedgedDeadMs = DEFAULT_TICK_WEDGED_DEAD_MS`; the branch at `:129-134` runs after the fresh-heartbeat (`:121-124`), dispatch-field (`:126`), and paused/draining (`:127-128`) checks, and before the `pendingDispatchable` check (`:135`) — exact required ordering.
 - AC2 (branch logic) — `:129-134`: `d.lastTickReason === 'wedged'` and (`Date.parse` unparseable or `now - lastAttemptMs > wedgedDeadMs`) → `{ dead: true, reason: 'tick-wedged' }`, matching the spec exactly.
 - AC3 (JSDoc updated, "must not relaunch" retained) — `:101-119` documents the new `tick-wedged` rule with the 2026-09-25 incident and keeps "Callers must NOT relaunch on this" at `:117-118`.
 - AC4 (4 named tests) — `src/main/lib/__tests__/watchdog-helpers.test.cjs:378` `'wedged + stale lastDispatchAttemptAt → tick-wedged dead'`, `:388` `'wedged but recent attempt → not dead'`, `:399` `'wedged while paused → paused (not dead)'`, `:410` `'wedged with pendingDispatchable 0 still dead (the 2026-09-25 shape)'` — all four present, plus two extra cases (unparseable timestamp, default constant) beyond the AC minimum.

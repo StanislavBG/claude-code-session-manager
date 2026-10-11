@@ -9,12 +9,12 @@
  * surfaces (PRDs 838/840) read it via `projectBrief:get` and trigger
  * synthesis via `projectBrief:refresh`; this file is backend + preload only.
  *
- * Spawn pattern mirrors memoryAggregate.cjs (via the shared lib/runClaudeP.cjs
+ * Spawn pattern mirrors memoryAggregate.cjs (via the shared lib/claude/runClaudeP.cjs
  * helper it was extracted from): cost-gated (only fires on explicit
  * `refresh`), stdin closed, model pinned, hard timeout, SM_KG_INTERNAL=1 so
  * the prompt-logging hook skips it, brace-matching JSON extraction. Slot
  * pool: every refresh acquires a machine session slot from
- * lib/sessionSlots.cjs first (the same ≤3 `claude -p` pool scheduler jobs
+ * lib/scheduler/sessionSlots.cjs first (the same ≤3 `claude -p` pool scheduler jobs
  * and chat runs already share) and releases it in a finally.
  */
 
@@ -24,10 +24,10 @@ const { spawn } = require('node:child_process');
 const path = require('node:path');
 const os = require('node:os');
 const config = require('./config.cjs');
-const { encodeCwd } = require('./lib/encodeCwd.cjs');
-const { extractJson } = require('./lib/extractJson.cjs');
-const { runClaudeP } = require('./lib/runClaudeP.cjs');
-const sessionSlots = require('./lib/sessionSlots.cjs');
+const { encodeCwd } = require('./lib/util/encodeCwd.cjs');
+const { extractJson } = require('./lib/util/extractJson.cjs');
+const { runClaudeP } = require('./lib/claude/runClaudeP.cjs');
+const sessionSlots = require('./lib/scheduler/sessionSlots.cjs');
 const core = require('./lib/projectBriefCore.cjs');
 
 // Pinned explicitly per the automation model-pinning rule — same alias style

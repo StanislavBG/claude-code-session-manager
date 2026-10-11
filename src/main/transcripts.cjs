@@ -36,10 +36,10 @@ function attachWindow(w) {
   window = w;
 }
 
-const { encodeCwd } = require('./lib/encodeCwd.cjs');
-const { LRUCache } = require('./lib/lruCache.cjs');
+const { encodeCwd } = require('./lib/util/encodeCwd.cjs');
+const { LRUCache } = require('./lib/util/lruCache.cjs');
 const { classifyLine } = require('./lib/classifyTranscriptLine.cjs');
-const { resolveEpicTranscriptPath } = require('./lib/epicTranscriptPath.cjs');
+const { resolveEpicTranscriptPath } = require('./lib/epic/epicTranscriptPath.cjs');
 
 /**
  * Where the CLI's JSONL for this session lives. Epic sessions run in a

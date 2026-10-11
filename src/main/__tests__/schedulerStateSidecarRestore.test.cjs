@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const { loadSchedulerState, persistSchedulerState, getSchedulerStateSnapshot } = require('../scheduler.cjs');
-const schedulerPaths = require('../lib/schedulerPaths.cjs');
+const schedulerPaths = require('../lib/scheduler/schedulerPaths.cjs');
 
 function writeSidecar(data) {
   fs.mkdirSync(path.dirname(schedulerPaths.schedulerStatePath()), { recursive: true });

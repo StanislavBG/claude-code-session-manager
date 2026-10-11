@@ -17,7 +17,7 @@
  *
  * ── Scope: shared trees only ─────────────────────────────────────────────
  * A scheduler job or Epic running inside its OWN linked worktree
- * (`sm-job/<slug>` / `sm-epic/<epicId>`, minted by src/main/lib/gitWorktree.cjs)
+ * (`sm-job/<slug>` / `sm-epic/<epicId>`, minted by src/main/lib/git/gitWorktree.cjs)
  * owns that checkout exclusively — destroying it harms nobody, so every one
  * of the operations above is permitted there. This hook only denies when the
  * command's cwd is the shared base tree (or any other tree not recognized as
@@ -26,7 +26,7 @@
  * WORKTREE_ROOTS/BRANCH_PREFIXES below) rather than requiring that module —
  * this script runs standalone, outside the app's process, and must not pull
  * the whole main-process require graph into a hook invoked on every Bash call.
- * src/main/lib/gitWorktree.cjs stays the source of truth for those constants;
+ * src/main/lib/git/gitWorktree.cjs stays the source of truth for those constants;
  * if it ever renames the prefixes or root folder names, update them here too.
  *
  * ── Fail-closed on ambiguous parsing ─────────────────────────────────────
@@ -64,12 +64,12 @@
  * ── Adopting this hook in a DIFFERENT (non-session-manager) project ──────
  * DON'T HAND-WRITE THIS. Session Manager installs it: open New Session in
  * that project and press "Fix it" on the readiness banner's destructive-git-
- * guard row (src/main/lib/delegationReadiness.cjs's installDestructiveGitGuard,
+ * guard row (src/main/lib/epic/delegationReadiness.cjs's installDestructiveGitGuard,
  * which merges into any existing hooks block instead of clobbering it).
  *
  * Adopted by REFERENCE through the stable shim
  * `~/.claude/session-manager/hooks/guard-destructive-git.cjs`, written by
- * src/main/lib/guardShims.cjs (installed by src/main/lib/delegationReadiness.cjs).
+ * src/main/lib/guardShims.cjs (installed by src/main/lib/epic/delegationReadiness.cjs).
  * The shim carries no guard logic — it reads `app-root.json` and require()s this
  * file from the currently running app, so an app upgrade never breaks an adopter.
  * Never vendor: do not copy this file into another repo, and do not hardcode an

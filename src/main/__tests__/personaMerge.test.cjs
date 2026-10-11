@@ -1,5 +1,5 @@
 /**
- * personaMerge.test.cjs — overlay-over-global persona MERGE (lib/personaMerge.cjs)
+ * personaMerge.test.cjs — overlay-over-global persona MERGE (lib/persona-macro/personaMerge.cjs)
  * and every reader that goes through it.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/personaMerge.test.cjs
@@ -12,10 +12,10 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { resolveMergedPersona } = require('../lib/personaMerge.cjs');
-const { readOverlayAwarePersonaModel, resolvePrdPersonaForSpawn } = require('../lib/agentModelResolve.cjs');
-const { resolveEpicEffort } = require('../lib/agentEffortResolve.cjs');
-const { resolveEffectiveModelInfo } = require('../lib/effectiveModelInfo.cjs');
+const { resolveMergedPersona } = require('../lib/persona-macro/personaMerge.cjs');
+const { readOverlayAwarePersonaModel, resolvePrdPersonaForSpawn } = require('../lib/claude/agentModelResolve.cjs');
+const { resolveEpicEffort } = require('../lib/claude/agentEffortResolve.cjs');
+const { resolveEffectiveModelInfo } = require('../lib/claude/effectiveModelInfo.cjs');
 const { getPersonaBody, listPersonas } = require('../agentLibrary.cjs');
 
 const tmpDirs = [];
@@ -92,7 +92,7 @@ test("this repo's three full-body overlays resolve byte-identically (text + body
     const m = resolveMergedPersona(path.resolve(repoAgents, '..', '..'), name, { globalDir, validatePath: noop });
     expect(m.text).toBe(raw);
     expect(m.path).toBe(overlayFile);
-    expect(m.body).toBe(require('../lib/prdFrontmatter.cjs').splitFrontmatter(raw).body);
+    expect(m.body).toBe(require('../lib/prd/prdFrontmatter.cjs').splitFrontmatter(raw).body);
     const viaLib = await getPersonaBody({ cwd: path.resolve(repoAgents, '..', '..'), name, globalDir, validatePath: noop });
     expect(viaLib.text).toBe(raw);
   }
@@ -108,7 +108,7 @@ test('malformed overlay frontmatter degrades to the global persona, never throws
   expect(m.fromOverlay).toBe(false);
   expect(m.overlayIssue).toMatch(/malformed/);
   expect(readOverlayAwarePersonaModel('dev-lead', { ...deps, cwd })).toBe('sonnet');
-  const { todayFile } = require('../lib/opsErrorLog.cjs');
+  const { todayFile } = require('../lib/telemetry/opsErrorLog.cjs');
   expect(fs.readFileSync(todayFile(cwd), 'utf8')).toMatch(/malformed frontmatter/);
 });
 

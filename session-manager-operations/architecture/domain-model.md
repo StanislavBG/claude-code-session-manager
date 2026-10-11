@@ -55,7 +55,7 @@ scoping scheme.
   `agentTagDef(tag).description`, never a second copy. `agentType` matches Claude Code's own `agent_type` hook
   payload, the Task tool's `subagent_type`, and `teams.cjs`'s member field, so it isn't a fourth name for the
   same concept.
-- **Epic tag and PRD tag share ONE `WorkType` enum (`lib/workTypeLibrary.cjs`) but are independent values** —
+- **Epic tag and PRD tag share ONE `WorkType` enum (`lib/prd/workTypeLibrary.cjs`) but are independent values** —
   never derived, defaulted, or validated against each other. An Epic is the plan; a PRD is one unit inside it,
   so a `feature` Epic can legitimately hold a `bug` PRD. The only asymmetry: an Epic's tag may be `discussion`
   (whether-to-build is unsettled), a PRD's never is (`PRD_WORK_TYPES` = `WORK_TYPES` minus `discussion`).
@@ -125,7 +125,7 @@ scoping scheme.
   `proposed`, and nothing is spent until someone presses **Approve & start** (`EpicApprovalBar`), which sends
   `openingPrompt` (falling back to `goalText`) as the first message.
 - **SINGLE-CREATOR LAW: an Epic is created in exactly one place — a human pressing New Epic**, plus one narrow
-  second door for inbound cross-project feedback. Enforced fail-closed in `src/main/lib/epicMint.cjs`:
+  second door for inbound cross-project feedback. Enforced fail-closed in `src/main/lib/epic/epicMint.cjs`:
   `ensureEpic()` is join-only except for `promptSessionsCreateEpic.cjs` (`MINT_AUTHORITY_NEW_EPIC_UI`) and
   `crossProjectFeedback.cjs` (`MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK`). `MINT_AUTHORITIES` is the full
   two-entry list; a third is a domain-model change, not a convenience. Anyone else asking for a missing Epic
@@ -146,7 +146,7 @@ scoping scheme.
   read their codebase. There is no reply channel; a receipt event chained onto the sending Epic is the whole
   loop.
 - **A scheduler job's question comes back to the session that wrote the PRD.** A `needs_review` park is a
-  question, not a result: `lib/rcaReport.cjs` writes a root-cause report beside the run log and
+  question, not a result: `lib/scheduler/rcaReport.cjs` writes a root-cause report beside the run log and
   `scheduler.cjs`'s `notifyNeedsReview` appends it as a `response` event on the authoring Epic (resolved from
   `sourcePromptId`, falling back to the job's `epicId`). Join-only — with no open authoring Epic, the report and
   the Scheduler tab are the whole record. This is why PRDs must be written to the point.
@@ -163,7 +163,7 @@ scoping scheme.
   is auto-consolidated into `prds-archived/` at the top of every `reconcile()` pass, so a file dropped there
   while the app runs is swept before it can become a queue row. Machine-level state is runtime only:
   `~/.claude/session-manager/scheduler-machine.json`, run logs under `scheduled-plans/runs/`, and the session
-  slot pool (`lib/sessionSlots.cjs`) — the one machine-wide pool every scheduler job and chat run acquires from.
+  slot pool (`lib/scheduler/sessionSlots.cjs`) — the one machine-wide pool every scheduler job and chat run acquires from.
 - **PRD authoring is API-only.** `scheduler_create_prd` validates frontmatter, atomically allocates `NN`, and
   enforces the Epic-join rule. A hand-written PRD is never sanctioned (`audit-ops-hygiene.cjs` and `ops-sweep`
   flag one); with the app not running, the agent stops and asks the human to start it.

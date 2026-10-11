@@ -36,11 +36,11 @@ const { ipcMain } = require('electron');
 const { SCHEDULE_SLUG_RE: SLUG_RE, schemas } = require('./ipcSchemas.cjs');
 const logs = require('./logs.cjs');
 const config = require('./config.cjs');
-const { expandHome } = require('./lib/expandHome.cjs');
-const { HISTORY_RETENTION_MS } = require('./lib/schedulerConfig.cjs');
-const schedulerPaths = require('./lib/schedulerPaths.cjs');
+const { expandHome } = require('./lib/util/expandHome.cjs');
+const { HISTORY_RETENTION_MS } = require('./lib/scheduler/schedulerConfig.cjs');
+const schedulerPaths = require('./lib/scheduler/schedulerPaths.cjs');
 
-// Lazy: resolved via lib/schedulerPaths.cjs at each use (SM_SCHEDULER_HOME).
+// Lazy: resolved via lib/scheduler/schedulerPaths.cjs at each use (SM_SCHEDULER_HOME).
 const prdsArchiveDir = () => path.join(schedulerPaths.scheduledPlansRoot(), 'prds-archived');
 
 // ────────────────────────────────────────────── lint rules
@@ -125,8 +125,8 @@ const INTERACTIVE_AC_PATTERNS = [
   },
 ];
 
-const { splitFrontmatter } = require('./lib/prdFrontmatter.cjs');
-const { resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs } = require('./lib/prdLocations.cjs');
+const { splitFrontmatter } = require('./lib/prd/prdFrontmatter.cjs');
+const { resolvePrdsDirs, resolvePrdWriteDir, listEpicPrdDirs } = require('./lib/prd/prdLocations.cjs');
 
 // PRD 808: PRDS_DIR is now the LEGACY global dir — kept as a migration
 // source and search fallback for not-yet-migrated files. Live PRDs resolve

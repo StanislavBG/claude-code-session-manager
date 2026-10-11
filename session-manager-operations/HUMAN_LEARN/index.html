@@ -126,14 +126,14 @@ endpoint every 60&thinsp;s (<code>GET api.anthropic.com/api/oauth/usage</code>, 
 <code>~/.claude/.credentials.json</code>) and fires whenever pending&gt;0, not paused, and five-hour
 utilization is below the 90% threshold. <code>on-reset</code> arms one timer at
 <code>resets_at + 15&thinsp;min</code>; <code>manual</code> fires only from the UI.
-<div class="refs"><span class="loc">src/main/scheduler.cjs:1956</span> <span class="loc">src/main/lib/schedulerConfig.cjs:11</span> <span class="loc">src/main/usage.cjs</span></div></li>
+<div class="refs"><span class="loc">src/main/scheduler.cjs:1956</span> <span class="loc">src/main/lib/scheduler/schedulerConfig.cjs:11</span> <span class="loc">src/main/usage.cjs</span></div></li>
 
 <li><b><code>pickNextBatch</code> fills free slots</b> — jobs group by project (<code>cwd</code>); parallel groups
 serialize <i>within</i> a project while different projects run concurrently up to the cap
 (<code>concurrencyCap</code> 3, env-overridable). A project holds if an earlier group has <code>failed</code>
 jobs — <code>needs_review</code> deliberately does not block. A memory gate additionally clamps the batch:
 each job is budgeted 2.5&thinsp;GB against <code>MemAvailable</code> minus a 3&thinsp;GB host reserve.
-<div class="refs"><span class="loc">src/main/lib/schedulerBatch.cjs:158</span> <span class="loc">src/main/scheduler.cjs:1849</span> <span class="loc">src/main/scheduler.cjs:1875</span></div></li>
+<div class="refs"><span class="loc">src/main/lib/scheduler/schedulerBatch.cjs:158</span> <span class="loc">src/main/scheduler.cjs:1849</span> <span class="loc">src/main/scheduler.cjs:1875</span></div></li>
 
 <li><b>The job spawns</b> — <code>claude -p &lt;prd + finish protocol&gt; --model sonnet
 --dangerously-skip-permissions --output-format stream-json --verbose --session-id &lt;uuid&gt;</code>,
@@ -182,7 +182,7 @@ batch's acceptance criteria live, flags risky surfaces, and writes
 <code>runs/&lt;ts&gt;/definition-of-done-&lt;key&gt;.md</code>. It is watermarked and batch-keyed so a re-drain
 over the same completed set is a single fs-stat no-op, and it skips entirely while paused or
 cancelled. Kill-switch <code>SM_DOD_DISABLE=1</code>.</p>
-<div class="refs"><span class="loc">src/main/lib/dodDrainHook.cjs:59</span></div>
+<div class="refs"><span class="loc">src/main/lib/scheduler/dodDrainHook.cjs:59</span></div>
 
 <p style="margin-top:16px"><b style="color:var(--fg);font-size:13.5px">Control surfaces — how it gets called</b></p>
 <table class="kv">
@@ -438,14 +438,14 @@ can manage the job queue directly.</p>
 </div>
 
 <footer>
-Sources: src/main/pty.cjs, src/main/scheduler.cjs, src/main/lib/schedulerConfig.cjs,
+Sources: src/main/pty.cjs, src/main/scheduler.cjs, src/main/lib/scheduler/schedulerConfig.cjs,
 src/main/supervisor.cjs, src/renderer/components/tabs/browser/CapturePanel.tsx,
 src/renderer/components/tabs/browser/RecorderPanel.tsx, src/main/browserCapture.cjs,
 src/main/browserView.cjs, src/renderer/state/browser.ts, src/renderer/lib/captureDest.ts,
 src/renderer/lib/browserExport.ts, src/main/config.cjs, src/renderer/state/voice.ts,
 src/renderer/components/LeftNav.tsx, src/main/memoryAggregate.cjs, src/main/webRemote.cjs,
-src/main/adminServer.cjs, src/main/lib/prdParser.cjs, src/main/lib/schedulerBatch.cjs,
-src/main/lib/dodDrainHook.cjs, src/main/queueOps.cjs, scripts/scheduler-watchdog.cjs,
+src/main/adminServer.cjs, src/main/lib/prdParser.cjs, src/main/lib/scheduler/schedulerBatch.cjs,
+src/main/lib/scheduler/dodDrainHook.cjs, src/main/queueOps.cjs, scripts/scheduler-watchdog.cjs,
 scripts/scheduler-mcp-server.cjs, src/renderer/state/scheduleState.ts,
 src/renderer/components/SchedulePanel.tsx, src/renderer/components/tabs/Scheduler.tsx ·
 generated 2026-07-24

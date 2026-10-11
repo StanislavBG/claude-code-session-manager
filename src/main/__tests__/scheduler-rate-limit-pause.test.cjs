@@ -36,7 +36,7 @@ const {
 const billing = require('../usage.cjs');
 
 // Repo-tracked, byte-for-byte copy of the real 2026-09-05 starry-night-ships
-// incident log (see src/main/lib/__tests__/rateLimitWindow.test.cjs for the
+// incident log (see src/main/lib/claude/__tests__/rateLimitWindow.test.cjs for the
 // live-path parity check) — kept hermetic rather than pointed at the
 // machine-local live path directly.
 const FIXTURE = path.join(__dirname, '..', 'lib', '__tests__', 'fixtures', '204-mercury-steam-horse.log.txt');

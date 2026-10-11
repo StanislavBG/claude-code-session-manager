@@ -22,8 +22,8 @@ const {
   ScheduleJobSchema,
   JOB_STATUSES,
   assertValidScheduleJob,
-} = require('../lib/scheduleJobSchema.cjs');
-const { shapeJobs } = require('../lib/queueStore.cjs');
+} = require('../lib/scheduler/scheduleJobSchema.cjs');
+const { shapeJobs } = require('../lib/scheduler/queueStore.cjs');
 
 function validJob(overrides = {}) {
   return {

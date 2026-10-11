@@ -7,7 +7,7 @@ const path = require('node:path');
 const src = fs.readFileSync(path.join(__dirname, '..', 'index.cjs'), 'utf8');
 
 describe('login-shell PATH boot wiring', () => {
-  const requireIdx = src.indexOf("require('./lib/loginShellPath.cjs')");
+  const requireIdx = src.indexOf("require('./lib/process/loginShellPath.cjs')");
   const callIdx = src.indexOf('applyLoginShellPath(');
   const assignIdx = src.indexOf('bootClaudeBin = { resolved: claudeResolved');
 

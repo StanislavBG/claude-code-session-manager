@@ -17,15 +17,15 @@ const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 const { addAllowedRoot } = require('./config.cjs');
-const { aliasedShellBin } = require('./lib/smProcNames.cjs');
-const { cleanChildEnv, pathWithUserBins } = require('./lib/cleanEnv.cjs');
+const { aliasedShellBin } = require('./lib/process/smProcNames.cjs');
+const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs');
 const { checkInsideHome } = require('./lib/insideHome.cjs');
-const { defaultShell } = require('./lib/defaultShell.cjs');
+const { defaultShell } = require('./lib/process/defaultShell.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
-const opsErrorLog = require('./lib/opsErrorLog.cjs');
-const { planEpicSpawn } = require('./lib/epicSpawnPlan.cjs');
-const { resolveEpicSpawnCwd } = require('./lib/epicSpawnCwd.cjs');
-const telemetryCounters = require('./lib/telemetryCounters.cjs');
+const opsErrorLog = require('./lib/telemetry/opsErrorLog.cjs');
+const { planEpicSpawn } = require('./lib/epic/epicSpawnPlan.cjs');
+const { resolveEpicSpawnCwd } = require('./lib/epic/epicSpawnCwd.cjs');
+const telemetryCounters = require('./lib/telemetry/telemetryCounters.cjs');
 
 // Absolute path to the installed package root (src/main/ -> ../../), shown in
 // the remediation message so the user can cd there and rebuild.

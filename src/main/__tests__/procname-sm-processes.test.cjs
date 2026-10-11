@@ -25,9 +25,9 @@ beforeAll(() => {
   realHome = process.env.HOME;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-pn03-'));
   process.env.HOME = tmpHome;
-  for (const m of ['procName', 'smProcNames']) delete require.cache[require.resolve(`../lib/${m}.cjs`)];
-  procName = require('../lib/procName.cjs');
-  names = require('../lib/smProcNames.cjs');
+  for (const m of ['process/procName', 'process/smProcNames']) delete require.cache[require.resolve(`../lib/${m}.cjs`)];
+  procName = require('../lib/process/procName.cjs');
+  names = require('../lib/process/smProcNames.cjs');
 });
 afterAll(() => {
   process.env.HOME = realHome;
@@ -57,7 +57,7 @@ describe('names', () => {
 describe.skipIf(!LINUX)('process.title', () => {
   it('sets comm and does not disturb process.argv', () => {
     const out = execFileSync(process.execPath, ['-e', `
-      const n = require(${JSON.stringify(path.join(REPO, 'src/main/lib/smProcNames.cjs'))});
+      const n = require(${JSON.stringify(path.join(REPO, 'src/main/lib/process/smProcNames.cjs'))});
       n.setProcessTitle(n.PROC_NAMES.main);
       console.log(require('fs').readFileSync('/proc/self/comm','utf8').trim() + '|' + process.argv.slice(1).join(','));
     `, 'a', '--simple'], { encoding: 'utf8', env: { ...process.env, HOME: tmpHome } }).trim();
@@ -75,7 +75,7 @@ describe.skipIf(!LINUX)('process.title', () => {
     const first = src.indexOf('setProcessTitle(PROC_NAMES.watchdog)');
     expect(first).toBeGreaterThan(-1);
     expect(first).toBeLessThan(src.indexOf("require('node:fs')"));
-    const child = spawn(process.execPath, ['-e', `require(${JSON.stringify(path.join(REPO, 'src/main/lib/smProcNames.cjs'))}).setProcessTitle('sm-watchdog'); setTimeout(()=>{},20000)`], { stdio: 'ignore', env: { ...process.env, HOME: tmpHome } });
+    const child = spawn(process.execPath, ['-e', `require(${JSON.stringify(path.join(REPO, 'src/main/lib/process/smProcNames.cjs'))}).setProcessTitle('sm-watchdog'); setTimeout(()=>{},20000)`], { stdio: 'ignore', env: { ...process.env, HOME: tmpHome } });
     try { expect(await waitComm(child.pid, 'sm-watchdog')).toBe('sm-watchdog'); } finally { child.kill('SIGKILL'); }
   });
 

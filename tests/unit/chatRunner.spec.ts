@@ -65,7 +65,7 @@ exchanges.recordExchange = (...args: unknown[]) => {
   return Promise.resolve()
 }
 
-const agentModelResolve = require('../../src/main/lib/agentModelResolve.cjs') as {
+const agentModelResolve = require('../../src/main/lib/claude/agentModelResolve.cjs') as {
   resolveEpicModel: (opts: { cwd: string; claudeSessionId: string; fallbackModel?: string; deps?: unknown }) => string
 }
 const originalResolveEpicModel = agentModelResolve.resolveEpicModel
@@ -784,8 +784,8 @@ describe('bounded stream buffers (real executeRun path via a faked child process
   const os = require('node:os') as typeof import('node:os')
   const fs = require('node:fs') as typeof import('node:fs')
   const path = require('node:path') as typeof import('node:path')
-  const opsErrorLog = require('../../src/main/lib/opsErrorLog.cjs') as { appendError: (row: Record<string, unknown>) => unknown }
-  const { createHeadTailBuffer } = require('../../src/main/lib/headTailBuffer.cjs') as {
+  const opsErrorLog = require('../../src/main/lib/telemetry/opsErrorLog.cjs') as { appendError: (row: Record<string, unknown>) => unknown }
+  const { createHeadTailBuffer } = require('../../src/main/lib/util/headTailBuffer.cjs') as {
     createHeadTailBuffer: (max: number) => { append: (s: string) => void; matchText: () => string; preview: () => string; size: number }
   }
   const realAppendError = opsErrorLog.appendError
@@ -851,7 +851,7 @@ describe('per-sessionId in-flight latch (real executeRun path via a faked child 
   const os = require('node:os') as typeof import('node:os')
   const fs = require('node:fs') as typeof import('node:fs')
   const path = require('node:path') as typeof import('node:path')
-  const opsErrorLog = require('../../src/main/lib/opsErrorLog.cjs') as { appendError: (row: Record<string, unknown>) => unknown }
+  const opsErrorLog = require('../../src/main/lib/telemetry/opsErrorLog.cjs') as { appendError: (row: Record<string, unknown>) => unknown }
   const realAppendError = opsErrorLog.appendError
   let scratch = ''
   let spawned: FakeChild[] = []
@@ -918,7 +918,7 @@ describe('per-sessionId in-flight latch (real executeRun path via a faked child 
     // (epicSpawnPlan) then picks --resume off that transcript. Scratch HOME keeps it off the real one.
     const realHome = process.env.HOME
     process.env.HOME = scratch
-    const { encodeCwd } = require('../../src/main/lib/encodeCwd.cjs') as { encodeCwd: (d: string) => string }
+    const { encodeCwd } = require('../../src/main/lib/util/encodeCwd.cjs') as { encodeCwd: (d: string) => string }
     const projDir = path.join(scratch, '.claude', 'projects', encodeCwd(scratch))
     fs.mkdirSync(projDir, { recursive: true })
     fs.writeFileSync(path.join(projDir, 'sess-l5.jsonl'), '{}\n')

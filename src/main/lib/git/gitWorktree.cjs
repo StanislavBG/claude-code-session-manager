@@ -1,0 +1,2336 @@
+/**
+ * gitWorktree.cjs — generalized `git worktree` isolation primitives (PRD
+ * 1032), backing BOTH scheduler jobs (`sm-job/<slug>`, unchanged behavior —
+ * see jobWorktree.cjs, now a thin wrapper over this module) and interactive
+ * Epic sessions (`sm-epic/<epicId>`, new).
+ *
+ * Every entry point below takes an explicit `kind: 'job' | 'epic'` (or is
+ * itself kind-scoped via a `create*Worktree`/`integrate*Branch`/
+ * `cleanup*Worktree` wrapper) that selects: the branch prefix, the on-disk
+ * worktree root subfolder, the disable/cap env vars, and the concurrency cap
+ * default. Everything else — the git plumbing, the never-throws contract, the
+ * ff-only→merge-commit→abort-and-flag integration strategy, the TOCTOU-safe
+ * synchronous slot reservation — is one shared implementation.
+ *
+ * ---------- the ops-root hazard (read before touching cwd plumbing) ----------
+ *
+ * `<cwd>/session-manager-operations/` (PRDs, queue state, run logs, the
+ * active-index.json Epic store) is resolved from a project's cwd by
+ * lib/prd/prdLocations.cjs, lib/scheduler/queueStore.cjs, and every prompt-sessions IPC
+ * handler — all of them take `cwd` as an explicit parameter, never
+ * `process.cwd()`. That means the ops root follows WHATEVER cwd value the
+ * caller passes in. A prior incident (recorded in this project's memory as
+ * `no_schedule_self_e2e`) is exactly this mistake: swapping a job's cwd for a
+ * worktree cwd gives it a different, EMPTY ops root and orphans its own
+ * PRD/queue row.
+ *
+ * This invariant carries forward UNCHANGED into the Epic path: this module
+ * never changes an Epic's owning-project `cwd` either. It only ever hands
+ * back a SEPARATE `dir` (the worktree directory) for a caller to use as a
+ * spawned process's `cwd` *spawn option* — every PRD-path resolution, queue
+ * read/write, active-index.json read/write, and run-log path must keep using
+ * the real project `cwd` exactly as before. The next PRD in this chain (which
+ * wires an Epic's PTY/Chat spawn cwd to its worktree) must preserve this same
+ * split: spawn cwd = worktree dir, ops-root cwd = real project cwd, always.
+ *
+ * ---------- commit-guard visibility across the worktree boundary ----------
+ *
+ * For the job kind, scheduler.cjs's commit-guard reads git state
+ * (uncommittedChanges/gitHead) from the main tree before and after a run. If
+ * a job's commit only ever lands on a throwaway worktree branch, the main
+ * tree's HEAD never moves and the guard would wrongly conclude nothing was
+ * committed (the pre-existing `pass-no-commit-worktree-commit-invisible-at-
+ * exit` / RCA 770-pr269 incident class). `integrateBranch` closes that gap
+ * for OUR managed worktrees: it merges the branch into `cwd`'s own HEAD
+ * (ff-only when possible, a real merge commit otherwise) BEFORE any post-run
+ * git check relying on the main tree's HEAD — so the commit is real on the
+ * main tree, not something a guard has to go looking for.
+ */
+'use strict';
+
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
+const { OPS_ROOT_DIR } = require('../opsOwnership.cjs');
+const schedulerPaths = require('../scheduler/schedulerPaths.cjs');
+const sharedGitExec = require('./gitExec.cjs');
+
+// Per-kind configuration. Roots are kept OUTSIDE any project's own tree
+// (os.tmpdir(), not `<cwd>/.git/...`) so a managed worktree never shows up in
+// the main tree's own file listings, `find`, or a tsc rootDir scan of `<cwd>`.
+//
+// Job default cap (4): disk estimate for this repo (session-manager) — `git
+// worktree add` checks out only git-tracked source, not `node_modules`/
+// `dist` — a fresh checkout of this repo's tracked tree is ~30-40 MB
+// (measured via `git ls-files | xargs du -ch`, minus the shared .git object
+// store). At 4 concurrent worktrees that's under 200 MB — negligible next to
+// whatever a job's own build step may add inside its worktree (uncounted
+// here; bounded by scheduler.cjs's own memory gate, not by this cap).
+//
+// Epic default cap (50, effectively unbounded in practice): a scheduler job
+// runs minutes and is torn down the moment its PRD completes, so a tight cap
+// plus a fallback-to-in-place is the right trade — worst case, one job waits
+// a few minutes for a slot to free up. An Epic is the opposite shape: it runs
+// for hours or days across an interactive human session, and "fall back to
+// running in the main tree" for an Epic means silently losing the isolation
+// the whole feature exists to provide, for as long as that Epic stays open.
+// The job cap's assumptions (few, short-lived, quickly-reclaimed checkouts)
+// simply don't transfer, so the epic kind gets a separately-configurable,
+// much higher ceiling rather than sharing the job kind's default.
+// staleSweepAgeEnv/defaultStaleSweepAgeMs back the on-disk orphan sweep
+// (reconcileWorktreesOnBoot's root-level pass, below) — how old an on-disk
+// checkout must be before it's reclaimed even though no caller-supplied cwd
+// vouches for it. The job default (24h) matches a job's whole lifetime being
+// minutes; the epic default (7d) matches an Epic legitimately living for
+// days, same rationale as defaultMax above.
+const KIND_CONFIG = {
+  job: {
+    get root() { return schedulerPaths.worktreeRoot('job'); },
+    branchPrefix: 'sm-job/',
+    disableEnv: 'SM_JOB_WORKTREE_DISABLE',
+    maxEnv: 'SM_JOB_WORKTREE_MAX',
+    defaultMax: 4,
+    staleSweepAgeEnv: 'SM_JOB_WORKTREE_STALE_MS',
+    defaultStaleSweepAgeMs: 24 * 60 * 60 * 1000,
+  },
+  epic: {
+    get root() { return schedulerPaths.worktreeRoot('epic'); },
+    branchPrefix: 'sm-epic/',
+    disableEnv: 'SM_EPIC_WORKTREE_DISABLE',
+    maxEnv: 'SM_EPIC_WORKTREE_MAX',
+    defaultMax: 50,
+    staleSweepAgeEnv: 'SM_EPIC_WORKTREE_STALE_MS',
+    defaultStaleSweepAgeMs: 7 * 24 * 60 * 60 * 1000,
+  },
+};
+
+function configFor(kind) {
+  const cfg = KIND_CONFIG[kind];
+  if (!cfg) throw new Error(`gitWorktree: unknown kind "${kind}" (expected 'job' or 'epic')`);
+  return cfg;
+}
+
+// Per-Epic integration branch prefix (checkout-free landing — see
+// integrateOntoRef/ensureLandBranch below). Not a `kind` in KIND_CONFIG's
+// sense (no worktree root, no cap) — it never backs a `git worktree add`
+// checkout — but it IS one of our own managed prefixes for every place that
+// decides "is this branch ours", so it's declared once, here, alongside the
+// job/epic prefixes it sits next to.
+const LAND_BRANCH_PREFIX = 'sm-land/';
+
+/** True when `b` is one of OUR OWN managed branches — a job/epic worktree
+ *  branch (KIND_CONFIG's `branchPrefix`) or an `sm-land/*` integration
+ *  branch. Hoisted out of `integrateBranch` so every caller that needs to
+ *  tell "ours" from "a real project branch" (integrateBranch's baseBranch
+ *  fallback, ensureLandBranch's baseBranch fallback) shares one definition
+ *  instead of drifting apart. */
+function isOwnManagedBranch(b) {
+  return typeof b === 'string' && b.length > 0 && (
+    Object.values(KIND_CONFIG).some((c) => b.startsWith(c.branchPrefix))
+    || b.startsWith(LAND_BRANCH_PREFIX)
+  );
+}
+
+function worktreeRootFor(kind) {
+  return configFor(kind).root;
+}
+
+/**
+ * `cwd` is optional (job-kind callers never pass it — the per-project toggle
+ * only exists for the epic kind, PRD 1035) and, when passed, additionally
+ * consults epicWorktreeProjectConfig.cjs's per-project UI toggle — the
+ * env var still wins machine-wide regardless of what any project has set.
+ * Lazily required to avoid a load-order cycle (neither module needs the
+ * other at require time, only at call time).
+ */
+function isWorktreeDisabled(kind, cwd) {
+  if (process.env[configFor(kind).disableEnv] === '1') return true;
+  if (kind === 'epic' && cwd) {
+    const { isEpicWorktreeDisabledForProject } = require('../epic/epicWorktreeProjectConfig.cjs');
+    if (isEpicWorktreeDisabledForProject(cwd)) return true;
+  }
+  return false;
+}
+
+/**
+ * The job-kind default alone is floored at sessionSlots' machine-wide `claude
+ * -p` cap (lazily required to avoid a load-order cycle): a job that fails to
+ * get session-slot capacity already waits for a slot to free up rather than
+ * degrading, so the worktree cap below it must never be tighter than the
+ * slot pool — otherwise raising slots to 10 in the UI silently strands 6 jobs
+ * without isolation, running in-place instead of waiting (the exact bug this
+ * PRD fixes). An explicit SM_JOB_WORKTREE_MAX still wins verbatim — a
+ * deliberate operator override, not a value this floor should touch.
+ */
+function getMaxConcurrentWorktrees(kind) {
+  const cfg = configFor(kind);
+  const raw = Number(process.env[cfg.maxEnv]);
+  if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+  if (kind === 'job') {
+    const sessionSlots = require('../scheduler/sessionSlots.cjs');
+    return Math.max(cfg.defaultMax, sessionSlots.totalSlots());
+  }
+  return cfg.defaultMax;
+}
+
+function getStaleSweepAgeMs(kind) {
+  const cfg = configFor(kind);
+  const raw = Number(process.env[cfg.staleSweepAgeEnv]);
+  return Number.isFinite(raw) && raw > 0 ? raw : cfg.defaultStaleSweepAgeMs;
+}
+
+/** True when resolved path `p` is `root` itself or nested under it — the one
+ *  gate every deletion routine below must pass before touching disk, so a
+ *  path-traversal-shaped key can never escape this kind's own tmpdir root. */
+function isUnderRoot(p, root) {
+  const resolvedRoot = path.resolve(root);
+  const resolvedP = path.resolve(p);
+  return resolvedP === resolvedRoot || resolvedP.startsWith(resolvedRoot + path.sep);
+}
+
+// In-memory count of worktrees currently checked out by THIS process, kept
+// PER KIND so a burst of Epic worktrees can never starve the job cap (or vice
+// versa). Reset to 0 per kind on every restart by design — a crash can never
+// leave either counter permanently wedged above its cap; reconcileWorktreesOnBoot
+// cleans up any leaked ON-DISK checkouts separately (see below).
+//
+// This counter can still drift UPWARD of reality (a missed decrement —
+// cleanupWorktree never ran because the owning process crashed, was
+// reaped, or SIGTERM'd before teardown) for as long as the app keeps
+// running. `reserveWorktreeSlot` below is what makes that drift
+// self-healing: instead of trusting this counter forever once it reaches
+// the cap, a rejection is verified against OBSERVED on-disk reality
+// (`getObservedWorktreeCount`) before being honored, and the counter is
+// corrected down to match reality when it's proven to have leaked.
+const activeWorktreeCount = { job: 0, epic: 0 };
+
+// Registered checkouts this process created and has not yet cleaned up:
+// dir -> { kind, branch }. Lets `expireDeadWorktreeRegistrations` prove a
+// counted checkout is dead (no cwd holder + terminal row) and release its
+// count — accounting only, never a kill or an rm.
+const registeredCheckouts = new Map();
+const expiredCheckoutDirs = new Set(); // released by expiry, awaiting their (late) cleanupWorktree
+
+// Per-kind promise chain used as a simple async mutex (see `withKindLock`)
+// so the cap-check-and-reserve decision in `reserveWorktreeSlot` — which now
+// sometimes needs to `await` a fresh on-disk observation — stays a single
+// atomic step across concurrent callers, the same guarantee the old
+// purely-synchronous check+increment gave for free.
+const worktreeCapLockChain = { job: Promise.resolve(), epic: Promise.resolve() };
+
+// Short-TTL memo of `getObservedWorktreeCount`'s result, per kind, so a burst
+// of callers hitting the cap in quick succession (e.g. several scheduler
+// ticks in a row while the machine is genuinely full) doesn't turn into a
+// `git worktree list` storm. Cleared per-kind by the test hook below.
+const observedWorktreeCountCache = { job: { count: null, at: 0 }, epic: { count: null, at: 0 } };
+const OBSERVED_WORKTREE_COUNT_TTL_MS = 2000;
+
+// Thin re-shape over the shared gitExec.execGit (cwd-first signature) —
+// kept so the ~40 call sites below (args-first, `{ cwd, timeout }`) don't
+// all need touching. Semantics (timeout/maxBuffer/env, execFile with an
+// argv array, stderrText/stdoutText on error) now live in gitExec.cjs.
+function execGit(args, { cwd, timeout = 20_000, maxBuffer, env } = {}) {
+  return sharedGitExec.execGit(cwd, args, { timeout, maxBuffer, env });
+}
+
+// Unquote a single git porcelain v1 path token. Git wraps a path in double
+// quotes and C-style-escapes it (\", \\, \t, \n, and \NNN octal per raw UTF-8
+// byte) whenever it contains a double quote, backslash, control character, or
+// any byte >= 0x80 (core.quotepath's default "ASCII-safe" behavior) — a plain
+// path with none of those passes through untouched. Pure. Lives here (not
+// scheduler.cjs, which also parses porcelain output) because scheduler.cjs
+// requires this module — the reverse would be circular — and every porcelain
+// consumer in either file must unquote a path before treating it as a real
+// on-disk path (fs.existsSync, a pathspec, a Set membership check).
+function unquotePorcelainPath(raw) {
+  if (raw.length < 2 || raw[0] !== '"' || raw[raw.length - 1] !== '"') return raw;
+  const inner = raw.slice(1, -1);
+  const bytes = [];
+  const simpleEscapes = { '"': 0x22, '\\': 0x5c, n: 0x0a, t: 0x09, r: 0x0d, a: 0x07, b: 0x08, f: 0x0c, v: 0x0b };
+  for (let i = 0; i < inner.length; i += 1) {
+    const c = inner[i];
+    if (c === '\\' && i + 1 < inner.length) {
+      const next = inner[i + 1];
+      if (Object.prototype.hasOwnProperty.call(simpleEscapes, next)) {
+        bytes.push(simpleEscapes[next]);
+        i += 1;
+      } else if (next >= '0' && next <= '7') {
+        let octal = '';
+        let j = i + 1;
+        while (j < inner.length && octal.length < 3 && inner[j] >= '0' && inner[j] <= '7') {
+          octal += inner[j];
+          j += 1;
+        }
+        bytes.push(parseInt(octal, 8) & 0xff);
+        i = j - 1;
+      } else {
+        bytes.push(c.charCodeAt(0));
+      }
+    } else {
+      for (const b of Buffer.from(c, 'utf8')) bytes.push(b);
+    }
+  }
+  return Buffer.from(bytes).toString('utf8');
+}
+
+async function isGitRepo(cwd) {
+  if (!cwd) return false;
+  try {
+    const out = await execGit(['rev-parse', '--is-inside-work-tree'], { cwd, timeout: 10_000 });
+    return out.trim() === 'true';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when `cwd`'s own working tree (not any worktree) has zero pending
+ * changes to TRACKED files (modified or staged). Untracked files are
+ * deliberately excluded (`--untracked-files=no`): an untracked file is never
+ * tracked WIP a job depends on, and `git worktree add` checks out only
+ * committed HEAD content into the new worktree — it never touches, copies, or
+ * is affected by the base tree's untracked files either way. Counting them as
+ * "dirty" here bought no safety: one stray scratch file in a project silently
+ * disabled isolation for every job in that project, permanently, since a
+ * failed-to-commit job leaves the tree dirty and re-triggers the same
+ * fallback for every subsequent job (RCA: PRD 1064, starry-night-ships).
+ */
+async function isBaseTreeClean(cwd) {
+  try {
+    const out = await execGit(['status', '--porcelain', '--untracked-files=no'], { cwd, timeout: 10_000 });
+    return out.trim().length === 0;
+  } catch {
+    return false;
+  }
+}
+
+function hashOf(input) {
+  return crypto.createHash('sha1').update(input).digest('hex').slice(0, 16);
+}
+
+function worktreeDirFor(kind, cwd, key) {
+  return path.join(worktreeRootFor(kind), hashOf(cwd), key);
+}
+
+function branchNameFor(kind, key) {
+  return `${configFor(kind).branchPrefix}${key}`;
+}
+
+/**
+ * Best-effort teardown of one worktree checkout — never throws. Also rmdirs
+ * `dir`'s parent (the per-cwd hash directory `worktreeDirFor` nests every
+ * checkout under) when it's left empty, so a torn-down checkout doesn't
+ * leave a permanent empty leftover behind (RCA: PRD 1108 — 1125 of 1133
+ * on-disk hash dirs under the job root were exactly this, never reclaimed).
+ * Uses non-recursive `fs.rmdir`, which only succeeds on a truly empty
+ * directory, so a sibling checkout still living under the same hash dir can
+ * never be destroyed by this call.
+ */
+async function removeWorktreeDir(cwd, dir) {
+  try {
+    await execGit(['worktree', 'remove', '--force', dir], { cwd, timeout: 15_000 });
+  } catch {
+    // Not registered (already removed) or dir already gone — fall through to
+    // a plain rm so a half-created checkout never leaks disk either.
+  }
+  try {
+    await fsp.rm(dir, { recursive: true, force: true });
+  } catch {
+    /* best-effort */
+  }
+  const parentDir = path.dirname(dir);
+  // Guard against ever rmdir-ing the worktree base (persistent state dir or SM_WORKTREE_ROOT) itself — every real caller's
+  // `dir` is `<kind root>/<hash>/<key>`, so `parentDir` is always the hash
+  // dir, never the tmpdir root, but this keeps the guarantee explicit rather
+  // than relying solely on call-site discipline.
+  if (parentDir === schedulerPaths.worktreeBase()) return;
+  try {
+    const remaining = await fsp.readdir(parentDir);
+    if (remaining.length === 0) await fsp.rmdir(parentDir);
+  } catch {
+    // Not empty (a sibling checkout survives), doesn't exist, or a race —
+    // all fine to ignore.
+  }
+}
+
+/**
+ * Reads a linked worktree checkout's own `.git` file (a plain text pointer,
+ * not a directory, for any `git worktree add` checkout) to recover the path
+ * of the MAIN tree it's registered against, without needing a caller-
+ * supplied cwd. Content looks like `gitdir: /path/to/main/.git/worktrees/
+ * <name>`; the main tree is that path with the trailing `/.git/worktrees/
+ * <name>` segment stripped off.
+ *
+ * Round-trip verified before being trusted, mirroring the same defense
+ * `src/main/lib/activeSessions.cjs`'s `worktreeMainRootOf` already applies: a
+ * `.git` pointer file is a plain text file, so its content must not be
+ * trusted to redirect `git worktree remove --force` at an arbitrary path
+ * without the candidate main tree's OWN admin dir
+ * (`<main>/.git/worktrees/<name>/gitdir`) agreeing this checkout is really
+ * one of its registered worktrees. Returns null on any read/parse/mismatch —
+ * never throws.
+ */
+async function mainTreeFromWorktreeGitFile(dir) {
+  try {
+    const gitFile = path.join(dir, '.git');
+    const content = await fsp.readFile(gitFile, 'utf8');
+    const match = content.match(/^gitdir:\s*(.+)$/m);
+    if (!match) return null;
+    const gitdir = match[1].trim();
+    const marker = `${path.sep}.git${path.sep}worktrees${path.sep}`;
+    const idx = gitdir.lastIndexOf(marker);
+    if (idx === -1) return null;
+    const candidateMain = gitdir.slice(0, idx);
+    const worktreeName = gitdir.slice(idx + marker.length).split(path.sep)[0];
+    if (!worktreeName) return null;
+
+    const adminGitdirFile = path.join(candidateMain, '.git', 'worktrees', worktreeName, 'gitdir');
+    const backRef = (await fsp.readFile(adminGitdirFile, 'utf8')).trim();
+    if (path.resolve(backRef) !== path.resolve(gitFile)) return null;
+
+    return candidateMain;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tear down one orphaned on-disk checkout that `sweepStaleWorktreeCheckouts`
+ * found with no caller-supplied cwd to run `git worktree remove` against.
+ * Recovers the main tree from the checkout's own `.git` file and removes the
+ * registration there first, so the main repo's `git worktree list` is never
+ * left with a stale entry pointing at a directory we just deleted. Falls back
+ * to a plain `rm -rf` (plus a best-effort `worktree prune` run from inside
+ * the checkout itself, in case git can still resolve it) when that lookup
+ * fails. Never throws.
+ */
+async function teardownOrphanedCheckout(dir) {
+  const mainTree = await mainTreeFromWorktreeGitFile(dir);
+  if (mainTree) {
+    try {
+      await execGit(['worktree', 'remove', '--force', dir], { cwd: mainTree, timeout: 15_000 });
+    } catch {
+      // Registration already gone, or the main tree no longer agrees this is
+      // one of its worktrees — fall through to the plain rm below either way.
+    }
+    try { await fsp.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+    try { await execGit(['worktree', 'prune'], { cwd: mainTree, timeout: 10_000 }); } catch { /* best-effort */ }
+    return;
+  }
+  try { await execGit(['worktree', 'prune'], { cwd: dir, timeout: 10_000 }); } catch { /* best-effort */ }
+  try { await fsp.rm(dir, { recursive: true, force: true }); } catch { /* best-effort */ }
+}
+
+/**
+ * Sweeps this kind's ENTIRE on-disk worktree root directly — not limited to
+ * any caller-supplied list of cwds — for checkouts belonging to a project
+ * `reconcileWorktreesOnBoot` was never handed a cwd for (a project removed
+ * from Session Manager, or a stray leftover from before this sweep existed).
+ * The per-cwd loop in `reconcileWorktreesOnBoot` can only clean what it's
+ * told about; this covers the rest.
+ *
+ * A checkout younger than `staleAgeMs` (mtime-based) is NEVER touched — this
+ * is what keeps an in-progress job or Epic safe from a concurrent boot sweep.
+ * This intentionally does NOT accept a queue-aware `isLive` predicate the way
+ * `reconcileWorktreesOnBoot`'s per-cwd pass does: that predicate is scoped to
+ * ONE project's own active-index.json per call, but this sweep walks EVERY
+ * project's checkouts under the shared kind root in one pass — applying one
+ * project's liveness answer to another project's checkout would be worse
+ * than no answer at all (a false "not live" for a foreign key would tear
+ * down a genuinely active Epic before its own project's turn ever runs this
+ * sweep).
+ *
+ * It DOES, however, check `hasLiveHolder` on every candidate that clears the
+ * age threshold: unlike a queue-derived `isLive`, a live `/proc` cwd holder
+ * is project-agnostic and machine-global — a directory's mtime does NOT
+ * advance when a long-running process only writes into subdirectories of it
+ * (exactly the "starry-night-ships"-class workload), so an old mtime is not
+ * proof of abandonment. A process still holding the checkout as its cwd is
+ * authoritative over any timer and is never reaped, regardless of age.
+ * `holders` may be supplied precomputed (one `/proc` scan reused across many
+ * candidates/kinds); when omitted this computes its own. On darwin (no
+ * `/proc`) `listCwdHolders`/`hasLiveHolder` always report no holder, so the
+ * age threshold alone gates darwin — same accepted tradeoff as
+ * `reclaimTerminalJobOrphans`'s `isLive`.
+ *
+ * Every path visited is verified (`isUnderRoot`) to be nested under this
+ * kind's own root before any read or delete, so a maliciously-shaped on-disk
+ * name can never walk this sweep outside its own tmpdir root.
+ *
+ * Returns `{ checkoutsRemoved, emptyRootsRemoved }`. Never throws.
+ */
+async function sweepStaleWorktreeCheckouts(kind, opts = {}) {
+  const root = worktreeRootFor(kind);
+  const staleAgeMs = Number.isFinite(opts.staleAgeMs) && opts.staleAgeMs >= 0
+    ? opts.staleAgeMs
+    : getStaleSweepAgeMs(kind);
+  const holders = opts.holders instanceof Set ? opts.holders : listCwdHolders();
+  const result = { checkoutsRemoved: 0, emptyRootsRemoved: 0 };
+
+  let hashEntries;
+  try {
+    hashEntries = await fsp.readdir(root, { withFileTypes: true });
+  } catch {
+    return result; // root doesn't exist yet (or unreadable) — nothing to sweep
+  }
+
+  for (const hashEntry of hashEntries) {
+    if (!hashEntry.isDirectory()) continue;
+    const hashDir = path.join(root, hashEntry.name);
+    if (!isUnderRoot(hashDir, root)) continue;
+
+    let keyEntries;
+    try {
+      keyEntries = await fsp.readdir(hashDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const keyEntry of keyEntries) {
+      if (!keyEntry.isDirectory()) continue;
+      const checkoutDir = path.join(hashDir, keyEntry.name);
+      if (!isUnderRoot(checkoutDir, root)) continue;
+
+      let stat;
+      try {
+        stat = await fsp.stat(checkoutDir);
+      } catch {
+        continue;
+      }
+      if (Date.now() - stat.mtimeMs < staleAgeMs) continue; // still fresh — never touched
+
+      if (hasLiveHolder(checkoutDir, holders)) {
+        console.log(`[gitWorktree] stale-age sweep (kind:${kind}): skipping ${checkoutDir} — live cwd holder outlasts the age threshold`);
+        continue;
+      }
+
+      try {
+        await teardownOrphanedCheckout(checkoutDir);
+        result.checkoutsRemoved++;
+      } catch {
+        /* best-effort */
+      }
+    }
+
+    try {
+      const remaining = await fsp.readdir(hashDir);
+      if (remaining.length === 0) {
+        await fsp.rmdir(hashDir);
+        result.emptyRootsRemoved++;
+      }
+    } catch {
+      // Not empty (a fresh checkout survives, or one this pass just skipped),
+      // doesn't exist, or a race — all fine to ignore.
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Capture the base tree's outstanding TRACKED diff (`git diff HEAD
+ * --binary` — read-only, never stages or touches `cwd`) and apply it inside
+ * the freshly created worktree `dir`, so a job started against a dirty base
+ * tree sees the SAME content it would have seen running in place, without
+ * the base tree ever being written to. Returns `{ ok: true, paths }` or
+ * `{ ok: false, reason }`; never throws.
+ *
+ * This is deliberately read-context, not work-product: the authoritative
+ * copy of the human's WIP stays in `cwd` the whole time. Nothing here ever
+ * `git add`s or commits the carried paths on the job's behalf, and nothing
+ * ever restores them back into `cwd` — they were never removed from it.
+ *
+ * The diff itself is captured via `git diff --output=<file>` so git writes
+ * the patch straight to disk — never through Node's stdout buffer. A prior
+ * version piped the patch through `execFile`'s default-`maxBuffer` stdout
+ * capture, which overflowed on a real dirty tree of ~240 changed paths
+ * (`stdout maxBuffer length exceeded`, job 1192) and silently fell back to
+ * running the job in the SHARED working tree — the exact moment isolation
+ * matters most. `--output` removes the buffer ceiling entirely regardless of
+ * how large the tree's outstanding diff is. The temp patch file lives
+ * inside `dir` (the job's own fresh worktree checkout, not a bare
+ * `os.tmpdir()` path) so it is guaranteed to be cleaned up either by the
+ * explicit `fsp.rm` below or, on any earlier failure, by the caller tearing
+ * the whole `dir` down.
+ */
+async function captureAndCarryBaseDiff({ cwd, dir }) {
+  let paths = [];
+  try {
+    const nameOut = await execGit(['diff', 'HEAD', '--name-only'], { cwd, timeout: 15_000 });
+    paths = nameOut.split('\n').map((l) => l.trim()).filter(Boolean);
+  } catch (e) {
+    return { ok: false, reason: `listing changed paths failed: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+
+  // Everything from here on operates on a real (or attempted) file at
+  // `patchFile` — wrapped in one try/finally so the temp file is removed on
+  // EVERY exit path, including a `git diff` that errors after partially
+  // writing it, not just the clean-success path.
+  const patchFile = path.join(dir, `.sm-worktree-carry-${crypto.randomBytes(8).toString('hex')}.patch`);
+  try {
+    try {
+      await execGit(['diff', 'HEAD', '--binary', `--output=${patchFile}`], { cwd, timeout: 120_000 });
+    } catch (e) {
+      return { ok: false, reason: `capturing base diff failed: ${(e && (e.stderrText || e.message)) || e}` };
+    }
+
+    let stat;
+    try {
+      stat = await fsp.stat(patchFile);
+    } catch (e) {
+      return { ok: false, reason: `reading captured diff file failed: ${(e && e.message) || e}` };
+    }
+    if (stat.size === 0) return { ok: true, paths: [] };
+
+    try {
+      // Same 120s ceiling as the capture step above: applying a patch large
+      // enough to need that long to generate can just as easily need that
+      // long to apply — leaving this at the old 30s reintroduces the same
+      // large-dirty-tree degrade-to-shared-tree failure one call later.
+      await execGit(['apply', '--binary', patchFile], { cwd: dir, timeout: 120_000 });
+    } catch (e) {
+      return { ok: false, reason: `git apply failed: ${(e && (e.stderrText || e.message)) || e}` };
+    }
+    return { ok: true, paths };
+  } finally {
+    try { await fsp.rm(patchFile, { force: true }); } catch { /* best-effort */ }
+  }
+}
+
+/**
+ * Counts how many worktrees of `kind` genuinely exist on disk RIGHT NOW,
+ * machine-wide — not limited to any one project's cwd, since the in-memory
+ * cap (`activeWorktreeCount`) is itself shared across every project using
+ * this kind. Walks the kind's own root directory (same enumeration
+ * `sweepStaleWorktreeCheckouts` uses) to find candidate checkouts, resolves
+ * each to its owning main tree via `mainTreeFromWorktreeGitFile` (never
+ * trusting a directory's mere presence — a half-created or already-removed
+ * checkout must not count), then asks EACH distinct main tree's own `git
+ * worktree list --porcelain` (the same invocation `reconcileWorktreesOnBoot`
+ * already uses, via `execGit`/`parseWorktreeListPorcelain` — no second
+ * git-invocation style) which of its registered worktrees still live under
+ * this kind's root. Never throws; an unreadable root or a git failure for a
+ * given main tree simply contributes 0 from that tree rather than aborting
+ * the whole count.
+ */
+async function computeObservedWorktreeCount(kind) {
+  const root = worktreeRootFor(kind);
+  let hashEntries;
+  try {
+    hashEntries = await fsp.readdir(root, { withFileTypes: true });
+  } catch {
+    return 0; // root doesn't exist (or unreadable) — nothing on disk
+  }
+
+  const checkoutDirs = [];
+  for (const hashEntry of hashEntries) {
+    if (!hashEntry.isDirectory()) continue;
+    const hashDir = path.join(root, hashEntry.name);
+    if (!isUnderRoot(hashDir, root)) continue;
+    let keyEntries;
+    try {
+      keyEntries = await fsp.readdir(hashDir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const keyEntry of keyEntries) {
+      if (!keyEntry.isDirectory()) continue;
+      const checkoutDir = path.join(hashDir, keyEntry.name);
+      if (isUnderRoot(checkoutDir, root)) checkoutDirs.push(checkoutDir);
+    }
+  }
+  if (!checkoutDirs.length) return 0;
+
+  const mainTrees = new Set();
+  for (const dir of checkoutDirs) {
+    const mainTree = await mainTreeFromWorktreeGitFile(dir);
+    if (mainTree) mainTrees.add(mainTree);
+  }
+
+  const liveWorktreePaths = new Set();
+  for (const mainTree of mainTrees) {
+    let out = '';
+    try {
+      out = await execGit(['worktree', 'list', '--porcelain'], { cwd: mainTree, timeout: 15_000 });
+    } catch {
+      continue; // that main tree is unreadable right now — its worktrees simply don't count this pass
+    }
+    for (const entry of parseWorktreeListPorcelain(out)) {
+      if (entry.worktree && isUnderRoot(entry.worktree, root)) {
+        liveWorktreePaths.add(path.resolve(entry.worktree));
+      }
+    }
+  }
+  return liveWorktreePaths.size;
+}
+
+/**
+ * Enumerates every process on the machine currently holding some directory as
+ * its cwd, as a Set of resolved absolute paths (never throws). Linux-only —
+ * walks `/proc/*\/cwd` via `readlinkSync`, tolerating a per-pid `EACCES`
+ * (owned by another user) or `ENOENT`/`ESRCH` (process exited between the
+ * `readdir` and the `readlink`) by simply skipping that pid rather than
+ * aborting the whole scan. On darwin (no `/proc`) returns an empty Set with
+ * no log line — `hasLiveHolder`'s caller is expected to also gate on a live
+ * `runtime.pid`, which is the darwin-covering half of that check.
+ *
+ * A readlink target ending in ` (deleted)` (the kernel's marker for a cwd
+ * whose directory entry was unlinked while still held open) has that suffix
+ * stripped before being added, so a holder of an already-unlinked directory
+ * still counts as a holder of the original path.
+ */
+function listCwdHolders() {
+  const holders = new Set();
+  if (process.platform !== 'linux') return holders;
+  let pids;
+  try {
+    pids = fs.readdirSync('/proc').filter((name) => /^\d+$/.test(name));
+  } catch {
+    return holders;
+  }
+  const DELETED_SUFFIX = ' (deleted)';
+  for (const pid of pids) {
+    try {
+      const target = fs.readlinkSync(`/proc/${pid}/cwd`);
+      const clean = target.endsWith(DELETED_SUFFIX) ? target.slice(0, -DELETED_SUFFIX.length) : target;
+      holders.add(path.resolve(clean));
+    } catch {
+      // EACCES (not our process), ENOENT/ESRCH (pid exited mid-scan) — skip.
+    }
+  }
+  return holders;
+}
+
+/**
+ * True when any process on the machine holds `dir` (or a path nested under
+ * it) as its cwd — the liveness signal that lets boot reconciliation tell a
+ * worktree still backing a running `claude -p` executor (survives an Electron
+ * restart via `detached: true`) apart from a genuinely abandoned one. Never
+ * throws.
+ *
+ * `holders`, when supplied, must be a `Set` already produced by
+ * `listCwdHolders()` — this lets a caller sweeping N candidate worktrees
+ * compute the `/proc` scan once and reuse it, rather than paying a full
+ * `readdir` + per-pid `readlink` pass for every candidate. When omitted, this
+ * computes its own (a single-candidate convenience, and what the bare
+ * `hasLiveHolder(dir)` contract in the AC exercises directly).
+ */
+function hasLiveHolder(dir, holders) {
+  try {
+    if (!dir || typeof dir !== 'string') return false;
+    if (process.platform !== 'linux') return false;
+    const resolvedDir = path.resolve(dir);
+    const set = holders instanceof Set ? holders : listCwdHolders();
+    for (const holder of set) {
+      if (holder === resolvedDir || holder.startsWith(resolvedDir + path.sep)) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** TTL-memoized wrapper over `computeObservedWorktreeCount` — see the cache header above. */
+async function getObservedWorktreeCount(kind, ttlMs = OBSERVED_WORKTREE_COUNT_TTL_MS) {
+  const cache = observedWorktreeCountCache[kind];
+  const now = Date.now();
+  if (cache.count !== null && now - cache.at < ttlMs) return cache.count;
+  const count = await computeObservedWorktreeCount(kind);
+  cache.count = count;
+  cache.at = now;
+  return count;
+}
+
+/**
+ * Serializes `fn` per kind via a promise chain, so the cap-check-and-reserve
+ * decision below stays a single atomic step across concurrent callers even
+ * though it now sometimes needs to `await` a fresh on-disk observation.
+ * `worktreeCapLockChain[kind]` is deliberately kept always-resolving (its
+ * own rejection is swallowed) so one caller's failure can never wedge every
+ * later caller behind it.
+ */
+function withKindLock(kind, fn) {
+  const previous = worktreeCapLockChain[kind];
+  const result = previous.then(fn, fn);
+  worktreeCapLockChain[kind] = result.then(() => {}, () => {});
+  return result;
+}
+
+/**
+ * Decides whether a new worktree of `kind` may be created right now, and if
+ * so reserves the slot — the single choke point `createWorktree` calls
+ * before doing any actual git work. Replaces the old bare
+ * `if (activeWorktreeCount[kind] >= cap) reject; else activeWorktreeCount[kind]++`
+ * with the same fast path when comfortably under cap (no await at all, same
+ * as before), but when the in-memory counter is AT OR OVER the cap, verifies
+ * that against observed on-disk reality before honoring the rejection —
+ * self-healing a leaked (never-decremented) counter instead of wedging the
+ * cap at a stale high-water mark for the rest of the process's life.
+ *
+ * TOCTOU safety for concurrent callers: the entire decision (including the
+ * observed-count await) runs inside `withKindLock`, so only one caller per
+ * kind is ever mid-decision at a time — a strictly stronger guarantee than
+ * the old purely-synchronous check+increment, which only protected callers
+ * that happened to land in the same tick.
+ */
+async function reserveWorktreeSlot(kind) {
+  return withKindLock(kind, async () => {
+    const cap = getMaxConcurrentWorktrees(kind);
+    if (activeWorktreeCount[kind] >= cap) {
+      const observed = await getObservedWorktreeCount(kind);
+      if (observed < activeWorktreeCount[kind]) {
+        activeWorktreeCount[kind] = observed;
+      }
+      if (activeWorktreeCount[kind] >= cap) {
+        return { ok: false, reason: `worktree cap reached (${cap} concurrent)` };
+      }
+    }
+    activeWorktreeCount[kind]++;
+    return { ok: true };
+  });
+}
+
+/**
+ * Create a linked worktree on a fresh branch checked out from the main
+ * tree's current HEAD. Returns `{ ok: true, dir, branch, baseCwd,
+ * carriedPaths, baseBranch }` on success (`baseBranch` is `cwd`'s branch at
+ * creation time — `null` on a detached HEAD — so integration later targets
+ * the branch the checkout actually started from, not whatever `cwd` sits on
+ * by the time the job finishes), or `{ ok: false, reason }` — the reason is
+ * always a short, human-readable string meant to be logged verbatim so a
+ * fallback to running in place is never silent.
+ *
+ * A dirty base tree (tracked modifications) no longer disables isolation —
+ * a worktree only ever checks out committed HEAD content, so the base
+ * tree's outstanding diff is captured and applied inside the fresh worktree
+ * (`captureAndCarryBaseDiff`) instead: the job sees the same content it
+ * would have seen running in place, while the shared base tree is never
+ * written to and stays untouchable for the run's whole duration. If that
+ * capture/apply fails for any reason (binary conflict, non-zero `git
+ * apply`), creation degrades to the OLD behaviour — the worktree is torn
+ * down and this returns `{ ok: false, reason: 'carry-over of base WIP
+ * failed: ...' }` — so this change can never turn a working fallback into a
+ * hard failure. `carriedPaths` (possibly empty) is threaded back so callers
+ * can exclude the human's carried WIP from branch integration.
+ *
+ * Never throws: every failure mode (not a repo, cap reached, carry-over
+ * failure, git error) is a normal, expected outcome for a project that
+ * hasn't opted into — or currently can't support — isolation, not an
+ * exceptional one.
+ *
+ * `fromRef` (optional) forks the checkout from that ref instead of HEAD —
+ * used by the checkout-free `sm-land/<epicId>` integration path, where a
+ * job's worktree should start from the shared land branch rather than
+ * whatever the human's own checkout happens to be on. Only used when it
+ * actually resolves to a commit; an unresolvable `fromRef` silently falls
+ * back to HEAD, same as omitting it. `baseBranch` on the result always stays
+ * the human checkout's OWN branch (never the land ref) — integration still
+ * needs to know what the human was really on, `forkedFrom` carries the ref
+ * the worktree content itself came from. The base-tree WIP carry-over
+ * (`captureAndCarryBaseDiff`) is skipped whenever `fromRef` resolved: the
+ * human's dirty diff is relative to their OWN tree, not `fromRef`'s, so
+ * applying it here would silently misplace or conflict with content that has
+ * nothing to do with it.
+ */
+async function createWorktree({ kind, cwd, key, fromRef }) {
+  configFor(kind); // throws on an unknown kind before anything else runs
+  if (!cwd || typeof cwd !== 'string') return { ok: false, reason: 'no cwd provided' };
+  if (!key || typeof key !== 'string') return { ok: false, reason: 'no key provided' };
+  if (isWorktreeDisabled(kind, cwd)) return { ok: false, reason: `disabled via ${configFor(kind).disableEnv}=1 or the project's isolation toggle` };
+
+  if (!(await isGitRepo(cwd))) return { ok: false, reason: 'not a git repository' };
+
+  const baseBranch = await getCurrentBranch(cwd);
+  const baseWasClean = await isBaseTreeClean(cwd);
+
+  // Resolved to a commit SHA — never the bare ref/branch NAME — before it's
+  // handed to `git worktree add` below: a name could keep moving (or, for a
+  // '-'-prefixed name, be read as an option rather than a positional arg)
+  // between this resolution and the actual checkout; a SHA pins exactly the
+  // commit this call decided on. `forkedFrom` on the result still carries
+  // the original NAME (never the SHA) — that's the human-readable "what ref
+  // did this fork from" a caller wants to log/display.
+  let resolvedFromRefSha = null;
+  if (typeof fromRef === 'string' && fromRef) {
+    resolvedFromRefSha = await tryResolveCommit(cwd, `${fromRef}^{commit}`);
+  }
+
+  // Cap check + slot reservation as a single atomic step, per kind — see
+  // reserveWorktreeSlot's header. Released again below on any failure path
+  // so a failed create never permanently shrinks capacity.
+  const reservation = await reserveWorktreeSlot(kind);
+  if (!reservation.ok) return reservation;
+
+  const dir = worktreeDirFor(kind, cwd, key);
+  const branch = branchNameFor(kind, key);
+  const worktreeSource = resolvedFromRefSha || 'HEAD';
+  try {
+    await fsp.mkdir(path.dirname(dir), { recursive: true });
+    // Defensive: a same-key leftover from a prior crashed run (same slug/id
+    // can legitimately re-fire after a transient failure) must not collide
+    // with `git worktree add`'s own branch/path checks.
+    await removeWorktreeDir(cwd, dir);
+    try { await execGit(['branch', '-D', branch], { cwd, timeout: 10_000 }); } catch { /* didn't exist */ }
+    await execGit(['worktree', 'add', '-b', branch, dir, worktreeSource], { cwd, timeout: 30_000 });
+  } catch (e) {
+    activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
+    return { ok: false, reason: `git worktree add failed: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+
+  let carriedPaths = [];
+  if (!resolvedFromRefSha && !baseWasClean) {
+    // Routed through module.exports (not the bare local function) so tests
+    // can substitute a failing carry-over without needing a real git-apply
+    // conflict fixture — see gitWorktree.test.cjs's carry-over-failure case.
+    const carry = await module.exports.captureAndCarryBaseDiff({ cwd, dir });
+    if (!carry.ok) {
+      await removeWorktreeDir(cwd, dir);
+      try { await execGit(['branch', '-D', branch], { cwd, timeout: 10_000 }); } catch { /* best-effort */ }
+      activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
+      return { ok: false, reason: `carry-over of base WIP failed: ${carry.reason}` };
+    }
+    carriedPaths = carry.paths;
+  }
+
+  registeredCheckouts.set(dir, { kind, branch });
+  const result = { ok: true, dir, branch, baseCwd: cwd, carriedPaths, baseBranch };
+  if (resolvedFromRefSha) result.forkedFrom = fromRef;
+  return result;
+}
+
+/**
+ * Release the count of any registered checkout whose branch has no live
+ * holder (no process cwd under its dir) AND whose row is terminal
+ * (`isTerminalBranch(branch)`). Fail-closed: an unknown/live row or a live
+ * holder keeps the count. Returns the expired dirs. O(registered) plus one
+ * /proc scan.
+ */
+function expireDeadWorktreeRegistrations({ isTerminalBranch, holders = listCwdHolders() } = {}) {
+  const expired = [];
+  if (typeof isTerminalBranch !== 'function') return expired;
+  for (const [dir, reg] of [...registeredCheckouts]) {
+    if (hasLiveHolder(dir, holders)) continue;
+    if (!isTerminalBranch(reg.branch)) continue;
+    registeredCheckouts.delete(dir);
+    expiredCheckoutDirs.add(dir);
+    activeWorktreeCount[reg.kind] = Math.max(0, activeWorktreeCount[reg.kind] - 1);
+    expired.push(dir);
+  }
+  return expired;
+}
+
+/**
+ * True iff every path in `paths` has working-tree content in `cwd`
+ * byte-identical to its committed blob on `branch`. Used both by the
+ * carried-wip-only shortcut above and by integrateBranch's auto-resolve of a
+ * "would be overwritten by merge" refusal below — in both cases discarding a
+ * working-tree copy is only safe BECAUSE identity with the incoming commit is
+ * proven, never assumed. Fails toward false (not identical) on ANY read
+ * error — a `git show` failure or an unreadable working-tree file is never
+ * proof of identity.
+ */
+async function pathsIdenticalToBranch({ cwd, branch, paths }) {
+  if (!Array.isArray(paths) || !paths.length) return false;
+  for (const p of paths) {
+    try {
+      const branchContent = await execGit(['show', `${branch}:${p}`], { cwd, timeout: 10_000 });
+      const baseContent = await fsp.readFile(path.join(cwd, p), 'utf8');
+      if (branchContent !== baseContent) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Parses the path lists out of git's refusal to merge over dirty working-tree
+ * files. Git emits up to two distinct blocks — tracked paths under "local
+ * changes ... would be overwritten" (restorable via `git checkout --`, which
+ * needs an index entry) and untracked paths under "untracked working tree
+ * files ... would be overwritten" (no index entry, so `git checkout --`
+ * cannot touch them — they must be removed instead). Each block is a run of
+ * TAB-indented path lines terminated by the next non-indented line (a
+ * "Please ..." sentence or the next block's own header). Returns null when
+ * neither block is present — stderr from a genuine content conflict has no
+ * such block.
+ */
+function parseBlockingMergePaths(stderrText) {
+  if (!stderrText) return null;
+  const tracked = [];
+  const untracked = [];
+  let mode = null;
+  for (const rawLine of stderrText.split('\n')) {
+    if (/would be overwritten by merge:\s*$/.test(rawLine) && /local changes/.test(rawLine)) {
+      mode = 'tracked';
+      continue;
+    }
+    if (/would be overwritten by merge:\s*$/.test(rawLine) && /untracked working tree files/.test(rawLine)) {
+      mode = 'untracked';
+      continue;
+    }
+    if (mode) {
+      if (/^\t/.test(rawLine)) {
+        const p = rawLine.trim();
+        if (p) (mode === 'tracked' ? tracked : untracked).push(p);
+        continue;
+      }
+      mode = null;
+    }
+  }
+  if (!tracked.length && !untracked.length) return null;
+  return { tracked: Array.from(new Set(tracked)), untracked: Array.from(new Set(untracked)) };
+}
+
+/**
+ * Classifies a failed `git merge` from its stderr — additive metadata for
+ * integrateBranch's `ok: false` results (the `reason` string is untouched).
+ * 'blocking_paths' = git refused up-front over dirty/untracked paths
+ * (auto-resolvable, PRD 1125); 'content_conflict' = a genuine 3-way
+ * `CONFLICT (` (deterministic on every retry); 'other' = anything else.
+ * For content_conflict, reads the unmerged paths — MUST be called before
+ * `git merge --abort`, which clears them. Never throws; a failed read
+ * yields `conflictedPaths: []`. O(p log p) in the conflicted-path count.
+ */
+async function classifyMergeFailure({ cwd, stderrText, stdoutText }) {
+  const blocking = parseBlockingMergePaths(stderrText);
+  if (blocking) return { failureKind: 'blocking_paths', blockingPaths: blocking };
+  // git prints `CONFLICT (...)` lines on STDOUT, not stderr.
+  if (/CONFLICT \(/m.test(`${stdoutText || ''}\n${stderrText || ''}`)) {
+    let conflictedPaths = [];
+    try {
+      const out = await execGit(['diff', '--name-only', '--diff-filter=U'], { cwd, timeout: 10_000 });
+      conflictedPaths = Array.from(new Set(out.split('\n').map((l) => l.trim()).filter(Boolean))).sort();
+    } catch { /* best effort — abort must still run */ }
+    return { failureKind: 'content_conflict', conflictedPaths };
+  }
+  return { failureKind: 'other' };
+}
+
+// Extensions eligible for the pure-addition auto-resolve. All-or-nothing across
+// a merge: one conflicted path outside this list means no auto-resolve at all.
+const AUTO_RESOLVE_EXTENSIONS = new Set(['.md', '.markdown', '.txt', '.rst']);
+
+/**
+ * Renders `git merge-file -p --diff3` over the index's three conflict stages
+ * of `p`. Returns the merged text (with markers), or null when any stage is
+ * missing/unreadable, a stage is not valid UTF-8 (the round-trip would not be
+ * byte-exact), or git itself errors. `merge-file` exits with the conflict
+ * count (1..127) on a clean run — only >127 or a signal is an error. Never
+ * throws. O(file size).
+ */
+async function renderStagesDiff3({ cwd, p }) {
+  let tmp = null;
+  try {
+    tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-mergefile-'));
+    const files = [];
+    for (const stage of [2, 1, 3]) { // ours, base, theirs — merge-file's argument order
+      const content = await execGit(['cat-file', 'blob', `:${stage}:${p}`], { cwd, timeout: 10_000 });
+      if (content.includes('�')) return null;
+      const f = path.join(tmp, `stage${stage}`);
+      await fsp.writeFile(f, content, 'utf8');
+      files.push(f);
+    }
+    try {
+      return await execGit(['merge-file', '-p', '--diff3', '-L', 'ours', '-L', 'base', '-L', 'theirs', ...files], { cwd, timeout: 10_000 });
+    } catch (e) {
+      if (e && typeof e.code === 'number' && e.code >= 1 && e.code <= 127 && typeof e.stdoutText === 'string') return e.stdoutText;
+      return null;
+    }
+  } catch {
+    return null;
+  } finally {
+    if (tmp) { try { await fsp.rm(tmp, { recursive: true, force: true }); } catch { /* best effort */ } }
+  }
+}
+
+/**
+ * Parses diff3 merge-file output into segments: `{ text }` for pass-through
+ * regions and `{ ours, base, theirs }` (arrays of lines) for conflict hunks.
+ * Returns null on any out-of-order marker or an unterminated hunk. A marker
+ * prefix is only meaningful in its expected state; `=======` inside the ours
+ * or theirs section (e.g. a markdown setext underline) is treated as
+ * unparseable rather than guessed at. O(n) in output lines.
+ */
+function parseDiff3Output(output) {
+  const lines = output.split('\n');
+  const segments = [];
+  let plain = [];
+  let hunk = null;
+  let state = 'plain';
+  for (const line of lines) {
+    const isOpen = line.startsWith('<<<<<<< ');
+    const isBase = line.startsWith('||||||| ');
+    const isSep = line.startsWith('=======');
+    const isClose = line.startsWith('>>>>>>> ');
+    if (state === 'plain') {
+      if (isBase || isClose) return null;
+      if (isOpen) {
+        segments.push({ lines: plain });
+        plain = [];
+        hunk = { ours: [], base: [], theirs: [] };
+        state = 'ours';
+      } else {
+        plain.push(line);
+      }
+    } else if (state === 'ours') {
+      if (isOpen || isSep || isClose) return null;
+      if (isBase) state = 'base'; else hunk.ours.push(line);
+    } else if (state === 'base') {
+      if (isOpen || isBase || isClose) return null;
+      if (isSep && line === '=======') state = 'theirs'; else if (isSep) return null; else hunk.base.push(line);
+    } else {
+      if (isOpen || isBase || isSep) return null;
+      if (isClose) { segments.push({ hunk }); hunk = null; state = 'plain'; } else hunk.theirs.push(line);
+    }
+  }
+  if (state !== 'plain') return null;
+  segments.push({ lines: plain });
+  return segments;
+}
+
+/**
+ * True ONLY when, for EVERY path, the index holds all three conflict stages
+ * and every diff3 conflict hunk has an EMPTY base section (both sides purely
+ * added text where the merge base had nothing). Proven from the bytes, never
+ * assumed; fails toward false on every error path. Never throws.
+ */
+async function isPureAdditionConflict({ cwd, paths }) {
+  try {
+    if (!Array.isArray(paths) || !paths.length) return false;
+    for (const p of paths) {
+      const out = await renderStagesDiff3({ cwd, p });
+      if (out === null) return false;
+      const segments = parseDiff3Output(out);
+      if (!segments) return false;
+      const hunks = segments.filter((s) => s.hunk);
+      if (!hunks.length) return false;
+      if (hunks.some((s) => s.hunk.base.length !== 0)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Rewrites each conflicted path in the working tree with every conflict hunk
+ * replaced by OURS then THEIRS (no markers, base, reordering, or dedup);
+ * non-conflicted regions pass through unchanged. Renders ALL paths before
+ * writing any so a late failure leaves nothing half-rewritten. Throws on any
+ * failure — the caller aborts the merge.
+ */
+async function resolveByConcatenation({ cwd, paths }) {
+  const rendered = [];
+  for (const p of paths) {
+    const out = await renderStagesDiff3({ cwd, p });
+    const segments = out === null ? null : parseDiff3Output(out);
+    if (!segments) throw new Error(`cannot render conflict for ${p}`);
+    rendered.push({ p, text: joinSegments(segments) });
+  }
+  for (const { p, text } of rendered) {
+    await fsp.writeFile(path.join(cwd, p), text, 'utf8');
+  }
+}
+
+/** Rebuilds file text from parsed segments, hunks contributing ours+theirs lines. */
+function joinSegments(segments) {
+  const out = [];
+  for (const seg of segments) {
+    if (seg.hunk) out.push(...seg.hunk.ours, ...seg.hunk.theirs);
+    else out.push(...seg.lines);
+  }
+  return out.join('\n');
+}
+
+/**
+ * Resolves `cwd`'s default branch, without ever hardcoding `main`: prefers
+ * the remote-tracked default (`origin/HEAD`, set by `git clone`/`git remote
+ * set-head`), falls back to the repo's own `init.defaultBranch` config, then
+ * to whichever of a local `main`/`master` branch actually exists, and only
+ * as a last resort assumes `main`. Never throws — every git failure along
+ * this chain (no remote, no config, no matching local branch) simply falls
+ * through to the next source.
+ */
+// HEAD sha of `cwd` (null on any failure) — stamped on a failed integration so
+// mechanical recovery can tell whether the base tree has moved since.
+async function readHeadSha(cwd) {
+  try {
+    return (await execGit(['rev-parse', 'HEAD'], { cwd, timeout: 10_000 })).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveDefaultBranch(cwd) {
+  try {
+    const out = (await execGit(['symbolic-ref', 'refs/remotes/origin/HEAD'], { cwd, timeout: 10_000 })).trim();
+    const match = out.match(/^refs\/remotes\/origin\/(.+)$/);
+    if (match && match[1]) return match[1];
+  } catch { /* no remote, or origin/HEAD not set — fall through */ }
+  try {
+    const out = (await execGit(['config', '--get', 'init.defaultBranch'], { cwd, timeout: 10_000 })).trim();
+    if (out) return out;
+  } catch { /* not configured — fall through */ }
+  try {
+    await execGit(['show-ref', '--verify', '--quiet', 'refs/heads/main'], { cwd, timeout: 10_000 });
+    return 'main';
+  } catch { /* no local main — fall through */ }
+  try {
+    await execGit(['show-ref', '--verify', '--quiet', 'refs/heads/master'], { cwd, timeout: 10_000 });
+    return 'master';
+  } catch { /* no local master either — fall through */ }
+  return 'main';
+}
+
+/**
+ * `cwd`'s current branch name, or `null` on a detached HEAD (or any other
+ * state `git symbolic-ref` can't resolve to a branch). Never throws.
+ */
+async function getCurrentBranch(cwd) {
+  try {
+    const out = (await execGit(['symbolic-ref', '-q', '--short', 'HEAD'], { cwd, timeout: 10_000 })).trim();
+    return out || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when `branch`'s ONLY committed changes (relative to `cwd`'s HEAD)
+ * touch paths in `carriedPaths` (the human's carried-over base-tree WIP from
+ * `createWorktree`) AND every one of those changed paths' committed blob on
+ * `branch` is byte-identical to what's still sitting dirty in `cwd` right
+ * now — i.e. the branch committed exactly the carried WIP and nothing more.
+ * Extracted out of `integrateBranch` (identical logic, same content-verify
+ * safety reasoning documented there) so a checkout-free Epic land path can
+ * reuse the same classification before ever attempting a land.
+ * Never throws — any read failure (including no `carriedPaths`) is reported
+ * as `false`, the safer default that falls through to a real integration
+ * attempt rather than silently dropping a commit.
+ */
+async function isCarriedWipOnly({ cwd, branch, carriedPaths }) {
+  if (!Array.isArray(carriedPaths) || !carriedPaths.length) return false;
+  try {
+    let mergeBase = '';
+    try {
+      mergeBase = (await execGit(['merge-base', 'HEAD', branch], { cwd, timeout: 10_000 })).trim();
+    } catch {
+      mergeBase = '';
+    }
+    const changedOut = await execGit(['diff', `${mergeBase || 'HEAD'}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
+    const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
+    if (changed.length && changed.every((p) => carriedPaths.includes(p))) {
+      const allIdentical = await pathsIdenticalToBranch({ cwd, branch, paths: changed });
+      if (allIdentical) return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Integrate a branch back into `cwd`'s current HEAD — fast-forward when
+ * possible, a real merge commit when the main tree advanced underneath (a
+ * sibling job/Epic merged first) since the worktree was created. Returns
+ * `{ ok: true, integrated: boolean, ...}` on success (integrated:false means
+ * the branch had no new commits — a legitimate no-op, not a failure), or
+ * `{ ok: false, reason }` when neither ff-only nor a real merge could land —
+ * e.g. a genuine content conflict. On failure the branch is left un-merged
+ * and NOT deleted (see cleanupWorktree) so the work is recoverable, never
+ * silently discarded.
+ *
+ * `carriedPaths` (optional — from createWorktree's WIP carry-over) skips the
+ * merge entirely, returning `{ ok: true, integrated: false, reason:
+ * 'carried-wip-only' }`, when the branch's ONLY committed changes touch
+ * paths that were carried in as the human's base-tree WIP rather than the
+ * job's own work — landing such a commit would just re-apply the human's
+ * uncommitted edit back onto itself via a merge, and could conflict with
+ * the base tree still holding that same path dirty.
+ *
+ * Refuses outright — before touching any other git state — when `cwd`'s
+ * HEAD is not on the expected target branch or is detached. The expected
+ * target is `baseBranch` (the branch `cwd` was actually on when the
+ * worktree was created, per `createWorktree`) when it is a non-empty string
+ * that doesn't start with one of OUR OWN managed branch prefixes (KIND_CONFIG's
+ * `branchPrefix`, i.e. `sm-job/`/`sm-epic/` — read from the same config
+ * createWorktree/branchNameFor use, so a prefix rename can never drift the two
+ * apart) — a leftover managed-branch value is never a legitimate integration
+ * target, so it falls back the same as no baseBranch at all); otherwise it
+ * falls back to `resolveDefaultBranch(cwd)` (never hardcoded to `main`) —
+ * today's pre-PRD behavior for callers that don't pass `baseBranch` (e.g.
+ * `branchSweep.cjs`'s orphan sweep, which has no job row to read it from).
+ * A checkout that has moved off the expected target since the worktree was
+ * created (e.g. a leftover `sm-job/*` branch from a prior run) would
+ * otherwise make every subsequent merge-base/merge silently target the
+ * WRONG tree, producing merge "conflicts" that are really just wrong-base
+ * artifacts (RCA: starry-night-ships, 2026-09-12) — still guarded here
+ * because an `sm-*` baseBranch is rejected as an expected target, and a HEAD
+ * that moved after the worktree forked is refused regardless of what
+ * baseBranch was recorded. This refusal never checks out, resets, or
+ * switches anything — it only reports (`failureKind: 'stray_checkout'`); a
+ * human fixes the checkout. Pass `allowRefLanding: true` to land onto
+ * `expectedBranch`'s ref instead of refusing (still never touches any
+ * checkout) — only `performMechanicalRecovery` opts into this; every other
+ * caller keeps today's refusal.
+ *
+ * The ref-landing path refuses the same way — reports, never lands — in
+ * three more cases: `cwd`'s HEAD is detached (a plain detached checkout and
+ * a mid-rebase one both read back as `null` from `getCurrentBranch`, and the
+ * two can't be told apart, so both are refused); `expectedBranch` is being
+ * rebased in ANY worktree of this repo, not only checked out in one (the
+ * rebase scan inside `checkTargetRefNotCheckedOut`) — a later `git rebase
+ * --abort`/`--continue` there would otherwise undo or outrun the ref move
+ * this path just made; or `branch`'s only committed changes touch
+ * `carriedPaths` — judged by path membership alone here, unlike the
+ * in-checkout path's `isCarriedWipOnly`, because `cwd` is on some other
+ * branch and has no working tree this path could trust to content-verify
+ * against.
+ */
+async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranch, allowRefLanding = false }) {
+  if (!cwd || !branch) return { ok: false, reason: 'missing cwd/branch' };
+
+  const expectedBranch = (typeof baseBranch === 'string' && baseBranch && !isOwnManagedBranch(baseBranch))
+    ? baseBranch
+    : await resolveDefaultBranch(cwd);
+  // Hoisted above the stray-checkout check: both the ref-landing path below
+  // and the normal in-checkout merge path further down land with this exact
+  // text, and must never drift apart on it.
+  const mergeMessage = kind === 'epic'
+    ? `merge epic ${key || branch}`
+    // Preserves the exact job-kind message the pre-generalization jobWorktree.cjs
+    // used, so a job's merge-commit text never changes under this refactor.
+    : `merge scheduler job ${key || branch}`;
+  const currentBranch = await getCurrentBranch(cwd);
+  if (currentBranch !== expectedBranch) {
+    const actualBranch = currentBranch === null ? 'detached HEAD' : currentBranch;
+    const strayCheckoutFailure = {
+      ok: false,
+      failureKind: 'stray_checkout',
+      expectedBranch,
+      actualBranch,
+      reason: `refusing to integrate: HEAD is on "${actualBranch}", not the expected base branch "${expectedBranch}" — a stray checkout must be fixed before integration can proceed`,
+    };
+    if (!allowRefLanding || process.env.SM_REF_LANDING_DISABLE === '1') {
+      return strayCheckoutFailure;
+    }
+    // A detached HEAD is indistinguishable from a mid-rebase one — both read
+    // back as `null` from getCurrentBranch — and a ref move under a paused
+    // rebase gets undone the moment that rebase ends (`--abort`) or outrun
+    // (`--continue`). We cannot tell the two apart, so neither is landed.
+    if (currentBranch === null) {
+      return strayCheckoutFailure;
+    }
+    // The checkout is busy on some OTHER branch (a human, or a sibling job's
+    // own worktree-free promotion) — land straight onto `expectedBranch`'s
+    // ref instead of refusing outright. Never touches `cwd`'s working tree,
+    // index, or HEAD: `integrateOntoRef` is a pure object-database CAS. Only
+    // `performMechanicalRecovery` opts into this today (`allowRefLanding:
+    // true`) — the first-pass integrate (scheduler.cjs's `finalizeJobWorktree`)
+    // must keep refusing here, because it finds the landed commit by
+    // watching HEAD move, which a ref-only land never does.
+    let refBranchHead;
+    try {
+      refBranchHead = (await execGit(['rev-parse', branch], { cwd, timeout: 10_000 })).trim();
+    } catch {
+      return strayCheckoutFailure;
+    }
+    let refMergeBase = '';
+    try {
+      refMergeBase = (await execGit(['merge-base', expectedBranch, branch], { cwd, timeout: 10_000 })).trim();
+    } catch {
+      refMergeBase = '';
+    }
+    if (refMergeBase && refMergeBase === refBranchHead) {
+      return { ok: true, integrated: false, reason: 'branch has no new commits' };
+    }
+    // Carried-WIP shortcut, path membership only: `cwd` is on `actualBranch`,
+    // not `expectedBranch`, so there is no trustworthy working tree here to
+    // content-verify against (isCarriedWipOnly's approach, used by the
+    // in-checkout path below). Refusing instead of reporting a false
+    // "carried-wip-only" matters because the caller (performMechanicalRecovery)
+    // treats that reason as safe to delete the job branch — a wrong guess
+    // would discard real work. A branch that changed carried paths AND other
+    // paths still lands below, same as the in-checkout path.
+    if (Array.isArray(carriedPaths) && carriedPaths.length) {
+      try {
+        const changedOut = await execGit(['diff', `${refMergeBase || expectedBranch}..${branch}`, '--name-only'], { cwd, timeout: 10_000 });
+        const changed = changedOut.split('\n').map((l) => l.trim()).filter(Boolean);
+        if (changed.length && changed.every((p) => carriedPaths.includes(p))) {
+          return strayCheckoutFailure;
+        }
+      } catch {
+        // Diff failed — fall through to the normal ref landing below, same
+        // as every other "never throws" rule in this function.
+      }
+    }
+    const refResult = await integrateOntoRef({
+      cwd, targetRef: `refs/heads/${expectedBranch}`, branch, message: mergeMessage,
+    });
+    if (refResult.ok) {
+      // Spread refResult first so a fast-forward keeps `fastForward: true`
+      // and a merge commit keeps `mergeCommit: true` — this used to
+      // hard-code `fastForward: false` on every success, misreporting a
+      // plain fast-forward as a merge.
+      return { ...refResult, viaRef: true, sha: refResult.sha || refBranchHead };
+    }
+    if (refResult.failureKind === 'target_checked_out') {
+      return strayCheckoutFailure;
+    }
+    if (refResult.failureKind === 'content_conflict') {
+      return {
+        ok: false,
+        reason: `merge failed (likely a real content conflict): ${refResult.reason}`,
+        failureKind: 'content_conflict',
+        conflictedPaths: refResult.conflictedPaths || [],
+      };
+    }
+    return strayCheckoutFailure;
+  }
+
+  let branchHead;
+  try {
+    branchHead = (await execGit(['rev-parse', branch], { cwd, timeout: 10_000 })).trim();
+  } catch (e) {
+    return { ok: false, reason: `branch ${branch} not found: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+  let mergeBase = '';
+  try {
+    mergeBase = (await execGit(['merge-base', 'HEAD', branch], { cwd, timeout: 10_000 })).trim();
+  } catch {
+    mergeBase = '';
+  }
+  if (mergeBase && mergeBase === branchHead) {
+    return { ok: true, integrated: false, reason: 'branch has no new commits' };
+  }
+
+  // Path membership alone is NOT enough: a job that legitimately edits the
+  // SAME file the base tree had carried-in WIP on (e.g. this repo's own
+  // scheduler.cjs churns queue.json/active-index.json while jobs run) would
+  // otherwise have its real commit misclassified as "just the carried WIP"
+  // and dropped — the caller treats `integrated: false` as
+  // safe-to-delete-the-branch, so that commit would be gone for good, worse
+  // than the ordinary merge-conflict path (branch kept, flagged for manual
+  // recovery) this shortcut is supposed to be a safe subset of. See
+  // `isCarriedWipOnly` above for the content-verify logic.
+  if (await isCarriedWipOnly({ cwd, branch, carriedPaths })) {
+    return { ok: true, integrated: false, reason: 'carried-wip-only' };
+  }
+
+  try {
+    await execGit(['merge', '--ff-only', branch], { cwd, timeout: 30_000 });
+    // The branch tip we fast-forwarded to, read from the branch ref (not HEAD,
+    // which a concurrent writer may already have moved).
+    return { ok: true, integrated: true, fastForward: true, sha: await tryResolveCommit(cwd, `${branch}^{commit}`) };
+  } catch {
+    // Main tree advanced since the worktree branched (a sibling job/Epic
+    // merged first) — a real merge commit still lands the branch's commit(s).
+  }
+  try {
+    await execGit(['merge', '--no-ff', '--no-edit', '-m', mergeMessage, branch], { cwd, timeout: 30_000 });
+    return { ok: true, integrated: true, mergeCommit: true, sha: await readHeadSha(cwd) };
+  } catch (e) {
+    const stderrText = (e && (e.stderrText || e.message)) || String(e);
+    // git refuses this class of merge before ever touching MERGE_HEAD, so
+    // there is nothing yet to abort here — only the retry below (if it also
+    // fails) can leave a half-applied merge behind.
+    const blocking = parseBlockingMergePaths(stderrText);
+    if (blocking) {
+      const allPaths = [...blocking.tracked, ...blocking.untracked];
+      const identical = await pathsIdenticalToBranch({ cwd, branch, paths: allPaths });
+      if (identical) {
+        try {
+          if (blocking.tracked.length) {
+            await execGit(['checkout', '--', ...blocking.tracked], { cwd, timeout: 30_000 });
+          }
+          for (const p of blocking.untracked) {
+            await fsp.rm(path.join(cwd, p), { force: true });
+          }
+          await execGit(['merge', '--no-ff', '--no-edit', '-m', mergeMessage, branch], { cwd, timeout: 30_000 });
+          return {
+            ok: true,
+            integrated: true,
+            mergeCommit: true,
+            sha: await readHeadSha(cwd),
+            autoResolved: 'identical_working_tree_duplicates',
+            resolvedPaths: allPaths,
+          };
+        } catch (retryErr) {
+          const retryText = (retryErr && (retryErr.stderrText || retryErr.message)) || String(retryErr);
+          const retryClass = await classifyMergeFailure({ cwd, stderrText: retryText, stdoutText: retryErr && retryErr.stdoutText });
+          try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
+          return { ok: false, reason: `merge failed (likely a real content conflict): ${retryText}`, ...retryClass, baseHeadSha: await readHeadSha(cwd) };
+        }
+      }
+    }
+    // Read the conflicted paths BEFORE the abort — it clears the index stages.
+    const failureClass = await classifyMergeFailure({ cwd, stderrText, stdoutText: e && e.stdoutText });
+    // Pure-addition auto-resolve: two jobs appended different text to the same
+    // doc. All-or-nothing; any doubt or failure falls through to the abort.
+    if (
+      process.env.SM_PURE_ADDITION_MERGE_DISABLE !== '1'
+      && failureClass.failureKind === 'content_conflict'
+      && failureClass.conflictedPaths.length
+      && failureClass.conflictedPaths.every((p) => AUTO_RESOLVE_EXTENSIONS.has(path.extname(p).toLowerCase()))
+    ) {
+      try {
+        const paths = failureClass.conflictedPaths;
+        if (await isPureAdditionConflict({ cwd, paths })) {
+          await resolveByConcatenation({ cwd, paths });
+          await execGit(['add', ...paths], { cwd, timeout: 30_000 });
+          await execGit(['commit', '-m', mergeMessage], { cwd, timeout: 30_000 });
+          return { ok: true, integrated: true, mergeCommit: true, sha: await readHeadSha(cwd), autoResolved: 'pure_addition_concat', resolvedPaths: paths };
+        }
+      } catch { /* fall through to the abort */ }
+    }
+    // Abort a half-applied merge so `cwd` isn't left in a mid-merge state.
+    try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
+    return { ok: false, reason: `merge failed (likely a real content conflict): ${stderrText}`, ...failureClass, baseHeadSha: await readHeadSha(cwd) };
+  }
+}
+
+/**
+ * Tear down one worktree checkout after it has been integrated (or failed to
+ * integrate). Always removes the linked-worktree checkout (freeing its
+ * disk); only deletes the branch ref when `keepBranch` is falsy — a failed
+ * integration keeps the branch around for manual recovery per
+ * integrateBranch's contract above. Never throws.
+ */
+async function cleanupWorktree({ kind, cwd, dir, branch, keepBranch }) {
+  configFor(kind); // throws on an unknown kind before anything else runs
+  if (dir) await removeWorktreeDir(cwd, dir);
+  if (branch && !keepBranch) {
+    try { await execGit(['branch', '-D', branch], { cwd, timeout: 10_000 }); } catch { /* already gone */ }
+  }
+  try { await execGit(['worktree', 'prune'], { cwd, timeout: 10_000 }); } catch { /* best effort */ }
+  // A checkout the expiry pass already released must not be counted down
+  // twice, and neither must a dir-less call (e.g. mechanical recovery's
+  // branch-only cleanup after the worktree dir was already freed by the
+  // job's own earlier finalize) — no `dir` means this call never held a
+  // counted slot to begin with.
+  const alreadyExpired = dir ? expiredCheckoutDirs.delete(dir) : false;
+  if (dir) registeredCheckouts.delete(dir);
+  if (dir && !alreadyExpired) activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
+}
+
+/**
+ * Best-effort dump of a worktree's full outstanding diff (tracked
+ * modifications AND untracked files) to `outFile`, for a caller about to
+ * tear the worktree down. A job killed before its finish-protocol commit
+ * (rate limit, timeout, crash, hard kill) otherwise loses that work
+ * outright the moment `cleanupWorktree` removes the checkout — no branch,
+ * no stash, no patch survives it. `git add -A --intent-to-add` stages
+ * untracked paths (empty blobs) without touching their content, so the
+ * subsequent `git diff HEAD --binary` includes their full contents exactly
+ * like a tracked modification; the result is a patch a later `git apply`
+ * can consume verbatim.
+ *
+ * Never throws — this always runs immediately before teardown and must
+ * never block branch integration/cleanup or change a job's verdict. Writes
+ * nothing (and returns `{ ok: false }`) when the worktree is clean or on
+ * any git failure, so a successful run's teardown never leaves a 0-byte
+ * artifact behind.
+ */
+async function salvageWorktreeDiff({ cwd, outFile }) {
+  try {
+    const status = await execGit(['status', '--porcelain'], { cwd, timeout: 15_000 });
+    if (!status.trim()) return { ok: false };
+    try {
+      await execGit(['add', '-A', '--intent-to-add'], { cwd, timeout: 30_000 });
+    } catch {
+      // Best-effort — the diff below still captures whatever staged/tracked
+      // changes exist even if intent-to-add partially failed.
+    }
+    const patch = await execGit(['diff', 'HEAD', '--binary'], { cwd, timeout: 30_000 });
+    if (!patch || !patch.trim()) return { ok: false };
+    const { writeTextAtomic } = require('../../config.cjs');
+    await writeTextAtomic(outFile, patch);
+    return { ok: true, bytes: Buffer.byteLength(patch, 'utf8') };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * Best-effort dump of a caller-supplied DELTA of paths — never the whole
+ * tree — to `outFile`. This is the shared-tree counterpart to
+ * salvageWorktreeDiff above: a job that ran IN PLACE (no throwaway worktree
+ * checkout to diff and discard) shares `cwd` with a human's own WIP and any
+ * sibling job, so it must never touch anything outside the exact paths the
+ * caller says this job itself dirtied (typically: `git status` at exit,
+ * minus a pre-run baseline snapshot).
+ *
+ * Deliberately does NOT reuse salvageWorktreeDiff's `git add -A
+ * --intent-to-add` — that stages the ENTIRE tree's untracked files into the
+ * shared index, which is exactly the kind of blanket mutation this function
+ * exists to avoid. Instead: tracked/modified delta paths are read via `git
+ * diff HEAD --binary -- <paths>` (never stages anything), and untracked
+ * delta paths are read individually via `git diff --no-index --binary --
+ * /dev/null <path>` (also never touches the index) — `--no-index` exits
+ * non-zero to mean "found a difference", which execGit rejects, so its
+ * stdout is recovered off the rejected error via `err.stdoutText`.
+ *
+ * Never throws, and never mutates `cwd` in any way (no add/stash/reset/
+ * checkout/clean) — a caller running this against a tree shared with a
+ * human or a sibling job must be able to trust `git status --porcelain` and
+ * the stash list are byte-identical before and after. Writes nothing (and
+ * returns `{ ok: false }`) when none of the given paths are actually dirty,
+ * or on any git failure, so a run with nothing to salvage never leaves a
+ * 0-byte artifact behind.
+ */
+async function salvageDirtyDelta({ cwd, paths, outFile }) {
+  try {
+    const list = Array.isArray(paths) ? [...new Set(paths.filter(Boolean))] : [];
+    if (!list.length) return { ok: false };
+
+    const statusOut = await execGit(['status', '--porcelain', '--', ...list], { cwd, timeout: 15_000 }).catch(() => '');
+    const trackedPaths = [];
+    const untrackedPaths = [];
+    for (const line of String(statusOut || '').split('\n')) {
+      if (!line) continue;
+      const code = line.slice(0, 2);
+      // Unquote before use: a raw quoted+C-escaped token (any path with a
+      // quote, backslash, control char, or non-ASCII byte) is not a real
+      // on-disk path — passing it straight through as a pathspec to the
+      // `git diff` calls below silently fails to match the real file,
+      // dropping that path's content out of the salvaged patch entirely.
+      const p = unquotePorcelainPath(line.slice(3));
+      if (!p) continue;
+      if (code === '??') untrackedPaths.push(p);
+      else trackedPaths.push(p);
+    }
+    // Any requested path `git status` didn't report on (already clean by the
+    // time this runs — e.g. a race with a concurrent write) is simply
+    // skipped, never guessed at.
+
+    let patch = '';
+    if (trackedPaths.length) {
+      try {
+        const d = await execGit(['diff', 'HEAD', '--binary', '--', ...trackedPaths], { cwd, timeout: 30_000 });
+        if (d) patch += d;
+      } catch {
+        // Best-effort — a diff failure for the tracked set must not block
+        // salvaging the untracked set below.
+      }
+    }
+    for (const p of untrackedPaths) {
+      try {
+        const d = await execGit(['diff', '--no-index', '--binary', '--', '/dev/null', p], { cwd, timeout: 15_000 });
+        if (d) patch += d;
+      } catch (e) {
+        // git diff --no-index exits 1 (not an error) whenever it finds a
+        // difference, which is the expected outcome here every time — the
+        // real diff text is on stdout despite the non-zero exit.
+        if (e && typeof e.stdoutText === 'string' && e.stdoutText) patch += e.stdoutText;
+      }
+    }
+    if (!patch.trim()) return { ok: false };
+    const { writeTextAtomic } = require('../../config.cjs');
+    await writeTextAtomic(outFile, patch);
+    return { ok: true, bytes: Buffer.byteLength(patch, 'utf8') };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/**
+ * True when every commit on `branch` is already an ancestor of (or equal to)
+ * `cwd`'s current HEAD — i.e. the branch holds no work that isn't already
+ * landed. Used by the stranded-branch sweep (branchSweep.cjs) to tell a
+ * genuinely stranded `sm-job/*` branch from one that's already a no-op.
+ * Never throws; a branch that doesn't exist, or any other git failure, is
+ * conservatively reported as NOT merged so a caller never treats an
+ * unreadable branch as safe to skip.
+ */
+async function isBranchMergedIntoHead(cwd, branch) {
+  try {
+    const branchHead = (await execGit(['rev-parse', '--verify', branch], { cwd, timeout: 10_000 })).trim();
+    const mergeBase = (await execGit(['merge-base', 'HEAD', branch], { cwd, timeout: 10_000 })).trim();
+    return mergeBase !== '' && mergeBase === branchHead;
+  } catch {
+    return false;
+  }
+}
+
+// Alias — the real implementation now lives in gitExec.cjs
+// (parseWorktreePorcelain) so it can be shared below both this module and
+// scheduler.cjs in the require graph. Name kept for the many existing
+// `gitWorktree.parseWorktreeListPorcelain` call sites/tests.
+const parseWorktreeListPorcelain = sharedGitExec.parseWorktreePorcelain;
+
+/** Strips a kind's branch prefix off a branch name, returning the bare
+ *  key (slug/epicId), or null if the branch doesn't carry that prefix. */
+function keyFromBranch(kind, branch) {
+  const prefix = configFor(kind).branchPrefix;
+  if (!branch || !branch.startsWith(prefix)) return null;
+  return branch.slice(prefix.length);
+}
+
+/**
+ * Reclaims a job-kind worktree checkout whose OWNING QUEUE ROW is already
+ * terminal (`completed`/`failed`/`skipped` — passed in via `terminalSlugs`)
+ * without waiting for either the stale-age sweep (`sweepStaleWorktreeCheckouts`,
+ * gated on `staleSweepAgeMs`, default 24h) or the next app boot
+ * (`reconcileWorktreesOnBoot` only runs once, at startup). A job whose run
+ * ended without ever reaching `cleanupWorktree` (crash, reap, SIGTERM, an
+ * exception before teardown) otherwise leaves its checkout on disk
+ * indefinitely even though the row itself already resolved.
+ *
+ * Never assumes it's safe to delete — proves it, two ways, for each
+ * candidate:
+ *   1. `isBranchMergedIntoHead`: the branch holds ZERO commits that aren't
+ *      already on `cwd`'s HEAD (equivalently, zero commits ahead of main) —
+ *      so integrating it again could add nothing, and removing it loses no
+ *      committed work.
+ *   2. Every path still dirty in the checkout itself (`git status
+ *      --porcelain` run with cwd = the checkout dir) lives under
+ *      `session-manager-operations/` — i.e. it's carried-over ops-folder
+ *      noise (queue.json/history.jsonl churn picked up by
+ *      `captureAndCarryBaseDiff` when the worktree was created), never real
+ *      uncommitted job output.
+ *
+ * A candidate failing either check is left alone for a human/the stale-age
+ * sweep to deal with. Returns the list of slugs actually reclaimed. Never
+ * throws.
+ *
+ * Neither proof above is a liveness check: a still-running executor that
+ * hasn't committed yet trivially satisfies proof 1 (zero commits ahead), and
+ * satisfies proof 2 whenever its in-progress output is gitignored. So an
+ * optional `isLive(slug, entry)` predicate — supplied by the caller, which
+ * alone knows the owning queue row's recorded pid; this module keeps no
+ * queue knowledge of its own — is checked FIRST, before either proof, since
+ * it is the cheapest and most decisive gate. A candidate it reports live is
+ * skipped and logged once, without ever reaching (or affecting) the
+ * merge/status proofs below. `isLive` throwing is treated fail-SAFE: assume
+ * live (skip), never assume dead — leaking a checkout one more sweep cycle
+ * is far cheaper than deleting a running job's worktree out from under it.
+ */
+async function reclaimTerminalJobOrphans({ cwd, terminalSlugs, isLive }) {
+  const kind = 'job';
+  const root = worktreeRootFor(kind);
+  const reclaimed = [];
+  if (!cwd || !(terminalSlugs instanceof Set) || terminalSlugs.size === 0) return reclaimed;
+  if (!(await isGitRepo(cwd))) return reclaimed;
+
+  let out = '';
+  try {
+    out = await execGit(['worktree', 'list', '--porcelain'], { cwd, timeout: 15_000 });
+  } catch {
+    return reclaimed;
+  }
+
+  for (const entry of parseWorktreeListPorcelain(out)) {
+    if (!entry.worktree || !isUnderRoot(entry.worktree, root)) continue;
+    const slug = keyFromBranch(kind, entry.branch);
+    if (!slug || !terminalSlugs.has(slug)) continue;
+
+    if (typeof isLive === 'function') {
+      let live;
+      try {
+        live = await isLive(slug, entry);
+      } catch {
+        live = true; // fail-safe: an isLive that throws must never be read as "dead"
+      }
+      if (live) continue;
+    }
+
+    const merged = await isBranchMergedIntoHead(cwd, entry.branch);
+    if (!merged) continue; // real un-landed work — never touch
+
+    let statusOut = '';
+    try {
+      statusOut = await execGit(['status', '--porcelain'], { cwd: entry.worktree, timeout: 15_000 });
+    } catch {
+      continue; // can't prove the checkout is clean-of-real-work — never assume
+    }
+    const dirtyPaths = statusOut.split('\n')
+      .filter((l) => l.length > 0)
+      .map((l) => unquotePorcelainPath(l.slice(3).trim()))
+      .filter(Boolean);
+    const opsOnly = dirtyPaths.every(
+      (p) => p === OPS_ROOT_DIR || p.startsWith(`${OPS_ROOT_DIR}/`)
+    );
+    if (!opsOnly) continue; // real non-ops dirty content present — leave for a human
+
+    await removeWorktreeDir(cwd, entry.worktree);
+    if (entry.branch) {
+      try { await execGit(['branch', '-D', entry.branch], { cwd, timeout: 10_000 }); } catch { /* already gone */ }
+    }
+    reclaimed.push(slug);
+  }
+  try { await execGit(['worktree', 'prune'], { cwd, timeout: 10_000 }); } catch { /* best-effort */ }
+  return reclaimed;
+}
+
+/**
+ * Boot reconciliation: a worktree that survives a process crash (app killed
+ * mid-run, host reboot) leaks disk and a dangling branch forever unless
+ * something cleans it up — this is that something. For each known project
+ * cwd, lists every registered worktree, forcibly removes any that live under
+ * this kind's own root (never touches a worktree a human created for their
+ * own purposes, or one belonging to the OTHER kind), deletes its branch, and
+ * prunes stale registrations.
+ *
+ * `opts.isLive(key, entry)` is an optional liveness predicate — when it
+ * returns true for a given worktree's key (the slug/epicId parsed off its
+ * branch name), that worktree is left alone instead of being reaped. This is
+ * what lets the epic kind skip a worktree whose owning Epic is still
+ * `active` in the project's active-index.json (the caller supplies that
+ * check; this module has no active-index.json knowledge of its own — see
+ * this chain's next PRD for the real wiring). The job kind uses the same
+ * mechanism for a different signal: a job is spawned `detached: true`
+ * (scheduler.cjs), so its `claude -p` executor can survive an app restart —
+ * scheduler.cjs's own `isLive` treats a worktree as live when its owning
+ * queue row is still `running` with a live pid, OR `hasLiveHolder` finds a
+ * process whose cwd is still the checkout itself (see jobWorktreeBootLive.cjs).
+ * A caller that omits `isLive` entirely (e.g. an ad hoc test) still gets the
+ * old unconditional-reap behavior for that kind.
+ *
+ * After the per-cwd pass, this also runs `sweepStaleWorktreeCheckouts` —
+ * a second, root-directory-driven pass that is NOT limited to `cwds`, so a
+ * checkout belonging to a project no longer known to the caller (removed
+ * from Session Manager, or a leftover from before this sweep existed) still
+ * gets reclaimed once it's older than `opts.staleAgeMs` (default per-kind,
+ * see `KIND_CONFIG`). A one-shot log line reports the totals so a recurring
+ * leak stays visible (RCA: PRD 1108).
+ *
+ * Never throws — a project that isn't a git repo, or has no worktrees, is a
+ * silent no-op.
+ */
+async function reconcileWorktreesOnBoot(cwds, opts = {}) {
+  const kind = opts.kind || 'job';
+  const isLive = typeof opts.isLive === 'function' ? opts.isLive : null;
+  const root = worktreeRootFor(kind);
+  const list = Array.isArray(cwds) ? cwds.filter(Boolean) : [];
+  let checkoutsRemoved = 0;
+  for (const cwd of list) {
+    if (!(await isGitRepo(cwd))) continue;
+    let out = '';
+    try {
+      out = await execGit(['worktree', 'list', '--porcelain'], { cwd, timeout: 15_000 });
+    } catch {
+      continue;
+    }
+    const entries = parseWorktreeListPorcelain(out);
+    for (const entry of entries) {
+      if (!entry.worktree || !entry.worktree.startsWith(root + path.sep)) continue;
+      const key = keyFromBranch(kind, entry.branch);
+      if (isLive && key && (await isLive(key, entry))) continue;
+      await removeWorktreeDir(cwd, entry.worktree);
+      checkoutsRemoved++;
+      // sm-land/* is the per-Epic integration branch, never a throwaway
+      // worktree branch — even if something else checked it out onto a
+      // worktree under this kind's root, this sweep must never delete it.
+      if (entry.branch && !entry.branch.startsWith(LAND_BRANCH_PREFIX)) {
+        try { await execGit(['branch', '-D', entry.branch], { cwd, timeout: 10_000 }); } catch { /* already gone */ }
+      }
+    }
+    try { await execGit(['worktree', 'prune'], { cwd, timeout: 10_000 }); } catch { /* best effort */ }
+  }
+
+  let sweep = { checkoutsRemoved: 0, emptyRootsRemoved: 0 };
+  try {
+    sweep = await sweepStaleWorktreeCheckouts(kind, { staleAgeMs: opts.staleAgeMs, holders: opts.holders });
+  } catch {
+    /* never let the orphan sweep take down boot reconciliation */
+  }
+  const totals = {
+    checkoutsRemoved: checkoutsRemoved + sweep.checkoutsRemoved,
+    emptyRootsRemoved: sweep.emptyRootsRemoved,
+  };
+  console.log(
+    `[gitWorktree] boot sweep (kind:${kind}): reclaimed ${totals.checkoutsRemoved} checkout(s), ` +
+    `${totals.emptyRootsRemoved} empty root dir(s)`
+  );
+  return totals;
+}
+
+// ──────────────────────────────────────────── checkout-free integration (integrateOntoRef / ensureLandBranch)
+
+/** `git rev-parse --verify --quiet <spec>`, trimmed — null (never throws) on
+ *  any failure, e.g. `spec` doesn't resolve to a commit. */
+async function tryResolveCommit(cwd, spec) {
+  try {
+    const out = await execGit(['rev-parse', '--verify', '--quiet', spec], { cwd, timeout: 10_000 });
+    return out.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Runs `git merge-tree --write-tree --name-only --no-messages <targetRef>
+ * <branch>` and classifies the result — never throws. Confirmed against a
+ * real repo (git 2.39.5): a clean merge exits 0 with the resulting tree OID
+ * as the only stdout line; a content conflict exits 1 with the tree OID on
+ * line 1 followed by one conflicted path per line; anything else (including
+ * exit 129 / an "unknown option" stderr, git < 2.38's signature for not
+ * supporting `--write-tree` at all) is a hard failure.
+ */
+async function runMergeTreeWriteTree({ cwd, oldSha, branchSha }) {
+  try {
+    // Resolved SHAs, never ref/branch NAMES: (1) keeps the tree content this
+    // computes and the parents `git commit-tree` later stamps always in sync
+    // with the exact objects decided on above — a name could resolve to a
+    // DIFFERENT object by the time this runs if something else moved it
+    // between the earlier resolution and this call; (2) a branch/ref name
+    // starting with '-' (e.g. an epicId-derived branch) would otherwise be
+    // read as an option by `git merge-tree`, not a positional argument.
+    const out = await execGit(
+      ['merge-tree', '--write-tree', '--name-only', '--no-messages', oldSha, branchSha],
+      { cwd, timeout: 30_000 },
+    );
+    return { ok: true, treeOid: (out.split('\n')[0] || '').trim() };
+  } catch (e) {
+    const stderrText = (e && e.stderrText) || '';
+    const stdoutText = (e && e.stdoutText) || '';
+    if (e && e.code === 129 || /unknown option/i.test(stderrText)) {
+      return {
+        ok: false,
+        failureKind: 'git_too_old',
+        reason: `git merge-tree --write-tree is unsupported by this git (need >= 2.38): ${stderrText || e.message}`,
+      };
+    }
+    if (e && e.code === 1) {
+      const lines = stdoutText.split('\n').map((l) => l.trim());
+      const conflictedPaths = Array.from(new Set(lines.slice(1).filter(Boolean))).sort();
+      return {
+        ok: false,
+        failureKind: 'content_conflict',
+        conflictedPaths,
+        reason: `merge-tree conflict on: ${conflictedPaths.join(', ')}`,
+      };
+    }
+    return { ok: false, reason: `git merge-tree --write-tree failed: ${stderrText || e.message}` };
+  }
+}
+
+/**
+ * One computation attempt for `integrateOntoRef` — resolves both tips fresh,
+ * decides ff vs merge-commit vs no-op, and lands the result via a
+ * compare-and-swap `git update-ref`. Returns `{ retry: true }` (never `ok`)
+ * when the CAS lost a race against a concurrent ref update — the caller
+ * recomputes from scratch, since a stale `oldSha` invalidates everything
+ * derived from it (the ff-vs-merge decision, the merge-tree/commit-tree
+ * inputs). Every other return is terminal: a real `{ ok: true/false, ... }`.
+ */
+async function attemptIntegrateOntoRef({ cwd, targetRef, branch, message }) {
+  const branchSha = await tryResolveCommit(cwd, `${branch}^{commit}`);
+  if (!branchSha) return { ok: false, reason: `branch "${branch}" not found` };
+
+  // Resolve the ref itself (any object type) separately from its `^{commit}`
+  // form: a ref that exists but doesn't resolve to a commit (points at a
+  // blob/tree, or a corrupt/annotated-non-commit ref) must be an explicit
+  // failure, never silently treated as "doesn't exist yet" — that would run
+  // the create-only CAS below and stomp the ref's existing (non-commit)
+  // value instead of refusing.
+  const targetRefExists = await tryResolveCommit(cwd, targetRef);
+  const oldSha = await tryResolveCommit(cwd, `${targetRef}^{commit}`);
+  if (targetRefExists && !oldSha) {
+    return { ok: false, reason: `targetRef "${targetRef}" exists but does not resolve to a commit` };
+  }
+
+  if (oldSha === branchSha) {
+    return { ok: true, integrated: false, reason: 'branch has no new commits' };
+  }
+
+  // Retries only when `targetRef` actually moved since `oldSha` was read
+  // (a real CAS race a fresh attempt can resolve); otherwise the update-ref
+  // failure is real (bad ref name, permissions, disk) and reported as such
+  // rather than silently retried forever.
+  async function updateRefOrClassify(args) {
+    try {
+      await execGit(['update-ref', ...args], { cwd, timeout: 10_000 });
+      return { ok: true };
+    } catch (e) {
+      const stderrText = (e && (e.stderrText || e.message)) || String(e);
+      const nowSha = await tryResolveCommit(cwd, `${targetRef}^{commit}`);
+      if (nowSha !== oldSha) return { retry: true };
+      return { ok: false, failureKind: 'update_ref_failed', reason: stderrText };
+    }
+  }
+
+  if (!oldSha) {
+    // targetRef doesn't exist yet — a create-only CAS is the correct
+    // fast-forward: everything on branch is new relative to an empty ref.
+    const outcome = await updateRefOrClassify([targetRef, branchSha, '']);
+    if (outcome.retry) return { retry: true };
+    if (!outcome.ok) return outcome;
+    return { ok: true, integrated: true, fastForward: true, sha: branchSha };
+  }
+
+  let isAncestor;
+  try {
+    await execGit(['merge-base', '--is-ancestor', oldSha, branchSha], { cwd, timeout: 10_000 });
+    isAncestor = true;
+  } catch (e) {
+    if (e && e.code === 1) {
+      isAncestor = false;
+    } else {
+      return { ok: false, reason: `merge-base --is-ancestor failed: ${(e && (e.stderrText || e.message)) || e}` };
+    }
+  }
+
+  if (isAncestor) {
+    const outcome = await updateRefOrClassify([targetRef, branchSha, oldSha]);
+    if (outcome.retry) return { retry: true };
+    if (!outcome.ok) return outcome;
+    return { ok: true, integrated: true, fastForward: true, sha: branchSha };
+  }
+
+  const mergeTreeResult = await runMergeTreeWriteTree({ cwd, oldSha, branchSha });
+  if (!mergeTreeResult.ok) return mergeTreeResult;
+
+  const commitTreeArgs = ['commit-tree', mergeTreeResult.treeOid, '-p', oldSha, '-p', branchSha, '-m', message];
+  let newSha;
+  try {
+    newSha = (await execGit(commitTreeArgs, { cwd, timeout: 15_000 })).trim();
+  } catch (e) {
+    const stderrText = (e && (e.stderrText || e.message)) || String(e);
+    if (!/Please tell me who you are/i.test(stderrText)) {
+      return { ok: false, reason: `git commit-tree failed: ${stderrText}` };
+    }
+    try {
+      newSha = (await execGit(
+        ['-c', 'user.name=Session Manager Scheduler', '-c', 'user.email=scheduler@session-manager.local', ...commitTreeArgs],
+        { cwd, timeout: 15_000 },
+      )).trim();
+    } catch (e2) {
+      return { ok: false, reason: `git commit-tree failed: ${(e2 && (e2.stderrText || e2.message)) || e2}` };
+    }
+  }
+
+  const outcome = await updateRefOrClassify([targetRef, newSha, oldSha]);
+  if (outcome.retry) return { retry: true };
+  if (!outcome.ok) return outcome;
+  return { ok: true, integrated: true, mergeCommit: true, sha: newSha };
+}
+
+/**
+ * Lands `branch` onto `targetRef` WITHOUT touching any working tree, index,
+ * or HEAD — no `git checkout`, no `git merge`, nothing in any human's or
+ * job's own checkout ever moves. Fast-forwards via a compare-and-swap `git
+ * update-ref` when `targetRef` is an ancestor of `branch`; otherwise builds a
+ * merge commit entirely in the object database (`git merge-tree --write-tree`
+ * + `git commit-tree`) and lands IT via the same CAS. This is the foundation
+ * for a per-Epic `sm-land/<epicId>` integration branch that scheduler jobs
+ * can land onto regardless of what the human's own checkout is doing.
+ *
+ * Refuses up front (`failureKind: 'target_checked_out'`, nothing touched) if
+ * `targetRef` is checked out in ANY worktree of this repo — updating a
+ * checked-out branch's ref out from under `git worktree list` would desync
+ * that working tree's HEAD from its own index, which no compare-and-swap can
+ * detect or prevent (a worktree's HEAD isn't a ref-race participant here).
+ *
+ * A CAS loss (the ref moved between our read and our write — a sibling
+ * caller landed first) retries the WHOLE computation, up to 3 attempts total,
+ * before giving up with `failureKind: 'ref_race'`.
+ */
+/**
+ * Normalizes `targetRef` to a full `refs/heads/...` name: a short name like
+ * `sm-land/x` becomes `refs/heads/sm-land/x`; a value already under
+ * `refs/heads/` passes through unchanged; anything else that already starts
+ * with `refs/` (e.g. `refs/tags/x`, `refs/remotes/x`) is rejected — it is not
+ * a local branch and prefixing `refs/heads/` onto it would silently target
+ * the wrong ref. Returns null on any non-normalizable input (including a
+ * non-string/empty value). Pure — never touches git or disk.
+ */
+function normalizeTargetRef(targetRef) {
+  if (typeof targetRef !== 'string' || !targetRef) return null;
+  if (targetRef.startsWith('refs/heads/')) return targetRef;
+  if (targetRef.startsWith('refs/')) return null;
+  return `refs/heads/${targetRef}`;
+}
+
+/**
+ * Reads `<adminDir>/rebase-merge/head-name` or `.../rebase-apply/head-name`
+ * (git uses exactly one of the two backends per paused rebase) and returns
+ * its trimmed content — the `refs/heads/...` ref that rebase will update
+ * when it finishes — or `null` when neither file exists (no rebase paused in
+ * this admin dir). ENOENT/ENOTDIR on a read means "not that backend," not a
+ * failure; any other error (permissions, I/O) propagates so the caller can
+ * fail closed instead of silently treating an unreadable admin dir as
+ * rebase-free.
+ */
+async function pausedRebaseHeadRef(adminDir) {
+  for (const rel of ['rebase-merge/head-name', 'rebase-apply/head-name']) {
+    try {
+      return (await fsp.readFile(path.join(adminDir, rel), 'utf8')).trim();
+    } catch (e) {
+      if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) continue;
+      throw e;
+    }
+  }
+  return null;
+}
+
+/**
+ * Fetches `git worktree list --porcelain` fresh and refuses when
+ * `targetRef` (already normalized to `refs/heads/...`) is checked out in any
+ * worktree — see integrateOntoRef's header. Split out so each retry
+ * iteration in integrateOntoRef re-checks this from scratch: a sibling
+ * process could check `targetRef` out into a worktree in between two of our
+ * own retry attempts, and a guard that only ran once before the retry loop
+ * would miss that.
+ *
+ * Also refuses when `targetRef` is mid-rebase in any worktree of this repo,
+ * checked out there or not: a paused rebase detaches HEAD, so `git worktree
+ * list`'s `branch` line goes missing for the SAME worktree this guard most
+ * needs to catch — the check above would otherwise pass and the ref would
+ * move, only for `git rebase --abort` to reset it back (losing the landed
+ * commit) or `--continue` to leave it stale. Reads each worktree's own admin
+ * dir directly instead of running git inside it, because a worktree's
+ * checkout directory can be gone while its admin dir under the shared
+ * `.git` still holds the paused rebase's state. Fails closed: any read
+ * error here is also a refusal, never a silent pass.
+ */
+async function checkTargetRefNotCheckedOut({ cwd, targetRef }) {
+  let worktreeListOut;
+  try {
+    worktreeListOut = await execGit(['worktree', 'list', '--porcelain'], { cwd, timeout: 15_000 });
+  } catch (e) {
+    return { ok: false, reason: `git worktree list failed: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+  // NOT parseWorktreeListPorcelain here on purpose — that helper strips the
+  // `refs/heads/` prefix, but targetRef (below) is always compared in full
+  // `refs/heads/...` form (normalizeTargetRef), so this needs the raw ref.
+  const checkedOutRefs = new Set(
+    worktreeListOut.split('\n').filter((l) => l.startsWith('branch ')).map((l) => l.slice('branch '.length).trim()),
+  );
+  if (checkedOutRefs.has(targetRef)) {
+    return {
+      ok: false,
+      failureKind: 'target_checked_out',
+      reason: `${targetRef} is checked out in a worktree — updating it directly would desync that working tree`,
+    };
+  }
+
+  let gitCommonDirOut;
+  try {
+    gitCommonDirOut = await execGit(['rev-parse', '--git-common-dir'], { cwd, timeout: 10_000 });
+  } catch (e) {
+    return { ok: false, reason: `git rev-parse --git-common-dir failed: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+  const sharedGitDir = path.resolve(cwd, gitCommonDirOut.trim());
+  const worktreesDir = path.join(sharedGitDir, 'worktrees');
+  const adminDirs = [sharedGitDir];
+  try {
+    for (const entry of await fsp.readdir(worktreesDir)) adminDirs.push(path.join(worktreesDir, entry));
+  } catch (e) {
+    if (!(e && (e.code === 'ENOENT' || e.code === 'ENOTDIR'))) {
+      return { ok: false, reason: `reading ${worktreesDir} failed: ${(e && e.message) || e}` };
+    }
+  }
+  for (const adminDir of adminDirs) {
+    let pausedRef;
+    try {
+      pausedRef = await pausedRebaseHeadRef(adminDir);
+    } catch (e) {
+      return { ok: false, reason: `reading rebase state under ${adminDir} failed: ${(e && e.message) || e}` };
+    }
+    if (pausedRef && pausedRef === targetRef) {
+      return {
+        ok: false,
+        failureKind: 'target_checked_out',
+        reason: `${targetRef} is being rebased in a worktree — moving it now would be undone when that rebase ends`,
+      };
+    }
+  }
+
+  return { ok: true };
+}
+
+async function integrateOntoRef({ cwd, targetRef, branch, message }) {
+  if (!cwd || typeof cwd !== 'string') return { ok: false, reason: 'no cwd provided' };
+  if (!targetRef || typeof targetRef !== 'string') return { ok: false, reason: 'no targetRef provided' };
+  if (!branch || typeof branch !== 'string') return { ok: false, reason: 'no branch provided' };
+  if (!(await isGitRepo(cwd))) return { ok: false, reason: 'not a git repository' };
+
+  const normalizedTargetRef = normalizeTargetRef(targetRef);
+  if (!normalizedTargetRef) {
+    return { ok: false, reason: `targetRef "${targetRef}" is not a refs/heads/... branch ref (or a short name that normalizes to one)` };
+  }
+  try {
+    await execGit(['check-ref-format', normalizedTargetRef], { cwd, timeout: 10_000 });
+  } catch (e) {
+    return { ok: false, reason: `targetRef "${targetRef}" failed check-ref-format: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+
+  const mergeMessage = (typeof message === 'string' && message) || `integrate ${branch} onto ${normalizedTargetRef}`;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const guard = await checkTargetRefNotCheckedOut({ cwd, targetRef: normalizedTargetRef });
+    if (!guard.ok) return guard;
+    const result = await attemptIntegrateOntoRef({ cwd, targetRef: normalizedTargetRef, branch, message: mergeMessage });
+    if (!result.retry) return result;
+  }
+  return { ok: false, failureKind: 'ref_race' };
+}
+
+/**
+ * Validates `epicId` is ALREADY a safe branch-name component and prefixes it
+ * with `sm-land/` — the single definition of an Epic's land-branch name, so
+ * `ensureLandBranch` and any future caller never drift apart on how an
+ * epicId becomes a branch name.
+ *
+ * Returns null (never a silently-mangled name) when `epicId` is not a
+ * string, is empty, contains any character outside `[A-Za-z0-9._-]`,
+ * contains `..`, ends with `.lock`, or starts with `.` or `-` — the same
+ * shapes `git check-ref-format`/a shell arg parser would choke on or
+ * misinterpret. A caller that gets null must treat the epicId as rejected,
+ * not retry with a stripped-down version of it: silently stripping invalid
+ * characters would let two different epicIds collide on the same land
+ * branch (e.g. `"a/b"` and `"ab"` both sanitizing to `"ab"`).
+ */
+function landBranchNameFor(epicId) {
+  if (typeof epicId !== 'string' || !epicId) return null;
+  if (!/^[A-Za-z0-9._-]+$/.test(epicId)) return null;
+  if (epicId.includes('..')) return null;
+  if (epicId.endsWith('.lock')) return null;
+  if (epicId.startsWith('.') || epicId.startsWith('-')) return null;
+  return `${LAND_BRANCH_PREFIX}${epicId}`;
+}
+
+/**
+ * Ensures the per-Epic integration branch `sm-land/<epicId>` exists, creating
+ * it (via a create-only CAS `git update-ref`, never `git checkout`/`git
+ * branch -f`) at the tip of `baseBranch` when absent. `baseBranch` falls back
+ * to `resolveDefaultBranch(cwd)` when it's falsy or one of our OWN managed
+ * branches (`isOwnManagedBranch` — an `sm-job/*`/`sm-epic/*`/`sm-land/*` value
+ * is never a legitimate base, same reasoning `integrateBranch` already
+ * applies to its own baseBranch fallback).
+ *
+ * Idempotent: a second call for the same epicId is a no-op (`created:
+ * false`), including the race where a concurrent caller created it between
+ * our existence check and our own create-only CAS.
+ */
+async function ensureLandBranch({ cwd, epicId, baseBranch }) {
+  if (!cwd || typeof cwd !== 'string') return { ok: false, reason: 'no cwd provided' };
+
+  const branch = landBranchNameFor(epicId);
+  if (!branch) return { ok: false, reason: `epicId "${epicId}" is not a safe branch-name component` };
+  const ref = `refs/heads/${branch}`;
+
+  const existingSha = await tryResolveCommit(cwd, `${ref}^{commit}`);
+  if (existingSha) return { ok: true, ref, branch, created: false };
+
+  const base = (typeof baseBranch === 'string' && baseBranch && !isOwnManagedBranch(baseBranch))
+    ? baseBranch
+    : await resolveDefaultBranch(cwd);
+  const baseSha = await tryResolveCommit(cwd, `${base}^{commit}`);
+  if (!baseSha) return { ok: false, reason: `base branch "${base}" not found` };
+
+  try {
+    await execGit(['update-ref', ref, baseSha, ''], { cwd, timeout: 10_000 });
+    return { ok: true, ref, branch, created: true };
+  } catch (e) {
+    // A concurrent caller may have created it between our check above and
+    // this create-only CAS — re-check before treating it as a real failure.
+    const nowSha = await tryResolveCommit(cwd, `${ref}^{commit}`);
+    if (nowSha) return { ok: true, ref, branch, created: false };
+    return { ok: false, reason: `update-ref create failed: ${(e && (e.stderrText || e.message)) || e}` };
+  }
+}
+
+// ──────────────────────────────────────────── kind-scoped convenience wrappers
+
+async function createJobWorktree({ cwd, slug, fromRef }) {
+  return createWorktree({ kind: 'job', cwd, key: slug, fromRef });
+}
+async function integrateJobBranch({ cwd, branch, slug, carriedPaths, baseBranch, allowRefLanding }) {
+  return integrateBranch({ kind: 'job', cwd, branch, key: slug, carriedPaths, baseBranch, allowRefLanding });
+}
+async function cleanupJobWorktree({ cwd, dir, branch, keepBranch }) {
+  return cleanupWorktree({ kind: 'job', cwd, dir, branch, keepBranch });
+}
+async function salvageJobWorktreeDiff({ dir, outFile }) {
+  return salvageWorktreeDiff({ cwd: dir, outFile });
+}
+async function salvageJobDirtyDelta({ cwd, paths, outFile }) {
+  return salvageDirtyDelta({ cwd, paths, outFile });
+}
+
+async function createEpicWorktree({ cwd, epicId }) {
+  return createWorktree({ kind: 'epic', cwd, key: epicId });
+}
+async function integrateEpicBranch({ cwd, branch, epicId, baseBranch }) {
+  return integrateBranch({ kind: 'epic', cwd, branch, key: epicId, baseBranch });
+}
+async function cleanupEpicWorktree({ cwd, dir, branch, keepBranch }) {
+  return cleanupWorktree({ kind: 'epic', cwd, dir, branch, keepBranch });
+}
+
+module.exports = {
+  KIND_CONFIG,
+  worktreeRootFor,
+  isWorktreeDisabled,
+  getMaxConcurrentWorktrees,
+  getStaleSweepAgeMs,
+  isGitRepo,
+  unquotePorcelainPath,
+  isBaseTreeClean,
+  worktreeDirFor,
+  branchNameFor,
+  keyFromBranch,
+  createWorktree,
+  captureAndCarryBaseDiff,
+  pathsIdenticalToBranch,
+  resolveDefaultBranch,
+  getCurrentBranch,
+  isCarriedWipOnly,
+  integrateBranch,
+  cleanupWorktree,
+  salvageWorktreeDiff,
+  salvageDirtyDelta,
+  isBranchMergedIntoHead,
+  parseWorktreeListPorcelain,
+  listCwdHolders,
+  hasLiveHolder,
+  reconcileWorktreesOnBoot,
+  sweepStaleWorktreeCheckouts,
+  mainTreeFromWorktreeGitFile,
+  getObservedWorktreeCount,
+  reserveWorktreeSlot,
+  expireDeadWorktreeRegistrations,
+  reclaimTerminalJobOrphans,
+  // Checkout-free integration primitives — land a branch onto a ref without
+  // touching any working tree/index/HEAD (see integrateOntoRef's header).
+  isOwnManagedBranch,
+  integrateOntoRef,
+  landBranchNameFor,
+  ensureLandBranch,
+  // Job-kind convenience wrappers — same call shape jobWorktree.cjs has
+  // always exposed.
+  createJobWorktree,
+  integrateJobBranch,
+  cleanupJobWorktree,
+  salvageJobWorktreeDiff,
+  salvageJobDirtyDelta,
+  // Epic-kind convenience wrappers.
+  createEpicWorktree,
+  integrateEpicBranch,
+  cleanupEpicWorktree,
+  // Test-only escape hatch for the in-memory per-kind concurrency counters.
+  _resetActiveWorktreeCountForTests(kind, n = 0) {
+    configFor(kind);
+    activeWorktreeCount[kind] = n;
+  },
+  _getActiveWorktreeCountForTests(kind) {
+    configFor(kind);
+    return activeWorktreeCount[kind];
+  },
+  // Test-only escape hatch for the observed-worktree-count TTL cache, so a
+  // test simulating a leak-then-recover sequence isn't at the mercy of a
+  // stale count left behind by an earlier test in the same process.
+  _resetObservedWorktreeCountCacheForTests(kind) {
+    if (kind) {
+      configFor(kind);
+      observedWorktreeCountCache[kind] = { count: null, at: 0 };
+    } else {
+      observedWorktreeCountCache.job = { count: null, at: 0 };
+      observedWorktreeCountCache.epic = { count: null, at: 0 };
+    }
+  },
+};

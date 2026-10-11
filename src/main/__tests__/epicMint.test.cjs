@@ -13,7 +13,7 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
-const { ensureEpic, removeEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epicMint.cjs');
+const { ensureEpic, removeEpic, readActiveIndex, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epic/epicMint.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -60,7 +60,7 @@ function readAuditRecordsForCwd(auditLog, cwd) {
 
 test('ensureEpic refuses to mint without mintAuthority, and appends an epic_mint_refused audit event', async () => {
   const cwd = await mkCwd();
-  const auditLog = require('../lib/auditLog.cjs');
+  const auditLog = require('../lib/telemetry/auditLog.cjs');
 
   await expect(ensureEpic(cwd, { goalText: 'agent wants work done' }))
     .rejects.toThrow(/no open Epic to join/);
@@ -135,7 +135,7 @@ test('ensureEpic refuses to join a completed Epic and does NOT mint a replacemen
   const index = readActiveIndex(cwd);
   index.sessions[first.epicId].status = 'completed';
   writeIndex(cwd, index);
-  const auditLog = require('../lib/auditLog.cjs');
+  const auditLog = require('../lib/telemetry/auditLog.cjs');
 
   await expect(ensureEpic(cwd, { goalText: 'follow-up work', epicId: first.epicId }))
     .rejects.toThrow(/no open Epic to join/);
@@ -242,7 +242,7 @@ test('ensureEpic mints with status "proposed" by default', async () => {
 
 test('ensureEpic throws when a mint is requested with status "active", and appends an audit event', async () => {
   const cwd = await mkCwd();
-  const auditLog = require('../lib/auditLog.cjs');
+  const auditLog = require('../lib/telemetry/auditLog.cjs');
 
   await expect(mint(cwd, { goalText: 'should never mint active', status: 'active' }))
     .rejects.toThrow(/born 'proposed'/);
@@ -256,7 +256,7 @@ test('ensureEpic throws when a mint is requested with status "active", and appen
 
 test('ensureEpic refuses the mint and appends an epic_mint_refused audit event when the constructed session object fails schema validation', async () => {
   const cwd = await mkCwd();
-  const auditLog = require('../lib/auditLog.cjs');
+  const auditLog = require('../lib/telemetry/auditLog.cjs');
   const schema = require('../lib/promptSessionSchema.cjs');
 
   // The real construction in ensureEpic is hardcoded and always produces a

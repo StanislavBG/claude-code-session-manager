@@ -8,7 +8,7 @@ Gates re-run in the foreground, from this worktree (`node_modules` symlinked to 
 - `npm run lint`: exit 0.
 
 ## d2d-e2e-crypto-lib (1757) — VERIFIED
-- `src/main/lib/remoteE2eCrypto.cjs` is a new file (+109 lines) that requires only `node:crypto`.
+- `src/main/lib/feedback-remote/remoteE2eCrypto.cjs` is a new file (+109 lines) that requires only `node:crypto`.
 - `webRemote.cjs` now requires the helpers from it, and the commit `e196eeed` is a refactor with no protocol change.
 - `remoteE2eCrypto.test.cjs` covers matching SAS and keys, the encrypt/decrypt round trip, and tamper/wrong-key cases. It passes.
 - `web-remote-e2e-pinning.test.cjs` is untouched and passes.

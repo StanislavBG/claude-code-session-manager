@@ -35,16 +35,16 @@ beforeAll(() => {
   realClaudeBin = process.env.SM_CLAUDE_BIN;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-pn02-'));
   process.env.HOME = tmpHome;
-  for (const m of ['procName', 'claudeBin']) {
+  for (const m of ['process/procName', 'claude/claudeBin']) {
     delete require.cache[require.resolve(`../lib/${m}.cjs`)];
   }
-  procName = require('../lib/procName.cjs');
-  claudeBin = require('../lib/claudeBin.cjs');
+  procName = require('../lib/process/procName.cjs');
+  claudeBin = require('../lib/claude/claudeBin.cjs');
   scheduler = require('../scheduler.cjs');
-  reaper = require('../lib/reaperHelpers.cjs');
+  reaper = require('../lib/scheduler/reaperHelpers.cjs');
   cr = require('../chatRunner.cjs');
-  childWithLog = require('../lib/childWithLog.cjs');
-  procIdentity = require('../lib/procIdentity.cjs');
+  childWithLog = require('../lib/process/childWithLog.cjs');
+  procIdentity = require('../lib/process/procIdentity.cjs');
 });
 
 afterAll(() => {

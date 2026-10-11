@@ -1,5 +1,5 @@
 /**
- * projectHomeAdminRoutes.test.cjs — lib/projectHomeAdminRoutes.cjs's two
+ * projectHomeAdminRoutes.test.cjs — lib/feedback-remote/projectHomeAdminRoutes.cjs's two
  * routes (POST /admin/project-home/write and
  * POST /admin/project-home/demo-video/write, both {cwd, html}) and their
  * self-contained-HTML validators.
@@ -23,7 +23,7 @@ const {
   DEMO_VIDEO_CSP,
   MAX_HTML_BYTES,
   MAX_DEMO_VIDEO_BYTES,
-} = require('../lib/projectHomeAdminRoutes.cjs');
+} = require('../lib/feedback-remote/projectHomeAdminRoutes.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {

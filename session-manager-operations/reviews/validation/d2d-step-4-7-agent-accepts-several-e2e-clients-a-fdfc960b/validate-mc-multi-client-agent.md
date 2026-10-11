@@ -9,7 +9,7 @@ Environment note: the job worktree has no `node_modules`; I symlinked the main c
 - Extra PRD gates: `vitest run tests/unit/webRemote{AuthGate,SasState,CommandSets,Wiring,EpicList}.spec.ts ipc-web-remote.spec.ts` → 6 files, 110 passed. `npm run lint` → exit 0.
 
 ## mc-client-session-registry — VERIFIED
-- Exports `createClientSessions` with all 10 methods: `src/main/lib/remoteClientSessions.cjs:55-79`.
+- Exports `createClientSessions` with all 10 methods: `src/main/lib/feedback-remote/remoteClientSessions.cjs:55-79`.
 - `clientKeyOf` → fromConn if non-empty string ≤64 else 'legacy' (`LEGACY_CLIENT_KEY` exported): :20-24, :84.
 - Record shape (key, clientId, e2e=makeState(), peerPubKey null, deviceId null, ptyStreams Map, subscriptions Set, lastSessionListJson null): :27-38.
 - teardown swallows unsub throws, clears, deletes, returns record/null; teardownAll returns count: :44-53, :72-77.

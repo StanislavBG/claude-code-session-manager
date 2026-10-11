@@ -35,7 +35,7 @@ fs.mkdirSync(path.join(tmpHome, '.claude', 'projects'), { recursive: true });
 
 const { runStarveEscalationSweep, attachWindow } = require('../scheduler.cjs');
 const { selectStarveEscalations, STARVE_ESCALATION_MS } = require('../scheduler/starvation.cjs');
-const { auditLogPath } = require('../lib/auditLog.cjs');
+const { auditLogPath } = require('../lib/telemetry/auditLog.cjs');
 
 afterAll(() => {
   process.env.HOME = originalHome;

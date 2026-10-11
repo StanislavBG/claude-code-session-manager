@@ -13,7 +13,7 @@
 
 import { test, expect } from 'vitest';
 const http = require('node:http');
-const { createAdminHttp } = require('../lib/localAdminHttp.cjs');
+const { createAdminHttp } = require('../lib/feedback-remote/localAdminHttp.cjs');
 const { registerAdminRoutes } = require('../scheduler.cjs');
 
 function request(port, { method = 'GET', path: reqPath, token, body }) {

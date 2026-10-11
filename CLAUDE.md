@@ -76,7 +76,7 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   state. **Every Epic is born `proposed`**; nothing is created directly as `active`. Don't restate the
   lifecycle elsewhere — link there.
 - **SINGLE-CREATOR LAW: an Epic is created in exactly one place — a human pressing New Epic.** Enforced
-  fail-closed in `src/main/lib/epicMint.cjs`; `MINT_AUTHORITIES` has exactly two entries (the New Epic IPC
+  fail-closed in `src/main/lib/epic/epicMint.cjs`; `MINT_AUTHORITIES` has exactly two entries (the New Epic IPC
   handler, and `crossProjectFeedback.cjs`). A third entry is a domain-model change, not a convenience. There
   is **no agent-facing proposal channel** — an agent sure that work is needed runs `/develop` inside the Epic
   it is already in. PRDs join an existing Epic; they never conjure one.
@@ -139,7 +139,7 @@ Full list + the incident behind each: [`conventions.md`](session-manager-operati
 Each of these is a real incident, with the post-mortem in
 [`conventions.md`](session-manager-operations/architecture/conventions.md) — read it before working around one.
 
-- Launching a `claude -p` process **without acquiring a slot from `lib/sessionSlots.cjs`** (the sole
+- Launching a `claude -p` process **without acquiring a slot from `lib/scheduler/sessionSlots.cjs`** (the sole
   machine-wide cap) — never reintroduce a private cap.
 - Gating scheduler batches on **`parallelGroup`** — it's a unique-per-PRD display hint, never a barrier.
   `dependsOn` is the sole ordering primitive.
@@ -148,7 +148,7 @@ Each of these is a real incident, with the post-mortem in
 - **Declaring a hook below a top-level early return** — React #300/#310 → pane dies into its error boundary.
   `npm run lint:hooks`.
 - Adding `shell: true` to `child_process.spawn` outside `watchers.cjs`/`app:test-fire-hook`.
-- Re-implementing tmp+rename atomic writes — use `lib/atomicFs.cjs`.
+- Re-implementing tmp+rename atomic writes — use `lib/util/atomicFs.cjs`.
 - Reading remote URLs in prod — `createWindow` fails if `dist/index.html` is missing.
 - Adding a new LeftNav tab before checking whether an existing surface owns that data — pruned once at
   ~31 destinations with overlap.

@@ -23,7 +23,7 @@ const { spawn } = require('node:child_process');
 const path = require('node:path');
 const { schemas } = require('./ipcSchemas.cjs');
 const { validatePath } = require('./config.cjs');
-const { LRUCache } = require('./lib/lruCache.cjs');
+const { LRUCache } = require('./lib/util/lruCache.cjs');
 
 const GIT_TIMEOUT_MS = 5_000;
 const CACHE_TTL_MS = 5_000;

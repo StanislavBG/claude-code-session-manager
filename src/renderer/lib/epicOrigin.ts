@@ -4,7 +4,7 @@
  * project, here's which one".
  *
  * Why it needs saying on screen. A cross-project feedback Epic
- * (src/main/lib/crossProjectFeedback.cjs) lands in this project's queue as a
+ * (src/main/lib/feedback-remote/crossProjectFeedback.cjs) lands in this project's queue as a
  * plain `proposed` row, visually identical to one the human here filed
  * themselves. Approve & start is a spend decision, and it is a different
  * decision when the claim came from an agent that has never read this

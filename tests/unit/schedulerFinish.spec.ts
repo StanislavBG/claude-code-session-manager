@@ -13,7 +13,8 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { parsePorcelain, FINISH_PROTOCOL, buildFinishProtocol, computeCommittedDuringRun } = require('../../src/main/scheduler.cjs')
+const { FINISH_PROTOCOL, buildFinishProtocol } = require('../../src/main/scheduler.cjs')
+const { parsePorcelain, computeCommittedDuringRun } = require('../../src/main/scheduler/gitTreeGuard.cjs')
 
 describe('parsePorcelain (commit guard)', () => {
   it('returns [] for an empty / clean tree', () => {

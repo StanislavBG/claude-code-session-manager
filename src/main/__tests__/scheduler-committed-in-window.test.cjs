@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const scheduler = require('../scheduler.cjs');
+const scheduler = require('../scheduler/gitTreeGuard.cjs');
 const { committedInWindow, computeCommittedDuringRun } = scheduler;
 
 function git(cwd, args) {

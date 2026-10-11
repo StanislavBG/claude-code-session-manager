@@ -23,7 +23,7 @@
 'use strict';
 
 import { test, expect } from 'vitest';
-const scheduler = require('../scheduler.cjs');
+const scheduler = require('../scheduler/gitTreeGuard.cjs');
 const { parsePorcelainEntries, evaluateSharedTreeGuard } = scheduler;
 
 // --- parsePorcelainEntries: rename/copy lines split into real components ---

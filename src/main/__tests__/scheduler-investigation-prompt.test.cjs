@@ -12,7 +12,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { buildInvestigationPrompt, isGitRepoSync } = require('../scheduler.cjs');
+const { buildInvestigationPrompt } = require('../scheduler.cjs');
+const { isGitRepoSync } = require('../scheduler/gitTreeGuard.cjs');
 
 function makeArgs(overrides = {}) {
   return {

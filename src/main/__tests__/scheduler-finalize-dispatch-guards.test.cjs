@@ -39,7 +39,7 @@ const {
   evaluateFinalizeDrop,
   evaluateDispatchSidecarReconcile,
   isQueueRowRegression,
-} = require('../scheduler.cjs');
+} = require('../scheduler/gitTreeGuard.cjs');
 
 describe('evaluateFinalizeDrop', () => {
   it('drops loudly (row-missing) with nothing to stamp when the row vanished from s.jobs', () => {

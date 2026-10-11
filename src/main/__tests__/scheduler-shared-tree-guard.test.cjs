@@ -17,7 +17,7 @@
 
 import { test, expect, vi, afterEach } from 'vitest';
 const fs = require('node:fs');
-const scheduler = require('../scheduler.cjs');
+const scheduler = require('../scheduler/gitTreeGuard.cjs');
 const { evaluateSharedTreeGuard, checkSharedTreeGuard } = scheduler;
 
 afterEach(() => {

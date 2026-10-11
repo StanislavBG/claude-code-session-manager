@@ -10,7 +10,8 @@
 
 import { test } from 'vitest';
 const assert = require('node:assert/strict');
-const { resolveRunCommitAttribution, finalizeJobWorktree } = require('../scheduler.cjs');
+const { finalizeJobWorktree } = require('../scheduler.cjs');
+const { resolveRunCommitAttribution } = require('../scheduler/gitTreeGuard.cjs');
 
 test('worktree run: foreign HEAD move with no own integration gets no credit', () => {
   const r = resolveRunCommitAttribution({

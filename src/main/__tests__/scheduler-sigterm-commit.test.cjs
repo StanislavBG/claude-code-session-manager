@@ -13,7 +13,7 @@
 'use strict';
 
 import { test, expect } from 'vitest';
-const { classifySigtermWithCommit } = require('../scheduler.cjs');
+const { classifySigtermWithCommit } = require('../scheduler/gitTreeGuard.cjs');
 
 test('classifySigtermWithCommit: exit 143 + commit found in window → needs_review', () => {
   const decision = classifySigtermWithCommit(143, true);

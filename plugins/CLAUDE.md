@@ -5,11 +5,8 @@ Part of the **AGENT LAYER** partition — see
 
 ## What's here
 
-`session-manager-dev/skills/` — 15 skills (`blog-for-project-feature`, `builder`, `develop`,
-`discover-features`, `explain-to-me`, `find-opportunity`, `issue-address`,
-`local-project-health`, `memory-sanitation`, `ops-sweep`, `project-status`, `pr-review-sweep`,
-`pr-signal`, `requesting-code-review`, `send-feedback`) — verified against `ls
-plugins/session-manager-dev/skills` 2026-09-13; keep in sync with `project-partition.md` and
+`session-manager-dev/skills/` — 3 skills (`builder`, `develop`, `send-feedback`) — verified against `ls
+plugins/session-manager-dev/skills` 2026-10-11; keep in sync with `project-partition.md` and
 `seedDevPlugin.cjs`'s header count.
 
 Two manifests: root [`.claude-plugin/marketplace.json`](../.claude-plugin/marketplace.json)
@@ -28,9 +25,9 @@ breaks them all, undetectably from here.
 
 **Path literals inside shipped skills.** A skill runs in OTHER repos, so a
 session-manager-internal path (`src/main/...`, `src/renderer/...`, bare `scripts/...`) inside one
-is a portability defect unless `$SM_ROOT`-qualified (see `ops-sweep/SKILL.md`'s resolution) or
-removed. Current offenders, not precedent: `memory-sanitation/SKILL.md`, `builder/SKILL.md` +
-`builder/0-diff/SKILL.md`, `develop/standards.md`, `ops-sweep/SKILL.md`.
+is a portability defect unless `$SM_ROOT`-qualified (e.g. `node "$SM_ROOT/scripts/<x>.cjs"`, with `$SM_ROOT` resolved
+to the installed package root) or removed. Current offenders, not precedent: `builder/SKILL.md` +
+`builder/0-diff/SKILL.md`, `develop/standards.md`.
 
 ## Who consumes this
 

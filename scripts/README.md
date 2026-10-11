@@ -8,7 +8,7 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 
 | script | invoked by | shipped on npm |
 | --- | --- | --- |
-| audit-ops-hygiene.cjs | manual; named in `ops-sweep` SKILL.md | yes |
+| audit-ops-hygiene.cjs | manual | yes |
 | bench/main-bench.cjs | `npm run bench` (main-process micro-benches, plain Node); renderer half is `npm run bench:renderer` (`tests/bench/`, `vitest.bench.config.ts`, not in `test:unit`) | no |
 | page-surface.cjs | manual and by the page steward personas `.claude/agents/page-*.md`; derives a page's owned/shared files, window.api methods, main handlers and tests | no |
 | check-page-stewards.cjs | `npm run lint:page-stewards` (in `lint`) — every nav page has a valid `.claude/agents/page-<key>.md` steward persona; ratchets PENDING | no |
@@ -24,7 +24,7 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | install-scheduler-watchdog.sh | manual; installs the systemd user timer (cron fallback) | no |
 | move-modules.cjs | manual; `node scripts/move-modules.cjs <mapping.json> [root] [--dry-run]` — idempotent codemod that git-mvs `src/main/lib` modules (+ their tests) into subfolders and rewrites every relative require and `lib/<m>.cjs` path string | no |
 | mint-epic.cjs | manual; joins an existing Epic and prints its prds dir | yes |
-| ops-sweep.cjs | `ops-sweep` SKILL.md (`node "$SM_ROOT/scripts/ops-sweep.cjs" <cwd>`) | yes |
+| ops-sweep.cjs | manual; `node scripts/ops-sweep.cjs <cwd>` | yes |
 | postinstall.cjs | npm `postinstall` | yes |
 | refresh-vad-assets.mjs | `npm run refresh:vad-assets` | no |
 | replay-verdicts.cjs | manual, dev-only, read-only | no |

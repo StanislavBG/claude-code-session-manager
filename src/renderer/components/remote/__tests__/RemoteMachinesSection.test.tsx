@@ -232,5 +232,37 @@ describe('RemoteMachinesSection', () => {
     const handler = api.onStatus.mock.calls[0][0] as (s: unknown) => void
     await act(async () => { handler({ peerId: 'p1', status: 'failed', reason: 'token_revoked', sas: null }); await Promise.resolve() })
     expect(q('remote-client-code')).not.toBeNull()
+    expect(q('remote-client-revoked')!.textContent).toBe(
+      'This computer was disconnected from your account on bilko.run. Enter a new code to reconnect.',
+    )
+  })
+
+  describe('pairing error copy', () => {
+    const failPair = async (error: string) => {
+      api.authStatus.mockImplementation(async () => ({ paired: false, clientId: null }))
+      api.pair.mockImplementation(async () => ({ ok: false, error }))
+      await mount()
+      await typeInto(q('remote-client-code'), 'ABCD1234')
+      await click(q('remote-client-pair'))
+      return useToast.getState().toasts.map((t) => t.message)
+    }
+
+    it('toasts plain copy for code_expired', async () => {
+      expect(await failPair('code_expired')).toEqual(['That code expired. Mint a new one on bilko.run → Desktop clients.'])
+    })
+
+    it('toasts plain copy for invalid_code', async () => {
+      expect(await failPair('invalid_code')).toEqual(["That code didn't match. Check it and try again."])
+    })
+
+    it('falls back for unknown codes', async () => {
+      expect(await failPair('weird')).toEqual(['Pairing failed (weird)'])
+    })
+
+    it('no revoked notice on a fresh unpaired form', async () => {
+      api.authStatus.mockImplementation(async () => ({ paired: false, clientId: null }))
+      await mount()
+      expect(q('remote-client-revoked')).toBeNull()
+    })
   })
 })

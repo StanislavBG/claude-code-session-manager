@@ -12,6 +12,21 @@ const errMsg = (e: unknown) => (e as Error)?.message || String(e)
 
 const UNPAIRED_REASONS = ['relay_client_unpaired', 'token_revoked']
 
+const PAIRING_ERROR_COPY: Record<string, string> = {
+  invalid_code: "That code didn't match. Check it and try again.",
+  code_expired: 'That code expired. Mint a new one on bilko.run → Desktop clients.',
+  invalid_code_format: 'Codes are 8 letters or numbers. Check it and try again.',
+  rate_limited: 'Too many tries. Wait a minute and try again.',
+  relay_client_unpaired: 'This computer is no longer connected to your account. Enter a new code to reconnect.',
+}
+
+/** Plain-language copy for a relay pairing error code. */
+export function pairingErrorCopy(code: string): string {
+  return Object.prototype.hasOwnProperty.call(PAIRING_ERROR_COPY, code)
+    ? PAIRING_ERROR_COPY[code]
+    : `Pairing failed (${code})`
+}
+
 const parseVersion = (v: string): number[] | null => {
   const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(v.trim())
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
@@ -102,9 +117,10 @@ function MachineCard({
 
 /** Account pairing: enter the phone-minted code, or pick an account device to add. */
 function ClientPairing({
-  paired, peers, onAuthChanged, onAdded,
+  paired, revoked, peers, onAuthChanged, onAdded,
 }: {
   paired: boolean
+  revoked: boolean
   peers: RemoteMachinePeer[]
   onAuthChanged: () => void
   onAdded: () => void
@@ -127,7 +143,7 @@ function ClientPairing({
       } else if (r.error === UNAVAILABLE) {
         setUnavailable(true)
       } else {
-        showToast('error', r.error ?? 'Pairing failed')
+        showToast('error', pairingErrorCopy(r.error ?? 'unknown'))
       }
     } catch (e) {
       showToast('error', errMsg(e))
@@ -142,7 +158,7 @@ function ClientPairing({
       const r = await window.api.remoteClient.devices()
       if (r.ok) setDevices(r.devices ?? [])
       else if (r.error === UNAVAILABLE) setUnavailable(true)
-      else showToast('error', r.error ?? 'Could not load devices')
+      else showToast('error', pairingErrorCopy(r.error ?? 'unknown'))
     } catch (e) {
       showToast('error', errMsg(e))
     } finally {
@@ -194,6 +210,11 @@ function ClientPairing({
         <p className="text-[12.5px] leading-snug text-fg-faint">
           Mint a desktop code on your phone: Session Manager remote → Desktop clients.
         </p>
+        {revoked && (
+          <p data-testid="remote-client-revoked" className="text-[12.5px] leading-snug text-fg-faint">
+            This computer was disconnected from your account on bilko.run. Enter a new code to reconnect.
+          </p>
+        )}
         {unavailableCopy}
       </div>
     )
@@ -239,17 +260,23 @@ export function RemoteMachinesSection() {
   const showToast = useToast((s) => s.show)
   const openPanel = useLayout((s) => s.openPanel)
   const [paired, setPaired] = useState(false)
+  const [revoked, setRevoked] = useState(false)
 
   const readAuth = useCallback(async () => {
     try {
-      setPaired((await window.api.remoteClient.authStatus()).paired)
+      const p = (await window.api.remoteClient.authStatus()).paired
+      setPaired(p)
+      if (p) setRevoked(false)
     } catch (e) {
       showToast('error', errMsg(e))
     }
   }, [showToast])
 
   const onStatusEvent = useCallback((s: RemoteClientStatus) => {
-    if (s.reason && UNPAIRED_REASONS.includes(s.reason)) void readAuth()
+    if (s.reason && UNPAIRED_REASONS.includes(s.reason)) {
+      if (s.reason === 'token_revoked') setRevoked(true)
+      void readAuth()
+    }
   }, [readAuth])
 
   const { peers, refresh, connect: onConnect, confirmSas: onConfirmSas, revoke } = useRemotePeers(onStatusEvent)
@@ -272,7 +299,7 @@ export function RemoteMachinesSection() {
       >
         Remote machines
       </SectionLabel>
-      <ClientPairing paired={paired} peers={peers} onAuthChanged={() => { void readAuth() }} onAdded={() => { void refresh() }} />
+      <ClientPairing paired={paired} revoked={revoked} peers={peers} onAuthChanged={() => { void readAuth() }} onAdded={() => { void refresh() }} />
       {peers.length === 0 ? (
         <EmptyState testId="remote-machines-empty">No machines paired yet.</EmptyState>
       ) : (

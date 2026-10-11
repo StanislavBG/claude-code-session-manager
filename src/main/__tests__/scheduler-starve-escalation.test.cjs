@@ -33,12 +33,8 @@ process.env.HOME = tmpHome;
 fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager'), { recursive: true });
 fs.mkdirSync(path.join(tmpHome, '.claude', 'projects'), { recursive: true });
 
-const {
-  selectStarveEscalations,
-  runStarveEscalationSweep,
-  STARVE_ESCALATION_MS,
-  attachWindow,
-} = require('../scheduler.cjs');
+const { runStarveEscalationSweep, attachWindow } = require('../scheduler.cjs');
+const { selectStarveEscalations, STARVE_ESCALATION_MS } = require('../scheduler/starvation.cjs');
 const { auditLogPath } = require('../lib/auditLog.cjs');
 
 afterAll(() => {

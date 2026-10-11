@@ -36,7 +36,7 @@ const {
   classifyQueueStarvation,
   classifyQueueStarvationByProject,
   QUEUE_STARVATION_MS,
-} = require('../scheduler.cjs');
+} = require('../scheduler/starvation.cjs');
 
 afterAll(() => {
   process.env.HOME = originalHome;

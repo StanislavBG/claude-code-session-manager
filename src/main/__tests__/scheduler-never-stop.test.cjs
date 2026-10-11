@@ -28,11 +28,8 @@ const path = require('node:path');
 // HOME before require: every state path is baked from os.homedir() at load.
 process.env.HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'never-stop-test-'));
 
-const {
-  classifyQueueStarvation,
-  QUEUE_STARVATION_MS,
-  stripAppOwnedChurn,
-} = require('../scheduler.cjs');
+const { stripAppOwnedChurn } = require('../scheduler.cjs');
+const { classifyQueueStarvation, QUEUE_STARVATION_MS } = require('../scheduler/starvation.cjs');
 
 const CWD = '/home/bilko/Projects/starry-night-ships';
 const NOW = Date.parse('2026-09-05T23:00:00.000Z');

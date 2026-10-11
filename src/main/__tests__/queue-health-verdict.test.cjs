@@ -24,7 +24,7 @@ process.env.HOME = tmpHome;
 fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager'), { recursive: true });
 fs.mkdirSync(path.join(tmpHome, '.claude', 'projects'), { recursive: true });
 
-const { classifyQueueHealth, QUEUE_STARVATION_MS } = require('../scheduler.cjs');
+const { classifyQueueHealth, QUEUE_STARVATION_MS } = require('../scheduler/starvation.cjs');
 
 afterAll(() => {
   process.env.HOME = originalHome;

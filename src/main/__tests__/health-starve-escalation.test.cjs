@@ -29,7 +29,7 @@ const {
   evaluateStarveEscalationHealth,
   latestStarveEscalationReasons,
 } = require('../health.cjs');
-const { STARVE_ESCALATION_MS } = require('../scheduler.cjs');
+const { STARVE_ESCALATION_MS } = require('../scheduler/starvation.cjs');
 
 const CWD = '/home/bilko/Projects/Bilko';
 const NOW = Date.parse('2026-09-12T20:00:00.000Z');

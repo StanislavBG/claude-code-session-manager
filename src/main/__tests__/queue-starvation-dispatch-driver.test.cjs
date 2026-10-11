@@ -34,6 +34,7 @@ let originalHome;
 let originalClaudeBin;
 let originalAutofixDisable;
 let scheduler;
+let starvation;
 let queueStore;
 
 // A forced tick actually dispatches the one pending job it finds. Without a
@@ -66,6 +67,7 @@ beforeAll(() => {
   fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager'), { recursive: true });
   fs.mkdirSync(path.join(tmpHome, '.claude', 'projects'), { recursive: true });
   scheduler = require('../scheduler.cjs');
+  starvation = require('../scheduler/starvation.cjs');
   queueStore = require('../lib/queueStore.cjs');
 });
 
@@ -192,25 +194,25 @@ test('a real launch (fresh lastRunAt) refreshes the clock; so do a pause clear a
   const jobs = [pendingRow('a')];
   const base = { jobs, paused: null, runningCount: 0, now: NOW };
   const stale = idleFor(3 * 60 * 60_000);
-  expect(scheduler.classifyQueueStarvation({ ...base, lastRunAtMs: stale }).kind).toBe('starved');
-  expect(scheduler.classifyQueueStarvation({ ...base, lastRunAtMs: idleFor(5_000) })).toBeNull();
-  expect(scheduler.classifyQueueStarvation({ ...base, lastRunAtMs: stale, lastPauseClearedAtMs: idleFor(5_000) })).toBeNull();
-  expect(scheduler.classifyQueueStarvation({ ...base, lastRunAtMs: stale, schedulerBootedAtMs: idleFor(5_000) })).toBeNull();
-  expect(scheduler.dispatchIdleMs({ lastRunAtMs: 1000, lastPauseClearedAtMs: 4000, schedulerBootedAtMs: 2000, now: 10_000 })).toBe(6000);
-  expect(scheduler.dispatchIdleMs({ now: 10_000 })).toBe(Infinity);
+  expect(starvation.classifyQueueStarvation({ ...base, lastRunAtMs: stale }).kind).toBe('starved');
+  expect(starvation.classifyQueueStarvation({ ...base, lastRunAtMs: idleFor(5_000) })).toBeNull();
+  expect(starvation.classifyQueueStarvation({ ...base, lastRunAtMs: stale, lastPauseClearedAtMs: idleFor(5_000) })).toBeNull();
+  expect(starvation.classifyQueueStarvation({ ...base, lastRunAtMs: stale, schedulerBootedAtMs: idleFor(5_000) })).toBeNull();
+  expect(starvation.dispatchIdleMs({ lastRunAtMs: 1000, lastPauseClearedAtMs: 4000, schedulerBootedAtMs: 2000, now: 10_000 })).toBe(6000);
+  expect(starvation.dispatchIdleMs({ now: 10_000 })).toBe(Infinity);
 });
 
 test('rows held by a launch breaker / lease read blocked, not starved (per project too)', () => {
   const jobs = [pendingRow('a'), pendingRow('b')];
   const args = { jobs, paused: null, runningCount: 0, lastRunAtMs: idleFor(3 * 60 * 60_000), now: NOW };
-  expect(scheduler.classifyQueueStarvation(args).kind).toBe('starved');
-  const partial = scheduler.classifyQueueStarvation({ ...args, heldSlugs: new Set(['a']) });
+  expect(starvation.classifyQueueStarvation(args).kind).toBe('starved');
+  const partial = starvation.classifyQueueStarvation({ ...args, heldSlugs: new Set(['a']) });
   expect(partial.kind).toBe('starved');
   expect(partial.dispatchable).toBe(1);
-  const all = scheduler.classifyQueueStarvation({ ...args, heldSlugs: new Map([['a', 'x'], ['b', 'y']]) });
+  const all = starvation.classifyQueueStarvation({ ...args, heldSlugs: new Map([['a', 'x'], ['b', 'y']]) });
   expect(all.kind).toBe('blocked');
   expect(all.dispatchable).toBe(0);
-  const byProject = scheduler.classifyQueueStarvationByProject({
+  const byProject = starvation.classifyQueueStarvationByProject({
     jobs, paused: null, runningSet: new Set(), lastRunAtMs: args.lastRunAtMs, heldSlugs: new Set(['a', 'b']), now: NOW,
   });
   expect(byProject.map((v) => v.kind)).toEqual(['blocked']);
@@ -278,7 +280,7 @@ test('the watchdog latches: one forced tick / audit per starve episode, re-armed
     expect((await scheduler.runQueueStarvationWatchdog(state, { now: NOW + 60_000, ...opts })).kind).toBe('starved');
     expect(starvedLogs()).toBe(1);
     // QUEUE_STARVATION_MS elapsed again: a new episode.
-    await scheduler.runQueueStarvationWatchdog(state, { now: NOW + scheduler.QUEUE_STARVATION_MS + 1, ...opts });
+    await scheduler.runQueueStarvationWatchdog(state, { now: NOW + starvation.QUEUE_STARVATION_MS + 1, ...opts });
     expect(starvedLogs()).toBe(2);
   } finally {
     warn.mockRestore();

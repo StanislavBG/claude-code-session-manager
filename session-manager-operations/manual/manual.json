@@ -1,9 +1,9 @@
 {
-  "version": "2.0.1",
+  "version": "2.1.0",
   "title": "The Session Manager Field Manual",
   "summary": "A warm, plain-English guide to AI agents — and to running your own small agency of them with Claude Code and Session Manager. No experience needed.",
-  "documentsAppVersion": "0.108.0",
-  "releasedAt": "2026-09-25",
+  "documentsAppVersion": "0.110.0",
+  "releasedAt": "2026-10-10",
   "chapters": [
     {
       "slug": "welcome",
@@ -88,7 +88,7 @@
     {
       "slug": "cockpit-tour",
       "title": "Around the cockpit — Home, memory, usage, history and more",
-      "blurb": "A guided walk through the rest of the app: dashboards, memory, usage meters, cost history, voice input and publishing.",
+      "blurb": "A guided walk through the rest of the app: dashboards, memory, usage meters, cost history, voice input, remote machines and publishing.",
       "part": "Make it yours",
       "free": true,
       "file": "cockpit-tour.html"

@@ -7,7 +7,7 @@ Part of the **DESKTOP HARNESS** partition, except `main/projectPages.cjs`
 ## What's here
 
 - `main/` — Electron main process. Entry modules (`index.cjs`, `scheduler.cjs`, …), `lib/`
-  (shared helpers, schemas, guard shims — scoped [`main/lib/CLAUDE.md`](main/lib/CLAUDE.md): subfolders + reuse table), `scheduler/prdParser.cjs`, `templates/`, `__tests__/`.
+  (shared helpers, schemas, guard shims — scoped [`main/lib/CLAUDE.md`](main/lib/CLAUDE.md): subfolders + reuse table), `scheduler/` (extracted pure scheduler modules — scoped [`main/scheduler/CLAUDE.md`](main/scheduler/CLAUDE.md): "changing X → edit Y" map), `templates/`, `__tests__/`.
 - `preload/` — `api.d.ts` is the hand-maintained IPC contract. `main/lib/persona-macro/agentPersonaSchema.cjs`,
   `main/lib/scheduler/scheduleJobSchema.cjs` and `main/ipcSchemas.cjs` (zod) mirror it by interface
   NAME (`ScheduleJob`, `AgentPersonaSaveInput`, …) — cite names, never line numbers.

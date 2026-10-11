@@ -7,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const schedulerPaths = require('./schedulerPaths.cjs');
 const { isRestartingMarkerActive } = require('./upgradeDrain.cjs');
-const { pidAlive: pidAliveCore } = require('./pidAlive.cjs');
+const { pidAlive } = require('./pidAlive.cjs');
 const atomicFs = require('./atomicFs.cjs');
 const { isPackagedApp } = require('./appRuntime.cjs');
 
@@ -142,19 +142,6 @@ function evaluateDispatchLiveness(entry, now = Date.now(), { deadMs = DEFAULT_DI
   return { dead: true, reason: 'dispatch-dead' };
 }
 
-/**
- * isPidAlive(pid) → boolean
- *
- * Thin alias over pidAlive.cjs's shared pidAlive() — single source of truth
- * for the "is this recorded pid still alive" check used by
- * checkAppLiveness's defense-in-depth relaunch gate. Kept as a named export
- * here (rather than inlining the require at every call site) so existing
- * imports of `isPidAlive` from this module keep working unchanged.
- */
-function isPidAlive(pid) {
-  return pidAliveCore(pid);
-}
-
 // Offline queue.json reconciliation (orphaned 'running' jobs whose pid died
 // while Electron wasn't running) used to live here as reconcileQueueOffline().
 // PRD 686 moved that responsibility into src/main/scheduler.cjs's own boot
@@ -188,7 +175,7 @@ function checkAppLiveness({
     return { alive: true, reason: 'heartbeat-fresh' };
   }
   const last = readLastHeartbeat(heartbeatPath);
-  if (last !== null && typeof last.pid === 'number' && isPidAlive(last.pid)) {
+  if (last !== null && typeof last.pid === 'number' && pidAlive(last.pid)) {
     return { alive: true, reason: 'pid-alive-heartbeat-stale' };
   }
   return { alive: false, reason: 'stale-and-dead' };
@@ -470,7 +457,6 @@ module.exports = {
   readLastHeartbeatTs,
   heartbeatFresh,
   evaluateDispatchLiveness,
-  isPidAlive,
   localDateStr,
   maybeFinalizeHistory,
   tryAcquireLock,

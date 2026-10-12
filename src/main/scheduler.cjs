@@ -65,6 +65,7 @@ const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/cl
 // as the authoritative guarantee.
 ensureCliCapsProbed().catch(() => {});
 const launchFailure = require('./lib/scheduler/launchFailure.cjs');
+const { finalizeReasonFor } = require('./lib/scheduler/finalizeReason.cjs');
 const { appendError } = require('./lib/telemetry/opsErrorLog.cjs');
 const { readTail } = require('./lib/util/fileTail.cjs');
 const {
@@ -6589,9 +6590,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           // reason — surface that on the completed row's statusHistory
           // instead of the generic "run finished with exit 0" every other
           // completed run gets.
-          const finalizeReason = (effectiveStatus === 'completed' && verifyResult?.verdict === 'already_satisfied_on_main')
-            ? verifyResult.reason
-            : (sigtermOverrideReason ?? `run finished with exit ${res.exitCode}`);
+          const finalizeReason = finalizeReasonFor({ effectiveStatus, verifyResult, sigtermOverrideReason, exitCode: res.exitCode });
           // error/verifierVerdict are stamped BEFORE transitionJob() below —
           // needsReviewLedger's buildNeedsReviewEntryLine reads job.
           // verifierVerdict/heldReason/error synchronously off `job` the

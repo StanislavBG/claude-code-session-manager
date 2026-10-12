@@ -1008,10 +1008,26 @@ function registerAdminRoute(adminHttp) {
 
 // ─── IPC handler registration ─────────────────────────────────────────────
 
+/**
+ * Record a chat prompt into the human prompt ledger, only when the renderer
+ * explicitly declared origin === 'human'. Absent/other origins are not-human
+ * (fail-closed). Never throws.
+ * @param {{ sessionId: string, prompt: string, origin?: string }} args
+ */
+function noteChatRunOrigin({ sessionId, prompt, origin }) {
+  try {
+    if (origin !== 'human') return;
+    require('./lib/feedback-remote/humanPromptLedger.cjs').recordHumanPrompt(sessionId, prompt);
+  } catch {
+    /* never throws */
+  }
+}
+
 function registerChatHandlers() {
   const { schemas, validated } = require('./ipcSchemas.cjs');
 
-  ipcMain.handle('chat:run', validated(schemas.chatRun, async ({ tabId, sessionId, prompt, cwd, resume, promptId }) => {
+  ipcMain.handle('chat:run', validated(schemas.chatRun, async ({ tabId, sessionId, prompt, cwd, resume, promptId, origin }) => {
+    noteChatRunOrigin({ sessionId, prompt, origin });
     // Report what actually happened instead of an unconditional { ok: true }.
     // A user send is always accepted now (queued behind the tab's live run if
     // one holds it), but the renderer gets the truth either way rather than a
@@ -1042,6 +1058,7 @@ module.exports = {
   __liveSessionCount: () => liveSessions.size,
   attachWindow,
   registerChatHandlers,
+  noteChatRunOrigin,
   parseStopSignal,
   splitStopSignal,
   parseContextUsageMarkdown,

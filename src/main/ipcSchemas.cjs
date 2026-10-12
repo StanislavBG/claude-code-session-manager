@@ -919,6 +919,9 @@ const chatRun = z.object({
   // Originating PromptTicket.id (PRD 748) when this run was dequeued from a
   // tab's prompt queue — absent for a fresh manual send with no ticket.
   promptId: z.string().min(1).max(128).optional(),
+  // Who authored this send. Only 'human' is auto-approve evidence for
+  // crossProjectFeedback; absent or any other value is treated as not-human.
+  origin: z.enum(['human', 'external', 'inbound-proposal']).optional(),
 });
 
 const chatCancel = z.object({

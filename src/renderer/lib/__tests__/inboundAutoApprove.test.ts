@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { usePromptSessions, type PromptSession } from '../../state/promptSessions'
 import { useChat } from '../../state/chat'
-import { autoApproveInbound } from '../inboundAutoApprove'
+import { autoApproveInbound, approveStampedInbound } from '../inboundAutoApprove'
 
 const CWD = '/tmp/proj'
 
@@ -87,6 +87,31 @@ describe('inboundAutoApprove', () => {
 
   it('honours the epicId filter', async () => {
     await autoApproveInbound(CWD, 'unstamped')
+    expect(send).not.toHaveBeenCalled()
+  })
+
+  it('approveStampedInbound never hydrates (a second hydrate would clobber in-memory sessions)', () => {
+    const hydrate = vi.fn()
+    usePromptSessions.setState({ hydrate } as never)
+    approveStampedInbound(CWD)
+    expect(hydrate).not.toHaveBeenCalled()
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a plain proposed and a completed Epic untouched', () => {
+    usePromptSessions.setState({
+      sessions: {
+        plain: epic('plain'),
+        done: epic('done', {
+          status: 'completed',
+          source: { producer: 'cross-project-feedback', autoApprove: stamp },
+        }),
+      },
+    } as never)
+    approveStampedInbound(CWD)
+    const s = usePromptSessions.getState().sessions
+    expect(s.plain.status).toBe('proposed')
+    expect(s.done.status).toBe('completed')
     expect(send).not.toHaveBeenCalled()
   })
 })

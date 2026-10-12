@@ -36,11 +36,16 @@ function isStampedInbound(e: PromptSession): boolean {
   )
 }
 
-/** Hydrate `cwd`'s Epics and approve-and-start every stamped inbound proposal (only `epicId` when given). */
-export async function autoApproveInbound(cwd: string, epicId?: string): Promise<void> {
-  await usePromptSessions.getState().hydrate(cwd)
+/** Approve-and-start every stamped inbound proposal already in the store (only `epicId` when given). No hydrate. */
+export function approveStampedInbound(cwd: string, epicId?: string): void {
   const candidates = Object.values(usePromptSessions.getState().sessions).filter(
     (e) => e.cwd === cwd && (epicId === undefined || e.id === epicId) && isStampedInbound(e),
   )
   for (const epic of candidates) approveAndStart(epic, 'inbound-auto-approve', 'inbound-proposal')
+}
+
+/** Hydrate `cwd`'s Epics, then approve-and-start every stamped inbound proposal. */
+export async function autoApproveInbound(cwd: string, epicId?: string): Promise<void> {
+  await usePromptSessions.getState().hydrate(cwd)
+  approveStampedInbound(cwd, epicId)
 }

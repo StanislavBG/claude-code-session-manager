@@ -7,6 +7,7 @@ import { BroadcastBar } from './components/BroadcastBar'
 import { WatchersPopover } from './components/WatchersPopover'
 import { Workbench } from './components/workbench/Workbench'
 import { RecordingStatus } from './components/RecordingStatus'
+import { TelemetryNoticeBanner } from './components/TelemetryNotice'
 import { MicWizard } from './components/MicWizard'
 import { CommandPalette, type Command } from './components/CommandPalette'
 import { SimpleShell } from './components/SimpleShell'
@@ -673,6 +674,7 @@ export function App() {
           outer container shifts the rest of the app down by the banner's
           28px height so TabBar stays visible. */}
       <RecordingStatus />
+      <TelemetryNoticeBanner />
       <PrereqChecklist />
       <TabBar />
       <div className="flex-1 flex min-h-0">

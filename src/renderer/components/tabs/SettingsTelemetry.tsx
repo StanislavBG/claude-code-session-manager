@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Toggle } from '../ui/Toggle'
 import { EmptyState } from '../ui/EmptyState'
+import { TelemetryNotice } from '../TelemetryNotice'
 import { copyText } from '../../lib/clipboard'
 import { toast } from '../../state/toast'
 import type {
@@ -281,14 +282,6 @@ function ProductTelemetrySection() {
     void persist({ ...cfg, enabled })
   }
 
-  const onAckNotice = (opts: { turnOff: boolean }) => {
-    void persist({
-      ...cfg,
-      enabled: opts.turnOff ? false : cfg.enabled,
-      noticeAckedAt: new Date().toISOString(),
-    })
-  }
-
   const onCopyInstallId = async () => {
     if (await copyText(cfg.installId)) {
       setCopyLabel('Copied')
@@ -340,35 +333,13 @@ function ProductTelemetrySection() {
         </p>
       </header>
 
-      {!cfg.noticeAckedAt && (
-        <section
-          data-testid="telemetry-first-run-notice"
-          className="border border-accent rounded p-3 space-y-2 text-xs"
-        >
-          <div className="text-fg font-medium">This app sends anonymous product telemetry</div>
-          <p className="text-fg-dim leading-relaxed">
-            Collected: a coarse machine profile (OS/arch/app version, no hardware id), error and
-            warning counts, and session counts — sent on start-up, after an update, and once a day.
-          </p>
-          <p className="text-fg-dim leading-relaxed">
-            Never collected: prompts, transcripts, file paths, project names, email, or username.
-          </p>
-          <div className="flex items-center gap-2 pt-1">
-            <button
-              onClick={() => onAckNotice({ turnOff: false })}
-              className="px-3 py-1 rounded bg-accent text-bg"
-            >
-              OK
-            </button>
-            <button
-              onClick={() => onAckNotice({ turnOff: true })}
-              className="px-3 py-1 rounded border border-line text-fg-dim hover:text-fg"
-            >
-              Turn off
-            </button>
-          </div>
-        </section>
-      )}
+      <TelemetryNotice
+        cfg={cfg}
+        onSaved={(config, st) => {
+          setCfg(config)
+          setStatus(st)
+        }}
+      />
 
       <section className="border border-line rounded p-3 space-y-3">
         <div className="flex items-center justify-between gap-3">

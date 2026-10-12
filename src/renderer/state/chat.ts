@@ -11,6 +11,7 @@ import { summarizeSignal, type ChatSignal } from '../lib/chatSignals'
 import { extractAttribution, type Attribution } from '../lib/chatAttribution'
 import { splitInjectedPreamble } from '../lib/promptPreamble'
 import { splitStopSignal } from '../lib/stopSignal'
+import { autoApproveInbound } from '../lib/inboundAutoApprove'
 
 /**
  * Per-tab chat state for the terminal chat experience (PRD 319). Each tab that
@@ -1425,4 +1426,12 @@ if (typeof window !== 'undefined' && window.api?.chat) {
       `external send ignored: ${tabId} matches neither an open tab nor a known Epic`,
     )
   })
+  // Main verified a human-requested cross-project proposal (crossProjectFeedback.cjs)
+  // and stamped it — approve + start it without the button. Guarded: older
+  // preloads / test harnesses lack the channel.
+  if (typeof window.api?.promptSessions?.onInboundAutoApprove === 'function') {
+    window.api.promptSessions.onInboundAutoApprove(({ cwd, epicId }) => {
+      void autoApproveInbound(cwd, epicId)
+    })
+  }
 }

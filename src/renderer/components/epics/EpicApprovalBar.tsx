@@ -14,8 +14,7 @@
  */
 import { useState } from 'react'
 import { usePromptSessions, type PromptSession } from '../../state/promptSessions'
-import { useChat } from '../../state/chat'
-import { toast } from '../../state/toast'
+import { approveAndStart } from '../../lib/inboundAutoApprove'
 import { EpicKindTag, EpicInboundTag } from './epic-primitives'
 import { inboundFeedbackOrigin } from '../../lib/epicOrigin'
 
@@ -30,18 +29,7 @@ export function EpicApprovalBar({ epic }: { epic: PromptSession }) {
     if (busy) return
     setBusy(true)
     try {
-      const approved = usePromptSessions.getState().approveProposed(epic.id, 'EpicApprovalBar')
-      if (!approved) {
-        toast.error('This session is no longer awaiting approval.')
-        return
-      }
-      useChat.getState().send({
-        tabId: approved.id,
-        sessionId: approved.claudeSessionId,
-        cwd: approved.cwd,
-        prompt: approved.openingPrompt || approved.goalText,
-        origin: inbound ? 'inbound-proposal' : 'human',
-      })
+      approveAndStart(epic, 'EpicApprovalBar', inbound ? 'inbound-proposal' : 'human')
     } finally {
       setBusy(false)
     }

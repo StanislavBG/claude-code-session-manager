@@ -19,13 +19,15 @@ const sharedWindowApi = vi.hoisted(() => {
   type CompleteHandler = (e: { tabId: string; sessionId: string; finalMessage: string }) => void
   type ErrorHandler = (e: { tabId: string; sessionId: string; message: string }) => void
   type ExternalSendHandler = (e: { tabId: string; prompt: string }) => void
+  type InboundAutoApproveHandler = (e: { cwd: string; epicId: string }) => void
 
   const handlers: {
     needsInput: NeedsInputHandler | null
     complete: CompleteHandler | null
     error: ErrorHandler | null
     externalSend: ExternalSendHandler | null
-  } = { needsInput: null, complete: null, error: null, externalSend: null }
+    inboundAutoApprove: InboundAutoApproveHandler | null
+  } = { needsInput: null, complete: null, error: null, externalSend: null, inboundAutoApprove: null }
 
   const api = {
     chat: {
@@ -70,6 +72,13 @@ const sharedWindowApi = vi.hoisted(() => {
       exists: vi.fn().mockResolvedValue(false),
       readJson: vi.fn().mockResolvedValue({ exists: false, data: null }),
     },
+    promptSessions: {
+      onEventAppended: vi.fn(),
+      onInboundAutoApprove: vi.fn((handler: InboundAutoApproveHandler) => {
+        handlers.inboundAutoApprove = handler
+        return () => { handlers.inboundAutoApprove = null }
+      }),
+    },
     logs: { write: vi.fn() },
     promptSessionTranscript: {
       append: vi.fn().mockResolvedValue({ ok: true }),
@@ -80,7 +89,13 @@ const sharedWindowApi = vi.hoisted(() => {
   return { api, handlers }
 })
 
+vi.mock('../../lib/inboundAutoApprove', () => ({
+  autoApproveInbound: vi.fn().mockResolvedValue(undefined),
+  approveAndStart: vi.fn(),
+}))
+
 import { useChat, isChainResolved } from '../chat'
+import { autoApproveInbound } from '../../lib/inboundAutoApprove'
 import { useSessions } from '../sessions'
 import { usePromptSessions } from '../promptSessions'
 import { useToast } from '../toast'
@@ -235,6 +250,14 @@ describe('chat.ts pushNotice()', () => {
     expect(after.queuedPosition).toBe(2)
     expect(after.stream).toBe('partial')
     expect(after.liveToolUses).toEqual([{ id: 'u1', kind: 'tool', label: 'Bash' }])
+  })
+})
+
+describe('chat.ts onInboundAutoApprove listener', () => {
+  it('registers at boot and approves the broadcast cwd/epicId', () => {
+    expect(sharedWindowApi.api.promptSessions.onInboundAutoApprove).toHaveBeenCalledTimes(1)
+    sharedWindowApi.handlers.inboundAutoApprove?.({ cwd: '/proj/in', epicId: 'epic-in' })
+    expect(autoApproveInbound).toHaveBeenCalledWith('/proj/in', 'epic-in')
   })
 })
 

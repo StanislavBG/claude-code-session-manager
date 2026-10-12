@@ -10,6 +10,7 @@ import type { NavKey } from '../../lib/navKey'
 import { useDocumentVisible } from '../../lib/useDocumentVisible'
 import { useKnownProjects } from '../../lib/useKnownProjects'
 import { takePendingPromptSessionId } from '../../lib/promptSessionDeepLink'
+import { autoApproveInbound } from '../../lib/inboundAutoApprove'
 import { useScheduledPrds } from '../../lib/useScheduledPrds'
 import { lastActivityMs } from '../../lib/epicQueueControls'
 import { useSessions } from '../../state/sessions'
@@ -99,7 +100,10 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
   const knownCwdsKey = epicProjectCwds(knownCwds, effectiveCwd ?? null).join('\n')
   useEffect(() => {
     for (const c of knownCwdsKey ? knownCwdsKey.split('\n') : []) {
-      void usePromptSessions.getState().hydrate(c)
+      void usePromptSessions
+        .getState()
+        .hydrate(c)
+        .then(() => autoApproveInbound(c))
       void usePromptSessions.getState().hydrateArchived(c)
     }
   }, [knownCwdsKey])
@@ -122,7 +126,7 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
     window.api.config.watch(paths)
     const off = window.api.config.onChanged(({ path }) => {
       const cwd = byPath.get(path)
-      if (cwd) void usePromptSessions.getState().hydrate(cwd)
+      if (cwd) void usePromptSessions.getState().hydrate(cwd).then(() => autoApproveInbound(cwd))
     })
     return () => {
       off()

@@ -543,6 +543,12 @@ contextBridge.exposeInMainWorld('api', {
     list: (payload) => ipcRenderer.invoke('exchanges:list', payload),
   },
   promptSessions: {
+    /** Main asks the renderer to approve-and-start a verified inbound proposal. */
+    onInboundAutoApprove: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('promptSessions:inbound-auto-approve', listener);
+      return () => ipcRenderer.removeListener('promptSessions:inbound-auto-approve', listener);
+    },
     /** Fires when the main process (currently only the scheduler's
      *  response-event append) appends an event to a PromptSession's chain on
      *  disk — lets an already-hydrated Epic pick it up live instead of

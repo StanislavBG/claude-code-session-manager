@@ -2262,6 +2262,8 @@ export interface SessionManagerAPI {
     }) => Promise<Exchange[]>;
   };
   promptSessions: {
+    /** Main requests approve-and-start of a verified inbound proposal. */
+    onInboundAutoApprove: (handler: (e: { cwd: string; epicId: string }) => void) => () => void;
     /** Fires when the main process appends an event to a PromptSession's
      *  chain on disk (currently only the scheduler's response-event append
      *  from notifyOriginatingTab) — lets an already-hydrated Epic pick it up

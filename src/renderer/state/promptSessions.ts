@@ -43,6 +43,8 @@ export interface EpicSource {
   fromEpicId?: string
   /** 'cross-project-feedback' only — structured plan; absent on legacy Epics. */
   proposal?: InboundProposal
+  /** 'cross-project-feedback' only — stamped by main after verifying the human explicitly requested this work. */
+  autoApprove?: { requestedBy: 'human'; quote: string; verifiedAt: string; fromClaudeSessionId: string }
 }
 
 export interface PromptSession {

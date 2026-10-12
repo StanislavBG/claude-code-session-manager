@@ -31,15 +31,17 @@ test('normal beat: converts ns to ms (1 decimal) and does not flag a stall', () 
 });
 
 test('stall beat: max above threshold yields warn "main loop stall"', () => {
-  const state = { p50: 20_000_000, p99: 300_000_000, max: 412_300_000, resets: 0 };
+  const state = { p50: 20_000_000, p99: 300_000_000, max: 1_500_000_000, resets: 0 };
   const snap = createLoopDelayMonitor(stubHistogram(state)).snapshot();
-  expect(snap.loopDelayMaxMs).toBe(412.3);
+  expect(snap.loopDelayMaxMs).toBe(1500);
+  expect(LOOP_STALL_WARN_MS).toBe(1000);
   expect(stallVerdict(snap)).toEqual({ level: 'warn', message: 'main loop stall' });
+  expect(stallVerdict({ loopDelayMaxMs: 626 })).toBeNull(); // typical heartbeat max, not a stall
   expect(stallVerdict({ loopDelayMaxMs: LOOP_STALL_WARN_MS })).toBeNull(); // strictly greater
 });
 
 test('reset between beats: a stall does not bleed into the next interval', () => {
-  const state = { p50: 20_000_000, p99: 300_000_000, max: 500_000_000, resets: 0 };
+  const state = { p50: 20_000_000, p99: 300_000_000, max: 1_200_000_000, resets: 0 };
   const m = createLoopDelayMonitor(stubHistogram(state));
   expect(stallVerdict(m.snapshot())).not.toBeNull();
   expect(state.resets).toBe(1);

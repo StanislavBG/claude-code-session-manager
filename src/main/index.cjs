@@ -1402,6 +1402,12 @@ app.whenReady().then(async () => {
     console.log(`[main] scheduler ownership held by pid ${ownership.holderPid} — running scheduler-passive (no reconciliation, no admin server)`);
     logs.writeLine({ scope: 'scheduler', level: 'info', message: 'scheduler-passive: ownership held by another instance', meta: { holderPid: ownership.holderPid } });
   }
+  // Sweep orphaned `<file>.tmp-<pid>-…` files from crashed atomic writers in the
+  // machine-global state dir (per-project dirs belong to reconcile).
+  try {
+    const { removed } = require('./lib/util/atomicFs.cjs').sweepStaleTmpFiles(path.join(os.homedir(), '.claude', 'session-manager'));
+    logs.writeLine({ scope: 'main', level: 'info', message: 'stale tmp sweep', meta: { removed: removed.length } });
+  } catch { /* sweep is best-effort */ }
   // First-boot default: install the bundled session-manager-dev plugin (its 3
   // dev skills) from the app's own marketplace. One-shot + idempotent; never
   // throws. SM_SEED_DEV_PLUGIN_DISABLE=1 to opt out.

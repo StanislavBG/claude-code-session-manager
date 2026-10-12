@@ -84,4 +84,53 @@ describe('atomicFs', () => {
     const file = path.join(blocker, 'nope.json');
     await expect(atomicFs.writeJsonAtomic(file, { a: 1 })).rejects.toThrow();
   });
+
+  describe('sweepStaleTmpFiles', () => {
+    const DEAD = 999999;
+    const touch = (name, ageMs) => {
+      const f = path.join(dir, name);
+      fs.writeFileSync(f, '');
+      const t = new Date(Date.now() - ageMs);
+      fs.utimesSync(f, t, t);
+      return f;
+    };
+    const HOUR2 = 2 * 3600000;
+    const isPidAlive = (pid) => pid !== DEAD;
+
+    it('removes old tmp files whose pid is dead', () => {
+      const f = touch(`a.json.tmp-${DEAD}-1-abc`, HOUR2);
+      const r = atomicFs.sweepStaleTmpFiles(dir, { isPidAlive });
+      expect(r.removed).toEqual([f]);
+      expect(fs.existsSync(f)).toBe(false);
+    });
+
+    it('keeps fresh tmp files', () => {
+      const f = touch(`a.json.tmp-${DEAD}-1-abc`, 1000);
+      expect(atomicFs.sweepStaleTmpFiles(dir, { isPidAlive }).removed).toEqual([]);
+      expect(fs.existsSync(f)).toBe(true);
+    });
+
+    it('keeps old tmp files whose pid is alive', () => {
+      const f = touch(`a.json.tmp-${process.pid}-1-abc`, HOUR2);
+      expect(atomicFs.sweepStaleTmpFiles(dir).removed).toEqual([]);
+      expect(fs.existsSync(f)).toBe(true);
+    });
+
+    it('keeps .corrupt and .bak files and does not recurse', () => {
+      const c = touch(`a.json.corrupt-${DEAD}-1`, HOUR2);
+      const c2 = touch(`a.json.tmp-${DEAD}-1.corrupt-x`, HOUR2);
+      const b = touch(`a.json.bak.tmp-${DEAD}-1`, HOUR2);
+      fs.mkdirSync(path.join(dir, 'sub'));
+      const nested = path.join(dir, 'sub', `n.json.tmp-${DEAD}-1-abc`);
+      fs.writeFileSync(nested, '');
+      const t = new Date(Date.now() - HOUR2);
+      fs.utimesSync(nested, t, t);
+      expect(atomicFs.sweepStaleTmpFiles(dir, { isPidAlive }).removed).toEqual([]);
+      for (const f of [c, c2, b, nested]) expect(fs.existsSync(f)).toBe(true);
+    });
+
+    it('never throws on a missing dir', () => {
+      expect(atomicFs.sweepStaleTmpFiles(path.join(dir, 'nope'))).toEqual({ removed: [] });
+    });
+  });
 });

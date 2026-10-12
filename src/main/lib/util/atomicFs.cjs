@@ -105,7 +105,49 @@ function readJsonOrSync(file, fallback) {
   }
 }
 
+function defaultIsPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e?.code === 'EPERM'; // exists but owned by someone else
+  }
+}
+
+/**
+ * Remove orphaned `<file>.tmp-<pid>-<ts>-<rand>` files left by crashed
+ * writers. Direct children of `dir` only (no recursion); a file goes only when
+ * its mtime is older than `olderThanMs` AND its embedded pid is not alive.
+ * `.corrupt-*` / `.bak*` forensics never match. Never throws.
+ */
+function sweepStaleTmpFiles(dir, { olderThanMs = 3600000, isPidAlive = defaultIsPidAlive } = {}) {
+  const removed = [];
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return { removed };
+  }
+  const now = Date.now();
+  for (const name of names) {
+    try {
+      const m = /\.tmp-(\d+)-/.exec(name);
+      if (!m) continue;
+      if (/\.(corrupt|bak)/.test(name)) continue;
+      const full = path.join(dir, name);
+      const st = fs.lstatSync(full);
+      if (!st.isFile()) continue;
+      if (now - st.mtimeMs <= olderThanMs) continue;
+      if (isPidAlive(Number(m[1]))) continue;
+      fs.unlinkSync(full);
+      removed.push(full);
+    } catch { /* per-file errors are skipped */ }
+  }
+  return { removed };
+}
+
 module.exports = {
+  sweepStaleTmpFiles,
   tmpPathFor,
   writeTextAtomic,
   writeTextAtomicSync,

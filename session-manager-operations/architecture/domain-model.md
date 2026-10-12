@@ -145,6 +145,16 @@ scoping scheme.
   `lib/epicOrigin.ts` renders as a chip so the receiving human sees the claim came from an agent that never
   read their codebase. There is no reply channel; a receipt event chained onto the sending Epic is the whole
   loop.
+- **Verified human request auto-starts a cross-project proposal.** The mint is unchanged — the Epic is still born
+  `proposed`. When the tool call carries `autoStart: true` + `humanRequestQuote`, main stamps `source.autoApprove`
+  only if the quote is verified, and the receiving renderer then approves and starts it through the normal
+  `approveProposed` path. Verification is fail-closed; anything unverifiable degrades to the ordinary proposal:
+  - `humanPromptLedger` is fed only by `chat:run` prompts with origin `'human'`. Terminal-view and Web Remote
+    prompts never reach it, so they do not qualify.
+  - The quote must appear verbatim in a human prompt, from the originating chat session, that names the target
+    project.
+  - Identity is `SM_CHAT_SESSION_ID` (MCP env, set only for interactive chat runs), so a scheduler job has no
+    identity to match and can never auto-start. Agent-initiated proposals still wait for a human.
 - **A scheduler job's question comes back to the session that wrote the PRD.** A `needs_review` park is a
   question, not a result: `lib/scheduler/rcaReport.cjs` writes a root-cause report beside the run log and
   `scheduler.cjs`'s `notifyNeedsReview` appends it as a `response` event on the authoring Epic (resolved from

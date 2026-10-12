@@ -81,8 +81,8 @@ Any new feature touching sessions, navigation, or per-project state must map ont
   is **no agent-facing proposal channel** — an agent sure that work is needed runs `/develop` inside the Epic
   it is already in. PRDs join an existing Epic; they never conjure one.
 - **Cross-project feedback lands as a `proposed` Epic in the RECEIVING project** (`crossProjectFeedback.cjs`,
-  `feedback_open_session` MCP tool, `session-manager-dev:send-feedback` skill). `toCwd === fromCwd` is
-  rejected — that's `/develop`.
+  `feedback_open_session`, `send-feedback` skill); auto-approved only on a verified explicit human request
+  ([domain-model.md](session-manager-operations/architecture/domain-model.md)). Same-cwd rejected — `/develop`.
 - **A MACRO is a saved (agent, tag, prompt) hot key** — machine-local library (`macroLibrary.cjs`,
   `~/.claude/session-manager/macros.json`), shown per project in the Sessions HOT KEYS strip. Pressing it is the
   same act as New Session, through the same mint authority.

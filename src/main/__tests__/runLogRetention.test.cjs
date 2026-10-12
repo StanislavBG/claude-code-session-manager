@@ -23,6 +23,7 @@ const {
   runningRunIdsFromJobs,
   isLiveJob,
   runBootSweep,
+  DEFAULT_RUN_LOG_RETENTION,
 } = require('../lib/scheduler/runLogRetention.cjs');
 
 let runsDir;
@@ -71,24 +72,26 @@ test('scanRunEntries: finds one entry per slug, even when a dir holds many slugs
 
 // ─── default is dry-run: nothing removed with no opt-in ────────────────────
 
-test('applyRetention: DEFAULT (no settings) is dry-run — deletes nothing, regardless of how old the runs are', () => {
-  const now = Date.now();
-  makeRun('2020-01-01T00-00-00-000Z', 'old-slug', { finishedAt: now - 400 * DAY_MS });
-  makeRun('2020-06-01T00-00-00-000Z', 'old-slug', { finishedAt: now - 300 * DAY_MS });
-
-  const result = applyRetention(runsDir, undefined, { now });
-  expect(result.deleted).toBe(false);
-  expect(result.removedFiles).toBeUndefined();
-  expect(fs.readdirSync(runsDir).length).toBe(2);
-
-  // The same data WOULD flag one eligible run once a real policy is computed
-  // (this is what the human-facing report is built from) — proves the dry
-  // run above wasn't a no-op because nothing was ever eligible.
-  const withPolicy = computeReport(runsDir, { maxAgeDays: 30 }, { now });
-  expect(withPolicy.eligible.length).toBeGreaterThan(0);
+test('DEFAULT_RUN_LOG_RETENTION: enabled, 14 days, keep newest 3', () => {
+  expect(DEFAULT_RUN_LOG_RETENTION).toEqual({ enabled: true, policy: { maxAgeDays: 14, keepPerSlug: 3 } });
 });
 
-test('applyRetention: enabled=false is still dry-run regardless of policy', () => {
+test('applyRetention: absent setting applies the default policy — deletes a 20-day-old run beyond the newest 3', () => {
+  const now = Date.now();
+  const old = makeRun('2026-01-01T00-00-00-000Z', 'dflt-slug', { finishedAt: now - 20 * DAY_MS });
+  const keep = [
+    makeRun('2026-01-02T00-00-00-000Z', 'dflt-slug', { finishedAt: now - 19 * DAY_MS }),
+    makeRun('2026-01-03T00-00-00-000Z', 'dflt-slug', { finishedAt: now - 18 * DAY_MS }),
+    makeRun('2026-01-04T00-00-00-000Z', 'dflt-slug', { finishedAt: now - 17 * DAY_MS }),
+  ];
+
+  const result = applyRetention(runsDir, undefined, { now, jobs: [] });
+  expect(result.deleted).toBe(true);
+  expect(fs.existsSync(old)).toBe(false);
+  for (const d of keep) expect(fs.existsSync(d)).toBe(true);
+});
+
+test('applyRetention: explicit enabled=false is dry-run regardless of policy — nothing deleted', () => {
   const now = Date.now();
   makeRun('2020-01-01T00-00-00-000Z', 'old-slug', { finishedAt: now - 400 * DAY_MS });
   makeRun('2020-06-01T00-00-00-000Z', 'old-slug', { finishedAt: now - 300 * DAY_MS });
@@ -100,8 +103,9 @@ test('applyRetention: enabled=false is still dry-run regardless of policy', () =
 });
 
 test('isRetentionEnabled: requires enabled===true AND a non-empty policy', () => {
-  expect(isRetentionEnabled(undefined)).toBe(false);
-  expect(isRetentionEnabled({})).toBe(false);
+  expect(isRetentionEnabled(undefined)).toBe(true); // absent → built-in default
+  expect(isRetentionEnabled({})).toBe(true);
+  expect(isRetentionEnabled({ schedulerRunLogRetention: { enabled: false } })).toBe(false);
   expect(isRetentionEnabled({ schedulerRunLogRetention: { enabled: true } })).toBe(false);
   expect(isRetentionEnabled({ schedulerRunLogRetention: { enabled: true, policy: {} } })).toBe(false);
   expect(
@@ -358,14 +362,14 @@ test('runBootSweep: reads queueStore ONCE and threads its jobs explicitly into a
   }
 });
 
-test('runBootSweep: dry-run when config has no opt-in', () => {
+test('runBootSweep: dry-run when config explicitly opts out', () => {
   const now = Date.now();
   makeRun('2020-01-01T00-00-00-000Z', 'noop-slug', { finishedAt: now - 400 * DAY_MS });
   makeRun('2026-01-01T00-00-00-000Z', 'noop-slug', { finishedAt: now - 1 * DAY_MS });
 
   const queueStore = require('../lib/scheduler/queueStore.cjs');
   const original = queueStore.readMergedSync;
-  queueStore.readMergedSync = () => ({ config: {}, jobs: [] });
+  queueStore.readMergedSync = () => ({ config: { schedulerRunLogRetention: { enabled: false } }, jobs: [] });
   try {
     const result = runBootSweep({ now, runsDir });
     expect(result.deleted).toBe(false);
@@ -456,12 +460,12 @@ test('applyRetention orphan pass: skips an empty directory whose runId belongs t
   expect(fs.existsSync(inFlightDir)).toBe(true);
 });
 
-test('applyRetention orphan pass: never runs when retention is not opted in (dry-run)', () => {
+test('applyRetention orphan pass: never runs when retention is opted out (dry-run)', () => {
   const now = Date.now();
   const orphanDir = path.join(runsDir, '2020-01-01T00-00-00-000Z');
   fs.mkdirSync(orphanDir, { recursive: true });
 
-  const result = applyRetention(runsDir, undefined, { now, jobs: [] });
+  const result = applyRetention(runsDir, { schedulerRunLogRetention: { enabled: false } }, { now, jobs: [] });
   expect(result.deleted).toBe(false);
   expect(fs.existsSync(orphanDir)).toBe(true);
 });

@@ -1,8 +1,7 @@
 'use strict';
 
 /**
- * runLogRetention.cjs — computes (and, only when explicitly opted in,
- * applies) a retention policy over `scheduled-plans/runs/`.
+ * runLogRetention.cjs — computes and applies a retention policy over `scheduled-plans/runs/`.
  *
  * That directory is a machine-level Session-Manager runtime artifact store
  * (execution logs of the scheduler's own `claude -p` runs), not anything
@@ -26,10 +25,10 @@
  * slug's own files.
  *
  * SAFETY MODEL (the point of this module — see the PRD that added it):
- *   - Nothing is ever deleted unless the caller passes settings with
- *     `schedulerRunLogRetention.enabled === true` AND a non-empty policy.
- *     Everywhere else (computeReport, and applyRetention with no opt-in)
- *     this module only READS the filesystem.
+ *   - Retention is ON by default (DEFAULT_RUN_LOG_RETENTION) when settings
+ *     carry no `schedulerRunLogRetention`. An explicit `enabled: false` (or a
+ *     config with no non-empty policy) opts out: computeReport, and
+ *     applyRetention when opted out, only READ the filesystem.
  *   - An entry belonging to a job that is currently live — status `pending`
  *     (queued), `running`, `needs_review`, or `investigating` (the exact
  *     literals scheduler.cjs uses; see LIVE_STATUSES) — is never eligible,
@@ -50,6 +49,16 @@ const schedulerPaths = require('./schedulerPaths.cjs');
 // used throughout scheduler.cjs (see e.g. its DOD_SLUG_RE-adjacent status
 // checks) — 'completed' and 'failed' are the only terminal ones.
 const LIVE_STATUSES = new Set(['pending', 'running', 'needs_review', 'investigating']);
+
+/**
+ * Built-in policy applied when settings carry no `schedulerRunLogRetention`:
+ * drop runs older than 14 days but always keep each slug's newest 3.
+ * (Policy keys follow the module's own names: maxAgeDays / keepPerSlug.)
+ */
+const DEFAULT_RUN_LOG_RETENTION = Object.freeze({
+  enabled: true,
+  policy: Object.freeze({ maxAgeDays: 14, keepPerSlug: 3 }),
+});
 
 const META_SUFFIX = '.meta.json';
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -259,11 +268,21 @@ function computeReport(runsDir, policy, opts) {
 }
 
 /**
- * True only when settings carry an explicit, well-formed opt-in:
- * `schedulerRunLogRetention.enabled === true` plus a non-empty policy.
+ * The effective retention config: the caller's `schedulerRunLogRetention`
+ * when present, else DEFAULT_RUN_LOG_RETENTION.
+ */
+function resolveRetentionConfig(settings) {
+  const cfg = settings && settings.schedulerRunLogRetention;
+  return cfg == null ? DEFAULT_RUN_LOG_RETENTION : cfg;
+}
+
+/**
+ * True when the effective config (see resolveRetentionConfig) has
+ * `enabled === true` plus a non-empty policy. An absent setting resolves to
+ * the default (enabled); an explicit `enabled: false` opts out.
  */
 function isRetentionEnabled(settings) {
-  const cfg = settings && settings.schedulerRunLogRetention;
+  const cfg = resolveRetentionConfig(settings);
   if (!cfg || cfg.enabled !== true) return false;
   const policy = cfg.policy;
   return !!policy && (policy.maxAgeDays != null || policy.keepPerSlug != null);
@@ -372,7 +391,7 @@ function sweepOrphanDirs(runsDir, runningRunIds, errors) {
  * nothing removed.
  */
 function applyRetention(runsDir, settings, opts) {
-  const cfg = (settings && settings.schedulerRunLogRetention) || null;
+  const cfg = resolveRetentionConfig(settings);
   const policy = (cfg && cfg.policy) || {};
   const enabled = isRetentionEnabled(settings);
   const liveKeys = resolveLiveKeysForApply(runsDir, opts, enabled);
@@ -381,7 +400,7 @@ function applyRetention(runsDir, settings, opts) {
   if (!enabled) {
     return {
       deleted: false,
-      reason: 'dry-run: schedulerRunLogRetention.enabled is not true (or has no policy)',
+      reason: 'dry-run: schedulerRunLogRetention is disabled (enabled !== true, or has no policy)',
       report,
     };
   }
@@ -424,8 +443,8 @@ function applyRetention(runsDir, settings, opts) {
  * applyRetention's own internal queueStore fallback (resolveLiveKeysForApply
  * above), which exists only as a defensive net for callers who forget to
  * thread live-job info through, not as this module's primary path. Deletion
- * still only happens when the read config carries an explicit
- * schedulerRunLogRetention.enabled === true (see isRetentionEnabled).
+ * happens unless the read config opts out with
+ * schedulerRunLogRetention.enabled === false (see isRetentionEnabled).
  *
  * Intended to be called once per app boot (see index.cjs's deferred 30s
  * startup timer, alongside finalizeClosedDays) — never on its own timer.
@@ -438,6 +457,8 @@ function runBootSweep(opts) {
 }
 
 module.exports = {
+  DEFAULT_RUN_LOG_RETENTION,
+  resolveRetentionConfig,
   LIVE_STATUSES,
   isLiveJob,
   liveKeysFromJobs,

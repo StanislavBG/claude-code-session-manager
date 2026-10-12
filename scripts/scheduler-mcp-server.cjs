@@ -410,6 +410,14 @@ const TOOLS = [
           type: 'array', items: { type: 'string' },
           description: 'Optional absolute paths worth reading, appended as Reference lines',
         },
+        autoStart: {
+          type: 'boolean',
+          description: 'Set true ONLY when the human in THIS conversation explicitly asked for this work in the other project. Requires humanRequestQuote. Never set it for work you decided on your own initiative. An unverified request silently falls back to a plain PROPOSED session.',
+        },
+        humanRequestQuote: {
+          type: 'string',
+          description: "Required with autoStart. Copy VERBATIM from the human's own message in this conversation; that message must name the target project. Do not paraphrase or write it yourself.",
+        },
       },
       required: ['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body'],
     },
@@ -699,11 +707,21 @@ async function handleCallTool(request) {
         payload.originProjectRoot = process.env.SM_PROJECT_ROOT;
       }
       const result = await adminRequest('POST', '/admin/feedback/open-session', payload);
-      // Never say "sent", "filed" or "fixed" — this call delivers a PROPOSAL
-      // that a human in the other project must still approve.
-      const note = result?.ok !== false
-        ? ' — delivered as a PROPOSED session in the receiving project; it runs only if a human there presses Approve & start. No reply channel.'
-        : '';
+      // Never say "sent", "filed" or "fixed" — this call delivers a session
+      // that is either a PROPOSAL a human must approve or, when the human's own
+      // request was verified, one that is auto-approved and starting. It never
+      // reports the work as done.
+      let note = '';
+      if (result?.ok !== false) {
+        if (result?.status === 'auto-approved') {
+          note = ' — auto-approved on the human\'s explicit request; the session is starting in the receiving project. No reply channel; the work is not done yet.';
+        } else {
+          note = ' — delivered as a PROPOSED session in the receiving project; it runs only if a human there presses Approve & start. No reply channel.';
+          if (args.autoStart && result?.autoStart && result.autoStart.granted !== true && result.autoStart.reason) {
+            note += ` Auto-start was requested but not granted: ${result.autoStart.reason}`;
+          }
+        }
+      }
       return { content: [{ type: 'text', text: JSON.stringify(result) + note }] };
     }
     if (name === 'chat_send_prompt') {

@@ -139,6 +139,15 @@ project has not yet agreed with. Use `bug` or `feature` only when the finding is
 unambiguous and you'd expect them to start decomposing it on sight (those two
 treat PRD decomposition as the expected next step).
 
+**Auto-start (only when the human asked).** If the human in THIS conversation
+explicitly asked you to do the work in the other project, also pass
+`autoStart: true` and `humanRequestQuote` — copied VERBATIM from their own
+message, which must name the target project. Never write or paraphrase the
+quote, and never pass `autoStart` for something you decided on your own: that
+stays a plain proposal. If the quote cannot be verified, the call silently falls
+back to a normal `proposed` session (the result note gives the reason), so
+report it as a proposal in that case.
+
 `fromEpicId` is filled in automatically from your running session; pass it
 explicitly only if you know it and the auto-fill failed. When it resolves, a
 receipt is chained onto your own session's event log so your transcript records
@@ -150,6 +159,10 @@ Say exactly this much: the proposal was **delivered as a proposed session** in
 `<toCwd>`, and it runs only if a human there presses **Approve & start**. That
 human sees the motivation, plan and acceptance criteria on the proposal before
 approving.
+
+If the result status is `auto-approved`, say instead that the session was
+auto-approved on the human's request and is starting in `<toCwd>` — not that it
+is done.
 
 Do **not** say the other project has been notified-and-is-working-on-it, that
 the bug is filed/fixed/assigned, or that you'll follow up when they respond.

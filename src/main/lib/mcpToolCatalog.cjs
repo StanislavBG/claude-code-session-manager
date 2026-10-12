@@ -243,7 +243,11 @@ const MCP_TOOL_CATALOG = [
       + '`acceptanceCriteria`; put evidence, symptom and references in `body`. Name the file in THEIR repo '
       + 'that looks responsible if you know it. When one request is split into several proposals, send '
       + 'them ALL with one shared `series` {key, title, total} (plus each one\'s `index`) and summarise '
-      + 'the overall plan in each motivation.',
+      + 'the overall plan in each motivation. TWO MODES: (1) agent-initiated (your own idea) = PROPOSED, a '
+      + 'human in the receiving project must approve it; pass neither autoStart nor humanRequestQuote. '
+      + '(2) human-requested = the human in THIS conversation explicitly asked for the work in that other '
+      + 'project: pass `autoStart: true` plus `humanRequestQuote`, copied VERBATIM from their own message, '
+      + 'which must name the target project. An unverified request silently falls back to PROPOSED.',
     whenNotToUse: 'WHEN NOT TO USE IT: for work in the project you are ALREADY in, run /develop inside the Epic you '
       + 'are already in — this tool refuses toCwd === fromCwd outright.',
     exampleArgs: {
@@ -258,11 +262,13 @@ const MCP_TOOL_CATALOG = [
       series: { key: 'shared-admin-api-f', title: 'Shared admin API field F', index: 1, total: 2 },
       body: 'Symptom: X. Observed while doing Y in session-manager. Expected: Z. Suspected file: <path in their repo>.',
     },
-    notes: 'WHAT THIS DOES NOT DO: it does not start anything, queue a PRD, or spend a token. The session '
+    notes: 'WHAT THIS DOES NOT DO: it never writes code or queues a PRD itself. Agent-initiated, the session '
       + 'lands as `proposed` and runs only if a human in the RECEIVING project presses "Approve & start". '
+      + 'With a verified autoStart + humanRequestQuote the result status is `auto-approved` and the session '
+      + 'starts on its own; otherwise it stays proposed (check the note for the reason). '
       + 'There is no callback and no reply channel — do not wait for an answer, and do not tell the user '
       + 'the other project has "been fixed" or "is working on it". Report only that the proposal was '
-      + 'delivered.',
+      + 'delivered, or that the session was auto-approved and is starting.',
   },
   {
     name: 'project_home_write',

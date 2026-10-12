@@ -37,6 +37,17 @@ const TMP_DROP_ROOTS = {
   get prefixDropRoots() { return [WORKTREE_KIND_CONFIG.job.root, WORKTREE_KIND_CONFIG.epic.root]; },
 };
 
+// Test-harness project cwds live at <tmpdir>/sst-*/…. They are never real
+// projects, and leaking them into the active list made the renderer's batched
+// config:watch hit 618 "Path outside allowed boundaries" rejects. Only the
+// `sst-` first segment is matched, so test-stubbed HOMEs that are not sst-*
+// dirs (see the exactDropCwds note above) are still kept.
+function isSstHarnessCwd(cwd) {
+  const rel = path.relative(TMPDIR, cwd);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+  return rel.split(path.sep)[0].startsWith('sst-');
+}
+
 // Transcript reads only need the last line with a `cwd` field — a few dozen
 // lines is always enough. 64 KB keeps peak RSS proportionate.
 const TAIL_BYTES = 64 * 1024;
@@ -389,6 +400,7 @@ function deriveCwds(records, maxAgeMin, maxCwds, tmpDropRoots) {
       return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
     });
     if (isUnderPrefixDropRoot) return;
+    if (isSstHarnessCwd(cwd)) return;
     if (seen.has(cwd) || result.length >= maxCwds) return;
     // Must exist AND be a directory — a transcript naming a since-deleted
     // path, or a file, is not a project.
@@ -456,6 +468,7 @@ module.exports = {
   allProjectCwds,
   projectRootOf,
   worktreeMainRootOf,
+  isSstHarnessCwd,
   bustProjectCwdCache,
   __waitForPendingRefresh,
 };

@@ -30,6 +30,7 @@ const {
 } = require('../lib/feedback-remote/crossProjectFeedback.cjs');
 const { readActiveIndex, MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK, MINT_AUTHORITIES } = require('../lib/epic/epicMint.cjs');
 const { assertValidPromptSession } = require('../lib/promptSessionSchema.cjs');
+const humanPromptLedger = require('../lib/feedback-remote/humanPromptLedger.cjs');
 
 const tmpDirs = [];
 afterEach(async () => {
@@ -386,6 +387,108 @@ test('chains a receipt onto the sending Epic when it is known and active', async
   expect(epicId).toBe('sender-epic');
   expect(text).toContain(to);
   expect(text).toMatch(/will not run until a human/i);
+});
+
+// ---------------------------------------------------------------------------
+// Verified human auto-start
+// ---------------------------------------------------------------------------
+
+const SESSION_ID = 'chat-session-1';
+
+function autoStartSetup(to, promptText) {
+  humanPromptLedger._resetForTests();
+  const quote = `please fix the relay frame drop in ${path.basename(to)}`;
+  humanPromptLedger.recordHumanPrompt(SESSION_ID, promptText ?? `Hey, ${quote} right now.`);
+  return quote;
+}
+
+async function runAutoStart(to, from, inputOverrides, notify = []) {
+  const r = await openFeedbackSession(
+    payload(to, from, { autoStart: true, originClaudeSessionId: SESSION_ID, ...inputOverrides }),
+    {
+      appendResponseEventIfKnown: async () => true,
+      notifyRenderer: (arg) => { notify.push(arg); },
+    },
+  );
+  return r;
+}
+
+test('grants auto-start for a verified human quote naming the target; Epic still born proposed', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const quote = autoStartSetup(to);
+  const notify = [];
+  const r = await runAutoStart(to, from, { humanRequestQuote: quote, fromEpicId: 'sender-epic' }, notify);
+  expect(r.ok).toBe(true);
+  expect(r.status).toBe('auto-approved');
+  expect(r.autoStart).toEqual({ granted: true });
+  expect(r.note).toMatch(/starting in the receiving project/i);
+  const epic = readActiveIndex(to).sessions[r.epicId];
+  expect(epic.status).toBe('proposed');
+  expect(epic.source.autoApprove).toMatchObject({
+    requestedBy: 'human',
+    quote,
+    fromClaudeSessionId: SESSION_ID,
+  });
+  expect(Number.isNaN(Date.parse(epic.source.autoApprove.verifiedAt))).toBe(false);
+  expect(notify).toEqual([{ cwd: to, epicId: r.epicId }]);
+});
+
+test('auto-start receipt on the origin epic says it was auto-approved at the human\'s request', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const quote = autoStartSetup(to);
+  const calls = [];
+  await openFeedbackSession(
+    payload(to, from, { autoStart: true, originClaudeSessionId: SESSION_ID, humanRequestQuote: quote, fromEpicId: 'sender-epic' }),
+    { appendResponseEventIfKnown: async (...a) => { calls.push(a); return true; }, notifyRenderer: () => {} },
+  );
+  expect(calls[0][2]).toMatch(/auto-approved at the human's explicit request/);
+});
+
+test('denies auto-start (stays proposed, no notify) for every unverifiable case', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const quote = autoStartSetup(to);
+  const cases = {
+    'missing quote': { overrides: {} },
+    'quote not in ledger': { overrides: { humanRequestQuote: 'this sentence was never typed by anyone at all' } },
+    'missing originClaudeSessionId': { overrides: { humanRequestQuote: quote, originClaudeSessionId: undefined } },
+  };
+  for (const [name, { overrides }] of Object.entries(cases)) {
+    const notify = [];
+    const r = await runAutoStart(to, from, overrides, notify);
+    expect(r.ok, name).toBe(true);
+    expect(r.status, name).toBe('proposed');
+    expect(r.autoStart.granted, name).toBe(false);
+    expect(typeof r.autoStart.reason, name).toBe('string');
+    expect(notify, name).toEqual([]);
+    expect(readActiveIndex(to).sessions[r.epicId].source.autoApprove, name).toBeUndefined();
+  }
+});
+
+test('denies auto-start when the human prompt does not name the target project', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  humanPromptLedger._resetForTests();
+  const quote = 'please fix the relay frame drop somewhere else';
+  humanPromptLedger.recordHumanPrompt(SESSION_ID, `Hey, ${quote} thanks.`);
+  const notify = [];
+  const r = await runAutoStart(to, from, { humanRequestQuote: quote }, notify);
+  expect(r.ok).toBe(true);
+  expect(r.status).toBe('proposed');
+  expect(r.autoStart.granted).toBe(false);
+  expect(r.autoStart.reason).toMatch(/name/i);
+  expect(notify).toEqual([]);
+});
+
+test('validateFeedbackInput bounds humanRequestQuote and types autoStart', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  expect(validateFeedbackInput(payload(to, from, { humanRequestQuote: 'x'.repeat(2001) })).ok).toBe(false);
+  expect(validateFeedbackInput(payload(to, from, { humanRequestQuote: 5 })).ok).toBe(false);
+  expect(validateFeedbackInput(payload(to, from, { autoStart: 'yes' })).ok).toBe(false);
+  expect(validateFeedbackInput(payload(to, from, { autoStart: true })).ok).toBe(true);
 });
 
 // ---------------------------------------------------------------------------

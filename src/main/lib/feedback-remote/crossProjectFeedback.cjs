@@ -33,7 +33,19 @@
  * feedback Epic is born 'proposed' like every other Epic (epicMint.cjs's
  * BORN-PROPOSED check applies to this mint authority verbatim), so the human
  * in the RECEIVING project is still the one who decides whether a single token
- * gets spent. An agent can ask; it cannot start.
+ * gets spent. An agent can ask; it cannot start on its own say-so.
+ *
+ * The one exception is a VERIFIED HUMAN REQUEST. When the human themselves
+ * asked, in chat, for work in another project, making them re-confirm in the
+ * receiving project is pure friction. So `autoStart: true` plus a
+ * `humanRequestQuote` is honored only when main can check the quote against
+ * humanPromptLedger (prompts chat:run recorded with human origin) for the
+ * originating chat session — `input.originClaudeSessionId`, taken from the MCP
+ * server's env, set only for interactive chat runs, never for scheduler jobs —
+ * AND that human prompt names the target project. Even then the Epic is still
+ * minted 'proposed'; it is only stamped `source.autoApprove` and the renderer
+ * is told to approve-and-start it through its normal approveProposed path.
+ * Anything unverifiable degrades to the ordinary proposal.
  *
  * Guards, all fail-closed:
  *   - both cwds go through config.cjs's validatePath (allowedRoots = home)
@@ -90,6 +102,7 @@ const MAX_SERIES_KEY_CHARS = 60;
 const MAX_SERIES_TITLE_CHARS = 120;
 const MAX_SERIES_TOTAL = 50;
 const MAX_ORIGIN_ASK_CHARS = 300;
+const MAX_HUMAN_QUOTE_CHARS = 2000;
 const KEBAB_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /** Bound on how many `~/.claude/projects/` folders listFeedbackTargets will
@@ -349,6 +362,18 @@ function validateFeedbackInput(input = {}) {
     series = { key, title: stitle, index: sr.index, total: sr.total };
   }
 
+  if (input.autoStart !== undefined && input.autoStart !== null && typeof input.autoStart !== 'boolean') {
+    return bad(400, 'autoStart must be a boolean');
+  }
+  let humanRequestQuote = '';
+  if (input.humanRequestQuote !== undefined && input.humanRequestQuote !== null) {
+    if (typeof input.humanRequestQuote !== 'string') return bad(400, 'humanRequestQuote must be a string');
+    humanRequestQuote = input.humanRequestQuote.trim();
+    if (humanRequestQuote.length > MAX_HUMAN_QUOTE_CHARS) {
+      return bad(400, `humanRequestQuote is ${humanRequestQuote.length} chars; cap is ${MAX_HUMAN_QUOTE_CHARS}`);
+    }
+  }
+
   const referencePaths = Array.isArray(input.referencePaths) ? input.referencePaths : [];
   if (referencePaths.length > MAX_REFERENCES) {
     return bad(400, `too many referencePaths (${referencePaths.length}); cap is ${MAX_REFERENCES}`);
@@ -410,12 +435,52 @@ function validateFeedbackInput(input = {}) {
       acceptanceCriteria: lists.acceptanceCriteria,
       outOfScope: lists.outOfScope,
       series,
+      autoStart: input.autoStart === true,
+      humanRequestQuote,
       referencePaths: referencePaths.map((p) => String(p)),
       fromEpicId: input.fromEpicId ? String(input.fromEpicId) : null,
       agentType: input.agentType ? String(input.agentType) : DEFAULT_FEEDBACK_AGENT,
       agentDescription: input.agentDescription ? String(input.agentDescription) : null,
     },
   };
+}
+
+/** Tell every renderer window to approve-and-start a granted auto-start Epic.
+ *  Electron is required lazily so unit tests never need it. */
+function defaultNotifyRenderer(payload) {
+  try {
+    const { BrowserWindow } = require('electron');
+    for (const win of BrowserWindow.getAllWindows()) {
+      try {
+        win.webContents.send('promptSessions:inbound-auto-approve', payload);
+      } catch { /* window going away */ }
+    }
+  } catch { /* not running under Electron */ }
+}
+
+/**
+ * verifyAutoStart(v, originClaudeSessionId) → { granted: true, quote } | { granted: false, reason }
+ *
+ * Every check is fail-closed. The session identity is ONLY the caller-supplied
+ * originClaudeSessionId (MCP env), never a field an agent can pick freely.
+ */
+function verifyAutoStart(v, originClaudeSessionId) {
+  if (!v.autoStart) return { granted: false, reason: 'autoStart was not requested' };
+  if (!v.humanRequestQuote) return { granted: false, reason: 'no humanRequestQuote was given' };
+  if (!originClaudeSessionId) {
+    return { granted: false, reason: 'no originClaudeSessionId — only interactive chat sessions can auto-start' };
+  }
+  const { findHumanPromptContaining } = require('./humanPromptLedger.cjs');
+  const found = findHumanPromptContaining(originClaudeSessionId, v.humanRequestQuote);
+  if (!found) {
+    return { granted: false, reason: 'humanRequestQuote was not found in a prompt the human typed in this chat session' };
+  }
+  const prompt = found.text.toLowerCase();
+  const base = path.basename(v.toCwd).toLowerCase();
+  if (!(base && prompt.includes(base)) && !prompt.includes(v.toCwd.toLowerCase())) {
+    return { granted: false, reason: `the human's prompt does not name the receiving project (${path.basename(v.toCwd)})` };
+  }
+  return { granted: true, quote: v.humanRequestQuote };
 }
 
 /**
@@ -427,8 +492,8 @@ function validateFeedbackInput(input = {}) {
  * best-effort: a failure there never invalidates a delivered proposal, it just
  * reports `receiptOnOriginEpic: false`.
  *
- * `deps` exists so tests can inject the two side-effecting collaborators
- * without an Electron/main-process boot.
+ * `deps` exists so tests can inject the side-effecting collaborators
+ * (ensureEpic, appendResponseEventIfKnown, notifyRenderer) without an Electron/main-process boot.
  */
 async function openFeedbackSession(input, deps = {}) {
   const mint = deps.ensureEpic || ensureEpic;
@@ -439,9 +504,18 @@ async function openFeedbackSession(input, deps = {}) {
     // boot the main process.
     || ((...args) => require('../../promptSessionEvents.cjs').appendResponseEventIfKnown(...args));
 
+  const notify = deps.notifyRenderer || defaultNotifyRenderer;
+
   const checked = validateFeedbackInput(input);
   if (!checked.ok) return checked;
   const v = checked.value;
+
+  const originClaudeSessionId =
+    typeof input.originClaudeSessionId === 'string' && input.originClaudeSessionId
+      ? input.originClaudeSessionId
+      : null;
+  const auto = verifyAutoStart(v, originClaudeSessionId);
+  const verifiedAt = new Date().toISOString();
 
   // The MCP client can't know its own Epic id — it only inherits the claude
   // session id chatRunner.cjs stamps on the `claude -p` child. Resolve it
@@ -488,6 +562,16 @@ async function openFeedbackSession(input, deps = {}) {
         producer: 'cross-project-feedback',
         fromCwd: v.fromCwd,
         ...(v.fromEpicId ? { fromEpicId: v.fromEpicId } : {}),
+        ...(auto.granted
+          ? {
+              autoApprove: {
+                requestedBy: 'human',
+                quote: auto.quote,
+                verifiedAt,
+                fromClaudeSessionId: originClaudeSessionId,
+              },
+            }
+          : {}),
         proposal: {
           motivation: v.motivation,
           originAsk,
@@ -511,7 +595,15 @@ async function openFeedbackSession(input, deps = {}) {
     tag: v.tag,
     title: v.title,
     series: v.series,
+    autoStartGranted: auto.granted,
+    autoStartReason: auto.granted ? 'verified human request' : auto.reason,
   });
+
+  if (auto.granted) {
+    try {
+      notify({ cwd: v.toCwd, epicId: minted.epicId });
+    } catch { /* the Epic is delivered either way; a human can still approve it */ }
+  }
 
   let receiptOnOriginEpic = false;
   if (v.fromEpicId) {
@@ -522,7 +614,9 @@ async function openFeedbackSession(input, deps = {}) {
         `Feedback delivered to ${v.toCwd} as a proposed session (${minted.epicId}): "${v.title}"`
         + (v.series ? ` [${seriesLine(v.series)}]` : '')
         + '. '
-        + 'It will not run until a human in that project approves it.',
+        + (auto.granted
+          ? 'It was auto-approved at the human\'s explicit request and is starting in that project.'
+          : 'It will not run until a human in that project approves it.'),
       );
     } catch {
       receiptOnOriginEpic = false;
@@ -535,14 +629,18 @@ async function openFeedbackSession(input, deps = {}) {
     toCwd: v.toCwd,
     fromCwd: v.fromCwd,
     tag: v.tag,
-    status: 'proposed',
+    status: auto.granted ? 'auto-approved' : 'proposed',
+    ...(v.autoStart ? { autoStart: auto.granted ? { granted: true } : { granted: false, reason: auto.reason } } : {}),
     receiptOnOriginEpic,
     // Say plainly what did NOT happen, same posture as create-prd's
     // `enqueued: false` — never let a caller report this as "work started".
-    note:
-      'Delivered as a PROPOSED session in the receiving project\'s Sessions queue. Nothing runs and no '
-      + 'tokens are spent until a human in that project presses Approve & start. There is no callback: '
-      + 'if you need an answer, ask the human to follow up.',
+    note: auto.granted
+      ? 'Auto-approved at the human\'s explicit request (verified against their chat prompt): the session '
+        + 'is starting in the receiving project. There is no callback: if you need an answer, ask the human '
+        + 'to follow up.'
+      : 'Delivered as a PROPOSED session in the receiving project\'s Sessions queue. Nothing runs and no '
+        + 'tokens are spent until a human in that project presses Approve & start. There is no callback: '
+        + 'if you need an answer, ask the human to follow up.',
     goalText,
   };
 }

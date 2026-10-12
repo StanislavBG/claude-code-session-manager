@@ -302,7 +302,9 @@ export function SettingsRemote() {
           <div className="text-[13px] text-fg-dim leading-snug">
             {active
               ? 'A web session can send commands to this machine. Revoke below if unexpected.'
-              : enabled
+              : enabled && status?.linkState === 'repair-needed'
+                ? 'The relay no longer recognises this device. Re-pair it with a new code to reconnect.'
+                : enabled
                 ? 'The relay is on but no device is connected. Pair a device to begin.'
                 : 'The relay connection is closed — no remote commands are accepted. Enable it below only when you need it.'}
           </div>

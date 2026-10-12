@@ -1651,6 +1651,8 @@ export interface WebRemoteStatus {
   enabled: boolean;
   remoteControlEnabled: boolean;
   connected: boolean;
+  /** 'repair-needed' once the relay rejected the device token; the device must be re-paired. */
+  linkState?: 'ok' | 'repair-needed';
   e2eActive: boolean;
   /** True once the user has confirmed the SAS on the desktop. */
   e2eAuthenticated: boolean;

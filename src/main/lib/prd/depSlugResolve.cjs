@@ -31,6 +31,21 @@ function resolveDepSlug(depSlug, candidateSlugs) {
 }
 
 /**
+ * Is this dep ROW satisfied? `completed`, or a `skipped` row stamped
+ * `needsReviewAutoResolvedSkip` — the bounded needs_review auto-resolve's
+ * terminal decision (scheduler.cjs applyNeedsReviewAutoResolve), deliberately
+ * not a permanent block. Shared by schedulerBatch.findBlockingDep (dispatch)
+ * and runVerify.checkDeps (post-run): when they disagreed, the picker fired a
+ * dependent of an auto-skipped row and the verifier downgraded every finished
+ * run back to pending on "is skipped (need completed)" — an unbounded billed
+ * re-run loop (Bilko-Launch-Kit validator, ~20 runs, 2026-10-11).
+ */
+function isSatisfiedDepRow(row) {
+  return row?.status === 'completed'
+    || (row?.status === 'skipped' && row.needsReviewAutoResolvedSkip === true);
+}
+
+/**
  * Levenshtein edit distance. O(n*m) in the two strings' lengths — fine here
  * since it only ever runs over short slug strings (<= 60 chars, PRD_CREATE_SLUG_RE's
  * cap) at PRD-create time, never in a hot/per-tick path.
@@ -69,4 +84,4 @@ function findNearMatches(depSlug, candidateSlugs, limit = 3) {
     .map((entry) => entry.slug);
 }
 
-module.exports = { bareSlug, resolveDepSlug, findNearMatches };
+module.exports = { bareSlug, resolveDepSlug, findNearMatches, isSatisfiedDepRow };

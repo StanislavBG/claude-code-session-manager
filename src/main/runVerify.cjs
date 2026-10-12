@@ -41,6 +41,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { parsePrdFile } = require('./lib/prd/prdFrontmatter.cjs');
+const { isSatisfiedDepRow } = require('./lib/prd/depSlugResolve.cjs');
 
 const VERDICTS_SCHEMA_VERSION = 1;
 
@@ -468,7 +469,9 @@ function checkDeps(queueEntry, allJobs, prdBody) {
     // bare dep name that never matched any row, and ended up on disk with no
     // queue row at all.
     if (deps.length === 0) continue;
-    const unfinished = deps.find((d) => d.status !== 'completed');
+    // Same predicate as findBlockingDep — an auto-resolve skip the picker
+    // dispatched past must not be re-judged unmet here (same infinite re-run).
+    const unfinished = deps.find((d) => !isSatisfiedDepRow(d));
     if (unfinished) {
       return { ok: false, reason: `dependsOn: "${depSlug}" is ${unfinished.status} (need completed)` };
     }
@@ -488,7 +491,7 @@ function checkDeps(queueEntry, allJobs, prdBody) {
       if (matches.length === 0) continue; // unresolvable fragment — skip
 
       for (const dep of matches) {
-        if (dep.status !== 'completed') {
+        if (!isSatisfiedDepRow(dep)) {
           return {
             ok: false,
             reason: `PRD body dep "${frag}" → "${dep.slug}" is ${dep.status} (need completed)`,

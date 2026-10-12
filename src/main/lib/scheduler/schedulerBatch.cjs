@@ -15,7 +15,7 @@
 const path = require('node:path');
 const os = require('node:os');
 const { projectJobCap, quietMachineWaitMs } = require('./schedulerConfig.cjs');
-const { bareSlug } = require('../prd/depSlugResolve.cjs');
+const { bareSlug, isSatisfiedDepRow } = require('../prd/depSlugResolve.cjs');
 
 const DEFAULT_PROJECT_CWD = path.join(os.homedir(), 'Projects', 'session-manager');
 
@@ -127,20 +127,16 @@ function findUnresolvableDepRoots(projectJobs, satisfiedSlugs = new Set()) {
 
 function findBlockingDep(job, projectJobs, satisfiedSlugs = new Set()) {
   const { rowsForDep, isKnownSatisfied } = makeDepResolver(projectJobs, satisfiedSlugs);
-  // A dep row is blocking unless it's 'completed', OR it's a 'skipped' row
-  // stamped `needsReviewAutoResolvedSkip` — the bounded needs_review
-  // auto-resolve terminal decision (scheduler.cjs's
-  // applyNeedsReviewAutoResolve). That skip is deliberately NOT the
+  // A dep row is blocking unless isSatisfiedDepRow — 'completed', or a
+  // `needsReviewAutoResolvedSkip` skip. That skip is deliberately NOT the
   // "PRD source vanished, a human must author a fresh PRD" skip the
-  // heldBySkippedDep messaging above describes — it already got every
-  // bounded chance to resolve itself, so treating it as a permanent
-  // dependsOn block would defeat the whole point of that auto-resolve pass
-  // (a chain that never drains without an operator).
-  const isSatisfiedRow = (dep) => dep.status === 'completed'
-    || (dep.status === 'skipped' && dep.needsReviewAutoResolvedSkip === true);
+  // heldBySkippedDep messaging describes — it already got every bounded
+  // chance to resolve itself, so treating it as a permanent dependsOn block
+  // would defeat the auto-resolve pass. runVerify.checkDeps MUST use the same
+  // predicate, or every run of the dependent is downgraded and re-dispatched.
   return (job.dependsOn ?? []).find((slug) => {
     const rows = rowsForDep(slug);
-    if (rows.length > 0) return rows.some((dep) => !isSatisfiedRow(dep));
+    if (rows.length > 0) return rows.some((dep) => !isSatisfiedDepRow(dep));
     return !isKnownSatisfied(slug);
   });
 }

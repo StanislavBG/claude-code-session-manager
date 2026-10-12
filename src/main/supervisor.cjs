@@ -205,6 +205,41 @@ Decision rules:
 - "stuck"/kill-agent only if the agent itself is wedged (no child processes, no recent log events, > 60 min stale). Set targetPid to the claude root pid.`;
 }
 
+/**
+ * Parse `claude -p --output-format json` stdout from a probe.
+ * @param {string} stdout
+ * @returns {{ verdictObj: any, costUsd: number|null, errorSubtype: string|null }}
+ */
+function parseProbeOutput(stdout) {
+  let costUsd = null;
+  let verdictObj = null;
+  let errorSubtype = null;
+
+  // --output-format json emits a single JSON result object.
+  // The `result` field contains the assistant's raw text response.
+  for (const line of String(stdout).split('\n').reverse()) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    try {
+      const obj = JSON.parse(trimmed);
+      if (!obj || typeof obj !== 'object') continue;
+      if (typeof obj.total_cost_usd === 'number') costUsd = obj.total_cost_usd;
+      if (obj.is_error === true || (typeof obj.subtype === 'string' && obj.subtype !== 'success')) {
+        errorSubtype = typeof obj.subtype === 'string' && obj.subtype ? obj.subtype : 'error';
+      }
+      // Extract verdict from the result text field (assistant's response).
+      if (obj.result && typeof obj.result === 'string') {
+        const m = obj.result.match(/\{[^{}]+\}/);
+        if (m) {
+          try { verdictObj = JSON.parse(m[0]); } catch { /* */ }
+        }
+      }
+    } catch { /* not JSON */ }
+    if (verdictObj) break;
+  }
+  return { verdictObj, costUsd, errorSubtype };
+}
+
 async function runProbe(claudeBin, prompt) {
   await ensureCliCapsProbed();
   return new Promise((resolve) => {
@@ -213,10 +248,10 @@ async function runProbe(claudeBin, prompt) {
       const target = claudeSpawnTarget('aux', 'supervisor', claudeBin);
       child = spawn(target.command, [
         '-p', prompt,
-        '--model', 'claude-opus-4-7',
+        '--model', 'claude-haiku-5-5',
         '--no-session-persistence',
         '--output-format', 'json',
-        '--max-budget-usd', '0.10',
+        '--max-budget-usd', '0.50',
         '--dangerously-skip-permissions',
         ...headlessPermissionArgs(),
         '--allowedTools', 'Bash',
@@ -254,26 +289,13 @@ async function runProbe(claudeBin, prompt) {
     child.on('exit', () => {
       clearTimers();
       const stdout = Buffer.concat(stdoutChunks).toString('utf8');
-      let costUsd = null;
-      let verdictObj = null;
+      const { verdictObj, costUsd, errorSubtype } = parseProbeOutput(stdout);
 
-      // --output-format json emits a single JSON result object.
-      // The `result` field contains the assistant's raw text response.
-      for (const line of stdout.split('\n').reverse()) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        try {
-          const obj = JSON.parse(trimmed);
-          if (typeof obj.total_cost_usd === 'number') costUsd = obj.total_cost_usd;
-          // Extract verdict from the result text field (assistant's response).
-          if (obj.result && typeof obj.result === 'string') {
-            const m = obj.result.match(/\{[^{}]+\}/);
-            if (m) {
-              try { verdictObj = JSON.parse(m[0]); } catch { /* */ }
-            }
-          }
-        } catch { /* not JSON */ }
-        if (verdictObj) break;
+      if ((!verdictObj || !verdictObj.verdict) && errorSubtype) {
+        // Budget cap / CLI error exit: record it distinctly, never as a real verdict.
+        console.warn('[supervisor] probe error exit (treating as ok):', errorSubtype);
+        resolve({ verdict: 'ok', action: 'none', targetPid: null, reason: `probe_error:${errorSubtype}`, costUsd });
+        return;
       }
 
       if (!verdictObj || !verdictObj.verdict) {
@@ -506,4 +528,5 @@ module.exports = {
   supervisorTick,
   applyAction,
   registerHandlers,
+  parseProbeOutput,
 };

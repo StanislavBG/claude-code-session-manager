@@ -86,7 +86,6 @@ test('a futile refresh returns an auth verdict without spawning the CLI fallback
   // ...and the storm's spawn/oauth triple never runs.
   expect(events).not.toContain('cli_fallback_ok');
   expect(events).not.toContain('cli_fallback_failed');
-  expect(events).not.toContain('oauth_refresh_unsupported');
 });
 
 test('repeated polls in the cooldown window do NOT re-log — the every-15s storm is suppressed', async () => {

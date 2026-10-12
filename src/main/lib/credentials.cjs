@@ -6,7 +6,6 @@ const path = require('node:path');
 const os = require('node:os');
 const { spawn, execFileSync } = require('node:child_process');
 const { cleanChildEnv, pathWithUserBins } = require('./process/cleanEnv.cjs');
-const atomicFs = require('./util/atomicFs.cjs');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./claude/claudeBin.cjs');
 
 const CREDS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
@@ -47,21 +46,8 @@ function keychainAccount() {
   return os.userInfo().username;
 }
 
-/** Write the credential JSON back into the Keychain (-U upserts in place). */
-function writeKeychainRaw(value) {
-  execFileSync(
-    'security',
-    ['add-generic-password', '-U', '-s', KEYCHAIN_SERVICE, '-a', keychainAccount(), '-w', value],
-    { timeout: 10_000, stdio: 'ignore' },
-  );
-}
 const REFRESH_LOG_PATH = path.join(os.homedir(), '.claude', 'session-manager', 'credential-refresh.log');
 const REFRESH_LOG_MAX_BYTES = 100 * 1024;
-
-// Standard OAuth 2.0 refresh grant — endpoint discovered from Claude Code CLI behavior.
-// Returns { kind: 'unsupported' } if the endpoint returns 404 or cannot be reached,
-// allowing the caller to fall back gracefully.
-const OAUTH_TOKEN_URL = 'https://claude.ai/api/auth/oauth/token';
 
 /** Parse a raw credential JSON blob (from file or Keychain) into a result. */
 function parseCredsRaw(raw, source) {
@@ -125,14 +111,13 @@ function isExpiringSoon(creds, withinMs = 5 * 60_000) {
  * isRefreshFutile(creds) → boolean
  *
  * True when the token is already expired AND there is no refresh token to
- * present. In that state every refresh avenue is a dead end: tryOAuthRefresh
- * short-circuits to 'unsupported' (it needs `creds.refreshToken`), and the
+ * present. In that state the refresh avenue is a dead end: the
  * `claude --version` CLI fallback performs its own silent OAuth refresh from
  * that SAME missing refresh token, so it cannot help either. The only recovery
  * is an out-of-band `claude login` — which refreshIfNeeded picks up on its very
  * next call via the isExpiringSoon early-return, since fresh creds never reach
  * this path. Left ungated, this state made pollLoop spawn a `claude --version`
- * process and write the oauth_refresh_unsupported → cli_fallback_ok →
+ * process and write the cli_fallback_ok →
  * auth_failed_expired triple on EVERY 15 s poll, forever (observed 2026-09-23:
  * expiredAtMs 1775277875159, identical triple every ~15 min across the log).
  */
@@ -153,17 +138,6 @@ function __resetFutileRefreshThrottle() {
   lastFutileRefreshLoggedAt = null;
 }
 
-async function writeCredentials(rawData, freshOauth, source = 'file') {
-  const next = { ...rawData, claudeAiOauth: { ...rawData.claudeAiOauth, ...freshOauth } };
-  if (source === 'keychain') {
-    // macOS: upsert back into the Keychain. Sync + may throw — caller catches
-    // and falls back to the `claude --version` CLI refresh path.
-    writeKeychainRaw(JSON.stringify(next));
-    return;
-  }
-  await atomicFs.writeJsonAtomic(CREDS_PATH, next, { mode: 0o600, newline: false });
-}
-
 function appendRefreshLog(entry) {
   try {
     const line = JSON.stringify({ ...entry, ts: new Date().toISOString() }) + '\n';
@@ -179,36 +153,7 @@ function appendRefreshLog(entry) {
   } catch { /* non-fatal; telemetry must not break the main flow */ }
 }
 
-// Stretch: attempt standard OAuth 2.0 refresh token grant.
-async function tryOAuthRefresh(creds) {
-  if (!creds.refreshToken) return { kind: 'unsupported', message: 'no refresh token in credentials' };
-  try {
-    const r = await fetch(OAUTH_TOKEN_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: creds.refreshToken }),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (r.status === 404) return { kind: 'unsupported', message: 'refresh endpoint not found (HTTP 404)' };
-    if (r.status === 401 || r.status === 403) return { kind: 'auth', message: `refresh rejected: HTTP ${r.status}` };
-    if (!r.ok) return { kind: 'transient', message: `HTTP ${r.status}` };
-    const j = await r.json();
-    if (!j.access_token) return { kind: 'auth', message: 'no access_token in refresh response' };
-    return {
-      kind: 'ok',
-      fresh: {
-        accessToken: j.access_token,
-        refreshToken: j.refresh_token ?? creds.refreshToken,
-        expiresAt: j.expires_at ?? (Date.now() + (j.expires_in ?? 3600) * 1000),
-      },
-    };
-  } catch (e) {
-    if (e?.name === 'TimeoutError') return { kind: 'transient', message: 'refresh request timed out' };
-    return { kind: 'unsupported', message: `refresh error: ${e?.message}` };
-  }
-}
-
-// Stretch fallback: spawning `claude --version` triggers silent token refresh in the CLI binary.
+// Sole refresh avenue: spawning `claude --version` triggers silent token refresh in the CLI binary.
 function tryCliFallback() {
   return new Promise((resolve) => {
     let settled = false;
@@ -244,7 +189,7 @@ function tryCliFallback() {
 async function refreshIfNeeded(forceRefresh = false) {
   const cr = await readCredentials();
   if (cr.kind !== 'ok') return cr;
-  const { creds, raw, source } = cr;
+  const { creds } = cr;
 
   if (!forceRefresh && !isExpiringSoon(creds)) {
     return { kind: 'ok', creds };
@@ -253,12 +198,12 @@ async function refreshIfNeeded(forceRefresh = false) {
   const alreadyExpired = isExpired(creds);
 
   // Futile-refresh short-circuit: token already expired AND no refresh token
-  // to present. Every downstream avenue (OAuth grant, `claude --version` CLI
-  // fallback) is a guaranteed dead end from the same missing token, so running
-  // them on every 15 s poll only spawns a doomed child process and re-logs the
+  // to present. The `claude --version` CLI fallback is a guaranteed dead end
+  // from the same missing token, so running it on every 15 s poll only spawns
+  // a doomed child process and re-logs the
   // same triple forever (2026-09-23 storm). Re-read once — cheap, and the ONE
   // real recovery (`claude login`) lands here — then, if still futile, return
-  // the auth verdict WITHOUT the OAuth call or the CLI-fallback spawn, logging
+  // the auth verdict WITHOUT the CLI-fallback spawn, logging
   // at most once per FUTILE_REFRESH_COOLDOWN_MS instead of every poll.
   if (isRefreshFutile(creds)) {
     const recheckCr = await readCredentials();
@@ -279,38 +224,19 @@ async function refreshIfNeeded(forceRefresh = false) {
     };
   }
 
-  // Stretch: try OAuth refresh endpoint first.
-  const oauthResult = await tryOAuthRefresh(creds);
-  appendRefreshLog({ event: `oauth_refresh_${oauthResult.kind}`, message: oauthResult.message ?? null });
-
-  if (oauthResult.kind === 'ok') {
-    try {
-      await writeCredentials(raw, oauthResult.fresh, source);
-      const freshCr = await readCredentials();
-      if (freshCr.kind === 'ok') {
-        appendRefreshLog({ event: 'oauth_refresh_written_ok' });
-        return { kind: 'ok', creds: freshCr.creds };
-      }
-    } catch (e) {
-      appendRefreshLog({ event: 'oauth_refresh_write_failed', error: e?.message });
-    }
-  }
-
-  // Stretch: if OAuth didn't explicitly reject the token, try `claude --version` fallback.
-  if (oauthResult.kind !== 'auth') {
-    const cliResult = await tryCliFallback();
-    appendRefreshLog({ event: cliResult.ok ? 'cli_fallback_ok' : 'cli_fallback_failed', reason: cliResult.reason ?? null });
-    if (cliResult.ok) {
-      const freshCr = await readCredentials();
-      if (freshCr.kind === 'ok' && !isExpired(freshCr.creds)) {
-        return { kind: 'ok', creds: freshCr.creds };
-      }
+  // The CLI owns the real refresh contract: `claude --version` refreshes silently.
+  const cliResult = await tryCliFallback();
+  appendRefreshLog({ event: cliResult.ok ? 'cli_fallback_ok' : 'cli_fallback_failed', reason: cliResult.reason ?? null });
+  if (cliResult.ok) {
+    const freshCr = await readCredentials();
+    if (freshCr.kind === 'ok' && !isExpired(freshCr.creds)) {
+      return { kind: 'ok', creds: freshCr.creds };
     }
   }
 
   if (alreadyExpired) {
     // Re-read from disk in case credentials were externally refreshed (e.g. via
-    // `claude login`) between our initial read and the failed OAuth attempt.
+    // `claude login`) between our initial read and the failed CLI fallback.
     const recheckCr = await readCredentials();
     if (recheckCr.kind === 'ok' && !isExpired(recheckCr.creds)) {
       appendRefreshLog({ event: 'externally_refreshed_ok', recheckExpiresAt: recheckCr.creds.expiresAt ?? null });

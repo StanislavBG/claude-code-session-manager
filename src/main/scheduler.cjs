@@ -66,6 +66,7 @@ const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/cl
 ensureCliCapsProbed().catch(() => {});
 const launchFailure = require('./lib/scheduler/launchFailure.cjs');
 const { finalizeReasonFor } = require('./lib/scheduler/finalizeReason.cjs');
+const { shouldRunFlatSweep, FLAT_SWEEP_INTERVAL_MS } = require('./lib/scheduler/flatSweepThrottle.cjs');
 const { appendError } = require('./lib/telemetry/opsErrorLog.cjs');
 const { readTail } = require('./lib/util/fileTail.cjs');
 const {
@@ -1390,6 +1391,9 @@ function reconcileSourcePromptId(job, parsedSourcePromptId) {
 // process rather than one per 60s reconcile tick.
 const warnedUnregisteredEpics = new Set();
 
+/** @type {number | null} last flat-sweep start (ms); null until first pass. */
+let lastFlatSweepMs = null;
+
 async function reconcile(state) {
   // Defence in depth — tickQueue already gates on this, but reconcile is the
   // function that would do the damage (every unmatched PRD .md becomes a
@@ -1415,8 +1419,17 @@ async function reconcile(state) {
   // instead of ever reaching the onDisk scan below.
   let phaseStartMs = Date.now();
   const skipCwds = quarantinedCwdSet(state);
-  await prdPaths.consolidateAllFlatPrds(allProjectCwds(), skipCwds);
-  phaseMs.flatPrdSweep = Date.now() - phaseStartMs;
+  // Throttled: the flat layout is retired, and the sweep (plus the ~270 ms
+  // allProjectCwds() scan) cost ~1 s per pass. A PRD dropped into a flat dir
+  // is still consolidated within one FLAT_SWEEP_INTERVAL_MS; the first pass
+  // after boot always runs.
+  if (shouldRunFlatSweep(phaseStartMs, lastFlatSweepMs, FLAT_SWEEP_INTERVAL_MS)) {
+    lastFlatSweepMs = phaseStartMs;
+    await prdPaths.consolidateAllFlatPrds(allProjectCwds(), skipCwds);
+    phaseMs.flatPrdSweep = Date.now() - phaseStartMs;
+  } else {
+    phaseMs.flatPrdSweep = 0;
+  }
 
   phaseStartMs = Date.now();
   const { files, dirCount } = await listPrdFiles(skipCwds);

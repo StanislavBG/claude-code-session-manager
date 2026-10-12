@@ -11,7 +11,7 @@ const { monitorEventLoopDelay } = require('node:perf_hooks');
 
 const LOOP_DELAY_RESOLUTION_MS = 20;
 // A single beat whose worst loop delay exceeds this is a visible main-thread stall.
-const LOOP_STALL_WARN_MS = 250;
+const LOOP_STALL_WARN_MS = 1000;
 
 const NS_PER_MS = 1e6;
 const toMs = (ns) => Math.round(ns / NS_PER_MS * 10) / 10;

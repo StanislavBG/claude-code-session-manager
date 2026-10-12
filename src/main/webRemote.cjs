@@ -83,6 +83,7 @@ let _pongTimer = null;
 let _missedPongs = 0;
 let _configCache = null;
 let _configCacheAt = 0;
+let _repairNeeded = false; // relay rejected the device token (invalid_token / 401): terminal until re-pair
 let _destroyed = false; // set at app shutdown to stop reconnect loops
 
 // E2E session state — reset on each new WS connection.
@@ -274,6 +275,7 @@ function computeStatus(cfg) {
     enabled: cfg.remoteEnabled,
     remoteControlEnabled: cfg.remoteControlEnabled ?? false,
     connected,
+    linkState: _repairNeeded ? 'repair-needed' : 'ok',
     e2eActive: connected && _clients.values().some((r) => r.e2e.sessionKey !== null),
     e2eAuthenticated: connected && authed !== null,
     e2eState: connected ? e2eState : 'idle',
@@ -389,9 +391,18 @@ async function connect() {
       scope: 'webRemote', level: 'warn',
       message: 'device ticket request failed', meta: { error: e?.message },
     });
+    // invalid_token / 401 is final (device unpaired server-side): retrying only
+    // spams the relay. Park in repair-needed until a new pair stores a fresh token.
+    if (e?.message === 'invalid_token' || e?.message === 'HTTP 401') {
+      cancelReconnect();
+      _repairNeeded = true;
+      broadcastStatus();
+      return;
+    }
     scheduleReconnect();
     return;
   }
+  _repairNeeded = false;
 
   // Step 2: open WSS connection with the ticket.
   let ws;
@@ -1278,6 +1289,7 @@ async function pair(otp) {
   }];
 
   await saveConfig({ ...cfg, devices });
+  _repairNeeded = false;
 
   if (cfg.remoteEnabled) {
     connect().catch(() => {});
@@ -1480,6 +1492,9 @@ module.exports = {
     getDispatchMap,
     buildRemoteSessionList,
     setWs: (ws) => { _ws = ws; },
+    connect,
+    hasReconnectTimer: () => _reconnectTimer !== null,
+    cancelReconnect,
     invalidateConfigCache,
     setE2eAuthenticated: (key, clientKey = LEGACY_CLIENT_KEY) => {
       _clients.getOrCreate(clientKey).e2e = makeState('authenticated', key, null);

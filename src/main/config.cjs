@@ -392,8 +392,21 @@ function watchKeyOf(key, depth) {
  */
 function watch(paths, senderId, opts) {
   const depth = opts?.depth;
+  const watched = [];
+  const rejected = [];
   for (const rawPath of paths) {
-    validatePath(expandHome(rawPath)); // security check — throws if out of bounds
+    try {
+      validatePath(expandHome(rawPath)); // security check — throws if out of bounds
+    } catch (err) {
+      // Per-path: one bad path must not abort the rest of the batch.
+      rejected.push(rawPath);
+      if (!warnedRejectedPaths.has(rawPath)) {
+        warnedRejectedPaths.add(rawPath);
+        logs.writeLine({ level: 'warn', scope: 'config', message: 'config:watch path reject', meta: { path: rawPath, error: err?.message } });
+      }
+      continue;
+    }
+    watched.push(rawPath);
     const key = normalizePathKey(rawPath);
     const mapKey = watchKeyOf(key, depth);
     if (senderId != null) {
@@ -430,7 +443,11 @@ function watch(paths, senderId, opts) {
     });
     watchers.set(mapKey, { watcher: w, refCount: 1 });
   }
+  return { watched, rejected };
 }
+
+// Distinct rejected watch paths already warned about (once per process).
+const warnedRejectedPaths = new Set();
 
 function unwatch(paths, senderId, opts) {
   for (const rawPath of paths) {

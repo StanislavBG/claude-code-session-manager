@@ -1481,3 +1481,37 @@ describe('chat.ts send() refuses while an Epic Terminal-mode PTY is attached (PR
     await vi.waitFor(() => expect(run).toHaveBeenCalled())
   })
 })
+
+describe('chat.ts prompt origin threading', () => {
+  it("passes origin 'human' for a plain send", async () => {
+    const { run } = installWindowApiMock({ transcriptExists: true })
+    useChat.getState().send({ tabId: 'o1', sessionId: 's', cwd: '/proj', prompt: 'hi' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalled())
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ origin: 'human' }))
+  })
+
+  it("passes origin 'external' for an idle external send", async () => {
+    const { run } = installWindowApiMock({ transcriptExists: true })
+    useChat.getState().send({ tabId: 'o2', sessionId: 's', cwd: '/proj', prompt: 'hi', external: true })
+    await vi.waitFor(() => expect(run).toHaveBeenCalled())
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ origin: 'external' }))
+  })
+
+  it("passes origin 'external' for a queued external send", async () => {
+    const { run, getCompleteHandler } = installWindowApiMock({ transcriptExists: true })
+    useChat.getState().send({ tabId: 'o3', sessionId: 's', cwd: '/proj', prompt: 'first' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(1))
+    useChat.getState().send({ tabId: 'o3', sessionId: 's', cwd: '/proj', prompt: 'second', external: true })
+    getCompleteHandler()!({ tabId: 'o3', sessionId: 's', finalMessage: 'done' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2))
+    expect(run).toHaveBeenNthCalledWith(1, expect.objectContaining({ origin: 'human' }))
+    expect(run).toHaveBeenNthCalledWith(2, expect.objectContaining({ prompt: 'second', origin: 'external' }))
+  })
+
+  it("passes an explicit 'inbound-proposal' origin", async () => {
+    const { run } = installWindowApiMock({ transcriptExists: true })
+    useChat.getState().send({ tabId: 'o4', sessionId: 's', cwd: '/proj', prompt: 'hi', origin: 'inbound-proposal' })
+    await vi.waitFor(() => expect(run).toHaveBeenCalled())
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ origin: 'inbound-proposal' }))
+  })
+})

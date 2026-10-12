@@ -1495,6 +1495,8 @@ export interface ChatRunPayload {
   /** Originating PromptTicket.id (PRD 748) when dequeued from a tab's
    *  prompt queue — absent for a fresh manual send. */
   promptId?: string;
+  /** Who wrote the prompt: a local human, an injected external source, or an Epic proposal from another project. */
+  origin?: 'human' | 'external' | 'inbound-proposal';
 }
 
 export interface ChatCreatePrdPayload {

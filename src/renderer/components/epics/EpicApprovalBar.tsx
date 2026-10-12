@@ -40,6 +40,7 @@ export function EpicApprovalBar({ epic }: { epic: PromptSession }) {
         sessionId: approved.claudeSessionId,
         cwd: approved.cwd,
         prompt: approved.openingPrompt || approved.goalText,
+        origin: inbound ? 'inbound-proposal' : 'human',
       })
     } finally {
       setBusy(false)

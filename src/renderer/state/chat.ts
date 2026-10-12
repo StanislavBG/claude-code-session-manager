@@ -87,6 +87,8 @@ export interface ChatTurn {
  * client-side (chat.ts) and dispatched one at a time through the same
  * chatRunner FIFO lane a fresh manual send uses — never a second queue.
  */
+export type ChatPromptOrigin = 'human' | 'external' | 'inbound-proposal'
+
 export interface PromptTicket {
   id: string
   tabId: string
@@ -132,6 +134,8 @@ export interface PromptTicket {
    * dispatchToPrd()/chat:create-prd.
    */
   external?: boolean
+  /** Resolved prompt origin forwarded to chat:run (explicit ?? external ? 'external' : 'human'). */
+  origin?: ChatPromptOrigin
 }
 
 /** Minimal job-status shape a chain-resolution check needs — kept structural
@@ -213,6 +217,8 @@ interface ChatState {
     chainRootId?: string
     /** Set when this prompt originates from onExternalSend, not a human composer submit. */
     external?: boolean
+    /** Explicit origin; defaults to 'external' when `external` is set, else 'human'. */
+    origin?: ChatPromptOrigin
   }) => void
   /** Reset a tab's chat thread: clears turns and run state (paired with sessions.newSession). */
   resetThread: (tabId: string) => void
@@ -323,7 +329,8 @@ export const useChat = create<ChatState>((set, get) => ({
       window.api?.logs?.write('chat', 'warn', `exchange hydration failed for tab ${tabId}: ${msg}`)
     }
   },
-  send: ({ tabId, sessionId, cwd, prompt, tag, chainRootId, external }) => {
+  send: ({ tabId, sessionId, cwd, prompt, tag, chainRootId, external, origin }) => {
+    const resolvedOrigin: ChatPromptOrigin = origin ?? (external ? 'external' : 'human')
     const trimmed = prompt.trim()
     if (!trimmed) return
     // PRD 831: Chat and Terminal are two mutually-exclusive views over the
@@ -349,6 +356,7 @@ export const useChat = create<ChatState>((set, get) => ({
         tag,
         chainRootId,
         external,
+        origin: resolvedOrigin,
       }
       set({
         chats: {
@@ -364,7 +372,7 @@ export const useChat = create<ChatState>((set, get) => ({
     // dispatching so the queue panel/composer stop treating the tab as
     // stalled once the reply is in flight.
     clearNeedsInput(tabId)
-    dispatchSend({ tabId, sessionId, cwd, text: trimmed, tag, chainRootId })
+    dispatchSend({ tabId, sessionId, cwd, text: trimmed, tag, chainRootId, origin: resolvedOrigin })
   },
   resetThread: (tabId) => {
     // A reset pairs with a NEW session (sessions.newSession) — its transcript
@@ -498,8 +506,9 @@ function dispatchSend(args: {
   promptId?: string
   tag?: TicketTag
   chainRootId?: string
+  origin?: ChatPromptOrigin
 }): void {
-  const { tabId, sessionId, cwd, text, promptId, tag, chainRootId } = args
+  const { tabId, sessionId, cwd, text, promptId, tag, chainRootId, origin } = args
   const cur = useChat.getState().chats[tabId] ?? EMPTY
   const userTurn: ChatTurn = { id: turnId(), role: 'user', text, at: Date.now() }
   capturePromptSessionTurn(tabId, 'user', text)
@@ -531,7 +540,7 @@ function dispatchSend(args: {
       window.api?.logs?.write('chat', 'warn', `transcript-exists check failed for tab ${tabId}: ${msg}`)
       return cur.started
     })
-    .then((resume) => window.api.chat.run({ tabId, sessionId, prompt: text, cwd, resume, promptId }))
+    .then((resume) => window.api.chat.run({ tabId, sessionId, prompt: text, cwd, resume, promptId, origin }))
     .catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err)
       applyError(tabId, sessionId, msg)
@@ -625,6 +634,7 @@ function dispatchQueuedInline(tabId: string, ticket: PromptTicket): void {
     promptId: running.id,
     tag: running.tag,
     chainRootId: running.chainRootId,
+    origin: running.origin ?? (running.external ? 'external' : 'human'),
   })
 }
 

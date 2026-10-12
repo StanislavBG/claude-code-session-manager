@@ -647,18 +647,20 @@ function describeFailureStatus(status) {
   return status === 0 ? 'network error' : `HTTP ${status}`;
 }
 
-function applyFailureBackoff(status) {
+function applyFailureBackoff(status, channel) {
   if (status === 429 || status === 0 || status >= 500) {
     S.consecutiveFailures += 1;
     const ms = Math.min(BACKOFF_BASE_MS * (2 ** (S.consecutiveFailures - 1)), BACKOFF_MAX_MS);
     S.backoffUntil = Date.now() + ms;
     S.lastError = { status, message: describeFailureStatus(status), at: Date.now() };
+    logWarn('telemetry send failed', { channel, status, consecutiveFailures: S.consecutiveFailures, backoffMs: ms });
     return;
   }
   if (status >= 400 && status < 500) {
     // Malformed-contract circuit breaker (includes 401) — not retried.
     S.disabledForProcess = true;
     S.lastError = { status, message: describeFailureStatus(status), at: Date.now() };
+    logWarn('telemetry disabled for process', { status });
   }
 }
 
@@ -705,7 +707,7 @@ async function flushImpl(reason) {
             result.sent.push(r.recordId);
           } else {
             result.failed.push(r.recordId);
-            applyFailureBackoff(res.status);
+            applyFailureBackoff(res.status, channel);
             sawFailure = true;
             break;
           }
@@ -726,7 +728,7 @@ async function flushImpl(reason) {
           }
         } else {
           for (const r of batch) result.failed.push(r.recordId);
-          applyFailureBackoff(res.status);
+          applyFailureBackoff(res.status, channel);
           sawFailure = true;
           break;
         }
@@ -739,7 +741,9 @@ async function flushImpl(reason) {
     if (safeReason === 'daily' && result.failed.length === 0) {
       S.settings = await telemetrySettings.save({ lastDailyFlushAt: new Date().toISOString() });
     }
-  } catch { /* fail-inert */ }
+  } catch (e) {
+    logWarn('telemetry flush threw', { error: e && e.message ? e.message : String(e) });
+  }
   S.lastFlushAt = Date.now();
   S.lastFlushReason = safeReason;
   return result;

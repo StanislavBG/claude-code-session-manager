@@ -1053,3 +1053,35 @@ test('clearQueue() never touches telemetry-sent.json', async () => {
   expect(sentAfter).toBe(sentBefore);
   client.shutdown();
 });
+
+test('503 flush logs a warn line via logger and does not enqueue anything', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  const lines = [];
+  client._setLogger((p) => lines.push(p));
+  client._setFetchImpl(fetchStub(async () => statusResponse(503)));
+  await client.track('evt', { a: 1 });
+  const before = client.status().pendingCount;
+  await client.flush('manual');
+  expect(client.status().pendingCount).toBe(before);
+  const warn = lines.find((l) => l.message === 'telemetry send failed');
+  expect(warn).toMatchObject({ scope: 'telemetry', level: 'warn' });
+  expect(warn.meta).toMatchObject({ channel: 'event', status: 503, consecutiveFailures: 1 });
+  expect(typeof warn.meta.backoffMs).toBe('number');
+  client.shutdown();
+});
+
+test('400 flush logs the circuit-breaker trip at warn', async () => {
+  const home = await mkHome();
+  const client = freshClient(home);
+  const lines = [];
+  client._setLogger((p) => lines.push(p));
+  client._setFetchImpl(fetchStub(async () => statusResponse(400)));
+  await client.track('evt', { a: 1 });
+  const before = client.status().pendingCount;
+  await client.flush('manual');
+  expect(client.status().pendingCount).toBe(before);
+  const warn = lines.find((l) => l.message === 'telemetry disabled for process');
+  expect(warn).toMatchObject({ scope: 'telemetry', level: 'warn', meta: { status: 400 } });
+  client.shutdown();
+});

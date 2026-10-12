@@ -264,3 +264,81 @@ test('fresh heartbeat carrying dispatch.drain is not dispatch-dead', () => {
   };
   assert.deepEqual(evaluateDispatchLiveness(entry, now), { dead: false, reason: 'draining' });
 });
+
+// ── watchdog script: alert-once, alive throttle, log prune ──────────────────
+
+const {
+  sendDesktopNotification,
+  nextAlertState,
+  shouldLogDecision,
+  selectPrunableLogs,
+  pruneOldLogs,
+  ALIVE_HEARTBEAT_MS,
+} = require('../../../../scripts/scheduler-watchdog.cjs');
+
+test('capped alerts once, stays quiet until an alive tick re-arms', () => {
+  const capped = { fresh: false, relaunch: { reason: 'capped' } };
+  let s = { alerted: false };
+  const first = nextAlertState(s, capped);
+  assert.equal(first.alert, true);
+  s = first;
+  assert.equal(nextAlertState(s, capped).alert, false);
+  s = nextAlertState(s, { fresh: true });
+  assert.equal(s.alerted, false);
+  assert.equal(nextAlertState(s, capped).alert, true);
+});
+
+test('non-capped stale tick neither alerts nor clears the alerted flag', () => {
+  const r = nextAlertState({ alerted: true }, { fresh: false, relaunch: { reason: 'debounce' } });
+  assert.deepEqual(r, { alert: false, alerted: true });
+});
+
+test('alive lines are logged on transition or hourly only', () => {
+  const now = 10_000_000_000;
+  assert.equal(shouldLogDecision('stale', { lastLoggedDecision: 'alive', lastAliveLoggedTs: now }, now), true);
+  assert.equal(shouldLogDecision('alive', {}, now), true);
+  assert.equal(shouldLogDecision('alive', { lastLoggedDecision: 'stale' }, now), true);
+  const st = { lastLoggedDecision: 'alive', lastAliveLoggedTs: now - 60_000 };
+  assert.equal(shouldLogDecision('alive', st, now), false);
+  assert.equal(shouldLogDecision('alive', st, now + ALIVE_HEARTBEAT_MS), true);
+});
+
+test('prune selects only watchdog logs older than 14 days', () => {
+  const now = Date.now();
+  const day = 24 * 60 * 60_000;
+  const names = selectPrunableLogs([
+    { name: 'watchdog-old.log', mtimeMs: now - 15 * day },
+    { name: 'watchdog-new.log', mtimeMs: now - 13 * day },
+    { name: 'watchdog-state.json', mtimeMs: now - 99 * day },
+    { name: 'other.log', mtimeMs: now - 99 * day },
+  ], now);
+  assert.deepEqual(names, ['watchdog-old.log']);
+
+  const dir = tmpDir();
+  try {
+    const oldF = path.join(dir, 'watchdog-2026-01-01.log');
+    const newF = path.join(dir, 'watchdog-2026-10-01.log');
+    fs.writeFileSync(oldF, 'x');
+    fs.writeFileSync(newF, 'x');
+    const t = new Date(now - 20 * day);
+    fs.utimesSync(oldF, t, t);
+    assert.deepEqual(pruneOldLogs(dir, now), ['watchdog-2026-01-01.log']);
+    assert.equal(fs.existsSync(newF), true);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('desktop notification spawns without a shell per platform', () => {
+  const calls = [];
+  const spawnFn = (cmd, args, opts) => { calls.push({ cmd, args, opts }); return { on() {}, unref() {} }; };
+  assert.equal(sendDesktopNotification('T', 'B', 'linux', spawnFn), true);
+  assert.equal(sendDesktopNotification('T', 'B', 'darwin', spawnFn), true);
+  assert.equal(sendDesktopNotification('T', 'B', 'win32', spawnFn), false);
+  assert.equal(calls[0].cmd, 'notify-send');
+  assert.equal(calls[1].cmd, 'osascript');
+  assert.equal(calls[1].args[0], '-e');
+  assert.match(calls[1].args[1], /^display notification/);
+  for (const c of calls) assert.notEqual(c.opts.shell, true);
+  assert.equal(sendDesktopNotification('T', 'B', 'linux', () => { throw new Error('boom'); }), false);
+});

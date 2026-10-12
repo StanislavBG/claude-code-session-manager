@@ -2,7 +2,7 @@
 
 // Name this process first (pn-03): otherwise it shows as a bare `node`.
 const { PROC_NAMES, setProcessTitle } = require('../src/main/lib/process/smProcNames.cjs');
-setProcessTitle(PROC_NAMES.watchdog);
+if (require.main === module) setProcessTitle(PROC_NAMES.watchdog);
 
 // scheduler-watchdog.cjs — external check-and-exit watchdog for session-manager.
 //
@@ -25,6 +25,7 @@ setProcessTitle(PROC_NAMES.watchdog);
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawn } = require('node:child_process');
 
 const {
   readLastHeartbeat,
@@ -52,6 +53,100 @@ function appendLog(entry) {
   } catch (e) {
     process.stderr.write(`[watchdog] log write failed: ${e?.message}\n`);
   }
+}
+
+// ---------- alert / alive-throttle / log-prune helpers ----------
+
+const ALIVE_HEARTBEAT_MS = 60 * 60_000;
+const LOG_RETENTION_MS = 14 * 24 * 60 * 60_000;
+const ALERT_TITLE = 'Session Manager scheduler is down';
+const ALERT_BODY = 'Watchdog gave up relaunching the app. Start it manually.';
+
+function alertStatePath() {
+  return path.join(schedulerPaths.watchdogLogsDir(), 'watchdog-state.json');
+}
+
+function readAlertState(statePath) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeAlertState(statePath, state) {
+  try {
+    fs.mkdirSync(path.dirname(statePath), { recursive: true });
+    fs.writeFileSync(statePath, JSON.stringify(state) + '\n');
+  } catch (e) {
+    process.stderr.write(`[watchdog] state write failed: ${e?.message}\n`);
+  }
+}
+
+/** Desktop notification, no shell, failures ignored. */
+function sendDesktopNotification(title, body, platform = process.platform, spawnFn = spawn) {
+  try {
+    let cmd;
+    let args;
+    if (platform === 'darwin') {
+      const esc = (t) => String(t).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      cmd = 'osascript';
+      args = ['-e', `display notification "${esc(body)}" with title "${esc(title)}"`];
+    } else if (platform === 'linux') {
+      cmd = 'notify-send';
+      args = [title, body];
+    } else {
+      return false;
+    }
+    const child = spawnFn(cmd, args, { stdio: 'ignore', detached: true });
+    if (child && typeof child.on === 'function') child.on('error', () => {});
+    if (child && typeof child.unref === 'function') child.unref();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Pure transition: given this tick's outcome, return the next state and
+ * whether to alert. Alerts once on entering capped; an alive tick re-arms.
+ */
+function nextAlertState(state, { fresh, relaunch }) {
+  const prev = state && state.alerted === true;
+  if (fresh) return { alert: false, alerted: false };
+  if (relaunch && relaunch.reason === 'capped') return { alert: !prev, alerted: true };
+  return { alert: false, alerted: prev };
+}
+
+/** Log an `alive` line only on a transition into alive, or hourly. */
+function shouldLogDecision(decision, state, now) {
+  if (decision !== 'alive') return true;
+  if (!state || state.lastLoggedDecision !== 'alive') return true;
+  const last = typeof state.lastAliveLoggedTs === 'number' ? state.lastAliveLoggedTs : 0;
+  return now - last >= ALIVE_HEARTBEAT_MS;
+}
+
+/** Pure: names of watchdog-*.log files strictly older than the retention window. */
+function selectPrunableLogs(entries, now, maxAgeMs = LOG_RETENTION_MS) {
+  return entries
+    .filter((e) => /^watchdog-.*\.log$/.test(e.name) && now - e.mtimeMs > maxAgeMs)
+    .map((e) => e.name);
+}
+
+function pruneOldLogs(dir, now = Date.now(), maxAgeMs = LOG_RETENTION_MS) {
+  const removed = [];
+  try {
+    const entries = [];
+    for (const name of fs.readdirSync(dir)) {
+      if (!/^watchdog-.*\.log$/.test(name)) continue;
+      try { entries.push({ name, mtimeMs: fs.statSync(path.join(dir, name)).mtimeMs }); } catch { /* raced */ }
+    }
+    for (const name of selectPrunableLogs(entries, now, maxAgeMs)) {
+      try { fs.unlinkSync(path.join(dir, name)); removed.push(name); } catch { /* ignore */ }
+    }
+  } catch { /* dir absent */ }
+  return removed;
 }
 
 // ---------- history rollup finalize ----------
@@ -86,6 +181,20 @@ async function main() {
   const decision = fresh ? 'alive' : 'stale';
 
   const logEntry = { ts: now, decision, heartbeatAgeMs, maxAgeMs: DEFAULT_MAX_AGE_MS };
+  const statePath = alertStatePath();
+  const state = readAlertState(statePath);
+  pruneOldLogs(schedulerPaths.watchdogLogsDir(), now);
+
+  // Records the tick's outcome; alive lines are throttled via shouldLogDecision.
+  const finish = (extra, outcome) => {
+    const logIt = shouldLogDecision(decision, state, now);
+    if (logIt) appendLog({ ...logEntry, ...extra });
+    writeAlertState(statePath, {
+      alerted: outcome.alerted,
+      lastLoggedDecision: logIt ? decision : state.lastLoggedDecision,
+      lastAliveLoggedTs: logIt && decision === 'alive' ? now : state.lastAliveLoggedTs,
+    });
+  };
 
   if (fresh) {
     // Alive branch: do nothing that touches queue.json. Let the in-app
@@ -97,7 +206,7 @@ async function main() {
       appendAuditEvent('dispatch_dead_observed', { dispatch: lastEntry.dispatch, reason: dispatchLiveness.reason });
     }
     const history = await runHistoryFinalize();
-    appendLog({ ...logEntry, dispatchLiveness, history });
+    finish({ dispatchLiveness, history }, nextAlertState(state, { fresh: true }));
     process.exit(0);
   }
 
@@ -106,11 +215,25 @@ async function main() {
   const relaunch = maybeRelaunchApp();
   const history = await runHistoryFinalize();
 
-  appendLog({ ...logEntry, relaunch, history });
+  const outcome = nextAlertState(state, { fresh: false, relaunch });
+  if (outcome.alert) sendDesktopNotification(ALERT_TITLE, ALERT_BODY);
+  finish({ relaunch, history }, outcome);
   process.exit(0);
 }
 
-main().catch((e) => {
-  process.stderr.write(`[watchdog] fatal: ${e?.message}\n`);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((e) => {
+    process.stderr.write(`[watchdog] fatal: ${e?.message}\n`);
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  sendDesktopNotification,
+  nextAlertState,
+  shouldLogDecision,
+  selectPrunableLogs,
+  pruneOldLogs,
+  ALIVE_HEARTBEAT_MS,
+  LOG_RETENTION_MS,
+};

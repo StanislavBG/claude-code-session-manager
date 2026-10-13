@@ -436,10 +436,6 @@ async function connect() {
       broadcastStatus();
     }).catch(() => {});
     broadcastStatus();
-    // v2: begin pushing the live session list once connected.
-    // Reset diff-guard so the new client always receives a full session-list push.
-    for (const c of _clients.values()) c.lastSessionListJson = null;
-    startSessionListPush();
   });
 
   ws.on('message', (raw) => {
@@ -500,11 +496,9 @@ async function handleTokenRevoked(deviceId) {
 // The last completed assistant turn drives the Haiku summary (see maybeSummarize).
 
 const SESSION_POLL_MS = 1500;
-const SESSION_LIST_PUSH_MS = 5000;
 const SESSION_INIT_TAIL_BYTES = 512 * 1024; // bound the initial read
 
 const _sessionWatchers = new Map(); // tabId → watcher
-let _sessionListTimer = null;
 
 /** Push an unsolicited event to ONE client, E2E-encrypted with its key and unicast via toConn. */
 function pushEventTo(client, type, payload) {
@@ -691,7 +685,6 @@ function stopSessionWatch(tabId) {
 
 function stopAllSessionWatches() {
   for (const tabId of Array.from(_sessionWatchers.keys())) stopSessionWatch(tabId);
-  if (_sessionListTimer) { clearInterval(_sessionListTimer); _sessionListTimer = null; }
 }
 
 /**
@@ -727,47 +720,6 @@ function buildRemoteSessionList(tabs, readIndex) {
     }
   }
   return out;
-}
-
-/** Push the current session list (reuses sessionsStore — the canonical source). */
-async function pushSessionList() {
-  try {
-    // Honor the kill switch: when remote is disabled, push nothing (the project
-    // list = cwds/titles is sensitive). dispatchEnvelope already blocks cmd:*;
-    // this stops the unsolicited background push too.
-    const cfg = await loadConfig();
-    if (!cfg.remoteEnabled) return;
-    // Don't push before SAS is confirmed — session cwds/titles are sensitive user data.
-    // A relay that completes e2e:hello before the user confirms the SAS would otherwise
-    // receive the full session list immediately (same threat SAS_GATED_READS blocks for
-    // cmd:sessions:load). Guard here so client.lastSessionListJson is not poisoned either.
-    if (!anyAuthenticated()) return;
-    const sessionsStore = require('./sessionsStore.cjs');
-    const data = await sessionsStore.load();
-    // Tabs + their ACTIVE Epics → SessionMeta. tabId === claude sessionId so it
-    // matches the transcript JSONL name used by cmd:session:subscribe.
-    const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
-    const sessions = buildRemoteSessionList(data?.tabs ?? [], readActiveIndex).map((s) => ({
-      ...s,
-      state: _sessionWatchers.get(s.tabId)?.state ?? null,
-    }));
-    const payload = { sessions, activeTabId: data?.activeTabId ?? null };
-    const json = JSON.stringify(payload);
-    for (const c of _clients.authenticated()) {
-      if (json === c.lastSessionListJson) continue;
-      c.lastSessionListJson = json;
-      pushEventTo(c, 'event:session:list', payload);
-    }
-  } catch (e) {
-    logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'pushSessionList failed', meta: { error: e?.message } });
-  }
-}
-
-function startSessionListPush() {
-  if (_sessionListTimer) return;
-  pushSessionList().catch(() => {});
-  _sessionListTimer = setInterval(() => pushSessionList().catch(() => {}), SESSION_LIST_PUSH_MS);
-  if (typeof _sessionListTimer.unref === 'function') _sessionListTimer.unref();
 }
 
 // ─── SM-V2-03: mobile summary via Claude Haiku 4.5 ───────────────────────────
@@ -811,14 +763,12 @@ async function maybeSummarize(w) {
 /**
  * Shared finish-up for any path that transitions a client's e2e state into 'authenticated'
  * (manual SAS confirmation or pinned-key auto-trust): log, broadcast the new
- * status, and flush the session list immediately rather than waiting for the
- * next SESSION_LIST_PUSH_MS tick.
+ * status, and tell that one client it may start requesting (event:remote:ready).
  */
 function finalizeE2eAuthenticated(logMessage, client) {
   logs.writeLine({ scope: 'webRemote', level: 'info', message: logMessage });
   broadcastStatus();
-  if (client) client.lastSessionListJson = null;
-  pushSessionList().catch(() => {});
+  if (client && loadConfigSync().remoteEnabled) pushEventTo(client, 'event:remote:ready', { ts: Date.now() });
 }
 
 // ─── Message handling & command dispatch ─────────────────────────────────────
@@ -1428,9 +1378,6 @@ function registerRemoteHandlers() {
         logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'failed to persist pinned peer pubkey', meta: { error: e?.message } });
       }
     }
-    // Flush the session list immediately — the push loop was suppressed while
-    // state !== 'authenticated', so the mobile app would otherwise wait up to
-    // SESSION_LIST_PUSH_MS for the first useful data.
     finalizeE2eAuthenticated('E2E session authenticated — SAS confirmed by user', target);
     return { ok: true };
   }));
@@ -1544,6 +1491,9 @@ module.exports = {
     setE2eAuthenticated: (key, clientKey = LEGACY_CLIENT_KEY) => {
       _clients.getOrCreate(clientKey).e2e = makeState('authenticated', key, null);
     },
+    setConfigCache: (cfg) => { _configCache = { ...defaultConfig(), ...cfg }; _configCacheAt = Date.now(); },
+    finalizeE2eAuthenticated,
+    getClient: (clientKey = LEGACY_CLIENT_KEY) => _clients.getOrCreate(clientKey),
     revokeAllDevices,
     streamCount: () => _clients.values().reduce((n, c) => n + c.ptyStreams.size, 0),
   },

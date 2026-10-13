@@ -75,4 +75,29 @@ describe('drill-down commands', () => {
     stubStore()
     await expect(dispatch()['cmd:session:transcript']({ cwd, sessionKey: '../x' })).rejects.toMatchObject({ name: 'ZodError' })
   })
+
+  it('finalizeE2eAuthenticated pushes event:remote:ready to that client only, never event:session:list', () => {
+    const sent: string[] = []
+    webRemote.__test.setWs({ readyState: 1, send: (m: string) => sent.push(m) })
+    webRemote.__test.setConfigCache({ remoteEnabled: true })
+    webRemote.__test.setE2eAuthenticated(Buffer.alloc(32, 7), 'ready-client')
+    const client = webRemote.__test.getClient('ready-client')
+    try {
+      webRemote.__test.finalizeE2eAuthenticated('test', undefined)
+      expect(sent).toHaveLength(0)
+      webRemote.__test.finalizeE2eAuthenticated('test', client)
+      expect(sent).toHaveLength(1)
+      const out = JSON.parse(sent[0])
+      expect(out.type).toBe('e2e:box')
+      expect(out.toConn).toBe('ready-client')
+      const { decryptBox } = require('../../src/main/lib/feedback-remote/remoteE2eCrypto.cjs')
+      const inner = JSON.parse(decryptBox(out.payload.nonce, out.payload.ciphertext, client.e2e.sessionKey))
+      expect(inner.type).toBe('event:remote:ready')
+      expect(typeof inner.payload.ts).toBe('number')
+      expect(sent.join('')).not.toContain('event:session:list')
+    } finally {
+      webRemote.__test.setWs(null)
+      webRemote.__test.invalidateConfigCache()
+    }
+  })
 })

@@ -1173,7 +1173,7 @@ const READ_COMMANDS = new Set([
 // Sensitive reads — return user data; require SAS confirmation same as MUTATE.
 const SAS_GATED_READS = new Set([
   'cmd:sessions:load',
-  // Same data as the event:session:list push (projects + their active Epics).
+  // Same data the phone reads on demand (projects + their active Epics).
   'cmd:sessions:list',
   'cmd:history:aggregate',
   // subscribe initiates a live stream of session state/summary — sensitive.

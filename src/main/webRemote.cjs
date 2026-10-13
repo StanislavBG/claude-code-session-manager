@@ -216,10 +216,15 @@ async function getDeviceTicket(deviceToken) {
   return result.ticket;
 }
 
+// Per-client-key time of the last e2e:rekey sent, so a burst of stale boxes yields one rekey.
+const REKEY_THROTTLE_MS = 5000;
+const _lastRekeyMs = new Map();
+
 // ─── E2E state helpers ────────────────────────────────────────────────────────
 
 // Tear down every client session (connection-level reset).
 function resetE2e() {
+  _lastRekeyMs.clear();
   teardownAllClients();
 }
 
@@ -530,6 +535,7 @@ function pruneSessionWatchers() {
 
 /** Tear down one client (its PTY streams + subscriptions) without touching others. */
 function teardownClient(key) {
+  _lastRekeyMs.delete(key);
   const rec = _clients.teardown(key);
   pruneSessionWatchers();
   return rec;
@@ -922,6 +928,11 @@ async function handleMessage(raw, device) {
   if (type === 'e2e:box') {
     if (!client.e2e.sessionKey) {
       logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'e2e:box received but no session key — dropping' });
+      const now = Date.now();
+      if (now - (_lastRekeyMs.get(client.key) || 0) >= REKEY_THROTTLE_MS) {
+        _lastRekeyMs.set(client.key, now);
+        respond(id, { reason: 'no_session' }, 'e2e:rekey', client);
+      }
       return;
     }
     const { nonce, ciphertext } = payload || {};

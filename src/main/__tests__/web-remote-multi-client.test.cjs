@@ -151,10 +151,10 @@ describe('web-remote multi-client E2E', () => {
     expect(webRemote._internal.getE2eState('connB').state).toBe('pending_sas')
     expect(webRemote._internal.getE2eState('connA').sessionKey).not.toBe(keyA)
 
-    // A box from a client with no session is dropped.
+    // A box from a client with no session is dropped (and answered with a plaintext e2e:rekey).
     sent.length = 0
     await boxed('connC', keyA, { type: 'cmd:unknown:probe', id: 'qC', payload: {}, ts: 1 })
-    expect(sent).toHaveLength(0)
+    expect(sent.map((m) => m.type)).toEqual(['e2e:rekey'])
   })
 })
 

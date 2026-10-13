@@ -36,6 +36,7 @@ Phone → desktop commands over the relay (stateless; drill down projects → se
 - `cmd:chat:send` — send a prompt; target = epicId or main tab id.
 - `cmd:session:subscribe` — stream live updates for one session.
 - `event:remote:ready` — desktop → phone: bridge is up, commands accepted.
+- `e2e:rekey` — desktop → phone (plaintext): drop the session key and re-send `e2e:hello`; pinned phones re-authenticate without SAS.
 
 ## Who consumes this
 

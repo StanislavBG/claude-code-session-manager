@@ -29,9 +29,9 @@ describe('SessionNav grouping', () => {
 });
 
 describe('MicPane cmd:chat:send', () => {
-  const send = async (tabId: string) => {
-    const sendCommand = vi.fn().mockResolvedValue(undefined);
-    render(<MicPane socket={{ sendCommand } as any} deviceId="dev1" tabId={tabId} />);
+  const send = async (target: string) => {
+    const sendCommand = vi.fn().mockResolvedValue({ payload: {} });
+    render(<MicPane socket={{ sendCommand } as any} deviceId="dev1" target={target} />);
     fireEvent.change(screen.getByPlaceholderText(/Type a command|Message this session/), { target: { value: 'hi' } });
     fireEvent.click(screen.getByLabelText('Send command'));
     await waitFor(() => expect(sendCommand).toHaveBeenCalled());
@@ -39,18 +39,18 @@ describe('MicPane cmd:chat:send', () => {
   };
 
   it('sends the epicId for an Epic', async () => {
-    const sendCommand = await send('claude-sess-1');
+    const sendCommand = await send('epic-1');
     expect(sendCommand).toHaveBeenCalledWith('cmd:chat:send', 'dev1', { tabId: 'epic-1', prompt: 'hi' });
   });
 
-  it('sends the project tabId for a project', async () => {
+  it('sends the main tabId for a project', async () => {
     const sendCommand = await send('tab-proj');
     expect(sendCommand).toHaveBeenCalledWith('cmd:chat:send', 'dev1', { tabId: 'tab-proj', prompt: 'hi' });
   });
 
-  it('errors and sends nothing when the session is gone', async () => {
+  it('errors and sends nothing when there is no target', async () => {
     const sendCommand = vi.fn();
-    render(<MicPane socket={{ sendCommand } as any} deviceId="dev1" tabId="gone" />);
+    render(<MicPane socket={{ sendCommand } as any} deviceId="dev1" target={null} />);
     fireEvent.change(screen.getByPlaceholderText(/Type a command|Message this session/), { target: { value: 'hi' } });
     fireEvent.click(screen.getByLabelText('Send command'));
     expect(await screen.findByText('Session no longer available')).toBeInTheDocument();

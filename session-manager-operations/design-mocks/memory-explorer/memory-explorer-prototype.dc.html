@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics><title>Memory Explorer — prototype</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&amp;display=swap" rel="stylesheet"><style>body{margin:0;background:#dcd5c5;font-family:"Inter Tight",system-ui,sans-serif;color:#1a1612}*{box-sizing:border-box}a{color:#a83818;text-decoration:none}a:hover{color:#1a1612}.dv-turn{padding:40px 44px 32px;border-bottom:1px solid rgba(0,0,0,.08)}.dv-thd{display:flex;align-items:baseline;gap:10px;margin:0 0 20px}.dv-tid{font:600 10px "JetBrains Mono",monospace;padding:3px 7px;background:#1a1612;color:#fff;border-radius:4px}.dv-tname{font:600 13px/1.2 "Inter Tight",sans-serif;color:#1a1612}.dv-opts{display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start}.dv-opt{flex:none;display:flex;flex-direction:column;gap:9px}.dv-oid{font:600 10.5px "JetBrains Mono",monospace;padding:3px 7px;background:rgba(0,0,0,.08);color:#1a1612;border-radius:5px}.dv-olabel{display:flex;align-items:baseline;gap:8px;font:400 12px/1.3 "Inter Tight",sans-serif;color:#3a342b}.dv-card{background:#f5f0e6;border:1px solid rgba(0,0,0,.1);border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,.08);overflow:hidden}.dv-opt:target .dv-oid{background:#a83818;color:#fff}.dv-next{margin:22px 0 0;font:12px/1.5 "Inter Tight",sans-serif;color:#5d5648}</style><template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" fill="#a83818"/><text x="50" y="64" font-family="Georgia,serif" font-size="44" fill="#f5f0e6" text-anchor="middle">M</text></svg></template></helmet>
+<div style="padding:32px 40px;min-width:max-content">
+<div class="dv-opt" id="2a"><div class="dv-olabel"><span style="font-family:'Source Serif 4',serif;font-size:22px;color:#1a1612;margin-right:6px">Memory Explorer</span>Interactive prototype: scope, list, reader, Ask, Clusters
+<div onClick="{{ p.toggleCo }}" style="margin-left:12px;padding:2px 9px;border:1px solid #c9bfa8;border-radius:5px;cursor:pointer;font-size:11.5px;color:#1a1612;background:#f5f0e6">Callouts: {{ p.coLabel }}</div>
+<div onClick="{{ p.reset }}" style="padding:2px 9px;border:1px solid #c9bfa8;border-radius:5px;cursor:pointer;font-size:11.5px;color:#1a1612;background:#f5f0e6">Reset prototype</div></div>
+<div style="display:flex;gap:24px;align-items:flex-start">
+<div class="dv-card" style="width:1320px;height:900px;display:grid;grid-template-rows:auto minmax(0,1fr);position:relative">
+
+<div style="display:flex;align-items:center;gap:12px;padding:16px 24px;border-bottom:1px solid #d4ccb8;position:relative">
+<div style="display:flex;align-items:baseline;gap:12px"><span style="font-size:11px;letter-spacing:.08em;color:#5d5648;font-weight:500">CONFIGURE</span><span style="font-family:'Source Serif 4',serif;font-size:28px;line-height:1">Memory</span><span style="font-size:12px;color:#5d5648">Stored locally · nothing leaves your machine</span></div>
+<div style="flex:1"></div>
+<sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">2</span></sc-if>
+<div onClick="{{ p.openPalette }}" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 10px;border:1px solid #d4ccb8;border-radius:6px;background:#ede6d6;width:300px;font-size:12px;color:#5d5648;cursor:pointer" style-hover="border-color:#9c937f"><span>Search all memories, or ask a question…</span><span style="flex:1"></span><span style="font-family:'JetBrains Mono',monospace;font-size:10px;padding:1px 5px;border:1px solid #d4ccb8;border-radius:3px;color:#5d5648">⌘K</span></div>
+<sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">3</span></sc-if>
+<div onClick="{{ p.toggleLearn }}" style="font-size:11px;letter-spacing:.08em;font-weight:600;color:#a83818;cursor:pointer;padding:6px 4px" style-hover="color:#1a1612">LEARN</div>
+<sc-if value="{{ p.ovLearn }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;right:20px;top:58px;width:360px;z-index:30;background:#fbf8f1;border:1px solid #d4ccb8;border-radius:8px;box-shadow:0 10px 30px rgba(26,22,18,.18);padding:16px;display:flex;flex-direction:column;gap:10px;font-size:13px;line-height:1.55;color:#2a241c">
+<span style="font-family:'Source Serif 4',serif;font-size:17px;color:#1a1612">How memory works</span>
+<span>Each memory is a markdown file in this workspace's memory folder. The assistant loads the relevant ones at the start of a session and writes new ones when you correct it or say "remember".</span>
+<span><b>Stale</b> means a path or claim it references no longer matches the repo. <b>Broken references</b> are links or paths that point at nothing.</span>
+<div style="display:flex;justify-content:flex-end"><button onClick="{{ p.closeOv }}" style="font:500 12px 'Inter Tight',sans-serif;height:28px;padding:0 12px;border:0;border-radius:5px;background:#1a1612;color:#f5f0e6;cursor:pointer">Got it</button></div>
+</div>
+</sc-if>
+</div>
+
+<div style="display:grid;grid-template-columns:232px minmax(0,1fr);min-height:0">
+<nav style="background:#ede6d6;border-right:1px solid #d4ccb8;padding:14px 10px;display:flex;flex-direction:column;gap:16px;position:relative">
+<div style="position:relative">
+<div onClick="{{ p.toggleScope }}" style="display:flex;flex-direction:column;gap:2px;padding:8px 10px;border:1px solid #d4ccb8;border-radius:6px;background:#f5f0e6;cursor:pointer" style-hover="border-color:#9c937f">
+<div style="display:flex;align-items:center;gap:6px"><span style="font-size:10px;letter-spacing:.08em;color:#5d5648;font-weight:600;flex:1">{{ p.scopeKind }}</span><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">1</span></sc-if></div>
+<div style="display:flex;align-items:center;gap:6px"><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#1a1612">{{ p.scopeName }}</span><span style="flex:1"></span><span style="font-size:10px;color:#5d5648">▾</span></div>
+<span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5d5648;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.scopePath }}</span>
+</div>
+<sc-if value="{{ p.ovScope }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;left:0;right:-40px;top:calc(100% + 4px);z-index:30;background:#fbf8f1;border:1px solid #d4ccb8;border-radius:7px;box-shadow:0 10px 30px rgba(26,22,18,.18);padding:4px;display:flex;flex-direction:column">
+<sc-for list="{{ p.scopes }}" as="sc" hint-placeholder-count="5">
+<div onClick="{{ sc.onClick }}" style="display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:5px;cursor:pointer;background:{{ sc.bg }}" style-hover="background:#ede6d6">
+<span style="width:12px;font-size:11px;color:#2e5a3e">{{ sc.check }}</span>
+<span style="display:flex;flex-direction:column;flex:1"><span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#1a1612">{{ sc.name }}</span><span style="font-size:10.5px;color:#5d5648">{{ sc.kind }}</span></span>
+<span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5d5648">{{ sc.count }}</span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</div>
+<div style="display:flex;flex-direction:column;gap:1px">
+<div style="display:flex;align-items:center;gap:6px;padding:0 10px 6px"><span style="font-size:10px;letter-spacing:.08em;color:#5d5648;font-weight:600">BROWSE</span><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">4</span></sc-if></div>
+<sc-for list="{{ p.nav.browse }}" as="n" hint-placeholder-count="3">
+<div onClick="{{ n.onClick }}" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:5px;cursor:pointer;font-size:13px;background:{{ n.bg }};color:{{ n.color }};font-weight:{{ n.weight }}" style-hover="background:#e3dcc8"><span style="width:7px;height:7px;border-radius:2px;flex:none;background:{{ n.dot }}"></span><span style="flex:1">{{ n.label }}</span><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:{{ n.countColor }}">{{ n.count }}</span></div>
+</sc-for>
+</div>
+<div style="display:flex;flex-direction:column;gap:1px">
+<div style="display:flex;align-items:center;gap:6px;padding:0 10px 6px"><span style="font-size:10px;letter-spacing:.08em;color:#5d5648;font-weight:600">REVIEW</span><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">5</span></sc-if></div>
+<sc-for list="{{ p.nav.review }}" as="n" hint-placeholder-count="3">
+<div onClick="{{ n.onClick }}" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:5px;cursor:pointer;font-size:13px;background:{{ n.bg }};color:{{ n.color }};font-weight:{{ n.weight }}" style-hover="background:#e3dcc8"><span style="width:7px;height:7px;border-radius:2px;flex:none;background:{{ n.dot }}"></span><span style="flex:1">{{ n.label }}</span><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:{{ n.countColor }}">{{ n.count }}</span></div>
+</sc-for>
+</div>
+<div style="display:flex;flex-direction:column;gap:1px">
+<div style="display:flex;align-items:center;gap:6px;padding:0 10px 6px"><span style="font-size:10px;letter-spacing:.08em;color:#5d5648;font-weight:600">CLUSTERS</span><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">6</span></sc-if></div>
+<sc-for list="{{ p.nav.clusters }}" as="n" hint-placeholder-count="5">
+<div onClick="{{ n.onClick }}" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:5px;cursor:pointer;font-size:13px;background:{{ n.bg }};color:{{ n.color }};font-weight:{{ n.weight }}" style-hover="background:#e3dcc8"><span style="width:7px;height:7px;border-radius:2px;flex:none;background:{{ n.dot }}"></span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ n.label }}</span><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:{{ n.countColor }}">{{ n.count }}</span></div>
+</sc-for>
+</div>
+<div style="display:flex;flex-direction:column;gap:1px">
+<div style="display:flex;align-items:center;gap:6px;padding:0 10px 6px"><span style="font-size:10px;letter-spacing:.08em;color:#5d5648;font-weight:600">SUBAGENT SCOPES</span><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">7</span></sc-if></div>
+<sc-for list="{{ p.agents }}" as="a" hint-placeholder-count="4">
+<div onClick="{{ a.onClick }}" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:5px;font-size:13px;color:#3a342b;cursor:pointer;background:{{ a.bg }};font-weight:{{ a.weight }}" style-hover="background:#e3dcc8"><span style="font-family:'JetBrains Mono',monospace;font-size:12px;flex:1">{{ a.name }}</span><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#5d5648">{{ a.count }}</span></div>
+</sc-for>
+</div>
+</nav>
+<div style="min-height:0;display:flex;flex-direction:column">
+
+<sc-if value="{{ p.isBrowse }}" hint-placeholder-val="{{ true }}">
+<div style="display:grid;grid-template-columns:316px minmax(0,1fr);height:100%;min-height:0">
+<div style="border-right:1px solid #d4ccb8;display:flex;flex-direction:column;min-height:0">
+<div style="padding:14px 14px 10px;display:flex;flex-direction:column;gap:10px;border-bottom:1px solid #d4ccb8">
+<div style="display:flex;align-items:center;gap:8px"><span style="font-family:'Source Serif 4',serif;font-size:18px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ p.listTitle }}</span><span style="font-size:12px;color:#5d5648">{{ p.listCount }}</span><span style="flex:1"></span>
+<sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">8</span></sc-if>
+<button onClick="{{ p.onNew }}" style="font:500 12px 'Inter Tight',sans-serif;height:26px;padding:0 10px;border:1px solid #d4ccb8;border-radius:5px;background:#f5f0e6;color:#1a1612;cursor:pointer;flex:none" style-hover="border-color:#1a1612">+ New</button></div>
+<div style="display:flex;gap:6px;align-items:center">
+<sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">9</span></sc-if>
+<input value="{{ p.q }}" onChange="{{ p.onQ }}" placeholder="Filter by name or content…" style="flex:1;min-width:0;height:28px;border:1px solid #d4ccb8;border-radius:5px;padding:0 9px;font:12px 'Inter Tight',sans-serif;color:#1a1612;background:#fbf8f1;outline:none"></input>
+<div onClick="{{ p.cycleSort }}" style="height:28px;padding:0 9px;border:1px solid #d4ccb8;border-radius:5px;display:flex;align-items:center;font-size:12px;color:#3a342b;cursor:pointer;white-space:nowrap" style-hover="border-color:#9c937f">{{ p.sortLabel }} ⇅</div></div>
+</div>
+<div style="overflow:auto;flex:1;padding:6px">
+<sc-for list="{{ p.list }}" as="m" hint-placeholder-count="10">
+<div onClick="{{ m.onClick }}" style="padding:8px 10px;border-radius:6px;cursor:pointer;display:flex;flex-direction:column;gap:3px;background:{{ m.bg }}" style-hover="background:#ede6d6">
+<div style="display:flex;align-items:center;gap:7px"><span style="width:7px;height:7px;border-radius:2px;flex:none;background:{{ m.dot }}"></span><span style="font-size:13px;font-weight:500;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.slug }}</span>
+<sc-if value="{{ m.stale }}" hint-placeholder-val="{{ false }}"><span style="font-size:9.5px;font-weight:600;letter-spacing:.06em;padding:1px 5px;border-radius:3px;background:#f9e5b8;color:#6e4a0a">STALE</span></sc-if>
+<sc-if value="{{ m.broken }}" hint-placeholder-val="{{ false }}"><span style="font-size:9.5px;font-weight:600;letter-spacing:.06em;padding:1px 5px;border-radius:3px;background:#f6e3dc;color:#5a1d0c">BROKEN</span></sc-if>
+<sc-if value="{{ m.sel }}" hint-placeholder-val="{{ false }}"><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">10</span></sc-if></sc-if></div>
+<div style="font-size:11.5px;color:#5d5648;padding-left:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.desc }}</div>
+<div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#5d5648;padding-left:14px">{{ m.meta }}</div>
+</div>
+</sc-for>
+<sc-if value="{{ p.isEmpty }}" hint-placeholder-val="{{ false }}">
+<div style="padding:40px 18px;display:flex;flex-direction:column;gap:8px;align-items:flex-start">
+<span style="font-family:'Source Serif 4',serif;font-size:17px;color:#1a1612">{{ p.empty.t }}</span>
+<span style="font-size:12.5px;line-height:1.5;color:#5d5648">{{ p.empty.b }}</span>
+<button onClick="{{ p.empty.on }}" style="margin-top:6px;font:500 12px 'Inter Tight',sans-serif;height:28px;padding:0 12px;border:1px solid #c9bfa8;border-radius:5px;background:#f5f0e6;color:#1a1612;cursor:pointer">{{ p.empty.a }}</button>
+</div>
+</sc-if>
+</div>
+</div>
+
+<div style="display:grid;grid-template-columns:minmax(0,1fr) 236px;min-height:0">
+<div style="display:flex;flex-direction:column;min-height:0">
+
+<sc-if value="{{ p.hasM }}" hint-placeholder-val="{{ true }}">
+<div style="padding:14px 22px 12px;border-bottom:1px solid #d4ccb8;display:flex;flex-direction:column;gap:8px">
+<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#5d5648"><span style="width:7px;height:7px;border-radius:2px;background:{{ p.r.dot }}"></span><span>{{ p.r.cluster }}</span><span style="flex:1"></span>
+<sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">11</span></sc-if>
+<div style="display:flex;border:1px solid #d4ccb8;border-radius:5px;overflow:hidden"><div onClick="{{ p.setRead }}" style="padding:3px 10px;cursor:pointer;background:{{ p.readBg }};color:#1a1612">Read</div><div onClick="{{ p.setSource }}" style="padding:3px 10px;cursor:pointer;background:{{ p.sourceBg }};color:#1a1612;border-left:1px solid #d4ccb8">Source</div></div>
+<sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">12</span></sc-if>
+<button onClick="{{ p.r.onEdit }}" style="font:500 12px 'Inter Tight',sans-serif;height:26px;padding:0 10px;border:1px solid #d4ccb8;border-radius:5px;background:#f5f0e6;color:#1a1612;cursor:pointer" style-hover="border-color:#1a1612">Edit</button>
+<sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">13</span></sc-if>
+<div style="position:relative">
+<button onClick="{{ p.toggleMore }}" style="font:500 12px 'Inter Tight',sans-serif;height:26px;padding:0 8px;border:1px solid #d4ccb8;border-radius:5px;background:#f5f0e6;color:#1a1612;cursor:pointer" style-hover="border-color:#1a1612">⋯</button>
+<sc-if value="{{ p.ovMore }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;right:0;top:32px;width:200px;z-index:30;background:#fbf8f1;border:1px solid #d4ccb8;border-radius:7px;box-shadow:0 10px 30px rgba(26,22,18,.18);padding:4px;display:flex;flex-direction:column;font-size:12.5px;color:#1a1612">
+<div onClick="{{ p.copyPath }}" style="padding:7px 10px;border-radius:5px;cursor:pointer" style-hover="background:#ede6d6">Copy path</div>
+<div onClick="{{ p.reveal }}" style="padding:7px 10px;border-radius:5px;cursor:pointer" style-hover="background:#ede6d6">Reveal in Finder</div>
+<div style="height:1px;background:#e3dcc8;margin:4px 6px"></div>
+<div onClick="{{ p.archive }}" style="padding:7px 10px;border-radius:5px;cursor:pointer" style-hover="background:#ede6d6">Archive</div>
+<div onClick="{{ p.askDelete }}" style="padding:7px 10px;border-radius:5px;cursor:pointer;color:#a83818" style-hover="background:#f6e3dc">Delete…</div>
+</div>
+</sc-if>
+</div>
+</div>
+<div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:500;color:#1a1612">{{ p.r.slug }}</div>
+<div style="display:flex;flex-wrap:wrap;gap:6px;font-size:11.5px;color:#3a342b">
+<span style="padding:2px 7px;border-radius:4px;background:#ede6d6">type · project</span><span style="padding:2px 7px;border-radius:4px;background:#ede6d6">{{ p.r.size }}</span><span style="padding:2px 7px;border-radius:4px;background:#ede6d6">modified {{ p.r.age }}</span><span style="padding:2px 7px;border-radius:4px;background:#ede6d6;font-family:'JetBrains Mono',monospace;font-size:10.5px">session de0e5dbe</span></div>
+</div>
+
+<sc-if value="{{ p.r.fixIdle }}" hint-placeholder-val="{{ true }}">
+<div style="margin:12px 22px 0;padding:10px 12px;border-radius:6px;background:#f9e5b8;display:flex;gap:10px;align-items:center;font-size:12.5px;color:#4a3208">
+<div style="flex:1;display:flex;flex-direction:column;gap:2px"><b style="font-weight:600">Stale — {{ p.r.staleNote }}</b><span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6e4a0a">{{ p.r.stalePaths }}</span></div>
+<sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f9e5b8">14</span></sc-if>
+<button onClick="{{ p.r.onFix }}" style="font:500 12px 'Inter Tight',sans-serif;height:26px;padding:0 10px;border:0;border-radius:5px;background:#1a1612;color:#f5f0e6;cursor:pointer">Fix with assistant</button>
+<sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f9e5b8">15</span></sc-if>
+<button onClick="{{ p.r.onVerify }}" style="font:500 12px 'Inter Tight',sans-serif;height:26px;padding:0 10px;border:1px solid #c9a24e;border-radius:5px;background:transparent;color:#4a3208;cursor:pointer">Mark verified</button>
+</div>
+</sc-if>
+<sc-if value="{{ p.r.fixChecking }}" hint-placeholder-val="{{ false }}">
+<div style="margin:12px 22px 0;padding:12px;border-radius:6px;border:1px dashed #c9a24e;background:#fbf3df;font-size:12.5px;color:#4a3208;display:flex;align-items:center;gap:10px"><span style="font-family:'JetBrains Mono',monospace;color:#a83818">●○○</span>Assistant is checking {{ p.r.checkCount }} against the repo…</div>
+</sc-if>
+<sc-if value="{{ p.r.fixProposed }}" hint-placeholder-val="{{ false }}">
+<div style="margin:12px 22px 0;border:1px solid #c9a24e;border-radius:6px;overflow:hidden;background:#fbf8f1">
+<div style="padding:9px 12px;background:#f9e5b8;font-size:12.5px;color:#4a3208;font-weight:600">Suggested update</div>
+<sc-for list="{{ p.r.diff }}" as="d" hint-placeholder-count="4"><div style="display:grid;grid-template-columns:20px 1fr;padding:6px 12px;font:12px/1.5 'JetBrains Mono',monospace;background:{{ d.bg }};color:{{ d.fg }};border-top:1px solid #efe7d3"><span>{{ d.sign }}</span><span>{{ d.text }}</span></div></sc-for>
+<div style="display:flex;gap:8px;padding:10px 12px;border-top:1px solid #e3dcc8"><button onClick="{{ p.r.onApply }}" style="font:500 12px 'Inter Tight',sans-serif;height:28px;padding:0 12px;border:0;border-radius:5px;background:#1a1612;color:#f5f0e6;cursor:pointer">Apply</button><button onClick="{{ p.r.onDiscard }}" style="font:500 12px 'Inter Tight',sans-serif;height:28px;padding:0 12px;border:1px solid #c9bfa8;border-radius:5px;background:transparent;color:#1a1612;cursor:pointer">Discard</button><span style="flex:1"></span><span style="font-size:11.5px;color:#5d5648;align-self:center">Writes the file, clears stale</span></div>
+</div>
+</sc-if>
+<sc-if value="{{ p.r.brokenOnly }}" hint-placeholder-val="{{ false }}">
+<div style="margin:12px 22px 0;padding:10px 12px;border-radius:6px;background:#f6e3dc;font-size:12.5px;color:#5a1d0c">Broken reference — a link or path in this memory points at nothing. See the red items in Links.</div>
+</sc-if>
+
+<div style="flex:1;overflow:auto;padding:16px 22px 22px">
+<sc-if value="{{ p.isRead }}" hint-placeholder-val="{{ true }}">
+<div style="max-width:640px;font-size:14px;line-height:1.65;color:#2a241c;display:flex;flex-direction:column;gap:12px;text-wrap:pretty">
+<p style="margin:0;font-family:'Source Serif 4',serif;font-size:17px;line-height:1.5;color:#1a1612">{{ p.r.desc }}</p>
+<sc-if value="{{ p.r.isBilko }}" hint-placeholder-val="{{ true }}">
+<p style="margin:0">The public bilko.run site is <b>not</b> part of this repo. That includes <code style="font-family:'JetBrains Mono',monospace;font-size:12.5px;background:#ede6d6;padding:1px 4px;border-radius:3px">bilko.run/products/session-manager</code>. It lives in the sibling repo at <code style="font-family:'JetBrains Mono',monospace;font-size:12.5px;background:#ede6d6;padding:1px 4px;border-radius:3px">~/Projects/Bilko/</code>.</p>
+<h4 style="margin:6px 0 0;font-size:11px;letter-spacing:.08em;color:#a83818">WHY</h4>
+<p style="margin:0">Got this wrong once: assumed the folder was named <code style="font-family:'JetBrains Mono',monospace;font-size:12.5px;background:#ede6d6;padding:1px 4px;border-radius:3px">bilko-run</code>, found nothing, and nearly reported the capability as unavailable.</p>
+<h4 style="margin:6px 0 0;font-size:11px;letter-spacing:.08em;color:#a83818">HOW TO APPLY</h4>
+<p style="margin:0">For any "bilko.run doesn't do X" report, go straight to <code style="font-family:'JetBrains Mono',monospace;font-size:12.5px;background:#ede6d6;padding:1px 4px;border-radius:3px">~/Projects/Bilko/</code>.</p>
+</sc-if>
+<sc-if value="{{ p.r.isGeneric }}" hint-placeholder-val="{{ false }}">
+<h4 style="margin:6px 0 0;font-size:11px;letter-spacing:.08em;color:#a83818">WHY</h4>
+<p style="margin:0">Recorded after it caused a real failure in session de0e5dbe.</p>
+<h4 style="margin:6px 0 0;font-size:11px;letter-spacing:.08em;color:#a83818">HOW TO APPLY</h4>
+<p style="margin:0">Check this before touching the related code path. The Links panel shows what it connects to.</p>
+</sc-if>
+<sc-if value="{{ p.r.isCreated }}" hint-placeholder-val="{{ false }}"><div style="white-space:pre-wrap">{{ p.r.body }}</div></sc-if>
+</div>
+</sc-if>
+<sc-if value="{{ p.isSource }}" hint-placeholder-val="{{ false }}">
+<pre style="margin:0;padding:14px 16px;background:#211c17;color:#e3dcc8;border-radius:6px;font:12px/1.7 'JetBrains Mono',monospace;white-space:pre-wrap">{{ p.r.source }}</pre>
+</sc-if>
+</div>
+<div style="padding:8px 22px;border-top:1px solid #d4ccb8;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#5d5648;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.r.path }}</div>
+</sc-if>
+
+<sc-if value="{{ p.editing }}" hint-placeholder-val="{{ false }}">
+<div style="padding:14px 22px 12px;border-bottom:1px solid #d4ccb8;display:flex;align-items:center;gap:8px">
+<span style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:500;flex:1">{{ p.editTitle }}</span>
+<button onClick="{{ p.onCancel }}" style="font:500 12px 'Inter Tight',sans-serif;height:28px;padding:0 12px;border:1px solid #d4ccb8;border-radius:5px;background:#f5f0e6;color:#1a1612;cursor:pointer">Cancel</button>
+<button onClick="{{ p.onSave }}" style="font:500 12px 'Inter Tight',sans-serif;height:28px;padding:0 14px;border:0;border-radius:5px;background:#a83818;color:#fff;cursor:pointer">Save</button>
+</div>
+<div style="flex:1;display:flex;flex-direction:column;gap:10px;padding:16px 22px;min-height:0">
+<sc-if value="{{ p.isNew }}" hint-placeholder-val="{{ false }}">
+<label style="display:flex;flex-direction:column;gap:4px;font-size:11px;letter-spacing:.06em;color:#5d5648;font-weight:600">NAME
+<input value="{{ p.pname }}" onChange="{{ p.onName }}" placeholder="e.g. deploy freeze fridays" style="height:32px;border:1px solid #c9bfa8;border-radius:5px;padding:0 10px;font:13px 'JetBrains Mono',monospace;color:#1a1612;background:#fbf8f1;outline:none;letter-spacing:0;font-weight:400"></input></label>
+</sc-if>
+<textarea value="{{ p.pedit }}" onChange="{{ p.onEditText }}" style="flex:1;resize:none;border:1px solid #c9bfa8;border-radius:6px;padding:12px 14px;font:13px/1.7 'JetBrains Mono',monospace;color:#1a1612;background:#fbf8f1;outline:none"></textarea>
+<span style="font-size:11.5px;color:#5d5648">Markdown. Frontmatter is added on save. Saving marks the memory verified.</span>
+</div>
+</sc-if>
+
+<sc-if value="{{ p.noSel }}" hint-placeholder-val="{{ false }}">
+<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:#5d5648;font-size:13px"><span style="font-family:'Source Serif 4',serif;font-size:18px;color:#1a1612">No memory selected</span><span>Pick one from the list, or press ⌘K.</span></div>
+</sc-if>
+</div>
+
+<aside style="border-left:1px solid #d4ccb8;background:#f0eadd;padding:16px 14px;display:flex;flex-direction:column;gap:18px;overflow:auto">
+<sc-if value="{{ p.hasM }}" hint-placeholder-val="{{ true }}">
+<div style="display:flex;flex-direction:column;gap:6px"><div style="display:flex;align-items:center;gap:6px"><span style="font-size:10px;letter-spacing:.08em;color:#5d5648;font-weight:600;flex:1">LINKS TO · {{ p.r.outCount }}</span><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f0eadd">16</span></sc-if></div>
+<sc-for list="{{ p.r.out }}" as="l" hint-placeholder-count="2"><div onClick="{{ l.onClick }}" style="display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-radius:5px;cursor:pointer;background:#f5f0e6;border:1px solid {{ l.border }}" style-hover="border-color:#9c937f"><span style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:{{ l.color }}">{{ l.slug }}</span><span style="font-size:10.5px;color:{{ l.color }}">{{ l.type }}</span></div></sc-for>
+<sc-if value="{{ p.r.noOut }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:#5d5648">No outgoing links.</span></sc-if>
+</div>
+<div style="display:flex;flex-direction:column;gap:6px"><span style="font-size:10px;letter-spacing:.08em;color:#5d5648;font-weight:600">LINKED FROM · {{ p.r.inCount }}</span>
+<sc-for list="{{ p.r.inc }}" as="l" hint-placeholder-count="2"><div onClick="{{ l.onClick }}" style="display:flex;flex-direction:column;gap:1px;padding:6px 8px;border-radius:5px;cursor:pointer;background:#f5f0e6;border:1px solid {{ l.border }}" style-hover="border-color:#9c937f"><span style="font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ l.slug }}</span><span style="font-size:10.5px;color:#5d5648">{{ l.type }}</span></div></sc-for>
+<sc-if value="{{ p.r.noIn }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:#5d5648">Nothing links here yet.</span></sc-if>
+</div>
+<div onClick="{{ p.r.onAskAbout }}" style="margin-top:auto;display:flex;flex-direction:column;gap:6px;padding:10px;border:1px dashed #c9bfa8;border-radius:6px;cursor:pointer" style-hover="border-color:#1a1612"><div style="display:flex;align-items:center;gap:6px"><span style="font-size:12px;color:#3a342b;flex:1">Ask about this memory</span><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f0eadd">17</span></sc-if></div><div style="height:28px;border:1px solid #d4ccb8;border-radius:5px;background:#fbf8f1;padding:0 8px;display:flex;align-items:center;font-size:11.5px;color:#5d5648">Is this still accurate?</div></div>
+</sc-if>
+</aside>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ p.isAsk }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;height:100%;min-height:0">
+<div style="padding:16px 28px;border-bottom:1px solid #d4ccb8;display:flex;align-items:center;gap:10px"><span style="font-family:'Source Serif 4',serif;font-size:20px">Ask</span><span style="font-size:12px;color:#5d5648;flex:1">Search and edit this scope's memories in plain language. Answers cite the files they used.</span>
+<sc-if value="{{ p.hasCtx }}" hint-placeholder-val="{{ false }}"><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">18</span></sc-if>
+<span style="display:flex;align-items:center;gap:6px;padding:3px 4px 3px 9px;border:1px solid #c9bfa8;border-radius:5px;background:#ede6d6;font-size:12px">About <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">{{ p.ctx }}</span><span onClick="{{ p.clearCtx }}" style="padding:0 5px;cursor:pointer;color:#5d5648" style-hover="color:#a83818">×</span></span></sc-if>
+</div>
+<div style="flex:1;overflow:auto;padding:24px 28px;display:flex;flex-direction:column;gap:20px;max-width:820px">
+<sc-if value="{{ p.askIdle }}" hint-placeholder-val="{{ false }}">
+<div style="margin:auto 0;display:flex;flex-direction:column;gap:6px;color:#5d5648;font-size:13px"><span style="font-family:'Source Serif 4',serif;font-size:20px;color:#1a1612">What do you want to know?</span><span>Ask about a symptom, a file or a past decision, or start with "remember" to save something new.</span></div>
+</sc-if>
+<sc-if value="{{ p.askDone }}" hint-placeholder-val="{{ false }}">
+<div style="align-self:flex-end;max-width:520px;padding:10px 14px;border-radius:10px;background:#1a1612;color:#f5f0e6;font-size:14px">{{ p.question }}</div>
+<div style="display:flex;flex-direction:column;gap:10px;font-size:14px;line-height:1.65;color:#2a241c;max-width:680px">
+<p style="margin:0;text-wrap:pretty">{{ p.answer }}</p>
+<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+<sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">21</span></sc-if>
+<sc-for list="{{ p.cites }}" as="c" hint-placeholder-count="3"><div onClick="{{ c.onClick }}" style="display:flex;align-items:center;gap:6px;padding:4px 9px;border:1px solid #d4ccb8;border-radius:5px;background:#f5f0e6;cursor:pointer;font-size:12px" style-hover="border-color:#1a1612"><span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#a83818">{{ c.n }}</span><span>{{ c.slug }}</span><span style="color:#5d5648">{{ c.age }}</span><sc-if value="{{ c.stale }}" hint-placeholder-val="{{ false }}"><span style="font-size:9.5px;font-weight:600;padding:0 4px;border-radius:3px;background:#f9e5b8;color:#6e4a0a">STALE</span></sc-if></div></sc-for>
+</div>
+<sc-if value="{{ p.hasStaleCited }}" hint-placeholder-val="{{ false }}">
+<div style="padding:10px 12px;border-radius:6px;background:#f9e5b8;font-size:12.5px;color:#4a3208;display:flex;align-items:center;gap:10px"><span style="flex:1">{{ p.staleCitedText }}</span><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f9e5b8">22</span></sc-if><button onClick="{{ p.reverify }}" style="font:500 12px 'Inter Tight',sans-serif;height:26px;padding:0 10px;border:0;border-radius:5px;background:#1a1612;color:#f5f0e6;cursor:pointer">Re-verify</button></div>
+</sc-if>
+</div>
+</sc-if>
+<sc-if value="{{ p.askRemember }}" hint-placeholder-val="{{ false }}">
+<div style="align-self:flex-end;max-width:520px;padding:10px 14px;border-radius:10px;background:#1a1612;color:#f5f0e6;font-size:14px">{{ p.question }}</div>
+<div style="max-width:560px;border:1px solid #c9bfa8;border-radius:8px;background:#fbf8f1;padding:14px;display:flex;flex-direction:column;gap:8px">
+<span style="font-size:10px;letter-spacing:.08em;color:#2e5a3e;font-weight:600">DRAFT MEMORY · NOT SAVED YET</span>
+<span style="font-family:'Source Serif 4',serif;font-size:16px;color:#1a1612">{{ p.draftText }}</span>
+<div style="display:flex;gap:8px"><button onClick="{{ p.reviewDraft }}" style="font:500 12px 'Inter Tight',sans-serif;height:28px;padding:0 12px;border:0;border-radius:5px;background:#1a1612;color:#f5f0e6;cursor:pointer">Review draft</button><span style="font-size:12px;color:#5d5648;align-self:center">Opens it in the editor before anything is written</span></div>
+</div>
+</sc-if>
+</div>
+<div style="padding:12px 28px 16px;border-top:1px solid #d4ccb8;display:flex;flex-direction:column;gap:10px">
+<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">19</span></sc-if><sc-for list="{{ p.chips }}" as="s" hint-placeholder-count="4"><span onClick="{{ s.onClick }}" style="padding:4px 10px;border:1px solid #d4ccb8;border-radius:14px;font-size:12px;color:#3a342b;cursor:pointer" style-hover="background:#ede6d6">{{ s.c }}</span></sc-for></div>
+<div style="display:flex;gap:8px;align-items:center"><input value="{{ p.compose }}" onChange="{{ p.onCompose }}" onKeyDown="{{ p.onComposeKey }}" placeholder="Ask, or say “remember …” to add a memory" style="flex:1;height:44px;border:1px solid #c9bfa8;border-radius:6px;background:#fbf8f1;padding:0 12px;font:13px 'Inter Tight',sans-serif;color:#1a1612;outline:none"></input><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">20</span></sc-if><button onClick="{{ p.send }}" style="font:500 13px 'Inter Tight',sans-serif;height:44px;padding:0 16px;border:0;border-radius:6px;background:#a83818;color:#fff;cursor:pointer">Send</button></div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ p.isClusters }}" hint-placeholder-val="{{ false }}">
+<div style="display:flex;flex-direction:column;height:100%;min-height:0">
+<div style="padding:16px 24px;border-bottom:1px solid #d4ccb8;display:flex;align-items:center;gap:10px"><span style="font-family:'Source Serif 4',serif;font-size:20px">Clusters</span><span style="font-size:12px;color:#5d5648">Generated 3d ago from shared references and links</span><span style="flex:1"></span>
+<sc-if value="{{ p.hasUnclustered }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:#6e4a0a;padding:2px 8px;border-radius:4px;background:#f9e5b8">{{ p.unclustered }} unclustered</span></sc-if>
+<sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #f5f0e6">23</span></sc-if>
+<button onClick="{{ p.regenerate }}" style="font:500 12px 'Inter Tight',sans-serif;height:26px;padding:0 10px;border:1px solid #d4ccb8;border-radius:5px;background:#f5f0e6;color:#1a1612;cursor:pointer" style-hover="border-color:#1a1612">Regenerate</button></div>
+<div style="flex:1;overflow:auto;padding:18px 24px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-content:start">
+<sc-for list="{{ p.clusterCards }}" as="k" hint-placeholder-count="4">
+<div style="border:1px solid #d4ccb8;border-radius:8px;background:#fbf8f1;padding:16px;display:flex;flex-direction:column;gap:10px">
+<div style="display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;border-radius:2px;background:{{ k.dot }}"></span><span style="font-family:'Source Serif 4',serif;font-size:17px;flex:1">{{ k.name }}</span><sc-if value="{{ k.first }}" hint-placeholder-val="{{ false }}"><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #fbf8f1">24</span></sc-if></sc-if><span onClick="{{ k.onOpen }}" style="font-size:12px;color:#a83818;cursor:pointer" style-hover="color:#1a1612">Open {{ k.count }} →</span></div>
+<span style="font-size:12.5px;color:#5d5648;line-height:1.5">{{ k.desc }}</span>
+<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center"><sc-for list="{{ k.members }}" as="m" hint-placeholder-count="4"><sc-if value="{{ m.first }}" hint-placeholder-val="{{ false }}"><sc-if value="{{ p.co }}" hint-placeholder-val="{{ true }}"><span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace;flex:none;box-shadow:0 0 0 2px #fbf8f1">25</span></sc-if></sc-if><span onClick="{{ m.onClick }}" style="font-family:'JetBrains Mono',monospace;font-size:11px;padding:3px 7px;border-radius:4px;cursor:pointer;background:{{ m.bg }};color:#2a241c;border:1px solid #e3dcc8" style-hover="border-color:#1a1612">{{ m.slug }}</span></sc-for></div>
+<div style="display:flex;gap:14px;font-size:11.5px;color:#3a342b;border-top:1px solid #e3dcc8;padding-top:9px"><span>{{ k.relCount }} links</span><span>{{ k.retires }} retires</span><span style="color:#6e4a0a">{{ k.staleCount }} stale</span></div>
+</div>
+</sc-for>
+</div>
+</div>
+</sc-if>
+
+</div>
+</div>
+
+<sc-if value="{{ p.ovPalette }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ p.closeOv }}" style="position:absolute;inset:0;z-index:40;background:rgba(26,22,18,.32)"></div>
+<div style="position:absolute;left:50%;top:84px;transform:translateX(-50%);width:580px;z-index:41;background:#fbf8f1;border:1px solid #c9bfa8;border-radius:10px;box-shadow:0 20px 50px rgba(26,22,18,.3);overflow:hidden">
+<input value="{{ p.pk }}" onChange="{{ p.onPk }}" autoFocus="{{ true }}" placeholder="Search memories or ask a question…" style="width:100%;height:50px;border:0;border-bottom:1px solid #e3dcc8;padding:0 18px;font:15px 'Inter Tight',sans-serif;color:#1a1612;background:transparent;outline:none"></input>
+<div style="padding:6px;display:flex;flex-direction:column;max-height:380px;overflow:auto">
+<sc-for list="{{ p.palette }}" as="x" hint-placeholder-count="5">
+<div onClick="{{ x.onClick }}" style="display:flex;align-items:center;gap:9px;padding:8px 12px;border-radius:6px;cursor:pointer" style-hover="background:#ede6d6"><span style="width:7px;height:7px;border-radius:2px;background:{{ x.dot }};flex:none"></span><span style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#1a1612;flex:none">{{ x.slug }}</span><span style="font-size:12px;color:#5d5648;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ x.desc }}</span></div>
+</sc-for>
+<div onClick="{{ p.askFromPalette }}" style="display:flex;align-items:center;gap:9px;padding:10px 12px;margin-top:4px;border-top:1px solid #e3dcc8;cursor:pointer;font-size:13px;color:#a83818" style-hover="background:#ede6d6"><span style="font-family:'JetBrains Mono',monospace;font-size:11px">↵</span>{{ p.askRow }}<span style="flex:1"></span><span style="font-size:11px;color:#5d5648">opens Ask</span></div>
+</div>
+<div style="padding:8px 14px;border-top:1px solid #e3dcc8;font-size:11px;color:#5d5648;display:flex;gap:14px"><span>↑↓ move</span><span>↵ open</span><span>esc close</span></div>
+</div>
+</sc-if>
+
+<sc-if value="{{ p.ovDelete }}" hint-placeholder-val="{{ false }}">
+<div onClick="{{ p.closeOv }}" style="position:absolute;inset:0;z-index:40;background:rgba(26,22,18,.32)"></div>
+<div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:440px;z-index:41;background:#fbf8f1;border:1px solid #c9bfa8;border-radius:10px;box-shadow:0 20px 50px rgba(26,22,18,.3);padding:20px;display:flex;flex-direction:column;gap:12px">
+<span style="font-family:'Source Serif 4',serif;font-size:20px;color:#1a1612">Delete this memory?</span>
+<span style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#1a1612">{{ p.r.slug }}.md</span>
+<sc-if value="{{ p.hasInbound }}" hint-placeholder-val="{{ true }}"><div style="padding:10px 12px;border-radius:6px;background:#f6e3dc;font-size:12.5px;line-height:1.5;color:#5a1d0c">{{ p.inboundN }} memories link here. Those links will show as broken until removed.</div></sc-if>
+<span style="font-size:12.5px;color:#5d5648">The file is removed from disk. You can undo for a few seconds afterwards. To keep it out of sessions without deleting it, use Archive.</span>
+<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px"><button onClick="{{ p.archive }}" style="font:500 12.5px 'Inter Tight',sans-serif;height:32px;padding:0 12px;border:1px solid #c9bfa8;border-radius:5px;background:transparent;color:#1a1612;cursor:pointer;margin-right:auto">Archive instead</button><button onClick="{{ p.closeOv }}" style="font:500 12.5px 'Inter Tight',sans-serif;height:32px;padding:0 12px;border:1px solid #c9bfa8;border-radius:5px;background:#f5f0e6;color:#1a1612;cursor:pointer">Cancel</button><button onClick="{{ p.confirmDelete }}" style="font:500 12.5px 'Inter Tight',sans-serif;height:32px;padding:0 14px;border:0;border-radius:5px;background:#a83818;color:#fff;cursor:pointer">Delete</button></div>
+</div>
+</sc-if>
+
+<sc-if value="{{ p.hasToast }}" hint-placeholder-val="{{ false }}">
+<div style="position:absolute;left:50%;bottom:22px;transform:translateX(-50%);z-index:50;display:flex;align-items:center;gap:14px;padding:10px 12px 10px 16px;border-radius:8px;background:#1a1612;color:#f5f0e6;font-size:13px;box-shadow:0 10px 30px rgba(26,22,18,.3);white-space:nowrap">
+<span>{{ p.toastText }}</span>
+<sc-if value="{{ p.toastUndo }}" hint-placeholder-val="{{ false }}"><span onClick="{{ p.onUndo }}" style="font-weight:600;color:#f0b49c;cursor:pointer" style-hover="color:#fff">Undo</span></sc-if>
+<span onClick="{{ p.closeToast }}" style="color:#9c937f;cursor:pointer;padding:0 4px" style-hover="color:#fff">×</span>
+</div>
+</sc-if>
+</div>
+
+<aside style="width:340px;flex:none;display:flex;flex-direction:column;gap:2px;background:#f5f0e6;border:1px solid rgba(0,0,0,.1);border-radius:8px;padding:18px 18px 10px">
+<span style="font-size:10px;letter-spacing:.08em;color:#5d5648;font-weight:600">CALLOUTS · {{ p.viewName }}</span>
+<span style="font-size:12px;color:#5d5648;margin-bottom:10px">1–7 are global. The rest change with the view.</span>
+<sc-for list="{{ p.legend }}" as="g" hint-placeholder-count="17">
+<div style="display:grid;grid-template-columns:24px minmax(0,1fr);gap:8px;padding:9px 0;border-top:1px solid #e3dcc8">
+<span style="display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:50%;background:#a83818;color:#fff;font:600 10px/1 'JetBrains Mono',monospace">{{ g.n }}</span>
+<div style="display:flex;flex-direction:column;gap:2px;font-size:12px;line-height:1.45"><b style="font-weight:600;color:#1a1612">{{ g.name }}</b><span style="color:#2a241c">{{ g.click }}</span><sc-if value="{{ g.hasNote }}" hint-placeholder-val="{{ true }}"><span style="color:#5d5648">↳ {{ g.note }}</span></sc-if></div>
+</div>
+</sc-for>
+</aside>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const CL = {
+  sched: { name: 'Scheduler diagnosis & stability', dot: '#a83818', desc: 'Root causes and diagnostics for scheduler freezes, stalls, wedges and idle-with-queue symptoms.' },
+  review: { name: 'Needs-review & worktree recovery', dot: '#2e5a3e', desc: 'How parked needs_review rows, worktree failures and cwd hazards stall chains — and how to unblock them.' },
+  feedback: { name: 'Working-style feedback', dot: '#d49a25', desc: 'Corrections and preferences: when to commit, publish, queue work and end turns.' },
+  bilko: { name: 'Bilko & marketing', dot: '#3a342b', desc: 'Where the bilko.run site, checkout and pricing actually live.' },
+  infra: { name: 'Tooling & test infra', dot: '#9c937f', desc: 'Test harnesses, env-sensitive gotchas and Claude Code references.' },
+};
+const M = [
+  ['bilko_run_marketing_repo','bilko','3.6 KB',16,1,'bilko.run marketing/purchase pages live in ~/Projects/Bilko, not this repo.'],
+  ['billing_usage_api','bilko','2.5 KB',29,1,'Usage metering endpoint shape and where invoices are generated.'],
+  ['claude_code_reference','infra','6.3 KB',190,1,'Flags, hook names and settings paths for Claude Code.'],
+  ['claude_design_link_access','infra','1.6 KB',17,1,'How design links are authorised for headless runs.'],
+  ['claude_projects_scan_cost','sched','1.6 KB',29,1,'Scanning ~/.claude/projects on every tick is the main idle CPU cost.'],
+  ['cross_project_prd_authoring','feedback','1.4 KB',35,0,'Write PRDs in the repo that owns the change, not the caller.'],
+  ['develop_loop_calibration','infra','2.6 KB',20,1,'Timeouts and retry counts tuned for the develop loop.'],
+  ['e2e_test_infra','infra','1.9 KB',176,0,'Playwright harness layout and how fixtures are seeded.'],
+  ['env_sensitive_test_gotcha','infra','883 B',80,0,'Two tests pass locally only because TZ is set.'],
+  ['false_rate_limit_pause','sched','1.1 KB',1,0,'Pauses that look like 429s are actually meter refreshes.'],
+  ['feedback_always_commit_after_edit','feedback','2.1 KB',71,0,'Commit after every verified edit; never leave a dirty tree.'],
+  ['feedback_dont_end_turns_with_questions','feedback','1.4 KB',29,0,'Finish the work; ask only when truly blocked.'],
+  ['feedback_dont_file_product_work_at_host','feedback','1.4 KB',29,1,'Product work belongs in the product repo, not the host.'],
+  ['feedback_git_publish_autonomy','feedback','1.8 KB',72,0,'Push and publish without asking once checks pass.'],
+  ['feedback_queue_by_default','feedback','1.3 KB',92,0,'Queue follow-ups as jobs rather than doing them inline.'],
+  ['job_runtime_profile','sched','1.3 KB',29,1,'Typical job durations; anything over 3× is a stall.'],
+  ['mac_scheduler_v096_liveness_fixes','sched','2.8 KB',18,0,'Liveness fixes shipped in v0.96 for the mac scheduler.'],
+  ['mechanical_recovery_content_conflict','review','2.2 KB',23,1,'Recovering when a worktree merge leaves conflict markers.'],
+  ['meter_429_idles_scheduler','sched','1.4 KB',3,0,'A 429 from the meter pauses dispatch with nothing to re-arm it.'],
+  ['mutate_reentrant_deadlock','sched','1.4 KB',17,0,'Re-entrant mutate() calls deadlock the state lock.'],
+  ['needs_review_chain_stall','review','2.8 KB',29,1,'Parked needs_review rows silently stall the whole chain.'],
+  ['needs_review_not_in_history','review','1.4 KB',29,1,'needs_review rows are missing from the history view.'],
+  ['reverify_heals_on_foreign_commit','review','1.2 KB',6,0,'Re-verify succeeds when another agent committed the fix.'],
+  ['scheduler_dispatch_has_no_driver','sched','2.0 KB',5,0,'Once the tick loop exits, nothing drives dispatch.'],
+  ['scheduler_stability_chain','sched','3.1 KB',4,0,'The PRD chain that retires most scheduler stall memories.'],
+  ['worktree_cwd_ops_root_hazard','review','1.7 KB',9,0,'Ops run from the root checkout clobber worktree state.'],
+].map(([slug,c,size,days,stale,desc]) => ({ slug, c, size, days, stale: !!stale, desc }));
+const R = [
+  ['scheduler_stability_chain','scheduler_dispatch_has_no_driver','retires'],
+  ['scheduler_stability_chain','needs_review_chain_stall','retires'],
+  ['scheduler_stability_chain','job_runtime_profile','retires'],
+  ['scheduler_dispatch_has_no_driver','meter_429_idles_scheduler','related'],
+  ['meter_429_idles_scheduler','job_runtime_profile','related'],
+  ['mutate_reentrant_deadlock','scheduler_stability_chain','related'],
+  ['mac_scheduler_v096_liveness_fixes','job_runtime_profile','related'],
+  ['mac_scheduler_v096_liveness_fixes','scheduler_dispatch_has_no_driver','related'],
+  ['claude_projects_scan_cost','scheduler_dispatch_has_no_driver','related'],
+  ['claude_projects_scan_cost','feedback_dont_file_product_work_at_host','related'],
+  ['needs_review_not_in_history','needs_review_chain_stall','related'],
+  ['needs_review_chain_stall','worktree_cwd_ops_root_hazard','related'],
+  ['mechanical_recovery_content_conflict','needs_review_chain_stall','related'],
+  ['reverify_heals_on_foreign_commit','needs_review_chain_stall','related'],
+  ['bilko_run_marketing_repo','feedback_queue_by_default','related'],
+  ['billing_usage_api','bilko_run_marketing_repo','related'],
+  ['cross_project_prd_authoring','bilko_run_marketing_repo','related'],
+  ['false_rate_limit_pause','meter_429_idles_scheduler','related'],
+];
+const STALE_INFO = {
+  bilko_run_marketing_repo: ['references 2 paths that no longer exist', '~/Projects/bilko-run/  ·  design-mocks/landing-v2/'],
+};
+
+const AG = {
+  'code-reviewer': ['feedback_always_commit_after_edit','feedback_git_publish_autonomy','env_sensitive_test_gotcha','e2e_test_infra','cross_project_prd_authoring','claude_code_reference','feedback_dont_end_turns_with_questions','develop_loop_calibration'],
+  'release-bot': ['feedback_git_publish_autonomy','bilko_run_marketing_repo','billing_usage_api','mac_scheduler_v096_liveness_fixes'],
+  'scheduler-ops': ['meter_429_idles_scheduler','scheduler_dispatch_has_no_driver','scheduler_stability_chain','mutate_reentrant_deadlock','job_runtime_profile','false_rate_limit_pause','claude_projects_scan_cost','mac_scheduler_v096_liveness_fixes','needs_review_chain_stall','worktree_cwd_ops_root_hazard','reverify_heals_on_foreign_commit'],
+  'docs-writer': [],
+};
+const BROKEN = ['bilko_run_marketing_repo','claude_code_reference','develop_loop_calibration','mechanical_recovery_content_conflict'];
+const P0 = { pv: 'all', psel: 'bilko_run_marketing_repo', pmode: 'read', pscope: 'workspace', pq: '', psort: 'recent', povl: null, pfix: null, ptoast: null, pask: 'idle', pcompose: '', pctx: null, pquestion: '', premember: false, pedit: '', pname: '', pk: '', pprev: null };
+const p0 = () => ({ ...P0, pverified: [], parchived: [], pdeleted: [], pcreated: [], plinkRm: [] });
+const NEW_BODY = 'One-line summary of the fact or rule.\n\n**Why:** \n\n**How to apply:** ';
+const sz = s => parseFloat(s) * (s.includes('KB') ? 1024 : 1);
+const SORTS = ['recent', 'name', 'size'];
+const LEG_G = [
+  [1, 'Scope switcher', 'Opens the scope menu. Picking a scope reloads the list and every nav count.', 'Empty scope → empty state with + New memory.'],
+  [2, 'Search  ⌘K', 'Opens the command palette. Typing filters memories; the last row sends the text to Ask.', 'Esc or backdrop closes with no change.'],
+  [3, 'Learn', 'Popover: where memory lives and how it gets loaded.', 'Replaces the paragraph that used to sit in the header.'],
+  [4, 'Browse views', 'All memories → list + reader. Ask → chat. Clusters → cards.', 'Selection is kept when you return to a list view.'],
+  [5, 'Review queues', 'Filters the list to Stale, Broken references or Changed this week. Counts update live.', 'Count reaches 0 → shows ✓ and the queue says "All clear".'],
+  [6, 'Cluster filters', 'Filters the list to one cluster.', 'New memories stay Unclustered until Regenerate.'],
+  [7, 'Subagent scopes', 'Shortcut for 1: switches straight to that subagent.', 'docs-writer has no memories → empty state.'],
+];
+const LEG_V = {
+  browse: [
+    [8, '+ New', 'Opens a blank template in the reader.', 'Save adds it to the top of the list, selected. Cancel returns to the previous memory.'],
+    [9, 'Filter + sort', 'Filter narrows live by name and description. Sort cycles Recent → Name → Size.', 'No matches → empty state with Clear filter.'],
+    [10, 'List row', 'Selects the memory into the reader.', 'STALE / BROKEN badges match the reader banner.'],
+    [11, 'Read / Source', 'Switches between rendered markdown and the raw file with frontmatter.', ''],
+    [12, 'Edit', 'Swaps the body for an inline editor. Save writes the file.', 'Saving a stale memory also marks it verified.'],
+    [13, '⋯ More', 'Copy path · Reveal in Finder · Archive · Delete.', 'Archive can be undone from the toast. Delete asks first and counts inbound links.'],
+    [14, 'Fix with assistant', 'Assistant checks referenced paths (~1s), then shows a diff with Apply / Discard.', 'Apply clears stale with Undo. Discard returns to the banner.'],
+    [15, 'Mark verified', 'Clears stale without edits and resets the 30-day re-check.', 'Undo in toast.'],
+    [16, 'Links rail', 'Click to open the linked memory.', 'Deleted targets turn red; clicking removes the dead link.'],
+    [17, 'Ask about this memory', 'Opens Ask with this memory attached as context.', ''],
+  ],
+  ask: [
+    [18, 'Context chip', 'Shows which memory the question is about. × widens to the whole scope.', ''],
+    [19, 'Suggestions', 'Fills the composer. Nothing is sent until Send.', ''],
+    [20, 'Send', 'Answers inline with numbered citations.', 'Starting with "remember …" drafts a new memory instead.'],
+    [21, 'Citation', 'Opens that memory in the reader.', 'Stale citations carry the badge.'],
+    [22, 'Re-verify', 'Jumps to the Stale queue.', ''],
+  ],
+  clusters: [
+    [23, 'Regenerate', 'Rebuilds clusters from links and shared references.', 'Toast reports what moved.'],
+    [24, 'Open N →', 'Switches to the list filtered to that cluster.', ''],
+    [25, 'Member chip', 'Opens that memory in the reader.', 'Yellow = stale.'],
+  ],
+};
+
+class Component extends DCLogic {
+  state = { view: 'all', sel: 'bilko_run_marketing_repo', mode: 'read', pco: true, ...p0() };
+  componentDidMount() {
+    this._kd = e => {
+      if (e.key === 'Escape' && this.state.povl) this.setState({ povl: null });
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); this.setState({ povl: 'palette', pk: '' }); }
+    };
+    window.addEventListener('keydown', this._kd);
+  }
+  componentWillUnmount() { window.removeEventListener('keydown', this._kd); clearTimeout(this._tt); clearTimeout(this._ft); }
+  pMems(s = this.state) {
+    const base = s.pscope === 'workspace' ? M : M.filter(m => AG[s.pscope].includes(m.slug));
+    return [...s.pcreated, ...base].filter(m => !s.pdeleted.includes(m.slug) && !s.parchived.includes(m.slug)).map(m => ({ ...m, stale: m.stale && !s.pverified.includes(m.slug) }));
+  }
+  toast(text, undo) { clearTimeout(this._tt); this.setState({ ptoast: { text, undo } }); this._tt = setTimeout(() => this.setState({ ptoast: null }), 6000); }
+  pFix() { this.setState({ pfix: 'checking' }); clearTimeout(this._ft); this._ft = setTimeout(() => this.setState(s => s.pfix === 'checking' ? { pfix: 'proposed' } : null), 1400); }
+  pVerify(slug, msg) { this.setState(st => ({ pverified: [...st.pverified, slug], pfix: null })); this.toast(msg || 'Marked verified · re-check in 30 days', () => this.setState(st => ({ pverified: st.pverified.filter(x => x !== slug) }))); }
+  pApply(slug) { this.pVerify(slug, 'Updated ' + slug + ' · referenced paths repointed'); }
+  pNew(body) { this.setState(s => ({ pprev: s.psel === '__new' ? s.pprev : s.psel, psel: '__new', pmode: 'edit', pname: '', pedit: body ? body + '\n\n**Why:** \n\n**How to apply:** ' : NEW_BODY, pv: (s.pv === 'ask' || s.pv === 'clusters') ? 'all' : s.pv, povl: null, pfix: null })); }
+  pSaveNew() {
+    const s = this.state;
+    const slug = s.pname.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'untitled_memory';
+    const desc = (s.pedit.split('\n').find(l => l.trim()) || '').replace(/\*\*/g, '');
+    this.setState(st => ({ pcreated: [{ slug, c: null, size: '0.4 KB', days: 0, stale: false, desc, body: st.pedit }, ...st.pcreated], psel: slug, pmode: 'read', pv: 'all', pq: '' }));
+    this.toast('Saved ' + slug + '.md · Unclustered until next Regenerate');
+  }
+  pSaveEdit() { const slug = this.state.psel; this.setState(st => ({ pmode: 'read', pfix: null, pverified: st.pverified.includes(slug) ? st.pverified : [...st.pverified, slug] })); this.toast('Saved ' + slug + '.md · marked verified'); }
+  pCancel() { this.setState(st => st.psel === '__new' ? { psel: st.pprev, pmode: 'read' } : { pmode: 'read' }); }
+  pArchive(slug) { this.setState(st => ({ parchived: [...st.parchived, slug], psel: null, povl: null })); this.toast('Archived ' + slug, () => this.setState(st => ({ parchived: st.parchived.filter(x => x !== slug), psel: slug }))); }
+  pDelete(slug) {
+    const n = R.filter(x => x[1] === slug).length;
+    this.setState(st => ({ pdeleted: [...st.pdeleted, slug], psel: null, povl: null }));
+    this.toast('Deleted ' + slug + (n ? ' · ' + n + ' inbound links now broken' : ''), () => this.setState(st => ({ pdeleted: st.pdeleted.filter(x => x !== slug), psel: slug })));
+  }
+  pJump(o, after) { clearTimeout(this._ft); clearTimeout(this._tt); this.setState({ ...p0(), ...o }, after); if (location.hash !== '#2a') location.hash = '2a'; }
+  go(view) { this.setState({ view }); }
+  open(slug) { this.setState({ sel: slug, view: this.inView(slug) ? this.state.view : 'all' }); }
+  inView(slug) { return this.filtered().some(m => m.slug === slug) && ['ask','clusters'].indexOf(this.state.view) < 0; }
+  filtered() {
+    const v = this.state.view;
+    if (v === 'stale') return M.filter(m => m.stale);
+    if (v === 'recent') return M.filter(m => m.days <= 7);
+    if (v === 'broken') return M.filter(m => STALE_INFO[m.slug] || m.slug === 'claude_code_reference' || m.slug === 'develop_loop_calibration' || m.slug === 'mechanical_recovery_content_conflict');
+    if (v.startsWith('c:')) return M.filter(m => m.c === v.slice(2));
+    return [...M].sort((a, b) => a.days - b.days);
+  }
+  renderV1() {
+    const { view, sel, mode } = this.state;
+    const browse = view !== 'ask' && view !== 'clusters';
+    const item = (id, label, count, dot) => {
+      const on = view === id;
+      return { label, count: count ?? '', dot: dot || 'transparent', onClick: () => this.go(id), bg: on ? '#f5f0e6' : 'transparent', color: on ? '#1a1612' : '#3a342b', weight: on ? 600 : 400, countColor: on ? '#1a1612' : '#5d5648' };
+    };
+    const staleN = M.filter(m => m.stale).length;
+    const navGroups = [
+      { title: 'BROWSE', items: [item('all', 'All memories', M.length), item('ask', 'Ask'), item('clusters', 'Clusters', 5)] },
+      { title: 'REVIEW', items: [item('stale', 'Stale', staleN, '#d49a25'), item('broken', 'Broken references', 4, '#a83818'), item('recent', 'Changed this week', M.filter(m => m.days <= 7).length)] },
+      { title: 'CLUSTERS', items: Object.keys(CL).map(k => item('c:' + k, CL[k].name, M.filter(m => m.c === k).length, CL[k].dot)) },
+    ];
+    const listM = this.filtered();
+    const titles = { all: 'All memories', stale: 'Stale', recent: 'Changed this week', broken: 'Broken references' };
+    const list = listM.map(m => ({ slug: m.slug, desc: m.desc, stale: m.stale, dot: CL[m.c].dot, meta: `${m.size} · ${m.days}d ago`, bg: m.slug === sel ? '#e3dcc8' : 'transparent', onClick: () => this.setState({ sel: m.slug }) }));
+    const m = M.find(x => x.slug === sel) || M[0];
+    const link = (slug, type) => ({ slug, type, onClick: () => this.open(slug) });
+    const out = R.filter(r => r[0] === m.slug).map(r => link(r[1], r[2]));
+    const inc = R.filter(r => r[1] === m.slug).map(r => link(r[0], r[2] === 'retires' ? 'retired by this' : r[2]));
+    const si = STALE_INFO[m.slug] || ['not re-verified in ' + m.days + ' days', 'last verified against commit a41c2e0'];
+    const r = {
+      slug: m.slug, desc: m.desc, cluster: CL[m.c].name, dot: CL[m.c].dot, size: m.size, age: m.days + 'd ago', stale: m.stale,
+      staleNote: si[0], stalePaths: si[1], isBilko: m.slug === 'bilko_run_marketing_repo', notBilko: m.slug !== 'bilko_run_marketing_repo',
+      out, inc, outCount: out.length, inCount: inc.length, noOut: !out.length, noIn: !inc.length,
+      path: `~/.claude/projects/-home-bilko-Projects-session-manager/memory/${m.slug}.md`,
+      source: `---\nname: ${m.slug.replace(/_/g, '-')}\ndescription: "${m.desc}"\nmetadata:\n  node_type: memory\n  type: project\n  originSessionId: de0e5dbe-8abe-4fec-a9a4-e667767ccbd9\n  modified: 2026-09-26T03:27:00.825Z\n---\n\n${m.desc}\n\n**Why:** …\n\n**How to apply:** …`,
+    };
+    const cite = ['meter_429_idles_scheduler', 'scheduler_dispatch_has_no_driver', 'mutate_reentrant_deadlock', 'job_runtime_profile'];
+    const citations = cite.map((s, i) => ({ n: '[' + (i + 1) + ']', slug: s, age: M.find(x => x.slug === s).days + 'd', onClick: () => this.open(s) }));
+    const clusterCards = Object.keys(CL).map(k => {
+      const mem = M.filter(x => x.c === k);
+      const rel = R.filter(rr => mem.some(x => x.slug === rr[0]));
+      return { name: CL[k].name, desc: CL[k].desc, dot: CL[k].dot, count: mem.length, staleCount: mem.filter(x => x.stale).length, relCount: rel.length, retires: rel.filter(rr => rr[2] === 'retires').length,
+        members: mem.map(x => ({ slug: x.slug, bg: x.stale ? '#f9e5b8' : '#f5f0e6', onClick: () => this.open(x.slug) })), onOpen: () => this.go('c:' + k) };
+    });
+    const tree = Object.keys(CL).map((k, i) => {
+      const mem = M.filter(x => x.c === k);
+      const open = k === 'review' || k === 'sched';
+      return { name: CL[k].name, dot: CL[k].dot, count: mem.length, caret: open ? '▼' : '▶',
+        members: open ? mem.map(x => ({ slug: x.slug, bg: x.slug === 'needs_review_chain_stall' ? '#f5f0e6' : 'transparent', flag: ['claude_projects_scan_cost', 'mechanical_recovery_content_conflict'].includes(x.slug) ? '#a83818' : x.stale ? '#d49a25' : 'transparent' })) : [] };
+    });
+    const progress = Array.from({ length: 30 }, (_, i) => ({ c: i < 3 ? '#2e5a3e' : i === 3 ? '#1a1612' : '#d4ccb8' }));
+    const upNext = M.filter(x => x.stale && x.slug !== 'claude_code_reference').sort((a, b) => b.days - a.days).slice(0, 5).map(x => ({ slug: x.slug, age: x.days + 'd' }));
+    return {
+      navGroups, agents: [{ name: 'code-reviewer', count: 8 }, { name: 'release-bot', count: 4 }, { name: 'scheduler-ops', count: 11 }],
+      isBrowse: browse, isAsk: view === 'ask', isClusters: view === 'clusters',
+      listTitle: view.startsWith('c:') ? CL[view.slice(2)].name : titles[view] || 'All memories', listCount: listM.length,
+      list, r, isRead: mode === 'read', isSource: mode === 'source', readBg: mode === 'read' ? '#e3dcc8' : 'transparent', sourceBg: mode === 'source' ? '#e3dcc8' : 'transparent',
+      setRead: () => this.setState({ mode: 'read' }), setSource: () => this.setState({ mode: 'source' }), openBilko: () => this.open('bilko_run_marketing_repo'),
+      citations, askChips: ['What changed this week?', 'Find contradictions', 'Summarize stale memories', 'Remember…'],
+      clusterCards, tree, staleCount: staleN, progress, upNext,
+    };
+  }
+  renderVals() { return { ...this.renderV1(), p: this.renderP() }; }
+  renderP() {
+    const s = this.state;
+    const set = o => () => this.setState(o);
+    const all = this.pMems();
+    const v = s.pv;
+    const browse = v !== 'ask' && v !== 'clusters';
+    const cl = c => CL[c] || { name: 'Unclustered', dot: '#c9bfa8' };
+    const rmKey = x => x[0] + '>' + x[1];
+    const isBroken = m => BROKEN.includes(m.slug) || R.some(x => x[0] === m.slug && s.pdeleted.includes(x[1]) && !s.plinkRm.includes(rmKey(x)));
+    const staleN = all.filter(m => m.stale).length, brokenN = all.filter(isBroken).length, recentN = all.filter(m => m.days <= 7).length;
+    const go = id => () => this.setState({ pv: id, pq: '', povl: null, pmode: s.pmode === 'edit' ? 'read' : s.pmode, pfix: null });
+    const item = (id, label, count, dot) => { const on = v === id; return { label, count: count ?? '', dot: dot || 'transparent', onClick: go(id), bg: on ? '#f5f0e6' : 'transparent', color: on ? '#1a1612' : '#3a342b', weight: on ? 600 : 400, countColor: on ? '#1a1612' : '#5d5648' }; };
+    const ckeys = Object.keys(CL).filter(k => all.some(m => m.c === k));
+    const nav = {
+      browse: [item('all', 'All memories', all.length), item('ask', 'Ask'), item('clusters', 'Clusters', ckeys.length)],
+      review: [item('stale', 'Stale', staleN || '✓', '#d49a25'), item('broken', 'Broken references', brokenN || '✓', '#a83818'), item('recent', 'Changed this week', recentN)],
+      clusters: ckeys.map(k => item('c:' + k, CL[k].name, all.filter(m => m.c === k).length, CL[k].dot)),
+    };
+    const pickScope = k => () => { const f = (k === 'workspace' ? M : M.filter(m => AG[k].includes(m.slug)))[0]; this.setState({ pscope: k, pv: 'all', psel: f ? f.slug : null, povl: null, pq: '', pmode: 'read', pfix: null }); };
+    const scopes = ['workspace', ...Object.keys(AG)].map(k => ({ name: k === 'workspace' ? 'session-manager' : k, kind: k === 'workspace' ? 'workspace' : 'subagent', count: k === 'workspace' ? M.length : AG[k].length, onClick: pickScope(k), bg: s.pscope === k ? '#ede6d6' : 'transparent', check: s.pscope === k ? '✓' : '' }));
+    const agents = Object.keys(AG).map(k => ({ name: k, count: AG[k].length, onClick: pickScope(k), bg: s.pscope === k ? '#f5f0e6' : 'transparent', weight: s.pscope === k ? 600 : 400 }));
+    const ws = s.pscope === 'workspace';
+    const scopeName = ws ? 'session-manager' : s.pscope;
+    let lm = v === 'stale' ? all.filter(m => m.stale) : v === 'broken' ? all.filter(isBroken) : v === 'recent' ? all.filter(m => m.days <= 7) : v.startsWith('c:') ? all.filter(m => m.c === v.slice(2)) : all;
+    const q = s.pq.trim().toLowerCase();
+    if (q) lm = lm.filter(m => m.slug.includes(q) || m.desc.toLowerCase().includes(q));
+    lm = [...lm].sort(s.psort === 'name' ? (a, b) => a.slug.localeCompare(b.slug) : s.psort === 'size' ? (a, b) => sz(b.size) - sz(a.size) : (a, b) => a.days - b.days);
+    const list = lm.map(m => ({ slug: m.slug, desc: m.desc, stale: m.stale, broken: isBroken(m) && !m.stale, dot: cl(m.c).dot, meta: m.size + ' · ' + (m.days ? m.days + 'd ago' : 'just now'), sel: m.slug === s.psel, bg: m.slug === s.psel ? '#e3dcc8' : 'transparent', onClick: () => this.setState({ psel: m.slug, pmode: 'read', pfix: null, povl: null }) }));
+    const titles = { all: 'All memories', stale: 'Stale', broken: 'Broken references', recent: 'Changed this week' };
+    let empty = { t: '', b: '', a: '', on: null };
+    if (!lm.length) {
+      if (q) empty = { t: 'No memories match “' + s.pq + '”', b: 'Filter checks names and descriptions in this view.', a: 'Clear filter', on: set({ pq: '' }) };
+      else if (!all.length) empty = { t: scopeName + ' has no memories yet', b: 'They appear when this subagent saves one, or add one now.', a: '+ New memory', on: () => this.pNew() };
+      else empty = { t: 'All clear', b: v === 'stale' ? 'Nothing is stale in this scope.' : 'Nothing in this view.', a: 'Back to all memories', on: go('all') };
+    }
+    const isNew = s.psel === '__new';
+    const m = isNew ? null : all.find(x => x.slug === s.psel);
+    const editing = s.pmode === 'edit' && (isNew || !!m);
+    const open = slug => () => this.setState({ psel: slug, pmode: 'read', pfix: null });
+    let r = { out: [], inc: [], diff: [] };
+    if (m) {
+      const out = R.filter(x => x[0] === m.slug && !s.plinkRm.includes(rmKey(x))).map(x => {
+        const del = s.pdeleted.includes(x[1]), here = all.some(y => y.slug === x[1]);
+        return { slug: x[1], type: del ? 'deleted · click to remove link' : here ? x[2] : x[2] + ' · other scope', color: del ? '#a83818' : '#1a1612', border: del ? '#e8b9a8' : '#e3dcc8',
+          onClick: del ? () => { this.setState(st => ({ plinkRm: [...st.plinkRm, rmKey(x)] })); this.toast('Dead link removed from ' + m.slug); } : here ? open(x[1]) : () => this.toast(x[1] + ' lives in another scope') };
+      });
+      const inc = R.filter(x => x[1] === m.slug && !s.pdeleted.includes(x[0])).map(x => {
+        const here = all.some(y => y.slug === x[0]);
+        return { slug: x[0], type: (x[2] === 'retires' ? 'retires this' : x[2]) + (here ? '' : ' · other scope'), color: '#1a1612', border: '#e3dcc8', onClick: here ? open(x[0]) : () => this.toast(x[0] + ' lives in another scope') };
+      });
+      const si = STALE_INFO[m.slug] || ['not re-verified in ' + m.days + ' days', 'last verified against commit a41c2e0'];
+      const bil = m.slug === 'bilko_run_marketing_repo';
+      const D = (sign, text) => ({ sign, text, bg: sign === '−' ? '#f6e3dc' : '#e2ecdf', fg: sign === '−' ? '#5a1d0c' : '#1f3d2a' });
+      r = {
+        slug: m.slug, desc: m.desc, cluster: cl(m.c).name, dot: cl(m.c).dot, size: m.size, age: m.days ? m.days + 'd ago' : 'just now', stale: m.stale,
+        brokenOnly: isBroken(m) && !m.stale, fixIdle: m.stale && !s.pfix, fixChecking: m.stale && s.pfix === 'checking', fixProposed: m.stale && s.pfix === 'proposed',
+        staleNote: si[0], stalePaths: si[1], checkCount: bil ? '2 referenced paths' : '1 claim',
+        diff: bil ? [D('−', '~/Projects/bilko-run/'), D('+', '~/Projects/Bilko/   (matched by package name)'), D('−', 'design-mocks/landing-v2/'), D('+', 'removed, shipped in 65c8ef6')] : [D('−', 'claim checked against commit a41c2e0'), D('+', 'still true at HEAD 9b2f71d, wording refreshed')],
+        isBilko: bil, isCreated: !!m.body, isGeneric: !bil && !m.body, body: m.body || '',
+        out, inc, outCount: out.length, inCount: inc.length, noOut: !out.length, noIn: !inc.length,
+        path: (ws ? '~/.claude/projects/-home-bilko-Projects-session-manager/memory/' : '~/.claude/agents/' + s.pscope + '/memory/') + m.slug + '.md',
+        source: '---\nname: ' + m.slug.replace(/_/g, '-') + '\ndescription: "' + m.desc + '"\nmetadata:\n  node_type: memory\n  type: project\n  originSessionId: de0e5dbe-8abe-4fec-a9a4-e667767ccbd9\n  modified: 2026-09-26T03:27:00.825Z\n---\n\n' + (m.body || m.desc + '\n\n**Why:** …\n\n**How to apply:** …'),
+        onFix: () => this.pFix(), onDiscard: set({ pfix: null }), onApply: () => this.pApply(m.slug), onVerify: () => this.pVerify(m.slug),
+        onEdit: () => this.setState({ pmode: 'edit', pedit: m.body || m.desc + '\n\n**Why:** \n\n**How to apply:** ', povl: null }),
+        onAskAbout: () => this.setState({ pv: 'ask', pctx: m.slug, pask: 'idle', pcompose: '' }),
+      };
+    }
+    const inboundN = m ? R.filter(x => x[1] === m.slug && all.some(y => y.slug === x[0])).length : 0;
+    const k = s.pk.trim().toLowerCase();
+    const palette = (k ? all.filter(x => x.slug.includes(k) || x.desc.toLowerCase().includes(k)) : [...all].sort((a, b) => a.days - b.days)).slice(0, 6)
+      .map(x => ({ slug: x.slug, desc: x.desc, dot: cl(x.c).dot, onClick: () => this.setState({ psel: x.slug, pv: 'all', povl: null, pk: '', pmode: 'read', pfix: null }) }));
+    const ctxM = s.pctx ? all.find(x => x.slug === s.pctx) : null;
+    const citeSlugs = ctxM ? [ctxM.slug] : ['meter_429_idles_scheduler', 'scheduler_dispatch_has_no_driver', 'mutate_reentrant_deadlock', 'job_runtime_profile'];
+    const cites = citeSlugs.map((c, i) => { const mm = all.find(x => x.slug === c) || M.find(x => x.slug === c); return { n: '[' + (i + 1) + ']', slug: c, age: mm.days + 'd', stale: !!mm.stale, first: i === 0, onClick: () => this.setState({ pv: 'all', psel: c, pmode: 'read', pfix: null }) }; });
+    const staleCited = cites.filter(c => c.stale).length;
+    const answer = ctxM
+      ? ctxM.slug + ' was last written ' + ctxM.days + 'd ago. ' + (ctxM.stale ? 'It is flagged stale: ' + (STALE_INFO[ctxM.slug] || ['it has not been re-verified recently'])[0] + '. Open it and use Fix with assistant to repoint it.' : 'Everything it references still resolves at HEAD, so it reads as accurate.')
+      : 'Three memories point to the same chain. A 429 from the meter paused dispatch, but nothing re-armed it, because the dispatcher has no driver once the tick loop exits. A separate deadlock in mutate() could freeze it the same way.';
+    const send = () => {
+      const qq = s.pcompose.trim() || (ctxM ? 'Is this still accurate?' : 'Why did the scheduler sit idle with a full queue last week?');
+      this.setState({ pask: 'answered', pquestion: qq, pcompose: '', premember: /^remember/i.test(qq) });
+    };
+    const clusterCards = ckeys.map((ck, i) => {
+      const mem = all.filter(x => x.c === ck), rel = R.filter(x => mem.some(y => y.slug === x[0]));
+      return { name: CL[ck].name, desc: CL[ck].desc, dot: CL[ck].dot, count: mem.length, first: i === 0, staleCount: mem.filter(x => x.stale).length, relCount: rel.length, retires: rel.filter(x => x[2] === 'retires').length,
+        members: mem.map((x, j) => ({ slug: x.slug, first: i === 0 && j === 0, bg: x.stale ? '#f9e5b8' : '#f5f0e6', onClick: () => this.setState({ pv: 'all', psel: x.slug, pmode: 'read', pfix: null }) })), onOpen: go('c:' + ck) };
+    });
+    const unclustered = all.filter(x => !x.c).length;
+    const lkey = browse ? 'browse' : v;
+    const legend = [...LEG_G, ...LEG_V[lkey]].map(([n, name, click, note]) => ({ n: String(n), name, click, note, hasNote: !!note }));
+    const J = (o, after) => () => this.pJump(o, after);
+    const B = 'bilko_run_marketing_repo', N = 'needs_review_chain_stall', JR = 'job_runtime_profile', CC = 'claude_code_reference';
+    const flows = [
+      ['A', 'Stale memory points at paths that moved', 'The most common review case: a repo was renamed or files shipped.', [
+        ['Nav › Stale', 'List narrows to the 11 stale memories', J({ pv: 'stale', psel: null })],
+        ['Click row', 'Banner names the 2 missing paths', J({ pv: 'stale', psel: B })],
+        ['Fix with assistant', 'Checks paths against the repo (~1s)', J({ pv: 'stale', psel: B }, () => this.pFix())],
+        ['Review diff', 'bilko-run/ → Bilko/, landing-v2 dropped', J({ pv: 'stale', psel: B, pfix: 'proposed' })],
+        ['Apply', 'Badge clears, Stale 11 → 10, toast with Undo', J({ pv: 'stale', psel: B, pfix: 'proposed' }, () => this.pApply(B))]]],
+      ['B', 'Old but still accurate', 'Nothing to change; the memory just needs a fresh check date.', [
+        ['Click stale row', '190 days old, nothing referenced has moved', J({ pv: 'stale', psel: CC })],
+        ['Mark verified', 'Stale clears, 30-day clock resets', J({ pv: 'stale', psel: CC }, () => this.pVerify(CC))],
+        ['Undo in toast', 'Restores the stale flag within 6s', J({ pv: 'stale', psel: CC })]]],
+      ['C', 'Capture a new memory by hand', 'You want to write a rule down without going through chat.', [
+        ['+ New', 'Blank template opens in the reader', J({ psel: '__new', pprev: B, pmode: 'edit', pedit: NEW_BODY })],
+        ['Fill name + body', 'Name becomes the file slug', J({ psel: '__new', pprev: B, pmode: 'edit', pname: 'deploy freeze fridays', pedit: 'No session-manager deploys after 15:00 on Fridays.\n\n**Why:** Two weekend pages in September traced to Friday-evening releases.\n\n**How to apply:** Queue the release for Monday instead.' })],
+        ['Save', 'Row added at top, Unclustered; toast', J({ psel: '__new', pprev: B, pmode: 'edit', pname: 'deploy freeze fridays', pedit: 'No session-manager deploys after 15:00 on Fridays.\n\n**Why:** Two weekend pages in September traced to Friday-evening releases.\n\n**How to apply:** Queue the release for Monday instead.' }, () => this.pSaveNew())]]],
+      ['D', 'Delete something other memories link to', 'Destructive and affects the graph, so it confirms and then offers Undo.', [
+        ['⋯ More', 'Copy · Reveal · Archive · Delete', J({ psel: N, povl: 'more' })],
+        ['Delete…', 'Dialog warns: 4 memories link here', J({ psel: N, povl: 'delete' })],
+        ['Confirm', 'Removed; toast with Undo', J({ psel: N }, () => this.pDelete(N))],
+        ['Open a linking memory', 'Dead link shows red; click removes it', J({ pdeleted: [N], psel: 'mechanical_recovery_content_conflict' })]]],
+      ['E', 'Find by question', 'You remember the symptom, not the file name.', [
+        ['⌘K / Search', 'Palette shows recent memories', J({ povl: 'palette' })],
+        ['Type "idle"', 'Matches, plus an Ask row', J({ povl: 'palette', pk: 'idle' })],
+        ['Ask row', 'Answer with 4 citations', J({ pv: 'ask', pask: 'answered', pquestion: 'idle' })],
+        ['Click citation', 'Opens that memory in the reader', J({ psel: 'meter_429_idles_scheduler' })]]],
+      ['F', 'Check one memory with the assistant', 'Starting from a memory, not from chat.', [
+        ['Select memory', 'job_runtime_profile, stale 29d', J({ psel: JR })],
+        ['Ask about this memory', 'Ask opens with a context chip', J({ pv: 'ask', pctx: JR })],
+        ['Send', 'Answer scoped to it, with 1 citation', J({ pv: 'ask', pctx: JR, pask: 'answered', pquestion: 'Is this still accurate?' })]]],
+      ['G', 'Capture from Ask', 'Saying "remember …" in Ask drafts a memory instead of answering.', [
+        ['Type "remember …"', 'Composer is pre-filled', J({ pv: 'ask', pcompose: 'remember release-bot must never push tags on Fridays' })],
+        ['Send', 'Assistant replies with a draft card', J({ pv: 'ask', pask: 'answered', premember: true, pquestion: 'remember release-bot must never push tags on Fridays' })],
+        ['Review draft', 'Opens the editor with the text filled in', J({}, () => this.pNew('release-bot must never push tags on Fridays.'))]]],
+      ['H', 'Switch scope and handle empty or no-match views', 'Subagents have their own memory, and some have none.', [
+        ['Scope card', 'Menu: workspace + 4 subagents', J({ povl: 'scope' })],
+        ['scheduler-ops', 'List, clusters and review counts all recalculate', J({ pscope: 'scheduler-ops', psel: 'meter_429_idles_scheduler' })],
+        ['docs-writer', 'Empty state with + New memory', J({ pscope: 'docs-writer', psel: null })],
+        ['Filter "zzz"', 'No matches, with Clear filter', J({ pq: 'zzz' })]]],
+    ].map(([id, title, sit, steps]) => ({ id, title, sit, steps: steps.map(([act, res, onClick], i) => ({ n: String(i + 1), act, res, onClick, arrow: i < steps.length - 1 })) }));
+    return {
+      co: s.pco, coLabel: s.pco ? 'on' : 'off', toggleCo: () => this.setState(st => ({ pco: !st.pco })), reset: J({}),
+      viewName: browse ? (v.startsWith('c:') ? 'Cluster list' : titles[v]) : v === 'ask' ? 'Ask' : 'Clusters', legend, flows,
+      nav, agents, scopes, scopeKind: ws ? 'WORKSPACE' : 'SUBAGENT', scopeName, scopePath: ws ? '~/Projects/session-manager' : '~/.claude/agents/' + s.pscope + '/memory',
+      ovScope: s.povl === 'scope', ovLearn: s.povl === 'learn', ovMore: s.povl === 'more', ovDelete: s.povl === 'delete' && !!m, ovPalette: s.povl === 'palette',
+      toggleScope: set({ povl: s.povl === 'scope' ? null : 'scope' }), toggleLearn: set({ povl: s.povl === 'learn' ? null : 'learn' }), toggleMore: set({ povl: s.povl === 'more' ? null : 'more' }),
+      closeOv: set({ povl: null }), openPalette: set({ povl: 'palette', pk: '' }),
+      isBrowse: browse, isAsk: v === 'ask', isClusters: v === 'clusters',
+      listTitle: v.startsWith('c:') ? CL[v.slice(2)].name : titles[v] || 'All memories', listCount: lm.length, list, hasList: lm.length > 0, empty, isEmpty: !lm.length,
+      q: s.pq, onQ: e => this.setState({ pq: e.target.value }), sortLabel: s.psort[0].toUpperCase() + s.psort.slice(1), cycleSort: set({ psort: SORTS[(SORTS.indexOf(s.psort) + 1) % 3] }),
+      onNew: () => this.pNew(),
+      hasM: !!m && !editing, editing, isNew, noSel: !m && !isNew, r, isRead: s.pmode === 'read', isSource: s.pmode === 'source',
+      readBg: s.pmode === 'read' ? '#e3dcc8' : 'transparent', sourceBg: s.pmode === 'source' ? '#e3dcc8' : 'transparent', setRead: set({ pmode: 'read' }), setSource: set({ pmode: 'source' }),
+      editTitle: isNew ? 'New memory' : 'Editing ' + (m ? m.slug : '') + '.md', pedit: s.pedit, pname: s.pname,
+      onEditText: e => this.setState({ pedit: e.target.value }), onName: e => this.setState({ pname: e.target.value }),
+      onSave: () => isNew ? this.pSaveNew() : this.pSaveEdit(), onCancel: () => this.pCancel(),
+      copyPath: () => { this.setState({ povl: null }); this.toast('Path copied'); }, reveal: () => { this.setState({ povl: null }); this.toast('Revealed in Finder'); },
+      archive: () => m && this.pArchive(m.slug), askDelete: set({ povl: 'delete' }), confirmDelete: () => m && this.pDelete(m.slug), inboundN, hasInbound: inboundN > 0,
+      hasToast: !!s.ptoast, toastText: s.ptoast ? s.ptoast.text : '', toastUndo: !!(s.ptoast && s.ptoast.undo),
+      onUndo: () => { const u = s.ptoast && s.ptoast.undo; clearTimeout(this._tt); this.setState({ ptoast: null }); u && u(); }, closeToast: set({ ptoast: null }),
+      pk: s.pk, onPk: e => this.setState({ pk: e.target.value }), palette, hasPalette: palette.length > 0, askRow: 'Ask “' + (s.pk || '…') + '”',
+      askFromPalette: () => this.setState({ pv: 'ask', povl: null, pask: 'answered', pquestion: s.pk || 'Why did the scheduler sit idle with a full queue last week?', pk: '', pctx: null, premember: false }),
+      hasCtx: !!ctxM, ctx: s.pctx, clearCtx: set({ pctx: null }), askIdle: s.pask === 'idle', askDone: s.pask === 'answered' && !s.premember, askRemember: s.pask === 'answered' && s.premember,
+      question: s.pquestion, answer, cites, hasStaleCited: staleCited > 0, staleCitedText: staleCited + ' of these ' + (staleCited === 1 ? 'is' : 'are') + ' flagged stale. Re-verify against the current code?',
+      reverify: go('stale'), compose: s.pcompose, onCompose: e => this.setState({ pcompose: e.target.value }), send,
+      onComposeKey: e => { if (e.key === 'Enter') send(); },
+      chips: (ctxM ? ['Is this still accurate?', 'What links here?', 'Summarize it'] : ['What changed this week?', 'Find contradictions', 'Summarize stale memories', 'remember …']).map(c => ({ c, onClick: set({ pcompose: c }) })),
+      draftText: s.pquestion.replace(/^remember\s*/i, ''), reviewDraft: () => this.pNew(s.pquestion.replace(/^remember\s*/i, '').replace(/^./, c => c.toUpperCase()) + '.'),
+      clusterCards, hasUnclustered: unclustered > 0, unclustered,
+      regenerate: () => { this.setState(st => ({ pcreated: st.pcreated.map(x => x.c ? x : { ...x, c: 'feedback' }) })); this.toast(unclustered ? unclustered + ' memory moved into Working-style feedback' : 'Clusters regenerated · no changes'); },
+    };
+  }
+}
+</script>
+</body>
+</html>

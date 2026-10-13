@@ -17,6 +17,7 @@ either a closed historical record or a still-relevant template.
 | `dom-specs/` | The DOM-spec authoring template (`TEMPLATE.html`). One spec has ever been produced from it (`scheduler-tab.html`, 2026-08-02). Keep — it's a live template for future tab specs, not dead weight, even though only one tab has used it so far. |
 | `landing-v2/` | **ACTIVE 2026-09.** Spec and final copy (`copy.json`) for the bilko.run Session Manager landing page (`/products/session-manager`, implemented in the Bilko repo), plus the saved Claude Design sources (`landing-v1.dc.html`, `landing-v2.dc.html`) and a render. `DESIGN_SPEC.md` maps the mock onto Bilko code and records every copy change with evidence. |
 | `memory-tab/` | **ACTIVE 2026-10.** `DESIGN_BRIEF.md` — feature inventory, states, data API and constraints for redesigning the Memory tab on Claude Code's native memory. |
+| `memory-explorer/` | **ACTIVE 2026-10.** Claude Design prototype (`memory-explorer-prototype.dc.html` + `support.js`), reference `renders/`, and `DESIGN_SPEC.md` mapping it onto the Memory tab code. |
 
 ## Who writes here
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useStore } from '../store';
-import { requestOtp } from '../api';
+import { requestOtp, revokeDevice } from '../api';
 import type { RelaySocket } from '../ws';
 
 const IcoBolt = () => (
@@ -22,6 +22,25 @@ export default function ConnectScreen({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [showPair, setShowPair] = useState(false);
+  const [forgetting, setForgetting] = useState(false);
+
+  const hasDevices = devices.length > 0;
+  // online first, then newest pairing first
+  const rows = [...devices].sort((a, b) =>
+    Number(b.isOnline) - Number(a.isOnline) || b.issuedAt - a.issuedAt);
+  const offline = rows.filter((d) => !d.isOnline);
+  const lastPairedId = offline[0]?.deviceId;
+
+  const forget = async (ids: string[], message: string) => {
+    if (!window.confirm(message)) return;
+    setForgetting(true); setErr(null);
+    try {
+      await Promise.all(ids.map((id) => revokeDevice(id)));
+      await onRefresh();
+    } catch (e: any) { setErr(e?.message || 'Failed to forget device'); }
+    finally { setForgetting(false); }
+  };
 
   const generate = async () => {
     setLoading(true); setErr(null);
@@ -58,11 +77,23 @@ export default function ConnectScreen({
         </div>
       </div>
 
-      <h1 className="font-serif text-[34px] font-semibold tracking-tight text-center mt-5 mb-2">Pair this phone</h1>
-      <p className="text-center text-[14.5px] text-ink-soft leading-relaxed mb-7">
-        On your desktop open <strong className="text-ink font-semibold">Settings → Phone remote</strong>, turn on
-        remote control, then click Pair Device… and enter the code below.
-      </p>
+      {hasDevices ? (
+        <>
+          <h1 className="font-serif text-[34px] font-semibold tracking-tight text-center mt-5 mb-2">Your desktop is offline</h1>
+          <p className="text-center text-[14.5px] text-ink-soft leading-relaxed mb-7">
+            Open <strong className="text-ink font-semibold">Session Manager</strong> on it with Phone remote
+            enabled and this phone will reconnect on its own. There's no need to pair again.
+          </p>
+        </>
+      ) : (
+        <>
+          <h1 className="font-serif text-[34px] font-semibold tracking-tight text-center mt-5 mb-2">Pair this phone</h1>
+          <p className="text-center text-[14.5px] text-ink-soft leading-relaxed mb-7">
+            On your desktop open <strong className="text-ink font-semibold">Settings → Phone remote</strong>, turn on
+            remote control, then click Pair Device… and enter the code below.
+          </p>
+        </>
+      )}
 
       {/* code cells (shown once generated) */}
       {code && (
@@ -84,6 +115,13 @@ export default function ConnectScreen({
           <li>Go to <span className="text-ink font-semibold">Settings → Phone remote</span> and turn on 'Allow remote control from the web'.</li>
           <li>Click 'Pair Device…' and enter this code.</li>
         </ol>
+      ) : (hasDevices && !showPair) ? (
+        <button
+          onClick={() => setShowPair(true)}
+          className="h-10 rounded-xl border border-edge bg-card text-ink-soft text-sm font-medium active:opacity-80"
+        >
+          Pair another computer
+        </button>
       ) : (
         <button
           onClick={generate}
@@ -101,15 +139,36 @@ export default function ConnectScreen({
       {err && <div className="mt-3 text-xs text-accent text-center" role="alert">{err}</div>}
 
       <div className="mt-7">
-        {devices.length > 0 && (
+        {hasDevices && (
           <>
-            <div className="text-[11.5px] font-bold uppercase tracking-[0.8px] text-ink-mute mb-2">Paired devices</div>
+            <div className="flex items-center mb-2">
+              <div className="text-[11.5px] font-bold uppercase tracking-[0.8px] text-ink-mute flex-1">Paired devices</div>
+              {offline.length >= 2 && (
+                <button
+                  onClick={() => forget(offline.map((d) => d.deviceId), `Forget ${offline.length} offline devices?`)}
+                  disabled={forgetting}
+                  className="text-xs text-accent font-medium disabled:opacity-50"
+                >
+                  {`Forget ${offline.length} offline`}
+                </button>
+              )}
+            </div>
             <div className="flex flex-col gap-1.5 mb-2">
-              {devices.map((d) => (
-                <div key={d.deviceId} className="flex items-center gap-2.5 py-1.5 text-ink-soft">
+              {rows.map((d) => (
+                <div key={d.deviceId} data-testid="device-row" className="flex items-center gap-2.5 py-1.5 text-ink-soft">
                   <span className={`w-2 h-2 rounded-full ${d.isOnline ? 'bg-sage' : 'bg-ink-mute'}`} />
                   <span className="font-mono text-xs truncate flex-1">{d.deviceId.slice(0, 12)}…</span>
+                  {d.deviceId === lastPairedId && <span className="text-xs text-ink-mute">last paired</span>}
                   <span className="text-xs text-ink-mute">{d.isOnline ? 'online' : 'offline'}</span>
+                  {!d.isOnline && (
+                    <button
+                      onClick={() => forget([d.deviceId], 'Forget this device? You can pair it again later.')}
+                      disabled={forgetting}
+                      className="text-xs text-accent font-medium disabled:opacity-50"
+                    >
+                      Forget
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

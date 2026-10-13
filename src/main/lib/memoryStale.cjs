@@ -25,6 +25,22 @@ function stripName(name) {
 }
 
 /**
+ * Frontmatter meta from a leading `---` block only. `type:` / `originSessionId:`
+ * match at any indentation (real files nest them under `metadata:`).
+ */
+function parseMeta(body) {
+  const fm = /^---\r?\n([\s\S]*?)\r?\n---/.exec(body);
+  if (!fm) return { description: null, type: null, originSessionId: null };
+  const pick = (key) => {
+    const m = new RegExp(`^[ \\t]*${key}:[ \\t]*(.+?)[ \\t]*$`, 'm').exec(fm[1]);
+    return m ? m[1] : null;
+  };
+  let description = pick('description');
+  if (description !== null) description = description.replace(/^"(.*)"$/, '$1');
+  return { description, type: pick('type'), originSessionId: pick('originSessionId') };
+}
+
+/**
  * Extract dead-ref candidate paths from a memory body.
  * Complexity: O(body length) — one regex pass, then O(candidates) filtering.
  */
@@ -81,7 +97,9 @@ function scoreMemories({ entries, now, existsPath }) {
     }
   });
 
-  return entries.map((e) => {
+  const knownSlugs = new Set(entries.map((e) => stripName(e.name)));
+
+  return entries.map((e, i) => {
     const ageDays = Math.floor((now - e.mtimeMs) / DAY_MS);
     const slug = stripName(e.name);
     const inboundLinks = inboundCounts.get(slug) || 0;
@@ -102,8 +120,13 @@ function scoreMemories({ entries, now, existsPath }) {
       reasons.push('90+ days old with no inbound links');
     }
 
+    const outLinks = [...perEntryTargets[i]].filter((t) => t !== slug);
+
     return {
       name: e.name,
+      ...parseMeta(e.body),
+      outLinks,
+      danglingLinks: outLinks.filter((t) => !knownSlugs.has(t)),
       ageDays,
       inboundLinks,
       deadRefs,

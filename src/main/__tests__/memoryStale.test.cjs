@@ -86,3 +86,54 @@ test('[[self]] in a memory own body does not count as an inbound link', () => {
   assert.equal(result[0].inboundLinks, 0);
   assert.equal(result[0].stale, true);
 });
+
+test('frontmatter description/type/originSessionId parsed, incl. nested metadata keys and quoted description', () => {
+  const body = [
+    '---',
+    'name: x',
+    'description: "pages live in ~/Projects/Bilko"',
+    'metadata:',
+    '  type: project',
+    '  originSessionId: de0e5dbe-8abe-4fec-a9a4-e667767ccbd9',
+    '---',
+    'body',
+  ].join('\n');
+  const [r] = scoreMemories({ entries: [{ name: 'x.md', mtimeMs: NOW, body }], now: NOW, existsPath: () => true });
+  assert.equal(r.description, 'pages live in ~/Projects/Bilko');
+  assert.equal(r.type, 'project');
+  assert.equal(r.originSessionId, 'de0e5dbe-8abe-4fec-a9a4-e667767ccbd9');
+});
+
+test('a memory with no frontmatter yields null meta fields', () => {
+  const [r] = scoreMemories({
+    entries: [{ name: 'x.md', mtimeMs: NOW, body: 'type: project\ndescription: nope' }],
+    now: NOW,
+    existsPath: () => true,
+  });
+  assert.equal(r.description, null);
+  assert.equal(r.type, null);
+  assert.equal(r.originSessionId, null);
+});
+
+test('outLinks dedupe, exclude self, keep first-appearance order', () => {
+  const body = 'see [[b]] then [[self]] then [[a]] and [[b]] again';
+  const entries = [
+    { name: 'self.md', mtimeMs: NOW, body },
+    { name: 'a.md', mtimeMs: NOW, body: '' },
+    { name: 'b.md', mtimeMs: NOW, body: '' },
+  ];
+  const r = scoreMemories({ entries, now: NOW, existsPath: () => true })[0];
+  assert.deepEqual(r.outLinks, ['b', 'a']);
+  assert.deepEqual(r.danglingLinks, []);
+});
+
+test('danglingLinks lists outLinks with no matching memory file', () => {
+  const entries = [
+    { name: 'a.md', mtimeMs: NOW, body: '[[b]] [[missing]]' },
+    { name: 'b.md', mtimeMs: NOW, body: '' },
+  ];
+  const r = scoreMemories({ entries, now: NOW, existsPath: () => true });
+  assert.deepEqual(r[0].outLinks, ['b', 'missing']);
+  assert.deepEqual(r[0].danglingLinks, ['missing']);
+  assert.deepEqual(r[1].outLinks, []);
+});

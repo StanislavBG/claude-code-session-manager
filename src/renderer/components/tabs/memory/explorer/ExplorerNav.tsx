@@ -28,7 +28,7 @@ const SCOPE_NOTE: Record<'user' | 'project' | 'local', string> = {
 }
 
 const LABEL = 'text-[10px] tracking-[.08em] font-semibold text-fg-faint'
-const ROW = 'flex items-center gap-2 h-7 px-2.5 rounded-[5px] text-[13px] cursor-pointer hover:bg-bg-muteband text-left w-full'
+const ROW = 'flex items-center gap-2 h-7 px-2.5 rounded-[5px] text-[13px] cursor-pointer hover:bg-muteband text-left w-full'
 
 function agentCount(a: MemoryAgent, counts: Record<string, number>): string {
   return a.memoryScope === null ? 'off' : String(counts[a.name] ?? 0)
@@ -53,10 +53,10 @@ function NavRow({ id, label, count, dot, active, mono, onClick, check }: RowProp
       onClick={onClick}
       className={`${ROW} ${active ? 'bg-bg font-semibold text-fg' : 'text-fg-dim'}`}
     >
-      {dot && <span className={`w-[7px] h-[7px] rounded-sm shrink-0 ${dot}`} />}
+      <span className={`w-[7px] h-[7px] rounded-sm shrink-0 ${dot || 'bg-transparent'}`} />
       <span className={`flex-1 min-w-0 truncate ${mono ? 'font-mono text-xs' : ''}`}>{label}</span>
       {count !== undefined && (
-        <span className={`font-mono text-[11px] ${check && count === 0 ? 'text-sage-dark' : 'text-fg-faint'}`}>
+        <span className={`font-mono text-[11px] ${check && count === 0 ? 'text-sage-dark' : active ? 'text-fg' : 'text-fg-faint'}`}>
           {check && count === 0 ? '✓' : count}
         </span>
       )}
@@ -160,18 +160,18 @@ export const ExplorerNav = memo(function ExplorerNav(p: Props) {
 
       <div className="flex flex-col gap-px">
         <div className={`px-2.5 pb-1.5 ${LABEL}`}>BROWSE</div>
-        {row('all', 'All memories', 'bg-fg-dim', p.counts.all)}
-        {row('ask', 'Ask', 'bg-accent')}
-        {row('clusters', 'Clusters', 'bg-sage-dark', p.clusters.length)}
+        {row('all', 'All memories', '', p.counts.all)}
+        {row('ask', 'Ask', '')}
+        {row('clusters', 'Clusters', '', p.clusters.length)}
       </div>
 
       <div className="flex flex-col gap-px">
         <div className={`px-2.5 pb-1.5 ${LABEL}`}>REVIEW</div>
         {row('stale', 'Stale', 'bg-honey', p.counts.stale, true)}
         {row('broken', 'Broken references', 'bg-accent', p.counts.broken, true)}
-        {row('recent', 'Changed this week', 'bg-sage-dark', p.counts.recent)}
-        {row('unindexed', 'Not in index', 'bg-fg-faint', p.counts.unindexed, true)}
-        {p.archivedCount > 0 && row('archived', 'Archived', 'bg-fg-faint', p.archivedCount)}
+        {row('recent', 'Changed this week', '', p.counts.recent)}
+        {row('unindexed', 'Not in index', '', p.counts.unindexed, true)}
+        {p.archivedCount > 0 && row('archived', 'Archived', '', p.archivedCount)}
       </div>
 
       {!isAgent && (

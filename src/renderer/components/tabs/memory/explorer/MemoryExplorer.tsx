@@ -33,6 +33,7 @@ type Overlay = 'learn' | 'palette' | 'delete' | null
 interface Fix { state: 'idle' | 'checking' | 'proposed'; diff: { sign: '−' | '+' | ' '; text: string }[]; summary: string }
 interface UndoMsg { message: string; undo?: () => void }
 
+const NEW_TEMPLATE = 'One-line summary of the fact or rule.\n\n**Why:**\n\n**How to apply:**'
 const IDLE_FIX: Fix = { state: 'idle', diff: [], summary: '' }
 const stem = (s: string): string => s.replace(/\.md$/, '')
 const basename = (p: string | null): string => (p ? p.split(/[\\/]/).filter(Boolean).pop() ?? p : 'workspace')
@@ -176,7 +177,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   // Keep a valid selection: first row when nothing (or something that vanished) is selected.
   useEffect(() => {
     if (ex.loading || !isBrowse || mode === 'new') return
-    if (selRow) return
+    if (selRow && listRows.some((r) => r.name === selRow.name)) return
     setSelected(listRows[0]?.name ?? null)
   }, [ex.loading, isBrowse, mode, selRow, listRows])
 
@@ -371,7 +372,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
         title: `${scopeName} has no memories yet`,
         body: 'They appear when this subagent saves one, or add one now.',
         action: '+ New memory',
-        onAction: () => openNew(),
+        onAction: () => openNew(NEW_TEMPLATE),
       }
     } else {
       empty = {
@@ -387,7 +388,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   const learn = LEARNING_CONTENT.memory
 
   return (
-    <div data-testid="mx-shell" className="relative h-full flex flex-col bg-bg text-fg">
+    <div data-testid="mx-shell" className="relative h-full flex flex-col bg-bg text-fg leading-[normal]">
       <div className="relative shrink-0 flex items-center gap-3 px-6 py-4 border-b border-rule-structural">
         <div className="flex items-baseline gap-3">
           <span className="text-[11px] tracking-[.08em] font-medium text-fg-dim">CONFIGURE</span>
@@ -497,7 +498,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                 onQuery={setQuery}
                 sort={sort}
                 onSort={setSort}
-                onNew={() => openNew()}
+                onNew={() => openNew(NEW_TEMPLATE)}
                 empty={empty}
               />
               <div className="flex flex-col min-w-0 min-h-0">
@@ -512,7 +513,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                     onSave={() => { void save() }}
                     onCancel={cancelEdit}
                     saving={saving}
-                    dirty={mode === 'new' ? title.trim() !== '' || draft !== '' : draft !== draftOrig}
+                    dirty={mode === 'new' ? title.trim() !== '' || draft !== NEW_TEMPLATE : draft !== draftOrig}
                   />
                 ) : selRow ? (
                   <MemoryReader

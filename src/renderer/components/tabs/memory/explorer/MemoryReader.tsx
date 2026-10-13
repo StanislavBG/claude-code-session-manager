@@ -42,8 +42,7 @@ function formatSize(bytes: number): string {
 }
 
 function formatAge(days: number): string {
-  if (days <= 0) return 'today'
-  if (days === 1) return 'yesterday'
+  if (days <= 0) return 'just now'
   return `${days}d ago`
 }
 
@@ -190,7 +189,7 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
             <div
               key={i}
               className={`grid grid-cols-[20px_1fr] px-3 py-1.5 font-mono text-xs leading-normal border-t border-rule-inner ${
-                d.sign === '−' ? 'bg-accent/10 text-accent-dark' : d.sign === '+' ? 'bg-sage/15 text-sage-dark' : 'text-fg-dim'
+                d.sign === '−' ? 'bg-accent-muted/30 text-accent-dark' : d.sign === '+' ? 'bg-sage/20 text-sage-dark' : 'text-fg-dim'
               }`}
             >
               <span>{d.sign}</span>
@@ -221,7 +220,7 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
       )}
 
       {row.broken && !row.stale && (
-        <div className="mx-[22px] mt-3 px-3 py-2.5 rounded-md bg-accent/10 text-[12.5px] text-accent-dark">
+        <div className="mx-[22px] mt-3 px-3 py-2.5 rounded-md bg-accent-muted/30 text-[12.5px] text-accent-dark">
           Broken reference — a link or path in this memory points at nothing. See the red items in Links.
         </div>
       )}
@@ -244,7 +243,7 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
             {row.description && (
               <p className="font-serif text-[17px] leading-normal text-fg">{row.description}</p>
             )}
-            <div className={PROSE} dangerouslySetInnerHTML={{ __html: html }} />
+            <div className="contents" dangerouslySetInnerHTML={{ __html: html }} />
           </div>
         )}
       </div>

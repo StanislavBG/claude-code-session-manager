@@ -21,7 +21,7 @@ function LinkCard({
       type="button"
       data-testid={testid}
       onClick={onClick}
-      className={`${CARD} ${dangling ? 'border-accent-muted' : 'border-rule-structural'}`}
+      className={`${CARD} ${dangling ? 'border-accent-muted' : 'border-rule-inner'}`}
     >
       <span
         className={`text-[12px] font-medium overflow-hidden text-ellipsis whitespace-nowrap ${dangling ? 'text-accent' : ''}`}

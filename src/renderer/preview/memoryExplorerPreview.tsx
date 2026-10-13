@@ -13,7 +13,7 @@ import type {
 } from '../../preload/api'
 import '../styles.css'
 
-const CWD = '/home/user/Projects/session-manager'
+const CWD = '~/Projects/session-manager'
 const DIR = '~/.claude/projects/-home-bilko-Projects-session-manager/memory'
 const DAY = 86_400_000
 
@@ -128,7 +128,6 @@ for (const [slug, cluster, size, days, stale, description] of M_RAW) {
   const links = R.filter((r) => r[0] === slug)
   const deadRefs = BROKEN_PATHS[slug] ?? []
   const lines = [
-    description, '',
     '**Why:** Learned the hard way; the cost of forgetting it recurs.', '',
     '**How to apply:** Check this before touching the area it describes.',
   ]

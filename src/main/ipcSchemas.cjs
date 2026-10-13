@@ -940,6 +940,16 @@ const chatExternalSend = z.object({
   ),
 });
 
+// Phone drill-down reads. cwd is re-checked against the open tabs in
+// webRemote.cjs; sessionKey becomes a transcript filename lookup so it is
+// restricted to a session-id charset (no '/', so no traversal).
+const remoteProjectSessions = z.object({ cwd: z.string().min(1).max(4096) });
+const remoteSessionTranscript = z.object({
+  cwd: z.string().min(1).max(4096),
+  sessionKey: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/),
+  limit: z.number().int().min(1).max(100).optional(),
+});
+
 // Phone-initiated new Session. cwd/agentName are re-checked against the open
 // tabs / persona list in webRemote.cjs before anything touches the filesystem.
 const remoteSessionCreate = z.object({
@@ -1170,6 +1180,11 @@ const SAS_GATED_READS = new Set([
   'cmd:session:subscribe',
   // Picker data (projects, personas, tags, macros) for the phone's New Session.
   'cmd:session:options',
+  // Drill-down: project list, one project's Epics, one session's recent
+  // transcript text — all user data, so SAS-gated.
+  'cmd:projects:list',
+  'cmd:project:sessions',
+  'cmd:session:transcript',
   // NOTE: cmd:exchanges:list is intentionally NOT allowlisted — webRemote.cjs has
   // no dispatch handler for it, so an allowlist entry would only fail closed with
   // an opaque reject. Re-add here together with the handler when remote exchanges
@@ -1305,6 +1320,8 @@ module.exports = {
     chatClassifyTicket,
     chatExternalSend,
     remoteSessionCreate,
+    remoteProjectSessions,
+    remoteSessionTranscript,
     exchangesList,
     agentsSavePersona,
     macrosSave,

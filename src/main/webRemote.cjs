@@ -1111,6 +1111,51 @@ function getDispatchMap() {
       };
     },
 
+    'cmd:projects:list': async () => {
+      const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
+      const { listRemoteProjects } = require('./lib/remoteDrilldown.cjs');
+      const data = await sessionsStore.load();
+      return { projects: listRemoteProjects(data?.tabs ?? [], readActiveIndex) };
+    },
+
+    'cmd:project:sessions': async (payload) => {
+      const parsed = schemas.remoteProjectSessions.parse(payload);
+      const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
+      const { listRemoteProjectSessions } = require('./lib/remoteDrilldown.cjs');
+      const data = await sessionsStore.load();
+      const result = listRemoteProjectSessions(data?.tabs ?? [], readActiveIndex, parsed.cwd);
+      if (!result) throw new Error('cwd is not an open project');
+      return result;
+    },
+
+    // cwd must be exactly an open tab's cwd; sessionKey is the tab's main id or
+    // an Epic id / claudeSessionId from that project's active index.
+    'cmd:session:transcript': async (payload) => {
+      const parsed = schemas.remoteSessionTranscript.parse(payload);
+      const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
+      const { resolveEpicTranscriptPath } = require('./lib/epic/epicTranscriptPath.cjs');
+      const { readRecentChatMessages } = require('./lib/remoteTranscriptTail.cjs');
+      const data = await sessionsStore.load();
+      const tab = (data?.tabs ?? []).find((t) => t && t.cwd === parsed.cwd);
+      if (!tab) throw new Error('cwd is not an open project');
+      validatePath(parsed.cwd);
+      let filePath = null;
+      if (parsed.sessionKey === (tab.id ?? tab.sessionId)) {
+        filePath = require('./transcripts.cjs').transcriptPath(parsed.cwd, parsed.sessionKey);
+      } else {
+        const sessions = readActiveIndex(parsed.cwd)?.sessions ?? {};
+        const epic = Object.values(sessions).find(
+          (e) => e && (e.id === parsed.sessionKey || e.claudeSessionId === parsed.sessionKey),
+        );
+        if (epic && epic.claudeSessionId) {
+          filePath = resolveEpicTranscriptPath({ cwd: parsed.cwd, claudeSessionId: epic.claudeSessionId }).path;
+        }
+      }
+      if (!filePath) return { messages: [] };
+      validatePath(filePath);
+      return { messages: await readRecentChatMessages(filePath, { limit: parsed.limit }) };
+    },
+
     'cmd:sessions:save': async (payload) => {
       const parsed = schemas.sessionsPayload.parse(payload);
       return sessionsStore.save(parsed);

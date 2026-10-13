@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
-vi.mock('../components/SessionNav', () => ({ default: () => <div /> }));
-vi.mock('../components/StatePane', () => ({ default: () => <div /> }));
-vi.mock('../components/SummaryPane', () => ({ default: () => <div /> }));
-vi.mock('../components/MicPane', () => ({ default: () => <div /> }));
+vi.mock('../components/ProjectsScreen', () => ({ default: () => <div>projects-screen</div> }));
+vi.mock('../components/SessionsScreen', () => ({ default: () => <div /> }));
+vi.mock('../components/SessionScreen', () => ({ default: () => <div /> }));
 
 import Cockpit from '../components/Cockpit';
 import { useStore } from '../store';
@@ -15,15 +14,15 @@ beforeEach(() => {
 });
 
 describe('awaitingDesktopConfirm store flag', () => {
-  it('is true after setPendingSas, survives clearPendingSas, clears on setSessions', () => {
+  it('is true after setPendingSas, survives clearPendingSas, survives goProjects', () => {
     const s = useStore.getState();
     expect(s.awaitingDesktopConfirm).toBe(false);
     s.setPendingSas({ deviceId: 'd1', sas: '123456' });
     expect(useStore.getState().awaitingDesktopConfirm).toBe(true);
     useStore.getState().clearPendingSas();
     expect(useStore.getState().awaitingDesktopConfirm).toBe(true);
-    useStore.getState().setSessions([]);
-    expect(useStore.getState().awaitingDesktopConfirm).toBe(false);
+    useStore.getState().goProjects();
+    expect(useStore.getState().awaitingDesktopConfirm).toBe(true);
   });
 
   it('reset restores false', () => {
@@ -33,16 +32,16 @@ describe('awaitingDesktopConfirm store flag', () => {
   });
 });
 
-describe('Cockpit empty state', () => {
+describe('Cockpit projects route', () => {
   it('tells the user to confirm on the desktop while awaiting', () => {
-    useStore.setState({ awaitingDesktopConfirm: true, sessions: [], selectedTabId: null });
+    useStore.setState({ awaitingDesktopConfirm: true });
     render(<Cockpit socket={null} deviceId="d1" />);
     expect(screen.getByText(/Waiting for you to confirm/)).toBeInTheDocument();
-    expect(screen.queryByText(/No active sessions/)).toBeNull();
+    expect(screen.queryByText('projects-screen')).toBeNull();
   });
 
-  it('keeps the default empty text when not awaiting', () => {
+  it('renders the projects screen when not awaiting', () => {
     render(<Cockpit socket={null} deviceId="d1" />);
-    expect(screen.getByText('No active sessions on this device yet.')).toBeInTheDocument();
+    expect(screen.getByText('projects-screen')).toBeInTheDocument();
   });
 });

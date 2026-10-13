@@ -1,7 +1,13 @@
 import { create } from 'zustand';
+import type { SessionTarget } from './components/SessionScreen';
 import type {
-  MeResponse, Device, Screen, SessionMeta, SessionState, SessionSummary,
+  MeResponse, Device, Screen, SessionState, SessionSummary,
 } from './types';
+
+export type Route =
+  | { view: 'projects' }
+  | { view: 'sessions'; cwd: string; title: string }
+  | { view: 'session'; cwd: string; title: string; target: SessionTarget };
 
 interface AppState {
   me: MeResponse | null;
@@ -10,12 +16,14 @@ interface AppState {
   wsConnected: boolean;
   screen: Screen;
 
-  // Session cockpit state (single source: event:session:list / state / summary)
-  sessions: SessionMeta[];
-  selectedTabId: string | null;
+  // Drill-down route: projects → a project's sessions → one session.
+  route: Route;
+  /** Bumped to make the visible screen re-fetch. */
+  refreshKey: number;
+
+  // Live per-tab state / summary
   stateByTab: Record<string, SessionState>;
   summaryByTab: Record<string, SessionSummary>;
-  navOpen: boolean;
 
   // E2E security state
   /** SAS pending user confirmation: { deviceId, sas } or null. */
@@ -32,11 +40,12 @@ interface AppState {
   setWsConnected: (v: boolean) => void;
   setScreen: (s: Screen) => void;
 
-  setSessions: (sessions: SessionMeta[]) => void;
-  selectTab: (tabId: string | null) => void;
+  goProjects: () => void;
+  goSessions: (cwd: string, title: string) => void;
+  goSession: (cwd: string, title: string, target: SessionTarget) => void;
+  bumpRefresh: () => void;
   setTabState: (tabId: string, state: SessionState) => void;
   setTabSummary: (s: SessionSummary) => void;
-  setNavOpen: (v: boolean) => void;
   reset: () => void;
 
   setPendingSas: (v: { deviceId: string; sas: string } | null) => void;
@@ -51,11 +60,10 @@ export const useStore = create<AppState>((set) => ({
   wsConnected: false,
   screen: { kind: 'login' },
 
-  sessions: [],
-  selectedTabId: null,
+  route: { view: 'projects' },
+  refreshKey: 0,
   stateByTab: {},
   summaryByTab: {},
-  navOpen: false,
 
   pendingSas: null,
   awaitingDesktopConfirm: false,
@@ -69,22 +77,17 @@ export const useStore = create<AppState>((set) => ({
   setWsConnected: (wsConnected) => set({ wsConnected }),
   setScreen: (screen) => set({ screen }),
 
-  setSessions: (sessions) =>
-    set((s) => {
-      // Keep the current selection if it still exists, else pick the first session.
-      const stillThere = sessions.some((x) => x.tabId === s.selectedTabId);
-      const selectedTabId = stillThere ? s.selectedTabId : (sessions[0]?.tabId ?? null);
-      return { sessions, selectedTabId, awaitingDesktopConfirm: false };
-    }),
-  selectTab: (selectedTabId) => set({ selectedTabId, navOpen: false }),
+  goProjects: () => set({ route: { view: 'projects' } }),
+  goSessions: (cwd, title) => set({ route: { view: 'sessions', cwd, title } }),
+  goSession: (cwd, title, target) => set({ route: { view: 'session', cwd, title, target } }),
+  bumpRefresh: () => set((s) => ({ refreshKey: s.refreshKey + 1 })),
   setTabState: (tabId, state) =>
     set((s) => ({ stateByTab: { ...s.stateByTab, [tabId]: state } })),
   setTabSummary: (summary) =>
     set((s) => ({ summaryByTab: { ...s.summaryByTab, [summary.tabId]: summary } })),
-  setNavOpen: (navOpen) => set({ navOpen }),
   reset: () => set({
-    sessions: [], selectedTabId: null, stateByTab: {}, summaryByTab: {},
-    activeDeviceId: null, navOpen: false, awaitingDesktopConfirm: false,
+    route: { view: 'projects' }, stateByTab: {}, summaryByTab: {},
+    activeDeviceId: null, awaitingDesktopConfirm: false,
   }),
 
   setPendingSas: (pendingSas) =>

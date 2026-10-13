@@ -1,72 +1,88 @@
-import { useStore } from '../store';
+import { useEffect } from 'react';
+import { useStore, type Route } from '../store';
 import type { RelaySocket } from '../ws';
-import SessionNav from './SessionNav';
-import StatePane from './StatePane';
-import SummaryPane from './SummaryPane';
-import MicPane from './MicPane';
+import type { RemoteProject } from '../types';
+import ProjectsScreen from './ProjectsScreen';
+import SessionsScreen, { type OpenTarget } from './SessionsScreen';
+import SessionScreen from './SessionScreen';
 
 interface Props {
   socket: RelaySocket | null;
   deviceId: string;
 }
 
+const PROJECTS_ROUTE: Route = { view: 'projects' };
+
 /**
- * Session cockpit: collapsible left-nav (sessions) + 3-pane main
- * (state animation / mobile summary / mic input). Mobile-first single column;
- * the left-nav is a slide-over drawer on small screens.
+ * Drill-down cockpit: Projects → a project's Sessions → one Session, driven by
+ * `route` in the store. Each forward step pushes a history entry so the browser
+ * back button (popstate) walks the route back up.
  */
 export default function Cockpit({ socket, deviceId }: Props) {
-  const { wsConnected, navOpen, setNavOpen, selectedTabId, sessions, awaitingDesktopConfirm } = useStore();
-  const selected = sessions.find((s) => s.tabId === selectedTabId) ?? null;
+  const wsConnected = useStore((s) => s.wsConnected);
+  const awaitingDesktopConfirm = useStore((s) => s.awaitingDesktopConfirm);
+  const route = useStore((s) => s.route);
+  const refreshKey = useStore((s) => s.refreshKey);
+  const goSessions = useStore((s) => s.goSessions);
+  const goSession = useStore((s) => s.goSession);
+
+  useEffect(() => {
+    window.history.replaceState({ ...(window.history.state ?? {}), smRoute: useStore.getState().route }, '');
+    const onPop = (e: PopStateEvent) => {
+      const r = (e.state as { smRoute?: Route } | null)?.smRoute ?? PROJECTS_ROUTE;
+      useStore.setState({ route: r });
+    };
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  const push = () => window.history.pushState({ smRoute: useStore.getState().route }, '');
+  const back = () => window.history.back();
+
+  const openProject = (p: RemoteProject) => { goSessions(p.cwd, p.title); push(); };
+  const openTarget = (cwd: string, t: OpenTarget) => {
+    goSession(cwd, t.kind === 'main' ? t.title : t.session.title, t);
+    push();
+  };
+
+  const title = route.view === 'projects' ? 'Session Manager' : route.title;
+
+  let body;
+  if (route.view === 'projects') {
+    body = awaitingDesktopConfirm ? (
+      <div className="flex-1 flex items-center justify-center text-ink-mute text-sm px-6 text-center font-serif italic">
+        Waiting for you to confirm the 6-digit code on your computer (Settings → Phone remote)…
+      </div>
+    ) : (
+      <ProjectsScreen socket={socket} deviceId={deviceId} refreshKey={refreshKey} onOpen={openProject} />
+    );
+  } else if (route.view === 'sessions') {
+    body = (
+      <SessionsScreen
+        socket={socket}
+        deviceId={deviceId}
+        cwd={route.cwd}
+        refreshKey={refreshKey}
+        onBack={back}
+        onOpen={(t) => openTarget(route.cwd, t)}
+      />
+    );
+  } else {
+    body = (
+      <SessionScreen socket={socket} deviceId={deviceId} projectCwd={route.cwd} target={route.target} onBack={back} />
+    );
+  }
 
   return (
     <div className="flex flex-col h-dvh text-ink">
-      {/* Top bar */}
       <header className="flex items-center gap-3 px-3 pt-[max(0.25rem,env(safe-area-inset-top))] h-[calc(3rem+env(safe-area-inset-top))] border-b border-edge bg-paper flex-shrink-0">
-        <button
-          onClick={() => setNavOpen(!navOpen)}
-          className="min-h-touch min-w-touch flex items-center justify-center text-ink active:text-accent"
-          aria-label="Toggle sessions"
-        >
-          <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <line x1="4" y1="6" x2="20" y2="6" /><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="18" x2="20" y2="18" />
-          </svg>
-        </button>
-        <span className="flex-1 font-serif text-lg font-semibold truncate">
-          {selected?.title ?? 'Session Manager'}
-        </span>
-        <span
-          className="inline-flex items-center gap-1.5 text-xs font-mono text-ink-soft"
-          aria-live="polite"
-        >
+        <span className="flex-1 font-serif text-lg font-semibold truncate">{title}</span>
+        <span className="inline-flex items-center gap-1.5 text-xs font-mono text-ink-soft" aria-live="polite">
           <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-sage rm-pulse' : 'bg-ink-mute'}`} />
           {wsConnected ? 'live' : 'offline'}
         </span>
       </header>
-
-      <div className="flex flex-1 overflow-hidden relative">
-        {/* Left-nav drawer */}
-        <SessionNav socket={socket} deviceId={deviceId} />
-
-        {/* Main: 3-pane split */}
-        <main className="flex-1 flex flex-col min-w-0">
-          {selectedTabId ? (
-            <>
-              <StatePane tabId={selectedTabId} />
-              <SummaryPane tabId={selectedTabId} />
-              <MicPane socket={socket} deviceId={deviceId} target={selected?.epicId ?? selectedTabId} />
-            </>
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-ink-mute text-sm px-6 text-center font-serif italic">
-              {sessions.length
-                ? 'Select a session from the menu.'
-                : awaitingDesktopConfirm
-                  ? 'Waiting for you to confirm the 6-digit code on your computer (Settings → Phone remote)…'
-                  : 'No active sessions on this device yet.'}
-            </div>
-          )}
-        </main>
-      </div>
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">{body}</main>
     </div>
   );
 }

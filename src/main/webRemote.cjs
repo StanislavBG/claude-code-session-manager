@@ -426,6 +426,7 @@ async function connect() {
     _missedPongs = 0;
     startHeartbeat();
     // Update lastConnectedAt without exposing token
+    invalidateConfigCache(); // a pin written since the last cached read must not be overwritten
     loadConfig().then(async (c) => {
       const devs = (c.devices || []).map((d) =>
         d.deviceId === device.deviceId
@@ -895,7 +896,10 @@ async function handleMessage(raw, device) {
       // manually SAS-confirmed once, skip pending_sas and auto-authenticate — the
       // user already verified this browser. A different/first-seen pubKey always
       // falls through to the manual pending_sas flow below, unchanged.
-      if (isPinnedPeerKey(device, browserPubKey)) {
+      // Read pins from the CURRENT config: `device` is the connect-time snapshot and
+      // never sees pins that webRemote:confirm-sas wrote afterwards.
+      const live = ((await loadConfig()).devices || []).find((d) => d.deviceId === device.deviceId) || device;
+      if (isPinnedPeerKey(live, browserPubKey)) {
         client.e2e = makeState('authenticated', sessionKey, null);
         finalizeE2eAuthenticated('E2E session auto-authenticated — pinned browser key matched', client);
         respond(id, undefined, 'e2e:ready', client);

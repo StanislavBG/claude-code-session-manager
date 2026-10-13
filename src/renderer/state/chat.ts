@@ -1401,7 +1401,7 @@ if (typeof window !== 'undefined' && window.api?.chat) {
   // Terminal guard in send() (PRD 831) still applies since we pass the same
   // tabId an Epic's Terminal attachment is keyed by. No-ops (with a log line
   // naming both lookups) if neither an open tab nor a known Epic matches.
-  window.api.chat.onExternalSend(({ tabId, prompt }) => {
+  window.api.chat.onExternalSend(({ tabId, prompt, sessionId, cwd }) => {
     const tab = useSessions.getState().tabs.find((t) => t.id === tabId)
     if (tab) {
       useChat.getState().send({ tabId, sessionId: tab.sessionId, cwd: tab.cwd, prompt, external: true })
@@ -1418,6 +1418,12 @@ if (typeof window !== 'undefined' && window.api?.chat) {
         return
       }
       useChat.getState().send({ tabId, sessionId: epic.claudeSessionId, cwd: epic.cwd, prompt, external: true })
+      return
+    }
+    // Epic not loaded in this renderer yet (e.g. another project): main already
+    // resolved and active-checked it, so trust the payload.
+    if (typeof sessionId === 'string' && sessionId && typeof cwd === 'string' && cwd) {
+      useChat.getState().send({ tabId, sessionId, cwd, prompt, external: true })
       return
     }
     window.api?.logs?.write(

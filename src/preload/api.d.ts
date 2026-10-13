@@ -1598,6 +1598,9 @@ export interface ChatRunNoticeEvent {
 export interface ChatExternalSendEvent {
   tabId: string;
   prompt: string;
+  /** Epic's claudeSessionId + project cwd, resolved by main so the renderer can deliver before the Epic's project is loaded. */
+  sessionId?: string;
+  cwd?: string;
 }
 
 export type CreateProjectFolderResult =

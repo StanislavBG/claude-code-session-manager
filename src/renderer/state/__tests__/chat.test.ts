@@ -18,7 +18,7 @@ const sharedWindowApi = vi.hoisted(() => {
   type NeedsInputHandler = (e: { tabId: string; sessionId: string; questions: string[]; answerBody: string; raw: string }) => void
   type CompleteHandler = (e: { tabId: string; sessionId: string; finalMessage: string }) => void
   type ErrorHandler = (e: { tabId: string; sessionId: string; message: string }) => void
-  type ExternalSendHandler = (e: { tabId: string; prompt: string }) => void
+  type ExternalSendHandler = (e: { tabId: string; prompt: string; sessionId?: string; cwd?: string }) => void
   type InboundAutoApproveHandler = (e: { cwd: string; epicId: string }) => void
 
   const handlers: {
@@ -309,6 +309,34 @@ describe('chat.ts onExternalSend listener (PRD 753)', () => {
       'warn',
       expect.stringMatching(/unknown-tab.*open tab.*Epic/),
     )
+  })
+
+  it('delivers to an unknown Epic when the payload carries sessionId and cwd', async () => {
+    const { api, run } = installWindowApiMock({ transcriptExists: true })
+
+    useSessions.setState({ tabs: [] })
+    usePromptSessions.setState({ sessions: {}, events: {} })
+
+    const handler = api.chat.onExternalSend.mock.calls[0][0]
+    handler({ tabId: 'epic-x', prompt: 'from phone', sessionId: 'sess-x', cwd: '/other/proj' })
+
+    await vi.waitFor(() => expect(run).toHaveBeenCalled())
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({ tabId: 'epic-x', sessionId: 'sess-x', cwd: '/other/proj', prompt: 'from phone' }),
+    )
+  })
+
+  it('does not send to an unknown Epic when sessionId/cwd are missing or empty', async () => {
+    const { api, run } = installWindowApiMock({ transcriptExists: true })
+
+    useSessions.setState({ tabs: [] })
+    usePromptSessions.setState({ sessions: {}, events: {} })
+
+    const handler = api.chat.onExternalSend.mock.calls[0][0]
+    handler({ tabId: 'epic-x', prompt: 'p' })
+    handler({ tabId: 'epic-x', prompt: 'p', sessionId: '', cwd: '/x' })
+
+    expect(run).not.toHaveBeenCalled()
   })
 
   it('resolves the target from usePromptSessions and hands off to send() when it is an active Epic', async () => {

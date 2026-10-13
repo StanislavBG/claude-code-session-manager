@@ -32,6 +32,7 @@ const config = require('./config.cjs');
 
 const { MEMORY_SLUG_RE: SLUG_RE } = require('./lib/memorySlug.cjs');
 const { scoreMemories } = require('./lib/memoryStale.cjs');
+const { addIndexLine, removeIndexLines, indexHealth } = require('./lib/memoryIndex.cjs');
 const {
   resolveWorkspaceMemoryDir,
   autoMemoryEnabled,
@@ -208,11 +209,22 @@ async function write({ workspace, name, content, cwd, agent }) {
   }
 }
 
+const INDEX_NAME = 'MEMORY.md';
+
+/** Read <dir>/MEMORY.md; missing/unreadable -> null. */
+async function readIndexText(dir) {
+  const r = await config.readText(path.join(dir, INDEX_NAME));
+  return r.exists ? r.text : null;
+}
+
 async function deleteEntry({ workspace, name, cwd, agent }) {
   const ws = validWorkspaceName(workspace) ? workspace : 'default';
   let abs;
-  try { abs = resolveEntryPath((await resolveDir({ workspace: ws, cwd, agent })).dir, name); }
-  catch (e) { return { ok: false, error: e.message }; }
+  let dir;
+  try {
+    dir = (await resolveDir({ workspace: ws, cwd, agent })).dir;
+    abs = resolveEntryPath(dir, name);
+  } catch (e) { return { ok: false, error: e.message }; }
   // Route through config.cjs::validatePath (home-boundary pin, symlink-safe)
   // plus validateWrite (write-prefix pin) — same contract every other
   // mutating call in the codebase follows. Complexity: O(1) per call.
@@ -225,18 +237,30 @@ async function deleteEntry({ workspace, name, cwd, agent }) {
   }
   try {
     await fsp.unlink(real);
-    return { ok: true, error: null };
   } catch (e) {
-    if (e.code === 'ENOENT') return { ok: true, error: null };
-    return { ok: false, error: e.message };
+    if (e.code !== 'ENOENT') return { ok: false, error: e.message };
   }
+  if (name === INDEX_NAME) return { ok: true, error: null };
+  try {
+    const text = await readIndexText(dir);
+    if (text !== null) {
+      const next = removeIndexLines(text, name);
+      if (next !== text) await config.writeTextAtomic(path.join(dir, INDEX_NAME), next);
+    }
+  } catch (e) {
+    return { ok: true, error: null, indexError: e.message };
+  }
+  return { ok: true, error: null };
 }
 
 async function create({ workspace, name, description, cwd, agent }) {
   const ws = validWorkspaceName(workspace) ? workspace : 'default';
   let abs;
-  try { abs = resolveEntryPath((await resolveDir({ workspace: ws, cwd, agent })).dir, name); }
-  catch (e) { return { ok: false, error: e.message }; }
+  let dir;
+  try {
+    dir = (await resolveDir({ workspace: ws, cwd, agent })).dir;
+    abs = resolveEntryPath(dir, name);
+  } catch (e) { return { ok: false, error: e.message }; }
   // Refuse to overwrite — create is strictly "new file".
   try {
     await fsp.access(abs, fs.constants.F_OK);
@@ -253,7 +277,16 @@ async function create({ workspace, name, description, cwd, agent }) {
     desc || `# ${stem}`,
     '',
   ].join('\n');
-  return await write({ workspace: ws, name, content: fm, cwd, agent });
+  const w = await write({ workspace: ws, name, content: fm, cwd, agent });
+  if (!w.ok || name === INDEX_NAME) return w;
+  try {
+    const text = (await readIndexText(dir)) || '';
+    const next = addIndexLine(text, { file: name, title: stem, hook: desc.replace(/\n/g, ' ') });
+    if (next !== text) await config.writeTextAtomic(path.join(dir, INDEX_NAME), next);
+  } catch (e) {
+    return { ...w, indexError: e.message };
+  }
+  return w;
 }
 
 /**
@@ -301,7 +334,8 @@ async function stale({ workspace, cwd, agent }) {
     entries.push({ name, mtimeMs: r2.mtimeMs, body: r2.text });
   }
 
-  return { entries: scoreMemories({ entries, now: Date.now(), existsPath }), workspace: ws, error: null };
+  const index = indexHealth({ indexText: await readIndexText(dir), files: r.entries.map((e) => e.name).filter((n) => n.endsWith('.md')) });
+  return { entries: scoreMemories({ entries, now: Date.now(), existsPath }), workspace: ws, error: null, index };
 }
 
 /** Agents (user + project) with their `memory:` frontmatter scope. */
@@ -347,6 +381,8 @@ module.exports = {
   list,
   read,
   write,
+  create,
+  deleteEntry,
   agents,
   stale,
 };

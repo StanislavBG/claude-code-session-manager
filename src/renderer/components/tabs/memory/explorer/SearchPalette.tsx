@@ -51,7 +51,7 @@ export function SearchPalette({ open, rows, clusterDot, onPick, onAsk, onClose }
     <div data-testid="mx-palette">
       <div className={`absolute inset-0 ${Z.dialog} bg-fg/30`} onClick={onClose} />
       <div
-        className={`absolute left-1/2 top-[84px] -translate-x-1/2 w-[580px] ${Z.dialog} bg-bg-hi border border-rule-structural rounded-[10px] shadow-lg overflow-hidden`}
+        className={`absolute left-1/2 top-[84px] -translate-x-1/2 w-[580px] ${Z.dialog} bg-bg-hi border border-rule rounded-[10px] shadow-2xl overflow-hidden`}
       >
         <input
           data-testid="mx-palette-input"

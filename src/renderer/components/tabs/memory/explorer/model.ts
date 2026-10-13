@@ -41,6 +41,7 @@ export interface ClusterInfo {
   summary: string
   memberSlugs: string[]
   linkCount: number
+  retireCount: number
   staleCount: number
   dotClass: string
 }
@@ -118,6 +119,7 @@ export function buildClusters(agg: MemoryAggregateResult | null, rows: MemoryRow
     summary: c.summary,
     memberSlugs: c.memberSlugs,
     linkCount: c.links.length,
+    retireCount: c.links.filter((l) => /retire/i.test(l.label ?? '')).length,
     staleCount: c.memberSlugs.filter((s) => staleSlugs.has(s)).length,
     dotClass: CLUSTER_DOT_CLASSES[i % CLUSTER_DOT_CLASSES.length],
   }))

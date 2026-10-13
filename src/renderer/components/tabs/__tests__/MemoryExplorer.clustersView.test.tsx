@@ -20,7 +20,7 @@ function row(over: Partial<MemoryRow> = {}): MemoryRow {
 
 const cluster: ClusterInfo = {
   id: 'c1', name: 'Scheduler', summary: 'Queue notes', memberSlugs: ['a', 'b'],
-  linkCount: 4, staleCount: 1, dotClass: 'bg-accent',
+  linkCount: 4, retireCount: 0, staleCount: 1, dotClass: 'bg-accent',
 }
 
 function mount(over: Record<string, unknown> = {}) {
@@ -83,7 +83,9 @@ describe('ClustersView', () => {
     expect(t).toContain('Scheduler')
     expect(t).toContain('Open 2 →')
     expect(t).toContain('Queue notes')
-    expect(t).toContain('4 links · 1 stale')
+    expect(t).toContain('4 links')
+    expect(t).toContain('0 retires')
+    expect(t).toContain('1 stale')
     const chips = Array.from(q('mx-cluster-c1')!.querySelectorAll('button.font-mono')) as HTMLElement[]
     expect(chips.map((c) => c.textContent)).toEqual(['a', 'b'])
     expect(chips[0].className).toContain('bg-butter/40')

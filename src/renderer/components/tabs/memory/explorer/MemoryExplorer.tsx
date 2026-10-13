@@ -390,7 +390,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   return (
     <div data-testid="mx-shell" className="relative h-full flex flex-col bg-bg text-fg leading-[normal]">
       <div className="relative shrink-0 flex items-center gap-3 px-6 py-4 border-b border-rule-structural">
-        <div className="flex items-baseline gap-3">
+        <div className="flex items-baseline gap-3 pt-1">
           <span className="text-[11px] tracking-[.08em] font-medium text-fg-dim">CONFIGURE</span>
           <span className="font-serif text-[28px] leading-none">Memory</span>
           <span className="text-xs text-fg-dim">Claude Code's own memory files · stored on this machine</span>
@@ -410,14 +410,14 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
           type="button"
           data-testid="mx-learn"
           onClick={() => setOverlay((o) => (o === 'learn' ? null : 'learn'))}
-          className="text-[11px] tracking-[.08em] font-semibold text-accent px-1 py-1.5 hover:text-fg"
+          className={`text-[11px] tracking-[.08em] font-semibold px-1 py-1.5 hover:text-fg ${overlay === 'learn' ? 'text-fg' : 'text-accent'}`}
         >
           LEARN
         </button>
         {overlay === 'learn' && (
           <div
             data-testid="mx-learn-popover"
-            className={`absolute right-5 top-[58px] w-[360px] ${Z.dialog} bg-bg-hi border border-rule-structural rounded-lg shadow-lg p-4 flex flex-col gap-2.5 text-[13px] leading-[1.55] text-fg`}
+            className={`absolute right-5 top-[58px] w-[360px] ${Z.dialog} bg-bg-hi border border-rule-structural rounded-lg shadow-2xl p-4 flex flex-col gap-2.5 text-[13px] leading-[1.55] text-fg`}
           >
             <span className="font-serif text-[17px]">How memory works</span>
             <span>{learn.intro}</span>

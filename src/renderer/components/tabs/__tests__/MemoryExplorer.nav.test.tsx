@@ -15,7 +15,7 @@ const agents: MemoryAgent[] = [
   { name: 'architect', origin: 'user', memoryScope: null, agentFile: '/a/architect.md' },
 ]
 const clusters: ClusterInfo[] = [
-  { id: 'c1', name: 'Scheduler', summary: '', memberSlugs: [], linkCount: 0, staleCount: 0, dotClass: 'bg-accent' },
+  { id: 'c1', name: 'Scheduler', summary: '', memberSlugs: [], linkCount: 0, retireCount: 0, staleCount: 0, dotClass: 'bg-accent' },
 ]
 const index: IndexHealth = {
   lines: 210, bytes: 2048, maxLines: 200, maxBytes: 25600,

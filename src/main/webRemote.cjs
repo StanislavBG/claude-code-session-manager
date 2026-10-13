@@ -1195,8 +1195,27 @@ function getDispatchMap() {
     // already runs inside the Electron main process (PRD 753).
     'cmd:chat:send': async (payload) => {
       const parsed = schemas.chatExternalSend.parse(payload);
-      chatRunner.enqueueExternalPrompt(parsed.tabId, parsed.prompt);
-      return { ok: true };
+      const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
+      const data = await sessionsStore.load();
+      const tabs = data?.tabs ?? [];
+      // Resolve the target in main: an open tab, or an ACTIVE Epic (by id or
+      // claudeSessionId) of an open project. Anything else fails loudly.
+      if (tabs.some((t) => t.sessionId === parsed.tabId || t.id === parsed.tabId)) {
+        chatRunner.enqueueExternalPrompt(parsed.tabId, parsed.prompt);
+        return { ok: true };
+      }
+      for (const tab of tabs) {
+        const sessions = Object.values(readActiveIndex(tab.cwd)?.sessions ?? {});
+        const epic = sessions.find((e) => e && (e.id === parsed.tabId || e.claudeSessionId === parsed.tabId));
+        if (!epic) continue;
+        if (epic.status !== 'active' || !epic.claudeSessionId) throw new Error('target is not an active session');
+        chatRunner.enqueueExternalPrompt(epic.id, parsed.prompt, {
+          sessionId: epic.claudeSessionId,
+          cwd: epic.cwd || tab.cwd,
+        });
+        return { ok: true };
+      }
+      throw new Error('unknown chat target');
     },
 
     'cmd:session:options': async () => {

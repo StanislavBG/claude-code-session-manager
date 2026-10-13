@@ -76,6 +76,37 @@ describe('drill-down commands', () => {
     await expect(dispatch()['cmd:session:transcript']({ cwd, sessionKey: '../x' })).rejects.toMatchObject({ name: 'ZodError' })
   })
 
+  describe('cmd:chat:send target resolution', () => {
+    const chatRunner = require('../../src/main/chatRunner.cjs')
+    function stub(status: string) {
+      vi.spyOn(sessionsStore, 'load').mockResolvedValue({ tabs: [{ sessionId: 'main-1', cwd, label: 'Proj' }] })
+      vi.spyOn(epicMint, 'readActiveIndex').mockReturnValue({
+        sessions: { e1: { id: 'e1', claudeSessionId: 'cs-1', status, cwd } },
+      })
+      return vi.spyOn(chatRunner, 'enqueueExternalPrompt').mockImplementation(() => {})
+    }
+    it('open tab id', async () => {
+      const spy = stub('active')
+      await expect(dispatch()['cmd:chat:send']({ tabId: 'main-1', prompt: 'hi' })).resolves.toEqual({ ok: true })
+      expect(spy).toHaveBeenCalledWith('main-1', 'hi')
+    })
+    it('active Epic by epicId and claudeSessionId', async () => {
+      const spy = stub('active')
+      for (const tabId of ['e1', 'cs-1']) {
+        await expect(dispatch()['cmd:chat:send']({ tabId, prompt: 'hi' })).resolves.toEqual({ ok: true })
+        expect(spy).toHaveBeenLastCalledWith('e1', 'hi', { sessionId: 'cs-1', cwd })
+      }
+    })
+    it('proposed, completed and unknown throw', async () => {
+      const spy = stub('proposed')
+      await expect(dispatch()['cmd:chat:send']({ tabId: 'e1', prompt: 'hi' })).rejects.toThrow()
+      stub('completed')
+      await expect(dispatch()['cmd:chat:send']({ tabId: 'cs-1', prompt: 'hi' })).rejects.toThrow()
+      await expect(dispatch()['cmd:chat:send']({ tabId: 'nope', prompt: 'hi' })).rejects.toThrow()
+      expect(spy).not.toHaveBeenCalled()
+    })
+  })
+
   it('finalizeE2eAuthenticated pushes event:remote:ready to that client only, never event:session:list', () => {
     const sent: string[] = []
     webRemote.__test.setWs({ readyState: 1, send: (m: string) => sent.push(m) })

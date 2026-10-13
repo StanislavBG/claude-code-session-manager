@@ -966,8 +966,14 @@ function cancel(tabId) {
 // directly, reusing send()'s existing queued-vs-immediate branching rather
 // than duplicating it here.
 
-function enqueueExternalPrompt(tabId, prompt) {
-  broadcast('chat:external-send', { tabId, prompt });
+function enqueueExternalPrompt(tabId, prompt, extra = {}) {
+  const { sessionId, cwd } = extra ?? {};
+  broadcast('chat:external-send', {
+    tabId,
+    prompt,
+    ...(sessionId !== undefined ? { sessionId } : {}),
+    ...(cwd !== undefined ? { cwd } : {}),
+  });
 }
 
 // Asks the renderer to start a new Session (same launchSession a macro press

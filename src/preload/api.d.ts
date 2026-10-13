@@ -1259,9 +1259,41 @@ export interface MemoryEntry {
   bytes: number;
 }
 
+export interface MemoryAgentTarget {
+  name: string;
+  scope: 'user' | 'project' | 'local';
+}
+
+/** Addressing for memory:* calls. `agent` targets an agent's native memory dir; `cwd` drives native resolution. */
+export interface MemoryTarget {
+  workspace?: string;
+  cwd?: string;
+  agent?: MemoryAgentTarget;
+}
+
+export interface MemoryAgent {
+  name: string;
+  origin: 'user' | 'project';
+  memoryScope: 'user' | 'project' | 'local' | null;
+  agentFile: string;
+}
+
+export interface MemoryIndexHealth {
+  lines: number;
+  bytes: number;
+  maxLines: number;
+  maxBytes: number;
+  overBudget: boolean;
+  nearBudget: boolean;
+  orphans: string[];
+  dangling: string[];
+}
+
 export interface MemoryListResult {
   entries: MemoryEntry[];
   workspace: string;
+  dir: string;
+  autoMemoryEnabled: boolean;
   error: string | null;
 }
 
@@ -1314,6 +1346,7 @@ export interface MemoryStaleResult {
   entries: MemoryStaleEntry[];
   workspace: string;
   error: string | null;
+  index?: MemoryIndexHealth;
 }
 
 // ────────────────────────────────────────────── Project Brief (PRD 837)
@@ -2094,19 +2127,21 @@ export interface SessionManagerAPI {
   };
   memory: {
     /** List markdown memory entries for the given workspace (defaults to 'default'). */
-    list: (workspace?: string) => Promise<MemoryListResult>;
+    list: (target?: MemoryTarget) => Promise<MemoryListResult>;
     /** Read the contents of one memory entry. */
-    read: (name: string, workspace?: string) => Promise<MemoryReadResult>;
+    read: (name: string, target?: MemoryTarget) => Promise<MemoryReadResult>;
     /** Atomic write of a memory entry (max 1 MiB). */
-    write: (name: string, content: string, workspace?: string) => Promise<MemoryMutationResult>;
+    write: (name: string, content: string, target?: MemoryTarget) => Promise<MemoryMutationResult>;
     /** Delete a memory entry. */
-    delete: (name: string, workspace?: string) => Promise<MemoryMutationResult>;
+    delete: (name: string, target?: MemoryTarget) => Promise<MemoryMutationResult>;
     /** Create a new memory entry with starter frontmatter + body. */
-    create: (name: string, description?: string, workspace?: string) => Promise<MemoryMutationResult>;
+    create: (name: string, description?: string, target?: MemoryTarget) => Promise<MemoryMutationResult>;
     /** Aggregate workspace memories into semantic clusters. `refresh:true` fires a cost-gated `claude -p` pass; otherwise returns the cache only. */
     aggregate: (workspace: string, refresh?: boolean, cwd?: string) => Promise<MemoryAggregateResult>;
     /** Deterministic, zero-LLM-cost staleness report. `cwd` (optional) scopes the dead-repo-ref check. */
-    stale: (workspace?: string, cwd?: string) => Promise<MemoryStaleResult>;
+    stale: (target?: MemoryTarget) => Promise<MemoryStaleResult>;
+    /** Agents (user + project) with their `memory:` frontmatter scope. */
+    agents: (cwd?: string) => Promise<{ agents: MemoryAgent[] }>;
   };
   projectBrief: {
     /** Read brief.json (or null if none yet) plus cheaply-computed source/drift metadata. Never fires an LLM call. */

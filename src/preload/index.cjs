@@ -1,5 +1,15 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+/** Forward only the defined addressing keys of a memory target. */
+function memoryTarget(target) {
+  const out = {};
+  if (!target || typeof target !== 'object') return out;
+  if (target.workspace) out.workspace = target.workspace;
+  if (target.cwd) out.cwd = target.cwd;
+  if (target.agent) out.agent = target.agent;
+  return out;
+}
+
 contextBridge.exposeInMainWorld('api', {
   app: {
     version: () => ipcRenderer.invoke('app:version'),
@@ -335,22 +345,20 @@ contextBridge.exposeInMainWorld('api', {
     writeText: (text) => ipcRenderer.invoke('clipboard:write-text', { text }),
   },
   memory: {
-    list: (workspace) => ipcRenderer.invoke('memory:list', workspace ? { workspace } : {}),
-    read: (name, workspace) => ipcRenderer.invoke('memory:read', workspace ? { name, workspace } : { name }),
-    write: (name, content, workspace) =>
-      ipcRenderer.invoke('memory:write', workspace ? { name, content, workspace } : { name, content }),
-    delete: (name, workspace) =>
-      ipcRenderer.invoke('memory:delete', workspace ? { name, workspace } : { name }),
-    create: (name, description, workspace) => {
-      const payload = { name };
+    list: (target) => ipcRenderer.invoke('memory:list', memoryTarget(target)),
+    read: (name, target) => ipcRenderer.invoke('memory:read', { name, ...memoryTarget(target) }),
+    write: (name, content, target) =>
+      ipcRenderer.invoke('memory:write', { name, content, ...memoryTarget(target) }),
+    delete: (name, target) => ipcRenderer.invoke('memory:delete', { name, ...memoryTarget(target) }),
+    create: (name, description, target) => {
+      const payload = { name, ...memoryTarget(target) };
       if (description) payload.description = description;
-      if (workspace) payload.workspace = workspace;
       return ipcRenderer.invoke('memory:create', payload);
     },
     aggregate: (workspace, refresh, cwd) =>
       ipcRenderer.invoke('memory:aggregate', { workspace, ...(refresh ? { refresh: true } : {}), ...(cwd ? { cwd } : {}) }),
-    stale: (workspace, cwd) =>
-      ipcRenderer.invoke('memory:stale', { ...(workspace ? { workspace } : {}), ...(cwd ? { cwd } : {}) }),
+    stale: (target) => ipcRenderer.invoke('memory:stale', memoryTarget(target)),
+    agents: (cwd) => ipcRenderer.invoke('memory:agents', cwd ? { cwd } : {}),
   },
   projectBrief: {
     get: (cwd) => ipcRenderer.invoke('project-brief:get', { cwd }),

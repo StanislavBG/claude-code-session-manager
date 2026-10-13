@@ -81,7 +81,7 @@ function WorkspaceMemoryView() {
 
   const refresh = useCallback(async () => {
     if (!home) return
-    const r = await window.api.memory.list(workspace)
+    const r = await window.api.memory.list({ workspace, cwd: cwd ?? undefined })
     setEntries(r.entries)
     if (r.error) toast.error(`Memory list failed: ${r.error}`)
     setSelectedName((prev) => {
@@ -89,7 +89,7 @@ function WorkspaceMemoryView() {
       return r.entries[0]?.name ?? null
     })
     try {
-      const s = await window.api.memory.stale(workspace, cwd ?? undefined)
+      const s = await window.api.memory.stale({ workspace, cwd: cwd ?? undefined })
       setStaleByName(Object.fromEntries(s.entries.map((e) => [e.name, e])))
     } catch (err) {
       setStaleByName({})
@@ -130,7 +130,7 @@ function WorkspaceMemoryView() {
     if (draftByName[selectedName] !== undefined) return
     let cancelled = false
     ;(async () => {
-      const r = await window.api.memory.read(selectedName, workspace)
+      const r = await window.api.memory.read(selectedName, { workspace, cwd: cwd ?? undefined })
       if (cancelled) return
       if (r.error) { toast.error(`Memory read failed: ${r.error}`); return }
       setDraftByName((m) => ({ ...m, [selectedName]: r.content }))
@@ -154,7 +154,7 @@ function WorkspaceMemoryView() {
   const onSave = async () => {
     if (!selectedName) return
     setBusy(true)
-    const r = await window.api.memory.write(selectedName, draft, workspace)
+    const r = await window.api.memory.write(selectedName, draft, { workspace, cwd: cwd ?? undefined })
     setBusy(false)
     if (!r.ok) {
       toast.error(`Memory save failed: ${r.error ?? 'unknown error'}`)
@@ -168,7 +168,7 @@ function WorkspaceMemoryView() {
     if (!selectedName) return
     if (!window.confirm(`Delete memory "${selectedName}"? This cannot be undone.`)) return
     setBusy(true)
-    const r = await window.api.memory.delete(selectedName, workspace)
+    const r = await window.api.memory.delete(selectedName, { workspace, cwd: cwd ?? undefined })
     setBusy(false)
     if (!r.ok) {
       toast.error(`Memory delete failed: ${r.error ?? 'unknown error'}`)
@@ -260,7 +260,7 @@ function WorkspaceMemoryView() {
       }
     >
       {view === 'natural' ? (
-        <MemoryNaturalPanel workspace={workspace} entries={entries} onChanged={refresh} />
+        <MemoryNaturalPanel workspace={workspace} cwd={cwd ?? undefined} entries={entries} onChanged={refresh} />
       ) : view === 'clusters' ? (
         <MemoryClustersPanel
           workspace={workspace}
@@ -322,6 +322,7 @@ function WorkspaceMemoryView() {
           creatingOpen ? (
             <NewMemoryForm
               workspace={workspace}
+              cwd={cwd}
               onCancel={() => setCreatingOpen(false)}
               onCreated={(name) => {
                 setCreatingOpen(false)
@@ -364,10 +365,12 @@ function WorkspaceMemoryView() {
 
 function NewMemoryForm({
   workspace,
+  cwd,
   onCancel,
   onCreated,
 }: {
   workspace: string
+  cwd: string | null
   onCancel: () => void
   onCreated: (name: string) => void
 }) {
@@ -387,7 +390,7 @@ function NewMemoryForm({
     setBusy(true)
     setError(null)
     const name = `${normalized}.md`
-    const r = await window.api.memory.create(name, description.trim() || undefined, workspace)
+    const r = await window.api.memory.create(name, description.trim() || undefined, { workspace, cwd: cwd ?? undefined })
     setBusy(false)
     if (!r.ok) {
       setError(r.error ?? 'create failed')

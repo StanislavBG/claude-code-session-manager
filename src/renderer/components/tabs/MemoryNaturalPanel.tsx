@@ -165,13 +165,15 @@ function uid(): string {
 interface Props {
   /** Encoded workspace key for the IPC layer. */
   workspace: string
+  /** Project cwd; drives native memory-dir resolution. */
+  cwd?: string
   /** Current entries — supplied by parent so it stays in sync with classic view. */
   entries: MemoryEntry[]
   /** Trigger a re-list after a local mutation (delete / add). */
   onChanged: () => void
 }
 
-export function MemoryNaturalPanel({ workspace, entries, onChanged }: Props) {
+export function MemoryNaturalPanel({ workspace, cwd, entries, onChanged }: Props) {
   const home = useHomeDir()
   // useActiveTab() derives its id from useSessions state (tabs.find by
   // activeTabId), the same store VoiceButton's onClick reads via
@@ -222,7 +224,7 @@ export function MemoryNaturalPanel({ workspace, entries, onChanged }: Props) {
         push({ role: 'result', text: `No memory matches "${arg}". Try \`list\` to see what is here.` })
         return
       }
-      const r = await window.api.memory.read(match.name, workspace)
+      const r = await window.api.memory.read(match.name, { workspace, cwd })
       if (r.error) {
         toast.error(`Memory read failed: ${r.error}`)
         push({ role: 'result', text: `Read failed: ${r.error}` })
@@ -234,7 +236,7 @@ export function MemoryNaturalPanel({ workspace, entries, onChanged }: Props) {
         payload: { kind: 'entry', entry: match, content: r.content },
       })
     },
-    [entries, workspace, push],
+    [entries, workspace, cwd, push],
   )
 
   const handleSearch = useCallback(
@@ -248,7 +250,7 @@ export function MemoryNaturalPanel({ workspace, entries, onChanged }: Props) {
       const bodyHits: SearchHit[] = []
       for (const e of entries) {
         if (nameHits.includes(e)) continue
-        const r = await window.api.memory.read(e.name, workspace)
+        const r = await window.api.memory.read(e.name, { workspace, cwd })
         if (r.error) continue
         const lines = r.content.split('\n')
         const idx = lines.findIndex((l) => l.toLowerCase().includes(lowerQuery))
@@ -270,7 +272,7 @@ export function MemoryNaturalPanel({ workspace, entries, onChanged }: Props) {
         payload: { kind: 'search', query, hits: allHits },
       })
     },
-    [entries, workspace, push],
+    [entries, workspace, cwd, push],
   )
 
   const handleForget = useCallback(
@@ -281,7 +283,7 @@ export function MemoryNaturalPanel({ workspace, entries, onChanged }: Props) {
         return
       }
       if (!window.confirm(`Delete memory "${match.name}"? This cannot be undone.`)) return
-      const r = await window.api.memory.delete(match.name, workspace)
+      const r = await window.api.memory.delete(match.name, { workspace, cwd })
       if (!r.ok) {
         toast.error(`Memory delete failed: ${r.error ?? 'unknown error'}`)
         push({ role: 'result', text: `Delete failed: ${r.error ?? 'unknown error'}` })
@@ -290,7 +292,7 @@ export function MemoryNaturalPanel({ workspace, entries, onChanged }: Props) {
       push({ role: 'result', text: `Deleted ${match.name}.` })
       onChanged()
     },
-    [entries, workspace, push, onChanged],
+    [entries, workspace, cwd, push, onChanged],
   )
 
   const handleRemember = useCallback(
@@ -402,15 +404,15 @@ export function MemoryNaturalPanel({ workspace, entries, onChanged }: Props) {
       }
       const name = `${slug}.md`
       // Use `create` so we never overwrite an existing entry without intent.
-      const created = await window.api.memory.create(name, undefined, workspace)
+      const created = await window.api.memory.create(name, undefined, { workspace, cwd })
       if (!created.ok) {
         toast.error(`Create failed: ${created.error ?? 'unknown error'}`)
         return
       }
       // Append the body via `write` — `create` only seeds frontmatter.
-      const existing = await window.api.memory.read(name, workspace)
+      const existing = await window.api.memory.read(name, { workspace, cwd })
       const body = existing.error ? content : `${existing.content.trimEnd()}\n\n${content}\n`
-      const written = await window.api.memory.write(name, body, workspace)
+      const written = await window.api.memory.write(name, body, { workspace, cwd })
       if (!written.ok) {
         toast.error(`Write failed: ${written.error ?? 'unknown error'}`)
         return
@@ -418,7 +420,7 @@ export function MemoryNaturalPanel({ workspace, entries, onChanged }: Props) {
       push({ role: 'result', text: `Saved as ${name}.` })
       onChanged()
     },
-    [workspace, push, onChanged],
+    [workspace, cwd, push, onChanged],
   )
 
   // Quick-action chips that prefill the input.

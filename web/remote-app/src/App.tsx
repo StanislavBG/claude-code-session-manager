@@ -32,13 +32,33 @@ export default function App() {
 
 const PIN_PREFIX = 'sm-e2e-pin-v1-';
 
+/** How long to wait after sas:pending for event:remote:ready before asking anyway. */
+export const READY_FALLBACK_MS = 20_000;
+
+/**
+ * Fallback timer for version skew (an older desktop never sends event:remote:ready).
+ * arm() restarts the countdown; clear() cancels it. On expiry `onReady` fires so the
+ * Projects screen issues its request and surfaces the RemoteError guidance.
+ */
+export function createReadyFallback(onReady: () => void, ms: number = READY_FALLBACK_MS) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const clear = (): void => {
+    if (timer) { clearTimeout(timer); timer = null; }
+  };
+  const arm = (): void => {
+    clear();
+    timer = setTimeout(() => { timer = null; onReady(); }, ms);
+  };
+  return { arm, clear };
+}
+
 function AppInner() {
   const { getToken } = useAuth();
   const {
     activeDeviceId,
     setMe, setDevices, setDeviceOnline, setActiveDevice,
     setWsConnected, setTabState, setTabSummary, reset,
-    setPendingSas, addKeyMismatch,
+    setPendingSas, addKeyMismatch, markRemoteReady,
   } = useStore();
   const socketRef = useRef<RelaySocket | null>(null);
 
@@ -86,6 +106,7 @@ function AppInner() {
   useEffect(() => {
     const socket = new RelaySocket((connected) => setWsConnected(connected));
     socketRef.current = socket;
+    const fallback = createReadyFallback(markRemoteReady);
     socket.connect().catch(console.error);
 
     const offStatus = socket.on('event:device:status', async (m: Envelope) => {
@@ -120,16 +141,28 @@ function AppInner() {
     // Internal event: SAS computed after e2e:ready; show to user for manual comparison.
     const offSas = socket.on('sas:pending', (m: Envelope) => {
       const p = m.payload as { sas?: string } | undefined;
-      if (m.deviceId && p?.sas) setPendingSas({ deviceId: m.deviceId, sas: p.sas });
+      if (m.deviceId && p?.sas) {
+        setPendingSas({ deviceId: m.deviceId, sas: p.sas });
+        fallback.arm();
+      }
+    });
+    // Desktop: phone is SAS-confirmed / key-pinned — commands are accepted now.
+    const offReady = socket.on('event:remote:ready', (m: Envelope) => {
+      const active = useStore.getState().activeDeviceId;
+      if (!m.deviceId || m.deviceId === active) {
+        fallback.clear();
+        markRemoteReady();
+      }
     });
 
     return () => {
-      offStatus(); offState(); offSummary(); offSas();
+      offStatus(); offState(); offSummary(); offSas(); offReady();
+      fallback.clear();
       socket.destroy();
       socketRef.current = null;
       reset();
     };
-  }, [setWsConnected, setDeviceOnline, setActiveDevice, setTabState, setTabSummary, reset, setPendingSas]);
+  }, [setWsConnected, setDeviceOnline, setActiveDevice, setTabState, setTabSummary, reset, setPendingSas, markRemoteReady]);
 
   const device = useStore((s) => s.devices.find((d) => d.deviceId === s.activeDeviceId));
   const online = !!device?.isOnline;

@@ -28,7 +28,7 @@ interface AppState {
   // E2E security state
   /** SAS pending user confirmation: { deviceId, sas } or null. */
   pendingSas: { deviceId: string; sas: string } | null;
-  /** True from SAS display until the desktop confirms (first event:session:list). */
+  /** True from SAS display until the desktop confirms (event:remote:ready). */
   awaitingDesktopConfirm: boolean;
   /** Device IDs whose relay-served pubKey diverged from the pinned value (TOFU). */
   keyMismatchDeviceIds: string[];
@@ -50,6 +50,8 @@ interface AppState {
 
   setPendingSas: (v: { deviceId: string; sas: string } | null) => void;
   clearPendingSas: () => void;
+  /** Desktop signalled readiness (or the fallback fired): stop waiting and re-fetch. */
+  markRemoteReady: () => void;
   addKeyMismatch: (deviceId: string) => void;
 }
 
@@ -93,6 +95,7 @@ export const useStore = create<AppState>((set) => ({
   setPendingSas: (pendingSas) =>
     set(pendingSas ? { pendingSas, awaitingDesktopConfirm: true } : { pendingSas }),
   clearPendingSas: () => set({ pendingSas: null }),
+  markRemoteReady: () => set((s) => ({ awaitingDesktopConfirm: false, refreshKey: s.refreshKey + 1 })),
   addKeyMismatch: (deviceId) =>
     set((s) => ({
       keyMismatchDeviceIds: s.keyMismatchDeviceIds.includes(deviceId)

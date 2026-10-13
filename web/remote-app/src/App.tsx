@@ -7,7 +7,7 @@ import { getMe, getDevices, setTokenGetter } from './api';
 import { RelaySocket } from './ws';
 import Cockpit from './components/Cockpit';
 import ConnectScreen from './components/ConnectScreen';
-import type { Envelope, SessionMeta, SessionSummary, SessionState } from './types';
+import type { Envelope, SessionSummary, SessionState } from './types';
 
 // Same Clerk instance as bilko.run (clerk.bilko.run) so the static sibling shares
 // the host session. Publishable keys are public; overridable at build time.
@@ -35,9 +35,9 @@ const PIN_PREFIX = 'sm-e2e-pin-v1-';
 function AppInner() {
   const { getToken } = useAuth();
   const {
-    activeDeviceId, selectedTabId, sessions,
+    activeDeviceId,
     setMe, setDevices, setDeviceOnline, setActiveDevice,
-    setWsConnected, setSessions, setTabState, setTabSummary, reset,
+    setWsConnected, setTabState, setTabSummary, reset,
     setPendingSas, addKeyMismatch,
   } = useStore();
   const socketRef = useRef<RelaySocket | null>(null);
@@ -109,10 +109,6 @@ function AppInner() {
         }
       }
     });
-    const offList = socket.on('event:session:list', (m: Envelope) => {
-      const p = m.payload as { sessions?: SessionMeta[] } | undefined;
-      if (p?.sessions) setSessions(p.sessions);
-    });
     const offState = socket.on('event:session:state', (m: Envelope) => {
       const p = m.payload as { tabId?: string; state?: SessionState } | undefined;
       if (p?.tabId && p.state) setTabState(p.tabId, p.state);
@@ -128,25 +124,12 @@ function AppInner() {
     });
 
     return () => {
-      offStatus(); offList(); offState(); offSummary(); offSas();
+      offStatus(); offState(); offSummary(); offSas();
       socket.destroy();
       socketRef.current = null;
       reset();
     };
-  }, [setWsConnected, setDeviceOnline, setActiveDevice, setSessions, setTabState, setTabSummary, reset, setPendingSas]);
-
-  // Subscribe to the selected session's live state + summary; unsubscribe on change.
-  useEffect(() => {
-    const socket = socketRef.current;
-    if (!socket || !activeDeviceId || !selectedTabId) return;
-    const sess = sessions.find((s) => s.tabId === selectedTabId);
-    if (!sess?.cwd) return;
-    socket.sendCommand('cmd:session:subscribe', activeDeviceId, { tabId: selectedTabId, cwd: sess.cwd })
-      .catch(() => {});
-    return () => {
-      socket.sendCommand('cmd:session:unsubscribe', activeDeviceId, { tabId: selectedTabId }).catch(() => {});
-    };
-  }, [activeDeviceId, selectedTabId, sessions]);
+  }, [setWsConnected, setDeviceOnline, setActiveDevice, setTabState, setTabSummary, reset, setPendingSas]);
 
   const device = useStore((s) => s.devices.find((d) => d.deviceId === s.activeDeviceId));
   const online = !!device?.isOnline;

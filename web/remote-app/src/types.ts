@@ -63,18 +63,6 @@ export type SessionState =
   | 'error'
   | 'unknown';
 
-export interface SessionMeta {
-  tabId: string;           // === claudeSessionId (transcript lookup key)
-  cwd?: string;
-  title?: string;
-  state?: SessionState | null;
-  kind?: 'project' | 'epic';
-  epicId?: string;         // epic entries: id the desktop resolves for cmd:chat:send
-  project?: string;
-  tag?: string;
-  agentType?: string;
-}
-
 export interface SessionSummary {
   tabId: string;
   summary: string;

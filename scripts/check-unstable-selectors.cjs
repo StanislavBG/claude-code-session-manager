@@ -39,7 +39,6 @@ const STORE_HOOK_NAMES = [
   'useConfig',
   'useLayout',
   'useChat',
-  'useAgentMemory',
   'useEditor',
   'useTeams',
   'useToast',

@@ -115,7 +115,6 @@ const { registerProjectBriefIpc } = require('./projectBrief.cjs');
 const { registerProjectPagesIpc, attachWindow: attachProjectPagesWindow, closeAllOutputWatchers: closeAllProjectPagesWatchers } = require('./projectPages.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
 const { computeEpicDelegationStats } = require('./lib/epic/epicDelegationStats.cjs');
-const agentMemory = require('./agentMemory.cjs');
 const git = require('./git.cjs');
 const heapSnapshot = require('./heapSnapshot.cjs');
 const filesIpc = require('./files.cjs');
@@ -1034,7 +1033,6 @@ ipcMain.handle('auditLog:append', validated(schemas.auditLogAppend, async ({ kin
   appendAuditEvent(kind, { cwd, epicId, source });
   return { ok: true };
 }));
-agentMemory.registerAgentMemoryHandlers();
 git.register(ipcMain);
 filesIpc.registerFilesHandlers();
 registerDocEditHandlers();

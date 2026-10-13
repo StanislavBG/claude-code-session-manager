@@ -1435,37 +1435,6 @@ export interface ProjectPagesGetResult {
   demoVideo: { path: string; mtimeMs: number } | null;
 }
 
-// ────────────────────────────────────────────── Per-subagent memory
-// Stored at ~/.claude/session-manager/agent-memory/<agentId>.json. Keyed by
-// agent name (the .md filename in ~/.claude/agents/), not by workspace cwd.
-
-export type AgentMemoryCategory = 'command' | 'preference' | 'pattern' | 'failure' | 'workflow';
-
-export interface AgentMemoryEntry {
-  id: string;
-  body: string;
-  category: AgentMemoryCategory | null;
-  createdAt: number;
-  updatedAt: number;
-  bytes: number;
-}
-
-export interface AgentMemoryListResult {
-  entries: AgentMemoryEntry[];
-  agentId: string;
-  error: string | null;
-}
-
-export interface AgentMemoryGetResult {
-  entry: AgentMemoryEntry | null;
-  error: string | null;
-}
-
-export interface AgentMemoryMutationResult {
-  ok: boolean;
-  error: string | null;
-}
-
 // ────────────────────────────────────────────── Git status (richer than app:git-branch)
 
 /** Mirrors the status returned by src/main/git.cjs mapStatus(). */
@@ -2188,21 +2157,6 @@ export interface SessionManagerAPI {
       kind: 'epic_create' | 'epic_approve' | 'epic_complete' | 'epic_delete' | 'epic_resume' | 'epic_duplicate',
       fields: { cwd: string; epicId: string; source: string },
     ) => Promise<{ ok: boolean }>;
-  };
-  agentMemory: {
-    /** List all memory entries for one subagent. Sorted newest first. */
-    list: (agentId: string) => Promise<AgentMemoryListResult>;
-    /** Get one entry's full body. Returns `{entry:null}` if missing. */
-    get: (agentId: string, entryId: string) => Promise<AgentMemoryGetResult>;
-    /** Upsert one entry. Atomic write through config.cjs; max body 1 MiB. */
-    set: (
-      agentId: string,
-      entryId: string,
-      body: string,
-      category?: AgentMemoryCategory,
-    ) => Promise<AgentMemoryMutationResult>;
-    /** Delete one entry. Removes the file outright when last entry is removed. */
-    delete: (agentId: string, entryId: string) => Promise<AgentMemoryMutationResult>;
   };
   git: {
     /** Full git status for `cwd`. Returns null when not a git repo, git is

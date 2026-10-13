@@ -54,7 +54,6 @@ const LIVE_ROOT_ALLOWLIST = new Map([
   ['scripts/__tests__/check-ops-path-literals.test.cjs', 'lint test: scratch fixtures deliberately contain violating lines'],
   // Non-scheduler app state that still lives under ~/.claude/session-manager (or a tmp worktree
   // root) with its own path; not yet routed through schedulerPaths. Migrating them is separate work.
-  ['src/main/agentMemory.cjs', 'agent-memory dir: app state under ~/.claude/session-manager, not a scheduler root'],
   ['src/main/index.cjs', 'main-process log dir under ~/.claude/session-manager/logs, not a scheduler root'],
   ['src/main/layoutStore.cjs', 'workbench-layout.json: app state, not a scheduler root'],
   ['src/main/lib/credentials.cjs', 'credential-refresh log next to ~/.claude/.credentials.json, not a scheduler root'],

@@ -389,16 +389,6 @@ contextBridge.exposeInMainWorld('api', {
   auditLog: {
     append: (kind, fields) => ipcRenderer.invoke('auditLog:append', { kind, ...fields }),
   },
-  agentMemory: {
-    list: (agentId) => ipcRenderer.invoke('agent-memory:list', { agentId }),
-    get: (agentId, entryId) => ipcRenderer.invoke('agent-memory:get', { agentId, entryId }),
-    set: (agentId, entryId, body, category) => {
-      const payload = { agentId, entryId, body };
-      if (category) payload.category = category;
-      return ipcRenderer.invoke('agent-memory:set', payload);
-    },
-    delete: (agentId, entryId) => ipcRenderer.invoke('agent-memory:delete', { agentId, entryId }),
-  },
   git: {
     // Returns null when cwd is not a git repo, git is missing, or the call
     // times out (5s ceiling). The existing `app.gitBranch` is intentionally

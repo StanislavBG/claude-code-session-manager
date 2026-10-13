@@ -849,36 +849,6 @@ const auditLogAppend = z.object({
   source: z.string().min(1).max(256),
 }).strict();
 
-// ──────────────────────────────────────────── Per-subagent memory
-// Distinct from the workspace-scoped Memory tool: agentMemory is keyed by
-// subagent name (the .md filename in ~/.claude/agents/, e.g. "code-reviewer"),
-// not by cwd. Storage lives at ~/.claude/session-manager/agent-memory/<agentId>.json.
-// Regex caps must stay in lockstep with agentMemory.cjs AGENT_ID_RE / ENTRY_ID_RE.
-const AGENT_MEMORY_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
-const AGENT_MEMORY_CATEGORY = z.enum(['command', 'preference', 'pattern', 'failure', 'workflow']);
-const AGENT_MEMORY_MAX_BODY = 1024 * 1024; // 1 MiB — must match MAX_BODY_BYTES in agentMemory.cjs
-
-const agentMemoryList = z.object({
-  agentId: z.string().regex(AGENT_MEMORY_ID_RE),
-}).strict();
-
-const agentMemoryGet = z.object({
-  agentId: z.string().regex(AGENT_MEMORY_ID_RE),
-  entryId: z.string().regex(AGENT_MEMORY_ID_RE),
-}).strict();
-
-const agentMemorySet = z.object({
-  agentId: z.string().regex(AGENT_MEMORY_ID_RE),
-  entryId: z.string().regex(AGENT_MEMORY_ID_RE),
-  body: z.string().max(AGENT_MEMORY_MAX_BODY),
-  category: AGENT_MEMORY_CATEGORY.optional(),
-}).strict();
-
-const agentMemoryDelete = z.object({
-  agentId: z.string().regex(AGENT_MEMORY_ID_RE),
-  entryId: z.string().regex(AGENT_MEMORY_ID_RE),
-}).strict();
-
 // ──────────────────────────────────────────── Exchanges (PRD 324 read path)
 const SESSION_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -1322,10 +1292,6 @@ module.exports = {
     promptSessionsGetWorktreeDisabled,
     promptSessionsSetWorktreeDisabled,
     auditLogAppend,
-    agentMemoryList,
-    agentMemoryGet,
-    agentMemorySet,
-    agentMemoryDelete,
     watchersAdd,
     watchersList,
     watchersRemove,

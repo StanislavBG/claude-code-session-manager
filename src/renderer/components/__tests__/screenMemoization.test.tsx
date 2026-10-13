@@ -153,6 +153,9 @@ function installBroadWindowApiMock() {
       write: vi.fn().mockResolvedValue({ ok: true }),
       delete: vi.fn().mockResolvedValue({ ok: true }),
       create: vi.fn().mockResolvedValue({ ok: true }),
+      aggregate: vi.fn().mockResolvedValue({ workspace: 'ws', generatedAt: null, clusters: [], orphans: [], cached: true }),
+      agents: vi.fn().mockResolvedValue({ agents: [] }),
+      listArchived: vi.fn().mockResolvedValue({ names: [], error: null }),
     },
     agents: {
       listPersonas: vi.fn().mockResolvedValue([] as AgentPersona[]),

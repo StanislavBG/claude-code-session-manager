@@ -16,13 +16,26 @@ which `vite preview` does not serve. It stays unrun; it is the Bilko publish-gat
 
 ## Two deploy targets — do not conflate
 
-1. **Bilko static-path copy** at `bilko.run/projects/session-manager/` — the live one. `dist/`
-   is copied into `~/Projects/Bilko` **by hand**; no script automates it.
+1. **Bilko static-path copy** at `bilko.run/projects/session-manager/` — the live one. After
+   `npm run build`, `node scripts/vendor-to-bilko.mjs` copies `dist/` into `~/Projects/Bilko`
+   (`--target`/`--dist` override). Committing/pushing `~/Projects/Bilko` stays a human/architect step.
 2. **Standalone Render static site** declared by `render.yaml` (`sm-app`,
    `session-manager.bilko.run`) — not how this ships today.
 
 Bundle budget 200 KB gz; xterm stays off the critical path. Voice is browser Web Speech →
 text; no audio crosses the wire. Browser auth is the host's Clerk.
+
+## Desktop command protocol
+
+Phone → desktop commands over the relay (stateless; drill down projects → sessions → chat):
+
+- `cmd:projects:list` — list projects.
+- `cmd:project:sessions` — list a project's sessions (Epics).
+- `cmd:session:transcript` — recent chat messages of a session.
+- `cmd:session:prds` — PRDs attached to a session.
+- `cmd:chat:send` — send a prompt; target = epicId or main tab id.
+- `cmd:session:subscribe` — stream live updates for one session.
+- `event:remote:ready` — desktop → phone: bridge is up, commands accepted.
 
 ## Who consumes this
 

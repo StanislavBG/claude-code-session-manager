@@ -6,6 +6,7 @@ type EventHandler = (envelope: Envelope) => void;
 type RespHandler = (envelope: Envelope) => void;
 
 interface PendingCmd {
+  deviceId?: string;
   resolve: RespHandler;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
@@ -296,6 +297,11 @@ export class RelaySocket {
         this.ws = null;
         this.stopPing();
         this.onStatusChange?.(false);
+        // The desktop drops its E2E sessions when our relay link drops; a stale
+        // key would make initiateE2E no-op and every command vanish. Clear keys
+        // (keypairs persist, so auth:ok re-sends e2e:hello with the same pubKey).
+        this.resetE2E();
+        this.rejectPending(undefined, 'connection lost');
         // 4001 = token revoked; don't reconnect
         if (evt.code === 4001 || this.destroyed) return;
         this.scheduleReconnect();
@@ -350,6 +356,28 @@ export class RelaySocket {
     }
   }
 
+  /**
+   * Drop the derived session key (not the persisted keypair) for one device, or
+   * all devices, so the next hello starts a real handshake with the same pubKey.
+   */
+  resetE2E(deviceId?: string): void {
+    if (deviceId !== undefined) {
+      const s = this.e2eSessions.get(deviceId);
+      if (s) s.sessionKey = null;
+      return;
+    }
+    for (const s of this.e2eSessions.values()) s.sessionKey = null;
+  }
+
+  private rejectPending(deviceId: string | undefined, reason: string): void {
+    for (const [id, p] of this.pending) {
+      if (deviceId !== undefined && p.deviceId !== deviceId) continue;
+      clearTimeout(p.timer);
+      this.pending.delete(id);
+      p.reject(new Error(reason));
+    }
+  }
+
   /** True if E2E session key is established for the given device. */
   hasE2E(deviceId: string): boolean {
     return this.e2eSessions.get(deviceId)?.sessionKey != null;
@@ -375,6 +403,26 @@ export class RelaySocket {
       let inner: Envelope;
       try { inner = JSON.parse(plaintext) as Envelope; } catch { return; }
       await this.dispatchAsync(inner);
+      return;
+    }
+
+    // e2e:rekey: desktop has no session for us; redo the handshake, same pubKey
+    if (type === 'e2e:rekey') {
+      const deviceId = msg.deviceId;
+      if (!deviceId) return;
+      const session = this.e2eSessions.get(deviceId);
+      if (!session) return;
+      this.resetE2E(deviceId);
+      this.rejectPending(deviceId, 'connection lost');
+      if (this.isConnected) {
+        this.sendRaw({
+          type: 'e2e:hello',
+          id: crypto.randomUUID(),
+          deviceId,
+          payload: { pubKey: session.browserPubKeyB64 },
+          ts: Date.now(),
+        });
+      }
       return;
     }
 
@@ -496,7 +544,7 @@ export class RelaySocket {
         reject(new Error(`timeout waiting for resp:${id}`));
       }, CMD_TIMEOUT_MS);
 
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, deviceId });
 
       const session = this.e2eSessions.get(deviceId);
       if (session?.sessionKey) {

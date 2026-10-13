@@ -7,7 +7,7 @@ function entry(name: string): MemoryEntry {
 }
 
 function staleEntry(name: string, stale: boolean, reasons: string[] = []): MemoryStaleEntry {
-  return { name, ageDays: 100, inboundLinks: 0, deadRefs: [], stale, reasons }
+  return { name, ageDays: 100, inboundLinks: 0, deadRefs: [], stale, reasons, description: null, type: null, originSessionId: null, outLinks: [], danglingLinks: [] }
 }
 
 describe('filterEntries', () => {

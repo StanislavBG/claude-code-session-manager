@@ -687,6 +687,26 @@ const memoryStale = z.object({
   agent: MEMORY_AGENT,
 }).strict();
 
+// memory:verify/archive/restore/listArchived/ask/proposeFix — Memory Explorer actions.
+const memoryNamed = z.object({
+  workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
+  name: z.string().regex(MEMORY_SLUG_RE),
+  cwd: MEMORY_CWD,
+  agent: MEMORY_AGENT,
+}).strict();
+const memoryVerify = memoryNamed;
+const memoryArchive = memoryNamed;
+const memoryRestore = memoryNamed;
+const memoryProposeFix = memoryNamed;
+const memoryListArchived = memoryList;
+const memoryAsk = z.object({
+  workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
+  question: z.string().min(1).max(4000),
+  contextName: z.string().regex(MEMORY_SLUG_RE).optional(),
+  cwd: MEMORY_CWD,
+  agent: MEMORY_AGENT,
+}).strict();
+
 const memoryAgents = z.object({
   cwd: MEMORY_CWD,
 }).strict();
@@ -1298,6 +1318,12 @@ module.exports = {
     memoryAggregate,
     memoryStale,
     memoryAgents,
+    memoryVerify,
+    memoryArchive,
+    memoryRestore,
+    memoryListArchived,
+    memoryAsk,
+    memoryProposeFix,
     projectBriefCwd,
     projectPagesCwd,
     projectHomeAdminWriteBody,

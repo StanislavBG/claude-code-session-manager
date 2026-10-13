@@ -360,6 +360,34 @@ async function agents({ cwd } = {}) {
   };
 }
 
+// memory:verify/archive/restore/listArchived/ask/proposeFix — thin delegates to
+// lib/memoryOps.cjs and memoryAssist.cjs; folder choice stays in resolveDir.
+async function memoryOp(fn, payload, failure) {
+  let dir;
+  try { dir = (await resolveDir(payload)).dir; }
+  catch (e) { return { ...failure, error: e.message }; }
+  return fn(dir);
+}
+
+const verifyEntry = ({ name, ...t }) => memoryOp((dir) => require('./lib/memoryOps.cjs').verify(dir, name), t, { ok: false });
+const archiveEntry = ({ name, ...t }) => memoryOp((dir) => require('./lib/memoryOps.cjs').archive(dir, name), t, { ok: false });
+const restoreEntry = ({ name, ...t }) => memoryOp((dir) => require('./lib/memoryOps.cjs').restore(dir, name), t, { ok: false });
+const listArchivedEntries = (t) => memoryOp((dir) => require('./lib/memoryOps.cjs').listArchived(dir), t, { names: [] });
+const askMemory = ({ question, contextName, ...t }) =>
+  memoryOp((dir) => require('./memoryAssist.cjs').ask({ question, dir, contextName }), t, { ok: false, answer: '', citations: [] });
+
+async function proposeFix({ name, ...t }) {
+  const fail = (error) => ({ ok: false, content: '', summary: '', error });
+  let dir;
+  let cwd;
+  try {
+    if (typeof t.cwd !== 'string' || !t.cwd) return fail('proposeFix requires a cwd');
+    cwd = config.validatePath(t.cwd);
+    dir = (await resolveDir(t)).dir;
+  } catch (e) { return fail(e.message); }
+  return require('./memoryAssist.cjs').proposeFix({ name, dir, cwd });
+}
+
 function registerMemoryHandlers() {
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('memory:list', v(s.memoryList, list));
@@ -369,6 +397,12 @@ function registerMemoryHandlers() {
   ipcMain.handle('memory:create', v(s.memoryCreate, create));
   ipcMain.handle('memory:stale', v(s.memoryStale, stale));
   ipcMain.handle('memory:agents', v(s.memoryAgents, agents));
+  ipcMain.handle('memory:verify', v(s.memoryVerify, verifyEntry));
+  ipcMain.handle('memory:archive', v(s.memoryArchive, archiveEntry));
+  ipcMain.handle('memory:restore', v(s.memoryRestore, restoreEntry));
+  ipcMain.handle('memory:listArchived', v(s.memoryListArchived, listArchivedEntries));
+  ipcMain.handle('memory:ask', v(s.memoryAsk, askMemory));
+  ipcMain.handle('memory:proposeFix', v(s.memoryProposeFix, proposeFix));
 }
 
 module.exports = {

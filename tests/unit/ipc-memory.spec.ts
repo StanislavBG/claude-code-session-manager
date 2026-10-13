@@ -200,3 +200,45 @@ describe('memoryCreate schema', () => {
     expect(schemas.memoryCreate.safeParse({ description: 'desc' }).success).toBe(false)
   })
 })
+
+// ──────────────────────────────────────────── Memory Explorer actions
+describe.each(['memoryVerify', 'memoryArchive', 'memoryRestore', 'memoryProposeFix'])('%s schema', (key) => {
+  it('accepts a valid payload', () => {
+    expect(schemas[key].safeParse({ name: 'foo.md', cwd: '/tmp/x', workspace: 'ws' }).success).toBe(true)
+  })
+  it('rejects an unknown key', () => {
+    expect(schemas[key].safeParse({ name: 'foo.md', extra: 1 }).success).toBe(false)
+  })
+  it('rejects a bad slug', () => {
+    expect(schemas[key].safeParse({ name: '../foo.md' }).success).toBe(false)
+  })
+})
+
+describe('memoryListArchived schema', () => {
+  it('accepts a valid payload', () => {
+    expect(schemas.memoryListArchived.safeParse({ workspace: 'ws', cwd: '/tmp/x' }).success).toBe(true)
+  })
+  it('rejects an unknown key', () => {
+    expect(schemas.memoryListArchived.safeParse({ extra: 1 }).success).toBe(false)
+  })
+  it('rejects a bad workspace', () => {
+    expect(schemas.memoryListArchived.safeParse({ workspace: '../etc' }).success).toBe(false)
+  })
+})
+
+describe('memoryAsk schema', () => {
+  it('accepts a valid payload', () => {
+    expect(schemas.memoryAsk.safeParse({ question: 'why?', contextName: 'foo.md', cwd: '/tmp/x' }).success).toBe(true)
+  })
+  it('rejects an unknown key', () => {
+    expect(schemas.memoryAsk.safeParse({ question: 'why?', extra: 1 }).success).toBe(false)
+  })
+  it('rejects a bad contextName slug', () => {
+    expect(schemas.memoryAsk.safeParse({ question: 'why?', contextName: '../x' }).success).toBe(false)
+  })
+  it('rejects empty and over-long questions', () => {
+    expect(schemas.memoryAsk.safeParse({ question: '' }).success).toBe(false)
+    expect(schemas.memoryAsk.safeParse({ question: 'a'.repeat(4001) }).success).toBe(false)
+    expect(schemas.memoryAsk.safeParse({ question: 'a'.repeat(4000) }).success).toBe(true)
+  })
+})

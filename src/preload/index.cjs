@@ -359,6 +359,13 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.invoke('memory:aggregate', { workspace, ...(refresh ? { refresh: true } : {}), ...(cwd ? { cwd } : {}) }),
     stale: (target) => ipcRenderer.invoke('memory:stale', memoryTarget(target)),
     agents: (cwd) => ipcRenderer.invoke('memory:agents', cwd ? { cwd } : {}),
+    verify: (name, target) => ipcRenderer.invoke('memory:verify', { name, ...memoryTarget(target) }),
+    archive: (name, target) => ipcRenderer.invoke('memory:archive', { name, ...memoryTarget(target) }),
+    restore: (name, target) => ipcRenderer.invoke('memory:restore', { name, ...memoryTarget(target) }),
+    listArchived: (target) => ipcRenderer.invoke('memory:listArchived', memoryTarget(target)),
+    ask: ({ question, target, contextName }) =>
+      ipcRenderer.invoke('memory:ask', { question, ...(contextName ? { contextName } : {}), ...memoryTarget(target) }),
+    proposeFix: ({ name, target }) => ipcRenderer.invoke('memory:proposeFix', { name, ...memoryTarget(target) }),
   },
   projectBrief: {
     get: (cwd) => ipcRenderer.invoke('project-brief:get', { cwd }),

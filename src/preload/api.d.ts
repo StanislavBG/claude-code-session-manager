@@ -1340,6 +1340,11 @@ export interface MemoryStaleEntry {
   deadRefs: string[];
   stale: boolean;
   reasons: string[];
+  description: string | null;
+  type: string | null;
+  originSessionId: string | null;
+  outLinks: string[];
+  danglingLinks: string[];
 }
 
 export interface MemoryStaleResult {
@@ -2114,6 +2119,20 @@ export interface SessionManagerAPI {
     stale: (target?: MemoryTarget) => Promise<MemoryStaleResult>;
     /** Agents (user + project) with their `memory:` frontmatter scope. */
     agents: (cwd?: string) => Promise<{ agents: MemoryAgent[] }>;
+    /** Stamp a memory as verified (refreshes its freshness). */
+    verify: (name: string, target?: MemoryTarget) => Promise<{ ok: boolean; error: string | null }>;
+    /** Move a memory into the archive. */
+    archive: (name: string, target?: MemoryTarget) => Promise<{ ok: boolean; error: string | null }>;
+    /** Restore an archived memory. */
+    restore: (name: string, target?: MemoryTarget) => Promise<{ ok: boolean; error: string | null }>;
+    /** Names of archived memories. */
+    listArchived: (target?: MemoryTarget) => Promise<{ names: string[]; error: string | null }>;
+    /** Gated `claude -p` question over the memory folder. */
+    ask: (input: { question: string; target?: MemoryTarget; contextName?: string }) =>
+      Promise<{ ok: boolean; answer: string; citations: string[]; error?: string }>;
+    /** Gated `claude -p` proposed rewrite fixing a memory's dead refs; requires `target.cwd`. */
+    proposeFix: (input: { name: string; target?: MemoryTarget }) =>
+      Promise<{ ok: boolean; content: string; summary: string; error?: string }>;
   };
   projectBrief: {
     /** Read brief.json (or null if none yet) plus cheaply-computed source/drift metadata. Never fires an LLM call. */

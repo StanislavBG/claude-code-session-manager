@@ -65,7 +65,7 @@ const PAGE_META: Partial<Record<NavKey, PageConfig>> = {
   'plugins':       { title: 'Plugins',                   intro: 'Extensions for Claude Code. Install, enable, or remove plugins per-scope.' },
   'mcp':           { title: 'MCP Servers',               intro: 'External tools and integrations the agent can call. Add a new server or test an existing connection.' },
   'hooks':         { title: 'Hooks',                     intro: 'Run scripts on session events. Tail logs, format files, post to Slack — anything that responds to a shell command.' },
-  'memory':        { title: 'Memory',                    intro: 'Memories that persist across conversations — Workspace scope (keyed by project) or Subagent scope (keyed by agent). Stored locally, nothing leaves your machine.' },
+  'memory':        { title: 'Memory',                    intro: 'Claude Code\'s own memory files for this project and its subagents — a MEMORY.md index plus topic files. Stored locally, nothing leaves your machine.' },
   // 'projects' intentionally omitted: ProjectsWorkspace renders bare (no SectionFrame chrome)
   'system-prompt': { title: 'System prompt',             intro: 'The personality and behavior contract for this app. Edits here apply to every new session you spawn.' },
   'permissions':   { title: 'Permissions',               intro: 'Allow and deny rules per scope. Adjust which tools Claude can call without prompting.' },

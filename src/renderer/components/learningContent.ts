@@ -359,26 +359,49 @@ export const LEARNING_CONTENT: Record<NavKey, LearningContent> = {
       ],
     },
   'memory': {
-    headline: 'Memories Claude can read and write across sessions — by project or by subagent',
+    headline: 'A window onto Claude Code\'s own memory files for this project and its subagents',
     intro:
-      'Two scopes share one tab, toggled by the Workspace / Subagent switch up top (your choice is remembered). Workspace is a cwd-scoped notebook at ~/.claude/projects/<workspace>/memory/ — plain markdown files with an optional description. Subagent is keyed by agent at ~/.claude/session-manager/agent-memory/<agentId>.json — facts about a specific agent (e.g. the "code-reviewer" agent\'s preferred test runner) that survive across projects. You can hand-edit either here; Claude writes to them during sessions when you ask it to remember things across context resets.',
+      'Claude Code can keep notes between conversations. These are plain markdown files, stored on your machine. For a project they live in ~/.claude/projects/<project>/memory/. MEMORY.md is the index. Topic files hold the details. At the start of each session Claude loads only the first 200 lines or 25KB of MEMORY.md, whichever comes first, so keep the index short. This tab shows those files and lets you read, edit and delete them. Nothing leaves your machine.',
     sections: [
+      {
+        title: 'What memory is',
+        items: [
+          { term: 'Index + topics', body: 'MEMORY.md is a short list of one-line pointers. Each pointer names a topic file that holds the full note. Claude reads the index every session and opens a topic file when it needs it.' },
+          { term: 'Load limit', body: 'Only the first 200 lines / 25KB of MEMORY.md are loaded per session. Lines past that are never seen, so a long index quietly loses its tail.' },
+          { term: 'Who writes', body: 'Claude writes memories when you ask it to remember something, or when it decides a fact is worth keeping. You can also edit the files here by hand.' },
+        ],
+      },
       {
         title: 'Workspace memories',
         items: [
-          { term: 'Scope', body: 'Auto-selected from the active terminal tab\'s directory. Switching to a tab in a different folder shows a different memory set. A watcher refreshes the list when Claude writes to these files mid-session.' },
-          { term: 'New memory', body: 'Names are lowercase letters/digits/dashes/underscores and become the .md filename. You can add an optional one-line description. Edit the body in the markdown editor, then Save (or Delete).' },
-          { term: 'Natural panel', body: 'A chat-style console for the workspace. Type plain commands — list, show <name>, search <text>, remember <text>, forget <name>, help. It never writes on its own: free-form text offers two buttons — "Send to Claude in terminal" (pastes a prompt you still press Enter on) or "Add as new memory" (writes directly).' },
+          { term: 'Where', body: 'The project\'s auto memory, at ~/.claude/projects/<project>/memory/. It is picked from the active tab\'s folder, so a different folder shows a different set.' },
+          { term: 'Worktrees', body: 'All git worktrees of the same repository share one workspace memory. A note saved in one worktree is visible in the others.' },
+          { term: 'Editing', body: 'Open a file to read or edit it, add a new one, or delete one. The list refreshes when Claude writes to these files mid-session.' },
         ],
       },
       {
         title: 'Subagent memories',
         items: [
-          { term: 'Agent', body: 'Pick an agent from the dropdown — scanned from ~/.claude/agents and <cwd>/.claude/agents (project agents shadow same-named user ones).' },
-          { term: 'Entries', body: 'Each entry has an id, a body, and an optional category: Commands, Preferences, Patterns, Avoid, or Workflow. Newest entries sort first. Add via "+ New entry"; edit the body and Save, or Delete.' },
-          { term: 'Caps', body: '1 MiB per entry body. Writes above the cap are refused.' },
+          { term: 'Opt-in', body: 'A subagent keeps memory only if its definition has `memory: user`, `memory: project` or `memory: local` in its frontmatter. Without that line it has none.' },
+          { term: 'Where', body: 'user: ~/.claude/agent-memory/<agent>/. project: <project>/.claude/agent-memory/<agent>/ (can be committed and shared). local: <project>/.claude/agent-memory-local/<agent>/ (kept out of version control).' },
+          { term: 'Agent picker', body: 'Pick an agent to see its memory directory. Its files look the same as workspace memory: a MEMORY.md index plus topic files.' },
         ],
       },
+      {
+        title: 'What this tab adds',
+        items: [
+          { term: 'Stale badge', body: 'Marks a memory that has not been touched for a long time, so you can check whether it is still true.' },
+          { term: 'Not in index', body: 'Marks a topic file that MEMORY.md does not point to. Claude will not find it on its own until you add a line to the index.' },
+          { term: 'Index budget', body: 'A strip showing how many lines and KB of MEMORY.md you have used against the 200-line / 25KB limit. It warns when you are close or over.' },
+          { term: 'Clusters', body: 'Groups related memories so you can spot duplicates and merge them. It asks a model to do the grouping, so it costs tokens and only runs when you press the button.' },
+          { term: 'Natural console', body: 'A chat-style box for the workspace. Type list, show <name>, search <text>, remember <text>, forget <name> or help. Free-form text never writes by itself: you choose to send it to Claude in the terminal or add it as a new memory.' },
+        ],
+      },
+    ],
+    tips: [
+      'Auto memory off means nothing here is read. Turn it back on if the files seem to have no effect.',
+      'Keep MEMORY.md lines short and move detail into topic files so the index stays under the limit.',
+      'Check the "not in index" count after Claude has been writing for a while.',
     ],
   },
   'projects': {

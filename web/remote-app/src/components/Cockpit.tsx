@@ -54,7 +54,7 @@ export default function Cockpit({ socket, deviceId }: Props) {
             <>
               <StatePane tabId={selectedTabId} />
               <SummaryPane tabId={selectedTabId} />
-              <MicPane socket={socket} deviceId={deviceId} tabId={selectedTabId} />
+              <MicPane socket={socket} deviceId={deviceId} target={selected?.epicId ?? selectedTabId} />
             </>
           ) : (
             <div className="flex-1 flex items-center justify-center text-ink-mute text-sm px-6 text-center font-serif italic">

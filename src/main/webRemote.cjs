@@ -1106,6 +1106,25 @@ function getDispatchMap() {
       return { messages: await readRecentChatMessages(filePath, { limit: parsed.limit }) };
     },
 
+    'cmd:session:prds': async (payload) => {
+      const parsed = schemas.remoteSessionPrds.parse(payload);
+      const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
+      const data = await sessionsStore.load();
+      const tab = (data?.tabs ?? []).find((t) => t && t.cwd === parsed.cwd);
+      if (!tab) throw new Error('cwd is not an open project');
+      validatePath(parsed.cwd);
+      const sessions = readActiveIndex(parsed.cwd)?.sessions ?? {};
+      const known = Object.values(sessions).some((e) => e && e.id === parsed.epicId) || !!sessions[parsed.epicId];
+      if (!known) throw new Error('unknown epic');
+      const all = await require('./scheduler.cjs').listPrdsInternal();
+      const prds = all
+        .filter((e) => e && e.epicId === parsed.epicId)
+        .map((e) => ({ slug: e.slug, title: e.title, status: e.status ?? null, archived: !!e.archived }))
+        .sort((a, b) => Number(a.archived) - Number(b.archived) || String(a.slug).localeCompare(String(b.slug)))
+        .slice(0, 50);
+      return { prds };
+    },
+
     'cmd:sessions:save': async (payload) => {
       const parsed = schemas.sessionsPayload.parse(payload);
       return sessionsStore.save(parsed);

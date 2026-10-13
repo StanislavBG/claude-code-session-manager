@@ -949,6 +949,11 @@ const remoteSessionTranscript = z.object({
   sessionKey: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/),
   limit: z.number().int().min(1).max(100).optional(),
 });
+// One Epic's PRD list (slug/title/status projection only, never bodies).
+const remoteSessionPrds = z.object({
+  cwd: z.string().min(1).max(4096),
+  epicId: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/),
+});
 
 // Phone-initiated new Session. cwd/agentName are re-checked against the open
 // tabs / persona list in webRemote.cjs before anything touches the filesystem.
@@ -1185,6 +1190,8 @@ const SAS_GATED_READS = new Set([
   'cmd:projects:list',
   'cmd:project:sessions',
   'cmd:session:transcript',
+  // PRD slugs/titles/statuses for one Epic — project work content, so SAS-gated.
+  'cmd:session:prds',
   // NOTE: cmd:exchanges:list is intentionally NOT allowlisted — webRemote.cjs has
   // no dispatch handler for it, so an allowlist entry would only fail closed with
   // an opaque reject. Re-add here together with the handler when remote exchanges
@@ -1322,6 +1329,7 @@ module.exports = {
     remoteSessionCreate,
     remoteProjectSessions,
     remoteSessionTranscript,
+    remoteSessionPrds,
     exchangesList,
     agentsSavePersona,
     macrosSave,

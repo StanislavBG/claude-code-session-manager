@@ -28,8 +28,8 @@ const { schemas, ALLOWED_COMMANDS, READ_COMMANDS, SAS_GATED_READS, MUTATE_COMMAN
 // ─── Allowlist coverage ───────────────────────────────────────────────────────
 
 describe('ALLOWED_COMMANDS set', () => {
-  it('contains exactly 18 entries', () => {
-    expect(ALLOWED_COMMANDS.size).toBe(18)
+  it('contains exactly 19 entries', () => {
+    expect(ALLOWED_COMMANDS.size).toBe(19)
   })
 
   it('is the exact union of READ, SAS_GATED_READS, and MUTATE tiers (no overlap, no orphans)', () => {

@@ -76,6 +76,39 @@ describe('drill-down commands', () => {
     await expect(dispatch()['cmd:session:transcript']({ cwd, sessionKey: '../x' })).rejects.toMatchObject({ name: 'ZodError' })
   })
 
+  describe('cmd:session:prds', () => {
+    const scheduler = require('../../src/main/scheduler.cjs')
+    const entry = (slug: string, o: any = {}) => ({ slug, title: 't-' + slug, cwd, status: 'queued', archived: false, epicId: 'e1', body: 'SECRET', ...o })
+    it('is SAS-gated', () => {
+      expect(SAS_GATED_READS.has('cmd:session:prds')).toBe(true)
+      expect(ALLOWED_COMMANDS.has('cmd:session:prds')).toBe(true)
+    })
+    it('projects, filters by epic, orders live first then slug, caps at 50', async () => {
+      stubStore()
+      const many = Array.from({ length: 60 }, (_, i) => entry('m' + String(i).padStart(2, '0')))
+      vi.spyOn(scheduler, 'listPrdsInternal').mockResolvedValue([
+        entry('b', { archived: true, status: 'completed' }), entry('z', { status: undefined }), entry('a'),
+        entry('other', { epicId: 'e2' }), ...many,
+      ])
+      const r = await dispatch()['cmd:session:prds']({ cwd, epicId: 'e1' })
+      expect(r.prds).toHaveLength(50)
+      expect(r.prds[0]).toEqual({ slug: 'a', title: 't-a', status: 'queued', archived: false })
+      expect(JSON.stringify(r)).not.toContain('SECRET')
+      expect(r.prds.some((p: any) => p.slug === 'other')).toBe(false)
+      vi.spyOn(scheduler, 'listPrdsInternal').mockResolvedValue([entry('b', { archived: true }), entry('z', { status: undefined }), entry('a')])
+      const r2 = await dispatch()['cmd:session:prds']({ cwd, epicId: 'e1' })
+      expect(r2.prds.map((p: any) => p.slug)).toEqual(['a', 'z', 'b'])
+      expect(r2.prds[1].status).toBeNull()
+      expect(r2.prds[2].archived).toBe(true)
+    })
+    it('unknown epic and unopened cwd throw', async () => {
+      stubStore()
+      vi.spyOn(scheduler, 'listPrdsInternal').mockResolvedValue([])
+      await expect(dispatch()['cmd:session:prds']({ cwd, epicId: 'nope' })).rejects.toThrow()
+      await expect(dispatch()['cmd:session:prds']({ cwd: '/nope', epicId: 'e1' })).rejects.toThrow()
+    })
+  })
+
   describe('cmd:chat:send target resolution', () => {
     const chatRunner = require('../../src/main/chatRunner.cjs')
     function stub(status: string) {

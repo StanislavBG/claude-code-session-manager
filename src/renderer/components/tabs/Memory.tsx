@@ -10,12 +10,13 @@ import { formatBytes } from '../../lib/formatBytes'
 import { formatMtimeMs } from '../../lib/formatTime'
 import { encodeWorkspace } from '../../lib/encodeWorkspace'
 import { MEMORY_SLUG_RE } from '../../lib/memorySlug'
-import type { MemoryEntry, MemoryStaleEntry } from '../../../preload/api'
+import type { MemoryEntry, MemoryIndexHealth as IndexHealth, MemoryStaleEntry } from '../../../preload/api'
 import { toast } from '../../state/toast'
 import { filterEntries } from '../../lib/staleFilter'
 import { MemoryNaturalPanel } from './MemoryNaturalPanel'
 import { SubagentMemoryView } from './memory/SubagentMemoryView'
 import { MemoryClustersPanel } from './memory/MemoryClustersPanel'
+import { MemoryIndexHealth } from './memory/MemoryIndexHealth'
 
 type MemoryView = 'classic' | 'natural' | 'clusters'
 type MemoryScope = 'workspace' | 'subagent'
@@ -72,6 +73,9 @@ function WorkspaceMemoryView() {
   const [filter, setFilter] = useState('')
   const [staleByName, setStaleByName] = useState<Record<string, MemoryStaleEntry>>({})
   const [staleOnly, setStaleOnly] = useState(false)
+  const [memDir, setMemDir] = useState('')
+  const [autoMemoryEnabled, setAutoMemoryEnabled] = useState(true)
+  const [indexHealth, setIndexHealth] = useState<IndexHealth | undefined>(undefined)
 
   // Per-entry editor state. Keyed by entry name. Cleared on workspace switch.
   const [draftByName, setDraftByName] = useState<Record<string, string>>({})
@@ -83,6 +87,8 @@ function WorkspaceMemoryView() {
     if (!home) return
     const r = await window.api.memory.list({ workspace, cwd: cwd ?? undefined })
     setEntries(r.entries)
+    setMemDir(r.dir ?? '')
+    setAutoMemoryEnabled(r.autoMemoryEnabled !== false)
     if (r.error) toast.error(`Memory list failed: ${r.error}`)
     setSelectedName((prev) => {
       if (prev && r.entries.some((e) => e.name === prev)) return prev
@@ -91,8 +97,10 @@ function WorkspaceMemoryView() {
     try {
       const s = await window.api.memory.stale({ workspace, cwd: cwd ?? undefined })
       setStaleByName(Object.fromEntries(s.entries.map((e) => [e.name, e])))
+      setIndexHealth(s.index)
     } catch (err) {
       setStaleByName({})
+      setIndexHealth(undefined)
       toast.error(`Memory staleness check failed: ${err instanceof Error ? err.message : String(err)}`)
     }
   }, [home, workspace, cwd])
@@ -110,8 +118,8 @@ function WorkspaceMemoryView() {
   // consolidation review). Watch the workspace dir; any change inside fires
   // a re-list.
   useEffect(() => {
-    if (!home) return
-    const workspaceDir = `${home}/.claude/projects/${workspace}/memory`
+    if (!memDir) return
+    const workspaceDir = memDir
     window.api.config.watch([workspaceDir])
     const off = window.api.config.onChanged(({ path }) => {
       if (path === workspaceDir || path.startsWith(workspaceDir + '/')) {
@@ -122,7 +130,7 @@ function WorkspaceMemoryView() {
       off()
       window.api.config.unwatch([workspaceDir])
     }
-  }, [home, workspace, refresh])
+  }, [memDir, refresh])
 
   // Load file body when the selection changes (only if not yet cached).
   useEffect(() => {
@@ -259,6 +267,7 @@ function WorkspaceMemoryView() {
         ) : null
       }
     >
+      {view === 'classic' && <MemoryIndexHealth index={indexHealth} autoMemoryEnabled={autoMemoryEnabled} />}
       {view === 'natural' ? (
         <MemoryNaturalPanel workspace={workspace} cwd={cwd ?? undefined} entries={entries} onChanged={refresh} />
       ) : view === 'clusters' ? (
@@ -306,6 +315,14 @@ function WorkspaceMemoryView() {
                       {staleInfo?.stale && (
                         <span className="ml-1.5 shrink-0 px-1 rounded text-[9px] uppercase tracking-wide text-amber-400/90 border border-amber-400/30">
                           stale
+                        </span>
+                      )}
+                      {indexHealth?.orphans.includes(e.name) && (
+                        <span
+                          className="ml-1.5 shrink-0 px-1 rounded text-[9px] uppercase tracking-wide text-amber-400/90 border border-amber-400/30"
+                          title="Not listed in MEMORY.md — Claude won't see it"
+                        >
+                          not in index
                         </span>
                       )}
                     </span>

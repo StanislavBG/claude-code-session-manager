@@ -32,6 +32,13 @@ const config = require('./config.cjs');
 
 const { MEMORY_SLUG_RE: SLUG_RE } = require('./lib/memorySlug.cjs');
 const { scoreMemories } = require('./lib/memoryStale.cjs');
+const {
+  resolveWorkspaceMemoryDir,
+  autoMemoryEnabled,
+  resolveAgentMemoryDir,
+  listMemoryAgents,
+  gitRepoRoot,
+} = require('./lib/memoryDirResolve.cjs');
 
 const MAX_FILE_BYTES = 1024 * 1024; // 1 MiB
 const MAX_ENTRIES = 1000;
@@ -52,13 +59,59 @@ function workspaceDir(workspace) {
   return path.join(memoryRoot(), workspace, 'memory');
 }
 
+/** Read + parse a settings file; missing/malformed -> null. */
+async function readSettings(abs) {
+  try {
+    const r = await config.readText(abs);
+    if (!r.exists) return null;
+    const parsed = JSON.parse(r.text);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The one place a memory directory is chosen.
+ *   agent -> native subagent memory dir (root = git root of cwd, or cwd)
+ *   cwd   -> Claude Code's native workspace dir (git root + autoMemoryDirectory)
+ *   else  -> legacy ~/.claude/projects/<workspace>/memory
+ * Returns { dir, autoMemoryEnabled }. Throws on an invalid cwd/agent; every path
+ * the callers derive from `dir` still goes through config.validatePath/validateWrite.
+ */
+async function resolveDir({ workspace, cwd, agent } = {}) {
+  const home = os.homedir();
+  const ws = validWorkspaceName(workspace) ? workspace : 'default';
+  if (typeof cwd !== 'string' || !cwd) {
+    if (agent) throw new Error('agent memory requires a cwd');
+    return { dir: workspaceDir(ws), autoMemoryEnabled: true };
+  }
+  const realCwd = config.validatePath(cwd);
+  const root = gitRepoRoot(realCwd, require('node:child_process').execFileSync) || realCwd;
+  const realRoot = config.validatePath(root);
+  // Project-scoped native dirs live under <root>/.claude; validateWrite only
+  // permits that subtree for registered roots.
+  config.addAllowedRoot(realRoot);
+  const settings = {
+    user: await readSettings(path.join(home, '.claude', 'settings.json')),
+    project: await readSettings(path.join(realRoot, '.claude', 'settings.json')),
+    local: await readSettings(path.join(realRoot, '.claude', 'settings.local.json')),
+  };
+  const enabled = autoMemoryEnabled(settings);
+  if (agent) {
+    return { dir: resolveAgentMemoryDir({ home, root: realRoot, name: agent.name, scope: agent.scope }), autoMemoryEnabled: enabled };
+  }
+  const r = resolveWorkspaceMemoryDir({ home, cwd: realCwd, settings, repoRoot: realRoot });
+  return { dir: r.dir, autoMemoryEnabled: enabled };
+}
+
 /**
  * Reject NUL chars, '..' segments, absolute paths, or anything that would
  * resolve outside the workspace dir. Returns the resolved absolute path.
  * The downstream config.cjs helpers add a second layer of validation, but
  * this lets us return a clean error message before we get there.
  */
-function resolveEntryPath(workspace, name) {
+function resolveEntryPath(dir, name) {
   if (typeof name !== 'string' || !name) {
     throw new Error('invalid entry name');
   }
@@ -66,7 +119,6 @@ function resolveEntryPath(workspace, name) {
   if (!SLUG_RE.test(name)) {
     throw new Error(`invalid slug (must match ${SLUG_RE.source}): ${name}`);
   }
-  const dir = workspaceDir(workspace);
   const full = path.resolve(dir, name);
   // path.resolve normalizes; verify the result is still under dir to guard
   // against bizarre name inputs.
@@ -84,12 +136,15 @@ function validWorkspaceName(name) {
   return typeof name === 'string' && /^[a-zA-Z0-9-_]{1,256}$/.test(name);
 }
 
-async function list({ workspace }) {
+async function list({ workspace, cwd, agent }) {
   const ws = validWorkspaceName(workspace) ? workspace : 'default';
-  const dir = workspaceDir(ws);
+  let resolved;
+  try { resolved = await resolveDir({ workspace: ws, cwd, agent }); }
+  catch (e) { return { entries: [], workspace: ws, dir: null, autoMemoryEnabled: true, error: e.message }; }
+  const { dir } = resolved;
   const r = await config.listDir(dir, { filesOnly: true });
   if (!r.ok) {
-    return { entries: [], workspace: ws, error: r.error };
+    return { entries: [], workspace: ws, dir, autoMemoryEnabled: resolved.autoMemoryEnabled, error: r.error };
   }
   const entries = r.entries
     .filter((e) => e.name.endsWith('.md'))
@@ -100,12 +155,14 @@ async function list({ workspace }) {
       bytes: e.size,
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
-  return { entries, workspace: ws, error: null };
+  return { entries, workspace: ws, dir, autoMemoryEnabled: resolved.autoMemoryEnabled, error: null };
 }
 
-async function read({ workspace, name }) {
+async function read({ workspace, name, cwd, agent }) {
   const ws = validWorkspaceName(workspace) ? workspace : 'default';
-  const abs = resolveEntryPath(ws, name);
+  let abs;
+  try { abs = resolveEntryPath((await resolveDir({ workspace: ws, cwd, agent })).dir, name); }
+  catch (e) { return { content: '', exists: false, mtimeMs: 0, bytes: 0, error: e.message }; }
   const r = await config.readText(abs);
   if (!r.exists) {
     return { content: '', exists: false, mtimeMs: 0, bytes: 0, error: r.error };
@@ -119,7 +176,7 @@ async function read({ workspace, name }) {
   };
 }
 
-async function write({ workspace, name, content }) {
+async function write({ workspace, name, content, cwd, agent }) {
   const ws = validWorkspaceName(workspace) ? workspace : 'default';
   if (typeof content !== 'string') {
     return { ok: false, error: 'content must be a string' };
@@ -128,7 +185,9 @@ async function write({ workspace, name, content }) {
   if (bytes > MAX_FILE_BYTES) {
     return { ok: false, error: `file exceeds 1 MiB cap (${bytes} bytes)` };
   }
-  const abs = resolveEntryPath(ws, name);
+  let abs;
+  try { abs = resolveEntryPath((await resolveDir({ workspace: ws, cwd, agent })).dir, name); }
+  catch (e) { return { ok: false, error: e.message }; }
   // Enforce per-workspace entry cap on creates (writes to existing files are
   // always allowed regardless of count). Cheap fs.stat check rather than a
   // full directory enumeration where possible.
@@ -136,7 +195,7 @@ async function write({ workspace, name, content }) {
   try { await fsp.access(abs, fs.constants.F_OK); }
   catch { exists = false; }
   if (!exists) {
-    const l = await list({ workspace: ws });
+    const l = await list({ workspace: ws, cwd, agent });
     if (l.entries.length >= MAX_ENTRIES) {
       return { ok: false, error: `workspace at ${MAX_ENTRIES}-entry cap` };
     }
@@ -149,9 +208,11 @@ async function write({ workspace, name, content }) {
   }
 }
 
-async function deleteEntry({ workspace, name }) {
+async function deleteEntry({ workspace, name, cwd, agent }) {
   const ws = validWorkspaceName(workspace) ? workspace : 'default';
-  const abs = resolveEntryPath(ws, name);
+  let abs;
+  try { abs = resolveEntryPath((await resolveDir({ workspace: ws, cwd, agent })).dir, name); }
+  catch (e) { return { ok: false, error: e.message }; }
   // Route through config.cjs::validatePath (home-boundary pin, symlink-safe)
   // plus validateWrite (write-prefix pin) — same contract every other
   // mutating call in the codebase follows. Complexity: O(1) per call.
@@ -171,9 +232,11 @@ async function deleteEntry({ workspace, name }) {
   }
 }
 
-async function create({ workspace, name, description }) {
+async function create({ workspace, name, description, cwd, agent }) {
   const ws = validWorkspaceName(workspace) ? workspace : 'default';
-  const abs = resolveEntryPath(ws, name);
+  let abs;
+  try { abs = resolveEntryPath((await resolveDir({ workspace: ws, cwd, agent })).dir, name); }
+  catch (e) { return { ok: false, error: e.message }; }
   // Refuse to overwrite — create is strictly "new file".
   try {
     await fsp.access(abs, fs.constants.F_OK);
@@ -190,7 +253,7 @@ async function create({ workspace, name, description }) {
     desc || `# ${stem}`,
     '',
   ].join('\n');
-  return await write({ workspace: ws, name, content: fm });
+  return await write({ workspace: ws, name, content: fm, cwd, agent });
 }
 
 /**
@@ -200,9 +263,11 @@ async function create({ workspace, name, description }) {
  * the dead-ref existence check. Absent/invalid cwd disables dead-ref
  * detection entirely rather than mass-flagging memories.
  */
-async function stale({ workspace, cwd }) {
+async function stale({ workspace, cwd, agent }) {
   const ws = validWorkspaceName(workspace) ? workspace : 'default';
-  const dir = workspaceDir(ws);
+  let dir;
+  try { dir = (await resolveDir({ workspace: ws, cwd, agent })).dir; }
+  catch (e) { return { entries: [], workspace: ws, error: e.message }; }
   const r = await config.listDir(dir, { filesOnly: true });
   if (!r.ok) {
     return { entries: [], workspace: ws, error: r.error };
@@ -239,6 +304,28 @@ async function stale({ workspace, cwd }) {
   return { entries: scoreMemories({ entries, now: Date.now(), existsPath }), workspace: ws, error: null };
 }
 
+/** Agents (user + project) with their `memory:` frontmatter scope. */
+async function agents({ cwd } = {}) {
+  const home = os.homedir();
+  let root = null;
+  if (typeof cwd === 'string' && cwd) {
+    try {
+      const realCwd = config.validatePath(cwd);
+      root = config.validatePath(gitRepoRoot(realCwd, require('node:child_process').execFileSync) || realCwd);
+    } catch {
+      root = null;
+    }
+  }
+  return {
+    agents: listMemoryAgents({
+      home,
+      root,
+      readDir: (d) => fs.readdirSync(d),
+      readText: (f) => fs.readFileSync(f, 'utf8'),
+    }),
+  };
+}
+
 function registerMemoryHandlers() {
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('memory:list', v(s.memoryList, list));
@@ -247,6 +334,7 @@ function registerMemoryHandlers() {
   ipcMain.handle('memory:delete', v(s.memoryDelete, deleteEntry));
   ipcMain.handle('memory:create', v(s.memoryCreate, create));
   ipcMain.handle('memory:stale', v(s.memoryStale, stale));
+  ipcMain.handle('memory:agents', v(s.memoryAgents, agents));
 }
 
 module.exports = {
@@ -255,5 +343,10 @@ module.exports = {
   // exported for tests
   memoryRoot,
   workspaceDir,
+  resolveDir,
+  list,
+  read,
+  write,
+  agents,
   stale,
 };

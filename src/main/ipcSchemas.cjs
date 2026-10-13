@@ -634,30 +634,48 @@ const { MEMORY_SLUG_RE } = require('./lib/memorySlug.cjs');
 // 1 MiB hard cap — matches MAX_FILE_BYTES in memoryTool.cjs.
 const MEMORY_MAX_BYTES = 1024 * 1024;
 
+// Optional native-dir addressing: `cwd` selects Claude Code's own workspace dir
+// (git root + autoMemoryDirectory); `agent` selects native subagent memory.
+const MEMORY_CWD = z.string().max(4096).optional();
+const MEMORY_AGENT = z.object({
+  name: z.string().regex(/^[A-Za-z0-9._-]{1,128}$/),
+  scope: z.enum(['user', 'project', 'local']),
+}).strict().optional();
+
 const memoryList = z.object({
   workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
+  cwd: MEMORY_CWD,
+  agent: MEMORY_AGENT,
 }).strict();
 
 const memoryRead = z.object({
   workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
   name: z.string().regex(MEMORY_SLUG_RE),
+  cwd: MEMORY_CWD,
+  agent: MEMORY_AGENT,
 }).strict();
 
 const memoryWrite = z.object({
   workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
   name: z.string().regex(MEMORY_SLUG_RE),
   content: z.string().max(MEMORY_MAX_BYTES),
+  cwd: MEMORY_CWD,
+  agent: MEMORY_AGENT,
 }).strict();
 
 const memoryDelete = z.object({
   workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
   name: z.string().regex(MEMORY_SLUG_RE),
+  cwd: MEMORY_CWD,
+  agent: MEMORY_AGENT,
 }).strict();
 
 const memoryCreate = z.object({
   workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
   name: z.string().regex(MEMORY_SLUG_RE),
   description: z.string().max(2048).optional(),
+  cwd: MEMORY_CWD,
+  agent: MEMORY_AGENT,
 }).strict();
 
 // memory:stale — deterministic staleness scorer (PRD 601). `cwd`, when given,
@@ -666,6 +684,11 @@ const memoryCreate = z.object({
 const memoryStale = z.object({
   workspace: z.string().regex(MEMORY_WORKSPACE_RE).optional(),
   cwd: z.string().max(4096).optional(),
+  agent: MEMORY_AGENT,
+}).strict();
+
+const memoryAgents = z.object({
+  cwd: MEMORY_CWD,
 }).strict();
 
 // memory:aggregate — Memory Clusters (PRD 356). `workspace` here is already
@@ -1282,6 +1305,7 @@ module.exports = {
     memoryCreate,
     memoryAggregate,
     memoryStale,
+    memoryAgents,
     projectBriefCwd,
     projectPagesCwd,
     projectHomeAdminWriteBody,

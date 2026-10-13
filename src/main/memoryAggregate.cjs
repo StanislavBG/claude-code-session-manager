@@ -33,8 +33,15 @@ const { MEMORY_SLUG_RE } = require('./lib/memorySlug.cjs');
 const HOME = os.homedir();
 const CACHE_WRITER = 'memory-clusters';
 
-function memoryDir(workspace) {
-  return path.join(HOME, '.claude', 'projects', workspace, 'memory');
+// Resolved through memoryTool.cjs so cwd-addressed callers read Claude Code's
+// native dir (git root + autoMemoryDirectory); no cwd -> legacy workspace dir.
+async function memoryDir(workspace, cwd) {
+  const { resolveDir } = require('./memoryTool.cjs');
+  try {
+    return (await resolveDir({ workspace, cwd })).dir;
+  } catch {
+    return path.join(HOME, '.claude', 'projects', workspace, 'memory');
+  }
 }
 
 function clustersCachePath(cwd) {
@@ -94,15 +101,15 @@ function parseFrontmatter(text) {
   return { type, description, body: m[2] };
 }
 
-async function listMemoryFiles(workspace) {
-  const dir = memoryDir(workspace);
+async function listMemoryFiles(workspace, cwd) {
+  const dir = await memoryDir(workspace, cwd);
   const r = await config.listDir(dir, { filesOnly: true });
   if (!r.ok) return [];
   return r.entries.filter((e) => MEMORY_SLUG_RE.test(e.name)).map((e) => e.name).sort();
 }
 
-async function readMemories(workspace, names) {
-  const dir = memoryDir(workspace);
+async function readMemories(workspace, names, cwd) {
+  const dir = await memoryDir(workspace, cwd);
   const out = [];
   for (const name of names) {
     const abs = path.join(dir, name);
@@ -178,8 +185,8 @@ async function aggregate({ workspace, refresh, cwd }) {
     return { workspace: ws, generatedAt: null, clusters: [], orphans: [], cached: false };
   }
 
-  const names = await listMemoryFiles(ws);
-  const memories = await readMemories(ws, names);
+  const names = await listMemoryFiles(ws, cwd);
+  const memories = await readMemories(ws, names, cwd);
   const slugs = memories.map((m) => m.slug);
 
   let clusters = [];

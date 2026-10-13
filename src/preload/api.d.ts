@@ -1639,7 +1639,8 @@ export interface RemoteClientDevice {
   deviceId: string;
   email: string;
   issuedAt: string;
-  expiresAt: string;
+  /** null = never expires (relay keeps tokens until revoked). */
+  expiresAt: string | null;
   isOnline: boolean;
   devicePubKey: string;
 }

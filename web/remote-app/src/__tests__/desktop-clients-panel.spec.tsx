@@ -37,6 +37,15 @@ describe('DesktopClientsPanel', () => {
     const rows = await screen.findAllByTestId('desktop-client-row');
     expect(rows).toHaveLength(1);
     expect(rows[0].textContent).toContain('Work laptop');
+    expect(rows[0].textContent).toContain('Expires');
+  });
+
+  it('null expiresAt renders "Never expires", never an epoch date', async () => {
+    api.getClients.mockResolvedValue({ clients: [{ ...client, expiresAt: null }] });
+    render(<DesktopClientsPanel />);
+    const [row] = await screen.findAllByTestId('desktop-client-row');
+    expect(row.textContent).toContain('Never expires');
+    expect(row.textContent).not.toMatch(/1969|1970/);
   });
 
   it('revoke calls revokeClient with the id and reloads', async () => {

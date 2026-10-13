@@ -30,7 +30,8 @@ export interface DesktopClient {
   email: string;
   clientName: string | null;
   issuedAt: string;
-  expiresAt: string;
+  /** null = never expires (relay keeps tokens until revoked). */
+  expiresAt: string | null;
 }
 
 export interface ClientsResponse {

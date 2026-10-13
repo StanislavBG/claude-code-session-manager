@@ -78,7 +78,7 @@ export default function DesktopClientsPanel() {
           <li key={c.clientId} data-testid="desktop-client-row" className="flex items-center gap-2 px-3 py-2 rounded-2xl border border-edge bg-paper">
             <div className="flex-1 min-w-0">
               <div className="text-[14px] font-semibold text-ink truncate">{c.clientName || 'Unnamed desktop'}</div>
-              <div className="text-[11.5px] text-ink-mute">Expires {new Date(c.expiresAt).toLocaleDateString()}</div>
+              <div className="text-[11.5px] text-ink-mute">{c.expiresAt ? `Expires ${new Date(c.expiresAt).toLocaleDateString()}` : 'Never expires'}</div>
             </div>
             <button
               data-testid="desktop-client-revoke"

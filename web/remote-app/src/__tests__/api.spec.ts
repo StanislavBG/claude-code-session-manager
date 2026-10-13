@@ -110,7 +110,7 @@ describe('desktop-client calls', () => {
   it('getClients GETs /clients with Bearer', async () => {
     const payload = {
       clients: [
-        { clientId: 'c1', email: 'a@b.co', clientName: null, issuedAt: 'x', expiresAt: 'y' },
+        { clientId: 'c1', email: 'a@b.co', clientName: null, issuedAt: 'x', expiresAt: null },
       ],
     };
     const { calls } = makeFetchSpy(payload);

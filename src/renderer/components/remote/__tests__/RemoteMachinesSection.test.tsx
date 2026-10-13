@@ -168,7 +168,7 @@ describe('RemoteMachinesSection', () => {
       ok: true,
       devices: [
         { deviceId: 'already', email: 'a@b.c', issuedAt: '', expiresAt: '', isOnline: true, devicePubKey: 'k' },
-        { deviceId: 'abcdef1234567890', email: 'a@b.c', issuedAt: '', expiresAt: '', isOnline: false, devicePubKey: 'k2' },
+        { deviceId: 'abcdef1234567890', email: 'a@b.c', issuedAt: '', expiresAt: null, isOnline: false, devicePubKey: 'k2' },
       ],
     }))
     await mount()

@@ -34,7 +34,7 @@
 - `components/tabs/Settings.tsx` — canonical "scoped editor" shape (ScopeSwitcher + SaveBar + JsonEditor).
 - `components/tabs/Skills.tsx` — canonical "list+detail" shape; Hooks, McpServers, Plugins follow it.
 - `components/tabs/Scheduler.tsx` — Scheduler cockpit; renders Queue/PRDs/History via SchedulePanel + scheduleState.
-- `components/tabs/Memory.tsx` / `components/tabs/MemoryNaturalPanel.tsx` — Memory Clusters UI over `memoryAggregate.cjs`'s output.
+- `components/tabs/Memory.tsx` → `tabs/memory/explorer/` (`MemoryExplorer` shell, `useMemoryExplorer` hook, `model.ts`, view components) over main-side `lib/memoryOps.cjs` + `memoryAssist.cjs` + `memoryAggregate.cjs`.
 - `components/SchedulePanel.tsx` — reusable pane (Queue/PRDs/History). Owns filter state.
 - `components/tabs/scheduler/sched-primitives.tsx` — shared scheduler primitives: SchBadge (status color/mark), ProjectTag, DetailBlock/Line.
 - `components/ui/` — shared primitives (Panel, ScopeSwitcher, SaveBar, JsonEditor, KVTable, ListDetail, Toggle, EmptyState).

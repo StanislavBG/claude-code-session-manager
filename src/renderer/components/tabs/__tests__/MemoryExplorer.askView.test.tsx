@@ -4,7 +4,9 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 
-vi.mock('../../VoiceButton', () => ({ VoiceButton: () => null }))
+vi.mock('../../VoiceButton', () => ({
+  VoiceButton: () => createElement('button', { 'data-testid': 'voice-btn' }),
+}))
 
 import { AskView } from '../memory/explorer/AskView'
 import type { MemoryRow } from '../memory/explorer/model'
@@ -48,6 +50,13 @@ afterEach(() => {
 })
 
 describe('AskView', () => {
+  it('renders the mic button in the composer row, after the input', () => {
+    mount()
+    const row = q('mx-ask-input')!.parentElement!
+    const kids = Array.from(row.children)
+    expect(kids.indexOf(q('voice-btn')!)).toBe(kids.indexOf(q('mx-ask-input')!) + 1)
+  })
+
   it('remember path makes no onAsk call and shows a draft', async () => {
     const p = mount()
     type('Remember tests use vitest')

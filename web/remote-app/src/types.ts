@@ -90,3 +90,41 @@ export type Screen =
   | { kind: 'login' }
   | { kind: 'connect' }    // signed in, choosing/pairing a device
   | { kind: 'cockpit' };   // paired device online — session cockpit
+
+// ── Drill-down model (projects → sessions → transcript) ──────────────────────
+
+export interface RemoteProject {
+  cwd: string;
+  title: string;
+  mainTabId: string;
+  counts: { proposed: number; active: number; completed: number };
+}
+
+export interface RemoteSession {
+  epicId: string;
+  claudeSessionId: string;
+  title: string;
+  status: string;
+  tag?: string;
+  agentType?: string;
+  spawnCwd: string;
+  updatedAt: number;
+}
+
+export interface ProjectSessionsResponse {
+  project: RemoteProject;
+  sessions: RemoteSession[];
+}
+
+export interface ChatMessage {
+  role: string;
+  text: string;
+  ts: number;
+  uuid: string;
+}
+
+export interface SessionPrd {
+  slug: string;
+  title: string;
+  status: string;
+}

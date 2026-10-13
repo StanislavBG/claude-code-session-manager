@@ -64,3 +64,5 @@ Bench numbers are machine-relative — compare runs on the same machine only; th
 ## Tests
 
 New tests under `scripts/` must be hand-registered in `vitest.config.ts` (see [tests/README.md](../tests/README.md)).
+
+`memory-explorer-shots.mjs [outDir]` (`npm run preview:memory`) — dev-only: serves `src/renderer/preview/memory-explorer.html` with Vite, drives 13 Memory Explorer states in plain Chromium (no Electron), writes `NN-name.png` + `compare.html` against `design-mocks/memory-explorer/renders/`.

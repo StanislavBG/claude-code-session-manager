@@ -371,9 +371,9 @@ async function connect() {
   if (!cfg.remoteEnabled) return;
 
   const devices = cfg.devices || [];
-  // Use the most recently paired credential. The relay's device-token store is
-  // in-memory and wiped on every relay redeploy, so an older credential can hold a
-  // dead token that 401s forever; picking the newest lets a fresh re-pair recover.
+  // Use the most recently paired credential. The relay persists device tokens in its
+  // DB, but a revoked or superseded credential can still 401 forever; picking the
+  // newest lets a fresh re-pair recover.
   const device = devices
     .filter((d) => d.deviceToken)
     .sort((a, b) => String(b.issuedAt || '').localeCompare(String(a.issuedAt || '')))[0];
@@ -1282,11 +1282,20 @@ async function dispatchCommand(type, payload, client) {
 // ─── Pairing ─────────────────────────────────────────────────────────────────
 
 async function pair(otp) {
-  const deviceId = crypto.randomUUID();
+  const cfg = await loadConfig();
+  // Re-pairing an existing machine keeps its identity (deviceId, E2E keypair, pinned
+  // phone keys) so the relay row is replaced in place and no new SAS is needed.
+  // Explicit revocation empties cfg.devices, which forces a fresh identity.
+  const prev = (cfg.devices || [])
+    .filter((d) => d.deviceId && d.e2ePrivateKey && d.e2ePublicKey)
+    .sort((a, b) => String(b.issuedAt || '').localeCompare(String(a.issuedAt || '')))[0];
 
-  // Generate E2E keypair at pair time — public key is sent to relay and stored
-  // alongside the device token so the browser can do key agreement.
-  const { e2ePrivateKey, e2ePublicKey } = generateE2EKeyPair();
+  const deviceId = prev ? prev.deviceId : crypto.randomUUID();
+  // E2E public key is sent to relay and stored alongside the device token so the
+  // browser can do key agreement.
+  const { e2ePrivateKey, e2ePublicKey } = prev
+    ? { e2ePrivateKey: prev.e2ePrivateKey, e2ePublicKey: prev.e2ePublicKey }
+    : generateE2EKeyPair();
 
   const body = JSON.stringify({
     code: otp.trim().toUpperCase(),
@@ -1305,25 +1314,29 @@ async function pair(otp) {
     return { ok: false, error: 'relay returned no device token' };
   }
 
-  const cfg = await loadConfig();
   // A desktop only ever connects to the relay as ONE device; all of the user's
   // browsers route to it (the relay isolates by email, not per-credential). So keep
   // only the newly paired credential — accumulating stale entries is pure cruft that
   // would otherwise shadow this one and trap reconnection on a dead token.
-  const devices = [{
-    deviceId: response.deviceId,
-    deviceToken: response.deviceToken, // stored only on disk at 0600
-    // Private key stored at 0600 — same security model as device token.
-    e2ePrivateKey,
-    e2ePublicKey,
-    deviceName: `Device (paired ${new Date().toISOString().slice(0, 10)})`,
-    issuedAt: new Date().toISOString(),
-    lastConnectedAt: null,
-    // Set once a browser's SAS is manually confirmed; TOFU-pinned for auto-trust
-    // on future reconnects from the same (deviceId, browserPubKey) pair.
-    verifiedPeerPubKey: null,
-    verifiedPeerPubKeys: [],
-  }];
+  const now = new Date().toISOString();
+  // Pins are only carried onto a deviceId the relay confirmed.
+  const reused = prev && response.deviceId === deviceId;
+  const devices = [reused
+    ? { ...prev, deviceId, deviceToken: response.deviceToken, issuedAt: now, lastConnectedAt: null }
+    : {
+        deviceId: response.deviceId,
+        deviceToken: response.deviceToken, // stored only on disk at 0600
+        // Private key stored at 0600 — same security model as device token.
+        e2ePrivateKey,
+        e2ePublicKey,
+        deviceName: `Device (paired ${now.slice(0, 10)})`,
+        issuedAt: now,
+        lastConnectedAt: null,
+        // Set once a browser's SAS is manually confirmed; TOFU-pinned for auto-trust
+        // on future reconnects from the same (deviceId, browserPubKey) pair.
+        verifiedPeerPubKey: null,
+        verifiedPeerPubKeys: [],
+      }];
 
   await saveConfig({ ...cfg, devices });
   _repairNeeded = false;
@@ -1537,6 +1550,7 @@ module.exports = {
     finalizeE2eAuthenticated,
     getClient: (clientKey = LEGACY_CLIENT_KEY) => _clients.getOrCreate(clientKey),
     revokeAllDevices,
+    pair,
     streamCount: () => _clients.values().reduce((n, c) => n + c.ptyStreams.size, 0),
   },
 };

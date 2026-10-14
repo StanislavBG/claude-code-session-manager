@@ -21,6 +21,7 @@ import { useMacroLaunch } from '../../lib/useMacroLaunch'
 import { normalizeCwd } from '../../lib/knownProjectAggregate'
 import type { Macro } from '../../../preload/api'
 import { MacroEditor } from './MacroEditor'
+import { MacroInputsForm } from './MacroInputsForm'
 
 const BTN =
   'inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11.5px] font-semibold border transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
@@ -119,6 +120,7 @@ export function SessionActionsBar({ onNew, onSelect }: SessionActionsBarProps) {
   const macros = macrosForProject(library, cwd)
   const [editor, setEditor] = useState<{ macro: Macro | null } | null>(null)
   const [managing, setManaging] = useState(false)
+  const [pending, setPending] = useState<Macro | null>(null)
 
   return (
     <div className="flex flex-col gap-2" data-testid="session-actions-bar">
@@ -136,7 +138,7 @@ export function SessionActionsBar({ onNew, onSelect }: SessionActionsBarProps) {
           <button
             key={m.id}
             type="button"
-            onClick={() => void launch(m)}
+            onClick={() => (m.inputs && m.inputs.length > 0 ? setPending(m) : void launch(m))}
             disabled={launching !== null}
             title={macroTooltip(m)}
             data-testid="hotkey-macro"
@@ -172,6 +174,19 @@ export function SessionActionsBar({ onNew, onSelect }: SessionActionsBarProps) {
           </button>
         )}
       </div>
+
+      {pending && (
+        <MacroInputsForm
+          key={pending.id}
+          macro={pending}
+          onCancel={() => setPending(null)}
+          onSubmit={(values) => {
+            const m = pending
+            setPending(null)
+            void launch(m, undefined, values)
+          }}
+        />
+      )}
 
       {managing && library.length > 0 && (
         <ManagePanel

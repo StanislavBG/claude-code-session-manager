@@ -218,6 +218,64 @@ describe('SessionActionsBar', () => {
     errSpy.mockRestore()
   })
 
+  describe('macro inputs form', () => {
+    const withInputs = () =>
+      macro({
+        prompt: 'Work on {{stream}}',
+        inputs: [{ name: 'stream', label: 'Stream', default: 'education-veggies', required: true }],
+      } as Partial<Macro>)
+    const submit = (el: HTMLElement) =>
+      act(async () => { q(el, 'macro-inputs-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })) })
+
+    it('a macro without inputs launches on click with no form', async () => {
+      library = [macro()]
+      const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+      await act(async () => { qa(el, 'hotkey-macro')[0].click() })
+      expect(q(el, 'macro-inputs-form')).toBeNull()
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+    })
+
+    it('an inputs macro opens a prefilled form; Enter launches with the defaults', async () => {
+      library = [withInputs()]
+      const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+      await act(async () => { qa(el, 'hotkey-macro')[0].click() })
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+      expect((q(el, 'macro-input-stream') as HTMLInputElement).value).toBe('education-veggies')
+      await submit(el)
+      expect(createPromptSessionSpy).toHaveBeenCalledTimes(1)
+      expect(createPromptSessionSpy.mock.calls[0][5]).toContain('Work on education-veggies')
+      expect(q(el, 'macro-inputs-form')).toBeNull()
+    })
+
+    it('passes an edited value through', async () => {
+      library = [withInputs()]
+      const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+      await act(async () => { qa(el, 'hotkey-macro')[0].click() })
+      act(() => setValue(q(el, 'macro-input-stream') as HTMLInputElement, 'sales-leads'))
+      await submit(el)
+      expect(createPromptSessionSpy.mock.calls[0][5]).toContain('Work on sales-leads')
+    })
+
+    it('clearing a required field shows the error and does not launch', async () => {
+      library = [withInputs()]
+      const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+      await act(async () => { qa(el, 'hotkey-macro')[0].click() })
+      act(() => setValue(q(el, 'macro-input-stream') as HTMLInputElement, ''))
+      await submit(el)
+      expect(q(el, 'macro-inputs-form')!.textContent).toContain('"Stream" is required')
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+    })
+
+    it('Cancel closes the form without launching', async () => {
+      library = [withInputs()]
+      const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+      await act(async () => { qa(el, 'hotkey-macro')[0].click() })
+      act(() => q(el, 'macro-inputs-cancel')!.click())
+      expect(q(el, 'macro-inputs-form')).toBeNull()
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+    })
+  })
+
   it('a manage toggle made while the editor is open is not reverted by Save', async () => {
     library = [macro({ id: 'k', projects: [CWD] })]
     const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)

@@ -526,17 +526,17 @@ function checkDeps(queueEntry, allJobs, prdBody) {
 // ─── sentinel scanner ─────────────────────────────────────────────────────────
 
 /**
- * Scan for a `SCHEDULER_VERDICT: PASS|FAIL|BLOCKED_BY_FOREIGN_WIP` sentinel
+ * Scan for a `SCHEDULER_VERDICT: PASS|FAIL|BLOCKED_BY_FOREIGN_WIP|NEEDS_HUMAN` sentinel
  * line in the run output.
  *
  * Checks `resultEvent.resultText` first (the agent's final message), then the
  * last tool_result content. Anchored to line-start so prose mentioning the
  * string in mid-sentence does not match.
  *
- * Returns 'pass', 'fail', 'blocked_by_foreign_wip', or null.
+ * Returns 'pass', 'fail', 'blocked_by_foreign_wip', 'needs_human', or null.
  */
 function scanSentinel(resultEvent, events) {
-  const RE = /^SCHEDULER_VERDICT:\s*(PASS|FAIL|BLOCKED_BY_FOREIGN_WIP)\b/m;
+  const RE = /^SCHEDULER_VERDICT:\s*(PASS|FAIL|BLOCKED_BY_FOREIGN_WIP|NEEDS_HUMAN)\b/m;
 
   if (resultEvent) {
     const m = resultEvent.resultText.match(RE);
@@ -561,6 +561,28 @@ function scanSentinel(resultEvent, events) {
  */
 function scanSentinelReason(resultEvent, events) {
   const RE = /^SCHEDULER_VERDICT:\s*FAIL\b[ \t]*([^\n]*)/m;
+  const clip = (m) => m[1].trim().slice(0, 300);
+  if (resultEvent && resultEvent.resultText) {
+    const m = resultEvent.resultText.match(RE);
+    if (m) return clip(m);
+  }
+  let lastToolResult = null;
+  for (const ev of events) {
+    if (ev.kind === 'tool_result') lastToolResult = ev;
+  }
+  if (lastToolResult && lastToolResult.content) {
+    const m = lastToolResult.content.match(RE);
+    if (m) return clip(m);
+  }
+  return '';
+}
+
+/**
+ * One-line question after `SCHEDULER_VERDICT: NEEDS_HUMAN` (same two-source
+ * scan order as scanSentinel). Trimmed, capped at 300 chars; '' when absent.
+ */
+function scanHumanQuestion(resultEvent, events) {
+  const RE = /^SCHEDULER_VERDICT:\s*NEEDS_HUMAN\b[ \t]*([^\n]*)/m;
   const clip = (m) => m[1].trim().slice(0, 300);
   if (resultEvent && resultEvent.resultText) {
     const m = resultEvent.resultText.match(RE);
@@ -1121,6 +1143,19 @@ async function verifyRun({
       );
     }
 
+    // The executor needs a decision/action only the human can take. Parks as
+    // needs_review with the question; every automatic retry rung skips it.
+    if (sentinel === 'needs_human') {
+      const humanQuestion = scanHumanQuestion(resultEvent, events);
+      const kept = [...annotations, ...issues.map((i) => ({ verdict: i.verdict, reason: i.reason }))];
+      return conclude(
+        'needs_human',
+        'executor reported SCHEDULER_VERDICT: NEEDS_HUMAN' + (humanQuestion ? ': ' + humanQuestion : ''),
+        'needs_review',
+        { sentinel, humanQuestion, ...(kept.length ? { annotations: kept } : {}) },
+      );
+    }
+
     // Ground truth outranks heuristics: an exit-0 run that landed a commit
     // ATTRIBUTABLE TO THIS RUN (spawnJob's own guardHeadBefore/headAtExit
     // delta, or the repo-wide committedDuringRun window scan) and never
@@ -1420,6 +1455,7 @@ module.exports = {
   parseLog,
   scanSentinel,
   scanSentinelReason,
+  scanHumanQuestion,
   scanForeignWipPathsClaim,
   isMergeMainSlug,
   extractMergeMainPrNumber,

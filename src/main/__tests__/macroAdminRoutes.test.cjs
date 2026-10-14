@@ -215,6 +215,51 @@ test('zod validation error on bad field surfaces as a 400 with a message, onChan
   expect(getChangedCount()).toBe(0);
 });
 
+const STREAM_INPUTS = [{ name: 'stream', label: 'Stream', default: 'education-veggies' }];
+
+test('create with inputs returns 200, GET list includes them, update without inputs keeps them', async () => {
+  const cwd = await mkProjectCwd();
+  const filePath = await mkMacrosFile();
+  const adminHttp = makeFakeAdminHttp();
+  const { onChanged } = makeHandlers();
+  registerAdminRoute(adminHttp, { onChanged }, { filePath });
+
+  const created = await adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, label: 'Stream', agentName: 'builder', tag: 'build', prompt: 'stream={{stream}}', inputs: STREAM_INPUTS },
+  });
+  expect(created.status).toBe(200);
+  expect(created.body.macro.inputs).toEqual(STREAM_INPUTS);
+
+  const list = await adminHttp.call('GET', '/admin/macros', { query: { cwd } });
+  const listed = list.body.macros.find((m) => m.id === created.body.macro.id);
+  expect(listed.inputs).toEqual(STREAM_INPUTS);
+
+  const updated = await adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, id: created.body.macro.id, label: 'Stream 2', agentName: 'builder', tag: 'build', prompt: 'stream={{stream}}' },
+  });
+  expect(updated.status).toBe(200);
+  const list2 = await adminHttp.call('GET', '/admin/macros', { query: { cwd } });
+  const relisted = list2.body.macros.find((m) => m.id === created.body.macro.id);
+  expect(relisted.label).toBe('Stream 2');
+  expect(relisted.inputs).toEqual(STREAM_INPUTS);
+});
+
+test('undeclared placeholder with non-empty inputs is refused with 400, onChanged never called', async () => {
+  const cwd = await mkProjectCwd();
+  const filePath = await mkMacrosFile();
+  const adminHttp = makeFakeAdminHttp();
+  const { onChanged, getChangedCount } = makeHandlers();
+  registerAdminRoute(adminHttp, { onChanged }, { filePath });
+
+  const { status, body } = await adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, label: 'Bad', agentName: 'builder', tag: 'build', prompt: 'stream={{stream}} x={{x}}', inputs: STREAM_INPUTS },
+  });
+  expect(status).toBe(400);
+  expect(body.ok).toBe(false);
+  expect(body.error).toContain('{{x}}');
+  expect(getChangedCount()).toBe(0);
+});
+
 test('non-project cwd (missing session-manager-operations/) is refused with 400', async () => {
   const filePath = await mkMacrosFile();
   const adminHttp = makeFakeAdminHttp();

@@ -169,6 +169,15 @@ the API rejects that.
 9. Put `NAME=value` words before `timeout`, never after it, for example
    `CI=1 timeout 300 npm test`. A leading `TMPDIR=$(mktemp -d) ` is allowed but not needed: the
    scheduler gives each gate its own TMPDIR.
+10. Before queueing, run each gate command once at the current HEAD in the main checkout. If it
+    is red, scope the gate to the PRD's own test files, never a suite that is already red, and
+    say in the PRD notes which suite was red and why it was scoped out. Why: a gate that is red
+    on the base parks the job as `sentinel_fail` whatever the executor does.
+11. Never put a step only a human or the passage of time can complete (host cron install,
+    waiting for a live post, a live payment, an account dashboard action) in a gate or
+    criterion. The executor ends with `SCHEDULER_VERDICT: NEEDS_HUMAN <question>` for those, and
+    the PRD notes say so. Why: no executor can pass such a gate, so the job parks as
+    `sentinel_fail`.
 
 ### files rules
 
@@ -253,6 +262,9 @@ Rules:
          `scheduler_archive_prd`. Archiving marks it completed and frees the PRDs that depend on
          it.
       A parked validator arrives this way too.
+      A `needs_human` notice carries a question for the human: relay it verbatim, then act on
+      the answer with `scheduler_update_prd` + `scheduler_reset_job`. Why: the executor stopped
+      on a step only the human can answer.
    2. **A validator verdict.** Read its record. A `REFUTED` PRD, or a Critical or Important
       finding, means a fix wave: one `behavior` or `wire` PRD per finding plus a new validate
       PRD. Never fix inline.

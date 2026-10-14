@@ -926,7 +926,7 @@ function isEligibleForImmediateAutoFix(job, allJobs, fixSlugExists) {
  *
  * Returns the first tier-1 row, else the tier-2 row, else null.
  */
-function selectGateShadowTarget(jobs, headByCwd, { authorityDisabled = false } = {}) {
+function selectGateShadowTarget(jobs, headByCwd, { authorityDisabled = false, baselineDisabled = process.env.SM_BASELINE_GATE_AUTHORITY_DISABLE === '1' } = {}) {
   const eligible = jobs.filter((j) => {
     if (j.status !== 'needs_review') return false;
     const head = headByCwd.get(j.cwd);
@@ -938,16 +938,25 @@ function selectGateShadowTarget(jobs, headByCwd, { authorityDisabled = false } =
     return !j.gateShadow || j.gateShadow.head !== head || j.gateShadow.definitive !== true;
   };
 
-  if (!authorityDisabled) {
+  // Baseline authority: a sentinel_fail park with a landed commit and a known
+  // base commit may complete when its red gate was already red at that base.
+  const baselineEligible = (j) => !baselineDisabled
+    && j.verifierVerdict === 'sentinel_fail'
+    && typeof j.landedCommit === 'string' && j.landedCommit.length > 0
+    && typeof j.guardHeadBefore === 'string' && j.guardHeadBefore.length > 0;
+
+  if (!authorityDisabled || !baselineDisabled) {
     const ranAtMs = (j) => {
       const t = j.gateShadow ? Date.parse(j.gateShadow.ranAt) : NaN;
       return Number.isFinite(t) ? t : -Infinity; // never-run or unparseable sorts oldest
     };
     const tier1 = eligible.filter((j) => isStale(j)
-      && j.verifierVerdict
-      && GATE_AUTHORITY_VERDICTS.includes(j.verifierVerdict)
-      && typeof j.landedCommit === 'string'
-      && j.landedCommit.length > 0);
+      && ((!authorityDisabled
+        && j.verifierVerdict
+        && GATE_AUTHORITY_VERDICTS.includes(j.verifierVerdict)
+        && typeof j.landedCommit === 'string'
+        && j.landedCommit.length > 0)
+        || baselineEligible(j)));
     if (tier1.length) {
       const ranked = tier1
         .map((j, i) => ({ j, i, neverRun: !j.gateShadow, ranAt: ranAtMs(j) }))

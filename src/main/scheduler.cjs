@@ -79,6 +79,8 @@ const { sweepStrandedJobBranches } = require('./lib/git/branchSweep.cjs');
 const { detectRateLimitInLog } = require('./lib/claude/rateLimitDetect.cjs');
 const { stripAppOwnedChurn } = require('./lib/scheduler/jobDirtFilter.cjs');
 const { GATE_AUTHORITY_VERDICTS, decideGateAuthority } = require('./lib/scheduler/gateAuthority.cjs');
+const { decideBaselineAuthority } = require('./lib/scheduler/baselineGate.cjs');
+const { linkDependencyDirs } = require('./lib/git/worktreeDeps.cjs');
 const { resolveBindingRateLimitReset } = require('./lib/claude/rateLimitWindow.cjs');
 const { isResetFresh, bindingWindow, degradedBudget, meterFailureBudget } = require('./lib/claude/usageCircuit.cjs');
 const { computeQueueHealth } = require('./lib/scheduler/queueHealth.cjs');
@@ -8793,6 +8795,52 @@ async function runGateShadow(job) {
     gateShadow.authority = decision;
   }
 
+  // Baseline authority: a sentinel_fail park whose gate is red at HEAD may
+  // still complete when every HEAD failure already failed at the job's base
+  // commit. The base run is memoized per HEAD on gateShadow.baseline.
+  let baselineDecision = null;
+  if (
+    job.verifierVerdict === 'sentinel_fail'
+    && outcome.status === 'red' && definitive
+    && typeof job.landedCommit === 'string' && job.landedCommit.length > 0
+    && typeof job.guardHeadBefore === 'string' && job.guardHeadBefore.length > 0
+    && process.env.SM_BASELINE_GATE_AUTHORITY_DISABLE !== '1'
+  ) {
+    const startedAtMs = typeof job.startedAt === 'string' ? Date.parse(job.startedAt) : NaN;
+    let evidenceOk = false;
+    if (Number.isFinite(startedAtMs)) {
+      try { evidenceOk = await resolveLandedCommitEvidence(job.cwd, job.landedCommit, job.startedAt); } catch { evidenceOk = false; }
+    }
+    let ancestorOk = false;
+    try {
+      await execGitAt(job.cwd, ['merge-base', '--is-ancestor', job.landedCommit, headBefore], { timeout: 10_000 });
+      ancestorOk = true;
+    } catch { ancestorOk = false; }
+    const memo = job.gateShadow?.baseline;
+    let baseOutcome = memo && memo.head === headBefore && memo.outcome ? memo.outcome : null;
+    if (!baseOutcome) {
+      const scratch = path.join(os.tmpdir(), `sm-baseline-gate-${process.pid}-${Date.now()}`);
+      let added = false;
+      try {
+        await execGitAt(job.cwd, ['worktree', 'add', '--detach', scratch, job.guardHeadBefore], { timeout: 120_000 });
+        added = true;
+        await linkDependencyDirs({ mainCwd: job.cwd, worktreeCwd: scratch });
+        const r = await runGateSequence(gate.sequence, { cwd: scratch });
+        baseOutcome = r.status === 'busy' ? { status: 'unavailable', reason: 'busy', results: [] } : r;
+      } catch (e) {
+        baseOutcome = { status: 'unavailable', reason: `base-gate-error: ${e && e.message ? e.message : e}`, results: [] };
+      } finally {
+        if (added) {
+          try { await execGitAt(job.cwd, ['worktree', 'remove', '--force', scratch], { timeout: 60_000 }); } catch { /* best-effort */ }
+        }
+        try { fs.rmSync(scratch, { recursive: true, force: true }); } catch { /* best-effort */ }
+        try { await execGitAt(job.cwd, ['worktree', 'prune'], { timeout: 30_000 }); } catch { /* best-effort */ }
+      }
+    }
+    baselineDecision = decideBaselineAuthority({ job, headOutcome: outcome, baseOutcome, evidenceOk, ancestorOk, cleanOk, headStable });
+    gateShadow.baseline = { head: headBefore, base: job.guardHeadBefore, outcome: baseOutcome, ...baselineDecision };
+  }
+
   const runId = job.runId || reviewLadder.resolveRunId(job);
   if (runId) {
     const verdictsPath = path.join(schedulerPaths.runsDir(), runId, `${job.slug}.verdicts.json`);
@@ -8827,6 +8875,19 @@ async function runGateShadow(job) {
         continue;
       }
       j.gateShadow = gateShadow;
+      if (baselineDecision?.complete) {
+        const v = j.verifierVerdict;
+        transitionJob(j, 'completed', {
+          reason: `gate red at ${headShort} but identical to base ${String(job.guardHeadBefore).slice(0, 7)}; verdict ${v} overridden`,
+          source: 'gateAuthority:baseline',
+        });
+        j.error = null;
+        j.verifierVerdict = 'pass_preexisting_gate_red';
+        j.preexistingGateFailures = baselineDecision.preexisting;
+        delete j.looksDone;
+        resolved = { slug: j.slug, cwd: j.cwd, verdict: v };
+        continue;
+      }
       if (!decision?.complete) continue;
       const v = j.verifierVerdict;
       transitionJob(j, 'completed', {

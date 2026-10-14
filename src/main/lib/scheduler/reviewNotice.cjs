@@ -45,6 +45,27 @@ const DEFAULT_HOLD_MINUTES = 240;
 // row in the real queue.
 const { bareSlug } = require('../prd/depSlugResolve.cjs');
 
+const oneLine = (v) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
+const clip = (v, max) => (v.length > max ? `${v.slice(0, max - 1)}…` : v);
+
+// First sentence of the PRD's goal, from the stored body preview. Prefers the
+// text under a `# Goal` heading; otherwise the first non-heading line.
+function goalLineFrom(bodyPreview) {
+  if (typeof bodyPreview !== 'string') return null;
+  const lines = bodyPreview.split('\n').map((l) => l.trim());
+  const at = lines.findIndex((l) => /^#+\s*goal\b/i.test(l));
+  const rest = (at >= 0 ? lines.slice(at + 1) : lines).filter((l) => l && !l.startsWith('#') && l !== '---');
+  const text = oneLine(rest[0]);
+  if (!text) return null;
+  const m = text.match(/^.*?[.!?](?=\s|$)/);
+  return clip(m ? m[0] : text, 200);
+}
+
+function blockingPathsOf(job) {
+  const paths = [job?.integrationConflictPaths, job?.uncommittedPaths].find((a) => Array.isArray(a) && a.length);
+  return paths ? paths.filter((p) => typeof p === 'string') : [];
+}
+
 /**
  * buildReviewNotice({ job, report, epicId, now, prior }) → ReviewNotice
  *
@@ -70,9 +91,14 @@ function buildReviewNotice({ job, report, epicId, now, prior } = {}) {
   const summary = filed ? report.summary : `${job?.slug ?? 'unknown job'} stopped (${cause})`;
   const reportPath = filed ? (report.path ?? null) : null;
   const firstParkedAt = prior && !prior.sentAt && prior.firstParkedAt ? prior.firstParkedAt : now;
+  const rawReason = job?.verifierVerdict === 'needs_human' && job?.humanQuestion ? job.humanQuestion : job?.error;
   return {
     summary,
     reportPath,
+    title: job?.title ?? null,
+    goalLine: goalLineFrom(job?.bodyPreview),
+    reason: clip(oneLine(rawReason), 300) || null,
+    blockingPaths: blockingPathsOf(job),
     cause,
     epicId: epicId ?? null,
     firstParkedAt,
@@ -127,6 +153,8 @@ function selectDueReviewNotices(jobs = [], { now = Date.now(), holdMs = DEFAULT_
   const isDue = (j) => {
     if (j.status === 'skipped' && j.needsReviewAutoResolvedSkip) return true;
     if (j.status !== 'needs_review') return false;
+    // A question for the human has nothing for the ladder to heal — no hold.
+    if (j.verifierVerdict === 'needs_human') return true;
     const firstParkedAt = j.reviewNotice.firstParkedAt;
     if (!firstParkedAt) return false;
     const parkedMs = Date.parse(firstParkedAt);
@@ -169,6 +197,12 @@ const HUMAN_CAUSE = {
   abandoned_background_task: 'the run started a background task and then stopped watching it',
   silent_no_op: 'the run finished clean but made no changes, so there is no evidence it did the work',
   pass_no_commit: 'the run reported success but did not commit anything',
+  sentinel_fail: 'the run reported that it could not complete the work',
+  needs_human: 'the run needs an answer from a person before it can continue',
+  worktree_integration_failed: "the run's finished work could not be merged into the main checkout",
+  uncommitted_changes: 'the run left changes in the working tree without committing them',
+  reaped_without_integration: 'the run was stopped before its work was merged into the main checkout',
+  budget_exceeded: 'the run used up its time or cost budget before finishing',
 };
 
 function humanCauseFor(cause) {
@@ -215,6 +249,18 @@ function blockedDependents(group, jobs) {
   return [...blocked].sort();
 }
 
+function answerNeededFor(group, j, n) {
+  const cause = group.cause ?? n.cause ?? '';
+  if (cause === 'needs_human' || cause.startsWith('needs_human:')) {
+    return `${n.reason || 'the executor asked a question'} — reply here; this Epic will update the PRD and reset it.`;
+  }
+  const paths = Array.isArray(n.blockingPaths) ? n.blockingPaths : [];
+  if (cause.startsWith('worktree_integration_failed') && paths.length) {
+    return `commit or discard ${paths.join(', ')} in ${group.cwd ?? 'the project'}, then reset ${j.slug}.`;
+  }
+  return `reset ${j.slug} to retry, update its PRD if the spec is wrong, or archive it if the work is already done.`;
+}
+
 /**
  * formatReviewNotice(group, { jobs }) → plain-text message body for the
  * authoring Epic's event chain. `group` is one entry from
@@ -237,6 +283,13 @@ function formatReviewNotice(group, { jobs = [] } = {}) {
     waitingLine,
     `PRDs: ${slugs.join(', ')}`,
   ];
+  for (const j of groupJobs) {
+    const n = j.reviewNotice ?? {};
+    lines.push('', n.title ? `${j.slug} — ${n.title}` : `${j.slug}`);
+    if (n.goalLine) lines.push(`Goal: ${n.goalLine}`);
+    if (n.reason) lines.push(`Why it stopped: ${n.reason}`);
+    lines.push(`Answer needed: ${answerNeededFor(group, j, n)}`);
+  }
   if (reportPaths.length) lines.push(`Reports: ${reportPaths.join(', ')}`);
   return lines.join('\n');
 }

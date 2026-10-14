@@ -195,8 +195,8 @@ test('formatReviewNotice maps a known cause to plain language', () => {
 });
 
 test('formatReviewNotice falls back to the raw cause when no human mapping exists', () => {
-  const group = { cwd: '/proj', epicId: 'epic-1', cause: 'budget_exceeded', jobs: [{ slug: '1-a', reviewNotice: {} }] };
-  expect(formatReviewNotice(group)).toContain('reason: budget_exceeded.');
+  const group = { cwd: '/proj', epicId: 'epic-1', cause: 'some_new_cause', jobs: [{ slug: '1-a', reviewNotice: {} }] };
+  expect(formatReviewNotice(group)).toContain('reason: some_new_cause.');
 });
 
 test('formatReviewNotice unions ladder flags across every job in the group', () => {
@@ -270,6 +270,62 @@ test('formatReviewNotice keeps the "nothing is waiting" wording when no pending 
 test('formatReviewNotice defaults to the "nothing is waiting" wording when jobs is omitted', () => {
   const group = { cwd: '/proj', epicId: 'epic-1', cause: 'uncommitted_changes', jobs: [{ slug: '1-a', status: 'needs_review', reviewNotice: {} }] };
   expect(formatReviewNotice(group)).toContain('Nothing is waiting on you unless you want to act.');
+});
+
+// --- self-contained per-PRD blocks ---
+
+test('buildReviewNotice captures title, goalLine, reason and blockingPaths', () => {
+  const job = {
+    slug: '8-x', title: 'Fix the thing', verifierVerdict: 'worktree_integration_failed', integrationFailureKind: 'stray_checkout',
+    bodyPreview: '# Goal\n\nMake the thing work. Then more text.\n\n# Acceptance', error: 'could   not merge\nbranch',
+    integrationConflictPaths: ['a.cjs', 'b.cjs'],
+  };
+  const n = buildReviewNotice({ job, report: null, epicId: 'e', now: '2026-10-01T00:00:00.000Z' });
+  expect(n.title).toBe('Fix the thing');
+  expect(n.goalLine).toBe('Make the thing work.');
+  expect(n.reason).toBe('could not merge branch');
+  expect(n.blockingPaths).toEqual(['a.cjs', 'b.cjs']);
+});
+
+test('buildReviewNotice uses humanQuestion as reason for needs_human and caps lengths', () => {
+  const job = { slug: '9-q', verifierVerdict: 'needs_human', humanQuestion: 'Which db?', error: 'ignored', bodyPreview: 'x'.repeat(500) };
+  const n = buildReviewNotice({ job, report: null, now: 't' });
+  expect(n.reason).toBe('Which db?');
+  expect(n.goalLine.length).toBeLessThanOrEqual(200);
+  const long = buildReviewNotice({ job: { slug: 's', error: 'e'.repeat(900) }, report: null, now: 't' });
+  expect(long.reason.length).toBeLessThanOrEqual(300);
+  expect(long.blockingPaths).toEqual([]);
+});
+
+test('a needs_human needs_review row is due immediately', () => {
+  const job = parkedJob({
+    verifierVerdict: 'needs_human',
+    reviewNotice: { ...parkedJob().reviewNotice, firstParkedAt: new Date(NOW - 1000).toISOString() },
+  });
+  expect(selectDueReviewNotices([job], { now: NOW, holdMs: HOLD_MS })).toHaveLength(1);
+});
+
+function blockGroup(cause, notice, cwd = '/proj') {
+  return { cwd, epicId: 'e', cause, jobs: [{ slug: '1-a', reviewNotice: notice }] };
+}
+
+test('formatReviewNotice renders a per-PRD block with needs_human Answer needed', () => {
+  const text = formatReviewNotice(blockGroup('needs_human', { title: 'T', goalLine: 'G.', reason: 'Which db?' }));
+  expect(text).toContain('1-a — T');
+  expect(text).toContain('Goal: G.');
+  expect(text).toContain('Why it stopped: Which db?');
+  expect(text).toContain('Answer needed: Which db? — reply here; this Epic will update the PRD and reset it.');
+});
+
+test('formatReviewNotice Answer needed names blocking paths for integration failures', () => {
+  const text = formatReviewNotice(blockGroup('worktree_integration_failed:content_conflict', { blockingPaths: ['a.cjs', 'b.cjs'] }));
+  expect(text).toContain('Answer needed: commit or discard a.cjs, b.cjs in /proj, then reset 1-a.');
+});
+
+test('formatReviewNotice Answer needed falls back to the generic reset line', () => {
+  const text = formatReviewNotice(blockGroup('worktree_integration_failed', { blockingPaths: [] }));
+  expect(text).toContain('Answer needed: reset 1-a to retry, update its PRD if the spec is wrong, or archive it if the work is already done.');
+  expect(formatReviewNotice(blockGroup('sentinel_fail', {}))).toContain('could not complete the work');
 });
 
 // --- holdMsFromEnv ---

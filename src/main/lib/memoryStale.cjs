@@ -14,11 +14,9 @@ const WIKILINK_RE = /\[\[([^\]]+)\]\]/g;
 // Backtick-quoted repo-path-shaped tokens, optionally suffixed with a :line.
 const PATH_TOKEN_RE = /`([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,5}(?::\d+)?)`/g;
 
-const KNOWN_SOURCE_EXTENSIONS = new Set([
-  'js', 'jsx', 'ts', 'tsx', 'cjs', 'mjs', 'json', 'md', 'py', 'rb', 'go', 'rs',
-  'java', 'c', 'h', 'cpp', 'hpp', 'css', 'scss', 'html', 'yml', 'yaml', 'sh',
-  'txt', 'toml', 'lock', 'sql', 'php', 'swift', 'kt', 'vue',
-]);
+// Project roots a memory names: `~/x/y` or `/home/<user>/x/y`, backticked or not.
+const ROOT_TOKEN_RE = /(?:~|\/home\/[^/\s`]+)\/[A-Za-z0-9_.\-/]+/g;
+const MAX_ROOTS = 5;
 
 function stripName(name) {
   return name.replace(/\.md$/, '');
@@ -53,12 +51,29 @@ function extractCandidates(body) {
     if (out.length >= MAX_DEAD_REF_CANDIDATES) break;
     let token = m[1].replace(/:\d+$/, '');
     if (token.startsWith('/') || token.startsWith('~')) continue; // not repo-relative
-    const ext = token.includes('.') ? token.split('.').pop().toLowerCase() : '';
-    const hasSlash = token.includes('/');
-    if (!hasSlash && !KNOWN_SOURCE_EXTENSIONS.has(ext)) continue;
+    // A bare filename can never resolve from the repo root — only slashed paths are checkable.
+    if (!token.includes('/')) continue;
     if (seen.has(token)) continue;
     seen.add(token);
     out.push(token);
+  }
+  return out;
+}
+
+/**
+ * Extract up to MAX_ROOTS distinct directory tokens (`~/...`, `/home/<user>/...`)
+ * named anywhere in the body, so a sibling-repo path can resolve against them.
+ * Pure, no fs.
+ */
+function extractRoots(body) {
+  const out = [];
+  let m;
+  ROOT_TOKEN_RE.lastIndex = 0;
+  while ((m = ROOT_TOKEN_RE.exec(body)) !== null) {
+    const root = m[0].replace(/[/.,)]+$/, '');
+    if (!root.includes('/') || out.includes(root)) continue;
+    out.push(root);
+    if (out.length >= MAX_ROOTS) break;
   }
   return out;
 }
@@ -68,7 +83,7 @@ function extractCandidates(body) {
  *
  * entries: Array<{ name, mtimeMs, body }>
  * now: ms epoch
- * existsPath: (relPath: string) => boolean
+ * existsPath: (relPath: string, roots?: string[]) => boolean
  *
  * Complexity: O(total body bytes) — a single pass per entry to extract
  * wikilink targets and dead-ref candidates; the inbound-link fold is
@@ -105,7 +120,8 @@ function scoreMemories({ entries, now, existsPath }) {
     const inboundLinks = inboundCounts.get(slug) || 0;
 
     const candidates = extractCandidates(e.body);
-    const deadRefs = candidates.filter((c) => !existsPath(c));
+    const roots = extractRoots(e.body);
+    const deadRefs = candidates.filter((c) => !existsPath(c, roots));
 
     const reasons = [];
     if (deadRefs.length > 0) {
@@ -136,4 +152,4 @@ function scoreMemories({ entries, now, existsPath }) {
   });
 }
 
-module.exports = { scoreMemories };
+module.exports = { scoreMemories, extractRoots };

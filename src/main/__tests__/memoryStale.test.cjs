@@ -2,7 +2,7 @@
 
 import { test } from 'vitest';
 const assert = require('node:assert/strict');
-const { scoreMemories } = require('../lib/memoryStale.cjs');
+const { scoreMemories, extractRoots } = require('../lib/memoryStale.cjs');
 
 const DAY_MS = 86_400_000;
 const NOW = 1_800_000_000_000; // fixed epoch ms for deterministic tests
@@ -76,6 +76,39 @@ test('the candidate cap holds at 20', () => {
   const result = scoreMemories({ entries, now: NOW, existsPath });
   assert.equal(result[0].deadRefs.length, 20);
   assert.equal(callCount, 20);
+});
+
+test('a bare backticked filename is not a dead-ref candidate', () => {
+  const entries = [
+    { name: 'bare.md', mtimeMs: NOW - 1 * DAY_MS, body: 'see `queue.json` and `webRemote.cjs` and `scheduler.cjs`' },
+  ];
+  let callCount = 0;
+  const existsPath = () => { callCount += 1; return false; };
+  const [r] = scoreMemories({ entries, now: NOW, existsPath });
+  assert.equal(callCount, 0);
+  assert.deepEqual(r.deadRefs, []);
+  assert.equal(r.stale, false);
+});
+
+test('roots named in the body are passed to existsPath as the second argument', () => {
+  const entries = [
+    {
+      name: 'roots.md',
+      mtimeMs: NOW - 1 * DAY_MS,
+      body: 'pages live in ~/Projects/Bilko/ (see `web/index.html`) and /home/bilko/Projects/session-manager.',
+    },
+  ];
+  let seen = null;
+  const existsPath = (p, roots) => { seen = roots; return true; };
+  scoreMemories({ entries, now: NOW, existsPath });
+  assert.deepEqual(seen, ['~/Projects/Bilko', '/home/bilko/Projects/session-manager']);
+});
+
+test('extractRoots dedupes, strips punctuation and caps at 5', () => {
+  assert.deepEqual(extractRoots('`~/a/b`, ~/a/b/ and ~/a/b.'), ['~/a/b']);
+  const body = Array.from({ length: 8 }, (_, i) => `~/p/r${i}`).join(' ');
+  assert.equal(extractRoots(body).length, 5);
+  assert.deepEqual(extractRoots('no roots here, src/main/x.cjs'), []);
 });
 
 test('[[self]] in a memory own body does not count as an inbound link', () => {

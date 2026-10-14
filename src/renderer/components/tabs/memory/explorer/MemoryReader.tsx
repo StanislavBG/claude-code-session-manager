@@ -19,7 +19,15 @@ interface Props {
   onArchive: () => void
   onRestore: () => void
   onAskDelete: () => void
-  fix: { state: 'idle' | 'checking' | 'proposed'; diff: DiffLine[]; summary: string }
+  fix: {
+    state: 'idle' | 'checking' | 'proposed'
+    diff: DiffLine[]
+    summary: string
+    action: 'update' | 'delete' | 'fold' | 'keep'
+    reason: string
+    fold: { target: string; anchor: string; insert: string } | null
+  }
+  appliedStill?: boolean
   onFix: () => void
   onApplyFix: () => void
   onDiscardFix: () => void
@@ -36,6 +44,20 @@ const PROSE =
   '[&_p]:m-0 [&_h4]:mt-1.5 [&_h4]:mb-0 [&_h4]:text-[11px] [&_h4]:tracking-[.08em] [&_h4]:font-semibold [&_h4]:text-accent ' +
   '[&_code]:font-mono [&_code]:text-[12.5px] [&_code]:bg-bg-elev [&_code]:px-1 [&_code]:rounded-[3px] ' +
   '[&_ul]:m-0 [&_ul]:pl-5 [&_ul]:list-disc [&_ol]:m-0 [&_ol]:pl-5 [&_ol]:list-decimal'
+
+const ACTION_UI = {
+  update: { apply: 'Apply', hint: 'Writes the file' },
+  delete: { apply: 'Archive', hint: 'Moves to .archive — undoable' },
+  keep: { apply: 'Mark verified', hint: 'Touches the file, clears age staleness' },
+  fold: { apply: 'Copy for an Epic', hint: 'Memory stays until the doc change lands' },
+} as const
+
+function actionHeader(fix: Props['fix']): string {
+  if (fix.action === 'delete') return 'Suggested: archive this memory'
+  if (fix.action === 'fold') return `Suggested: move into ${fix.fold?.target ?? 'a doc'}`
+  if (fix.action === 'keep') return 'Looks accurate — keep'
+  return 'Suggested update'
+}
 
 function formatSize(bytes: number): string {
   return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
@@ -135,6 +157,20 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
         </div>
       </div>
 
+      {!p.archived && !row.stale && fix.state === 'idle' && (
+        <div className="mx-[22px] mt-3 flex items-center gap-2 text-[11px] text-fg-dim">
+          <button
+            type="button"
+            data-testid="mx-reader-fix"
+            onClick={p.onFix}
+            className="text-xs font-medium h-[26px] px-2.5 rounded-[5px] border border-rule-structural text-fg hover:border-fg"
+          >
+            Review with assistant
+          </button>
+          <span>uses Claude</span>
+        </div>
+      )}
+
       {p.archived && (
         <div className="mx-[22px] mt-3 px-3 py-2.5 rounded-md bg-bg-elev flex items-center gap-2.5 text-[12.5px] text-fg-dim">
           <span className="flex-1">Archived — read-only. Claude no longer loads this memory.</span>
@@ -148,7 +184,11 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
           className="mx-[22px] mt-3 px-3 py-2.5 rounded-md bg-butter/40 text-honey-dark flex gap-2.5 items-center text-[12.5px]"
         >
           <div className="flex-1 flex flex-col gap-0.5">
-            <b className="font-semibold">Stale — {row.staleReasons[0] ?? 'needs review'}</b>
+            <b className="font-semibold">
+              {p.appliedStill
+                ? `Applied — still flagged: ${row.staleReasons[0] ?? 'needs review'}`
+                : `Stale — ${row.staleReasons[0] ?? 'needs review'}`}
+            </b>
             {row.deadRefs.length > 0 && (
               <span className="font-mono text-[11px]">{row.deadRefs.join(' · ')}</span>
             )}
@@ -175,17 +215,37 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
         </div>
       )}
 
-      {!p.archived && row.stale && fix.state === 'checking' && (
+      {!p.archived && fix.state === 'checking' && (
         <div className="mx-[22px] mt-3 p-3 rounded-md border border-dashed border-honey bg-butter/20 text-[12.5px] text-honey-dark flex items-center gap-2.5">
           <span className="font-mono text-accent">●○○</span>
           Assistant is checking {row.deadRefs.length > 0 ? `${row.deadRefs.length} references` : 'this memory'} against the repo…
         </div>
       )}
 
-      {!p.archived && row.stale && fix.state === 'proposed' && (
+      {!p.archived && fix.state === 'proposed' && (
         <div className="mx-[22px] mt-3 border border-honey rounded-md overflow-hidden bg-bg-hi">
-          <div className="px-3 py-[9px] bg-butter/40 text-[12.5px] text-honey-dark font-semibold">Suggested update</div>
-          {fix.diff.map((d, i) => (
+          <div className="px-3 py-[9px] bg-butter/40 text-[12.5px] text-honey-dark font-semibold">{actionHeader(fix)}</div>
+          <div className="px-3 py-2 text-[12.5px] text-fg flex flex-col gap-0.5">
+            <span data-testid="mx-reader-summary">{fix.summary}</span>
+            {fix.reason && <span data-testid="mx-reader-reason" className="text-fg-dim">{fix.reason}</span>}
+          </div>
+          {fix.action === 'fold' && fix.fold && (
+            <>
+              <div className="px-3 py-1.5 border-t border-rule-inner text-[11.5px] text-fg-dim font-mono break-all">
+                {fix.fold.target} · {fix.fold.anchor || 'append at end'}
+              </div>
+              {fix.fold.insert.split('\n').map((line, i) => (
+                <div
+                  key={i}
+                  className="grid grid-cols-[20px_1fr] px-3 py-1.5 font-mono text-xs leading-normal border-t border-rule-inner bg-sage/20 text-sage-dark"
+                >
+                  <span>+</span>
+                  <span className="whitespace-pre-wrap break-words">{line}</span>
+                </div>
+              ))}
+            </>
+          )}
+          {fix.action === 'update' && fix.diff.map((d, i) => (
             <div
               key={i}
               className={`grid grid-cols-[20px_1fr] px-3 py-1.5 font-mono text-xs leading-normal border-t border-rule-inner ${
@@ -203,7 +263,7 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
               onClick={p.onApplyFix}
               className="text-xs font-medium h-7 px-3 rounded-[5px] bg-fg text-bg"
             >
-              Apply
+              {ACTION_UI[fix.action].apply}
             </button>
             <button
               type="button"
@@ -214,7 +274,7 @@ export const MemoryReader = memo(function MemoryReader(p: Props) {
               Discard
             </button>
             <span className="flex-1" />
-            <span className="text-[11.5px] text-fg-dim">Writes the file, clears stale</span>
+            <span className="text-[11.5px] text-fg-dim">{ACTION_UI[fix.action].hint}</span>
           </div>
         </div>
       )}

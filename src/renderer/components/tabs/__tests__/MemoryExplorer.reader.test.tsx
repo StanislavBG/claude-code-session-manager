@@ -15,6 +15,7 @@ const row: MemoryRow = {
   deadRefs: [], broken: false, danglingLinks: [], outLinks: [], inLinks: [], notIndexed: false,
   clusterId: null, type: 'project', originSessionId: 'de0e5dbe-1234',
 }
+const IDLE = { state: 'idle', diff: [], summary: '', action: 'update', reason: '', fold: null }
 const CONTENT = '---\nname: x\n---\n\nBody text.\n\n**Why:** because.\n\n**How to apply:** do it.\n'
 
 function props(over: Record<string, unknown> = {}) {
@@ -22,7 +23,7 @@ function props(over: Record<string, unknown> = {}) {
     row, content: CONTENT, clusterName: 'Scheduler', clusterDot: 'bg-accent', archived: false,
     mode: 'read', onMode: vi.fn(), onEdit: vi.fn(), onCopyPath: vi.fn(), onReveal: vi.fn(),
     onArchive: vi.fn(), onRestore: vi.fn(), onAskDelete: vi.fn(),
-    fix: { state: 'idle', diff: [], summary: '' },
+    fix: IDLE,
     onFix: vi.fn(), onApplyFix: vi.fn(), onDiscardFix: vi.fn(), onVerify: vi.fn(),
     ...over,
   }
@@ -78,19 +79,64 @@ describe('MemoryReader', () => {
     click(q('mx-reader-fix'))
     expect(p.onFix).toHaveBeenCalled()
     act(() => root!.unmount()); container!.remove()
-    mount({ row: stale, fix: { state: 'checking', diff: [], summary: '' } })
+    mount({ row: stale, fix: { ...IDLE, state: 'checking' } })
     expect(q('mx-reader')!.textContent).toContain('Assistant is checking')
     act(() => root!.unmount()); container!.remove()
     const p2 = mount({
       row: stale,
-      fix: { state: 'proposed', diff: [{ sign: '−', text: 'old' }, { sign: '+', text: 'new' }], summary: 's' },
+      fix: { ...IDLE, state: 'proposed', diff: [{ sign: '−', text: 'old' }, { sign: '+', text: 'new' }], summary: 's' },
     })
     expect(q('mx-reader')!.textContent).toContain('Suggested update')
-    expect(q('mx-reader')!.textContent).toContain('Writes the file, clears stale')
+    expect(q('mx-reader')!.textContent).toContain('Writes the file')
     click(q('mx-reader-apply'))
     click(q('mx-reader-discard'))
     expect(p2.onApplyFix).toHaveBeenCalled()
     expect(p2.onDiscardFix).toHaveBeenCalled()
+  })
+
+  it.each([
+    ['update', 'Suggested update', 'Apply', 'Writes the file'],
+    ['delete', 'Suggested: archive this memory', 'Archive', 'Moves to .archive — undoable'],
+    ['keep', 'Looks accurate — keep', 'Mark verified', 'Touches the file, clears age staleness'],
+    ['fold', 'Suggested: move into CLAUDE.md', 'Copy for an Epic', 'Memory stays until the doc change lands'],
+  ])('proposed %s: header, label, hint', (action, header, label, hint) => {
+    const fold = action === 'fold' ? { target: 'CLAUDE.md', anchor: '', insert: 'line one\nline two' } : null
+    mount({ fix: { ...IDLE, state: 'proposed', action, summary: 'sum', reason: 'because', fold,
+      diff: action === 'update' ? [{ sign: '+', text: 'new' }] : [] } })
+    const t = q('mx-reader')!.textContent!
+    expect(t).toContain(header)
+    expect(t).toContain('sum')
+    expect(t).toContain('because')
+    expect(t).toContain(hint)
+    expect(q('mx-reader-apply')!.textContent).toBe(label)
+  })
+
+  it('fold shows + rows under target and append anchor; non-update hides diff', () => {
+    mount({ fix: { ...IDLE, state: 'proposed', action: 'fold', diff: [{ sign: '−', text: 'gone' }],
+      fold: { target: 'src/CLAUDE.md', anchor: '', insert: 'line one\nline two' } } })
+    const t = q('mx-reader')!.textContent!
+    expect(t).toContain('src/CLAUDE.md')
+    expect(t).toContain('append at end')
+    expect(t).toContain('+line one')
+    expect(t).toContain('+line two')
+    expect(t).not.toContain('gone')
+  })
+
+  it('shows Applied — still flagged when appliedStill', () => {
+    mount({ row: { ...row, stale: true, staleReasons: ['dead path'] }, appliedStill: true })
+    expect(q('mx-reader-stale')!.textContent).toContain('Applied — still flagged: dead path')
+  })
+
+  it('Review with assistant on a non-stale row', () => {
+    const p = mount()
+    expect(q('mx-reader-fix')!.textContent).toBe('Review with assistant')
+    click(q('mx-reader-fix'))
+    expect(p.onFix).toHaveBeenCalled()
+  })
+
+  it('proposed panel shows on a non-stale row', () => {
+    mount({ fix: { ...IDLE, state: 'proposed', action: 'keep', summary: 's' } })
+    expect(q('mx-reader-apply')).not.toBeNull()
   })
 
   it('⋯ menu items call handlers; Edit and mode toggle work', () => {

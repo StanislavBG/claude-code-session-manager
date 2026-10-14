@@ -30,11 +30,18 @@ const AGENT_PREFIX = 'agent:'
 
 type Mode = 'read' | 'source' | 'edit' | 'new'
 type Overlay = 'learn' | 'palette' | 'delete' | null
-interface Fix { state: 'idle' | 'checking' | 'proposed'; diff: { sign: '−' | '+' | ' '; text: string }[]; summary: string }
+interface Fix {
+  state: 'idle' | 'checking' | 'proposed'
+  diff: { sign: '−' | '+' | ' '; text: string }[]
+  summary: string
+  action: 'update' | 'delete' | 'fold' | 'keep'
+  reason: string
+  fold: { target: string; anchor: string; insert: string } | null
+}
 interface UndoMsg { message: string; undo?: () => void }
 
 const NEW_TEMPLATE = 'One-line summary of the fact or rule.\n\n**Why:**\n\n**How to apply:**'
-const IDLE_FIX: Fix = { state: 'idle', diff: [], summary: '' }
+const IDLE_FIX: Fix = { state: 'idle', diff: [], summary: '', action: 'update', reason: '', fold: null }
 const stem = (s: string): string => s.replace(/\.md$/, '')
 const basename = (p: string | null): string => (p ? p.split(/[\\/]/).filter(Boolean).pop() ?? p : 'workspace')
 
@@ -116,6 +123,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   const [overlay, setOverlay] = useState<Overlay>(null)
   const [fix, setFix] = useState<Fix>(IDLE_FIX)
   const [proposed, setProposed] = useState('')
+  const [appliedSlug, setAppliedSlug] = useState<string | null>(null)
   const [undo, setUndo] = useState<UndoMsg | null>(null)
   const [askCtx, setAskCtx] = useState<string | null>(null)
   const [title, setTitle] = useState('')
@@ -163,6 +171,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
     setSelected(name)
     setMode('read')
     setFix(IDLE_FIX)
+    setAppliedSlug(null)
     setOverlay(null)
   }, [])
 
@@ -266,21 +275,52 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
   const runFix = async () => {
     if (!selRow || content === null) return
     const row = selRow
-    setFix({ state: 'checking', diff: [], summary: '' })
+    setFix({ ...IDLE_FIX, state: 'checking' })
     const r = await actions.proposeFix(row.name)
     if (!r.ok) { setFix(IDLE_FIX); return }
     setProposed(r.content)
-    setFix({ state: 'proposed', diff: lineDiff(content, r.content), summary: r.summary })
+    setFix({
+      state: 'proposed',
+      diff: r.action === 'update' ? lineDiff(content, r.content) : [],
+      summary: r.summary,
+      action: r.action,
+      reason: r.reason,
+      fold: r.fold,
+    })
   }
 
   const applyFix = async () => {
     if (!selRow || content === null) return
     const row = selRow
-    const before = stripFront(content)
-    const ok = await actions.saveBody(row.name, stripFront(proposed))
-    if (!ok) return
-    setFix(IDLE_FIX)
-    say(`Applied fix to ${row.slug}`, () => { void actions.saveBody(row.name, before) })
+    if (fix.action === 'delete') {
+      if (!(await actions.archive(row.name))) return
+      setFix(IDLE_FIX)
+      say(`Archived ${row.slug}`, () => { void actions.restore(row.name) })
+    } else if (fix.action === 'keep') {
+      if (!(await actions.verify(row.name))) return
+      setFix(IDLE_FIX)
+      say(`Marked ${row.slug} verified`)
+    } else if (fix.action === 'fold') {
+      if (!fix.fold) return
+      const { target, anchor, insert } = fix.fold
+      const text =
+        `Fold memory ${row.slug} into ${target}.\n` +
+        `Insert after the line: ${anchor || '(append at end)'}\n---\n${insert}\n---\n` +
+        `Tread lightly: add only these lines, do not restructure the doc. ` +
+        `Once committed, archive the memory ${row.slug} from the Memory page.\n` +
+        `Memory file: ${row.path}`
+      const r = await window.api.clipboard.writeText(text)
+      if (!r.ok) { toast.error(`Copy failed: ${r.error ?? 'unknown error'}`); return }
+      setFix(IDLE_FIX)
+      say('Fold copied — paste it into a New Epic')
+    } else {
+      const before = stripFront(content)
+      const ok = await actions.saveBody(row.name, stripFront(proposed))
+      if (!ok) return
+      setFix(IDLE_FIX)
+      setAppliedSlug(row.slug)
+      say(`Applied fix to ${row.slug}`, () => { void actions.saveBody(row.name, before) })
+    }
   }
 
   const verify = async () => {
@@ -531,6 +571,7 @@ function ExplorerBody({ scope, cwd, onScope, onAgents, wsCount, onWsCount }: Bod
                     onRestore={() => { void restore() }}
                     onAskDelete={() => setOverlay('delete')}
                     fix={fix}
+                    appliedStill={appliedSlug === selRow.slug && selRow.stale}
                     onFix={() => { void runFix() }}
                     onApplyFix={() => { void applyFix() }}
                     onDiscardFix={() => setFix(IDLE_FIX)}

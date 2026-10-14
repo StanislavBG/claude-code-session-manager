@@ -478,7 +478,21 @@ const TOOLS = [
         label: { type: 'string', description: 'Short label shown on the HOT KEYS button.' },
         agentName: { type: 'string', description: 'Persona to run the macro as (e.g. "builder").' },
         tag: { type: 'string', description: 'Mission tag for the macro.' },
-        prompt: { type: 'string', description: 'The opening prompt the macro sends.' },
+        prompt: { type: 'string', description: 'The opening prompt the macro sends. Write input placeholders as {{name}}; each is filled from the matching entry in `inputs` when the macro is pressed.' },
+        inputs: {
+          type: 'array',
+          description: 'Optional input fields the human fills in before the macro runs. Prompt placeholders are written as {{name}}. Omit on update to keep the existing inputs; pass [] to clear them.',
+          items: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Placeholder key used as {{name}} in the prompt.' },
+              label: { type: 'string', description: 'Label shown on the input field.' },
+              default: { type: 'string', description: 'Default value pre-filled in the field.' },
+              required: { type: 'boolean', description: 'Whether the field must be filled before running.' },
+              options: { type: 'array', items: { type: 'string' }, description: 'Optional fixed choices for the field.' },
+            },
+          },
+        },
       },
       required: ['label', 'agentName', 'tag', 'prompt'],
     },
@@ -775,6 +789,7 @@ async function handleCallTool(request) {
       const cwd = resolveCwdArg(args);
       const payload = { cwd, label: args.label, agentName: args.agentName, tag: args.tag, prompt: args.prompt };
       if (typeof args.id === 'string' && args.id) payload.id = args.id;
+      if (Array.isArray(args.inputs)) payload.inputs = args.inputs;
       const result = await adminRequest('POST', '/admin/macros/save', payload);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }

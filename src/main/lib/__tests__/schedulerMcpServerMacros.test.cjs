@@ -176,6 +176,49 @@ test('macro_save forwards the body to /admin/macros/save with the resolved cwd',
   });
 });
 
+test('macro_save forwards inputs verbatim in the POST body', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true, macro: {} });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  const inputs = [
+    { name: 'stream', label: 'Stream', default: 'education-veggies', required: true, options: ['a', 'b'] },
+  ];
+  const result = await callTool(handleCallTool, SAVE_TOOL_NAME, {
+    cwd: '/home/bilko/Projects/session-manager',
+    label: 'Run stream',
+    agentName: 'builder',
+    tag: 'feature',
+    prompt: 'Run {{stream}}.',
+    inputs,
+  });
+  expect(result.isError).toBeFalsy();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].body.inputs).toEqual(inputs);
+});
+
+test('macro_save without inputs sends a body with no inputs key', async () => {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, { ok: true, macro: {} });
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+
+  const { handleCallTool } = requireServerWithHome(homeDir);
+  await callTool(handleCallTool, SAVE_TOOL_NAME, {
+    cwd: '/home/bilko/Projects/session-manager',
+    label: 'Plain',
+    agentName: 'builder',
+    tag: 'feature',
+    prompt: 'No inputs.',
+  });
+  expect(requests).toHaveLength(1);
+  expect(Object.prototype.hasOwnProperty.call(requests[0].body, 'inputs')).toBe(false);
+});
+
 test('macro_save defaults cwd to SM_PROJECT_ROOT when omitted', async () => {
   const homeDir = await mkTmp();
   const token = 'test-token';

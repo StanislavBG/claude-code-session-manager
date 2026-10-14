@@ -365,10 +365,14 @@ const MCP_TOOL_CATALOG = [
       label: 'Publish git + npm',
       agentName: 'builder',
       tag: 'feature',
-      prompt: 'Run the full publish flow: commit, bump version, gate, npm publish, push.',
+      prompt: 'Run the full publish flow for the {{stream}} stream: commit, bump version, gate, npm publish, push.',
+      inputs: [{ name: 'stream', label: 'Stream', default: 'education-veggies' }],
     },
     notes: "cwd is optional — defaults to the calling session's own project root (SM_PROJECT_ROOT or "
-      + 'process.cwd()) when omitted. label, agentName, tag and prompt are all required strings.',
+      + 'process.cwd()) when omitted. label, agentName, tag and prompt are all required strings. '
+      + '`inputs` is an optional array of { name, label, default, required, options } fields the human fills in '
+      + 'when pressing the macro; reference each in the prompt as {{name}}. Omitting `inputs` on update keeps '
+      + 'the existing inputs; `[]` clears them.',
   },
   {
     name: 'session_manager_help',

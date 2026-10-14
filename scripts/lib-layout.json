@@ -46,6 +46,7 @@
   "fileTail": "util",
   "fixChainDepth": "scheduler",
   "fixPlanSlug": "scheduler",
+  "baselineGate": "scheduler",
   "gateAuthority": "scheduler",
   "gitExec": "git",
   "gitWorktree": "git",

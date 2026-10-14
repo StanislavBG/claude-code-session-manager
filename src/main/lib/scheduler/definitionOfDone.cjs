@@ -758,6 +758,8 @@ function writeReport(key, { acResults = [], riskFlags = [], runsDir } = {}) {
 // shadow gate in flight machine-wide (the scheduler is one process).
 let gateInFlight = false;
 const OUTPUT_TAIL_CHARS = 1000;
+// Bounded full-output ring kept for baseline comparison (failing test ids).
+const OUTPUT_RING_CHARS = 64 * 1024;
 
 function runOneGateCommand(cmd, { cwd, env }) {
   return new Promise((resolve) => {
@@ -776,11 +778,15 @@ function runOneGateCommand(cmd, { cwd, env }) {
         // No shell:true — the sequence was tokenized by tokenizeNoShell.
       });
     } catch {
-      resolve({ cmd: label, status: 'unavailable', code: null, ms: ms(), timedOut: false, tail: '' });
+      resolve({ cmd: label, status: 'unavailable', code: null, ms: ms(), timedOut: false, tail: '', outputTail: '' });
       return;
     }
     let tail = '';
-    const onData = (d) => { tail = (tail + d).slice(-OUTPUT_TAIL_CHARS); };
+    let outputTail = '';
+    const onData = (d) => {
+      tail = (tail + d).slice(-OUTPUT_TAIL_CHARS);
+      outputTail = (outputTail + d).slice(-OUTPUT_RING_CHARS);
+    };
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
     let settled = false;
@@ -800,7 +806,7 @@ function runOneGateCommand(cmd, { cwd, env }) {
       settled = true;
       clearTimeout(killTimer);
       clearTimeout(escalate);
-      resolve({ cmd: label, ms: ms(), timedOut, tail, ...r });
+      resolve({ cmd: label, ms: ms(), timedOut, tail, outputTail, ...r });
     };
     child.on('error', () => finish({ status: 'unavailable', code: null }));
     child.on('close', (code) => {

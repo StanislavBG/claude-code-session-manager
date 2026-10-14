@@ -77,6 +77,13 @@ in favor of this pool — see commit `4c8916d`).
   worktree count (`getObservedWorktreeCount`) before honoring it, correcting a leaked
   (never-decremented) counter down to reality rather than wedging the cap at a stale high-water
   mark for the rest of the process's life.
+- A fresh job worktree gets the main checkout's gitignored dependency dirs via `linkDependencyDirs`
+  (`src/main/lib/git/worktreeDeps.cjs`, called from `gitWorktree.cjs` right after the worktree is
+  created): `node_modules`, `.venv` and `venv` are symlinked in when they exist and are gitignored in
+  the main checkout, and each linked name is appended as `/<name>` to the repo's shared
+  `info/exclude` (a `node_modules/` gitignore line matches directories only, so the symlink would
+  otherwise show as untracked and park the job `uncommitted_changes`). Best-effort: it never fails
+  worktree creation. Kill switch `SM_WORKTREE_DEP_LINK_DISABLE=1`.
 
 ## 3. The starvation classifier — the last-resort safety net
 
@@ -132,6 +139,24 @@ needs_review park with verdict `transcript_errors`, `no_verdict_sentinel` or
 on HEAD, and the tracked tree is clean. Kill switch: `SM_GATE_AUTHORITATIVE_DISABLE=1`. Every other
 verdict keeps the shadow gate observation-only, exactly as before.
 
+**Baseline extension.** A park with verdict `sentinel_fail` whose gate is red at HEAD can also
+complete when the gate was already red before the job (`decideBaselineAuthority`,
+`lib/scheduler/baselineGate.cjs`, run from the same shadow gate). The base is the job's
+`guardHeadBefore`; `runGateShadow` runs the PRD gate there in a scratch detached worktree (deps
+linked via `linkDependencyDirs`, removed afterwards, memoized per HEAD on `gateShadow.baseline`).
+Failing-id subset rule: both runs must fail the same gate step, and every failing test id at HEAD
+(`parseFailingTests`) must also fail at base — one new failing id, an unparseable output, or a green
+base refuses. The landed-commit evidence, on-HEAD, clean-tree and HEAD-stable checks are the same as
+above. Success completes the row with verdict `pass_preexisting_gate_red` (ids in
+`preexistingGateFailures`, named in the completion notice); the decision and its `reason` are
+recorded at `gateShadow.baseline`. Kill switch `SM_BASELINE_GATE_AUTHORITY_DISABLE=1`.
+
+**`needs_human`.** An executor that needs a decision only a person can make ends with
+`SCHEDULER_VERDICT: NEEDS_HUMAN <question>`; the park carries `verifierVerdict: 'needs_human'` and
+the question as `humanQuestion`. `isNeedsHuman` (`scheduler/reviewLadder.cjs`) excludes it from
+rungs 1, 2, 4 and 6 (nothing the ladder does can answer it), and its review notice is due
+immediately — `selectDueReviewNotices` skips the hold window for it (§8).
+
 ## 5. The reap/orphan path and its git-evidence gate
 
 `reapDeadRunningJobs()` (`scheduler.cjs`) scans `queue.json` (never the in-memory
@@ -168,6 +193,7 @@ human clears it via Resume/Run now.
 | A `dependsOn` chain stalled behind one row | That row's `status` — if `needs_review`, check `job.exhaustedResolveAttempts` and how long it's dwelt (`statusHistory`'s last `to: 'needs_review'` entry) | If under 30 min: **automatic**, the ladder (§4) is still working through it. If exhausted (`exhaustedResolveAttempts` at cap): **automatic** — auto-skips within one more pass to unblock the chain. `blocked` (not `starved`) verdicts from §3 need a human |
 | Slots saturated by an overrunning job | `sessionSlots.snapshot()` (via `scheduler_list_jobs` or `npm run health`) — `holders` names the owner; check the row's `budgetWarning` field (stamped at 75% of budget, `scheduler.cjs`) and `job.verifierVerdict === 'budget_exceeded'` | **Automatic, and tighter than the 4h deadman**: the wall-clock BUDGET watchdog (`computeJobBudgetMs`) SIGTERMs a job once elapsed time passes `clamp(estimateMinutes × 3, 45min floor, 180min ceiling)` — calibrated against a p50=13m/p90=60m/max=240m run-duration profile — well before `MAX_JOB_DURATION_MS`'s 4h deadman would ever fire. A budget kill always parks `needs_review` with `verifierVerdict: 'budget_exceeded'` (`classifyBudgetKill`,) and is deliberately excluded from rungs 1-4 of the ladder — it only clears via rung 5/6 or a human |
 | Torn `scheduler-machine.json` | `npm run health`'s `scheduler_queue.machineStateRecovered` field, or a `queueStore.recoverTornMachineState*` WARN/ERROR in logs | **Automatic** — `findLongestValidJsonPrefix` (`queueStore.cjs`) recovers the longest valid prefix and dispatch keeps running; health only goes non-GREEN as a loud "this happened" signal. A prefix mentioning `paused`/`resumeAt` in its discarded tail needs a human to verify pause status manually |
+| Job parked `needs_review`, verdict `sentinel_fail`, reason says pre-existing failures | `gateShadow.baseline.reason` on the row (`baseline-identical` completes; `new-failures`, `different-failing-step`, `base-green`, `unparseable-output`, `base-unavailable`, `kill-switch`… refuse) | `new-failures`: the job broke something — fix it. `base-unavailable`/`unparseable-output`: the base gate could not be judged; re-run by hand at `guardHeadBefore`. Otherwise see the baseline extension in §4 |
 | Leaked worktree-cap counter (rows held `pending` with `heldReason: 'worktree cap reached...'` and 0 running) | `npm run health`'s `scheduler_queue.worktreeCapBlocked` (`health.cjs`, keys on `runningCount === 0` + the exact `heldReason` prefix) | **Automatic** — `reserveWorktreeSlot` (`gitWorktree.cjs`) re-verifies against the real on-disk worktree count before honoring a rejection, self-correcting a leaked in-memory counter without an app restart |
 | A job's worktree was stranded (process died, checkout never cleaned up) | Directory age under the kind's worktree root vs `getStaleSweepAgeMs` (job: 24h, epic: 7d, `gitWorktree.cjs`) | **Automatic** — `sweepStaleWorktreeCheckouts` runs on boot (`reconcileWorktreesOnBoot`) and periodically, but only reaps past the age threshold AND only when no `/proc` process still holds the directory as its cwd (`hasLiveHolder`) — a still-running job is never torn down early |
 | Job parked `needs_review`, verdict `worktree_integration_failed`, `integrationFailureKind: 'content_conflict'`, its own verifier said clean, `filesChanged: 0` but a real `landedCommit` | `git log --oneline main..sm-job/<slug>` shows unmerged commits | Merge the preserved branch by hand, then archive the PRD. Rung 1 skips it (without spending its attempt) while base HEAD is unchanged since the failure (`integrationBaseHeadSha`); pure-addition doc conflicts are auto-resolved at merge time (kill switch `SM_PURE_ADDITION_MERGE_DISABLE=1`) |
@@ -188,7 +214,8 @@ A finished step's row leaves `queue.json` (`archiveCompletedPrd` + `reconcile()`
 
 ## 8. What recovers automatically vs what needs a human
 
-**The human-facing notice is quiet and grouped, not immediate.** A park into
+**The human-facing notice is quiet and grouped, not immediate** (except `needs_human`, §4, which
+is due at once). A park into
 `needs_review` records a notice on the job row (`reviewNotice.cjs`'s
 `buildReviewNotice`) and sends nothing yet — the ladder above almost always
 heals it first. A human reset (`resetJobFields`) deletes that notice outright,
@@ -201,7 +228,10 @@ resolution for `SM_REVIEW_NOTICE_HOLD_MINUTES` (default 240 minutes) — a
 not-yet-due row only joins that group once it has sat for at least 30 minutes
 itself (`SWEEP_MIN_AGE_MINUTES`), so the ladder's early rungs get a fair
 chance first. `scheduler.cjs`'s `flushDueReviewNotices` is the sole sender; it
-groups every row sharing the same cause into one plain-language message,
+groups every row sharing the same cause into one plain-language message that carries, per PRD,
+its title, goal line, the reason it stopped and an `Answer needed:` line (so the Epic can answer
+without opening the Scheduler), delivers it to the authoring Epic whatever that Epic's status
+(`allowInactive`),
 names any pending PRD the group still blocks via `dependsOn` instead of
 always claiming nothing is waiting, and retries a send that errors up to 3
 times, then stamps it sent anyway so a dead Epic cannot loop forever. Kill

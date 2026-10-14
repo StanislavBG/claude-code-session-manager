@@ -130,5 +130,6 @@
   "watchdogHelpers": "scheduler",
   "winSpawn": "process",
   "withTimeout": "util",
-  "workTypeLibrary": "prd"
+  "workTypeLibrary": "prd",
+  "worktreeDeps": "git"
 }

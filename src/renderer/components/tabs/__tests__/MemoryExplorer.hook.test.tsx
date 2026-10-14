@@ -139,4 +139,14 @@ describe('useMemoryExplorer', () => {
     expect(undo).toBeNull()
     expect(toastError).toHaveBeenCalledWith(expect.stringContaining('EPERM'))
   })
+
+  it('proposeFix passes an action:fold result through unchanged', async () => {
+    await mount()
+    const fold = { target: 'CLAUDE.md', anchor: '## Conventions', insert: '- a rule' }
+    const proposal = { ok: true, action: 'fold', summary: 's', reason: 'belongs in CLAUDE.md', content: '', fold }
+    memory.proposeFix.mockResolvedValue(proposal)
+    let r: unknown
+    await act(async () => { r = await latest.actions.proposeFix('a.md') })
+    expect(r).toEqual(proposal)
+  })
 })

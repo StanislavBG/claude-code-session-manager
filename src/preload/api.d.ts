@@ -1359,6 +1359,16 @@ export interface MemoryStaleEntry {
   danglingLinks: string[];
 }
 
+export type MemoryFixProposal = {
+  ok: boolean;
+  action: 'update' | 'delete' | 'fold' | 'keep';
+  summary: string;
+  reason: string;
+  content: string;
+  fold: { target: string; anchor: string; insert: string } | null;
+  error?: string;
+};
+
 export interface MemoryStaleResult {
   entries: MemoryStaleEntry[];
   workspace: string;
@@ -2143,9 +2153,9 @@ export interface SessionManagerAPI {
     /** Gated `claude -p` question over the memory folder. */
     ask: (input: { question: string; target?: MemoryTarget; contextName?: string }) =>
       Promise<{ ok: boolean; answer: string; citations: string[]; error?: string }>;
-    /** Gated `claude -p` proposed rewrite fixing a memory's dead refs; requires `target.cwd`. */
+    /** Gated `claude -p` triage of a memory against the md network: update, delete, fold into a CLAUDE.md, or keep; requires `target.cwd`. */
     proposeFix: (input: { name: string; target?: MemoryTarget }) =>
-      Promise<{ ok: boolean; content: string; summary: string; error?: string }>;
+      Promise<MemoryFixProposal>;
   };
   projectBrief: {
     /** Read brief.json (or null if none yet) plus cheaply-computed source/drift metadata. Never fires an LLM call. */

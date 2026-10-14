@@ -5,6 +5,7 @@ import type {
   MemoryAgent,
   MemoryAggregateResult,
   MemoryEntry,
+  MemoryFixProposal,
   MemoryIndexHealth,
   MemoryStaleResult,
   MemoryTarget,
@@ -38,9 +39,7 @@ export interface MemoryExplorerActions {
     question: string,
     contextName?: string,
   ) => Promise<{ ok: boolean; answer: string; citations: string[]; error?: string }>
-  proposeFix: (
-    name: string,
-  ) => Promise<{ ok: boolean; content: string; summary: string; error?: string }>
+  proposeFix: (name: string) => Promise<MemoryFixProposal>
 }
 
 export interface MemoryExplorer {
@@ -300,7 +299,9 @@ export function useMemoryExplorer(scope: ExplorerScope, cwd: string | null): Mem
   }, [target])
 
   const proposeFix = useCallback(async (name: string) => {
-    const fail = (error: string) => ({ ok: false, content: '', summary: '', error })
+    const fail = (error: string): MemoryFixProposal => ({
+      ok: false, action: 'keep', summary: '', reason: '', content: '', fold: null, error,
+    })
     if (!target) return fail('no memory store')
     try {
       const r = await window.api.memory.proposeFix({ name, target })

@@ -2,7 +2,7 @@
 
 import { test } from 'vitest';
 const assert = require('node:assert/strict');
-const { ask, proposeFix, buildAskPrompt, buildFixPrompt } = require('../memoryAssist.cjs');
+const { ask, proposeFix, buildAskPrompt, buildFixPrompt, FIX_POLICY } = require('../memoryAssist.cjs');
 
 const files = [
   { name: 'MEMORY.md', mtimeMs: 9, body: '- index' },
@@ -26,8 +26,13 @@ function makeDeps({ out, ok = true, slot = 'tok' } = {}) {
         if (out instanceof Error) throw out;
         return ok ? { ok: true, out } : { ok: false, error: 'boom' };
       },
-      gitLsFiles: async () => ['src/main/old/helper.cjs', 'src/other/helper.cjs'],
-      existsPath: () => false,
+      trackedFiles: ['src/main/old/helper.cjs', 'src/other/helper.cjs', 'CLAUDE.md', 'src/CLAUDE.md'],
+      exists: () => false,
+      readFile: (p) => {
+        if (p.endsWith('/src/CLAUDE.md')) return '# Src docs\nline one\nline one\nuse `helper.cjs` here\nanchor line';
+        if (p.endsWith('/CLAUDE.md')) return '# Root\nSee [src](src/CLAUDE.md).';
+        throw new Error('ENOENT');
+      },
     },
   };
 }
@@ -82,24 +87,83 @@ test('unparsable output → ok:false', async () => {
   assert.deepEqual(calls.release, ['tok']);
 });
 
-test('proposeFix rejects content lacking the original frontmatter', async () => {
-  const bad = makeDeps({ out: JSON.stringify({ summary: 's', content: 'Alpha without frontmatter' }) });
-  const r = await proposeFix({ name: 'alpha.md', dir: '/m', cwd: '/c' }, bad.deps);
-  assert.equal(r.ok, false);
-  const good = makeDeps({ out: JSON.stringify({ summary: 's', content: '---\ndescription: a\n---\nFixed.' }) });
-  const g = await proposeFix({ name: 'alpha.md', dir: '/m', cwd: '/c' }, good.deps);
-  assert.equal(g.ok, true);
-  assert.equal(g.summary, 's');
-  assert.ok(g.content.endsWith('Fixed.'));
+const run = (out) => {
+  const m = makeDeps({ out: typeof out === 'string' ? out : JSON.stringify(out) });
+  return proposeFix({ name: 'alpha.md', dir: '/m', cwd: '/c' }, m.deps).then((r) => ({ r, ...m }));
+};
+const J = (o) => ({ summary: 's', reason: 'why', content: '', fold: null, ...o });
+
+test('proposeFix update: keeps frontmatter, rejects content lacking it', async () => {
+  const bad = await run(J({ action: 'update', content: 'Alpha without frontmatter' }));
+  assert.equal(bad.r.ok, false);
+  const good = await run(J({ action: 'update', content: '---\ndescription: a\n---\nFixed.' }));
+  assert.equal(good.r.ok, true);
+  assert.equal(good.r.action, 'update');
+  assert.equal(good.r.summary, 's');
+  assert.equal(good.r.reason, 'why');
+  assert.ok(good.r.content.endsWith('Fixed.'));
+  assert.equal(good.r.fold, null);
 });
 
-test('proposeFix prompt carries full text and ≤5 basename matches per dead path', () => {
+test('proposeFix delete and keep: empty content, null fold', async () => {
+  for (const action of ['delete', 'keep']) {
+    const { r } = await run(J({ action, content: 'ignored' }));
+    assert.equal(r.ok, true);
+    assert.equal(r.action, action);
+    assert.equal(r.content, '');
+    assert.equal(r.fold, null);
+  }
+});
+
+test('proposeFix fold happy path (unique anchor, and empty anchor)', async () => {
+  const a = await run(J({ action: 'fold', fold: { target: 'src/CLAUDE.md', anchor: 'anchor line', insert: 'new rule' } }));
+  assert.equal(a.r.ok, true);
+  assert.deepEqual(a.r.fold, { target: 'src/CLAUDE.md', anchor: 'anchor line', insert: 'new rule' });
+  assert.equal(a.r.content, '');
+  const b = await run(J({ action: 'fold', fold: { target: 'CLAUDE.md', anchor: '', insert: 'x' } }));
+  assert.equal(b.r.ok, true);
+  assert.equal(b.r.fold.anchor, '');
+});
+
+test('proposeFix rejects invalid action and missing summary/reason', async () => {
+  assert.equal((await run(J({ action: 'merge' }))).r.ok, false);
+  assert.equal((await run(J({ action: 'keep', summary: '' }))).r.ok, false);
+  assert.equal((await run(J({ action: 'keep', reason: undefined }))).r.ok, false);
+});
+
+test('proposeFix fold rejection rules', async () => {
+  const f = (fold) => run(J({ action: 'fold', fold })).then((x) => x.r);
+  assert.equal((await f(null)).ok, false);
+  assert.equal((await f({ target: 'other/README.md', anchor: '', insert: 'x' })).ok, false);
+  assert.equal((await f({ target: 'CLAUDE.md', anchor: '', insert: '  ' })).ok, false);
+  assert.equal((await f({ target: 'CLAUDE.md', anchor: '', insert: 'a\nb\nc\nd' })).ok, false);
+  assert.equal((await f({ target: 'CLAUDE.md', anchor: '', insert: 'x'.repeat(601) })).ok, false);
+  assert.equal((await f({ target: 'src/CLAUDE.md', anchor: 'line one', insert: 'x' })).ok, false);
+  assert.equal((await f({ target: 'src/CLAUDE.md', anchor: 'missing', insert: 'x' })).ok, false);
+});
+
+test('fix prompt says unresolved (never "no longer exists"), lists docs and a coverage hit', async () => {
+  const { calls } = await run(J({ action: 'keep' }));
+  const p = calls.run[0].prompt;
+  assert.ok(p.includes('unresolved') || p.includes('Unresolved'));
+  // FIX_POLICY (exact text per PRD) itself says "Never write that a path no longer exists";
+  // everything the builder adds around it must not.
+  assert.ok(!p.replace(FIX_POLICY, '').includes('no longer exists'));
+  assert.ok(!calls.run[0].opts.systemPrompt.includes('no longer exists'));
+  assert.ok(p.includes('- src/CLAUDE.md — Src docs'));
+  assert.ok(p.includes('<doc path="CLAUDE.md">'));
+});
+
+test('buildFixPrompt renders coverage hits and unresolved candidates', () => {
   const p = buildFixPrompt({
     name: 'x.md',
     text: 'FULLTEXT',
-    suggestions: { 'src/gone/helper.cjs': ['a/helper.cjs', 'b/helper.cjs'] },
+    unresolved: { 'src/gone/helper.cjs': ['a/helper.cjs'], 'z/none.cjs': [] },
+    network: { rootClaudeMd: 'ROOT', docs: [], coverage: [{ term: 'helper.cjs', hits: [{ path: 'src/CLAUDE.md', line: 4, text: 'use it' }] }] },
   });
-  assert.ok(p.includes('FULLTEXT') && p.includes('a/helper.cjs'));
+  assert.ok(p.includes('FULLTEXT') && p.includes('a/helper.cjs') && p.includes('none found'));
+  assert.ok(p.includes('- `helper.cjs`: src/CLAUDE.md:4-use it'));
+  assert.ok(!p.replace(FIX_POLICY, '').includes('no longer exists'));
 });
 
 test('proposeFix rejects path-traversing names and unknown files', async () => {

@@ -23,6 +23,7 @@ import { useSessions } from '../state/sessions'
 import { toast } from '../state/toast'
 import { launchSession } from './launchSession'
 import { macroCostWarning } from './macroCost'
+import { defaultMacroValues, renderMacroPrompt } from './macroPrompt'
 import type { AgentPersona, Macro } from '../../preload/api'
 
 export function useMacroLaunch(
@@ -33,7 +34,7 @@ export function useMacroLaunch(
   const activeTabCwd = useSessions((s) => s.tabs.find((t) => t.id === s.activeTabId)?.cwd ?? null)
   const [launching, setLaunching] = useState<string | null>(null)
 
-  const launch = async (macro: Macro, extraInstructions?: string) => {
+  const launch = async (macro: Macro, extraInstructions?: string, inputValues?: Record<string, string>) => {
     if (!activeTabCwd || launching) return
 
     if (opts?.resumeActive) {
@@ -60,6 +61,12 @@ export function useMacroLaunch(
     const costWarning = macroCostWarning(macro, persona)
     if (costWarning && !window.confirm(costWarning)) return
 
+    const rendered = renderMacroPrompt(macro.prompt, macro.inputs, inputValues ?? defaultMacroValues(macro.inputs))
+    if (!rendered.ok) {
+      toast.error(`Cannot start "${macro.label}" — ${rendered.error}`)
+      return
+    }
+
     setLaunching(macro.id)
     try {
       if (opts?.requireReadiness) {
@@ -83,7 +90,7 @@ export function useMacroLaunch(
       }
 
       const trimmedExtra = extraInstructions?.trim()
-      const goal = trimmedExtra ? `${macro.prompt}\n\nAdditional instructions: ${trimmedExtra}` : macro.prompt
+      const goal = trimmedExtra ? `${rendered.prompt}\n\nAdditional instructions: ${trimmedExtra}` : rendered.prompt
       const result = await launchSession({
         cwd: activeTabCwd,
         agentName: macro.agentName,

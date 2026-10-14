@@ -47,15 +47,21 @@ async function mount(el: React.ReactElement) {
   return container
 }
 
-function Harness({ personas, opts, onSelect, extraInstructions }: {
+function Harness({ personas, opts, onSelect, extraInstructions, macroOver, inputValues }: {
   personas: AgentPersona[]
   opts?: { resumeActive?: boolean; requireReadiness?: boolean }
   onSelect: (id: string) => void
   extraInstructions?: string
+  macroOver?: Partial<Macro>
+  inputValues?: Record<string, string>
 }) {
   const { launch, launching } = useMacroLaunch(onSelect, personas, opts)
   return (
-    <button type="button" disabled={launching !== null} onClick={() => void launch(macro(), extraInstructions)}>
+    <button
+      type="button"
+      disabled={launching !== null}
+      onClick={() => void launch(macro(macroOver), extraInstructions, inputValues)}
+    >
       Launch
     </button>
   )
@@ -209,6 +215,66 @@ describe('useMacroLaunch', () => {
     expect(
       useToast.getState().toasts.some((t) => t.kind === 'error' && t.message.includes('scout')),
     ).toBe(true)
+  })
+
+  describe('macro inputs', () => {
+    const withInputs = {
+      prompt: 'run stream={{stream}}',
+      inputs: [{ name: 'stream', label: 'Stream', default: 'education-veggies' }],
+    } as Partial<Macro>
+
+    it('no values passed: placeholders render with the input defaults', async () => {
+      const el = await mount(<Harness personas={[persona()]} onSelect={vi.fn()} macroOver={withInputs} />)
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+
+      const [, goalText] = createPromptSessionSpy.mock.calls[0]
+      expect(goalText).toBe('Sweep\n\nrun stream=education-veggies')
+    })
+
+    it('values passed: the override replaces the default', async () => {
+      const el = await mount(
+        <Harness personas={[persona()]} onSelect={vi.fn()} macroOver={withInputs} inputValues={{ stream: 'math' }} />,
+      )
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+
+      const [, goalText] = createPromptSessionSpy.mock.calls[0]
+      expect(goalText).toBe('Sweep\n\nrun stream=math')
+    })
+
+    it('a required input left empty toasts and mints nothing', async () => {
+      const onSelect = vi.fn()
+      const el = await mount(
+        <Harness
+          personas={[persona()]}
+          onSelect={onSelect}
+          macroOver={{
+            prompt: 'run stream={{stream}}',
+            inputs: [{ name: 'stream', label: 'Stream', required: true }],
+          } as Partial<Macro>}
+          inputValues={{ stream: '' }}
+        />,
+      )
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+      expect(sendSpy).not.toHaveBeenCalled()
+      expect(onSelect).not.toHaveBeenCalled()
+      expect(
+        useToast.getState().toasts.some(
+          (t) => t.kind === 'error' && t.message === 'Cannot start "Sweep" — "Stream" is required',
+        ),
+      ).toBe(true)
+    })
+
+    it('a macro without inputs sends a goal identical to its prompt', async () => {
+      const el = await mount(
+        <Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ prompt: 'keep {{this}} literal' }} />,
+      )
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+
+      const [, goalText] = createPromptSessionSpy.mock.calls[0]
+      expect(goalText).toBe('Sweep\n\nkeep {{this}} literal')
+    })
   })
 
   describe('cost confirmation', () => {

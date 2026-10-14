@@ -115,4 +115,40 @@ describe('MacroEditor', () => {
     expect(onClose).toHaveBeenCalledTimes(2)
     expect(save).not.toHaveBeenCalled()
   })
+
+  describe('inputs', () => {
+    const rows = () => Array.from(container.querySelectorAll('[data-testid="macro-input-row"]')) as HTMLElement[]
+    const inRow = (r: HTMLElement, id: string) => r.querySelector(`[data-testid="${id}"]`) as HTMLInputElement
+    const fill = () => act(() => { setValue(q('macro-label') as HTMLInputElement, 'a'); setValue(q('macro-prompt') as HTMLTextAreaElement, 'stream={{stream}}') })
+
+    it('saves an added input with its default', async () => {
+      mount()
+      fill()
+      act(() => q('macro-input-add').click())
+      const r = rows()[0]
+      act(() => { setValue(inRow(r, 'macro-input-name'), 'stream'); setValue(inRow(r, 'macro-input-default'), 'education-veggies') })
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0].inputs).toEqual([{ name: 'stream', label: 'stream', default: 'education-veggies', required: false }])
+    })
+
+    it('an undeclared placeholder disables Save', () => {
+      mount()
+      act(() => { setValue(q('macro-label') as HTMLInputElement, 'a'); setValue(q('macro-prompt') as HTMLTextAreaElement, 'x={{x}}') })
+      expect(q('macro-undeclared-placeholder')).not.toBeNull()
+      expect((q('macro-save') as HTMLButtonElement).disabled).toBe(true)
+    })
+
+    it('an untouched legacy macro saves without an inputs key', async () => {
+      mount({ macro: mac() })
+      await act(async () => { q('macro-save').click() })
+      expect('inputs' in save.mock.calls[0][0]).toBe(false)
+    })
+
+    it('removing every row of a macro that had inputs sends inputs: []', async () => {
+      mount({ macro: mac({ prompt: 'p', inputs: [{ name: 'stream', label: 'Stream' }] }) })
+      act(() => inRow(rows()[0], 'macro-input-remove').click())
+      await act(async () => { q('macro-save').click() })
+      expect(save.mock.calls[0][0].inputs).toEqual([])
+    })
+  })
 })

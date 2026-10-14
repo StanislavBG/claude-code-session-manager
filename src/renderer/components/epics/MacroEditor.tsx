@@ -4,10 +4,11 @@
  * rail, so every field stacks vertically. Saves through `window.api.macros`.
  */
 import { useEffect, useState } from 'react'
-import type { AgentPersona, Macro } from '../../../preload/api'
+import type { AgentPersona, Macro, MacroInput } from '../../../preload/api'
 import { toast } from '../../state/toast'
 import { missionTagsForAgent } from '../../lib/missionTags'
 import { tagLibraryEntry } from '../../lib/tagLibrary'
+import { macroPlaceholders } from '../../lib/macroPrompt'
 import { AgentPicker } from './AgentPicker'
 
 export const MACRO_LABEL_MAX = 60
@@ -15,6 +16,7 @@ export const MACRO_PROMPT_MAX = 8000
 
 const FIELD =
   'w-full rounded-md border border-line bg-bg px-2 py-1 text-[12px] text-fg placeholder:text-fg-faint focus:outline-none focus:border-accent'
+const INPUT_NAME_RE = /^[a-z][a-z0-9_]{0,31}$/
 const LABEL = 'font-mono text-[10px] font-semibold tracking-[1px] uppercase text-fg-faint'
 
 export interface MacroEditorProps {
@@ -36,6 +38,7 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
   const [prompt, setPrompt] = useState(macro?.prompt ?? '')
   const initialEverywhere = macro ? macro.projects.includes('*') : false
   const [everywhere, setEverywhere] = useState(initialEverywhere)
+  const [inputs, setInputs] = useState<MacroInput[]>(macro?.inputs ?? [])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -69,7 +72,17 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
 
   const trimmedLabel = label.trim()
   const trimmedPrompt = prompt.trim()
-  const valid = trimmedLabel.length > 0 && trimmedPrompt.length > 0 && agentName !== ''
+  const hadInputs = (macro?.inputs?.length ?? 0) > 0
+  const placeholders = macroPlaceholders(prompt)
+  const declared = new Set(inputs.map((i) => i.name))
+  const undeclared = placeholders.filter((n) => !declared.has(n))
+  const inputsValid =
+    undeclared.length === 0 &&
+    inputs.every((i) => INPUT_NAME_RE.test(i.name)) &&
+    declared.size === inputs.length
+  const valid = trimmedLabel.length > 0 && trimmedPrompt.length > 0 && agentName !== '' && inputsValid
+  const patchInput = (idx: number, patch: Partial<MacroInput>) =>
+    setInputs((rows) => rows.map((r, i) => (i === idx ? { ...r, ...patch } : r)))
 
   const save = async () => {
     if (!valid || saving) return
@@ -89,6 +102,16 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
         tag: activeTag as Macro['tag'],
         prompt: trimmedPrompt,
         projects,
+        ...(hadInputs || inputs.length > 0
+          ? {
+              inputs: inputs.map((i) => ({
+                ...i,
+                label: i.label.trim() || i.name,
+                required: i.required === true,
+                ...(i.default ? { default: i.default } : {}),
+              })),
+            }
+          : {}),
       })
       toast.info(macro ? `Macro "${trimmedLabel}" updated` : `Macro "${trimmedLabel}" saved`)
       onClose()
@@ -164,6 +187,77 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
           placeholder="What should the new session do first?"
           onChange={(e) => setPrompt(e.target.value)}
         />
+      </div>
+
+      {placeholders.length > 0 && (
+        <div data-testid="macro-placeholders" className="flex flex-wrap gap-1 text-[11px] text-fg-dim">
+          {placeholders.map((n) =>
+            declared.has(n) ? (
+              <code key={n}>{`{{${n}}}`}</code>
+            ) : (
+              <code key={n} data-testid="macro-undeclared-placeholder" className="text-amber-500">
+                {`{{${n}}}`} (no input)
+              </code>
+            ),
+          )}
+        </div>
+      )}
+
+      <div data-testid="macro-inputs" className="flex flex-col gap-1">
+        <span className={LABEL}>Inputs</span>
+        {inputs.map((row, idx) => (
+          <div key={idx} data-testid="macro-input-row" className="flex flex-col gap-1 rounded-md border border-line p-1.5">
+            <input
+              data-testid="macro-input-name"
+              className={FIELD}
+              value={row.name}
+              placeholder="name (e.g. stream)"
+              aria-invalid={!INPUT_NAME_RE.test(row.name)}
+              onChange={(e) => patchInput(idx, { name: e.target.value })}
+            />
+            <input
+              data-testid="macro-input-label"
+              className={FIELD}
+              value={row.label}
+              placeholder="label"
+              onChange={(e) => patchInput(idx, { label: e.target.value })}
+            />
+            <input
+              data-testid="macro-input-default"
+              className={FIELD}
+              value={row.default ?? ''}
+              placeholder="default"
+              onChange={(e) => patchInput(idx, { default: e.target.value })}
+            />
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-1.5 text-[11.5px] text-fg-dim">
+                <input
+                  type="checkbox"
+                  data-testid="macro-input-required"
+                  checked={row.required === true}
+                  onChange={(e) => patchInput(idx, { required: e.target.checked })}
+                />
+                Required
+              </label>
+              <button
+                type="button"
+                data-testid="macro-input-remove"
+                onClick={() => setInputs((rows) => rows.filter((_, i) => i !== idx))}
+                className="text-[11.5px] font-semibold text-fg-dim hover:text-fg"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        ))}
+        <button
+          type="button"
+          data-testid="macro-input-add"
+          onClick={() => setInputs((rows) => [...rows, { name: '', label: '' }])}
+          className="self-start rounded-md border border-line bg-bg px-2 py-0.5 text-[11.5px] font-semibold text-fg-dim hover:text-fg"
+        >
+          Add input
+        </button>
       </div>
 
       <label className="flex items-center gap-1.5 text-[11.5px] text-fg-dim">

@@ -3,7 +3,7 @@
  * the scheduler MCP, next PRD) can list and create/update a HOT KEYS macro
  * for its own project, through the existing macroLibrary.cjs store:
  *   GET  /admin/macros?cwd=…                          -> { ok, macros }
- *   POST /admin/macros/save  {cwd, id?, label, agentName, tag, prompt}
+ *   POST /admin/macros/save  {cwd, id?, label, agentName, tag, prompt, inputs?}
  *
  * cwd resolution matches projectHomeAdminRoutes.cjs's resolveCwd exactly
  * (reused, not copied). A create always stores `projects: [resolvedCwd]`,
@@ -69,6 +69,7 @@ function saveHandler(onChanged, libOpts) {
         agentName: body.agentName,
         tag: body.tag,
         prompt: body.prompt,
+        inputs: body.inputs,
       });
     } catch (e) {
       sendJson(res, 400, { ok: false, error: e?.issues?.[0]?.message ?? e?.message ?? 'invalid payload' });

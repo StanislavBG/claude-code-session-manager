@@ -32,6 +32,7 @@ const config = require('./config.cjs');
 
 const { MEMORY_SLUG_RE: SLUG_RE } = require('./lib/memorySlug.cjs');
 const { scoreMemories } = require('./lib/memoryStale.cjs');
+const { makeRefResolver, listTrackedFiles } = require('./lib/memoryRefResolve.cjs');
 const { addIndexLine, removeIndexLines, indexHealth } = require('./lib/memoryIndex.cjs');
 const {
   resolveWorkspaceMemoryDir,
@@ -318,13 +319,24 @@ async function stale({ workspace, cwd, agent }) {
       baseDir = null;
     }
   }
-  const existsPath = baseDir
-    ? (relPath) => {
-        const full = path.resolve(baseDir, relPath);
-        if (full !== baseDir && !full.startsWith(baseDir + path.sep)) return false;
-        return fs.existsSync(full);
+  let existsPath = () => true;
+  if (baseDir) {
+    const resolveRef = makeRefResolver({ cwd: baseDir, trackedFiles: await listTrackedFiles(baseDir) });
+    existsPath = (relPath, roots = []) => {
+      const full = path.resolve(baseDir, relPath);
+      if (full !== baseDir && !full.startsWith(baseDir + path.sep)) return false;
+      const safeRoots = [];
+      for (const root of roots) {
+        try {
+          // Validate the expanded form so `~/x` is checked against the home boundary too.
+          const expanded = root === '~' || root.startsWith('~/') ? path.join(os.homedir(), root.slice(1)) : root;
+          config.validatePath(expanded);
+          safeRoots.push(root);
+        } catch { /* skip an out-of-bounds root */ }
       }
-    : () => true;
+      return resolveRef(relPath, safeRoots);
+    };
+  }
 
   const entries = [];
   for (const name of names) {

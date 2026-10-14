@@ -80,6 +80,22 @@ test('write/read/list round-trip in a not-yet-existing agent dir', async () => {
   assert.equal(l1.autoMemoryEnabled, true);
 });
 
+test('stale(): tracked-file suffix refs resolve; missing refs are stale', async () => {
+  fs.mkdirSync(path.join(proj, 'src', 'renderer', 'lib'), { recursive: true });
+  fs.writeFileSync(path.join(proj, 'src', 'renderer', 'lib', 'x.ts'), 'export {};');
+  execFileSync('git', ['add', 'src/renderer/lib/x.ts'], { cwd: proj });
+  const { dir } = await tool.resolveDir({ cwd: proj });
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'ok.md'), 'See `lib/x.ts` for the helper.');
+  fs.writeFileSync(path.join(dir, 'dead.md'), 'See `nope/missing.ts` for details.');
+  const r = await tool.stale({ cwd: proj });
+  assert.equal(r.error, null);
+  const byName = Object.fromEntries(r.entries.map((e) => [e.name, e]));
+  assert.equal(byName['ok.md'].deadRefs.length, 0);
+  assert.equal(byName['dead.md'].deadRefs.length, 1);
+  assert.equal(byName['dead.md'].stale, true);
+});
+
 test('memory:agents lists user + project agents with memory scope', async () => {
   const { agents } = await tool.agents({ cwd: proj });
   const byName = Object.fromEntries(agents.map((a) => [a.name, a]));

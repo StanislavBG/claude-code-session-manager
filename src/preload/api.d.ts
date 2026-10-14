@@ -259,6 +259,15 @@ export interface McpCatalogResult {
  *  same concept, not a free-form string list. */
 export type AgentPersonaTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder';
 
+/** One declared `{{name}}` argument of a macro prompt (macroLibrary.cjs `MacroInputSchema`). */
+export interface MacroInput {
+  name: string;
+  label: string;
+  default?: string;
+  required?: boolean;
+  options?: string[];
+}
+
 /** One user-defined sidebar HOT KEYS macro (macroLibrary.cjs). `projects` = absolute cwds or `'*'` (every project). */
 export interface Macro {
   id: string;
@@ -275,6 +284,7 @@ export interface Macro {
   builtinVersion?: number;
   createdAt: string;
   updatedAt: string;
+  inputs?: MacroInput[];
 }
 
 /** Omit `id` to create; set it to update an existing macro. */
@@ -286,6 +296,8 @@ export interface MacroSaveInput {
   prompt: string;
   projects?: string[];
   surface?: 'sessions' | 'project-home';
+  /** Omitted keeps the stored list on update; `[]` clears it. */
+  inputs?: MacroInput[];
 }
 
 /** One global `~/.claude/agents/<name>.md` persona, per the Agent Library nav page. */

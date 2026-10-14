@@ -306,3 +306,54 @@ test('real BUILTIN_MACROS seed as expected', async () => {
   const projectHome = listed.find((m) => m.id === 'builtin-project-home');
   expect(projectHome).toMatchObject({ label: 'Project Home', agentName: 'project-home-builder', tag: 'project-home-builder', surface: 'project-home' });
 });
+
+// ── inputs ──────────────────────────────────────────────────────────────────
+
+const withInputs = (o = {}) => base({
+  prompt: 'Run stream={{stream}}',
+  inputs: [{ name: 'stream', label: 'Stream', default: 'education-veggies' }],
+  ...o,
+});
+
+test('inputs: create round-trips through listMacros; absent when not given', async () => {
+  const created = await lib.saveMacro(withInputs(), opts);
+  expect(created.inputs).toEqual([{ name: 'stream', label: 'Stream', default: 'education-veggies' }]);
+  expect(await lib.listMacros(opts)).toEqual([created]);
+  const plain = await lib.saveMacro(base(), opts);
+  expect('inputs' in plain).toBe(false);
+});
+
+test('inputs: update with inputs omitted preserves them; [] clears them', async () => {
+  const created = await lib.saveMacro(withInputs(), opts);
+  const kept = await lib.saveMacro({ ...base({ label: 'Renamed', prompt: 'Run stream={{stream}}' }), id: created.id }, opts);
+  expect(kept.inputs).toEqual(created.inputs);
+  const cleared = await lib.saveMacro({ ...base({ prompt: 'No args' }), id: created.id, inputs: [] }, opts);
+  expect('inputs' in cleared).toBe(false);
+  expect('inputs' in (await lib.listMacros(opts))[0]).toBe(false);
+});
+
+test('inputs: undeclared placeholder rejected, naming it', async () => {
+  await expect(lib.saveMacro(withInputs({ prompt: 'a {{stream}} b {{other}}' }), opts)).rejects.toThrow(/other/);
+});
+
+test('inputs: duplicate name rejected', async () => {
+  const dup = [{ name: 'stream', label: 'A' }, { name: 'stream', label: 'B' }];
+  await expect(lib.saveMacro(withInputs({ inputs: dup }), opts)).rejects.toThrow(/duplicate/);
+});
+
+test('inputs: default outside options rejected', async () => {
+  const bad = [{ name: 'stream', label: 'S', default: 'x', options: ['a', 'b'] }];
+  await expect(lib.saveMacro(withInputs({ inputs: bad }), opts)).rejects.toThrow(/options/);
+});
+
+test('inputs: stored legacy macro with literal {{x}} and no inputs still lists', async () => {
+  const now = new Date().toISOString();
+  const legacy = {
+    id: 'legacy', label: 'Legacy', agentName: 'builder', tag: 'build',
+    prompt: 'literal {{x}} here', projects: ['/work/a'], surface: 'sessions',
+    createdAt: now, updatedAt: now,
+  };
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, macros: [legacy] }));
+  const listed = await lib.listMacros(opts);
+  expect(listed.map((m) => m.id)).toEqual(['legacy']);
+});

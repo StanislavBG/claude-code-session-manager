@@ -60,6 +60,39 @@ const MacroProjectEntrySchema = z.union([z.literal(ALL_PROJECTS), AbsolutePathSc
 const MacroProjectsSchema = z.array(MacroProjectEntrySchema).max(200);
 const MacroSurfaceSchema = z.enum(['sessions', 'project-home']);
 
+const MACRO_INPUT_MAX_LEN = 500;
+const MACRO_PLACEHOLDER_RE = /\{\{\s*([a-z][a-z0-9_]{0,31})\s*\}\}/g;
+
+const MacroInputSchema = z.object({
+  name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/, 'invalid input name'),
+  label: z.string().trim().min(1).max(60),
+  default: z.string().max(MACRO_INPUT_MAX_LEN).optional(),
+  required: z.boolean().optional(),
+  options: z.array(z.string().min(1).max(MACRO_INPUT_MAX_LEN)).min(1).max(20).optional(),
+});
+const MacroInputsSchema = z.array(MacroInputSchema).max(10);
+
+/** Cross-field checks; a no-op when `inputs` is absent/empty so legacy literal `{{x}}` prompts still load. */
+function refineInputs(value, ctx) {
+  if (!value.inputs || value.inputs.length === 0) return;
+  const seen = new Set();
+  value.inputs.forEach((input, i) => {
+    if (seen.has(input.name)) {
+      ctx.addIssue({ code: 'custom', path: ['inputs', i, 'name'], message: `duplicate input name: ${input.name}` });
+    }
+    seen.add(input.name);
+    if (input.default !== undefined && input.options && !input.options.includes(input.default)) {
+      ctx.addIssue({ code: 'custom', path: ['inputs', i, 'default'], message: `default for "${input.name}" is not one of its options` });
+    }
+  });
+  const re = new RegExp(MACRO_PLACEHOLDER_RE.source, 'g');
+  for (const m of value.prompt.matchAll(re)) {
+    if (!seen.has(m[1])) {
+      ctx.addIssue({ code: 'custom', path: ['prompt'], message: `prompt placeholder {{${m[1]}}} is not declared in inputs` });
+    }
+  }
+}
+
 const MacroSchema = z.object({
   id: MacroIdSchema,
   label: MacroLabelSchema,
@@ -72,7 +105,8 @@ const MacroSchema = z.object({
   builtinVersion: z.number().int().optional(),
   createdAt: z.string().min(1).max(64),
   updatedAt: z.string().min(1).max(64),
-});
+  inputs: MacroInputsSchema.optional(),
+}).superRefine(refineInputs);
 
 const MacroSaveSchema = z.object({
   id: MacroIdSchema.optional(),
@@ -85,7 +119,9 @@ const MacroSaveSchema = z.object({
   // wipe its visibility back to no projects. `undefined` on create means [].
   projects: MacroProjectsSchema.optional(),
   surface: MacroSurfaceSchema.optional(),
-});
+  // Omitted keeps the stored list on update; `[]` clears it.
+  inputs: MacroInputsSchema.optional(),
+}).superRefine(refineInputs);
 
 const MacroDeleteSchema = z.object({ id: MacroIdSchema });
 
@@ -399,6 +435,13 @@ async function saveMacro(input, opts = {}) {
         surface: parsed.surface ?? macros[idx].surface,
         updatedAt: now,
       };
+      if (parsed.inputs === undefined) {
+        // keep whatever the spread carried over
+      } else if (parsed.inputs.length === 0) {
+        delete saved.inputs;
+      } else {
+        saved.inputs = parsed.inputs;
+      }
       macros[idx] = saved;
     } else {
       const projects = parsed.projects !== undefined ? normalizeProjects(parsed.projects) : [];
@@ -413,6 +456,7 @@ async function saveMacro(input, opts = {}) {
         createdAt: now,
         updatedAt: now,
       };
+      if (parsed.inputs && parsed.inputs.length > 0) saved.inputs = parsed.inputs;
       macros.push(saved);
     }
     await writeStore(filePath, macros);
@@ -467,6 +511,9 @@ async function setMacroProject(input, opts = {}) {
 
 module.exports = {
   ALL_PROJECTS,
+  MACRO_INPUT_MAX_LEN,
+  MACRO_PLACEHOLDER_RE,
+  MacroInputSchema,
   MacroSchema,
   MacroSaveSchema,
   MacroDeleteSchema,

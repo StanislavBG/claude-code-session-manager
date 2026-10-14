@@ -1,0 +1,26 @@
+{
+  "listing": {
+    "detail": "A free desktop cockpit for Claude Code: sessions with a persona and a mission, a scheduler that waits out your token limit, and every setting in one window.",
+    "metric": "free",
+    "metricLabel": "app + manual",
+    "lang": "TypeScript",
+    "audience": "Developers who run Claude Code sessions every day.",
+    "talkingPoints": [
+      "Free desktop app for managing Claude Code CLI sessions.",
+      "Each session gets a persona and a mission.",
+      "Has a scheduler that waits out your token limit and resumes work.",
+      "Ships with a free Field Manual."
+    ],
+    "offering": "free-tool",
+    "pricing": "free",
+    "callToAction": "Try it: run npx claude-code-session-manager@latest, or grab the installer from GitHub Releases.",
+    "avoidClaims": [
+      "It is a hosted SaaS or cloud service. It is a local desktop app; sessions and files stay on the user's machine.",
+      "It is made, endorsed or supported by Anthropic. It is an independent, single-author open-source project.",
+      "It includes Claude access or replaces a Claude plan. Users need Claude Code installed and signed in with their own account.",
+      "It has a paid, pro or trial tier. The app and the Field Manual are both free (MIT).",
+      "It is a team or enterprise product with support or an SLA."
+    ],
+    "shareImage": "/projects/session-manager/og.png"
+  }
+}

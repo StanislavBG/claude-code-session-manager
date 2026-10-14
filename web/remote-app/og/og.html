@@ -1,0 +1,45 @@
+<!doctype html>
+<!-- Source of public/og.png — the listing.shareImage / bilko.run/projects hero. Render: node og/render-og.mjs -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+@font-face { font-family: Newsreader; font-weight: 700; src: url(../node_modules/@fontsource/newsreader/files/newsreader-latin-700-normal.woff2); }
+@font-face { font-family: Newsreader; font-weight: 700; font-style: italic; src: url(../node_modules/@fontsource/newsreader/files/newsreader-latin-700-italic.woff2); }
+@font-face { font-family: Geist; font-weight: 500; src: url(../node_modules/@fontsource/geist-sans/files/geist-sans-latin-500-normal.woff2); }
+@font-face { font-family: Geist; font-weight: 600; src: url(../node_modules/@fontsource/geist-sans/files/geist-sans-latin-600-normal.woff2); }
+@font-face { font-family: Plex; font-weight: 500; src: url(../node_modules/@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2); }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 1200px; height: 630px; overflow: hidden; }
+body {
+  background: #f4efe4;
+  background-image: radial-gradient(#d9cfbb 1.2px, transparent 1.2px);
+  background-size: 22px 22px;
+  font-family: Geist, sans-serif; color: #1d1a16; position: relative;
+}
+.copy { position: absolute; left: 100px; top: 72px; width: 500px; }
+.brand { display: flex; align-items: center; gap: 14px; font: 600 28px Geist; }
+.mark { width: 48px; height: 48px; border-radius: 10px; background: #b8401f; color: #fff;
+  display: grid; place-items: center; font: 700 30px Newsreader; box-shadow: 3px 3px 0 #1d1a16; }
+h1 { margin-top: 34px; font: 700 64px/1 Newsreader; letter-spacing: -1px; }
+h1 em { display: inline-block; margin-top: 6px; font-style: italic; font-size: 76px; color: #b8401f;
+  background: linear-gradient(transparent 62%, #f2b844 62%, #f2b844 90%, transparent 90%); padding-right: 6px; }
+.promise { margin-top: 26px; font: 500 26px/1.3 Geist; color: #3d362d; }
+.cmd { position: absolute; left: 100px; bottom: 66px; display: flex; align-items: center; gap: 16px; }
+.pill { background: #1d1a16; color: #f2b844; font: 500 20px Plex; padding: 13px 22px; border-radius: 12px; }
+.free { background: #2f5d45; color: #fff; font: 600 20px Geist; padding: 12px 20px; border-radius: 999px; transform: rotate(-4deg); }
+.shot { position: absolute; right: 64px; top: 150px; width: 500px; height: 292px; border-radius: 14px; overflow: hidden;
+  border: 3px solid #1d1a16; box-shadow: 10px 10px 0 #1d1a16; transform: rotate(2deg); background: #e9e1d0; }
+.shot img { position: absolute; width: 720px; left: -148px; top: -60px; }
+</style>
+</head>
+<body>
+  <div class="copy">
+    <div class="brand"><div class="mark">S</div>Session Manager</div>
+    <h1>Claude Code,<br><em>supercharged.</em></h1>
+    <p class="promise">A free desktop cockpit: sessions, a scheduler that waits out your token limit, every setting in one window.</p>
+  </div>
+  <div class="shot"><img src="app-window.jpg" alt=""></div>
+  <div class="cmd"><span class="pill">$ npx claude-code-session-manager</span><span class="free">Free</span></div>
+</body>
+</html>

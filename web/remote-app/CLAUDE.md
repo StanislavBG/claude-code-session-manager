@@ -49,3 +49,8 @@ Phone → desktop commands over the relay (stateless; drill down projects → se
   `web-remote/relay/` is dead — see [`web-remote/CLAUDE.md`](../../web-remote/CLAUDE.md).
   Never decommission the deployed relay (root `CLAUDE.md`).
 - `dist/` and `node_modules/` are build output — never hand-edit.
+
+## Share image
+
+`public/og.png` (1200x630) is the bilko.run `listing.shareImage` — X preview + `/projects` hero.
+Source `og/og.html`; re-render with `node og/render-og.mjs`. Declared in root `bilko.listing.json`.

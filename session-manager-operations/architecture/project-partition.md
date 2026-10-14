@@ -36,6 +36,7 @@ Domain concepts (TAB/EPIC/PRD, single-writer law) are defined in
 | `.mcp.json` | AGENT LAYER | Empty today. The scheduler MCP server (`scripts/scheduler-mcp-server.cjs`) is registered at user scope in `~/.claude.json` (installed by `scripts/install-scheduler-mcp-user-scope.sh`), not here. |
 | `web/` | WEB PRESENCE | Physical home of the partition's producers (`project-pages/`, `manual/`, `remote-app/`) — see [`web/README.md`](../../web/README.md). |
 | `web-remote/` | WEB PRESENCE | `app/` moved to `web/remote-app/` (PRD 1184). See [web-remote/CLAUDE.md](../../web-remote/CLAUDE.md) — only `relay/` (dead) remains here. |
+| `bilko.listing.json` | WEB PRESENCE | bilko.run card listing (full `listing` object, incl. `shareImage` → `web/remote-app/public/og.png`); synced into the Bilko registry on every `publish_static_project`. |
 | `session-manager-operations/` | OPERATIONS STATE | See namespace table below. |
 | `README.md` | DESKTOP HARNESS | Also shipped in the npm `files` array as end-user install docs. |
 | `node_modules/`, `.git/` | *(excluded)* | Dependency cache / VCS internals — not partition members. |

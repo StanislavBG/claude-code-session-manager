@@ -3065,7 +3065,15 @@ async function notifyOriginatingTab(job, {
 } = {}) {
   try {
     const prd = await resolveNotifyPrd(job, parsePrdRaw);
-    const message = `PRD ${job.slug} finished: ${job.status}. Check Scheduler for details.`;
+    let message = `PRD ${job.slug} finished: ${job.status}. Check Scheduler for details.`;
+    if (job.verifierVerdict === 'pass_preexisting_gate_red') {
+      const failures = Array.isArray(job.preexistingGateFailures) ? job.preexistingGateFailures : [];
+      const shown = failures.slice(0, 10).join('; ');
+      const more = failures.length > 10 ? ` (+${failures.length - 10} more)` : '';
+      message = `PRD ${job.slug} completed; the gate was already red before this PRD`
+        + (failures.length ? `. Pre-existing failures: ${shown}${more}` : '')
+        + '. Check Scheduler for details.';
+    }
 
     // The EPIC this check-in belongs to. Deliberately does NOT consider
     // `sourceTabId` — that is a Terminal tab id, not an Epic id, and
@@ -3392,6 +3400,7 @@ async function flushDueReviewNotices({
             prdSlug: group.jobs[0].slug,
             outcome: 'needs_review',
             validation: 'unvalidated',
+            allowInactive: true,
           });
           outcome = typeof result === 'boolean' ? { ok: result, reason: result ? undefined : 'refused' } : result;
         } catch (e) {

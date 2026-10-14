@@ -84,7 +84,7 @@ async function appendResponseEventWithReason(cwd, sourcePromptId, text, meta = {
       const data = result.data;
       const session = data.sessions && data.sessions[sourcePromptId];
       if (!session) return { ok: false, reason: 'no-session' };
-      if (session.status !== 'active') return { ok: false, reason: 'not-active' };
+      if (session.status !== 'active' && !(meta && meta.allowInactive === true)) return { ok: false, reason: 'not-active' };
       const events = (data.events && data.events[sourcePromptId]) || [];
       const tail = events.length > 0 ? events[events.length - 1] : null;
       if (!tail) return { ok: false, reason: 'no-events' };

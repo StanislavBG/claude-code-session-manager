@@ -894,6 +894,13 @@ async function createWorktree({ kind, cwd, key, fromRef }) {
     carriedPaths = carry.paths;
   }
 
+  if (process.env.SM_WORKTREE_DEP_LINK_DISABLE !== '1') {
+    try {
+      const { linked } = await require('./worktreeDeps.cjs').linkDependencyDirs({ mainCwd: cwd, worktreeCwd: dir });
+      if (linked.length) console.log(`[gitWorktree] linked deps: ${linked.join(', ')} -> ${dir}`);
+    } catch { /* best-effort — never fails worktree creation */ }
+  }
+
   registeredCheckouts.set(dir, { kind, branch });
   const result = { ok: true, dir, branch, baseCwd: cwd, carriedPaths, baseBranch };
   if (resolvedFromRefSha) result.forkedFrom = fromRef;

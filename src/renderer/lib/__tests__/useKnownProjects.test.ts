@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { useKnownProjects } from '../useKnownProjects'
+import { buildWorktreeOwnerMap, useKnownProjects } from '../useKnownProjects'
 
 const ROOT = '/home/u/.claude/projects'
 const file = (dir: string, name: string, mtimeMs: number, size = 10) => ({
@@ -60,5 +60,14 @@ describe('useKnownProjects recentSessions', () => {
     // after those belong to cwd resolution, which is a separate stage.
     act(() => root.unmount())
     expect(listDir.mock.calls.slice(0, 3).map((c) => c[0])).toEqual([ROOT, a, b])
+  })
+})
+
+describe('buildWorktreeOwnerMap', () => {
+  it('maps sha1(cwd) hex sliced to 16 chars to the cwd', async () => {
+    const a = '/home/bilko/Projects/social-signals-trader'
+    const b = '/home/bilko/Projects/session-manager'
+    expect((await buildWorktreeOwnerMap([a])).get('ddb972d7a48ee4b5')).toBe(a)
+    expect((await buildWorktreeOwnerMap([b])).get('fd076eb59c21f399')).toBe(b)
   })
 })

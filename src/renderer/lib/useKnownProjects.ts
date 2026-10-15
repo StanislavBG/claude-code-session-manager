@@ -2,7 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSessions } from '../state/sessions'
 import { enrichProject, type ProjectDetails } from './projectEnrichment'
 import { useHomeDir } from './useHomeDir'
-import { aggregateProjectsByCwd, normalizeCwd, type ProjectAggregate } from './knownProjectAggregate'
+import {
+  aggregateProjectsByCwd,
+  countUnresolvedWorktreeFolders,
+  normalizeCwd,
+  ownerCandidateCwds,
+  type ProjectAggregate,
+} from './knownProjectAggregate'
 import type { DirEntry } from '../../preload/api'
 
 export interface ProjectRow {
@@ -96,6 +102,45 @@ function notify() {
 function setState(patch: Partial<KnownProjectsState>) {
   state = { ...state, ...patch }
   notify()
+}
+
+/**
+ * Maps `sha1(cwd).hex.slice(0, 16)` → cwd — the same hash the main process uses
+ * to name `session-manager-{job,epic}-worktrees/<hash>/` dirs — so a worktree
+ * cwd can be folded into the project that owns it.
+ */
+export async function buildWorktreeOwnerMap(cwds: readonly string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  const enc = new TextEncoder()
+  await Promise.all(
+    cwds.map(async (cwd) => {
+      const digest = await globalThis.crypto.subtle.digest('SHA-1', enc.encode(cwd))
+      const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+      out.set(hex.slice(0, 16), cwd)
+    }),
+  )
+  return out
+}
+
+// Shared owner map, keyed by the joined candidate list so it is recomputed only
+// when the candidates change. Null until the first resolve: worktree rows are
+// then absent rather than flashing in.
+let ownerMap: ReadonlyMap<string, string> | null = null
+let ownerMapKey: string | null = null
+
+function ensureOwnerMap(candidates: string[]): void {
+  const key = candidates.join('\n')
+  if (key === ownerMapKey) return
+  ownerMapKey = key
+  void buildWorktreeOwnerMap(candidates)
+    .then((map) => {
+      if (key !== ownerMapKey) return
+      ownerMap = map
+      notify()
+    })
+    .catch((err) => {
+      console.error('[useKnownProjects] owner map failed:', err)
+    })
 }
 
 const SCAN_CONCURRENCY = 6
@@ -235,7 +280,19 @@ export function useKnownProjects() {
   // projects" surface consumes THIS, not `rows` (which is one entry per
   // ~/.claude/projects transcript folder and is only useful for folder-level
   // bookkeeping such as archiving).
-  const projects = useMemo(() => aggregateProjectsByCwd(rows, enriched), [rows, enriched])
+  const candidates = useMemo(() => ownerCandidateCwds(rows, enriched), [rows, enriched])
+  useEffect(() => { ensureOwnerMap(candidates) }, [candidates])
+  const ownerByHash = ownerMap ?? new Map<string, string>()
+  const projects = useMemo(
+    () => aggregateProjectsByCwd(rows, enriched, ownerByHash),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, enriched, ownerMap],
+  )
+  const unresolvedWorktreeFolders = useMemo(
+    () => countUnresolvedWorktreeFolders(rows, enriched, ownerByHash),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, enriched, ownerMap],
+  )
 
   const openProject = async (cwd: string) => {
     const id = crypto.randomUUID()
@@ -293,5 +350,5 @@ export function useKnownProjects() {
     return last
   }
 
-  return { rows, recentSessions, enriched, projects, loading, resolving, openProject, openInSession, archiveProject, archiveProjectByCwd }
+  return { rows, recentSessions, enriched, projects, unresolvedWorktreeFolders, loading, resolving, openProject, openInSession, archiveProject, archiveProjectByCwd }
 }

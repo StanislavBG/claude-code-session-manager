@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { aggregateProjectsByCwd, normalizeCwd, projectNameFromCwd } from '../knownProjectAggregate'
+import {
+  aggregateProjectsByCwd,
+  countUnresolvedWorktreeFolders,
+  normalizeCwd,
+  ownerCandidateCwds,
+  parseManagedWorktreeCwd,
+  projectNameFromCwd,
+} from '../knownProjectAggregate'
 import type { ProjectRow, EnrichmentState } from '../useKnownProjects'
 
 function row(overrides: Partial<ProjectRow> = {}): ProjectRow {
@@ -115,5 +122,84 @@ describe('aggregateProjectsByCwd', () => {
 
   it('handles zero rows', () => {
     expect(aggregateProjectsByCwd([], {})).toEqual([])
+  })
+})
+
+const H = 'a1b2c3d4e5f60718'
+const JOB = `/tmp/session-manager-job-worktrees/${H}/4169-fix-event-pricing`
+const EPIC = `/home/bilko/.local-state/session-manager/session-manager-epic-worktrees/${H}/abc123`
+const OWNER = '/home/bilko/Projects/foo'
+
+describe('parseManagedWorktreeCwd', () => {
+  it('recognises job and epic worktrees on both bases, incl. subdirectories', () => {
+    expect(parseManagedWorktreeCwd(JOB)).toEqual({ kind: 'job', hash: H })
+    expect(parseManagedWorktreeCwd(EPIC)).toEqual({ kind: 'epic', hash: H })
+    expect(parseManagedWorktreeCwd(`${JOB}/src/renderer`)).toEqual({ kind: 'job', hash: H })
+  })
+
+  it('returns null for ordinary paths and malformed hashes', () => {
+    expect(parseManagedWorktreeCwd(OWNER)).toBeNull()
+    expect(parseManagedWorktreeCwd('/tmp/session-manager-job-worktrees/short/key')).toBeNull()
+    expect(parseManagedWorktreeCwd(`/tmp/session-manager-job-worktrees/${H}0/key`)).toBeNull()
+    expect(parseManagedWorktreeCwd(`/tmp/session-manager-job-worktrees/${H.toUpperCase()}/key`)).toBeNull()
+    expect(parseManagedWorktreeCwd(`/tmp/session-manager-job-worktrees/${H}`)).toBeNull()
+  })
+})
+
+describe('worktree folding', () => {
+  const owners = new Map([[H, OWNER]])
+
+  it('folds a worktree row into the owner project, keeping the main folder as representative', () => {
+    const rows = [
+      row({ encoded: 'main', sessionCount: 2, sizeBytes: 10, lastSession: 100 }),
+      row({ encoded: 'wt', sessionCount: 5, sizeBytes: 90, lastSession: 900 }),
+    ]
+    const out = aggregateProjectsByCwd(rows, { main: e(OWNER, { lastBranch: 'main' }), wt: e(JOB, { lastBranch: 'sm-job/x' }) }, owners)
+    expect(out).toHaveLength(1)
+    expect(out[0].cwd).toBe(OWNER)
+    expect(out[0].sessionCount).toBe(7)
+    expect(out[0].sizeBytes).toBe(100)
+    expect(out[0].lastSession).toBe(900)
+    expect(out[0].encodedIds.sort()).toEqual(['main', 'wt'])
+    expect(out[0].encoded).toBe('main')
+    expect(out[0].details.lastBranch).toBe('main')
+  })
+
+  it('keeps the main folder representative regardless of row order', () => {
+    const rows = [
+      row({ encoded: 'wt', lastSession: 900 }),
+      row({ encoded: 'main', lastSession: 100 }),
+    ]
+    const out = aggregateProjectsByCwd(rows, { main: e(OWNER), wt: e(EPIC) }, owners)
+    expect(out).toHaveLength(1)
+    expect(out[0].encoded).toBe('main')
+    expect(out[0].lastSession).toBe(900)
+  })
+
+  it('creates the owner row from worktree rows alone, named after the owner cwd', () => {
+    const out = aggregateProjectsByCwd([row({ encoded: 'wt' })], { wt: e(JOB) }, owners)
+    expect(out).toHaveLength(1)
+    expect(out[0].cwd).toBe(OWNER)
+    expect(out[0].name).toBe('foo')
+    expect(out[0].encoded).not.toBe('wt')
+    expect(out[0].details).toEqual({})
+  })
+
+  it('drops an unresolved worktree (or any worktree without a map) and counts it', () => {
+    const rows = [row({ encoded: 'wt' }), row({ encoded: 'main' })]
+    const en = { wt: e(JOB), main: e(OWNER) }
+    expect(aggregateProjectsByCwd(rows, en).map((p) => p.cwd)).toEqual([OWNER])
+    expect(aggregateProjectsByCwd(rows, en, new Map()).map((p) => p.cwd)).toEqual([OWNER])
+    expect(countUnresolvedWorktreeFolders(rows, en)).toBe(1)
+    expect(countUnresolvedWorktreeFolders(rows, en, new Map())).toBe(1)
+    expect(countUnresolvedWorktreeFolders(rows, en, owners)).toBe(0)
+  })
+})
+
+describe('ownerCandidateCwds', () => {
+  it('lists unique normalized non-worktree cwds only', () => {
+    const rows = [row({ encoded: 'a' }), row({ encoded: 'b' }), row({ encoded: 'w' }), row({ encoded: 'n' })]
+    const out = ownerCandidateCwds(rows, { a: e(OWNER), b: e(`${OWNER}/`), w: e(JOB), n: e(null) })
+    expect(out).toEqual([OWNER])
   })
 })

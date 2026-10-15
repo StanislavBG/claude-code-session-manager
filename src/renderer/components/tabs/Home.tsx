@@ -41,6 +41,8 @@ import { runSchedulerNow } from '../../lib/schedulerActions'
 import { projectColorFor } from '../../lib/projectColor'
 import { openProjectTab } from '../../lib/homeOpenProject'
 import { useSessionSlots, setSessionSlots, type SlotSnapshot } from '../../lib/useSessionSlots'
+import { usePagedList } from '../../lib/usePagedList'
+import { Pager } from '../ui/Pager'
 import { UsageMeters } from './home/UsageMeters'
 import { HomeSessionDrawer, type DrawerKeyVal, type DrawerTailLine } from './home/HomeSessionDrawer'
 import { NewEpicProjectDrawer } from './home/NewEpicProjectDrawer'
@@ -580,10 +582,8 @@ function NeedsButton({
 // ────────────────────────────────────────────────────────────────────
 export function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
   const jobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
-  const pending = useMemo(
-    () => jobs.filter((j) => j.status === 'pending').slice(0, 4),
-    [jobs],
-  )
+  const pending = useMemo(() => jobs.filter((j) => j.status === 'pending'), [jobs])
+  const paged = usePagedList(pending, 5)
   const [openSlug, setOpenSlug] = useState<string | null>(null)
 
   const runNow = () => {
@@ -595,7 +595,7 @@ export function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void })
     <div className="bg-bg-hi border border-line rounded-[14px] px-4 py-[14px]">
       <div className="flex items-center justify-between mb-2.5">
         <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint">
-          Queued
+          Queued{pending.length > 0 ? ` · ${pending.length}` : ''}
         </div>
         <button
           onClick={() => onNavigate?.('scheduler')}
@@ -608,7 +608,7 @@ export function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void })
         <div className="text-[13px] text-fg-faint py-1">Nothing pending.</div>
       ) : (
         <div className="space-y-2.5">
-          {pending.map((q) => (
+          {paged.pageItems.map((q) => (
             <div key={q.slug} className="relative">
               <button
                 onClick={() => setOpenSlug(openSlug === q.slug ? null : q.slug)}
@@ -632,6 +632,14 @@ export function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void })
           ))}
         </div>
       )}
+      <Pager
+        compact
+        testIdPrefix="home-queued-pager"
+        page={paged.page}
+        pageSize={paged.pageSize}
+        totalItems={paged.total}
+        onPageChange={paged.setPage}
+      />
     </div>
   )
 }
@@ -698,10 +706,12 @@ function BillingCard() {
 // Projects — compact list of known projects with live/activity chips.
 // Clicking a row activates the matching SessionTab, or opens one.
 // ────────────────────────────────────────────────────────────────────
-function ProjectsCard({ projectRows }: { projectRows: HomeProjectRow[] }) {
+export function ProjectsCard({ projectRows }: { projectRows: HomeProjectRow[] }) {
   const tabs = useSessions((s) => s.tabs)
   const addTab = useSessions((s) => s.addTab)
   const setActive = useSessions((s) => s.setActive)
+  const { unresolvedWorktreeFolders } = useKnownProjects()
+  const paged = usePagedList(projectRows, 8)
 
   const openProject = (cwd: string) => {
     openProjectTab(cwd, tabs, addTab, setActive)
@@ -719,7 +729,7 @@ function ProjectsCard({ projectRows }: { projectRows: HomeProjectRow[] }) {
         <div className="text-[13px] text-fg-faint py-2">No known projects yet.</div>
       ) : (
         <div className="space-y-1">
-          {projectRows.map((p) => (
+          {paged.pageItems.map((p) => (
             <button
               key={p.encoded}
               onClick={() => openProject(p.cwd)}
@@ -738,6 +748,19 @@ function ProjectsCard({ projectRows }: { projectRows: HomeProjectRow[] }) {
               )}
             </button>
           ))}
+        </div>
+      )}
+      <Pager
+        compact
+        testIdPrefix="home-projects-pager"
+        page={paged.page}
+        pageSize={paged.pageSize}
+        totalItems={paged.total}
+        onPageChange={paged.setPage}
+      />
+      {unresolvedWorktreeFolders > 0 && (
+        <div data-testid="home-projects-unresolved" className="mt-2 text-[11px] text-fg-faint">
+          {unresolvedWorktreeFolders} worktree folders not matched to a project
         </div>
       )}
     </div>

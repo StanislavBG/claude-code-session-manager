@@ -139,4 +139,28 @@ describe('QueuedCard', () => {
     })
     expect(document.querySelector('[data-testid="queue-job-popover"]')).toBeNull()
   })
+
+  it('pages 7 pending jobs: 5 visible, header count, pager, Next shows the rest', async () => {
+    const el = await mount()
+    const jobs = Array.from({ length: 7 }, (_, i) => ({
+      slug: `job-${i + 1}`, title: `Job title ${i + 1}`, status: 'pending', cwd: '/home/bilko/Projects/foo',
+    }))
+    await act(async () => {
+      useScheduleState.setState({
+        snapshot: { jobs, history: [], paused: null, concurrency: 3 } as never,
+        loaded: true,
+      })
+      await Promise.resolve()
+    })
+    const titles = () => Array.from(el.querySelectorAll('button')).filter((b) => b.textContent?.includes('Job title')).length
+    expect(titles()).toBe(5)
+    expect(el.textContent).toContain('Queued · 7')
+    expect(el.querySelector('[data-testid="home-queued-pager-range"]')!.textContent).toBe('1–5 of 7')
+    await act(async () => {
+      el.querySelector('[data-testid="home-queued-pager-next"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      await Promise.resolve()
+    })
+    expect(titles()).toBe(2)
+    expect(el.textContent).toContain('Job title 7')
+  })
 })

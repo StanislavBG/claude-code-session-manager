@@ -93,7 +93,7 @@ function HomeComponent({ onNavigate }: HomeProps) {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="mx-auto max-w-[1080px] px-[34px] py-[26px] text-fg">
+      <div className="mx-auto max-w-[1400px] px-[34px] py-[26px] text-fg">
         <HomeHeaderWithLegend
           greeting={greeting}
           projectCount={projectRows.length}
@@ -101,21 +101,32 @@ function HomeComponent({ onNavigate }: HomeProps) {
           onNavigate={onNavigate}
           onOpenNewEpic={() => setNewEpicOpen(true)}
         />
-        <div className="grid gap-[18px] mb-7" style={{ gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr) 220px' }}>
-          <BillingCard />
+        <div
+          data-testid="home-panel-grid"
+          className="grid gap-[18px] mb-7"
+          style={{ gridTemplateColumns: 'repeat(3, minmax(0,1fr))', gridTemplateRows: 'repeat(2, minmax(0, 300px))' }}
+        >
+          <div className="bg-bg-hi border border-line rounded-[14px] px-4 py-[14px] min-h-0 overflow-auto">
+            <BillingCard />
+          </div>
           <ProjectsCard projectRows={projectRows} />
           <QueuedCard onNavigate={onNavigate} />
+          <NeedsYouSection rows={needsRows} onNavigate={onNavigate} />
+          <ActiveSessionsCard onNavigate={onNavigate} />
+          <RecentSessionsCard onNavigate={onNavigate} />
         </div>
-        <NeedsYouSection rows={needsRows} onNavigate={onNavigate} />
-        <ActiveSessionsCard onNavigate={onNavigate} />
-        <RecentSessionsCard onNavigate={onNavigate} />
-        <HomeAgentTools />
-        <AgentsCard />
-        <DataModelCard onNavigate={onNavigate} />
-        {/* App-wide terminal theme + font size. Lives here, not in a gear
-         *  popover inside a Terminal pane, because it is machine-wide state —
-         *  see lib/terminalSettings.ts for exactly what it reaches. */}
-        <TerminalAppearanceCard />
+        <details data-testid="home-reference" className="mb-6">
+          <summary className="cursor-pointer font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint mb-3">
+            Reference &amp; appearance
+          </summary>
+          <HomeAgentTools />
+          <AgentsCard />
+          <DataModelCard onNavigate={onNavigate} />
+          {/* App-wide terminal theme + font size. Lives here, not in a gear
+           *  popover inside a Terminal pane, because it is machine-wide state —
+           *  see lib/terminalSettings.ts for exactly what it reaches. */}
+          <TerminalAppearanceCard />
+        </details>
       </div>
       <NewEpicProjectDrawer
         open={newEpicOpen}
@@ -479,9 +490,9 @@ export function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onN
   }
 
   return (
-    <section id="home-needs-you" className="mb-6 scroll-mt-4">
-      <div className="flex items-baseline justify-between mb-3">
-        <h2 className="m-0 font-serif text-[22px] font-medium">Needs you</h2>
+    <section id="home-needs-you" className="bg-bg-hi border border-line rounded-[14px] px-4 py-[14px] min-h-0 overflow-auto scroll-mt-4">
+      <div className="flex items-baseline justify-between gap-2 mb-2.5">
+        <h2 className="m-0 font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint font-normal">Needs you</h2>
         <span className="font-mono text-[12px] text-fg-faint">{rows.length ? `${rows.length} open` : 'all clear'}</span>
       </div>
       {rows.length === 0 && (
@@ -602,7 +613,7 @@ export function QueuedCard({ onNavigate }: { onNavigate?: (k: NavKey) => void })
   }
 
   return (
-    <div className="bg-bg-hi border border-line rounded-[14px] px-4 py-[14px]">
+    <div className="bg-bg-hi border border-line rounded-[14px] px-4 py-[14px] min-h-0 overflow-auto">
       <div className="flex items-center justify-between mb-2.5">
         <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint">
           Queued{pending.length > 0 ? ` · ${pending.length}` : ''}
@@ -731,7 +742,7 @@ export function ProjectsCard({ projectRows }: { projectRows: HomeProjectRow[] })
   }
 
   return (
-    <div className="bg-bg-hi border border-line rounded-[14px] px-4 py-[14px]">
+    <div className="bg-bg-hi border border-line rounded-[14px] px-4 py-[14px] min-h-0 overflow-auto">
       <div className="font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint mb-2.5">
         Projects
       </div>
@@ -836,9 +847,9 @@ export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
       ]
     : []
   return (
-    <section className="mb-6">
-      <div className="flex items-baseline justify-between mb-3">
-        <h2 className="m-0 font-serif text-[22px] font-medium">Recent sessions</h2>
+    <section className="bg-bg-hi border border-line rounded-[14px] px-4 py-[14px] min-h-0 overflow-auto">
+      <div className="flex items-baseline justify-between gap-2 mb-2.5">
+        <h2 className="m-0 font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint font-normal">Recent sessions</h2>
         <button
           onClick={() => onNavigate?.('history')}
           className="text-[13px] text-accent font-medium hover:underline"
@@ -846,7 +857,7 @@ export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
           See all history →
         </button>
       </div>
-      <div className="bg-bg-hi border border-line rounded-[14px] overflow-hidden">
+      <div className="overflow-hidden">
         {loading && rows.length === 0 && (
           <div className="px-[18px] py-6 text-[13px] text-fg-faint text-center">Reading transcripts…</div>
         )}
@@ -989,9 +1000,9 @@ export function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
     : []
 
   return (
-    <section className="mb-6">
-      <div className="flex items-baseline justify-between mb-3">
-        <h2 className="m-0 font-serif text-[22px] font-medium">Active sessions</h2>
+    <section className="bg-bg-hi border border-line rounded-[14px] px-4 py-[14px] min-h-0 overflow-auto">
+      <div className="flex items-baseline justify-between gap-2 mb-2.5">
+        <h2 className="m-0 font-mono text-[11px] uppercase tracking-[0.08em] text-fg-faint font-normal">Active sessions</h2>
         <span className="flex items-center gap-4">
           <span className="font-mono text-[12px] text-fg-faint">
             {inUse} of {total} slots in use

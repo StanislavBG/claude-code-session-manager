@@ -409,9 +409,11 @@ function HeroButton({ children, onClick, primary }: { children: ReactNode; onCli
 // ────────────────────────────────────────────────────────────────────
 // Needs you section — expandable rows, one card per real signal.
 // ────────────────────────────────────────────────────────────────────
-function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onNavigate?: (k: NavKey) => void }) {
+export function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onNavigate?: (k: NavKey) => void }) {
   const [openId, setOpenId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const paged = usePagedList(rows, 4)
+  const changePage = (p: number) => { setOpenId(null); paged.setPage(p) }
 
   const approve = (row: NeedsYouRow) => {
     if (!row.epicId || busyId) return
@@ -488,7 +490,7 @@ function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onNavigate
         </div>
       )}
       <div className="grid gap-[7px]">
-        {rows.map((row) => {
+        {paged.pageItems.map((row) => {
           const open = openId === row.id
           const tone =
             row.kind === 'job-failed' ? 'bg-accent'
@@ -543,6 +545,14 @@ function NeedsYouSection({ rows, onNavigate }: { rows: NeedsYouRow[]; onNavigate
           )
         })}
       </div>
+      <Pager
+        compact
+        testIdPrefix="home-needs-pager"
+        page={paged.page}
+        pageSize={paged.pageSize}
+        totalItems={paged.total}
+        onPageChange={changePage}
+      />
     </section>
   )
 }
@@ -793,7 +803,8 @@ const RECENT_SESSIONS_GRID = '92px minmax(0,1.2fr) minmax(0,1fr) 80px 74px 78px'
 
 export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) => void }) {
   const { projects, recentSessions, loading } = useKnownProjects()
-  const rows = recentSessions.slice(0, 5)
+  const paged = usePagedList(recentSessions, 5)
+  const rows = paged.pageItems
   const addTab = useSessions((s) => s.addTab)
   const sessions = usePromptSessions((s) => s.sessions)
   const [drawerRow, setDrawerRow] = useState<RecentRow | null>(null)
@@ -871,6 +882,16 @@ export function RecentSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
             </button>
           )
         })}
+        <div className="px-[18px]">
+          <Pager
+            compact
+            testIdPrefix="home-recent-pager"
+            page={paged.page}
+            pageSize={paged.pageSize}
+            totalItems={paged.total}
+            onPageChange={paged.setPage}
+          />
+        </div>
       </div>
       <HomeSessionDrawer
         open={drawerRow != null}
@@ -943,6 +964,8 @@ export function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
     [slots, runningJobs, chats, sessions],
   )
 
+  const paged = usePagedList(rows, 5)
+
   const open = (row: ActiveSessionRow) => {
     if (row.openTarget === 'scheduler') { onNavigate?.('scheduler'); return }
     if (row.openTarget === 'terminal' && row.epicId) {
@@ -981,7 +1004,7 @@ export function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
         <div className="text-[13px] text-fg-faint py-1">No headless Claude sessions running.</div>
       ) : (
         <div className="grid gap-2">
-          {rows.map((row) => (
+          {paged.pageItems.map((row) => (
             <button
               key={row.owner}
               onClick={() => setDrawerRow(row)}
@@ -1015,6 +1038,14 @@ export function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
           ))}
         </div>
       )}
+      <Pager
+        compact
+        testIdPrefix="home-active-pager"
+        page={paged.page}
+        pageSize={paged.pageSize}
+        totalItems={paged.total}
+        onPageChange={paged.setPage}
+      />
       <HomeSessionDrawer
         open={drawerRow != null}
         onClose={() => setDrawerRow(null)}

@@ -222,13 +222,15 @@ End every plan with exactly one validate PRD:
    itself, and a REFUTED PRD is still a successful validation.
 
 The validator prints `VALIDATION: <slug> VERIFIED` or `VALIDATION: <slug> REFUTED — <reason>`
-per PRD. While it is pending, the scheduler skips per-PRD validation prompts and in-run review —
-but only for PRDs that finish AFTER it is queued; queue the validate PRD right after the plan's
-first PRDs, not last, or the early finishers still each send a VALIDATION REQUEST.
+per PRD. Queue the validate PRD last: `dependsOn` accepts only slugs that already exist. The
+scheduler sends no per-PRD validation prompt. When the Epic has no pending or running PRD for
+`SM_EPIC_SETTLE_SECONDS` (default 120), it queues one `validate-sweep-*` validator for completed
+PRDs no validator checked, then sends one PLAN SETTLED digest. Several validators in one Epic
+are fine: each runs headless.
 
 If the API rejects `agentType: "validator"`, the persona is not installed: keep the plan
-queued, say so, ask the human to restart the app, and answer each VALIDATION REQUEST the
-scheduler sends here. Never write the record yourself.
+queued, say so, ask the human to restart the app, and validate the digest's Not validated list
+here. Never write the record yourself.
 
 ## Phase 2 — track to done
 
@@ -265,11 +267,10 @@ Rules:
       A `needs_human` notice carries a question for the human: relay it verbatim, then act on
       the answer with `scheduler_update_prd` + `scheduler_reset_job`. Why: the executor stopped
       on a step only the human can answer.
-   2. **A validator verdict.** Read its record. A `REFUTED` PRD, or a Critical or Important
-      finding, means a fix wave: one `behavior` or `wire` PRD per finding plus a new validate
-      PRD. Never fix inline.
-   3. **A VALIDATION REQUEST**, only when the plan has no validate PRD. Follow the steps in the
-      request.
+   2. **A PLAN SETTLED digest.** Read the validator records it names. A `REFUTED` PRD, or a
+      Critical or Important finding, means a fix wave: one `behavior` or `wire` PRD per finding
+      plus a new validate PRD. Never fix inline. A Not validated list means validate exactly
+      those PRDs here. All `VERIFIED` with nothing open means Done: write the final report.
 4. **Done** = the latest validator marked every PRD `VERIFIED`, no Critical or Important
    finding is open, and its record is committed. Never "done with caveats": a REFUTED PRD gets
    a fix wave or an explicit human decision to stop.

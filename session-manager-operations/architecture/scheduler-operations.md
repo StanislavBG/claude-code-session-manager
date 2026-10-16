@@ -157,6 +157,25 @@ the question as `humanQuestion`. `isNeedsHuman` (`scheduler/reviewLadder.cjs`) e
 rungs 1, 2, 4 and 6 (nothing the ladder does can answer it), and its review notice is due
 immediately — `selectDueReviewNotices` skips the hold window for it (§8).
 
+## 4a. Validation messaging into the Epic
+
+The scheduler never prompts the planning session per finished PRD. Instead:
+
+- **Settle trigger.** Every terminal (completed/failed) check-in arms a per-Epic in-memory
+  debounce timer (`SM_EPIC_SETTLE_SECONDS`, default 120). When it fires and the Epic has no
+  pending or running PRD, the Epic is settled.
+- **Sweep.** Completed non-validator PRDs since the last digest (24-hour horizon) with no
+  VERIFIED/REFUTED verdict get one scheduler-queued headless validator, slug
+  `validate-sweep-<yyyymmddhhmm>`, at most 25 PRDs each. Sweep guard: a slug already in a sweep
+  validator's `dependsOn` is never swept again.
+- **Digest.** When nothing is left to sweep, ONE chat prompt starting `PLAN SETTLED` lists
+  Verified, REFUTED, Failed, Parked and Not validated. A digest marker event (outcome `digest`,
+  `digestKey`) dedups a repeat for the same state. Not validated appears only when the validator
+  persona could not be queued or a sweep already ran without checking a slug.
+- **Kill switch.** `SM_EPIC_VALIDATION_DISABLE=1` turns all of it off.
+- **No boot-time sweep.** The timer is in memory; a boot sweep would message every active Epic at
+  once. needs_review grouped notices (§4) are unchanged.
+
 ## 5. The reap/orphan path and its git-evidence gate
 
 `reapDeadRunningJobs()` (`scheduler.cjs`) scans `queue.json` (never the in-memory
@@ -202,6 +221,7 @@ human clears it via Resume/Run now.
 | Every project shows paused (agent)/(manual) | `audit-log.jsonl` entries of `kind: scheduler_pause` — the `by` field names the calling session/cwd | Resume via the Scheduler Resume button or `scheduler_resume`. An agent pause auto-expires after 30 minutes and is cleared on app restart |
 | `utilization-held` at 100% / `slots-exhausted` with 2 running while real usage is low | `~/.claude/session-manager-reboot.log` for `billing meter rate-limited (HTTP 429)`; `billing-cache.json` for the real percentages | Usage meter 429 treated as an account limit (fixed by PRD 1647): a meter 429 now uses a ≤30-min-old cached reading with the full slot pool; only an executor-observed `rate_limit` pause pins utilization. No cache / older cache still runs the degraded budget (cap 2) |
 | `rate_limit` pause to the weekly reset while `billing-cache.json` shows usage well below threshold | The run log for a `rate_limit_event` with `status "rejected"` — none means the pause was spurious | Pre-fix substring detection treated `allowed` events as rejections (2026-10-11, 4-day pause at 58% weekly). Resume via the Scheduler Resume button or `scheduler_resume` |
+| Epic got no PLAN SETTLED digest | Whether the app restarted inside the settle window (`SM_EPIC_SETTLE_SECONDS`, default 120) after the Epic's last terminal check-in; the timer is in memory | The next terminal check-in re-arms it. Also check `SM_EPIC_VALIDATION_DISABLE` is not set |
 
 ### Usage threshold vs rate_limit pause
 

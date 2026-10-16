@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v5 -->
+<!-- PRD_AUTHORING.md v6 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -125,6 +125,9 @@ A short Epic-context digest is prepended automatically for orientation only — 
 
 The executor can't ask you anything: no `ScheduleWakeup`, Cron, Monitor, `AskUserQuestion`, plan mode, or worktree tools; background tasks are off (a `timeout` command is always on PATH — the app installs a shim on macOS). It must never stop to ask a question — it makes the safest reasonable call and reports it, so write the PRD so that call is obvious.
 
+Worktree reach: every PRD runs in an isolated git worktree holding tracked files plus symlinked `node_modules`/`.venv`/`venv` only. A step that needs gitignored runtime state (databases, `downloads/`, browser profiles, logs) or a live side effect must address the main checkout by absolute path (e.g. `$HOME/Projects/<repo>/...`), be artifact-only (a deliverable artifact + `artifactPaths`, no tracked edits), and `dependsOn` the PRD that lands its tracked edits. Host crontab installs stay human-only (see §15).
+Why: burrow PRD 1516 halted because its relative `.venv` python against `downloads/fb-tracker.db`, `scripts/install-cron.sh` and `pipeline-cron.sh --now` resolved inside the worktree (no runtime state; install-cron would bake a temporary worktree path into crontab), while sibling 1494 succeeded the same day using an absolute main-checkout path and artifact-only output. `scheduler_create_prd` warns on relative gitignored paths.
+
 ---
 
 ## §8 Scope sizing — target ≤10 min, ceiling 15
@@ -228,6 +231,7 @@ Before queueing a new PRD, verify each of these:
 - [ ] **§5 Frontmatter:** `title`, `cwd` (exists on this machine), `estimateMinutes` present; `dependsOn` used for ordering, not `parallelGroup`.
 - [ ] **§6 Gate and files:** `gate` follows every rule in §6 (or is `["none"]` alone); `files` is 1–50 repo-relative paths, no overlap with a concurrent PRD.
 - [ ] **§7 Self-contained:** no reference to "the conversation" or outside context; paths/identifiers inline; clean UTF-8, no NUL bytes (`grep -qP '\x00' file && echo BAD`).
+- [ ] **§7 Worktree reach:** no relative path to a gitignored file; live-run steps use absolute main-checkout paths in an artifact-only PRD. Why: the job worktree has no gitignored runtime state, so relative paths fail or bake a temporary path into host config (burrow 1516).
 - [ ] **§8 Scope:** targets ≤10 min, ceiling 15; e2e/publish sharded to one spec per PRD.
 - [ ] **§9 Failure surfacing:** errors exit 1 with a diagnostic line; no silent `|| true`.
 - [ ] **§10 Negative assertions:** every "should find nothing" check is inverted to exit 0 on the clean case.

@@ -178,6 +178,8 @@ the API rejects that.
     criterion. The executor ends with `SCHEDULER_VERDICT: NEEDS_HUMAN <question>` for those, and
     the PRD notes say so. Why: no executor can pass such a gate, so the job parks as
     `sentinel_fail`.
+    Live-run steps that need gitignored state follow PRD_AUTHORING.md §7 (absolute main-checkout
+    paths, artifact-only).
 
 ### files rules
 

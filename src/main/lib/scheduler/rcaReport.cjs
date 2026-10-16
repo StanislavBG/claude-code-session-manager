@@ -73,6 +73,7 @@ const FAILURE_CLASSES = {
   TRANSCRIPT_ERRORS: 'transcript-errors',
   ABANDONED_BACKGROUND_TASK: 'abandoned-background-task',
   BLOCKED_BY_FOREIGN_WIP: 'blocked-by-foreign-wip',
+  NEEDS_HUMAN: 'needs-human',
   UNKNOWN: 'unknown',
 };
 
@@ -82,8 +83,11 @@ const FAILURE_CLASSES = {
 // nothing to investigate, and re-queuing is already owned by
 // reconcile()'s requeueForeignWipBlockedJobs, not this action), 'resume-and-commit'
 // (PRD 1111's --resume dispatch owns this), 'verify-and-close' (the work
-// likely landed, just missing its sentinel), 'investigate' (the only class
-// that still buys a fix-plan investigation).
+// likely landed, just missing its sentinel), 'ask-human' (the executor
+// correctly stopped on a step only a person can do — answer the job's
+// humanQuestion, then update + reset the PRD; never a fix-plan, and the review
+// ladder never auto-fixes it), 'investigate' (the only class that still buys a
+// fix-plan investigation).
 const RECOVERY_ACTIONS = {
   [FAILURE_CLASSES.ALREADY_SHIPPED]: 'archive',
   [FAILURE_CLASSES.SELF_QUEUE]: 'investigate',
@@ -104,6 +108,7 @@ const RECOVERY_ACTIONS = {
   // guidance into that cold-read investigation.
   [FAILURE_CLASSES.ABANDONED_BACKGROUND_TASK]: 'investigate',
   [FAILURE_CLASSES.BLOCKED_BY_FOREIGN_WIP]: 'archive',
+  [FAILURE_CLASSES.NEEDS_HUMAN]: 'ask-human',
   [FAILURE_CLASSES.UNKNOWN]: 'investigate',
 };
 
@@ -131,6 +136,8 @@ const PREVENTION_HINTS = {
     'A headless run cannot receive a background-task completion notification — never let a long Bash command auto-background past its foreground timeout and then wait for it. Run long commands with an explicit bound (`timeout <N> <cmd>`) so they finish in the foreground, or poll their output file directly instead of waiting on Monitor/notification.',
   [FAILURE_CLASSES.BLOCKED_BY_FOREIGN_WIP]:
     'This job correctly reported `SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP` against a sibling job\'s in-flight, uncommitted files three times in a row — auto-requeue is exhausted (reconcile() only clears this once the blocked paths go clean). This is not a defect in this PRD\'s own work: check on the sibling job/human that owns the still-dirty path(s) named on the job row, and either wait for them to commit or manually reset this job to `pending` once the tree is clear. Do not author a fix-plan PRD against it.',
+  [FAILURE_CLASSES.NEEDS_HUMAN]:
+    'The run stopped on a step that needs a person or live runtime state — the executor was right to stop, so this is not a defect to fix-plan. Answer the job\'s humanQuestion, then update and reset the PRD. If the reason is that the job worktree lacks gitignored runtime state (databases, browser profile, downloads/, crontab paths), re-author the step as an artifact-only PRD that addresses the main checkout by absolute path, per PRD_AUTHORING.md section 7.',
   [FAILURE_CLASSES.UNKNOWN]:
     'Re-run the acceptance criteria gate locally against the failure log to pin down the specific break before re-queuing.',
 };
@@ -191,6 +198,11 @@ function stripHarnessInitEvents(logTail) {
 function classifyFailure({ verdict, logTail: rawLogTail }) {
   const logTail = stripHarnessInitEvents(rawLogTail);
   const lines = logTail.split('\n');
+
+  // Checked before every other rule, log-tail heuristics included: the
+  // executor deliberately stopped on a human-only step, so words like
+  // "sleep"/"until" in its tail say nothing about the cause.
+  if (verdict === 'needs_human') return FAILURE_CLASSES.NEEDS_HUMAN;
 
   // Checked before every other rule: an unambiguous, materially-checked
   // verdict (the scheduler itself validated the executor's claimed paths

@@ -176,7 +176,7 @@ test('writeRcaReport: skips when there is no run directory to write into', async
 // ─── recovery actions ────────────────────────────────────────────────────────
 
 test('RECOVERY_ACTIONS: every FAILURE_CLASSES member has an entry from the closed set', () => {
-  const CLOSED_SET = new Set(['archive', 'resume-and-commit', 'verify-and-close', 'investigate']);
+  const CLOSED_SET = new Set(['archive', 'resume-and-commit', 'verify-and-close', 'investigate', 'ask-human']);
   for (const failureClass of Object.values(rcaReport.FAILURE_CLASSES)) {
     expect(rcaReport.RECOVERY_ACTIONS).toHaveProperty(failureClass);
     expect(CLOSED_SET.has(rcaReport.RECOVERY_ACTIONS[failureClass])).toBe(true);
@@ -263,4 +263,26 @@ test('writeRcaReport: a blocked_by_foreign_wip_streak verdict points at the sibl
   const body = fs.readFileSync(res.path, 'utf8');
   expect(body).toMatch(/sibling job/i);
   expect(body).not.toMatch(/Re-run the acceptance criteria gate/);
+});
+
+test('classifyFailure: needs_human verdict classifies as NEEDS_HUMAN with ask-human, even when the tail matches STUCK_LOOP_RE', () => {
+  const failureClass = rcaReport.classifyFailure({ verdict: 'needs_human', logTail: 'while true; do sleep 1; done\nuntil ready' });
+  expect(failureClass).toBe(rcaReport.FAILURE_CLASSES.NEEDS_HUMAN);
+  expect(failureClass).toBe('needs-human');
+  expect(rcaReport.recoveryActionFor(failureClass)).toBe('ask-human');
+});
+
+test('buildRcaMarkdown: needs_human emits needs-human / ask-human frontmatter and the worktree-reach hint', () => {
+  const md = rcaReport.buildRcaMarkdown({
+    job: baseJob({ cwd: tmpHome }),
+    verdict: 'needs_human',
+    meta: null,
+    logTail: 'while true; do sleep 1; done',
+    acText: null,
+    failureClass: rcaReport.classifyFailure({ verdict: 'needs_human', logTail: 'sleep 1' }),
+  });
+  expect(md).toContain('failure-class: needs-human');
+  expect(md).toContain('recovery-action: ask-human');
+  expect(md).toMatch(/artifact-only PRD/);
+  expect(md).toMatch(/PRD_AUTHORING\.md section 7/);
 });

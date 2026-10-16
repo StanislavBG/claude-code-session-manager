@@ -69,7 +69,9 @@ function mintEventId() {
  * meta arg (not a fifth positional parameter) with `validation`: a
  * scheduler check-in is born `'unvalidated'` — never `'verified'` —
  * regardless of the job's self-reported outcome; the authoring Epic's own
- * validation pass is what may later move it to 'verified'/'refuted'. All
+ * validation pass is what may later move it to 'verified'/'refuted'. `agentType`
+ * (the job's agent) and `digestKey` (the settle digest's stable key) ride the
+ * same meta arg and are copied the same way. All
  * keys are added to the event object only when present in `meta`, never as
  * `undefined`-valued keys, so events appended without them serialize
  * identically to before.
@@ -99,6 +101,8 @@ async function appendResponseEventWithReason(cwd, sourcePromptId, text, meta = {
       if (meta && meta.prdSlug) event.prdSlug = meta.prdSlug;
       if (meta && meta.outcome) event.outcome = meta.outcome;
       if (meta && meta.validation) event.validation = meta.validation;
+      if (meta && meta.agentType) event.agentType = meta.agentType;
+      if (meta && meta.digestKey) event.digestKey = meta.digestKey;
       data.events[sourcePromptId] = [...events, event];
       await config.writeJson(path, data, { writer: 'scheduler' });
       broadcast(EVENT_APPENDED_CHANNEL, { cwd, promptSessionId: sourcePromptId, event });

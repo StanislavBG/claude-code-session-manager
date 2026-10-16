@@ -191,6 +191,27 @@ test('appending with { validation } persists the stamp; without it no validation
   expect('validation' in plain).toBe(false);
 });
 
+test('appending with { agentType, digestKey } persists both; without them neither key exists', async () => {
+  await writeIndex({
+    sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'active' } },
+    events: {
+      'psess-1': [
+        { id: 'pevt-1', promptSessionId: 'psess-1', kind: 'prompt', causedByEventId: null, at: '2026-01-01T00:00:00.000Z' },
+      ],
+    },
+  });
+
+  await appendResponseEventIfKnown(cwd, 'psess-1', 'check-in', { prdSlug: '1-foo', outcome: 'completed', agentType: 'validator', digestKey: 'abcd1234abcd1234' });
+  await appendResponseEventIfKnown(cwd, 'psess-1', 'plain');
+
+  const onDisk = JSON.parse(await fsp.readFile(promptSessionActiveIndexPath(cwd), 'utf8'));
+  const [, withMeta, plain] = onDisk.events['psess-1'];
+  expect(withMeta.agentType).toBe('validator');
+  expect(withMeta.digestKey).toBe('abcd1234abcd1234');
+  expect('agentType' in plain).toBe(false);
+  expect('digestKey' in plain).toBe(false);
+});
+
 test('appending without { prdSlug, outcome } persists an event with neither key set', async () => {
   await writeIndex({
     sessions: { 'psess-1': { id: 'psess-1', cwd, status: 'active' } },

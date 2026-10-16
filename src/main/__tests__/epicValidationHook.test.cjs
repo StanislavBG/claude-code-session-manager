@@ -233,33 +233,24 @@ test('a sendPrompt that throws is swallowed and logged, never propagated (fire-a
 
 // ─── wiring through notifyOriginatingTab ────────────────────────────────────
 
-test('notifyOriginatingTab: a routed check-in stamps validation:unvalidated and fires the validation hook once with the Epic id + slug', async () => {
+test('notifyOriginatingTab: a routed check-in stamps validation:unvalidated and arms the settle runner once with the Epic id', async () => {
   const sendPrompt = vi.fn();
   const appendResponseEvent = vi.fn(async () => true);
-  const enqueueValidation = vi.fn(() => ({ enqueued: true }));
+  const scheduleSettle = vi.fn();
   const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: EPIC, path: PRD_PATH }));
   const loadSessions = vi.fn(async () => ({ tabs: [] }));
 
   await notifyOriginatingTab(
     { slug: SLUG, status: 'completed', cwd: '/some/cwd' },
-    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, enqueueValidation },
+    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, scheduleSettle },
   );
 
   expect(appendResponseEvent).toHaveBeenCalledWith(
     '/some/cwd', EPIC, expect.stringContaining(SLUG),
     expect.objectContaining({ prdSlug: SLUG, outcome: 'completed', validation: 'unvalidated' }),
   );
-  expect(enqueueValidation).toHaveBeenCalledTimes(1);
-  expect(enqueueValidation).toHaveBeenCalledWith(
-    expect.objectContaining({
-      cwd: '/some/cwd',
-      epicId: EPIC,
-      prdSlug: SLUG,
-      outcome: 'completed',
-      eventValidation: 'unvalidated',
-    }),
-    expect.objectContaining({ sendPrompt }),
-  );
+  expect(scheduleSettle).toHaveBeenCalledTimes(1);
+  expect(scheduleSettle).toHaveBeenCalledWith({ cwd: '/some/cwd', epicId: EPIC });
   // The check-in routed into the Epic chain — no tab-prompt fallback fires.
   expect(sendPrompt).not.toHaveBeenCalled();
 });
@@ -267,29 +258,29 @@ test('notifyOriginatingTab: a routed check-in stamps validation:unvalidated and 
 test('notifyOriginatingTab: a REFUSED append (unknown/completed Epic) never fires the validation hook', async () => {
   const sendPrompt = vi.fn();
   const appendResponseEvent = vi.fn(async () => false);
-  const enqueueValidation = vi.fn();
+  const scheduleSettle = vi.fn();
   const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: EPIC, sourceTabId: 'tab-x' }));
   const loadSessions = vi.fn(async () => ({ tabs: [] }));
 
   await notifyOriginatingTab(
     { slug: SLUG, status: 'completed', cwd: '/some/cwd' },
-    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, enqueueValidation },
+    { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, scheduleSettle },
   );
 
-  expect(enqueueValidation).not.toHaveBeenCalled();
+  expect(scheduleSettle).not.toHaveBeenCalled();
 });
 
 test('notifyOriginatingTab: a validation hook that throws never blocks the notification path', async () => {
   const sendPrompt = vi.fn();
   const appendResponseEvent = vi.fn(async () => true);
-  const enqueueValidation = vi.fn(() => { throw new Error('boom'); });
+  const scheduleSettle = vi.fn(() => { throw new Error('boom'); });
   const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: EPIC, path: PRD_PATH }));
   const loadSessions = vi.fn(async () => ({ tabs: [] }));
 
   await expect(
     notifyOriginatingTab(
       { slug: SLUG, status: 'failed', cwd: '/some/cwd' },
-      { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, enqueueValidation },
+      { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, scheduleSettle },
     ),
   ).resolves.not.toThrow();
 });

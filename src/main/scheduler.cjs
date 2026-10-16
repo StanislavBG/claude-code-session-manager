@@ -99,7 +99,8 @@ const sessionsStore = require('./sessionsStore.cjs');
 const { enqueueExternalPrompt } = require('./chatRunner.cjs');
 const { appendResponseEventIfKnown, appendResponseEventWithReason } = require('./promptSessionEvents.cjs');
 const { buildReviewNotice, selectDueReviewNotices, formatReviewNotice, holdMsFromEnv } = require('./lib/scheduler/reviewNotice.cjs');
-const { maybeEnqueueValidationPrompt } = require('./lib/epic/epicValidationHook.cjs');
+const epicValidationHook = require('./lib/epic/epicValidationHook.cjs');
+const prdCreate = require('./lib/prd/prdCreate.cjs');
 const { parseValidationSentinels } = require('./lib/scheduler/validationSentinels.cjs');
 const { hasDownstreamValidator } = require('./lib/prd/planValidator.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
@@ -3019,6 +3020,29 @@ async function resolveFixPlanPath(failedJob) {
 }
 
 /**
+ * defaultScheduleSettle — production wiring for notifyOriginatingTab's
+ * scheduleSettle option: arms the debounced Epic settle runner with live deps.
+ * `remote` is defined later in the module but only read at call time.
+ */
+function defaultScheduleSettle({ cwd, epicId }) {
+  const deps = {
+    loadJobs: async () => (await readQueue()).jobs || [],
+    loadHistory: () => queueHistory.readHistory({ limit: 500 }),
+    createPrd: (input) => prdCreate.createPrd(input, remote),
+    resolveBaseSha: async (c, commit) => {
+      try {
+        return String(await execGitAt(c, ['rev-parse', `${commit}^`])).trim() || null;
+      } catch {
+        return null;
+      }
+    },
+    sendPrompt: enqueueExternalPrompt,
+    appendResponseEvent: appendResponseEventIfKnown,
+  };
+  epicValidationHook.scheduleEpicSettle({ cwd, epicId }, (args) => epicValidationHook.runEpicSettle(args, deps));
+}
+
+/**
  * notifyOriginatingTab(job) → void
  *
  * On a true terminal transition (completed/failed — never the benign
@@ -3056,12 +3080,7 @@ async function notifyOriginatingTab(job, {
   appendResponseEvent = appendResponseEventIfKnown,
   appendTranscriptTurn = promptSessionTranscript.appendTurn,
   readResultFromLog = extractResultTextFromLog,
-  enqueueValidation = maybeEnqueueValidationPrompt,
-  // PRD 1408: same queue rows spawnJob/tickQueue already use — read fresh
-  // here (not threaded through the terminal-transition snapshot) since this
-  // fires well after dispatch, when the plan may have gained/dropped a
-  // trailing validator row since this job was spawned.
-  loadJobs = async () => (await readQueue()).jobs || [],
+  scheduleSettle = defaultScheduleSettle,
 } = {}) {
   try {
     const prd = await resolveNotifyPrd(job, parsePrdRaw);
@@ -3174,55 +3193,22 @@ async function notifyOriginatingTab(job, {
         prdSlug: job.slug,
         outcome: job.status,
         validation: 'unvalidated',
+        ...(typeof job.agentType === 'string' ? { agentType: job.agentType } : {}),
       }).catch((e) => {
         console.error('[scheduler] notifyOriginatingTab appendResponseEvent error', job?.slug, e);
         return false;
       });
       if (routed) {
-        // PRD 986: a successful check-in append triggers ONE validation
-        // prompt into the authoring Epic's own session, asking it to verify
-        // every acceptance criterion against the real working tree and reply
-        // VERIFIED or REFUTED. Fire-and-forget, same convention as this
-        // function's own call site in tickQueue: a failure to enqueue is
-        // logged inside the hook, never thrown, and never blocks the job's
-        // status transition or the response-event append (which already
-        // happened above). All gating (kill-switch SM_EPIC_VALIDATION_DISABLE,
-        // active-Epic check, once-per-(epicId, prdSlug), loop guard, slot-pool
-        // routing) lives in lib/epic/epicValidationHook.cjs.
-        //
-        // PRD 1407: a validator job's own check-in never enqueues a
-        // validation prompt for itself — it IS the plan's validation pass,
-        // not a work-item awaiting one.
-        //
-        // PRD 1408: nor does an ordinary work-item whose plan already ends in
-        // a trailing validator job depending on it — that validator's own
-        // check-in (above) is the single validation pass for the whole plan,
-        // so a per-PRD prompt here would be a second, redundant ask into the
-        // same (Opus/Fable-tier) authoring session.
-        if (job.agentType !== 'validator') {
-          let skipForDownstreamValidator = false;
-          try {
-            skipForDownstreamValidator = hasDownstreamValidator(job, await loadJobs());
-          } catch (e) {
-            console.error('[scheduler] notifyOriginatingTab loadJobs error', job?.slug, e);
-          }
-          if (!skipForDownstreamValidator) {
-            try {
-              enqueueValidation(
-                {
-                  cwd: job.cwd || null,
-                  epicId,
-                  prdSlug: job.slug,
-                  prdPath: prd?.path || prdPaths.archivedPrdPathForJob(job) || null,
-                  outcome: job.status,
-                  eventValidation: 'unvalidated',
-                },
-                { sendPrompt },
-              );
-            } catch (e) {
-              console.error('[scheduler] notifyOriginatingTab enqueueValidation error', job?.slug, e);
-            }
-          }
+        // The debounced Epic settle runner (lib/epic/epicValidationHook.cjs)
+        // owns all validation messaging now (replaces the per-PRD prompts of
+        // PRDs 986/1407/1408): every successful terminal check-in, a
+        // validator's own included (its finish usually settles the Epic),
+        // just re-arms the per-Epic debounce. A finished PRD never sends a
+        // chat prompt into its authoring Epic by itself.
+        try {
+          scheduleSettle({ cwd: job.cwd || null, epicId });
+        } catch (e) {
+          console.error('[scheduler] notifyOriginatingTab scheduleSettle error', job?.slug, e);
         }
         return;
       }
@@ -6456,17 +6442,10 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     let mechanicalRecoveryTarget = null;
     let terminalNotifySnapshot = null;
     const newlyCompletedPrds = [];
-    // PRD 1408: captured inside the mutate() below (the one in-memory read of
-    // `s.jobs` this finalize pass already does) so notifyOriginatingTab's own
-    // hasDownstreamValidator check can reuse it instead of a second, redundant
-    // readQueue() — that call federates queue.json shards across every known
-    // project cwd on the machine, not just this job's own project.
-    let jobsSnapshotForNotify = null;
     // Base HEAD for the mechanical-recovery futility check — read here, never inside mutate() (no I/O).
     const finalizeHeadSha = worktreeIntegrationDetail && worktreeIntegrationDetail.failureKind === 'content_conflict'
       ? await gitTreeGuard.gitHead(guardCwd) : null;
     await mutate((s) => {
-      jobsSnapshotForNotify = s.jobs.slice();
       const i2 = s.jobs.findIndex((x) => x.slug === job.slug);
       // A job already moved off 'running' by someone else (namely
       // remote.cancelJob, PRD 1024 — it SIGTERMs the process then finalizes
@@ -6883,9 +6862,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     });
 
     if (terminalNotifySnapshot) {
-      notifyOriginatingTab(terminalNotifySnapshot, {
-        loadJobs: async () => jobsSnapshotForNotify || [],
-      }).catch((e) => {
+      notifyOriginatingTab(terminalNotifySnapshot).catch((e) => {
         console.error('[scheduler] notifyOriginatingTab error', job.slug, e);
       });
     }

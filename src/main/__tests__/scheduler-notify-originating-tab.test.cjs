@@ -280,7 +280,7 @@ describe("tab", () => {
     const sendPrompt = vi.fn();
     const appendResponseEvent = vi.fn(async () => true);
     const appendTranscriptTurn = vi.fn(async () => {});
-    const enqueueValidation = vi.fn();
+    const scheduleSettle = vi.fn();
     const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-validator-1' }));
     const loadSessions = vi.fn(async () => ({ tabs: [] }));
     const readResultFromLog = vi.fn(() => [
@@ -292,7 +292,7 @@ describe("tab", () => {
       { slug: '1407-validator-run', status: 'completed', cwd: '/some/cwd', agentType: 'validator' },
       {
         parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent,
-        appendTranscriptTurn, readResultFromLog, enqueueValidation,
+        appendTranscriptTurn, readResultFromLog, scheduleSettle,
       },
     );
 
@@ -307,48 +307,56 @@ describe("tab", () => {
     );
     expect(appendResponseEvent).toHaveBeenNthCalledWith(
       3, '/some/cwd', 'psess-validator-1', expect.stringContaining('1407-validator-run'),
-      { prdSlug: '1407-validator-run', outcome: 'completed', validation: 'unvalidated' },
+      { prdSlug: '1407-validator-run', outcome: 'completed', agentType: 'validator', validation: 'unvalidated' },
     );
-    expect(enqueueValidation).not.toHaveBeenCalled();
+    expect(scheduleSettle).toHaveBeenCalledTimes(1);
+    expect(scheduleSettle).toHaveBeenCalledWith({ cwd: '/some/cwd', epicId: 'psess-validator-1' });
+    expect(appendResponseEvent).toHaveBeenLastCalledWith(
+      '/some/cwd', 'psess-validator-1', expect.any(String),
+      expect.objectContaining({ agentType: 'validator' }),
+    );
   });
 
   // ─── PRD 1408: a downstream validator suppresses the per-PRD validation ask ─
-  test('skips enqueueValidation when loadJobs reports a pending validator row depending on this job', async () => {
-    const sendPrompt = vi.fn();
+  test('settle: a completed job arms scheduleSettle once with { cwd, epicId } and stamps no agentType when absent', async () => {
     const appendResponseEvent = vi.fn(async () => true);
-    const enqueueValidation = vi.fn();
-    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1' }));
-    const loadSessions = vi.fn(async () => ({ tabs: [] }));
-    const loadJobs = vi.fn(async () => ([
-      { slug: '1408-work-item' },
-      { slug: '1408-validate', agentType: 'validator', status: 'pending', dependsOn: ['1408-work-item'] },
-    ]));
-
+    const scheduleSettle = vi.fn();
     await notifyOriginatingTab(
       { slug: '1408-work-item', status: 'completed', cwd: '/some/cwd' },
-      { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, enqueueValidation, loadJobs },
+      {
+        parsePrdRaw: vi.fn(async () => ({ sourcePromptId: 'psess-1' })),
+        loadSessions: vi.fn(async () => ({ tabs: [] })),
+        sendPrompt: vi.fn(), appendResponseEvent, scheduleSettle,
+      },
     );
-
-    expect(appendResponseEvent).toHaveBeenCalledTimes(1);
-    expect(loadJobs).toHaveBeenCalledTimes(1);
-    expect(enqueueValidation).not.toHaveBeenCalled();
+    expect(scheduleSettle).toHaveBeenCalledTimes(1);
+    expect(scheduleSettle).toHaveBeenCalledWith({ cwd: '/some/cwd', epicId: 'psess-1' });
+    expect(appendResponseEvent.mock.calls[0][3]).not.toHaveProperty('agentType');
   });
 
-  test('still enqueues validation when loadJobs reports no downstream validator', async () => {
-    const sendPrompt = vi.fn();
-    const appendResponseEvent = vi.fn(async () => true);
-    const enqueueValidation = vi.fn();
-    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-1' }));
-    const loadSessions = vi.fn(async () => ({ tabs: [] }));
-    const loadJobs = vi.fn(async () => ([{ slug: '1408-work-item' }]));
-
+  test('settle: not called when the check-in append is refused', async () => {
+    const scheduleSettle = vi.fn();
     await notifyOriginatingTab(
       { slug: '1408-work-item', status: 'completed', cwd: '/some/cwd' },
-      { parsePrdRaw, loadSessions, sendPrompt, appendResponseEvent, enqueueValidation, loadJobs },
+      {
+        parsePrdRaw: vi.fn(async () => ({ sourcePromptId: 'psess-1' })),
+        loadSessions: vi.fn(async () => ({ tabs: [] })),
+        sendPrompt: vi.fn(), appendResponseEvent: vi.fn(async () => false), scheduleSettle,
+      },
     );
+    expect(scheduleSettle).not.toHaveBeenCalled();
+  });
 
-    expect(appendResponseEvent).toHaveBeenCalledTimes(1);
-    expect(enqueueValidation).toHaveBeenCalledTimes(1);
+  test('settle: a throwing scheduleSettle is caught', async () => {
+    await expect(notifyOriginatingTab(
+      { slug: '1408-work-item', status: 'completed', cwd: '/some/cwd' },
+      {
+        parsePrdRaw: vi.fn(async () => ({ sourcePromptId: 'psess-1' })),
+        loadSessions: vi.fn(async () => ({ tabs: [] })),
+        sendPrompt: vi.fn(), appendResponseEvent: vi.fn(async () => true),
+        scheduleSettle: vi.fn(() => { throw new Error('boom'); }),
+      },
+    )).resolves.toBeUndefined();
   });
 });
 

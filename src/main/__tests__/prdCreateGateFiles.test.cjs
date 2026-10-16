@@ -605,3 +605,63 @@ test('POST /admin/scheduler/create-prd response reports gate/files warnings when
     await admin.stop();
   }
 });
+
+// ──────────────────────────────────────────── worktree-reach advisory
+
+const { execFileSync } = require('node:child_process');
+
+async function mkGitProject({ git = true } = {}) {
+  const dir = await fsp.mkdtemp(path.join(os.homedir(), '.sm-reach-test-'));
+  if (git) {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    await fsp.writeFile(path.join(dir, '.gitignore'), 'downloads/\n');
+    await fsp.mkdir(path.join(dir, 'src'), { recursive: true });
+    await fsp.writeFile(path.join(dir, 'src', 'tracked.js'), '1\n');
+  }
+  return dir;
+}
+
+test('createPrd warns when an AC names a gitignored relative path', async () => {
+  const dir = await mkGitProject();
+  try {
+    const remote = makeFakeRemoteWithPrdsDir(await mkTmpPrdsDir());
+    const result = await createPrd(validCreateBody({
+      slug: 'reach-ignored', cwd: dir, gate: ['timeout 60 npm test'], files: ['src/tracked.js'],
+      acceptanceCriteria: ['reads downloads/fb-tracker.db after the run'],
+    }), remote);
+    expect(result.ok).toBe(true);
+    expect(result.warnings.some((w) => /gitignored path\(s\).*downloads\/fb-tracker\.db/.test(w))).toBe(true);
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('createPrd gives no worktree-reach warning for tracked paths only', async () => {
+  const dir = await mkGitProject();
+  try {
+    const remote = makeFakeRemoteWithPrdsDir(await mkTmpPrdsDir());
+    const result = await createPrd(validCreateBody({
+      slug: 'reach-tracked', cwd: dir, gate: ['timeout 60 npm test'], files: ['src/tracked.js'],
+      acceptanceCriteria: ['edits src/tracked.js'],
+    }), remote);
+    expect(result.ok).toBe(true);
+    expect(result.warnings.some((w) => /gitignored path/.test(w))).toBe(false);
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('createPrd gives no worktree-reach warning in a non-git cwd and still writes', async () => {
+  const dir = await mkGitProject({ git: false });
+  try {
+    const remote = makeFakeRemoteWithPrdsDir(await mkTmpPrdsDir());
+    const result = await createPrd(validCreateBody({
+      slug: 'reach-nogit', cwd: dir, gate: ['timeout 60 npm test'], files: ['src/tracked.js'],
+      acceptanceCriteria: ['reads downloads/fb-tracker.db after the run'],
+    }), remote);
+    expect(result.ok).toBe(true);
+    expect(result.warnings.some((w) => /gitignored path/.test(w))).toBe(false);
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+});

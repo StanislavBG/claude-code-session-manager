@@ -32,6 +32,8 @@ const { resolveDepSlug, findNearMatches } = require('./depSlugResolve.cjs');
 const { isFixPlanSlug } = require('../scheduler/fixPlanSlug.cjs');
 const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
 const { sizingWarnings } = require('./prdSizing.cjs');
+const { execGit } = require('../git/gitExec.cjs');
+const { extractRepoPathCandidates, worktreeReachWarnings } = require('./prdWorktreeReach.cjs');
 const { validateGate, validateFiles, renderFilesSection, renderGateSection } = require('./prdGateFiles.cjs');
 const { resolveGate, parseChain, isNoneGate } = require('../scheduler/definitionOfDone.cjs');
 
@@ -184,6 +186,26 @@ function resolveSourcePromptIdFromClaudeSession(cwd, claudeSessionId) {
     if (session && session.claudeSessionId === claudeSessionId) return session.id;
   }
   return null;
+}
+
+
+/**
+ * Advisory: which relative paths the PRD names are gitignored in `cwd` (so absent from the job
+ * worktree). execGit has no stdin, so candidates go as argv after `--` (still one call). Exit 1 =
+ * nothing ignored; any other failure (not a repo, timeout) is swallowed — never blocks the write.
+ */
+async function worktreeReachAdvisory(input, cwd) {
+  try {
+    const text = [input.goal, ...(Array.isArray(input.acceptanceCriteria) ? input.acceptanceCriteria : []),
+      input.implementationNotes].filter((s) => typeof s === 'string').join('\n');
+    const candidates = extractRepoPathCandidates(text);
+    if (candidates.length === 0) return [];
+    const out = await execGit(cwd, ['check-ignore', '--', ...candidates], { timeout: 10000 });
+    const ignored = out.split('\n').map((l) => l.trim()).filter(Boolean);
+    return worktreeReachWarnings(input, ignored);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -419,6 +441,7 @@ async function createPrd(input, remote) {
   } else {
     extraWarnings.push('No files list: the executor is not told which files it may change.');
   }
+  extraWarnings.push(...await worktreeReachAdvisory(input, cwd));
 
   const nn = await remote.allocateParallelGroup(input.cwd);
   const filenameSlug = `${nn}-${slug}`;

@@ -53,8 +53,6 @@ const BACKOFF_MULT = 2;
 
 // Heartbeat (ADR §2.3)
 const PING_INTERVAL_MS = 30_000;
-// Relay sends protocol pings every 30s; 100s = just over 3 missed beats.
-const RELAY_PING_SILENCE_MS = 100_000;
 const PONG_TIMEOUT_MS = 10_000;
 const MAX_MISSED_PONGS = 3;
 
@@ -83,7 +81,6 @@ let _backoffMs = BACKOFF_INIT_MS;
 let _pingTimer = null;
 let _pongTimer = null;
 let _missedPongs = 0;
-let _lastRelayPingAt = 0; // last protocol-level relay ping (or socket open)
 let _configCache = null;
 let _configCacheAt = 0;
 let _repairNeeded = false; // relay rejected the device token (invalid_token / 401): terminal until re-pair
@@ -311,26 +308,10 @@ function stopHeartbeat() {
   if (_pongTimer) { clearTimeout(_pongTimer); _pongTimer = null; }
 }
 
-// The relay can evict a live conn from its device map (stale close of a prior
-// socket). App-level pongs still arrive, but protocol pings stop — terminate so
-// the close handler reconnects and re-registers.
-function checkRelayLiveness(now = Date.now()) {
-  if (!_ws || _ws.readyState !== WebSocket.OPEN) return false;
-  if (_lastRelayPingAt <= 0 || now - _lastRelayPingAt <= RELAY_PING_SILENCE_MS) return false;
-  logs.writeLine({
-    scope: 'webRemote', level: 'warn',
-    message: 'relay heartbeat silent — reconnecting',
-    meta: { silentMs: now - _lastRelayPingAt },
-  });
-  _ws.terminate();
-  return true;
-}
-
 function startHeartbeat() {
   stopHeartbeat();
   _pingTimer = setInterval(() => {
     if (!_ws || _ws.readyState !== WebSocket.OPEN) { stopHeartbeat(); return; }
-    if (checkRelayLiveness()) return;
     const pingId = crypto.randomUUID();
     _ws.send(JSON.stringify({ type: 'ping', id: pingId, ts: Date.now() }));
     _pongTimer = setTimeout(() => {
@@ -448,7 +429,6 @@ async function connect() {
     logs.writeLine({ scope: 'webRemote', level: 'info', message: 'connected to relay' });
     _backoffMs = BACKOFF_INIT_MS;
     _missedPongs = 0;
-    _lastRelayPingAt = Date.now();
     startHeartbeat();
     // Update lastConnectedAt without exposing token
     invalidateConfigCache(); // a pin written since the last cached read must not be overwritten
@@ -501,10 +481,10 @@ async function connect() {
   // too. This keeps the session up even if the relay ever stops answering the
   // app-level pings (the exact failure that silently dropped sessions every ~100s
   // before the relay learned to pong). node 'ws' auto-replies to the ping itself.
-  // It is also the orphaned-conn signal: the relay's stale close of a previous
-  // socket can evict this live conn from its map, after which only app-level
-  // pongs arrive and relay protocol pings stop (see checkRelayLiveness).
-  ws.on('ping', () => { _missedPongs = 0; _lastRelayPingAt = Date.now(); });
+  // Relay protocol pings are not guaranteed to reach the desktop through the
+  // bilko.run front proxy (observed 2026-10-17: none in 120s on a live link), so
+  // they must never be used as a liveness requirement.
+  ws.on('ping', () => { _missedPongs = 0; });
 }
 
 async function handleTokenRevoked(deviceId) {
@@ -1573,9 +1553,6 @@ module.exports = {
     getDispatchMap,
     buildRemoteSessionList,
     setWs: (ws) => { _ws = ws; },
-    checkRelayLiveness,
-    setLastRelayPingAt: (ts) => { _lastRelayPingAt = ts; },
-    RELAY_PING_SILENCE_MS,
     connect,
     hasReconnectTimer: () => _reconnectTimer !== null,
     cancelReconnect,

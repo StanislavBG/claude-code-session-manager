@@ -15,6 +15,54 @@ describe('markRemoteReady', () => {
   });
 });
 
+describe('remoteReady suppresses the SAS banner', () => {
+  const sas = { deviceId: 'd1', sas: '123456' };
+  beforeEach(() => {
+    useStore.setState({
+      remoteReady: false, pendingSas: null, awaitingDesktopConfirm: false, refreshKey: 0,
+    });
+  });
+
+  it('first-time pairing: setPendingSas shows the banner', () => {
+    useStore.getState().setPendingSas(sas);
+    const s = useStore.getState();
+    expect(s.pendingSas).toEqual(sas);
+    expect(s.awaitingDesktopConfirm).toBe(true);
+  });
+
+  it('ready-then-sas: sas:pending after ready is suppressed', () => {
+    useStore.getState().markRemoteReady();
+    useStore.getState().setPendingSas(sas);
+    const s = useStore.getState();
+    expect(s.remoteReady).toBe(true);
+    expect(s.pendingSas).toBeNull();
+    expect(s.awaitingDesktopConfirm).toBe(false);
+  });
+
+  it('sas-then-ready: ready clears a pending sas', () => {
+    useStore.getState().setPendingSas(sas);
+    useStore.getState().markRemoteReady();
+    const s = useStore.getState();
+    expect(s.pendingSas).toBeNull();
+    expect(s.awaitingDesktopConfirm).toBe(false);
+  });
+
+  it('clearRemoteReady re-enables the banner', () => {
+    useStore.getState().markRemoteReady();
+    useStore.getState().clearRemoteReady();
+    useStore.getState().setPendingSas(sas);
+    expect(useStore.getState().pendingSas).toEqual(sas);
+  });
+
+  it('reset re-enables the banner', () => {
+    useStore.getState().markRemoteReady();
+    useStore.getState().reset();
+    expect(useStore.getState().remoteReady).toBe(false);
+    useStore.getState().setPendingSas(sas);
+    expect(useStore.getState().pendingSas).toEqual(sas);
+  });
+});
+
 describe('createReadyFallback', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });

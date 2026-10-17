@@ -121,7 +121,10 @@ function AppInner() {
         }
         const online = m.status === 'connected';
         setDeviceOnline(deviceId, online);
-        if (!online) socket.resetE2E(deviceId);
+        if (!online) {
+          socket.resetE2E(deviceId);
+          useStore.getState().clearRemoteReady();
+        }
         if (online) {
           setActiveDevice(deviceId);
           // Negotiate E2E (P-256 ECDH → AES-256-GCM) so the relay only ever sees

@@ -30,6 +30,8 @@ interface AppState {
   pendingSas: { deviceId: string; sas: string } | null;
   /** True from SAS display until the desktop confirms (event:remote:ready). */
   awaitingDesktopConfirm: boolean;
+  /** Desktop sent event:remote:ready for this connection: the key is pinned, no SAS needed. */
+  remoteReady: boolean;
   /** Device IDs whose relay-served pubKey diverged from the pinned value (TOFU). */
   keyMismatchDeviceIds: string[];
 
@@ -52,6 +54,8 @@ interface AppState {
   clearPendingSas: () => void;
   /** Desktop signalled readiness (or the fallback fired): stop waiting and re-fetch. */
   markRemoteReady: () => void;
+  /** Connection dropped: a fresh handshake must show the SAS again unless re-confirmed ready. */
+  clearRemoteReady: () => void;
   addKeyMismatch: (deviceId: string) => void;
 }
 
@@ -69,6 +73,7 @@ export const useStore = create<AppState>((set) => ({
 
   pendingSas: null,
   awaitingDesktopConfirm: false,
+  remoteReady: false,
   keyMismatchDeviceIds: [],
 
   setMe: (me) => set({ me }),
@@ -89,13 +94,19 @@ export const useStore = create<AppState>((set) => ({
     set((s) => ({ summaryByTab: { ...s.summaryByTab, [summary.tabId]: summary } })),
   reset: () => set({
     route: { view: 'projects' }, stateByTab: {}, summaryByTab: {},
-    activeDeviceId: null, awaitingDesktopConfirm: false,
+    activeDeviceId: null, awaitingDesktopConfirm: false, remoteReady: false,
   }),
 
   setPendingSas: (pendingSas) =>
-    set(pendingSas ? { pendingSas, awaitingDesktopConfirm: true } : { pendingSas }),
+    set((s) => {
+      if (s.remoteReady && pendingSas) return {};
+      return pendingSas ? { pendingSas, awaitingDesktopConfirm: true } : { pendingSas };
+    }),
   clearPendingSas: () => set({ pendingSas: null }),
-  markRemoteReady: () => set((s) => ({ awaitingDesktopConfirm: false, refreshKey: s.refreshKey + 1 })),
+  markRemoteReady: () => set((s) => ({
+    remoteReady: true, pendingSas: null, awaitingDesktopConfirm: false, refreshKey: s.refreshKey + 1,
+  })),
+  clearRemoteReady: () => set({ remoteReady: false }),
   addKeyMismatch: (deviceId) =>
     set((s) => ({
       keyMismatchDeviceIds: s.keyMismatchDeviceIds.includes(deviceId)

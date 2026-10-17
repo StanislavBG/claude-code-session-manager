@@ -58,7 +58,7 @@ function AppInner() {
     activeDeviceId,
     setMe, setDevices, setDeviceOnline, setActiveDevice,
     setWsConnected, setTabState, setTabSummary, reset,
-    setPendingSas, addKeyMismatch, markRemoteReady,
+    setPendingSas, addKeyMismatch, markRemoteReady, stopAwaitingDesktop,
   } = useStore();
   const socketRef = useRef<RelaySocket | null>(null);
 
@@ -106,7 +106,7 @@ function AppInner() {
   useEffect(() => {
     const socket = new RelaySocket((connected) => setWsConnected(connected));
     socketRef.current = socket;
-    const fallback = createReadyFallback(markRemoteReady);
+    const fallback = createReadyFallback(stopAwaitingDesktop);
     socket.connect().catch(console.error);
 
     const offStatus = socket.on('event:device:status', async (m: Envelope) => {
@@ -166,7 +166,7 @@ function AppInner() {
       socketRef.current = null;
       reset();
     };
-  }, [setWsConnected, setDeviceOnline, setActiveDevice, setTabState, setTabSummary, reset, setPendingSas, markRemoteReady]);
+  }, [setWsConnected, setDeviceOnline, setActiveDevice, setTabState, setTabSummary, reset, setPendingSas, markRemoteReady, stopAwaitingDesktop]);
 
   const device = useStore((s) => s.devices.find((d) => d.deviceId === s.activeDeviceId));
   const online = !!device?.isOnline;

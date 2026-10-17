@@ -54,6 +54,7 @@ interface AppState {
   clearPendingSas: () => void;
   /** Desktop signalled readiness (or the fallback fired): stop waiting and re-fetch. */
   markRemoteReady: () => void;
+  stopAwaitingDesktop: () => void;
   /** Connection dropped: a fresh handshake must show the SAS again unless re-confirmed ready. */
   clearRemoteReady: () => void;
   addKeyMismatch: (deviceId: string) => void;
@@ -81,7 +82,7 @@ export const useStore = create<AppState>((set) => ({
   setDeviceOnline: (deviceId, isOnline) =>
     set((s) => ({ devices: s.devices.map((d) => (d.deviceId === deviceId ? { ...d, isOnline } : d)) })),
   setActiveDevice: (activeDeviceId) => set({ activeDeviceId }),
-  setWsConnected: (wsConnected) => set({ wsConnected }),
+  setWsConnected: (wsConnected) => set(wsConnected ? { wsConnected } : { wsConnected, remoteReady: false }),
   setScreen: (screen) => set({ screen }),
 
   goProjects: () => set({ route: { view: 'projects' } }),
@@ -106,6 +107,7 @@ export const useStore = create<AppState>((set) => ({
   markRemoteReady: () => set((s) => ({
     remoteReady: true, pendingSas: null, awaitingDesktopConfirm: false, refreshKey: s.refreshKey + 1,
   })),
+  stopAwaitingDesktop: () => set((s) => ({ awaitingDesktopConfirm: false, refreshKey: s.refreshKey + 1 })),
   clearRemoteReady: () => set({ remoteReady: false }),
   addKeyMismatch: (deviceId) =>
     set((s) => ({

@@ -97,11 +97,25 @@ describe('createReadyFallback', () => {
     expect(onReady).toHaveBeenCalledTimes(1);
   });
 
-  it('drives the store: refreshKey bumps when the fallback fires', () => {
-    useStore.setState({ awaitingDesktopConfirm: true, refreshKey: 0 });
-    createReadyFallback(useStore.getState().markRemoteReady).arm();
+  it('drives the store: refreshKey bumps when the fallback fires, SAS stays visible', () => {
+    const sas = { deviceId: 'd1', sas: '123456' };
+    useStore.setState({ remoteReady: false, pendingSas: sas, awaitingDesktopConfirm: true, refreshKey: 0 });
+    createReadyFallback(useStore.getState().stopAwaitingDesktop).arm();
     vi.advanceTimersByTime(READY_FALLBACK_MS);
-    expect(useStore.getState().awaitingDesktopConfirm).toBe(false);
-    expect(useStore.getState().refreshKey).toBe(1);
+    const s = useStore.getState();
+    expect(s.awaitingDesktopConfirm).toBe(false);
+    expect(s.refreshKey).toBe(1);
+    expect(s.remoteReady).toBe(false);
+    expect(s.pendingSas).toEqual(sas);
+  });
+
+  it('setWsConnected(false) after ready re-enables the banner', () => {
+    const sas = { deviceId: 'd1', sas: '123456' };
+    useStore.setState({ remoteReady: false, pendingSas: null });
+    useStore.getState().markRemoteReady();
+    useStore.getState().setWsConnected(false);
+    expect(useStore.getState().remoteReady).toBe(false);
+    useStore.getState().setPendingSas(sas);
+    expect(useStore.getState().pendingSas).toEqual(sas);
   });
 });

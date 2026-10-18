@@ -23,6 +23,7 @@
   "defaultShell": "process",
   "definitionOfDone": "scheduler",
   "delegationReadiness": "epic",
+  "depHealth": "git",
   "depSlugResolve": "prd",
   "dispatchLoop": "scheduler",
   "dodDrainHook": "scheduler",

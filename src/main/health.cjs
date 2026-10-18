@@ -399,6 +399,41 @@ function evaluateEpicIndexHealth(cwds) {
   return { component: { ok: !anyOrphanRows, byProject }, issues };
 }
 
+// Read-only scan for stray `session-manager-operations` dirs nested under a
+// project root (symptom of a writer joining an agent cwd without
+// projectRootOf/opsPath). The top-level one is legitimate; node_modules, .git
+// and .claude/worktrees are skipped. Bounded depth, sync readdir, never writes.
+const OPS_DIR_NAME = 'session-manager-operations';
+function findNestedOpsRoots(projectRoot, { maxDepth = 3 } = {}) {
+  const found = [];
+  const walk = (dir, depth) => {
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue; // symlinks are not followed
+      if (e.name === 'node_modules' || e.name === '.git') continue;
+      const full = path.join(dir, e.name);
+      if (e.name === '.claude') {
+        // only .claude/worktrees is skipped; other .claude children still scan
+        if (depth + 1 < maxDepth) {
+          try {
+            for (const c of fs.readdirSync(full, { withFileTypes: true })) {
+              if (c.isDirectory() && c.name !== 'worktrees') walk(path.join(full, c.name), depth + 2);
+            }
+          } catch { /* unreadable */ }
+        }
+        continue;
+      }
+      if (e.name === OPS_DIR_NAME) {
+        if (depth > 0) { found.push(full); continue; } // stray; don't descend
+      }
+      if (depth + 1 < maxDepth) walk(full, depth + 1);
+    }
+  };
+  walk(projectRoot, 0);
+  return found;
+}
+
 // Pure evaluator over ~/.claude/session-manager/scheduler-state.json's parsed
 // content (the sidecar scheduler.cjs's pollLoop maintains for the billing
 // usage-meter / rate-limit-window poller — see rateLimitPollerStreak tests).
@@ -1234,6 +1269,18 @@ async function check(opts = {}) {
     status.components.epic_transcripts = { ok: true, error: e.message };
   }
 
+  // 6.665. Nested ops roots (NON-fatal WARN): stray session-manager-operations
+  // dirs under this project. Read-only; never deletes.
+  try {
+    const nested = findNestedOpsRoots(PROJECT_ROOT, { maxDepth: 3 });
+    status.components.nested_ops_roots = { ok: true, count: nested.length, paths: nested };
+    if (nested.length > 0) {
+      status.issues.push(`Warning: ${nested.length} nested session-manager-operations dir(s): ${nested.join(', ')}`);
+    }
+  } catch (e) {
+    status.components.nested_ops_roots = { ok: true, error: e.message };
+  }
+
   // 6.7. Build freshness (informational): running heartbeat vs installed
   // build-info vs repo HEAD.
   try {
@@ -1297,6 +1344,7 @@ module.exports = {
   evaluateCredentialHealth,
   computeEpicIndexDrift,
   evaluateEpicIndexHealth,
+  findNestedOpsRoots,
   computeProjectProblemCounts,
   evaluateWorktreeCapBlocked,
   evaluatePerProjectStall,

@@ -111,9 +111,72 @@ function partitionJobs(jobs, nowMs, opts = {}) {
   return { hot, toArchive };
 }
 
+const SLIM_ARRAY_FIELDS = ['preRunDirtyPaths', 'guardBaseline', 'leftoverPaths'];
+const SALVAGE_PATCH_MAX_BYTES = 2048;
+// Dedupe only needs recent rows: a crash-replay re-submits the batch that was
+// just appended, so the tail of the file always contains its keys.
+const DEDUPE_TAIL_BYTES = 2 * 1024 * 1024;
+
 /**
- * Append-only JSONL write, deduped by slug+runId against what's already on
- * disk. The dedupe exists for crash-safety: reconcile() appends BEFORE
+ * Pure: returns a copy of `row` with the bulky snapshot arrays
+ * (preRunDirtyPaths, guardBaseline, leftoverPaths) replaced by `<field>Count`,
+ * and a salvagePatch string over 2 KB replaced by `salvagePatchBytes`. Every
+ * other field passes through unchanged. Rows without those fields are
+ * returned as-is (same shape, no extra keys).
+ */
+function slimHistoryRow(row) {
+  if (!row || typeof row !== 'object') return row;
+  let out = row;
+  const slim = () => (out === row ? (out = { ...row }) : out);
+  for (const f of SLIM_ARRAY_FIELDS) {
+    if (Array.isArray(row[f])) {
+      const o = slim();
+      o[`${f}Count`] = row[f].length;
+      delete o[f];
+    }
+  }
+  if (typeof row.salvagePatch === 'string') {
+    const bytes = Buffer.byteLength(row.salvagePatch, 'utf8');
+    if (bytes > SALVAGE_PATCH_MAX_BYTES) {
+      const o = slim();
+      o.salvagePatchBytes = bytes;
+      delete o.salvagePatch;
+    }
+  }
+  return out;
+}
+
+/** Text of the last `maxBytes` of a file, cut to whole lines ('' if absent). */
+async function readTailText(target, maxBytes) {
+  let fh;
+  try {
+    fh = await fsp.open(target, 'r');
+  } catch (e) {
+    if (e.code === 'ENOENT') return '';
+    throw e;
+  }
+  try {
+    const { size } = await fh.stat();
+    if (size === 0) return '';
+    const len = Math.min(maxBytes, size);
+    const start = size - len;
+    const buf = Buffer.alloc(len);
+    await fh.read(buf, 0, len, start);
+    let text = buf.toString('utf8');
+    if (start > 0) {
+      // Window may begin mid-line; drop the partial first fragment.
+      const nl = text.indexOf('\n');
+      text = nl === -1 ? '' : text.slice(nl + 1);
+    }
+    return text;
+  } finally {
+    await fh.close();
+  }
+}
+
+/**
+ * Append-only JSONL write, deduped by slug+runId against the last 2 MB of
+ * what's already on disk. Rows are slimmed (slimHistoryRow) before writing. The dedupe exists for crash-safety: reconcile() appends BEFORE
  * dropping archived jobs from state.jobs, so a crash between those two steps
  * replays the same batch through partitionJobs on the next boot — dedupe
  * here is what stops that replay from double-writing history.
@@ -133,12 +196,7 @@ async function appendHistory(entries) {
 
   let appended = 0;
   for (const [target, group] of byPath) {
-    let existingText = '';
-    try {
-      existingText = await fsp.readFile(target, 'utf8');
-    } catch (e) {
-      if (e.code !== 'ENOENT') throw e;
-    }
+    const existingText = await readTailText(target, DEDUPE_TAIL_BYTES);
 
     const existingKeys = new Set();
     if (existingText) {
@@ -156,7 +214,7 @@ async function appendHistory(entries) {
     if (fresh.length === 0) continue;
 
     await fsp.mkdir(path.dirname(target), { recursive: true });
-    const text = fresh.map((e) => JSON.stringify(e)).join('\n') + '\n';
+    const text = fresh.map((e) => JSON.stringify(slimHistoryRow(e))).join('\n') + '\n';
     await fsp.appendFile(target, text, 'utf8');
     appended += fresh.length;
   }
@@ -407,6 +465,7 @@ module.exports = {
   historyPath,
   partitionJobs,
   appendHistory,
+  slimHistoryRow,
   readHistory,
   historyTerminalBySlug,
   completedSlugsForCwd,

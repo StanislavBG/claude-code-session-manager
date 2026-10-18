@@ -433,3 +433,56 @@ test('completedSlugsForCwd: ignores needs_review ledger lines even when they are
   const slugs = await queueHistory.completedSlugsForCwd(projectCwd);
   expect(slugs.has('900-base')).toBe(true);
 });
+
+// ---------- slim rows + tail-window dedupe ----------
+
+test('appendHistory: a 500-entry preRunDirtyPaths is replaced by a count and the row stays under 1 KB', async () => {
+  const paths = Array.from({ length: 500 }, (_, i) => `src/some/long/dirty/path/file-${i}.ts`);
+  const row = old({
+    slug: 'slim-1', runId: 'rs1',
+    preRunDirtyPaths: paths, guardBaseline: paths.slice(0, 50), leftoverPaths: ['a', 'b'],
+    salvagePatch: 'p'.repeat(5000),
+  });
+  await queueHistory.appendHistory([row]);
+  const raw = fs.readFileSync(queueHistory.historyPath(), 'utf8');
+  expect(Buffer.byteLength(raw, 'utf8')).toBeLessThan(1024);
+  const [read] = await queueHistory.readHistory({ limit: 1 });
+  expect(read.preRunDirtyPaths).toBeUndefined();
+  expect(read.preRunDirtyPathsCount).toBe(500);
+  expect(read.guardBaselineCount).toBe(50);
+  expect(read.leftoverPathsCount).toBe(2);
+  expect(read.salvagePatch).toBeUndefined();
+  expect(read.salvagePatchBytes).toBe(5000);
+  expect(read.slug).toBe('slim-1');
+  expect(read.status).toBe('completed');
+  // Caller's object is not mutated.
+  expect(row.preRunDirtyPaths).toHaveLength(500);
+});
+
+test('slimHistoryRow: leaves small salvagePatch and unrelated fields unchanged', () => {
+  const row = old({ salvagePatch: 'small', note: 'keep' });
+  expect(queueHistory.slimHistoryRow(row)).toEqual(row);
+});
+
+test('appendHistory: a duplicate of a recent row inside the tail window is not re-appended', async () => {
+  const filler = Array.from({ length: 50 }, (_, i) => old({ slug: `f${i}`, runId: `rf${i}`, bodyPreview: 'x'.repeat(200) }));
+  await queueHistory.appendHistory(filler);
+  const recent = old({ slug: 'recent-dup', runId: 'rrd' });
+  expect((await queueHistory.appendHistory([recent])).appended).toBe(1);
+  expect((await queueHistory.appendHistory([recent])).appended).toBe(0);
+  const lines = fs.readFileSync(queueHistory.historyPath(), 'utf8').split('\n').filter(Boolean);
+  expect(lines.filter((l) => l.includes('recent-dup'))).toHaveLength(1);
+});
+
+test('historyTerminalBySlug: finds an old row buried beyond the dedupe tail window, and slim rows keep their status', async () => {
+  const target = queueHistory.historyPath();
+  const ancient = old({ slug: 'ancient', status: 'failed', runId: 'rancient' });
+  // Old-format (pre-slim) row followed by > 2 MB of filler lines.
+  const pad = JSON.stringify(old({ slug: 'pad', runId: 'rpad', bodyPreview: 'z'.repeat(100_000) })) + '\n';
+  fs.writeFileSync(target, JSON.stringify({ ...ancient, preRunDirtyPaths: ['x'] }) + '\n' + pad.repeat(25), 'utf8');
+  const slimmed = old({ slug: 'after', status: 'completed', runId: 'rafter', preRunDirtyPaths: ['a', 'b'] });
+  expect((await queueHistory.appendHistory([slimmed])).appended).toBe(1);
+  const map = await queueHistory.historyTerminalBySlug();
+  expect(map.get('ancient').status).toBe('failed');
+  expect(map.get('after').status).toBe('completed');
+});

@@ -2329,6 +2329,8 @@ export interface SessionManagerAPI {
     getWorktreeDisabled: (payload: PromptSessionsGetWorktreeDisabledPayload) => Promise<PromptSessionsGetWorktreeDisabledResult>;
     /** Writes the per-project "disable Epic worktree isolation" UI toggle. */
     setWorktreeDisabled: (payload: PromptSessionsSetWorktreeDisabledPayload) => Promise<PromptSessionsSetWorktreeDisabledResult>;
+    /** Archives the raw Claude JSONL to a gzip sidecar main-side; pointer, or null when absent/empty. */
+    archiveTranscript: (payload: { cwd: string; epicId: string; claudeSessionId: string }) => Promise<{ path: string; bytes: number; gzBytes: number; sha256: string } | null>;
   };
 }
 

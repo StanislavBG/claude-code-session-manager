@@ -7,7 +7,7 @@
  * `prompt-sessions` namespace, so the `epics` owner already covers it) and the
  * caller keeps only the small pointer returned by writeSidecar.
  *
- * Electron-free (like epicStatusMirror.cjs). No caller is wired here.
+ * Electron-free at load (like epicStatusMirror.cjs); registerIpc takes ipcMain.
  */
 
 const crypto = require('node:crypto');
@@ -61,4 +61,31 @@ function readSidecar(cwd, epicId) {
   }
 }
 
-module.exports = { writeSidecar, readSidecar, sidecarPath };
+/**
+ * archiveTranscript({cwd, epicId, claudeSessionId}, {resolvePath}) -> pointer | null.
+ * Reads the raw Claude JSONL main-side and writes the sidecar; null when the
+ * JSONL is missing or empty (caller falls back to durableTurns).
+ */
+function archiveTranscript(args, { resolvePath } = {}) {
+  const { cwd, epicId, claudeSessionId } = args || {};
+  if (typeof cwd !== 'string' || !require('node:path').isAbsolute(cwd)) {
+    throw new Error('archivedTranscript: cwd must be an absolute path');
+  }
+  assertSafeEpicId(epicId);
+  if (typeof claudeSessionId !== 'string' || !claudeSessionId) return null;
+  const resolve = resolvePath || ((c, s) => require('../../transcripts.cjs').transcriptPath(c, s));
+  let text;
+  try {
+    text = fs.readFileSync(resolve(cwd, claudeSessionId), 'utf8');
+  } catch {
+    return null;
+  }
+  if (!text) return null;
+  return writeSidecar(cwd, epicId, text);
+}
+
+function registerIpc(ipcMain, deps) {
+  ipcMain.handle('promptSessions:archiveTranscript', async (_e, payload) => archiveTranscript(payload, deps));
+}
+
+module.exports = { writeSidecar, readSidecar, sidecarPath, archiveTranscript, registerIpc };

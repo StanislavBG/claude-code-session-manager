@@ -1007,6 +1007,7 @@ pluginInstall.registerPluginInstallHandlers();
 memoryTool.registerMemoryHandlers();
 activeIndexMerge.registerActiveIndexMergeHandlers();
 promptSessionsCreateEpic.registerPromptSessionsCreateEpicHandlers();
+require('./lib/epic/archivedTranscript.cjs').registerIpc(ipcMain);
 customerFeedbackIpc.registerCustomerFeedbackHandlers();
 epicWorktreeMint.registerEpicWorktreeMintHandlers();
 epicWorktreeMerge.registerEpicWorktreeMergeHandlers();

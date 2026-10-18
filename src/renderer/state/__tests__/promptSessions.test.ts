@@ -39,6 +39,7 @@ function installWindowApiMock() {
     },
     promptSessions: {
       onEventAppended: vi.fn(),
+      archiveTranscript: vi.fn().mockResolvedValue({ path: '/p/e.jsonl.gz', bytes: 15, gzBytes: 10, sha256: 'abc' }),
       mergeActiveIndex: vi.fn().mockResolvedValue({ sessions: {}, events: {} }),
       create: fakePromptSessionsCreate(),
       // Defaults to null (no worktree) — matches createEpicWorktreeViaIpc's
@@ -324,7 +325,8 @@ describe('promptSessions.ts', () => {
     const [archivePath, archive] = archiveCall!
     expect(archive.session).toEqual(updated)
     expect(archive.events).toEqual(events)
-    expect(archive.transcript).toBe('transcript body')
+    expect(archive.transcript).toBeUndefined()
+    expect(archive.transcriptRef).toEqual({ path: '/p/e.jsonl.gz', bytes: 15, gzBytes: 10, sha256: 'abc' })
     expect(archive.archivedAt).toBeTruthy()
   })
 
@@ -346,7 +348,7 @@ describe('promptSessions.ts', () => {
 
   it('markCompleted falls back to the durable transcript store when the raw ~/.claude/projects copy is empty', async () => {
     const api = installWindowApiMock()
-    api.config.readText.mockResolvedValue({ exists: false, text: '', mtimeMs: 0, error: null })
+    api.promptSessions.archiveTranscript.mockResolvedValue(null)
     api.promptSessionTranscript.read.mockResolvedValue({
       turns: [
         { v: 1, epicId: 'irrelevant', eventId: null, role: 'user', at: '2026-01-01T00:00:00.000Z', text: 'hello' },
@@ -364,7 +366,7 @@ describe('promptSessions.ts', () => {
     )
     expect(archiveCall).toBeDefined()
     const [, archive] = archiveCall!
-    expect(archive.transcript).toBe('')
+    expect(archive.transcriptRef).toBeUndefined()
     expect(archive.durableTurns).toEqual([
       { role: 'user', text: 'hello', at: '2026-01-01T00:00:00.000Z' },
       { role: 'assistant', text: 'hi there', at: '2026-01-01T00:00:01.000Z' },
@@ -384,7 +386,7 @@ describe('promptSessions.ts', () => {
       (c) => c[0] === promptSessionArchivePath('/proj', session.id),
     )
     const [, archive] = archiveCall!
-    expect(archive.transcript).toBe('transcript body')
+    expect(archive.transcriptRef).toBeDefined()
     expect(archive.durableTurns).toBeUndefined()
   })
 

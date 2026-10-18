@@ -147,7 +147,10 @@ export interface PromptSession {
 export interface PromptSessionArchive {
   session: PromptSession
   events: PromptSessionEvent[]
-  transcript: string
+  /** Legacy inline raw JSONL — absent on archives written after the sidecar wire. */
+  transcript?: string
+  /** Pointer to the gzip sidecar (archivedTranscript.cjs). */
+  transcriptRef?: { path: string; bytes: number; gzBytes: number; sha256: string }
   archivedAt: string
   /** Status mirror fields (see src/main/lib/epic/epicStatusMirror.cjs) — copies of
    *  `session.status`/`session.cwd` plus a write timestamp, kept at the TOP
@@ -687,13 +690,16 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     }
     emitAuditEvent('epic_complete', { cwd: session.cwd, epicId: promptSessionId, source: source ?? 'unknown' })
 
-    let transcript = ''
+    let transcriptRef: PromptSessionArchive['transcriptRef'] = undefined
     try {
-      const transcriptPath = await window.api.transcripts.pathFor(session.cwd, session.claudeSessionId)
-      const result = await window.api.config.readText(transcriptPath)
-      transcript = result.exists ? result.text : ''
-    } catch {
-      transcript = ''
+      transcriptRef =
+        (await window.api.promptSessions.archiveTranscript({
+          cwd: session.cwd,
+          epicId: promptSessionId,
+          claudeSessionId: session.claudeSessionId,
+        })) ?? undefined
+    } catch (err) {
+      toast.error(`Transcript archive failed: ${err instanceof Error ? err.message : String(err)}`)
     }
 
     // The raw ~/.claude/projects/... copy above is a one-shot best-effort
@@ -703,7 +709,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     // carries its conversation. Both fields are kept when present rather
     // than one replacing the other.
     let durableTurns: PromptSessionArchive['durableTurns'] = undefined
-    if (!transcript) {
+    if (!transcriptRef) {
       try {
         const { turns } = await window.api.promptSessionTranscript.read(session.cwd, promptSessionId)
         if (turns.length > 0) {
@@ -717,7 +723,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     const archive: PromptSessionArchive = {
       session: completed,
       events: get().events[promptSessionId] ?? closedEventList,
-      transcript,
+      ...(transcriptRef ? { transcriptRef } : {}),
       archivedAt: now,
       status: completed.status,
       cwd: completed.cwd,

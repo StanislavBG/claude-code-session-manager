@@ -596,5 +596,7 @@ contextBridge.exposeInMainWorld('api', {
      *  the UI-reachable equivalent of setting SM_EPIC_WORKTREE_DISABLE=1 for
      *  just this one project rather than machine-wide. */
     setWorktreeDisabled: (payload) => ipcRenderer.invoke('promptSessions:set-worktree-disabled', payload),
+    /** Writes the gzip transcript sidecar main-side; resolves the pointer, or null when no JSONL. */
+    archiveTranscript: (payload) => ipcRenderer.invoke('promptSessions:archiveTranscript', payload),
   },
 });

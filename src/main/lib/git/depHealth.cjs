@@ -67,7 +67,7 @@ function repairMainDependencies(mainCwd) {
   return new Promise((resolve) => {
     try {
       execFile(
-        'pnpm',
+        process.env.SM_PNPM_BIN || 'pnpm',
         ['install', '--offline', '--frozen-lockfile', '--config.confirmModulesPurge=false'],
         { cwd: mainCwd, env: { ...process.env, CI: '1' }, timeout: 300_000, maxBuffer: 16 * 1024 * 1024 },
         (err, stdout, stderr) => {

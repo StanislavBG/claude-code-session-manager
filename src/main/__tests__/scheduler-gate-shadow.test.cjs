@@ -446,3 +446,24 @@ test('gate authority: a runId change under the gate drops the result entirely, n
   assert.equal(row.runId, 'a-different-run');
   assert.equal('gateShadow' in row, false, 'the stale result is dropped entirely, not written onto the new dispatch');
 });
+
+test('broken main pnpm node_modules: repair fails -> unavailable, non-definitive, gate skipped', async () => {
+  const t = setup('maindeps', ac('timeout 30 node --version'));
+  fs.writeFileSync(path.join(t.cwd, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+  fs.writeFileSync(path.join(t.cwd, 'package.json'), JSON.stringify({ name: 'x', dependencies: { lib: '1.0.0' } }));
+  const stub = path.join(tmpHome, 'pnpm-stub.sh');
+  fs.writeFileSync(stub, '#!/bin/sh\nexit 1\n');
+  fs.chmodSync(stub, 0o755);
+  const prev = process.env.SM_PNPM_BIN;
+  process.env.SM_PNPM_BIN = stub;
+  try {
+    const rec = await runGateShadow(t.job);
+    assert.equal(rec.status, 'unavailable');
+    assert.ok(rec.reason.startsWith('main-deps-broken'), rec.reason);
+    assert.equal(rec.definitive, false);
+    assert.equal(rec.mainDeps.ok, false);
+    assert.equal(rec.mainDeps.repaired, false);
+  } finally {
+    if (prev === undefined) delete process.env.SM_PNPM_BIN; else process.env.SM_PNPM_BIN = prev;
+  }
+});

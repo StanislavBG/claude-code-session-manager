@@ -81,6 +81,10 @@ const { stripAppOwnedChurn } = require('./lib/scheduler/jobDirtFilter.cjs');
 const { GATE_AUTHORITY_VERDICTS, decideGateAuthority } = require('./lib/scheduler/gateAuthority.cjs');
 const { decideBaselineAuthority } = require('./lib/scheduler/baselineGate.cjs');
 const { linkDependencyDirs } = require('./lib/git/worktreeDeps.cjs');
+const { checkMainDependencyHealth, repairMainDependencies } = require('./lib/git/depHealth.cjs');
+// cwd -> last main-checkout dependency repair attempt (ms); caps repair to once per cooldown.
+const mainDepsRepairAt = new Map();
+const MAIN_DEPS_REPAIR_COOLDOWN_MS = 10 * 60_000;
 const { resolveBindingRateLimitReset } = require('./lib/claude/rateLimitWindow.cjs');
 const { isResetFresh, bindingWindow, degradedBudget, meterFailureBudget } = require('./lib/claude/usageCircuit.cjs');
 const { computeQueueHealth } = require('./lib/scheduler/queueHealth.cjs');
@@ -8744,12 +8748,31 @@ async function runGateShadow(job) {
   const dirtBefore = await gateTreeDirt(job.cwd);
   const gate = resolveGate(prdText);
   let outcome;
+  let mainDeps = null;
+  let repaired = false;
   if (gate.source === 'none') outcome = { status: 'unavailable', reason: 'gate-opt-out', results: [] };
   else if (!gate.sequence.length) outcome = { status: 'unavailable', reason: 'no-parseable-gate', results: [] };
   else {
-    const r = await runGateSequence(gate.sequence, { cwd: job.cwd });
-    if (r.status === 'busy') return null;
-    outcome = r;
+    let health = checkMainDependencyHealth(job.cwd);
+    if (!health.ok) {
+      const last = mainDepsRepairAt.get(job.cwd) ?? 0;
+      if (Date.now() - last >= MAIN_DEPS_REPAIR_COOLDOWN_MS) {
+        mainDepsRepairAt.set(job.cwd, Date.now());
+        const rep = await repairMainDependencies(job.cwd);
+        repaired = rep.ok;
+        console.warn(`[scheduler] main deps broken in ${job.cwd}: ${health.reason} — repair ${rep.ok ? 'ok' : 'failed'}`);
+        health = checkMainDependencyHealth(job.cwd);
+      }
+      mainDeps = { ok: health.ok, reason: health.reason ?? null, missing: health.missing ?? [], repaired };
+    }
+    if (!health.ok) {
+      const names = health.missing && health.missing.length ? `: ${health.missing.join(', ')}` : '';
+      outcome = { status: 'unavailable', reason: `main-deps-broken: ${health.reason}${names}`, results: [] };
+    } else {
+      const r = await runGateSequence(gate.sequence, { cwd: job.cwd });
+      if (r.status === 'busy') return null;
+      outcome = r;
+    }
   }
   const headAfter = await gitTreeGuard.gitHead(job.cwd);
   const dirtAfter = await gateTreeDirt(job.cwd);
@@ -8761,7 +8784,7 @@ async function runGateShadow(job) {
   // about done-ness, so it must stay eligible for retry once the PRD gains a
   // real gate. `busy` never reaches here (returns early above).
   const definitive = headStable && cleanOk && (outcome.status === 'green' || outcome.status === 'red');
-  const gateShadow = { ...outcome, head: headBefore, source: gate.source, ranAt: new Date().toISOString(), definitive };
+  const gateShadow = { ...outcome, head: headBefore, source: gate.source, ranAt: new Date().toISOString(), definitive, ...(mainDeps ? { mainDeps } : {}) };
 
   // Gate authority: a green re-run may complete the row outright, but only
   // for transcript-noise verdicts with a landed commit — every other park

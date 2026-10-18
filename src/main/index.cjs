@@ -1490,6 +1490,23 @@ app.whenReady().then(async () => {
     runRunLogRetentionPass();
     const retentionTimer = setInterval(runRunLogRetentionPass, 24 * 60 * 60 * 1000);
     if (retentionTimer.unref) retentionTimer.unref();
+    // Archived-transcript migration: move embedded `transcript` strings into gzip
+    // sidecars, <=50 files per project per boot, yielding between files. Uses the
+    // cached allProjectCwds() list (never a fresh ~/.claude/projects scan).
+    (async () => {
+      try {
+        const { migrateProject } = require('./lib/epic/archivedTranscriptMigration.cjs');
+        for (const projectCwd of allProjectCwds()) {
+          const r = await migrateProject(projectCwd, { limit: 50, yieldFn: () => new Promise((res) => setImmediate(res)) });
+          if (r.migrated || r.errors.length) {
+            logs.writeLine({ scope: 'main', level: r.errors.length ? 'warn' : 'info', message: 'archived transcript migration', meta: { projectCwd, migrated: r.migrated, freedBytes: r.freedBytes, errors: r.errors.length } });
+          }
+          await new Promise((res) => setImmediate(res));
+        }
+      } catch (e) {
+        logs.writeLine({ scope: 'main', level: 'error', message: 'archived transcript migration failed', meta: { error: e?.message } });
+      }
+    })();
   }, 30_000);
   // Keep TODAY's rollup line current so the History dashboard never needs to
   // fall back to a live transcript scan. Shares the same O_EXCL lock file as

@@ -159,11 +159,13 @@ export default function MicPane({ socket, deviceId, target, disabledReason }: Pr
       {/* Voice bottom sheet — bound to live Web Speech state */}
       {sheetOpen && (
         <div className="absolute inset-0 z-30 flex flex-col justify-end" data-testid="voice-sheet">
-          <div
+          <button
+            type="button"
             data-track="mic-sheet-close"
-            className="absolute inset-0 bg-[rgba(20,14,8,0.45)] backdrop-blur-[2px]"
+            tabIndex={-1}
+            aria-label="Close voice sheet"
+            className="absolute inset-0 bg-[rgba(20,14,8,0.45)] backdrop-blur-[2px] cursor-default"
             onClick={() => { stopMic(); setSheetOpen(false); }}
-            aria-hidden="true"
           />
           <div className="relative rm-sheet bg-paper rounded-t-[26px] px-6 pt-5 pb-7 safe-bottom shadow-[0_-10px_40px_rgba(0,0,0,0.25)]">
             <div className="w-10 h-[5px] rounded-full bg-rule mx-auto mb-5" />

@@ -1110,9 +1110,11 @@ const SMFILE_MIME = {
 // E2E tests also skip so playwright.electron.launch can run multiple specs
 // back-to-back without the prior app's lock causing the next launch to quit.
 const isDev = process.env.SM_DEV === '1' || process.env.SM_E2E === '1';
+let lostInstanceLock = false;
 if (!isDev) {
   const gotLock = app.requestSingleInstanceLock();
   if (!gotLock) {
+    lostInstanceLock = true;
     terminateLosingInstance(app);
   } else {
     app.on('second-instance', () => {
@@ -1122,6 +1124,31 @@ if (!isDev) {
         mainWindow.focus();
       }
     });
+  }
+}
+
+function runRunLogRetentionPass() {
+  if (lostInstanceLock) return;
+  try {
+    const schedulerPaths = require('./lib/scheduler/schedulerPaths.cjs');
+    const staleTmpSweep = require('./lib/scheduler/staleTmpSweep.cjs');
+    const result = runLogRetention.runBootSweep();
+    const plansRoot = schedulerPaths.scheduledPlansRoot();
+    const tmp = staleTmpSweep.sweepStaleTmp(plansRoot);
+    const archive = staleTmpSweep.pruneRunsArchive(path.join(plansRoot, 'runs-archive'));
+    logs.writeLine({
+      scope: 'run-log-retention',
+      level: 'info',
+      message: result.deleted ? 'sweep applied' : 'sweep dry-run',
+      meta: {
+        deleted: result.deleted,
+        removedFiles: (result.removedFiles || 0) + tmp.removedFiles + archive.removedFiles,
+        freedBytes: (result.freedBytes || 0) + tmp.freedBytes + archive.freedBytes,
+        errorCount: (result.errors ? result.errors.length : 0) + tmp.errors.length + archive.errors.length,
+      },
+    });
+  } catch (e) {
+    logs.writeLine({ scope: 'run-log-retention', level: 'error', message: 'sweep failed', meta: { error: e?.message } });
   }
 }
 
@@ -1454,25 +1481,14 @@ app.whenReady().then(async () => {
       logs.writeLine({ scope: 'history-rollup', level: 'error', message: 'finalizeClosedDays failed', meta: { error: e?.message } });
     });
     runIntradayRefresh();
-    // Run-log retention sweep: same deferred-30s, once-per-boot shape as the
-    // history rollup above. Read-only unless config.schedulerRunLogRetention
+    // Run-log retention sweep: runs once 30s after boot, then every 24h (a
+    // long-lived app would otherwise never trim). Skipped when this process
+    // lost the single-instance lock (lostInstanceLock, set beside
+    // terminateLosingInstance above). Read-only unless config.schedulerRunLogRetention
     // opts in (see runLogRetention.cjs's safety model) — non-fatal on error.
-    try {
-      const result = runLogRetention.runBootSweep();
-      logs.writeLine({
-        scope: 'run-log-retention',
-        level: 'info',
-        message: result.deleted ? 'boot sweep applied' : 'boot sweep dry-run',
-        meta: {
-          deleted: result.deleted,
-          removedFiles: result.removedFiles,
-          freedBytes: result.freedBytes,
-          errorCount: result.errors ? result.errors.length : 0,
-        },
-      });
-    } catch (e) {
-      logs.writeLine({ scope: 'run-log-retention', level: 'error', message: 'boot sweep failed', meta: { error: e?.message } });
-    }
+    runRunLogRetentionPass();
+    const retentionTimer = setInterval(runRunLogRetentionPass, 24 * 60 * 60 * 1000);
+    if (retentionTimer.unref) retentionTimer.unref();
   }, 30_000);
   // Keep TODAY's rollup line current so the History dashboard never needs to
   // fall back to a live transcript scan. Shares the same O_EXCL lock file as

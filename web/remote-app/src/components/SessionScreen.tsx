@@ -84,7 +84,7 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
   return (
     <div className="flex flex-col h-dvh text-ink" data-testid="session-screen">
       <header className="flex items-center gap-3 px-3 h-12 border-b border-edge bg-paper flex-shrink-0">
-        <button onClick={onBack} aria-label="Back" className="min-h-touch min-w-touch text-ink active:text-accent">‹ Back</button>
+        <button onClick={onBack} data-track="session-back" aria-label="Back" className="min-h-touch min-w-touch text-ink active:text-accent">‹ Back</button>
         <span className="flex-1 font-serif text-lg font-semibold truncate">{title}</span>
         {status && <span className="text-xs font-mono text-ink-soft" data-testid="session-status">{status}</span>}
       </header>
@@ -94,7 +94,7 @@ export default function SessionScreen({ socket, deviceId, projectCwd, target, on
 
       {isEpic && (
         <section className="border-b border-edge bg-panel px-3.5 py-2 flex-shrink-0">
-          <button onClick={() => setPrdsOpen((o) => !o)} aria-expanded={prdsOpen} className="text-sm font-medium text-ink">
+          <button onClick={() => setPrdsOpen((o) => !o)} data-track="session-prds-toggle" aria-expanded={prdsOpen} className="text-sm font-medium text-ink">
             PRDs ({prds.length})
           </button>
           {prdError && <div className="text-xs text-accent mt-1" role="alert">{prdError}</div>}

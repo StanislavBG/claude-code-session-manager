@@ -99,6 +99,7 @@ export default function SessionsScreen({
       <div className="flex items-center gap-2 pb-2">
         <button
           onClick={onBack}
+          data-track="sessions-back"
           className="min-h-touch px-2 text-sm font-semibold text-accent"
           aria-label="Back"
         >
@@ -107,6 +108,7 @@ export default function SessionsScreen({
         <div className="flex-1 min-w-0 text-[15px] font-semibold text-ink truncate">{title}</div>
         <button
           onClick={() => setSheet(true)}
+          data-track="sessions-new"
           className="text-xs font-semibold text-accent min-h-touch px-1"
           aria-label={`New session in ${title}`}
         >
@@ -123,6 +125,7 @@ export default function SessionsScreen({
           <div className="text-sm text-ink">{state.error}</div>
           <button
             onClick={retry}
+            data-track="sessions-retry"
             className="self-start min-h-touch px-4 rounded-2xl border border-edge bg-card text-sm font-semibold text-accent"
           >
             Retry
@@ -134,6 +137,8 @@ export default function SessionsScreen({
           {project && (
             <button
               data-testid="main-session-row"
+              data-track="sessions-open-main"
+              data-track-redact=""
               onClick={() => onOpen({ kind: 'main', mainTabId: project.mainTabId, title })}
               className="w-full flex items-center gap-3 px-3.5 py-3 text-left rounded-2xl border border-edge bg-card min-h-touch active:bg-panel"
             >
@@ -160,6 +165,8 @@ export default function SessionsScreen({
                   <button
                     key={s.epicId}
                     data-testid="session-row"
+                    data-track="sessions-open-epic"
+                    data-track-redact=""
                     onClick={() => onOpen({ kind: 'epic', session: s })}
                     className={`w-full flex items-center gap-3 px-3.5 py-3 text-left rounded-2xl border border-edge bg-card min-h-touch active:bg-panel ${status === 'completed' ? 'opacity-60' : ''}`}
                   >

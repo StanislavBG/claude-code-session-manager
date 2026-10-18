@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { RelaySocket } from '../ws';
+import { trackFlow, trackScreen } from '../telemetry';
 
 interface Macro {
   id: string;
@@ -43,6 +44,11 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
+
+  useEffect(() => {
+    trackScreen('new-session-sheet');
+    trackFlow('new-session', 'start');
+  }, []);
 
   useEffect(() => {
     if (!socket) return;
@@ -101,6 +107,7 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
     if (!socket || !ready) return;
     setBusy(true);
     setErr(null);
+    trackFlow('new-session', 'submit', { tag });
     try {
       const resp = await socket.sendCommand('cmd:session:create', deviceId, {
         cwd,
@@ -111,12 +118,15 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
       });
       const e = respError(resp);
       if (e) {
+        trackFlow('new-session', 'fail', { tag, reason: 'desktop-error' });
         setErr(e);
         return;
       }
+      trackFlow('new-session', 'success', { tag });
       onStarted?.();
       onClose();
     } catch (e: any) {
+      trackFlow('new-session', 'fail', { tag, reason: 'send-error' });
       setErr(e?.message || 'could not start session');
     } finally {
       setBusy(false);
@@ -130,7 +140,7 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
       <div className="w-full max-h-[90dvh] overflow-y-auto rm-scroll bg-paper border-t border-edge rounded-t-3xl p-4 flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div className="font-serif text-lg font-semibold truncate">New session · {project}</div>
-          <button onClick={onClose} className="min-h-touch min-w-touch text-ink-mute" aria-label="Close">✕</button>
+          <button onClick={onClose} data-track="new-session-close" className="min-h-touch min-w-touch text-ink-mute" aria-label="Close">✕</button>
         </div>
 
         {!opts && !err && <div className="text-sm text-ink-mute font-serif italic">Loading…</div>}
@@ -141,6 +151,8 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
               <button
                 key={m.id}
                 onClick={() => applyMacro(m)}
+                data-track="new-session-macro"
+                data-track-redact=""
                 className="px-3 py-1.5 rounded-full border border-edge bg-card text-sm text-ink active:bg-panel"
               >
                 {m.label}
@@ -189,7 +201,7 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
             onChange={(e) => onPrompt(e.target.value)}
           />
         </label>
-        <button onClick={dictate} disabled={listening} className="self-start text-sm text-accent min-h-touch" aria-label="Dictate prompt">
+        <button onClick={dictate} data-track="new-session-dictate" disabled={listening} className="self-start text-sm text-accent min-h-touch" aria-label="Dictate prompt">
           {listening ? 'Listening…' : '🎤 Dictate'}
         </button>
 
@@ -197,6 +209,7 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
 
         <button
           onClick={start}
+          data-track="new-session-start"
           disabled={!ready}
           className="min-h-touch rounded-2xl bg-accent text-white font-semibold disabled:opacity-40"
         >

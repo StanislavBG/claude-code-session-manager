@@ -326,6 +326,45 @@ async function maxParallelGroupInUse(prdsDir) {
 }
 
 /**
+ * Bound the `.reserved-NN` marker pile. Markers far below the highest
+ * reserved NN protect nothing (the O_EXCL race only matters for candidates
+ * near the floor, and `.max-allocated-group` already keeps the allocator
+ * monotonic), so keep the newest `keep` numbers and delete older markers
+ * whose mtime is also older than `minAgeMs`. Returns { removed, kept }.
+ */
+async function pruneStaleReservations(prdsDir, { keep = 100, minAgeMs = 3600000, now = Date.now() } = {}) {
+  let entries;
+  try {
+    entries = await fsp.readdir(prdsDir);
+  } catch {
+    return { removed: 0, kept: 0 };
+  }
+  const markers = [];
+  let max = 0;
+  for (const name of entries) {
+    const m = name.match(RESERVATION_RE);
+    if (!m) continue;
+    const nn = Number(m[1]);
+    markers.push({ name, nn });
+    max = Math.max(max, nn);
+  }
+  const cutoff = max - keep;
+  let removed = 0;
+  for (const { name, nn } of markers) {
+    if (nn > cutoff) continue;
+    try {
+      const st = await fsp.stat(path.join(prdsDir, name));
+      if (now - st.mtimeMs <= minAgeMs) continue;
+      await fsp.unlink(path.join(prdsDir, name));
+      removed += 1;
+    } catch {
+      // raced with another remover, or unreadable — leave it
+    }
+  }
+  return { removed, kept: markers.length - removed };
+}
+
+/**
  * Atomically allocate a brand-new parallel-group number under prdsDir.
  * Returns the reserved NN. Reservation survives a crash mid-allocation
  * (the `.reserved-NN` marker just sits there forever, retiring that one
@@ -360,6 +399,11 @@ async function allocateParallelGroup(prdsDir, { extraFloor = 0 } = {}) {
     if (candidate > highWater) {
       await writeHighWaterMark(prdsDir, candidate);
     }
+    try {
+      await pruneStaleReservations(prdsDir);
+    } catch {
+      // best-effort; never fail an allocation over housekeeping
+    }
     return candidate;
   }
   throw new Error(`allocateParallelGroup: exhausted ${MAX_RESERVE_ATTEMPTS} reservation attempts starting at ${candidate}`);
@@ -370,6 +414,7 @@ module.exports = {
   parsePrd,
   listPrdFiles,
   allocateParallelGroup,
+  pruneStaleReservations,
   maxParallelGroupInUse,
   PRD_READ_MAX_BYTES,
   _resetCache,

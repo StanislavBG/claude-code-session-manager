@@ -59,6 +59,7 @@ export default function ProjectsScreen({
         <div className="px-1 py-4 flex flex-col gap-3" role="alert">
           <div className="text-sm text-ink">{state.error}</div>
           <button
+            data-track="projects-retry"
             onClick={retry}
             className="self-start min-h-touch px-4 rounded-2xl border border-edge bg-card text-sm font-semibold text-accent"
           >
@@ -77,6 +78,8 @@ export default function ProjectsScreen({
             <button
               key={p.cwd}
               data-testid="project-row"
+              data-track="projects-open"
+              data-track-redact=""
               onClick={() => onOpen(p)}
               className="rm-in w-full flex flex-col gap-0.5 px-3.5 py-3 text-left rounded-2xl border border-edge bg-card min-h-touch transition-colors active:bg-panel"
               style={{ animationDelay: `${i * 45}ms` }}

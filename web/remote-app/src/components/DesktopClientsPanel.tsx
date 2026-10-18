@@ -57,6 +57,7 @@ export default function DesktopClientsPanel() {
       <div className="pb-2 text-[11.5px] font-bold uppercase tracking-[0.8px] text-ink-mute">Desktop clients</div>
       <button
         data-testid="desktop-client-mint"
+        data-track="desktop-client-mint"
         onClick={mint}
         disabled={minting}
         className="w-full min-h-touch px-3 rounded-2xl border border-edge bg-paper text-ink text-[15px] font-semibold active:bg-panel disabled:opacity-60"
@@ -82,6 +83,7 @@ export default function DesktopClientsPanel() {
             </div>
             <button
               data-testid="desktop-client-revoke"
+              data-track="desktop-client-revoke"
               onClick={() => revoke(c.clientId)}
               className="min-h-touch px-3 rounded-xl border border-edge text-ink text-[13px] active:bg-panel"
             >

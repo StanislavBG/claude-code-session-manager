@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useStore } from '../store';
 import { requestOtp, revokeDevice } from '../api';
 import type { RelaySocket } from '../ws';
+import { trackFlow } from '../telemetry';
 
 const IcoBolt = () => (
   <svg width={15} height={15} viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4 14h6l-1 8 9-12h-6z" /></svg>
@@ -44,8 +45,9 @@ export default function ConnectScreen({
 
   const generate = async () => {
     setLoading(true); setErr(null);
-    try { setCode((await requestOtp()).code); }
-    catch (e: any) { setErr(e?.message || 'Failed to generate code'); }
+    trackFlow('pair', 'start');
+    try { setCode((await requestOtp()).code); trackFlow('pair', 'code-issued'); }
+    catch (e: any) { trackFlow('pair', 'fail', { reason: 'otp-error' }); setErr(e?.message || 'Failed to generate code'); }
     finally { setLoading(false); }
   };
 
@@ -117,6 +119,7 @@ export default function ConnectScreen({
         </ol>
       ) : (hasDevices && !showPair) ? (
         <button
+          data-track="connect-pair-another"
           onClick={() => setShowPair(true)}
           className="h-10 rounded-xl border border-edge bg-card text-ink-soft text-sm font-medium active:opacity-80"
         >
@@ -124,6 +127,7 @@ export default function ConnectScreen({
         </button>
       ) : (
         <button
+          data-track="connect-generate-code"
           onClick={generate}
           disabled={loading}
           className="h-[54px] rounded-2xl bg-accent text-white text-base font-semibold flex items-center justify-center gap-2.5 shadow-[0_6px_18px_rgba(184,92,52,0.28)] active:opacity-90 disabled:opacity-50"
@@ -145,6 +149,7 @@ export default function ConnectScreen({
               <div className="text-[11.5px] font-bold uppercase tracking-[0.8px] text-ink-mute flex-1">Paired devices</div>
               {offline.length >= 2 && (
                 <button
+                  data-track="connect-forget-offline"
                   onClick={() => forget(offline.map((d) => d.deviceId), `Forget ${offline.length} offline devices?`)}
                   disabled={forgetting}
                   className="text-xs text-accent font-medium disabled:opacity-50"
@@ -162,6 +167,7 @@ export default function ConnectScreen({
                   <span className="text-xs text-ink-mute">{d.isOnline ? 'online' : 'offline'}</span>
                   {!d.isOnline && (
                     <button
+                      data-track="connect-forget-device"
                       onClick={() => forget([d.deviceId], 'Forget this device? You can pair it again later.')}
                       disabled={forgetting}
                       className="text-xs text-accent font-medium disabled:opacity-50"
@@ -178,6 +184,7 @@ export default function ConnectScreen({
           </>
         )}
         <button
+          data-track="connect-refresh"
           onClick={refresh}
           disabled={refreshing}
           className="w-full h-10 rounded-xl border border-edge bg-card text-ink-soft text-sm font-medium flex items-center justify-center gap-2 active:opacity-80 disabled:opacity-50"

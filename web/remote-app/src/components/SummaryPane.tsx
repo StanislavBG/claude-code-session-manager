@@ -35,6 +35,7 @@ export default function SummaryPane({ tabId }: { tabId: string }) {
       </p>
       {!isRaw && (
         <button
+          data-track="summary-toggle"
           onClick={() => setExpanded((v) => !v)}
           className="mt-3.5 text-xs font-semibold text-accent active:opacity-70 min-h-touch"
         >

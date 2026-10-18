@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RelaySocket } from '../ws';
 import { sendChat } from '../remoteApi';
+import { trackFlow, trackScreen } from '../telemetry';
 
 interface Props {
   socket: RelaySocket | null;
@@ -51,6 +52,8 @@ export default function MicPane({ socket, deviceId, target, disabledReason }: Pr
 
   useEffect(() => () => { try { recRef.current?.stop(); } catch { /* */ } }, []);
 
+  useEffect(() => { if (sheetOpen) trackScreen('mic-sheet'); }, [sheetOpen]);
+
   const startMic = () => {
     const Ctor = getSR();
     if (!Ctor) return;
@@ -77,13 +80,17 @@ export default function MicPane({ socket, deviceId, target, disabledReason }: Pr
     const data = (msg ?? text).trim();
     if (!data || !socket || disabledReason) return;
     if (!target) { setErr('Session no longer available'); return; }
+    const source = msg !== undefined ? 'chip' : sheetOpen ? 'voice' : 'text';
     setSending(true);
     setErr(null);
+    trackFlow('chat-send', 'start', { source });
     try {
       await sendChat(socket, deviceId, { target, prompt: data });
+      trackFlow('chat-send', 'success', { source });
       setText('');
       setSheetOpen(false);
     } catch (e: any) {
+      trackFlow('chat-send', 'fail', { source, reason: 'send-error' });
       setErr(e?.message || 'send failed');
     } finally {
       setSending(false);
@@ -97,6 +104,8 @@ export default function MicPane({ socket, deviceId, target, disabledReason }: Pr
         {QUICK.map((q) => (
           <button
             key={q}
+            data-track="mic-chip"
+            data-track-redact=""
             onClick={() => send(q)}
             disabled={sending || !!disabledReason}
             className="flex-shrink-0 rounded-full border border-edge bg-card text-ink-soft font-mono text-xs px-3.5 py-1.5 active:bg-panel disabled:opacity-50 whitespace-nowrap"
@@ -123,6 +132,7 @@ export default function MicPane({ socket, deviceId, target, disabledReason }: Pr
             {text.trim()
               ? (
                 <button
+                  data-track="mic-send"
                   onClick={() => send()}
                   disabled={sending || !!disabledReason}
                   className="w-9 h-9 rounded-full bg-accent text-white grid place-items-center disabled:opacity-50"
@@ -135,6 +145,7 @@ export default function MicPane({ socket, deviceId, target, disabledReason }: Pr
           </div>
           {supported && (
             <button
+              data-track="mic-start"
               onClick={startMic}
               aria-label="Start voice input"
               className="w-[46px] h-[46px] rounded-full bg-sage text-white grid place-items-center flex-shrink-0 shadow-[0_4px_14px_rgba(111,125,82,0.35)] active:opacity-90"
@@ -149,6 +160,7 @@ export default function MicPane({ socket, deviceId, target, disabledReason }: Pr
       {sheetOpen && (
         <div className="absolute inset-0 z-30 flex flex-col justify-end" data-testid="voice-sheet">
           <div
+            data-track="mic-sheet-close"
             className="absolute inset-0 bg-[rgba(20,14,8,0.45)] backdrop-blur-[2px]"
             onClick={() => { stopMic(); setSheetOpen(false); }}
             aria-hidden="true"
@@ -186,12 +198,14 @@ export default function MicPane({ socket, deviceId, target, disabledReason }: Pr
 
             <div className="flex gap-3">
               <button
+                data-track="mic-sheet-cancel"
                 onClick={() => { stopMic(); setSheetOpen(false); setText(''); }}
                 className="flex-1 inline-flex items-center justify-center gap-2 border border-edge bg-card text-ink-soft h-[52px] rounded-2xl text-[15px] font-semibold active:bg-panel"
               >
                 <IcoX /> Cancel
               </button>
               <button
+                data-track="mic-sheet-send"
                 onClick={() => { stopMic(); send(); }}
                 disabled={!text.trim() || sending}
                 className="flex-[1.4] inline-flex items-center justify-center gap-2 bg-accent text-white h-[52px] rounded-2xl text-[15px] font-semibold disabled:bg-panel disabled:text-ink-mute"

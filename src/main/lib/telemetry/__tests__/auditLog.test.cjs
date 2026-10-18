@@ -9,7 +9,8 @@ import { test, expect, beforeAll, afterAll } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { readTail } = require('../auditLog.cjs');
+const zlib = require('node:zlib');
+const { readTail, appendAuditEvent } = require('../auditLog.cjs');
 
 let dir;
 beforeAll(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auditlog-tail-')); });
@@ -35,4 +36,53 @@ test('bounded window drops the partial leading line and keeps the newest', () =>
   expect(tail[tail.length - 1]).toBe(lines[999]);
   for (const l of tail) expect(() => JSON.parse(l)).not.toThrow();
   expect(readTail(0, f)).toEqual([]);
+});
+
+function setMtime(f, iso) { const d = new Date(iso); fs.utimesSync(f, d, d); }
+
+test('month rollover gzips old content and starts a fresh file', () => {
+  const d = fs.mkdtempSync(path.join(dir, 'roll-'));
+  const f = path.join(d, 'audit-log.jsonl');
+  fs.writeFileSync(f, '{"old":1}\n');
+  setMtime(f, '2026-09-20T00:00:00Z');
+  appendAuditEvent('x', {}, { target: f, now: new Date('2026-10-02T00:00:00Z') });
+  const gz = path.join(d, 'audit-log-2026-09.jsonl.gz');
+  expect(zlib.gunzipSync(fs.readFileSync(gz)).toString()).toBe('{"old":1}\n');
+  const live = fs.readFileSync(f, 'utf8').trim().split('\n');
+  expect(live).toHaveLength(1);
+  expect(JSON.parse(live[0]).kind).toBe('x');
+});
+
+test('same month does not rotate', () => {
+  const d = fs.mkdtempSync(path.join(dir, 'same-'));
+  const f = path.join(d, 'audit-log.jsonl');
+  fs.writeFileSync(f, '{"old":1}\n');
+  setMtime(f, '2026-10-01T00:00:00Z');
+  appendAuditEvent('x', {}, { target: f, now: new Date('2026-10-18T00:00:00Z') });
+  expect(fs.readdirSync(d)).toEqual(['audit-log.jsonl']);
+  expect(fs.readFileSync(f, 'utf8').trim().split('\n')).toHaveLength(2);
+});
+
+test('8 rolled files → newest 6 remain', () => {
+  const d = fs.mkdtempSync(path.join(dir, 'prune-'));
+  const f = path.join(d, 'audit-log.jsonl');
+  for (let m = 1; m <= 8; m++) fs.writeFileSync(path.join(d, `audit-log-2026-0${m}.jsonl.gz`), 'x');
+  fs.writeFileSync(f, '{"old":1}\n');
+  setMtime(f, '2026-09-20T00:00:00Z');
+  appendAuditEvent('x', {}, { target: f, now: new Date('2026-10-02T00:00:00Z') });
+  const rolled = fs.readdirSync(d).filter((n) => n.endsWith('.gz')).sort();
+  expect(rolled).toEqual(['audit-log-2026-04.jsonl.gz', 'audit-log-2026-05.jsonl.gz', 'audit-log-2026-06.jsonl.gz',
+    'audit-log-2026-07.jsonl.gz', 'audit-log-2026-08.jsonl.gz', 'audit-log-2026-09.jsonl.gz']);
+});
+
+test('append still lands when rotation errors', () => {
+  const d = fs.mkdtempSync(path.join(dir, 'err-'));
+  const f = path.join(d, 'audit-log.jsonl');
+  fs.writeFileSync(f, '{"old":1}\n');
+  setMtime(f, '2026-09-20T00:00:00Z');
+  fs.mkdirSync(path.join(d, 'audit-log-2026-09.jsonl.gz')); // roll target is a dir → write throws
+  appendAuditEvent('x', {}, { target: f, now: new Date('2026-10-02T00:00:00Z') });
+  const lines = fs.readFileSync(f, 'utf8').trim().split('\n');
+  expect(lines).toHaveLength(2);
+  expect(JSON.parse(lines[1]).kind).toBe('x');
 });

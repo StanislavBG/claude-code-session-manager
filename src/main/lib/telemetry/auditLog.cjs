@@ -7,6 +7,11 @@
  * state a project's single-writer law needs to arbitrate, and it must
  * survive even if the project's ops root doesn't exist yet.
  *
+ * Rotation: on the first append in a new calendar month (UTC) the live file is
+ * gzipped to audit-log-<YYYY-MM>.jsonl.gz beside it (YYYY-MM = the month of the
+ * file's last write) and a fresh live file starts; the newest MAX_ROLLED rolled
+ * files are kept. The live file stays plain JSONL, so readers are unaffected.
+ *
  * Best-effort only: a logging failure must never block the mint/create it is
  * observing (same posture as rcaReport.cjs / dodDrainHook.cjs).
  *
@@ -17,6 +22,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const zlib = require('node:zlib');
 
 const { auditLogPath } = require('../scheduler/schedulerPaths.cjs');
 
@@ -36,21 +42,52 @@ function callerContext() {
   };
 }
 
+const MAX_ROLLED = 6;
+const ROLLED_RE = /^audit-log-\d{4}-\d{2}\.jsonl\.gz$/;
+
+function monthKey(d) { return d.toISOString().slice(0, 7); }
+
+/** Roll the live file if its last write was in an earlier month than `now`; prune old rolls. */
+function rotateIfNewMonth(target, now) {
+  let st;
+  try { st = fs.statSync(target); } catch { return; }
+  if (!st.isFile() || st.size === 0) return;
+  const oldMonth = monthKey(st.mtime);
+  if (oldMonth === monthKey(now)) return;
+  const dir = path.dirname(target);
+  const base = path.basename(target, path.extname(target));
+  const rolled = path.join(dir, `${base}-${oldMonth}.jsonl.gz`);
+  // appendFileSync: gzip members concatenate, so a pre-existing roll for that month is extended.
+  fs.appendFileSync(rolled, zlib.gzipSync(fs.readFileSync(target)));
+  fs.unlinkSync(target);
+  const rolls = fs.readdirSync(dir).filter((f) => ROLLED_RE.test(f)).sort();
+  for (const f of rolls.slice(0, Math.max(0, rolls.length - MAX_ROLLED))) {
+    try { fs.unlinkSync(path.join(dir, f)); } catch { /* best-effort */ }
+  }
+}
+
 /**
- * appendAuditEvent(kind, fields) — append one JSONL record. `kind` is a short
+ * appendAuditEvent(kind, fields, opts?) — append one JSONL record. `kind` is a short
  * label ('epic_mint' | 'prd_create' | ...); `fields` is event-specific detail
- * (cwd, epicId, status, title, slug, etc). Never throws.
+ * (cwd, epicId, status, title, slug, etc). `opts.now` (Date) / `opts.target` are
+ * test seams. Never throws; a rotation failure never drops the append.
  */
-function appendAuditEvent(kind, fields = {}) {
+function appendAuditEvent(kind, fields = {}, opts = {}) {
   try {
+    const now = opts.now ?? new Date();
     const record = {
-      at: new Date().toISOString(),
+      at: now.toISOString(),
       kind,
       ...fields,
       caller: callerContext(),
     };
-    const target = auditLogPath();
+    const target = opts.target ?? auditLogPath();
     fs.mkdirSync(path.dirname(target), { recursive: true });
+    try {
+      rotateIfNewMonth(target, now);
+    } catch (e) {
+      console.error('[auditLog] rotation failed', e?.message ?? String(e));
+    }
     fs.appendFileSync(target, `${JSON.stringify(record)}\n`);
   } catch (e) {
     console.error('[auditLog] failed to append audit event', e?.message ?? String(e));
@@ -60,7 +97,7 @@ function appendAuditEvent(kind, fields = {}) {
 /**
  * readTail(maxBytes, target?) → string[] — the complete JSONL lines within the
  * last `maxBytes` of the log, oldest first. O(maxBytes), never O(file): the
- * audit log is a never-rotated provenance record and grows without bound. A
+ * live log is a provenance record that rolls monthly but can still be large. A
  * line cut by the window's start is dropped. Missing/unreadable file → [].
  */
 function readTail(maxBytes, target = auditLogPath()) {

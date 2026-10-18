@@ -24,21 +24,32 @@
  * directory from being fully removed, but never blocks removal of a claimed
  * slug's own files.
  *
- * SAFETY MODEL (the point of this module — see the PRD that added it):
+ * FILE KINDS. Each (runId, slug) entry owns two kinds of file:
+ *   - BULK: `<slug>.log`, `<slug>.supervisor.json`, `<slug>*.patch`,
+ *     `root-cause-<slug>.md` — the space hogs.
+ *   - METADATA: `<slug>.meta.json`, `<slug>.verdicts.json`,
+ *     `<slug>.outcome.json` — tiny; terminalRunOutcome.cjs reads the newest
+ *     run's copies as the re-run guard fallback.
+ *
+ * SEMANTICS (age-driven):
  *   - Retention is ON by default (DEFAULT_RUN_LOG_RETENTION) when settings
  *     carry no `schedulerRunLogRetention`. An explicit `enabled: false` (or a
  *     config with no non-empty policy) opts out: computeReport, and
  *     applyRetention when opted out, only READ the filesystem.
- *   - An entry belonging to a job that is currently live — status `pending`
- *     (queued), `running`, `needs_review`, or `investigating` (the exact
- *     literals scheduler.cjs uses; see LIVE_STATUSES) — is never eligible,
- *     regardless of age or count policy.
- *   - The most recent entry for any given slug is never eligible, even past
- *     an age cap — every PRD keeps at least its latest evidence.
- *   - Age and count policies are COMBINABLE and combine conservatively
- *     (AND): when both are set, an entry must clear both floors to be
- *     eligible. A policy is a safety floor, not a removal trigger — setting
- *     one dimension should never make the other one weaker.
+ *   - A LIVE entry (status pending/running/needs_review/investigating — see
+ *     LIVE_STATUSES) loses nothing, regardless of age or count.
+ *   - With `maxAgeDays` set, age alone decides: a non-live entry older than
+ *     maxAgeDays loses its BULK files even when it is the slug's newest/only
+ *     run. `keepPerSlug` applies within the age window only — entries younger
+ *     than maxAgeDays are always kept, so it never rescues an old entry.
+ *   - With only `keepPerSlug` set (no maxAgeDays), bulk files of entries ranked
+ *     beyond the newest N are eligible.
+ *   - METADATA is removed only from entries that are bulk-eligible AND not the
+ *     slug's newest run: the newest run of every slug always keeps its
+ *     meta/verdicts/outcome files.
+ *   - A directory left holding only definition-of-done-*.md files (batch-keyed,
+ *     claimed by no entry) whose mtime is older than maxAgeDays is removed with
+ *     them; a directory left empty is removed.
  */
 
 const fs = require('node:fs');
@@ -135,19 +146,26 @@ function scanRunEntries(runsDir) {
     const metaFiles = files.filter((f) => f.endsWith(META_SUFFIX));
     for (const metaFile of metaFiles) {
       const slug = metaFile.slice(0, -META_SUFFIX.length);
-      const relatedNames = files.filter(
-        (f) => f === metaFile || f === `${slug}.log` || f === `${slug}.supervisor.json` || f === `root-cause-${slug}.md`
-      );
+      const isBulk = (f) =>
+        f === `${slug}.log` ||
+        f === `${slug}.supervisor.json` ||
+        f === `root-cause-${slug}.md` ||
+        (f.startsWith(`${slug}.`) && f.endsWith('.patch'));
+      const isMetadata = (f) =>
+        f === metaFile || f === `${slug}.verdicts.json` || f === `${slug}.outcome.json`;
+      const relatedNames = files.filter((f) => isBulk(f) || isMetadata(f));
 
       let sizeBytes = 0;
       let mtimeMs = null;
       const filePaths = [];
+      const fileInfos = [];
       for (const name of relatedNames) {
         const fp = path.join(dir, name);
         filePaths.push(fp);
         try {
           const st = fs.statSync(fp);
           sizeBytes += st.size;
+          fileInfos.push({ path: fp, size: st.size, kind: isBulk(name) ? 'bulk' : 'metadata' });
           if (mtimeMs === null || st.mtimeMs > mtimeMs) mtimeMs = st.mtimeMs;
         } catch {
           // file vanished mid-scan — skip its contribution
@@ -168,6 +186,7 @@ function scanRunEntries(runsDir) {
         slug,
         dir,
         files: filePaths,
+        fileInfos,
         sizeBytes,
         timeMs: recordedAtMs ?? mtimeMs ?? 0,
       });
@@ -206,10 +225,23 @@ function computeEligibility(entries, policy, opts) {
     const isMostRecent = rank === 0;
     const isLive = liveKeys.has(`${e.slug}|${e.runId}`);
     const ageDays = (now - e.timeMs) / DAY_MS;
-    const ageOk = maxAgeDays == null || ageDays > maxAgeDays;
-    const countOk = keepPerSlug == null || rank >= keepPerSlug;
-    const eligible = hasPolicy && !isLive && !isMostRecent && ageOk && countOk;
-    return { ...e, ageDays, rank, isMostRecent, isLive, eligible };
+    // Age alone decides when set; keepPerSlug only governs count-only policies.
+    const retained = maxAgeDays != null ? !(ageDays > maxAgeDays) : !(rank >= keepPerSlug);
+    const bulkEligible = hasPolicy && !isLive && !retained;
+    const metaEligible = bulkEligible && !isMostRecent;
+    const infos = e.fileInfos || [];
+    const removeFiles = infos.filter((f) => (f.kind === 'bulk' ? bulkEligible : metaEligible));
+    return {
+      ...e,
+      ageDays,
+      rank,
+      isMostRecent,
+      isLive,
+      bulkEligible,
+      metaEligible,
+      removeFiles,
+      eligible: removeFiles.length > 0,
+    };
   });
 }
 
@@ -228,27 +260,66 @@ function computeReport(runsDir, policy, opts) {
   const oldestRunAt = entries.length ? Math.min(...entries.map((e) => e.timeMs)) : null;
 
   const eligible = evaluated.filter((e) => e.eligible);
-  const eligibleBytes = eligible.reduce((sum, e) => sum + e.sizeBytes, 0);
+  let bulkBytes = 0;
+  let metadataBytes = 0;
+  for (const e of eligible) {
+    for (const f of e.removeFiles) {
+      if (f.kind === 'bulk') bulkBytes += f.size;
+      else metadataBytes += f.size;
+    }
+  }
 
-  // A directory is fully removable only when every file physically present
-  // in it belongs to an eligible entry — an unclaimed file (a DoD report, or
-  // a slug entry that isn't eligible) keeps the directory itself alive even
-  // though the eligible entries' own files can still be unlinked.
+  // A directory is fully removable when, after the eligible files are
+  // unlinked, nothing remains except definition-of-done reports older than
+  // maxAgeDays (which go with it). Any other leftover (a non-eligible entry's
+  // files, an unclaimed file, a young DoD report) keeps the directory alive.
+  const maxAgeDays = policy && policy.maxAgeDays;
+  const removing = new Set();
+  for (const e of eligible) for (const f of e.removeFiles) removing.add(f.path);
+
+  let allDirs;
+  try {
+    allDirs = fs.readdirSync(runsDir, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => path.join(runsDir, d.name));
+  } catch {
+    allDirs = [];
+  }
   const removableDirs = [];
-  for (const dir of dirSet) {
+  const dodFiles = [];
+  for (const dir of allDirs) {
     let actualFiles;
     try {
       actualFiles = fs.readdirSync(dir);
     } catch {
       continue;
     }
-    if (actualFiles.length === 0) continue;
-    const claimedEligible = new Set();
-    for (const e of evaluated) {
-      if (e.dir !== dir || !e.eligible) continue;
-      for (const fp of e.files) claimedEligible.add(path.basename(fp));
+    if (actualFiles.length === 0) continue; // empty orphans: sweepOrphanDirs
+    const dirDod = [];
+    let removable = true;
+    for (const f of actualFiles) {
+      const fp = path.join(dir, f);
+      if (removing.has(fp)) continue;
+      if (maxAgeDays != null && /^definition-of-done-.*\.md$/.test(f)) {
+        try {
+          const st = fs.statSync(fp);
+          if ((now - st.mtimeMs) / DAY_MS > maxAgeDays) {
+            dirDod.push({ path: fp, size: st.size, kind: 'metadata' });
+            continue;
+          }
+        } catch {
+          // vanished — treat as gone
+          continue;
+        }
+      }
+      removable = false;
+      break;
     }
-    if (actualFiles.every((f) => claimedEligible.has(f))) removableDirs.push(dir);
+    if (removable) {
+      removableDirs.push(dir);
+      for (const d of dirDod) {
+        dodFiles.push(d);
+        metadataBytes += d.size;
+      }
+    }
   }
 
   return {
@@ -262,7 +333,13 @@ function computeReport(runsDir, policy, opts) {
       oldestRunAt,
     },
     eligible,
-    eligibleSummary: { count: eligible.length, bytes: eligibleBytes },
+    eligibleSummary: {
+      count: eligible.length,
+      bytes: bulkBytes + metadataBytes,
+      bulkBytes,
+      metadataBytes,
+    },
+    dodFiles,
     removableDirs,
   };
 }
@@ -409,16 +486,17 @@ function applyRetention(runsDir, settings, opts) {
   let freedBytes = 0;
   const errors = [];
 
-  for (const entry of report.eligible) {
-    for (const fp of entry.files) {
-      try {
-        const st = fs.statSync(fp);
-        fs.unlinkSync(fp);
-        removedFiles += 1;
-        freedBytes += st.size;
-      } catch (e) {
-        if (e && e.code !== 'ENOENT') errors.push({ path: fp, error: e.message });
-      }
+  const toRemove = [];
+  for (const entry of report.eligible) for (const f of entry.removeFiles) toRemove.push(f.path);
+  for (const f of report.dodFiles) toRemove.push(f.path);
+  for (const fp of toRemove) {
+    try {
+      const st = fs.statSync(fp);
+      fs.unlinkSync(fp);
+      removedFiles += 1;
+      freedBytes += st.size;
+    } catch (e) {
+      if (e && e.code !== 'ENOENT') errors.push({ path: fp, error: e.message });
     }
   }
 

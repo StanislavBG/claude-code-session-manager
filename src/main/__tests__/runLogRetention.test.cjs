@@ -76,7 +76,7 @@ test('DEFAULT_RUN_LOG_RETENTION: enabled, 14 days, keep newest 3', () => {
   expect(DEFAULT_RUN_LOG_RETENTION).toEqual({ enabled: true, policy: { maxAgeDays: 14, keepPerSlug: 3 } });
 });
 
-test('applyRetention: absent setting applies the default policy — deletes a 20-day-old run beyond the newest 3', () => {
+test('applyRetention: absent setting applies the default policy — age alone decides; the newest run keeps only its meta', () => {
   const now = Date.now();
   const old = makeRun('2026-01-01T00-00-00-000Z', 'dflt-slug', { finishedAt: now - 20 * DAY_MS });
   const keep = [
@@ -88,7 +88,12 @@ test('applyRetention: absent setting applies the default policy — deletes a 20
   const result = applyRetention(runsDir, undefined, { now, jobs: [] });
   expect(result.deleted).toBe(true);
   expect(fs.existsSync(old)).toBe(false);
-  for (const d of keep) expect(fs.existsSync(d)).toBe(true);
+  // older non-newest runs lose everything
+  expect(fs.existsSync(keep[0])).toBe(false);
+  expect(fs.existsSync(keep[1])).toBe(false);
+  // the slug's newest run loses bulk but keeps its meta
+  expect(fs.existsSync(path.join(keep[2], 'dflt-slug.log'))).toBe(false);
+  expect(fs.existsSync(path.join(keep[2], 'dflt-slug.meta.json'))).toBe(true);
 });
 
 test('applyRetention: explicit enabled=false is dry-run regardless of policy — nothing deleted', () => {
@@ -186,17 +191,82 @@ test('queued/running jobs are also protected, same as needs_review', () => {
 
 // ─── most-recent-per-slug protection ────────────────────────────────────────
 
-test('the most recent run for a slug is never eligible, even past the age cap', () => {
+test('the only run of a slug past the age cap loses its bulk files but keeps .meta.json/.verdicts.json/.outcome.json', () => {
   const now = Date.now();
-  makeRun('2018-01-01T00-00-00-000Z', 'lonely-slug', { finishedAt: now - 3000 * DAY_MS });
-
-  const report = computeReport(runsDir, { maxAgeDays: 1 }, { now });
-  expect(report.eligible.length).toBe(0);
+  const dir = makeRun('2018-01-01T00-00-00-000Z', 'lonely-slug', {
+    finishedAt: now - 3000 * DAY_MS,
+    extraFiles: ['lonely-slug.supervisor.json', 'lonely-slug.1.patch', 'root-cause-lonely-slug.md', 'lonely-slug.verdicts.json', 'lonely-slug.outcome.json'],
+  });
 
   const settings = { schedulerRunLogRetention: { enabled: true, policy: { maxAgeDays: 1 } } };
-  const result = applyRetention(runsDir, settings, { now });
+  const result = applyRetention(runsDir, settings, { now, jobs: [] });
+  expect(result.removedFiles).toBe(4);
+  for (const f of ['lonely-slug.log', 'lonely-slug.supervisor.json', 'lonely-slug.1.patch', 'root-cause-lonely-slug.md']) {
+    expect(fs.existsSync(path.join(dir, f))).toBe(false);
+  }
+  for (const f of ['lonely-slug.meta.json', 'lonely-slug.verdicts.json', 'lonely-slug.outcome.json']) {
+    expect(fs.existsSync(path.join(dir, f))).toBe(true);
+  }
+});
+
+test('a live needs_review run 60d old is untouched, even though it is the only run', () => {
+  const now = Date.now();
+  const dir = makeRun('2026-08-01T00-00-00-000Z', 'parked-slug', { finishedAt: now - 60 * DAY_MS });
+  const jobs = [{ slug: 'parked-slug', runId: '2026-08-01T00-00-00-000Z', status: 'needs_review' }];
+  const settings = { schedulerRunLogRetention: { enabled: true, policy: { maxAgeDays: 14, keepPerSlug: 3 } } };
+  const result = applyRetention(runsDir, settings, { now, jobs });
   expect(result.removedFiles).toBe(0);
-  expect(fs.existsSync(path.join(runsDir, '2018-01-01T00-00-00-000Z'))).toBe(true);
+  expect(fs.existsSync(path.join(dir, 'parked-slug.log'))).toBe(true);
+  expect(fs.existsSync(path.join(dir, 'parked-slug.meta.json'))).toBe(true);
+});
+
+test('a needs_review job with no runId protects every run dir holding its log', () => {
+  const now = Date.now();
+  const dir = makeRun('2026-08-01T00-00-00-000Z', 'lost-parked', { finishedAt: now - 60 * DAY_MS });
+  const jobs = [{ slug: 'lost-parked', runId: null, status: 'needs_review' }];
+  const settings = { schedulerRunLogRetention: { enabled: true, policy: { maxAgeDays: 14 } } };
+  applyRetention(runsDir, settings, { now, jobs });
+  expect(fs.existsSync(path.join(dir, 'lost-parked.log'))).toBe(true);
+});
+
+test('a dir holding only definition-of-done files older than maxAgeDays is removed; a young one survives', () => {
+  const now = Date.now();
+  const oldDir = path.join(runsDir, '2026-07-01T00-00-00-000Z');
+  fs.mkdirSync(oldDir, { recursive: true });
+  const oldFile = path.join(oldDir, 'definition-of-done-abc12345.md');
+  fs.writeFileSync(oldFile, 'dod\n');
+  const t = (now - 40 * DAY_MS) / 1000;
+  fs.utimesSync(oldFile, t, t);
+  const youngDir = path.join(runsDir, '2026-10-17T00-00-00-000Z');
+  fs.mkdirSync(youngDir, { recursive: true });
+  fs.writeFileSync(path.join(youngDir, 'definition-of-done-def67890.md'), 'dod\n');
+
+  const settings = { schedulerRunLogRetention: { enabled: true, policy: { maxAgeDays: 14 } } };
+  const result = applyRetention(runsDir, settings, { now, jobs: [] });
+  expect(fs.existsSync(oldDir)).toBe(false);
+  expect(fs.existsSync(youngDir)).toBe(true);
+  expect(result.removedFiles).toBe(1);
+});
+
+test('computeReport (dry-run) bytes equal applyRetention freedBytes, split by kind', () => {
+  const now = Date.now();
+  makeRun('2020-01-01T00-00-00-000Z', 'rep-slug', { finishedAt: now - 400 * DAY_MS });
+  makeRun('2020-02-01T00-00-00-000Z', 'rep-slug', { finishedAt: now - 300 * DAY_MS });
+  const dodDir = path.join(runsDir, '2020-03-01T00-00-00-000Z');
+  fs.mkdirSync(dodDir, { recursive: true });
+  const dod = path.join(dodDir, 'definition-of-done-aaaa1111.md');
+  fs.writeFileSync(dod, 'dod report\n');
+  const t = (now - 100 * DAY_MS) / 1000;
+  fs.utimesSync(dod, t, t);
+
+  const cfg = { enabled: true, policy: { maxAgeDays: 14 } };
+  const report = computeReport(runsDir, cfg.policy, { now, liveKeys: new Set() });
+  expect(report.eligibleSummary.bulkBytes).toBeGreaterThan(0);
+  expect(report.eligibleSummary.metadataBytes).toBeGreaterThan(0);
+  expect(report.eligibleSummary.bytes).toBe(report.eligibleSummary.bulkBytes + report.eligibleSummary.metadataBytes);
+
+  const result = applyRetention(runsDir, { schedulerRunLogRetention: cfg }, { now, jobs: [] });
+  expect(result.freedBytes).toBe(report.eligibleSummary.bytes);
 });
 
 // ─── age + count combinability ──────────────────────────────────────────────
@@ -229,17 +299,16 @@ test('count-based policy: keeps the N most recent runs per slug, rest eligible',
   expect(eligibleRunIds.has(ids[0])).toBe(true);
 });
 
-test('age + count policies combine conservatively (AND): an entry needs both to be eligible', () => {
+test('with maxAgeDays set, keepPerSlug does not rescue an old run; with only keepPerSlug it still ranks', () => {
   const now = Date.now();
-  // Old by age, but within the keepPerSlug=3 window (rank 1 of 3).
   makeRun('2020-01-01T00-00-00-000Z', 's', { finishedAt: now - 400 * DAY_MS });
   makeRun('2020-02-01T00-00-00-000Z', 's', { finishedAt: now - 300 * DAY_MS });
-  makeRun('2020-03-01T00-00-00-000Z', 's', { finishedAt: now - 1 * DAY_MS }); // most recent
+  makeRun('2020-03-01T00-00-00-000Z', 's', { finishedAt: now - 1 * DAY_MS }); // most recent, inside window
 
-  const policy = { maxAgeDays: 30, keepPerSlug: 3 };
-  const report = computeReport(runsDir, policy, { now });
-  // Both are old enough by age, but keepPerSlug=3 keeps all 3 ranks (0,1,2) — none eligible.
-  expect(report.eligible.length).toBe(0);
+  const both = computeReport(runsDir, { maxAgeDays: 30, keepPerSlug: 3 }, { now });
+  expect(both.eligible.map((e) => e.runId).sort()).toEqual(['2020-01-01T00-00-00-000Z', '2020-02-01T00-00-00-000Z']);
+  const countOnly = computeReport(runsDir, { keepPerSlug: 3 }, { now });
+  expect(countOnly.eligible.length).toBe(0);
 });
 
 // ─── report surface: usage stats ────────────────────────────────────────────

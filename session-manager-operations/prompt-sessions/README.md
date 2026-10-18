@@ -34,13 +34,17 @@ stated answer before this section — each gets one now, and each is allowed to 
 
 ### Archived Epic JSON files (top level, `<promptSessionId>.json`)
 
-**Keep indefinitely.** An archived Epic is the durable audit record of what was asked, what the
-session did (`events`), and its full transcript at the moment of archiving — `hydrateArchived(cwd)`
-walks every file here on load to backfill the completed-Epics list, and `resumeArchived()` reads
-one back to mint a resumed Epic with `resumedFromId` tracing to it. Deleting one destroys that
-Epic's history irrecoverably; there is no other copy. No code prunes these today, and none should
-be added without a proposed Epic — same reasoning as `scheduler/README.md`'s `prds-archived/`
-policy.
+**The JSON is slim; the transcript lives in a gzip sidecar.** An archived Epic is still the durable
+audit record of what was asked and what the session did (`events`), but its full transcript is no
+longer embedded. On archive, the transcript is written to
+`prompt-sessions/transcripts-archive/<epicId>.jsonl.gz` (`lib/epic/archivedTranscript.cjs`) and the
+Epic JSON stores a `transcriptRef` pointing at it. **Archived transcripts are kept forever by
+default** (`archivedTranscripts.mode: 'forever'` in `ops-retention.json`). The embedded `transcript`
+field is **legacy**: older archives that still carry it are migrated to a sidecar on boot, so new code
+reads via `transcriptRef` and never writes `transcript` inline. `hydrateArchived(cwd)` and
+`resumeArchived()` still read these files; deleting one still destroys that Epic's history, so no
+code prunes the Epic JSONs themselves. Knob: `ops-retention.json` (Settings → App → Ops data
+retention) — see `scheduler/README.md`.
 
 ### `attachments/`
 

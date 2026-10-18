@@ -136,3 +136,15 @@ against any project. The only unbuilt piece is a scheduled cadence: no cron trig
 Suggested cadence once that's built: monthly per active project, plus triggered whenever a new
 top-level folder appears under a project's `session-manager-operations/` (Pattern B is cheap to
 catch early and expensive to catch late).
+
+## Measured baseline 2026-10-18
+
+Captured across local projects before the retention work landed (see `scheduler/README.md` →
+Retention sweeps and `prompt-sessions/README.md` → Retention policy):
+
+| Artifact | Measured |
+| --- | --- |
+| `runs/` (run logs) | 3.5 GB |
+| Archived Epic transcripts | ~700 MB across projects |
+| `state/history.jsonl` | up to 11.7 MB per project |
+| `prds/.reserved-NN` markers | up to 3,163 per project |

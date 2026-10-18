@@ -23,7 +23,8 @@ session-manager-operations/scheduler/
                                               .reserved-<NNNN>       — zero-byte per-group
                                                                       reservation markers, one per
                                                                       allocated parallelGroup;
-                                                                      never deleted once written
+                                                                      pruned: newest 100 kept,
+                                                                      only if >1h old
   prds-archived/                         — sibling archive for the retired flat layout
   state/queue.json                       — this project's job rows ({ jobs: [...] })
   state/queue.json.corrupt-<ts>          — a torn/unparseable queue.json snapshot preserved at the
@@ -78,7 +79,10 @@ row's real fields (from a live shard, see `queue.json`'s `jobs[0]`) include: `sl
 ### `state/history.jsonl`
 
 Append-only JSON-lines run history for this project, owned by `queueHistory.cjs` (path resolved
-here via `projectHistoryPath(cwd)`); one line per completed run.
+here via `projectHistoryPath(cwd)`); one line per completed run. Rows are **slim**
+(`slimHistoryRow`): the bulky snapshot arrays `preRunDirtyPaths`, `guardBaseline` and
+`leftoverPaths` are replaced by `<field>Count`, and a `salvagePatch` over 2 KB is replaced by
+`salvagePatchBytes`; every other field passes through unchanged.
 
 ## Ownership
 
@@ -115,6 +119,24 @@ writer for one file in `prompt-sessions/`, not the other way around — see that
    sibling `.../prds-archived/` (same Epic, or the flat layout's own archive for pre-migration
    PRDs) so a completed slug can't be re-fired; `state/history.jsonl` gets an append-only record
    of the run.
+
+## Retention sweeps (`ops-retention.json`)
+
+One machine-level knob, `~/.claude/session-manager/ops-retention.json` (`lib/opsRetentionSettings.cjs`),
+edited in Settings → App → Ops data retention (with a read-only preview). A missing or corrupt file
+yields the defaults:
+
+| Setting | Default | What it governs |
+| --- | --- | --- |
+| `runLogs.maxAgeDays` / `runLogs.keepPerSlug` | 14 days / 3 | Run logs (`lib/scheduler/runLogRetention.cjs`): drop runs older than the age, always keep each slug's newest N. Runs once per app boot. |
+| `runsArchiveDays` | 30 | `scheduled-plans/runs-archive/` entries pruned by age (`staleTmpSweep.cjs`). |
+| `auditLogMonths` | 6 | Audit-log retention window. |
+| `reservedMarkersKeep` | 100 | `prds/.reserved-NN` markers: the newest 100 are kept; older ones are pruned only when more than 1 hour old. |
+| `archivedTranscripts.mode` | `forever` | Epic transcript sidecars — see `prompt-sessions/README.md`. |
+
+The tmp sweep (`staleTmpSweep.cjs`) also removes orphaned `*.tmp` files in `state/` that are older
+than 1 hour and whose owning pid is dead; `queue.json.bak*` files are reported, never deleted.
+`prds-archived/` below is unaffected by these sweeps.
 
 ## Retention policy for `prds-archived/`
 

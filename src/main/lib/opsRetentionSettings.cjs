@@ -35,7 +35,7 @@ const BOUNDS = Object.freeze({
 const ARCHIVED_MODES = Object.freeze(['forever']);
 
 function storePath() {
-  return path.join(os.homedir(), '.claude', 'session-manager', 'ops-retention.json');
+  return path.join(require('./scheduler/schedulerPaths.cjs').schedulerHome(), 'ops-retention.json');
 }
 
 const isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);

@@ -10,7 +10,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const { POLL_INTERVAL_MS, loadGateThreshold } = require('./lib/scheduler/schedulerConfig.cjs');
-const { opsPath } = require('./lib/opsOwnership.cjs');
+const { opsPath, OPS_ROOT_DIR } = require('./lib/opsOwnership.cjs');
 const { effectivePaused } = require('./lib/scheduler/upgradeDrain.cjs');
 const { checkPersonaImports } = require('./lib/persona-macro/personaImportHealth.cjs');
 const { checkDelegationReadiness } = require('./lib/epic/delegationReadiness.cjs');
@@ -403,7 +403,7 @@ function evaluateEpicIndexHealth(cwds) {
 // project root (symptom of a writer joining an agent cwd without
 // projectRootOf/opsPath). The top-level one is legitimate; node_modules, .git
 // and .claude/worktrees are skipped. Bounded depth, sync readdir, never writes.
-const OPS_DIR_NAME = 'session-manager-operations';
+const OPS_DIR_NAME = OPS_ROOT_DIR;
 function findNestedOpsRoots(projectRoot, { maxDepth = 3 } = {}) {
   const found = [];
   const walk = (dir, depth) => {

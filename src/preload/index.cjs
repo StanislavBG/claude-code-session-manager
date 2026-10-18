@@ -439,6 +439,11 @@ contextBridge.exposeInMainWorld('api', {
       return () => ipcRenderer.removeListener('updater:status', listener);
     },
   },
+  opsRetention: {
+    get: () => ipcRenderer.invoke('opsRetention:get'),
+    set: (patch) => ipcRenderer.invoke('opsRetention:set', patch),
+    preview: () => ipcRenderer.invoke('opsRetention:preview'),
+  },
   webRemote: {
     /** Current connection state (no token values). */
     getStatus: () => ipcRenderer.invoke('webRemote:get-status'),

@@ -1,6 +1,25 @@
 import type { PromptSession } from '../renderer/state/promptSessions';
 
 /** Mirrors the item shape returned by main/lib/prereqs.cjs checkPrereqs(). */
+export type OpsRetentionSettings = {
+  runLogs: { maxAgeDays: number; keepPerSlug: number };
+  runsArchiveDays: number;
+  auditLogMonths: number;
+  reservedMarkersKeep: number;
+  archivedTranscripts: { mode: 'forever' };
+};
+export type OpsRetentionPatch = {
+  runLogs?: { maxAgeDays?: number; keepPerSlug?: number };
+  runsArchiveDays?: number;
+  auditLogMonths?: number;
+  reservedMarkersKeep?: number;
+};
+export type OpsRetentionPreview = {
+  runLogs: { files: number; bytes: number };
+  runsArchive: { entries: number; bytes: number };
+  tmp: { files: number; bytes: number };
+};
+
 export type AutoUpdaterState =
   | 'unsupported' | 'disabled' | 'idle' | 'checking'
   | 'downloading' | 'ready' | 'deferred' | 'error';
@@ -2233,6 +2252,11 @@ export interface SessionManagerAPI {
     cancelDeferred: () => Promise<AutoUpdaterStatus>;
     setEnabled: (enabled: boolean) => Promise<AutoUpdaterStatus>;
     onStatus: (handler: (status: AutoUpdaterStatus) => void) => () => void;
+  };
+  opsRetention: {
+    get: () => Promise<OpsRetentionSettings>;
+    set: (patch: OpsRetentionPatch) => Promise<OpsRetentionSettings>;
+    preview: () => Promise<OpsRetentionPreview>;
   };
   webRemote: {
     getStatus: () => Promise<WebRemoteStatus>;

@@ -3,6 +3,7 @@ import { useModelCatalog } from '../../lib/useModelCatalog'
 import { useDensity } from '../../lib/useDensity'
 import { Choice } from '../ui/Choice'
 import { SettingsUpdates } from './SettingsUpdates'
+import { SettingsOpsRetention } from './SettingsOpsRetention'
 
 const DENSITY_LABELS = { compact: 'Compact', roomy: 'Roomy' }
 
@@ -49,6 +50,7 @@ export function SettingsAppPrefs() {
       </section>
 
       <SettingsUpdates />
+      <SettingsOpsRetention />
     </div>
   )
 }

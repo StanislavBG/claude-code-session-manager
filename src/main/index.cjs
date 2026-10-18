@@ -1045,6 +1045,11 @@ try {
 } catch (e) {
   logs.writeLine({ scope: 'main', level: 'error', message: 'updater IPC registration failed', meta: { error: e?.message } });
 }
+try {
+  require('./lib/opsRetentionSettings.cjs').registerIpc(ipcMain);
+} catch (e) {
+  logs.writeLine({ scope: 'main', level: 'error', message: 'ops retention IPC registration failed', meta: { error: e?.message } });
+}
 chatRunner.registerChatHandlers();
 
 // Direct in-process PRD authoring for a queued PromptTicket classified

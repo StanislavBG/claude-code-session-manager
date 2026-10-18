@@ -31,6 +31,7 @@ function sweepStaleTmp(dir, opts) {
   const minAgeMs = typeof o.minAgeMs === 'number' ? o.minAgeMs : 3600000;
   const now = typeof o.now === 'number' ? o.now : Date.now();
   const isPidAlive = typeof o.isPidAlive === 'function' ? o.isPidAlive : defaultIsPidAlive;
+  const dryRun = o.dryRun === true;
   const result = { removedFiles: 0, freedBytes: 0, removed: [], backups: [], errors: [] };
   let names;
   try {
@@ -51,7 +52,7 @@ function sweepStaleTmp(dir, opts) {
       const st = fs.statSync(full);
       if (!st.isFile() || now - st.mtimeMs <= minAgeMs) continue;
       if (isPidAlive(Number(m[1]))) continue;
-      fs.unlinkSync(full);
+      if (!dryRun) fs.unlinkSync(full);
       result.removedFiles += 1;
       result.freedBytes += st.size;
       result.removed.push(name);
@@ -73,9 +74,20 @@ function sizeOf(p, st) {
   return total;
 }
 
+// Lazy require: opsRetentionSettings requires this module (preview), so a
+// top-level require here would be circular.
+function defaultRunsArchiveDays() {
+  try {
+    return require('../opsRetentionSettings.cjs').read().runsArchiveDays;
+  } catch {
+    return 30;
+  }
+}
+
 function pruneRunsArchive(archiveDir, opts) {
   const o = opts || {};
-  const maxAgeDays = typeof o.maxAgeDays === 'number' ? o.maxAgeDays : 30;
+  const maxAgeDays = typeof o.maxAgeDays === 'number' ? o.maxAgeDays : defaultRunsArchiveDays();
+  const dryRun = o.dryRun === true;
   const now = typeof o.now === 'number' ? o.now : Date.now();
   const result = { removedFiles: 0, freedBytes: 0, removed: [], errors: [] };
   let names;
@@ -91,7 +103,7 @@ function pruneRunsArchive(archiveDir, opts) {
       const st = fs.lstatSync(full);
       if (now - st.mtimeMs <= maxAgeDays * DAY_MS) continue;
       const bytes = sizeOf(full, st);
-      fs.rmSync(full, { recursive: true, force: true });
+      if (!dryRun) fs.rmSync(full, { recursive: true, force: true });
       result.removedFiles += 1;
       result.freedBytes += bytes;
       result.removed.push(name);

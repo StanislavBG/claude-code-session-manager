@@ -345,10 +345,18 @@ function computeReport(runsDir, policy, opts) {
 }
 
 /**
- * The effective retention config: the caller's `schedulerRunLogRetention`
- * when present, else DEFAULT_RUN_LOG_RETENTION.
+ * The effective retention config: ops-retention.json `runLogs` when stored,
+ * else the caller's `schedulerRunLogRetention` when present, else DEFAULT_RUN_LOG_RETENTION.
  */
 function resolveRetentionConfig(settings) {
+  // Machine-level ops-retention.json wins over the legacy scheduler-machine.json key.
+  // Lazy require: opsRetentionSettings requires this module (preview).
+  try {
+    const stored = require('../opsRetentionSettings.cjs').readStored();
+    if (stored && stored.runLogs) return { enabled: true, policy: { ...stored.runLogs } };
+  } catch {
+    // unreadable settings never block retention — fall through to legacy/default
+  }
   const cfg = settings && settings.schedulerRunLogRetention;
   return cfg == null ? DEFAULT_RUN_LOG_RETENTION : cfg;
 }

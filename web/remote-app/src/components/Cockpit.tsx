@@ -5,6 +5,7 @@ import type { RemoteProject } from '../types';
 import ProjectsScreen from './ProjectsScreen';
 import SessionsScreen, { type OpenTarget } from './SessionsScreen';
 import SessionScreen from './SessionScreen';
+import { trackScreen } from '../telemetry';
 
 interface Props {
   socket: RelaySocket | null;
@@ -35,6 +36,10 @@ export default function Cockpit({ socket, deviceId }: Props) {
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
+
+  // Deduped by the dep: re-renders with the same screen emit nothing. Names only — never titles.
+  const screenName = route.view === 'projects' && awaitingDesktopConfirm ? 'awaiting-desktop' : route.view;
+  useEffect(() => { trackScreen(screenName); }, [screenName]);
 
   const push = () => window.history.pushState({ smRoute: useStore.getState().route }, '');
   const back = () => window.history.back();

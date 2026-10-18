@@ -7,6 +7,7 @@ import { getMe, getDevices, setTokenGetter } from './api';
 import { RelaySocket } from './ws';
 import Cockpit from './components/Cockpit';
 import ConnectScreen from './components/ConnectScreen';
+import { trackFlow, trackScreen } from './telemetry';
 import type { Envelope, SessionSummary, SessionState } from './types';
 
 // Same Clerk instance as bilko.run (clerk.bilko.run) so the static sibling shares
@@ -156,6 +157,7 @@ function AppInner() {
       if (!m.deviceId || m.deviceId === active) {
         fallback.clear();
         markRemoteReady();
+        trackFlow('pair', 'success');
       }
     });
 
@@ -184,6 +186,11 @@ function AppInner() {
     }
   }, [online, device?.deviceId, device?.devicePubKey]);
 
+  const showConnect = !online;
+  useEffect(() => { if (showConnect) trackScreen('connect'); }, [showConnect]);
+  const hasPendingSas = !!pendingSas;
+  useEffect(() => { if (hasPendingSas) trackScreen('sas-confirm'); }, [hasPendingSas]);
+
   const banners = (
     <>
       {keyMismatchDeviceIds.length > 0 && (
@@ -210,6 +217,7 @@ function AppInner() {
             </p>
             <button
               onClick={clearPendingSas}
+              data-track="sas-dismiss"
               className="px-5 py-2.5 rounded-xl bg-accent text-white text-sm font-semibold hover:opacity-90 active:opacity-80 transition-opacity"
             >
               Got it

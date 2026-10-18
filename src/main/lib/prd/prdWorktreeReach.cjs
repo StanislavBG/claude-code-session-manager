@@ -3,8 +3,8 @@
  *
  * Incident: burrow PRD 1516-fb-bilko-first-pumpkin named a gitignored runtime path by RELATIVE
  * path (downloads/fb-tracker.db) and an install-cron.sh that baked a worktree path. Scheduled
- * PRDs run in an isolated git job worktree holding only tracked files plus symlinked dependency
- * dirs (DEFAULT_DEP_DIRS), so that path pointed at a file that did not exist there and the job
+ * PRDs run in an isolated git job worktree holding only tracked files plus symlinked or (pnpm) worktree-local
+ * dependency dirs (DEFAULT_DEP_DIRS), so that path pointed at a file that did not exist there and the job
  * parked needs_human.
  *
  * Two exports: `extractRepoPathCandidates(text)` pulls repo-relative path-looking tokens out of

@@ -3,7 +3,8 @@
  *
  * Storage: ~/.claude/session-manager/ops-retention.json
  * Shape (DEFAULTS): { runLogs:{maxAgeDays,keepPerSlug}, runsArchiveDays, auditLogMonths,
- *   reservedMarkersKeep, archivedTranscripts:{mode:'forever'} }
+ *   reservedMarkersKeep }
+ * Archived transcripts are kept forever (fixed policy, not a setting).
  *
  * Top-level in lib/ (no domain fits: read by scheduler, telemetry and epic sweeps alike).
  * preview() runs the sweeps' own eligibility code in dry-run mode — it deletes nothing.
@@ -21,7 +22,6 @@ const DEFAULTS = Object.freeze({
   runsArchiveDays: 30,
   auditLogMonths: 6,
   reservedMarkersKeep: 100,
-  archivedTranscripts: Object.freeze({ mode: 'forever' }),
 });
 
 // [min, max] per integer field; out-of-range values clamp, non-integers round.
@@ -32,7 +32,6 @@ const BOUNDS = Object.freeze({
   auditLogMonths: [1, 120],
   reservedMarkersKeep: [1, 100000],
 });
-const ARCHIVED_MODES = Object.freeze(['forever']);
 
 function storePath() {
   return path.join(require('./scheduler/schedulerPaths.cjs').claudeHome(), 'session-manager', 'ops-retention.json');
@@ -48,7 +47,7 @@ function clamp(key, v) {
 /**
  * Strict patch validation (used by write() and the IPC set handler). Returns a
  * partial settings object with clamped integers; throws on unknown keys,
- * wrong types, or an unsupported archivedTranscripts.mode.
+ * or wrong types.
  */
 function validatePatch(patch) {
   if (!isObj(patch)) throw new Error('Invalid ops retention config');
@@ -65,11 +64,6 @@ function validatePatch(patch) {
         if (rk !== 'maxAgeDays' && rk !== 'keepPerSlug') throw new Error(`Invalid ops retention config: runLogs.${rk}`);
         out.runLogs[rk] = num(`runLogs.${rk}`, rv);
       }
-    } else if (k === 'archivedTranscripts') {
-      if (!isObj(v) || Object.keys(v).some((x) => x !== 'mode') || !ARCHIVED_MODES.includes(v.mode)) {
-        throw new Error('Invalid ops retention config: archivedTranscripts');
-      }
-      out.archivedTranscripts = { mode: v.mode };
     } else if (k === 'runsArchiveDays' || k === 'auditLogMonths' || k === 'reservedMarkersKeep') {
       out[k] = num(k, v);
     } else {
@@ -98,9 +92,6 @@ function sanitizeStored(data) {
     const v = int(key, data[key]);
     if (v !== undefined) out[key] = v;
   }
-  if (isObj(data.archivedTranscripts) && ARCHIVED_MODES.includes(data.archivedTranscripts.mode)) {
-    out.archivedTranscripts = { mode: data.archivedTranscripts.mode };
-  }
   return out;
 }
 
@@ -122,7 +113,6 @@ function withDefaults(stored) {
     runsArchiveDays: s.runsArchiveDays ?? DEFAULTS.runsArchiveDays,
     auditLogMonths: s.auditLogMonths ?? DEFAULTS.auditLogMonths,
     reservedMarkersKeep: s.reservedMarkersKeep ?? DEFAULTS.reservedMarkersKeep,
-    archivedTranscripts: { ...DEFAULTS.archivedTranscripts },
   };
 }
 

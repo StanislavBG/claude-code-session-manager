@@ -38,8 +38,8 @@ stated answer before this section — each gets one now, and each is allowed to 
 audit record of what was asked and what the session did (`events`), but its full transcript is no
 longer embedded. On archive, the transcript is written to
 `prompt-sessions/transcripts-archive/<epicId>.jsonl.gz` (`lib/epic/archivedTranscript.cjs`) and the
-Epic JSON stores a `transcriptRef` pointing at it. **Archived transcripts are kept forever by
-default** (`archivedTranscripts.mode: 'forever'` in `ops-retention.json`). The embedded `transcript`
+Epic JSON stores a `transcriptRef` pointing at it. **Archived transcripts are always kept**
+(fixed policy, not configurable — the gzip sidecar may be the only raw copy). The embedded `transcript`
 field is **legacy**: older archives that still carry it are migrated to a sidecar on boot, so new code
 reads via `transcriptRef` and never writes `transcript` inline. `hydrateArchived(cwd)` and
 `resumeArchived()` still read these files; deleting one still destroys that Epic's history, so no

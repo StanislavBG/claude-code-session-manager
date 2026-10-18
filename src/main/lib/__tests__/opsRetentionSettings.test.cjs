@@ -36,8 +36,8 @@ test('read returns DEFAULTS when the file is missing', () => {
     runsArchiveDays: 30,
     auditLogMonths: 6,
     reservedMarkersKeep: 100,
-    archivedTranscripts: { mode: 'forever' },
   });
+  expect(settings.DEFAULTS).not.toHaveProperty('archivedTranscripts');
   expect(settings.storePath()).toBe(path.join(home, '.claude', 'session-manager', 'ops-retention.json'));
 });
 
@@ -49,11 +49,19 @@ test('write merges a patch, clamps and rounds integers, persists', () => {
   expect(settings.read()).toEqual(out);
 });
 
-test('write rejects unknown keys, bad types, and non-forever transcript mode', () => {
+test('write rejects unknown keys (incl. archivedTranscripts) and bad types', () => {
   expect(() => settings.write({ nope: 1 })).toThrow();
   expect(() => settings.write({ runsArchiveDays: 'x' })).toThrow();
-  expect(() => settings.write({ archivedTranscripts: { mode: 'delete' } })).toThrow();
+  expect(() => settings.write({ archivedTranscripts: { mode: 'forever' } })).toThrow(/unknown key/);
   expect(() => settings.write(null)).toThrow();
+});
+
+test('a legacy stored archivedTranscripts key is dropped on read', () => {
+  writeRaw(JSON.stringify({ auditLogMonths: 12, archivedTranscripts: { mode: 'forever' } }));
+  const out = settings.read();
+  expect(out.auditLogMonths).toBe(12);
+  expect(out).not.toHaveProperty('archivedTranscripts');
+  expect(settings.readStored()).not.toHaveProperty('archivedTranscripts');
 });
 
 test('corrupt file falls back to DEFAULTS', () => {

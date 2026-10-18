@@ -132,7 +132,7 @@ yields the defaults:
 | `runsArchiveDays` | 30 | `scheduled-plans/runs-archive/` entries pruned by age (`staleTmpSweep.cjs`). |
 | `auditLogMonths` | 6 | Audit-log retention window. |
 | `reservedMarkersKeep` | 100 | `prds/.reserved-NN` markers: the newest 100 are kept; older ones are pruned only when more than 1 hour old. |
-| `archivedTranscripts.mode` | `forever` | Epic transcript sidecars — see `prompt-sessions/README.md`. |
+| _(not configurable)_ | always kept | Epic transcript sidecars are kept forever — fixed policy, see `prompt-sessions/README.md`. |
 
 The tmp sweep (`staleTmpSweep.cjs`) also removes orphaned `*.tmp` files in `state/` that are older
 than 1 hour and whose owning pid is dead; `queue.json.bak*` files are reported, never deleted.

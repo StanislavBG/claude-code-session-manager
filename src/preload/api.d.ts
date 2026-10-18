@@ -6,7 +6,6 @@ export type OpsRetentionSettings = {
   runsArchiveDays: number;
   auditLogMonths: number;
   reservedMarkersKeep: number;
-  archivedTranscripts: { mode: 'forever' };
 };
 export type OpsRetentionPatch = {
   runLogs?: { maxAgeDays?: number; keepPerSlug?: number };

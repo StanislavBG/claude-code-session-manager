@@ -11,7 +11,6 @@ const SETTINGS = {
   runsArchiveDays: 30,
   auditLogMonths: 6,
   reservedMarkersKeep: 100,
-  archivedTranscripts: { mode: 'forever' },
 }
 const PREVIEW = {
   runLogs: { files: 4000, bytes: 2.5 * 1024 ** 3 },

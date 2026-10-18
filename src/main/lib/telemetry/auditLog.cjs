@@ -9,7 +9,7 @@
  *
  * Rotation: on the first append in a new calendar month (UTC) the live file is
  * gzipped to audit-log-<YYYY-MM>.jsonl.gz beside it (YYYY-MM = the month of the
- * file's last write) and a fresh live file starts; the newest MAX_ROLLED rolled
+ * file's last write) and a fresh live file starts; the newest `auditLogMonths` rolled
  * files are kept. The live file stays plain JSONL, so readers are unaffected.
  *
  * Best-effort only: a logging failure must never block the mint/create it is
@@ -42,7 +42,15 @@ function callerContext() {
   };
 }
 
-const MAX_ROLLED = 6;
+const DEFAULT_MAX_ROLLED = 6;
+
+/** Rolled-file cap from ops-retention.json (one file read per rotation); 6 if unreadable. */
+function maxRolled() {
+  try {
+    const n = require('../opsRetentionSettings.cjs').read().auditLogMonths;
+    return Number.isFinite(n) && n >= 1 ? n : DEFAULT_MAX_ROLLED;
+  } catch { return DEFAULT_MAX_ROLLED; }
+}
 const ROLLED_RE = /^audit-log-\d{4}-\d{2}\.jsonl\.gz$/;
 
 function monthKey(d) { return d.toISOString().slice(0, 7); }
@@ -61,7 +69,7 @@ function rotateIfNewMonth(target, now) {
   fs.appendFileSync(rolled, zlib.gzipSync(fs.readFileSync(target)));
   fs.unlinkSync(target);
   const rolls = fs.readdirSync(dir).filter((f) => ROLLED_RE.test(f)).sort();
-  for (const f of rolls.slice(0, Math.max(0, rolls.length - MAX_ROLLED))) {
+  for (const f of rolls.slice(0, Math.max(0, rolls.length - maxRolled()))) {
     try { fs.unlinkSync(path.join(dir, f)); } catch { /* best-effort */ }
   }
 }

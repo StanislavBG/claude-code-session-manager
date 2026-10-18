@@ -400,7 +400,12 @@ async function allocateParallelGroup(prdsDir, { extraFloor = 0 } = {}) {
       await writeHighWaterMark(prdsDir, candidate);
     }
     try {
-      await pruneStaleReservations(prdsDir);
+      let keep = 100;
+      try {
+        const k = require('../lib/opsRetentionSettings.cjs').read().reservedMarkersKeep;
+        if (Number.isFinite(k) && k >= 0) keep = k;
+      } catch { /* default */ }
+      await pruneStaleReservations(prdsDir, { keep });
     } catch {
       // best-effort; never fail an allocation over housekeeping
     }

@@ -49,6 +49,31 @@ test('failed and needs_review rows are reported; refuted reason parsed', () => {
   expect(r.refuted).toEqual([{ slug: 'foo', reason: 'gate red' }]);
 });
 
+test('cancelled failed row is reported as cancelled, not failed; ordinary failed stays', () => {
+  const r = run(
+    [checkin('3-bad', 1, { outcome: 'failed' }), checkin('5-dead', 2, { outcome: 'failed' })],
+    [
+      { slug: '5-dead', status: 'failed', epicId: 'e1', cancelledAt: '2026-10-19T00:00:00.000Z' },
+      { slug: '6-hist', status: 'needs_review', epicId: 'e1', statusHistory: [{ to: 'needs_review', source: 'remote:cancelJob' }] },
+      { slug: '4-stuck', status: 'needs_review', epicId: 'e1' },
+    ],
+  );
+  expect(r.cancelled).toEqual(['5-dead', '6-hist']);
+  expect(r.failed).toEqual(['3-bad']);
+  expect(r.parked).toEqual(['4-stuck']);
+  expect(r.hasContent).toBe(true);
+  expect(run([], [{ slug: '5-dead', status: 'failed', epicId: 'e1', cancelledAt: 'x' }]).hasContent).toBe(true);
+  expect(run([], [{ slug: '5-dead', status: 'failed', epicId: 'e1', cancelledAt: 'x' }]).digestKey).not.toBe(run([]).digestKey);
+});
+
+test('digest built from a cancelled settle has the Cancelled section; omitted when empty', () => {
+  const { buildSettledDigest } = require('../epicValidationHook.cjs');
+  const s = run([], [{ slug: '5-dead', status: 'failed', epicId: 'e1', cancelledAt: '2026-10-19T00:00:00.000Z' }]);
+  const d = buildSettledDigest(s, { epicId: 'e1' });
+  expect(d).toContain('Cancelled (1) — stopped by scheduler_cancel_job; only scheduler_reset_job revives them:\n- 5-dead');
+  expect(buildSettledDigest(run([]), { epicId: 'e1' })).not.toContain('Cancelled');
+});
+
 test('window starts after the newest digest event', () => {
   const r = run([checkin('1-old', 1), { kind: 'response', at: at(5), outcome: 'digest', digestKey: 'k' }, checkin('2-new', 6)]);
   expect(r.uncovered.map((u) => u.slug)).toEqual(['2-new']);

@@ -82,7 +82,10 @@ in favor of this pool — see commit `4c8916d`).
   created): `node_modules`, `.venv` and `venv` are symlinked in when they exist and are gitignored in
   the main checkout, and each linked name is appended as `/<name>` to the repo's shared
   `info/exclude` (a `node_modules/` gitignore line matches directories only, so the symlink would
-  otherwise show as untracked and park the job `uncommitted_changes`). Best-effort: it never fails
+  otherwise show as untracked and park the job `uncommitted_changes`). Exceptions that get their own
+  copy instead of a link: pnpm `node_modules` (offline frozen install) and a uv project's
+  `.venv`/`venv` (offline frozen `uv sync` — a shared env lets one worktree's `uv run` repoint the main
+  checkout's editable install at its own `src/`). Best-effort: it never fails
   worktree creation. Kill switch `SM_WORKTREE_DEP_LINK_DISABLE=1`.
 
 ## 3. The starvation classifier — the last-resort safety net

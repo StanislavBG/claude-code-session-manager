@@ -16,6 +16,16 @@
  * touched. `node_modules/` (any depth) is excluded so nested workspace
  * node_modules stay untracked.
  *
+ * uv projects (`uv.lock`) are the exception for .venv/venv: `uv run` and
+ * `uv sync` re-sync the project env, and for an editable project install that
+ * rewrites site-packages/<pkg>.pth to the CURRENT tree's src. Through a shared
+ * symlink that silently repoints the main checkout's imports at the worktree
+ * (social-signals-trader, 2026-10-18), and worktree tests import whichever
+ * tree synced last. So a uv worktree gets its own env, built by an offline
+ * frozen `uv sync` (hardlinks from uv's cache — cheap); the main env is never
+ * linked. If that sync fails the name is skipped and the executor's own `uv`
+ * call builds a worktree-local env — never the main one.
+ *
  * Never throws; failures land in `skipped`.
  */
 'use strict';
@@ -48,6 +58,27 @@ function isPnpmProject(mainCwd) {
     return fs.existsSync(path.join(mainCwd, 'pnpm-lock.yaml'))
       || fs.existsSync(path.join(mainCwd, 'node_modules', '.modules.yaml'));
   } catch { return false; }
+}
+
+/** True when mainCwd is a uv project (uv.lock). Never throws. */
+function isUvProject(mainCwd) {
+  try { return fs.existsSync(path.join(mainCwd, 'uv.lock')); } catch { return false; }
+}
+
+/** Offline frozen `uv sync` into worktreeCwd/<name>. Resolves true on exit 0; never throws. */
+function installUvEnv(worktreeCwd, name) {
+  return new Promise((resolve) => {
+    try {
+      const env = { ...process.env, UV_PROJECT_ENVIRONMENT: path.join(worktreeCwd, name) };
+      delete env.VIRTUAL_ENV;
+      execFile(
+        'uv',
+        ['sync', '--frozen', '--offline'],
+        { cwd: worktreeCwd, env, timeout: 180_000, maxBuffer: 16 * 1024 * 1024 },
+        (err) => resolve(!err),
+      );
+    } catch { resolve(false); }
+  });
 }
 
 /** Offline frozen install in the worktree. Resolves true on exit 0; never throws. */
@@ -103,6 +134,11 @@ async function linkDependencyDirs({ mainCwd, worktreeCwd, names = DEFAULT_DEP_DI
         (await installPnpmModules(worktreeCwd) ? installed : skipped).push(name);
         continue;
       }
+      if ((name === '.venv' || name === 'venv') && isUvProject(mainCwd)) {
+        await addExcludes(mainCwd, [name]);
+        (await installUvEnv(worktreeCwd, name) ? installed : skipped).push(name);
+        continue;
+      }
       // Exclude first: a link without its exclude line would dirty status.
       await addExcludes(mainCwd, [name]);
       fs.symlinkSync(src, dest, 'dir');
@@ -114,4 +150,4 @@ async function linkDependencyDirs({ mainCwd, worktreeCwd, names = DEFAULT_DEP_DI
   return { linked, skipped, installed };
 }
 
-module.exports = { linkDependencyDirs, isPnpmProject, DEFAULT_DEP_DIRS };
+module.exports = { linkDependencyDirs, isPnpmProject, isUvProject, DEFAULT_DEP_DIRS };

@@ -654,14 +654,31 @@ function latestStarveEscalationReasons(auditLogPath) {
  * repo HEAD differs from the installed build. Both are reported, neither is
  * critical (never flips status.ok).
  */
-function evaluateBuildFreshness({ running = null, installedOnDisk = null, repoHead = null } = {}) {
+const WORKTREE_SAFETY_PATHS = [
+  'src/main/lib/git/worktreeDeps.cjs',
+  'src/main/lib/git/depHealth.cjs',
+  'src/main/lib/git/gitWorktree.cjs',
+  'src/main/lib/git/jobWorktree.cjs',
+];
+
+function evaluateBuildFreshness({ running = null, installedOnDisk = null, repoHead = null, safetyCommitsMissing = [] } = {}) {
   const differs = (a, b) => !!a && !!b && !(a.startsWith(b) || b.startsWith(a));
   const restartNeeded = differs(running, installedOnDisk);
   const publishNeeded = differs(repoHead, installedOnDisk);
   const notes = [];
   if (restartNeeded) notes.push(`restart needed: running ${running}, installed ${installedOnDisk}`);
   if (publishNeeded) notes.push(`publish needed: repo HEAD ${repoHead}, installed ${installedOnDisk}`);
-  return { ok: true, running, installedOnDisk, repoHead, restartNeeded, publishNeeded, ...(notes.length ? { note: notes.join('; ') } : {}) };
+  let safetyIssue;
+  if (safetyCommitsMissing.length) {
+    const listed = safetyCommitsMissing.slice(0, 3).map((c) => `${c.sha} ${c.subject}`).join('; ');
+    const more = safetyCommitsMissing.length > 3 ? `; +${safetyCommitsMissing.length - 3} more` : '';
+    safetyIssue = `running build ${running} predates ${safetyCommitsMissing.length} worktree-safety commit(s): ${listed}${more} — publish a new release and restart Session Manager`;
+  }
+  return {
+    ok: true, running, installedOnDisk, repoHead, restartNeeded, publishNeeded,
+    safetyCommitsMissing, ...(safetyIssue ? { safetyIssue } : {}),
+    ...(notes.length ? { note: notes.join('; ') } : {}),
+  };
 }
 
 /**
@@ -1290,11 +1307,27 @@ async function check(opts = {}) {
         timeout: 5000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
       }).trim() || null;
     } catch { /* not a git checkout */ }
+    const running = readFreshHeartbeat(schedulerPaths.heartbeatPath())?.build?.codeSha ?? null;
+    let safetyCommitsMissing = [];
+    if (typeof running === 'string' && running && typeof repoHead === 'string' && repoHead) {
+      try {
+        safetyCommitsMissing = execFileSync(
+          'git',
+          ['-C', PROJECT_ROOT, 'log', '--format=%h%x09%s', `${running}..HEAD`, '--', ...WORKTREE_SAFETY_PATHS],
+          { timeout: 5000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+        ).split('\n').filter(Boolean).map((line) => {
+          const i = line.indexOf('\t');
+          return { sha: line.slice(0, i), subject: line.slice(i + 1) };
+        });
+      } catch { safetyCommitsMissing = []; }
+    }
     status.components.build = evaluateBuildFreshness({
-      running: readFreshHeartbeat(schedulerPaths.heartbeatPath())?.build?.codeSha ?? null,
+      running,
       installedOnDisk: resolveBuildIdentity().codeSha ?? null,
       repoHead,
+      safetyCommitsMissing,
     });
+    if (status.components.build.safetyIssue) status.issues.push(status.components.build.safetyIssue);
   } catch (e) {
     status.components.build = { ok: true, error: e.message };
   }
@@ -1357,6 +1390,7 @@ module.exports = {
   evaluateBlockingParkHealth,
   evaluateStarveEscalationHealth,
   evaluateBuildFreshness,
+  WORKTREE_SAFETY_PATHS,
   latestStarveEscalationReasons,
   DISPATCH_STALL_THRESHOLD_MS,
   DISPATCH_WARN_THRESHOLD_MS,

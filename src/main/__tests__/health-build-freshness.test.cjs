@@ -37,3 +37,47 @@ test('unknown inputs never claim a difference; short/long sha prefixes match', (
   expect(evaluateBuildFreshness({ running: null, installedOnDisk: 'abc1234', repoHead: 'abc1234567890' }))
     .toMatchObject({ restartNeeded: false, publishNeeded: false });
 });
+
+const { WORKTREE_SAFETY_PATHS } = require('../health.cjs');
+
+test('WORKTREE_SAFETY_PATHS lists the four worktree-safety files', () => {
+  expect(WORKTREE_SAFETY_PATHS).toEqual([
+    'src/main/lib/git/worktreeDeps.cjs',
+    'src/main/lib/git/depHealth.cjs',
+    'src/main/lib/git/gitWorktree.cjs',
+    'src/main/lib/git/jobWorktree.cjs',
+  ]);
+});
+
+test('empty/omitted safetyCommitsMissing → no safetyIssue', () => {
+  const a = evaluateBuildFreshness({ running: 'cf5b9a82', installedOnDisk: 'cf5b9a82', repoHead: 'ddd4444' });
+  expect(a.safetyIssue).toBeUndefined();
+  expect(a.safetyCommitsMissing).toEqual([]);
+  const b = evaluateBuildFreshness({ running: 'cf5b9a82', safetyCommitsMissing: [] });
+  expect(b.safetyIssue).toBeUndefined();
+});
+
+test('two missing safety commits → safetyIssue names running sha, count, shas; ok stays true', () => {
+  const r = evaluateBuildFreshness({
+    running: 'cf5b9a82',
+    repoHead: 'ddd4444',
+    safetyCommitsMissing: [
+      { sha: '1113551', subject: 'fix(worktree): no pnpm symlink' },
+      { sha: '2224662', subject: 'fix(depHealth): guard' },
+    ],
+  });
+  expect(r.ok).toBe(true);
+  expect(r.safetyIssue).toContain('cf5b9a82');
+  expect(r.safetyIssue).toContain('2');
+  expect(r.safetyIssue).toContain('1113551');
+  expect(r.safetyIssue).toContain('2224662');
+  expect(r.safetyIssue).toContain('publish a new release and restart Session Manager');
+});
+
+test('five missing safety commits → only three listed', () => {
+  const commits = Array.from({ length: 5 }, (_, i) => ({ sha: `sha000${i}`, subject: `subj${i}` }));
+  const r = evaluateBuildFreshness({ running: 'cf5b9a82', safetyCommitsMissing: commits });
+  expect(r.safetyIssue).toContain('5');
+  for (const i of [0, 1, 2]) expect(r.safetyIssue).toContain(`sha000${i}`);
+  for (const i of [3, 4]) expect(r.safetyIssue).not.toContain(`sha000${i}`);
+});

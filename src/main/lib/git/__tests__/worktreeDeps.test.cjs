@@ -137,6 +137,36 @@ test.skipIf(!hasPnpm)('pnpm worktree install never touches the main checkout nod
   expect(git(pwt, 'status', '--porcelain')).toBe('');
 }, 60_000);
 
+/** Symlinks under `dir` (not followed) whose target does not exist. */
+function danglingLinks(dir) {
+  const out = [];
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, e.name);
+    if (e.isSymbolicLink()) { if (!fs.existsSync(p)) out.push(p); } else if (e.isDirectory()) out.push(...danglingLinks(p));
+  }
+  return out;
+}
+
+// Bilko-Launch-Kit incident (2026-10-18): a job ran pnpm through a symlinked node_modules, the main
+// checkout's links were repointed into the job worktree and dangled once the worktree was deleted.
+test.skipIf(!hasPnpm)('pnpm update in a worktree leaves no dangling links in the main node_modules', async () => {
+  const pmain = path.join(root, 'pmain3');
+  const pwt = path.join(root, 'pwt3');
+  fs.mkdirSync(pmain);
+  git(pmain, 'init', '-q', '-b', 'main');
+  git(pmain, 'config', 'user.email', 't@t.t');
+  git(pmain, 'config', 'user.name', 't');
+  makePnpmFixture(pmain);
+  git(pmain, 'worktree', 'add', '-q', '-b', 'pwt3-branch', pwt, 'HEAD');
+
+  await linkDependencyDirs({ mainCwd: pmain, worktreeCwd: pwt });
+  pnpm(pwt, 'update', '--offline', 'lib');
+  git(pmain, 'worktree', 'remove', '--force', pwt);
+
+  expect(danglingLinks(path.join(pmain, 'node_modules'))).toEqual([]);
+  expect(fs.existsSync(path.join(pmain, 'node_modules', 'lib', 'package.json'))).toBe(true);
+}, 60_000);
+
 test.skipIf(!hasPnpm)('isPnpmProject is true for the pnpm fixture and false for the plain one', () => {
   const pmain = path.join(root, 'pmain2');
   fs.mkdirSync(pmain);

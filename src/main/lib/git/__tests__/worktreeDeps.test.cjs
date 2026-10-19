@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { linkDependencyDirs, isPnpmProject } = require('../worktreeDeps.cjs');
+const { linkDependencyDirs, isPnpmProject, isUvProject } = require('../worktreeDeps.cjs');
 
 const hasPnpm = (() => {
   try { execFileSync('pnpm', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
@@ -31,6 +31,30 @@ function makePnpmFixture(dir) {
   git(dir, 'add', '.');
   git(dir, 'commit', '-q', '-m', 'pnpm fixture');
 }
+
+const hasUv = (() => {
+  try { execFileSync('uv', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
+})();
+const uvEnv = (() => { const e = { ...process.env }; delete e.VIRTUAL_ENV; delete e.UV_PROJECT_ENVIRONMENT; return e; })();
+const uv = (cwd, ...args) => execFileSync('uv', args, { cwd, env: uvEnv, stdio: 'pipe' });
+
+/** uv project in `dir` with an editable package `pkgx`, synced offline; committed. */
+function makeUvFixture(dir) {
+  fs.mkdirSync(path.join(dir, 'src', 'pkgx'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src', 'pkgx', '__init__.py'), 'WHERE = __file__\n');
+  fs.writeFileSync(path.join(dir, 'pyproject.toml'), [
+    '[project]', 'name = "pkgx"', 'version = "0.1.0"', 'requires-python = ">=3.8"', 'dependencies = []',
+    '[build-system]', 'requires = ["uv_build"]', 'build-backend = "uv_build"', '',
+  ].join('\n'));
+  fs.writeFileSync(path.join(dir, '.gitignore'), '.venv/\n__pycache__/\n');
+  uv(dir, 'lock', '--offline');
+  uv(dir, 'sync', '--frozen', '--offline');
+  git(dir, 'add', '.');
+  git(dir, 'commit', '-q', '-m', 'uv fixture');
+}
+
+const whereFrom = (venvPython, cwd) =>
+  execFileSync(venvPython, ['-c', 'import pkgx; print(pkgx.WHERE)'], { cwd, encoding: 'utf8' }).trim();
 
 let root, main, wt;
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
@@ -124,3 +148,37 @@ test.skipIf(!hasPnpm)('isPnpmProject is true for the pnpm fixture and false for 
   expect(isPnpmProject(main)).toBe(false);
   expect(isPnpmProject(path.join(root, 'nope'))).toBe(false);
 }, 60_000);
+
+test.skipIf(!hasUv)('uv worktree gets its own .venv; uv sync/run there never repoints the main checkout', async (ctx) => {
+  const umain = path.join(root, 'umain');
+  const uwt = path.join(root, 'uwt');
+  fs.mkdirSync(umain);
+  git(umain, 'init', '-q', '-b', 'main');
+  git(umain, 'config', 'user.email', 't@t.t');
+  git(umain, 'config', 'user.name', 't');
+  try { makeUvFixture(umain); } catch { ctx.skip(); } // no cached python/uv_build offline
+  git(umain, 'worktree', 'add', '-q', '-b', 'uwt-branch', uwt, 'HEAD');
+  const mainPy = path.join(umain, '.venv', 'bin', 'python');
+  const mainSrc = path.join(umain, 'src', 'pkgx', '__init__.py');
+  expect(isUvProject(umain)).toBe(true);
+  expect(whereFrom(mainPy, root)).toBe(mainSrc);
+
+  const r = await linkDependencyDirs({ mainCwd: umain, worktreeCwd: uwt });
+  expect(r.linked).not.toContain('.venv');
+  expect(r.installed).toContain('.venv');
+  const st = fs.lstatSync(path.join(uwt, '.venv'));
+  expect(st.isSymbolicLink()).toBe(false);
+  expect(st.isDirectory()).toBe(true);
+
+  // The executor's own uv calls inside the worktree.
+  uv(uwt, 'sync', '--offline');
+  uv(uwt, 'run', '--offline', 'python', '-c', 'pass');
+  expect(whereFrom(mainPy, root)).toBe(mainSrc);
+  expect(whereFrom(path.join(uwt, '.venv', 'bin', 'python'), root)).toBe(path.join(uwt, 'src', 'pkgx', '__init__.py'));
+  expect(git(uwt, 'status', '--porcelain')).toBe('');
+}, 60_000);
+
+test('isUvProject is false without uv.lock', () => {
+  expect(isUvProject(main)).toBe(false);
+  expect(isUvProject(path.join(root, 'nope'))).toBe(false);
+});

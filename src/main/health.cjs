@@ -24,6 +24,7 @@ const { classifyQueueStarvation, launchBlockedSlugs, STARVE_ESCALATION_MS } = re
 const { REVERIFY_INTERVAL_MS } = require('./scheduler/reviewLadder.cjs');
 const { findStarvedProjects, findUnresolvableDepRoots, DEFAULT_PROJECT_CWD, DEP_HISTORY_FAIL_OPEN } = require('./lib/scheduler/schedulerBatch.cjs');
 const { auditLogPath, readTail } = require('./lib/telemetry/auditLog.cjs');
+const { checkMainDependencyHealth } = require('./lib/git/depHealth.cjs');
 const { resolveBuildIdentity } = require('./lib/buildIdentity.cjs');
 const { computeReport, isRetentionEnabled, liveKeysFromJobs } = require('./lib/scheduler/runLogRetention.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
@@ -682,6 +683,31 @@ function evaluateBuildFreshness({ running = null, installedOnDisk = null, repoHe
 }
 
 /**
+ * evaluateMainDepLinks(results) → { component, issues }
+ *
+ * Pure over `Array<{ cwd, health }>` (health = checkMainDependencyHealth's
+ * return). One issue per project whose node_modules links point into a job
+ * worktree or dangle. Non-critical: component.ok is always true.
+ */
+function evaluateMainDepLinks(results = []) {
+  const list = Array.isArray(results) ? results : [];
+  const broken = [];
+  const issues = [];
+  for (const { cwd, health } of list) {
+    if (!health || health.ok !== false) continue;
+    if (health.reason !== 'links-into-worktree' && health.reason !== 'dangling-links') continue;
+    const missing = Array.isArray(health.missing) ? health.missing : [];
+    broken.push({ cwd, reason: health.reason, missing });
+    const shown = missing.slice(0, 5).join(', ');
+    const more = missing.length > 5 ? `, +${missing.length - 5} more` : '';
+    issues.push(
+      `${cwd}: node_modules ${health.reason}${shown ? ` (${shown}${more})` : ''} — fix: cd ${cwd} && CI=1 pnpm install --offline --frozen-lockfile`,
+    );
+  }
+  return { component: { ok: true, checked: list.length, broken }, issues };
+}
+
+/**
  * evaluateCredentialHealth({ credState, now }) → { component, issues }
  *
  * Pure over its inputs — `credState` is the shape lib/credentials.cjs's
@@ -1332,6 +1358,22 @@ async function check(opts = {}) {
     status.components.build = { ok: true, error: e.message };
   }
 
+  // 6.75. Main-checkout dependency links: node_modules entries pointing into a
+  // job worktree or dangling, for every cwd the queue knows. Non-critical.
+  if (queueState) {
+    try {
+      const cwds = [...new Set(Object.values(queueState.jobs || {})
+        .map((j) => j && j.cwd).filter((c) => typeof c === 'string' && c))].slice(0, 50);
+      const results = cwds.filter((cwd) => fs.existsSync(cwd))
+        .map((cwd) => ({ cwd, health: checkMainDependencyHealth(cwd) }));
+      const { component, issues } = evaluateMainDepLinks(results);
+      status.components.main_dep_links = component;
+      status.issues.push(...issues);
+    } catch (e) {
+      status.components.main_dep_links = { ok: true, error: e.message };
+    }
+  }
+
   // 6.8. Credential health (informational-but-loud): is the Claude OAuth token
   // usable? An expired/absent token silently voids every headless `claude -p`
   // job — the queue "runs" but nothing authenticates. refreshIfNeeded() reads
@@ -1390,6 +1432,7 @@ module.exports = {
   evaluateBlockingParkHealth,
   evaluateStarveEscalationHealth,
   evaluateBuildFreshness,
+  evaluateMainDepLinks,
   WORKTREE_SAFETY_PATHS,
   latestStarveEscalationReasons,
   DISPATCH_STALL_THRESHOLD_MS,

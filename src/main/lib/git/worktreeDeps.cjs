@@ -16,6 +16,16 @@
  * touched. `node_modules/` (any depth) is excluded so nested workspace
  * node_modules stay untracked.
  *
+ * Relative `file:`/`link:` deps that point OUTSIDE the repo (e.g.
+ * `file:../Bilko/packages/host-kit`) cannot resolve from a worktree, which lives
+ * under the session-manager state dir rather than next to the sibling repo — the
+ * offline install would ENOENT and leave no node_modules. So before installing,
+ * `linkOutOfRepoLocalDeps` creates a symlink at the equivalent location relative
+ * to the worktree (first path segment past the `..` hops, e.g.
+ * `<worktrees>/<hash>/Bilko -> ~/Projects/Bilko`). That link may therefore sit
+ * OUTSIDE the worktree; it is only created where nothing exists, never inside
+ * the main checkout, and never overwrites anything.
+ *
  * uv projects (`uv.lock`) are the exception for .venv/venv: `uv run` and
  * `uv sync` re-sync the project env, and for an editable project install that
  * rewrites site-packages/<pkg>.pth to the CURRENT tree's src. Through a shared
@@ -81,6 +91,72 @@ function installUvEnv(worktreeCwd, name) {
   });
 }
 
+/** Top-level importer dirs from pnpm-lock.yaml (`.` is the root). Simple line scan; never throws. */
+function lockImporters(cwd) {
+  const out = ['.'];
+  try {
+    let inImporters = false;
+    for (const line of fs.readFileSync(path.join(cwd, 'pnpm-lock.yaml'), 'utf8').split('\n')) {
+      if (/^importers:\s*$/.test(line)) { inImporters = true; continue; }
+      if (!inImporters) continue;
+      if (/^\S/.test(line)) break;
+      const m = /^ {2}(\S[^:]*):\s*$/.exec(line);
+      if (m) out.push(m[1].replace(/^(['"])(.*)\1$/, '$2'));
+    }
+  } catch { /* no lockfile */ }
+  return [...new Set(out)];
+}
+
+/** Relative file:/link: specifiers of a package.json. Never throws. */
+function localSpecs(pkgJson) {
+  const specs = [];
+  try {
+    const pkg = JSON.parse(fs.readFileSync(pkgJson, 'utf8'));
+    for (const f of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+      for (const v of Object.values(pkg[f] || {})) {
+        const m = typeof v === 'string' && /^(?:file|link):(.+)$/.exec(v);
+        if (m && !path.isAbsolute(m[1])) specs.push(m[1]);
+      }
+    }
+  } catch { /* unreadable */ }
+  return specs;
+}
+
+const within = (parent, p) => p === parent || p.startsWith(parent + path.sep);
+
+/**
+ * Best-effort: link out-of-repo relative file:/link: dep targets at their
+ * worktree-relative location so the offline install can resolve them. Never throws.
+ */
+function linkOutOfRepoLocalDeps(mainCwd, worktreeCwd) {
+  try {
+    for (const importer of lockImporters(worktreeCwd)) {
+      const mainDir = path.resolve(mainCwd, importer);
+      const wtDir = path.resolve(worktreeCwd, importer);
+      for (const spec of localSpecs(path.join(mainDir, 'package.json'))) {
+        try {
+          const target = path.resolve(mainDir, spec);
+          if (within(mainCwd, target) || !exists(target)) continue;
+          const segs = path.normalize(spec).split(path.sep).filter((x) => x && x !== '.');
+          let ups = 0;
+          while (segs[ups] === '..') ups++;
+          const rest = segs.slice(ups);
+          if (!rest.length) continue;
+          // Link the first segment past the `..` hops, to the matching target ancestor.
+          let wtBase = wtDir;
+          for (let i = 0; i < ups; i++) wtBase = path.dirname(wtBase);
+          const linkPath = path.join(wtBase, rest[0]);
+          let linkTarget = target;
+          for (let i = 1; i < rest.length; i++) linkTarget = path.dirname(linkTarget);
+          if (within(mainCwd, linkPath) || within(worktreeCwd, linkPath) || exists(linkPath)) continue;
+          fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+          fs.symlinkSync(linkTarget, linkPath, isDir(linkTarget) ? 'dir' : 'file');
+        } catch { /* best-effort per dep */ }
+      }
+    }
+  } catch { /* best-effort */ }
+}
+
 /** Offline frozen install in the worktree. Resolves true on exit 0; never throws. */
 function installPnpmModules(worktreeCwd) {
   return new Promise((resolve) => {
@@ -131,6 +207,7 @@ async function linkDependencyDirs({ mainCwd, worktreeCwd, names = DEFAULT_DEP_DI
       }
       if (name === 'node_modules' && isPnpmProject(mainCwd)) {
         await addExcludeLines(mainCwd, ['node_modules/']);
+        linkOutOfRepoLocalDeps(mainCwd, worktreeCwd);
         (await installPnpmModules(worktreeCwd) ? installed : skipped).push(name);
         continue;
       }

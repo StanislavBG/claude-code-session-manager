@@ -167,6 +167,36 @@ test.skipIf(!hasPnpm)('pnpm update in a worktree leaves no dangling links in the
   expect(fs.existsSync(path.join(pmain, 'node_modules', 'lib', 'package.json'))).toBe(true);
 }, 60_000);
 
+// Bilko-Launch-Kit: `file:../Bilko/packages/host-kit` cannot resolve from a worktree that is not
+// next to the sibling repo, so the offline install ENOENTs and the worktree gets no node_modules.
+test.skipIf(!hasPnpm)('pnpm worktree resolves out-of-repo file: deps through a link and never touches main', async (ctx) => {
+  const pmain = path.join(root, 'repos', 'pmain');
+  const sibling = path.join(root, 'repos', 'sibling', 'pkg');
+  const pwt = path.join(root, 'wts', 'h', 'pwt');
+  fs.mkdirSync(pmain, { recursive: true });
+  fs.mkdirSync(sibling, { recursive: true });
+  fs.mkdirSync(path.dirname(pwt), { recursive: true });
+  fs.writeFileSync(path.join(sibling, 'package.json'), JSON.stringify({ name: 'sib', version: '1.0.0' }));
+  git(pmain, 'init', '-q', '-b', 'main');
+  git(pmain, 'config', 'user.email', 't@t.t');
+  git(pmain, 'config', 'user.name', 't');
+  fs.writeFileSync(path.join(pmain, 'package.json'), JSON.stringify({ name: 'root', private: true, dependencies: { sib: 'file:../sibling/pkg' } }));
+  fs.writeFileSync(path.join(pmain, '.gitignore'), 'node_modules/\n');
+  try { pnpm(pmain, 'install', '--offline'); } catch { ctx.skip(); }
+  git(pmain, 'add', '.');
+  git(pmain, 'commit', '-q', '-m', 'file dep fixture');
+  git(pmain, 'worktree', 'add', '-q', '-b', 'pwt4-branch', pwt, 'HEAD');
+  fs.writeFileSync(path.join(pmain, 'node_modules', '.sentinel'), 'x');
+
+  const r = await linkDependencyDirs({ mainCwd: pmain, worktreeCwd: pwt });
+  expect(r.installed).toContain('node_modules');
+  const st = fs.lstatSync(path.join(pwt, 'node_modules'));
+  expect(st.isSymbolicLink()).toBe(false);
+  expect(st.isDirectory()).toBe(true);
+  expect(fs.existsSync(path.join(pmain, 'node_modules', '.sentinel'))).toBe(true);
+  expect(fs.readdirSync(pmain).sort()).toEqual(['.git', '.gitignore', 'node_modules', 'package.json', 'pnpm-lock.yaml']);
+}, 60_000);
+
 test.skipIf(!hasPnpm)('isPnpmProject is true for the pnpm fixture and false for the plain one', () => {
   const pmain = path.join(root, 'pmain2');
   fs.mkdirSync(pmain);

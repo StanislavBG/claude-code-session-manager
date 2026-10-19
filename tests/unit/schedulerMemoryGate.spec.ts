@@ -11,7 +11,7 @@ import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const { memoryLimitedBatchSize, availableForJobs } = require('../../src/main/scheduler.cjs') as {
-  memoryLimitedBatchSize: (availableMb: number, minPerJob: number, runningCount: number, batchLen: number) => number
+  memoryLimitedBatchSize: (availableMb: number, minPerJob: number, runningCount: number, batchLen: number, consumedMb?: number) => number
   availableForJobs: (availableMb: number, reservedHostMb: number) => number
 }
 
@@ -60,6 +60,32 @@ describe('memoryLimitedBatchSize', () => {
 
   it('one below boundary is clamped', () => {
     expect(memoryLimitedBatchSize(2999, MIN, 0, 2)).toBe(1)
+  })
+})
+
+describe('memoryLimitedBatchSize consumedMb credit', () => {
+  const M = 2500
+
+  it('(a) 2 running with consumedMb 0 equals the old 4-arg result', () => {
+    for (const avail of [4000, 7500, 9999, 10_000, 12_500]) {
+      expect(memoryLimitedBatchSize(avail, M, 2, 3, 0)).toBe(memoryLimitedBatchSize(avail, M, 2, 3))
+    }
+  })
+
+  it('(b) 1 running with consumedMb 2500 behaves like 0 running', () => {
+    for (const avail of [1000, 2500, 4999, 5000, 7500]) {
+      expect(memoryLimitedBatchSize(avail, M, 1, 3, 2500)).toBe(memoryLimitedBatchSize(avail, M, 0, 3))
+    }
+  })
+
+  it('(c) oversized consumedMb never admits more than 0-running would', () => {
+    for (const avail of [0, 2499, 2500, 5000, 7500]) {
+      expect(memoryLimitedBatchSize(avail, M, 1, 4, 99_999)).toBeLessThanOrEqual(memoryLimitedBatchSize(avail, M, 0, 4))
+    }
+  })
+
+  it('ignores negative consumedMb', () => {
+    expect(memoryLimitedBatchSize(2500, M, 1, 2, -5000)).toBe(memoryLimitedBatchSize(2500, M, 1, 2))
   })
 })
 

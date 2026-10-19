@@ -57,6 +57,7 @@ const billing = require('./usage.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs');
 const { ensureTimeoutShim, withTimeoutShimOnPath } = require('./lib/process/timeoutShim.cjs');
 const supervisor = require('./supervisor.cjs');
+const { processGroupRssMb } = require('./lib/process/procGroupRss.cjs');
 const { resolveClaudeBin, claudeSpawnTarget, probeClaudeVersion } = require('./lib/claude/claudeBin.cjs');
 const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/claudeCliCaps.cjs');
 // Fire-and-forget priming — by the time the first job dispatches, the cached
@@ -415,7 +416,9 @@ const HEARTBEAT_MAX_BYTES = 1024 * 1024;
 // DEFAULT_PROJECT_CWD imported from lib/scheduler/schedulerBatch.cjs (single source of truth).
 
 // Each headless claude -p job can shell out to tsc/vite/pytest and grow well
-// past 1 GB at peak; reserve 2.5 GB per running+pending slot. Raised from 1.5 GB
+// past 1 GB at peak; reserve 2.5 GB of PEAK headroom per running+pending slot.
+// A running job's already-resident memory is credited back (consumedMb in
+// memoryLimitedBatchSize) because MemAvailable is already net of it. Raised from 1.5 GB
 // after the 2026-06-16 OOM: 3 concurrent cross-project jobs + their build
 // subprocesses pushed a 24 GB host ~10 GB into swap and the OOM killer took
 // Electron — every pty got SIGHUP (code=0 signal=1).
@@ -482,10 +485,13 @@ function getAvailableMemMb() {
  * drop available memory below MIN_FREE_MB_PER_JOB per active slot.
  * Exported for unit tests.
  */
-function memoryLimitedBatchSize(availableMb, minPerJob, runningCount, batchLen) {
+function memoryLimitedBatchSize(availableMb, minPerJob, runningCount, batchLen, consumedMb = 0) {
   if (availableMb === Infinity) return batchLen;
+  // Credit is bounded by the running jobs' own reservations: never negative,
+  // never more permissive than a 0-running machine.
+  const credit = Math.min(Math.max(Number(consumedMb) || 0, 0), minPerJob * runningCount);
   let allowed = batchLen;
-  while (allowed > 0 && availableMb < minPerJob * (runningCount + allowed)) {
+  while (allowed > 0 && availableMb < minPerJob * (runningCount + allowed) - credit) {
     allowed--;
   }
   return allowed;
@@ -7346,22 +7352,34 @@ async function tickBody(gen, { bypassLoadGate }) {
     const jobBudgetMb = availableForJobs(availableMb, RESERVED_HOST_MB);
     // The slot pool already bounded `batch` (it was passed as freeSlots to
     // pickNextBatch above), so only the memory gate can narrow it further.
+    // Credit each running job's already-resident RSS (capped at its reservation)
+    // — MemAvailable is already net of it. Unknown pid / 0 MB read = no credit.
+    let consumedMb = 0;
+    if (availableMb !== Infinity) {
+      for (const j of state.jobs) {
+        if (!runningSet.has(j.slug)) continue;
+        const pid = j.runtime?.pid ?? j.pid;
+        if (!Number.isInteger(pid) || pid <= 0) continue;
+        consumedMb += Math.min(processGroupRssMb(pid), MIN_FREE_MB_PER_JOB);
+      }
+      consumedMb = Math.min(consumedMb, MIN_FREE_MB_PER_JOB * runningSet.size);
+    }
     const allowed = memoryLimitedBatchSize(
-      jobBudgetMb, MIN_FREE_MB_PER_JOB, runningSet.size, batch.length,
+      jobBudgetMb, MIN_FREE_MB_PER_JOB, runningSet.size, batch.length, consumedMb,
     );
     if (allowed === 0) {
-      const threshold = RESERVED_HOST_MB + MIN_FREE_MB_PER_JOB * (runningSet.size + 1);
-      console.log(`[scheduler] memory gate: available=${availableMb} MB < threshold=${threshold} MB (host reserve ${RESERVED_HOST_MB} + ${MIN_FREE_MB_PER_JOB}/job × ${runningSet.size + 1}) — deferring ${batch.length} job(s)`);
-      lastMemGate = { availableMb, threshold, deferred: true, at: new Date().toISOString() };
+      const threshold = RESERVED_HOST_MB + MIN_FREE_MB_PER_JOB * (runningSet.size + 1) - consumedMb;
+      console.log(`[scheduler] memory gate: available=${availableMb} MB < threshold=${threshold} MB (host reserve ${RESERVED_HOST_MB} + ${MIN_FREE_MB_PER_JOB}/job × ${runningSet.size + 1} - consumed=${consumedMb} MB) — deferring ${batch.length} job(s)`);
+      lastMemGate = { availableMb, threshold, consumedMb, deferred: true, at: new Date().toISOString() };
       return recordTick(
-        { fired: false, reason: 'memory-deferred', deferredCount: batch.length, availableMb, threshold },
-        { detail: `memory gate: ${availableMb} MB free, need ${threshold} MB`, holds },
+        { fired: false, reason: 'memory-deferred', deferredCount: batch.length, availableMb, threshold, consumedMb },
+        { detail: `memory gate: ${availableMb} MB free, need ${threshold} MB (consumed=${consumedMb} MB credited)`, holds },
       );
     }
     const gatedBatch = batch.slice(0, allowed);
     if (gatedBatch.length < batch.length) {
-      console.log(`[scheduler] memory gate: available=${availableMb} MB — clamped batch ${batch.length} → ${gatedBatch.length} (host reserve ${RESERVED_HOST_MB} + ${MIN_FREE_MB_PER_JOB}/job)`);
-      lastMemGate = { availableMb, threshold: RESERVED_HOST_MB + MIN_FREE_MB_PER_JOB * (runningSet.size + gatedBatch.length), deferred: false, clamped: true, at: new Date().toISOString() };
+      console.log(`[scheduler] memory gate: available=${availableMb} MB — clamped batch ${batch.length} → ${gatedBatch.length} (host reserve ${RESERVED_HOST_MB} + ${MIN_FREE_MB_PER_JOB}/job, consumed=${consumedMb} MB)`);
+      lastMemGate = { availableMb, threshold: RESERVED_HOST_MB + MIN_FREE_MB_PER_JOB * (runningSet.size + gatedBatch.length) - consumedMb, consumedMb, deferred: false, clamped: true, at: new Date().toISOString() };
     } else {
       // Ungated full batch: clear stale gate snapshot so status doesn't show
       // a stale deferral from a previous tick.

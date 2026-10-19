@@ -10930,7 +10930,32 @@ const remote = {
     // Stamped before SIGTERM so finalizeJobWorktree (run on executor exit) sees it.
     if (wasRunning && pid) killOrphanClaudePid(pid);
     await broadcast({ flush: true });
-    return { ok: true, slug, status: targetStatus, wasRunning, cwd: job.cwd ?? null, cancelledAt };
+    const result = { ok: true, slug, status: targetStatus, wasRunning, cwd: job.cwd ?? null, cancelledAt };
+    if (wasRunning) {
+      // Whatever the executor committed before SIGTERM stays on its job
+      // branch (never integrated); tell the caller where. Known residual: a
+      // cancel arriving after integration already finished reports
+      // landed:false with jobBranch:null (branch deleted after the merge).
+      let jobBranch = null;
+      let jobBranchSha = null;
+      try {
+        const branch = jobWorktree.branchNameFor(slug);
+        const stdout = await execGitAt(
+          resolveProjectRoot(job.cwd || DEFAULT_PROJECT_CWD),
+          ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`],
+          { timeout: 10_000 },
+        );
+        const sha = String(stdout || '').trim();
+        if (sha) { jobBranch = branch; jobBranchSha = sha; }
+      } catch { /* branch absent or git errored → nulls */ }
+      Object.assign(result, {
+        landed: confirmedLandedCommit != null,
+        landedCommit: confirmedLandedCommit ?? null,
+        jobBranch,
+        jobBranchSha,
+      });
+    }
+    return result;
   },
 
   // Exposes the module-level allocateParallelGroup (PRD 548) to callers that

@@ -193,7 +193,9 @@ const MCP_TOOL_CATALOG = [
     purpose: "THE ONLY SUPPORTED WAY to cancel a not-yet-terminal scheduler job via the session-manager app's admin "
       + 'API. A running job is SIGTERM\'d; a pending job is simply retired. There is no "cancelled" job status, so a '
       + 'cancelled job lands as "failed" with an error naming the cause. Refuses a slug whose job is already terminal '
-      + '(completed/failed/needs_review) — nothing to cancel.',
+      + '(completed/failed/needs_review) — nothing to cancel. A cancelled running job\'s commits are never landed on '
+      + 'the base branch; they stay on the job branch, reported in the result as landed:false plus '
+      + 'jobBranch/jobBranchSha.',
     whenToUse: 'Use to stop a running or pending job that should not continue (e.g. it was queued in error, or scope changed underneath it).',
     whenNotToUse: 'Do not use on an already-terminal job (completed/failed/needs_review) — use scheduler_reset_job if it should run again.',
     exampleArgs: { slug: 'add-mcp-tool-catalog' },

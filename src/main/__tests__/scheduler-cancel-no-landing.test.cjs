@@ -88,6 +88,9 @@ test('cancelled running job: commit stays on job branch, main untouched', async 
     await runningRow(slug, cwd, 'run-cancel-1');
     const res = await scheduler.remote.cancelJob(slug, { cwd });
     assert.equal(res.ok, true, JSON.stringify(res));
+    assert.equal(res.landed, false);
+    assert.equal(res.jobBranch, worktree.branch);
+    assert.equal(res.jobBranchSha, wtSha);
     const fin = await scheduler.finalizeJobWorktree({ job: { slug, cwd }, runId: 'run-cancel-1', runDir, worktree, guardCwd: cwd, carriedPaths: [] });
     assert.equal(fin.cancelled, true);
     assert.equal(fin.integratedSha, null);
@@ -107,6 +110,22 @@ test('control: non-cancelled running job still fast-forwards main', async () => 
     const fin = await scheduler.finalizeJobWorktree({ job: { slug, cwd }, runId: 'run-control-1', runDir, worktree, guardCwd: cwd, carriedPaths: [] });
     assert.equal(fin.cancelled, false);
     assert.equal(git(cwd, 'rev-parse', 'refs/heads/main'), wtSha);
+  } finally {
+    await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
+  }
+});
+
+test('cancelling a pending row reports no job-branch keys', async () => {
+  const slug = 'cancel-no-landing-c';
+  const cwd = path.join(tmpHome, 'repo-cancel');
+  try {
+    const prdsDir = path.join(cwd, 'session-manager-operations', 'scheduler', 'epics', 'e1', 'prds');
+    fs.mkdirSync(prdsDir, { recursive: true });
+    fs.writeFileSync(path.join(prdsDir, `${slug}.md`), `---\ntitle: t\ncwd: ${cwd}\nestimateMinutes: 10\n---\n\n# Goal\n\nx\n`, 'utf8');
+    await scheduler.writeQueue({ jobs: [{ slug, cwd, status: 'pending' }], config: {}, paused: null });
+    const res = await scheduler.remote.cancelJob(slug, { cwd });
+    assert.equal(res.ok, true, JSON.stringify(res));
+    assert.equal('jobBranchSha' in res, false);
   } finally {
     await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
   }

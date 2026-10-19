@@ -2675,7 +2675,11 @@ async function clearPause(source) {
  */
 function resetJobFields(job, errorMsg, opts = {}) {
   if ((job.status === 'completed' || job.status === 'skipped') && opts.force !== true) return false;
+  // Durable cancel (2026-10-19 git-viewer incident): a human-cancelled row is
+  // revived only by an explicit human reset, never by an automated pass.
+  if (reviewLadder.isCancelledJob(job) && opts.source !== 'remote:resetJob' && opts.source !== 'ipc:schedule:reset-job') return false;
   if (!transitionJob(job, 'pending', { reason: errorMsg ?? 'reset to pending', source: opts.source ?? 'resetJobFields' })) return false;
+  delete job.cancelledAt;
   job.runId = null;
   job.startedAt = null;
   job.finishedAt = null;
@@ -4846,7 +4850,7 @@ function isPromotableOriginal(status) {
  */
 function healTargetForFix(fixSlug, jobs) {
   const originalSlug = fixSlug.replace(/^(\d+)-fix-/, '$1-');
-  return jobs.find((x) => x.slug === originalSlug && isPromotableOriginal(x.status)) || null;
+  return jobs.find((x) => x.slug === originalSlug && isPromotableOriginal(x.status) && !reviewLadder.isCancelledJob(x)) || null;
 }
 
 /**
@@ -5189,8 +5193,8 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   await mutate((s) => {
     const j = s.jobs.find((x) => x.slug === failedJob.slug);
     if (!j) return;
-    const statusEligible = j.status === 'needs_review' || j.status === 'failed';
-    const transitioned = transitionJob(j, 'investigating', { reason: 'spawning investigation probe', source: 'spawnInvestigation:start' });
+    const statusEligible = (j.status === 'needs_review' || j.status === 'failed') && !reviewLadder.isCancelledJob(j);
+    const transitioned = statusEligible && transitionJob(j, 'investigating', { reason: 'spawning investigation probe', source: 'spawnInvestigation:start' });
     liveCheck = { ok: statusEligible && transitioned, status: j.status };
   });
   if (!liveCheck.ok) {
@@ -8521,7 +8525,7 @@ function selectHistoryJobs(jobs, limit, historyEntries = []) {
  * guard-parked row was never "exhausted auto-fix" and must never claim to be.
  */
 function applyNeedsReviewAutoResolve(j, jobsInProject = []) {
-  if (!j || j.status !== 'needs_review' || !reviewLadder.isEligibleForNeedsReviewAutoResolve(j, jobsInProject)) return null;
+  if (!j || j.status !== 'needs_review' || reviewLadder.isCancelledJob(j) || !reviewLadder.isEligibleForNeedsReviewAutoResolve(j, jobsInProject)) return null;
   if ((j.exhaustedResolveAttempts ?? 0) > reviewLadder.NEEDS_REVIEW_RESOLVE_CAP) return null;
   const originIsGuardParked = !reviewLadder.isExhaustedAutoFix(j) && reviewLadder.isGuardParkedWithoutAutoFix(j);
 
@@ -9971,7 +9975,7 @@ function rescheduleIntervalTick() {
     mutate(async (ms) => {
       for (const target of autoResetTargets) {
         const j = ms.jobs.find((x) => x.slug === target.slug);
-        if (!j || j.status !== 'failed' || (j.failedAutoResetAttempts ?? 0) >= reviewLadder.FAILED_AUTORESET_CAP) continue; // race guard
+        if (!j || j.status !== 'failed' || reviewLadder.isCancelledJob(j) || (j.failedAutoResetAttempts ?? 0) >= reviewLadder.FAILED_AUTORESET_CAP) continue; // race guard
         const attempt = (j.failedAutoResetAttempts ?? 0) + 1;
         j.failedAutoResetAttempts = attempt;
         const reason = `auto-reset after ${Math.round(reviewLadder.FAILED_AUTORESET_MS / 60_000)}m failed (attempt ${attempt}/${reviewLadder.FAILED_AUTORESET_CAP})`;
@@ -10886,19 +10890,21 @@ const remote = {
     const cancelReason = confirmedLandedCommit
       ? `cancelled via admin API, but landedCommit ${confirmedLandedCommit} resolves — verify before treating as done`
       : 'cancelled via admin API';
+    const cancelledAt = new Date().toISOString();
     await mutate((s) => {
       const idx = s.jobs.findIndex((j) => j.slug === slug);
       if (idx < 0) return;
       const j = s.jobs[idx];
       transitionJob(j, targetStatus, { reason: cancelReason, source: 'remote:cancelJob' });
       j.error = cancelReason;
+      j.cancelledAt = cancelledAt;
       j.finishedAt = new Date().toISOString();
       j.exitCode = j.exitCode ?? null;
       if (confirmedLandedCommit) j.verifierVerdict = 'cancelled_with_landed_commit';
       delete j.runtime;
     });
     await broadcast({ flush: true });
-    return { ok: true, slug, status: targetStatus, wasRunning, cwd: job.cwd ?? null };
+    return { ok: true, slug, status: targetStatus, wasRunning, cwd: job.cwd ?? null, cancelledAt };
   },
 
   // Exposes the module-level allocateParallelGroup (PRD 548) to callers that

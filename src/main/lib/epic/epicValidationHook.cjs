@@ -52,6 +52,7 @@ function buildSettledDigest(settle, { epicId, notValidatedReason } = {}) {
   const refuted = s.refuted || [];
   const failed = s.failed || [];
   const parked = s.parked || [];
+  const cancelled = s.cancelled || [];
   const notValidated = (s.uncovered || []).map((u) => (typeof u === 'string' ? u : u.slug));
   const lines = [
     `PLAN SETTLED — no PRD of this session is pending or running. This is ONE digest, not a per-PRD request.`,
@@ -69,6 +70,12 @@ function buildSettledDigest(settle, { epicId, notValidatedReason } = {}) {
   }
   if (parked.length) {
     lines.push('', `Parked (needs_review) (${parked.length}):`, ...parked.map((p) => `- ${p}`));
+  }
+  if (cancelled.length) {
+    lines.push(
+      '', `Cancelled (${cancelled.length}) — stopped by scheduler_cancel_job; only scheduler_reset_job revives them:`,
+      ...cancelled.map((c) => `- ${c}`),
+    );
   }
   if (notValidated.length) {
     lines.push(

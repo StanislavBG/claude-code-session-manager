@@ -21,6 +21,17 @@ const ts = (at) => {
 const isValidatorCheckin = (e, bare) =>
   e.agentType === 'validator' || (e.agentType == null && bare.startsWith('validate-'));
 
+// Mirrors the scheduler's cancel rule locally (lib/epic stays free of scheduler deps).
+const isCancelledRow = (r) => {
+  if (!r || (r.status !== 'failed' && r.status !== 'needs_review')) return false;
+  if (typeof r.cancelledAt === 'string' && r.cancelledAt) return true;
+  const hist = Array.isArray(r.statusHistory) ? r.statusHistory : [];
+  for (let i = hist.length - 1; i >= 0; i--) {
+    if (hist[i] && hist[i].to === r.status) return hist[i].source === 'remote:cancelJob';
+  }
+  return false;
+};
+
 /**
  * @param {{ epicId: string, cwd?: string|null, events?: any[], jobs?: any[], now?: number, horizonMs?: number }} args
  */
@@ -34,8 +45,13 @@ function evaluateEpicSettle({ epicId, cwd, events, jobs, now, horizonMs } = {}) 
     (r) => r && (r.epicId === epicId || r.sourcePromptId === epicId) && (r.cwd == null || cwd == null || r.cwd === cwd),
   );
   const settled = !epicRows.some((r) => r.status === 'pending' || r.status === 'running');
+  const cancelled = epicRows
+    .filter(isCancelledRow)
+    .map((r) => String(r.slug))
+    .sort();
+  const cancelledSet = new Set(cancelled.flatMap((s) => [s, bareSlug(s)]));
   const parked = epicRows
-    .filter((r) => r.status === 'needs_review')
+    .filter((r) => r.status === 'needs_review' && !isCancelledRow(r))
     .map((r) => String(r.slug))
     .sort();
 
@@ -83,7 +99,7 @@ function evaluateEpicSettle({ epicId, cwd, events, jobs, now, horizonMs } = {}) 
   const failed = [];
   for (const [bare, { event, t }] of checkins) {
     if (event.outcome === 'failed') {
-      failed.push(event.prdSlug);
+      if (!cancelledSet.has(event.prdSlug) && !cancelledSet.has(bare)) failed.push(event.prdSlug);
       continue;
     }
     const v = verdicts.get(bare);
@@ -94,12 +110,12 @@ function evaluateEpicSettle({ epicId, cwd, events, jobs, now, horizonMs } = {}) 
   failed.sort();
 
   const digestKey = createHash('sha1')
-    .update(JSON.stringify({ verified, refuted, failed, parked, uncovered: uncovered.map((u) => u.slug) }))
+    .update(JSON.stringify({ verified, refuted, failed, parked, cancelled, uncovered: uncovered.map((u) => u.slug) }))
     .digest('hex')
     .slice(0, 16);
-  const hasContent = [uncovered, verified, refuted, failed, parked].some((l) => l.length > 0);
+  const hasContent = [uncovered, verified, refuted, failed, parked, cancelled].some((l) => l.length > 0);
 
-  return { settled, uncovered, verified, refuted, failed, parked, digestKey, hasContent };
+  return { settled, uncovered, verified, refuted, failed, parked, cancelled, digestKey, hasContent };
 }
 
 module.exports = { evaluateEpicSettle, DEFAULT_SETTLE_HORIZON_MS };

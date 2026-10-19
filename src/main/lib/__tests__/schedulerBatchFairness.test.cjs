@@ -58,6 +58,38 @@ test('a project with high NN numbers is never starved behind a project with low 
   assert.ok(dispatched.some((j) => j.cwd === A), 'A still gets its start too');
 });
 
+// ─── dep-blocked rows must not carry the age tiebreak (2026-10-18) ──────────
+
+// A has an old row blocked behind a newer pending dep; B's single row sits
+// between the two in age. Only dispatchable rows count for the tiebreak.
+function blockedVsRunnableJobs() {
+  return [
+    job('101-a-blocked', 'pending', A, { createdAt: '2026-10-18T00:00:00Z', dependsOn: ['102-a-dep'] }),
+    job('102-a-dep', 'pending', A, { createdAt: '2026-10-18T02:00:00Z' }),
+    job('201-b', 'pending', B, { createdAt: '2026-10-18T01:00:00Z' }),
+  ];
+}
+
+test('an old dep-blocked row does not win the age tiebreak over an older-than-its-dep runnable row elsewhere', () => {
+  delete process.env.SM_PROJECT_JOB_CAP;
+  const { batch } = pickNextBatch(blockedVsRunnableJobs(), new Set(), 1);
+  assert.deepEqual(batch.map((j) => j.slug), ['201-b']);
+});
+
+test('4 ticks at freeSlots=1 with each pick completing: both projects get a start', () => {
+  delete process.env.SM_PROJECT_JOB_CAP;
+  const jobs = blockedVsRunnableJobs();
+  const started = [];
+  for (let tick = 0; tick < 4; tick++) {
+    const { batch } = pickNextBatch(jobs, new Set(), 1);
+    if (batch.length === 0) break;
+    started.push(batch[0]);
+    jobs.find((j) => j.slug === batch[0].slug).status = 'completed';
+  }
+  assert.ok(started.some((j) => j.cwd === A), `A must start, got ${started.map((j) => j.slug)}`);
+  assert.ok(started.some((j) => j.cwd === B), `B must start, got ${started.map((j) => j.slug)}`);
+});
+
 // ─── round-robin ────────────────────────────────────────────────────────────
 
 test('round-robin: 4 projects x 3 eligible, freeSlots=4 -> exactly one job from each project', () => {

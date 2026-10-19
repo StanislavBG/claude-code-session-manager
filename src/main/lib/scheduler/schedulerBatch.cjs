@@ -430,9 +430,12 @@ function enqueueTimestamp(job) {
  * nothing. A single project can therefore never drain every free slot while
  * another project with eligible work gets none in the same tick.
  *   1. fewest jobs currently `running` in that project, ascending;
- *   2. tiebreak: the oldest pending job's enqueue timestamp
+ *   2. tiebreak: the oldest DISPATCHABLE pending job's enqueue timestamp
  *      (enqueueTimestamp — createdAt → queuedAt → statusHistory → startedAt),
- *      ascending, unprovable ages last;
+ *      ascending, unprovable ages last. Rows blocked by an unfinished
+ *      dependsOn do NOT count (a project with only blocked rows gets
+ *      Infinity). 2026-10-18: Game-Academy's dep-blocked 02:16Z row kept it
+ *      ahead of Self's runnable 02:50Z rows, so it took every freed slot.
  *   3. final deterministic tiebreak: the project cwd string.
  *
  * WHY NOT THE PRD NUMBER. The previous sort key was each project's lowest
@@ -576,8 +579,9 @@ function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
       projectJobs.filter((j) => running.has(j.slug)).map((j) => j.slug),
     );
     const runningCount = projectJobs.filter((j) => j.status === 'running').length;
+    const satisfied = satisfiedSlugsFor(cwd);
     const oldestPendingMs = projectJobs
-      .filter(pickable)
+      .filter((j) => pickable(j) && !findBlockingDep(j, projectJobs, satisfied))
       .reduce((min, j) => Math.min(min, enqueueTimestamp(j)), Infinity);
     candidates.push({ cwd, view, runningSlugsInProject, runningCount, oldestPendingMs, active: true });
   }

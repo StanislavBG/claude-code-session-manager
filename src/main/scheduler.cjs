@@ -2680,6 +2680,7 @@ function resetJobFields(job, errorMsg, opts = {}) {
   if (reviewLadder.isCancelledJob(job) && opts.source !== 'remote:resetJob' && opts.source !== 'ipc:schedule:reset-job') return false;
   if (!transitionJob(job, 'pending', { reason: errorMsg ?? 'reset to pending', source: opts.source ?? 'resetJobFields' })) return false;
   delete job.cancelledAt;
+  delete job.cancelledRunId;
   job.runId = null;
   job.startedAt = null;
   job.finishedAt = null;
@@ -5544,10 +5545,11 @@ function reportSchedulerError(message, slug, e) {
  *   worktreeIntegrationFailure: string|null, worktreeIntegrationDetail: object|null,
  *   mergeAutoResolved: string|null, mergeAutoResolvedPaths: string[]|null}>}
  */
-async function finalizeJobWorktree({ job, runDir, worktree, guardCwd, carriedPaths, deps = {} }) {
+async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardCwd, carriedPaths, deps = {} }) {
   const jw = deps.jobWorktree || jobWorktree;
   const uncommitted = deps.uncommittedChanges || gitTreeGuard.uncommittedChanges;
   const report = deps.reportSchedulerError || reportSchedulerError;
+  const runCancelled = deps.isRunCancelled || isRunCancelled;
   let worktreeLeftoverDirty = [];
   let salvagePatch = null;
   let worktreeIntegrationFailure = null;
@@ -5569,6 +5571,12 @@ async function finalizeJobWorktree({ job, runDir, worktree, guardCwd, carriedPat
         salvagePatch = salvagePath;
         console.log(`[scheduler] ${job.slug}: salvaged ${salvage.bytes} byte(s) of uncommitted worktree diff to ${salvagePath}`);
       }
+    }
+    if (await runCancelled(job.slug, runId)) {
+      // Cancelled mid-run: keep the commit on the job branch only.
+      appendAuditEvent('job_cancel_integration_skipped', { slug: job.slug, runId, branch: worktree.branch });
+      await jw.cleanupJobWorktree({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+      return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha: null, cancelled: true };
     }
     const integration = await jw.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug, carriedPaths, baseBranch: worktree.baseBranch });
     if (integration.ok && integration.reason === 'carried-wip-only') {
@@ -5601,7 +5609,25 @@ async function finalizeJobWorktree({ job, runDir, worktree, guardCwd, carriedPat
       await jw.cleanupJobWorktree({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
     } catch { /* already reported above */ }
   }
-  return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha };
+  return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha, cancelled: false };
+}
+
+/**
+ * True when the queue row for `slug` carries a durable cancel stamp for this
+ * exact run (`cancelledAt` + matching `cancelledRunId`). Incident 2026-10-19
+ * (git-viewer): a cancelled running PRD's commit still landed on main because
+ * finalizeJobWorktree integrated unconditionally. A read error returns false so
+ * a flaky read never strands every normal run's work. Known residual: a cancel
+ * arriving after integrateJobBranch already completed cannot un-land the commit.
+ */
+async function isRunCancelled(slug, runId) {
+  try {
+    const state = await readQueue();
+    const row = state.jobs.find((j) => j.slug === slug);
+    return !!(row && row.cancelledAt && (row.cancelledRunId ?? null) === (runId ?? null));
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -6030,7 +6056,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     } finally {
       if (worktree.ok) {
         ({ worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha } =
-          await finalizeJobWorktree({ job, runDir, worktree, guardCwd, carriedPaths }));
+          await finalizeJobWorktree({ job, runId, runDir, worktree, guardCwd, carriedPaths }));
       } else {
         // In-place run (non-git cwd, cap reached, env-disabled, or a carry-over
         // failure) — there is no throwaway checkout to diff, so salvage only
@@ -10868,9 +10894,6 @@ const remote = {
     }
     const wasRunning = job.status === 'running';
     const pid = job.runtime?.pid;
-    if (wasRunning && pid) {
-      killOrphanClaudePid(pid);
-    }
     // Evidence-before-failure guard, scoped to an actually-running job being
     // killed here (a 'pending' cancel has no live process, so nothing new
     // could have landed since its last stamp — and 'needs_review' is not
@@ -10898,11 +10921,14 @@ const remote = {
       transitionJob(j, targetStatus, { reason: cancelReason, source: 'remote:cancelJob' });
       j.error = cancelReason;
       j.cancelledAt = cancelledAt;
+      if (wasRunning) j.cancelledRunId = job.runId ?? null;
       j.finishedAt = new Date().toISOString();
       j.exitCode = j.exitCode ?? null;
       if (confirmedLandedCommit) j.verifierVerdict = 'cancelled_with_landed_commit';
       delete j.runtime;
     });
+    // Stamped before SIGTERM so finalizeJobWorktree (run on executor exit) sees it.
+    if (wasRunning && pid) killOrphanClaudePid(pid);
     await broadcast({ flush: true });
     return { ok: true, slug, status: targetStatus, wasRunning, cwd: job.cwd ?? null, cancelledAt };
   },

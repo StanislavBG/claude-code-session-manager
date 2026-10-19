@@ -20,6 +20,7 @@
     "src/main/lib/feedback-remote/customerFeedbackClient.cjs",
     "src/main/lib/feedback-remote/customerFeedbackInbox.cjs",
     "src/main/lib/feedback-remote/customerFeedbackIpc.cjs",
+    "src/main/lib/process/procGroupRss.cjs",
     "src/main/ipcSchemas.cjs"
   ]
 }

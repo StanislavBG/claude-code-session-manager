@@ -6,12 +6,12 @@
 
 'use strict';
 
-import { test, expect, beforeEach, afterEach } from 'vitest';
+import { test, expect, describe, beforeEach, afterEach } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { checkMainDependencyHealth, repairMainDependencies } = require('../depHealth.cjs');
+const { checkMainDependencyHealth, findWorktreeEscapingLinks, repairMainDependencies } = require('../depHealth.cjs');
 
 const hasPnpm = (() => {
   try { execFileSync('pnpm', ['--version'], { stdio: 'ignore' }); return true; } catch { return false; }
@@ -50,12 +50,12 @@ test('unresolved-deps lists the missing name', () => {
   expect(checkMainDependencyHealth(dir)).toEqual({ ok: false, reason: 'unresolved-deps', missing: ['gone'] });
 });
 
-test('dangling symlink counts as missing', () => {
+test('dangling symlink counts as missing (caught by the link scan before the deps check)', () => {
   write('pnpm-lock.yaml', '');
   write('package.json', pkgJson({ dangling: '1.0.0' }));
   write('node_modules/.modules.yaml', '');
   fs.symlinkSync(path.join(dir, 'nowhere'), path.join(dir, 'node_modules', 'dangling'));
-  expect(checkMainDependencyHealth(dir)).toEqual({ ok: false, reason: 'unresolved-deps', missing: ['dangling'] });
+  expect(checkMainDependencyHealth(dir)).toEqual({ ok: false, reason: 'dangling-links', missing: ['dangling'] });
 });
 
 test('ok when all deps resolve', () => {
@@ -90,3 +90,43 @@ test.skipIf(!hasPnpm)('repair restores a deleted workspace dep', async () => {
   expect(res.ok).toBe(true);
   expect(checkMainDependencyHealth(dir)).toEqual({ ok: true });
 }, 60_000);
+
+describe('worktree-escaping links', () => {
+  const setup = () => {
+    write('pnpm-lock.yaml', '');
+    write('package.json', pkgJson({}));
+    write('node_modules/.modules.yaml', '');
+    const wt = path.join(dir, 'fake-wt-root');
+    fs.mkdirSync(path.join(wt, 'job1', 'packages', 'a'), { recursive: true });
+    return wt;
+  };
+
+  test('link into worktree root -> links-into-worktree', () => {
+    const wt = setup();
+    fs.symlinkSync(path.join(wt, 'job1', 'packages', 'a'), path.join(dir, 'node_modules', 'a'));
+    expect(checkMainDependencyHealth(dir, { worktreeRoots: [wt] }))
+      .toEqual({ ok: false, reason: 'links-into-worktree', missing: ['a'] });
+  });
+
+  test('scoped link into worktree is listed as @s/x', () => {
+    const wt = setup();
+    fs.mkdirSync(path.join(dir, 'node_modules', '@s'), { recursive: true });
+    fs.symlinkSync(path.join(wt, 'job1', 'packages', 'a'), path.join(dir, 'node_modules', '@s', 'x'));
+    expect(findWorktreeEscapingLinks(dir, { worktreeRoots: [wt] }))
+      .toEqual({ intoWorktree: ['@s/x'], dangling: [] });
+  });
+
+  test('dangling link -> dangling-links', () => {
+    const wt = setup();
+    fs.symlinkSync(path.join(dir, 'nowhere'), path.join(dir, 'node_modules', 'gone'));
+    expect(checkMainDependencyHealth(dir, { worktreeRoots: [wt] }))
+      .toEqual({ ok: false, reason: 'dangling-links', missing: ['gone'] });
+  });
+
+  test('sibling link inside mainCwd is ok', () => {
+    const wt = setup();
+    write('packages/a/package.json', '{}');
+    fs.symlinkSync(path.join('..', 'packages', 'a'), path.join(dir, 'node_modules', 'a'));
+    expect(checkMainDependencyHealth(dir, { worktreeRoots: [wt] })).toEqual({ ok: true });
+  });
+});

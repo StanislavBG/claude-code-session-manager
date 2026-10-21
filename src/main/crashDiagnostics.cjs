@@ -26,7 +26,7 @@
 const { app, powerSaveBlocker, powerMonitor, crashReporter } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
-const { reportCrash } = require('./lib/telemetry/crashTelemetry.cjs');
+const { reportCrash, classifyUncleanShutdown, reportChildProcessGone } = require('./lib/telemetry/crashTelemetry.cjs');
 const { createLoopDelayMonitor, stallVerdict } = require('./lib/util/loopDelay.cjs');
 
 let logs = null;
@@ -37,6 +37,7 @@ let loopMonitor = null;
 let sentinelPath = null;
 let startedAtIso = null;
 let lastSample = null;
+let lastLoop = null;
 
 // Warn threshold for total working set across all Electron processes. The OOM
 // journal showed a single renderer hitting ~900 MB anon-rss before the kernel
@@ -140,6 +141,7 @@ function persistSentinel(clean) {
     startedAt: startedAtIso,
     closedAt: clean ? new Date().toISOString() : undefined,
     lastSample,
+    loop: lastLoop ? { loopDelayMaxMs: lastLoop.loopDelayMaxMs, loopDelayP99Ms: lastLoop.loopDelayP99Ms } : null,
   };
   try {
     fs.mkdirSync(path.dirname(sentinelPath), { recursive: true });
@@ -152,11 +154,12 @@ function persistSentinel(clean) {
 
 function heartbeat() {
   lastSample = sampleMemory();
+  const loop = loopMonitor ? loopMonitor.snapshot() : null;
+  lastLoop = loop;
   // Persist every tick so the final pre-crash sample survives a SIGKILL.
   persistSentinel(false);
   const top = [...lastSample.procs].sort((a, b) => b.mb - a.mb).slice(0, 4);
   const level = lastSample.totalMb >= MEM_WARN_MB ? 'warn' : 'debug';
-  const loop = loopMonitor ? loopMonitor.snapshot() : null;
   logs?.writeLine({
     scope: 'crash-diag',
     level,
@@ -183,10 +186,14 @@ function checkPreviousRun() {
   if (!prev || prev.open !== true) return;
   const s = prev.lastSample;
   const lastTop = s && Array.isArray(s.procs) ? [...s.procs].sort((a, b) => b.mb - a.mb).slice(0, 4).map((p) => `${p.type}:${p.mb}MB`) : undefined;
+  const lastLoopDelayMaxMs = prev.loop?.loopDelayMaxMs;
+  const sampleMs = s?.ts ? Date.parse(s.ts) : NaN;
+  const silentGapSec = Number.isFinite(sampleMs) ? Math.round((Date.now() - sampleMs) / 1000) : undefined;
+  const likelyCause = classifyUncleanShutdown({ lastLoopDelayMaxMs, lastTotalMb: s?.totalMb, silentGapSec });
   logs?.writeLine({
     scope: 'crash-diag',
     level: 'error',
-    message: 'previous session ended UNCLEANLY (likely OOM-kill / native crash — no graceful quit)',
+    message: `previous session ended UNCLEANLY (likelyCause=${likelyCause}; no graceful quit)`,
     meta: {
       prevPid: prev.pid,
       startedAt: prev.startedAt,
@@ -195,7 +202,10 @@ function checkPreviousRun() {
       lastMainRssMb: s?.main?.rssMb,
       lastTop,
       powerBlockerHeldAtDeath: s?.powerBlockerHeld,
-      hint: 'Check `journalctl -k | grep -i oom` around lastSampleTs to confirm the kernel OOM-killer.',
+      lastLoopDelayMaxMs,
+      silentGapSec,
+      likelyCause,
+      hint: 'Check `journalctl -k | grep -i oom` around lastSampleTs to confirm the kernel OOM-killer, and the "main-loop stall" heartbeats before lastSampleTs to confirm a wedged main thread.',
     },
   });
   // The unclean-shutdown postmortem is the report most likely to be the ONLY
@@ -209,6 +219,9 @@ function checkPreviousRun() {
       lastMainRssMb: s?.main?.rssMb,
       lastTop,
       powerBlockerHeldAtDeath: s?.powerBlockerHeld,
+      lastLoopDelayMaxMs,
+      silentGapSec,
+      likelyCause,
     },
   });
 }
@@ -244,15 +257,7 @@ function registerCrashHooks() {
         lastTotalMb: lastSample?.totalMb,
       },
     });
-    reportCrash({
-      reason: details?.reason || 'unknown',
-      meta: {
-        type: details?.type,
-        name: details?.name || details?.serviceName,
-        exitCode: details?.exitCode,
-        lastTotalMb: lastSample?.totalMb,
-      },
-    });
+    reportChildProcessGone({ details, lastTotalMb: lastSample?.totalMb });
   });
 
   // powerMonitor ties the suspend story to the crash timeline. If we ever log

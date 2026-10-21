@@ -17,7 +17,9 @@ third-party service, so issues with the product page are ours to fix, just in th
 
 Key files in `~/Projects/Bilko/` for session-manager's listing:
 - `src/pages/SessionManagerPage.tsx` + `src/pages/session-manager-landing/` — the product page. It sells
-  nothing: no checkout, no email form, and the only price on it is the app's `$0`. Every visible string
+  nothing: no checkout, and the only price on it is the app's `$0`. Since the owner decision of 2026-10-20
+  (reversing 2026-09-25's no-form rule) it and the manual show an optional, dismissable bilko.run sign-in
+  for updates (`SignInPrompt.tsx`) that records signup source + opt-in consent; it never gates content. Every visible string
   lives in `session-manager-landing/copy.ts`, mirrored from this repo's
   [`design-mocks/landing-v2/copy.json`](../design-mocks/landing-v2/copy.json) — edit there first.
   Only the price tag carries `npx` (restored 2026-10-10); the film end card, the /projects hub card and

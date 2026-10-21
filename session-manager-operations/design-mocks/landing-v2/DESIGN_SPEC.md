@@ -1049,3 +1049,17 @@ chapter flips of the section above. Flips stay only between the landing and the 
 - No prev/next and no chapter flips: nothing inside the manual book-turns.
 - Deep links scroll to the section; the ready signal fires after it renders.
 - The back row, the dots and the header back link keep their back turns to the landing.
+
+## 2026-10-20 — sign-in for updates prompt (intentional addition to the mock)
+
+Owner decision 2026-10-20, reversing the 2026-09-25 "no forms / no capture" stance. The prompt is **not in the
+Claude Design mock**; it is a deliberate addition (Bilko `src/pages/session-manager-landing/SignInPrompt.tsx`,
+bilko-run commit 5e96bba1).
+
+- Copy: `signinPrompt.*` in `copy.json`, mirrored byte for byte into Bilko's `copy.ts`.
+- Placement: inline, never modal. On the canvas layout it is a fixed corner card (`variant="corner"`); in reflow
+  and on the manual page it renders inline.
+- Dismissable ("No thanks"), remembered per source page; hidden while the visitor is signed in.
+- The "Send me occasional updates" consent checkbox is off by default.
+- It never gates content: the page and every Field Manual chapter stay free and readable without an account.
+- Collect only: signup source + opt-in consent with a timestamp. No newsletter sending is in scope.

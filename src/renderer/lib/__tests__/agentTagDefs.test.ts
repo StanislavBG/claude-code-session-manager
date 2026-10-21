@@ -52,3 +52,11 @@ describe('AGENT_TAG_DEFS art template', () => {
     expect(template).toContain('.blend')
   })
 })
+
+describe('AGENT_TAG_DEFS portfolio template', () => {
+  it('routes via feedback_open_session and forbids queuing PRDs', () => {
+    const template = AGENT_TAG_DEFS.portfolio.initialPromptTemplate
+    expect(template).toContain('feedback_open_session')
+    expect(template).toContain('Do not queue PRDs')
+  })
+})

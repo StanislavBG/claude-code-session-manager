@@ -275,7 +275,7 @@ export interface McpCatalogResult {
 /** Mirrors WorkType (src/main/lib/prd/workTypeLibrary.cjs) / EpicTag (tagLibrary.ts) — the
  *  same Epic-mission taxonomy, reused here since an Agent persona's `tags` field is that
  *  same concept, not a free-form string list. */
-export type AgentPersonaTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'art';
+export type AgentPersonaTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'art' | 'portfolio';
 
 /** One declared `{{name}}` argument of a macro prompt (macroLibrary.cjs `MacroInputSchema`). */
 export interface MacroInput {
@@ -1561,7 +1561,7 @@ export interface ChatCreatePrdPayload {
   /** Originating tab id — used at job completion to route a status prompt back into the tab. */
   sourceTabId?: string;
   /** User-selected Feature/Bug tag (PRD 774) carried from the originating PromptTicket. */
-  tag?: 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'art';
+  tag?: 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'art' | 'portfolio';
 }
 
 export type ChatCreatePrdResult =
@@ -2375,7 +2375,7 @@ export interface PromptSessionsMergeActiveIndexResult {
 export interface PromptSessionsCreateEpicPayload {
   cwd: string;
   goalText: string;
-  tag?: 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'art';
+  tag?: 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'art' | 'portfolio';
   agentType?: string;
   /** Per-Epic model/effort overrides (New Session card); omitted = the persona's own. */
   model?: string;

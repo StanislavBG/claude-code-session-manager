@@ -74,6 +74,15 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
       "set to the project's art persona (e.g. blender-artist), rather than editing assets inline " +
       'in this conversation. The .blend file is the source of truth; exported assets are derived.',
   },
+  portfolio: {
+    description: 'Reviews the whole project portfolio and routes decided changes to the owning projects — never builds or queues PRDs itself.',
+    initialPromptTemplate:
+      "You are running a portfolio optimization review across the owner's projects (money, influence, online presence). " +
+      'The outcome is a small set of decisions, not a code change in this project. Do not edit files here. ' +
+      'Do not queue PRDs or run /develop from this session. Route each decided change to the project that owns it ' +
+      'with the send-feedback skill (feedback_open_session), which lands it as a proposed Epic in that project ' +
+      'for its own human to approve.',
+  },
 }
 
 /**
@@ -92,7 +101,7 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
  * (epicIntake.ts) grounds the opening prompt with, so the "what a tag means"
  * wording has exactly one source no matter how many UI surfaces show it.
  */
-export const AGENT_TAG_ORDER: TicketTag[] = ['feature', 'bug', 'discussion', 'project-home-builder', 'art']
+export const AGENT_TAG_ORDER: TicketTag[] = ['feature', 'bug', 'discussion', 'project-home-builder', 'art', 'portfolio']
 
 export function agentTagDef(tag: TicketTag): AgentTagDef {
   return AGENT_TAG_DEFS[tag]

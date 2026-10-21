@@ -28,6 +28,7 @@ const WORK_TYPES = Object.freeze([
   'build',
   'project-home-builder',
   'art',
+  'portfolio',
 ]);
 
 const WorkTypeSchema = z.enum(WORK_TYPES);
@@ -38,17 +39,19 @@ const WorkTypeSchema = z.enum(WORK_TYPES);
 // legacy-drop preprocessing.
 const LEGACY_WORK_TYPES = Object.freeze(['bilko-host-publisher']);
 
-// A 'discussion'-tagged ticket never reaches PRD authoring (a domain
+// 'discussion' and 'portfolio' tickets never reach PRD authoring (a domain
 // invariant unrelated to the Epic/PRD tag unification above), so the PRD
 // frontmatter `tag` field — parsed in prdFrontmatter.cjs/.ts and patched via
-// ipcSchemas.cjs's adminPrdFrontmatterPatch — excludes it even though
+// ipcSchemas.cjs's adminPrdFrontmatterPatch — excludes them even though
 // WorkTypeSchema itself (used at PRD-create time) does not.
-const PRD_WORK_TYPES = Object.freeze(WORK_TYPES.filter((t) => t !== 'discussion'));
+const NON_PRD_WORK_TYPES = Object.freeze(['discussion', 'portfolio']);
+const PRD_WORK_TYPES = Object.freeze(WORK_TYPES.filter((t) => !NON_PRD_WORK_TYPES.includes(t)));
 const PrdWorkTypeSchema = z.enum(PRD_WORK_TYPES);
 
 module.exports = {
   WORK_TYPES,
   WorkTypeSchema,
+  NON_PRD_WORK_TYPES,
   PRD_WORK_TYPES,
   PrdWorkTypeSchema,
   LEGACY_WORK_TYPES,

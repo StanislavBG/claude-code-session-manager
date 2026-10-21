@@ -22,7 +22,7 @@ const API_D_TS_PATH = path.join(REPO_ROOT, 'src/preload/api.d.ts');
 const IPC_SCHEMAS_PATH = path.join(REPO_ROOT, 'src/main/ipcSchemas.cjs');
 const SCHEDULER_MCP_SERVER_PATH = path.join(REPO_ROOT, 'scripts/scheduler-mcp-server.cjs');
 
-test('WORK_TYPES matches the expected 6 canonical ids in order', () => {
+test('WORK_TYPES matches the expected 7 canonical ids in order', () => {
   expect(WORK_TYPES).toEqual([
     'feature',
     'bug',
@@ -30,6 +30,7 @@ test('WORK_TYPES matches the expected 6 canonical ids in order', () => {
     'build',
     'project-home-builder',
     'art',
+    'portfolio',
   ]);
 });
 
@@ -46,7 +47,7 @@ test('WORK_TYPES matches the tag ids declared in tagLibrary.ts TAG_LIBRARY, in o
   expect(tagMatches).toEqual(WORK_TYPES);
 });
 
-test('api.d.ts tag unions both contain exactly the same 6 values', () => {
+test('api.d.ts tag unions both contain exactly the same 7 values', () => {
   const src = fs.readFileSync(API_D_TS_PATH, 'utf8');
   const unionMatches = [...src.matchAll(/tag\?:\s*((?:'[^']+'\s*\|?\s*)+);/g)].map((m) =>
     m[1]
@@ -86,4 +87,11 @@ test('scheduler-mcp-server.cjs requires PRD_WORK_TYPES rather than hardcoding a 
   // enum on feedback_open_session's tag property.
   expect(occurrences).toBe(2);
   expect(PRD_WORK_TYPES).toEqual(['feature', 'bug', 'build', 'project-home-builder', 'art']);
+});
+
+test("WorkTypeSchema accepts 'portfolio' while PrdWorkTypeSchema rejects it", () => {
+  const { PrdWorkTypeSchema, NON_PRD_WORK_TYPES } = require('../lib/prd/workTypeLibrary.cjs');
+  expect(NON_PRD_WORK_TYPES).toEqual(['discussion', 'portfolio']);
+  expect(WorkTypeSchema.parse('portfolio')).toBe('portfolio');
+  expect(PrdWorkTypeSchema.safeParse('portfolio').success).toBe(false);
 });

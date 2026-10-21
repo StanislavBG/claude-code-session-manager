@@ -46,6 +46,7 @@ const TAG_TONE: Record<TicketTag, { bg: string; text: string; border: boolean; l
   discussion: { bg: 'bg-butter/25', text: 'text-fg-dim', border: true, label: 'Discussion' },
   build: { bg: 'bg-hive-teal/20', text: 'text-hive-teal', border: true, label: 'Build' },
   'project-home-builder': { bg: 'bg-honey/20', text: 'text-honey-dark', border: true, label: 'Project Home Builder' },
+  portfolio: { bg: 'bg-butter/25', text: 'text-fg-dim', border: true, label: 'Portfolio' },
   art: { bg: 'bg-butter/25', text: 'text-honey-dark', border: true, label: '3D Art' },
 }
 

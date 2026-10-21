@@ -7,7 +7,7 @@
  * (tone/color) and `epicQueueControls.ts` (group order) both import the tag
  * list from here rather than keeping their own copies.
  */
-export type EpicTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'art'
+export type EpicTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'art' | 'portfolio'
 
 export type DevelopEagerness = 'expected-default' | 'available-not-assumed'
 
@@ -20,8 +20,8 @@ export interface TagLibraryEntry {
    * Which skill/protocol actually fires for this tag — `developEagerness`
    * only says how eagerly, not which mechanism. Only `feature`/`bug`/
    * `discussion`/`art` route through the `session-manager-dev:develop` skill
-   * itself; the other two each name a dedicated, different skill/protocol
-   * and never decompose via /develop's own PRD pipeline (project-home-builder
+   * itself; `portfolio` routes via send-feedback; the others each name a dedicated,
+   * different skill/protocol and never decompose via /develop's own PRD pipeline (project-home-builder
    * falls back to /develop only as a one-time bootstrap if its own pipeline
    * doesn't exist yet — see agentTagDefs.ts's template for that tag).
    */
@@ -76,6 +76,14 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
       'Blender modeling, rigging, skinning and animation work whose source of truth is a .blend file. Decomposition into PRDs executed by an art persona is the expected next step, same as feature/bug.',
     developEagerness: 'expected-default',
     developsVia: '/develop (PRDs executed by an art persona, e.g. agentType blender-artist)',
+  },
+  {
+    tag: 'portfolio',
+    label: 'Portfolio Optimization',
+    description:
+      "A cross-project review of the owner's whole portfolio (money, influence, online presence) that judges past decisions and routes at most a few changes to the projects that own them. Like discussion it never decomposes into PRDs here; decided changes leave via send-feedback (feedback_open_session) as proposed Epics in the owning project.",
+    developEagerness: 'available-not-assumed',
+    developsVia: 'send-feedback / feedback_open_session to the owning project (never /develop here)',
   },
 ]
 

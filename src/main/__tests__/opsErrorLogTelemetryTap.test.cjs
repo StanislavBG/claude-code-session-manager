@@ -171,3 +171,71 @@ test('a realistic error with an absolute path and a prompt-like string never rea
   expect(raw).not.toContain(promptLike);
   client.shutdown();
 });
+
+// ─── level routing + code ─────────────────────────────────────────────────
+
+function captureClient() {
+  const reportErrorCalls = [];
+  const logLineCalls = [];
+  stubTelemetryClient({
+    reportError: (o) => reportErrorCalls.push(o),
+    logLine: (o) => logLineCalls.push(o),
+  });
+  return { reportErrorCalls, logLineCalls };
+}
+
+test('level "info" and "debug" ship nothing to telemetry but still write the local line', () => {
+  const cwd = mkTmpProject();
+  const { reportErrorCalls, logLineCalls } = captureClient();
+  opsErrorLog.appendError({ cwd, scope: 'delegationReadiness', level: 'info', message: 'auto-install x: installed' });
+  opsErrorLog.appendError({ cwd, scope: 'delegationReadiness', level: 'debug', message: 'dbg' });
+  expect(reportErrorCalls).toHaveLength(0);
+  expect(logLineCalls).toHaveLength(0);
+  expect(readLines(cwd)).toHaveLength(2);
+});
+
+test('level "warn" ships logLine only; level "error" ships reportError only', () => {
+  const cwd = mkTmpProject();
+  const { reportErrorCalls, logLineCalls } = captureClient();
+  opsErrorLog.appendError({ cwd, scope: 'chatRunner', level: 'warn', message: 'w' });
+  expect(logLineCalls).toHaveLength(1);
+  expect(logLineCalls[0].level).toBe('warn');
+  expect(reportErrorCalls).toHaveLength(0);
+  opsErrorLog.appendError({ cwd, scope: 'chatRunner', level: 'error', message: 'e' });
+  expect(reportErrorCalls).toHaveLength(1);
+  expect(logLineCalls).toHaveLength(1);
+});
+
+test('a valid code lands in local line, tag, context.code and the msg label; name stays scope', () => {
+  const cwd = mkTmpProject();
+  const { reportErrorCalls } = captureClient();
+  opsErrorLog.appendError({ cwd, scope: 'chatRunner', code: 'spawn:enoent', message: 'secret text' });
+  expect(reportErrorCalls).toHaveLength(1);
+  const r = reportErrorCalls[0];
+  expect(r.msg).toBe('opsError:chatRunner:spawn:enoent');
+  expect(r.name).toBe('chatRunner');
+  expect(r.context.code).toBe('spawn:enoent');
+  expect(r.msg).not.toContain('secret text');
+  const line = readLines(cwd)[0];
+  expect(line.code).toBe('spawn:enoent');
+  expect(line.tags).toContain('code:spawn:enoent');
+});
+
+test('a valid code also reaches logLine fields for warn level', () => {
+  const cwd = mkTmpProject();
+  const { logLineCalls } = captureClient();
+  opsErrorLog.appendError({ cwd, scope: 'chatRunner', level: 'warn', code: 'slow', message: 'm' });
+  expect(logLineCalls[0].msg).toBe('opsError:chatRunner:slow');
+  expect(logLineCalls[0].fields.code).toBe('slow');
+});
+
+test('an invalid code is dropped, never thrown', () => {
+  const cwd = mkTmpProject();
+  const { reportErrorCalls } = captureClient();
+  expect(() => opsErrorLog.appendError({ cwd, scope: 'chatRunner', code: 'Has Space/../x', message: 'm' })).not.toThrow();
+  expect(reportErrorCalls[0].msg).toBe('opsError:chatRunner');
+  expect(reportErrorCalls[0].context.code).toBeUndefined();
+  const line = readLines(cwd)[0];
+  expect(line.code).toBeUndefined();
+  expect(line.tags.some((t) => t.startsWith('code:'))).toBe(false);
+});

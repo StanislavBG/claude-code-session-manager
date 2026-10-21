@@ -45,7 +45,14 @@ function todayFile(cwd) {
   return path.join(logsDir(cwd), `errors-${yyyy}-${mm}-${dd}.jsonl`);
 }
 
-function writeLocalLine({ cwd, scope, level, tabId, epicId, tags, message, meta }) {
+// Non-PII triage code: short lowercase slug. Anything else is dropped (never thrown).
+const CODE_RE = /^[a-z0-9][a-z0-9:._-]{0,47}$/;
+
+function normalizeCode(code) {
+  return typeof code === 'string' && CODE_RE.test(code) ? code : undefined;
+}
+
+function writeLocalLine({ cwd, scope, level, tabId, epicId, tags, message, meta, safeCode }) {
   const file = todayFile(cwd);
   try {
     assertOpsWrite(file, 'logs');
@@ -58,6 +65,7 @@ function writeLocalLine({ cwd, scope, level, tabId, epicId, tags, message, meta 
     `scope:${scope || 'unknown'}`,
     ...(tabId ? [`tab:${tabId}`] : []),
     ...(epicId ? [`epic:${epicId}`] : []),
+    ...(safeCode ? [`code:${safeCode}`] : []),
   ];
   const allTags = Array.from(new Set([...autoTags, ...tags]));
 
@@ -68,6 +76,7 @@ function writeLocalLine({ cwd, scope, level, tabId, epicId, tags, message, meta 
     tabId: tabId || null,
     epicId: epicId || null,
     tags: allTags,
+    ...(safeCode ? { code: safeCode } : {}),
     message: String(message ?? ''),
     ...(meta !== undefined ? { meta: sanitizeMeta(meta) } : {}),
   };
@@ -83,9 +92,13 @@ function writeLocalLine({ cwd, scope, level, tabId, epicId, tags, message, meta 
 }
 
 /**
- * Mirrors every appendError() line to telemetryClient — the single tap that
+ * Mirrors appendError() lines to telemetryClient — the single tap that
  * covers pty/chatRunner/scheduler/logs.cjs/renderer in one place, since they
- * all already funnel through appendError. Runs AFTER the local write and is
+ * all already funnel through appendError. Level routing: 'error' ships as a
+ * telemetry error, 'warn' as a warn log line, anything else ('info', 'debug')
+ * ships nothing (it is a success/diagnostic, not an error). An optional
+ * validated `code` rides in context/fields and the msg label so host-side
+ * reports are triageable though `message` is always redacted. Runs AFTER the local write and is
  * independently wrapped so a throwing telemetry stub can never prevent or
  * corrupt it. Reported regardless of the local ephemeral-cwd refusal — an
  * Epic/job worktree still has a REAL project behind it, just not one that
@@ -105,7 +118,8 @@ function writeLocalLine({ cwd, scope, level, tabId, epicId, tags, message, meta 
  * `scope`, a small closed vocabulary of subsystem names — structural, never
  * free text.
  */
-function reportToTelemetry({ cwd, scope, level, tabId, epicId, tags, message }) {
+function reportToTelemetry({ cwd, scope, level, tabId, epicId, tags, message, safeCode }) {
+  if (level !== 'error' && level !== 'warn') return;
   try {
     const telemetryClient = require('./telemetryClient.cjs');
     const { projectRootOf } = require('../activeSessions.cjs');
@@ -116,8 +130,11 @@ function reportToTelemetry({ cwd, scope, level, tabId, epicId, tags, message }) 
       ...(epicId ? [`epic:${epicId}`] : []),
     ];
     const allTags = Array.from(new Set([...autoTags, ...(tags || [])]));
-    const label = `opsError:${scope || 'unknown'}`;
-    const context = { scope: scope || 'unknown', tags: allTags, cwd: normalizedCwd, message };
+    const label = safeCode ? `opsError:${scope || 'unknown'}:${safeCode}` : `opsError:${scope || 'unknown'}`;
+    const context = {
+      scope: scope || 'unknown', tags: allTags, cwd: normalizedCwd, message,
+      ...(safeCode ? { code: safeCode } : {}),
+    };
     if (level === 'warn') {
       telemetryClient.logLine({ level: 'warn', msg: label, fields: context });
     } else {
@@ -159,7 +176,8 @@ function isInsideTestScratch(cwd) {
  * @param {{
  *   cwd: string,           // required — which project's ops root owns this line
  *   scope: string,         // subsystem name, e.g. 'pty', 'chatRunner', 'voice'
- *   level?: string,        // default 'error'; 'warn' also accepted
+ *   level?: string,        // default 'error'; telemetry: 'error' -> error, 'warn' -> warn log, else nothing
+ *   code?: string,         // optional non-PII triage slug, /^[a-z0-9][a-z0-9:._-]{0,47}$/; invalid is dropped
  *   tabId?: string,        // claudeSessionId of the tab this error belongs to, if any
  *   epicId?: string,       // Epic id, if this error happened inside an Epic-backed run
  *   tags?: string[],       // extra caller-supplied tags, merged with the auto-derived ones
@@ -167,12 +185,14 @@ function isInsideTestScratch(cwd) {
  *   meta?: unknown,
  * }} entry
  */
-function appendError({ cwd, scope, level = 'error', tabId, epicId, tags = [], message, meta }) {
+function appendError({ cwd, scope, level = 'error', tabId, epicId, tags = [], message, meta, code }) {
   if (!cwd || typeof cwd !== 'string') return; // no project to attribute this line to — skip
 
   // Test-process guard: a vitest fixture passing a real project root must never
   // write to that project's logs/ NOR ship a fake event to production telemetry.
   if (process.env.VITEST && !isInsideTestScratch(cwd)) return;
+
+  const safeCode = normalizeCode(code);
 
   if (isEphemeralCwd(cwd)) {
     // A worktree is torn down when its Epic/job ends and os.tmpdir() is
@@ -183,10 +203,10 @@ function appendError({ cwd, scope, level = 'error', tabId, epicId, tags = [], me
     // tap below still fires — this refusal is about the LOCAL write only.
     console.warn(`[opsErrorLog] appendError: refusing ephemeral cwd "${cwd}" (scope=${scope || 'unknown'})`);
   } else {
-    writeLocalLine({ cwd, scope, level, tabId, epicId, tags, message, meta });
+    writeLocalLine({ cwd, scope, level, tabId, epicId, tags, message, meta, safeCode });
   }
 
-  reportToTelemetry({ cwd, scope, level, tabId, epicId, tags, message });
+  reportToTelemetry({ cwd, scope, level, tabId, epicId, tags, message, safeCode });
 }
 
 module.exports = { appendError, logsDir, todayFile };

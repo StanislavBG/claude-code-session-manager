@@ -185,3 +185,9 @@ investigation probe that died identically.
   without opening a transcript.
 - Headless jobs launch with `SM_SCHEDULER_JOB_SLUG` set; `scheduler_create_prd` refuses
   calls from inside one unless `SM_SCHEDULER_JOB_MAY_QUEUE=1` (architect persona only).
+
+- A PRD persona's `tools:` list is enforced on its headless run via `--agents`/`--agent`
+  (`lib/claude/personaToolScope.cjs`, wired in `buildClaudeSpawnArgs`'s `toolScope`). The headless
+  floor (Agent, Skill, ToolSearch, TodoWrite) is always added so the finish protocol's reviews and
+  MCP tool discovery keep working; a persona with no `tools:` line or `*` spawns unscoped.
+  `--allowedTools` was not used: it is a no-op under `--dangerously-skip-permissions`.

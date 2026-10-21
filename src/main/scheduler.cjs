@@ -151,6 +151,7 @@ const queueOps = require('./queueOps.cjs');
 const { listEpicPrdDirs, listArchivedPrdDirs, deriveProjectCwdFromPrdPath } = require('./lib/prd/prdLocations.cjs');
 const { ensureEpic, appendPrdCreatedEvent, readActiveIndex } = require('./lib/epic/epicMint.cjs');
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
+const { buildPersonaToolScope, personaToolScopeArgs } = require('./lib/claude/personaToolScope.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { transitionJob, STATUS_HISTORY_CAP, LEGAL_TRANSITIONS } = require('./lib/scheduler/scheduleJobTransitions.cjs');
 const { buildContextDigest, composeExecutorPrompt } = require('./lib/epic/epicContextDigest.cjs');
@@ -4157,16 +4158,21 @@ const HEADLESS_DISALLOWED_TOOLS = Object.freeze([
  * persona body, resolved by agentModelResolve.cjs's resolvePrdPersonaForSpawn),
  * is passed as `--append-system-prompt` so the executor IS that persona at
  * launch rather than being asked in prose to adopt one.
+ * `toolScope` (buildPersonaToolScope of the persona's `tools:` list; null =
+ * unscoped) adds `--agents/--agent` so the persona's tool list is enforced —
+ * `--allowedTools` is a no-op under --dangerously-skip-permissions. It is
+ * inserted BEFORE that flag, never between `--disallowedTools` and its value.
  * `--disallowedTools` takes a variadic list, so another flag must always
  * follow it to end that list — `--output-format` does, right after. Never
  * put `--disallowedTools` last or right before the prompt.
  */
-function buildClaudeSpawnArgs({ prompt, model, effort, sessionId, resume, systemPrompt }) {
+function buildClaudeSpawnArgs({ prompt, model, effort, sessionId, resume, systemPrompt, toolScope }) {
   return [
     '-p', prompt,
     '--model', model,
     ...effortArgs(effort),
     ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
+    ...personaToolScopeArgs(toolScope),
     '--dangerously-skip-permissions',
     ...headlessPermissionArgs(),
     '--disallowedTools', HEADLESS_DISALLOWED_TOOLS.join(','),
@@ -4452,7 +4458,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // and is logged once by resolvePrdPersonaForSpawn itself.
   const personaResolution = await agentModelResolve.resolvePrdPersonaForSpawn({ cwd, agentType: job.agentType });
   const personaEffort = resolveEpicEffort({ cwd, agentType: job.agentType }).effort;
-  safeLog(`[scheduler] agentType=${job.agentType || '(none)'} persona=${personaResolution.personaPath || '(fallback — no persona applied)'} model=${personaResolution.model}${personaEffort ? ` effort=${personaEffort}` : ''}\n`);
+  const personaToolScope = buildPersonaToolScope(personaResolution.tools, { disallowed: HEADLESS_DISALLOWED_TOOLS });
+  safeLog(`[scheduler] agentType=${job.agentType || '(none)'} persona=${personaResolution.personaPath || '(fallback — no persona applied)'} model=${personaResolution.model}${personaEffort ? ` effort=${personaEffort}` : ''} ${personaToolScope ? `tools=${personaToolScope.tools.length} scoped` : 'tools=unscoped'}\n`);
 
   // Authoritative guarantee that buildClaudeSpawnArgs (a pure sync helper,
   // called below via withChildAndLog) sees a resolved --permission-prompts
@@ -4661,6 +4668,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       sessionId,
       resume: !!resumeTarget,
       systemPrompt: personaResolution.systemPrompt,
+      toolScope: personaToolScope,
     });
     const jobSpawn = claudeSpawnTarget('job', job.slug, claudeBin, jobArgs);
 

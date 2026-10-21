@@ -15,6 +15,7 @@
 
 import { test, expect, afterEach } from 'vitest';
 const { buildResumeRecoveryPreamble, buildClaudeSpawnArgs, HEADLESS_DISALLOWED_TOOLS, spawnInvestigation } = require('../scheduler.cjs');
+const { buildPersonaToolScope, HEADLESS_SCOPE_AGENT_NAME } = require('../lib/claude/personaToolScope.cjs');
 const { selectResumeRecoveryTarget, selectAutoFixTargets } = require('../scheduler/reviewLadder.cjs');
 
 const savedDisable = process.env.SM_RESUME_RECOVERY_DISABLE;
@@ -142,6 +143,44 @@ test('buildClaudeSpawnArgs: --disallowedTools carries the frozen headless list a
     const args = buildClaudeSpawnArgs({ prompt: 'x', model: 'sonnet', sessionId: 'sid', resume });
     const idx = args.indexOf('--disallowedTools');
     expect(idx).toBeGreaterThanOrEqual(0);
+    expect(args[idx + 1]).toBe(HEADLESS_DISALLOWED_TOOLS.join(','));
+    expect(args[idx + 2]).toMatch(/^--/);
+  }
+});
+
+// ---------- persona tool scope (toolScope) ----------
+
+test('buildClaudeSpawnArgs: no toolScope → no --agents/--agent and argv equals the old call shape', () => {
+  for (const resume of [true, false]) {
+    const base = { prompt: 'x', model: 'sonnet', sessionId: 'sid', resume };
+    const old = buildClaudeSpawnArgs(base);
+    for (const toolScope of [undefined, null]) {
+      const args = buildClaudeSpawnArgs({ ...base, toolScope });
+      expect(args).not.toContain('--agents');
+      expect(args).not.toContain('--agent');
+      expect(args).toEqual(old);
+    }
+  }
+});
+
+test('buildClaudeSpawnArgs: blender-artist-style scope → --agent name + --agents JSON with persona tools plus floor', () => {
+  const personaTools = ['Read', 'Bash', 'Edit', 'Write', 'mcp__blender__execute_blender_code_for_cli'];
+  const toolScope = buildPersonaToolScope(personaTools, { disallowed: HEADLESS_DISALLOWED_TOOLS });
+  for (const resume of [true, false]) {
+    const args = buildClaudeSpawnArgs({ prompt: 'x', model: 'sonnet', sessionId: 'sid', resume, toolScope });
+    expect(args[args.indexOf('--agent') + 1]).toBe(HEADLESS_SCOPE_AGENT_NAME);
+    const def = JSON.parse(args[args.indexOf('--agents') + 1])[HEADLESS_SCOPE_AGENT_NAME];
+    for (const t of [...personaTools, 'Agent', 'Skill', 'ToolSearch', 'TodoWrite']) expect(def.tools).toContain(t);
+    expect(args.indexOf('--agents')).toBeLessThan(args.indexOf('--dangerously-skip-permissions'));
+    expect(args.indexOf('--agent')).toBeLessThan(args.indexOf('--dangerously-skip-permissions'));
+  }
+});
+
+test('buildClaudeSpawnArgs: --disallowedTools still followed by another flag with a toolScope', () => {
+  const toolScope = buildPersonaToolScope(['Read'], { disallowed: HEADLESS_DISALLOWED_TOOLS });
+  for (const resume of [true, false]) {
+    const args = buildClaudeSpawnArgs({ prompt: 'x', model: 'sonnet', sessionId: 'sid', resume, toolScope });
+    const idx = args.indexOf('--disallowedTools');
     expect(args[idx + 1]).toBe(HEADLESS_DISALLOWED_TOOLS.join(','));
     expect(args[idx + 2]).toMatch(/^--/);
   }

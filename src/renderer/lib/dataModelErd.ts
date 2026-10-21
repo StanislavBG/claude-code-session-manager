@@ -375,7 +375,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       { name: 'sourcePromptId', type: 'string', optional: true, key: 'fk', ref: 'epic.id', note: 'frontmatter intent — can disagree with epicId' },
       { name: 'sourceTabId', type: 'string', optional: true },
       { name: 'estimateMinutes', type: 'number' },
-      { name: 'tag', type: "'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder'", optional: true, key: 'fk', ref: 'tag.tag' },
+      { name: 'tag', type: "'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'art'", optional: true, key: 'fk', ref: 'tag.tag' },
       { name: 'dependsOn', type: 'string[]', optional: true, key: 'fk', ref: 'prd.slug', note: 'the SOLE ordering primitive' },
       { name: 'goal', type: 'string' },
       { name: 'acceptanceCriteria', type: 'string[]' },
@@ -538,7 +538,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
     },
     summary: 'The closed 5-taxonomy union — Epic creation is agentType (who) + tag (what), two independent selections.',
     fields: [
-      { name: 'tag', type: "'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder'", key: 'pk' },
+      { name: 'tag', type: "'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'art'", key: 'pk' },
       { name: 'label', type: 'string' },
       { name: 'description', type: 'string' },
       { name: 'developEagerness', type: "'expected-default' | 'available-not-assumed'" },

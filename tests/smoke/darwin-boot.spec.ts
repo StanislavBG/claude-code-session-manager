@@ -33,6 +33,8 @@ test('darwin: app boots, renderer mounts, no boot-poller timeouts', async () => 
       ...process.env,
       NODE_ENV: 'development',
       SM_E2E: '1',
+      // Keep smoke runs from registering phantom installs on bilko.run.
+      SM_TELEMETRY: '0',
       SM_SUPERVISOR_DISABLE: '1',
       // Keep billing poll deterministic on a runner with no Claude credentials.
       SM_MOCK_BILLING_KIND: 'ok',

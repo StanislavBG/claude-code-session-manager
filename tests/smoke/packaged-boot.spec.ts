@@ -34,6 +34,8 @@ test('packaged: app boots and renderer mounts', async () => {
       ...(isWin ? {} : { HOME: home, USERPROFILE: home }),
       SM_BOOT_DIAG: '1',
       SM_E2E: '1',
+      // Packaged build reports a real version + env 'prod'; keep smoke runs off bilko.run.
+      SM_TELEMETRY: '0',
       SM_SUPERVISOR_DISABLE: '1',
       SM_MOCK_BILLING_KIND: 'ok',
     },

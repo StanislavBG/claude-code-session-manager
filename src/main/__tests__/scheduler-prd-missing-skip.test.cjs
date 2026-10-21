@@ -15,7 +15,7 @@
 
 'use strict';
 
-import { test, expect, beforeAll, afterAll } from 'vitest';
+import { test, expect, beforeAll, afterAll, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -142,6 +142,39 @@ test("spawnJob's post-run handler retires a prd-missing skip as a plain completi
     expect(row.status).not.toBe('needs_review');
     expect(row.landedCommit).toBeUndefined();
   } finally {
+    fs.rmSync(projectCwd, { recursive: true, force: true });
+    fs.rmSync(runDir, { recursive: true, force: true });
+  }
+});
+
+test('a PRD that exists under a job-scoped Epic dir is NOT retired when the global lookups miss', async () => {
+  const prdPaths = require('../scheduler/prdPaths.cjs');
+  const projectCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-prd-recheck-project-'));
+  fs.mkdirSync(path.join(tmpHome, '.claude'), { recursive: true });
+  const runDir = fs.mkdtempSync(path.join(tmpHome, '.claude', 'sm-prd-recheck-run-'));
+  const spies = [];
+  try {
+    const slug = `2070-recheck-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
+    const epicId = 'epic-recheck';
+    const prdsDir = path.join(projectCwd, 'session-manager-operations', 'scheduler', 'epics', epicId, 'prds');
+    fs.mkdirSync(prdsDir, { recursive: true });
+    fs.writeFileSync(path.join(prdsDir, `${slug}.md`), '---\ntitle: recheck\n---\n\n# Goal\nhello\n', 'utf8');
+
+    spies.push(vi.spyOn(prdPaths, 'findPrdDir').mockResolvedValue(null));
+    spies.push(vi.spyOn(prdPaths, 'candidatePrdsDirs').mockResolvedValue([]));
+    // First (pre-guard) job-scoped lookup misses; the guard's fresh scan hits.
+    const real = prdPaths.jobScopedPrdDirs.bind(prdPaths);
+    let calls = 0;
+    spies.push(vi.spyOn(prdPaths, 'jobScopedPrdDirs').mockImplementation(async (j) => (++calls <= 2 ? [] : real(j))));
+
+    const job = { slug, cwd: projectCwd, epicId };
+    const result = await executeJob(job, runDir, projectCwd, () => {});
+
+    expect(result.skipped).toBeUndefined();
+    const log = fs.readFileSync(path.join(runDir, `${slug}.log`), 'utf8');
+    expect(log).toContain('PRD resolved on re-check at');
+  } finally {
+    for (const s of spies) s.mockRestore();
     fs.rmSync(projectCwd, { recursive: true, force: true });
     fs.rmSync(runDir, { recursive: true, force: true });
   }

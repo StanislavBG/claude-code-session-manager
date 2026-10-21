@@ -534,6 +534,26 @@ function biasJobOomScore(pid) {
 // `<job.cwd>/session-manager-operations/scheduler/prds/` via prdLocations.cjs.
 
 /**
+ * Last-line guard before any 'prd-missing' retire: bust the project-cwd cache
+ * and re-check every job-scoped dir plus findPrdDirForJob for
+ * `<dir>/<slug>.md`. Returns the first existing absolute path, or null. A
+ * stale allProjectCwds scan must never retire a PRD whose file exists.
+ */
+async function recheckPrdSourceForJob(job) {
+  const slug = job && job.slug;
+  if (typeof slug !== 'string' || !slug || path.basename(slug) !== slug) return null;
+  try { require('./lib/activeSessions.cjs').bustProjectCwdCache(); } catch { /* best-effort */ }
+  const dirs = [...(await prdPaths.jobScopedPrdDirs(job))];
+  const found = await prdPaths.findPrdDirForJob(job);
+  if (found) dirs.push(found);
+  for (const dir of dirs) {
+    const candidate = path.join(dir, `${slug}.md`);
+    try { await fsp.access(candidate); return candidate; } catch { /* not here */ }
+  }
+  return null;
+}
+
+/**
  * Build the non-failure result + run meta for a queued job whose PRD source
  * is gone. Shared by both PRD-read failure exits in executeJob so the
  * stale-skip logic isn't duplicated. Two reasons, both exitCode: 0 (no RCA
@@ -4310,6 +4330,26 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   // then an ancestor-folder Epic walk above job.cwd) first, so the common
   // case — a live Epic-scoped PRD — is a first-try hit instead of probing
   // the retired flat dir and only then falling back.
+  // Shared by both 'prd-missing' exits: resolves to null (truly missing), the
+  // string 'resolved' (file found + parsed; prompt/prdPath/parsedPrdMeta set),
+  // or a ready-to-return { exitCode: -1, error } result.
+  const recheckBeforeMissingSkip = async () => {
+    const found = await recheckPrdSourceForJob(job);
+    if (!found) return null;
+    try {
+      const parsed = await parsePrd(found);
+      prompt = parsed.body;
+      prdPath = found;
+      parsedPrdMeta = parsed;
+    } catch (err) {
+      const error = `PRD exists at ${found} but could not be read: ${err?.message}`;
+      safeLog(`[scheduler] ${error}\n`);
+      closeFd();
+      return { exitCode: -1, durationMs: 0, error, sessionId };
+    }
+    safeLog(`[scheduler] PRD resolved on re-check at ${found}\n`);
+    return 'resolved';
+  };
   const resolvedDir = await prdPaths.findPrdDirForJob(job);
   prdPath = resolvedDir ? path.join(resolvedDir, `${job.slug}.md`) : prdPaths.prdPathForJob(job);
   try {
@@ -4345,11 +4385,14 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-archived');
         }
         if (e2 && e2.code === 'ENOENT') {
-          return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-missing');
+          const rc = await recheckBeforeMissingSkip();
+          if (rc && rc !== 'resolved') return rc;
+          if (!rc) return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-missing');
+        } else {
+          safeLog(`[scheduler] failed to read PRD: ${e2?.message}\n`);
+          closeFd();
+          return { exitCode: -1, durationMs: 0, error: e2?.message };
         }
-        safeLog(`[scheduler] failed to read PRD: ${e2?.message}\n`);
-        closeFd();
-        return { exitCode: -1, durationMs: 0, error: e2?.message };
       }
     } else {
       // No candidate dir has the slug at all. Case A: it was archived —
@@ -4362,11 +4405,14 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-archived');
       }
       if (e && e.code === 'ENOENT') {
-        return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-missing');
+        const rc = await recheckBeforeMissingSkip();
+        if (rc && rc !== 'resolved') return rc;
+        if (!rc) return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-missing');
+      } else {
+        safeLog(`[scheduler] failed to read PRD: ${e?.message}\n`);
+        closeFd();
+        return { exitCode: -1, durationMs: 0, error: e?.message };
       }
-      safeLog(`[scheduler] failed to read PRD: ${e?.message}\n`);
-      closeFd();
-      return { exitCode: -1, durationMs: 0, error: e?.message };
     }
   }
   } // end resumeTarget ? preamble : normal-PRD-read

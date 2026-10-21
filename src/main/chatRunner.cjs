@@ -497,7 +497,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // run settled without one.
     let terminalSent = false;
     let lineOverflowLogged = false;
-    const emitTerminal = (channel, payload) => {
+    const emitTerminal = (channel, payload, diag = {}) => {
       if (terminalSent) return;
       terminalSent = true;
       // Every terminal error for this tab, logged once, regardless of the
@@ -507,6 +507,8 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
         opsErrorLog.appendError({
           cwd,
           scope: 'chatRunner',
+          level: diag.level || 'error',
+          code: diag.code || payload?.code,
           tabId,
           tags: silent ? ['silent-probe'] : [],
           message: payload?.message ?? 'chat run failed',
@@ -677,7 +679,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
           `Killed after ${Math.round(elapsedMs / 60_000)}m (ceiling ${KILL_CEILING_MIN}m). ` +
           `Last actions: ${lastActionsText}. External side effects may have completed — verify ` +
           `before retrying.`,
-      });
+      }, { level: 'warn', code: 'ceiling-kill' });
       cancelFn();
     }, KILL_CEILING_MS);
     if (killTimer.unref) killTimer.unref();
@@ -707,7 +709,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
         tabId,
         sessionId,
         message: `spawn failed: ${err?.message ?? String(err)}`,
-      });
+      }, { code: 'spawn-failed' });
       settle();
       return;
     }
@@ -803,7 +805,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
             tabId,
             sessionId,
             message: `run ended with result subtype: ${event.subtype ?? 'unknown'}`,
-          });
+          }, { code: 'result-error' });
         }
       }
     };
@@ -823,6 +825,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
           opsErrorLog.appendError({
             cwd,
             scope: 'chatRunner',
+            code: 'stdout-line-overflow',
             tabId,
             tags: silent ? ['silent-probe'] : [],
             message: `stdout line exceeded ${LINE_BUFFER_MAX} bytes without a newline; buffer dropped`,
@@ -843,7 +846,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
         tabId,
         sessionId,
         message: err?.message ?? String(err),
-      });
+      }, { code: 'child-error' });
       settle();
     });
 
@@ -893,7 +896,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
             tabId,
             sessionId,
             message: 'run cancelled',
-          });
+          }, { level: 'info', code: 'cancelled' });
         } else if (SESSION_IN_USE_RE.test(stderrText()) || NO_CONVERSATION_RE.test(stderrText())) {
           // A session-flag rejection that survived the one-shot swap (or was
           // not eligible for it). The raw stderr dump names neither the flag,
@@ -911,7 +914,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
               + `Spawn cwd: ${execCwd}. Transcript: ${plan.transcriptPath ?? 'no transcript found on disk'}. `
               + `App version: ${appVersion}. If this version is behind the published latest, update the app first — `
               + 'the session-flag resolution logic lives in main, and a stale build resolves it with older rules.',
-          });
+          }, { code: 'session-flag-rejected' });
         } else {
           const preview = stderrBuffer.preview();
           const errDetail = preview ? `: ${preview}` : '';
@@ -919,7 +922,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
             tabId,
             sessionId,
             message: `process exited without a result event (code=${code} signal=${signal})${errDetail}`,
-          });
+          }, { code: 'exit-no-result' });
         }
       }
       settle();

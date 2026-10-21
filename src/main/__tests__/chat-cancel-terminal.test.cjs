@@ -75,6 +75,28 @@ test('cancelling an ACTIVE run broadcasts a terminal event (unsticks the UI)', a
   assert.match(terminal[0].payload.message, /cancel/i, 'message names the cancellation');
 });
 
+test('cancel logs a chatRunner line with level info and code cancelled', async () => {
+  cr.attachWindow({
+    isDestroyed: () => false,
+    webContents: { isDestroyed: () => false, send: () => {} },
+  });
+  cr.run({ tabId: 'T3', sessionId: 'S3', prompt: 'hello', cwd: scratchCwd, resume: false });
+  for (let i = 0; i < 6; i++) await tick();
+  await cr.cancel('T3');
+
+  const logsDir = path.join(scratchCwd, 'session-manager-operations', 'logs');
+  const lines = [];
+  for (const f of fs.readdirSync(logsDir).filter((n) => /^errors-.*\.jsonl$/.test(n))) {
+    for (const l of fs.readFileSync(path.join(logsDir, f), 'utf8').split('\n')) {
+      if (l.trim()) lines.push(JSON.parse(l));
+    }
+  }
+  assert.ok(
+    lines.some((l) => l.scope === 'chatRunner' && l.level === 'info' && l.code === 'cancelled'),
+    'cancel is logged as info/cancelled',
+  );
+});
+
 test('cancel() resolves only AFTER the terminal broadcast fires, not immediately on SIGTERM (PRD 718)', async () => {
   // Order-of-events assertion (not timing-based — a real SIGTERM can be fast
   // enough on a lightweight stub child that a fixed-delay race would flake).

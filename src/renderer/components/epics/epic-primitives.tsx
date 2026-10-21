@@ -85,6 +85,7 @@ const KIND_TONE: Record<NonNullable<PromptSession['tag']>, { text: string; ring:
   discussion: { text: 'text-fg-faint',   ring: 'ring-fg-faint/40',   label: 'DISCUSSION' },
   build:      { text: 'text-hive-teal',  ring: 'ring-hive-teal/40',  label: 'BUILD' },
   'project-home-builder': { text: 'text-honey-dark', ring: 'ring-honey/40', label: 'PROJECT HOME BUILDER' },
+  art: { text: 'text-honey-dark', ring: 'ring-honey/40', label: '3D ART' },
 }
 
 const KIND_DOT: Record<NonNullable<PromptSession['tag']>, string> = {
@@ -93,6 +94,7 @@ const KIND_DOT: Record<NonNullable<PromptSession['tag']>, string> = {
   discussion: 'bg-fg-faint',
   build: 'bg-hive-teal',
   'project-home-builder': 'bg-honey',
+  art: 'bg-butter',
 }
 
 /** Solid dot color for a kind, e.g. the tag-grouped Epic queue section header. */

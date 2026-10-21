@@ -27,6 +27,7 @@ const WORK_TYPES = Object.freeze([
   'discussion',
   'build',
   'project-home-builder',
+  'art',
 ]);
 
 const WorkTypeSchema = z.enum(WORK_TYPES);

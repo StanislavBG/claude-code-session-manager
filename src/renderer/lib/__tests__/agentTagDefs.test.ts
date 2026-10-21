@@ -43,3 +43,12 @@ describe('AGENT_TAG_DEFS project-home-builder template', () => {
     expect(template).toContain('persona')
   })
 })
+
+describe('AGENT_TAG_DEFS art template', () => {
+  it('references /develop and names the art persona and the .blend source of truth', () => {
+    const template = AGENT_TAG_DEFS.art.initialPromptTemplate
+    expect(template).toContain('/develop')
+    expect(template).toContain('blender-artist')
+    expect(template).toContain('.blend')
+  })
+})

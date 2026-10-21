@@ -7,7 +7,7 @@
  * (tone/color) and `epicQueueControls.ts` (group order) both import the tag
  * list from here rather than keeping their own copies.
  */
-export type EpicTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder'
+export type EpicTag = 'feature' | 'bug' | 'discussion' | 'build' | 'project-home-builder' | 'art'
 
 export type DevelopEagerness = 'expected-default' | 'available-not-assumed'
 
@@ -19,8 +19,8 @@ export interface TagLibraryEntry {
   /**
    * Which skill/protocol actually fires for this tag — `developEagerness`
    * only says how eagerly, not which mechanism. Only `feature`/`bug`/
-   * `discussion` route through the `session-manager-dev:develop` skill
-   * itself; the other three each name a dedicated, different skill/protocol
+   * `discussion`/`art` route through the `session-manager-dev:develop` skill
+   * itself; the other two each name a dedicated, different skill/protocol
    * and never decompose via /develop's own PRD pipeline (project-home-builder
    * falls back to /develop only as a one-time bootstrap if its own pipeline
    * doesn't exist yet — see agentTagDefs.ts's template for that tag).
@@ -68,6 +68,14 @@ export const TAG_LIBRARY: TagLibraryEntry[] = [
       'Reads a project and writes its one-page Project Home overview (home.html) via the project-home-builder local agent and the project_home_write tool. Decomposition into PRDs is the expected next step, same as feature/bug/build.',
     developEagerness: 'expected-default',
     developsVia: 'project-home-builder agent protocol (not /develop)',
+  },
+  {
+    tag: 'art',
+    label: '3D art / animation',
+    description:
+      'Blender modeling, rigging, skinning and animation work whose source of truth is a .blend file. Decomposition into PRDs executed by an art persona is the expected next step, same as feature/bug.',
+    developEagerness: 'expected-default',
+    developsVia: '/develop (PRDs executed by an art persona, e.g. agentType blender-artist)',
   },
 ]
 

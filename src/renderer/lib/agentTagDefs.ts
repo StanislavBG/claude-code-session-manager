@@ -63,6 +63,17 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
       'single write tool that persona names, exactly once. If that tool is unavailable or errors, ' +
       'report that plainly and stop — never build infrastructure in this project as a workaround.',
   },
+  art: {
+    description:
+      'Plans 3D art / animation work (modeling, rigging, animation) and queues it via /develop for the project art persona.',
+    initialPromptTemplate:
+      'You are planning 3D art / animation work (modeling, rigging, skinning, shape keys, ' +
+      "animation cycles). Treat the goal below as the full objective — establish scope against the " +
+      "project's CLAUDE.md (which names the .blend source of truth, export pipeline and engine), " +
+      'then decompose and queue the work as scheduled PRDs via the /develop skill with agentType ' +
+      "set to the project's art persona (e.g. blender-artist), rather than editing assets inline " +
+      'in this conversation. The .blend file is the source of truth; exported assets are derived.',
+  },
 }
 
 /**
@@ -81,7 +92,7 @@ export const AGENT_TAG_DEFS: Record<TicketTag, AgentTagDef> = {
  * (epicIntake.ts) grounds the opening prompt with, so the "what a tag means"
  * wording has exactly one source no matter how many UI surfaces show it.
  */
-export const AGENT_TAG_ORDER: TicketTag[] = ['feature', 'bug', 'discussion', 'project-home-builder']
+export const AGENT_TAG_ORDER: TicketTag[] = ['feature', 'bug', 'discussion', 'project-home-builder', 'art']
 
 export function agentTagDef(tag: TicketTag): AgentTagDef {
   return AGENT_TAG_DEFS[tag]

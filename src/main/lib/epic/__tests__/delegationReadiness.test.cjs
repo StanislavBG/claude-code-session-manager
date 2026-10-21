@@ -14,6 +14,7 @@ const path = require('node:path');
 const {
   checkDelegationReadiness,
   ensureGuardsInstalled,
+  logAutoInstallEvent,
   clearGuardsInstalledCache,
   installPrdWriteGuard,
   installDestructiveGitGuard,
@@ -1168,6 +1169,20 @@ test('ensureGuardsInstalled: an already-installed re-run writes no new ops error
   expect(Object.values(again.guards).every((g) => g.action === 'already-installed')).toBe(true);
   expect(fs.readFileSync(logFile, 'utf8')).toBe(before);
 }, 15_000);
+
+test('logAutoInstallEvent: passes a guard-install triage code; error is level error, installed is info', async () => {
+  const cwd = await mkTmp('sm-auto-install-code-');
+  logAutoInstallEvent({ cwd, guard: 'prd-write-guard', action: 'error', error: 'boom' });
+  logAutoInstallEvent({ cwd, guard: 'prd-write-guard', action: 'installed' });
+  logAutoInstallEvent({ cwd, guard: 'prd-write-guard', action: 'already-installed' });
+
+  const lines = fs.readFileSync(opsErrorLogTodayFile(cwd), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  expect(lines).toHaveLength(2);
+  expect(lines[0].level).toBe('error');
+  expect(lines[0].code).toBe('guard-install-error:prd-write-guard');
+  expect(lines[1].level).toBe('info');
+  expect(lines[1].code).toBe('guard-install-installed:prd-write-guard');
+});
 
 test('delegationReadiness.cjs source contains no raw NUL byte', () => {
   const src = fs.readFileSync(path.join(__dirname, '..', 'delegationReadiness.cjs'));

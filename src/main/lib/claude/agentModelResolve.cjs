@@ -212,10 +212,10 @@ function buildPersonaBodyText(rawBody, personaPath) {
  * same runaway-file protection.
  *
  * @param {{ cwd: string, agentType: string|null, fallbackModel?: string, deps?: object }} opts
- * @returns {Promise<{ model: string, systemPrompt: string|null, personaPath: string|null }>}
+ * @returns {Promise<{ model: string, systemPrompt: string|null, personaPath: string|null, tools: string[]|null }>}
  */
 async function resolvePrdPersonaForSpawn({ cwd, agentType, fallbackModel = FALLBACK_MODEL, deps = {} } = {}) {
-  const miss = { model: fallbackModel, systemPrompt: null, personaPath: null };
+  const miss = { model: fallbackModel, systemPrompt: null, personaPath: null, tools: null };
   if (!agentType) return miss;
   try {
     const getBody = deps.getPersonaBody || require('../../agentLibrary.cjs').getPersonaBody;
@@ -230,7 +230,9 @@ async function resolvePrdPersonaForSpawn({ cwd, agentType, fallbackModel = FALLB
     const { fm, body } = persona.fm ? persona : splitFrontmatter(persona.text);
     const model = fm.model && fm.model !== 'inherit' ? fm.model : fallbackModel;
     const systemPrompt = buildPersonaBodyText(body, persona.path);
-    return { model, systemPrompt, personaPath: persona.path };
+    const parseTools = deps.parseTools || require('../../agentLibrary.cjs').parseTools;
+    const list = parseTools(typeof fm.tools === 'string' ? fm.tools : '');
+    return { model, systemPrompt, personaPath: persona.path, tools: list.length ? list : null };
   } catch {
     return miss;
   }

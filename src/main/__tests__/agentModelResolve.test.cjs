@@ -176,7 +176,7 @@ test('resolvePrdPersonaForSpawn falls back without throwing when agentType no lo
     agentType: 'ghost-persona',
     deps: { getPersonaBody: async () => null },
   });
-  await expect(call()).resolves.toEqual({ model: FALLBACK_MODEL, systemPrompt: null, personaPath: null });
+  await expect(call()).resolves.toEqual({ model: FALLBACK_MODEL, systemPrompt: null, personaPath: null, tools: null });
   await call(); // second call must not log a second line (dedup)
 
   const { todayFile } = require('../lib/telemetry/opsErrorLog.cjs');
@@ -189,7 +189,31 @@ test('resolvePrdPersonaForSpawn falls back without throwing when agentType no lo
 test('resolvePrdPersonaForSpawn returns the fallback (no persona applied) when agentType is absent, without touching getPersonaBody', async () => {
   const getPersonaBody = async () => { throw new Error('must not be called'); };
   const result = await resolvePrdPersonaForSpawn({ cwd: '/irrelevant', agentType: null, deps: { getPersonaBody } });
-  expect(result).toEqual({ model: FALLBACK_MODEL, systemPrompt: null, personaPath: null });
+  expect(result).toEqual({ model: FALLBACK_MODEL, systemPrompt: null, personaPath: null, tools: null });
+  expect(result.tools).toBeNull();
+});
+
+test('resolvePrdPersonaForSpawn returns the persona tools frontmatter as a parsed list, MCP names unchanged', async () => {
+  const result = await resolvePrdPersonaForSpawn({
+    cwd: '/irrelevant',
+    agentType: 'blender-artist',
+    deps: {
+      getPersonaBody: async () => ({
+        path: '/x/blender-artist.md',
+        text: '---\ntools: Read, Bash, mcp__blender__execute_blender_code_for_cli\n---\nBody.',
+      }),
+    },
+  });
+  expect(result.tools).toEqual(['Read', 'Bash', 'mcp__blender__execute_blender_code_for_cli']);
+});
+
+test('resolvePrdPersonaForSpawn returns tools: null (not []) when the persona has no tools line', async () => {
+  const result = await resolvePrdPersonaForSpawn({
+    cwd: '/irrelevant',
+    agentType: 'dev-lead',
+    deps: { getPersonaBody: async () => ({ path: '/x/dev-lead.md', text: '---\nmodel: opus\n---\nBody.' }) },
+  });
+  expect(result.tools).toBeNull();
 });
 
 // Overlay-aware resolution (unify-epic-model-resolution): resolveEpicModel

@@ -25,13 +25,14 @@
 
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
 const { ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs } = require('../lib/prd/prdLocations.cjs');
-const { findPrdDirForJob, archivedTwinExists } = require('../scheduler/prdPaths.cjs');
+const prdPaths = require('../scheduler/prdPaths.cjs');
+const { findPrdDirForJob, archivedTwinExists } = prdPaths;
 
 const tmpDirs = [];
 
@@ -57,6 +58,7 @@ function uniqueSlug(label) {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (tmpDirs.length) {
     const dir = tmpDirs.pop();
     fs.rmSync(dir, { recursive: true, force: true });
@@ -161,4 +163,45 @@ test('ancestorEpicArchivedPrdDirs never matches a different Epic sharing the sam
   fs.mkdirSync(epicArchivedDir(parentDir, 'epic-a'), { recursive: true });
 
   expect(ancestorEpicArchivedPrdDirs(repoDir, 'epic-b')).toEqual([]);
+});
+
+// Incident (Rabbits-Game 2026-10-20): project dropped out of allProjectCwds, so
+// candidatePrdsDirs() no longer visits it; the job-scoped lookup needs no scan.
+function writeLivePrd(cwd, epicId, slug) {
+  const dir = epicPrdsDir(cwd, epicId);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `${slug}.md`), '# Goal\n\ntest\n', 'utf8');
+  return dir;
+}
+
+test('findPrdDirForJob finds <job.cwd>/…/epics/<epicId>/prds when the global scan misses the project', async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-jobscoped-'));
+  tmpDirs.push(cwd);
+  const slug = uniqueSlug('jobscoped');
+  const dir = writeLivePrd(cwd, 'epic-a', slug);
+  vi.spyOn(prdPaths, 'candidatePrdsDirs').mockReturnValue([]);
+
+  expect(await findPrdDirForJob({ slug, cwd, epicId: 'epic-a' })).toBe(dir);
+});
+
+test('findPrdDirForJob with no epicId still resolves via listEpicPrdDirs when the global scan misses', async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-jobscoped-'));
+  tmpDirs.push(cwd);
+  const slug = uniqueSlug('noepic');
+  const dir = writeLivePrd(cwd, 'epic-b', slug);
+  vi.spyOn(prdPaths, 'candidatePrdsDirs').mockReturnValue([]);
+
+  expect(await findPrdDirForJob({ slug, cwd })).toBe(dir);
+});
+
+test('jobScopedPrdDirs ignores an unsafe epicId and returns [] for a relative cwd', async () => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-jobscoped-'));
+  tmpDirs.push(cwd);
+  const dir = writeLivePrd(cwd, 'epic-c', uniqueSlug('unsafe'));
+
+  const dirs = await prdPaths.jobScopedPrdDirs({ slug: 'x', cwd, epicId: '../x' });
+  expect(dirs).toContain(dir);
+  expect(dirs.every((d) => d.startsWith(cwd))).toBe(true);
+  expect(await prdPaths.jobScopedPrdDirs({ slug: 'x', cwd: 'relative/dir', epicId: 'epic-c' })).toEqual([]);
+  expect(await prdPaths.jobScopedPrdDirs({ slug: 'x' })).toEqual([]);
 });

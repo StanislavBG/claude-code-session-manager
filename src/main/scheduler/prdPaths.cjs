@@ -13,9 +13,9 @@ const schedulerPaths = require('../lib/scheduler/schedulerPaths.cjs');
 const logs = require('../logs.cjs');
 const { SCHEDULE_SLUG_RE } = require('../ipcSchemas.cjs');
 const { DEFAULT_PROJECT_CWD } = require('../lib/scheduler/schedulerBatch.cjs');
-const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, listArchivedPrdDirs, ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs } = require('../lib/prd/prdLocations.cjs');
+const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, resolveEpicPrdWriteDir, isSafeEpicId, listArchivedPrdDirs, ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs } = require('../lib/prd/prdLocations.cjs');
 const { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds } = require('../lib/prd/prdMigration.cjs');
-const { allProjectCwds } = require('../lib/activeSessions.cjs');
+const { allProjectCwds, projectRootOf } = require('../lib/activeSessions.cjs');
 
 /**
  * Every PRD-source directory currently in play: the legacy global dir (still
@@ -145,23 +145,69 @@ async function findPrdDir(slug) {
 }
 
 /**
- * Job-aware widening of findPrdDir: tries the ordinary global candidate
- * search first (unchanged), then a stored absolute PRD path on the row (if
+ * Deterministic, scan-free candidate PRD dirs for a job, derived only from
+ * `job.cwd` (projectRootOf-normalized): the exact `job.epicId` Epic dir (when
+ * the id is safe and the dir exists), then every Epic prds dir of the project,
+ * then the project's own prds dir. Ordered, deduplicated; [] when job.cwd is
+ * missing or not absolute. All paths are built with path.join.
+ */
+async function jobScopedPrdDirs(job) {
+  const cwd = job && job.cwd;
+  if (typeof cwd !== 'string' || !path.isAbsolute(cwd)) return [];
+  const root = projectRootOf(cwd);
+  const out = [];
+  const add = (dir) => { if (dir && !out.includes(dir)) out.push(dir); };
+  if (isSafeEpicId(job.epicId)) {
+    try {
+      const exact = resolveEpicPrdWriteDir(root, job.epicId);
+      if (fs.existsSync(exact)) add(exact);
+    } catch { /* unsafe epicId — skip the exact dir */ }
+  }
+  for (const dir of listEpicPrdDirs(root)) add(dir);
+  add(module.exports.prdDirForCwd(root));
+  return out;
+}
+
+async function dirHasSlug(dir, slug) {
+  try {
+    await fsp.access(path.join(dir, `${slug}.md`));
+    return true;
+  } catch { return false; }
+}
+
+/**
+ * Job-aware widening of findPrdDir: tries the job's exact Epic dir from
+ * jobScopedPrdDirs first, then the ordinary global candidate search, then the
+ * remaining job-scoped dirs, then a stored absolute PRD path on the row (if
  * the queue schema ever carries one — checked defensively), then walks up
  * to 3 ancestor directories above `job.cwd` for that EXACT `job.epicId`'s
  * `prds` dir (prdLocations.ancestorEpicPrdDirs).
  *
- * Fixes the incident where an Epic lives in a non-git PARENT folder P
- * (P/session-manager-operations/scheduler/epics/<epicId>/prds/*.md) but its
- * PRDs' frontmatter `cwd` is the sub-repo P/repo — P is never itself a
- * tracked project cwd, so findPrdDir's candidatePrdsDirs() never visits it
- * and the job was wrongly retired as `prd-missing`. epicId is matched
- * exactly (never a glob); every path is built with path.join, never string
- * concatenation with user input.
+ * The job-scoped lookup is what keeps a live PRD resolvable when its project
+ * has fallen out of allProjectCwds (a transcript-tail heuristic), which would
+ * otherwise hide it from findPrdDir (incident: Rabbits-Game
+ * 41-bunny-run-cycle-art, 2026-10-20, retired as `prd-missing`).
+ *
+ * The ancestor walk fixes the incident where an Epic lives in a non-git
+ * PARENT folder P (P/session-manager-operations/scheduler/epics/<epicId>/
+ * prds/*.md) but its PRDs' frontmatter `cwd` is the sub-repo P/repo — P is
+ * never itself a tracked project cwd, so candidatePrdsDirs() never visits it.
+ * epicId is matched exactly (never a glob); every path is built with
+ * path.join, never string concatenation with user input.
  */
 async function findPrdDirForJob(job) {
-  const viaGlobalSearch = await module.exports.findPrdDir(job && job.slug);
+  const slug = job && job.slug;
+  const scoped = typeof slug === 'string' && slug && path.basename(slug) === slug
+    ? await module.exports.jobScopedPrdDirs(job) : [];
+  const exactDir = scoped.length && isSafeEpicId(job.epicId)
+    ? path.join(projectRootOf(job.cwd), 'session-manager-operations', 'scheduler', 'epics', job.epicId, 'prds')
+    : null;
+  if (exactDir && scoped[0] === exactDir && await dirHasSlug(exactDir, slug)) return exactDir;
+  const viaGlobalSearch = await module.exports.findPrdDir(slug);
   if (viaGlobalSearch) return viaGlobalSearch;
+  for (const dir of scoped) {
+    if (await dirHasSlug(dir, slug)) return dir;
+  }
   if (job && typeof job.prdPath === 'string' && job.prdPath) {
     try {
       await fsp.access(job.prdPath);
@@ -170,10 +216,7 @@ async function findPrdDirForJob(job) {
   }
   if (job && job.cwd && job.epicId) {
     for (const dir of ancestorEpicPrdDirs(job.cwd, job.epicId)) {
-      try {
-        await fsp.access(path.join(dir, `${job.slug}.md`));
-        return dir;
-      } catch { /* not here — try the next ancestor */ }
+      if (await dirHasSlug(dir, slug)) return dir;
     }
   }
   return null;
@@ -474,6 +517,7 @@ module.exports = {
   archivedTwinExists,
   findPrdDir,
   findPrdDirForJob,
+  jobScopedPrdDirs,
   safeSlugPathIn,
   realPrdsDir,
   safeSlugPath,

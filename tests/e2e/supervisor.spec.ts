@@ -161,6 +161,7 @@ test('SM_SUPERVISOR_DISABLE=1 prevents supervisor from starting', async () => {
       NODE_ENV: 'development',
       SM_E2E: '1',
       SM_SUPERVISOR_DISABLE: '1',
+      SM_TELEMETRY: '0',
     },
   })
 

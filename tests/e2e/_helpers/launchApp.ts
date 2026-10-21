@@ -39,6 +39,8 @@ export async function launchApp(opts: LaunchOptions = {}): Promise<{
     SM_ADMIN_TOKEN_PATH: path.join(sandbox, 'scheduler-home', 'admin-api.e2e.json'),
     SM_CLAUDE_VERSION: '0.0.0-e2e',
     HOME: path.join(sandbox, 'home'),
+    // Fresh sandbox HOME = new installId per run = phantom install on bilko.run.
+    SM_TELEMETRY: '0',
   }
   for (const d of [sandboxEnv.SM_SCHEDULER_HOME, sandboxEnv.SM_WORKTREE_ROOT, sandboxEnv.HOME]) {
     fs.mkdirSync(d, { recursive: true })

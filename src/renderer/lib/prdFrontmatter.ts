@@ -32,10 +32,11 @@
 
 import { TAG_LIBRARY, type EpicTag } from './tagLibrary'
 
-// A 'discussion'-tagged ticket never reaches PRD authoring, so that value is
-// excluded here even though the write-side schema (ipcSchemas.cjs's
-// schedulerCreatePrd) accepts it as a WorkType in general.
-const PRD_TAG_VALUES: Set<EpicTag> = new Set(TAG_LIBRARY.map((entry) => entry.tag).filter((tag) => tag !== 'discussion'))
+// 'discussion'- and 'portfolio'-tagged tickets never reach PRD authoring, so
+// those values are excluded here even though the write-side schema
+// (ipcSchemas.cjs's schedulerCreatePrd) accepts them as WorkTypes in general.
+const NON_PRD_TAGS: ReadonlySet<EpicTag> = new Set<EpicTag>(['discussion', 'portfolio'])
+const PRD_TAG_VALUES: Set<EpicTag> = new Set(TAG_LIBRARY.map((entry) => entry.tag).filter((tag) => !NON_PRD_TAGS.has(tag)))
 
 export type PrdFrontmatter = {
   title?: string

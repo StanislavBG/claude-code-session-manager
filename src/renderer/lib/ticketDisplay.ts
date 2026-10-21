@@ -28,9 +28,9 @@ export function ticketDisplayStatus(status: PromptTicket['status']): PrdDisplayS
 /**
  * The tag a user picks in the composer before starting an epic. 'feature' and
  * 'bug' (PRD 774) both describe work to be built, so they stay eligible for
- * the inline-vs-/develop classifier. 'discussion' is the odd one out: it
- * declares up front that the goal is back-and-forth research with the agent,
- * so it must never be routed to PRD authoring — see isDiscussionTag below.
+ * the inline-vs-/develop classifier. 'discussion' and 'portfolio' are the odd
+ * ones out: they declare up front that the goal is back-and-forth work with
+ * the agent, so they must never be routed to PRD authoring — see isDiscussionTag below.
  */
 export type TicketTag = EpicTag
 
@@ -55,14 +55,14 @@ export function ticketTagTone(tag: TicketTag) {
 }
 
 /**
- * A 'discussion' ticket is an explicit statement of intent: the user wants an
- * interactive research conversation, not decomposition into scheduled PRDs.
+ * A 'discussion' or 'portfolio' ticket is an explicit statement of intent: the
+ * user wants an interactive conversation, not decomposition into scheduled PRDs.
  * dequeueNext() short-circuits the classifier on this, the same way it does
  * for external-origin tickets — different reason, same guarantee that
  * dispatchToPrd() is unreachable.
  */
 export function isDiscussionTag(tag: TicketTag | undefined): boolean {
-  return tag === 'discussion'
+  return tag === 'discussion' || tag === 'portfolio'
 }
 
 /**

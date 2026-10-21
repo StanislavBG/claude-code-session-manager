@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mergeTicketsForDisplay, ticketDisplayStatus } from '../ticketDisplay'
+import { isDiscussionTag, mergeTicketsForDisplay, ticketDisplayStatus } from '../ticketDisplay'
 import type { PromptTicket } from '../../state/chat'
 
 function ticket(overrides: Partial<PromptTicket>): PromptTicket {
@@ -44,5 +44,15 @@ describe('mergeTicketsForDisplay', () => {
 
   it('returns an empty list when there is nothing queued, active, or historical', () => {
     expect(mergeTicketsForDisplay([], null, [])).toEqual([])
+  })
+})
+
+describe('isDiscussionTag', () => {
+  it('is true for discussion and portfolio, false for other tags', () => {
+    expect(isDiscussionTag('discussion')).toBe(true)
+    expect(isDiscussionTag('portfolio')).toBe(true)
+    expect(isDiscussionTag('art')).toBe(false)
+    expect(isDiscussionTag('feature')).toBe(false)
+    expect(isDiscussionTag(undefined)).toBe(false)
   })
 })

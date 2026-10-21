@@ -115,6 +115,24 @@ describe('prdFrontmatter tag (PRD 774)', () => {
     expect(serializePrdFile(frontmatter, body)).toBe(text)
   })
 
+  it('never parses a non-PRD tag (portfolio) into the frontmatter tag', () => {
+    const text = [
+      '---',
+      'title: Portfolio PRD',
+      'cwd: ~/Projects/session-manager',
+      'estimateMinutes: 5',
+      'tag: portfolio',
+      '---',
+      '# Goal',
+      '',
+      'Never authored.',
+      '',
+    ].join('\n')
+
+    const { frontmatter } = parsePrdFile(text)
+    expect(frontmatter.tag).toBeUndefined()
+  })
+
   it('round-trips a file with tag byte-identically when unedited', () => {
     const text = [
       '---',

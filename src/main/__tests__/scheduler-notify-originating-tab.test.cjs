@@ -451,4 +451,24 @@ describe("transcript", () => {
 
     expect(appendTranscriptTurn).not.toHaveBeenCalled();
   });
+
+  test('skipped job with blockedDependents sends the dedicated prd-missing message (capped at 10)', async () => {
+    const appendResponseEvent = vi.fn(async () => true);
+    const parsePrdRaw = vi.fn(async () => ({ sourcePromptId: 'psess-abc' }));
+    const deps = Array.from({ length: 12 }, (_, n) => `dep-${n + 1}`);
+
+    await notifyOriginatingTab(
+      { slug: '2071-skipped', status: 'skipped', cwd: '/some/cwd', blockedDependents: deps },
+      { parsePrdRaw, appendResponseEvent, appendTranscriptTurn: vi.fn(async () => true), readResultFromLog: vi.fn(() => '') },
+    );
+
+    expect(appendResponseEvent).toHaveBeenCalledTimes(1);
+    const text = JSON.stringify(appendResponseEvent.mock.calls[0]);
+    expect(text).toContain('PRD 2071-skipped was skipped: its PRD source could not be found on disk.');
+    expect(text).toContain('Blocked dependents: dep-1, dep-2');
+    expect(text).toContain('dep-10 (+2 more)');
+    expect(text).not.toContain('dep-11');
+    expect(text).toContain('scheduler_reset_job with force:true');
+    expect(text).toContain('scheduler_archive_prd');
+  });
 });

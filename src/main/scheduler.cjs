@@ -3129,6 +3129,13 @@ async function notifyOriginatingTab(job, {
         + (failures.length ? `. Pre-existing failures: ${shown}${more}` : '')
         + '. Check Scheduler for details.';
     }
+    if (job.status === 'skipped' && Array.isArray(job.blockedDependents) && job.blockedDependents.length > 0) {
+      const deps = job.blockedDependents;
+      const shown = deps.slice(0, 10).join(', ');
+      const more = deps.length > 10 ? ` (+${deps.length - 10} more)` : '';
+      message = `PRD ${job.slug} was skipped: its PRD source could not be found on disk. Blocked dependents: ${shown}${more}.`
+        + ' If the PRD file exists, run scheduler_reset_job with force:true; if it was intentionally removed, archive it with scheduler_archive_prd.';
+    }
 
     // The EPIC this check-in belongs to. Deliberately does NOT consider
     // `sourceTabId` — that is a Terminal tab id, not an Epic id, and
@@ -6233,6 +6240,8 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     // 20 never-executed sigma PRDs read as shipped (2026-08-30 incident).
     if (res.skipped) {
       const targetStatus = res.skipped === 'prd-missing' ? 'skipped' : 'completed';
+      /** @type {string[]} */
+      let blockedDependents = [];
       await mutate((s) => {
         const idx = s.jobs.findIndex((x) => x.slug === job.slug);
         if (idx >= 0) {
@@ -6241,9 +6250,25 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           s.jobs[idx].exitCode = 0;
           s.jobs[idx].error = null;
           delete s.jobs[idx].runtime;
+          if (res.skipped === 'prd-missing') {
+            // Dependents wait on this slug forever once it is skipped; record
+            // them so the Epic can be told what is blocked.
+            blockedDependents = s.jobs
+              .filter((x) => x.slug !== job.slug
+                && x.cwd === job.cwd
+                && Array.isArray(x.dependsOn) && x.dependsOn.includes(job.slug)
+                && (x.status == null || x.status === 'pending' || x.status === 'needs_review'))
+              .map((x) => x.slug);
+            s.jobs[idx].blockedDependents = blockedDependents;
+          }
         }
       });
       await broadcast({ flush: true });
+      if (res.skipped === 'prd-missing' && blockedDependents.length > 0) {
+        notifyOriginatingTab({ ...job, status: 'skipped', blockedDependents }).catch((e) => {
+          console.error('[scheduler] notifyOriginatingTab error', job.slug, e);
+        });
+      }
       return;
     }
 

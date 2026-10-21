@@ -415,9 +415,9 @@ const schedulerCreatePrd = z.object({
   // User-selected work-type tag (PRD 774; independence from the parent
   // Epic's own tag confirmed PRD 1041) — deterministic, never LLM-classified.
   // Epic tag and PRD tag draw on the same WorkType vocabulary
-  // (lib/prd/workTypeLibrary.cjs) but are independent values; 'discussion' is
+  // (lib/prd/workTypeLibrary.cjs) but are independent values; 'discussion' and 'portfolio' are
   // excluded here for the same reason adminPrdFrontmatterPatch excludes it
-  // below — a discussion-tagged Epic never reaches PRD authoring.
+  // below — a discussion- or portfolio-tagged Epic never reaches PRD authoring.
   tag: PrdWorkTypeSchema.optional(),
   // WHO executes this PRD (persona name, `~/.claude/agents/<name>.md`) —
   // independent of `tag` above. Optional: prdCreate.cjs's buildPrdBody fills
@@ -516,7 +516,7 @@ const adminPrdFrontmatterPatch = z.object({
   parallelGroup: z.number().int().min(0).max(999999).optional(),
   sourcePromptId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
   sourceTabId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
-  // 'discussion' deliberately excluded: matches prdFrontmatter.cjs's
+  // 'discussion' and 'portfolio' deliberately excluded: matches prdFrontmatter.cjs's
   // parsePrdFile, which never parses that value for a PRD's tag key (a
   // discussion-tagged Epic never reaches PRD authoring) — see
   // workTypeLibrary.cjs's PrdWorkTypeSchema.

@@ -249,3 +249,45 @@ test('missing projectsDir returns [] and does not poison the cache once the dir 
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+test('newest jsonl ending in a 200 KB line without cwd still reports the project', () => {
+  const base = tmpDir();
+  try {
+    const projectsDir = path.join(base, 'projects');
+    const cwdA = path.join(base, 'proj-a');
+    fs.mkdirSync(cwdA);
+    const projDir = path.join(projectsDir, 'slug-a');
+    fs.mkdirSync(projDir, { recursive: true });
+    const fp = path.join(projDir, 'a.jsonl');
+    fs.writeFileSync(fp, JSON.stringify({ cwd: cwdA }) + '\n' + JSON.stringify({ blob: 'x'.repeat(200 * 1024) }) + '\n');
+    const mtime = new Date(Date.now() - 5 * 60 * 1000);
+    fs.utimesSync(fp, mtime, mtime);
+
+    bustProjectCwdCache();
+    assert.deepEqual(allProjectCwds({ projectsDir }), [cwdA]);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('newest jsonl with no cwd at all falls back to an older jsonl, keeping the newest mtime', () => {
+  const base = tmpDir();
+  try {
+    const projectsDir = path.join(base, 'projects');
+    const cwdA = path.join(base, 'proj-a');
+    fs.mkdirSync(cwdA);
+    writeTranscript(projectsDir, 'slug-a', 'old.jsonl', cwdA, 120 * 60 * 1000);
+    const fp = path.join(projectsDir, 'slug-a', 'new.jsonl');
+    fs.writeFileSync(fp, JSON.stringify({ blob: 'y'.repeat(100 * 1024) }) + '\n');
+    const mtime = new Date(Date.now() - 5 * 60 * 1000);
+    fs.utimesSync(fp, mtime, mtime);
+
+    bustProjectCwdCache();
+    assert.deepEqual(allProjectCwds({ projectsDir }), [cwdA]);
+    // recency still comes from the newest file (5 min), not the fallback (120 min)
+    bustProjectCwdCache();
+    assert.deepEqual(activeProjectCwds(90, { projectsDir }), [cwdA]);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});

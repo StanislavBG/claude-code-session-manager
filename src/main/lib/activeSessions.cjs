@@ -51,6 +51,13 @@ function isSstHarnessCwd(cwd) {
 // Transcript reads only need the last line with a `cwd` field — a few dozen
 // lines is always enough. 64 KB keeps peak RSS proportionate.
 const TAIL_BYTES = 64 * 1024;
+// A single transcript line (base64 render, big tool result) can exceed TAIL_BYTES
+// and leave the tail with no complete `cwd` row. Only on that miss the tail
+// grows (x16 per step) up to MAX_TAIL_BYTES, then up to MAX_FALLBACK_FILES
+// newest transcripts are tried before the project is given up on.
+const MAX_TAIL_BYTES = 16 * 1024 * 1024;
+const MAX_FALLBACK_FILES = 5;
+const TAIL_GROWTH = 16;
 
 // Safety cap on distinct cwds to bound result set size. O(1) extra space.
 const MAX_CWDS = 50;
@@ -139,6 +146,20 @@ function readTailLines(filePath, maxBytes) {
   return buf.toString('utf8').split('\n').filter((l) => l.trim());
 }
 
+function fileSizeSync(fp) {
+  try { return fs.statSync(fp).size; } catch { return 0; }
+}
+
+/** lastCwdInLines(lines) → the `cwd` of the last parseable row that has one, or null. */
+function lastCwdInLines(lines) {
+  for (let i = lines.length - 1; i >= 0; i--) {
+    let row;
+    try { row = JSON.parse(lines[i]); } catch { continue; }
+    if (row && row.cwd) return row.cwd;
+  }
+  return null;
+}
+
 /**
  * scanOneProjectDirSync(projDir) → {rawCwd, newestMtimeMs} | null
  * Newest *.jsonl's mtime plus its last parseable `cwd`, for one project dir.
@@ -149,28 +170,25 @@ function scanOneProjectDirSync(projDir) {
     entries = fs.readdirSync(projDir).filter((f) => f.endsWith('.jsonl'));
   } catch { return null; }
 
-  let newestPath = null;
-  let newestMtimeMs = 0;
+  const files = [];
   for (const tf of entries) {
     const fp = path.join(projDir, tf);
-    try {
-      const st = fs.statSync(fp);
-      if (st.mtimeMs > newestMtimeMs) {
-        newestMtimeMs = st.mtimeMs;
-        newestPath = fp;
-      }
-    } catch { continue; }
+    try { files.push({ fp, mtimeMs: fs.statSync(fp).mtimeMs }); } catch { continue; }
   }
-  if (!newestPath) return null;
+  if (!files.length) return null;
+  files.sort((x, y) => y.mtimeMs - x.mtimeMs);
+  const newestMtimeMs = files[0].mtimeMs;
 
-  const tlines = readTailLines(newestPath, TAIL_BYTES);
-  let rawCwd = null;
-  for (let i = tlines.length - 1; i >= 0; i--) {
-    let row;
-    try { row = JSON.parse(tlines[i]); } catch { continue; }
-    if (row.cwd) { rawCwd = row.cwd; break; }
+  for (const { fp } of files.slice(0, MAX_FALLBACK_FILES)) {
+    let size = TAIL_BYTES;
+    for (;;) {
+      const rawCwd = lastCwdInLines(readTailLines(fp, size));
+      if (rawCwd) return { rawCwd, newestMtimeMs };
+      if (size >= MAX_TAIL_BYTES || size >= fileSizeSync(fp)) break;
+      size = Math.min(size * TAIL_GROWTH, MAX_TAIL_BYTES);
+    }
   }
-  return rawCwd ? { rawCwd, newestMtimeMs } : null;
+  return null;
 }
 
 /**
@@ -262,28 +280,27 @@ async function scanOneProjectDirAsync(projDir) {
     entries = (await fsp.readdir(projDir)).filter((f) => f.endsWith('.jsonl'));
   } catch { return null; }
 
-  let newestPath = null;
-  let newestMtimeMs = 0;
+  const files = [];
   for (const tf of entries) {
     const fp = path.join(projDir, tf);
-    try {
-      const st = await fsp.stat(fp);
-      if (st.mtimeMs > newestMtimeMs) {
-        newestMtimeMs = st.mtimeMs;
-        newestPath = fp;
-      }
-    } catch { continue; }
+    try { files.push({ fp, mtimeMs: (await fsp.stat(fp)).mtimeMs }); } catch { continue; }
   }
-  if (!newestPath) return null;
+  if (!files.length) return null;
+  files.sort((x, y) => y.mtimeMs - x.mtimeMs);
+  const newestMtimeMs = files[0].mtimeMs;
 
-  const tlines = await readTailLinesAsync(newestPath, TAIL_BYTES);
-  let rawCwd = null;
-  for (let i = tlines.length - 1; i >= 0; i--) {
-    let row;
-    try { row = JSON.parse(tlines[i]); } catch { continue; }
-    if (row.cwd) { rawCwd = row.cwd; break; }
+  for (const { fp } of files.slice(0, MAX_FALLBACK_FILES)) {
+    let size = TAIL_BYTES;
+    for (;;) {
+      const rawCwd = lastCwdInLines(await readTailLinesAsync(fp, size));
+      if (rawCwd) return { rawCwd, newestMtimeMs };
+      let fileSize = 0;
+      try { fileSize = (await fsp.stat(fp)).size; } catch { /* gone: stop growing */ }
+      if (size >= MAX_TAIL_BYTES || size >= fileSize) break;
+      size = Math.min(size * TAIL_GROWTH, MAX_TAIL_BYTES);
+    }
   }
-  return rawCwd ? { rawCwd, newestMtimeMs } : null;
+  return null;
 }
 
 /**

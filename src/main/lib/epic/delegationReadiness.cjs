@@ -671,6 +671,7 @@ function logAutoInstallEvent({ cwd, guard, action, error }) {
       scope: 'delegationReadiness',
       level: action === 'error' ? 'error' : 'info',
       message: `auto-install ${guard}: ${action}`,
+      code: `guard-install-${action}:${guard}`,
       meta: { guard, action, ...(error ? { error } : {}) },
     });
   } catch { /* logging must never break the caller */ }
@@ -796,6 +797,7 @@ async function ensureGuardsInstalled(cwd, { homeDir = os.homedir() } = {}) {
 module.exports = {
   checkDelegationReadiness,
   ensureGuardsInstalled,
+  logAutoInstallEvent,
   clearGuardsInstalledCache,
   installPrdWriteGuard,
   installDestructiveGitGuard,

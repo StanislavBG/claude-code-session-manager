@@ -77,6 +77,7 @@
   "otlpTraceExporter": "telemetry",
   "personaImportHealth": "persona-macro",
   "personaMerge": "persona-macro",
+  "personaToolScope": "claude",
   "pidAlive": "process",
   "planValidator": "prd",
   "prdAdminRoutes": "prd",

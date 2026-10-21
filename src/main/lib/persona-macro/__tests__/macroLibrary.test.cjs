@@ -54,6 +54,16 @@ test('create / update / delete round-trip', async () => {
   expect(await lib.listMacros(opts)).toEqual([]);
 });
 
+test('portfolio tag round-trips', async () => {
+  const saved = await lib.saveMacro(
+    base({ label: 'Portfolio Optimization', tag: 'portfolio', prompt: 'x' }),
+    opts,
+  );
+  expect(saved.tag).toBe('portfolio');
+  const reloaded = (await lib.listMacros(opts)).find((m) => m.id === saved.id);
+  expect(reloaded.tag).toBe('portfolio');
+});
+
 test('update of unknown id errors', async () => {
   await expect(lib.saveMacro({ ...base(), id: 'nope' }, opts)).rejects.toThrow(/not found/);
 });

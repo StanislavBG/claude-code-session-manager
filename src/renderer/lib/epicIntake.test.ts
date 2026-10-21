@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { composeEpicIntake, joinSections } from './epicIntake'
-import { agentTagDef } from './agentTagDefs'
+import { agentTagDef, AGENT_TAG_DEFS } from './agentTagDefs'
 import { CONTEXT_INJECTIONS } from './contextInjections'
 
 describe('composeEpicIntake', () => {
@@ -53,6 +53,12 @@ describe('composeEpicIntake', () => {
     expect(goalText).toBe('T\n\nG')
     expect(openingPrompt.startsWith('You are diagnosing a reported bug.')).toBe(true)
     expect(openingPrompt.endsWith('Goal: T\n\nG')).toBe(true)
+  })
+
+  it('includes the portfolio framing for a portfolio-tagged Epic', () => {
+    const { openingPrompt } = composeEpicIntake({ title: 'T', goal: 'G', tag: 'portfolio' })
+    expect(openingPrompt).toContain(AGENT_TAG_DEFS.portfolio.initialPromptTemplate)
+    expect(openingPrompt).toContain('feedback_open_session')
   })
 
   it('omits grounding entirely when no tag is given', () => {

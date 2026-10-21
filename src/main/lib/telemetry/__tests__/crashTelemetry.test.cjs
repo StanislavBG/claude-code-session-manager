@@ -97,6 +97,76 @@ test('the unclean-shutdown postmortem is reported as crash.unclean-shutdown with
   client.shutdown();
 });
 
+test('classifyUncleanShutdown: main-hang when the last loop stall was >= 10 s', () => {
+  const { classifyUncleanShutdown } = require('../crashTelemetry.cjs');
+  // The 2026-10-19 19:14 PDT sample: 972 MB total, far below memory pressure.
+  expect(classifyUncleanShutdown({ lastLoopDelayMaxMs: 23521.7, lastTotalMb: 972, silentGapSec: 360 })).toBe('main-hang');
+  expect(classifyUncleanShutdown({ lastLoopDelayMaxMs: 10000, lastTotalMb: 100 })).toBe('main-hang');
+  // Hang wins over memory pressure.
+  expect(classifyUncleanShutdown({ lastLoopDelayMaxMs: 12000, lastTotalMb: 4000 })).toBe('main-hang');
+});
+
+test('classifyUncleanShutdown: memory-pressure when total >= 3000 MB and no hang', () => {
+  const { classifyUncleanShutdown } = require('../crashTelemetry.cjs');
+  expect(classifyUncleanShutdown({ lastLoopDelayMaxMs: 9999, lastTotalMb: 3000 })).toBe('memory-pressure');
+  expect(classifyUncleanShutdown({ lastTotalMb: 5000 })).toBe('memory-pressure');
+});
+
+test('classifyUncleanShutdown: unknown otherwise, and non-number inputs never throw', () => {
+  const { classifyUncleanShutdown } = require('../crashTelemetry.cjs');
+  expect(classifyUncleanShutdown({ lastLoopDelayMaxMs: 50, lastTotalMb: 900, silentGapSec: 5 })).toBe('unknown');
+  expect(classifyUncleanShutdown({})).toBe('unknown');
+  expect(classifyUncleanShutdown()).toBe('unknown');
+  expect(classifyUncleanShutdown({ lastLoopDelayMaxMs: '23000', lastTotalMb: null, silentGapSec: NaN })).toBe('unknown');
+});
+
+test('reportChildProcessGone: Utility Network Service (non-oom) is a warn log line, not an error', () => {
+  const { reportChildProcessGone } = require('../crashTelemetry.cjs');
+  const calls = { log: [], err: [] };
+  const deps = { telemetryClient: { logLine: (a) => calls.log.push(a), reportError: (a) => calls.err.push(a) } };
+  reportChildProcessGone({
+    details: { type: 'Utility', name: 'Network Service', reason: 'crashed', exitCode: -1 },
+    lastTotalMb: 900,
+    deps,
+  });
+  expect(calls.err).toEqual([]);
+  expect(calls.log).toEqual([{
+    level: 'warn',
+    msg: 'crash.child-restartable',
+    fields: { type: 'Utility', name: 'Network Service', reason: 'crashed', exitCode: -1, lastTotalMb: 900 },
+  }]);
+  // serviceName is accepted as the name too.
+  reportChildProcessGone({ details: { type: 'Utility', serviceName: 'Network Service', reason: 'killed' }, deps });
+  expect(calls.log).toHaveLength(2);
+});
+
+test('reportChildProcessGone: everything else (GPU, oom, other utility) goes through reportCrash', () => {
+  const { reportChildProcessGone } = require('../crashTelemetry.cjs');
+  const calls = { log: [], err: [] };
+  const deps = { telemetryClient: { logLine: (a) => calls.log.push(a), reportError: (a) => calls.err.push(a) } };
+  reportChildProcessGone({ details: { type: 'GPU', reason: 'crashed', exitCode: 9 }, lastTotalMb: 1200, deps });
+  reportChildProcessGone({ details: { type: 'Utility', name: 'Network Service', reason: 'oom' }, deps });
+  reportChildProcessGone({ details: { type: 'Utility', name: 'Audio Service', reason: 'crashed' }, deps });
+  reportChildProcessGone({ details: {}, deps });
+  expect(calls.log).toEqual([]);
+  expect(calls.err).toHaveLength(4);
+  expect(calls.err[0]).toEqual({
+    name: 'crash.crashed',
+    msg: 'crashed',
+    context: { type: 'GPU', name: undefined, exitCode: 9, lastTotalMb: 1200 },
+  });
+  expect(calls.err[1].name).toBe('crash.oom');
+  expect(calls.err[3].name).toBe('crash.unknown');
+});
+
+test('reportChildProcessGone never throws', () => {
+  const { reportChildProcessGone } = require('../crashTelemetry.cjs');
+  const throwing = { logLine: () => { throw new Error('boom'); }, reportError: () => { throw new Error('boom'); } };
+  expect(() => reportChildProcessGone({ details: { type: 'Utility', name: 'Network Service', reason: 'crashed' }, deps: { telemetryClient: throwing } })).not.toThrow();
+  expect(() => reportChildProcessGone({ details: { type: 'GPU' }, deps: { telemetryClient: throwing } })).not.toThrow();
+  expect(() => reportChildProcessGone()).not.toThrow();
+});
+
 test('reportCrash never throws even when the injected telemetryClient throws', () => {
   const throwingClient = { reportError: () => { throw new Error('telemetry boom'); } };
   expect(() => reportCrash({ reason: 'oom', meta: {}, deps: { telemetryClient: throwingClient } })).not.toThrow();

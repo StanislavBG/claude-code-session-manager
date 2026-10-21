@@ -34,4 +34,52 @@ function reportCrash({ reason, meta, deps } = {}) {
   }
 }
 
-module.exports = { reportCrash };
+// A 10 s+ main-loop stall means the main thread was wedged (the 2026-10-19
+// hang death showed 23 s stalls at 972 MB, far below any memory pressure), so
+// a stall outranks memory when picking the likely cause.
+const HANG_LOOP_DELAY_MS = 10000;
+const MEMORY_PRESSURE_MB = 3000;
+
+const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+
+/**
+ * Turns the previous run's last sample into a likely cause. silentGapSec is
+ * accepted for the caller's meta but does not change the verdict.
+ * @param {{ lastLoopDelayMaxMs?: unknown, lastTotalMb?: unknown, silentGapSec?: unknown }} [sample]
+ * @returns {'main-hang' | 'memory-pressure' | 'unknown'}
+ */
+function classifyUncleanShutdown({ lastLoopDelayMaxMs, lastTotalMb } = {}) {
+  if (isNum(lastLoopDelayMaxMs) && lastLoopDelayMaxMs >= HANG_LOOP_DELAY_MS) return 'main-hang';
+  if (isNum(lastTotalMb) && lastTotalMb >= MEMORY_PRESSURE_MB) return 'memory-pressure';
+  return 'unknown';
+}
+
+/**
+ * Routes a Chromium child-process-gone event. Chromium restarts the Utility
+ * 'Network Service' itself, so a non-oom exit there is a warn log line; all
+ * else is a crash error via reportCrash. Fail-inert: never throws.
+ */
+function reportChildProcessGone({ details, lastTotalMb, deps } = {}) {
+  try {
+    const d = details || {};
+    const type = d.type;
+    const name = d.name || d.serviceName;
+    if (type === 'Utility' && name === 'Network Service' && d.reason !== 'oom') {
+      const telemetryClient = (deps && deps.telemetryClient) || require('./telemetryClient.cjs');
+      return telemetryClient.logLine({
+        level: 'warn',
+        msg: 'crash.child-restartable',
+        fields: { type, name, reason: d.reason, exitCode: d.exitCode, lastTotalMb },
+      });
+    }
+    return reportCrash({
+      reason: d.reason || 'unknown',
+      meta: { type, name, exitCode: d.exitCode, lastTotalMb },
+      deps,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+module.exports = { reportCrash, classifyUncleanShutdown, reportChildProcessGone };

@@ -179,3 +179,27 @@ test('a PRD that exists under a job-scoped Epic dir is NOT retired when the glob
     fs.rmSync(runDir, { recursive: true, force: true });
   }
 });
+
+test('a prd-missing skip with a pending dependent records blockedDependents on the row', async () => {
+  const projectCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-prd-missing-blocked-project-'));
+  registerActiveProject(projectCwd);
+  fs.mkdirSync(path.join(tmpHome, '.claude'), { recursive: true });
+  const runDir = fs.mkdtempSync(path.join(tmpHome, '.claude', 'sm-prd-missing-blocked-run-'));
+  try {
+    const slug = `2071-blocked-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
+    const depSlug = `${slug}-dep`;
+    const queuePath = writeProjectQueue(projectCwd, [
+      { slug, status: 'pending', cwd: projectCwd },
+      { slug: depSlug, status: 'pending', cwd: projectCwd, dependsOn: [slug] },
+    ]);
+
+    await spawnJob({ slug, cwd: projectCwd }, 'run-blocked', runDir, projectCwd);
+
+    const row = readTerminalRow(queuePath, projectCwd, slug);
+    expect(row.status).toBe('skipped');
+    expect(row.blockedDependents).toEqual([depSlug]);
+  } finally {
+    fs.rmSync(projectCwd, { recursive: true, force: true });
+    fs.rmSync(runDir, { recursive: true, force: true });
+  }
+});

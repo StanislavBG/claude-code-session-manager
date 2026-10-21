@@ -329,6 +329,17 @@
       "speedTemplate": "Playback speed {rate}"
     }
   },
+  "signinPrompt": {
+    "title": "Sign in to get Field Manual updates and the Agent Factory Kit preview",
+    "body": "Everything here stays free and readable without an account. Signing in just puts you on the list for new chapters and an early look at the Kit.",
+    "consent": "Send me occasional updates",
+    "signIn": "Sign in",
+    "dismiss": "No thanks",
+    "aria": {
+      "region": "Sign in for updates",
+      "dismiss": "Dismiss the sign-in prompt"
+    }
+  },
   "endCard": {
     "badge": "THE END (FOR NOW)",
     "headline": "That's the whole tour.",

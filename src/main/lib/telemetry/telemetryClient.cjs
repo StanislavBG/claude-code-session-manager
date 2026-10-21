@@ -137,7 +137,8 @@ function sentPath() {
 }
 
 /**
- * True when running under a test runner (VITEST, NODE_ENV=test) with no
+ * True when running under a test runner (VITEST, NODE_ENV=test, or Playwright
+ * e2e via SM_E2E=1, set by tests/e2e/_helpers/launchApp.ts) with no
  * explicit SM_TELEMETRY_SPOOL override. Gates appendRecord() below so a test
  * that merely exercises epicMint/scheduler/etc. code paths — without itself
  * setting up an isolated spool — can never accumulate fake records into a
@@ -148,7 +149,7 @@ function sentPath() {
  */
 function isTestEnvironment() {
   if (process.env.SM_TELEMETRY_SPOOL) return false;
-  return !!process.env.VITEST || process.env.NODE_ENV === 'test';
+  return !!process.env.VITEST || process.env.NODE_ENV === 'test' || process.env.SM_E2E === '1';
 }
 
 function getBeaconToken() {
@@ -826,4 +827,6 @@ module.exports = {
   _setFetchImpl,
   _setMachineProfileBuilder,
   _setLogger,
+  _currentEnv: currentEnv,
+  _buildInstallWire: buildInstallWire,
 };

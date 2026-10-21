@@ -338,6 +338,29 @@ test('env resolves to "test" under a real test-runner environment, independent o
   expect(machineProfile.resolveEnv({ isTestRunner: true, installChannel: 'npx' })).toBe('test');
 });
 
+test('SM_E2E=1 counts as a test runner: currentEnv and the install wire resolve env:"test"', async () => {
+  const home = await mkHome();
+  const client = freshClient(home, { installChannel: 'npx' });
+  const saved = { SM_E2E: process.env.SM_E2E, VITEST: process.env.VITEST, NODE_ENV: process.env.NODE_ENV, SM_TELEMETRY_SPOOL: process.env.SM_TELEMETRY_SPOOL };
+  try {
+    delete process.env.VITEST;
+    process.env.NODE_ENV = 'development';
+    // spool override wins first: e2e flag alone does not flip env while it is set
+    process.env.SM_E2E = '1';
+    expect(client._currentEnv()).toBe('prod');
+    delete process.env.SM_TELEMETRY_SPOOL;
+    expect(client._currentEnv()).toBe('test');
+    expect(client._buildInstallWire(fakeProfile({ installChannel: 'npx' }), 'iid').env).toBe('test');
+    delete process.env.SM_E2E;
+    expect(client._currentEnv()).toBe('prod');
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    client.shutdown();
+  }
+});
+
 // ─── queue is the accumulator, survives restart ────────────────────────
 
 test('a record survives a simulated process restart and is still pending', async () => {

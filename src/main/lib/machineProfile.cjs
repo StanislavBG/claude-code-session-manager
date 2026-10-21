@@ -117,6 +117,8 @@ async function buildMachineProfile(opts = {}) {
   let appPath = null;
   if (electronApp) {
     try { appVersion = electronApp.getVersion(); } catch { /* not ready / not a real app object */ }
+    // Unpackaged launch with a script path makes getVersion() return Electron's own version.
+    if (appVersion && process.versions && appVersion === process.versions.electron) appVersion = null;
     try { appPath = electronApp.getAppPath(); } catch { /* not ready / not a real app object */ }
   }
   if (!appVersion) appVersion = resolvePackageVersion();

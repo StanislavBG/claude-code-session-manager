@@ -150,3 +150,25 @@ test('resolveEnv: prod for every other installChannel (npx, unknown) when not un
   expect(resolveEnv({ isTestRunner: false, installChannel: 'unknown' })).toBe('prod');
   expect(resolveEnv({ isTestRunner: false, installChannel: undefined })).toBe('prod');
 });
+
+test('appVersion ignores Electron\'s own version from getVersion() and falls back to package.json', async () => {
+  // Plain node has no process.versions.electron; define one so the equality guard is exercised.
+  const had = Object.prototype.hasOwnProperty.call(process.versions, 'electron');
+  const prev = process.versions.electron;
+  Object.defineProperty(process.versions, 'electron', { value: '42.11.10', configurable: true, enumerable: true, writable: true });
+  let profile;
+  try {
+    const fakeApp = { getVersion: () => process.versions.electron, getAppPath: () => '/opt/app' };
+    profile = await buildMachineProfile({ osModule: fakeOs(), probeClaudeVersion: stubProbeNull, electronApp: fakeApp });
+  } finally {
+    if (had) process.versions.electron = prev; else delete process.versions.electron;
+  }
+  const pkg = require('../../../package.json');
+  expect(profile.appVersion).toBe(pkg.version);
+});
+
+test('appVersion keeps a real getVersion() value that differs from the Electron version', async () => {
+  const fakeApp = { getVersion: () => '9.9.9', getAppPath: () => '/opt/app' };
+  const profile = await buildMachineProfile({ osModule: fakeOs(), probeClaudeVersion: stubProbeNull, electronApp: fakeApp });
+  expect(profile.appVersion).toBe('9.9.9');
+});

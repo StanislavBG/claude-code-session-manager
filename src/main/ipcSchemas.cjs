@@ -968,6 +968,7 @@ const remoteSessionTranscript = z.object({
   cwd: z.string().min(1).max(4096),
   sessionKey: z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9_.-]*$/),
   limit: z.number().int().min(1).max(100).optional(),
+  before: z.number().int().min(0).max(10000).optional(),
 });
 // One Epic's PRD list (slug/title/status projection only, never bodies).
 const remoteSessionPrds = z.object({

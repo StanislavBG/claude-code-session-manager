@@ -1102,26 +1102,34 @@ function getDispatchMap() {
       const parsed = schemas.remoteSessionTranscript.parse(payload);
       const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
       const { resolveEpicTranscriptPath } = require('./lib/epic/epicTranscriptPath.cjs');
-      const { readRecentChatMessages } = require('./lib/remoteTranscriptTail.cjs');
+      const { readRecentChatMessages, buildRemoteConversation } = require('./lib/remoteTranscriptTail.cjs');
+      const { listExchanges } = require('./exchanges.cjs');
       const data = await sessionsStore.load();
       const tab = (data?.tabs ?? []).find((t) => t && t.cwd === parsed.cwd);
       if (!tab) throw new Error('cwd is not an open project');
       validatePath(parsed.cwd);
+      const limit = parsed.limit ?? 10;
+      const before = parsed.before ?? 0;
       let filePath = null;
-      if (parsed.sessionKey === (tab.id ?? tab.sessionId)) {
-        filePath = require('./transcripts.cjs').transcriptPath(parsed.cwd, parsed.sessionKey);
+      let sessionId = null;
+      if (parsed.sessionKey === tab.id || parsed.sessionKey === tab.sessionId) {
+        sessionId = tab.sessionId || parsed.sessionKey;
+        filePath = require('./transcripts.cjs').transcriptPath(parsed.cwd, sessionId);
       } else {
         const sessions = readActiveIndex(parsed.cwd)?.sessions ?? {};
         const epic = Object.values(sessions).find(
           (e) => e && (e.id === parsed.sessionKey || e.claudeSessionId === parsed.sessionKey),
         );
         if (epic && epic.claudeSessionId) {
-          filePath = resolveEpicTranscriptPath({ cwd: parsed.cwd, claudeSessionId: epic.claudeSessionId }).path;
+          sessionId = epic.claudeSessionId;
+          filePath = resolveEpicTranscriptPath({ cwd: parsed.cwd, claudeSessionId: sessionId }).path;
         }
       }
-      if (!filePath) return { messages: [] };
+      if (!filePath || !sessionId) return { messages: [], hasMore: false, nextBefore: null };
       validatePath(filePath);
-      return { messages: await readRecentChatMessages(filePath, { limit: parsed.limit }) };
+      const exchanges = await listExchanges({ cwd: parsed.cwd, sessionId, limit: limit + 1, offset: before });
+      const tail = before === 0 ? await readRecentChatMessages(filePath, { limit: 30 }) : [];
+      return buildRemoteConversation({ exchanges, tail, limit, before });
     },
 
     'cmd:session:prds': async (payload) => {

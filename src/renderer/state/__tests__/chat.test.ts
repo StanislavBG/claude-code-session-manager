@@ -18,7 +18,7 @@ const sharedWindowApi = vi.hoisted(() => {
   type NeedsInputHandler = (e: { tabId: string; sessionId: string; questions: string[]; answerBody: string; raw: string }) => void
   type CompleteHandler = (e: { tabId: string; sessionId: string; finalMessage: string }) => void
   type ErrorHandler = (e: { tabId: string; sessionId: string; message: string }) => void
-  type ExternalSendHandler = (e: { tabId: string; prompt: string; sessionId?: string; cwd?: string }) => void
+  type ExternalSendHandler = (e: { tabId: string; prompt: string; sessionId?: string; cwd?: string; requestId?: string }) => void
   type InboundAutoApproveHandler = (e: { cwd: string; epicId: string }) => void
 
   const handlers: {
@@ -1564,5 +1564,109 @@ describe('chat.ts prompt origin threading', () => {
     useChat.getState().send({ tabId: 'o4', sessionId: 's', cwd: '/proj', prompt: 'hi', origin: 'inbound-proposal' })
     await vi.waitFor(() => expect(run).toHaveBeenCalled())
     expect(run).toHaveBeenCalledWith(expect.objectContaining({ origin: 'inbound-proposal' }))
+  })
+})
+
+describe('chat.ts send() result + external-send reporting', () => {
+  const epic = (status: 'active' | 'completed') => ({
+    id: 'epic-r',
+    cwd: '/proj/r',
+    goalText: 'g',
+    claudeSessionId: 'sess-r',
+    status,
+    createdAt: '2026-07-31T00:00:00.000Z',
+    completedAt: null,
+  })
+  const base = { tabId: 'tab-r', sessionId: 'sess-r', cwd: '/proj/r' }
+
+  function setup() {
+    const ctx = installWindowApiMock({ transcriptExists: true })
+    const report = vi.fn().mockResolvedValue(undefined)
+    ;(ctx.api.chat as Record<string, unknown>).reportExternalSendResult = report
+    useSessions.setState({ tabs: [] })
+    usePromptSessions.setState({ sessions: {}, events: {} })
+    return { ...ctx, report, handler: ctx.api.chat.onExternalSend.mock.calls[0][0] }
+  }
+
+  it('send returns refused/empty-prompt for a blank prompt', () => {
+    setup()
+    expect(useChat.getState().send({ ...base, prompt: '   ' })).toEqual({ disposition: 'refused', reason: 'empty-prompt' })
+  })
+
+  it('send returns refused/terminal-attached when the Epic Terminal is attached', () => {
+    setup()
+    vi.spyOn(useEpicTerminal.getState(), 'isAttached').mockReturnValue(true)
+    expect(useChat.getState().send({ ...base, prompt: 'hi' })).toEqual({
+      disposition: 'refused',
+      reason: 'terminal-attached',
+    })
+    vi.restoreAllMocks()
+  })
+
+  it('send returns queued when a turn is running, else sent', () => {
+    setup()
+    expect(useChat.getState().send({ ...base, prompt: 'first' })).toEqual({ disposition: 'sent' })
+    expect(useChat.getState().get('tab-r').running).toBe(true)
+    expect(useChat.getState().send({ ...base, prompt: 'second' })).toEqual({ disposition: 'queued' })
+  })
+
+  it('reports sent for an active Epic target with the requestId', () => {
+    const { handler, report } = setup()
+    usePromptSessions.setState({ sessions: { 'epic-r': epic('active') }, events: {} })
+    handler({ tabId: 'epic-r', prompt: 'hi', requestId: 'req-1' })
+    expect(report).toHaveBeenCalledWith({ requestId: 'req-1', disposition: 'sent' })
+  })
+
+  it('reports sent for an open-tab target and queued on a second send', () => {
+    const { handler, report } = setup()
+    useSessions.setState({
+      tabs: [
+        {
+          id: 'tab-o', sessionId: 'sess-o', label: 'o', cwd: '/proj/o', pid: null, status: 'dormant',
+          exitCode: null, startupCommand: null, presetId: null, generation: 0,
+        },
+      ],
+    })
+    handler({ tabId: 'tab-o', prompt: 'a', requestId: 'r1' })
+    handler({ tabId: 'tab-o', prompt: 'b', requestId: 'r2' })
+    expect(report).toHaveBeenNthCalledWith(1, { requestId: 'r1', disposition: 'sent' })
+    expect(report).toHaveBeenNthCalledWith(2, { requestId: 'r2', disposition: 'queued' })
+  })
+
+  it('reports the send result for the payload fallback, including a refusal', () => {
+    const { handler, report } = setup()
+    handler({ tabId: 'epic-p', prompt: 'x', sessionId: 's-p', cwd: '/p', requestId: 'r1' })
+    handler({ tabId: 'epic-p2', prompt: '  ', sessionId: 's-p2', cwd: '/p', requestId: 'r2' })
+    expect(report).toHaveBeenNthCalledWith(1, { requestId: 'r1', disposition: 'sent' })
+    expect(report).toHaveBeenNthCalledWith(2, { requestId: 'r2', disposition: 'refused', reason: 'empty-prompt' })
+  })
+
+  it('reports refused/completed for a completed Epic', () => {
+    const { handler, report, api } = setup()
+    usePromptSessions.setState({ sessions: { 'epic-r': epic('completed') }, events: {} })
+    handler({ tabId: 'epic-r', prompt: 'hi', requestId: 'r1' })
+    expect(report).toHaveBeenCalledWith({ requestId: 'r1', disposition: 'refused', reason: 'completed' })
+    expect(api.chat.run).not.toHaveBeenCalled()
+  })
+
+  it('reports refused/unknown-target when nothing matches', () => {
+    const { handler, report } = setup()
+    handler({ tabId: 'nope', prompt: 'hi', requestId: 'r1' })
+    expect(report).toHaveBeenCalledWith({ requestId: 'r1', disposition: 'refused', reason: 'unknown-target' })
+  })
+
+  it('does not report without a string requestId', () => {
+    const { handler, report } = setup()
+    handler({ tabId: 'nope', prompt: 'hi' })
+    expect(report).not.toHaveBeenCalled()
+  })
+
+  it('swallows a rejected report and never throws when the API is absent', async () => {
+    const { handler, report, api } = setup()
+    report.mockRejectedValue(new Error('boom'))
+    expect(() => handler({ tabId: 'nope', prompt: 'hi', requestId: 'r1' })).not.toThrow()
+    await Promise.resolve()
+    delete (api.chat as Record<string, unknown>).reportExternalSendResult
+    expect(() => handler({ tabId: 'nope', prompt: 'hi', requestId: 'r2' })).not.toThrow()
   })
 })

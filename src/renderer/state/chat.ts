@@ -201,6 +201,15 @@ export interface TabChat {
   pendingVoiceText?: string
 }
 
+export type ChatSendResult =
+  | { disposition: 'sent' }
+  | { disposition: 'queued' }
+  | { disposition: 'refused'; reason: 'terminal-attached' | 'empty-prompt' }
+
+type ChatExternalSendOutcome =
+  | ChatSendResult
+  | { disposition: 'refused'; reason: 'completed' | 'unknown-target' }
+
 interface ChatState {
   chats: Record<string, TabChat>
   /** Tabs for which history hydration has been attempted (exactly once per tab). */
@@ -220,7 +229,7 @@ interface ChatState {
     external?: boolean
     /** Explicit origin; defaults to 'external' when `external` is set, else 'human'. */
     origin?: ChatPromptOrigin
-  }) => void
+  }) => ChatSendResult
   /** Reset a tab's chat thread: clears turns and run state (paired with sessions.newSession). */
   resetThread: (tabId: string) => void
   /**
@@ -333,13 +342,13 @@ export const useChat = create<ChatState>((set, get) => ({
   send: ({ tabId, sessionId, cwd, prompt, tag, chainRootId, external, origin }) => {
     const resolvedOrigin: ChatPromptOrigin = origin ?? (external ? 'external' : 'human')
     const trimmed = prompt.trim()
-    if (!trimmed) return
+    if (!trimmed) return { disposition: 'refused', reason: 'empty-prompt' }
     // PRD 831: Chat and Terminal are two mutually-exclusive views over the
     // same claude session for an Epic — a live Terminal-mode PTY (keyed by
     // the same sessionId) must never race a headless chatRunner resume.
     if (useEpicTerminal.getState().isAttached(tabId)) {
       toast.error('Terminal mode is active for this Epic — switch back to Chat to send a message.')
-      return
+      return { disposition: 'refused', reason: 'terminal-attached' }
     }
     const cur = get().chats[tabId] ?? EMPTY
     if (cur.running) {
@@ -365,7 +374,7 @@ export const useChat = create<ChatState>((set, get) => ({
           [tabId]: { ...cur, queue: [...cur.queue, ticket] },
         },
       })
-      return
+      return { disposition: 'queued' }
     }
     // A fresh send resumes the tab's session regardless of any outstanding
     // needs-input ticket (chatRunner always resumes by sessionId) — so this
@@ -374,6 +383,7 @@ export const useChat = create<ChatState>((set, get) => ({
     // stalled once the reply is in flight.
     clearNeedsInput(tabId)
     dispatchSend({ tabId, sessionId, cwd, text: trimmed, tag, chainRootId, origin: resolvedOrigin })
+    return { disposition: 'sent' }
   },
   resetThread: (tabId) => {
     // A reset pairs with a NEW session (sessions.newSession) — its transcript
@@ -1401,10 +1411,18 @@ if (typeof window !== 'undefined' && window.api?.chat) {
   // Terminal guard in send() (PRD 831) still applies since we pass the same
   // tabId an Epic's Terminal attachment is keyed by. No-ops (with a log line
   // naming both lookups) if neither an open tab nor a known Epic matches.
-  window.api.chat.onExternalSend(({ tabId, prompt, sessionId, cwd }) => {
+  window.api.chat.onExternalSend(({ tabId, prompt, sessionId, cwd, requestId }) => {
+    const report = (result: ChatExternalSendOutcome): void => {
+      if (typeof requestId !== 'string') return
+      try {
+        void window.api?.chat?.reportExternalSendResult?.({ requestId, ...result })?.catch?.(() => {})
+      } catch {
+        // reporting is best-effort; never let it break the send path
+      }
+    }
     const tab = useSessions.getState().tabs.find((t) => t.id === tabId)
     if (tab) {
-      useChat.getState().send({ tabId, sessionId: tab.sessionId, cwd: tab.cwd, prompt, external: true })
+      report(useChat.getState().send({ tabId, sessionId: tab.sessionId, cwd: tab.cwd, prompt, external: true }))
       return
     }
     const epic = usePromptSessions.getState().sessions[tabId]
@@ -1415,15 +1433,16 @@ if (typeof window !== 'undefined' && window.api?.chat) {
           'warn',
           `external send ignored: Epic ${tabId} is completed/archived — its claudeSessionId is dead`,
         )
+        report({ disposition: 'refused', reason: 'completed' })
         return
       }
-      useChat.getState().send({ tabId, sessionId: epic.claudeSessionId, cwd: epic.cwd, prompt, external: true })
+      report(useChat.getState().send({ tabId, sessionId: epic.claudeSessionId, cwd: epic.cwd, prompt, external: true }))
       return
     }
     // Epic not loaded in this renderer yet (e.g. another project): main already
     // resolved and active-checked it, so trust the payload.
     if (typeof sessionId === 'string' && sessionId && typeof cwd === 'string' && cwd) {
-      useChat.getState().send({ tabId, sessionId, cwd, prompt, external: true })
+      report(useChat.getState().send({ tabId, sessionId, cwd, prompt, external: true }))
       return
     }
     window.api?.logs?.write(
@@ -1431,6 +1450,7 @@ if (typeof window !== 'undefined' && window.api?.chat) {
       'warn',
       `external send ignored: ${tabId} matches neither an open tab nor a known Epic`,
     )
+    report({ disposition: 'refused', reason: 'unknown-target' })
   })
   // Main verified a human-requested cross-project proposal (crossProjectFeedback.cjs)
   // and stamped it — approve + start it without the button. Guarded: older

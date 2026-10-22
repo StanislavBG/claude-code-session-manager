@@ -3,7 +3,9 @@ import type {
   ChatMessage,
   ProjectSessionsResponse,
   RemoteProject,
+  SendChatResult,
   SessionPrd,
+  TranscriptPage,
 } from './types';
 
 type CommandSocket = Pick<RelaySocket, 'sendCommand'>;
@@ -43,12 +45,23 @@ export function listProjectSessions(socket: CommandSocket, deviceId: string, cwd
   return call<ProjectSessionsResponse>(socket, deviceId, 'cmd:project:sessions', { cwd });
 }
 
-export function getTranscript(
+export async function getTranscript(
   socket: CommandSocket,
   deviceId: string,
-  args: { cwd: string; sessionKey: string; limit?: number },
-) {
-  return call<{ messages: ChatMessage[] }>(socket, deviceId, 'cmd:session:transcript', args);
+  args: { cwd: string; sessionKey: string; limit?: number; before?: number },
+): Promise<TranscriptPage> {
+  const payload: typeof args = { ...args };
+  if (payload.before === undefined) delete payload.before;
+  const r = await call<{
+    messages?: ChatMessage[];
+    hasMore?: unknown;
+    nextBefore?: unknown;
+  } | null>(socket, deviceId, 'cmd:session:transcript', payload);
+  return {
+    messages: r?.messages ?? [],
+    hasMore: r?.hasMore === true,
+    nextBefore: typeof r?.nextBefore === 'number' ? r.nextBefore : null,
+  };
 }
 
 export function listSessionPrds(
@@ -59,14 +72,41 @@ export function listSessionPrds(
   return call<{ prds: SessionPrd[] }>(socket, deviceId, 'cmd:session:prds', args);
 }
 
+/** Copy shown to the phone user when the desktop refuses a send. */
+export function refusalMessage(reason?: string): string {
+  switch (reason) {
+    case 'terminal-attached':
+      return 'This session is open in Terminal mode on your computer. Switch it back to Chat there to reply from your phone.';
+    case 'proposed':
+      return 'This session has not started yet. Approve it on your computer first.';
+    case 'not-active':
+    case 'completed':
+      return 'This session is completed, so it cannot take new messages. Start a new session instead.';
+    case 'unknown-target':
+      return 'Your computer no longer has this session open. Go back and refresh the list.';
+    case 'empty-prompt':
+      return 'Type a message first.';
+    default:
+      return 'Your computer did not accept this message.';
+  }
+}
+
 /** `target` is the epicId for Epics, or mainTabId for a project's main session — never claudeSessionId. */
-export function sendChat(
+export async function sendChat(
   socket: CommandSocket,
   deviceId: string,
   args: { target: string; prompt: string },
-) {
-  return call<unknown>(socket, deviceId, 'cmd:chat:send', {
-    tabId: args.target,
-    prompt: args.prompt,
-  });
+): Promise<SendChatResult> {
+  const r = await call<{ disposition?: string; reason?: string } | null>(
+    socket,
+    deviceId,
+    'cmd:chat:send',
+    { tabId: args.target, prompt: args.prompt },
+  );
+  const d = r?.disposition;
+  if (d === 'refused') throw new RemoteError(refusalMessage(r?.reason));
+  if (d === 'sent' || d === 'queued' || d === 'unconfirmed') {
+    return { disposition: d, reason: r?.reason };
+  }
+  return { disposition: 'unconfirmed' };
 }

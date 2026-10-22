@@ -110,6 +110,18 @@ export interface ChatMessage {
   text: string;
   ts: number;
   uuid: string;
+  live?: boolean;
+}
+
+export interface TranscriptPage {
+  messages: ChatMessage[];
+  hasMore: boolean;
+  nextBefore: number | null;
+}
+
+export interface SendChatResult {
+  disposition: 'sent' | 'queued' | 'unconfirmed';
+  reason?: string;
 }
 
 export interface SessionPrd {

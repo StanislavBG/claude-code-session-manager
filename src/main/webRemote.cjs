@@ -29,7 +29,6 @@ const logs = require('./logs.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { claudeHome } = require('./lib/scheduler/schedulerPaths.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
-const { summarize: _sharedSummarize } = require('./lib/summarize.cjs');
 const { makeState, confirmSas: confirmSasLogic } = require('./lib/e2eStateMachine.cjs');
 const { createClientSessions, LEGACY_CLIENT_KEY } = require('./lib/feedback-remote/remoteClientSessions.cjs');
 
@@ -497,12 +496,11 @@ async function handleTokenRevoked(deviceId) {
   sendIfAlive(_window, 'webRemote:token-revoked', { deviceId });
 }
 
-// ─── v2 mobile: session live state + summary push ────────────────────────────
+// ─── v2 mobile: session live state push ────────────────────────────
 //
 // For each subscribed tab the agent tails its transcript JSONL (reusing the
 // canonical classifyLine + transcriptPath from transcripts.cjs — single source of
 // truth), derives a coarse state, and pushes event:session:state on change.
-// The last completed assistant turn drives the Haiku summary (see maybeSummarize).
 
 const SESSION_POLL_MS = 1500;
 const SESSION_INIT_TAIL_BYTES = 512 * 1024; // bound the initial read
@@ -524,7 +522,7 @@ function pushEventTo(client, type, payload) {
   }
 }
 
-/** Authenticated clients subscribed to a tab's session state/summary. */
+/** Authenticated clients subscribed to a tab's session state. */
 function subscribersOf(tabId) {
   return _clients.authenticated().filter((c) => c.subscriptions.has(tabId));
 }
@@ -549,15 +547,6 @@ function teardownAllClients() {
   const n = _clients.teardownAll();
   pruneSessionWatchers();
   return n;
-}
-
-/** Extract concatenated text from an assistant transcript line, or '' if none. */
-function extractAssistantText(raw) {
-  const msg = raw?.message || raw;
-  const content = msg?.content;
-  if (typeof content === 'string') return content;
-  if (!Array.isArray(content)) return '';
-  return content.filter((b) => b?.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('\n').trim();
 }
 
 /** Map a classified transcript event to a coarse session state. */
@@ -613,6 +602,19 @@ async function tailLines(filePath, fromOffset) {
 }
 
 async function pollSessionWatcher(w) {
+  // The transcript may not exist yet (new session) or may live under another
+  // project/worktree encoding: re-resolve while the watched file is missing.
+  if (!fs.existsSync(w.filePath)) {
+    try {
+      const next = require('./transcripts.cjs').transcriptPath(w.cwd, w.sessionId);
+      if (next && next !== w.filePath) {
+        validatePath(next);
+        w.filePath = next;
+        w.offset = null;
+        w.inode = undefined;
+      }
+    } catch { /* keep the old path */ }
+  }
   let res;
   try {
     res = await tailLines(w.filePath, w.offset);
@@ -627,8 +629,6 @@ async function pollSessionWatcher(w) {
   w.inode = res.inode;
 
   let nextState = null;
-  let newAssistantText = null;
-  let newMsgId = null;
   for (const line of res.lines) {
     let obj;
     try { obj = JSON.parse(line); } catch { continue; }
@@ -636,10 +636,6 @@ async function pollSessionWatcher(w) {
     for (const ev of events) {
       const s = deriveState(ev, obj);
       if (s) nextState = s;
-      if (ev.kind === 'assistant') {
-        const text = extractAssistantText(obj);
-        if (text) { newAssistantText = text; newMsgId = obj.uuid || obj.message?.id || `${w.tabId}:${res.size}`; }
-      }
     }
   }
 
@@ -650,33 +646,20 @@ async function pollSessionWatcher(w) {
       pushEventTo(c, 'event:session:state', { tabId: w.tabId, state: w.state, since: Date.now() });
     }
   }
-  if (newAssistantText && newMsgId !== w.lastMsgId) {
-    w.lastAssistantText = newAssistantText;
-    w.lastMsgId = newMsgId;
-  }
-  // Summarize only a COMPLETED turn (state idle) — not assistant text mid-turn that
-  // is followed by a tool call. Cache by msgId so re-subscribe doesn't re-bill.
-  if (w.state === 'idle' && w.lastAssistantText && w.lastMsgId !== w.summarizedMsgId) {
-    w.summarizedMsgId = w.lastMsgId;
-    maybeSummarize(w).catch(() => {});
-  }
 }
 
-function startSessionWatch(tabId, cwd) {
+function startSessionWatch(tabId, cwd, sessionId = tabId) {
   if (_sessionWatchers.has(tabId)) return;
-  const filePath = require('./transcripts.cjs').transcriptPath(cwd, tabId);
+  const filePath = require('./transcripts.cjs').transcriptPath(cwd, sessionId);
   // Defense in depth: the schema restricts tabId charset, but re-validate the
   // FINAL joined path against the home-dir boundary (validatePath resolves
   // symlinks + rejects escapes) before any fs read. Throws → dispatch drops it.
   validatePath(filePath);
   const w = {
-    tabId, cwd, filePath,
+    tabId, cwd, sessionId, filePath,
     offset: null,       // null → first poll reads a bounded tail then tracks EOF
     inode: undefined,
     state: 'idle',
-    lastAssistantText: null,
-    lastMsgId: null,
-    summarizedMsgId: null,
     timer: null,
   };
   _sessionWatchers.set(tabId, w);
@@ -730,44 +713,6 @@ function buildRemoteSessionList(tabs, readIndex) {
     }
   }
   return out;
-}
-
-// ─── SM-V2-03: mobile summary via Claude Haiku 4.5 ───────────────────────────
-// Summarization logic lives in lib/summarize.cjs (shared with exchanges.cjs).
-
-const SUMMARY_MIN_CHARS = 280; // below this, push raw — not worth an API call
-
-/**
- * Produce a mobile summary of the watcher's last completed assistant turn and push it.
- * Short turns are pushed raw (no API call). If no API key is configured, degrades to
- * the raw message so core remote control is never blocked. Cost: Haiku in+out per
- * completed turn per subscribed tab (~$1/$5 per 1M tokens).
- */
-async function maybeSummarize(w) {
-  // Guard: summaries (session transcript content) go only to SAS-confirmed subscribers.
-  if (subscribersOf(w.tabId).length === 0) return;
-  const text = w.lastAssistantText;
-  if (!text) return;
-  const ofMessageId = w.lastMsgId;
-
-  if (text.length < SUMMARY_MIN_CHARS) {
-    for (const c of subscribersOf(w.tabId)) {
-      pushEventTo(c, 'event:session:summary', { tabId: w.tabId, summary: text, ofMessageId, model: 'raw', ts: Date.now() });
-    }
-    return;
-  }
-
-  const { summary, model, degraded } = await _sharedSummarize(text);
-  if (degraded) {
-    logs.writeLine({ scope: 'webRemote', level: 'warn', message: `summary degraded: ${degraded}`, meta: {} });
-  }
-  for (const c of subscribersOf(w.tabId)) {
-    pushEventTo(c, 'event:session:summary', {
-      tabId: w.tabId, summary, ofMessageId, model,
-      ...(degraded ? { degraded } : {}),
-      ts: Date.now(),
-    });
-  }
 }
 
 /**
@@ -1217,12 +1162,15 @@ function getDispatchMap() {
     'cmd:app:info': async () =>
       ({ version: app.getVersion(), platform: process.platform }),
 
-    // v2 mobile: start/stop pushing live state + summary for a session.
+    // v2 mobile: start/stop pushing live state for a session.
     'cmd:session:subscribe': async (payload, reqClient) => {
       const client = reqClient || _clients.getOrCreate(LEGACY_CLIENT_KEY);
       const parsed = schemas.sessionSubscribe.parse(payload);
       validatePath(parsed.cwd); // home-dir boundary before any fs access
-      startSessionWatch(parsed.tabId, parsed.cwd);
+      // The phone's Main row passes the tab `id`, but the transcript is keyed by the tab's `sessionId`.
+      const { tabs } = await require('./sessionsStore.cjs').load();
+      const tab = (Array.isArray(tabs) ? tabs : []).find((t) => t && t.id === parsed.tabId && t.cwd === parsed.cwd);
+      startSessionWatch(parsed.tabId, parsed.cwd, tab?.sessionId || parsed.tabId);
       client.subscriptions.add(parsed.tabId);
       return { ok: true };
     },
@@ -1559,6 +1507,10 @@ module.exports = {
   },
   __test: {
     getDispatchMap,
+    startSessionWatch,
+    pollSessionWatcher,
+    getSessionWatcher: (tabId) => _sessionWatchers.get(tabId),
+    stopAllSessionWatches,
     buildRemoteSessionList,
     setWs: (ws) => { _ws = ws; },
     connect,

@@ -15,6 +15,7 @@ const { SCHEDULE_SLUG_RE } = require('../ipcSchemas.cjs');
 const { DEFAULT_PROJECT_CWD } = require('../lib/scheduler/schedulerBatch.cjs');
 const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, resolveEpicPrdWriteDir, isSafeEpicId, listArchivedPrdDirs, ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs } = require('../lib/prd/prdLocations.cjs');
 const { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds } = require('../lib/prd/prdMigration.cjs');
+const { opsPath } = require('../lib/opsOwnership.cjs');
 const { allProjectCwds, projectRootOf } = require('../lib/activeSessions.cjs');
 
 /**
@@ -200,7 +201,7 @@ async function findPrdDirForJob(job) {
   const scoped = typeof slug === 'string' && slug && path.basename(slug) === slug
     ? await module.exports.jobScopedPrdDirs(job) : [];
   const exactDir = scoped.length && isSafeEpicId(job.epicId)
-    ? path.join(projectRootOf(job.cwd), 'session-manager-operations', 'scheduler', 'epics', job.epicId, 'prds')
+    ? opsPath(job.cwd, 'scheduler', 'epics', job.epicId, 'prds')
     : null;
   if (exactDir && scoped[0] === exactDir && await dirHasSlug(exactDir, slug)) return exactDir;
   const viaGlobalSearch = await module.exports.findPrdDir(slug);

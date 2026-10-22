@@ -1646,6 +1646,17 @@ export interface ChatExternalSendEvent {
   /** Epic's claudeSessionId + project cwd, resolved by main so the renderer can deliver before the Epic's project is loaded. */
   sessionId?: string;
   cwd?: string;
+  /** Set by main's enqueueExternalPrompt on every push; the renderer must echo it back via `reportExternalSendResult`. */
+  requestId?: string;
+}
+
+export type ChatExternalSendDisposition = 'sent' | 'queued' | 'refused';
+export type ChatExternalSendRefusalReason = 'terminal-attached' | 'completed' | 'unknown-target' | 'empty-prompt';
+/** What the renderer did with a `ChatExternalSendEvent`, reported back to main. */
+export interface ChatExternalSendResult {
+  requestId: string;
+  disposition: ChatExternalSendDisposition;
+  reason?: ChatExternalSendRefusalReason;
 }
 
 export type CreateProjectFolderResult =
@@ -2297,6 +2308,8 @@ export interface SessionManagerAPI {
      *  tool) pushes a prompt into an open tab's queue from outside the
      *  renderer (PRD 753). */
     onExternalSend: (handler: (e: ChatExternalSendEvent) => void) => () => void;
+    /** Reports what the renderer did with an external send (echoing its requestId) back to main. */
+    reportExternalSendResult: (result: ChatExternalSendResult) => Promise<void>;
     /** Fires when a paired phone asks main to start a new Session (payload pre-validated in main). */
     onExternalNewSession: (
       handler: (e: { cwd: string; agentName: string; tag: AgentPersonaTag; title: string; prompt: string }) => void,

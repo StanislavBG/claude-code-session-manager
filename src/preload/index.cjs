@@ -536,6 +536,8 @@ contextBridge.exposeInMainWorld('api', {
       ipcRenderer.on('chat:external-send', listener);
       return () => ipcRenderer.removeListener('chat:external-send', listener);
     },
+    /** Reports the renderer's disposition for an external send back to main. */
+    reportExternalSendResult: (result) => ipcRenderer.invoke('chat:external-send-result', result),
     /** Fires when a paired phone asks main to start a new Session. */
     onExternalNewSession: (handler) => {
       const listener = (_e, payload) => handler(payload);

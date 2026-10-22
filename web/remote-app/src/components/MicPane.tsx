@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RelaySocket } from '../ws';
 import { sendChat } from '../remoteApi';
+import type { SendChatResult } from '../types';
 import { trackFlow, trackScreen } from '../telemetry';
 
 interface Props {
@@ -8,6 +9,7 @@ interface Props {
   deviceId: string;
   target: string | null;
   disabledReason?: string;
+  onSent?: (prompt: string, result: SendChatResult) => void;
 }
 
 // Minimal Web Speech typings (not in standard lib.dom).
@@ -41,7 +43,7 @@ const IcoX = () => (
  * No audio leaves the browser; STT runs in the browser. A recording indicator is
  * shown whenever the mic is live (privacy invariant).
  */
-export default function MicPane({ socket, deviceId, target, disabledReason }: Props) {
+export default function MicPane({ socket, deviceId, target, disabledReason, onSent }: Props) {
   const [text, setText] = useState('');
   const [listening, setListening] = useState(false);
   const [sending, setSending] = useState(false);
@@ -85,10 +87,11 @@ export default function MicPane({ socket, deviceId, target, disabledReason }: Pr
     setErr(null);
     trackFlow('chat-send', 'start', { source });
     try {
-      await sendChat(socket, deviceId, { target, prompt: data });
+      const result = await sendChat(socket, deviceId, { target, prompt: data });
       trackFlow('chat-send', 'success', { source });
       setText('');
       setSheetOpen(false);
+      onSent?.(data, result);
     } catch (e: any) {
       trackFlow('chat-send', 'fail', { source, reason: 'send-error' });
       setErr(e?.message || 'send failed');

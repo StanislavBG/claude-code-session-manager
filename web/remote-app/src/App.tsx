@@ -8,7 +8,7 @@ import { RelaySocket } from './ws';
 import Cockpit from './components/Cockpit';
 import ConnectScreen from './components/ConnectScreen';
 import { trackFlow, trackScreen } from './telemetry';
-import type { Envelope, SessionSummary, SessionState } from './types';
+import type { Envelope, SessionState } from './types';
 
 // Same Clerk instance as bilko.run (clerk.bilko.run) so the static sibling shares
 // the host session. Publishable keys are public; overridable at build time.
@@ -58,7 +58,7 @@ function AppInner() {
   const {
     activeDeviceId,
     setMe, setDevices, setDeviceOnline, setActiveDevice,
-    setWsConnected, setTabState, setTabSummary, reset,
+    setWsConnected, setTabState, reset,
     setPendingSas, addKeyMismatch, markRemoteReady, stopAwaitingDesktop,
   } = useStore();
   const socketRef = useRef<RelaySocket | null>(null);
@@ -139,10 +139,6 @@ function AppInner() {
       const p = m.payload as { tabId?: string; state?: SessionState } | undefined;
       if (p?.tabId && p.state) setTabState(p.tabId, p.state);
     });
-    const offSummary = socket.on('event:session:summary', (m: Envelope) => {
-      const p = m.payload as SessionSummary | undefined;
-      if (p?.tabId) setTabSummary(p);
-    });
     // Internal event: SAS computed after e2e:ready; show to user for manual comparison.
     const offSas = socket.on('sas:pending', (m: Envelope) => {
       const p = m.payload as { sas?: string } | undefined;
@@ -162,13 +158,13 @@ function AppInner() {
     });
 
     return () => {
-      offStatus(); offState(); offSummary(); offSas(); offReady();
+      offStatus(); offState(); offSas(); offReady();
       fallback.clear();
       socket.destroy();
       socketRef.current = null;
       reset();
     };
-  }, [setWsConnected, setDeviceOnline, setActiveDevice, setTabState, setTabSummary, reset, setPendingSas, markRemoteReady, stopAwaitingDesktop]);
+  }, [setWsConnected, setDeviceOnline, setActiveDevice, setTabState, reset, setPendingSas, markRemoteReady, stopAwaitingDesktop]);
 
   const device = useStore((s) => s.devices.find((d) => d.deviceId === s.activeDeviceId));
   const online = !!device?.isOnline;

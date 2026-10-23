@@ -25,11 +25,9 @@ describe('session store', () => {
     expect(useStore.getState().refreshKey).toBe(before + 1);
   });
 
-  it('records per-tab state and summary independently', () => {
-    const { setTabState, setTabSummary } = useStore.getState();
+  it('records per-tab state', () => {
+    const { setTabState } = useStore.getState();
     setTabState('a', 'thinking');
-    setTabSummary({ tabId: 'a', summary: 'did a thing', ts: 1 });
     expect(useStore.getState().stateByTab.a).toBe('thinking');
-    expect(useStore.getState().summaryByTab.a.summary).toBe('did a thing');
   });
 });

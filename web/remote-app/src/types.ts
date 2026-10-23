@@ -64,15 +64,6 @@ export type SessionState =
   | 'error'
   | 'unknown';
 
-export interface SessionSummary {
-  tabId: string;
-  summary: string;
-  ofMessageId?: string;
-  model?: string;          // 'claude-haiku-4-5' | 'raw'
-  degraded?: string;       // 'no_api_key' | 'api_error'
-  ts: number;
-}
-
 // ── App navigation state ──────────────────────────────────────────────────────
 
 export type Screen =

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { SessionTarget } from './components/SessionScreen';
 import type {
-  MeResponse, Device, Screen, SessionState, SessionSummary,
+  MeResponse, Device, Screen, SessionState,
 } from './types';
 
 export type Route =
@@ -21,9 +21,8 @@ interface AppState {
   /** Bumped to make the visible screen re-fetch. */
   refreshKey: number;
 
-  // Live per-tab state / summary
+  // Live per-tab state
   stateByTab: Record<string, SessionState>;
-  summaryByTab: Record<string, SessionSummary>;
 
   // E2E security state
   /** SAS pending user confirmation: { deviceId, sas } or null. */
@@ -47,7 +46,6 @@ interface AppState {
   goSession: (cwd: string, title: string, target: SessionTarget) => void;
   bumpRefresh: () => void;
   setTabState: (tabId: string, state: SessionState) => void;
-  setTabSummary: (s: SessionSummary) => void;
   reset: () => void;
 
   setPendingSas: (v: { deviceId: string; sas: string } | null) => void;
@@ -70,7 +68,6 @@ export const useStore = create<AppState>((set) => ({
   route: { view: 'projects' },
   refreshKey: 0,
   stateByTab: {},
-  summaryByTab: {},
 
   pendingSas: null,
   awaitingDesktopConfirm: false,
@@ -91,10 +88,8 @@ export const useStore = create<AppState>((set) => ({
   bumpRefresh: () => set((s) => ({ refreshKey: s.refreshKey + 1 })),
   setTabState: (tabId, state) =>
     set((s) => ({ stateByTab: { ...s.stateByTab, [tabId]: state } })),
-  setTabSummary: (summary) =>
-    set((s) => ({ summaryByTab: { ...s.summaryByTab, [summary.tabId]: summary } })),
   reset: () => set({
-    route: { view: 'projects' }, stateByTab: {}, summaryByTab: {},
+    route: { view: 'projects' }, stateByTab: {},
     activeDeviceId: null, awaitingDesktopConfirm: false, remoteReady: false,
   }),
 

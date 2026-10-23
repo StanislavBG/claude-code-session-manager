@@ -4,7 +4,7 @@ import { useScheduleState } from '../../../state/scheduleState'
 import { usePromptSessions } from '../../../state/promptSessions'
 import { toast } from '../../../state/toast'
 import { usePanelFocus } from '../../../lib/panelFocus'
-import { setSessionSlots } from '../../../lib/useSessionSlots'
+import { setSessionSlots, useSessionSlots } from '../../../lib/useSessionSlots'
 import { useDocumentVisible } from '../../../lib/useDocumentVisible'
 import { formatAgo, formatRelative } from '../../../lib/formatTime'
 import { windowKindLabel } from '../../../lib/usageWindow'
@@ -230,6 +230,7 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
   const snapshot = useScheduleState((s) => s.snapshot)
   const sessions = usePromptSessions((s) => s.sessions)
   const health = useQueueHealth(scopeCwd)
+  const slotSnapshot = useSessionSlots()
   const [now, setNow] = useState(() => Date.now())
   // DONE TODAY cost/tokens: best-effort, one call on mount, never blocks paint.
   const [spend, setSpend] = useState<string>('—')
@@ -448,7 +449,7 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
               <Stepper
                 value={cap}
                 min={0}
-                max={10}
+                max={slotSnapshot?.max ?? cap}
                 disabled={envPinned}
                 onChange={(next) => { setSessionSlots(next).catch((err) => { toast.error(`Could not set session slots: ${err instanceof Error ? err.message : String(err)}`) }) }}
                 title={envPinned ? 'pinned by SM_SESSION_SLOTS — unset the env var to edit' : 'Machine-wide claude -p session slots, shared with chat runs'}

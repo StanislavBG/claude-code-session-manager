@@ -69,9 +69,9 @@ export function SessionManagerConfig({ navigate }: SessionManagerConfigProps) {
         <p className="mt-0 mb-3 text-[13px] text-fg-dim leading-relaxed">
           One machine-wide pool of concurrent Claude sessions. Scheduler jobs and Epic chat
           runs each request a slot before launching; work waits when the pool is full.
-          Adjustable from 0 (pauses new launches) to 10 on the Home tab, default 5 — or
+          Adjustable from 0 (pauses new launches) to {slots?.max ?? 10} on the Home tab, default 5 — or
           pin it with{' '}
-          <code className="font-mono text-[12px]">SM_SESSION_SLOTS</code> (clamped 0–10).
+          <code className="font-mono text-[12px]">SM_SESSION_SLOTS</code> (clamped 0–{slots?.max ?? 10}).
         </p>
         <div className="flex items-center gap-2">
           <SlotDots total={slots?.total ?? 5} inUse={slots?.inUse ?? 0} size="md" />

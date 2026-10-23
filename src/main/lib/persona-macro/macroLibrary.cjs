@@ -475,6 +475,14 @@ async function loadForWrite(filePath, opts) {
  * Create (no id) or update (id) a macro. Returns the saved Macro.
  * Throws on invalid input or unknown id.
  */
+/** Merged-macro check: every `{{name}}` in the prompt must be a declared input. */
+function assertPlaceholdersDeclared(macro) {
+  const declared = new Set((macro.inputs || []).map((i) => i.name));
+  for (const name of macroPlaceholders(macro.prompt)) {
+    if (!declared.has(name)) throw new Error(`prompt placeholder {{${name}}} is not declared in inputs`);
+  }
+}
+
 async function saveMacro(input, opts = {}) {
   const parsed = MacroSaveSchema.parse(input);
   const filePath = resolvePath(opts);
@@ -503,6 +511,7 @@ async function saveMacro(input, opts = {}) {
       } else {
         saved.inputs = parsed.inputs;
       }
+      assertPlaceholdersDeclared(saved);
       macros[idx] = saved;
     } else {
       const projects = parsed.projects !== undefined ? normalizeProjects(parsed.projects) : [];
@@ -518,6 +527,7 @@ async function saveMacro(input, opts = {}) {
         updatedAt: now,
       };
       if (parsed.inputs && parsed.inputs.length > 0) saved.inputs = parsed.inputs;
+      assertPlaceholdersDeclared(saved);
       macros.push(saved);
     }
     await writeStore(filePath, macros);

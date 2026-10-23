@@ -244,6 +244,21 @@ test('create with inputs returns 200, GET list includes them, update without inp
   expect(relisted.inputs).toEqual(STREAM_INPUTS);
 });
 
+test('undeclared placeholder with no inputs is refused with 400', async () => {
+  const cwd = await mkProjectCwd();
+  const filePath = await mkMacrosFile();
+  const adminHttp = makeFakeAdminHttp();
+  const { onChanged, getChangedCount } = makeHandlers();
+  registerAdminRoute(adminHttp, { onChanged }, { filePath });
+
+  const { status, body } = await adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, label: 'Bad', agentName: 'builder', tag: 'build', prompt: 'Run {{x}}' },
+  });
+  expect(status).toBe(400);
+  expect(body.error).toContain('{{x}}');
+  expect(getChangedCount()).toBe(0);
+});
+
 test('undeclared placeholder with non-empty inputs is refused with 400, onChanged never called', async () => {
   const cwd = await mkProjectCwd();
   const filePath = await mkMacrosFile();

@@ -346,6 +346,27 @@ test('inputs: undeclared placeholder rejected, naming it', async () => {
   await expect(lib.saveMacro(withInputs({ prompt: 'a {{stream}} b {{other}}' }), opts)).rejects.toThrow(/other/);
 });
 
+test('inputs: merged-macro check rejects undeclared placeholders on every save path', async () => {
+  // create with no inputs
+  await expect(lib.saveMacro(base({ prompt: 'Run {{x}}' }), opts)).rejects.toThrow('prompt placeholder {{x}} is not declared in inputs');
+  expect(await lib.listMacros(opts)).toEqual([]);
+
+  const created = await lib.saveMacro(withInputs(), opts);
+  const before = await lib.listMacros(opts);
+
+  // update with inputs: [] while the prompt keeps {{stream}}
+  await expect(lib.saveMacro({ ...withInputs(), id: created.id, inputs: [] }, opts)).rejects.toThrow(/\{\{stream\}\}/);
+  expect(await lib.listMacros(opts)).toEqual(before);
+
+  // update with inputs omitted, new prompt adds {{other}}
+  await expect(lib.saveMacro({ ...base({ prompt: 'Run {{stream}} {{other}}' }), id: created.id }, opts)).rejects.toThrow(/\{\{other\}\}/);
+  expect(await lib.listMacros(opts)).toEqual(before);
+
+  // omitted inputs with only stored inputs is accepted
+  const ok = await lib.saveMacro({ ...base({ prompt: 'Again {{stream}}' }), id: created.id }, opts);
+  expect(ok.inputs).toEqual(created.inputs);
+});
+
 test('inputs: duplicate name rejected', async () => {
   const dup = [{ name: 'stream', label: 'A' }, { name: 'stream', label: 'B' }];
   await expect(lib.saveMacro(withInputs({ inputs: dup }), opts)).rejects.toThrow(/duplicate/);

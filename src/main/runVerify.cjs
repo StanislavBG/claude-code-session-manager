@@ -364,76 +364,17 @@ function isSelfRecovered(events, errorSeq, desc) {
   return false;
 }
 
-// ─── soak / deps parsing ─────────────────────────────────────────────────────
-
-/**
- * Extract soak days from a text string.
- *
- * Accepted forms (case-insensitive):
- *   "30+ days", "30 days", "≥ 180 days", "180-day soak",
- *   "N days of soak", "N days each", "soak of N days"
- *
- * Returns { soakDays, soakPhrase } or null.
- * Refuses to parse if the unit is not days (surfaces as verify_unavailable
- * at the dep-check call site).
- */
-function extractSoakFromBody(body) {
-  const PATTERNS = [
-    /(\d+)\+?\s*-?day\s+soak/i,
-    /soak\s+of\s+(\d+)\+?\s*days?/i,
-    /≥\s*(\d+)\s+days?/i,
-    /(\d+)\+?\s*days?\s+(?:of\s+)?soak/i,
-    /(\d+)\+?\s*days?\s+each/i,
-    /only\s+after\s+\S+.*?(?:run\s+)?(\d+)\+?\s*days?/i,
-  ];
-  for (const re of PATTERNS) {
-    const m = body.match(re);
-    if (m && m[1]) {
-      const n = parseInt(m[1], 10);
-      if (!isNaN(n) && n > 0 && n <= 3650) return { soakDays: n, soakPhrase: m[0].trim() };
-    }
-  }
-  return null;
-}
-
-/**
- * Parse dependency slug fragments from a PRD body:
- *   - Lines under "# Dependencies", "# Depends on", "# Pre-condition", "# Blocked on"
- *   - Inline "This PRD is blocked on: - M2 — ..."
- *
- * Returns a deduplicated array of lowercase fragment strings.
- */
-function parsePrdBodyDepFragments(body) {
-  const frags = [];
-
-  const SECTION_RE = /^#+\s*(?:depends?\s+on|dependencies|pre-?conditions?|blocked\s+on)[^\n]*\n([\s\S]*?)(?=\n#|$)/im;
-  const INLINE_RE = /(?:this\s+prd\s+is\s+blocked\s+on|depends?\s+on)\s*:?\s+([\s\S]*?)(?=\n\n|$)/i;
-
-  const sections = [];
-  const sm = body.match(SECTION_RE);
-  if (sm) sections.push(sm[1]);
-  const im = body.match(INLINE_RE);
-  if (im) sections.push(im[1]);
-
-  for (const section of sections) {
-    for (const m of section.matchAll(/^\s*[-*]\s*([A-Za-z][A-Za-z0-9._-]+)/gm)) {
-      const frag = m[1].toLowerCase();
-      if (frag.length >= 2) frags.push(frag);
-    }
-  }
-  return [...new Set(frags)];
-}
+// ─── dependency check ────────────────────────────────────────────────────────
 
 /**
  * Verify that all declared dependencies for `queueEntry` are satisfied.
  *
- * Two layers:
- *   1. queue.json's `dependsOn` array (explicit slug list, often empty).
- *   2. PRD body deps section (prose slug fragments + optional soak period).
+ * One layer: queue.json's `dependsOn` array — the same and only dependency
+ * signal the dispatcher (findBlockingDep) uses. PRD body prose is NOT parsed.
  *
- * @returns {{ ok: boolean, reason?: string, floorDate?: string }}
+ * @returns {{ ok: boolean, reason?: string }}
  */
-function checkDeps(queueEntry, allJobs, prdBody) {
+function checkDeps(queueEntry, allJobs) {
   const bySlug = new Map(allJobs.map((j) => [j.slug, j]));
   // A PRD's filename carries the allocator's `NN-` prefix, but `dependsOn:` is
   // authored with the bare name (the author cannot know the number that will
@@ -474,49 +415,6 @@ function checkDeps(queueEntry, allJobs, prdBody) {
     const unfinished = deps.find((d) => !isSatisfiedDepRow(d));
     if (unfinished) {
       return { ok: false, reason: `dependsOn: "${depSlug}" is ${unfinished.status} (need completed)` };
-    }
-  }
-
-  // 2. PRD body deps (prose).
-  if (prdBody) {
-    const frags = parsePrdBodyDepFragments(prdBody);
-    const soak = extractSoakFromBody(prdBody);
-    let latestFinishedMs = null;
-
-    for (const frag of frags) {
-      // Substring match: "m7" matches "44-signal-builder-m7-final-cutover".
-      const matches = allJobs.filter(
-        (j) => j.slug !== queueEntry.slug && j.slug.toLowerCase().includes(frag),
-      );
-      if (matches.length === 0) continue; // unresolvable fragment — skip
-
-      for (const dep of matches) {
-        if (!isSatisfiedDepRow(dep)) {
-          return {
-            ok: false,
-            reason: `PRD body dep "${frag}" → "${dep.slug}" is ${dep.status} (need completed)`,
-          };
-        }
-        if (dep.finishedAt) {
-          const t = new Date(dep.finishedAt).getTime();
-          if (!isNaN(t) && (latestFinishedMs === null || t > latestFinishedMs)) {
-            latestFinishedMs = t;
-          }
-        }
-      }
-    }
-
-    // Soak period check.
-    if (soak && latestFinishedMs !== null) {
-      const floorMs = latestFinishedMs + soak.soakDays * 86_400_000;
-      if (Date.now() < floorMs) {
-        const floorDate = new Date(floorMs).toISOString().slice(0, 10);
-        return {
-          ok: false,
-          reason: `Soak not elapsed: "${soak.soakPhrase}" requires waiting until ${floorDate}`,
-          floorDate,
-        };
-      }
     }
   }
 
@@ -971,11 +869,9 @@ async function verifyRun({
 
     // ── 1. Dependency check ────────────────────────────────────────────────
     // Run first: if deps are unmet we can skip the expensive log parse.
-    const depsResult = checkDeps(queueEntry, allJobs, prdBody);
+    const depsResult = checkDeps(queueEntry, allJobs);
     if (!depsResult.ok) {
-      return conclude('deps_unmet', depsResult.reason, 'pending', {
-        soakFloorDate: depsResult.floorDate ?? null,
-      });
+      return conclude('deps_unmet', depsResult.reason, 'pending');
     }
 
     // ── 2. Parse log ───────────────────────────────────────────────────────
@@ -1449,8 +1345,6 @@ module.exports = {
   isSelfRecovered,
   normalizeDescForRecovery,
   toolUseName,
-  extractSoakFromBody,
-  parsePrdBodyDepFragments,
   checkDeps,
   parseLog,
   scanSentinel,

@@ -20,7 +20,7 @@ test('auto-resolve skip: dispatched once, and the finished run is NOT downgraded
   expect(pickForProject(pending, new Set(), 4).batch.map((j) => j.slug)).toEqual(['6-validate-no-source-disclosure']);
 
   const finished = [autoSkipped, fixPlan, validator('running')];
-  expect(checkDeps(finished[2], finished, '')).toEqual({ ok: true });
+  expect(checkDeps(finished[2], finished)).toEqual({ ok: true });
 });
 
 test('plain skip (PRD source gone): held at dispatch, so it runs zero times', () => {
@@ -29,7 +29,7 @@ test('plain skip (PRD source gone): held at dispatch, so it runs zero times', ()
   const { batch, reason } = pickForProject(jobs, new Set(), 4);
   expect(batch).toEqual([]);
   expect(reason).toMatch(/never-ran dependencies/);
-  expect(checkDeps(jobs[1], jobs, '').ok).toBe(false);
+  expect(checkDeps(jobs[1], jobs).ok).toBe(false);
 });
 
 test.each(['completed', 'pending', 'running', 'failed', 'needs_review', 'skipped'])(
@@ -39,7 +39,22 @@ test.each(['completed', 'pending', 'running', 'failed', 'needs_review', 'skipped
       const dep = { slug: '5-site-value-first-copy', status, cwd: CWD, needsReviewAutoResolvedSkip: marker };
       const jobs = [dep, validator('pending')];
       const blocked = findBlockingDep(jobs[1], jobs) !== undefined;
-      expect(checkDeps(jobs[1], jobs, '').ok).toBe(!blocked);
+      expect(checkDeps(jobs[1], jobs).ok).toBe(!blocked);
     }
   },
 );
+
+test('prose "Depends on:" in a PRD body is not a dependency signal', () => {
+  const pendingJob = { slug: '150-surface-motion-perf-and-docs', status: 'pending', cwd: CWD };
+  const entry = { slug: '133-enemy-crew-body-adoption', status: 'running', cwd: CWD, dependsOn: [] };
+  // checkDeps takes no PRD body: the body "Depends on:\n- do the thing" cannot reach it.
+  expect(checkDeps(entry, [pendingJob, entry])).toEqual({ ok: true });
+});
+
+test('unmet explicit dependsOn still blocks with "(need completed)"', () => {
+  const dep = { slug: '150-surface-motion-perf-and-docs', status: 'pending', cwd: CWD };
+  const entry = { slug: '133-enemy-crew-body-adoption', status: 'running', cwd: CWD, dependsOn: ['surface-motion-perf-and-docs'] };
+  const r = checkDeps(entry, [dep, entry]);
+  expect(r.ok).toBe(false);
+  expect(r.reason).toContain('(need completed)');
+});

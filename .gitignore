@@ -57,3 +57,6 @@ session-manager-operations/memory-clusters/
 
 # electron-builder staging + installer output (scripts/package/stage.cjs)
 release/
+
+# sqlite MCP --db-path <path> placeholder file created in every cwd
+<path>

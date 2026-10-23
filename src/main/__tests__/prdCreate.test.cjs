@@ -45,6 +45,13 @@ test('readStandards reads the real standards.md and returns non-empty text', asy
   expect(text.includes('Execution discipline')).toBeTruthy();
 });
 
+test('buildPrdBody omits the estimateMinutes line when none is supplied', () => {
+  const base = { title: 't', cwd: '~/x', goal: 'g', acceptanceCriteria: ['a'], implementationNotes: 'n' };
+  expect(buildPrdBody(base)).not.toMatch(/estimateMinutes/);
+  expect(buildPrdBody({ ...base, estimateMinutes: 0 })).not.toMatch(/estimateMinutes/);
+  expect(buildPrdBody({ ...base, estimateMinutes: 7 })).toMatch(/^estimateMinutes: 7$/m);
+});
+
 test('buildPrdBody emits required frontmatter keys and body sections in order', async () => {
   const body = buildPrdBody({
     title: 'Do the thing',

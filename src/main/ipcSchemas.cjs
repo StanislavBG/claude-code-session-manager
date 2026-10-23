@@ -365,7 +365,7 @@ const schedulerCreatePrd = z.object({
   // sourcePromptId/originProjectRoot. A call with none of those still fails with
   // a clear "cwd is required" error.
   cwd: z.string().min(1).max(4096).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
-  estimateMinutes: z.number().int().min(1).max(100000),
+  estimateMinutes: z.number().int().min(1).max(100000).optional(),
   goal: z.string().min(1).max(20000),
   acceptanceCriteria: z.array(z.string().min(1).max(2000)).min(1).max(100),
   implementationNotes: z.string().min(1).max(20000),

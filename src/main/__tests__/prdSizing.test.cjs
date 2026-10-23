@@ -23,16 +23,6 @@ test('compliant PRD yields no warnings', () => {
   expect(sizingWarnings(compliantInput())).toEqual([]);
 });
 
-test('warns when estimateMinutes exceeds the limit', () => {
-  const warnings = sizingWarnings(compliantInput({ estimateMinutes: SIZING_LIMITS.estimateMinutes + 1 }));
-  expect(warnings.some((w) => /estimateMinutes/.test(w))).toBe(true);
-});
-
-test('does not warn when estimateMinutes is exactly the limit', () => {
-  const warnings = sizingWarnings(compliantInput({ estimateMinutes: SIZING_LIMITS.estimateMinutes }));
-  expect(warnings.some((w) => /estimateMinutes/.test(w))).toBe(false);
-});
-
 test('warns when acceptanceCriteria has more than the limit of lines', () => {
   const acceptanceCriteria = Array.from({ length: SIZING_LIMITS.acLines + 1 }, (_, i) => `criterion ${i}`);
   const warnings = sizingWarnings(compliantInput({ acceptanceCriteria }));

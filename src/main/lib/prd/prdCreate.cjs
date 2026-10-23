@@ -88,7 +88,9 @@ function buildPrdBody(input) {
   // No `parallelGroup` frontmatter key (PRD_AUTHORING.md §5) — the NN-
   // filename prefix is the single source of truth for grouping; adding a
   // second one here would let the two drift out of sync.
-  const fmLines = ['---', `title: ${title}`, `cwd: ${cwd}`, `estimateMinutes: ${estimateMinutes}`];
+  const fmLines = ['---', `title: ${title}`, `cwd: ${cwd}`];
+  // Optional: only a finite positive integer is written; absent => budget's 45-min floor.
+  if (Number.isInteger(estimateMinutes) && estimateMinutes > 0) fmLines.push(`estimateMinutes: ${estimateMinutes}`);
   // Provenance stamp (PRD-authoring lockdown): every PRD written through this
   // function — the sole in-process implementation behind both the admin
   // HTTP create-prd route and the renderer's chat:create-prd IPC handler —

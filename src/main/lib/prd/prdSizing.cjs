@@ -11,7 +11,6 @@
 'use strict';
 
 const SIZING_LIMITS = {
-  estimateMinutes: 15,
   acLines: 8,
   acLineChars: 400,
   bodyChars: 7000,
@@ -30,17 +29,11 @@ const TIMEOUT_CMD_RE = /\btimeout\s+\d+/gi;
  * treated as empty/absent rather than thrown on, since this is advisory only.
  */
 function sizingWarnings(input) {
-  const { estimateMinutes, goal, implementationNotes } = input || {};
+  const { goal, implementationNotes } = input || {};
   const acceptanceCriteria = Array.isArray(input?.acceptanceCriteria) ? input.acceptanceCriteria : [];
   const acLines = acceptanceCriteria.filter((line) => typeof line === 'string');
 
   const warnings = [];
-
-  if (typeof estimateMinutes === 'number' && estimateMinutes > SIZING_LIMITS.estimateMinutes) {
-    warnings.push(
-      `estimateMinutes (${estimateMinutes}) exceeds the ${SIZING_LIMITS.estimateMinutes}-minute sizing limit — split this PRD into smaller work items.`,
-    );
-  }
 
   if (acceptanceCriteria.length > SIZING_LIMITS.acLines) {
     warnings.push(

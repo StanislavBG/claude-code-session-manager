@@ -449,7 +449,7 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
               <Stepper
                 value={cap}
                 min={0}
-                max={slotSnapshot?.max ?? cap}
+                max={slotSnapshot?.max ?? 10}
                 disabled={envPinned}
                 onChange={(next) => { setSessionSlots(next).catch((err) => { toast.error(`Could not set session slots: ${err instanceof Error ? err.message : String(err)}`) }) }}
                 title={envPinned ? 'pinned by SM_SESSION_SLOTS — unset the env var to edit' : 'Machine-wide claude -p session slots, shared with chat runs'}

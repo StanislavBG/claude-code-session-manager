@@ -23,6 +23,7 @@ import { ProjectDrill } from './history/analytics/ProjectDrill'
 import { ModelMix } from './history/analytics/panels/ModelMix'
 import { Concentration } from './history/analytics/panels/Concentration'
 import { CachePanel } from './history/analytics/panels/CachePanel'
+import { LoopEfficiency } from './history/analytics/panels/LoopEfficiency'
 import { Rhythm } from './history/analytics/panels/Rhythm'
 
 const MEASURES: Measure[] = ['in', 'out', 'total', 'prompts', 'sessions', 'time', 'spend']
@@ -363,6 +364,7 @@ export function HistoryDashboard() {
           <CachePanel totals={facet.totals} />
           <Rhythm days={facet.days} measure={measure} />
         </div>
+        <LoopEfficiency />
       </div>
     </div>
   )

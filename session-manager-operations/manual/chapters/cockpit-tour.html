@@ -72,6 +72,10 @@ one of them for the detail behind the total.</p>
 <p>Voice lets you talk to your agents with your microphone instead of typing. Your speech is
 transcribed on your own machine and turned into text, the same as if you'd typed it yourself.</p>
 
+<p>The speech model only loads when you first press the microphone, so that first press takes a few
+seconds while the voice panel says <em>Loading speech model</em>. After half an hour without using
+voice, Session Manager unloads it to free memory, and the next press loads it again.</p>
+
 <h3>The recording indicator</h3>
 
 <p>Whenever your microphone is capturing audio, a red bar appears at the very top of the window

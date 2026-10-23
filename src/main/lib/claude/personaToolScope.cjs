@@ -54,10 +54,16 @@ function personaToolScopeArgs(scope) {
     prompt: 'Tool scope is enforced by the scheduler.',
     tools: scope.tools,
   };
-  return [
+  const args = [
     '--agents', JSON.stringify({ [HEADLESS_SCOPE_AGENT_NAME]: def }),
     '--agent', HEADLESS_SCOPE_AGENT_NAME,
   ];
+  // A scope naming no MCP tool never uses a server: with --strict-mcp-config and
+  // no --mcp-config (variadic; would swallow later args) the CLI boots none.
+  if (!scope.tools.some((t) => String(t).startsWith('mcp__'))) {
+    args.push('--strict-mcp-config');
+  }
+  return args;
 }
 
 module.exports = {

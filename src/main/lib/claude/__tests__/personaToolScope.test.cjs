@@ -51,7 +51,7 @@ describe('personaToolScope', () => {
   it('builds --agents JSON that parses back', () => {
     const scope = buildPersonaToolScope(['Read']);
     const args = personaToolScopeArgs(scope);
-    assert.equal(args.length, 4);
+    assert.equal(args.length, 5);
     assert.equal(args[0], '--agents');
     assert.equal(args[2], '--agent');
     assert.equal(args[3], HEADLESS_SCOPE_AGENT_NAME);
@@ -61,5 +61,18 @@ describe('personaToolScope', () => {
     assert.equal(typeof def.description, 'string');
     assert.match(def.prompt, /scheduler/);
     assert.deepEqual(def.tools, scope.tools);
+  });
+
+  it('adds --strict-mcp-config when scope names no mcp__ tool', () => {
+    const args = personaToolScopeArgs(buildPersonaToolScope(['Read', 'Bash']));
+    assert.equal(args[args.length - 1], '--strict-mcp-config');
+    assert.ok(!args.includes('--mcp-config'));
+  });
+
+  it('omits --strict-mcp-config when scope names an mcp__ tool', () => {
+    const args = personaToolScopeArgs(buildPersonaToolScope(['Read', 'mcp__blender']));
+    assert.equal(args.length, 4);
+    assert.ok(!args.includes('--strict-mcp-config'));
+    assert.ok(!args.includes('--mcp-config'));
   });
 });

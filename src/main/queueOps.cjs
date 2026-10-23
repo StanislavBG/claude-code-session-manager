@@ -18,7 +18,8 @@
  *   - `^until ` at the start of a logical line  → fizzpop-style poll hang
  *   - `^while true` (case insensitive)          → unbounded while loop
  *   - `for .* in $(seq 1 [5-9][0-9][0-9]+)`     → unbounded large seq
- *   - missing frontmatter title / cwd / estimateMinutes
+ *   - missing frontmatter title / cwd (estimateMinutes is optional; if present
+ *     it must be a positive integer)
  *   - cwd doesn't exist on disk (fs.accessSync)
  *   - `--no-verify` or `--no-gpg-sign`          → hook-skip flags
  *
@@ -200,14 +201,8 @@ function lintParsed(slug, raw) {
       }
     }
   }
-  if (fm.estimateMinutes === undefined || !String(fm.estimateMinutes).trim()) {
-    findings.push({
-      rule: 'missing-estimate',
-      line: 1,
-      snippet: 'frontmatter "estimateMinutes" is required',
-      severity: 'warn',
-    });
-  } else {
+  // estimateMinutes is optional (budget.cjs floors a missing one); validate only when present.
+  if (fm.estimateMinutes !== undefined && String(fm.estimateMinutes).trim()) {
     const v = Number(fm.estimateMinutes);
     if (!Number.isInteger(v) || v <= 0) {
       findings.push({

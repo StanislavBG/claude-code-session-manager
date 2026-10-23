@@ -209,7 +209,7 @@ export interface PromptSessionEvent {
   at: string
   /** Required for kind: 'prd_created' — the PRD's actual filename/slug.
    *  Also carried on kind: 'response' when the scheduler's check-in names
-   *  the PRD it came from (notifyOriginatingTab/notifyNeedsReview) — same
+   *  the PRD it came from (notifyOriginatingTab/flushDueReviewNotices) — same
    *  field, not a parallel one, since both cases mean "which PRD is this
    *  event about." Optional so events written before this existed still
    *  decode fine. */

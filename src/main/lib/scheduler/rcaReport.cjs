@@ -12,7 +12,7 @@
  * It used to file a `proposed` Epic per parked job; Epics are now created in
  * exactly one place — the human pressing New Epic (see epicMint.cjs's
  * SINGLE-CREATOR LAW). Surfacing the parked job back to a human is the
- * scheduler's job (notifyNeedsReview → appendResponseEventIfKnown), which
+ * scheduler's job (flushDueReviewNotices → appendResponseEventIfKnown), which
  * routes it into the Epic that AUTHORED the PRD rather than opening a
  * sibling Epic about it.
  *

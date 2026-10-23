@@ -282,9 +282,7 @@ without opening the Scheduler), delivers it to the authoring Epic whatever that 
 (`allowInactive`),
 names any pending PRD the group still blocks via `dependsOn` instead of
 always claiming nothing is waiting, and retries a send that errors up to 3
-times, then stamps it sent anyway so a dead Epic cannot loop forever. Kill
-switch `SM_REVIEW_NOTICE_IMMEDIATE=1` restores the old immediate, ungrouped
-notify-at-park-time behavior, for local debugging.
+times, then stamps it sent anyway so a dead Epic cannot loop forever.
 
 **Automatic, no operator action required:** the starvation watchdog forcing a tick (§3); rungs
 1, 2, 4, 5, and the bounded part of rung 6 of the needs_review ladder (§4); the reap/orphan

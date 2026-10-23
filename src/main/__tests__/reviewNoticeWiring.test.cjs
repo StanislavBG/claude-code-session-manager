@@ -1,7 +1,7 @@
 /**
  * reviewNoticeWiring.test.cjs — wires reviewNotice.cjs's pure selection logic
  * (covered on its own in reviewNotice.test.cjs) into scheduler.cjs's
- * flushDueReviewNotices, notifyNeedsReview and rescheduleIntervalTick's
+ * flushDueReviewNotices and rescheduleIntervalTick's
  * hold-expiry else-branch.
  *
  * Mocks queueStore's readMerged/readMergedSync/writeSplit (same seam as
@@ -41,7 +41,6 @@ beforeAll(() => {
   tmpHome = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'review-notice-wiring-home-'));
   process.env.HOME = tmpHome;
   delete process.env.SM_REVIEW_NOTICE_HOLD_MINUTES;
-  delete process.env.SM_REVIEW_NOTICE_IMMEDIATE;
 
   // scheduler.cjs itself is only required once per worker; PROJECT_CWD just
   // needs to be a real, writable path in case anything along the way stats it.
@@ -361,33 +360,4 @@ test('rescheduleIntervalTick does not flush when no row carries an unsent notice
   // evaluated synchronously against the tick's own snapshot — false here, so
   // flushDueReviewNotices (and the extra queue read it would cost) never runs.
   expect(readMerged).not.toHaveBeenCalled();
-});
-
-// --- notifyNeedsReview: the SM_REVIEW_NOTICE_IMMEDIATE=1 kill switch's target ---
-
-test('notifyNeedsReview sends one immediate message when the report was filed', async () => {
-  const appendResponseEvent = vi.fn().mockResolvedValue(true);
-  const job = { slug: '1-a', cwd: PROJECT_CWD, epicId: 'epic-1' };
-  const report = { filed: true, summary: 'root cause: uncommitted changes', path: '/runs/1/root-cause-1-a.md' };
-
-  const sent = await scheduler.notifyNeedsReview(job, report, { appendResponseEvent });
-
-  expect(sent).toBe(true);
-  expect(appendResponseEvent).toHaveBeenCalledTimes(1);
-  const [cwd, epicId, message, meta] = appendResponseEvent.mock.calls[0];
-  expect(cwd).toBe(PROJECT_CWD);
-  expect(epicId).toBe('epic-1');
-  expect(message).toContain('root cause: uncommitted changes');
-  expect(message).toContain('/runs/1/root-cause-1-a.md');
-  expect(meta).toMatchObject({ prdSlug: '1-a', outcome: 'needs_review', validation: 'unvalidated' });
-});
-
-test('notifyNeedsReview sends nothing when the report was never filed', async () => {
-  const appendResponseEvent = vi.fn().mockResolvedValue(true);
-  const job = { slug: '1-a', cwd: PROJECT_CWD, epicId: 'epic-1' };
-
-  const sent = await scheduler.notifyNeedsReview(job, { filed: false }, { appendResponseEvent });
-
-  expect(sent).toBe(false);
-  expect(appendResponseEvent).not.toHaveBeenCalled();
 });

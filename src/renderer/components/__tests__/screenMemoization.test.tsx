@@ -352,7 +352,6 @@ describe('memoized screens still react to their own store', () => {
     const emptySnapshot: ScheduleStateSnapshot = {
       config: { enabled: true, offsetMinutes: 0, defaultCwd: '/home/bilko', firePolicy: 'when-available', utilizationThreshold: 90, schemaVersion: 1 },
       jobs: [],
-      scheduledFor: null,
       lastRunAt: null,
       nextReset: null,
       paused: null,

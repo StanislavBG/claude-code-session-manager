@@ -35,7 +35,6 @@ function snapshot(jobs: ScheduleJob[]): ScheduleStateSnapshot {
     config: { firePolicy: 'when-available', supervisor: { enabled: false } },
     jobs,
     lastTick: null,
-    scheduledFor: null,
     lastRunAt: null,
     nextReset: null,
     paused: null,

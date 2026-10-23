@@ -622,14 +622,14 @@ export interface TelemetryFlushResult {
   reason: string;
 }
 
-export type ScheduleFirePolicy = 'manual' | 'on-reset' | 'when-available';
+export type ScheduleFirePolicy = 'manual' | 'when-available';
 
 export interface ScheduleConfig {
   /** Legacy on/off — kept for backwards compat with v0.4 queue.json. New
    *  installs derive enablement from firePolicy ('manual' === disabled). */
   enabled: boolean;
   /** Minutes to wait after the 5h reset before firing pending jobs.
-   *  Used by 'on-reset'. Ignored by 'when-available' and 'manual'. */
+   *  Currently unused by the fire policies ('when-available', 'manual'). */
   offsetMinutes: number;
   defaultCwd: string;
   /** Auto-fire policy. Default 'when-available'. */
@@ -977,7 +977,6 @@ export interface ScheduleStateSnapshot {
   /** Why the last tick fired (or didn't). Null before the first tick. */
   lastTick?: ScheduleLastTick | null;
   jobs: ScheduleJob[];
-  scheduledFor: string | null;
   lastRunAt: string | null;
   /** Stamped every time tickQueue reaches the picker at all, whether or not
    *  that pass ends in a launch — distinct from lastRunAt (only stamped on an

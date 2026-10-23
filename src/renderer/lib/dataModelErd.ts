@@ -482,7 +482,7 @@ export const ERD_ENTITIES: ErdEntity[] = [
       { name: 'enabled', type: 'boolean', note: 'legacy on/off, kept for v0.4 backwards compat' },
       { name: 'offsetMinutes', type: 'number' },
       { name: 'defaultCwd', type: 'string', key: 'fk', ref: 'project.cwd' },
-      { name: 'firePolicy', type: "'manual' | 'on-reset' | 'when-available'" },
+      { name: 'firePolicy', type: "'manual' | 'when-available'" },
       { name: 'utilizationThreshold', type: 'number' },
       { name: 'schemaVersion', type: '1' },
     ],

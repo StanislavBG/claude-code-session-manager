@@ -38,7 +38,7 @@ function job(over: Partial<ScheduleJob> & { slug: string }): ScheduleJob {
 function snapshot(jobs: ScheduleJob[]): ScheduleStateSnapshot {
   return {
     config: { firePolicy: 'when-available', supervisor: { enabled: false } },
-    jobs, lastTick: null, scheduledFor: null, lastRunAt: null, nextReset: null, paused: null,
+    jobs, lastTick: null, lastRunAt: null, nextReset: null, paused: null,
     utilization: null, effectiveConcurrency: { cap: 3, source: 'config' },
   } as unknown as ScheduleStateSnapshot
 }

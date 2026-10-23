@@ -58,7 +58,7 @@ function jobs(n: number): ScheduleJob[] {
 function snapshot(jobsIn: ScheduleJob[]): ScheduleStateSnapshot {
   return {
     config: { firePolicy: 'when-available', supervisor: { enabled: false } },
-    jobs: jobsIn, lastTick: null, scheduledFor: null, lastRunAt: null, nextReset: null, paused: null,
+    jobs: jobsIn, lastTick: null, lastRunAt: null, nextReset: null, paused: null,
     utilization: null, effectiveConcurrency: { cap: 3, source: 'config' },
   } as unknown as ScheduleStateSnapshot
 }

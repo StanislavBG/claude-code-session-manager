@@ -52,7 +52,6 @@ function emptySnapshot(): ScheduleStateSnapshot {
       schemaVersion: 1,
     },
     jobs: [],
-    scheduledFor: null,
     lastRunAt: null,
     nextReset: null,
     paused: null,

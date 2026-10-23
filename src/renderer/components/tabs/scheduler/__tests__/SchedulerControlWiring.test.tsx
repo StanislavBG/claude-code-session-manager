@@ -50,7 +50,7 @@ const JOBS = [
 function snapshot(paused: unknown = null): ScheduleStateSnapshot {
   return {
     config: { firePolicy: 'when-available', utilizationThreshold: 90, supervisor: { enabled: false, intervalMinutes: 15, maxConcurrentProbes: 2, probeStaleThresholdMinutes: 10 } },
-    jobs: JOBS, lastTick: null, scheduledFor: null, lastRunAt: null, nextReset: null, paused,
+    jobs: JOBS, lastTick: null, lastRunAt: null, nextReset: null, paused,
     utilization: 10, effectiveConcurrency: { cap: 3, free: 2, source: 'config' },
   } as unknown as ScheduleStateSnapshot
 }

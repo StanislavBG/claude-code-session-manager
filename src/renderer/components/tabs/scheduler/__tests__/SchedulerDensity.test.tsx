@@ -66,7 +66,7 @@ beforeEach(async () => {
   useScheduleState.setState({
     snapshot: {
       config: { firePolicy: 'when-available', utilizationThreshold: 90, supervisor: { enabled: false } },
-      jobs, lastTick: null, scheduledFor: null, lastRunAt: null, nextReset: null, paused: null,
+      jobs, lastTick: null, lastRunAt: null, nextReset: null, paused: null,
       utilization: 10, effectiveConcurrency: { cap: 3, free: 2, source: 'config' },
     } as unknown as ScheduleStateSnapshot,
     loaded: true,

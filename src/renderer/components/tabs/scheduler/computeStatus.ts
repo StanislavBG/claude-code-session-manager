@@ -2,7 +2,7 @@ import type { ScheduleStateSnapshot, ScheduleJob } from '../../../../preload/api
 import { toast } from '../../../state/toast'
 import { formatTimingLabel, formatClock, formatRelative } from '../../../lib/formatTime'
 
-export type StatusKind = 'running' | 'paused' | 'auto-soon' | 'auto-throttled' | 'manual' | 'on-reset' | 'idle'
+export type StatusKind = 'running' | 'paused' | 'auto-soon' | 'auto-throttled' | 'manual' | 'idle'
 
 // A utilization hold whose reset is further out than this is not a routine 5h pause.
 const LONG_HOLD_MS = 5 * 60 * 60_000
@@ -96,19 +96,6 @@ export function computeStatus({
         onClick: () => window.api.schedule.forceTick().then(toast.fromOutcome).catch(() => toast.error('Failed to fire batch')),
         title: 'Bypasses the billing-usage poll. Use when the meter is rate-limited or you want immediate progress.',
       },
-    }
-  }
-
-  if (pol === 'on-reset') {
-    if (!nextReset) {
-      return { kind: 'on-reset', line1: 'On-reset · waiting for billing data', line2: null }
-    }
-    const fireAt = Date.parse(nextReset) + (config.offsetMinutes * 60_000)
-    const wait = fireAt - now
-    return {
-      kind: 'on-reset',
-      line1: `On-reset · ${pendingCount} pending`,
-      line2: wait > 0 ? `fires ${formatClock(fireAt)} (in ${formatRelative(wait)})` : 'firing now…',
     }
   }
 

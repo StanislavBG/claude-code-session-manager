@@ -40,7 +40,6 @@ function fixture(over: Partial<ScheduleStateSnapshot> = {}): ScheduleStateSnapsh
       job('6-review', 'needs_review'),
       job('7-done', 'completed', { startedAt: st, finishedAt: fin }),
     ],
-    scheduledFor: null,
     lastRunAt: new Date(NOW - 5 * 60_000).toISOString(),
     nextReset: new Date(NOW + 4 * 86_400_000 + 3_600_000).toISOString(),
     paused: null,

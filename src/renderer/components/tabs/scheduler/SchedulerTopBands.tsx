@@ -435,11 +435,10 @@ export function SchedulerTopBands({ scopeCwd, subView, onSubView, filterText, on
                 value={policy}
                 onChange={(e) => window.api.schedule.setConfig({ firePolicy: e.target.value as ScheduleFirePolicy })}
                 className="border border-line bg-bg-hi rounded px-1 py-0.5 text-[12px] text-fg-dim"
-                title="when-available: poll usage and fire when tokens are below threshold. on-reset: fire after each 5h reset. manual: only on Run now."
+                title="when-available: poll usage and fire when tokens are below threshold. manual: only on Run now."
                 aria-label="Start jobs policy"
               >
                 <option value="when-available">when available</option>
-                <option value="on-reset">only on reset</option>
                 <option value="manual">manually</option>
               </select>
             </label>

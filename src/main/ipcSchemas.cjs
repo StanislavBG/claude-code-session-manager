@@ -596,7 +596,7 @@ const setConfigSchema = z.object({
     (s) => s === home || s.startsWith(home + path.sep),
     'defaultCwd must be inside home directory'
   ).optional(),
-  firePolicy: z.enum(['when-available', 'on-reset', 'manual']).optional(),
+  firePolicy: z.enum(['when-available', 'manual']).optional(),
   utilizationThreshold: z.number().min(0).max(200).optional(),
   supervisor: z.object({
     enabled: z.boolean().optional(),

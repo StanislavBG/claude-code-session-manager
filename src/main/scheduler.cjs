@@ -718,9 +718,22 @@ function persistSchedulerState() {
 
 // ---------- heartbeat log ----------
 
+// Memory time series stamped on every heartbeat line (MB, whole numbers).
+function memoryFields() {
+  const m = process.memoryUsage();
+  const mb = (b) => Math.max(0, Math.round((b || 0) / 1048576));
+  return {
+    rssMB: mb(m.rss),
+    heapUsedMB: mb(m.heapUsed),
+    heapTotalMB: mb(m.heapTotal),
+    externalMB: mb(m.external),
+    arrayBuffersMB: mb(m.arrayBuffers),
+  };
+}
+
 function appendHeartbeat(entry) {
   try {
-    const line = JSON.stringify(entry) + '\n';
+    const line = JSON.stringify({ ...memoryFields(), ...entry }) + '\n';
     let size = 0;
     try { size = fs.statSync(schedulerPaths.heartbeatPath()).size; } catch { /* new file */ }
     if (size >= HEARTBEAT_MAX_BYTES) {

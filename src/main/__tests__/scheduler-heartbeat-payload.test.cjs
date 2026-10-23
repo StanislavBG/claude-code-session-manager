@@ -35,6 +35,16 @@ test('healthy tick writes build {version, codeSha, builtAt} and is fresh', () =>
   expect(readFreshHeartbeat(HB())).not.toBeNull();
 });
 
+test('heartbeat line carries memory fields', () => {
+  scheduler.heartbeatTick({ readQueueSync: () => ({ jobs: [], unreadable: true, paused: null }) });
+  const line = lastLine();
+  for (const k of ['rssMB', 'heapUsedMB', 'heapTotalMB', 'externalMB', 'arrayBuffersMB']) {
+    expect(Number.isInteger(line[k])).toBe(true);
+    expect(line[k]).toBeGreaterThanOrEqual(0);
+  }
+  expect(heartbeatFresh(HB())).toBe(true);
+});
+
 test('a throwing queue read writes a degraded line with the error, never a fresh one', () => {
   scheduler.heartbeatTick({ readQueueSync: () => { throw new Error('boom-queue'); } });
   const line = lastLine();

@@ -3,11 +3,7 @@
  *
  * Run standalone: timeout 180 npx vitest run src/main/__tests__/runVerify.test.cjs
  *
- * Three fixture scenarios (matching the 2026-05-23→24 incident window):
- *
- *   1. Case 1 (false-PASS): M2 acceptance script prints test failures + Traceback,
- *      then echoes "M2 acceptance: PASS". Scheduler used to stamp 'completed'.
- *      Expected: transcript_errors → needs_review
+ *   (Case 1 false-PASS pattern detection retired — the verdict is outcome-only.)
  *
  *   2. Case 2 (HALT): M7 agent correctly halts because M1 soak is unmet.
  *      Expected: halt → pending, reason embeds soak floor date
@@ -69,84 +65,6 @@ function writePrd(dir, slug, body) {
 }
 
 // ─── fixture: Case 1 — false-PASS (M2 acceptance) ─────────────────────────
-
-test('Case 1: false-PASS (Traceback + echo PASS) → transcript_errors/needs_review', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '39-signal-builder-m2-sentiment-stack';
-    const logEvents = [
-      // Assistant turn: run acceptance script
-      {
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [{
-            type: 'tool_use',
-            id: 'toolu_m2_001',
-            name: 'Bash',
-            input: {
-              command: 'bash check_m2.sh',
-              description: 'Run M2 acceptance checks',
-            },
-          }],
-        },
-      },
-      // Tool result: test failures then echo PASS (the false-positive pattern)
-      {
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [{
-            type: 'tool_result',
-            tool_use_id: 'toolu_m2_001',
-            content: [
-              '=== Signal-builder side ===',
-              'ERROR tests/test_news_signals_panel.py',
-              '!!!!!!!! stopping after 1 failures !!!!!!!!',
-              '1 error in 0.03s',
-              'SB: 0',
-              '=== Sanity: SB sentiment_cache.db rows ===',
-              'rows: 0',
-              '=== contract.json panels.sentiment ===',
-              'Traceback (most recent call last):',
-              '  File "<string>", line 1, in <module>',
-              "KeyError: 'panels.sentiment'",
-              'M2 acceptance: PASS',
-            ].join('\n'),
-            is_error: false,
-          }],
-        },
-      },
-      // Result: agent declares success
-      {
-        type: 'result',
-        subtype: 'success',
-        result: 'M2 acceptance criteria verified. All checks passed.',
-      },
-    ];
-
-    writeLog(tmp, slug, logEvents);
-    const prdPath = writePrd(tmp, slug, '# M2 Sentiment Stack\n\nBuild the sentiment pipeline.');
-
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'running' },
-      allJobs: [],
-    });
-
-    assert.equal(verdict.verdict, 'transcript_errors', `expected transcript_errors, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, 'needs_review');
-    assert.ok(verdict.reason.length > 0, 'reason should be non-empty');
-
-    // verdicts.json sidecar should have been written
-    const sidecar = JSON.parse(fs.readFileSync(path.join(tmp, `${slug}.verdicts.json`), 'utf8'));
-    assert.equal(sidecar.schemaVersion, 1);
-    assert.equal(sidecar.verdict, 'transcript_errors');
-  } finally {
-    rmdir(tmp);
-  }
-});
 
 // ─── fixture: Case 2 — HALT (M7 soak unmet) ──────────────────────────────────
 
@@ -319,86 +237,6 @@ test('Truly clean run (no error markers) → clean/null', async () => {
 
 // ─── self-recovery: FAIL followed by successful retry ──────────────────────
 
-test('FAIL recovered within 30 events → clean', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '21-self-recovering';
-    const desc = 'Run pytest';
-    const logEvents = [
-      // First attempt: fails
-      {
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [{
-            type: 'tool_use',
-            id: 'toolu_r1',
-            name: 'Bash',
-            input: { command: 'pytest', description: desc },
-          }],
-        },
-      },
-      {
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [{
-            type: 'tool_result',
-            tool_use_id: 'toolu_r1',
-            content: 'FAILED tests/test_foo.py::test_bar - AssertionError',
-            is_error: false,
-          }],
-        },
-      },
-      // Agent fixes and retries with same description
-      {
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [{
-            type: 'tool_use',
-            id: 'toolu_r2',
-            name: 'Bash',
-            input: { command: 'pytest', description: desc },
-          }],
-        },
-      },
-      {
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [{
-            type: 'tool_result',
-            tool_use_id: 'toolu_r2',
-            content: '5 passed in 0.42s',
-            is_error: false,
-          }],
-        },
-      },
-      {
-        type: 'result',
-        subtype: 'success',
-        result: 'Fixed the failing test and verified all pass.\nSCHEDULER_VERDICT: PASS',
-      },
-    ];
-
-    writeLog(tmp, slug, logEvents);
-    const prdPath = writePrd(tmp, slug, '# Self-recovering test');
-
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'running' },
-      allJobs: [],
-      committedDuringRun: true,
-    });
-
-    assert.equal(verdict.verdict, 'clean', `self-recovery should yield clean, got ${verdict.verdict}: ${verdict.reason}`);
-  } finally {
-    rmdir(tmp);
-  }
-});
-
 // ─── self-recovery: sleep-prefix normalization (RCA 745-pr188-ci-lint-docs-integrity) ──
 
 /**
@@ -420,198 +258,6 @@ function paddingEvents(n) {
   }
   return out;
 }
-
-test('sleep-prefixed FAIL recovered by a bare retry of the same command → clean', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '812-sleep-prefix-recovery';
-    const logEvents = [
-      ...paddingEvents(8),
-      // First attempt: polls too early with a `sleep 20 &&` prefix, gets a
-      // pending/error result.
-      {
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [{
-            type: 'tool_use',
-            id: 'toolu_r1',
-            name: 'Bash',
-            input: {
-              command: 'sleep 20 && gh pr checks 188 --repo midt-bg/sigma 2>&1',
-              description: 'sleep 20 && gh pr checks 188 --repo midt-bg/sigma',
-            },
-          }],
-        },
-      },
-      {
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [{
-            type: 'tool_result',
-            tool_use_id: 'toolu_r1',
-            content: 'Exit code 8\ncheck\tpending\t0\thttps://github.com/midt-bg/sigma/actions/runs/1/job/1',
-            is_error: true,
-          }],
-        },
-      },
-      // Later retry: same underlying command, no sleep prefix, succeeds.
-      {
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [{
-            type: 'tool_use',
-            id: 'toolu_r2',
-            name: 'Bash',
-            input: {
-              command: 'gh pr checks 188 --repo midt-bg/sigma 2>&1',
-              description: 'gh pr checks 188 --repo midt-bg/sigma',
-            },
-          }],
-        },
-      },
-      {
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [{
-            type: 'tool_result',
-            tool_use_id: 'toolu_r2',
-            content: 'check\tpass\t2m16s\thttps://github.com/midt-bg/sigma/actions/runs/1/job/1',
-            is_error: false,
-          }],
-        },
-      },
-      {
-        type: 'result',
-        subtype: 'success',
-        result: 'CI is green.\nSCHEDULER_VERDICT: PASS',
-      },
-    ];
-
-    writeLog(tmp, slug, logEvents);
-    const prdPath = writePrd(tmp, slug, '# Sleep-prefix recovery test');
-
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'running' },
-      allJobs: [],
-      committedDuringRun: true,
-    });
-
-    assert.equal(verdict.verdict, 'clean', `sleep-prefix recovery should yield clean, got ${verdict.verdict}: ${verdict.reason}`);
-  } finally {
-    rmdir(tmp);
-  }
-});
-
-test('normalizeDescForRecovery only strips the sleep wrapper, not unrelated text', () => {
-  const { normalizeDescForRecovery } = require('../runVerify.cjs');
-  assert.equal(
-    normalizeDescForRecovery('sleep 20 && gh pr checks 188 --repo midt-bg/sigma'),
-    'gh pr checks 188 --repo midt-bg/sigma',
-  );
-  assert.equal(
-    normalizeDescForRecovery('sleep 90; gh pr checks 188 --repo midt-bg/sigma'),
-    'gh pr checks 188 --repo midt-bg/sigma',
-  );
-  assert.equal(
-    normalizeDescForRecovery('gh pr checks 188 --repo midt-bg/sigma'),
-    'gh pr checks 188 --repo midt-bg/sigma',
-  );
-});
-
-test('two different commands, one sleep-prefixed, are not paired as recovered', () => {
-  // Exercise isSelfRecovered directly (via parseLog) rather than the full
-  // verifyRun pipeline: a SCHEDULER_VERDICT: PASS + landed commit legitimately
-  // overrides a transcript_errors finding at the verifyRun layer by design
-  // (see verifyRun's sentinel-override comment), which would mask the
-  // narrower claim this test makes — that the sleep-prefix strip alone must
-  // not pair two genuinely different commands.
-  const { isSelfRecovered, parseLog } = require('../runVerify.cjs');
-  const tmp = makeTmpDir();
-  try {
-    const slug = '812-sleep-prefix-no-false-pair';
-    const logEvents = [
-      // First attempt: sleep-prefixed poll of PR 188, fails.
-      {
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [{
-            type: 'tool_use',
-            id: 'toolu_r1',
-            name: 'Bash',
-            input: {
-              command: 'sleep 20 && gh pr checks 188 --repo midt-bg/sigma 2>&1',
-              description: 'sleep 20 && gh pr checks 188 --repo midt-bg/sigma',
-            },
-          }],
-        },
-      },
-      {
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [{
-            type: 'tool_result',
-            tool_use_id: 'toolu_r1',
-            content: 'Exit code 8\ncheck\tpending\t0\thttps://github.com/midt-bg/sigma/actions/runs/1/job/1',
-            is_error: true,
-          }],
-        },
-      },
-      // "Retry" is actually a different command (different PR number) —
-      // after stripping the sleep wrapper it must NOT be treated as the
-      // same underlying command.
-      {
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [{
-            type: 'tool_use',
-            id: 'toolu_r2',
-            name: 'Bash',
-            input: {
-              command: 'gh pr checks 999 --repo midt-bg/sigma 2>&1',
-              description: 'gh pr checks 999 --repo midt-bg/sigma',
-            },
-          }],
-        },
-      },
-      {
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [{
-            type: 'tool_result',
-            tool_use_id: 'toolu_r2',
-            content: 'check\tpass\t2m16s\thttps://github.com/midt-bg/sigma/actions/runs/2/job/2',
-            is_error: false,
-          }],
-        },
-      },
-      {
-        type: 'result',
-        subtype: 'success',
-        result: 'Done.\nSCHEDULER_VERDICT: PASS',
-      },
-    ];
-
-    writeLog(tmp, slug, logEvents);
-    const { events } = parseLog(path.join(tmp, `${slug}.log`));
-    const failedToolUse = events.find((ev) => ev.kind === 'tool_use' && ev.toolUseId === 'toolu_r1');
-    assert.ok(failedToolUse, 'fixture should contain the failing tool_use event');
-
-    const recovered = isSelfRecovered(events, failedToolUse.seq, failedToolUse.description);
-    assert.equal(recovered, false, 'a differently-numbered PR check must not be treated as a recovered retry of the sleep-prefixed one');
-  } finally {
-    rmdir(tmp);
-  }
-});
 
 // ─── fixtures: feedback 2026-06-10-01 — quoted-error false positives ─────────
 
@@ -661,27 +307,6 @@ test('feedback 01: reviewer prose mentioning ImportError mid-sentence → clean'
   } finally { rmdir(tmp); }
 });
 
-test('feedback 01: real line-anchored ModuleNotFoundError in a FAILED run → verify_unavailable/needs_review', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '25-real-import-error';
-    const out = [
-      '$ python run_checks.py',
-      'Traceback (most recent call last):',
-      '  File "run_checks.py", line 2, in <module>',
-      '    from playwright.sync_api import sync_playwright',
-      "ModuleNotFoundError: No module named 'playwright'",
-    ].join('\n');
-    // Run did NOT succeed: the missing dependency was never resolved, so the
-    // "couldn't verify" signal must still escalate to a human.
-    writeLog(tmp, slug, bashRunEvents(out, { resultSubtype: 'error_during_execution' }));
-    const prdPath = writePrd(tmp, slug, '# Real failure');
-    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
-    assert.equal(verdict.verdict, 'verify_unavailable', `unresolved missing-dep must flag, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, 'needs_review');
-  } finally { rmdir(tmp); }
-});
-
 // ─── feedback 2026-06-10 addendum — recovered env-probe false positives ──────
 //
 // Setup probes (interpreter/venv search) that surface ModuleNotFoundError but
@@ -689,57 +314,6 @@ test('feedback 01: real line-anchored ModuleNotFoundError in a FAILED run → ve
 // real failure. They must NOT downgrade — only annotate. But a Traceback ending
 // in a real logic exception (KeyError/AssertionError) still hard-flags, even on
 // "success", preserving the 2026-05-23 false-PASS guard.
-
-test('addendum: Traceback→ModuleNotFoundError in a SUCCEEDED run → clean (annotated, not downgraded)', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '26-self-billbot-shared-lib';
-    const probe = [
-      'Exit code 1',
-      'Traceback (most recent call last):',
-      '  File "/home/bilko/Self/.claude/skills/snopud-bill/download_bill.py", line 42, in <module>',
-      '    from playwright.sync_api import TimeoutError as PWTimeout',
-      "ModuleNotFoundError: No module named 'playwright'",
-    ].join('\n');
-    writeLog(tmp, slug, bashRunEvents(probe)); // resultSubtype defaults to success
-    const prdPath = writePrd(tmp, slug, '# Shared lib');
-    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: true });
-    assert.equal(verdict.verdict, 'clean', `recovered env probe must not downgrade, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, null);
-    assert.ok(Array.isArray(verdict.annotations) && verdict.annotations.length === 1, 'should record one annotation');
-    assert.equal(verdict.annotations[0].verdict, 'verify_unavailable');
-  } finally { rmdir(tmp); }
-});
-
-test('addendum: bare Import/ModuleNotFound probe (no traceback) in SUCCEEDED run → clean/annotated', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '26-self-parser-tests';
-    writeLog(tmp, slug, bashRunEvents("ModuleNotFoundError: No module named 'conftest'"));
-    const prdPath = writePrd(tmp, slug, '# Parser tests');
-    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: true });
-    assert.equal(verdict.verdict, 'clean', `got ${verdict.verdict}: ${verdict.reason}`);
-    assert.ok(Array.isArray(verdict.annotations) && verdict.annotations.length === 1);
-  } finally { rmdir(tmp); }
-});
-
-test('addendum: Traceback→KeyError (real logic failure) on "success" → still transcript_errors/needs_review', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '26-real-logic-failure';
-    const out = [
-      '=== contract.json panels.sentiment ===',
-      'Traceback (most recent call last):',
-      '  File "<string>", line 1, in <module>',
-      "KeyError: 'panels.sentiment'",
-    ].join('\n');
-    writeLog(tmp, slug, bashRunEvents(out)); // success result — must NOT rescue a real failure
-    const prdPath = writePrd(tmp, slug, '# Logic failure');
-    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [] });
-    assert.equal(verdict.verdict, 'transcript_errors', `real logic Traceback must still flag, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, 'needs_review');
-  } finally { rmdir(tmp); }
-});
 
 test('feedback 01: error-shaped text inside a Task (subagent) result → clean', async () => {
   const tmp = makeTmpDir();
@@ -839,30 +413,6 @@ test('subagent-internal is_error (parent_tool_use_id set) in final 20% → clean
   } finally { rmdir(tmp); }
 });
 
-test('main-agent is_error (no parent_tool_use_id) in final 20% → still transcript_errors', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '955-main-agent-error-guard';
-    const events = [];
-    for (let k = 0; k < 8; k++) {
-      events.push({ type: 'assistant', message: { role: 'assistant', content: [
-        { type: 'tool_use', id: `t${k}`, name: 'Read', input: { description: `read ${k}` } }] } });
-      events.push({ type: 'user', message: { role: 'user', content: [
-        { type: 'tool_result', tool_use_id: `t${k}`, content: 'ok', is_error: false }] } });
-    }
-    events.push({ type: 'assistant', message: { role: 'assistant', content: [
-      { type: 'tool_use', id: 'tbad', name: 'Bash', input: { description: 'run tests' } }] } });
-    events.push({ type: 'user', message: { role: 'user', content: [
-      { type: 'tool_result', tool_use_id: 'tbad', content: 'FAILED: 1 test failed', is_error: true }] } });
-    events.push({ type: 'result', subtype: 'success', result: 'All acceptance criteria verified.' });
-
-    writeLog(tmp, slug, events);
-    const prdPath = writePrd(tmp, slug, '# Guard: main-agent errors still flag');
-    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: true });
-    assert.equal(verdict.verdict, 'transcript_errors', `main-agent is_error must still flag, got ${verdict.verdict}: ${verdict.reason}`);
-  } finally { rmdir(tmp); }
-});
-
 test('parseLog populates parentToolUseId on tool_use and tool_result events, defaulting to null', () => {
   const tmp = makeTmpDir();
   try {
@@ -904,14 +454,6 @@ test('parseLog populates parentToolUseId on tool_use and tool_result events, def
     assert.equal(topUse.parentToolUseId, null);
     assert.equal(topResult.parentToolUseId, null);
   } finally { rmdir(tmp); }
-});
-
-test('isHarnessToolError detects wrapper and "No such tool available"', () => {
-  const { isHarnessToolError } = require('../runVerify.cjs');
-  assert.equal(isHarnessToolError('<tool_use_error>Error: No such tool available: bash</tool_use_error>'), true);
-  assert.equal(isHarnessToolError('No such tool available: Foo'), true);
-  assert.equal(isHarnessToolError('ModuleNotFoundError: No module named x'), false);
-  assert.equal(isHarnessToolError(''), false);
 });
 
 // ─── SCHEDULER_VERDICT sentinel override tests ────────────────────────────────
@@ -956,187 +498,7 @@ function tracebackRunEvents(sentinelLine) {
   ];
 }
 
-// (a) sentinel PASS + committedDuringRun:true + Traceback+Error → clean
-test('sentinel PASS + committedDuringRun:true + Traceback → clean (override)', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '77-sentinel-override-pass';
-    writeLog(tmp, slug, tracebackRunEvents('SCHEDULER_VERDICT: PASS'));
-    const prdPath = writePrd(tmp, slug, '# Sentinel override test');
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'running' },
-      allJobs: [],
-      committedDuringRun: true,
-    });
-    assert.equal(verdict.verdict, 'clean', `expected clean, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, null);
-    assert.ok(verdict.reason.includes('SCHEDULER_VERDICT: PASS'), `reason should mention sentinel: ${verdict.reason}`);
-    // Sidecar should record the sentinel and override
-    const sidecar = JSON.parse(fs.readFileSync(path.join(tmp, `${slug}.verdicts.json`), 'utf8'));
-    assert.equal(sidecar.sentinel, 'pass');
-    assert.ok(sidecar.sentinelOverride, 'sidecar should record sentinelOverride');
-  } finally {
-    rmdir(tmp);
-  }
-});
-
-// (b) no sentinel + Traceback+Error → transcript_errors (unchanged baseline)
-test('no sentinel + Traceback+Error + committedDuringRun:true → transcript_errors (no override)', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '77-no-sentinel-baseline';
-    writeLog(tmp, slug, tracebackRunEvents(null));
-    const prdPath = writePrd(tmp, slug, '# No sentinel baseline');
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'running' },
-      allJobs: [],
-      committedDuringRun: true,
-    });
-    assert.equal(verdict.verdict, 'transcript_errors', `expected transcript_errors without sentinel, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, 'needs_review');
-  } finally {
-    rmdir(tmp);
-  }
-});
-
-// (c) sentinel PASS + committedDuringRun:false → stays transcript_errors (commit not confirmed)
-test('sentinel PASS + committedDuringRun:false → transcript_errors (commit unconfirmed)', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '77-sentinel-no-commit';
-    writeLog(tmp, slug, tracebackRunEvents('SCHEDULER_VERDICT: PASS'));
-    const prdPath = writePrd(tmp, slug, '# Sentinel without commit');
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'running' },
-      allJobs: [],
-      committedDuringRun: false,
-    });
-    assert.equal(verdict.verdict, 'transcript_errors', `PASS without commit must not override, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, 'needs_review');
-  } finally {
-    rmdir(tmp);
-  }
-});
-
-// (d) sentinel FAIL → never clean (even with committedDuringRun:true)
-test('sentinel FAIL + committedDuringRun:true → transcript_errors (FAIL never overrides)', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '77-sentinel-fail';
-    writeLog(tmp, slug, tracebackRunEvents('SCHEDULER_VERDICT: FAIL AC gate was red'));
-    const prdPath = writePrd(tmp, slug, '# Sentinel FAIL');
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'running' },
-      allJobs: [],
-      committedDuringRun: true,
-    });
-    assert.equal(verdict.verdict, 'sentinel_fail', `FAIL sentinel must not override to clean, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, 'needs_review');
-  } finally {
-    rmdir(tmp);
-  }
-});
-
 // ─── pre-sentinel heal (allowPreSentinelHeal) ─────────────────────────────────
-
-// (f) allowPreSentinelHeal=true + committed + no sentinel → clean
-test('pre-sentinel heal: committed + no sentinel + allowPreSentinelHeal → clean', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '86-pre-sentinel-heal-pass';
-    writeLog(tmp, slug, tracebackRunEvents(null)); // no SCHEDULER_VERDICT line
-    const prdPath = writePrd(tmp, slug, '# Pre-sentinel heal');
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'needs_review' },
-      allJobs: [],
-      committedDuringRun: true,
-      allowPreSentinelHeal: true,
-    });
-    assert.equal(verdict.verdict, 'clean', `expected clean via pre-sentinel heal, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, null);
-    assert.ok(verdict.reason.includes('pre-sentinel heal'), `reason should mention pre-sentinel heal: ${verdict.reason}`);
-    const sidecar = JSON.parse(fs.readFileSync(path.join(tmp, `${slug}.verdicts.json`), 'utf8'));
-    assert.ok(sidecar.preSentinelHeal, 'sidecar should record preSentinelHeal');
-  } finally {
-    rmdir(tmp);
-  }
-});
-
-// (g) allowPreSentinelHeal=true + committed + FAIL sentinel → stays transcript_errors
-test('pre-sentinel heal: committed + SCHEDULER_VERDICT: FAIL + allowPreSentinelHeal → transcript_errors', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '86-pre-sentinel-heal-fail';
-    writeLog(tmp, slug, tracebackRunEvents('SCHEDULER_VERDICT: FAIL AC gate was red'));
-    const prdPath = writePrd(tmp, slug, '# Pre-sentinel heal blocked by FAIL');
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'needs_review' },
-      allJobs: [],
-      committedDuringRun: true,
-      allowPreSentinelHeal: true,
-    });
-    assert.equal(verdict.verdict, 'sentinel_fail', `FAIL sentinel must block pre-sentinel heal, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, 'needs_review');
-  } finally {
-    rmdir(tmp);
-  }
-});
-
-// (h) allowPreSentinelHeal=true + NOT committed + no sentinel → stays transcript_errors
-test('pre-sentinel heal: not committed + no sentinel + allowPreSentinelHeal → transcript_errors', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '86-pre-sentinel-heal-uncommitted';
-    writeLog(tmp, slug, tracebackRunEvents(null));
-    const prdPath = writePrd(tmp, slug, '# Pre-sentinel heal blocked by no commit');
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'needs_review' },
-      allJobs: [],
-      committedDuringRun: false,
-      allowPreSentinelHeal: true,
-    });
-    assert.equal(verdict.verdict, 'transcript_errors', `no commit must block pre-sentinel heal, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, 'needs_review');
-  } finally {
-    rmdir(tmp);
-  }
-});
-
-// (i) allowPreSentinelHeal=false (default) + committed + no sentinel → baseline unchanged
-test('no sentinel + committed + allowPreSentinelHeal=false (default) → transcript_errors', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '86-pre-sentinel-heal-disabled';
-    writeLog(tmp, slug, tracebackRunEvents(null));
-    const prdPath = writePrd(tmp, slug, '# allowPreSentinelHeal disabled by default');
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'needs_review' },
-      allJobs: [],
-      committedDuringRun: true,
-      // allowPreSentinelHeal defaults to false
-    });
-    assert.equal(verdict.verdict, 'transcript_errors', `must not heal without allowPreSentinelHeal, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, 'needs_review');
-  } finally {
-    rmdir(tmp);
-  }
-});
 
 // ─── no_verdict_sentinel: no commit + no sentinel is not "clean" by default ──
 
@@ -1782,3 +1144,49 @@ test('merge-main exemption: commit landed → path unreachable, zero gh invocati
     rmdir(tmp);
   }
 });
+
+
+// ─── outcome-only verdict: error text never changes the verdict ──────────────
+
+function errorTextRunEvents(variant, sentinelLine) {
+  const events = [];
+  for (let k = 0; k < 8; k++) {
+    events.push({ type: 'assistant', message: { role: 'assistant', content: [
+      { type: 'tool_use', id: `o${k}`, name: 'Read', input: { description: `read ${k}` } }] } });
+    events.push({ type: 'user', message: { role: 'user', content: [
+      { type: 'tool_result', tool_use_id: `o${k}`, content: 'ok', is_error: false }] } });
+  }
+  events.push({ type: 'assistant', message: { role: 'assistant', content: [
+    { type: 'tool_use', id: 'obad', name: 'Bash', input: { command: 'run', description: 'run checks' } }] } });
+  const bad = variant === 'traceback'
+    ? { content: 'Traceback (most recent call last):\n  File "x.py", line 1\nKeyError: \'a\'', is_error: false }
+    : { content: 'command failed', is_error: true };
+  events.push({ type: 'user', message: { role: 'user', content: [
+    { type: 'tool_result', tool_use_id: 'obad', ...bad }] } });
+  events.push({ type: 'result', subtype: 'success', result: sentinelLine });
+  return events;
+}
+
+for (const { label, sentinelLine, committed, expected } of [
+  { label: 'PASS + commit', sentinelLine: 'done\nSCHEDULER_VERDICT: PASS', committed: true, expected: 'clean' },
+  { label: 'no sentinel + no commit', sentinelLine: 'done', committed: false, expected: 'no_verdict_sentinel' },
+  { label: 'PASS + no commit', sentinelLine: 'done\nSCHEDULER_VERDICT: PASS', committed: false, expected: 'pass_no_commit' },
+]) {
+  test(`error text (Traceback vs is_error) in final 20% never changes the verdict — ${label} → ${expected}`, async () => {
+    const out = [];
+    for (const variant of ['traceback', 'is_error']) {
+      const tmp = makeTmpDir();
+      try {
+        const slug = `70-outcome-only-${variant.replace('_', '-')}`;
+        writeLog(tmp, slug, errorTextRunEvents(variant, sentinelLine));
+        const prdPath = writePrd(tmp, slug, '# Outcome only');
+        const v = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: committed, exitCode: 0 });
+        out.push(v);
+      } finally { rmdir(tmp); }
+    }
+    assert.equal(out[0].verdict, expected, `traceback: ${out[0].verdict}: ${out[0].reason}`);
+    assert.equal(out[1].verdict, out[0].verdict, `is_error: ${out[1].verdict}: ${out[1].reason}`);
+    assert.equal(out[1].downgradeTo, out[0].downgradeTo);
+    for (const v of out) assert.notEqual(v.verdict, 'transcript_errors');
+  });
+}

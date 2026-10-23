@@ -42,7 +42,7 @@ describe('evaluateTickLiveness', () => {
 
   it('still flags a genuine stall under a non-manual policy', () => {
     const r = health.evaluateTickLiveness(
-      stalledLookingQueue({ firePolicy: 'on-reset' }),
+      stalledLookingQueue({ firePolicy: 'when-available' }),
       null,
       NOW,
       0,

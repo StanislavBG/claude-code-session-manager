@@ -442,7 +442,6 @@ const DEFAULT_CONFIG = {
   offsetMinutes: 15,
   defaultCwd: DEFAULT_PROJECT_CWD,
   // 'when-available' = poll usage and fire whenever utilization < threshold.
-  // 'on-reset'        = fire offsetMinutes after the next 5h reset (legacy).
   // 'manual'          = only fire on explicit Run now click.
   firePolicy: 'when-available',
   // For 'when-available'. Fire only when BINDING-window utilization < this
@@ -1125,9 +1124,16 @@ function flagUnreadable(state) {
 // Sync queue read — passed to the supervisor module (which calls it from
 // supervisorTick / applyAction with no await) and the heartbeat interval.
 // IPC handlers and mutate() use readQueue (async) below.
+// Migration: the retired legacy fire policy becomes 'when-available'
+// so an old install keeps dispatching. Persisted by the next mutate() write.
+function normalizeConfig(cfg) {
+  if (cfg && cfg.firePolicy === 'on-reset') return { ...cfg, firePolicy: 'when-available' };
+  return cfg;
+}
+
 function readQueueSync() {
   const s = queueStore.readMergedSync();
-  s.config = { ...DEFAULT_CONFIG, ...(s.config || {}) };
+  s.config = normalizeConfig({ ...DEFAULT_CONFIG, ...(s.config || {}) });
   return flagUnreadable(s);
 }
 
@@ -1136,7 +1142,7 @@ function readQueueSync() {
 // shard reads hands control back to the renderer between files.
 async function readQueue() {
   const s = await queueStore.readMerged();
-  s.config = { ...DEFAULT_CONFIG, ...(s.config || {}) };
+  s.config = normalizeConfig({ ...DEFAULT_CONFIG, ...(s.config || {}) });
   return flagUnreadable(s);
 }
 
@@ -2229,7 +2235,6 @@ const consecutiveRapidRateLimitsBySlug = new Map();
 // ---------- timer ----------
 
 let mainWindow = null;
-let fireTimer = null;
 let resumeTimer = null;
 let pollLoopTimer = null;
 let rescheduleInterval = null;
@@ -2350,7 +2355,6 @@ function buildScheduleStatePayload(state) {
   const payload = {
     config: state.config,
     jobs: state.jobs,
-    scheduledFor: state.scheduledFor,
     lastRunAt: state.lastRunAt,
     // Distinct from lastRunAt (only stamped when a batch actually launches):
     // stamped every time tickQueue reaches the picker at all. See
@@ -2434,24 +2438,6 @@ async function broadcast(opts = {}) {
   }
 }
 
-function clearFireTimer() {
-  if (fireTimer) {
-    clearTimeout(fireTimer);
-    fireTimer = null;
-  }
-}
-
-function computeFireAt(state, nextResetIso) {
-  // Only the legacy 'on-reset' policy uses scheduled fire times. Other
-  // policies fire either immediately on demand ('manual') or via the
-  // when-available poll loop.
-  if (state.config.firePolicy !== 'on-reset') return null;
-  if (!nextResetIso) return null;
-  const reset = new Date(nextResetIso).getTime();
-  if (Number.isNaN(reset)) return null;
-  return reset + (state.config.offsetMinutes * 60_000);
-}
-
 // PRD 1446: refreshNextReset() awaits billing.fetchUsage(), which can hang
 // or back off for minutes while the usage meter is rate-limited. Left
 // unbounded, that stalled THIS function's own mutate(reconcile) call for as
@@ -2465,12 +2451,9 @@ function computeFireAt(state, nextResetIso) {
 const RESCHEDULE_TIMER_BILLING_RACE_MS = 10_000;
 
 async function rescheduleTimer() {
-  clearFireTimer();
-  // Wrap in try/catch — on failure use the cached value so the on-reset
-  // timer can still be armed from the last known reset.
-  let nextResetIso;
+  // Wrap in try/catch — on failure the cached value is kept.
   try {
-    nextResetIso = await Promise.race([
+    await Promise.race([
       refreshNextReset(),
       new Promise((resolve) => {
         const t = setTimeout(() => resolve(cachedNextReset), RESCHEDULE_TIMER_BILLING_RACE_MS);
@@ -2478,20 +2461,12 @@ async function rescheduleTimer() {
       }),
     ]);
   } catch {
-    nextResetIso = cachedNextReset;
+    // cachedNextReset stays as-is; reconcile below does not need the value.
   }
-  const fireAt = await mutate(async (state) => {
+  await mutate(async (state) => {
     await reconcile(state);
-    const fa = computeFireAt(state, nextResetIso);
-    state.scheduledFor = fa ? new Date(fa).toISOString() : null;
-    return fa;
   });
   await broadcast();
-  if (!fireAt) return;
-
-  const delay = Math.max(1000, fireAt - Date.now());
-  fireTimer = setTimeout(() => { runDueJobs().catch(() => {}); }, delay);
-  console.log(`[scheduler] next fire in ${Math.round(delay / 1000)}s @ ${new Date(fireAt).toISOString()}`);
 }
 
 // ---------- pause / resume ----------
@@ -7542,8 +7517,6 @@ async function runDueJobs({ bypassLoadGate = false } = {}) {
   }
   cancelToken = { cancelled: false };
   const result = await tickQueue({ bypassLoadGate });
-  // Clear the one-shot scheduledFor without waiting for jobs to settle.
-  await mutate((s) => { s.scheduledFor = null; });
   await broadcast();
   return result;
 }
@@ -11063,6 +11036,7 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
 }
 
 module.exports = {
+  normalizeConfig,
   reportSchedulerError,
   finalizeJobWorktree,
   worktreeIntegrationVerdict,

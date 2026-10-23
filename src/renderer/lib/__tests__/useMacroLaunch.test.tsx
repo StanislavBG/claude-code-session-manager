@@ -268,12 +268,26 @@ describe('useMacroLaunch', () => {
 
     it('a macro without inputs sends a goal identical to its prompt', async () => {
       const el = await mount(
-        <Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ prompt: 'keep {{this}} literal' }} />,
+        <Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ prompt: 'keep $& literal' }} />,
       )
       await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
 
       const [, goalText] = createPromptSessionSpy.mock.calls[0]
-      expect(goalText).toBe('Sweep\n\nkeep {{this}} literal')
+      expect(goalText).toBe('Sweep\n\nkeep $& literal')
+    })
+
+    it('a macro without inputs but with a placeholder toasts and mints nothing', async () => {
+      const el = await mount(
+        <Harness personas={[persona()]} onSelect={vi.fn()} macroOver={{ prompt: 'keep {{this}} literal' }} />,
+      )
+      await act(async () => { (el.querySelector('button') as HTMLButtonElement).click() })
+
+      expect(createPromptSessionSpy).not.toHaveBeenCalled()
+      expect(
+        useToast.getState().toasts.some(
+          (t) => t.kind === 'error' && t.message === 'Cannot start "Sweep" — prompt uses undeclared input {{this}}',
+        ),
+      ).toBe(true)
     })
   })
 

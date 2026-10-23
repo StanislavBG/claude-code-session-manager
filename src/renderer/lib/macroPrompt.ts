@@ -1,6 +1,6 @@
 // Renders a macro prompt's `{{name}}` placeholders from user-entered values. Pure; the
-// press path and the editor own the UI. Mirrors macroLibrary.cjs MACRO_PLACEHOLDER_RE
-// (renderer code cannot require .cjs).
+// press path and the editor own the UI. Mirrors macroLibrary.cjs `renderMacroPrompt`
+// (renderer code cannot require .cjs); tests/unit/macroRenderParity.spec.ts enforces it.
 import type { MacroInput } from '../../preload/api';
 
 export const MACRO_INPUT_MAX_LEN = 500;
@@ -33,11 +33,10 @@ export function renderMacroPrompt(
   inputs: MacroInput[] | undefined,
   values: Record<string, string>,
 ): RenderMacroResult {
-  if (!inputs || inputs.length === 0) return { ok: true, prompt };
-
   const clean: Record<string, string> = Object.create(null);
-  for (const input of inputs) {
-    const v = sanitize(values[input.name] ?? input.default ?? '');
+  for (const input of inputs ?? []) {
+    const own = Object.prototype.hasOwnProperty.call(values, input.name) && typeof values[input.name] === 'string';
+    const v = sanitize(own ? values[input.name] : (input.default ?? ''));
     if (v === '') {
       if (input.required) return { ok: false, error: `"${input.label}" is required` };
     } else if (v.length > MACRO_INPUT_MAX_LEN) {

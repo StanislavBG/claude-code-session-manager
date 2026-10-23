@@ -62,9 +62,19 @@ describe('renderMacroPrompt', () => {
     expect(r.ok).toBe(false);
   });
 
-  it('passes the prompt through when there are no inputs', () => {
-    expect(renderMacroPrompt('keep {{x}} $&', undefined, {})).toEqual({ ok: true, prompt: 'keep {{x}} $&' });
-    expect(renderMacroPrompt('keep {{x}}', [], {})).toEqual({ ok: true, prompt: 'keep {{x}}' });
+  it('blocks an undeclared placeholder when there are no inputs', () => {
+    const err = { ok: false, error: 'prompt uses undeclared input {{x}}' };
+    expect(renderMacroPrompt('keep {{x}}', [], {})).toEqual(err);
+    expect(renderMacroPrompt('keep {{x}}', undefined, {})).toEqual(err);
+  });
+
+  it('passes a placeholder-free prompt through when there are no inputs', () => {
+    expect(renderMacroPrompt('keep $& literal', undefined, {})).toEqual({ ok: true, prompt: 'keep $& literal' });
+  });
+
+  it('reads values by own property only', () => {
+    const r = renderMacroPrompt('{{constructor}}', [{ name: 'constructor', label: 'C', default: 'd' }], {});
+    expect(r).toEqual({ ok: true, prompt: 'd' });
   });
 });
 

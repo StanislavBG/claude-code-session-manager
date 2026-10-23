@@ -100,6 +100,7 @@ const pluginInstall = require('./pluginInstall.cjs');
 const { seedDevPlugin } = require('./seedDevPlugin.cjs');
 const { seedAgentPersonas } = require('./seedAgentPersonas.cjs');
 const { seedSchedulerMcp } = require('./seedSchedulerMcp.cjs');
+const { runSeedersSerially } = require('./lib/runSeeders.cjs');
 const { getSeedStatus } = require('./seedStatus.cjs');
 const otel = require('./otel.cjs');
 const otelSettings = require('./otelSettings.cjs');
@@ -1444,9 +1445,6 @@ app.whenReady().then(async () => {
   // First-boot default: install the bundled session-manager-dev plugin (its 3
   // dev skills) from the app's own marketplace. One-shot + idempotent; never
   // throws. SM_SEED_DEV_PLUGIN_DISABLE=1 to opt out.
-  seedDevPlugin({ logger: console, writeLog: logs.writeLine }).catch((e) => {
-    logs.writeLine({ scope: 'seed-dev-plugin', level: 'error', message: 'seed failed', meta: { error: e?.message } });
-  });
   webRemote.init().catch((e) => {
     logs.writeLine({ scope: 'webRemote', level: 'error', message: 'init failed', meta: { error: e?.message } });
   });
@@ -1454,16 +1452,15 @@ app.whenReady().then(async () => {
   // into ~/.claude/agents/ so the Agent Library isn't empty on a fresh
   // install. One-shot + idempotent; never overwrites an existing persona;
   // never throws. SM_SEED_AGENT_PERSONAS_DISABLE=1 to opt out.
-  seedAgentPersonas({ logger: console, writeLog: logs.writeLine }).catch((e) => {
-    logs.writeLine({ scope: 'seed-agent-personas', level: 'error', message: 'seed failed', meta: { error: e?.message } });
-  });
-  // First-boot default: register the session-manager-scheduler MCP server at
-  // USER scope so scheduler_create_prd is available in every project, not
-  // just this repo's own .mcp.json. One-shot + idempotent; never overwrites
-  // an existing registration; never throws. SM_SEED_SCHEDULER_MCP_DISABLE=1
-  // to opt out.
-  seedSchedulerMcp({ logger: console, writeLog: logs.writeLine }).catch((e) => {
-    logs.writeLine({ scope: 'seed-scheduler-mcp', level: 'error', message: 'seed failed', meta: { error: e?.message } });
+  // Seeders run through ONE serial chain (runSeeders.cjs): plugin install and
+  // `mcp add --scope user` both write Claude's config files, and concurrent
+  // writes can drop an entry. Fire-and-forget relative to window creation.
+  runSeedersSerially([
+    { name: 'dev-plugin', run: () => seedDevPlugin({ logger: console, writeLog: logs.writeLine }) },
+    { name: 'agent-personas', run: () => seedAgentPersonas({ logger: console, writeLog: logs.writeLine }) },
+    { name: 'scheduler-mcp', run: () => seedSchedulerMcp({ logger: console, writeLog: logs.writeLine }) },
+  ]).catch((e) => {
+    logs.writeLine({ scope: 'seed', level: 'error', message: 'seed chain failed', meta: { error: e?.message } });
   });
   // Rewrite the stable guard-hook shims (~/.claude/session-manager/hooks/) to
   // point at THIS running app's root, on every boot. An already-installed

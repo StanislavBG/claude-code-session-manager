@@ -15,7 +15,6 @@ const assert = require('node:assert/strict');
 const cr = require('../chatRunner.cjs');
 
 const ORIGINAL_SLOTS = process.env.SM_SESSION_SLOTS;
-const ORIGINAL_CONC = process.env.SM_CHAT_CONCURRENCY;
 beforeEach(() => {
   process.env.SM_SESSION_SLOTS = '2';
   cr.__resetQueueForTests();
@@ -26,8 +25,6 @@ afterEach(() => {
   cr.__resetQueueForTests();
   if (ORIGINAL_SLOTS === undefined) delete process.env.SM_SESSION_SLOTS;
   else process.env.SM_SESSION_SLOTS = ORIGINAL_SLOTS;
-  if (ORIGINAL_CONC === undefined) delete process.env.SM_CHAT_CONCURRENCY;
-  else process.env.SM_CHAT_CONCURRENCY = ORIGINAL_CONC;
 });
 
 const tick = () => new Promise((r) => setImmediate(r));

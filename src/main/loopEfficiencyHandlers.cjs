@@ -69,18 +69,18 @@ async function validationsForLog(logPath) {
 }
 
 /** Never throws; resolves null on any failure or after 5 s. */
-async function defaultUsage() {
+async function defaultUsage(fetchUsage) {
   let timer;
   try {
-    const { fetchUsage } = require('./usage.cjs');
+    const fetchFn = fetchUsage || require('./usage.cjs').fetchUsage;
     const r = await Promise.race([
-      fetchUsage(),
+      fetchFn(),
       new Promise((resolve) => { timer = setTimeout(() => resolve(null), USAGE_TIMEOUT_MS); }),
     ]);
     if (!r) return null;
-    if (r.kind === 'ok') return r.data && r.data.usage ? r.data.usage : null;
-    const cached = r.cached;
-    return cached && cached.usage ? cached.usage : null;
+    // 'ok-stale' = last cached payload served while the API fails / rate-limits.
+    if (r.kind === 'ok' || r.kind === 'ok-stale') return r.data && r.data.usage ? r.data.usage : null;
+    return null;
   } catch {
     return null;
   } finally {
@@ -157,4 +157,4 @@ function registerLoopEfficiencyHandlers() {
   });
 }
 
-module.exports = { gatherLoopEfficiency, registerLoopEfficiencyHandlers };
+module.exports = { gatherLoopEfficiency, registerLoopEfficiencyHandlers, defaultUsage };

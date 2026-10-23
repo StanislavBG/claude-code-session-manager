@@ -50,6 +50,17 @@ test('aggregates runs, wasted runs and validator verdicts; skips out-of-window r
   expect(r.verifiedPerUsagePct).toBeCloseTo(1 / 40);
 });
 
+test('defaultUsage returns usage for ok and ok-stale, null otherwise', async () => {
+  const { defaultUsage } = require('../loopEfficiencyHandlers.cjs');
+  const usage = { seven_day: { utilization: 12, resets_at: '2026-10-25T00:00:00.000Z' } };
+  expect(await defaultUsage(async () => ({ kind: 'ok', data: { usage } }))).toBe(usage);
+  expect(await defaultUsage(async () => ({
+    kind: 'ok-stale', data: { usage }, staleSince: 1, lastError: 'HTTP 429',
+  }))).toBe(usage);
+  expect(await defaultUsage(async () => ({ kind: 'error', message: 'boom' }))).toBeNull();
+  expect(await defaultUsage(async () => ({ kind: 'ok-stale', data: {} }))).toBeNull();
+});
+
 test('falls back to a rolling 7d window with null pct when usage is missing', async () => {
   const { gatherLoopEfficiency } = require('../loopEfficiencyHandlers.cjs');
   const r = await gatherLoopEfficiency({ runsRoot: root, nowMs: NOW, usage: null });

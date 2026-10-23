@@ -31,7 +31,11 @@ const input = {
   source: 'src',
 }
 
+const getPersonaBody = vi.fn()
+
 beforeEach(() => {
+  ;(globalThis as unknown as { window: unknown }).window = { api: { agents: { getPersonaBody } } }
+  getPersonaBody.mockResolvedValue(null)
   calls.length = 0
   vi.clearAllMocks()
   createPromptSession.mockImplementation(async () => {
@@ -55,6 +59,26 @@ describe('launchSession', () => {
     expect(approveProposed).toHaveBeenCalledWith('e1', 'src')
     expect(send).toHaveBeenCalledWith({ tabId: 'e1', sessionId: 'c1', cwd: '/p', prompt: 'OPEN' })
     expect(out).toEqual({ epicId: 'e1', claudeSessionId: 'c1' })
+  })
+
+  it('includes persona-body section when persona readable', async () => {
+    getPersonaBody.mockResolvedValueOnce({ path: '/a/dev-lead.md', text: 'BODY' })
+    await launchSession(input)
+    expect(getPersonaBody).toHaveBeenCalledWith({ cwd: '/p', name: 'dev-lead' })
+    expect(composeEpicIntake).toHaveBeenCalledWith(
+      expect.objectContaining({ agentBody: 'BODY', agentPath: '/a/dev-lead.md' }),
+    )
+  })
+
+  it('falls back when persona unreadable', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    getPersonaBody.mockRejectedValueOnce(new Error('nope'))
+    await expect(launchSession(input)).resolves.toEqual({ epicId: 'e1', claudeSessionId: 'c1' })
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(composeEpicIntake).toHaveBeenCalledWith({
+      title: 'T', goal: 'G', tag: 'feature', agentName: 'dev-lead', agentDescription: 'desc',
+    })
+    warn.mockRestore()
   })
 
   it.each(['cwd', 'agentName', 'title', 'goal'] as const)('throws on empty %s', async (key) => {

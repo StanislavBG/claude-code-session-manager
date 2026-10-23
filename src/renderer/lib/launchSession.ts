@@ -19,6 +19,24 @@ export interface LaunchSessionInput {
   source: string
 }
 
+/**
+ * Resolve the persona body + path for (agentName, cwd) via the same
+ * window.api call NewEpicCard uses. Best-effort: any failure warns once and
+ * returns null so the caller composes today's prompt without a body section.
+ */
+export async function resolvePersonaBody(
+  cwd: string,
+  agentName: string,
+): Promise<{ text: string; path: string } | null> {
+  try {
+    const body = await window.api.agents.getPersonaBody({ cwd, name: agentName })
+    return body ? { text: body.text, path: body.path } : null
+  } catch (err) {
+    console.warn(`launchSession: persona body unreadable for ${agentName}`, err)
+    return null
+  }
+}
+
 export async function launchSession(input: LaunchSessionInput): Promise<{ epicId: string; claudeSessionId: string }> {
   const { cwd, agentName, tag, title, goal, agentDescription, source } = input
   if (!cwd) throw new Error('launchSession: cwd is required')
@@ -26,7 +44,15 @@ export async function launchSession(input: LaunchSessionInput): Promise<{ epicId
   if (!title) throw new Error('launchSession: title is required')
   if (!goal) throw new Error('launchSession: goal is required')
 
-  const { goalText, openingPrompt, sections } = composeEpicIntake({ title, goal, tag, agentName, agentDescription })
+  const persona = await resolvePersonaBody(cwd, agentName)
+  const { goalText, openingPrompt, sections } = composeEpicIntake({
+    title,
+    goal,
+    tag,
+    agentName,
+    agentDescription,
+    ...(persona ? { agentBody: persona.text, agentPath: persona.path } : {}),
+  })
   const session = await usePromptSessions
     .getState()
     .createPromptSession(cwd, goalText, tag, source, agentName, openingPrompt, sections)

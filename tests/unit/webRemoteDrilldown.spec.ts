@@ -65,7 +65,7 @@ describe('drill-down commands', () => {
         expect(JSON.stringify(r.messages)).toContain('hello')
       }
       const none = await dispatch()['cmd:session:transcript']({ cwd, sessionKey: 'zzz' })
-      expect(none).toEqual({ messages: [] })
+      expect(none).toEqual({ messages: [], hasMore: false, nextBefore: null })
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
     }
@@ -116,26 +116,27 @@ describe('drill-down commands', () => {
       vi.spyOn(epicMint, 'readActiveIndex').mockReturnValue({
         sessions: { e1: { id: 'e1', claudeSessionId: 'cs-1', status, cwd } },
       })
-      return vi.spyOn(chatRunner, 'enqueueExternalPrompt').mockImplementation(() => {})
+      return vi.spyOn(chatRunner, 'enqueueExternalPrompt').mockResolvedValue({ disposition: 'sent' })
     }
     it('open tab id', async () => {
       const spy = stub('active')
-      await expect(dispatch()['cmd:chat:send']({ tabId: 'main-1', prompt: 'hi' })).resolves.toEqual({ ok: true })
+      await expect(dispatch()['cmd:chat:send']({ tabId: 'main-1', prompt: 'hi' })).resolves.toEqual({ ok: true, disposition: 'sent' })
       expect(spy).toHaveBeenCalledWith('main-1', 'hi')
     })
     it('active Epic by epicId and claudeSessionId', async () => {
       const spy = stub('active')
       for (const tabId of ['e1', 'cs-1']) {
-        await expect(dispatch()['cmd:chat:send']({ tabId, prompt: 'hi' })).resolves.toEqual({ ok: true })
+        await expect(dispatch()['cmd:chat:send']({ tabId, prompt: 'hi' })).resolves.toEqual({ ok: true, disposition: 'sent' })
         expect(spy).toHaveBeenLastCalledWith('e1', 'hi', { sessionId: 'cs-1', cwd })
       }
     })
-    it('proposed, completed and unknown throw', async () => {
+    it('proposed, completed and unknown targets are refused without sending', async () => {
+      const refused = (reason: string) => ({ ok: false, disposition: 'refused', reason })
       const spy = stub('proposed')
-      await expect(dispatch()['cmd:chat:send']({ tabId: 'e1', prompt: 'hi' })).rejects.toThrow()
+      await expect(dispatch()['cmd:chat:send']({ tabId: 'e1', prompt: 'hi' })).resolves.toEqual(refused('proposed'))
       stub('completed')
-      await expect(dispatch()['cmd:chat:send']({ tabId: 'cs-1', prompt: 'hi' })).rejects.toThrow()
-      await expect(dispatch()['cmd:chat:send']({ tabId: 'nope', prompt: 'hi' })).rejects.toThrow()
+      await expect(dispatch()['cmd:chat:send']({ tabId: 'cs-1', prompt: 'hi' })).resolves.toEqual(refused('not-active'))
+      await expect(dispatch()['cmd:chat:send']({ tabId: 'nope', prompt: 'hi' })).resolves.toEqual(refused('unknown-target'))
       expect(spy).not.toHaveBeenCalled()
     })
   })

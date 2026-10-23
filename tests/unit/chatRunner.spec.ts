@@ -646,8 +646,9 @@ describe('enqueueExternalPrompt (PRD 753)', () => {
     expect(sent).toHaveLength(1)
     expect(sent[0]).toEqual({
       channel: 'chat:external-send',
-      payload: { tabId: 'tab-external', prompt: 'hello from outside' },
+      payload: { tabId: 'tab-external', prompt: 'hello from outside', requestId: expect.any(String) },
     })
+    expect(sent[0].payload.requestId).not.toBe('')
   })
 
   it('is a no-op when no window is attached', () => {
@@ -692,7 +693,10 @@ describe('registerAdminRoute (PRD 753)', () => {
     await handler!(req, res)
 
     expect(sent).toEqual([
-      { channel: 'chat:external-send', payload: { tabId: 'tab-admin', prompt: 'hi from admin route' } },
+      {
+        channel: 'chat:external-send',
+        payload: { tabId: 'tab-admin', prompt: 'hi from admin route', requestId: expect.any(String) },
+      },
     ])
     expect(res.statusCode).toBe(200)
     expect(JSON.parse(res.body!)).toEqual({ ok: true })

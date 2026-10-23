@@ -265,8 +265,7 @@ function ResponseEvent({
   const displayText = expanded && fullText ? fullText : (event.text ?? '')
   const displayHtml = useMemo(() => renderChatMarkdown(displayText), [displayText])
   // A 'response' event with outcome 'needs_review' is written exclusively by
-  // scheduler.cjs's flushDueReviewNotices (immediate-notify kill switch:
-  // notifyNeedsReview) once a parked job's self-heal ladder gives up or its
+  // scheduler.cjs's flushDueReviewNotices once a parked job's self-heal ladder gives up or its
   // hold time passes — see that function's own doc comment. It is a
   // scheduler notice routed back to THIS Epic, not a status update, so it
   // gets its own amber treatment + an explicit marker rather than blending

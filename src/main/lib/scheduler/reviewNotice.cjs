@@ -5,7 +5,7 @@
  * notice (this PRD).
  *
  * Before this module, a park into `needs_review` told the authoring Epic
- * immediately (scheduler.cjs's notifyNeedsReview), BEFORE the scheduler's own
+ * immediately at park time, BEFORE the scheduler's own
  * recovery ladder (mechanical re-integration, resume, quarantine, auto-fix,
  * gate re-run, bounded auto-resolve) ever got a chance to run. Most parks
  * heal on their own, so that immediate message was usually a false alarm.

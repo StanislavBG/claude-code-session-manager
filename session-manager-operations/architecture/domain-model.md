@@ -157,7 +157,7 @@ scoping scheme.
     identity to match and can never auto-start. Agent-initiated proposals still wait for a human.
 - **A scheduler job's question comes back to the session that wrote the PRD.** A `needs_review` park is a
   question, not a result: `lib/scheduler/rcaReport.cjs` writes a root-cause report beside the run log and
-  `scheduler.cjs`'s `notifyNeedsReview` appends it as a `response` event on the authoring Epic (resolved from
+  `scheduler.cjs`'s `flushDueReviewNotices` appends it as a `response` event on the authoring Epic (resolved from
   `sourcePromptId`, falling back to the job's `epicId`). Join-only — with no open authoring Epic, the report and
   the Scheduler tab are the whole record. This is why PRDs must be written to the point.
 

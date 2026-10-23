@@ -238,7 +238,7 @@ here. Never write the record yourself.
 
 The scheduler heals most parks itself:
 
-1. Transcript-noise parks (verdicts transcript_errors, no_verdict_sentinel,
+1. Verdict-line parks (verdicts no_verdict_sentinel,
    abandoned_background_task) complete when the gate re-run is green, the landed commit is on
    HEAD and the tracked tree is clean.
 2. Stray-checkout parks (the main checkout was on another branch) are re-landed onto the base

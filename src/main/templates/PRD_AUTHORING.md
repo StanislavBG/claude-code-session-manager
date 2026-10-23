@@ -1,10 +1,10 @@
-<!-- PRD_AUTHORING.md v7 -->
+<!-- PRD_AUTHORING.md v8 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
 Why: two real stuck jobs (fizzpop poll-hang, etch-engine post-AC overrun) cost hours of wall-clock time and real money.
 
-Before queueing, run the §15 checklist at the bottom. It is last on purpose — check it last.
+Before queueing, run the §14 checklist at the bottom. It is last on purpose — check it last.
 
 ---
 
@@ -125,7 +125,7 @@ A short Epic-context digest is prepended automatically for orientation only — 
 
 The executor can't ask you anything: no `ScheduleWakeup`, Cron, Monitor, `AskUserQuestion`, plan mode, or worktree tools; background tasks are off (a `timeout` command is always on PATH — the app installs a shim on macOS). It must never stop to ask a question — it makes the safest reasonable call and reports it, so write the PRD so that call is obvious.
 
-Worktree reach: every PRD runs in an isolated git worktree holding tracked files plus `.venv`/`venv` (and `node_modules` for non-pnpm projects) symlinked from the main checkout; pnpm projects (pnpm-lock.yaml) get a worktree-local `node_modules` installed offline from the store. Why: a pnpm install through the symlink purged the main checkout's node_modules (Bilko-Game-Academy 2026-10-18). A step that needs gitignored runtime state (databases, `downloads/`, browser profiles, logs) or a live side effect must address the main checkout by absolute path (e.g. `$HOME/Projects/<repo>/...`), be artifact-only (a deliverable artifact + `artifactPaths`, no tracked edits), and `dependsOn` the PRD that lands its tracked edits. Host crontab installs stay human-only (see §15).
+Worktree reach: every PRD runs in an isolated git worktree holding tracked files plus `.venv`/`venv` (and `node_modules` for non-pnpm projects) symlinked from the main checkout; pnpm projects (pnpm-lock.yaml) get a worktree-local `node_modules` installed offline from the store. Why: a pnpm install through the symlink purged the main checkout's node_modules (Bilko-Game-Academy 2026-10-18). A step that needs gitignored runtime state (databases, `downloads/`, browser profiles, logs) or a live side effect must address the main checkout by absolute path (e.g. `$HOME/Projects/<repo>/...`), be artifact-only (a deliverable artifact + `artifactPaths`, no tracked edits), and `dependsOn` the PRD that lands its tracked edits. Host crontab installs stay human-only (see §14).
 Why: burrow PRD 1516 halted because its relative `.venv` python against `downloads/fb-tracker.db`, `scripts/install-cron.sh` and `pipeline-cron.sh --now` resolved inside the worktree (no runtime state; install-cron would bake a temporary worktree path into crontab), while sibling 1494 succeeded the same day using an absolute main-checkout path and artifact-only output. `scheduler_create_prd` warns on relative gitignored paths.
 
 ---
@@ -155,7 +155,7 @@ Note: a `rateLimited` exit-1 is the scheduler's own benign auto-pause (it resume
 ## §10 Negative-assertion checks must exit 0 on the clean case
 
 Rule: a check that asserts something is ABSENT must exit 0 when it's absent. Write it as `if <detector>; then echo HALT...; exit 1; fi` — never leave the no-match path carrying the non-zero exit.
-Why: `grep` exits 1 when it finds nothing. PRD `62-x-trader-doctrine` cleaned up correctly, but its sanity `grep` for a banned phrase found nothing, exited 1, and a perfect run was flagged `needs_review` by the verifier's `transcript_errors` check.
+Why: `grep` exits 1 when it finds nothing. PRD `62-x-trader-doctrine` cleaned up correctly, but its sanity `grep` for a banned phrase found nothing, exited 1, and the gate command itself failed on a clean tree.
 
 ```bash
 if grep -rniE "banned phrase" path/; then
@@ -168,10 +168,10 @@ Applies to `grep`, `rg`, `diff` (exits 1 on any difference), and any custom dete
 
 ---
 
-## §11 End green, and trust the verdict line
+## §11 End green
 
-Rule: order the run so the acceptance/test gate is the LAST command. Run any intentionally-failing step (a TDD red test, an expected-nonzero probe) EARLY, and capture its output (`2>&1 | tail` inside a conditional) so a bare `Traceback`/`is_error` never lands in the final part of the transcript.
-Why: the post-run verifier scans the transcript and downgrades to `needs_review` on error markers — it can't tell an intentional failure from a real one.
+Rule: order the run so the acceptance/test gate is the LAST command. Run any intentionally-failing step (a TDD red test, an expected-nonzero probe) EARLY, and capture its output (`2>&1 | tail`).
+Why: the last command's result is the run's real outcome; a red step left at the end hides whether the work is green.
 
 ```bash
 # RIGHT — red demo first and captured, green gate last
@@ -180,25 +180,11 @@ timeout 120 python -m pytest tests/test_repro.py::test_bug 2>&1 | tail -3 || tru
 timeout 300 pytest -q   # LAST thing the run does
 ```
 
-The scheduler appends a finish protocol after your PRD's own steps — you never write it: review, then the `# Gate` commands (§6), then commit only the exact paths you created or changed for this PRD, then the verdict line — `SCHEDULER_VERDICT: PASS` once the gate is green and the commit landed, else `SCHEDULER_VERDICT: FAIL <one-line reason>`. The verifier trusts a truthful `PASS` plus a landed commit over stray transcript markers. Never print `PASS` on a red gate.
+The scheduler appends a finish protocol after your PRD's own steps — you never write it: review, then the `# Gate` commands (§6), then commit only the exact paths you created or changed for this PRD, then the verdict line — `SCHEDULER_VERDICT: PASS` once the gate is green and the commit landed, else `SCHEDULER_VERDICT: FAIL <one-line reason>`. Never print `PASS` on a red gate.
 
 ---
 
-## §12 Don't strand mid-run probe errors; annotate expected timeouts
-
-Rule: a throwaway probe that errors (a bad quote, a wrong kwarg) must be re-run corrected right after, or annotated `# expected/handled: <why>` on the next line — never left stranded. Prefer a temp `.py` file over a fragile inline `python -c` one-liner.
-
-Rule: an *expected* `timeout` cap (a long ingest/scan you expect to hit it) is success-with-note, not a bare `Exit code 124` — branch on it explicitly:
-```bash
-timeout 120 python -m project.ingest --all || { rc=$?
-  [ $rc -eq 124 ] && echo "hit time cap — partial, rows persist; OK" \
-                  || { echo "HALT: ingest failed rc=$rc"; exit 1; }; }
-```
-Why: both a stranded probe traceback and a bare `Exit code 124` read as failure to the verifier even when the committed work is correct and green (PRDs 77, 80 — 2026-06-13).
-
----
-
-## §13 Queueing PRDs from external automation
+## §12 Queueing PRDs from external automation
 
 Decision: is the session-manager app running on this machine right now?
 - Yes → call the `scheduler_create_prd` MCP tool, with the usual fields (`title`, `cwd`, `estimateMinutes`, `sourcePromptId`, `goal`, `acceptanceCriteria`, `implementationNotes`) plus `gate` and `files` (§6).
@@ -208,10 +194,10 @@ It only works while the app is running — closing it removes the admin port/tok
 
 ---
 
-## §14 A parked job may resolve itself now
+## §13 A parked job may resolve itself now
 
-Rule: if a job parks `needs_review` with verdict `transcript_errors`, `no_verdict_sentinel`, or `abandoned_background_task`, do nothing first. The scheduler re-runs the gate on its own and completes the job once the gate is green, the commit is on HEAD, and the tracked tree is clean.
-Why: those three verdicts mean the transcript looked noisy, not that the work was wrong.
+Rule: if a job parks `needs_review` with verdict `no_verdict_sentinel` or `abandoned_background_task`, do nothing first. The scheduler re-runs the gate on its own and completes the job once the gate is green, the commit is on HEAD, and the tracked tree is clean.
+Why: those verdicts mean the run ended without a clean verdict line, not that the work was wrong.
 
 Rule: a park caused by a DIFFERENT actor already finishing the same objective (a sibling PRD, a human) does not self-heal this way. Why: the job has no landed commit of its own. Confirm in the tree that the work is really done, then call `scheduler_archive_prd` with the slug. Archiving marks the job completed and frees the PRDs that depend on it. Never hand-edit `queue.json`: the scheduler and the watchdog both write it. Archiving clears a stale label; it does not fix a real bug.
 
@@ -219,7 +205,7 @@ Known gap: `pass_no_commit` ("already correct, nothing to commit") isn't yet in 
 
 ---
 
-## §15 Pre-queue checklist (the litany)
+## §14 Pre-queue checklist (the litany)
 
 Before queueing a new PRD, verify each of these:
 
@@ -236,6 +222,5 @@ Before queueing a new PRD, verify each of these:
 - [ ] **§9 Failure surfacing:** errors exit 1 with a diagnostic line; no silent `|| true`.
 - [ ] **§10 Negative assertions:** every "should find nothing" check is inverted to exit 0 on the clean case.
 - [ ] **§11 End green:** the gate runs last; any intentional failure runs early and is captured.
-- [ ] **§12 No stranded probes:** a probe error is corrected or annotated; an expected `timeout` cap branches on exit 124.
 - [ ] **Gate baseline:** every gate command ran green once at HEAD in the main checkout; a red suite is scoped to the PRD's own test files and the PRD notes say why. Why: a gate already red on base parks as `sentinel_fail`.
 - [ ] **No human-only gates:** no gate or criterion needs a human or the passage of time (cron install, live post wait, live payment, dashboard action); those end `SCHEDULER_VERDICT: NEEDS_HUMAN <question>`. Why: no executor can pass them.

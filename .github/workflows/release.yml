@@ -11,7 +11,28 @@ concurrency:
 permissions:
   contents: write
 jobs:
+  # Creates the ONE draft release for the tag before the matrix runs. Matrix runners
+  # upload into it (releaseType=draft) so they never race to create releases.
+  create-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Create draft release if missing
+        run: |
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; reusing it"
+          else
+            gh release create "$TAG" --repo "$REPO" --draft --title "$TAG" --notes "Release $TAG"
+          fi
+
   release:
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
@@ -118,4 +139,20 @@ jobs:
 
       - name: Build and publish installers
         shell: bash
-        run: npm run ${{ matrix.script }} -- --publish always -c.publish.releaseType=release $EXTRA_BUILDER_ARGS
+        run: npm run ${{ matrix.script }} -- --publish always -c.publish.releaseType=draft $EXTRA_BUILDER_ARGS
+
+  # Publishes the draft only after all three platform jobs succeeded.
+  finalize-release:
+    needs: release
+    if: ${{ success() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.ref_name }}
+      REPO: ${{ github.repository }}
+    steps:
+      - name: Publish draft release and mark latest
+        run: gh release edit "$TAG" --repo "$REPO" --draft=false --latest

@@ -103,6 +103,7 @@
   "rateLimitWindow": "claude",
   "rcaReport": "scheduler",
   "reaperHelpers": "scheduler",
+  "refireCap": "scheduler",
   "relayClientAuth": "feedback-remote",
   "remoteClientSessions": "feedback-remote",
   "remoteE2eCrypto": "feedback-remote",

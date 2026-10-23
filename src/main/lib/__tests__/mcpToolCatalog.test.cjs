@@ -127,3 +127,14 @@ test('feedback_open_session advertises the structured proposal contract', () => 
   expect(entry.exampleArgs).toHaveProperty('plan');
   expect(entry.exampleArgs).toHaveProperty('series');
 });
+
+test('scheduler_create_prd does not require estimateMinutes but keeps the other required fields', () => {
+  const tool = TOOLS.find((t) => t.name === 'scheduler_create_prd');
+  const required = tool.inputSchema.required;
+  expect(required).not.toContain('estimateMinutes');
+  for (const f of ['title', 'goal', 'acceptanceCriteria', 'implementationNotes', 'gate', 'files']) {
+    expect(required).toContain(f);
+  }
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'scheduler_create_prd');
+  expect(entry.exampleArgs).not.toHaveProperty('estimateMinutes');
+});

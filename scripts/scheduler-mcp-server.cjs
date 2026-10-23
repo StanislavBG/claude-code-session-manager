@@ -186,7 +186,7 @@ const TOOLS = [
       properties: {
         title: { type: 'string', description: 'One-line human-readable title' },
         cwd: { type: 'string', description: 'Absolute path to the target project (where claude -p will run). Optional inside an Epic session — the server resolves the real project from the calling session (originClaudeSessionId/sourcePromptId) when omitted.' },
-        estimateMinutes: { type: 'number', description: 'Integer wall-clock estimate in minutes. Most PRDs take 5-10; never over 15 (split instead)' },
+        estimateMinutes: { type: 'number', description: 'Optional; normally omit. A run without one gets the 45-minute kill-budget floor. Pass one only for work that legitimately needs longer (budget = 3x the estimate, capped at 180 minutes).' },
         goal: { type: 'string', description: '2-4 sentences: what the executor will build and why' },
         acceptanceCriteria: {
           type: 'array', items: { type: 'string' },
@@ -226,7 +226,7 @@ const TOOLS = [
           description: 'Optional: set true only when this PRD\'s acceptance criteria are wall-clock/timing measurements (frame time, performance fences) that CPU contention from concurrent jobs would invalidate. The scheduler dispatches it only once zero other jobs are running machine-wide, and holds every other job off the whole slot pool for its run — a whole-machine exclusive lease, not a per-project one. If the machine never goes quiet within the configured wait window (default 30 minutes), it dispatches anyway and is marked degraded. Opt-in only; omit for ordinary PRDs.',
         },
       },
-      required: ['title', 'estimateMinutes', 'goal', 'acceptanceCriteria', 'implementationNotes', 'gate', 'files'],
+      required: ['title', 'goal', 'acceptanceCriteria', 'implementationNotes', 'gate', 'files'],
     },
   },
   {

@@ -127,7 +127,6 @@ const MCP_TOOL_CATALOG = [
     exampleArgs: {
       title: 'Add unit tests for the retry backoff helper',
       cwd: '/home/bilko/Projects/session-manager',
-      estimateMinutes: 10,
       goal: 'Cover retryWithBackoff.cjs edge cases (zero retries, max-delay clamp) that currently have no test.',
       acceptanceCriteria: ['New test file exercises zero-retry and max-delay-clamp cases', 'Typecheck passes', 'Unit tests pass'],
       implementationNotes: 'See src/main/lib/retryWithBackoff.cjs and its existing __tests__ sibling for the pattern to extend.',

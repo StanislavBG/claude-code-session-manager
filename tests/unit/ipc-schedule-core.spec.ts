@@ -18,8 +18,11 @@ describe('setConfigSchema', () => {
 
   it('accepts valid firePolicy', () => {
     expect(schemas.setConfigSchema.safeParse({ firePolicy: 'when-available' }).success).toBe(true)
-    expect(schemas.setConfigSchema.safeParse({ firePolicy: 'on-reset' }).success).toBe(true)
     expect(schemas.setConfigSchema.safeParse({ firePolicy: 'manual' }).success).toBe(true)
+  })
+
+  it('rejects the retired on-reset firePolicy', () => {
+    expect(schemas.setConfigSchema.safeParse({ firePolicy: 'on-reset' }).success).toBe(false)
   })
 
   it('rejects invalid firePolicy', () => {

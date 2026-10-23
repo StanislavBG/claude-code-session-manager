@@ -1,72 +1,82 @@
 /**
- * chat-queue.test.cjs — unit tests for the chatRunner serial run queue (v0.34).
- * Asserts the "up to two loops at a time" guarantee: SILENT (automated probe)
- * runs execute up to the concurrency cap in FIFO order, and a queued
- * (not-yet-started) silent run can be cancelled without running. PRD 493:
- * this cap/FIFO governs silent runs only — manual runs bypass it entirely
- * (see chatRunner.spec.ts's "manual runs are uncapped" tests).
+ * chat-queue.test.cjs — unit tests for the chatRunner run queue.
+ * chatRunner has NO private concurrency cap: a queued run starts exactly when
+ * lib/scheduler/sessionSlots.cjs grants a slot (the sole machine-wide cap).
+ * These tests pin the pool with SM_SESSION_SLOTS and assert FIFO ordering and
+ * cancel-while-waiting through that gate.
  *
  * Run: timeout 300 npx vitest run src/main/__tests__/chat-queue.test.cjs
  */
 
 'use strict';
 
-// Force the default cap (2) regardless of the developer's shell env.
-delete process.env.SM_CHAT_CONCURRENCY;
-
-import { test } from 'vitest';
+import { test, beforeEach, afterEach } from 'vitest';
 const assert = require('node:assert/strict');
 const cr = require('../chatRunner.cjs');
+
+const ORIGINAL_SLOTS = process.env.SM_SESSION_SLOTS;
+const ORIGINAL_CONC = process.env.SM_CHAT_CONCURRENCY;
+beforeEach(() => {
+  process.env.SM_SESSION_SLOTS = '2';
+  cr.__resetQueueForTests();
+});
+afterEach(() => {
+  cr.__setExecutor(null);
+  cr.attachWindow(null);
+  cr.__resetQueueForTests();
+  if (ORIGINAL_SLOTS === undefined) delete process.env.SM_SESSION_SLOTS;
+  else process.env.SM_SESSION_SLOTS = ORIGINAL_SLOTS;
+  if (ORIGINAL_CONC === undefined) delete process.env.SM_CHAT_CONCURRENCY;
+  else process.env.SM_CHAT_CONCURRENCY = ORIGINAL_CONC;
+});
 
 const tick = () => new Promise((r) => setImmediate(r));
 const job = (id) => ({ tabId: id, sessionId: id, prompt: 'x', cwd: '/', resume: true, silent: true });
 
-test('runs execute up to the concurrency cap in FIFO order', async () => {
+// Executor whose runs stay in flight (holding a slot) until released manually.
+function holdingExecutor() {
   const order = [];
-  let active = 0;
-  let maxActive = 0;
-  // Stub the spawn: each run resolves on the next tick, so the queue must
-  // advance via the pump's finally hook for C to ever run.
+  const resolvers = [];
   cr.__setExecutor((j) => {
-    active += 1;
-    maxActive = Math.max(maxActive, active);
     order.push(j.tabId);
-    return new Promise((res) => setImmediate(() => { active -= 1; res(); }));
+    return new Promise((res) => resolvers.push(res));
   });
+  return { order, resolvers };
+}
+
+test('queued runs start in FIFO order as sessionSlots frees slots', async () => {
+  const { order, resolvers } = holdingExecutor();
 
   cr.run(job('A'));
   cr.run(job('B'));
   cr.run(job('C'));
+  for (let i = 0; i < 4; i++) await tick();
+  assert.deepEqual(order, ['A', 'B'], 'only as many runs start as the slot pool grants');
 
-  // Drain the queue (each run takes one tick; allow generous headroom).
-  for (let i = 0; i < 12 && order.length < 3; i++) await tick();
-  await tick();
-
-  assert.equal(maxActive, 2, 'up to two runs active at once under the default cap');
+  resolvers[0](); // A finishes -> releases its slot -> C starts
+  for (let i = 0; i < 4; i++) await tick();
   assert.deepEqual(order, ['A', 'B', 'C'], 'runs execute in FIFO order');
 
-  cr.__setExecutor(null); // restore real executor
+  resolvers.slice(1).forEach((r) => r());
+  await tick();
 });
 
-test('cancelling a queued run drops it without executing', async () => {
-  const order = [];
-  cr.__setExecutor((j) => {
-    order.push(j.tabId);
-    return new Promise((res) => setImmediate(res));
-  });
+test('cancelling a run waiting for a session slot drops it without executing', async () => {
+  const { order, resolvers } = holdingExecutor();
 
-  // X and Y each take one of the two lanes; Z queues behind them. Cancel Z
-  // before a lane frees.
   cr.run(job('X'));
   cr.run(job('Y'));
-  cr.run(job('Z'));
-  cr.cancel('Z'); // Z is still in the waiting list — drop it
+  cr.run(job('Z')); // no slot free: waits
+  for (let i = 0; i < 4; i++) await tick();
+  cr.cancel('Z'); // still waiting for a slot — drop it
 
-  for (let i = 0; i < 8; i++) await tick();
+  resolvers[0]();
+  for (let i = 0; i < 6; i++) await tick();
 
-  assert.deepEqual(order, ['X', 'Y'], 'only X and Y ran; Z was cancelled while queued');
+  assert.deepEqual(order, ['X', 'Y'], 'Z was cancelled while waiting and never ran');
 
-  cr.__setExecutor(null);
+  resolvers.slice(1).forEach((r) => r());
+  await tick();
 });
 
 test('a queued silent run never broadcasts chat:run:queued (silent runs stay invisible to the renderer)', async () => {
@@ -75,11 +85,10 @@ test('a queued silent run never broadcasts chat:run:queued (silent runs stay inv
     isDestroyed: () => false,
     webContents: { isDestroyed: () => false, send: (channel, payload) => sent.push({ channel, payload }) },
   });
-  cr.__setExecutor((j) => new Promise((res) => setImmediate(res)));
+  const { resolvers } = holdingExecutor();
 
-  // P and Q take the two lanes under the default cap; R queues behind them —
-  // this is the only path that ever populates chatRunner's `waiting` list,
-  // and every job on it is silent (manual runs bypass the queue entirely).
+  // P and Q take the two slots; R waits for a slot — every job on the
+  // waiting list here is silent.
   cr.run(job('P'));
   cr.run(job('Q'));
   cr.run(job('R'));
@@ -92,6 +101,6 @@ test('a queued silent run never broadcasts chat:run:queued (silent runs stay inv
     'no chat:run:queued broadcast for a silent (automated probe) run',
   );
 
-  cr.__setExecutor(null);
-  cr.attachWindow(null);
+  resolvers.forEach((r) => r());
+  await tick();
 });

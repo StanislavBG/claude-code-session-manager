@@ -11,7 +11,7 @@
  *   - Per-project history:    `<cwd>/session-manager-operations/scheduler/state/history.jsonl`
  *     (owned by queueHistory.cjs, path resolved here)
  *   - Machine runtime state:  `~/.claude/session-manager/scheduler-machine.json`
- *     (config, paused/rate-limit, scheduledFor, lastRunAt — these are
+ *     (config, paused/rate-limit, lastRunAt — these are
  *     Session-Manager runtime concerns, like the sessionSlots pool, not any
  *     one project's data. Run logs under scheduled-plans/runs/ stay
  *     machine-local for the same reason: they're execution artifacts of this
@@ -230,7 +230,6 @@ function bustCwdCache() {
 function shapeMachine(data) {
   return {
     config: data.config || {},
-    scheduledFor: data.scheduledFor ?? null,
     lastRunAt: data.lastRunAt ?? null,
     // Distinct from lastRunAt (stamped only when tickQueue actually launches a
     // job): this is stamped every time tickQueue gets far enough to evaluate
@@ -451,7 +450,7 @@ function shapeJobs(raw, file) {
 }
 
 /**
- * readMergedSync(opts?) → { config, jobs, scheduledFor, lastRunAt, paused,
+ * readMergedSync(opts?) → { config, jobs, lastRunAt, paused,
  * unreadable?, unreadablePath?, unreadableCwds, sourceCwds }.
  *
  * `unreadable` is reserved for the machine-runtime file alone (a machine-wide
@@ -462,7 +461,7 @@ function shapeJobs(raw, file) {
  * writeSplit can persist "this project now has zero jobs".
  */
 function readMergedSync(opts) {
-  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, lastDispatchAttemptAt: null, paused: null, drain: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
+  const out = { config: {}, jobs: [], lastRunAt: null, lastDispatchAttemptAt: null, paused: null, drain: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
   const sourceCwds = [];
   const machine = loadMachineStateSync();
   if (machine.shaped) {
@@ -496,7 +495,7 @@ function readMergedSync(opts) {
 
 /** Async twin of readMergedSync for IPC hot paths. */
 async function readMerged(opts) {
-  const out = { config: {}, jobs: [], scheduledFor: null, lastRunAt: null, lastDispatchAttemptAt: null, paused: null, drain: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
+  const out = { config: {}, jobs: [], lastRunAt: null, lastDispatchAttemptAt: null, paused: null, drain: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
   const sourceCwds = [];
   const machine = await loadMachineState();
   if (machine.shaped) {
@@ -547,7 +546,6 @@ function defineSources(state, sourceCwds) {
 async function writeSplit(state, defaultCwd) {
   await writeJsonAtomic(schedulerPaths.machineStatePath(), {
     config: state.config,
-    scheduledFor: state.scheduledFor ?? null,
     lastRunAt: state.lastRunAt ?? null,
     lastDispatchAttemptAt: state.lastDispatchAttemptAt ?? null,
     paused: state.paused ?? null,

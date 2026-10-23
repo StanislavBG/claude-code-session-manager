@@ -188,3 +188,15 @@ test('writeSplit never re-creates a quarantined shard that has no file at all', 
   await queueStore.writeSplit(state, ghost.cwd);
   expect(fs.existsSync(ghost.file)).toBe(false);
 });
+
+test('a legacy machine-state file carrying scheduledFor loads and the field is dropped on the next write', async () => {
+  fs.writeFileSync(machineStatePath, JSON.stringify({ config: { concurrencyCap: 4 }, scheduledFor: '2026-01-01T00:00:00.000Z', lastRunAt: '2026-09-11T10:00:14.441Z' }));
+  const state = queueStore.readMergedSync();
+  expect(state.unreadable).toBeUndefined();
+  expect(state.lastRunAt).toBe('2026-09-11T10:00:14.441Z');
+  expect('scheduledFor' in state).toBe(false);
+  await queueStore.writeSplit(state, path.join(tmpHome, 'Projects', 'session-manager'));
+  const written = JSON.parse(fs.readFileSync(machineStatePath, 'utf8'));
+  expect('scheduledFor' in written).toBe(false);
+  expect(written.lastRunAt).toBe('2026-09-11T10:00:14.441Z');
+});

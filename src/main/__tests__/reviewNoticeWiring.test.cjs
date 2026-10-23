@@ -324,7 +324,7 @@ test('rescheduleIntervalTick flushes a notice whose hold expired when the ladder
     },
   });
   const { readMerged } = mockQueueStore([job]);
-  process.env.SM_REVERIFY_PERIODIC_DISABLE = '1'; // keep the unrelated periodic-reverify pass out of this
+  scheduler._setPeriodicReverifyEnabledForTests(false); // keep the unrelated periodic-reverify pass out of this
 
   try {
     scheduler.rescheduleIntervalTick();
@@ -339,7 +339,7 @@ test('rescheduleIntervalTick flushes a notice whose hold expired when the ladder
       expect(job.reviewNotice.sentAt).not.toBeNull();
     });
   } finally {
-    delete process.env.SM_REVERIFY_PERIODIC_DISABLE;
+    scheduler._setPeriodicReverifyEnabledForTests(true);
   }
 });
 
@@ -348,12 +348,12 @@ test('rescheduleIntervalTick does not flush when no row carries an unsent notice
     reviewNotice: { ...parkedJob().reviewNotice, sentAt: new Date().toISOString() },
   });
   const { readMerged } = mockQueueStore([job]);
-  process.env.SM_REVERIFY_PERIODIC_DISABLE = '1';
+  scheduler._setPeriodicReverifyEnabledForTests(false);
 
   try {
     scheduler.rescheduleIntervalTick();
   } finally {
-    delete process.env.SM_REVERIFY_PERIODIC_DISABLE;
+    scheduler._setPeriodicReverifyEnabledForTests(true);
   }
 
   // The else-branch's own guard (s.jobs.some(unsent reviewNotice)) is

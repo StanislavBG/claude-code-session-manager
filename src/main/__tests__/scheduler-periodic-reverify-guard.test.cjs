@@ -178,10 +178,9 @@ test('kill-switches still fully disable their respective paths', () => {
   const prevAutofix = process.env.SM_AUTOFIX_DISABLE;
   const prevMechanical = process.env.SM_MECHANICAL_RECOVERY_DISABLE;
   try {
-    // SM_REVERIFY_PERIODIC_DISABLE is enforced by the interval callback around
+    // The periodic-reverify test seam (scheduler._setPeriodicReverifyEnabledForTests) is enforced by the interval callback around
     // shouldRunPeriodicReverify (scheduler.cjs's rescheduleInterval body), not
     // inside the guard itself — the guard stays a pure predicate over jobs.
-    assert.equal(process.env.SM_REVERIFY_PERIODIC_DISABLE, undefined, 'sanity: not set in this test process');
 
     // SM_MECHANICAL_RECOVERY_DISABLE=1 makes selectMechanicalRecoveryTarget
     // always return null, which is exactly what the widened guard consults.

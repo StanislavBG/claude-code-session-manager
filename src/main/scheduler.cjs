@@ -9874,12 +9874,12 @@ function rescheduleIntervalTick() {
   // auto-clears WITHOUT waiting for the next app restart. Cheap-guarded by
   // shouldRunPeriodicReverify, which reuses isRescanCandidate so the guard
   // and the candidate filter can never drift apart again (they did once —
-  // see that function's comment). Kill-switch:
-  // SM_REVERIFY_PERIODIC_DISABLE=1 (boot reverify above stays always-on).
+  // see that function's comment). Test seam:
+  // _setPeriodicReverifyEnabledForTests(false) (boot reverify above stays always-on).
   // reverifyNeedsReview's auto-fix loop is capped downstream by
   // MAX_CONCURRENT_INVESTIGATIONS (spawnInvestigation queues/early-returns
   // past it), so this interval firing cannot fan out investigations.
-  if (process.env.SM_REVERIFY_PERIODIC_DISABLE !== '1') {
+  if (periodicReverifyEnabled) {
     if (reviewLadder.shouldRunPeriodicReverify(s.jobs)) {
       reverifyNeedsReview().catch(() => {});
     }
@@ -10090,6 +10090,13 @@ function rescheduleIntervalTick() {
     // Ladder didn't fire this tick (row ineligible for auto-resolve, or SM_NEEDS_REVIEW_AUTORESOLVE_DISABLE=1) — flush any notice whose hold already expired, reusing this tick's own snapshot for the guard so a tick with nothing unsent reads nothing extra. Status-checked so a row that healed (e.g. a human reset, or a later run that completed) with a leftover unsent notice from a past episode no longer costs a queue read every tick — resetJobFields already deletes the notice outright, but this guard stays defensive in case a notice is ever left behind some other way.
     flushDueReviewNotices().catch(() => {});
   }
+}
+
+// Test-only seam: the periodic reverify pass is on in production; tests turn it
+// off to isolate themselves from the unrelated reverify/broadcast side effects.
+let periodicReverifyEnabled = true;
+function _setPeriodicReverifyEnabledForTests(enabled) {
+  periodicReverifyEnabled = enabled !== false;
 }
 
 async function init() {
@@ -11060,6 +11067,7 @@ module.exports = {
   getSchedulerStateSnapshot,
   computeDegradedBudget,
   writeQueue,
+  _setPeriodicReverifyEnabledForTests,
   _mutateForTests: mutate, // mutate() has no other exported call site; test-only seam.
   reconcile,
   broadcast,

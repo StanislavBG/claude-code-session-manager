@@ -653,7 +653,7 @@ const STUCK_FAILED_ESCALATE_MS = process.env.SM_STUCK_FAILED_ESCALATE_HOURS
 /**
  * Kill-switch gate for the stuck-failed escalation below
  * (SM_STUCK_FAILED_ESCALATE_DISABLE=1), mirroring the
- * SM_REVERIFY_PERIODIC_DISABLE / SM_RCA_DISABLE convention. A tiny wrapper
+ * SM_RCA_DISABLE convention. A tiny wrapper
  * so the disable path is unit-testable without invoking the 10-minute
  * setInterval body directly.
  */

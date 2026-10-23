@@ -9,10 +9,10 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 
-const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
 const os = require('node:os')
+const { generateE2EKeyPair, deriveSessionKey, decryptBox } = require('../lib/feedback-remote/remoteE2eCrypto.cjs')
 
 let tmpHome
 let origHome
@@ -97,9 +97,34 @@ describe('web-remote session watch', () => {
     webRemote.__test.stopAllSessionWatches()
   })
 
-  it('source has no summary push', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', 'webRemote.cjs'), 'utf8')
-    expect(src).not.toContain('event:session:summary')
-    expect(src).not.toContain('maybeSummarize')
+  it('pushes a state event and never a summary event to a subscribed client', async () => {
+    const a = generateE2EKeyPair()
+    const b = generateE2EKeyPair()
+    const key = deriveSessionKey(a.e2ePrivateKey, b.e2ePublicKey, 'device-watch')
+    const sent = []
+    webRemote.__test.setWs({ readyState: 1, send: (m) => sent.push(JSON.parse(m)), terminate: () => {} })
+    webRemote.__test.setE2eAuthenticated(key, 'connS')
+    webRemote.__test.getClient('connS').subscriptions.add('sum')
+    try {
+      const file = path.join(projDir, 'sum-sess.jsonl')
+      await fsp.writeFile(file, JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' } }) + '\n')
+      webRemote.__test.startSessionWatch('sum', cwd, 'sum-sess')
+      const w = webRemote.__test.getSessionWatcher('sum')
+      await webRemote.__test.pollSessionWatcher(w)
+      await fsp.appendFile(file, assistantLine('finished'))
+      await webRemote.__test.pollSessionWatcher(w)
+      const types = sent
+        .filter((m) => m.type === 'e2e:box')
+        .map((m) => {
+          const plain = decryptBox(m.payload.nonce, m.payload.ciphertext, key)
+          return plain ? JSON.parse(plain).type : null
+        })
+      expect(types).toContain('event:session:state')
+      expect(types).not.toContain('event:session:summary')
+    } finally {
+      webRemote.__test.stopAllSessionWatches()
+      webRemote.__test.getClient('connS').subscriptions.clear()
+      webRemote.__test.setWs(null)
+    }
   })
 })

@@ -2057,6 +2057,8 @@ export interface SessionManagerAPI {
     aggregate: (req?: HistoryAggregateRequest) => Promise<HistoryAggregateResult>;
     scanProjects: () => Promise<SessionScanResult>;
     dashboard: (req: HistoryDashboardRequest) => Promise<HistoryDashboardResult>;
+    /** This usage week's validated-PRDs-per-usage efficiency, per project (loopEfficiency.cjs). */
+    loopEfficiency: () => Promise<LoopEfficiencyResult>;
     /** Fires (throttled to 1/5 s) when main appends days to the rollup. Returns unsubscribe. */
     onUpdated: (handler: () => void) => () => void;
   };
@@ -2514,3 +2516,22 @@ declare global {
 }
 
 export {};
+
+interface LoopEfficiencyRow {
+  cwd: string;
+  project: string;
+  runs: number;
+  wastedRuns: number;
+  verified: number;
+  refuted: number;
+  executorUsd: number;
+  usdPerVerified: number | null;
+}
+interface LoopEfficiencyResult {
+  fromMs: number;
+  toMs: number;
+  rows: LoopEfficiencyRow[];
+  totals: { runs: number; wastedRuns: number; verified: number; refuted: number; executorUsd: number; wastedRunRate: number };
+  weeklyUtilizationPct: number | null;
+  verifiedPerUsagePct: number | null;
+}

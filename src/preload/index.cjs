@@ -244,6 +244,7 @@ contextBridge.exposeInMainWorld('api', {
     aggregate: (req) => ipcRenderer.invoke('history:aggregate', req),
     scanProjects: () => ipcRenderer.invoke('history:scan-projects'),
     dashboard: (req) => ipcRenderer.invoke('history:dashboard', req),
+    loopEfficiency: () => ipcRenderer.invoke('history:loop-efficiency'),
     // Fired (throttled) after main appends new days to the rollup.
     onUpdated: (handler) => {
       const listener = () => handler();

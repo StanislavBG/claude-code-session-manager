@@ -252,7 +252,19 @@ interface ChatState {
    *  called for Epic ids (Epics live in this same store but are never removed
    *  via sessions.ts; their chat history persists for the Epic's own lifetime). */
   dropTab: (tabId: string) => void
+  /** Drops an Epic's chat slice + de-dupe/feed bookkeeping (Epic deleted, or LRU eviction). */
+  dropEpicChat: (epicId: string) => void
+  /** Marks an Epic's chat as most recently viewed (LRU order). */
+  touchEpicChat: (epicId: string) => void
+  /** Evicts least-recently-viewed idle chats beyond `max`. Never the visible
+   *  (attached / `keep`) Epic nor one with an in-flight run. */
+  evictIdleChats: (max?: number, keep?: string) => void
 }
+
+/** Max Epic chats kept in memory; idle ones beyond this rehydrate on reopen. */
+const MAX_RESIDENT_EPIC_CHATS = 8
+/** Epic ids in view order, oldest first. Module-level bookkeeping (not state). */
+let viewOrder: string[] = []
 
 const EMPTY: TabChat = {
   turns: [],
@@ -415,6 +427,22 @@ export const useChat = create<ChatState>((set, get) => ({
     const hydratedTabs = { ...get().hydratedTabs }
     delete hydratedTabs[tabId]
     set({ chats, hydratedTabs })
+  },
+  dropEpicChat: (epicId) => {
+    viewOrder = viewOrder.filter((id) => id !== epicId)
+    get().dropTab(epicId)
+  },
+  touchEpicChat: (epicId) => {
+    viewOrder = [...viewOrder.filter((id) => id !== epicId), epicId]
+  },
+  evictIdleChats: (max = MAX_RESIDENT_EPIC_CHATS, keep) => {
+    for (const id of [...viewOrder]) {
+      if (viewOrder.length <= max) break
+      if (id === keep || (feedRefs.get(id) ?? 0) > 0) continue
+      const c = get().chats[id]
+      if (c && (c.running || c.queuedPosition > 0 || c.stream !== '' || c.liveToolUses.length > 0)) continue
+      get().dropEpicChat(id)
+    }
   },
 }))
 
@@ -1263,6 +1291,8 @@ export function ingestTranscriptEvents(tabId: string, events: TranscriptEvent[])
  */
 export function attachTranscriptFeed(args: { tabId: string; cwd: string; sessionUuid: string }): void {
   const { tabId, cwd, sessionUuid } = args
+  useChat.getState().touchEpicChat(tabId)
+  useChat.getState().evictIdleChats(MAX_RESIDENT_EPIC_CHATS, tabId)
   // No transcripts IPC surface (non-renderer import, component tests with a
   // partial window.api mock) → no feed; the tab falls back to exchange
   // hydration exactly as before this PRD.

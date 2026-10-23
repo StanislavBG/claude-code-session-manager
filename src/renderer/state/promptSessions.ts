@@ -186,6 +186,12 @@ export function promptSessionActiveIndexPath(cwd: string): string {
   return `${cwd.replace(/\/+$/, '')}/session-manager-operations/prompt-sessions/active-index.json`
 }
 
+/** Max in-memory events kept per Epic; the oldest are dropped. */
+export const MAX_EVENTS_PER_EPIC = 500
+function capEvents(list: PromptSessionEvent[]): PromptSessionEvent[] {
+  return list.length > MAX_EVENTS_PER_EPIC ? list.slice(list.length - MAX_EVENTS_PER_EPIC) : list
+}
+
 interface PromptSessionActiveIndex {
   sessions: Record<string, PromptSession>
   events: Record<string, PromptSessionEvent[]>
@@ -614,7 +620,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       promptSessionId,
       at: new Date().toISOString(),
     }
-    const events = { ...get().events, [promptSessionId]: [...existing, fullEvent] }
+    const events = { ...get().events, [promptSessionId]: capEvents([...existing, fullEvent]) }
     set({ events })
     const session = get().sessions[promptSessionId]
     persistActiveIndex(session.cwd, get().sessions, events).catch(() => {})
@@ -842,6 +848,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       set({ sessions: priorSessions, events: priorEvents })
       throw err
     }
+    useChat.getState().dropEpicChat(promptSessionId)
     emitAuditEvent('epic_delete', { cwd: session.cwd, epicId: promptSessionId, source: source ?? 'unknown' })
   },
   hydrate: async (cwd) => {
@@ -984,7 +991,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     if (existing.some((e) => e.id === event.id)) return
     const events = {
       ...get().events,
-      [promptSessionId]: [...existing, event].sort(compareEventsChainAware),
+      [promptSessionId]: capEvents([...existing, event].sort(compareEventsChainAware)),
     }
     set({ events })
     // A PRD-completion notification landing on an Epic the user isn't

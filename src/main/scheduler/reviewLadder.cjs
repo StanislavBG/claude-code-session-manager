@@ -35,6 +35,13 @@ const { DEFAULT_PROJECT_CWD } = require('../lib/scheduler/schedulerBatch.cjs');
  * exactly (always returns null), mirroring SM_RCA_DISABLE/SM_DOD_DISABLE.
  */
 /** A row parked on a question only the human can answer — no automatic rung may touch it. */
+// PRD refire-cap: a row parked by the post-run re-fire cap stays parked for the
+// Epic's grouped notice. Every automated rung (reset, re-verify, auto-fix,
+// auto-skip) consults this ONE predicate.
+function isRefireCapped(job) {
+  return !!job && job.verifierVerdict === 'refire_capped';
+}
+
 function isNeedsHuman(job) {
   return !!job && job.verifierVerdict === 'needs_human';
 }
@@ -399,6 +406,7 @@ function isStrandedAutoFixPark(job, jobsInProject) {
  * Exported for tests.
  */
 function isEligibleForNeedsReviewAutoResolve(job, jobsInProject = []) {
+  if (isRefireCapped(job)) return false;
   return isExhaustedAutoFix(job) || isGuardParkedWithoutAutoFix(job) || isStrandedAutoFixPark(job, jobsInProject);
 }
 
@@ -534,7 +542,7 @@ function isFailedUnverifiedShaped(job) {
 }
 
 function isRescanCandidate(job) {
-  if (!job || isCancelledJob(job)) return false;
+  if (!job || isCancelledJob(job) || isRefireCapped(job)) return false;
   // Default-ELIGIBLE: every needs_review row is a heal candidate unless its
   // verdict is in RESCAN_EXCLUDED_VERDICTS. No runId requirement here — a row
   // without one still gets the evidence rung and the unresolvable annotation.
@@ -862,6 +870,7 @@ function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRu
   const slugsInQueue = new Set(jobs.map((j) => j.slug));
   return jobs.filter((job) => {
     if (isCancelledJob(job)) return false;
+    if (isRefireCapped(job)) return false;
     if (job.status !== 'needs_review') return false;
     if (isNeedsHuman(job)) return false;
     // A job parked here because it was blocked by a sibling's foreign WIP
@@ -1005,6 +1014,7 @@ function selectGateShadowTarget(jobs, headByCwd, { authorityDisabled = false, ba
 
 module.exports = {
   isNeedsHuman,
+  isRefireCapped,
   isCancelledJob,
   selectResumeRecoveryTarget,
   MECHANICALLY_RESOLVABLE_VERDICTS,

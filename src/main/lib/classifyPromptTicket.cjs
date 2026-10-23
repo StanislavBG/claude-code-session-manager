@@ -64,6 +64,7 @@ function classifyPromptTicket(text) {
     const args = [
       '-p', `${CLASSIFY_PROMPT_PREFIX}${text}`,
       '--model', CLASSIFY_MODEL,
+      '--strict-mcp-config',
       '--output-format', 'text',
     ];
 

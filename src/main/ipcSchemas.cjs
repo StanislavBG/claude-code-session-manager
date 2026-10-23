@@ -960,6 +960,14 @@ const chatExternalSend = z.object({
   ),
 });
 
+// Renderer's report of what it did with a `chat:external-send` (mirrors
+// ChatExternalSendResult in preload/api.d.ts).
+const chatExternalSendResult = z.object({
+  requestId: z.string().min(1).max(64),
+  disposition: z.enum(['sent', 'queued', 'refused']),
+  reason: z.enum(['terminal-attached', 'completed', 'unknown-target', 'empty-prompt']).optional(),
+});
+
 // Phone drill-down reads. cwd is re-checked against the open tabs in
 // webRemote.cjs; sessionKey becomes a transcript filename lookup so it is
 // restricted to a session-id charset (no '/', so no traversal).
@@ -1357,6 +1365,7 @@ module.exports = {
     chatCancel,
     chatClassifyTicket,
     chatExternalSend,
+    chatExternalSendResult,
     remoteSessionCreate,
     remoteProjectSessions,
     remoteSessionTranscript,

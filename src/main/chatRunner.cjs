@@ -969,14 +969,46 @@ function cancel(tabId) {
 // directly, reusing send()'s existing queued-vs-immediate branching rather
 // than duplicating it here.
 
+const EXTERNAL_SEND_ACK_TIMEOUT_MS = 8000;
+const pendingExternalSends = new Map(); // requestId -> { resolve, timer }
+
+function hasLiveWindow() {
+  try {
+    return !!(mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed());
+  } catch { return false; }
+}
+
+/**
+ * Resolves { disposition, reason? } once the renderer reports what it did, or
+ * { disposition: 'unconfirmed', reason: 'timeout' | 'no-window' }. Never rejects.
+ */
 function enqueueExternalPrompt(tabId, prompt, extra = {}) {
   const { sessionId, cwd } = extra ?? {};
-  broadcast('chat:external-send', {
-    tabId,
-    prompt,
-    ...(sessionId !== undefined ? { sessionId } : {}),
-    ...(cwd !== undefined ? { cwd } : {}),
+  if (!hasLiveWindow()) return Promise.resolve({ disposition: 'unconfirmed', reason: 'no-window' });
+  const requestId = require('node:crypto').randomUUID();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      pendingExternalSends.delete(requestId);
+      resolve({ disposition: 'unconfirmed', reason: 'timeout' });
+    }, EXTERNAL_SEND_ACK_TIMEOUT_MS);
+    timer.unref?.();
+    pendingExternalSends.set(requestId, { resolve, timer });
+    broadcast('chat:external-send', {
+      requestId,
+      tabId,
+      prompt,
+      ...(sessionId !== undefined ? { sessionId } : {}),
+      ...(cwd !== undefined ? { cwd } : {}),
+    });
   });
+}
+
+function settleExternalSend({ requestId, disposition, reason }) {
+  const entry = pendingExternalSends.get(requestId);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  pendingExternalSends.delete(requestId);
+  entry.resolve({ disposition, ...(reason !== undefined ? { reason } : {}) });
 }
 
 // Asks the renderer to start a new Session (same launchSession a macro press
@@ -1010,7 +1042,7 @@ function registerAdminRoute(adminHttp) {
       sendJson(res, 400, { ok: false, error: e?.message ?? 'invalid body' });
       return;
     }
-    enqueueExternalPrompt(body.tabId, body.prompt);
+    void enqueueExternalPrompt(body.tabId, body.prompt);
     sendJson(res, 200, { ok: true });
   });
 }
@@ -1052,6 +1084,10 @@ function registerChatHandlers() {
     return classifyPromptTicket(text);
   }));
 
+  ipcMain.handle('chat:external-send-result', validated(schemas.chatExternalSendResult, async (payload) => {
+    settleExternalSend(payload);
+  }));
+
   ipcMain.handle('chat:cancel', async (_e, payload) => {
     let tabId;
     try { tabId = schemas.chatCancel.parse(payload).tabId; } catch { return; }
@@ -1082,6 +1118,7 @@ module.exports = {
   WARN_CEILING_MS,
   __setExecutor,
   enqueueExternalPrompt,
+  EXTERNAL_SEND_ACK_TIMEOUT_MS,
   requestExternalNewSession,
   registerAdminRoute,
 };

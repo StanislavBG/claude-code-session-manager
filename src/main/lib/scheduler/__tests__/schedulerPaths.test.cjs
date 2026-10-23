@@ -64,7 +64,6 @@ test('every resolver lands under SM_SCHEDULER_HOME', () => {
   expect(sp.scheduledPlansRoot()).toBe(plans);
   expect(sp.runsDir()).toBe(path.join(plans, 'runs'));
   expect(sp.prdsRoot()).toBe(path.join(plans, 'prds'));
-  expect(sp.legacyQueuePath()).toBe(path.join(plans, 'queue.json'));
   expect(sp.machineStatePath()).toBe(path.join(tmpHome, 'scheduler-machine.json'));
   expect(sp.schedulerStatePath()).toBe(path.join(tmpHome, 'scheduler-state.json'));
   expect(sp.heartbeatPath()).toBe(path.join(tmpHome, 'scheduler-heartbeat.log'));
@@ -118,7 +117,6 @@ test('machineStateLogCwd is the literal ~/Projects/session-manager unless overri
 test('queueStore: paths and readMergedSync resolve under the override', () => {
   const queueStore = require('../queueStore.cjs');
   expect(queueStore.MACHINE_STATE_PATH).toBe(sp.machineStatePath());
-  expect(queueStore.LEGACY_QUEUE_PATH).toBe(sp.legacyQueuePath());
   fs.writeFileSync(sp.machineStatePath(), JSON.stringify({ paused: null, lastRunAt: 4242 }));
   const merged = queueStore.readMergedSync();
   expect(merged.unreadable).toBeUndefined();

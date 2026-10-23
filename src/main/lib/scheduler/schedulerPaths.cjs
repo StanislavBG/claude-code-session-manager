@@ -104,7 +104,6 @@ function scheduledPlansRoot() { return assertNotLiveRoot(path.join(schedulerHome
 function runsDir() { return assertNotLiveRoot(path.join(scheduledPlansRoot(), 'runs'), 'runsDir'); }
 function prdsRoot() { return assertNotLiveRoot(path.join(scheduledPlansRoot(), 'prds'), 'prdsRoot'); }
 function machineStatePath() { return assertNotLiveRoot(path.join(schedulerHome(), 'scheduler-machine.json'), 'machineStatePath'); }
-function legacyQueuePath() { return assertNotLiveRoot(path.join(scheduledPlansRoot(), 'queue.json'), 'legacyQueuePath'); }
 function schedulerStatePath() { return assertNotLiveRoot(path.join(schedulerHome(), 'scheduler-state.json'), 'schedulerStatePath'); }
 function heartbeatPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'scheduler-heartbeat.log'), 'heartbeatPath'); }
 function sessionSlotsConfigPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'session-slots-config.json'), 'sessionSlotsConfigPath'); }
@@ -193,7 +192,6 @@ module.exports = {
   runsDir,
   prdsRoot,
   machineStatePath,
-  legacyQueuePath,
   schedulerStatePath,
   heartbeatPath,
   sessionSlotsConfigPath,

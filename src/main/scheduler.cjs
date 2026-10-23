@@ -1118,8 +1118,7 @@ function flagUnreadable(state) {
 // shards under `<cwd>/session-manager-operations/scheduler/state/queue.json`
 // plus one machine-runtime file (config/paused/lastRunAt). Reads merge every
 // shard into the single state object all downstream logic already expects;
-// writes split it back. The old global scheduled-plans/queue.json is retired
-// (split at boot by queueStore.migrateLegacyGlobalQueue).
+// writes split it back. The old global scheduled-plans/queue.json is retired.
 
 // Sync queue read — passed to the supervisor module (which calls it from
 // supervisorTick / applyAction with no await) and the heartbeat interval.
@@ -10103,16 +10102,6 @@ async function init() {
     // Boot-time expiry pass (process-local state is empty after a restart, so
     // this is a cheap belt-and-braces run against the freshly read queue).
     try { runReservationExpiryPass((await readQueue()).jobs); } catch { /* best-effort */ }
-    // Retire the global queue.json: split its rows into per-project shards
-    // BEFORE the first read below, so boot reconciliation sees the shards.
-    try {
-      const m = await queueStore.migrateLegacyGlobalQueue(DEFAULT_PROJECT_CWD);
-      if (m.migrated) {
-        console.log(`[scheduler] legacy global queue retired: ${m.moved} row(s) split across ${m.projects} project shard(s)`);
-      }
-    } catch (e) {
-      console.error('[scheduler] legacy queue split failed', e?.message);
-    }
     await prdPaths.runPrdMigration();
     prdPaths.sweepQueueBackups().catch((e) => console.warn('[scheduler] backup sweep failed', e?.message));
 

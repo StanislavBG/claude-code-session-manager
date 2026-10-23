@@ -581,70 +581,6 @@ async function writeSplit(state, defaultCwd) {
   bustCwdCache();
 }
 
-// ---------- legacy migration ----------
-
-/**
- * migrateLegacyGlobalQueue(defaultCwd) — one-time boot split of the retired
- * global queue.json into per-project shards. Shard rows win over legacy rows
- * with the same slug (the shard is newer by construction). The legacy file is
- * renamed to `queue.json.retired-<epoch>` so a rollback can recover it but no
- * reader ever consults it again. Machine fields (config/paused/...) migrate
- * only when no machine file exists yet. Idempotent: no legacy file → no-op.
- */
-async function migrateLegacyGlobalQueue(defaultCwd) {
-  let raw;
-  try {
-    raw = await fsp.readFile(schedulerPaths.legacyQueuePath(), 'utf8');
-  } catch {
-    return { migrated: false };
-  }
-  let legacy;
-  try {
-    legacy = JSON.parse(raw);
-  } catch (e) {
-    console.error(`[queueStore] legacy queue.json unparseable — leaving in place: ${e?.message}`);
-    return { migrated: false, error: e?.message };
-  }
-
-  if (!fs.existsSync(schedulerPaths.machineStatePath())) {
-    await writeJsonAtomic(schedulerPaths.machineStatePath(), {
-      config: legacy.config || {},
-      scheduledFor: legacy.scheduledFor ?? null,
-      lastRunAt: legacy.lastRunAt ?? null,
-      paused: legacy.paused ?? null,
-    });
-  }
-
-  const legacyJobs = Array.isArray(legacy.jobs) ? legacy.jobs : [];
-  const byCwd = new Map();
-  for (const job of legacyJobs) {
-    const cwd = job.cwd || defaultCwd;
-    if (!cwd) continue;
-    if (!byCwd.has(cwd)) byCwd.set(cwd, []);
-    byCwd.get(cwd).push(job);
-  }
-  let moved = 0;
-  for (const [cwd, jobs] of byCwd) {
-    const file = queuePathOrSkip(cwd, 'legacy split');
-    if (!file) continue;
-    let existing = [];
-    try { existing = shapeJobs(await fsp.readFile(file, 'utf8'), file).jobs; } catch { /* fresh shard */ }
-    const have = new Set(existing.map((j) => j.slug));
-    const merged = [...existing, ...jobs.filter((j) => !have.has(j.slug))];
-    try {
-      await writeJsonAtomic(file, { jobs: merged });
-      moved += merged.length - existing.length;
-    } catch (e) {
-      console.error(`[queueStore] legacy split: failed to write ${file}: ${e?.message}`);
-      return { migrated: false, error: e?.message };
-    }
-  }
-
-  await fsp.rename(schedulerPaths.legacyQueuePath(), `${schedulerPaths.legacyQueuePath()}.retired-${Date.now()}`);
-  bustCwdCache();
-  return { migrated: true, moved, projects: byCwd.size };
-}
-
 module.exports = {
   STATE_SUBPATH,
   projectStateDir,
@@ -656,7 +592,6 @@ module.exports = {
   readMerged,
   readMergedSync,
   writeSplit,
-  migrateLegacyGlobalQueue,
   writeJsonAtomic,
   writeJsonAtomicSync,
   findLongestValidJsonPrefix,
@@ -664,4 +599,3 @@ module.exports = {
 
 // Lazy path getters (SM_SCHEDULER_HOME resolved at read, never at require).
 Object.defineProperty(module.exports, 'MACHINE_STATE_PATH', { get: schedulerPaths.machineStatePath, enumerable: true });
-Object.defineProperty(module.exports, 'LEGACY_QUEUE_PATH', { get: schedulerPaths.legacyQueuePath, enumerable: true });

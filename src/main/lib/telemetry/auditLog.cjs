@@ -7,8 +7,8 @@
  * state a project's single-writer law needs to arbitrate, and it must
  * survive even if the project's ops root doesn't exist yet.
  *
- * Rotation: on the first append in a new calendar month (UTC) the live file is
- * gzipped to audit-log-<YYYY-MM>.jsonl.gz beside it (YYYY-MM = the month of the
+ * Rotation: on the first append in a new calendar month (UTC), or once the live file passes
+ * 32 MB, the live file is renamed synchronously and then stream-gzipped (async) to audit-log-<YYYY-MM>.jsonl.gz beside it (YYYY-MM = the month of the
  * file's last write) and a fresh live file starts; the newest `auditLogMonths` rolled
  * files are kept. The live file stays plain JSONL, so readers are unaffected.
  *
@@ -23,6 +23,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
+const { pipeline } = require('node:stream/promises');
 
 const { auditLogPath } = require('../scheduler/schedulerPaths.cjs');
 
@@ -55,23 +56,73 @@ const ROLLED_RE = /^audit-log-\d{4}-\d{2}\.jsonl\.gz$/;
 
 function monthKey(d) { return d.toISOString().slice(0, 7); }
 
-/** Roll the live file if its last write was in an earlier month than `now`; prune old rolls. */
-function rotateIfNewMonth(target, now) {
-  let st;
-  try { st = fs.statSync(target); } catch { return; }
-  if (!st.isFile() || st.size === 0) return;
-  const oldMonth = monthKey(st.mtime);
-  if (oldMonth === monthKey(now)) return;
-  const dir = path.dirname(target);
-  const base = path.basename(target, path.extname(target));
-  const rolled = path.join(dir, `${base}-${oldMonth}.jsonl.gz`);
-  // appendFileSync: gzip members concatenate, so a pre-existing roll for that month is extended.
-  fs.appendFileSync(rolled, zlib.gzipSync(fs.readFileSync(target)));
-  fs.unlinkSync(target);
+const MAX_LIVE_BYTES = 32 * 1024 * 1024;
+let rollSeq = 0;
+const inflight = new Set(); // renamed files currently being compressed
+let chain = Promise.resolve();
+const settling = new Set(); // promises of in-progress compressions
+
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function pruneRolled(dir) {
   const rolls = fs.readdirSync(dir).filter((f) => ROLLED_RE.test(f)).sort();
   for (const f of rolls.slice(0, Math.max(0, rolls.length - maxRolled()))) {
     try { fs.unlinkSync(path.join(dir, f)); } catch { /* best-effort */ }
   }
+}
+
+/** Stream-gzip `pending` onto the month archive (append: members concatenate), then unlink it. */
+async function compressPending(pending, rolled, dir) {
+  let before = 0;
+  try { before = fs.statSync(rolled).size; } catch { /* new archive */ }
+  try {
+    await pipeline(fs.createReadStream(pending), zlib.createGzip(), fs.createWriteStream(rolled, { flags: 'a' }));
+  } catch (e) {
+    // Drop any partial gzip member so the archive stays valid; the pending file is kept for retry.
+    try { if (fs.existsSync(rolled)) fs.truncateSync(rolled, before); } catch { /* best-effort */ }
+    throw e;
+  }
+  fs.unlinkSync(pending);
+  try { pruneRolled(dir); } catch { /* best-effort */ }
+}
+
+function startCompress(pending, rolled, dir) {
+  if (inflight.has(pending)) return;
+  inflight.add(pending);
+  // Serialized: two members appended to one archive concurrently would interleave.
+  const p = chain.then(() => compressPending(pending, rolled, dir))
+    .catch((e) => { console.error('[auditLog] roll compress failed; will retry', e?.message ?? String(e)); })
+    .finally(() => { inflight.delete(pending); settling.delete(p); });
+  chain = p;
+  settling.add(p);
+}
+
+/** Resolves once every in-flight roll compression has finished (success or failure). Test seam. */
+async function settleRolls() {
+  while (settling.size) await Promise.all([...settling]);
+}
+
+/**
+ * Roll the live file if its last write was in an earlier month than `now`, or it
+ * exceeds `maxBytes`. The rename is synchronous; compression is async. Leftover
+ * renamed files from a failed compress are retried here.
+ */
+function rotateIfNeeded(target, now, maxBytes) {
+  let st;
+  try { st = fs.statSync(target); } catch { return; }
+  if (!st.isFile() || st.size === 0) return;
+  const oldMonth = monthKey(st.mtime);
+  if (oldMonth === monthKey(now) && st.size <= maxBytes) return;
+  const dir = path.dirname(target);
+  const base = path.basename(target, path.extname(target));
+  const pending = path.join(dir, `${base}-${oldMonth}.jsonl.rolling-${Date.now().toString(36)}${(rollSeq++).toString(36)}`);
+  fs.renameSync(target, pending);
+  const pendingRe = new RegExp(`^${escapeRe(base)}-(\\d{4}-\\d{2})\\.jsonl\\.rolling-[a-z0-9]+$`);
+  for (const f of fs.readdirSync(dir)) {
+    const m = pendingRe.exec(f);
+    if (m) startCompress(path.join(dir, f), path.join(dir, `${base}-${m[1]}.jsonl.gz`), dir);
+  }
+  try { pruneRolled(dir); } catch { /* best-effort */ }
 }
 
 /**
@@ -92,7 +143,7 @@ function appendAuditEvent(kind, fields = {}, opts = {}) {
     const target = opts.target ?? auditLogPath();
     fs.mkdirSync(path.dirname(target), { recursive: true });
     try {
-      rotateIfNewMonth(target, now);
+      rotateIfNeeded(target, now, opts.maxBytes ?? MAX_LIVE_BYTES);
     } catch (e) {
       console.error('[auditLog] rotation failed', e?.message ?? String(e));
     }
@@ -127,4 +178,4 @@ function readTail(maxBytes, target = auditLogPath()) {
   }
 }
 
-module.exports = { appendAuditEvent, auditLogPath, readTail };
+module.exports = { appendAuditEvent, settleRolls, MAX_LIVE_BYTES, auditLogPath, readTail };

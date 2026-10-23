@@ -13,14 +13,10 @@ import { EventEmitter } from 'node:events'
 
 vi.mock('electron', () => ({ ipcMain: { handle: vi.fn(), on: vi.fn() } }))
 
-// chatRunner.cjs reads SM_CHAT_CONCURRENCY lazily (per pump() call), not at
-// module-load time, so deleting it here — before every test, restoring after
-// — is enough to make the "default cap = 2" assertions deterministic on any
-// machine whose shell exports SM_CHAT_CONCURRENCY (e.g. the dev's ~/.bashrc
-// sets 3). No vi.resetModules() / dynamic import needed.
-const ORIGINAL_SM_CHAT_CONCURRENCY = process.env.SM_CHAT_CONCURRENCY
+// Pool size is pinned per-file; individual tests override SM_SESSION_SLOTS.
+const ORIGINAL_SLOTS = process.env.SM_SESSION_SLOTS
 beforeEach(() => {
-  delete process.env.SM_CHAT_CONCURRENCY
+  process.env.SM_SESSION_SLOTS = '2'
   // Clear lane + slot-pool state between tests. Several specs drive the REAL
   // executeRun with a fake child that never emits 'exit', so their run stays
   // in flight forever, holding a session slot and a lane seat; without this
@@ -29,8 +25,8 @@ beforeEach(() => {
   chatRunner.__resetQueueForTests()
 })
 afterEach(() => {
-  if (ORIGINAL_SM_CHAT_CONCURRENCY === undefined) delete process.env.SM_CHAT_CONCURRENCY
-  else process.env.SM_CHAT_CONCURRENCY = ORIGINAL_SM_CHAT_CONCURRENCY
+  if (ORIGINAL_SLOTS === undefined) delete process.env.SM_SESSION_SLOTS
+  else process.env.SM_SESSION_SLOTS = ORIGINAL_SLOTS
 })
 
 const require = createRequire(import.meta.url)
@@ -186,7 +182,7 @@ describe('silent flag threading (run -> waiting -> executor)', () => {
 
 })
 
-describe('concurrency (default cap = 2)', () => {
+describe('concurrency (gated only by sessionSlots)', () => {
   let captured: Array<Record<string, unknown>>
   let resolvers: Array<() => void>
 
@@ -202,7 +198,7 @@ describe('concurrency (default cap = 2)', () => {
   // PRD 493: CONCURRENCY_CAP now governs SILENT (automated probe) runs only —
   // these were written under PRD 486 against plain (manual) run() calls, so
   // they're updated to silent:true to keep testing the FIFO lane they target.
-  it('runs 2 different silent probes concurrently under the default cap', async () => {
+  it('runs 2 different silent probes concurrently with slots free', async () => {
     chatRunner.run({ tabId: 'tab-conc-a', sessionId: 'sess-conc-a', prompt: 'a', cwd: '/tmp', resume: true, silent: true })
     chatRunner.run({ tabId: 'tab-conc-b', sessionId: 'sess-conc-b', prompt: 'b', cwd: '/tmp', resume: true, silent: true })
     await new Promise((r) => setTimeout(r, 0))
@@ -235,21 +231,29 @@ describe('concurrency (default cap = 2)', () => {
     await new Promise((r) => setTimeout(r, 0))
   })
 
-  it('SM_CHAT_CONCURRENCY=1 clamps the silent lane to 1 (override still works)', async () => {
-    process.env.SM_CHAT_CONCURRENCY = '1'
-
-    chatRunner.run({ tabId: 'tab-conc-cap1-a', sessionId: 'sess-conc-cap1-a', prompt: 'a', cwd: '/tmp', resume: true, silent: true })
-    chatRunner.run({ tabId: 'tab-conc-cap1-b', sessionId: 'sess-conc-cap1-b', prompt: 'b', cwd: '/tmp', resume: true, silent: true })
+  it('starts 4 queued runs when 10 slots are free', async () => {
+    process.env.SM_SESSION_SLOTS = '10'
+    for (const n of ['a', 'b', 'c', 'd']) {
+      chatRunner.run({ tabId: `tab-ten-${n}`, sessionId: `sess-ten-${n}`, prompt: n, cwd: '/tmp', resume: true, silent: true })
+    }
     await new Promise((r) => setTimeout(r, 0))
+    expect(captured.map((j) => j.tabId)).toEqual(['tab-ten-a', 'tab-ten-b', 'tab-ten-c', 'tab-ten-d'])
 
-    // Only the 1st lane is filled; the 2nd silent probe queues behind it.
-    expect(captured).toHaveLength(1)
-    expect(captured[0].tabId).toBe('tab-conc-cap1-a')
+    resolvers.forEach((resolve) => resolve())
+    await new Promise((r) => setTimeout(r, 0))
+  })
+
+  it('third run waits for a slot when only 2 slots exist', async () => {
+    process.env.SM_SESSION_SLOTS = '2'
+    for (const n of ['a', 'b', 'c']) {
+      chatRunner.run({ tabId: `tab-two-${n}`, sessionId: `sess-two-${n}`, prompt: n, cwd: '/tmp', resume: true })
+    }
+    await new Promise((r) => setTimeout(r, 0))
+    expect(captured.map((j) => j.tabId)).toEqual(['tab-two-a', 'tab-two-b'])
 
     resolvers[0]()
     await new Promise((r) => setTimeout(r, 0))
-    expect(captured).toHaveLength(2)
-    expect(captured[1].tabId).toBe('tab-conc-cap1-b')
+    expect(captured.map((j) => j.tabId)).toEqual(['tab-two-a', 'tab-two-b', 'tab-two-c'])
 
     resolvers.slice(1).forEach((resolve) => resolve())
     await new Promise((r) => setTimeout(r, 0))
@@ -269,7 +273,7 @@ describe('manual runs share the FIFO lane with silent runs', () => {
     })
   })
 
-  it('two manual runs for different tabs both invoke the executor immediately under the default cap of 2', async () => {
+  it('two manual runs for different tabs both invoke the executor immediately with 2 slots free', async () => {
     chatRunner.run({ tabId: 'tab-manual-a', sessionId: 'sess-manual-a', prompt: 'a', cwd: '/tmp', resume: false })
     chatRunner.run({ tabId: 'tab-manual-b', sessionId: 'sess-manual-b', prompt: 'b', cwd: '/tmp', resume: false })
     await new Promise((r) => setTimeout(r, 0))

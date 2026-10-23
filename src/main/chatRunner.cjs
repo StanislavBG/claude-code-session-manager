@@ -5,19 +5,12 @@
  * the terminal chat UI (PRD 319). Each call spawns a fresh process that exits
  * when done; no idle process lives between commands.
  *
- * v0.34: silent (automated) runs are serialized through a FIFO queue capped at
- * CONCURRENCY_CAP (SM_CHAT_CONCURRENCY overrides, clamped to [1,3]); modeled
- * on the scheduler's serialized queue so a burst of probes can't fan out into
- * the parallel-`claude -p` OOM that SIGKILLed a job on 2026-06-26.
- * PRD 493 had manual, user-initiated runs bypass that lane entirely (always
- * immediate, uncapped). A later PRD (per-tab prompt queue) folded manual runs
- * back into the SAME FIFO lane — a per-tab queue in the renderer (chat.ts)
- * now only ever calls run() once per tab at a time, so the cap governs
- * cross-tab fan-out, not per-tab ordering.
+ * Runs (silent and manual) go through one FIFO queue gated only by the shared
+ * sessionSlots pool; there is no chat-private concurrency cap.
  *
  * Public surface:
  *   run({ tabId, sessionId, prompt, cwd, resume, silent }): void  — fire-and-forget enqueue.
- *     Both silent (PRD 470) and manual runs go through the same CONCURRENCY_CAP FIFO lane.
+ *     Both silent (PRD 470) and manual runs go through the same FIFO queue.
  *     Silent runs additionally suppress the six turn-affecting broadcasts + recordExchange.
  *   cancel(tabId): Promise<void>  — resolves once the cancelled run fully settles
  *   parseStopSignal(finalText): { questions: string[] } | null     — exported for reuse
@@ -295,22 +288,10 @@ const CHAT_MODE_TRUTH_INSTRUCTION =
   `either a real result or an explicit statement that the user needs to ` +
   `reply for the work to continue.\n\n`;
 
-// ─── Serial run queue (v0.34) ───────────────────────────────────────────────
-// CONCURRENCY_CAP=2 (default) governs ALL runs — silent probes and manual
-// sends alike share one FIFO lane; two can run at once across all tabs before
-// a 3rd queues. SM_CHAT_CONCURRENCY still overrides, clamped to [1, 3].
-
-const DEFAULT_CAP = 2;
-// Clamp to [1, 3]; default 2 = "two loops at a time". Read lazily (not
-// captured at module-load time) so tests can stub the env per-case without
-// vi.resetModules(); production behavior is unaffected since the env var
-// never changes mid-process.
-function getConcurrencyCap() {
-  return Math.min(
-    3,
-    Math.max(1, parseInt(process.env.SM_CHAT_CONCURRENCY || String(DEFAULT_CAP), 10) || DEFAULT_CAP),
-  );
-}
+// ─── Run queue ──────────────────────────────────────────────────────────────
+// FIFO lane for ALL runs (silent probes and manual sends). There is NO private
+// cap: a queued run starts exactly when lib/scheduler/sessionSlots.cjs grants a
+// slot — the sole machine-wide cap.
 
 // tabId → { cancelFn, donePromise } for every ACTIVE run; FIFO list of WAITING
 // runs; live count. `donePromise` resolves once the run's own executeRun()
@@ -330,7 +311,6 @@ const dispatching = new Set();
 // "Session ID … is already in use", so pump() refuses to start a second run
 // for a held sessionId (it waits in `waiting` like any other blocked run).
 const liveSessions = new Set();
-let activeCount = 0;
 
 // Indirection so tests can stub the spawn without launching claude.
 let executor = executeRun;
@@ -347,7 +327,6 @@ function __resetQueueForTests() {
   dispatching.clear();
   liveSessions.clear();
   waiting.length = 0;
-  activeCount = 0;
   sessionSlots.__resetForTests();
 }
 
@@ -370,7 +349,7 @@ function broadcast(channel, payload) {
 /**
  * Enqueue a chat run for a tab. Fire-and-forget — results arrive via IPC.
  * Both silent (automated probe) and manual (user-initiated) runs share the
- * CONCURRENCY_CAP=2 (default) FIFO lane — extra submits queue and are
+ * FIFO lane — submits beyond the free slots queue and are
  * announced via chat:run:queued (silent runs stay invisible to the renderer;
  * see pump() below). De-dupes a tab already in the pipeline (the renderer's
  * per-tab prompt queue in chat.ts only ever calls this once per tab at a
@@ -407,10 +386,10 @@ function run(opts) {
   return { accepted: true, queued: tabBusy };
 }
 
-// Fill open lanes FIFO up to CONCURRENCY_CAP, then announce queue positions for
+// Start queued runs FIFO while sessionSlots grants a slot, then announce queue positions for
 // the remainder. O(n) over the waiting list (bounded by open tabs).
 function pump() {
-  while (activeCount < getConcurrencyCap() && waiting.length > 0) {
+  while (waiting.length > 0) {
     // Per-tab exclusivity: skip past any waiting run whose tab already has one
     // live, rather than head-blocking the whole lane on it. `dispatching`
     // covers the gap between picking a job here and executeRun() registering
@@ -422,14 +401,12 @@ function pump() {
     // Everything queued is blocked behind its own tab's live run; the settle()
     // of that run re-pumps.
     if (idx === -1) break;
-    // The chat lane cap is a POLICY bound; actual capacity comes from the
-    // Session-Manager-wide slot pool shared with the scheduler
-    // (lib/scheduler/sessionSlots.cjs). No slot → everyone keeps waiting; the next
-    // settle() in either subsystem re-pumps.
+    // Capacity comes only from the Session-Manager-wide slot pool shared with
+    // the scheduler (lib/scheduler/sessionSlots.cjs). Refusal → stop; the rest
+    // stay queued in order and the next release in either subsystem re-pumps.
     const slotToken = sessionSlots.acquire(`chat:${waiting[idx].tabId}`);
     if (!slotToken) break;
     const [job] = waiting.splice(idx, 1);
-    activeCount += 1;
     dispatching.add(job.tabId);
     liveSessions.add(job.sessionId);
     Promise.resolve()
@@ -444,7 +421,6 @@ function pump() {
         dispatching.delete(job.tabId);
         liveSessions.delete(job.sessionId);
         sessionSlots.release(slotToken);
-        activeCount -= 1;
         pump();
       });
   }

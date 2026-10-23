@@ -55,10 +55,15 @@ test('effectiveConcurrency is env-sourced when SM_SESSION_SLOTS is set', () => {
   expect(payload.effectiveConcurrency).toEqual({ cap: 7, free: 7, source: 'env' });
 });
 
-test('effectiveConcurrency clamps the env var into the pool range [0, 10]', () => {
+test('effectiveConcurrency clamps the env var into the pool range [0, MAX_SLOTS]', () => {
+  const max = sessionSlots.MAX_SLOTS;
   process.env[ENV_KEY] = '999';
   const payload = buildScheduleStatePayload(fakeState());
-  expect(payload.effectiveConcurrency).toEqual({ cap: 10, free: 10, source: 'env' });
+  expect(payload.effectiveConcurrency).toEqual({ cap: max, free: max, source: 'env' });
+
+  process.env[ENV_KEY] = '-3';
+  const low = buildScheduleStatePayload(fakeState());
+  expect(low.effectiveConcurrency).toEqual({ cap: 0, free: 0, source: 'env' });
 });
 
 test('free is net of held slots — a chat run shrinks it without changing cap', () => {

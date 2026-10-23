@@ -237,11 +237,12 @@ export function App() {
   const handleStartProjectClose = useCallback(() => setStartProjectOpen(false), [])
   const startProjectParent = activeTab ? parentDirOf(activeTab.cwd) || homeDir : homeDir
 
-  // Eager preload of the speech model + permission subscription.
-  // Lifted here from VoiceButton so the model warms even if the user never
-  // mounts the mic UI, and so the gate's permissionState is fresh on first
-  // click. initModel() and the permission listener are both idempotent under
-  // StrictMode / HMR remount; unsupported is logged at most once per session.
+  // Permission subscription only. The speech model is NOT preloaded here: it
+  // loads lazily on the first record press (voice.ts startRecording) and the
+  // worker is released after 30 min idle. No always-listening / hands-free mode
+  // exists today; if one is added it must call initModel() when enabled. The
+  // permission listener is idempotent under StrictMode / HMR remount;
+  // unsupported is logged at most once per session.
   useEffect(() => {
     if (!isRecognitionSupported()) {
       if (!unsupportedLogged) {
@@ -250,7 +251,6 @@ export function App() {
       }
       return
     }
-    useVoice.getState().initModel()
 
     let permStatus: PermissionStatus | null = null
     let cancelled = false

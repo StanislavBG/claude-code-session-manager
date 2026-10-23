@@ -4,6 +4,7 @@ import {
   isRecognitionSupported,
   preloadModel,
   resetModel,
+  releaseModel,
   type RecognitionHandle,
 } from '../lib/speechRecognition'
 import { stopSpeaking, isSpeaking, getSpeakStartedAt } from '../lib/speechSynthesis'
@@ -450,6 +451,19 @@ function clearWatchdog() {
   }
 }
 
+// Lazy model lifecycle: the model loads on the first record press and the
+// worker is terminated after MODEL_IDLE_RELEASE_MS without a recording.
+export const MODEL_IDLE_RELEASE_MS = 30 * 60 * 1000
+let modelIdleTimer: ReturnType<typeof setTimeout> | null = null
+let loadingForRecord = false
+
+function clearModelIdleRelease() {
+  if (modelIdleTimer) {
+    clearTimeout(modelIdleTimer)
+    modelIdleTimer = null
+  }
+}
+
 // Documented ASR hallucinations on silent/near-silent input. VAD now gates
 // out most silence upstream, but keep this as a backstop for edge cases.
 const ASR_HALLUCINATIONS = new Set([
@@ -465,7 +479,40 @@ const ASR_HALLUCINATIONS = new Set([
   'Bye!',
 ])
 
-export const useVoice = create<VoiceState>((set, get) => ({
+export const useVoice = create<VoiceState>((set, get) => {
+  function armModelIdleRelease() {
+    clearModelIdleRelease()
+    modelIdleTimer = setTimeout(() => {
+      modelIdleTimer = null
+      if (get().isRecording || activeHandle) {
+        armModelIdleRelease()
+        return
+      }
+      log.info('voice', 'model idle timeout: releasing worker')
+      clearWatchdog()
+      loadGeneration++
+      releaseModel()
+      set({ modelStatus: 'idle', loadingProgress: 0, error: null, errorKind: null })
+    }, MODEL_IDLE_RELEASE_MS)
+  }
+
+  // Resolves once modelStatus is 'ready'; rejects on 'error'. Kicks off the load.
+  function ensureModelReady(): Promise<void> {
+    if (get().modelStatus === 'error') get().resetAndRetryModel()
+    else get().initModel()
+    return new Promise<void>((resolve, reject) => {
+      let unsub: () => void = () => {}
+      const check = (st: { modelStatus: string; error: string | null }) => {
+        if (st.modelStatus === 'ready') { unsub(); resolve(); return true }
+        if (st.modelStatus === 'error') { unsub(); reject(new Error(st.error ?? 'Model load failed')); return true }
+        return false
+      }
+      if (check(get())) return
+      unsub = useVoice.subscribe((st) => { check(st) })
+    })
+  }
+
+  return {
   isRecording: false,
   externalRecording: false,
   ttsEnabled: false,
@@ -521,6 +568,7 @@ export const useVoice = create<VoiceState>((set, get) => ({
           clearWatchdog()
           log.info('voice', 'modelStatus -> ready')
           set({ modelStatus: 'ready', loadingProgress: 100, errorKind: null })
+          if (!get().isRecording && !activeHandle) armModelIdleRelease()
         } else if (status === 'error') {
           clearWatchdog()
           log.error('voice', 'modelStatus -> error', { msg })
@@ -564,6 +612,26 @@ export const useVoice = create<VoiceState>((set, get) => ({
       set({ error: 'Microphone or Web Worker not available', errorKind: 'recording' })
       return
     }
+
+    // Lazy model load: first press loads the model (existing modelStatus
+    // 'loading' state drives the UI), then recording begins once it is ready.
+    if (get().modelStatus !== 'ready') {
+      if (loadingForRecord) return
+      loadingForRecord = true
+      ensureModelReady()
+        .then(() => {
+          loadingForRecord = false
+          get().startRecording(tabId, opts)
+        })
+        .catch((e: unknown) => {
+          loadingForRecord = false
+          const msg = e instanceof Error ? e.message : String(e)
+          log.error('voice', 'startRecording: model load failed', { error: msg })
+          toast.error(`Could not load speech model: ${msg}`)
+        })
+      return
+    }
+    clearModelIdleRelease()
 
     // F5: read the persisted device pref before instantiating the recognition.
     // We optimistically flip isRecording=true now so the UI shows the ring
@@ -777,6 +845,7 @@ export const useVoice = create<VoiceState>((set, get) => ({
     set({ isRecording: false, lastTranscript: '', lastPartial: '', statusPill: 'idle' })
     // Hold activeHandle non-null until the drain completes so a fast
     // double-click in startRecording sees it and bails.
+    armModelIdleRelease()
     handle.stop().finally(() => {
       handle.destroy()
       if (activeHandle === handle) { activeHandle = null; currentSink = null }
@@ -1008,7 +1077,8 @@ export const useVoice = create<VoiceState>((set, get) => ({
       set({ hotkeyState: 'destroyed' })
     }
   },
-}))
+  }
+})
 
 export const selectLiveTranscript = (s: VoiceState) => ({
   isRecording: s.isRecording,

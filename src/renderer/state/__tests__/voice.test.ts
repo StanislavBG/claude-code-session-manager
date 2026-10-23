@@ -26,7 +26,7 @@ vi.mock('../../lib/speechRecognition', () => ({
     }
   }),
   isRecognitionSupported: vi.fn(() => true),
-  preloadModel: vi.fn(),
+  preloadModel: vi.fn((onStatus?: (s: string, m: string) => void) => onStatus?.('ready', '')),
   resetModel: vi.fn(),
 }))
 

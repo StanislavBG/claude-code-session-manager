@@ -322,6 +322,21 @@ export function resetModel(): void {
   modelLoading = false
 }
 
+/**
+ * Terminate the shared worker (freeing the ONNX model + wasm heap) and clear
+ * the load flags. The next getWorker()/preloadModel() spawns a fresh worker and
+ * reloads. Used by the voice store's idle release.
+ */
+export function releaseModel(): void {
+  log.info('speech', 'releaseModel: terminating worker')
+  if (sharedWorker) {
+    try { sharedWorker.terminate() } catch { /* */ }
+  }
+  sharedWorker = null
+  modelReady = false
+  modelLoading = false
+}
+
 export function isRecognitionSupported(): boolean {
   return (
     typeof Worker !== 'undefined' &&

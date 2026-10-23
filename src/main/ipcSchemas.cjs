@@ -13,7 +13,7 @@ const { PromptSessionSchema, EpicTagSchema, EpicSourceSchema, EpicIntakeSectionS
 const { PrdWorkTypeSchema } = require('./lib/prd/workTypeLibrary.cjs');
 const { PERSONA_NAME_RE } = require('./agentLibrary.cjs');
 const { AgentPersonaSaveSchema } = require('./lib/persona-macro/agentPersonaSchema.cjs');
-const { MacroSaveSchema, MacroDeleteSchema, MacroSetProjectSchema } = require('./lib/persona-macro/macroLibrary.cjs');
+const { MacroSaveSchema, MacroDeleteSchema, MacroSetProjectSchema, MacroInputSchema } = require('./lib/persona-macro/macroLibrary.cjs');
 
 // ──────────────────────────────────────────── PTY
 const ptySpawn = z.object({
@@ -987,6 +987,10 @@ const remoteSessionCreate = z.object({
     (s) => Buffer.byteLength(s, 'utf8') <= CHAT_PROMPT_MAX_BYTES,
     `prompt must be ≤ ${CHAT_PROMPT_MAX_BYTES} bytes`,
   ),
+  macroId: MacroDeleteSchema.shape.id.optional(),
+  inputs: z.record(MacroInputSchema.shape.name, z.string().max(2000))
+    .refine((o) => Object.keys(o).length <= 20, 'too many inputs')
+    .optional(),
 });
 
 // ──────────────────────────────────────────── Web Remote

@@ -1222,6 +1222,7 @@ function getDispatchMap() {
         agents: personas.map((a) => ({ name: a.name, description: a.description })),
         tags: EpicTagSchema.options,
         macros: await macroLibrary.listMacros(),
+        macroInputs: true,
       };
     },
 
@@ -1234,7 +1235,23 @@ function getDispatchMap() {
       if (!tabs.some((t) => t.cwd === parsed.cwd)) throw new Error('cwd is not an open project');
       const personas = await agentLibrary.listPersonas();
       if (!personas.some((a) => a.name === parsed.agentName)) throw new Error('unknown agent');
-      chatRunner.requestExternalNewSession(parsed);
+      let prompt = parsed.prompt;
+      if (parsed.macroId) {
+        const macroLibrary = require('./lib/persona-macro/macroLibrary.cjs');
+        const macros = await macroLibrary.listMacros();
+        const macro = macros.find((m) => m.id === parsed.macroId);
+        if (!macro || !macroLibrary.macroVisibleIn(macro, parsed.cwd)) throw new Error('unknown macro');
+        const result = macroLibrary.renderMacroPrompt(parsed.prompt, macro.inputs, parsed.inputs ?? {});
+        if (!result.ok) throw new Error(result.error);
+        prompt = result.prompt;
+      }
+      chatRunner.requestExternalNewSession({
+        cwd: parsed.cwd,
+        agentName: parsed.agentName,
+        tag: parsed.tag,
+        title: parsed.title,
+        prompt,
+      });
       return { ok: true };
     },
   };

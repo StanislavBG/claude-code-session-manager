@@ -81,11 +81,10 @@ test('(b) FAIL + committedDuringRun → sentinel_fail', async () => {
   assert.equal(verdict.downgradeTo, 'needs_review');
 });
 
-test('(c) FAIL + jobLandedCommitThisRun + transcript_errors hit → sentinel_fail', async () => {
+test('(c) FAIL + jobLandedCommitThisRun → sentinel_fail', async () => {
   const { verdict } = await run(FAIL, true, { jobLandedCommitThisRun: 'abc1234', exitCode: 0 });
   assert.equal(verdict.verdict, 'sentinel_fail');
   assert.equal(verdict.downgradeTo, 'needs_review');
-  assert.ok(Array.isArray(verdict.annotations) && verdict.annotations.length > 0, 'transcript hits kept as annotations');
 });
 
 test('(d) FAIL + allowPreSentinelHeal → sentinel_fail', async () => {

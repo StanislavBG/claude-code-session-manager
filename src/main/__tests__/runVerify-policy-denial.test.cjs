@@ -63,27 +63,3 @@ test('PreToolUse policy denial (Blocked: ...) in final 20% → clean, surfaced a
     );
   } finally { rmdir(tmp); }
 });
-
-test('genuine late-run failure (not a policy denial) still downgrades to transcript_errors', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '1106-genuine-failure-still-flags';
-    const events = [];
-    for (let k = 0; k < 8; k++) {
-      events.push({ type: 'assistant', message: { role: 'assistant', content: [
-        { type: 'tool_use', id: `t${k}`, name: 'Read', input: { description: `read ${k}` } }] } });
-      events.push({ type: 'user', message: { role: 'user', content: [
-        { type: 'tool_result', tool_use_id: `t${k}`, content: 'ok', is_error: false }] } });
-    }
-    events.push({ type: 'assistant', message: { role: 'assistant', content: [
-      { type: 'tool_use', id: 'ttest', name: 'Bash', input: { command: 'npm test', description: 'run tests' } }] } });
-    events.push({ type: 'user', message: { role: 'user', content: [
-      { type: 'tool_result', tool_use_id: 'ttest', content: 'FAILED: 1 test failed', is_error: true }] } });
-    events.push({ type: 'result', subtype: 'success', result: 'All acceptance criteria verified.' });
-
-    writeLog(tmp, slug, events);
-    const prdPath = writePrd(tmp, slug, '# Genuine failure still flags');
-    const verdict = await verifyRun({ runDir: tmp, prdPath, queueEntry: { slug, status: 'running' }, allJobs: [], committedDuringRun: true });
-    assert.equal(verdict.verdict, 'transcript_errors', `genuine failure must still flag, got ${verdict.verdict}: ${verdict.reason}`);
-  } finally { rmdir(tmp); }
-});

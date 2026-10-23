@@ -2,8 +2,9 @@
  * runVerify.cjs — post-run reconciliation verifier.
  *
  * Called by scheduler.cjs after every agent exit=0, before marking a job
- * "completed". Pattern-matches tool_result content from the run log and checks
- * dependency prerequisites to catch false-positives (clean-exit ≠ done).
+ * "completed". The verdict depends only on outcomes — sentinel, commit
+ * evidence, exit code, log readability, dependency prerequisites. Transcript
+ * content is NEVER scanned for error text (pattern scan retired).
  *
  * Pure: no IPC, no queue writes. Writes a verdicts.json sidecar to runDir as
  * a by-product so the renderer and any offline tooling can read the result
@@ -13,7 +14,7 @@
  *   verifyRun({ runDir, prdPath, queueEntry, allJobs }) → Promise<Verdict>
  *
  * Verdict shape:
- *   { verdict: 'clean'|'halt'|'deps_unmet'|'transcript_errors'|'verify_unavailable'
+ *   { verdict: 'clean'|'halt'|'deps_unmet'|'verify_unavailable'
  *       |'no_verdict_sentinel'|'abandoned_background_task',
  *     reason: string,
  *     downgradeTo: 'pending'|'needs_review'|null }
@@ -22,8 +23,8 @@
  *   clean           → null        (caller stamps 'completed')
  *   halt            → 'pending'   (re-fires automatically next slot)
  *   deps_unmet      → 'pending'   (re-fires when deps clear)
- *   transcript_errors → 'needs_review' (requires human flip)
- *   verify_unavailable → 'needs_review'
+ *   transcript_errors → historical rows only; no longer emitted
+ *   verify_unavailable → 'needs_review' (unreadable log / verifier threw)
  *   no_verdict_sentinel → 'needs_review'
  *   abandoned_background_task → 'needs_review'
  *
@@ -48,29 +49,7 @@ const VERDICTS_SCHEMA_VERSION = 1;
 // Bound on the `gh pr view` postcondition check below (§ merge-main exemption).
 const GH_CHECK_TIMEOUT_MS = 15_000;
 
-// ─── content pattern detectors ───────────────────────────────────────────────
-
-/**
- * Detect high-signal error patterns in a single tool_result content string.
- * Returns { verdict, pattern } on match, null if clean.
- *
- * Checked in priority order (cheapest first):
- *   1. FAIL/FATAL at line start
- *   2. Traceback + Error within 10 lines (Python exception)
- *   3. ModuleNotFoundError / ImportError (missing venv / broken deps)
- */
-/**
- * True when a tool_result content is a Claude Code harness tool error rather
- * than task output — emitted when the model calls a tool that doesn't exist or
- * isn't allowed (e.g. `<tool_use_error>Error: No such tool available: bash`).
- * The harness rejects the call; the model recovers by retrying with a valid
- * tool. Never a task failure, so the verifier must not downgrade on it.
- */
-function isHarnessToolError(content) {
-  if (typeof content !== 'string' || !content) return false;
-  return content.includes('<tool_use_error>')
-    || /\bNo such tool available\b/.test(content);
-}
+// ─── policy-denial detector ──────────────────────────────────────────────────
 
 /**
  * A PreToolUse hook denial (`guard-destructive-git.cjs`, `guard-prd-writes.cjs`,
@@ -85,51 +64,6 @@ function isPolicyDenial(content) {
   return /^(?:Error:\s*)?Blocked:/.test(content);
 }
 
-function detectPattern(content) {
-  if (typeof content !== 'string' || !content) return null;
-
-  // (1) FAIL/FATAL at the start of a line (case-sensitive, multiline).
-  if (/^FAIL\b/m.test(content) || /^FATAL\b/m.test(content)) {
-    return { verdict: 'transcript_errors', pattern: 'FAIL/FATAL at line start' };
-  }
-
-  // (2) Python Traceback + exception line within next 10 lines. Both anchored
-  // to line starts: reviewer prose quoting "will crash with ImportError" or
-  // embedding "...Error:" mid-sentence must not match (feedback 2026-06-10-01).
-  //
-  // The TERMINATING exception decides the class: a Traceback ending in
-  // ModuleNotFoundError/ImportError is the missing-dependency class ("the
-  // verification couldn't run", same as detector 3), NOT a logic failure — so
-  // it routes through the weaker verify_unavailable path (env-recovery escape
-  // hatch + success demotion). A Traceback ending in any other exception
-  // (KeyError, AssertionError, …) stays transcript_errors — that is the real
-  // false-PASS class the verifier exists to catch (2026-05-23 incident).
-  // (feedback 2026-06-10 addendum: interpreter-search setup probes that ended
-  // in ModuleNotFoundError were 3/3 false positives.)
-  const lines = content.split('\n');
-  for (let i = 0; i < lines.length; i++) {
-    if (/^\s*Traceback \(most recent call last\):/.test(lines[i])) {
-      for (let j = i + 1; j < Math.min(i + 11, lines.length); j++) {
-        const m = lines[j].match(/^\s*([A-Za-z_][\w.]*(?:Error|Exception))\s*:/);
-        if (m) {
-          if (m[1] === 'ModuleNotFoundError' || m[1] === 'ImportError') {
-            return { verdict: 'verify_unavailable', pattern: `Traceback → ${m[1]}` };
-          }
-          return { verdict: 'transcript_errors', pattern: 'Traceback + Error within 10 lines' };
-        }
-      }
-    }
-  }
-
-  // (3) Import / module errors (verification was skipped). Line-anchored:
-  // real interpreter output starts the line with the exception name
-  // ("ModuleNotFoundError: No module named 'x'"); prose never does.
-  if (/^\s*(?:ModuleNotFoundError|ImportError)\s*(?::|$)/m.test(content)) {
-    return { verdict: 'verify_unavailable', pattern: 'ModuleNotFoundError/ImportError' };
-  }
-
-  return null;
-}
 
 // ─── log parser ───────────────────────────────────────────────────────────────
 
@@ -270,96 +204,6 @@ function hasAbandonedBackgroundTask(events) {
   for (const ev of events) {
     if (ev.kind !== 'tool_result' || !ev.content) continue;
     if (BACKGROUND_TASK_MARKERS.some((marker) => ev.content.includes(marker))) return true;
-  }
-  return false;
-}
-
-// ─── self-recovery helpers ────────────────────────────────────────────────────
-
-/**
- * Return the description of the tool_use that produced a given tool_result
- * (matched by tool_use_id). Returns '' if not found.
- */
-function toolUseDesc(events, toolUseId) {
-  if (!toolUseId) return '';
-  for (const ev of events) {
-    if (ev.kind === 'tool_use' && ev.toolUseId === toolUseId) return ev.description ?? '';
-  }
-  return '';
-}
-
-/**
- * Return the tool name of the tool_use that produced a given tool_result.
- * Returns '' if not found.
- */
-function toolUseName(events, toolUseId) {
-  if (!toolUseId) return '';
-  for (const ev of events) {
-    if (ev.kind === 'tool_use' && ev.toolUseId === toolUseId) return ev.toolName ?? '';
-  }
-  return '';
-}
-
-/**
- * Check whether the next ≤5 tool_use calls after `fromSeq` include a package
- * install command (pip install, pip3 install, uv sync, uv pip install).
- */
-function hasInstallRecovery(events, fromSeq) {
-  let count = 0;
-  for (const ev of events) {
-    if (ev.seq <= fromSeq) continue;
-    if (ev.kind !== 'tool_use') continue;
-    if (++count > 5) break;
-    const combined = `${ev.command ?? ''} ${ev.description ?? ''}`;
-    if (/pip\d*\s+install/i.test(combined) || /uv\s+(?:sync|pip\s+install)/i.test(combined)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-// Matches a leading `sleep <N> &&` or `sleep <N> ;` wrapper (the shell idiom
-// used to poll a still-pending remote job) so a retry that only drops/changes
-// its own timing wrapper still counts as the same underlying command. Narrow
-// on purpose: it strips nothing else, so two genuinely different commands
-// never collapse into a false pairing (incident: RCA 745-pr188-ci-lint-docs-integrity).
-const SLEEP_PREFIX_RE = /^\s*sleep\s+\d+\s*(&&|;)\s*/;
-
-/**
- * Strip a leading `sleep <N> (&&|;)` wrapper from a tool_use description so
- * self-recovery comparisons ignore only that timing-poll idiom.
- */
-function normalizeDescForRecovery(desc) {
-  return (desc ?? '').replace(SLEEP_PREFIX_RE, '');
-}
-
-/**
- * Check whether the error at `errorSeq` is self-recovered within the next 30
- * events.
- *
- * Recovery heuristic: another tool_use with the same non-empty `description`
- * (after stripping a leading `sleep N &&`/`sleep N;` wrapper from both sides)
- * appears within 30 events of the error, AND its corresponding tool_result is
- * free of error patterns AND is not is_error=true.
- */
-function isSelfRecovered(events, errorSeq, desc) {
-  if (!desc) return false;
-  const normalizedDesc = normalizeDescForRecovery(desc);
-  if (!normalizedDesc) return false;
-
-  // Build a quick lookup from tool_use_id → tool_result event.
-  const resultByUseId = new Map();
-  for (const ev of events) {
-    if (ev.kind === 'tool_result') resultByUseId.set(ev.toolUseId, ev);
-  }
-
-  let seen = 0;
-  for (const ev of events) {
-    if (ev.seq <= errorSeq) continue;
-    if (++seen > 30) break;
-    if (ev.kind !== 'tool_use' || normalizeDescForRecovery(ev.description) !== normalizedDesc) continue;
-    const result = resultByUseId.get(ev.toolUseId);
-    if (result && !result.isError && !detectPattern(result.content)) return true;
   }
   return false;
 }
@@ -793,12 +637,7 @@ function artifactsCheck({ cwd, paths, startedAt, finishedAt, fsImpl = fs }) {
  * @param {boolean}  [params.committedDuringRun] True when HEAD moved during the run,
  *                                            confirming the job's commit landed.
  *                                            Default false for back-compat.
- * @param {boolean}  [params.allowPreSentinelHeal] When true, a commit-in-window
- *                                            with no SCHEDULER_VERDICT: FAIL is
- *                                            sufficient to override weak verdicts
- *                                            (transcript_errors/verify_unavailable)
- *                                            even without a PASS sentinel. Only
- *                                            set by the boot reverify self-heal
+ * (`allowPreSentinelHeal` is still passed by one caller but is ignored: the pattern verdicts it healed no longer exist.)
  *                                            pass for pre-sentinel legacy runs.
  * @param {Function} [params.ghExecImpl]      Test-only override for the `gh pr view`
  *                                            subprocess call used by the -merge-main
@@ -829,7 +668,7 @@ function artifactsCheck({ cwd, paths, startedAt, finishedAt, fsImpl = fs }) {
  * @returns {Promise<{verdict:string, reason:string, downgradeTo:string|null}>}
  */
 async function verifyRun({
-  runDir, prdPath, queueEntry, allJobs = [], committedDuringRun = false, allowPreSentinelHeal = false,
+  runDir, prdPath, queueEntry, allJobs = [], committedDuringRun = false,
   ghExecImpl, priorLandedCommit = null, jobLandedCommitThisRun = null, exitCode = null, worktreeDir = null,
 }) {
   const { slug } = queueEntry;
@@ -917,108 +756,20 @@ async function verifyRun({
       }
     }
 
-    // ── 4. Tool-result error scan ─────────────────────────────────────────
-    const total = events.length;
-    const last20pctStart = Math.floor(total * 0.8);
+    // ── 4. Policy-denial annotations ──────────────────────────────────────
+    // The verdict depends only on outcomes (sentinel, commit evidence, exit,
+    // log readability) — transcript content is never scanned for error text.
+    // A PreToolUse denial is still recorded as a non-blocking annotation.
     const issues = [];
-    // Non-blocking notes: signals worth recording but not strong enough to
-    // downgrade (e.g. a missing-dependency probe in a run that still succeeded).
     const annotations = [];
-    const runSucceeded = !!resultEvent && resultEvent.subtype === 'success';
-
     for (let i = 0; i < events.length; i++) {
       const ev = events[i];
-      if (ev.kind !== 'tool_result') continue;
-
-      // Harness tool errors (`<tool_use_error>…`) are emitted when the model
-      // requests a tool that isn't available — e.g. a wrong-case name like
-      // "bash" instead of "Bash", or a tool outside the allowlist. The harness
-      // rejects the call and the model retries with a valid tool; the task is
-      // unaffected. These are never task failures, so they are exempt from both
-      // the is_error scan and the content pattern scan (false-positive class
-      // seen in 58-web-remote-correctness-batch, 2026-06-10).
-      if (isHarnessToolError(ev.content)) continue;
-
-      // A PreToolUse policy denial (a guard hook blocked the call before it
-      // ran) is exempt from both the is_error scan and the content-pattern
-      // scan for the same reason as a harness tool error above — the denied
-      // call never executed. Unlike a harness tool error, record it as an
-      // annotation so the denial stays visible in the verdict record instead
-      // of vanishing silently.
+      if (ev.kind !== 'tool_result' || ev.parentToolUseId) continue;
       if (isPolicyDenial(ev.content)) {
         annotations.push({
           verdict: 'policy_denial',
           reason: `PreToolUse policy denial at event ${i}: ${ev.content.slice(0, 200)}`,
         });
-        continue;
-      }
-
-      // A tool_result carrying a non-null parent_tool_use_id happened INSIDE a Task
-      // subagent's own execution, not in the main agent's. Subagents do ordinary
-      // exploratory work (greps that exit 1 on no-match, ls on a path that may not
-      // exist) whose failures say nothing about whether the parent run succeeded —
-      // the same false-positive class the Task exemption below already covers for the
-      // content-pattern scan, which sits after this branch and so never reached
-      // is_error. The subagent's OWN final Task tool_result has parentToolUseId ===
-      // null and is still scanned, so a genuinely failed subagent still surfaces.
-      // (Incident: 955-route-epic-create-through-ipc, 2026-08-03 — a fully green,
-      // committed run parked in needs_review over a code-reviewer subagent's
-      // no-match grep at event 450/499.)
-      if (ev.parentToolUseId) continue;
-
-      // is_error:true in the final 20% of the transcript.
-      if (ev.isError && i >= last20pctStart) {
-        const desc = toolUseDesc(events, ev.toolUseId);
-        if (!isSelfRecovered(events, ev.seq, desc)) {
-          issues.push({
-            verdict: 'transcript_errors',
-            reason: `is_error=true in final 20% of transcript (event ${i}/${total})`,
-            priority: 2,
-          });
-          continue; // is_error already covers any content patterns
-        }
-      }
-
-      if (!ev.content) continue;
-
-      // Subagent (Task) results are structured prose — review findings that
-      // *describe* exceptions ("will crash with ImportError") are the dominant
-      // false-positive source (feedback 2026-06-10-01). Real runtime errors
-      // surface through Bash/test tool_results, which are still scanned.
-      if (toolUseName(events, ev.toolUseId) === 'Task') continue;
-
-      const hit = detectPattern(ev.content);
-      if (!hit) continue;
-
-      const desc = toolUseDesc(events, ev.toolUseId);
-
-      if (hit.verdict === 'verify_unavailable') {
-        // ModuleNotFoundError/ImportError: first check for pip/uv install in
-        // the next ≤5 tool_use calls (the agent may have self-healed).
-        if (!hasInstallRecovery(events, ev.seq) && !isSelfRecovered(events, ev.seq, desc)) {
-          const note = `${hit.pattern} at event ${i}, no install recovery found`;
-          if (runSucceeded) {
-            // "Verification couldn't run" is the weakest signal. When the run
-            // still reached a genuine result:success, the agent resolved its
-            // environment (often an interpreter/venv search the recovery
-            // heuristics above don't model) and finished — record it as an
-            // annotation, do NOT downgrade. transcript_errors (real logic/test
-            // failures) are never demoted this way, so the false-PASS guard is
-            // intact. (feedback 2026-06-10 addendum.)
-            annotations.push({ verdict: 'verify_unavailable', reason: note });
-          } else {
-            issues.push({ verdict: 'verify_unavailable', reason: note, priority: 1 });
-          }
-        }
-      } else {
-        // transcript_errors (FAIL/FATAL/Traceback): self-recovery escape hatch.
-        if (!isSelfRecovered(events, ev.seq, desc)) {
-          issues.push({
-            verdict: 'transcript_errors',
-            reason: `${hit.pattern} at event ${i} (no self-recovery)`,
-            priority: 2,
-          });
-        }
       }
     }
 
@@ -1050,37 +801,6 @@ async function verifyRun({
         'needs_review',
         { sentinel, humanQuestion, ...(kept.length ? { annotations: kept } : {}) },
       );
-    }
-
-    // Ground truth outranks heuristics: an exit-0 run that landed a commit
-    // ATTRIBUTABLE TO THIS RUN (spawnJob's own guardHeadBefore/headAtExit
-    // delta, or the repo-wide committedDuringRun window scan) and never
-    // printed an explicit SCHEDULER_VERDICT: FAIL demotes every
-    // transcript_errors/verify_unavailable hit from `issues` to `annotations`
-    // — a tool error the agent already recovered from three calls later, or
-    // an environment probe, says nothing once the work is materially proven
-    // to have landed. Deliberately narrower than the sentinel-override below:
-    // it needs no PASS claim at all, only the ABSENCE of an explicit FAIL, so
-    // it also catches the majority no-sentinel-at-all park class that the
-    // PASS+commitEvidence override (further below) can never reach. Never
-    // demotes pass_no_commit/no_verdict_sentinel/abandoned_background_task —
-    // those are added below this point and are about the ABSENCE of a
-    // sentinel/commit, which this same evidence does not resolve.
-    // (Incident: 1218-fo-01 — a `git apply` "patch does not apply" tool error
-    // at event 179/209 was retried and succeeded 3 events later, the run
-    // landed commit d1edf15, and the row was parked needs_review anyway,
-    // spawning a $3.74 fix-plan investigation into work that needed no fix.)
-    const groundTruthOutranksHeuristics = exitCode === 0 && commitEvidence && sentinel !== 'fail';
-    if (groundTruthOutranksHeuristics) {
-      for (let k = issues.length - 1; k >= 0; k--) {
-        if (issues[k].verdict === 'transcript_errors' || issues[k].verdict === 'verify_unavailable') {
-          annotations.push({
-            verdict: issues[k].verdict,
-            reason: `${issues[k].reason} (demoted: exit 0 + commit landed this run outranks transcript heuristics)`,
-          });
-          issues.splice(k, 1);
-        }
-      }
     }
 
     const sentinelFields = sentinel ? { sentinel } : {};
@@ -1280,50 +1000,9 @@ async function verifyRun({
       return conclude('clean', reason, null, extras);
     }
 
-    // Pick highest-priority issue (transcript_errors > verify_unavailable ==
-    // no_verdict_sentinel; ties keep the loop's original order via stable sort).
+    // Highest-priority outcome issue wins (stable sort keeps loop order on ties).
     issues.sort((a, b) => b.priority - a.priority);
     const top = issues[0];
-
-    // Sentinel override: SCHEDULER_VERDICT: PASS + a commit that landed during
-    // the run is authoritative evidence the job succeeded. Suppresses incidental
-    // transcript noise (grep results with "Error", TDD red-phase reproductions,
-    // Traceback in debug output) for the two weakest verdict classes.
-    // MUST NOT apply to halt or deps_unmet — those keep their existing semantics.
-    if (
-      sentinel === 'pass'
-      && commitEvidence
-      && (top.verdict === 'transcript_errors' || top.verdict === 'verify_unavailable')
-    ) {
-      return conclude('clean',
-        `SCHEDULER_VERDICT: PASS + commit landed overrides ${top.verdict}`,
-        null,
-        {
-          ...(annotations.length ? { annotations } : {}),
-          sentinel,
-          sentinelOverride: top.verdict,
-          ...(commitEvidenceSource ? { commitEvidenceSource } : {}),
-        },
-      );
-    }
-
-    // Pre-sentinel heal: job predates SCHEDULER_VERDICT emission. A commit in
-    // the run window with no explicit FAIL sentinel is weak but sufficient to
-    // override the two weakest verdict classes during the self-heal pass.
-    // Only applies when the caller opts in (allowPreSentinelHeal=true) — live
-    // runs never set this, so only the boot reverify self-heal uses it.
-    if (
-      allowPreSentinelHeal
-      && committedDuringRun
-      && sentinel !== 'fail'
-      && (top.verdict === 'transcript_errors' || top.verdict === 'verify_unavailable')
-    ) {
-      return conclude('clean',
-        `pre-sentinel heal: committed in run window, no SCHEDULER_VERDICT: FAIL, overrides ${top.verdict}`,
-        null,
-        { ...(annotations.length ? { annotations } : {}), preSentinelHeal: top.verdict },
-      );
-    }
 
     return conclude(top.verdict, top.reason, 'needs_review', extras);
 
@@ -1339,12 +1018,7 @@ async function verifyRun({
 module.exports = {
   verifyRun,
   // Exposed for unit tests.
-  detectPattern,
-  isHarnessToolError,
   isPolicyDenial,
-  isSelfRecovered,
-  normalizeDescForRecovery,
-  toolUseName,
   checkDeps,
   parseLog,
   scanSentinel,

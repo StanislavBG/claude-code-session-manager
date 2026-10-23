@@ -102,51 +102,6 @@ function writeLog(dir, slug, text) {
   fs.writeFileSync(path.join(dir, `${slug}.log`), text);
 }
 
-// (a) exit 0 + commit landed THIS run + no sentinel at all → clean, demoted to annotation.
-test('exit 0 + landed commit this run + no FAIL sentinel → clean with annotation (1218-fo-01)', async () => {
-  const tmp = makeTmpDir();
-  const repo = makeTmpGitRepo();
-  try {
-    writeLog(tmp, SLUG, loadFixture({ stripFailSentinel: true }));
-    const prdPath = writePrd(tmp, SLUG);
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug: SLUG, status: 'running', cwd: repo },
-      allJobs: [],
-      committedDuringRun: false,
-      jobLandedCommitThisRun: LANDED_COMMIT,
-      exitCode: 0,
-    });
-    assert.equal(verdict.verdict, 'clean', `expected clean, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, null);
-    const sidecar = JSON.parse(fs.readFileSync(path.join(tmp, `${SLUG}.verdicts.json`), 'utf8'));
-    assert.ok(Array.isArray(sidecar.annotations) && sidecar.annotations.length > 0, 'the demoted is_error hit must be recorded as an annotation');
-    assert.ok(sidecar.annotations.some((a) => a.verdict === 'transcript_errors'), 'annotation must carry the original transcript_errors verdict');
-  } finally { rmdir(tmp); rmdir(repo); }
-});
-
-// (b) the same (stripped-sentinel) log, but exitCode !== 0 → keeps today's behavior.
-test('non-zero exit → transcript_errors (evidence never applies to a failing run)', async () => {
-  const tmp = makeTmpDir();
-  const repo = makeTmpGitRepo();
-  try {
-    writeLog(tmp, SLUG, loadFixture({ stripFailSentinel: true }));
-    const prdPath = writePrd(tmp, SLUG);
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug: SLUG, status: 'running', cwd: repo },
-      allJobs: [],
-      committedDuringRun: false,
-      jobLandedCommitThisRun: LANDED_COMMIT,
-      exitCode: 1,
-    });
-    assert.equal(verdict.verdict, 'transcript_errors', `expected transcript_errors, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, 'needs_review');
-  } finally { rmdir(tmp); rmdir(repo); }
-});
-
 // (c) the pristine, byte-for-byte-unmodified fixture — its own real FAIL sentinel — keeps today's behavior.
 test('explicit FAIL sentinel (the real, unmodified fixture) → sentinel_fail', async () => {
   const tmp = makeTmpDir();
@@ -166,26 +121,5 @@ test('explicit FAIL sentinel (the real, unmodified fixture) → sentinel_fail', 
     assert.equal(verdict.verdict, 'sentinel_fail', `expected sentinel_fail, got ${verdict.verdict}: ${verdict.reason}`);
     assert.equal(verdict.downgradeTo, 'needs_review');
     assert.equal(verdict.sentinel, 'fail');
-  } finally { rmdir(tmp); rmdir(repo); }
-});
-
-// (d) no landed-commit evidence at all → transcript_errors (evidence gate requires attribution).
-test('no landed commit evidence → transcript_errors (evidence gate requires attribution)', async () => {
-  const tmp = makeTmpDir();
-  const repo = makeTmpGitRepo();
-  try {
-    writeLog(tmp, SLUG, loadFixture({ stripFailSentinel: true }));
-    const prdPath = writePrd(tmp, SLUG);
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug: SLUG, status: 'running', cwd: repo },
-      allJobs: [],
-      committedDuringRun: false,
-      jobLandedCommitThisRun: null,
-      exitCode: 0,
-    });
-    assert.equal(verdict.verdict, 'transcript_errors', `expected transcript_errors, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, 'needs_review');
   } finally { rmdir(tmp); rmdir(repo); }
 });

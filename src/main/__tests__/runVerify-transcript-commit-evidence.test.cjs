@@ -106,92 +106,9 @@ function buildRunEvents({ includeCommitEvidence, evidenceForm = 'vcs_state_chang
 
 // ─── (1) regression case: non-git cwd + transcript evidence → clean ──────────
 
-test('PASS + late is_error + transcript commit evidence + non-git cwd → clean (fallback fires)', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '99-fix-e2e-needs-review-test';
-    writeLog(tmp, slug, buildRunEvents({ includeCommitEvidence: true }));
-    const prdPath = writePrd(tmp, slug, '# Fix scheduler skip guard');
-    const nonGitCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'run-verify-nongit-cwd-'));
-    try {
-      const verdict = await verifyRun({
-        runDir: tmp,
-        prdPath,
-        queueEntry: { slug, status: 'running', cwd: nonGitCwd },
-        allJobs: [],
-        committedDuringRun: false,
-      });
-      assert.equal(verdict.verdict, 'clean', `expected clean via transcript fallback, got ${verdict.verdict}: ${verdict.reason}`);
-      assert.equal(verdict.downgradeTo, null);
-      const sidecar = JSON.parse(fs.readFileSync(path.join(tmp, `${slug}.verdicts.json`), 'utf8'));
-      assert.equal(sidecar.commitEvidenceSource, 'transcript', 'sidecar should record the fallback source');
-    } finally { rmdir(nonGitCwd); }
-  } finally { rmdir(tmp); }
-});
-
-test('PASS + late is_error + gitOperation.commit evidence + non-git cwd → clean (fallback fires)', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '99-fix-e2e-needs-review-test-alt';
-    writeLog(tmp, slug, buildRunEvents({ includeCommitEvidence: true, evidenceForm: 'gitOperation' }));
-    const prdPath = writePrd(tmp, slug, '# Fix scheduler skip guard');
-    const nonGitCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'run-verify-nongit-cwd-'));
-    try {
-      const verdict = await verifyRun({
-        runDir: tmp,
-        prdPath,
-        queueEntry: { slug, status: 'running', cwd: nonGitCwd },
-        allJobs: [],
-        committedDuringRun: false,
-      });
-      assert.equal(verdict.verdict, 'clean', `expected clean via transcript fallback, got ${verdict.verdict}: ${verdict.reason}`);
-    } finally { rmdir(nonGitCwd); }
-  } finally { rmdir(tmp); }
-});
-
 // ─── (2) no evidence lines → fallback must not fire, still transcript_errors ──
 
-test('PASS + late is_error + NO transcript evidence + non-git cwd → transcript_errors (no fallback)', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '99-fix-no-evidence';
-    writeLog(tmp, slug, buildRunEvents({ includeCommitEvidence: false }));
-    const prdPath = writePrd(tmp, slug, '# Fix scheduler skip guard');
-    const nonGitCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'run-verify-nongit-cwd-'));
-    try {
-      const verdict = await verifyRun({
-        runDir: tmp,
-        prdPath,
-        queueEntry: { slug, status: 'running', cwd: nonGitCwd },
-        allJobs: [],
-        committedDuringRun: false,
-      });
-      assert.equal(verdict.verdict, 'transcript_errors', `expected transcript_errors without evidence, got ${verdict.verdict}: ${verdict.reason}`);
-      assert.equal(verdict.downgradeTo, 'needs_review');
-    } finally { rmdir(nonGitCwd); }
-  } finally { rmdir(tmp); }
-});
-
 // ─── (3) git-repo cwd + evidence + committedDuringRun:false → fallback must not apply ──
-
-test('PASS + late is_error + transcript evidence + GIT-REPO cwd + committedDuringRun:false → transcript_errors (false-PASS guard)', async () => {
-  const tmp = makeTmpDir();
-  const repo = makeTmpGitRepo();
-  try {
-    const slug = '99-fix-git-repo-cwd';
-    writeLog(tmp, slug, buildRunEvents({ includeCommitEvidence: true }));
-    const prdPath = writePrd(tmp, slug, '# Fix scheduler skip guard');
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'running', cwd: repo },
-      allJobs: [],
-      committedDuringRun: false,
-    });
-    assert.equal(verdict.verdict, 'transcript_errors', `fallback must not apply when git ancestry is observable, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, 'needs_review');
-  } finally { rmdir(tmp); rmdir(repo); }
-});
 
 // ─── (4) PASS + transcript evidence + non-git cwd must not be pass_no_commit ──
 

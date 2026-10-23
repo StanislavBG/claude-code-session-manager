@@ -104,9 +104,9 @@ failure modes have different fixes:
    its test), `migration` (mechanical change), `doc`, `validate`.
 7. **Keep each PRD small**: at most 3 edited files, 1 new file, 6 criteria. The validate PRD is
    exempt: it has one criterion per PRD, plus the record. A new helper and its first caller are
-   two PRDs. Most PRDs take 5–10 executor minutes; past estimates were 3–5×
-   too high. Never estimate over 15; split. Why: the kill budget floors at 45 minutes, so a low
-   estimate never starves a run.
+   two PRDs. Most PRDs take 5–10 executor minutes; split anything expected
+   to take over 15. Do not write an estimate. Why: the kill budget floors at 45 minutes, so a
+   run without one is never starved.
 8. **Make each PRD self-contained.** The executor sees only the PRD and the project. Notes are
    a recipe: `Read first:` (at most 4 files, with line ranges), `Steps:` (numbered, each naming
    file and function), `Do not touch:` (files a sibling owns). Quote signatures. Say when a PRD
@@ -114,7 +114,7 @@ failure modes have different fixes:
 9. **Write plain, checkable criteria.** Each names a file, a symbol and the result; one names
    the test file and tests. Commands go in `gate`. No open-ended "grep X and update" lines.
 10. **Show the plan once**: the plan goal line, the stage view (for example `Stage 1: A ∥ B →
-    Stage 2: C → validate`), and a table (#, PRD, files, gate, dependsOn, estimate) — not PRD
+    Stage 2: C → validate`), and a table (#, PRD, files, gate, dependsOn) — not PRD
     drafts. Queue at once when the Epic is `feature` or `bug` and scope is clear; otherwise ask
     one approval question, once.
 11. Before the first `scheduler_create_prd` call, run `git -C "$SM_PROJECT_ROOT" rev-parse HEAD`
@@ -135,7 +135,7 @@ failure modes have different fixes:
 | --- | --- |
 | `title`, `goal`, `acceptanceCriteria`, `implementationNotes`, `outOfScope` | Steps 6–9. Goal: 2–4 sentences. |
 | `gate`, `files` | **REQUIRED.** Rules below. The tool refuses a call without them. |
-| `estimateMinutes` | Honest: 5–10, never over 15. |
+| `estimateMinutes` | Omit. Pass one only for a run that legitimately needs more than the 45-minute kill-budget floor. |
 | `sourcePromptId` | Always `<epic-id>`. Never rely on the server's fallback. |
 | `cwd` | The Epic's project root, as an absolute path or `~/…`. The API always uses the Epic's project, whatever you pass. To work in another project, open an Epic there. |
 | `dependsOn` | Slugs that must finish first. The only ordering tool. |
@@ -206,7 +206,7 @@ paths → verdict line.
 
 End every plan with exactly one validate PRD:
 
-1. `agentType: "validator"`, `tag: "build"`, `estimateMinutes: 10`, slug
+1. `agentType: "validator"`, `tag: "build"`, slug
    `validate-<short-plan-name>`. Its title is the plan goal shown on the Scheduler card, so
    write it as `Validate: <plain-language goal>`.
 2. `dependsOn`: every other slug in the plan. Past the cap of 100, only the sinks (PRDs nothing

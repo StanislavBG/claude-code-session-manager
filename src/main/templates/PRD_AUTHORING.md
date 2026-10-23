@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v8 -->
+<!-- PRD_AUTHORING.md v9 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -69,7 +69,7 @@ if (!found) {
 Rule: every PRD needs these fields.
 1. `title` — one line, plain English.
 2. `cwd` — the Epic's project root, as an absolute path or `~/…`. The API always sets it to the Epic's project, whatever you pass. To work in another project, open an Epic in that project. The folder must exist when you queue.
-3. `estimateMinutes` — a realistic integer. Most PRDs take 5–10 minutes (§8) — don't inflate it.
+3. `estimateMinutes` — optional; omit it. A run without one gets the 45-minute kill-budget floor. Pass one only if the run legitimately needs longer. Most PRDs take 5–10 minutes (§8).
 
 `parallelGroup` is deprecated and ignored. `dependsOn: [<slug>, ...]` is the only ordering primitive.
 
@@ -187,7 +187,7 @@ The scheduler appends a finish protocol after your PRD's own steps — you never
 ## §12 Queueing PRDs from external automation
 
 Decision: is the session-manager app running on this machine right now?
-- Yes → call the `scheduler_create_prd` MCP tool, with the usual fields (`title`, `cwd`, `estimateMinutes`, `sourcePromptId`, `goal`, `acceptanceCriteria`, `implementationNotes`) plus `gate` and `files` (§6).
+- Yes → call the `scheduler_create_prd` MCP tool, with the usual fields (`title`, `cwd`, `sourcePromptId`, `goal`, `acceptanceCriteria`, `implementationNotes`) plus `gate` and `files` (§6).
 - No → stop. Ask the human to start the app, then call the tool again. Never write the PRD file by hand: the scheduler quarantines a file the API did not write, and it never runs.
 
 It only works while the app is running — closing it removes the admin port/token, and the call fails with `session-manager app is not running (admin API unreachable)`.
@@ -214,7 +214,7 @@ Before queueing a new PRD, verify each of these:
 - [ ] **§2 No bonus work:** the AC list is the only source of work.
 - [ ] **§3 Verify, don't poll:** every deploy/migration step is followed by a test command that exits 1 on failure; the AC test command ran green once before you declare done.
 - [ ] **§4 Bounded generators:** any search/seed loop has an explicit max and surfaces failure on exhaustion.
-- [ ] **§5 Frontmatter:** `title`, `cwd` (exists on this machine), `estimateMinutes` present; `dependsOn` used for ordering, not `parallelGroup`.
+- [ ] **§5 Frontmatter:** `title`, `cwd` (exists on this machine); `estimateMinutes` omitted (optional); `dependsOn` used for ordering, not `parallelGroup`.
 - [ ] **§6 Gate and files:** `gate` follows every rule in §6 (or is `["none"]` alone); `files` is 1–50 repo-relative paths, no overlap with a concurrent PRD.
 - [ ] **§7 Self-contained:** no reference to "the conversation" or outside context; paths/identifiers inline; clean UTF-8, no NUL bytes (`grep -qP '\x00' file && echo BAD`).
 - [ ] **§7 Worktree reach:** no relative path to a gitignored file; live-run steps use absolute main-checkout paths in an artifact-only PRD. Why: the job worktree has no gitignored runtime state, so relative paths fail or bake a temporary path into host config (burrow 1516).

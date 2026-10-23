@@ -11,7 +11,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { upgradeIfStale, compareSemver } = require('../seedDevPlugin.cjs');
+const { upgradeIfStale, compareSemver, seedDevPlugin, markerPath } = require('../seedDevPlugin.cjs');
 
 const KEY = 'session-manager-dev@session-manager';
 let home;
@@ -93,4 +93,55 @@ test('CLI failure → logged, resolves', async () => {
   const { writeLog: wl2, p: p2 } = run({ runUpdate: vi.fn(async () => { throw new Error('x'); }) });
   await expect(p2).resolves.toBeUndefined();
   expect(wl2).toHaveBeenCalledTimes(1);
+});
+
+// ---- marketplace repair (marker.done) ----
+function market(p) {
+  writeJson('plugins/known_marketplaces.json', { 'session-manager': { source: { source: 'directory', path: p }, installLocation: p } });
+}
+function doneMarker() {
+  const m = markerPath(home);
+  fs.mkdirSync(path.dirname(m), { recursive: true });
+  fs.writeFileSync(m, JSON.stringify({ done: true, attempts: 0 }));
+}
+async function seed(expectedDir) {
+  const runInstall = vi.fn(async () => ({ ok: true, exitCode: 0 }));
+  const runUpdate = vi.fn(async () => ({ ok: true, exitCode: 0 }));
+  await seedDevPlugin({ home, expectedDir, runInstall, runUpdate, logger: {}, writeLog: vi.fn() });
+  return { runInstall, runUpdate };
+}
+
+test('repairs a missing marketplace path', async () => {
+  const expected = fs.mkdtempSync(path.join(os.tmpdir(), 'sdp-exp-'));
+  doneMarker(); enabled(true); market(path.join(home, 'gone'));
+  const { runInstall } = await seed(expected);
+  expect(runInstall).toHaveBeenCalledTimes(1);
+  fs.rmSync(expected, { recursive: true, force: true });
+});
+
+test('repairs a path pointing at an older package dir', async () => {
+  const expected = fs.mkdtempSync(path.join(os.tmpdir(), 'sdp-exp-'));
+  const old = fs.mkdtempSync(path.join(os.tmpdir(), 'sdp-old-'));
+  doneMarker(); enabled(true); market(old);
+  const { runInstall } = await seed(expected);
+  expect(runInstall).toHaveBeenCalledTimes(1);
+  fs.rmSync(expected, { recursive: true, force: true });
+  fs.rmSync(old, { recursive: true, force: true });
+});
+
+test('leaves a deliberately disabled plugin alone', async () => {
+  const expected = fs.mkdtempSync(path.join(os.tmpdir(), 'sdp-exp-'));
+  doneMarker(); enabled(false); market(path.join(home, 'gone'));
+  const { runInstall } = await seed(expected);
+  expect(runInstall).not.toHaveBeenCalled();
+  fs.rmSync(expected, { recursive: true, force: true });
+});
+
+test('healthy install is a no-op', async () => {
+  const expected = fs.mkdtempSync(path.join(os.tmpdir(), 'sdp-exp-'));
+  doneMarker(); enabled(true); market(expected);
+  const { runInstall, runUpdate } = await seed(expected);
+  expect(runInstall).not.toHaveBeenCalled();
+  expect(runUpdate).not.toHaveBeenCalled();
+  fs.rmSync(expected, { recursive: true, force: true });
 });

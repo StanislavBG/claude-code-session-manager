@@ -29,21 +29,21 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { install, update } = require('./pluginInstall.cjs');
+const { install, update, bundledMarketplaceDir } = require('./pluginInstall.cjs');
 
 const PLUGIN_SLUG = 'session-manager-dev';
 const MARKETPLACE = { add: 'bundled', name: 'session-manager' };
 const ENABLED_KEY = `${PLUGIN_SLUG}@${MARKETPLACE.name}`;
 const MAX_ATTEMPTS = 3; // give a transient first-boot failure a few chances
 
-function markerPath() {
-  return path.join(os.homedir(), '.claude', 'session-manager', '.dev-plugin-seeded');
+function markerPath(home = os.homedir()) {
+  return path.join(home, '.claude', 'session-manager', '.dev-plugin-seeded');
 }
 
 /** Read the marker → { done:boolean, attempts:number }. Absent = fresh. */
-function readMarker() {
+function readMarker(home) {
   try {
-    const raw = fs.readFileSync(markerPath(), 'utf8').trim();
+    const raw = fs.readFileSync(markerPath(home), 'utf8').trim();
     const m = JSON.parse(raw);
     return { done: !!m.done, attempts: Number(m.attempts) || 0 };
   } catch {
@@ -51,9 +51,9 @@ function readMarker() {
   }
 }
 
-function alreadyEnabled() {
+function alreadyEnabled(home = os.homedir()) {
   try {
-    const raw = fs.readFileSync(path.join(os.homedir(), '.claude', 'settings.json'), 'utf8');
+    const raw = fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8');
     const enabled = JSON.parse(raw)?.enabledPlugins;
     return !!(enabled && enabled[ENABLED_KEY]);
   } catch {
@@ -61,9 +61,9 @@ function alreadyEnabled() {
   }
 }
 
-function writeMarker(state) {
+function writeMarker(state, home) {
   try {
-    const p = markerPath();
+    const p = markerPath(home);
     fs.mkdirSync(path.dirname(p), { recursive: true });
     fs.writeFileSync(p, JSON.stringify({ ...state, ts: new Date().toISOString() }) + '\n');
   } catch (err) {
@@ -85,6 +85,24 @@ function compareSemver(a, b) {
 
 function readJson(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+}
+
+/**
+ * Pure check: is the registered 'session-manager' marketplace source missing on disk or
+ * different from `expectedDir`? Not registered at all → false (a deliberate uninstall stays).
+ * (Own reader: delegationReadiness's readDevMarketplacePath is not exported.)
+ */
+function marketplaceIsStale({ homeDir = os.homedir(), expectedDir = bundledMarketplaceDir() } = {}) {
+  const m = readJson(path.join(homeDir, '.claude', 'plugins', 'known_marketplaces.json'))?.[MARKETPLACE.name];
+  const p = m?.source?.path ?? m?.installLocation;
+  if (typeof p !== 'string' || !p) return false;
+  if (path.resolve(p) !== path.resolve(expectedDir)) return true;
+  return !fs.existsSync(p);
+}
+
+/** True only when settings.json explicitly sets the plugin to false. */
+function deliberatelyDisabled(home) {
+  return readJson(path.join(home, '.claude', 'settings.json'))?.enabledPlugins?.[ENABLED_KEY] === false;
 }
 
 function bundledVersion() {
@@ -131,23 +149,32 @@ async function upgradeIfStale({
   }
 }
 
-async function seedDevPlugin({ logger = console, writeLog = () => {} } = {}) {
+async function seedDevPlugin({
+  logger = console,
+  writeLog = () => {},
+  home = os.homedir(),
+  expectedDir = bundledMarketplaceDir(),
+  runInstall = install,
+  runUpdate = update,
+} = {}) {
   if (process.env.SM_SEED_DEV_PLUGIN_DISABLE === '1') return;
-  await upgradeIfStale({ logger, writeLog });
-  const marker = readMarker();
-  if (marker.done) return;                       // succeeded before — leave it alone.
-  if (marker.attempts >= MAX_ATTEMPTS) return;   // gave up — manual install only.
+  await upgradeIfStale({ logger, writeLog, home, runUpdate });
+  const marker = readMarker(home);
+  // Repair: the registered marketplace dir vanished or points at an older package dir.
+  const repair = marker.done && !deliberatelyDisabled(home) && marketplaceIsStale({ homeDir: home, expectedDir });
+  if (marker.done && !repair) return;            // succeeded before — leave it alone.
+  if (!marker.done && marker.attempts >= MAX_ATTEMPTS) return;   // gave up — manual install only.
 
   try {
-    if (alreadyEnabled()) {
-      writeMarker({ done: true, attempts: marker.attempts });
+    if (!repair && alreadyEnabled(home)) {
+      writeMarker({ done: true, attempts: marker.attempts }, home);
       return;
     }
-    logger.log?.('[seedDevPlugin] installing bundled session-manager-dev plugin…');
-    const r = await install({ slug: PLUGIN_SLUG, marketplace: MARKETPLACE });
+    logger.log?.(`[seedDevPlugin] ${repair ? 're-registering' : 'installing'} bundled session-manager-dev plugin…`);
+    const r = await runInstall({ slug: PLUGIN_SLUG, marketplace: MARKETPLACE });
     if (r.ok) {
       logger.log?.('[seedDevPlugin] installed session-manager-dev@session-manager');
-      writeMarker({ done: true, attempts: marker.attempts });
+      writeMarker({ done: true, attempts: marker.attempts }, home);
     } else {
       // Failure: bump the attempt counter so the next boot can retry (bounded).
       logger.warn?.(`[seedDevPlugin] install failed (exit ${r.exitCode})${r.error ? ` — ${r.error}` : ''}; attempt ${marker.attempts + 1}/${MAX_ATTEMPTS}`);
@@ -157,7 +184,7 @@ async function seedDevPlugin({ logger = console, writeLog = () => {} } = {}) {
         message: 'install failed',
         meta: { exitCode: r.exitCode, error: r.error, attempt: marker.attempts + 1, maxAttempts: MAX_ATTEMPTS },
       });
-      writeMarker({ done: false, attempts: marker.attempts + 1 });
+      writeMarker({ done: false, attempts: marker.attempts + 1 }, home);
     }
   } catch (err) {
     logger.warn?.('[seedDevPlugin] error:', err?.message ?? err);
@@ -167,8 +194,8 @@ async function seedDevPlugin({ logger = console, writeLog = () => {} } = {}) {
       message: 'seed error',
       meta: { error: err?.message ?? String(err), attempt: marker.attempts + 1, maxAttempts: MAX_ATTEMPTS },
     });
-    writeMarker({ done: false, attempts: marker.attempts + 1 });
+    writeMarker({ done: false, attempts: marker.attempts + 1 }, home);
   }
 }
 
-module.exports = { seedDevPlugin, upgradeIfStale, compareSemver, markerPath, MAX_ATTEMPTS };
+module.exports = { seedDevPlugin, upgradeIfStale, marketplaceIsStale, compareSemver, markerPath, MAX_ATTEMPTS };

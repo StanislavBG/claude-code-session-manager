@@ -32,6 +32,7 @@ async function runClaudeP(prompt, { model = 'sonnet', timeoutMs = 180_000, syste
       '--model', model,
       '--dangerously-skip-permissions',
       ...headlessPermissionArgs(),
+      '--strict-mcp-config',
       '--output-format', 'text',
     ];
     if (systemPrompt) args.push('--append-system-prompt', systemPrompt);

@@ -254,6 +254,7 @@ async function runProbe(claudeBin, prompt) {
         '--max-budget-usd', '0.50',
         '--dangerously-skip-permissions',
         ...headlessPermissionArgs(),
+        '--strict-mcp-config',
         '--allowedTools', 'Bash',
       ], { env: withProcRole(process.env, 'aux'), stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
     } catch (e) {

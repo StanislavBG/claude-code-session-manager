@@ -955,7 +955,7 @@ async function dispatchEnvelope(envelope, device, client) {
   let result;
   try {
     result = await dispatchCommand(type, payload ?? {}, client);
-    await auditLog(ts, type, device.deviceId, id, 'ok', client);
+    await auditLog(ts, type, device.deviceId, id, auditResultFor(result), client);
   } catch (e) {
     const code = e?.name === 'ZodError' ? 'schema_invalid' : 'dispatch_error';
     await auditLog(ts, type, device.deviceId, id, `error:${code}`, client);
@@ -963,6 +963,14 @@ async function dispatchEnvelope(envelope, device, client) {
   }
 
   respond(id, result, undefined, client);
+}
+
+/** Audit result string for a handler result: structured refusals log as refused[:reason]. */
+function auditResultFor(result) {
+  if (result && result.ok === false && typeof result.disposition === 'string') {
+    return typeof result.reason === 'string' && result.reason ? `refused:${result.reason}` : 'refused';
+  }
+  return 'ok';
 }
 
 function respond(msgId, payload, typeOverride, client) {
@@ -1192,23 +1200,28 @@ function getDispatchMap() {
       const data = await sessionsStore.load();
       const tabs = data?.tabs ?? [];
       // Resolve the target in main: an open tab, or an ACTIVE Epic (by id or
-      // claudeSessionId) of an open project. Anything else fails loudly.
+      // claudeSessionId) of an open project. Anything else is a structured refusal.
+      const outcome = (r) => ({
+        ok: r.disposition !== 'refused',
+        disposition: r.disposition,
+        ...(r.reason ? { reason: r.reason } : {}),
+      });
       if (tabs.some((t) => t.sessionId === parsed.tabId || t.id === parsed.tabId)) {
-        chatRunner.enqueueExternalPrompt(parsed.tabId, parsed.prompt);
-        return { ok: true };
+        return outcome(await chatRunner.enqueueExternalPrompt(parsed.tabId, parsed.prompt));
       }
       for (const tab of tabs) {
         const sessions = Object.values(readActiveIndex(tab.cwd)?.sessions ?? {});
         const epic = sessions.find((e) => e && (e.id === parsed.tabId || e.claudeSessionId === parsed.tabId));
         if (!epic) continue;
-        if (epic.status !== 'active' || !epic.claudeSessionId) throw new Error('target is not an active session');
-        chatRunner.enqueueExternalPrompt(epic.id, parsed.prompt, {
+        if (epic.status !== 'active' || !epic.claudeSessionId) {
+          return { ok: false, disposition: 'refused', reason: epic.status === 'proposed' ? 'proposed' : 'not-active' };
+        }
+        return outcome(await chatRunner.enqueueExternalPrompt(epic.id, parsed.prompt, {
           sessionId: epic.claudeSessionId,
           cwd: epic.cwd || tab.cwd,
-        });
-        return { ok: true };
+        }));
       }
-      throw new Error('unknown chat target');
+      return { ok: false, disposition: 'refused', reason: 'unknown-target' };
     },
 
     'cmd:session:options': async () => {
@@ -1524,6 +1537,7 @@ module.exports = {
   },
   __test: {
     getDispatchMap,
+    auditResultFor,
     startSessionWatch,
     pollSessionWatcher,
     getSessionWatcher: (tabId) => _sessionWatchers.get(tabId),

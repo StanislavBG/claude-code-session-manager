@@ -78,8 +78,7 @@ module.exports = {
   // this age is escalated: warn-logged naming project + slug + age, and
   // surfaced distinctly on Home (see homeNeedsYou.ts's matching constant)
   // so it cannot be stranded indefinitely with nothing looking at it — see
-  // findStaleQuarantinedJobs in scheduler.cjs. Overridable via
-  // SM_QUARANTINE_ESCALATE_HOURS for testing/tuning.
+  // findStaleQuarantinedJobs in scheduler.cjs.
   QUARANTINE_ESCALATE_MS: 24 * 60 * 60_000,
 
   // A project with pending work, nothing of its own running, and an oldest

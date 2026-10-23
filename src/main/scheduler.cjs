@@ -125,15 +125,12 @@ const {
   MAX_JOB_DURATION_MS,
   BROADCAST_COALESCE_MS,
   RECONCILE_SLOW_PASS_MS,
-  QUARANTINE_ESCALATE_MS: QUARANTINE_ESCALATE_MS_DEFAULT,
+  QUARANTINE_ESCALATE_MS,
   PIDLESS_SPAWN_GRACE_MS,
   INVESTIGATION_MAX_MS,
   STARVATION_ESCALATE_MS,
   STARVE_ESCALATION_MS,
 } = require('./lib/scheduler/schedulerConfig.cjs');
-const QUARANTINE_ESCALATE_MS = process.env.SM_QUARANTINE_ESCALATE_HOURS
-  ? Number(process.env.SM_QUARANTINE_ESCALATE_HOURS) * 60 * 60_000
-  : QUARANTINE_ESCALATE_MS_DEFAULT;
 // A running job past this fraction of its own budget gets a durable
 // `budgetWarning` stamp on its row (see the budget watchdog below) so the
 // renderer can warn BEFORE the kill, not only after.
@@ -647,7 +644,6 @@ function ensureDirs() {
 // would deadlock the exit path.
 const config = require('./config.cjs');
 const { seedAuthoringGuide } = require('./lib/prd/prdAuthoringSeed.cjs');
-const atomicWriteJsonSync = (p, data) => config.writeJsonSync(p, data);
 
 // ---------- scheduler-state.json (sidecar) ----------
 
@@ -767,10 +763,10 @@ function drainSnapshot(jobs) {
 /**
  * Restart is triggered automatically ONLY when the installed build-info.json
  * differs from the running codeSha (an install/update already happened) —
- * never by polling npm. SM_AUTO_UPGRADE_RESTART=0 disables it.
+ * never by polling npm.
  */
 function maybeAutoRequestRestart() {
-  if (process.env.SM_AUTO_UPGRADE_RESTART === '0' || process.env.SM_DEV === '1') return null;
+  if (process.env.SM_DEV === '1') return null;
   const installed = readInstalledBuildInfo();
   const installedSha = typeof installed?.gitShortSha === 'string' ? installed.gitShortSha : null;
   if (!upgradeDrain.installedBuildDiffers({ running: SCHEDULER_CODE_SHA, installed: installedSha })) return null;
@@ -2088,10 +2084,6 @@ async function refreshNextReset() {
   return cachedNextReset;
 }
 
-function getNextResetCached() {
-  return cachedNextReset;
-}
-
 /**
  * Pure: picks the reset to pause against for a rate-limited run (PRD 1118).
  * Prefers the BINDING window read off the run's own log — refreshNextReset()
@@ -2352,7 +2344,7 @@ function buildScheduleStatePayload(state) {
     // classifyQueueHealth/classifyQueueStarvation's header comments for why
     // the two must never merge.
     lastDispatchAttemptAt: state.lastDispatchAttemptAt ?? null,
-    nextReset: getNextResetCached(),
+    nextReset: cachedNextReset,
     paused: state.paused,
     drain: state.drain ?? null,
     // Launch circuit breaker (issue #11): which personas cannot launch right
@@ -4194,10 +4186,9 @@ function pickRunDir() {
 // process. It never throws and never blocks or fails a spawn: a failed
 // install just logs one line and leaves the PATH addition pointing at a shim
 // dir that may have nothing in it yet, no worse than today's
-// no-shim-at-all. SM_TIMEOUT_SHIM_DISABLE=1 skips it outright.
+// no-shim-at-all.
 let timeoutShimEnsured = null;
 function ensureTimeoutShimOnce() {
-  if (process.env.SM_TIMEOUT_SHIM_DISABLE === '1') return Promise.resolve();
   if (!timeoutShimEnsured) {
     timeoutShimEnsured = ensureTimeoutShim().then(
       (result) => {
@@ -4501,11 +4492,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // `launchEnv` is the launch circuit breaker's degraded-mode env (e.g.
     // MAX_THINKING_TOKENS=0 while an outdated CLI's thinking parameter is
     // being rejected — lib/scheduler/launchFailure.cjs); applied last so it wins.
-    // SM_TIMEOUT_SHIM_DISABLE=1 is the kill switch for the PATH addition
-    // below — paired with the install skip inside ensureTimeoutShimOnce().
-    const timeoutShimEnabled = process.env.SM_TIMEOUT_SHIM_DISABLE !== '1';
     const childEnv = cleanChildEnv({
-      PATH: timeoutShimEnabled ? withTimeoutShimOnPath(pathWithUserBins()) : pathWithUserBins(),
+      PATH: withTimeoutShimOnPath(pathWithUserBins()),
       SM_PROJECT_ROOT: cwd,
       SM_SCHEDULER_JOB_SLUG: job.slug,
       SM_SCHEDULER_JOB_MAY_QUEUE: job.agentType === 'architect' ? '1' : '0',
@@ -5232,11 +5220,8 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   await ensureCliCapsProbed();
   await ensureTimeoutShimOnce();
   const claudeBin = resolveClaudeBin();
-  // SM_TIMEOUT_SHIM_DISABLE=1 is the kill switch for the PATH addition below —
-  // paired with the install skip inside ensureTimeoutShimOnce().
-  const timeoutShimEnabled = process.env.SM_TIMEOUT_SHIM_DISABLE !== '1';
   const childEnv = cleanChildEnv({
-    PATH: timeoutShimEnabled ? withTimeoutShimOnPath(pathWithUserBins()) : pathWithUserBins(), // Homebrew/user bins for macOS
+    PATH: withTimeoutShimOnPath(pathWithUserBins()), // Homebrew/user bins for macOS
     BASH_DEFAULT_TIMEOUT_MS: String(BASH_DEFAULT_TIMEOUT_MS),
     BASH_MAX_TIMEOUT_MS: String(BASH_MAX_TIMEOUT_MS),
   });
@@ -8955,7 +8940,7 @@ async function runGateShadow(job) {
     if (fs.existsSync(path.dirname(verdictsPath))) {
       let existing = {};
       try { existing = JSON.parse(fs.readFileSync(verdictsPath, 'utf8')) || {}; } catch { /* absent/unparseable → fresh */ }
-      try { atomicWriteJsonSync(verdictsPath, { ...existing, gateShadow }); } catch { /* best-effort */ }
+      try { config.writeJsonSync(verdictsPath, { ...existing, gateShadow }); } catch { /* best-effort */ }
     }
   }
 
@@ -9171,7 +9156,7 @@ async function reverifyNeedsReview() {
   // pass starting before this one's pick resolves could choose a target of
   // its own too, breaking the single-flight rule.
   let pick = null;
-  if (!gateShadowPending && process.env.SM_GATE_SHADOW_DISABLE !== '1') {
+  if (!gateShadowPending) {
     pick = (async () => {
       const needsReview = snap.jobs.filter((j) => j.status === 'needs_review');
       const headByCwd = new Map();

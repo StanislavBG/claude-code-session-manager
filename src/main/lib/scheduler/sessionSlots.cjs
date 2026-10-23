@@ -32,7 +32,7 @@ const atomicFs = require('../util/atomicFs.cjs');
 const { isProvablyDead, DEFAULT_GRACE_MS } = require('./reservationExpiry.cjs');
 
 const MIN_SLOTS = 0;
-const MAX_SLOTS = 10;
+const MAX_SLOTS = 32;
 const DEFAULT_SLOTS = 5;
 
 

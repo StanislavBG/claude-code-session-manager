@@ -33,11 +33,13 @@ test('pool defaults to 5 slots and exhausts', () => {
   assert.ok(slots.acquire('f'));
 });
 
-test('SM_SESSION_SLOTS overrides, clamped to [0, 10]', () => {
+test('SM_SESSION_SLOTS overrides, clamped to [0, 32]', () => {
   process.env.SM_SESSION_SLOTS = '1';
   assert.equal(slots.totalSlots(), 1);
   process.env.SM_SESSION_SLOTS = '20';
-  assert.equal(slots.totalSlots(), 10, 'clamped high');
+  assert.equal(slots.totalSlots(), 20, 'within range');
+  process.env.SM_SESSION_SLOTS = '40';
+  assert.equal(slots.totalSlots(), 32, 'clamped high');
   process.env.SM_SESSION_SLOTS = '0';
   assert.equal(slots.totalSlots(), 0, '0 is a legal explicit value (pauses new launches)');
   process.env.SM_SESSION_SLOTS = '-5';
@@ -64,7 +66,9 @@ test('setCap persists a value that totalSlots() picks up without an env override
 });
 
 test('setCap rejects out-of-range or non-integer values', () => {
-  assert.throws(() => slots.setCap(11));
+  assert.equal(slots.setCap(32), 32);
+  assert.equal(slots.totalSlots(), 32, 'setCap(32) persists');
+  assert.throws(() => slots.setCap(33));
   assert.throws(() => slots.setCap(-1));
   assert.throws(() => slots.setCap(2.5));
 });
@@ -95,6 +99,7 @@ test('snapshot names holders for attribution', () => {
   slots.acquire('chat:tab-1');
   const snap = slots.snapshot();
   assert.equal(snap.inUse, 2);
+  assert.equal(snap.max, 32, 'snapshot reports MAX_SLOTS');
   assert.deepEqual(snap.holders.map((h) => h.owner).sort(), ['chat:tab-1', 'scheduler:42-fix-thing']);
 });
 

@@ -367,3 +367,60 @@ test('inputs: stored legacy macro with literal {{x}} and no inputs still lists',
   const listed = await lib.listMacros(opts);
   expect(listed.map((m) => m.id)).toEqual(['legacy']);
 });
+
+const PORTFOLIO_INPUTS = [
+  { name: 'mode', label: 'Mode', default: 'auto', required: true, options: ['auto', 'early-check', 'review'] },
+  { name: 'focus', label: 'Focus (tool, project or question; optional)', default: 'none', required: false },
+  { name: 'instructions', label: 'Instructions for Bilko (verbatim; optional)', default: 'none', required: false },
+  { name: 'data', label: 'New data or links since last review (optional)', default: 'none', required: false },
+];
+const PORTFOLIO_PROMPT = 'Owner inputs for this run:\n- Mode: {{mode}}\n- Focus: {{focus}}\n- Instructions: {{instructions}}\n- Data / links: {{data}}';
+
+test('renderMacroPrompt: Portfolio with {} renders defaults', () => {
+  const r = lib.renderMacroPrompt(PORTFOLIO_PROMPT, PORTFOLIO_INPUTS, {});
+  expect(r).toEqual({
+    ok: true,
+    prompt: 'Owner inputs for this run:\n- Mode: auto\n- Focus: none\n- Instructions: none\n- Data / links: none',
+  });
+  expect(r.prompt).not.toContain('{{');
+});
+
+test('renderMacroPrompt: Portfolio with supplied values', () => {
+  const r = lib.renderMacroPrompt(PORTFOLIO_PROMPT, PORTFOLIO_INPUTS, { mode: 'review', focus: 'Bilko' });
+  expect(r).toEqual({
+    ok: true,
+    prompt: 'Owner inputs for this run:\n- Mode: review\n- Focus: Bilko\n- Instructions: none\n- Data / links: none',
+  });
+});
+
+test('renderMacroPrompt: bogus option rejected', () => {
+  expect(lib.renderMacroPrompt(PORTFOLIO_PROMPT, PORTFOLIO_INPUTS, { mode: 'bogus' })).toEqual({
+    ok: false,
+    error: '"Mode" must be one of: auto, early-check, review',
+  });
+});
+
+test('renderMacroPrompt: strict when no inputs declared', () => {
+  const err = { ok: false, error: 'prompt uses undeclared input {{x}}' };
+  expect(lib.renderMacroPrompt('keep {{x}}', undefined, {})).toEqual(err);
+  expect(lib.renderMacroPrompt('keep {{x}}', [], {})).toEqual(err);
+  expect(lib.renderMacroPrompt('plain text', undefined, {})).toEqual({ ok: true, prompt: 'plain text' });
+});
+
+test('renderMacroPrompt: only own string values are read', () => {
+  const inputs = [{ name: 'constructor', label: 'C', default: 'd' }];
+  expect(lib.renderMacroPrompt('v={{constructor}}', inputs, {})).toEqual({ ok: true, prompt: 'v=d' });
+});
+
+test('macroPlaceholders / defaultMacroValues', () => {
+  expect(lib.macroPlaceholders('{{b}} {{a}} {{b}}')).toEqual(['b', 'a']);
+  expect(lib.defaultMacroValues([{ name: 'a', label: 'A', default: 'x' }, { name: 'b', label: 'B' }])).toEqual({ a: 'x', b: '' });
+});
+
+test('macroVisibleIn', () => {
+  expect(lib.macroVisibleIn({ projects: ['*'] }, '/work/a')).toBe(true);
+  expect(lib.macroVisibleIn({ projects: ['/work/a'] }, '/work/a')).toBe(true);
+  expect(lib.macroVisibleIn({ projects: ['/work/a'] }, '/work/a/')).toBe(true);
+  expect(lib.macroVisibleIn({ projects: ['/work/a'] }, '/work/b')).toBe(false);
+  expect(lib.macroVisibleIn({ projects: [] }, '/work/a')).toBe(false);
+});

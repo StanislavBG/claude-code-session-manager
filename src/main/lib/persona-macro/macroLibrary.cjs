@@ -93,6 +93,61 @@ function refineInputs(value, ctx) {
   }
 }
 
+/** Distinct `{{name}}` placeholder names in first-seen order. */
+function macroPlaceholders(prompt) {
+  const names = [];
+  for (const m of String(prompt).matchAll(new RegExp(MACRO_PLACEHOLDER_RE.source, 'g'))) {
+    if (!names.includes(m[1])) names.push(m[1]);
+  }
+  return names;
+}
+
+/** `{ [name]: default ?? '' }` for every declared input. */
+function defaultMacroValues(inputs) {
+  const out = {};
+  for (const i of inputs || []) out[i.name] = i.default ?? '';
+  return out;
+}
+
+function sanitizeMacroValue(v) {
+  // eslint-disable-next-line no-control-regex
+  return v.replace(/[\r\n\t]+/g, ' ').replace(/[\u0000-\u001f\u007f]/g, '').trim();
+}
+
+const MACRO_PROMPT_RENDERED_MAX_LEN = 8000;
+
+/**
+ * Mirrors `src/renderer/lib/macroPrompt.ts` renderMacroPrompt, but strict for macros
+ * without inputs: a placeholder with no declared input is always an error.
+ * @returns {{ ok: true, prompt: string } | { ok: false, error: string }}
+ */
+function renderMacroPrompt(prompt, inputs, values) {
+  const vals = values && typeof values === 'object' ? values : {};
+  const clean = Object.create(null);
+  for (const input of inputs || []) {
+    const own = Object.prototype.hasOwnProperty.call(vals, input.name) && typeof vals[input.name] === 'string';
+    const v = sanitizeMacroValue(own ? vals[input.name] : (input.default ?? ''));
+    if (v === '') {
+      if (input.required) return { ok: false, error: `"${input.label}" is required` };
+    } else if (v.length > MACRO_INPUT_MAX_LEN) {
+      return { ok: false, error: `"${input.label}" is longer than ${MACRO_INPUT_MAX_LEN} characters` };
+    } else if (input.options && input.options.length > 0 && !input.options.includes(v)) {
+      return { ok: false, error: `"${input.label}" must be one of: ${input.options.join(', ')}` };
+    }
+    clean[input.name] = v;
+  }
+
+  for (const name of macroPlaceholders(prompt)) {
+    if (!(name in clean)) return { ok: false, error: `prompt uses undeclared input {{${name}}}` };
+  }
+
+  const rendered = String(prompt).replace(new RegExp(MACRO_PLACEHOLDER_RE.source, 'g'), (_m, n) => clean[n]);
+  if (rendered.length > MACRO_PROMPT_RENDERED_MAX_LEN) {
+    return { ok: false, error: `rendered prompt is longer than ${MACRO_PROMPT_RENDERED_MAX_LEN} characters` };
+  }
+  return { ok: true, prompt: rendered };
+}
+
 const MacroSchema = z.object({
   id: MacroIdSchema,
   label: MacroLabelSchema,
@@ -149,6 +204,12 @@ function normalizeCwd(cwd) {
   const collapsed = cwd.trim().replace(/\/{2,}/g, '/');
   if (collapsed === '/') return '/';
   return collapsed.replace(/\/+$/, '');
+}
+
+/** True iff the macro is shown for `cwd`: its projects include '*' or the normalized cwd. */
+function macroVisibleIn(macro, cwd) {
+  const projects = (macro && macro.projects) || [];
+  return projects.includes(ALL_PROJECTS) || projects.includes(normalizeCwd(cwd));
 }
 
 function normalizeProjects(projects) {
@@ -518,6 +579,10 @@ module.exports = {
   MacroSaveSchema,
   MacroDeleteSchema,
   MacroSetProjectSchema,
+  macroPlaceholders,
+  defaultMacroValues,
+  renderMacroPrompt,
+  macroVisibleIn,
   listMacros,
   saveMacro,
   deleteMacro,

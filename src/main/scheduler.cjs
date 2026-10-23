@@ -66,6 +66,7 @@ const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/cl
 // as the authoritative guarantee.
 ensureCliCapsProbed().catch(() => {});
 const launchFailure = require('./lib/scheduler/launchFailure.cjs');
+const { decideVerifyDowngrade } = require('./lib/scheduler/refireCap.cjs');
 const { finalizeReasonFor } = require('./lib/scheduler/finalizeReason.cjs');
 const { shouldRunFlatSweep, FLAT_SWEEP_INTERVAL_MS } = require('./lib/scheduler/flatSweepThrottle.cjs');
 const { appendError } = require('./lib/telemetry/opsErrorLog.cjs');
@@ -2709,6 +2710,9 @@ function resetJobFields(job, errorMsg, opts = {}) {
   job.error = errorMsg ?? null;
   delete job.runtime;
   delete job.verifierVerdict;
+  // A reset starts the consecutive-downgrade count over (the refire path in
+  // spawnJob re-sets it right after this call).
+  delete job.verifyRefireCount;
   delete job.humanQuestion;
   delete job.uncommittedPaths;
   delete job.resumeRecoveryAttempted;
@@ -6620,6 +6624,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           // Determine effective status, applying the verifier verdict for exit=0 runs.
           let effectiveStatus;
           let sigtermOverrideReason = null;
+          let capParkVerdict = null; // set only when the re-fire cap parks the job
           // Wall-clock budget kill — checked FIRST and unconditionally wins:
           // never 'failed', never silently 'completed', and (via
           // sigtermLandedCommitEvidence/plainExitLandedCommitEvidence, whichever
@@ -6707,9 +6712,18 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           ) {
             effectiveStatus = 'completed';
           } else if (verifyResult.downgradeTo === 'pending') {
-            // HALT or deps_unmet: reset to pending so the job re-fires.
-            resetJobFields(s.jobs[i2], verifyResult.reason, { source: 'spawnJob:verify-downgrade' });
-            return; // job already mutated by resetJobFields; skip the rest
+            // HALT or deps_unmet: re-fire, bounded by decideVerifyDowngrade.
+            const downgrade = decideVerifyDowngrade(s.jobs[i2], verifyResult);
+            if (downgrade.action === 'refire') {
+              if (resetJobFields(s.jobs[i2], verifyResult.reason, { source: 'spawnJob:verify-downgrade' })) {
+                s.jobs[i2].verifyRefireCount = downgrade.nextCount;
+              }
+              return; // job already mutated by resetJobFields; skip the rest
+            }
+            // Cap hit: park through the existing needs_review stamping path.
+            effectiveStatus = 'needs_review';
+            capParkVerdict = downgrade.verdict;
+            sigtermOverrideReason = downgrade.reason;
           } else {
             // transcript_errors or verify_unavailable: escalate to needs_review.
             effectiveStatus = 'needs_review';
@@ -6728,7 +6742,9 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           // needs_review ledger stale/leftover values from before this run,
           // defeating its whole `byReason` rollup for the two escalation
           // paths that land here.
-          s.jobs[i2].error = (effectiveStatus === 'needs_review' || s.jobs[i2].blockedByForeignWip === true)
+          s.jobs[i2].error = capParkVerdict
+            ? sigtermOverrideReason
+            : (effectiveStatus === 'needs_review' || s.jobs[i2].blockedByForeignWip === true)
             ? (verifyResult?.reason ?? sigtermOverrideReason ?? null)
             // A failed job (non-zero exit) never consults verifyResult above,
             // but a worktree integration failure is still worth surfacing on
@@ -6748,11 +6764,16 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           // 'blocked_by_foreign_wip_streak'/'budget_exceeded' are set above
           // from the sigterm/exit-code path, never from verifyResult (which
           // stays null on a non-zero exit) — never clobber either here.
-          if (verifyResult?.verdict && verifyResult.verdict !== 'clean') {
+          if (capParkVerdict) {
+            s.jobs[i2].verifierVerdict = capParkVerdict;
+          } else if (verifyResult?.verdict && verifyResult.verdict !== 'clean') {
             s.jobs[i2].verifierVerdict = verifyResult.verdict;
           } else if (!['blocked_by_foreign_wip_streak', 'budget_exceeded'].includes(s.jobs[i2].verifierVerdict)) {
             delete s.jobs[i2].verifierVerdict;
           }
+          // Only a downgrade-to-pending (which returned above) keeps the count;
+          // every other finalize outcome, including the cap park, clears it.
+          delete s.jobs[i2].verifyRefireCount;
           if (verifyResult?.verdict === 'needs_human') {
             s.jobs[i2].humanQuestion = verifyResult.humanQuestion || '';
           } else {

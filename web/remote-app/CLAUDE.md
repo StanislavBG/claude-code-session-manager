@@ -33,6 +33,8 @@ Phone → desktop commands over the relay (stateless; drill down projects → se
 - `cmd:project:sessions` — list a project's sessions (Epics).
 - `cmd:session:transcript` — recent chat messages of a session.
 - `cmd:session:prds` — PRDs attached to a session.
+- `cmd:session:options` — agents, tags, macros, and the `macroInputs` capability flag.
+- `cmd:session:create` — start a session; optional `macroId` + `inputs`, the desktop renders the macro's `{{name}}` placeholders.
 - `cmd:chat:send` — send a prompt; target = epicId or main tab id.
 - `cmd:session:subscribe` — stream live updates for one session.
 - `event:remote:ready` — desktop → phone: bridge is up, commands accepted.

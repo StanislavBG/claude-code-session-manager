@@ -9,11 +9,13 @@ interface Macro {
   tag: string;
   prompt: string;
   projects?: string[];
+  inputs?: { name: string; label: string; default?: string; required?: boolean; options?: string[] }[];
 }
 interface Options {
   agents: { name: string; description?: string }[];
   tags: string[];
   macros: Macro[];
+  macroInputs?: boolean;
 }
 
 interface Props {
@@ -44,6 +46,8 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
+  const [macro, setMacro] = useState<Macro | null>(null);
+  const [inputValues, setInputValues] = useState<Record<string, string>>({});
 
   useEffect(() => {
     trackScreen('new-session-sheet');
@@ -60,7 +64,7 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
         const e = respError(resp);
         if (e) return setErr(e);
         const p: any = resp?.payload ?? {};
-        setOpts({ agents: p.agents ?? [], tags: p.tags ?? [], macros: p.macros ?? [] });
+        setOpts({ agents: p.agents ?? [], tags: p.tags ?? [], macros: p.macros ?? [], macroInputs: p.macroInputs === true });
       })
       .catch((e) => live && setErr(e?.message || 'could not load options'));
     return () => {
@@ -69,7 +73,7 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
   }, [socket, deviceId]);
 
   const macros = (opts?.macros ?? []).filter(
-    (m) => !m.projects || m.projects.length === 0 || m.projects.includes('*') || m.projects.includes(cwd),
+    (m) => m.projects?.includes('*') || m.projects?.includes(cwd),
   );
 
   const applyMacro = (m: Macro) => {
@@ -78,6 +82,8 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
     setTitle(m.label);
     setTitleEdited(true);
     setPrompt(m.prompt);
+    setMacro(m);
+    setInputValues(Object.fromEntries((m.inputs ?? []).map((i) => [i.name, i.default ?? ''])));
   };
 
   const onPrompt = (v: string) => {
@@ -101,7 +107,8 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
   };
 
   const finalTitle = (title.trim() || prompt.trim().slice(0, 60)).slice(0, 120);
-  const ready = !!agentName && !!tag && !!prompt.trim() && !!finalTitle && !busy && !!socket;
+  const blocked = !!macro?.inputs?.length && opts?.macroInputs !== true;
+  const ready = !!agentName && !!tag && !!prompt.trim() && !!finalTitle && !busy && !!socket && !blocked;
 
   const start = async () => {
     if (!socket || !ready) return;
@@ -115,6 +122,8 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
         tag,
         title: finalTitle,
         prompt,
+        ...(macro ? { macroId: macro.id } : {}),
+        ...(macro?.inputs?.length ? { inputs: inputValues } : {}),
       });
       const e = respError(resp);
       if (e) {
@@ -161,6 +170,37 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
           </div>
         )}
 
+        {macro?.inputs?.length ? (
+          <div className="flex flex-col gap-3" role="group" aria-label="Macro inputs">
+            {macro.inputs.map((i) => (
+              <label key={i.name} className="text-xs font-bold uppercase text-ink-mute">
+                {i.label}{i.required ? ' *' : ''}
+                {i.options?.length ? (
+                  <select
+                    aria-label={i.label}
+                    className={field}
+                    value={inputValues[i.name] ?? ''}
+                    onChange={(e) => setInputValues((v) => ({ ...v, [i.name]: e.target.value }))}
+                  >
+                    {!i.required && <option value=""></option>}
+                    {i.options.map((o) => (
+                      <option key={o} value={o}>{o}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    aria-label={i.label}
+                    className={field}
+                    maxLength={500}
+                    value={inputValues[i.name] ?? ''}
+                    onChange={(e) => setInputValues((v) => ({ ...v, [i.name]: e.target.value }))}
+                  />
+                )}
+              </label>
+            ))}
+          </div>
+        ) : null}
+
         <label className="text-xs font-bold uppercase text-ink-mute">
           Agent
           <select aria-label="Agent" className={field} value={agentName} onChange={(e) => setAgentName(e.target.value)}>
@@ -205,6 +245,11 @@ export default function NewSessionSheet({ socket, deviceId, cwd, project, onClos
           {listening ? 'Listening…' : '🎤 Dictate'}
         </button>
 
+        {blocked && (
+          <div role="alert" className="text-sm text-red-700">
+            Update Session Manager on your computer to use this macro's inputs from the phone.
+          </div>
+        )}
         {err && <div role="alert" className="text-sm text-red-700">{err}</div>}
 
         <button

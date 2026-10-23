@@ -208,6 +208,63 @@ test('evidence miss (no scheduler run, no transcript) reports resolvedModelId/re
   expect(info.resolvedFrom).toBeNull();
 });
 
+function writeLargeHistory(rows, bytes) {
+  const dir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'history.jsonl');
+  const pad = JSON.stringify({ slug: 'filler', runId: 'none', agentType: 'other', pad: 'x'.repeat(900) }) + '\n';
+  const fd = fs.openSync(file, 'w');
+  try {
+    // rows[0] first (oldest), then filler to >= bytes, then the rest.
+    fs.writeSync(fd, JSON.stringify(rows[0]) + '\n');
+    let written = 0;
+    const chunk = pad.repeat(1000);
+    while (written < bytes) { fs.writeSync(fd, chunk); written += chunk.length; }
+    for (const r of rows.slice(1)) fs.writeSync(fd, JSON.stringify(r) + '\n');
+  } finally {
+    fs.closeSync(fd);
+  }
+  return file;
+}
+
+test('reads only the tail of a large history', async () => {
+  writeGlobalPersona('big', ['model: sonnet']);
+  // The only row in the first (out-of-tail) region; must NOT be consulted.
+  const file = writeLargeHistory([
+    { slug: 'head-only', runId: 'run-head', agentType: 'big', finishedAt: '2026-01-01T00:00:00.000Z' },
+    { slug: 'tail-row', runId: 'run-tail', agentType: 'big', finishedAt: '2026-02-01T00:00:00.000Z' },
+  ], 20 * 1024 * 1024);
+  expect(fs.statSync(file).size).toBeGreaterThanOrEqual(20 * 1024 * 1024);
+  writeRunLog('run-head', 'head-only', '[scheduler] agentType=big persona=/p/b.md model=claude-head-1\n');
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'big' });
+  // Head row is outside the 1 MB tail, so only the tail row is a candidate
+  // (and it has no run log) -> no evidence from the head.
+  expect(info.resolvedModelId).toBeNull();
+});
+
+test('returns newest matching row', async () => {
+  writeGlobalPersona('big2', ['model: sonnet']);
+  writeLargeHistory([
+    { slug: 'old', runId: 'run-old', agentType: 'big2', finishedAt: '2026-01-01T00:00:00.000Z' },
+    { slug: 'mid', runId: 'run-mid', agentType: 'big2', finishedAt: '2026-02-01T00:00:00.000Z' },
+    { slug: 'new', runId: 'run-new', agentType: 'big2', finishedAt: '2026-03-01T00:00:00.000Z' },
+  ], 20 * 1024 * 1024);
+  writeRunLog('run-old', 'old', '[scheduler] agentType=big2 persona=/p/x.md model=claude-old-1\n');
+  writeRunLog('run-mid', 'mid', '[scheduler] agentType=big2 persona=/p/x.md model=claude-mid-1\n');
+  writeRunLog('run-new', 'new', '[scheduler] agentType=big2 persona=/p/x.md model=claude-new-1\n');
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'big2' });
+  expect(info.resolvedModelId).toBe('claude-new-1');
+});
+
+test('a malformed history file yields no evidence and does not throw', async () => {
+  writeGlobalPersona('bad', ['model: sonnet']);
+  const dir = path.join(cwd, 'session-manager-operations', 'scheduler', 'state');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'history.jsonl'), '{not json\n\x00\x01garbage');
+  const info = await resolveEffectiveModelInfo({ cwd, agentType: 'bad' });
+  expect(info.resolvedModelId).toBeNull();
+});
+
 // ---------- edge cases ----------
 
 test('never throws for a missing cwd/agentType', async () => {

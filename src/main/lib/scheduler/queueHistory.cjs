@@ -11,7 +11,8 @@
 // disk. appendHistory/readHistory own the actual fs I/O.
 
 const path = require('path');
-const fsp = require('fs').promises;
+const fs = require('fs');
+const fsp = fs.promises;
 const { HISTORY_RETENTION_MS } = require('./schedulerConfig.cjs');
 const { projectHistoryPath, stateCwds } = require('./queueStore.cjs');
 const { queueHistoryPath } = require('./schedulerPaths.cjs');
@@ -288,6 +289,47 @@ async function readHistoryFile(target, cap) {
   }
 }
 
+/**
+ * Sync bounded tail read of one history file: newest-first parsed rows, at
+ * most `maxRows` (clamped [1,500]) drawn from at most the last `maxBytes`
+ * bytes (default 1 MB). Missing/unreadable file -> []. Never throws.
+ */
+function readHistoryFileTailSync(target, { maxRows = 500, maxBytes = 1024 * 1024 } = {}) {
+  const cap = Math.max(1, Math.min(500, Math.floor(maxRows) || 500));
+  let fd;
+  try {
+    fd = fs.openSync(target, 'r');
+    const { size } = fs.fstatSync(fd);
+    if (size === 0) return [];
+    const length = Math.min(Math.max(1, maxBytes), size);
+    const start = size - length;
+    const buf = Buffer.alloc(length);
+    fs.readSync(fd, buf, 0, length, start);
+    let text = buf.toString('utf8');
+    if (start > 0) {
+      // Chunk may begin mid-line; drop the partial first fragment.
+      const firstNl = text.indexOf('\n');
+      text = firstNl === -1 ? '' : text.slice(firstNl + 1);
+    }
+    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean).slice(-cap);
+    const parsed = [];
+    for (const line of lines) {
+      try {
+        parsed.push(JSON.parse(line));
+      } catch {
+        // corrupt/partial line — skip
+      }
+    }
+    return parsed.reverse();
+  } catch {
+    return [];
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* ignore */ }
+    }
+  }
+}
+
 // mtime-gated cache, same convention as scheduler/prdParser.cjs's dirCache —
 // repeated reconcile() calls between appends hit the cache instead of
 // re-reading/re-parsing a JSONL file that only grows over time.
@@ -467,6 +509,7 @@ module.exports = {
   appendHistory,
   slimHistoryRow,
   readHistory,
+  readHistoryFileTailSync,
   historyTerminalBySlug,
   completedSlugsForCwd,
 };

@@ -137,28 +137,16 @@ function readHotJobsForCwd(cwd, deps) {
 /** Best-effort read of `<cwd>/session-manager-operations/scheduler/state/history.jsonl`'s archived rows. */
 function readHistoryEntriesForCwd(cwd, deps) {
   const { projectHistoryPath } = deps.queueStore || require('../scheduler/queueStore.cjs');
-  let text;
-  try {
-    text = fs.readFileSync(projectHistoryPath(cwd), 'utf8');
-  } catch {
-    return [];
-  }
+  const { readHistoryFileTailSync } = deps.queueHistory || require('../scheduler/queueHistory.cjs');
+  // Bounded tail (<=500 rows / <=1 MB): only the most recent matching row matters.
+  const rows = readHistoryFileTailSync(projectHistoryPath(cwd), { maxRows: 500, maxBytes: 1024 * 1024 });
+  // Tail reader is newest-first; callers sort by timestamp anyway.
   const entries = [];
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    try {
-      const j = JSON.parse(line);
-      // needs_review_entry/needs_review_resolution lines (needsReviewLedger.cjs)
-      // share history.jsonl with terminal job rows but carry no `agentType` —
-      // findLatestSchedulerModel's own `j.agentType === agentType` filter
-      // already excludes them, but skip explicitly here too so this reader
-      // stays correct even if a future ledger line shape happens to pick up
-      // an agentType-shaped field.
-      if (j?.kind && j.kind !== 'terminal') continue;
-      entries.push(j);
-    } catch {
-      // corrupt/partial line — skip
-    }
+  for (const j of rows) {
+    // needs_review_entry/needs_review_resolution lines (needsReviewLedger.cjs)
+    // share history.jsonl with terminal job rows; skip non-terminal kinds.
+    if (j?.kind && j.kind !== 'terminal') continue;
+    entries.push(j);
   }
   return entries;
 }

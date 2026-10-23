@@ -8,6 +8,7 @@ import { useCustomerFeedback } from '../../state/customerFeedback'
 import { usePromptSessions } from '../../state/promptSessions'
 import { toast } from '../../state/toast'
 import { composeEpicIntake } from '../../lib/epicIntake'
+import { resolvePersonaBody } from '../../lib/launchSession'
 import type { CustomerFeedbackInboxItem, CustomerFeedbackStatus, CustomerFeedbackTag } from '../../../preload/api'
 
 const STATUSES: { value: CustomerFeedbackStatus; label: string }[] = [
@@ -37,7 +38,11 @@ function fenceFor(s: string): string {
   return '`'.repeat(Math.max(3, longest + 1))
 }
 
-function buildIntake(it: CustomerFeedbackInboxItem) {
+const ARCHITECT_DESCRIPTION =
+  "The primary Actor for an Epic's whole interactive conversation — plans, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies."
+
+async function buildIntake(it: CustomerFeedbackInboxItem, cwd: string) {
+  const persona = await resolvePersonaBody(cwd, 'architect')
   const fence = fenceFor(it.body)
   const goal = [
     `Customer feedback ${it.id} (client ${it.clientVersion ?? 'unknown version'} on ${it.clientPlatform ?? 'unknown platform'}).`,
@@ -49,6 +54,8 @@ function buildIntake(it: CustomerFeedbackInboxItem) {
     goal,
     tag: TAG_TO_EPIC_TAG[it.tag],
     agentName: 'architect',
+    agentDescription: ARCHITECT_DESCRIPTION,
+    ...(persona ? { agentBody: persona.text, agentPath: persona.path } : {}),
   })
 }
 
@@ -74,7 +81,7 @@ function InboxRow({ it, projectCwd }: { it: CustomerFeedbackInboxItem; projectCw
     if (openDisabled || !projectCwd) return
     setBusy(true)
     try {
-      const { goalText, openingPrompt, sections } = buildIntake(it)
+      const { goalText, openingPrompt, sections } = await buildIntake(it, projectCwd)
       const session = await createPromptSession(
         projectCwd,
         goalText,

@@ -29,6 +29,7 @@ const { resolveProjectContext } = require('../projectRootResolve.cjs');
 const { fixChainDepthOf, baseSlugOf } = require('../scheduler/fixChainDepth.cjs');
 const { DEFAULT_PRD_AGENT_TYPE, assertAgentTypeWritable } = require('./prdAgentType.cjs');
 const { resolveDepSlug, findNearMatches } = require('./depSlugResolve.cjs');
+const { resolveEpicPrdWriteDir } = require('./prdLocations.cjs');
 const { isFixPlanSlug } = require('../scheduler/fixPlanSlug.cjs');
 const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
 const { sizingWarnings } = require('./prdSizing.cjs');
@@ -442,6 +443,30 @@ async function createPrd(input, remote) {
     extraWarnings.push('No files list: the executor is not told which files it may change.');
   }
   extraWarnings.push(...await worktreeReachAdvisory(input, cwd));
+
+  // Duplicate-slug guard (2110/2111 phone-drop-summary-state: duplicate re-issue after archive).
+  // Finished rows leave queue.json, so an author can re-issue a landed PRD under a fresh NN.
+  // Refused before NN allocation so it burns no number. Fix plans are exempt.
+  if (input.sourcePromptId && !isFixPlanSlug(`0-${slug}`)) {
+    let epicDirs = [];
+    try {
+      const prdsDir = resolveEpicPrdWriteDir(cwd, input.sourcePromptId);
+      epicDirs = [prdsDir, path.join(path.dirname(prdsDir), 'prds-archived')];
+    } catch { /* unsafe epic id — no dirs to scan */ }
+    for (const dir of epicDirs) {
+      let names = [];
+      try { names = await fsp.readdir(dir); } catch { /* missing dir counts as empty */ }
+      const dup = names.find((n) => n.endsWith('.md') && n.slice(0, -3).replace(/^\d+-/, '') === slug);
+      if (dup) {
+        return {
+          ok: false,
+          status: 409,
+          error: `A PRD with slug "${slug}" already exists in this Epic as "${dup}". Its work may already have landed. ` +
+            'Use scheduler_update_prd / scheduler_reset_job on it, or pick a distinct slug.',
+        };
+      }
+    }
+  }
 
   const nn = await remote.allocateParallelGroup(input.cwd);
   const filenameSlug = `${nn}-${slug}`;

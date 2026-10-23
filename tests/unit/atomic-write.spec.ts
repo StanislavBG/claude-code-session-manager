@@ -23,7 +23,7 @@ const requireCjs = createRequire(import.meta.url)
  *      orphaned tmp files in the parent of the target.
  */
 
-describe('atomic write contract (config.cjs writeTextAtomic + scheduler.cjs atomicWriteJsonSync)', () => {
+describe('atomic write contract (config.cjs writeTextAtomic)', () => {
   let workdir: string
   let homeBackup: string | undefined
 
@@ -141,8 +141,10 @@ describe('atomic write contract (config.cjs writeTextAtomic + scheduler.cjs atom
         .join('\n')
       expect(codeOnly).not.toMatch(/fs\.writeFileSync\(tmp/)
       expect(codeOnly).not.toMatch(/fsp\.writeFile\(tmp/)
-      // And that the helpers are bound to config.cjs's shared impl.
-      expect(src).toMatch(/atomicWriteJsonSync\s*=\s*\(.*\)\s*=>\s*config\.writeJsonSync/)
+      // No inline tmp-file + renameSync write recipe (a `tmp`-named path renamed into place).
+      expect(codeOnly).not.toMatch(/renameSync\(\s*\w*tmp\w*\s*,/i)
+      // JSON writes go through config.cjs's shared impl, called directly.
+      expect(codeOnly).toMatch(/config\.writeJsonSync\(/)
     })
   })
 })

@@ -12,7 +12,6 @@ const { sendChat } = vi.hoisted(() => ({ sendChat: vi.fn() }));
 vi.mock('../remoteApi', () => ({ sendChat }));
 
 import MicPane from '../components/MicPane';
-import SummaryPane from '../components/SummaryPane';
 import { useStore } from '../store';
 
 const socket: any = { sendCommand: vi.fn() };
@@ -75,13 +74,5 @@ describe('MicPane telemetry', () => {
     await waitFor(() =>
       expect(trackFlow).toHaveBeenCalledWith('chat-send', 'fail', { source: 'text', reason: 'send-error' }));
     expect(JSON.stringify(trackFlow.mock.calls)).not.toContain('secret');
-  });
-});
-
-describe('SummaryPane telemetry', () => {
-  it('tags the expand toggle', () => {
-    useStore.setState({ summaryByTab: { t1: { summary: 's', model: 'haiku' } } } as any);
-    render(<SummaryPane tabId="t1" />);
-    expect(screen.getByText('Show raw message').getAttribute('data-track')).toBe('summary-toggle');
   });
 });

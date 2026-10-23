@@ -303,18 +303,84 @@ async function checkSchedulerMcpLive({ cwd, homeDir, schedulerMcpCheck }) {
   };
 }
 
+const DEV_PLUGIN_MARKETPLACE = 'session-manager';
+const DEV_PLUGIN_REINSTALL_FIX = 'Restart Session Manager to reinstall the session-manager-dev plugin';
+
+/** installPath of the dev plugin from installed_plugins.json, or null. */
+function readDevPluginInstallPath(homeDir) {
+  const data = readJsonOrSync(path.join(homeDir, '.claude', 'plugins', 'installed_plugins.json'), null);
+  const entries = data?.plugins?.[DEV_PLUGIN_ENABLED_KEY];
+  if (!Array.isArray(entries)) return null;
+  for (const e of entries) {
+    if (e && typeof e.installPath === 'string' && e.installPath) return e.installPath;
+  }
+  return null;
+}
+
+/** Source path of the 'session-manager' marketplace from known_marketplaces.json, or null. */
+function readDevMarketplacePath(homeDir) {
+  const data = readJsonOrSync(path.join(homeDir, '.claude', 'plugins', 'known_marketplaces.json'), null);
+  const m = data?.[DEV_PLUGIN_MARKETPLACE];
+  const p = m?.source?.path ?? m?.installLocation;
+  return typeof p === 'string' && p ? p : null;
+}
+
 function checkDevPlugin({ homeDir }) {
   const settings = readJsonOrSync(path.join(homeDir, '.claude', 'settings.json'), null);
-  const ok = settings?.enabledPlugins?.[DEV_PLUGIN_ENABLED_KEY] === true;
+  const enabled = settings?.enabledPlugins?.[DEV_PLUGIN_ENABLED_KEY] === true;
+  const base = { id: 'dev-plugin', label: 'session-manager-dev plugin enabled' };
+
+  if (!enabled) {
+    return {
+      ...base,
+      ok: false,
+      detail: `${DEV_PLUGIN_ENABLED_KEY} missing from ~/.claude/settings.json enabledPlugins`,
+      fix: 'Enable in Plugins tab: session-manager-dev (Session Manager)',
+    };
+  }
+
+  const installPath = readDevPluginInstallPath(homeDir);
+  if (!installPath) {
+    return {
+      ...base,
+      ok: false,
+      detail: `${DEV_PLUGIN_ENABLED_KEY} enabled but not recorded in ~/.claude/plugins/installed_plugins.json`,
+      fix: DEV_PLUGIN_REINSTALL_FIX,
+    };
+  }
+  const skillFile = path.join(installPath, 'skills', 'develop', 'SKILL.md');
+  if (!fs.existsSync(skillFile)) {
+    return {
+      ...base,
+      ok: false,
+      detail: `${DEV_PLUGIN_ENABLED_KEY} enabled but ${skillFile} is missing`,
+      fix: DEV_PLUGIN_REINSTALL_FIX,
+    };
+  }
+
+  const marketplacePath = readDevMarketplacePath(homeDir);
+  if (!marketplacePath) {
+    return {
+      ...base,
+      ok: false,
+      detail: `'${DEV_PLUGIN_MARKETPLACE}' marketplace not registered in ~/.claude/plugins/known_marketplaces.json`,
+      fix: DEV_PLUGIN_REINSTALL_FIX,
+    };
+  }
+  if (!fs.existsSync(marketplacePath)) {
+    return {
+      ...base,
+      ok: false,
+      detail: `'${DEV_PLUGIN_MARKETPLACE}' marketplace folder ${marketplacePath} no longer exists`,
+      fix: DEV_PLUGIN_REINSTALL_FIX,
+    };
+  }
 
   return {
-    id: 'dev-plugin',
-    label: 'session-manager-dev plugin enabled',
-    ok,
-    detail: ok
-      ? `${DEV_PLUGIN_ENABLED_KEY} enabled in ~/.claude/settings.json`
-      : `${DEV_PLUGIN_ENABLED_KEY} missing from ~/.claude/settings.json enabledPlugins`,
-    fix: ok ? null : 'Enable in Plugins tab: session-manager-dev (Session Manager)',
+    ...base,
+    ok: true,
+    detail: `${DEV_PLUGIN_ENABLED_KEY} enabled in ~/.claude/settings.json and installed on disk`,
+    fix: null,
   };
 }
 
@@ -795,6 +861,7 @@ async function ensureGuardsInstalled(cwd, { homeDir = os.homedir() } = {}) {
 }
 
 module.exports = {
+  checkDevPlugin,
   checkDelegationReadiness,
   ensureGuardsInstalled,
   logAutoInstallEvent,

@@ -12,6 +12,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const {
+  checkDevPlugin,
   checkDelegationReadiness,
   ensureGuardsInstalled,
   logAutoInstallEvent,
@@ -93,6 +94,22 @@ async function writeSilentStub(dir) {
   return scriptPath;
 }
 
+async function writeDevPluginInstall(homeDir) {
+  const installPath = path.join(homeDir, '.claude', 'plugins', 'cache', 'session-manager', 'session-manager-dev', '0.0.1');
+  const marketplace = path.join(homeDir, 'marketplace-src');
+  await fsp.mkdir(path.join(installPath, 'skills', 'develop'), { recursive: true });
+  await fsp.writeFile(path.join(installPath, 'skills', 'develop', 'SKILL.md'), '# develop', 'utf8');
+  await fsp.mkdir(marketplace, { recursive: true });
+  await writeJson(path.join(homeDir, '.claude', 'plugins', 'installed_plugins.json'), {
+    version: 2,
+    plugins: { 'session-manager-dev@session-manager': [{ scope: 'user', installPath, version: '0.0.1' }] },
+  });
+  await writeJson(path.join(homeDir, '.claude', 'plugins', 'known_marketplaces.json'), {
+    'session-manager': { source: { source: 'directory', path: marketplace }, installLocation: marketplace },
+  });
+  return { installPath, marketplace };
+}
+
 async function makeGreenFixtures() {
   const homeDir = await mkTmp('sm-delegation-home-');
   const cwd = await mkTmp('sm-delegation-cwd-');
@@ -104,6 +121,7 @@ async function makeGreenFixtures() {
   await writeJson(path.join(homeDir, '.claude', 'settings.json'), {
     enabledPlugins: { 'session-manager-dev@session-manager': true },
   });
+  await writeDevPluginInstall(homeDir);
   await fsp.mkdir(path.join(homeDir, '.claude', 'agents'), { recursive: true });
   await fsp.writeFile(path.join(homeDir, '.claude', 'agents', 'dev-lead.md'), '# dev-lead', 'utf8');
   // The canonical, sanctioned form: an ABSOLUTE path to session-manager's own
@@ -216,6 +234,43 @@ test('dev-plugin: fails independently when enabledPlugins is missing the key', a
   // the other checks still pass independently
   expect(result.checks.filter((c) => c.id !== 'dev-plugin').every((c) => c.ok)).toBe(true);
 }, 15_000);
+
+test('dev-plugin fails when SKILL.md missing', async () => {
+  const { homeDir, cwd } = await makeGreenFixtures();
+  const { installPath } = await writeDevPluginInstall(homeDir);
+  await fsp.rm(path.join(installPath, 'skills', 'develop', 'SKILL.md'));
+  const check = checkDevPlugin({ homeDir });
+  expect(check.ok).toBe(false);
+  expect(check.detail).toMatch(/SKILL\.md/);
+  expect(check.fix).toMatch(/reinstall/);
+  const result = await checkDelegationReadiness({ cwd, homeDir });
+  expect(result.checks.find((c) => c.id === 'dev-plugin').ok).toBe(false);
+}, 15_000);
+
+test('dev-plugin fails when marketplace dir missing', async () => {
+  const { homeDir } = await makeGreenFixtures();
+  const { marketplace } = await writeDevPluginInstall(homeDir);
+  await fsp.rm(marketplace, { recursive: true, force: true });
+  const check = checkDevPlugin({ homeDir });
+  expect(check.ok).toBe(false);
+  expect(check.detail).toMatch(/marketplace folder/);
+});
+
+test('dev-plugin ok on healthy home', async () => {
+  const { homeDir } = await makeGreenFixtures();
+  expect(checkDevPlugin({ homeDir }).ok).toBe(true);
+});
+
+test('dev-plugin: malformed install JSON gives ok:false, never throws', async () => {
+  const { homeDir } = await makeGreenFixtures();
+  await fsp.writeFile(path.join(homeDir, '.claude', 'plugins', 'installed_plugins.json'), '{ nope', 'utf8');
+  expect(checkDevPlugin({ homeDir }).ok).toBe(false);
+  await writeDevPluginInstall(homeDir);
+  await fsp.writeFile(path.join(homeDir, '.claude', 'plugins', 'known_marketplaces.json'), '{ nope', 'utf8');
+  const check = checkDevPlugin({ homeDir });
+  expect(check.ok).toBe(false);
+  expect(check.detail).toBeTruthy();
+});
 
 test('agent-personas: fails independently when ~/.claude/agents has no personas', async () => {
   const { homeDir, cwd } = await makeGreenFixtures();

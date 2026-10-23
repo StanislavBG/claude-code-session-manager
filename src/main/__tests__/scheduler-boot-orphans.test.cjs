@@ -85,7 +85,7 @@ test('a row whose supervisor record says exited is finalized from its meta, not 
     const { immediate, adopted } = partitionBootOrphans([job], { pidAlive: () => true, runsDir });
     assert.deepEqual(immediate, ['exited-row']);
     assert.deepEqual(adopted, []);
-    applyOrphanOutcome(job, 'success');
+    applyOrphanOutcome(job, 'success', '', 'abc123');
     assert.equal(job.status, 'completed');
   });
 });
@@ -116,13 +116,38 @@ test('partitionBootOrphans ignores non-running jobs entirely', () => {
   assert.deepEqual(adopted, []);
 });
 
-test('applyOrphanOutcome: success finalizes to completed, clears runtime', () => {
+test('applyOrphanOutcome: success + landed commit completes with landedCommit, clears runtime', () => {
   const job = { slug: 's', status: 'running', runtime: { pid: 1 }, exitCode: null };
-  applyOrphanOutcome(job, 'success');
+  applyOrphanOutcome(job, 'success', '', 'abc123');
   assert.equal(job.status, 'completed');
+  assert.equal(job.landedCommit, 'abc123');
   assert.equal(job.exitCode, 0);
   assert.equal(job.error, null);
   assert.ok(job.finishedAt);
+  assert.equal(job.runtime, undefined);
+});
+
+test('applyOrphanOutcome: success with no landed-commit evidence re-queues with the new reason', () => {
+  const job = { slug: 's', status: 'running', runtime: { pid: 1 }, orphanRetries: 0 };
+  applyOrphanOutcome(job, 'success');
+  assert.equal(job.status, 'pending');
+  assert.equal(job.orphanRetries, 1);
+  assert.match(job.error, /run reported success but no landed commit was found/);
+  assert.equal(job.runtime, undefined);
+});
+
+test('applyOrphanOutcome: success with no evidence at the cap fails', () => {
+  const job = { slug: 's', status: 'running', runtime: { pid: 1 }, orphanRetries: ORPHAN_REQUEUE_CAP };
+  applyOrphanOutcome(job, 'success');
+  assert.equal(job.status, 'failed');
+  assert.match(job.error, /no landed commit was found/);
+});
+
+test('applyOrphanOutcome: success on an artifact-only job with no commit completes', () => {
+  const job = { slug: 's', status: 'running', runtime: { pid: 1 }, deliverable: 'artifact', artifactPaths: ['out/x.md'] };
+  applyOrphanOutcome(job, 'success');
+  assert.equal(job.status, 'completed');
+  assert.equal(job.exitCode, 0);
   assert.equal(job.runtime, undefined);
 });
 

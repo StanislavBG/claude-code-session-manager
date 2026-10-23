@@ -2872,7 +2872,9 @@ function isBootRowAlive(j, {
  * applyOrphanOutcome(job, outcome, killNote?, confirmedLandedCommit?) → void
  *
  * Mutates `job` in place to finalize a boot-orphaned 'running' job given its
- * classified run outcome: success/failed finalize terminally; no_result/unknown
+ * classified run outcome: success finalizes only with landed-commit evidence
+ * (or for artifact-only PRDs), otherwise it takes the re-queue path below;
+ * failed finalizes terminally; no_result/unknown
  * re-queues to pending bounded by ORPHAN_REQUEUE_CAP. The status-mutation
  * semantics (and the cap-exhaustion boundary) match the now-deleted
  * reconcileQueueOffline (src/main/lib/scheduler/watchdogHelpers.cjs) verbatim; killNote
@@ -2886,12 +2888,21 @@ function isBootRowAlive(j, {
  * orphaned job that actually landed a real commit is reachable via boot
  * reconciliation even though the live reap path is now guarded. Callers
  * must resolve this (a git spawn) BEFORE calling mutate(), never inside it —
- * pass null to skip the gate (e.g. when the outcome isn't 'failed').
+ * pass null when there is none (a 'success' then re-queues, unless artifact-only).
  */
 function applyOrphanOutcome(job, outcome, killNote = '', confirmedLandedCommit = null) {
   const now = new Date().toISOString();
-  if (outcome === 'success') {
-    transitionJob(job, 'completed', { reason: 'boot orphan reconciliation: run succeeded', source: 'applyOrphanOutcome' });
+  // A reported 'success' completes only on landed-commit evidence, or for a
+  // DECLARED artifact-only PRD (`deliverable: artifact` + artifactPaths — same
+  // check as runVerify's artifact exemption) where no commit is legitimate.
+  const artifactOnly = job.deliverable === 'artifact' && Array.isArray(job.artifactPaths) && job.artifactPaths.length > 0;
+  if (outcome === 'success' && (confirmedLandedCommit || artifactOnly)) {
+    if (confirmedLandedCommit) {
+      transitionJob(job, 'completed', { reason: `boot orphan reconciliation: run succeeded, landedCommit ${confirmedLandedCommit} resolves`, source: 'applyOrphanOutcome:landed' });
+      job.landedCommit = confirmedLandedCommit;
+    } else {
+      transitionJob(job, 'completed', { reason: 'boot orphan reconciliation: run succeeded (artifact-only PRD, no commit expected)', source: 'applyOrphanOutcome' });
+    }
     job.exitCode = 0;
     job.error = null;
     job.finishedAt = now;
@@ -2911,8 +2922,9 @@ function applyOrphanOutcome(job, outcome, killNote = '', confirmedLandedCommit =
     delete job.runtime;
   } else {
     const tries = job.orphanRetries ?? 0;
+    const noLanded = outcome === 'success' ? ' — run reported success but no landed commit was found' : '';
     if (tries < ORPHAN_REQUEUE_CAP) {
-      resetJobFields(job, `orphaned: app restarted mid-run, re-queued (attempt ${tries + 1}/${ORPHAN_REQUEUE_CAP})${killNote}`, { source: 'applyOrphanOutcome' });
+      resetJobFields(job, `orphaned: app restarted mid-run, re-queued (attempt ${tries + 1}/${ORPHAN_REQUEUE_CAP})${killNote}${noLanded}`, { source: 'applyOrphanOutcome' });
       job.orphanRetries = tries + 1;
     } else if (confirmedLandedCommit) {
       transitionJob(job, 'completed', { reason: `orphaned: app restarted while running, exhausted ${ORPHAN_REQUEUE_CAP} re-queue attempts${killNote}, but landedCommit ${confirmedLandedCommit} resolves — completed on evidence`, source: 'applyOrphanOutcome:landed' });
@@ -2922,9 +2934,9 @@ function applyOrphanOutcome(job, outcome, killNote = '', confirmedLandedCommit =
       job.finishedAt = now;
       delete job.runtime;
     } else {
-      transitionJob(job, 'failed', { reason: `orphaned: app restarted while running, exhausted ${ORPHAN_REQUEUE_CAP} re-queue attempts${killNote}`, source: 'applyOrphanOutcome' });
+      transitionJob(job, 'failed', { reason: `orphaned: app restarted while running, exhausted ${ORPHAN_REQUEUE_CAP} re-queue attempts${killNote}${noLanded}`, source: 'applyOrphanOutcome' });
       job.exitCode = job.exitCode ?? 1;
-      job.error = `orphaned: app restarted while running, exhausted ${ORPHAN_REQUEUE_CAP} re-queue attempts${killNote}`;
+      job.error = `orphaned: app restarted while running, exhausted ${ORPHAN_REQUEUE_CAP} re-queue attempts${killNote}${noLanded}`;
       job.finishedAt = now;
       delete job.runtime;
     }
@@ -10294,7 +10306,7 @@ async function init() {
     const bootLandedCommitEvidence = new Map();
     await Promise.all(bootSnap.jobs.map(async (j) => {
       if (!immediateSlugs.includes(j.slug) || j.status !== 'running') return;
-      if (bootOutcomes.get(j.slug) === 'success' || !j.landedCommit) return;
+      if (!j.landedCommit) return;
       const resolved = await resolveLandedCommitEvidence(j.cwd || DEFAULT_PROJECT_CWD, j.landedCommit, j.startedAt);
       if (resolved) bootLandedCommitEvidence.set(j.slug, j.landedCommit);
     }));

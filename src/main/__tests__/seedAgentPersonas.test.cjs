@@ -225,7 +225,7 @@ test('upgrade uses the bundled model when the installed value only matches the s
   const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const { fm, body } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
   expect(fm.model).toBe('sonnet'); // 'fable' was just the old shipped default here, not a user choice
-  expect(fm.seedVersion).toBe('3'); // bundled stamp, not the installed file's old one
+  expect(fm.seedVersion).toBe('4'); // bundled stamp, not the installed file's old one
   expect(body).toContain('## Run contract'); // bundled body replaced the old one
 });
 
@@ -295,7 +295,7 @@ test('an installed seedVersion: with an empty value reads as 1, so a bundled see
 
   const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const { fm } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
-  expect(fm.seedVersion).toBe('3');
+  expect(fm.seedVersion).toBe('4');
 });
 
 test('the upgrade backs up the pre-upgrade file content by hash, outside the agents dir', async () => {

@@ -124,6 +124,17 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         tools: "Read, Grep, Glob, Bash, Edit, Write",
       },
     },
+    {
+      commit: "2129verify",
+      bodySha256: "82b93c1da9a5e3b7dfcfadd1b4689d988a4bd19de2d897ebd3f3158969d741fc",
+      fm: {
+        description: "Executes exactly one already-scoped PRD at a time, headless, start to finish — reads the PRD's Goal/Acceptance Criteria/Implementation notes and standards.md, implements it, verifies against its own AC, and reports. Has no visibility into the overall plan — that's architect's job. This is the default persona a scheduled PRD runs as: the scheduler resolves a PRD's `agentType` frontmatter field (default `dev-lead`) to this file and launches the headless executor AS this persona via `--append-system-prompt`.",
+        model: "sonnet",
+        effort: "medium",
+        title: "Engineering — Software Engineer",
+        tools: "Read, Grep, Glob, Bash, Edit, Write",
+      },
+    },
   ],
   "project-home-builder": [
     {

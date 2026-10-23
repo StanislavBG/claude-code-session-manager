@@ -15,6 +15,31 @@ working tree at the time this doc was written — `scheduler.cjs`/`gitWorktree.c
 actively-edited files, so a line number here can drift; if a citation looks wrong, `grep` the
 quoted function/constant name rather than trusting the number blindly.
 
+## Reliability target and feature freeze
+
+About two thirds of the `bug` Epics the human files by hand (Sep 65%, Oct 70%, keyword-classified)
+are about the scheduler/develop loop itself, and scheduler + prd + epic + git code is ~29k lines
+(~42% of main-process code). The loop's own bugs dominate, so new mechanisms are frozen until it
+is measurably reliable.
+
+**Target — checked weekly, all four must hold:**
+
+| Measure | Threshold | Source |
+| --- | --- | --- |
+| `refire_capped` parks | 0 | needs_review ledger |
+| Human-filed `bug` Epics about the scheduler/develop loop | 0 | Epic tags (`bug` tag, human-created, keyword-classified) |
+| `needs_review` runs | ≤ 3% of runs | needs_review ledger ÷ scheduler run sidecars |
+| Wasted runs (verdict neither clean nor completed-equivalent) | ≤ 5% of runs | scheduler run sidecars (per-run verdict) |
+
+**Freeze rule.** Until the target holds for **2 consecutive weeks**, scheduler/develop-loop PRDs
+are limited to bug fixes, deletions and measurement. A PRD that adds a new mechanism must name
+the existing mechanism it deletes. A red week (any measure missed) re-arms the freeze and resets
+the consecutive-week count to 0.
+
+**Who checks.** The architect Epic, before queuing any scheduler/develop-loop work: compute the
+four measures for the last full week from the sources above, state whether the freeze is armed,
+and reject or reshape PRDs that violate it.
+
 ## 1. The dispatch path — what actually drives `tickQueue`
 
 `tickQueue()` (`src/main/scheduler.cjs`) is the single function that reads the queue,

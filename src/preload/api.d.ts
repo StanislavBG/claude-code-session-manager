@@ -489,10 +489,10 @@ export interface DelegationReadiness {
 }
 
 /** First-boot seeder outcome, one per seeder id, derived from its marker file.
- *  `fix` is the manual remedy shown by the Plugins banner when `status` is 'exhausted'. */
+ *  `fix` is the manual remedy shown by the Plugins banner when `status` is 'failed' or 'exhausted'. */
 export type SeedStatus = Record<
   'dev-plugin' | 'scheduler-mcp' | 'agent-personas',
-  { status: 'done' | 'pending' | 'exhausted'; fix: string }
+  { status: 'done' | 'pending' | 'failed' | 'exhausted'; fix: string }
 >;
 
 export interface OtelConfig {
@@ -1781,7 +1781,7 @@ export interface SessionManagerAPI {
      *  on macOS symlinked-/Users mismatch and blocks all session spawns. */
     homeSelfCheck: () => Promise<{ ok: boolean; error?: string; realCwd?: string }>;
     /** First-boot seeder outcomes, read live from each seeder's own marker
-     *  file: 'done' (succeeded), 'pending' (not yet run / retrying),
+     *  file: 'done' (succeeded), 'pending' (not yet run), 'failed' (an attempt failed; retries next launch),
      *  'exhausted' (gave up after MAX_ATTEMPTS — manual fix needed). */
     seedStatus: () => Promise<SeedStatus>;
     /** "Can this project actually delegate?" — the 4 preconditions for

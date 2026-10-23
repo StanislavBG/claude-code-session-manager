@@ -77,9 +77,9 @@ for (const id of Object.keys(MARKER_NAMES)) {
     expect(getSeedStatus()[id].status).toBe('done');
   });
 
-  test(`${id}: done:false, attempts below max → pending`, () => {
+  test(`${id}: done:false, attempts 1 reports failed`, () => {
     writeMarker(id, JSON.stringify({ done: false, attempts: 1, ts: '2026-01-01T00:00:00.000Z' }));
-    expect(getSeedStatus()[id].status).toBe('pending');
+    expect(getSeedStatus()[id].status).toBe('failed');
   });
 
   test(`${id}: done:false, attempts >= max → exhausted`, () => {
@@ -93,7 +93,7 @@ for (const id of Object.keys(MARKER_NAMES)) {
     expect(getSeedStatus()[id].status).toBe('pending');
   });
 
-  test(`${id}: missing marker file → pending`, () => {
+  test(`${id}: absent marker stays pending`, () => {
     // No file written for this id — directory may not even exist.
     expect(getSeedStatus()[id].status).toBe('pending');
   });

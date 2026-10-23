@@ -22,14 +22,15 @@ const SEEDERS = {
   'agent-personas': seedAgentPersonas,
 };
 
-/** One seeder's marker → 'done' | 'pending' | 'exhausted'. */
+/** One seeder's marker → 'done' | 'pending' | 'failed' | 'exhausted'. */
 function statusFromMarker(mod) {
   try {
     const raw = fs.readFileSync(mod.markerPath(), 'utf8').trim();
     const m = JSON.parse(raw);
     if (m && m.done) return 'done';
     const attempts = Number(m && m.attempts) || 0;
-    return attempts >= mod.MAX_ATTEMPTS ? 'exhausted' : 'pending';
+    if (attempts >= mod.MAX_ATTEMPTS) return 'exhausted';
+    return attempts > 0 ? 'failed' : 'pending';
   } catch {
     return 'pending'; // absent or unparseable — never surfaced as an error.
   }

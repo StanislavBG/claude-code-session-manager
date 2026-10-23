@@ -256,7 +256,7 @@ function PluginsComponent() {
   const exhaustedSeeders = useMemo(() => {
     if (!seedStatus) return []
     return (Object.keys(seedStatus) as Array<keyof SeedStatus>).filter(
-      (id) => seedStatus[id].status === 'exhausted' && !dismissedSeeders.has(id),
+      (id) => (seedStatus[id].status === 'exhausted' || seedStatus[id].status === 'failed') && !dismissedSeeders.has(id),
     )
   }, [seedStatus, dismissedSeeders])
 
@@ -360,7 +360,10 @@ function SeedStatusBanner({
       {seeders.map((id) => (
         <div key={id} className="flex items-start gap-2 text-xs text-yellow-300">
           <div className="flex-1 min-w-0">
-            <div className="font-medium">{SEEDER_LABELS[id]} setup failed after retrying — manual fix needed</div>
+            <div className="font-medium">{seedStatus[id].status === 'failed'
+                ? `${SEEDER_LABELS[id]} setup failed — it will retry on next launch. To fix it now:`
+                : `${SEEDER_LABELS[id]} setup failed after retrying — manual fix needed`}
+            </div>
             {id === 'dev-plugin' ? (
               <div className="text-yellow-400/80 mt-0.5">
                 Click <button onClick={onOpenLibrary} className="underline hover:no-underline">here</button> to open the

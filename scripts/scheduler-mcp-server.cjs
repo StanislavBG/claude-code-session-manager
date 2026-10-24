@@ -80,6 +80,16 @@ function errorResult(text) {
 const NOT_RUNNING_ERROR =
   `session-manager app is not running (admin API unreachable) — start it first${HELP_POINTER}`;
 
+// The app accepted (or may have accepted) the request but did not answer: the
+// write may already be applied, so the advice is "check, then same slug" —
+// never a new slug.
+function busyError(code) {
+  return `session-manager admin API did not answer (${code}) — the app is running but busy; the request may still be applied. `
+    + 'Before retrying a create, call scheduler_list_prds for this Epic with no status filter '
+    + '(a just-written PRD has status null), or retry the same call with the same slug; '
+    + `never re-issue it under a new slug.${HELP_POINTER}`;
+}
+
 // Same resolution fetchReadiness() below uses: a project-home-builder session
 // running inside an Epic worktree still targets the real project cwd, not
 // the worktree's own pwd.
@@ -114,11 +124,15 @@ async function adminRequest(method, urlPath, body) {
       },
       body: body ? JSON.stringify(body) : undefined,
     });
-  } catch {
-    throw new Error(NOT_RUNNING_ERROR);
+  } catch (err) {
+    if (err?.cause?.code === 'ECONNREFUSED') throw new Error(NOT_RUNNING_ERROR);
+    throw new Error(busyError(err?.cause?.code || err?.name || 'unknown'));
   }
-  const json = await res.json();
-  return json;
+  try {
+    return await res.json();
+  } catch {
+    throw new Error(`admin API answered HTTP ${res.status} with a non-JSON body`);
+  }
 }
 
 // session_manager_help's live half. The catalog/recipes below are static and
@@ -870,4 +884,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { TOOLS, handleCallTool, HELP_POINTER, NOT_RUNNING_ERROR };
+module.exports = { TOOLS, handleCallTool, HELP_POINTER, NOT_RUNNING_ERROR, busyError };

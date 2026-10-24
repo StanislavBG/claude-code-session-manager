@@ -45,7 +45,7 @@ jobs:
       # Vitest's experimental.fsModuleCache (vitest.config.ts) persists
       # transformed modules here across runs; restoring it per shard avoids
       # re-transforming all 601 files every CI run.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: node_modules/.experimental-vitest-cache
           key: vitest-fs-module-cache-${{ hashFiles('package-lock.json') }}-shard${{ matrix.shard }}

@@ -32,6 +32,7 @@ const { resolveDepSlug, findNearMatches } = require('./depSlugResolve.cjs');
 const { resolveEpicPrdWriteDir } = require('./prdLocations.cjs');
 const { isFixPlanSlug } = require('../scheduler/fixPlanSlug.cjs');
 const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
+const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { sizingWarnings } = require('./prdSizing.cjs');
 const { execGit } = require('../git/gitExec.cjs');
 const { extractRepoPathCandidates, worktreeReachWarnings } = require('./prdWorktreeReach.cjs');
@@ -224,7 +225,18 @@ async function worktreeReachAdvisory(input, cwd) {
  * on failure — `status` is the HTTP status code the caller should map errors to
  * (400/409/500), left to the caller since only the HTTP route needs it.
  */
+const inFlightCreates = new Set();
+
 async function createPrd(input, remote) {
+  const ctl = { key: null };
+  try {
+    return await createPrdInner(input, remote, ctl);
+  } finally {
+    if (ctl.key) inFlightCreates.delete(ctl.key);
+  }
+}
+
+async function createPrdInner(input, remote, ctl) {
   // cwd is untrusted AND, since this PRD, optional — a caller inside an
   // Epic's git worktree naturally passes its worktree pwd (or omits cwd
   // entirely and relies on originClaudeSessionId/sourcePromptId). Resolve the
@@ -450,6 +462,16 @@ async function createPrd(input, remote) {
   // Finished rows leave queue.json, so an author can re-issue a landed PRD under a fresh NN.
   // Refused before NN allocation so it burns no number. Fix plans are exempt.
   if (input.sourcePromptId && !isFixPlanSlug(`0-${slug}`)) {
+    const inFlightKey = `${input.sourcePromptId}\u0000${slug}`;
+    if (inFlightCreates.has(inFlightKey)) {
+      return {
+        ok: false,
+        status: 409,
+        error: `A create for slug "${slug}" in this Epic is still in progress — wait for it to finish, then retry the same call`,
+      };
+    }
+    inFlightCreates.add(inFlightKey);
+    ctl.key = inFlightKey;
     let epicDirs = [];
     try {
       const prdsDir = resolveEpicPrdWriteDir(cwd, input.sourcePromptId);
@@ -460,6 +482,28 @@ async function createPrd(input, remote) {
       try { names = await fsp.readdir(dir); } catch { /* missing dir counts as empty */ }
       const dup = names.find((n) => n.endsWith('.md') && n.slice(0, -3).replace(/^\d+-/, '') === slug);
       if (dup) {
+        let existingTitle = null;
+        try {
+          existingTitle = splitFrontmatter(await fsp.readFile(path.join(dir, dup), 'utf8')).fm.title ?? null;
+        } catch { /* unreadable — treat as different */ }
+        if (existingTitle !== null && String(existingTitle).trim() === String(input.title ?? '').trim()) {
+          const existingSlug = dup.slice(0, -3);
+          let enqueuedExisting = false;
+          try {
+            if (typeof remote.getJob === 'function') enqueuedExisting = Boolean(await remote.getJob(existingSlug));
+          } catch { /* non-fatal */ }
+          return {
+            ok: true,
+            alreadyExisted: true,
+            nn: Number((/^(\d+)-/.exec(dup) || [])[1]),
+            filename: dup,
+            prdPath: path.join(dir, dup),
+            epicId: input.sourcePromptId,
+            enqueued: enqueuedExisting,
+            note: 'PRD was not written again: this Epic already has that file with the same title, which usually means an earlier call\'s response was lost, so treat it as created.',
+            warnings: [],
+          };
+        }
         return {
           ok: false,
           status: 409,
@@ -720,6 +764,7 @@ function registerAdminRoute(adminHttp, remote) {
     // Mirror createPrd()'s own honest shape verbatim — never re-add a
     // 'status' field here. See createPrd's return above for why.
     sendJson(res, 200, {
+      ...(result.alreadyExisted ? { alreadyExisted: true } : {}),
       nn: result.nn,
       filename: result.filename,
       prdPath: result.prdPath ?? null,

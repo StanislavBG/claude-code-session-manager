@@ -31,11 +31,11 @@ beforeEach(async () => {
   };
 });
 
-async function seed(epicId, sub, file) {
+async function seed(epicId, sub, file, title = 'seed') {
   const prds = resolveEpicPrdWriteDir(cwd, epicId);
   const dir = sub === 'prds' ? prds : path.join(path.dirname(prds), sub);
   await fsp.mkdir(dir, { recursive: true });
-  await fsp.writeFile(path.join(dir, file), '---\ntitle: seed\n---\n');
+  await fsp.writeFile(path.join(dir, file), `---\ntitle: ${title}\n---\n`);
 }
 
 const body = (o = {}) => ({
@@ -72,4 +72,48 @@ test('a distinct slug is allowed', async () => {
   const r = await createPrd(body({ slug: 'something-else' }), remote);
   expect(r.status).not.toBe(409);
   expect(alloc).toHaveBeenCalled();
+});
+
+test('same title in prds/ → ok alreadyExisted, nothing written', async () => {
+  await seed('epic-a', 'prds', '2110-phone-drop-summary-state.md', 'Phone drop');
+  const writePrd = vi.fn(async () => ({ ok: true }));
+  const r = await createPrd(body(), { ...remote, writePrd });
+  expect(r.ok).toBe(true);
+  expect(r.alreadyExisted).toBe(true);
+  expect(r.filename).toBe('2110-phone-drop-summary-state.md');
+  expect(r.nn).toBe(2110);
+  expect(alloc).not.toHaveBeenCalled();
+  expect(writePrd).not.toHaveBeenCalled();
+});
+
+test('same title in prds-archived/ → ok alreadyExisted', async () => {
+  await seed('epic-a', 'prds-archived', '2110-phone-drop-summary-state.md', 'Phone drop');
+  const r = await createPrd(body(), remote);
+  expect(r.ok).toBe(true);
+  expect(r.alreadyExisted).toBe(true);
+  expect(alloc).not.toHaveBeenCalled();
+});
+
+test('different title still 409', async () => {
+  await seed('epic-a', 'prds', '2110-phone-drop-summary-state.md', 'Other title');
+  const r = await createPrd(body(), remote);
+  expect(r.ok).toBe(false);
+  expect(r.status).toBe(409);
+  expect(r.error).toContain('already exists');
+});
+
+test('concurrent create for same slug → second gets in-progress 409', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  const blocked = { ...remote, allocateParallelGroup: vi.fn(async () => { await gate; return 7; }) };
+  const first = createPrd(body(), blocked);
+  await new Promise((r) => setTimeout(r, 50));
+  const second = await createPrd(body(), blocked);
+  expect(second.ok).toBe(false);
+  expect(second.status).toBe(409);
+  expect(second.error).toContain('still in progress');
+  release();
+  await first;
+  const third = await createPrd(body({ slug: 'phone-drop-summary-state' }), remote);
+  expect(third.error ?? '').not.toContain('still in progress');
 });

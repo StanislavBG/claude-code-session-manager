@@ -29,8 +29,30 @@ function trackSessionOpen(deps) {
   track('session.open', {}, deps);
 }
 
-function trackEpicCreate(deps) {
-  track('epic.create', {}, deps);
+// Enum mappers — user-authored values never leave the machine; only the closed
+// shipped sets do. Sets are required lazily so this module stays light.
+function mapTag(tag) {
+  if (typeof tag !== 'string' || !tag) return null;
+  try {
+    const { EpicTagSchema } = require('../promptSessionSchema.cjs');
+    return EpicTagSchema.options.includes(tag) ? tag : 'other';
+  } catch { return 'other'; }
+}
+
+function mapAgentType(agentType) {
+  if (typeof agentType !== 'string' || !agentType) return null;
+  try {
+    const { PERSONAS } = require('../../seedAgentPersonas.cjs');
+    return PERSONAS.includes(agentType) ? agentType : 'custom';
+  } catch { return 'custom'; }
+}
+
+function trackEpicCreate({ tag, agentType } = {}, deps) {
+  track('epic.create', { tag: mapTag(tag), agentType: mapAgentType(agentType) }, deps);
+}
+
+function trackPrdCreate({ agentType } = {}, deps) {
+  track('prd.create', { agentType: mapAgentType(agentType) }, deps);
 }
 
 function trackSchedulerJobFinish({ status } = {}, deps) {
@@ -41,5 +63,6 @@ module.exports = {
   trackAppLaunch,
   trackSessionOpen,
   trackEpicCreate,
+  trackPrdCreate,
   trackSchedulerJobFinish,
 };

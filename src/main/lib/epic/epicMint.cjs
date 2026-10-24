@@ -382,7 +382,7 @@ function ensureEpic(cwd, { goalText, tag, epicId: explicitEpicId, status = 'prop
 
     const prdDir = resolveEpicPrdWriteDir(cwd, epicId);
     fs.mkdirSync(prdDir, { recursive: true });
-    telemetryCounters.trackEpicCreate();
+    telemetryCounters.trackEpicCreate({ tag, agentType });
     return { epicId, prdDir, created: true };
   });
 }

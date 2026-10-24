@@ -34,6 +34,7 @@ const { isFixPlanSlug } = require('../scheduler/fixPlanSlug.cjs');
 const { isIncomplete, resolveChainTerminals, isValidPlanId, mintPlanId, resolveInheritedPlanId } = require('./prdDisposition.cjs');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { sizingWarnings } = require('./prdSizing.cjs');
+const telemetryCounters = require('../telemetry/telemetryCounters.cjs');
 const { execGit } = require('../git/gitExec.cjs');
 const { extractRepoPathCandidates, worktreeReachWarnings } = require('./prdWorktreeReach.cjs');
 const { validateGate, validateFiles, renderFilesSection, renderGateSection } = require('./prdGateFiles.cjs');
@@ -671,6 +672,8 @@ async function createPrdInner(input, remote, ctl) {
     sourcePromptId: input.sourcePromptId ?? null,
     sourceTabId: input.sourceTabId ?? null,
   });
+  // Anonymous counter: enum-mapped agentType only (telemetryCounters.cjs).
+  telemetryCounters.trackPrdCreate({ agentType: input.agentType || DEFAULT_PRD_AGENT_TYPE });
 
   // PRD 1446: writePrd() succeeding used to just promise "the next scheduler
   // reconcile pass (~1 minute)" adopts this file — but nothing reliably ran

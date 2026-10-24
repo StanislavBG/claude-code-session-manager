@@ -111,12 +111,10 @@ const MCP_TOOL_CATALOG = [
       + 'them with `dependsOn` instead.',
     whenToUse: 'Use whenever new work should be queued into an already-approved Epic — this is the /develop path.',
     whenNotToUse: 'TWO DISTINCT FAILURE MODES if this tool is not usable — do not conflate them: '
-      + '(a) this tool call is PRESENT in your tool list but ERRORS as app-not-running / admin '
-      + 'API unreachable — that is the ONLY case where hand-authoring the PRD file directly on '
-      + 'disk is an acceptable DEGRADED, LAST-RESORT fallback; the caller MUST say so explicitly '
-      + 'and visibly in its report (which file, why the tool was unreachable, that it needs '
-      + 'verification) since the server-side validation, atomic NN allocation, and '
-      + 'Epic-existence check this tool performs did not run for that file. '
+      + '(a) this tool call is PRESENT in your tool list but ERRORS — NEVER hand-write a PRD file. '
+      + 'On "not running" (admin API unreachable): stop, ask the human to start the app, then retry the same call. '
+      + 'On "did not answer": the app is busy and the PRD may already exist — check with scheduler_list_prds '
+      + '(no status filter) or retry the same slug. '
       + '(b) this tool is ABSENT from your tool list entirely — you were never offered it, so '
       + 'there is no error to catch. That means the session-manager-scheduler MCP server is not '
       + 'registered for this project: a MISCONFIGURATION, not an offline app. In that case DO '
@@ -400,7 +398,7 @@ const MCP_RECIPES = [
     title: 'Queue work into an already-approved Epic (/develop)',
     steps: [
       'Confirm an Epic already exists for this work (proposed or active) — scheduler_create_prd never mints one.',
-      'Call scheduler_create_prd with sourcePromptId set to that Epic id, plus title/cwd/estimateMinutes/goal/acceptanceCriteria/implementationNotes.',
+      'Call scheduler_create_prd with sourcePromptId set to that Epic id, plus title/cwd/goal/acceptanceCriteria/implementationNotes/gate/files.',
       'The response has enqueued:false — the queue row is derived by the scheduler\'s next reconcile pass (~1 minute), not by this call.',
       'Optionally call scheduler_list_prds with cwd/status to confirm the PRD picked up a job row.',
     ],

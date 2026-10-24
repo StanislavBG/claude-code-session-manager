@@ -209,4 +209,4 @@ async function seedSchedulerMcp({ logger = console, addFn = runClaudeMcpAdd, rem
   }
 }
 
-module.exports = { seedSchedulerMcp, mcpAddArgv, markerPath, MAX_ATTEMPTS, serverScriptPath, SERVER_NAME };
+module.exports = { seedSchedulerMcp, writeMarker, runClaudeMcpAdd, runClaudeMcpRemove, mcpAddArgv, markerPath, MAX_ATTEMPTS, serverScriptPath, SERVER_NAME };

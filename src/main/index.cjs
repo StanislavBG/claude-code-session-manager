@@ -627,8 +627,20 @@ ipcMain.handle('app:delegation-readiness', validated(schemas.delegationReadiness
   try {
     await ensureGuardsInstalled(cwd);
   } catch { /* auto-install must never block the readiness probe itself */ }
+  const first = await checkDelegationReadiness({ ...payload, cwd });
+  const failing = (first?.checks || []).some((c) => !c.ok && (c.id === 'dev-plugin' || c.id === 'scheduler-mcp'));
+  if (!failing) return first;
+  // Repair at point of use (at most once per check per app run) — the boot seeders give up after 3 attempts.
+  try {
+    await require('./lib/epic/delegationSelfHeal.cjs').selfHealDelegation({
+      checks: first.checks,
+      homeDir: os.homedir(),
+      deps: { awaitBootSeeding: () => bootSeedingPromise, cwd },
+    });
+  } catch { /* self-heal never blocks the probe */ }
   return checkDelegationReadiness({ ...payload, cwd });
 }));
+let bootSeedingPromise = Promise.resolve();
 
 // Every guard-install attempt is logged from MAIN, not the renderer — a
 // press that never reaches this process (e.g. a renderer talking to an
@@ -1455,7 +1467,7 @@ app.whenReady().then(async () => {
   // Seeders run through ONE serial chain (runSeeders.cjs): plugin install and
   // `mcp add --scope user` both write Claude's config files, and concurrent
   // writes can drop an entry. Fire-and-forget relative to window creation.
-  runSeedersSerially([
+  bootSeedingPromise = runSeedersSerially([
     { name: 'dev-plugin', run: () => seedDevPlugin({ logger: console, writeLog: logs.writeLine }) },
     { name: 'agent-personas', run: () => seedAgentPersonas({ logger: console, writeLog: logs.writeLine }) },
     { name: 'scheduler-mcp', run: () => seedSchedulerMcp({ logger: console, writeLog: logs.writeLine }) },

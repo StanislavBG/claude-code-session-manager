@@ -198,4 +198,4 @@ async function seedDevPlugin({
   }
 }
 
-module.exports = { seedDevPlugin, upgradeIfStale, marketplaceIsStale, compareSemver, markerPath, MAX_ATTEMPTS };
+module.exports = { seedDevPlugin, writeMarker, PLUGIN_SLUG, MARKETPLACE, ENABLED_KEY, upgradeIfStale, marketplaceIsStale, compareSemver, markerPath, MAX_ATTEMPTS };

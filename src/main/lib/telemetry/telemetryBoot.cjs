@@ -24,7 +24,29 @@ function resolveDeps(deps = {}) {
     telemetryClient: deps.telemetryClient || require('./telemetryClient.cjs'),
     buildMachineProfile: deps.buildMachineProfile || require('../machineProfile.cjs').buildMachineProfile,
     telemetryCounters: deps.telemetryCounters || require('./telemetryCounters.cjs'),
+    getSeedStatus: deps.getSeedStatus || (() => require('../../seedStatus.cjs').getSeedStatus()),
   };
+}
+
+/**
+ * Maps getSeedStatus() to enum-only strings (never the fix text or a path).
+ * Any failure or malformed shape yields null — never a throw.
+ */
+function buildSeeds(getSeedStatus) {
+  try {
+    const s = getSeedStatus();
+    const pick = (id) => {
+      const v = s && s[id] && s[id].status;
+      return typeof v === 'string' ? v : null;
+    };
+    return {
+      devPlugin: pick('dev-plugin'),
+      schedulerMcp: pick('scheduler-mcp'),
+      agentPersonas: pick('agent-personas'),
+    };
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -52,7 +74,7 @@ function resolveDeps(deps = {}) {
  */
 async function bootSequence({ now = Date.now(), appVersion, installChannel, deps: depsOverride } = {}) {
   const deps = resolveDeps(depsOverride);
-  const { telemetrySettings, telemetryClient, buildMachineProfile, telemetryCounters } = deps;
+  const { telemetrySettings, telemetryClient, buildMachineProfile, telemetryCounters, getSeedStatus } = deps;
 
   const settings = await telemetrySettings.load();
   const versionChanged = settings.lastMachineReportVersion !== appVersion;
@@ -63,7 +85,7 @@ async function bootSequence({ now = Date.now(), appVersion, installChannel, deps
   }
 
   if (telemetrySettings.isMachineReportDue(settings, { now, appVersion })) {
-    const profile = await buildMachineProfile();
+    const profile = { ...(await buildMachineProfile()), seeds: buildSeeds(getSeedStatus) };
     const reportResult = await telemetryClient.reportInstall(profile);
     if (reportResult && reportResult.accepted) {
       await telemetrySettings.save({
@@ -76,4 +98,4 @@ async function bootSequence({ now = Date.now(), appVersion, installChannel, deps
   telemetryCounters.trackAppLaunch({ installChannel, appVersion });
 }
 
-module.exports = { bootSequence };
+module.exports = { bootSequence, buildSeeds };

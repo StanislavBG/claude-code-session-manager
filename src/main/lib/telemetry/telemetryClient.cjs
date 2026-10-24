@@ -580,7 +580,19 @@ function buildInstallWire(profile, installId) {
     // not the module-singleton one) plus the current process's test-runner
     // signal, same three-value contract as the other three channels.
     env: machineProfile.resolveEnv({ isTestRunner: isTestEnvironment(), installChannel: p.installChannel }),
+    // First-boot seeder outcomes (enum strings only) or null — see telemetryBoot.buildSeeds.
+    seeds: sanitizeSeeds(p.seeds),
   };
+}
+
+const SEED_ENUM = new Set(['done', 'pending', 'failed', 'exhausted']);
+function sanitizeSeeds(seeds) {
+  if (!seeds || typeof seeds !== 'object') return null;
+  const out = {};
+  for (const k of ['devPlugin', 'schedulerMcp', 'agentPersonas']) {
+    out[k] = SEED_ENUM.has(seeds[k]) ? seeds[k] : null;
+  }
+  return out;
 }
 
 /**

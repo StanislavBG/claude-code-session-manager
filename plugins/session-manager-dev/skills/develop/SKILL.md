@@ -69,6 +69,7 @@ failure modes have different fixes:
   error is not this case: fix the input and retry. **STOP. Do not write any PRD file.** Tell the
   human to start the app, then retry the same call. Why: a PRD file the API did not write is
   quarantined and never runs.
+- **(c) Create errors with "did not answer" or "Connection closed".** It may still have been written; retry the same call with the same slug (it returns the existing PRD with `alreadyExisted: true`) and never re-issue it under a new slug.
 - **(b) Tool ABSENT from your tool list.** The `session-manager-scheduler` MCP server is not
   registered: a **misconfiguration**, not an offline app.
   **STOP. Do not write any PRD file.** Tell the human. The app registers the server at user

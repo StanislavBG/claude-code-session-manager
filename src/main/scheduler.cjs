@@ -10358,7 +10358,7 @@ function toCompactPrdEntry(entry) {
  * `schedule:list-prds` IPC handler and the admin HTTP `GET
  * /admin/scheduler/prds` route (PRD 1024) — neither re-implements this scan.
  */
-async function listPrdsInternal() {
+async function listPrdsInternal({ cwd } = {}) {
   ensureDirs();
   const out = [];
   const seenSlugs = new Set();
@@ -10410,12 +10410,21 @@ async function listPrdsInternal() {
   // Live PRDs first, so an archived duplicate (shouldn't exist, but a
   // stale rename copy is possible) never shadows the still-runnable live
   // entry.
-  for (const dir of prdPaths.candidatePrdsDirs()) {
+  // A non-empty cwd scopes the scan to that one project's dirs (cost = that
+  // project's files, not every project's); no cwd = the machine-wide scan.
+  const scoped = typeof cwd === 'string' && cwd.length > 0;
+  const liveDirs = scoped
+    ? [...new Set([schedulerPaths.prdsRoot(), prdPaths.prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)])]
+    : prdPaths.candidatePrdsDirs();
+  const archivedDirs = scoped
+    ? [...new Set(listArchivedPrdDirs(cwd))]
+    : prdPaths.candidateArchivedPrdsDirs();
+  for (const dir of liveDirs) {
     await readDirInto(dir, { archived: false });
   }
 
   const archivedStart = out.length;
-  for (const dir of prdPaths.candidateArchivedPrdsDirs()) {
+  for (const dir of archivedDirs) {
     await readDirInto(dir, { archived: true });
   }
 
@@ -10658,7 +10667,7 @@ const remote = {
   // paging by offset can't skip or duplicate an entry between requests as
   // long as the underlying PRD set doesn't change mid-page.
   async listPrds(filter = {}) {
-    const all = await listPrdsInternal();
+    const all = await listPrdsInternal({ cwd: filter.cwd });
     const filtered = all.filter((entry) => {
       if (filter.cwd && entry.cwd !== filter.cwd) return false;
       if (filter.epicId && entry.epicId !== filter.epicId) return false;

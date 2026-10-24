@@ -7,6 +7,7 @@
  * independent on/off toggle, surfaced in the New Epic card's "advanced"
  * grounding board — not folded silently into Actor or Mission.
  */
+import type { EpicTag } from './tagLibrary'
 
 export interface ContextInjectionDef {
   key: string
@@ -50,3 +51,15 @@ export type ContextInjectionKey = keyof typeof CONTEXT_INJECTIONS
 
 /** Insertion order for every toggle-list/table in the UI. */
 export const CONTEXT_INJECTION_ORDER: ContextInjectionKey[] = Object.keys(CONTEXT_INJECTIONS) as ContextInjectionKey[]
+
+/**
+ * Default on/off state for every Context Injection, given the Mission tag.
+ * `general-behavior` is always on; `delegate-implementation` defaults on only
+ * for `feature`/`bug` (the missions that already queue work via /develop).
+ * A human toggle always overrides this default.
+ */
+export function defaultContextInjectionsForTag(tag: EpicTag): Record<ContextInjectionKey, boolean> {
+  return Object.fromEntries(
+    CONTEXT_INJECTION_ORDER.map((k) => [k, k === 'delegate-implementation' ? tag === 'feature' || tag === 'bug' : true]),
+  ) as Record<ContextInjectionKey, boolean>
+}

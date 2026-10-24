@@ -7,6 +7,7 @@
 import { usePromptSessions } from '../state/promptSessions'
 import { useChat } from '../state/chat'
 import { composeEpicIntake } from './epicIntake'
+import { defaultContextInjectionsForTag } from './contextInjections'
 import type { EpicTag } from './tagLibrary'
 
 export interface LaunchSessionInput {
@@ -51,6 +52,7 @@ export async function launchSession(input: LaunchSessionInput): Promise<{ epicId
     tag,
     agentName,
     agentDescription,
+    contextInjections: defaultContextInjectionsForTag(tag),
     ...(persona ? { agentBody: persona.text, agentPath: persona.path } : {}),
   })
   const session = await usePromptSessions

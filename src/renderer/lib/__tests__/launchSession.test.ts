@@ -20,6 +20,7 @@ vi.mock('../epicIntake', () => ({
 
 import { launchSession } from '../launchSession'
 import { composeEpicIntake } from '../epicIntake'
+import { CONTEXT_INJECTIONS } from '../contextInjections'
 
 const input = {
   cwd: '/p',
@@ -52,6 +53,7 @@ describe('launchSession', () => {
     expect(calls).toEqual(['compose', 'create', 'approve', 'send'])
     expect(composeEpicIntake).toHaveBeenCalledWith({
       title: 'T', goal: 'G', tag: 'feature', agentName: 'dev-lead', agentDescription: 'desc',
+      contextInjections: { 'general-behavior': true, 'delegate-implementation': true },
     })
     expect(createPromptSession).toHaveBeenCalledWith(
       '/p', 'GOAL', 'feature', 'src', 'dev-lead', 'OPEN', [{ kind: 'goal', label: 'g', text: 't' }],
@@ -77,8 +79,26 @@ describe('launchSession', () => {
     expect(warn).toHaveBeenCalledTimes(1)
     expect(composeEpicIntake).toHaveBeenCalledWith({
       title: 'T', goal: 'G', tag: 'feature', agentName: 'dev-lead', agentDescription: 'desc',
+      contextInjections: { 'general-behavior': true, 'delegate-implementation': true },
     })
     warn.mockRestore()
+  })
+
+  it.each([
+    ['feature', true],
+    ['discussion', false],
+  ] as const)('%s launch: delegate-implementation injection=%s, general-behavior always', async (tag, delegate) => {
+    const actual = await vi.importActual<typeof import('../epicIntake')>('../epicIntake')
+    vi.mocked(composeEpicIntake).mockImplementationOnce(actual.composeEpicIntake)
+    await launchSession({ ...input, tag: tag as never })
+    const [, , , , , openingPrompt, sections] = createPromptSession.mock.calls[0]
+    const texts = (sections as { text: string }[]).map((s) => s.text)
+    const general = CONTEXT_INJECTIONS['general-behavior'].text
+    const deleg = CONTEXT_INJECTIONS['delegate-implementation'].text
+    expect(openingPrompt).toContain(general)
+    expect(texts.some((t) => t.includes(general))).toBe(true)
+    expect((openingPrompt as string).includes(deleg)).toBe(delegate)
+    expect(texts.some((t) => t.includes(deleg))).toBe(delegate)
   })
 
   it.each(['cwd', 'agentName', 'title', 'goal'] as const)('throws on empty %s', async (key) => {

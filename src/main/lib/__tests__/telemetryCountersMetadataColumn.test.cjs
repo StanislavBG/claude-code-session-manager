@@ -77,7 +77,7 @@ test('every counter event still yields appVersion + machineDigest once persisted
 
   counters.trackAppLaunch({ installChannel: 'npx', appVersion: '0.83.0' }, deps);
   counters.trackSessionOpen(deps);
-  counters.trackEpicCreate(deps);
+  counters.trackEpicCreate({}, deps);
   counters.trackSchedulerJobFinish({ status: 'completed' }, deps);
 
   // track() ingress does real fs I/O and the counter functions fire it without

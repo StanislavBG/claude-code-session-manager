@@ -34,9 +34,10 @@ test('trackSessionOpen fires session.open once', () => {
 
 test('trackEpicCreate fires epic.create once', () => {
   const { calls, deps } = fakeClient();
-  counters.trackEpicCreate(deps);
+  counters.trackEpicCreate({}, deps);
   expect(calls).toHaveLength(1);
   expect(calls[0].name).toBe('epic.create');
+  expect(Object.keys(calls[0].props).sort()).toEqual(['agentType', 'tag']);
 });
 
 test('trackSchedulerJobFinish fires scheduler.job.finish once with a status-only prop', () => {
@@ -52,6 +53,6 @@ test('a throwing telemetryClient.track never escapes any counter function', () =
   const deps = { telemetryClient: { track: () => { throw new Error('boom'); } } };
   expect(() => counters.trackAppLaunch({ installChannel: 'dev', appVersion: '1.0.0' }, deps)).not.toThrow();
   expect(() => counters.trackSessionOpen(deps)).not.toThrow();
-  expect(() => counters.trackEpicCreate(deps)).not.toThrow();
+  expect(() => counters.trackEpicCreate({}, deps)).not.toThrow();
   expect(() => counters.trackSchedulerJobFinish({ status: 'failed' }, deps)).not.toThrow();
 });

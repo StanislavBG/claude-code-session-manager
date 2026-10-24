@@ -26,7 +26,16 @@ describe('release.yml', () => {
   })
   it('publishes with --publish always', () => {
     expect(yml).toContain('npm run ${{ matrix.script }} -- --publish always')
-    expect(yml).toContain('-c.publish.releaseType=release')
+    expect(yml).toContain('-c.publish.releaseType=draft')
+    expect(yml).not.toContain('-c.publish.releaseType=release')
+  })
+  it('creates one draft release before the matrix and publishes it after', () => {
+    expect(yml).toContain('create-release:')
+    expect(yml).toContain('needs: create-release')
+    expect(yml).toContain('gh release create "$TAG"')
+    expect(yml).toContain('--draft')
+    expect(yml).toContain('--draft=false --latest')
+    expect(yml.indexOf('--draft=false --latest')).toBeGreaterThan(yml.indexOf('--publish always'))
   })
   it('runs the packaged smoke before publishing', () => {
     expect(yml).toContain('SM_PACKAGED_BIN')

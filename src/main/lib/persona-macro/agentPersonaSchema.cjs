@@ -77,6 +77,8 @@ const AgentPersonaSaveSchema = z.object({
   // Without this field zod's default "strip unknown keys" behavior would
   // silently drop it from a save payload that did carry one.
   seedVersion: z.number().int().optional(),
+  // Executor-only persona (e.g. dev-lead): New Epic warns when picked as the planning Actor. Never blocks.
+  executorOnly: z.boolean().optional(),
   // Unbounded — a persona's body is arbitrary system-prompt prose.
   body: z.string(),
 });

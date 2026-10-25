@@ -342,6 +342,8 @@ export interface AgentPersona {
   title?: string | null;
   /** Bundled-persona version stamp (seedAgentPersonas.cjs). Null for a persona that was never seeded, or has no stamp. */
   seedVersion?: number | null;
+  /** `executorOnly: true` frontmatter — persona only executes a scoped PRD; New Epic warns when it is picked as Actor. */
+  executorOnly?: boolean;
   path: string;
   body: string;
   /** Project names (basename of cwd) whose currently-open tab overlays this agent. */
@@ -374,6 +376,8 @@ export interface AgentPersonaSaveInput {
   projectName?: string;
   /** Bundled-persona version stamp (seedAgentPersonas.cjs). Omit to carry over the existing file's stamp unchanged. */
   seedVersion?: number;
+  /** Omit to keep the existing file's value. */
+  executorOnly?: boolean;
   body: string;
 }
 

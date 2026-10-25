@@ -71,3 +71,9 @@ test('a persona with only the required fields parses', () => {
   expect(() => assertValidAgentPersonaSave(minimal)).not.toThrow();
   expect(AgentPersonaSaveSchema.safeParse(minimal).success).toBe(true);
 });
+
+test('executorOnly is an optional boolean and survives parsing', () => {
+  expect(assertValidAgentPersonaSave(validPersona({ executorOnly: true })).executorOnly).toBe(true);
+  expect(assertValidAgentPersonaSave(validPersona()).executorOnly).toBeUndefined();
+  expect(() => assertValidAgentPersonaSave(validPersona({ executorOnly: 'yes' }))).toThrow(/executorOnly/);
+});

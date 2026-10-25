@@ -301,6 +301,28 @@ describe('NewEpicCard', () => {
     expect(el.querySelector('[data-testid="new-epic-agent-debugger"]')).not.toBeNull()
   })
 
+  it('warns inline when the selected Actor is executorOnly, and not for architect', async () => {
+    const base = { description: 'x', tools: [], model: null, effort: null, color: null, tags: [], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] }
+    listPersonasSpy.mockResolvedValue([
+      { ...base, name: 'dev-lead', executorOnly: true },
+    ])
+    let el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    const warn = el.querySelector('[data-testid="new-epic-executor-only-warning"]')
+    expect(warn).not.toBeNull()
+    expect(warn!.textContent).toContain('architect')
+    act(() => root!.unmount())
+    container!.remove()
+
+    listPersonasSpy.mockResolvedValue([
+      { ...base, name: 'architect' },
+      { ...base, name: 'dev-lead', executorOnly: true },
+    ])
+    el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    expect(el.querySelector('[data-testid="new-epic-executor-only-warning"]')).toBeNull()
+  })
+
   it('pre-selects the "architect" persona by default when one exists in the Agent Library', async () => {
     listPersonasSpy.mockResolvedValue([
       { name: 'architect', description: 'Owns overall plan and decomposition.', tools: [], model: 'opus', effort: null, color: null, tags: [], projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] },

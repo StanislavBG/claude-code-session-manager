@@ -72,7 +72,7 @@ function decodeLine(s) {
  * unchanged (not Claude-Code-visible either) so a save from the Agent
  * Library editor never erases the stamp a hand-edit should keep intact.
  */
-function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, body }) {
+function serializePersona({ name, description, tools, model, effort, color, tags, projects, action, actionLabel, title, seedVersion, executorOnly, body }) {
   const lines = ['---', `name: ${name}`];
   if (description) lines.push(`description: ${description}`);
   if (tools && tools.length) lines.push(`tools: ${tools.join(', ')}`);
@@ -85,6 +85,7 @@ function serializePersona({ name, description, tools, model, effort, color, tags
   if (actionLabel) lines.push(`actionLabel: ${encodeLine(actionLabel)}`);
   if (title) lines.push(`title: ${title}`);
   if (typeof seedVersion === 'number' && Number.isFinite(seedVersion)) lines.push(`seedVersion: ${seedVersion}`);
+  if (executorOnly === true) lines.push('executorOnly: true');
   lines.push('---', '');
   return lines.join('\n') + (body || '').trim() + '\n';
 }
@@ -149,6 +150,7 @@ async function savePersona({
   actionLabel,
   title,
   seedVersion,
+  executorOnly,
   body,
   projectName,
   globalDir = path.join(os.homedir(), '.claude', 'agents'),
@@ -173,20 +175,22 @@ async function savePersona({
   let resolvedProjects = projects;
   let resolvedAction = action;
   let resolvedActionLabel = actionLabel;
-  if ([seedVersion, title, projects, action, actionLabel].some((v) => v === undefined)) {
+  let resolvedExecutorOnly = executorOnly;
+  if ([seedVersion, title, projects, action, actionLabel, executorOnly].some((v) => v === undefined)) {
     try {
       const { fm } = splitFrontmatter(fsSync.readFileSync(target, 'utf8'));
       if (resolvedSeedVersion === undefined) {
         const existingVersion = Number(fm.seedVersion);
         if (Number.isFinite(existingVersion)) resolvedSeedVersion = existingVersion;
       }
+      if (resolvedExecutorOnly === undefined && String(fm.executorOnly).trim() === 'true') resolvedExecutorOnly = true;
       if (resolvedTitle === undefined && fm.title) resolvedTitle = fm.title;
       if (resolvedProjects === undefined && fm.projects) resolvedProjects = parseTools(fm.projects);
       if (resolvedAction === undefined && fm.action) resolvedAction = decodeLine(fm.action);
       if (resolvedActionLabel === undefined && fm.actionLabel) resolvedActionLabel = decodeLine(fm.actionLabel);
     } catch { /* no existing file (or unreadable) — nothing to carry over */ }
   }
-  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, body });
+  const text = serializePersona({ name, description, tools, model, effort, color, tags, projects: resolvedProjects, action: resolvedAction, actionLabel: resolvedActionLabel, title: resolvedTitle, seedVersion: resolvedSeedVersion, executorOnly: resolvedExecutorOnly, body });
   await writeTextAtomic(target, text);
   if (originalName && originalName !== name) {
     const oldReal = validatePath(path.join(globalDir, `${originalName}.md`));
@@ -332,6 +336,7 @@ async function listPersonas({
       actionLabel: decodeLine(fm.actionLabel) || null,
       title: fm.title || null,
       seedVersion: fm.seedVersion !== undefined && Number.isFinite(Number(fm.seedVersion)) ? Number(fm.seedVersion) : null,
+      executorOnly: String(fm.executorOnly).trim() === 'true',
       path: real,
       body: body.trim(),
       overridingProjects,

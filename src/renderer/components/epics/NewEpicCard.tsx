@@ -525,6 +525,18 @@ export function NewEpicCard({
               </label>
             ) : null}
 
+            {selectedAgent?.executorOnly && (
+              <div
+                data-testid="new-epic-executor-only-warning"
+                className="mb-2.5 rounded-md border border-honey/30 bg-honey/15 px-2.5 py-2 text-[11.5px] leading-[1.5]"
+              >
+                <Badge tone="warn">Executor persona</Badge>
+                <span className="ml-1.5 text-fg-dim">
+                  {selectedAgent.name} executes one already-scoped PRD; for planning, pick architect.
+                </span>
+              </div>
+            )}
+
             {readiness && !readiness.ok && (
               <div
                 data-testid="delegation-readiness-warning"

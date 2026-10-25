@@ -31,6 +31,14 @@ function section(body, heading) {
 }
 
 describe('applyStructuredPrdPatch', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('gate-only patch reads back to exactly the new commands', () => {
     const body = makeBody();
     const gate = ['timeout 30 npm run typecheck', 'timeout 60 npx vitest run src/x.test.cjs'];
@@ -56,7 +64,7 @@ describe('applyStructuredPrdPatch', () => {
     assert.ok(!r.body.includes('first works'));
   });
 
-  it('rejects a gate with a shell metacharacter and leaves the body unchanged', () => {
+  it('rejects a gate with a shell metacharacter and leaves the body unchanged', { repeats: 20 }, () => {
     const body = makeBody();
     const r = applyStructuredPrdPatch(body, { gate: ['npm test | tee out.txt'] });
     assert.equal(r.ok, false);

@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v10 -->
+<!-- PRD_AUTHORING.md v11 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -100,6 +100,7 @@ Both fields are required in every `scheduler_create_prd` call.
 7. Keep each entry on one line, at most 500 chars, with plain spaces between words.
 8. Use `["none"]` only for docs or config with no runnable check. Write exactly `none`. Never mix `none` with commands.
 9. Put `NAME=value` words before `timeout`, never after it, for example `CI=1 timeout 300 npm test`. A leading `TMPDIR=$(mktemp -d) ` is allowed but not needed: the scheduler gives each gate its own TMPDIR.
+10. A gate command must not create or modify tracked files; write outputs to the per-gate TMPDIR or a gitignored path. Why: a dirtied tree fails the clean-tree check.
 
 ### files
 
@@ -226,3 +227,4 @@ Before queueing a new PRD, verify each of these:
 - [ ] **§11 End green:** the gate runs last; any intentional failure runs early and is captured.
 - [ ] **Gate baseline:** every gate command ran green once at HEAD in the main checkout; a red suite is scoped to the PRD's own test files and the PRD notes say why. Why: a gate already red on base parks as `sentinel_fail`.
 - [ ] **No human-only gates:** no gate or criterion needs a human or the passage of time (cron install, live post wait, live payment, dashboard action); those end `SCHEDULER_VERDICT: NEEDS_HUMAN <question>`. Why: no executor can pass them.
+- [ ] **Gate purity:** a gate command must not create or modify tracked files; outputs go to the per-gate TMPDIR or a gitignored path. Why: a dirtied tree fails the clean-tree check.

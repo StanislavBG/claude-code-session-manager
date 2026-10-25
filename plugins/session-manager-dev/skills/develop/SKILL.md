@@ -31,7 +31,7 @@ new work. **report** = your final message to the human.
    4. No match: stop and say so. Tell the human to open an Epic with the New Epic card and run
       /develop there. Never mint an Epic or write a PRD without one. Why: only a human creates
       an Epic.
-2. **Tag-aware default.** On a `feature` or `bug` Epic, PRDs are the expected path once scope
+2. **Tag-aware default.** On a `feature`, `bug` or `art` Epic, PRDs are the expected path once scope
    is clear; start unasked. On a `discussion` Epic it stays available, but wait until the
    human settles that code is wanted.
 3. **Never hand-implement in this session**, even when the plan is agreed. Why: this session
@@ -89,10 +89,11 @@ failure modes have different fixes:
    (empty, max, concurrent, malformed, permission, failure); interaction effects (what depends
    on your change); integration (reuse the existing schema, store, API, primitives);
    validation (for UI: which screenshot, light and dark, proves which criterion).
-4. **Run a completeness pass** if the ask exceeds one or two PRDs or spans subsystems: give one
-   Explore or general-purpose sub-agent the ask verbatim, your draft list and the lenses; ask
-   what is missing. Fold in real gaps, drop vague ones. Repeat at most once. It reviews; you
-   author.
+4. **Run a completeness pass** if the ask exceeds one or two PRDs or spans subsystems: start it as a
+   background sub-agent as soon as the draft list exists (Explore or general-purpose; the ask
+   verbatim, your draft list, the lenses; ask what is missing) and keep exploring while it runs.
+   The planner turn is hard-killed at 30 minutes with a warning at 24; late gaps become sibling
+   PRDs. Fold in real gaps, drop vague ones. Repeat at most once. It reviews; you author.
 5. **Tests and security go inside the feature's own PRD** as criteria (security when it
    touches input, auth or data), never as follow-ups. Why: TDD needs the test with the code;
    security is decided while writing it. Also check quality (performance, error handling).
@@ -103,7 +104,8 @@ failure modes have different fixes:
    pass. Each goal's first sentence names its type, in chain order: `primitive` (new helper
    and its test), `wire` (adopt it at named call sites), `behavior` (one function's logic and
    its test), `migration` (mechanical change), `doc`, `validate`.
-7. **Keep each PRD small**: at most 3 edited files, 1 new file, 6 criteria. The validate PRD is
+7. **Keep each PRD small**: at most 3 edited files, 1 new file, 6 criteria. Test files edited or added in lockstep with
+   the PRD's own code do not count toward the 3-edited / 1-new file limit. The validate PRD is
    exempt: it has one criterion per PRD, plus the record. A new helper and its first caller are
    two PRDs. Most PRDs take 5–10 executor minutes; split anything expected
    to take over 15. Do not write an estimate. Why: the kill budget floors at 45 minutes, so a
@@ -116,7 +118,7 @@ failure modes have different fixes:
    the test file and tests. Commands go in `gate`. No open-ended "grep X and update" lines.
 10. **Show the plan once**: the plan goal line, the stage view (for example `Stage 1: A ∥ B →
     Stage 2: C → validate`), and a table (#, PRD, files, gate, dependsOn) — not PRD
-    drafts. Queue at once when the Epic is `feature` or `bug` and scope is clear; otherwise ask
+    drafts. Queue at once when the Epic is `feature`, `bug` or `art` and scope is clear; otherwise ask
     one approval question, once.
 11. Before the first `scheduler_create_prd` call, run `git -C "$SM_PROJECT_ROOT" rev-parse HEAD`
     and keep the SHA. **Walk the pre-queue checklist** (last section of PRD_AUTHORING.md), then
@@ -174,7 +176,9 @@ the API rejects that.
     is red, scope the gate to the PRD's own test files, never a suite that is already red, and
     say in the PRD notes which suite was red and why it was scoped out. Why: a gate that is red
     on the base parks the job as `sentinel_fail` whatever the executor does.
-11. Never put a step only a human or the passage of time can complete (host cron install,
+11. A gate command must not create or modify tracked files; write outputs to the per-gate TMPDIR
+    or a gitignored path. Why: a dirtied tree fails the clean-tree check.
+12. Never put a step only a human or the passage of time can complete (host cron install,
     waiting for a live post, a live payment, an account dashboard action) in a gate or
     criterion. The executor ends with `SCHEDULER_VERDICT: NEEDS_HUMAN <question>` for those, and
     the PRD notes say so. Why: no executor can pass such a gate, so the job parks as
@@ -213,10 +217,9 @@ End every plan with exactly one validate PRD:
 2. `dependsOn`: every other slug in the plan. Past the cap of 100, only the sinks (PRDs nothing
    depends on). Why: `dependsOn` is walked transitively.
 3. Goal: the plan's slugs and titles.
-4. Criteria: one per PRD, naming its file
-   (`$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/<epic-id>/prds/<NN>-<slug>.md`
-   while queued, `prds-archived/` (possibly a timestamped subfolder) beside it once done; find
-   it by slug. Why: `session-manager-operations/scheduler/` is gitignored, so it is never in
+4. Criteria: one per PRD, citing it by slug
+   (under `$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/<epic-id>/`; find it by
+   slug under prds/ or prds-archived/, possibly a timestamped subfolder. Why: `session-manager-operations/scheduler/` is gitignored, so it is never in
    the validator's job worktree. The last: write and commit
    `session-manager-operations/reviews/validation/<epic-id>/<validate-slug>.md`.
 5. Notes: "Work as the validator persona — the procedure is your system prompt." and a line

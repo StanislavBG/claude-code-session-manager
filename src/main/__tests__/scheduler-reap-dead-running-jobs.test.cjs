@@ -47,11 +47,15 @@ const { auditLogPath } = require('../lib/telemetry/auditLog.cjs');
 // after registering a new project so each test sees its own fixture.
 const { bustCwdCache } = require('../lib/scheduler/queueStore.cjs');
 
+// The production bustProjectCwdCache() is shallow (known slug dirs are not
+// re-read), so this fixture — which reuses one slug dir for a different cwd per
+// test — must use the full test reset to make the new cwd visible.
 function registerActiveProject(cwd) {
   const projectsDir = path.join(tmpHome, '.claude', 'projects');
   const slugDir = path.join(projectsDir, 'fake-project-slug');
   fs.mkdirSync(slugDir, { recursive: true });
   fs.writeFileSync(path.join(slugDir, 'transcript.jsonl'), JSON.stringify({ cwd }) + '\n');
+  require('../lib/activeSessions.cjs').__resetProjectCwdCacheForTests();
 }
 
 // Every real scheduler row is born from a real PRD .md file — reconcile()'s

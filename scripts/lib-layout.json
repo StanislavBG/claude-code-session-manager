@@ -138,5 +138,6 @@
   "winSpawn": "process",
   "withTimeout": "util",
   "workTypeLibrary": "prd",
-  "worktreeDeps": "git"
+  "worktreeDeps": "git",
+  "worktreeSetup": "git"
 }

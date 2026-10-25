@@ -148,4 +148,65 @@ async function runWorktreeSetup(opts) {
   }
 }
 
-module.exports = { runWorktreeSetup, CONFIG_NAME };
+const LINE_PREFIX = '[scheduler] worktree setup:';
+const LINE_MAX = 500;
+/** Reasons that mean "nothing to log" (no setup applies). */
+const SILENT_REASONS = new Set(['no-config', 'in-place']);
+/** Skip reasons where the worktree is still trustworthy for a gate. */
+const SETTLED_REASONS = new Set(['no-config', 'not-declared', 'opt-out']);
+
+function clip(line) {
+  return line.length <= LINE_MAX ? line : `${line.slice(0, LINE_MAX - 1)}…`;
+}
+const secs = (ms) => (Math.round((Number(ms) || 0) / 100) / 10).toString();
+
+/**
+ * Run-log lines for a setup outcome. Pure; never throws. Lines are
+ * `[scheduler]`-prefixed and never carry command output (tails stay in
+ * meta.json) so the run-log detectors cannot be tripped by a setup command.
+ * @param {any} outcome
+ * @returns {string[]}
+ */
+function formatSetupOutcome(outcome) {
+  try {
+    if (!outcome || typeof outcome !== 'object') return [];
+    const reason = String(outcome.reason);
+    if (SILENT_REASONS.has(reason)) return [];
+    if (!outcome.ran) {
+      let line = `${LINE_PREFIX} skipped — ${reason}`;
+      if (outcome.error) line += `: ${String(outcome.error)}`;
+      const lines = [clip(line)];
+      if (reason === 'not-in-worktree') {
+        lines.push(clip(`${LINE_PREFIX} .session-manager.json is in the main checkout but not in this worktree's commit`));
+      }
+      return lines;
+    }
+    const commands = Array.isArray(outcome.commands) ? outcome.commands : [];
+    let summary = `${LINE_PREFIX} ${reason} — ${commands.length} command(s) in ${secs(outcome.ms)}s`;
+    if (Number(outcome.waitedMs) >= 1000) summary += `, waited ${secs(outcome.waitedMs)}s`;
+    const lines = [clip(summary)];
+    for (const c of commands) {
+      const cc = c && typeof c === 'object' ? c : {};
+      const code = cc.code === null || cc.code === undefined ? 'n/a' : String(cc.code);
+      lines.push(clip(`${LINE_PREFIX}   exit ${code} in ${Number(cc.ms) || 0}ms${cc.timedOut ? ', timed out' : ''}: ${String(cc.cmd ?? '')}`));
+    }
+    if (outcome.ok === false) {
+      lines.push(clip(`${LINE_PREFIX} output tail is in the run's meta.json under worktreeSetup.commands[].tail`));
+    }
+    return lines;
+  } catch { return []; }
+}
+
+/**
+ * True when a gate can trust the worktree: setup passed, or none is declared.
+ * @param {any} outcome
+ * @returns {boolean}
+ */
+function isSetupSettled(outcome) {
+  try {
+    if (!outcome || typeof outcome !== 'object') return false;
+    return outcome.ok === true || SETTLED_REASONS.has(outcome.reason);
+  } catch { return false; }
+}
+
+module.exports = { runWorktreeSetup, formatSetupOutcome, isSetupSettled, CONFIG_NAME };

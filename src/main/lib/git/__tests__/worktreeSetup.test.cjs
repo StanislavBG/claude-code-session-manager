@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { runWorktreeSetup } = require('../worktreeSetup.cjs');
+const { runWorktreeSetup, formatSetupOutcome, isSetupSettled } = require('../worktreeSetup.cjs');
 const { parseChain, runGateSequence } = require('../../scheduler/definitionOfDone.cjs');
 
 let dir;
@@ -133,5 +133,56 @@ describe('runWorktreeSetup runs', () => {
     const g2 = await runGateSequence(parseChain(`timeout 30 node -e '0'`), { cwd: dir });
     expect(g2.status).toBe('green');
     expect((await setup).reason).toBe('passed');
+  });
+});
+
+describe('formatSetupOutcome', () => {
+  const P = '[scheduler] worktree setup:';
+  const ran = (o) => ({ ran: true, ok: true, reason: 'passed', waitedMs: 0, ms: 2400, commands: [{ cmd: 'a', code: 0, ms: 1200, timedOut: false, tail: 'SECRET' }], ...o });
+  it('is empty for null/undefined/no-config/in-place/garbage', () => {
+    for (const o of [null, undefined, { reason: 'no-config' }, { reason: 'in-place' }, 5, 'x']) expect(formatSetupOutcome(o)).toEqual([]);
+  });
+  it('passed: summary + per-command line, no output text', () => {
+    expect(formatSetupOutcome(ran())).toEqual([`${P} passed — 1 command(s) in 2.4s`, `${P}   exit 0 in 1200ms: a`]);
+  });
+  it('waited >= 1000ms is reported, less is not', () => {
+    expect(formatSetupOutcome(ran({ waitedMs: 3000 }))[0]).toBe(`${P} passed — 1 command(s) in 2.4s, waited 3s`);
+    expect(formatSetupOutcome(ran({ waitedMs: 999 }))[0]).not.toContain('waited');
+  });
+  it('failed with a timed-out command points at meta.json', () => {
+    const lines = formatSetupOutcome(ran({ ok: false, reason: 'failed', commands: [{ cmd: 'b', code: null, ms: 5, timedOut: true, tail: 'rate limit' }] }));
+    expect(lines[1]).toBe(`${P}   exit n/a in 5ms, timed out: b`);
+    expect(lines[2]).toContain('worktreeSetup.commands[].tail');
+    expect(lines.join('\n')).not.toContain('rate limit');
+  });
+  it('skip reasons', () => {
+    for (const reason of ['unreadable', 'not-declared', 'invalid', 'opt-out', 'no-commands', 'dep-link-disabled', 'error']) {
+      expect(formatSetupOutcome({ ran: false, ok: false, reason, commands: [] })).toEqual([`${P} skipped — ${reason}`]);
+    }
+    expect(formatSetupOutcome({ ran: false, reason: 'invalid', error: 'bad' })).toEqual([`${P} skipped — invalid: bad`]);
+    const nw = formatSetupOutcome({ ran: false, reason: 'not-in-worktree' });
+    expect(nw[0]).toBe(`${P} skipped — not-in-worktree`);
+    expect(nw[1]).toContain('main checkout');
+  });
+  it('truncates every line to 500 chars with an ellipsis', () => {
+    const long = 'x'.repeat(2000);
+    const lines = [...formatSetupOutcome(ran({ commands: [{ cmd: long, code: 0, ms: 1 }] })), ...formatSetupOutcome({ ran: false, reason: 'error', error: long })];
+    for (const l of lines) { expect(l.length).toBeLessThanOrEqual(500); expect(l.startsWith(P)).toBe(true); }
+    expect(lines[1].endsWith('…')).toBe(true);
+  });
+  it('never throws on malformed input', () => {
+    expect(() => formatSetupOutcome({ ran: true, commands: [null, 3] })).not.toThrow();
+    expect(() => formatSetupOutcome({ ran: true, commands: 'x', reason: {} })).not.toThrow();
+  });
+});
+
+describe('isSetupSettled', () => {
+  it('truth table', () => {
+    for (const r of ['no-config', 'not-declared', 'opt-out']) expect(isSetupSettled({ ok: false, reason: r })).toBe(true);
+    expect(isSetupSettled({ ok: true, reason: 'passed' })).toBe(true);
+    for (const r of ['failed', 'unavailable', 'not-in-worktree', 'unreadable', 'invalid', 'no-commands', 'error', 'in-place', 'dep-link-disabled']) {
+      expect(isSetupSettled({ ok: false, reason: r })).toBe(false);
+    }
+    for (const o of [null, undefined, {}, 'x', 1]) expect(isSetupSettled(o)).toBe(false);
   });
 });

@@ -21,7 +21,8 @@
  *
  * Downgrade policy:
  *   clean           → null        (caller stamps 'completed')
- *   halt            → 'pending'   (re-fires automatically next slot)
+ *   halt            → 'pending'   (re-fires automatically next slot; only for
+ *                                  a run that printed no SCHEDULER_VERDICT line)
  *   deps_unmet      → 'pending'   (re-fires when deps clear)
  *   transcript_errors → historical rows only; no longer emitted
  *   verify_unavailable → 'needs_review' (unreadable log / verifier threw)
@@ -294,6 +295,30 @@ function scanSentinel(resultEvent, events) {
     if (m) return m[1].toLowerCase();
   }
 
+  return null;
+}
+
+/**
+ * First line that starts at column 0 with the exact uppercase halt marker
+ * (`HALT:`) outside a fenced block, else null. Line-anchored and fence-aware
+ * because reports quote the marker in prose and paste tool output in fences,
+ * and PRD_AUTHORING.md §4/§9/§10 tell scripts to print it on failure — neither
+ * is the executor's own stop signal.
+ * @param {unknown} text
+ * @returns {string | null}
+ */
+function scanHaltLine(text) {
+  if (typeof text !== 'string') return null;
+  let inFence = false;
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\r$/, '').trimEnd();
+    const t = line.trimStart();
+    if (t.startsWith('```') || t.startsWith('~~~')) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence && line.startsWith('HALT:')) return line;
+  }
   return null;
 }
 
@@ -742,13 +767,17 @@ async function verifyRun({
       else if (commitEvidence) commitEvidenceSource = 'transcript';
     }
 
-    // ── 3. HALT detection ─────────────────────────────────────────────────
-    // Primary: check the final `{"type":"result"}` event's `result` text.
-    if (resultEvent) {
-      const rt = resultEvent.resultText;
-      if (/\bHALT:/i.test(rt) || /^HALT\b/m.test(rt)) {
-        const firstLine = rt.split('\n')[0].slice(0, 200);
-        let reason = `Agent HALTed: ${firstLine}`;
+    // ── 3. HALT detection (fallback only) ─────────────────────────────────
+    // The SCHEDULER_VERDICT line is the executor's final say (FINISH_PROTOCOL
+    // VERDICT LINE step); the halt check is a fallback for runs that printed
+    // none. Incident: Rabbits-Game 163-attack-scorecard, 2026-10-24 — a PASS
+    // report quoting the marker in backticks was re-queued as a halt.
+    const sentinel = scanSentinel(resultEvent, events);
+    if (resultEvent && sentinel === null) {
+      const haltLine = scanHaltLine(resultEvent.resultText);
+      if (haltLine) {
+        const rt = resultEvent.resultText;
+        let reason = `Agent HALTed: ${haltLine.slice(0, 200)}`;
         // Embed machine-parseable floor date if present in HALT message.
         const dateMatch = rt.match(/~?(\d{4}-\d{2}-\d{2})/);
         if (dateMatch) reason += ` (eligible from: ${dateMatch[1]})`;
@@ -772,9 +801,6 @@ async function verifyRun({
         });
       }
     }
-
-    // Scan for the SCHEDULER_VERDICT sentinel emitted by the finish protocol.
-    const sentinel = scanSentinel(resultEvent, events);
 
     // An explicit executor FAIL is always blocking — outranks every other
     // verdict and every override below (early return). Transcript issues are
@@ -1022,6 +1048,7 @@ module.exports = {
   checkDeps,
   parseLog,
   scanSentinel,
+  scanHaltLine,
   scanSentinelReason,
   scanHumanQuestion,
   scanForeignWipPathsClaim,

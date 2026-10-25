@@ -21,7 +21,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { verifyRun, parseLog } = require('../runVerify.cjs');
+const { verifyRun, parseLog, scanHaltLine } = require('../runVerify.cjs');
 
 // The verdicts sidecar goes through config.writeJsonSync, whose write allow-list
 // rejects os.tmpdir() fixtures. Route it to a plain write for these fixtures.
@@ -947,56 +947,62 @@ test('pass_no_commit: PASS, no commit, priorLandedCommit not supplied (null) →
   }
 });
 
-// (e) halt + sentinel PASS → still halt (override must not apply to halt)
-test('halt result + sentinel PASS + committedDuringRun:true → still halt', async () => {
+// (e) halt line + sentinel PASS → clean (the verdict line now outranks the halt check)
+test('halt line + sentinel PASS + committedDuringRun:true → clean', async () => {
+  const v = await runReport('77-halt-sentinel-pass', 'HALT: prerequisite not met\nSCHEDULER_VERDICT: PASS', true);
+  assert.equal(v.verdict, 'clean', `got ${v.verdict}: ${v.reason}`);
+  assert.equal(v.downgradeTo, null);
+});
+
+async function runReport(slug, text, committedDuringRun) {
   const tmp = makeTmpDir();
   try {
-    const slug = '77-halt-sentinel-pass';
-    const logEvents = [
-      {
-        type: 'assistant',
-        message: {
-          role: 'assistant',
-          content: [{
-            type: 'tool_use',
-            id: 'toolu_halt_001',
-            name: 'Bash',
-            input: { command: 'check deps', description: 'Check prerequisites' },
-          }],
-        },
-      },
-      {
-        type: 'user',
-        message: {
-          role: 'user',
-          content: [{
-            type: 'tool_result',
-            tool_use_id: 'toolu_halt_001',
-            content: 'dep not ready',
-            is_error: false,
-          }],
-        },
-      },
-      {
-        type: 'result',
-        subtype: 'success',
-        result: 'HALT: prerequisite not met\nSCHEDULER_VERDICT: PASS',
-      },
-    ];
-    writeLog(tmp, slug, logEvents);
-    const prdPath = writePrd(tmp, slug, '# Halt with sentinel');
-    const verdict = await verifyRun({
+    writeLog(tmp, slug, [{ type: 'result', subtype: 'success', result: text }]);
+    const prdPath = writePrd(tmp, slug, '# Report test');
+    return await verifyRun({
       runDir: tmp,
       prdPath,
       queueEntry: { slug, status: 'running' },
       allJobs: [],
-      committedDuringRun: true,
+      committedDuringRun,
     });
-    assert.equal(verdict.verdict, 'halt', `halt must survive even with PASS sentinel, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, 'pending');
   } finally {
     rmdir(tmp);
   }
+}
+
+test('163-attack-scorecard: PASS report quoting the marker in backticks → clean', async () => {
+  const text = 'I added `game/tools/attack_scorecard.gd`. The Godot suite passes (198 passed, 0 failed).\n\nI did not test the `HALT:` exit-1 path, since every move hits.\n\nSCHEDULER_VERDICT: PASS';
+  const v = await runReport('163-attack-scorecard', text, true);
+  assert.equal(v.verdict, 'clean', `got ${v.verdict}: ${v.reason}`);
+  assert.equal(v.downgradeTo, null);
+});
+
+test('no verdict line + second line starts with the marker → halt/pending, reason uses that line', async () => {
+  const v = await runReport('78-halt-second-line', 'Checking prerequisites.\nHALT: dep X not ready\nstopping', false);
+  assert.equal(v.verdict, 'halt');
+  assert.equal(v.downgradeTo, 'pending');
+  assert.ok(v.reason.includes('HALT: dep X not ready'), v.reason);
+  assert.ok(!v.reason.includes('Checking prerequisites'), v.reason);
+});
+
+test('verdict FAIL line + marker line → sentinel_fail/needs_review', async () => {
+  const v = await runReport('79-fail-and-halt', 'HALT: something\nSCHEDULER_VERDICT: FAIL gate red', false);
+  assert.equal(v.verdict, 'sentinel_fail');
+  assert.equal(v.downgradeTo, 'needs_review');
+});
+
+test('scanHaltLine: column-0 line matches; quoted/indented/fenced/other-case do not', () => {
+  assert.equal(scanHaltLine('intro\nHALT: dep missing  \r\nmore'), 'HALT: dep missing');
+  assert.equal(scanHaltLine('it printed HALT: here'), null);
+  assert.equal(scanHaltLine('see `HALT:` path'), null);
+  assert.equal(scanHaltLine('halt: lower'), null);
+  assert.equal(scanHaltLine('  HALT: indented'), null);
+  assert.equal(scanHaltLine('```\nHALT: in fence\n```'), null);
+  assert.equal(scanHaltLine('~~~\nHALT: in tilde fence\n~~~'), null);
+  assert.equal(scanHaltLine('```\nx\n```\nHALT: after fence'), 'HALT: after fence');
+  assert.equal(scanHaltLine(''), null);
+  assert.equal(scanHaltLine(undefined), null);
 });
 
 // ─── -merge-main postcondition exemption tests (2026-07-18 feedback) ──────────

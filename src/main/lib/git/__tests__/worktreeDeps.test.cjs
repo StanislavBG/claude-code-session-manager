@@ -248,7 +248,7 @@ test('runs the project worktreeSetup command in the worktree', async () => {
     worktreeSetup: [`timeout 30 node -e 'require("fs").writeFileSync("setup-ran.txt","x")'`],
   }));
   const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
-  expect(r.setup).toEqual({ ran: true, ok: true });
+  expect(r.setup).toMatchObject({ ran: true, ok: true, reason: 'passed' });
   expect(fs.existsSync(path.join(wt, 'setup-ran.txt'))).toBe(true);
 });
 
@@ -257,6 +257,6 @@ test('a failing worktreeSetup still resolves with setup.ok false', async () => {
     worktreeSetup: ["timeout 30 node -e 'process.exit(3)'"],
   }));
   const r = await linkDependencyDirs({ mainCwd: main, worktreeCwd: wt });
-  expect(r.setup.ok).toBe(false);
+  expect(r.setup).toMatchObject({ ran: true, ok: false, reason: 'failed' });
   expect(r.linked).toContain('node_modules');
 });

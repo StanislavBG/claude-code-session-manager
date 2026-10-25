@@ -2,66 +2,149 @@
  * worktreeSetup.cjs — run a project's one-time warm-up commands in a fresh
  * worktree (e.g. Godot's first `--import` core-dumps; the second is clean).
  *
- * The project declares them in a tracked `.session-manager.json` at its root:
- *   { "worktreeSetup": ["timeout 600 godot --headless --import"] }
+ * The project declares them in a TRACKED `.session-manager.json` at its root:
+ *   { "worktreeSetup": ["timeout 600 godot --headless --path game --import"] }
  * Entries use gate syntax, are validated by prdGateFiles.validateGate, and run
- * in order with cwd = the worktree through definitionOfDone.runGateSequence.
- * Best-effort: never throws; failures are logged and returned.
+ * in order with cwd = the WORKTREE ROOT, so a project whose code lives in a
+ * subfolder names it itself (Godot's `--path game`).
+ *
+ * Execution: definitionOfDone.runIsolatedSequence — it never takes the shadow
+ * gate flag, so a setup is never skipped as "busy" and never makes a gate busy.
+ * Setups of the same project (key = path.resolve(mainCwd || worktreeCwd)) run
+ * strictly one at a time: a later call waits and is never skipped. Different
+ * projects run in parallel.
+ *
+ * Never throws. Always resolves to one outcome object:
+ *   { ran, ok, reason, error?, waitedMs, ms, commands }
+ *   commands: one { cmd, status, code, ms, timedOut, tail } per started command
+ *             (tail <= 1000 chars). ok is true only when every command passed.
+ *   reason when commands ran: 'passed' | 'failed' | 'unavailable'
+ *   reason otherwise: 'no-config' | 'not-in-worktree' | 'unreadable' |
+ *     'not-declared' | 'invalid' | 'opt-out' | 'no-commands' | 'error'
  */
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
 const { validateGate } = require('../prd/prdGateFiles.cjs');
-const { parseChain, runGateSequence } = require('../scheduler/definitionOfDone.cjs');
+const { parseChain, runIsolatedSequence } = require('../scheduler/definitionOfDone.cjs');
 
 const CONFIG_NAME = '.session-manager.json';
+const TAIL_MAX = 1000;
+
+/** Per-project chain of in-flight setups; idle keys are deleted. */
+const setupChains = new Map();
 
 function log(msg) {
   try { console.warn(`[worktreeSetup] ${msg}`); } catch { /* best-effort */ }
 }
 
-/**
- * @param {{ worktreeCwd: string }} opts
- * @returns {Promise<{ ran: false, error?: string } | { ran: true, ok: boolean }>}
- */
-async function runWorktreeSetup({ worktreeCwd }) {
+function skipped(reason, extra) {
+  return { ran: false, ok: false, reason, waitedMs: 0, ms: 0, commands: [], ...extra };
+}
+
+/** True when mainCwd's config declares a real (non-empty, non-"none") worktreeSetup. */
+function mainDeclaresSetup(mainCwd) {
+  if (typeof mainCwd !== 'string' || !mainCwd) return false;
   try {
-    if (typeof worktreeCwd !== 'string' || !worktreeCwd) return { ran: false };
-    let cfg;
-    try {
-      cfg = JSON.parse(fs.readFileSync(path.join(worktreeCwd, CONFIG_NAME), 'utf8'));
-    } catch (err) {
-      if (err && err.code !== 'ENOENT') log(`${CONFIG_NAME} unreadable, treated as absent: ${err.message}`);
-      return { ran: false };
-    }
-    if (!cfg || typeof cfg !== 'object' || !Array.isArray(cfg.worktreeSetup)) return { ran: false };
+    const cfg = JSON.parse(fs.readFileSync(path.join(mainCwd, CONFIG_NAME), 'utf8'));
+    const ws = cfg && cfg.worktreeSetup;
+    if (!Array.isArray(ws) || !ws.length) return false;
+    if (ws.length === 1 && typeof ws[0] === 'string' && /^none$/i.test(ws[0].trim())) return false;
+    return true;
+  } catch { return false; }
+}
 
-    const v = validateGate(cfg.worktreeSetup);
-    if (!v.ok) {
-      log(`invalid worktreeSetup, skipped: ${v.error}`);
-      return { ran: false, error: v.error };
-    }
-    // "none" is the gate opt-out: nothing to run.
-    if (v.commands.length === 1 && /^none$/i.test(v.commands[0])) return { ran: false };
-
-    const sequence = [];
-    for (const chain of v.commands) sequence.push(...parseChain(chain));
-    if (!sequence.length) return { ran: false, error: 'worktreeSetup produced no runnable commands' };
-
-    const res = await runGateSequence(sequence, { cwd: worktreeCwd });
-    if (res.status === 'green') return { ran: true, ok: true };
-    if (res.status === 'busy') {
-      log('gate runner busy, setup skipped');
-      return { ran: false, error: 'gate runner busy' };
-    }
-    const last = res.results[res.results.length - 1] || {};
-    const cmd = sequence[res.results.length - 1]?.raw ?? '(unknown)';
-    log(`setup command failed: ${cmd} (exit ${last.code ?? 'n/a'}, ${last.status ?? res.status})`);
-    return { ran: true, ok: false };
+/**
+ * Resolve the sequence to run, or a skipped outcome.
+ * @returns {{ sequence: any[] } | { outcome: object }}
+ */
+function resolveConfig(worktreeCwd, mainCwd) {
+  let cfg;
+  try {
+    cfg = JSON.parse(fs.readFileSync(path.join(worktreeCwd, CONFIG_NAME), 'utf8'));
   } catch (err) {
-    log(`unexpected error: ${err && err.message}`);
-    return { ran: false, error: String(err && err.message) };
+    if (err && err.code === 'ENOENT') {
+      if (mainDeclaresSetup(mainCwd)) {
+        log(`${CONFIG_NAME} declares worktreeSetup in the main checkout but is not in this worktree's commit — commit it`);
+        return { outcome: skipped('not-in-worktree') };
+      }
+      return { outcome: skipped('no-config') };
+    }
+    const msg = String(err && err.message);
+    log(`${CONFIG_NAME} unreadable, setup skipped: ${msg}`);
+    return { outcome: skipped('unreadable', { error: msg }) };
+  }
+  if (!cfg || typeof cfg !== 'object' || !('worktreeSetup' in cfg)) return { outcome: skipped('not-declared') };
+  if (!Array.isArray(cfg.worktreeSetup)) {
+    const error = 'worktreeSetup must be an array of gate-syntax strings';
+    log(`invalid worktreeSetup, skipped: ${error}`);
+    return { outcome: skipped('invalid', { error }) };
+  }
+  const v = validateGate(cfg.worktreeSetup);
+  if (!v.ok) {
+    log(`invalid worktreeSetup, skipped: ${v.error}`);
+    return { outcome: skipped('invalid', { error: v.error }) };
+  }
+  if (v.commands.length === 1 && /^none$/i.test(v.commands[0])) return { outcome: skipped('opt-out') };
+  const sequence = [];
+  for (const chain of v.commands) sequence.push(...parseChain(chain));
+  if (!sequence.length) return { outcome: skipped('no-commands') };
+  return { sequence };
+}
+
+async function execute(sequence, worktreeCwd, startedAt) {
+  const t0 = Date.now();
+  const res = await runIsolatedSequence(sequence, { cwd: worktreeCwd });
+  const results = Array.isArray(res.results) ? res.results : [];
+  const commands = results.map((r, i) => ({
+    cmd: sequence[i]?.raw ?? r.cmd,
+    status: r.status,
+    code: r.code,
+    ms: r.ms,
+    timedOut: r.timedOut,
+    tail: typeof r.tail === 'string' ? r.tail.slice(-TAIL_MAX) : r.tail,
+  }));
+  const reason = res.status === 'green' ? 'passed' : res.status === 'red' ? 'failed' : 'unavailable';
+  if (reason !== 'passed') {
+    const last = commands[commands.length - 1] || {};
+    log(`setup ${reason}: ${last.cmd ?? '(no command started)'} (exit ${last.code ?? 'n/a'}, ${last.status ?? res.status})`);
+  }
+  return {
+    ran: commands.length > 0,
+    ok: reason === 'passed',
+    reason,
+    waitedMs: t0 - startedAt,
+    ms: Date.now() - t0,
+    commands,
+  };
+}
+
+/**
+ * @param {{ worktreeCwd: string, mainCwd?: string }} opts
+ * @returns {Promise<{ ran: boolean, ok: boolean, reason: string, error?: string, waitedMs: number, ms: number, commands: object[] }>}
+ */
+async function runWorktreeSetup(opts) {
+  try {
+    const { worktreeCwd, mainCwd } = opts || {};
+    if (typeof worktreeCwd !== 'string' || !worktreeCwd) return skipped('no-config');
+    const cfg = resolveConfig(worktreeCwd, mainCwd);
+    if (cfg.outcome) return cfg.outcome;
+
+    const key = path.resolve(mainCwd || worktreeCwd);
+    const startedAt = Date.now();
+    const prev = setupChains.get(key) || Promise.resolve();
+    const mine = prev.catch(() => {}).then(() => execute(cfg.sequence, worktreeCwd, startedAt));
+    setupChains.set(key, mine);
+    try {
+      return await mine;
+    } finally {
+      if (setupChains.get(key) === mine) setupChains.delete(key);
+    }
+  } catch (err) {
+    const error = String(err && err.message);
+    log(`unexpected error: ${error}`);
+    return skipped('error', { error });
   }
 }
 

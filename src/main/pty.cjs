@@ -111,44 +111,6 @@ class PtyManager {
     this.outBuffers = new Map();
     this.flushTimers = new Map(); // tabId -> Timeout
     this.window = null;
-    this.outputListeners = new Map(); // tabId -> Set<{onData,onExit}>
-  }
-
-  /**
-   * Observe a tab's coalesced output (the same string the renderer gets) and
-   * its exit from the main process. Returns an unsubscribe function.
-   * @param {string} tabId
-   * @param {(tabId: string, chunk: string) => void} onData
-   * @param {(tabId: string, info: {exitCode: number, signal?: number}) => void} [onExit]
-   */
-  addOutputListener(tabId, onData, onExit) {
-    const entry = { onData, onExit };
-    let set = this.outputListeners.get(tabId);
-    if (!set) {
-      set = new Set();
-      this.outputListeners.set(tabId, set);
-    }
-    set.add(entry);
-    return () => {
-      const cur = this.outputListeners.get(tabId);
-      if (!cur) return;
-      cur.delete(entry);
-      if (cur.size === 0) this.outputListeners.delete(tabId);
-    };
-  }
-
-  /** Fire every onExit listener for `tabId` once (errors isolated), then drop them. */
-  #notifyExit(tabId, info) {
-    const set = this.outputListeners.get(tabId);
-    this.outputListeners.delete(tabId);
-    if (!set) return;
-    for (const l of [...set]) {
-      try {
-        l.onExit?.(tabId, info);
-      } catch (err) {
-        console.warn('[pty] output listener onExit threw', err);
-      }
-    }
   }
 
   /** Send any pending buffered output for `tabId` now, and clear its timer. */
@@ -162,16 +124,6 @@ class PtyManager {
     if (pending) {
       this.outBuffers.delete(tabId);
       sendIfAlive(this.window, `pty:data:${tabId}`, pending);
-      const set = this.outputListeners.get(tabId);
-      if (set) {
-        for (const l of [...set]) {
-          try {
-            l.onData?.(tabId, pending);
-          } catch (err) {
-            console.warn('[pty] output listener onData threw', err);
-          }
-        }
-      }
     }
   }
 
@@ -376,7 +328,6 @@ class PtyManager {
         this.sessions.delete(tabId);
         this.buffers.delete(tabId);
         this.#dropOutput(tabId);
-        this.#notifyExit(tabId, { exitCode, signal });
         return;
       }
       // Flush any still-buffered output BEFORE the exit event so the renderer
@@ -398,7 +349,6 @@ class PtyManager {
         });
       }
       sendIfAlive(this.window, `pty:exit:${tabId}`, { exitCode, signal });
-      this.#notifyExit(tabId, { exitCode, signal });
       this.sessions.delete(tabId);
       this.buffers.delete(tabId);
     });
@@ -461,9 +411,6 @@ class PtyManager {
       this.sessions.delete(tabId);
       this.buffers.delete(tabId);
       this.#dropOutput(tabId);
-      // Listeners learn the tab is gone now; the suppressed exit event that
-      // follows finds none left, so each fires exactly once.
-      this.#notifyExit(tabId, { exitCode: 0, signal: undefined });
     }
   }
 

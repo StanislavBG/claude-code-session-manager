@@ -544,7 +544,7 @@ function biasJobOomScore(pid) {
 async function recheckPrdSourceForJob(job) {
   const slug = job && job.slug;
   if (typeof slug !== 'string' || !slug || path.basename(slug) !== slug) return null;
-  try { require('./lib/activeSessions.cjs').bustProjectCwdCache(); } catch { /* best-effort */ }
+  try { require('./lib/activeSessions.cjs').bustProjectCwdCache({ deep: true }); } catch { /* best-effort */ }
   const dirs = [...(await prdPaths.jobScopedPrdDirs(job))];
   const found = await prdPaths.findPrdDirForJob(job);
   if (found) dirs.push(found);

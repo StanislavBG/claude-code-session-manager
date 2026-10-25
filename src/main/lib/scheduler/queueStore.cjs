@@ -218,10 +218,11 @@ function stateCwds(opts) {
 
 function bustCwdCache() {
   cwdCache = { at: 0, cwds: Object.freeze([]) };
-  // Without this chain, activeSessions' own scan cache hands stateCwds a
-  // stale list even after this bust — turning a caller's "I just wrote a
-  // brand-new project's first state file, make it visible now" into a
-  // no-op until activeSessions' independent TTL expires.
+  // Shallow bust: activeSessions keeps its per-dir cache and the next scan
+  // only picks up new project dirs. That is enough for new-project
+  // visibility — a brand-new project's transcript dir changes
+  // ~/.claude/projects' mtime, which the incremental path already sees.
+  // Callers needing a never-stale scan pass { deep: true } themselves.
   bustProjectCwdCache();
 }
 

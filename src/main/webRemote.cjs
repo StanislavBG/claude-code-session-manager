@@ -98,6 +98,30 @@ function defaultConfig() {
   return { remoteEnabled: false, remoteControlEnabled: false, devices: [] };
 }
 
+// Retired desktop-to-desktop clients: drop pins that came from one (clientId is a
+// string) so a leftover keypair is never auto-trusted; strip clientId from the rest.
+function pruneDesktopPins(cfg) {
+  if (!cfg || !Array.isArray(cfg.devices)) return cfg;
+  const devices = cfg.devices.map((d) => {
+    if (!d || !Array.isArray(d.verifiedPeerPubKeys)) return d;
+    const verifiedPeerPubKeys = d.verifiedPeerPubKeys
+      .filter((p) => p && typeof p.clientId !== 'string')
+      .map((p) => {
+        const { clientId: _drop, ...rest } = p;
+        return rest;
+      });
+    return { ...d, verifiedPeerPubKeys };
+  });
+  return { ...cfg, devices };
+}
+
+// Delete the orphaned desktop-client files. Never throws.
+function removeOrphanedClientFiles(dir) {
+  for (const name of ['remote-peers.json', 'relay-client.json']) {
+    try { fs.rmSync(path.join(dir, name), { force: true }); } catch { /* best effort */ }
+  }
+}
+
 function loadConfigSync() {
   const now = Date.now();
   if (_configCache && now - _configCacheAt < CONFIG_CACHE_TTL_MS) {
@@ -105,7 +129,7 @@ function loadConfigSync() {
   }
   try {
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-    _configCache = { ...defaultConfig(), ...JSON.parse(raw) };
+    _configCache = pruneDesktopPins({ ...defaultConfig(), ...JSON.parse(raw) });
   } catch {
     _configCache = defaultConfig();
   }
@@ -120,7 +144,7 @@ async function loadConfig() {
   }
   try {
     const raw = await fsp.readFile(CONFIG_PATH, 'utf8');
-    _configCache = { ...defaultConfig(), ...JSON.parse(raw) };
+    _configCache = pruneDesktopPins({ ...defaultConfig(), ...JSON.parse(raw) });
   } catch {
     _configCache = defaultConfig();
   }
@@ -142,14 +166,14 @@ async function saveConfig(data) {
 
 // ─── Audit log ────────────────────────────────────────────────────────────────
 
-// Format: <ISO>  <type>  deviceId=<id>  client=<clientId|connKey|->  msgId=<uuid>  result=ok|error:<code>
+// Format: <ISO>  <type>  deviceId=<id>  client=<connKey|->  msgId=<uuid>  result=ok|error:<code>
 // NEVER log token values or payload content.
 async function auditLog(ts, type, deviceId, msgId, result, client) {
   try {
     const ymd = ts.slice(0, 10);
     const logPath = path.join(AUDIT_LOG_DIR, `remote-audit-${ymd}.log`);
     const clean = (s) => String(s ?? '').replace(/[\r\n\t]+/g, ' ').slice(0, 200);
-    const line = `${ts}  ${clean(type)}  deviceId=${clean(deviceId) || '-'}  client=${clean(client && (client.clientId || client.key)) || '-'}  msgId=${clean(msgId) || '-'}  result=${result}\n`;
+    const line = `${ts}  ${clean(type)}  deviceId=${clean(deviceId) || '-'}  client=${clean(client && (client.key)) || '-'}  msgId=${clean(msgId) || '-'}  result=${result}\n`;
     const handle = await fsp.open(logPath, 'a', 0o600);
     try {
       await handle.write(line);
@@ -257,10 +281,10 @@ function isPinnedPeerKey(device, pubKey) {
 }
 
 // Append a pin (never removing another client's), dedupe by pubKey, keep the newest MAX.
-function addPinnedPeerKey(device, pubKey, clientId) {
+function addPinnedPeerKey(device, pubKey) {
   const prev = Array.isArray(device.verifiedPeerPubKeys) ? device.verifiedPeerPubKeys : [];
   const next = prev.filter((p) => p && p.pubKey !== pubKey);
-  next.push({ pubKey, clientId: clientId ?? null, pinnedAt: new Date().toISOString() });
+  next.push({ pubKey, pinnedAt: new Date().toISOString() });
   return next.slice(-MAX_PINNED_PEER_KEYS);
 }
 
@@ -286,7 +310,6 @@ function computeStatus(cfg) {
     pendingSas: connected && !authed && pending ? pending.e2e.pendingSas : null,
     clients: _clients.values().map((r) => ({
       key: r.key,
-      clientId: r.clientId ?? null,
       state: r.e2e.state,
       pendingSas: r.e2e.state === 'pending_sas' ? r.e2e.pendingSas : null,
     })),
@@ -745,7 +768,7 @@ async function handleMessage(raw, device) {
   }
 
   // Per-client E2E record, keyed by the relay-stamped fromConn (else 'legacy').
-  const client = _clients.getOrCreate(_clients.clientKeyOf(envelope), { clientId: envelope.fromClientId ?? null });
+  const client = _clients.getOrCreate(_clients.clientKeyOf(envelope));
 
   // ── E2E key exchange ───────────────────────────────────────────────────────
   // Browser sends e2e:hello with its ephemeral P-256 public key (SPKI base64url).
@@ -1269,6 +1292,7 @@ async function revokeAllDevices() {
 // ─── IPC handlers ─────────────────────────────────────────────────────────────
 
 function registerRemoteHandlers() {
+  removeOrphanedClientFiles(path.join(claudeHome(), 'session-manager'));
   const { validated } = require('./ipcSchemas.cjs');
 
   // Returns current status without tokens — safe to expose to renderer.
@@ -1306,7 +1330,7 @@ function registerRemoteHandlers() {
         const cfg = await loadConfig();
         const devices = (cfg.devices || []).map((d) =>
           d.deviceId === target.deviceId
-            ? { ...d, verifiedPeerPubKeys: addPinnedPeerKey(d, target.peerPubKey, target.clientId) }
+            ? { ...d, verifiedPeerPubKeys: addPinnedPeerKey(d, target.peerPubKey) }
             : d
         );
         await saveConfig({ ...cfg, devices });
@@ -1417,6 +1441,8 @@ module.exports = {
     getE2eState: (clientKey = LEGACY_CLIENT_KEY) => (_clients.get(clientKey) || { e2e: makeState() }).e2e,
   },
   __test: {
+    pruneDesktopPins,
+    removeOrphanedClientFiles,
     getDispatchMap,
     auditResultFor,
     startSessionWatch,

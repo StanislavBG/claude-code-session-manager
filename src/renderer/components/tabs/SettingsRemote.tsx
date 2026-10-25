@@ -265,7 +265,7 @@ export function SettingsRemote() {
         ? pendingClients.map((c, i) => (
             <div key={c.key} data-testid="settings-remote-sas-row">
               {pendingClients.length > 1 && (
-                <div className="text-[12px] font-semibold text-fg-dim mb-1">{c.clientId ?? 'Phone'}</div>
+                <div className="text-[12px] font-semibold text-fg-dim mb-1">Browser {i + 1}</div>
               )}
               <SasBanner
                 testId={i === 0 ? 'settings-remote-sas' : undefined}

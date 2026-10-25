@@ -81,25 +81,25 @@ describe('web-remote live pin check', () => {
     verifiedPeerPubKey: null,
     ...extra,
   })
-  const hello = (device, conn, clientId, pub, id) => webRemote._internal.handleMessage(
-    JSON.stringify({ type: 'e2e:hello', id, fromConn: conn, fromClientId: clientId, payload: { pubKey: pub } }), device)
+  const hello = (device, conn, pub, id) => webRemote._internal.handleMessage(
+    JSON.stringify({ type: 'e2e:hello', id, fromConn: conn, payload: { pubKey: pub } }), device)
   const stateOf = (conn) => webRemote._internal.getE2eState(conn).state
 
   it('a) pin from confirm-sas on client A is honoured for client B on the same stale device snapshot', async () => {
     await writeConfig({ remoteEnabled: true, remoteControlEnabled: false, devices: [row(deviceId)] })
     const stale = JSON.parse(JSON.stringify(row(deviceId))) // connect-time snapshot, never refreshed
 
-    await hello(stale, 'connA', 'cA', browserK.pub, 'm1')
+    await hello(stale, 'connA', browserK.pub, 'm1')
     expect(stateOf('connA')).toBe('pending_sas')
     expect(await handlers.get('webRemote:confirm-sas')({}, { clientKey: 'connA' })).toEqual({ ok: true })
 
-    await hello(stale, 'connB', 'cB', browserK.pub, 'm2')
+    await hello(stale, 'connB', browserK.pub, 'm2')
     expect(stateOf('connB')).toBe('authenticated')
   })
 
   it('b) a never-pinned key stays pending_sas', async () => {
     const stale = row(deviceId)
-    await hello(stale, 'connC', 'cC', browserOther.pub, 'm3')
+    await hello(stale, 'connC', browserOther.pub, 'm3')
     expect(stateOf('connC')).toBe('pending_sas')
   })
 
@@ -109,11 +109,11 @@ describe('web-remote live pin check', () => {
       remoteControlEnabled: false,
       devices: [
         row(deviceId),
-        row('dev-other', { verifiedPeerPubKeys: [{ pubKey: browserOther.pub, clientId: null, pinnedAt: new Date().toISOString() }] }),
+        row('dev-other', { verifiedPeerPubKeys: [{ pubKey: browserOther.pub, pinnedAt: new Date().toISOString() }] }),
       ],
     })
     webRemote._internal.resetE2e()
-    await hello(row(deviceId), 'connD', 'cD', browserOther.pub, 'm4')
+    await hello(row(deviceId), 'connD', browserOther.pub, 'm4')
     expect(stateOf('connD')).toBe('pending_sas')
   })
 })

@@ -1695,7 +1695,6 @@ export interface WebRemoteStatus {
 
 export interface WebRemoteClientStatus {
   key: string;
-  clientId: string | null;
   state: 'idle' | 'pending_sas' | 'authenticated' | 'failed';
   pendingSas: string | null;
 }

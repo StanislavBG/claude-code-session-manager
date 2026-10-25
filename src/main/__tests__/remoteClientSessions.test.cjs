@@ -29,12 +29,11 @@ describe('clientKeyOf', () => {
 describe('createClientSessions', () => {
   it('gives two keys independent records', () => {
     const s = createClientSessions()
-    const a = s.getOrCreate('a', { clientId: 'phone' })
-    const b = s.getOrCreate('b', { clientId: null })
+    const a = s.getOrCreate('a')
+    const b = s.getOrCreate('b')
     expect(a).not.toBe(b)
-    expect(s.getOrCreate('a', {})).toBe(a)
-    expect(a.clientId).toBe('phone')
-    expect(b.clientId).toBeNull()
+    expect(s.getOrCreate('a')).toBe(a)
+    expect(a).not.toHaveProperty('clientId')
     expect(a.e2e).not.toBe(b.e2e)
     expect(a.subscriptions).not.toBe(b.subscriptions)
     expect(a).toMatchObject({ key: 'a', peerPubKey: null, deviceId: null, lastSessionListJson: null })
@@ -46,7 +45,7 @@ describe('createClientSessions', () => {
 
   it('authenticated() returns only authenticated records', () => {
     const s = createClientSessions()
-    const a = s.getOrCreate('a', {})
+    const a = s.getOrCreate('a')
     s.getOrCreate('b', {})
     a.e2e = { ...a.e2e, state: 'authenticated' }
     expect(s.authenticated()).toEqual([a])
@@ -54,7 +53,7 @@ describe('createClientSessions', () => {
 
   it('teardown of one key leaves the other untouched', () => {
     const s = createClientSessions()
-    const a = s.getOrCreate('a', {})
+    const a = s.getOrCreate('a')
     const b = s.getOrCreate('b', {})
     a.subscriptions.add('t1')
     b.subscriptions.add('t2')
@@ -68,7 +67,7 @@ describe('createClientSessions', () => {
 
   it('teardownAll returns the count and empties the registry', () => {
     const s = createClientSessions()
-    s.getOrCreate('a', {}).subscriptions.add('t')
+    s.getOrCreate('a').subscriptions.add('t')
     s.getOrCreate('b', {})
     s.getOrCreate('c', {})
     expect(s.teardownAll()).toBe(3)

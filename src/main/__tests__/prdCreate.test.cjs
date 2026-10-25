@@ -988,3 +988,31 @@ test('createPrd warns and skips dependsOn validation (never fails the write) whe
     warnSpy.mockRestore();
   }
 });
+
+test('createPrd returns within 3s with applied:true when requestReconcile never settles', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = { ...makeFakeRemoteWithPrdsDir(prdsDir), requestReconcile: () => new Promise(() => {}) };
+  const t0 = Date.now();
+  const result = await createPrd(validCreateBody(), remote);
+  expect(Date.now() - t0).toBeLessThan(3000);
+  expect(result.ok).toBe(true);
+  expect(result.applied).toBe(true);
+  expect(fs.existsSync(path.join(prdsDir, result.filename))).toBe(true);
+});
+
+test('createPrd still returns ok:true, applied:true when requestReconcile rejects', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = { ...makeFakeRemoteWithPrdsDir(prdsDir), requestReconcile: () => Promise.reject(new Error('boom')) };
+  const result = await createPrd(validCreateBody(), remote);
+  expect(result.ok).toBe(true);
+  expect(result.applied).toBe(true);
+});
+
+test('createPrd gate-validation refusal returns applied:false and writes no file', async () => {
+  const prdsDir = await mkTmpPrdsDir();
+  const remote = makeFakeRemoteWithPrdsDir(prdsDir);
+  const result = await createPrd(validCreateBody({ gate: ['   '] }), remote);
+  expect(result.ok).toBe(false);
+  expect(result.applied).toBe(false);
+  expect(fs.readdirSync(prdsDir)).toEqual([]);
+});

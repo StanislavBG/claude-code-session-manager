@@ -262,7 +262,7 @@ async function createPrdInner(input, remote, ctl) {
 
   if (!resolved.cwd) {
     return {
-      ok: false,
+      ok: false, applied: false,
       status: 400,
       error: 'cwd is required — pass cwd explicitly, or originClaudeSessionId/sourcePromptId that resolves '
         + 'to an existing, already-approved Epic (create/approve an Epic first)',
@@ -277,7 +277,7 @@ async function createPrdInner(input, remote, ctl) {
   try {
     realCwd = config.validatePath(cwd);
   } catch (e) {
-    return { ok: false, status: 400, error: `cwd rejected: ${e?.message ?? 'outside allowed roots'}` };
+    return { ok: false, applied: false, status: 400, error: `cwd rejected: ${e?.message ?? 'outside allowed roots'}` };
   }
   // Register this project's cwd as a write-allowed root (config.cjs's
   // validateWrite gate). Chat-only Epics (headless claude -p, no Terminal
@@ -326,7 +326,7 @@ async function createPrdInner(input, remote, ctl) {
         const nonInteractive = Boolean(process.env.SM_SCHEDULER_JOB_SLUG);
         if (!nonInteractive) {
           return {
-            ok: false,
+            ok: false, applied: false,
             status: 400,
             error: `Epic ${input.sourcePromptId} already has incomplete PRDs — pass disposition: "append" ` +
               '(extend the existing chain behind its current tail) or "new-head" (an independent root, ' +
@@ -353,7 +353,7 @@ async function createPrdInner(input, remote, ctl) {
     const nnMatch = SLUG_HAS_NN_PREFIX_RE.exec(input.slug);
     if (nnMatch) {
       return {
-        ok: false,
+        ok: false, applied: false,
         status: 400,
         error: `slug "${input.slug}" already starts with a numeric prefix "${nnMatch[1]}-" — the allocator ` +
           `owns the NN- prefix, not the caller. Pass the bare name instead (e.g. "${input.slug.slice(nnMatch[0].length)}").`,
@@ -363,7 +363,7 @@ async function createPrdInner(input, remote, ctl) {
 
   const slug = input.slug || deriveSlugFromTitle(input.title);
   if (!slug || !PRD_CREATE_SLUG_RE.test(slug)) {
-    return { ok: false, status: 400, error: 'could not derive a valid kebab-case slug from title; supply "slug" explicitly' };
+    return { ok: false, applied: false, status: 400, error: 'could not derive a valid kebab-case slug from title; supply "slug" explicitly' };
   }
 
   // NN allocation is delegated to allocateParallelGroup() (PRD 548) via the
@@ -378,21 +378,21 @@ async function createPrdInner(input, remote, ctl) {
   // checked BEFORE the NN allocation so a refusal burns no number.
   const hasArtifactPaths = Array.isArray(input.artifactPaths) && input.artifactPaths.length > 0;
   if (input.deliverable != null && input.deliverable !== 'artifact') {
-    return { ok: false, status: 400, error: 'deliverable must be exactly "artifact" when given' };
+    return { ok: false, applied: false, status: 400, error: 'deliverable must be exactly "artifact" when given' };
   }
   if (input.deliverable === 'artifact' && !hasArtifactPaths) {
-    return { ok: false, status: 400, error: 'deliverable: "artifact" requires a non-empty artifactPaths — name every git-excluded file this PRD produces' };
+    return { ok: false, applied: false, status: 400, error: 'deliverable: "artifact" requires a non-empty artifactPaths — name every git-excluded file this PRD produces' };
   }
   if (input.artifactPaths != null && input.deliverable !== 'artifact') {
-    return { ok: false, status: 400, error: 'artifactPaths requires deliverable: "artifact" — artifactPaths given without it' };
+    return { ok: false, applied: false, status: 400, error: 'artifactPaths requires deliverable: "artifact" — artifactPaths given without it' };
   }
   if (hasArtifactPaths) {
     for (const ap of input.artifactPaths) {
       if (typeof ap !== 'string' || !ap.trim() || /[\r\n,\[\]]/.test(ap)) {
-        return { ok: false, status: 400, error: `artifactPaths entry ${JSON.stringify(ap)} must be a non-empty single-line path without commas or brackets` };
+        return { ok: false, applied: false, status: 400, error: `artifactPaths entry ${JSON.stringify(ap)} must be a non-empty single-line path without commas or brackets` };
       }
       if (ap.includes('..')) {
-        return { ok: false, status: 400, error: `artifactPaths entry "${ap}" must not contain ".."` };
+        return { ok: false, applied: false, status: 400, error: `artifactPaths entry "${ap}" must not contain ".."` };
       }
     }
   }
@@ -416,18 +416,18 @@ async function createPrdInner(input, remote, ctl) {
   }
   for (const [fieldLabel, text] of [['goal', input.goal], ['implementation notes', input.implementationNotes]]) {
     const headingError = headingGuardError(fieldLabel, text);
-    if (headingError) return { ok: false, status: 400, error: headingError };
+    if (headingError) return { ok: false, applied: false, status: 400, error: headingError };
   }
   if (Array.isArray(input.acceptanceCriteria)) {
     for (const entry of input.acceptanceCriteria) {
       const headingError = headingGuardError('acceptance criteria', entry);
-      if (headingError) return { ok: false, status: 400, error: headingError };
+      if (headingError) return { ok: false, applied: false, status: 400, error: headingError };
     }
   }
   if (Array.isArray(input.outOfScope)) {
     for (const entry of input.outOfScope) {
       const headingError = headingGuardError('out of scope', entry);
-      if (headingError) return { ok: false, status: 400, error: headingError };
+      if (headingError) return { ok: false, applied: false, status: 400, error: headingError };
     }
   }
 
@@ -440,7 +440,7 @@ async function createPrdInner(input, remote, ctl) {
   if (input.gate !== undefined) {
     const gateValidation = validateGate(input.gate);
     if (!gateValidation.ok) {
-      return { ok: false, status: 400, error: gateValidation.error };
+      return { ok: false, applied: false, status: 400, error: gateValidation.error };
     }
     gateCommands = gateValidation.commands;
     extraWarnings.push(...gateValidation.warnings);
@@ -451,7 +451,7 @@ async function createPrdInner(input, remote, ctl) {
   if (input.files !== undefined) {
     const filesValidation = validateFiles(input.files);
     if (!filesValidation.ok) {
-      return { ok: false, status: 400, error: filesValidation.error };
+      return { ok: false, applied: false, status: 400, error: filesValidation.error };
     }
     filesList = filesValidation.files;
   } else {
@@ -466,7 +466,7 @@ async function createPrdInner(input, remote, ctl) {
     const inFlightKey = `${input.sourcePromptId}\u0000${slug}`;
     if (inFlightCreates.has(inFlightKey)) {
       return {
-        ok: false,
+        ok: false, applied: false,
         status: 409,
         error: `A create for slug "${slug}" in this Epic is still in progress — wait for it to finish, then retry the same call`,
       };
@@ -495,6 +495,7 @@ async function createPrdInner(input, remote, ctl) {
           } catch { /* non-fatal */ }
           return {
             ok: true,
+            applied: true,
             alreadyExisted: true,
             nn: Number((/^(\d+)-/.exec(dup) || [])[1]),
             filename: dup,
@@ -506,7 +507,7 @@ async function createPrdInner(input, remote, ctl) {
           };
         }
         return {
-          ok: false,
+          ok: false, applied: false,
           status: 409,
           error: `A PRD with slug "${slug}" already exists in this Epic as "${dup}". Its work may already have landed. ` +
             'Use scheduler_update_prd / scheduler_reset_job on it, or pick a distinct slug.',
@@ -527,7 +528,7 @@ async function createPrdInner(input, remote, ctl) {
   if (chainDepth > FIX_CHAIN_DEPTH_CAP) {
     const base = baseSlugOf(filenameSlug);
     return {
-      ok: false,
+      ok: false, applied: false,
       status: 409,
       error: `Fix-chain depth cap exceeded: "${base}" has already failed to close ${chainDepth} time(s) for ` +
         `infrastructure reasons (refusing to write "${filenameSlug}.md" at depth ${chainDepth}). Authoring a ` +
@@ -550,7 +551,7 @@ async function createPrdInner(input, remote, ctl) {
   // — but only when spawnInvestigation authors it, never through this API).
   if (isFixPlanSlug(filenameSlug)) {
     return {
-      ok: false,
+      ok: false, applied: false,
       status: 400,
       error: `slug "${filenameSlug}" collides with the reserved NN-fix-... fix-plan naming convention ` +
         '(reserved for PRDs the scheduler\'s own investigation loop authors itself). Reword the title/slug ' +
@@ -566,7 +567,7 @@ async function createPrdInner(input, remote, ctl) {
   // clobber an existing job's PRD.
   const existing = await remote.readPrd(filenameSlug, input.cwd);
   if (existing?.ok) {
-    return { ok: false, status: 409, error: `PRD already exists: ${filenameSlug}.md` };
+    return { ok: false, applied: false, status: 409, error: `PRD already exists: ${filenameSlug}.md` };
   }
 
   // Write-time FK check (throw on write, report on read — see
@@ -579,7 +580,7 @@ async function createPrdInner(input, remote, ctl) {
     try {
       await assertAgentTypeWritable(input.cwd, input.agentType);
     } catch (e) {
-      return { ok: false, status: 400, error: e?.message ?? 'invalid agentType' };
+      return { ok: false, applied: false, status: 400, error: e?.message ?? 'invalid agentType' };
     }
   }
 
@@ -609,7 +610,7 @@ async function createPrdInner(input, remote, ctl) {
         const near = findNearMatches(dep, candidateSlugs);
         const suggestion = near.length ? ` Closest existing slug(s): ${near.join(', ')}.` : '';
         return {
-          ok: false,
+          ok: false, applied: false,
           status: 400,
           error: `dependsOn entry "${dep}" does not resolve to any existing PRD in this project.${suggestion} ` +
             'Pass the bare name (preferred) or the exact NN-prefixed slug of an existing PRD.',
@@ -648,7 +649,7 @@ async function createPrdInner(input, remote, ctl) {
       && JSON.stringify(resolved.sequence) === JSON.stringify(expectedSequence);
     if (!matches) {
       return {
-        ok: false,
+        ok: false, applied: false,
         status: 400,
         error: 'The PRD text already holds a gate fence (three backticks + gate), so the scheduler would read '
           + 'the wrong gate. Remove it from the goal, implementation notes, acceptance criteria, out of scope '
@@ -659,7 +660,7 @@ async function createPrdInner(input, remote, ctl) {
 
   const writeResult = await remote.writePrd(filenameSlug, body, input.cwd);
   if (!writeResult?.ok) {
-    return { ok: false, status: 500, error: writeResult?.error ?? 'write failed' };
+    return { ok: false, applied: false, status: 500, error: writeResult?.error ?? 'write failed' };
   }
 
   // Trace-back point for "who/what created this PRD" (auditLog.cjs) — every
@@ -689,7 +690,12 @@ async function createPrdInner(input, remote, ctl) {
   let enqueued = false;
   if (typeof remote.requestReconcile === 'function') {
     try {
-      await remote.requestReconcile();
+      let timer;
+      const reconcile = Promise.resolve().then(() => remote.requestReconcile());
+      // Late rejection (after the race is lost) must never be unhandled.
+      reconcile.catch((e) => console.warn(`[prdCreate] requestReconcile failed for ${filenameSlug} (non-fatal): ${e?.message ?? e}`));
+      const bound = new Promise((resolve) => { timer = setTimeout(resolve, 2000); });
+      try { await Promise.race([reconcile, bound]); } finally { clearTimeout(timer); }
       if (typeof remote.getJob === 'function') {
         enqueued = Boolean(await remote.getJob(filenameSlug));
       }
@@ -709,6 +715,7 @@ async function createPrdInner(input, remote, ctl) {
   // row before this function returned — it is not a fabricated status.
   return {
     ok: true,
+    applied: true,
     nn,
     filename: `${filenameSlug}.md`,
     prdPath: writeResult.path ?? null,

@@ -167,8 +167,8 @@ describe('web-remote per-client SAS pins', () => {
   }
   const sent = []
   const fakeWs = { readyState: 1, send: (m) => sent.push(JSON.parse(m)), terminate: () => {} }
-  const hello = (conn, pub, id, clientId) => webRemote._internal.handleMessage(
-    JSON.stringify({ type: 'e2e:hello', id, fromConn: conn, fromClientId: clientId, payload: { pubKey: pub } }), device)
+  const hello = (conn, pub, id) => webRemote._internal.handleMessage(
+    JSON.stringify({ type: 'e2e:hello', id, fromConn: conn, payload: { pubKey: pub } }), device)
 
   it('confirms one client at a time, keeps both pins, auto-authenticates pinned keys', async () => {
     await writeConfig({ remoteEnabled: true, remoteControlEnabled: false, devices: [device] })
@@ -177,12 +177,12 @@ describe('web-remote per-client SAS pins', () => {
     webRemote.__test.setWs(fakeWs)
     const a = generateE2EKeyPair()
     const b = generateE2EKeyPair()
-    await hello('connA', a.e2ePublicKey, 'hA', 'desktop-1')
-    await hello('connB', b.e2ePublicKey, 'hB', null)
+    await hello('connA', a.e2ePublicKey, 'hA')
+    await hello('connB', b.e2ePublicKey, 'hB')
 
     const status = await handlers.get('webRemote:get-status')()
-    expect(status.clients.map((c) => [c.key, c.clientId, c.state]).sort()).toEqual([
-      ['connA', 'desktop-1', 'pending_sas'], ['connB', null, 'pending_sas'],
+    expect(status.clients.map((c) => [c.key, c.state]).sort()).toEqual([
+      ['connA', 'pending_sas'], ['connB', 'pending_sas'],
     ])
     expect(JSON.stringify(status.clients)).not.toContain(a.e2ePublicKey)
 
@@ -193,7 +193,7 @@ describe('web-remote per-client SAS pins', () => {
     expect(webRemote._internal.getE2eState('connB').state).toBe('pending_sas')
     let pins = (await readConfig()).devices[0].verifiedPeerPubKeys
     expect(pins.map((p) => p.pubKey)).toEqual([a.e2ePublicKey])
-    expect(pins[0].clientId).toBe('desktop-1')
+    expect(pins[0]).not.toHaveProperty('clientId')
 
     // Single remaining pending client: no clientKey needed.
     expect(await handlers.get('webRemote:confirm-sas')({}, undefined)).toEqual({ ok: true })
@@ -259,7 +259,7 @@ describe('web-remote per-client teardown', () => {
     expect(state('connA')).toBe('authenticated')
     expect(state('connB')).toBe('authenticated')
     await webRemote._internal.handleMessage(JSON.stringify({
-      type: 'event:client:disconnected', fromConn: 'connA', fromClientId: 'cidA', reason: 'closed',
+      type: 'event:client:disconnected', fromConn: 'connA', reason: 'closed',
     }), device)
     expect(state('connA')).not.toBe('authenticated')
     expect(state('connB')).toBe('authenticated')

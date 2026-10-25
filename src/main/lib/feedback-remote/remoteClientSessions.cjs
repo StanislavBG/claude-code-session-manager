@@ -24,10 +24,9 @@ function clientKeyOf(envelope) {
   return LEGACY_CLIENT_KEY
 }
 
-function makeRecord(key, clientId) {
+function makeRecord(key) {
   return {
     key,
-    clientId: typeof clientId === 'string' ? clientId : null,
     e2e: makeState(),
     peerPubKey: null,
     deviceId: null,
@@ -50,13 +49,11 @@ function createClientSessions() {
   return {
     clientKeyOf,
     get: (key) => records.get(key) || null,
-    getOrCreate(key, { clientId = null } = {}) {
+    getOrCreate(key) {
       let rec = records.get(key)
       if (!rec) {
-        rec = makeRecord(key, clientId)
+        rec = makeRecord(key)
         records.set(key, rec)
-      } else if (rec.clientId === null && typeof clientId === 'string') {
-        rec.clientId = clientId
       }
       return rec
     },

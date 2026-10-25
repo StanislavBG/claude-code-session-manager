@@ -229,11 +229,25 @@ rather than `sendBatch()`.
 `buildMachineProfile()`'s camelCase fields (`machineProfile.cjs`) plus `settings.installId` as
 `install_id` and the literal `'session-manager'` as `app` — mapped to the exact snake_case keys
 `app_installs` expects: `install_id, app, app_version, platform, os_release, arch, cpu_count,
-total_mem_mb, node_version, electron_version, install_channel, locale, timezone` (`timezone` is
-`String(timezoneOffsetMinutes)` — machineProfile's anonymity contract already forbids an IANA
-zone name). Unlike `track`/`logLine`/`reportError`, this body isn't arbitrary user content, so it
+total_mem_mb, node_version, electron_version, install_channel, locale, timezone, env, seeds`
+(`timezone` is `String(timezoneOffsetMinutes)` — machineProfile's anonymity contract already
+forbids an IANA zone name; `env` comes from `machineProfile.resolveEnv()`, see
+[The `env` discriminator](#the-env-discriminator); `seeds` comes from
+`telemetryBoot.buildSeeds()`, merged onto the profile before `reportInstall()`). Unlike `track`/`logLine`/`reportError`, this body isn't arbitrary user content, so it
 skips `redactDeep()` and never merges an attribution/`recordId` block onto the wire — the server's
 upsert has no use for one.
+
+`seeds` carries the first-boot setup outcomes. `telemetryBoot.cjs` `buildSeeds()` keeps only each
+seeder's `status` from `seedStatus.cjs` `getSeedStatus()`; `telemetryClient.cjs` `sanitizeSeeds()`
+sends either `null` or an object with exactly the keys `devPlugin` (the session-manager-dev plugin
+install), `schedulerMcp` (the session-manager-scheduler MCP registration) and `agentPersonas` (the
+seeded agent personas), each `done`, `pending`, `failed`, `exhausted` or `null`. `done` = the seeder
+finished; `pending` = never attempted, or its marker file is missing or unreadable; `failed` =
+attempted but still under the retry cap; `exhausted` = reached the seeder's `MAX_ATTEMPTS`. A status
+the client does not recognize goes out as `null`, and the whole field is `null` when
+`getSeedStatus()` throws. Bilko's `/install` route persists `seeds` to `app_installs.seeds`
+(bilko-run commit 523ba538); see that repo's `docs/telemetry-beacons.md`, section 'First-run setup
+outcomes (`seeds`)'.
 
 `telemetryBoot.cjs`'s machine-profile heartbeat (version-change OR 30-day liveness) now calls
 `telemetryClient.reportInstall(profile)` instead of the former `track('install.machine', profile)`.
@@ -250,7 +264,10 @@ stable spec fields, a hardware-*class* fingerprint, not a device id), structural
 records with `redactDeep()`-scrubbed metadata (any `cwd` key becomes a one-way `projectHash`, any
 key matching `REDACT_KEY` — transcript/message/token/secret/password/authorization/cookie/\*key/\*token
 — becomes `'[redacted]'`, and every string leaf gets homedir/absolute-path redaction), and coarse
-session/launch counters.
+session/launch counters, and the first-run setup outcomes: three fixed step names (`devPlugin`,
+`schedulerMcp`, `agentPersonas`) with enum values only (`done`/`pending`/`failed`/`exhausted`).
+`getSeedStatus()` also returns a `fix` string per seeder (the scheduler-mcp one embeds an absolute
+path); `buildSeeds()` drops it, so the Plugins-banner fix text and any path never leave the machine.
 
 **Never sent**: prompts, transcript content, file paths (beyond the one-way project hash), project
 names, email addresses, usernames, or any other identifying field — there is no field in

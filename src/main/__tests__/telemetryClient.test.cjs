@@ -627,10 +627,11 @@ test('wire field names match server/routes/telemetry.ts exactly', async () => {
   expect(Object.keys(eventCall.body.batch[0]).sort()).toEqual(['app', 'env', 'name', 'props', 'session_id', 'visitor_id'].sort());
   expect(Object.keys(logCall.body.batch[0]).sort()).toEqual(['app', 'env', 'version', 'level', 'msg', 'visitor_id', 'session_id', 'fields', 'ts'].sort());
   expect(Object.keys(errorCall.body.batch[0]).sort()).toEqual(['app', 'env', 'version', 'name', 'msg', 'stack', 'url', 'ua', 'visitor_id', 'session_id', 'context', 'ts'].sort());
+  // Bilko's /install route must persist `seeds` (cross-project feedback filed 2026-10-25); until it does, the server ignores the key.
   expect(Object.keys(installCall.body).sort()).toEqual([
     'app', 'app_version', 'arch', 'cpu_count', 'electron_version', 'env',
     'install_channel', 'install_id', 'locale', 'node_version',
-    'os_release', 'platform', 'timezone', 'total_mem_mb',
+    'os_release', 'platform', 'seeds', 'timezone', 'total_mem_mb',
   ].sort());
   client.shutdown();
 });
@@ -945,10 +946,11 @@ test('reportInstall() maps buildMachineProfile()\'s camelCase onto the exact sna
   const [rec] = await readQueueLines(client);
 
   expect(rec.channel).toBe('install');
+  // Bilko's /install route must persist `seeds` (cross-project feedback filed 2026-10-25); until it does, the server ignores the key.
   expect(Object.keys(rec.wire).sort()).toEqual([
     'app', 'app_version', 'arch', 'cpu_count', 'electron_version', 'env',
     'install_channel', 'install_id', 'locale', 'node_version',
-    'os_release', 'platform', 'timezone', 'total_mem_mb',
+    'os_release', 'platform', 'seeds', 'timezone', 'total_mem_mb',
   ].sort());
   expect(rec.wire.app).toBe('session-manager');
   expect(rec.wire.app_version).toBe(profile.appVersion);
@@ -1055,7 +1057,13 @@ test('a stub server bound to 127.0.0.1 receives exactly one well-formed install 
       locale: profile.locale,
       timezone: String(profile.timezoneOffsetMinutes),
       env: 'dev',
+      seeds: received.seeds,
     });
+    // seeds is null or an object whose values are seeder-outcome enums (or null).
+    const seedsOk = received.seeds === null
+      || (typeof received.seeds === 'object'
+        && Object.values(received.seeds).every((v) => v === null || ['done', 'pending', 'failed', 'exhausted'].includes(v)));
+    expect(seedsOk).toBe(true);
     client.shutdown();
   } finally {
     await new Promise((resolve) => server.close(resolve));

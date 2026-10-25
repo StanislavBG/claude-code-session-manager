@@ -4,6 +4,8 @@ import {
 } from '@clerk/clerk-react';
 import { useStore } from './store';
 import { getMe, getDevices, setTokenGetter } from './api';
+import { getAppInfo } from './remoteApi';
+import { pickActiveDevice, loadPreferredDevice } from './devices';
 import { RelaySocket } from './ws';
 import Cockpit from './components/Cockpit';
 import ConnectScreen from './components/ConnectScreen';
@@ -59,7 +61,7 @@ function AppInner() {
     activeDeviceId,
     setMe, setDevices, setDeviceOnline, setActiveDevice,
     setWsConnected, setTabState, reset,
-    setPendingSas, addKeyMismatch, markRemoteReady, stopAwaitingDesktop,
+    setPendingSas, addKeyMismatch, stopAwaitingDesktop,
   } = useStore();
   const socketRef = useRef<RelaySocket | null>(null);
 
@@ -88,6 +90,12 @@ function AppInner() {
     });
     setDevices(safeDevices);
     mismatchIds.forEach(addKeyMismatch);
+    // Keep an already-active desktop; otherwise adopt the preferred/newest online one.
+    const st = useStore.getState();
+    if (!st.activeDeviceId) {
+      const pick = pickActiveDevice(st.devices, st.activeDeviceId, loadPreferredDevice());
+      if (pick) setActiveDevice(pick);
+    }
   };
 
   // Wire Clerk token into the relay API client, then bootstrap.
@@ -108,6 +116,7 @@ function AppInner() {
     const socket = new RelaySocket((connected) => setWsConnected(connected));
     socketRef.current = socket;
     const fallback = createReadyFallback(stopAwaitingDesktop);
+    const infoFetched = new Set<string>();
     socket.connect().catch(console.error);
 
     const offStatus = socket.on('event:device:status', async (m: Envelope) => {
@@ -124,25 +133,30 @@ function AppInner() {
         setDeviceOnline(deviceId, online);
         if (!online) {
           socket.resetE2E(deviceId);
-          useStore.getState().clearRemoteReady();
-        }
-        if (online) {
-          setActiveDevice(deviceId);
-          // Negotiate E2E (P-256 ECDH → AES-256-GCM) so the relay only ever sees
-          // ciphertext. Idempotent — initiateE2E no-ops if the session exists.
-          const dev = useStore.getState().devices.find((d) => d.deviceId === deviceId);
-          if (dev?.devicePubKey) socket.initiateE2E(deviceId, dev.devicePubKey).catch(console.warn);
+          useStore.getState().clearRemoteReady(deviceId);
+          infoFetched.delete(deviceId);
+        } else {
+          const st = useStore.getState();
+          const pick = pickActiveDevice(st.devices, st.activeDeviceId, loadPreferredDevice());
+          if (pick) setActiveDevice(pick);
+          // Negotiate E2E (P-256 ECDH → AES-256-GCM) only with the active desktop, so a
+          // second desktop never prompts for a 6-digit code uninvited. Idempotent.
+          if (pick === deviceId) {
+            const dev = useStore.getState().devices.find((d) => d.deviceId === deviceId);
+            if (dev?.devicePubKey) socket.initiateE2E(deviceId, dev.devicePubKey).catch(console.warn);
+          }
         }
       }
     });
     const offState = socket.on('event:session:state', (m: Envelope) => {
+      if (m.deviceId && m.deviceId !== useStore.getState().activeDeviceId) return;
       const p = m.payload as { tabId?: string; state?: SessionState } | undefined;
       if (p?.tabId && p.state) setTabState(p.tabId, p.state);
     });
     // Internal event: SAS computed after e2e:ready; show to user for manual comparison.
     const offSas = socket.on('sas:pending', (m: Envelope) => {
       const p = m.payload as { sas?: string } | undefined;
-      if (m.deviceId && p?.sas) {
+      if (m.deviceId && p?.sas && m.deviceId === useStore.getState().activeDeviceId) {
         setPendingSas({ deviceId: m.deviceId, sas: p.sas });
         fallback.arm();
       }
@@ -150,10 +164,25 @@ function AppInner() {
     // Desktop: phone is SAS-confirmed / key-pinned — commands are accepted now.
     const offReady = socket.on('event:remote:ready', (m: Envelope) => {
       const active = useStore.getState().activeDeviceId;
+      if (m.deviceId) useStore.getState().markRemoteReady(m.deviceId);
+      else if (active) useStore.getState().markRemoteReady(active);
       if (!m.deviceId || m.deviceId === active) {
         fallback.clear();
-        markRemoteReady();
         trackFlow('pair', 'success');
+        const id = m.deviceId ?? active;
+        if (id && !infoFetched.has(id)) {
+          infoFetched.add(id);
+          getAppInfo(socket, id)
+            .then((info) => {
+              const name = info.hostname?.trim();
+              if (name) {
+                useStore.getState().setDeviceMeta(id, {
+                  name, platform: info.platform, version: info.version, seenAt: Date.now(),
+                });
+              }
+            })
+            .catch(() => {});
+        }
       }
     });
 
@@ -164,7 +193,7 @@ function AppInner() {
       socketRef.current = null;
       reset();
     };
-  }, [setWsConnected, setDeviceOnline, setActiveDevice, setTabState, reset, setPendingSas, markRemoteReady, stopAwaitingDesktop]);
+  }, [setWsConnected, setDeviceOnline, setActiveDevice, setTabState, reset, setPendingSas, stopAwaitingDesktop]);
 
   const device = useStore((s) => s.devices.find((d) => d.deviceId === s.activeDeviceId));
   const online = !!device?.isOnline;

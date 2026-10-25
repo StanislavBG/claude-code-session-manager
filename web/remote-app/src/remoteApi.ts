@@ -72,6 +72,19 @@ export function listSessionPrds(
   return call<{ prds: SessionPrd[] }>(socket, deviceId, 'cmd:session:prds', args);
 }
 
+export interface AppInfo {
+  version: string | null;
+  platform: string | null;
+  hostname: string | null;
+}
+
+/** Older desktops return no hostname (or reject) — callers keep the fallback label. */
+export async function getAppInfo(socket: CommandSocket, deviceId: string): Promise<AppInfo> {
+  const r = await call<Partial<Record<keyof AppInfo, unknown>> | null>(socket, deviceId, 'cmd:app:info');
+  const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+  return { version: str(r?.version), platform: str(r?.platform), hostname: str(r?.hostname) };
+}
+
 /** Copy shown to the phone user when the desktop refuses a send. */
 export function refusalMessage(reason?: string): string {
   switch (reason) {

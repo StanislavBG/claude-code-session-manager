@@ -5,6 +5,7 @@ import {
   getTranscript,
   listSessionPrds,
   sendChat,
+  getAppInfo,
   RemoteError,
   REFUSED_MESSAGE,
   refusalMessage,
@@ -121,5 +122,14 @@ describe('remoteApi', () => {
     ])('%s', (reason, msg) => {
       expect(refusalMessage(reason)).toBe(msg);
     });
+  });
+});
+
+describe('getAppInfo', () => {
+  it('sends cmd:app:info and normalizes missing fields to null', async () => {
+    const sendCommand = vi.fn().mockResolvedValue({ payload: { version: '1.0.0', hostname: '' } });
+    const r = await getAppInfo({ sendCommand } as never, 'dev1');
+    expect(sendCommand).toHaveBeenCalledWith('cmd:app:info', 'dev1', undefined);
+    expect(r).toEqual({ version: '1.0.0', platform: null, hostname: null });
   });
 });

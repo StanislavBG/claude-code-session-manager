@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v9 -->
+<!-- PRD_AUTHORING.md v10 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -149,6 +149,8 @@ npm test || { echo "HALT: npm test failed — see above"; exit 1; }
 ```
 
 Note: a `rateLimited` exit-1 is the scheduler's own benign auto-pause (it resumes at the next 5h reset) — don't engineer retry logic for it.
+
+Note: `HALT:` in a script's output, a PRD, or a report is plain text to the scheduler. Only the verdict line decides the outcome; a report line that starts with `HALT:` re-queues the job only when the report has no `SCHEDULER_VERDICT` line. Why: the verifier used to match `HALT:` anywhere in a report, so finished PASS runs that only described a tool's failure path were re-queued and parked (Rabbits-Game `163-attack-scorecard`, 2026-10-24).
 
 ---
 

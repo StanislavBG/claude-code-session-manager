@@ -5730,6 +5730,23 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       await broadcast({ flush: true });
       return;
     }
+    // Early returns after the preflight worktree exists must not leak the
+    // checkout or its cap count (retries would also re-run the whole setup).
+    const releasePreflightWorktree = async () => {
+      if (!preflightWorktree.ok) return;
+      try {
+        await jobWorktree.cleanupJobWorktree({
+          cwd: job.cwd || defaultCwd,
+          dir: preflightWorktree.dir,
+          branch: preflightWorktree.branch,
+          keepBranch: false,
+        });
+      } catch (err) {
+        try {
+          reportSchedulerError("preflight worktree cleanup failed", job.slug, err);
+        } catch { /* reporting must never throw out of spawnJob */ }
+      }
+    };
     // Launch circuit breaker (lib/scheduler/launchFailure.cjs, issue #11). Re-evaluated
     // here, not just in tickQueue, because the block can change between the
     // pick and this dispatch (another job's probe just failed). 'blocked' →
@@ -5769,6 +5786,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     });
     if (launchGate.state === 'blocked') {
       console.log(`[scheduler] ${job.slug}: deferring — ${launchGate.reason}`);
+      await releasePreflightWorktree();
       await broadcast({ flush: true });
       return;
     }
@@ -5880,7 +5898,10 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       }
     });
     await broadcast({ flush: true });
-    if (dispatchSkippedAlreadyCompleted) return;
+    if (dispatchSkippedAlreadyCompleted) {
+      await releasePreflightWorktree();
+      return;
+    }
 
     await mutate((s) => {
       const idx = s.jobs.findIndex((x) => x.slug === job.slug);

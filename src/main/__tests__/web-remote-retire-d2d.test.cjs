@@ -49,6 +49,13 @@ describe('pruneDesktopPins', () => {
     expect(out.devices[0].verifiedPeerPubKeys).toEqual([{ pubKey: 'B' }])
   })
 
+  it('passes string pins through unchanged and in order', () => {
+    const out = webRemote.__test.pruneDesktopPins({
+      devices: [{ verifiedPeerPubKeys: ['phone-1', { pubKey: 'A', clientId: 'desktop-1' }, { pubKey: 'B', clientId: null }] }],
+    })
+    expect(out.devices[0].verifiedPeerPubKeys).toEqual(['phone-1', { pubKey: 'B' }])
+  })
+
   it('leaves devices without pins untouched', () => {
     const out = webRemote.__test.pruneDesktopPins({ devices: [{ deviceId: 'x' }] })
     expect(out.devices).toEqual([{ deviceId: 'x' }])

@@ -105,8 +105,9 @@ function pruneDesktopPins(cfg) {
   const devices = cfg.devices.map((d) => {
     if (!d || !Array.isArray(d.verifiedPeerPubKeys)) return d;
     const verifiedPeerPubKeys = d.verifiedPeerPubKeys
-      .filter((p) => p && typeof p.clientId !== 'string')
+      .filter((p) => !(p && typeof p === 'object' && typeof p.clientId === 'string'))
       .map((p) => {
+        if (!p || typeof p !== 'object') return p;
         const { clientId: _drop, ...rest } = p;
         return rest;
       });

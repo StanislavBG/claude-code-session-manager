@@ -69,7 +69,8 @@ describe('applyStructuredPrdPatch', () => {
     const r = applyStructuredPrdPatch(body, { gate: ['npm test | tee out.txt'] });
     assert.equal(r.ok, false);
     assert.equal(typeof r.error, 'string');
-    assert.equal(body, makeBody());
+    // A failed result carries no body field (see prdBodyPatch.cjs ok:false shapes).
+    assert.equal('body' in r, false);
   });
 
   it('rejects invalid files and an empty patch', () => {

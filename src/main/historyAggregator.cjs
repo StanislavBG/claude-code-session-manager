@@ -553,9 +553,29 @@ function rollupMapToRows(map, finalizedDates) {
  * opts.dryRun (optional): computes what would be finalized without writing
  * anything to the rollup file.
  */
-async function finalizeClosedDays({ budgetMs, dryRun = false } = {}) {
+async function finalizeClosedDays({ budgetMs, dryRun = false, cursorPath } = {}) {
   const deadline = typeof budgetMs === 'number' ? Date.now() + budgetMs : null;
   const today = localDate(new Date());
+
+  // Resumable cursor: { cycleStartedAt, lastDir, dates }. `dates` carries the
+  // closed days seen by earlier partial calls of this cycle so the completing
+  // call can stamp all of them. Missing/corrupt file => fresh cycle.
+  const atomicFs = require('./lib/util/atomicFs.cjs');
+  let resolvedCursor = cursorPath;
+  if (!resolvedCursor) {
+    try { resolvedCursor = require('./lib/scheduler/schedulerPaths.cjs').historyRollupCursorPath(); } catch { resolvedCursor = null; }
+  }
+  let cycleStartedAt = Date.now();
+  let lastDir = '';
+  const dates = new Set();
+  if (resolvedCursor) {
+    const c = atomicFs.readJsonOrSync(resolvedCursor, null);
+    if (c && typeof c === 'object' && typeof c.lastDir === 'string' && c.lastDir) {
+      lastDir = c.lastDir;
+      if (typeof c.cycleStartedAt === 'number') cycleStartedAt = c.cycleStartedAt;
+      if (Array.isArray(c.dates)) for (const d of c.dates) if (typeof d === 'string') dates.add(d);
+    }
+  }
 
   let projectDirs;
   try {
@@ -566,10 +586,12 @@ async function finalizeClosedDays({ budgetMs, dryRun = false } = {}) {
 
   projectDirs = projectDirs
     .filter((e) => e.isDirectory())
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .filter((e) => !lastDir || e.name.localeCompare(lastDir) > 0);
 
   const buckets = new Map();
   let partial = false;
+  let walkedLast = lastDir;
 
   for (const projEntry of projectDirs) {
     if (deadline !== null && Date.now() >= deadline) {
@@ -581,7 +603,7 @@ async function finalizeClosedDays({ budgetMs, dryRun = false } = {}) {
     const projectDir = path.join(PROJECTS_DIR, encodedCwd);
 
     let files;
-    try { files = await fsp.readdir(projectDir, { withFileTypes: true }); } catch { continue; }
+    try { files = await fsp.readdir(projectDir, { withFileTypes: true }); } catch { walkedLast = encodedCwd; continue; }
 
     for (const fileEntry of files) {
       if (!fileEntry.name.endsWith('.jsonl')) continue;
@@ -600,23 +622,35 @@ async function finalizeClosedDays({ budgetMs, dryRun = false } = {}) {
       if (!buckets.has(key)) buckets.set(key, emptyBucket(sessionDate, encodedCwd));
       foldParsedIntoBucket(buckets.get(key), parsed);
     }
+    walkedLast = encodedCwd; // advance only after the directory is fully walked
   }
 
-  const dates = new Set();
   const entries = [];
   for (const b of buckets.values()) {
     dates.add(b.date);
     entries.push(...bucketToRollupLines(b));
   }
-  // Only stamp dates as finalized (safe to trust with no live re-scan) when
-  // the walk visited every project directory within budget — a partial walk
-  // may be missing contributions from directories not yet visited.
+  // Only stamp dates as finalized (safe to trust with no live re-scan) once a
+  // full cycle has covered every project directory — possibly across calls.
   if (!partial) {
     for (const date of dates) entries.push(finalizedMarkerLine(date));
   }
 
   if (!dryRun) {
     await appendRollupAndNotify(entries);
+    if (resolvedCursor) {
+      try {
+        if (partial) {
+          if (walkedLast !== lastDir) {
+            await atomicFs.writeJsonAtomic(resolvedCursor, { cycleStartedAt, lastDir: walkedLast, dates: Array.from(dates) });
+          }
+        } else {
+          await fsp.rm(resolvedCursor, { force: true });
+        }
+      } catch {
+        // Cursor is an optimisation; a failed write just means a re-walk.
+      }
+    }
   }
   return { finalizedDates: partial ? [] : Array.from(dates), partial };
 }

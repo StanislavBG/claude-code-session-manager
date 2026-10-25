@@ -119,6 +119,7 @@ function watchdogRelaunchLogPath() {
   );
 }
 function historyRollupStampPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'history-rollup.stamp'), 'historyRollupStampPath'); }
+function historyRollupCursorPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'history-rollup.cursor.json'), 'historyRollupCursorPath'); }
 function historyRollupLockPath() { return assertNotLiveRoot(path.join(schedulerHome(), 'history-rollup.lock'), 'historyRollupLockPath'); }
 function historyRollupPath() { return path.join(schedulerHome(), 'history-rollup.jsonl'); }
 function auditLogPath() { return path.join(schedulerHome(), 'audit-log.jsonl'); }
@@ -206,6 +207,7 @@ module.exports = {
   watchdogRelaunchStatePath,
   watchdogRelaunchLogPath,
   historyRollupStampPath,
+  historyRollupCursorPath,
   historyRollupLockPath,
   historyRollupPath,
   auditLogPath,

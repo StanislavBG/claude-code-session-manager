@@ -14,7 +14,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { KIND_CONFIG: WORKTREE_KIND_CONFIG } = require('./git/gitWorktree.cjs');
 const { OPS_ROOT_DIR } = require('./opsOwnership.cjs');
-const { classifyCwd, worktreeMainRootOf } = require('./cwdClassify.cjs');
+const cwdClassify = require('./cwdClassify.cjs');
+const { worktreeMainRootOf } = cwdClassify;
 
 const HOME = os.homedir();
 const TMPDIR = os.tmpdir();
@@ -55,7 +56,7 @@ const TAIL_BYTES = 64 * 1024;
 // and leave the tail with no complete `cwd` row. Only on that miss the tail
 // grows (x16 per step) up to MAX_TAIL_BYTES, then up to MAX_FALLBACK_FILES
 // newest transcripts are tried before the project is given up on.
-const MAX_TAIL_BYTES = 16 * 1024 * 1024;
+const MAX_TAIL_BYTES = 1024 * 1024;
 const MAX_FALLBACK_FILES = 5;
 const TAIL_GROWTH = 16;
 
@@ -92,9 +93,25 @@ const EMPTY_CWDS = Object.freeze([]);
 // per-dir record cache that lets a changed projectsDir rescan only the added dirs.
 const rawScanCache = new Map();
 
+// rawCwd -> classifyCwd result. Never holds kind 'unknown' (an unresolvable
+// .git may resolve later). Bounded; cleared when exceeded or on a full first scan.
+const CLASSIFY_MEMO_MAX = 20000;
+const classifyMemo = new Map();
+function classifyMemoized(rawCwd) {
+  const hit = classifyMemo.get(rawCwd);
+  if (hit) return hit;
+  const classified = cwdClassify.classifyCwd(rawCwd);
+  if (classified.kind !== 'unknown') {
+    if (classifyMemo.size >= CLASSIFY_MEMO_MAX) classifyMemo.clear();
+    classifyMemo.set(rawCwd, classified);
+  }
+  return classified;
+}
+
 /** Forces the next activeProjectCwds/allProjectCwds call to rescan. */
 function bustProjectCwdCache() {
   rawScanCache.clear();
+  classifyMemo.clear();
 }
 
 // The ops-root folder name. A transcript's `cwd` can point INSIDE it whenever
@@ -122,7 +139,7 @@ const OPS_DIRNAME = OPS_ROOT_DIR;
  * resolution) lives in cwdClassify.cjs.
  */
 function projectRootOf(cwd) {
-  return classifyCwd(cwd).projectRoot ?? cwd;
+  return cwdClassify.classifyCwd(cwd).projectRoot ?? cwd;
 }
 
 /**
@@ -253,6 +270,7 @@ function scanProjectsDir(projectsDir) {
 
   // Incremental: reuse every already-known dir's entry, scan only added names,
   // drop names that vanished.
+  if (!cached) classifyMemo.clear();
   const prevDirs = cached ? cached.dirs : null;
   const dirs = new Map();
   for (const slug of slugs) {
@@ -418,7 +436,7 @@ function deriveCwds(records, maxAgeMin, maxCwds, tmpDropRoots) {
     // Normalize an ops-internal cwd up to its project root BEFORE any of the
     // checks below — the stray-ops-root incident (see OPS_DIRNAME above) got
     // through precisely because such a path is absolute and does exist.
-    const classified = classifyCwd(rawCwd);
+    const classified = classifyMemoized(rawCwd);
     // `unknown` (a .git file we cannot resolve) is non-registrable: registering
     // it would hand every consumer a project whose ops writes are refused.
     if (classified.kind === 'unknown') return;

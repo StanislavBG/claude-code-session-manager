@@ -291,3 +291,65 @@ test('newest jsonl with no cwd at all falls back to an older jsonl, keeping the 
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+describe('classify memo and tail cap', () => {
+  const cwdClassify = require('../cwdClassify.cjs');
+
+  test('second call over unchanged records does not re-classify', () => {
+    const base = tmpDir();
+    const spy = vi.spyOn(cwdClassify, 'classifyCwd');
+    try {
+      const projectsDir = path.join(base, 'projects');
+      const cwdA = path.join(base, 'proj-a');
+      fs.mkdirSync(cwdA);
+      writeTranscript(projectsDir, 'slug-a', 'a.jsonl', cwdA, 60 * 1000);
+      bustProjectCwdCache();
+      assert.deepEqual(activeProjectCwds(90, { projectsDir }), [cwdA]);
+      const first = spy.mock.calls.length;
+      assert.ok(first > 0);
+      assert.deepEqual(activeProjectCwds(90, { projectsDir }), [cwdA]);
+      assert.equal(spy.mock.calls.length, first);
+    } finally {
+      spy.mockRestore();
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test("'unknown' results are not memoized and are retried", () => {
+    const base = tmpDir();
+    const spy = vi.spyOn(cwdClassify, 'classifyCwd').mockReturnValue({ kind: 'unknown', projectRoot: null });
+    try {
+      const projectsDir = path.join(base, 'projects');
+      const cwdA = path.join(base, 'proj-a');
+      fs.mkdirSync(cwdA);
+      writeTranscript(projectsDir, 'slug-a', 'a.jsonl', cwdA, 60 * 1000);
+      bustProjectCwdCache();
+      assert.deepEqual(activeProjectCwds(90, { projectsDir }), []);
+      assert.deepEqual(activeProjectCwds(90, { projectsDir }), []);
+      assert.equal(spy.mock.calls.length, 2);
+    } finally {
+      spy.mockRestore();
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+
+  test('cwd 2 MB from the end falls back to next newest file', () => {
+    const base = tmpDir();
+    try {
+      const projectsDir = path.join(base, 'projects');
+      const cwdA = path.join(base, 'proj-a');
+      fs.mkdirSync(cwdA);
+      writeTranscript(projectsDir, 'slug-a', 'old.jsonl', cwdA, 120 * 60 * 1000);
+      const fp = path.join(projectsDir, 'slug-a', 'new.jsonl');
+      const cwdDeep = path.join(base, 'deep-only');
+      fs.mkdirSync(cwdDeep);
+      fs.writeFileSync(fp, JSON.stringify({ cwd: cwdDeep }) + '\n' + JSON.stringify({ blob: 'y'.repeat(2 * 1024 * 1024) }) + '\n');
+      const mtime = new Date(Date.now() - 5 * 60 * 1000);
+      fs.utimesSync(fp, mtime, mtime);
+      bustProjectCwdCache();
+      assert.deepEqual(allProjectCwds({ projectsDir }), [cwdA]);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+});

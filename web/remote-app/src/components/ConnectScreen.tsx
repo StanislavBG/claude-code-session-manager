@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { revokeDevice } from '../api';
 import type { RelaySocket } from '../ws';
 import PairCode, { IcoLink } from './PairCode';
+import { deviceLabel, platformLabel } from '../devices';
 
 const IcoBolt = () => (
   <svg width={15} height={15} viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4 14h6l-1 8 9-12h-6z" /></svg>
@@ -14,7 +15,10 @@ const IcoBolt = () => (
 export default function ConnectScreen({
   socket: _socket, onRefresh,
 }: { socket: RelaySocket | null; onRefresh: () => Promise<void> }) {
-  const { devices, wsConnected } = useStore();
+  const devices = useStore((s) => s.devices);
+  const wsConnected = useStore((s) => s.wsConnected);
+  const activeDeviceId = useStore((s) => s.activeDeviceId);
+  const deviceMeta = useStore((s) => s.deviceMeta);
   const [err, setErr] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [showPair, setShowPair] = useState(false);
@@ -25,6 +29,7 @@ export default function ConnectScreen({
   const rows = [...devices].sort((a, b) =>
     Number(b.isOnline) - Number(a.isOnline) || b.issuedAt - a.issuedAt);
   const offline = rows.filter((d) => !d.isOnline);
+  const activeDevice = activeDeviceId ? devices.find((d) => d.deviceId === activeDeviceId) : undefined;
   const lastPairedId = offline[0]?.deviceId;
 
   const forget = async (ids: string[], message: string) => {
@@ -64,7 +69,9 @@ export default function ConnectScreen({
 
       {hasDevices ? (
         <>
-          <h1 className="font-serif text-[34px] font-semibold tracking-tight text-center mt-5 mb-2">Your desktop is offline</h1>
+          <h1 className="font-serif text-[34px] font-semibold tracking-tight text-center mt-5 mb-2">{activeDevice && !activeDevice.isOnline
+            ? `${deviceLabel(activeDevice.deviceId, deviceMeta[activeDevice.deviceId])} is offline`
+            : 'Your desktop is offline'}</h1>
           <p className="text-center text-[14.5px] text-ink-soft leading-relaxed mb-7">
             Open <strong className="text-ink font-semibold">Session Manager</strong> on it with Phone remote
             enabled and this phone will reconnect on its own. There's no need to pair again.
@@ -113,9 +120,23 @@ export default function ConnectScreen({
               {rows.map((d) => (
                 <div key={d.deviceId} data-testid="device-row" className="flex items-center gap-2.5 py-1.5 text-ink-soft">
                   <span className={`w-2 h-2 rounded-full ${d.isOnline ? 'bg-sage' : 'bg-ink-mute'}`} />
-                  <span className="font-mono text-xs truncate flex-1">{d.deviceId.slice(0, 12)}…</span>
+                  <span className="text-xs truncate flex-1">
+                    {deviceLabel(d.deviceId, deviceMeta[d.deviceId])}
+                    {platformLabel(deviceMeta[d.deviceId]?.platform) && (
+                      <span className="text-ink-mute"> · {platformLabel(deviceMeta[d.deviceId]?.platform)}</span>
+                    )}
+                  </span>
                   {d.deviceId === lastPairedId && <span className="text-xs text-ink-mute">last paired</span>}
                   <span className="text-xs text-ink-mute">{d.isOnline ? 'online' : 'offline'}</span>
+                  {d.isOnline && d.deviceId !== activeDeviceId && (
+                    <button
+                      data-track="connect-open-device"
+                      onClick={() => useStore.getState().chooseDevice(d.deviceId)}
+                      className="text-xs text-accent font-medium"
+                    >
+                      Open
+                    </button>
+                  )}
                   {!d.isOnline && (
                     <button
                       data-track="connect-forget-device"

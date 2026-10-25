@@ -22,7 +22,8 @@ describe('ConnectScreen offline guidance', () => {
   });
   afterEach(() => {
     cleanup();
-    useStore.setState({ devices: [] });
+    useStore.setState({ devices: [], activeDeviceId: null, deviceMeta: {} });
+    localStorage.clear();
     vi.restoreAllMocks();
   });
 
@@ -72,5 +73,32 @@ describe('ConnectScreen offline guidance', () => {
     expect(rows[0].textContent).toContain('online');
     expect(rows[0].textContent).not.toContain('Forget');
     expect(rows[1].textContent).toContain('last paired');
+  });
+
+  it('rows show name + OS, with a fallback label and no truncated id', () => {
+    useStore.setState({
+      devices: [dev('aaaaaaaaaaaaaaaa', 2, true), dev('bbbbbbbbbbbbbbbb', 1)],
+      deviceMeta: { aaaaaaaaaaaaaaaa: { name: 'Work Mac', platform: 'darwin', version: null, seenAt: 1 } },
+    });
+    render(<ConnectScreen socket={null} onRefresh={async () => {}} />);
+    const rows = screen.getAllByTestId('device-row');
+    expect(rows[0].textContent).toContain('Work Mac');
+    expect(rows[0].textContent).toContain('macOS');
+    expect(rows[1].textContent).toContain('Computer bbbbbb');
+    expect(rows[1].textContent).not.toContain('…');
+  });
+
+  it('active offline desktop is named in the heading; Open switches to an online one', () => {
+    useStore.setState({
+      devices: [dev('aaaaaaaaaaaaaaaa', 2, true), dev('bbbbbbbbbbbbbbbb', 1)],
+      activeDeviceId: 'bbbbbbbbbbbbbbbb',
+      deviceMeta: { bbbbbbbbbbbbbbbb: { name: 'Home Laptop', platform: 'linux', version: null, seenAt: 1 } },
+    });
+    render(<ConnectScreen socket={null} onRefresh={async () => {}} />);
+    expect(screen.getByText('Home Laptop is offline')).toBeTruthy();
+    expect(screen.getAllByText('Open')).toHaveLength(1);
+    fireEvent.click(screen.getByText('Open'));
+    expect(useStore.getState().activeDeviceId).toBe('aaaaaaaaaaaaaaaa');
+    expect(localStorage.getItem('sm-active-device-v1')).toBe('aaaaaaaaaaaaaaaa');
   });
 });

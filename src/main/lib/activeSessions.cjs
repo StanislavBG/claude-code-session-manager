@@ -108,8 +108,23 @@ function classifyMemoized(rawCwd) {
   return classified;
 }
 
-/** Forces the next activeProjectCwds/allProjectCwds call to rescan. */
-function bustProjectCwdCache() {
+/**
+ * Forces the next activeProjectCwds/allProjectCwds call to revalidate. Keeps the
+ * per-dir Map and classify memo (a full rescan of thousands of dirs is the cost
+ * this exists to avoid): entries are only marked stale so the next scan takes
+ * the incremental path. `deep` also re-lists/re-stats every KNOWN dir, tail-reading
+ * only those whose newest transcript changed.
+ */
+function bustProjectCwdCache({ deep = false } = {}) {
+  for (const entry of rawScanCache.values()) {
+    entry.dirMtimeMs = NaN;
+    entry.cachedAt = 0;
+    if (deep) entry.forceDeep = true;
+  }
+}
+
+/** Test isolation: the old full clear (cache + classify memo). */
+function __resetProjectCwdCacheForTests() {
   rawScanCache.clear();
   classifyMemo.clear();
 }
@@ -272,11 +287,12 @@ function scanProjectsDir(projectsDir) {
   // drop names that vanished.
   if (!cached) classifyMemo.clear();
   const prevDirs = cached ? cached.dirs : null;
+  const deep = !!(cached && cached.forceDeep);
   const dirs = new Map();
   for (const slug of slugs) {
     const known = prevDirs && prevDirs.get(slug);
-    if (known) { dirs.set(slug, known); continue; }
-    const rec = scanOneProjectDirSync(path.join(projectsDir, slug));
+    if (known && !deep) { dirs.set(slug, known); continue; }
+    const rec = scanOneProjectDirSync(path.join(projectsDir, slug), known || undefined);
     if (rec) dirs.set(slug, rec);
   }
 
@@ -529,5 +545,6 @@ module.exports = {
   worktreeMainRootOf,
   isSstHarnessCwd,
   bustProjectCwdCache,
+  __resetProjectCwdCacheForTests,
   __waitForPendingRefresh,
 };

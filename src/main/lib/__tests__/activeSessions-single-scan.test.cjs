@@ -14,7 +14,7 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const {
-  activeProjectCwds, allProjectCwds, bustProjectCwdCache, __waitForPendingRefresh,
+  activeProjectCwds, allProjectCwds, __resetProjectCwdCacheForTests, __waitForPendingRefresh,
 } = require('../activeSessions.cjs');
 
 function tmpDir() {
@@ -42,7 +42,7 @@ test('allProjectCwds then activeProjectCwds within the TTL perform exactly one d
     writeTranscript(projectsDir, 'slug-fresh', 'fresh.jsonl', cwdFresh, 5 * 60 * 1000);
     writeTranscript(projectsDir, 'slug-stale', 'stale.jsonl', cwdStale, 120 * 60 * 1000);
 
-    bustProjectCwdCache();
+    __resetProjectCwdCacheForTests();
     const readdirSpy = vi.spyOn(fs, 'readdirSync');
 
     const all = allProjectCwds({ projectsDir });
@@ -71,7 +71,7 @@ test('a rescan error keeps the old record and never throws into the synchronous 
     fs.mkdirSync(cwdA);
     writeTranscript(projectsDir, 'slug-a', 'a.jsonl', cwdA, 5 * 60 * 1000);
 
-    bustProjectCwdCache();
+    __resetProjectCwdCacheForTests();
     const warm = allProjectCwds({ projectsDir });
 
     const future = Date.now() + 130_000;
@@ -105,7 +105,7 @@ test('maxCwds cap is applied per-view, identically to the old per-call semantics
       writeTranscript(projectsDir, `slug-${i}`, `f${i}.jsonl`, cwd, (i + 1) * 60 * 1000);
     }
 
-    bustProjectCwdCache();
+    __resetProjectCwdCacheForTests();
     const capped = activeProjectCwds(90, { projectsDir, maxCwds: 3 });
     assert.equal(capped.length, 3, 'maxCwds must cap the derived result size');
 
@@ -124,7 +124,7 @@ test('after TTL expiry, the next call returns the stale record synchronously (no
     fs.mkdirSync(cwdA);
     writeTranscript(projectsDir, 'slug-a', 'a.jsonl', cwdA, 5 * 60 * 1000);
 
-    bustProjectCwdCache();
+    __resetProjectCwdCacheForTests();
     const warm = allProjectCwds({ projectsDir }); // warm the cache (first scan is sync)
 
     try {
@@ -155,7 +155,7 @@ test('expired cache: 5 concurrent callers trigger exactly one async rescan', asy
     fs.mkdirSync(cwdA);
     writeTranscript(projectsDir, 'slug-a', 'a.jsonl', cwdA, 5 * 60 * 1000);
 
-    bustProjectCwdCache();
+    __resetProjectCwdCacheForTests();
     allProjectCwds({ projectsDir }); // warm the cache synchronously
 
     const readdirPromiseSpy = vi.spyOn(fsp, 'readdir');
@@ -185,7 +185,7 @@ test('a new project dir added within the TTL window (bumping the dir mtime) is s
     fs.mkdirSync(cwdA);
     writeTranscript(projectsDir, 'slug-a', 'a.jsonl', cwdA, 5 * 60 * 1000);
 
-    bustProjectCwdCache();
+    __resetProjectCwdCacheForTests();
     const before = allProjectCwds({ projectsDir });
     assert.equal(before.length, 1);
 
@@ -219,7 +219,7 @@ test('next call after the async rescan resolves sees an updated cwd (same dirMti
     fs.mkdirSync(cwdA);
     const fp = writeTranscript(projectsDir, 'slug-a', 'a.jsonl', cwdA, 5 * 60 * 1000);
 
-    bustProjectCwdCache();
+    __resetProjectCwdCacheForTests();
     const before = allProjectCwds({ projectsDir });
     assert.deepEqual(before, [cwdA]);
 

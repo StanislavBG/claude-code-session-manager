@@ -10,7 +10,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { allProjectCwds, bustProjectCwdCache, __waitForPendingRefresh } = require('../activeSessions.cjs');
+const { allProjectCwds, bustProjectCwdCache, __resetProjectCwdCacheForTests, __waitForPendingRefresh } = require('../activeSessions.cjs');
 
 function writeT(projectsDir, slug, cwd, ageMs = 60_000, name = 't.jsonl') {
   const d = path.join(projectsDir, slug);
@@ -30,7 +30,7 @@ function setup(n) {
     fs.mkdirSync(cwd);
     writeT(projectsDir, `s${i}`, cwd);
   }
-  bustProjectCwdCache();
+  __resetProjectCwdCacheForTests();
   return { base, projectsDir };
 }
 
@@ -96,6 +96,70 @@ test('removing a dir drops its record', () => {
     assert.equal(after.length, 3);
     assert.ok(!after.includes(path.join(base, 'p2')));
     assert.equal(openSpy.mock.calls.length, 0);
+  } finally {
+    vi.restoreAllMocks();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('default bust keeps the per-dir cache: 0 tail reads; added dir costs exactly 1', () => {
+  const { base, projectsDir } = setup(50);
+  try {
+    assert.equal(allProjectCwds({ projectsDir }).length, 50);
+    const openSpy = vi.spyOn(fs, 'openSync');
+    bustProjectCwdCache();
+    assert.equal(allProjectCwds({ projectsDir }).length, 50);
+    assert.equal(openSpy.mock.calls.length, 0, 'bust must not force tail reads');
+
+    const cwdNew = path.join(base, 'pnew');
+    fs.mkdirSync(cwdNew);
+    writeT(projectsDir, 'snew', cwdNew);
+    bustProjectCwdCache();
+    const after = allProjectCwds({ projectsDir });
+    assert.equal(after.length, 51);
+    assert.ok(after.includes(cwdNew));
+    assert.equal(openSpy.mock.calls.length, 1, 'exactly one tail read');
+  } finally {
+    vi.restoreAllMocks();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('deep bust re-reads only the dir whose newest transcript grew', () => {
+  const { base, projectsDir } = setup(50);
+  try {
+    allProjectCwds({ projectsDir });
+    const moved = path.join(base, 'moved');
+    fs.mkdirSync(moved);
+    fs.appendFileSync(path.join(projectsDir, 's7', 't.jsonl'), JSON.stringify({ cwd: moved }) + '\n');
+    const openSpy = vi.spyOn(fs, 'openSync');
+    bustProjectCwdCache();
+    assert.ok(!allProjectCwds({ projectsDir }).includes(moved), 'shallow bust does not notice growth');
+    assert.equal(openSpy.mock.calls.length, 0);
+    bustProjectCwdCache({ deep: true });
+    assert.ok(allProjectCwds({ projectsDir }).includes(moved));
+    assert.equal(openSpy.mock.calls.length, 1, 'only the grown dir is tail-read');
+    openSpy.mockClear();
+    bustProjectCwdCache();
+    allProjectCwds({ projectsDir });
+    assert.equal(openSpy.mock.calls.length, 0, 'forceDeep is cleared after the pass');
+  } finally {
+    vi.restoreAllMocks();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('classify memo survives a default bust', () => {
+  const { base, projectsDir } = setup(3);
+  try {
+    allProjectCwds({ projectsDir });
+    const statSpy = vi.spyOn(fs, 'statSync');
+    const gitCalls = () => statSpy.mock.calls.filter((c) => String(c[0]).endsWith('.git')).length;
+    allProjectCwds({ projectsDir });
+    bustProjectCwdCache();
+    const before = gitCalls();
+    allProjectCwds({ projectsDir });
+    assert.equal(gitCalls(), before, 'no re-classification of known cwds');
   } finally {
     vi.restoreAllMocks();
     fs.rmSync(base, { recursive: true, force: true });

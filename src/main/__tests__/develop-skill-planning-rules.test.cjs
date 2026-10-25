@@ -73,4 +73,6 @@ test('batch create, validated update fields and files-overlap are documented', (
   const a = flat(authoring());
   expect(a).toMatch(/never runs two PRDs with overlapping files at once \(held as `files-overlap`\)/);
   expect(a).toMatch(/`worktreeSetup`/);
+  expect(a).toMatch(/--path/);
+  expect(a).toMatch(/worktree setup:/);
 });

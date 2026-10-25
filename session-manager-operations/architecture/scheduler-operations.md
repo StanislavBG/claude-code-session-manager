@@ -111,7 +111,10 @@ in favor of this pool — see commit `4c8916d`).
   copy instead of a link: pnpm `node_modules` (offline frozen install) and a uv project's
   `.venv`/`venv` (offline frozen `uv sync` — a shared env lets one worktree's `uv run` repoint the main
   checkout's editable install at its own `src/`). Best-effort: it never fails
-  worktree creation. Kill switch `SM_WORKTREE_DEP_LINK_DISABLE=1`.
+  worktree creation. Then the project's `worktreeSetup` commands (tracked `.session-manager.json`,
+  `lib/git/worktreeSetup.cjs`) run with cwd = the worktree root, one at a time per project and never
+  skipped; the outcome is the `[scheduler] worktree setup:` lines atop the run log and `worktreeSetup`
+  in meta.json. Kill switch `SM_WORKTREE_DEP_LINK_DISABLE=1` skips both the linking and the setup.
 
 ## 3. The starvation classifier — the last-resort safety net
 
@@ -171,7 +174,7 @@ verdict keeps the shadow gate observation-only, exactly as before.
 complete when the gate was already red before the job (`decideBaselineAuthority`,
 `lib/scheduler/baselineGate.cjs`, run from the same shadow gate). The base is the job's
 `guardHeadBefore`; `runGateShadow` runs the PRD gate there in a scratch detached worktree (deps
-linked via `linkDependencyDirs`, removed afterwards, memoized per HEAD on `gateShadow.baseline`).
+linked via `linkDependencyDirs`, removed afterwards, memoized per HEAD on `gateShadow.baseline`). The scratch also runs the project's `worktreeSetup`; its outcome is recorded on `gateShadow.baseline.setup`, and a base whose declared setup did not pass is unavailable (`base-setup-<reason>`).
 Failing-id subset rule: both runs must fail the same gate step, and every failing test id at HEAD
 (`parseFailingTests`) must also fail at base — one new failing id, an unparseable output, or a green
 base refuses. The landed-commit evidence, on-HEAD, clean-tree and HEAD-stable checks are the same as
@@ -241,7 +244,7 @@ human clears it via Resume/Run now.
 | Slots saturated by an overrunning job | `sessionSlots.snapshot()` (via `scheduler_list_jobs` or `npm run health`) — `holders` names the owner; check the row's `budgetWarning` field (stamped at 75% of budget, `scheduler.cjs`) and `job.verifierVerdict === 'budget_exceeded'` | **Automatic, and tighter than the 4h deadman**: the wall-clock BUDGET watchdog (`computeJobBudgetMs`) SIGTERMs a job once elapsed time passes `clamp(estimateMinutes × 3, 45min floor, 180min ceiling)` — calibrated against a p50=13m/p90=60m/max=240m run-duration profile — well before `MAX_JOB_DURATION_MS`'s 4h deadman would ever fire. A budget kill always parks `needs_review` with `verifierVerdict: 'budget_exceeded'` (`classifyBudgetKill`,) and is deliberately excluded from rungs 1-4 of the ladder — it only clears via rung 5/6 or a human |
 | Pending row held with `heldReason: 'files-overlap:<slug>'` | The named row is `running` (or picked earlier this tick) in the SAME project and its `files` array shares an equal path or a folder (`/`-suffixed) prefix with this row's | **Automatic** — mutual exclusion only (`schedulerBatch.cjs`), imposes no order; releases on the first tick after the named row leaves `running`. Rows with empty/missing `files` are never held; other projects never interact. Wrong when it never clears: the named row is stuck `running` — diagnose that row |
 | Torn `scheduler-machine.json` | `npm run health`'s `scheduler_queue.machineStateRecovered` field, or a `queueStore.recoverTornMachineState*` WARN/ERROR in logs | **Automatic** — `findLongestValidJsonPrefix` (`queueStore.cjs`) recovers the longest valid prefix and dispatch keeps running; health only goes non-GREEN as a loud "this happened" signal. A prefix mentioning `paused`/`resumeAt` in its discarded tail needs a human to verify pause status manually |
-| Job parked `needs_review`, verdict `sentinel_fail`, reason says pre-existing failures | `gateShadow.baseline.reason` on the row (`baseline-identical` completes; `new-failures`, `different-failing-step`, `base-green`, `unparseable-output`, `base-unavailable`, `kill-switch`… refuse) | `new-failures`: the job broke something — fix it. `base-unavailable`/`unparseable-output`: the base gate could not be judged; re-run by hand at `guardHeadBefore`. Otherwise see the baseline extension in §4 |
+| Job parked `needs_review`, verdict `sentinel_fail`, reason says pre-existing failures | `gateShadow.baseline.reason` on the row (`baseline-identical` completes; `new-failures`, `different-failing-step`, `base-green`, `unparseable-output`, `base-unavailable`, `base-setup-<reason>`, `kill-switch`… refuse; setup outcome at `gateShadow.baseline.setup`) | `new-failures`: the job broke something — fix it. `base-unavailable`/`base-setup-<reason>`/`unparseable-output`: the base gate could not be judged; re-run by hand at `guardHeadBefore`. Otherwise see the baseline extension in §4 |
 | Leaked worktree-cap counter (rows held `pending` with `heldReason: 'worktree cap reached...'` and 0 running) | `npm run health`'s `scheduler_queue.worktreeCapBlocked` (`health.cjs`, keys on `runningCount === 0` + the exact `heldReason` prefix) | **Automatic** — `reserveWorktreeSlot` (`gitWorktree.cjs`) re-verifies against the real on-disk worktree count before honoring a rejection, self-correcting a leaked in-memory counter without an app restart |
 | A job's worktree was stranded (process died, checkout never cleaned up) | Directory age under the kind's worktree root vs `getStaleSweepAgeMs` (job: 24h, epic: 7d, `gitWorktree.cjs`) | **Automatic** — `sweepStaleWorktreeCheckouts` runs on boot (`reconcileWorktreesOnBoot`) and periodically, but only reaps past the age threshold AND only when no `/proc` process still holds the directory as its cwd (`hasLiveHolder`) — a still-running job is never torn down early |
 | Job parked `needs_review`, verdict `worktree_integration_failed`, `integrationFailureKind: 'content_conflict'`, its own verifier said clean, `filesChanged: 0` but a real `landedCommit` | `git log --oneline main..sm-job/<slug>` shows unmerged commits | Merge the preserved branch by hand, then archive the PRD. Rung 1 skips it (without spending its attempt) while base HEAD is unchanged since the failure (`integrationBaseHeadSha`); pure-addition doc conflicts are auto-resolved at merge time (kill switch `SM_PURE_ADDITION_MERGE_DISABLE=1`) |
@@ -321,7 +324,7 @@ self-heal). Tracked as Epic `scheduler-job-status-desyncs-from-run-completion-95
 queue row**:
 
 ```
-~/.claude/session-manager/scheduled-plans/runs/<runId>/<slug>.meta.json      # exitCode, finishedAt
+~/.claude/session-manager/scheduled-plans/runs/<runId>/<slug>.meta.json      # exitCode, finishedAt, worktreeSetup
 ~/.claude/session-manager/scheduled-plans/runs/<runId>/<slug>.verdicts.json  # review verdict
 ~/.claude/session-manager/scheduled-plans/runs/<runId>/<slug>.log           # full stream-json transcript
 ```

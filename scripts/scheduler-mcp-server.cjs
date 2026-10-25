@@ -158,6 +158,56 @@ async function fetchReadiness() {
   }
 }
 
+const PRD_BATCH_MAX = 40; // mirrors prdCreate.cjs / ipcSchemas.cjs (the server enforces it)
+
+const CREATE_PRD_ITEM_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string', description: 'One-line human-readable title' },
+    cwd: { type: 'string', description: 'Absolute path to the target project (where claude -p will run). Optional inside an Epic session — the server resolves the real project from the calling session (originClaudeSessionId/sourcePromptId) when omitted.' },
+    estimateMinutes: { type: 'number', description: 'Optional; normally omit. A run without one gets the 45-minute kill-budget floor. Pass one only for work that legitimately needs longer (budget = 3x the estimate, capped at 180 minutes).' },
+    goal: { type: 'string', description: '2-4 sentences: what the executor will build and why' },
+    acceptanceCriteria: {
+      type: 'array', items: { type: 'string' },
+      description: 'Each entry is one verifiable checklist line',
+    },
+    implementationNotes: { type: 'string', description: 'File paths, patterns, and constraints the executor needs' },
+    gate: {
+      type: 'array', items: { type: 'string' },
+      description: 'REQUIRED. Commands that prove this PRD is done. The scheduler re-runs them without a shell. One command per entry, run in order; each must exit 0. Start each && step with `timeout <seconds>`. Join steps with &&. Outside single quotes, no | < > ; & ` $ \\ * ? [ ] ( ) { } or !. Use ["none"], exactly, only for docs or config with no runnable check.',
+    },
+    files: {
+      type: 'array', items: { type: 'string' },
+      description: 'REQUIRED. Repo-relative files or folders (end a folder with /) this PRD may change. No absolute paths, .. or . segments, globs, backslashes or backticks. PRDs that run at the same time must not share files; chain them with dependsOn instead.',
+    },
+    outOfScope: { type: 'array', items: { type: 'string' }, description: 'Optional: what NOT to build' },
+    slug: { type: 'string', description: 'Optional kebab-case slug; derived from title if omitted' },
+    parallelGroup: { type: 'number', description: 'DEPRECATED and ignored (PRD 832): numbers are strictly unique per project; use dependsOn for ordering' },
+    dependsOn: { type: 'array', items: { type: 'string' }, description: 'Optional: PRD slugs that must complete before this one becomes eligible (replaces the retired shared-NN-parallel convention)' },
+    disposition: {
+      type: 'string',
+      enum: ['append', 'new-head'],
+      description: 'Required when this PRD would land as a new root (no dependsOn given) in an Epic that already has incomplete PRDs: "append" depends this wave on the existing chain\'s current terminal PRD(s); "new-head" leaves it independent, eligible to run in parallel. Omit when the Epic has no incomplete PRDs yet, or when dependsOn already places this PRD explicitly.',
+    },
+    sourcePromptId: { type: 'string', description: "Effectively required: an EXISTING, already-human-approved Epic's promptSessionId (the id shown in the Epics list / active-index.json sessions key) to join — NOT a PromptTicket.id (those are distinct fields). The server never mints a new Epic; if this is omitted and no Epic can be resolved (via the SM_CHAT_SESSION_ID fallback below), the write is refused with an error telling the caller to create/approve an Epic first." },
+    sourceTabId: { type: 'string', description: 'Optional: tab id (claudeSessionId) this PRD was queued from, so the scheduler can route a completion status prompt back to it' },
+    tag: {
+      type: 'string',
+      enum: PRD_WORK_TYPES,
+      description: 'Optional: the WORK TYPE of THIS PRD — independent of the parent Epic\'s own tag. An Epic is the plan; a PRD is one unit of work inside it, and a single plan may legitimately contain several different work types. Never derived or inherited from the Epic.',
+    },
+    agentType: {
+      type: 'string',
+      description: 'Optional: WHO executes this PRD — the persona name (a file at ~/.claude/agents/<name>.md, e.g. "dev-lead") the executor should adopt. Distinct from `tag` (what kind of work); this is who does it. Defaults to "dev-lead" when omitted. Rejected at write time if the name does not resolve to a readable persona file.',
+    },
+    quietMachine: {
+      type: 'boolean',
+      description: 'Optional: set true only when this PRD\'s acceptance criteria are wall-clock/timing measurements (frame time, performance fences) that CPU contention from concurrent jobs would invalidate. The scheduler dispatches it only once zero other jobs are running machine-wide, and holds every other job off the whole slot pool for its run — a whole-machine exclusive lease, not a per-project one. If the machine never goes quiet within the configured wait window (default 30 minutes), it dispatches anyway and is marked degraded. Opt-in only; omit for ordinary PRDs.',
+    },
+  },
+  required: ['title', 'goal', 'acceptanceCriteria', 'implementationNotes', 'gate', 'files'],
+};
+
 const TOOLS = [
   {
     name: 'scheduler_reset_job',
@@ -195,52 +245,23 @@ const TOOLS = [
   {
     name: 'scheduler_create_prd',
     description: descriptionFor('scheduler_create_prd'),
+    inputSchema: CREATE_PRD_ITEM_SCHEMA,
+  },
+  {
+    name: 'scheduler_create_prds',
+    description: descriptionFor('scheduler_create_prds'),
     inputSchema: {
       type: 'object',
       properties: {
-        title: { type: 'string', description: 'One-line human-readable title' },
-        cwd: { type: 'string', description: 'Absolute path to the target project (where claude -p will run). Optional inside an Epic session — the server resolves the real project from the calling session (originClaudeSessionId/sourcePromptId) when omitted.' },
-        estimateMinutes: { type: 'number', description: 'Optional; normally omit. A run without one gets the 45-minute kill-budget floor. Pass one only for work that legitimately needs longer (budget = 3x the estimate, capped at 180 minutes).' },
-        goal: { type: 'string', description: '2-4 sentences: what the executor will build and why' },
-        acceptanceCriteria: {
-          type: 'array', items: { type: 'string' },
-          description: 'Each entry is one verifiable checklist line',
-        },
-        implementationNotes: { type: 'string', description: 'File paths, patterns, and constraints the executor needs' },
-        gate: {
-          type: 'array', items: { type: 'string' },
-          description: 'REQUIRED. Commands that prove this PRD is done. The scheduler re-runs them without a shell. One command per entry, run in order; each must exit 0. Start each && step with `timeout <seconds>`. Join steps with &&. Outside single quotes, no | < > ; & ` $ \\ * ? [ ] ( ) { } or !. Use ["none"], exactly, only for docs or config with no runnable check.',
-        },
-        files: {
-          type: 'array', items: { type: 'string' },
-          description: 'REQUIRED. Repo-relative files or folders (end a folder with /) this PRD may change. No absolute paths, .. or . segments, globs, backslashes or backticks. PRDs that run at the same time must not share files; chain them with dependsOn instead.',
-        },
-        outOfScope: { type: 'array', items: { type: 'string' }, description: 'Optional: what NOT to build' },
-        slug: { type: 'string', description: 'Optional kebab-case slug; derived from title if omitted' },
-        parallelGroup: { type: 'number', description: 'DEPRECATED and ignored (PRD 832): numbers are strictly unique per project; use dependsOn for ordering' },
-        dependsOn: { type: 'array', items: { type: 'string' }, description: 'Optional: PRD slugs that must complete before this one becomes eligible (replaces the retired shared-NN-parallel convention)' },
-        disposition: {
-          type: 'string',
-          enum: ['append', 'new-head'],
-          description: 'Required when this PRD would land as a new root (no dependsOn given) in an Epic that already has incomplete PRDs: "append" depends this wave on the existing chain\'s current terminal PRD(s); "new-head" leaves it independent, eligible to run in parallel. Omit when the Epic has no incomplete PRDs yet, or when dependsOn already places this PRD explicitly.',
-        },
-        sourcePromptId: { type: 'string', description: "Effectively required: an EXISTING, already-human-approved Epic's promptSessionId (the id shown in the Epics list / active-index.json sessions key) to join — NOT a PromptTicket.id (those are distinct fields). The server never mints a new Epic; if this is omitted and no Epic can be resolved (via the SM_CHAT_SESSION_ID fallback below), the write is refused with an error telling the caller to create/approve an Epic first." },
-        sourceTabId: { type: 'string', description: 'Optional: tab id (claudeSessionId) this PRD was queued from, so the scheduler can route a completion status prompt back to it' },
-        tag: {
-          type: 'string',
-          enum: PRD_WORK_TYPES,
-          description: 'Optional: the WORK TYPE of THIS PRD — independent of the parent Epic\'s own tag. An Epic is the plan; a PRD is one unit of work inside it, and a single plan may legitimately contain several different work types. Never derived or inherited from the Epic.',
-        },
-        agentType: {
-          type: 'string',
-          description: 'Optional: WHO executes this PRD — the persona name (a file at ~/.claude/agents/<name>.md, e.g. "dev-lead") the executor should adopt. Distinct from `tag` (what kind of work); this is who does it. Defaults to "dev-lead" when omitted. Rejected at write time if the name does not resolve to a readable persona file.',
-        },
-        quietMachine: {
-          type: 'boolean',
-          description: 'Optional: set true only when this PRD\'s acceptance criteria are wall-clock/timing measurements (frame time, performance fences) that CPU contention from concurrent jobs would invalidate. The scheduler dispatches it only once zero other jobs are running machine-wide, and holds every other job off the whole slot pool for its run — a whole-machine exclusive lease, not a per-project one. If the machine never goes quiet within the configured wait window (default 30 minutes), it dispatches anyway and is marked degraded. Opt-in only; omit for ordinary PRDs.',
+        prds: {
+          type: 'array',
+          minItems: 1,
+          maxItems: PRD_BATCH_MAX,
+          items: CREATE_PRD_ITEM_SCHEMA,
+          description: `1 to ${PRD_BATCH_MAX} PRDs, each exactly the scheduler_create_prd input. All-or-nothing: if any entry is invalid nothing is written. dependsOn may name other entries of this same call by bare slug.`,
         },
       },
-      required: ['title', 'goal', 'acceptanceCriteria', 'implementationNotes', 'gate', 'files'],
+      required: ['prds'],
     },
   },
   {
@@ -552,6 +573,36 @@ const TOOLS = [
 // sibling can exercise session_manager_help's argument handling directly —
 // mocking node:fs/promises + global.fetch to drive adminRequest — without
 // booting a stdio transport.
+// Shared by scheduler_create_prd and scheduler_create_prds: the headless-job
+// refusal (issue #11 C1) and the origin-forwarding fields. Returns an error
+// result to bail with, or null.
+function headlessQueueRefusal(toolName) {
+  // A headless scheduled executor performs its own acceptance criteria and
+  // never queues follow-on work. scheduler.cjs stamps SM_SCHEDULER_JOB_SLUG on
+  // every job spawn and SM_SCHEDULER_JOB_MAY_QUEUE=1 only for decomposition
+  // personas (architect).
+  if (process.env.SM_SCHEDULER_JOB_SLUG && process.env.SM_SCHEDULER_JOB_MAY_QUEUE !== '1') {
+    return errorResult(
+      `refused: ${toolName} was called from inside headless scheduled job '${process.env.SM_SCHEDULER_JOB_SLUG}'. `
+      + 'A PRD executor performs its own acceptance criteria directly and never queues follow-on work (self-queue failure class). '
+      + 'If more work is genuinely needed, say so in your final result text — the authoring Epic decides whether to queue it.',
+    );
+  }
+  return null;
+}
+
+// Adds originClaudeSessionId (SM_CHAT_SESSION_ID fallback when sourcePromptId
+// is absent) and originProjectRoot (SM_PROJECT_ROOT hint) to a create payload.
+function withCreateOrigin(payload) {
+  if (!payload.sourcePromptId && process.env.SM_CHAT_SESSION_ID) {
+    payload.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;
+  }
+  if (process.env.SM_PROJECT_ROOT) {
+    payload.originProjectRoot = process.env.SM_PROJECT_ROOT;
+  }
+  return payload;
+}
+
 async function handleCallTool(request) {
   const { name, arguments: args } = request.params;
   try {
@@ -643,21 +694,8 @@ async function handleCallTool(request) {
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'scheduler_create_prd') {
-      // Hard refusal at the authoring boundary (issue #11, list C1): a
-      // headless scheduled executor performs its own acceptance criteria and
-      // never queues follow-on work — PRD 460 called /develop from inside its
-      // run, spawned a duplicate PRD, and exited 0 having done nothing. The
-      // standards prose already says so; this makes the harness enforce it.
-      // scheduler.cjs stamps SM_SCHEDULER_JOB_SLUG on every job spawn and
-      // SM_SCHEDULER_JOB_MAY_QUEUE=1 only for personas whose whole job is
-      // decomposition (architect), so a planning PRD still can.
-      if (process.env.SM_SCHEDULER_JOB_SLUG && process.env.SM_SCHEDULER_JOB_MAY_QUEUE !== '1') {
-        return errorResult(
-          `refused: scheduler_create_prd was called from inside headless scheduled job '${process.env.SM_SCHEDULER_JOB_SLUG}'. `
-          + 'A PRD executor performs its own acceptance criteria directly and never queues follow-on work (self-queue failure class). '
-          + 'If more work is genuinely needed, say so in your final result text — the authoring Epic decides whether to queue it.',
-        );
-      }
+      const refusal = headlessQueueRefusal('scheduler_create_prd');
+      if (refusal) return refusal;
       // Required-fields refusal (gate-and-files-in-PRD-body unit): checked
       // right after the headless-refusal check above, before any payload
       // forwarding — 74% of parked jobs had no gate the scheduler could
@@ -670,23 +708,9 @@ async function handleCallTool(request) {
           + 'Add both and call again.',
         );
       }
-      // If the caller (the model) didn't pass sourcePromptId, forward this
-      // process's own SM_CHAT_SESSION_ID (set by chatRunner.cjs on the
-      // parent claude -p process this MCP server inherited its env from) so
-      // the admin route can auto-resolve it to the calling Epic and join
-      // that Epic instead of silently minting an unrelated sibling one — see
-      // prdCreate.cjs's resolveSourcePromptIdFromClaudeSession.
-      const payload = { ...args };
-      if (!payload.sourcePromptId && process.env.SM_CHAT_SESSION_ID) {
-        payload.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;
-      }
-      // SM_PROJECT_ROOT (chatRunner.cjs/pty.cjs/scheduler.cjs's job spawn) —
-      // a trusted hint for the real project cwd, forwarded so the admin route
-      // can resolve it even when the caller omitted cwd or passed a worktree
-      // pwd. See projectRootResolve.cjs's resolveProjectContext.
-      if (process.env.SM_PROJECT_ROOT) {
-        payload.originProjectRoot = process.env.SM_PROJECT_ROOT;
-      }
+      // Forwards SM_CHAT_SESSION_ID / SM_PROJECT_ROOT so the admin route resolves the
+      // calling Epic and real project (prdCreate.cjs, projectRootResolve.cjs).
+      const payload = withCreateOrigin({ ...args });
       const result = await adminRequest('POST', '/admin/scheduler/create-prd', payload);
       // Never say "queued" — this tool only writes the PRD file; the queue
       // row is derived by the scheduler's next reconcile pass, not by this
@@ -709,6 +733,29 @@ async function handleCallTool(request) {
       }
       if (Array.isArray(result?.files)) {
         text += `\nFiles: ${result.files.join(', ')}`;
+      }
+      return { content: [{ type: 'text', text }] };
+    }
+    if (name === 'scheduler_create_prds') {
+      const refusal = headlessQueueRefusal('scheduler_create_prds');
+      if (refusal) return refusal;
+      const prds = Array.isArray(args?.prds) ? args.prds : null;
+      if (!prds || prds.length === 0 || prds.length > PRD_BATCH_MAX) {
+        return errorResult(`scheduler_create_prds needs "prds": an array of 1 to ${PRD_BATCH_MAX} scheduler_create_prd inputs.`);
+      }
+      const payload = withCreateOrigin({ ...args });
+      const result = await adminRequest('POST', '/admin/scheduler/create-prds', payload);
+      if (result?.ok === false) {
+        const errs = Array.isArray(result.errors) ? result.errors : [{ index: -1, slug: null, error: result.error ?? 'batch refused' }];
+        const lines = errs.map((e) => `- [${e.index}] ${e.slug ?? '(no slug)'}: ${e.error}`);
+        return errorResult(`scheduler_create_prds refused the batch — nothing was written (all-or-nothing). Fix every entry below and call again:\n${lines.join('\n')}`);
+      }
+      const written = Array.isArray(result?.prds) ? result.prds : [];
+      let text = `${written.length} PRD file(s) written (the queue rows are derived on the next scheduler reconcile pass, not by this call):\n`
+        + written.map((p) => `${p.slug} -> ${p.nn}`).join('\n');
+      const warned = written.filter((p) => Array.isArray(p.warnings) && p.warnings.length > 0);
+      if (warned.length > 0) {
+        text += `\nWarnings:\n${warned.map((p) => p.warnings.map((w) => `- ${p.slug}: ${w}`).join('\n')).join('\n')}`;
       }
       return { content: [{ type: 'text', text }] };
     }

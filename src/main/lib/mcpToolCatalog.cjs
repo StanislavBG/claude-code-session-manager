@@ -135,6 +135,34 @@ const MCP_TOOL_CATALOG = [
     notes: 'See /develop.',
   },
   {
+    name: 'scheduler_create_prds',
+    group: 'scheduler',
+    purpose: 'Write a whole plan of PRDs in ONE all-or-nothing call (1 to 40 entries) via the session-manager '
+      + "app's admin API. Each entry is exactly a scheduler_create_prd input (gate and files REQUIRED per entry). "
+      + 'Every entry is validated first; only if all pass are NNs allocated and files written, otherwise NOTHING is '
+      + 'written and every per-entry error is returned as { index, slug, error }. Returns each slug and its NN, plus '
+      + 'any advisory warnings. Like scheduler_create_prd it only writes files; the queue rows are derived by the '
+      + 'next reconcile pass. All entries must resolve to the same project and Epic; top-level cwd, sourcePromptId '
+      + 'and origin fields are forwarded the same way as scheduler_create_prd.',
+    whenToUse: 'Use to queue a whole plan at once, validate PRD included: dependsOn may name other entries of the same call by bare slug (earlier or later), so a chain needs no ordering of calls.',
+    whenNotToUse: 'Do not use for a single PRD — use scheduler_create_prd. Not callable from inside a headless scheduled job (same refusal as scheduler_create_prd). If the app is not running, stop and ask the human to start it; never hand-write PRD files.',
+    exampleArgs: {
+      prds: [
+        {
+          title: 'Add retry backoff helper',
+          goal: 'Add retryWithBackoff.cjs.',
+          acceptanceCriteria: ['Helper exists', 'Unit tests pass'],
+          implementationNotes: 'See existing helpers under src/main/lib/.',
+          gate: ['timeout 300 npm run test:unit'],
+          files: ['src/main/lib/retryWithBackoff.cjs'],
+          slug: 'add-retry-backoff',
+          sourcePromptId: 'epic-id-of-an-already-approved-session',
+        },
+      ],
+    },
+    notes: 'See /develop.',
+  },
+  {
     name: 'scheduler_list_prds',
     group: 'scheduler',
     purpose: "THE ONLY SUPPORTED WAY to list scheduled PRDs (live + archived) via the session-manager app's admin API. "

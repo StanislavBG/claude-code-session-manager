@@ -27,6 +27,7 @@ const { app, powerSaveBlocker, powerMonitor, crashReporter } = require('electron
 const fs = require('node:fs');
 const path = require('node:path');
 const { reportCrash, classifyUncleanShutdown, reportChildProcessGone } = require('./lib/telemetry/crashTelemetry.cjs');
+const { maybeCaptureMainHeap } = require('./lib/telemetry/mainHeapSnapshot.cjs');
 const { createLoopDelayMonitor, stallVerdict } = require('./lib/util/loopDelay.cjs');
 
 let logs = null;
@@ -124,6 +125,7 @@ function sampleMemory() {
     main: {
       rssMb: Math.round(mu.rss / 1048576),
       heapUsedMb: Math.round(mu.heapUsed / 1048576),
+      heapTotalMb: Math.round(mu.heapTotal / 1048576),
       externalMb: Math.round(mu.external / 1048576),
     },
     powerBlockerHeld: (() => {
@@ -152,6 +154,25 @@ function persistSentinel(clean) {
   } catch { /* best-effort */ }
 }
 
+let heapSkipLogged = false;
+function tryMainHeapSnapshot() {
+  try {
+    const t0 = Date.now();
+    const heapUsedMb = process.memoryUsage().heapUsed / 1048576;
+    const r = maybeCaptureMainHeap({ heapUsedMb });
+    if (r.captured) {
+      logs?.writeLine({ scope: 'crash-diag', level: 'warn', message: '[crash-diag] main heap snapshot',
+        meta: { filePath: r.filePath, ms: Date.now() - t0, heapUsedMb: Math.round(heapUsedMb) } });
+    } else if (r.reason !== 'below-threshold' && r.reason !== 'already-captured' && !heapSkipLogged) {
+      heapSkipLogged = true;
+      logs?.writeLine({ scope: 'crash-diag', level: 'warn', message: '[crash-diag] main heap snapshot skipped',
+        meta: { reason: r.reason, heapUsedMb: Math.round(heapUsedMb) } });
+    }
+  } catch (err) {
+    try { logs?.writeLine({ scope: 'crash-diag', level: 'error', message: `[crash-diag] main heap snapshot failed: ${err && err.message}` }); } catch { /* ignore */ }
+  }
+}
+
 function heartbeat() {
   lastSample = sampleMemory();
   const loop = loopMonitor ? loopMonitor.snapshot() : null;
@@ -167,11 +188,14 @@ function heartbeat() {
     meta: {
       totalMb: lastSample.totalMb,
       mainRssMb: lastSample.main.rssMb,
+      mainHeapUsedMb: lastSample.main.heapUsedMb,
+      mainHeapTotalMb: lastSample.main.heapTotalMb,
       powerBlockerHeld: lastSample.powerBlockerHeld,
       top: top.map((p) => `${p.type}:${p.mb}MB`),
       ...loop,
     },
   });
+  tryMainHeapSnapshot();
   const stall = loop && stallVerdict(loop);
   if (stall) logs?.writeLine({ scope: 'crash-diag', ...stall, meta: { ...loop } });
 }

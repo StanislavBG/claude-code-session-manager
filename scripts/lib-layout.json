@@ -72,6 +72,7 @@
   "lruCache": "util",
   "macroAdminRoutes": "feedback-remote",
   "macroLibrary": "persona-macro",
+  "mainHeapSnapshot": "telemetry",
   "modelCatalog": "claude",
   "needsReviewLedger": "scheduler",
   "opsErrorLog": "telemetry",

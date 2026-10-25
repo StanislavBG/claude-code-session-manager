@@ -189,6 +189,7 @@ const queueStore = require('./lib/scheduler/queueStore.cjs');
 const supervisorRecord = require('./lib/scheduler/jobSupervisorRecord.cjs');
 const adoptedRunSupervisor = require('./lib/scheduler/adoptedRunSupervisor.cjs');
 const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prd/prdFrontmatter.cjs');
+const { applyStructuredPrdPatch } = require('./lib/prd/prdBodyPatch.cjs');
 const { resolveDepSlug, findNearMatches } = require('./lib/prd/depSlugResolve.cjs');
 const { computeDispositionRewrite, mintPlanId, resolveInheritedPlanId } = require('./lib/prd/prdDisposition.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');
@@ -10782,7 +10783,15 @@ const remote = {
   // prdFrontmatter.cjs's parsePrdFile/serializePrdFile round-trip pair (PRD
   // 1024) so unrecognized keys (e.g. dependsOn) and untouched recognized
   // keys' original line formatting survive unchanged.
-  async updatePrd({ slug, cwd, frontmatter, body }) {
+  async updatePrd({ slug, cwd, frontmatter, body, gate, files, acceptanceCriteria }) {
+    const structured = {};
+    if (gate !== undefined) structured.gate = gate;
+    if (files !== undefined) structured.files = files;
+    if (acceptanceCriteria !== undefined) structured.acceptanceCriteria = acceptanceCriteria;
+    const hasStructured = Object.keys(structured).length > 0;
+    if (hasStructured && body !== undefined) {
+      return { ok: false, error: 'Pass either body (full replacement) or the structured fields gate/files/acceptanceCriteria, not both.' };
+    }
     const job = await this.getJob(slug);
     const EDITABLE_JOB_STATUSES = new Set(['pending', 'quarantined', 'needs_review', 'failed', 'skipped']);
     if (job && !EDITABLE_JOB_STATUSES.has(job.status)) {
@@ -10862,13 +10871,22 @@ const remote = {
         fm[key] = frontmatter[key];
       }
     }
-    const newBody = body !== undefined ? body : origBody;
+    let newBody = body !== undefined ? body : origBody;
+    let patchWarnings = [];
+    if (hasStructured) {
+      const patched = applyStructuredPrdPatch(origBody, structured);
+      if (!patched.ok) return { ok: false, error: patched.error };
+      newBody = patched.body;
+      patchWarnings = patched.warnings || [];
+    }
     const newRaw = serializePrdFile(fm, newBody);
 
     try {
       await config.writeTextAtomic(filePath, newRaw, { writer: 'scheduler' });
       const stat = await fsp.stat(filePath);
-      return { ok: true, slug, bytesWritten: stat.size };
+      return patchWarnings.length
+        ? { ok: true, slug, bytesWritten: stat.size, warnings: patchWarnings }
+        : { ok: true, slug, bytesWritten: stat.size };
     } catch (e) {
       return { ok: false, error: e?.message ?? 'write failed' };
     }

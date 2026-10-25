@@ -566,9 +566,18 @@ const adminUpdatePrd = z.object({
     (s) => Buffer.byteLength(s, 'utf8') <= PRD_WRITE_MAX_BYTES,
     `body must be ≤ ${PRD_WRITE_MAX_BYTES} bytes`,
   ).optional(),
-}).refine(
-  (it) => (it.frontmatter && Object.keys(it.frontmatter).length > 0) || it.body !== undefined,
-  'at least one of frontmatter or body is required',
+  // Structured section patches, applied via prdBodyPatch.cjs (re-validated and
+  // re-rendered). Mutually exclusive with `body` (enforced in updatePrd too).
+  gate: z.array(z.string().min(1).max(2000)).min(1).max(50).optional(),
+  files: z.array(z.string().min(1).max(1000)).min(1).max(200).optional(),
+  acceptanceCriteria: z.array(z.string().min(1).max(2000)).min(1).max(100).optional(),
+}).strict().refine(
+  (it) => (it.frontmatter && Object.keys(it.frontmatter).length > 0) || it.body !== undefined
+    || it.gate !== undefined || it.files !== undefined || it.acceptanceCriteria !== undefined,
+  'at least one of frontmatter, body, gate, files or acceptanceCriteria is required',
+).refine(
+  (it) => it.body === undefined || (it.gate === undefined && it.files === undefined && it.acceptanceCriteria === undefined),
+  'body cannot be combined with gate, files or acceptanceCriteria',
 );
 
 const adminCancelJob = z.object({

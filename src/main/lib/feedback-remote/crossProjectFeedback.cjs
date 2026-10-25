@@ -79,6 +79,7 @@ const {
 const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
 const { OPS_ROOT_DIR } = require('../opsOwnership.cjs');
 const { resolveProjectContext } = require('../projectRootResolve.cjs');
+const { isEphemeralCwd } = require('../ephemeralCwd.cjs');
 
 /** Only these three Epic tags make sense for an inbound report — they are
  *  exactly the tags that route through /develop (tagLibrary.ts). 'build' and
@@ -680,8 +681,14 @@ async function listFeedbackTargets({ limit = TARGET_SCAN_LIMIT, projectsDir } = 
 
   const byCwd = new Map();
   for (const { full, mtimeMs } of scanned) {
-    const cwd = await resolveCwdFromTranscriptDir(full);
-    if (!cwd) continue;
+    const rawCwd = await resolveCwdFromTranscriptDir(full);
+    if (!rawCwd) continue;
+    // Job/Epic worktrees carry a tracked operations root too, so each would
+    // list as a project. Collapse to the main checkout (same resolver the
+    // admin routes use); a worktree whose main checkout can't be proven
+    // stays ephemeral/worktree-shaped and is dropped, never listed.
+    const cwd = resolveProjectContext({ cwd: rawCwd }).cwd;
+    if (!cwd || isEphemeralCwd(cwd)) continue;
     const prior = byCwd.get(cwd);
     if (!prior || prior.lastActivity < mtimeMs) byCwd.set(cwd, { cwd, lastActivity: mtimeMs });
   }

@@ -1,7 +1,7 @@
 'use strict';
 
 // E2E encryption helpers (P-256 ECDH + AES-256-GCM, ADR §5.2).
-// Shared by the agent side (webRemote.cjs) and the desktop client role.
+// Used by the agent side (webRemote.cjs).
 
 const crypto = require('node:crypto');
 

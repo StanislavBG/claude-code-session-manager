@@ -107,8 +107,9 @@ const MCP_TOOL_CATALOG = [
       + 'no shell metacharacters), or exactly `["none"]` for a PRD with no runnable check; the scheduler '
       + 're-runs these commands and reads them back from the rendered `# Gate` section verbatim, so a stray '
       + '```gate fence anywhere else in the PRD text is rejected. `files` lists the 1-50 repo-relative files '
-      + 'or folders this PRD may change; PRDs that can run at the same time must not share a file — chain '
-      + 'them with `dependsOn` instead.',
+      + 'or folders this PRD may change; The scheduler never runs two PRDs with overlapping files at once '
+      + '(dispatch holds the later one), so `dependsOn` is for real output or order dependencies, not for '
+      + 'avoiding file clashes.',
     whenToUse: 'Use whenever new work should be queued into an already-approved Epic — this is the /develop path.',
     whenNotToUse: 'TWO DISTINCT FAILURE MODES if this tool is not usable — do not conflate them: '
       + '(a) this tool call is PRESENT in your tool list but ERRORS — NEVER hand-write a PRD file. '

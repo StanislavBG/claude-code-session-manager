@@ -138,3 +138,15 @@ test('scheduler_create_prd does not require estimateMinutes but keeps the other 
   const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'scheduler_create_prd');
   expect(entry.exampleArgs).not.toHaveProperty('estimateMinutes');
 });
+
+test('scheduler_create_prd files/estimateMinutes wording reflects files-overlap hold and persona default', () => {
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'scheduler_create_prd');
+  expect(entry.purpose).toMatch(/never runs two PRDs with overlapping files at once/);
+  expect(entry.purpose).toMatch(/real output or order dependencies/);
+  expect(entry.purpose).not.toMatch(/must not share a file/);
+  const tool = TOOLS.find((t) => t.name === 'scheduler_create_prd');
+  const files = tool.inputSchema.properties.files.description;
+  expect(files).toMatch(/never runs two PRDs with overlapping files at once/);
+  expect(files).toMatch(/real output or order dependencies/);
+  expect(tool.inputSchema.properties.estimateMinutes.description).toMatch(/defaultEstimateMinutes.*45-minute/);
+});

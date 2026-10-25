@@ -165,7 +165,7 @@ const CREATE_PRD_ITEM_SCHEMA = {
   properties: {
     title: { type: 'string', description: 'One-line human-readable title' },
     cwd: { type: 'string', description: 'Absolute path to the target project (where claude -p will run). Optional inside an Epic session — the server resolves the real project from the calling session (originClaudeSessionId/sourcePromptId) when omitted.' },
-    estimateMinutes: { type: 'number', description: 'Optional; normally omit. A run without one gets the 45-minute kill-budget floor. Pass one only for work that legitimately needs longer (budget = 3x the estimate, capped at 180 minutes).' },
+    estimateMinutes: { type: 'number', description: 'Optional; normally omit. An omitted estimate falls back to the executing persona\'s defaultEstimateMinutes, then to the 45-minute kill-budget floor. Pass one only for work that legitimately needs longer (budget = 3x the estimate, capped at 180 minutes).' },
     goal: { type: 'string', description: '2-4 sentences: what the executor will build and why' },
     acceptanceCriteria: {
       type: 'array', items: { type: 'string' },
@@ -178,7 +178,7 @@ const CREATE_PRD_ITEM_SCHEMA = {
     },
     files: {
       type: 'array', items: { type: 'string' },
-      description: 'REQUIRED. Repo-relative files or folders (end a folder with /) this PRD may change. No absolute paths, .. or . segments, globs, backslashes or backticks. PRDs that run at the same time must not share files; chain them with dependsOn instead.',
+      description: 'REQUIRED. Repo-relative files or folders (end a folder with /) this PRD may change. No absolute paths, .. or . segments, globs, backslashes or backticks. The scheduler never runs two PRDs with overlapping files at once (dispatch holds the later one), so do not chain PRDs with dependsOn just to avoid a file clash; dependsOn is for real output or order dependencies.',
     },
     outOfScope: { type: 'array', items: { type: 'string' }, description: 'Optional: what NOT to build' },
     slug: { type: 'string', description: 'Optional kebab-case slug; derived from title if omitted' },

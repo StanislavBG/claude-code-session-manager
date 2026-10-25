@@ -190,6 +190,7 @@ const supervisorRecord = require('./lib/scheduler/jobSupervisorRecord.cjs');
 const adoptedRunSupervisor = require('./lib/scheduler/adoptedRunSupervisor.cjs');
 const { splitFrontmatter, parsePrdFile, serializePrdFile } = require('./lib/prd/prdFrontmatter.cjs');
 const { applyStructuredPrdPatch } = require('./lib/prd/prdBodyPatch.cjs');
+const { resolvePersonaDefaultEstimate, DEFAULT_PRD_AGENT_TYPE } = require('./lib/prd/prdAgentType.cjs');
 const { resolveDepSlug, findNearMatches } = require('./lib/prd/depSlugResolve.cjs');
 const { computeDispositionRewrite, mintPlanId, resolveInheritedPlanId } = require('./lib/prd/prdDisposition.cjs');
 const { allProjectCwds } = require('./lib/activeSessions.cjs');

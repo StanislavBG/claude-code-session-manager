@@ -207,3 +207,24 @@ test('executeJob: a frontmatter-only project overlay changes --model/--effort wh
   expect(argv[argv.indexOf('--effort') + 1]).toBe('high');
   expect(argv[argv.indexOf('--append-system-prompt') + 1]).toBe('You are dev-lead. Global body.');
 });
+
+// ---------- persona defaultEstimateMinutes → armed wall-clock budget ----------
+
+test('executeJob: a PRD with no estimateMinutes arms the wall-clock budget at 3x the persona defaultEstimateMinutes', async () => {
+  const budget = require('../scheduler/budget.cjs');
+  writePersona(path.join(tmpHome, '.claude', 'agents'), 'est-persona', ['model: opus', 'defaultEstimateMinutes: 20'], 'body');
+  const real = budget.computeJobBudgetMs;
+  const armed = [];
+  budget.computeJobBudgetMs = (...a) => { const r = real(...a); armed.push({ est: a[0], ms: r }); return r; };
+  let out;
+  try {
+    out = await runJobWithAgentType({ agentType: 'est-persona' });
+  } finally {
+    budget.computeJobBudgetMs = real;
+  }
+  expect(out.result.exitCode).toBe(0);
+  expect(armed.length).toBeGreaterThan(0);
+  expect(armed[0].est).toBe(20);
+  const expected = Math.min(Math.max(20 * 3 * 60_000, budget.JOB_BUDGET_FLOOR_MS), budget.JOB_BUDGET_CEILING_MS);
+  expect(armed[0].ms).toBe(expected);
+});

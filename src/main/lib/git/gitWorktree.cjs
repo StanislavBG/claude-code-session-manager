@@ -894,15 +894,20 @@ async function createWorktree({ kind, cwd, key, fromRef }) {
     carriedPaths = carry.paths;
   }
 
+  let setup = { ran: false, ok: false, reason: 'dep-link-disabled', waitedMs: 0, ms: 0, commands: [] };
   if (process.env.SM_WORKTREE_DEP_LINK_DISABLE !== '1') {
     try {
-      const { linked } = await require('./worktreeDeps.cjs').linkDependencyDirs({ mainCwd: cwd, worktreeCwd: dir });
-      if (linked.length) console.log(`[gitWorktree] linked deps: ${linked.join(', ')} -> ${dir}`);
-    } catch { /* best-effort — never fails worktree creation */ }
+      const deps = await require('./worktreeDeps.cjs').linkDependencyDirs({ mainCwd: cwd, worktreeCwd: dir });
+      setup = deps.setup;
+      if (deps.linked.length) console.log(`[gitWorktree] linked deps: ${deps.linked.join(', ')} -> ${dir}`);
+    } catch (err) {
+      // best-effort — never fails worktree creation
+      setup = { ran: false, ok: false, reason: 'error', error: String((err && err.message) || err), waitedMs: 0, ms: 0, commands: [] };
+    }
   }
 
   registeredCheckouts.set(dir, { kind, branch });
-  const result = { ok: true, dir, branch, baseCwd: cwd, carriedPaths, baseBranch };
+  const result = { ok: true, dir, branch, baseCwd: cwd, carriedPaths, baseBranch, setup };
   if (resolvedFromRefSha) result.forkedFrom = fromRef;
   return result;
 }

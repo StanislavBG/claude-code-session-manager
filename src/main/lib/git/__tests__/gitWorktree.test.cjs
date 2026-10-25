@@ -1925,3 +1925,59 @@ test('[createWorktree fromRef] forks the worktree from fromRef instead of HEAD, 
   fs.writeFileSync(path.join(repoCwd, 'README.md'), 'hello\n', 'utf8'); // restore for afterEach's clean teardown
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: result.dir, branch: result.branch });
 });
+
+// ──────────────────────────────────────────── worktree setup outcome on the result
+
+function commitSetupConfig(dir, marker) {
+  const cmd = `timeout 30 node -e "require('fs').writeFileSync('${marker}','x')"`;
+  fs.writeFileSync(path.join(dir, '.session-manager.json'), JSON.stringify({ worktreeSetup: [cmd] }), 'utf8');
+  git(['add', '-A'], dir);
+  git(['commit', '-q', '-m', 'add setup config'], dir);
+}
+
+test('[job] createJobWorktree result carries a passed setup outcome and the marker exists', async () => {
+  commitSetupConfig(repoCwd, 'setup-marker.txt');
+  const result = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'setup-pass' });
+  expect(result.ok).toBe(true);
+  expect(result.setup.ran).toBe(true);
+  expect(result.setup.ok).toBe(true);
+  expect(result.setup.reason).toBe('passed');
+  expect(result.setup.commands[0].code).toBe(0);
+  expect(fs.existsSync(path.join(result.dir, 'setup-marker.txt'))).toBe(true);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: result.dir, branch: result.branch });
+});
+
+test('[job] SM_WORKTREE_DEP_LINK_DISABLE=1 gives setup reason dep-link-disabled and no marker', async () => {
+  commitSetupConfig(repoCwd, 'setup-marker.txt');
+  const prev = process.env.SM_WORKTREE_DEP_LINK_DISABLE;
+  process.env.SM_WORKTREE_DEP_LINK_DISABLE = '1';
+  try {
+    const result = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'setup-disabled' });
+    expect(result.ok).toBe(true);
+    expect(result.setup).toEqual({ ran: false, ok: false, reason: 'dep-link-disabled', waitedMs: 0, ms: 0, commands: [] });
+    expect(fs.existsSync(path.join(result.dir, 'setup-marker.txt'))).toBe(false);
+    await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: result.dir, branch: result.branch });
+  } finally {
+    if (prev === undefined) delete process.env.SM_WORKTREE_DEP_LINK_DISABLE; else process.env.SM_WORKTREE_DEP_LINK_DISABLE = prev;
+  }
+});
+
+test('[job] a config only in the main checkout gives setup reason not-in-worktree', async () => {
+  fs.appendFileSync(path.join(repoCwd, '.git', 'info', 'exclude'), '\n.session-manager.json\n');
+  const cmd = `timeout 30 node -e "require('fs').writeFileSync('setup-marker.txt','x')"`;
+  fs.writeFileSync(path.join(repoCwd, '.session-manager.json'), JSON.stringify({ worktreeSetup: [cmd] }), 'utf8');
+  const result = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'setup-not-in-wt' });
+  expect(result.ok).toBe(true);
+  expect(result.setup.reason).toBe('not-in-worktree');
+  expect(fs.existsSync(path.join(result.dir, 'setup-marker.txt'))).toBe(false);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: result.dir, branch: result.branch });
+});
+
+test('[epic] createEpicWorktree result also carries setup', async () => {
+  commitSetupConfig(repoCwd, 'setup-marker.txt');
+  const result = await gitWorktree.createEpicWorktree({ cwd: repoCwd, epicId: 'setup-epic' });
+  expect(result.ok).toBe(true);
+  expect(result.setup).toBeTruthy();
+  expect(result.setup.reason).toBe('passed');
+  await gitWorktree.cleanupEpicWorktree({ cwd: repoCwd, dir: result.dir, branch: result.branch });
+});

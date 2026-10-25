@@ -226,11 +226,12 @@ async function linkDependencyDirs({ mainCwd, worktreeCwd, names = DEFAULT_DEP_DI
     }
   }
   // Project warm-up (.session-manager.json worktreeSetup) runs after linking so it sees node_modules.
-  // Both createWorktree and the scheduler's verify scratch worktree come through here. Note:
-  // SM_WORKTREE_DEP_LINK_DISABLE=1 skips linkDependencyDirs at the gitWorktree.cjs call site, so it skips setup too.
+  // Both createWorktree and the scheduler's verify scratch worktree come through here. mainCwd lets
+  // same-project setups serialize and reports a config missing from the worktree; the outcome is
+  // returned unchanged as `setup`. SM_WORKTREE_DEP_LINK_DISABLE=1 skips this at the gitWorktree.cjs call site.
   let setup;
   try {
-    setup = await runWorktreeSetup({ worktreeCwd });
+    setup = await runWorktreeSetup({ worktreeCwd, mainCwd });
   } catch (err) {
     setup = { ran: false, error: String(err && err.message) };
   }

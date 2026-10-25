@@ -88,6 +88,7 @@ const ScheduleJobSchema = z
     runtime: ScheduleJobRuntimeSchema.optional(),
     verifierVerdict: z.string().optional(),
     dependsOn: z.array(z.string()).optional(),
+    files: z.array(z.string()).optional(),
     originSessionId: z.string().nullable().optional(),
     sourceTabId: z.string().nullable().optional(),
     sourcePromptId: z.string().nullable().optional(),

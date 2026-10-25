@@ -1606,6 +1606,7 @@ async function reconcile(state) {
       // membership, so moving the file between Epic dirs must re-point the row.
       epicId: p.epicId ?? job.epicId ?? null,
       dependsOn: p.dependsOn,
+      files: p.files ?? [],
       disposition: p.disposition ?? null,
       planId: p.planId ?? null,
       quietMachine: p.quietMachine === true,
@@ -1729,6 +1730,7 @@ async function reconcile(state) {
       sourceTabId: p.sourceTabId ?? inv.row?.sourceTabId ?? null,
       epicId: p.epicId ?? inv.row?.epicId ?? null,
       dependsOn: p.dependsOn,
+      files: p.files ?? [],
       disposition: p.disposition ?? null,
       planId: p.planId ?? null,
       quietMachine: p.quietMachine === true,
@@ -1864,6 +1866,7 @@ async function reconcile(state) {
       sourceTabId: p.sourceTabId,
       epicId: p.epicId ?? null,
       dependsOn: p.dependsOn,
+      files: p.files ?? [],
       disposition: p.disposition ?? null,
       planId: p.planId ?? null,
       quietMachine: p.quietMachine === true,

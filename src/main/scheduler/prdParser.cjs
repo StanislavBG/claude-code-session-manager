@@ -19,6 +19,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
 const { deriveEpicIdFromPrdPath } = require('../lib/prd/prdLocations.cjs');
+const { parseFilesSection } = require('../lib/prd/prdGateFiles.cjs');
 const { reportDanglingAgentTypeOnce } = require('../lib/prd/prdAgentType.cjs');
 
 /**
@@ -100,6 +101,8 @@ async function parsePrdRaw(filePath) {
     // queue row is completed (a slug with no row is treated as already
     // done/archived, matching retireCompletedSlugs semantics).
     dependsOn: parseDependsOn(fm.dependsOn),
+    // Declared touch-list from the body's `# Files` section ([] when absent).
+    files: parseFilesSection(body),
     // Provenance stamp (PRD-authoring lockdown): set only by prdCreate.cjs's
     // buildPrdBody (create) or the update-prd route's legacy-adopt patch
     // (migration/manual adopt). A PRD discovered on disk with no value here

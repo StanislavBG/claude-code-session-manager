@@ -245,6 +245,36 @@ function renderFilesSection(files) {
 }
 
 /**
+ * Inverse of renderFilesSection: read the bullet entries under the `# Files`
+ * heading (up to the next top-level heading) back out of a PRD body. Returns
+ * [] when there is no such section. Strips only the renderer's `- ` prefix
+ * (plus tolerated wrapping backticks); prose lines are ignored.
+ *
+ * @param {string} body
+ * @returns {string[]}
+ */
+function parseFilesSection(body) {
+  if (typeof body !== 'string') return [];
+  const lines = body.split(/\r?\n/);
+  const start = lines.findIndex((l) => /^#\s+Files\s*$/.test(l));
+  if (start === -1) return [];
+  const out = [];
+  let inFence = false;
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\s*```/.test(line)) { inFence = !inFence; continue; }
+    if (!inFence && /^#\s/.test(line)) break;
+    const m = line.match(/^[-*]\s+(.+?)\s*$/);
+    if (!m) continue;
+    let entry = m[1];
+    const tick = entry.match(/^`([^`]+)`$/);
+    if (tick) entry = tick[1];
+    if (entry && !out.includes(entry)) out.push(entry);
+  }
+  return out;
+}
+
+/**
  * Render the `# Gate` body section as an array of lines. `commandsOrNone`
  * must already be validated (validateGate's `commands` output) — either
  * `['none']` or the ordered command-chain strings to fence verbatim.
@@ -280,5 +310,6 @@ module.exports = {
   validateGate,
   validateFiles,
   renderFilesSection,
+  parseFilesSection,
   renderGateSection,
 };

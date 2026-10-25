@@ -61,3 +61,16 @@ test('validate criterion 4 cites PRDs by slug, no NN in the path', () => {
   expect(flat(s)).toMatch(/find it by slug under prds\/ or prds-archived\//);
   expect(s).not.toMatch(/prds\/<NN>-<slug>\.md/);
 });
+
+test('batch create, validated update fields and files-overlap are documented', () => {
+  const s = flat(skill());
+  expect(s).toMatch(/one `scheduler_create_prds` call; `dependsOn` may name other entries of that call/);
+  expect(s).toMatch(/only if the batch tool is absent/);
+  expect(s).toMatch(/in a single `scheduler_create_prd`, `dependsOn` accepts only slugs that already exist/i);
+  expect(s).toMatch(/`gate`, `files` and `acceptanceCriteria` fields are validated and re-rendered/);
+  expect(s).not.toMatch(/does not check them|copy the `# Gate` and/);
+  expect(s).toMatch(/never runs two PRDs with overlapping files at once \(held as `files-overlap`\)/);
+  const a = flat(authoring());
+  expect(a).toMatch(/never runs two PRDs with overlapping files at once \(held as `files-overlap`\)/);
+  expect(a).toMatch(/`worktreeSetup`/);
+});

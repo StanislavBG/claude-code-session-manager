@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v11 -->
+<!-- PRD_AUTHORING.md v12 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -69,7 +69,7 @@ if (!found) {
 Rule: every PRD needs these fields.
 1. `title` — one line, plain English.
 2. `cwd` — the Epic's project root, as an absolute path or `~/…`. The API always sets it to the Epic's project, whatever you pass. To work in another project, open an Epic in that project. The folder must exist when you queue.
-3. `estimateMinutes` — optional; omit it. A run without one gets the 45-minute kill-budget floor. Pass one only if the run legitimately needs longer. Most PRDs take 5–10 minutes (§8).
+3. `estimateMinutes` — optional; omit it. A run without one gets its persona's `defaultEstimateMinutes`, else the 45-minute floor. Pass one only if the run legitimately needs longer. Most PRDs take 5–10 minutes (§8).
 
 `parallelGroup` is deprecated and ignored. `dependsOn: [<slug>, ...]` is the only ordering primitive.
 
@@ -106,7 +106,7 @@ Both fields are required in every `scheduler_create_prd` call.
 
 1. 1–50 repo-relative paths. A folder ends with `/`.
 2. No absolute paths, no `~` at the start, no `..` or `.` segments, no `*` or `?`, no `\` or backticks, no leading `-`. Use `/` between folders.
-3. PRDs that can run at the same time must not share a file. If two PRDs touch the same file, chain them with `dependsOn`.
+3. The scheduler never runs two PRDs with overlapping files at once (held as `files-overlap`); `dependsOn` is for real output or order dependencies only.
 
 ### What the API writes
 
@@ -126,7 +126,7 @@ A short Epic-context digest is prepended automatically for orientation only — 
 
 The executor can't ask you anything: no `ScheduleWakeup`, Cron, Monitor, `AskUserQuestion`, plan mode, or worktree tools; background tasks are off (a `timeout` command is always on PATH — the app installs a shim on macOS). It must never stop to ask a question — it makes the safest reasonable call and reports it, so write the PRD so that call is obvious.
 
-Worktree reach: every PRD runs in an isolated git worktree holding tracked files plus `.venv`/`venv` (and `node_modules` for non-pnpm projects) symlinked from the main checkout; pnpm projects (pnpm-lock.yaml) get a worktree-local `node_modules` installed offline from the store. Why: a pnpm install through the symlink purged the main checkout's node_modules (Bilko-Game-Academy 2026-10-18). A step that needs gitignored runtime state (databases, `downloads/`, browser profiles, logs) or a live side effect must address the main checkout by absolute path (e.g. `$HOME/Projects/<repo>/...`), be artifact-only (a deliverable artifact + `artifactPaths`, no tracked edits), and `dependsOn` the PRD that lands its tracked edits. Host crontab installs stay human-only (see §14).
+Worktree reach: every PRD runs in an isolated git worktree holding tracked files plus `.venv`/`venv` (and `node_modules` for non-pnpm projects) symlinked from the main checkout; pnpm projects (pnpm-lock.yaml) get a worktree-local `node_modules` installed offline from the store. Why: a pnpm install through the symlink purged the main checkout's node_modules (Bilko-Game-Academy 2026-10-18). A step that needs gitignored runtime state (databases, `downloads/`, browser profiles, logs) or a live side effect must address the main checkout by absolute path (e.g. `$HOME/Projects/<repo>/...`), be artifact-only (a deliverable artifact + `artifactPaths`, no tracked edits), and `dependsOn` the PRD that lands its tracked edits. A project may declare `worktreeSetup` gate-syntax commands in a tracked `.session-manager.json`, run best-effort once per fresh job and verify worktree before the gate. Host crontab installs stay human-only (see §14).
 Why: burrow PRD 1516 halted because its relative `.venv` python against `downloads/fb-tracker.db`, `scripts/install-cron.sh` and `pipeline-cron.sh --now` resolved inside the worktree (no runtime state; install-cron would bake a temporary worktree path into crontab), while sibling 1494 succeeded the same day using an absolute main-checkout path and artifact-only output. `scheduler_create_prd` warns on relative gitignored paths.
 
 ---

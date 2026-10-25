@@ -69,7 +69,7 @@ failure modes have different fixes:
   error is not this case: fix the input and retry. **STOP. Do not write any PRD file.** Tell the
   human to start the app, then retry the same call. Why: a PRD file the API did not write is
   quarantined and never runs.
-- **(c) Create errors with "did not answer" or "Connection closed".** It may still have been written; retry the same call with the same slug (it returns the existing PRD with `alreadyExisted: true`) and never re-issue it under a new slug.
+- **(c) Create errors with "did not answer" or "Connection closed".** It may still have been written; retry the same call with the same slug (it returns the existing PRD with `alreadyExisted: true`, or per entry `applied`) and never re-issue it under a new slug. `scheduler_get_prd` accepts the bare slug.
 - **(b) Tool ABSENT from your tool list.** The `session-manager-scheduler` MCP server is not
   registered: a **misconfiguration**, not an offline app.
   **STOP. Do not write any PRD file.** Tell the human. The app registers the server at user
@@ -120,13 +120,14 @@ failure modes have different fixes:
     Stage 2: C → validate`), and a table (#, PRD, files, gate, dependsOn) — not PRD
     drafts. Queue at once when the Epic is `feature`, `bug` or `art` and scope is clear; otherwise ask
     one approval question, once.
-11. Before the first `scheduler_create_prd` call, run `git -C "$SM_PROJECT_ROOT" rev-parse HEAD`
-    and keep the SHA. **Walk the pre-queue checklist** (last section of PRD_AUTHORING.md), then
-    queue each PRD with `scheduler_create_prd`, the validate PRD last.
+11. Before queueing, run `git -C "$SM_PROJECT_ROOT" rev-parse HEAD` and keep the SHA.
+    **Walk the pre-queue checklist** (last section of PRD_AUTHORING.md), then queue the whole
+    plan, validate PRD included, in one `scheduler_create_prds` call; `dependsOn` may name other
+    entries of that call. Use one `scheduler_create_prd` per PRD only if the batch tool is absent.
 12. **Read the warnings each call returns before the next call.** Warnings do not block. If a
-    gate or files warning shows a real mistake, archive that PRD with `scheduler_archive_prd` and
-    queue it again under a new slug, before you queue the PRDs that depend on it. Why: a new
-    call checks the gate and files again; `scheduler_update_prd` does not check them. Never
+    gate or files warning shows a real mistake, fix it with `scheduler_update_prd`: its `gate`,
+    `files` and `acceptanceCriteria` fields are validated and re-rendered. Why: a full body
+    replacement is for prose only and is not re-checked. Never
     change a PRD only to silence a warning. The validate PRD's none-gate warning and its size
     warning (8 or more criteria) are expected. Then post one short message: each PRD's number and slug, the validate slug, the
     warnings you kept, and that no per-PRD check will come from this session.
@@ -138,7 +139,7 @@ failure modes have different fixes:
 | --- | --- |
 | `title`, `goal`, `acceptanceCriteria`, `implementationNotes`, `outOfScope` | Steps 6–9. Goal: 2–4 sentences. |
 | `gate`, `files` | **REQUIRED.** Rules below. The tool refuses a call without them. |
-| `estimateMinutes` | Omit. Pass one only for a run that legitimately needs more than the 45-minute kill-budget floor. |
+| `estimateMinutes` | Omit (a persona's `defaultEstimateMinutes` applies). Pass one only for a run needing more than the 45-minute floor. |
 | `sourcePromptId` | Always `<epic-id>`. Never rely on the server's fallback. |
 | `cwd` | The Epic's project root, as an absolute path or `~/…`. The API always uses the Epic's project, whatever you pass. To work in another project, open an Epic there. |
 | `dependsOn` | Slugs that must finish first. The only ordering tool. |
@@ -191,8 +192,8 @@ the API rejects that.
 1. 1–50 repo-relative paths. A folder ends with `/`.
 2. No absolute paths, no `~` at the start, no `..` or `.` segments, no `*` or `?`, no `\` or
    backticks, no leading `-`. Use `/` between folders.
-3. PRDs that can run at the same time must not share a file. If two PRDs touch the same file,
-   chain them with `dependsOn`.
+3. The scheduler never runs two PRDs with overlapping files at once (held as `files-overlap`);
+   `dependsOn` is for real output or order dependencies only.
 
 ### What a headless run cannot do
 
@@ -228,7 +229,7 @@ End every plan with exactly one validate PRD:
    itself, and a REFUTED PRD is still a successful validation.
 
 The validator prints `VALIDATION: <slug> VERIFIED` or `VALIDATION: <slug> REFUTED — <reason>`
-per PRD. Queue the validate PRD last: `dependsOn` accepts only slugs that already exist. The
+per PRD. Queue the validate PRD in the same `scheduler_create_prds` call as the plan (its `dependsOn` may name that call's entries); with single creates it goes last: in a single `scheduler_create_prd`, `dependsOn` accepts only slugs that already exist. The
 scheduler sends no per-PRD validation prompt. When the Epic has no pending or running PRD for
 `SM_EPIC_SETTLE_SECONDS` (default 120), it queues one `validate-sweep-*` validator for completed
 PRDs no validator checked, then sends one PLAN SETTLED digest. Several validators in one Epic
@@ -263,8 +264,8 @@ Rules:
          reports it, and the fix wave covers it.
       2. Its spec is wrong: fix it with `scheduler_update_prd`, then call `scheduler_reset_job`
          (add `force: true` if it is skipped). Always edit first. Why: a reset job can start on
-         the next tick. The tool does not check the new body, so copy the `# Gate` and
-         `# Files` sections unchanged unless they are what is wrong.
+         the next tick. Fix `gate`, `files` and `acceptanceCriteria` through their validated,
+         re-rendered fields; use a full body replacement only for prose.
       3. Its spec is right: call `scheduler_reset_job` (add `force: true` if it is skipped).
       4. Another PRD or a human already did the work: confirm it in the tree, then call
          `scheduler_archive_prd`. Archiving marks it completed and frees the PRDs that depend on

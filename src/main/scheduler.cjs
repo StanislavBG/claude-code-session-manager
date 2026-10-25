@@ -8944,15 +8944,23 @@ async function runGateShadow(job) {
     } catch { ancestorOk = false; }
     const memo = job.gateShadow?.baseline;
     let baseOutcome = memo && memo.head === headBefore && memo.outcome ? memo.outcome : null;
+    let baseSetup = baseOutcome ? (memo.setup ?? null) : null;
     if (!baseOutcome) {
       const scratch = path.join(os.tmpdir(), `sm-baseline-gate-${process.pid}-${Date.now()}`);
       let added = false;
       try {
         await execGitAt(job.cwd, ['worktree', 'add', '--detach', scratch, job.guardHeadBefore], { timeout: 120_000 });
         added = true;
-        await linkDependencyDirs({ mainCwd: job.cwd, worktreeCwd: scratch });
-        const r = await runGateSequence(gate.sequence, { cwd: scratch });
-        baseOutcome = r.status === 'busy' ? { status: 'unavailable', reason: 'busy', results: [] } : r;
+        const deps = await linkDependencyDirs({ mainCwd: job.cwd, worktreeCwd: scratch });
+        baseSetup = deps && deps.setup ? deps.setup : null;
+        if (!isWorktreeSetupSettled(baseSetup)) {
+          // A declared setup that did not pass can leave a broken cache (cold Godot
+          // import); a base gate failing for that reason must not excuse HEAD's failures.
+          baseOutcome = { status: 'unavailable', reason: `base-setup-${baseSetup?.reason ?? 'error'}`, results: [] };
+        } else {
+          const r = await runGateSequence(gate.sequence, { cwd: scratch });
+          baseOutcome = r.status === 'busy' ? { status: 'unavailable', reason: 'busy', results: [] } : r;
+        }
       } catch (e) {
         baseOutcome = { status: 'unavailable', reason: `base-gate-error: ${e && e.message ? e.message : e}`, results: [] };
       } finally {
@@ -8964,7 +8972,7 @@ async function runGateShadow(job) {
       }
     }
     baselineDecision = decideBaselineAuthority({ job, headOutcome: outcome, baseOutcome, evidenceOk, ancestorOk, cleanOk, headStable });
-    gateShadow.baseline = { head: headBefore, base: job.guardHeadBefore, outcome: baseOutcome, ...baselineDecision };
+    gateShadow.baseline = { head: headBefore, base: job.guardHeadBefore, outcome: baseOutcome, setup: baseSetup, ...baselineDecision };
   }
 
   const runId = job.runId || reviewLadder.resolveRunId(job);

@@ -5,7 +5,6 @@ vi.mock('../remoteApi', async () => {
   const actual = await vi.importActual<typeof import('../remoteApi')>('../remoteApi');
   return { ...actual, listProjects: vi.fn() };
 });
-vi.mock('../components/DesktopClientsPanel', () => ({ default: () => <div data-testid="clients" /> }));
 
 import { listProjects, RemoteError } from '../remoteApi';
 import ProjectsScreen from '../components/ProjectsScreen';

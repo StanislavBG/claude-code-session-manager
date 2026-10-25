@@ -21,23 +21,6 @@ export interface OtpResponse {
   code: string;
 }
 
-export interface ClientOtpResponse {
-  code: string;
-}
-
-export interface DesktopClient {
-  clientId: string;
-  email: string;
-  clientName: string | null;
-  issuedAt: string;
-  /** null = never expires (relay keeps tokens until revoked). */
-  expiresAt: string | null;
-}
-
-export interface ClientsResponse {
-  clients: DesktopClient[];
-}
-
 export interface WsTicketResponse {
   ticket: string;
 }

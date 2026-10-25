@@ -4,7 +4,6 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 const { api, tel } = vi.hoisted(() => ({
   api: {
     requestOtp: vi.fn(), revokeDevice: vi.fn(),
-    requestClientOtp: vi.fn(), getClients: vi.fn(), revokeClient: vi.fn(),
   },
   tel: { track: vi.fn(), trackFlow: vi.fn(), trackScreen: vi.fn() },
 }));
@@ -19,14 +18,12 @@ vi.mock('../remoteApi', async () => {
 import { listProjects } from '../remoteApi';
 import { useStore } from '../store';
 import ConnectScreen from '../components/ConnectScreen';
-import DesktopClientsPanel from '../components/DesktopClientsPanel';
 import ProjectsScreen from '../components/ProjectsScreen';
 
 const dev = (deviceId: string, isOnline: boolean, issuedAt: number) => ({ deviceId, isOnline, issuedAt }) as any;
 
 beforeEach(() => {
   vi.clearAllMocks();
-  api.getClients.mockResolvedValue({ clients: [{ clientId: 'c1', email: 'a@b.c', clientName: 'W', issuedAt: '2026-01-01T00:00:00Z', expiresAt: '2026-12-01T00:00:00Z' }] });
   useStore.setState({ devices: [] } as any);
 });
 
@@ -60,13 +57,6 @@ describe('ConnectScreen tracking', () => {
   });
 });
 
-describe('DesktopClientsPanel tracking', () => {
-  it('tags mint and revoke', async () => {
-    render(<DesktopClientsPanel />);
-    expect(screen.getByTestId('desktop-client-mint').getAttribute('data-track')).toBe('desktop-client-mint');
-    expect((await screen.findByTestId('desktop-client-revoke')).getAttribute('data-track')).toBe('desktop-client-revoke');
-  });
-});
 
 describe('ProjectsScreen tracking', () => {
   const socket = { sendCommand: vi.fn() } as any;

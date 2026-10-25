@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { listProjects } from '../remoteApi';
 import type { RemoteProject } from '../types';
 import type { RelaySocket } from '../ws';
-import DesktopClientsPanel from './DesktopClientsPanel';
 
 type State =
   | { status: 'loading' }
@@ -93,7 +92,6 @@ export default function ProjectsScreen({
           ))}
         </div>
       )}
-      <DesktopClientsPanel />
     </div>
   );
 }

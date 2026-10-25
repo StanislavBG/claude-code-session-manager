@@ -35,10 +35,13 @@ Phone → desktop commands over the relay (stateless; drill down projects → se
 - `cmd:session:prds` — PRDs attached to a session.
 - `cmd:session:options` — agents, tags, macros, and the `macroInputs` capability flag.
 - `cmd:session:create` — start a session; optional `macroId` + `inputs`, the desktop renders the macro's `{{name}}` placeholders.
+- `cmd:app:info` — SAS-gated; version, platform, hostname (names desktops in the switcher).
 - `cmd:chat:send` — send a prompt; target = epicId or main tab id.
 - `cmd:session:subscribe` — stream live updates for one session.
 - `event:remote:ready` — desktop → phone: bridge is up, commands accepted.
 - `e2e:rekey` — desktop → phone (plaintext): drop the session key and re-send `e2e:hello`; pinned phones re-authenticate without SAS.
+
+A signed-in browser can drive any paired desktop, chosen in the header switcher (`src/devices.ts`).
 
 ## Who consumes this
 

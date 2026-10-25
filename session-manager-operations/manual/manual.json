@@ -88,7 +88,7 @@
     {
       "slug": "cockpit-tour",
       "title": "Around the cockpit — Home, memory, usage, history and more",
-      "blurb": "A guided walk through the rest of the app: dashboards, memory, usage meters, cost history, voice input, remote machines and publishing.",
+      "blurb": "A guided walk through the rest of the app: dashboards, memory, usage meters, cost history, voice input, the web remote and publishing.",
       "part": "Make it yours",
       "free": true,
       "file": "cockpit-tour.html"

@@ -108,39 +108,31 @@ dismiss the first-run notice with its own "Turn off" button. Running Session Man
 or a scheduled job instead? Set the environment variable <code>SM_TELEMETRY=0</code>, and it
 overrides everything else, every time.</p>
 
-<h2>Remote machines: drive another computer</h2>
+<h2>The web remote: drive all your computers</h2>
 
-<p>Session Manager can run on a second computer, such as a Windows PC at home, while you work
-from this one. You pair the two once. After that, this app can open a terminal on the other
-machine and send messages to its sessions. Everything travels through the bilko.run relay,
-scrambled so that only your two computers can read it.</p>
-
-<p>Pairing has two sides. The machine you want to drive is the <strong>host</strong>. The machine
-you sit at is the <strong>client</strong>. Do the host first.</p>
+<p>You can work with Session Manager from a phone or any browser, and you can pair several
+computers to it, such as your laptop and a Windows PC at home. Each computer is paired once. After
+that, you pick which one to drive from the header of the web app. Everything travels through the
+bilko.run relay, scrambled so that only your browser and your computer can read it.</p>
 
 <ol class="manual-steps">
-  <li>On the host, install and open Session Manager. Go to Settings, then Phone remote, and turn
-  on <strong>Allow remote control from the web</strong>.</li>
-  <li>To let the other machine type commands, such as running <code>hostname</code> in a
-  terminal, also turn on <strong>Allow command writes</strong>. Leave it off if you only want to
-  watch.</li>
+  <li>On the computer, install and open Session Manager. Go to Settings, then Phone remote, and
+  turn on <strong>Allow remote control from the web</strong>.</li>
+  <li>To let the browser type commands, such as running <code>hostname</code> in a terminal, also
+  turn on <strong>Allow command writes</strong>. Leave it off if you only want to watch.</li>
   <li>On any phone or browser, open <code>bilko.run/projects/session-manager</code> and sign in.
-  Tap <strong>Generate pairing code</strong>. Back on the host, choose <strong>Pair
+  Tap <strong>Generate pairing code</strong>. Back on the computer, choose <strong>Pair
   Device…</strong> and enter the 8-character code.</li>
-  <li>On the same page, open <strong>Desktop clients</strong> and tap <strong>Pair a
-  desktop</strong>. It shows a second 8-character code for your client machine.</li>
-  <li>On the client, open Settings, then Phone remote, and find <strong>Remote machines</strong>.
-  Enter that code and press <strong>Pair</strong>, then <strong>Find my devices</strong>. Name
-  the host and press <strong>Add</strong>.</li>
-  <li>Press <strong>Connect</strong>. Both machines show a short numeric code. If the two codes
-  match, confirm on each side. If they differ, stop and revoke the machine.</li>
-  <li>Press <strong>Open Remote view</strong> to pick the machine, browse its sessions, or open a
-  terminal on it.</li>
+  <li>The first time a browser connects to a computer, the web app waits for you to confirm a
+  6-digit code on that computer (Settings, then Phone remote). Confirm it once per browser, per
+  computer.</li>
+  <li>To add another computer, repeat steps 1 to 4 on it. To switch, use the computer switcher in
+  the web app header and pick an online computer.</li>
 </ol>
 
-<aside class="manual-note"><strong>Good to know:</strong> the matching-codes check is what stops
-anyone in the middle from posing as your machine. A paired machine can be removed at any time with
-<strong>Revoke</strong>, and the host's command-write switch can be turned off whenever you like.</aside>
+<aside class="manual-note"><strong>Good to know:</strong> the 6-digit code check is what stops
+anyone in the middle from posing as your computer. A paired computer can be forgotten from the web
+app at any time, and its command-write switch can be turned off whenever you like.</aside>
 
 <div class="manual-takeaways">
   <h2>What you learned</h2>
@@ -155,7 +147,7 @@ anyone in the middle from posing as your machine. A paired machine can be remove
     <li>Voice lets you talk to your agents, the recording indicator always tells you when it's
     listening, and telemetry is anonymous, on by default, and one setting — or
     <code>SM_TELEMETRY=0</code> — away from off.</li>
-    <li>Remote machines let one Session Manager drive another over the relay; pair once, confirm the matching codes, then use the Remote view.</li>
+    <li>The web remote lets a phone or browser drive every computer you pair; pair each once, confirm the 6-digit code, then switch from the header.</li>
   </ul>
 </div>
 

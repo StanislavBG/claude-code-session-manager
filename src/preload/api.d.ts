@@ -1675,43 +1675,6 @@ export interface WebRemoteDevice {
   lastConnectedAt: string | null;
 }
 
-export interface RemoteMachinePeer {
-  peerId: string;
-  deviceId: string;
-  machineName: string;
-  pairedAt: string;
-  clientPublicKey: string;
-  verifiedDevicePubKey: string | null;
-  /** process.platform of the remote machine, last known (null until first authenticated). */
-  os: string | null;
-  status: string;
-  reason: string | null;
-  sas: string | null;
-}
-
-export interface RemoteClientDevice {
-  deviceId: string;
-  email: string;
-  issuedAt: string;
-  /** null = never expires (relay keeps tokens until revoked). */
-  expiresAt: string | null;
-  isOnline: boolean;
-  devicePubKey: string;
-}
-
-export interface RemoteClientStatus {
-  peerId: string;
-  status: string;
-  reason: string | null;
-  sas: string | null;
-}
-
-export interface RemoteClientEvent {
-  peerId: string;
-  type: string;
-  payload: unknown;
-}
-
 export interface WebRemoteStatus {
   enabled: boolean;
   remoteControlEnabled: boolean;
@@ -2245,20 +2208,6 @@ export interface SessionManagerAPI {
      *  Same 5s cache as status(). Designed for a file-tree sidebar where the
      *  renderer needs per-row badges without a separate git call per file. */
     fileStatus: (cwd: string) => Promise<GitFileStatusMap>;
-  };
-  remoteClient: {
-    list: () => Promise<RemoteMachinePeer[]>;
-    connect: (peerId: string) => Promise<{ status: string; reason: string | null; sas: string | null }>;
-    confirmSas: (peerId: string) => Promise<{ ok: boolean; reason?: string }>;
-    remove: (peerId: string) => Promise<{ ok: boolean }>;
-    authStatus: () => Promise<{ paired: boolean; clientId: string | null }>;
-    pair: (code: string, clientName?: string) => Promise<{ ok: boolean; clientId?: string; error?: string }>;
-    unpair: () => Promise<{ ok: boolean }>;
-    devices: () => Promise<{ ok: boolean; devices?: RemoteClientDevice[]; error?: string }>;
-    add: (deviceId: string, machineName: string) => Promise<RemoteMachinePeer>;
-    send: (peerId: string, type: string, payload?: unknown) => Promise<unknown>;
-    onStatus: (handler: (status: RemoteClientStatus) => void) => () => void;
-    onEvent: (handler: (ev: RemoteClientEvent) => void) => () => void;
   };
   updater: {
     status: () => Promise<AutoUpdaterStatus>;

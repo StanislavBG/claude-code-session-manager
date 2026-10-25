@@ -122,7 +122,6 @@ const heapSnapshot = require('./heapSnapshot.cjs');
 const filesIpc = require('./files.cjs');
 const { registerDocEditHandlers, attachWindow: attachDocEditWindow } = require('./docEdit.cjs');
 const webRemote = require('./webRemote.cjs');
-const { registerRemoteClientHandlers } = require('./remoteClientIpc.cjs');
 const { registerAgentsHandlers } = require('./agentsIpc.cjs');
 const { registerTelemetryHandlers } = require('./telemetryIpc.cjs');
 const { registerUpdaterIpc } = require('./updaterIpc.cjs');
@@ -1053,7 +1052,6 @@ git.register(ipcMain);
 filesIpc.registerFilesHandlers();
 registerDocEditHandlers();
 webRemote.registerRemoteHandlers();
-registerRemoteClientHandlers(() => mainWindow);
 registerAgentsHandlers({ ipcMain, getWindow: () => mainWindow });
 try {
   registerUpdaterIpc({ ipcMain, getWindow: () => mainWindow, ptyManager });

@@ -16,6 +16,7 @@ const { DEFAULT_PROJECT_CWD } = require('../lib/scheduler/schedulerBatch.cjs');
 const { resolvePrdsDirs, resolveArchivedPrdsDirs, resolvePrdWriteDir, listEpicPrdDirs, resolveEpicPrdWriteDir, isSafeEpicId, listArchivedPrdDirs, ancestorEpicPrdDirs, ancestorEpicArchivedPrdDirs } = require('../lib/prd/prdLocations.cjs');
 const { migratePrds, consolidateFlatPrds, legacyAdoptExistingPrds } = require('../lib/prd/prdMigration.cjs');
 const { opsPath } = require('../lib/opsOwnership.cjs');
+const { bareSlug, resolveDepSlug } = require('../lib/prd/depSlugResolve.cjs');
 const { allProjectCwds, projectRootOf } = require('../lib/activeSessions.cjs');
 
 /**
@@ -269,6 +270,50 @@ async function safeSlugPath(slug) {
 }
 
 /**
+ * Resolve a BARE slug (no `NN-` prefix) to the unique NN-prefixed PRD file —
+ * for a caller whose create response was lost and never learned the NN.
+ * Scans the live PRD dirs, the archive dirs, and one level of
+ * `prds-archived/<ts>/`, matching with depSlugResolve's rule. `cwd` narrows to
+ * one project; omitted, it searches every candidate dir. Returns
+ * `{ ok: true, path, dir }`, `{ ok: false, reason: 'not-found' }`, or
+ * `{ ok: false, reason: 'ambiguous', files, error }` (never guesses).
+ */
+async function resolveBareSlugFile(slug, cwd) {
+  if (typeof slug !== 'string' || !slug || bareSlug(slug) !== slug) return { ok: false, reason: 'not-found' };
+  const live = cwd ? [module.exports.prdDirForCwd(cwd), ...listEpicPrdDirs(cwd)] : module.exports.candidatePrdsDirs();
+  const archived = cwd ? listArchivedPrdDirs(cwd) : module.exports.candidateArchivedPrdsDirs();
+  const dirs = [...live];
+  for (const a of archived) {
+    dirs.push(a);
+    const subs = await fsp.readdir(a, { withFileTypes: true }).catch(() => []);
+    for (const ent of subs) if (ent.isDirectory()) dirs.push(path.join(a, ent.name));
+  }
+  const found = []; // { slug, dir, file }
+  const seen = new Set();
+  for (const dir of dirs) {
+    const names = await fsp.readdir(dir).catch(() => []);
+    for (const n of names) {
+      if (!n.endsWith('.md')) continue;
+      const file = path.join(dir, n);
+      if (seen.has(file)) continue;
+      seen.add(file);
+      found.push({ slug: n.slice(0, -3), dir, file });
+    }
+  }
+  const matched = new Set(resolveDepSlug(slug, found.map((f) => f.slug)));
+  const hits = found.filter((f) => matched.has(f.slug));
+  if (hits.length === 0) return { ok: false, reason: 'not-found' };
+  if (hits.length > 1) {
+    const files = hits.map((h) => h.file);
+    return { ok: false, reason: 'ambiguous', files, error: `ambiguous slug "${slug}": matches ${files.join(' and ')} — use the full NN-prefixed slug` };
+  }
+  const only = hits[0];
+  const safe = module.exports.safeSlugPathIn(only.dir, only.slug);
+  if (!safe) return { ok: false, reason: 'not-found' };
+  return { ok: true, path: safe, dir: only.dir };
+}
+
+/**
  * The two distinct failure modes safeSlugPath collapses into one nullable
  * return (the defect this fixes — see the PRD that added this helper's
  * Goal): a slug that fails SCHEDULE_SLUG_RE is a caller mistake ("invalid
@@ -291,10 +336,10 @@ async function resolveSlugOrReason(slug, cwd) {
         return { ok: true, path: p };
       } catch { /* not in this dir — try the next candidate */ }
     }
-    return { ok: false, reason: 'not-found' };
+    return module.exports.resolveBareSlugFile(slug, cwd);
   }
   const dir = await module.exports.findPrdDir(slug);
-  if (!dir) return { ok: false, reason: 'not-found' };
+  if (!dir) return module.exports.resolveBareSlugFile(slug, cwd);
   const p = module.exports.safeSlugPathIn(dir, slug);
   if (!p) return { ok: false, reason: 'not-found' };
   return { ok: true, path: p };
@@ -522,6 +567,7 @@ module.exports = {
   safeSlugPathIn,
   realPrdsDir,
   safeSlugPath,
+  resolveBareSlugFile,
   resolveSlugOrReason,
   jobMatchesSlugAndCwd,
   unknownSlugMessage,

@@ -107,6 +107,8 @@ const { appendResponseEventIfKnown, appendResponseEventWithReason } = require('.
 const { buildReviewNotice, selectDueReviewNotices, formatReviewNotice, holdMsFromEnv } = require('./lib/scheduler/reviewNotice.cjs');
 const epicValidationHook = require('./lib/epic/epicValidationHook.cjs');
 const prdCreate = require('./lib/prd/prdCreate.cjs');
+const { resolveProjectContext } = require('./lib/projectRootResolve.cjs');
+const { expandHome } = require('./lib/util/expandHome.cjs');
 const { parseValidationSentinels } = require('./lib/scheduler/validationSentinels.cjs');
 const { hasDownstreamValidator } = require('./lib/prd/planValidator.cjs');
 const promptSessionTranscript = require('./promptSessionTranscript.cjs');
@@ -10358,12 +10360,20 @@ function toCompactPrdEntry(entry) {
  * `schedule:list-prds` IPC handler and the admin HTTP `GET
  * /admin/scheduler/prds` route (PRD 1024) — neither re-implements this scan.
  */
-async function listPrdsInternal({ cwd } = {}) {
+function normalizeListCwd(cwd) {
+  if (typeof cwd !== 'string' || cwd.length === 0) return cwd;
+  // Same normalization createPrd applies to frontmatter cwd: tilde expansion,
+  // trailing-slash strip, Epic-worktree path -> main checkout.
+  return resolveProjectContext({ cwd: expandHome(cwd) }).cwd || cwd;
+}
+
+async function listPrdsInternal({ cwd: rawCwd } = {}) {
   ensureDirs();
+  const cwd = normalizeListCwd(rawCwd);
   const out = [];
   const seenSlugs = new Set();
 
-  async function readDirInto(dir, { archived }) {
+  async function readDirInto(dir, { archived, nested = false }) {
     let entries;
     try {
       entries = await fsp.readdir(dir);
@@ -10373,9 +10383,20 @@ async function listPrdsInternal({ cwd } = {}) {
       }
       return;
     }
-    for (const name of entries) {
-      if (!name.endsWith('.md') || name.startsWith('.')) continue;
-      const filePath = path.join(dir, name);
+    const files = entries.filter((n) => n.endsWith('.md') && !n.startsWith('.')).map((n) => path.join(dir, n));
+    if (archived && !nested) {
+      // prds-archived/<ISO-ts>/*.md — exactly one level down (mirrors
+      // budget.cjs computeDepHistorySatisfaction); never recurse further.
+      for (const name of entries) {
+        if (name.endsWith('.md') || name.startsWith('.')) continue;
+        const sub = path.join(dir, name);
+        let st;
+        try { st = await fsp.lstat(sub); } catch { continue; }
+        if (st.isDirectory()) await readDirInto(sub, { archived, nested: true });
+      }
+    }
+    for (const filePath of files) {
+      const name = path.basename(filePath);
       try {
         const parsed = await parsePrd(filePath);
         // A slug can't be both live and archived at once, but a duplicate
@@ -10667,9 +10688,10 @@ const remote = {
   // paging by offset can't skip or duplicate an entry between requests as
   // long as the underlying PRD set doesn't change mid-page.
   async listPrds(filter = {}) {
-    const all = await listPrdsInternal({ cwd: filter.cwd });
+    const filterCwd = normalizeListCwd(filter.cwd);
+    const all = await listPrdsInternal({ cwd: filterCwd });
     const filtered = all.filter((entry) => {
-      if (filter.cwd && entry.cwd !== filter.cwd) return false;
+      if (filterCwd && entry.cwd !== filterCwd) return false;
       if (filter.epicId && entry.epicId !== filter.epicId) return false;
       if (filter.status && entry.status !== filter.status) return false;
       return true;

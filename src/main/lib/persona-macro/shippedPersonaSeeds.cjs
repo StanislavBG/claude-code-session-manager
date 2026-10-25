@@ -136,7 +136,7 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
       },
     },
     {
-      commit: "wip-executor-only",
+      commit: "9e400786",
       bodySha256: "82b93c1da9a5e3b7dfcfadd1b4689d988a4bd19de2d897ebd3f3158969d741fc",
       fm: {
         description: "Executes exactly one already-scoped PRD at a time, headless, start to finish — reads the PRD's Goal/Acceptance Criteria/Implementation notes and standards.md, implements it, verifies against its own AC, and reports. Has no visibility into the overall plan — that's architect's job. This is the default persona a scheduled PRD runs as: the scheduler resolves a PRD's `agentType` frontmatter field (default `dev-lead`) to this file and launches the headless executor AS this persona via `--append-system-prompt`.",
@@ -241,7 +241,7 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
       },
     },
     {
-      commit: "wip-executor-only",
+      commit: "9e400786",
       bodySha256: "ca159cd47ac4b618af842c6ccd59107fac4a34b0efcfa5dfe7d06875736156ed",
       fm: {
         description: "Validates a finished PLAN (the PRDs its validate PRD lists) once, after its last PRD lands — re-runs each PRD's gate, checks every acceptance criterion against the real tree, reviews the plan's combined diff, and reports one VERIFIED/REFUTED verdict per PRD via sentinel lines. Runs headless as a scheduled PRD (agentType: validator); never edits product code and never queues work.",

@@ -83,6 +83,36 @@ const FIXTURES = {
       '',
     ].join('\n'),
   },
+  'src/main/__tests__/doc-guard.test.cjs': {
+    smells: [],
+    text: [
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "import { describe, it, expect } from 'vitest';",
+      "const doc = fs.readFileSync(path.join(__dirname, '..', 'templates', 'X.md'), 'utf8');",
+      "describe('doc', () => {",
+      "  it('a', () => { expect(doc).toMatch(/foo/); });",
+      "  it('b', () => { expect(doc.includes('bar')).toBe(true); });",
+      "  it('c', () => { expect(doc.length).toBeGreaterThan(0); });",
+      '});',
+      '',
+    ].join('\n'),
+  },
+  'src/main/__tests__/code-guard.test.cjs': {
+    smells: ['source-text'],
+    text: [
+      "const fs = require('node:fs');",
+      "const path = require('node:path');",
+      "import { describe, it, expect } from 'vitest';",
+      "const code = fs.readFileSync(path.join(__dirname, '..', 'templates', 'x.cjs'), 'utf8');",
+      "describe('code', () => {",
+      "  it('a', () => { expect(code).toMatch(/foo/); });",
+      "  it('b', () => { expect(code.includes('bar')).toBe(true); });",
+      "  it('c', () => { expect(code.length).toBeGreaterThan(0); });",
+      '});',
+      '',
+    ].join('\n'),
+  },
 };
 
 describe('smells scanner', () => {

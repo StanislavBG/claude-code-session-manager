@@ -138,6 +138,8 @@ function makePathEvaluator(relPath, decls) {
 function isProdPath(p) {
   if (p == null) return false;
   const norm = normRel(p);
+  // Prose docs are not production code: a doc drift guard is not a source-text smell.
+  if (/\.md$/i.test(norm)) return false;
   const segs = norm.split('/');
   if (segs[0] === '..' || !PROD_DIRS.has(segs[0]) || segs.length < 2) return false;
   return !segs.includes('__tests__') && !segs.includes('fixtures');

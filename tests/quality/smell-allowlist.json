@@ -4,7 +4,6 @@
     "src/main/__tests__/procname-sm-processes.test.cjs",
     "src/main/__tests__/scheduleJobTransitionsGrep.test.cjs",
     "src/main/__tests__/scheduler-killtree-adoption.test.cjs",
-    "src/main/__tests__/seedAgentPersonas.test.cjs",
     "src/main/__tests__/workTypeLibrary.test.cjs",
     "src/main/lib/epic/__tests__/delegationReadiness.test.cjs",
     "tests/unit/atomic-write.spec.ts"

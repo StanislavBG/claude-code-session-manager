@@ -237,7 +237,10 @@ async function createPrd(input, remote) {
   }
 }
 
-async function createPrdInner(input, remote, ctl) {
+async function createPrdInner(input, remote, ctl, opts = {}) {
+  // opts.dryRun: run every check, allocate/write nothing, return the prepared
+  // entry (createPrdBatch's validate phase). opts.extraDepSlugs: bare slugs of
+  // sibling batch entries, accepted as dependsOn targets.
   // cwd is untrusted AND, since this PRD, optional — a caller inside an
   // Epic's git worktree naturally passes its worktree pwd (or omits cwd
   // entirely and relies on originClaudeSessionId/sourcePromptId). Resolve the
@@ -464,15 +467,17 @@ async function createPrdInner(input, remote, ctl) {
   // Refused before NN allocation so it burns no number. Fix plans are exempt.
   if (input.sourcePromptId && !isFixPlanSlug(`0-${slug}`)) {
     const inFlightKey = `${input.sourcePromptId}\u0000${slug}`;
-    if (inFlightCreates.has(inFlightKey)) {
+    if (!opts.dryRun && inFlightCreates.has(inFlightKey)) {
       return {
         ok: false, applied: false,
         status: 409,
         error: `A create for slug "${slug}" in this Epic is still in progress — wait for it to finish, then retry the same call`,
       };
     }
-    inFlightCreates.add(inFlightKey);
-    ctl.key = inFlightKey;
+    if (!opts.dryRun) {
+      inFlightCreates.add(inFlightKey);
+      ctl.key = inFlightKey;
+    }
     let epicDirs = [];
     try {
       const prdsDir = resolveEpicPrdWriteDir(cwd, input.sourcePromptId);
@@ -516,7 +521,8 @@ async function createPrdInner(input, remote, ctl) {
     }
   }
 
-  const nn = await remote.allocateParallelGroup(input.cwd);
+  // Dry run burns no number: a placeholder keeps the filename-shaped guards below meaningful.
+  const nn = opts.dryRun ? 9999999 : await remote.allocateParallelGroup(input.cwd);
   const filenameSlug = `${nn}-${slug}`;
 
   // Fix-chain depth guard (PRD 1113): refuse a fix-of-a-fix before it's ever
@@ -565,7 +571,7 @@ async function createPrdInner(input, remote, ctl) {
   // no existence guard (by design, it doubles as the edit-in-place
   // path for Scheduler UI PRD edits), so "create" must not silently
   // clobber an existing job's PRD.
-  const existing = await remote.readPrd(filenameSlug, input.cwd);
+  const existing = opts.dryRun ? null : await remote.readPrd(filenameSlug, input.cwd);
   if (existing?.ok) {
     return { ok: false, applied: false, status: 409, error: `PRD already exists: ${filenameSlug}.md` };
   }
@@ -604,7 +610,7 @@ async function createPrdInner(input, remote, ctl) {
     }
     if (listing) {
       depRows = listing.prds ?? [];
-      const candidateSlugs = depRows.map((p) => p.slug);
+      const candidateSlugs = [...depRows.map((p) => p.slug), ...(opts.extraDepSlugs ?? [])];
       for (const dep of input.dependsOn) {
         if (resolveDepSlug(dep, candidateSlugs).length > 0) continue;
         const near = findNearMatches(dep, candidateSlugs);
@@ -630,6 +636,7 @@ async function createPrdInner(input, remote, ctl) {
       console.warn(`[prdCreate] dependsOn spans plans ${inherited.diverged.join(', ')} — inheriting ${planId} (lowest-numbered dependency)`);
     }
   }
+  const inheritedPlanId = planId;
   if (!planId) planId = mintPlanId();
 
   const body = buildPrdBody({ ...input, planId, gate: gateCommands, files: filesList });
@@ -656,6 +663,13 @@ async function createPrdInner(input, remote, ctl) {
           + 'or files, and call again.',
       };
     }
+  }
+
+  if (opts.dryRun) {
+    return {
+      ok: true, dryRun: true, slug, input, gateCommands, filesList,
+      inheritedPlanId, warnings: [...extraWarnings, ...sizingWarnings(input)],
+    };
   }
 
   const writeResult = await remote.writePrd(filenameSlug, body, input.cwd);
@@ -738,6 +752,128 @@ async function createPrdInner(input, remote, ctl) {
   };
 }
 
+const PRD_BATCH_MAX = 40;
+
+/**
+ * Create several PRDs all-or-nothing. Every entry goes through createPrd's own
+ * validation (dry run: no NN, no file); `dependsOn` may also name other entries
+ * of the batch by bare slug, earlier or later. Only when every entry validates
+ * and the intra-batch graph is acyclic are NNs allocated and files written; a
+ * write failure unlinks what this call already wrote. Allocated NNs are never
+ * reissued (the allocator's high-water only moves up), so a rollback leaves a
+ * gap, not an inconsistency.
+ */
+async function createPrdBatch(inputs, remote, opts = {}) {
+  const fail = (errors) => ({ ok: false, applied: false, errors });
+  if (!Array.isArray(inputs) || inputs.length === 0) return fail([{ index: -1, slug: null, error: 'batch needs at least one entry' }]);
+  if (inputs.length > PRD_BATCH_MAX) return fail([{ index: -1, slug: null, error: `batch has ${inputs.length} entries; the maximum is ${PRD_BATCH_MAX}` }]);
+
+  const envelope = {};
+  for (const k of ['cwd', 'originClaudeSessionId', 'originProjectRoot', 'sourcePromptId']) {
+    if (opts[k] != null) envelope[k] = opts[k];
+  }
+  const entries = inputs.map((e) => ({ ...envelope, ...e }));
+
+  // Pass 1: slugs (cheap, so duplicates / cycles are reported before any I/O).
+  const slugs = entries.map((e) => e.slug || deriveSlugFromTitle(e.title));
+  const errors = [];
+  const firstIndex = new Map();
+  slugs.forEach((s, i) => {
+    if (!s) return;
+    if (firstIndex.has(s)) errors.push({ index: i, slug: s, error: `duplicate slug "${s}" in batch (also entry ${firstIndex.get(s)})` });
+    else firstIndex.set(s, i);
+  });
+  if (errors.length) return fail(errors);
+  const batchSlugs = slugs.filter(Boolean);
+
+  // Pass 2: per-entry validation through createPrd's own checks.
+  const prepared = [];
+  for (let i = 0; i < entries.length; i++) {
+    const r = await createPrdInner(entries[i], remote, { key: null }, { dryRun: true, extraDepSlugs: batchSlugs });
+    if (!r.ok) { errors.push({ index: i, slug: slugs[i] ?? null, error: r.error }); continue; }
+    if (r.alreadyExisted) { errors.push({ index: i, slug: slugs[i], error: `slug "${slugs[i]}" already exists in this Epic as "${r.filename}"` }); continue; }
+    prepared.push(r);
+  }
+  if (errors.length) return fail(errors);
+  const sameTarget = prepared.every((p) => p.input.cwd === prepared[0].input.cwd && (p.input.sourcePromptId ?? null) === (prepared[0].input.sourcePromptId ?? null));
+  if (!sameTarget) return fail([{ index: -1, slug: null, error: 'all batch entries must resolve to the same project and Epic' }]);
+
+  // Cycle detection: DFS over intra-batch dependsOn edges (bare-slug match).
+  const edges = prepared.map((p) => (p.input.dependsOn ?? []).filter((d) => firstIndex.has(d)).map((d) => firstIndex.get(d)));
+  const state = new Array(prepared.length).fill(0);
+  let cycle = null;
+  const visit = (n, trail) => {
+    if (cycle) return;
+    state[n] = 1;
+    for (const m of edges[n]) {
+      if (state[m] === 1) { cycle = [...trail.slice(trail.indexOf(m)), n, m].map((x) => slugs[x]); return; }
+      if (state[m] === 0) visit(m, [...trail, n]);
+      if (cycle) return;
+    }
+    state[n] = 2;
+  };
+  for (let i = 0; i < prepared.length && !cycle; i++) if (state[i] === 0) visit(i, []);
+  if (cycle) {
+    const at = firstIndex.get(cycle[0]);
+    return fail([{ index: at, slug: cycle[0], error: `dependsOn cycle inside batch: ${cycle.join(' -> ')}` }]);
+  }
+
+  // One planId for the whole batch unless an entry inherits one from existing deps.
+  const planId = prepared.map((p) => p.inheritedPlanId).find(Boolean) || mintPlanId();
+
+  // Write phase: allocate + write in input order; unlink on any failure.
+  const written = [];
+  const results = [];
+  const rollback = async () => {
+    for (const w of written) {
+      try {
+        if (w.path) await fsp.unlink(w.path);
+        else if (typeof remote.deletePrd === 'function') await remote.deletePrd(w.filenameSlug, w.cwd);
+      } catch (e) { console.warn(`[prdCreate] batch rollback could not remove ${w.filenameSlug}: ${e?.message ?? e}`); }
+    }
+  };
+  for (let i = 0; i < prepared.length; i++) {
+    const p = prepared[i];
+    let nn; let filenameSlug;
+    try {
+      nn = await remote.allocateParallelGroup(p.input.cwd);
+      filenameSlug = `${nn}-${p.slug}`;
+      const body = buildPrdBody({ ...p.input, planId, gate: p.gateCommands, files: p.filesList });
+      const w = await remote.writePrd(filenameSlug, body, p.input.cwd);
+      if (!w?.ok) throw new Error(w?.error ?? 'write failed');
+      written.push({ filenameSlug, path: w.path ?? null, cwd: p.input.cwd });
+      results.push({ slug: p.slug, nn, filename: `${filenameSlug}.md`, warnings: p.warnings });
+    } catch (e) {
+      await rollback();
+      return fail([{ index: i, slug: p.slug, error: `write failed (batch rolled back): ${e?.message ?? e}` }]);
+    }
+  }
+
+  for (let i = 0; i < prepared.length; i++) {
+    const p = prepared[i];
+    appendAuditEvent('prd_create', {
+      cwd: p.input.cwd, slug: `${results[i].nn}-${p.slug}`, title: p.input.title,
+      sourcePromptId: p.input.sourcePromptId ?? null, sourceTabId: p.input.sourceTabId ?? null, batch: true,
+    });
+    telemetryCounters.trackPrdCreate({ agentType: p.input.agentType || DEFAULT_PRD_AGENT_TYPE });
+  }
+
+  // One bounded reconcile after the last write (best-effort, as in createPrd).
+  if (typeof remote.requestReconcile === 'function') {
+    let timer;
+    try {
+      const reconcile = Promise.resolve().then(() => remote.requestReconcile());
+      reconcile.catch((e) => console.warn(`[prdCreate] batch requestReconcile failed (non-fatal): ${e?.message ?? e}`));
+      const bound = new Promise((resolve) => { timer = setTimeout(resolve, 2000); });
+      await Promise.race([reconcile, bound]);
+    } catch (e) {
+      console.warn(`[prdCreate] batch requestReconcile failed (non-fatal): ${e?.message ?? e}`);
+    } finally { clearTimeout(timer); }
+  }
+
+  return { ok: true, applied: true, prds: results };
+}
+
 /**
  * Registers the create-prd admin HTTP route (PRD 689 — moved verbatim out of
  * the former standalone admin HTTP server module's handleRequest, no behavior
@@ -786,6 +922,31 @@ function registerAdminRoute(adminHttp, remote) {
       warnings: result.warnings,
     });
   });
+
+  adminHttp.registerRoute('POST', '/admin/scheduler/create-prds', async (req, res) => {
+    const raw = await readBody(req);
+    let parsed;
+    try {
+      parsed = raw ? JSON.parse(raw) : {};
+    } catch {
+      sendJson(res, 400, { ok: false, applied: false, error: 'invalid JSON body' });
+      return;
+    }
+    let input;
+    try {
+      input = schemas.adminCreatePrds.parse(parsed);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, applied: false, error: 'invalid PRD batch payload', details: e?.issues ?? e?.message });
+      return;
+    }
+    const { prds, ...envelope } = input;
+    const result = await createPrdBatch(prds, remote, envelope);
+    if (!result.ok) {
+      sendJson(res, 400, { ok: false, applied: false, errors: result.errors });
+      return;
+    }
+    sendJson(res, 200, { ok: true, applied: true, prds: result.prds });
+  });
 }
 
 module.exports = {
@@ -796,5 +957,7 @@ module.exports = {
   buildPrdBody,
   resolveSourcePromptIdFromClaudeSession,
   createPrd,
+  createPrdBatch,
+  PRD_BATCH_MAX,
   registerAdminRoute,
 };

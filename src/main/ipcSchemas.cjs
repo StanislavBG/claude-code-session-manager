@@ -450,6 +450,18 @@ const schedulerCreatePrd = z.object({
 // computed target (from the SAME backlog tree the UI renders — see
 // lib/backlogTree.ts); the main-process handler only validates the rewrite
 // is safe (prdDisposition.cjs), never re-derives "the" terminal itself.
+// Batch create (createPrdBatch): up to 40 entries, each the exact single-create
+// shape. Cross-entry rules (cycles, duplicate slugs, dependsOn naming siblings)
+// live in prdCreate.cjs; this only bounds the envelope.
+const PRD_BATCH_MAX = 40;
+const adminCreatePrds = z.object({
+  prds: z.array(schedulerCreatePrd).min(1).max(PRD_BATCH_MAX),
+  cwd: z.string().min(1).max(4096).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
+  originClaudeSessionId: z.string().min(1).max(200).optional(),
+  originProjectRoot: z.string().min(1).max(4096).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
+  sourcePromptId: z.string().min(1).max(128).regex(NO_NEWLINE_RE, 'must not contain newlines').optional(),
+});
+
 const scheduleSetPrdDisposition = z.object({
   slug: z.string().regex(SCHEDULE_SLUG_RE),
   cwd: z.string().min(1).max(4096).optional(),
@@ -1299,6 +1311,7 @@ module.exports = {
     scheduleReadLog,
     scheduleWritePrd,
     schedulerCreatePrd,
+    adminCreatePrds,
     scheduleSetPrdDisposition,
     scheduleArchivePrd,
     scheduleRetagPrd,

@@ -82,6 +82,7 @@ const { detectRateLimitInLog } = require('./lib/claude/rateLimitDetect.cjs');
 const { stripAppOwnedChurn } = require('./lib/scheduler/jobDirtFilter.cjs');
 const { GATE_AUTHORITY_VERDICTS, decideGateAuthority } = require('./lib/scheduler/gateAuthority.cjs');
 const { decideBaselineAuthority } = require('./lib/scheduler/baselineGate.cjs');
+const { formatSetupOutcome: formatWorktreeSetupOutcome, isSetupSettled: isWorktreeSetupSettled } = require('./lib/git/worktreeSetup.cjs');
 const { linkDependencyDirs } = require('./lib/git/worktreeDeps.cjs');
 const { checkMainDependencyHealth, repairMainDependencies } = require('./lib/git/depHealth.cjs');
 // cwd -> last main-checkout dependency repair attempt (ms); caps repair to once per cooldown.
@@ -567,7 +568,7 @@ async function recheckPrdSourceForJob(job) {
  *     fixture that leaked into the live queue and was cleaned up by its own
  *     `finally` block). Retire the row rather than fail it.
  */
-function prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, reason = 'prd-archived') {
+function prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, reason = 'prd-archived', extraMeta = {}) {
   const msg = reason === 'prd-missing'
     ? 'PRD source no longer exists on disk — retiring stale queue entry'
     : (() => {
@@ -579,7 +580,7 @@ function prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd,
   const finishedAt = Date.now();
   config.writeJsonSync(metaPath, {
     slug: job.slug, cwd, sessionId, exitCode: 0, skipped: reason,
-    note: msg, startedAt, finishedAt, durationMs: 0, ...SCHEDULER_META_IDENTITY,
+    note: msg, startedAt, finishedAt, durationMs: 0, ...SCHEDULER_META_IDENTITY, ...extraMeta,
   });
   return { exitCode: 0, durationMs: 0, skipped: reason, note: msg, sessionId };
 }
@@ -4212,13 +4213,14 @@ function ensureTimeoutShimOnce() {
  * Watchdogs are declared as an array; the result-tailer's exit-code mapping
  * (success+killedBySignal → 0) is scheduler-specific and lives in onExit.
  */
-async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget = null, foreignWip = null, launchEnv = null, onPhase = null, reviewInRun = true) {
+async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget = null, foreignWip = null, launchEnv = null, onPhase = null, reviewInRun = true, worktreeSetup = null) {
   // First statement — stamps the 'exec-entered' dispatch-phase breadcrumb
   // before openLog below, so a hang inside openLog/spawn itself still shows
   // execution reached this function (see spawnJob's dispatchPhase comment).
   if (onPhase) await onPhase('exec-entered');
   const logPath = path.join(runDir, `${job.slug}.log`);
   const metaPath = path.join(runDir, `${job.slug}.meta.json`);
+  const setupMeta = worktreeSetup ? { worktreeSetup } : {};
   // `cwd` stays the MAIN tree throughout — PRD lookup (findPrdDir/prdPathForJob)
   // and every git call below key off this value, never the worktree. Only the
   // spawned child's own process cwd (spawnCwd) may point at a job worktree —
@@ -4244,6 +4246,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
 
   safeLog(`[scheduler] starting ${job.slug} at ${new Date().toISOString()}\n[scheduler] cwd=${cwd}` +
     (spawnCwd !== cwd ? ` (running isolated in worktree ${spawnCwd})` : '') + '\n\n');
+  if (worktreeSetup) {
+    try {
+      const setupLines = formatWorktreeSetupOutcome(worktreeSetup);
+      if (setupLines.length) safeLog(setupLines.join('\n') + '\n\n');
+    } catch { /* logging must never break a run */ }
+  }
 
   // Dead-cwd guard: verify the target directory exists and is traversable
   // before handing it to the child process. Checks spawnCwd (where the child
@@ -4256,7 +4264,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // Sync write: this is an early-exit error path inside an async function,
     // so we could await, but using the sync variant keeps the error path
     // ordering identical to the spawn-failed branch below (also sync).
-    config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0, ...SCHEDULER_META_IDENTITY });
+    config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0, ...SCHEDULER_META_IDENTITY, ...setupMeta });
     return { exitCode: -1, durationMs: 0, error: errMsg, sessionId };
   }
 
@@ -4334,12 +4342,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         // real failure. Anything else (malformed/unreadable PRD) is a real
         // failure and keeps exitCode: -1.
         if (await prdPaths.archivedTwinExists(job)) {
-          return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-archived');
+          return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-archived', setupMeta);
         }
         if (e2 && e2.code === 'ENOENT') {
           const rc = await recheckBeforeMissingSkip();
           if (rc && rc !== 'resolved') return rc;
-          if (!rc) return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-missing');
+          if (!rc) return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-missing', setupMeta);
         } else {
           safeLog(`[scheduler] failed to read PRD: ${e2?.message}\n`);
           closeFd();
@@ -4354,12 +4362,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       // than a hard failure. Anything else (a real read/parse error) still
       // fails the job.
       if (await prdPaths.archivedTwinExists(job)) {
-        return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-archived');
+        return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-archived', setupMeta);
       }
       if (e && e.code === 'ENOENT') {
         const rc = await recheckBeforeMissingSkip();
         if (rc && rc !== 'resolved') return rc;
-        if (!rc) return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-missing');
+        if (!rc) return prdArchivedSkipResult(job, cwd, sessionId, startedAt, safeLog, closeFd, metaPath, 'prd-missing', setupMeta);
       } else {
         safeLog(`[scheduler] failed to read PRD: ${e?.message}\n`);
         closeFd();
@@ -4444,7 +4452,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   if (!promptCheck.ok) {
     safeLog(`[scheduler] ${promptCheck.error}\n`);
     closeFd();
-    config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: promptCheck.error, startedAt, finishedAt: Date.now(), durationMs: 0, ...SCHEDULER_META_IDENTITY });
+    config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: promptCheck.error, startedAt, finishedAt: Date.now(), durationMs: 0, ...SCHEDULER_META_IDENTITY, ...setupMeta });
     return { exitCode: -1, durationMs: 0, error: promptCheck.error, sessionId };
   }
 
@@ -4709,7 +4717,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           sl(`\n[scheduler] ${errMsg}\n`);
           // Sync write: inside a Promise executor callback; must flush meta
           // before resolve() so the spawnJob mutate() that follows sees it.
-          config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked, ...SCHEDULER_META_IDENTITY, originSessionId, contextDigestApplied });
+          config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked, ...SCHEDULER_META_IDENTITY, ...setupMeta, originSessionId, contextDigestApplied });
           resolve({ exitCode: -1, durationMs, error: errMsg, leakedDescendants: leaked, sessionId });
           return;
         }
@@ -4771,7 +4779,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked,
           agentResultSubtype, mappedFromSignal: mappedToSuccess ? signal || `code=${exitCode}` : null,
           killedByWatchdog: effectiveKilledByWatchdog, budgetKillReason,
-          ...SCHEDULER_META_IDENTITY,
+          ...SCHEDULER_META_IDENTITY, ...setupMeta,
           originSessionId, contextDigestApplied,
         });
         resolve({
@@ -5969,6 +5977,19 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     const worktree = preflightWorktree;
     if (worktree.ok) {
       console.log(`[scheduler] ${job.slug}: isolated in worktree ${worktree.dir} (branch ${worktree.branch})`);
+      if (worktree.setup && !isWorktreeSetupSettled(worktree.setup)) {
+        try {
+          const cmds = (Array.isArray(worktree.setup.commands) ? worktree.setup.commands : [])
+            .map((c) => `${c && c.cmd}: exit ${c && c.code} in ${(c && c.ms) || 0}ms`);
+          appendError({
+            cwd: job.cwd || defaultCwd,
+            scope: 'scheduler',
+            level: 'warn',
+            message: `${job.slug}: worktree setup did not pass (${worktree.setup.reason})${cmds.length ? ' — ' + cmds.join('; ') : ''}`,
+            meta: { slug: job.slug, cwd: job.cwd || defaultCwd, reason: worktree.setup.reason, commands: (worktree.setup.commands || []).map((c) => ({ cmd: c && c.cmd, code: c && c.code, ms: c && c.ms })) },
+          });
+        } catch { /* durable logging must never break dispatch */ }
+      }
     } else {
       console.log(`[scheduler] ${job.slug}: running in main tree (worktree not used: ${worktree.reason})`);
       // A job losing worktree isolation must never be a silent downgrade
@@ -6074,7 +6095,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
             s.jobs[idx].dispatchPhaseAt = new Date().toISOString();
           }
         });
-      }, reviewInRun);
+      }, reviewInRun, worktree.ok ? worktree.setup : { ran: false, ok: false, reason: 'in-place', waitedMs: 0, ms: 0, commands: [] });
     } finally {
       if (worktree.ok) {
         ({ worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha } =

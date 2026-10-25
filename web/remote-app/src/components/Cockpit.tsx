@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore, type Route } from '../store';
 import type { RelaySocket } from '../ws';
 import type { RemoteProject } from '../types';
@@ -6,6 +6,8 @@ import ProjectsScreen from './ProjectsScreen';
 import SessionsScreen, { type OpenTarget } from './SessionsScreen';
 import SessionScreen from './SessionScreen';
 import { trackScreen } from '../telemetry';
+import { deviceLabel } from '../devices';
+import DevicePicker from './DevicePicker';
 
 interface Props {
   socket: RelaySocket | null;
@@ -26,6 +28,9 @@ export default function Cockpit({ socket, deviceId }: Props) {
   const refreshKey = useStore((s) => s.refreshKey);
   const goSessions = useStore((s) => s.goSessions);
   const goSession = useStore((s) => s.goSession);
+  const activeDeviceId = useStore((s) => s.activeDeviceId);
+  const meta = useStore((s) => (s.activeDeviceId ? s.deviceMeta[s.activeDeviceId] : undefined));
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     window.history.replaceState({ ...(window.history.state ?? {}), smRoute: useStore.getState().route }, '');
@@ -82,12 +87,21 @@ export default function Cockpit({ socket, deviceId }: Props) {
     <div className="flex flex-col h-dvh text-ink">
       <header className="flex items-center gap-3 px-3 pt-[max(0.25rem,env(safe-area-inset-top))] h-[calc(3rem+env(safe-area-inset-top))] border-b border-edge bg-paper flex-shrink-0">
         <span className="flex-1 font-serif text-lg font-semibold truncate">{title}</span>
+        <button
+          onClick={() => setPickerOpen(true)}
+          data-testid="device-switcher"
+          data-track="cockpit-device-switch"
+          className="max-w-[40%] truncate px-2.5 py-1 rounded-full border border-edge text-xs font-mono text-ink-soft hover:text-ink"
+        >
+          {deviceLabel(activeDeviceId ?? deviceId, meta)} ▾
+        </button>
         <span className="inline-flex items-center gap-1.5 text-xs font-mono text-ink-soft" aria-live="polite">
           <span className={`w-2 h-2 rounded-full ${wsConnected ? 'bg-sage rm-pulse' : 'bg-ink-mute'}`} />
           {wsConnected ? 'live' : 'offline'}
         </span>
       </header>
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden">{body}</main>
+      {pickerOpen && <DevicePicker onClose={() => setPickerOpen(false)} />}
     </div>
   );
 }

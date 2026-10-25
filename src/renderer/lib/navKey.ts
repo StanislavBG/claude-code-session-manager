@@ -24,8 +24,6 @@ export type NavKey =
   | 'memory'
   | 'projects'
   | 'history'
-  // Session Managers on the user's other computers (Home face only).
-  | 'remote'
   // One combined screen on both faces — global scheduler policy +
   // session-pool controls (folded in from the former standalone
   // 'sm-config' key) stacked directly above the active project's live PRD

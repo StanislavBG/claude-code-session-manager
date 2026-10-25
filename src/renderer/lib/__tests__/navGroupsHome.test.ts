@@ -21,7 +21,7 @@ describe('getNavItemsForFace', () => {
   const HOME_ONLY = [
     'overview', 'plugins', 'voice', 'agent-library', 'tag-library',
     'system-prompt', 'skills', 'mcp', 'hooks', 'permissions', 'settings',
-    'history', 'data-model', 'remote',
+    'history', 'data-model',
   ]
   const PROJECT_ONLY = ['project-home', 'memory', 'terminal', 'scheduler']
   const BOTH = ['projects']
@@ -166,14 +166,6 @@ describe('memory is project-only', () => {
   it('project face includes memory', () => {
     const keys = getNavItemsForFace('project').map((item) => item.key)
     expect(keys).toContain('memory')
-  })
-})
-
-describe('remote is a home-only Workspace row', () => {
-  it('NAV_ITEMS tags remote with faces: [home] and group Workspace', () => {
-    const item = NAV_ITEMS.find((i) => i.key === 'remote')
-    expect(item?.faces).toEqual(['home'])
-    expect(item?.group).toBe('Workspace')
   })
 })
 

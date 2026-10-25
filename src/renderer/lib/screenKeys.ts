@@ -18,7 +18,6 @@ export const SCREEN_KEYS: NavKey[] = [
   'terminal',
   'scheduler',
   'history',
-  'remote',
   // Configure
   'skills',
   'plugins',

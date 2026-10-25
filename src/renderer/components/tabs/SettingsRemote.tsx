@@ -4,7 +4,6 @@ import { Toggle } from '../ui/Toggle'
 import { Badge } from '../ui/Badge'
 import { AlmanacIcon } from '../layout/AlmanacIcon'
 import { SectionLabel, PillButton, RemoteCard, RevokeButton, SasBanner, EmptyState } from '../remote/remoteUi'
-import { RemoteMachinesSection } from '../remote/RemoteMachinesSection'
 import type { WebRemoteDevice, WebRemoteStatus } from '../../../preload/api'
 
 type PairingStep = 'idle' | 'enter-otp' | 'pairing'
@@ -408,8 +407,6 @@ export function SettingsRemote() {
           </div>
         )}
       </div>
-
-      <RemoteMachinesSection />
 
       <div>
         <SectionLabel right={

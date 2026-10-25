@@ -4609,7 +4609,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // is calibrated against). `quietMachine` jobs and any PRD with an
     // explicit `budgetExempt: true` opt out entirely — logged once here so
     // an unbounded job is never silently unbounded.
-    const jobBudgetMs = budget.computeJobBudgetMs(job.estimateMinutes);
+    const jobBudgetMs = budget.computeJobBudgetMs(
+      job.estimateMinutes ?? resolvePersonaDefaultEstimate(job.cwd, job.agentType || DEFAULT_PRD_AGENT_TYPE));
     const budgetExempt = budget.isJobBudgetExempt(job);
     if (budgetExempt) {
       safeLog(`[scheduler] wall-clock budget watchdog EXEMPT for ${job.slug} ` +

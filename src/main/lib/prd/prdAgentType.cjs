@@ -15,6 +15,8 @@
 
 const { personaFileExists, resolvePersonaPaths } = require('../epic/epicMint.cjs');
 const { listPersonas } = require('../../agentLibrary.cjs');
+const { splitFrontmatter } = require('./prdFrontmatter.cjs');
+const fs = require('node:fs');
 
 /** PRD execution's documented default persona (dev-lead.md's own frontmatter role). */
 const DEFAULT_PRD_AGENT_TYPE = 'dev-lead';
@@ -77,8 +79,34 @@ async function assertAgentTypeWritable(cwd, agentType, deps = {}) {
   );
 }
 
+/**
+ * resolvePersonaDefaultEstimate(cwd, agentType, deps) — the persona's
+ * optional `defaultEstimateMinutes` frontmatter (integer 1..60), project
+ * overlay before global. Returns a number or null; never throws (missing,
+ * malformed or out-of-range → null). Uncached sync read: called once per
+ * job spawn.
+ */
+function resolvePersonaDefaultEstimate(cwd, agentType, deps = {}) {
+  try {
+    if (!cwd || typeof agentType !== 'string' || !/^[a-z0-9][a-z0-9-]*$/.test(agentType)) return null;
+    const { projectPath, globalPath } = resolvePersonaPaths(cwd, agentType, deps);
+    for (const file of [projectPath, globalPath]) {
+      let text;
+      try { text = fs.readFileSync(file, 'utf8'); } catch { continue; }
+      const raw = splitFrontmatter(text).fm.defaultEstimateMinutes;
+      if (raw === undefined) continue;
+      const str = String(raw).trim();
+      if (!/^\d+$/.test(str)) continue;
+      const n = Number(str);
+      if (n >= 1 && n <= 60) return n;
+    }
+  } catch { /* never throws */ }
+  return null;
+}
+
 module.exports = {
   DEFAULT_PRD_AGENT_TYPE,
+  resolvePersonaDefaultEstimate,
   assertAgentTypeWritable,
   reportDanglingAgentTypeOnce,
 };

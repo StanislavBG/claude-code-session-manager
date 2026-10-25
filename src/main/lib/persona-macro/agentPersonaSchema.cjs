@@ -58,6 +58,8 @@ const AgentPersonaSaveSchema = z.object({
   tools: z.array(BoundedString),
   model: BoundedString,
   effort: BoundedString.optional(),
+  // Wall-clock budget default for PRDs without estimateMinutes (60 × factor 3 reaches the 180-min ceiling).
+  defaultEstimateMinutes: z.number().int().min(1).max(60).optional(),
   color: BoundedString,
   // A legacy tag value (e.g. the retired 'bilko-host-publisher') must keep
   // loading on an old on-disk persona — dropped silently, never thrown. Any

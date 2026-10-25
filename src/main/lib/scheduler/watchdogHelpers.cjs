@@ -158,6 +158,8 @@ function evaluateDispatchLiveness(entry, now = Date.now(), { deadMs = DEFAULT_DI
 
 const DEFAULT_RELAUNCH_DEBOUNCE_MS = 90_000;
 const DEFAULT_MAX_RELAUNCH_ATTEMPTS = 3;
+// After the fast attempts are spent, keep retrying forever on this bounded backoff.
+const DEFAULT_CAPPED_RETRY_MS = 30 * 60_000;
 
 /**
  * checkAppLiveness(opts?) → { alive: boolean, reason: string }
@@ -188,10 +190,24 @@ function readRelaunchState(statePath = schedulerPaths.watchdogRelaunchStatePath(
     return {
       lastAttemptTs: typeof raw.lastAttemptTs === 'number' ? raw.lastAttemptTs : null,
       attemptCount: typeof raw.attemptCount === 'number' ? raw.attemptCount : 0,
+      lastBackoffLogTs: typeof raw.lastBackoffLogTs === 'number' ? raw.lastBackoffLogTs : null,
     };
   } catch {
-    return { lastAttemptTs: null, attemptCount: 0 };
+    return { lastAttemptTs: null, attemptCount: 0, lastBackoffLogTs: null };
   }
+}
+
+/**
+ * resetRelaunchState — zero the attempt counter. Called by the watchdog on every
+ * fresh, non-degraded heartbeat. Writes only when the state is not already zeroed.
+ */
+function resetRelaunchState({ statePath = schedulerPaths.watchdogRelaunchStatePath() } = {}) {
+  const state = readRelaunchState(statePath);
+  if (state.attemptCount === 0 && state.lastAttemptTs === null && state.lastBackoffLogTs === null) {
+    return { reset: false };
+  }
+  writeRelaunchState(statePath, { lastAttemptTs: null, attemptCount: 0 });
+  return { reset: true };
 }
 
 /** Atomic write via atomicFs.cjs (mirrors config.cjs writeJsonSync). */
@@ -318,14 +334,14 @@ function defaultSpawnRelaunch({
  *
  * Debounced, capped auto-relaunch:
  *   - alive (heartbeat fresh or pid alive)             → no-op, reset attempt state.
- *   - dead + attemptCount already at maxAttempts         → skip, log diagnostic (give up).
+ *   - dead + attemptCount at maxAttempts, last attempt < cappedRetryMs ago
+ *                                                         → skip ('backoff'), one log line per window.
+ *   - dead + attemptCount at maxAttempts, window elapsed  → spawn again (retries forever).
  *   - dead + last attempt < debounceMs ago                → skip (still booting).
  *   - dead + debounce elapsed + under cap               → spawn, bump attemptCount, log.
  *
- * attemptCount only resets to 0 once a fresh heartbeat is observed (i.e. a
- * relaunch actually succeeded), so 3 relaunch attempts that each fail to
- * produce a fresh heartbeat permanently cap further attempts until a human
- * intervenes or the app comes up some other way.
+ * attemptCount resets to 0 when the alive branch here sees a live app, and the
+ * watchdog script also calls resetRelaunchState() on every fresh heartbeat.
  */
 function maybeRelaunchApp({
   heartbeatPath = schedulerPaths.heartbeatPath(),
@@ -334,6 +350,7 @@ function maybeRelaunchApp({
   logPath = schedulerPaths.watchdogRelaunchLogPath(),
   debounceMs = DEFAULT_RELAUNCH_DEBOUNCE_MS,
   maxAttempts = DEFAULT_MAX_RELAUNCH_ATTEMPTS,
+  cappedRetryMs = DEFAULT_CAPPED_RETRY_MS,
   now = Date.now(),
   spawnFn = defaultSpawnRelaunch,
   restartingMarkerPath = schedulerPaths.restartingMarkerPath(),
@@ -342,7 +359,7 @@ function maybeRelaunchApp({
   const state = readRelaunchState(statePath);
 
   if (liveness.alive) {
-    if (state.attemptCount !== 0 || state.lastAttemptTs !== null) {
+    if (state.attemptCount !== 0 || state.lastAttemptTs !== null || state.lastBackoffLogTs !== null) {
       writeRelaunchState(statePath, { lastAttemptTs: null, attemptCount: 0 });
     }
     return { relaunched: false, reason: 'alive', attemptCount: 0 };
@@ -357,14 +374,23 @@ function maybeRelaunchApp({
   }
 
   if (state.attemptCount >= maxAttempts) {
-    logRelaunchLine(
-      logPath,
-      `giving up: ${state.attemptCount} relaunch attempt(s) already made and heartbeat is still stale — manual intervention required`,
-    );
-    return { relaunched: false, reason: 'capped', attemptCount: state.attemptCount };
-  }
-
-  if (state.lastAttemptTs !== null && (now - state.lastAttemptTs) < debounceMs) {
+    const sinceLast = state.lastAttemptTs === null ? Infinity : now - state.lastAttemptTs;
+    if (sinceLast < cappedRetryMs) {
+      const nextRetryInMs = cappedRetryMs - sinceLast;
+      const logged = state.lastBackoffLogTs;
+      if (logged === null || logged < state.lastAttemptTs || now - logged >= cappedRetryMs) {
+        logRelaunchLine(
+          logPath,
+          `backoff: ${state.attemptCount} relaunch attempt(s) made and heartbeat is still stale — next retry in ${Math.ceil(nextRetryInMs / 60_000)} min`,
+        );
+        writeRelaunchState(statePath, {
+          lastAttemptTs: state.lastAttemptTs, attemptCount: state.attemptCount, lastBackoffLogTs: now,
+        });
+      }
+      return { relaunched: false, reason: 'backoff', attemptCount: state.attemptCount, nextRetryInMs };
+    }
+    // Window elapsed: fall through to spawn (skips debounce, which is shorter).
+  } else if (state.lastAttemptTs !== null && (now - state.lastAttemptTs) < debounceMs) {
     return { relaunched: false, reason: 'debounce', attemptCount: state.attemptCount };
   }
 
@@ -376,7 +402,7 @@ function maybeRelaunchApp({
   writeRelaunchState(statePath, { lastAttemptTs: now, attemptCount });
   logRelaunchLine(
     logPath,
-    `relaunch attempt ${attemptCount}/${maxAttempts}: spawning ${how} (heartbeat stale, last-known pid dead)`,
+    `relaunch attempt ${attemptCount}${attemptCount > maxAttempts ? ' (backoff retry)' : `/${maxAttempts}`}: spawning ${how} (heartbeat stale, last-known pid dead)`,
   );
   return { relaunched: true, reason: 'launched', attemptCount };
 }
@@ -525,6 +551,7 @@ module.exports = {
   releaseLock,
   checkAppLiveness,
   readRelaunchState,
+  resetRelaunchState,
   writeRelaunchState,
   defaultSpawnRelaunch,
   relaunchInvocation,
@@ -538,6 +565,7 @@ module.exports = {
   DEFAULT_FINALIZE_BUDGET_MS,
   DEFAULT_RELAUNCH_DEBOUNCE_MS,
   DEFAULT_MAX_RELAUNCH_ATTEMPTS,
+  DEFAULT_CAPPED_RETRY_MS,
 };
 
 // Lazy default-path getters (SM_SCHEDULER_HOME resolved at read, never at require).

@@ -12,6 +12,8 @@ const {
   evaluateDispatchLiveness,
   readLastHeartbeat,
   readRelaunchState,
+  resetRelaunchState,
+  DEFAULT_CAPPED_RETRY_MS,
   relaunchInvocation,
   defaultSpawnRelaunch,
   DEFAULT_MAX_RELAUNCH_ATTEMPTS,
@@ -130,7 +132,7 @@ test('stale heartbeat but debounce window not elapsed → no relaunch', () => {
   }
 });
 
-test('3 failed attempts → stops attempting and logs, no 4th attempt', () => {
+test('3 failed attempts → backoff, no 4th attempt inside the window, one log line per window', () => {
   const dir = tmpDir();
   try {
     const hbPath = path.join(dir, 'heartbeat.log');
@@ -138,31 +140,84 @@ test('3 failed attempts → stops attempting and logs, no 4th attempt', () => {
     const logPath = path.join(dir, 'relaunch.log');
     let now = Date.now();
     writeHeartbeat(hbPath, now - 10 * 60_000, DEAD_PID); // stays stale/dead throughout
+    const base = { heartbeatPath: hbPath, maxAgeMs: 180_000, statePath, logPath, debounceMs: 90_000 };
 
-    let lastResult;
     for (let i = 0; i < DEFAULT_MAX_RELAUNCH_ATTEMPTS; i++) {
       const spawnFn = makeSpawnSpy();
-      lastResult = maybeRelaunchApp({
-        heartbeatPath: hbPath, maxAgeMs: 180_000, statePath, logPath, debounceMs: 90_000, now, spawnFn,
-      });
-      assert.equal(lastResult.relaunched, true, `attempt ${i + 1} should relaunch`);
+      const r = maybeRelaunchApp({ ...base, now, spawnFn });
+      assert.equal(r.relaunched, true, `attempt ${i + 1} should relaunch`);
       assert.equal(spawnFn.calls.length, 1);
-      now += 100_000; // past the 90s debounce for the next tick
+      now += 100_000;
     }
 
-    // 4th tick: capped — must NOT spawn again.
     const spawnFn4 = makeSpawnSpy();
-    const fourth = maybeRelaunchApp({
-      heartbeatPath: hbPath, maxAgeMs: 180_000, statePath, logPath, debounceMs: 90_000, now, spawnFn: spawnFn4,
-    });
-
+    const fourth = maybeRelaunchApp({ ...base, now, spawnFn: spawnFn4 });
     assert.equal(fourth.relaunched, false);
-    assert.equal(fourth.reason, 'capped');
+    assert.equal(fourth.reason, 'backoff');
     assert.equal(spawnFn4.calls.length, 0);
     assert.equal(fourth.attemptCount, DEFAULT_MAX_RELAUNCH_ATTEMPTS);
+    assert.ok(fourth.nextRetryInMs > 0 && fourth.nextRetryInMs <= DEFAULT_CAPPED_RETRY_MS);
 
-    const logContent = fs.readFileSync(logPath, 'utf8');
-    assert.match(logContent, /giving up/i);
+    // More ticks inside the same window: still backoff, log line not repeated.
+    maybeRelaunchApp({ ...base, now: now + 60_000, spawnFn: spawnFn4 });
+    maybeRelaunchApp({ ...base, now: now + 120_000, spawnFn: spawnFn4 });
+    assert.equal(spawnFn4.calls.length, 0);
+    const lines = fs.readFileSync(logPath, 'utf8').split('\n').filter((l) => /backoff:/.test(l));
+    assert.equal(lines.length, 1);
+    assert.doesNotMatch(fs.readFileSync(logPath, 'utf8'), /giving up/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('capped state retries once the backoff window has elapsed', () => {
+  const dir = tmpDir();
+  try {
+    const hbPath = path.join(dir, 'heartbeat.log');
+    const statePath = path.join(dir, 'state.json');
+    const now = Date.now();
+    writeHeartbeat(hbPath, now - 10 * 60_000, DEAD_PID);
+    fs.writeFileSync(statePath, JSON.stringify({ lastAttemptTs: now - DEFAULT_CAPPED_RETRY_MS, attemptCount: 3 }));
+    const spawnFn = makeSpawnSpy();
+    const r = maybeRelaunchApp({ heartbeatPath: hbPath, maxAgeMs: 180_000, statePath, logPath: path.join(dir, 'l.log'), now, spawnFn });
+    assert.equal(r.relaunched, true);
+    assert.equal(r.attemptCount, 4);
+    assert.equal(spawnFn.calls.length, 1);
+    assert.equal(readRelaunchState(statePath).lastAttemptTs, now);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('months-old {attemptCount:3} state re-arms on the first stale tick', () => {
+  const dir = tmpDir();
+  try {
+    const hbPath = path.join(dir, 'heartbeat.log');
+    const statePath = path.join(dir, 'state.json');
+    const now = Date.now();
+    writeHeartbeat(hbPath, now - 10 * 60_000, DEAD_PID);
+    fs.writeFileSync(statePath, JSON.stringify({ lastAttemptTs: now - 90 * 24 * 60 * 60_000, attemptCount: 3 }));
+    const spawnFn = makeSpawnSpy();
+    const r = maybeRelaunchApp({ heartbeatPath: hbPath, maxAgeMs: 180_000, statePath, logPath: path.join(dir, 'l.log'), now, spawnFn });
+    assert.equal(r.relaunched, true);
+    assert.equal(spawnFn.calls.length, 1);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('resetRelaunchState zeroes a stuck state and skips the write when already zeroed', () => {
+  const dir = tmpDir();
+  try {
+    const statePath = path.join(dir, 'state.json');
+    assert.deepEqual(resetRelaunchState({ statePath }), { reset: false });
+    assert.equal(fs.existsSync(statePath), false);
+    fs.writeFileSync(statePath, JSON.stringify({ lastAttemptTs: 123, attemptCount: 3 }));
+    assert.deepEqual(resetRelaunchState({ statePath }), { reset: true });
+    assert.deepEqual(JSON.parse(fs.readFileSync(statePath, 'utf8')), { lastAttemptTs: null, attemptCount: 0 });
+    const mtime = fs.statSync(statePath).mtimeMs;
+    assert.deepEqual(resetRelaunchState({ statePath }), { reset: false });
+    assert.equal(fs.statSync(statePath).mtimeMs, mtime);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -278,16 +333,24 @@ const {
   ALIVE_HEARTBEAT_MS,
 } = require('../../../../scripts/scheduler-watchdog.cjs');
 
-test('capped alerts once, stays quiet until an alive tick re-arms', () => {
-  const capped = { fresh: false, relaunch: { reason: 'capped' } };
-  let s = { alerted: false };
-  const first = nextAlertState(s, capped);
+test('backoff alerts on entry, re-alerts hourly, and a fresh tick re-arms', () => {
+  const t0 = 10_000_000_000;
+  const backoff = { fresh: false, relaunch: { reason: 'backoff' } };
+  const first = nextAlertState({ alerted: false }, { ...backoff, now: t0 });
   assert.equal(first.alert, true);
-  s = first;
-  assert.equal(nextAlertState(s, capped).alert, false);
-  s = nextAlertState(s, { fresh: true });
-  assert.equal(s.alerted, false);
-  assert.equal(nextAlertState(s, capped).alert, true);
+  assert.equal(first.lastAlertTs, t0);
+  const quiet = nextAlertState(first, { ...backoff, now: t0 + 59 * 60_000 });
+  assert.equal(quiet.alert, false);
+  assert.equal(quiet.lastAlertTs, t0);
+  const again = nextAlertState(quiet, { ...backoff, now: t0 + 60 * 60_000 });
+  assert.equal(again.alert, true);
+  assert.equal(again.lastAlertTs, t0 + 60 * 60_000);
+  // legacy 'capped' reason behaves like backoff
+  assert.equal(nextAlertState({ alerted: false }, { fresh: false, relaunch: { reason: 'capped' }, now: t0 }).alert, true);
+  const cleared = nextAlertState(again, { fresh: true, now: t0 + 61 * 60_000 });
+  assert.equal(cleared.alerted, false);
+  assert.equal(cleared.lastAlertTs, undefined);
+  assert.equal(nextAlertState(cleared, { ...backoff, now: t0 + 62 * 60_000 }).alert, true);
 });
 
 test('non-capped stale tick neither alerts nor clears the alerted flag', () => {

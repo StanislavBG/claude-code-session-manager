@@ -33,6 +33,7 @@ const {
   localDateStr,
   maybeFinalizeHistory,
   maybeRelaunchApp,
+  resetRelaunchState,
   DEFAULT_MAX_AGE_MS,
 } = require('../src/main/lib/scheduler/watchdogHelpers.cjs');
 const schedulerPaths = require('../src/main/lib/scheduler/schedulerPaths.cjs');
@@ -60,7 +61,8 @@ function appendLog(entry) {
 const ALIVE_HEARTBEAT_MS = 60 * 60_000;
 const LOG_RETENTION_MS = 14 * 24 * 60 * 60_000;
 const ALERT_TITLE = 'Session Manager scheduler is down';
-const ALERT_BODY = 'Watchdog gave up relaunching the app. Start it manually.';
+const ALERT_BODY = 'Watchdog could not bring the app back; it keeps retrying every 30 min. Start it manually if you can.';
+const REALERT_MS = 60 * 60_000;
 
 function alertStatePath() {
   return path.join(schedulerPaths.watchdogLogsDir(), 'watchdog-state.json');
@@ -110,13 +112,21 @@ function sendDesktopNotification(title, body, platform = process.platform, spawn
 
 /**
  * Pure transition: given this tick's outcome, return the next state and
- * whether to alert. Alerts once on entering capped; an alive tick re-arms.
+ * whether to alert. Alerts on entering backoff and again once the stored
+ * lastAlertTs is >= REALERT_MS old; a fresh tick clears it. A legacy
+ * 'capped' reason is treated like 'backoff'.
  */
-function nextAlertState(state, { fresh, relaunch }) {
+function nextAlertState(state, { fresh, relaunch, now = Date.now() }) {
   const prev = state && state.alerted === true;
+  const lastAlertTs = state && typeof state.lastAlertTs === 'number' ? state.lastAlertTs : null;
   if (fresh) return { alert: false, alerted: false };
-  if (relaunch && relaunch.reason === 'capped') return { alert: !prev, alerted: true };
-  return { alert: false, alerted: prev };
+  if (relaunch && (relaunch.reason === 'backoff' || relaunch.reason === 'capped')) {
+    const due = !prev || lastAlertTs === null || now - lastAlertTs >= REALERT_MS;
+    return { alert: due, alerted: true, lastAlertTs: due ? now : lastAlertTs };
+  }
+  const out = { alert: false, alerted: prev };
+  if (lastAlertTs !== null) out.lastAlertTs = lastAlertTs;
+  return out;
 }
 
 /** Log an `alive` line only on a transition into alive, or hourly. */
@@ -191,6 +201,7 @@ async function main() {
     if (logIt) appendLog({ ...logEntry, ...extra });
     writeAlertState(statePath, {
       alerted: outcome.alerted,
+      lastAlertTs: typeof outcome.lastAlertTs === 'number' ? outcome.lastAlertTs : undefined,
       lastLoggedDecision: logIt ? decision : state.lastLoggedDecision,
       lastAliveLoggedTs: logIt && decision === 'alive' ? now : state.lastAliveLoggedTs,
     });
@@ -205,8 +216,15 @@ async function main() {
     if (dispatchLiveness.dead) {
       appendAuditEvent('dispatch_dead_observed', { dispatch: lastEntry.dispatch, reason: dispatchLiveness.reason });
     }
+    if (lastEntry.degraded !== true) {
+      try {
+        resetRelaunchState();
+      } catch (e) {
+        process.stderr.write(`[watchdog] relaunch state reset failed: ${e?.message}\n`);
+      }
+    }
     const history = await runHistoryFinalize();
-    finish({ dispatchLiveness, history }, nextAlertState(state, { fresh: true }));
+    finish({ dispatchLiveness, history }, nextAlertState(state, { fresh: true, now }));
     process.exit(0);
   }
 
@@ -215,7 +233,7 @@ async function main() {
   const relaunch = maybeRelaunchApp();
   const history = await runHistoryFinalize();
 
-  const outcome = nextAlertState(state, { fresh: false, relaunch });
+  const outcome = nextAlertState(state, { fresh: false, relaunch, now });
   if (outcome.alert) sendDesktopNotification(ALERT_TITLE, ALERT_BODY);
   finish({ relaunch, history }, outcome);
   process.exit(0);

@@ -218,7 +218,7 @@ function scanOneProjectDirSync(projDir, prev) {
     const fp = path.join(projDir, tf);
     try { const st = fs.statSync(fp); files.push({ fp, tf, mtimeMs: st.mtimeMs, size: st.size }); } catch { continue; }
   }
-  if (!files.length) return null;
+  if (!files.length) return { rawCwd: null, newestFile: null, newestMtimeMs: 0, newestSize: 0 };
   files.sort((x, y) => y.mtimeMs - x.mtimeMs);
   const newestMtimeMs = files[0].mtimeMs;
   const newestFile = files[0].tf;
@@ -234,7 +234,8 @@ function scanOneProjectDirSync(projDir, prev) {
       size = Math.min(size * TAIL_GROWTH, MAX_TAIL_BYTES);
     }
   }
-  return null;
+  // No cwd found: cache the negative result under the same newest-file fingerprint.
+  return { rawCwd: null, newestMtimeMs, newestFile, newestSize };
 }
 
 /**
@@ -296,7 +297,7 @@ function scanProjectsDir(projectsDir) {
     if (rec) dirs.set(slug, rec);
   }
 
-  const records = Object.freeze([...dirs.values()]);
+  const records = Object.freeze([...dirs.values()].filter((d) => d.rawCwd));
   rawScanCache.set(projectsDir, { dirMtimeMs, cachedAt: now0, records, dirs, refreshPromise: null });
   return records;
 }
@@ -338,7 +339,7 @@ async function scanOneProjectDirAsync(projDir, prev) {
     const fp = path.join(projDir, tf);
     try { const st = await fsp.stat(fp); files.push({ fp, tf, mtimeMs: st.mtimeMs, size: st.size }); } catch { continue; }
   }
-  if (!files.length) return null;
+  if (!files.length) return { rawCwd: null, newestFile: null, newestMtimeMs: 0, newestSize: 0 };
   files.sort((x, y) => y.mtimeMs - x.mtimeMs);
   const newestMtimeMs = files[0].mtimeMs;
   const newestFile = files[0].tf;
@@ -356,7 +357,8 @@ async function scanOneProjectDirAsync(projDir, prev) {
       size = Math.min(size * TAIL_GROWTH, MAX_TAIL_BYTES);
     }
   }
-  return null;
+  // No cwd found: cache the negative result under the same newest-file fingerprint.
+  return { rawCwd: null, newestMtimeMs, newestFile, newestSize };
 }
 
 /**
@@ -386,7 +388,7 @@ async function rescanProjectsDirAsync(projectsDir, prevDirs) {
   const workerCount = Math.min(RESCAN_CONCURRENCY, slugs.length);
   await Promise.all(Array.from({ length: workerCount }, worker));
 
-  const records = Object.freeze([...dirs.values()]);
+  const records = Object.freeze([...dirs.values()].filter((d) => d.rawCwd));
   return { dirMtimeMs, records, dirs };
 }
 

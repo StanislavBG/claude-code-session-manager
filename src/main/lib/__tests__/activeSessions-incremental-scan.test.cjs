@@ -165,3 +165,52 @@ test('classify memo survives a default bust', () => {
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+function addCwdless(projectsDir, slug, withFile = true) {
+  const d = path.join(projectsDir, slug);
+  fs.mkdirSync(d, { recursive: true });
+  if (!withFile) return null;
+  const fp = path.join(d, 't.jsonl');
+  fs.writeFileSync(fp, JSON.stringify({ type: 'summary' }) + '\n');
+  const t = new Date(Date.now() - 60_000);
+  fs.utimesSync(fp, t, t);
+  return fp;
+}
+
+test('cwd-less and jsonl-less dirs are cached: shallow and deep bust do 0 tail reads', () => {
+  const { base, projectsDir } = setup(5);
+  try {
+    for (let i = 0; i < 10; i++) addCwdless(projectsDir, `c${i}`);
+    for (let i = 0; i < 3; i++) addCwdless(projectsDir, `e${i}`, false);
+    assert.equal(allProjectCwds({ projectsDir }).length, 5);
+    const openSpy = vi.spyOn(fs, 'openSync');
+    bustProjectCwdCache();
+    assert.equal(allProjectCwds({ projectsDir }).length, 5);
+    assert.equal(openSpy.mock.calls.length, 0, 'shallow bust: no tail reads');
+    bustProjectCwdCache({ deep: true });
+    assert.equal(allProjectCwds({ projectsDir }).length, 5);
+    assert.equal(openSpy.mock.calls.length, 0, 'deep bust: no tail reads');
+  } finally {
+    vi.restoreAllMocks();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('a cwd-less dir whose transcript gains a cwd row is re-read exactly once', () => {
+  const { base, projectsDir } = setup(5);
+  try {
+    const fps = [];
+    for (let i = 0; i < 10; i++) fps.push(addCwdless(projectsDir, `c${i}`));
+    allProjectCwds({ projectsDir });
+    const found = path.join(base, 'found');
+    fs.mkdirSync(found);
+    fs.appendFileSync(fps[4], JSON.stringify({ cwd: found }) + '\n');
+    const openSpy = vi.spyOn(fs, 'openSync');
+    bustProjectCwdCache({ deep: true });
+    assert.ok(allProjectCwds({ projectsDir }).includes(found));
+    assert.equal(openSpy.mock.calls.length, 1, 'only the changed dir is read');
+  } finally {
+    vi.restoreAllMocks();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});

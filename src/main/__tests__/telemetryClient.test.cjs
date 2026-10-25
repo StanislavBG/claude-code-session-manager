@@ -627,7 +627,7 @@ test('wire field names match server/routes/telemetry.ts exactly', async () => {
   expect(Object.keys(eventCall.body.batch[0]).sort()).toEqual(['app', 'env', 'name', 'props', 'session_id', 'visitor_id'].sort());
   expect(Object.keys(logCall.body.batch[0]).sort()).toEqual(['app', 'env', 'version', 'level', 'msg', 'visitor_id', 'session_id', 'fields', 'ts'].sort());
   expect(Object.keys(errorCall.body.batch[0]).sort()).toEqual(['app', 'env', 'version', 'name', 'msg', 'stack', 'url', 'ua', 'visitor_id', 'session_id', 'context', 'ts'].sort());
-  // Bilko's /install route must persist `seeds` (cross-project feedback filed 2026-10-25); until it does, the server ignores the key.
+  // Bilko's /install route persists `seeds` to app_installs.seeds (bilko-run 523ba538).
   expect(Object.keys(installCall.body).sort()).toEqual([
     'app', 'app_version', 'arch', 'cpu_count', 'electron_version', 'env',
     'install_channel', 'install_id', 'locale', 'node_version',
@@ -946,7 +946,7 @@ test('reportInstall() maps buildMachineProfile()\'s camelCase onto the exact sna
   const [rec] = await readQueueLines(client);
 
   expect(rec.channel).toBe('install');
-  // Bilko's /install route must persist `seeds` (cross-project feedback filed 2026-10-25); until it does, the server ignores the key.
+  // Bilko's /install route persists `seeds` to app_installs.seeds (bilko-run 523ba538).
   expect(Object.keys(rec.wire).sort()).toEqual([
     'app', 'app_version', 'arch', 'cpu_count', 'electron_version', 'env',
     'install_channel', 'install_id', 'locale', 'node_version',

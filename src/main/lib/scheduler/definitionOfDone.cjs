@@ -427,7 +427,8 @@ function extractAcCommand(prdBody) {
  * Runs the resolved gate with `runGateSequence`, the same runner the
  * scheduler's shadow gate uses: `&&` semantics, each run gets its own
  * isolated TMPDIR and `CI=1`, and at most one gate runs machine-wide at a
- * time. This never spawns `claude` and never writes to queue.json — it only
+ * time (the flag-free variant is runIsolatedSequence, which never reports
+ * 'busy'). This never spawns `claude` and never writes to queue.json — it only
  * re-runs the already-authored gate command.
  *
  * Result `status` meanings:
@@ -756,6 +757,7 @@ function writeReport(key, { acResults = [], riskFlags = [], runsDir } = {}) {
 // records the outcome next to the verdict. Not a claude -p run, so it takes no
 // slot from sessionSlots; instead a single module-level flag keeps at most one
 // shadow gate in flight machine-wide (the scheduler is one process).
+// runIsolatedSequence is the flag-free variant: same run, no single-flight.
 let gateInFlight = false;
 const OUTPUT_TAIL_CHARS = 1000;
 // Bounded full-output ring kept for baseline comparison (failing test ids).
@@ -829,9 +831,28 @@ function runOneGateCommand(cmd, { cwd, env }) {
  */
 async function runGateSequence(sequence, { cwd }) {
   if (gateInFlight) return { status: 'busy', results: [] };
+  gateInFlight = true;
+  try {
+    return await runIsolatedSequence(sequence, { cwd });
+  } finally {
+    gateInFlight = false;
+  }
+}
+
+/**
+ * Flag-free variant of runGateSequence: same `&&` semantics, own mkdtemp
+ * TMPDIR (removed afterwards) and CI=1, but it never reads or writes
+ * `gateInFlight`, so it never returns 'busy' and never makes a concurrent
+ * runGateSequence return 'busy'. Meant for per-worktree work (e.g. worktree
+ * setup) whose callers bound their own parallelism.
+ *
+ * @param {Array<{argv:string[], timeoutMs:number, env?:object}>} sequence
+ * @param {{ cwd: string }} opts
+ * @returns {Promise<{ status: 'green'|'red'|'unavailable', results: object[] }>}
+ */
+async function runIsolatedSequence(sequence, { cwd }) {
   if (!Array.isArray(sequence) || !sequence.length) return { status: 'unavailable', results: [] };
   try { fs.statSync(cwd); } catch { return { status: 'unavailable', results: [] }; }
-  gateInFlight = true;
   let tmp = null;
   try {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-gate-shadow-'));
@@ -847,7 +868,6 @@ async function runGateSequence(sequence, { cwd }) {
   } catch {
     return { status: 'unavailable', results: [] };
   } finally {
-    gateInFlight = false;
     if (tmp) { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* best-effort */ } }
   }
 }
@@ -899,6 +919,7 @@ module.exports = {
   isNoneGate,
   resolveGate,
   runGateSequence,
+  runIsolatedSequence,
   extractSection,
   reverifyAc,
   reverifyBatch,

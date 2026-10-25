@@ -44,6 +44,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { execFile } = require('node:child_process');
 const { execGit } = require('./gitExec.cjs');
+const { runWorktreeSetup } = require('./worktreeSetup.cjs');
 
 const DEFAULT_DEP_DIRS = ['node_modules', '.venv', 'venv'];
 
@@ -191,7 +192,7 @@ function addExcludes(mainCwd, names) {
 
 /**
  * @param {{ mainCwd: string, worktreeCwd: string, names?: string[] }} opts
- * @returns {Promise<{ linked: string[], skipped: string[], installed: string[] }>}
+ * @returns {Promise<{ linked: string[], skipped: string[], installed: string[], setup: object }>}
  */
 async function linkDependencyDirs({ mainCwd, worktreeCwd, names = DEFAULT_DEP_DIRS }) {
   const linked = [];
@@ -224,7 +225,16 @@ async function linkDependencyDirs({ mainCwd, worktreeCwd, names = DEFAULT_DEP_DI
       skipped.push(name);
     }
   }
-  return { linked, skipped, installed };
+  // Project warm-up (.session-manager.json worktreeSetup) runs after linking so it sees node_modules.
+  // Both createWorktree and the scheduler's verify scratch worktree come through here. Note:
+  // SM_WORKTREE_DEP_LINK_DISABLE=1 skips linkDependencyDirs at the gitWorktree.cjs call site, so it skips setup too.
+  let setup;
+  try {
+    setup = await runWorktreeSetup({ worktreeCwd });
+  } catch (err) {
+    setup = { ran: false, error: String(err && err.message) };
+  }
+  return { linked, skipped, installed, setup };
 }
 
 module.exports = { linkDependencyDirs, isPnpmProject, isUvProject, DEFAULT_DEP_DIRS };

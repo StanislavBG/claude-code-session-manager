@@ -1000,21 +1000,12 @@ function respond(msgId, payload, typeOverride, client) {
   }
 }
 
-function stopClientPtyStream(client, tabId) {
-  const unsub = client.ptyStreams.get(tabId);
-  client.ptyStreams.delete(tabId);
-  if (unsub) {
-    try { unsub(); } catch { /* listener already gone */ }
-  }
-}
-
 // Lazy-loaded dispatch map — avoids circular require at module load time.
 let _dispatchMap = null;
 
 function getDispatchMap() {
   if (_dispatchMap) return _dispatchMap;
 
-  const { manager: ptyManager } = require('./pty.cjs');
   const sessionsStore = require('./sessionsStore.cjs');
   const { remote: histRemote } = require('./historyAggregator.cjs');
   const chatRunner = require('./chatRunner.cjs');
@@ -1107,56 +1098,6 @@ function getDispatchMap() {
     'cmd:sessions:save': async (payload) => {
       const parsed = schemas.sessionsPayload.parse(payload);
       return sessionsStore.save(parsed);
-    },
-
-    'cmd:pty:spawn': async (payload, reqClient) => {
-      const client = reqClient || _clients.getOrCreate(LEGACY_CLIENT_KEY);
-      const parsed = schemas.ptySpawn.parse(payload);
-      // Path safety — validatePath rejects anything outside home dir.
-      validatePath(parsed.cwd);
-      // Strip startupCommand: it is ignored by pty.cjs today, but passing a
-      // remotely-controlled 8 KiB string to spawn is a landmine if pty.cjs
-      // ever uses it. Remote callers have no legitimate need for it.
-      const { startupCommand: _ignored, ...safePayload } = parsed;
-      const result = await ptyManager.spawn(safePayload);
-      // Stream output to the peer — replaces any prior subscription for this tab.
-      // Chunk contents are sensitive: never logged.
-      const tabId = safePayload.tabId;
-      stopClientPtyStream(client, tabId);
-      const unsub = ptyManager.addOutputListener(
-        tabId,
-        (_id, data) => {
-          if (client.e2e.state !== 'authenticated' || !loadConfigSync().remoteEnabled) return;
-          pushEventTo(client, 'event:pty:data', { tabId, data });
-        },
-        (_id, info) => {
-          if (client.ptyStreams.get(tabId) === unsub) client.ptyStreams.delete(tabId);
-          if (client.e2e.state !== 'authenticated' || !loadConfigSync().remoteEnabled) return;
-          pushEventTo(client, 'event:pty:exit', { tabId, exitCode: info?.exitCode, signal: info?.signal });
-        },
-      );
-      client.ptyStreams.set(tabId, unsub);
-      return result;
-    },
-
-    'cmd:pty:write': async (payload) => {
-      const parsed = schemas.ptyWrite.parse(payload);
-      return ptyManager.write(parsed);
-    },
-
-    'cmd:pty:resize': async (payload) => {
-      const parsed = schemas.ptyResize.parse(payload);
-      ptyManager.resize(parsed);
-      return { ok: true };
-    },
-
-    'cmd:pty:kill': async (payload, reqClient) => {
-      const parsed = schemas.ptyTabId.parse(payload);
-      // Kill ends the PTY itself, so every client's stream for it ends.
-      for (const c of _clients.values()) stopClientPtyStream(c, parsed.tabId);
-      void reqClient;
-      ptyManager.kill(parsed.tabId);
-      return { ok: true };
     },
 
     'cmd:history:aggregate': async (payload) => {
@@ -1556,6 +1497,5 @@ module.exports = {
     getClient: (clientKey = LEGACY_CLIENT_KEY) => _clients.getOrCreate(clientKey),
     revokeAllDevices,
     pair,
-    streamCount: () => _clients.values().reduce((n, c) => n + c.ptyStreams.size, 0),
   },
 };

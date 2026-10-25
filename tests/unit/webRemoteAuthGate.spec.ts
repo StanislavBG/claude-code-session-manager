@@ -62,7 +62,7 @@ describe('Ungated READ commands are not in SAS_GATED_READS', () => {
 })
 
 describe('MUTATE commands remain gated', () => {
-  const mutates = ['cmd:pty:spawn', 'cmd:pty:write']
+  const mutates = ['cmd:chat:send', 'cmd:session:create']
   for (const cmd of mutates) {
     it(`${cmd} is blocked when e2eAuthenticated=false`, () => {
       expect(isBlocked(cmd, false)).toBe(true)

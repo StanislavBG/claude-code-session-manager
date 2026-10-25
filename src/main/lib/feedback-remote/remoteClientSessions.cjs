@@ -31,7 +31,6 @@ function makeRecord(key, clientId) {
     e2e: makeState(),
     peerPubKey: null,
     deviceId: null,
-    ptyStreams: new Map(),
     subscriptions: new Set(),
     lastSessionListJson: null,
   }
@@ -43,10 +42,6 @@ function createClientSessions() {
   function teardown(key) {
     const rec = records.get(key)
     if (!rec) return null
-    for (const unsub of rec.ptyStreams.values()) {
-      try { if (typeof unsub === 'function') unsub() } catch { /* swallow */ }
-    }
-    rec.ptyStreams.clear()
     rec.subscriptions.clear()
     records.delete(key)
     return rec

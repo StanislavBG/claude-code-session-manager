@@ -4,10 +4,10 @@
  * Tests verify:
  *   1. Non-allowlisted command types are rejected (no handler called).
  *   2. Schema-invalid payloads throw ZodError before any handler runs.
- *   3. Path-bearing commands (cmd:pty:spawn) pass cwd through validatePath.
+ *   3. Path-bearing payload schemas (ptySpawn) require a cwd.
  *   4. Kill-switch: commands are refused when remoteEnabled = false.
  *   5. All 15 allowlisted command types are present in the set.
- *   6. Destructive pty commands live in the MUTATE tier, not READ.
+ *   6. No remote PTY control: cmd:pty:* is not allowlisted.
  *   7. Sensitive READ commands (SAS_GATED_READS) are not in the plain READ tier.
  */
 
@@ -28,8 +28,8 @@ const { schemas, ALLOWED_COMMANDS, READ_COMMANDS, SAS_GATED_READS, MUTATE_COMMAN
 // ─── Allowlist coverage ───────────────────────────────────────────────────────
 
 describe('ALLOWED_COMMANDS set', () => {
-  it('contains exactly 19 entries', () => {
-    expect(ALLOWED_COMMANDS.size).toBe(19)
+  it('contains exactly 15 entries', () => {
+    expect(ALLOWED_COMMANDS.size).toBe(15)
   })
 
   it('is the exact union of READ, SAS_GATED_READS, and MUTATE tiers (no overlap, no orphans)', () => {
@@ -41,15 +41,10 @@ describe('ALLOWED_COMMANDS set', () => {
     for (const c of SAS_GATED_READS) expect(MUTATE_COMMANDS.has(c)).toBe(false)
   })
 
-  // Destructive/stateful commands must require the remoteControlEnabled + SAS
-  // gate, which only applies to MUTATE_COMMANDS. A read-only mirror that could
-  // kill or resize the desktop PTY would be a control-bypass (sec review S2/S7).
-  for (const c of ['cmd:pty:kill', 'cmd:pty:resize', 'cmd:pty:spawn', 'cmd:pty:write']) {
-    it(`gates "${c}" behind the MUTATE tier`, () => {
-      expect(MUTATE_COMMANDS.has(c)).toBe(true)
-      expect(READ_COMMANDS.has(c)).toBe(false)
-    })
-  }
+  it('does not allowlist any cmd:pty:* command (no remote shell control)', () => {
+    expect(ALLOWED_COMMANDS.has('cmd:pty:spawn')).toBe(false)
+    for (const c of ALLOWED_COMMANDS) expect(c.startsWith('cmd:pty:')).toBe(false)
+  })
 
   const forbidden = [
     'app:test-fire-hook',

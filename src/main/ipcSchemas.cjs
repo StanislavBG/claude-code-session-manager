@@ -1260,16 +1260,8 @@ const SAS_GATED_READS = new Set([
 
 const MUTATE_COMMANDS = new Set([
   'cmd:sessions:save',
-  'cmd:pty:spawn',
-  'cmd:pty:write',
-  // pty:kill terminates a live session; pty:resize drives the geometry of the
-  // user's interactive PTY — both write live process state, so they are gated
-  // behind remoteControlEnabled + SAS like every other mutation. A read-only
-  // mobile mirror has no business killing or resizing the desktop's session.
-  'cmd:pty:kill',
-  'cmd:pty:resize',
   // Pushes a prompt into an open tab's chat queue — a real mutation of that
-  // tab's session, same tier as pty:write.
+  // tab's session, a mutation.
   'cmd:chat:send',
   // Starts a new Session on the desktop via the renderer's launchSession.
   'cmd:session:create',

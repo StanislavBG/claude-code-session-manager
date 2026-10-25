@@ -141,8 +141,32 @@ function findBlockingDep(job, projectJobs, satisfiedSlugs = new Set()) {
   });
 }
 
+/** Normalise a `files` entry for overlap comparison (`./a//b` -> `a/b`, trailing `/` kept). */
+function normFilePath(f) {
+  const raw = String(f ?? '').trim().replace(/\\/g, '/').replace(/^(\.\/)+/, '').replace(/\/{2,}/g, '/');
+  return raw;
+}
+
+/** Equal paths, or a folder entry (ending in `/`) that prefixes the other path. */
+function pathsOverlap(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.endsWith('/') && b.startsWith(a)) return true;
+  if (b.endsWith('/') && a.startsWith(b)) return true;
+  return false;
+}
+
+/** True when two jobs' `files` arrays overlap. Empty/missing files never overlap. */
+function filesOverlap(aFiles, bFiles) {
+  if (!Array.isArray(aFiles) || !Array.isArray(bFiles)) return false;
+  const a = aFiles.map(normFilePath).filter(Boolean);
+  const b = bFiles.map(normFilePath).filter(Boolean);
+  return a.some((x) => b.some((y) => pathsOverlap(x, y)));
+}
+
 /**
- * Per-project batch picker. `dependsOn` is the ONLY ordering primitive.
+ * Per-project batch picker. `dependsOn` is the only ORDERING primitive;
+ * files-overlap (see below) is a mutual-exclusion hold, never an order.
  *
  * Rules:
  *   1. Eligible = pending, not already running, and no blocking dependency.
@@ -386,10 +410,24 @@ function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = n
   // parallelGroup is a PRIORITY HINT, not a barrier: when there are more
   // eligible jobs than slots, the lower (earlier-authored) PRD numbers go
   // first. Everything else about the number is display-only.
-  const batch = pending
-    .slice()
-    .sort((a, b) => (a.parallelGroup ?? 99) - (b.parallelGroup ?? 99))
-    .slice(0, effectiveSlots);
+  // files-overlap: mutual exclusion only. An eligible job is skipped while a
+  // running job (or one picked earlier in this call) shares a path with it.
+  const inFlight = projectJobs.filter((j) => j.status === 'running' || runningSlugsInProject.has(j.slug));
+  const batch = [];
+  for (const j of pending.slice().sort((a, b) => (a.parallelGroup ?? 99) - (b.parallelGroup ?? 99))) {
+    if (batch.length >= effectiveSlots) break;
+    const other = [...inFlight, ...batch].find((o) => o.slug !== j.slug && filesOverlap(j.files, o.files));
+    if (other) {
+      holds.push({ slug: j.slug, dep: null, depStatus: null, reason: `files-overlap:${other.slug}` });
+      continue;
+    }
+    batch.push(j);
+  }
+  if (batch.length === 0) {
+    const reason = `[scheduler] files-overlap [${projectCwd}]: holding ${pending.length} eligible job(s) behind running jobs sharing files`;
+    console.log(reason);
+    return { batch: [], reason, holds };
+  }
   console.log(
     `[scheduler] concurrency [${projectCwd}]: firing ${batch.length} of ${pending.length} ` +
     `eligible job(s) [${batch.map((j) => j.slug).join(', ')}]`,

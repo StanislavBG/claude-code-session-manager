@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { loadDeviceMeta, saveDeviceMeta, savePreferredDevice, type DeviceMeta } from './devices';
 import type { SessionTarget } from './components/SessionScreen';
 import type {
   MeResponse, Device, Screen, SessionState,
@@ -33,11 +34,18 @@ interface AppState {
   remoteReady: boolean;
   /** Device IDs whose relay-served pubKey diverged from the pinned value (TOFU). */
   keyMismatchDeviceIds: string[];
+  /** Desktops that signalled event:remote:ready on their current connection. */
+  readyDeviceIds: string[];
+  /** Cached desktop names/platform, hydrated from localStorage. */
+  deviceMeta: Record<string, DeviceMeta>;
 
   setMe: (me: MeResponse | null) => void;
   setDevices: (devices: Device[]) => void;
   setDeviceOnline: (deviceId: string, isOnline: boolean) => void;
   setActiveDevice: (deviceId: string | null) => void;
+  /** User-initiated switch: persist as preferred, then activate. */
+  chooseDevice: (deviceId: string) => void;
+  setDeviceMeta: (deviceId: string, meta: DeviceMeta) => void;
   setWsConnected: (v: boolean) => void;
   setScreen: (s: Screen) => void;
 
@@ -51,14 +59,14 @@ interface AppState {
   setPendingSas: (v: { deviceId: string; sas: string } | null) => void;
   clearPendingSas: () => void;
   /** Desktop signalled readiness (or the fallback fired): stop waiting and re-fetch. */
-  markRemoteReady: () => void;
+  markRemoteReady: (deviceId?: string) => void;
   stopAwaitingDesktop: () => void;
   /** Connection dropped: a fresh handshake must show the SAS again unless re-confirmed ready. */
-  clearRemoteReady: () => void;
+  clearRemoteReady: (deviceId?: string) => void;
   addKeyMismatch: (deviceId: string) => void;
 }
 
-export const useStore = create<AppState>((set) => ({
+export const useStore = create<AppState>((set, get) => ({
   me: null,
   devices: [],
   activeDeviceId: null,
@@ -73,12 +81,43 @@ export const useStore = create<AppState>((set) => ({
   awaitingDesktopConfirm: false,
   remoteReady: false,
   keyMismatchDeviceIds: [],
+  readyDeviceIds: [],
+  deviceMeta: {},
 
   setMe: (me) => set({ me }),
-  setDevices: (devices) => set({ devices }),
+  setDevices: (devices) =>
+    set((s) => {
+      let deviceMeta = s.deviceMeta;
+      for (const d of devices) {
+        if (deviceMeta[d.deviceId]) continue;
+        const m = loadDeviceMeta(d.deviceId);
+        if (m) deviceMeta = { ...deviceMeta, [d.deviceId]: m };
+      }
+      return deviceMeta === s.deviceMeta ? { devices } : { devices, deviceMeta };
+    }),
   setDeviceOnline: (deviceId, isOnline) =>
     set((s) => ({ devices: s.devices.map((d) => (d.deviceId === deviceId ? { ...d, isOnline } : d)) })),
-  setActiveDevice: (activeDeviceId) => set({ activeDeviceId }),
+  setActiveDevice: (activeDeviceId) =>
+    set((s) => {
+      if (s.activeDeviceId === activeDeviceId) return {};
+      return {
+        activeDeviceId,
+        route: { view: 'projects' },
+        stateByTab: {},
+        pendingSas: null,
+        awaitingDesktopConfirm: false,
+        remoteReady: activeDeviceId !== null && s.readyDeviceIds.includes(activeDeviceId),
+        refreshKey: s.refreshKey + 1,
+      };
+    }),
+  chooseDevice: (deviceId) => {
+    savePreferredDevice(deviceId);
+    get().setActiveDevice(deviceId);
+  },
+  setDeviceMeta: (deviceId, meta) => {
+    set((s) => ({ deviceMeta: { ...s.deviceMeta, [deviceId]: meta } }));
+    saveDeviceMeta(deviceId, meta);
+  },
   setWsConnected: (wsConnected) => set(wsConnected ? { wsConnected } : { wsConnected, remoteReady: false }),
   setScreen: (screen) => set({ screen }),
 
@@ -91,6 +130,7 @@ export const useStore = create<AppState>((set) => ({
   reset: () => set({
     route: { view: 'projects' }, stateByTab: {},
     activeDeviceId: null, awaitingDesktopConfirm: false, remoteReady: false,
+    readyDeviceIds: [],
   }),
 
   setPendingSas: (pendingSas) =>
@@ -99,11 +139,22 @@ export const useStore = create<AppState>((set) => ({
       return pendingSas ? { pendingSas, awaitingDesktopConfirm: true } : { pendingSas };
     }),
   clearPendingSas: () => set({ pendingSas: null }),
-  markRemoteReady: () => set((s) => ({
-    remoteReady: true, pendingSas: null, awaitingDesktopConfirm: false, refreshKey: s.refreshKey + 1,
-  })),
+  markRemoteReady: (deviceId) => set((s) => {
+    const readyDeviceIds = deviceId && !s.readyDeviceIds.includes(deviceId)
+      ? [...s.readyDeviceIds, deviceId]
+      : s.readyDeviceIds;
+    if (deviceId !== undefined && deviceId !== s.activeDeviceId) return { readyDeviceIds };
+    return {
+      readyDeviceIds, remoteReady: true, pendingSas: null, awaitingDesktopConfirm: false,
+      refreshKey: s.refreshKey + 1,
+    };
+  }),
   stopAwaitingDesktop: () => set((s) => ({ awaitingDesktopConfirm: false, refreshKey: s.refreshKey + 1 })),
-  clearRemoteReady: () => set({ remoteReady: false }),
+  clearRemoteReady: (deviceId) => set((s) => {
+    if (deviceId === undefined) return { readyDeviceIds: [], remoteReady: false };
+    const readyDeviceIds = s.readyDeviceIds.filter((id) => id !== deviceId);
+    return deviceId === s.activeDeviceId ? { readyDeviceIds, remoteReady: false } : { readyDeviceIds };
+  }),
   addKeyMismatch: (deviceId) =>
     set((s) => ({
       keyMismatchDeviceIds: s.keyMismatchDeviceIds.includes(deviceId)

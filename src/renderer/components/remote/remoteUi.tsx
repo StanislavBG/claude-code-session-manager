@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { AlmanacIcon, type AlmanacIconName } from '../layout/AlmanacIcon'
 
-/** Shared look of the Settings → Phone remote view and the Remote machines section. */
+/** Shared look of the Settings → Phone remote view. */
 
 export function SectionLabel({ children, right }: { children: ReactNode; right?: ReactNode }) {
   return (

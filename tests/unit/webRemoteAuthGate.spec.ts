@@ -27,8 +27,8 @@ function isBlocked(type: string, e2eAuthenticated: boolean): boolean {
 
 describe('SAS_GATED_READS — sensitive READ commands require SAS confirmation', () => {
   const sensitiveReads = [
-    'cmd:sessions:load',
-    'cmd:history:aggregate',
+    'cmd:app:info',
+    'cmd:projects:list',
     'cmd:session:subscribe',
   ]
 
@@ -48,10 +48,10 @@ describe('SAS_GATED_READS — sensitive READ commands require SAS confirmation',
 })
 
 describe('Ungated READ commands are not in SAS_GATED_READS', () => {
-  it('cmd:app:version is ungated (returns only version string, no user data)', () => {
-    expect(SAS_GATED_READS.has('cmd:app:version')).toBe(false)
-    expect(READ_COMMANDS.has('cmd:app:version')).toBe(true)
-    expect(isBlocked('cmd:app:version', false)).toBe(false)
+  it('cmd:app:info is SAS-gated (hostname identifies the machine)', () => {
+    expect(SAS_GATED_READS.has('cmd:app:info')).toBe(true)
+    expect(READ_COMMANDS.has('cmd:app:info')).toBe(false)
+    expect(isBlocked('cmd:app:info', false)).toBe(true)
   })
 
   it('cmd:session:unsubscribe is ungated (teardown lifecycle, returns nothing)', () => {

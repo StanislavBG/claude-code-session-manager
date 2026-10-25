@@ -28,8 +28,8 @@ const { schemas, ALLOWED_COMMANDS, READ_COMMANDS, SAS_GATED_READS, MUTATE_COMMAN
 // ─── Allowlist coverage ───────────────────────────────────────────────────────
 
 describe('ALLOWED_COMMANDS set', () => {
-  it('contains exactly 15 entries', () => {
-    expect(ALLOWED_COMMANDS.size).toBe(15)
+  it('contains exactly 10 entries', () => {
+    expect(ALLOWED_COMMANDS.size).toBe(10)
   })
 
   it('is the exact union of READ, SAS_GATED_READS, and MUTATE tiers (no overlap, no orphans)', () => {
@@ -39,6 +39,15 @@ describe('ALLOWED_COMMANDS set', () => {
       expect(SAS_GATED_READS.has(c)).toBe(false)
     }
     for (const c of SAS_GATED_READS) expect(MUTATE_COMMANDS.has(c)).toBe(false)
+  })
+
+  it('tiers are exactly the web app protocol', () => {
+    expect([...READ_COMMANDS].sort()).toEqual(['cmd:session:unsubscribe'])
+    expect([...SAS_GATED_READS].sort()).toEqual([
+      'cmd:app:info', 'cmd:project:sessions', 'cmd:projects:list', 'cmd:session:options',
+      'cmd:session:prds', 'cmd:session:subscribe', 'cmd:session:transcript',
+    ])
+    expect([...MUTATE_COMMANDS].sort()).toEqual(['cmd:chat:send', 'cmd:session:create'])
   })
 
   it('does not allowlist any cmd:pty:* command (no remote shell control)', () => {

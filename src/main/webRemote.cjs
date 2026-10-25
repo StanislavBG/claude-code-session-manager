@@ -681,41 +681,6 @@ function stopAllSessionWatches() {
 }
 
 /**
- * Pure builder for the phone's session list: one project entry per tab, then
- * each tab's ACTIVE Epics (from active-index.json via readIndex). Never throws.
- */
-function buildRemoteSessionList(tabs, readIndex) {
-  const out = [];
-  const seenEpics = new Set();
-  for (const tab of Array.isArray(tabs) ? tabs : []) {
-    if (!tab) continue;
-    const project = tab.label || path.basename(tab.cwd || '');
-    out.push({ kind: 'project', tabId: tab.sessionId, cwd: tab.cwd, title: tab.label || tab.cwd, project });
-    let sessions = null;
-    try { sessions = readIndex(tab.cwd)?.sessions; } catch { sessions = null; }
-    if (!sessions || typeof sessions !== 'object') continue;
-    for (const epic of Object.values(sessions)) {
-      if (!epic || epic.status !== 'active') continue;
-      if (typeof epic.claudeSessionId !== 'string' || !epic.claudeSessionId) continue;
-      if (seenEpics.has(epic.id)) continue;
-      seenEpics.add(epic.id);
-      const firstLine = typeof epic.goalText === 'string' ? epic.goalText.split('\n')[0].trim().slice(0, 80).trim() : '';
-      out.push({
-        kind: 'epic',
-        tabId: epic.claudeSessionId,
-        epicId: epic.id,
-        cwd: epic.worktree?.dir || epic.cwd,
-        title: firstLine || epic.id,
-        project,
-        tag: epic.tag,
-        agentType: epic.agentType,
-      });
-    }
-  }
-  return out;
-}
-
-/**
  * Shared finish-up for any path that transitions a client's e2e state into 'authenticated'
  * (manual SAS confirmation or pinned-key auto-trust): log, broadcast the new
  * status, and tell that one client it may start requesting (event:remote:ready).
@@ -1007,22 +972,9 @@ function getDispatchMap() {
   if (_dispatchMap) return _dispatchMap;
 
   const sessionsStore = require('./sessionsStore.cjs');
-  const { remote: histRemote } = require('./historyAggregator.cjs');
   const chatRunner = require('./chatRunner.cjs');
 
   _dispatchMap = {
-    'cmd:sessions:load': async () =>
-      sessionsStore.load(),
-
-    'cmd:sessions:list': async () => {
-      const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
-      const data = await sessionsStore.load();
-      return {
-        sessions: buildRemoteSessionList(data?.tabs ?? [], readActiveIndex),
-        activeTabId: data?.activeTabId ?? null,
-      };
-    },
-
     'cmd:projects:list': async () => {
       const { readActiveIndex } = require('./lib/epic/epicMint.cjs');
       const { listRemoteProjects } = require('./lib/remoteDrilldown.cjs');
@@ -1095,21 +1047,9 @@ function getDispatchMap() {
       return { prds };
     },
 
-    'cmd:sessions:save': async (payload) => {
-      const parsed = schemas.sessionsPayload.parse(payload);
-      return sessionsStore.save(parsed);
-    },
-
-    'cmd:history:aggregate': async (payload) => {
-      const parsed = schemas.historyAggregate.parse(payload);
-      return histRemote.aggregate(parsed);
-    },
-
-    'cmd:app:version': async () =>
-      app.getVersion(),
-
+    // Web app's multi-desktop picker (SAS-gated: hostname identifies the machine).
     'cmd:app:info': async () =>
-      ({ version: app.getVersion(), platform: process.platform }),
+      ({ version: app.getVersion(), platform: process.platform, hostname: os.hostname() }),
 
     // v2 mobile: start/stop pushing live state for a session.
     'cmd:session:subscribe': async (payload, reqClient) => {
@@ -1483,7 +1423,6 @@ module.exports = {
     pollSessionWatcher,
     getSessionWatcher: (tabId) => _sessionWatchers.get(tabId),
     stopAllSessionWatches,
-    buildRemoteSessionList,
     setWs: (ws) => { _ws = ws; },
     connect,
     hasReconnectTimer: () => _reconnectTimer !== null,

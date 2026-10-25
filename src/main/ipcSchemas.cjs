@@ -1209,7 +1209,7 @@ function validated(schema, handler) {
 // Commands are split into three tiers:
 //   READ_COMMANDS      — return data; allowed when remoteEnabled=true.
 //   SAS_GATED_READS    — return sensitive user data (sessions, PRDs, logs,
-//                        transcript summaries); additionally require
+//                        transcript summaries, machine hostname); additionally require
 //                        _e2eAuthenticated=true (SAS confirmed by user).
 //                        A compromised relay cannot exfiltrate this data from
 //                        a session that has not been SAS-confirmed.
@@ -1219,22 +1219,17 @@ function validated(schema, handler) {
 // ALLOWED_COMMANDS is the union, kept for existing import compatibility.
 //
 // Ungated READ_COMMANDS (justify each):
-//   cmd:app:version      — exposes only the app semver string; no user data.
-//   cmd:app:info         — exposes only app semver + OS platform string; no user data.
 //   cmd:session:unsubscribe — teardown lifecycle; returns nothing sensitive.
 const READ_COMMANDS = new Set([
-  'cmd:app:version',
-  'cmd:app:info',
   // v2 mobile: unsubscribe is a teardown lifecycle call with no data payload.
   'cmd:session:unsubscribe',
 ]);
 
 // Sensitive reads — return user data; require SAS confirmation same as MUTATE.
 const SAS_GATED_READS = new Set([
-  'cmd:sessions:load',
-  // Same data the phone reads on demand (projects + their active Epics).
-  'cmd:sessions:list',
-  'cmd:history:aggregate',
+  // Web app's multi-desktop picker: { version, platform, hostname }. The
+  // hostname identifies the machine, so this is SAS-gated.
+  'cmd:app:info',
   // subscribe initiates a live stream of session state/summary — sensitive.
   'cmd:session:subscribe',
   // Picker data (projects, personas, tags, macros) for the phone's New Session.
@@ -1259,7 +1254,6 @@ const SAS_GATED_READS = new Set([
 ]);
 
 const MUTATE_COMMANDS = new Set([
-  'cmd:sessions:save',
   // Pushes a prompt into an open tab's chat queue — a real mutation of that
   // tab's session, a mutation.
   'cmd:chat:send',

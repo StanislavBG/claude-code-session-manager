@@ -24,7 +24,7 @@ describe('packaged relaunch + install channel', () => {
     const logPath = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pkgrl-')), 'r.log');
     const calls = [];
     const spawnFn = (cmd, args, o) => { calls.push({ cmd, args, o }); return { on() {}, unref() {} }; };
-    defaultSpawnRelaunch({ logPath, packaged: true, execPath: '/app/bin', spawnFn });
+    defaultSpawnRelaunch({ logPath, packaged: true, execPath: '/app/bin', spawnFn, env: { PATH: '/usr/bin', ELECTRON_RUN_AS_NODE: '1' } });
     expect(calls).toHaveLength(1);
     expect(calls[0].cmd).toBe('/app/bin');
     expect(calls[0].args).toEqual([]);

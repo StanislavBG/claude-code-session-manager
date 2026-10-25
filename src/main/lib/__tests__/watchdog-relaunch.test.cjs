@@ -12,6 +12,8 @@ const {
   evaluateDispatchLiveness,
   readLastHeartbeat,
   readRelaunchState,
+  relaunchInvocation,
+  defaultSpawnRelaunch,
   DEFAULT_MAX_RELAUNCH_ATTEMPTS,
 } = require('../scheduler/watchdogHelpers.cjs');
 
@@ -341,4 +343,73 @@ test('desktop notification spawns without a shell per platform', () => {
   assert.match(calls[1].args[1], /^display notification/);
   for (const c of calls) assert.notEqual(c.opts.shell, true);
   assert.equal(sendDesktopNotification('T', 'B', 'linux', () => { throw new Error('boom'); }), false);
+});
+
+// ── relaunchInvocation (systemd transient unit) ─────────────────────────────
+
+describe('relaunchInvocation', () => {
+  const npxSpec = { command: 'npx', args: ['claude-code-session-manager@latest'], packaged: false };
+  const base = { logPath: '/tmp/x/r.log', now: 1234, systemdRunPath: '/usr/bin/systemd-run' };
+
+  test('systemd mode args exact order incl. KillMode=process', () => {
+    const inv = relaunchInvocation({ ...base, spec: npxSpec, env: { INVOCATION_ID: 'abc', PATH: '/a:/b' } });
+    assert.deepEqual(inv, {
+      mode: 'systemd-run',
+      command: '/usr/bin/systemd-run',
+      args: [
+        '--user', '--collect', '--quiet', '--unit=session-manager-relaunch-1234',
+        '-p', 'KillMode=process',
+        '-p', 'StandardOutput=append:/tmp/x/r.log',
+        '-p', 'StandardError=append:/tmp/x/r.log',
+        '--setenv=PATH=/a:/b',
+        '--', 'npx', 'claude-code-session-manager@latest',
+      ],
+    });
+  });
+
+  test('detached when INVOCATION_ID unset', () => {
+    const inv = relaunchInvocation({ ...base, spec: npxSpec, env: { PATH: '/a' } });
+    assert.deepEqual(inv, { mode: 'detached', command: 'npx', args: ['claude-code-session-manager@latest'] });
+  });
+
+  test('detached when systemdRunPath is null', () => {
+    const inv = relaunchInvocation({ ...base, systemdRunPath: null, spec: npxSpec, env: { INVOCATION_ID: 'abc', PATH: '/a' } });
+    assert.equal(inv.mode, 'detached');
+  });
+
+  test('packaged spec wrapped in systemd mode', () => {
+    const spec = { command: '/app/bin', args: [], packaged: true };
+    const inv = relaunchInvocation({ ...base, spec, env: { INVOCATION_ID: 'abc', PATH: '/a' } });
+    assert.equal(inv.mode, 'systemd-run');
+    assert.deepEqual(inv.args.slice(-2), ['--', '/app/bin']);
+  });
+
+  test('defaultSpawnRelaunch falls back to detached when spawnSync returns status 1', () => {
+    const dir = tmpDir();
+    try {
+      const bin = path.join(dir, 'bin');
+      fs.mkdirSync(bin);
+      const fake = path.join(bin, 'systemd-run');
+      fs.writeFileSync(fake, '#!/bin/sh\n');
+      fs.chmodSync(fake, 0o755);
+      const logPath = path.join(dir, 'r.log');
+      const syncCalls = [];
+      const spawnCalls = [];
+      const spawnSyncFn = (cmd, args, o) => { syncCalls.push({ cmd, args, o }); return { status: 1 }; };
+      const spawnFn = (cmd, args, o) => { spawnCalls.push({ cmd, args, o }); return { on() {}, unref() {} }; };
+      const res = defaultSpawnRelaunch({
+        logPath, spawnFn, spawnSyncFn, now: 99,
+        env: { INVOCATION_ID: 'abc', PATH: bin, ELECTRON_RUN_AS_NODE: '1' },
+      });
+      assert.deepEqual(res, { mode: 'detached-fallback' });
+      assert.equal(syncCalls.length, 1);
+      assert.equal(syncCalls[0].cmd, fake);
+      assert.equal(syncCalls[0].o.timeout, 15000);
+      assert.equal(spawnCalls.length, 1);
+      assert.equal(spawnCalls[0].cmd, 'npx');
+      assert.match(fs.readFileSync(logPath, 'utf8'), /systemd-run failed \(.*\) — falling back to detached spawn/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

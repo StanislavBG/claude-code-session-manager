@@ -231,15 +231,73 @@ function relaunchSpec(opts) {
   return { command: 'npx', args: ['claude-code-session-manager@latest'], packaged: false };
 }
 
-function defaultSpawnRelaunch({ logPath = schedulerPaths.watchdogRelaunchLogPath(), packaged, execPath, spawnFn } = {}) {
-  const spawn = spawnFn || require('node:child_process').spawn;
+/** Resolve an executable on a PATH string (no shell). Returns null when absent. */
+function findOnPath(name, envPath) {
+  if (typeof envPath !== 'string') return null;
+  for (const dir of envPath.split(':')) {
+    if (!dir) continue;
+    const candidate = path.join(dir, name);
+    try {
+      fs.accessSync(candidate, fs.constants.X_OK);
+      return candidate;
+    } catch { /* keep scanning */ }
+  }
+  return null;
+}
+
+/**
+ * relaunchInvocation — pure. Under systemd (INVOCATION_ID set) the relaunch must
+ * live in its own transient user unit, or the oneshot watchdog unit's cgroup
+ * teardown kills it. KillMode=process so a successor spawned by the old app's
+ * npx survives that npx exiting.
+ */
+function relaunchInvocation({ spec, env, logPath, now, systemdRunPath }) {
+  if (typeof env?.INVOCATION_ID === 'string' && env.INVOCATION_ID !== '' && typeof systemdRunPath === 'string') {
+    return {
+      mode: 'systemd-run',
+      command: systemdRunPath,
+      args: [
+        '--user', '--collect', '--quiet',
+        `--unit=session-manager-relaunch-${now}`,
+        '-p', 'KillMode=process',
+        '-p', `StandardOutput=append:${logPath}`,
+        '-p', `StandardError=append:${logPath}`,
+        `--setenv=PATH=${env.PATH}`,
+        '--',
+        spec.command, ...spec.args,
+      ],
+    };
+  }
+  return { mode: 'detached', command: spec.command, args: spec.args };
+}
+
+function defaultSpawnRelaunch({
+  logPath = schedulerPaths.watchdogRelaunchLogPath(), packaged, execPath, spawnFn, spawnSyncFn,
+  env: envIn = process.env, now = Date.now(),
+} = {}) {
+  const cp = require('node:child_process');
+  const spawn = spawnFn || cp.spawn;
+  const spawnSync = spawnSyncFn || cp.spawnSync;
   const spec = relaunchSpec({ packaged, execPath });
   fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const env = { ...envIn };
+  // The watchdog may itself run as node via the app binary; the relaunched app must not.
+  if (spec.packaged) delete env.ELECTRON_RUN_AS_NODE;
+  const inv = relaunchInvocation({
+    spec, env, logPath, now,
+    systemdRunPath: env.INVOCATION_ID ? findOnPath('systemd-run', env.PATH) : null,
+  });
+  let result = { mode: 'detached' };
+  if (inv.mode === 'systemd-run') {
+    const r = spawnSync(inv.command, inv.args, { timeout: 15000, stdio: 'ignore', env });
+    if (r && !r.error && r.status === 0) {
+      return { mode: 'systemd-run', ok: true, unit: `session-manager-relaunch-${now}` };
+    }
+    logRelaunchLine(logPath, `systemd-run failed (${r?.error?.message || `status ${r?.status}`}) — falling back to detached spawn`);
+    result = { mode: 'detached-fallback' };
+  }
   const fd = fs.openSync(logPath, 'a');
   try {
-    const env = { ...process.env };
-    // The watchdog may itself run as node via the app binary; the relaunched app must not.
-    if (spec.packaged) delete env.ELECTRON_RUN_AS_NODE;
     const child = spawn(spec.command, spec.args, {
       detached: true,
       stdio: ['ignore', fd, fd],
@@ -252,6 +310,7 @@ function defaultSpawnRelaunch({ logPath = schedulerPaths.watchdogRelaunchLogPath
   } finally {
     fs.closeSync(fd);
   }
+  return result;
 }
 
 /**
@@ -310,11 +369,14 @@ function maybeRelaunchApp({
   }
 
   const attemptCount = state.attemptCount + 1;
-  spawnFn({ logPath });
+  const spawned = spawnFn({ logPath, now });
+  const how = spawned && spawned.mode === 'systemd-run'
+    ? `via systemd-run unit ${spawned.unit || `session-manager-relaunch-${now}`}${spawned.ok === false ? ' (failed)' : ''}`
+    : spawned && spawned.mode === 'detached-fallback' ? 'detached (systemd-run fallback)' : 'detached';
   writeRelaunchState(statePath, { lastAttemptTs: now, attemptCount });
   logRelaunchLine(
     logPath,
-    `relaunch attempt ${attemptCount}/${maxAttempts}: spawning "npx claude-code-session-manager@latest" (heartbeat stale, last-known pid dead)`,
+    `relaunch attempt ${attemptCount}/${maxAttempts}: spawning ${how} (heartbeat stale, last-known pid dead)`,
   );
   return { relaunched: true, reason: 'launched', attemptCount };
 }
@@ -465,6 +527,8 @@ module.exports = {
   readRelaunchState,
   writeRelaunchState,
   defaultSpawnRelaunch,
+  relaunchInvocation,
+  findOnPath,
   relaunchSpec,
   maybeRelaunchApp,
   DEFAULT_MAX_AGE_MS,

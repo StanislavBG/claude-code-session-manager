@@ -20,6 +20,7 @@ let clockOffset;
 let statSpy;
 let nowSpy;
 let statted;
+let statDelayMs = 0;
 
 const DIRS = ['-a', '-b', '-c', '-d', '-e'];
 const MODULES = ['../lib/historyRollup.cjs', '../historyAggregator.cjs', '../config.cjs'];
@@ -49,12 +50,17 @@ beforeEach(() => {
   }
   // Fake clock: every transcript stat costs 100 ms, so budgetMs=150 walks 2 dirs per call.
   clockOffset = 0;
+  statDelayMs = 0;
   statted = [];
-  const realNow = Date.now.bind(Date);
-  nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + clockOffset);
+  const base = Date.now();
+  nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => base + clockOffset);
   const realStat = fsp.stat.bind(fsp);
   statSpy = vi.spyOn(fsp, 'stat').mockImplementation(async (p, ...rest) => {
-    if (String(p).endsWith('.jsonl') && String(p).includes(path.join('.claude', 'projects'))) { clockOffset += 100; statted.push(path.basename(path.dirname(String(p)))); }
+    if (String(p).endsWith('.jsonl') && String(p).includes(path.join('.claude', 'projects'))) {
+      if (statDelayMs) await new Promise((r) => setTimeout(r, statDelayMs));
+      clockOffset += 100;
+      statted.push(path.basename(path.dirname(String(p))));
+    }
     return realStat(p, ...rest);
   });
 });
@@ -101,6 +107,13 @@ test('dryRun never writes the cursor', async () => {
 
 test('missing or corrupt cursor starts a fresh cycle', async () => {
   fs.writeFileSync(cursorPath, '{not json');
+  await historyAggregator.finalizeClosedDays({ budgetMs: 150, cursorPath });
+  expect(statted).toEqual(['-a', '-b']);
+  expect(readCursor().lastDir).toBe('-b');
+});
+
+test('budget is independent of real elapsed time', async () => {
+  statDelayMs = 80;
   await historyAggregator.finalizeClosedDays({ budgetMs: 150, cursorPath });
   expect(statted).toEqual(['-a', '-b']);
   expect(readCursor().lastDir).toBe('-b');

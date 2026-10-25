@@ -87,7 +87,10 @@ const CACHE_TTL_MS = 120_000;
 // Bounds how many project dirs the async rescan reads concurrently.
 const RESCAN_CONCURRENCY = 32;
 const EMPTY_CWDS = Object.freeze([]);
-const rawScanCache = new Map(); // projectsDir -> { dirMtimeMs, cachedAt, records, refreshPromise }
+// projectsDir -> { dirMtimeMs, cachedAt, records, dirs, refreshPromise }
+// `dirs` is Map<projectDirName, {rawCwd, newestMtimeMs, newestFile, newestSize}> — the
+// per-dir record cache that lets a changed projectsDir rescan only the added dirs.
+const rawScanCache = new Map();
 
 /** Forces the next activeProjectCwds/allProjectCwds call to rescan. */
 function bustProjectCwdCache() {
@@ -160,11 +163,19 @@ function lastCwdInLines(lines) {
   return null;
 }
 
+/** True when the cached entry's newest transcript is unchanged (name, mtime, size). */
+function sameNewest(prev, newest) {
+  return !!prev && prev.newestFile === newest.tf && prev.newestMtimeMs === newest.mtimeMs
+    && prev.newestSize === newest.size;
+}
+
 /**
- * scanOneProjectDirSync(projDir) → {rawCwd, newestMtimeMs} | null
+ * scanOneProjectDirSync(projDir, prev?) → {rawCwd, newestMtimeMs} | null
  * Newest *.jsonl's mtime plus its last parseable `cwd`, for one project dir.
+ * With `prev` (a cached entry), the tail read is skipped entirely when the newest
+ * transcript's name, mtime and size are unchanged.
  */
-function scanOneProjectDirSync(projDir) {
+function scanOneProjectDirSync(projDir, prev) {
   let entries;
   try {
     entries = fs.readdirSync(projDir).filter((f) => f.endsWith('.jsonl'));
@@ -173,17 +184,20 @@ function scanOneProjectDirSync(projDir) {
   const files = [];
   for (const tf of entries) {
     const fp = path.join(projDir, tf);
-    try { files.push({ fp, mtimeMs: fs.statSync(fp).mtimeMs }); } catch { continue; }
+    try { const st = fs.statSync(fp); files.push({ fp, tf, mtimeMs: st.mtimeMs, size: st.size }); } catch { continue; }
   }
   if (!files.length) return null;
   files.sort((x, y) => y.mtimeMs - x.mtimeMs);
   const newestMtimeMs = files[0].mtimeMs;
+  const newestFile = files[0].tf;
+  const newestSize = files[0].size;
+  if (sameNewest(prev, files[0])) return { ...prev, newestMtimeMs };
 
   for (const { fp } of files.slice(0, MAX_FALLBACK_FILES)) {
     let size = TAIL_BYTES;
     for (;;) {
       const rawCwd = lastCwdInLines(readTailLines(fp, size));
-      if (rawCwd) return { rawCwd, newestMtimeMs };
+      if (rawCwd) return { rawCwd, newestMtimeMs, newestFile, newestSize };
       if (size >= MAX_TAIL_BYTES || size >= fileSizeSync(fp)) break;
       size = Math.min(size * TAIL_GROWTH, MAX_TAIL_BYTES);
     }
@@ -237,14 +251,19 @@ function scanProjectsDir(projectsDir) {
   let slugs;
   try { slugs = fs.readdirSync(projectsDir); } catch { rawScanCache.delete(projectsDir); return null; }
 
-  const records = [];
+  // Incremental: reuse every already-known dir's entry, scan only added names,
+  // drop names that vanished.
+  const prevDirs = cached ? cached.dirs : null;
+  const dirs = new Map();
   for (const slug of slugs) {
+    const known = prevDirs && prevDirs.get(slug);
+    if (known) { dirs.set(slug, known); continue; }
     const rec = scanOneProjectDirSync(path.join(projectsDir, slug));
-    if (rec) records.push(rec);
+    if (rec) dirs.set(slug, rec);
   }
 
-  Object.freeze(records);
-  rawScanCache.set(projectsDir, { dirMtimeMs, cachedAt: now0, records, refreshPromise: null });
+  const records = Object.freeze([...dirs.values()]);
+  rawScanCache.set(projectsDir, { dirMtimeMs, cachedAt: now0, records, dirs, refreshPromise: null });
   return records;
 }
 
@@ -271,10 +290,10 @@ async function readTailLinesAsync(filePath, maxBytes) {
 }
 
 /**
- * scanOneProjectDirAsync(projDir) → Promise<{rawCwd, newestMtimeMs} | null>
+ * scanOneProjectDirAsync(projDir, prev?) → Promise<{rawCwd, newestMtimeMs} | null>
  * fs.promises counterpart of scanOneProjectDirSync, used only by the async rescan.
  */
-async function scanOneProjectDirAsync(projDir) {
+async function scanOneProjectDirAsync(projDir, prev) {
   let entries;
   try {
     entries = (await fsp.readdir(projDir)).filter((f) => f.endsWith('.jsonl'));
@@ -283,17 +302,20 @@ async function scanOneProjectDirAsync(projDir) {
   const files = [];
   for (const tf of entries) {
     const fp = path.join(projDir, tf);
-    try { files.push({ fp, mtimeMs: (await fsp.stat(fp)).mtimeMs }); } catch { continue; }
+    try { const st = await fsp.stat(fp); files.push({ fp, tf, mtimeMs: st.mtimeMs, size: st.size }); } catch { continue; }
   }
   if (!files.length) return null;
   files.sort((x, y) => y.mtimeMs - x.mtimeMs);
   const newestMtimeMs = files[0].mtimeMs;
+  const newestFile = files[0].tf;
+  const newestSize = files[0].size;
+  if (sameNewest(prev, files[0])) return { ...prev, newestMtimeMs };
 
   for (const { fp } of files.slice(0, MAX_FALLBACK_FILES)) {
     let size = TAIL_BYTES;
     for (;;) {
       const rawCwd = lastCwdInLines(await readTailLinesAsync(fp, size));
-      if (rawCwd) return { rawCwd, newestMtimeMs };
+      if (rawCwd) return { rawCwd, newestMtimeMs, newestFile, newestSize };
       let fileSize = 0;
       try { fileSize = (await fsp.stat(fp)).size; } catch { /* gone: stop growing */ }
       if (size >= MAX_TAIL_BYTES || size >= fileSize) break;
@@ -311,25 +333,27 @@ async function scanOneProjectDirAsync(projDir) {
  * (missing dir, unreadable) is left to throw/reject — startAsyncRefresh's
  * caller catches it, logs once, and keeps the old cached record.
  */
-async function rescanProjectsDirAsync(projectsDir) {
+async function rescanProjectsDirAsync(projectsDir, prevDirs) {
   const dirMtimeMs = (await fsp.stat(projectsDir)).mtimeMs;
   const slugs = await fsp.readdir(projectsDir);
 
-  const records = [];
+  const dirs = new Map();
   let nextIdx = 0;
   async function worker() {
     for (;;) {
       const i = nextIdx++;
       if (i >= slugs.length) return;
-      const rec = await scanOneProjectDirAsync(path.join(projectsDir, slugs[i]));
-      if (rec) records.push(rec);
+      const rec = await scanOneProjectDirAsync(
+        path.join(projectsDir, slugs[i]), prevDirs && prevDirs.get(slugs[i]),
+      );
+      if (rec) dirs.set(slugs[i], rec);
     }
   }
   const workerCount = Math.min(RESCAN_CONCURRENCY, slugs.length);
   await Promise.all(Array.from({ length: workerCount }, worker));
 
-  Object.freeze(records);
-  return { dirMtimeMs, records };
+  const records = Object.freeze([...dirs.values()]);
+  return { dirMtimeMs, records, dirs };
 }
 
 /**
@@ -345,12 +369,12 @@ function startAsyncRefresh(projectsDir) {
   if (!entry) return Promise.resolve();
   if (entry.refreshPromise) return entry.refreshPromise;
 
-  const promise = rescanProjectsDirAsync(projectsDir)
+  const promise = rescanProjectsDirAsync(projectsDir, entry.dirs)
     .then((result) => {
       const current = rawScanCache.get(projectsDir);
       if (!current) return; // busted mid-flight; nothing to swap into
       rawScanCache.set(projectsDir, {
-        dirMtimeMs: result.dirMtimeMs, cachedAt: Date.now(), records: result.records, refreshPromise: null,
+        dirMtimeMs: result.dirMtimeMs, cachedAt: Date.now(), records: result.records, dirs: result.dirs, refreshPromise: null,
       });
     })
     .catch((err) => {

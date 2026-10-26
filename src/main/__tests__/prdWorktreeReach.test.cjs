@@ -32,6 +32,19 @@ test('dedupes, requires a slash, strips trailing punctuation, caps at 200', () =
   expect(extractRepoPathCandidates(null)).toEqual([]);
 });
 
+test('strips #anchor, :line and :line-range suffixes', () => {
+  expect(extractRepoPathCandidates('docs/a/README.md#lifecycle')).toEqual(['docs/a/README.md']);
+  expect(extractRepoPathCandidates('docs/a/README.md:12')).toEqual(['docs/a/README.md']);
+  expect(extractRepoPathCandidates('(docs/a/README.md:40-60),')).toEqual(['docs/a/README.md']);
+  expect(extractRepoPathCandidates('docs/a/README.md#x docs/a/README.md:1 docs/a/README.md')).toEqual(['docs/a/README.md']);
+});
+
+test('a still-ignored suffixed path produces the warning', () => {
+  const w = worktreeReachWarnings({ goal: 'see downloads/x.db:3 for data' }, ['downloads/x.db']);
+  expect(w).toHaveLength(1);
+  expect(w[0]).toContain('downloads/x.db');
+});
+
 test('empty ignoredPaths yields no warnings', () => {
   expect(worktreeReachWarnings({ goal: 'x downloads/a.db' }, [])).toEqual([]);
   expect(worktreeReachWarnings({ goal: 'x' }, undefined)).toEqual([]);

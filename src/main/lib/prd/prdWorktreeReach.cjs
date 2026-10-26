@@ -22,6 +22,9 @@ const MAX_NAMED_PATHS = 5;
 const LEADING_JUNK_RE = /^[`'"([<]+/;
 const TRAILING_JUNK_RE = /[`'")\]>.,:;]+$/;
 
+const FRAGMENT_RE = /#[^/#]*$/;
+const LINE_SUFFIX_RE = /:\d+(?:-\d+)?$/;
+
 function isCandidate(token) {
   if (!token.includes('/')) return false;
   if (/^[/~$-]/.test(token)) return false;
@@ -35,7 +38,12 @@ function extractRepoPathCandidates(text) {
   const seen = new Set();
   for (const raw of String(text == null ? '' : text).split(/\s+/)) {
     if (!raw) continue;
-    const token = raw.replace(LEADING_JUNK_RE, '').replace(TRAILING_JUNK_RE, '');
+    const token = raw
+      .replace(LEADING_JUNK_RE, '')
+      .replace(TRAILING_JUNK_RE, '')
+      .replace(FRAGMENT_RE, '')
+      .replace(LINE_SUFFIX_RE, '')
+      .replace(TRAILING_JUNK_RE, '');
     if (!token || !isCandidate(token)) continue;
     seen.add(token);
     if (seen.size >= MAX_CANDIDATES) break;

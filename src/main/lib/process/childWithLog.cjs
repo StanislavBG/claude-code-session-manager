@@ -53,6 +53,7 @@
 const fs = require('node:fs');
 const { spawn, execFile } = require('node:child_process');
 const { killTree } = require('./killTree.cjs');
+const { feedChildStdin } = require('./childStdin.cjs');
 
 // Injectable for tests (enumeration-failure coverage).
 const deps = { execFile };
@@ -320,16 +321,7 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
 
   ctx.child = child;
 
-  if (stdinText !== null && child.stdin) {
-    // Listener FIRST: a child that exits without reading raises EPIPE on the write.
-    let stdinErrLogged = false;
-    child.stdin.on('error', (err) => {
-      if (stdinErrLogged) return;
-      stdinErrLogged = true;
-      safeLog(`[childWithLog] stdin write failed (${(err && (err.code || err.message)) || 'unknown'}): the child exited before reading its input\n`);
-    });
-    child.stdin.end(stdinText, 'utf8');
-  }
+  if (stdinText !== null) feedChildStdin(child, stdinText, { log: safeLog });
 
   child.on('error', (err) => handleDone(-1, null, err, false));
   child.on('exit', (code, signal) => handleDone(code, signal, undefined, false));

@@ -9,6 +9,7 @@
   "auditLog": "telemetry",
   "branchSweep": "git",
   "builtinMacros": "persona-macro",
+  "childStdin": "process",
   "childWithLog": "process",
   "claudeBin": "claude",
   "claudeCliCaps": "claude",

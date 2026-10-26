@@ -198,4 +198,17 @@ describe('handleChatLinkClick', () => {
     expect(err.mock.calls.some((c) => String(c[0]).includes('outside the project'))).toBe(true)
     vi.unstubAllGlobals()
   })
+  it.each([
+    ['path outside home', true],
+    ['path outside home and project roots: /etc/passwd', true],
+    ['EACCES: permission denied', false],
+  ])('outside-project toast for read error %j => %s', async (error, expectToast) => {
+    ;(window.api.files.read as ReturnType<typeof vi.fn>).mockResolvedValue({ ok: false, text: '', error, size: 0 })
+    const { toast } = await import('../../state/toast')
+    const err = vi.spyOn(toast, 'error')
+    const container = mount(`<span ${FILE_LINK_ATTR}="/etc/passwd"></span>`)
+    await fireClick(container, container.firstElementChild!, '/home/user/project').result
+    const shown = err.mock.calls.some((c) => String(c[0]).includes('outside the project'))
+    expect(shown).toBe(expectToast)
+  })
 })

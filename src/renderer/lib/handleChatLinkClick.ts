@@ -36,7 +36,7 @@ async function resolveReadableFile(
   // (files.cjs) rather than re-implementing path validation in the renderer.
   // The same check runs again below for every cross-tab fallback candidate.
   const primaryRead = await window.api.files.read(primary.absPath)
-  if (!primaryRead.ok && primaryRead.error === 'path outside home' && !isUnderProject(primary.absPath, cwd)) {
+  if (!primaryRead.ok && primaryRead.error?.startsWith('path outside home') && !isUnderProject(primary.absPath, cwd)) {
     toast.error("That path is outside the project and can't be opened.")
     return null
   }

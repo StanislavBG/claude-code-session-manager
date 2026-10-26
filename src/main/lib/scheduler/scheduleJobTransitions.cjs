@@ -116,7 +116,7 @@ const LEGAL_TRANSITIONS = {
   pending: ['running', 'completed', 'failed', 'skipped'],
   running: ['completed', 'failed', 'needs_review', 'skipped', 'pending'],
   investigating: ['failed', 'needs_review', 'completed', 'pending', 'skipped'],
-  failed: ['investigating', 'pending', 'completed', 'needs_review'],
+  failed: ['investigating', 'pending', 'completed', 'needs_review', 'skipped'],
   needs_review: ['investigating', 'pending', 'completed', 'skipped', 'running'],
   completed: ['pending'],
   skipped: ['pending'],

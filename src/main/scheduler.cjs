@@ -8670,6 +8670,33 @@ function applyNeedsReviewAutoResolve(j, jobsInProject = []) {
 }
 
 /**
+ * Terminal outcome for a failed row that used every FAILED_AUTORESET_CAP
+ * auto-reset and sat past STUCK_FAILED_ESCALATE_MS: skip it (same marker and
+ * grouped review notice as the rung-6 cap-exhausted skip) so dependents drain
+ * and the Epic's automated turn queues the fix. Mutates in place; returns
+ * 'skipped', or null when the race guard rejects it.
+ */
+function applyStuckFailedAutoSkip(j, ageMs = 0) {
+  if (!j || j.status !== 'failed' || reviewLadder.isCancelledJob(j)) return null;
+  if ((j.failedAutoResetAttempts ?? 0) < reviewLadder.FAILED_AUTORESET_CAP) return null;
+  const cap = reviewLadder.FAILED_AUTORESET_CAP;
+  j.needsReviewAutoResolvedSkip = true;
+  j.error = `failed auto-reset cap exhausted (${cap}/${cap} attempts) after ${Math.round(ageMs / 3_600_000)}h — auto-skipped to unblock downstream dependsOn rows`;
+  j.reviewNotice = buildReviewNotice({
+    job: j,
+    report: null,
+    epicId: j.epicId ?? j.sourcePromptId ?? null,
+    now: new Date().toISOString(),
+    prior: j.reviewNotice,
+  });
+  transitionJob(j, 'skipped', {
+    reason: `failed auto-resets exhausted (${cap}/${cap}) — auto-skipped`,
+    source: 'stuckFailedAutoSkip',
+  });
+  return 'skipped';
+}
+
+/**
  * Self-healing pass over needs_review jobs. The verifier runs in-process, so a
  * fix to runVerify.cjs only takes effect for jobs verified AFTER an app
  * restart — jobs flagged by the old (buggy) verifier stay stuck in needs_review
@@ -10104,18 +10131,19 @@ function rescheduleIntervalTick() {
       }
       for (const stuck of stuckFailed) {
         const j = ms.jobs.find((x) => x.slug === stuck.slug);
-        if (!j || j.status !== 'failed' || j.stuckFailedNotified === true) continue; // race guard
+        if (!j || j.status !== 'failed') continue; // race guard
         // Still has auto-reset attempts left — it will be (or already was,
         // earlier this same pass) picked up by the loop above instead.
         // Never log "reset it by hand" for a row that isn't actually stuck.
         if ((j.failedAutoResetAttempts ?? 0) < reviewLadder.FAILED_AUTORESET_CAP) continue;
-        j.stuckFailedNotified = true;
+        const outcome = applyStuckFailedAutoSkip(j, stuck.ageMs);
+        if (!outcome) continue;
         console.warn(
           `[scheduler] FAILED PRD STUCK: project=${stuck.cwd ?? '(unknown)'} slug=${stuck.slug} `
           + `failed=${Math.round(stuck.ageMs / 3_600_000)}h (>= ${Math.round(reviewLadder.STUCK_FAILED_ESCALATE_MS / 3_600_000)}h threshold) — `
-          + `auto-reset cap exhausted (${reviewLadder.FAILED_AUTORESET_CAP}/${reviewLadder.FAILED_AUTORESET_CAP} attempts); reset it by hand via scheduler_reset_job`,
+          + `auto-reset cap exhausted (${reviewLadder.FAILED_AUTORESET_CAP}/${reviewLadder.FAILED_AUTORESET_CAP} attempts); auto-skipped to unblock dependents`,
         );
-        appendAuditEvent('job_stuck_failed', { slug: stuck.slug, cwd: stuck.cwd, ageMs: stuck.ageMs });
+        appendAuditEvent('job_stuck_failed', { slug: stuck.slug, cwd: stuck.cwd, ageMs: stuck.ageMs, outcome });
       }
       for (const target of exhaustedNeedsReviewTargets) {
         const j = ms.jobs.find((x) => x.slug === target.slug);
@@ -11191,6 +11219,7 @@ module.exports = {
   runGateShadow,
   awaitGateShadowIdle: async () => { while (gateShadowPending) await gateShadowPending; },
   applyNeedsReviewAutoResolve,
+  applyStuckFailedAutoSkip,
   computeLooksDone,
   attributeLandedCommits,
   isPromotableOriginal,

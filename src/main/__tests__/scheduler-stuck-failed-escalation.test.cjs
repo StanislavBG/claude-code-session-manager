@@ -124,3 +124,28 @@ test('stuckFailedEscalationDisabled reflects SM_STUCK_FAILED_ESCALATE_DISABLE', 
     else process.env.SM_STUCK_FAILED_ESCALATE_DISABLE = saved;
   }
 });
+
+test('applyStuckFailedAutoSkip skips a cap-exhausted failed row with marker + reviewNotice', () => {
+  const { applyStuckFailedAutoSkip } = require('../scheduler.cjs');
+  const { FAILED_AUTORESET_CAP } = require('../scheduler/reviewLadder.cjs');
+  const job = {
+    slug: 'cap-exhausted', status: 'failed', cwd: '/tmp/x', epicId: 'epic-1',
+    failedAutoResetAttempts: FAILED_AUTORESET_CAP,
+    statusHistory: [{ to: 'failed', at: new Date(Date.now() - 4 * DAY_MS).toISOString() }],
+  };
+  assert.equal(applyStuckFailedAutoSkip(job, 4 * DAY_MS), 'skipped');
+  assert.equal(job.status, 'skipped');
+  assert.equal(job.needsReviewAutoResolvedSkip, true);
+  assert.ok(job.reviewNotice && job.reviewNotice.sentAt === null);
+  assert.equal(job.reviewNotice.epicId, 'epic-1');
+  assert.match(job.error, /auto-reset cap exhausted/);
+});
+
+test('applyStuckFailedAutoSkip leaves a row with auto-resets left untouched', () => {
+  const { applyStuckFailedAutoSkip } = require('../scheduler.cjs');
+  const job = { slug: 'has-resets', status: 'failed', failedAutoResetAttempts: 1 };
+  assert.equal(applyStuckFailedAutoSkip(job, 4 * DAY_MS), null);
+  assert.equal(job.status, 'failed');
+  assert.equal(job.needsReviewAutoResolvedSkip, undefined);
+  assert.equal(job.reviewNotice, undefined);
+});

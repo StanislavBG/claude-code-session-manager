@@ -34,7 +34,6 @@ const { DEFAULT_PROJECT_CWD } = require('../lib/scheduler/schedulerBatch.cjs');
  * Kill-switch: SM_RESUME_RECOVERY_DISABLE=1 restores today's behaviour
  * exactly (always returns null), mirroring SM_RCA_DISABLE/SM_DOD_DISABLE.
  */
-/** A row parked on a question only the human can answer — no automatic rung may touch it. */
 // PRD refire-cap: a row parked by the post-run re-fire cap stays parked for the
 // Epic's grouped notice. Every automated rung (reset, re-verify, auto-fix,
 // auto-skip) consults this ONE predicate.
@@ -42,14 +41,10 @@ function isRefireCapped(job) {
   return !!job && job.verifierVerdict === 'refire_capped';
 }
 
-function isNeedsHuman(job) {
-  return !!job && job.verifierVerdict === 'needs_human';
-}
 
 function selectResumeRecoveryTarget(job) {
   if (process.env.SM_RESUME_RECOVERY_DISABLE === '1') return null;
   if (!job || job.status !== 'needs_review') return null;
-  if (isNeedsHuman(job)) return null;
   if (job.verifierVerdict !== 'uncommitted_changes') return null;
   if (typeof job.sessionId !== 'string' || job.sessionId.length === 0) return null;
   if (job.resumeRecoveryAttempted === true) return null;
@@ -113,7 +108,6 @@ function isMechanicalRecoveryFutile(job, currentHeadSha) {
 function selectMechanicalRecoveryTarget(job, currentHeadSha = null) {
   if (process.env.SM_MECHANICAL_RECOVERY_DISABLE === '1') return null;
   if (!job || job.status !== 'needs_review') return null;
-  if (isNeedsHuman(job)) return null;
   if (!MECHANICALLY_RESOLVABLE_VERDICTS.has(job.verifierVerdict)) return null;
   if (job.mechanicalRecoveryAttempted === true) return null;
   if (isMechanicalRecoveryFutile(job, currentHeadSha)) return null;
@@ -827,7 +821,6 @@ function selectExhaustedNeedsReviewTargets(jobs, now, thresholdMs) {
   for (const j of jobs ?? []) {
     if (isCancelledJob(j)) continue;
     if (j.status !== 'needs_review') continue;
-    if (isNeedsHuman(j)) continue;
     if (!isEligibleForNeedsReviewAutoResolve(j, jobs)) continue;
     if ((j.exhaustedResolveAttempts ?? 0) > NEEDS_REVIEW_RESOLVE_CAP) continue;
     const history = j.statusHistory || [];
@@ -872,7 +865,6 @@ function selectAutoFixTargets(jobs, { fixSlugExists, resolveJobRunId = resolveRu
     if (isCancelledJob(job)) return false;
     if (isRefireCapped(job)) return false;
     if (job.status !== 'needs_review') return false;
-    if (isNeedsHuman(job)) return false;
     // A job parked here because it was blocked by a sibling's foreign WIP
     // three times in a row (never its own regression) has nothing for a
     // fix-plan investigation to diagnose — there is no code defect to
@@ -1013,7 +1005,6 @@ function selectGateShadowTarget(jobs, headByCwd, { authorityDisabled = false, ba
 }
 
 module.exports = {
-  isNeedsHuman,
   isRefireCapped,
   isCancelledJob,
   selectResumeRecoveryTarget,

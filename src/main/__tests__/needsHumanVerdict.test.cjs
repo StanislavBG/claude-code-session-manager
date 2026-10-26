@@ -31,32 +31,22 @@ const row = (over = {}) => ({
   ...over,
 });
 
-test('isNeedsHuman', () => {
-  assert.equal(ladder.isNeedsHuman(row()), true);
-  assert.equal(ladder.isNeedsHuman(row({ verifierVerdict: 'sentinel_fail' })), false);
-  assert.equal(ladder.isNeedsHuman(null), false);
+test('isNeedsHuman is gone', () => {
+  assert.equal(ladder.isNeedsHuman, undefined);
 });
 
-test('selectMechanicalRecoveryTarget skips needs_human', () => {
-  assert.equal(ladder.selectMechanicalRecoveryTarget(row({ verifierVerdict: 'worktree_integration_failed' })) !== undefined, true);
-  assert.equal(ladder.selectMechanicalRecoveryTarget(row()), null);
+test('selectMechanicalRecoveryTarget no longer exempts needs_human', () => {
+  assert.equal(ladder.selectMechanicalRecoveryTarget(row()), null); // not a mechanical verdict
 });
 
-test('selectResumeRecoveryTarget skips needs_human', () => {
-  assert.equal(ladder.selectResumeRecoveryTarget(row({ uncommittedPaths: ['a.txt'] })), null);
-});
-
-test('selectAutoFixTargets and isEligibleForImmediateAutoFix skip needs_human', () => {
+test('selectAutoFixTargets and isEligibleForImmediateAutoFix include needs_human', () => {
   const jobs = [row()];
   const opts = { fixSlugExists: () => false, resolveJobRunId: () => 'r1' };
-  assert.deepEqual(ladder.selectAutoFixTargets(jobs, opts), []);
-  assert.equal(ladder.isEligibleForImmediateAutoFix(jobs[0], jobs, () => false), false);
-  // control: same row with a normal fail verdict is selected
-  const ctl = [row({ verifierVerdict: 'sentinel_fail' })];
-  assert.equal(ladder.selectAutoFixTargets(ctl, opts).length, 1);
+  assert.equal(ladder.selectAutoFixTargets(jobs, opts).length, 1);
+  assert.equal(ladder.isEligibleForImmediateAutoFix(jobs[0], jobs, () => false), true);
 });
 
-test('selectExhaustedNeedsReviewTargets skips needs_human', () => {
+test('selectExhaustedNeedsReviewTargets includes a dwelt needs_human row', () => {
   const now = Date.now();
-  assert.deepEqual(ladder.selectExhaustedNeedsReviewTargets([row()], now, 1000), []);
+  assert.equal(ladder.selectExhaustedNeedsReviewTargets([row({ autoFixAttempted: true, autoFixOutcome: 'error', autoFixRetries: 1 })], now, 1000).length, 1);
 });

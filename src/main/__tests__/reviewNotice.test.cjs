@@ -297,12 +297,17 @@ test('buildReviewNotice uses humanQuestion as reason for needs_human and caps le
   expect(long.blockingPaths).toEqual([]);
 });
 
-test('a needs_human needs_review row is due immediately', () => {
-  const job = parkedJob({
+test('a needs_human needs_review row waits the same hold window as every other park', () => {
+  const young = parkedJob({
     verifierVerdict: 'needs_human',
     reviewNotice: { ...parkedJob().reviewNotice, firstParkedAt: new Date(NOW - 1000).toISOString() },
   });
-  expect(selectDueReviewNotices([job], { now: NOW, holdMs: HOLD_MS })).toHaveLength(1);
+  expect(selectDueReviewNotices([young], { now: NOW, holdMs: HOLD_MS })).toHaveLength(0);
+  const old = parkedJob({
+    verifierVerdict: 'needs_human',
+    reviewNotice: { ...parkedJob().reviewNotice, firstParkedAt: new Date(NOW - HOLD_MS - 1000).toISOString() },
+  });
+  expect(selectDueReviewNotices([old], { now: NOW, holdMs: HOLD_MS })).toHaveLength(1);
 });
 
 function blockGroup(cause, notice, cwd = '/proj') {

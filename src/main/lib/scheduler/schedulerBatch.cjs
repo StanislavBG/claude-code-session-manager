@@ -360,7 +360,7 @@ function pickForProject(projectJobs, runningSlugsInProject, slots, heldSlugs = n
     for (const [rootSlug, { rootStatus, slugs }] of heldByRoot) {
       const names = [...slugs].sort().join(', ');
       if (rootStatus === 'needs_review') {
-        reasons.push(`holding ${slugs.size} job(s) transitively behind root blocker ${rootSlug} (needs_review) [${names}]. ${rootSlug} is a QUESTION awaiting a human — the chain resumes once it is retired or reset; it will not clear on its own.`);
+        reasons.push(`holding ${slugs.size} job(s) transitively behind root blocker ${rootSlug} (needs_review) [${names}]. the chain resumes when the recovery ladder resolves ${rootSlug} (or it is retired or reset).`);
       } else if (rootStatus === 'failed') {
         reasons.push(`holding ${slugs.size} job(s) transitively behind root blocker ${rootSlug} (failed) [${names}]. Reset or archive ${rootSlug} to unblock the chain.`);
       } else if (rootStatus === 'skipped') {

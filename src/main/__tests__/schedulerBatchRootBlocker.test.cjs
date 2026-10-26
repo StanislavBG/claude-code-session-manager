@@ -31,7 +31,8 @@ test('a 3-deep chain rooted at a needs_review row names the ROOT, not the middle
   // Names the root, not the immediate (middle) dep as the cause.
   assert.match(reason, /root blocker 100-root/);
   assert.match(reason, /needs_review/);
-  assert.match(reason, /is a QUESTION awaiting a human/);
+  assert.match(reason, /recovery ladder resolves 100-root/);
+  assert.doesNotMatch(reason, /QUESTION|awaiting a human|will not clear/);
   // Both downstream jobs are counted as held behind the root.
   assert.match(reason, /holding 2 job\(s\)/);
   assert.match(reason, /101-middle/);

@@ -153,8 +153,6 @@ function selectDueReviewNotices(jobs = [], { now = Date.now(), holdMs = DEFAULT_
   const isDue = (j) => {
     if (j.status === 'skipped' && j.needsReviewAutoResolvedSkip) return true;
     if (j.status !== 'needs_review') return false;
-    // A question for the human has nothing for the ladder to heal — no hold.
-    if (j.verifierVerdict === 'needs_human') return true;
     const firstParkedAt = j.reviewNotice.firstParkedAt;
     if (!firstParkedAt) return false;
     const parkedMs = Date.parse(firstParkedAt);

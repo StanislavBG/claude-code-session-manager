@@ -26,6 +26,7 @@ import { toast } from '../../state/toast'
 import { copyText } from '../../lib/clipboard'
 import { usePanelFocus, usePanelFocusRef } from '../../lib/panelFocus'
 import { useConfigDirWatch } from '../../lib/useConfigDirWatch'
+import { dirname, basename, segments, isUnder } from '../../lib/pathSep'
 import { readUiPrefs,writeUiPrefsPatch } from '../../lib/uiPrefs'
 import { readUiSettingsPrefs, writeUiSettingsPrefs } from '../../lib/uiSettingsPrefs'
 
@@ -58,12 +59,11 @@ export async function loadShowHidden(): Promise<boolean> {
 export function saveShowHidden(value: boolean) {
   writeUiSettingsPrefs({ fileTreeShowHidden: value }).catch(() => {})
 }
-function pruneExpanded(set: Set<string>, path: string): Set<string> {
-  const prefix = path + '/'
+export function pruneExpanded(set: Set<string>, path: string): Set<string> {
   let changed = false
   const next = new Set<string>()
   for (const p of set) {
-    if (p === path || p.startsWith(prefix)) { changed = true; continue }
+    if (p === path || isUnder(p, path)) { changed = true; continue }
     next.add(p)
   }
   return changed ? next : set
@@ -232,7 +232,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     const req = loadReqRef.current
     const byDepth = new Map<number, string[]>()
     for (const p of paths) {
-      const d = p.split('/').length
+      const d = segments(p).length
       const bucket = byDepth.get(d)
       if (bucket) bucket.push(p); else byDepth.set(d, [p])
     }
@@ -299,7 +299,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
         const next = new Set<string>()
         let changed = false
         for (const p of prev) {
-          if (dead.some((d) => p === d || p.startsWith(d + '/'))) { changed = true; continue }
+          if (dead.some((d) => p === d || isUnder(p, d))) { changed = true; continue }
           next.add(p)
         }
         return changed ? next : prev
@@ -493,7 +493,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     }
     if (activeTabId) {
       // Convert absolute path to a relative one when possible, then "@path ".
-      const rel = nodePath.startsWith(cwd + '/') ? nodePath.slice(cwd.length + 1) : nodePath
+      const rel = isUnder(nodePath, cwd) ? nodePath.slice(cwd.replace(/[\\/]+$/, '').length + 1) : nodePath
       window.api.pty.write({ tabId: activeTabId, data: `@${rel} ` })
     }
   }, [onSendToChat, activeTabId, cwd])
@@ -516,7 +516,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     const result = await window.api.files.rename(renaming, name)
     setRenaming(null)
     if (result.ok) {
-      const parent = renaming.slice(0, renaming.lastIndexOf('/'))
+      const parent = dirname(renaming)
       persistExpanded((prev) => pruneExpanded(prev, renaming))
       await refreshNode(parent || cwd)
       tryLoadGitStatus(cwd).then(setGitStatus)
@@ -549,7 +549,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
   const confirmDelete = async () => {
     if (!deleteConfirm) return
     const result = await window.api.files.delete(deleteConfirm.path)
-    const parent = deleteConfirm.path.slice(0, deleteConfirm.path.lastIndexOf('/'))
+    const parent = dirname(deleteConfirm.path)
     setDeleteConfirm(null)
     if (result.ok) {
       persistExpanded((prev) => pruneExpanded(prev, deleteConfirm.path))
@@ -570,7 +570,7 @@ export function FileTree({ cwd, onPreviewFile, onSendToChat, activeTabId }: File
     return root.filter((n) => n.name.toLowerCase().includes(q))
   }, [root, search])
 
-  const projectName = cwd?.split('/').filter(Boolean).pop() || 'project'
+  const projectName = (cwd ? basename(cwd) : '') || 'project'
 
   return (
     <div className="w-full h-full flex flex-col bg-bg-elev text-fg">
@@ -953,8 +953,8 @@ function Modal(props: ModalProps) {
 // Helpers
 // -------------------------------------------------------------------------
 
-function displayName(p: string): string {
-  return p.split('/').filter(Boolean).pop() || p
+export function displayName(p: string): string {
+  return basename(p)
 }
 
 /** Immutable tree update: returns a new node array with children attached at path. */

@@ -18,6 +18,7 @@
 const { spawn } = require('node:child_process');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./claude/claudeBin.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./process/cleanEnv.cjs');
+const { feedChildStdin } = require('./process/childStdin.cjs');
 
 const CLASSIFY_TIMEOUT_MS = 30_000;
 const CLASSIFY_MODEL = 'sonnet';
@@ -61,8 +62,10 @@ function classifyPromptTicket(text) {
       return;
     }
     const childEnv = cleanChildEnv({ PATH: pathWithUserBins() });
+    // The prompt goes on stdin, never argv: a >128 KB argv element fails spawn with E2BIG.
+    const prompt = `${CLASSIFY_PROMPT_PREFIX}${text}`;
     const args = [
-      '-p', `${CLASSIFY_PROMPT_PREFIX}${text}`,
+      '-p',
       '--model', CLASSIFY_MODEL,
       '--strict-mcp-config',
       '--output-format', 'text',
@@ -78,9 +81,11 @@ function classifyPromptTicket(text) {
     };
 
     try {
-      // stdin closed — `claude -p` otherwise blocks waiting for piped stdin.
+      // stdin is a pipe fed with the prompt and then ended (feedChildStdin), so
+      // `claude -p` neither blocks on stdin nor sees an oversized argv element.
       const target = claudeSpawnTarget('aux', 'classify', claudeBin);
-      child = spawnImpl(target.command, args, { env: childEnv, stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
+      child = spawnImpl(target.command, args, { env: childEnv, stdio: ['pipe', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
+      feedChildStdin(child, prompt);
     } catch {
       finish('inline');
       return;
@@ -115,4 +120,4 @@ function classifyPromptTicket(text) {
   });
 }
 
-module.exports = { classifyPromptTicket, parseVerdict, CLASSIFY_TIMEOUT_MS, __setSpawnForTest };
+module.exports = { classifyPromptTicket, CLASSIFY_PROMPT_PREFIX, parseVerdict, CLASSIFY_TIMEOUT_MS, __setSpawnForTest };

@@ -168,7 +168,8 @@ test('non-running rows are never considered, pidless or not', () => {
 test('pidless + past grace + findLiveProcess finds a pid → recovered, never reaped', () => {
   const jobs = [{ slug: 'zombie-alive', status: 'running', startedAt: agoMin(464) }];
   const findLiveProcess = () => 2174739;
-  const { reapable, recovered, warnings } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE, findLiveProcess });
+  const getLogMtimeMs = () => NOW - 24 * 3600_000; // run log exists, stale
+  const { reapable, recovered, warnings } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE, findLiveProcess, getLogMtimeMs });
   assert.deepStrictEqual(reapable, []);
   assert.deepStrictEqual(warnings, []);
   assert.strictEqual(recovered.length, 1);
@@ -176,10 +177,54 @@ test('pidless + past grace + findLiveProcess finds a pid → recovered, never re
   assert.strictEqual(recovered[0].pid, 2174739);
 });
 
+test('pidless + no run log → reaped without calling findLiveProcess', () => {
+  const jobs = [{ slug: 'never-spawned', status: 'running', startedAt: agoMin(464) }];
+  const calls = [];
+  const findLiveProcess = (j) => { calls.push(j.slug); return 973753; };
+  const { reapable, recovered } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE, findLiveProcess, getLogMtimeMs: () => null });
+  assert.deepStrictEqual(calls, []);
+  assert.deepStrictEqual(recovered, []);
+  assert.strictEqual(reapable.length, 1);
+});
+
+test('findLiveProcess pid equal to another running row\'s runtime.pid → not recovered, warning names both slugs + pid', () => {
+  const jobs = [
+    { slug: 'holder', status: 'running', runtime: { pid: 973753 }, startedAt: agoMin(10) },
+    { slug: 'thief', status: 'running', startedAt: agoMin(464) },
+  ];
+  const { reapable, recovered, warnings } = selectReapableJobs(jobs, NOW, {
+    pidAlive: alwaysAlive, grace: GRACE, findLiveProcess: () => 973753, getLogMtimeMs: () => NOW - 24 * 3600_000,
+  });
+  assert.deepStrictEqual(recovered, []);
+  assert.deepStrictEqual(reapable.map((r) => r.slug), ['thief']);
+  assert.strictEqual(warnings.length, 1);
+  assert.match(warnings[0].reason, /holder/);
+  assert.match(warnings[0].reason, /thief/);
+  assert.match(warnings[0].reason, /973753/);
+});
+
+test('same pid found for two pidless rows in one call → first recovered, second reaped with a warning', () => {
+  const jobs = [
+    { slug: 'first', status: 'running', startedAt: agoMin(464) },
+    { slug: 'second', status: 'running', startedAt: agoMin(464) },
+  ];
+  const calls = [];
+  const { reapable, recovered, warnings } = selectReapableJobs(jobs, NOW, {
+    pidAlive: alwaysAlive, grace: GRACE, getLogMtimeMs: () => NOW - 24 * 3600_000,
+    findLiveProcess: (j) => { calls.push(j.slug); return 973753; },
+  });
+  assert.deepStrictEqual(calls, ['first', 'second']);
+  assert.deepStrictEqual(recovered, [{ slug: 'first', pid: 973753 }]);
+  assert.deepStrictEqual(reapable.map((r) => r.slug), ['second']);
+  assert.match(warnings[0].reason, /first/);
+  assert.match(warnings[0].reason, /second/);
+  assert.match(warnings[0].reason, /973753/);
+});
+
 test('pidless + past grace + findLiveProcess finds nothing → reaped exactly as today', () => {
   const jobs = [{ slug: 'zombie-dead', status: 'running', startedAt: agoMin(464) }];
   const findLiveProcess = () => null;
-  const { reapable, recovered } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE, findLiveProcess });
+  const { reapable, recovered } = selectReapableJobs(jobs, NOW, { pidAlive: alwaysAlive, grace: GRACE, findLiveProcess, getLogMtimeMs: () => NOW - 24 * 3600_000 });
   assert.deepStrictEqual(recovered, []);
   assert.strictEqual(reapable.length, 1);
   assert.strictEqual(reapable[0].pidless, true);

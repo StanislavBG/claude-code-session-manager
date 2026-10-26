@@ -70,8 +70,31 @@ test('a pidless row is adopted on any one of the reaper liveness signals', () =>
   const base = { pidAlive: (pid) => pid === 77, runsDir: os.tmpdir(), now: 1_000_000 };
   assert.deepEqual(partitionBootOrphans([job()], { ...base, getLogMtimeMs: () => 999_000, logFreshWindowMs: 5_000 }).adopted, ['p'], 'fresh log');
   assert.deepEqual(partitionBootOrphans([job()], { ...base, getLogPid: () => 77 }).adopted, ['p'], 'log pid alive');
-  assert.deepEqual(partitionBootOrphans([job()], { ...base, findLiveProcess: () => 88 }).adopted, ['p'], '/proc scan');
+  assert.deepEqual(partitionBootOrphans([job()], { ...base, getLogMtimeMs: () => 1_000, findLiveProcess: () => 88 }).adopted, ['p'], '/proc scan');
   assert.deepEqual(partitionBootOrphans([job()], { ...base, getLogMtimeMs: () => 1_000, logFreshWindowMs: 5_000 }).immediate, ['p'], 'stale log');
+});
+
+test('/proc fallback: no run log → immediate without scanning; claimed pid never adopted twice', () => {
+  const rows = () => [
+    { slug: 'a', status: 'running', runtime: {} },
+    { slug: 'b', status: 'running', runtime: {} },
+  ];
+  const base = { pidAlive: () => false, runsDir: os.tmpdir(), now: 1_000_000 };
+  // incident shape: no run logs, stub returns the same pid for both
+  const calls = [];
+  const noLog = partitionBootOrphans(rows(), { ...base, findLiveProcess: (j) => { calls.push(j.slug); return 973753; } });
+  assert.deepEqual(noLog.immediate, ['a', 'b']);
+  assert.deepEqual(noLog.adopted, []);
+  assert.deepEqual(calls, [], 'no scan without a run log');
+  // logs exist: first adopts, second refused for the same pid
+  const dup = partitionBootOrphans(rows(), { ...base, getLogMtimeMs: () => 1_000, findLiveProcess: () => 973753 });
+  assert.deepEqual(dup.adopted, ['a']);
+  assert.deepEqual(dup.immediate, ['b']);
+  // pid recorded on another running row is refused
+  const held = [{ slug: 'h', status: 'running', runtime: { pid: 973753 } }, { slug: 'x', status: 'running', runtime: {} }];
+  const r = partitionBootOrphans(held, { ...base, pidAlive: (p) => p === 973753, getLogMtimeMs: () => 1_000, findLiveProcess: () => 973753 });
+  assert.deepEqual(r.adopted, ['h']);
+  assert.deepEqual(r.immediate, ['x']);
 });
 
 test('a row whose supervisor record says exited is finalized from its meta, not adopted', () => {

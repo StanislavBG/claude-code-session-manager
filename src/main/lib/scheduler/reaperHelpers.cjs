@@ -400,6 +400,11 @@ function selectReapableJobs(jobs, now, {
   const reapable = [];
   const warnings = [];
   const recovered = [];
+  /** pid -> slug that records/was recovered with it */
+  const claimedPids = new Map();
+  for (const r of jobs ?? []) {
+    if (r.status === 'running' && r.runtime?.pid) claimedPids.set(r.runtime.pid, r.slug);
+  }
   for (const j of jobs ?? []) {
     if (j.status !== 'running') continue;
     const pid = j.runtime?.pid;
@@ -435,10 +440,22 @@ function selectReapableJobs(jobs, now, {
       continue;
     }
 
-    const livePid = typeof findLiveProcess === 'function' ? findLiveProcess(j) : null;
+    // A row with no run log never reached the spawn — a /proc scan can only
+    // misattribute a stray process to it.
+    const livePid = (typeof findLiveProcess === 'function' && Number.isFinite(logMtimeMs))
+      ? findLiveProcess(j) : null;
     if (livePid) {
-      recovered.push({ slug: j.slug, pid: livePid });
-      continue;
+      const holder = claimedPids.get(livePid);
+      if (holder && holder !== j.slug) {
+        warnings.push({
+          slug: j.slug,
+          reason: `pid ${livePid} not recovered for ${j.slug} — already claimed by ${holder}`,
+        });
+      } else {
+        claimedPids.set(livePid, j.slug);
+        recovered.push({ slug: j.slug, pid: livePid });
+        continue;
+      }
     }
     reapable.push({
       slug: j.slug,

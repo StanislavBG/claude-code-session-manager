@@ -2821,10 +2821,15 @@ function partitionBootOrphans(jobs, {
 } = {}) {
   const immediate = [];
   const adopted = [];
+  const claimedPids = new Set();
+  for (const r of jobs) {
+    if (r.status === 'running' && r.runtime?.pid) claimedPids.add(r.runtime.pid);
+  }
   for (const j of jobs) {
     if (j.status !== 'running') continue;
     if (isBootRowAlive(j, {
       pidAlive, getLogPid, getLogMtimeMs, logFreshWindowMs, findLiveProcess, readRecord, runsDir, identityOf, now,
+      claimedPids,
     })) adopted.push(j.slug);
     else immediate.push(j.slug);
   }
@@ -2833,6 +2838,7 @@ function partitionBootOrphans(jobs, {
 
 function isBootRowAlive(j, {
   pidAlive, getLogPid, getLogMtimeMs, logFreshWindowMs, findLiveProcess, readRecord, runsDir, identityOf, now,
+  claimedPids = new Set(),
 }) {
   const logMtimeMs = typeof getLogMtimeMs === 'function' ? getLogMtimeMs(j) : null;
   const runDir = j.runId ? path.join(runsDir || schedulerPaths.runsDir(), j.runId) : null;
@@ -2853,7 +2859,12 @@ function isBootRowAlive(j, {
   if (typeof logFreshWindowMs === 'number' && Number.isFinite(logMtimeMs) && now - logMtimeMs <= logFreshWindowMs) return true;
   const logPid = typeof getLogPid === 'function' ? getLogPid(j) : null;
   if (logPid && pidAlive(logPid)) return true;
-  return !!(typeof findLiveProcess === 'function' && findLiveProcess(j));
+  // No run log = dispatch never reached the spawn; a /proc scan could only misattribute a stray process.
+  if (typeof findLiveProcess !== 'function' || !Number.isFinite(logMtimeMs)) return false;
+  const livePid = findLiveProcess(j);
+  if (!livePid || claimedPids.has(livePid)) return false;
+  claimedPids.add(livePid);
+  return true;
 }
 
 /**

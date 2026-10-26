@@ -26,11 +26,9 @@
  *     lock (epicMint.cjs exports withPathLock; requiring it here shares the
  *     same module-level Map via Node's require cache, not a second one).
  *
- * Tombstones are never auto-cleared: resumeArchived() (state/promptSessions.ts)
- * always mints a BRAND NEW Epic id + claudeSessionId — it never reuses the
- * archived id — so a tombstoned id is never legitimately reborn under the
- * current domain model. If that ever changes, this module would need an
- * explicit "un-tombstone" path; today one would be dead code.
+ * Tombstones are cleared in exactly one place: reopenEpic (lib/epic/epicReopen.cjs),
+ * a human pressing Resume/Reopen on a completed Epic, under the same withPathLock.
+ * Nothing else un-tombstones an id.
  */
 
 const path = require('path');

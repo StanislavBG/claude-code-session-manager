@@ -232,6 +232,9 @@ const promptSessionsCreateWorktree = z.object({
   epicId: z.string().regex(PROMPT_SESSION_ID_RE),
 });
 
+// Renderer entry point for reopening a completed Epic in place (lib/epic/epicReopen.cjs).
+const promptSessionsReopen = z.object({ cwd: z.string().min(1).max(4096), epicId: z.string().regex(PROMPT_SESSION_ID_RE) }).strict();
+
 // Renderer entry point for folding an Epic's isolated git worktree branch
 // back into its owning project's main tree (lib/epic/epicWorktreeMerge.cjs) — PRD
 // 1034, the ONLY point where the per-Epic isolation PRD 1033 wires resolves.
@@ -1357,6 +1360,7 @@ module.exports = {
     promptSessionsMergeActiveIndex,
     promptSessionsCreateEpic,
     promptSessionsCreateWorktree,
+    promptSessionsReopen,
     promptSessionsMergeToMain,
     promptSessionsGetWorktreeDisabled,
     promptSessionsSetWorktreeDisabled,

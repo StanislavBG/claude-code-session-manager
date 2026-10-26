@@ -107,3 +107,11 @@ test('parseLog extracts deduplicated transcriptCommitShas from committed gitOper
   assert.deepEqual(r.transcriptCommitShas, ['347641f', '9999999']);
   assert.equal(r.transcriptCommitLanded, true);
 });
+
+test('legacy NEEDS_HUMAN line is classified exactly like FAIL, text as reason', async () => {
+  const { verdict, sidecar } = await run('SCHEDULER_VERDICT: NEEDS_HUMAN need the prod token', false, { committedDuringRun: false });
+  assert.equal(verdict.verdict, 'sentinel_fail');
+  assert.equal(verdict.downgradeTo, 'needs_review');
+  assert.ok(verdict.reason.includes('need the prod token'), verdict.reason);
+  assert.equal(sidecar.sentinel, 'fail');
+});

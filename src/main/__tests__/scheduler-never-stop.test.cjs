@@ -152,3 +152,12 @@ test('a job that leaves REAL source dirty still parks — the filter must not ex
     ['scripts/arena/titan.gd'],
   );
 });
+
+test('finish protocol no longer offers NEEDS_HUMAN and tells the run to FAIL naming what is missing', () => {
+  const { buildFinishProtocol } = require('../scheduler.cjs');
+  for (const reviewInRun of [true, false]) {
+    const text = buildFinishProtocol({ reviewInRun });
+    assert.ok(!text.includes('NEEDS_HUMAN'));
+    assert.ok(text.includes('Never ask a question'));
+  }
+});

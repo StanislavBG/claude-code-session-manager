@@ -359,18 +359,16 @@ ${verdictStepNum}. VERDICT LINE — end your final report with exactly one of th
      SCHEDULER_VERDICT: PASS
      SCHEDULER_VERDICT: FAIL <one-line reason>
      SCHEDULER_VERDICT: BLOCKED_BY_FOREIGN_WIP
-     SCHEDULER_VERDICT: NEEDS_HUMAN <one-line question>
    - Print PASS only when the gate is green AND the commit from step ${commitStepNum} landed.
-   - Print FAIL when the gate is red or the commit could not land.
+   - Print FAIL when the gate is red or the commit could not land. Also print
+     FAIL when a step needs something this run cannot reach (live runtime
+     state, credentials, an account or dashboard action, a host install): do
+     everything else, commit it, and name exactly what is missing in the
+     reason. Never ask a question.
    - Never print PASS on a red gate. Why: a false PASS ships broken work that
      no one notices. A true PASS plus a landed commit lets the scheduler ignore
      harmless noise in your transcript, such as grep hits for "Error", an early
      red test run, or debug tracebacks.
-   - Print NEEDS_HUMAN only when finishing needs a decision or action only the
-     human can take (credentials, an account/dashboard action, a product
-     choice, an install on the host) — never for a red gate or a bug you could
-     fix. Commit any finished work first. Phrase the question so a yes/no or
-     one-line answer unblocks it.
    - Print BLOCKED_BY_FOREIGN_WIP ONLY when your gate failed because of a
      sibling job's unfinished, uncommitted file — never because of your own
      change — AND every failing path is one this prompt already listed as

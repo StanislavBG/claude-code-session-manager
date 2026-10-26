@@ -9,19 +9,14 @@ const ladder = require('../scheduler/reviewLadder.cjs');
 
 const res = (text) => ({ resultText: text });
 
-test('scanSentinel recognizes NEEDS_HUMAN with and without a question', () => {
-  assert.equal(scanSentinel(res('done\nSCHEDULER_VERDICT: NEEDS_HUMAN Is promo X ok?'), []), 'needs_human');
-  assert.equal(scanSentinel(res('SCHEDULER_VERDICT: NEEDS_HUMAN'), []), 'needs_human');
+test('scanSentinel maps a legacy NEEDS_HUMAN line to fail', () => {
+  assert.equal(scanSentinel(res('done\nSCHEDULER_VERDICT: NEEDS_HUMAN Is promo X ok?'), []), 'fail');
+  assert.equal(scanSentinel(res('SCHEDULER_VERDICT: NEEDS_HUMAN'), []), 'fail');
   assert.equal(scanSentinel(res('SCHEDULER_VERDICT: PASS'), []), 'pass');
 });
 
-test('scanHumanQuestion trims, caps at 300 chars, and is empty when absent', () => {
-  assert.equal(scanHumanQuestion(res('SCHEDULER_VERDICT: NEEDS_HUMAN   Install cron?  '), []), 'Install cron?');
-  assert.equal(scanHumanQuestion(res('SCHEDULER_VERDICT: NEEDS_HUMAN'), []), '');
-  assert.equal(scanHumanQuestion(res('SCHEDULER_VERDICT: NEEDS_HUMAN ' + 'x'.repeat(500)), []).length, 300);
-  assert.equal(scanHumanQuestion(res('SCHEDULER_VERDICT: PASS'), []), '');
-  const ev = [{ kind: 'tool_result', content: 'SCHEDULER_VERDICT: NEEDS_HUMAN From tool?' }];
-  assert.equal(scanHumanQuestion(null, ev), 'From tool?');
+test('scanHumanQuestion is deleted', () => {
+  assert.equal(scanHumanQuestion, undefined);
 });
 
 const row = (over = {}) => ({

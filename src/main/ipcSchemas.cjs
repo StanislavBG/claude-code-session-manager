@@ -838,8 +838,8 @@ const projectBriefUpdate = z.object({
     purpose: PROJECT_BRIEF_TEXT.optional(),
     what: z.array(PROJECT_BRIEF_TEXT).max(50).optional(),
     conventions: z.array(PROJECT_BRIEF_TEXT).max(100).optional(),
-    areas: z.array(z.record(z.unknown())).max(100).optional(),
-    scope: z.array(z.record(z.unknown())).max(200).optional(),
+    areas: z.array(z.record(z.string(), z.unknown())).max(100).optional(),
+    scope: z.array(z.record(z.string(), z.unknown())).max(200).optional(),
   }).strict().refine((p) => Object.keys(p).length > 0, { message: 'patch is empty' }),
 }).strict();
 

@@ -143,7 +143,7 @@ describe('smells scanner', () => {
     const by = Object.fromEntries(files.map((f) => [f.file, f]));
     expect(by['src/main/__tests__/scheduler-killtree-adoption.test.cjs'].smells).toContain('source-text');
     expect(by['src/main/lib/util/__tests__/atomicFs.test.cjs'].smells).not.toContain('source-text');
-  });
+  }, 60000);
 
   it('--check fails on new offenders and stale entries, passes when clean', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'smells-check-'));

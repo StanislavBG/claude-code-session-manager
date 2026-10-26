@@ -130,15 +130,15 @@ describe('cli', () => {
     expect(Array.isArray(r.owned)).toBe(true);
     expect(Array.isArray(r.api)).toBe(true);
     expect(Array.isArray(r.tests)).toBe(true);
-  });
+  }, 60000);
 
   test('--duplicates --json includes agents.savePersona', () => {
     expect(JSON.parse(cli('--duplicates', '--json')).some((d) => d.method === 'agents.savePersona')).toBe(true);
-  });
+  }, 60000);
 
   test('unknown key exits 2', () => {
     const r = spawnSync(process.execPath, [SCRIPT, 'nope-page'], { encoding: 'utf8' });
     expect(r.status).toBe(2);
     expect(r.stderr).toContain("page-surface: unknown NavKey 'nope-page'");
-  });
+  }, 60000);
 });

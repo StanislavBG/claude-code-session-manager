@@ -182,11 +182,7 @@ above. Success completes the row with verdict `pass_preexisting_gate_red` (ids i
 `preexistingGateFailures`, named in the completion notice); the decision and its `reason` are
 recorded at `gateShadow.baseline`. Kill switch `SM_BASELINE_GATE_AUTHORITY_DISABLE=1`.
 
-**`needs_human`.** An executor that needs a decision only a person can make ends with
-`SCHEDULER_VERDICT: NEEDS_HUMAN <question>`; the park carries `verifierVerdict: 'needs_human'` and
-the question as `humanQuestion`. `isNeedsHuman` (`scheduler/reviewLadder.cjs`) excludes it from
-rungs 1, 2, 4 and 6 (nothing the ladder does can answer it), and its review notice is due
-immediately — `selectDueReviewNotices` skips the hold window for it (§8).
+**No `needs_human` verdict.** It no longer exists (a legacy `NEEDS_HUMAN` line reads as FAIL); every park goes through the same ladder.
 
 ## 4a. Validation messaging into the Epic
 
@@ -274,8 +270,7 @@ A finished step's row leaves `queue.json` (`archiveCompletedPrd` + `reconcile()`
 
 ## 8. What recovers automatically vs what needs a human
 
-**The human-facing notice is quiet and grouped, not immediate** (except `needs_human`, §4, which
-is due at once). A park into
+**The human-facing notice is quiet and grouped, not immediate** A park into
 `needs_review` records a notice on the job row (`reviewNotice.cjs`'s
 `buildReviewNotice`) and sends nothing yet — the ladder above almost always
 heals it first. A human reset (`resetJobFields`) deletes that notice outright,
@@ -301,7 +296,7 @@ times, then stamps it sent anyway so a dead Epic cannot loop forever.
 git-evidence gate promoting a wrongly-reaped row to `completed` (§5); the launch circuit breaker
 re-probing on backoff and self-clearing on a CLI version change (§6); torn `scheduler-machine.json`
 prefix recovery (§7); a leaked worktree-cap counter self-correcting against observed disk state
-(§7); failed → pending auto-reset (up to 3 attempts over 10-minute windows); a stranded
+(§7); failed → pending auto-reset (up to 3 attempts over 10-minute windows); a `failed` row that exhausted its 3 auto-resets and sat past `STUCK_FAILED_ESCALATE_MS` (24h) being auto-skipped (`applyStuckFailedAutoSkip`) with a grouped review notice so dependents drain; scheduler-sent Epic turns never ask questions (`SCHEDULER_TURN_INSTRUCTION`, `chatRunner.cjs`); a stranded
 `investigating` row being restored to its prior terminal status after 1 hour with no live probe.
 
 **Genuinely requires a human (usually):** a `'blocked'` (not `'starved'`) verdict from §3 — every
@@ -310,9 +305,7 @@ pending row is behind a terminal/parked dependency and no automatic pass can res
 succeed — the row needs a real fix; a `verifierVerdict: 'budget_exceeded'` park (§7) — it is
 excluded from ladder rungs 1-4 by design, so it sits until rung 5/6 finds `looksDone` evidence or
 a human intervenes; a launch breaker that has exhausted
-`LAUNCH_BLOCK_MAX_ATTEMPTS` (8) with no CLI version change; a `failed` row that has exhausted its
-3 auto-reset attempts (`STUCK_FAILED_ESCALATE_MS`, 24h default, logs "reset it by hand via
-scheduler_reset_job"); a quarantined row nobody has adopted past `QUARANTINE_ESCALATE_MS` (24h
+`LAUNCH_BLOCK_MAX_ATTEMPTS` (8) with no CLI version change; a quarantined row nobody has adopted past `QUARANTINE_ESCALATE_MS` (24h
 default) — quarantine promotion out of `quarantined` only ever happens through the adopt path,
 never a timer; a `worktree_integration_failed` verdict where the branch itself no longer exists
 (mechanical recovery's one retry already failed).

@@ -139,3 +139,11 @@ test('classifyFailureOutcome: signal-kill transient (exit 143, short run) still 
   assert.strictEqual(decision.action, 'retry');
   assert.strictEqual(decision.transientKind, 'exit=143');
 });
+
+test('classifyFailureOutcome: launchError fails the launch before any transient check, even with networkError', () => {
+  const decision = classifyFailureOutcome({
+    exitCode: -1, networkError: true, durationMs: 10, transientRetries: 0, newlyDirtyCount: 0,
+    launchError: 'argv_too_large',
+  });
+  assert.deepStrictEqual(decision, { action: 'fail-launch', launchError: 'argv_too_large' });
+});

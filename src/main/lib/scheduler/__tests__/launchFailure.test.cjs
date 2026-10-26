@@ -218,3 +218,24 @@ test('writeOutcomeSidecar: writes <slug>.outcome.json atomically and never throw
   expect(lf.writeOutcomeSidecar('/nonexistent/dir/for/sure', 'x', {})).toBeNull();
   expect(lf.writeOutcomeSidecar(null, 'x', {})).toBeNull();
 });
+
+test('findOversizedArg: flags a 131072-byte value after --append-system-prompt, not 131071, null for normal argv', () => {
+  const hit = lf.findOversizedArg(['-p', '--append-system-prompt', 'x'.repeat(131072)]);
+  expect(hit).toEqual({ index: 2, flag: '--append-system-prompt', bytes: 131073 });
+  expect(lf.findOversizedArg(['--append-system-prompt', 'x'.repeat(131071)])).toBeNull();
+  expect(lf.findOversizedArg(['--model', 'sonnet', '-p'])).toBeNull();
+  expect(lf.findOversizedArg(['y'.repeat(131072)]).flag).toBe('(positional)');
+  expect(lf.MAX_ARG_BYTES).toBe(131072);
+});
+
+test('isArgvTooLargeSpawnError: E2BIG/ENAMETOOLONG true, ENOENT false', () => {
+  expect(lf.isArgvTooLargeSpawnError('spawn E2BIG')).toBe(true);
+  expect(lf.isArgvTooLargeSpawnError('spawn ENAMETOOLONG')).toBe(true);
+  expect(lf.isArgvTooLargeSpawnError('spawn ENOENT')).toBe(false);
+});
+
+test('deriveTerminalReason: launchError argv_too_large wins over the exit-code case', () => {
+  expect(lf.deriveTerminalReason({ effectiveStatus: 'failed', exitCode: -1, launchError: 'argv_too_large' }))
+    .toBe('launch_failure:argv_too_large');
+  expect(lf.deriveTerminalReason({ effectiveStatus: 'failed', exitCode: -1 })).toBe('impl_failed:exit_-1');
+});

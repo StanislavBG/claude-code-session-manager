@@ -3474,7 +3474,9 @@ const TRANSIENT_RETRY_CAP = 2;
  * transient (PRD 543/545 incident) — same bounded-retry treatment, not a
  * second parallel classifier.
  */
-function classifyFailureOutcome({ exitCode, networkError, durationMs, transientRetries, newlyDirtyCount }) {
+function classifyFailureOutcome({ exitCode, networkError, durationMs, transientRetries, newlyDirtyCount, launchError }) {
+  // The run never started (argv too large): not transient, not investigable.
+  if (launchError) return { action: 'fail-launch', launchError };
   const signalTransient = (exitCode === 143 || exitCode === 137) && durationMs < IDLE_OUTPUT_KILL_MS;
   const networkTransient = networkError === true;
   const transient = signalTransient || networkTransient;
@@ -4748,6 +4750,17 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     });
     const jobSpawn = claudeSpawnTarget('job', job.slug, claudeBin, jobArgs);
 
+    // Pre-spawn argv guard: one oversized argument makes spawn throw E2BIG.
+    const oversized = launchFailure.findOversizedArg(jobSpawn.args || jobArgs);
+    if (oversized) {
+      const errMsg = `argv too large: ${oversized.flag} is ${oversized.bytes} bytes, over the ${launchFailure.MAX_ARG_BYTES}-byte per-argument limit; not spawned`;
+      safeLog(`[scheduler] ${errMsg}\n`);
+      closeFd();
+      config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs: 0, ...SCHEDULER_META_IDENTITY, ...setupMeta });
+      resolve({ exitCode: -1, durationMs: 0, error: errMsg, launchError: 'argv_too_large', sessionId });
+      return;
+    }
+
     const { child } = withChildAndLog({
       fd,
       logPath,
@@ -4791,7 +4804,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           // Sync write: inside a Promise executor callback; must flush meta
           // before resolve() so the spawnJob mutate() that follows sees it.
           config.writeJsonSync(metaPath, { slug: job.slug, cwd, sessionId, exitCode: -1, error: errMsg, startedAt, finishedAt: Date.now(), durationMs, leakedDescendants: leaked, ...SCHEDULER_META_IDENTITY, ...setupMeta, originSessionId, contextDigestApplied });
-          resolve({ exitCode: -1, durationMs, error: errMsg, leakedDescendants: leaked, sessionId });
+          resolve({ exitCode: -1, durationMs, error: errMsg, leakedDescendants: leaked, sessionId,
+            ...(launchFailure.isArgvTooLargeSpawnError(error?.message) ? { launchError: 'argv_too_large' } : {}) });
           return;
         }
 
@@ -6845,7 +6859,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           // says WHY it ended without anyone opening the transcript.
           s.jobs[i2].terminalReason = launchFailure.deriveTerminalReason({
             effectiveStatus, exitCode: res.exitCode, verifyResult, sigtermOverride, worktreeIntegrationFailure,
-            budgetKill: !!budgetKill,
+            budgetKill: !!budgetKill, launchError: res.launchError,
           });
           delete s.jobs[i2].launchFailure;
           delete s.jobs[i2].heldReason;
@@ -7155,9 +7169,19 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
         durationMs: res.durationMs,
         transientRetries: retries,
         newlyDirtyCount,
+        launchError: res.launchError,
       });
 
-      if (decision.action === 'retry') {
+      if (decision.action === 'fail-launch') {
+        console.log(`[scheduler] launch failure (${decision.launchError}) for ${job.slug} — run never started; no investigation`);
+        await mutate((s) => {
+          const i = s.jobs.findIndex((x) => x.slug === job.slug);
+          if (i >= 0) {
+            s.jobs[i].error = `launch failure (${decision.launchError}): ${res.error}; the run never started, so no investigation was spawned`;
+          }
+        });
+        await broadcast({ flush: true });
+      } else if (decision.action === 'retry') {
         console.log(`[scheduler] transient failure (${decision.transientKind} dur=${res.durationMs}ms) — auto-retry ${decision.retries + 1}/${TRANSIENT_RETRY_CAP} for ${job.slug}`);
         await mutate((s) => {
           const i = s.jobs.findIndex((x) => x.slug === job.slug);

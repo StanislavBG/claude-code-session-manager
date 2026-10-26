@@ -57,6 +57,38 @@ const LAUNCH_FAILURE_KINDS = Object.freeze({
   API_ERROR: 'api_error',
 });
 
+/**
+ * Argv-size guard (incident 2026-10-26, social-signals-trader): an oversized
+ * `-p` argument made `spawn` fail with E2BIG (exit -1 in ~86 ms), which
+ * became `impl_failed:exit_-1` and spawned a fix-plan that failed the same
+ * way. Linux caps ONE argv string at MAX_ARG_STRLEN = 131072 bytes, counting
+ * the NUL terminator. The cause is one job's input, not the persona's
+ * environment, so this never arms the per-persona launch breaker.
+ */
+const MAX_ARG_BYTES = 131072;
+
+/** First argv element whose utf8 bytes + NUL exceed `limit`, else null. */
+function findOversizedArg(args, limit = MAX_ARG_BYTES) {
+  if (!Array.isArray(args)) return null;
+  for (let index = 0; index < args.length; index++) {
+    const a = args[index];
+    if (typeof a !== 'string') continue;
+    const bytes = Buffer.byteLength(a, 'utf8') + 1;
+    if (bytes <= limit) continue;
+    let flag = '(positional)';
+    for (let j = index - 1; j >= 0; j--) {
+      if (typeof args[j] === 'string' && args[j].startsWith('--')) { flag = args[j]; break; }
+    }
+    return { index, flag, bytes };
+  }
+  return null;
+}
+
+/** True when a spawn error message is the OS refusing an oversized argv. */
+function isArgvTooLargeSpawnError(message) {
+  return /E2BIG|ENAMETOOLONG/.test(String(message ?? ''));
+}
+
 /** Tail bytes scanned for the `result` event — same budget classifyRunOutcome uses. */
 const RESULT_TAIL_BYTES = 65536;
 
@@ -310,9 +342,10 @@ function evaluateLaunchGate(block, { now, claudeVersion } = {}) {
  * closed set so operators never have to open a transcript to tell a
  * non-start from an implementation failure from a verifier downgrade.
  */
-function deriveTerminalReason({ effectiveStatus, exitCode, verifyResult, sigtermOverride, worktreeIntegrationFailure, budgetKill }) {
+function deriveTerminalReason({ effectiveStatus, exitCode, verifyResult, sigtermOverride, worktreeIntegrationFailure, budgetKill, launchError }) {
   if (worktreeIntegrationFailure) return 'worktree_integration_failed';
   if (effectiveStatus === 'completed') return 'completed';
+  if (launchError === 'argv_too_large') return 'launch_failure:argv_too_large';
   if (budgetKill) return 'budget_exceeded';
   if (sigtermOverride) return 'signal_kill_with_commit';
   if (exitCode === 143 || exitCode === 137) return 'signal_kill';
@@ -338,6 +371,9 @@ function writeOutcomeSidecar(runDir, slug, outcome) {
 }
 
 module.exports = {
+  MAX_ARG_BYTES,
+  findOversizedArg,
+  isArgvTooLargeSpawnError,
   LAUNCH_FAILURE_KINDS,
   LAUNCH_BLOCK_MAX_ATTEMPTS,
   LAUNCH_PROBE_STALE_MS,

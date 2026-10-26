@@ -228,3 +228,37 @@ test('executeJob: a PRD with no estimateMinutes arms the wall-clock budget at 3x
   const expected = Math.min(Math.max(20 * 3 * 60_000, budget.JOB_BUDGET_FLOOR_MS), budget.JOB_BUDGET_CEILING_MS);
   expect(armed[0].ms).toBe(expected);
 });
+
+// ---------- pre-spawn argv guard ----------
+
+test('executeJob: a persona system prompt over 131072 bytes is never spawned and resolves launchError argv_too_large', async () => {
+  // resolvePrdPersonaForSpawn caps real persona bodies (6000 chars), so the
+  // oversized --append-system-prompt is injected by stubbing the resolver.
+  const agentModelResolve = require('../lib/claude/agentModelResolve.cjs');
+  const real = agentModelResolve.resolvePrdPersonaForSpawn;
+  agentModelResolve.resolvePrdPersonaForSpawn = async (...a) => ({
+    ...(await real(...a)), systemPrompt: 'x'.repeat(131072), model: 'opus',
+  });
+  const mainCwd = fs.mkdtempSync(path.join(tmpHome, 'sm-prd-persona-big-'));
+  fs.mkdirSync(path.join(tmpHome, '.claude'), { recursive: true });
+  const runDir = fs.mkdtempSync(path.join(tmpHome, '.claude', 'sm-prd-persona-bigrun-'));
+  const slug = `2359-test-${process.pid}-${Math.floor(Math.random() * 1e6)}`;
+  const prdsDir = path.join(mainCwd, 'session-manager-operations', 'scheduler', 'prds');
+  fs.mkdirSync(prdsDir, { recursive: true });
+  fs.writeFileSync(path.join(prdsDir, `${slug}.md`), 'Do the thing.', 'utf8');
+  process.env.SM_CLAUDE_BIN = writeClaudeStub();
+  try {
+    const result = await executeJob({ slug, cwd: mainCwd, agentType: 'dev-lead' }, runDir, mainCwd, () => Promise.resolve());
+    expect(result.exitCode).toBe(-1);
+    expect(result.launchError).toBe('argv_too_large');
+    expect(fs.existsSync(path.join(mainCwd, 'argv.marker'))).toBe(false);
+    const metaFile = fs.readdirSync(runDir).find((f) => f.endsWith('.meta.json'));
+    expect(metaFile).toBeTruthy();
+    const meta = JSON.parse(fs.readFileSync(path.join(runDir, metaFile), 'utf8'));
+    expect(meta.error).toContain('--append-system-prompt');
+  } finally {
+    agentModelResolve.resolvePrdPersonaForSpawn = real;
+    fs.rmSync(mainCwd, { recursive: true, force: true });
+    fs.rmSync(runDir, { recursive: true, force: true });
+  }
+});

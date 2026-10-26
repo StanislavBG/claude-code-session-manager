@@ -219,6 +219,12 @@ The scheduler never prompts the planning session per finished PRD. Instead:
 never falsely promote a LATER real failure). A row whose commit resolves gets promoted to
 `completed` (source `reapDeadRunningJobs:landed`) instead of `failed`.
 
+Pidless recovery (`findLiveProcess`, audit event `job_pid_recovered_by_liveness_scan`) adopts a
+process only when its `/proc/<pid>/cmdline` argv[0] is a `claude` binary (`isClaudeArgv`,
+`reaperHelpers.cjs`) AND the row has a run log; a pid already held by another running row, or
+already adopted earlier in the same pass, is never adopted again (the pass warns naming both
+slugs). There is no cwd-based match.
+
 This gate was added in commit `44c3604` after job 1192 shipped a real, verifiable commit and
 was still reaped `failed` because the reaper only ever judged spawn bookkeeping
 (`runtime.pid`), never the `landedCommit` a row could already carry.
@@ -253,6 +259,8 @@ human clears it via Resume/Run now.
 | Every project shows paused (agent)/(manual) | `audit-log.jsonl` entries of `kind: scheduler_pause` — the `by` field names the calling session/cwd | Resume via the Scheduler Resume button or `scheduler_resume`. An agent pause auto-expires after 30 minutes and is cleared on app restart |
 | `utilization-held` at 100% / `slots-exhausted` with 2 running while real usage is low | `~/.claude/session-manager-reboot.log` for `billing meter rate-limited (HTTP 429)`; `billing-cache.json` for the real percentages | Usage meter 429 treated as an account limit (fixed by PRD 1647): a meter 429 now uses a ≤30-min-old cached reading with the full slot pool; only an executor-observed `rate_limit` pause pins utilization. No cache / older cache still runs the degraded budget (cap 2) |
 | `rate_limit` pause to the weekly reset while `billing-cache.json` shows usage well below threshold | The run log for a `rate_limit_event` with `status "rejected"` — none means the pause was spurious | Pre-fix substring detection treated `allowed` events as rejections (2026-10-11, 4-day pause at 58% weekly). Resume via the Scheduler Resume button or `scheduler_resume` |
+| A row stays `running` for hours, its `runtime.pid` is not a claude process or is shared by two rows | `/proc/<pid>/cmdline` argv[0], and the audit-log `job_pid_recovered_by_liveness_scan` event for that slug | `scheduler_cancel_job` then `scheduler_reset_job`. Since the fix, liveness requires a claude argv[0] and a run log, and a pid is never adopted twice |
+| Every project pending, nothing dispatching, `lastTickReason` `held` | Heartbeat `dispatch.lastTickDetail` (quiet-machine lease, untracked running rows, `dependsOn` hold) | A quiet-machine lease releases when its job ends; it is meant only for timing-measurement PRDs |
 | Epic got no PLAN SETTLED digest | Whether the app restarted inside the settle window (`SM_EPIC_SETTLE_SECONDS`, default 120) after the Epic's last terminal check-in; the timer is in memory | The next terminal check-in re-arms it. Also check `SM_EPIC_VALIDATION_DISABLE` is not set |
 
 ### Usage threshold vs rate_limit pause

@@ -225,12 +225,12 @@ function classifyBudgetKill(res, landedCommitEvidence) {
 /**
  * isJobBudgetExempt(job) → boolean
  *
- * Pure. `quietMachine: true` PRDs (their whole point is running alone,
- * un-contended, for a timing-sensitive measurement) and any PRD with an
- * explicit `budgetExempt: true` opt-out have no wall-clock kill ceiling.
+ * Pure. Only an explicit `budgetExempt: true` opt-out has no wall-clock kill
+ * ceiling. `quietMachine` jobs are NOT exempt: they hold an exclusive
+ * machine-wide lease, so they must always be killed by the normal budget.
  */
 function isJobBudgetExempt(job) {
-  return job?.quietMachine === true || job?.budgetExempt === true;
+  return job?.budgetExempt === true;
 }
 
 /** Pure predicate the budget watchdog's shouldFire calls — single source of

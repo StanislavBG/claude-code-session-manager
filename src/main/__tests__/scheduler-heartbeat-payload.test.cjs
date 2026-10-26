@@ -84,7 +84,7 @@ test('healthy tick carries dispatch {..., pendingDispatchable excludes blocked c
     lastRunAt: '2026-01-01T00:00:00.000Z', pendingDispatchable: 1, runningCount: 0, paused: false,
   }));
   expect(Object.keys(entry.dispatch).sort()).toEqual(
-    ['drain', 'lastDispatchAttemptAt', 'lastRunAt', 'lastTickDetail', 'lastTickReason', 'paused', 'pendingDispatchable', 'runningCount'],
+    ['drain', 'lastDispatchAttemptAt', 'lastRunAt', 'lastTickDetail', 'lastTickReason', 'paused', 'pendingDispatchable', 'quietLeaseHolder', 'runningCount'],
   );
   expect(entry.dispatch.drain).toBeNull();
 });
@@ -99,4 +99,19 @@ test('held tick detail lands in dispatch.lastTickDetail with prefix stripped', (
   expect(entry.dispatch.lastTickReason).toBe('held');
   expect(entry.dispatch.lastTickDetail.startsWith('quiet-machine: lease held')).toBe(true);
   expect(entry.dispatch.lastTickDetail.length).toBeLessThanOrEqual(200);
+});
+
+test('dispatch.quietLeaseHolder is null when free and names the slug when held', () => {
+  const lease = require('../lib/scheduler/quietMachineLease.cjs');
+  lease.__resetForTests();
+  const q = () => ({ jobs: [], unreadable: true, paused: null });
+  scheduler.heartbeatTick({ readQueueSync: q });
+  expect(lastLine().dispatch.quietLeaseHolder).toBeNull();
+  lease.acquire('quiet-slug');
+  try {
+    scheduler.heartbeatTick({ readQueueSync: q });
+    expect(lastLine().dispatch.quietLeaseHolder).toBe('quiet-slug');
+  } finally {
+    lease.__resetForTests();
+  }
 });

@@ -978,6 +978,7 @@ function heartbeatTick(deps = {}) {
         lastTickDetail: lastTick?.detail ? stripTickDetailPrefix(lastTick.detail, { keepWord: true }).slice(0, 200) : null,
         pendingDispatchable: Math.max(0, counts.pending - blockedPending),
         runningCount: counts.running,
+        quietLeaseHolder: quietMachineLease.isHeld() ? (quietMachineLease.holder() ?? null) : null,
         paused: Boolean(s.paused),
         drain: s.drain?.active ? { since: s.drain.since ?? null, requestedAt: s.drain.requestedAt ?? null } : null,
       };
@@ -4635,15 +4636,15 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // clock time regardless of whether the job keeps writing output — the
     // gap a chatty-but-runaway executor slips through (see
     // computeJobBudgetMs's header for the measured p50/p90/max this budget
-    // is calibrated against). `quietMachine` jobs and any PRD with an
-    // explicit `budgetExempt: true` opt out entirely — logged once here so
+    // is calibrated against). Only a PRD with an
+    // explicit `budgetExempt: true` opts out entirely — logged once here so
     // an unbounded job is never silently unbounded.
     const jobBudgetMs = budget.computeJobBudgetMs(
       job.estimateMinutes ?? resolvePersonaDefaultEstimate(job.cwd, job.agentType || DEFAULT_PRD_AGENT_TYPE));
     const budgetExempt = budget.isJobBudgetExempt(job);
     if (budgetExempt) {
       safeLog(`[scheduler] wall-clock budget watchdog EXEMPT for ${job.slug} ` +
-        `(${job.quietMachine === true ? 'quietMachine' : 'budgetExempt'}) — no wall-clock kill ceiling this run\n`);
+        `(budgetExempt) — no wall-clock kill ceiling this run\n`);
     }
     let budgetWarningStamped = false;
     const budgetWatchdog = {

@@ -100,8 +100,8 @@ test('classifyBudgetKill: an over-budget job with a verified landed commit is st
 
 // ---------- isJobBudgetExempt: quietMachine + explicit opt-out ----------
 
-test('isJobBudgetExempt: a quietMachine job is exempt', () => {
-  assert.strictEqual(isJobBudgetExempt({ quietMachine: true }), true);
+test('isJobBudgetExempt: a quietMachine-only job is NOT exempt', () => {
+  assert.strictEqual(isJobBudgetExempt({ quietMachine: true }), false);
 });
 
 test('isJobBudgetExempt: a PRD with an explicit budgetExempt opt-out is exempt', () => {

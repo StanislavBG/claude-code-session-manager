@@ -54,6 +54,7 @@ describe("tab", () => {
     expect(sendPrompt).toHaveBeenCalledWith(
       'tab-from-frontmatter',
       expect.stringContaining('761-notify'),
+      expect.objectContaining({ origin: 'scheduler' }),
     );
   });
 
@@ -74,7 +75,7 @@ describe("tab", () => {
     );
 
     expect(sendPrompt).toHaveBeenCalledTimes(1);
-    expect(sendPrompt).toHaveBeenCalledWith('tab-match', expect.stringContaining('761-notify'));
+    expect(sendPrompt).toHaveBeenCalledWith('tab-match', expect.stringContaining('761-notify'), expect.objectContaining({ origin: 'scheduler' }));
   });
 
   test('no-ops without throwing when neither sourceTabId nor a cwd-matching tab resolves', async () => {
@@ -142,7 +143,7 @@ describe("tab", () => {
     );
 
     expect(appendResponseEvent).toHaveBeenCalled();
-    expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
+    expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'), expect.objectContaining({ origin: 'scheduler' }));
   });
 
   test('falls back to the tab-external-ticket path when the PRD has no sourcePromptId at all (pre-813 PRD)', async () => {
@@ -157,7 +158,7 @@ describe("tab", () => {
     );
 
     expect(appendResponseEvent).not.toHaveBeenCalled();
-    expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
+    expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'), expect.objectContaining({ origin: 'scheduler' }));
   });
 
   // PRD 854: a PRD dispatched straight from an Epic's own composer
@@ -178,7 +179,7 @@ describe("tab", () => {
 
     expect(appendResponseEvent).toHaveBeenCalled();
     expect(loadSessions).not.toHaveBeenCalled();
-    expect(sendPrompt).toHaveBeenCalledWith('epic-1', expect.stringContaining('854-notify'));
+    expect(sendPrompt).toHaveBeenCalledWith('epic-1', expect.stringContaining('854-notify'), expect.objectContaining({ origin: 'scheduler' }));
   });
 
   test('falls back to the tab-external-ticket path when appendResponseEvent itself throws', async () => {
@@ -194,7 +195,7 @@ describe("tab", () => {
       ),
     ).resolves.not.toThrow();
 
-    expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'));
+    expect(sendPrompt).toHaveBeenCalledWith('tab-x', expect.stringContaining('814-notify'), expect.objectContaining({ origin: 'scheduler' }));
   });
 
   // ─── PRD 985: real path resolution ───────────────────────────────────────────

@@ -63,7 +63,10 @@ afterEach(() => {
 // emits one stream-json result and exits 0. With `linger` it stays alive so a
 // test can inspect it from outside.
 function writeStub({ capturePath, linger = false } = {}) {
-  const stubPath = path.join(tmpHome, `stub-${Math.floor(Math.random() * 1e9)}.cjs`);
+  const stubDir = path.join(tmpHome, `stub-${Math.floor(Math.random() * 1e9)}`);
+  fs.mkdirSync(stubDir, { recursive: true });
+  // basename 'claude' so a node-launched stub passes the strict isClaudeArgv identity.
+  const stubPath = path.join(stubDir, 'claude');
   const body = `
     const fs = require('fs');
     ${capturePath ? `fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({
@@ -140,11 +143,11 @@ describe.skipIf(!HAS_PROC)('real aliased processes vs the reaper gates', () => {
   const kids = [];
   afterAll(() => { for (const k of kids) { try { process.kill(-k.pid, 'SIGKILL'); } catch { /* gone */ } } });
 
-  function spawnAliased(role, detail, { detached = true } = {}) {
+  function spawnAliased(role, detail, { detached = true, cwd = os.tmpdir() } = {}) {
     const real = writeStub({ linger: true });
     const t = claudeBin.claudeSpawnTarget(role, detail, real);
     const child = spawn(t.command, ['-p', `prompt mentioning ${detail}`], {
-      cwd: os.tmpdir(), stdio: 'ignore', detached, ...(t.argv0 ? { argv0: t.argv0 } : {}),
+      cwd, stdio: 'ignore', detached, ...(t.argv0 ? { argv0: t.argv0 } : {}),
     });
     kids.push(child);
     return child;
@@ -155,7 +158,8 @@ describe.skipIf(!HAS_PROC)('real aliased processes vs the reaper gates', () => {
 
   it('kernel comm is the alias, cmdline carries the label + slug, and all four gates match', async () => {
     const slug = `pn02-slug-${process.pid}-${Date.now()}`;
-    const child = spawnAliased('job', slug);
+    const wt = fs.mkdtempSync(path.join(tmpHome, 'wt-'));
+    const child = spawnAliased('job', slug, { cwd: wt });
     await waitFor(() => comm(child.pid) === 'sm-claude-job');
     const cmd = cmdline(child.pid);
     // A shebang stub's cmdline[0] is the interpreter and [1] the ALIAS PATH (the
@@ -166,7 +170,8 @@ describe.skipIf(!HAS_PROC)('real aliased processes vs the reaper gates', () => {
     // scheduler.cjs killOrphanClaudePid + reaperHelpers.cjs:31 / :105 / :107 regexes
     expect(GATE.test(cmd)).toBe(true);
     expect(reaper.claudePidAlive(child.pid)).toBe(true);
-    expect(reaper.findLiveProcessForJob({ slug })).toBe(child.pid);
+    // Shebang stub: argv[0] is the interpreter (no slug), so the match is by worktree cwd.
+    expect(reaper.findLiveProcessForJob({ slug }, { worktreeDir: wt })).toBe(child.pid);
   });
 
   it('a native (ELF) binary shows the smArgv0 label as cmdline[0] and passes every gate', async () => {
@@ -185,13 +190,13 @@ describe.skipIf(!HAS_PROC)('real aliased processes vs the reaper gates', () => {
     expect(scheduler.killOrphanClaudePid(child.pid)).toBe('killed');
   });
 
-  it('findLiveProcessForJob still finds the job by slug when the argv0 label is absent (fail-open path)', async () => {
+  it('findLiveProcessForJob does NOT adopt a claude-identity process by slug-in-prompt when argv0 label and worktree cwd are absent', async () => {
     const slug = 'pn02-noargv0-slug';
     const real = writeStub({ linger: true });
     const child = spawn(real, ['-p', `claude prompt ${slug}`], { cwd: os.tmpdir(), stdio: 'ignore', detached: true });
     kids.push(child);
     await waitFor(() => { try { return cmdline(child.pid).includes(slug); } catch { return false; } });
-    expect(reaper.findLiveProcessForJob({ slug })).toBe(child.pid);
+    expect(reaper.findLiveProcessForJob({ slug })).not.toBe(child.pid);
   });
 
   it('killOrphanClaudePid kills an aliased process group', async () => {

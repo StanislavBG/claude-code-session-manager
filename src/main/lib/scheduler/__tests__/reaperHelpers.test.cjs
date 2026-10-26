@@ -24,7 +24,7 @@ const {
   selectReapableJobs, mapOutcomeToGateOutcome, classifyRunOutcome,
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome,
   isAlreadySatisfiedOnMain, resolvePidlessFailureOverride,
-  readSpawnedPidFromLog, isLogFresh, claudePidAlive,
+  readSpawnedPidFromLog, isLogFresh, claudePidAlive, isClaudeArgv,
 } = require('../reaperHelpers.cjs');
 const { detectRateLimitInLog } = require('../../claude/rateLimitDetect.cjs');
 
@@ -328,7 +328,7 @@ test('classifyRunOutcome: a clean success log still classifies as success', () =
 test('findLiveProcessForJob: finds a live process via /proc/<pid>/cwd match', async () => {
   if (process.platform !== 'linux' || !fs.existsSync('/proc')) return;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-reaper-liveness-'));
-  const child = spawn('sleep', ['5'], { cwd: dir, stdio: 'ignore' });
+  const child = spawn('sleep', ['5'], { cwd: dir, stdio: 'ignore', argv0: 'sm-claude-job:irrelevant-slug' });
   try {
     await new Promise((resolve) => setTimeout(resolve, 200));
     const pid = findLiveProcessForJob({ slug: 'irrelevant-slug' }, { worktreeDir: dir });
@@ -348,22 +348,48 @@ test('findLiveProcessForJob: no live process anywhere → null', () => {
   assert.strictEqual(pid, null);
 });
 
-// findLiveProcessForJob: runCwd — the 2026-09-13 in-place/shared-tree fix.
-// A run with no dedicated worktree (no worktreeDir) and no slug in argv
-// (dispatch never puts it there) is invisible to both existing matches; the
-// runCwd+cmdline-claude combo match exists for exactly this shape. `sleep`
-// is used as the /proc-visible process here (not a real `claude` binary), so
-// this exercises the cwd-plus-cmdline-substring code path directly rather
-// than depending on a real claude binary being installed.
-test('findLiveProcessForJob: runCwd match requires BOTH cwd AND a claude-looking cmdline — bare cwd match is never sufficient', async () => {
+// isClaudeArgv — strict identity (2026-10-25 stray `tail -F` adoption).
+test('isClaudeArgv: table', () => {
+  const yes = [
+    ['claude', '-p'], ['/usr/local/bin/claude'], ['sm-claude-job:slug', '-p'],
+    ['node', '/x/bin/claude'], ['bun', '/x/claude.js'], ['node', '/a/claude.mjs'], ['node', '/a/claude.cjs'],
+    ['node', '/n/@anthropic-ai/claude-code/cli.js'],
+  ];
+  const no = [
+    ['tail', '-n', '0', '-F', '/tmp/claude-1000/x/bake_aet.log'],
+    ['/bin/bash', '-c', 'source /home/u/.claude/shell-snapshots/s.sh'],
+    ['ugrep', '-E', 'claude'], [], ['node', '/x/server.js'], ['node'],
+  ];
+  for (const a of yes) assert.equal(isClaudeArgv(a), true, JSON.stringify(a));
+  for (const a of no) assert.equal(isClaudeArgv(a), false, JSON.stringify(a));
+});
+
+test('non-claude argv in a nested cwd: claudePidAlive false, findLiveProcessForJob does not return it', async () => {
   if (process.platform !== 'linux' || !fs.existsSync('/proc')) return;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-reaper-runcwd-'));
-  // Runs in `dir` but its cmdline has no "claude" in it — must NOT match.
-  const child = spawn('sleep', ['5'], { cwd: dir, stdio: 'ignore' });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-reaper-strict-'));
+  const nested = path.join(dir, 'nested');
+  fs.mkdirSync(nested);
+  const child = spawn('sleep', ['5'], { cwd: nested, stdio: 'ignore', argv0: '/tmp/claude-1000/fake' });
   try {
     await new Promise((resolve) => setTimeout(resolve, 200));
-    const pid = findLiveProcessForJob({ slug: 'unrelated-slug' }, { runCwd: dir });
-    assert.strictEqual(pid, null, 'a bare cwd match without a claude-looking cmdline must never match — shared-tree cross-match hazard');
+    assert.equal(claudePidAlive(child.pid), false);
+    assert.notEqual(findLiveProcessForJob({ slug: 'fake' }, { worktreeDir: dir }), child.pid);
+  } finally {
+    child.kill('SIGKILL');
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('findLiveProcessForJob: claude-identity process in a nested non-worktree cwd with a different slug is NOT returned', async () => {
+  if (process.platform !== 'linux' || !fs.existsSync('/proc')) return;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-reaper-runcwd-'));
+  const nested = path.join(dir, 'nested');
+  fs.mkdirSync(nested);
+  const child = spawn('sleep', ['5'], { cwd: nested, stdio: 'ignore', argv0: 'claude' });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const pid = findLiveProcessForJob({ slug: 'unrelated-slug' }, { worktreeDir: '/nonexistent/wt/xyz' });
+    assert.notEqual(pid, child.pid);
   } finally {
     child.kill('SIGKILL');
     fs.rmSync(dir, { recursive: true, force: true });

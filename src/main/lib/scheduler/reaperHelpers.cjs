@@ -12,72 +12,78 @@ const path = require('node:path');
 const { readTail } = require('../util/fileTail.cjs');
 const { detectRateLimitInLog } = require('../claude/rateLimitDetect.cjs');
 const { pidAlive } = require('../process/pidAlive.cjs');
+const { smArgv0 } = require('../process/procName.cjs');
 
 /**
- * Return true if pid is alive AND its cmdline looks like a claude process.
+ * isClaudeArgv(argv) — strict claude-executor identity. Pure.
  *
- * Guards against PID recycling: on Linux we read /proc/<pid>/cmdline and
- * require /\bclaude\b/ in the command. On macOS (no /proc) we can't read
- * cmdline, so we conservatively return true — never false-reap a live PID
- * just because we can't verify its identity.
- *
- * Existence check now delegates to the shared pidAlive() (pidAlive.cjs) so
- * EPERM (pid exists, owned by another user) counts as alive here too — the
- * previous bare `process.kill(pid, 0)` + catch-all-false treated EPERM the
- * same as ESRCH (no such process), silently false-reaping a live-but-
- * unsignalable pid.
- *
- * Conservative by design: a false negative (live process treated as dead) is
- * far worse than a late reap.
+ * Judges argv[0] (and argv[1] only for a node/bun-launched CLI) — never a
+ * substring of the whole command line. 2026-10-25: a stray
+ * `tail -F /tmp/claude-1000/.../x.log` matched /\bclaude\b/ and was adopted as
+ * the executor of two pidless rows for up to 25 hours.
  */
-function claudePidAlive(pid, { platform = process.platform } = {}) {
-  if (!pid || typeof pid !== 'number' || pid <= 1) return false;
-  if (!pidAlive(pid)) return false;
-  // Windows has no /proc — cannot verify identity, so never call it dead.
-  if (platform === 'win32') return true;
+function isClaudeArgv(argv) {
+  if (!Array.isArray(argv) || argv.length === 0 || typeof argv[0] !== 'string') return false;
+  const base = path.basename(argv[0]);
+  if (base === 'claude' || base.startsWith('sm-claude-')) return true;
+  if (base === 'node' || base === 'bun') {
+    const a1 = typeof argv[1] === 'string' ? argv[1] : '';
+    // A shebang-script claude launched through an sm-claude-* alias shows the
+    // alias path as argv[1] (the kernel rewrites script argv), so accept it too.
+    return /\/claude(\.js|\.mjs|\.cjs)?$/.test(a1) || a1.includes('/@anthropic-ai/claude-code/')
+      || path.basename(a1).startsWith('sm-claude-');
+  }
+  return false;
+}
+
+/** Read /proc/<pid>/cmdline as an argv array; null when unreadable. */
+function readArgv(pid) {
   try {
-    const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
-    return /\bclaude\b/.test(cmd);
+    const parts = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+    if (parts.length && parts[parts.length - 1] === '') parts.pop();
+    return parts;
   } catch {
-    // Can't read cmdline (macOS, permission denied) → assume alive.
-    return true;
+    return null;
   }
 }
 
 /**
- * findLiveProcessForJob(job, { worktreeDir, runCwd }) → pid | null
+ * Return true if pid is alive AND its argv looks like a claude process
+ * (isClaudeArgv). Guards against PID recycling. Where /proc/<pid>/cmdline
+ * cannot be read (macOS, permission denied) or on win32, conservatively
+ * returns true — never false-reap a live PID we cannot identify.
  *
- * Positive liveness scan for a 'running' row whose `runtime.pid` is missing —
- * the case a missing pid must NOT be read as "the process is gone" (2026-09-06
- * incident: 234-uranus-eight-tails-ox marked failed/never_ran while PID
- * 2174739 was a live `claude -p` still writing to that job's own worktree).
- *
- * Linux-`/proc` only. Scans every numeric `/proc/<pid>` entry and matches any
- * of, in order:
- *  - `/proc/<pid>/cwd` resolves to `worktreeDir` (or a path nested under it)
- *    — sufficient alone, no cmdline check needed.
- *  - `/proc/<pid>/cmdline` contains both `claude` and the job's slug —
- *    fallback for a worktree-disabled/in-place run with no dedicated
- *    worktreeDir to match against.
- *  - `/proc/<pid>/cwd` resolves to `runCwd` (or nested under it) AND
- *    `/proc/<pid>/cmdline` contains `claude` (2026-09-13 incident:
- *    runId 2026-09-13T16-15-56-818Z ran in-place in the shared tree — no
- *    worktree, and dispatch never puts the slug into argv — so neither of
- *    the above could ever match a live pid 3138458). `runCwd` is deliberately
- *    NEVER matched alone: several concurrent jobs commonly share one tree's
- *    cwd, so a bare cwd match without the process-identity check would
- *    cross-match the wrong job's process.
- *
- * Returns the first matching pid, or null if none is found.
- *
- * Safe fallback by construction: on any platform without `/proc` (macOS,
- * Windows) `fs.readdirSync('/proc')` throws and this returns null immediately
- * — i.e. exactly today's behaviour (fail toward terminalizing), never a hang
- * or a thrown error propagating to the caller.
+ * Existence check delegates to the shared pidAlive() so EPERM counts as alive.
  */
-function findLiveProcessForJob(job, { worktreeDir, runCwd, platform = process.platform } = {}) {
+function claudePidAlive(pid, { platform = process.platform } = {}) {
+  if (!pid || typeof pid !== 'number' || pid <= 1) return false;
+  if (!pidAlive(pid)) return false;
+  if (platform === 'win32') return true;
+  const argv = readArgv(pid);
+  if (argv === null) return true;
+  return isClaudeArgv(argv);
+}
+
+/**
+ * findLiveProcessForJob(job, { worktreeDir }) → pid | null
+ *
+ * Positive liveness scan for a 'running' row whose `runtime.pid` is missing
+ * (2026-09-06: a pidless row was reaped while its claude was still alive).
+ *
+ * Linux-`/proc` only. A candidate must pass isClaudeArgv AND either:
+ *  - `/proc/<pid>/cwd` is `worktreeDir` or nested under it, or
+ *  - argv[0] === smArgv0('job', job.slug) (every scheduler job spawn carries
+ *    the slug in argv[0]).
+ * There is deliberately no runCwd-nested match: it adopted a stray `tail -F`
+ * on 2026-10-25 and is redundant now that argv[0] carries the slug.
+ *
+ * Returns the first matching pid, or null. On platforms without `/proc` it
+ * returns null immediately.
+ */
+function findLiveProcessForJob(job, { worktreeDir, platform = process.platform } = {}) {
   if (platform === 'win32') return null; // no /proc — skip every read
   const slug = job?.slug;
+  const want = slug ? smArgv0('job', slug) : null;
   let entries;
   try {
     entries = fs.readdirSync('/proc');
@@ -89,34 +95,15 @@ function findLiveProcessForJob(job, { worktreeDir, runCwd, platform = process.pl
     const pid = Number(name);
     if (!pid || pid <= 1) continue;
 
-    let cwdLink = null;
-    if (worktreeDir || runCwd) {
-      try {
-        cwdLink = fs.readlinkSync(`/proc/${pid}/cwd`);
-      } catch {
-        // Process exited mid-scan, or permission denied — try the argv
-        // fallback below before giving up on this pid.
-      }
-    }
+    const argv = readArgv(pid);
+    if (!argv || !isClaudeArgv(argv)) continue;
 
-    if (worktreeDir && cwdLink && (cwdLink === worktreeDir || cwdLink.startsWith(worktreeDir + path.sep))) {
-      return pid;
-    }
+    if (want && argv[0] === want) return pid;
 
-    let cmd = null;
-    if (slug || (runCwd && cwdLink)) {
-      try {
-        cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
-      } catch {
-        // Same as above — process gone or unreadable, keep scanning.
-      }
-    }
-
-    if (slug && cmd && /\bclaude\b/.test(cmd) && cmd.includes(slug)) return pid;
-
-    if (runCwd && cwdLink && cmd && /\bclaude\b/.test(cmd) &&
-        (cwdLink === runCwd || cwdLink.startsWith(runCwd + path.sep))) {
-      return pid;
+    if (worktreeDir) {
+      let cwdLink = null;
+      try { cwdLink = fs.readlinkSync(`/proc/${pid}/cwd`); } catch { /* exited / denied */ }
+      if (cwdLink && (cwdLink === worktreeDir || cwdLink.startsWith(worktreeDir + path.sep))) return pid;
     }
   }
   return null;
@@ -520,6 +507,7 @@ function resolveCommitGuardOutcome(guardVerdict, satisfyingCommits) {
 
 module.exports = {
   claudePidAlive,
+  isClaudeArgv,
   classifyRunOutcome,
   mapOutcomeToGateOutcome,
   ORPHAN_REQUEUE_CAP,

@@ -74,7 +74,7 @@ const { readTail } = require('./lib/util/fileTail.cjs');
 const {
   claudePidAlive, classifyRunOutcome, mapOutcomeToGateOutcome, ORPHAN_REQUEUE_CAP, selectReapableJobs,
   findLiveProcessForJob, logHasOutput, resolvePidlessGateOutcome, resolveCommitGuardOutcome,
-  readSpawnedPidFromLog, readLogMtimeMs,
+  readSpawnedPidFromLog, readLogMtimeMs, isClaudeArgv,
 } = require('./lib/scheduler/reaperHelpers.cjs');
 const { resolveProjectRoot } = require('./lib/opsOwnership.cjs');
 const { sweepStrandedJobBranches } = require('./lib/git/branchSweep.cjs');
@@ -1370,16 +1370,17 @@ function killOrphanClaudePid(pid, recordedIdentity = null) {
   }
   // win32 has no /proc or `ps`: the identity heuristic can't run, so never reap.
   if (process.platform === 'win32') return 'unknown';
-  let cmdline = '';
+  let argv = [];
   try {
-    cmdline = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
+    argv = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
+    if (argv.length && argv[argv.length - 1] === '') argv.pop();
   } catch {
     try {
       const out = require('node:child_process').execSync(`ps -p ${pid} -o command=`, { encoding: 'utf8', stdio: ['ignore','pipe','ignore'] });
-      cmdline = out.trim();
+      argv = out.trim().split(/\s+/).filter(Boolean);
     } catch { return 'unknown'; }
   }
-  if (!/\bclaude\b/.test(cmdline)) return 'mismatch';
+  if (!isClaudeArgv(argv)) return 'mismatch';
   killTree(pid, 'SIGTERM');
   setTimeout(() => {
     try { process.kill(pid, 0); } catch { return; /* already gone */ }
@@ -7937,7 +7938,6 @@ async function reapDeadRunningJobs() {
       grace: PIDLESS_SPAWN_GRACE_MS,
       findLiveProcess: (j) => findLiveProcessForJob(j, {
         worktreeDir: jobWorktree.worktreeDirFor(j.cwd || state.config?.defaultCwd || DEFAULT_PROJECT_CWD, j.slug),
-        runCwd: j.runtime?.cwd || j.cwd,
       }),
       getLogPid: (j) => readSpawnedPidFromLog(logPathForJob(j)),
       getLogMtimeMs: (j) => readLogMtimeMs(logPathForJob(j)),
@@ -10230,7 +10230,6 @@ async function init() {
       logFreshWindowMs: IDLE_OUTPUT_KILL_MS,
       findLiveProcess: (j) => findLiveProcessForJob(j, {
         worktreeDir: jobWorktree.worktreeDirFor(j.cwd || DEFAULT_PROJECT_CWD, j.slug),
-        runCwd: j.runtime?.cwd || j.cwd,
       }),
       readRecord: supervisorRecord.readSupervisorRecord,
     });

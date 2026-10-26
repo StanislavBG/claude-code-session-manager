@@ -60,26 +60,26 @@ afterEach(() => {
 // ---------- buildClaudeSpawnArgs: systemPrompt -> --append-system-prompt ----------
 
 test('buildClaudeSpawnArgs: a given systemPrompt is passed via --append-system-prompt', () => {
-  const args = buildClaudeSpawnArgs({ prompt: 'prd body', model: 'opus', sessionId: 'sid', resume: false, systemPrompt: 'You are dev-lead.' });
+  const args = buildClaudeSpawnArgs({ model: 'opus', sessionId: 'sid', resume: false, systemPrompt: 'You are dev-lead.' });
   const idx = args.indexOf('--append-system-prompt');
   expect(idx).toBeGreaterThanOrEqual(0);
   expect(args[idx + 1]).toBe('You are dev-lead.');
 });
 
 test('buildClaudeSpawnArgs: omits --append-system-prompt entirely when systemPrompt is absent', () => {
-  const args = buildClaudeSpawnArgs({ prompt: 'prd body', model: 'sonnet', sessionId: 'sid', resume: false });
+  const args = buildClaudeSpawnArgs({ model: 'sonnet', sessionId: 'sid', resume: false });
   expect(args).not.toContain('--append-system-prompt');
 });
 
 test('buildClaudeSpawnArgs: model is never omitted even without a systemPrompt', () => {
-  const args = buildClaudeSpawnArgs({ prompt: 'x', model: 'sonnet', sessionId: 'sid', resume: false });
+  const args = buildClaudeSpawnArgs({ model: 'sonnet', sessionId: 'sid', resume: false });
   const idx = args.indexOf('--model');
   expect(idx).toBeGreaterThanOrEqual(0);
   expect(args[idx + 1]).toBe('sonnet');
 });
 
 test('buildClaudeSpawnArgs: --disallowedTools carries the frozen headless list and is immediately followed by another flag', () => {
-  const args = buildClaudeSpawnArgs({ prompt: 'x', model: 'sonnet', sessionId: 'sid', resume: false });
+  const args = buildClaudeSpawnArgs({ model: 'sonnet', sessionId: 'sid', resume: false });
   const idx = args.indexOf('--disallowedTools');
   expect(idx).toBeGreaterThanOrEqual(0);
   expect(args[idx + 1]).toBe(EXPECTED_HEADLESS_DISALLOWED_TOOLS.join(','));

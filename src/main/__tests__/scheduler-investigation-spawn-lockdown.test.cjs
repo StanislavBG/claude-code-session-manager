@@ -126,6 +126,7 @@ function writeClaudeStub() {
     const path = require('path');
     fs.writeFileSync(path.join(process.cwd(), 'investigation-argv.marker'), JSON.stringify({
       argv: process.argv.slice(2),
+      prompt: readPrompt(),
       path: process.env.PATH || '',
       disableBackgroundTasks: process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS || null,
     }), 'utf8');
@@ -195,6 +196,11 @@ test('spawnInvestigation: the real probe child carries --disallowedTools, the ti
   // Never last, never right before the prompt: the variadic list must be
   // ended by another flag.
   expect(marker.argv[idx + 2]).toMatch(/^--/);
+
+  // The prompt travels on stdin, never in argv (128 KB per-argument limit).
+  for (const a of marker.argv) expect(Buffer.byteLength(a)).toBeLessThan(131072);
+  expect(marker.argv[marker.argv.indexOf('-p') + 1]).toBe('--model');
+  expect(marker.prompt.length).toBeGreaterThan(0);
 
   // A headless run has no later turn to receive a background task's report.
   expect(marker.disableBackgroundTasks).toBe('1');

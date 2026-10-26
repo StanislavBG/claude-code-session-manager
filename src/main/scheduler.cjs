@@ -4207,11 +4207,15 @@ const HEADLESS_DISALLOWED_TOOLS = Object.freeze([
  * inserted BEFORE that flag, never between `--disallowedTools` and its value.
  * `--disallowedTools` takes a variadic list, so another flag must always
  * follow it to end that list — `--output-format` does, right after. Never
- * put `--disallowedTools` last or right before the prompt.
+ * put `--disallowedTools` last.
+ * The prompt is NOT in argv: callers send it on the child's stdin
+ * (withChildAndLog's `stdinText`). Linux caps a single argv element at 128 KB,
+ * and a large prompt failed with spawn E2BIG before the job started (the
+ * 2026-10-26 incident). `claude -p` with no positional prompt reads stdin.
  */
-function buildClaudeSpawnArgs({ prompt, model, effort, sessionId, resume, systemPrompt, toolScope }) {
+function buildClaudeSpawnArgs({ model, effort, sessionId, resume, systemPrompt, toolScope }) {
   return [
-    '-p', prompt,
+    '-p',
     '--model', model,
     ...effortArgs(effort),
     ...(systemPrompt ? ['--append-system-prompt', systemPrompt] : []),
@@ -4735,7 +4739,6 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // Distinct comm (`sm-claude-job`) + slug-labelled argv0 for System Monitor.
     // Both keep the word `claude`, which the /\bclaude\b/ reaper gates need.
     const jobArgs = buildClaudeSpawnArgs({
-      prompt,
       model: personaResolution.model,
       effort: personaEffort,
       sessionId,
@@ -4752,6 +4755,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       closeFd,
       spawn: {
         command: jobSpawn.command,
+        stdinText: prompt,
         // Resume mode passes `--resume <sessionId>` (reconnect to the SAME
         // session) INSTEAD of `--session-id <sessionId>` (mint a new one) —
         // never both, see buildClaudeSpawnArgs.
@@ -5327,8 +5331,9 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
     closeFd,
     spawn: {
       command: probeSpawn.command,
+      stdinText: prompt,
       args: [
-        '-p', prompt,
+        '-p',
         '--model', 'opus',
         '--dangerously-skip-permissions',
         ...headlessPermissionArgs(),

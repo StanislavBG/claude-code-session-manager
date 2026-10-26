@@ -54,8 +54,7 @@ afterEach(() => {
 function writeClaudeStub(capturePath) {
   return claudeStub.writeClaudeStub({ body: `
     const fs = require('fs');
-    const idx = process.argv.indexOf('-p');
-    const prompt = idx >= 0 ? process.argv[idx + 1] : '';
+    const prompt = readPrompt();
     fs.writeFileSync(${JSON.stringify(capturePath)}, prompt, 'utf8');
     process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok' }) + '\\n');
     process.exit(0);

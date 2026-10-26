@@ -116,14 +116,14 @@ test('selectResumeRecoveryTarget: SM_RESUME_RECOVERY_DISABLE=1 → null even for
 // ---------- --resume vs --session-id argv (buildClaudeSpawnArgs) ----------
 
 test('buildClaudeSpawnArgs: resume=true passes --resume <sessionId>, never --session-id', () => {
-  const args = buildClaudeSpawnArgs({ prompt: 'preamble text', model: 'sonnet', sessionId: 'sess-abc-123', resume: true });
+  const args = buildClaudeSpawnArgs({ model: 'sonnet', sessionId: 'sess-abc-123', resume: true });
   expect(args).toContain('--resume');
   expect(args[args.indexOf('--resume') + 1]).toBe('sess-abc-123');
   expect(args).not.toContain('--session-id');
 });
 
 test('buildClaudeSpawnArgs: resume=false passes --session-id <sessionId>, never --resume', () => {
-  const args = buildClaudeSpawnArgs({ prompt: 'prd body', model: 'sonnet', sessionId: 'sess-fresh-456', resume: false });
+  const args = buildClaudeSpawnArgs({ model: 'sonnet', sessionId: 'sess-fresh-456', resume: false });
   expect(args).toContain('--session-id');
   expect(args[args.indexOf('--session-id') + 1]).toBe('sess-fresh-456');
   expect(args).not.toContain('--resume');
@@ -131,7 +131,7 @@ test('buildClaudeSpawnArgs: resume=false passes --session-id <sessionId>, never 
 
 test('buildClaudeSpawnArgs: --model is always explicitly pinned, both modes', () => {
   for (const resume of [true, false]) {
-    const args = buildClaudeSpawnArgs({ prompt: 'x', model: 'sonnet', sessionId: 'sid', resume });
+    const args = buildClaudeSpawnArgs({ model: 'sonnet', sessionId: 'sid', resume });
     const modelIdx = args.indexOf('--model');
     expect(modelIdx).toBeGreaterThanOrEqual(0);
     expect(args[modelIdx + 1]).toBe('sonnet');
@@ -140,7 +140,7 @@ test('buildClaudeSpawnArgs: --model is always explicitly pinned, both modes', ()
 
 test('buildClaudeSpawnArgs: --disallowedTools carries the frozen headless list and is immediately followed by another flag, both modes', () => {
   for (const resume of [true, false]) {
-    const args = buildClaudeSpawnArgs({ prompt: 'x', model: 'sonnet', sessionId: 'sid', resume });
+    const args = buildClaudeSpawnArgs({ model: 'sonnet', sessionId: 'sid', resume });
     const idx = args.indexOf('--disallowedTools');
     expect(idx).toBeGreaterThanOrEqual(0);
     expect(args[idx + 1]).toBe(HEADLESS_DISALLOWED_TOOLS.join(','));
@@ -167,7 +167,7 @@ test('buildClaudeSpawnArgs: blender-artist-style scope → --agent name + --agen
   const personaTools = ['Read', 'Bash', 'Edit', 'Write', 'mcp__blender__execute_blender_code_for_cli'];
   const toolScope = buildPersonaToolScope(personaTools, { disallowed: HEADLESS_DISALLOWED_TOOLS });
   for (const resume of [true, false]) {
-    const args = buildClaudeSpawnArgs({ prompt: 'x', model: 'sonnet', sessionId: 'sid', resume, toolScope });
+    const args = buildClaudeSpawnArgs({ model: 'sonnet', sessionId: 'sid', resume, toolScope });
     expect(args[args.indexOf('--agent') + 1]).toBe(HEADLESS_SCOPE_AGENT_NAME);
     const def = JSON.parse(args[args.indexOf('--agents') + 1])[HEADLESS_SCOPE_AGENT_NAME];
     for (const t of [...personaTools, 'Agent', 'Skill', 'ToolSearch', 'TodoWrite']) expect(def.tools).toContain(t);
@@ -179,7 +179,7 @@ test('buildClaudeSpawnArgs: blender-artist-style scope → --agent name + --agen
 test('buildClaudeSpawnArgs: --disallowedTools still followed by another flag with a toolScope', () => {
   const toolScope = buildPersonaToolScope(['Read'], { disallowed: HEADLESS_DISALLOWED_TOOLS });
   for (const resume of [true, false]) {
-    const args = buildClaudeSpawnArgs({ prompt: 'x', model: 'sonnet', sessionId: 'sid', resume, toolScope });
+    const args = buildClaudeSpawnArgs({ model: 'sonnet', sessionId: 'sid', resume, toolScope });
     const idx = args.indexOf('--disallowedTools');
     expect(args[idx + 1]).toBe(HEADLESS_DISALLOWED_TOOLS.join(','));
     expect(args[idx + 2]).toMatch(/^--/);

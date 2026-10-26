@@ -961,6 +961,36 @@ async function dispatchIpcInvoke(envelope, device, client) {
   }
 }
 
+/** asset:manifest / asset:get — E2E-authenticated only; reply is chunked ipc:result-style frames, unicast. */
+async function dispatchAsset(envelope, device, client) {
+  const { type, id, payload } = envelope;
+  const ts = new Date().toISOString();
+  if (typeof id !== 'string' || !id || client.e2e.state !== 'authenticated' || !client.e2e.sessionKey) {
+    await auditLog(ts, type, device.deviceId, id, 'refused:e2e_not_authenticated', client);
+    respond(id, { error: 'rejected' }, undefined, client);
+    return;
+  }
+  const { chunkFrames } = require('./lib/feedback-remote/remoteIpcDispatch.cjs');
+  const assets = require('./lib/feedback-remote/remoteAssets.cjs');
+  let out;
+  let audit = 'ok';
+  try {
+    if (type === 'asset:manifest') out = { ok: true, result: assets.assetManifest() };
+    else {
+      const r = assets.readAsset(payload && payload.name);
+      if (r.ok) out = { ok: true, result: r };
+      else { out = { ok: false, error: 'rejected' }; audit = `refused:${r.error}`; }
+    }
+  } catch {
+    out = { ok: false, error: 'rejected' };
+    audit = 'refused:asset_error';
+  }
+  let chunked = chunkFrames(out);
+  if (!chunked.ok) { chunked = chunkFrames({ ok: false, error: 'rejected' }); audit = 'refused:too_large'; }
+  await auditLog(ts, type, device.deviceId, id, audit, client);
+  for (const frame of chunked.frames) sendIpcResult(id, frame, client);
+}
+
 // ─── ipc:subscribe push fanout ─────────────────────────────────────
 // Mirrors sendIfAlive pushes to E2E-authenticated browser clients that subscribed.
 
@@ -1024,6 +1054,10 @@ async function dispatchEnvelope(envelope, device, client) {
   }
   if (type === 'ipc:invoke') {
     await dispatchIpcInvoke(envelope, device, client);
+    return;
+  }
+  if (type === 'asset:manifest' || type === 'asset:get') {
+    await dispatchAsset(envelope, device, client);
     return;
   }
   if (typeof type !== 'string' || !type.startsWith('cmd:')) return;

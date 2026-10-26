@@ -20,6 +20,18 @@
  * webContents state and wrap the send in try/catch.
  */
 function sendIfAlive(window, channel, payload) {
+  sendToWindow(window, channel, payload);
+  // Remote fanout runs even when the window is gone (web clients outlive it) and never throws.
+  if (_remoteFanout) {
+    try {
+      _remoteFanout(channel, payload);
+    } catch {
+      // A broken remote subscriber must never break the Electron send path.
+    }
+  }
+}
+
+function sendToWindow(window, channel, payload) {
   if (!window || window.isDestroyed()) return;
   const wc = window.webContents;
   if (!wc || wc.isDestroyed() || wc.isCrashed()) return;
@@ -31,4 +43,12 @@ function sendIfAlive(window, channel, payload) {
   }
 }
 
-module.exports = { sendIfAlive };
+/** @type {((channel: string, payload: unknown) => void) | null} */
+let _remoteFanout = null;
+
+/** Register (or clear with null) the fanout that mirrors every push to E2E web clients. */
+function setRemoteFanout(fn) {
+  _remoteFanout = typeof fn === 'function' ? fn : null;
+}
+
+module.exports = { sendIfAlive, setRemoteFanout };

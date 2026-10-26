@@ -26,7 +26,7 @@ const fsp = require('node:fs/promises');
 const fs = require('node:fs');
 const { writeTextAtomic, validatePath } = require('./config.cjs');
 const logs = require('./logs.cjs');
-const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
+const { sendIfAlive, setRemoteFanout } = require('./lib/sendToRenderer.cjs');
 const { claudeHome } = require('./lib/scheduler/schedulerPaths.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
 const { makeState, confirmSas: confirmSasLogic } = require('./lib/e2eStateMachine.cjs');
@@ -961,8 +961,67 @@ async function dispatchIpcInvoke(envelope, device, client) {
   }
 }
 
+// ─── ipc:subscribe push fanout ─────────────────────────────────────
+// Mirrors sendIfAlive pushes to E2E-authenticated browser clients that subscribed.
+
+const IPC_SUBSCRIBE_MAX_CHANNELS = 50;
+
+/** True iff the apiSurface lists `channel` as a push (on / on-dynamic) with remote not deny. */
+function isPushableChannel(channel) {
+  if (typeof channel !== 'string' || channel.length === 0 || channel.length > 200) return false;
+  const surface = require('../preload/apiSurface.cjs');
+  return surface.some((r) => {
+    if (r.remote === 'deny') return false;
+    if (r.kind === 'on') return r.channel === channel;
+    if (r.kind === 'on-dynamic') {
+      const prefix = r.channel.endsWith('*') ? r.channel.slice(0, -1) : r.channel;
+      return channel.length > prefix.length && channel.startsWith(prefix);
+    }
+    return false;
+  });
+}
+
+function handleIpcSubscribe(envelope, client, subscribe) {
+  const channels = envelope.payload && Array.isArray(envelope.payload.channels) ? envelope.payload.channels : [];
+  if (!client.pushChannels) client.pushChannels = new Set();
+  for (const ch of channels.slice(0, IPC_SUBSCRIBE_MAX_CHANNELS)) {
+    if (subscribe) { if (isPushableChannel(ch)) client.pushChannels.add(ch); }
+    else client.pushChannels.delete(ch);
+  }
+}
+
+/** Encrypt + unicast one ipc:event frame to one subscribed client. */
+function sendIpcEvent(client, channel, frame) {
+  if (!_ws || _ws.readyState !== WebSocket.OPEN) return;
+  if (!client.e2e.sessionKey) return;
+  const inner = { type: 'ipc:event', id: crypto.randomUUID(), channel, seq: frame.seq, total: frame.total, data: frame.data, ts: Date.now() };
+  const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), client.e2e.sessionKey);
+  const out = { type: 'e2e:box', id: inner.id, payload: { nonce, ciphertext }, ts: Date.now() };
+  if (client.key !== LEGACY_CLIENT_KEY) out.toConn = client.key;
+  _ws.send(JSON.stringify(out));
+}
+
+function fanoutIpcEvent(channel, payload) {
+  const targets = _clients.authenticated().filter((c) => c.pushChannels && c.pushChannels.has(channel));
+  if (targets.length === 0) return;
+  const { chunkFrames } = require('./lib/feedback-remote/remoteIpcDispatch.cjs');
+  const chunked = chunkFrames(payload);
+  if (!chunked.ok) return;
+  for (const client of targets) {
+    try {
+      for (const frame of chunked.frames) sendIpcEvent(client, channel, frame);
+    } catch (e) {
+      logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'ipc:event send failed', meta: { error: e?.message } });
+    }
+  }
+}
+
 async function dispatchEnvelope(envelope, device, client) {
   const { type, id, payload } = envelope;
+  if (type === 'ipc:subscribe' || type === 'ipc:unsubscribe') {
+    if (client.e2e.state === 'authenticated') handleIpcSubscribe(envelope, client, type === 'ipc:subscribe');
+    return;
+  }
   if (type === 'ipc:invoke') {
     await dispatchIpcInvoke(envelope, device, client);
     return;
@@ -1356,6 +1415,7 @@ async function revokeAllDevices() {
 // ─── IPC handlers ─────────────────────────────────────────────────────────────
 
 function registerRemoteHandlers() {
+  setRemoteFanout(fanoutIpcEvent);
   removeOrphanedClientFiles(path.join(claudeHome(), 'session-manager'));
   const { validated } = require('./ipcSchemas.cjs');
 
@@ -1520,6 +1580,7 @@ module.exports = {
     hasReconnectTimer: () => _reconnectTimer !== null,
     cancelReconnect,
     invalidateConfigCache,
+    fanoutIpcEvent,
     setE2eAuthenticated: (key, clientKey = LEGACY_CLIENT_KEY) => {
       _clients.getOrCreate(clientKey).e2e = makeState('authenticated', key, null);
     },

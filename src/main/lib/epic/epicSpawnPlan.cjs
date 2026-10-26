@@ -16,6 +16,9 @@
  * the real cause, never claim a flag that cannot work. Reachable = "some existing transcript lives
  * under encodeCwd(candidate cwd)" and the candidate is a real directory.
  *
+ * A turn-1 `worktreeDirHint` lets a brand-new Epic's first spawn land in its freshly minted worktree;
+ * once any transcript exists (or the hint is not a directory) the hint is ignored.
+ *
  * Also refuses requests routed to a closed (`completed`) Epic, and keeps a per-session circuit
  * breaker: once a session is found unreachable, later requests are refused after ONE stat (is the
  * worktree dir still missing?) without re-running the restore git commands.
@@ -74,7 +77,7 @@ function findEpic(cwd, claudeSessionId, deps) {
  * @returns {{ ok: true, execCwd: string, useResume: boolean, transcriptPath: string|null }
  *   | { ok: false, code: 'epic_closed'|'session_unreachable'|'spawn_cwd_missing', message: string }}
  */
-function planEpicSpawn({ cwd, claudeSessionId, fallbackResume = false, deps = {} } = {}) {
+function planEpicSpawn({ cwd, claudeSessionId, fallbackResume = false, worktreeDirHint, deps = {} } = {}) {
   const statSync = deps.statSync || fs.statSync;
   const epic = findEpic(cwd, claudeSessionId, deps);
 
@@ -97,6 +100,11 @@ function planEpicSpawn({ cwd, claudeSessionId, fallbackResume = false, deps = {}
     resolved = resolveEpicTranscriptPath({ cwd, claudeSessionId, deps });
     useResume = !!resolved.existsAnywhere;
   } catch { /* keep the caller-supplied flag */ }
+
+  // Turn-1 hint: no transcript anywhere yet and the freshly minted worktree exists → spawn there.
+  if ((!resolved || !resolved.existsAnywhere) && typeof worktreeDirHint === 'string' && worktreeDirHint && isDir(worktreeDirHint, statSync)) {
+    return { ok: true, execCwd: worktreeDirHint, useResume: false, transcriptPath: null };
+  }
 
   let execCwd = (deps.resolveSpawnCwd || resolveEpicSpawnCwd)({ cwd, claudeSessionId, deps: { restore: true, readActiveIndex: deps.readActiveIndex, statSync: deps.statSync, restoreWorktree: deps.restoreWorktree } });
 

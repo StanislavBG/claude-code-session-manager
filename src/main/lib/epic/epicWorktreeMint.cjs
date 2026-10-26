@@ -24,6 +24,7 @@
  * since this is likewise reachable from the renderer over IPC.
  */
 
+const path = require('node:path');
 const { createEpicWorktree } = require('../git/gitWorktree.cjs');
 const { validatePath } = require('../../config.cjs');
 
@@ -35,8 +36,49 @@ const { validatePath } = require('../../config.cjs');
  * `null` on any failure — createEpicWorktree/createWorktree never throw, so
  * this never does either.
  */
-async function createEpicWorktreeViaIpc(cwd, epicId) {
-  validatePath(cwd);
+/** In-flight mints, keyed by resolved cwd + epicId (turn 1 awaits these — awaitPendingEpicWorktree). */
+const pendingMints = new Map();
+const mintKey = (cwd, epicId) => `${path.resolve(String(cwd))}\0${epicId}`;
+
+function createEpicWorktreeViaIpc(cwd, epicId) {
+  try { validatePath(cwd); } catch (err) { return Promise.reject(err); }
+  const key = mintKey(cwd, epicId);
+  const p = mintEpicWorktree(cwd, epicId);
+  pendingMints.set(key, p);
+  p.finally(() => { if (pendingMints.get(key) === p) pendingMints.delete(key); }).catch(() => {});
+  return p;
+}
+
+/**
+ * awaitPendingEpicWorktree(cwd, epicId, { timeoutMs }) → Promise<EpicWorktree | null>
+ * Resolves the in-flight mint's result, null when nothing is pending or after timeoutMs. Never rejects.
+ */
+async function awaitPendingEpicWorktree(cwd, epicId, { timeoutMs = 90000 } = {}) {
+  let p;
+  try { p = pendingMints.get(mintKey(cwd, epicId)); } catch { return null; }
+  if (!p) return null;
+  let timer;
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => {
+      console.log(`[epicWorktreeMint] ${epicId}: pending mint timed out after ${timeoutMs}ms`);
+      resolve(null);
+    }, timeoutMs);
+    if (timer && typeof timer.unref === 'function') timer.unref();
+  });
+  try {
+    return await Promise.race([p.catch(() => null), timeout]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function __resetPendingForTests() {
+  pendingMints.clear();
+}
+
+async function mintEpicWorktree(cwd, epicId) {
   const result = await createEpicWorktree({ cwd, epicId });
   if (!result.ok) {
     console.log(`[epicWorktreeMint] ${epicId}: not isolated (${result.reason})`);
@@ -66,4 +108,4 @@ function registerEpicWorktreeMintHandlers() {
   );
 }
 
-module.exports = { createEpicWorktreeViaIpc, registerEpicWorktreeMintHandlers };
+module.exports = { createEpicWorktreeViaIpc, awaitPendingEpicWorktree, __resetPendingForTests, registerEpicWorktreeMintHandlers };

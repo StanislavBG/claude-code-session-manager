@@ -194,3 +194,31 @@ test('chatRunner: silent run refused by planEpicSpawn => onSilentError with the 
     fs.rmSync(project, { recursive: true, force: true });
   }
 });
+
+test('worktreeDirHint: turn 1 (no transcript) spawns in the hinted worktree, no resume', () => {
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-hint-'));
+  try {
+    const plan = planEpicSpawn({ cwd: PROJECT, claudeSessionId: SID, worktreeDirHint: wt, deps: { homeDir: home, readActiveIndex: () => ({ sessions: {} }) } });
+    expect(plan).toEqual({ ok: true, execCwd: wt, useResume: false, transcriptPath: null });
+  } finally { fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+test('worktreeDirHint: ignored once a transcript exists anywhere', () => {
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-hint-'));
+  try {
+    transcriptUnder(PROJECT);
+    const deps = { homeDir: home, readActiveIndex: () => ({ sessions: epic({ worktree: undefined }) }), statSync: (p) => (p === PROJECT ? { isDirectory: () => true } : fs.statSync(p)) };
+    const plan = planEpicSpawn({ cwd: PROJECT, claudeSessionId: SID, worktreeDirHint: wt, deps });
+    expect(plan).toMatchObject({ ok: true, useResume: true, execCwd: PROJECT });
+  } finally { fs.rmSync(wt, { recursive: true, force: true }); }
+});
+
+test('worktreeDirHint: ignored when the directory is missing', () => {
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-realproj-'));
+  try {
+    const deps = { homeDir: home, readActiveIndex: () => ({ sessions: {} }) };
+    const withHint = planEpicSpawn({ cwd: proj, claudeSessionId: SID, worktreeDirHint: '/nonexistent/hint-dir', deps });
+    const without = planEpicSpawn({ cwd: proj, claudeSessionId: SID, deps });
+    expect(withHint).toEqual(without);
+  } finally { fs.rmSync(proj, { recursive: true, force: true }); }
+});

@@ -14,7 +14,7 @@
 
 'use strict';
 
-import { test, expect, afterEach } from 'vitest';
+import { test, expect, afterEach, describe, vi } from 'vitest';
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
@@ -114,4 +114,33 @@ test('a cwd outside every allowed root is rejected before anything is created', 
 test('a request missing epicId is rejected by ipcSchemas validation', async () => {
   const cwd = await mkRepoCwd();
   expect(() => handler(null, { cwd })).toThrow();
+});
+
+describe('pending mint registry', () => {
+  const { awaitPendingEpicWorktree, __resetPendingForTests } = require('../epicWorktreeMint.cjs');
+  afterEach(() => { vi.restoreAllMocks(); __resetPendingForTests(); });
+
+  test('registers synchronously, resolves the mint result, and clears once settled', async () => {
+    const cwd = await mkRepoCwd();
+    const p = createEpicWorktreeViaIpc(cwd, 'epic-pend-1');
+    const awaited = awaitPendingEpicWorktree(cwd, 'epic-pend-1');
+    const [result, viaAwait] = await Promise.all([p, awaited]);
+    expect(result).not.toBeNull();
+    expect(viaAwait).toEqual(result);
+    expect(await awaitPendingEpicWorktree(cwd, 'epic-pend-1')).toBeNull();
+  });
+
+  test('nothing pending resolves null at once', async () => {
+    expect(await awaitPendingEpicWorktree('/nowhere', 'epic-none')).toBeNull();
+  });
+
+  test('a mint slower than timeoutMs resolves null and logs once', async () => {
+    const cwd = await mkRepoCwd();
+    const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(gitWorktree, 'createEpicWorktree');
+    const p = createEpicWorktreeViaIpc(cwd, 'epic-pend-2');
+    expect(await awaitPendingEpicWorktree(cwd, 'epic-pend-2', { timeoutMs: 0 })).toBeNull();
+    expect(spy.mock.calls.filter((c) => String(c[0]).includes('pending mint timed out')).length).toBe(1);
+    await p;
+  });
 });

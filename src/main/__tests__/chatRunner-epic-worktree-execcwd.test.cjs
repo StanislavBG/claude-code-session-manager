@@ -12,7 +12,7 @@
 
 'use strict';
 
-import { test, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import { test, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -34,6 +34,7 @@ afterAll(() => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   delete process.env.SM_CLAUDE_BIN;
   cr.__resetQueueForTests();
   cr.attachWindow(null);
@@ -117,6 +118,51 @@ test('executeRun falls back to cwd unchanged when the Epic has no worktree recor
 
   try {
     cr.run({ tabId: 'tab-2', sessionId, prompt: 'hello', cwd: mainCwd, resume: false });
+    await waitForFile(path.join(mainCwd, 'ran-here.marker'));
+    expect(fs.existsSync(path.join(mainCwd, 'ran-here.marker'))).toBe(true);
+  } finally {
+    fs.rmSync(mainCwd, { recursive: true, force: true });
+  }
+});
+
+const mintMod = () => require('../lib/epic/epicWorktreeMint.cjs');
+
+test('turn 1 with an in-flight mint resolving to a dir spawns inside that dir', async () => {
+  const mainCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunner-pend-main-'));
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunner-pend-wt-'));
+  const spy = vi.spyOn(mintMod(), 'awaitPendingEpicWorktree').mockImplementation(
+    () => new Promise((r) => setTimeout(() => r({ dir: wt }), 50)),
+  );
+  process.env.SM_CLAUDE_BIN = writeClaudeStub();
+  try {
+    cr.run({ tabId: 'epic-pend', sessionId: `pend-sess-${process.pid}`, prompt: 'hello', cwd: mainCwd, resume: false });
+    await waitForFile(path.join(wt, 'ran-here.marker'));
+    expect(spy).toHaveBeenCalledWith(mainCwd, 'epic-pend');
+    expect(fs.existsSync(path.join(mainCwd, 'ran-here.marker'))).toBe(false);
+  } finally {
+    fs.rmSync(mainCwd, { recursive: true, force: true });
+    fs.rmSync(wt, { recursive: true, force: true });
+  }
+});
+
+test('nothing pending leaves the spawn cwd unchanged', async () => {
+  const mainCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunner-nopend-'));
+  process.env.SM_CLAUDE_BIN = writeClaudeStub();
+  try {
+    cr.run({ tabId: 'epic-nopend', sessionId: `nopend-sess-${process.pid}`, prompt: 'hello', cwd: mainCwd, resume: false });
+    await waitForFile(path.join(mainCwd, 'ran-here.marker'));
+    expect(fs.existsSync(path.join(mainCwd, 'ran-here.marker'))).toBe(true);
+  } finally {
+    fs.rmSync(mainCwd, { recursive: true, force: true });
+  }
+});
+
+test('a pending mint resolving null leaves the spawn cwd unchanged', async () => {
+  const mainCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunner-nullpend-'));
+  vi.spyOn(mintMod(), 'awaitPendingEpicWorktree').mockResolvedValue(null);
+  process.env.SM_CLAUDE_BIN = writeClaudeStub();
+  try {
+    cr.run({ tabId: 'epic-nullpend', sessionId: `nullpend-sess-${process.pid}`, prompt: 'hello', cwd: mainCwd, resume: false });
     await waitForFile(path.join(mainCwd, 'ran-here.marker'));
     expect(fs.existsSync(path.join(mainCwd, 'ran-here.marker'))).toBe(true);
   } finally {

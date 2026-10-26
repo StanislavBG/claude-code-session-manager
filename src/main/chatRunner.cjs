@@ -50,6 +50,7 @@ const { killTree, detachedSpawnOpts } = require('./lib/process/killTree.cjs');
 const agentModelResolve = require('./lib/claude/agentModelResolve.cjs');
 const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResolve.cjs');
 const { planEpicSpawn } = require('./lib/epic/epicSpawnPlan.cjs');
+const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
 const logs = require('./logs.cjs');
 const { createHeadTailBuffer } = require('./lib/util/headTailBuffer.cjs');
 
@@ -445,7 +446,16 @@ sessionSlots.subscribe(() => { try { pump(); } catch { /* defensive */ } });
  * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void, onSilentError?: (message: string, code?: string) => void, promptId?: string }} opts
  * @returns {Promise<void>}
  */
-function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult, onSilentError, promptId }) {
+async function executeRun(opts) {
+  // A New Epic's turn 1 races the fire-and-forget worktree mint: wait (<=90s, never rejects,
+  // no wait when nothing is pending) so the first spawn lands in the worktree. Awaited before
+  // any slot/lane work in the run body, so nothing is held while waiting.
+  let pendingWt = null;
+  try { pendingWt = await epicWorktreeMint.awaitPendingEpicWorktree(opts.cwd, opts.tabId); } catch { pendingWt = null; }
+  return executeRunWithHint(opts, pendingWt && pendingWt.dir);
+}
+
+function executeRunWithHint({ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult, onSilentError, promptId }, worktreeDirHint) {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     // Last few tool_use blocks seen on the stream, oldest first — surfaced in
@@ -548,7 +558,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // Main is authoritative about --resume vs --session-id AND the spawn cwd, and it decides
     // them TOGETHER (epicSpawnPlan.cjs): a transcript under an encoding the spawn cwd cannot see
     // must never yield a claimed flag. Unreachable / closed Epics are refused before any spawn.
-    const plan = planEpicSpawn({ cwd, claudeSessionId: sessionId, fallbackResume: !!resume });
+    const plan = planEpicSpawn({ cwd, claudeSessionId: sessionId, fallbackResume: !!resume, worktreeDirHint });
     if (!plan.ok) {
       emitTerminal('chat:run:error', { tabId, sessionId, code: plan.code, message: plan.message });
       // emitTerminal is a no-op broadcast for silent runs, so hand the refusal to the caller

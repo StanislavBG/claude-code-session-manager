@@ -7,8 +7,9 @@
  * cost-gated synthesis caller (Memory Clusters, the Project Brief) shares one
  * spawn/timeout/output-cap implementation instead of forking it per feature.
  *
- * Pattern: stdin closed ('ignore' — `claude -p` blocks forever waiting for
- * piped stdin otherwise), model pinned explicitly by the caller, hard
+ * Pattern: the prompt is written to stdin (never argv — Linux caps one
+ * argument at 128 KB, E2BIG) and stdin is closed right after the write, never
+ * left open (`claude -p` blocks forever waiting on an open pipe), model pinned explicitly by the caller, hard
  * timeout that resolves {ok:false} rather than hanging, SM_KG_INTERNAL=1 so
  * the prompt-logging hook skips these internal calls, and an output-size cap
  * so a runaway response can't grow `out` unbounded.
@@ -17,6 +18,7 @@
 const { spawn } = require('node:child_process');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./claudeBin.cjs');
 const { headlessPermissionArgs, ensureCliCapsProbed } = require('./claudeCliCaps.cjs');
+const { feedChildStdin } = require('../process/childStdin.cjs');
 const { withProcRole } = require('../process/cleanEnv.cjs');
 
 const MAX_OUT_BYTES = 8 * 1024 * 1024;
@@ -28,7 +30,7 @@ async function runClaudeP(prompt, { model = 'sonnet', timeoutMs = 180_000, syste
     let bin;
     try { bin = resolveClaudeBin(); } catch (e) { resolve({ ok: false, error: `claude not found: ${e?.message}` }); return; }
     const args = [
-      '-p', prompt,
+      '-p',
       '--model', model,
       '--dangerously-skip-permissions',
       ...headlessPermissionArgs(),
@@ -37,7 +39,8 @@ async function runClaudeP(prompt, { model = 'sonnet', timeoutMs = 180_000, syste
     ];
     if (systemPrompt) args.push('--append-system-prompt', systemPrompt);
     const target = claudeSpawnTarget('aux', 'runclaudep', bin);
-    const child = spawn(target.command, args, { env: withProcRole({ ...process.env, SM_KG_INTERNAL: '1' }, 'aux'), stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
+    const child = spawn(target.command, args, { env: withProcRole({ ...process.env, SM_KG_INTERNAL: '1' }, 'aux'), stdio: ['pipe', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
+    feedChildStdin(child, prompt);
     let out = '';
     let err = '';
     let killedForSize = false;

@@ -20,6 +20,7 @@ const { spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
 const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/claudeCliCaps.cjs');
+const { feedChildStdin } = require('./lib/process/childStdin.cjs');
 const { withProcRole } = require('./lib/process/cleanEnv.cjs');
 const { extractJson } = require('./lib/util/extractJson.cjs');
 const { assertInsideHome } = require('./lib/insideHome.cjs');
@@ -94,7 +95,7 @@ async function runClaude(prompt, { model = 'sonnet', timeoutMs = 90_000, systemP
     let bin;
     try { bin = resolveClaudeBin(); } catch (e) { resolve({ ok: false, error: `claude not found: ${e?.message}` }); return; }
     const args = [
-      '-p', prompt,
+      '-p',
       '--model', model,
       '--dangerously-skip-permissions',
       ...headlessPermissionArgs(),
@@ -102,11 +103,13 @@ async function runClaude(prompt, { model = 'sonnet', timeoutMs = 90_000, systemP
       '--output-format', 'text',
     ];
     if (systemPrompt) args.push('--append-system-prompt', systemPrompt);
-    // stdin MUST be closed ('ignore') — `claude -p` otherwise blocks waiting
-    // for piped stdin and returns empty. SM_KG_INTERNAL=1 tells the
+    // The prompt goes on stdin (argv caps one argument at 128 KB -> E2BIG) and
+    // stdin is closed right after the write, never left open — `claude -p`
+    // otherwise blocks waiting on it and returns empty. SM_KG_INTERNAL=1 tells the
     // prompt-logging hook to skip this invocation.
     const target = claudeSpawnTarget('aux', 'docedit', bin);
-    const child = spawn(target.command, args, { env: withProcRole({ ...process.env, SM_KG_INTERNAL: '1' }, 'aux'), stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
+    const child = spawn(target.command, args, { env: withProcRole({ ...process.env, SM_KG_INTERNAL: '1' }, 'aux'), stdio: ['pipe', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
+    feedChildStdin(child, prompt);
     let out = '';
     let err = '';
     // Cap accumulated stdout — the model output shouldn't grow `out` without
@@ -250,6 +253,7 @@ module.exports = {
   parseDocEdit,
   editPrompt,
   runDocEdit,
+  runClaude,
   docEditViaSession,
   MAX_DOC_CONTEXT,
   truncateDocumentText,

@@ -26,6 +26,11 @@ export default function Cockpit({ socket, deviceId }: Props) {
   const awaitingDesktopConfirm = useStore((s) => s.awaitingDesktopConfirm);
   const route = useStore((s) => s.route);
   const refreshKey = useStore((s) => s.refreshKey);
+  const remoteReady = useStore((s) => s.remoteReady);
+  const fallbackExpired = useStore((s) => s.readyFallbackExpired);
+  // Devices without a pinned E2E key never negotiate, so there is nothing to wait for.
+  const needsE2E = useStore((s) => !!s.devices.find((d) => d.deviceId === s.activeDeviceId)?.devicePubKey);
+  const ready = remoteReady || fallbackExpired || !needsE2E;
   const goSessions = useStore((s) => s.goSessions);
   const goSession = useStore((s) => s.goSession);
   const activeDeviceId = useStore((s) => s.activeDeviceId);
@@ -64,7 +69,7 @@ export default function Cockpit({ socket, deviceId }: Props) {
         Waiting for you to confirm the 6-digit code on your computer (Settings → Phone remote)…
       </div>
     ) : (
-      <ProjectsScreen socket={socket} deviceId={deviceId} refreshKey={refreshKey} onOpen={openProject} />
+      <ProjectsScreen socket={socket} deviceId={deviceId} refreshKey={refreshKey} ready={ready} onOpen={openProject} />
     );
   } else if (route.view === 'sessions') {
     body = (

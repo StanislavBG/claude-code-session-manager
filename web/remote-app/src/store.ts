@@ -32,6 +32,8 @@ interface AppState {
   awaitingDesktopConfirm: boolean;
   /** Desktop sent event:remote:ready for this connection: the key is pinned, no SAS needed. */
   remoteReady: boolean;
+  /** The ready fallback expired for the active device: ask anyway (version skew). */
+  readyFallbackExpired: boolean;
   /** Device IDs whose relay-served pubKey diverged from the pinned value (TOFU). */
   keyMismatchDeviceIds: string[];
   /** Desktops that signalled event:remote:ready on their current connection. */
@@ -80,6 +82,7 @@ export const useStore = create<AppState>((set, get) => ({
   pendingSas: null,
   awaitingDesktopConfirm: false,
   remoteReady: false,
+  readyFallbackExpired: false,
   keyMismatchDeviceIds: [],
   readyDeviceIds: [],
   deviceMeta: {},
@@ -107,6 +110,7 @@ export const useStore = create<AppState>((set, get) => ({
         pendingSas: null,
         awaitingDesktopConfirm: false,
         remoteReady: activeDeviceId !== null && s.readyDeviceIds.includes(activeDeviceId),
+        readyFallbackExpired: false,
         refreshKey: s.refreshKey + 1,
       };
     }),
@@ -118,7 +122,7 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => ({ deviceMeta: { ...s.deviceMeta, [deviceId]: meta } }));
     saveDeviceMeta(deviceId, meta);
   },
-  setWsConnected: (wsConnected) => set(wsConnected ? { wsConnected } : { wsConnected, remoteReady: false }),
+  setWsConnected: (wsConnected) => set(wsConnected ? { wsConnected } : { wsConnected, remoteReady: false, readyFallbackExpired: false }),
   setScreen: (screen) => set({ screen }),
 
   goProjects: () => set({ route: { view: 'projects' } }),
@@ -129,7 +133,7 @@ export const useStore = create<AppState>((set, get) => ({
     set((s) => ({ stateByTab: { ...s.stateByTab, [tabId]: state } })),
   reset: () => set({
     route: { view: 'projects' }, stateByTab: {},
-    activeDeviceId: null, awaitingDesktopConfirm: false, remoteReady: false,
+    activeDeviceId: null, awaitingDesktopConfirm: false, remoteReady: false, readyFallbackExpired: false,
     readyDeviceIds: [],
   }),
 
@@ -145,15 +149,17 @@ export const useStore = create<AppState>((set, get) => ({
       : s.readyDeviceIds;
     if (deviceId !== undefined && deviceId !== s.activeDeviceId) return { readyDeviceIds };
     return {
-      readyDeviceIds, remoteReady: true, pendingSas: null, awaitingDesktopConfirm: false,
+      readyDeviceIds, remoteReady: true, readyFallbackExpired: false, pendingSas: null, awaitingDesktopConfirm: false,
       refreshKey: s.refreshKey + 1,
     };
   }),
-  stopAwaitingDesktop: () => set((s) => ({ awaitingDesktopConfirm: false, refreshKey: s.refreshKey + 1 })),
+  stopAwaitingDesktop: () => set((s) => ({
+    awaitingDesktopConfirm: false, readyFallbackExpired: true, refreshKey: s.refreshKey + 1,
+  })),
   clearRemoteReady: (deviceId) => set((s) => {
-    if (deviceId === undefined) return { readyDeviceIds: [], remoteReady: false };
+    if (deviceId === undefined) return { readyDeviceIds: [], remoteReady: false, readyFallbackExpired: false };
     const readyDeviceIds = s.readyDeviceIds.filter((id) => id !== deviceId);
-    return deviceId === s.activeDeviceId ? { readyDeviceIds, remoteReady: false } : { readyDeviceIds };
+    return deviceId === s.activeDeviceId ? { readyDeviceIds, remoteReady: false, readyFallbackExpired: false } : { readyDeviceIds };
   }),
   addKeyMismatch: (deviceId) =>
     set((s) => ({

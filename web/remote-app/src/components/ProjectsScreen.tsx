@@ -19,11 +19,14 @@ export default function ProjectsScreen({
   socket,
   deviceId,
   refreshKey,
+  ready = true,
   onOpen,
 }: {
   socket: RelaySocket | null;
   deviceId: string;
   refreshKey: number;
+  /** False until the desktop signalled ready (or the fallback expired): no request is sent. */
+  ready?: boolean;
   onOpen: (p: RemoteProject) => void;
 }) {
   const [state, setState] = useState<State>({ status: 'loading' });
@@ -32,8 +35,9 @@ export default function ProjectsScreen({
 
   useEffect(() => {
     if (!socket) return;
-    let live = true;
     setState({ status: 'loading' });
+    if (!ready) return;
+    let live = true;
     listProjects(socket, deviceId)
       .then((r) => live && setState({ status: 'ready', projects: r?.projects ?? [] }))
       .catch((e) =>
@@ -42,7 +46,7 @@ export default function ProjectsScreen({
     return () => {
       live = false;
     };
-  }, [socket, deviceId, refreshKey, attempt]);
+  }, [socket, deviceId, refreshKey, attempt, ready]);
 
   return (
     <div className="flex-1 overflow-y-auto rm-scroll px-3 py-3">

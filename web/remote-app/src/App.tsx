@@ -64,6 +64,7 @@ function AppInner() {
     setPendingSas, addKeyMismatch, stopAwaitingDesktop,
   } = useStore();
   const socketRef = useRef<RelaySocket | null>(null);
+  const fallbackRef = useRef<ReturnType<typeof createReadyFallback> | null>(null);
 
   // Fetches /devices and re-applies TOFU key pinning. Shared by the mount-time
   // bootstrap and the event-triggered refresh (device paired after initial load).
@@ -116,6 +117,7 @@ function AppInner() {
     const socket = new RelaySocket((connected) => setWsConnected(connected));
     socketRef.current = socket;
     const fallback = createReadyFallback(stopAwaitingDesktop);
+    fallbackRef.current = fallback;
     const infoFetched = new Set<string>();
     socket.connect().catch(console.error);
 
@@ -189,6 +191,7 @@ function AppInner() {
     return () => {
       offStatus(); offState(); offSas(); offReady();
       fallback.clear();
+      fallbackRef.current = null;
       socket.destroy();
       socketRef.current = null;
       reset();
@@ -210,6 +213,17 @@ function AppInner() {
       socket.initiateE2E(device.deviceId, device.devicePubKey).catch(() => {});
     }
   }, [online, device?.deviceId, device?.devicePubKey]);
+
+  // Arm the version-skew fallback whenever we start waiting for the active desktop's
+  // event:remote:ready (online + E2E initiated); clear it once ready arrives.
+  const remoteReady = useStore((s) => s.remoteReady);
+  const wsConnected = useStore((s) => s.wsConnected);
+  useEffect(() => {
+    const f = fallbackRef.current;
+    if (!f) return;
+    if (online && device?.devicePubKey && wsConnected && !remoteReady) f.arm();
+    else f.clear();
+  }, [online, device?.deviceId, device?.devicePubKey, wsConnected, remoteReady]);
 
   const showConnect = !online;
   useEffect(() => { if (showConnect) trackScreen('connect'); }, [showConnect]);

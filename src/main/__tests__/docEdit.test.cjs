@@ -6,7 +6,12 @@
 
 'use strict';
 
-import { test, expect, describe, beforeEach, vi } from 'vitest';
+import { test, expect, describe, beforeEach, afterEach, vi } from 'vitest';
+
+const fsMod = require('node:fs');
+const osMod = require('node:os');
+const pathMod = require('node:path');
+const { writeClaudeStub, reapClaudeStubs } = require('../../../tests/helpers/claudeStub.cjs');
 
 // docEdit.cjs requires chatRunner.cjs at module scope and calls `chatRunner.run(...)`
 // as a property access, so patching `run` on the already-required (cached) module
@@ -17,7 +22,7 @@ const runCalls = [];
 beforeEach(() => { runCalls.length = 0; });
 chatRunnerModule.run = (opts) => { runCalls.push(opts); };
 
-const { parseDocEdit, editPrompt, truncateDocumentText, MAX_DOC_CONTEXT, docEditViaSession, attachWindow } = require('../docEdit.cjs');
+const { runClaude, parseDocEdit, editPrompt, truncateDocumentText, MAX_DOC_CONTEXT, docEditViaSession, attachWindow } = require('../docEdit.cjs');
 const { duplicateNameFor } = require('../files.cjs');
 
 const broadcasts = [];
@@ -216,6 +221,34 @@ describe('docEditViaSession', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('runClaude stdin prompt', () => {
+  const prevBin = process.env.SM_CLAUDE_BIN;
+  afterEach(() => {
+    if (prevBin === undefined) delete process.env.SM_CLAUDE_BIN; else process.env.SM_CLAUDE_BIN = prevBin;
+    reapClaudeStubs();
+  });
+
+  test('a 300 KB prompt goes over stdin; no argv element reaches 128 KB', async () => {
+    const dir = fsMod.mkdtempSync(pathMod.join(osMod.tmpdir(), 'docedit-'));
+    const argvFile = pathMod.join(dir, 'argv.json');
+    process.env.SM_CLAUDE_BIN = writeClaudeStub({
+      body: `
+if (process.argv.indexOf('-p') < 0) { process.stdout.write('stub 0.0.0\\n'); process.exit(0); }
+require('node:fs').writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)));
+process.stdout.write(String(Buffer.byteLength(readPrompt(), 'utf8')));
+process.exit(0);
+`,
+    });
+    const res = await runClaude('x'.repeat(300 * 1024), { timeoutMs: 60_000 });
+    expect(res.ok).toBe(true);
+    expect(res.out.trim()).toBe(String(300 * 1024));
+    const argv = JSON.parse(fsMod.readFileSync(argvFile, 'utf8'));
+    expect(argv[1]).toBe('--model');
+    for (const a of argv) expect(Buffer.byteLength(a, 'utf8')).toBeLessThan(131072);
+    fsMod.rmSync(dir, { recursive: true, force: true });
   });
 });
 

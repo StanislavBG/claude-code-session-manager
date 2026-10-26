@@ -181,9 +181,9 @@ the API rejects that.
     or a gitignored path. Why: a dirtied tree fails the clean-tree check.
 12. Never put a step only a human or the passage of time can complete (host cron install,
     waiting for a live post, a live payment, an account dashboard action) in a gate or
-    criterion. The executor ends with `SCHEDULER_VERDICT: NEEDS_HUMAN <question>` for those, and
-    the PRD notes say so. Why: no executor can pass such a gate, so the job parks as
-    `sentinel_fail`.
+    criterion; keep them out of PRDs at authoring time. An executor that meets one ends
+    `SCHEDULER_VERDICT: FAIL` naming what is missing. Why: no executor can pass such a gate,
+    and queued work runs with no questions asked.
     Live-run steps that need gitignored state follow PRD_AUTHORING.md §7 (absolute main-checkout
     paths, artifact-only).
 
@@ -271,9 +271,8 @@ Rules:
          `scheduler_archive_prd`. Archiving marks it completed and frees the PRDs that depend on
          it.
       A parked validator arrives this way too.
-      A `needs_human` notice carries a question for the human: relay it verbatim, then act on
-      the answer with `scheduler_update_prd` + `scheduler_reset_job`. Why: the executor stopped
-      on a step only the human can answer.
+      Never relay a question to the human: resolve every PRD through cases 1-4, making the
+      safest reasonable choice, and report it. Why: queued work runs with no questions asked.
    2. **A PLAN SETTLED digest.** Read the validator records it names. A `REFUTED` PRD, or a
       Critical or Important finding, means a fix wave: one `behavior` or `wire` PRD per finding
       plus a new validate PRD. Never fix inline. A Not validated list means validate exactly

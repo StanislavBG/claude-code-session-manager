@@ -26,6 +26,13 @@ const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { expandHome } = require('./lib/util/expandHome.cjs');
 const { listReferencedFiles } = require('./lib/importReferences.cjs');
 const atomicFs = require('./lib/util/atomicFs.cjs');
+const insideHome = require('./lib/insideHome.cjs');
+
+// Platform + matching path module, read per call so tests can inject win32.
+const platformNow = () => process.platform;
+const pathFor = () => (platformNow() === 'win32' ? path.win32 : path);
+const within = (real, root) => insideHome.isContainedIn(real, root, platformNow());
+const canon = (p) => insideHome.realpath(p, { platform: platformNow() });
 
 /** Map<watchKey, {watcher, refCount}> — one chokidar watcher per path (+ depth, see watchKeyOf). */
 const watchers = new Map();
@@ -55,26 +62,7 @@ function attachWindow(w) {
  * squarely inside the allowed root.
  */
 function realResolve(abs) {
-  const lex = path.resolve(expandHome(abs));
-  try {
-    return fs.realpathSync(lex);
-  } catch (e) {
-    if (e.code !== 'ENOENT') throw e;
-  }
-  const tail = [path.basename(lex)];
-  let dir = path.dirname(lex);
-  for (;;) {
-    try {
-      const realDir = fs.realpathSync(dir);
-      return path.join(realDir, ...tail.reverse());
-    } catch (e) {
-      if (e.code !== 'ENOENT') throw e;
-      const parentDir = path.dirname(dir);
-      if (parentDir === dir) return lex; // hit the filesystem root; give up safely
-      tail.push(path.basename(dir));
-      dir = parentDir;
-    }
-  }
+  return canon(expandHome(abs));
 }
 
 /**
@@ -87,7 +75,7 @@ function realResolve(abs) {
 const allowedRoots = new Set([os.homedir()]);
 
 function addAllowedRoot(dir) {
-  if (dir) allowedRoots.add(path.resolve(dir));
+  if (dir) allowedRoots.add(pathFor().resolve(dir));
 }
 
 // PromptSession archive writes (state/promptSessions.ts's markCompleted ->
@@ -119,11 +107,11 @@ function validatePath(abs) {
   for (const root of allowedRoots) {
     let realRoot;
     try {
-      realRoot = fs.realpathSync(root);
+      realRoot = canon(root);
     } catch {
       realRoot = root;
     }
-    if (real === realRoot || real.startsWith(realRoot + path.sep)) return real;
+    if (within(real, realRoot)) return real;
   }
   throw new Error(`Path outside allowed boundaries: ${real}`);
 }
@@ -132,7 +120,7 @@ function validatePath(abs) {
 // home because validateWrite compares against a realpath — on macOS a HOME
 // under os.tmpdir() (/var → /private/var) otherwise never matches.
 const REAL_HOME = (() => {
-  try { return fs.realpathSync(os.homedir()); } catch { return os.homedir(); }
+  try { return canon(os.homedir()); } catch { return os.homedir(); }
 })();
 const WRITE_PREFIXES = [
   path.join(REAL_HOME, '.claude'),
@@ -150,7 +138,7 @@ function validateWrite(realAbs) {
     throw new Error(`Write to .credentials.json denied`);
   }
   const inWritePrefix = WRITE_PREFIXES.some(
-    (p) => realAbs === p || realAbs.startsWith(p + path.sep)
+    (p) => within(realAbs, p)
   );
   if (inWritePrefix) return;
   // The app's own userData dir (update-check.json cache).
@@ -162,10 +150,10 @@ function validateWrite(realAbs) {
   for (const root of allowedRoots) {
     if (root === os.homedir()) continue;
     let realRoot;
-    try { realRoot = fs.realpathSync(root); } catch { realRoot = root; }
-    if (realAbs === realRoot || realAbs.startsWith(realRoot + path.sep)) {
+    try { realRoot = canon(root); } catch { realRoot = root; }
+    if (within(realAbs, realRoot)) {
       const claudeSub = path.join(realRoot, '.claude');
-      if (realAbs === claudeSub || realAbs.startsWith(claudeSub + path.sep)) {
+      if (within(realAbs, claudeSub)) {
         return;
       }
       // Writable ops namespaces under a registered project root — every
@@ -189,7 +177,7 @@ function validateWrite(realAbs) {
         opsSubs = [];
       }
       for (const sub of opsSubs) {
-        if (realAbs === sub || realAbs.startsWith(sub + path.sep)) return;
+        if (within(realAbs, sub)) return;
       }
     }
   }

@@ -8,7 +8,7 @@
 'use strict';
 
 import { test, expect } from 'vitest';
-const { isContained } = require('../insideHome.cjs');
+const { isContained, isContainedIn, realpath } = require('../insideHome.cjs');
 const { decodeCwd } = require('../../historyAggregator.cjs');
 const { isAbsoluteForPlatform } = require('../persona-macro/agentPersonaSchema.cjs');
 const { encodeCwd } = require('../util/encodeCwd.cjs');
@@ -51,4 +51,44 @@ test('agentPersona absoluteness is platform-aware', () => {
   expect(isAbsoluteForPlatform('/home/me', 'linux')).toBe(true);
   expect(isAbsoluteForPlatform('C:\\Users\\Me', 'linux')).toBe(false);
   expect(isAbsoluteForPlatform('rel/dir', 'linux')).toBe(false);
+});
+
+test('isContainedIn win32: drive-root root', () => {
+  expect(isContainedIn('D:\\proj\\x', 'D:\\', 'win32')).toBe(true);
+  expect(isContainedIn('d:\\', 'D:\\', 'win32')).toBe(true);
+  expect(isContainedIn('C:\\proj', 'D:\\', 'win32')).toBe(false);
+});
+
+test('isContainedIn win32: UNC home matches itself and children only', () => {
+  const home = '\\\\srv\\share\\me';
+  expect(isContainedIn('\\\\SRV\\share\\me', home, 'win32')).toBe(true);
+  expect(isContainedIn('\\\\srv\\share\\me\\proj', home, 'win32')).toBe(true);
+  expect(isContainedIn('\\\\srv\\share\\mean', home, 'win32')).toBe(false);
+  expect(isContainedIn('\\\\other\\share\\me', home, 'win32')).toBe(false);
+  expect(isContainedIn('\\\\?\\C:\\x', home, 'win32')).toBe(false);
+  expect(isContainedIn('C:\\srv\\share\\me', home, 'win32')).toBe(false);
+});
+
+test('realpath: native used, 8.3 expanded via injected fs', () => {
+  const native = (p) => p.replace('JOHNSM~1', 'johnsmith');
+  const fakeFs = { realpathSync: Object.assign(() => { throw new Error('js used'); }, { native }) };
+  const real = realpath('C:\\Users\\JOHNSM~1\\proj', { fs: fakeFs, platform: 'win32' });
+  expect(real).toBe('C:\\Users\\johnsmith\\proj');
+  expect(isContainedIn(real, 'C:\\Users\\johnsmith', 'win32')).toBe(true);
+});
+
+test('realpath: falls back to fs.realpathSync without native', () => {
+  const fakeFs = { realpathSync: (p) => p + '-js' };
+  expect(realpath('/a/b', { fs: fakeFs, platform: 'linux' })).toBe('/a/b-js');
+});
+
+test('realpath: ENOENT walks to nearest existing parent', () => {
+  const enoent = () => Object.assign(new Error('x'), { code: 'ENOENT' });
+  const native = (p) => {
+    if (p === 'C:\\Users\\JOHNSM~1') return 'C:\\Users\\johnsmith';
+    throw enoent();
+  };
+  const fakeFs = { realpathSync: Object.assign(native, { native }) };
+  expect(realpath('C:\\Users\\JOHNSM~1\\a\\b\\c.json', { fs: fakeFs, platform: 'win32' }))
+    .toBe('C:\\Users\\johnsmith\\a\\b\\c.json');
 });

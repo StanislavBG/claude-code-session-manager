@@ -87,3 +87,14 @@ test('trailing prose after the closing brace → questions array', () => {
     'Let me know and I will continue.';
   assert.deepEqual(parseStopSignal(text), { questions: ['Which environment?'] });
 });
+
+test('SCHEDULER_TURN_INSTRUCTION forbids questions and carries no sentinel-invite', () => {
+  const { SCHEDULER_TURN_INSTRUCTION, STOP_SIGNAL_INSTRUCTION } = require('../chatRunner.cjs');
+  assert.ok(SCHEDULER_TURN_INSTRUCTION.startsWith('IMPORTANT: This turn was started by the scheduler'));
+  assert.match(SCHEDULER_TURN_INSTRUCTION, /Never ask questions/);
+  assert.match(SCHEDULER_TURN_INSTRUCTION, /Phase 2/);
+  // the sentinel is named only inside the "never print" prohibition
+  assert.match(SCHEDULER_TURN_INSTRUCTION, /never print <<<SM_NEEDS_INPUT>>>/);
+  assert.ok(!SCHEDULER_TURN_INSTRUCTION.includes('{"questions"'));
+  assert.ok(STOP_SIGNAL_INSTRUCTION.startsWith('IMPORTANT: First deliver'));
+});

@@ -155,6 +155,7 @@ test('runEpicSettle: 15 verified check-ins produce one digest and zero sweeps', 
   expect(deps.createPrd).not.toHaveBeenCalled();
   expect(deps.sendPrompt).toHaveBeenCalledTimes(1);
   expect(deps.sendPrompt.mock.calls[0][1]).toContain('Verified (15)');
+  expect(deps.sendPrompt.mock.calls[0][2]).toEqual({ origin: 'scheduler' });
   expect(deps.appendResponseEvent).toHaveBeenCalledWith(
     '/c', EPIC, 'Plan digest sent: 15 verified, 0 refuted, 0 not validated',
     expect.objectContaining({ outcome: 'digest', digestKey: expect.any(String) }),

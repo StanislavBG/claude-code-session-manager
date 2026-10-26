@@ -173,7 +173,7 @@ async function runEpicSettle({ cwd, epicId } = {}, deps = {}) {
     }
 
     const prompt = buildSettledDigest(digestSettle, { epicId, notValidatedReason });
-    sendPrompt(epicId, prompt);
+    sendPrompt(epicId, prompt, { origin: 'scheduler' });
     await appendResponseEvent(
       cwd, epicId,
       `Plan digest sent: ${settle.verified.length} verified, ${settle.refuted.length} refuted, ${settle.uncovered.length} not validated`,

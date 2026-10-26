@@ -3094,7 +3094,7 @@ function defaultScheduleSettle({ cwd, epicId }) {
         return null;
       }
     },
-    sendPrompt: enqueueExternalPrompt,
+    sendPrompt: (tabId, prompt) => enqueueExternalPrompt(tabId, prompt, { origin: 'scheduler' }),
     appendResponseEvent: appendResponseEventIfKnown,
   };
   epicValidationHook.scheduleEpicSettle({ cwd, epicId }, (args) => epicValidationHook.runEpicSettle(args, deps));
@@ -3299,7 +3299,7 @@ async function notifyOriginatingTab(job, {
       return;
     }
 
-    sendPrompt(targetTabId, message);
+    sendPrompt(targetTabId, message, { origin: 'scheduler' });
   } catch (e) {
     console.error('[scheduler] notifyOriginatingTab error', job?.slug, e);
   }

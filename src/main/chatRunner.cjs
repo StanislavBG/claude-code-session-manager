@@ -259,6 +259,33 @@ const STOP_SIGNAL_INSTRUCTION =
   `guess on what's genuinely blocked, but always answer what you can first. ` +
   `Otherwise complete the task and end with a concise summary of what you did.\n\n`;
 
+// Replaces STOP_SIGNAL_INSTRUCTION for turns the scheduler itself starts: no human is
+// watching, so a question would stall the Epic forever.
+const SCHEDULER_TURN_INSTRUCTION =
+  `IMPORTANT: This turn was started by the scheduler and nobody is watching. ` +
+  `Never ask questions and never print ${STOP_SENTINEL}. Act on the message below with ` +
+  `the /develop skill's Phase 2 rules (reset, fix the spec, archive, or queue a fix wave). ` +
+  `Make the safest reasonable choice for anything left open, and end with a short report ` +
+  `of what you did.\n\n`;
+
+// tab+prompt keys of scheduler-originated prompts awaiting their run() (consumed once).
+const schedulerPrompts = new Map();
+const SCHEDULER_PROMPT_TTL_MS = 6 * 60 * 60 * 1000;
+function noteSchedulerPrompt(tabId, prompt) {
+  const now = Date.now();
+  for (const [k, v] of schedulerPrompts) if (v.expires < now) schedulerPrompts.delete(k);
+  const key = `${tabId}\n${prompt}`;
+  const cur = schedulerPrompts.get(key);
+  schedulerPrompts.set(key, { count: (cur ? cur.count : 0) + 1, expires: now + SCHEDULER_PROMPT_TTL_MS });
+}
+function consumeSchedulerPrompt(tabId, prompt) {
+  const key = `${tabId}\n${prompt}`;
+  const cur = schedulerPrompts.get(key);
+  if (!cur || cur.expires < Date.now()) { schedulerPrompts.delete(key); return false; }
+  if (cur.count <= 1) schedulerPrompts.delete(key); else cur.count -= 1;
+  return true;
+}
+
 // ─── Hard wall-clock kill ceiling ────────────────────────────────────────
 // Defined here (ahead of CHAT_MODE_TRUTH_INSTRUCTION) so the prompt's stated
 // budget is always derived from this single constant — never a hand-written
@@ -356,6 +383,9 @@ function broadcast(channel, payload) {
  * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void, onSilentError?: (message: string, code?: string) => void, promptId?: string }} opts
  */
 function run(opts) {
+  // A scheduler-originated prompt (tagged by enqueueExternalPrompt) is re-identified
+  // here by tab + exact text, since it travels through the renderer's chat:run.
+  if (!opts.silent && consumeSchedulerPrompt(opts.tabId, opts.prompt)) opts = { ...opts, origin: 'scheduler' };
   // Per-tab exclusivity still holds — two `claude -p --resume` against ONE
   // sessionId must never overlap — but it is now enforced in pump() (which
   // refuses to start a run for a tab that already has one live) rather than by
@@ -455,7 +485,7 @@ async function executeRun(opts) {
   return executeRunWithHint(opts, pendingWt && pendingWt.dir);
 }
 
-function executeRunWithHint({ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult, onSilentError, promptId }, worktreeDirHint) {
+function executeRunWithHint({ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult, onSilentError, promptId, origin }, worktreeDirHint) {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     // Last few tool_use blocks seen on the stream, oldest first — surfaced in
@@ -539,7 +569,8 @@ function executeRunWithHint({ tabId, sessionId, prompt, cwd, resume, silent, onS
 
     // Prepend the stop-signal protocol instruction and the chat-mode truth
     // instruction to every prompt
-    const fullPrompt = STOP_SIGNAL_INSTRUCTION + CHAT_MODE_TRUTH_INSTRUCTION + prompt;
+    const fullPrompt = (origin === 'scheduler' ? SCHEDULER_TURN_INSTRUCTION : STOP_SIGNAL_INSTRUCTION)
+      + CHAT_MODE_TRUTH_INSTRUCTION + prompt;
 
     // sessionId is the Epic's claudeSessionId for an Epic-backed tab (see
     // comment above childEnv) — resolve that Epic's agentType persona model,
@@ -966,8 +997,9 @@ function hasLiveWindow() {
  * { disposition: 'unconfirmed', reason: 'timeout' | 'no-window' }. Never rejects.
  */
 function enqueueExternalPrompt(tabId, prompt, extra = {}) {
-  const { sessionId, cwd } = extra ?? {};
+  const { sessionId, cwd, origin } = extra ?? {};
   if (!hasLiveWindow()) return Promise.resolve({ disposition: 'unconfirmed', reason: 'no-window' });
+  if (origin === 'scheduler') noteSchedulerPrompt(tabId, prompt);
   const requestId = require('node:crypto').randomUUID();
   return new Promise((resolve) => {
     const timer = setTimeout(() => {
@@ -1095,6 +1127,7 @@ module.exports = {
   // (lib/promptPreamble.ts) can be drift-tested against the REAL text rather
   // than a copy — see chat-preamble-anchors.test.cjs.
   STOP_SIGNAL_INSTRUCTION,
+  SCHEDULER_TURN_INSTRUCTION,
   CHAT_MODE_TRUTH_INSTRUCTION,
   KILL_CEILING_MS,
   KILL_CEILING_MIN,

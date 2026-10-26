@@ -20,7 +20,8 @@ const path = require('node:path');
 const os = require('node:os');
 
 const { z } = require('zod');
-const { assertInsideHome } = require('./lib/insideHome.cjs');
+const { assertInsideHomeOrRoots } = require('./lib/insideHome.cjs');
+const { getAllowedRoots } = require('./config.cjs');
 const { expandHome } = require('./lib/util/expandHome.cjs');
 const atomicFs = require('./lib/util/atomicFs.cjs');
 const { schemas } = require('./ipcSchemas.cjs');
@@ -32,7 +33,7 @@ const { schemas } = require('./ipcSchemas.cjs');
  * ~ — but never escapes the home tree.
  */
 function validateHomePath(abs) {
-  return assertInsideHome(expandHome(abs)).realPath;
+  return assertInsideHomeOrRoots(expandHome(abs), getAllowedRoots()).realPath;
 }
 
 /** Reject .credentials.json writes regardless of where they sit. */
@@ -282,14 +283,23 @@ async function duplicateEntry(filePath) {
   }
 }
 
-const CRITICAL_PATHS = new Set([os.homedir(), '/', '/usr', '/bin', '/etc', '/var', '/System', '/Applications']);
+const CRITICAL_PATHS = ['/', '/usr', '/bin', '/etc', '/var', '/System', '/Applications'];
+
+/** Case-insensitive on win32 (`C:\\Users\\Me` == `c:\\users\\me`). */
+function isCriticalPath(resolved, platform = process.platform, home = os.homedir()) {
+  const norm = platform === 'win32'
+    ? (v) => path.win32.normalize(v).toLowerCase().replace(/[\\/]+$/, '')
+    : (v) => v;
+  const r = norm(resolved);
+  return [home, ...CRITICAL_PATHS].some((c) => norm(c) === r);
+}
 
 async function deleteEntry(filePath) {
   let resolved;
   try { resolved = validateHomePath(filePath); }
   catch (e) { return { ok: false, error: e.message }; }
 
-  if (CRITICAL_PATHS.has(resolved)) {
+  if (isCriticalPath(resolved)) {
     return { ok: false, error: 'Cannot delete system-critical paths' };
   }
   try { rejectCredentials(resolved); }
@@ -414,6 +424,8 @@ module.exports = {
   showInFinder,
   // exported for tests
   rejectCredentials,
+  validateHomePath,
+  isCriticalPath,
   listDir,
   readFile,
   writeFile,

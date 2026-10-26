@@ -78,6 +78,11 @@ function addAllowedRoot(dir) {
   if (dir) allowedRoots.add(pathFor().resolve(dir));
 }
 
+/** Snapshot of the registered roots (main-process-registered only). */
+function getAllowedRoots() {
+  return [...allowedRoots];
+}
+
 // PromptSession archive writes (state/promptSessions.ts's markCompleted ->
 // window.api.config.writeJson(promptSessionArchivePath(...))) reach this
 // generic IPC handler with no pty ever having spawned for their cwd (a
@@ -524,6 +529,7 @@ module.exports = {
   listDir,
   exists,
   addAllowedRoot,
+  getAllowedRoots,
   registerPromptSessionsRoot,
   validatePath,
   validateWrite,

@@ -16,10 +16,10 @@ const { ipcMain } = require('electron');
 const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
-const { addAllowedRoot } = require('./config.cjs');
+const { addAllowedRoot, getAllowedRoots } = require('./config.cjs');
 const { aliasedShellBin } = require('./lib/process/smProcNames.cjs');
 const { cleanChildEnv, pathWithUserBins } = require('./lib/process/cleanEnv.cjs');
-const { checkInsideHome } = require('./lib/insideHome.cjs');
+const { checkInsideHomeOrRoots } = require('./lib/insideHome.cjs');
 const { defaultShell } = require('./lib/process/defaultShell.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const opsErrorLog = require('./lib/telemetry/opsErrorLog.cjs');
@@ -151,9 +151,10 @@ class PtyManager {
       return { pid: null, cwd, reattached: false, error: 'node-pty unavailable' };
     }
 
-    // Validate that cwd is inside homedir before widening the allowed-root set.
+    // Validate that cwd is inside homedir or an already-registered project root
+    // (never a renderer-supplied one) before widening the allowed-root set.
     if (cwd) {
-      const r = checkInsideHome(cwd);
+      const r = checkInsideHomeOrRoots(cwd, getAllowedRoots());
       if (!r.ok) throw new Error(`pty ${r.error}`);
       addAllowedRoot(r.realPath);
     }

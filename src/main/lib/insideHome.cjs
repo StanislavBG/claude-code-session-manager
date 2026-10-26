@@ -130,4 +130,52 @@ function checkInsideHome(p) {
   return { ok: true, realPath };
 }
 
-module.exports = { assertInsideHome, checkInsideHome, isContained, isContainedIn, realpath };
+/**
+ * Home OR a main-process-registered project root. `roots` must come from
+ * config.cjs's allowed-roots registry — never from a renderer request.
+ * deps: { platform, home, fs } injectable for tests.
+ */
+function checkInsideHomeOrRoots(p, roots = [], deps = {}) {
+  const platform = deps.platform || process.platform;
+  const home = deps.home || HOME_REAL;
+  const list = [...roots];
+  const fail = () => ({
+    ok: false,
+    error: `path outside home and project roots: ${typeof p === 'string' ? p : String(p)}`,
+  });
+  if (typeof p !== 'string' || !p) return fail();
+  let realPath;
+  try {
+    realPath = realpath(p, deps);
+  } catch {
+    return fail();
+  }
+  if (isContainedIn(realPath, home, platform)) return { ok: true, realPath };
+  for (const root of list) {
+    if (typeof root !== 'string' || !root) continue;
+    let realRoot;
+    try {
+      realRoot = realpath(root, deps);
+    } catch {
+      realRoot = root;
+    }
+    if (isContainedIn(realPath, realRoot, platform)) return { ok: true, realPath };
+  }
+  return fail();
+}
+
+function assertInsideHomeOrRoots(p, roots = [], deps = {}) {
+  const r = checkInsideHomeOrRoots(p, roots, deps);
+  if (!r.ok) throw new Error(r.error);
+  return { realPath: r.realPath };
+}
+
+module.exports = {
+  assertInsideHome,
+  checkInsideHome,
+  assertInsideHomeOrRoots,
+  checkInsideHomeOrRoots,
+  isContained,
+  isContainedIn,
+  realpath,
+};

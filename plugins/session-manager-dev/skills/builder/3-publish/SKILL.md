@@ -40,24 +40,37 @@ to ask for reconfirmation once `builder:gate` has passed.
 
 5. **Create the isolated worktree from that tag:**
    ```
-   git worktree add /tmp/sm-publish-v<version> v<version>
+   mkdir -p "$HOME/.cache/sm-publish"
+   git worktree add "$HOME/.cache/sm-publish/v<version>" v<version>
    ```
+   **Never under `/tmp`** (or anywhere under `os.tmpdir()`): the test suite treats such paths as
+   test fixtures, so `src/main/__tests__/opsErrorLog.test.cjs` ("a real project root is
+   refused") fails inside a `/tmp` worktree.
 
-6. **Move into the worktree and build clean:**
+6. **Move into the worktree, build clean, and run the in-tree gate:**
    ```
-   cd /tmp/sm-publish-v<version>
+   cd "$HOME/.cache/sm-publish/v<version>"
    npm ci
    npm run typecheck
+   npm run test:unit
    ```
    `npm ci` gives a fully clean `node_modules` from the lockfile — no leftover local state
-   from the dirty main repo can leak into the published artifact.
+   from the dirty main repo can leak into the published artifact. Typecheck and unit tests
+   must both pass here; stop before `npm publish` on any failure.
+
+   After the build step (run the project's build, e.g. `npm run build` plus any web build that
+   produces `dist-web/`), check that every `files` entry exists:
+   ```
+   test -f dist-web/index.html && test -f dist/index.html
+   ```
+   If either is missing, stop before `npm publish` and report.
 
 7. **Publish from inside the worktree:**
    ```
    npm publish
    ```
    This project's `prepublishOnly` script runs `vite build` — because step 6 already `cd`'d
-   into `/tmp/sm-publish-v<version>`, that build runs **inside the clean worktree**, never
+   into `$HOME/.cache/sm-publish/v<version>`, that build runs **inside the clean worktree**, never
    touching (or being affected by) the live/dirty working directory back in the main repo.
    This is the entire reason the worktree exists: it decouples "what's uncommitted in my
    editor right now" from "what gets built and shipped."
@@ -81,16 +94,21 @@ to ask for reconfirmation once `builder:gate` has passed.
 
 9. **Clean up the worktree:**
    ```
-   git worktree remove /tmp/sm-publish-v<version> --force
+   git worktree remove "$HOME/.cache/sm-publish/v<version>" --force
    ```
 
-10. **Verify the publish actually landed on the registry:**
+10. **Verify the publish actually landed on the registry.** `npm view` is cached and lags for
+    minutes after a real publish, so check a cache-busted packument and the tarball first:
     ```
+    curl -s "https://registry.npmjs.org/<packageName>?t=$(date +%s)"   # dist-tags.latest + versions
+    curl -sI <tarball URL from versions["<version>"].dist.tarball>      # expect HTTP 200
     npm view <packageName> version
     npm view <packageName> dist-tags
     ```
-    Confirm the reported version matches `<version>` and `latest` points to it (unless the
-    project intentionally publishes to a different dist-tag).
+    Confirm `dist-tags.latest` is `<version>`, `<version>` is in `versions`, and the tarball
+    returns 200 (unless the project intentionally publishes to a different dist-tag). If the
+    packument is current, an unchanged `npm view` for a few minutes is normal lag, not a
+    failure — do not republish.
 
 11. **Post-publish: verify the installer release.** Pushing `v<version>` (step 8) triggers
     `.github/workflows/release.yml`. Confirm the tag push succeeded, then poll (bounded: at most
@@ -109,7 +127,7 @@ to ask for reconfirmation once `builder:gate` has passed.
 Stop at that step. Do not proceed. Report which step failed and its output. If the worktree
 was already created (step 5+), leave it in place if its state is relevant evidence for
 diagnosing the failure; otherwise remove it (step 9) before reporting, so a retry doesn't
-collide with a stale `/tmp/sm-publish-v<version>` path.
+collide with a stale `$HOME/.cache/sm-publish/v<version>` path.
 
 ## Output
 

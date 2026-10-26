@@ -9,7 +9,9 @@
  *   writeClaudeStub({ body, allowCommitUnder })
  *     body            JS run by the stub (CommonJS). Default: emit a stream-json
  *                     success result and exit 0. Inside `body`, use `runGit(args)`
- *                     for git — it enforces the allowCommitUnder guard.
+ *                     for git — it enforces the allowCommitUnder guard. Use
+ *                     `readPrompt()` for the prompt: the argv value after `-p`
+ *                     when present and not a flag, else all of stdin ('' on error).
  *     allowCommitUnder  absolute dir; omitted → the stub may not run git at all.
  */
 
@@ -38,6 +40,13 @@ function writeClaudeStub({ body = DEFAULT_BODY, allowCommitUnder } = {}) {
 const __cp = require('node:child_process');
 const __path = require('node:path');
 const __allow = ${JSON.stringify(allow)};
+const __fs = require('node:fs');
+function readPrompt() {
+  const i = process.argv.indexOf('-p');
+  const v = i >= 0 ? process.argv[i + 1] : undefined;
+  if (typeof v === 'string' && !v.startsWith('-')) return v;
+  try { return __fs.readFileSync(0, 'utf8'); } catch { return ''; }
+}
 function runGit(args, opts) {
   const cwd = __path.resolve(process.cwd());
   const rel = __allow ? __path.relative(__allow, cwd) : null;

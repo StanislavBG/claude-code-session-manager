@@ -205,6 +205,16 @@ function sweepChildProcessGroup(child, detached, safeLog) {
     .then((leaked) => { kill(); return leaked; });
 }
 
+/**
+ * Spawn a child with its stdout/stderr on the log fd and supervise it.
+ *
+ * `spawn.stdinText` (optional string): when given, the child's stdin is a pipe
+ * that receives the text (UTF-8) and is then closed; otherwise stdin is
+ * 'ignore'. It exists because argv is a poor channel for large input: Linux
+ * caps a single argument at MAX_ARG_STRLEN (131072 bytes, spawn E2BIG) and
+ * Windows cmd.exe caps a command line at 8191 characters. A stdin error
+ * (EPIPE when the child never reads) is logged once and otherwise ignored.
+ */
 function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watchdogs = [], onExit }) {
   const startedAt = Date.now();
 
@@ -296,11 +306,12 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
 
   // Attempt synchronous spawn. On failure, call handleDone immediately so the
   // caller's onExit can resolve any pending Promise before we return null.
+  const stdinText = typeof spawnSpec.stdinText === 'string' ? spawnSpec.stdinText : null;
   let child;
   try {
     child = spawn(spawnSpec.command, spawnSpec.args, {
       ...spawnSpec.options,
-      stdio: ['ignore', fd, fd],
+      stdio: [stdinText !== null ? 'pipe' : 'ignore', fd, fd],
     });
   } catch (e) {
     handleDone(-1, null, e, /* spawnFailed */ true);
@@ -308,6 +319,17 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
   }
 
   ctx.child = child;
+
+  if (stdinText !== null && child.stdin) {
+    // Listener FIRST: a child that exits without reading raises EPIPE on the write.
+    let stdinErrLogged = false;
+    child.stdin.on('error', (err) => {
+      if (stdinErrLogged) return;
+      stdinErrLogged = true;
+      safeLog(`[childWithLog] stdin write failed (${(err && (err.code || err.message)) || 'unknown'}): the child exited before reading its input\n`);
+    });
+    child.stdin.end(stdinText, 'utf8');
+  }
 
   child.on('error', (err) => handleDone(-1, null, err, false));
   child.on('exit', (code, signal) => handleDone(code, signal, undefined, false));

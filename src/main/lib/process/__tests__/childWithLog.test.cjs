@@ -319,3 +319,53 @@ describe('childWithLog sweep ordering + sync paths (PRD 1370)', () => {
     expect(fs.readFileSync(logPath, 'utf8')).toContain('onExit threw: exit boom');
   }, 15000);
 });
+
+// stdinText — hand a child its input over a stdin pipe instead of argv
+// (Linux MAX_ARG_STRLEN 128 KB per argument; Windows cmd.exe 8191 chars).
+describe('childWithLog stdinText', () => {
+  function runStdin(script, stdinText) {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-child-stdin-'));
+    const logPath = path.join(dir, 'job.log');
+    const outFile = path.join(dir, 'out.txt');
+    const { fd, safeLog, closeFd } = openLog(logPath);
+    const spec = { command: process.execPath, args: ['-e', script, outFile], options: {} };
+    if (stdinText !== undefined) spec.stdinText = stdinText;
+    const uncaught = [];
+    const onUncaught = (e) => uncaught.push(e);
+    process.on('uncaughtException', onUncaught);
+    const done = new Promise((resolve) => {
+      withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spec, onExit: resolve });
+    });
+    const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timed out')), 20000));
+    return Promise.race([done, timeout]).then(async (info) => {
+      await new Promise((r) => setTimeout(r, 100));
+      process.off('uncaughtException', onUncaught);
+      return { info, uncaught, outFile, logPath };
+    }, (e) => { process.off('uncaughtException', onUncaught); throw e; });
+  }
+
+  const COUNT = `
+    const fs = require('node:fs'); let n = 0;
+    process.stdin.on('data', (b) => { n += b.length; });
+    process.stdin.on('end', () => { fs.writeFileSync(process.argv[1], String(n)); process.exit(0); });
+  `;
+
+  it('delivers a 300 KB stdinText to the child intact', async () => {
+    const text = 'é'.repeat(150 * 1024); // 300 KB UTF-8
+    const r = await runStdin(COUNT, text);
+    expect(r.info.exitCode).toBe(0);
+    expect(fs.readFileSync(r.outFile, 'utf8')).toBe(String(Buffer.byteLength(text, 'utf8')));
+  }, 30000);
+
+  it('survives a child that exits without reading a 2 MB stdinText', async () => {
+    const r = await runStdin('process.exit(0)', 'x'.repeat(2 * 1024 * 1024));
+    expect(r.info.exitCode).toBe(0);
+    expect(r.uncaught).toEqual([]);
+  }, 30000);
+
+  it('gives EOF at once when stdinText is absent', async () => {
+    const r = await runStdin(COUNT, undefined);
+    expect(r.info.exitCode).toBe(0);
+    expect(fs.readFileSync(r.outFile, 'utf8')).toBe('0');
+  }, 30000);
+});

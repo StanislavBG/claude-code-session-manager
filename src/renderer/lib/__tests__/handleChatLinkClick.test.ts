@@ -180,4 +180,22 @@ describe('handleChatLinkClick', () => {
     expect(openFileMock).not.toHaveBeenCalled()
     expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('(tried 2 other open tabs)'))
   })
+
+  it('win32: maps /c/ link to C:\\ and only toasts when really outside the project', async () => {
+    vi.stubGlobal('navigator', { userAgent: 'Windows NT', platform: 'Win32' })
+    const read = window.api.files.read as ReturnType<typeof vi.fn>
+    read.mockResolvedValue({ ok: false, error: 'path outside home' })
+    const container = mount(`<span ${FILE_LINK_ATTR}="/c/Users/me/proj/a.ts"></span>`)
+    await fireClick(container, container.firstElementChild!, 'C:\\Users\\me\\proj').result
+    expect(read).toHaveBeenCalledWith('C:\\Users\\me\\proj\\a.ts')
+    const { toast } = await import('../../state/toast')
+    const err = vi.spyOn(toast, 'error')
+    // under project (case-insensitive): no 'outside the project' toast
+    await fireClick(container, container.firstElementChild!, 'c:\\users\\me\\proj').result
+    expect(err.mock.calls.some((c) => String(c[0]).includes('outside the project'))).toBe(false)
+    // really outside
+    await fireClick(container, container.firstElementChild!, 'D:\\other').result
+    expect(err.mock.calls.some((c) => String(c[0]).includes('outside the project'))).toBe(true)
+    vi.unstubAllGlobals()
+  })
 })

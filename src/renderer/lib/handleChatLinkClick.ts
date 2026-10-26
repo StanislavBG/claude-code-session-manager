@@ -2,7 +2,7 @@ import type { MouseEvent } from 'react'
 import { useEditor } from '../state/editor'
 import { useSessions } from '../state/sessions'
 import { toast } from '../state/toast'
-import { FILE_LINK_ATTR, resolveFileLinkTarget } from './chatFileLinks'
+import { FILE_LINK_ATTR, resolveFileLinkTarget, isAbsoluteLinkPath, mapGitBashPath, isUnderProject } from './chatFileLinks'
 
 // Same pattern as MarkdownPreview.tsx's onClick: intercept http(s) link clicks
 // and route them through the shell instead of letting will-navigate block them
@@ -36,7 +36,7 @@ async function resolveReadableFile(
   // (files.cjs) rather than re-implementing path validation in the renderer.
   // The same check runs again below for every cross-tab fallback candidate.
   const primaryRead = await window.api.files.read(primary.absPath)
-  if (!primaryRead.ok && primaryRead.error === 'path outside home') {
+  if (!primaryRead.ok && primaryRead.error === 'path outside home' && !isUnderProject(primary.absPath, cwd)) {
     toast.error("That path is outside the project and can't be opened.")
     return null
   }
@@ -49,7 +49,7 @@ async function resolveReadableFile(
   // in (the assistant can discuss another project mid-conversation). Only
   // relative tokens benefit — an absolute path resolves the same regardless
   // of cwd, so there's nothing to retry.
-  if (!filePath.startsWith('/')) {
+  if (!isAbsoluteLinkPath(mapGitBashPath(filePath))) {
     const otherCwds = Array.from(
       new Set(useSessions.getState().tabs.map((t) => t.cwd).filter((c) => c && c !== cwd)),
     )

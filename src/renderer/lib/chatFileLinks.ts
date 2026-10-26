@@ -1,3 +1,4 @@
+import { isUnder, join, sepOf } from './pathSep'
 // Bare file-path mentions in assistant chat text (e.g. "docs/README.md" or
 // "src/foo.ts:42:8") have no markdown link syntax, so `marked` renders them as
 // plain text — unlike a real `[text](url)` link (handled by handleChatLinkClick).
@@ -6,7 +7,8 @@
 // ILinkProvider for the raw-terminal surface. Regex duplicated verbatim from
 // Terminal.tsx's FILE_LINK_RE — not shared, per this PRD's scope (a small
 // duplicated constant over a forced cross-cutting refactor).
-export const FILE_LINK_RE = /(?:^|[\s(])((?:\.{1,2}\/)?[\w./-]+\.[A-Za-z]\w*(?::(\d+))?(?::(\d+))?)/g
+// Also matches native Windows paths (`C:\\Users\\a.ts`, `C:/Users/a.ts`, `src\\a.ts:12`).
+export const FILE_LINK_RE = /(?:^|[\s(])((?:[A-Za-z]:[\\/]|\.{1,2}[\\/])?[\w./\\-]+\.[A-Za-z]\w*(?::(\d+))?(?::(\d+))?)/g
 
 /** data attribute a linkified span carries; read back by handleChatLinkClick. */
 export const FILE_LINK_ATTR = 'data-file-link-text'
@@ -39,7 +41,7 @@ const DOMAIN_TLDS = new Set([
 
 function isPlausibleFilePath(pathPart: string): boolean {
   const filePath = pathPart.replace(/(?::\d+)+$/, '')
-  if (filePath.includes('/')) return true
+  if (filePath.includes('/') || filePath.includes('\\')) return true
   const dot = filePath.lastIndexOf('.')
   const ext = dot === -1 ? '' : filePath.slice(dot + 1)
   if (!ext || ext.length > MAX_EXTENSION_LENGTH) return false
@@ -118,18 +120,47 @@ export function extractFilePaths(text: string): string[] {
   return paths
 }
 
+/** True when the renderer runs on Windows (no new IPC: read from the Chromium UA). */
+export function isWin32(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return /windows|win32/i.test(`${navigator.userAgent} ${navigator.platform ?? ''}`)
+}
+
+const WIN_DRIVE_RE = /^[A-Za-z]:[\\/]/
+
+/** Git-Bash style `/c/Users/x` -> `C:\Users\x` (win32 only; otherwise unchanged). */
+export function mapGitBashPath(p: string): string {
+  const m = isWin32() ? p.match(/^\/([A-Za-z])(?:\/(.*))?$/) : null
+  if (!m) return p
+  return `${m[1].toUpperCase()}:\\${(m[2] ?? '').replace(/\//g, '\\')}`
+}
+
+/** True for posix-absolute, drive-letter, or UNC paths (after Git-Bash mapping). */
+export function isAbsoluteLinkPath(p: string): boolean {
+  return p.startsWith('/') || WIN_DRIVE_RE.test(p) || p.startsWith('\\\\')
+}
+
+/** Case-insensitive on win32 wrapper around pathSep.isUnder. */
+export function isUnderProject(child: string, parent: string): boolean {
+  if (!parent) return false
+  return isWin32() ? isUnder(child.toLowerCase(), parent.toLowerCase()) : isUnder(child, parent)
+}
+
 /**
  * Resolves a matched token (e.g. "src/foo.ts:42:8") into an absolute path plus
- * optional line/col, same stripping logic as Terminal.tsx:103-107.
+ * optional line/col, same stripping logic as Terminal.tsx.
  */
 export function resolveFileLinkTarget(
   raw: string,
   cwd: string,
 ): { absPath: string; line?: number; col?: number } {
   const lineColMatch = raw.match(/(?::(\d+))?(?::(\d+))?$/)
-  const filePath = raw.replace(/(?::\d+)+$/, '')
+  const filePath = mapGitBashPath(raw.replace(/(?::\d+)+$/, ''))
   const line = lineColMatch?.[1] ? parseInt(lineColMatch[1], 10) : undefined
   const col = lineColMatch?.[2] ? parseInt(lineColMatch[2], 10) : undefined
-  const absPath = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
+  let absPath: string
+  if (isAbsoluteLinkPath(filePath)) absPath = filePath
+  else if (sepOf(cwd) === '\\' || isWin32()) absPath = join(cwd, filePath.replace(/\//g, '\\')).replace(/\//g, '\\')
+  else absPath = `${cwd}/${filePath}`
   return { absPath, line, col }
 }

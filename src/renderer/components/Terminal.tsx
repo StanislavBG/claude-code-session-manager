@@ -6,6 +6,7 @@ import '@xterm/xterm/css/xterm.css'
 import { useSessions } from '../state/sessions'
 import { useEditor } from '../state/editor'
 import { toast } from '../state/toast'
+import { FILE_LINK_RE, resolveFileLinkTarget } from '../lib/chatFileLinks'
 import { copyText } from '../lib/clipboard'
 import { mountTerminalSettings, DEFAULT_TERMINAL_SETTINGS, TERMINAL_THEMES } from '../lib/terminalSettings'
 import { EpicsWorkspace } from './epics/EpicsWorkspace'
@@ -21,7 +22,6 @@ import { WORKBENCH_REFIT_EVENT } from '../lib/workbenchRefit'
 //   src/main/index.cjs       src/main/index.cjs:633        ./foo.ts:42:8
 // Examples that should NOT match:
 //   www.example.com (no extension after final dot is rejected by \.[A-Za-z]\w+)
-const FILE_LINK_RE = /(?:^|[\s(])((?:\.{1,2}\/)?[\w./-]+\.[A-Za-z]\w*(?::(\d+))?(?::(\d+))?)/g
 
 interface Props {
   tabId: string
@@ -116,10 +116,9 @@ export function Terminal({ tabId, cwd }: Props) {
               // (foo.ts:42) is preserved so the editor reveals it. The
               // 'sm:open-editor' event lets App route to the editor scene since
               // Terminal has no navigate of its own.
-              const filePath = pathPart.replace(/(?::\d+)+$/, '')
+              const { absPath } = resolveFileLinkTarget(pathPart, cwd)
               const ln = lineStr ? parseInt(lineStr, 10) : undefined
               const col = colStr ? parseInt(colStr, 10) : undefined
-              const absPath = filePath.startsWith('/') ? filePath : `${cwd}/${filePath}`
               useEditor.getState().openFile(absPath, { line: ln, col })
               window.dispatchEvent(new CustomEvent('sm:open-editor'))
             },

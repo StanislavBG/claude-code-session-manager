@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { FILE_LINK_ATTR, linkifyFilePaths, resolveFileLinkTarget, extractFilePaths } from '../chatFileLinks'
 
 function mount(html: string): HTMLElement {
@@ -171,5 +171,20 @@ describe('extractFilePaths', () => {
     // "AB_CD" is only 5 chars — this exercises the all-caps/underscore check
     // independently of the length cutoff, which alone wouldn't reject it.
     expect(extractFilePaths('the constant foo.AB_CD is not a file')).toEqual([])
+  })
+})
+
+describe('windows paths', () => {
+  it('links native Windows paths and keeps line suffix', () => {
+    const t = 'see C:\\Users\\me\\proj\\src\\a.ts and C:/Users/me/proj/a.ts and src\\a.ts:12 ok'
+    expect(extractFilePaths(t)).toEqual(['C:\\Users\\me\\proj\\src\\a.ts', 'C:/Users/me/proj/a.ts', 'src\\a.ts:12'])
+  })
+  it('maps /c/ git-bash paths on win32 only', () => {
+    vi.stubGlobal('navigator', { userAgent: 'Windows NT', platform: 'Win32' })
+    expect(resolveFileLinkTarget('/c/Users/me/proj/a.ts:3', 'C:\\Users\\me\\proj').absPath).toBe('C:\\Users\\me\\proj\\a.ts')
+    expect(resolveFileLinkTarget('src/a.ts', 'C:\\Users\\me\\proj').absPath).toBe('C:\\Users\\me\\proj\\src\\a.ts')
+    vi.stubGlobal('navigator', { userAgent: 'X11 Linux', platform: 'Linux' })
+    expect(resolveFileLinkTarget('/c/Users/a.ts', '/home/x').absPath).toBe('/c/Users/a.ts')
+    vi.unstubAllGlobals()
   })
 })

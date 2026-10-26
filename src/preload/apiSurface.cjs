@@ -250,6 +250,7 @@ const ROWS = [
   { ns: "promptSessions", method: "onEventAppended", channel: "promptSession:event-appended", kind: "on", remote: "read" },
   { ns: "promptSessions", method: "mergeActiveIndex", channel: "promptSessions:merge-active-index", kind: "invoke", remote: "mutate" },
   { ns: "promptSessions", method: "create", channel: "promptSessions:create-epic", kind: "invoke", remote: "mutate" },
+  { ns: "promptSessions", method: "reopen", channel: "promptSessions:reopen", kind: "invoke", remote: "mutate" },
   { ns: "promptSessions", method: "createWorktree", channel: "promptSessions:create-worktree", kind: "invoke", remote: "mutate" },
   { ns: "promptSessions", method: "mergeToMain", channel: "promptSessions:merge-to-main", kind: "invoke", remote: "mutate" },
   { ns: "promptSessions", method: "getWorktreeDisabled", channel: "promptSessions:get-worktree-disabled", kind: "invoke", remote: "read" },

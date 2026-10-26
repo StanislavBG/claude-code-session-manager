@@ -30,6 +30,73 @@ function captureIpcHandlers(ipcMain) {
   return handlers
 }
 
+
+const { isContainedIn } = require('../insideHome.cjs')
+
+/**
+ * Path-taking remote-readable channels. mode 'root': realpath must sit inside a
+ * registered project root. mode 'secret': only the secret refusal applies (the
+ * handler enforces its own root, e.g. the transcripts dir). `field` is the key
+ * of the payload object (args[0]) that carries the filesystem path.
+ */
+const PATH_FENCED_CHANNELS = Object.freeze({
+  'files:read': { field: 'path', mode: 'root' },
+  'files:list': { field: 'path', mode: 'root', allowHomeListing: true },
+  'transcript:readRef': { field: 'filePath', mode: 'secret' },
+  'transcript:path': { field: 'cwd', mode: 'secret' },
+  'memory:read': { field: 'cwd', mode: 'secret' },
+})
+
+const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.kube', '.docker'])
+const SECRET_BASENAMES = new Set(['.credentials.json', '.netrc', '.npmrc', '.env'])
+const SECRET_BASENAME_RES = [/^\.env\..*/, /\.pem$/, /^id_rsa/, /^id_ed25519/, /^id_ecdsa/]
+
+/** True when the path has a secret segment or basename. */
+function isSecretPath(p, platform) {
+  const norm = platform === 'win32' ? String(p).toLowerCase() : String(p)
+  const segs = norm.split(/[\\/]+/).filter(Boolean)
+  for (let i = 0; i < segs.length; i++) {
+    if (SECRET_DIRS.has(segs[i])) return true
+    if (segs[i] === '.config' && segs[i + 1] === 'gcloud') return true
+  }
+  const base = segs[segs.length - 1] || ''
+  return SECRET_BASENAMES.has(base) || SECRET_BASENAME_RES.some((re) => re.test(base))
+}
+
+/**
+ * Remote-only argument fence. Returns { ok: true } or { ok: false, reason: 'path_fenced' }.
+ * @param {string} channel
+ * @param {any[]} args
+ * @param {{ homeDir: string, projectRoots: () => string[], realpath: (p:string)=>string, platform?: string }} ctx
+ */
+function remoteArgFence(channel, args, ctx) {
+  const spec = Object.prototype.hasOwnProperty.call(PATH_FENCED_CHANNELS, channel) ? PATH_FENCED_CHANNELS[channel] : null
+  if (!spec) return { ok: true }
+  const refuse = { ok: false, reason: 'path_fenced' }
+  const platform = (ctx && ctx.platform) || process.platform
+  try {
+    const a0 = Array.isArray(args) ? args[0] : undefined
+    const raw = a0 && typeof a0 === 'object' ? a0[spec.field] : a0
+    if (typeof raw !== 'string' || !raw) return refuse
+    const real = ctx.realpath(raw)
+    if (isSecretPath(raw, platform) || isSecretPath(real, platform)) return refuse
+    if (spec.mode === 'secret') return { ok: true }
+    const home = ctx.realpath(ctx.homeDir)
+    if (spec.allowHomeListing && isContainedIn(real, home, platform) && isContainedIn(home, real, platform)) {
+      return { ok: true }
+    }
+    for (const root of ctx.projectRoots() || []) {
+      if (typeof root !== 'string' || !root) continue
+      let realRoot
+      try { realRoot = ctx.realpath(root) } catch { realRoot = root }
+      if (isContainedIn(real, realRoot, platform)) return { ok: true }
+    }
+    return refuse
+  } catch {
+    return refuse
+  }
+}
+
 const STRICTNESS = { read: 0, mutate: 1, deny: 2 }
 
 /** Strictest remote policy among the invokable (invoke|send) rows for a channel, or null. */
@@ -47,9 +114,10 @@ function policyFor(surface, channel) {
 /**
  * @param {{ surface: ReadonlyArray<{channel:string,kind:string,remote:string}>,
  *           handlers: Map<string, Function> | Record<string, Function>,
- *           getConfig: () => ({remoteEnabled?:boolean, remoteControlEnabled?:boolean} | Promise<any>) }} deps
+ *           getConfig: () => ({remoteEnabled?:boolean, remoteControlEnabled?:boolean} | Promise<any>),
+ *           fenceCtx?: Parameters<typeof remoteArgFence>[2] }} deps
  */
-function createRemoteIpcDispatcher({ surface, handlers, getConfig }) {
+function createRemoteIpcDispatcher({ surface, handlers, getConfig, fenceCtx }) {
   const lookup = (channel) =>
     handlers instanceof Map ? handlers.get(channel) : handlers && Object.prototype.hasOwnProperty.call(handlers, channel) ? handlers[channel] : undefined
 
@@ -70,6 +138,12 @@ function createRemoteIpcDispatcher({ surface, handlers, getConfig }) {
 
     const handler = lookup(channel)
     if (typeof handler !== 'function') return { ok: false, reason: 'no_handler' }
+
+    // Remote-only fence: fail closed when path-taking channels have no ctx.
+    const fence = fenceCtx || !Object.prototype.hasOwnProperty.call(PATH_FENCED_CHANNELS, channel)
+      ? remoteArgFence(channel, args, fenceCtx)
+      : { ok: false, reason: 'path_fenced' }
+    if (!fence.ok) return { ok: false, reason: 'path_fenced' }
 
     try {
       const event = { sender: null, remoteClientId: client.key }
@@ -119,4 +193,4 @@ function joinFrames(frames) {
   return JSON.parse(sorted.map((f) => f.data).join(''))
 }
 
-module.exports = { captureIpcHandlers, createRemoteIpcDispatcher, chunkFrames, joinFrames, MAX_VALUE_BYTES }
+module.exports = { remoteArgFence, PATH_FENCED_CHANNELS, captureIpcHandlers, createRemoteIpcDispatcher, chunkFrames, joinFrames, MAX_VALUE_BYTES }

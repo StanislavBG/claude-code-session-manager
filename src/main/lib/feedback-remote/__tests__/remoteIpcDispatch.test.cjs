@@ -6,6 +6,7 @@ const {
   createRemoteIpcDispatcher,
   chunkFrames,
   joinFrames,
+  remoteArgFence,
 } = require('../remoteIpcDispatch.cjs')
 
 const surface = [
@@ -101,5 +102,51 @@ describe('chunking', () => {
   it('refuses over 50 MB', () => {
     const r = chunkFrames('x'.repeat(50 * 1024 * 1024 + 1))
     expect(r).toEqual({ ok: false, reason: 'too_large' })
+  })
+})
+
+describe('remoteArgFence', () => {
+  const links = { '/home/u/proj/link': '/home/u/.ssh' }
+  const mk = (platform = 'linux') => ({
+    homeDir: '/home/u',
+    projectRoots: () => ['/home/u/proj'],
+    realpath: (p) => {
+      for (const [k, v] of Object.entries(links)) if (p === k || p.startsWith(k + '/')) return v + p.slice(k.length)
+      return p
+    },
+    platform,
+  })
+  const f = (ch, p, ctx = mk()) => remoteArgFence(ch, [{ path: p }], ctx)
+  const fenced = { ok: false, reason: 'path_fenced' }
+  it('allows a project file', () => expect(f('files:read', '/home/u/proj/a.ts')).toEqual({ ok: true }))
+  it('refuses home file outside projects', () => expect(f('files:read', '/home/u/notes.txt')).toEqual(fenced))
+  it('refuses ~/.ssh key', () => expect(f('files:read', '/home/u/.ssh/id_ed25519')).toEqual(fenced))
+  it('refuses symlink into ~/.ssh', () => expect(f('files:read', '/home/u/proj/link/key')).toEqual(fenced))
+  it('refuses .env and .env.local inside project', () => {
+    expect(f('files:read', '/home/u/proj/.env')).toEqual(fenced)
+    expect(f('files:read', '/home/u/proj/.env.local')).toEqual(fenced)
+  })
+  it('refuses win32 upper-case variant', () => {
+    const ctx = { ...mk('win32'), homeDir: 'C:\\Users\\u', projectRoots: () => ['C:\\Users\\u\\proj'], realpath: (p) => p }
+    expect(f('files:read', 'C:\\Users\\u\\proj\\.SSH\\ID_RSA', ctx)).toEqual(fenced)
+    expect(f('files:read', 'C:\\Users\\u\\proj\\a.ts', ctx)).toEqual({ ok: true })
+  })
+  it('allows home listing only for files:list', () => {
+    expect(f('files:list', '/home/u')).toEqual({ ok: true })
+    expect(f('files:read', '/home/u')).toEqual(fenced)
+    expect(f('files:list', '/home/u/other')).toEqual(fenced)
+  })
+  it('ignores unfenced channels and fences invoke before the handler', async () => {
+    expect(remoteArgFence('app:version', [], mk())).toEqual({ ok: true })
+    const fn = vi.fn(async () => 'x')
+    const d = createRemoteIpcDispatcher({
+      surface: [{ channel: 'files:read', kind: 'invoke', remote: 'read' }],
+      handlers: new Map([['files:read', fn]]),
+      getConfig: () => ({ remoteEnabled: true }),
+      fenceCtx: mk(),
+    })
+    expect(await d.invoke(authed, 'files:read', [{ path: '/home/u/.ssh/id_rsa' }])).toEqual(fenced)
+    expect(fn).not.toHaveBeenCalled()
+    expect((await d.invoke(authed, 'files:read', [{ path: '/home/u/proj/a' }])).ok).toBe(true)
   })
 })

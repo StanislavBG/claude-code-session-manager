@@ -20,6 +20,7 @@ const UNIT_FILES = [
   'src/main/lib/__tests__/smfileUrlPath.test.cjs',
   'src/main/lib/__tests__/configValidatePathWin32.test.cjs',
   'src/main/__tests__/filesProjectRoots.test.cjs',
+  'src/main/lib/feedback-remote/__tests__/remoteIpcDispatch.test.cjs',
 ]
 
 describe('ci.yml windows job', () => {

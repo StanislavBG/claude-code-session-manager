@@ -133,7 +133,7 @@ const webRemote = require('./webRemote.cjs');
     getConfig: () => webRemote.loadConfig(),
     fenceCtx: {
       homeDir: os.homedir(),
-      realpath: (p) => fs.realpathSync(p),
+      realpath: (p) => require('./lib/insideHome.cjs').realpath(p),
       projectRoots: () => {
         try {
           const data = JSON.parse(fs.readFileSync(sessionsStore.storePath(), 'utf8'));

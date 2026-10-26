@@ -68,7 +68,7 @@ const SECRET_SEQUENCES = [
 function isSecretPath(p, platform) {
   const win = platform === 'win32'
   const norm = win ? String(p).toLowerCase() : String(p)
-  const segs = norm.split(/[\\/]+/).filter(Boolean)
+  const segs = norm.split(/[\\/]+/).map((x) => (win ? x.replace(/[. ]+$/, '') : x)).filter(Boolean)
   const seqs = win ? SECRET_SEQUENCES.map((q) => q.map((x) => x.toLowerCase())) : SECRET_SEQUENCES
   for (let i = 0; i < segs.length; i++) {
     if (SECRET_DIRS.has(segs[i])) return true

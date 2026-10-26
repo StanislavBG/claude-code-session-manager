@@ -200,6 +200,22 @@ describe('remoteArgFence', () => {
       expect(f('files:read', 'C:\\Users\\u\\proj\\APPDATA\\ROAMING\\MICROSOFT\\CREDENTIALS\\x', ctx)).toEqual(fenced)
       expect(f('files:read', 'C:\\Users\\u\\proj\\.Claude.JSON', ctx)).toEqual(fenced)
     })
+    it('win32 8.3 short names are refused once realpath expands them', () => {
+      const ctx = {
+        ...mk('win32'), homeDir: 'C:\\Users\\u', projectRoots: () => ['C:\\Users\\u\\proj'],
+        realpath: (p) => p.replace('CLAUDE~1', '.claude').replace('SESSIO~1', 'session-manager'),
+      }
+      expect(f('files:read', 'C:\\Users\\u\\proj\\CLAUDE~1\\SESSIO~1\\web-remote.json', ctx)).toEqual(fenced)
+      expect(f('files:read', 'proj\\CLAUDE~1\\SESSIO~1\\web-remote.json', ctx)).toEqual(fenced)
+    })
+    it('win32 trailing dots and spaces are ignored when matching', () => {
+      const ctx = { ...mk('win32'), homeDir: 'C:\\Users\\u', projectRoots: () => ['C:\\Users\\u\\proj'], realpath: (p) => p }
+      expect(f('files:read', 'C:\\Users\\u\\proj\\.claude.json.', ctx)).toEqual(fenced)
+      expect(f('files:read', 'C:\\Users\\u\\proj\\.ssh \\id_ed25519', ctx)).toEqual(fenced)
+    })
+    it('posix does not strip trailing dots', () => {
+      expect(f('files:read', '/home/u/proj/.claude.json.')).toEqual({ ok: true })
+    })
     it('refuses a symlink inside a project pointing into ~/.claude/session-manager', () => {
       const ctx = {
         ...mk(),

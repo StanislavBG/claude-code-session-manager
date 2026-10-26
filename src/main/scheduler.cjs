@@ -3677,37 +3677,87 @@ function capDirtyPaths(paths, cap = PRE_RUN_DIRTY_PATHS_CAP) {
 const FOREIGN_WIP_DELIMITER = '--- FOREIGN WORKING-TREE STATE (not your work) ---';
 const FOREIGN_WIP_END_DELIMITER = '--- END FOREIGN WORKING-TREE STATE ---';
 
+const FOREIGN_WIP_SECTION_MAX_BYTES = 16 * 1024;
+const FOREIGN_WIP_SUMMARY_RESERVE_BYTES = 1024;
+const FOREIGN_WIP_OMITTED_SENTENCE = 'The omitted paths are just as foreign: do not stage, commit, revert, or stash them either.';
+
+/**
+ * Pure: bound a foreign-WIP path list by count (PRE_RUN_DIRTY_PATHS_CAP) and
+ * bytes. A trailing capDirtyPaths `+N more` marker is never listed; its N is
+ * added to omittedCount. Omitted real paths are grouped by parent directory.
+ * `fixedBytes` = byte length of the section's fixed sentences/delimiters.
+ */
+function limitForeignWipPaths(paths, fixedBytes = 0) {
+  const all = Array.isArray(paths) ? paths.filter(Boolean) : [];
+  let omittedCount = 0;
+  if (all.length && /^\+\d+ more$/.test(all[all.length - 1])) {
+    omittedCount += Number(all.pop().slice(1).split(' ')[0]);
+  }
+  const budget = FOREIGN_WIP_SECTION_MAX_BYTES - fixedBytes - FOREIGN_WIP_SUMMARY_RESERVE_BYTES;
+  const listed = [];
+  let used = 0;
+  let i = 0;
+  for (; i < all.length && listed.length < PRE_RUN_DIRTY_PATHS_CAP; i++) {
+    const lineBytes = Buffer.byteLength(`  ${all[i]}\n`, 'utf8');
+    if (used + lineBytes > budget) break;
+    used += lineBytes;
+    listed.push(all[i]);
+  }
+  const byDir = new Map();
+  for (; i < all.length; i++) {
+    const slash = all[i].lastIndexOf('/');
+    const dir = slash >= 0 ? all[i].slice(0, slash + 1) : '(repo root)';
+    byDir.set(dir, (byDir.get(dir) || 0) + 1);
+    omittedCount += 1;
+  }
+  const omittedByDir = [...byDir.entries()].sort((x, y) => y[1] - x[1]);
+  return { listed, omittedCount, omittedByDir };
+}
+
+function foreignWipSummaryLine(omittedCount, omittedByDir) {
+  const fmt = (n) => n.toLocaleString('en-US');
+  const clip = (d) => (d.length > 120 ? `${d.slice(0, 117)}...` : d);
+  const top = omittedByDir.slice(0, 5);
+  const parts = top.map(([d, n]) => `${fmt(n)} under ${clip(d)}`);
+  const rest = omittedByDir.slice(5).reduce((sum, [, n]) => sum + n, 0);
+  if (rest > 0) parts.push(`${fmt(rest)} elsewhere`);
+  const tail = parts.length ? `: ${parts.join(', ')}` : '';
+  return `  ... and ${fmt(omittedCount)} more path(s) not listed${tail}`;
+}
+
 /**
  * Pure: build the executor-prompt section warning about pre-existing dirty
  * paths this job does not own — either base WIP carried into an isolated
  * worktree (PRD 1094's carriedPaths, checked first since it's the more
  * specific/authoritative case) or the raw pre-run dirty snapshot of a shared
  * (non-isolated) tree. Returns '' when both lists are empty so a clean spawn
- * produces a byte-identical prompt to before this section existed.
+ * produces a byte-identical prompt to before this section existed. Both
+ * branches are bounded by count and bytes (FOREIGN_WIP_SECTION_MAX_BYTES).
  */
 function buildForeignWipSection({ preRunDirtyPaths, carriedPaths } = {}) {
   const carried = Array.isArray(carriedPaths) ? carriedPaths.filter(Boolean) : [];
-  if (carried.length) {
-    return [
-      FOREIGN_WIP_DELIMITER,
-      'This job is running in an isolated git worktree, but the following paths carry uncommitted base-tree work-in-progress that was carried into this checkout so the tree is self-consistent. The authoritative copy of these files lives in the MAIN tree, not this worktree.',
-      'These files were already modified before this job started. They are NOT this job\'s work:',
-      ...carried.map((p) => `  ${p}`),
-      'Do not stage, commit, revert, or stash these paths. A test failure confined to these paths is not this job\'s regression.',
-      FOREIGN_WIP_END_DELIMITER,
-    ].join('\n');
-  }
   const dirty = Array.isArray(preRunDirtyPaths) ? preRunDirtyPaths.filter(Boolean) : [];
-  if (dirty.length) {
-    return [
-      FOREIGN_WIP_DELIMITER,
-      'This job is running in a SHARED working tree (not isolated in its own worktree). The following paths were already modified when this job started:',
-      ...dirty.map((p) => `  ${p}`),
-      'These files are NOT this job\'s work. Do not stage, commit, revert, or stash them. A test failure confined to these paths is not this job\'s regression.',
-      FOREIGN_WIP_END_DELIMITER,
-    ].join('\n');
-  }
-  return '';
+  if (!carried.length && !dirty.length) return '';
+  const isCarried = carried.length > 0;
+  const head = isCarried
+    ? [
+        FOREIGN_WIP_DELIMITER,
+        'This job is running in an isolated git worktree, but the following paths carry uncommitted base-tree work-in-progress that was carried into this checkout so the tree is self-consistent. The authoritative copy of these files lives in the MAIN tree, not this worktree.',
+        'These files were already modified before this job started. They are NOT this job\'s work:',
+      ]
+    : [
+        FOREIGN_WIP_DELIMITER,
+        'This job is running in a SHARED working tree (not isolated in its own worktree). The following paths were already modified when this job started:',
+      ];
+  const tailLines = isCarried
+    ? ['Do not stage, commit, revert, or stash these paths. A test failure confined to these paths is not this job\'s regression.', FOREIGN_WIP_END_DELIMITER]
+    : ['These files are NOT this job\'s work. Do not stage, commit, revert, or stash them. A test failure confined to these paths is not this job\'s regression.', FOREIGN_WIP_END_DELIMITER];
+  const fixedBytes = Buffer.byteLength([...head, ...tailLines, FOREIGN_WIP_OMITTED_SENTENCE].join('\n'), 'utf8') + 8;
+  const { listed, omittedCount, omittedByDir } = limitForeignWipPaths(isCarried ? carried : dirty, fixedBytes);
+  const omitted = omittedCount > 0
+    ? [foreignWipSummaryLine(omittedCount, omittedByDir), FOREIGN_WIP_OMITTED_SENTENCE]
+    : [];
+  return [...head, ...listed.map((p) => `  ${p}`), ...omitted, ...tailLines].join('\n');
 }
 
 // A job whose validated BLOCKED_BY_FOREIGN_WIP claim keeps recurring against
@@ -11243,6 +11293,8 @@ module.exports = {
   LEFTOVER_PATHS_CAP,
   capDirtyPaths,
   buildForeignWipSection,
+  limitForeignWipPaths,
+  FOREIGN_WIP_SECTION_MAX_BYTES,
   PRE_RUN_DIRTY_PATHS_CAP,
   FOREIGN_WIP_DELIMITER,
   FOREIGN_WIP_END_DELIMITER,

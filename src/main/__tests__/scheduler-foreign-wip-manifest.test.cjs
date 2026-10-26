@@ -17,6 +17,7 @@ const {
   PRE_RUN_DIRTY_PATHS_CAP,
   FOREIGN_WIP_DELIMITER,
   FOREIGN_WIP_END_DELIMITER,
+  FOREIGN_WIP_SECTION_MAX_BYTES,
 } = require('../scheduler.cjs');
 
 test('capDirtyPaths: [] for null/undefined/empty input', () => {
@@ -75,4 +76,50 @@ test('buildForeignWipSection: carriedPaths takes precedence over preRunDirtyPath
 
 test('buildForeignWipSection: isolated-clean (worktree ok, no carried WIP) emits nothing', () => {
   expect(buildForeignWipSection({ carriedPaths: [] })).toBe('');
+});
+
+const pathLines = (section) => section.split('\n').filter((l) => /^  \S/.test(l) && !l.startsWith('  ... and'));
+
+test('buildForeignWipSection: 5,000 carried paths are capped by count and bytes with a per-directory summary', () => {
+  const carried = [
+    ...Array.from({ length: 4900 }, (_, i) => `session-manager-operations/scheduler/prds/.reserved-${i}`),
+    ...Array.from({ length: 100 }, (_, i) => `src/f${i}.ts`),
+  ];
+  const section = buildForeignWipSection({ carriedPaths: carried });
+  expect(Buffer.byteLength(section, 'utf8')).toBeLessThanOrEqual(FOREIGN_WIP_SECTION_MAX_BYTES);
+  expect(section.split('\n')[0]).toBe(FOREIGN_WIP_DELIMITER);
+  expect(section.split('\n').pop()).toBe(FOREIGN_WIP_END_DELIMITER);
+  expect(pathLines(section).map((l) => l.trim())).toEqual(carried.slice(0, 200));
+  expect(section).toContain('... and 4,800 more path(s) not listed:');
+  expect(section).toContain('4,700 under session-manager-operations/scheduler/prds/');
+  expect(section).toContain('100 under src/');
+});
+
+test('buildForeignWipSection: long paths are limited by the byte budget, remainder summarised', () => {
+  const carried = Array.from({ length: 200 }, (_, i) => `d/${String(i).padStart(3, '0')}${'x'.repeat(295)}`);
+  const section = buildForeignWipSection({ carriedPaths: carried });
+  expect(Buffer.byteLength(section, 'utf8')).toBeLessThanOrEqual(FOREIGN_WIP_SECTION_MAX_BYTES);
+  const listed = pathLines(section).length;
+  expect(listed).toBeLessThan(200);
+  expect(section).toContain(`... and ${(200 - listed).toLocaleString('en-US')} more path(s) not listed: ${(200 - listed).toLocaleString('en-US')} under d/`);
+});
+
+test('buildForeignWipSection: capDirtyPaths "+N more" marker is never a path; its N joins the omitted count', () => {
+  const dirty = capDirtyPaths(Array.from({ length: 5000 }, (_, i) => `a/f${i}`));
+  const section = buildForeignWipSection({ preRunDirtyPaths: dirty });
+  expect(section).not.toContain('+4800 more');
+  expect(pathLines(section)).toHaveLength(200);
+  expect(section).toContain('... and 4,800 more path(s) not listed');
+  expect(Buffer.byteLength(section, 'utf8')).toBeLessThanOrEqual(FOREIGN_WIP_SECTION_MAX_BYTES);
+});
+
+test('buildForeignWipSection: more than 5 directories sum the rest as "elsewhere"; root files group as (repo root)', () => {
+  const paths = [...Array.from({ length: 200 }, (_, i) => `keep${i}`),
+    ...['a/', 'b/', 'c/', 'd/', 'e/', 'f/'].flatMap((d, k) => Array.from({ length: 10 - k }, (_, i) => `${d}${i}`)),
+    'root.txt'];
+  const section = buildForeignWipSection({ carriedPaths: paths });
+  expect(section).toContain('10 under a/');
+  expect(section).toContain('6 under e/');
+  expect(section).not.toContain('under f/');
+  expect(section).toMatch(/, \d+ elsewhere/);
 });

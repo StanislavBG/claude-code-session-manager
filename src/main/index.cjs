@@ -16,6 +16,9 @@ const { PROC_NAMES, setProcessTitle, inhibitHolderShell } = require('./lib/proce
 // `process.argv.includes('--simple')` read further down.
 setProcessTitle(PROC_NAMES.main);
 const { app, BrowserWindow, ipcMain, dialog, Menu, session, systemPreferences, globalShortcut, shell, clipboard, powerSaveBlocker, protocol } = require('electron');
+// Capture every ipcMain.handle registration (before any module registers one) so the
+// web-remote ipc:invoke dispatcher calls the exact handlers the renderer calls.
+const capturedIpcHandlers = require('./lib/feedback-remote/remoteIpcDispatch.cjs').captureIpcHandlers(ipcMain);
 const { spawn, execFile, execFileSync } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
@@ -122,6 +125,24 @@ const heapSnapshot = require('./heapSnapshot.cjs');
 const filesIpc = require('./files.cjs');
 const { registerDocEditHandlers, attachWindow: attachDocEditWindow } = require('./docEdit.cjs');
 const webRemote = require('./webRemote.cjs');
+{
+  const { createRemoteIpcDispatcher } = require('./lib/feedback-remote/remoteIpcDispatch.cjs');
+  webRemote.setIpcDispatcher(createRemoteIpcDispatcher({
+    surface: require('./../preload/apiSurface.cjs'),
+    handlers: capturedIpcHandlers,
+    getConfig: () => webRemote.loadConfig(),
+    fenceCtx: {
+      homeDir: os.homedir(),
+      realpath: (p) => fs.realpathSync(p),
+      projectRoots: () => {
+        try {
+          const data = JSON.parse(fs.readFileSync(sessionsStore.storePath(), 'utf8'));
+          return (data.tabs || []).map((t) => t && t.cwd).filter((c) => typeof c === 'string' && c);
+        } catch { return []; }
+      },
+    },
+  }));
+}
 const { registerAgentsHandlers } = require('./agentsIpc.cjs');
 const { registerTelemetryHandlers } = require('./telemetryIpc.cjs');
 const { registerUpdaterIpc } = require('./updaterIpc.cjs');

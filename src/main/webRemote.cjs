@@ -902,8 +902,71 @@ async function handleMessage(raw, device) {
   await dispatchEnvelope(envelope, device, client);
 }
 
+const IPC_INVOKE_MAX_CALLS = 50;
+let _ipcDispatcher = null;
+
+/** Install the shared renderer-handler dispatcher (built in index.cjs). */
+function setIpcDispatcher(dispatcher) {
+  _ipcDispatcher = dispatcher;
+}
+
+/** Encrypt + unicast one ipc:result frame to the calling client (never plaintext). */
+function sendIpcResult(callId, frame, client) {
+  if (!_ws || _ws.readyState !== WebSocket.OPEN) return;
+  if (!client || !client.e2e.sessionKey) return;
+  try {
+    const inner = { type: 'ipc:result', id: callId, seq: frame.seq, total: frame.total, data: frame.data, ts: Date.now() };
+    const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), client.e2e.sessionKey);
+    const out = { type: 'e2e:box', id: callId, payload: { nonce, ciphertext }, ts: Date.now() };
+    if (client.key !== LEGACY_CLIENT_KEY) out.toConn = client.key;
+    _ws.send(JSON.stringify(out));
+  } catch (e) {
+    logs.writeLine({ scope: 'webRemote', level: 'warn', message: 'ipc:result send failed', meta: { error: e?.message } });
+  }
+}
+
+/** Batched ipc:invoke — each call runs through the shared dispatcher (same handlers as the renderer). */
+async function dispatchIpcInvoke(envelope, device, client) {
+  const { id, payload } = envelope;
+  const ts = new Date().toISOString();
+  const calls = payload && Array.isArray(payload.calls) ? payload.calls : null;
+  const valid = calls && calls.length >= 1 && calls.length <= IPC_INVOKE_MAX_CALLS &&
+    calls.every((c) => c && typeof c === 'object' && typeof c.channel === 'string' && c.channel.length > 0 &&
+      c.channel.length <= 200 && (c.args === undefined || Array.isArray(c.args)));
+  if (!valid || typeof id !== 'string' || !id || !_ipcDispatcher) {
+    await auditLog(ts, 'ipc:invoke', device.deviceId, id, 'error:rejected', client);
+    respond(id, { error: 'rejected' }, undefined, client);
+    return;
+  }
+  const { chunkFrames } = require('./lib/feedback-remote/remoteIpcDispatch.cjs');
+  for (let i = 0; i < calls.length; i++) {
+    const { channel, args } = calls[i];
+    let out;
+    let audit;
+    try {
+      const r = await _ipcDispatcher.invoke(client, channel, args ?? []);
+      if (r.ok) { out = { ok: true, result: r.result }; audit = 'ok'; }
+      else { out = { ok: false, error: 'rejected' }; audit = `refused:${r.reason}`; }
+    } catch (e) {
+      out = { ok: false, error: 'rejected' };
+      audit = 'refused:dispatch_error';
+    }
+    let chunked = chunkFrames(out);
+    if (!chunked.ok) {
+      chunked = chunkFrames({ ok: false, error: 'rejected' });
+      if (out.ok) audit = 'refused:too_large';
+    }
+    await auditLog(ts, `ipc:${channel}`, device.deviceId, id, audit, client);
+    for (const frame of chunked.frames) sendIpcResult(`${id}.${i}`, frame, client);
+  }
+}
+
 async function dispatchEnvelope(envelope, device, client) {
   const { type, id, payload } = envelope;
+  if (type === 'ipc:invoke') {
+    await dispatchIpcInvoke(envelope, device, client);
+    return;
+  }
   if (typeof type !== 'string' || !type.startsWith('cmd:')) return;
 
   const ts = new Date().toISOString();
@@ -1430,6 +1493,8 @@ function destroy() {
 }
 
 module.exports = {
+  loadConfig,
+  setIpcDispatcher,
   attachWindow,
   registerRemoteHandlers,
   init,

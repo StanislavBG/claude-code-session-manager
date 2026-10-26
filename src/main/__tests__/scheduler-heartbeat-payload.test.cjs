@@ -84,7 +84,19 @@ test('healthy tick carries dispatch {..., pendingDispatchable excludes blocked c
     lastRunAt: '2026-01-01T00:00:00.000Z', pendingDispatchable: 1, runningCount: 0, paused: false,
   }));
   expect(Object.keys(entry.dispatch).sort()).toEqual(
-    ['drain', 'lastDispatchAttemptAt', 'lastRunAt', 'lastTickReason', 'paused', 'pendingDispatchable', 'runningCount'],
+    ['drain', 'lastDispatchAttemptAt', 'lastRunAt', 'lastTickDetail', 'lastTickReason', 'paused', 'pendingDispatchable', 'runningCount'],
   );
   expect(entry.dispatch.drain).toBeNull();
+});
+
+test('held tick detail lands in dispatch.lastTickDetail with prefix stripped', () => {
+  scheduler.recordTick({
+    fired: false,
+    reason: 'held',
+    detail: '[scheduler] quiet-machine: lease held by a running job — holding all dispatch until it releases',
+  });
+  const entry = scheduler.heartbeatTick({ readQueueSync: () => ({ jobs: [], unreadable: true, paused: null }) });
+  expect(entry.dispatch.lastTickReason).toBe('held');
+  expect(entry.dispatch.lastTickDetail.startsWith('quiet-machine: lease held')).toBe(true);
+  expect(entry.dispatch.lastTickDetail.length).toBeLessThanOrEqual(200);
 });

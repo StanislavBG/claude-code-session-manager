@@ -975,6 +975,7 @@ function heartbeatTick(deps = {}) {
         lastDispatchAttemptAt: s.lastDispatchAttemptAt ?? null,
         lastRunAt: s.lastRunAt ?? null,
         lastTickReason: lastTick?.reason ?? null,
+        lastTickDetail: lastTick?.detail ? stripTickDetailPrefix(lastTick.detail, { keepWord: true }).slice(0, 200) : null,
         pendingDispatchable: Math.max(0, counts.pending - blockedPending),
         runningCount: counts.running,
         paused: Boolean(s.paused),
@@ -2304,6 +2305,13 @@ const loadGate = createLoadGate();
 // actually pinned at 1 with nothing on screen explaining why. This is that
 // explanation, recorded once per tick and broadcast with the rest of the state.
 let lastTick = null;
+// Strips the leading '[scheduler] <word> [..]: ' prefix from a tick detail.
+// keepWord=true strips only the '[scheduler] ' tag and keeps '<word>: ' (the
+// heartbeat wants the hold kind, e.g. 'quiet-machine: lease held ...').
+function stripTickDetailPrefix(detail, { keepWord = false } = {}) {
+  const re = keepWord ? /^\[scheduler\]\s*/ : /^\[scheduler\]\s*[\w-]+\s*(?:\[[^\]]*\])?:\s*/;
+  return String(detail ?? '').replace(re, '');
+}
 function recordTick(outcome, extra = {}) {
   lastTick = { ...outcome, ...extra, at: new Date().toISOString() };
   return outcome;
@@ -7558,7 +7566,7 @@ function forceTickOutcome(result) {
     case 'slots-exhausted':
       return { ok: true, kind: 'warn', message: `Deferred ${result.deferredCount} job(s) — all session slots in use (${(result.holders ?? []).map((h) => h.owner).join(', ')})` };
     case 'held': {
-      const detail = String(result.detail ?? '').replace(/^\[scheduler\]\s*[\w-]+\s*(?:\[[^\]]*\])?:\s*/, '');
+      const detail = stripTickDetailPrefix(result.detail);
       return { ok: true, kind: 'warn', message: detail || 'Batch held' };
     }
     default:
@@ -11140,6 +11148,7 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
 
 module.exports = {
   normalizeConfig,
+  recordTick,
   reportSchedulerError,
   finalizeJobWorktree,
   worktreeIntegrationVerdict,

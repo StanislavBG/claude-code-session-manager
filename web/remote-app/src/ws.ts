@@ -580,6 +580,25 @@ export class RelaySocket {
     });
   }
 
+  /**
+   * Fire-and-forget envelope (no resp:<id> pending entry) — used by the renderer bridge,
+   * whose replies arrive as ipc:result / ipc:event frames. Boxed when an E2E session exists.
+   */
+  async sendEnvelope(
+    type: string,
+    deviceId: string,
+    payload?: unknown,
+    id: string = crypto.randomUUID(),
+  ): Promise<boolean> {
+    const inner: Envelope = { type, id, deviceId, payload, ts: Date.now() };
+    const session = this.e2eSessions.get(deviceId);
+    if (session?.sessionKey) {
+      const { nonce, ciphertext } = await encryptBox(JSON.stringify(inner), session.sessionKey);
+      return this.sendRaw({ type: 'e2e:box', id, deviceId, payload: { nonce, ciphertext }, ts: Date.now() });
+    }
+    return this.sendRaw(inner);
+  }
+
   sendRaw(msg: unknown): boolean {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));

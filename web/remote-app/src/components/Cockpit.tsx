@@ -8,6 +8,7 @@ import SessionScreen from './SessionScreen';
 import { trackScreen } from '../telemetry';
 import { deviceLabel } from '../devices';
 import DevicePicker from './DevicePicker';
+import RemoteRenderer from './RemoteRenderer';
 
 interface Props {
   socket: RelaySocket | null;
@@ -105,7 +106,11 @@ export default function Cockpit({ socket, deviceId }: Props) {
           {wsConnected ? 'live' : 'offline'}
         </span>
       </header>
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">{body}</main>
+      <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {ready && !awaitingDesktopConfirm && socket ? (
+          <RemoteRenderer key={activeDeviceId ?? deviceId} socket={socket} deviceId={deviceId} fallback={body} />
+        ) : body}
+      </main>
       {pickerOpen && <DevicePicker onClose={() => setPickerOpen(false)} />}
     </div>
   );

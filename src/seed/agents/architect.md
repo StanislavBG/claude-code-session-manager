@@ -4,9 +4,9 @@ description: The primary Actor for an Epic's whole interactive conversation — 
 tools: Read, Grep, Glob, Bash, Edit, Write
 model: opus
 effort: medium
-tags: feature, bug, discussion
+tags: feature, bug, discussion, art
 title: Engineering — Architect
-seedVersion: 2
+seedVersion: 3
 ---
 
 You are the architect. You are the one Actor a human talks to for the whole life of an Epic's

@@ -54,7 +54,7 @@ function silentLogger() {
   return { log: () => {}, warn: () => {} };
 }
 
-const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder'];
+const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder', 'blender-artist'];
 
 test('fresh seed writes every persona file', async () => {
   await seedAgentPersonas({ logger: silentLogger() });
@@ -429,4 +429,73 @@ test('the upgrade pass runs even when the marker says every persona is already s
   const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
   const { body } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'dev-lead.md'), 'utf8'));
   expect(body).toContain('## Run contract'); // upgraded despite the marker being "done" and attempts exhausted
+});
+
+// --- blender-artist + architect art Mission ------------------------------
+
+function bundledRaw(name) {
+  return fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', `${name}.md`), 'utf8');
+}
+
+test('a fresh seed writes blender-artist.md as an executorOnly art persona', async () => {
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const { fm } = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'blender-artist.md'), 'utf8'));
+  expect(String(fm.executorOnly)).toBe('true');
+  expect(fm.tags).toBe('art');
+});
+
+test('a machine whose marker lists the five older personas receives blender-artist on its next run', async () => {
+  const mPath = markerPath();
+  fs.mkdirSync(path.dirname(mPath), { recursive: true });
+  const older = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder'];
+  fs.writeFileSync(mPath, JSON.stringify({ seeded: older, attempts: 0, ts: '2026-01-01T00:00:00.000Z' }));
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  expect(fs.existsSync(path.join(agentsDir(), 'blender-artist.md'))).toBe(true);
+  expect(fs.existsSync(path.join(agentsDir(), 'architect.md'))).toBe(false); // already seeded, left alone
+  const marker = JSON.parse(fs.readFileSync(mPath, 'utf8'));
+  expect(marker.seeded.sort()).toEqual([...ALL_PERSONAS].sort());
+});
+
+test('a pre-existing hand-written blender-artist.md without seedVersion is left byte-identical', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  const mine = '---\nname: blender-artist\ndescription: mine\ntags: art\n---\n\nmy own body\n';
+  fs.writeFileSync(path.join(agentsDir(), 'blender-artist.md'), mine);
+
+  await seedAgentPersonas({ logger: silentLogger() });
+
+  expect(fs.readFileSync(path.join(agentsDir(), 'blender-artist.md'), 'utf8')).toBe(mine);
+});
+
+test('upgrade adds art to an installed seedVersion-2 architect with shipped tags, and keeps user-edited tags', async () => {
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const { fm: bundledFm, body } = splitFrontmatter(bundledRaw('architect'));
+  const installed = (tags) => [
+    '---', 'name: architect', `description: ${bundledFm.description}`, `tools: ${bundledFm.tools}`,
+    'model: opus', 'effort: medium', `tags: ${tags}`, `title: ${bundledFm.title}`, 'seedVersion: 2', '---', '', body.trim(), '',
+  ].join('\n');
+  const mark = markerPath();
+  fs.mkdirSync(path.dirname(mark), { recursive: true });
+  fs.writeFileSync(mark, JSON.stringify({ seeded: ALL_PERSONAS, attempts: 0, ts: '2026-01-01T00:00:00.000Z' }));
+  fs.mkdirSync(agentsDir(), { recursive: true });
+
+  fs.writeFileSync(path.join(agentsDir(), 'architect.md'), installed('feature, bug, discussion'));
+  await seedAgentPersonas({ logger: silentLogger() });
+  let out = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'architect.md'), 'utf8')).fm;
+  expect(out.tags).toBe('feature, bug, discussion, art');
+  expect(out.seedVersion).toBe('3');
+
+  fs.writeFileSync(path.join(agentsDir(), 'architect.md'), installed('feature, mine'));
+  await seedAgentPersonas({ logger: silentLogger() });
+  out = splitFrontmatter(fs.readFileSync(path.join(agentsDir(), 'architect.md'), 'utf8')).fm;
+  expect(out.tags).toBe('feature, mine');
+});
+
+test('the bundled blender-artist.md carries no machine-specific path or project name', () => {
+  const raw = bundledRaw('blender-artist');
+  expect(raw).not.toContain('/home/');
+  expect(raw.toLowerCase()).not.toContain('bilko');
 });

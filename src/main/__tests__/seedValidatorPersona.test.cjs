@@ -55,7 +55,7 @@ function silentLogger() {
   return { log: () => {}, warn: () => {} };
 }
 
-const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder'];
+const ALL_PERSONAS = ['architect', 'dev-lead', 'project-home-builder', 'validator', 'demo-video-builder', 'blender-artist'];
 const seedSrc = (name) => path.join(__dirname, '..', '..', 'seed', 'agents', `${name}.md`);
 
 test('a fresh homedir gets all four persona files', async () => {

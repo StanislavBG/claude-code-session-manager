@@ -51,6 +51,18 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         tools: "Read, Grep, Glob, Bash, Edit, Write",
       },
     },
+    {
+      commit: "0c6e625f",
+      bodySha256: "40a4d41445e7fdb128f4f1d8d3eef88b857ca466726b3719b36cb69933f09168",
+      fm: {
+        description: "The primary Actor for an Epic's whole interactive conversation — owns overall plan and decomposition, clarifies scope, searches before building, decomposes work into scheduled PRDs via /develop, tracks them to completion, and verifies before calling anything done. Never implements a PRD itself — that's dev-lead's job, one PRD at a time, headless. Task-type framing is the Epic's Mission tag's job, not this persona's.",
+        model: "opus",
+        effort: "medium",
+        tags: "feature, bug, discussion, art",
+        title: "Engineering — Architect",
+        tools: "Read, Grep, Glob, Bash, Edit, Write",
+      },
+    },
   ],
   "dev-lead": [
     {
@@ -328,6 +340,21 @@ const SHIPPED_PERSONA_SEEDS = deepFreeze({
         title: "Project Home — Demo Video",
         model: "opus",
         effort: "max",
+      },
+    },
+  ],
+  "blender-artist": [
+    {
+      commit: "0c6e625f",
+      bodySha256: "9cc52c7a1e35f81a158cccfd6b05974ed7a95e23cb98666c8f68dab54c9a6b5a",
+      fm: {
+        description: "Expert 3D character artist for games — modeling, rigging, skinning, shape keys and keyframe animation in Blender, driven headlessly through Blender's Python API and the Blender MCP, verified in-engine with the Godot CLI. Executes exactly one already-scoped art PRD at a time (the dev-lead equivalent for 3D assets). Use for any change whose source of truth is a .blend file.",
+        tools: "Read, Grep, Glob, Bash, Edit, Write, mcp__blender__execute_blender_code_for_cli, mcp__blender__get_blendfile_summary_datablocks_for_cli, mcp__blender__get_blendfile_summary_usage_guess_for_cli, mcp__blender__get_blendfile_summary_missing_files_for_cli, mcp__blender__get_python_api_docs, mcp__blender__search_api_docs, mcp__blender__search_manual_docs, mcp__blender__render_thumbnail_to_path, mcp__blender__render_viewport_to_path, mcp__blender__execute_blender_code, mcp__blender__get_objects_summary, mcp__blender__get_object_detail_summary, mcp__blender__get_screenshot_of_area_as_image",
+        title: "Games — 3D Character Artist (Blender)",
+        model: "opus",
+        effort: "high",
+        tags: "art",
+        executorOnly: "true",
       },
     },
   ],

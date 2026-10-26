@@ -74,6 +74,11 @@ async function awaitPendingEpicWorktree(cwd, epicId, { timeoutMs = 90000 } = {})
   }
 }
 
+/** True exactly when a mint is in flight for this Epic. Synchronous, never throws. */
+function hasPendingEpicWorktree(cwd, epicId) {
+  try { return pendingMints.has(mintKey(cwd, epicId)); } catch { return false; }
+}
+
 function __resetPendingForTests() {
   pendingMints.clear();
 }
@@ -108,4 +113,4 @@ function registerEpicWorktreeMintHandlers() {
   );
 }
 
-module.exports = { createEpicWorktreeViaIpc, awaitPendingEpicWorktree, __resetPendingForTests, registerEpicWorktreeMintHandlers };
+module.exports = { createEpicWorktreeViaIpc, awaitPendingEpicWorktree, hasPendingEpicWorktree, __resetPendingForTests, registerEpicWorktreeMintHandlers };

@@ -117,7 +117,7 @@ test('a request missing epicId is rejected by ipcSchemas validation', async () =
 });
 
 describe('pending mint registry', () => {
-  const { awaitPendingEpicWorktree, __resetPendingForTests } = require('../epicWorktreeMint.cjs');
+  const { awaitPendingEpicWorktree, hasPendingEpicWorktree, __resetPendingForTests } = require('../epicWorktreeMint.cjs');
   afterEach(() => { vi.restoreAllMocks(); __resetPendingForTests(); });
 
   test('registers synchronously, resolves the mint result, and clears once settled', async () => {
@@ -128,6 +128,18 @@ describe('pending mint registry', () => {
     expect(result).not.toBeNull();
     expect(viaAwait).toEqual(result);
     expect(await awaitPendingEpicWorktree(cwd, 'epic-pend-1')).toBeNull();
+  });
+
+  test('hasPendingEpicWorktree is true only while a mint is in flight', async () => {
+    const cwd = await mkRepoCwd();
+    expect(hasPendingEpicWorktree(cwd, 'epic-has-1')).toBe(false);
+    const p = createEpicWorktreeViaIpc(cwd, 'epic-has-1');
+    expect(hasPendingEpicWorktree(cwd, 'epic-has-1')).toBe(true);
+    expect(hasPendingEpicWorktree(cwd, 'epic-other')).toBe(false);
+    await p;
+    await new Promise((r) => setTimeout(r, 0));
+    expect(hasPendingEpicWorktree(cwd, 'epic-has-1')).toBe(false);
+    expect(hasPendingEpicWorktree(undefined, undefined)).toBe(false);
   });
 
   test('nothing pending resolves null at once', async () => {

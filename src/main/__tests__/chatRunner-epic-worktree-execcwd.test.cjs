@@ -130,6 +130,7 @@ const mintMod = () => require('../lib/epic/epicWorktreeMint.cjs');
 test('turn 1 with an in-flight mint resolving to a dir spawns inside that dir', async () => {
   const mainCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunner-pend-main-'));
   const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunner-pend-wt-'));
+  vi.spyOn(mintMod(), 'hasPendingEpicWorktree').mockReturnValueOnce(true);
   const spy = vi.spyOn(mintMod(), 'awaitPendingEpicWorktree').mockImplementation(
     () => new Promise((r) => setTimeout(() => r({ dir: wt }), 50)),
   );
@@ -159,6 +160,7 @@ test('nothing pending leaves the spawn cwd unchanged', async () => {
 
 test('a pending mint resolving null leaves the spawn cwd unchanged', async () => {
   const mainCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunner-nullpend-'));
+  vi.spyOn(mintMod(), 'hasPendingEpicWorktree').mockReturnValueOnce(true);
   vi.spyOn(mintMod(), 'awaitPendingEpicWorktree').mockResolvedValue(null);
   process.env.SM_CLAUDE_BIN = writeClaudeStub();
   try {
@@ -167,5 +169,32 @@ test('a pending mint resolving null leaves the spawn cwd unchanged', async () =>
     expect(fs.existsSync(path.join(mainCwd, 'ran-here.marker'))).toBe(true);
   } finally {
     fs.rmSync(mainCwd, { recursive: true, force: true });
+  }
+});
+
+test('cancel during a pending mint never spawns', async () => {
+  const mainCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunner-cancelpend-'));
+  const wt = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunner-cancelpend-wt-'));
+  vi.spyOn(mintMod(), 'hasPendingEpicWorktree').mockReturnValueOnce(true);
+  vi.spyOn(mintMod(), 'awaitPendingEpicWorktree').mockImplementation(
+    () => new Promise((r) => setTimeout(() => r({ dir: wt }), 100)),
+  );
+  const sent = [];
+  cr.attachWindow({
+    isDestroyed: () => false,
+    webContents: { isDestroyed: () => false, send: (ch, payload) => sent.push([ch, payload]) },
+  });
+  process.env.SM_CLAUDE_BIN = writeClaudeStub();
+  try {
+    const res = cr.run({ tabId: 'epic-cancelpend', sessionId: `cancelpend-sess-${process.pid}`, prompt: 'hello', cwd: mainCwd, resume: false });
+    expect(res.accepted).toBe(true);
+    await cr.cancel('epic-cancelpend');
+    expect(sent.some(([ch, p]) => ch === 'chat:run:error' && p.message === 'cancelled while queued')).toBe(true);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(fs.existsSync(path.join(wt, 'ran-here.marker'))).toBe(false);
+    expect(fs.existsSync(path.join(mainCwd, 'ran-here.marker'))).toBe(false);
+  } finally {
+    fs.rmSync(mainCwd, { recursive: true, force: true });
+    fs.rmSync(wt, { recursive: true, force: true });
   }
 });

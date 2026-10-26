@@ -340,6 +340,9 @@ const dispatching = new Set();
 // "Session ID … is already in use", so pump() refuses to start a second run
 // for a held sessionId (it waits in `waiting` like any other blocked run).
 const liveSessions = new Set();
+// Submissions parked while a New Epic's fire-and-forget worktree mint is still in
+// flight (tabId → opts). Counted by run()'s tabBusy; cancel() can drop them.
+const pendingStart = new Map();
 
 // Indirection so tests can stub the spawn without launching claude.
 let executor = executeRun;
@@ -356,6 +359,7 @@ function __resetQueueForTests() {
   dispatching.clear();
   liveSessions.clear();
   waiting.length = 0;
+  pendingStart.clear();
   sessionSlots.__resetForTests();
 }
 
@@ -402,11 +406,27 @@ function run(opts) {
   const tabBusy = inFlight.has(opts.tabId)
     || dispatching.has(opts.tabId)
     || liveSessions.has(opts.sessionId)
+    || pendingStart.has(opts.tabId)
     || waiting.some((w) => w.tabId === opts.tabId);
   if (tabBusy && opts.silent) {
     // Silent probes stay best-effort and invisible: a probe that collides is
     // still dropped, since queueing one would delay real work to no benefit.
     return { accepted: false, reason: 'tab-busy-silent' };
+  }
+
+  // A New Epic's turn 1 races the fire-and-forget worktree mint: only when a mint is
+  // actually in flight for this Epic, hold the submission (<=90s, never rejects) so the
+  // first spawn lands in the worktree. Every other run is untouched.
+  if (epicWorktreeMint.hasPendingEpicWorktree(opts.cwd, opts.tabId)) {
+    pendingStart.set(opts.tabId, opts);
+    epicWorktreeMint.awaitPendingEpicWorktree(opts.cwd, opts.tabId)
+      .then((wt) => wt, () => null)
+      .then((wt) => {
+        if (pendingStart.get(opts.tabId) !== opts) return; // cancelled meanwhile
+        pendingStart.delete(opts.tabId);
+        run({ ...opts, worktreeDirHint: wt && wt.dir ? wt.dir : undefined });
+      });
+    return { accepted: true, queued: tabBusy };
   }
 
   waiting.push(opts);
@@ -476,16 +496,7 @@ sessionSlots.subscribe(() => { try { pump(); } catch { /* defensive */ } });
  * @param {{ tabId: string, sessionId: string, prompt: string, cwd: string, resume: boolean, silent?: boolean, onSilentResult?: (text: string) => void, onSilentError?: (message: string, code?: string) => void, promptId?: string }} opts
  * @returns {Promise<void>}
  */
-async function executeRun(opts) {
-  // A New Epic's turn 1 races the fire-and-forget worktree mint: wait (<=90s, never rejects,
-  // no wait when nothing is pending) so the first spawn lands in the worktree. Awaited before
-  // any slot/lane work in the run body, so nothing is held while waiting.
-  let pendingWt = null;
-  try { pendingWt = await epicWorktreeMint.awaitPendingEpicWorktree(opts.cwd, opts.tabId); } catch { pendingWt = null; }
-  return executeRunWithHint(opts, pendingWt && pendingWt.dir);
-}
-
-function executeRunWithHint({ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult, onSilentError, promptId, origin }, worktreeDirHint) {
+function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentResult, onSilentError, promptId, origin, worktreeDirHint }) {
   return new Promise((resolve) => {
     const startedAt = Date.now();
     // Last few tool_use blocks seen on the stream, oldest first — surfaced in
@@ -957,6 +968,14 @@ function executeRunWithHint({ tabId, sessionId, prompt, cwd, resume, silent, onS
  *   no-op cancel, since there is nothing further to await in those cases.
  */
 function cancel(tabId) {
+  const parked = pendingStart.get(tabId);
+  if (parked) {
+    pendingStart.delete(tabId);
+    if (!parked.silent) {
+      broadcast('chat:run:error', { tabId: parked.tabId, sessionId: parked.sessionId, message: 'cancelled while queued' });
+    }
+    return Promise.resolve();
+  }
   const entry = inFlight.get(tabId);
   if (entry) {
     entry.cancelFn(); // settle() (on child exit) deletes from inFlight + pumps the next run

@@ -465,28 +465,63 @@ describe('promptSessions.ts', () => {
     expect(archiveCall).toBeDefined()
   })
 
-  it('resumeArchived mints a fresh independent session id, born proposed and activated only via approveProposed, and records the link back to the archived session', async () => {
-    installWindowApiMock()
-    const { usePromptSessions } = await import('../promptSessions')
-    const store = usePromptSessions.getState()
+  describe('reopenEpic', () => {
+    async function completedEpic(api: ReturnType<typeof installWindowApiMock>) {
+      const { usePromptSessions } = await import('../promptSessions')
+      const archived = await usePromptSessions.getState().createPromptSession('/proj', 'Ship the feature')
+      await usePromptSessions.getState().markCompleted(archived.id)
+      const done = usePromptSessions.getState().sessions[archived.id]
+      ;(api.promptSessions as any).reopen = vi.fn().mockResolvedValue({
+        ok: true,
+        session: { ...done, status: 'active', completedAt: null },
+        events: [],
+        alreadyOpen: false,
+      })
+      return { usePromptSessions, done }
+    }
 
-    const archived = await store.createPromptSession('/proj', 'Ship the feature')
-    await usePromptSessions.getState().markCompleted(archived.id)
+    it('reopens the SAME Epic in place — same id + claudeSessionId, no new row, no create call', async () => {
+      const api = installWindowApiMock()
+      const { usePromptSessions, done } = await completedEpic(api)
+      const countBefore = Object.keys(usePromptSessions.getState().sessions).length
+      api.promptSessions.create.mockClear()
 
-    const approveSpy = vi.spyOn(usePromptSessions.getState(), 'approveProposed')
-    const resumed = await usePromptSessions.getState().resumeArchived(archived.id)
+      const reopened = await usePromptSessions.getState().reopenEpic(done.id)
 
-    expect(resumed.id).not.toBe(archived.id)
-    expect(resumed.claudeSessionId).not.toBe(archived.claudeSessionId)
-    // The only way resumeArchived's result can be 'active' is via
-    // approveProposed — it can never be minted 'active' directly.
-    expect(approveSpy).toHaveBeenCalledWith(resumed.id, 'unknown')
-    expect(resumed.status).toBe('active')
-    expect(resumed.resumedFromId).toBe(archived.id)
-    expect(resumed.cwd).toBe(archived.cwd)
+      expect(reopened.id).toBe(done.id)
+      expect(reopened.claudeSessionId).toBe(done.claudeSessionId)
+      expect(reopened.status).toBe('active')
+      expect(Object.keys(usePromptSessions.getState().sessions)).toHaveLength(countBefore)
+      expect(usePromptSessions.getState().sessions[done.id].status).toBe('active')
+      expect(api.promptSessions.create).not.toHaveBeenCalled()
+      expect((api.promptSessions as any).reopen).toHaveBeenCalledWith({ cwd: '/proj', epicId: done.id })
+    })
 
-    // The archived session's own record is untouched by the resume.
-    expect(usePromptSessions.getState().sessions[archived.id].status).toBe('completed')
+    it('rejects on ok:false and leaves the row completed', async () => {
+      const api = installWindowApiMock()
+      const { usePromptSessions, done } = await completedEpic(api)
+      ;(api.promptSessions as any).reopen = vi.fn().mockResolvedValue({ ok: false, code: 'transcript_missing', message: 'transcript gone' })
+
+      await expect(usePromptSessions.getState().reopenEpic(done.id)).rejects.toThrow('transcript gone')
+      expect(usePromptSessions.getState().sessions[done.id].status).toBe('completed')
+    })
+
+    it('throws for an unknown id', async () => {
+      installWindowApiMock()
+      const { usePromptSessions } = await import('../promptSessions')
+      await expect(usePromptSessions.getState().reopenEpic('nope')).rejects.toThrow(/no PromptSession/)
+    })
+
+    it('makes no IPC call for an already-active Epic', async () => {
+      const api = installWindowApiMock()
+      const { usePromptSessions } = await import('../promptSessions')
+      ;(api.promptSessions as any).reopen = vi.fn()
+      const s = await usePromptSessions.getState().createPromptSession('/proj', 'Live one')
+      const active = usePromptSessions.getState().approveProposed(s.id)!
+      const out = await usePromptSessions.getState().reopenEpic(active.id)
+      expect(out.id).toBe(active.id)
+      expect((api.promptSessions as any).reopen).not.toHaveBeenCalled()
+    })
   })
 
   it('persists an active session + its events to disk on create/append, and round-trips id/claudeSessionId/events through hydrate() after a simulated reload', async () => {
@@ -1567,15 +1602,22 @@ describe('audit log emission (PRD 940)', () => {
       },
     },
     {
-      name: 'resumeArchived fires an epic_resume audit event for the new Epic id',
+      name: 'reopenEpic fires an epic_resume audit event naming the SAME Epic id',
       event: 'epic_resume',
       source: 'EpicDetail',
       run: async (s: any, api: any) => {
         const archived = await s.createPromptSession('/proj', 'Ship the feature')
         await s.markCompleted(archived.id)
+        api.promptSessions.reopen = vi.fn().mockResolvedValue({
+          ok: true,
+          session: { ...archived, status: 'active', completedAt: null },
+          events: [],
+          alreadyOpen: false,
+        })
         api.auditLog.append.mockClear()
-        const resumed = await s.resumeArchived(archived.id, 'EpicDetail')
-        return { cwd: resumed.cwd, epicId: resumed.id }
+        const resumed = await s.reopenEpic(archived.id, 'EpicDetail')
+        expect(resumed.id).toBe(archived.id)
+        return { cwd: resumed.cwd, epicId: archived.id }
       },
     },
     {

@@ -64,9 +64,9 @@ export interface PromptSession {
   status: 'proposed' | 'active' | 'completed'
   createdAt: string
   completedAt: string | null
-  /** Set only on a session minted via resumeArchived — traces back to the
-   *  completed/archived PromptSession this one follows on from. The
-   *  archived session's claudeSessionId is dead and never reused. */
+  /** Legacy field, written only by the retired resume-as-new-Epic action and never
+   *  written now. Old on-disk Epics may still carry it; it traced a minted
+   *  Epic back to the archived one it followed on from. */
   resumedFromId?: string | null
   /** Epic-level intent tag. Every Epic — human-created via New Epic or
    *  automated — is constructed by src/main/lib/epic/epicMint.cjs's ensureEpic();
@@ -295,7 +295,7 @@ interface PromptSessionsState {
     /** Full opening-prompt body + its labeled sections (epicIntake.ts's
      *  composeEpicIntake) — persisted on the minted Epic alongside goalText
      *  so its first turn can render the AIM briefing card. Omitted by
-     *  callers that never composed a full opening prompt (resumeArchived).
+     *  callers that never composed a full opening prompt.
      *  Hot-key macro launches do compose one. */
     openingPrompt?: string,
     sections?: EpicIntakeSection[],
@@ -315,10 +315,10 @@ interface PromptSessionsState {
    *  status to 'completed', and persists the full event chain + transcript
    *  to session-manager-operations/prompt-sessions/<id>.json. */
   markCompleted: (promptSessionId: string, source?: string) => Promise<void>
-  /** Mints a brand-new independent PromptSession (fresh claudeSessionId —
-   *  the archived one is dead) that carries a traceability link back to the
-   *  archived session it follows on from. */
-  resumeArchived: (archivedId: string, source?: string) => Promise<PromptSession>
+  /** Reopens in place — same id + claudeSessionId, completed -> active; the
+   *  next Chat/Terminal turn resumes the same claude session. Never mints an
+   *  Epic (SINGLE-CREATOR LAW). Rejects on unknown id or IPC `ok: false`. */
+  reopenEpic: (promptSessionId: string, source?: string) => Promise<PromptSession>
   /** Cosmetic correction only (typo/clarity in the queue row menu) — not a
    *  re-purposing of the Epic's goal. Re-encodes goalText as `${title}\n\n${goal}`,
    *  the same encoding EpicDetail.tsx's splitTitleAndGoal reads, and persists
@@ -466,7 +466,7 @@ const indexBackedIds = new Set<string>()
  *  treats it as such (markCompleted/deleteEpic/approveProposed/renameEpic)
  *  await this and roll their optimistic state back on rejection. Callers that
  *  intentionally stay fire-and-forget (createPromptSession,
- *  appendPromptSessionEvent, resumeArchived's own index write) must append
+ *  appendPromptSessionEvent) must append
  *  their own `.catch(() => {})` — the log line above is their only record of
  *  failure, same as before this change. No-ops outside a renderer (tests that
  *  never stub window.api). */
@@ -749,23 +749,25 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       throw err
     }
   },
-  resumeArchived: async (archivedId, source) => {
-    const archived = get().sessions[archivedId]
-    if (!archived) {
-      throw new Error(`resumeArchived: no PromptSession with id "${archivedId}"`)
+  reopenEpic: async (promptSessionId, source) => {
+    const session = get().sessions[promptSessionId]
+    if (!session) {
+      throw new Error(`reopenEpic: no PromptSession with id "${promptSessionId}"`)
     }
-    // Born 'proposed' like every Epic, then immediately approved — this is a
-    // direct user button click (explicit intent), so activation is correct,
-    // but it must still go through the one proposed->active transition.
-    const resolvedSource = source ?? 'unknown'
-    const proposed = await get().createPromptSession(archived.cwd, archived.goalText, undefined, resolvedSource)
-    const linked: PromptSession = { ...proposed, resumedFromId: archivedId }
-    const sessions = { ...get().sessions, [proposed.id]: linked }
-    set({ sessions })
-    persistActiveIndex(linked.cwd, sessions, get().events).catch(() => {})
-    const approved = get().approveProposed(linked.id, resolvedSource)
-    emitAuditEvent('epic_resume', { cwd: linked.cwd, epicId: linked.id, source: resolvedSource })
-    return approved ?? linked
+    if (session.status === 'active' || session.status === 'proposed') return session
+    const result = await window.api.promptSessions.reopen({ cwd: session.cwd, epicId: promptSessionId })
+    if (!result.ok) throw new Error(result.message)
+    // Main already wrote active-index.json and the status mirror — no persistActiveIndex here.
+    set({
+      sessions: { ...get().sessions, [promptSessionId]: result.session as unknown as PromptSession },
+      events: { ...get().events, [promptSessionId]: result.events as unknown as PromptSessionEvent[] },
+    })
+    emitAuditEvent('epic_resume', {
+      cwd: session.cwd,
+      epicId: promptSessionId,
+      source: source ?? 'unknown',
+    })
+    return get().sessions[promptSessionId]
   },
   renameEpic: async (promptSessionId, title, goal) => {
     const session = get().sessions[promptSessionId]

@@ -87,7 +87,16 @@ function installWindowApiMock(opts: {
     clipboard: { writeText: vi.fn().mockResolvedValue({ ok: true }) },
     logs: { write: vi.fn() },
     schedule: { listPrds },
-    promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
+    promptSessions: {
+      create: fakePromptSessionsCreate(),
+      onEventAppended: vi.fn(),
+      reopen: vi.fn(async ({ epicId }: { epicId: string }) => ({
+        ok: true,
+        session: { ...usePromptSessions.getState().sessions[epicId], status: 'active', completedAt: null },
+        events: [],
+        alreadyOpen: false,
+      })),
+    },
   }
   ;(window as unknown as { api: typeof api }).api = api
   return { api, listPrds }
@@ -423,6 +432,36 @@ describe('EpicDetail (PRD 827)', () => {
 
     expect(el.querySelector('[data-testid="epic-resume"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="epic-mark-completed"]')).toBeNull()
+  })
+
+  it('Resume calls reopenEpic and is disabled + "Resuming…" while pending', async () => {
+    installWindowApiMock()
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Fix the bug', 'bug')
+    usePromptSessions.setState({
+      sessions: {
+        ...usePromptSessions.getState().sessions,
+        [session.id]: { ...session, status: 'completed', completedAt: new Date().toISOString() },
+      },
+    })
+    const completed = usePromptSessions.getState().sessions[session.id]
+    let resolve!: (s: typeof completed) => void
+    const reopenEpic = vi
+      .spyOn(usePromptSessions.getState(), 'reopenEpic')
+      .mockImplementation(() => new Promise((r) => { resolve = r }))
+
+    const el = mount(createElement(EpicDetail, { promptSession: completed }))
+    const btn = el.querySelector('[data-testid="epic-resume"]') as HTMLButtonElement
+    await act(async () => {
+      btn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(reopenEpic).toHaveBeenCalledWith(session.id, 'EpicDetail')
+    const pending = el.querySelector('[data-testid="epic-resume"]') as HTMLButtonElement
+    expect(pending.disabled).toBe(true)
+    expect(pending.textContent).toBe('Resuming…')
+    await act(async () => {
+      resolve(completed)
+    })
+    expect((el.querySelector('[data-testid="epic-resume"]') as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('interleaves chat turns and prd_created events by timestamp in the Discussion view', async () => {

@@ -618,7 +618,8 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
     [isInboundProposal, promptSession, sessions],
   )
   const markCompleted = usePromptSessions((s) => s.markCompleted)
-  const resumeArchived = usePromptSessions((s) => s.resumeArchived)
+  const reopenEpic = usePromptSessions((s) => s.reopenEpic)
+  const [resuming, setResuming] = useState(false)
   const appendPromptSessionEvent = usePromptSessions((s) => s.appendPromptSessionEvent)
   const scheduleJobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
 
@@ -950,15 +951,22 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
             {isCompleted ? (
               <button
                 type="button"
-                onClick={() => {
-                  resumeArchived(epicId, 'EpicDetail').catch((err: unknown) => {
+                onClick={async () => {
+                  setResuming(true)
+                  try {
+                    await reopenEpic(epicId, 'EpicDetail')
+                  } catch (err: unknown) {
                     toast.error(err instanceof Error ? err.message : String(err))
-                  })
+                  } finally {
+                    setResuming(false)
+                  }
                 }}
+                disabled={resuming}
+                title="Reopen this session and continue the same conversation"
                 data-testid="epic-resume"
-                className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent/90"
+                className="rounded-md bg-accent px-3 py-1.5 text-xs font-semibold text-white hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Resume
+                {resuming ? 'Resuming…' : 'Resume'}
               </button>
             ) : (
               <>

@@ -320,7 +320,8 @@ function useRowMenuItems(
       onSelect: () => {
         usePromptSessions
           .getState()
-          .resumeArchived(epic.id, 'EpicQueue row menu')
+          .reopenEpic(epic.id, 'EpicQueue row menu')
+          .then(() => onSelect(epic.id))
           .catch((err: unknown) => {
             toast.error(err instanceof Error ? err.message : String(err))
           })

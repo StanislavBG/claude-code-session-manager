@@ -79,7 +79,16 @@ function installWindowApiMock() {
       unwatch: vi.fn(),
     },
     schedule: { listPrds: vi.fn().mockResolvedValue([]) },
-    promptSessions: { create: fakePromptSessionsCreate(), onEventAppended: vi.fn() },
+    promptSessions: {
+      create: fakePromptSessionsCreate(),
+      onEventAppended: vi.fn(),
+      reopen: vi.fn(async ({ epicId }: { epicId: string }) => ({
+        ok: true,
+        session: { ...usePromptSessions.getState().sessions[epicId], status: 'active', completedAt: null },
+        events: [],
+        alreadyOpen: false,
+      })),
+    },
   }
   ;(window as unknown as { api: typeof api }).api = api
   return api
@@ -209,7 +218,7 @@ describe('EpicsWorkspace', () => {
     expect(usePromptSessions.getState().sessions[session!.id].status).toBe('completed')
   })
 
-  it('a completed Epic opens its detail read-only, with no composer, and "Resume" mints a new active Epic', async () => {
+  it('a completed Epic opens its detail read-only, with no composer, and "Resume" reopens that same Epic', async () => {
     const api = installWindowApiMock()
     let session: ReturnType<typeof usePromptSessions.getState>['sessions'][string]
     await act(async () => {
@@ -237,10 +246,10 @@ describe('EpicsWorkspace', () => {
     })
 
     const allSessions = Object.values(usePromptSessions.getState().sessions)
-    expect(allSessions).toHaveLength(2)
-    const resumed = allSessions.find((s) => s.id !== session!.id)!
-    expect(resumed.status).toBe('active')
-    expect(resumed.resumedFromId).toBe(session!.id)
+    expect(allSessions).toHaveLength(1)
+    expect(allSessions[0].id).toBe(session!.id)
+    expect(allSessions[0].status).toBe('active')
+    expect(el.querySelector('[data-testid="epic-composer"]')).not.toBeNull()
   })
 
   it('selecting via the sm:select-prompt-session deep link opens that Epic\'s detail, including a completed one', async () => {

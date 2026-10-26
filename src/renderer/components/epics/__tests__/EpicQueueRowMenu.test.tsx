@@ -17,7 +17,7 @@ import { flushAsync } from '../../../testUtils/domFlush'
  * search/filter/group/sort/pin/paging/keyboard nav, which pass unchanged
  * even if every menu item were broken.
  *
- * Store actions (renameEpic/duplicateEpic/deleteEpic/resumeArchived/
+ * Store actions (renameEpic/duplicateEpic/deleteEpic/reopenEpic/
  * markCompleted) already have full behavioral coverage in
  * state/__tests__/promptSessions.test.ts — these tests only assert the
  * component wires clicks to those actions correctly, so store methods are
@@ -330,15 +330,15 @@ describe('EpicQueue row menu', () => {
     })
   })
 
-  it('Reopen calls resumeArchived with the epic id', async () => {
-    const resumeArchived = vi.spyOn(usePromptSessions.getState(), 'resumeArchived').mockResolvedValue(makeEpic())
+  it('Reopen calls reopenEpic with the epic id', async () => {
+    const reopenEpic = vi.spyOn(usePromptSessions.getState(), 'reopenEpic').mockResolvedValue(makeEpic())
     const epic = makeEpic({ status: 'completed', completedAt: new Date().toISOString() })
     const el = mount(createElement(EpicQueue, baseProps(epic)))
     const menu = openMenu(el)
     clickMenuItem(menu, 'Reopen')
     await flushAsync(2)
 
-    expect(resumeArchived).toHaveBeenCalledWith(epic.id, 'EpicQueue row menu')
+    expect(reopenEpic).toHaveBeenCalledWith(epic.id, 'EpicQueue row menu')
   })
 
   describe('Epic worktree isolation (PRD 1035)', () => {

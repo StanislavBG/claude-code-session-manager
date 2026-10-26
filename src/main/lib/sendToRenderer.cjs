@@ -34,7 +34,7 @@ function sendIfAlive(window, channel, payload) {
 function sendToWindow(window, channel, payload) {
   if (!window || window.isDestroyed()) return;
   const wc = window.webContents;
-  if (!wc || wc.isDestroyed() || wc.isCrashed()) return;
+  if (!wc || wc.isDestroyed() || wc.isCrashed?.()) return;
   try {
     wc.send(channel, payload);
   } catch {

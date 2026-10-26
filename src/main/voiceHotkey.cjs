@@ -18,6 +18,7 @@
 const { app, globalShortcut, ipcMain } = require('electron');
 const voiceSettings = require('./voiceSettings.cjs');
 const { voiceHotkeyLog } = require('./lib/voice-hotkey-log.cjs');
+const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { schemas, validated } = require('./ipcSchemas.cjs');
 
 let mainWindow = null;
@@ -170,7 +171,7 @@ function attachBeforeInput() {
 
 function emitHotkey(phase, source) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
-  mainWindow.webContents.send('voice:hotkey', { phase, source });
+  sendIfAlive(mainWindow, 'voice:hotkey', { phase, source });
   voiceHotkeyLog('info', phase === 'down' ? 'down' : 'up', { source });
 }
 
@@ -308,7 +309,7 @@ function registerHotkeyHandlers() {
     currentConfig = await voiceSettings.load();
     applyConfig(currentConfig);
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('voice:hotkey-changed', currentConfig);
+      sendIfAlive(mainWindow, 'voice:hotkey-changed', currentConfig);
     }
     return { ok: true, config: currentConfig };
   }));

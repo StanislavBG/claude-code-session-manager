@@ -67,6 +67,7 @@
 const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const os = require('node:os');
+const { sendIfAlive } = require('../sendToRenderer.cjs');
 const path = require('node:path');
 
 const config = require('../../config.cjs');
@@ -453,7 +454,7 @@ function defaultNotifyRenderer(payload) {
     const { BrowserWindow } = require('electron');
     for (const win of BrowserWindow.getAllWindows()) {
       try {
-        win.webContents.send('promptSessions:inbound-auto-approve', payload);
+        sendIfAlive(win, 'promptSessions:inbound-auto-approve', payload);
       } catch { /* window going away */ }
     }
   } catch { /* not running under Electron */ }

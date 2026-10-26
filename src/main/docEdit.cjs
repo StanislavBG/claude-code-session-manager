@@ -1,4 +1,5 @@
 'use strict';
+const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 /**
  * docEdit.cjs — Document Experience rewrite runner (PRD 638).
@@ -154,11 +155,7 @@ let mainWindow = null;
 function attachWindow(win) { mainWindow = win; }
 
 function broadcast(channel, payload) {
-  try {
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-      mainWindow.webContents.send(channel, payload);
-    }
-  } catch { /* render frame may be gone */ }
+  sendIfAlive(mainWindow, channel, payload);
 }
 
 // `chatRunner.run()`'s silent lane invokes `onSilentResult` on its success path and

@@ -1,4 +1,5 @@
 'use strict';
+const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 /**
  * chatRunner.cjs — headless `claude -p --output-format stream-json` runner for
@@ -337,11 +338,7 @@ let mainWindow = null;
 function attachWindow(win) { mainWindow = win; }
 
 function broadcast(channel, payload) {
-  try {
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-      mainWindow.webContents.send(channel, payload);
-    }
-  } catch { /* render frame may be gone */ }
+  sendIfAlive(mainWindow, channel, payload);
 }
 
 // ─── Public queue entry ─────────────────────────────────────────────────────

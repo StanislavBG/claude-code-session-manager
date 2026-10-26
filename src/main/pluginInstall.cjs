@@ -7,7 +7,7 @@
  *
  * Channels:
  *   ipcMain.handle('plugins:install', { slug }) -> { ok, exitCode }
- *   webContents.send('plugins:install-progress', { slug, line })
+ *   sendIfAlive('plugins:install-progress', { slug, line })
  *
  * Safety:
  *   - slug must match /^[a-z0-9\-/]+$/ (lowercase, hyphen, slash for owner/name).

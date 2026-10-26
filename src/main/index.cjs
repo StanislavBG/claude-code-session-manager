@@ -1387,7 +1387,7 @@ app.whenReady().then(async () => {
           accelerator: 'CmdOrCtrl+N',
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('app:new-session');
+              sendIfAlive(mainWindow, 'app:new-session');
             }
           },
         },
@@ -1401,7 +1401,7 @@ app.whenReady().then(async () => {
           accelerator: 'CmdOrCtrl+Shift+S',
           click: () => {
             if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('app:reboot-session');
+              sendIfAlive(mainWindow, 'app:reboot-session');
             }
           },
         },

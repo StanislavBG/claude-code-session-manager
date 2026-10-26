@@ -1,4 +1,5 @@
 'use strict';
+const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 
 /**
  * Main-process counterpart to promptSessions.ts's event chain, used ONLY by
@@ -30,11 +31,7 @@ let mainWindow = null;
 function attachWindow(win) { mainWindow = win; }
 
 function broadcast(channel, payload) {
-  try {
-    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents && !mainWindow.webContents.isDestroyed()) {
-      mainWindow.webContents.send(channel, payload);
-    }
-  } catch { /* render frame may be gone */ }
+  sendIfAlive(mainWindow, channel, payload);
 }
 
 let seq = 0;

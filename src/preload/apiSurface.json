@@ -1,0 +1,1689 @@
+[
+ {
+  "ns": "app",
+  "method": "version",
+  "channel": "app:version",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "app",
+  "method": "updateStatus",
+  "channel": "app:update-status",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "app",
+  "method": "homeDir",
+  "channel": "app:home-dir",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "app",
+  "method": "cwd",
+  "channel": "app:cwd",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "app",
+  "method": "engageRulesPath",
+  "channel": "app:engage-rules-path",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "app",
+  "method": "pickDirectory",
+  "channel": "app:pick-directory",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "app",
+  "method": "createProjectFolder",
+  "channel": "app:create-project-folder",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "app",
+  "method": "gitBranch",
+  "channel": "app:git-branch",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "app",
+  "method": "rebootApp",
+  "channel": "app:reboot-app",
+  "kind": "send",
+  "remote": "deny"
+ },
+ {
+  "ns": "app",
+  "method": "archiveProject",
+  "channel": "app:archive-project",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "app",
+  "method": "testFireHook",
+  "channel": "app:test-fire-hook",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "app",
+  "method": "isE2E",
+  "channel": "app:is-e2e",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "app",
+  "method": "launchMode",
+  "channel": "app:launch-mode",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "app",
+  "method": "claudeBinStatus",
+  "channel": "app:claude-bin-status",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "app",
+  "method": "prereqs",
+  "channel": "app:prereqs",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "app",
+  "method": "prereqsRunFix",
+  "channel": "app:prereqs-run-fix",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "app",
+  "method": "homeSelfCheck",
+  "channel": "app:home-self-check",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "app",
+  "method": "seedStatus",
+  "channel": "app:seed-status",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "app",
+  "method": "delegationReadiness",
+  "channel": "app:delegation-readiness",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "app",
+  "method": "installPrdWriteGuard",
+  "channel": "app:install-prd-write-guard",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "app",
+  "method": "installDestructiveGitGuard",
+  "channel": "app:install-destructive-git-guard",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "app",
+  "method": "installInlineImplementationGuard",
+  "channel": "app:install-inline-implementation-guard",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "app",
+  "method": "installSelfScheduleGuard",
+  "channel": "app:install-self-schedule-guard",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "app",
+  "method": "onNewSession",
+  "channel": "app:new-session",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "app",
+  "method": "onRebootSession",
+  "channel": "app:reboot-session",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "pty",
+  "method": "spawn",
+  "channel": "pty:spawn",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "pty",
+  "method": "write",
+  "channel": "pty:write",
+  "kind": "send",
+  "remote": "deny"
+ },
+ {
+  "ns": "pty",
+  "method": "resize",
+  "channel": "pty:resize",
+  "kind": "send",
+  "remote": "deny"
+ },
+ {
+  "ns": "pty",
+  "method": "kill",
+  "channel": "pty:kill",
+  "kind": "send",
+  "remote": "deny"
+ },
+ {
+  "ns": "pty",
+  "method": "alive",
+  "channel": "pty:alive",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "pty",
+  "method": "onData",
+  "channel": "pty:data:*",
+  "kind": "on-dynamic",
+  "remote": "deny"
+ },
+ {
+  "ns": "pty",
+  "method": "onExit",
+  "channel": "pty:exit:*",
+  "kind": "on-dynamic",
+  "remote": "deny"
+ },
+ {
+  "ns": "pty",
+  "method": "onWriteError",
+  "channel": "pty:write-error",
+  "kind": "on",
+  "remote": "deny"
+ },
+ {
+  "ns": "transcripts",
+  "method": "subscribe",
+  "channel": "transcript:subscribe",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "transcripts",
+  "method": "unsubscribe",
+  "channel": "transcript:unsubscribe",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "transcripts",
+  "method": "closeTab",
+  "channel": "transcript:close",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "transcripts",
+  "method": "buffer",
+  "channel": "transcript:buffer",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "transcripts",
+  "method": "page",
+  "channel": "transcript:page",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "transcripts",
+  "method": "readRef",
+  "channel": "transcript:readRef",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "transcripts",
+  "method": "pathFor",
+  "channel": "transcript:path",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "transcripts",
+  "method": "usageFor",
+  "channel": "transcript:usageFor",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "transcripts",
+  "method": "onEvent",
+  "channel": "transcript:event:*",
+  "kind": "on-dynamic",
+  "remote": "read"
+ },
+ {
+  "ns": "sessions",
+  "method": "load",
+  "channel": "sessions:load",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "sessions",
+  "method": "save",
+  "channel": "sessions:save",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "layout",
+  "method": "load",
+  "channel": "layout:load",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "layout",
+  "method": "save",
+  "channel": "layout:save",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "billing",
+  "method": "fetch",
+  "channel": "billing:fetch",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "mcp",
+  "method": "status",
+  "channel": "mcp:status",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "mcp",
+  "method": "catalog",
+  "channel": "mcp:catalog",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "agents",
+  "method": "listPersonas",
+  "channel": "agents:list-personas",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "agents",
+  "method": "savePersona",
+  "channel": "agents:save-persona",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "agents",
+  "method": "deletePersona",
+  "channel": "agents:delete-persona",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "agents",
+  "method": "removeOverride",
+  "channel": "agents:remove-override",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "agents",
+  "method": "getPersonaBody",
+  "channel": "agents:get-persona-body",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "agents",
+  "method": "resolveModelInfo",
+  "channel": "agents:resolve-model-info",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "agents",
+  "method": "resolveEpicModel",
+  "channel": "agents:resolve-epic-model",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "agents",
+  "method": "resolveEpicEffort",
+  "channel": "agents:resolve-epic-effort",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "agents",
+  "method": "onChanged",
+  "channel": "agents:changed",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "macros",
+  "method": "list",
+  "channel": "macros:list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "macros",
+  "method": "save",
+  "channel": "macros:save",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "macros",
+  "method": "delete",
+  "channel": "macros:delete",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "macros",
+  "method": "setProject",
+  "channel": "macros:set-project",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "macros",
+  "method": "onChanged",
+  "channel": "macros:changed",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "models",
+  "method": "catalog",
+  "channel": "models:catalog",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "logs",
+  "method": "write",
+  "channel": "log:write",
+  "kind": "send",
+  "remote": "mutate"
+ },
+ {
+  "ns": "logs",
+  "method": "dir",
+  "channel": "log:dir",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "config",
+  "method": "readJson",
+  "channel": "config:read-json",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "config",
+  "method": "readText",
+  "channel": "config:read-text",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "config",
+  "method": "writeJson",
+  "channel": "config:write-json",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "config",
+  "method": "writeText",
+  "channel": "config:write-text",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "config",
+  "method": "listDir",
+  "channel": "config:list-dir",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "config",
+  "method": "exists",
+  "channel": "config:exists",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "config",
+  "method": "watch",
+  "channel": "config:watch",
+  "kind": "send",
+  "remote": "deny"
+ },
+ {
+  "ns": "config",
+  "method": "unwatch",
+  "channel": "config:unwatch",
+  "kind": "send",
+  "remote": "deny"
+ },
+ {
+  "ns": "config",
+  "method": "parseImports",
+  "channel": "config:parse-imports",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "config",
+  "method": "onChanged",
+  "channel": "config:changed",
+  "kind": "on",
+  "remote": "deny"
+ },
+ {
+  "ns": "voice",
+  "method": "onHotkey",
+  "channel": "voice:hotkey",
+  "kind": "on",
+  "remote": "deny"
+ },
+ {
+  "ns": "voice",
+  "method": "onHotkeyConfigChanged",
+  "channel": "voice:hotkey-changed",
+  "kind": "on",
+  "remote": "deny"
+ },
+ {
+  "ns": "voice",
+  "method": "getHotkeyConfig",
+  "channel": "voice:get-hotkey-config",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "voice",
+  "method": "setHotkeyConfig",
+  "channel": "voice:set-hotkey",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "voice",
+  "method": "setRecording",
+  "channel": "voice:set-recording",
+  "kind": "send",
+  "remote": "deny"
+ },
+ {
+  "ns": "voice",
+  "method": "getDevicePref",
+  "channel": "voice:get-device-pref",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "voice",
+  "method": "setDevicePref",
+  "channel": "voice:set-device-pref",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "voice",
+  "method": "getWizardState",
+  "channel": "voice:wizard-state",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "voice",
+  "method": "markWizardComplete",
+  "channel": "voice:wizard-complete",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "voice",
+  "method": "getTurnDetector",
+  "channel": "voice:get-turn-detector",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "voice",
+  "method": "setTurnDetector",
+  "channel": "voice:set-turn-detector",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "watchers",
+  "method": "add",
+  "channel": "watchers:add",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "watchers",
+  "method": "list",
+  "channel": "watchers:list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "watchers",
+  "method": "remove",
+  "channel": "watchers:remove",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "watchers",
+  "method": "killTab",
+  "channel": "watchers:kill-tab",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "watchers",
+  "method": "onLine",
+  "channel": "watcher:line",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "watchers",
+  "method": "onClosed",
+  "channel": "watcher:closed",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "otel",
+  "method": "getConfig",
+  "channel": "otel:get-config",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "otel",
+  "method": "setConfig",
+  "channel": "otel:set-config",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "otel",
+  "method": "status",
+  "channel": "otel:status",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "otel",
+  "method": "configPath",
+  "channel": "otel:config-path",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "telemetry",
+  "method": "getConfig",
+  "channel": "telemetry:get-config",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "telemetry",
+  "method": "setConfig",
+  "channel": "telemetry:set-config",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "telemetry",
+  "method": "status",
+  "channel": "telemetry:status",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "telemetry",
+  "method": "configPath",
+  "channel": "telemetry:config-path",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "telemetry",
+  "method": "recentRecords",
+  "channel": "telemetry:recent-records",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "telemetry",
+  "method": "flushNow",
+  "channel": "telemetry:flush-now",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "customerFeedback",
+  "method": "submit",
+  "channel": "customerFeedback:submit",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "customerFeedback",
+  "method": "list",
+  "channel": "customerFeedback:list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "customerFeedback",
+  "method": "refreshStatus",
+  "channel": "customerFeedback:refresh-status",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "customerFeedback",
+  "method": "markSeen",
+  "channel": "customerFeedback:mark-seen",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "customerFeedback",
+  "method": "ownerInfo",
+  "channel": "customerFeedback:owner-info",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "customerFeedback",
+  "method": "inboxPull",
+  "channel": "customerFeedback:inbox-pull",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "customerFeedback",
+  "method": "inboxList",
+  "channel": "customerFeedback:inbox-list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "customerFeedback",
+  "method": "inboxSetStatus",
+  "channel": "customerFeedback:inbox-set-status",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "customerFeedback",
+  "method": "inboxLinkEpic",
+  "channel": "customerFeedback:inbox-link-epic",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "diagnostics",
+  "method": "takeHeapSnapshot",
+  "channel": "diagnostics:heap-snapshot",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "history",
+  "method": "aggregate",
+  "channel": "history:aggregate",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "history",
+  "method": "scanProjects",
+  "channel": "history:scan-projects",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "history",
+  "method": "dashboard",
+  "channel": "history:dashboard",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "history",
+  "method": "loopEfficiency",
+  "channel": "history:loop-efficiency",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "history",
+  "method": "onUpdated",
+  "channel": "history:updated",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "files",
+  "method": "list",
+  "channel": "files:list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "files",
+  "method": "read",
+  "channel": "files:read",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "files",
+  "method": "write",
+  "channel": "files:write",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "files",
+  "method": "create",
+  "channel": "files:create",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "files",
+  "method": "rename",
+  "channel": "files:rename",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "files",
+  "method": "delete",
+  "channel": "files:delete",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "files",
+  "method": "duplicate",
+  "channel": "files:duplicate",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "files",
+  "method": "saveBinary",
+  "channel": "files:save-binary",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "docEdit",
+  "method": "run",
+  "channel": "docedit:run",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "docEdit",
+  "method": "runInSession",
+  "channel": "docedit:run-in-session",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "docEdit",
+  "method": "onSessionResult",
+  "channel": "docedit:session-result",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "shell",
+  "method": "open",
+  "channel": "shell:open",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "schedule",
+  "method": "state",
+  "channel": "schedule:state",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "schedule",
+  "method": "sessionSlots",
+  "channel": "schedule:session-slots",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "schedule",
+  "method": "worktreeBase",
+  "channel": "schedule:worktree-base",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "schedule",
+  "method": "setSessionSlots",
+  "channel": "schedule:set-session-slots",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "setConfig",
+  "channel": "schedule:set-config",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "resetJob",
+  "channel": "schedule:reset-job",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "runNow",
+  "channel": "schedule:run-now",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "forceTick",
+  "channel": "schedule:force-tick",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "pause",
+  "channel": "schedule:pause",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "resume",
+  "channel": "schedule:resume",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "rescan",
+  "channel": "schedule:rescan",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "clearQueue",
+  "channel": "schedule:clear-queue",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "openFolder",
+  "channel": "schedule:open-folder",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "schedule",
+  "method": "readPrd",
+  "channel": "schedule:read-prd",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "schedule",
+  "method": "readLog",
+  "channel": "schedule:read-log",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "schedule",
+  "method": "writePrd",
+  "channel": "schedule:write-prd",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "listPrds",
+  "channel": "schedule:list-prds",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "schedule",
+  "method": "health",
+  "channel": "schedule:health",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "schedule",
+  "method": "queueHealth",
+  "channel": "schedule:queue-health",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "schedule",
+  "method": "onState",
+  "channel": "schedule:state",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "schedule",
+  "method": "onStall",
+  "channel": "schedule:stall",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "schedule",
+  "method": "lintQueue",
+  "channel": "schedule:lint-queue",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "schedule",
+  "method": "archivePrds",
+  "channel": "schedule:archive-prd",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "retagPrds",
+  "channel": "schedule:retag-prd",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "adoptPrd",
+  "channel": "schedule:adopt-prd",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "setPrdDisposition",
+  "channel": "schedule:set-prd-disposition",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "schedule",
+  "method": "getHistory",
+  "channel": "schedule:get-history",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "supervisor",
+  "method": "tickNow",
+  "channel": "supervisor:tick-now",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "supervisor",
+  "method": "getLog",
+  "channel": "supervisor:get-log",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "plugins",
+  "method": "install",
+  "channel": "plugins:install",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "plugins",
+  "method": "abort",
+  "channel": "plugins:abort",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "plugins",
+  "method": "onInstallProgress",
+  "channel": "plugins:install-progress",
+  "kind": "on",
+  "remote": "deny"
+ },
+ {
+  "ns": "clipboard",
+  "method": "pasteImage",
+  "channel": "clipboard:paste-image",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "clipboard",
+  "method": "pasteText",
+  "channel": "clipboard:paste-text",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "clipboard",
+  "method": "writeText",
+  "channel": "clipboard:write-text",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "memory",
+  "method": "list",
+  "channel": "memory:list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "memory",
+  "method": "read",
+  "channel": "memory:read",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "memory",
+  "method": "write",
+  "channel": "memory:write",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "memory",
+  "method": "delete",
+  "channel": "memory:delete",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "memory",
+  "method": "create",
+  "channel": "memory:create",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "memory",
+  "method": "aggregate",
+  "channel": "memory:aggregate",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "memory",
+  "method": "stale",
+  "channel": "memory:stale",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "memory",
+  "method": "agents",
+  "channel": "memory:agents",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "memory",
+  "method": "verify",
+  "channel": "memory:verify",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "memory",
+  "method": "archive",
+  "channel": "memory:archive",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "memory",
+  "method": "restore",
+  "channel": "memory:restore",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "memory",
+  "method": "listArchived",
+  "channel": "memory:listArchived",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "memory",
+  "method": "ask",
+  "channel": "memory:ask",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "memory",
+  "method": "proposeFix",
+  "channel": "memory:proposeFix",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "projectBrief",
+  "method": "get",
+  "channel": "project-brief:get",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "projectBrief",
+  "method": "refresh",
+  "channel": "project-brief:refresh",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "projectBrief",
+  "method": "setPin",
+  "channel": "project-brief:set-pin",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "projectBrief",
+  "method": "update",
+  "channel": "project-brief:update",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "projectPages",
+  "method": "get",
+  "channel": "project-pages:get",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "projectPages",
+  "method": "watch",
+  "channel": "project-pages:watch",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "projectPages",
+  "method": "unwatch",
+  "channel": "project-pages:unwatch",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "projectPages",
+  "method": "onChanged",
+  "channel": "project-pages:changed",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "promptSessionTranscript",
+  "method": "append",
+  "channel": "promptSessionTranscript:append",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "promptSessionTranscript",
+  "method": "read",
+  "channel": "promptSessionTranscript:read",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "epicDelegationStats",
+  "method": "get",
+  "channel": "epicDelegationStats:get",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "auditLog",
+  "method": "append",
+  "channel": "auditLog:append",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "git",
+  "method": "status",
+  "channel": "git:status",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "git",
+  "method": "fileStatus",
+  "channel": "git:file-status",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "updater",
+  "method": "status",
+  "channel": "updater:status",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "updater",
+  "method": "check",
+  "channel": "updater:check",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "updater",
+  "method": "install",
+  "channel": "updater:install",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "updater",
+  "method": "cancelDeferred",
+  "channel": "updater:cancel-deferred",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "updater",
+  "method": "setEnabled",
+  "channel": "updater:set-enabled",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "updater",
+  "method": "onStatus",
+  "channel": "updater:status",
+  "kind": "on",
+  "remote": "deny"
+ },
+ {
+  "ns": "opsRetention",
+  "method": "get",
+  "channel": "opsRetention:get",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "opsRetention",
+  "method": "set",
+  "channel": "opsRetention:set",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "opsRetention",
+  "method": "preview",
+  "channel": "opsRetention:preview",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "webRemote",
+  "method": "getStatus",
+  "channel": "webRemote:get-status",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "enable",
+  "channel": "webRemote:enable",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "disable",
+  "channel": "webRemote:disable",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "enableControl",
+  "channel": "webRemote:enable-control",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "disableControl",
+  "channel": "webRemote:disable-control",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "pair",
+  "channel": "webRemote:pair",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "revokeDevice",
+  "channel": "webRemote:revoke-device",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "auditTail",
+  "channel": "webRemote:audit-tail",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "onStatus",
+  "channel": "webRemote:status",
+  "kind": "on",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "onTokenRevoked",
+  "channel": "webRemote:token-revoked",
+  "kind": "on",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "revokeAll",
+  "channel": "webRemote:revoke-all",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "confirmSas",
+  "channel": "webRemote:confirm-sas",
+  "kind": "invoke",
+  "remote": "deny"
+ },
+ {
+  "ns": "webRemote",
+  "method": "onRevokedAll",
+  "channel": "webRemote:revoked-all",
+  "kind": "on",
+  "remote": "deny"
+ },
+ {
+  "ns": "chat",
+  "method": "run",
+  "channel": "chat:run",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "chat",
+  "method": "cancel",
+  "channel": "chat:cancel",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "chat",
+  "method": "onQueued",
+  "channel": "chat:run:queued",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "chat",
+  "method": "onRunStarted",
+  "channel": "chat:run:started",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "chat",
+  "method": "onOutput",
+  "channel": "chat:run:output",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "chat",
+  "method": "onToolUse",
+  "channel": "chat:run:tool-use",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "chat",
+  "method": "onNeedsInput",
+  "channel": "chat:run:needs-input",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "chat",
+  "method": "onComplete",
+  "channel": "chat:run:complete",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "chat",
+  "method": "onError",
+  "channel": "chat:run:error",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "chat",
+  "method": "onNotice",
+  "channel": "chat:run:notice",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "chat",
+  "method": "onExternalSend",
+  "channel": "chat:external-send",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "chat",
+  "method": "reportExternalSendResult",
+  "channel": "chat:external-send-result",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "chat",
+  "method": "onExternalNewSession",
+  "channel": "chat:external-new-session",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "chat",
+  "method": "classifyTicket",
+  "channel": "chat:classify-ticket",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "chat",
+  "method": "createPrd",
+  "channel": "chat:create-prd",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "exchanges",
+  "method": "list",
+  "channel": "exchanges:list",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "promptSessions",
+  "method": "onInboundAutoApprove",
+  "channel": "promptSessions:inbound-auto-approve",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "promptSessions",
+  "method": "onEventAppended",
+  "channel": "promptSession:event-appended",
+  "kind": "on",
+  "remote": "read"
+ },
+ {
+  "ns": "promptSessions",
+  "method": "mergeActiveIndex",
+  "channel": "promptSessions:merge-active-index",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "promptSessions",
+  "method": "create",
+  "channel": "promptSessions:create-epic",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "promptSessions",
+  "method": "reopen",
+  "channel": "promptSessions:reopen",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "promptSessions",
+  "method": "createWorktree",
+  "channel": "promptSessions:create-worktree",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "promptSessions",
+  "method": "mergeToMain",
+  "channel": "promptSessions:merge-to-main",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "promptSessions",
+  "method": "getWorktreeDisabled",
+  "channel": "promptSessions:get-worktree-disabled",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "promptSessions",
+  "method": "setWorktreeDisabled",
+  "channel": "promptSessions:set-worktree-disabled",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "promptSessions",
+  "method": "archiveTranscript",
+  "channel": "promptSessions:archiveTranscript",
+  "kind": "invoke",
+  "remote": "mutate"
+ }
+]

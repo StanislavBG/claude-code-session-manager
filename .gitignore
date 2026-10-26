@@ -60,3 +60,4 @@ release/
 
 # sqlite MCP --db-path <path> placeholder file created in every cwd
 <path>
+dist-web

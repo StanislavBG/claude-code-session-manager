@@ -29,6 +29,7 @@
     "dist/index.html",
     "dist/assets/",
     "dist/vad/",
+    "dist-web/",
     "README.md",
     "!src/**/__tests__/**"
   ],
@@ -37,6 +38,7 @@
     "dev:renderer": "vite",
     "dev:electron": "wait-on http://localhost:5173 && SM_DEV=1 electron .",
     "build": "vite build",
+    "build:web": "vite build --config vite.web.config.ts",
     "dist:stage": "npm run build && node scripts/package/stage.cjs",
     "dist:mac": "npm run dist:stage && electron-builder --config electron-builder.yml --mac --publish never",
     "dist:win": "npm run dist:stage && electron-builder --config electron-builder.yml --win --publish never",

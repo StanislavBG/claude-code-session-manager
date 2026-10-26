@@ -63,4 +63,20 @@ function shouldBlockFrameNavigation({ isMainFrame, currentUrl, targetUrl }) {
   return true;
 }
 
-module.exports = { DEMO_VIDEO_CSP_HEADER, smfileResponseHeaders, shouldBlockFrameNavigation };
+/**
+ * Convert an smfile:// URL pathname (still percent-encoded) into a filesystem
+ * path. On win32 the pathname is `/C:/Users/...`; the leading '/' before the
+ * drive letter is stripped and the result is path.win32-normalized. Posix input
+ * is only decoded.
+ * @param {string} pathname
+ * @param {string} [platform]
+ * @returns {string}
+ */
+function smfileUrlToPath(pathname, platform = process.platform) {
+  const decoded = decodeURIComponent(pathname);
+  if (platform !== 'win32') return decoded;
+  const stripped = /^[\\/][A-Za-z]:/.test(decoded) ? decoded.slice(1) : decoded;
+  return require('node:path').win32.normalize(stripped);
+}
+
+module.exports = { DEMO_VIDEO_CSP_HEADER, smfileResponseHeaders, shouldBlockFrameNavigation, smfileUrlToPath };

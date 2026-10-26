@@ -62,7 +62,7 @@ const prdCreate = require('./lib/prd/prdCreate.cjs');
 const prdAdminRoutes = require('./lib/prd/prdAdminRoutes.cjs');
 const projectHomeAdminRoutes = require('./lib/feedback-remote/projectHomeAdminRoutes.cjs');
 const macroAdminRoutes = require('./lib/feedback-remote/macroAdminRoutes.cjs');
-const { smfileResponseHeaders, shouldBlockFrameNavigation } = require('./lib/smfileHeaders.cjs');
+const { smfileResponseHeaders, shouldBlockFrameNavigation, smfileUrlToPath } = require('./lib/smfileHeaders.cjs');
 const { appendAuditEvent } = require('./lib/telemetry/auditLog.cjs');
 const chatRunner = require('./chatRunner.cjs');
 const promptSessionEvents = require('./promptSessionEvents.cjs');
@@ -1322,7 +1322,7 @@ app.whenReady().then(async () => {
   protocol.handle('smfile', async (request) => {
     try {
       const url = new URL(request.url);
-      const abs = decodeURIComponent(url.pathname);
+      const abs = smfileUrlToPath(url.pathname);
       const { realPath } = assertInsideHome(abs); // throws if outside home
       const st = await fs.promises.stat(realPath);
       if (st.isDirectory()) return new Response('Not a file', { status: 404 });

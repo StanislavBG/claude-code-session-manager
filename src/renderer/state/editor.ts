@@ -285,7 +285,7 @@ export function defaultViewMode(p: string): ViewMode {
 /** Build the smfile:// URL the HTML preview iframe loads. Encodes per segment
  *  so spaces / unicode survive; the main handler decodeURIComponent's it back. */
 export function smfileUrl(absPath: string): string {
-  const encoded = absPath.split('/').map(encodeURIComponent).join('/')
+  const encoded = absPath.split(/[\\/]/).map(encodeURIComponent).join('/')
   return `smfile://local${encoded.startsWith('/') ? '' : '/'}${encoded}`
 }
 

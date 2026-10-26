@@ -1,4 +1,4 @@
-import type { PromptSession } from '../renderer/state/promptSessions';
+import type { PromptSession, PromptSessionEvent } from '../renderer/state/promptSessions';
 
 /** Mirrors the item shape returned by main/lib/prereqs.cjs checkPrereqs(). */
 export type OpsRetentionSettings = {
@@ -2320,8 +2320,15 @@ export interface SessionManagerAPI {
     setWorktreeDisabled: (payload: PromptSessionsSetWorktreeDisabledPayload) => Promise<PromptSessionsSetWorktreeDisabledResult>;
     /** Archives the raw Claude JSONL to a gzip sidecar main-side; pointer, or null when absent/empty. */
     archiveTranscript: (payload: { cwd: string; epicId: string; claudeSessionId: string }) => Promise<{ path: string; bytes: number; gzBytes: number; sha256: string } | null>;
+    /** Reopens a completed Epic in place (same id + claudeSessionId); never mints an Epic. */
+    reopen: (payload: PromptSessionsReopenPayload) => Promise<PromptSessionsReopenResult>;
   };
 }
+
+export interface PromptSessionsReopenPayload { cwd: string; epicId: string }
+export type PromptSessionsReopenResult =
+  | { ok: true; session: PromptSession; events: PromptSessionEvent[]; alreadyOpen: boolean }
+  | { ok: false; code: 'not_found' | 'transcript_missing' | 'invalid_session_id' | 'restore_failed' | 'write_failed'; message: string };
 
 // ─────────────────────────────────── PromptSessions active-index merge
 export interface PromptSessionsMergeActiveIndexPayload {

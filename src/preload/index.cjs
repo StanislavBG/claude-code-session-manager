@@ -582,5 +582,7 @@ contextBridge.exposeInMainWorld('api', {
     setWorktreeDisabled: (payload) => ipcRenderer.invoke('promptSessions:set-worktree-disabled', payload),
     /** Writes the gzip transcript sidecar main-side; resolves the pointer, or null when no JSONL. */
     archiveTranscript: (payload) => ipcRenderer.invoke('promptSessions:archiveTranscript', payload),
+    /** Reopens a completed Epic in place (same id + claudeSessionId); never mints an Epic. */
+    reopen: (payload) => ipcRenderer.invoke('promptSessions:reopen', payload),
   },
 });

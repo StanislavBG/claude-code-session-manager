@@ -1025,6 +1025,7 @@ require('./lib/epic/archivedTranscript.cjs').registerIpc(ipcMain);
 customerFeedbackIpc.registerCustomerFeedbackHandlers();
 epicWorktreeMint.registerEpicWorktreeMintHandlers();
 epicWorktreeMerge.registerEpicWorktreeMergeHandlers();
+require('./lib/epic/epicReopen.cjs').registerEpicReopenHandlers();
 epicWorktreeProjectConfig.registerEpicWorktreeProjectConfigHandlers();
 registerMemoryAggregateIpc();
 registerProjectBriefIpc();

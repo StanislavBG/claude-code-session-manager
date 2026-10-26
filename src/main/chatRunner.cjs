@@ -52,6 +52,7 @@ const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResol
 const { planEpicSpawn } = require('./lib/epic/epicSpawnPlan.cjs');
 const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
 const logs = require('./logs.cjs');
+const { feedChildStdin } = require('./lib/process/childStdin.cjs');
 const { createHeadTailBuffer } = require('./lib/util/headTailBuffer.cjs');
 
 // Caps on per-run stream buffers (a run can last hours).
@@ -627,7 +628,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // used for the flag-swap retry so both attempts share one construction path.
     const buildArgs = (resumeFlag) => {
       const a = [
-        '-p', fullPrompt,
+        '-p',
         '--model', model,
         ...effortFlags,
         '--dangerously-skip-permissions',
@@ -712,9 +713,11 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // One spawn of the CLI. Per-attempt state (buffers, child) lives in here;
     // everything turn-level (timers, latch, lane) is in the enclosing scope.
     const startAttempt = (resumeFlag, attemptNo) => {
-    // Spawn with stdin closed (mirrors scheduler's 'ignore' — prevents the
-    // "claude -p stdin must be closed" gotcha from kg.cjs). stdout is piped for
-    // real-time NDJSON streaming; stderr piped for error-message capture.
+    // Spawn with a stdin pipe: the prompt is fed on stdin (never argv — E2BIG
+    // above 128 KB per argument on Linux, 8191 chars on Windows cmd.exe) and
+    // feedChildStdin closes it, satisfying "claude -p stdin must be closed".
+    // stdout is piped for real-time NDJSON streaming; stderr piped for
+    // error-message capture.
     let thisChild;
     try {
       const chatArgs = buildArgs(resumeFlag);
@@ -724,7 +727,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
         ...(target.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
         cwd: execCwd,
         env: childEnv,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
         ...detachedSpawnOpts(), // own process group so killTree can SIGTERM descendants
       });
     } catch (err) {
@@ -739,6 +742,9 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       return;
     }
     child = thisChild;
+    feedChildStdin(thisChild, fullPrompt, {
+      log: (m) => logs.writeLine({ scope: 'chatRunner', level: 'warn', message: m }),
+    });
 
     // ─── Stream parsing ────────────────────────────────────────────────────
     // stdout is newline-delimited JSON (stream-json format). We buffer partial

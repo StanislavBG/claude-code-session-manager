@@ -36,7 +36,7 @@ const require = createRequire(import.meta.url)
 // node:child_process / exchanges.cjs exports in place (before chatRunner.cjs's own
 // require() destructures them) is the pattern that actually reaches chatRunner.cjs.
 const cp = require('node:child_process') as { spawn: (...args: unknown[]) => unknown }
-type FakeChild = EventEmitter & { stdout: EventEmitter; stderr: EventEmitter; pid: number; kill: (sig?: string) => void }
+type FakeChild = EventEmitter & { stdin: EventEmitter & { write: (t: string) => boolean; end: (t?: string) => void }; stdinText: string; stdout: EventEmitter; stderr: EventEmitter; pid: number; kill: (sig?: string) => void }
 let nextChild: FakeChild | null = null
 let lastSpawnArgs: string[] | null = null
 // Per-test override of the shared spawn stub (chatRunner.cjs destructured `spawn`
@@ -44,6 +44,11 @@ let lastSpawnArgs: string[] | null = null
 let spawnHook: ((child: FakeChild, args: string[]) => void) | null = null
 cp.spawn = (...spawnCallArgs: unknown[]) => {
   const child = new EventEmitter() as FakeChild
+  child.stdinText = ''
+  const stdin = new EventEmitter() as FakeChild['stdin']
+  stdin.write = (t: string) => { child.stdinText += t; return true }
+  stdin.end = (t?: string) => { if (t) child.stdinText += t }
+  child.stdin = stdin
   child.stdout = new EventEmitter()
   child.stderr = new EventEmitter()
   child.pid = 12345
@@ -421,13 +426,23 @@ describe('prompt-prepended instructions (real executeRun path via a faked child 
 
     const pIndex = lastSpawnArgs!.indexOf('-p')
     expect(pIndex).toBeGreaterThanOrEqual(0)
-    const fullPrompt = lastSpawnArgs![pIndex + 1]
+    expect(lastSpawnArgs![pIndex + 1]).toBe('--model')
+    const fullPrompt = nextChild!.stdinText
 
     expect(fullPrompt).toContain(chatRunner.STOP_SENTINEL)
     expect(fullPrompt).toContain(chatRunner.CHAT_MODE_TRUTH_INSTRUCTION)
     expect(fullPrompt.indexOf(chatRunner.CHAT_MODE_TRUTH_INSTRUCTION)).toBeLessThan(fullPrompt.indexOf('hello'))
     expect(fullPrompt).toMatch(/one-shot|no process (survives|resumes)/i)
     expect(fullPrompt.endsWith('hello')).toBe(true)
+  })
+
+  it('delivers a 300 KB prompt in full on stdin, with no oversized argv element', async () => {
+    const big = 'x'.repeat(300 * 1024)
+    chatRunner.run({ tabId: 'tab-big', sessionId: 'sess-big', prompt: big, cwd: '/tmp', resume: false })
+    await flush()
+    expect(nextChild).not.toBeNull()
+    expect(nextChild!.stdinText.endsWith(big)).toBe(true)
+    for (const a of lastSpawnArgs!) expect(Buffer.byteLength(a)).toBeLessThan(131072)
   })
 })
 

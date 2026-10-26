@@ -19,6 +19,7 @@ const { ipcMain } = require('electron');
 const { resolveClaudeBin, claudeSpawnTarget } = require('./lib/claude/claudeBin.cjs');
 const { headlessPermissionArgs, ensureCliCapsProbed } = require('./lib/claude/claudeCliCaps.cjs');
 const { withProcRole } = require('./lib/process/cleanEnv.cjs');
+const { feedChildStdin } = require('./lib/process/childStdin.cjs');
 const schedulerPaths = require('./lib/scheduler/schedulerPaths.cjs');
 
 const HOME = os.homedir();
@@ -247,7 +248,7 @@ async function runProbe(claudeBin, prompt) {
     try {
       const target = claudeSpawnTarget('aux', 'supervisor', claudeBin);
       child = spawn(target.command, [
-        '-p', prompt,
+        '-p',
         '--model', 'claude-haiku-5-5',
         '--no-session-persistence',
         '--output-format', 'json',
@@ -256,7 +257,9 @@ async function runProbe(claudeBin, prompt) {
         ...headlessPermissionArgs(),
         '--strict-mcp-config',
         '--allowedTools', 'Bash',
-      ], { env: withProcRole(process.env, 'aux'), stdio: ['ignore', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
+      ], { env: withProcRole(process.env, 'aux'), stdio: ['pipe', 'pipe', 'pipe'], ...(target.argv0 ? { argv0: target.argv0 } : {}) });
+      // Prompt on stdin, not argv: a >128 KB argv element fails spawn with E2BIG.
+      feedChildStdin(child, prompt);
     } catch (e) {
       console.error('[supervisor] probe spawn failed:', e?.message);
       resolve({ verdict: 'ok', action: 'none', targetPid: null, reason: `spawn failed: ${e?.message}`, costUsd: null });
@@ -530,4 +533,5 @@ module.exports = {
   applyAction,
   registerHandlers,
   parseProbeOutput,
+  runProbe,
 };

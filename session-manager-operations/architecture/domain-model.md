@@ -38,8 +38,8 @@ scoping scheme.
   conflict sets `worktree.status` to `needs_merge_resolution` (EpicDetail's banner, "Resolve in Terminal")
   rather than blocking anything. Settings' project scope holds the per-project opt-out.
 - **Persistence:** active Epics in `prompt-sessions/active-index.json`; completed ones archived one JSON per
-  Epic in the same folder. An archived Epic's claudeSessionId is dead — resuming mints a new session with
-  `resumedFromId` tracing back.
+  Epic in the same folder. Resume reopens the same Epic in place (same id and
+  claudeSessionId, full history) — see [lifecycle](../prompt-sessions/README.md#lifecycle).
 
 ## Agent + Tag, and the AIM prompt
 

@@ -42,7 +42,8 @@ Epic JSON stores a `transcriptRef` pointing at it. **Archived transcripts are al
 (fixed policy, not configurable — the gzip sidecar may be the only raw copy). The embedded `transcript`
 field is **legacy**: older archives that still carry it are migrated to a sidecar on boot, so new code
 reads via `transcriptRef` and never writes `transcript` inline. `hydrateArchived(cwd)` and
-`resumeArchived()` still read these files; deleting one still destroys that Epic's history, so no
+`reopenEpic` (`lib/epic/epicReopen.cjs`, which restores the transcript from this sidecar when needed)
+still read these files; deleting one still destroys that Epic's history, so no
 code prunes the Epic JSONs themselves. Knob: `ops-retention.json` (Settings → App → Ops data
 retention) — see `scheduler/README.md`.
 
@@ -97,7 +98,7 @@ interface PromptSession {
   status: 'proposed' | 'active' | 'completed'
   createdAt: string
   completedAt: string | null
-  resumedFromId?: string | null          // set only when minted via resumeArchived()
+  resumedFromId?: string | null          // LEGACY: written only by the retired resumeArchived(); reopenEpic never sets it
   tag?: 'feature' | 'bug' | 'discussion' // Epic-level MISSION (Tag Library) — the "what"
   openingPrompt?: string | null          // full first-prompt body, when it differs from goalText
   source?: EpicSource                    // which automated producer minted this Epic (absent if human-created)
@@ -171,7 +172,7 @@ Epic's stage reads this field.
 | --- | --- | --- | --- |
 | `proposed` | Not started — the human opened the Epic, or a cross-project finding was routed here, but it has not started. | One of the two declared mint authorities (`lib/epic/epicMint.cjs`'s `MINT_AUTHORITIES`), both going through `ensureEpic(..., { mintAuthority })`: the New Epic IPC handler (`lib/epic/promptSessionsCreateEpic.cjs`, `mintAuthority: 'new-epic-ui'`), or `src/main/lib/feedback-remote/crossProjectFeedback.cjs` (`mintAuthority: 'cross-project-feedback'`) landing feedback from another project | No |
 | `active` | The Epic's session is running. It authors PRDs and receives scheduler updates. | Human presses **Approve & start**, or finishes the draft — the same transition | Yes |
-| `completed` | Archived. `claudeSessionId` is dead and never reused. | `markCompleted()`, or **Discard** on a proposal | No |
+| `completed` | Archived. The session and its transcript are kept, so **Resume / Reopen** can bring the same Epic back to `active`. | `markCompleted()`, or **Discard** on a proposal | No |
 
 **There is no `draft` state.** A half-typed Epic is simply `proposed`: it has not started and has
 spent nothing, which is exactly what `proposed` already means. "The human is still typing" and
@@ -262,10 +263,21 @@ and takes the shared `proposed → active` transition, `epicDisplayStatus` no lo
 3. **Completed** — `markCompleted()` kills the Epic's live process, appends a `closed` event,
    flips `status` to `'completed'`, writes the full archive to `<id>.json`, and the Epic drops out
    of `active-index.json` (persist keeps only `'proposed'` and `'active'` rows for the cwd — a
-   completed Epic matches neither). The Epic's `claudeSessionId` is dead from this point —
-   resuming it (`resumeArchived`) mints a brand-new `claudeSessionId` and records `resumedFromId`
-   tracing back to the archived Epic.
-4. **Hydration** — `hydrate(cwd)` reads `active-index.json` back on load (in-memory always wins on
+   completed Epic matches neither). The session and its transcript are kept (gzip
+   sidecar), so the Epic can be reopened (next item).
+4. **Reopen** — `completed → active`, a transition, not a state (still exactly three states). Human-only:
+   EpicDetail's **Resume** button or the Sessions row menu's **Reopen**. Main-side
+   `reopenEpic({ cwd, epicId })` (`src/main/lib/epic/epicReopen.cjs`), reached over IPC
+   `promptSessions:reopen` from the renderer store's `reopenEpic` (`src/renderer/state/promptSessions.ts`).
+   It keeps the same `id`, `claudeSessionId`, `tag`, `agentType`, model/effort and event chain; clears the
+   id's removal tombstone; re-provisions the worktree (`createEpicWorktree` at the same derived path so the
+   transcript's `~/.claude/projects` encoding still matches, or re-attaches an unmerged branch); makes the
+   transcript reachable (copy, or gzip-sidecar restore — `epicTranscriptRestore.cjs`) or refuses; and
+   rewrites `<id>.json` from an archive back to a live status mirror. It never sends an opening prompt
+   and never mints, so the SINGLE-CREATOR LAW is untouched. The next Chat or Terminal turn continues via
+   `--resume` (`planEpicSpawn` decides the flag and cwd). **Duplicate as new session** is the way to start
+   fresh.
+5. **Hydration** — `hydrate(cwd)` reads `active-index.json` back on load (in-memory always wins on
    id collision; disk-deleted Epics are reconciled out, but only once no write to that path is
    still in flight). `hydrateArchived(cwd)` separately walks every `*.json` file in this folder
    (excluding `active-index.json`) to backfill completed Epics.

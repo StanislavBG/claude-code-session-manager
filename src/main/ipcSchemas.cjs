@@ -252,7 +252,10 @@ const promptSessionsMergeToMain = z.object({
   // integrateEpicBranch can apply the same carried-wip-only skip the job
   // path already gets. Absent on a worktree created before this field
   // existed, or one whose base tree was clean at creation.
-  carriedPaths: z.array(z.string().min(1).max(4096)).max(2000).optional(),
+  // The renderer sends the Epic's full carried diff (`git diff HEAD --name-only`),
+  // which is uncapped; 3,306 paths were seen on 2026-10-26. A tight cap rejects
+  // every merge for such an Epic.
+  carriedPaths: z.array(z.string().min(1).max(4096)).max(100000).optional(),
 });
 
 // Renderer entry points for the per-project "disable Epic worktree

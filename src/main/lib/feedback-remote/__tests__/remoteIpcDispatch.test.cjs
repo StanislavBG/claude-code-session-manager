@@ -149,4 +149,64 @@ describe('remoteArgFence', () => {
     expect(fn).not.toHaveBeenCalled()
     expect((await d.invoke(authed, 'files:read', [{ path: '/home/u/proj/a' }])).ok).toBe(true)
   })
+  describe('home / ancestor roots are ignored', () => {
+    const withRoots = (roots) => ({ ...mk(), projectRoots: () => roots })
+    it('home registered as a root does not expose ~/notes.txt', () => {
+      expect(f('files:read', '/home/u/notes.txt', withRoots(['/home/u']))).toEqual(fenced)
+    })
+    it('/ registered as a root does not expose ~/notes.txt or /etc/hosts', () => {
+      expect(f('files:read', '/home/u/notes.txt', withRoots(['/']))).toEqual(fenced)
+      expect(f('files:read', '/etc/hosts', withRoots(['/']))).toEqual(fenced)
+    })
+    it('win32 drive root is ignored', () => {
+      const ctx = { ...mk('win32'), homeDir: 'C:\\Users\\u', projectRoots: () => ['C:\\'], realpath: (p) => p }
+      expect(f('files:read', 'C:\\Users\\u\\notes.txt', ctx)).toEqual(fenced)
+    })
+    it('a real project root alongside a home root still reads its files', () => {
+      expect(f('files:read', '/home/u/proj/a.ts', withRoots(['/home/u', '/home/u/proj']))).toEqual({ ok: true })
+    })
+    it('files:list of home itself still works with home registered', () => {
+      expect(f('files:list', '/home/u', withRoots(['/home/u']))).toEqual({ ok: true })
+    })
+  })
+
+  describe('credential stores are refused', () => {
+    const denied = [
+      '/home/u/.claude/session-manager/web-remote.json',
+      '/home/u/proj/.claude/session-manager/x/y.json',
+      '/home/u/proj/.claude.json',
+      '/home/u/proj/.config/gh/hosts.yml',
+      '/home/u/proj/.git-credentials',
+      '/home/u/proj/.config/git/credentials',
+      '/home/u/proj/.pypirc',
+      '/home/u/proj/.cargo/credentials',
+      '/home/u/proj/.cargo/credentials.toml',
+      '/home/u/proj/.local/share/keyrings/login.keyring',
+      '/home/u/proj/.password-store/a.gpg',
+      '/home/u/proj/.azure/accessTokens.json',
+      '/home/u/proj/.terraform.d/credentials.tfrc.json',
+      '/home/u/proj/Library/Keychains/login.keychain-db',
+      '/home/u/proj/AppData/Roaming/Microsoft/Credentials/abc',
+      '/home/u/proj/AppData/Local/Microsoft/Credentials/abc',
+    ]
+    it.each(denied)('refuses %s', (p) => expect(f('files:read', p)).toEqual(fenced))
+    it('does not refuse near-misses', () => {
+      expect(f('files:read', '/home/u/proj/.config/ghx/a')).toEqual({ ok: true })
+      expect(f('files:read', '/home/u/proj/.claude/other.json')).toEqual({ ok: true })
+    })
+    it('win32 upper-case variants are refused', () => {
+      const ctx = { ...mk('win32'), homeDir: 'C:\\Users\\u', projectRoots: () => ['C:\\Users\\u\\proj'], realpath: (p) => p }
+      expect(f('files:read', 'C:\\Users\\u\\proj\\.CLAUDE\\Session-Manager\\a.json', ctx)).toEqual(fenced)
+      expect(f('files:read', 'C:\\Users\\u\\proj\\APPDATA\\ROAMING\\MICROSOFT\\CREDENTIALS\\x', ctx)).toEqual(fenced)
+      expect(f('files:read', 'C:\\Users\\u\\proj\\.Claude.JSON', ctx)).toEqual(fenced)
+    })
+    it('refuses a symlink inside a project pointing into ~/.claude/session-manager', () => {
+      const ctx = {
+        ...mk(),
+        realpath: (p) => (p === '/home/u/proj/sm' || p.startsWith('/home/u/proj/sm/')
+          ? '/home/u/.claude/session-manager' + p.slice('/home/u/proj/sm'.length) : p),
+      }
+      expect(f('files:read', '/home/u/proj/sm/web-remote.json', ctx)).toEqual(fenced)
+    })
+  })
 })

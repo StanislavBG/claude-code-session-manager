@@ -47,17 +47,34 @@ const PATH_FENCED_CHANNELS = Object.freeze({
   'memory:read': { field: 'cwd', mode: 'secret' },
 })
 
-const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.kube', '.docker'])
-const SECRET_BASENAMES = new Set(['.credentials.json', '.netrc', '.npmrc', '.env'])
+const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.kube', '.docker', '.password-store', '.azure', '.terraform.d'])
+const SECRET_BASENAMES = new Set(['.credentials.json', '.netrc', '.npmrc', '.env', '.claude.json', '.git-credentials', '.pypirc'])
 const SECRET_BASENAME_RES = [/^\.env\..*/, /\.pem$/, /^id_rsa/, /^id_ed25519/, /^id_ecdsa/]
+/** Multi-segment secrets: match as consecutive path segments at any depth. */
+const SECRET_SEQUENCES = [
+  ['.config', 'gcloud'],
+  ['.claude', 'session-manager'],
+  ['.config', 'gh'],
+  ['.config', 'git', 'credentials'],
+  ['.cargo', 'credentials'],
+  ['.cargo', 'credentials.toml'],
+  ['.local', 'share', 'keyrings'],
+  ['Library', 'Keychains'],
+  ['AppData', 'Roaming', 'Microsoft', 'Credentials'],
+  ['AppData', 'Local', 'Microsoft', 'Credentials'],
+]
 
-/** True when the path has a secret segment or basename. */
+/** True when the path has a secret segment, segment sequence or basename. */
 function isSecretPath(p, platform) {
-  const norm = platform === 'win32' ? String(p).toLowerCase() : String(p)
+  const win = platform === 'win32'
+  const norm = win ? String(p).toLowerCase() : String(p)
   const segs = norm.split(/[\\/]+/).filter(Boolean)
+  const seqs = win ? SECRET_SEQUENCES.map((q) => q.map((x) => x.toLowerCase())) : SECRET_SEQUENCES
   for (let i = 0; i < segs.length; i++) {
     if (SECRET_DIRS.has(segs[i])) return true
-    if (segs[i] === '.config' && segs[i + 1] === 'gcloud') return true
+    for (const q of seqs) {
+      if (q.every((part, k) => segs[i + k] === part)) return true
+    }
   }
   const base = segs[segs.length - 1] || ''
   return SECRET_BASENAMES.has(base) || SECRET_BASENAME_RES.some((re) => re.test(base))
@@ -89,6 +106,9 @@ function remoteArgFence(channel, args, ctx) {
       if (typeof root !== 'string' || !root) continue
       let realRoot
       try { realRoot = ctx.realpath(root) } catch { realRoot = root }
+      // A root equal to home or an ancestor of it (incl. `/` or a drive root)
+      // would expose every non-secret file under home — never honour it.
+      if (isContainedIn(home, realRoot, platform)) continue
       if (isContainedIn(real, realRoot, platform)) return { ok: true }
     }
     return refuse

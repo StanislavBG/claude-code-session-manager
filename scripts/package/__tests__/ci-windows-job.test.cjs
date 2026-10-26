@@ -17,6 +17,9 @@ const UNIT_FILES = [
   'src/main/lib/__tests__/appRuntime.test.cjs',
   'src/main/lib/__tests__/prereqs.test.cjs',
   'src/main/lib/__tests__/autoUpdater.test.cjs',
+  'src/main/lib/__tests__/smfileUrlPath.test.cjs',
+  'src/main/lib/__tests__/configValidatePathWin32.test.cjs',
+  'src/main/__tests__/filesProjectRoots.test.cjs',
 ]
 
 describe('ci.yml windows job', () => {
@@ -34,6 +37,11 @@ describe('ci.yml windows job', () => {
     const line = job.split('\n').find((l) => l.includes('npx vitest run'))
     const files = line.split('npx vitest run')[1].trim().split(/\s+/)
     expect(files).toEqual(UNIT_FILES)
+  })
+  it('lists only test files that exist on disk', () => {
+    const root = path.join(__dirname, '..', '..', '..')
+    const missing = UNIT_FILES.filter((f) => !fs.existsSync(path.join(root, f)))
+    expect(missing).toEqual([])
   })
   it('stages, packages win-unpacked, then runs the packaged smoke', () => {
     const stage = job.indexOf('node scripts/package/stage.cjs')

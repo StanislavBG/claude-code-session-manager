@@ -2,7 +2,7 @@
   "version": "2.3.0",
   "title": "The Session Manager Field Manual",
   "summary": "A warm, plain-English guide to AI agents — and to running your own small agency of them with Claude Code and Session Manager. No experience needed.",
-  "documentsAppVersion": "0.123.1",
+  "documentsAppVersion": "0.125.0",
   "releasedAt": "2026-10-23",
   "chapters": [
     {

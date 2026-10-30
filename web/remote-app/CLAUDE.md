@@ -9,6 +9,7 @@ The phone-remote PWA (`@session-manager/app`): a **separate npm project** with i
 `npm ci`, `npm test` (vitest), `npm run typecheck`, `npm run build` (tsc + vite +
 `scripts/emit-manifest.mjs`, which writes the host-contract `dist/manifest.json`).
 Root `npm run test:unit` / `test:e2e` do NOT cover it (root `playwright.config.ts` `testIgnore`).
+`npm test`: vitest runs `src/**/*.{spec,test}.{ts,tsx}`; name new tests `*.spec.*`.
 
 `tests/golden.spec.ts` is run by **no config**: this project's playwright `testDir` is
 `src/__tests__` (`*.e2e.ts`), and the spec targets a live `/projects/session-manager/` URL,

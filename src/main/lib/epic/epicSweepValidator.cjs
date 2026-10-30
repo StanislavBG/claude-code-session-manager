@@ -41,7 +41,7 @@ function buildSweepValidatorInput({ epicId, cwd, uncovered, baseSha, now }) {
   const acceptanceCriteria = names.map(
     (name) => `${name} verified against its PRD file (find it by slug under $SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/${epicId}/prds/ or prds-archived/, possibly in a timestamped subfolder)`,
   );
-  acceptanceCriteria.push(`Record written and committed at ${recordPath}`);
+  acceptanceCriteria.push(`Record written and committed at ${recordPath}, relative to the repository root (git rev-parse --show-toplevel), never relative to a subdirectory you cd'd into`);
 
   const base = baseSha
     ? `Base: ${baseSha}`

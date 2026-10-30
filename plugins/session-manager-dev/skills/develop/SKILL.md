@@ -222,7 +222,8 @@ End every plan with exactly one validate PRD:
    (under `$SM_PROJECT_ROOT/session-manager-operations/scheduler/epics/<epic-id>/`; find it by
    slug under prds/ or prds-archived/, possibly a timestamped subfolder. Why: `session-manager-operations/scheduler/` is gitignored, so it is never in
    the validator's job worktree. The last: write and commit
-   `session-manager-operations/reviews/validation/<epic-id>/<validate-slug>.md`.
+   `session-manager-operations/reviews/validation/<epic-id>/<validate-slug>.md`, relative to the repository root
+   (`git rev-parse --show-toplevel`), not to any subdirectory you `cd`'d into to run a gate.
 5. Notes: "Work as the validator persona — the procedure is your system prompt." and a line
    `Base: <sha>`, the SHA from step 11.
 6. `gate: ["none"]`; `files`: the record path. Why: the validator re-runs each PRD's gate

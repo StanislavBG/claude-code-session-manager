@@ -52,6 +52,7 @@ test('builds the input shape', () => {
   expect(input.acceptanceCriteria[0]).toContain('prd-0');
   expect(input.acceptanceCriteria[0]).toContain('epics/epic-1/prds/');
   expect(input.acceptanceCriteria[2]).toContain('Record written and committed at');
+  expect(input.acceptanceCriteria[2]).toContain('git rev-parse --show-toplevel');
   expect(input.implementationNotes).toContain('Work as the validator persona — the procedure is your system prompt.');
   expect(input.implementationNotes).toContain('Base: abc123');
 });

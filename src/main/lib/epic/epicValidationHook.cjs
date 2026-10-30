@@ -56,7 +56,7 @@ function buildSettledDigest(settle, { epicId, notValidatedReason } = {}) {
   const notValidated = (s.uncovered || []).map((u) => (typeof u === 'string' ? u : u.slug));
   const lines = [
     `PLAN SETTLED — no PRD of this session is pending or running. This is ONE digest, not a per-PRD request.`,
-    `Validation record folder: session-manager-operations/reviews/validation/${epicId}/`,
+    `Validation record folder (relative to the repository root): session-manager-operations/reviews/validation/${epicId}/`,
     'Do NOT re-verify VERIFIED PRDs — a validator already checked them.',
   ];
   if (verified.length) {

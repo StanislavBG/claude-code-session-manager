@@ -80,20 +80,39 @@ async function loadVerified(socket: FrameSocket, deviceId: string, f: AssetFile)
 const base = (p: string) => p.split(/[?#]/)[0].split('/').pop() ?? p;
 const dec = new TextDecoder();
 
-/** Build the sandboxed document: CSS inlined, entry JS from a blob URL. */
-export function buildSrcDoc(html: string, css: Map<string, string>, scriptUrls: Map<string, string>): string {
+/**
+ * Fixed inline bootstrap. The frame has an opaque origin, so it cannot load a parent-origin
+ * blob: URL; instead the parent posts the verified script text and the frame appends it.
+ */
+export const BOOTSTRAP = `<script>(function(){
+function announce(){parent.postMessage({type:'sm-boot-ready'},'*');}
+if(document.readyState!=='loading'){announce();}else{document.addEventListener('DOMContentLoaded',announce);}
+function onBoot(e){
+if(e.source!==parent||!e.data||e.data.type!=='sm-boot'||!Array.isArray(e.data.scripts))return;
+window.removeEventListener('message',onBoot);
+e.data.scripts.forEach(function(s){
+var el=document.createElement('script');
+if(s.module)el.type='module';
+el.textContent=s.code;
+document.head.appendChild(el);
+});
+}
+window.addEventListener('message',onBoot);
+})();</script>`;
+
+export interface BootScript { module: boolean; code: string }
+
+/** Build the sandboxed document: CSS inlined, external scripts removed, bootstrap inserted. */
+export function buildSrcDoc(html: string, css: Map<string, string>): string {
   let out = html.replace(/<link\b[^>]*rel=["']stylesheet["'][^>]*>/gi, (tag) => {
     const href = /href=["']([^"']+)["']/i.exec(tag)?.[1];
     const c = href ? css.get(base(href)) : undefined;
     return c === undefined ? '' : `<style>${c.replace(/<\/style/gi, '<\\/style')}</style>`;
   });
-  out = out.replace(/<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>\s*<\/script>/gi, (tag, src: string) => {
-    const url = scriptUrls.get(base(src));
-    if (!url) return '';
-    const module = /type=["']module["']/i.test(tag) ? ' type="module"' : '';
-    return `<script${module} src="${url}"></script>`;
-  });
-  return out;
+  out = out.replace(/<script\b[^>]*\bsrc=["'][^"']+["'][^>]*>\s*<\/script>/gi, '');
+  if (/<\/head>/i.test(out)) return out.replace(/<\/head>/i, () => `${BOOTSTRAP}</head>`);
+  if (/<body\b[^>]*>/i.test(out)) return out.replace(/<body\b[^>]*>/i, (m) => `${m}${BOOTSTRAP}`);
+  return BOOTSTRAP + out;
 }
 
 // ── sm-ipc bridge ───────────────────────────────────────────────────────────
@@ -237,11 +256,12 @@ export default function RemoteRenderer({ socket, deviceId, fallback }: Props) {
   const capable = !!socket && typeof socket.sendEnvelope === 'function' && typeof socket.on === 'function';
   const [state, setState] = useState<State>(capable ? { kind: 'loading' } : { kind: 'fallback' });
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const scriptsRef = useRef<BootScript[]>([]);
 
   useEffect(() => {
     if (!capable || !socket) { setState({ kind: 'fallback' }); return; }
     let cancelled = false;
-    const urls: string[] = [];
+    scriptsRef.current = [];
     setState({ kind: 'loading' });
     (async () => {
       try {
@@ -252,30 +272,29 @@ export default function RemoteRenderer({ socket, deviceId, fallback }: Props) {
         const html = dec.decode(await loadVerified(socket, deviceId, index));
         const byName = new Map(manifest.files.map((f) => [f.name, f]));
         const css = new Map<string, string>();
-        const scripts = new Map<string, string>();
         for (const m of html.matchAll(/<link\b[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["']|<link\b[^>]*href=["']([^"']+)["'][^>]*rel=["']stylesheet["']/gi)) {
           const name = base(m[1] ?? m[2]);
           const f = byName.get(name);
           if (f) css.set(name, dec.decode(await loadVerified(socket, deviceId, f)));
         }
-        for (const m of html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)) {
+        const boot: BootScript[] = [];
+        for (const m of html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi)) {
           const name = base(m[1]);
           const f = byName.get(name);
           if (!f) continue;
           const bytes = await loadVerified(socket, deviceId, f);
-          const url = URL.createObjectURL(new Blob([bytes as unknown as BlobPart], { type: 'text/javascript' }));
-          urls.push(url);
-          scripts.set(name, url);
+          boot.push({ module: /type=["']module["']/i.test(m[0]), code: dec.decode(bytes) });
         }
         if (cancelled) return;
-        setState({ kind: 'ready', srcDoc: buildSrcDoc(html, css, scripts) });
+        scriptsRef.current = boot;
+        setState({ kind: 'ready', srcDoc: buildSrcDoc(html, css) });
       } catch (e) {
         if (cancelled) return;
         if (e instanceof Error && e.name === 'HashMismatchError') setState({ kind: 'refused', file: (e as HashMismatchError).file });
         else setState({ kind: 'fallback' });
       }
     })();
-    return () => { cancelled = true; urls.forEach((u) => URL.revokeObjectURL(u)); };
+    return () => { cancelled = true; };
   }, [socket, deviceId, capable]);
 
   const srcDoc = state.kind === 'ready' ? state.srcDoc : null;
@@ -285,6 +304,10 @@ export default function RemoteRenderer({ socket, deviceId, fallback }: Props) {
     const onMessage = (e: MessageEvent) => {
       const win = iframeRef.current?.contentWindow;
       if (!win || e.source !== win) return;
+      if (e.data && (e.data as { type?: unknown }).type === 'sm-boot-ready') {
+        win.postMessage({ type: 'sm-boot', scripts: scriptsRef.current }, '*');
+        return;
+      }
       bridge.handle(e.data);
     };
     window.addEventListener('message', onMessage);

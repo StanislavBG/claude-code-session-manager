@@ -6,6 +6,10 @@ vi.mock('../remoteApi', async () => {
   return { ...actual, listProjects: vi.fn() };
 });
 
+vi.mock('../components/RemoteRenderer', () => ({
+  default: ({ fallback }: { fallback: React.ReactNode }) => <>{fallback}</>,
+}));
+
 import { listProjects, RemoteError } from '../remoteApi';
 import Cockpit from '../components/Cockpit';
 import { useStore } from '../store';
@@ -52,7 +56,8 @@ describe('ready-gated first fetch', () => {
     act(() => useStore.getState().markRemoteReady('d1'));
     await flush();
     expect(mocked).toHaveBeenCalledTimes(1);
-    expect(await screen.findByTestId('project-row')).toBeInTheDocument();
+    await flush(); // findBy* polls on timers, which are faked here
+    expect(screen.getByTestId('project-row')).toBeInTheDocument();
   });
 
   it('re-fetches once when ready arrives while in the error state', async () => {

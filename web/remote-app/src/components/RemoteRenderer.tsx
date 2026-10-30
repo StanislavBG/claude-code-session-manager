@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
   fetchAssetBytes,
   fetchAssetManifest,
@@ -298,7 +298,8 @@ export default function RemoteRenderer({ socket, deviceId, fallback }: Props) {
   }, [socket, deviceId, capable]);
 
   const srcDoc = state.kind === 'ready' ? state.srcDoc : null;
-  useEffect(() => {
+  // Must register in the commit that inserts the iframe, before the frame can post sm-boot-ready.
+  useLayoutEffect(() => {
     if (!srcDoc || !socket) return;
     const bridge = new IpcBridge(socket, deviceId, (msg) => iframeRef.current?.contentWindow?.postMessage(msg, '*'));
     const onMessage = (e: MessageEvent) => {

@@ -844,6 +844,12 @@ async function handleMessage(raw, device) {
       const live = ((await loadConfig()).devices || []).find((d) => d.deviceId === device.deviceId) || device;
       if (isPinnedPeerKey(live, browserPubKey)) {
         client.e2e = makeState('authenticated', sessionKey, null);
+        // ORDER IS A CONTRACT: the boxed event:remote:ready (sent inside
+        // finalizeE2eAuthenticated) deliberately goes out BEFORE the plaintext e2e:ready
+        // below. web/remote-app/src/ws.ts holds boxes that arrive before e2e:ready and
+        // decides on sas:pending only after draining them, so the early remote:ready
+        // skips the SAS prompt. Reordering brings back a flash of "confirm the 6-digit
+        // code". Pinned by src/main/__tests__/web-remote-pinned-ready-order.test.cjs.
         finalizeE2eAuthenticated('E2E session auto-authenticated — pinned browser key matched', client);
         respond(id, undefined, 'e2e:ready', client);
         return;

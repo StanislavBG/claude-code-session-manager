@@ -1,6 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
-import RemoteRenderer, { sha256Hex, IFRAME_SANDBOX } from '../components/RemoteRenderer';
+import RemoteRenderer, { sha256Hex, IFRAME_SANDBOX, buildSrcDoc, BOOTSTRAP } from '../components/RemoteRenderer';
 
 const enc = new TextEncoder();
 const INDEX = '<html><head><link rel="stylesheet" href="./app.css"></head><body><script type="module" src="./app.js"></script></body></html>';
@@ -41,11 +41,6 @@ async function makeSocket(opts: { available?: boolean; corrupt?: string } = {}) 
   return { socket: socket as any, emit, sent };
 }
 
-beforeEach(() => {
-  (URL as any).createObjectURL = vi.fn(() => 'blob:fake');
-  (URL as any).revokeObjectURL = vi.fn();
-});
-
 async function mounted(opts?: Parameters<typeof makeSocket>[0]) {
   const s = await makeSocket(opts);
   render(<RemoteRenderer socket={s.socket} deviceId="d1" fallback={<div data-testid="drill">drill</div>} />);
@@ -57,12 +52,27 @@ async function mounted(opts?: Parameters<typeof makeSocket>[0]) {
 }
 
 describe('RemoteRenderer', () => {
-  it('mounts a sandboxed iframe without allow-same-origin, css inline, js from blob', async () => {
+  it('buildSrcDoc strips script src and inserts the bootstrap', () => {
+    const out = buildSrcDoc(INDEX, new Map([['app.css', 'body{}']]));
+    expect(out).not.toMatch(/<script[^>]*\bsrc=/i);
+    expect(out).toContain(BOOTSTRAP);
+    expect(out).toContain('<style>body{}</style>');
+  });
+
+  it('posts sm-boot with verified code after sm-boot-ready, without bridging it', async () => {
+    const { fromIframe, post, sent } = await mounted();
+    await fromIframe({ type: 'sm-boot-ready' });
+    expect(post).toHaveBeenCalledWith({ type: 'sm-boot', scripts: [{ module: true, code: 'console.log(1)' }] }, '*');
+    await new Promise((r) => setTimeout(r, 150));
+    expect(sent.filter((m) => m.type === 'ipc:invoke')).toHaveLength(0);
+  });
+
+  it('mounts a sandboxed iframe without allow-same-origin, css inline, no script src', async () => {
     const { iframe } = await mounted();
     expect(iframe.getAttribute('sandbox')).toBe(IFRAME_SANDBOX);
     expect(iframe.getAttribute('sandbox')).not.toContain('allow-same-origin');
     expect(iframe.getAttribute('srcdoc')).toContain('<style>body{}</style>');
-    expect(iframe.getAttribute('srcdoc')).toContain('src="blob:fake"');
+    expect(iframe.getAttribute('srcdoc')).not.toMatch(/<script[^>]*\bsrc=/i);
   });
 
   it('refuses to mount on a hash mismatch', async () => {

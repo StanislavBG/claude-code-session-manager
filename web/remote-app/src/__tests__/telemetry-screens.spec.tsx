@@ -85,4 +85,12 @@ describe('App telemetry', () => {
     expect(trackFlow).toHaveBeenCalledTimes(1);
     expect(trackFlow).toHaveBeenCalledWith('pair', 'success');
   });
+
+  it('tracks pair resumed (not success) when no SAS was pending', () => {
+    render(<App />);
+    act(() => { handlers['event:remote:ready']({ deviceId: undefined }); });
+    expect(trackFlow).toHaveBeenCalledTimes(1);
+    expect(trackFlow).toHaveBeenCalledWith('pair', 'resumed');
+    expect(trackFlow).not.toHaveBeenCalledWith('pair', 'success');
+  });
 });

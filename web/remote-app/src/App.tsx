@@ -165,12 +165,14 @@ function AppInner() {
     });
     // Desktop: phone is SAS-confirmed / key-pinned — commands are accepted now.
     const offReady = socket.on('event:remote:ready', (m: Envelope) => {
-      const active = useStore.getState().activeDeviceId;
+      const st = useStore.getState();
+      const active = st.activeDeviceId;
+      const sasFlow = !!st.pendingSas || st.awaitingDesktopConfirm || st.readyFallbackExpired;
       if (m.deviceId) useStore.getState().markRemoteReady(m.deviceId);
       else if (active) useStore.getState().markRemoteReady(active);
       if (!m.deviceId || m.deviceId === active) {
         fallback.clear();
-        trackFlow('pair', 'success');
+        trackFlow('pair', sasFlow ? 'success' : 'resumed');
         const id = m.deviceId ?? active;
         if (id && !infoFetched.has(id)) {
           infoFetched.add(id);

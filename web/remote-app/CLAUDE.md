@@ -39,6 +39,7 @@ Phone → desktop commands over the relay (stateless; drill down projects → se
 - `cmd:chat:send` — send a prompt; target = epicId or main tab id.
 - `cmd:session:subscribe` — stream live updates for one session.
 - `event:remote:ready` — desktop → phone: bridge is up, commands accepted.
+- For a key-pinned browser the desktop sends the boxed `event:remote:ready` before the plaintext `e2e:ready`; `RelaySocket` holds such early boxes and dispatches them before deciding on `sas:pending`.
 - `e2e:rekey` — desktop → phone (plaintext): drop the session key and re-send `e2e:hello`; pinned phones re-authenticate without SAS.
 
 A signed-in browser can drive any paired desktop, chosen in the header switcher (`src/devices.ts`).

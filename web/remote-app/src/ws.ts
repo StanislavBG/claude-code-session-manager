@@ -18,12 +18,15 @@ interface E2ESession {
   browserPubKeyB64: string;     // browser's SPKI DER public key, base64url
   devicePubKeyB64: string;      // agent's SPKI DER public key, base64url
   sessionKey: CryptoKey | null; // derived AES-256-GCM key, null until e2e:ready
+  held: Envelope[];             // e2e:box frames that arrived before the key (max HELD_BOX_CAP)
 }
 
 // Command response timeout
 const CMD_TIMEOUT_MS = 15_000;
 // Heartbeat interval
 const PING_INTERVAL_MS = 30_000;
+// Max e2e:box frames held per session while the handshake is in flight
+const HELD_BOX_CAP = 16;
 
 // ── WebCrypto E2E helpers ──────────────────────────────────────────────────
 
@@ -243,6 +246,8 @@ export class RelaySocket {
   private pending = new Map<string, PendingCmd>();
   private pingTimer: ReturnType<typeof setInterval> | null = null;
   private destroyed = false;
+  // Inbound frames are handled strictly in arrival order
+  private inbound: Promise<void> = Promise.resolve();
 
   // Reconnect state
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -288,9 +293,11 @@ export class RelaySocket {
         } catch {
           return;
         }
-        this.dispatchAsync(msg).catch((e) => {
-          console.warn('[relay] dispatchAsync error', e);
-        });
+        this.inbound = this.inbound
+          .then(() => this.dispatchAsync(msg))
+          .catch((e) => {
+            console.warn('[relay] dispatchAsync error', e);
+          });
       };
 
       socket.onclose = (evt) => {
@@ -338,6 +345,7 @@ export class RelaySocket {
         browserPubKeyB64: publicKeyB64,
         devicePubKeyB64,
         sessionKey: null,
+        held: [],
       };
       this.e2eSessions.set(deviceId, session);
 
@@ -383,6 +391,18 @@ export class RelaySocket {
     return this.e2eSessions.get(deviceId)?.sessionKey != null;
   }
 
+  /** Decrypt + parse one e2e:box frame; null (with a warning) when unusable. */
+  private async openBox(msg: Envelope, key: CryptoKey): Promise<Envelope | null> {
+    const p = msg.payload as { nonce?: string; ciphertext?: string } | undefined;
+    if (!p?.nonce || !p.ciphertext) return null;
+    const plaintext = await decryptBox(p.nonce, p.ciphertext, key);
+    if (!plaintext) {
+      console.warn('[relay] e2e:box decryption failed (auth tag mismatch)');
+      return null;
+    }
+    try { return JSON.parse(plaintext) as Envelope; } catch { return null; }
+  }
+
   private async dispatchAsync(msg: Envelope): Promise<void> {
     const { type } = msg;
 
@@ -392,17 +412,18 @@ export class RelaySocket {
       const deviceId = msg.deviceId;
       if (!deviceId) return;
       const session = this.e2eSessions.get(deviceId);
-      if (!session?.sessionKey) return;
-      const p = msg.payload as { nonce?: string; ciphertext?: string } | undefined;
-      if (!p?.nonce || !p.ciphertext) return;
-      const plaintext = await decryptBox(p.nonce, p.ciphertext, session.sessionKey);
-      if (!plaintext) {
-        console.warn('[relay] e2e:box decryption failed (auth tag mismatch)');
+      if (!session) return;
+      if (!session.sessionKey) {
+        // Handshake in flight: hold until e2e:ready delivers the key
+        if (session.held.length >= HELD_BOX_CAP) {
+          console.warn('[relay] held e2e:box cap reached, dropping frame');
+        } else {
+          session.held.push(msg);
+        }
         return;
       }
-      let inner: Envelope;
-      try { inner = JSON.parse(plaintext) as Envelope; } catch { return; }
-      await this.dispatchAsync(inner);
+      const inner = await this.openBox(msg, session.sessionKey);
+      if (inner) await this.dispatchAsync(inner);
       return;
     }
 
@@ -439,6 +460,20 @@ export class RelaySocket {
           deviceId,
         );
         this.emit('e2e:ready', { ...msg, deviceId });
+        // Dispatch boxes that arrived before the key, in arrival order
+        const held = session.held.splice(0);
+        let sawRemoteReady = false;
+        for (const box of held) {
+          const inner = await this.openBox(box, session.sessionKey);
+          if (!inner) continue;
+          if (inner.type === 'event:remote:ready') sawRemoteReady = true;
+          try {
+            await this.dispatchAsync(inner);
+          } catch (e) {
+            console.warn('[relay] held box dispatch error', e);
+          }
+        }
+        if (sawRemoteReady) return;
         // Compute SAS for user verification — emitted as an internal event so
         // App.tsx can display it alongside the desktop's SAS for manual comparison.
         try {

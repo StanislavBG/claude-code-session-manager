@@ -339,15 +339,23 @@ export class RelaySocket {
     if (existing?.sessionKey) return;
 
     try {
-      const { privateKey, publicKeyB64 } = await getOrCreateBrowserKeyPair(deviceId);
-      const session: E2ESession = {
-        privateKey,
-        browserPubKeyB64: publicKeyB64,
-        devicePubKeyB64,
-        sessionKey: null,
-        held: [],
-      };
-      this.e2eSessions.set(deviceId, session);
+      let session: E2ESession;
+      if (existing && existing.devicePubKeyB64 === devicePubKeyB64) {
+        // Same device key, handshake still pending: keep the session so frames
+        // already held on it survive a repeated initiate.
+        session = existing;
+      } else {
+        const { privateKey, publicKeyB64: browserPub } = await getOrCreateBrowserKeyPair(deviceId);
+        session = {
+          privateKey,
+          browserPubKeyB64: browserPub,
+          devicePubKeyB64,
+          sessionKey: null,
+          held: [],
+        };
+        this.e2eSessions.set(deviceId, session);
+      }
+      const publicKeyB64 = session.browserPubKeyB64;
 
       // Send hello immediately if connected; if not, auth:ok handler sends it
       if (this.isConnected) {
@@ -371,10 +379,10 @@ export class RelaySocket {
   resetE2E(deviceId?: string): void {
     if (deviceId !== undefined) {
       const s = this.e2eSessions.get(deviceId);
-      if (s) s.sessionKey = null;
+      if (s) { s.sessionKey = null; s.held = []; }
       return;
     }
-    for (const s of this.e2eSessions.values()) s.sessionKey = null;
+    for (const s of this.e2eSessions.values()) { s.sessionKey = null; s.held = []; }
   }
 
   private rejectPending(deviceId: string | undefined, reason: string): void {
@@ -423,7 +431,7 @@ export class RelaySocket {
         return;
       }
       const inner = await this.openBox(msg, session.sessionKey);
-      if (inner) await this.dispatchAsync(inner);
+      if (inner) await this.dispatchAsync({ ...inner, deviceId: inner.deviceId ?? deviceId });
       return;
     }
 
@@ -464,8 +472,9 @@ export class RelaySocket {
         const held = session.held.splice(0);
         let sawRemoteReady = false;
         for (const box of held) {
-          const inner = await this.openBox(box, session.sessionKey);
-          if (!inner) continue;
+          const opened = await this.openBox(box, session.sessionKey);
+          if (!opened) continue;
+          const inner = { ...opened, deviceId: opened.deviceId ?? deviceId };
           if (inner.type === 'event:remote:ready') sawRemoteReady = true;
           try {
             await this.dispatchAsync(inner);

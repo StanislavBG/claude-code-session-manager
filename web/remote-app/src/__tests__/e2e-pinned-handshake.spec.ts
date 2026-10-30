@@ -127,4 +127,47 @@ describe('pinned-browser handshake ordering', () => {
     expect(calls.sas).toHaveLength(1);
     sock.destroy();
   });
+
+  it('(d) resetE2E drops held boxes: no remote:ready, sas:pending fires once', async () => {
+    const { sock, ws, box, readyFrame, innerReady } = await setup();
+    const calls = spy(sock);
+    ws.serve(await box(innerReady));
+    await wait(30);
+    sock.resetE2E(DEVICE);
+    ws.serve(readyFrame);
+    await wait();
+    expect(calls.remoteReady).toBe(0);
+    expect(calls.sas).toHaveLength(1);
+    sock.destroy();
+  });
+
+  it('(e) repeated initiateE2E for the same key keeps held boxes', async () => {
+    const { sock, ws, box, readyFrame, innerReady } = await setup();
+    const calls = spy(sock);
+    const hello = ws.sent.find((m) => m.type === 'e2e:hello')!;
+    void hello;
+    ws.serve(await box(innerReady));
+    await wait(30);
+    // Re-initiate with the same device key (recovered from the existing session)
+    const session = (sock as unknown as { e2eSessions: Map<string, { devicePubKeyB64: string }> }).e2eSessions.get(DEVICE)!;
+    await sock.initiateE2E(DEVICE, session.devicePubKeyB64);
+    ws.serve(readyFrame);
+    await wait();
+    expect(calls.remoteReady).toBe(1);
+    expect(calls.sas).toHaveLength(0);
+    sock.destroy();
+  });
+
+  it('(f) remote:ready carries the outer frame deviceId (drained and live)', async () => {
+    const { sock, ws, box, readyFrame, innerReady } = await setup();
+    const ids: Array<string | undefined> = [];
+    sock.on('event:remote:ready', (e) => { ids.push(e.deviceId); });
+    ws.serve(await box(innerReady));
+    ws.serve(readyFrame);
+    await wait();
+    ws.serve(await box({ ...innerReady, id: 'r2' }));
+    await wait();
+    expect(ids).toEqual([DEVICE, DEVICE]);
+    sock.destroy();
+  });
 });

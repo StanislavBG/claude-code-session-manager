@@ -13,6 +13,19 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      # Fails when a tracked file holds the owner's real name or personal email
+      # (session-manager-operations/architecture/identity-boundary.md). The strings live only in the secret.
+      - name: Identity scan
+        env:
+          IDENTITY_DENYLIST: ${{ secrets.IDENTITY_DENYLIST }}
+        run: |
+          if [ -z "$IDENTITY_DENYLIST" ]; then
+            echo "::warning::IDENTITY_DENYLIST secret not set; identity scan skipped (session-manager-operations/architecture/identity-boundary.md)"
+            exit 0
+          fi
+          list=$(mktemp)
+          printf '%s\n' "$IDENTITY_DENYLIST" > "$list"
+          BILKO_IDENTITY_DENYLIST="$list" npm run --silent identity:scan
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=moderate
       - run: npm run typecheck

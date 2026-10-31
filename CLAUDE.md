@@ -38,20 +38,19 @@ before changing anything in that area.** Reference docs, all under `session-mana
 
 ## Stack
 
-Electron 42 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand · xterm + node-pty · Moonshine
-(ricky0123/vad-web + onnxruntime-web) for voice.
+Electron 42 (CommonJS main + preload) · React 18 + Vite · Tailwind · zustand · xterm + node-pty · Moonshine for voice.
 
 ## Commands
 
 - `npm run dev` — Vite + Electron with HMR. `SM_DEV=1` set automatically.
 - `npm run build` — renderer build into `dist/`.
 - `npm run typecheck` — `tsc --noEmit`. Must pass before commits.
-- `npm run test:unit` — `vitest run`. Single file: `npx vitest run <path>` (no `timeout` on macOS). NOT `node --test`
+- `npm run test:unit` — `vitest run`. Single file: `npx vitest run <path>`. NOT `node --test`
   (can't resolve TS renderer imports).
 - `npm run test:e2e` — Playwright Electron under `xvfb-run` (Linux).
 - `npm run lint` — unstable selectors + conditional hooks (blank-screen guards) + doc hierarchy (`lint:docs`); run with typecheck.
 - `npm run health` — `src/main/health.cjs` (exit 0 = GREEN).
-- `npm publish` — `prepublishOnly` = project-pages build + logic build + gate + `vite build`. Tag `latest`.
+- `npm publish` — `prepublishOnly` = build-info + `npm run build`. Tag `latest`.
   Published as `claude-code-session-manager`; [distribution detail](session-manager-operations/architecture/conventions.md#distribution).
 
 ## Domain model — the laws
@@ -133,6 +132,7 @@ Full list + the incident behind each: [`conventions.md`](session-manager-operati
 - **Toast is the user-facing error channel** — `useToast().show('error', msg)`; never swallow errors.
 - **Renderer stores are islands** — no cross-store subscription; compose selectors per component.
 - **`--model` must be pinned explicitly** on every `claude -p`/`claude --print` call site — unpinned drift costs.
+- **The owner's real name and personal email never enter a tracked file or commit** — [why](session-manager-operations/architecture/identity-boundary.md).
 
 ## Avoid
 
@@ -150,6 +150,5 @@ Each of these is a real incident, with the post-mortem in
 - Adding `shell: true` to `child_process.spawn` outside `watchers.cjs`/`app:test-fire-hook`.
 - Re-implementing tmp+rename atomic writes — use `lib/util/atomicFs.cjs`.
 - Reading remote URLs in prod — `createWindow` fails if `dist/index.html` is missing.
-- Adding a new LeftNav tab before checking whether an existing surface owns that data — pruned once at
-  ~31 destinations with overlap.
+- Adding a new LeftNav tab before checking whether an existing surface owns that data.
 - Adding pane state to parent tabs, or importing design primitives via wildcard.

@@ -6,9 +6,10 @@
  *  - pid alive AND it is an sm-claude-chat process for that sessionId → orphan: hold the
  *    session in chatRunner so run() queues instead of spawning a second writer, poll until
  *    it exits, then treat it as dead;
- *  - dead (or recycled pid) → transcript's last turn is the assistant's = finished: just
- *    clear the entry + refresh the tab; otherwise re-run ONCE through chatRunner.run() with
- *    the same sessionId and a fixed continue prompt, at most once per session per 24 h.
+ *  - dead (or recycled pid) → Claude's own session JSONL decides (classifyTurnTail): finished or
+ *    missing, or a silent entry → just clear the entry; unfinished → re-run ONCE through
+ *    chatRunner.run() with the same sessionId and a fixed continue prompt, at most once per
+ *    session per 24 h.
  * Touches only the session's own turn: never mints an Epic or edits its title/objective/status.
  */
 
@@ -30,10 +31,33 @@ function isChatProcessFor(identity, sessionId) {
 }
 
 /**
+ * Classify the tail of a Claude session JSONL.
+ * @param {string} text
+ * @returns {'finished'|'unfinished'|'missing'}
+ */
+function classifyTurnTail(text) {
+  if (typeof text !== 'string' || !text) return 'missing';
+  const lines = text.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const t = lines[i].trim();
+    if (!t) continue;
+    let obj;
+    try { obj = JSON.parse(t); } catch { continue; }
+    if (!obj || typeof obj !== 'object') continue;
+    if (obj.type === 'user') return 'unfinished';
+    if (obj.type === 'assistant') {
+      const sr = obj.message && obj.message.stop_reason;
+      return sr != null && sr !== 'tool_use' ? 'finished' : 'unfinished';
+    }
+  }
+  return 'missing';
+}
+
+/**
  * @param {object} deps
  *  ledger {list,end,markRecovered,recoveredMap}, run(opts), holdOrphan(sid), releaseOrphan(sid),
- *  pidAlive(pid), identityOf(pid), readTranscriptTail(cwd, tabId) → last turn|null,
- *  notify(channel, payload), now(), pollMs, setTimer/clearTimer (tests)
+ *  pidAlive(pid), identityOf(pid), sessionTurnState(entry) → 'finished'|'unfinished'|'missing',
+ *  now(), pollMs, setTimer/clearTimer (tests)
  * @returns {Promise<{ pending: Promise<void>, results: object[] }>} resolves after the first pass;
  *  `pending` settles once every orphan has exited and been handled.
  */
@@ -41,7 +65,7 @@ async function recoverInflightTurns(deps) {
   const {
     ledger, run, holdOrphan = () => {}, releaseOrphan = () => {},
     pidAlive = defaultPidAlive, identityOf = () => null,
-    readTranscriptTail = async () => null, notify = () => {},
+    sessionTurnState = async () => 'missing',
     now = Date.now, pollMs = ORPHAN_POLL_MS,
     setTimer = setTimeout,
   } = deps;
@@ -52,12 +76,12 @@ async function recoverInflightTurns(deps) {
 
   async function settleDead(entry) {
     const { sessionId, tabId, cwd } = entry;
-    let last = null;
-    try { last = await readTranscriptTail(cwd, tabId); } catch { last = null; }
-    const finished = !!last && last.role === 'assistant';
-    if (finished) {
+    let state = 'missing';
+    if (!entry.silent) {
+      try { state = await sessionTurnState(entry); } catch { state = 'missing'; }
+    }
+    if (entry.silent || state !== 'unfinished') {
       await ledger.end(sessionId);
-      safeNotify('chat:run:recovered', { tabId, sessionId, outcome: 'finished' });
       return { sessionId, outcome: 'finished' };
     }
     let recovered = {};
@@ -65,7 +89,6 @@ async function recoverInflightTurns(deps) {
     const prev = Number(recovered[sessionId]);
     if (Number.isFinite(prev) && now() - prev < DAY_MS) {
       await ledger.end(sessionId);
-      safeNotify('chat:run:recovered', { tabId, sessionId, outcome: 'guarded' });
       return { sessionId, outcome: 'guarded' };
     }
     await ledger.markRecovered(sessionId, now());
@@ -78,8 +101,6 @@ async function recoverInflightTurns(deps) {
     });
     return { sessionId, outcome: 'rerun' };
   }
-
-  function safeNotify(channel, payload) { try { notify(channel, payload); } catch { /* tab may be closed */ } }
 
   function isOrphan(entry) {
     if (!pidAlive(entry.pid)) return false;
@@ -112,4 +133,4 @@ async function recoverInflightTurns(deps) {
   return { results, pending: Promise.all(waits).then(() => undefined) };
 }
 
-module.exports = { recoverInflightTurns, CONTINUE_PROMPT, DAY_MS };
+module.exports = { recoverInflightTurns, classifyTurnTail, CONTINUE_PROMPT, DAY_MS };

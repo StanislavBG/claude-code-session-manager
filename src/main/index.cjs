@@ -1100,8 +1100,15 @@ try {
     holdOrphan: chatRunner.holdOrphanSession,
     releaseOrphan: chatRunner.releaseOrphanSession,
     identityOf: identity,
-    readTranscriptTail: async (cwd, tabId) => (await promptSessionTranscript.readTurns(cwd, tabId, { limit: 1 }))[0] || null,
-    notify: (channel, payload) => sendIfAlive(mainWindow, channel, payload),
+    sessionTurnState: async (entry) => {
+      try {
+        const { resolveEpicTranscriptPath } = require('./lib/epic/epicTranscriptPath.cjs');
+        const { readTranscriptTail } = require('./lib/epic/epicDelegationStats.cjs');
+        const filePath = resolveEpicTranscriptPath({ cwd: entry.cwd, claudeSessionId: entry.sessionId }).path;
+        if (!filePath) return 'missing';
+        return require('./lib/chatBootRecovery.cjs').classifyTurnTail(readTranscriptTail(filePath));
+      } catch { return 'missing'; }
+    },
   }).catch((e) => logs.writeLine({ scope: 'main', level: 'error', message: 'chat boot recovery failed', meta: { error: e?.message } }));
 } catch (e) {
   logs.writeLine({ scope: 'main', level: 'error', message: 'chat boot recovery wiring failed', meta: { error: e?.message } });

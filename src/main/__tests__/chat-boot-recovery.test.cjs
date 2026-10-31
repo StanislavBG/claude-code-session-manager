@@ -6,14 +6,14 @@
 
 import { test, beforeEach, afterEach } from 'vitest';
 const assert = require('node:assert/strict');
-const { recoverInflightTurns, CONTINUE_PROMPT, DAY_MS } = require('../lib/chatBootRecovery.cjs');
+const { recoverInflightTurns, classifyTurnTail, CONTINUE_PROMPT, DAY_MS } = require('../lib/chatBootRecovery.cjs');
 const cr = require('../chatRunner.cjs');
 
 const NOW = 1_800_000_000_000;
 const tick = () => new Promise((r) => setImmediate(r));
 
-function harness({ entries, alive = {}, tail = null, recovered = {}, ident } = {}) {
-  const calls = { run: [], end: [], mark: [], notify: [], hold: [], release: [] };
+function harness({ entries, alive = {}, tail = 'missing', recovered = {}, ident } = {}) {
+  const calls = { run: [], end: [], mark: [], hold: [], release: [] };
   const timers = [];
   const deps = {
     ledger: {
@@ -27,8 +27,7 @@ function harness({ entries, alive = {}, tail = null, recovered = {}, ident } = {
     releaseOrphan: (s) => calls.release.push(s),
     pidAlive: (pid) => !!alive[pid],
     identityOf: ident || ((pid) => ({ cmdline: `sm-claude-chat --resume ${entries.find((e) => e.pid === pid).sessionId}` })),
-    readTranscriptTail: async () => tail,
-    notify: (c, p) => calls.notify.push([c, p]),
+    sessionTurnState: async () => tail,
     now: () => NOW,
     pollMs: 5,
     setTimer: (fn) => { timers.push(fn); return { unref() {} }; },
@@ -38,7 +37,7 @@ function harness({ entries, alive = {}, tail = null, recovered = {}, ident } = {
 const entry = (o = {}) => ({ sessionId: 's1', tabId: 't1', cwd: '/p', pid: 100, resume: true, ...o });
 
 test('orphan: holds session until pid exits, then re-runs once', async () => {
-  const h = harness({ entries: [entry()], alive: { 100: true }, tail: { role: 'user' } });
+  const h = harness({ entries: [entry()], alive: { 100: true }, tail: 'unfinished' });
   const { results, pending } = await recoverInflightTurns(h.deps);
   assert.deepEqual(h.calls.hold, ['s1']);
   assert.equal(h.calls.run.length, 0);
@@ -54,23 +53,22 @@ test('orphan: holds session until pid exits, then re-runs once', async () => {
 });
 
 test('orphan identity mismatch (recycled pid) is treated as dead', async () => {
-  const h = harness({ entries: [entry()], alive: { 100: true }, tail: { role: 'user' }, ident: () => ({ cmdline: 'vim' }) });
+  const h = harness({ entries: [entry()], alive: { 100: true }, tail: 'unfinished', ident: () => ({ cmdline: 'vim' }) });
   await recoverInflightTurns(h.deps);
   assert.equal(h.calls.hold.length, 0);
   assert.equal(h.calls.run.length, 1);
 });
 
-test('finished transcript only clears the entry and refreshes the tab', async () => {
-  const h = harness({ entries: [entry()], tail: { role: 'assistant', text: 'done' } });
+test('finished transcript only clears the entry', async () => {
+  const h = harness({ entries: [entry()], tail: 'finished' });
   const { results } = await recoverInflightTurns(h.deps);
   assert.equal(results[0].outcome, 'finished');
   assert.deepEqual(h.calls.end, ['s1']);
   assert.equal(h.calls.run.length, 0);
-  assert.equal(h.calls.notify[0][1].tabId, 't1');
 });
 
 test('dead + unfinished re-runs once with same sessionId and continue prompt', async () => {
-  const h = harness({ entries: [entry({ promptId: 'p9' })], tail: { role: 'user' } });
+  const h = harness({ entries: [entry({ promptId: 'p9' })], tail: 'unfinished' });
   await recoverInflightTurns(h.deps);
   assert.equal(h.calls.run.length, 1);
   const r = h.calls.run[0];
@@ -86,22 +84,40 @@ test('dead + unfinished re-runs once with same sessionId and continue prompt', a
 });
 
 test('24h guard: a session recovered recently is not re-run', async () => {
-  const h = harness({ entries: [entry()], tail: { role: 'user' }, recovered: { s1: NOW - DAY_MS + 60_000 } });
+  const h = harness({ entries: [entry()], tail: 'unfinished', recovered: { s1: NOW - DAY_MS + 60_000 } });
   const { results } = await recoverInflightTurns(h.deps);
   assert.equal(results[0].outcome, 'guarded');
   assert.equal(h.calls.run.length, 0);
   assert.deepEqual(h.calls.end, ['s1']);
-  const h2 = harness({ entries: [entry()], tail: { role: 'user' }, recovered: { s1: NOW - DAY_MS - 1 } });
+  const h2 = harness({ entries: [entry()], tail: 'unfinished', recovered: { s1: NOW - DAY_MS - 1 } });
   await recoverInflightTurns(h2.deps);
   assert.equal(h2.calls.run.length, 1);
 });
 
-test('closed tab: re-run needs no renderer, notify failure is swallowed', async () => {
-  const h = harness({ entries: [entry({ tabId: 'gone' })], tail: null });
-  h.deps.notify = () => { throw new Error('window destroyed'); };
-  const { results } = await recoverInflightTurns(h.deps);
-  assert.equal(results[0].outcome, 'rerun');
-  assert.equal(h.calls.run[0].tabId, 'gone');
+test('missing transcript clears the entry without re-run', async () => {
+  const h = harness({ entries: [entry({ tabId: 'gone' })], tail: 'missing' });
+  await recoverInflightTurns(h.deps);
+  assert.equal(h.calls.run.length, 0);
+  assert.deepEqual(h.calls.end, ['s1']);
+});
+
+test('silent entry is never re-run even when unfinished', async () => {
+  const h = harness({ entries: [entry({ silent: true })], tail: 'unfinished' });
+  await recoverInflightTurns(h.deps);
+  assert.equal(h.calls.run.length, 0);
+  assert.deepEqual(h.calls.end, ['s1']);
+});
+
+const L = (o) => JSON.stringify(o);
+test('classifyTurnTail', () => {
+  const asst = (stop_reason) => L({ type: 'assistant', message: { stop_reason } });
+  assert.equal(classifyTurnTail([L({ type: 'user' }), asst('end_turn')].join('\n')), 'finished');
+  assert.equal(classifyTurnTail([L({ type: 'user' }), asst('tool_use')].join('\n')), 'unfinished');
+  assert.equal(classifyTurnTail([asst('end_turn'), L({ type: 'user' })].join('\n')), 'unfinished');
+  assert.equal(classifyTurnTail([asst(null)].join('\n')), 'unfinished');
+  assert.equal(classifyTurnTail([asst('end_turn'), L({ type: 'last-prompt' }), L({ type: 'mode' }), 'not json{', L({ type: 'cost-state' })].join('\n') + '\n'), 'finished');
+  assert.equal(classifyTurnTail(''), 'missing');
+  assert.equal(classifyTurnTail(L({ type: 'mode' })), 'missing');
 });
 
 test('chatRunner holds run() for an orphan session until released', async () => {

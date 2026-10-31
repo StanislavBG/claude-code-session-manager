@@ -123,4 +123,5 @@ module.exports = {
   countPrdsQueued,
   countInlineEdits,
   isApplicationSourcePath,
+  readTranscriptTail,
 };

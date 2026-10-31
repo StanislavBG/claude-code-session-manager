@@ -88,8 +88,13 @@ Env overrides, checked first: `SM_FEEDBACK_OWNER_TOKEN` (+ `SM_FEEDBACK_OWNER_PR
 There is one feedback owner, because the slug and host are fixed. The token is a single host secret, not a
 per-install one: it cannot be minted locally, and customer machines never hold it, so this is not Field
 Manual material. It is also broader than this feature — the same bearer authorizes snapshot and event writes
-for every project slug on bilko.run (`checkBearer` in the Bilko repo's `server/routes/project-feedback.ts`).
+for every project slug on bilko.run (`server/routes/project-data.ts` and `project-events.ts` in the Bilko repo).
 Never print it or put it in a tracked file.
+
+The host also accepts a narrower bearer that opens only this inbox (`PROJECT_FEEDBACK_TOKENS`, see the Bilko
+repo's `docs/secrets-rotation.md`). The owner machine does not use it, by the owner's decision on 2026-10-30:
+social-signals-trader needs the all-project token in its `.env` on the same machine, so moving this file would
+add a secret to manage without removing the broad one from the machine.
 
 1. Take the value from a local holder: `SST_DASHBOARD_SNAPSHOT_TOKEN` in
    `~/Projects/social-signals-trader/.env` is documented there to match the host. With no local holder, it is
@@ -100,8 +105,9 @@ Never print it or put it in a tracked file.
 4. Verify: `customer_feedback_list({ pull: true })` returns `ok: true`. An app reinstall leaves the file in
    place; only a new machine repeats these steps.
 
-`401` means the host token was rotated: repeat from step 1. Rotation has no signal on this side, so a
-rotated token surfaces here first. `503` means the host has no token configured.
+A `401` (surfaced as the host's text, `unauthorized`) means the host token was rotated: repeat from step 1.
+Rotation has no signal on this side, so a rotated token surfaces here first. The host's rotation runbook lists
+this file as a holder. `503` means the host has no token configured.
 
 ## Wire contract (bilko.run)
 

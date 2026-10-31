@@ -514,6 +514,71 @@ test('reapDeadRunningJobs: a dead successful job with a commit on a detached wor
   assert.equal(git(['rev-parse', 'HEAD'], projectCwd).trim(), headBefore, 'the reaper only parks, never lands');
 });
 
+function setupPinnedJob(name, { pinOnBase = false, startedAtMs = Date.now() - 60_000 } = {}) {
+  const projectCwd = path.join(tmpHome, `pin-${name}`);
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+  const headBefore = git(['rev-parse', 'HEAD'], projectCwd).trim();
+  const slug = `pin-${name}-job`;
+  const branch = `sm-job/${slug}`;
+  git(['branch', branch], projectCwd);
+  let sha;
+  if (pinOnBase) {
+    sha = headBefore;
+  } else {
+    const wtDir = path.join(tmpHome, `pin-${name}-wt`);
+    git(['worktree', 'add', '--detach', wtDir, branch], projectCwd);
+    fs.writeFileSync(path.join(wtDir, 'pinned.txt'), 'work\n', 'utf8');
+    git(['add', '-A'], wtDir);
+    git(['commit', '-q', '-m', 'pinned commit'], wtDir);
+    sha = git(['rev-parse', 'HEAD'], wtDir).trim();
+    // The boot sweep's state: worktree gone, commit held only by a pin.
+    git(['worktree', 'remove', '--force', wtDir], projectCwd);
+  }
+  git(['update-ref', `refs/sm-stranded/${slug}/${sha}`, sha], projectCwd);
+  const runId = `run-${slug}`;
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug, status: 'running', cwd: projectCwd, runId,
+      runtime: { pid: 999999, cwd: path.join(tmpHome, `pin-${name}-wt`) },
+      guardHeadBefore: headBefore,
+      startedAt: new Date(startedAtMs).toISOString(),
+    },
+  ]);
+  writeRunLog(runId, slug, ['{"type":"result","subtype":"success","result":"done","is_error":false}']);
+  return { queuePath, slug, sha, projectCwd };
+}
+
+test('reapDeadRunningJobs: a dead successful job with its worktree gone and a pin on its commit parks, naming the SHA', async () => {
+  const { queuePath, slug, sha, projectCwd } = setupPinnedJob('parks');
+  bustCwdCache();
+  await reapDeadRunningJobs();
+  const row = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs.find((j) => j.slug === slug);
+  assert.equal(row.status, 'needs_review');
+  assert.equal(row.verifierVerdict, 'run_commit_not_landed');
+  assert.match(row.error, new RegExp(sha.slice(0, 8)));
+  assert.match(row.error, /refs\/sm-stranded\//);
+  assert.equal(row.landedCommit, undefined);
+  assert.ok(git(['rev-parse', '--verify', `refs/sm-stranded/${slug}/${sha}`], projectCwd).trim(), 'pin preserved');
+});
+
+test('reapDeadRunningJobs: a pin older than row.startedAt does not park the job', async () => {
+  const { queuePath, slug } = setupPinnedJob('old', { startedAtMs: Date.now() + 3_600_000 });
+  bustCwdCache();
+  await reapDeadRunningJobs();
+  const row = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs.find((j) => j.slug === slug);
+  assert.notEqual(row.verifierVerdict, 'run_commit_not_landed');
+});
+
+test('reapDeadRunningJobs: a pinned commit already on the base branch does not park the job', async () => {
+  const { queuePath, slug } = setupPinnedJob('onbase', { pinOnBase: true });
+  bustCwdCache();
+  await reapDeadRunningJobs();
+  const row = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs.find((j) => j.slug === slug);
+  assert.notEqual(row.verifierVerdict, 'run_commit_not_landed');
+  assert.equal(row.status, 'completed');
+});
+
 test('reapDeadRunningJobs: a worktree job whose branch is already fully integrated into HEAD comes out completed, with landedCommit stamped', async () => {
   const projectCwd = path.join(tmpHome, 'j-project-real-success');
   initRepo(projectCwd);

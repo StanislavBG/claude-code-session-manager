@@ -8236,12 +8236,28 @@ async function reapDeadRunningJobs() {
       let landedCommit = null;
       let notLandedInfo = null;
       let effectiveSuccess = true;
+      // The boot sweep runs before this reaper and removes the worktree, pinning
+      // its unique commits; the branch then sits at the fork point and reads as
+      // integrated. Consult the job's own pins so that case parks instead.
+      const startedMs = Date.parse(row.startedAt);
+      let strandedPins = [];
+      try {
+        strandedPins = await jobWorktree.listStrandedPins({
+          cwd: rowCwd, key: d.slug, sinceMs: Number.isFinite(startedMs) ? startedMs : 0,
+        });
+      } catch { strandedPins = []; }
+      const pinVerdict = headReconcile?.action === 'diverged'
+        ? null
+        : gitTreeGuard.strandedCommitVerdict({ worktreeHead: { stranded: strandedPins }, landedCommit: null });
       if (headReconcile?.action === 'diverged') {
         effectiveSuccess = false;
         notLandedInfo = {
           verdict: 'run_commit_not_landed',
           reason: `worktree HEAD ${headReconcile.finalHead} diverged from ${branch}; commit pinned at ${headReconcile.pinnedRef || 'no ref'} — never landed`,
         };
+      } else if (pinVerdict) {
+        effectiveSuccess = false;
+        notLandedInfo = { verdict: pinVerdict.verdict, reason: pinVerdict.reason };
       } else if (integrated === null) {
         // No sm-job/<slug> branch — an in-place run (or worktree isolation
         // disabled). Prove landing via the exact same HEAD-advance evidence

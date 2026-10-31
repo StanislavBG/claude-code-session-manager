@@ -14,7 +14,7 @@
       "name": "session-manager-dev",
       "source": "./plugins/session-manager-dev",
       "description": "Default end-to-end development skillset — pairs with the session-manager scheduler to form a develop → queue → validate → release loop.",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "category": "development",
       "strict": false
     }

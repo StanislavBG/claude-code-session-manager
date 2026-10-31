@@ -99,6 +99,7 @@ export function useMacroLaunch(
         goal,
         agentDescription: persona?.description ?? undefined,
         source: `SessionActionsBar ${macro.agentName}`,
+        macroId: macro.id,
       })
       onSelect(result.epicId)
     } catch (err) {

@@ -105,6 +105,10 @@ describe('useMacroLaunch', () => {
     expect(approveProposedSpy).toHaveBeenCalledWith(created.id, 'SessionActionsBar scout')
     expect(sendSpy).toHaveBeenCalledWith(expect.objectContaining({ tabId: created.id, cwd: CWD }))
     expect(onSelect).toHaveBeenCalledWith(created.id)
+    expect(createPromptSessionSpy.mock.calls[0][7]).toEqual({ macroId: 'm1' })
+    expect((globalThis as any).window.api.promptSessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({ source: { producer: 'new-epic-ui', macroId: 'm1' } }),
+    )
   })
 
   it('extraInstructions omitted or blank: goal is unchanged', async () => {

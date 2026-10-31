@@ -37,6 +37,8 @@ export interface EpicSource {
   prdSlug?: string
   runId?: string
   sourceTabId?: string
+  /** 'new-epic-ui' only — the id of the macro whose press launched this Epic. */
+  macroId?: string
   /** 'cross-project-feedback' only — the sending project's cwd. */
   fromCwd?: string
   /** 'cross-project-feedback' only — the sending Epic's id, if it had one. */
@@ -300,7 +302,7 @@ interface PromptSessionsState {
     openingPrompt?: string,
     sections?: EpicIntakeSection[],
     /** New Session card's per-Epic runtime overrides — forwarded as IPC fields; main writes the record. */
-    runtime?: { model?: string; effort?: string },
+    runtime?: { model?: string; effort?: string; macroId?: string },
   ) => Promise<PromptSession>
   /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
    *  approved session, or null when the id is unknown or not a proposal.
@@ -524,6 +526,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       cwd, goalText, tag, agentType, openingPrompt, sections,
       ...(runtime?.model ? { model: runtime.model } : {}),
       ...(runtime?.effort ? { effort: runtime.effort } : {}),
+      ...(runtime?.macroId ? { source: { producer: 'new-epic-ui' as const, macroId: runtime.macroId } } : {}),
     })
     // ensureEpic's response is the byte-identical record just written to
     // active-index.json (validated against promptSessionSchema.cjs main-side)

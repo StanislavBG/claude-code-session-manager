@@ -63,6 +63,14 @@ describe('launchSession', () => {
     expect(out).toEqual({ epicId: 'e1', claudeSessionId: 'c1' })
   })
 
+  it('forwards macroId as the runtime argument only when set', async () => {
+    await launchSession({ ...input, macroId: 'm9' })
+    expect(createPromptSession.mock.calls[0][7]).toEqual({ macroId: 'm9' })
+    createPromptSession.mockClear()
+    await launchSession(input)
+    expect(createPromptSession.mock.calls[0]).toHaveLength(7)
+  })
+
   it('includes persona-body section when persona readable', async () => {
     getPersonaBody.mockResolvedValueOnce({ path: '/a/dev-lead.md', text: 'BODY' })
     await launchSession(input)

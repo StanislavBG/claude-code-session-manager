@@ -787,11 +787,21 @@ test('cadence: 23h of idle ticks send nothing; the tick past 24h sends exactly o
   await vi.advanceTimersByTimeAsync(2 * 60 * 60 * 1000);
   client.shutdown();
   vi.useRealTimers();
-  await new Promise((resolve) => { setTimeout(resolve, 200); }); // settle in-flight real I/O
+  // The daily tick's send is real I/O (queue file, HTTP to the stub) that fake timers cannot
+  // advance, so a fixed sleep races a slow runner. Poll for the send to land, then keep a short
+  // grace window so "exactly one" still catches a duplicate send.
+  for (let i = 0; i < 200 && stubServer.state.events.length < before + 1; i++) {
+    await new Promise((resolve) => { setTimeout(resolve, 50); });
+  }
+  await new Promise((resolve) => { setTimeout(resolve, 200); });
 
   expect(stubServer.state.events.length).toBe(before + 1); // exactly one send after the 24h boundary
 
-  const persisted = await telemetrySettings.load();
+  let persisted = await telemetrySettings.load();
+  for (let i = 0; i < 100 && telemetrySettings.isDailyFlushDue(persisted, Date.now()); i++) {
+    await new Promise((resolve) => { setTimeout(resolve, 50); }); // settings write trails the send
+    persisted = await telemetrySettings.load();
+  }
   expect(telemetrySettings.isDailyFlushDue(persisted, Date.now())).toBe(false); // lastDailyFlushAt persisted
 
   // A fresh client does not immediately re-send.

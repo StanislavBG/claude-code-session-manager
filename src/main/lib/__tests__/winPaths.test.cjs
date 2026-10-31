@@ -79,7 +79,9 @@ test('realpath: native used, 8.3 expanded via injected fs', () => {
 
 test('realpath: falls back to fs.realpathSync without native', () => {
   const fakeFs = { realpathSync: (p) => p + '-js' };
-  expect(realpath('/a/b', { fs: fakeFs, platform: 'linux' })).toBe('/a/b-js');
+  // Drive-qualified win32 path: realpath() resolves with path.win32 for 'win32' on every host,
+  // whereas platform:'linux' resolves with the HOST's path module (D:\ prefix on a Windows runner).
+  expect(realpath('C:\\a\\b', { fs: fakeFs, platform: 'win32' })).toBe('C:\\a\\b-js');
 });
 
 test('realpath: ENOENT walks to nearest existing parent', () => {

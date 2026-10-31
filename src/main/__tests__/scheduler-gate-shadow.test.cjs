@@ -59,10 +59,7 @@ function setup(name, gateBody) {
   fs.mkdirSync(slugDir, { recursive: true });
   fs.writeFileSync(path.join(slugDir, 't.jsonl'), JSON.stringify({ cwd }) + '\n');
   bustCwdCache();
-  const prdDir = resolveEpicPrdWriteDir(cwd, 'gate-epic');
-  fs.mkdirSync(prdDir, { recursive: true });
   const slug = `01-${name}`;
-  fs.writeFileSync(path.join(prdDir, `${slug}.md`), `---\ntitle: T\ncwd: ${cwd}\nestimateMinutes: 5\n---\n${gateBody}\n`);
   const runId = `run-${name}`;
   const runDir = path.join(tmpHome, '.claude', 'session-manager', 'scheduled-plans', 'runs', runId);
   fs.mkdirSync(runDir, { recursive: true });
@@ -76,8 +73,15 @@ function setup(name, gateBody) {
   // commit above and this timestamp are otherwise within the same second, and
   // git truncates committer dates to whole seconds, so an un-backdated
   // startedAt is flaky — it can land AFTER the commit it is meant to predate.
+  // Queue row first, PRD file last, and the PRD carries createdVia: reconcile() scans EVERY
+  // project registered under tmpHome, and an earlier test's still-running background pass can
+  // reach this project mid-setup. PRD-before-row let it mint a 'quarantined' row for an
+  // unstamped PRD with no row yet, which then shadowed the needs_review row under test.
   const job = { slug, status: 'needs_review', cwd, runId, verifierVerdict: 'transcript_errors', startedAt: new Date(Date.now() - 60_000).toISOString(), finishedAt: new Date().toISOString() };
   fs.writeFileSync(queuePath, JSON.stringify({ jobs: [job] }, null, 2));
+  const prdDir = resolveEpicPrdWriteDir(cwd, 'gate-epic');
+  fs.mkdirSync(prdDir, { recursive: true });
+  fs.writeFileSync(path.join(prdDir, `${slug}.md`), `---\ntitle: T\ncwd: ${cwd}\nestimateMinutes: 5\ncreatedVia: scheduler-api\nissuedAt: 2026-09-25T00:00:00.000Z\n---\n${gateBody}\n`);
   return { cwd, slug, job, verdictsPath, queuePath };
 }
 

@@ -1,7 +1,8 @@
 /**
- * macroAdminRoutes.test.cjs — lib/feedback-remote/macroAdminRoutes.cjs's two routes
- * (GET /admin/macros?cwd=… and POST /admin/macros/save {cwd, id?, label,
- * agentName, tag, prompt}), backed by a temp macros.json via macroLibrary's
+ * macroAdminRoutes.test.cjs — lib/feedback-remote/macroAdminRoutes.cjs's three routes
+ * (GET /admin/macros?cwd=…, POST /admin/macros/save {cwd, id?, label,
+ * agentName, tag, prompt} and POST /admin/macros/delete {cwd, id,
+ * originClaudeSessionId?}), backed by a temp macros.json via macroLibrary's
  * `{ filePath }` option.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/macroAdminRoutes.test.cjs
@@ -78,13 +79,14 @@ function makeHandlers() {
   return { onChanged, getChangedCount: () => changedCount };
 }
 
-test('registers GET /admin/macros and POST /admin/macros/save', () => {
+test('registers GET /admin/macros, POST /admin/macros/save and POST /admin/macros/delete', () => {
   const adminHttp = makeFakeAdminHttp();
   const { onChanged } = makeHandlers();
   registerAdminRoute(adminHttp, { onChanged });
   expect([...adminHttp.routes.keys()]).toEqual([
     'GET /admin/macros',
     'POST /admin/macros/save',
+    'POST /admin/macros/delete',
   ]);
 });
 
@@ -313,4 +315,111 @@ test('admin save never sets autoStartTargets on create and leaves a stored list 
     expect(upd.status).toBe(200);
     expect(upd.body.macro.autoStartTargets).toEqual(['/work/b']);
   }
+});
+
+// --- POST /admin/macros/delete ----------------------------------------------
+
+const { readTail } = require('../lib/telemetry/auditLog.cjs');
+const macroLib = require('../lib/persona-macro/macroLibrary.cjs');
+
+function deleteEvents(id) {
+  return readTail(1_000_000)
+    .map((l) => JSON.parse(l))
+    .filter((e) => e.kind === 'admin_macro_delete' && e.macro?.id === id);
+}
+
+async function setupDelete() {
+  const cwd = await mkProjectCwd();
+  const filePath = await mkMacrosFile();
+  const adminHttp = makeFakeAdminHttp();
+  const h = makeHandlers();
+  registerAdminRoute(adminHttp, { onChanged: h.onChanged }, { filePath });
+  return { cwd, filePath, adminHttp, ...h };
+}
+
+test('delete: sole-project macro is deleted, listing drops it, onChanged once, one audit event', async () => {
+  const { cwd, adminHttp, getChangedCount } = await setupDelete();
+  const created = await adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, label: 'Doomed', agentName: 'builder', tag: 'build', prompt: 'x' },
+  });
+  const id = created.body.macro.id;
+  const before = getChangedCount();
+  const res = await adminHttp.call('POST', '/admin/macros/delete', { body: { cwd, id, originClaudeSessionId: 'sess-1' } });
+  expect(res.status).toBe(200);
+  expect(res.body.ok).toBe(true);
+  expect(res.body.deleted).toBe(true);
+  expect(res.body.macro.id).toBe(id);
+  const list = await adminHttp.call('GET', '/admin/macros', { query: { cwd } });
+  expect(list.body.macros.map((m) => m.id)).not.toContain(id);
+  expect(getChangedCount() - before).toBe(1);
+  const ev = deleteEvents(id);
+  expect(ev).toHaveLength(1);
+  expect(ev[0].route).toBe('/admin/macros/delete');
+  expect(ev[0].cwd).toBe(fs.realpathSync(cwd));
+  expect(ev[0].deleted).toBe(true);
+  expect(ev[0].originClaudeSessionId).toBe('sess-1');
+});
+
+test('delete: macro shared by two projects only loses this project', async () => {
+  const { cwd, filePath, adminHttp, getChangedCount } = await setupDelete();
+  const other = await mkProjectCwd();
+  const m = await macroLib.saveMacro(
+    { label: 'Shared', agentName: 'builder', tag: 'build', prompt: 'x', projects: [fs.realpathSync(cwd), fs.realpathSync(other)] },
+    { filePath },
+  );
+  const res = await adminHttp.call('POST', '/admin/macros/delete', { body: { cwd, id: m.id } });
+  expect(res.status).toBe(200);
+  expect(res.body).toMatchObject({ ok: true, deleted: false });
+  expect(res.body.macro.id).toBe(m.id);
+  const list = await adminHttp.call('GET', '/admin/macros', { query: { cwd: other } });
+  expect(list.body.macros.map((x) => x.id)).toContain(m.id);
+  expect(getChangedCount()).toBe(1);
+  const ev = deleteEvents(m.id);
+  expect(ev).toHaveLength(1);
+  expect(ev[0].deleted).toBe(false);
+  expect(ev[0].originClaudeSessionId).toBeNull();
+});
+
+test('delete: originClaudeSessionId outside 1..128 chars or non-string is recorded as null', async () => {
+  const { cwd, adminHttp } = await setupDelete();
+  for (const origin of ['', 'x'.repeat(129), 42]) {
+    const created = await adminHttp.call('POST', '/admin/macros/save', {
+      body: { cwd, label: 'O', agentName: 'builder', tag: 'build', prompt: 'x' },
+    });
+    const id = created.body.macro.id;
+    const res = await adminHttp.call('POST', '/admin/macros/delete', { body: { cwd, id, originClaudeSessionId: origin } });
+    expect(res.status).toBe(200);
+    expect(deleteEvents(id)[0].originClaudeSessionId).toBeNull();
+  }
+});
+
+test('delete: refusals return 400 with no onChanged and no audit event', async () => {
+  const { cwd, filePath, adminHttp, getChangedCount } = await setupDelete();
+  const other = await mkProjectCwd();
+  const foreign = await macroLib.saveMacro(
+    { label: 'Foreign', agentName: 'builder', tag: 'build', prompt: 'x', projects: [fs.realpathSync(other)] }, { filePath });
+  const star = await macroLib.saveMacro(
+    { label: 'Star', agentName: 'builder', tag: 'build', prompt: 'x', projects: ['*'] }, { filePath });
+  const cases = [
+    { body: { cwd, id: 'builtin-project-home' }, id: 'builtin-project-home' },
+    { body: { cwd, id: foreign.id }, id: foreign.id },
+    { body: { cwd, id: star.id }, id: star.id },
+    { body: { cwd, id: 'nonexistent-abc123' }, id: 'nonexistent-abc123' },
+    { body: { cwd, id: 'bad id!/..' }, error: 'invalid macro id' },
+    { body: { cwd }, error: 'id is required' },
+    { body: { cwd: 'relative/dir', id: foreign.id } },
+    { rawBody: '{nope', error: 'invalid JSON body' },
+    { rawBody: 'null', error: 'invalid JSON body' },
+  ];
+  for (const c of cases) {
+    const res = await adminHttp.call('POST', '/admin/macros/delete', c.body ? { body: c.body } : { rawBody: c.rawBody });
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+    expect(typeof res.body.error).toBe('string');
+    if (c.error) expect(res.body.error).toContain(c.error);
+    if (c.id) expect(deleteEvents(c.id)).toHaveLength(0);
+  }
+  expect(getChangedCount()).toBe(0);
+  const list = await adminHttp.call('GET', '/admin/macros', { query: { cwd: other } });
+  expect(list.body.macros.map((m) => m.id)).toContain(foreign.id);
 });

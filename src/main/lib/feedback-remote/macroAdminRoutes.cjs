@@ -1,9 +1,15 @@
 /**
  * macroAdminRoutes.cjs — loopback admin HTTP routes so an agent session (via
- * the scheduler MCP, next PRD) can list and create/update a HOT KEYS macro
+ * the scheduler MCP) can list, create/update and delete a HOT KEYS macro
  * for its own project, through the existing macroLibrary.cjs store:
  *   GET  /admin/macros?cwd=…                          -> { ok, macros }
  *   POST /admin/macros/save  {cwd, id?, label, agentName, tag, prompt, inputs?}
+ *   POST /admin/macros/delete {cwd, id, originClaudeSessionId?}
+ *                                                     -> { ok, deleted, macro }
+ * delete removes the macro from THIS project through
+ * macroLibrary.removeMacroFromProject (deleted:false when other projects still
+ * list it), fires onChanged once and appends one `admin_macro_delete` audit
+ * event on success; every refusal is a 400 with no onChanged and no audit.
  *
  * cwd resolution matches projectHomeAdminRoutes.cjs's resolveCwd exactly
  * (reused, not copied). A create always stores `projects: [resolvedCwd]`,
@@ -20,6 +26,30 @@
 const { readBody, sendJson } = require('./localAdminHttp.cjs');
 const { resolveCwd } = require('./projectHomeAdminRoutes.cjs');
 const macroLibrary = require('../persona-macro/macroLibrary.cjs');
+const { appendAuditEvent } = require('../telemetry/auditLog.cjs');
+
+/** Read + parse a JSON object body; on failure sends the 400 and returns null. */
+async function readJsonBody(req, res) {
+  let raw;
+  try {
+    raw = await readBody(req);
+  } catch (e) {
+    sendJson(res, 400, { ok: false, error: `request body rejected: ${e?.message ?? 'unreadable'}` });
+    return null;
+  }
+  let body;
+  try {
+    body = raw ? JSON.parse(raw) : {};
+  } catch {
+    sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+    return null;
+  }
+  if (body === null || typeof body !== 'object') {
+    sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
+    return null;
+  }
+  return body;
+}
 
 function listHandler(onChanged, libOpts) {
   return async (_req, res, query) => {
@@ -38,20 +68,8 @@ function listHandler(onChanged, libOpts) {
 
 function saveHandler(onChanged, libOpts) {
   return async (req, res) => {
-    let raw;
-    try {
-      raw = await readBody(req);
-    } catch (e) {
-      sendJson(res, 400, { ok: false, error: `request body rejected: ${e?.message ?? 'unreadable'}` });
-      return;
-    }
-    let body;
-    try {
-      body = raw ? JSON.parse(raw) : {};
-    } catch {
-      sendJson(res, 400, { ok: false, error: 'invalid JSON body' });
-      return;
-    }
+    const body = await readJsonBody(req, res);
+    if (!body) return;
     const resolved = resolveCwd(body.cwd);
     if (!resolved.ok) {
       sendJson(res, resolved.status, { ok: false, error: resolved.error });
@@ -101,10 +119,48 @@ function saveHandler(onChanged, libOpts) {
   };
 }
 
+function deleteHandler(onChanged, libOpts) {
+  return async (req, res) => {
+    const body = await readJsonBody(req, res);
+    if (!body) return;
+    const resolved = resolveCwd(body.cwd);
+    if (!resolved.ok) {
+      sendJson(res, resolved.status, { ok: false, error: resolved.error });
+      return;
+    }
+    if (typeof body.id !== 'string' || !body.id) {
+      sendJson(res, 400, { ok: false, error: 'id is required' });
+      return;
+    }
+    let result;
+    try {
+      result = await macroLibrary.removeMacroFromProject({ id: body.id, cwd: resolved.cwd }, libOpts);
+    } catch (e) {
+      sendJson(res, 400, { ok: false, error: e?.issues?.[0]?.message ?? e?.message ?? 'delete failed' });
+      return;
+    }
+    if (!result.ok) {
+      sendJson(res, 400, result);
+      return;
+    }
+    const origin = body.originClaudeSessionId;
+    appendAuditEvent('admin_macro_delete', {
+      route: '/admin/macros/delete',
+      cwd: resolved.cwd,
+      deleted: result.deleted,
+      macro: result.macro,
+      originClaudeSessionId: typeof origin === 'string' && origin.length >= 1 && origin.length <= 128 ? origin : null,
+    });
+    if (onChanged) onChanged();
+    sendJson(res, 200, result);
+  };
+}
+
 function registerAdminRoute(adminHttp, { onChanged } = {}, opts = {}) {
   const libOpts = opts.filePath ? { filePath: opts.filePath } : undefined;
   adminHttp.registerRoute('GET', '/admin/macros', listHandler(onChanged, libOpts));
   adminHttp.registerRoute('POST', '/admin/macros/save', saveHandler(onChanged, libOpts));
+  adminHttp.registerRoute('POST', '/admin/macros/delete', deleteHandler(onChanged, libOpts));
 }
 
 module.exports = {

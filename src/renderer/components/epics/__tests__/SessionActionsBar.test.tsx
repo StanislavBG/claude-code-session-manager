@@ -152,6 +152,15 @@ describe('SessionActionsBar', () => {
     expect(qa(el, 'hotkey-macro').map((b) => b.textContent)).toEqual(['Scan'])
   })
 
+  it('a macro removed from the library leaves the strip when macros:changed fires', async () => {
+    library = [macro({ id: 'gone', label: 'Gone' })]
+    const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
+    expect(qa(el, 'hotkey-macro')).toHaveLength(1)
+    library = []
+    await act(async () => { changed?.() })
+    expect(qa(el, 'hotkey-macro')).toHaveLength(0)
+  })
+
   it('blocks Save with empty label or prompt', async () => {
     const el = await mount(<SessionActionsBar onNew={vi.fn()} onSelect={vi.fn()} />)
     act(() => q(el, 'hotkey-new-macro')!.click())

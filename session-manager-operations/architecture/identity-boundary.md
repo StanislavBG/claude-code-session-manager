@@ -30,7 +30,7 @@ To set up a machine:
 
 To audit the tree, run `npm run identity:scan`. It exits 1 on any hit. No deny-list means nothing to check: the guard says so and exits 0, so read its output before trusting a pass.
 
-CI runs the same scan in the `ci` job from the `IDENTITY_DENYLIST` repo secret (one string per line). A push to `main` with no secret fails the step. A pull request with no secret only warns, because Dependabot and fork pull requests get no Actions secrets; the scan then runs on the push to `main`. A secret with no usable entries fails the step on every event, so on `main` a green step means the guard's pass line printed. A merge that Dependabot performs itself also runs without Actions secrets and fails the step, so merge its pull requests by hand. To set the secret, run `gh secret set IDENTITY_DENYLIST < ~/.config/bilko/identity-denylist`.
+CI runs the same scan in the `ci` job from the `IDENTITY_DENYLIST` repo secret (one string per line). A push to `main` with no secret fails the step. A pull request with no secret only warns, because Dependabot and fork pull requests get no Actions secrets; the scan then runs on the push to `main`. A secret with no usable entries fails the step on every event, so on `main` a green step means the guard's pass line printed. A merge that Dependabot performs itself also runs without Actions secrets and fails the step, so merge its pull requests by hand. The secret is a copy of the deny-list file. To set it, and again after every change to the file, run `gh secret set IDENTITY_DENYLIST < ~/.config/bilko/identity-denylist`. The Bilko repo keeps its own copy, so update that one too.
 
 `--no-verify` bypasses the hooks. Do not use it to get past the guard.
 

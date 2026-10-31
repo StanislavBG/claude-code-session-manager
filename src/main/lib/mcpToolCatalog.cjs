@@ -349,7 +349,10 @@ const MCP_TOOL_CATALOG = [
       + 'Turning an item into an Epic is done by the human via Open as Epic in the {F} feedback panel — there is no tool '
       + 'for it. A finding that belongs to another local project uses feedback_open_session instead.',
     exampleArgs: { pull: true, includeHidden: false },
-    notes: 'Returns { ok, items, pulled? }. Not-configured machines get { ok:false, error } as an error result.',
+    notes: 'Returns { ok, items, pulled? }. Not-configured machines get { ok:false, error } as an error result. '
+      + 'A customer machine stays not-configured by design. Owner setup is one-time per machine: the host token goes in '
+      + '~/.claude/session-manager/customer-feedback-owner.json; it cannot be minted locally. Steps: '
+      + 'session-manager-operations/architecture/customer-feedback.md, Owner setup.',
   },
   {
     name: 'customer_feedback_set_status',

@@ -69,7 +69,7 @@ Envelope: `{ schemaVersion: 1, items: InboxItem[], nextSince: string|null, nextM
 | | |
 | --- | --- |
 | Path | `~/.claude/session-manager/customer-feedback-owner.json` |
-| Owning module | `src/main/lib/feedback-remote/customerFeedbackInbox.cjs` (**read-only** — `loadOwnerConfig`; nothing in the app writes it, the owner authors it by hand) |
+| Owning module | `src/main/lib/feedback-remote/customerFeedbackInbox.cjs` (**read-only** — `loadOwnerConfig`, on every call; nothing in the app writes it, it is installed once per machine — see [Owner setup](#owner-setup-one-time-per-machine)) |
 | Write mode | None from the app |
 | Primary key | Singleton file — one row |
 | Cap / eviction | None |
@@ -77,11 +77,31 @@ Envelope: `{ schemaVersion: 1, items: InboxItem[], nextSince: string|null, nextM
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `token` | string | Host owner token. Presence (non-empty after trim) = owner mode. |
+| `token` | string | The host's `PROJECT_SNAPSHOT_TOKEN`. Presence (non-empty after trim) = owner mode. |
 | `projectCwd` | string \| null | Project that receives Open-as-Epic Epics; without it the button is disabled. |
 
 Env overrides, checked first: `SM_FEEDBACK_OWNER_TOKEN` (+ `SM_FEEDBACK_OWNER_PROJECT_CWD`). Base URL:
 `SM_FEEDBACK_ENDPOINT`, default `https://bilko.run`.
+
+#### Owner setup (one time, per machine)
+
+There is one feedback owner, because the slug and host are fixed. The token is a single host secret, not a
+per-install one: it cannot be minted locally, and customer machines never hold it, so this is not Field
+Manual material. It is also broader than this feature — the same bearer authorizes snapshot and event writes
+for every project slug on bilko.run (`checkBearer` in the Bilko repo's `server/routes/project-feedback.ts`).
+Never print it or put it in a tracked file.
+
+1. Take the value from a local holder: `SST_DASHBOARD_SNAPSHOT_TOKEN` in
+   `~/Projects/social-signals-trader/.env` is documented there to match the host. With no local holder, it is
+   the `PROJECT_SNAPSHOT_TOKEN` env var on the bilko.run Render service.
+2. Write `{ "token": "…", "projectCwd": "<session-manager checkout>" }` to the path above, mode `0600`.
+   `~/.claude` is a git repo; this file stays out of it only through that repo's allowlist `.gitignore`.
+3. No restart needed: the MCP tools see it on the next call, the {F} panel on its next open.
+4. Verify: `customer_feedback_list({ pull: true })` returns `ok: true`. An app reinstall leaves the file in
+   place; only a new machine repeats these steps.
+
+`401` means the host token was rotated: repeat from step 1. Rotation has no signal on this side, so a
+rotated token surfaces here first. `503` means the host has no token configured.
 
 ## Wire contract (bilko.run)
 

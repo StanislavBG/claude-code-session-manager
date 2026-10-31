@@ -53,6 +53,7 @@ const { planEpicSpawn } = require('./lib/epic/epicSpawnPlan.cjs');
 const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
 const logs = require('./logs.cjs');
 const { feedChildStdin } = require('./lib/process/childStdin.cjs');
+const memoryScope = require('./lib/process/memoryScope.cjs');
 const { createHeadTailBuffer } = require('./lib/util/headTailBuffer.cjs');
 
 // Caps on per-run stream buffers (a run can last hours).
@@ -742,9 +743,29 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // stdout is piped for real-time NDJSON streaming; stderr piped for
     // error-message capture.
     let thisChild;
+    // Memory-capped systemd scope for this attempt (null = unwrapped, today's path).
+    let scopeUnit = null;
+    let scopeStopped = false;
+    const stopAttemptScope = () => {
+      if (!scopeUnit || scopeStopped) return;
+      scopeStopped = true;
+      try { memoryScope.stopScope(scopeUnit); } catch { /* never fail the turn */ }
+    };
     try {
       const chatArgs = buildArgs(resumeFlag);
-      const target = claudeSpawnTarget('chat', sessionId, claudeBin, chatArgs);
+      let target = claudeSpawnTarget('chat', sessionId, claudeBin, chatArgs);
+      if (memoryScope.scopeSupported()) {
+        const limits = memoryScope.memoryLimitsFor({ totalRamMb: Math.floor(require('node:os').totalmem() / 1048576) });
+        if (limits) {
+          const unit = `sm-chat-${memoryScope.sanitizeUnit(sessionId)}-${attemptNo}-${Date.now()}`;
+          const wrapped = memoryScope.wrapInMemoryScope({
+            command: target.command, args: target.args || chatArgs, unit, limits,
+          });
+          // argv0 cannot pass through systemd-run — dropped on the wrapped path only.
+          target = { ...target, command: wrapped.command, args: wrapped.args, argv0: undefined };
+          scopeUnit = unit;
+        }
+      }
       thisChild = spawn(target.command, target.args || chatArgs, {
         ...(target.argv0 ? { argv0: target.argv0 } : {}),
         ...(target.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
@@ -754,6 +775,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
         ...detachedSpawnOpts(), // own process group so killTree can SIGTERM descendants
       });
     } catch (err) {
+      stopAttemptScope();
       clearTimeout(killTimer);
       clearTimeout(warnTimer);
       emitTerminal('chat:run:error', {
@@ -903,6 +925,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     });
 
     thisChild.on('error', (err) => {
+      stopAttemptScope();
       clearTimeout(killTimer);
       clearTimeout(warnTimer);
       emitTerminal('chat:run:error', {
@@ -920,6 +943,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // firing first and dropping the real chat:run:complete behind the
     // terminalSent latch.
     thisChild.on('close', (code, signal) => {
+      stopAttemptScope();
       // Flush any partial line that didn't end with \n
       if (lineBuffer.trim()) processLine(lineBuffer.trim());
 

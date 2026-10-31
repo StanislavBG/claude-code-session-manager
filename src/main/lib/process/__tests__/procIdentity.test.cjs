@@ -95,8 +95,12 @@ describe('procIdentity.isDifferentProcess — fail-closed decision', () => {
 
   it('true only when both sides are complete AND a field differs', () => {
     expect(isDifferentProcess(complete(), complete({ startTicks: 999 }))).toBe(true);
-    expect(isDifferentProcess(complete(), complete({ cmdline: 'node other' }))).toBe(true);
+    expect(isDifferentProcess(complete(), complete({ pid: 101 }))).toBe(true);
     expect(isDifferentProcess(complete(), complete())).toBe(false);
+  });
+
+  it('same pid + startTicks with a different cmdline is NOT different (exec keeps both; systemd-run --scope execs in place)', () => {
+    expect(isDifferentProcess(complete(), complete({ cmdline: 'node other' }))).toBe(false);
   });
 
   it('an incomplete recorded or live side never reads as different (fail closed)', () => {

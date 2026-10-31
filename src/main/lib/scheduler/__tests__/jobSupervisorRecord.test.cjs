@@ -76,3 +76,11 @@ test('classifyAdoption matrix', () => {
   expect(rec.classifyAdoption(base({ budgetMs: null, maxDurationMs: 100 }), { identity: same, pidAlive: true, logMtimeMs: 1_050, now: 1_200 })).toBe('over-budget');
   expect(rec.classifyAdoption(base({ budgetMs: null, idleKillMs: null }), { identity: same, pidAlive: true, now: 9e9 })).toBe('adopt');
 });
+
+test('classifyAdoption: systemd-run --scope exec (cmdline changed, pid + startTicks kept) still adopts', () => {
+  const r = base({ identity: { pid: 42, startTicks: 7, cmdline: 'systemd-run --user --scope --quiet', complete: true } });
+  const live = { pid: 42, startTicks: 7, cmdline: '/x/procnames/sm-claude-job -p', complete: true };
+  const c = (identity) => rec.classifyAdoption(r, { identity, pidAlive: true, logMtimeMs: 2_000, exitMarker: false, now: 2_000 });
+  expect(c(live)).toBe('adopt');
+  expect(c({ ...live, startTicks: 8 })).toBe('foreign-pid');
+});

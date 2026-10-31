@@ -16,6 +16,13 @@
  * all all read as "not different" — i.e. today's pid-only behaviour, never a
  * false positive that could wrongly break a live lock or veto a real kill.
  *
+ * Identity is pid + startTicks ONLY; cmdline is recorded but never compared.
+ * Why: exec keeps both pid and start time while replacing the cmdline, and
+ * `systemd-run --scope` execs the job in place — the identity taken right
+ * after spawn holds systemd-run's cmdline, the live job later holds its own.
+ * Comparing cmdline read a LIVE job as a foreign pid after an app restart.
+ * A recycled pid cannot repeat the same start time within a boot.
+ *
  * SM_PROC_ROOT overrides the /proc root — tests only, so stat/cmdline
  * fixtures can be written under a temp dir instead of touching real /proc.
  */
@@ -146,7 +153,8 @@ function identity(pid, { platform = process.platform, execFile = execFileSync } 
 
 /**
  * isDifferentProcess(recorded, live) — true ONLY when both sides are a
- * COMPLETE identity and differ. Every other case (missing side, incomplete
+ * COMPLETE identity and pid or startTicks differ. cmdline is NOT compared
+ * (see header: exec keeps pid + start time). Every other case (missing side, incomplete
  * side, a legacy record with no identity fields) is "not different", i.e.
  * today's pid-only behaviour — the fail-closed default.
  */
@@ -154,8 +162,7 @@ function isDifferentProcess(recorded, live) {
   if (!recorded || !live) return false;
   if (!recorded.complete || !live.complete) return false;
   return recorded.pid !== live.pid
-    || recorded.startTicks !== live.startTicks
-    || recorded.cmdline !== live.cmdline;
+    || recorded.startTicks !== live.startTicks;
 }
 
 module.exports = { identity, isDifferentProcess };

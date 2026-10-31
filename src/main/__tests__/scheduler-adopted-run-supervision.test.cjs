@@ -12,6 +12,7 @@
 import { test, expect, vi, beforeEach, afterEach } from 'vitest';
 const { superviseAdoptedRuns, evaluateAdoptedRun } = require('../lib/scheduler/adoptedRunSupervisor.cjs');
 const quietMachineLease = require('../lib/scheduler/quietMachineLease.cjs');
+const { isDifferentProcess: realIsDifferentProcess } = require('../lib/process/procIdentity.cjs');
 const { classifyBudgetKill } = require('../scheduler/budget.cjs');
 
 const MIN = 60_000;
@@ -140,4 +141,23 @@ test('a pid that is gone is never signalled; rows that stop running drop their s
   expect(live.registry.size).toBe(1);
   await superviseAdoptedRuns([{ slug: 'fin', status: 'completed', runId: 'r1' }], live.ctx);
   expect(live.registry.size).toBe(0);
+});
+
+test('exec case: recorded systemd-run cmdline vs live job cmdline (same pid + startTicks) keeps supervising', async () => {
+  const h = harness({
+    rows: [row('scoped')],
+    records: { scoped: record('scoped', {
+      startedAt: T0 - 50 * MIN,
+      identity: { pid: 4242, startTicks: 5, cmdline: 'systemd-run --user --scope --quiet', complete: true },
+    }) },
+  });
+  const makeDeps = h.ctx.makeDeps;
+  h.ctx.makeDeps = (j, rec) => ({
+    ...makeDeps(j, rec),
+    isDifferentProcess: realIsDifferentProcess,
+    identityOf: () => ({ pid: 4242, startTicks: 5, cmdline: '/x/procnames/sm-claude-job -p', complete: true }),
+  });
+  expect(await h.run()).toEqual(['scoped']);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(h.kills).toEqual([{ slug: 'scoped', pgid: 4242, signal: 'SIGTERM' }]); // still ours → budget kill fires
 });

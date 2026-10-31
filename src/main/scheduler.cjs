@@ -6492,10 +6492,15 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     // verdict owns the needs_review reason and the pattern hit is demoted to an
     // annotation, so a real "finish protocol incomplete" is distinguishable from
     // transcript noise in the queue (feedback 2026-06-10 addendum).
-    const guardWillRefire = verifyResult && verifyResult.downgradeTo === 'pending';
+    // The skip decision is one pure function (gitTreeGuard.commitGuardSkipped):
+    // re-fire, run_commit_not_landed, and completed-equivalent verdicts skip,
+    // except a worktree pass_no_commit_* run that left newly dirty files.
     const guardArtifactVerified = verifyResult?.verdict === 'pass_no_commit_artifact_verified';
-    const guardIsLegitimateNoOp = verifyResult && !guardArtifactVerified && COMPLETED_EQUIVALENT_VERDICTS.has(verifyResult.verdict);
-    if (res.exitCode === 0 && !res.rateLimited && !guardWillRefire && !guardIsLegitimateNoOp) {
+    if (res.exitCode === 0 && !res.rateLimited && !gitTreeGuard.commitGuardSkipped({
+      verifyResult,
+      ranInWorktree: Boolean(worktree.ok),
+      newlyDirty: newlyDirtyAll,
+    })) {
       // afterGuardCwd === null means non-git cwd (or git errored) —
       // best-effort skip, same as always; only a git-status result (even an
       // empty one) counts as evidence for the zero-edit path. newlyDirtyAll
@@ -6515,7 +6520,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           siblingRunning,
           ranInWorktree: worktree.ok,
           jobSelfCommitted,
-          legitimateNoOp: guardIsLegitimateNoOp,
+          legitimateNoOp: false,
           isFixPlanJob: resolveIsFixPlan(job.slug, job.isFixPlan),
           artifactVerified: guardArtifactVerified,
           verifyResult,

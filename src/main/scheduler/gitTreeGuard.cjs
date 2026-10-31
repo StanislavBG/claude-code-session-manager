@@ -11,6 +11,7 @@ const { execFile, execFileSync } = require('node:child_process');
 const gitWorktree = require('../lib/git/gitWorktree.cjs');
 const sharedGitExec = require('../lib/git/gitExec.cjs');
 const { resolveProjectRoot } = require('../lib/opsOwnership.cjs');
+const { COMPLETED_EQUIVALENT_VERDICTS } = require('../lib/scheduler/terminalRunOutcome.cjs');
 
 // Unquote a single git porcelain v1 path token. Defined once in
 // gitWorktree.cjs (which this file already requires — the reverse would be
@@ -662,6 +663,29 @@ async function landedCommitIsAncestorOfHead(cwd, sha) {
   }
 }
 
+/**
+ * Should spawnJob skip the commit guard for this run? Pure.
+ * Skips when the job is about to re-fire (downgradeTo pending), when the
+ * verdict is run_commit_not_landed (the stranded-commit verdict owns the row;
+ * the guard must not replace it with silent_no_op), and for completed-equivalent
+ * verdicts — EXCEPT pass_no_commit_artifact_verified (guard still runs), and
+ * except a pass_no_commit_* verdict in a worktree with newly dirty files: a
+ * worktree's dirt is attributable to the job, so it is real dropped work.
+ * @param {{verifyResult?: {verdict?: string, downgradeTo?: string|null}|null, ranInWorktree?: boolean, newlyDirty?: string[]|null}} a
+ * @returns {boolean}
+ */
+function commitGuardSkipped({ verifyResult, ranInWorktree, newlyDirty } = {}) {
+  if (!verifyResult) return false;
+  if (verifyResult.downgradeTo === 'pending') return true;
+  const verdict = verifyResult.verdict;
+  if (verdict === 'run_commit_not_landed') return true;
+  if (verdict === 'pass_no_commit_artifact_verified') return false;
+  if (!COMPLETED_EQUIVALENT_VERDICTS.has(verdict)) return false;
+  const dirty = Array.isArray(newlyDirty) && newlyDirty.length > 0;
+  if (ranInWorktree && dirty && String(verdict).startsWith('pass_no_commit')) return false;
+  return true;
+}
+
 module.exports = {
   splitRenamePorcelainField,
   parsePorcelainEntries,
@@ -688,4 +712,5 @@ module.exports = {
   evaluateDispatchSidecarReconcile,
   isQueueRowRegression,
   landedCommitIsAncestorOfHead,
+  commitGuardSkipped,
 };

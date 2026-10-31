@@ -4,9 +4,9 @@
  * delegation-readiness probe (delegationReadiness.cjs, PRD 1048). Exercises
  * evaluateDelegationChainHealth() directly since it's pure — no need to spawn
  * the full check() to cover shaping/degradation — plus one end-to-end check()
- * run against this repo's own real config, where every check is expected to
- * pass (this repo registers the scheduler MCP in its own .mcp.json and wires
- * guard-prd-writes in .claude/settings.json).
+ * run against a fixture home seeded with the chain's user-scope state
+ * (tests/helpers/delegationHome.cjs) plus this repo's tracked
+ * .claude/settings.json guard wiring, where every check must pass.
  *
  * Run: timeout 120 npx vitest run src/main/__tests__/health-delegation-chain.test.cjs
  */
@@ -15,6 +15,7 @@
 
 import { test, expect } from 'vitest';
 const { evaluateDelegationChainHealth, check } = require('../health.cjs');
+const { seedDelegationHome } = require('../../../tests/helpers/delegationHome.cjs');
 
 function makeCheck(id, ok, overrides = {}) {
   return { id, label: `${id} label`, ok, detail: `${id} detail`, fix: ok ? null : `fix ${id}`, ...overrides };
@@ -83,23 +84,26 @@ test('failing check with no fix omits the "(fix: ...)" suffix', () => {
   expect(issues[0]).not.toContain('(fix:');
 });
 
-test('end-to-end: check() reports delegation_chain for this repo, expected to pass here', async () => {
-  // Probes THIS machine's real user-scope config (~/.claude.json MCP registration, guard
-  // shims), so it reads the real home — not the per-run sandbox HOME. Read-only: scheduler
-  // state stays redirected to the sandbox (SM_SCHEDULER_HOME re-pinned after the HOME swap).
+test('end-to-end: check() reports delegation_chain ok with the chain installed in a fixture home', async () => {
+  // HOME points at a temp home seeded with the user-scope state; the real home is never read.
+  // Assigning HOME drops the sandbox SM_SCHEDULER_HOME override, so it is re-pinned.
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
   const sandboxHome = process.env.HOME;
   const sandboxSchedulerHome = process.env.SM_SCHEDULER_HOME;
-  process.env.HOME = require('node:os').userInfo().homedir;
-  if (sandboxSchedulerHome !== undefined) process.env.SM_SCHEDULER_HOME = sandboxSchedulerHome;
-  process.env.SM_ALLOW_LIVE_ROOT_READS = '1';
+  const fixtureHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-health-delegation-home-'));
   let status;
   try {
+    await seedDelegationHome(fixtureHome);
+    process.env.HOME = fixtureHome;
+    if (sandboxSchedulerHome !== undefined) process.env.SM_SCHEDULER_HOME = sandboxSchedulerHome;
     // skipTypecheck: this test asserts on delegation_chain only; the tsc shell-out was
     // ~15s of the ~16s idle runtime and starved to the 90s budget under CPU load.
     status = await check({ skipTypecheck: true });
   } finally {
-    delete process.env.SM_ALLOW_LIVE_ROOT_READS;
     process.env.HOME = sandboxHome;
+    fs.rmSync(fixtureHome, { recursive: true, force: true });
   }
   expect(status.components.delegation_chain).toBeDefined();
   expect(status.components.delegation_chain.checks).toHaveLength(9);
@@ -115,17 +119,7 @@ test('end-to-end: check() reports delegation_chain for this repo, expected to pa
     'inline-implementation-guard',
     'self-schedule-guard',
   ]);
-  // Whether each probe passes depends on the machine: a developer box registers the scheduler
-  // MCP in ~/.claude.json and installs guard shims under ~/.claude/session-manager/hooks, a CI
-  // checkout has neither (and .claude/settings.json is untracked). The contract under test is
-  // that check() reports the machine's real state faithfully, not that every machine is ready:
-  // component.ok is exactly "every check ok", and each failing check surfaces as one issue
-  // carrying its actionable fix.
   const checks = status.components.delegation_chain.checks;
-  expect(status.components.delegation_chain.ok).toBe(checks.every((c) => c.ok));
-  const failing = checks.filter((c) => !c.ok);
-  for (const c of failing) {
-    expect(c.fix, `failing check ${c.id} must say how to fix it`).toBeTruthy();
-    expect(status.issues.some((issue) => issue.includes(c.label))).toBe(true);
-  }
+  expect(checks.filter((c) => !c.ok).map((c) => c.id)).toEqual([]);
+  expect(status.components.delegation_chain.ok).toBe(true);
 }, 90_000);

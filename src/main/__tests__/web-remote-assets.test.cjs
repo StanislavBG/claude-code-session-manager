@@ -5,7 +5,7 @@
  * Run: timeout 300 npx vitest run src/main/__tests__/web-remote-assets.test.cjs
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest'
 
 const fsp = require('node:fs/promises')
 const path = require('node:path')
@@ -54,6 +54,37 @@ afterAll(async () => {
   remoteAssets.__test.setRoot(null)
   process.env.HOME = origHome
   await fsp.rm(tmpHome, { recursive: true, force: true })
+})
+
+describe('missingEntryFiles', () => {
+  const html = (extra = '') => `<html><head>${extra}<script type="module" src="./assets/app.js"></script><link rel="stylesheet" href="./assets/app.css"></head></html>`
+  async function withRoot(files) {
+    const d = await fsp.mkdtemp(path.join(tmpHome, 'mef-'))
+    for (const [n, c] of Object.entries(files)) {
+      await fsp.mkdir(path.dirname(path.join(d, n)), { recursive: true })
+      await fsp.writeFile(path.join(d, n), c)
+    }
+    remoteAssets.__test.setRoot(d)
+    return d
+  }
+  afterEach(() => remoteAssets.__test.setRoot(distDir))
+
+  it('nested assets/ layout reports app.js and app.css', async () => {
+    await withRoot({ 'index.html': html(), 'assets/app.js': 'x', 'assets/app.css': 'y' })
+    expect(remoteAssets.missingEntryFiles().sort()).toEqual(['app.css', 'app.js'])
+  })
+  it('flat layout returns []', async () => {
+    await withRoot({ 'index.html': html(), 'app.js': 'x', 'app.css': 'y' })
+    expect(remoteAssets.missingEntryFiles()).toEqual([])
+  })
+  it('ignores external Google Fonts links', async () => {
+    await withRoot({ 'index.html': html('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter"><link href="//fonts.gstatic.com/x.css" rel="stylesheet">'), 'app.js': 'x', 'app.css': 'y' })
+    expect(remoteAssets.missingEntryFiles()).toEqual([])
+  })
+  it('missing root returns [index.html]', () => {
+    remoteAssets.__test.setRoot(path.join(tmpHome, 'does-not-exist'))
+    expect(remoteAssets.missingEntryFiles()).toEqual(['index.html'])
+  })
 })
 
 describe('remoteAssets', () => {

@@ -40,8 +40,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         inlineDynamicImports: true,
-        entryFileNames: 'assets/app.js',
-        assetFileNames: (a) => (a.name?.endsWith('.css') ? 'assets/app.css' : 'assets/[name]-[hash][extname]'),
+        entryFileNames: 'app.js',
+        assetFileNames: (a) => (a.name?.endsWith('.css') ? 'app.css' : '[name]-[hash][extname]'),
       },
     },
   },

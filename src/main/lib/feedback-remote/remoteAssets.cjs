@@ -92,7 +92,31 @@ function readAsset(name) {
   };
 }
 
+/**
+ * Basenames of local stylesheet/script references in dist-web/index.html that the manifest
+ * cannot serve (e.g. nested under assets/). ['index.html'] when the root or index.html is absent.
+ */
+function missingEntryFiles() {
+  let html;
+  try { html = fs.readFileSync(path.join(webRoot(), 'index.html'), 'utf8'); } catch { return ['index.html']; }
+  const served = new Set(assetManifest().files.map((f) => f.name));
+  const refs = [];
+  for (const m of html.matchAll(/<script\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/gi)) refs.push(m[1]);
+  for (const m of html.matchAll(/<link\b[^>]*>/gi)) {
+    if (!/\brel\s*=\s*["']?stylesheet/i.test(m[0])) continue;
+    const h = /\bhref\s*=\s*["']([^"']+)["']/i.exec(m[0]);
+    if (h) refs.push(h[1]);
+  }
+  const missing = [];
+  for (const ref of refs) {
+    if (/^(https?:)?\/\//i.test(ref) || /^[a-z][a-z0-9+.-]*:/i.test(ref)) continue;
+    const name = path.basename(ref.split(/[?#]/)[0]);
+    if (name && !served.has(name) && !missing.includes(name)) missing.push(name);
+  }
+  return missing;
+}
+
 module.exports = {
-  assetManifest, readAsset, MAX_ASSET_BYTES,
+  assetManifest, readAsset, missingEntryFiles, MAX_ASSET_BYTES,
   __test: { setRoot: (p) => { _rootOverride = p; } },
 };

@@ -63,6 +63,8 @@
     "manual:build": "node web/manual/build.mjs",
     "manual:figures": "xvfb-run -a node web/manual/capture-figures.mjs",
     "lint:selectors": "node scripts/check-unstable-selectors.cjs",
+    "hooks:install": "bash scripts/install-git-hooks.sh",
+    "identity:scan": "bash scripts/identity-guard.sh tree",
     "lint:hooks": "node scripts/check-conditional-hooks.cjs",
     "lint:docs": "node scripts/check-doc-hierarchy.cjs",
     "lint:paths": "node scripts/check-ops-path-literals.cjs",

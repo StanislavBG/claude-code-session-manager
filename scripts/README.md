@@ -1,6 +1,6 @@
 # scripts/
 
-Five invocation mechanisms live here: npm scripts, a systemd timer, `.claude/settings.json` hooks, plugin skills, and manual one-shots. This is the index.
+Six invocation mechanisms live here: npm scripts, a systemd timer, `.claude/settings.json` hooks, git hooks, plugin skills, and manual one-shots. This is the index.
 
 scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may require from scripts/.
 
@@ -9,6 +9,8 @@ scripts/lib was moved into src/main/lib (2026-09); nothing under src/ may requir
 | script | invoked by | shipped on npm |
 | --- | --- | --- |
 | audit-ops-hygiene.cjs | manual | yes |
+| identity-guard.sh | `npm run identity:scan` (CI `ci` job) and the git hooks from install-git-hooks.sh; rule in `session-manager-operations/architecture/identity-boundary.md` | no |
+| install-git-hooks.sh | `npm run hooks:install`, manual, once per clone and after any guard change | no |
 | bench/main-bench.cjs | `npm run bench` (main-process micro-benches, plain Node); renderer half is `npm run bench:renderer` (`tests/bench/`, `vitest.bench.config.ts`, not in `test:unit`) | no |
 | page-surface.cjs | manual and by the page steward personas `.claude/agents/page-*.md`; derives a page's owned/shared files, window.api methods, main handlers and tests | no |
 | check-page-stewards.cjs | `npm run lint:page-stewards` (in `lint`) — every nav page has a valid `.claude/agents/page-<key>.md` steward persona; ratchets PENDING | no |

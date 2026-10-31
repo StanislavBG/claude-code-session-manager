@@ -140,3 +140,66 @@ describe('identity-guard.sh', () => {
     expect(r.out.toLowerCase()).not.toContain(EMAIL);
   });
 });
+
+describe('install-git-hooks.sh', () => {
+  const { readFileSync, copyFileSync, existsSync, statSync } = require('node:fs');
+  const SCRIPTS = join(__dirname, '..');
+  const isolatedGit = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  let dir;
+  let repo;
+  let denylist;
+
+  const env = () => ({ ...process.env, ...isolatedGit, BILKO_IDENTITY_DENYLIST: denylist });
+  const git = (...args) => spawnSync('git', args, { cwd: repo, encoding: 'utf-8', env: env(), timeout: 30_000 });
+  const install = () =>
+    spawnSync('bash', ['scripts/install-git-hooks.sh'], { cwd: repo, encoding: 'utf-8', env: env(), timeout: 30_000 });
+  const hooksDir = () => join(repo, '.git', 'hooks');
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'install-hooks-'));
+    repo = join(dir, 'repo');
+    mkdirSync(join(repo, 'scripts'), { recursive: true });
+    denylist = join(dir, 'denylist');
+    writeFileSync(denylist, `${EMAIL}\n`);
+    for (const f of ['identity-guard.sh', 'install-git-hooks.sh']) copyFileSync(join(SCRIPTS, f), join(repo, 'scripts', f));
+    git('init', '-q', '-b', 'main');
+    git('config', 'user.name', 'Bilko');
+    git('config', 'user.email', 'bilko@bilko.run');
+  });
+
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('installs hooks that reject a deny-listed commit without echoing the value, and accept a clean one', () => {
+    const i = install();
+    expect(i.status).toBe(0);
+    for (const h of ['pre-commit', 'commit-msg', 'pre-push']) expect(existsSync(join(hooksDir(), h))).toBe(true);
+    writeFileSync(join(repo, 'leak.md'), `contact ${EMAIL}\n`);
+    git('add', 'leak.md');
+    const bad = git('commit', '-q', '-m', 'add leak');
+    expect(bad.status).not.toBe(0);
+    expect(`${bad.stdout}${bad.stderr}`.toLowerCase()).not.toContain(EMAIL);
+    git('reset', '-q');
+    writeFileSync(join(repo, 'ok.md'), 'clean\n');
+    git('add', 'ok.md');
+    expect(git('commit', '-q', '-m', 'add ok').status).toBe(0);
+  });
+
+  it('refuses to replace a foreign hook, leaving it untouched', () => {
+    mkdirSync(hooksDir(), { recursive: true });
+    const foreign = join(hooksDir(), 'pre-commit');
+    writeFileSync(foreign, '#!/bin/sh\necho mine\n');
+    const r = install();
+    expect(r.status).toBe(1);
+    expect(readFileSync(foreign, 'utf-8')).toBe('#!/bin/sh\necho mine\n');
+  });
+
+  it('is idempotent and warns when there is no deny-list', () => {
+    expect(install().status).toBe(0);
+    expect(install().status).toBe(0);
+    rmSync(denylist);
+    const r = install();
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain('no deny-list');
+    expect(statSync(join(repo, 'scripts', 'install-git-hooks.sh')).isFile()).toBe(true);
+  });
+});

@@ -190,6 +190,8 @@ const MacroSetProjectSchema = z.object({
   enabled: z.boolean(),
 });
 
+const MacroRemoveFromProjectSchema = z.object({ id: MacroIdSchema, cwd: AbsolutePathSchema });
+
 function defaultFilePath() {
   return path.join(schedulerHome(), 'macros.json');
 }
@@ -617,6 +619,39 @@ async function setMacroProject(input, opts = {}) {
   });
 }
 
+/**
+ * One project gives up a macro. The macro is deleted when `cwd` was its last
+ * project; otherwise only `cwd` is dropped, so one project can never take a
+ * button from another. Refuses a built-in, a '*' macro, and a macro not listed
+ * for `cwd`. Returns `{ ok: true, deleted, macro }` or `{ ok: false, error }`;
+ * when `deleted`, `macro` is the removed copy.
+ */
+async function removeMacroFromProject(input, opts = {}) {
+  const { id, cwd } = MacroRemoveFromProjectSchema.parse(input);
+  const filePath = resolvePath(opts);
+  const target = normalizeCwd(cwd);
+  return serialize(async () => {
+    const macros = await loadForWrite(filePath, opts);
+    const idx = macros.findIndex((m) => m.id === id);
+    if (idx === -1) return { ok: false, error: `macro not found: ${id}` };
+    const macro = macros[idx];
+    if (macro.builtin) return { ok: false, error: 'built-in macros cannot be deleted' };
+    if (macro.projects.includes(ALL_PROJECTS)) {
+      return { ok: false, error: `macro ${id} is shown in every project; only the human can remove it, from the HOT KEYS panel` };
+    }
+    if (!macro.projects.includes(target)) return { ok: false, error: `macro ${id} is not visible to ${target}` };
+    const projects = macro.projects.filter((p) => p !== target);
+    if (projects.length === 0) {
+      await writeStore(filePath, macros.filter((m) => m.id !== id));
+      return { ok: true, deleted: true, macro };
+    }
+    const updated = { ...macro, projects, updatedAt: new Date().toISOString() };
+    macros[idx] = updated;
+    await writeStore(filePath, macros);
+    return { ok: true, deleted: false, macro: updated };
+  });
+}
+
 module.exports = {
   ALL_PROJECTS,
   MACRO_INPUT_MAX_LEN,
@@ -626,6 +661,7 @@ module.exports = {
   MacroSaveSchema,
   MacroDeleteSchema,
   MacroSetProjectSchema,
+  MacroRemoveFromProjectSchema,
   macroPlaceholders,
   defaultMacroValues,
   renderMacroPrompt,
@@ -635,6 +671,7 @@ module.exports = {
   saveMacro,
   deleteMacro,
   setMacroProject,
+  removeMacroFromProject,
   defaultFilePath,
   ensureBuiltins,
 };

@@ -598,3 +598,64 @@ test('macroAllowsAutoStart', () => {
   expect(lib.macroAllowsAutoStart({}, '/work/b')).toBe(false);
   expect(lib.macroAllowsAutoStart(null, '/work/b')).toBe(false);
 });
+
+// --- removeMacroFromProject --------------------------------------------------
+
+test('removeMacroFromProject rejects malformed input', async () => {
+  await expect(lib.removeMacroFromProject({ id: '', cwd: '/a' }, opts)).rejects.toThrow();
+  await expect(lib.removeMacroFromProject({ id: 'x', cwd: 'rel/path' }, opts)).rejects.toThrow();
+});
+
+test('removeMacroFromProject deletes when cwd was the last project', async () => {
+  const m = await lib.saveMacro(base({ projects: ['/a'] }), opts);
+  const r = await lib.removeMacroFromProject({ id: m.id, cwd: '/a' }, opts);
+  expect(r).toEqual({ ok: true, deleted: true, macro: m });
+  expect(await lib.listMacros(opts)).toEqual([]);
+});
+
+test('removeMacroFromProject drops only cwd when others remain', async () => {
+  const m = await lib.saveMacro(base({ projects: ['/a', '/b'] }), opts);
+  const r = await lib.removeMacroFromProject({ id: m.id, cwd: '/a/' }, opts);
+  expect(r.ok).toBe(true);
+  expect(r.deleted).toBe(false);
+  expect(r.macro.projects).toEqual(['/b']);
+  expect(r.macro.updatedAt).not.toBe(m.updatedAt);
+  expect(r.macro).toEqual({ ...m, projects: ['/b'], updatedAt: r.macro.updatedAt });
+  expect(await lib.listMacros(opts)).toEqual([r.macro]);
+});
+
+test('removeMacroFromProject refusals leave macros.json byte-identical', async () => {
+  const one = await lib.saveMacro(base({ projects: ['/a'] }), opts);
+  const all = await lib.saveMacro(base({ label: 'Everywhere', projects: ['*'] }), opts);
+  const none = await lib.saveMacro(base({ label: 'Nowhere', projects: [] }), opts);
+  const before = fs.readFileSync(filePath);
+  const cases = [
+    [{ id: 'missing', cwd: '/a' }, 'macro not found: missing'],
+    [{ id: all.id, cwd: '/a' }, `macro ${all.id} is shown in every project; only the human can remove it, from the HOT KEYS panel`],
+    [{ id: one.id, cwd: '/zzz' }, `macro ${one.id} is not visible to /zzz`],
+    [{ id: none.id, cwd: '/a' }, `macro ${none.id} is not visible to /a`],
+  ];
+  for (const [input, error] of cases) {
+    expect(await lib.removeMacroFromProject(input, opts)).toEqual({ ok: false, error });
+    expect(fs.readFileSync(filePath).equals(before)).toBe(true);
+  }
+});
+
+test('removeMacroFromProject refuses a built-in', async () => {
+  const o = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V1 };
+  await lib.listMacros(o);
+  const before = fs.readFileSync(filePath);
+  expect(await lib.removeMacroFromProject({ id: 'builtin-test-one', cwd: '/a' }, o))
+    .toEqual({ ok: false, error: 'built-in macros cannot be deleted' });
+  expect(fs.readFileSync(filePath).equals(before)).toBe(true);
+});
+
+test('removeMacroFromProject and saveMacro run concurrently without loss', async () => {
+  const m = await lib.saveMacro(base({ projects: ['/a'] }), opts);
+  const [r, created] = await Promise.all([
+    lib.removeMacroFromProject({ id: m.id, cwd: '/a' }, opts),
+    lib.saveMacro(base({ label: 'Other', projects: ['/c'] }), opts),
+  ]);
+  expect(r.ok).toBe(true);
+  expect(await lib.listMacros(opts)).toEqual([created]);
+});

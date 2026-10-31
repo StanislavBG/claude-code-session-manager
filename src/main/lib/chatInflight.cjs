@@ -58,10 +58,31 @@ function end(sessionId) {
   return enqueue((all) => { delete all[sessionId]; });
 }
 
+const RECOVERED_KEY = '__recovered';
+
 /** @returns {Promise<object[]>} */
 async function list() {
   await chain;
-  return Object.values(await readAll());
+  const all = await readAll();
+  return Object.entries(all).filter(([k]) => k !== RECOVERED_KEY).map(([, v]) => v);
 }
 
-module.exports = { begin, end, list, ledgerPath };
+/** Stamp a session as boot-recovered now (separate key, survives begin/end). */
+function markRecovered(sessionId, at = Date.now()) {
+  if (!sessionId) return Promise.resolve();
+  return enqueue((all) => {
+    const m = all[RECOVERED_KEY] && typeof all[RECOVERED_KEY] === 'object' ? all[RECOVERED_KEY] : {};
+    for (const [k, v] of Object.entries(m)) if (at - Number(v) > 7 * 86400000) delete m[k];
+    m[sessionId] = at;
+    all[RECOVERED_KEY] = m;
+  });
+}
+
+/** @returns {Promise<Record<string, number>>} sessionId → last recovery ms */
+async function recoveredMap() {
+  await chain;
+  const m = (await readAll())[RECOVERED_KEY];
+  return m && typeof m === 'object' ? m : {};
+}
+
+module.exports = { begin, end, list, ledgerPath, markRecovered, recoveredMap };

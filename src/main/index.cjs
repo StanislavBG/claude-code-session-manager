@@ -1090,6 +1090,22 @@ try {
   logs.writeLine({ scope: 'main', level: 'error', message: 'ops retention IPC registration failed', meta: { error: e?.message } });
 }
 chatRunner.registerChatHandlers();
+// Boot recovery of chat turns that were in flight when the app last died (once, after handlers).
+try {
+  const chatInflight = require('./lib/chatInflight.cjs');
+  const { identity } = require('./lib/process/procIdentity.cjs');
+  require('./lib/chatBootRecovery.cjs').recoverInflightTurns({
+    ledger: chatInflight,
+    run: (o) => chatRunner.run(o),
+    holdOrphan: chatRunner.holdOrphanSession,
+    releaseOrphan: chatRunner.releaseOrphanSession,
+    identityOf: identity,
+    readTranscriptTail: async (cwd, tabId) => (await promptSessionTranscript.readTurns(cwd, tabId, { limit: 1 }))[0] || null,
+    notify: (channel, payload) => sendIfAlive(mainWindow, channel, payload),
+  }).catch((e) => logs.writeLine({ scope: 'main', level: 'error', message: 'chat boot recovery failed', meta: { error: e?.message } }));
+} catch (e) {
+  logs.writeLine({ scope: 'main', level: 'error', message: 'chat boot recovery wiring failed', meta: { error: e?.message } });
+}
 
 // Direct in-process PRD authoring for a queued PromptTicket classified
 // 'develop' (PRD 749 follow-up) — calls the same createPrd() the admin HTTP

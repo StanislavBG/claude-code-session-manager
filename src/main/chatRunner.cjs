@@ -366,6 +366,11 @@ const dispatching = new Set();
 // "Session ID … is already in use", so pump() refuses to start a second run
 // for a held sessionId (it waits in `waiting` like any other blocked run).
 const liveSessions = new Set();
+// sessionIds whose previous-boot CLI child is still alive (chatBootRecovery): run() for
+// them waits in `waiting` until released, so a second writer is never spawned.
+const orphanSessions = new Set();
+function holdOrphanSession(sessionId) { if (sessionId) orphanSessions.add(sessionId); }
+function releaseOrphanSession(sessionId) { orphanSessions.delete(sessionId); pump(); }
 // Submissions parked while a New Epic's fire-and-forget worktree mint is still in
 // flight (tabId → opts). Counted by run()'s tabBusy; cancel() can drop them.
 const pendingStart = new Map();
@@ -384,6 +389,7 @@ function __resetQueueForTests() {
   inFlight.clear();
   dispatching.clear();
   liveSessions.clear();
+  orphanSessions.clear();
   waiting.length = 0;
   pendingStart.clear();
   sessionSlots.__resetForTests();
@@ -432,6 +438,7 @@ function run(opts) {
   const tabBusy = inFlight.has(opts.tabId)
     || dispatching.has(opts.tabId)
     || liveSessions.has(opts.sessionId)
+    || orphanSessions.has(opts.sessionId)
     || pendingStart.has(opts.tabId)
     || waiting.some((w) => w.tabId === opts.tabId);
   if (tabBusy && opts.silent) {
@@ -471,7 +478,7 @@ function pump() {
     // synchronous sweep of this loop could start two runs for the same tab and
     // race two --resume processes against a single sessionId.
     const idx = waiting.findIndex((w) => !inFlight.has(w.tabId) && !dispatching.has(w.tabId)
-      && !liveSessions.has(w.sessionId));
+      && !liveSessions.has(w.sessionId) && !orphanSessions.has(w.sessionId));
     // Everything queued is blocked behind its own tab's live run; the settle()
     // of that run re-pumps.
     if (idx === -1) break;
@@ -1199,6 +1206,8 @@ module.exports = {
   run,
   cancel,
   __resetQueueForTests,
+  holdOrphanSession,
+  releaseOrphanSession,
   __liveSessionCount: () => liveSessions.size,
   attachWindow,
   registerChatHandlers,

@@ -185,3 +185,36 @@ test('strandedCommitVerdict: null when landed or nothing stranded', () => {
   assert.equal(strandedCommitVerdict({ worktreeHead: { stranded: [{ sha: 'abc', ref: 'r' }] }, landedCommit: 'x' }), null);
   assert.equal(strandedCommitVerdict({ worktreeHead: { stranded: [] }, landedCommit: null }), null);
 });
+
+// ── real-git: carried base WIP the job left alone is not the job's dirt ──
+async function dirtyBaseSetup(name) {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), `sm-carried-${name}-`));
+  gitIn(cwd, 'init', '-q', '-b', 'main');
+  gitIn(cwd, 'config', 'user.email', 't@example.com');
+  gitIn(cwd, 'config', 'user.name', 't');
+  fs.writeFileSync(path.join(cwd, 'a.txt'), 'a\n');
+  gitIn(cwd, 'add', '-A');
+  gitIn(cwd, 'commit', '-q', '-m', 'init');
+  fs.writeFileSync(path.join(cwd, 'a.txt'), 'a wip\n');
+  const worktree = await realJw.createJobWorktree({ cwd, slug: `carried-${name}` });
+  if (!worktree.ok) throw new Error(JSON.stringify(worktree));
+  const runDir = path.join(cwd, '.run');
+  fs.mkdirSync(runDir, { recursive: true });
+  return { cwd, worktree, runDir, slug: `carried-${name}` };
+}
+const finCarried = (s) => finalizeJobWorktree({ job: { slug: s.slug }, runDir: s.runDir, worktree: s.worktree, guardCwd: s.cwd, carriedPaths: s.worktree.carriedPaths, deps: { isRunCancelled: async () => false } });
+
+test('real git: dirty base, job leaves carried path alone → not in worktreeLeftoverDirty', async () => {
+  const s = await dirtyBaseSetup('same');
+  assert.deepEqual(s.worktree.carriedPaths, ['a.txt']);
+  assert.equal(fs.readFileSync(path.join(s.worktree.dir, 'a.txt'), 'utf8'), 'a wip\n');
+  const r = await finCarried(s);
+  assert.ok(!r.worktreeLeftoverDirty.includes('a.txt'), JSON.stringify(r.worktreeLeftoverDirty));
+});
+
+test('real git: dirty base, job edits carried path further → still in worktreeLeftoverDirty', async () => {
+  const s = await dirtyBaseSetup('edited');
+  fs.writeFileSync(path.join(s.worktree.dir, 'a.txt'), 'a job edit\n');
+  const r = await finCarried(s);
+  assert.ok(r.worktreeLeftoverDirty.includes('a.txt'), JSON.stringify(r.worktreeLeftoverDirty));
+});

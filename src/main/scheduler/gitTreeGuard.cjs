@@ -671,17 +671,23 @@ async function landedCommitIsAncestorOfHead(cwd, sha) {
  * verdicts — EXCEPT pass_no_commit_artifact_verified (guard still runs), and
  * except a pass_no_commit_* verdict in a worktree with newly dirty files: a
  * worktree's dirt is attributable to the job, so it is real dropped work.
+ * Also a `clean` verdict in a worktree with dirt and no landedCommit (a
+ * fix-plan PASS whose edits would be dropped) is not skipped; with a landed
+ * commit it still skips.
  * @param {{verifyResult?: {verdict?: string, downgradeTo?: string|null}|null, ranInWorktree?: boolean, newlyDirty?: string[]|null}} a
  * @returns {boolean}
  */
-function commitGuardSkipped({ verifyResult, ranInWorktree, newlyDirty } = {}) {
+function commitGuardSkipped({ verifyResult, ranInWorktree, newlyDirty, landedCommit } = {}) {
   if (!verifyResult) return false;
   if (verifyResult.downgradeTo === 'pending') return true;
   const verdict = verifyResult.verdict;
   if (verdict === 'run_commit_not_landed') return true;
   if (verdict === 'pass_no_commit_artifact_verified') return false;
-  if (!COMPLETED_EQUIVALENT_VERDICTS.has(verdict)) return false;
   const dirty = Array.isArray(newlyDirty) && newlyDirty.length > 0;
+  // A fix-plan PASS gets verdict `clean`; in a worktree with own dirt and no
+  // landed commit its edits would be dropped, so the guard must run.
+  if (verdict === 'clean' && ranInWorktree && dirty && !landedCommit) return false;
+  if (!COMPLETED_EQUIVALENT_VERDICTS.has(verdict)) return false;
   if (ranInWorktree && dirty && String(verdict).startsWith('pass_no_commit')) return false;
   return true;
 }

@@ -253,7 +253,9 @@ test.each([
   ['downgradeTo pending', v('deps_unmet', 'pending'), false, [], true],
   ['run_commit_not_landed', v('run_commit_not_landed', 'needs_review'), true, ['a.cjs'], true],
   ['clean, in place', v('clean'), false, [], true],
-  ['clean, worktree, dirty (clean still skips)', v('clean'), true, ['a.cjs'], true],
+  ['clean, worktree, dirty, no landed commit (fix-plan PASS, edits dropped)', v('clean'), true, ['a.cjs'], false],
+  ['clean, worktree, clean tree', v('clean'), true, [], true],
+  ['clean, in place, dirty', v('clean'), false, ['a.cjs'], true],
   ['pass_no_commit_already_shipped in place + dirt', v('pass_no_commit_already_shipped'), false, ['a.cjs'], true],
   ['pass_no_commit_prior_run_verified worktree, clean tree', v('pass_no_commit_prior_run_verified'), true, [], true],
   ['pass_no_commit_prior_run_verified worktree, null dirt', v('pass_no_commit_prior_run_verified'), true, null, true],
@@ -263,6 +265,26 @@ test.each([
   ['other verdict', v('transcript_errors', 'needs_review'), false, [], false],
 ])('commitGuardSkipped: %s', (_name, verifyResult, ranInWorktree, newlyDirty, expected) => {
   expect(gitTreeGuard.commitGuardSkipped({ verifyResult, ranInWorktree, newlyDirty })).toBe(expected);
+});
+
+test('commitGuardSkipped: clean, worktree, dirty but a commit landed → still skips', () => {
+  expect(gitTreeGuard.commitGuardSkipped({ verifyResult: v('clean'), ranInWorktree: true, newlyDirty: ['a.cjs'], landedCommit: 'abc123' })).toBe(true);
+});
+
+test('fix-plan worktree job with verdict clean and dirt reaches commitGuardVerdict → uncommitted_changes', () => {
+  const verifyResult = v('clean');
+  const newlyDirty = ['src/main/edited.cjs'];
+  expect(gitTreeGuard.commitGuardSkipped({ verifyResult, ranInWorktree: true, newlyDirty, landedCommit: null })).toBe(false);
+  const verdict = commitGuardVerdict({
+    newlyDirty,
+    siblingRunning: false,
+    ranInWorktree: true,
+    jobSelfCommitted: false,
+    legitimateNoOp: false,
+    isFixPlanJob: true,
+    verifyResult,
+  });
+  expect(verdict?.verdict).toBe('uncommitted_changes');
 });
 
 test('worktree pass_no_commit_prior_run_verified with one dirty path is not skipped and reaches commitGuardVerdict → uncommitted_changes', () => {

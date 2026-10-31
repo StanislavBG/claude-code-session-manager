@@ -5690,6 +5690,12 @@ async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardC
         console.log(`[scheduler] ${job.slug}: salvaged ${salvage.bytes} byte(s) of uncommitted worktree diff to ${salvagePath}`);
       }
     }
+    // Carried base WIP the job left byte-identical to the base is not the job's
+    // dirt. Filtered AFTER the salvage so the patch still holds the full diff.
+    if (worktreeLeftoverDirty.length && Array.isArray(carriedPaths) && carriedPaths.length && typeof jw.unchangedCarriedPaths === 'function') {
+      const same = new Set(await jw.unchangedCarriedPaths({ cwd: guardCwd, dir: worktree.dir, paths: carriedPaths }));
+      if (same.size) worktreeLeftoverDirty = worktreeLeftoverDirty.filter((p) => !same.has(p));
+    }
     // Where did HEAD end up? A commit on a detached HEAD must end on the job
     // branch (fast-forward) or be pinned (diverged) before the checkout goes.
     if (typeof jw.reconcileWorktreeHead === 'function') {
@@ -6282,6 +6288,11 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
           ...worktreeLeftoverDirty,
         ])]);
 
+    // The dirt the commit guard judges: a worktree run is judged on its own
+    // worktree's real dirt only (main-checkout changes belong to the owner or
+    // a sibling); an in-place run on the baseline delta.
+    const jobDirt = worktree.ok ? stripAppOwnedChurn(worktreeLeftoverDirty) : newlyDirtyAll;
+
     if (res.launchFailure) {
       await handleLaunchFailure({ job, res, runId, runDir, launchKey, launchEnv, claudeVersion: claudeVersionNow });
       return;
@@ -6506,14 +6517,15 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     if (res.exitCode === 0 && !res.rateLimited && !gitTreeGuard.commitGuardSkipped({
       verifyResult,
       ranInWorktree: Boolean(worktree.ok),
-      newlyDirty: newlyDirtyAll,
+      newlyDirty: jobDirt,
+      landedCommit: jobLandedCommitThisRun,
     })) {
       // afterGuardCwd === null means non-git cwd (or git errored) —
       // best-effort skip, same as always; only a git-status result (even an
       // empty one) counts as evidence for the zero-edit path. newlyDirtyAll
       // was computed once, above, right after the try/finally.
       if (afterGuardCwd !== null) {
-        const newlyDirty = newlyDirtyAll;
+        const newlyDirty = jobDirt || [];
         const guardState = await readQueue().catch(() => ({ jobs: [] }));
         const siblingRunning = (guardState.jobs || []).some(
           (j) => j.slug !== job.slug && j.status === 'running' && (j.cwd || defaultCwd) === guardCwd,

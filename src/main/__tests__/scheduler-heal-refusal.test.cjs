@@ -55,6 +55,14 @@ test('an honest no-op exemption verdict still heals when the job recorded its ow
   expect(healRefusalReason(job, { verdict: 'pass_no_commit_already_shipped', reason: 'x' }, false)).toBeNull();
 });
 
+test('pass_no_commit with no landedCommit is refused a heal (a sibling commit is not this job\'s)', () => {
+  const job = { slug: '2411-edit-only', verifierVerdict: 'pass_no_commit', landedCommit: null };
+  const refusal = healRefusalReason(job, CLEAN, true);
+  expect(refusal).toBeTruthy();
+  expect(refusal).toContain('pass_no_commit');
+  expect(healRefusalReason({ ...job, landedCommit: 'deadbee' }, CLEAN, true)).toBeNull();
+});
+
 test('null/missing inputs never throw and never refuse', () => {
   expect(healRefusalReason(null, CLEAN, true)).toBeNull();
   expect(healRefusalReason({ slug: 'x' }, null, true)).toBeNull();

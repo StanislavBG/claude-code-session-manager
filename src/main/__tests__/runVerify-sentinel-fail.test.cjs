@@ -108,6 +108,14 @@ test('parseLog extracts deduplicated transcriptCommitShas from committed gitOper
   assert.equal(r.transcriptCommitLanded, true);
 });
 
+test('parseLog collects cherry-picked SHAs but still excludes amended', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'parselog-cp-'));
+  const mk = (sha, kind) => ({ type: 'user', tool_use_result: { gitOperation: { commit: { sha, kind } } } });
+  writeLog(dir, 's', [mk('aaa1111', 'cherry-picked'), mk('bbb2222', 'amended'), mk('ccc3333', 'committed')]);
+  const r = parseLog(path.join(dir, 's.log'));
+  assert.deepEqual(r.transcriptCommitShas, ['aaa1111', 'ccc3333']);
+});
+
 test('legacy NEEDS_HUMAN line is classified exactly like FAIL, text as reason', async () => {
   const { verdict, sidecar } = await run('SCHEDULER_VERDICT: NEEDS_HUMAN need the prod token', false, { committedDuringRun: false });
   assert.equal(verdict.verdict, 'sentinel_fail');

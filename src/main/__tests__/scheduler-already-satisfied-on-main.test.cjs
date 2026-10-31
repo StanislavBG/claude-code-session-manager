@@ -47,6 +47,17 @@ test('silent_no_op + a satisfying commit on main → completed-shaped verdict na
   expect(outcome.reason).toMatch(/5de4134abc123/);
 });
 
+// PRD 2411: verifyRun no longer exempts an edit-only no-commit PASS by tracked
+// paths; the 655 shape reaches already_satisfied_on_main through the commit guard.
+test('655 shape: no-commit PASS whose declared paths landed after queuedAt → already_satisfied_on_main (completed)', () => {
+  const guardVerdict = commitGuardVerdict({
+    newlyDirty: [], siblingRunning: false, jobSelfCommitted: false,
+    legitimateNoOp: false, isFixPlanJob: false, verifyResult: null,
+  });
+  const outcome = resolveCommitGuardOutcome(guardVerdict, ['e13168d']);
+  expect(outcome.verdict).toBe('already_satisfied_on_main');
+});
+
 // AC 2: the inverse — same clean-tree/no-commit shape, but NO commit on main
 // satisfies it → still parks as the existing 'finish protocol incomplete'
 // verdict. The gate must not be weakened into always-passing.

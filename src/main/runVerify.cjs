@@ -28,6 +28,8 @@
  *   verify_unavailable → 'needs_review' (unreadable log / verifier threw)
  *   no_verdict_sentinel → 'needs_review'
  *   abandoned_background_task → 'needs_review'
+ *   run_commit_not_landed → 'needs_review' (PASS but transcript SHA unreachable)
+ *   pass_no_commit_already_shipped → historical rows only; no longer emitted
  *
  * Time complexity: O(N·L) where N = log line count, L = avg content line count.
  * The log is read once with readFileSync (700 KB typical; well within Node.js
@@ -129,8 +131,9 @@ function parseLog(logPath) {
     if (obj.type === 'system' && obj.subtype === 'vcs_state_changed' && obj.kind === 'commit') {
       transcriptCommitLanded = true;
     }
-    if (obj.tool_use_result?.gitOperation?.commit?.kind === 'committed') {
-      transcriptCommitLanded = true;
+    const gitOpKind = obj.tool_use_result?.gitOperation?.commit?.kind;
+    if (gitOpKind === 'committed' || gitOpKind === 'cherry-picked') {
+      if (gitOpKind === 'committed') transcriptCommitLanded = true;
       const sha = obj.tool_use_result.gitOperation.commit.sha;
       if (typeof sha === 'string' && sha) transcriptCommitShaSet.add(sha);
     }
@@ -499,83 +502,6 @@ function isGitRepo(cwd) {
   }
 }
 
-// ─── already-shipped postcondition exemption (original PRD re-runs) ─────────
-
-const PRD_DELIVERABLE_PATH_RE = /(?:^|[`\s(])((?:src|scripts|session-manager-operations|test|tests|docs|bin)\/[A-Za-z0-9_./-]*[A-Za-z0-9_-]\.[A-Za-z0-9]+)\b/g;
-
-// Repo-root config files a PRD can legitimately name as its only deliverable.
-// Deliberately an exact-name allowlist, not a general root-file pattern:
-// a loose rule would match prose mentions (README.md, queue.json) and grant
-// false exemptions. Incident: PRD 816 named vitest.config.ts as its primary
-// deliverable and it was silently dropped from extraction.
-const PRD_ROOT_CONFIG_DELIVERABLES = [
-  'package.json',
-  'tsconfig.json',
-  'vitest.config.ts',
-  'vite.config.ts',
-  'playwright.config.ts',
-  'eslint.config.js',
-  'tailwind.config.js',
-  'postcss.config.js',
-];
-
-/**
- * Extract the deliverable file paths a PRD body names — backticked or bare
- * paths under a source dir with a file extension (e.g. `src/main/lib/foo.cjs`,
- * `src/renderer/components/Bar.tsx`, `scripts/baz.cjs`), plus any allowlisted
- * repo-root config filename named as a whole word (e.g. `vitest.config.ts`).
- * Deliberately narrow: only repo-relative paths under a known source root or
- * an exact-name root-config allowlist, no globs, no node_modules, no URLs.
- * O(n) over the PRD body length.
- */
-function extractPrdDeliverablePaths(prdBody) {
-  if (typeof prdBody !== 'string' || !prdBody) return [];
-  const seen = new Set();
-  const out = [];
-  let m;
-  PRD_DELIVERABLE_PATH_RE.lastIndex = 0;
-  while ((m = PRD_DELIVERABLE_PATH_RE.exec(prdBody)) !== null) {
-    const p = m[1];
-    if (p.includes('node_modules') || p.includes('..') || seen.has(p)) continue;
-    seen.add(p);
-    out.push(p);
-  }
-  for (const name of PRD_ROOT_CONFIG_DELIVERABLES) {
-    if (seen.has(name)) continue;
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`(?:^|[\`\\s(])${escaped}(?:[\`\\s)]|$)`);
-    if (re.test(prdBody)) {
-      seen.add(name);
-      out.push(name);
-    }
-  }
-  return out;
-}
-
-/**
- * Materially check whether every deliverable path a PRD names is already
- * tracked in git — i.e. the PRD's work landed in an EARLIER run/commit and
- * this run correctly had nothing to do. Uses `git ls-files --error-unmatch`
- * (bounded, execImpl injectable for tests). Fails safe in every direction:
- * any error, a non-git cwd, or zero paths returns false, which falls straight
- * through to today's pass_no_commit behavior.
- */
-function allDeliverablesAlreadyTracked({ cwd, paths, execImpl = execFileSync, timeoutMs = 15_000 }) {
-  if (!Array.isArray(paths) || paths.length === 0) return false;
-  try {
-    execImpl('git', ['ls-files', '--error-unmatch', '--', ...paths], {
-      cwd: cwd || process.cwd(),
-      timeout: timeoutMs,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-
 /**
  * Material check for a DECLARED artifact-only PRD (`deliverable: artifact` +
  * `artifactPaths`). Returns true only when every declared path resolves inside
@@ -718,7 +644,7 @@ async function verifyRun({
     }
 
     // ── 2. Parse log ───────────────────────────────────────────────────────
-    const { events, resultEvent, error: parseError, transcriptCommitLanded } = parseLog(logPath);
+    const { events, resultEvent, error: parseError, transcriptCommitLanded, transcriptCommitShas } = parseLog(logPath);
 
     if (parseError) {
       return conclude('verify_unavailable', `log unreadable: ${parseError}`, 'needs_review');
@@ -848,7 +774,22 @@ async function verifyRun({
     // bare PASS with no commit from one is still a strong silent-failure
     // signal and stays covered by this check.
     const isFixPlanJob = /^\d+-fix-/.test(queueEntry?.slug || '');
-    if (sentinel === 'pass' && !commitEvidence && !isFixPlanJob) {
+    // A transcript-reported commit that is not reachable from the repo was
+    // dropped (detached HEAD, off-branch); no no-commit exemption may excuse it.
+    let unlandedTranscriptShas = [];
+    if (sentinel === 'pass' && !commitEvidence && cwdIsGitRepo) {
+      unlandedTranscriptShas = (transcriptCommitShas || [])
+        .filter((sha) => !isAncestorCommit({ cwd: queueEntry?.cwd, sha }));
+    }
+    if (unlandedTranscriptShas.length > 0) {
+      issues.push({
+        verdict: 'run_commit_not_landed',
+        reason: 'SCHEDULER_VERDICT: PASS but the transcript reports a commit that is not reachable from the repo: '
+          + unlandedTranscriptShas.join(', '),
+        priority: 1,
+        downgradeTo: 'needs_review',
+      });
+    } else if (sentinel === 'pass' && !commitEvidence && !isFixPlanJob) {
       // EXEMPTION: `-merge-main` PRDs (see isMergeMainSlug) can genuinely and
       // correctly find nothing left to do when an out-of-band actor (a human,
       // another agent, a sibling scheduler job) already merged/updated the
@@ -889,9 +830,7 @@ async function verifyRun({
       // re-checked every AC item, found it all already implemented by an
       // earlier run of this exact PRD, declined to make a no-op commit, and
       // printed a truthful PASS" is correct, idempotent behavior — the
-      // systemic false-failure class this exemption exists to catch (distinct
-      // from the already-shipped exemption below, which looks at PRD-named
-      // file paths rather than a specific prior run's SHA).
+      // systemic false-failure class this exemption exists to catch.
       // (Incident: 812-workbench-review-nits-cleanup, 2026-07-31 — re-fired
       // ~24 min after its own prior run landed 00d891c; re-verified,
       // re-ran typecheck + 17 green tests, made no new commit, printed a
@@ -913,34 +852,6 @@ async function verifyRun({
           },
         );
       }
-      // EXEMPTION: an ORIGINAL PRD re-queued after its deliverables already
-      // landed. "I checked, the work is already committed and green, nothing
-      // to change" is a truthful PASS, not a silent no-op — the same
-      // reasoning that exempts fix-plan slugs above. Materially checked
-      // against real git state, never inferred from the transcript.
-      // (Incident: 655-needs-review-rca-feedback-hook, 2026-07-31 — verified
-      // rcaFeedbackHook.cjs shipped in e13168d, ran typecheck + 23 green
-      // tests, made no commit, printed a truthful PASS, and was parked
-      // anyway.)
-      let alreadyShipped = false;
-      if (!mergeMainVerified && !priorRunVerified) {
-        const deliverablePaths = extractPrdDeliverablePaths(prdBody);
-        if (deliverablePaths.length > 0
-          && allDeliverablesAlreadyTracked({ cwd: queueEntry?.cwd, paths: deliverablePaths })) {
-          alreadyShipped = true;
-          return conclude(
-            'pass_no_commit_already_shipped',
-            `SCHEDULER_VERDICT: PASS with no commit, but every PRD-named deliverable path is already `
-              + `tracked in git (${deliverablePaths.join(', ')}) — this PRD's work landed in an earlier run`,
-            null,
-            {
-              ...(annotations.length ? { annotations } : {}),
-              sentinel,
-              alreadyTrackedPaths: deliverablePaths,
-            },
-          );
-        }
-      }
       // EXEMPTION: a PRD that DECLARES `deliverable: artifact` + `artifactPaths`
       // (all deliverables live in a git-excluded dir, so "no commit" is
       // correct). Reads the declared list from frontmatter — never scrapes
@@ -950,7 +861,7 @@ async function verifyRun({
       // through to pass_no_commit below. The commit guard separately requires
       // a clean tree for this verdict (scheduler.cjs commitGuardVerdict).
       let artifactVerified = false;
-      if (!mergeMainVerified && !priorRunVerified && !alreadyShipped) {
+      if (!mergeMainVerified && !priorRunVerified) {
         let fm = null;
         try { fm = parsePrdFile(prdFullText).frontmatter; } catch { fm = null; }
         if (fm && fm.deliverable === 'artifact' && Array.isArray(fm.artifactPaths) && fm.artifactPaths.length > 0) {
@@ -976,7 +887,7 @@ async function verifyRun({
           }
         }
       }
-      if (!mergeMainVerified && !priorRunVerified && !alreadyShipped && !artifactVerified) {
+      if (!mergeMainVerified && !priorRunVerified && !artifactVerified) {
         issues.push({
           verdict: 'pass_no_commit',
           reason: 'SCHEDULER_VERDICT: PASS but no commit landed during the run window — the run claims success but produced no code change',
@@ -1020,8 +931,6 @@ module.exports = {
   isMergeMainSlug,
   extractMergeMainPrNumber,
   checkMergeablePr,
-  extractPrdDeliverablePaths,
-  allDeliverablesAlreadyTracked,
   artifactsVerifiedOnDisk,
   isAncestorCommit,
   isGitRepo,

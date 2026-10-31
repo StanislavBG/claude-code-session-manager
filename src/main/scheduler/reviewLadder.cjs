@@ -165,8 +165,9 @@ function fixSlugFor(job) {
 // fix-plan job flagged before that exemption shipped gets a genuinely
 // different verdict on rescan (2026-07-12: false-positive cascade where
 // investigation jobs correctly found "nothing to fix" but were flagged
-// anyway). For non-fix-plan jobs the exemption never applies, so rescanning
-// their pass_no_commit verdict is a harmless no-op (same facts, same verdict).
+// anyway). For non-fix-plan jobs the exemption never applies, so a rescan
+// reaches the same verdict, and healRefusalReason refuses to heal a
+// pass_no_commit row off a repo-wide commit that is not this job's own.
 const RESCANNABLE_VERDICTS = new Set(['transcript_errors', 'verify_unavailable', 'no_verdict_sentinel', 'abandoned_background_task', 'pass_no_commit', 'pass_no_commit_already_shipped']);
 // RESCANNABLE_VERDICTS is a HINT, not a gate: it names the verdicts whose
 // recovery rung is a transcript re-verification (verifyRun). Every other
@@ -491,7 +492,7 @@ function isFixPlanDead(job, jobsInProject) {
 // committedDuringRun repo-wide-not-per-job attribution problem) — the PRD 983
 // incident mechanism above applies identically, so it gets the same guard
 // rather than a carve-out that would silently reopen the same false-heal hole.
-const NO_ATTRIBUTABLE_COMMIT_VERDICTS = new Set(['no_verdict_sentinel', 'abandoned_background_task']);
+const NO_ATTRIBUTABLE_COMMIT_VERDICTS = new Set(['no_verdict_sentinel', 'abandoned_background_task', 'pass_no_commit']);
 
 function healRefusalReason(job, verdict, committedDuringRun) {
   if (!job || !verdict) return null;

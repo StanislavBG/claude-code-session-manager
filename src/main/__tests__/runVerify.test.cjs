@@ -705,18 +705,22 @@ test('pass_no_commit: fix-plan job (slug ^\\d+-fix-) with PASS but no commit is 
   }
 });
 
-// ─── pass_no_commit_already_shipped: original PRD re-run after landing ─────
-// (incident: 655-needs-review-rca-feedback-hook, 2026-07-31)
+// ─── edit-only PASS with no commit is no longer exempted ────────────────────
+// (pass_no_commit_already_shipped is retired; the verdict name stays only for
+// historical rows. A true re-run completes via prior_run_verified or the
+// commit guard's already_satisfied_on_main.)
 
-const { extractPrdDeliverablePaths, allDeliverablesAlreadyTracked } = require('../runVerify.cjs');
 const REPO_ROOT = path.resolve(__dirname, '../../..');
+const REPO_ROOT_COMMIT_EARLY = execFileSync('git', ['rev-list', '--max-parents=0', 'HEAD'], {
+  cwd: REPO_ROOT, encoding: 'utf8',
+}).trim().split('\n')[0];
 
-test('pass_no_commit: original PRD, PASS no commit, all deliverable paths already tracked in git → pass_no_commit_already_shipped', async () => {
+test('pass_no_commit: edit-only PRD, PASS no commit, every named path tracked → pass_no_commit (needs_review)', async () => {
   const tmp = makeTmpDir();
   try {
     const slug = '655-needs-review-rca-feedback-hook';
-    writeLog(tmp, slug, noOpRunEvents('Verified rcaReport.cjs already shipped in e13168d; typecheck + tests green; no commit needed.\nSCHEDULER_VERDICT: PASS'));
-    const prdPath = writePrd(tmp, slug, 'Deliverables: `src/main/lib/scheduler/rcaReport.cjs` and `src/main/__tests__/rcaReport.test.cjs`.');
+    writeLog(tmp, slug, noOpRunEvents('Verified rcaReport.cjs already shipped; no commit needed.\nSCHEDULER_VERDICT: PASS'));
+    const prdPath = writePrd(tmp, slug, 'Deliverables: `src/main/runVerify.cjs` and `src/main/__tests__/runVerify.test.cjs`.');
     const verdict = await verifyRun({
       runDir: tmp,
       prdPath,
@@ -724,38 +728,76 @@ test('pass_no_commit: original PRD, PASS no commit, all deliverable paths alread
       allJobs: [],
       committedDuringRun: false,
     });
-    assert.equal(verdict.verdict, 'pass_no_commit_already_shipped', `expected already-shipped exemption, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, null);
+    assert.equal(verdict.verdict, 'pass_no_commit', `got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.downgradeTo, 'needs_review');
   } finally {
     rmdir(tmp);
   }
 });
 
-test('pass_no_commit: original PRD, PASS no commit, one deliverable path untracked → falls through to pass_no_commit', async () => {
+test('runVerify no longer exports the deliverable-path helpers', () => {
+  const mod = require('../runVerify.cjs');
+  assert.equal(mod.extractPrdDeliverablePaths, undefined);
+  assert.equal(mod.allDeliverablesAlreadyTracked, undefined);
+});
+
+// ─── run_commit_not_landed: transcript reports an unreachable commit ────────
+const UNREACHABLE_SHA = '0000000000000000000000000000000000000001';
+function committedEvent(sha, kind = 'committed') {
+  return { type: 'user', tool_use_result: { gitOperation: { commit: { sha, kind } } } };
+}
+
+for (const [label, slug] of [
+  ['original PRD', '2411-some-original-prd'],
+  ['fix-plan slug', '2411-fix-some-original-prd'],
+]) {
+  test(`run_commit_not_landed: ${label}, PASS, unreachable transcript SHA → needs_review naming the SHA`, async () => {
+    const tmp = makeTmpDir();
+    try {
+      writeLog(tmp, slug, [committedEvent(UNREACHABLE_SHA), ...noOpRunEvents('Done.\nSCHEDULER_VERDICT: PASS')]);
+      const prdPath = writePrd(tmp, slug, 'prose only');
+      const verdict = await verifyRun({
+        runDir: tmp,
+        prdPath,
+        queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
+        allJobs: [],
+        committedDuringRun: false,
+      });
+      assert.equal(verdict.verdict, 'run_commit_not_landed', `got ${verdict.verdict}: ${verdict.reason}`);
+      assert.equal(verdict.downgradeTo, 'needs_review');
+      assert.ok(verdict.reason.includes(UNREACHABLE_SHA));
+    } finally {
+      rmdir(tmp);
+    }
+  });
+}
+
+test('run_commit_not_landed: outranks a reachable priorLandedCommit exemption', async () => {
   const tmp = makeTmpDir();
   try {
-    const slug = '655-needs-review-rca-feedback-hook';
-    writeLog(tmp, slug, noOpRunEvents('Nothing to do here.\nSCHEDULER_VERDICT: PASS'));
-    const prdPath = writePrd(tmp, slug, 'Deliverables: `src/main/lib/scheduler/rcaReport.cjs` and `src/main/lib/does-not-exist-xyz.cjs`.');
+    const slug = '2411-some-original-prd';
+    writeLog(tmp, slug, [committedEvent(UNREACHABLE_SHA), ...noOpRunEvents('Done.\nSCHEDULER_VERDICT: PASS')]);
+    const prdPath = writePrd(tmp, slug, 'prose only');
     const verdict = await verifyRun({
       runDir: tmp,
       prdPath,
       queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
       allJobs: [],
       committedDuringRun: false,
+      priorLandedCommit: REPO_ROOT_COMMIT_EARLY,
     });
-    assert.equal(verdict.verdict, 'pass_no_commit', `expected fallback to pass_no_commit, got ${verdict.verdict}: ${verdict.reason}`);
+    assert.equal(verdict.verdict, 'run_commit_not_landed', `got ${verdict.verdict}: ${verdict.reason}`);
   } finally {
     rmdir(tmp);
   }
 });
 
-test('pass_no_commit: original PRD, PASS no commit, zero extractable deliverable paths → falls through to pass_no_commit', async () => {
+test('run_commit_not_landed: a reachable transcript SHA does not trigger it', async () => {
   const tmp = makeTmpDir();
   try {
-    const slug = '999-some-vague-prd';
-    writeLog(tmp, slug, noOpRunEvents('Nothing to do here.\nSCHEDULER_VERDICT: PASS'));
-    const prdPath = writePrd(tmp, slug, 'This PRD names no file paths at all, just prose.');
+    const slug = '2411-some-original-prd';
+    writeLog(tmp, slug, [committedEvent(REPO_ROOT_COMMIT_EARLY), ...noOpRunEvents('Done.\nSCHEDULER_VERDICT: PASS')]);
+    const prdPath = writePrd(tmp, slug, 'prose only');
     const verdict = await verifyRun({
       runDir: tmp,
       prdPath,
@@ -763,102 +805,7 @@ test('pass_no_commit: original PRD, PASS no commit, zero extractable deliverable
       allJobs: [],
       committedDuringRun: false,
     });
-    assert.equal(verdict.verdict, 'pass_no_commit', `expected fallback to pass_no_commit, got ${verdict.verdict}: ${verdict.reason}`);
-  } finally {
-    rmdir(tmp);
-  }
-});
-
-// (incident: 812-commit-guard-retry-on-worktree-ref-visibility-delay — a
-// stale scheduler process, booted before the already-shipped exemption
-// landed, produced a false pass_no_commit for exactly this shape of re-run)
-test('pass_no_commit: commit-guard-retry PRD naming scheduler.cjs + its committed-in-window test, PASS no commit → pass_no_commit_already_shipped', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '812-commit-guard-retry-on-worktree-ref-visibility-delay';
-    writeLog(tmp, slug, noOpRunEvents('Retry + tests already present; nothing to change.\nSCHEDULER_VERDICT: PASS'));
-    const prdPath = writePrd(
-      tmp,
-      slug,
-      'Deliverables: `src/main/scheduler.cjs` and `src/main/__tests__/scheduler-committed-in-window.test.cjs`.',
-    );
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
-      allJobs: [],
-      committedDuringRun: false,
-    });
-    assert.equal(verdict.verdict, 'pass_no_commit_already_shipped', `expected already-shipped exemption, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, null);
-  } finally {
-    rmdir(tmp);
-  }
-});
-
-test('extractPrdDeliverablePaths: extracts backticked repo-relative paths, ignores prose', () => {
-  const body = 'Deliverables: `src/main/lib/scheduler/rcaReport.cjs` and `src/main/__tests__/rcaReport.test.cjs`. Also see node_modules/foo/bar.js which should be excluded.';
-  const paths = extractPrdDeliverablePaths(body);
-  assert.deepEqual(paths, ['src/main/lib/scheduler/rcaReport.cjs', 'src/main/__tests__/rcaReport.test.cjs']);
-  assert.deepEqual(extractPrdDeliverablePaths(''), []);
-  assert.deepEqual(extractPrdDeliverablePaths(undefined), []);
-});
-
-test('allDeliverablesAlreadyTracked: fail-safe on empty paths, non-git cwd, and git errors', () => {
-  assert.equal(allDeliverablesAlreadyTracked({ cwd: REPO_ROOT, paths: [] }), false);
-  assert.equal(allDeliverablesAlreadyTracked({
-    cwd: REPO_ROOT,
-    paths: ['src/main/runVerify.cjs'],
-    execImpl: () => { throw new Error('boom'); },
-  }), false);
-  assert.equal(allDeliverablesAlreadyTracked({
-    cwd: REPO_ROOT,
-    paths: ['src/main/runVerify.cjs'],
-    execImpl: () => '',
-  }), true);
-});
-
-// ─── repo-root config deliverable extraction ────────────────────────────────
-// (incident: 816-vitest-register-runverify-test, 2026-07-31 — PRD named only
-// `vitest.config.ts` as its deliverable; the source-dir-only regex extracted
-// nothing, so allDeliverablesAlreadyTracked early-returned false even though
-// the config edit was already tracked in git)
-
-test('extractPrdDeliverablePaths: extracts a root-config file alongside a src path', () => {
-  const body = 'Register the test in `vitest.config.ts` and port `src/main/__tests__/runVerify.test.cjs` onto vitest.';
-  const paths = extractPrdDeliverablePaths(body);
-  assert.deepEqual(new Set(paths), new Set(['vitest.config.ts', 'src/main/__tests__/runVerify.test.cjs']));
-});
-
-test('extractPrdDeliverablePaths: root-config-only PRD body yields a non-empty result', () => {
-  const body = 'The only deliverable is `vitest.config.ts` — add the missing test.include entry.';
-  const paths = extractPrdDeliverablePaths(body);
-  assert.deepEqual(paths, ['vitest.config.ts']);
-});
-
-test('extractPrdDeliverablePaths: nested or non-allowlisted root files do not produce spurious root-config entries', () => {
-  const body = 'See `some/nested/package.json` for the dependency, and update README.md with notes.';
-  const paths = extractPrdDeliverablePaths(body);
-  assert.equal(paths.includes('package.json'), false);
-  assert.equal(paths.includes('README.md'), false);
-  assert.deepEqual(paths, []);
-});
-
-test('pass_no_commit: root-config-only PRD, PASS no commit, config already tracked → pass_no_commit_already_shipped', async () => {
-  const tmp = makeTmpDir();
-  try {
-    const slug = '816-vitest-register-runverify-test';
-    writeLog(tmp, slug, noOpRunEvents('Registered already in vitest.config.ts; 48 tests green.\nSCHEDULER_VERDICT: PASS'));
-    const prdPath = writePrd(tmp, slug, 'Deliverable: register the test file in `vitest.config.ts`.');
-    const verdict = await verifyRun({
-      runDir: tmp,
-      prdPath,
-      queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
-      allJobs: [],
-      committedDuringRun: false,
-    });
-    assert.equal(verdict.verdict, 'pass_no_commit_already_shipped', `expected already-shipped exemption, got ${verdict.verdict}: ${verdict.reason}`);
-    assert.equal(verdict.downgradeTo, null);
+    assert.notEqual(verdict.verdict, 'run_commit_not_landed');
   } finally {
     rmdir(tmp);
   }

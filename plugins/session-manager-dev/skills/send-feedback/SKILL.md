@@ -148,6 +148,14 @@ stays a plain proposal. If the quote cannot be verified, the call silently falls
 back to a normal `proposed` session (the result note gives the reason), so
 report it as a proposal in that case.
 
+**Auto-start from a macro.** If the human started THIS session by pressing a
+macro whose auto-start setting allows the target project, bug and feature
+proposals there start without any quote: pass no `autoStart` flag and no
+`humanRequestQuote`, and do not try to set the setting yourself (it is edited
+only in the macro editor). It reaches only that one hop, at most 5 times per
+session, and `discussion` or other tags stay plain proposals. The result status
+tells you which happened.
+
 `fromEpicId` is filled in automatically from your running session; pass it
 explicitly only if you know it and the auto-fill failed. When it resolves, a
 receipt is chained onto your own session's event log so your transcript records
@@ -161,8 +169,8 @@ human sees the motivation, plan and acceptance criteria on the proposal before
 approving.
 
 If the result status is `auto-approved`, say instead that the session was
-auto-approved on the human's request and is starting in `<toCwd>` — not that it
-is done.
+auto-approved (on the human's request, or by the macro they pressed) and is
+starting in `<toCwd>` — not that it is done.
 
 Do **not** say the other project has been notified-and-is-working-on-it, that
 the bug is filed/fixed/assigned, or that you'll follow up when they respond.

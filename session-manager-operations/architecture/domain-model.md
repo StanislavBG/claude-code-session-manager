@@ -149,12 +149,28 @@ scoping scheme.
   `proposed`. When the tool call carries `autoStart: true` + `humanRequestQuote`, main stamps `source.autoApprove`
   only if the quote is verified, and the receiving renderer then approves and starts it through the normal
   `approveProposed` path. Verification is fail-closed; anything unverifiable degrades to the ordinary proposal:
-  - `humanPromptLedger` is fed only by `chat:run` prompts with origin `'human'`. Terminal-view and Web Remote
+  - `humanPromptLedger` is fed only by `chat:run` prompts with origin `'human'` (and the first prompt of a
+    phone-started session, which goes through `launchSession`). Terminal-view prompts and later Web Remote
     prompts never reach it, so they do not qualify.
   - The quote must appear verbatim in a human prompt, from the originating chat session, that names the target
     project.
   - Identity is `SM_CHAT_SESSION_ID` (MCP env, set only for interactive chat runs), so a scheduler job has no
     identity to match and can never auto-start. Agent-initiated proposals still wait for a human.
+- **A granted macro press also auto-starts a cross-project proposal.** Second ground beside the verified quote;
+  the mint is still `proposed` and the receiving renderer approves it through the same `approveProposed` path
+  (`source.autoApprove.requestedBy: 'macro'`). The human pressing the macro and listing the target is the consent:
+  - The setting (`autoStartTargets`: Off / All / Selected) is set only in the macro editor. The agent passes no
+    flag and no quote.
+  - The sender Epic is resolved only from `SM_CHAT_SESSION_ID`, never from the agent-supplied `fromEpicId`, and
+    must be a `new-epic-ui` Epic carrying a `macroId`. The receiving Epic's producer is
+    `cross-project-feedback`, so it can never chain: one hop.
+  - Limit of 5 grants per sending session (released if the mint fails). Bug and feature tags only.
+  - PRD jobs stay proposal-only: a scheduler job has no chat session identity, so it matches no macro.
+  - The auto-started Epic gets the full composed persona and mission opening prompt, a no-ask turn
+    instruction (`autoStartedSession.cjs`), and, if its first turn leaves no PRD queued, exactly one automatic
+    follow-up turn telling it to run `/develop`.
+  - Anything denied (macro gone, target not allowed, wrong tag, limit hit) degrades to an ordinary proposal
+    with the reason in the result.
 - **A scheduler job's question comes back to the session that wrote the PRD.** A `needs_review` park is a
   question, not a result: `lib/scheduler/rcaReport.cjs` writes a root-cause report beside the run log and
   `scheduler.cjs`'s `flushDueReviewNotices` appends it as a `response` event on the authoring Epic (resolved from

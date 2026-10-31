@@ -246,7 +246,8 @@ const MCP_TOOL_CATALOG = [
     whenToUse: 'Use to programmatically continue a conversation in a tab that is already open in the running app.',
     whenNotToUse: 'Do not use to start new work in a project you are not already chatting in — that is /develop (scheduler_create_prd) or feedback_open_session.',
     exampleArgs: { tabId: 'a1b2c3d4-tab-id', prompt: 'Please continue with the next step.' },
-    notes: 'No-ops if the tab is unknown/closed.',
+    notes: 'tabId is an open tab\'s id or an Epic id (Epic chats are keyed by Epic id), never a Claude session id. '
+      + 'A refused send (unknown tab/Epic) returns ok false with disposition and reason; an unconfirmed send (no window or ack timeout) stays ok true.',
   },
   {
     name: 'feedback_list_projects',

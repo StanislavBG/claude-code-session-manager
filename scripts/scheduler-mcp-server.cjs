@@ -387,7 +387,7 @@ const TOOLS = [
     inputSchema: {
       type: 'object',
       properties: {
-        tabId: { type: 'string', description: 'Target tab id (claudeSessionId) that must already be open in the app' },
+        tabId: { type: 'string', description: "Target id: an open tab's id or an Epic id (Epic chats are keyed by Epic id). Never a Claude session id." },
         prompt: { type: 'string', description: 'Prompt text to enqueue' },
       },
       required: ['tabId', 'prompt'],

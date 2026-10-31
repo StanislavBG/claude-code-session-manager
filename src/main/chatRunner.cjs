@@ -1140,8 +1140,12 @@ function registerAdminRoute(adminHttp) {
       sendJson(res, 400, { ok: false, error: e?.message ?? 'invalid body' });
       return;
     }
-    void enqueueExternalPrompt(body.tabId, body.prompt);
-    sendJson(res, 200, { ok: true });
+    const outcome = await enqueueExternalPrompt(body.tabId, body.prompt);
+    sendJson(res, 200, {
+      ok: outcome.disposition !== 'refused',
+      disposition: outcome.disposition,
+      ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
+    });
   });
 }
 
@@ -1221,6 +1225,7 @@ module.exports = {
   WARN_CEILING_MS,
   __setExecutor,
   enqueueExternalPrompt,
+  settleExternalSend,
   EXTERNAL_SEND_ACK_TIMEOUT_MS,
   requestExternalNewSession,
   registerAdminRoute,

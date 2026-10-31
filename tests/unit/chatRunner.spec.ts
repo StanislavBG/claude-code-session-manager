@@ -92,6 +92,8 @@ const chatRunner = require('../../src/main/chatRunner.cjs') as {
   KILL_CEILING_MIN: number
   WARN_CEILING_MS: number
   enqueueExternalPrompt: (tabId: string, prompt: string) => void
+  settleExternalSend: (r: { requestId: unknown; disposition: string; reason?: string }) => void
+  EXTERNAL_SEND_ACK_TIMEOUT_MS: number
   registerAdminRoute: (adminHttp: { registerRoute: (method: string, url: string, handler: (req: unknown, res: unknown) => Promise<void>) => void }) => void
 }
 
@@ -708,8 +710,12 @@ describe('registerAdminRoute (PRD 753)', () => {
     const handler = routes.get('POST /admin/chat/send-prompt')
     expect(handler).toBeTruthy()
 
+    vi.useFakeTimers()
     const { req, res } = fakeReqRes(JSON.stringify({ tabId: 'tab-admin', prompt: 'hi from admin route' }))
-    await handler!(req, res)
+    const pending = handler!(req, res)
+    await vi.advanceTimersByTimeAsync(chatRunner.EXTERNAL_SEND_ACK_TIMEOUT_MS)
+    await pending
+    vi.useRealTimers()
 
     expect(sent).toEqual([
       {
@@ -718,7 +724,46 @@ describe('registerAdminRoute (PRD 753)', () => {
       },
     ])
     expect(res.statusCode).toBe(200)
-    expect(JSON.parse(res.body!)).toEqual({ ok: true })
+    expect(JSON.parse(res.body!)).toEqual({ ok: true, disposition: 'unconfirmed', reason: 'timeout' })
+  })
+
+  function setup(sent: Array<{ channel: string; payload: Record<string, unknown> }>) {
+    chatRunner.attachWindow({
+      isDestroyed: () => false,
+      webContents: { isDestroyed: () => false, send: (channel: string, payload: Record<string, unknown>) => sent.push({ channel, payload }) },
+    })
+    const routes = new Map<string, (req: unknown, res: unknown) => Promise<void>>()
+    chatRunner.registerAdminRoute({
+      registerRoute: (method, url, handler) => routes.set(`${method} ${url}`, handler),
+    })
+    return routes.get('POST /admin/chat/send-prompt')!
+  }
+
+  it('answers ok:false with disposition and reason when the renderer refuses', async () => {
+    const sent: Array<{ channel: string; payload: Record<string, unknown> }> = []
+    const handler = setup(sent)
+    const { req, res } = fakeReqRes(JSON.stringify({ tabId: 'sess-id', prompt: 'x' }))
+    const p = handler(req, res)
+    await new Promise((r) => setTimeout(r, 20))
+    chatRunner.settleExternalSend({ requestId: sent[0].payload.requestId, disposition: 'refused', reason: 'unknown-tab' })
+    await p
+    expect(res.statusCode).toBe(200)
+    expect(JSON.parse(res.body!)).toEqual({ ok: false, disposition: 'refused', reason: 'unknown-tab' })
+  })
+
+  it('answers ok:true with the unconfirmed disposition on an ack timeout', async () => {
+    vi.useFakeTimers()
+    try {
+      const sent: Array<{ channel: string; payload: Record<string, unknown> }> = []
+      const handler = setup(sent)
+      const { req, res } = fakeReqRes(JSON.stringify({ tabId: 'tab-x', prompt: 'x' }))
+      const p = handler(req, res)
+      await vi.advanceTimersByTimeAsync(chatRunner.EXTERNAL_SEND_ACK_TIMEOUT_MS)
+      await p
+      expect(JSON.parse(res.body!)).toEqual({ ok: true, disposition: 'unconfirmed', reason: 'timeout' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('responds 400 on an invalid body and does not enqueue anything', async () => {

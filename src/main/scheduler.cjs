@@ -433,13 +433,12 @@ const MIN_FREE_MB_PER_JOB = 2500;
 // MemAvailable before the per-job gate runs. See availableForJobs().
 const RESERVED_HOST_MB = 3000;
 
-// oom_score_adj applied to each spawned claude -p job (range -1000..1000;
-// Electron inherits the default 0). A positive bias makes the kernel OOM killer
-// prefer a disposable, restartable job over Electron — whose death SIGHUPs every
-// pty and drops the sleep inhibitor. The job's build subprocesses (tsc/vite)
-// inherit it, so the actual memory hogs are the preferred victims. The gate caps
-// how many START; this decides who dies if a spike slips through anyway.
-const OOM_SCORE_ADJ_JOB = 500;
+// oom_score_adj for each claude -p job (Electron stays 0): jobs die before Electron.
+// Badness = rss + adj/1000 * (RAM+swap): 500 adds ~20 GB here, 200 ~8 GB (Chrome's own 200).
+// 2026-10-31: a 388 MB Blender (+20 GB) outranked an 11.5 GB Chrome (+8 GB) and died in
+// its place while the hog kept growing. 200 lets size decide among job children and
+// still outranks Electron. The gate caps starts; this picks the victim of a slipped spike.
+const OOM_SCORE_ADJ_JOB = 200;
 
 const DEFAULT_CONFIG = {
   offsetMinutes: 15,
@@ -11493,6 +11492,8 @@ module.exports = {
   pollRecoveryClearSource,
   memoryLimitedBatchSize,
   availableForJobs,
+  biasJobOomScore,
+  OOM_SCORE_ADJ_JOB,
   reverifyNeedsReview,
   runGateShadow,
   awaitGateShadowIdle: async () => { while (gateShadowPending) await gateShadowPending; },

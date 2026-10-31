@@ -2003,3 +2003,104 @@ test('[epic] createEpicWorktree result also carries setup', async () => {
   expect(result.setup.reason).toBe('passed');
   await gitWorktree.cleanupEpicWorktree({ cwd: repoCwd, dir: result.dir, branch: result.branch });
 });
+
+// ──────────────────────────────────────────── stranded HEAD reconciliation
+
+function commitFile(dir, name, msg) {
+  fs.writeFileSync(path.join(dir, name), `${msg}\n`, 'utf8');
+  git(['add', '-A'], dir);
+  git(['commit', '-q', '-m', msg], dir);
+  return git(['rev-parse', 'HEAD'], dir).trim();
+}
+
+test('[stranded] detached-HEAD commit fast-forwards the branch and integrateJobBranch lands it', async () => {
+  const slug = 'stranded-ff';
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  git(['checkout', '-q', 'HEAD~0'], wt.dir);
+  const sha = commitFile(wt.dir, 'detached.txt', 'detached work');
+  const r = await gitWorktree.reconcileWorktreeHead({ cwd: repoCwd, dir: wt.dir, branch: wt.branch, key: slug });
+  expect(r.action).toBe('fast-forwarded');
+  expect(r.finalHead).toBe(sha);
+  expect(git(['rev-parse', `refs/heads/${wt.branch}`], repoCwd).trim()).toBe(sha);
+  const out = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: wt.branch, slug });
+  expect(out.integrated).toBe(true);
+  expect(fs.existsSync(path.join(repoCwd, 'detached.txt'))).toBe(true);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: wt.dir, branch: wt.branch });
+});
+
+test('[stranded] a master-default repo behaves the same', async () => {
+  git(['branch', '-m', 'master'], repoCwd);
+  const slug = 'stranded-master';
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  expect(wt.ok).toBe(true);
+  git(['checkout', '-q', 'HEAD~0'], wt.dir);
+  const sha = commitFile(wt.dir, 'm.txt', 'master detached');
+  const r = await gitWorktree.reconcileWorktreeHead({ cwd: repoCwd, dir: wt.dir, branch: wt.branch, key: slug });
+  expect(r.action).toBe('fast-forwarded');
+  const out = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: wt.branch, slug });
+  expect(out.integrated).toBe(true);
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(sha);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: wt.dir, branch: wt.branch });
+});
+
+test('[stranded] HEAD behind the branch is aligned; unresolvable ref is unknown', async () => {
+  const slug = 'stranded-aligned';
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  commitFile(wt.dir, 'a.txt', 'on branch');
+  git(['checkout', '-q', '--detach', 'HEAD~1'], wt.dir);
+  const tip = git(['rev-parse', `refs/heads/${wt.branch}`], repoCwd).trim();
+  const r = await gitWorktree.reconcileWorktreeHead({ cwd: repoCwd, dir: wt.dir, branch: wt.branch, key: slug });
+  expect(r.action).toBe('aligned');
+  expect(git(['rev-parse', `refs/heads/${wt.branch}`], repoCwd).trim()).toBe(tip);
+  const u = await gitWorktree.reconcileWorktreeHead({ cwd: repoCwd, dir: wt.dir, branch: 'nope', key: slug });
+  expect(u.action).toBe('unknown');
+});
+
+test('[stranded] a diverged HEAD is pinned and the branch is unmoved', async () => {
+  const slug = 'stranded-diverged';
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  commitFile(wt.dir, 'a.txt', 'on branch');
+  const tip = git(['rev-parse', `refs/heads/${wt.branch}`], repoCwd).trim();
+  git(['checkout', '-q', '--detach', 'HEAD~1'], wt.dir);
+  const sha = commitFile(wt.dir, 'b.txt', 'other line');
+  const r = await gitWorktree.reconcileWorktreeHead({ cwd: repoCwd, dir: wt.dir, branch: wt.branch, key: slug });
+  expect(r.action).toBe('diverged');
+  expect(r.pinnedRef).toBe(`refs/sm-stranded/${slug}/${sha}`);
+  expect(git(['rev-parse', r.pinnedRef], repoCwd).trim()).toBe(sha);
+  expect(git(['rev-parse', `refs/heads/${wt.branch}`], repoCwd).trim()).toBe(tip);
+});
+
+test('[stranded] pinUnlandedWorktreeCommits reports a detached commit after returning to the branch; skips amended-away', async () => {
+  const slug = 'stranded-reflog';
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  git(['checkout', '-q', '--detach'], wt.dir);
+  const old = commitFile(wt.dir, 'x.txt', 'first try');
+  git(['commit', '-q', '--amend', '-m', 'amended'], wt.dir);
+  const kept = git(['rev-parse', 'HEAD'], wt.dir).trim();
+  git(['checkout', '-q', wt.branch], wt.dir);
+  const pinned = await gitWorktree.pinUnlandedWorktreeCommits({ cwd: repoCwd, dir: wt.dir, branch: wt.branch, key: slug, baseBranch: 'main' });
+  const shas = pinned.map((p) => p.sha);
+  expect(shas).toContain(kept);
+  expect(shas).not.toContain(old);
+  expect(git(['rev-parse', pinned[0].ref], repoCwd).trim()).toBe(pinned[0].sha);
+});
+
+test('[stranded] reconcileWorktreesOnBoot deleting a stranded checkout leaves the commit under the prefix', async () => {
+  const slug = 'stranded-boot';
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  git(['checkout', '-q', '--detach'], wt.dir);
+  const sha = commitFile(wt.dir, 's.txt', 'stranded');
+  gitWorktree._resetActiveWorktreeCountForTests('job', 0);
+  await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job' });
+  expect(fs.existsSync(wt.dir)).toBe(false);
+  const refs = git(['for-each-ref', '--format=%(objectname)', 'refs/sm-stranded/'], repoCwd);
+  expect(refs.split('\n')).toContain(sha);
+});
+
+test('[stranded] a reachable HEAD adds no pin ref', async () => {
+  const slug = 'stranded-clean';
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  gitWorktree._resetActiveWorktreeCountForTests('job', 0);
+  await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job' });
+  expect(git(['for-each-ref', 'refs/sm-stranded/'], repoCwd).trim()).toBe('');
+});

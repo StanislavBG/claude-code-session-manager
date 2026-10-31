@@ -329,6 +329,7 @@ function branchNameFor(kind, key) {
  * never be destroyed by this call.
  */
 async function removeWorktreeDir(cwd, dir) {
+  await pinStrandedHead({ cwd, dir });
   try {
     await execGit(['worktree', 'remove', '--force', dir], { cwd, timeout: 15_000 });
   } catch {
@@ -408,6 +409,7 @@ async function mainTreeFromWorktreeGitFile(dir) {
  */
 async function teardownOrphanedCheckout(dir) {
   const mainTree = await mainTreeFromWorktreeGitFile(dir);
+  await pinStrandedHead({ cwd: mainTree || dir, dir });
   if (mainTree) {
     try {
       await execGit(['worktree', 'remove', '--force', dir], { cwd: mainTree, timeout: 15_000 });
@@ -2290,7 +2292,118 @@ async function cleanupEpicWorktree({ cwd, dir, branch, keepBranch }) {
   return cleanupWorktree({ kind: 'epic', cwd, dir, branch, keepBranch });
 }
 
+// ──────────────────────────────────────────── stranded-HEAD reconciliation
+
+/** Pins `sha` under STRANDED_REF_PREFIX/<key>/<sha>; returns the ref or null. Never throws. */
+async function pinCommit({ cwd, key, sha }) {
+  try {
+    const safeKey = String(key || 'unknown').replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '_') || 'unknown';
+    const ref = `${sharedGitExec.STRANDED_REF_PREFIX}${safeKey}/${sha}`;
+    await execGit(['update-ref', ref, sha], { cwd, timeout: 10_000 });
+    return ref;
+  } catch {
+    return null;
+  }
+}
+
+/** True/false for `git merge-base --is-ancestor a b`; null on a real failure. */
+async function isAncestorOf(cwd, a, b) {
+  try {
+    await execGit(['merge-base', '--is-ancestor', a, b], { cwd, timeout: 10_000 });
+    return true;
+  } catch (e) {
+    return e && e.code === 1 ? false : null;
+  }
+}
+
+/**
+ * Compares a worktree's HEAD with its branch. aligned: HEAD is the tip or
+ * behind it. fast-forwarded: branch tip was an ancestor of HEAD, so the
+ * branch ref moved to HEAD (compare-and-swap update-ref). diverged: HEAD is
+ * pinned, branch untouched. unknown: a ref did not resolve; no git writes.
+ * Never throws.
+ */
+async function reconcileWorktreeHead({ cwd, dir, branch, key }) {
+  let finalHead = null;
+  let branchTip = null;
+  try {
+    finalHead = await tryResolveCommit(dir, 'HEAD^{commit}');
+    branchTip = await tryResolveCommit(cwd, `refs/heads/${branch}^{commit}`);
+    if (!finalHead || !branchTip) return { action: 'unknown', finalHead, branchTip, pinnedRef: null };
+    if (finalHead === branchTip || (await isAncestorOf(cwd, finalHead, branchTip)) === true) {
+      return { action: 'aligned', finalHead, branchTip, pinnedRef: null };
+    }
+    if ((await isAncestorOf(cwd, branchTip, finalHead)) === true) {
+      try {
+        await execGit(['update-ref', `refs/heads/${branch}`, finalHead, branchTip], { cwd, timeout: 10_000 });
+        return { action: 'fast-forwarded', finalHead, branchTip, pinnedRef: null };
+      } catch { /* refused (branch moved) — fall through to diverged */ }
+    }
+    const pinnedRef = await pinCommit({ cwd, key: key || branch, sha: finalHead });
+    return { action: 'diverged', finalHead, branchTip, pinnedRef };
+  } catch {
+    return { action: 'unknown', finalHead, branchTip, pinnedRef: null };
+  }
+}
+
+/**
+ * Pins commits recorded in the worktree's HEAD reflog (commit, cherry-pick,
+ * revert) that neither the branch nor the base branch contains. A predecessor
+ * of a `commit (amend)` entry is superseded and skipped. Newest first, capped
+ * at 20. Complexity: at most 200 reflog entries read, two ancestry checks per
+ * kept candidate. Returns [{ sha, ref }]; [] on any error.
+ */
+async function pinUnlandedWorktreeCommits({ cwd, dir, branch, key, baseBranch }) {
+  try {
+    const out = await execGit(['reflog', 'show', '--format=%H%x09%gs', '-n', '200', 'HEAD'], { cwd: dir, timeout: 15_000 });
+    const entries = out.split('\n').filter(Boolean).map((l) => {
+      const i = l.indexOf('\t');
+      return { sha: l.slice(0, i), subject: l.slice(i + 1) };
+    });
+    const candidates = [];
+    const superseded = new Set();
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
+      if (!/^(commit|cherry-pick|revert)\b/.test(e.subject)) continue;
+      if (/^commit \(amend\)/.test(e.subject) && entries[i + 1]) superseded.add(entries[i + 1].sha);
+      candidates.push(e.sha);
+    }
+    const base = (typeof baseBranch === 'string' && baseBranch && !isOwnManagedBranch(baseBranch))
+      ? baseBranch
+      : await resolveDefaultBranch(cwd);
+    const baseRef = (await tryResolveCommit(cwd, `refs/heads/${base}^{commit}`)) ? `refs/heads/${base}` : null;
+    const seen = new Set();
+    const pinned = [];
+    for (const sha of candidates) {
+      if (pinned.length >= 20) break;
+      if (seen.has(sha) || superseded.has(sha)) continue;
+      seen.add(sha);
+      if ((await isAncestorOf(cwd, sha, `refs/heads/${branch}`)) !== false) continue;
+      if (baseRef && (await isAncestorOf(cwd, sha, baseRef)) !== false) continue;
+      const ref = await pinCommit({ cwd, key: key || branch, sha });
+      if (ref) pinned.push({ sha, ref });
+    }
+    return pinned;
+  } catch {
+    return [];
+  }
+}
+
+/** Pins `dir`'s HEAD when no branch/tag/remote holds it. Swallows every error. */
+async function pinStrandedHead({ cwd, dir }) {
+  try {
+    if (!fs.existsSync(dir)) return;
+    const out = (await execGit(['rev-list', '-1', 'HEAD', '--not', '--branches', '--tags', '--remotes'], { cwd: dir, timeout: 10_000 })).trim();
+    if (!out) return;
+    const head = (await execGit(['rev-parse', 'HEAD'], { cwd: dir, timeout: 10_000 })).trim();
+    if (head) await pinCommit({ cwd: cwd || dir, key: path.basename(dir), sha: head });
+  } catch { /* best-effort */ }
+}
+
 module.exports = {
+  reconcileWorktreeHead,
+  pinUnlandedWorktreeCommits,
+  resolveDefaultBranch,
   KIND_CONFIG,
   worktreeRootFor,
   isWorktreeDisabled,

@@ -66,4 +66,14 @@ function parseWorktreePorcelain(text) {
   return entries;
 }
 
-module.exports = { execGit, parseWorktreePorcelain };
+/**
+ * Namespace for durable pins on commits a checkout holds but no branch does
+ * (a job that left its branch via `git checkout HEAD~0` then committed).
+ * Deliberately NOT under refs/heads/sm-job: branchSweep.cjs merges that
+ * namespace forward and deletes it, which would silently drop the pin. A
+ * ref outside refs/heads, refs/tags and refs/remotes is still a GC root but
+ * invisible to branch listings and sweeps.
+ */
+const STRANDED_REF_PREFIX = 'refs/sm-stranded/';
+
+module.exports = { execGit, parseWorktreePorcelain, STRANDED_REF_PREFIX };

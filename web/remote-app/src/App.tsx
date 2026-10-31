@@ -274,7 +274,7 @@ function AppInner() {
   );
 
   if (online) {
-    return <>{banners}<Cockpit socket={socketRef.current} deviceId={activeDeviceId!} /></>;
+    return <>{banners}<Cockpit socket={socketRef.current} deviceId={activeDeviceId!} onRefreshDevices={refreshDevices} /></>;
   }
   return <>{banners}<ConnectScreen socket={socketRef.current} onRefresh={refreshDevices} /></>;
 }

@@ -13,6 +13,7 @@ import RemoteRenderer from './RemoteRenderer';
 interface Props {
   socket: RelaySocket | null;
   deviceId: string;
+  onRefreshDevices?: () => Promise<void>;
 }
 
 const PROJECTS_ROUTE: Route = { view: 'projects' };
@@ -22,7 +23,7 @@ const PROJECTS_ROUTE: Route = { view: 'projects' };
  * `route` in the store. Each forward step pushes a history entry so the browser
  * back button (popstate) walks the route back up.
  */
-export default function Cockpit({ socket, deviceId }: Props) {
+export default function Cockpit({ socket, deviceId, onRefreshDevices }: Props) {
   const wsConnected = useStore((s) => s.wsConnected);
   const awaitingDesktopConfirm = useStore((s) => s.awaitingDesktopConfirm);
   const route = useStore((s) => s.route);
@@ -111,7 +112,7 @@ export default function Cockpit({ socket, deviceId }: Props) {
           <RemoteRenderer key={activeDeviceId ?? deviceId} socket={socket} deviceId={deviceId} fallback={body} />
         ) : body}
       </main>
-      {pickerOpen && <DevicePicker onClose={() => setPickerOpen(false)} />}
+      {pickerOpen && <DevicePicker onClose={() => setPickerOpen(false)} onRefreshDevices={onRefreshDevices} />}
     </div>
   );
 }

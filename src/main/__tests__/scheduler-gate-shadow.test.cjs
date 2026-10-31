@@ -30,7 +30,7 @@ process.env.HOME = tmpHome;
 // rung alone.
 process.env.SM_AUTOFIX_DISABLE = '1';
 
-const { runGateShadow, reverifyNeedsReview, awaitGateShadowIdle } = require('../scheduler.cjs');
+const { runGateShadow, reverifyNeedsReview, awaitGateShadowIdle, broadcast } = require('../scheduler.cjs');
 const { runGateSequence } = require('../lib/scheduler/definitionOfDone.cjs');
 const { resolveEpicPrdWriteDir } = require('../lib/prd/prdLocations.cjs');
 const { bustCwdCache } = require('../lib/scheduler/queueStore.cjs');
@@ -73,10 +73,6 @@ function setup(name, gateBody) {
   // commit above and this timestamp are otherwise within the same second, and
   // git truncates committer dates to whole seconds, so an un-backdated
   // startedAt is flaky — it can land AFTER the commit it is meant to predate.
-  // Queue row first, PRD file last, and the PRD carries createdVia: reconcile() scans EVERY
-  // project registered under tmpHome, and an earlier test's still-running background pass can
-  // reach this project mid-setup. PRD-before-row let it mint a 'quarantined' row for an
-  // unstamped PRD with no row yet, which then shadowed the needs_review row under test.
   const job = { slug, status: 'needs_review', cwd, runId, verifierVerdict: 'transcript_errors', startedAt: new Date(Date.now() - 60_000).toISOString(), finishedAt: new Date().toISOString() };
   fs.writeFileSync(queuePath, JSON.stringify({ jobs: [job] }, null, 2));
   const prdDir = resolveEpicPrdWriteDir(cwd, 'gate-epic');
@@ -97,7 +93,11 @@ function persistJob(t) {
 // around). Only the trigger-re-pick test below calls reverifyNeedsReview();
 // the rest call runGateShadow directly and never consult the registry, so
 // this is a no-op for them.
-afterEach(() => {
+afterEach(async () => {
+  // runGateShadow ends with a coalesced broadcast: 200 ms later it reconciles every project under
+  // tmpHome, inside the next test's setup(). Drain it here so no pass crosses a test boundary.
+  await awaitGateShadowIdle();
+  await broadcast({ flush: true });
   fs.rmSync(path.join(tmpHome, '.claude', 'projects'), { recursive: true, force: true });
   bustCwdCache();
 });

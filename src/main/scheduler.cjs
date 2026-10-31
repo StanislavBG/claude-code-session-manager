@@ -8202,13 +8202,28 @@ async function reapDeadRunningJobs() {
       const rowCwd = row.cwd || state.config?.defaultCwd || DEFAULT_PROJECT_CWD;
       if (!gitTreeGuard.isGitRepoSync(rowCwd)) continue;
       const branch = jobWorktree.branchNameFor(d.slug);
+      // Reconcile the worktree's real HEAD into the branch first: a detached
+      // commit would otherwise leave the branch unmoved and read as integrated.
+      let headReconcile = null;
+      const wtDir = row.runtime?.cwd;
+      if (typeof wtDir === 'string' && wtDir && wtDir !== rowCwd && fs.existsSync(wtDir)) {
+        try {
+          headReconcile = await jobWorktree.reconcileWorktreeHead({ cwd: rowCwd, dir: wtDir, branch, key: d.slug });
+        } catch { headReconcile = null; }
+      }
       const integrated = await gitTreeGuard.isBranchAlreadyIntegrated(rowCwd, branch);
       const headNow = await gitTreeGuard.gitHead(rowCwd);
       const guardHeadBeforeVal = row.guardHeadBefore || null;
       let landedCommit = null;
       let notLandedInfo = null;
       let effectiveSuccess = true;
-      if (integrated === null) {
+      if (headReconcile?.action === 'diverged') {
+        effectiveSuccess = false;
+        notLandedInfo = {
+          verdict: 'run_commit_not_landed',
+          reason: `worktree HEAD ${headReconcile.finalHead} diverged from ${branch}; commit pinned at ${headReconcile.pinnedRef || 'no ref'} — never landed`,
+        };
+      } else if (integrated === null) {
         // No sm-job/<slug> branch — an in-place run (or worktree isolation
         // disabled). Prove landing via the exact same HEAD-advance evidence
         // the live commit-guard already uses — reused, not re-derived.

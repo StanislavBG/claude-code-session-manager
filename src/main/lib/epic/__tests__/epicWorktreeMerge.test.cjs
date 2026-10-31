@@ -128,3 +128,42 @@ test('a request with a malformed branch name is rejected by ipcSchemas validatio
     () => handler(null, { cwd, epicId: 'epic-merge-y', branch: 'not-an-epic-branch', dir: '/tmp/whatever' }),
   ).toThrow();
 });
+
+test('a commit made on a detached worktree HEAD is reconciled into the Epic branch and lands', async () => {
+  const cwd = await mkRepoCwd();
+  const created = await gitWorktree.createEpicWorktree({ cwd, epicId: 'epic-merge-detached' });
+  expect(created.ok).toBe(true);
+  git(['checkout', '-q', '--detach'], created.dir);
+  fs.writeFileSync(path.join(created.dir, 'detached.txt'), 'detached work\n', 'utf8');
+  git(['add', '-A'], created.dir);
+  git(['commit', '-q', '-m', 'detached commit'], created.dir);
+
+  const result = await handler(null, { cwd, epicId: 'epic-merge-detached', branch: created.branch, dir: created.dir });
+
+  expect(result).toEqual({ ok: true, status: 'merged', integrated: true });
+  expect(fs.existsSync(path.join(cwd, 'detached.txt'))).toBe(true);
+});
+
+test('a diverged worktree HEAD is refused with the checkout and branch intact', async () => {
+  const cwd = await mkRepoCwd();
+  const created = await gitWorktree.createEpicWorktree({ cwd, epicId: 'epic-merge-diverged' });
+  expect(created.ok).toBe(true);
+  fs.writeFileSync(path.join(created.dir, 'on-branch.txt'), 'x\n', 'utf8');
+  git(['add', '-A'], created.dir);
+  git(['commit', '-q', '-m', 'on branch'], created.dir);
+  git(['checkout', '-q', '--detach', 'HEAD~1'], created.dir);
+  fs.writeFileSync(path.join(created.dir, 'off-branch.txt'), 'y\n', 'utf8');
+  git(['add', '-A'], created.dir);
+  git(['commit', '-q', '-m', 'off branch'], created.dir);
+  const finalHead = git(['rev-parse', 'HEAD'], created.dir).trim();
+
+  const result = await handler(null, { cwd, epicId: 'epic-merge-diverged', branch: created.branch, dir: created.dir });
+
+  expect(result.ok).toBe(false);
+  expect(result.status).toBe('needs_merge_resolution');
+  expect(result.reason).toContain(finalHead);
+  expect(result.reason).toMatch(/refs\//);
+  expect(fs.existsSync(created.dir)).toBe(true);
+  expect(git(['branch', '--list', created.branch], cwd).trim()).not.toBe('');
+  expect(fs.existsSync(path.join(cwd, 'on-branch.txt'))).toBe(false);
+});

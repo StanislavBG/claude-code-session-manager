@@ -25,7 +25,7 @@
  * them from the command line.
  */
 
-const { integrateEpicBranch, cleanupEpicWorktree } = require('../git/gitWorktree.cjs');
+const { integrateEpicBranch, cleanupEpicWorktree, reconcileWorktreeHead } = require('../git/gitWorktree.cjs');
 const { validatePath } = require('../../config.cjs');
 
 /**
@@ -40,6 +40,14 @@ const { validatePath } = require('../../config.cjs');
  */
 async function mergeEpicToMainViaIpc(cwd, epicId, branch, dir, carriedPaths) {
   validatePath(cwd);
+  if (dir) {
+    const rec = await reconcileWorktreeHead({ cwd, dir, branch, key: epicId });
+    if (rec && rec.action === 'diverged') {
+      const reason = `worktree HEAD ${rec.finalHead} is not on ${branch}; commit pinned at ${rec.pinnedRef || 'no ref'} — resolve manually`;
+      console.log(`[epicWorktreeMerge] ${epicId}: needs manual resolution (${reason})`);
+      return { ok: false, status: 'needs_merge_resolution', reason };
+    }
+  }
   const outcome = await integrateEpicBranch({ cwd, branch, epicId, carriedPaths });
   if (!outcome.ok) {
     console.log(`[epicWorktreeMerge] ${epicId}: needs manual resolution (${outcome.reason})`);

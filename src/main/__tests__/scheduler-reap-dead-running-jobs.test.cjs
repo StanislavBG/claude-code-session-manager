@@ -475,6 +475,45 @@ test('reapDeadRunningJobs: a worktree job shaped like PRD 1118 (branch un-integr
   assert.equal(git(['rev-parse', 'HEAD'], projectCwd).trim(), headBefore, 'guardCwd HEAD must not have moved — no merge was performed');
 });
 
+test('reapDeadRunningJobs: a dead successful job with a commit on a detached worktree HEAD parks instead of completing', async () => {
+  const projectCwd = path.join(tmpHome, 'l-project-detached-head');
+  initRepo(projectCwd);
+  registerActiveProject(projectCwd);
+
+  const headBefore = git(['rev-parse', 'HEAD'], projectCwd).trim();
+  const slug = 'detached-head-worktree-job';
+  const branch = `sm-job/${slug}`;
+  git(['branch', branch], projectCwd);
+  const wtDir = path.join(tmpHome, 'l-project-detached-head-wt');
+  git(['worktree', 'add', '--detach', wtDir, branch], projectCwd);
+  fs.writeFileSync(path.join(wtDir, 'detached.txt'), 'work\n', 'utf8');
+  git(['add', '-A'], wtDir);
+  git(['commit', '-q', '-m', 'detached commit'], wtDir);
+
+  const runId = `run-${slug}`;
+  const queuePath = writeProjectQueue(projectCwd, [
+    {
+      slug,
+      status: 'running',
+      cwd: projectCwd,
+      runId,
+      runtime: { pid: 999999, cwd: wtDir },
+      guardHeadBefore: headBefore,
+      startedAt: new Date(Date.now() - 60_000).toISOString(),
+    },
+  ]);
+  writeRunLog(runId, slug, ['{"type":"result","subtype":"success","result":"done","is_error":false}']);
+
+  bustCwdCache();
+  await reapDeadRunningJobs();
+
+  const row = JSON.parse(fs.readFileSync(queuePath, 'utf8')).jobs.find((j) => j.slug === slug);
+  assert.equal(row.status, 'needs_review');
+  assert.equal(row.verifierVerdict, 'reaped_without_integration');
+  assert.equal(row.landedCommit, undefined);
+  assert.equal(git(['rev-parse', 'HEAD'], projectCwd).trim(), headBefore, 'the reaper only parks, never lands');
+});
+
 test('reapDeadRunningJobs: a worktree job whose branch is already fully integrated into HEAD comes out completed, with landedCommit stamped', async () => {
   const projectCwd = path.join(tmpHome, 'j-project-real-success');
   initRepo(projectCwd);

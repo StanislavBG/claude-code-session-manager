@@ -242,3 +242,40 @@ test('commitGuardVerdict: carries forward a non-clean prior verdict as an annota
   expect(verdict).not.toBeNull();
   expect(verdict.annotations).toEqual([{ verdict: 'transcript_errors', reason: 'grep hit an Error string' }]);
 });
+
+// ── commitGuardSkipped: the single skip decision spawnJob consults ──────────
+const gitTreeGuard = require('../scheduler/gitTreeGuard.cjs');
+
+const v = (verdict, downgradeTo = null) => ({ verdict, reason: 'r', downgradeTo });
+
+test.each([
+  ['no verifyResult', null, false, [], false],
+  ['downgradeTo pending', v('deps_unmet', 'pending'), false, [], true],
+  ['run_commit_not_landed', v('run_commit_not_landed', 'needs_review'), true, ['a.cjs'], true],
+  ['clean, in place', v('clean'), false, [], true],
+  ['clean, worktree, dirty (clean still skips)', v('clean'), true, ['a.cjs'], true],
+  ['pass_no_commit_already_shipped in place + dirt', v('pass_no_commit_already_shipped'), false, ['a.cjs'], true],
+  ['pass_no_commit_prior_run_verified worktree, clean tree', v('pass_no_commit_prior_run_verified'), true, [], true],
+  ['pass_no_commit_prior_run_verified worktree, null dirt', v('pass_no_commit_prior_run_verified'), true, null, true],
+  ['pass_no_commit_prior_run_verified worktree + dirt', v('pass_no_commit_prior_run_verified'), true, ['a.cjs'], false],
+  ['pass_no_commit_target_verified worktree + dirt', v('pass_no_commit_target_verified'), true, ['a.cjs'], false],
+  ['pass_no_commit_artifact_verified', v('pass_no_commit_artifact_verified'), false, [], false],
+  ['other verdict', v('transcript_errors', 'needs_review'), false, [], false],
+])('commitGuardSkipped: %s', (_name, verifyResult, ranInWorktree, newlyDirty, expected) => {
+  expect(gitTreeGuard.commitGuardSkipped({ verifyResult, ranInWorktree, newlyDirty })).toBe(expected);
+});
+
+test('worktree pass_no_commit_prior_run_verified with one dirty path is not skipped and reaches commitGuardVerdict → uncommitted_changes', () => {
+  const verifyResult = v('pass_no_commit_prior_run_verified');
+  const newlyDirty = ['src/main/leftover.cjs'];
+  expect(gitTreeGuard.commitGuardSkipped({ verifyResult, ranInWorktree: true, newlyDirty })).toBe(false);
+  const verdict = commitGuardVerdict({
+    newlyDirty,
+    siblingRunning: false,
+    ranInWorktree: true,
+    jobSelfCommitted: false,
+    legitimateNoOp: false,
+    verifyResult,
+  });
+  expect(verdict?.verdict).toBe('uncommitted_changes');
+});

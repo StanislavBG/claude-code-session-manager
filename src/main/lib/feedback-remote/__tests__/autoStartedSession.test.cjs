@@ -99,3 +99,38 @@ test('autoStartFollowUp sends once with scheduler origin, only when a plan is ne
 test('autoStartFollowUp never throws when send throws', () => {
   expect(() => mod.autoStartFollowUp({ cwd: tmp, tabId: 't', sessionId: 'cs-bug', send: () => { throw new Error('x'); } })).not.toThrow();
 });
+
+test.each(['macro', 'human'])('stamp survives the active-index save path for requestedBy %s', (requestedBy) => {
+  const { schemas } = require('../../../ipcSchemas.cjs');
+  const { opsPath } = require('../../opsOwnership.cjs');
+  const tmp2 = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-autostart-save-'));
+  try {
+    const autoApprove = {
+      requestedBy,
+      macroId: 'macro-1',
+      macroLabel: 'Fable',
+      verifiedAt: '2026-10-31T10:00:00.000Z',
+      fromClaudeSessionId: 'from-cs-1',
+    };
+    const session = {
+      id: 'psess-save',
+      cwd: tmp2,
+      goalText: 'x',
+      claudeSessionId: 'cs-saved',
+      status: 'active',
+      createdAt: '2026-10-31T10:00:00.000Z',
+      completedAt: null,
+      source: { producer: 'cross-project-feedback', autoApprove },
+    };
+    const parsed = schemas.promptSessionsMergeActiveIndex.parse({
+      cwd: tmp2, sessions: { 'psess-save': session }, events: {}, source: 'epics',
+    });
+    expect(Object.keys(parsed.sessions)).toEqual(['psess-save']);
+    const file = opsPath(tmp2, 'prompt-sessions', 'active-index.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ sessions: parsed.sessions }));
+    expect(mod.isAutoStartedEpic(tmp2, 'cs-saved')).toBe(true);
+  } finally {
+    fs.rmSync(tmp2, { recursive: true, force: true });
+  }
+});

@@ -70,6 +70,7 @@ module.exports = {
   parseWorktreeListPorcelain: gitWorktree.parseWorktreeListPorcelain,
   reconcileWorktreesOnBoot: (cwds, opts = {}) => gitWorktree.reconcileWorktreesOnBoot(cwds, { kind: KIND, isLive: opts.isLive }),
   reclaimTerminalJobOrphans: gitWorktree.reclaimTerminalJobOrphans,
+  unchangedCarriedPaths: gitWorktree.unchangedCarriedPaths,
   // Test-only escape hatch for the in-memory concurrency counter.
   _resetActiveWorktreeCountForTests(n = 0) { gitWorktree._resetActiveWorktreeCountForTests(KIND, n); },
   _getActiveWorktreeCountForTests() { return gitWorktree._getActiveWorktreeCountForTests(KIND); },

@@ -960,6 +960,37 @@ async function pathsIdenticalToBranch({ cwd, branch, paths }) {
 }
 
 /**
+ * Returns the entries of `paths` whose bytes in `dir` still equal the bytes in
+ * `cwd` (carried-but-untouched), plus entries absent from both (a carried
+ * deletion). Any read error, or a path resolving outside cwd/dir, leaves that
+ * path out. Never throws. Complexity: O(paths) — each file is read twice.
+ */
+async function unchangedCarriedPaths({ cwd, dir, paths }) {
+  const out = [];
+  if (!Array.isArray(paths) || !paths.length || !cwd || !dir) return out;
+  const inside = (root, abs) => {
+    const rel = path.relative(root, abs);
+    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+  };
+  const readOrMissing = async (file) => {
+    try { return await fsp.readFile(file); }
+    catch (err) { if (err && err.code === 'ENOENT') return null; throw err; }
+  };
+  for (const p of paths) {
+    try {
+      if (typeof p !== 'string' || !p) continue;
+      const a = path.resolve(cwd, p);
+      const b = path.resolve(dir, p);
+      if (!inside(path.resolve(cwd), a) || !inside(path.resolve(dir), b)) continue;
+      const [baseBuf, wtBuf] = await Promise.all([readOrMissing(a), readOrMissing(b)]);
+      if (baseBuf === null && wtBuf === null) out.push(p);
+      else if (baseBuf !== null && wtBuf !== null && baseBuf.equals(wtBuf)) out.push(p);
+    } catch { /* read error: leave the path out */ }
+  }
+  return out;
+}
+
+/**
  * Parses the path lists out of git's refusal to merge over dirty working-tree
  * files. Git emits up to two distinct blocks — tracked paths under "local
  * changes ... would be overwritten" (restorable via `git checkout --`, which
@@ -2439,6 +2470,7 @@ module.exports = {
   createWorktree,
   captureAndCarryBaseDiff,
   pathsIdenticalToBranch,
+  unchangedCarriedPaths,
   resolveDefaultBranch,
   getCurrentBranch,
   isCarriedWipOnly,

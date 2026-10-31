@@ -2153,3 +2153,23 @@ test('[stranded] a merge commit made on a PR branch in the worktree is not repor
   const pinned = await gitWorktree.pinUnlandedWorktreeCommits({ cwd: repoCwd, dir: wt.dir, branch: wt.branch, key: slug });
   expect(pinned).toEqual([]);
 });
+
+test('[job] unchangedCarriedPaths: untouched carried path returned, further-edited excluded, carried deletion returned, empty/missing paths -> []', async () => {
+  fs.writeFileSync(path.join(repoCwd, 'a.txt'), 'a\n', 'utf8');
+  fs.writeFileSync(path.join(repoCwd, 'b.txt'), 'b\n', 'utf8');
+  git(['add', '-A'], repoCwd);
+  git(['commit', '-q', '-m', 'add a b'], repoCwd);
+  fs.writeFileSync(path.join(repoCwd, 'README.md'), 'dirty readme\n', 'utf8');
+  fs.writeFileSync(path.join(repoCwd, 'a.txt'), 'dirty a\n', 'utf8');
+  fs.rmSync(path.join(repoCwd, 'b.txt'));
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'unchanged-carried' });
+  expect(wt.ok).toBe(true);
+  fs.writeFileSync(path.join(wt.dir, 'a.txt'), 'job edited further\n', 'utf8');
+  const got = await gitWorktree.unchangedCarriedPaths({
+    cwd: repoCwd, dir: wt.dir, paths: ['README.md', 'a.txt', 'b.txt', '../escape.txt'],
+  });
+  expect(got.sort()).toEqual(['README.md', 'b.txt']);
+  expect(await gitWorktree.unchangedCarriedPaths({ cwd: repoCwd, dir: wt.dir, paths: [] })).toEqual([]);
+  expect(await gitWorktree.unchangedCarriedPaths({ cwd: repoCwd, dir: wt.dir })).toEqual([]);
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: wt.dir, branch: wt.branch });
+});

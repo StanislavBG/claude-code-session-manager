@@ -32,7 +32,7 @@ function isStampedInbound(e: PromptSession): boolean {
   return (
     e.status === 'proposed' &&
     e.source?.producer === 'cross-project-feedback' &&
-    e.source.autoApprove?.requestedBy === 'human'
+    (e.source.autoApprove?.requestedBy === 'human' || e.source.autoApprove?.requestedBy === 'macro')
   )
 }
 

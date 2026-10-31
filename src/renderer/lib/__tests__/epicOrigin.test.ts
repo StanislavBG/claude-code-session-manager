@@ -116,6 +116,24 @@ describe('inboundFeedbackOrigin', () => {
     expect(origin?.title).toContain('epic-123')
   })
 
+  it('names the macro on a macro-stamped Epic', () => {
+    const origin = inboundFeedbackOrigin({
+      source: {
+        producer: 'cross-project-feedback',
+        fromCwd: '/home/bilko/Projects/Self',
+        autoApprove: {
+          requestedBy: 'macro',
+          macroId: 'm1',
+          macroLabel: 'Fable',
+          verifiedAt: '2026-10-11T00:00:00.000Z',
+          fromClaudeSessionId: 's1',
+        },
+      },
+    })
+    expect(origin?.label).toBe('Self · Fable')
+    expect(origin?.title.startsWith('Auto-started by macro "Fable" from /home/bilko/Projects/Self')).toBe(true)
+  })
+
   it('always warns in the hover text that the sender has not read this codebase', () => {
     const origin = inboundFeedbackOrigin({
       source: { producer: 'cross-project-feedback', fromCwd: '/p/a' },

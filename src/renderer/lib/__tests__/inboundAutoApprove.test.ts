@@ -98,6 +98,33 @@ describe('inboundAutoApprove', () => {
     expect(send).toHaveBeenCalledTimes(1)
   })
 
+  it('starts a macro-stamped Epic and ignores an unknown requestedBy', () => {
+    usePromptSessions.setState({
+      sessions: {
+        macro: epic('macro', {
+          source: {
+            producer: 'cross-project-feedback',
+            autoApprove: {
+              requestedBy: 'macro',
+              macroId: 'm1',
+              macroLabel: 'Fable',
+              verifiedAt: '2026-10-11T00:00:00.000Z',
+              fromClaudeSessionId: 'from-1',
+            },
+          },
+        }),
+        weird: epic('weird', {
+          source: { producer: 'cross-project-feedback', autoApprove: { requestedBy: 'robot' } as never },
+        }),
+      },
+    } as never)
+    approveStampedInbound(CWD)
+    const s = usePromptSessions.getState().sessions
+    expect(s.macro.status).toBe('active')
+    expect(s.weird.status).toBe('proposed')
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
   it('leaves a plain proposed and a completed Epic untouched', () => {
     usePromptSessions.setState({
       sessions: {

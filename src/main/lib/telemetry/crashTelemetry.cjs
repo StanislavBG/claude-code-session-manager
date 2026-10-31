@@ -43,12 +43,16 @@ const MEMORY_PRESSURE_MB = 3000;
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 
 /**
- * Turns the previous run's last sample into a likely cause. silentGapSec is
+ * Turns the previous run's evidence into a likely cause. Launcher evidence
+ * (stderr tail, exit record) outranks the sample-based rules. silentGapSec is
  * accepted for the caller's meta but does not change the verdict.
- * @param {{ lastLoopDelayMaxMs?: unknown, lastTotalMb?: unknown, silentGapSec?: unknown }} [sample]
- * @returns {'main-hang' | 'memory-pressure' | 'unknown'}
+ * @param {{ lastLoopDelayMaxMs?: unknown, lastTotalMb?: unknown, silentGapSec?: unknown, exitRecord?: { signal?: unknown } | null, stderrTail?: unknown }} [sample]
+ * @returns {string} 'compositor-disconnect' | `signal:<NAME>` | 'main-hang' | 'memory-pressure' | 'unknown'
  */
-function classifyUncleanShutdown({ lastLoopDelayMaxMs, lastTotalMb } = {}) {
+function classifyUncleanShutdown({ lastLoopDelayMaxMs, lastTotalMb, exitRecord, stderrTail } = {}) {
+  if (typeof stderrTail === 'string' && stderrTail.includes('Fatal Wayland communication error')) return 'compositor-disconnect';
+  const sig = exitRecord && exitRecord.signal;
+  if (typeof sig === 'string' && /^[A-Z0-9]{2,16}$/.test(sig)) return `signal:${sig}`;
   if (isNum(lastLoopDelayMaxMs) && lastLoopDelayMaxMs >= HANG_LOOP_DELAY_MS) return 'main-hang';
   if (isNum(lastTotalMb) && lastTotalMb >= MEMORY_PRESSURE_MB) return 'memory-pressure';
   return 'unknown';

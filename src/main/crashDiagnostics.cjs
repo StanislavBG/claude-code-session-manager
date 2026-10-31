@@ -200,21 +200,93 @@ function heartbeat() {
   if (stall) logs?.writeLine({ scope: 'crash-diag', ...stall, meta: { ...loop } });
 }
 
+const STDERR_TAIL_BYTES = 16 * 1024;
+
+// Last 16 KB of the launcher's saved stderr. Best-effort: '' when missing.
+function readStderrTail(dir) {
+  let fd = null;
+  try {
+    fd = fs.openSync(path.join(dir, 'electron-stderr.log'), 'r');
+    const size = fs.fstatSync(fd).size;
+    const len = Math.min(size, STDERR_TAIL_BYTES);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, size - len);
+    return buf.toString('utf8');
+  } catch { return ''; } finally {
+    if (fd !== null) { try { fs.closeSync(fd); } catch { /* ignore */ } }
+  }
+}
+
+// Newest main-exit.jsonl line for `pid` (format owned by bin/supervise.cjs).
+// Only enum-ish fields are kept: no paths, no message text.
+function readExitRecord(dir, pid) {
+  if (!Number.isInteger(pid)) return null;
+  try {
+    const lines = fs.readFileSync(path.join(dir, 'main-exit.jsonl'), 'utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i]) continue;
+      let rec = null;
+      try { rec = JSON.parse(lines[i]); } catch { continue; }
+      if (rec && rec.pid === pid) {
+        return {
+          code: typeof rec.code === 'number' ? rec.code : null,
+          signal: typeof rec.signal === 'string' ? rec.signal : null,
+          uptimeMs: typeof rec.uptimeMs === 'number' ? rec.uptimeMs : undefined,
+        };
+      }
+    }
+  } catch { /* missing or unreadable */ }
+  return null;
+}
+
+// systemd's verdict on the previous run's scope. Linux only; any failure = no data.
+function readScopeResult(pid, deps) {
+  if ((deps.platform || process.platform) !== 'linux' || !Number.isInteger(pid)) return null;
+  try {
+    const spawnSync = deps.spawnSync || require('node:child_process').spawnSync;
+    const r = spawnSync('systemctl', ['--user', 'show', `app-claude-code-session-manager-${pid}.scope`, '-p', 'Result', '--value'],
+      { encoding: 'utf8', timeout: 2000 });
+    if (!r || r.error || r.status !== 0) return null;
+    const out = String(r.stdout || '').trim();
+    return out || null;
+  } catch { return null; }
+}
+
 // Read the previous run's sentinel. If it was still `open`, the app died
 // without a clean quit — almost certainly the OOM-kill we're hunting. Log it
 // as the postmortem the dying process couldn't write, including its last
-// memory sample so we can see the footprint at time of death.
-function checkPreviousRun() {
+// memory sample so we can see the footprint at time of death. `deps` is
+// injectable for tests.
+function checkPreviousRun(deps = {}) {
+  const sPath = deps.sentinelPath || sentinelPath;
+  const log = deps.logs !== undefined ? deps.logs : logs;
+  const report = deps.reportCrash || reportCrash;
   let prev = null;
-  try { prev = JSON.parse(fs.readFileSync(sentinelPath, 'utf8')); } catch { return; }
-  if (!prev || prev.open !== true) return;
+  try { prev = JSON.parse(fs.readFileSync(sPath, 'utf8')); } catch { return; }
+  if (!prev) return;
+  const dir = path.dirname(sPath);
+  // A systemd SIGTERM runs will-quit and marks the sentinel clean, so the scope
+  // result is the only witness to an oom-kill in that case.
+  const scopeResult = readScopeResult(prev.pid, deps);
+  if (scopeResult === 'oom-kill') {
+    log?.writeLine({
+      scope: 'crash-diag',
+      level: 'error',
+      message: 'previous session was killed by systemd (oom-scope-stop; scope Result=oom-kill)',
+      meta: { prevPid: prev.pid, sentinelOpen: prev.open === true, likelyCause: 'oom-scope-stop' },
+    });
+    report({ reason: 'oom-scope-stop', meta: { likelyCause: 'oom-scope-stop', sentinelOpen: prev.open === true } });
+  }
+  if (prev.open !== true) return;
   const s = prev.lastSample;
   const lastTop = s && Array.isArray(s.procs) ? [...s.procs].sort((a, b) => b.mb - a.mb).slice(0, 4).map((p) => `${p.type}:${p.mb}MB`) : undefined;
   const lastLoopDelayMaxMs = prev.loop?.loopDelayMaxMs;
   const sampleMs = s?.ts ? Date.parse(s.ts) : NaN;
   const silentGapSec = Number.isFinite(sampleMs) ? Math.round((Date.now() - sampleMs) / 1000) : undefined;
-  const likelyCause = classifyUncleanShutdown({ lastLoopDelayMaxMs, lastTotalMb: s?.totalMb, silentGapSec });
-  logs?.writeLine({
+  const exitRecord = readExitRecord(dir, prev.pid);
+  const stderrTail = readStderrTail(dir);
+  const likelyCause = classifyUncleanShutdown({ lastLoopDelayMaxMs, lastTotalMb: s?.totalMb, silentGapSec, exitRecord, stderrTail });
+  log?.writeLine({
     scope: 'crash-diag',
     level: 'error',
     message: `previous session ended UNCLEANLY (likelyCause=${likelyCause}; no graceful quit)`,
@@ -229,13 +301,15 @@ function checkPreviousRun() {
       lastLoopDelayMaxMs,
       silentGapSec,
       likelyCause,
+      exitRecord,
+      scopeResult,
       hint: 'Check `journalctl -k | grep -i oom` around lastSampleTs to confirm the kernel OOM-killer, and the "main-loop stall" heartbeats before lastSampleTs to confirm a wedged main thread.',
     },
   });
   // The unclean-shutdown postmortem is the report most likely to be the ONLY
   // thing ever received from a machine that just OOM-killed the app — the
   // dying process couldn't write it itself. See crashTelemetry.cjs header.
-  reportCrash({
+  report({
     reason: 'unclean-shutdown',
     meta: {
       lastSampleTs: s?.ts,
@@ -246,6 +320,7 @@ function checkPreviousRun() {
       lastLoopDelayMaxMs,
       silentGapSec,
       likelyCause,
+      exitRecord,
     },
   });
 }
@@ -327,4 +402,4 @@ function markCleanShutdown() {
   persistSentinel(true);
 }
 
-module.exports = { startCrashReporter, init, markCleanShutdown };
+module.exports = { startCrashReporter, init, markCleanShutdown, checkPreviousRun };

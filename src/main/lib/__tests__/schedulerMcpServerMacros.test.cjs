@@ -24,8 +24,15 @@ const tmpDirs = [];
 const servers = [];
 let originalHome;
 let originalProjectRoot;
+const ENV_KEYS = ['SM_CHAT_SESSION_ID', 'SM_SCHEDULER_JOB_SLUG', 'SM_SCHEDULER_JOB_MAY_QUEUE'];
+const savedEnv = {};
+for (const k of ENV_KEYS) savedEnv[k] = process.env[k];
 
 afterEach(async () => {
+  for (const k of ENV_KEYS) {
+    if (savedEnv[k] === undefined) delete process.env[k];
+    else process.env[k] = savedEnv[k];
+  }
   if (originalHome !== undefined) {
     process.env.HOME = originalHome;
     originalHome = undefined;
@@ -252,4 +259,86 @@ test('macro_save returns an error result when a required field is missing or not
   }
   const resultBadType = await callTool(handleCallTool, SAVE_TOOL_NAME, { ...base, label: 42 });
   expect(resultBadType.isError).toBe(true);
+});
+
+function setDeleteEnv({ chat, slug, mayQueue }) {
+  for (const [k, v] of [['SM_CHAT_SESSION_ID', chat], ['SM_SCHEDULER_JOB_SLUG', slug], ['SM_SCHEDULER_JOB_MAY_QUEUE', mayQueue]]) {
+    if (v === undefined) delete process.env[k];
+    else process.env[k] = v;
+  }
+}
+
+async function deleteHarness(body) {
+  const homeDir = await mkTmp();
+  const token = 'test-token';
+  const { server, requests } = await startFakeAdminServer(token, body);
+  servers.push(server);
+  await writeAdminConfig(homeDir, { port: server.address().port, token });
+  originalProjectRoot = process.env.SM_PROJECT_ROOT ?? null;
+  process.env.SM_PROJECT_ROOT = '/home/bilko/Projects/session-manager';
+  const { handleCallTool, TOOLS } = requireServerWithHome(homeDir);
+  return { handleCallTool, TOOLS, requests };
+}
+
+test('macro_delete is listed with only id, required, catalog description', async () => {
+  const { TOOLS } = requireServerWithHome(await mkTmp());
+  const tool = TOOLS.find((t) => t.name === 'macro_delete');
+  expect(tool).toBeTruthy();
+  expect(Object.keys(tool.inputSchema.properties)).toEqual(['id']);
+  expect(tool.inputSchema.required).toEqual(['id']);
+  const entry = MCP_TOOL_CATALOG.find((e) => e.name === 'macro_delete');
+  expect(entry.group).toBe('macros');
+  expect(tool.description).toBe(composeDescription(entry));
+});
+
+test('macro_delete posts exactly { cwd, id, originClaudeSessionId } and ignores a cwd argument', async () => {
+  setDeleteEnv({ chat: 'chat-123' });
+  const { handleCallTool, requests } = await deleteHarness({ ok: true, deleted: true, macro: { id: 'm1' } });
+  const result = await callTool(handleCallTool, 'macro_delete', { id: 'm1', cwd: '/some/other/project' });
+  expect(result.isError).toBeFalsy();
+  expect(JSON.parse(result.content[0].text)).toEqual({ ok: true, deleted: true, macro: { id: 'm1' } });
+  expect(requests).toHaveLength(1);
+  expect(requests[0].method).toBe('POST');
+  expect(requests[0].url).toBe('/admin/macros/delete');
+  expect(requests[0].body).toEqual({
+    cwd: '/home/bilko/Projects/session-manager',
+    id: 'm1',
+    originClaudeSessionId: 'chat-123',
+  });
+});
+
+test('macro_delete refuses a bad id without any HTTP request', async () => {
+  setDeleteEnv({ chat: 'chat-123' });
+  const { handleCallTool, requests } = await deleteHarness({ ok: true });
+  for (const args of [{}, { id: '' }, { id: 7 }, { id: null }]) {
+    const result = await callTool(handleCallTool, 'macro_delete', args);
+    expect(result.isError).toBe(true);
+  }
+  expect(requests).toHaveLength(0);
+});
+
+test('macro_delete refuses in a scheduled job, even one that may queue', async () => {
+  const { handleCallTool, requests } = await deleteHarness({ ok: true });
+  for (const mayQueue of [undefined, '1']) {
+    setDeleteEnv({ chat: 'chat-123', slug: 'some-job', mayQueue });
+    const result = await callTool(handleCallTool, 'macro_delete', { id: 'm1' });
+    expect(result.isError).toBe(true);
+  }
+  expect(requests).toHaveLength(0);
+});
+
+test('macro_delete refuses outside a Session Manager session', async () => {
+  setDeleteEnv({});
+  const { handleCallTool, requests } = await deleteHarness({ ok: true });
+  const result = await callTool(handleCallTool, 'macro_delete', { id: 'm1' });
+  expect(result.isError).toBe(true);
+  expect(requests).toHaveLength(0);
+});
+
+test('macro_delete turns an admin { ok: false, error } into an error result', async () => {
+  setDeleteEnv({ chat: 'chat-123' });
+  const { handleCallTool } = await deleteHarness({ ok: false, error: 'macro not listed for this project' });
+  const result = await callTool(handleCallTool, 'macro_delete', { id: 'm1' });
+  expect(result.isError).toBe(true);
+  expect(result.content[0].text).toContain('macro not listed for this project');
 });

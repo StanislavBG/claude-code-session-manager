@@ -375,7 +375,7 @@ const MCP_TOOL_CATALOG = [
     purpose: "List this project's HOT KEYS macros — the saved (agent, tag, prompt) one-click buttons shown "
       + "in the Sessions tab's HOT KEYS strip, via the session-manager app's admin API.",
     whenToUse: 'Use to see what macros already exist for this project (including machine-wide `*` macros and '
-      + 'built-ins) before deciding whether to add or update one.',
+      + 'built-ins) before deciding whether to add, update or delete one.',
     whenNotToUse: 'WHEN NOT TO USE IT: macros are scoped to the caller\'s own project — this only ever returns '
       + "macros visible to the resolved cwd, never another project's.",
     exampleArgs: { cwd: '/home/bilko/Projects/session-manager' },
@@ -393,7 +393,8 @@ const MCP_TOOL_CATALOG = [
     whenNotToUse: 'WHEN NOT TO USE IT: macros are scoped to the caller\'s own project — this call is refused if '
       + '`id` resolves to a macro not visible to this project. Built-in macros (`id` starting with `builtin-`) '
       + "cannot be edited through this route. A macro is a HUMAN's one-click button, not a task runner — never "
-      + 'create or update one unless the human has actually asked for that macro to exist.',
+      + 'create or update one unless the human has actually asked for that macro to exist. '
+      + 'To remove a macro use macro_delete; never rewrite it into a placeholder.',
     exampleArgs: {
       cwd: '/home/bilko/Projects/session-manager',
       label: 'Publish git + npm',
@@ -407,6 +408,23 @@ const MCP_TOOL_CATALOG = [
       + '`inputs` is an optional array of { name, label, default, required, options } fields the human fills in '
       + 'when pressing the macro; reference each in the prompt as {{name}}. Omitting `inputs` on update keeps '
       + 'the existing inputs; `[]` clears them.',
+  },
+  {
+    name: 'macro_delete',
+    group: 'macros',
+    purpose: "Remove one of this project's HOT KEYS macros via the session-manager app's admin API, through the same "
+      + 'macroLibrary.cjs store the Sessions HOT KEYS strip reads from, so an open strip updates at once.',
+    whenToUse: 'Use when the human has asked for that macro to go, for example after its work moved to another project. '
+      + 'Get the `id` from macro_list first.',
+    whenNotToUse: "WHEN NOT TO USE IT: a macro is a HUMAN's one-click button and this cannot be undone — never delete one "
+      + "unless the human has asked for that macro to go. It always acts for the calling session's own project: there is "
+      + 'no `cwd` argument, and a macro not listed for this project is refused. Built-in macros are refused. A macro shown '
+      + 'in every project is refused too; only the human can remove it, from the HOT KEYS panel. Refused in a scheduled job '
+      + "and outside a Session Manager session, because no human is there to ask. To change a macro, use macro_save. "
+      + "Another project's macro belongs to that project: use feedback_open_session.",
+    exampleArgs: { id: 'blog-video-8d618a' },
+    notes: 'Returns { ok, deleted, macro }. `deleted: true` means the macro is gone and `macro` is its last copy. '
+      + '`deleted: false` means other projects still list it, so only this project was dropped. A refusal comes back as an error result.',
   },
   {
     name: 'session_manager_help',

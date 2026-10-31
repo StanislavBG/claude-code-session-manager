@@ -86,7 +86,10 @@ scoping scheme.
   `macroLibrary.cjs` (`~/.claude/session-manager/macros.json`; `Macro.projects` = absolute cwds or `'*'`) and
   rendered by `SessionActionsBar.tsx`. Pressing one is the same act as New Session — the one IPC handler
   holding `MINT_AUTHORITY_NEW_EPIC_UI`, `composeEpicIntake`, approve out of `proposed`, send — so the
-  single-creator law is untouched: a human still presses the button.
+  single-creator law is untouched: a human still presses the button. Agents reach the same library through
+  macro_list, macro_save and macro_delete. macro_delete acts only for the calling session's own project and only
+  in a session a human is attached to: a macro's last project deletes it, and any other project only drops itself,
+  so one project never takes a button from another.
 - **An Epic's title + objective are fixed for the life of its session, and are its first prompt.** The New Epic
   card composes both through `composeEpicIntake` and sends the objective at creation; nothing rewrites
   `goalText` afterwards, because iteration belongs in follow-up messages and one short-lived Epic per unit of

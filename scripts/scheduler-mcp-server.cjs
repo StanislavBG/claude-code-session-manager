@@ -16,6 +16,7 @@
  *
  *   macro_list({ cwd? }) -> GET  /admin/macros?cwd=<encoded>
  *   macro_save({ cwd?, id?, label, agentName, tag, prompt }) -> POST /admin/macros/save
+ *   macro_delete({ id }) -> POST /admin/macros/delete
  *   customer_feedback_list({ pull?, includeHidden? }) -> GET  /admin/customer-feedback/inbox
  *   customer_feedback_set_status({ id, status, note? }) -> POST /admin/customer-feedback/status
  *
@@ -545,6 +546,17 @@ const TOOLS = [
     },
   },
   {
+    name: 'macro_delete',
+    description: descriptionFor('macro_delete'),
+    inputSchema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', description: 'Id of the macro to remove, from macro_list.' },
+      },
+      required: ['id'],
+    },
+  },
+  {
     name: 'customer_feedback_list',
     description: descriptionFor('customer_feedback_list'),
     inputSchema: {
@@ -580,6 +592,19 @@ const TOOLS = [
     },
   },
 ];
+
+// A macro is a human's button and its delete cannot be undone, so this runs
+// only in a session a human is attached to. headlessQueueRefusal does not fit:
+// it lets an architect job through.
+function macroDeleteRefusal() {
+  if (process.env.SM_SCHEDULER_JOB_SLUG || !process.env.SM_CHAT_SESSION_ID) {
+    return errorResult(
+      'refused: macro_delete runs only in a Session Manager chat or terminal session, because a macro goes only when a human asks. '
+      + 'Say in your final result which macro should go; the human can remove it from the HOT KEYS panel.',
+    );
+  }
+  return null;
+}
 
 // Named + exported (see module.exports below) so mcpToolCatalog.test.cjs's
 // sibling can exercise session_manager_help's argument handling directly —
@@ -868,6 +893,19 @@ async function handleCallTool(request) {
       if (typeof args.id === 'string' && args.id) payload.id = args.id;
       if (Array.isArray(args.inputs)) payload.inputs = args.inputs;
       const result = await adminRequest('POST', '/admin/macros/save', payload);
+      return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    }
+    if (name === 'macro_delete') {
+      const refusal = macroDeleteRefusal();
+      if (refusal) return refusal;
+      if (!args || typeof args.id !== 'string' || !args.id) return errorResult('missing or invalid required argument: id');
+      // No args: this tool never takes a project from the caller. mcpStdioServer enforces no input schema.
+      const result = await adminRequest('POST', '/admin/macros/delete', {
+        cwd: resolveCwdArg(),
+        id: args.id,
+        originClaudeSessionId: process.env.SM_CHAT_SESSION_ID,
+      });
+      if (result?.ok === false) return errorResult(result.error ?? 'macro_delete failed');
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };
     }
     if (name === 'customer_feedback_list') {

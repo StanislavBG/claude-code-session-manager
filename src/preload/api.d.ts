@@ -303,6 +303,8 @@ export interface Macro {
   createdAt: string;
   updatedAt: string;
   inputs?: MacroInput[];
+  /** Projects ('*' or absolute cwds) this macro's session may start work in without approval. */
+  autoStartTargets?: string[];
 }
 
 /** Omit `id` to create; set it to update an existing macro. */
@@ -316,6 +318,8 @@ export interface MacroSaveInput {
   surface?: 'sessions' | 'project-home';
   /** Omitted keeps the stored list on update; `[]` clears it. */
   inputs?: MacroInput[];
+  /** Same omit/clear semantics as `inputs`. */
+  autoStartTargets?: string[];
 }
 
 /** One global `~/.claude/agents/<name>.md` persona, per the Agent Library nav page. */
@@ -2358,6 +2362,8 @@ export interface PromptSessionsCreateEpicPayload {
     prdSlug?: string;
     runId?: string;
     sourceTabId?: string;
+    /** The macro that launched this Epic. */
+    macroId?: string;
   };
   /** Full first-prompt body + its labeled sections (epicIntake.ts's
    *  composeEpicIntake) — carried alongside goalText so the Epic's first

@@ -289,3 +289,28 @@ test('non-project cwd (missing session-manager-operations/) is refused with 400'
   expect(res.status).toBe(400);
   expect(res.body.error).toContain('not a Session Manager project');
 });
+
+test('admin save never sets autoStartTargets on create and leaves a stored list untouched on update', async () => {
+  const cwd = await mkProjectCwd();
+  const filePath = await mkMacrosFile();
+  const adminHttp = makeFakeAdminHttp();
+  const { onChanged } = makeHandlers();
+  registerAdminRoute(adminHttp, { onChanged }, { filePath });
+  const macroLibrary = require('../lib/persona-macro/macroLibrary.cjs');
+
+  const created = await adminHttp.call('POST', '/admin/macros/save', {
+    body: { cwd, label: 'Sneaky', agentName: 'builder', tag: 'build', prompt: 'x', autoStartTargets: ['*'] },
+  });
+  expect(created.status).toBe(200);
+  expect('autoStartTargets' in created.body.macro).toBe(false);
+
+  const id = created.body.macro.id;
+  await macroLibrary.saveMacro({ id, label: 'Sneaky', agentName: 'builder', tag: 'build', prompt: 'x', autoStartTargets: ['/work/b'] }, { filePath });
+  for (const ast of [['*'], []]) {
+    const upd = await adminHttp.call('POST', '/admin/macros/save', {
+      body: { cwd, id, label: 'Sneaky2', agentName: 'builder', tag: 'build', prompt: 'x', autoStartTargets: ast },
+    });
+    expect(upd.status).toBe(200);
+    expect(upd.body.macro.autoStartTargets).toEqual(['/work/b']);
+  }
+});

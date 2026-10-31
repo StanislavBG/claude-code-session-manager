@@ -161,6 +161,8 @@ const MacroSchema = z.object({
   createdAt: z.string().min(1).max(64),
   updatedAt: z.string().min(1).max(64),
   inputs: MacroInputsSchema.optional(),
+  // Projects this macro's session may start work in without approval. Set only by the app's IPC save.
+  autoStartTargets: MacroProjectsSchema.optional(),
 }).superRefine(refineInputs);
 
 const MacroSaveSchema = z.object({
@@ -176,6 +178,8 @@ const MacroSaveSchema = z.object({
   surface: MacroSurfaceSchema.optional(),
   // Omitted keeps the stored list on update; `[]` clears it.
   inputs: MacroInputsSchema.optional(),
+  // Omitted keeps the stored list on update; `[]` clears it.
+  autoStartTargets: MacroProjectsSchema.optional(),
 }).superRefine(refineInputs);
 
 const MacroDeleteSchema = z.object({ id: MacroIdSchema });
@@ -210,6 +214,12 @@ function normalizeCwd(cwd) {
 function macroVisibleIn(macro, cwd) {
   const projects = (macro && macro.projects) || [];
   return projects.includes(ALL_PROJECTS) || projects.includes(normalizeCwd(cwd));
+}
+
+/** True iff the macro may auto-start work in `toCwd`: autoStartTargets includes '*' or the normalized cwd. */
+function macroAllowsAutoStart(macro, toCwd) {
+  const targets = (macro && macro.autoStartTargets) || [];
+  return targets.includes(ALL_PROJECTS) || targets.includes(normalizeCwd(toCwd));
 }
 
 function normalizeProjects(projects) {
@@ -511,6 +521,13 @@ async function saveMacro(input, opts = {}) {
       } else {
         saved.inputs = parsed.inputs;
       }
+      if (parsed.autoStartTargets === undefined) {
+        // keep whatever the spread carried over
+      } else if (parsed.autoStartTargets.length === 0) {
+        delete saved.autoStartTargets;
+      } else {
+        saved.autoStartTargets = normalizeProjects(parsed.autoStartTargets);
+      }
       assertPlaceholdersDeclared(saved);
       macros[idx] = saved;
     } else {
@@ -527,6 +544,9 @@ async function saveMacro(input, opts = {}) {
         updatedAt: now,
       };
       if (parsed.inputs && parsed.inputs.length > 0) saved.inputs = parsed.inputs;
+      if (parsed.autoStartTargets && parsed.autoStartTargets.length > 0) {
+        saved.autoStartTargets = normalizeProjects(parsed.autoStartTargets);
+      }
       assertPlaceholdersDeclared(saved);
       macros.push(saved);
     }
@@ -593,6 +613,7 @@ module.exports = {
   defaultMacroValues,
   renderMacroPrompt,
   macroVisibleIn,
+  macroAllowsAutoStart,
   listMacros,
   saveMacro,
   deleteMacro,

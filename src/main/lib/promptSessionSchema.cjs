@@ -43,6 +43,8 @@ const EpicSourceSchema = z.object({
   // there is no cross-project registry anywhere else.
   fromCwd: z.string().optional(),
   fromEpicId: z.string().optional(),
+  // The macro that launched this Epic (new-epic-ui Epics only).
+  macroId: z.string().optional(),
 });
 
 // Mirrors EpicIntakeSection (src/renderer/lib/epicIntake.ts) — the labeled

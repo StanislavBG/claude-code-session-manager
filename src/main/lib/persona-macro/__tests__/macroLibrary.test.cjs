@@ -445,3 +445,40 @@ test('macroVisibleIn', () => {
   expect(lib.macroVisibleIn({ projects: ['/work/a'] }, '/work/b')).toBe(false);
   expect(lib.macroVisibleIn({ projects: [] }, '/work/a')).toBe(false);
 });
+
+test('autoStartTargets: create stores normalized non-empty list, empty/omitted leaves absent', async () => {
+  const a = await lib.saveMacro(base({ autoStartTargets: ['/work/b/', '*', '/work/b'] }), opts);
+  expect(a.autoStartTargets).toEqual(['/work/b', '*']);
+  const b = await lib.saveMacro(base({ autoStartTargets: [] }), opts);
+  expect('autoStartTargets' in b).toBe(false);
+  const c = await lib.saveMacro(base(), opts);
+  expect('autoStartTargets' in c).toBe(false);
+});
+
+test('autoStartTargets: update omitted keeps, [] deletes, non-empty replaces; survives file round trip', async () => {
+  const a = await lib.saveMacro(base({ autoStartTargets: ['/work/b'] }), opts);
+  const kept = await lib.saveMacro(base({ id: a.id }), opts);
+  expect(kept.autoStartTargets).toEqual(['/work/b']);
+  const replaced = await lib.saveMacro(base({ id: a.id, autoStartTargets: ['/work/c'] }), opts);
+  expect(replaced.autoStartTargets).toEqual(['/work/c']);
+  const onDisk = (await lib.listMacros(opts)).find((m) => m.id === a.id);
+  expect(onDisk.autoStartTargets).toEqual(['/work/c']);
+  expect(JSON.parse(fs.readFileSync(filePath, 'utf8')).macros.find((m) => m.id === a.id).autoStartTargets).toEqual(['/work/c']);
+  const cleared = await lib.saveMacro(base({ id: a.id, autoStartTargets: [] }), opts);
+  expect('autoStartTargets' in cleared).toBe(false);
+  const reread = (await lib.listMacros(opts)).find((m) => m.id === a.id);
+  expect('autoStartTargets' in reread).toBe(false);
+});
+
+test('autoStartTargets rejects relative paths', async () => {
+  await expect(lib.saveMacro(base({ autoStartTargets: ['rel/dir'] }), opts)).rejects.toThrow();
+});
+
+test('macroAllowsAutoStart', () => {
+  expect(lib.macroAllowsAutoStart({ autoStartTargets: ['/work/b'] }, '/work/b/')).toBe(true);
+  expect(lib.macroAllowsAutoStart({ autoStartTargets: ['/work/b'] }, '/work/c')).toBe(false);
+  expect(lib.macroAllowsAutoStart({ autoStartTargets: ['*'] }, '/anything')).toBe(true);
+  expect(lib.macroAllowsAutoStart({ autoStartTargets: [] }, '/work/b')).toBe(false);
+  expect(lib.macroAllowsAutoStart({}, '/work/b')).toBe(false);
+  expect(lib.macroAllowsAutoStart(null, '/work/b')).toBe(false);
+});

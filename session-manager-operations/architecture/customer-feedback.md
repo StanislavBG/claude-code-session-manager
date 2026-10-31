@@ -77,7 +77,7 @@ Envelope: `{ schemaVersion: 1, items: InboxItem[], nextSince: string|null, nextM
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `token` | string | This project's bearer: the value after `session-manager:` in the host's `PROJECT_FEEDBACK_TOKENS`. Presence (non-empty after trim) = owner mode. |
+| `token` | string | The host's `PROJECT_SNAPSHOT_TOKEN`. Presence (non-empty after trim) = owner mode. |
 | `projectCwd` | string \| null | Project that receives Open-as-Epic Epics; without it the button is disabled. |
 
 Env overrides, checked first: `SM_FEEDBACK_OWNER_TOKEN` (+ `SM_FEEDBACK_OWNER_PROJECT_CWD`). Base URL:
@@ -85,31 +85,29 @@ Env overrides, checked first: `SM_FEEDBACK_OWNER_TOKEN` (+ `SM_FEEDBACK_OWNER_PR
 
 #### Owner setup (one time, per machine)
 
-There is one feedback owner, because the slug and host are fixed. The token is a single host secret for this
-slug, not a per-install one: a value works only once it is in `PROJECT_FEEDBACK_TOKENS` on the host, and
-customer machines never hold it, so this is not Field Manual material. It opens the `session-manager` inbox
-(read, status and moderate; this app never calls moderate) and gets `401` on any other slug and on snapshot
-and event writes (`checkBearer` in the Bilko repo's `server/routes/project-feedback.ts`).
-`PROJECT_SNAPSHOT_TOKEN` opens the same routes but also writes snapshots and events for every project slug, so
-it does not belong in this file. Never print the token or put it in a tracked file.
+There is one feedback owner, because the slug and host are fixed. The token is a single host secret, not a
+per-install one: it cannot be minted locally, and customer machines never hold it, so this is not Field
+Manual material. It is also broader than this feature — the same bearer authorizes snapshot and event writes
+for every project slug on bilko.run (`server/routes/project-data.ts` and `project-events.ts` in the Bilko repo).
+Never print it or put it in a tracked file.
 
-1. Take the value after `session-manager:` from `PROJECT_FEEDBACK_TOKENS` on the bilko.run Render service. With
-   no such pair, add one first: see `PROJECT_FEEDBACK_TOKENS` in the Bilko repo's `docs/secrets-rotation.md`.
+The host also accepts a narrower bearer that opens only this inbox (`PROJECT_FEEDBACK_TOKENS`, see the Bilko
+repo's `docs/secrets-rotation.md`). The owner machine does not use it, by the owner's decision on 2026-10-30:
+social-signals-trader needs the all-project token in its `.env` on the same machine, so moving this file would
+add a secret to manage without removing the broad one from the machine.
+
+1. Take the value from a local holder: `SST_DASHBOARD_SNAPSHOT_TOKEN` in
+   `~/Projects/social-signals-trader/.env` is documented there to match the host. With no local holder, it is
+   the `PROJECT_SNAPSHOT_TOKEN` env var on the bilko.run Render service.
 2. Write `{ "token": "…", "projectCwd": "<session-manager checkout>" }` to the path above, mode `0600`.
    `~/.claude` is a git repo; this file stays out of it only through that repo's allowlist `.gitignore`.
 3. No restart needed: the MCP tools see it on the next call, the {F} panel on its next open.
-4. Verify: `customer_feedback_list({ pull: true })` returns `ok: true`, and
-   `POST https://bilko.run/api/projects/session-manager/snapshot` with this bearer and the body `{}` returns
-   `401`. A `400` there means the file holds the all-project token; that body is never stored. An app reinstall
-   leaves the file in place; only a new machine repeats these steps.
+4. Verify: `customer_feedback_list({ pull: true })` returns `ok: true`. An app reinstall leaves the file in
+   place; only a new machine repeats these steps.
 
-A `401` on the inbox (surfaced as the host's text, `unauthorized`) means this file no longer matches the host:
-repeat from step 1. Rotation has no signal on this side, so a rotated token surfaces here first. It needs no
-downtime, because a slug may appear twice; the steps are in the same section of `docs/secrets-rotation.md`.
-`503` means the host has no bearer configured for this slug.
-
-Migration note: the owner machine stays on `PROJECT_SNAPSHOT_TOKEN` until the `session-manager` pair is in
-Render. Run these steps to move it, then delete this note.
+A `401` (surfaced as the host's text, `unauthorized`) means the host token was rotated: repeat from step 1.
+Rotation has no signal on this side, so a rotated token surfaces here first. The host's rotation runbook lists
+this file as a holder. `503` means the host has no token configured.
 
 ## Wire contract (bilko.run)
 

@@ -296,6 +296,122 @@ test('leaves a user-edited built-in untouched', async () => {
   expect(stillEdited).toMatchObject({ label: 'My Custom Label', builtinVersion: 1 });
 });
 
+// --- content-based upgrade (timestamps alone never prove an edit) ------------
+
+const TEST_BUILTINS_V2_HISTORY = Object.freeze([
+  { ...TEST_BUILTINS_V1[0], prompt: 'v2 prompt', builtinVersion: 2, priorPrompts: ['v1 prompt'] },
+]);
+const T0 = '2026-01-01T00:00:00.000Z';
+const T1 = '2026-02-01T00:00:00.000Z';
+
+function seedStored(over) {
+  const b = TEST_BUILTINS_V1[0];
+  const stored = {
+    id: b.id,
+    label: b.label,
+    agentName: b.agentName,
+    tag: b.tag,
+    prompt: b.prompt,
+    projects: ['*'],
+    surface: b.surface,
+    builtin: true,
+    builtinVersion: 1,
+    createdAt: T0,
+    updatedAt: T1,
+    ...over,
+  };
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, macros: [stored] }));
+  return stored;
+}
+const histOpts = () => ({ filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V2_HISTORY });
+
+test('a re-stamped built-in holding an earlier shipped prompt still upgrades', async () => {
+  seedStored();
+  const listed = await lib.listMacros(histOpts());
+  const m = listed.find((x) => x.id === 'builtin-test-one');
+  expect(m).toMatchObject({ prompt: 'v2 prompt', builtinVersion: 2 });
+  expect(m.updatedAt).toBe(m.createdAt);
+});
+
+test('an unchanged Save through saveMacro does not stop the next upgrade', async () => {
+  const stored = seedStored({ updatedAt: T0 });
+  const o1 = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V1 };
+  await lib.saveMacro(
+    {
+      id: stored.id,
+      label: stored.label,
+      agentName: stored.agentName,
+      tag: stored.tag,
+      prompt: stored.prompt,
+      projects: stored.projects,
+    },
+    o1,
+  );
+  const listed = await lib.listMacros(histOpts());
+  const m = listed.find((x) => x.id === 'builtin-test-one');
+  expect(m).toMatchObject({ prompt: 'v2 prompt', builtinVersion: 2 });
+});
+
+test('an upgrade keeps projects, inputs and autoStartTargets', async () => {
+  const inputs = [{ name: 'x', label: 'X' }];
+  const autoStartTargets = ['/tmp/some-project'];
+  seedStored({ projects: ['/a', '/b'], inputs, autoStartTargets });
+  const listed = await lib.listMacros(histOpts());
+  const m = listed.find((x) => x.id === 'builtin-test-one');
+  expect(m.prompt).toBe('v2 prompt');
+  expect(m.projects).toEqual(['/a', '/b']);
+  expect(m.inputs).toEqual(inputs);
+  expect(m.autoStartTargets).toEqual(autoStartTargets);
+});
+
+test('a built-in with a really edited prompt stays frozen', async () => {
+  seedStored({ prompt: 'my own prompt' });
+  const listed = await lib.listMacros(histOpts());
+  expect(listed.find((x) => x.id === 'builtin-test-one')).toMatchObject({
+    prompt: 'my own prompt',
+    builtinVersion: 1,
+  });
+});
+
+test('a built-in with an edited label stays frozen even when its prompt shipped', async () => {
+  seedStored({ label: 'Renamed' });
+  const listed = await lib.listMacros(histOpts());
+  expect(listed.find((x) => x.id === 'builtin-test-one')).toMatchObject({
+    label: 'Renamed',
+    prompt: 'v1 prompt',
+    builtinVersion: 1,
+  });
+});
+
+test('every real built-in lists one prior prompt per earlier version', () => {
+  const { BUILTIN_MACROS } = require('../builtinMacros.cjs');
+  for (const b of BUILTIN_MACROS) {
+    expect(Array.isArray(b.priorPrompts)).toBe(true);
+    expect(Object.isFrozen(b.priorPrompts)).toBe(true);
+    expect(b.builtinVersion).toBe(b.priorPrompts.length + 1);
+    expect(b.priorPrompts).not.toContain(b.prompt);
+  }
+});
+
+test('the real demo-video v2 copy with a late updatedAt upgrades to the shipped prompt', async () => {
+  const { BUILTIN_MACROS } = require('../builtinMacros.cjs');
+  const real = BUILTIN_MACROS.find((b) => b.id === 'builtin-demo-video');
+  seedStored({
+    id: real.id,
+    label: real.label,
+    agentName: real.agentName,
+    tag: real.tag,
+    prompt: real.priorPrompts[1],
+    builtinVersion: 2,
+    createdAt: '2026-10-03T19:04:10.519Z',
+    updatedAt: '2026-10-03T19:35:19.725676Z',
+  });
+  const listed = await lib.listMacros({ filePath, listPersonas: async () => [], builtins: BUILTIN_MACROS });
+  const m = listed.find((x) => x.id === real.id);
+  expect(m.builtinVersion).toBe(4);
+  expect(m.prompt).toBe(real.prompt);
+});
+
 test('built-in macros cannot be deleted', async () => {
   const o = { filePath, listPersonas: async () => [], builtins: TEST_BUILTINS_V1 };
   await lib.listMacros(o);

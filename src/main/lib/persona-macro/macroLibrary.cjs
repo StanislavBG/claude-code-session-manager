@@ -308,9 +308,26 @@ function resolveBuiltins(opts) {
 /**
  * Pure. Seeds any `builtins` entry missing from `macros` (as `builtin: true`),
  * and upgrades a stored built-in that is behind the shipped `builtinVersion`
- * AND was never user-edited (`updatedAt === createdAt`). A user-edited
- * built-in is left untouched. Returns `{ macros, changed }`.
+ * AND unedited: `updatedAt === createdAt`, OR `isShippedCopy` (label/agent/tag
+ * match and the prompt is one of the built-in's `priorPrompts`). A really
+ * edited built-in is left untouched. Changing a built-in prompt means moving
+ * the old prompt into `priorPrompts` in builtinMacros.cjs. Returns
+ * `{ macros, changed }`.
  */
+/**
+ * True when `stored` matches an earlier shipped version of `builtin`. The
+ * editor stamps `updatedAt` on every Save (even an unchanged one), so
+ * timestamps alone cannot prove a real edit.
+ */
+function isShippedCopy(stored, builtin) {
+  return (
+    stored.label === builtin.label &&
+    stored.agentName === builtin.agentName &&
+    stored.tag === builtin.tag &&
+    (builtin.priorPrompts || []).includes(stored.prompt)
+  );
+}
+
 function ensureBuiltins(macros, builtins) {
   if (!builtins || builtins.length === 0) return { macros, changed: false };
   let changed = false;
@@ -337,7 +354,7 @@ function ensureBuiltins(macros, builtins) {
     }
     const stored = next[idx];
     const storedVersion = stored.builtinVersion || 0;
-    const neverEdited = stored.updatedAt === stored.createdAt;
+    const neverEdited = stored.updatedAt === stored.createdAt || isShippedCopy(stored, b);
     if (storedVersion < b.builtinVersion && neverEdited) {
       next[idx] = {
         ...stored,

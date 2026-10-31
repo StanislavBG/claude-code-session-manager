@@ -1316,6 +1316,7 @@ function getDispatchMap() {
       const personas = await agentLibrary.listPersonas();
       if (!personas.some((a) => a.name === parsed.agentName)) throw new Error('unknown agent');
       let prompt = parsed.prompt;
+      let macroId;
       if (parsed.macroId) {
         const macroLibrary = require('./lib/persona-macro/macroLibrary.cjs');
         const macros = await macroLibrary.listMacros();
@@ -1324,6 +1325,7 @@ function getDispatchMap() {
         const result = macroLibrary.renderMacroPrompt(parsed.prompt, macro.inputs, parsed.inputs ?? {});
         if (!result.ok) throw new Error(result.error);
         prompt = result.prompt;
+        macroId = macro.id;
       }
       chatRunner.requestExternalNewSession({
         cwd: parsed.cwd,
@@ -1331,6 +1333,7 @@ function getDispatchMap() {
         tag: parsed.tag,
         title: parsed.title,
         prompt,
+        ...(macroId ? { macroId } : {}),
       });
       return { ok: true };
     },

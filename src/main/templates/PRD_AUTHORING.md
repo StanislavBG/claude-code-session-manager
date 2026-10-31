@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v14 -->
+<!-- PRD_AUTHORING.md v15 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -80,6 +80,9 @@ Artifact-only PRDs (`deliverable: artifact` + `artifactPaths: [...]`) — use th
 2. Each file must be non-empty and written during the run window — the verifier stat-checks it on disk.
 3. The tree must still end clean. A declared artifact excuses the missing commit, not a stray tracked edit.
 4. Both fields are required together — passing one without the other is refused.
+
+Rule: a PRD whose truthful outcome is no commit (publish, live migration, probe) must declare `deliverable: artifact` with `artifactPaths` naming a git-excluded output it writes during the run, such as a built file in a gitignored folder. A PRD that lands no commit and makes no declaration parks in `needs_review`.
+Why: burrow PRD 1897 ended completed with its commit dropped, because a tracked path counted as proof the work had shipped.
 
 Why: PRD `816-prepare-157-copy-citation-extras-patch` wrote its patch into a git-excluded folder with no way to declare that, and parked `needs_review` twice.
 
@@ -204,7 +207,8 @@ Why: those verdicts mean the run ended without a clean verdict line, not that th
 
 Rule: a park caused by a DIFFERENT actor already finishing the same objective (a sibling PRD, a human) does not self-heal this way. Why: the job has no landed commit of its own. Confirm in the tree that the work is really done, then call `scheduler_archive_prd` with the slug. Archiving marks the job completed and frees the PRDs that depend on it. Never hand-edit `queue.json`: the scheduler and the watchdog both write it. Archiving clears a stale label; it does not fix a real bug.
 
-Known gap: `pass_no_commit` ("already correct, nothing to commit") isn't yet in the self-heal list above for the general case.
+Rule: a no-commit PASS (`pass_no_commit`) completes only with a prior landed commit of the same slug, or when every path in the Files list landed on the base branch since the PRD was queued. Otherwise it parks.
+Why: a tracked path existing is not proof this PRD's work shipped.
 
 ---
 

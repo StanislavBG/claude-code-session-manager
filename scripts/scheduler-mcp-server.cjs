@@ -200,6 +200,15 @@ const CREATE_PRD_ITEM_SCHEMA = {
       type: 'string',
       description: 'Optional: WHO executes this PRD — the persona name (a file at ~/.claude/agents/<name>.md, e.g. "dev-lead") the executor should adopt. Distinct from `tag` (what kind of work); this is who does it. Defaults to "dev-lead" when omitted. Rejected at write time if the name does not resolve to a readable persona file.',
     },
+    deliverable: {
+      type: 'string',
+      enum: ['artifact'],
+      description: 'Optional: set to "artifact" ONLY when this PRD truthfully lands no commit (publish, live migration, probe) and instead writes git-excluded output files during the run. Requires artifactPaths. A no-commit PRD with no declaration parks in needs_review.',
+    },
+    artifactPaths: {
+      type: 'array', items: { type: 'string' },
+      description: 'Required with deliverable: "artifact" (and refused without it): every git-excluded file this PRD writes during the run, e.g. a built file in a gitignored folder. Relative paths, never containing "..", no commas or brackets. Each must be non-empty and freshly written.',
+    },
     quietMachine: {
       type: 'boolean',
       description: 'Optional: set true only when this PRD\'s acceptance criteria are wall-clock/timing measurements (frame time, performance fences) that CPU contention from concurrent jobs would invalidate. The scheduler dispatches it only once zero other jobs are running machine-wide, and holds every other job off the whole slot pool for its run — a whole-machine exclusive lease, not a per-project one. If the machine never goes quiet within the configured wait window (default 30 minutes), it dispatches anyway and is marked degraded. Opt-in only; omit for ordinary PRDs.',

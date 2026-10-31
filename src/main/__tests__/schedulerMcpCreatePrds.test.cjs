@@ -54,6 +54,19 @@ describe('scheduler_create_prds', () => {
     expect(calls[0].body.originProjectRoot).toBe('/proj');
   });
 
+  it('lists deliverable/artifactPaths in the schema and forwards them', async () => {
+    const { TOOLS } = require('../../../scripts/scheduler-mcp-server.cjs');
+    const one = TOOLS.find((t) => t.name === 'scheduler_create_prd');
+    const many = TOOLS.find((t) => t.name === 'scheduler_create_prds');
+    for (const props of [one.inputSchema.properties, many.inputSchema.properties.prds.items.properties]) {
+      expect(props.deliverable.enum).toEqual(['artifact']);
+      expect(props.artifactPaths.type).toBe('array');
+    }
+    await call({ prds: [prd('a', { deliverable: 'artifact', artifactPaths: ['out/x.txt'] })] });
+    expect(calls[0].body.prds[0].deliverable).toBe('artifact');
+    expect(calls[0].body.prds[0].artifactPaths).toEqual(['out/x.txt']);
+  });
+
   it('does not forward originClaudeSessionId when sourcePromptId is given', async () => {
     process.env.SM_CHAT_SESSION_ID = 'chat-1';
     await call({ prds: [prd('a')], sourcePromptId: 'epic-1' });

@@ -309,7 +309,11 @@ interface PromptSessionsState {
   /** Flip a 'proposed' Epic to 'active' — the human approval gate. Returns the
    *  approved session, or null when the id is unknown or not a proposal.
    *  Starting its session is the caller's job (it owns the opening prompt). */
-  approveProposed: (promptSessionId: string, source?: string) => PromptSession | null
+  approveProposed: (
+    promptSessionId: string,
+    source?: string,
+    intake?: { openingPrompt: string; sections: EpicIntakeSection[] },
+  ) => PromptSession | null
   appendPromptSessionEvent: (
     promptSessionId: string,
     event: Omit<PromptSessionEvent, 'id' | 'promptSessionId' | 'at'>,
@@ -549,10 +553,14 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     emitAuditEvent('epic_create', { cwd, epicId: session.id, source: source ?? 'unknown' })
     return session
   },
-  approveProposed: (promptSessionId, source) => {
+  approveProposed: (promptSessionId, source, intake) => {
     const session = get().sessions[promptSessionId]
     if (!session || session.status !== 'proposed') return null
-    const approved: PromptSession = { ...session, status: 'active' }
+    const approved: PromptSession = {
+      ...session,
+      status: 'active',
+      ...(intake ? { openingPrompt: intake.openingPrompt, sections: intake.sections } : {}),
+    }
     const sessions = { ...get().sessions, [promptSessionId]: approved }
     set({ sessions })
     // Kept synchronous (not awaited/async) because every caller relies on

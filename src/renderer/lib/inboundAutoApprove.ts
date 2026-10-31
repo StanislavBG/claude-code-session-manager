@@ -8,12 +8,13 @@
 import { usePromptSessions, type PromptSession } from '../state/promptSessions'
 import { useChat } from '../state/chat'
 import { toast } from '../state/toast'
+import { composeInboundOpening, type InboundOpening } from './inboundOpeningPrompt'
 
 type SendOrigin = NonNullable<Parameters<ReturnType<typeof useChat.getState>['send']>[0]['origin']>
 
 /** Same act as EpicApprovalBar.onApprove. Returns the approved session, or null. */
-export function approveAndStart(epic: PromptSession, source: string, origin: SendOrigin): PromptSession | null {
-  const approved = usePromptSessions.getState().approveProposed(epic.id, source)
+export function approveAndStart(epic: PromptSession, source: string, origin: SendOrigin, intake?: InboundOpening): PromptSession | null {
+  const approved = usePromptSessions.getState().approveProposed(epic.id, source, intake)
   if (!approved) {
     toast.error('This session is no longer awaiting approval.')
     return null
@@ -36,16 +37,26 @@ function isStampedInbound(e: PromptSession): boolean {
   )
 }
 
-/** Approve-and-start every stamped inbound proposal already in the store (only `epicId` when given). No hydrate. */
-export function approveStampedInbound(cwd: string, epicId?: string): void {
+/**
+ * Approve-and-start every stamped inbound proposal already in the store (only `epicId` when given). No hydrate.
+ * Composes the full AIM prompt first, then re-reads the Epic and starts it only if still 'proposed'.
+ */
+export async function approveStampedInbound(cwd: string, epicId?: string): Promise<void> {
   const candidates = Object.values(usePromptSessions.getState().sessions).filter(
     (e) => e.cwd === cwd && (epicId === undefined || e.id === epicId) && isStampedInbound(e),
   )
-  for (const epic of candidates) approveAndStart(epic, 'inbound-auto-approve', 'inbound-proposal')
+  await Promise.all(
+    candidates.map(async (epic) => {
+      const intake = await composeInboundOpening(epic)
+      const fresh = usePromptSessions.getState().sessions[epic.id]
+      if (!fresh || !isStampedInbound(fresh)) return
+      approveAndStart(fresh, 'inbound-auto-approve', 'inbound-proposal', intake ?? undefined)
+    }),
+  )
 }
 
 /** Hydrate `cwd`'s Epics, then approve-and-start every stamped inbound proposal. */
 export async function autoApproveInbound(cwd: string, epicId?: string): Promise<void> {
   await usePromptSessions.getState().hydrate(cwd)
-  approveStampedInbound(cwd, epicId)
+  await approveStampedInbound(cwd, epicId)
 }

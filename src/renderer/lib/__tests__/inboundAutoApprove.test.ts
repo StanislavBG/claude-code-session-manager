@@ -90,15 +90,15 @@ describe('inboundAutoApprove', () => {
     expect(send).not.toHaveBeenCalled()
   })
 
-  it('approveStampedInbound never hydrates (a second hydrate would clobber in-memory sessions)', () => {
+  it('approveStampedInbound never hydrates (a second hydrate would clobber in-memory sessions)', async () => {
     const hydrate = vi.fn()
     usePromptSessions.setState({ hydrate } as never)
-    approveStampedInbound(CWD)
+    await approveStampedInbound(CWD)
     expect(hydrate).not.toHaveBeenCalled()
     expect(send).toHaveBeenCalledTimes(1)
   })
 
-  it('starts a macro-stamped Epic and ignores an unknown requestedBy', () => {
+  it('starts a macro-stamped Epic and ignores an unknown requestedBy', async () => {
     usePromptSessions.setState({
       sessions: {
         macro: epic('macro', {
@@ -118,14 +118,14 @@ describe('inboundAutoApprove', () => {
         }),
       },
     } as never)
-    approveStampedInbound(CWD)
+    await approveStampedInbound(CWD)
     const s = usePromptSessions.getState().sessions
     expect(s.macro.status).toBe('active')
     expect(s.weird.status).toBe('proposed')
     expect(send).toHaveBeenCalledTimes(1)
   })
 
-  it('leaves a plain proposed and a completed Epic untouched', () => {
+  it('leaves a plain proposed and a completed Epic untouched', async () => {
     usePromptSessions.setState({
       sessions: {
         plain: epic('plain'),
@@ -135,10 +135,16 @@ describe('inboundAutoApprove', () => {
         }),
       },
     } as never)
-    approveStampedInbound(CWD)
+    await approveStampedInbound(CWD)
     const s = usePromptSessions.getState().sessions
     expect(s.plain.status).toBe('proposed')
     expect(s.done.status).toBe('completed')
     expect(send).not.toHaveBeenCalled()
+  })
+
+  it('overlapping approveStampedInbound calls start the Epic once, no error toast', async () => {
+    await Promise.all([approveStampedInbound(CWD), approveStampedInbound(CWD)])
+    expect(send).toHaveBeenCalledTimes(1)
+    expect(usePromptSessions.getState().sessions.stamped.status).toBe('active')
   })
 })

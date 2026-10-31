@@ -31,7 +31,7 @@ const LegacyAwareEpicTagSchema = z.preprocess(
   EpicTagSchema.optional(),
 );
 
-// Mirrors EpicSource (src/renderer/state/promptSessions.ts:22-27).
+// Mirrors EpicSource (`export interface EpicSource` in src/renderer/state/promptSessions.ts).
 const EpicSourceSchema = z.object({
   producer: z.enum(['new-epic-ui', 'scheduler-dispatch', 'cross-project-feedback']),
   prdSlug: z.string().optional(),
@@ -45,6 +45,9 @@ const EpicSourceSchema = z.object({
   fromEpicId: z.string().optional(),
   // The macro that launched this Epic (new-epic-ui Epics only).
   macroId: z.string().optional(),
+  // Zod strips undeclared keys on the merge path; a stricter shape could make dropInvalidSessions (ipcSchemas.cjs) drop a whole row holding an older or malformed value.
+  proposal: z.unknown().optional(),
+  autoApprove: z.unknown().optional(),
 });
 
 // Mirrors EpicIntakeSection (src/renderer/lib/epicIntake.ts) — the labeled

@@ -131,6 +131,37 @@ describe('promptSessionsMergeActiveIndex IPC boundary validates session content'
     expect(result.success).toBe(true)
     expect(Object.keys(result.data?.sessions ?? {})).toEqual(['psess-ok3'])
   })
+
+  describe.each(['human', 'macro'])('source stamp survives for requestedBy %s', (requestedBy) => {
+    const base = (source: Record<string, unknown>) => ({
+      id: 'psess-src',
+      cwd: '/home/user/project',
+      goalText: 'x',
+      claudeSessionId: 'claude-src',
+      status: 'active',
+      createdAt: '2026-08-02T13:48:00.000Z',
+      completedAt: null,
+      source,
+    })
+    it('keeps source.proposal and source.autoApprove', () => {
+      const source = {
+        producer: 'cross-project-feedback',
+        proposal: { title: 't', body: 'b' },
+        autoApprove: { requestedBy, at: '2026-08-02T13:48:00.000Z' },
+      }
+      const result = schemas.promptSessionsMergeActiveIndex.safeParse(validEnvelope({ 'psess-src': base(source) }))
+      expect(result.success).toBe(true)
+      const got = (result.data?.sessions['psess-src'] as { source: Record<string, unknown> }).source
+      expect(got.proposal).toEqual(source.proposal)
+      expect(got.autoApprove).toEqual(source.autoApprove)
+    })
+    it('keeps a row with malformed autoApprove/proposal values', () => {
+      const source = { producer: 'cross-project-feedback', proposal: 42, autoApprove: 'garbage' }
+      const result = schemas.promptSessionsMergeActiveIndex.safeParse(validEnvelope({ 'psess-src': base(source) }))
+      expect(result.success).toBe(true)
+      expect(Object.keys(result.data?.sessions ?? {})).toEqual(['psess-src'])
+    })
+  })
 })
 
 // Structural guard for the actual PRD 953/955 claim: there is exactly ONE

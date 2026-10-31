@@ -40,7 +40,7 @@ function recordPath(runDir, slug) {
  */
 function writeSupervisorRecord({
   runDir, slug, cwd, runId, pid, pgid, identity, execCwd, worktreeDir, worktreeBranch,
-  sessionId, startedAt, budgetMs, maxDurationMs, idleKillMs, schedulerPid, codeSha, kind,
+  sessionId, startedAt, budgetMs, maxDurationMs, idleKillMs, schedulerPid, codeSha, kind, scopeUnit,
 }) {
   if (!runDir || !slug) throw new Error('writeSupervisorRecord: runDir and slug are required');
   const record = {
@@ -51,6 +51,7 @@ function writeSupervisorRecord({
     sessionId: sessionId ?? null, startedAt: startedAt ?? null,
     budgetMs: budgetMs ?? null, maxDurationMs: maxDurationMs ?? null, idleKillMs: idleKillMs ?? null,
     schedulerPid: schedulerPid ?? null, codeSha: codeSha ?? null,
+    scopeUnit: scopeUnit ?? null,
   };
   writeJsonAtomicSync(recordPath(runDir, slug), record);
   return record;

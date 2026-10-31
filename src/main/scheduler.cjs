@@ -525,6 +525,66 @@ function biasJobOomScore(pid) {
   }
 }
 
+// ---------- job memory scope (systemd cgroup cap) ----------
+
+const memoryScope = require('./lib/process/memoryScope.cjs');
+
+/**
+ * Decide whether a job's spawn target is wrapped in a systemd memory scope.
+ * Returns { spawn, unit }: unwrapped → the input target and unit null (today's
+ * behaviour untouched); wrapped → systemd-run command/args (argv0 dropped: the
+ * scope execs `claude` in place, so the pid and process group stay the job's).
+ * Unit = sm-job-<sanitized slug>-<run timestamp>.
+ */
+function planJobScope({ jobSpawn, jobArgs, slug, startedAt, deps = {} }) {
+  const supported = (deps.scopeSupported || memoryScope.scopeSupported)();
+  const limits = supported
+    ? (deps.memoryLimitsFor || memoryScope.memoryLimitsFor)({ totalRamMb: Math.floor(os.totalmem() / 1048576) })
+    : null;
+  if (!supported || !limits) return { spawn: jobSpawn, unit: null };
+  const unit = `sm-job-${memoryScope.sanitizeUnit(slug)}-${startedAt}`;
+  const wrapped = (deps.wrapInMemoryScope || memoryScope.wrapInMemoryScope)({
+    command: jobSpawn.command, args: jobSpawn.args || jobArgs, unit, limits,
+  });
+  return { spawn: { ...jobSpawn, command: wrapped.command, args: wrapped.args, argv0: undefined }, unit };
+}
+
+/** Reads the job's cgroup dir from /proc/<pid>/cgroup (cgroup v2). Null when unavailable. */
+function readJobCgroupDir(pid, unit, fsImpl = fs) {
+  try {
+    const line = String(fsImpl.readFileSync(`/proc/${pid}/cgroup`, 'utf8')).split('\n').find((l) => l.startsWith('0::'));
+    const rel = line ? line.slice(3).trim() : '';
+    if (!rel || (unit && !rel.includes(unit))) return null;
+    return path.join('/sys/fs/cgroup', rel);
+  } catch {
+    return null;
+  }
+}
+
+/** Appends memory.peak + oom_kill to the run log (missing files ignored), then stops the scope exactly once. */
+function finalizeJobScope(state, safeLog, deps = {}) {
+  if (!state || !state.unit || state.finalized) return;
+  state.finalized = true;
+  const fsImpl = deps.fs || fs;
+  try {
+    if (!state.cgroupDir && state.pid) state.cgroupDir = readJobCgroupDir(state.pid, state.unit, fsImpl);
+    if (state.cgroupDir) {
+      let peak = null;
+      let oomKills = null;
+      try { peak = Number(String(fsImpl.readFileSync(path.join(state.cgroupDir, 'memory.peak'), 'utf8')).trim()); } catch { /* gone */ }
+      try {
+        const m = /^oom_kill\s+(\d+)/m.exec(String(fsImpl.readFileSync(path.join(state.cgroupDir, 'memory.events'), 'utf8')));
+        if (m) oomKills = Number(m[1]);
+      } catch { /* gone */ }
+      if (Number.isFinite(peak) || oomKills !== null) {
+        safeLog(`\n[scheduler] memory scope ${state.unit}: peak=${Number.isFinite(peak) ? `${Math.round(peak / 1048576)}MB` : 'n/a'} ` +
+          `oom_kill=${oomKills ?? 'n/a'}\n`);
+      }
+    }
+  } catch { /* stats are best-effort */ }
+  (deps.stopScope || memoryScope.stopScope)(state.unit);
+}
+
 // ---------- fs helpers ----------
 
 // ---------- per-project PRD dir resolution (PRD 808) ----------
@@ -4772,22 +4832,26 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       return;
     }
 
+    const scopePlan = planJobScope({ jobSpawn, jobArgs, slug: job.slug, startedAt });
+    const scopeState = { unit: scopePlan.unit, pid: null, cgroupDir: null, finalized: false };
+    const launchSpawn = scopePlan.spawn;
+
     const { child } = withChildAndLog({
       fd,
       logPath,
       safeLog,
       closeFd,
       spawn: {
-        command: jobSpawn.command,
+        command: launchSpawn.command,
         stdinText: prompt,
         // Resume mode passes `--resume <sessionId>` (reconnect to the SAME
         // session) INSTEAD of `--session-id <sessionId>` (mint a new one) —
         // never both, see buildClaudeSpawnArgs.
-        args: jobSpawn.args || jobArgs,
+        args: launchSpawn.args || jobArgs,
         options: {
           cwd: spawnCwd,
           env: childEnv,
-          ...(jobSpawn.argv0 ? { argv0: jobSpawn.argv0 } : {}),
+          ...(launchSpawn.argv0 ? { argv0: launchSpawn.argv0 } : {}),
           ...(jobSpawn.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
           // detached:true puts the child in its own process group so we can kill
           // the entire descendant tree (including any stray background bashes the
@@ -4801,6 +4865,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       onExit({ exitCode, signal, killedByWatchdog, error, spawnFailed, leakedDescendants, safeLog: sl }) {
         const durationMs = Date.now() - startedAt;
         const leaked = leakedDescendants ?? [];
+        finalizeJobScope(scopeState, sl);
         if (leaked.length > 0) {
           sl(`\n[scheduler] leaked ${leaked.length} descendant(s) swept from job process group: ` +
             `${leaked.map((p) => `pid=${p.pid} comm=${p.comm} pcpu=${p.pcpu} etimes=${p.etimes}s`).join(', ')}\n`);
@@ -4899,6 +4964,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
           worktreeDir: execCwd || null, worktreeBranch: execCwd ? `sm-job/${job.slug}` : null,
           sessionId, startedAt, budgetMs: budgetExempt ? null : jobBudgetMs, maxDurationMs: null,
           idleKillMs: IDLE_OUTPUT_KILL_MS, schedulerPid: process.pid, codeSha: SCHEDULER_CODE_SHA,
+          scopeUnit: scopePlan.unit,
         });
       } catch (e) {
         const message = e?.message ?? String(e);
@@ -4907,6 +4973,18 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       }
       // Make this job the OOM killer's preferred victim over Electron.
       biasJobOomScore(child.pid);
+      if (scopeState.unit) {
+        // systemd-run moves itself into the scope just before exec; read the
+        // cgroup now (the process may be gone at finalize), retrying briefly.
+        scopeState.pid = child.pid;
+        scopeState.cgroupDir = readJobCgroupDir(child.pid, scopeState.unit);
+        for (const delay of scopeState.cgroupDir ? [] : [500, 3000]) {
+          const t = setTimeout(() => {
+            if (!scopeState.cgroupDir && !scopeState.finalized) scopeState.cgroupDir = readJobCgroupDir(child.pid, scopeState.unit);
+          }, delay);
+          if (t.unref) t.unref();
+        }
+      }
       // Persist runtime.pid with one retry — still fire-and-forget (must
       // never block the spawn), but a final failure is now loud instead of
       // silently swallowed. A silent failure here is exactly what let the
@@ -11371,6 +11449,9 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
 }
 
 module.exports = {
+  planJobScope,
+  finalizeJobScope,
+  readJobCgroupDir,
   normalizeConfig,
   recordTick,
   reportSchedulerError,

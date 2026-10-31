@@ -66,6 +66,8 @@ interface AppState {
   /** Connection dropped: a fresh handshake must show the SAS again unless re-confirmed ready. */
   clearRemoteReady: (deviceId?: string) => void;
   addKeyMismatch: (deviceId: string) => void;
+  /** Drop a removed computer's in-memory state (ready, key mismatch, cached meta). */
+  forgetDevice: (deviceId: string) => void;
 }
 
 export const useStore = create<AppState>((set, get) => ({
@@ -167,4 +169,13 @@ export const useStore = create<AppState>((set, get) => ({
         ? s.keyMismatchDeviceIds
         : [...s.keyMismatchDeviceIds, deviceId],
     })),
+  forgetDevice: (deviceId) =>
+    set((s) => {
+      const { [deviceId]: _gone, ...deviceMeta } = s.deviceMeta;
+      return {
+        readyDeviceIds: s.readyDeviceIds.filter((id) => id !== deviceId),
+        keyMismatchDeviceIds: s.keyMismatchDeviceIds.filter((id) => id !== deviceId),
+        deviceMeta,
+      };
+    }),
 }));

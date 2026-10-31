@@ -118,4 +118,24 @@ describe('multi-desktop', () => {
     await waitFor(() => expect(useStore.getState().deviceMeta.A?.name).toBe('work-laptop'));
     expect(JSON.parse(localStorage.getItem(META_PREFIX + 'A')!).name).toBe('work-laptop');
   });
+
+  it('switches to another online desktop when the active one is removed', async () => {
+    getDevicesMock.mockResolvedValueOnce({ devices: [dev('A', true, 1), dev('B', true, 2)] });
+    localStorage.setItem(PREFERRED_KEY, 'A');
+    render(<App />);
+    await waitFor(() => expect(useStore.getState().activeDeviceId).toBe('A'));
+    getDevicesMock.mockResolvedValue({ devices: [dev('B', true, 2)] });
+    await status('Z'); // unknown id forces a /devices refresh
+    expect(useStore.getState().activeDeviceId).toBe('B');
+    expect(localStorage.getItem(PREFERRED_KEY)).toBeNull();
+  });
+
+  it('leaves no active desktop when the last one is removed', async () => {
+    getDevicesMock.mockResolvedValueOnce({ devices: [dev('A', true, 1)] });
+    render(<App />);
+    await waitFor(() => expect(useStore.getState().activeDeviceId).toBe('A'));
+    getDevicesMock.mockResolvedValue({ devices: [] });
+    await status('Z');
+    expect(useStore.getState().activeDeviceId).toBeNull();
+  });
 });

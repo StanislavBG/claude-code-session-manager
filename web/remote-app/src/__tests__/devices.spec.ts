@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Device } from '../types';
 import {
   META_PREFIX,
+  PIN_PREFIX,
+  forgetDeviceLocal,
   PREFERRED_KEY,
   deviceLabel,
   loadDeviceMeta,
@@ -111,5 +113,27 @@ describe('storage', () => {
     } finally {
       Object.defineProperty(window, 'localStorage', orig);
     }
+  });
+});
+
+describe('forgetDeviceLocal', () => {
+  beforeEach(() => localStorage.clear());
+
+  it('removes pin and meta for that id only', () => {
+    localStorage.setItem(PIN_PREFIX + 'A', 'k');
+    localStorage.setItem(META_PREFIX + 'A', '{"name":"x"}');
+    localStorage.setItem(PIN_PREFIX + 'B', 'k2');
+    forgetDeviceLocal('A');
+    expect(localStorage.getItem(PIN_PREFIX + 'A')).toBeNull();
+    expect(localStorage.getItem(META_PREFIX + 'A')).toBeNull();
+    expect(localStorage.getItem(PIN_PREFIX + 'B')).toBe('k2');
+  });
+
+  it('clears the preferred key only when it holds that id', () => {
+    localStorage.setItem(PREFERRED_KEY, 'A');
+    forgetDeviceLocal('B');
+    expect(localStorage.getItem(PREFERRED_KEY)).toBe('A');
+    forgetDeviceLocal('A');
+    expect(localStorage.getItem(PREFERRED_KEY)).toBeNull();
   });
 });

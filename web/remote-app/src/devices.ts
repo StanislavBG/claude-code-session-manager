@@ -9,6 +9,7 @@ export interface DeviceMeta {
 
 export const PREFERRED_KEY = 'sm-active-device-v1';
 export const META_PREFIX = 'sm-device-meta-v1-';
+export const PIN_PREFIX = 'sm-e2e-pin-v1-';
 
 function lsGet(key: string): string | null {
   try {
@@ -65,6 +66,13 @@ export function loadDeviceMeta(deviceId: string): DeviceMeta | null {
 
 export function saveDeviceMeta(deviceId: string, meta: DeviceMeta): void {
   lsSet(META_PREFIX + deviceId, JSON.stringify(meta));
+}
+
+/** Drop everything this browser cached locally about a computer that no longer exists. */
+export function forgetDeviceLocal(deviceId: string): void {
+  lsRemove(PIN_PREFIX + deviceId);
+  lsRemove(META_PREFIX + deviceId);
+  if (lsGet(PREFERRED_KEY) === deviceId) lsRemove(PREFERRED_KEY);
 }
 
 export function pickActiveDevice(

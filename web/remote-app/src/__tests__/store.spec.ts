@@ -117,4 +117,18 @@ describe('session store', () => {
       expect(useStore.getState().deviceMeta.x).toEqual(meta);
     });
   });
+
+  it('forgetDevice drops ready, key-mismatch and meta for that id only', () => {
+    const meta = { name: 'n', platform: null, version: null, seenAt: 1 };
+    useStore.setState({
+      readyDeviceIds: ['x', 'y'],
+      keyMismatchDeviceIds: ['x', 'y'],
+      deviceMeta: { x: meta, y: meta },
+    });
+    useStore.getState().forgetDevice('x');
+    const st = useStore.getState();
+    expect(st.readyDeviceIds).toEqual(['y']);
+    expect(st.keyMismatchDeviceIds).toEqual(['y']);
+    expect(st.deviceMeta).toEqual({ y: meta });
+  });
 });

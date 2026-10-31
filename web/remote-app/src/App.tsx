@@ -5,7 +5,7 @@ import {
 import { useStore } from './store';
 import { getMe, getDevices, setTokenGetter } from './api';
 import { getAppInfo } from './remoteApi';
-import { pickActiveDevice, loadPreferredDevice } from './devices';
+import { pickActiveDevice, loadPreferredDevice, forgetDeviceLocal, PIN_PREFIX } from './devices';
 import { RelaySocket } from './ws';
 import Cockpit from './components/Cockpit';
 import ConnectScreen from './components/ConnectScreen';
@@ -32,8 +32,6 @@ export default function App() {
     </ClerkProvider>
   );
 }
-
-const PIN_PREFIX = 'sm-e2e-pin-v1-';
 
 /** How long to wait after sas:pending for event:remote:ready before asking anyway. */
 export const READY_FALLBACK_MS = 20_000;
@@ -89,14 +87,20 @@ function AppInner() {
       }
       return d;
     });
+    const previousIds = useStore.getState().devices.map((d) => d.deviceId);
     setDevices(safeDevices);
     mismatchIds.forEach(addKeyMismatch);
-    // Keep an already-active desktop; otherwise adopt the preferred/newest online one.
-    const st = useStore.getState();
-    if (!st.activeDeviceId) {
-      const pick = pickActiveDevice(st.devices, st.activeDeviceId, loadPreferredDevice());
-      if (pick) setActiveDevice(pick);
+    // Forget computers that left /devices (removed elsewhere).
+    const currentIds = new Set(safeDevices.map((d) => d.deviceId));
+    for (const id of previousIds) {
+      if (currentIds.has(id)) continue;
+      forgetDeviceLocal(id);
+      useStore.getState().forgetDevice(id);
     }
+    // Keep an active desktop still in the list; otherwise adopt the preferred/newest online one (or none).
+    const st = useStore.getState();
+    const pick = pickActiveDevice(st.devices, st.activeDeviceId, loadPreferredDevice());
+    if (pick !== st.activeDeviceId) setActiveDevice(pick);
   };
 
   // Wire Clerk token into the relay API client, then bootstrap.

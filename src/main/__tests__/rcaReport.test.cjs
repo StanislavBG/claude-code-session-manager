@@ -269,3 +269,12 @@ test('classifyFailure: no NEEDS_HUMAN class remains', () => {
   expect(rcaReport.FAILURE_CLASSES.NEEDS_HUMAN).toBeUndefined();
   expect(rcaReport.classifyFailure({ verdict: 'needs_human', logTail: '' })).not.toBe('needs-human');
 });
+
+test('run_commit_not_landed has a label, is never ALREADY_SHIPPED, and routes to investigate', () => {
+  const rca = require('../lib/scheduler/rcaReport.cjs');
+  expect(rca.VERDICT_LABELS.run_commit_not_landed).toBe('run made a commit that never landed');
+  expect(rca.humanVerdict('run_commit_not_landed')).toBe('run made a commit that never landed');
+  const cls = rca.classifyFailure({ verdict: 'run_commit_not_landed', logTail: 'the work is already committed, nothing to commit' });
+  expect(cls).not.toBe(rca.FAILURE_CLASSES.ALREADY_SHIPPED);
+  expect(rca.RECOVERY_ACTIONS[cls]).toBe('investigate');
+});

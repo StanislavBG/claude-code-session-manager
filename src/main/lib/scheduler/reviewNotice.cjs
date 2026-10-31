@@ -201,6 +201,7 @@ const HUMAN_CAUSE = {
   uncommitted_changes: 'the run left changes in the working tree without committing them',
   reaped_without_integration: 'the run was stopped before its work was merged into the main checkout',
   budget_exceeded: 'the run used up its time or cost budget before finishing',
+  run_commit_not_landed: 'the run committed work that never reached the main branch; the commit is kept under a named ref',
 };
 
 function humanCauseFor(cause) {

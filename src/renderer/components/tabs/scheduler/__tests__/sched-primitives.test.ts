@@ -93,3 +93,9 @@ describe('prdStatusFor (PRD 987)', () => {
     expect(prdStatusFor(null)).toBe('ready')
   })
 })
+
+describe('run_commit_not_landed label', () => {
+  it('maps to the same text as the main-process RCA table', () => {
+    expect(verdictLabel('run_commit_not_landed')).toBe('run made a commit that never landed')
+  })
+})

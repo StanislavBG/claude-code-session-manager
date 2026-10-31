@@ -348,3 +348,10 @@ test('holdMsFromEnv falls back to the default for zero, negative, or non-numeric
   expect(holdMsFromEnv({ SM_REVIEW_NOTICE_HOLD_MINUTES: '-5' })).toBe(240 * 60000);
   expect(holdMsFromEnv({ SM_REVIEW_NOTICE_HOLD_MINUTES: 'not-a-number' })).toBe(240 * 60000);
 });
+
+test('formatReviewNotice maps run_commit_not_landed to plain language', () => {
+  const group = { cwd: '/proj', epicId: 'epic-1', cause: 'run_commit_not_landed', jobs: [{ slug: '1-a', reviewNotice: {} }] };
+  const text = formatReviewNotice(group);
+  expect(text).toContain('the run committed work that never reached the main branch; the commit is kept under a named ref');
+  expect(text).not.toContain('reason: run_commit_not_landed');
+});

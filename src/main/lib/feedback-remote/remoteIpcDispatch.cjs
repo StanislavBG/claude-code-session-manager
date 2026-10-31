@@ -185,11 +185,22 @@ function chunkFrames(value, maxBytes = DEFAULT_FRAME_BYTES) {
   const json = JSON.stringify(value === undefined ? null : value)
   const buf = Buffer.from(json, 'utf8')
   if (buf.length > MAX_VALUE_BYTES) return { ok: false, reason: 'too_large' }
-  const limit = Math.max(4, maxBytes - 1)
+  // Budget is the JSON-escaped size of each slice (quotes/backslashes double,
+  // control bytes become \\n or \\u00XX) because the frame is re-stringified
+  // and then base64url-encoded inside an e2e:box.
+  const limit = Math.max(12, maxBytes - 1)
   const slices = []
   let start = 0
   while (start < buf.length) {
-    let end = Math.min(start + limit, buf.length)
+    let end = start
+    let cost = 0
+    while (end < buf.length) {
+      const b = buf[end]
+      const c = b === 0x22 || b === 0x5c ? 2 : b < 0x20 ? (b === 0x0a || b === 0x0d || b === 0x09 || b === 0x08 || b === 0x0c ? 2 : 6) : 1
+      if (cost + c > limit) break
+      cost += c
+      end++
+    }
     if (end < buf.length) {
       while (end > start && (buf[end] & 0xc0) === 0x80) end--
     }

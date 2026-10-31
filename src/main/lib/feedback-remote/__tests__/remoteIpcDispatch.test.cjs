@@ -105,6 +105,34 @@ describe('chunking', () => {
   })
 })
 
+describe('chunking fits the relay after encoding', () => {
+  const { encryptBox } = require('../remoteE2eCrypto.cjs')
+  const key = require('crypto').randomBytes(32)
+  const N = 1_400_000
+  const values = {
+    quotes: '"'.repeat(N),
+    backslashes: '\\'.repeat(N),
+    control: '\u0001\n\t'.repeat(Math.ceil(N / 3)),
+    multibyte: '€😀é'.repeat(Math.ceil(N / 9)),
+    mixed: '"\\\u0002é€😀x'.repeat(Math.ceil(N / 10)),
+  }
+  for (const [name, str] of Object.entries(values)) {
+    it(`${name}: every e2e:box < 256 KiB and round-trips`, () => {
+      const value = { s: str }
+      const r = chunkFrames(value)
+      expect(r.ok).toBe(true)
+      for (const f of r.frames) {
+        expect(Buffer.byteLength(JSON.stringify(f.data)) - 2).toBeLessThanOrEqual(180000)
+        const inner = { type: 'ipc:result', id: 'call-1', seq: f.seq, total: f.total, data: f.data, ts: Date.now() }
+        const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), key)
+        const out = { type: 'e2e:box', id: 'call-1', payload: { nonce, ciphertext }, ts: Date.now(), toConn: 'conn-1234567890' }
+        expect(Buffer.byteLength(JSON.stringify(out))).toBeLessThan(256 * 1024)
+      }
+      expect(joinFrames(r.frames)).toEqual(value)
+    })
+  }
+})
+
 describe('remoteArgFence', () => {
   const links = { '/home/u/proj/link': '/home/u/.ssh' }
   const mk = (platform = 'linux') => ({

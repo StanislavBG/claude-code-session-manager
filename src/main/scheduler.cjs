@@ -5654,6 +5654,16 @@ async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardC
   let mergeAutoResolved = null;
   let mergeAutoResolvedPaths = null;
   let integratedSha = null;
+  const worktreeHead = { action: 'unknown', finalHead: null, stranded: [] };
+  const addStranded = (list) => {
+    for (const c of Array.isArray(list) ? list : []) {
+      if (c && c.sha && !worktreeHead.stranded.some((x) => x.sha === c.sha)) worktreeHead.stranded.push({ sha: c.sha, ref: c.ref || null });
+    }
+  };
+  const pinUnlanded = async () => {
+    if (typeof jw.pinUnlandedWorktreeCommits !== 'function') return;
+    addStranded(await jw.pinUnlandedWorktreeCommits({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, key: job.slug, baseBranch: worktree.baseBranch }));
+  };
   try {
     worktreeLeftoverDirty = (await uncommitted(worktree.dir)) || [];
     // Salvage the worktree's full diff (tracked + untracked) to the run
@@ -5669,11 +5679,26 @@ async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardC
         console.log(`[scheduler] ${job.slug}: salvaged ${salvage.bytes} byte(s) of uncommitted worktree diff to ${salvagePath}`);
       }
     }
+    // Where did HEAD end up? A commit on a detached HEAD must end on the job
+    // branch (fast-forward) or be pinned (diverged) before the checkout goes.
+    if (typeof jw.reconcileWorktreeHead === 'function') {
+      const rec = await jw.reconcileWorktreeHead({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, key: job.slug });
+      worktreeHead.action = rec?.action || 'unknown';
+      worktreeHead.finalHead = rec?.finalHead || null;
+      if (rec?.pinnedRef && rec.finalHead) addStranded([{ sha: rec.finalHead, ref: rec.pinnedRef }]);
+    }
     if (await runCancelled(job.slug, runId)) {
       // Cancelled mid-run: keep the commit on the job branch only.
       appendAuditEvent('job_cancel_integration_skipped', { slug: job.slug, runId, branch: worktree.branch });
+      await pinUnlanded();
       await jw.cleanupJobWorktree({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
-      return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha: null, cancelled: true };
+      return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha: null, cancelled: true, worktreeHead };
+    }
+    if (worktreeHead.action === 'diverged') {
+      console.error(`[scheduler] ${job.slug}: worktree HEAD diverged from ${worktree.branch} — not integrating; commit pinned`);
+      await pinUnlanded();
+      await jw.cleanupJobWorktree({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+      return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha: null, cancelled: false, worktreeHead };
     }
     const integration = await jw.integrateJobBranch({ cwd: guardCwd, branch: worktree.branch, slug: job.slug, carriedPaths, baseBranch: worktree.baseBranch });
     if (integration.ok && integration.reason === 'carried-wip-only') {
@@ -5692,6 +5717,7 @@ async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardC
         console.log(`[scheduler] ${job.slug}: merge auto-resolved (${integration.autoResolved}) — discarded ${mergeAutoResolvedPaths.length} identical working-tree duplicate(s): ${mergeAutoResolvedPaths.join(', ')}`);
       }
     }
+    if (!integration.ok || !integration.integrated) await pinUnlanded();
     await jw.cleanupJobWorktree({
       cwd: guardCwd,
       dir: worktree.dir,
@@ -5706,7 +5732,7 @@ async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardC
       await jw.cleanupJobWorktree({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
     } catch { /* already reported above */ }
   }
-  return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha, cancelled: false };
+  return { worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha, cancelled: false, worktreeHead };
 }
 
 /**
@@ -6151,6 +6177,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     let mergeAutoResolved = null;
     let mergeAutoResolvedPaths = null;
     let integratedSha = null;
+    let worktreeHead = null;
     // A job's uncommitted-work patch, whichever isolation mode produced it —
     // set by EITHER branch below, never both (worktree.ok picks exactly one
     // shape for the whole run). Named generically (not "worktree...") because
@@ -6186,7 +6213,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       }, reviewInRun, worktree.ok ? worktree.setup : { ran: false, ok: false, reason: 'in-place', waitedMs: 0, ms: 0, commands: [] });
     } finally {
       if (worktree.ok) {
-        ({ worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha } =
+        ({ worktreeLeftoverDirty, salvagePatch, worktreeIntegrationFailure, worktreeIntegrationDetail, mergeAutoResolved, mergeAutoResolvedPaths, integratedSha, worktreeHead } =
           await finalizeJobWorktree({ job, runId, runDir, worktree, guardCwd, carriedPaths }));
       } else {
         // In-place run (non-git cwd, cap reached, env-disabled, or a carry-over
@@ -6519,6 +6546,16 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     // outcome, never silently dropped alongside the branch it's stranded on.
     if (worktreeIntegrationFailure) {
       verifyResult = worktreeIntegrationVerdict({ failure: worktreeIntegrationFailure, detail: worktreeIntegrationDetail, slug: job.slug });
+    }
+
+    // A commit that was pinned instead of landed (detached HEAD, diverged
+    // branch, cancelled) is never a success, even over already_satisfied_on_main.
+    if (res.exitCode === 0 && !res.rateLimited && !worktreeIntegrationFailure) {
+      const stranded = gitTreeGuard.strandedCommitVerdict({ worktreeHead, landedCommit: jobLandedCommitThisRun });
+      if (stranded) {
+        verifyResult = stranded;
+        console.log(`[scheduler] ${job.slug}: ${stranded.reason} → needs_review`);
+      }
     }
 
     // Shared-tree stash guard (incident 2026-09-01): only meaningful for an
@@ -7065,6 +7102,9 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       launchEnvApplied: launchEnv ? Object.keys(launchEnv) : [],
       filesChanged: Array.isArray(newlyDirtyAll) ? newlyDirtyAll.length : null,
       landedCommit: jobLandedCommitThisRun ?? null,
+      worktreeFinalHead: worktreeHead?.finalHead ?? null,
+      worktreeHeadAction: worktreeHead?.action ?? null,
+      strandedCommits: (worktreeHead?.stranded || []).map((c) => c.sha),
     });
 
     if (terminalNotifySnapshot) {

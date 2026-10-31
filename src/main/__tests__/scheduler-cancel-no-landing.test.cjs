@@ -130,3 +130,31 @@ test('cancelling a pending row reports no job-branch keys', async () => {
     await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
   }
 });
+
+test('cancelled detached run: commit ends on the job branch, off main', async () => {
+  const slug = 'cancel-no-landing-d';
+  const cwd = path.join(tmpHome, 'repo-cancel');
+  const runDir = path.join(tmpHome, `run-${slug}`);
+  fs.mkdirSync(runDir, { recursive: true });
+  const worktree = await jobWorktree.createJobWorktree({ cwd, slug });
+  assert.ok(worktree.ok, JSON.stringify(worktree));
+  git(worktree.dir, 'config', 'user.email', 't@example.com');
+  git(worktree.dir, 'config', 'user.name', 't');
+  git(worktree.dir, 'checkout', '-q', '--detach');
+  fs.writeFileSync(path.join(worktree.dir, 'detached.txt'), 'd\n');
+  git(worktree.dir, 'add', '-A');
+  git(worktree.dir, 'commit', '-q', '-m', 'detached work');
+  const sha = git(worktree.dir, 'rev-parse', 'HEAD');
+  const mainBefore = git(cwd, 'rev-parse', 'refs/heads/main');
+  try {
+    await runningRow(slug, cwd, 'run-cancel-d');
+    await scheduler.remote.cancelJob(slug, { cwd });
+    const fin = await scheduler.finalizeJobWorktree({ job: { slug, cwd }, runId: 'run-cancel-d', runDir, worktree, guardCwd: cwd, carriedPaths: [] });
+    assert.equal(fin.cancelled, true);
+    assert.equal(fin.worktreeHead.action, 'fast-forwarded');
+    assert.equal(git(cwd, 'rev-parse', `refs/heads/${worktree.branch}`), sha);
+    assert.equal(git(cwd, 'rev-parse', 'refs/heads/main'), mainBefore);
+  } finally {
+    await scheduler.writeQueue({ jobs: [], config: {}, paused: null });
+  }
+});

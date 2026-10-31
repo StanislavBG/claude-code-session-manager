@@ -180,3 +180,22 @@ test('computeCommittedDuringRun skips the retry (and the delay) when the HEAD-di
     vi.restoreAllMocks();
   }
 });
+
+test('committedInWindow ignores a commit that is only pinned under refs/sm-stranded/', async () => {
+  const dir = makeRepo();
+  try {
+    const startedAt = new Date(Date.now() + 5000).toISOString();
+    const when = new Date(Date.now() + 7000).toISOString();
+    git(dir, ['checkout', '-q', '--detach']);
+    fs.writeFileSync(path.join(dir, 'x.txt'), 'x\n');
+    git(dir, ['add', '.']);
+    execFileSync('git', ['commit', '-q', '-m', 'detached'], { cwd: dir, env: { ...process.env, GIT_AUTHOR_DATE: when, GIT_COMMITTER_DATE: when } });
+    const sha = git(dir, ['rev-parse', 'HEAD']);
+    git(dir, ['update-ref', `refs/sm-stranded/k/${sha}`, sha]);
+    git(dir, ['checkout', '-q', '-']);
+    const finishedAt = new Date(Date.now() + 10000).toISOString();
+    expect(await committedInWindow(dir, startedAt, finishedAt)).toBe(false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

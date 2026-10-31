@@ -417,7 +417,7 @@ async function committedInWindow(cwd, startedAt, finishedAt) {
       : new Date().toISOString();
     execFile(
       'git',
-      ['-C', cwd, 'log', '--all', '--format=%H', `--since=${startedAt}`, `--until=${until}`],
+      ['-C', cwd, 'log', `--exclude=${sharedGitExec.STRANDED_REF_PREFIX}*`, '--all', '--format=%H', `--since=${startedAt}`, `--until=${until}`],
       { timeout: 10_000, windowsHide: true },
       (err, stdout) => { resolve(!err && String(stdout || '').trim().length > 0); },
     );
@@ -446,6 +446,24 @@ async function computeCommittedDuringRun(cwd, headBefore, headAfter, startedAt, 
   if (await module.exports.committedInWindow(cwd, startedAt, untilIso)) return true;
   await new Promise((resolve) => { setTimeout(resolve, COMMIT_GUARD_RETRY_DELAY_MS); });
   return module.exports.committedInWindow(cwd, startedAt, untilIso);
+}
+
+/**
+ * A worktree run whose commit could not land (diverged HEAD, cancelled,
+ * integration refused) leaves pinned commits behind. Pure.
+ * @param {{worktreeHead?: {stranded?: Array<{sha: string, ref: string}>}|null, landedCommit?: string|null}} a
+ * @returns {{verdict: string, reason: string, downgradeTo: string}|null}
+ */
+function strandedCommitVerdict({ worktreeHead, landedCommit } = {}) {
+  if (landedCommit) return null;
+  const stranded = Array.isArray(worktreeHead?.stranded) ? worktreeHead.stranded.filter((s) => s && s.sha) : [];
+  if (stranded.length === 0) return null;
+  const list = stranded.map((s) => `${String(s.sha).slice(0, 8)} (pinned at ${s.ref || 'no pin ref'})`).join(', ');
+  return {
+    verdict: 'run_commit_not_landed',
+    reason: `run made ${stranded.length} commit(s) that did not land on the base branch: ${list}`,
+    downgradeTo: 'needs_review',
+  };
 }
 
 /**
@@ -662,6 +680,7 @@ module.exports = {
   committedInWindow,
   computeCommittedDuringRun,
   resolveRunCommitAttribution,
+  strandedCommitVerdict,
   gitRangeCommits,
   isBranchAlreadyIntegrated,
   classifySigtermWithCommit,

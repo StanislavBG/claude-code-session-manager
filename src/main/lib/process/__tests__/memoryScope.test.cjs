@@ -66,12 +66,26 @@ describe('scopeSupported', () => {
 });
 
 describe('stopScope', () => {
-  it('never throws', () => {
-    expect(ms.stopScope('u', { spawnSync: () => { throw new Error('boom'); } })).toBe(false);
-  });
-  it('stops the sanitized scope', () => {
+  const mkChild = () => {
+    const c = { handlers: {}, unrefed: 0 };
+    c.on = (ev, fn) => { c.handlers[ev] = fn; return c; };
+    c.unref = () => { c.unrefed += 1; };
+    return c;
+  };
+  it('spawns detached --no-block stop on the sanitized scope and unrefs', () => {
+    const child = mkChild();
     let seen;
-    expect(ms.stopScope('a b', { spawnSync: (c, a) => { seen = [c, a]; return { status: 0 }; } })).toBe(true);
-    expect(seen).toEqual(['systemctl', ['--user', 'stop', 'a-b.scope']]);
+    expect(ms.stopScope('a b', { spawn: (c, a, o) => { seen = [c, a, o]; return child; } })).toBeUndefined();
+    expect(seen).toEqual(['systemctl', ['--user', 'stop', '--no-block', 'a-b.scope'], { stdio: 'ignore', detached: true }]);
+    expect(child.unrefed).toBe(1);
+  });
+  it('attaches an error listener that swallows spawn errors', () => {
+    const child = mkChild();
+    ms.stopScope('u', { spawn: () => child });
+    expect(typeof child.handlers.error).toBe('function');
+    expect(() => child.handlers.error(new Error('ENOENT'))).not.toThrow();
+  });
+  it('never throws when spawn throws synchronously', () => {
+    expect(() => ms.stopScope('u', { spawn: () => { throw new Error('boom'); } })).not.toThrow();
   });
 });

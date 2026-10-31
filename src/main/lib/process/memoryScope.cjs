@@ -112,22 +112,22 @@ function wrapInMemoryScope(o) {
 }
 
 /**
- * Stop a scope by unit name. Never throws.
+ * Stop a scope by unit name, fire-and-forget. `--no-block` returns at once so a
+ * SIGTERM-ignoring straggler cannot stall the main thread. Never throws.
  * @param {string} unit
- * @param {{ spawnSync?: typeof childProcess.spawnSync }} [deps]
- * @returns {boolean}
+ * @param {{ spawn?: typeof childProcess.spawn }} [deps]
+ * @returns {void}
  */
 function stopScope(unit, deps = {}) {
   try {
-    const spawnSync = deps.spawnSync || childProcess.spawnSync;
-    const r = spawnSync('systemctl', ['--user', 'stop', `${sanitizeUnit(unit)}.scope`], {
+    const spawn = deps.spawn || childProcess.spawn;
+    const child = spawn('systemctl', ['--user', 'stop', '--no-block', `${sanitizeUnit(unit)}.scope`], {
       stdio: 'ignore',
-      timeout: 5000,
+      detached: true,
     });
-    return !!r && !r.error && r.status === 0;
-  } catch {
-    return false;
-  }
+    if (child && typeof child.on === 'function') child.on('error', () => { /* systemctl missing */ });
+    if (child && typeof child.unref === 'function') child.unref();
+  } catch { /* never throw */ }
 }
 
 module.exports = {

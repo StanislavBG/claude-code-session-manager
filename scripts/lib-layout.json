@@ -15,6 +15,7 @@
   "claudeCliCaps": "claude",
   "cleanEnv": "process",
   "crashTelemetry": "telemetry",
+  "autoStartedSession": "feedback-remote",
   "crossProjectFeedback": "feedback-remote",
   "customerFeedbackAdminRoutes": "feedback-remote",
   "customerFeedbackClient": "feedback-remote",

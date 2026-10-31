@@ -269,6 +269,19 @@ const SCHEDULER_TURN_INSTRUCTION =
   `Make the safest reasonable choice for anything left open, and end with a short report ` +
   `of what you did.\n\n`;
 
+/**
+ * Picks the instruction block that opens a turn: scheduler turns and
+ * auto-started inbound Epics have no human watching, so they never ask.
+ */
+function turnInstructionFor(origin, cwd, sessionId) {
+  if (origin === 'scheduler') return SCHEDULER_TURN_INSTRUCTION;
+  if (origin === 'inbound-proposal') {
+    const auto = require('./lib/feedback-remote/autoStartedSession.cjs');
+    if (auto.isAutoStartedEpic(cwd, sessionId)) return auto.autoStartTurnInstruction(STOP_SENTINEL);
+  }
+  return STOP_SIGNAL_INSTRUCTION;
+}
+
 // tab+prompt keys of scheduler-originated prompts awaiting their run() (consumed once).
 const schedulerPrompts = new Map();
 const SCHEDULER_PROMPT_TTL_MS = 6 * 60 * 60 * 1000;
@@ -581,7 +594,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
 
     // Prepend the stop-signal protocol instruction and the chat-mode truth
     // instruction to every prompt
-    const fullPrompt = (origin === 'scheduler' ? SCHEDULER_TURN_INSTRUCTION : STOP_SIGNAL_INSTRUCTION)
+    const fullPrompt = turnInstructionFor(origin, cwd, sessionId)
       + CHAT_MODE_TRUTH_INSTRUCTION + prompt;
 
     // sessionId is the Epic's claudeSessionId for an Epic-backed tab (see
@@ -1113,7 +1126,7 @@ function registerChatHandlers() {
     // A user send is always accepted now (queued behind the tab's live run if
     // one holds it), but the renderer gets the truth either way rather than a
     // success it can't verify.
-    const outcome = run({ tabId, sessionId, prompt, cwd, resume: !!resume, promptId });
+    const outcome = run({ tabId, sessionId, prompt, cwd, resume: !!resume, promptId, origin });
     return { ok: outcome.accepted !== false, queued: !!outcome.queued, reason: outcome.reason };
   }));
 
@@ -1144,6 +1157,7 @@ module.exports = {
   attachWindow,
   registerChatHandlers,
   noteChatRunOrigin,
+  turnInstructionFor,
   parseStopSignal,
   splitStopSignal,
   parseContextUsageMarkdown,

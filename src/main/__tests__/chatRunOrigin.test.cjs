@@ -17,6 +17,8 @@ let originalHome;
 let cr;
 let ledger;
 let schemas;
+const handlers = {};
+const fakeIpc = { handle: (ch, fn) => { handlers[ch] = fn; }, on: () => {} };
 
 const PROMPT = 'please ask the other project to add the widget export feature';
 
@@ -24,7 +26,15 @@ beforeAll(() => {
   originalHome = process.env.HOME;
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunorigin-home-'));
   process.env.HOME = tmpHome;
-  cr = require('../chatRunner.cjs');
+  // chatRunner destructures ipcMain from electron at load; stub it so the
+  // chat:run handler can be captured and called.
+  const Module = require('node:module');
+  const realLoad = Module._load;
+  Module._load = function (request, ...rest) {
+    if (request === 'electron') return { ipcMain: fakeIpc, app: {}, BrowserWindow: {} };
+    return realLoad.call(this, request, ...rest);
+  };
+  try { cr = require('../chatRunner.cjs'); } finally { Module._load = realLoad; }
   ledger = require('../lib/feedback-remote/humanPromptLedger.cjs');
   ({ schemas } = require('../ipcSchemas.cjs'));
 });
@@ -53,4 +63,24 @@ test('chatRun schema accepts known origins and rejects others', () => {
   }
   expect(schemas.chatRun.safeParse(base).success).toBe(true);
   expect(schemas.chatRun.safeParse({ ...base, origin: 'admin' }).success).toBe(false);
+});
+
+test('turnInstructionFor: scheduler, auto-started inbound, hand-approved inbound, human', () => {
+  expect(cr.turnInstructionFor('scheduler', tmpHome, 'x')).toBe(cr.SCHEDULER_TURN_INSTRUCTION);
+  expect(cr.turnInstructionFor('inbound-proposal', tmpHome, 'unknown')).toBe(cr.STOP_SIGNAL_INSTRUCTION);
+  expect(cr.turnInstructionFor('human', tmpHome, 'x')).toBe(cr.STOP_SIGNAL_INSTRUCTION);
+  expect(cr.turnInstructionFor(undefined, tmpHome, 'x')).toBe(cr.STOP_SIGNAL_INSTRUCTION);
+});
+
+test('chat:run handler passes origin through to run()', async () => {
+  const seen = [];
+  cr.__setExecutor((job) => { seen.push(job.origin); return Promise.resolve(); });
+  try {
+    cr.registerChatHandlers();
+    await handlers['chat:run']({}, { tabId: 'to', sessionId: 'so', prompt: 'p', cwd: '/tmp', origin: 'inbound-proposal' });
+    await new Promise((r) => setTimeout(r, 20));
+  } finally {
+    cr.__setExecutor(null);
+  }
+  expect(seen).toContain('inbound-proposal');
 });

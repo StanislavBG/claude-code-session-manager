@@ -14,7 +14,7 @@ jobs:
   # Creates the ONE draft release for the tag before the matrix runs. Matrix runners
   # upload into it (releaseType=draft) so they never race to create releases.
   create-release:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: write
@@ -39,7 +39,7 @@ jobs:
         include:
           - os: macos-latest
             script: dist:mac
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             script: dist:linux
           - os: windows-latest
             script: dist:win
@@ -115,13 +115,13 @@ jobs:
         env:
           SM_PACKAGED_BIN: release/out/mac-arm64/Session Manager.app/Contents/MacOS/Session Manager
       - name: Build unpacked app (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: npm run dist:linux-dir
       - name: Install Playwright
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: npx playwright install --with-deps chromium
       - name: Packaged smoke (Linux)
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-24.04'
         run: xvfb-run --auto-servernum npm run smoke:packaged
         env:
           SM_PACKAGED_BIN: release/out/linux-unpacked/session-manager
@@ -145,7 +145,7 @@ jobs:
   finalize-release:
     needs: release
     if: ${{ success() }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       contents: write

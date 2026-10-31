@@ -52,6 +52,7 @@ const { resolveEpicEffort, effortArgs } = require('./lib/claude/agentEffortResol
 const { planEpicSpawn } = require('./lib/epic/epicSpawnPlan.cjs');
 const epicWorktreeMint = require('./lib/epic/epicWorktreeMint.cjs');
 const logs = require('./logs.cjs');
+const chatInflight = require('./lib/chatInflight.cjs');
 const { feedChildStdin } = require('./lib/process/childStdin.cjs');
 const memoryScope = require('./lib/process/memoryScope.cjs');
 const { createHeadTailBuffer } = require('./lib/util/headTailBuffer.cjs');
@@ -533,6 +534,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     const settle = () => {
       if (settled) return;
       settled = true;
+      chatInflight.end(sessionId).catch(() => {});
       inFlight.delete(tabId);
       resolve();
     };
@@ -787,6 +789,7 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
       return;
     }
     child = thisChild;
+    chatInflight.begin(sessionId, { tabId, cwd, pid: thisChild.pid, startedAt, resume, silent, promptId, origin, worktreeDirHint }).catch(() => {});
     feedChildStdin(thisChild, fullPrompt, {
       log: (m) => logs.writeLine({ scope: 'chatRunner', level: 'warn', message: m }),
     });

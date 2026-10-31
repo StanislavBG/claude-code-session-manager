@@ -454,7 +454,7 @@ const TOOLS = [
         },
         humanRequestQuote: {
           type: 'string',
-          description: "Required with autoStart. Copy VERBATIM from the human's own message in this conversation; that message must name the target project. Do not paraphrase or write it yourself.",
+          description: "Required with autoStart. Copy VERBATIM from the human's own message in this conversation; the quoted words themselves must name the target project. Do not paraphrase or write it yourself.",
         },
       },
       required: ['toCwd', 'fromCwd', 'title', 'motivation', 'acceptanceCriteria', 'body'],
@@ -777,7 +777,11 @@ async function handleCallTool(request) {
       // Epic and chain a receipt onto it. Never invents an Epic — an
       // unresolvable id just means no receipt.
       const payload = { ...args };
-      if (!payload.fromEpicId && process.env.SM_CHAT_SESSION_ID) {
+      // payload starts as a copy of args: drop any caller-supplied identity so
+      // only this process's own env can vouch for the session (a scheduled PRD
+      // job has no SM_CHAT_SESSION_ID and so cannot claim one).
+      delete payload.originClaudeSessionId;
+      if (process.env.SM_CHAT_SESSION_ID) {
         payload.originClaudeSessionId = process.env.SM_CHAT_SESSION_ID;
       }
       // See scheduler_create_prd's own SM_PROJECT_ROOT forwarding above.
@@ -792,10 +796,10 @@ async function handleCallTool(request) {
       let note = '';
       if (result?.ok !== false) {
         if (result?.status === 'auto-approved') {
-          note = ' — auto-approved on the human\'s explicit request; the session is starting in the receiving project. No reply channel; the work is not done yet.';
+          note = ' — the session was auto-approved and is starting in the receiving project. No reply channel; the work is not done yet.';
         } else {
           note = ' — delivered as a PROPOSED session in the receiving project; it runs only if a human there presses Approve & start. No reply channel.';
-          if (args.autoStart && result?.autoStart && result.autoStart.granted !== true && result.autoStart.reason) {
+          if (result?.autoStart && result.autoStart.granted === false && result.autoStart.reason) {
             note += ` Auto-start was requested but not granted: ${result.autoStart.reason}`;
           }
         }

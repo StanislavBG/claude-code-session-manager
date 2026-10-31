@@ -12,7 +12,7 @@ Do not quote the forbidden strings in this file or anywhere else in the repo. Th
 
 ## The guard
 
-`scripts/identity-guard.sh` reads the forbidden strings from a local deny-list that is never committed. The path is `$BILKO_IDENTITY_DENYLIST`, default `~/.config/bilko/identity-denylist`, mode 600, one string per line. The Bilko repo reads the same file. Matching is case-insensitive and fixed-string. Output names files and entry numbers, never the matched text.
+`scripts/identity-guard.sh` reads the forbidden strings from a local deny-list that is never committed. The path is `$BILKO_IDENTITY_DENYLIST`, default `~/.config/bilko/identity-denylist`, mode 600, one string per line. The Bilko repo reads the same file. Matching is case-insensitive and fixed-string. An entry written `word:<string>` matches only as a whole word, where letters, digits and underscore are word characters, so a longer word that contains the string stays allowed. Output names files and entry numbers, never the matched text.
 
 | Hook | Blocks |
 | --- | --- |
@@ -37,7 +37,7 @@ CI runs the same scan in the `ci` job from the `IDENTITY_DENYLIST` repo secret (
 ## Limits
 
 - The scan covers tracked files. `dist/` and `dist-web/` are build output from those files.
-- Deny-list entries are substrings. An entry broad enough to match the repo's own URLs fails every scan, so keep entries exact. The GitHub handle is an open owner decision, not something this guard polices.
+- Plain deny-list entries are substrings. An entry broad enough to match the repo's own URLs fails every scan, so keep entries exact. The GitHub handle is an open owner decision, not something this guard polices.
 
 ## History
 

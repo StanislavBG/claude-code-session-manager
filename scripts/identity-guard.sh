@@ -5,9 +5,11 @@
 # The forbidden strings are never committed. They are read from a local,
 # untracked deny-list, one per line ($BILKO_IDENTITY_DENYLIST, default
 # ~/.config/bilko/identity-denylist; blank and `#` lines are skipped). Matching
-# is case-insensitive and fixed-string. Output names files, line counts and the
-# deny-list entry number, never the matched text, so the guard cannot leak what
-# it guards. No deny-list means nothing to check: it says so and exits 0.
+# is case-insensitive and fixed-string. A `word:<string>` entry matches only as a
+# whole word, for a string that longer allowed words contain. Output names files,
+# line counts and the deny-list entry number, never the matched text, so the
+# guard cannot leak what it guards. No deny-list means nothing to check: it says
+# so and exits 0.
 #
 # Modes (scripts/install-git-hooks.sh installs the first three as git hooks):
 #   pre-commit          block staged added lines, and an author/committer
@@ -35,8 +37,8 @@ if [[ ! -r $denylist ]]; then
 fi
 patterns=$(mktemp)
 trap 'rm -f "$patterns"' EXIT
-# Lowercased, without blank or comment lines: an empty pattern matches everything.
-tr -d '\r' <"$denylist" | grep -v -e '^[[:space:]]*$' -e '^#' | tr '[:upper:]' '[:lower:]' >"$patterns" || true
+# Lowercased, without blank, comment or empty word: lines: an empty pattern matches everything.
+tr -d '\r' <"$denylist" | tr '[:upper:]' '[:lower:]' | grep -v -e '^[[:space:]]*$' -e '^#' -e '^word:[[:space:]]*$' >"$patterns" || true
 if [[ ! -s $patterns ]]; then
   echo "identity-guard: deny-list $denylist has no entries; skipping $mode" >&2
   exit 0
@@ -48,9 +50,25 @@ MARK='identity-guard-commit '
 #   diff  unified diff (git diff / git log -p --format="$MARK%H"): only added
 #         lines and new paths count; labelled "<commit> <path>"
 #   text  every line counts; "$MARK<sha>" lines switch the label to that commit
+# found() tests word: entries the way git grep -w does: an occurrence inside a
+# longer word does not count, so it keeps looking for a standalone one.
 match() {
   awk -v kind="$1" -v label="${2:-}" -v mark="$MARK" '
-    NR == FNR { pat[++n] = $0; next }
+    function found(s, p, whole,    at, skip) {
+      skip = 0
+      while ((at = index(substr(s, skip + 1), p))) {
+        at += skip
+        if (!whole) return 1
+        if ((at == 1 || substr(s, at - 1, 1) !~ /[a-z0-9_]/) && substr(s, at + length(p), 1) !~ /[a-z0-9_]/) return 1
+        skip = at
+      }
+      return 0
+    }
+    NR == FNR {
+      isword[++n] = substr($0, 1, 5) == "word:"
+      pat[n] = isword[n] ? substr($0, 6) : $0
+      next
+    }
     index($0, mark) == 1 { commit = substr($0, length(mark) + 1, 8); label = commit; file = ""; hdr = 0; next }
     kind == "diff" {
       if ($0 ~ /^diff --(git|cc) /) { hdr = 1; next }
@@ -61,7 +79,7 @@ match() {
     }
     {
       line = tolower($0)
-      for (i = 1; i <= n; i++) if (index(line, pat[i])) { print label "\t" i; break }
+      for (i = 1; i <= n; i++) if (found(line, pat[i], isword[i])) { print label "\t" i; break }
     }
   ' "$patterns" -
 }
@@ -149,13 +167,15 @@ case $mode in
     i=0
     while IFS= read -r p; do
       i=$((i + 1))
+      args=(-F -e "$p")
+      [[ $p == word:* ]] && args=(-w -F -e "${p#word:}")
       # Binary files count too; -c prints "[<rev>:]<path>:<count>" and never the text.
       while IFS= read -r row; do
         [[ -z $row ]] && continue
         [[ ${#rev[@]} -gt 0 ]] && row=${row#"${rev[0]}":}
         hits=$((hits + 1))
         echo "  ${row%:*}: ${row##*:} line(s), deny-list entry #$i"
-      done < <(git grep -c -i -F -e "$p" ${rev[@]+"${rev[@]}"} -- || true)
+      done < <(git grep -c -i "${args[@]}" ${rev[@]+"${rev[@]}"} -- || true)
     done <"$patterns"
     if [[ $hits -gt 0 ]]; then
       echo "identity-guard: $hits tracked file match(es) for deny-listed identifiers." >&2

@@ -139,6 +139,121 @@ describe('identity-guard.sh', () => {
     expect(r.out).toContain('b.bin: 1 line(s), deny-list entry #1');
     expect(r.out.toLowerCase()).not.toContain(EMAIL);
   });
+
+  describe('word: entries', () => {
+    const NAME = 'Qqnameqq';
+    const LONGER = `${NAME}xy`;
+    const staged = (line) => {
+      writeFileSync(join(repo, 'notes.md'), `${line}\n`);
+      git('add', 'notes.md');
+      return guard(['pre-commit']);
+    };
+    const BLOCKED = [NAME, `by ${NAME.toUpperCase()}.`, `${NAME.toLowerCase()}'s kit`, `(${NAME} Persona)`, `${LONGER} and ${NAME}`];
+    const ALLOWED = [`github.com/${LONGER}/repo`, `${LONGER}@example.invalid`, `x${NAME}`, `${NAME}_x`, `${NAME}9`];
+
+    beforeEach(() => writeFileSync(denylist, `word:${NAME}\n`));
+
+    it('blocks the whole word in any case without echoing it', () => {
+      for (const line of BLOCKED) {
+        const r = staged(line);
+        expect(r.status).toBe(1);
+        expect(r.out).toContain('notes.md: 1 line(s), deny-list entry #1');
+        expect(r.out.toLowerCase()).not.toContain(NAME.toLowerCase());
+        expect(r.out.toLowerCase()).not.toContain('word:');
+      }
+    });
+
+    it('allows a longer word', () => {
+      for (const line of ALLOWED) expect(staged(line).status).toBe(0);
+    });
+
+    it('applies in commit-msg and pre-push', () => {
+      const msg = join(dir, 'msg');
+      writeFileSync(msg, `fix for ${NAME}\n`);
+      expect(guard(['commit-msg', msg]).status).toBe(1);
+      writeFileSync(msg, `fix for ${LONGER}\n`);
+      expect(guard(['commit-msg', msg]).status).toBe(0);
+
+      git('init', '-q', '--bare', join(dir, 'remote.git'));
+      git('remote', 'add', 'origin', join(dir, 'remote.git'));
+      git('push', '-q', '--no-verify', 'origin', 'main');
+      const base = git('rev-parse', 'HEAD');
+      commitFile('p.md', `by ${NAME}\n`);
+      const bad = guard(['pre-push', 'origin'], { input: `refs/heads/main ${git('rev-parse', 'HEAD')} refs/heads/main ${base}\n` });
+      expect(bad.status).toBe(1);
+      const mid = git('rev-parse', 'HEAD');
+      commitFile('q.md', `by ${LONGER}\n`);
+      git('reset', '-q', '--hard', base);
+      commitFile('q.md', `by ${LONGER}\n`);
+      const ok = guard(['pre-push', 'origin'], { input: `refs/heads/main ${git('rev-parse', 'HEAD')} refs/heads/main ${base}\n` });
+      expect(ok.status).toBe(0);
+      expect(mid).not.toBe(git('rev-parse', 'HEAD'));
+    });
+
+    it('blocks a new path and an author name holding the word', () => {
+      writeFileSync(join(repo, `${NAME}.md`), 'clean\n');
+      git('add', `${NAME}.md`);
+      expect(guard(['pre-commit']).status).toBe(1);
+      git('reset', '-q');
+      expect(guard(['pre-commit'], { env: { GIT_AUTHOR_NAME: NAME } }).status).toBe(1);
+    });
+
+    it('tree mode reports the whole word only, in text and binary files', () => {
+      const early = git('rev-parse', 'HEAD');
+      commitFile('only-longer.md', `by ${LONGER}\n`);
+      expect(guard(['tree']).status).toBe(0);
+      commitFile('t.md', `by ${NAME}\n`);
+      writeFileSync(join(repo, 'b.bin'), Buffer.concat([Buffer.from([0, 1, 0]), Buffer.from(NAME.toUpperCase()), Buffer.from([0])]));
+      git('add', 'b.bin');
+      git('commit', '-q', '--no-verify', '-m', 'add b.bin');
+      const r = guard(['tree']);
+      expect(r.status).toBe(1);
+      expect(r.out).toContain('t.md: 1 line(s), deny-list entry #1');
+      expect(r.out).toContain('b.bin: 1 line(s), deny-list entry #1');
+      expect(r.out).not.toContain('only-longer.md');
+      expect(guard(['tree', early]).status).toBe(0);
+    });
+
+    it('pre-commit and tree mode agree on every line', () => {
+      for (const line of [...BLOCKED, ...ALLOWED]) {
+        const pre = staged(line).status;
+        git('commit', '-q', '--no-verify', '-m', 'line');
+        expect(guard(['tree']).status).toBe(pre);
+      }
+    });
+
+    it('treats the prefix case-insensitively and keeps plain entries as substrings', () => {
+      for (const prefix of ['WORD:', 'Word:']) {
+        writeFileSync(denylist, `${prefix}${NAME}\n`);
+        expect(staged(`by ${NAME}`).status).toBe(1);
+        expect(staged(`by ${LONGER}`).status).toBe(0);
+      }
+      writeFileSync(denylist, `${NAME}\n`);
+      expect(staged(`by ${LONGER}`).status).toBe(1);
+      git('commit', '-q', '--no-verify', '-m', 'longer');
+      expect(guard(['tree']).status).toBe(1);
+    });
+
+    it('treats the entry as a literal string, not a pattern', () => {
+      writeFileSync(denylist, 'word:q.q\n');
+      expect(staged('by qxq').status).toBe(0);
+      git('commit', '-q', '--no-verify', '-m', 'x');
+      expect(guard(['tree']).status).toBe(0);
+      expect(staged('by q.q').status).toBe(1);
+      git('commit', '-q', '--no-verify', '-m', 'y');
+      expect(guard(['tree']).status).toBe(1);
+    });
+
+    it('drops empty word: lines instead of matching everything', () => {
+      writeFileSync(denylist, `word:\nWORD:  \n${SURNAME}\n`);
+      expect(staged('an unrelated line').status).toBe(0);
+      expect(staged(`by ${SURNAME}`).status).toBe(1);
+      git('reset', '-q');
+      expect(guard(['tree']).out).toContain('(1 entries checked)');
+      writeFileSync(denylist, 'word:\n');
+      expect(guard(['tree']).out).toContain('has no entries');
+    });
+  });
 });
 
 describe('install-git-hooks.sh', () => {

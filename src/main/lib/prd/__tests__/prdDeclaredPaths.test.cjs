@@ -80,3 +80,35 @@ test('declaredPathsForPrd on a missing file returns [] without throwing', () => 
 test('declaredPathsForPrd with null path returns []', () => {
   assert.deepStrictEqual(declaredPathsForPrd(null), []);
 });
+
+test('a Files section wins; gate, notes and criteria paths are ignored; folders dropped', () => {
+  const body = [
+    '# Acceptance criteria',
+    '- touches `src/main/ac-only.cjs`',
+    '',
+    '# Files',
+    '',
+    '- src/main/a.cjs',
+    '- `src/main/b.cjs`',
+    '- src/main/folder/',
+    '',
+    '# Implementation notes',
+    'Also see `src/main/notes-only.cjs`.',
+    '',
+    '# Gate',
+    '```gate',
+    'npx vitest run src/main/gate-only.test.cjs',
+    '```',
+  ].join('\n');
+  assert.deepStrictEqual(extractDeclaredPaths(body), ['src/main/a.cjs', 'src/main/b.cjs']);
+});
+
+test('a Files section holding only folders returns []', () => {
+  const body = ['# Files', '', '- src/main/', '', '# Implementation notes', 'See `src/main/x.cjs`.'].join('\n');
+  assert.deepStrictEqual(extractDeclaredPaths(body), []);
+});
+
+test('no Files section falls back to the legacy backtick scan', () => {
+  const body = ['# Implementation notes', 'Edit `src/main/legacy.cjs`.'].join('\n');
+  assert.deepStrictEqual(extractDeclaredPaths(body), ['src/main/legacy.cjs']);
+});

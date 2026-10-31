@@ -20,7 +20,7 @@
 
 'use strict';
 
-import { test, expect } from 'vitest';
+import { test, expect, describe } from 'vitest';
 const { commitGuardVerdict } = require('../scheduler.cjs');
 const { selectAutoFixTargets } = require('../scheduler/reviewLadder.cjs');
 const { resolveCommitGuardOutcome, isAlreadySatisfiedOnMain } = require('../lib/scheduler/reaperHelpers.cjs');
@@ -103,4 +103,45 @@ test('a job whose status is completed (the already-satisfied outcome) is never s
 test('isAlreadySatisfiedOnMain picks the newest (first) satisfying commit when several land', () => {
   const verdict = isAlreadySatisfiedOnMain(['newest111', 'older222']);
   expect(verdict.sha).toBe('newest111');
+});
+
+// findSatisfyingCommitOnMain against a real master-default repo, PRD Files list.
+describe('findSatisfyingCommitOnMain: master-default repo + Files list', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { execFileSync } = require('node:child_process');
+  const { findSatisfyingCommitOnMain } = require('../scheduler.cjs');
+
+  function setup(commitB) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sat-master-'));
+    const git = (...a) => execFileSync('git', ['-C', dir, ...a]);
+    git('init', '-q', '-b', 'master');
+    git('config', 'user.email', 't@t.com');
+    git('config', 'user.name', 'T');
+    const queued = Math.floor(Date.now() / 1000);
+    const commit = (rel, msg) => {
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), msg);
+      git('add', rel);
+      const d = `@${queued + 5} +0000`;
+      execFileSync('git', ['-C', dir, 'commit', '-q', '-m', msg], { env: { ...process.env, GIT_AUTHOR_DATE: d, GIT_COMMITTER_DATE: d } });
+    };
+    commit('src/a.cjs', 'a');
+    if (commitB) commit('src/b.cjs', 'b');
+    const slug = `sat-master-${path.basename(dir)}`;
+    const archDir = path.join(dir, 'session-manager-operations', 'scheduler', 'prds-archived');
+    fs.mkdirSync(archDir, { recursive: true });
+    fs.writeFileSync(path.join(archDir, `${slug}.md`), '---\nslug: x\n---\n# Files\n\n- src/a.cjs\n- src/b.cjs\n');
+    return { cwd: dir, slug, queuedAt: new Date((queued - 2) * 1000).toISOString() };
+  }
+
+  test('every Files entry committed after queuedAt → SHAs', async () => {
+    const shas = await findSatisfyingCommitOnMain(setup(true));
+    expect(shas.length).toBe(2);
+  });
+
+  test('one Files entry without a commit → []', async () => {
+    expect(await findSatisfyingCommitOnMain(setup(false))).toEqual([]);
+  });
 });

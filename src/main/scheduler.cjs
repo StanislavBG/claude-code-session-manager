@@ -3499,15 +3499,18 @@ function classifyFailureOutcome({ exitCode, networkError, durationMs, transientR
 
 /**
  * Evidence gathering for the commit-guard's already-satisfied-on-main
- * exemption (PRD 1136): does a commit reachable from `main`, landed AFTER
+ * exemption (PRD 1136): does a commit reachable from the base branch, landed AFTER
  * this job's `queuedAt`, touch a path this PRD itself declares? Scoped to
  * the PRD's own declared paths via declaredPathsForPrd — the same
  * path-extraction computeLooksDone already uses — so an unrelated commit
  * elsewhere in the repo is never credited to this job. Returns `[]` (never
  * fabricates evidence) when the PRD names no paths or has no `queuedAt`.
  *
- * Requires EVERY declared path to have landed, not just one — declaredPathsForPrd's
- * regex matches any backtick-quoted path in the PRD's Implementation notes or
+ * The PRD's `# Files` list is the declared change set; the backtick scan is
+ * only for PRDs with no Files section.
+ *
+ * Requires EVERY declared path to have landed, not just one — for legacy PRDs
+ * declaredPathsForPrd's regex matches any backtick-quoted path in the PRD's Implementation notes or
  * Acceptance criteria, including a path cited only as context (e.g.
  * `` `src/main/scheduler.cjs:1234` `` pointing at a call site, not a file this
  * PRD's own work touches). Unlike computeLooksDone's identical path-overlap
@@ -3530,9 +3533,10 @@ async function findSatisfyingCommitOnMain(job) {
   const paths = declaredPathsForPrd(prdPath);
   if (!paths.length) return [];
   await gitTreeGuard.fetchAllRefs(job.cwd);
-  const perPathCommits = await Promise.all(paths.map((p) => landedOnMainSince(job.cwd, job.queuedAt, [p])));
+  const baseBranch = job.worktreeBaseBranch || await jobWorktree.resolveDefaultBranch(job.cwd);
+  const perPathCommits = await Promise.all(paths.map((p) => landedOnMainSince(job.cwd, job.queuedAt, [p], { baseBranch })));
   if (perPathCommits.some((commits) => commits.length === 0)) return [];
-  return landedOnMainSince(job.cwd, job.queuedAt, paths);
+  return landedOnMainSince(job.cwd, job.queuedAt, paths, { baseBranch });
 }
 
 /**

@@ -146,3 +146,29 @@ test('landedOnMainSince: git-unavailable (non-repo cwd) resolves [] without thro
   const shas = await landedOnMainSince(dir, new Date().toISOString(), ['src/foo.js']);
   assert.deepStrictEqual(shas, []);
 });
+
+test('landedOnMainSince honours baseBranch in a master-default repo', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'landed-on-master-'));
+  execFileSync('git', ['-C', dir, 'init', '-q', '-b', 'master']);
+  execFileSync('git', ['-C', dir, 'config', 'user.email', 'test@test.com']);
+  execFileSync('git', ['-C', dir, 'config', 'user.name', 'Test']);
+  const since = new Date().toISOString();
+  commitFile(dir, 'src/foo.js', 'x', 'on master', Math.floor(Date.parse(since) / 1000) + 2);
+  assert.deepStrictEqual(await landedOnMainSince(dir, since, ['src/foo.js']), []);
+  const shas = await landedOnMainSince(dir, since, ['src/foo.js'], { baseBranch: 'master' });
+  assert.strictEqual(shas.length, 1);
+});
+
+test('landedSinceRun --all scan excludes pinned refs/sm-stranded commits', async () => {
+  const dir = mkRepoOnMain();
+  const since = new Date().toISOString();
+  const t = Math.floor(Date.parse(since) / 1000) + 2;
+  commitFile(dir, 'base.txt', 'b', 'base', t);
+  execFileSync('git', ['-C', dir, 'checkout', '-q', '-b', 'tmp']);
+  commitFile(dir, 'src/stranded.js', 's', 'stranded', t + 1);
+  const sha = execFileSync('git', ['-C', dir, 'rev-parse', 'HEAD']).toString().trim();
+  execFileSync('git', ['-C', dir, 'update-ref', 'refs/sm-stranded/abc', sha]);
+  execFileSync('git', ['-C', dir, 'checkout', '-q', 'main']);
+  execFileSync('git', ['-C', dir, 'branch', '-q', '-D', 'tmp']);
+  assert.deepStrictEqual(await landedSinceRun(dir, since, ['src/stranded.js']), []);
+});

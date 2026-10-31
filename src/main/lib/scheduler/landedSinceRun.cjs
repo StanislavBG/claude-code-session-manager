@@ -21,6 +21,8 @@
 
 const { execFile } = require('node:child_process');
 
+const { STRANDED_REF_PREFIX } = require('../git/gitExec.cjs');
+
 const LANDED_SINCE_RUN_TIMEOUT_MS = 10_000;
 
 /**
@@ -42,7 +44,7 @@ function landedSinceRun(cwd, sinceIso, paths, { timeoutMs = LANDED_SINCE_RUN_TIM
     }
     execFile(
       'git',
-      ['-C', cwd, 'log', '--all', `--since=${sinceIso}`, '--format=%H', '--', ...paths],
+      ['-C', cwd, 'log', `--exclude=${STRANDED_REF_PREFIX}*`, '--all', `--since=${sinceIso}`, '--format=%H', '--', ...paths],
       { timeout: timeoutMs, windowsHide: true },
       (err, stdout) => {
         if (err) { resolve([]); return; }
@@ -68,10 +70,16 @@ function landedSinceRun(cwd, sinceIso, paths, { timeoutMs = LANDED_SINCE_RUN_TIM
  * @param {string} cwd
  * @param {string} sinceIso
  * @param {string[]} paths
- * @param {{ timeoutMs?: number }} [opts]
+ * `baseBranch` defaults to `main` but can differ: burrow's default branch is
+ * `master`, so a hard-coded `main` silently returned [] there.
+ *
+ * @param {string} cwd
+ * @param {string} sinceIso
+ * @param {string[]} paths
+ * @param {{ baseBranch?: string, timeoutMs?: number }} [opts]
  * @returns {Promise<string[]>} full commit SHAs, newest first
  */
-function landedOnMainSince(cwd, sinceIso, paths, { timeoutMs = LANDED_SINCE_RUN_TIMEOUT_MS } = {}) {
+function landedOnMainSince(cwd, sinceIso, paths, { baseBranch = 'main', timeoutMs = LANDED_SINCE_RUN_TIMEOUT_MS } = {}) {
   const runLog = (ref) => new Promise((resolve) => {
     execFile(
       'git',
@@ -85,9 +93,9 @@ function landedOnMainSince(cwd, sinceIso, paths, { timeoutMs = LANDED_SINCE_RUN_
   });
   return (async () => {
     if (!cwd || !sinceIso || !Array.isArray(paths) || paths.length === 0) return [];
-    const viaLocal = await runLog('main');
+    const viaLocal = await runLog(baseBranch);
     if (viaLocal !== null) return viaLocal;
-    const viaRemote = await runLog('origin/main');
+    const viaRemote = await runLog(`origin/${baseBranch}`);
     return viaRemote ?? [];
   })();
 }

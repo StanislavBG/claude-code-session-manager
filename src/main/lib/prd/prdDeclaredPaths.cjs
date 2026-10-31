@@ -4,6 +4,9 @@
  * prdDeclaredPaths.cjs — derive the file paths a PRD declares it touches, for
  * the reverify self-heal pass's widened evidence window (PRD 1102).
  *
+ * The PRD's `# Files` list is the declared change set and wins when present;
+ * the backtick scan of notes/criteria is only for PRDs with no Files section.
+ *
  * Reuses definitionOfDone.cjs's existing `extractSection` (already the PRD
  * markdown section parser used by flagRiskySurfaces) rather than
  * re-implementing one — see standards.md's API-reuse rule.
@@ -12,6 +15,7 @@
 const fs = require('node:fs');
 const { splitFrontmatter } = require('./prdFrontmatter.cjs');
 const { extractSection } = require('../scheduler/definitionOfDone.cjs');
+const { parseFilesSection } = require('./prdGateFiles.cjs');
 
 // Backtick-quoted, extension-bearing relative paths, e.g. `src/main/scheduler.cjs`
 // or `src/main/scheduler.cjs:490` (trailing :line dropped). Requires at least
@@ -20,7 +24,9 @@ const PATH_RE = /`([a-zA-Z0-9_][\w.-]*(?:\/[\w.-]+)+\.[a-zA-Z0-9]+)(?::\d+)?`/g;
 
 /**
  * Extract declared file paths from a PRD body (frontmatter already
- * stripped). Scans the `# Implementation notes` and `# Acceptance criteria`
+ * stripped). When a `# Files` section exists, returns its file entries
+ * (folder entries ending in `/` dropped; a folders-only section yields []).
+ * Otherwise (legacy PRDs) scans the `# Implementation notes` and `# Acceptance criteria`
  * sections only — the same sections flagRiskySurfaces and the PRD-authoring
  * convention already treat as where files-touched are named. Returns `[]`
  * (never fabricates a path) when neither section names one.
@@ -30,6 +36,9 @@ const PATH_RE = /`([a-zA-Z0-9_][\w.-]*(?:\/[\w.-]+)+\.[a-zA-Z0-9]+)(?::\d+)?`/g;
  */
 function extractDeclaredPaths(prdBody) {
   if (!prdBody || typeof prdBody !== 'string') return [];
+  if (/^#\s+Files\s*$/m.test(prdBody)) {
+    return parseFilesSection(prdBody).filter((f) => !f.endsWith('/'));
+  }
   const text = [
     extractSection(prdBody, 'Implementation notes'),
     extractSection(prdBody, 'Acceptance criteria'),

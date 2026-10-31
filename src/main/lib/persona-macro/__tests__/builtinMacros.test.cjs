@@ -36,10 +36,60 @@ test('builtin demo-video macro is v4 with the character + styles prompt', () => 
   expect(macro.prompt).toContain('Kokoro');
 });
 
-test('demo-video-builder persona is opus / max / seedVersion 4', () => {
+test('demo-video-builder persona is opus / max / seedVersion 5', () => {
   const raw = fs.readFileSync(personaPath, 'utf8');
   const fm = frontmatter(raw);
   expect(fm.model).toBe('opus');
   expect(fm.effort).toBe('max');
-  expect(fm.seedVersion).toBe('4');
+  expect(fm.seedVersion).toBe('5');
+});
+
+function personaBody() {
+  return fs.readFileSync(personaPath, 'utf8').replace(/\r\n/g, '\n').replace(/^---\n[\s\S]*?\n---\n/, '').trim();
+}
+
+test('demo-video-builder persona sections are balanced and never nested', () => {
+  const body = personaBody();
+  let open = null;
+  for (const line of body.split('\n')) {
+    const m = line.match(/^<(\/?)([a-z_]+)>$/);
+    if (!m) continue;
+    if (m[1] === '') {
+      expect(open).toBeNull();
+      open = m[2];
+    } else {
+      expect(open).toBe(m[2]);
+      open = null;
+    }
+  }
+  expect(open).toBeNull();
+  expect(body).not.toMatch(/`<[a-z_]+>$/m);
+});
+
+test('demo-video-builder persona keeps its output contract rules', () => {
+  const body = personaBody();
+  for (const needle of ['XMLHttpRequest', 'system font stack', 'prefers-reduced-motion', 'Under 2 MB total', 'Never retype the base64 audio']) {
+    expect(body).toContain(needle);
+  }
+});
+
+test('plain language and close rules sit above the intake cut', () => {
+  const { AGENT_BODY_CHAR_CAP } = require('../../claude/agentModelResolve.cjs');
+  const head = personaBody().slice(0, AGENT_BODY_CHAR_CAP);
+  expect(head).toContain('</audience_and_language>');
+  expect(head).toContain('</call_to_action>');
+  expect(head).toContain('truncation notice');
+});
+
+test('script_first no longer closes on a command', () => {
+  const body = personaBody();
+  const section = body.slice(body.indexOf('<script_first>'), body.indexOf('</script_first>'));
+  expect(section).not.toContain('get-started');
+  expect(body).not.toContain('instead of paraphrasing');
+});
+
+test('narration recipe normalizes loudness', () => {
+  const body = personaBody();
+  expect(body).toContain('loudnorm=I=-14');
+  expect(body).toContain("'-af', LOUDNESS");
 });

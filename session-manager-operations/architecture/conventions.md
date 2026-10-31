@@ -45,6 +45,25 @@ Vite bundles that package's JS into the renderer, and the wasm served from `/vad
 (it was 1.24.3 wasm under 1.26.0 JS before this guard). Moonshine speech-to-text (`@huggingface/transformers`) bundles its own nested ORT
 separately. After any `onnxruntime-web` bump: run the refresh script and commit the result.
 
+### The built-in Demo Video: language, close, sound
+
+`src/seed/agents/demo-video-builder.md` holds the rules. Decided 2026-10-31, after a Burrow report that its
+videos used developer words.
+
+- **Plain language in every video.** Narration and captions target a GED reading level (Flesch-Kincaid grade 8
+  or lower), because these are marketing videos for people who have not met the project. The grade alone is not
+  enough: "run by cron" scores low and still means nothing to most people, so the persona also bans words the
+  audience would have to look up. Developer tools may keep words every developer uses daily.
+- **The close follows the audience.** Non-developer projects close on their public link. Developer tools keep the
+  real get-started command, on screen and not read aloud. A non-developer project with no public link closes on
+  its name, never on an install command or an invented URL. The link is plain text, because
+  `validateDemoVideoHtml` rejects an outbound `<a href>`.
+- **Louder narration, no music bed.** The recipe's `LOUDNESS` filter takes raw Kokoro from about -23 LUFS, with
+  clipping, to about -15. There is no music bed: the app ships no licensed audio, and a track synthesized in a
+  headless run cannot be judged by ear. The owner's own projects get music from Burrow's Marketing Video macro.
+- **The persona body is over the 6000-char intake cap** (`AGENT_BODY_CHAR_CAP`). Its must-have rules sit above the
+  cut, and the agent is told to read the whole file; both observed runs did. `builtinMacros.test.cjs` pins this.
+
 ## Avoid
 
 - Launching a `claude -p` process **without acquiring a slot from `lib/scheduler/sessionSlots.cjs`** first. That pool (default 5, user-adjustable [0,10] from the Home tab, `SM_SESSION_SLOTS` overrides) is the single machine-wide concurrency limit — scheduler jobs *and* chat runs draw from it. The scheduler's own `concurrencyCap` is **retired**: it was the exact per-consumer private cap sessionSlots.cjs was written to replace, and it silently ceilinged the queue at 3 while the Home tab reported 5. Do not reintroduce a private cap in any consumer. OOM protection is the *memory gate* in `tickQueue` (`RESERVED_HOST_MB` 3000 + `MIN_FREE_MB_PER_JOB` 2500), which is machine-aware — not a hardcoded job count; the 2026-06-10 five-parallel OOM is covered there.
@@ -62,6 +81,7 @@ separately. After any `onnxruntime-web` bump: run the refresh script and commit 
 
 - Treating a transcript's recorded `cwd` as a project root without normalizing it first. Claude Code rewrites `cwd` on every subsequent transcript row once an agent `cd`s somewhere, and `activeSessions.cjs` reads the **last** such row — so an agent that steps into a PRD folder makes that folder look like a project. Every consumer then joins the ops subpath onto it and a whole second ops root is materialized underneath the first: `<project>/session-manager-operations/scheduler/epics/<id>/prds/session-manager-operations/scheduler/state/queue.json`, holding `{"jobs": []}`. Reported from starry-night-ships 2026-08-30 — 15 stubs there, 5 here, 17 more across four sibling projects, mtimes spanning 8 days. This is the *second* form of the ops-root hazard: the 2026-08-13 guard only required the cwd be absolute and exist, and these are both. `activeSessions.projectRootOf` now truncates at the first `session-manager-operations` segment (normalize, don't drop — the ancestor really is the project), and `queueStore.projectStateDir` fails closed on an ops-internal cwd for every other caller; loops over many cwds log-and-skip via `queuePathOrSkip` so one bad row can't abort every other project's read or write. Coverage: `opsRootAbsoluteCwd.test.cjs` + `opsRootNestedWrite.test.cjs`. Existing litter: `node scripts/cleanup-nested-queue-stubs.cjs <projectCwd> --apply`.
 - Treating "dropped out of `git status`" as synonymous with "reverted" in the shared-tree guard (`evaluateSharedTreeGuard`/`checkSharedTreeGuard`, `scheduler.cjs`). 2026-09-12: PRD 1181 added a bare `logs/` pattern to `.gitignore` and committed it (`aff5607`); eleven untracked `session-manager-operations/logs/*` paths instantly stopped appearing in `git status` even though they were untouched on disk, and the guard's old `reverted = dirtyBefore - dirtyAfter - committed` diff had no way to tell that apart from an actual discard — an otherwise-perfect run (exit 0, commit landed) was downgraded to `verdict: 'shared_tree_reverted'` and parked in `needs_review` for a human with nothing to decide. The baseline now carries each path's porcelain status code (`parsePorcelainEntries`/`uncommittedChangesWithStatus`), so the guard can tell "was untracked" apart from "was tracked-and-modified": an untracked path that vanished from status but still exists on disk is `nowIgnored` (does not downgrade the job), while a tracked path leaving the dirty set is still `reverted` regardless of on-disk existence (its content was restored to HEAD, which is exactly the discard the guard exists to catch), and an untracked path that vanished from status *and* no longer exists on disk is still `reverted` too. Coverage: `scheduler-shared-tree-guard.test.cjs`.
+- Bumping a built-in macro by editing `~/.claude/session-manager/macros.json`. Change `builtinMacros.cjs`, bump `builtinVersion`, and let `ensureBuiltins` upgrade the stored copy. 2026-10-03: a session hand-wrote the v2 prompt into this machine's copy and stamped `updatedAt`, which read as a user edit, so the copy missed v3 and v4 until 2026-10-31.
 
 ## Distribution
 

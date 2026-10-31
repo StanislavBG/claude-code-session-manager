@@ -1,6 +1,6 @@
 /**
  * chatRunner-memory-scope.test.cjs — chat turn attempts run in a memory-capped
- * systemd scope when supported; stopScope runs once per attempt on settle.
+ * systemd scope when supported; stopScope is never called for chat turns (background processes outlive the turn).
  *
  * Run: timeout 200 npx vitest run src/main/__tests__/chatRunner-memory-scope.test.cjs
  */
@@ -85,7 +85,7 @@ async function runTurn(sessionId) {
   return { logFile, cwd };
 }
 
-test('wrapped: systemd-run argv, sm-chat unit, stdin still delivered, stopScope once', async () => {
+test('wrapped: systemd-run argv, sm-chat unit, stdin still delivered, stopScope never called', async () => {
   const stops = [];
   const wraps = [];
   ms.scopeSupported = () => true;
@@ -101,7 +101,7 @@ test('wrapped: systemd-run argv, sm-chat unit, stdin still delivered, stopScope 
   expect(wraps).toHaveLength(1);
   expect(wraps[0].unit).toMatch(/^sm-chat-sess-wrapped-1-1-\d+$/);
   expect(wraps[0].limits.memoryMaxMb).toBe(1000);
-  expect(stops).toEqual([wraps[0].unit]);
+  expect(stops).toEqual([]);
   const log = fs.readFileSync(logFile, 'utf8');
   expect(log).toContain('STDIN:');
   expect(log).not.toContain('STDIN:0');

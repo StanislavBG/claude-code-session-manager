@@ -752,14 +752,9 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // stdout is piped for real-time NDJSON streaming; stderr piped for
     // error-message capture.
     let thisChild;
-    // Memory-capped systemd scope for this attempt (null = unwrapped, today's path).
-    let scopeUnit = null;
-    let scopeStopped = false;
-    const stopAttemptScope = () => {
-      if (!scopeUnit || scopeStopped) return;
-      scopeStopped = true;
-      try { memoryScope.stopScope(scopeUnit); } catch { /* never fail the turn */ }
-    };
+    // Memory-capped systemd scope for this attempt (unwrapped when unsupported).
+    // A turn's background processes (dev server, local service) outlive it on
+    // purpose: the scope is never stopped; created --collect, systemd collects it once empty.
     try {
       const chatArgs = buildArgs(resumeFlag);
       let target = claudeSpawnTarget('chat', sessionId, claudeBin, chatArgs);
@@ -773,7 +768,6 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
           });
           // argv0 cannot pass through systemd-run — dropped on the wrapped path only.
           target = { ...target, command: wrapped.command, args: wrapped.args, argv0: undefined };
-          scopeUnit = unit;
         }
       }
       thisChild = spawn(target.command, target.args || chatArgs, {
@@ -785,7 +779,6 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
         ...detachedSpawnOpts(), // own process group so killTree can SIGTERM descendants
       });
     } catch (err) {
-      stopAttemptScope();
       clearTimeout(killTimer);
       clearTimeout(warnTimer);
       emitTerminal('chat:run:error', {
@@ -936,7 +929,6 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     });
 
     thisChild.on('error', (err) => {
-      stopAttemptScope();
       clearTimeout(killTimer);
       clearTimeout(warnTimer);
       emitTerminal('chat:run:error', {
@@ -954,7 +946,6 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     // firing first and dropping the real chat:run:complete behind the
     // terminalSent latch.
     thisChild.on('close', (code, signal) => {
-      stopAttemptScope();
       // Flush any partial line that didn't end with \n
       if (lineBuffer.trim()) processLine(lineBuffer.trim());
 

@@ -7,7 +7,9 @@ vi.mock('../../state/toast', () => ({ toast: { error: (m: string) => toastError(
 
 import { registerRemoteNewSession } from '../remoteNewSession'
 
-const payload = { cwd: '/p', agentName: 'dev-lead', tag: 'feature', title: 'T', prompt: 'do it' }
+const payload: { cwd: string; agentName: string; tag: string; title: string; prompt: string; macroId?: string } = {
+  cwd: '/p', agentName: 'dev-lead', tag: 'feature', title: 'T', prompt: 'do it',
+}
 let fire: (e: typeof payload) => Promise<void>
 const unsub = vi.fn()
 const logWrite = vi.fn()
@@ -37,6 +39,15 @@ describe('registerRemoteNewSession', () => {
       agentDescription: 'builds',
       source: 'WebRemote dev-lead',
     })
+  })
+
+  it('forwards macroId only when present', async () => {
+    launchSession.mockResolvedValue({ epicId: 'e', claudeSessionId: 's' })
+    registerRemoteNewSession()
+    await fire({ ...payload, macroId: 'm1' })
+    expect(launchSession).toHaveBeenLastCalledWith(expect.objectContaining({ macroId: 'm1' }))
+    await fire(payload)
+    expect(launchSession.mock.calls[1][0]).not.toHaveProperty('macroId')
   })
 
   it('toasts and logs on failure without throwing', async () => {

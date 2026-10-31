@@ -2269,7 +2269,7 @@ export interface SessionManagerAPI {
     reportExternalSendResult: (result: ChatExternalSendResult) => Promise<void>;
     /** Fires when a paired phone asks main to start a new Session (payload pre-validated in main). */
     onExternalNewSession: (
-      handler: (e: { cwd: string; agentName: string; tag: AgentPersonaTag; title: string; prompt: string }) => void,
+      handler: (e: { cwd: string; agentName: string; tag: AgentPersonaTag; title: string; prompt: string; macroId?: string }) => void,
     ) => () => void;
     /** Classify a queued PromptTicket's text as 'inline' (run through
      *  chatRunner) or 'develop' (dispatch to /develop for PRD decomposition).

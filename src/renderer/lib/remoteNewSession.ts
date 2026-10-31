@@ -8,7 +8,7 @@ import { launchSession } from './launchSession'
 import { toast } from '../state/toast'
 
 export function registerRemoteNewSession(): () => void {
-  return window.api.chat.onExternalNewSession(async ({ cwd, agentName, tag, title, prompt }) => {
+  return window.api.chat.onExternalNewSession(async ({ cwd, agentName, tag, title, prompt, macroId }) => {
     try {
       let agentDescription: string | undefined
       try {
@@ -17,7 +17,7 @@ export function registerRemoteNewSession(): () => void {
       } catch {
         // persona lookup is best-effort; a thinner opening prompt beats no session
       }
-      await launchSession({ cwd, agentName, tag, title, goal: prompt, agentDescription, source: 'WebRemote ' + agentName })
+      await launchSession({ cwd, agentName, tag, title, goal: prompt, agentDescription, source: 'WebRemote ' + agentName, ...(macroId ? { macroId } : {}) })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       toast.error(`Phone session start failed: ${msg}`)

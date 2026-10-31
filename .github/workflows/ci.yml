@@ -15,17 +15,33 @@ jobs:
           cache: 'npm'
       # Fails when a tracked file holds the owner's real name or personal email
       # (session-manager-operations/architecture/identity-boundary.md). The strings live only in the secret.
+      # GitHub withholds it from Dependabot and fork pull requests, so only a pull request may skip. Otherwise
+      # a green step needs the guard's pass line: the guard itself exits 0 on a list with no usable entries.
       - name: Identity scan
         env:
           IDENTITY_DENYLIST: ${{ secrets.IDENTITY_DENYLIST }}
         run: |
           if [ -z "$IDENTITY_DENYLIST" ]; then
-            echo "::warning::IDENTITY_DENYLIST secret not set; identity scan skipped (session-manager-operations/architecture/identity-boundary.md)"
-            exit 0
+            if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+              echo "::warning::IDENTITY_DENYLIST secret not available; identity scan skipped (session-manager-operations/architecture/identity-boundary.md)"
+              exit 0
+            fi
+            echo "::error::IDENTITY_DENYLIST secret not set; identity scan cannot run (session-manager-operations/architecture/identity-boundary.md)"
+            exit 1
           fi
           list=$(mktemp)
           printf '%s\n' "$IDENTITY_DENYLIST" > "$list"
-          BILKO_IDENTITY_DENYLIST="$list" npm run --silent identity:scan
+          status=0
+          out=$(BILKO_IDENTITY_DENYLIST="$list" npm run --silent identity:scan 2>&1) || status=$?
+          printf '%s\n' "$out"
+          [ "$status" -eq 0 ] || exit "$status"
+          case "$out" in
+            *"entries checked"*) ;;
+            *)
+              echo "::error::IDENTITY_DENYLIST has no usable entries; identity scan did not run (session-manager-operations/architecture/identity-boundary.md)"
+              exit 1
+              ;;
+          esac
       - run: npm ci
       - run: npm audit --omit=dev --audit-level=moderate
       - run: npm run typecheck

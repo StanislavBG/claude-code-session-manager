@@ -874,7 +874,7 @@ async function createWorktree({ kind, cwd, key, fromRef }) {
     // can legitimately re-fire after a transient failure) must not collide
     // with `git worktree add`'s own branch/path checks.
     await removeWorktreeDir(cwd, dir);
-    try { await execGit(['branch', '-D', branch], { cwd, timeout: 10_000 }); } catch { /* didn't exist */ }
+    await deleteBranchKeepingUniqueCommits({ cwd, branch, key });
     await execGit(['worktree', 'add', '-b', branch, dir, worktreeSource], { cwd, timeout: 30_000 });
   } catch (e) {
     activeWorktreeCount[kind] = Math.max(0, activeWorktreeCount[kind] - 1);
@@ -1818,7 +1818,7 @@ async function reclaimTerminalJobOrphans({ cwd, terminalSlugs, isLive }) {
 
     await removeWorktreeDir(cwd, entry.worktree);
     if (entry.branch) {
-      try { await execGit(['branch', '-D', entry.branch], { cwd, timeout: 10_000 }); } catch { /* already gone */ }
+      await deleteBranchKeepingUniqueCommits({ cwd, branch: entry.branch, key: slug });
     }
     reclaimed.push(slug);
   }
@@ -1878,15 +1878,19 @@ async function reconcileWorktreesOnBoot(cwds, opts = {}) {
     const entries = parseWorktreeListPorcelain(out);
     for (const entry of entries) {
       if (!entry.worktree || !entry.worktree.startsWith(root + path.sep)) continue;
-      const key = keyFromBranch(kind, entry.branch);
+      const branchKey = keyFromBranch(kind, entry.branch);
+      // Worktree dirs are <root>/<hash>/<key>, so the basename is the slug/epic id
+      // even when the checkout is detached or on a branch we do not own.
+      const key = branchKey || path.basename(entry.worktree);
       if (isLive && key && (await isLive(key, entry))) continue;
       await removeWorktreeDir(cwd, entry.worktree);
       checkoutsRemoved++;
       // sm-land/* is the per-Epic integration branch, never a throwaway
       // worktree branch — even if something else checked it out onto a
       // worktree under this kind's root, this sweep must never delete it.
-      if (entry.branch && !entry.branch.startsWith(LAND_BRANCH_PREFIX)) {
-        try { await execGit(['branch', '-D', entry.branch], { cwd, timeout: 10_000 }); } catch { /* already gone */ }
+      // Only a branch of this kind's own prefix is ours to delete.
+      if (branchKey && !entry.branch.startsWith(LAND_BRANCH_PREFIX)) {
+        await deleteBranchKeepingUniqueCommits({ cwd, branch: entry.branch, key: branchKey });
       }
     }
     try { await execGit(['worktree', 'prune'], { cwd, timeout: 10_000 }); } catch { /* best effort */ }
@@ -2325,15 +2329,73 @@ async function cleanupEpicWorktree({ cwd, dir, branch, keepBranch }) {
 
 // ──────────────────────────────────────────── stranded-HEAD reconciliation
 
+function safePinKey(key) {
+  return String(key || 'unknown').replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '_') || 'unknown';
+}
+
 /** Pins `sha` under STRANDED_REF_PREFIX/<key>/<sha>; returns the ref or null. Never throws. */
 async function pinCommit({ cwd, key, sha }) {
   try {
-    const safeKey = String(key || 'unknown').replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '_') || 'unknown';
+    const safeKey = safePinKey(key);
     const ref = `${sharedGitExec.STRANDED_REF_PREFIX}${safeKey}/${sha}`;
     await execGit(['update-ref', ref, sha], { cwd, timeout: 10_000 });
     return ref;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Deletes `branch` (`git branch -D`), first pinning its tip under
+ * refs/sm-stranded/<key>/ when it holds commits no other branch, tag or remote
+ * has. A failed uniqueness check also pins (fail-safe). Never throws.
+ */
+async function deleteBranchKeepingUniqueCommits({ cwd, branch, key }) {
+  try {
+    let tip = null;
+    try {
+      tip = (await execGit(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`], { cwd, timeout: 10_000 })).trim() || null;
+    } catch { tip = null; }
+    if (tip) {
+      let unique = true;
+      try {
+        const out = await execGit(
+          ['rev-list', '--count', `refs/heads/${branch}`, '--not', `--exclude=${branch}`, '--branches', '--tags', '--remotes'],
+          { cwd, timeout: 10_000 }
+        );
+        const n = Number.parseInt(String(out).trim(), 10);
+        unique = Number.isFinite(n) ? n > 0 : true;
+      } catch { unique = true; }
+      if (unique) await pinCommit({ cwd, key, sha: tip });
+    }
+  } catch { /* fall through to delete */ }
+  try { await execGit(['branch', '-D', branch], { cwd, timeout: 10_000 }); } catch { /* already gone */ }
+}
+
+/**
+ * Pins under refs/sm-stranded/<key>/ whose commit date is >= sinceMs and that
+ * no branch, tag or remote holds. Returns [{ sha, ref }]; [] on any error.
+ */
+async function listStrandedPins({ cwd, key, sinceMs }) {
+  try {
+    const prefix = `${sharedGitExec.STRANDED_REF_PREFIX}${safePinKey(key)}/`;
+    const out = await execGit(
+      ['for-each-ref', '--format=%(objectname)%09%(refname)%09%(committerdate:unix)', prefix],
+      { cwd, timeout: 10_000 }
+    );
+    const since = Number.isFinite(sinceMs) ? sinceMs : 0;
+    const pins = [];
+    for (const line of String(out).split('\n')) {
+      if (!line.trim()) continue;
+      const [sha, ref, ts] = line.split('\t');
+      if (!sha || !ref) continue;
+      if (Number(ts) * 1000 < since) continue;
+      if ((await countCommitsOnNoRef(cwd, sha)) <= 0) continue;
+      pins.push({ sha, ref });
+    }
+    return pins;
+  } catch {
+    return [];
   }
 }
 
@@ -2483,6 +2545,8 @@ module.exports = {
   listCwdHolders,
   hasLiveHolder,
   reconcileWorktreesOnBoot,
+  deleteBranchKeepingUniqueCommits,
+  listStrandedPins,
   sweepStaleWorktreeCheckouts,
   mainTreeFromWorktreeGitFile,
   getObservedWorktreeCount,

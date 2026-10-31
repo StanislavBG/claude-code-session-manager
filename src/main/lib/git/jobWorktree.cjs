@@ -65,6 +65,7 @@ module.exports = {
   salvageJobWorktreeDiff: gitWorktree.salvageJobWorktreeDiff,
   salvageJobDirtyDelta: gitWorktree.salvageJobDirtyDelta,
   reconcileWorktreeHead: gitWorktree.reconcileWorktreeHead,
+  listStrandedPins: gitWorktree.listStrandedPins,
   pinUnlandedWorktreeCommits: gitWorktree.pinUnlandedWorktreeCommits,
   resolveDefaultBranch: gitWorktree.resolveDefaultBranch,
   parseWorktreeListPorcelain: gitWorktree.parseWorktreeListPorcelain,

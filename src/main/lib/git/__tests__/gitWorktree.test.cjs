@@ -2173,3 +2173,68 @@ test('[job] unchangedCarriedPaths: untouched carried path returned, further-edit
   expect(await gitWorktree.unchangedCarriedPaths({ cwd: repoCwd, dir: wt.dir })).toEqual([]);
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: wt.dir, branch: wt.branch });
 });
+
+// ──────────────────────────────────────────── PRD 2435: sweeps keep unique branch commits
+
+function commitIn(dir, file, msg) {
+  fs.writeFileSync(path.join(dir, file), `${msg}\n`, 'utf8');
+  git(['add', '-A'], dir);
+  git(['commit', '-q', '-m', msg], dir);
+  return git(['rev-parse', 'HEAD'], dir).trim();
+}
+
+test('[job] boot sweep of a dead job branch holding a unique commit leaves it pinned', async () => {
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'pin-boot' });
+  const sha = commitIn(wt.dir, 'a.txt', 'unique work');
+  gitWorktree._resetActiveWorktreeCountForTests('job', 0);
+  await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job' });
+  expect(git(['branch', '--list', wt.branch], repoCwd).trim()).toBe('');
+  expect(git(['rev-parse', `refs/sm-stranded/pin-boot/${sha}`], repoCwd).trim()).toBe(sha);
+});
+
+test('[job] a re-created same-slug worktree pins the old tip', async () => {
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'pin-recreate' });
+  const sha = commitIn(wt.dir, 'b.txt', 'old tip');
+  gitWorktree._resetActiveWorktreeCountForTests('job', 0);
+  const again = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'pin-recreate' });
+  expect(again.ok).toBe(true);
+  expect(git(['rev-parse', `refs/sm-stranded/pin-recreate/${sha}`], repoCwd).trim()).toBe(sha);
+});
+
+test('[job] a detached checkout with isLive true survives the boot sweep', async () => {
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'detached-live' });
+  git(['checkout', '-q', '--detach'], wt.dir);
+  gitWorktree._resetActiveWorktreeCountForTests('job', 0);
+  const isLive = vi.fn((key) => key === 'detached-live');
+  await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job', isLive });
+  expect(isLive).toHaveBeenCalledWith('detached-live', expect.anything());
+  expect(fs.existsSync(wt.dir)).toBe(true);
+});
+
+test('[job] a stray branch checked out in a job worktree survives the boot sweep', async () => {
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug: 'stray-host' });
+  git(['checkout', '-q', '-b', 'pr/feature'], wt.dir);
+  gitWorktree._resetActiveWorktreeCountForTests('job', 0);
+  await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job' });
+  expect(fs.existsSync(wt.dir)).toBe(false);
+  expect(git(['branch', '--list', 'pr/feature'], repoCwd).trim()).not.toBe('');
+});
+
+test('listStrandedPins applies its date and already-landed filters', async () => {
+  const mk = (file, msg) => {
+    const sha = commitIn(repoCwd, file, msg);
+    git(['reset', '-q', '--hard', 'HEAD~1'], repoCwd);
+    return sha;
+  };
+  const kept = mk('k.txt', 'kept');
+  const landed = mk('l.txt', 'landed');
+  git(['update-ref', `refs/sm-stranded/lp/${kept}`, kept], repoCwd);
+  git(['update-ref', `refs/sm-stranded/lp/${landed}`, landed], repoCwd);
+  git(['branch', 'landed-branch', landed], repoCwd);
+
+  const all = await gitWorktree.listStrandedPins({ cwd: repoCwd, key: 'lp', sinceMs: 0 });
+  expect(all).toEqual([{ sha: kept, ref: `refs/sm-stranded/lp/${kept}` }]);
+  const future = await gitWorktree.listStrandedPins({ cwd: repoCwd, key: 'lp', sinceMs: Date.now() + 3_600_000 });
+  expect(future).toEqual([]);
+  expect(await gitWorktree.listStrandedPins({ cwd: '/nonexistent-dir-xyz', key: 'lp', sinceMs: 0 })).toEqual([]);
+});

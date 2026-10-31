@@ -3,12 +3,14 @@
  * tag, initial prompt). Rendered below the strip buttons in the narrow sidebar
  * rail, so every field stacks vertically. Saves through `window.api.macros`.
  */
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { AgentPersona, Macro, MacroInput } from '../../../preload/api'
 import { toast } from '../../state/toast'
 import { missionTagsForAgent } from '../../lib/missionTags'
 import { tagLibraryEntry } from '../../lib/tagLibrary'
 import { macroPlaceholders } from '../../lib/macroPrompt'
+import { basename } from '../../lib/basename'
+import { useSessions } from '../../state/sessions'
 import { AgentPicker } from './AgentPicker'
 
 export const MACRO_LABEL_MAX = 60
@@ -39,6 +41,19 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
   const initialEverywhere = macro ? macro.projects.includes('*') : false
   const [everywhere, setEverywhere] = useState(initialEverywhere)
   const [inputs, setInputs] = useState<MacroInput[]>(macro?.inputs ?? [])
+  const storedTargets = macro?.autoStartTargets
+  const [autoMode, setAutoMode] = useState<'off' | 'all' | 'selected'>(
+    !storedTargets || storedTargets.length === 0 ? 'off' : storedTargets.includes('*') ? 'all' : 'selected',
+  )
+  const [autoSelected, setAutoSelected] = useState<string[]>(
+    storedTargets && !storedTargets.includes('*') ? storedTargets : [],
+  )
+  const tabs = useSessions((s) => s.tabs)
+  const autoProjects = useMemo(() => {
+    const open = tabs.map((t) => t.cwd).filter((c): c is string => !!c && c !== cwd)
+    const extra = (storedTargets ?? []).filter((c) => c !== '*' && c !== cwd)
+    return Array.from(new Set([...open, ...extra]))
+  }, [tabs, cwd, storedTargets])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -102,6 +117,7 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
         tag: activeTag as Macro['tag'],
         prompt: trimmedPrompt,
         projects,
+        autoStartTargets: autoMode === 'all' ? ['*'] : autoMode === 'selected' ? autoSelected : [],
         ...(hadInputs || inputs.length > 0
           ? {
               inputs: inputs.map((i) => ({
@@ -269,6 +285,40 @@ export function MacroEditor({ cwd, agents, macro, latest, onClose }: MacroEditor
         />
         Show in every project
       </label>
+
+      <div className="flex flex-col gap-1">
+        <label className={LABEL} htmlFor="macro-auto-start-mode">Can start work in other projects</label>
+        <select
+          id="macro-auto-start-mode"
+          data-testid="macro-auto-start-mode"
+          className={FIELD}
+          value={autoMode}
+          onChange={(e) => setAutoMode(e.target.value as 'off' | 'all' | 'selected')}
+        >
+          <option value="off">Off</option>
+          <option value="all">All projects</option>
+          <option value="selected">Selected projects</option>
+        </select>
+        {autoMode === 'selected' &&
+          autoProjects.map((p) => (
+            <label key={p} title={p} className="flex items-center gap-1.5 text-[11.5px] text-fg-dim">
+              <input
+                type="checkbox"
+                data-testid="macro-auto-start-project"
+                data-cwd={p}
+                title={p}
+                checked={autoSelected.includes(p)}
+                onChange={(e) =>
+                  setAutoSelected((cur) => (e.target.checked ? [...cur, p] : cur.filter((x) => x !== p)))
+                }
+              />
+              {basename(p)}
+            </label>
+          ))}
+        <div className="text-[11px] text-fg-faint">
+          Work this macro sends to another project starts without approval.
+        </div>
+      </div>
 
       {error && (
         <div role="alert" data-testid="macro-error" className="text-[11.5px] text-red-500">

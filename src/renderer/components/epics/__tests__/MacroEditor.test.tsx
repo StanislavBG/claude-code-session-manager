@@ -3,6 +3,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import { MacroEditor } from '../MacroEditor'
+import { useSessions } from '../../../state/sessions'
 import type { AgentPersona, Macro } from '../../../../preload/api'
 
 const CWD = '/p/alpha'
@@ -36,7 +37,7 @@ describe('MacroEditor', () => {
     mount()
     act(() => { setValue(q('macro-label') as HTMLInputElement, ' Go '); setValue(q('macro-prompt') as HTMLTextAreaElement, 'Do it') })
     await act(async () => { q('macro-save').click() })
-    expect(save).toHaveBeenCalledWith({ label: 'Go', agentName: 'architect', tag: 'feature', prompt: 'Do it', projects: [CWD] })
+    expect(save).toHaveBeenCalledWith({ label: 'Go', agentName: 'architect', tag: 'feature', prompt: 'Do it', projects: [CWD], autoStartTargets: [] })
     expect(onClose).toHaveBeenCalled()
   })
 
@@ -114,6 +115,74 @@ describe('MacroEditor', () => {
     act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })) })
     expect(onClose).toHaveBeenCalledTimes(2)
     expect(save).not.toHaveBeenCalled()
+  })
+
+  describe('auto-start targets', () => {
+    const mode = () => (q('macro-auto-start-mode') as HTMLSelectElement).value
+    const projs = () => Array.from(container.querySelectorAll('[data-testid="macro-auto-start-project"]')) as HTMLInputElement[]
+    function setMode(v: string) {
+      const sel = q('macro-auto-start-mode') as HTMLSelectElement
+      act(() => {
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(sel, v)
+        sel.dispatchEvent(new Event('change', { bubbles: true }))
+      })
+    }
+    const fillNew = () => act(() => { setValue(q('macro-label') as HTMLInputElement, 'a'); setValue(q('macro-prompt') as HTMLTextAreaElement, 'b') })
+    const saved = async () => {
+      await act(async () => { q('macro-save').click() })
+      return save.mock.calls[0][0].autoStartTargets
+    }
+    beforeEach(() => {
+      useSessions.setState({ tabs: [{ cwd: CWD }, { cwd: '/p/beta' }, { cwd: '/p/beta' }, { cwd: '/p/gamma' }] as any })
+    })
+    afterEach(() => { useSessions.setState({ tabs: [] }) })
+
+    it('initial mode: absent/empty = off, "*" = all, list = selected', () => {
+      mount({ macro: mac() })
+      expect(mode()).toBe('off')
+      act(() => root.unmount()); container.remove()
+      mount({ macro: mac({ autoStartTargets: [] }) })
+      expect(mode()).toBe('off')
+      act(() => root.unmount()); container.remove()
+      mount({ macro: mac({ autoStartTargets: ['*'] }) })
+      expect(mode()).toBe('all')
+      act(() => root.unmount()); container.remove()
+      mount({ macro: mac({ autoStartTargets: ['/p/beta'] }) })
+      expect(mode()).toBe('selected')
+    })
+
+    it('Off saves []; All saves ["*"]', async () => {
+      mount({ macro: mac({ autoStartTargets: ['/p/beta'] }) })
+      setMode('off')
+      expect(await saved()).toEqual([])
+      save.mockClear()
+      setMode('all')
+      expect(await saved()).toEqual(['*'])
+    })
+
+    it('Selected lists unique other open cwds with folder name + path title; saves checked', async () => {
+      mount()
+      fillNew()
+      setMode('selected')
+      expect(projs().map((p) => p.title)).toEqual(['/p/beta', '/p/gamma'])
+      expect(container.textContent).toContain('beta')
+      act(() => projs()[1].click())
+      expect(await saved()).toEqual(['/p/gamma'])
+    })
+
+    it('Selected with nothing checked saves []', async () => {
+      mount()
+      fillNew()
+      setMode('selected')
+      expect(await saved()).toEqual([])
+    })
+
+    it('a stored target whose tab is closed stays listed, selected and saved', async () => {
+      mount({ macro: mac({ autoStartTargets: ['/p/closed'] }) })
+      const closed = projs().find((p) => p.title === '/p/closed')!
+      expect(closed.checked).toBe(true)
+      expect(await saved()).toEqual(['/p/closed'])
+    })
   })
 
   describe('inputs', () => {

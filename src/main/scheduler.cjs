@@ -5008,7 +5008,26 @@ The fix-plan PRD you write for this MUST instruct its executor to, in order:
 1. Check for a salvage patch (named \`<slug>.uncommitted.patch\` in the run directory${failedJob.salvagePatch ? `, e.g. \`${failedJob.salvagePatch}\`` : ''}) and, if found, apply it to the working tree BEFORE inspecting \`git status\`/\`git diff\` in ${cwd} for uncommitted changes matching the original PRD's acceptance criteria.
 2. If the work is present (via the applied patch or already in the tree) and satisfies the acceptance criteria, run the project's verify commands and COMMIT it — do not re-implement or re-plan the PRD from scratch.
 3. Only fall back to re-implementing whatever acceptance criteria are genuinely missing after applying any salvage patch, not the whole PRD.` : '';
-  return `You are investigating a failed scheduled job in the session-manager queue. Your ONLY job is to write a fix-plan PRD file. Do NOT attempt the fix yourself.${deadFixChildNote}${abandonedBackgroundTaskNote}
+  const runCommitNotLandedNote = failedJob.verifierVerdict === 'run_commit_not_landed' ? `
+
+# Known failure class: run_commit_not_landed
+This job's verifier verdict is \`run_commit_not_landed\`: the run committed its work on a detached
+HEAD or a branch that never reached the base, and the scheduler pinned each such commit under
+\`refs/sm-stranded/${failedJob.slug}/\`. The finished work EXISTS; it just never landed. This is NOT
+evidence the work failed.
+
+The job's worktree is gone, but the git object store is shared with every new worktree, so a
+\`git cherry-pick <sha>\` of a pinned commit works from any checkout of ${cwd}. List the pinned commits with:
+
+   git -C ${cwd} for-each-ref refs/sm-stranded/${failedJob.slug}/
+
+If no pin exists, the failure log names the SHA instead (${failedLogPath}).
+
+The fix-plan PRD you write for this MUST instruct its executor to, in order:
+1. Cherry-pick the pinned commits onto the base branch, oldest first.
+2. Run the original PRD's gate on the result.
+3. Then re-implement only the acceptance criteria that do not apply or are still missing after the cherry-pick — do not re-implement or re-plan the whole PRD from scratch.` : '';
+  return `You are investigating a failed scheduled job in the session-manager queue. Your ONLY job is to write a fix-plan PRD file. Do NOT attempt the fix yourself.${deadFixChildNote}${abandonedBackgroundTaskNote}${runCommitNotLandedNote}
 
 # Failed job
 - Slug: ${failedJob.slug}

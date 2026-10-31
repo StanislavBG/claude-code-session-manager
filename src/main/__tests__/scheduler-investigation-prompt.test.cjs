@@ -86,6 +86,29 @@ test('prompt for an abandoned_background_task job with a salvage patch names its
   assert.match(prompt, /apply it to the working tree BEFORE inspecting/);
 });
 
+// ─── run_commit_not_landed: investigation re-lands the pinned commit ───────────
+
+test('prompt for a run_commit_not_landed job directs cherry-picking the pinned commits first', () => {
+  const prompt = buildInvestigationPrompt(makeArgs({
+    failedJob: { slug: '05-my-feature', title: 'My feature', exitCode: 0, verifierVerdict: 'run_commit_not_landed' },
+  }));
+  assert.match(prompt, /Known failure class: run_commit_not_landed/);
+  assert.match(prompt, /git -C \/home\/bilko\/Projects\/session-manager for-each-ref refs\/sm-stranded\/05-my-feature\//);
+  assert.match(prompt, /cherry-pick/);
+  assert.match(prompt, /oldest first/);
+  assert.match(prompt, /re-implement only/);
+  assert.match(prompt, /failure log names the SHA/);
+});
+
+test('prompt for a job with another verdict omits the run_commit_not_landed note', () => {
+  const prompt = buildInvestigationPrompt(makeArgs());
+  assert.doesNotMatch(prompt, /run_commit_not_landed/);
+  const other = buildInvestigationPrompt(makeArgs({
+    failedJob: { slug: '05-my-feature', title: 'My feature', exitCode: 0, verifierVerdict: 'abandoned_background_task' },
+  }));
+  assert.doesNotMatch(other, /run_commit_not_landed/);
+});
+
 // ─── cwd-must-be-git-repo-root guidance (99-fix-e2e-needs-review-test) ────────
 
 test('prompt instructs that cwd must be the git repo root where the fix will land', () => {

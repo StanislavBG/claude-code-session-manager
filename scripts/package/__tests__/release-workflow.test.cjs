@@ -16,7 +16,9 @@ describe('release.yml', () => {
   })
   it('matrixes macos and ubuntu runners with their dist scripts', () => {
     expect(yml).toContain('macos-latest')
-    expect(yml).toContain('ubuntu-latest')
+    expect(yml).toContain('ubuntu-24.04')
+    // ubuntu-latest moved to 26.04, where Playwright cannot install: the Linux job fails and the release stays a draft.
+    expect(yml).not.toContain('ubuntu-latest')
     expect(yml).toContain('dist:mac')
     expect(yml).toContain('dist:linux')
     expect(yml).toContain('contents: write')

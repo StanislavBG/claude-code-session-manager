@@ -2316,11 +2316,35 @@ async function isAncestorOf(cwd, a, b) {
   }
 }
 
+/** Commits reachable from `sha` that no branch, tag or remote holds; -1 on failure. Never throws. */
+async function countCommitsOnNoRef(cwd, sha) {
+  try {
+    const out = await execGit(['rev-list', '--count', sha, '--not', '--branches', '--tags', '--remotes'], { cwd, timeout: 10_000 });
+    const n = Number.parseInt(String(out).trim(), 10);
+    return Number.isFinite(n) ? n : -1;
+  } catch {
+    return -1;
+  }
+}
+
+/** Commits in `from..to`; -1 on failure. Never throws. */
+async function countRange(cwd, from, to) {
+  try {
+    const out = await execGit(['rev-list', '--count', `${from}..${to}`], { cwd, timeout: 10_000 });
+    const n = Number.parseInt(String(out).trim(), 10);
+    return Number.isFinite(n) ? n : -1;
+  } catch {
+    return -1;
+  }
+}
+
 /**
  * Compares a worktree's HEAD with its branch. aligned: HEAD is the tip or
- * behind it. fast-forwarded: branch tip was an ancestor of HEAD, so the
- * branch ref moved to HEAD (compare-and-swap update-ref). diverged: HEAD is
- * pinned, branch untouched. unknown: a ref did not resolve; no git writes.
+ * behind it. on-other-ref: HEAD is held by some other branch/tag/remote (a PR
+ * branch); no git writes. fast-forwarded: branch tip is an ancestor of HEAD and
+ * every commit between is the run's own (held by no ref), so the branch ref
+ * moved to HEAD (compare-and-swap update-ref). diverged: HEAD is pinned,
+ * branch untouched. unknown: a ref did not resolve; no git writes.
  * Never throws.
  */
 async function reconcileWorktreeHead({ cwd, dir, branch, key }) {
@@ -2333,7 +2357,10 @@ async function reconcileWorktreeHead({ cwd, dir, branch, key }) {
     if (finalHead === branchTip || (await isAncestorOf(cwd, finalHead, branchTip)) === true) {
       return { action: 'aligned', finalHead, branchTip, pinnedRef: null };
     }
-    if ((await isAncestorOf(cwd, branchTip, finalHead)) === true) {
+    const unheld = await countCommitsOnNoRef(cwd, finalHead);
+    if (unheld === 0) return { action: 'on-other-ref', finalHead, branchTip, pinnedRef: null };
+    if (unheld > 0 && (await isAncestorOf(cwd, branchTip, finalHead)) === true
+      && (await countRange(cwd, branchTip, finalHead)) === unheld) {
       try {
         await execGit(['update-ref', `refs/heads/${branch}`, finalHead, branchTip], { cwd, timeout: 10_000 });
         return { action: 'fast-forwarded', finalHead, branchTip, pinnedRef: null };
@@ -2348,12 +2375,11 @@ async function reconcileWorktreeHead({ cwd, dir, branch, key }) {
 
 /**
  * Pins commits recorded in the worktree's HEAD reflog (commit, cherry-pick,
- * revert) that neither the branch nor the base branch contains. A predecessor
- * of a `commit (amend)` entry is superseded and skipped. Newest first, capped
- * at 20. Complexity: at most 200 reflog entries read, two ancestry checks per
- * kept candidate. Returns [{ sha, ref }]; [] on any error.
+ * revert) that no branch, tag or remote holds. A predecessor of a
+ * `commit (amend)` entry is superseded and skipped. Newest first, capped at 20.
+ * Returns [{ sha, ref }]; [] on any error. A failed count keeps the commit.
  */
-async function pinUnlandedWorktreeCommits({ cwd, dir, branch, key, baseBranch }) {
+async function pinUnlandedWorktreeCommits({ cwd, dir, branch, key }) {
   try {
     const out = await execGit(['reflog', 'show', '--format=%H%x09%gs', '-n', '200', 'HEAD'], { cwd: dir, timeout: 15_000 });
     const entries = out.split('\n').filter(Boolean).map((l) => {
@@ -2368,18 +2394,13 @@ async function pinUnlandedWorktreeCommits({ cwd, dir, branch, key, baseBranch })
       if (/^commit \(amend\)/.test(e.subject) && entries[i + 1]) superseded.add(entries[i + 1].sha);
       candidates.push(e.sha);
     }
-    const base = (typeof baseBranch === 'string' && baseBranch && !isOwnManagedBranch(baseBranch))
-      ? baseBranch
-      : await resolveDefaultBranch(cwd);
-    const baseRef = (await tryResolveCommit(cwd, `refs/heads/${base}^{commit}`)) ? `refs/heads/${base}` : null;
     const seen = new Set();
     const pinned = [];
     for (const sha of candidates) {
       if (pinned.length >= 20) break;
       if (seen.has(sha) || superseded.has(sha)) continue;
       seen.add(sha);
-      if ((await isAncestorOf(cwd, sha, `refs/heads/${branch}`)) !== false) continue;
-      if (baseRef && (await isAncestorOf(cwd, sha, baseRef)) !== false) continue;
+      if (!((await countCommitsOnNoRef(cwd, sha)) !== 0)) continue;
       const ref = await pinCommit({ cwd, key: key || branch, sha });
       if (ref) pinned.push({ sha, ref });
     }

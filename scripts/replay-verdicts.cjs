@@ -44,6 +44,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { verifyRun } = require('../src/main/runVerify.cjs');
 
+const { STRANDED_REF_PREFIX } = require('../src/main/lib/git/gitExec.cjs');
 const { runsDir } = require('../src/main/lib/scheduler/schedulerPaths.cjs');
 
 const PARK_VERDICTS = new Set(['transcript_errors', 'verify_unavailable']);
@@ -95,7 +96,7 @@ function approximateCommittedDuringRun(cwd, startedAtMs, finishedAtMs) {
     const until = new Date((finishedAtMs ?? Date.now()) + 60_000).toISOString();
     const out = execFileSync(
       'git',
-      ['-C', cwd, 'log', '--all', '--format=%H', `--since=${since}`, `--until=${until}`],
+      ['-C', cwd, 'log', `--exclude=${STRANDED_REF_PREFIX}*`, '--all', '--format=%H', `--since=${since}`, `--until=${until}`],
       { timeout: 8_000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
     );
     return out.trim().length > 0;

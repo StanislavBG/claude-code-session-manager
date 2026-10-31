@@ -2078,7 +2078,7 @@ test('[stranded] pinUnlandedWorktreeCommits reports a detached commit after retu
   git(['commit', '-q', '--amend', '-m', 'amended'], wt.dir);
   const kept = git(['rev-parse', 'HEAD'], wt.dir).trim();
   git(['checkout', '-q', wt.branch], wt.dir);
-  const pinned = await gitWorktree.pinUnlandedWorktreeCommits({ cwd: repoCwd, dir: wt.dir, branch: wt.branch, key: slug, baseBranch: 'main' });
+  const pinned = await gitWorktree.pinUnlandedWorktreeCommits({ cwd: repoCwd, dir: wt.dir, branch: wt.branch, key: slug });
   const shas = pinned.map((p) => p.sha);
   expect(shas).toContain(kept);
   expect(shas).not.toContain(old);
@@ -2103,4 +2103,53 @@ test('[stranded] a reachable HEAD adds no pin ref', async () => {
   gitWorktree._resetActiveWorktreeCountForTests('job', 0);
   await gitWorktree.reconcileWorktreesOnBoot([repoCwd], { kind: 'job' });
   expect(git(['for-each-ref', 'refs/sm-stranded/'], repoCwd).trim()).toBe('');
+});
+
+test('[stranded] a worktree ending on a PR branch descending from the job branch is on-other-ref and lands nothing', async () => {
+  const slug = 'stranded-pr-branch';
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  const tip = git(['rev-parse', `refs/heads/${wt.branch}`], repoCwd).trim();
+  const baseBefore = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  git(['checkout', '-q', '-b', 'pr/merge-main-a'], wt.dir);
+  const prSha = commitFile(wt.dir, 'pr-a.txt', 'pr work');
+  const r = await gitWorktree.reconcileWorktreeHead({ cwd: repoCwd, dir: wt.dir, branch: wt.branch, key: slug });
+  expect(r.action).toBe('on-other-ref');
+  expect(git(['rev-parse', `refs/heads/${wt.branch}`], repoCwd).trim()).toBe(tip);
+  expect(git(['for-each-ref', 'refs/sm-stranded/'], repoCwd).trim()).toBe('');
+  await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: wt.branch, slug });
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(baseBefore);
+  expect(() => git(['merge-base', '--is-ancestor', prSha, 'HEAD'], repoCwd)).toThrow();
+});
+
+test('[stranded] detached HEAD at a PR tip is on-other-ref; a new commit on top diverges, branch and base untouched', async () => {
+  const slug = 'stranded-pr-detached';
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  const tip = git(['rev-parse', `refs/heads/${wt.branch}`], repoCwd).trim();
+  const baseBefore = git(['rev-parse', 'HEAD'], repoCwd).trim();
+  git(['checkout', '-q', '-b', 'pr/merge-main-b'], wt.dir);
+  const prSha = commitFile(wt.dir, 'pr-b.txt', 'pr work');
+  git(['checkout', '-q', '--detach'], wt.dir);
+  const r1 = await gitWorktree.reconcileWorktreeHead({ cwd: repoCwd, dir: wt.dir, branch: wt.branch, key: slug });
+  expect(r1.action).toBe('on-other-ref');
+  const newSha = commitFile(wt.dir, 'pr-b2.txt', 'detached on top');
+  const r2 = await gitWorktree.reconcileWorktreeHead({ cwd: repoCwd, dir: wt.dir, branch: wt.branch, key: slug });
+  expect(r2.action).toBe('diverged');
+  expect(r2.pinnedRef).toBe(`refs/sm-stranded/${slug}/${newSha}`);
+  expect(git(['rev-parse', `refs/heads/${wt.branch}`], repoCwd).trim()).toBe(tip);
+  expect(git(['rev-parse', 'HEAD'], repoCwd).trim()).toBe(baseBefore);
+  expect(prSha).not.toBe(newSha);
+});
+
+test('[stranded] a merge commit made on a PR branch in the worktree is not reported by pinUnlandedWorktreeCommits', async () => {
+  const slug = 'stranded-pr-merge';
+  const wt = await gitWorktree.createJobWorktree({ cwd: repoCwd, slug });
+  git(['checkout', '-q', '-b', 'pr/merge-main-c'], wt.dir);
+  commitFile(wt.dir, 'pr-c.txt', 'pr work');
+  git(['checkout', '-q', '-b', 'side', 'HEAD~1'], wt.dir);
+  commitFile(wt.dir, 'side.txt', 'side work');
+  git(['checkout', '-q', 'pr/merge-main-c'], wt.dir);
+  git(['merge', '-q', '--no-ff', '-m', 'merge side', 'side'], wt.dir);
+  git(['branch', '-q', '-D', 'side'], wt.dir);
+  const pinned = await gitWorktree.pinUnlandedWorktreeCommits({ cwd: repoCwd, dir: wt.dir, branch: wt.branch, key: slug });
+  expect(pinned).toEqual([]);
 });

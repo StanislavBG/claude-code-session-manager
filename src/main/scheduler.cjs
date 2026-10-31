@@ -5666,7 +5666,7 @@ async function finalizeJobWorktree({ job, runId = null, runDir, worktree, guardC
   };
   const pinUnlanded = async () => {
     if (typeof jw.pinUnlandedWorktreeCommits !== 'function') return;
-    addStranded(await jw.pinUnlandedWorktreeCommits({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, key: job.slug, baseBranch: worktree.baseBranch }));
+    addStranded(await jw.pinUnlandedWorktreeCommits({ cwd: guardCwd, dir: worktree.dir, branch: worktree.branch, key: job.slug }));
   };
   try {
     worktreeLeftoverDirty = (await uncommitted(worktree.dir)) || [];

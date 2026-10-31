@@ -71,6 +71,7 @@
   "localAdminHttp": "feedback-remote",
   "loginShellPath": "process",
   "loopDelay": "util",
+  "memoryScope": "process",
   "lruCache": "util",
   "macroAdminRoutes": "feedback-remote",
   "macroLibrary": "persona-macro",

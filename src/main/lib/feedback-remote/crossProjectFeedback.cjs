@@ -469,6 +469,23 @@ function defaultNotifyRenderer(payload) {
 }
 
 /**
+ * quoteNamesTarget(quote, toCwd) → boolean. The quote itself (not the wider
+ * prompt) must name the receiving project: folder name on non-alphanumeric
+ * boundaries ('-'/'_' read as spaces, case-insensitive), or the full path.
+ */
+function quoteNamesTarget(quote, toCwd) {
+  const norm = (x) => String(x || '').toLowerCase().replace(/[-_]/g, ' ');
+  const q = norm(quote);
+  const base = norm(path.basename(String(toCwd || '')));
+  if (base.trim()) {
+    const esc = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (new RegExp(`(^|[^a-z0-9])${esc}($|[^a-z0-9])`).test(q)) return true;
+  }
+  const full = norm(toCwd);
+  return full.trim() !== '' && q.includes(full);
+}
+
+/**
  * verifyAutoStart(v, originClaudeSessionId) → { granted: true, quote } | { granted: false, reason }
  *
  * Every check is fail-closed. The session identity is ONLY the caller-supplied
@@ -485,10 +502,8 @@ function verifyAutoStart(v, originClaudeSessionId) {
   if (!found) {
     return { granted: false, reason: 'humanRequestQuote was not found in a prompt the human typed in this chat session' };
   }
-  const prompt = found.text.toLowerCase();
-  const base = path.basename(v.toCwd).toLowerCase();
-  if (!(base && prompt.includes(base)) && !prompt.includes(v.toCwd.toLowerCase())) {
-    return { granted: false, reason: `the human's prompt does not name the receiving project (${path.basename(v.toCwd)})` };
+  if (!quoteNamesTarget(v.humanRequestQuote, v.toCwd)) {
+    return { granted: false, reason: `the human's quote does not name the receiving project (${path.basename(v.toCwd)})` };
   }
   return { granted: true, quote: v.humanRequestQuote };
 }
@@ -882,6 +897,7 @@ module.exports = {
   MAX_REFERENCES,
   MAX_MACRO_AUTO_STARTS,
   verifyMacroAutoStart,
+  quoteNamesTarget,
   PROJECTS_DIR,
   resolveProjectsDir,
   isSessionManagerProject,

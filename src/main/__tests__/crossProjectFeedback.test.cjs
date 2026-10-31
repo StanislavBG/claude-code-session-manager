@@ -26,6 +26,7 @@ const {
   openFeedbackSession,
   listFeedbackTargets,
   isSessionManagerProject,
+  quoteNamesTarget,
   MAX_BODY_CHARS,
 } = require('../lib/feedback-remote/crossProjectFeedback.cjs');
 const { readActiveIndex, MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK, MINT_AUTHORITIES } = require('../lib/epic/epicMint.cjs');
@@ -479,6 +480,38 @@ test('denies auto-start when the human prompt does not name the target project',
   expect(r.status).toBe('proposed');
   expect(r.autoStart.granted).toBe(false);
   expect(r.autoStart.reason).toMatch(/name/i);
+  expect(notify).toEqual([]);
+});
+
+test('quoteNamesTarget matches the folder name on word boundaries only', () => {
+  expect(quoteNamesTarget('please do it yourself', '/p/Self')).toBe(false);
+  expect(quoteNamesTarget("send it to Self's inbox", '/p/Self')).toBe(true);
+  expect(quoteNamesTarget('file this in burrow please', '/p/Burrow')).toBe(true);
+  expect(quoteNamesTarget('file this in burrowing', '/p/Burrow')).toBe(false);
+  expect(quoteNamesTarget('tell the Session Manager project', '/p/session-manager')).toBe(true);
+  expect(quoteNamesTarget('tell the session_manager project', '/p/session-manager')).toBe(true);
+  expect(quoteNamesTarget('work in /p/some-app now', '/p/some-app')).toBe(true);
+  expect(quoteNamesTarget('work in /p/other-app now', '/p/some-app')).toBe(false);
+  expect(quoteNamesTarget('anything', '')).toBe(false);
+});
+
+test('denies auto-start when only the wider prompt (not the quote) names the target', async () => {
+  const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'sm-xproj-root-'));
+  tmpDirs.push(root);
+  const to = path.join(root, 'Burrow');
+  fs.mkdirSync(path.join(to, 'session-manager-operations'), { recursive: true });
+  fs.mkdirSync(path.join(to, '.claude', 'agents'), { recursive: true });
+  fs.writeFileSync(path.join(to, '.claude', 'agents', 'architect.md'), '---\nname: architect\n---\nFixture persona for tests.\n');
+  config.addAllowedRoot(to);
+  const from = await mkProject();
+  humanPromptLedger._resetForTests();
+  const quote = 'please fix the relay frame drop';
+  humanPromptLedger.recordHumanPrompt(SESSION_ID, `In Burrow: ${quote} thanks.`);
+  const notify = [];
+  const r = await runAutoStart(to, from, { humanRequestQuote: quote }, notify);
+  expect(r.status).toBe('proposed');
+  expect(r.autoStart.granted).toBe(false);
+  expect(r.autoStart.reason).toMatch(/Burrow/);
   expect(notify).toEqual([]);
 });
 

@@ -481,6 +481,41 @@ function isAncestorCommit({ cwd, sha, timeoutMs = GH_CHECK_TIMEOUT_MS, execImpl 
   }
 }
 
+/** True when this repo holds the commit object `sha` (bounded, never throws). */
+function commitExistsInRepo({ cwd, sha, timeoutMs = GH_CHECK_TIMEOUT_MS, execImpl = execFileSync }) {
+  if (!sha) return false;
+  try {
+    execImpl('git', ['cat-file', '-e', `${sha}^{commit}`], {
+      cwd: cwd || process.cwd(),
+      timeout: timeoutMs,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when some branch/tag/remote ref holds `sha`. A git error resolves false
+ * so the run parks instead of passing.
+ */
+function commitOnAnyRef({ cwd, sha, timeoutMs = GH_CHECK_TIMEOUT_MS, execImpl = execFileSync }) {
+  if (!sha) return false;
+  try {
+    const out = execImpl('git', ['rev-list', '--count', sha, '--not', '--branches', '--tags', '--remotes'], {
+      cwd: cwd || process.cwd(),
+      timeout: timeoutMs,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return String(out).trim() === '0';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * True when `cwd` is inside a git repository. Used to gate the transcript
  * commit-evidence fallback below: a job whose cwd is not a git repo can never
@@ -779,7 +814,10 @@ async function verifyRun({
     let unlandedTranscriptShas = [];
     if (sentinel === 'pass' && !commitEvidence && cwdIsGitRepo) {
       unlandedTranscriptShas = (transcriptCommitShas || [])
-        .filter((sha) => !isAncestorCommit({ cwd: queueEntry?.cwd, sha }));
+        .filter((sha) => commitExistsInRepo({ cwd: queueEntry?.cwd, sha }))
+        .filter((sha) => (isMergeMainSlug(queueEntry?.slug)
+          ? !commitOnAnyRef({ cwd: queueEntry?.cwd, sha })
+          : !isAncestorCommit({ cwd: queueEntry?.cwd, sha })));
     }
     if (unlandedTranscriptShas.length > 0) {
       issues.push({
@@ -933,6 +971,8 @@ module.exports = {
   checkMergeablePr,
   artifactsVerifiedOnDisk,
   isAncestorCommit,
+  commitExistsInRepo,
+  commitOnAnyRef,
   isGitRepo,
   hasAbandonedBackgroundTask,
 };

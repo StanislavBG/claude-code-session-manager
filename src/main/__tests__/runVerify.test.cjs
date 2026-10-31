@@ -742,7 +742,27 @@ test('runVerify no longer exports the deliverable-path helpers', () => {
 });
 
 // ─── run_commit_not_landed: transcript reports an unreachable commit ────────
-const UNREACHABLE_SHA = '0000000000000000000000000000000000000001';
+const UNKNOWN_SHA = '0000000000000000000000000000000000000001';
+let UNREACHABLE_SHA; // real commit dropped by `git reset --hard HEAD~1`
+let PR_BRANCH_SHA; // real commit on a side branch, not an ancestor of HEAD
+let TMP_REPO;
+const gitIn = (args) => execFileSync('git', args, { cwd: TMP_REPO, encoding: 'utf8' }).trim();
+beforeAll(() => {
+  TMP_REPO = fs.mkdtempSync(path.join(os.tmpdir(), 'run-verify-repo-'));
+  gitIn(['init', '-q']);
+  gitIn(['config', 'user.email', 't@example.com']);
+  gitIn(['config', 'user.name', 't']);
+  gitIn(['config', 'commit.gpgsign', 'false']);
+  gitIn(['commit', '-q', '--allow-empty', '-m', 'one']);
+  gitIn(['checkout', '-q', '-b', 'pr-branch']);
+  gitIn(['commit', '-q', '--allow-empty', '-m', 'pr']);
+  PR_BRANCH_SHA = gitIn(['rev-parse', 'HEAD']);
+  gitIn(['checkout', '-q', '-']);
+  gitIn(['commit', '-q', '--allow-empty', '-m', 'two']);
+  UNREACHABLE_SHA = gitIn(['rev-parse', 'HEAD']);
+  gitIn(['reset', '-q', '--hard', 'HEAD~1']);
+});
+afterAll(() => rmdir(TMP_REPO));
 function committedEvent(sha, kind = 'committed') {
   return { type: 'user', tool_use_result: { gitOperation: { commit: { sha, kind } } } };
 }
@@ -759,7 +779,7 @@ for (const [label, slug] of [
       const verdict = await verifyRun({
         runDir: tmp,
         prdPath,
-        queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
+        queueEntry: { slug, status: 'running', cwd: TMP_REPO },
         allJobs: [],
         committedDuringRun: false,
       });
@@ -781,10 +801,10 @@ test('run_commit_not_landed: outranks a reachable priorLandedCommit exemption', 
     const verdict = await verifyRun({
       runDir: tmp,
       prdPath,
-      queueEntry: { slug, status: 'running', cwd: REPO_ROOT },
+      queueEntry: { slug, status: 'running', cwd: TMP_REPO },
       allJobs: [],
       committedDuringRun: false,
-      priorLandedCommit: REPO_ROOT_COMMIT_EARLY,
+      priorLandedCommit: gitIn(['rev-parse', 'HEAD']),
     });
     assert.equal(verdict.verdict, 'run_commit_not_landed', `got ${verdict.verdict}: ${verdict.reason}`);
   } finally {
@@ -809,6 +829,57 @@ test('run_commit_not_landed: a reachable transcript SHA does not trigger it', as
   } finally {
     rmdir(tmp);
   }
+});
+
+async function verifyWithSha(slug, sha, extra = {}) {
+  const tmp = makeTmpDir();
+  try {
+    writeLog(tmp, slug, [committedEvent(sha), ...noOpRunEvents('Done.\nSCHEDULER_VERDICT: PASS')]);
+    const prdPath = writePrd(tmp, slug, '# Merge current main into PR #188');
+    return await verifyRun({
+      runDir: tmp,
+      prdPath,
+      queueEntry: { slug, status: 'running', cwd: TMP_REPO },
+      allJobs: [],
+      committedDuringRun: false,
+      ...extra,
+    });
+  } finally {
+    rmdir(tmp);
+  }
+}
+
+test('-merge-main slug with SHA on a PR branch → pass_no_commit_target_verified', async () => {
+  const ghExecImpl = () => JSON.stringify({ mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND' });
+  const verdict = await verifyWithSha('565-pr188-merge-main', PR_BRANCH_SHA, { ghExecImpl });
+  assert.equal(verdict.verdict, 'pass_no_commit_target_verified', `got ${verdict.verdict}: ${verdict.reason}`);
+});
+
+test('-merge-main slug with a dangling SHA → run_commit_not_landed', async () => {
+  const ghExecImpl = () => JSON.stringify({ mergeable: 'MERGEABLE', mergeStateStatus: 'BEHIND' });
+  const verdict = await verifyWithSha('565-pr188-merge-main', UNREACHABLE_SHA, { ghExecImpl });
+  assert.equal(verdict.verdict, 'run_commit_not_landed', `got ${verdict.verdict}: ${verdict.reason}`);
+});
+
+test('original PRD: SHA this repo does not know is skipped → pass_no_commit', async () => {
+  const verdict = await verifyWithSha('2411-some-original-prd', UNKNOWN_SHA);
+  assert.equal(verdict.verdict, 'pass_no_commit', `got ${verdict.verdict}: ${verdict.reason}`);
+});
+
+test('original PRD: SHA only on a side branch still counts as unlanded', async () => {
+  const verdict = await verifyWithSha('2411-some-original-prd', PR_BRANCH_SHA);
+  assert.equal(verdict.verdict, 'run_commit_not_landed');
+});
+
+test('commitExistsInRepo / commitOnAnyRef never throw', () => {
+  const { commitExistsInRepo, commitOnAnyRef } = require('../runVerify.cjs');
+  const boom = () => { throw new Error('x'); };
+  assert.equal(commitExistsInRepo({ cwd: TMP_REPO, sha: UNKNOWN_SHA }), false);
+  assert.equal(commitExistsInRepo({ cwd: TMP_REPO, sha: UNREACHABLE_SHA }), true);
+  assert.equal(commitOnAnyRef({ cwd: TMP_REPO, sha: PR_BRANCH_SHA }), true);
+  assert.equal(commitOnAnyRef({ cwd: TMP_REPO, sha: UNREACHABLE_SHA }), false);
+  assert.equal(commitExistsInRepo({ cwd: TMP_REPO, sha: 'x', execImpl: boom }), false);
+  assert.equal(commitOnAnyRef({ cwd: TMP_REPO, sha: 'x', execImpl: boom }), false);
 });
 
 // ─── pass_no_commit_prior_run_verified: re-fired slug whose PRIOR run landed ─

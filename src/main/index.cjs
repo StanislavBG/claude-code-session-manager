@@ -29,6 +29,7 @@ const { createProjectFolder } = require('./lib/projectFolder.cjs');
 const { cleanChildEnv } = require('./lib/process/cleanEnv.cjs');
 const { applyLoginShellPath } = require('./lib/process/loginShellPath.cjs');
 const { terminateLosingInstance } = require('./lib/process/singleInstanceGuard.cjs');
+const { ensureScopeOomPolicy } = require('./lib/process/scopeOomPolicy.cjs');
 const { acquireSchedulerOwnership, releaseSchedulerOwnership } = require('./lib/process/instanceLock.cjs');
 const { manager: ptyManager, registerPtyHandlers } = require('./pty.cjs');
 const configMgr = require('./config.cjs');
@@ -1456,6 +1457,13 @@ app.whenReady().then(async () => {
   // owner's running job and overwrote admin-api.json. Losing instances run
   // scheduler-PASSIVE: read IPC still works (handlers registered above),
   // nothing mutates.
+  // Child OOM-kill must not stop the whole app scope (OOMPolicy=continue drop-in).
+  try {
+    const oom = ensureScopeOomPolicy({ log: (m) => logs.writeLine({ scope: 'main', level: 'warn', message: m }) });
+    logs.writeLine({ scope: 'main', level: 'info', message: 'scope OOM policy', meta: oom });
+  } catch (e) {
+    logs.writeLine({ scope: 'main', level: 'warn', message: 'scope OOM policy failed', meta: { error: e?.message } });
+  }
   const ownership = acquireSchedulerOwnership();
   if (ownership.owner) {
     scheduler.init().catch((e) => {

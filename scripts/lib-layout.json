@@ -122,6 +122,7 @@
   "schedulerRuntimeState": "scheduler",
   "sessionSlots": "scheduler",
   "shippedPersonaSeeds": "persona-macro",
+  "scopeOomPolicy": "process",
   "singleInstanceGuard": "process",
   "smProcNames": "process",
   "telemetryBacklog": "telemetry",

@@ -1546,7 +1546,61 @@ const warnedUnregisteredEpics = new Set();
 /** @type {number | null} last flat-sweep start (ms); null until first pass. */
 let lastFlatSweepMs = null;
 
+// Parse cache for reconcile's parse loop, keyed by path and validated against
+// a FRESH stat (mtimeMs + size) every pass — the cache never decides a file
+// exists, only that its content is unchanged. Pruned to the live file list
+// after each loop so deleted PRDs cannot accumulate.
+/** @type {Map<string, { mtimeMs: number, size: number, parsed: any }>} */
+const reconcileParseCache = new Map();
+const RECONCILE_YIELD_EVERY = 10;
+
+// Single-flight: one pass at a time; requests arriving mid-pass set ONE rerun
+// flag and resolve when the following pass ends. The rerun uses the most
+// recent waiter's state object.
+let reconcileRunning = false;
+let reconcileRerun = false;
+/** @type {Array<{ resolve: (s: any) => void, reject: (e: any) => void }>} */
+let reconcileWaiters = [];
+let reconcileRerunState = null;
+let reconcileFirstError = null;
+
 async function reconcile(state) {
+  if (reconcileRunning) {
+    reconcileRerun = true;
+    reconcileRerunState = state;
+    return new Promise((resolve, reject) => { reconcileWaiters.push({ resolve, reject }); });
+  }
+  reconcileRunning = true;
+  try {
+    let result;
+    try {
+      result = await reconcilePass(state);
+    } catch (e) {
+      // Waiters still get their pass; the caller sees its own failure.
+      if (!reconcileRerun) throw e;
+      reconcileFirstError = e;
+    }
+    while (reconcileRerun) {
+      reconcileRerun = false;
+      const waiters = reconcileWaiters;
+      reconcileWaiters = [];
+      const st = reconcileRerunState;
+      reconcileRerunState = null;
+      try {
+        const r = await reconcilePass(st);
+        for (const w of waiters) w.resolve(r);
+      } catch (e) {
+        for (const w of waiters) w.reject(e);
+      }
+    }
+    if (reconcileFirstError) { const e = reconcileFirstError; reconcileFirstError = null; throw e; }
+    return result;
+  } finally {
+    reconcileRunning = false;
+  }
+}
+
+async function reconcilePass(state) {
   // Defence in depth — tickQueue already gates on this, but reconcile is the
   // function that would do the damage (every unmatched PRD .md becomes a
   // fresh 'pending' row), so it refuses the poison state itself.
@@ -1599,11 +1653,22 @@ async function reconcile(state) {
   // the bare `onDisk` (unscoped) since a same-slug NEW-PRD collision across
   // two projects is a rarer edge this reconcile pass doesn't yet resolve.
   const onDiskByCwd = new Map();
+  let parsedCount = 0;
   for (const f of files) {
+    if (++parsedCount % RECONCILE_YIELD_EVERY === 0) await new Promise((r) => setImmediate(r));
     try {
-      // Per-file await: parsing is mtime-cached so steady-state hits zero
-      // disk reads; on cold cache the awaits keep the main thread responsive.
-      const p = await parsePrd(f);
+      // Fresh stat every pass; reuse the cached parse only when path, mtimeMs
+      // and size are all unchanged (no content read).
+      let p;
+      let st = null;
+      try { st = await fsp.stat(f); } catch { reconcileParseCache.delete(f); }
+      const hit = st ? reconcileParseCache.get(f) : null;
+      if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
+        p = hit.parsed;
+      } else {
+        p = await parsePrd(f);
+        if (st) reconcileParseCache.set(f, { mtimeMs: st.mtimeMs, size: st.size, parsed: p });
+      }
       onDisk.set(p.slug, p);
       if (p.cwd) onDiskByCwd.set(`${p.slug}::${p.cwd}`, p);
     } catch (e) {
@@ -1620,6 +1685,10 @@ async function reconcile(state) {
       if (scoped) return scoped;
     }
     return onDisk.get(slug);
+  }
+  if (reconcileParseCache.size > 0) {
+    const liveFiles = new Set(files);
+    for (const k of reconcileParseCache.keys()) if (!liveFiles.has(k)) reconcileParseCache.delete(k);
   }
   phaseMs.parseLoop = Date.now() - phaseStartMs;
 

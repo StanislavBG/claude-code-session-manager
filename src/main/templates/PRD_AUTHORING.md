@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v15 -->
+<!-- PRD_AUTHORING.md v16 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -207,7 +207,7 @@ Why: those verdicts mean the run ended without a clean verdict line, not that th
 
 Rule: a park caused by a DIFFERENT actor already finishing the same objective (a sibling PRD, a human) does not self-heal this way. Why: the job has no landed commit of its own. Confirm in the tree that the work is really done, then call `scheduler_archive_prd` with the slug. Archiving marks the job completed and frees the PRDs that depend on it. Never hand-edit `queue.json`: the scheduler and the watchdog both write it. Archiving clears a stale label; it does not fix a real bug.
 
-Rule: a no-commit PASS (`pass_no_commit`) completes only with a prior landed commit of the same slug, or when every path in the Files list landed on the base branch since the PRD was queued. Otherwise it parks.
+Rule: a no-commit PASS (`pass_no_commit`) completes only with a prior landed commit of the same slug, or when every path in the Files list landed on the base branch since the PRD was written. Otherwise it parks.
 Why: a tracked path existing is not proof this PRD's work shipped.
 
 ---

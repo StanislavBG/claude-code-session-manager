@@ -76,4 +76,22 @@ function declaredPathsForPrd(prdPath) {
   return extractDeclaredPaths(body);
 }
 
-module.exports = { extractDeclaredPaths, declaredPathsForPrd };
+/**
+ * The PRD's frontmatter `issuedAt` string, or null. Never throws — a missing
+ * or unreadable PRD, or one without the field, resolves to null.
+ *
+ * @param {string|null} prdPath
+ * @returns {string|null}
+ */
+function issuedAtForPrd(prdPath) {
+  if (!prdPath) return null;
+  try {
+    const { fm } = splitFrontmatter(fs.readFileSync(prdPath, 'utf8'));
+    const v = fm && fm.issuedAt;
+    return typeof v === 'string' && v ? v : (v instanceof Date && !Number.isNaN(v.getTime()) ? v.toISOString() : null);
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { extractDeclaredPaths, declaredPathsForPrd, issuedAtForPrd };

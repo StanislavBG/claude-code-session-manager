@@ -156,3 +156,53 @@ describe('findSatisfyingCommitOnMain: master-default repo + Files list', () => {
     expect(await findSatisfyingCommitOnMain(setup(false))).toEqual([]);
   });
 });
+
+// PRD 2432: the window starts at the earlier of queuedAt and the PRD's issuedAt.
+describe('findSatisfyingCommitOnMain: issuedAt window', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { execFileSync } = require('node:child_process');
+  const { findSatisfyingCommitOnMain } = require('../scheduler.cjs');
+
+  // Landing commit at T0. Row queuedAt = T0+100s. PRD issuedAt per option.
+  function setup({ files, issuedOffset }) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sat-issued-'));
+    const git = (...a) => execFileSync('git', ['-C', dir, ...a]);
+    git('init', '-q', '-b', 'master');
+    git('config', 'user.email', 't@t.com');
+    git('config', 'user.name', 'T');
+    const t0 = Math.floor(Date.now() / 1000) - 1000;
+    for (const rel of files) {
+      fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+      fs.writeFileSync(path.join(dir, rel), 'x');
+      git('add', rel);
+      const d = `@${t0} +0000`;
+      execFileSync('git', ['-C', dir, 'commit', '-q', '-m', rel], { env: { ...process.env, GIT_AUTHOR_DATE: d, GIT_COMMITTER_DATE: d } });
+    }
+    const slug = `sat-issued-${path.basename(dir)}`;
+    const archDir = path.join(dir, 'session-manager-operations', 'scheduler', 'prds-archived');
+    fs.mkdirSync(archDir, { recursive: true });
+    const issued = issuedOffset == null ? '' : `issuedAt: ${new Date((t0 + issuedOffset) * 1000).toISOString()}\n`;
+    fs.writeFileSync(path.join(archDir, `${slug}.md`), `---\nslug: x\n${issued}---\n# Files\n\n${files.map((f) => `- ${f}`).join('\n')}\n`);
+    return { cwd: dir, slug, queuedAt: new Date((t0 + 100) * 1000).toISOString() };
+  }
+
+  test('PRD issued before the landing commit, row queued after it → SHAs', async () => {
+    const shas = await findSatisfyingCommitOnMain(setup({ files: ['src/a.cjs'], issuedOffset: -50 }));
+    expect(shas.length).toBe(1);
+  });
+
+  test('PRD issued after the landing commit → []', async () => {
+    expect(await findSatisfyingCommitOnMain(setup({ files: ['src/a.cjs'], issuedOffset: 50 }))).toEqual([]);
+  });
+
+  test('root config file only (816 shape) → SHAs', async () => {
+    const shas = await findSatisfyingCommitOnMain(setup({ files: ['vitest.config.ts'], issuedOffset: -50 }));
+    expect(shas.length).toBe(1);
+  });
+
+  test('PRD with no issuedAt keeps the queuedAt window → []', async () => {
+    expect(await findSatisfyingCommitOnMain(setup({ files: ['src/a.cjs'], issuedOffset: null }))).toEqual([]);
+  });
+});

@@ -117,7 +117,7 @@ const { verifyRun, parseLog, scanSentinel, scanForeignWipPathsClaim } = require(
 const { latestTerminalOutcomeForSlug, COMPLETED_EQUIVALENT_VERDICTS } = require('./lib/scheduler/terminalRunOutcome.cjs');
 const { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan } = require('./lib/scheduler/fixPlanSlug.cjs');
 const { landedSinceRun, landedOnMainSince } = require('./lib/scheduler/landedSinceRun.cjs');
-const { declaredPathsForPrd } = require('./lib/prd/prdDeclaredPaths.cjs');
+const { declaredPathsForPrd, issuedAtForPrd } = require('./lib/prd/prdDeclaredPaths.cjs');
 const { identity: procIdentityOf, isDifferentProcess } = require('./lib/process/procIdentity.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated, SCHEDULE_SLUG_RE } = require('./ipcSchemas.cjs');
@@ -3503,8 +3503,10 @@ function classifyFailureOutcome({ exitCode, networkError, durationMs, transientR
  * this job's `queuedAt`, touch a path this PRD itself declares? Scoped to
  * the PRD's own declared paths via declaredPathsForPrd — the same
  * path-extraction computeLooksDone already uses — so an unrelated commit
- * elsewhere in the repo is never credited to this job. Returns `[]` (never
- * fabricates evidence) when the PRD names no paths or has no `queuedAt`.
+ * elsewhere in the repo is never credited to this job. The window starts at the
+ * earlier valid date of the row's `queuedAt` and the PRD's own `issuedAt` (a
+ * re-minted row gets a new queuedAt; issuedAt survives). Returns `[]` (never
+ * fabricates evidence) when the PRD names no paths or neither date is valid.
  *
  * The PRD's `# Files` list is the declared change set; the backtick scan is
  * only for PRDs with no Files section.
@@ -3528,15 +3530,20 @@ function classifyFailureOutcome({ exitCode, networkError, durationMs, transientR
  * @returns {Promise<string[]>} full commit SHAs reachable from main, newest first
  */
 async function findSatisfyingCommitOnMain(job) {
-  if (!job?.queuedAt) return [];
+  if (!job) return [];
   const prdPath = (await resolveVerifyPrdPath(job)) ?? prdPaths.archivedPrdPathForJob(job);
   const paths = declaredPathsForPrd(prdPath);
   if (!paths.length) return [];
+  const starts = [job.queuedAt, issuedAtForPrd(prdPath)]
+    .map((d) => (d ? Date.parse(d) : NaN))
+    .filter((t) => Number.isFinite(t));
+  if (!starts.length) return [];
+  const since = new Date(Math.min(...starts)).toISOString();
   await gitTreeGuard.fetchAllRefs(job.cwd);
   const baseBranch = job.worktreeBaseBranch || await jobWorktree.resolveDefaultBranch(job.cwd);
-  const perPathCommits = await Promise.all(paths.map((p) => landedOnMainSince(job.cwd, job.queuedAt, [p], { baseBranch })));
+  const perPathCommits = await Promise.all(paths.map((p) => landedOnMainSince(job.cwd, since, [p], { baseBranch })));
   if (perPathCommits.some((commits) => commits.length === 0)) return [];
-  return landedOnMainSince(job.cwd, job.queuedAt, paths, { baseBranch });
+  return landedOnMainSince(job.cwd, since, paths, { baseBranch });
 }
 
 /**

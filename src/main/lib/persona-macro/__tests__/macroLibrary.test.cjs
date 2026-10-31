@@ -24,6 +24,7 @@ beforeEach(() => {
   opts = { filePath, listPersonas: async () => [], builtins: [] };
 });
 afterEach(() => {
+  vi.useRealTimers();
   fs.rmSync(dir, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
@@ -614,12 +615,15 @@ test('removeMacroFromProject deletes when cwd was the last project', async () =>
 });
 
 test('removeMacroFromProject drops only cwd when others remain', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-01-01T00:00:00.000Z'));
   const m = await lib.saveMacro(base({ projects: ['/a', '/b'] }), opts);
+  vi.setSystemTime(new Date('2026-01-01T00:00:01.000Z'));
   const r = await lib.removeMacroFromProject({ id: m.id, cwd: '/a/' }, opts);
   expect(r.ok).toBe(true);
   expect(r.deleted).toBe(false);
   expect(r.macro.projects).toEqual(['/b']);
-  expect(r.macro.updatedAt).not.toBe(m.updatedAt);
+  expect(r.macro.updatedAt).toBe('2026-01-01T00:00:01.000Z');
   expect(r.macro).toEqual({ ...m, projects: ['/b'], updatedAt: r.macro.updatedAt });
   expect(await lib.listMacros(opts)).toEqual([r.macro]);
 });

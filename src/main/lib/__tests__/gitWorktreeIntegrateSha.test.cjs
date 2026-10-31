@@ -77,3 +77,25 @@ test('no-new-commits path carries no sha', async () => {
   expect(res.integrated).toBe(false);
   expect(res.sha).toBeUndefined();
 });
+
+test('commit-msg hook rejection on the merge commit yields hook_rejected and leaves no MERGE_HEAD', async () => {
+  branchWithCommit('sm-job/hook', 'hook.txt');
+  commitFile('base-advance.txt', 'x\n', 'base advanced');
+  const hook = path.join(repo, '.git', 'hooks', 'commit-msg');
+  fs.writeFileSync(hook, '#!/bin/sh\necho "identity-guard: commit blocked." >&2\nexit 1\n', { mode: 0o755 });
+  const res = await gitWorktree.integrateBranch({ kind: 'job', cwd: repo, branch: 'sm-job/hook', mergeMessage: 'merge hook' });
+  expect(res.ok).toBe(false);
+  expect(res.failureKind).toBe('hook_rejected');
+  expect(res.reason.startsWith('merge blocked by a git hook: ')).toBe(true);
+  expect(fs.existsSync(path.join(repo, '.git', 'MERGE_HEAD'))).toBe(false);
+});
+
+test('mechanical recovery is futile for hook_rejected at an unchanged base HEAD', () => {
+  const { selectMechanicalRecoveryTarget } = require('../../scheduler/reviewLadder.cjs');
+  const job = {
+    slug: 'x', status: 'needs_review', verifierVerdict: 'worktree_integration_failed',
+    integrationFailureKind: 'hook_rejected', integrationBaseHeadSha: 'abc',
+  };
+  expect(selectMechanicalRecoveryTarget(job, 'abc')).toBeNull();
+  expect(selectMechanicalRecoveryTarget(job, 'def')).not.toBeNull();
+});

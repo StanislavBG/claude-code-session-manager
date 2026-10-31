@@ -1001,7 +1001,9 @@ function parseBlockingMergePaths(stderrText) {
  * integrateBranch's `ok: false` results (the `reason` string is untouched).
  * 'blocking_paths' = git refused up-front over dirty/untracked paths
  * (auto-resolvable, PRD 1125); 'content_conflict' = a genuine 3-way
- * `CONFLICT (` (deterministic on every retry); 'other' = anything else.
+ * `CONFLICT (` (deterministic on every retry); 'hook_rejected' = a git hook
+ * (the identity guard) refused the commit — deterministic too; 'other' =
+ * anything else.
  * For content_conflict, reads the unmerged paths — MUST be called before
  * `git merge --abort`, which clears them. Never throws; a failed read
  * yields `conflictedPaths: []`. O(p log p) in the conflicted-path count.
@@ -1009,6 +1011,7 @@ function parseBlockingMergePaths(stderrText) {
 async function classifyMergeFailure({ cwd, stderrText, stdoutText }) {
   const blocking = parseBlockingMergePaths(stderrText);
   if (blocking) return { failureKind: 'blocking_paths', blockingPaths: blocking };
+  if (/identity-guard:/.test(`${stdoutText || ''}\n${stderrText || ''}`)) return { failureKind: 'hook_rejected' };
   // git prints `CONFLICT (...)` lines on STDOUT, not stderr.
   if (/CONFLICT \(/m.test(`${stdoutText || ''}\n${stderrText || ''}`)) {
     let conflictedPaths = [];
@@ -1023,6 +1026,12 @@ async function classifyMergeFailure({ cwd, stderrText, stdoutText }) {
 
 // Extensions eligible for the pure-addition auto-resolve. All-or-nothing across
 // a merge: one conflicted path outside this list means no auto-resolve at all.
+function mergeFailureReason(failureKind, text) {
+  return failureKind === 'hook_rejected'
+    ? `merge blocked by a git hook: ${text}`
+    : `merge failed (likely a real content conflict): ${text}`;
+}
+
 const AUTO_RESOLVE_EXTENSIONS = new Set(['.md', '.markdown', '.txt', '.rst']);
 
 /**
@@ -1474,7 +1483,7 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
           const retryText = (retryErr && (retryErr.stderrText || retryErr.message)) || String(retryErr);
           const retryClass = await classifyMergeFailure({ cwd, stderrText: retryText, stdoutText: retryErr && retryErr.stdoutText });
           try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
-          return { ok: false, reason: `merge failed (likely a real content conflict): ${retryText}`, ...retryClass, baseHeadSha: await readHeadSha(cwd) };
+          return { ok: false, reason: mergeFailureReason(retryClass.failureKind, retryText), ...retryClass, baseHeadSha: await readHeadSha(cwd) };
         }
       }
     }
@@ -1496,11 +1505,18 @@ async function integrateBranch({ cwd, branch, key, kind, carriedPaths, baseBranc
           await execGit(['commit', '-m', mergeMessage], { cwd, timeout: 30_000 });
           return { ok: true, integrated: true, mergeCommit: true, sha: await readHeadSha(cwd), autoResolved: 'pure_addition_concat', resolvedPaths: paths };
         }
-      } catch { /* fall through to the abort */ }
+      } catch (autoErr) {
+        const autoText = [autoErr && autoErr.stderrText, autoErr && autoErr.stdoutText, autoErr && autoErr.message].filter(Boolean).join('\n');
+        if (autoText.includes('identity-guard:')) {
+          try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
+          return { ok: false, reason: mergeFailureReason('hook_rejected', autoText), failureKind: 'hook_rejected', baseHeadSha: await readHeadSha(cwd) };
+        }
+        /* otherwise fall through to the abort */
+      }
     }
     // Abort a half-applied merge so `cwd` isn't left in a mid-merge state.
     try { await execGit(['merge', '--abort'], { cwd, timeout: 10_000 }); } catch { /* nothing to abort */ }
-    return { ok: false, reason: `merge failed (likely a real content conflict): ${stderrText}`, ...failureClass, baseHeadSha: await readHeadSha(cwd) };
+    return { ok: false, reason: mergeFailureReason(failureClass.failureKind, stderrText), ...failureClass, baseHeadSha: await readHeadSha(cwd) };
   }
 }
 

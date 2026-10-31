@@ -94,12 +94,12 @@ function selectResumeRecoveryTarget(job) {
 const MECHANICALLY_RESOLVABLE_VERDICTS = new Set(['worktree_integration_failed']);
 
 /**
- * True when a retry is provably futile: a content_conflict whose base HEAD is
+ * True when a retry is provably futile: a content_conflict or hook_rejected whose base HEAD is
  * the same as at failure time. Unknown state (no stamp, null current HEAD)
  * is NOT futile — falls back to attempting the retry.
  */
 function isMechanicalRecoveryFutile(job, currentHeadSha) {
-  return job.integrationFailureKind === 'content_conflict'
+  return (job.integrationFailureKind === 'content_conflict' || job.integrationFailureKind === 'hook_rejected')
     && !!job.integrationBaseHeadSha
     && !!currentHeadSha
     && job.integrationBaseHeadSha === currentHeadSha;

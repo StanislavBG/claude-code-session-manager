@@ -625,3 +625,118 @@ test('isSessionManagerProject is the only definition of a valid target', async (
   expect(isSessionManagerProject(managed)).toBe(true);
   expect(isSessionManagerProject(bare)).toBe(false);
 });
+
+// ---------------------------------------------------------------------------
+// Macro auto-start ground
+// ---------------------------------------------------------------------------
+
+const { ensureEpic, MINT_AUTHORITY_NEW_EPIC_UI } = require('../lib/epic/epicMint.cjs');
+
+/** Seed a sender Epic in `from` with the real mint; returns { epicId, sessionId }. */
+async function seedSender(from, { source, authority = MINT_AUTHORITY_NEW_EPIC_UI } = {}) {
+  const m = await ensureEpic(from, {
+    goalText: 'sender work ' + Math.random().toString(36).slice(2, 8),
+    tag: 'feature',
+    agentType: 'architect',
+    status: 'proposed',
+    source,
+    mintAuthority: authority,
+  });
+  return { epicId: m.epicId, sessionId: readActiveIndex(from).sessions[m.epicId].claudeSessionId };
+}
+
+const macroFor = (to, over = {}) => ({ id: 'fable', label: 'Fable', autoStartTargets: [to], ...over });
+
+async function runMacro(to, from, sessionId, macros, over = {}, notify = []) {
+  return openFeedbackSession(
+    payload(to, from, { tag: 'bug', ...(sessionId ? { originClaudeSessionId: sessionId } : {}), ...over }),
+    {
+      appendResponseEventIfKnown: async () => true,
+      notifyRenderer: (a) => { notify.push(a); },
+      listMacros: async () => macros,
+    },
+  );
+}
+
+test('macro grant: no autoStart flag, stamped, notified once, names the macro', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const s = await seedSender(from, { source: { producer: 'new-epic-ui', macroId: 'fable' } });
+  const notify = [];
+  const r = await runMacro(to, from, s.sessionId, [macroFor(to)], {}, notify);
+  expect(r.ok).toBe(true);
+  expect(r.status).toBe('auto-approved');
+  expect(r.autoStart).toEqual({ granted: true });
+  expect(r.note).toMatch(/Fable/);
+  expect(notify).toEqual([{ cwd: to, epicId: r.epicId }]);
+  const epic = readActiveIndex(to).sessions[r.epicId];
+  expect(epic.status).toBe('proposed');
+  expect(epic.source.autoApprove).toMatchObject({
+    requestedBy: 'macro', macroId: 'fable', macroLabel: 'Fable', fromClaudeSessionId: s.sessionId,
+  });
+});
+
+test('macro denied: target not allowed → proposal with reason', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const other = await mkProject();
+  const s = await seedSender(from, { source: { producer: 'new-epic-ui', macroId: 'fable' } });
+  const notify = [];
+  const r = await runMacro(to, from, s.sessionId, [macroFor(other)], {}, notify);
+  expect(r.status).toBe('proposed');
+  expect(r.autoStart.granted).toBe(false);
+  expect(r.autoStart.reason).toMatch(/does not allow/);
+  expect(notify).toEqual([]);
+});
+
+test('macro denied: discussion tag', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const s = await seedSender(from, { source: { producer: 'new-epic-ui', macroId: 'fable' } });
+  const r = await runMacro(to, from, s.sessionId, [macroFor(to)], { tag: 'discussion' });
+  expect(r.status).toBe('proposed');
+  expect(r.autoStart).toMatchObject({ granted: false });
+  expect(r.autoStart.reason).toMatch(/bug and feature/);
+});
+
+test('macro denied: the sixth send from one sender Epic', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const s = await seedSender(from, { source: { producer: 'new-epic-ui', macroId: 'fable' } });
+  for (let i = 0; i < 5; i++) {
+    const ok = await runMacro(to, from, s.sessionId, [macroFor(to)]);
+    expect(ok.status).toBe('auto-approved');
+  }
+  const sixth = await runMacro(to, from, s.sessionId, [macroFor(to)]);
+  expect(sixth.status).toBe('proposed');
+  expect(sixth.autoStart.reason).toMatch(/limit/);
+});
+
+test('macro denied: spoofed fromEpicId of a granted Epic from an ungranted session', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const granted = await seedSender(from, { source: { producer: 'new-epic-ui', macroId: 'fable' } });
+  const plain = await seedSender(from, { source: { producer: 'new-epic-ui' } });
+  const r = await runMacro(to, from, plain.sessionId, [macroFor(to)], { fromEpicId: granted.epicId });
+  expect(r.status).toBe('proposed');
+  expect(readActiveIndex(to).sessions[r.epicId].source.autoApprove).toBeUndefined();
+});
+
+test('macro denied: an inbound (cross-project-feedback) Epic as sender', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  const s = await seedSender(from, {
+    source: { producer: 'cross-project-feedback', macroId: 'fable', fromCwd: to },
+    authority: MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK,
+  });
+  const r = await runMacro(to, from, s.sessionId, [macroFor(to)]);
+  expect(r.status).toBe('proposed');
+});
+
+test('macro denied: no originClaudeSessionId', async () => {
+  const to = await mkProject();
+  const from = await mkProject();
+  await seedSender(from, { source: { producer: 'new-epic-ui', macroId: 'fable' } });
+  const r = await runMacro(to, from, null, [macroFor(to)]);
+  expect(r.status).toBe('proposed');
+});

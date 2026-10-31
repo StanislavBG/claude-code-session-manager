@@ -69,6 +69,12 @@ const MINT_AUTHORITY_NEW_EPIC_UI = 'new-epic-ui';
 // that is all it may do. The removed channel let an agent file work into the
 // project it was already running in, which is what /develop-inside-your-own-
 // Epic replaced and which stays refused.
+//
+// Two grounds can stamp source.autoApprove on a cross-project Epic (it is
+// still minted 'proposed'; the receiving renderer approves it): a verified
+// human request quote, or a MACRO ground — the sender Epic was launched by a
+// human pressing a macro whose autoStartTargets names the target project
+// (bug/feature only, capped per sender Epic). Anything else stays a proposal.
 const MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK = 'cross-project-feedback';
 
 const MINT_AUTHORITIES = Object.freeze([

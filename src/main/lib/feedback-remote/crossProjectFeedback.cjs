@@ -47,6 +47,14 @@
  * is told to approve-and-start it through its normal approveProposed path.
  * Anything unverifiable degrades to the ordinary proposal.
  *
+ * A SECOND GROUND — the MACRO. A session a human launched from a saved macro
+ * (its Epic is source.producer 'new-epic-ui' with a source.macroId) may
+ * auto-start bug/feature work in a target the macro's autoStartTargets names:
+ * the human pressed that macro and listed the target, so no quote or autoStart
+ * flag is needed. The sender Epic is resolved ONLY from originClaudeSessionId
+ * (never from the agent-supplied fromEpicId), is capped at MAX_MACRO_AUTO_STARTS
+ * grants, and anything denied stays an ordinary proposal.
+ *
  * Guards, all fail-closed:
  *   - both cwds go through config.cjs's validatePath (allowedRoots = home)
  *   - both must be real, existing directories
@@ -485,6 +493,61 @@ function verifyAutoStart(v, originClaudeSessionId) {
   return { granted: true, quote: v.humanRequestQuote };
 }
 
+const MAX_MACRO_AUTO_STARTS = 5;
+const AUTO_START_TAGS = Object.freeze(['bug', 'feature']);
+
+// Grants per sender Epic id. In memory, so a restart resets it — accepted
+// because each press of a macro is a human act.
+const macroGrantCounts = new Map();
+
+/**
+ * verifyMacroAutoStart(v, originClaudeSessionId, deps) →
+ *   null (sender Epic has no macro: fall through to verifyAutoStart)
+ *   | { granted: true, ground:'macro', macroId, macroLabel, senderEpicId }
+ *   | { granted: false, reason }
+ *
+ * Does NOT reserve the count; the caller does that via reserveMacroGrant so a
+ * failed mint can release it.
+ */
+async function verifyMacroAutoStart(v, originClaudeSessionId, deps = {}) {
+  if (!originClaudeSessionId) return null;
+  let senderEpicId = null;
+  let source = null;
+  try {
+    const { resolveSourcePromptIdFromClaudeSession } = require('../prd/prdCreate.cjs');
+    senderEpicId = resolveSourcePromptIdFromClaudeSession(v.fromCwd, originClaudeSessionId) || null;
+    if (senderEpicId) {
+      const epic = readActiveIndex(v.fromCwd).sessions[senderEpicId];
+      source = (epic && epic.source) || null;
+    }
+  } catch { return null; }
+  if (!senderEpicId || !source || source.producer !== 'new-epic-ui' || !source.macroId) return null;
+
+  let macro = null;
+  try {
+    const listMacros = deps.listMacros || require('../persona-macro/macroLibrary.cjs').listMacros;
+    macro = ((await listMacros()) || []).find((m) => m && m.id === source.macroId) || null;
+  } catch { /* unreadable library → denied below */ }
+  if (!macro) return { granted: false, reason: `macro ${source.macroId} no longer exists` };
+  const { macroAllowsAutoStart } = require('../persona-macro/macroLibrary.cjs');
+  if (!macroAllowsAutoStart(macro, v.toCwd)) {
+    return { granted: false, reason: `macro ${macro.id} does not allow auto-start in ${path.basename(v.toCwd)}` };
+  }
+  if (!AUTO_START_TAGS.includes(v.tag)) {
+    return { granted: false, reason: `macro auto-start covers bug and feature work only (tag was ${v.tag})` };
+  }
+  if ((macroGrantCounts.get(senderEpicId) || 0) >= MAX_MACRO_AUTO_STARTS) {
+    return { granted: false, reason: `macro auto-start limit of ${MAX_MACRO_AUTO_STARTS} reached for this session` };
+  }
+  return {
+    granted: true,
+    ground: 'macro',
+    macroId: macro.id,
+    macroLabel: macro.label || macro.id,
+    senderEpicId,
+  };
+}
+
 /**
  * openFeedbackSession(input, deps?) → { ok, status?, error?, epicId, toCwd, ... }
  *
@@ -516,7 +579,23 @@ async function openFeedbackSession(input, deps = {}) {
     typeof input.originClaudeSessionId === 'string' && input.originClaudeSessionId
       ? input.originClaudeSessionId
       : null;
-  const auto = verifyAutoStart(v, originClaudeSessionId);
+  const macroAuto = await verifyMacroAutoStart(v, originClaudeSessionId, deps);
+  let auto = macroAuto && macroAuto.granted ? macroAuto : verifyAutoStart(v, originClaudeSessionId);
+  // A macro denial is the more specific reason when verifyAutoStart (no
+  // autoStart flag) would only say "not requested".
+  if (!auto.granted && macroAuto && !macroAuto.granted) auto = macroAuto;
+  const isMacro = auto.granted && auto.ground === 'macro';
+  // Reserve at grant time (re-checked after the verify's await so concurrent
+  // sends cannot overshoot the cap); released below if the mint throws.
+  if (isMacro) {
+    const used = macroGrantCounts.get(auto.senderEpicId) || 0;
+    if (used >= MAX_MACRO_AUTO_STARTS) {
+      auto = { granted: false, reason: `macro auto-start limit of ${MAX_MACRO_AUTO_STARTS} reached for this session` };
+    } else {
+      macroGrantCounts.set(auto.senderEpicId, used + 1);
+    }
+  }
+  const macroGranted = auto.granted && auto.ground === 'macro';
   const verifiedAt = new Date().toISOString();
 
   // The MCP client can't know its own Epic id — it only inherits the claude
@@ -566,12 +645,20 @@ async function openFeedbackSession(input, deps = {}) {
         ...(v.fromEpicId ? { fromEpicId: v.fromEpicId } : {}),
         ...(auto.granted
           ? {
-              autoApprove: {
-                requestedBy: 'human',
-                quote: auto.quote,
-                verifiedAt,
-                fromClaudeSessionId: originClaudeSessionId,
-              },
+              autoApprove: macroGranted
+                ? {
+                    requestedBy: 'macro',
+                    macroId: auto.macroId,
+                    macroLabel: auto.macroLabel,
+                    verifiedAt,
+                    fromClaudeSessionId: originClaudeSessionId,
+                  }
+                : {
+                    requestedBy: 'human',
+                    quote: auto.quote,
+                    verifiedAt,
+                    fromClaudeSessionId: originClaudeSessionId,
+                  },
             }
           : {}),
         proposal: {
@@ -586,6 +673,10 @@ async function openFeedbackSession(input, deps = {}) {
       mintAuthority: MINT_AUTHORITY_CROSS_PROJECT_FEEDBACK,
     });
   } catch (e) {
+    if (macroGranted) {
+      const n = (macroGrantCounts.get(auto.senderEpicId) || 1) - 1;
+      if (n > 0) macroGrantCounts.set(auto.senderEpicId, n); else macroGrantCounts.delete(auto.senderEpicId);
+    }
     return { ok: false, status: 500, error: `could not open the feedback session: ${e.message}` };
   }
 
@@ -598,7 +689,7 @@ async function openFeedbackSession(input, deps = {}) {
     title: v.title,
     series: v.series,
     autoStartGranted: auto.granted,
-    autoStartReason: auto.granted ? 'verified human request' : auto.reason,
+    autoStartReason: auto.granted ? (macroGranted ? `macro grant ${auto.macroId}` : 'verified human request') : auto.reason,
   });
 
   if (auto.granted) {
@@ -617,7 +708,9 @@ async function openFeedbackSession(input, deps = {}) {
         + (v.series ? ` [${seriesLine(v.series)}]` : '')
         + '. '
         + (auto.granted
-          ? 'It was auto-approved at the human\'s explicit request and is starting in that project.'
+          ? (macroGranted
+            ? `It was auto-approved by the "${auto.macroLabel}" macro (${auto.macroId}) and is starting in that project.`
+            : 'It was auto-approved at the human\'s explicit request and is starting in that project.')
           : 'It will not run until a human in that project approves it.'),
       );
     } catch {
@@ -632,11 +725,15 @@ async function openFeedbackSession(input, deps = {}) {
     fromCwd: v.fromCwd,
     tag: v.tag,
     status: auto.granted ? 'auto-approved' : 'proposed',
-    ...(v.autoStart ? { autoStart: auto.granted ? { granted: true } : { granted: false, reason: auto.reason } } : {}),
+    ...(v.autoStart || macroAuto ? { autoStart: auto.granted ? { granted: true } : { granted: false, reason: auto.reason } } : {}),
     receiptOnOriginEpic,
     // Say plainly what did NOT happen, same posture as create-prd's
     // `enqueued: false` — never let a caller report this as "work started".
-    note: auto.granted
+    note: macroGranted
+      ? `Auto-approved by the "${auto.macroLabel}" macro (${auto.macroId}), which the human launched this session `
+        + 'from and which allows auto-start in this project: the session is starting in the receiving project. '
+        + 'There is no callback: if you need an answer, ask the human to follow up.'
+      : auto.granted
       ? 'Auto-approved at the human\'s explicit request (verified against their chat prompt): the session '
         + 'is starting in the receiving project. There is no callback: if you need an answer, ask the human '
         + 'to follow up.'
@@ -783,6 +880,8 @@ module.exports = {
   MAX_TITLE_CHARS,
   MAX_BODY_CHARS,
   MAX_REFERENCES,
+  MAX_MACRO_AUTO_STARTS,
+  verifyMacroAutoStart,
   PROJECTS_DIR,
   resolveProjectsDir,
   isSessionManagerProject,

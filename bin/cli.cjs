@@ -37,13 +37,61 @@ try {
   process.exit(1);
 }
 
-const appRoot = path.join(__dirname, '..');
-const child = spawn(electronBin, [appRoot, ...process.argv.slice(2)], {
-  stdio: 'inherit',
-  env: process.env,
-});
+const sup = require('./supervise.cjs');
 
-child.on('close', (code, signal) => {
-  if (signal) process.kill(process.pid, signal);
-  else process.exit(code ?? 0);
-});
+const appRoot = path.join(__dirname, '..');
+const dir = sup.logsDir();
+let forwardedSignal = null;
+let respawns = [];
+let current = null;
+
+function launch() {
+  const startedAt = Date.now();
+  const child = spawn(electronBin, [appRoot, ...process.argv.slice(2)], {
+    stdio: ['inherit', 'inherit', 'pipe'],
+    env: process.env,
+  });
+  current = child;
+  if (child.stderr) {
+    child.stderr.on('data', (chunk) => {
+      try { process.stderr.write(chunk); } catch { /* ignore */ }
+      sup.appendStderr(dir, chunk);
+    });
+  }
+  child.on('close', (code, signal) => {
+    try {
+      sup.recordExit(dir, {
+        ts: new Date().toISOString(), pid: child.pid, code, signal, uptimeMs: Date.now() - startedAt,
+      });
+    } catch { /* best-effort */ }
+    let again = false;
+    try {
+      again = sup.shouldRespawn({ code, signal, forwardedSignal, sentinel: sup.readSentinel(dir), childPid: child.pid });
+    } catch { /* never block exit */ }
+    if (again) {
+      const guard = sup.checkCrashLoop(respawns, Date.now());
+      respawns = guard.timestamps;
+      again = guard.allow;
+    }
+    if (again) {
+      console.error(`[claude-code-session-manager] Electron exited unclean (code=${code} signal=${signal}); respawning in ${sup.RESPAWN_DELAY_MS / 1000}s`);
+      setTimeout(launch, sup.RESPAWN_DELAY_MS);
+      return;
+    }
+    if (signal) process.kill(process.pid, signal);
+    else process.exit(code ?? 0);
+  });
+}
+
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, () => {
+    forwardedSignal = sig;
+    if (current && current.exitCode === null && current.signalCode === null) {
+      try { current.kill(sig); } catch { /* ignore */ }
+    } else {
+      process.exit(0);
+    }
+  });
+}
+
+launch();

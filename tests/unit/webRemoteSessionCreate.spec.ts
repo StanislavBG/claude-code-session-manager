@@ -93,6 +93,12 @@ describe('dispatch handlers', () => {
     expect(spy).toHaveBeenCalledWith(valid)
   })
 
+  it('a create with no macroId forwards no macroId key', async () => {
+    const { map, spy } = setup()
+    await map['cmd:session:create'](valid)
+    expect(Object.keys(spy.mock.calls[0][0] as object)).not.toContain('macroId')
+  })
+
   const portfolio = {
     id: 'startup-portfolio-fcec18',
     label: 'Portfolio Optimization',
@@ -119,8 +125,9 @@ describe('dispatch handlers', () => {
   it('macro without inputs forwards the default lines', async () => {
     const { map, spy } = setupMacro()
     await map['cmd:session:create']({ ...valid, tag: 'discussion', macroId: portfolio.id, prompt: portfolio.prompt })
-    const sent = spy.mock.calls[0][0] as { prompt: string }
-    expect(Object.keys(sent).sort()).toEqual(['agentName', 'cwd', 'prompt', 'tag', 'title'])
+    const sent = spy.mock.calls[0][0] as { prompt: string; macroId?: string }
+    expect(Object.keys(sent).sort()).toEqual(['agentName', 'cwd', 'macroId', 'prompt', 'tag', 'title'])
+    expect(sent.macroId).toBe(portfolio.id)
     expect(sent.prompt).not.toContain('{{')
     expect(sent.prompt.endsWith('- Mode: auto\n- Focus: none\n- Instructions: none\n- Data / links: none')).toBe(true)
   })

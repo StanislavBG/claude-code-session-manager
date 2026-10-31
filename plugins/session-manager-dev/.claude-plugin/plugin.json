@@ -1,10 +1,11 @@
 {
   "name": "session-manager-dev",
   "description": "The default end-to-end development skillset for the Claude Code Session Manager: decompose work into scheduler PRDs and track them to a validated finish (/develop), publish releases to npm (/builder), and hand a finding to another project on this machine (/send-feedback). Together with the session-manager scheduler these form a develop → queue → validate → release loop.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": {
-    "name": "Stanislav Georgiev",
-    "url": "https://github.com/StanislavBG"
+    "name": "Bilko Bibitkov",
+    "email": "BilkoBibitkov2000@gmail.com",
+    "url": "https://bilko.run"
   },
   "homepage": "https://github.com/StanislavBG/claude-code-session-manager",
   "keywords": [

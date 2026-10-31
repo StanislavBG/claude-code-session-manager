@@ -12,7 +12,7 @@ This repo ships the app only. The public marketing page at **bilko.run/products/
 feature Parts Bin, the app's `$0` price tag — Mac + Windows installers, then the `npx` one-liner — links into the free Field Manual) and the
 npm-package registry entry (`Session Manager` card on bilko.run/projects) live in a **separate sibling
 repo**: `~/Projects/Bilko/` (git remote `origin` → `StanislavBG/bilko-run`, **not** `content-grade`). Bilko
-is Stanislav's own multi-project *hosting platform* — the App-Store-style host for bilko.run — not a
+is our own multi-project *hosting platform* — the App-Store-style host for bilko.run — not a
 third-party service, so issues with the product page are ours to fix, just in that repo.
 
 Key files in `~/Projects/Bilko/` for session-manager's listing:

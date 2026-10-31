@@ -38,7 +38,7 @@ const DEMO_MANIFEST = {
   name: 'demo',
   version: '1.2.3',
   description: 'Does the one thing well and describes it in one long sentence that should truncate.',
-  author: { name: 'Stanislav' },
+  author: { name: 'Ada Author' },
   license: 'MIT',
   homepage: 'https://example.com/demo',
 }
@@ -187,7 +187,7 @@ describe('Plugins drill-in page', () => {
     expect(text).toContain('Plugins')
 
     // Meta strip.
-    expect(text).toContain('Stanislav')
+    expect(text).toContain('Ada Author')
     expect(text).toContain('MIT')
     expect(text).toContain('example.com/demo')
 

@@ -1525,6 +1525,28 @@ test('[job] integrateBranch auto-resolves a pure-addition .md conflict by concat
   await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch });
 });
 
+test('[job] integrateBranch reports hook_rejected when a commit-msg hook rejects the auto-resolve commit', async () => {
+  const slug = 'test-slug-pure-add-hook';
+  const worktree = await conflictScenario(slug, {
+    base: { 'd.md': '# Doc\n\nintro\n' },
+    side: { 'd.md': '# Doc\n\nintro\n\n## Section A\na body\n' },
+    main: { 'd.md': '# Doc\n\nintro\n\n## Section B\nb body\n' },
+  });
+  const hookPath = path.join(repoCwd, '.git', 'hooks', 'commit-msg');
+  fs.mkdirSync(path.dirname(hookPath), { recursive: true });
+  fs.writeFileSync(hookPath, "#!/bin/sh\necho 'identity-guard: commit blocked.' >&2\nexit 1\n", { mode: 0o755 });
+  try {
+    const outcome = await gitWorktree.integrateJobBranch({ cwd: repoCwd, branch: worktree.branch, slug });
+    expect(outcome.ok).toBe(false);
+    expect(outcome.failureKind).toBe('hook_rejected');
+    expect(outcome.reason).toContain('merge blocked by a git hook: ');
+    expect(fs.existsSync(path.join(repoCwd, '.git', 'MERGE_HEAD'))).toBe(false);
+  } finally {
+    fs.rmSync(hookPath, { force: true });
+  }
+  await gitWorktree.cleanupJobWorktree({ cwd: repoCwd, dir: worktree.dir, branch: worktree.branch, keepBranch: true });
+});
+
 test('[job] integrateBranch does NOT auto-resolve a same-line .md edit and leaves the tree clean', async () => {
   const slug = 'test-slug-pure-add-neg-sameline';
   const worktree = await conflictScenario(slug, {

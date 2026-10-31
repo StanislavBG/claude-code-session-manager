@@ -98,8 +98,12 @@ const MECHANICALLY_RESOLVABLE_VERDICTS = new Set(['worktree_integration_failed']
  * the same as at failure time. Unknown state (no stamp, null current HEAD)
  * is NOT futile — falls back to attempting the retry.
  */
+function isHeadSensitiveFailureKind(kind) {
+  return kind === 'content_conflict' || kind === 'hook_rejected';
+}
+
 function isMechanicalRecoveryFutile(job, currentHeadSha) {
-  return (job.integrationFailureKind === 'content_conflict' || job.integrationFailureKind === 'hook_rejected')
+  return isHeadSensitiveFailureKind(job.integrationFailureKind)
     && !!job.integrationBaseHeadSha
     && !!currentHeadSha
     && job.integrationBaseHeadSha === currentHeadSha;
@@ -1010,6 +1014,7 @@ module.exports = {
   selectResumeRecoveryTarget,
   MECHANICALLY_RESOLVABLE_VERDICTS,
   isMechanicalRecoveryFutile,
+  isHeadSensitiveFailureKind,
   selectMechanicalRecoveryTarget,
   isStaleSharedTreeRevertedPark,
   fixSlugFor,

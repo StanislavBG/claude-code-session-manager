@@ -123,6 +123,29 @@ test('selectMechanicalRecoveryTarget: content_conflict with a moved HEAD returns
   expect(selectMechanicalRecoveryTarget(conflictJob(), 'bbb222')).not.toBeNull();
 });
 
+test('selectMechanicalRecoveryTarget: hook_rejected with unchanged HEAD is skipped', () => {
+  expect(selectMechanicalRecoveryTarget(conflictJob({ integrationFailureKind: 'hook_rejected' }), 'aaa111')).toBeNull();
+});
+
+test('selectMechanicalRecoveryTarget: hook_rejected with a moved HEAD returns a target', () => {
+  expect(selectMechanicalRecoveryTarget(conflictJob({ integrationFailureKind: 'hook_rejected' }), 'bbb222')).not.toBeNull();
+});
+
+test('resolveHeadShasForPass: real repo HEAD for hook_rejected, null for blocking_paths', async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-head-pass-'));
+  initRepo(repo);
+  const head = git(['rev-parse', 'HEAD'], repo).trim();
+  const hookJob = eligibleJob({ cwd: repo, integrationFailureKind: 'hook_rejected' });
+  const repo2 = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-head-pass2-'));
+  initRepo(repo2);
+  const blockJob = eligibleJob({ cwd: repo2, slug: 'other', integrationFailureKind: 'blocking_paths' });
+  const lookup = await scheduler.resolveHeadShasForPass([hookJob, blockJob]);
+  expect(lookup(hookJob)).toBe(head);
+  expect(lookup(blockJob)).toBeNull();
+  fs.rmSync(repo, { recursive: true, force: true });
+  fs.rmSync(repo2, { recursive: true, force: true });
+});
+
 test('selectMechanicalRecoveryTarget: blocking_paths with unchanged HEAD still returns a target', () => {
   const job = eligibleJob({ integrationFailureKind: 'blocking_paths', integrationBaseHeadSha: 'aaa111' });
   expect(selectMechanicalRecoveryTarget(job, 'aaa111')).not.toBeNull();

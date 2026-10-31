@@ -1026,13 +1026,13 @@ async function classifyMergeFailure({ cwd, stderrText, stdoutText }) {
 
 // Extensions eligible for the pure-addition auto-resolve. All-or-nothing across
 // a merge: one conflicted path outside this list means no auto-resolve at all.
+const AUTO_RESOLVE_EXTENSIONS = new Set(['.md', '.markdown', '.txt', '.rst']);
+
 function mergeFailureReason(failureKind, text) {
   return failureKind === 'hook_rejected'
     ? `merge blocked by a git hook: ${text}`
     : `merge failed (likely a real content conflict): ${text}`;
 }
-
-const AUTO_RESOLVE_EXTENSIONS = new Set(['.md', '.markdown', '.txt', '.rst']);
 
 /**
  * Renders `git merge-file -p --diff3` over the index's three conflict stages

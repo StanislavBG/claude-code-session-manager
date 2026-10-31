@@ -3894,7 +3894,7 @@ function stampIntegrationFailure(row, integration) {
 async function resolveHeadShasForPass(jobs) {
   const byCwd = new Map();
   for (const j of jobs || []) {
-    if (!j || j.status !== 'needs_review' || j.integrationFailureKind !== 'content_conflict') continue;
+    if (!j || j.status !== 'needs_review' || !reviewLadder.isHeadSensitiveFailureKind(j.integrationFailureKind)) continue;
     const cwd = j.cwd || DEFAULT_PROJECT_CWD;
     if (!byCwd.has(cwd)) byCwd.set(cwd, gitTreeGuard.gitHead(cwd));
   }
@@ -5159,7 +5159,7 @@ async function spawnInvestigation(failedJob, runDir, { deadChild = null } = {}) 
   // Mechanical recovery (PRD 1130): same first-refusal treatment — a job
   // eligible for a pure-git retry must never also get a cold-read fix-plan
   // PRD authored in the same pass.
-  if (reviewLadder.selectMechanicalRecoveryTarget(failedJob, failedJob.integrationFailureKind === 'content_conflict' ? await gitTreeGuard.gitHead(failedJob.cwd || DEFAULT_PROJECT_CWD) : null)) {
+  if (reviewLadder.selectMechanicalRecoveryTarget(failedJob, reviewLadder.isHeadSensitiveFailureKind(failedJob.integrationFailureKind) ? await gitTreeGuard.gitHead(failedJob.cwd || DEFAULT_PROJECT_CWD) : null)) {
     console.log(`[scheduler] skip investigation: ${failedJob.slug} is mechanical-recovery eligible`);
     return { deferred: false };
   }
@@ -6632,7 +6632,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     let terminalNotifySnapshot = null;
     const newlyCompletedPrds = [];
     // Base HEAD for the mechanical-recovery futility check — read here, never inside mutate() (no I/O).
-    const finalizeHeadSha = worktreeIntegrationDetail && worktreeIntegrationDetail.failureKind === 'content_conflict'
+    const finalizeHeadSha = worktreeIntegrationDetail && reviewLadder.isHeadSensitiveFailureKind(worktreeIntegrationDetail.failureKind)
       ? await gitTreeGuard.gitHead(guardCwd) : null;
     await mutate((s) => {
       const i2 = s.jobs.findIndex((x) => x.slug === job.slug);

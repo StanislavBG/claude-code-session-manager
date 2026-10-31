@@ -273,8 +273,18 @@ const SCHEDULER_TURN_INSTRUCTION =
  * Picks the instruction block that opens a turn: scheduler turns and
  * auto-started inbound Epics have no human watching, so they never ask.
  */
+/** Only the first (inbound-proposal) turn earns a follow-up; scheduler turns never chain. */
+function shouldFollowUp(origin) {
+  return origin === 'inbound-proposal';
+}
+
 function turnInstructionFor(origin, cwd, sessionId) {
-  if (origin === 'scheduler') return SCHEDULER_TURN_INSTRUCTION;
+  if (origin === 'scheduler') {
+    // An auto-started Epic with no PRDs needs /develop Phase 1 (plan), not Phase 2.
+    const auto = require('./lib/feedback-remote/autoStartedSession.cjs');
+    if (auto.autoStartNeedsPlan(cwd, sessionId)) return auto.autoStartTurnInstruction(STOP_SENTINEL);
+    return SCHEDULER_TURN_INSTRUCTION;
+  }
   if (origin === 'inbound-proposal') {
     const auto = require('./lib/feedback-remote/autoStartedSession.cjs');
     if (auto.isAutoStartedEpic(cwd, sessionId)) return auto.autoStartTurnInstruction(STOP_SENTINEL);
@@ -843,6 +853,15 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
                 console.error('[chatRunner] recordExchange failed:', err?.message ?? err);
               });
             }
+            if (shouldFollowUp(origin)) {
+              try {
+                require('./lib/feedback-remote/autoStartedSession.cjs').autoStartFollowUp({
+                  cwd, tabId, sessionId, send: enqueueExternalPrompt,
+                });
+              } catch (err) {
+                console.error('[chatRunner] auto-start follow-up failed:', err?.message ?? err);
+              }
+            }
           }
         } else {
           emitTerminal('chat:run:error', {
@@ -1158,6 +1177,7 @@ module.exports = {
   registerChatHandlers,
   noteChatRunOrigin,
   turnInstructionFor,
+  shouldFollowUp,
   parseStopSignal,
   splitStopSignal,
   parseContextUsageMarkdown,

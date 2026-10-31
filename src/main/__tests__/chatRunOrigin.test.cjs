@@ -84,3 +84,29 @@ test('chat:run handler passes origin through to run()', async () => {
   }
   expect(seen).toContain('inbound-proposal');
 });
+
+test('turnInstructionFor: scheduler turn on an auto-started Epic with no PRDs gets the plan instruction', () => {
+  const { opsPath } = require('../lib/opsOwnership.cjs');
+  const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-chatrunorigin-proj-'));
+  try {
+    const file = opsPath(proj, 'prompt-sessions', 'active-index.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ sessions: {
+      a: { id: 'a', tag: 'bug', claudeSessionId: 'cs-a', source: { producer: 'cross-project-feedback', autoApprove: { ground: 'x' } } },
+    } }));
+    const plan = cr.turnInstructionFor('scheduler', proj, 'cs-a');
+    expect(plan).not.toBe(cr.SCHEDULER_TURN_INSTRUCTION);
+    expect(plan).toContain('started automatically');
+    const prd = opsPath(proj, 'scheduler', 'epics', 'a', 'prds', '01-x.md');
+    fs.mkdirSync(path.dirname(prd), { recursive: true });
+    fs.writeFileSync(prd, '# x');
+    expect(cr.turnInstructionFor('scheduler', proj, 'cs-a')).toBe(cr.SCHEDULER_TURN_INSTRUCTION);
+  } finally {
+    fs.rmSync(proj, { recursive: true, force: true });
+  }
+});
+
+test("shouldFollowUp: only 'inbound-proposal'; scheduler never follows up", () => {
+  expect(cr.shouldFollowUp('inbound-proposal')).toBe(true);
+  for (const o of ['scheduler', 'human', 'external', undefined]) expect(cr.shouldFollowUp(o)).toBe(false);
+});

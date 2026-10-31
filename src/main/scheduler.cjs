@@ -468,16 +468,48 @@ const DEFAULT_CONFIG = {
  * open (returns Infinity) on darwin or on any parse/read error so the gate
  * never blocks scheduling on unsupported platforms.
  */
-function getAvailableMemMb() {
-  if (process.platform !== 'linux') return Infinity;
+function parseMemInfo(raw) {
+  const kb = (name) => {
+    const m = String(raw).match(new RegExp(`^${name}:\\s+(\\d+)\\s+kB`, 'm'));
+    return m ? Math.floor(parseInt(m[1], 10) / 1024) : null;
+  };
+  const avail = kb('MemAvailable');
+  return {
+    availableMb: avail === null ? Infinity : avail,
+    swapTotalMb: kb('SwapTotal') ?? 0,
+    swapFreeMb: kb('SwapFree') ?? 0,
+  };
+}
+
+/** Reads /proc/meminfo; fails open (Infinity, no swap) off Linux or on any error. */
+function readMemInfo() {
+  const open = { availableMb: Infinity, swapTotalMb: 0, swapFreeMb: 0 };
+  if (process.platform !== 'linux') return open;
   try {
-    const raw = fs.readFileSync('/proc/meminfo', 'utf8');
-    const m = raw.match(/^MemAvailable:\s+(\d+)\s+kB/m);
-    if (!m) return Infinity;
-    return Math.floor(parseInt(m[1], 10) / 1024);
+    return parseMemInfo(fs.readFileSync('/proc/meminfo', 'utf8'));
   } catch {
-    return Infinity;
+    return open;
   }
+}
+
+let swapGateLogged = false;
+function getAvailableMemMb() {
+  return readMemInfo().availableMb;
+}
+
+const SWAP_LOW_FREE_FRACTION = 0.10;
+
+/**
+ * Pure helper: when swap is configured and under 10% free, allow at most ONE
+ * job running in total (so 0 running still lets 1 start — never a hard hold
+ * at zero). No swap configured = no clamp. Exported for unit tests.
+ */
+function swapLimitedBatchSize(mem, runningCount, batchLen) {
+  const total = Number(mem?.swapTotalMb) || 0;
+  if (total <= 0) return batchLen;
+  const free = Number(mem?.swapFreeMb) || 0;
+  if (free >= total * SWAP_LOW_FREE_FRACTION) return batchLen;
+  return Math.min(batchLen, Math.max(0, 1 - runningCount));
 }
 
 /**
@@ -7696,7 +7728,8 @@ async function tickBody(gen, { bypassLoadGate }) {
       return recordTick({ fired: false, reason: 'drained' }, { holds });
     }
 
-    const availableMb = getAvailableMemMb();
+    const memInfo = readMemInfo();
+    const availableMb = memInfo.availableMb;
     // Reserve a fixed slice for the Electron host before the per-job gate, so a
     // job is never started into the host's own headroom (that path OOM-kills
     // Electron and SIGHUPs every pty — 2026-06-16 incident).
@@ -7727,7 +7760,22 @@ async function tickBody(gen, { bypassLoadGate }) {
         { detail: `memory gate: ${availableMb} MB free, need ${threshold} MB (consumed=${consumedMb} MB credited)`, holds },
       );
     }
-    const gatedBatch = batch.slice(0, allowed);
+    const swapAllowed = swapLimitedBatchSize(memInfo, runningSet.size, allowed);
+    if (swapAllowed < allowed) {
+      if (!swapGateLogged) {
+        swapGateLogged = true;
+        console.log(`[scheduler] memory gate: swap nearly exhausted (swapFree=${memInfo.swapFreeMb} MB of ${memInfo.swapTotalMb} MB, available=${availableMb} MB) — limiting to 1 running job (running=${runningSet.size}, batch ${allowed} → ${swapAllowed})`);
+      }
+    } else {
+      swapGateLogged = false;
+    }
+    if (swapAllowed === 0) {
+      return recordTick(
+        { fired: false, reason: 'memory-deferred', deferredCount: batch.length, availableMb, swapFreeMb: memInfo.swapFreeMb, swapTotalMb: memInfo.swapTotalMb },
+        { detail: `memory gate: swap nearly exhausted (${memInfo.swapFreeMb}/${memInfo.swapTotalMb} MB free), ${runningSet.size} job(s) running`, holds },
+      );
+    }
+    const gatedBatch = batch.slice(0, swapAllowed);
     if (gatedBatch.length < batch.length) {
       console.log(`[scheduler] memory gate: available=${availableMb} MB — clamped batch ${batch.length} → ${gatedBatch.length} (host reserve ${RESERVED_HOST_MB} + ${MIN_FREE_MB_PER_JOB}/job, consumed=${consumedMb} MB)`);
       lastMemGate = { availableMb, threshold: RESERVED_HOST_MB + MIN_FREE_MB_PER_JOB * (runningSet.size + gatedBatch.length) - consumedMb, consumedMb, deferred: false, clamped: true, at: new Date().toISOString() };
@@ -11492,6 +11540,10 @@ module.exports = {
   pollRecoveryClearSource,
   memoryLimitedBatchSize,
   availableForJobs,
+  parseMemInfo,
+  readMemInfo,
+  getAvailableMemMb,
+  swapLimitedBatchSize,
   biasJobOomScore,
   OOM_SCORE_ADJ_JOB,
   reverifyNeedsReview,

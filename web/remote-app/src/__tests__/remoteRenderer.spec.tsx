@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
-import RemoteRenderer, { sha256Hex, IFRAME_SANDBOX, buildSrcDoc, BOOTSTRAP } from '../components/RemoteRenderer';
+import RemoteRenderer, { sha256Hex, IFRAME_SANDBOX, buildSrcDoc, BOOTSTRAP, BOOT_WATCHDOG_MS } from '../components/RemoteRenderer';
 
 const enc = new TextEncoder();
 const INDEX = '<html><head><link rel="stylesheet" href="./app.css"></head><body><script type="module" src="./app.js"></script></body></html>';
@@ -9,12 +9,13 @@ function frames(value: unknown, id: string, extra: Record<string, unknown> = {})
   return [{ type: id.includes('evt') ? 'ipc:event' : 'ipc:result', id, seq: 0, total: 1, data: JSON.stringify(value), ...extra }];
 }
 
-async function makeSocket(opts: { available?: boolean; corrupt?: string } = {}) {
+async function makeSocket(opts: { available?: boolean; corrupt?: string; indexOnly?: boolean } = {}) {
   const files: Record<string, string> = { 'index.html': INDEX, 'app.css': 'body{}', 'app.js': 'console.log(1)' };
+  const listed = opts.indexOnly ? { 'index.html': INDEX } : files;
   const manifest = {
     available: opts.available !== false,
     version: '1',
-    files: await Promise.all(Object.entries(files).map(async ([name, body]) => ({
+    files: await Promise.all(Object.entries(listed).map(async ([name, body]) => ({
       name, size: body.length, type: 'x', sha256: await sha256Hex(enc.encode(body)),
     }))),
   };
@@ -124,5 +125,41 @@ describe('RemoteRenderer', () => {
     render(<RemoteRenderer socket={s.socket} deviceId="d1" fallback={<div data-testid="drill">drill</div>} />);
     expect(await screen.findByTestId('drill')).toBeInTheDocument();
     expect(screen.queryByTestId('remote-renderer')).toBeNull();
+  });
+
+  it('falls back, without mounting, when the desktop lists only index.html', async () => {
+    const s = await makeSocket({ indexOnly: true });
+    render(<RemoteRenderer socket={s.socket} deviceId="d1" fallback={<div data-testid="drill">drill</div>} />);
+    expect(await screen.findByTestId('drill')).toBeInTheDocument();
+    expect(screen.queryByTestId('remote-renderer')).toBeNull();
+    const gets = s.sent.filter((m) => m.type === 'asset:get');
+    expect(gets.every((m) => m.payload.name === 'index.html')).toBe(true);
+  });
+
+  it('boot watchdog falls back when the frame makes no IPC call', async () => {
+    const s = await makeSocket();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    render(<RemoteRenderer socket={s.socket} deviceId="d1" fallback={<div data-testid="drill">drill</div>} />);
+    try {
+      await screen.findByTestId('remote-renderer');
+      act(() => { vi.advanceTimersByTime(BOOT_WATCHDOG_MS + 1); });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(screen.getByTestId('drill')).toBeInTheDocument();
+    expect(screen.queryByTestId('remote-renderer')).toBeNull();
+  });
+
+  it('an sm-ipc message before expiry keeps the iframe mounted', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const { fromIframe } = await mounted();
+      await fromIframe({ type: 'sm-ipc', id: 1, channel: 'a:b', args: [] });
+      act(() => { vi.advanceTimersByTime(BOOT_WATCHDOG_MS + 1); });
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(screen.getByTestId('remote-renderer')).toBeInTheDocument();
+    expect(screen.queryByTestId('drill')).toBeNull();
   });
 });

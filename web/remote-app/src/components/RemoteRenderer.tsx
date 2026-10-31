@@ -79,6 +79,10 @@ async function loadVerified(socket: FrameSocket, deviceId: string, f: AssetFile)
 
 const base = (p: string) => p.split(/[?#]/)[0].split('/').pop() ?? p;
 const dec = new TextDecoder();
+const isLocalRef = (ref: string) => !/^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(ref);
+
+/** If the frame makes no IPC call within this long after mounting, drop to the drill-down. */
+export const BOOT_WATCHDOG_MS = 15000;
 
 /**
  * Fixed inline bootstrap. The frame has an opaque origin, so it cannot load a parent-origin
@@ -273,19 +277,23 @@ export default function RemoteRenderer({ socket, deviceId, fallback }: Props) {
         const byName = new Map(manifest.files.map((f) => [f.name, f]));
         const css = new Map<string, string>();
         for (const m of html.matchAll(/<link\b[^>]*rel=["']stylesheet["'][^>]*href=["']([^"']+)["']|<link\b[^>]*href=["']([^"']+)["'][^>]*rel=["']stylesheet["']/gi)) {
-          const name = base(m[1] ?? m[2]);
+          const ref = m[1] ?? m[2];
+          if (!isLocalRef(ref)) continue;
+          const name = base(ref);
           const f = byName.get(name);
-          if (f) css.set(name, dec.decode(await loadVerified(socket, deviceId, f)));
+          if (!f) { setState({ kind: 'fallback' }); return; }
+          css.set(name, dec.decode(await loadVerified(socket, deviceId, f)));
         }
         const boot: BootScript[] = [];
         for (const m of html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/gi)) {
-          const name = base(m[1]);
-          const f = byName.get(name);
-          if (!f) continue;
+          if (!isLocalRef(m[1])) continue;
+          const f = byName.get(base(m[1]));
+          if (!f) { setState({ kind: 'fallback' }); return; }
           const bytes = await loadVerified(socket, deviceId, f);
           boot.push({ module: /type=["']module["']/i.test(m[0]), code: dec.decode(bytes) });
         }
         if (cancelled) return;
+        if (boot.length === 0) { setState({ kind: 'fallback' }); return; }
         scriptsRef.current = boot;
         setState({ kind: 'ready', srcDoc: buildSrcDoc(html, css) });
       } catch (e) {
@@ -302,6 +310,8 @@ export default function RemoteRenderer({ socket, deviceId, fallback }: Props) {
   useLayoutEffect(() => {
     if (!srcDoc || !socket) return;
     const bridge = new IpcBridge(socket, deviceId, (msg) => iframeRef.current?.contentWindow?.postMessage(msg, '*'));
+    let watchdog: ReturnType<typeof setTimeout> | null = setTimeout(() => setState({ kind: 'fallback' }), BOOT_WATCHDOG_MS);
+    const clearWatchdog = () => { if (watchdog) { clearTimeout(watchdog); watchdog = null; } };
     const onMessage = (e: MessageEvent) => {
       const win = iframeRef.current?.contentWindow;
       if (!win || e.source !== win) return;
@@ -309,10 +319,12 @@ export default function RemoteRenderer({ socket, deviceId, fallback }: Props) {
         win.postMessage({ type: 'sm-boot', scripts: scriptsRef.current }, '*');
         return;
       }
+      const t = e.data && (e.data as { type?: unknown }).type;
+      if (t === 'sm-ipc' || t === 'sm-ipc-subscribe') clearWatchdog();
       bridge.handle(e.data);
     };
     window.addEventListener('message', onMessage);
-    return () => { window.removeEventListener('message', onMessage); bridge.dispose(); };
+    return () => { clearWatchdog(); window.removeEventListener('message', onMessage); bridge.dispose(); };
   }, [srcDoc, socket, deviceId]);
 
   if (state.kind === 'fallback') return <>{fallback}</>;

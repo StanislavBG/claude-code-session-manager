@@ -129,3 +129,15 @@ test('fallback: limits disabled (null) spawns unwrapped', async () => {
   expect(wrapped).toBe(0);
   expect(sent.some((e) => e.channel === 'chat:run:complete')).toBe(true);
 });
+
+test('null limits: scopeSupported is never probed and the spawn is unwrapped', async () => {
+  let probed = 0;
+  let wrapped = 0;
+  ms.memoryLimitsFor = () => null;
+  ms.scopeSupported = () => { probed++; return true; };
+  ms.wrapInMemoryScope = () => { wrapped++; return { command: 'x', args: [] }; };
+  await runTurn('sess-nolimits-1');
+  expect(probed).toBe(0);
+  expect(wrapped).toBe(0);
+  expect(sent.some((e) => e.channel === 'chat:run:complete')).toBe(true);
+});

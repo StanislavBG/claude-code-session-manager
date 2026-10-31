@@ -763,9 +763,10 @@ function executeRun({ tabId, sessionId, prompt, cwd, resume, silent, onSilentRes
     try {
       const chatArgs = buildArgs(resumeFlag);
       let target = claudeSpawnTarget('chat', sessionId, claudeBin, chatArgs);
-      if (memoryScope.scopeSupported()) {
-        const limits = memoryScope.memoryLimitsFor({ totalRamMb: Math.floor(require('node:os').totalmem() / 1048576) });
-        if (limits) {
+      // Limits first: with the cap off, never probe systemd.
+      const limits = memoryScope.memoryLimitsFor({ totalRamMb: Math.floor(require('node:os').totalmem() / 1048576) });
+      {
+        if (limits && memoryScope.scopeSupported()) {
           const unit = `sm-chat-${memoryScope.sanitizeUnit(sessionId)}-${attemptNo}-${Date.now()}`;
           const wrapped = memoryScope.wrapInMemoryScope({
             command: target.command, args: target.args || chatArgs, unit, limits,

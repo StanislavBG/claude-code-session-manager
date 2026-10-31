@@ -54,3 +54,11 @@ test('missing cgroup files are ignored and unwrapped state never stops anything'
   scheduler.finalizeJobScope({ unit: null, finalized: false }, log, { fs: fsImpl, stopScope });
   expect(stopScope).toHaveBeenCalledTimes(1);
 });
+
+test('null limits: scopeSupported is not called and the spawn is unwrapped', () => {
+  const scopeSupported = vi.fn(() => true);
+  const plan = scheduler.planJobScope({ jobSpawn, slug: 's', startedAt: 1, deps: { scopeSupported, memoryLimitsFor: () => null } });
+  expect(scopeSupported).not.toHaveBeenCalled();
+  expect(plan.spawn).toBe(jobSpawn);
+  expect(plan.unit).toBeNull();
+});

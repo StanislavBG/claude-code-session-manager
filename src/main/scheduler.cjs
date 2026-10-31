@@ -568,10 +568,9 @@ const memoryScope = require('./lib/process/memoryScope.cjs');
  * Unit = sm-job-<sanitized slug>-<run timestamp>.
  */
 function planJobScope({ jobSpawn, jobArgs, slug, startedAt, deps = {} }) {
-  const supported = (deps.scopeSupported || memoryScope.scopeSupported)();
-  const limits = supported
-    ? (deps.memoryLimitsFor || memoryScope.memoryLimitsFor)({ totalRamMb: Math.floor(os.totalmem() / 1048576) })
-    : null;
+  // Limits first: with the cap off, never probe systemd.
+  const limits = (deps.memoryLimitsFor || memoryScope.memoryLimitsFor)({ totalRamMb: Math.floor(os.totalmem() / 1048576) });
+  const supported = limits ? (deps.scopeSupported || memoryScope.scopeSupported)() : false;
   if (!supported || !limits) return { spawn: jobSpawn, unit: null };
   const unit = `sm-job-${memoryScope.sanitizeUnit(slug)}-${startedAt}`;
   const wrapped = (deps.wrapInMemoryScope || memoryScope.wrapInMemoryScope)({

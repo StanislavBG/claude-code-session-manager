@@ -20,6 +20,9 @@ import { inject, afterEach } from 'vitest';
 // scrub it so tests see a neutral process. Tests that need these set them explicitly.
 for (const k of ['SM_SCHEDULER_JOB_SLUG', 'SM_SCHEDULER_JOB_MAY_QUEUE', 'SM_PROC_ROLE', 'SM_PROJECT_ROOT']) delete process.env[k];
 
+// Memory cap off by default in tests: no real systemd-run scopes on the host, argv stays unwrapped.
+process.env.SM_JOB_MEMORY_MAX_MB = '0';
+
 const env = inject('schedulerSandbox');
 if (env) {
   Object.assign(process.env, env);

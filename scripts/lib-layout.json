@@ -22,6 +22,7 @@
   "customerFeedbackInbox": "feedback-remote",
   "customerFeedbackIpc": "feedback-remote",
   "humanPromptLedger": "feedback-remote",
+  "cpuSample": "scheduler",
   "defaultShell": "process",
   "definitionOfDone": "scheduler",
   "delegationReadiness": "epic",

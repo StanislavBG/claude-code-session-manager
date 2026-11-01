@@ -2549,6 +2549,19 @@ function formatLoadGateDetail(load) {
   return `CPU load gate: loadavg1 ${load.loadavg1} / ${load.cores} cores = ${load.ratio} > threshold ${load.threshold}, ${cpu}, held ${heldMinutes}m with slots and memory free`;
 }
 
+function loadGateAuditFields(load) {
+  return {
+    loadavg1: load.loadavg1, cores: load.cores, ratio: load.ratio, threshold: load.threshold,
+    cpuBusy: load.cpuBusy, cpuIowait: load.cpuIowait, cpuWindowMs: load.cpuWindowMs, heldMs: load.heldMs,
+  };
+}
+
+function loadGateStallEvent(load, batch, lead) {
+  const byProject = {};
+  for (const j of batch) byProject[j.cwd] = { held: (byProject[j.cwd]?.held || 0) + 1 };
+  return { message: `${lead} ${formatLoadGateDetail(load)}`, total: batch.length, byProject };
+}
+
 function attachWindow(w) { mainWindow = w; }
 
 /**
@@ -7920,10 +7933,23 @@ async function tickBody(gen, { bypassLoadGate }) {
       console.log(line);
       if (load.shouldAudit) {
         appendAuditEvent('launch_load_gated', {
-          loadavg1: load.loadavg1, cores: load.cores, ratio: load.ratio, threshold: load.threshold,
-          held: gatedBatch.map((j) => j.slug), heldMs: load.heldMs,
-          cpuBusy: load.cpuBusy, cpuWindowMs: load.cpuWindowMs,
+          ...loadGateAuditFields(load),
+          held: gatedBatch.map((j) => j.slug),
         });
+      }
+      if (load.escalated) {
+        const escTop = topCpuConsumers(3);
+        const escMins = Math.round(load.heldMs / 60_000);
+        console.warn(`[scheduler] load gate: CPU saturated, held ${gatedBatch.length} job(s) for ${escMins}m — nothing launched; top CPU: ${escTop.length ? escTop.join(' | ') : 'n/a'}`);
+        appendAuditEvent('load_gate_escalated', {
+          ...loadGateAuditFields(load),
+          held: gatedBatch.map((j) => j.slug),
+          top: escTop,
+        });
+        sendIfAlive(mainWindow, 'schedule:stall', loadGateStallEvent(
+          load, gatedBatch,
+          `CPU saturated: load gate has held ${gatedBatch.length} job(s) for ${escMins}m with slots and memory free; nothing launched.`,
+        ));
       }
       return recordTick(
         { fired: false, reason: 'load-deferred', deferredCount: gatedBatch.length, ratio: load.ratio, threshold: load.threshold },
@@ -7931,7 +7957,7 @@ async function tickBody(gen, { bypassLoadGate }) {
       );
     } else if (load.yielded) {
       // The gate held this batch for the whole yield window with slots and
-      // memory free: let ONE job through (the CPU really is busy here).
+      // memory free and the CPU not saturated (or no sample): let ONE job through.
       launchBatch = gatedBatch.slice(0, 1);
       top = topCpuConsumers(3);
       const mins = Math.round(load.heldMs / 60_000);
@@ -7939,10 +7965,7 @@ async function tickBody(gen, { bypassLoadGate }) {
     } else if (load.standDown) {
       console.log(`[scheduler] load gate: stood down — loadavg1=${load.loadavg1} cores=${load.cores} ratio=${load.ratio} > ${load.threshold} but CPU ${Math.round(load.cpuBusy * 100)}% busy over ${Math.round(load.cpuWindowMs / 1000)}s`);
       if (load.shouldAuditStandDown) {
-        appendAuditEvent('load_gate_stood_down', {
-          loadavg1: load.loadavg1, cores: load.cores, ratio: load.ratio, threshold: load.threshold,
-          cpuBusy: load.cpuBusy, cpuWindowMs: load.cpuWindowMs,
-        });
+        appendAuditEvent('load_gate_stood_down', loadGateAuditFields(load));
       }
     }
 
@@ -7972,20 +7995,13 @@ async function tickBody(gen, { bypassLoadGate }) {
       if (load.yielded) {
         const mins = Math.round(load.heldMs / 60_000);
         appendAuditEvent('load_gate_yielded', {
-          loadavg1: load.loadavg1, cores: load.cores, ratio: load.ratio, threshold: load.threshold,
-          cpuBusy: load.cpuBusy, cpuWindowMs: load.cpuWindowMs, heldMs: load.heldMs,
+          ...loadGateAuditFields(load),
           launched: launchBatch[0].slug, stillHeld: gatedBatch.slice(1).map((j) => j.slug), top,
         });
-        const byProject = {};
-        for (const j of gatedBatch) {
-          const key = j.cwd;
-          byProject[key] = { held: (byProject[key]?.held || 0) + 1 };
-        }
-        sendIfAlive(mainWindow, 'schedule:stall', {
-          message: `CPU load gate held ${gatedBatch.length} job(s) for ${mins}m with slots and memory free; letting one through. ${formatLoadGateDetail(load)}`,
-          total: gatedBatch.length,
-          byProject,
-        });
+        sendIfAlive(mainWindow, 'schedule:stall', loadGateStallEvent(
+          load, gatedBatch,
+          `CPU load gate held ${gatedBatch.length} job(s) for ${mins}m with slots and memory free; letting one through.`,
+        ));
       }
     }
     return recordTick({ fired: true, count: launchBatch.length, group: launchBatch[0]?.parallelGroup }, { holds });

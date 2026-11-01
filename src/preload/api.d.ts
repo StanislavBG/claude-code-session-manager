@@ -1035,7 +1035,7 @@ export interface ScheduleLoadGate {
   standDown: boolean;
   /** Time this gate itself held a batch that slots and memory admitted; 0 when not holding */
   heldMs: number;
-  /** True on the tick where a long hold reached its limit and one job was let through. */
+  /** True on the tick where a long hold reached its limit with the CPU not saturated (or no sample) and one job was let through. A saturated CPU keeps holding instead. */
   yielded: boolean;
   at: string;
 }

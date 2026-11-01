@@ -37,6 +37,16 @@ const { createCpuSampler } = require('./cpuSample.cjs');
 // evidence, so loadavg decides (a broken reader must never disable the gate).
 const MOSTLY_IDLE_BUSY = 0.5;
 
+// Three bands by measured CPU busy fraction (with loadavg over threshold):
+//   < MOSTLY_IDLE_BUSY (0.5): the gate stands down at once.
+//   0.5 .. SATURATED_BUSY (0.85): it holds, and at the yield limit lets ONE job
+//     through, because capacity remains.
+//   >= SATURATED_BUSY: it keeps holding past the limit and escalates to a human
+//     (once per yield window), because launching there is what the gate exists
+//     to prevent. A null sample cannot prove saturation, so it yields at the limit.
+// Both bars use Math.min(threshold, bar) so a strict threshold stays strict.
+const SATURATED_BUSY = 0.85;
+
 // One audit row per this interval while continuously gated — the poll loop
 // ticks every 60 s and a saturated box stays saturated for a while; auditing
 // every tick would bury the signal in its own noise.
@@ -65,7 +75,7 @@ function isLoadGated(loadavg1, cores, threshold) {
 
 /**
  * Best-effort top-N CPU consumers, for the audit line the scheduler warn-logs
- * when the load gate has held jobs past its escalation window. Diagnostic only
+ * when the load gate yields a job or escalates a saturated hold at its limit. Diagnostic only
  * — nothing downstream branches on the result, so it fails to [] rather than
  * throwing. Supported on Linux AND macOS (the two platforms this app targets);
  * [] anywhere else or on any error.
@@ -110,14 +120,18 @@ function topCpuConsumers(n = 3, { execImpl = execFileSync, platform = process.pl
  * last audited, the time this gate itself has held a batch). `evaluate({ bypass })`
  * returns the decision for THIS tick:
  *   { gated, ratio, threshold, loadavg1, cores, bypassed,
- *     shouldAudit, heldMs, yielded }
+ *     shouldAudit, shouldAuditStandDown, heldMs, yielded, escalated }
  * - shouldAudit: true at most once per AUDIT_INTERVAL_MS while gated.
  * - heldMs: time this gate itself held a batch. Each gated tick adds
  *   max(0, min(gap since previous gated tick, holdCreditCapMs)); only
  *   endHold() resets it (evaluate() never does).
  * - yielded: heldMs reached yieldAfterMs (JOB_OVERRUN_FLOOR_MS, 45 min by
- *   default). gated is false, it stays true on later ticks until the caller
+ *   default) AND the CPU is not saturated (busy < min(threshold, SATURATED_BUSY),
+ *   or no sample). gated is false, it stays true on later ticks until the caller
  *   calls endHold() after a real launch, and the caller launches one job.
+ * - saturated at the limit: gated stays true, yielded false, heldMs keeps
+ *   growing, and `escalated` is true at most once per yieldAfterMs of wall clock
+ *   (per-tick only, never in snapshot()). endHold() clears that clock.
  * - bypassed: `bypass` was set (an explicit human Run now) and the gate would
  *   otherwise have held; the caller launches anyway and logs that it did.
  *
@@ -138,6 +152,7 @@ function createLoadGate({
   let heldMs = 0;
   let lastHeldAt = null;
   let lastStandDownAuditAt = null;
+  let lastEscalatedAt = null;
   let last = null;
 
   function observe() {
@@ -164,7 +179,7 @@ function createLoadGate({
         reason: 'loadavg-unavailable-win32',
         at: new Date(t).toISOString(),
       };
-      return { ...last, shouldAudit: false, shouldAuditStandDown: false };
+      return { ...last, shouldAudit: false, shouldAuditStandDown: false, escalated: false };
     }
     const [l1] = loadavg();
     const c = cores();
@@ -181,8 +196,15 @@ function createLoadGate({
       lastHeldAt = t;
     }
     // A yield stays armed until the caller proves a launch with endHold().
-    const yielded = holding && heldMs >= yieldAfterMs;
+    const saturated = sample !== null && sample.busyFraction >= Math.min(th, SATURATED_BUSY);
+    const atLimit = holding && heldMs >= yieldAfterMs;
+    const yielded = atLimit && !saturated;
     const gated = holding && !yielded;
+    let escalated = false;
+    if (atLimit && saturated && (lastEscalatedAt === null || t - lastEscalatedAt >= yieldAfterMs)) {
+      escalated = true;
+      lastEscalatedAt = t;
+    }
     const bypassed = wouldGate && bypass;
 
     let shouldAudit = false;
@@ -210,7 +232,7 @@ function createLoadGate({
       yielded,
       at: new Date(t).toISOString(),
     };
-    return { ...last, shouldAudit, shouldAuditStandDown };
+    return { ...last, shouldAudit, shouldAuditStandDown, escalated };
   }
 
   // Only the caller knows a launch really happened (or that nothing is waiting
@@ -218,6 +240,7 @@ function createLoadGate({
   function endHold() {
     heldMs = 0;
     lastHeldAt = null;
+    lastEscalatedAt = null;
   }
 
   function snapshot() {
@@ -227,4 +250,4 @@ function createLoadGate({
   return { evaluate, observe, snapshot, endHold };
 }
 
-module.exports = { isLoadGated, createLoadGate, topCpuConsumers, AUDIT_INTERVAL_MS, MOSTLY_IDLE_BUSY };
+module.exports = { isLoadGated, createLoadGate, topCpuConsumers, AUDIT_INTERVAL_MS, MOSTLY_IDLE_BUSY, SATURATED_BUSY };

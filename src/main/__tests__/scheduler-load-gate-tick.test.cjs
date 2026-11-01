@@ -141,7 +141,7 @@ test('a hold that reaches the yield window launches exactly one of two rows, wit
     loadavg: () => [32.84, 25, 22],
     cores: () => 14,
     threshold: 0.85,
-    cpu: { observe() {}, sample: () => ({ busyFraction: 0.91, iowaitFraction: 0, windowMs: 61_000 }) },
+    cpu: { observe() {}, sample: () => ({ busyFraction: 0.6, iowaitFraction: 0, windowMs: 61_000 }) },
     now: () => t,
     yieldAfterMs: 5 * 60_000,
     holdCreditCapMs: 10 * 60_000,
@@ -170,6 +170,47 @@ test('a hold that reaches the yield window launches exactly one of two rows, wit
   }
   expect(pending).toBe(1);
   scheduler.attachWindow(null);
+}, 120_000);
+
+test('a saturated hold at the yield window launches nothing, with one audit row and one toast', async () => {
+  const proj = makeProject('sat-proj');
+  const slugs = [`9206-sat-a-${process.pid}`, `9206-sat-b-${process.pid}`];
+  for (const slug of slugs) fs.writeFileSync(path.join(proj.prdsDir, `${slug}.md`), 'Load gate PRD.', 'utf8');
+  fs.writeFileSync(proj.queueFile, JSON.stringify({
+    jobs: slugs.map((slug) => ({ slug, title: slug, status: 'pending', cwd: proj.cwd, dependsOn: [], createdAt: new Date().toISOString() })),
+  }));
+  let t = 9_000_000;
+  scheduler._setLoadGateForTests(createLoadGate({
+    loadavg: () => [32.84, 25, 22],
+    cores: () => 14,
+    threshold: 0.85,
+    cpu: { observe() {}, sample: () => ({ busyFraction: 0.95, iowaitFraction: 0, windowMs: 61_000 }) },
+    now: () => t,
+    yieldAfterMs: 5 * 60_000,
+    holdCreditCapMs: 10 * 60_000,
+  }));
+  const sent = [];
+  scheduler.attachWindow({
+    isDestroyed: () => false,
+    webContents: { isDestroyed: () => false, isCrashed: () => false, send: (channel, payload) => sent.push({ channel, payload }) },
+  });
+  const before = readAuditKind('load_gate_escalated').length;
+  const first = await scheduler.tickQueue();
+  expect(first.reason).toBe('load-deferred');
+  t += 6 * 60_000;
+  const second = await scheduler.tickQueue();
+  expect(second.reason).toBe('load-deferred');
+  expect(second.fired).toBe(false);
+  const queue = JSON.parse(fs.readFileSync(proj.queueFile, 'utf8'));
+  expect(queue.jobs.filter((j) => j.status === 'pending').length).toBe(2);
+  const rows = readAuditKind('load_gate_escalated').slice(before);
+  expect(rows.length).toBe(1);
+  expect(rows[0].held).toEqual(expect.arrayContaining(slugs));
+  expect(rows[0].cpuBusy).toBe(0.95);
+  expect(sent.filter((m) => m.channel === 'schedule:stall').length).toBe(1);
+  expect(fs.existsSync(path.join(proj.cwd, 'ran-here.marker'))).toBe(false);
+  scheduler.attachWindow(null);
+  fs.writeFileSync(proj.queueFile, JSON.stringify({ jobs: [] }));
 }, 120_000);
 
 function readDispatchStamps() {
@@ -243,7 +284,7 @@ test('a yield stamps lastDispatchAtByCwd only for the launched row\'s project', 
     loadavg: () => [32.84, 25, 22],
     cores: () => 14,
     threshold: 0.85,
-    cpu: { observe() {}, sample: () => ({ busyFraction: 0.91, iowaitFraction: 0, windowMs: 61_000 }) },
+    cpu: { observe() {}, sample: () => ({ busyFraction: 0.6, iowaitFraction: 0, windowMs: 61_000 }) },
     now: () => t,
     yieldAfterMs: 5 * 60_000,
     holdCreditCapMs: 10 * 60_000,

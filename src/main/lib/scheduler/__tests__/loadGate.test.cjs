@@ -9,7 +9,7 @@
 // batteries. These tests pin the pure decision, the audit rate-limit and the
 // escalation, with loadavg/cores/clock all injected.
 const assert = require('node:assert/strict');
-const { isLoadGated, createLoadGate, topCpuConsumers, AUDIT_INTERVAL_MS } = require('../loadGate.cjs');
+const { isLoadGated, createLoadGate, topCpuConsumers, AUDIT_INTERVAL_MS, SATURATED_BUSY } = require('../loadGate.cjs');
 const { loadGateThreshold, LOAD_GATE_PER_CORE } = require('../schedulerConfig.cjs');
 
 const ORIGINAL_ENV = process.env.SM_LOAD_GATE_PER_CORE;
@@ -270,6 +270,63 @@ test('yield then re-arm: reaching yieldAfterMs yields once, reports heldMs, and 
   assert.equal(r.gated, true, 're-armed: holds again');
   assert.equal(r.heldMs, 0);
   assert.equal(r.yielded, false);
+});
+
+function cpuOrNull(busy) {
+  return { observe() {}, sample: () => (busy === null ? null : { busyFraction: busy, iowaitFraction: 0, windowMs: 61_000 }) };
+}
+
+test('SATURATED_BUSY is 0.85', () => {
+  assert.equal(SATURATED_BUSY, 0.85);
+});
+
+test('46 minutes at 0.95 busy keeps holding and escalates once per window', () => {
+  const { g, state } = clockGate({ yieldAfterMs: 45 * 60_000, cpu: cpuOrNull(0.95) });
+  g.evaluate();
+  let escalations = 0;
+  let r;
+  for (let i = 0; i < 46; i += 1) {
+    state.t += 60_000;
+    r = g.evaluate();
+    if (r.escalated) escalations += 1;
+  }
+  assert.equal(r.gated, true);
+  assert.equal(r.yielded, false);
+  assert.equal(escalations, 1);
+  assert.equal(g.snapshot().escalated, undefined, 'escalated stays out of snapshot()');
+  // heldMs keeps growing past the limit
+  state.t += 60_000;
+  assert.ok(g.evaluate().heldMs > 45 * 60_000);
+  // a full window later it escalates again
+  for (let i = 0; i < 45; i += 1) { state.t += 60_000; r = g.evaluate(); if (r.escalated) escalations += 1; }
+  assert.equal(escalations, 2);
+  g.endHold();
+  assert.equal(g.evaluate().escalated, false);
+});
+
+test('46 minutes at 0.6 busy yields without escalating', () => {
+  const { g, state } = clockGate({ yieldAfterMs: 45 * 60_000, cpu: cpuOrNull(0.6) });
+  g.evaluate();
+  let r;
+  for (let i = 0; i < 46; i += 1) { state.t += 60_000; r = g.evaluate(); }
+  assert.equal(r.yielded, true);
+  assert.equal(r.gated, false);
+  assert.equal(r.escalated, false);
+});
+
+test('46 minutes with a null sample yields', () => {
+  const { g, state } = clockGate({ yieldAfterMs: 45 * 60_000, cpu: cpuOrNull(null) });
+  g.evaluate();
+  let r;
+  for (let i = 0; i < 46; i += 1) { state.t += 60_000; r = g.evaluate(); }
+  assert.equal(r.yielded, true);
+  assert.equal(r.gated, false);
+  assert.equal(r.escalated, false);
+});
+
+test('win32 never escalates', () => {
+  const { g } = clockGate({ platform: 'win32' });
+  assert.equal(g.evaluate().escalated, false);
 });
 
 test('bypass ends the hold', () => {

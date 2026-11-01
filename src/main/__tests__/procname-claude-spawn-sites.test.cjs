@@ -275,8 +275,15 @@ describe.skipIf(!HAS_PROC)('comm assertions through the real runners', () => {
       const stub = writeStub({ capturePath });
       process.env.SM_CLAUDE_BIN = procName.aliasBinFor(stub, 'sm-claude-chat');
       cr.run({ tabId: 'pn02-tab', sessionId: `pn02-sess-${process.pid}`, prompt: 'hello', cwd, resume: false });
-      await waitFor(() => fs.existsSync(capturePath));
-      expect(JSON.parse(fs.readFileSync(capturePath, 'utf8')).comm).toBe('sm-claude-chat');
+      // The stub writes non-atomically: wait until the file parses, not just exists.
+      const captured = await waitFor(() => {
+        try {
+          return JSON.parse(fs.readFileSync(capturePath, 'utf8'));
+        } catch {
+          return null;
+        }
+      });
+      expect(captured.comm).toBe('sm-claude-chat');
     } finally {
       fs.rmSync(cwd, { recursive: true, force: true });
     }

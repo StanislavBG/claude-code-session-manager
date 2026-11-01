@@ -18,6 +18,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { isClaudeArgv } = require('./reaperHelpers.cjs');
+const procIdentity = require('../process/procIdentity.cjs');
 
 const LEFTOVER_GRACE_MS = 120000;
 const MARKER = 'SM_SCHEDULER_JOB_SLUG=';
@@ -149,4 +150,43 @@ function selectLeftovers({ scan, rows, runningSlugs, now, selfPid } = {}) {
   return out;
 }
 
-module.exports = { scanJobProcesses, selectLeftovers, LEFTOVER_GRACE_MS };
+/**
+ * stopLeftovers(procs, deps) — SIGTERM each pid, then after graceMs SIGKILL only
+ * pids whose live identity is complete and not a different process from the one
+ * recorded before SIGTERM (a recycled pid is never killed). Never throws.
+ * Returns the pids that were signalled.
+ */
+function stopLeftovers(procs, {
+  kill = process.kill.bind(process),
+  identityOf = procIdentity.identity,
+  isDifferentProcess = procIdentity.isDifferentProcess,
+  setTimer = setTimeout,
+  graceMs = 5000,
+} = {}) {
+  const recorded = new Map();
+  const signalled = [];
+  for (const p of Array.isArray(procs) ? procs : []) {
+    const pid = p && p.pid;
+    if (!Number.isInteger(pid) || pid <= 1) continue;
+    try { recorded.set(pid, identityOf(pid)); } catch { recorded.set(pid, null); }
+    try {
+      kill(pid, 'SIGTERM');
+      signalled.push(pid);
+    } catch { /* already gone */ }
+  }
+  if (signalled.length === 0) return signalled;
+  const timer = setTimer(() => {
+    for (const pid of signalled) {
+      try {
+        const live = identityOf(pid);
+        if (!live || live.complete !== true) continue;
+        if (isDifferentProcess(recorded.get(pid), live)) continue;
+        kill(pid, 'SIGKILL');
+      } catch { /* gone */ }
+    }
+  }, graceMs);
+  if (timer && typeof timer.unref === 'function') timer.unref();
+  return signalled;
+}
+
+module.exports = { scanJobProcesses, selectLeftovers, stopLeftovers, LEFTOVER_GRACE_MS };

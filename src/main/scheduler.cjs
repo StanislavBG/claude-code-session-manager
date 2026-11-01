@@ -119,6 +119,7 @@ const { isFixPlanSlug, classifyDiscoveredFixPlan, resolveIsFixPlan } = require('
 const { landedSinceRun, landedOnMainSince } = require('./lib/scheduler/landedSinceRun.cjs');
 const { declaredPathsForPrd, issuedAtForPrd } = require('./lib/prd/prdDeclaredPaths.cjs');
 const { identity: procIdentityOf, isDifferentProcess } = require('./lib/process/procIdentity.cjs');
+const jobLeftovers = require('./lib/scheduler/jobLeftovers.cjs');
 const logs = require('./logs.cjs');
 const { schemas, validated, SCHEDULE_SLUG_RE } = require('./ipcSchemas.cjs');
 const { readBody, sendJson } = require('./lib/feedback-remote/localAdminHttp.cjs');
@@ -8170,6 +8171,43 @@ function runStarveEscalationSweep(starvedProjects) {
 let queueHealthSweepCycle = 0;
 const QUEUE_HEALTH_SWEEP_EVERY_N_CYCLES = 20;
 
+// Leftover sweep: stops processes that outlived a finished job (setsid escapees,
+// jobs ended across an app restart, no-scope / no-systemd runs). Time-based so
+// poll backoff cannot stretch it.
+const JOB_LEFTOVER_SWEEP_INTERVAL_MS = 5 * 60_000;
+let lastJobLeftoverSweepAt = 0;
+
+/**
+ * Order matters: scan /proc BEFORE reading the queue — a process seen in the
+ * scan spawned before the read, so the row read afterwards is running or later.
+ */
+async function runJobLeftoverSweep(deps = {}) {
+  const {
+    now = Date.now(),
+    platform = process.platform,
+    scan = () => jobLeftovers.scanJobProcesses(),
+    readState = readQueue,
+    stop = (procs) => jobLeftovers.stopLeftovers(procs),
+  } = deps;
+  if (now - lastJobLeftoverSweepAt < JOB_LEFTOVER_SWEEP_INTERVAL_MS) return [];
+  if (platform !== 'linux' || process.env.SM_E2E === '1') return [];
+  lastJobLeftoverSweepAt = now;
+  const scanned = scan();
+  const state = await readState();
+  if (!state || !Array.isArray(state.jobs) || quarantinedCwdSet(state).size > 0) return [];
+  const leftovers = jobLeftovers.selectLeftovers({
+    scan: scanned, rows: state.jobs, runningSlugs: runningSet, now, selfPid: process.pid,
+  });
+  for (const { slug, procs } of leftovers) {
+    const pids = stop(procs) ?? procs.map((p) => p.pid);
+    const comms = [...new Set(procs.map((p) => p.comm))];
+    const oldestEtimes = Math.max(...procs.map((p) => p.etimes || 0));
+    appendAuditEvent('job_leftovers_stopped', { slug, pids, comms, etimes: oldestEtimes });
+    console.log(`[scheduler] job leftovers stopped: ${slug} pids=${pids.join(',')} comms=${comms.join(',')} oldest=${Math.round(oldestEtimes)}s`);
+  }
+  return leftovers;
+}
+
 /**
  * runQueueHealthSweep(jobs) — read-only reporting pass over the queue
  * snapshot reapDeadRunningJobs already read this cycle. Never transitions a
@@ -8402,6 +8440,8 @@ async function reapDeadRunningJobs() {
       runQueueHealthSweep(state.jobs);
       await runBranchSweep(state.jobs);
     }
+
+    runJobLeftoverSweep().catch((e) => console.warn('[scheduler] job leftover sweep error', e?.message));
 
     if (dead.length === 0) return;
 
@@ -11603,6 +11643,7 @@ module.exports = {
   rescheduleIntervalTick,
   runQueueStarvationWatchdog,
   runStarveEscalationSweep,
+  runJobLeftoverSweep,
   stripAppOwnedChurn,
   BUDGET_WARNING_FRACTION,
   registerScheduleHandlers,

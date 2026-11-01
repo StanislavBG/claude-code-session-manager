@@ -11,6 +11,8 @@ const {
   SWEEP_SLUG_PREFIX,
   MAX_SWEEP_PRDS,
   isSweepValidatorSlug,
+  validatorEstimateMinutes,
+  VALIDATOR_OVERHEAD_MS,
   buildSweepValidatorInput,
 } = require('../epicSweepValidator.cjs');
 
@@ -26,7 +28,7 @@ test('constants', () => {
 
 test('isSweepValidatorSlug', () => {
   expect(isSweepValidatorSlug('validate-sweep-202610160310')).toBe(true);
-  expect(isSweepValidatorSlug('2001-validate-sweep-202610160310')).toBe(true);
+  expect(isSweepValidatorSlug('2001-validate-sweep-20261016031045')).toBe(true);
   expect(isSweepValidatorSlug('validate-campaign-spine')).toBe(false);
   expect(isSweepValidatorSlug(undefined)).toBe(false);
   expect(isSweepValidatorSlug(42)).toBe(false);
@@ -42,9 +44,9 @@ test('builds the input shape', () => {
     gate: ['none'],
     sourcePromptId: 'epic-1',
     cwd: '/proj',
-    slug: 'validate-sweep-202610160310',
+    slug: 'validate-sweep-20261016031045',
     dependsOn: ['prd-0', 'prd-1'],
-    files: ['session-manager-operations/reviews/validation/epic-1/validate-sweep-202610160310.md'],
+    files: ['session-manager-operations/reviews/validation/epic-1/validate-sweep-20261016031045.md'],
   });
   expect(input.slug.length).toBeLessThanOrEqual(60);
   expect(input.title.startsWith('Validate: ')).toBe(true);
@@ -87,4 +89,69 @@ test('no text carries a gate fence or Gate/Files heading', () => {
   expect(text).not.toContain('```gate');
   expect(text).not.toMatch(/# Gate/);
   expect(text).not.toMatch(/# Files/);
+});
+
+const MIN = 60_000;
+const { computeJobBudgetMs } = require('../../../scheduler/budget.cjs');
+const { buildPrdBody } = require('../../prd/prdCreate.cjs');
+const withGate = (n, ms) => entries(n).map((e) => ({ ...e, gateMs: ms }));
+
+test('validatorEstimateMinutes: floor, unknown, zero, factor', () => {
+  expect(VALIDATOR_OVERHEAD_MS).toBe(15 * MIN);
+  expect(validatorEstimateMinutes([], { factor: 3 })).toBe(10);
+  expect(validatorEstimateMinutes([undefined, NaN, -1, 'x'], { factor: 3 })).toBe(12);
+  expect(validatorEstimateMinutes([0, 0], { factor: 1 })).toBe(15);
+  expect(validatorEstimateMinutes([30 * MIN], { factor: 0 })).toBe(15);
+  expect(validatorEstimateMinutes([60 * MIN], { factor: 2 })).toBe(38);
+});
+
+test('short gates keep the 45 minute floor; 92.5 minutes of gates is covered', () => {
+  const { input } = build(withGate(3, 10 * MIN));
+  expect(computeJobBudgetMs(input.estimateMinutes)).toBe(45 * MIN);
+  const big = build(withGate(1, 92.5 * MIN)).input;
+  expect(computeJobBudgetMs(big.estimateMinutes)).toBeGreaterThanOrEqual(107.5 * MIN);
+});
+
+test('first-fit split at the ceiling', () => {
+  const jobBudget = { factor: 3, ceilingMs: 60 * MIN };
+  const at = buildSweepValidatorInput({ epicId: 'e', cwd: '/p', uncovered: [{ slug: '1-a', gateMs: 20 * MIN }, { slug: '2-b', gateMs: 25 * MIN }], now: NOW, jobBudget });
+  expect(at.carried).toEqual([]);
+  expect(at.input.budgetExempt).toBeUndefined();
+  const over = buildSweepValidatorInput({ epicId: 'e', cwd: '/p', uncovered: [{ slug: '1-a', gateMs: 20 * MIN }, { slug: '2-b', gateMs: 25 * MIN + 1 }], now: NOW, jobBudget });
+  expect(over.input.dependsOn).toEqual(['a']);
+  expect(over.carried).toHaveLength(1);
+});
+
+test('draining carried covers every PRD once, each budget covers its work', () => {
+  const jobBudget = { factor: 3, ceilingMs: 60 * MIN };
+  let rest = [10, 30, 30, 5, 40, 20, 20].map((m, i) => ({ slug: `${i}-p${i}`, gateMs: m * MIN }));
+  const seen = [];
+  while (rest.length) {
+    const { input, carried } = buildSweepValidatorInput({ epicId: 'e', cwd: '/p', uncovered: rest, now: NOW, jobBudget });
+    seen.push(...input.dependsOn);
+    expect(computeJobBudgetMs(input.estimateMinutes, jobBudget)).toBeGreaterThanOrEqual(
+      Math.min(60 * MIN, 15 * MIN + rest.slice(0, input.dependsOn.length).reduce((a, e) => a + e.gateMs, 0)));
+    rest = carried;
+  }
+  expect([...seen].sort()).toEqual([0, 1, 2, 3, 4, 5, 6].map((i) => `p${i}`));
+});
+
+test('single oversize PRD is budget-exempt, carrying the others', () => {
+  const { input, carried } = buildSweepValidatorInput({ epicId: 'e', cwd: '/p', uncovered: [{ slug: '1-a', gateMs: 90 * MIN }, { slug: '2-b', gateMs: MIN }], now: NOW, jobBudget: { factor: 2, ceilingMs: 60 * MIN } });
+  expect(input.budgetExempt).toBe(true);
+  expect(carried).toHaveLength(1);
+});
+
+test('MAX_SWEEP_PRDS still caps', () => {
+  const { input, carried } = build(withGate(MAX_SWEEP_PRDS + 2, 0));
+  expect(input.dependsOn).toHaveLength(MAX_SWEEP_PRDS);
+  expect(carried).toHaveLength(2);
+});
+
+test('buildPrdBody writes budgetExempt only for a sweep validator', () => {
+  const base = { title: 't', cwd: '/p', goal: 'g', acceptanceCriteria: ['a'], budgetExempt: true };
+  const sweep = buildPrdBody({ ...base, slug: 'validate-sweep-20261016031045', agentType: 'validator' });
+  expect(sweep).toContain('budgetExempt: true');
+  expect(buildPrdBody({ ...base, slug: 'validate-sweep-1', agentType: 'dev-lead' })).not.toContain('budgetExempt');
+  expect(buildPrdBody({ ...base, slug: 'other', agentType: 'validator' })).not.toContain('budgetExempt');
 });

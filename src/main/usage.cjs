@@ -310,8 +310,10 @@ async function fetchUsage() {
 
 /** Attaches the last good payload (+ its age anchor) to a 429 so callers can keep using it. */
 function withCachedPayload(r) {
-  if (r && r.kind === 'meter_rate_limited' && cache && cache.data) {
-    return { ...r, cached: cache.data, staleSince: cache.fetchedAt };
+  // cache.data is the wrapper { usage, subscriptionType, ... }; meterFailureBudget
+  // needs the inner usage object. No usage object -> attach nothing.
+  if (r && r.kind === 'meter_rate_limited' && cache && cache.data && cache.data.usage) {
+    return { ...r, cached: cache.data.usage, staleSince: cache.fetchedAt };
   }
   return r;
 }

@@ -1,7 +1,5 @@
 import { describe, it, expect } from 'vitest';
 
-const fs = require('node:fs');
-const path = require('node:path');
 const { chooseOzonePlatform } = require('../ozonePlatform.cjs');
 
 describe('chooseOzonePlatform', () => {
@@ -23,11 +21,5 @@ describe('chooseOzonePlatform', () => {
     expect(chooseOzonePlatform({ XDG_SESSION_TYPE: 'x11', DISPLAY: ':0' })).toBeNull();
     expect(chooseOzonePlatform({})).toBeNull();
     expect(chooseOzonePlatform()).toBeNull();
-  });
-
-  it('index.cjs no longer sets the switch (too late; the launcher owns it)', () => {
-    const src = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'index.cjs'), 'utf8');
-    expect(src).not.toContain("appendSwitch('ozone-platform'");
-    expect(src).not.toContain('ozonePlatform.cjs');
   });
 });

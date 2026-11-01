@@ -47,6 +47,11 @@ STABILITY_RUNS=3 timeout 900 npm run test:unit:stability
 `STABILITY_RUNS`-overridable) and exits non-zero listing any test that failed in any run. It is
 dev-only — not in package.json's `files`, never shipped in the npm tarball.
 
+A test that launches a job through `tickQueue` must settle in `afterEach` with
+`settleScheduler` (`tests/helpers/schedulerSettle.cjs`). The job is fire-and-forget: left in flight
+it holds a session slot and its `mutate()` rewrites `queue.json`, overwriting rows the next test
+wrote directly to disk, so the next case sees phantom or missing rows.
+
 When authoring a test that touches real time or spawns child processes, prefer:
 - An injected/frozen clock (`vi.useFakeTimers()` + `vi.setSystemTime()`, or the module's own
   `now`/`nowMs` param) over comparing `Date.now()`/`new Date()` against a real `setTimeout` delay —

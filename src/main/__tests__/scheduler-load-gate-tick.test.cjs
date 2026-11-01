@@ -8,11 +8,14 @@
 
 'use strict';
 
-import { test, expect, beforeAll, afterAll, vi } from 'vitest';
+import { test, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const claudeStub = require('../../../tests/helpers/claudeStub.cjs');
+const { settleScheduler } = require('../../../tests/helpers/schedulerSettle.cjs');
+
+const PRD_BODY = '---\ntitle: Load gate PRD\ncreatedVia: scheduler-api\n---\n\nLoad gate PRD.\n';
 
 let tmpHome;
 let originalHome;
@@ -34,7 +37,7 @@ function makeProject(name) {
 }
 
 function queueOne(proj, slug) {
-  fs.writeFileSync(path.join(proj.prdsDir, `${slug}.md`), 'Load gate PRD.', 'utf8');
+  fs.writeFileSync(path.join(proj.prdsDir, `${slug}.md`), PRD_BODY, 'utf8');
   fs.writeFileSync(proj.queueFile, JSON.stringify({
     jobs: [{ slug, title: slug, status: 'pending', cwd: proj.cwd, dependsOn: [], createdAt: new Date().toISOString() }],
   }));
@@ -91,6 +94,8 @@ function anyRunning() {
   return false;
 }
 
+afterEach(() => settleScheduler({ scheduler, projectsDir: path.join(tmpHome, 'Projects') }));
+
 afterAll(async () => {
   // A stub job may still be finalizing; removing HOME under it prints ENOENT noise.
   for (let i = 0; i < 100 && anyRunning(); i += 1) await new Promise((r) => setTimeout(r, 50));
@@ -132,7 +137,7 @@ test('high loadavg with an idle CPU stands down and fires the batch', async () =
 test('a hold that reaches the yield window launches exactly one of two rows, with one audit row and one toast', async () => {
   const proj = makeProject('yield-proj');
   const slugs = [`9203-yield-a-${process.pid}`, `9203-yield-b-${process.pid}`];
-  for (const slug of slugs) fs.writeFileSync(path.join(proj.prdsDir, `${slug}.md`), 'Load gate PRD.', 'utf8');
+  for (const slug of slugs) fs.writeFileSync(path.join(proj.prdsDir, `${slug}.md`), PRD_BODY, 'utf8');
   fs.writeFileSync(proj.queueFile, JSON.stringify({
     jobs: slugs.map((slug) => ({ slug, title: slug, status: 'pending', cwd: proj.cwd, dependsOn: [], createdAt: new Date().toISOString() })),
   }));
@@ -175,7 +180,7 @@ test('a hold that reaches the yield window launches exactly one of two rows, wit
 test('a saturated hold at the yield window launches nothing, with one audit row and one toast', async () => {
   const proj = makeProject('sat-proj');
   const slugs = [`9206-sat-a-${process.pid}`, `9206-sat-b-${process.pid}`];
-  for (const slug of slugs) fs.writeFileSync(path.join(proj.prdsDir, `${slug}.md`), 'Load gate PRD.', 'utf8');
+  for (const slug of slugs) fs.writeFileSync(path.join(proj.prdsDir, `${slug}.md`), PRD_BODY, 'utf8');
   fs.writeFileSync(proj.queueFile, JSON.stringify({
     jobs: slugs.map((slug) => ({ slug, title: slug, status: 'pending', cwd: proj.cwd, dependsOn: [], createdAt: new Date().toISOString() })),
   }));

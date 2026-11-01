@@ -2477,7 +2477,8 @@ let cancelToken = { cancelled: false };
 let lastMemGate = null;
 // CPU-load launch gate (PRD 1085, lib/scheduler/loadGate.cjs) — innermost launch
 // predicate after pool → project cap → memory. Withholds launches only.
-const loadGate = createLoadGate();
+let loadGate = createLoadGate();
+function _setLoadGateForTests(gate) { loadGate = gate; }
 
 // Last tickQueue outcome, kept for the UI. tickQueue already computes a precise
 // reason for every way a batch can come back empty (dependency holds, slot
@@ -2539,7 +2540,10 @@ function applyPauseCleared(wasPaused, token) {
  */
 function formatLoadGateDetail(load) {
   const heldMinutes = Math.round(load.gatedSinceMs / 60_000);
-  return `CPU load gate: loadavg1 ${load.loadavg1} / ${load.cores} cores = ${load.ratio} > threshold ${load.threshold}, held for ${heldMinutes}m`;
+  const cpu = load.cpuBusy == null
+    ? 'no CPU sample yet'
+    : `CPU ${Math.round(load.cpuBusy * 100)}% busy over ${Math.round(load.cpuWindowMs / 1000)}s`;
+  return `CPU load gate: loadavg1 ${load.loadavg1} / ${load.cores} cores = ${load.ratio} > threshold ${load.threshold}, ${cpu}, held for ${heldMinutes}m`;
 }
 
 function attachWindow(w) { mainWindow = w; }
@@ -7707,6 +7711,9 @@ const STALE_TICK = Object.freeze({ fired: false, reason: 'stale-generation' });
 
 async function tickBody(gen, { bypassLoadGate }) {
   const tickStartedAt = Date.now();
+  // evaluate() only runs once slots and memory admit a batch, so the CPU sampler
+  // needs every tick to keep a reference reading about a minute old.
+  loadGate.observe();
   {
     const stale = () => gen !== tickGeneration;
     const state = await readQueue();
@@ -7885,7 +7892,8 @@ async function tickBody(gen, { bypassLoadGate }) {
     // pickNextBatch → memory above) has already admitted `gatedBatch`. It
     // never touches running jobs and never becomes a second pool: it only
     // withholds this tick's launches while the 1-minute loadavg per core is
-    // over LOAD_GATE_PER_CORE. An explicit human Run now bypasses it.
+    // over LOAD_GATE_PER_CORE AND a real CPU sample does not show the CPU mostly
+    // idle (then it stands down and the batch launches). An explicit human Run now bypasses it.
     const load = loadGate.evaluate({ bypass: bypassLoadGate });
     if (load.bypassed) {
       console.log(`[scheduler] load gate: BYPASSED by run-now (loadavg1=${load.loadavg1} cores=${load.cores} ratio=${load.ratio} > ${load.threshold})`);
@@ -7901,12 +7909,21 @@ async function tickBody(gen, { bypassLoadGate }) {
         appendAuditEvent('launch_load_gated', {
           loadavg1: load.loadavg1, cores: load.cores, ratio: load.ratio, threshold: load.threshold,
           held: gatedBatch.map((j) => j.slug), gatedSinceMs: load.gatedSinceMs,
+          cpuBusy: load.cpuBusy, cpuWindowMs: load.cpuWindowMs,
         });
       }
       return recordTick(
         { fired: false, reason: 'load-deferred', deferredCount: gatedBatch.length, ratio: load.ratio, threshold: load.threshold },
         { detail: formatLoadGateDetail(load), holds },
       );
+    } else if (load.standDown) {
+      console.log(`[scheduler] load gate: stood down — loadavg1=${load.loadavg1} cores=${load.cores} ratio=${load.ratio} > ${load.threshold} but CPU ${Math.round(load.cpuBusy * 100)}% busy over ${Math.round(load.cpuWindowMs / 1000)}s`);
+      if (load.shouldAuditStandDown) {
+        appendAuditEvent('load_gate_stood_down', {
+          loadavg1: load.loadavg1, cores: load.cores, ratio: load.ratio, threshold: load.threshold,
+          cpuBusy: load.cpuBusy, cpuWindowMs: load.cpuWindowMs,
+        });
+      }
     }
 
     await mutate((s) => { s.lastRunAt = new Date().toISOString(); });
@@ -11655,6 +11672,7 @@ module.exports = {
   computeDegradedBudget,
   writeQueue,
   _setPeriodicReverifyEnabledForTests,
+  _setLoadGateForTests,
   _mutateForTests: mutate, // mutate() has no other exported call site; test-only seam.
   reconcile,
   broadcast,

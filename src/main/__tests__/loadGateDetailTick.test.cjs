@@ -20,6 +20,8 @@ test('names the load gate, the measured ratio, the threshold and how long it has
     ratio: 0.951,
     threshold: 0.85,
     gatedSinceMs: 83 * 60_000,
+    cpuBusy: 0.91,
+    cpuWindowMs: 61_000,
   });
 
   expect(detail).toMatch(/load gate/i);
@@ -28,4 +30,22 @@ test('names the load gate, the measured ratio, the threshold and how long it has
   expect(detail).toContain('0.951');
   expect(detail).toContain('0.85');
   expect(detail).toMatch(/83m/);
+});
+
+test('prints the CPU sample when one exists and stays under 200 chars', () => {
+  const detail = formatLoadGateDetail({
+    loadavg1: 13.31, cores: 14, ratio: 0.951, threshold: 0.85, gatedSinceMs: 83 * 60_000,
+    cpuBusy: 0.91, cpuWindowMs: 61_000,
+  });
+  expect(detail).toContain('CPU 91% busy over 61s');
+  expect(detail.length).toBeLessThan(200);
+});
+
+test('says so when there is no CPU sample yet', () => {
+  const detail = formatLoadGateDetail({
+    loadavg1: 13.31, cores: 14, ratio: 0.951, threshold: 0.85, gatedSinceMs: 0,
+    cpuBusy: null, cpuWindowMs: null,
+  });
+  expect(detail).toContain('no CPU sample yet');
+  expect(detail.length).toBeLessThan(200);
 });

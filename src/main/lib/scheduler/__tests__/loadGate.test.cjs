@@ -110,13 +110,17 @@ test('a ps failure (throw) degrades to [] rather than propagating — the audit 
 
 // ─── createLoadGate: decision, 1-minute-only, bypass ───────────────────────
 
-function gateWith({ l1 = 12.95, l5 = 0, l15 = 0, cores = 14, threshold = 0.85, clock }) {
+const NO_CPU = { observe() {}, sample: () => null };
+const cpuAt = (busyFraction) => ({ observe() {}, sample: () => ({ busyFraction, windowMs: 61_000 }) });
+
+function gateWith({ l1 = 12.95, l5 = 0, l15 = 0, cores = 14, threshold = 0.85, clock, cpu = NO_CPU }) {
   let t = clock ?? 0;
   const g = createLoadGate({
     loadavg: () => [l1, l5, l15],
     cores: () => cores,
     now: () => t,
     threshold,
+    cpu,
   });
   return { g, tick: (ms) => { t += ms; } };
 }
@@ -300,4 +304,57 @@ test('the release window actually releases: sustained sub-threshold load past th
   const r = g.evaluate();
   assert.equal(r.gated, false);
   assert.equal(r.gatedSinceMs, 0);
+});
+
+// ─── CPU sample confirmation ───────────────────────────────────────────────
+
+test('high loadavg with an idle CPU stands down', () => {
+  const { g } = gateWith({ cpu: cpuAt(0.13) });
+  const r = g.evaluate();
+  assert.equal(r.gated, false);
+  assert.equal(r.standDown, true);
+  assert.equal(r.cpuBusy, 0.13);
+  assert.equal(r.cpuWindowMs, 61_000);
+  assert.equal(r.shouldAuditStandDown, true);
+  assert.equal(g.evaluate().shouldAuditStandDown, false);
+});
+
+test('high loadavg with a busy CPU keeps holding', () => {
+  const r = gateWith({ cpu: cpuAt(0.91) }).g.evaluate();
+  assert.equal(r.gated, true);
+  assert.equal(r.standDown, false);
+});
+
+test('a 60% busy middle band still holds', () => {
+  const r = gateWith({ cpu: cpuAt(0.6) }).g.evaluate();
+  assert.equal(r.gated, true);
+  assert.equal(r.standDown, false);
+});
+
+test('a null sample keeps the loadavg verdict', () => {
+  const r = gateWith({}).g.evaluate();
+  assert.equal(r.gated, true);
+  assert.equal(r.cpuBusy, null);
+  assert.equal(r.cpuWindowMs, null);
+  assert.equal(r.standDown, false);
+});
+
+test('threshold 0.25 holds at 40% busy (bar is min(threshold, 0.5))', () => {
+  const r = gateWith({ threshold: 0.25, cpu: cpuAt(0.4) }).g.evaluate();
+  assert.equal(r.gated, true);
+  assert.equal(r.standDown, false);
+});
+
+test('observe() feeds the sampler except on win32; snapshot carries the cpu fields', () => {
+  let n = 0;
+  const cpu = { observe() { n++; }, sample: () => null };
+  createLoadGate({ loadavg: () => [1, 0, 0], cores: () => 4, cpu }).observe();
+  createLoadGate({ platform: 'win32', cpu }).observe();
+  assert.equal(n, 1);
+  const w = createLoadGate({ platform: 'win32', cores: () => 4, cpu });
+  const r = w.evaluate();
+  assert.deepEqual([r.cpuBusy, r.cpuWindowMs, r.standDown, r.shouldAuditStandDown], [null, null, false, false]);
+  const { g } = gateWith({ cpu: cpuAt(0.2) });
+  g.evaluate();
+  assert.equal(g.snapshot().standDown, true);
 });

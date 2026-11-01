@@ -120,7 +120,7 @@ test('runStarveEscalationSweep: emits project_starve_escalated exactly once per 
   assert.equal(record.oldestPendingSlug, 'oldest-a');
   assert.equal(record.ageMs, sp.ageMs);
   assert.ok(
-    ['slots-exhausted', 'memory-deferred', 'load-deferred', 'held', 'unknown'].includes(record.holdReason),
+    ['slots-exhausted', 'memory-deferred', 'load-deferred', 'held', 'unknown', 'dependency-blocked', 'launch-blocked', 'dispatching-elsewhere'].includes(record.holdReason),
     `unexpected holdReason: ${record.holdReason}`,
   );
 

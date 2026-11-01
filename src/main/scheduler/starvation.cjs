@@ -6,6 +6,7 @@
 'use strict';
 
 const launchFailure = require('../lib/scheduler/launchFailure.cjs');
+const { findBlockingDep, DEP_HISTORY_FAIL_OPEN } = require('../lib/scheduler/schedulerBatch.cjs');
 const { STARVE_ESCALATION_MS } = require('../lib/scheduler/schedulerConfig.cjs');
 
 /**
@@ -130,6 +131,26 @@ function launchBlockedSlugs(jobs, launchBlocks) {
     if (j && j.status === 'pending' && launchBlocks[launchFailure.launchBlockKeyFor(j)]) out.add(j.slug);
   }
   return out;
+}
+
+/**
+ * describeStarveHold({ projectRows, launchBlocks, lastTick, lastHoldTick }) → string
+ *
+ * Pure. Names the real limiter for a starved project: its own dependency wait,
+ * then a launch breaker, then the last tick's reason (or the last hold carried
+ * past a fired tick). 'unknown' only when the scheduler has not ticked.
+ */
+function describeStarveHold({ projectRows = [], launchBlocks = {}, lastTick = null, lastHoldTick = null } = {}) {
+  const rows = Array.isArray(projectRows) ? projectRows : [];
+  const pending = rows.filter((j) => j && j.status === 'pending');
+  if (pending.length) {
+    if (pending.every((j) => findBlockingDep(j, rows, DEP_HISTORY_FAIL_OPEN))) return 'dependency-blocked';
+    const blocked = launchBlockedSlugs(pending, launchBlocks);
+    if (pending.every((j) => blocked.has(j.slug))) return 'launch-blocked';
+  }
+  if (!lastTick) return 'unknown';
+  if (!lastTick.fired && lastTick.reason) return lastTick.reason;
+  return lastHoldTick?.reason ?? 'dispatching-elsewhere';
 }
 
 /**
@@ -383,6 +404,7 @@ module.exports = {
   STARVE_ESCALATION_MS,
   dispatchIdleMs,
   launchBlockedSlugs,
+  describeStarveHold,
   classifyQueueStarvation,
   classifyQueueStarvationByProject,
   classifyQueueHealth,

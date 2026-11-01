@@ -2487,6 +2487,9 @@ function _setLoadGateForTests(gate) { loadGate = gate; }
 // actually pinned at 1 with nothing on screen explaining why. This is that
 // explanation, recorded once per tick and broadcast with the rest of the state.
 let lastTick = null;
+// Last tick that did NOT fire for a real hold (not already-running/drained); a fired
+// tick stores no reason, so the starve alert reads this to still name the limiter.
+let lastHoldTick = null;
 // Strips the leading '[scheduler] <word> [..]: ' prefix from a tick detail.
 // keepWord=true strips only the '[scheduler] ' tag and keeps '<word>: ' (the
 // heartbeat wants the hold kind, e.g. 'quiet-machine: lease held ...').
@@ -2496,6 +2499,7 @@ function stripTickDetailPrefix(detail, { keepWord = false } = {}) {
 }
 function recordTick(outcome, extra = {}) {
   lastTick = { ...outcome, ...extra, at: new Date().toISOString() };
+  if (!outcome.fired && outcome.reason !== 'already-running' && outcome.reason !== 'drained') lastHoldTick = lastTick;
   return outcome;
 }
 
@@ -8187,12 +8191,13 @@ const starveEscalated = new Set();
  * gate. Exported for direct unit testing (attach a fake window via
  * attachWindow() first to assert the toast send).
  */
-function runStarveEscalationSweep(starvedProjects) {
+function runStarveEscalationSweep(starvedProjects, jobs = [], launchBlocks = {}) {
   const { toEscalate, toClear } = starvation.selectStarveEscalations(starvedProjects, starveEscalated, STARVE_ESCALATION_MS);
   for (const cwd of toClear) starveEscalated.delete(cwd);
   for (const sp of toEscalate) {
     starveEscalated.add(sp.cwd);
-    const holdReason = lastTick?.reason ?? 'unknown';
+    const projectRows = (Array.isArray(jobs) ? jobs : []).filter((j) => j && (j.cwd || DEFAULT_PROJECT_CWD) === sp.cwd);
+    const holdReason = starvation.describeStarveHold({ projectRows, launchBlocks, lastTick, lastHoldTick });
     const mins = Math.round(sp.ageMs / 60_000);
     console.error(
       `[scheduler] PROJECT STARVE ESCALATED: project=${sp.cwd} pending=${sp.pendingCount} oldest=${sp.oldestPendingSlug} `
@@ -10579,7 +10584,7 @@ function rescheduleIntervalTick() {
   // strictly later than STARVATION_ESCALATE_MS, so this only ever fires on
   // a subset of the rows already reported above — same verdict, no
   // re-derivation.
-  runStarveEscalationSweep(starvedProjects);
+  runStarveEscalationSweep(starvedProjects, s.jobs, s.launchBlocks);
 
   // Bounded failed -> pending auto-reset (PRD 1151), plus the stuck-failed
   // escalation now narrowed to only the rows that auto-reset gave up on.

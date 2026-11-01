@@ -161,3 +161,36 @@ test('selectAutoFixTargets: a budget_exceeded needs_review job is excluded — i
   assert.ok(!targets.some((t) => t.slug === '10-budget-victim'));
   assert.ok(targets.some((t) => t.slug === '11-ordinary'));
 });
+
+// ---------- resolveBudgetEstimate / resolveValidatorEstimate ----------
+
+test('resolveBudgetEstimate: explicit wins; else larger of validator/persona; else null', () => {
+  const { resolveBudgetEstimate } = require('../scheduler/budget.cjs');
+  assert.strictEqual(resolveBudgetEstimate({ estimateMinutes: 10, validatorEstimate: 99, personaEstimate: 50 }), 10);
+  assert.strictEqual(resolveBudgetEstimate({ validatorEstimate: 30, personaEstimate: 50 }), 50);
+  assert.strictEqual(resolveBudgetEstimate({ validatorEstimate: 80, personaEstimate: 50 }), 80);
+  assert.strictEqual(resolveBudgetEstimate({ validatorEstimate: null, personaEstimate: undefined }), null);
+  assert.strictEqual(resolveBudgetEstimate({}), null);
+});
+
+test('resolveValidatorEstimate: null for every non-applicable case, never rejects', async () => {
+  const { resolveValidatorEstimate } = require('../scheduler.cjs');
+  let reads = 0;
+  const readGateMs = async () => { reads++; return new Map(); };
+  assert.strictEqual(await resolveValidatorEstimate({ agentType: 'dev-lead', dependsOn: ['a'] }, { readGateMs }), null);
+  assert.strictEqual(await resolveValidatorEstimate({ agentType: 'validator', estimateMinutes: 5, dependsOn: ['a'] }, { readGateMs }), null);
+  assert.strictEqual(await resolveValidatorEstimate({ agentType: 'validator' }, { readGateMs }), null);
+  assert.strictEqual(await resolveValidatorEstimate({ agentType: 'validator', dependsOn: [] }, { readGateMs }), null);
+  assert.strictEqual(reads, 0);
+  const boom = async () => { throw new Error('x'); };
+  assert.strictEqual(await resolveValidatorEstimate({ agentType: 'validator', dependsOn: ['a'] }, { readGateMs: boom }), null);
+});
+
+test('resolveValidatorEstimate: long gates yield a budget covering gates plus 15m', async () => {
+  const { resolveValidatorEstimate } = require('../scheduler.cjs');
+  const gateMs = 40 * 60_000;
+  const readGateMs = async () => new Map([['a', gateMs], ['b', gateMs]]);
+  const est = await resolveValidatorEstimate({ agentType: 'validator', dependsOn: ['a', 'b'], cwd: '/x', epicId: 'e' }, { readGateMs });
+  assert.ok(typeof est === 'number');
+  assert.ok(computeJobBudgetMs(est) >= 2 * gateMs + 15 * 60_000);
+});

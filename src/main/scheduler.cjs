@@ -100,6 +100,7 @@ const prdParser = require('./scheduler/prdParser.cjs');
 const reviewLadder = require('./scheduler/reviewLadder.cjs');
 const starvation = require('./scheduler/starvation.cjs');
 const budget = require('./scheduler/budget.cjs');
+const { validatorEstimateMinutes } = require('./lib/epic/epicSweepValidator.cjs');
 const gitTreeGuard = require('./scheduler/gitTreeGuard.cjs');
 const prdPaths = require('./scheduler/prdPaths.cjs');
 const sessionsStore = require('./sessionsStore.cjs');
@@ -3311,6 +3312,23 @@ async function readValidatorGateMs(cwd, epicId, slugs) {
   return out;
 }
 
+/**
+ * resolveValidatorEstimate(job) → number | null — sizes a planner-written
+ * validator (no estimateMinutes) from its dependsOn PRDs' gate timeouts.
+ * Never rejects.
+ */
+async function resolveValidatorEstimate(job, { readGateMs = readValidatorGateMs } = {}) {
+  try {
+    if (!job || job.agentType !== 'validator' || job.estimateMinutes != null) return null;
+    if (!Array.isArray(job.dependsOn) || job.dependsOn.length === 0) return null;
+    const gateMap = await readGateMs(job.cwd, job.epicId || job.sourcePromptId, job.dependsOn);
+    const values = job.dependsOn.map((slug) => (gateMap && typeof gateMap.get === 'function' ? gateMap.get(slug) : undefined));
+    return validatorEstimateMinutes(values, { factor: budget.JOB_BUDGET_FACTOR });
+  } catch {
+    return null;
+  }
+}
+
 function defaultScheduleSettle({ cwd, epicId }) {
   const deps = {
     loadJobs: async () => (await readQueue()).jobs || [],
@@ -4791,6 +4809,8 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
   await ensureCliCapsProbed();
   await ensureTimeoutShimOnce();
 
+  const validatorEstimate = await resolveValidatorEstimate(job);
+
   return await new Promise((resolve) => {
     const claudeBin = resolveClaudeBin();
     // Strip Claude Code env and secrets that leak in when session-manager is
@@ -4935,8 +4955,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
     // is calibrated against). Only a PRD with an
     // explicit `budgetExempt: true` opts out entirely — logged once here so
     // an unbounded job is never silently unbounded.
-    const jobBudgetMs = budget.computeJobBudgetMs(
-      job.estimateMinutes ?? resolvePersonaDefaultEstimate(job.cwd, job.agentType || DEFAULT_PRD_AGENT_TYPE));
+    const budgetEstimate = budget.resolveBudgetEstimate({
+      estimateMinutes: job.estimateMinutes,
+      validatorEstimate,
+      personaEstimate: job.estimateMinutes != null ? null : resolvePersonaDefaultEstimate(job.cwd, job.agentType || DEFAULT_PRD_AGENT_TYPE),
+    });
+    const jobBudgetMs = budget.computeJobBudgetMs(budgetEstimate);
     const budgetExempt = budget.isJobBudgetExempt(job);
     if (budgetExempt) {
       safeLog(`[scheduler] wall-clock budget watchdog EXEMPT for ${job.slug} ` +
@@ -4966,7 +4990,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
       action(ctx) {
         const elapsedMs = Date.now() - ctx.startedAt;
         ctx.safeLog(`\n[scheduler] wall-clock budget watchdog: ran ${Math.round(elapsedMs / 60_000)}m ` +
-          `(> ${Math.round(jobBudgetMs / 60_000)}m budget, estimateMinutes=${job.estimateMinutes ?? 0}) — SIGTERM process group\n`);
+          `(> ${Math.round(jobBudgetMs / 60_000)}m budget, estimateMinutes=${budgetEstimate ?? 0}) — SIGTERM process group\n`);
         ctx.killedByWatchdog = 'budget';
         ctx.killTree('SIGTERM');
         const budgetKillTimer = setTimeout(() => {
@@ -5098,7 +5122,7 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         // resolveBudgetKillOutcome's own header for why this is gated on
         // killedBySignal, not on killedByWatchdog alone.
         const budgetKillOutcome = budget.resolveBudgetKillOutcome({
-          killedByWatchdog, killedBySignal, durationMs, jobBudgetMs, estimateMinutes: job.estimateMinutes,
+          killedByWatchdog, killedBySignal, durationMs, jobBudgetMs, estimateMinutes: budgetEstimate,
         });
         const { budgetKillReason } = budgetKillOutcome;
         const effectiveKilledByWatchdog = budgetKillOutcome.killedByWatchdog;
@@ -11758,6 +11782,7 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
 
 module.exports = {
   readValidatorGateMs,
+  resolveValidatorEstimate,
   planJobScope,
   finalizeJobScope,
   sampleJobScope,

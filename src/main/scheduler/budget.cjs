@@ -241,6 +241,16 @@ function shouldKillForBudget(elapsedMs, budgetMs) {
 }
 
 /**
+ * resolveBudgetEstimate({ estimateMinutes, validatorEstimate, personaEstimate }) → number | null
+ * An explicit estimate wins; otherwise the larger of the validator-derived and
+ * persona-default estimates (persona stays a lower bound); null if neither.
+ */
+function resolveBudgetEstimate({ estimateMinutes, validatorEstimate, personaEstimate } = {}) {
+  if (estimateMinutes != null) return estimateMinutes;
+  return Math.max(validatorEstimate ?? 0, personaEstimate ?? 0) || null;
+}
+
+/**
  * resolveBudgetKillOutcome({ killedByWatchdog, killedBySignal, durationMs, jobBudgetMs, estimateMinutes })
  *   → { killedByWatchdog: 'budget'|null, budgetKillReason: string|null }
  *
@@ -591,6 +601,7 @@ module.exports = {
   isJobBudgetExempt,
   shouldKillForBudget,
   resolveBudgetKillOutcome,
+  resolveBudgetEstimate,
   findStrandedInvestigations,
   computeDepHistorySatisfaction,
 };

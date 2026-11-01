@@ -144,6 +144,29 @@ unbroken 07:00→13:06). The slot pool and memory gate — the guards for real e
 NOT bypassed and still bound the forced batch; only the advisory CPU-headroom gate is skipped,
 exactly as a human Run-now (§2) skips it.
 
+### The CPU load gate (`lib/scheduler/loadGate.cjs`)
+
+Runs last in the gate order (slots → per-project cap → memory → load) and only withholds launches.
+The decision: **hold when `loadavg1` per core is over `LOAD_GATE_PER_CORE`, unless a CPU sample of
+about a minute (`cpuSample.cjs`) shows the machine under half busy** (`MOSTLY_IDLE_BUSY = 0.5`).
+`loadavg` counts D-state tasks and short bursts, so it can read high on an idle CPU. **No sample
+means loadavg decides** — a broken reader must never disable the gate.
+
+`iowait` and `nice` both count as busy. iowait: a disk-saturated machine is not spare capacity.
+nice: every Session Manager process runs at nice 12, so nice is the largest column on this box;
+leaving it out would read a fully loaded machine as idle.
+
+Limit: after a 45-minute hold (`JOB_OVERRUN_FLOOR_MS`) in which slots and memory were free, one job
+goes through anyway, with a `load_gate_yielded` audit row and a toast.
+
+**Reading a hold.** A heartbeat's `dispatch.lastTickReason` is the LAST tick only, and a gap in
+gated ticks means slots or memory was the limiter. To size a hold, count heartbeats per reason over
+the window. Example, 2026-10-31 18:01-18:55 PDT: detail said `held for 53m`, but of 54 heartbeats
+`slots-exhausted` was 29, `memory-deferred` 13, `load-deferred` 11, the longest unbroken
+`load-deferred` run was 6 minutes, and 7 jobs launched. The 53 minutes was a clock, not a hold.
+`loadRatio` from `health.cjs` is the raw loadavg figure with no CPU sample behind it, so it can
+read over threshold while the gate stands down.
+
 ## 4. The `needs_review` recovery ladder
 
 Six named rungs, defined once as the closed set `LADDER_RUNGS`
@@ -261,6 +284,7 @@ human clears it via Resume/Run now.
 | `rate_limit` pause to the weekly reset while `billing-cache.json` shows usage well below threshold | The run log for a `rate_limit_event` with `status "rejected"` — none means the pause was spurious | Pre-fix substring detection treated `allowed` events as rejections (2026-10-11, 4-day pause at 58% weekly). Resume via the Scheduler Resume button or `scheduler_resume` |
 | A row stays `running` for hours, its `runtime.pid` is not a claude process or is shared by two rows | `/proc/<pid>/cmdline` argv[0], and the audit-log `job_pid_recovered_by_liveness_scan` event for that slug | `scheduler_cancel_job` then `scheduler_reset_job`. Since the fix, liveness requires a claude argv[0] and a run log, and a pid is never adopted twice |
 | A process from a finished job is still running | `SM_SCHEDULER_JOB_SLUG` in `/proc/<pid>/environ` names the finished job's slug; `job_leftovers_stopped` entries in `audit-log.jsonl` show what the stops already caught | Three layers stop it (`jobLeftovers.cjs`): the process-group sweep at job exit, the job scope stop on systemd, and the 5-minute leftover sweep on Linux. macOS has only the group sweep. A survivor means a layer did not run (app older than the fix, no systemd) — kill it by hand; a PRD that needs a daemon must use a service manager, not `nohup` or `&` |
+| `lastTickReason` `load-deferred`; detail reads `CPU load gate: loadavg1 … = ratio > threshold, CPU N% busy over Ms (or no CPU sample yet), held Nm with slots and memory free` | The detail's CPU figure is the ~1-minute sample (`cpuBusy`); under 50% busy the gate stands down, `no CPU sample yet` means loadavg decided. `held Nm with slots and memory free` counts only time THIS gate held a batch that slots and memory admitted (each gated tick credits at most 2 min), not wall-clock since the last launch. Audit kinds in `audit-log.jsonl`: `launch_load_gated` (held, rate-limited to one per 10 min), `load_gate_stood_down` (loadavg high, CPU sample mostly idle, launch allowed), `load_gate_yielded` (45-min limit, one job let through) | **Automatic** — releases when loadavg falls, the sample shows idle, or the 45-min limit yields. Size a hold by counting heartbeats per `lastTickReason` (see §3), not from the detail's minutes |
 | Every project pending, nothing dispatching, `lastTickReason` `held` | Heartbeat `dispatch.lastTickDetail` (quiet-machine lease, untracked running rows, `dependsOn` hold) | A quiet-machine lease releases when its job ends; it is meant only for timing-measurement PRDs |
 | Epic got no PLAN SETTLED digest | Whether the app restarted inside the settle window (`SM_EPIC_SETTLE_SECONDS`, default 120) after the Epic's last terminal check-in; the timer is in memory | The next terminal check-in re-arms it. Also check `SM_EPIC_VALIDATION_DISABLE` is not set |
 

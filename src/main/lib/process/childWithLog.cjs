@@ -21,7 +21,7 @@
  *       shouldFire(ctx) returns true, then calls action(ctx).
  *     - action() may call ctx.addTimer(t) to register secondary timers
  *       (e.g. SIGTERM → SIGKILL cascades) so they are also cleared on exit.
- *   Calls onExit() inside the child 'exit'/'error' handler,
+ *   Calls onExit() synchronously inside the child 'exit'/'error' handler,
  *   before calling closeFd(). Caller may call ctx.safeLog() inside onExit.
  *
  * WatchdogContext:
@@ -40,10 +40,7 @@
  *   killedByWatchdog — string | null
  *   error         — Error | undefined (child 'error' event or sync spawn throw)
  *   spawnFailed   — boolean, true when the error came from a synchronous spawn throw
- *   leakedDescendants — { pid, pcpu, etimes, comm }[], the process-group survivors
- *                       sweepChildProcessGroup found still alive right before it
- *                       swept them. [] in the normal case (nothing leaked, or
- *                       non-Linux, or enumeration failed). See sweepChildProcessGroup.
+ *   pid           — number | null, the child pid (null when spawn threw)
  *   safeLog       — same safeLog (usable inside onExit for final log lines)
  *
  * Returns { child, cancel } where cancel() clears all timers + SIGKILLs.
@@ -51,12 +48,9 @@
  */
 
 const fs = require('node:fs');
-const { spawn, execFile } = require('node:child_process');
+const { spawn } = require('node:child_process');
 const { killTree } = require('./killTree.cjs');
 const { feedChildStdin } = require('./childStdin.cjs');
-
-// Injectable for tests (enumeration-failure coverage).
-const deps = { execFile };
 
 // Grace period between the post-exit SIGTERM sweep and the follow-up SIGKILL
 // sweep of a detached child's process group. See sweepChildProcessGroup below.
@@ -145,65 +139,24 @@ function openLog(logPath) {
 // a job's descendants must not outlive the job. Killing the job's own process
 // group at the job's own exit is ownership-based and needs no /proc heuristics
 // to distinguish an abandoned descendant from a live one.
-// Enumerate the still-alive members of process group `pgid` (Linux only).
-// Read-only — never throws, never blocks the caller's exit path. Used to
-// report what sweepChildProcessGroup is about to kill, since the kill itself
-// is silent (ESRCH on the normal empty-group case).
-// Async: resolves to the survivors list, rejects on ps failure/timeout. O(P) in
-// the process table, off the main event loop.
-function enumerateProcessGroupSurvivors(pgid) {
-  // ps -eo is Linux-only; on win32 (and macOS) report the empty/unknown result without spawning ps.
-  if (process.platform !== 'linux') return Promise.resolve([]);
-  if (!pgid || pgid <= 1) return Promise.resolve([]);
-  return new Promise((resolve, reject) => {
-    try {
-      deps.execFile('ps', ['-eo', 'pid,pgrp,pcpu,etimes,comm'], { encoding: 'utf8', timeout: 2000 }, (err, out) => {
-        if (err) { reject(err); return; }
-        const survivors = [];
-        for (const line of String(out).split('\n').slice(1)) {
-          const m = line.trim().match(/^(\d+)\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(.+)$/);
-          if (!m) continue;
-          const [, pidStr, pgrpStr, pcpuStr, etimesStr, comm] = m;
-          if (Number(pgrpStr) !== pgid) continue;
-          survivors.push({ pid: Number(pidStr), pcpu: Number(pcpuStr), etimes: Number(etimesStr), comm });
-        }
-        resolve(survivors);
-      });
-    } catch (e) { reject(e); }
-  });
-}
-
-// Returns null when there is nothing to enumerate/sweep (non-detached, missing or
-// invalid pid, our own group) so the caller can finish synchronously. Otherwise
-// returns a promise for the leaked descendants: enumeration runs FIRST so the
-// report reflects what the sweep is about to reap, and SIGTERM (+ the delayed
-// SIGKILL) is issued only once it has SETTLED — resolved or rejected. The 2 s ps
-// timeout bounds that wait. The promise never rejects: a failed enumeration
-// resolves [] after a safeLog line, and the group is still killed.
-function sweepChildProcessGroup(child, detached, safeLog) {
-  if (!detached) return null;
-  if (!child || !child.pid || child.pid <= 1) return null;
+// Synchronous and fire-and-forget: SIGTERM now, SIGKILL after the grace period.
+// What escaped the group is reported by the job-marker scan (jobLeftovers), not here.
+// No-op when there is nothing to sweep (non-detached, missing or invalid pid, our
+// own group, win32).
+function sweepChildProcessGroup(child, detached) {
+  if (!detached) return;
+  if (!child || !child.pid || child.pid <= 1) return;
   // Defensive: never target the Session Manager process's own group.
-  if (child.pid === process.pid) return null;
+  if (child.pid === process.pid) return;
   // win32 has no process groups; taskkill on an already-exited pid risks hitting a reused pid.
-  if (process.platform === 'win32') return null;
+  if (process.platform === 'win32') return;
 
   const pid = child.pid;
-  const kill = () => {
-    killTree(pid, 'SIGTERM'); // ESRCH on an empty group is the normal case
-    const t = setTimeout(() => {
-      killTree(pid, 'SIGKILL');
-    }, POST_EXIT_GROUP_SWEEP_GRACE_MS);
-    if (t.unref) t.unref();
-  };
-
-  return enumerateProcessGroupSurvivors(pid)
-    .then((all) => all.filter((p) => p.pid !== pid))
-    .catch((e) => {
-      safeLog(`[childWithLog] process-group enumeration failed; leak report omitted: ${e && e.message}\n`);
-      return [];
-    })
-    .then((leaked) => { kill(); return leaked; });
+  killTree(pid, 'SIGTERM'); // ESRCH on an empty group is the normal case
+  const t = setTimeout(() => {
+    killTree(pid, 'SIGKILL');
+  }, POST_EXIT_GROUP_SWEEP_GRACE_MS);
+  if (t.unref) t.unref();
 }
 
 /**
@@ -272,37 +225,27 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
   // calls onExit (caller may still safeLog inside), then closes the fd.
   const handleDone = (exitCode, signal, error, spawnFailed) => {
     clearAllTimers();
-    const finish = (leakedDescendants) => {
-      try {
-        if (onExit) {
-          onExit({
-            exitCode,
-            signal: signal ?? null,
-            killedByWatchdog: ctx.killedByWatchdog,
-            error,
-            spawnFailed: spawnFailed ?? false,
-            leakedDescendants,
-            safeLog,
-          });
-        }
-      } catch (e) {
-        // Log while the fd is still open (closeFd below makes safeLog a no-op),
-        // then rethrow: sync callers see the throw as before PRD 1353; the
-        // deferred path contains it below.
-        const stack = e && e.stack ? String(e.stack).split('\n').slice(0, 3).join('\n') : '';
-        safeLog(`[childWithLog] onExit threw: ${e && e.message}${stack ? `\n${stack}` : ''}\n`);
-        throw e;
-      } finally {
-        closeFd();
+    sweepChildProcessGroup(ctx.child, !!spawnSpec.options?.detached);
+    try {
+      if (onExit) {
+        onExit({
+          exitCode,
+          signal: signal ?? null,
+          killedByWatchdog: ctx.killedByWatchdog,
+          error,
+          spawnFailed: spawnFailed ?? false,
+          pid: ctx.child && ctx.child.pid ? ctx.child.pid : null,
+          safeLog,
+        });
       }
-    };
-    const pending = sweepChildProcessGroup(ctx.child, !!spawnSpec.options?.detached, safeLog);
-    // Nothing to enumerate: stay synchronous. Otherwise onExit + closeFd wait
-    // (bounded by the 2 s ps timeout) for the leak report; a throwing onExit
-    // must not become an unhandled rejection.
-    if (!pending) { finish([]); return; }
-    // finish() already logged the throw and closed the fd; just contain it.
-    pending.then(finish).catch(() => {});
+    } catch (e) {
+      // Log while the fd is still open (closeFd below makes safeLog a no-op), then rethrow.
+      const stack = e && e.stack ? String(e.stack).split('\n').slice(0, 3).join('\n') : '';
+      safeLog(`[childWithLog] onExit threw: ${e && e.message}${stack ? `\n${stack}` : ''}\n`);
+      throw e;
+    } finally {
+      closeFd();
+    }
   };
 
   // Attempt synchronous spawn. On failure, call handleDone immediately so the
@@ -337,4 +280,4 @@ function withChildAndLog({ fd, logPath, safeLog, closeFd, spawn: spawnSpec, watc
   return { child, cancel };
 }
 
-module.exports = { openLog, withChildAndLog, POST_EXIT_GROUP_SWEEP_GRACE_MS, _deps: deps };
+module.exports = { openLog, withChildAndLog, POST_EXIT_GROUP_SWEEP_GRACE_MS };

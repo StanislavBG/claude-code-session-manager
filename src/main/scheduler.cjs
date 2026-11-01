@@ -4984,12 +4984,12 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         },
       },
       watchdogs: [resultTailWatchdog, deadmanWatchdog, idleTailWatchdog, budgetWatchdog],
-      onExit({ exitCode, signal, killedByWatchdog, error, spawnFailed, leakedDescendants, safeLog: sl }) {
+      onExit({ exitCode, signal, killedByWatchdog, error, spawnFailed, pid, safeLog: sl }) {
+        const leaked = jobLeftovers.listJobSurvivors(job.slug, pid);
         const durationMs = Date.now() - startedAt;
-        const leaked = leakedDescendants ?? [];
         finalizeJobScope(scopeState, sl);
         if (leaked.length > 0) {
-          sl(`\n[scheduler] leaked ${leaked.length} descendant(s) swept from job process group: ` +
+          sl(`\n[scheduler] leaked ${leaked.length} descendant(s) left behind after the job exited: ` +
             `${leaked.map((p) => `pid=${p.pid} comm=${p.comm} pcpu=${p.pcpu} etimes=${p.etimes}s`).join(', ')}\n`);
         }
 

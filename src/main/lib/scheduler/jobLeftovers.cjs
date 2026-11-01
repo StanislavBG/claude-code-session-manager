@@ -189,4 +189,16 @@ function stopLeftovers(procs, {
   return signalled;
 }
 
-module.exports = { scanJobProcesses, selectLeftovers, stopLeftovers, LEFTOVER_GRACE_MS };
+/**
+ * listJobSurvivors(slug, pid, opts) — every scanned process carrying the job's
+ * SM_SCHEDULER_JOB_SLUG marker except `pid` itself, whatever its process group or
+ * session. opts is passed to scanJobProcesses (injectable fs/procRoot/platform).
+ */
+function listJobSurvivors(slug, pid, opts) {
+  const { procs } = scanJobProcesses(opts);
+  return procs
+    .filter((p) => p.slug === slug && p.pid !== pid)
+    .map((p) => ({ pid: p.pid, pcpu: Math.round(p.pcpu * 10) / 10, etimes: Math.round(p.etimes), comm: p.comm }));
+}
+
+module.exports = { scanJobProcesses, listJobSurvivors, selectLeftovers, stopLeftovers, LEFTOVER_GRACE_MS };

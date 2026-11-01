@@ -244,7 +244,7 @@ describe.skipIf(!HAS_PROC)('real aliased processes vs the reaper gates', () => {
     process.kill(-child.pid, 'SIGTERM');
     await waitFor(() => exit);
     expect(exit.signal).toBe('SIGTERM');
-    expect(exit.leakedDescendants).toEqual([]);
+    expect(exit.pid).toBe(child.pid);
   });
 });
 

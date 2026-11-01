@@ -243,3 +243,28 @@ test('NOT reported (but warned) when the pending rows carry no provable enqueue 
     console.warn = orig;
   }
 });
+
+const oldRow = () => [
+  job('158-a', 'running', A),
+  job('3887-b', 'pending', B, { queuedAt: new Date(NOW - 3 * H).toISOString() }),
+];
+
+test('NOT reported when the project dispatched 5 minutes ago, despite a 3h-old pending row', () => {
+  const stamps = { [B]: new Date(NOW - 5 * 60_000).toISOString() };
+  assert.deepEqual(findStarvedProjects(oldRow(), NOW, 45 * 60_000, stamps), []);
+});
+
+test('reported with ageMs since the dispatch when the last dispatch was 2h ago', () => {
+  const stamps = { [B]: new Date(NOW - 2 * H).toISOString() };
+  const out = findStarvedProjects(oldRow(), NOW, 45 * 60_000, stamps);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].ageMs, 2 * H);
+});
+
+test('missing or unparseable stamp is no dispatch: reported with the row age', () => {
+  for (const stamps of [{}, { [B]: 'garbage' }]) {
+    const out = findStarvedProjects(oldRow(), NOW, 45 * 60_000, stamps);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].ageMs, 3 * H);
+  }
+});

@@ -672,7 +672,7 @@ function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
 }
 
 /**
- * findStarvedProjects(jobs, now, thresholdMs) → [{ cwd, pendingCount, oldestPendingSlug, ageMs }]
+ * findStarvedProjects(jobs, now, thresholdMs, lastDispatchAtByCwd = {}) → [{ cwd, pendingCount, oldestPendingSlug, ageMs }]
  *
  * PRD 1087 — the escalation counterpart to the fairness rule above. A project
  * is STARVED when it has pending work, nothing of its own running, its oldest
@@ -680,12 +680,17 @@ function pickNextBatch(allJobs, running, freeSlots, quietOpts = {}) {
  * project currently has a running job (so the machine is dispatching, just
  * not for this project — an idle or paused machine is not starvation).
  *
+ * ageMs is now minus the LATER of the oldest pending row's enqueue time and
+ * the project's last dispatch (lastDispatchAtByCwd[cwd], ISO stamp; missing or
+ * unparseable = no dispatch), so a project draining a long queue is not
+ * starved in the gap between two jobs.
+ *
  * Pure and escalation-only: never mutates, reorders or dispatches. A pending
  * row whose age cannot be proven (no enqueue timestamp — see
  * enqueueTimestamp) is warn-logged and NOT reported, the same posture as
  * findStrandedInvestigations.
  */
-function findStarvedProjects(jobs, now, thresholdMs) {
+function findStarvedProjects(jobs, now, thresholdMs, lastDispatchAtByCwd = {}) {
   const byCwd = new Map();
   for (const j of jobs ?? []) {
     const key = j.cwd || DEFAULT_PROJECT_CWD;
@@ -713,7 +718,9 @@ function findStarvedProjects(jobs, now, thresholdMs) {
       console.warn(`[scheduler] findStarvedProjects: ${cwd} has ${pending.length} pending job(s) with no enqueue timestamp — cannot prove age, leaving alone`);
       continue;
     }
-    const ageMs = now - oldestMs;
+    const stamp = lastDispatchAtByCwd && typeof lastDispatchAtByCwd === 'object' ? Date.parse(lastDispatchAtByCwd[cwd]) : NaN;
+    const sinceMs = Number.isNaN(stamp) ? oldestMs : Math.max(oldestMs, stamp);
+    const ageMs = now - sinceMs;
     if (ageMs < thresholdMs) continue;
     out.push({ cwd, pendingCount: pending.length, oldestPendingSlug: oldest.slug, ageMs, unprovable });
   }

@@ -8203,7 +8203,7 @@ function runStarveEscalationSweep(starvedProjects) {
       cwd: sp.cwd, pendingCount: sp.pendingCount, oldestPendingSlug: sp.oldestPendingSlug, ageMs: sp.ageMs, holdReason,
     });
     sendIfAlive(mainWindow, 'schedule:stall', {
-      message: `Project starved: ${sp.cwd} has ${sp.pendingCount} pending PRD(s), oldest waiting ~${mins}m `
+      message: `Project starved: ${sp.cwd} has ${sp.pendingCount} pending PRD(s), no dispatch for ~${mins}m `
         + `(hold reason: ${holdReason}) — check the Scheduler tab.`,
       total: sp.pendingCount,
       byProject: { [sp.cwd]: { starved: sp.pendingCount } },
@@ -10564,7 +10564,7 @@ function rescheduleIntervalTick() {
   // else distinguishes "no pending work" from "pending work, never
   // started" — the 2026-09-01 NN-ordering starvation ran 3.5 h unnoticed.
   // Escalation only, same shape as the quarantine/overrun warnings above.
-  const starvedProjects = findStarvedProjects(s.jobs, Date.now(), STARVATION_ESCALATE_MS);
+  const starvedProjects = findStarvedProjects(s.jobs, Date.now(), STARVATION_ESCALATE_MS, s.lastDispatchAtByCwd);
   for (const sp of starvedProjects) {
     console.warn(
       `[scheduler] PROJECT STARVED: project=${sp.cwd} pending=${sp.pendingCount} oldest=${sp.oldestPendingSlug} `

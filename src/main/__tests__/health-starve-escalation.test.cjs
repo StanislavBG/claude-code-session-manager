@@ -92,3 +92,13 @@ test('latestStarveEscalationReasons reads the LAST recorded holdReason per cwd f
 test('latestStarveEscalationReasons returns {} for a missing audit log, never a throw', () => {
   expect(latestStarveEscalationReasons('/nonexistent/path/audit-log.jsonl')).toEqual({});
 });
+
+test('a recent dispatch stamp keeps a long-pending project GREEN in health', () => {
+  const allJobs = [
+    { slug: 'a', cwd: CWD, status: 'pending', createdAt: new Date(idleFor(STARVE_ESCALATION_MS * 3)).toISOString() },
+    { slug: 'other', cwd: '/home/bilko/Projects/other', status: 'running' },
+  ];
+  const stamps = { [CWD]: new Date(idleFor(5 * 60_000)).toISOString() };
+  const result = evaluateStarveEscalationHealth(allJobs, NOW, STARVE_ESCALATION_MS, {}, stamps);
+  expect(result.ok).toBe(true);
+});

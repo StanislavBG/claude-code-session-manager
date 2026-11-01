@@ -762,8 +762,8 @@ function evaluateCredentialHealth({ credState, now = Date.now() } = {}) {
  * latestStarveEscalationReasons); a cwd with no recorded reason yet reports
  * 'unknown' rather than failing.
  */
-function evaluateStarveEscalationHealth(jobs, now, thresholdMs, escalationReasons = {}) {
-  const starved = findStarvedProjects(jobs, now, thresholdMs);
+function evaluateStarveEscalationHealth(jobs, now, thresholdMs, escalationReasons = {}, lastDispatchAtByCwd = {}) {
+  const starved = findStarvedProjects(jobs, now, thresholdMs, lastDispatchAtByCwd);
   if (starved.length === 0) return { ok: true };
   const projects = starved.map((sp) => ({
     cwd: sp.cwd,
@@ -1066,6 +1066,7 @@ async function check(opts = {}) {
     // the exact condition the 2026-09-12 19h Bilko starve went unreported by.
     status.components.project_starve_escalation = evaluateStarveEscalationHealth(
       queueState.jobs, now, STARVE_ESCALATION_MS, latestStarveEscalationReasons(auditLogPath()),
+      queueState.lastDispatchAtByCwd,
     );
     if (!status.components.project_starve_escalation.ok) {
       status.issues.push(status.components.project_starve_escalation.message);

@@ -15,6 +15,8 @@ export function queueConstraintLabel(
       return lastTick.detail ?? 'CPU load gate holding'
     case 'slots-exhausted':
       return `all ${total} slots busy — ${lastTick.deferredCount ?? pending} pending`
+    case 'usage-meter-degraded':
+      return lastTick.detail ?? 'usage meter down: running capped'
     case 'held': {
       const n = lastTick.holds?.length ?? 0
       return n > 0

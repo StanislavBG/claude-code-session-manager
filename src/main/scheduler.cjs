@@ -7793,10 +7793,18 @@ async function tickBody(gen, { bypassLoadGate }) {
     if (batch.length === 0 && freeSlots === 0) {
       const snap = sessionSlots.snapshot();
       const pendingCount = state.jobs.filter((j) => j.status === 'pending').length;
-      console.log(`[scheduler] slot gate: 0 of ${snap.total} session slots free (${snap.holders.map((h) => h.owner).join(', ')}) — deferring ${pendingCount} pending job(s)`);
+      const hold = budget.describeSlotHold({
+        total: snap.total,
+        inUse: snap.inUse,
+        holders: snap.holders,
+        degradedCap: degradedConcurrencyCapValue,
+        running: runningSet.size,
+        deferredCount: pendingCount,
+      });
+      console.log(`[scheduler] slot gate: ${hold.reason} — ${hold.detail} — deferring ${pendingCount} pending job(s)`);
       return recordTick(
-        { fired: false, reason: 'slots-exhausted', deferredCount: pendingCount, holders: snap.holders },
-        { detail: `${snap.total} of ${snap.total} session slots busy (${snap.holders.map((h) => h.owner).join(', ')})`, holds },
+        { fired: false, reason: hold.reason, deferredCount: pendingCount, holders: snap.holders },
+        { detail: hold.detail, holds },
       );
     }
     if (batch.length === 0) {
@@ -7984,6 +7992,8 @@ function forceTickOutcome(result) {
       return { ok: true, kind: 'warn', message: `Deferred ${result.deferredCount} job(s) — low memory (${result.availableMb} MB available, need ${result.threshold} MB)` };
     case 'slots-exhausted':
       return { ok: true, kind: 'warn', message: `Deferred ${result.deferredCount} job(s) — all session slots in use (${(result.holders ?? []).map((h) => h.owner).join(', ')})` };
+    case 'usage-meter-degraded':
+      return { ok: true, kind: 'warn', message: `Deferred ${result.deferredCount} job(s) — usage meter cap held them (${stripTickDetailPrefix(result.detail) || 'meter degraded'})` };
     case 'held': {
       const detail = stripTickDetailPrefix(result.detail);
       return { ok: true, kind: 'warn', message: detail || 'Batch held' };

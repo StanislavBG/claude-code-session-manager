@@ -544,7 +544,27 @@ function selectLeftoverQuarantineTarget(job) {
   return { slug: job.slug, cwd: job.cwd, paths };
 }
 
+/**
+ * Why a tick found zero free slots. Pure. A degraded usage-meter cap that
+ * binds while the pool still has room is its own reason; a truly full pool
+ * stays 'slots-exhausted' even when the meter is also degraded.
+ */
+function describeSlotHold({ total, inUse, holders = [], degradedCap = null, running = 0, deferredCount = 0 } = {}) {
+  if (degradedCap != null && inUse < total) {
+    return {
+      reason: 'usage-meter-degraded',
+      detail: `usage meter down: running capped at ${degradedCap} (${running} running, ${inUse} of ${total} slots in use)`,
+    };
+  }
+  const owners = (holders || []).map((h) => h.owner).join(', ');
+  return {
+    reason: 'slots-exhausted',
+    detail: `${inUse} of ${total} session slots busy${owners ? ` (${owners})` : ''}`,
+  };
+}
+
 module.exports = {
+  describeSlotHold,
   BACKOFF_MAX_MS,
   FAILURE_STREAK_WARN_THRESHOLD,
   FAILURE_STREAK_ESCALATION_MS,

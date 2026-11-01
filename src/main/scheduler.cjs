@@ -3350,6 +3350,29 @@ function defaultScheduleSettle({ cwd, epicId }) {
 }
 
 /**
+ * armSettleAfterValidatorBudgetKill(job, { scheduleSettle }) → boolean
+ *
+ * A park never arms the settle (isNotifiableTerminalStatus excludes
+ * needs_review), budget_exceeded is excluded from the review heal ladder, and
+ * a split's carried PRDs only move on a settle — so a budget-killed validator
+ * would strand them with no digest. Arms the settle for that one case only
+ * (validator + budget_exceeded). Call OUTSIDE mutate with a row snapshot.
+ * Returns whether it armed; never throws.
+ */
+function armSettleAfterValidatorBudgetKill(job, { scheduleSettle = defaultScheduleSettle } = {}) {
+  try {
+    if (!job || job.agentType !== 'validator' || job.verifierVerdict !== 'budget_exceeded') return false;
+    const epicId = job.epicId || job.sourcePromptId;
+    if (!job.cwd || !epicId) return false;
+    scheduleSettle({ cwd: job.cwd, epicId });
+    return true;
+  } catch (e) {
+    console.error('[scheduler] armSettleAfterValidatorBudgetKill error', job && job.slug, e);
+    return false;
+  }
+}
+
+/**
  * notifyOriginatingTab(job) → void
  *
  * On a true terminal transition (completed/failed — never the benign
@@ -7437,6 +7460,8 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       });
     }
 
+    if (needsReviewRcaSnapshot) armSettleAfterValidatorBudgetKill(needsReviewRcaSnapshot);
+
     if (needsReviewRcaSnapshot) {
       // Fire-and-forget, mirroring the DoD drain hook: never blocks the status
       // transition, never throws to this caller.
@@ -8756,6 +8781,7 @@ async function reapDeadRunningJobs() {
       if (resolved) landedCommitEvidence.set(d.slug, row.landedCommit);
     }));
 
+    const budgetKillSettleSnapshots = [];
     await mutate(async (s) => {
       for (const { slug, pid, outcome, gateOutcome, pidless, reason, noOwnArtifact, failureOverride } of dead) {
         const idx = s.jobs.findIndex((x) => x.slug === slug);
@@ -8893,6 +8919,7 @@ async function reapDeadRunningJobs() {
           if (confirmedLandedCommit) s.jobs[idx].landedCommit = confirmedLandedCommit;
           if (landedCommit) s.jobs[idx].landedCommit = landedCommit;
           if (adoptedBudgetKill?.landedCommit) s.jobs[idx].landedCommit = adoptedBudgetKill.landedCommit;
+          if (adoptedBudgetKill) budgetKillSettleSnapshots.push({ ...s.jobs[idx], verifierVerdict: 'budget_exceeded' });
         }
         // A pidless spawn that never wrote its own '<slug>.log' into the
         // batch runId dir it was stamped with must not keep that runId —
@@ -8941,6 +8968,8 @@ async function reapDeadRunningJobs() {
         }
       }
     });
+
+    for (const snap of budgetKillSettleSnapshots) armSettleAfterValidatorBudgetKill(snap);
 
     await broadcast({ flush: true });
     tickQueue().catch(() => {});
@@ -11878,6 +11907,7 @@ module.exports = {
   notifyOriginatingTab,
   flushDueReviewNotices,
   isNotifiableTerminalStatus,
+  armSettleAfterValidatorBudgetKill,
   extractResultTextFromLog,
   resolveVerifyPrdPath,
   resolveFixPlanPath,

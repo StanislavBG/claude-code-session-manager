@@ -18,7 +18,7 @@ const {
   runEpicSettle,
   scheduleEpicSettle,
 } = require('../lib/epic/epicValidationHook.cjs');
-const { notifyOriginatingTab, readValidatorGateMs } = require('../scheduler.cjs');
+const { notifyOriginatingTab, readValidatorGateMs, armSettleAfterValidatorBudgetKill } = require('../scheduler.cjs');
 const os = require('node:os');
 const { gateTimeoutMs } = require('../lib/scheduler/definitionOfDone.cjs');
 
@@ -383,4 +383,78 @@ test('runEpicSettle: split over consecutive settles — sweep, remainder sweep, 
   expect(d3.createPrd).not.toHaveBeenCalled();
   expect(d3.sendPrompt).toHaveBeenCalledTimes(1);
   expect(d3.sendPrompt.mock.calls[0][1]).toContain('Verified (3)');
+});
+
+
+// ─── budget-killed validator arms the settle ────────────────────────────────
+
+const parkedRow = (slug, over = {}) => ({
+  slug, status: 'needs_review', verifierVerdict: 'budget_exceeded', agentType: 'validator',
+  epicId: EPIC, cwd: '/c', ...over,
+});
+
+test('armSettleAfterValidatorBudgetKill: arms only for a budget-killed validator with cwd + Epic', () => {
+  const scheduleSettle = vi.fn();
+  expect(armSettleAfterValidatorBudgetKill(parkedRow('900-v'), { scheduleSettle })).toBe(true);
+  expect(scheduleSettle).toHaveBeenCalledTimes(1);
+  expect(scheduleSettle).toHaveBeenCalledWith({ cwd: '/c', epicId: EPIC });
+  expect(armSettleAfterValidatorBudgetKill({ ...parkedRow('x'), epicId: undefined, sourcePromptId: 'e2' }, { scheduleSettle })).toBe(true);
+  expect(scheduleSettle).toHaveBeenLastCalledWith({ cwd: '/c', epicId: 'e2' });
+  scheduleSettle.mockClear();
+  for (const j of [
+    parkedRow('a', { agentType: 'dev-lead' }),
+    parkedRow('b', { verifierVerdict: 'uncommitted_changes' }),
+    parkedRow('c', { cwd: undefined }),
+    parkedRow('d', { epicId: undefined }),
+    null,
+  ]) expect(armSettleAfterValidatorBudgetKill(j, { scheduleSettle })).toBe(false);
+  expect(scheduleSettle).not.toHaveBeenCalled();
+  expect(armSettleAfterValidatorBudgetKill(parkedRow('e'), { scheduleSettle: () => { throw new Error('boom'); } })).toBe(false);
+});
+
+test('runEpicSettle: a parked sweep with a carried PRD queues a sweep for only that PRD', async () => {
+  const readGateMs = async () => gateMap({ '800-a': 7200, '801-b': 7200, '802-c': 1800 });
+  const jobBudget = { factor: 3, ceilingMs: 180 * 60000 };
+  const events = [checkin('800-a', 1), checkin('801-b', 2), checkin('802-c', 3)];
+  const parked = parkedRow('803-validate-sweep-x', { dependsOn: ['a', 'c'] });
+  const deps = settleDeps(events, { readGateMs, jobBudget, loadJobs: vi.fn(async () => [parked]) });
+  const res = await runEpicSettle({ cwd: '/c', epicId: EPIC }, deps);
+  expect(res.action).toBe('sweep-queued');
+  expect(deps.createPrd).toHaveBeenCalledTimes(1);
+  expect(deps.createPrd.mock.calls[0][0].dependsOn).toEqual(['b']);
+});
+
+test('runEpicSettle: a parked sweep with nothing carried sends one digest listing it under Parked', async () => {
+  const events = [checkin('800-a', 1), checkin('801-b', 2)];
+  const parked = parkedRow('803-validate-sweep-x', { dependsOn: ['a', 'b'] });
+  const deps = settleDeps(events, { loadJobs: vi.fn(async () => [parked]) });
+  const res = await runEpicSettle({ cwd: '/c', epicId: EPIC }, deps);
+  expect(res.action).toBe('digest-sent');
+  expect(deps.createPrd).not.toHaveBeenCalled();
+  expect(deps.sendPrompt).toHaveBeenCalledTimes(1);
+  const text = deps.sendPrompt.mock.calls[0][1];
+  expect(text).toContain('Parked (needs_review)');
+  expect(text).toContain('803-validate-sweep-x');
+  expect(text).toContain('Not validated (2)');
+  expect(text).toContain('a');
+  expect(text).toContain('b');
+});
+
+test('runEpicSettle: a parked planner validator gets one sized sweep, then a digest — not a third run', async () => {
+  const events = [checkin('800-a', 1), checkin('801-b', 2)];
+  const planner = parkedRow('804-validate-foo', { dependsOn: ['800-a', '801-b'] });
+  const d1 = settleDeps(events, { loadJobs: vi.fn(async () => [planner]) });
+  const r1 = await runEpicSettle({ cwd: '/c', epicId: EPIC }, d1);
+  expect(r1.action).toBe('sweep-queued');
+  expect(d1.createPrd).toHaveBeenCalledTimes(1);
+  const input = d1.createPrd.mock.calls[0][0];
+  expect(input.dependsOn).toEqual(['a', 'b']);
+  expect(input.estimateMinutes).toBeGreaterThan(0);
+
+  const sweep = parkedRow(`805-${input.slug}`, { dependsOn: input.dependsOn });
+  const d2 = settleDeps(events, { loadJobs: vi.fn(async () => [planner, sweep]) });
+  const r2 = await runEpicSettle({ cwd: '/c', epicId: EPIC }, d2);
+  expect(r2.action).toBe('digest-sent');
+  expect(d2.createPrd).not.toHaveBeenCalled();
+  expect(d2.sendPrompt).toHaveBeenCalledTimes(1);
 });

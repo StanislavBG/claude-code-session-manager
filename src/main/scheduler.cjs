@@ -7951,7 +7951,12 @@ async function tickBody(gen, { bypassLoadGate }) {
       }
     }
 
-    await mutate((s) => { s.lastRunAt = new Date().toISOString(); });
+    await mutate((s) => {
+      const nowIso = new Date().toISOString();
+      s.lastRunAt = nowIso;
+      if (!s.lastDispatchAtByCwd || typeof s.lastDispatchAtByCwd !== 'object' || Array.isArray(s.lastDispatchAtByCwd)) s.lastDispatchAtByCwd = {};
+      for (const job of gatedBatch) s.lastDispatchAtByCwd[job.cwd || DEFAULT_PROJECT_CWD] = nowIso;
+    });
     if (stale()) return STALE_TICK;
     await broadcast();
     if (stale()) return STALE_TICK;

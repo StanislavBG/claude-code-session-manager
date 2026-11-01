@@ -237,6 +237,8 @@ function shapeMachine(data) {
     // the queue at all, whether or not that evaluation ends in a launch. See
     // classifyQueueStarvation's header for why the two must never merge.
     lastDispatchAttemptAt: data.lastDispatchAttemptAt ?? null,
+    // Last launch time per project cwd (finished rows leave queue.json; lastRunAt is machine-wide).
+    lastDispatchAtByCwd: data.lastDispatchAtByCwd && typeof data.lastDispatchAtByCwd === 'object' && !Array.isArray(data.lastDispatchAtByCwd) ? data.lastDispatchAtByCwd : {},
     paused: data.paused ?? null,
     // Upgrade-drain state (lib/scheduler/upgradeDrain.cjs): deliberately NOT part of
     // `paused`, so a rate-limit pause can neither overwrite it nor have the
@@ -462,7 +464,7 @@ function shapeJobs(raw, file) {
  * writeSplit can persist "this project now has zero jobs".
  */
 function readMergedSync(opts) {
-  const out = { config: {}, jobs: [], lastRunAt: null, lastDispatchAttemptAt: null, paused: null, drain: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
+  const out = { config: {}, jobs: [], lastRunAt: null, lastDispatchAttemptAt: null, lastDispatchAtByCwd: {}, paused: null, drain: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
   const sourceCwds = [];
   const machine = loadMachineStateSync();
   if (machine.shaped) {
@@ -496,7 +498,7 @@ function readMergedSync(opts) {
 
 /** Async twin of readMergedSync for IPC hot paths. */
 async function readMerged(opts) {
-  const out = { config: {}, jobs: [], lastRunAt: null, lastDispatchAttemptAt: null, paused: null, drain: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
+  const out = { config: {}, jobs: [], lastRunAt: null, lastDispatchAttemptAt: null, lastDispatchAtByCwd: {}, paused: null, drain: null, launchBlocks: {}, launchMitigations: {}, invalidJobs: [], unreadableCwds: [] };
   const sourceCwds = [];
   const machine = await loadMachineState();
   if (machine.shaped) {
@@ -549,6 +551,7 @@ async function writeSplit(state, defaultCwd) {
     config: state.config,
     lastRunAt: state.lastRunAt ?? null,
     lastDispatchAttemptAt: state.lastDispatchAttemptAt ?? null,
+    lastDispatchAtByCwd: state.lastDispatchAtByCwd && typeof state.lastDispatchAtByCwd === 'object' && !Array.isArray(state.lastDispatchAtByCwd) ? state.lastDispatchAtByCwd : {},
     paused: state.paused ?? null,
     drain: state.drain ?? null,
     launchBlocks: state.launchBlocks ?? {},

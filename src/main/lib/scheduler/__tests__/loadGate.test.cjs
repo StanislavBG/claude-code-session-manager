@@ -448,3 +448,16 @@ test('saturated stays out of snapshot() and is false on win32', () => {
   const w = createLoadGate({ platform: 'win32', cores: () => 4, cpu: cpuAt(0.95) });
   assert.equal(w.evaluate({ bypass: true }).saturated, false);
 });
+
+test('isSaturated: true at 0.95, false at 0.6 / no sample / threshold 0 / win32; leaves heldMs alone', () => {
+  assert.equal(gateWith({ cpu: cpuAt(0.95) }).g.isSaturated(), true);
+  assert.equal(gateWith({ cpu: cpuAt(0.6) }).g.isSaturated(), false);
+  assert.equal(gateWith({}).g.isSaturated(), false);
+  assert.equal(gateWith({ threshold: 0, cpu: cpuAt(0.95) }).g.isSaturated(), false);
+  assert.equal(createLoadGate({ platform: 'win32', cores: () => 4, cpu: cpuAt(0.95) }).isSaturated(), false);
+  const { g } = gateWith({ cpu: cpuAt(0.95) });
+  const before = g.evaluate().heldMs;
+  g.isSaturated();
+  g.isSaturated();
+  assert.equal(g.snapshot().heldMs, before);
+});

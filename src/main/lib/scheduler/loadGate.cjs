@@ -249,7 +249,19 @@ function createLoadGate({
     return last;
   }
 
-  return { evaluate, observe, snapshot, endHold };
+  // Read-only, for automatic launch paths that never reach evaluate(): true only
+  // when the load gate would hold AND a CPU sample proves a saturated CPU. Touches
+  // no hold clock, audit state or `last`.
+  function isSaturated() {
+    if (platform === 'win32') return false;
+    const [l1] = loadavg();
+    const th = typeof threshold === 'function' ? threshold() : threshold;
+    if (!isLoadGated(l1, cores(), th)) return false;
+    const sample = cpu.sample();
+    return sample !== null && sample.busyFraction >= Math.min(th, SATURATED_BUSY);
+  }
+
+  return { evaluate, observe, snapshot, endHold, isSaturated };
 }
 
 module.exports = { isLoadGated, createLoadGate, topCpuConsumers, AUDIT_INTERVAL_MS, MOSTLY_IDLE_BUSY, SATURATED_BUSY };

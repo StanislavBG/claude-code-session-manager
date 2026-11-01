@@ -1009,7 +1009,24 @@ function selectGateShadowTarget(jobs, headByCwd, { authorityDisabled = false, ba
   return eligible.find((j) => !j.gateShadow) ?? null;
 }
 
+/**
+ * Resume-recovery rows a periodic pass may launch: every row
+ * selectResumeRecoveryTarget accepts, or only the first when the CPU is
+ * saturated (the rest stay eligible for the next pass).
+ */
+function selectResumeRecoveryBatch(jobs, { saturated = false } = {}) {
+  const batch = [];
+  for (const job of jobs ?? []) {
+    const target = selectResumeRecoveryTarget(job);
+    if (!target) continue;
+    batch.push({ job, target });
+    if (saturated) break;
+  }
+  return batch;
+}
+
 module.exports = {
+  selectResumeRecoveryBatch,
   isRefireCapped,
   isCancelledJob,
   selectResumeRecoveryTarget,

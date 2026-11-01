@@ -296,3 +296,13 @@ test('SM_RESUME_RECOVERY_DISABLE=1: spawnInvestigation is NOT skipped by the res
   const result = await spawnInvestigation(job, '/nonexistent/run/dir/for/this/test');
   expect(result).toEqual({ deferred: false });
 });
+
+test('selectResumeRecoveryBatch: all eligible rows, or only the first when saturated', () => {
+  const { selectResumeRecoveryBatch } = require('../scheduler/reviewLadder.cjs');
+  const jobs = [baseJob({ slug: 'a' }), baseJob({ slug: 'x', status: 'pending' }), baseJob({ slug: 'b' }), baseJob({ slug: 'c' })];
+  expect(selectResumeRecoveryBatch(jobs).map((b) => b.job.slug)).toEqual(['a', 'b', 'c']);
+  const sat = selectResumeRecoveryBatch(jobs, { saturated: true });
+  expect(sat.map((b) => b.job.slug)).toEqual(['a']);
+  expect(sat[0].target.slug).toBe('a');
+  expect(selectResumeRecoveryBatch(undefined)).toEqual([]);
+});

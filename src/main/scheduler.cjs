@@ -10027,9 +10027,10 @@ async function reverifyNeedsReview() {
   // already excludes every job this loop dispatches, so a resumable job
   // never also gets a fix-plan PRD authored in the same pass.
   {
-    for (const job of queueForResumeAndAutofix.jobs) {
-      const target = reviewLadder.selectResumeRecoveryTarget(job);
-      if (!target) continue;
+    // Saturated CPU (>= 85% busy): start ONE per pass; the rest stay eligible
+    // for the next pass (this path never reaches the load gate).
+    const batch = reviewLadder.selectResumeRecoveryBatch(queueForResumeAndAutofix.jobs, { saturated: loadGate.isSaturated() });
+    for (const { job, target } of batch) {
       console.log(`[scheduler] resume-recovery: needs_review ${job.slug} → resuming session ${target.sessionId}`);
       spawnResumeRecovery(job, target).catch((e) => {
         console.error('[scheduler] spawnResumeRecovery error', job.slug, e);

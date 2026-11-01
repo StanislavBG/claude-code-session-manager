@@ -7666,9 +7666,10 @@ function tickWatchdogMs() {
   return Number.isFinite(n) && n >= 0 ? n : 120_000;
 }
 
-// `bypassLoadGate` is set only by the explicit human run-now / force-tick
-// paths (via runDueJobs): the human is asking, so the CPU-load gate yields
-// and logs that it did. Every automatic caller leaves it false.
+// `bypassLoadGate` is set by the human run-now / force-tick paths (via
+// runDueJobs) and by the starvation watchdog. `lastResort` marks the watchdog:
+// on a saturated CPU its bypassed tick sends one job; a human run-now keeps
+// the whole batch. Every other automatic caller leaves both false.
 /**
  * Fail-CLOSED expiry of runtime reservations (slot tokens, quiet-machine
  * lease, investigation set, worktree accounting) whose owner is provably
@@ -7698,11 +7699,11 @@ function runReservationExpiryPass(jobs, now = Date.now()) {
   }
 }
 
-function tickQueue({ bypassLoadGate = false } = {}) {
+function tickQueue({ bypassLoadGate = false, lastResort = false } = {}) {
   const budgetMs = tickWatchdogMs();
   const next = tickTail.then(() => {
     const gen = tickGeneration;
-    return withTimeout(() => tickBody(gen, { bypassLoadGate }), budgetMs, () => {
+    return withTimeout(() => tickBody(gen, { bypassLoadGate, lastResort }), budgetMs, () => {
       tickGeneration++; // fence the abandoned body
       console.warn(`[scheduler] TICK WEDGED: tick body exceeded ${budgetMs}ms — resetting tick chain`);
       if (!tickWedgeLatched) {
@@ -7725,7 +7726,7 @@ function tickQueue({ bypassLoadGate = false } = {}) {
 // The stale sentinel a fenced body returns: never recorded, never acted on.
 const STALE_TICK = Object.freeze({ fired: false, reason: 'stale-generation' });
 
-async function tickBody(gen, { bypassLoadGate }) {
+async function tickBody(gen, { bypassLoadGate, lastResort }) {
   const tickStartedAt = Date.now();
   // evaluate() only runs once slots and memory admit a batch, so the CPU sampler
   // needs every tick to keep a reference reading about a minute old.
@@ -7927,7 +7928,9 @@ async function tickBody(gen, { bypassLoadGate }) {
     let top = [];
     const load = loadGate.evaluate({ bypass: bypassLoadGate });
     if (load.bypassed) {
-      console.log(`[scheduler] load gate: BYPASSED by run-now (loadavg1=${load.loadavg1} cores=${load.cores} ratio=${load.ratio} > ${load.threshold})`);
+      const clampToOne = !!lastResort && load.saturated;
+      if (clampToOne) launchBatch = gatedBatch.slice(0, 1);
+      console.log(`[scheduler] load gate: BYPASSED by ${lastResort ? 'starvation watchdog' : 'run-now'} (loadavg1=${load.loadavg1} cores=${load.cores} ratio=${load.ratio} > ${load.threshold})${clampToOne ? ', saturated CPU: one job' : ''}`);
     } else if (load.gated) {
       const line = `[scheduler] load gate: loadavg1=${load.loadavg1} cores=${load.cores} ratio=${load.ratio} > ${load.threshold} — holding ${gatedBatch.length} eligible job(s)`;
       console.log(line);
@@ -7992,6 +7995,12 @@ async function tickBody(gen, { bypassLoadGate }) {
     }
     if (issued > 0) {
       loadGate.endHold();
+      if (load.bypassed && lastResort && load.saturated) {
+        appendAuditEvent('load_gate_last_resort', {
+          ...loadGateAuditFields(load),
+          launched: launchBatch[0].slug, stillHeld: gatedBatch.slice(1).map((j) => j.slug),
+        });
+      }
       if (load.yielded) {
         const mins = Math.round(load.heldMs / 60_000);
         appendAuditEvent('load_gate_yielded', {
@@ -8190,14 +8199,14 @@ async function runQueueStarvationWatchdog(state, {
   // it can't influence, freezing the queue for hours (observed 2026-09-23:
   // 3 dispatchable, 0 running, lastTickReason 'load-deferred' unbroken from
   // 07:00→13:06). The gate is advisory headroom ("leave one core free"), not
-  // a resource guard; starting ONE batch cannot OOM the host. The slot pool
+  // a resource guard; starting ONE batch cannot OOM the host (on a saturated CPU the batch is one job: lastResort). The slot pool
   // and memory gate — which DO guard real exhaustion — are unaffected by this
   // flag and still bound the batch. The watchdog is the automated equivalent
   // of a human Run-now, the other caller that legitimately bypasses load
   // (§2/§3, scheduler-operations.md). Latched to one forced tick per
   // QUEUE_STARVATION_MS per cwd, so this cannot thrash. Routed via
   // module.exports so tests can assert the bypass without driving real load.
-  await module.exports.tickQueue({ bypassLoadGate: true }).catch((e) => console.error('[scheduler] starvation tick error', e));
+  await module.exports.tickQueue({ bypassLoadGate: true, lastResort: true }).catch((e) => console.error('[scheduler] starvation tick error', e));
   return primary;
 }
 

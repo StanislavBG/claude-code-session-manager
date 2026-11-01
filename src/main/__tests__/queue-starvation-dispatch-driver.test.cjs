@@ -236,7 +236,7 @@ test('a starved queue forces its tick with bypassLoadGate:true — the CPU load 
     const verdict = await scheduler.runQueueStarvationWatchdog(state, opts);
     expect(verdict.kind).toBe('starved');
     expect(tickSpy).toHaveBeenCalledTimes(1);
-    expect(tickSpy).toHaveBeenCalledWith({ bypassLoadGate: true });
+    expect(tickSpy).toHaveBeenCalledWith({ bypassLoadGate: true, lastResort: true });
   } finally {
     tickSpy.mockRestore();
   }

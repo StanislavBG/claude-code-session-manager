@@ -433,3 +433,18 @@ test('observe() feeds the sampler except on win32; snapshot carries the cpu fiel
   g.evaluate();
   assert.equal(g.snapshot().standDown, true);
 });
+
+test('saturated is a per-tick flag: true at 0.95, false at 0.6, false with no sample, true at 0.4 with threshold 0.25', () => {
+  assert.equal(gateWith({ cpu: cpuAt(0.95) }).g.evaluate().saturated, true);
+  assert.equal(gateWith({ cpu: cpuAt(0.6) }).g.evaluate().saturated, false);
+  assert.equal(gateWith({}).g.evaluate().saturated, false);
+  assert.equal(gateWith({ threshold: 0.25, cpu: cpuAt(0.4) }).g.evaluate().saturated, true);
+});
+
+test('saturated stays out of snapshot() and is false on win32', () => {
+  const { g } = gateWith({ cpu: cpuAt(0.95) });
+  g.evaluate();
+  assert.equal('saturated' in g.snapshot(), false);
+  const w = createLoadGate({ platform: 'win32', cores: () => 4, cpu: cpuAt(0.95) });
+  assert.equal(w.evaluate({ bypass: true }).saturated, false);
+});

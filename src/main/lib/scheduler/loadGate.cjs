@@ -159,6 +159,8 @@ function createLoadGate({
     if (platform !== 'win32') cpu.observe();
   }
 
+  // Returns `last` plus per-tick shouldAudit, shouldAuditStandDown, escalated and
+  // `saturated` (CPU sample proves busy >= min(threshold, SATURATED_BUSY); never in snapshot()).
   function evaluate({ bypass = false } = {}) {
     const t = now();
     if (platform === 'win32') {
@@ -179,7 +181,7 @@ function createLoadGate({
         reason: 'loadavg-unavailable-win32',
         at: new Date(t).toISOString(),
       };
-      return { ...last, shouldAudit: false, shouldAuditStandDown: false, escalated: false };
+      return { ...last, shouldAudit: false, shouldAuditStandDown: false, escalated: false, saturated: false };
     }
     const [l1] = loadavg();
     const c = cores();
@@ -232,7 +234,7 @@ function createLoadGate({
       yielded,
       at: new Date(t).toISOString(),
     };
-    return { ...last, shouldAudit, shouldAuditStandDown, escalated };
+    return { ...last, shouldAudit, shouldAuditStandDown, escalated, saturated };
   }
 
   // Only the caller knows a launch really happened (or that nothing is waiting

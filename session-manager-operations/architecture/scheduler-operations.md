@@ -154,6 +154,10 @@ CPU busy fraction of a ~1-minute sample (`cpuSample.cjs`; `MOSTLY_IDLE_BUSY = 0.
 - **Half to 85% busy: holds**, and after 45 minutes (`JOB_OVERRUN_FLOOR_MS`) one job goes through (`load_gate_yielded`) because capacity remains.
 - **85% and up: the gate itself holds and never launches**, because launching there is what the gate exists to prevent. A human Run now bypasses it with the full batch; the starvation watchdog bypasses it with one job (`load_gate_last_resort`). Every 45 minutes it writes a `load_gate_escalated` audit row and a toast for a human.
 
+**What can still start work at 85% busy or more.** "The gate holds" means the normal batch path launches nothing, not that nothing launches. Five paths remain: a human Run now (the full batch); the starvation watchdog (one job); periodic resume recovery (one row per pass, `selectResumeRecoveryBatch(jobs, { saturated })` in `reviewLadder.cjs`; the rest wait for the next pass); same-tick resume recovery (one per finished job); and the auto-fix investigation (one machine-wide). Mechanical recovery runs git only, so it starts no claude session and is not on this list.
+
+**Reconcile coverage rule.** `reconcile()` skips PRDs of any project whose queue file the read did not cover, for that pass only: it writes a `reconcile_uncovered_project` audit row (`cwd`, `skippedPrds`) and the next read, which covers the project, mints them. A project missing from a read is never treated as having an empty queue.
+
 **No sample yields at the limit**: it cannot prove saturation, so loadavg alone holds until 45 minutes, then one job goes through. A broken reader must never disable the gate.
 
 `iowait` does NOT count as busy: it is an idle CPU with I/O outstanding, swap-in waits land there on

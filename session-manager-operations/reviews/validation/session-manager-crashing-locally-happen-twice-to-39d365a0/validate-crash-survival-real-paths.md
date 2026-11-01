@@ -32,7 +32,7 @@ Gates re-run in the foreground. Targeted vitest across all six PRDs: 9 files, 68
 - `npm run lint:docs` was green (21 junctions, 35 files).
 - Minor: that scheduler-operations.md row says the line "records the limits applied to that job". The code logs `peak=` and `oom_kill=`, not the limits (scheduler.cjs finalizeJobScope).
 
-## identity-survives-scope-exec — VERIFIED on its criteria, but the suite criterion is NOT met
+## identity-survives-scope-exec — REFUTED (suite criterion unmet; code criteria hold)
 - `isDifferentProcess` compares pid and startTicks only (procIdentity.cjs:161-165). Incomplete, null and undefined identities return false. The header explains exec and `systemd-run --scope`.
 - classifyAdoption 'adopt' and 'foreign-pid' cases, the superviseAdoptedRun exec case and the real-exec test all passed. The real-exec test used a real `systemd-run --scope` process and asserted that cmdline changed.
 - **Full `npm run test:unit` with SM_* unset was not fully green, in two runs:**
@@ -40,7 +40,7 @@ Gates re-run in the foreground. Targeted vitest across all six PRDs: 9 files, 68
   - Run 2: `scheduler-shard-quarantine.test.cjs:88` failed (`result.fired` false), with 8066 passing.
   - Re-run in isolation, 3 times: fail, pass, pass. That test is therefore flaky, and it failed on a different cause than run 1.
   - The diff touches neither test nor `tickQueue`, and `src/renderer` is untouched since base. The only scheduler.cjs changes are the job-scope sampler and finalize. I judge the reds unrelated to these PRDs, but the criterion says "fully green", and it was not.
-- I mark the PRD VERIFIED because every criterion that belongs to its code holds. The suite red is the same load-flake class memory notes under `publish_worktree_cold_gate`, and is reported as Important.
+- I mark the PRD REFUTED only because its own acceptance criterion requires a fully green suite and it was red twice. Every code criterion holds. The reds look like the load-flake class in the publish-worktree cold-gate note, so the next step is a fix wave for the two flakes, not a rework of this PRD.
 
 ## Combined diff review
 12 files, +240/-31. I ran no `/code-review` or `/security-review` here; this is a self-review.

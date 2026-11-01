@@ -58,6 +58,7 @@ import { ticketTagTone } from '../../lib/ticketDisplay'
 import { toast } from '../../state/toast'
 import { formatAgo } from '../../lib/formatTime'
 import type { ScheduleJob } from '../../../preload/api'
+import { queueConstraintLabel } from './queueConstraintLabel'
 
 const EMPTY_JOBS: ScheduleJob[] = []
 
@@ -950,25 +951,8 @@ export function ActiveSessionsCard({ onNavigate }: { onNavigate?: (k: NavKey) =>
   // blocked one.
   const lastTick = useScheduleState((s) => s.snapshot?.lastTick)
   const constraint = useMemo(() => {
-    if (!lastTick || lastTick.fired) return null
     const pending = jobs.filter((j) => j.status === 'pending').length
-    if (pending === 0) return null
-    switch (lastTick.reason) {
-      case 'memory-deferred':
-        return `memory gate: ${lastTick.availableMb} MB free, need ${lastTick.threshold} MB`
-      case 'slots-exhausted':
-        return `all ${total} slots busy — ${lastTick.deferredCount ?? pending} pending`
-      case 'held': {
-        const n = lastTick.holds?.length ?? 0
-        return n > 0
-          ? `${n} pending held behind dependencies`
-          : (lastTick.detail ?? 'held')
-      }
-      case 'paused':
-        return 'scheduler paused'
-      default:
-        return null
-    }
+    return queueConstraintLabel(lastTick, pending, total)
   }, [lastTick, jobs, total])
   const rows = useMemo(
     () => activeSessionRows(slots?.holders ?? [], runningJobs, chats, sessions),

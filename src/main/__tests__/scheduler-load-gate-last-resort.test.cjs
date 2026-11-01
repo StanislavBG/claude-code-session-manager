@@ -118,19 +118,21 @@ async function twoRowBypassTick(name, gate, tickOpts) {
   const before = readAuditKind('load_gate_last_resort').length;
   scheduler._setLoadGateForTests(gate);
   const result = await scheduler.tickQueue(tickOpts);
-  // spawnJob is fire-and-forget: let launched rows leave 'pending'.
-  const want = result.count || 0;
+  // spawnJob is fire-and-forget: wait for this project's launched rows to leave 'pending'.
+  // Count only this project's own rows: a stray pending row elsewhere may also launch.
+  const want = result.fired ? Math.min(result.count, 2) : 0;
   let pending = 2;
   for (let i = 0; i < 50 && pending > 2 - want; i += 1) {
     await new Promise((r) => setTimeout(r, 100));
     pending = JSON.parse(fs.readFileSync(proj.queueFile, 'utf8')).jobs.filter((j) => j.status === 'pending').length;
   }
+  const launched = 2 - pending;
   // Let launched stub jobs finish so they cannot rewrite the queue after the cleanup below.
   for (let i = 0; i < 100 && (anyRunning() || slots.inUse() > 0); i += 1) await new Promise((r) => setTimeout(r, 50));
   // Drop held rows so they do not inflate the next test's batch.
   const q = JSON.parse(fs.readFileSync(proj.queueFile, 'utf8'));
   fs.writeFileSync(proj.queueFile, JSON.stringify({ ...q, jobs: q.jobs.filter((j) => j.status !== 'pending') }));
-  return { result, pending, newRows: readAuditKind('load_gate_last_resort').slice(before) };
+  return { result, pending, launched, newRows: readAuditKind('load_gate_last_resort').slice(before) };
 }
 
 test('lastResort bypass on a saturated CPU launches one job and audits load_gate_last_resort', async () => {
@@ -143,14 +145,14 @@ test('lastResort bypass on a saturated CPU launches one job and audits load_gate
 }, 120_000);
 
 test('a human bypass (no lastResort) on a saturated CPU keeps the whole batch', async () => {
-  const { result, newRows } = await twoRowBypassTick('hu-sat', gateWithCpu(0.95), { bypassLoadGate: true });
-  expect(result.count).toBe(2);
+  const { launched, newRows } = await twoRowBypassTick('hu-sat', gateWithCpu(0.95), { bypassLoadGate: true });
+  expect(launched).toBe(2);
   expect(newRows.length).toBe(0);
 }, 120_000);
 
 test('lastResort bypass at 60% busy keeps the whole batch', async () => {
-  const { result, newRows } = await twoRowBypassTick('lr-60', gateWithCpu(0.6), { bypassLoadGate: true, lastResort: true });
-  expect(result.count).toBe(2);
+  const { launched, newRows } = await twoRowBypassTick('lr-60', gateWithCpu(0.6), { bypassLoadGate: true, lastResort: true });
+  expect(launched).toBe(2);
   expect(newRows.length).toBe(0);
 }, 120_000);
 
@@ -159,7 +161,7 @@ test('lastResort bypass with no CPU sample keeps the whole batch', async () => {
     loadavg: () => [32.84, 25, 22], cores: () => 14, threshold: 0.85,
     cpu: { observe() {}, sample: () => null },
   });
-  const { result, newRows } = await twoRowBypassTick('lr-null', gate, { bypassLoadGate: true, lastResort: true });
-  expect(result.count).toBe(2);
+  const { launched, newRows } = await twoRowBypassTick('lr-null', gate, { bypassLoadGate: true, lastResort: true });
+  expect(launched).toBe(2);
   expect(newRows.length).toBe(0);
 }, 120_000);

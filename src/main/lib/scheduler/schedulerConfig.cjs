@@ -156,10 +156,12 @@ module.exports = {
   INVESTIGATION_MAX_MS: 60 * 60_000,
 
   // CPU-load launch gate (loadGate.cjs): holds NEW executors while the
-  // 1-minute load average per core exceeds this, UNLESS a ~1-minute CPU
-  // sample (iowait and nice count as busy) shows the machine under half
-  // busy; no sample means loadavg decides. After a 45-minute hold one job
-  // goes through (load_gate_yielded). The dynamic complement
+  // 1-minute load average per core exceeds this. Bands by a ~1-minute CPU
+  // sample (nice counts as busy, iowait does not; it is logged as cpuIowait):
+  // under half busy stands down; 50-85% holds, then one job goes through at
+  // 45 minutes (load_gate_yielded); 85%+ holds and never launches, with a
+  // load_gate_escalated audit row and toast every 45 minutes. No sample
+  // yields at the limit (it cannot prove saturation). The dynamic complement
   // to DEFAULT_PROJECT_JOB_CAP above — that cap is static and project-local;
   // this sees the machine. Observed 2026-09-01: 4 Godot test batteries under
   // Xvfb, loadavg 12.95 / 14 cores = 0.93, every battery stretching past its

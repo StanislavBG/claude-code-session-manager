@@ -24,7 +24,12 @@ module.exports = function setup({ provide }) {
   const worktreeRoot = path.join(sandbox, 'worktrees');
   for (const d of [home, schedulerHome, worktreeRoot]) fs.mkdirSync(d, { recursive: true });
 
+  // Fixed memory reading so tickQueue's memory/swap gates never depend on the host.
+  const meminfo = path.join(sandbox, 'meminfo');
+  fs.writeFileSync(meminfo, 'MemAvailable:   67108864 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\n');
+
   const env = {
+    SM_MEMINFO_PATH: meminfo,
     SM_SCHEDULER_HOME: schedulerHome,
     SM_WORKTREE_ROOT: worktreeRoot,
     SM_ADMIN_TOKEN_PATH: path.join(schedulerHome, 'admin-api.test.json'),

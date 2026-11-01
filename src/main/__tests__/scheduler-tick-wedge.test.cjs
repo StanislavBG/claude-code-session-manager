@@ -115,6 +115,8 @@ test('a never-settling tick body is declared wedged, the chain resets, the stale
     // via tickQueue's bypassLoadGate, and the memory gate ('memory-deferred', reads
     // MemAvailable from /proc/meminfo) via a stubbed fs.readFileSync for that one path.
     const realReadFileSync = fs.readFileSync;
+    const prevMemPath = process.env.SM_MEMINFO_PATH;
+    delete process.env.SM_MEMINFO_PATH;
     fs.readFileSync = function patchedReadFileSync(file, ...rest) {
       if (file === '/proc/meminfo') return 'MemAvailable:   67108864 kB\n';
       return realReadFileSync.call(this, file, ...rest);
@@ -124,6 +126,7 @@ test('a never-settling tick body is declared wedged, the chain resets, the stale
       fresh = await scheduler.tickQueue({ bypassLoadGate: true });
     } finally {
       fs.readFileSync = realReadFileSync;
+      if (prevMemPath !== undefined) process.env.SM_MEMINFO_PATH = prevMemPath;
     }
     expect(fresh.reason).not.toBe('wedged');
 

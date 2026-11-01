@@ -67,6 +67,29 @@ afterAll(() => {
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
+test('SM_MEMINFO_PATH reaches the real memory gate: a 1 GB fixture defers dispatch', async () => {
+  const proj = makeProject('lowmem-proj');
+  const slug = `9103-lowmem-${process.pid}`;
+  fs.writeFileSync(path.join(proj.prdsDir, `${slug}.md`), 'Low-memory PRD.', 'utf8');
+  fs.writeFileSync(proj.queueFile, JSON.stringify({
+    jobs: [{ slug, title: 'lowmem', status: 'pending', cwd: proj.cwd, dependsOn: [], createdAt: new Date().toISOString() }],
+  }));
+  process.env.SM_CLAUDE_BIN = writeClaudeStub();
+  const fixture = path.join(tmpHome, 'meminfo-1gb');
+  fs.writeFileSync(fixture, 'MemAvailable:    1048576 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\n');
+  const prev = process.env.SM_MEMINFO_PATH;
+  process.env.SM_MEMINFO_PATH = fixture;
+  try {
+    const result = await scheduler.tickQueue({ bypassLoadGate: true });
+    expect(result.reason).toBe('memory-deferred');
+    expect(result.fired).toBe(false);
+  } finally {
+    if (prev === undefined) delete process.env.SM_MEMINFO_PATH;
+    else process.env.SM_MEMINFO_PATH = prev;
+  }
+}, 120_000);
+// Runs first: nothing is 'running' yet, so the memory gate (not already-running) decides.
+
 test('tickQueue dispatches the healthy project while the torn project is skipped; health names it', async () => {
   const good = makeProject('good-proj');
   const torn = makeProject('torn-proj');

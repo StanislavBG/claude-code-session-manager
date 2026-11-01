@@ -25,6 +25,23 @@ test('parseMemInfo returns MB figures', () => {
   expect(scheduler.parseMemInfo(RAW)).toEqual({ availableMb: 4096, swapTotalMb: 8192, swapFreeMb: 0 });
 });
 
+test('readMemInfo reads the SM_MEMINFO_PATH fixture when set', () => {
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-meminfo-'));
+  const file = path.join(dir, 'meminfo');
+  fs.writeFileSync(file, RAW);
+  const prev = process.env.SM_MEMINFO_PATH;
+  process.env.SM_MEMINFO_PATH = file;
+  try {
+    expect(scheduler.readMemInfo()).toEqual({ availableMb: 4096, swapTotalMb: 8192, swapFreeMb: 0 });
+  } finally {
+    if (prev === undefined) delete process.env.SM_MEMINFO_PATH;
+    else process.env.SM_MEMINFO_PATH = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('parseMemInfo with no swap lines reports zero swap; no MemAvailable fails open', () => {
   expect(scheduler.parseMemInfo('MemAvailable: 2048 kB\n')).toEqual({ availableMb: 2, swapTotalMb: 0, swapFreeMb: 0 });
   expect(scheduler.parseMemInfo('garbage').availableMb).toBe(Infinity);

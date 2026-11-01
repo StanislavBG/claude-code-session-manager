@@ -481,12 +481,16 @@ function parseMemInfo(raw) {
   };
 }
 
-/** Reads /proc/meminfo; fails open (Infinity, no swap) off Linux or on any error. */
+/**
+ * Reads /proc/meminfo; fails open (Infinity, no swap) off Linux or on any error.
+ * SM_MEMINFO_PATH redirects the read to a fixture file. It is for tests only —
+ * nothing in production sets it.
+ */
 function readMemInfo() {
   const open = { availableMb: Infinity, swapTotalMb: 0, swapFreeMb: 0 };
   if (process.platform !== 'linux') return open;
   try {
-    return parseMemInfo(fs.readFileSync('/proc/meminfo', 'utf8'));
+    return parseMemInfo(fs.readFileSync(process.env.SM_MEMINFO_PATH || '/proc/meminfo', 'utf8'));
   } catch {
     return open;
   }

@@ -11,6 +11,8 @@
  * Kill-switch: SM_EPIC_VALIDATION_DISABLE=1 turns the whole runner off.
  * SM_EPIC_SETTLE_SECONDS sets the debounce before a settle run (default 120).
  *
+ * A sweep covers what fits one budget; the rest go to the next settle.
+ *
  * This module spawns NO process itself: the sweep validator is a PRD queued
  * through the scheduler (which acquires a lib/scheduler/sessionSlots.cjs slot),
  * and the digest goes through the chat queue's pump, which does the same.
@@ -108,6 +110,8 @@ async function runEpicSettle({ cwd, epicId } = {}, deps = {}) {
     loadHistory = async () => [],
     createPrd,
     resolveBaseSha = async () => null,
+    readGateMs = async () => new Map(),
+    jobBudget,
     sendPrompt,
     appendResponseEvent,
     now = Date.now,
@@ -158,14 +162,22 @@ async function runEpicSettle({ cwd, epicId } = {}, deps = {}) {
         }
         let baseSha = null;
         try { baseSha = earliest ? await resolveBaseSha(cwd, earliest.landedCommit) : null; } catch { baseSha = null; }
-        const { input } = buildSweepValidatorInput({ epicId, cwd, uncovered: candidates, baseSha, now: now() });
+        let gateMap = new Map();
+        try {
+          const m = await readGateMs(cwd, epicId, candidates.map((c) => c.slug));
+          if (m instanceof Map) gateMap = m;
+        } catch (e) {
+          try { (log || console).error('[epicValidationHook] readGateMs failed', epicId, e); } catch { /* noop */ }
+        }
+        const sized = candidates.map((c) => ({ ...c, gateMs: gateMap.get(c.slug) }));
+        const { input, carried } = buildSweepValidatorInput({ epicId, cwd, uncovered: sized, baseSha, now: now(), jobBudget });
         let res;
         try {
           res = await createPrd(input);
         } catch (e) {
           res = { ok: false, error: e && e.message ? e.message : String(e) };
         }
-        if (res && res.ok) return { action: 'sweep-queued', slug: input.slug };
+        if (res && res.ok) return { action: 'sweep-queued', slug: input.slug, carried: carried.length };
         notValidatedReason = `the validator persona could not be queued: ${(res && res.error) || 'unknown error'}`;
       } else {
         notValidatedReason = 'a sweep validator already ran and did not check them';

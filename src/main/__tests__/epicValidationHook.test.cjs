@@ -18,7 +18,9 @@ const {
   runEpicSettle,
   scheduleEpicSettle,
 } = require('../lib/epic/epicValidationHook.cjs');
-const { notifyOriginatingTab } = require('../scheduler.cjs');
+const { notifyOriginatingTab, readValidatorGateMs } = require('../scheduler.cjs');
+const os = require('node:os');
+const { gateTimeoutMs } = require('../lib/scheduler/definitionOfDone.cjs');
 
 const EPIC = 'epic-986';
 const SLUG = '986-example-prd';
@@ -167,7 +169,7 @@ test('runEpicSettle: an unchecked PRD produces one createPrd call and zero promp
     loadHistory: vi.fn(async () => [{ slug: '200-unchecked', cwd: '/c', epicId: EPIC, landedCommit: 'abc', finishedAt: at(1) }]),
   });
   const res = await runEpicSettle({ cwd: '/c', epicId: EPIC }, deps);
-  expect(res).toEqual({ action: 'sweep-queued', slug: expect.stringMatching(/^validate-sweep-/) });
+  expect(res).toEqual({ action: 'sweep-queued', slug: expect.stringMatching(/^validate-sweep-/), carried: 0 });
   expect(deps.createPrd).toHaveBeenCalledTimes(1);
   const input = deps.createPrd.mock.calls[0][0];
   expect(input.agentType).toBe('validator');
@@ -308,4 +310,77 @@ test('the retired per-PRD validation prompt functions are gone from scheduler.cj
     expect(src).not.toContain('maybeEnqueueValidationPrompt');
     expect(src).not.toContain('buildValidationPrompt');
   }
+});
+
+
+// ─── gate-sized sweeps ──────────────────────────────────────────────────────
+
+const sec = (n) => n * 1000;
+const gateMap = (o) => new Map(Object.entries(o).map(([k, v]) => [k, sec(v)]));
+
+test('readValidatorGateMs: reads a real Epic dir (archived PRD) and sizes it with gateTimeoutMs', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sm-gate-ms-'));
+  try {
+    const dir = path.join(root, 'session-manager-operations', 'scheduler', 'epics', 'e1', 'prds-archived');
+    fs.mkdirSync(dir, { recursive: true });
+    const text = '# Gate\n\n```gate\ntimeout 600 npx vitest run a.test.cjs\n```\n';
+    fs.writeFileSync(path.join(dir, '5-has-gate.md'), text);
+    const m = await readValidatorGateMs(root, 'e1', ['5-has-gate', 'absent']);
+    expect(m.get('5-has-gate')).toBe(gateTimeoutMs(text));
+    expect(m.get('5-has-gate')).toBeGreaterThan(0);
+    expect(m.has('absent')).toBe(false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('runEpicSettle: incident replay — gates 1800/900/2850 s give one sweep with a budget >= 107.5 min', async () => {
+  const readGateMs = vi.fn(async () => gateMap({ '700-a': 1800, '701-b': 900, '702-c': 2850 }));
+  const deps = settleDeps([checkin('700-a', 1), checkin('701-b', 2), checkin('702-c', 3)], {
+    readGateMs, jobBudget: { factor: 3, ceilingMs: 180 * 60000 },
+  });
+  const res = await runEpicSettle({ cwd: '/c', epicId: EPIC }, deps);
+  expect(res).toEqual({ action: 'sweep-queued', slug: expect.any(String), carried: 0 });
+  expect(readGateMs).toHaveBeenCalledWith('/c', EPIC, ['700-a', '701-b', '702-c']);
+  const input = deps.createPrd.mock.calls[0][0];
+  expect(input.dependsOn).toEqual(['a', 'b', 'c']);
+  expect(input.estimateMinutes * 3).toBeGreaterThanOrEqual(107.5);
+});
+
+test('runEpicSettle: a readGateMs that throws or rejects still queues the sweep, logs, counts unknown gates', async () => {
+  for (const readGateMs of [vi.fn(() => { throw new Error('sync'); }), vi.fn(async () => { throw new Error('async'); })]) {
+    const deps = settleDeps([checkin('710-a', 1)], { readGateMs, jobBudget: { factor: 1, ceilingMs: 180 * 60000 } });
+    const res = await runEpicSettle({ cwd: '/c', epicId: EPIC }, deps);
+    expect(res.action).toBe('sweep-queued');
+    expect(deps.log.error).toHaveBeenCalled();
+    expect(deps.createPrd.mock.calls[0][0].estimateMinutes).toBe(20); // 5 min unknown + 15 overhead, factor 1
+  }
+});
+
+test('runEpicSettle: split over consecutive settles — sweep, remainder sweep, then one digest', async () => {
+  const readGateMs = async () => gateMap({ '800-a': 7200, '801-b': 7200, '802-c': 1800 });
+  const jobBudget = { factor: 3, ceilingMs: 180 * 60000 };
+  const base = [checkin('800-a', 1), checkin('801-b', 2), checkin('802-c', 3)];
+
+  const d1 = settleDeps(base, { readGateMs, jobBudget });
+  const r1 = await runEpicSettle({ cwd: '/c', epicId: EPIC }, d1);
+  expect(r1).toEqual({ action: 'sweep-queued', slug: expect.any(String), carried: 1 });
+  const first = d1.createPrd.mock.calls[0][0];
+  expect(first.dependsOn).toEqual(['a', 'c']);
+
+  const sweepRow = { slug: `803-${first.slug}`, epicId: EPIC, cwd: '/c', status: 'completed', dependsOn: first.dependsOn };
+  const afterFirst = [...base, verdict('800-a', 'verified', 10), verdict('802-c', 'verified', 11)];
+  const d2 = settleDeps(afterFirst, { readGateMs, jobBudget, loadHistory: vi.fn(async () => [sweepRow]) });
+  const r2 = await runEpicSettle({ cwd: '/c', epicId: EPIC }, d2);
+  expect(r2).toEqual({ action: 'sweep-queued', slug: expect.any(String), carried: 0 });
+  expect(d2.createPrd.mock.calls[0][0].dependsOn).toEqual(['b']);
+
+  const sweep2 = { ...sweepRow, slug: `804-${d2.createPrd.mock.calls[0][0].slug}x`, dependsOn: ['b'] };
+  const afterSecond = [...afterFirst, verdict('801-b', 'verified', 20)];
+  const d3 = settleDeps(afterSecond, { readGateMs, jobBudget, loadHistory: vi.fn(async () => [sweepRow, sweep2]) });
+  const r3 = await runEpicSettle({ cwd: '/c', epicId: EPIC }, d3);
+  expect(r3.action).toBe('digest-sent');
+  expect(d3.createPrd).not.toHaveBeenCalled();
+  expect(d3.sendPrompt).toHaveBeenCalledTimes(1);
+  expect(d3.sendPrompt.mock.calls[0][1]).toContain('Verified (3)');
 });

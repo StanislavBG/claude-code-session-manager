@@ -143,7 +143,7 @@ const { pickForProject, pickNextBatch, findStarvedProjects, DEFAULT_PROJECT_CWD,
 const { runDefinitionOfDoneOnDrain } = require('./lib/scheduler/dodDrainHook.cjs');
 const { writeRcaReport, extractRcaBlock } = require('./lib/scheduler/rcaReport.cjs');
 const queueHistory = require('./lib/scheduler/queueHistory.cjs');
-const { resolveGate, runGateSequence } = require('./lib/scheduler/definitionOfDone.cjs');
+const { resolveGate, runGateSequence, gateTimeoutMs } = require('./lib/scheduler/definitionOfDone.cjs');
 const queueOps = require('./queueOps.cjs');
 // Feedback-auto-PRD sweep — formerly only run by the external scheduler-watchdog
 // while the app was down (PRD 686 moved it in-app so it also runs while alive).
@@ -3304,6 +3304,13 @@ async function resolveFixPlanPath(failedJob) {
  * scheduleSettle option: arms the debounced Epic settle runner with live deps.
  * `remote` is defined later in the module but only read at call time.
  */
+async function readValidatorGateMs(cwd, epicId, slugs) {
+  const texts = await prdPaths.readEpicPrdTexts(cwd, epicId, slugs);
+  const out = new Map();
+  for (const [slug, text] of texts) out.set(slug, gateTimeoutMs(text));
+  return out;
+}
+
 function defaultScheduleSettle({ cwd, epicId }) {
   const deps = {
     loadJobs: async () => (await readQueue()).jobs || [],
@@ -3316,6 +3323,8 @@ function defaultScheduleSettle({ cwd, epicId }) {
         return null;
       }
     },
+    readGateMs: readValidatorGateMs,
+    jobBudget: { factor: budget.JOB_BUDGET_FACTOR, ceilingMs: budget.JOB_BUDGET_CEILING_MS },
     sendPrompt: (tabId, prompt) => enqueueExternalPrompt(tabId, prompt, { origin: 'scheduler' }),
     appendResponseEvent: appendResponseEventIfKnown,
   };
@@ -11748,6 +11757,7 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
 }
 
 module.exports = {
+  readValidatorGateMs,
   planJobScope,
   finalizeJobScope,
   sampleJobScope,

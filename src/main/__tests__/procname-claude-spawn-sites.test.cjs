@@ -156,11 +156,14 @@ describe.skipIf(!HAS_PROC)('real aliased processes vs the reaper gates', () => {
   const comm = (pid) => { try { return fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim(); } catch { return null; } };
   const cmdline = (pid) => fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
 
+  // The kernel sets comm before the new image's argv pointers, so cmdline can read empty briefly.
+  const execDone = (pid, name) => { try { return comm(pid) === name && cmdline(pid).length > 0; } catch { return false; } };
+
   it('kernel comm is the alias, cmdline carries the label + slug, and all four gates match', async () => {
     const slug = `pn02-slug-${process.pid}-${Date.now()}`;
     const wt = fs.mkdtempSync(path.join(tmpHome, 'wt-'));
     const child = spawnAliased('job', slug, { cwd: wt });
-    await waitFor(() => comm(child.pid) === 'sm-claude-job');
+    await waitFor(() => execDone(child.pid, 'sm-claude-job'));
     const cmd = cmdline(child.pid);
     // A shebang stub's cmdline[0] is the interpreter and [1] the ALIAS PATH (the
     // kernel rewrites argv for scripts, so argv0 is not visible); a native
@@ -181,7 +184,7 @@ describe.skipIf(!HAS_PROC)('real aliased processes vs the reaper gates', () => {
     const t = claudeBin.claudeSpawnTarget('job', slug, sleepBin);
     const child = spawn(t.command, ['30'], { cwd: os.tmpdir(), stdio: 'ignore', detached: true, argv0: t.argv0 });
     kids.push(child);
-    await waitFor(() => comm(child.pid) === 'sm-claude-job');
+    await waitFor(() => execDone(child.pid, 'sm-claude-job'));
     const cmd = cmdline(child.pid);
     expect(cmd.startsWith(`sm-claude-job:${slug}`)).toBe(true);
     expect(GATE.test(cmd)).toBe(true);

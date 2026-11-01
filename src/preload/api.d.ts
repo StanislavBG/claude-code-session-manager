@@ -1031,8 +1031,10 @@ export interface ScheduleLoadGate {
   cpuWindowMs: number | null;
   /** True when loadavg was over threshold but the CPU sample showed it mostly idle, so launches proceed. */
   standDown: boolean;
-  /** How long the current gated stretch has lasted, 0 when not gated. */
-  gatedSinceMs: number;
+  /** Time this gate itself held a batch that slots and memory admitted; 0 when not holding */
+  heldMs: number;
+  /** True on the tick where a long hold reached its limit and one job was let through. */
+  yielded: boolean;
   at: string;
 }
 

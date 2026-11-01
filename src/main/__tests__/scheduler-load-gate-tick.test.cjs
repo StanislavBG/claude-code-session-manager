@@ -45,7 +45,7 @@ function gateWithCpu(busyFraction) {
     loadavg: () => [32.84, 25, 22],
     cores: () => 14,
     threshold: 0.85,
-    cpu: { observe() {}, sample: () => ({ busyFraction, windowMs: 61_000 }) },
+    cpu: { observe() {}, sample: () => ({ busyFraction, iowaitFraction: 0, windowMs: 61_000 }) },
   });
 }
 
@@ -125,7 +125,7 @@ test('a hold that reaches the yield window launches exactly one of two rows, wit
     loadavg: () => [32.84, 25, 22],
     cores: () => 14,
     threshold: 0.85,
-    cpu: { observe() {}, sample: () => ({ busyFraction: 0.91, windowMs: 61_000 }) },
+    cpu: { observe() {}, sample: () => ({ busyFraction: 0.91, iowaitFraction: 0, windowMs: 61_000 }) },
     now: () => t,
     yieldAfterMs: 5 * 60_000,
     holdCreditCapMs: 10 * 60_000,

@@ -7,7 +7,7 @@
  * it can read high on a mostly idle machine (2026-11-01, 14 CPUs: 25 D-state
  * tasks gave loadavg1 22.39 while the CPU was only 24% busy over 75 s). This
  * helper derives busy/total from cumulative counters over a window of about a
- * minute instead. Pure and injectable (`read`, `now`); nothing calls it yet.
+ * minute instead. Pure and injectable (`read`, `now`).
  */
 
 const fs = require('node:fs');
@@ -22,15 +22,17 @@ const MAX_WINDOW_MS = 180_000;
 const MIN_SPACING_MS = 5_000;
 
 /**
- * Parse the aggregate `cpu ` line of /proc/stat into { busy, total }.
+ * Parse the aggregate `cpu ` line of /proc/stat into { busy, iowait, total }.
  * Columns: user nice system idle iowait irq softirq steal guest guest_nice.
  * Only the first 8 count (guest time is already inside user).
- * - iowait counts as busy: a disk-saturated machine keeps holding launches;
- *   only true idle may open the gate.
+ * - iowait is not busy: the CPU is idle during it and the load gate judges CPU
+ *   only. Swap-in waits land there on this host, and the memory gate and swap
+ *   clamp run before the load gate. It is carried as its own figure. os.cpus()
+ *   has no such column, so macOS matches.
  * - nice counts as busy: every Session Manager process here runs at nice 12,
  *   so nice is the largest column on this box.
  * @param {string} text
- * @returns {{ busy: number, total: number } | null}
+ * @returns {{ busy: number, iowait: number, total: number } | null}
  */
 function parseProcStat(text) {
   if (typeof text !== 'string' || !text) return null;
@@ -46,12 +48,14 @@ function parseProcStat(text) {
   }
   while (nums.length < 8) nums.push(0);
   const total = nums.reduce((a, b) => a + b, 0);
-  return { busy: total - nums[3], total };
+  const idle = nums[3];
+  const iowait = nums[4];
+  return { busy: total - idle - iowait, iowait, total };
 }
 
 /**
  * @param {{ platform?: string, readFile?: (p: string) => string, cpus?: () => import('node:os').CpuInfo[] }} [deps]
- * @returns {{ busy: number, total: number } | null}
+ * @returns {{ busy: number, iowait: number, total: number } | null}
  */
 function readCpuTimes({
   platform = process.platform,
@@ -70,14 +74,14 @@ function readCpuTimes({
       idle += t.idle;
     }
     if (![busy, idle].every(Number.isFinite)) return null;
-    return { busy, total: busy + idle };
+    return { busy, iowait: 0, total: busy + idle };
   } catch {
     return null;
   }
 }
 
 /**
- * @param {{ read?: () => ({busy:number,total:number}|null), now?: () => number,
+ * @param {{ read?: () => ({busy:number,iowait?:number,total:number}|null), now?: () => number,
  *   windowMs?: number, minWindowMs?: number, maxWindowMs?: number, minSpacingMs?: number }} [opts]
  */
 function createCpuSampler({
@@ -88,7 +92,7 @@ function createCpuSampler({
   maxWindowMs = MAX_WINDOW_MS,
   minSpacingMs = MIN_SPACING_MS,
 } = {}) {
-  /** @type {{ at: number, busy: number, total: number }[]} */
+  /** @type {{ at: number, busy: number, iowait: number, total: number }[]} */
   let entries = [];
 
   function observe() {
@@ -97,7 +101,7 @@ function createCpuSampler({
     if (!r) return;
     const newest = entries[entries.length - 1];
     if (newest && t - newest.at < minSpacingMs) return;
-    entries.push({ at: t, busy: r.busy, total: r.total });
+    entries.push({ at: t, busy: r.busy, iowait: r.iowait ?? 0, total: r.total });
     entries = entries.filter((e) => t - e.at <= maxWindowMs);
   }
 
@@ -119,9 +123,14 @@ function createCpuSampler({
     if (!best) return null;
     const dBusy = r.busy - best.busy;
     const dTotal = r.total - best.total;
+    const dIowait = (r.iowait ?? 0) - best.iowait;
     // Per-CPU idle and iowait counters can step backwards.
     if (dTotal <= 0 || dBusy < 0) return null;
-    return { busyFraction: Math.min(1, dBusy / dTotal), windowMs: t - best.at };
+    return {
+      busyFraction: Math.min(1, dBusy / dTotal),
+      iowaitFraction: Math.min(1, Math.max(0, dIowait / dTotal)),
+      windowMs: t - best.at,
+    };
   }
 
   return { observe, sample };

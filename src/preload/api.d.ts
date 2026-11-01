@@ -1027,6 +1027,8 @@ export interface ScheduleLoadGate {
   cores: number;
   /** Measured machine-wide CPU busy fraction (0..1) over cpuWindowMs, or null with no sample. */
   cpuBusy: number | null;
+  /** Machine-wide iowait fraction (0..1) over the same window (not counted as busy), or null with no sample. */
+  cpuIowait: number | null;
   /** Length of the CPU sample window in ms, or null with no sample. */
   cpuWindowMs: number | null;
   /** True when loadavg was over threshold but the CPU sample showed it mostly idle, so launches proceed. */

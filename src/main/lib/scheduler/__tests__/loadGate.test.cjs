@@ -111,7 +111,7 @@ test('a ps failure (throw) degrades to [] rather than propagating — the audit 
 // ─── createLoadGate: decision, 1-minute-only, bypass ───────────────────────
 
 const NO_CPU = { observe() {}, sample: () => null };
-const cpuAt = (busyFraction) => ({ observe() {}, sample: () => ({ busyFraction, windowMs: 61_000 }) });
+const cpuAt = (busyFraction, iowaitFraction = 0) => ({ observe() {}, sample: () => ({ busyFraction, iowaitFraction, windowMs: 61_000 }) });
 
 function gateWith({ l1 = 12.95, l5 = 0, l15 = 0, cores = 14, threshold = 0.85, clock, cpu = NO_CPU }) {
   let t = clock ?? 0;
@@ -290,6 +290,20 @@ test('high loadavg with an idle CPU stands down', () => {
   assert.equal(r.cpuWindowMs, 61_000);
   assert.equal(r.shouldAuditStandDown, true);
   assert.equal(g.evaluate().shouldAuditStandDown, false);
+});
+
+test('high loadavg with 10% busy and 60% iowait stands down and reports cpuIowait', () => {
+  const { g } = gateWith({ cpu: cpuAt(0.1, 0.6) });
+  const r = g.evaluate();
+  assert.equal(r.gated, false);
+  assert.equal(r.standDown, true);
+  assert.equal(r.cpuIowait, 0.6);
+  assert.equal(g.snapshot().cpuIowait, 0.6);
+});
+
+test('cpuIowait is null with no sample and on win32', () => {
+  assert.equal(gateWith({}).g.evaluate().cpuIowait, null);
+  assert.equal(createLoadGate({ platform: 'win32', cores: () => 4 }).evaluate().cpuIowait, null);
 });
 
 test('high loadavg with a busy CPU keeps holding', () => {

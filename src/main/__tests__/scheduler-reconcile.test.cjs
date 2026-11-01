@@ -500,6 +500,73 @@ describe("quarantine", () => {
     }
   });
 
+  test('reconcile() skips minting for a project whose queue file the read did not cover', async () => {
+    const { cwd, prdsDir, stateDir } = makeFixtureProject('sm-uncovered-');
+    try {
+      const prd = (t) => `---\ntitle: ${t}\ncwd: ${cwd}\nestimateMinutes: 15\ncreatedVia: scheduler-api\nissuedAt: 2026-08-07T00:00:00.000Z\n---\n\n# Goal\nx\n`;
+      fs.writeFileSync(path.join(prdsDir, '9101-running-one.md'), prd('Running'), 'utf8');
+      fs.writeFileSync(path.join(prdsDir, '9102-pending-one.md'), prd('Pending'), 'utf8');
+      // unstamped PRD must not be quarantined/audited either
+      fs.writeFileSync(path.join(prdsDir, '9103-unstamped.md'), `---\ntitle: U\ncwd: ${cwd}\nestimateMinutes: 15\n---\n\n# Goal\nx\n`, 'utf8');
+      const rows = [
+        { slug: '9101-running-one', cwd, status: 'running', title: 'Running', prdPath: path.join(prdsDir, '9101-running-one.md') },
+        { slug: '9102-pending-one', cwd, status: 'pending', title: 'Pending', prdPath: path.join(prdsDir, '9102-pending-one.md') },
+      ];
+      const qfile = path.join(stateDir, 'queue.json');
+      fs.writeFileSync(qfile, JSON.stringify({ jobs: rows }, null, 2), 'utf8');
+      const before = fs.readFileSync(qfile);
+
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const bustSpy = vi.spyOn(queueStore, 'bustCwdCache');
+      const { auditLogPath } = require('../lib/telemetry/auditLog.cjs');
+      const auditBefore = fs.existsSync(auditLogPath()) ? fs.readFileSync(auditLogPath(), 'utf8') : '';
+
+      const state = { config: {}, jobs: [], invalidJobs: [], paused: null, sourceCwds: [] };
+      await scheduler.reconcile(state);
+
+      expect(state.jobs.filter((j) => j.cwd === cwd)).toHaveLength(0);
+      expect(fs.readFileSync(qfile).equals(before)).toBe(true);
+      expect(bustSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls.filter((a) => String(a[0]).includes(cwd) && String(a[0]).includes('did not cover'))).toHaveLength(1);
+      const added = fs.readFileSync(auditLogPath(), 'utf8').slice(auditBefore.length).trim().split('\n').filter(Boolean).map((l) => JSON.parse(l));
+      expect(added.filter((r) => r.kind === 'reconcile_uncovered_project' && r.cwd === cwd)).toHaveLength(1);
+      expect(added.some((r) => r.kind === 'prd_quarantined' && r.cwd === cwd)).toBe(false);
+
+      // Next read covers the project: rows match, nothing minted, no duplicates.
+      bustSpy.mockRestore();
+      queueStore.bustCwdCache();
+      const state2 = { config: {}, jobs: [], invalidJobs: [], paused: null, sourceCwds: [cwd] };
+      state2.jobs = rows.map((r) => ({ ...r }));
+      await scheduler.reconcile(state2);
+      const mine = state2.jobs.filter((j) => j.cwd === cwd && !j.slug.startsWith('9103'));
+      expect(mine.map((j) => j.slug).sort()).toEqual(['9101-running-one', '9102-pending-one']);
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  test('reconcile() still mints for a project with no queue file, and for a state with no sourceCwds', async () => {
+    const a = makeFixtureProject('sm-uncovered-nofile-');
+    const b = makeFixtureProject('sm-uncovered-nosrc-');
+    try {
+      const prd = (cwd) => `---\ntitle: T\ncwd: ${cwd}\nestimateMinutes: 15\ncreatedVia: scheduler-api\nissuedAt: 2026-08-07T00:00:00.000Z\n---\n\n# Goal\nx\n`;
+      fs.writeFileSync(path.join(a.prdsDir, '9111-fresh.md'), prd(a.cwd), 'utf8');
+      fs.writeFileSync(path.join(b.prdsDir, '9112-nosrc.md'), prd(b.cwd), 'utf8');
+      fs.writeFileSync(path.join(b.stateDir, 'queue.json'), JSON.stringify({ jobs: [] }), 'utf8');
+      queueStore.bustCwdCache();
+      const s1 = { config: {}, jobs: [], invalidJobs: [], paused: null, sourceCwds: [] };
+      await scheduler.reconcile(s1);
+      expect(s1.jobs.find((j) => j.slug === '9111-fresh')?.status).toBe('pending');
+      queueStore.bustCwdCache();
+      const s2 = { config: {}, jobs: [], invalidJobs: [], paused: null };
+      await scheduler.reconcile(s2);
+      expect(s2.jobs.find((j) => j.slug === '9112-nosrc')?.status).toBe('pending');
+    } finally {
+      fs.rmSync(a.cwd, { recursive: true, force: true });
+      fs.rmSync(b.cwd, { recursive: true, force: true });
+    }
+  });
+
   test('reconcile() queues a newly-discovered PRD stamped with createdVia as pending, not quarantined', async () => {
     const { cwd, prdsDir, stateDir } = makeFixtureProject('sm-quarantine-stamped-');
     try {

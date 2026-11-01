@@ -1976,8 +1976,23 @@ async function reconcilePass(state) {
   }
 
   let staleNewDiscoveryCount = 0;
+  // Reads use queueStore's cached project list (up to 120 s old) while PRD
+  // discovery sees every project. A project with a real queue file that this
+  // read never covered looks empty, so minting would write a shard holding
+  // only fresh rows over the real ones (same danger listPrdFiles guards for
+  // quarantined shards). Skip such PRDs and bust the cache for the next read.
+  const covered = Array.isArray(state.sourceCwds) ? new Set(state.sourceCwds) : null;
+  const uncovered = new Map();
   for (const [slug, p] of onDisk) {
     if (seen.has(slug)) continue;
+    if (covered) {
+      const mintCwd = p.cwd ?? deriveProjectCwdFromPrdPath(p.path) ?? null;
+      if (mintCwd && !covered.has(mintCwd) && fs.existsSync(queueStore.projectQueuePath(mintCwd))) {
+        if (!uncovered.has(mintCwd)) uncovered.set(mintCwd, []);
+        uncovered.get(mintCwd).push(slug);
+        continue;
+      }
+    }
     // Security gate: a PRD's file location IS its Epic membership
     // (prdLocations.deriveEpicIdFromPrdPath / p.epicId). Before this check,
     // the scheduler queued ANY .md file it found under an Epic's prds/ dir
@@ -2142,6 +2157,11 @@ async function reconcilePass(state) {
       }
     } catch { /* stat is best-effort reporting only */ }
     next.push(entry);
+  }
+  if (uncovered.size > 0) {
+    queueStore.bustCwdCache();
+    console.warn(`[scheduler] reconcile: skipped minting PRDs for project(s) whose queue file this read did not cover: ${[...uncovered.keys()].join(', ')}`);
+    for (const [cwd, skippedPrds] of uncovered) appendAuditEvent('reconcile_uncovered_project', { cwd, skippedPrds });
   }
   if (staleNewDiscoveryCount > 0) {
     console.warn(`[scheduler] reconcile: ${staleNewDiscoveryCount} PRD(s) discovered this pass were already older than one poll interval with no prior queue row`);

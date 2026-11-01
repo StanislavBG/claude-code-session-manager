@@ -8275,10 +8275,14 @@ async function runJobLeftoverSweep(deps = {}) {
   } = deps;
   if (now - lastJobLeftoverSweepAt < JOB_LEFTOVER_SWEEP_INTERVAL_MS) return [];
   if (platform !== 'linux' || process.env.SM_E2E === '1') return [];
+  // Fail closed under vitest: the queue is a sandbox with no rows, so every
+  // marked process on the real machine would read as ended and get killed.
+  // Same rule as assertNotLiveRoot in lib/scheduler/schedulerPaths.cjs.
+  if (process.env.VITEST && !deps.scan) return [];
   lastJobLeftoverSweepAt = now;
   const scanned = scan();
   const state = await readState();
-  if (!state || !Array.isArray(state.jobs) || quarantinedCwdSet(state).size > 0) return [];
+  if (!state || state.unreadable || !Array.isArray(state.jobs) || quarantinedCwdSet(state).size > 0) return [];
   const leftovers = jobLeftovers.selectLeftovers({
     scan: scanned, rows: state.jobs, runningSlugs: runningSet, now, selfPid: process.pid,
   });

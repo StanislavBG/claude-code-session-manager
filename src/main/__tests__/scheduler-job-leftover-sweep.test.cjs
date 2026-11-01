@@ -1,6 +1,6 @@
 'use strict';
 
-import { test, beforeEach, afterAll } from 'vitest';
+import { test, beforeEach, afterAll, vi } from 'vitest';
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -13,6 +13,7 @@ fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager'), { recursive: true
 fs.mkdirSync(path.join(tmpHome, '.claude', 'projects'), { recursive: true });
 
 const { runJobLeftoverSweep } = require('../scheduler.cjs');
+const jobLeftovers = require('../lib/scheduler/jobLeftovers.cjs');
 
 afterAll(() => {
   process.env.HOME = originalHome;
@@ -97,5 +98,28 @@ test('does not stop processes of a still-running row', async () => {
     readState: async () => ({ jobs: [{ slug: 'old-job', status: 'running' }], unreadableCwds: [] }),
   });
   await runJobLeftoverSweep(deps);
+  assert.ok(!calls.includes('stop'));
+});
+
+test('under vitest with no injected scan, never scans the real /proc', async () => {
+  const spy = vi.spyOn(jobLeftovers, 'scanJobProcesses');
+  try {
+    const { deps } = mkDeps({ now: clock });
+    delete deps.scan;
+    const out = await runJobLeftoverSweep(deps);
+    assert.deepEqual(out, []);
+    assert.equal(spy.mock.calls.length, 0);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
+test('does nothing for the real unreadable-queue shape, even with a marked process and no row', async () => {
+  const { deps, calls } = mkDeps({
+    now: clock,
+    readState: async () => ({ jobs: [], unreadable: 'x', unreadableCwds: [] }),
+  });
+  const out = await runJobLeftoverSweep(deps);
+  assert.deepEqual(out, []);
   assert.ok(!calls.includes('stop'));
 });

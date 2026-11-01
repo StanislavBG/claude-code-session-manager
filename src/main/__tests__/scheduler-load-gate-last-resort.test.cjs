@@ -24,6 +24,8 @@ let originalHome;
 let originalWt;
 let scheduler;
 let createLoadGate;
+let queueStore;
+let holdGate;
 let auditLogPath;
 
 function makeProject(name) {
@@ -43,6 +45,7 @@ function queueOne(proj, slug) {
   fs.writeFileSync(proj.queueFile, JSON.stringify({
     jobs: [{ slug, title: slug, status: 'pending', cwd: proj.cwd, dependsOn: [], createdAt: new Date().toISOString() }],
   }));
+  queueStore.bustCwdCache();
 }
 
 function gateWithCpu(busyFraction) {
@@ -74,6 +77,13 @@ beforeAll(() => {
   fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager'), { recursive: true });
   scheduler = require('../scheduler.cjs');
   ({ createLoadGate } = require('../lib/scheduler/loadGate.cjs'));
+  queueStore = require('../lib/scheduler/queueStore.cjs');
+  holdGate = createLoadGate({
+    loadavg: () => [32.84, 25, 22],
+    cores: () => 14,
+    threshold: 0.85,
+    cpu: { observe() {}, sample: () => ({ busyFraction: 0.95, iowaitFraction: 0, windowMs: 61_000 }) },
+  });
   ({ auditLogPath } = require('../lib/telemetry/auditLog.cjs'));
   process.env.SM_CLAUDE_BIN = claudeStub.writeClaudeStub({ body: `
     require('fs').writeFileSync(require('path').join(process.cwd(), 'ran-here.marker'), 'yes');
@@ -96,7 +106,7 @@ function anyRunning() {
   return false;
 }
 
-afterEach(() => settleScheduler({ scheduler, projectsDir: path.join(tmpHome, 'Projects') }));
+afterEach(() => settleScheduler({ scheduler, holdGate, projectsDir: path.join(tmpHome, 'Projects') }));
 
 afterAll(async () => {
   // A stub job may still be finalizing; removing HOME under it prints ENOENT noise.
@@ -120,6 +130,7 @@ async function twoRowBypassTick(name, gate, tickOpts) {
   fs.writeFileSync(proj.queueFile, JSON.stringify({
     jobs: slugs.map((slug) => ({ slug, title: slug, status: 'pending', cwd: proj.cwd, dependsOn: [], createdAt: new Date().toISOString() })),
   }));
+  queueStore.bustCwdCache();
   const before = readAuditKind('load_gate_last_resort').length;
   scheduler._setLoadGateForTests(gate);
   const result = await scheduler.tickQueue(tickOpts);
@@ -134,9 +145,6 @@ async function twoRowBypassTick(name, gate, tickOpts) {
   const launched = 2 - pending;
   // Let launched stub jobs finish so they cannot rewrite the queue after the cleanup below.
   for (let i = 0; i < 100 && (anyRunning() || slots.inUse() > 0); i += 1) await new Promise((r) => setTimeout(r, 50));
-  // Drop held rows so they do not inflate the next test's batch.
-  const q = JSON.parse(fs.readFileSync(proj.queueFile, 'utf8'));
-  fs.writeFileSync(proj.queueFile, JSON.stringify({ ...q, jobs: q.jobs.filter((j) => j.status !== 'pending') }));
   return { result, pending, launched, newRows: readAuditKind('load_gate_last_resort').slice(before) };
 }
 

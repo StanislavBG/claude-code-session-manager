@@ -48,9 +48,12 @@ STABILITY_RUNS=3 timeout 900 npm run test:unit:stability
 dev-only — not in package.json's `files`, never shipped in the npm tarball.
 
 A test that launches a job through `tickQueue` must settle in `afterEach` with
-`settleScheduler` (`tests/helpers/schedulerSettle.cjs`). The job is fire-and-forget: left in flight
-it holds a session slot and its `mutate()` rewrites `queue.json`, overwriting rows the next test
-wrote directly to disk, so the next case sees phantom or missing rows.
+`settleScheduler({ scheduler, holdGate, projectsDir })` (`tests/helpers/schedulerSettle.cjs`) and call
+`queueStore.bustCwdCache()` right after each fixture writes `queue.json`. The job is fire-and-forget:
+when it ends, a tick and the broadcast coalescer run `reconcile`, and a reconcile whose read missed a
+new project on queueStore's cached project list treats that project's PRDs as new and overwrites its
+`queue.json`, so the next case sees quarantined or missing rows. Settle drains the slots, ticks,
+wipes fixture rows and PRD files, then busts the cache.
 
 When authoring a test that touches real time or spawns child processes, prefer:
 - An injected/frozen clock (`vi.useFakeTimers()` + `vi.setSystemTime()`, or the module's own

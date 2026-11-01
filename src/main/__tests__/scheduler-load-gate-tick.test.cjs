@@ -22,6 +22,8 @@ let originalHome;
 let originalWt;
 let scheduler;
 let createLoadGate;
+let queueStore;
+let holdGate;
 let auditLogPath;
 
 function makeProject(name) {
@@ -41,6 +43,7 @@ function queueOne(proj, slug) {
   fs.writeFileSync(proj.queueFile, JSON.stringify({
     jobs: [{ slug, title: slug, status: 'pending', cwd: proj.cwd, dependsOn: [], createdAt: new Date().toISOString() }],
   }));
+  queueStore.bustCwdCache();
 }
 
 function gateWithCpu(busyFraction) {
@@ -72,6 +75,13 @@ beforeAll(() => {
   fs.mkdirSync(path.join(tmpHome, '.claude', 'session-manager'), { recursive: true });
   scheduler = require('../scheduler.cjs');
   ({ createLoadGate } = require('../lib/scheduler/loadGate.cjs'));
+  queueStore = require('../lib/scheduler/queueStore.cjs');
+  holdGate = createLoadGate({
+    loadavg: () => [32.84, 25, 22],
+    cores: () => 14,
+    threshold: 0.85,
+    cpu: { observe() {}, sample: () => ({ busyFraction: 0.95, iowaitFraction: 0, windowMs: 61_000 }) },
+  });
   ({ auditLogPath } = require('../lib/telemetry/auditLog.cjs'));
   process.env.SM_CLAUDE_BIN = claudeStub.writeClaudeStub({ body: `
     require('fs').writeFileSync(require('path').join(process.cwd(), 'ran-here.marker'), 'yes');
@@ -94,7 +104,7 @@ function anyRunning() {
   return false;
 }
 
-afterEach(() => settleScheduler({ scheduler, projectsDir: path.join(tmpHome, 'Projects') }));
+afterEach(() => settleScheduler({ scheduler, holdGate, projectsDir: path.join(tmpHome, 'Projects') }));
 
 afterAll(async () => {
   // A stub job may still be finalizing; removing HOME under it prints ENOENT noise.
@@ -118,8 +128,6 @@ test('high loadavg with a busy CPU defers and names the CPU figure', async () =>
   const payload = scheduler.buildScheduleStatePayload({ config: {}, jobs: [], scheduledFor: null, lastRunAt: null, paused: null });
   expect(payload.lastTick.detail).toContain('CPU 91% busy over 61s');
   expect(fs.existsSync(path.join(proj.cwd, 'ran-here.marker'))).toBe(false);
-  // Drop the held row so the next test's tick launches only its own project.
-  fs.writeFileSync(proj.queueFile, JSON.stringify({ jobs: [] }));
 }, 120_000);
 
 test('high loadavg with an idle CPU stands down and fires the batch', async () => {
@@ -141,6 +149,7 @@ test('a hold that reaches the yield window launches exactly one of two rows, wit
   fs.writeFileSync(proj.queueFile, JSON.stringify({
     jobs: slugs.map((slug) => ({ slug, title: slug, status: 'pending', cwd: proj.cwd, dependsOn: [], createdAt: new Date().toISOString() })),
   }));
+  queueStore.bustCwdCache();
   let t = 1_000_000;
   scheduler._setLoadGateForTests(createLoadGate({
     loadavg: () => [32.84, 25, 22],
@@ -174,7 +183,6 @@ test('a hold that reaches the yield window launches exactly one of two rows, wit
     pending = queue.jobs.filter((j) => j.status === 'pending').length;
   }
   expect(pending).toBe(1);
-  scheduler.attachWindow(null);
 }, 120_000);
 
 test('a saturated hold at the yield window launches nothing, with one audit row and one toast', async () => {
@@ -184,6 +192,7 @@ test('a saturated hold at the yield window launches nothing, with one audit row 
   fs.writeFileSync(proj.queueFile, JSON.stringify({
     jobs: slugs.map((slug) => ({ slug, title: slug, status: 'pending', cwd: proj.cwd, dependsOn: [], createdAt: new Date().toISOString() })),
   }));
+  queueStore.bustCwdCache();
   let t = 9_000_000;
   scheduler._setLoadGateForTests(createLoadGate({
     loadavg: () => [32.84, 25, 22],
@@ -214,8 +223,6 @@ test('a saturated hold at the yield window launches nothing, with one audit row 
   expect(rows[0].cpuBusy).toBe(0.95);
   expect(sent.filter((m) => m.channel === 'schedule:stall').length).toBe(1);
   expect(fs.existsSync(path.join(proj.cwd, 'ran-here.marker'))).toBe(false);
-  scheduler.attachWindow(null);
-  fs.writeFileSync(proj.queueFile, JSON.stringify({ jobs: [] }));
 }, 120_000);
 
 function readDispatchStamps() {
@@ -225,11 +232,6 @@ function readDispatchStamps() {
 
 test('endHold is called on a drained tick and a paused tick, not on a memory-deferred tick, and on a launch', async () => {
   const proj = makeProject('endhold-proj');
-  // Earlier tests left pending/finished rows in other projects; start from empty queues.
-  for (const name of fs.readdirSync(path.join(tmpHome, 'Projects'))) {
-    const qf = path.join(tmpHome, 'Projects', name, 'session-manager-operations', 'scheduler', 'state', 'queue.json');
-    if (fs.existsSync(qf)) fs.writeFileSync(qf, JSON.stringify({ jobs: [] }));
-  }
   const gate = gateWithCpu(0.91);
   const spy = vi.spyOn(gate, 'endHold');
   scheduler._setLoadGateForTests(gate);
@@ -240,7 +242,6 @@ test('endHold is called on a drained tick and a paused tick, not on a memory-def
   expect(spy).toHaveBeenCalledTimes(1);
 
   // paused
-  const queueStore = require('../lib/scheduler/queueStore.cjs');
   await scheduler.setPaused('manual', null);
   try {
     spy.mockClear();
@@ -274,7 +275,6 @@ test('endHold is called on a drained tick and a paused tick, not on a memory-def
   const launched = await scheduler.tickQueue({ bypassLoadGate: true });
   expect(launched.fired).toBe(true);
   expect(spy).toHaveBeenCalledTimes(1);
-  fs.writeFileSync(proj.queueFile, JSON.stringify({ jobs: [] }));
 }, 120_000);
 
 test('a yield stamps lastDispatchAtByCwd only for the launched row\'s project', async () => {

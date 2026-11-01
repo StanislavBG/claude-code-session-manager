@@ -19,6 +19,8 @@ describe('bin/cli.cjs launcher (real process, fake Electron)', () => {
     for (const f of fs.readdirSync(path.join(REPO, 'bin'))) {
       if (f.endsWith('.cjs')) fs.copyFileSync(path.join(REPO, 'bin', f), path.join(pkg, 'bin', f));
     }
+    fs.mkdirSync(path.join(pkg, 'src', 'main', 'lib', 'process'), { recursive: true });
+    fs.copyFileSync(path.join(REPO, 'src', 'main', 'lib', 'process', 'ozonePlatform.cjs'), path.join(pkg, 'src', 'main', 'lib', 'process', 'ozonePlatform.cjs'));
     fs.copyFileSync(path.join(REPO, 'package.json'), path.join(pkg, 'package.json'));
 
     const fake = path.join(tmp, 'fake-electron.sh');
@@ -50,5 +52,48 @@ describe('bin/cli.cjs launcher (real process, fake Electron)', () => {
     const err = fs.readFileSync(path.join(logs, 'electron-stderr.log'), 'utf8');
     expect(err).toContain('fake-electron stderr run 1');
     expect(err).toContain('fake-electron stderr run 2');
+  }, 15000);
+
+  async function runArgv(envExtra, launcherArgs) {
+    const pkg = path.join(tmp, 'pkg');
+    const logs = path.join(tmp, 'logs');
+    fs.mkdirSync(path.join(pkg, 'bin'), { recursive: true });
+    fs.mkdirSync(path.join(pkg, 'node_modules', 'electron'), { recursive: true });
+    fs.mkdirSync(logs, { recursive: true });
+    for (const f of fs.readdirSync(path.join(REPO, 'bin'))) {
+      if (f.endsWith('.cjs')) fs.copyFileSync(path.join(REPO, 'bin', f), path.join(pkg, 'bin', f));
+    }
+    fs.mkdirSync(path.join(pkg, 'src', 'main', 'lib', 'process'), { recursive: true });
+    fs.copyFileSync(path.join(REPO, 'src', 'main', 'lib', 'process', 'ozonePlatform.cjs'), path.join(pkg, 'src', 'main', 'lib', 'process', 'ozonePlatform.cjs'));
+    fs.copyFileSync(path.join(REPO, 'package.json'), path.join(pkg, 'package.json'));
+    const argvFile = path.join(tmp, 'argv.txt');
+    const fake = path.join(tmp, 'fake-electron.sh');
+    fs.writeFileSync(fake, `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${argvFile}"\nexit 0\n`, { mode: 0o755 });
+    fs.writeFileSync(path.join(pkg, 'node_modules', 'electron', 'index.js'), `module.exports = ${JSON.stringify(fake)};\n`);
+    const env = { ...process.env, SM_LOGS_DIR: logs, ...envExtra };
+    for (const k of Object.keys(envExtra)) if (envExtra[k] === undefined) delete env[k];
+    await new Promise((resolve, reject) => {
+      const p = spawn(process.execPath, [path.join(pkg, 'bin', 'cli.cjs'), ...launcherArgs], { cwd: pkg, env, stdio: 'ignore' });
+      p.on('error', reject);
+      p.on('close', resolve);
+    });
+    return { argv: fs.readFileSync(argvFile, 'utf8').trim().split('\n'), pkg };
+  }
+
+  it('passes --ozone-platform=x11 before the app path on Wayland with DISPLAY', async () => {
+    const { argv, pkg } = await runArgv({ XDG_SESSION_TYPE: 'wayland', DISPLAY: ':0', SM_OZONE_PLATFORM: undefined }, []);
+    const flagAt = argv.indexOf('--ozone-platform=x11');
+    expect(flagAt).toBe(0);
+    expect(argv.indexOf(fs.realpathSync(pkg))).toBeGreaterThan(flagAt);
+  }, 15000);
+
+  it('passes no flag with XDG_SESSION_TYPE and DISPLAY unset', async () => {
+    const { argv } = await runArgv({ XDG_SESSION_TYPE: undefined, DISPLAY: undefined, SM_OZONE_PLATFORM: undefined }, []);
+    expect(argv.some((a) => a.startsWith('--ozone-platform'))).toBe(false);
+  }, 15000);
+
+  it('an explicit --ozone-platform launcher arg wins and is not duplicated', async () => {
+    const { argv } = await runArgv({ XDG_SESSION_TYPE: 'wayland', DISPLAY: ':0', SM_OZONE_PLATFORM: undefined }, ['--ozone-platform=wayland']);
+    expect(argv.filter((a) => a.startsWith('--ozone-platform'))).toEqual(['--ozone-platform=wayland']);
   }, 15000);
 });

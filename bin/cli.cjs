@@ -38,6 +38,7 @@ try {
 }
 
 const sup = require('./supervise.cjs');
+const { chooseOzonePlatform } = require('../src/main/lib/process/ozonePlatform.cjs');
 
 const appRoot = path.join(__dirname, '..');
 const dir = sup.logsDir();
@@ -48,9 +49,19 @@ let forwardedSignal = null;
 let respawns = [];
 let current = null;
 
+// --ozone-platform must be on Electron's real argv: appendSwitch from the main script runs after
+// Electron has picked its platform. An explicit launcher arg wins and is never duplicated.
+function ozoneArgs(args) {
+  if (args.some((a) => a === '--ozone-platform' || a.startsWith('--ozone-platform='))) return [];
+  let choice = null;
+  try { choice = chooseOzonePlatform(process.env); } catch { /* default platform */ }
+  return choice ? [`--ozone-platform=${choice}`] : [];
+}
+
 function launch() {
   const startedAt = Date.now();
-  const child = spawn(electronBin, [appRoot, ...process.argv.slice(2)], {
+  const userArgs = process.argv.slice(2);
+  const child = spawn(electronBin, [...ozoneArgs(userArgs), appRoot, ...userArgs], {
     stdio: ['inherit', 'inherit', 'pipe'],
     env: process.env,
   });

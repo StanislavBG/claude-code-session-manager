@@ -58,9 +58,6 @@ try {
   process.stderr.write(`[win-userdata] fallback failed: ${err && err.message}\n`);
 }
 crashDiagnostics.startCrashReporter();
-// Must precede app ready. x11 on Wayland sessions (XWayland) avoids compositor-dropped clients.
-const ozonePlatformChoice = require('./lib/process/ozonePlatform.cjs').chooseOzonePlatform(process.env);
-if (ozonePlatformChoice) app.commandLine.appendSwitch('ozone-platform', ozonePlatformChoice);
 const voiceHotkey = require('./voiceHotkey.cjs');
 const voiceWizard = require('./voiceWizard.cjs');
 const scheduler = require('./scheduler.cjs');
@@ -1250,7 +1247,7 @@ app.on('web-contents-created', (_e, wc) => {
 app.whenReady().then(async () => {
   logs.pruneOld();
   logs.writeLine({ scope: 'main', level: 'info', message: 'app start', meta: { version: app.getVersion(), platform: process.platform } });
-  if (ozonePlatformChoice) logs.writeLine({ scope: 'main', level: 'info', message: 'ozone platform', meta: { ozonePlatform: ozonePlatformChoice, override: process.env.SM_OZONE_PLATFORM || null } });
+  logs.writeLine({ scope: 'main', level: 'info', message: 'ozone platform', meta: { ozonePlatform: app.commandLine.getSwitchValue('ozone-platform') || 'default', override: process.env.SM_OZONE_PLATFORM || null } });
 
   // Crash/OOM diagnostics: logs a postmortem if the PREVIOUS run died
   // uncleanly (the silent OOM-kill we've been chasing), then starts the memory

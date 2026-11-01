@@ -591,25 +591,43 @@ function readJobCgroupDir(pid, unit, fsImpl = fs) {
   }
 }
 
-/** Appends memory.peak + oom_kill to the run log (missing files ignored), then stops the scope exactly once. */
+/** Reads memory.peak + oom_kill into state.peak/state.oomKills; keeps the last good values when files are gone. */
+function sampleJobScope(state, fsImpl = fs) {
+  if (!state || !state.cgroupDir) return;
+  try {
+    const peak = Number(String(fsImpl.readFileSync(path.join(state.cgroupDir, 'memory.peak'), 'utf8')).trim());
+    if (Number.isFinite(peak)) state.peak = peak;
+  } catch { /* gone: keep last */ }
+  try {
+    const m = /^oom_kill\s+(\d+)/m.exec(String(fsImpl.readFileSync(path.join(state.cgroupDir, 'memory.events'), 'utf8')));
+    if (m) state.oomKills = Number(m[1]);
+  } catch { /* gone: keep last */ }
+}
+
+const JOB_SCOPE_SAMPLE_MS = 30000;
+
+/** Starts the unref'd 30 s sampler once cgroupDir is known; finalizeJobScope clears it. */
+function startJobScopeSampling(state, fsImpl = fs) {
+  if (!state || !state.cgroupDir || state.finalized || state.sampler) return;
+  sampleJobScope(state, fsImpl);
+  state.sampler = setInterval(() => sampleJobScope(state, fsImpl), JOB_SCOPE_SAMPLE_MS);
+  if (state.sampler.unref) state.sampler.unref();
+}
+
+/** Logs the last sampled memory.peak + oom_kill to the run log, then stops the scope exactly once. */
 function finalizeJobScope(state, safeLog, deps = {}) {
   if (!state || !state.unit || state.finalized) return;
   state.finalized = true;
   const fsImpl = deps.fs || fs;
+  if (state.sampler) { clearInterval(state.sampler); state.sampler = null; }
   try {
     if (!state.cgroupDir && state.pid) state.cgroupDir = readJobCgroupDir(state.pid, state.unit, fsImpl);
-    if (state.cgroupDir) {
-      let peak = null;
-      let oomKills = null;
-      try { peak = Number(String(fsImpl.readFileSync(path.join(state.cgroupDir, 'memory.peak'), 'utf8')).trim()); } catch { /* gone */ }
-      try {
-        const m = /^oom_kill\s+(\d+)/m.exec(String(fsImpl.readFileSync(path.join(state.cgroupDir, 'memory.events'), 'utf8')));
-        if (m) oomKills = Number(m[1]);
-      } catch { /* gone */ }
-      if (Number.isFinite(peak) || oomKills !== null) {
-        safeLog(`\n[scheduler] memory scope ${state.unit}: peak=${Number.isFinite(peak) ? `${Math.round(peak / 1048576)}MB` : 'n/a'} ` +
-          `oom_kill=${oomKills ?? 'n/a'}\n`);
-      }
+    sampleJobScope(state, fsImpl);
+    const hasPeak = Number.isFinite(state.peak);
+    const hasOom = state.oomKills !== undefined && state.oomKills !== null;
+    if (hasPeak || hasOom) {
+      safeLog(`\n[scheduler] memory scope ${state.unit}: peak=${hasPeak ? `${Math.round(state.peak / 1048576)}MB` : 'n/a'} ` +
+        `oom_kill=${hasOom ? state.oomKills : 'n/a'}\n`);
     }
   } catch { /* stats are best-effort */ }
   (deps.stopScope || memoryScope.stopScope)(state.unit);
@@ -5077,9 +5095,13 @@ async function executeJob(job, runDir, defaultCwd, onPid, execCwd, resumeTarget 
         // cgroup now (the process may be gone at finalize), retrying briefly.
         scopeState.pid = child.pid;
         scopeState.cgroupDir = readJobCgroupDir(child.pid, scopeState.unit);
+        startJobScopeSampling(scopeState);
         for (const delay of scopeState.cgroupDir ? [] : [500, 3000]) {
           const t = setTimeout(() => {
-            if (!scopeState.cgroupDir && !scopeState.finalized) scopeState.cgroupDir = readJobCgroupDir(child.pid, scopeState.unit);
+            if (!scopeState.cgroupDir && !scopeState.finalized) {
+              scopeState.cgroupDir = readJobCgroupDir(child.pid, scopeState.unit);
+              startJobScopeSampling(scopeState);
+            }
           }, delay);
           if (t.unref) t.unref();
         }
@@ -11566,6 +11588,7 @@ function registerAdminRoutes(adminHttp, remoteObj = remote) {
 module.exports = {
   planJobScope,
   finalizeJobScope,
+  sampleJobScope,
   readJobCgroupDir,
   normalizeConfig,
   recordTick,

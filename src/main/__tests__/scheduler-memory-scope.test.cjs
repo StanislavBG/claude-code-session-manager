@@ -62,3 +62,65 @@ test('null limits: scopeSupported is not called and the spawn is unwrapped', () 
   expect(plan.spawn).toBe(jobSpawn);
   expect(plan.unit).toBeNull();
 });
+
+test('sampleJobScope keeps last good values after files vanish; finalize logs them', () => {
+  const files = { '/cg/memory.peak': '5242880\n', '/cg/memory.events': 'oom_kill 1\n' };
+  const fsImpl = { readFileSync: (p) => { if (p in files) return files[p]; throw new Error('ENOENT'); } };
+  const state = { unit: 'u3', pid: null, cgroupDir: '/cg', finalized: false };
+  scheduler.sampleJobScope(state, fsImpl);
+  expect(state.peak).toBe(5242880);
+  expect(state.oomKills).toBe(1);
+  for (const k of Object.keys(files)) delete files[k];
+  scheduler.sampleJobScope(state, fsImpl);
+  expect(state.peak).toBe(5242880);
+  const log = vi.fn();
+  const stopScope = vi.fn();
+  scheduler.finalizeJobScope(state, log, { fs: fsImpl, stopScope });
+  expect(log.mock.calls[0][0]).toContain('memory scope u3: peak=5MB oom_kill=1');
+});
+
+test('no sample ever taken logs nothing', () => {
+  const log = vi.fn();
+  const fsImpl = { readFileSync: () => { throw new Error('ENOENT'); } };
+  scheduler.finalizeJobScope({ unit: 'u4', pid: null, cgroupDir: null, finalized: false }, log, { fs: fsImpl, stopScope: vi.fn() });
+  expect(log).not.toHaveBeenCalled();
+});
+
+test('finalize clears the sampling interval', () => {
+  const clear = vi.spyOn(globalThis, 'clearInterval');
+  const timer = setInterval(() => {}, 100000);
+  timer.unref();
+  const state = { unit: 'u5', pid: null, cgroupDir: null, finalized: false, sampler: timer };
+  scheduler.finalizeJobScope(state, vi.fn(), { fs: { readFileSync: () => { throw new Error('x'); } }, stopScope: vi.fn() });
+  expect(clear).toHaveBeenCalledWith(timer);
+  expect(state.sampler).toBeNull();
+  clear.mockRestore();
+});
+
+const memoryScope = require('../lib/process/memoryScope.cjs');
+const realTest = memoryScope.scopeSupported() ? test : test.skip;
+realTest('real scope: sampling a running sleep gives peak > 0 and no oom kills', async () => {
+  const { spawn } = require('node:child_process');
+  const unit = `sm-job-test-${process.pid}-${Date.now()}`;
+  const w = memoryScope.wrapInMemoryScope({
+    command: 'sleep', args: ['2'], unit,
+    limits: { memoryMaxMb: 512, memoryHighMb: 400, swapMaxMb: 0 },
+  });
+  const child = spawn(w.command, w.args, { stdio: 'ignore' });
+  try {
+    let dir = null;
+    const deadline = Date.now() + 1000;
+    while (!dir && Date.now() < deadline) {
+      dir = scheduler.readJobCgroupDir(child.pid, unit);
+      if (!dir) await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(dir).not.toBeNull();
+    const state = { cgroupDir: dir };
+    scheduler.sampleJobScope(state);
+    expect(state.peak).toBeGreaterThan(0);
+    expect(state.oomKills).toBe(0);
+  } finally {
+    child.kill();
+    memoryScope.stopScope(unit);
+  }
+}, 10000);

@@ -62,6 +62,50 @@ describe('UrlCallout', () => {
     expect(open).not.toHaveBeenCalled()
   })
 
+  describe('copied flash timer', () => {
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    })
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+    const copyBtn = (c: Element) =>
+      Array.from(c.querySelectorAll('button')).find((b) => b.textContent === 'Copy' || b.textContent === 'Copied')!
+
+    it('copy then unmount leaves no pending timer', async () => {
+      const c = mount('https://example.com/a')
+      await click(copyBtn(c))
+      expect(vi.getTimerCount()).toBe(1)
+      act(() => root!.unmount())
+      expect(vi.getTimerCount()).toBe(0)
+      root = createRoot(document.createElement('div'))
+    })
+
+    it('two copies leave one timer', async () => {
+      const c = mount('https://example.com/a')
+      await click(copyBtn(c))
+      await click(copyBtn(c))
+      expect(vi.getTimerCount()).toBe(1)
+    })
+
+    it('copied clears after 1100 ms', async () => {
+      const c = mount('https://example.com/a')
+      await click(copyBtn(c))
+      expect(copyBtn(c).textContent).toBe('Copied')
+      act(() => { vi.advanceTimersByTime(1100) })
+      expect(copyBtn(c).textContent).toBe('Copy')
+    })
+
+    it('failed copy toasts and stays uncopied', async () => {
+      writeText.mockResolvedValue({ ok: false })
+      const c = mount('https://example.com/a')
+      await click(copyBtn(c))
+      expect(toastError).toHaveBeenCalledWith('Copy failed')
+      expect(copyBtn(c).textContent).toBe('Copy')
+      expect(vi.getTimerCount()).toBe(0)
+    })
+  })
+
   it('never passes a javascript: URL to shell.open', async () => {
     const c = mount('javascript:alert(1)')
     await click(c.querySelector('[data-testid="chat-url-callout-open"]')!)

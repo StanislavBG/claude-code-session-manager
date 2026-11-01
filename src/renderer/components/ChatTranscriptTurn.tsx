@@ -35,13 +35,31 @@ function hasMarkdownList(text: string): boolean {
   return HAS_LIST_RE.test(text)
 }
 
-export function UrlCallout({ url }: { url: string }) {
+/** "Copied" flash: one timer in a ref, restarted on repeat, cleared on unmount. */
+function useCopiedFlash(ms: number): [boolean, () => void] {
   const [copied, setCopied] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (timer.current !== null) clearTimeout(timer.current)
+    timer.current = null
+  }, [])
+  const flash = useCallback(() => {
+    if (timer.current !== null) clearTimeout(timer.current)
+    setCopied(true)
+    timer.current = setTimeout(() => {
+      timer.current = null
+      setCopied(false)
+    }, ms)
+  }, [ms])
+  return [copied, flash]
+}
+
+export function UrlCallout({ url }: { url: string }) {
+  const [copied, flashCopied] = useCopiedFlash(1100)
   const onCopy = () => {
     void writeClipboard(url).then((ok) => {
       if (ok) {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 1100)
+        flashCopied()
       } else {
         toast.error('Copy failed')
       }
@@ -104,15 +122,14 @@ function FileCallout({
    *  keeps today's Open-in-Editor-only behavior. */
   inlinePreview?: boolean
 }) {
-  const [copied, setCopied] = useState(false)
+  const [copied, flashCopied] = useCopiedFlash(1100)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewText, setPreviewText] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const onCopy = () => {
     void writeClipboard(path).then((ok) => {
       if (ok) {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 1100)
+        flashCopied()
       } else {
         toast.error('Copy failed')
       }
@@ -503,7 +520,7 @@ export function TurnRawFooter({
   const [rawOpen, setRawOpen] = useState(false)
   const [rawText, setRawText] = useState<string | null>(null)
   const [rawLoading, setRawLoading] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [copied, flashCopied] = useCopiedFlash(1100)
 
   if (!turnRef && !copyText) return null
 
@@ -531,8 +548,7 @@ export function TurnRawFooter({
     if (!text) return
     void writeClipboard(text).then((ok) => {
       if (ok) {
-        setCopied(true)
-        setTimeout(() => setCopied(false), 1100)
+        flashCopied()
       } else {
         toast.error('Copy failed')
       }

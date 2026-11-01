@@ -201,9 +201,33 @@ test('a launch ends the hold: a non-holding evaluate() resets heldMs to 0', () =
   state.l1 = 1; state.t += 60_000;
   const r = g.evaluate();
   assert.equal(r.gated, false);
-  assert.equal(r.heldMs, 0);
+  assert.equal(r.heldMs, 0, 'a non-holding tick reports 0');
+  g.endHold(); // tickBody calls this once a spawn was issued
   state.l1 = 12.95; state.t += 60_000;
   assert.equal(g.evaluate().heldMs, 0, 'a fresh hold starts from zero');
+});
+
+test('a non-holding evaluate() does not clear the clock; only endHold() does', () => {
+  const { g, state } = clockGate();
+  g.evaluate();
+  state.t += 60_000;
+  assert.equal(g.evaluate().heldMs, 60_000);
+  state.l1 = 1; state.t += 60_000;
+  assert.equal(g.evaluate().heldMs, 0);
+  state.l1 = 12.95; state.t += 60_000;
+  assert.equal(g.evaluate().heldMs, 180_000, 'clock survived the low tick (gap credited, capped at 2 min)');
+  g.endHold();
+  state.t += 60_000;
+  assert.equal(g.evaluate().heldMs, 0);
+});
+
+test('a backward clock step cannot shrink heldMs', () => {
+  const { g, state } = clockGate();
+  g.evaluate();
+  state.t += 60_000;
+  assert.equal(g.evaluate().heldMs, 60_000);
+  state.t -= 10 * 60_000;
+  assert.equal(g.evaluate().heldMs, 60_000);
 });
 
 test('a hovering box: low ticks launch, so heldMs never exceeds one tick', () => {
@@ -213,6 +237,7 @@ test('a hovering box: low ticks launch, so heldMs never exceeds one tick', () =>
     state.l1 = SEQUENCE[i % SEQUENCE.length];
     const r = g.evaluate();
     assert.ok(r.heldMs <= 60_000, `heldMs ${r.heldMs} exceeded one tick`);
+    if (!r.gated) g.endHold(); // the low tick launches, so tickBody ends the hold
     assert.equal(r.yielded, false);
     state.t += 60_000;
   }
@@ -237,6 +262,11 @@ test('yield then re-arm: reaching yieldAfterMs yields once, reports heldMs, and 
   assert.equal(r.heldMs, 5 * 60_000);
   state.t += 60_000;
   r = g.evaluate();
+  assert.equal(r.yielded, true, 'stays armed until endHold()');
+  assert.equal(r.gated, false);
+  g.endHold();
+  state.t += 60_000;
+  r = g.evaluate();
   assert.equal(r.gated, true, 're-armed: holds again');
   assert.equal(r.heldMs, 0);
   assert.equal(r.yielded, false);
@@ -252,6 +282,7 @@ test('bypass ends the hold', () => {
   assert.equal(r.bypassed, true);
   assert.equal(r.gated, false);
   assert.equal(r.heldMs, 0);
+  g.endHold();
   state.t += 60_000;
   assert.equal(g.evaluate().heldMs, 0);
 });

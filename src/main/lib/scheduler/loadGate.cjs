@@ -99,7 +99,7 @@ function topCpuConsumers(n = 3, { execImpl = execFileSync, platform = process.pl
 }
 
 /**
- * createLoadGate(opts) → { evaluate, observe, snapshot }
+ * createLoadGate(opts) → { evaluate, observe, snapshot, endHold }
  *
  * Decision: loadavg over threshold AND the CPU sample not mostly idle (busy
  * fraction >= min(threshold, MOSTLY_IDLE_BUSY)) holds; over threshold with a
@@ -113,11 +113,11 @@ function topCpuConsumers(n = 3, { execImpl = execFileSync, platform = process.pl
  *     shouldAudit, heldMs, yielded }
  * - shouldAudit: true at most once per AUDIT_INTERVAL_MS while gated.
  * - heldMs: time this gate itself held a batch. Each gated tick adds
- *   min(gap since previous gated tick, holdCreditCapMs); any non-holding
- *   evaluate() resets it to 0.
+ *   max(0, min(gap since previous gated tick, holdCreditCapMs)); only
+ *   endHold() resets it (evaluate() never does).
  * - yielded: heldMs reached yieldAfterMs (JOB_OVERRUN_FLOOR_MS, 45 min by
- *   default). gated is false on that tick, the clock restarts, and the caller
- *   launches one job.
+ *   default). gated is false, it stays true on later ticks until the caller
+ *   calls endHold() after a real launch, and the caller launches one job.
  * - bypassed: `bypass` was set (an explicit human Run now) and the gate would
  *   otherwise have held; the caller launches anyway and logs that it did.
  *
@@ -177,20 +177,13 @@ function createLoadGate({
 
     const holding = wouldGate && !bypass;
     if (holding) {
-      if (lastHeldAt !== null) heldMs += Math.min(t - lastHeldAt, holdCreditCapMs);
+      if (lastHeldAt !== null) heldMs += Math.max(0, Math.min(t - lastHeldAt, holdCreditCapMs));
       lastHeldAt = t;
-    } else {
-      heldMs = 0;
-      lastHeldAt = null;
     }
+    // A yield stays armed until the caller proves a launch with endHold().
     const yielded = holding && heldMs >= yieldAfterMs;
     const gated = holding && !yielded;
     const bypassed = wouldGate && bypass;
-    const reportedHeldMs = heldMs;
-    if (yielded) {
-      heldMs = 0;
-      lastHeldAt = null;
-    }
 
     let shouldAudit = false;
     if (gated && (lastAuditAt === null || t - lastAuditAt >= auditIntervalMs)) {
@@ -213,18 +206,25 @@ function createLoadGate({
       cpuWindowMs: sample ? sample.windowMs : null,
       standDown,
       cores: c,
-      heldMs: reportedHeldMs,
+      heldMs: holding ? heldMs : 0,
       yielded,
       at: new Date(t).toISOString(),
     };
     return { ...last, shouldAudit, shouldAuditStandDown };
   }
 
+  // Only the caller knows a launch really happened (or that nothing is waiting
+  // on this gate), so only the caller ends a hold.
+  function endHold() {
+    heldMs = 0;
+    lastHeldAt = null;
+  }
+
   function snapshot() {
     return last;
   }
 
-  return { evaluate, observe, snapshot };
+  return { evaluate, observe, snapshot, endHold };
 }
 
 module.exports = { isLoadGated, createLoadGate, topCpuConsumers, AUDIT_INTERVAL_MS, MOSTLY_IDLE_BUSY };

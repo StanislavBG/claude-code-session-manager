@@ -8,7 +8,7 @@
 
 'use strict';
 
-import { test, expect, beforeAll, afterAll } from 'vitest';
+import { test, expect, beforeAll, afterAll, vi } from 'vitest';
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -77,7 +77,23 @@ beforeAll(() => {
   ` });
 });
 
-afterAll(() => {
+function anyRunning() {
+  try {
+    const projects = path.join(tmpHome, 'Projects');
+    for (const name of fs.readdirSync(projects)) {
+      const qf = path.join(projects, name, 'session-manager-operations', 'scheduler', 'state', 'queue.json');
+      try {
+        const q = JSON.parse(fs.readFileSync(qf, 'utf8'));
+        if ((q.jobs || []).some((j) => j.status === 'running')) return true;
+      } catch { /* missing or mid-write */ }
+    }
+  } catch { /* no projects dir */ }
+  return false;
+}
+
+afterAll(async () => {
+  // A stub job may still be finalizing; removing HOME under it prints ENOENT noise.
+  for (let i = 0; i < 100 && anyRunning(); i += 1) await new Promise((r) => setTimeout(r, 50));
   process.env.HOME = originalHome;
   if (originalWt === undefined) delete process.env.SM_JOB_WORKTREE_DISABLE;
   else process.env.SM_JOB_WORKTREE_DISABLE = originalWt;
@@ -154,4 +170,93 @@ test('a hold that reaches the yield window launches exactly one of two rows, wit
   }
   expect(pending).toBe(1);
   scheduler.attachWindow(null);
+}, 120_000);
+
+function readDispatchStamps() {
+  const f = path.join(tmpHome, '.claude', 'session-manager', 'scheduler-machine.json');
+  try { return JSON.parse(fs.readFileSync(f, 'utf8')).lastDispatchAtByCwd || {}; } catch { return {}; }
+}
+
+test('endHold is called on a drained tick and a paused tick, not on a memory-deferred tick, and on a launch', async () => {
+  const proj = makeProject('endhold-proj');
+  // Earlier tests left pending/finished rows in other projects; start from empty queues.
+  for (const name of fs.readdirSync(path.join(tmpHome, 'Projects'))) {
+    const qf = path.join(tmpHome, 'Projects', name, 'session-manager-operations', 'scheduler', 'state', 'queue.json');
+    if (fs.existsSync(qf)) fs.writeFileSync(qf, JSON.stringify({ jobs: [] }));
+  }
+  const gate = gateWithCpu(0.91);
+  const spy = vi.spyOn(gate, 'endHold');
+  scheduler._setLoadGateForTests(gate);
+
+  // drained
+  const drained = await scheduler.tickQueue();
+  expect(drained.fired).toBe(false);
+  expect(spy).toHaveBeenCalledTimes(1);
+
+  // paused
+  const queueStore = require('../lib/scheduler/queueStore.cjs');
+  await scheduler.setPaused('manual', null);
+  try {
+    spy.mockClear();
+    const paused = await scheduler.tickQueue();
+    expect(paused.reason).toBe('paused');
+    expect(spy).toHaveBeenCalledTimes(1);
+  } finally {
+    await scheduler.clearPause('manual');
+  }
+  expect((await queueStore.readMerged()).paused).toBeFalsy();
+
+  // memory-deferred: work is waiting, so the hold must survive
+  const slug = `9204-mem-${process.pid}`;
+  queueOne(proj, slug);
+  const fixture = path.join(tmpHome, 'meminfo-1gb');
+  fs.writeFileSync(fixture, 'MemAvailable:    1048576 kB\nSwapTotal:             0 kB\nSwapFree:              0 kB\n');
+  const prev = process.env.SM_MEMINFO_PATH;
+  process.env.SM_MEMINFO_PATH = fixture;
+  try {
+    spy.mockClear();
+    const deferred = await scheduler.tickQueue();
+    expect(deferred.reason).toBe('memory-deferred');
+    expect(spy).not.toHaveBeenCalled();
+  } finally {
+    if (prev === undefined) delete process.env.SM_MEMINFO_PATH;
+    else process.env.SM_MEMINFO_PATH = prev;
+  }
+
+  // launch (bypass the busy gate, as Run now does)
+  spy.mockClear();
+  const launched = await scheduler.tickQueue({ bypassLoadGate: true });
+  expect(launched.fired).toBe(true);
+  expect(spy).toHaveBeenCalledTimes(1);
+  fs.writeFileSync(proj.queueFile, JSON.stringify({ jobs: [] }));
+}, 120_000);
+
+test('a yield stamps lastDispatchAtByCwd only for the launched row\'s project', async () => {
+  const a = makeProject('stamp-a');
+  const b = makeProject('stamp-b');
+  const slugA = `9205-stamp-a-${process.pid}`;
+  const slugB = `9205-stamp-b-${process.pid}`;
+  queueOne(a, slugA);
+  queueOne(b, slugB);
+  let t = 5_000_000;
+  scheduler._setLoadGateForTests(createLoadGate({
+    loadavg: () => [32.84, 25, 22],
+    cores: () => 14,
+    threshold: 0.85,
+    cpu: { observe() {}, sample: () => ({ busyFraction: 0.91, iowaitFraction: 0, windowMs: 61_000 }) },
+    now: () => t,
+    yieldAfterMs: 5 * 60_000,
+    holdCreditCapMs: 10 * 60_000,
+  }));
+  const first = await scheduler.tickQueue();
+  expect(first.reason).toBe('load-deferred');
+  expect(readDispatchStamps()[a.cwd]).toBeUndefined();
+  expect(readDispatchStamps()[b.cwd]).toBeUndefined();
+  t += 6 * 60_000;
+  const second = await scheduler.tickQueue();
+  expect(second.fired).toBe(true);
+  expect(second.count).toBe(1);
+  const stamps = readDispatchStamps();
+  const stamped = [a.cwd, b.cwd].filter((c) => stamps[c]);
+  expect(stamped.length).toBe(1);
 }, 120_000);

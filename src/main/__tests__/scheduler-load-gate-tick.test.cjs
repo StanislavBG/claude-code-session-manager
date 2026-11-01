@@ -112,3 +112,46 @@ test('high loadavg with an idle CPU stands down and fires the batch', async () =
   expect(rows.length).toBeGreaterThanOrEqual(1);
   expect(rows[0].cpuBusy).toBe(0.13);
 }, 120_000);
+
+test('a hold that reaches the yield window launches exactly one of two rows, with one audit row and one toast', async () => {
+  const proj = makeProject('yield-proj');
+  const slugs = [`9203-yield-a-${process.pid}`, `9203-yield-b-${process.pid}`];
+  for (const slug of slugs) fs.writeFileSync(path.join(proj.prdsDir, `${slug}.md`), 'Load gate PRD.', 'utf8');
+  fs.writeFileSync(proj.queueFile, JSON.stringify({
+    jobs: slugs.map((slug) => ({ slug, title: slug, status: 'pending', cwd: proj.cwd, dependsOn: [], createdAt: new Date().toISOString() })),
+  }));
+  let t = 1_000_000;
+  scheduler._setLoadGateForTests(createLoadGate({
+    loadavg: () => [32.84, 25, 22],
+    cores: () => 14,
+    threshold: 0.85,
+    cpu: { observe() {}, sample: () => ({ busyFraction: 0.91, windowMs: 61_000 }) },
+    now: () => t,
+    yieldAfterMs: 5 * 60_000,
+    holdCreditCapMs: 10 * 60_000,
+  }));
+  const sent = [];
+  scheduler.attachWindow({
+    isDestroyed: () => false,
+    webContents: { isDestroyed: () => false, isCrashed: () => false, send: (channel, payload) => sent.push({ channel, payload }) },
+  });
+  const first = await scheduler.tickQueue();
+  expect(first.reason).toBe('load-deferred');
+  t += 6 * 60_000;
+  const second = await scheduler.tickQueue();
+  expect(second.fired).toBe(true);
+  expect(second.count).toBe(1);
+  const rows = readAuditKind('load_gate_yielded');
+  expect(rows.length).toBe(1);
+  expect(rows[0].stillHeld.length).toBe(1);
+  expect(sent.filter((m) => m.channel === 'schedule:stall').length).toBe(1);
+  // spawnJob is fire-and-forget: wait for the launched row to leave 'pending'.
+  let pending = 2;
+  for (let i = 0; i < 50 && pending > 1; i += 1) {
+    await new Promise((r) => setTimeout(r, 100));
+    const queue = JSON.parse(fs.readFileSync(proj.queueFile, 'utf8'));
+    pending = queue.jobs.filter((j) => j.status === 'pending').length;
+  }
+  expect(pending).toBe(1);
+  scheduler.attachWindow(null);
+}, 120_000);

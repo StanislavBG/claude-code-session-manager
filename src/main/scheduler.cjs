@@ -2533,17 +2533,16 @@ function applyPauseCleared(wasPaused, token) {
 /**
  * Human-readable explanation for a `reason: 'load-deferred'` tick, surfaced
  * to the renderer via lastTick.detail. Names the gate, the measured ratio,
- * the threshold and how long the stretch has been held — the box could sit
- * gated for 80+ minutes with nothing in the UI naming why (PRD: load gate
- * hysteresis). Pure so it's unit-testable without driving tickQueue's full
+ * the threshold and how long this gate itself has held a batch that slots and
+ * memory admitted (heldMs). Pure so it's unit-testable without driving tickQueue's full
  * fs/worktree machinery.
  */
 function formatLoadGateDetail(load) {
-  const heldMinutes = Math.round(load.gatedSinceMs / 60_000);
+  const heldMinutes = Math.round(load.heldMs / 60_000);
   const cpu = load.cpuBusy == null
     ? 'no CPU sample yet'
     : `CPU ${Math.round(load.cpuBusy * 100)}% busy over ${Math.round(load.cpuWindowMs / 1000)}s`;
-  return `CPU load gate: loadavg1 ${load.loadavg1} / ${load.cores} cores = ${load.ratio} > threshold ${load.threshold}, ${cpu}, held for ${heldMinutes}m`;
+  return `CPU load gate: loadavg1 ${load.loadavg1} / ${load.cores} cores = ${load.ratio} > threshold ${load.threshold}, ${cpu}, held ${heldMinutes}m with slots and memory free`;
 }
 
 function attachWindow(w) { mainWindow = w; }
@@ -7894,21 +7893,17 @@ async function tickBody(gen, { bypassLoadGate }) {
     // withholds this tick's launches while the 1-minute loadavg per core is
     // over LOAD_GATE_PER_CORE AND a real CPU sample does not show the CPU mostly
     // idle (then it stands down and the batch launches). An explicit human Run now bypasses it.
+    let launchBatch = gatedBatch;
     const load = loadGate.evaluate({ bypass: bypassLoadGate });
     if (load.bypassed) {
       console.log(`[scheduler] load gate: BYPASSED by run-now (loadavg1=${load.loadavg1} cores=${load.cores} ratio=${load.ratio} > ${load.threshold})`);
     } else if (load.gated) {
       const line = `[scheduler] load gate: loadavg1=${load.loadavg1} cores=${load.cores} ratio=${load.ratio} > ${load.threshold} — holding ${gatedBatch.length} eligible job(s)`;
-      if (load.escalate) {
-        const top = topCpuConsumers(3);
-        console.warn(`${line} for ${Math.round(load.gatedSinceMs / 60_000)}m; top CPU: ${top.length ? top.join(' | ') : 'n/a'}`);
-      } else {
-        console.log(line);
-      }
+      console.log(line);
       if (load.shouldAudit) {
         appendAuditEvent('launch_load_gated', {
           loadavg1: load.loadavg1, cores: load.cores, ratio: load.ratio, threshold: load.threshold,
-          held: gatedBatch.map((j) => j.slug), gatedSinceMs: load.gatedSinceMs,
+          held: gatedBatch.map((j) => j.slug), heldMs: load.heldMs,
           cpuBusy: load.cpuBusy, cpuWindowMs: load.cpuWindowMs,
         });
       }
@@ -7916,6 +7911,28 @@ async function tickBody(gen, { bypassLoadGate }) {
         { fired: false, reason: 'load-deferred', deferredCount: gatedBatch.length, ratio: load.ratio, threshold: load.threshold },
         { detail: formatLoadGateDetail(load), holds },
       );
+    } else if (load.yielded) {
+      // The gate held this batch for the whole yield window with slots and
+      // memory free: let ONE job through (the CPU really is busy here).
+      launchBatch = gatedBatch.slice(0, 1);
+      const top = topCpuConsumers(3);
+      const mins = Math.round(load.heldMs / 60_000);
+      console.warn(`[scheduler] load gate: held ${gatedBatch.length} job(s) for ${mins}m with slots and memory free — letting ${launchBatch[0].slug} through; top CPU: ${top.length ? top.join(' | ') : 'n/a'}`);
+      appendAuditEvent('load_gate_yielded', {
+        loadavg1: load.loadavg1, cores: load.cores, ratio: load.ratio, threshold: load.threshold,
+        cpuBusy: load.cpuBusy, cpuWindowMs: load.cpuWindowMs, heldMs: load.heldMs,
+        launched: launchBatch[0].slug, stillHeld: gatedBatch.slice(1).map((j) => j.slug), top,
+      });
+      const byProject = {};
+      for (const j of gatedBatch) {
+        const key = j.cwd;
+        byProject[key] = { held: (byProject[key]?.held || 0) + 1 };
+      }
+      sendIfAlive(mainWindow, 'schedule:stall', {
+        message: `CPU load gate held ${gatedBatch.length} job(s) for ${mins}m with slots and memory free; letting one through. ${formatLoadGateDetail(load)}`,
+        total: gatedBatch.length,
+        byProject,
+      });
     } else if (load.standDown) {
       console.log(`[scheduler] load gate: stood down — loadavg1=${load.loadavg1} cores=${load.cores} ratio=${load.ratio} > ${load.threshold} but CPU ${Math.round(load.cpuBusy * 100)}% busy over ${Math.round(load.cpuWindowMs / 1000)}s`);
       if (load.shouldAuditStandDown) {
@@ -7932,7 +7949,7 @@ async function tickBody(gen, { bypassLoadGate }) {
     if (stale()) return STALE_TICK;
 
     const { runId, dir: runDir } = pickRunDir();
-    for (const job of gatedBatch) {
+    for (const job of launchBatch) {
       if (cancelToken.cancelled || stale()) break;
       // spawnJob is fire-and-forget; it calls tickQueue() on completion.
       // state.jobs is the queue's rows in scope at THIS dispatch (PRD 1408) —
@@ -7940,7 +7957,7 @@ async function tickBody(gen, { bypassLoadGate }) {
       // never re-reads the queue itself.
       spawnJob(job, runId, runDir, state.config.defaultCwd, null, state.jobs).catch((e) => reportSchedulerError('spawnJob dispatch rejected', job.slug, e));
     }
-    return recordTick({ fired: true, count: gatedBatch.length, group: gatedBatch[0]?.parallelGroup }, { holds });
+    return recordTick({ fired: true, count: launchBatch.length, group: launchBatch[0]?.parallelGroup }, { holds });
   }
 }
 

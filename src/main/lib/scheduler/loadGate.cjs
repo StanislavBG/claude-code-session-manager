@@ -42,14 +42,10 @@ const MOSTLY_IDLE_BUSY = 0.5;
 // every tick would bury the signal in its own noise.
 const AUDIT_INTERVAL_MS = 10 * 60_000;
 
-// Default hysteresis release window for the gated stretch (PRD: boundary-
-// hovering load). A box sitting right at the threshold oscillates above/below
-// it tick to tick; clearing `gatedSince` on the first sub-threshold sample
-// reset the stretch counter every time, so `escalate` (and the warn-log with
-// topCpuConsumers()) never fired even after 80+ minutes of effectively
-// continuous gating. The stretch now only clears once load has stayed below
-// threshold continuously for this long.
-const RELEASE_WINDOW_MS = 2 * 60_000;
+// A gated tick credits at most this much held time. A longer gap between gated
+// ticks means slots or memory were the limiter in between (evaluate() runs only
+// once they admit a batch), and that time is not this gate's.
+const HOLD_CREDIT_CAP_MS = 2 * 60_000;
 
 /**
  * isLoadGated(loadavg1, cores, threshold) → boolean
@@ -111,13 +107,17 @@ function topCpuConsumers(n = 3, { execImpl = execFileSync, platform = process.pl
  * verdict. observe() feeds the sampler and must run every tick.
  *
  * Holds the small amount of state the gate needs across ticks (when it was
- * last audited, when the current gated stretch began). `evaluate({ bypass })`
+ * last audited, the time this gate itself has held a batch). `evaluate({ bypass })`
  * returns the decision for THIS tick:
  *   { gated, ratio, threshold, loadavg1, cores, bypassed,
- *     shouldAudit, escalate, gatedSinceMs }
+ *     shouldAudit, heldMs, yielded }
  * - shouldAudit: true at most once per AUDIT_INTERVAL_MS while gated.
- * - escalate: true once the current gated stretch exceeds JOB_OVERRUN_FLOOR_MS
- *   (45 min by default) — the caller warn-logs with topCpuConsumers().
+ * - heldMs: time this gate itself held a batch. Each gated tick adds
+ *   min(gap since previous gated tick, holdCreditCapMs); any non-holding
+ *   evaluate() resets it to 0.
+ * - yielded: heldMs reached yieldAfterMs (JOB_OVERRUN_FLOOR_MS, 45 min by
+ *   default). gated is false on that tick, the clock restarts, and the caller
+ *   launches one job.
  * - bypassed: `bypass` was set (an explicit human Run now) and the gate would
  *   otherwise have held; the caller launches anyway and logs that it did.
  *
@@ -129,14 +129,14 @@ function createLoadGate({
   now = () => Date.now(),
   threshold = loadGateThreshold,
   auditIntervalMs = AUDIT_INTERVAL_MS,
-  escalateAfterMs = JOB_OVERRUN_FLOOR_MS,
-  releaseWindowMs = RELEASE_WINDOW_MS,
+  holdCreditCapMs = HOLD_CREDIT_CAP_MS,
+  yieldAfterMs = JOB_OVERRUN_FLOOR_MS,
   platform = process.platform,
   cpu = createCpuSampler(),
 } = {}) {
   let lastAuditAt = null; // null = never audited; the first gated tick always audits
-  let gatedSince = null;
-  let belowSince = null; // start of the current continuous sub-threshold run, while a stretch is open
+  let heldMs = 0;
+  let lastHeldAt = null;
   let lastStandDownAuditAt = null;
   let last = null;
 
@@ -158,11 +158,12 @@ function createLoadGate({
         cpuWindowMs: null,
         standDown: false,
         cores: cores(),
-        gatedSinceMs: 0,
+        heldMs: 0,
+        yielded: false,
         reason: 'loadavg-unavailable-win32',
         at: new Date(t).toISOString(),
       };
-      return { ...last, shouldAudit: false, shouldAuditStandDown: false, escalate: false };
+      return { ...last, shouldAudit: false, shouldAuditStandDown: false };
     }
     const [l1] = loadavg();
     const c = cores();
@@ -173,24 +174,22 @@ function createLoadGate({
     const standDown = overLoad && sample !== null && sample.busyFraction < Math.min(th, MOSTLY_IDLE_BUSY);
     const wouldGate = overLoad && !standDown;
 
-    // Hysteresis: the STRETCH (gatedSince) only clears after load has stayed
-    // below threshold continuously for releaseWindowMs. This never affects
-    // `gated` itself below — a sub-threshold tick still returns gated:false
-    // immediately; only the bookkeeping/escalation lags behind.
-    if (wouldGate) {
-      if (gatedSince === null) gatedSince = t;
-      belowSince = null;
-    } else if (gatedSince !== null) {
-      if (belowSince === null) belowSince = t;
-      if (t - belowSince >= releaseWindowMs) {
-        gatedSince = null;
-        belowSince = null;
-      }
+    const holding = wouldGate && !bypass;
+    if (holding) {
+      if (lastHeldAt !== null) heldMs += Math.min(t - lastHeldAt, holdCreditCapMs);
+      lastHeldAt = t;
     } else {
-      belowSince = null;
+      heldMs = 0;
+      lastHeldAt = null;
     }
-    const gated = wouldGate && !bypass;
+    const yielded = holding && heldMs >= yieldAfterMs;
+    const gated = holding && !yielded;
     const bypassed = wouldGate && bypass;
+    const reportedHeldMs = heldMs;
+    if (yielded) {
+      heldMs = 0;
+      lastHeldAt = null;
+    }
 
     let shouldAudit = false;
     if (gated && (lastAuditAt === null || t - lastAuditAt >= auditIntervalMs)) {
@@ -202,9 +201,6 @@ function createLoadGate({
       shouldAuditStandDown = true;
       lastStandDownAuditAt = t;
     }
-    const gatedSinceMs = gatedSince === null ? 0 : t - gatedSince;
-    const escalate = gated && gatedSinceMs >= escalateAfterMs;
-
     last = {
       gated,
       bypassed,
@@ -215,10 +211,11 @@ function createLoadGate({
       cpuWindowMs: sample ? sample.windowMs : null,
       standDown,
       cores: c,
-      gatedSinceMs,
+      heldMs: reportedHeldMs,
+      yielded,
       at: new Date(t).toISOString(),
     };
-    return { ...last, shouldAudit, shouldAuditStandDown, escalate };
+    return { ...last, shouldAudit, shouldAuditStandDown };
   }
 
   function snapshot() {

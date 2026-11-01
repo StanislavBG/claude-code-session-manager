@@ -314,6 +314,59 @@ async function resolveBareSlugFile(slug, cwd) {
 }
 
 /**
+ * Text of each named PRD of one Epic, wherever it lives now: its prds/, its
+ * prds-archived/, each direct subfolder of prds-archived/ (newest name first),
+ * then the same for ancestor-folder copies of the Epic. First match wins; an
+ * exact `<slug>.md` beats a bare-slug match (`fix-x` finds `872-fix-x.md`).
+ * Slugs are only compared with readdir names, never joined into a path; only
+ * regular `.md` files are read. Never rejects. Returns Map<inputSlug, text>.
+ */
+async function readEpicPrdTexts(cwd, epicId, slugs) {
+  const out = new Map();
+  try {
+    if (typeof cwd !== 'string' || !cwd || !Array.isArray(slugs) || slugs.length === 0) return out;
+    if (!isSafeEpicId(epicId)) return out;
+    const root = projectRootOf(cwd);
+    const live = resolveEpicPrdWriteDir(root, epicId);
+    const archived = path.join(path.dirname(live), 'prds-archived');
+    const dirs = [];
+    const addWithSubs = async (dir) => {
+      dirs.push(dir);
+      const ents = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+      const subs = ents.filter((e) => e.isDirectory()).map((e) => e.name).sort().reverse();
+      for (const s of subs) dirs.push(path.join(dir, s));
+    };
+    dirs.push(live);
+    await addWithSubs(archived);
+    for (const d of ancestorEpicPrdDirs(root, epicId)) dirs.push(d);
+    for (const d of ancestorEpicArchivedPrdDirs(root, epicId)) await addWithSubs(d);
+    const index = new Map();
+    for (const dir of dirs) {
+      let ents;
+      try { ents = await fsp.readdir(dir, { withFileTypes: true }); } catch { continue; }
+      for (const e of ents) {
+        if (!e.isFile() || !e.name.endsWith('.md')) continue;
+        const key = e.name.slice(0, -3);
+        if (!index.has(key)) index.set(key, path.join(dir, e.name));
+      }
+    }
+    for (const slug of slugs) {
+      if (typeof slug !== 'string' || !slug || out.has(slug)) continue;
+      let file = index.get(slug);
+      if (!file) {
+        const bare = bareSlug(slug);
+        for (const [key, p] of index) {
+          if (bareSlug(key) === bare) { file = p; break; }
+        }
+      }
+      if (!file) continue;
+      try { out.set(slug, await fsp.readFile(file, 'utf8')); } catch { /* unreadable — no entry */ }
+    }
+  } catch { /* never rejects */ }
+  return out;
+}
+
+/**
  * The two distinct failure modes safeSlugPath collapses into one nullable
  * return (the defect this fixes — see the PRD that added this helper's
  * Goal): a slug that fails SCHEDULE_SLUG_RE is a caller mistake ("invalid
@@ -568,6 +621,7 @@ module.exports = {
   realPrdsDir,
   safeSlugPath,
   resolveBareSlugFile,
+  readEpicPrdTexts,
   resolveSlugOrReason,
   jobMatchesSlugAndCwd,
   unknownSlugMessage,

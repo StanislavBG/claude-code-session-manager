@@ -101,6 +101,29 @@ test('held tick detail lands in dispatch.lastTickDetail with prefix stripped', (
   expect(entry.dispatch.lastTickDetail.length).toBeLessThanOrEqual(200);
 });
 
+const loadDeferredDetail = (over) => scheduler.formatLoadGateDetail({
+  loadavg1: 6.4, cores: 8, ratio: 0.8, threshold: 0.7, cpuBusy: 0.13, cpuWindowMs: 30_000, heldMs: 53 * 60_000, ...over,
+});
+
+test('load-deferred detail reaches dispatch.lastTickDetail with its CPU figure', () => {
+  scheduler.recordTick({ fired: false, reason: 'load-deferred', detail: loadDeferredDetail({}) });
+  const entry = scheduler.heartbeatTick({ readQueueSync: () => ({ jobs: [], unreadable: true, paused: null }) });
+  expect(entry.dispatch.lastTickReason).toBe('load-deferred');
+  expect(entry.dispatch.lastTickDetail).toContain('busy over');
+  expect(entry.dispatch.lastTickDetail.length).toBeLessThanOrEqual(200);
+});
+
+test('load-deferred detail with long values still shows the held minutes', () => {
+  scheduler.recordTick({
+    fired: false,
+    reason: 'load-deferred',
+    detail: loadDeferredDetail({ loadavg1: 132.84, cores: 128, ratio: 1.038, cpuBusy: 0.87, heldMs: 900 * 60_000 }),
+  });
+  const entry = scheduler.heartbeatTick({ readQueueSync: () => ({ jobs: [], unreadable: true, paused: null }) });
+  expect(entry.dispatch.lastTickDetail).toContain('held 900m');
+  expect(entry.dispatch.lastTickDetail.length).toBeLessThanOrEqual(200);
+});
+
 test('dispatch.quietLeaseHolder is null when free and names the slug when held', () => {
   const lease = require('../lib/scheduler/quietMachineLease.cjs');
   lease.__resetForTests();

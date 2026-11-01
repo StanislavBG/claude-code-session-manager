@@ -19,6 +19,7 @@ const path = require('node:path');
 const {
   evaluateTickLiveness,
   readFreshHeartbeat,
+  lastTickFromHeartbeat,
   TICK_STALL_THRESHOLD_MS,
 } = require('../health.cjs');
 
@@ -176,4 +177,19 @@ test('no false positive: pending rows blocked on an unfinished dependsOn are wai
   );
   assert.strictEqual(result.stalled, false);
   assert.strictEqual(result.reason, 'no-pending-jobs');
+});
+
+test('lastTickFromHeartbeat reads reason and detail from dispatch', () => {
+  assert.deepStrictEqual(
+    lastTickFromHeartbeat({ dispatch: { lastTickReason: 'load-deferred', lastTickDetail: 'busy over 80%' } }),
+    { lastTickReason: 'load-deferred', lastTickDetail: 'busy over 80%' },
+  );
+});
+
+test('lastTickFromHeartbeat returns nulls for a null heartbeat', () => {
+  assert.deepStrictEqual(lastTickFromHeartbeat(null), { lastTickReason: null, lastTickDetail: null });
+});
+
+test('lastTickFromHeartbeat returns nulls when dispatch is missing', () => {
+  assert.deepStrictEqual(lastTickFromHeartbeat({ ts: 1 }), { lastTickReason: null, lastTickDetail: null });
 });

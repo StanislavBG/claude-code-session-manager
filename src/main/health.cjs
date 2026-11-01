@@ -88,6 +88,13 @@ function readFreshHeartbeat(heartbeatPath) {
   return entry;
 }
 
+// Last tick's reason + detail from a heartbeat's dispatch block; both null
+// when the heartbeat or its dispatch is missing.
+function lastTickFromHeartbeat(heartbeat) {
+  const d = heartbeat?.dispatch;
+  return { lastTickReason: d?.lastTickReason ?? null, lastTickDetail: d?.lastTickDetail ?? null };
+}
+
 // Evaluates whether the scheduler tick looks stalled: pending work exists,
 // there's free capacity to run it, and nothing about the queue's own state
 // explains why it hasn't. Kept as a pure function of (queueState, heartbeat,
@@ -988,9 +995,11 @@ async function check(opts = {}) {
       machineStateRecovered: queueState.machineStateRecovered ?? false,
       quarantinedCwds: (queueState.unreadableCwds ?? []).map((u) => u.cwd),
       machineStateRecoveryMode: queueState.machineStateRecoveryMode ?? null,
-      // Informational only (PRD 1085): current 1-min loadavg per core vs the
-      // launch-gate threshold, so a "nothing is launching" report can be
-      // read next to the reason without opening the app.
+      ...lastTickFromHeartbeat(heartbeat),
+      // Informational only (PRD 1085): the RAW 1-min loadavg per core vs the
+      // launch-gate threshold, with no CPU sample behind it (the gate also
+      // checks a CPU sample, so a ratio over threshold is not a hold). Read it
+      // beside lastTickReason / lastTickDetail above.
       loadRatio: (() => {
         const cores = (os.cpus() || []).length;
         const l1 = os.loadavg()[0];
@@ -1415,6 +1424,7 @@ module.exports = {
   check,
   evaluateTickLiveness,
   readFreshHeartbeat,
+  lastTickFromHeartbeat,
   evaluatePrdMigrationHealth,
   evaluateDelegationChainHealth,
   evaluateCredentialHealth,

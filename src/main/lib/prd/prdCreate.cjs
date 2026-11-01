@@ -37,6 +37,7 @@ const { sizingWarnings } = require('./prdSizing.cjs');
 const telemetryCounters = require('../telemetry/telemetryCounters.cjs');
 const { execGit } = require('../git/gitExec.cjs');
 const { extractRepoPathCandidates, worktreeReachWarnings } = require('./prdWorktreeReach.cjs');
+const { isSweepValidatorSlug } = require('../epic/epicSweepValidator.cjs');
 const { validateGate, validateFiles, renderFilesSection, renderGateSection } = require('./prdGateFiles.cjs');
 const { resolveGate, parseChain, isNoneGate } = require('../scheduler/definitionOfDone.cjs');
 
@@ -84,7 +85,7 @@ function buildPrdBody(input) {
   const {
     title, cwd, estimateMinutes, goal, acceptanceCriteria,
     implementationNotes, outOfScope, sourcePromptId, sourceTabId, tag, agentType, dependsOn, quietMachine, disposition, deliverable, artifactPaths, planId,
-    gate, files,
+    gate, files, budgetExempt,
   } = input;
 
   // No `parallelGroup` frontmatter key (PRD_AUTHORING.md §5) — the NN-
@@ -137,6 +138,9 @@ function buildPrdBody(input) {
   // sibling jobs would otherwise invalidate. Only emitted when true — see
   // prdFrontmatter.cjs's applyKey for the matching "only true opts in" parse.
   if (quietMachine === true) fmLines.push('quietMachine: true');
+  // Budget exemption is for a sweep validator that cannot be split further;
+  // every other caller's budgetExempt is ignored.
+  if (budgetExempt === true && agentType === 'validator' && isSweepValidatorSlug(input.slug)) fmLines.push('budgetExempt: true');
   fmLines.push('---', '');
 
   const acLines = acceptanceCriteria.map((line) => `- [ ] ${line}`).join('\n');

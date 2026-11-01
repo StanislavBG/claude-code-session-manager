@@ -389,6 +389,45 @@ function resolveGate(prdText) {
   return { source: 'absent', sequence: [] };
 }
 
+const TIMEOUT_UNIT_MS = { '': 1000, s: 1000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+
+/** Time one `&&` step may take: every `timeout N` outside quotes, else the default. */
+function stepTimeoutMs(step) {
+  const bare = step.replace(/'[^']*'|"[^"]*"/g, ' ');
+  let sum = 0;
+  for (const m of bare.matchAll(/(?:^|\s)timeout\s+(\d+)([smhd]?)(?=\s|$)/g)) {
+    sum += parseInt(m[1], 10) * TIMEOUT_UNIT_MS[m[2]];
+  }
+  return sum || DEFAULT_GATE_TIMEOUT_MS;
+}
+
+/**
+ * The most one full pass over a PRD's gate can take: the sum of every step's
+ * `timeout`. Not built on resolveGate because that returns an empty sequence
+ * for a gate the no-shell parser refuses (Bilko-Game-Academy 872-fix-e2e-no-gpu-suite
+ * read as 0 minutes though it is 47.5), yet a validator runs gates through
+ * Bash, so that time is real. Returns 0 for a none gate, a PRD with no gate,
+ * or non-string/empty input.
+ *
+ * @param {unknown} prdText
+ * @returns {number} milliseconds
+ */
+function gateTimeoutMs(prdText) {
+  if (!prdText || typeof prdText !== 'string') return 0;
+  const explicit = readExplicitGate(prdText);
+  if (explicit) {
+    if (explicit.kind === 'none') return 0;
+    let total = 0;
+    for (const chain of explicit.chains) {
+      for (const seg of splitOnAndAnd(chain)) {
+        if (seg.trim()) total += stepTimeoutMs(seg.trim());
+      }
+    }
+    return total;
+  }
+  return resolveGate(prdText).sequence.reduce((sum, step) => sum + step.timeoutMs, 0);
+}
+
 /**
  * The gate as an ordered list of no-shell commands: [{argv, timeoutMs}, …].
  * Empty when there is no parseable gate or the PRD opted out with `gate: none`
@@ -918,6 +957,7 @@ module.exports = {
   explainChain,
   isNoneGate,
   resolveGate,
+  gateTimeoutMs,
   runGateSequence,
   runIsolatedSequence,
   extractSection,

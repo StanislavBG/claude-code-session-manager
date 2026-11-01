@@ -41,6 +41,9 @@ const sup = require('./supervise.cjs');
 
 const appRoot = path.join(__dirname, '..');
 const dir = sup.logsDir();
+// A closed launcher stderr (EPIPE) must not kill the supervisor.
+process.stderr.on('error', () => { /* ignore */ });
+
 let forwardedSignal = null;
 let respawns = [];
 let current = null;

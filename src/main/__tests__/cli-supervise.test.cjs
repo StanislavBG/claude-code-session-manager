@@ -22,9 +22,11 @@ describe('shouldRespawn', () => {
   it('respawns on unclean exit with open sentinel for the pid', () => {
     expect(sup.shouldRespawn({ code: null, signal: 'SIGKILL', sentinel: open, childPid: 42 })).toBe(true);
     expect(sup.shouldRespawn({ code: 1, signal: null, sentinel: open, childPid: 42 })).toBe(true);
+    expect(sup.shouldRespawn({ code: 0, signal: null, sentinel: open, childPid: 42 })).toBe(true);
   });
-  it('never respawns on clean exit, forwarded signal, closed/foreign sentinel', () => {
-    expect(sup.shouldRespawn({ code: 0, signal: null, sentinel: open, childPid: 42 })).toBe(false);
+  it('never respawns on closed sentinel, forwarded signal, closed/foreign sentinel', () => {
+    expect(sup.shouldRespawn({ code: 0, signal: null, sentinel: { open: false, pid: 42 }, childPid: 42 })).toBe(false);
+    expect(sup.shouldRespawn({ code: 0, signal: null, sentinel: open, childPid: 7 })).toBe(false);
     expect(sup.shouldRespawn({ code: null, signal: 'SIGTERM', forwardedSignal: 'SIGTERM', sentinel: open, childPid: 42 })).toBe(false);
     expect(sup.shouldRespawn({ code: 1, signal: null, sentinel: { open: false, pid: 42 }, childPid: 42 })).toBe(false);
     expect(sup.shouldRespawn({ code: 1, signal: null, sentinel: open, childPid: 7 })).toBe(false);

@@ -60,12 +60,12 @@ function readSentinel(dir) {
 }
 
 /**
- * Respawn only after an unclean exit: the sentinel still says open:true for this
- * child's pid. Clean exits and signals the launcher forwarded never respawn.
+ * Respawn only after an unclean run: the sentinel still says open:true for this
+ * child's pid, whatever the exit code (a compositor disconnect exits 0). Clean runs
+ * (open:false), foreign pids and signals the launcher forwarded never respawn.
  */
 function shouldRespawn({ code, signal, forwardedSignal, sentinel, childPid }) {
   if (forwardedSignal) return false;
-  if (code === 0 && !signal) return false;
   return !!(sentinel && sentinel.open === true && sentinel.pid === childPid);
 }
 

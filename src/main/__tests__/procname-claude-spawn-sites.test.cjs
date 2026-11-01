@@ -221,8 +221,10 @@ describe.skipIf(!HAS_PROC)('real aliased processes vs the reaper gates', () => {
     const recorded = procIdentity.identity(aliased.pid);
     expect(procIdentity.isDifferentProcess(recorded, procIdentity.identity(aliased.pid))).toBe(false);
     expect(scheduler.killOrphanClaudePid(aliased.pid, recorded)).toBe('killed');
-    // A genuinely recycled pid (different cmdline/starttime) is still vetoed.
-    expect(procIdentity.isDifferentProcess({ ...recorded, cmdline: '/usr/bin/claude -p old' }, { ...recorded, cmdline: 'sm-claude-job:new' })).toBe(true);
+    // A genuinely recycled pid (different start time) is still vetoed.
+    expect(procIdentity.isDifferentProcess(recorded, { ...recorded, startTicks: recorded.startTicks + 1 })).toBe(true);
+    // A cmdline-only difference (scope exec) is the same process.
+    expect(procIdentity.isDifferentProcess({ ...recorded, cmdline: '/usr/bin/claude -p old' }, { ...recorded, cmdline: 'sm-claude-job:new' })).toBe(false);
   });
 
   it('process-group semantics unchanged: detached child leads its own group; killTree/cancel reaps it', async () => {

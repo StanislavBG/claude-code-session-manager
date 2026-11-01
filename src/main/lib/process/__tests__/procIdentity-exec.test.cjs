@@ -15,15 +15,16 @@ describe('procIdentity across systemd-run --scope exec', () => {
     try {
       const recorded = identity(child.pid);
       let live = identity(child.pid);
-      const deadline = Date.now() + 3000;
+      const deadline = Date.now() + 8000;
       while (live.cmdline === recorded.cmdline && Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 50));
         live = identity(child.pid);
       }
       expect(live.pid).toBe(recorded.pid);
+      expect(live.cmdline).not.toBe(recorded.cmdline);
       expect(isDifferentProcess(recorded, live)).toBe(false);
     } finally {
       try { child.kill('SIGTERM'); } catch { /* already gone */ }
     }
-  }, 10000);
+  }, 12000);
 });

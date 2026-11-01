@@ -26,6 +26,16 @@
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 const { loadGateThreshold, JOB_OVERRUN_FLOOR_MS } = require('./schedulerConfig.cjs');
+const { createCpuSampler } = require('./cpuSample.cjs');
+
+// A high loadavg only keeps holding launches when the measured CPU is NOT mostly
+// idle. loadavg counts D-state tasks and short bursts, so it can read high on an
+// idle CPU. The bar is 0.5, not 0.85: on SMT and hybrid chips half the logical
+// CPUs is already most of the real capacity, and the gate exists to stop test
+// batteries stretching past their timeouts (2026-09-01: loadavg 12.95 on 14
+// cores), so a machine at 70% busy is not spare capacity. No sample = no
+// evidence, so loadavg decides (a broken reader must never disable the gate).
+const MOSTLY_IDLE_BUSY = 0.5;
 
 // One audit row per this interval while continuously gated — the poll loop
 // ticks every 60 s and a saturated box stays saturated for a while; auditing
@@ -93,7 +103,12 @@ function topCpuConsumers(n = 3, { execImpl = execFileSync, platform = process.pl
 }
 
 /**
- * createLoadGate(opts) → { evaluate, snapshot }
+ * createLoadGate(opts) → { evaluate, observe, snapshot }
+ *
+ * Decision: loadavg over threshold AND the CPU sample not mostly idle (busy
+ * fraction >= min(threshold, MOSTLY_IDLE_BUSY)) holds; over threshold with a
+ * mostly idle sample stands down (standDown:true); no sample keeps the loadavg
+ * verdict. observe() feeds the sampler and must run every tick.
  *
  * Holds the small amount of state the gate needs across ticks (when it was
  * last audited, when the current gated stretch began). `evaluate({ bypass })`
@@ -117,11 +132,17 @@ function createLoadGate({
   escalateAfterMs = JOB_OVERRUN_FLOOR_MS,
   releaseWindowMs = RELEASE_WINDOW_MS,
   platform = process.platform,
+  cpu = createCpuSampler(),
 } = {}) {
   let lastAuditAt = null; // null = never audited; the first gated tick always audits
   let gatedSince = null;
   let belowSince = null; // start of the current continuous sub-threshold run, while a stretch is open
+  let lastStandDownAuditAt = null;
   let last = null;
+
+  function observe() {
+    if (platform !== 'win32') cpu.observe();
+  }
 
   function evaluate({ bypass = false } = {}) {
     const t = now();
@@ -133,18 +154,24 @@ function createLoadGate({
         ratio: 0,
         threshold: typeof threshold === 'function' ? threshold() : threshold,
         loadavg1: null,
+        cpuBusy: null,
+        cpuWindowMs: null,
+        standDown: false,
         cores: cores(),
         gatedSinceMs: 0,
         reason: 'loadavg-unavailable-win32',
         at: new Date(t).toISOString(),
       };
-      return { ...last, shouldAudit: false, escalate: false };
+      return { ...last, shouldAudit: false, shouldAuditStandDown: false, escalate: false };
     }
     const [l1] = loadavg();
     const c = cores();
     const th = typeof threshold === 'function' ? threshold() : threshold;
     const ratio = c > 0 && Number.isFinite(l1) ? l1 / c : 0;
-    const wouldGate = isLoadGated(l1, c, th);
+    const sample = cpu.sample();
+    const overLoad = isLoadGated(l1, c, th);
+    const standDown = overLoad && sample !== null && sample.busyFraction < Math.min(th, MOSTLY_IDLE_BUSY);
+    const wouldGate = overLoad && !standDown;
 
     // Hysteresis: the STRETCH (gatedSince) only clears after load has stayed
     // below threshold continuously for releaseWindowMs. This never affects
@@ -170,6 +197,11 @@ function createLoadGate({
       shouldAudit = true;
       lastAuditAt = t;
     }
+    let shouldAuditStandDown = false;
+    if (standDown && (lastStandDownAuditAt === null || t - lastStandDownAuditAt >= auditIntervalMs)) {
+      shouldAuditStandDown = true;
+      lastStandDownAuditAt = t;
+    }
     const gatedSinceMs = gatedSince === null ? 0 : t - gatedSince;
     const escalate = gated && gatedSinceMs >= escalateAfterMs;
 
@@ -179,18 +211,21 @@ function createLoadGate({
       ratio: Number(ratio.toFixed(3)),
       threshold: th,
       loadavg1: Number.isFinite(l1) ? Number(l1.toFixed(2)) : null,
+      cpuBusy: sample ? Number(sample.busyFraction.toFixed(3)) : null,
+      cpuWindowMs: sample ? sample.windowMs : null,
+      standDown,
       cores: c,
       gatedSinceMs,
       at: new Date(t).toISOString(),
     };
-    return { ...last, shouldAudit, escalate };
+    return { ...last, shouldAudit, shouldAuditStandDown, escalate };
   }
 
   function snapshot() {
     return last;
   }
 
-  return { evaluate, snapshot };
+  return { evaluate, observe, snapshot };
 }
 
-module.exports = { isLoadGated, createLoadGate, topCpuConsumers, AUDIT_INTERVAL_MS };
+module.exports = { isLoadGated, createLoadGate, topCpuConsumers, AUDIT_INTERVAL_MS, MOSTLY_IDLE_BUSY };

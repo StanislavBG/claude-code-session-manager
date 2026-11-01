@@ -1025,6 +1025,12 @@ export interface ScheduleLoadGate {
   threshold: number;
   loadavg1: number | null;
   cores: number;
+  /** Measured machine-wide CPU busy fraction (0..1) over cpuWindowMs, or null with no sample. */
+  cpuBusy: number | null;
+  /** Length of the CPU sample window in ms, or null with no sample. */
+  cpuWindowMs: number | null;
+  /** True when loadavg was over threshold but the CPU sample showed it mostly idle, so launches proceed. */
+  standDown: boolean;
   /** How long the current gated stretch has lasted, 0 when not gated. */
   gatedSinceMs: number;
   at: string;

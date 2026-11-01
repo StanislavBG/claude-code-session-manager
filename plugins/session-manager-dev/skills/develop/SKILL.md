@@ -109,7 +109,8 @@ failure modes have different fixes:
    exempt: it has one criterion per PRD, plus the record. A new helper and its first caller are
    two PRDs. Most PRDs take 5–10 executor minutes; split anything expected
    to take over 15. Do not write an estimate. Why: the kill budget floors at 45 minutes, so a
-   run without one is never starved.
+   run without one is never starved. A validator's budget is sized from the gates it must
+   re-run, so the validate PRD omits it too.
 8. **Make each PRD self-contained.** The executor sees only the PRD and the project. Notes are
    a recipe: `Read first:` (at most 4 files, with line ranges), `Steps:` (numbered, each naming
    file and function), `Do not touch:` (files a sibling owns). Quote signatures. Say when a PRD
@@ -233,7 +234,7 @@ The validator prints `VALIDATION: <slug> VERIFIED` or `VALIDATION: <slug> REFUTE
 per PRD. Queue the validate PRD in the same `scheduler_create_prds` call as the plan (its `dependsOn` may name that call's entries); with single creates it goes last: in a single `scheduler_create_prd`, `dependsOn` accepts only slugs that already exist. The
 scheduler sends no per-PRD validation prompt. When the Epic has no pending or running PRD for
 `SM_EPIC_SETTLE_SECONDS` (default 120), it queues one `validate-sweep-*` validator for completed
-PRDs no validator checked, then sends one PLAN SETTLED digest. Several validators in one Epic
+PRDs no validator checked (a large sweep becomes several sweeps in turn), then sends one PLAN SETTLED digest. Several validators in one Epic
 are fine: each runs headless.
 
 If the API rejects `agentType: "validator"`, the persona is not installed: keep the plan

@@ -1,4 +1,4 @@
-<!-- PRD_AUTHORING.md v17 -->
+<!-- PRD_AUTHORING.md v18 -->
 # PRD Authoring Guide — Scheduler Safety Rules
 
 Rule: every PRD you queue follows the rules below.
@@ -69,7 +69,7 @@ if (!found) {
 Rule: every PRD needs these fields.
 1. `title` — one line, plain English.
 2. `cwd` — the Epic's project root, as an absolute path or `~/…`. The API always sets it to the Epic's project, whatever you pass. To work in another project, open an Epic in that project. The folder must exist when you queue.
-3. `estimateMinutes` — optional; omit it. A run without one gets its persona's `defaultEstimateMinutes`, else the 45-minute floor. Pass one only if the run legitimately needs longer. Most PRDs take 5–10 minutes (§8).
+3. `estimateMinutes` — optional; omit it. A run without one gets its persona's `defaultEstimateMinutes`, else the 45-minute floor. Pass one only if the run legitimately needs longer. A validator with no estimate is sized from the gates it must re-run. Most PRDs take 5–10 minutes (§8).
 
 `parallelGroup` is deprecated and ignored. `dependsOn: [<slug>, ...]` is the only ordering primitive.
 

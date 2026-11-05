@@ -57,8 +57,7 @@ function installWindowApiMock() {
         return () => { exitHandler = null }
       }),
     },
-    transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl') },
-    config: { exists: vi.fn().mockResolvedValue(true) },
+    transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'), exists: vi.fn().mockResolvedValue(true) },
   }
   ;(window as unknown as { api: typeof api }).api = api
   return { api, spawn, write, kill, resize, fireData: (data: string) => dataHandler?.(data), fireExit: (info: { exitCode: number | null }) => exitHandler?.(info) }
@@ -152,7 +151,7 @@ describe('InlineConsentTerminal', () => {
   it('does not auto-type when no transcript exists yet (no live claude REPL to send to)', async () => {
     const { write } = installWindowApiMock()
     const fullApi = window.api as unknown as Record<string, unknown>
-    Object.assign(fullApi, { config: { exists: vi.fn().mockResolvedValue(false) } })
+    Object.assign(fullApi, { transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'), exists: vi.fn().mockResolvedValue(false) } })
     const { InlineConsentTerminal } = await import('../InlineConsentTerminal')
 
     mount(

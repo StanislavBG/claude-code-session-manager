@@ -82,6 +82,7 @@ function installWindowApiMock() {
     promptSessions: {
       create: fakePromptSessionsCreate(),
       onEventAppended: vi.fn(),
+      writeArchive: vi.fn().mockResolvedValue({ ok: true }),
       reopen: vi.fn(async ({ epicId }: { epicId: string }) => ({
         ok: true,
         session: { ...usePromptSessions.getState().sessions[epicId], status: 'active', completedAt: null },

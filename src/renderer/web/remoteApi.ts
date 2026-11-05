@@ -7,7 +7,6 @@ export const DENY_MESSAGE = 'Not available in the web version'
 /** Per-renderer persistence rows: a browser must never overwrite the Electron renderer's state. */
 export const PERSISTENCE_CHANNELS: ReadonlySet<string> = new Set([
   'sessions:save',
-  'promptSessions:merge-active-index',
   'layout:save',
 ])
 

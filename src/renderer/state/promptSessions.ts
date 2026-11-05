@@ -483,6 +483,10 @@ function persistActiveIndex(
   sessions: Record<string, PromptSession>,
   events: Record<string, PromptSessionEvent[]>,
   removedIds: string[] = [],
+  /** When given, only these ids are sent as the memory contribution — a
+   *  lifecycle write names just the Epic it changed (merge-by-id + tombstones),
+   *  never the renderer's whole view of the cwd. */
+  onlyIds?: string[],
 ): Promise<void> {
   if (typeof window === 'undefined' || !window.api?.promptSessions?.mergeActiveIndex) return Promise.resolve()
   // Captured now, not re-read from the global inside the .then/.catch below —
@@ -497,7 +501,8 @@ function persistActiveIndex(
   // junk to filter out. See prompt-sessions/README.md#lifecycle.
   const memorySessions = Object.fromEntries(
     Object.entries(sessions).filter(
-      ([, s]) => s.cwd === cwd && (s.status === 'active' || s.status === 'proposed'),
+      ([, s]) => s.cwd === cwd && (s.status === 'active' || s.status === 'proposed')
+        && (!onlyIds || onlyIds.includes(s.id)),
     ),
   )
   const memoryEvents: Record<string, PromptSessionEvent[]> = {}
@@ -571,7 +576,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     // and toast — the row never keeps showing 'active' once we know disk
     // doesn't have it.
     const { title } = splitTitleAndGoal(session.goalText)
-    persistActiveIndex(session.cwd, sessions, get().events).catch((err: unknown) => {
+    persistActiveIndex(session.cwd, sessions, get().events, [], [promptSessionId]).catch((err: unknown) => {
       const current = get().sessions[promptSessionId]
       if (current && current.status === 'active') {
         set({ sessions: { ...get().sessions, [promptSessionId]: { ...current, status: 'proposed' } } })
@@ -599,7 +604,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
           if (!current || current.status !== 'active') return
           const withWorktree = { ...current, worktree }
           set({ sessions: { ...get().sessions, [promptSessionId]: withWorktree } })
-          persistActiveIndex(session.cwd, get().sessions, get().events).catch(() => {})
+          persistActiveIndex(session.cwd, get().sessions, get().events, [], [promptSessionId]).catch(() => {})
         })
         .catch(() => {})
     }
@@ -636,7 +641,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     const events = { ...get().events, [promptSessionId]: capEvents([...existing, fullEvent]) }
     set({ events })
     const session = get().sessions[promptSessionId]
-    persistActiveIndex(session.cwd, get().sessions, events).catch(() => {})
+    persistActiveIndex(session.cwd, get().sessions, events, [], [promptSessionId]).catch(() => {})
     return fullEvent
   },
   markCompleted: async (promptSessionId, source) => {
@@ -702,7 +707,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     // the completion isn't durable (and the UI shouldn't show it as such)
     // until this lands.
     try {
-      await persistActiveIndex(session.cwd, sessions, eventsWithClosed, [promptSessionId])
+      await persistActiveIndex(session.cwd, sessions, eventsWithClosed, [promptSessionId], [])
     } catch (err) {
       rollbackToOpen(err instanceof Error ? err.message : String(err))
       throw err
@@ -750,7 +755,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       ...(durableTurns ? { durableTurns } : {}),
     }
     try {
-      await window.api.config.writeJson(promptSessionArchivePath(session.cwd, promptSessionId), archive, 'epics')
+      await window.api.promptSessions.writeArchive({ cwd: session.cwd, epicId: promptSessionId, archive: archive as unknown as Record<string, unknown> })
     } catch (err) {
       rollbackToOpen(err instanceof Error ? err.message : String(err))
       // The active-index write above already removed this Epic's row from
@@ -758,7 +763,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       // failed to land, so put the row back rather than leaving the Epic in
       // neither place. Best-effort: every further failure here is already
       // logged inside persistActiveIndex itself.
-      persistActiveIndex(priorSession.cwd, get().sessions, get().events).catch(() => {})
+      persistActiveIndex(priorSession.cwd, get().sessions, get().events, [], [priorSession.id]).catch(() => {})
       throw err
     }
   },
@@ -800,7 +805,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     const sessions = { ...get().sessions, [promptSessionId]: renamed }
     set({ sessions })
     try {
-      await persistActiveIndex(session.cwd, sessions, get().events)
+      await persistActiveIndex(session.cwd, sessions, get().events, [], [promptSessionId])
     } catch (err) {
       // Rolled back so a failed write never leaves the rename showing as
       // durable. Rethrown (not toasted here) — every current caller of
@@ -855,7 +860,7 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     delete events[promptSessionId]
     set({ sessions, events })
     try {
-      await persistActiveIndex(session.cwd, sessions, events, [promptSessionId])
+      await persistActiveIndex(session.cwd, sessions, events, [promptSessionId], [])
     } catch (err) {
       // Rolled back so a failed write never leaves the Epic showing as
       // deleted. Rethrown (not toasted here) — every current caller of

@@ -42,11 +42,21 @@ describe('remoteApi', () => {
 
   it('persistence rows no-op and never reach the parent', async () => {
     const { api, sent } = setup()
-    for (const ch of ['sessions:save', 'layout:save', 'promptSessions:merge-active-index']) {
+    for (const ch of ['sessions:save', 'layout:save']) {
       const r = find((x) => x.channel === ch)
       await expect(api[r.ns][r.method]({ x: 1 })).resolves.toEqual({ ok: true })
     }
     expect(sent).toHaveLength(0)
+  })
+
+  it('lifecycle writes reach the parent (mutate tier), not the no-op path', async () => {
+    const { api, sent } = setup()
+    for (const ch of ['promptSessions:merge-active-index', 'promptSessions:write-archive']) {
+      const r = find((x) => x.channel === ch)
+      expect(r.remote).toBe('mutate')
+      void api[r.ns][r.method]({ cwd: '/p' })
+    }
+    expect(sent).toHaveLength(2)
   })
 
   it('subscription delivers then unsubscribes', () => {

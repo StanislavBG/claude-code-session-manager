@@ -99,13 +99,33 @@ function readSessionTranscript(cwd, sessionId, { projectRoots = defaultProjectRo
   }
 }
 
+/**
+ * Write one completed Epic's archive (<cwd>/…/prompt-sessions/<id>.json).
+ * Path is built here from opsPath(); the writer id is hardcoded 'epics'
+ * (single-writer law). Refuses a non-registered cwd and an archive whose
+ * session.id does not match the named epicId.
+ */
+async function writeArchive(cwd, epicId, archive, { projectRoots = defaultProjectRoots, writeJson } = {}) {
+  assertRegistered(cwd, projectRoots);
+  if (typeof epicId !== 'string' || !ID_RE.test(epicId) || epicId === 'active-index') throw new Error('invalid epicId');
+  if (!archive || typeof archive !== 'object' || !archive.session || archive.session.id !== epicId) {
+    throw new Error('archive.session.id must match epicId');
+  }
+  const config = require('./config.cjs');
+  config.addAllowedRoot(norm(cwd));
+  const file = path.join(promptSessionsDir(cwd), `${epicId}.json`);
+  await (writeJson || config.writeJson)(file, archive, { writer: 'epics' });
+  return { ok: true };
+}
+
 function registerPromptSessionsReadHandlers() {
   const { ipcMain } = require('electron');
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('promptSessions:load-active-index', v(s.promptSessionsCwd, ({ cwd }) => loadActiveIndex(cwd)));
   ipcMain.handle('promptSessions:list-archived', v(s.promptSessionsCwd, ({ cwd }) => listArchived(cwd)));
   ipcMain.handle('promptSessions:read-archived', v(s.promptSessionsReadArchived, ({ cwd, epicId }) => readArchived(cwd, epicId)));
+  ipcMain.handle('promptSessions:write-archive', v(s.promptSessionsWriteArchive, ({ cwd, epicId, archive }) => writeArchive(cwd, epicId, archive)));
   ipcMain.handle('promptSessions:read-session-transcript', v(s.promptSessionsReadSessionTranscript, ({ cwd, sessionId }) => readSessionTranscript(cwd, sessionId)));
 }
 
-module.exports = { loadActiveIndex, listArchived, readArchived, readSessionTranscript, registerPromptSessionsReadHandlers };
+module.exports = { loadActiveIndex, listArchived, readArchived, readSessionTranscript, writeArchive, registerPromptSessionsReadHandlers };

@@ -2321,6 +2321,7 @@ export interface SessionManagerAPI {
     listArchived: (payload: { cwd: string }) => Promise<{ ok: boolean; ids: string[]; error?: string }>;
     readArchived: (payload: { cwd: string; epicId: string }) => Promise<{ exists: boolean; data: unknown; error?: string }>;
     readSessionTranscript: (payload: { cwd: string; sessionId: string }) => Promise<{ exists: boolean; text: string; error?: string }>;
+    writeArchive: (payload: { cwd: string; epicId: string; archive: Record<string, unknown> }) => Promise<{ ok: true }>;
     mergeActiveIndex: (payload: PromptSessionsMergeActiveIndexPayload) => Promise<PromptSessionsMergeActiveIndexResult>;
     /** Mints a brand-new 'proposed' Epic through main's own ensureEpic()
      *  (lib/epic/promptSessionsCreateEpic.cjs) instead of the renderer

@@ -209,6 +209,15 @@ const promptSessionsMergeActiveIndex = z.object({
 // routes state/promptSessions.ts's createPromptSession through it. `tag`/
 // `source` reuse promptSessionSchema.cjs's own enums rather than retyping
 // the value lists a third time.
+// Archive write for markCompleted — main resolves the path via opsPath() and
+// writes as the 'epics' owner, so the renderer (and a remote browser) never
+// hands over a path. `archive` is opaque here; the handler checks its shape.
+const promptSessionsWriteArchive = z.object({
+  cwd: z.string().min(1).max(4096),
+  epicId: z.string().regex(PROMPT_SESSION_ID_RE),
+  archive: z.record(z.string(), z.unknown()),
+}).strict();
+
 const promptSessionsCreateEpic = z.object({
   cwd: z.string().min(1).max(4096),
   goalText: z.string().min(1).max(20000),
@@ -1364,6 +1373,7 @@ module.exports = {
     promptSessionTranscriptRead,
     epicDelegationStatsGet,
     promptSessionsMergeActiveIndex,
+    promptSessionsWriteArchive,
     promptSessionsCreateEpic,
     promptSessionsCreateWorktree,
     promptSessionsReopen,

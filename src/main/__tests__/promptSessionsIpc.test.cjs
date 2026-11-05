@@ -44,4 +44,18 @@ describe('promptSessionsIpc read tier', () => {
     expect(ipc.readSessionTranscript(root, 's1', { ...roots, resolvePath: () => f })).toEqual({ exists: true, text: 'line' });
     expect(ipc.readSessionTranscript(root, 's1', { ...roots, resolvePath: () => f + 'x' }).exists).toBe(false);
   });
+
+  it('writeArchive writes as the epics owner under opsPath, refuses unregistered cwd and mismatched ids', async () => {
+    const calls = [];
+    const writeJson = async (file, data, opts) => { calls.push({ file, data, opts }); };
+    const archive = { session: { id: 'e1' }, events: [] };
+    await expect(ipc.writeArchive(root, 'e1', archive, { ...roots, writeJson })).resolves.toEqual({ ok: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].file).toBe(path.join(root, 'session-manager-operations', 'prompt-sessions', 'e1.json'));
+    expect(calls[0].opts).toEqual({ writer: 'epics' });
+    await expect(ipc.writeArchive(root, 'e2', archive, { ...roots, writeJson })).rejects.toThrow(/must match/);
+    await expect(ipc.writeArchive(root, '../x', archive, { ...roots, writeJson })).rejects.toThrow(/invalid epicId/);
+    await expect(ipc.writeArchive(path.join(os.tmpdir(), 'nope'), 'e1', archive, { ...roots, writeJson })).rejects.toThrow(/not a registered/);
+    expect(calls).toHaveLength(1);
+  });
 });

@@ -60,6 +60,10 @@ function installWindowApiMock() {
       readSessionTranscript: vi.fn().mockResolvedValue({ exists: true, text: 'transcript body' }),
       archiveTranscript: vi.fn().mockResolvedValue({ path: '/p/e.jsonl.gz', bytes: 15, gzBytes: 10, sha256: 'abc' }),
       mergeActiveIndex: vi.fn().mockResolvedValue({ sessions: {}, events: {} }),
+      // Main-side archive write; delegates to the config.writeJson mock so
+      // tests keep describing "what landed on disk" through one spy.
+      writeArchive: vi.fn(async ({ cwd, epicId, archive }: { cwd: string; epicId: string; archive: unknown }) =>
+        getApi().config.writeJson(`${cwd.replace(/\/+$/, '')}/session-manager-operations/prompt-sessions/${epicId}.json`, archive, 'epics')),
       create: fakePromptSessionsCreate(),
       // Defaults to null (no worktree) — matches createEpicWorktreeViaIpc's
       // own "never rejects, null on any failure" contract. Tests that care
@@ -407,6 +411,41 @@ describe('promptSessions.ts', () => {
     const [, archive] = archiveCall!
     expect(archive.transcriptRef).toBeDefined()
     expect(archive.durableTurns).toBeUndefined()
+  })
+
+  it('approve / complete / delete write only the changed Epic id (never a sibling it did not name)', async () => {
+    const api = installWindowApiMock()
+    const { usePromptSessions } = await import('../promptSessions')
+    const store = usePromptSessions.getState()
+    const a = await store.createPromptSession('/proj', 'Epic A')
+    const b = await store.createPromptSession('/proj', 'Epic B')
+    const c = await store.createPromptSession('/proj', 'Epic C')
+    api.promptSessions.mergeActiveIndex.mockClear()
+
+    usePromptSessions.getState().approveProposed(a.id)
+    await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalledTimes(1))
+    let payload = api.promptSessions.mergeActiveIndex.mock.calls[0][0]
+    expect(Object.keys(payload.sessions)).toEqual([a.id])
+    expect(payload.removedIds ?? []).toEqual([])
+
+    api.promptSessions.mergeActiveIndex.mockClear()
+    await usePromptSessions.getState().markCompleted(a.id)
+    const completeCalls = api.promptSessions.mergeActiveIndex.mock.calls.map((c: any[]) => c[0])
+    // Every write names only A (no sibling B/C), the last one tombstones it.
+    for (const call of completeCalls) expect(Object.keys(call.sessions).every((id) => id === a.id)).toBe(true)
+    payload = completeCalls[completeCalls.length - 1]
+    expect(payload.sessions).toEqual({})
+    expect(payload.removedIds).toEqual([a.id])
+    expect(api.promptSessions.writeArchive).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: '/proj', epicId: a.id }),
+    )
+
+    api.promptSessions.mergeActiveIndex.mockClear()
+    await usePromptSessions.getState().deleteEpic(b.id)
+    payload = api.promptSessions.mergeActiveIndex.mock.calls[0][0]
+    expect(payload.sessions).toEqual({})
+    expect(payload.removedIds).toEqual([b.id])
+    expect(usePromptSessions.getState().sessions[c.id]).toBeDefined()
   })
 
   it('markCompleted rolls status back to active and toasts when the active-index write rejects', async () => {
@@ -1274,7 +1313,10 @@ describe('proposed Epics are durable (never erased)', () => {
     await vi.waitFor(() => expect(api.promptSessions.mergeActiveIndex).toHaveBeenCalled())
     const persisted = lastIndexWrite(api, '/proj')
     expect(persisted?.sessions[active.id]).toBeDefined()
-    expect(persisted?.sessions[proposed.id]).toEqual(proposed)
+    // Merge-by-id: a lifecycle write names only the Epic it changed; main
+    // keeps the proposal on disk. The write must neither carry nor tombstone it.
+    expect(persisted?.sessions[proposed.id]).toBeUndefined()
+    expect(persisted?.removedIds ?? []).not.toContain(proposed.id)
   })
 
   it('drops a row only when it is completed (archived)', async () => {

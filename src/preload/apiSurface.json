@@ -1688,6 +1688,13 @@
  },
  {
   "ns": "promptSessions",
+  "method": "writeArchive",
+  "channel": "promptSessions:write-archive",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "promptSessions",
   "method": "createWorktree",
   "channel": "promptSessions:create-worktree",
   "kind": "invoke",

@@ -591,5 +591,7 @@ contextBridge.exposeInMainWorld('api', {
     listArchived: (payload) => ipcRenderer.invoke('promptSessions:list-archived', payload),
     readArchived: (payload) => ipcRenderer.invoke('promptSessions:read-archived', payload),
     readSessionTranscript: (payload) => ipcRenderer.invoke('promptSessions:read-session-transcript', payload),
+    /** Mutate-tier archive write for markCompleted (main builds the path; single-writer 'epics'). */
+    writeArchive: (payload) => ipcRenderer.invoke('promptSessions:write-archive', payload),
   },
 });

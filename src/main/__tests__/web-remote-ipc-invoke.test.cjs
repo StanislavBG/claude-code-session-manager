@@ -161,6 +161,15 @@ describe('web-remote ipc:invoke', () => {
     expect(rs.map((r) => JSON.parse(r.data).ok)).toEqual([true, true, false])
   })
 
+  it('outer e2e:box ids are UUIDs (the relay drops any other id) while inner ids keep <id>.<n>', async () => {
+    await setup()
+    await invoke('b2', [{ channel: 'app:version' }, { channel: 'app:version' }])
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    expect(sent.length).toBe(2)
+    for (const m of sent) expect(m.id).toMatch(uuid)
+    expect(results().map((r) => r.id)).toEqual(['b2.0', 'b2.1'])
+  })
+
   it('chunks a 600 KB result into frames under 180 KB that join back', async () => {
     await setup()
     await invoke('c1', [{ channel: 'big:read', args: [] }])

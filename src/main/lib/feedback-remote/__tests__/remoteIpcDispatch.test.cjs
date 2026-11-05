@@ -42,6 +42,32 @@ describe('captureIpcHandlers', () => {
     expect(map.get('x')).toBe(fn)
     expect(orig).toHaveBeenCalledWith('x', fn)
   })
+
+  it('captures ipcMain.on listeners (send rows) without displacing an invoke handler', () => {
+    const origOn = vi.fn()
+    const ipcMain = { handle: vi.fn(), on: origOn }
+    const map = captureIpcHandlers(ipcMain)
+    const logWrite = () => 1
+    ipcMain.on('log:write', logWrite)
+    ipcMain.handle('both', () => 'h')
+    ipcMain.on('both', () => 'o')
+    expect(map.get('log:write')).toBe(logWrite)
+    expect(map.get('both')()).toBe('h')
+    expect(origOn).toHaveBeenCalledTimes(2)
+  })
+
+  it('a send-kind channel reaches its ipcMain.on handler with a null sender', async () => {
+    const ipcMain = { handle: vi.fn(), on: vi.fn() }
+    const handlers = captureIpcHandlers(ipcMain)
+    const seen = []
+    ipcMain.on('log:write', (e, payload) => seen.push([e.sender, payload]))
+    const d = createRemoteIpcDispatcher({
+      surface: [{ channel: 'log:write', kind: 'send', remote: 'read' }], handlers, getConfig: () => fullCfg,
+    })
+    const r = await d.invoke(authed, 'log:write', [{ message: 'hi' }])
+    expect(r.ok).toBe(true)
+    expect(seen).toEqual([[null, { message: 'hi' }]])
+  })
 })
 
 describe('invoke refusals', () => {

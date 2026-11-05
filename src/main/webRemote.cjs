@@ -923,7 +923,9 @@ function sendIpcResult(callId, frame, client) {
   try {
     const inner = { type: 'ipc:result', id: callId, seq: frame.seq, total: frame.total, data: frame.data, ts: Date.now() };
     const { nonce, ciphertext } = encryptBox(JSON.stringify(inner), client.e2e.sessionKey);
-    const out = { type: 'e2e:box', id: callId, payload: { nonce, ciphertext }, ts: Date.now() };
+    // The relay's envelope schema requires a UUID `id` and DROPS anything else (invalid_envelope), so the
+    // outer id is always a fresh UUID. Batched replies are keyed `<uuid>.<n>`; that key rides inside the box.
+    const out = { type: 'e2e:box', id: crypto.randomUUID(), payload: { nonce, ciphertext }, ts: Date.now() };
     if (client.key !== LEGACY_CLIENT_KEY) out.toConn = client.key;
     _ws.send(JSON.stringify(out));
   } catch (e) {

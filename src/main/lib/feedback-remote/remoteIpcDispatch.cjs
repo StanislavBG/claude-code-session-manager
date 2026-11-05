@@ -27,6 +27,15 @@ function captureIpcHandlers(ipcMain) {
     handlers.set(channel, fn)
     return original(channel, fn)
   }
+  // Send-kind rows (renderer ipcRenderer.send, e.g. log:write) are served by ipcMain.on
+  // listeners. Capture the first listener per channel; an invoke handler always wins.
+  if (typeof ipcMain.on === 'function') {
+    const originalOn = ipcMain.on.bind(ipcMain)
+    ipcMain.on = (channel, fn) => {
+      if (!handlers.has(channel) && typeof fn === 'function') handlers.set(channel, fn)
+      return originalOn(channel, fn)
+    }
+  }
   return handlers
 }
 

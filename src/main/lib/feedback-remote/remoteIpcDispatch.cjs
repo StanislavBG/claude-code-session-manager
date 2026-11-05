@@ -55,6 +55,11 @@ const PATH_FENCED_CHANNELS = Object.freeze({
   'transcript:path': { field: 'cwd', mode: 'secret' },
   'transcript:exists': { field: 'cwd', mode: 'secret' },
   'memory:read': { field: 'cwd', mode: 'secret' },
+  // Sessions read tier (main/promptSessionsIpc.cjs): cwd must sit inside a registered project root.
+  'promptSessions:load-active-index': { field: 'cwd', mode: 'root' },
+  'promptSessions:list-archived': { field: 'cwd', mode: 'root' },
+  'promptSessions:read-archived': { field: 'cwd', mode: 'root' },
+  'promptSessions:read-session-transcript': { field: 'cwd', mode: 'root' },
 })
 
 const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.kube', '.docker', '.password-store', '.azure', '.terraform.d'])

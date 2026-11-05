@@ -75,6 +75,10 @@ const sharedWindowApi = vi.hoisted(() => {
     },
     promptSessions: {
       onEventAppended: vi.fn(),
+      // hydrate() reads through the read-tier channel; delegate to the
+      // config.readJson mock these tests stage disk state on.
+      loadActiveIndex: vi.fn(async ({ cwd }: { cwd: string }) =>
+        (api as any).config.readJson(`${cwd}/session-manager-operations/prompt-sessions/active-index.json`)),
       onInboundAutoApprove: vi.fn((handler: InboundAutoApproveHandler) => {
         handlers.inboundAutoApprove = handler
         return () => { handlers.inboundAutoApprove = null }

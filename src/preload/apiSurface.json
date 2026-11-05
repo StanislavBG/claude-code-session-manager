@@ -1660,6 +1660,34 @@
  },
  {
   "ns": "promptSessions",
+  "method": "loadActiveIndex",
+  "channel": "promptSessions:load-active-index",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "promptSessions",
+  "method": "listArchived",
+  "channel": "promptSessions:list-archived",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "promptSessions",
+  "method": "readArchived",
+  "channel": "promptSessions:read-archived",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "promptSessions",
+  "method": "readSessionTranscript",
+  "channel": "promptSessions:read-session-transcript",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "promptSessions",
   "method": "createWorktree",
   "channel": "promptSessions:create-worktree",
   "kind": "invoke",

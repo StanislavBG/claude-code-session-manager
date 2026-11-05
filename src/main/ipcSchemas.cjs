@@ -233,6 +233,9 @@ const promptSessionsCreateWorktree = z.object({
 });
 
 // Renderer entry point for reopening a completed Epic in place (lib/epic/epicReopen.cjs).
+const promptSessionsCwd = z.object({ cwd: z.string().min(1).max(4096) }).strict();
+const promptSessionsReadArchived = z.object({ cwd: z.string().min(1).max(4096), epicId: z.string().regex(PROMPT_SESSION_ID_RE) }).strict();
+const promptSessionsReadSessionTranscript = z.object({ cwd: z.string().min(1).max(4096), sessionId: z.string().min(1).max(128) }).strict();
 const promptSessionsReopen = z.object({ cwd: z.string().min(1).max(4096), epicId: z.string().regex(PROMPT_SESSION_ID_RE) }).strict();
 
 // Renderer entry point for folding an Epic's isolated git worktree branch
@@ -1364,6 +1367,9 @@ module.exports = {
     promptSessionsCreateEpic,
     promptSessionsCreateWorktree,
     promptSessionsReopen,
+    promptSessionsCwd,
+    promptSessionsReadArchived,
+    promptSessionsReadSessionTranscript,
     promptSessionsMergeToMain,
     promptSessionsGetWorktreeDisabled,
     promptSessionsSetWorktreeDisabled,

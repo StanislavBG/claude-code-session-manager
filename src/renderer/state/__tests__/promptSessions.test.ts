@@ -3,6 +3,7 @@ import type { PromptSession } from '../promptSessions'
 import { fakePromptSessionsCreate } from '../../testUtils/fakePromptSessionsCreate'
 
 function installWindowApiMock() {
+  const getApi = (): any => api
   const api = {
     pty: { kill: vi.fn() },
     watchers: { killTab: vi.fn().mockResolvedValue(undefined) },
@@ -40,6 +41,23 @@ function installWindowApiMock() {
     },
     promptSessions: {
       onEventAppended: vi.fn(),
+      // Read-tier channels delegate to the config.* mocks below so the many
+      // tests that stage disk state via api.config.readJson/listDir keep
+      // describing "what is on disk" without caring which channel reads it.
+      loadActiveIndex: vi.fn(async ({ cwd }: { cwd: string }) =>
+        getApi().config.readJson(`${cwd.replace(/\/+$/, '')}/session-manager-operations/prompt-sessions/active-index.json`)),
+      listArchived: vi.fn(async ({ cwd }: { cwd: string }) => {
+        const r = await getApi().config.listDir(`${cwd.replace(/\/+$/, '')}/session-manager-operations/prompt-sessions`, { filesOnly: true })
+        return {
+          ok: r.ok,
+          ids: (r.entries ?? [])
+            .filter((e: { name: string }) => e.name.endsWith('.json') && e.name !== 'active-index.json')
+            .map((e: { name: string }) => e.name.slice(0, -'.json'.length)),
+        }
+      }),
+      readArchived: vi.fn(async ({ cwd, epicId }: { cwd: string; epicId: string }) =>
+        getApi().config.readJson(`${cwd.replace(/\/+$/, '')}/session-manager-operations/prompt-sessions/${epicId}.json`)),
+      readSessionTranscript: vi.fn().mockResolvedValue({ exists: true, text: 'transcript body' }),
       archiveTranscript: vi.fn().mockResolvedValue({ path: '/p/e.jsonl.gz', bytes: 15, gzBytes: 10, sha256: 'abc' }),
       mergeActiveIndex: vi.fn().mockResolvedValue({ sessions: {}, events: {} }),
       create: fakePromptSessionsCreate(),

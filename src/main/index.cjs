@@ -1042,6 +1042,7 @@ registerLoopEfficiencyHandlers();
 pluginInstall.registerPluginInstallHandlers();
 memoryTool.registerMemoryHandlers();
 activeIndexMerge.registerActiveIndexMergeHandlers();
+require('./promptSessionsIpc.cjs').registerPromptSessionsReadHandlers();
 promptSessionsCreateEpic.registerPromptSessionsCreateEpicHandlers();
 require('./lib/epic/archivedTranscript.cjs').registerIpc(ipcMain);
 customerFeedbackIpc.registerCustomerFeedbackHandlers();

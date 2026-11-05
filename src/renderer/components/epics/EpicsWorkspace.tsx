@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { usePromptSessions, promptSessionActiveIndexPath } from '../../state/promptSessions'
+import { usePromptSessions } from '../../state/promptSessions'
 import { useChatSignals } from '../../lib/useChatSignals'
 import { epicProjectCwds } from '../../lib/epicProjectScope'
 import { useScheduleState } from '../../state/scheduleState'
@@ -108,29 +108,30 @@ export function EpicsWorkspace({ cwd }: { cwd?: string } = {}) {
     }
   }, [knownCwdsKey])
 
-  // Watch each project's active-Epic index so out-of-band edits reach the UI
-  // while it's open. Two writers exist besides this renderer: epicMint.cjs in
-  // the main process (an Epic auto-minted by a headless PRD dispatch) and
-  // anything editing the file directly. Without this, hydrate() only ran on
-  // mount, so a minted Epic never appeared and a deleted one stayed listed
-  // until a full reload — and the stale copy got persisted back over the
-  // deletion on the next mutation.
+  // Live refresh. Two writers exist besides this renderer: epicMint.cjs in the
+  // main process (an Epic auto-minted by a headless PRD dispatch) and anything
+  // editing the file directly. config.watch is deny for the remote web UI, so
+  // the refresh rides read-tier channels only: the promptSession:event-appended
+  // push re-hydrates the touched project, and a slow poll catches index edits
+  // that emit no event (a minted or deleted Epic). hydrate() no-ops when
+  // nothing changed, so the poll is cheap.
   useEffect(() => {
     const cwds = knownCwdsKey ? knownCwdsKey.split('\n') : []
     if (!cwds.length) return
-    // Absent in test harnesses that stub only the config calls this workspace
-    // reads — the watch is an enhancement, never a mount requirement.
-    if (typeof window.api?.config?.watch !== 'function' || typeof window.api?.config?.onChanged !== 'function') return
-    const paths = cwds.map((c) => promptSessionActiveIndexPath(c))
-    const byPath = new Map(paths.map((p, i) => [p, cwds[i]]))
-    window.api.config.watch(paths)
-    const off = window.api.config.onChanged(({ path }) => {
-      const cwd = byPath.get(path)
-      if (cwd) void usePromptSessions.getState().hydrate(cwd).then(() => approveStampedInbound(cwd))
-    })
+    const refresh = (cwd: string) =>
+      void usePromptSessions.getState().hydrate(cwd).then(() => approveStampedInbound(cwd))
+    const offEvent =
+      typeof window.api?.promptSessions?.onEventAppended === 'function'
+        ? window.api.promptSessions.onEventAppended(({ cwd }) => {
+            if (cwds.includes(cwd)) refresh(cwd)
+          })
+        : null
+    const timer = setInterval(() => {
+      for (const c of cwds) refresh(c)
+    }, 15_000)
     return () => {
-      off()
-      if (typeof window.api?.config?.unwatch === 'function') window.api.config.unwatch(paths)
+      offEvent?.()
+      clearInterval(timer)
     }
   }, [knownCwdsKey])
 

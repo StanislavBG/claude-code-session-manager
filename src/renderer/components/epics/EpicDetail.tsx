@@ -46,12 +46,9 @@ import {
  */
 async function captureTerminalHandoffTurns(cwd: string, epicId: string, sessionId: string): Promise<number> {
   try {
-    const [transcriptPath, { turns: existingTurns }] = await Promise.all([
-      window.api.transcripts.pathFor(cwd, sessionId),
-      window.api.promptSessionTranscript.read(cwd, epicId),
-    ])
+    const { turns: existingTurns } = await window.api.promptSessionTranscript.read(cwd, epicId)
     const lastCapturedAt = existingTurns.length > 0 ? existingTurns[existingTurns.length - 1].at : null
-    const result = await window.api.config.readText(transcriptPath)
+    const result = await window.api.promptSessions.readSessionTranscript({ cwd, sessionId })
     if (!result.exists || !result.text) return 0
     const parsed = parseTranscriptTurns(result.text)
     const fresh = selectNewTurns(parsed, lastCapturedAt)

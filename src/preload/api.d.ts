@@ -2314,6 +2314,13 @@ export interface SessionManagerAPI {
      *  (lib/epic/activeIndexMerge.cjs) — persistActiveIndex sends only its own
      *  in-memory contribution for the cwd; disk stays main's truth, merged
      *  inside the same lock epicMint.cjs's ensureEpic serializes through. */
+    /** Read-tier (remote-safe) Sessions reads, fenced to a registered project's
+     *  prompt-sessions ops dir (main/promptSessionsIpc.cjs). Reject on a cwd
+     *  that is not a registered project root. */
+    loadActiveIndex: (payload: { cwd: string }) => Promise<{ exists: boolean; data: unknown; error?: string }>;
+    listArchived: (payload: { cwd: string }) => Promise<{ ok: boolean; ids: string[]; error?: string }>;
+    readArchived: (payload: { cwd: string; epicId: string }) => Promise<{ exists: boolean; data: unknown; error?: string }>;
+    readSessionTranscript: (payload: { cwd: string; sessionId: string }) => Promise<{ exists: boolean; text: string; error?: string }>;
     mergeActiveIndex: (payload: PromptSessionsMergeActiveIndexPayload) => Promise<PromptSessionsMergeActiveIndexResult>;
     /** Mints a brand-new 'proposed' Epic through main's own ensureEpic()
      *  (lib/epic/promptSessionsCreateEpic.cjs) instead of the renderer

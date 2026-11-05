@@ -867,10 +867,12 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     emitAuditEvent('epic_delete', { cwd: session.cwd, epicId: promptSessionId, source: source ?? 'unknown' })
   },
   hydrate: async (cwd) => {
-    if (typeof window === 'undefined' || !window.api?.config?.readJson) return
+    if (typeof window === 'undefined' || !window.api?.promptSessions?.loadActiveIndex) return
     try {
       const path = promptSessionActiveIndexPath(cwd)
-      const result = await window.api.config.readJson(path)
+      // Read-tier IPC (fenced to this project's prompt-sessions dir) — works
+      // for the remote web UI, unlike the deny-tier config:readJson.
+      const result = await window.api.promptSessions.loadActiveIndex({ cwd })
       const disk = (result.exists && result.data ? result.data : {}) as Partial<PromptSessionActiveIndex>
       const diskSessions = disk.sessions ?? {}
       const diskEvents = disk.events ?? {}
@@ -943,10 +945,9 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
     }
   },
   hydrateArchived: async (cwd) => {
-    if (typeof window === 'undefined' || !window.api?.config?.listDir || !window.api?.config?.readJson) return
+    if (typeof window === 'undefined' || !window.api?.promptSessions?.listArchived || !window.api?.promptSessions?.readArchived) return
     try {
-      const dir = `${cwd.replace(/\/+$/, '')}/session-manager-operations/prompt-sessions`
-      const result = await window.api.config.listDir(dir, { filesOnly: true })
+      const result = await window.api.promptSessions.listArchived({ cwd })
       if (!result.ok) return
       const existingSessions = get().sessions
       const sessions = { ...existingSessions }
@@ -960,16 +961,14 @@ export const usePromptSessions = create<PromptSessionsState>((set, get) => ({
       // newer, authoritative write in that case, so it wins here instead of
       // leaving the Epic stuck showing "Open" forever.
       const staleReconciled: string[] = []
-      for (const entry of result.entries) {
-        if (!entry.name.endsWith('.json') || entry.name === 'active-index.json') continue
-        const id = entry.name.slice(0, -'.json'.length)
+      for (const id of result.ids) {
         const inMemory = sessions[id]
         const isStaleActiveIndexRow = !!inMemory && inMemory.status !== 'completed' && indexBackedIds.has(id)
         // In-memory state always wins over disk on id collision, same as
         // hydrate() — UNLESS it's a stale active-index leftover (above),
         // never a freshly-created local row that merely shares an id.
         if (inMemory && !isStaleActiveIndexRow) continue
-        const fileResult = await window.api.config.readJson(entry.path)
+        const fileResult = await window.api.promptSessions.readArchived({ cwd, epicId: id })
         if (!fileResult.exists || !fileResult.data) continue
         const archive = fileResult.data as Partial<PromptSessionArchive>
         if (!archive.session || archive.session.id !== id) continue

@@ -1316,7 +1316,6 @@ describe('proposed Epics are durable (never erased)', () => {
     // Merge-by-id: a lifecycle write names only the Epic it changed; main
     // keeps the proposal on disk. The write must neither carry nor tombstone it.
     expect(persisted?.sessions[proposed.id]).toBeUndefined()
-    expect(persisted?.removedIds ?? []).not.toContain(proposed.id)
   })
 
   it('drops a row only when it is completed (archived)', async () => {

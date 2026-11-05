@@ -67,6 +67,7 @@ const sharedWindowApi = vi.hoisted(() => {
     },
     transcripts: {
       pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'),
+      exists: vi.fn().mockResolvedValue(false),
     },
     config: {
       exists: vi.fn().mockResolvedValue(false),
@@ -143,7 +144,7 @@ function installWindowApiMock(opts: {
   chat.classifyTicket.mockClear().mockImplementation(opts.classifyTicket ?? (async () => 'inline' as const))
   chat.createPrd.mockClear().mockImplementation(opts.createPrd ?? (async () => ({ ok: true as const, nn: 42, filename: '42-fake-prd.md' })))
   transcripts.pathFor.mockClear()
-  config.exists.mockClear().mockResolvedValue(opts.transcriptExists)
+  transcripts.exists.mockClear().mockResolvedValue(opts.transcriptExists)
   config.readJson.mockClear().mockResolvedValue(
     opts.activeIndexOnDisk ? { exists: true, data: opts.activeIndexOnDisk } : { exists: false, data: null },
   )
@@ -171,7 +172,7 @@ describe('chat.ts send() resume decision', () => {
     useChat.getState().send({ tabId: 'tab-1', sessionId: 'sess-1', cwd: '/proj', prompt: 'hello' })
     await vi.waitFor(() => expect(run).toHaveBeenCalled())
 
-    expect(api.transcripts.pathFor).toHaveBeenCalledWith('/proj', 'sess-1')
+    expect(api.transcripts.exists).toHaveBeenCalledWith('/proj', 'sess-1')
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({ tabId: 'tab-1', sessionId: 'sess-1', resume: true }),
     )
@@ -183,7 +184,7 @@ describe('chat.ts send() resume decision', () => {
     useChat.getState().send({ tabId: 'tab-2', sessionId: 'sess-2', cwd: '/proj', prompt: 'hello' })
     await vi.waitFor(() => expect(run).toHaveBeenCalled())
 
-    expect(api.transcripts.pathFor).toHaveBeenCalledWith('/proj', 'sess-2')
+    expect(api.transcripts.exists).toHaveBeenCalledWith('/proj', 'sess-2')
     expect(run).toHaveBeenCalledWith(
       expect.objectContaining({ tabId: 'tab-2', sessionId: 'sess-2', resume: false }),
     )

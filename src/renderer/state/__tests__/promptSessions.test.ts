@@ -9,6 +9,7 @@ function installWindowApiMock() {
     transcripts: {
       closeTab: vi.fn().mockResolvedValue(undefined),
       pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'),
+      exists: vi.fn().mockResolvedValue(false),
     },
     sessions: {
       load: vi.fn().mockResolvedValue({ tabs: [], activeTabId: null, freshStart: false }),

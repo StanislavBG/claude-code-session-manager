@@ -139,8 +139,7 @@ test('parity: renderer transcriptExists (Terminal resume decision) sees a worktr
   writeIndex();
   vi.stubGlobal('window', {
     api: {
-      transcripts: { pathFor: async (c, s) => tr.transcriptPath(c, s) },
-      config: { exists: async (p) => fs.existsSync(p) },
+      transcripts: { exists: async (c, s) => tr.transcriptExists(c, s) },
     },
   });
   expect(await transcriptExists(proj, SID)).toBe(false);

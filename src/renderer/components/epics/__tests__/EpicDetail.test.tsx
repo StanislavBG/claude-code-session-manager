@@ -74,7 +74,7 @@ function installWindowApiMock(opts: {
       createPrd: vi.fn(async () => ({ ok: true as const, nn: 1, filename: '1-fake.md' })),
     },
     pty: { kill: vi.fn() },
-    transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl') },
+    transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'), exists: vi.fn().mockResolvedValue(true) },
     epicDelegationStats: { get: vi.fn().mockResolvedValue({ prdsQueued: 0, inlineEdits: 0 }) },
     config: {
       exists: vi.fn().mockResolvedValue(true),

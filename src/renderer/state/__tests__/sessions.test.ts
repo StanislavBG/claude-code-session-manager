@@ -12,6 +12,7 @@ function installWindowApiMock() {
     transcripts: {
       closeTab: vi.fn().mockResolvedValue(undefined),
       pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'),
+      exists: vi.fn().mockResolvedValue(false),
     },
     config: { exists: vi.fn().mockResolvedValue(false) },
     sessions: {
@@ -308,5 +309,30 @@ describe('sessions.ts wakeTab() vs. an in-flight chat run', () => {
     expect(tab.sessionId).toBe(id)
     expect(tab.startupCommand).toContain(`--session-id '${id}'`)
     expect(tab.startupCommand).not.toContain('--resume')
+  })
+})
+
+describe('hydrateSessions() with a failing transcript probe', () => {
+  beforeEach(() => {
+    vi.resetModules()
+    vi.unstubAllGlobals()
+  })
+
+  it('keeps every persisted tab (and its sessionId) when transcripts.exists rejects', async () => {
+    const api = installWindowApiMock()
+    api.transcripts.exists = vi.fn().mockRejectedValue(new Error('Not available in the web version'))
+    api.sessions.load = vi.fn().mockResolvedValue({
+      tabs: [
+        { id: 't1', sessionId: 's1', cwd: '/a', label: 'A', presetId: 'p' },
+        { id: 't2', sessionId: 's2', cwd: '/b', label: 'B', presetId: 'p' },
+      ],
+      activeTabId: 't2',
+      freshStart: false,
+    })
+    const { useSessions, hydrateSessions } = await import('../sessions')
+    await hydrateSessions()
+    const tabs = useSessions.getState().tabs
+    expect(tabs.map((t) => [t.id, t.sessionId])).toEqual([['t1', 's1'], ['t2', 's2']])
+    expect(useSessions.getState().activeTabId).toBe('t2')
   })
 })

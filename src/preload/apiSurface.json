@@ -281,6 +281,13 @@
  },
  {
   "ns": "transcripts",
+  "method": "exists",
+  "channel": "transcript:exists",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "transcripts",
   "method": "usageFor",
   "channel": "transcript:usageFor",
   "kind": "invoke",

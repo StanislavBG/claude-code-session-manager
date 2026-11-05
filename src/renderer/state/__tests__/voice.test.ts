@@ -68,6 +68,7 @@ function installWindowApiMock() {
     },
     transcripts: {
       pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'),
+      exists: vi.fn().mockResolvedValue(true),
     },
     config: {
       exists: vi.fn().mockResolvedValue(true),

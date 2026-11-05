@@ -85,6 +85,8 @@ contextBridge.exposeInMainWorld('api', {
     readRef: (ref) => ipcRenderer.invoke('transcript:readRef', ref),
     pathFor: (cwd, sessionUuid) =>
       ipcRenderer.invoke('transcript:path', { cwd, sessionUuid }),
+    exists: (cwd, sessionUuid) =>
+      ipcRenderer.invoke('transcript:exists', { cwd, sessionUuid }),
     usageFor: (cwd, sessionIds) =>
       ipcRenderer.invoke('transcript:usageFor', { cwd, sessionIds }),
     // Main sends one batch (array) per flush — see transcripts.cjs's doFlush —

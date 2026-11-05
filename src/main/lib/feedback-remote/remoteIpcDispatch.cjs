@@ -53,6 +53,7 @@ const PATH_FENCED_CHANNELS = Object.freeze({
   'files:list': { field: 'path', mode: 'root', allowHomeListing: true },
   'transcript:readRef': { field: 'filePath', mode: 'secret' },
   'transcript:path': { field: 'cwd', mode: 'secret' },
+  'transcript:exists': { field: 'cwd', mode: 'secret' },
   'memory:read': { field: 'cwd', mode: 'secret' },
 })
 

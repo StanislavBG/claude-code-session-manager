@@ -91,7 +91,14 @@ export async function resolveStartupCommand(
 ): Promise<{ sessionId: string; startupCommand: string }> {
   let useResume = !freshStart
   if (useResume) {
-    useResume = await transcriptExists(p.cwd, p.sessionId)
+    try {
+      useResume = await transcriptExists(p.cwd, p.sessionId)
+    } catch (e) {
+      // Probe failed (denied/unavailable): existence is unknown. Keep the
+      // persisted sessionId and never drop the tab because of it.
+      console.warn('[sessions] transcript probe failed; keeping persisted sessionId:', e)
+      useResume = false
+    }
   }
   // Only generate a new UUID on a fresh-start with no JSONL; otherwise the
   // existing sessionId is already authoritative (avoids UUID churn on

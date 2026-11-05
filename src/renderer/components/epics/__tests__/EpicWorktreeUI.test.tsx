@@ -78,7 +78,7 @@ function installWindowApiMock(opts: { mergeToMain?: ReturnType<typeof vi.fn> } =
       onData: vi.fn(() => () => {}),
       onExit: vi.fn(() => () => {}),
     },
-    transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl') },
+    transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'), exists: vi.fn().mockResolvedValue(true) },
     config: {
       exists: vi.fn().mockResolvedValue(true),
       readText: vi.fn().mockResolvedValue({ exists: false, text: '' }),

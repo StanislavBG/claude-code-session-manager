@@ -62,3 +62,32 @@ describe('remoteApi', () => {
     expect(got).toEqual([42])
   })
 })
+
+describe('remoteApi + transcripts.exists', () => {
+  it('transcripts.exists is remote-readable (reaches the parent, not denied)', async () => {
+    const { api, sent, deliver } = setup()
+    const p = api.transcripts.exists('/proj', 'abc')
+    expect(sent[0]).toMatchObject({ type: 'sm-ipc', channel: 'transcript:exists' })
+    deliver({ type: 'sm-ipc-result', id: sent[0].id, result: true })
+    await expect(p).resolves.toBe(true)
+  })
+
+  it('hydrateSessions under the web shim yields N tabs for N persisted tabs', async () => {
+    const { vi } = await import('vitest')
+    vi.resetModules()
+    const { api, sent, deliver } = setup()
+    const tabs = Array.from({ length: 8 }, (_, i) => ({ id: `t${i}`, sessionId: `s${i}`, cwd: `/p${i}`, label: `L${i}`, presetId: 'p' }))
+    api.sessions.load = async () => ({ tabs, activeTabId: 't0', freshStart: false })
+    // Answer transcript:exists probes through the shim; deny everything else.
+    const origSend = sent.push.bind(sent)
+    sent.push = (m: any) => {
+      if (m.channel === 'transcript:exists') queueMicrotask(() => deliver({ type: 'sm-ipc-result', id: m.id, result: true }))
+      return origSend(m)
+    }
+    vi.stubGlobal('window', { api })
+    const { useSessions, hydrateSessions } = await import('../../state/sessions')
+    await hydrateSessions()
+    expect(useSessions.getState().tabs).toHaveLength(8)
+    vi.unstubAllGlobals()
+  })
+})

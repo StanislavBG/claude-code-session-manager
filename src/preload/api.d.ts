@@ -1800,6 +1800,8 @@ export interface SessionManagerAPI {
     /** Full untruncated single-line read via a classifier byte reference (expand-to-full path). */
     readRef: (ref: TranscriptEventRef) => Promise<{ ok: boolean; text?: string; error?: string }>;
     pathFor: (cwd: string, sessionUuid: string) => Promise<string>;
+    /** Does the claude JSONL transcript for this session exist? Remote-readable. */
+    exists: (cwd: string, sessionUuid: string) => Promise<boolean>;
     /** Batched token-usage totals, one map entry per requested sessionId. A
      *  session with no transcript file yet (or one over the main-process size
      *  cap) maps to null. */

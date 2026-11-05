@@ -83,7 +83,7 @@ function installFullWindowApiMock() {
       onNotice: vi.fn(),
       onExternalSend: vi.fn(),
     },
-    transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl') },
+    transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'), exists: vi.fn().mockResolvedValue(true) },
     epicDelegationStats: { get: vi.fn().mockResolvedValue({ prdsQueued: 0, inlineEdits: 0 }) },
     config: {
       exists: vi.fn().mockResolvedValue(true),
@@ -342,7 +342,7 @@ describe('EpicTerminalPane (PRD 831)', () => {
     // transcriptExists probes pathFor + exists; report "no transcript".
     const fullApi = window.api as unknown as Record<string, unknown>
     Object.assign(fullApi, {
-      transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl') },
+      transcripts: { pathFor: vi.fn().mockResolvedValue('/tmp/fake/transcript.jsonl'), exists: vi.fn().mockResolvedValue(false) },
     epicDelegationStats: { get: vi.fn().mockResolvedValue({ prdsQueued: 0, inlineEdits: 0 }) },
       config: { exists: vi.fn().mockResolvedValue(false) },
     })

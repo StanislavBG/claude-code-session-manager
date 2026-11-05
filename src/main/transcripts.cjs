@@ -57,6 +57,12 @@ function transcriptPath(cwd, sessionUuid) {
   return resolveTranscript(cwd, sessionUuid).filePath;
 }
 
+/** True when the session's JSONL exists on disk (project or Epic-worktree encoding). */
+function transcriptExists(cwd, sessionUuid) {
+  const { filePath, existsAnywhere } = resolveTranscript(cwd, sessionUuid);
+  return existsAnywhere || fs.existsSync(filePath);
+}
+
 // Cap bytes read per readDelta pass. Bounds memory on first attach to a very
 // large transcript (hundreds of MB) — see readDelta's seek-to-tail branch.
 const MAX_DELTA_BYTES = 8 * 1024 * 1024;
@@ -577,12 +583,14 @@ function registerTranscriptHandlers() {
   }));
   ipcMain.handle('transcript:buffer', v(s.transcriptTabId, ({ tabId }) => getBuffer(tabId)));
   ipcMain.handle('transcript:path', v(s.transcriptPath, ({ cwd, sessionUuid }) => transcriptPath(cwd, sessionUuid)));
+  ipcMain.handle('transcript:exists', v(s.transcriptPath, ({ cwd, sessionUuid }) => transcriptExists(cwd, sessionUuid)));
   ipcMain.handle('transcript:usageFor', v(s.transcriptUsageFor, ({ cwd, sessionIds }) => usageFor(cwd, sessionIds)));
   ipcMain.handle('transcript:page', v(s.transcriptPage, ({ tabId, startLine, endLine }) => pageEvents(tabId, startLine, endLine)));
   ipcMain.handle('transcript:readRef', v(s.transcriptReadRef, (ref) => readRef(ref)));
 }
 
 module.exports = {
+  transcriptExists,
   attachWindow,
   registerTranscriptHandlers,
   closeAll,

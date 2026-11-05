@@ -21,7 +21,7 @@ beforeEach(() => {
     pendingSas: null,
     devices: [dev('aaaaaa111', true), dev('bbbbbb222', true), dev('cccccc333', false)],
     deviceMeta: {
-      aaaaaa111: { name: 'Work Mac', platform: 'darwin', version: null, seenAt: 1 },
+      aaaaaa111: { name: 'Work Mac', platform: 'darwin', version: '0.126.0', seenAt: 1 },
       cccccc333: { name: 'Old PC', platform: 'win32', version: null, seenAt: 1 },
     },
     activeDeviceId: 'aaaaaa111',
@@ -36,6 +36,7 @@ describe('DevicePicker', () => {
     expect(screen.getByText('Computer bbbbbb')).toBeInTheDocument();
     expect(screen.getByText(/macOS/)).toBeInTheDocument();
     expect(screen.getByText(/Windows/)).toBeInTheDocument();
+    expect(screen.getByTestId('device-row-aaaaaa111')).toHaveTextContent('v0.126.0');
     expect(screen.getAllByText('Current')).toHaveLength(1);
     expect(screen.getByTestId('device-row-aaaaaa111')).toHaveTextContent('Current');
   });

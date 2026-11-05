@@ -81,7 +81,7 @@ export default function DevicePicker({ onClose, onRefreshDevices }: Props) {
                   <span className="flex-1 min-w-0">
                     <span className="block text-sm font-semibold text-ink truncate">{label}</span>
                     <span className="block text-xs text-ink-mute truncate">
-                      {[plat, d.isOnline ? 'online' : 'offline'].filter(Boolean).join(' · ')}
+                      {[plat, deviceMeta[d.deviceId]?.version ? `v${deviceMeta[d.deviceId]?.version}` : null, d.isOnline ? 'online' : 'offline'].filter(Boolean).join(' · ')}
                     </span>
                   </span>
                   {current && <span className="text-xs font-mono text-accent">Current</span>}

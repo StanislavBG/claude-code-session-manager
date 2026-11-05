@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
+import { useStore } from '../store';
 import RemoteRenderer, { sha256Hex, IFRAME_SANDBOX, buildSrcDoc, BOOTSTRAP, BOOT_WATCHDOG_MS } from '../components/RemoteRenderer';
 
 const enc = new TextEncoder();
@@ -125,6 +126,15 @@ describe('RemoteRenderer', () => {
     render(<RemoteRenderer socket={s.socket} deviceId="d1" fallback={<div data-testid="drill">drill</div>} />);
     expect(await screen.findByTestId('drill')).toBeInTheDocument();
     expect(screen.queryByTestId('remote-renderer')).toBeNull();
+  });
+
+  it('shows an update banner with the desktop version when the manifest is unavailable', async () => {
+    useStore.setState({ deviceMeta: { d1: { name: 'PC', platform: 'win32', version: '0.125.1', seenAt: 1 } } });
+    const s = await makeSocket({ available: false });
+    render(<RemoteRenderer socket={s.socket} deviceId="d1" fallback={<div data-testid="drill">drill</div>} />);
+    const banner = await screen.findByTestId('renderer-outdated-banner');
+    expect(banner).toHaveTextContent('0.125.1');
+    expect(banner).toHaveTextContent('Update Session Manager on this computer to 0.126.0 or newer for the full interface');
   });
 
   it('falls back, without mounting, when the desktop lists only index.html', async () => {

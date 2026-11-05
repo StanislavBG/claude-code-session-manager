@@ -10,6 +10,13 @@ import { create } from 'zustand'
  * without chat.ts needing to know anything about EpicTerminalPane/xterm.
  */
 
+/** True in the browser build (remoteApi.ts sets `__remote`); pty:* is denied there. */
+export function isWebRemote(): boolean {
+  return typeof window !== 'undefined' && (window.api as unknown as { __remote?: boolean } | undefined)?.__remote === true
+}
+
+export const WEB_TERMINAL_TOOLTIP = 'Terminal is only available on the computer itself'
+
 export type EpicTerminalMode = 'chat' | 'terminal'
 
 interface EpicTerminalState {
@@ -23,7 +30,7 @@ interface EpicTerminalState {
 export const useEpicTerminal = create<EpicTerminalState>((set, get) => ({
   modes: {},
   attached: {},
-  setMode: (epicId, mode) => set((s) => ({ modes: { ...s.modes, [epicId]: mode } })),
+  setMode: (epicId, mode) => set(isWebRemote() && mode === 'terminal' ? (s) => s : (s) => ({ modes: { ...s.modes, [epicId]: mode } })),
   setAttached: (epicId, attached) => set((s) => ({ attached: { ...s.attached, [epicId]: attached } })),
   isAttached: (epicId) => Boolean(get().attached[epicId]),
 }))

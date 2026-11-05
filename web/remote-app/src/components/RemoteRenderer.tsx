@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useStore } from '../store';
 import {
   fetchAssetBytes,
   fetchAssetManifest,
@@ -245,7 +246,7 @@ export class IpcBridge {
 
 type State =
   | { kind: 'loading' }
-  | { kind: 'fallback' }
+  | { kind: 'fallback'; outdated?: boolean }
   | { kind: 'refused'; file: string }
   | { kind: 'ready'; srcDoc: string };
 
@@ -254,6 +255,18 @@ interface Props {
   deviceId: string;
   /** Drill-down shown when the desktop reports available:false (or predates asset:*). */
   fallback: ReactNode;
+}
+
+export const MIN_FULL_UI_VERSION = '0.126.0';
+
+function OutdatedBanner({ deviceId }: { deviceId: string }) {
+  const version = useStore((s) => s.deviceMeta[deviceId]?.version);
+  return (
+    <div role="status" data-testid="renderer-outdated-banner" className="px-4 py-2 text-xs bg-paper border-b border-edge text-ink-soft">
+      {version ? `This computer runs Session Manager ${version}. ` : 'This computer runs an older Session Manager. '}
+      Update Session Manager on this computer to {MIN_FULL_UI_VERSION} or newer for the full interface.
+    </div>
+  );
 }
 
 export default function RemoteRenderer({ socket, deviceId, fallback }: Props) {
@@ -272,7 +285,7 @@ export default function RemoteRenderer({ socket, deviceId, fallback }: Props) {
         const manifest = await fetchAssetManifest(socket, deviceId);
         if (cancelled) return;
         const index = manifest.files.find((f) => f.name === 'index.html');
-        if (!manifest.available || !index) { setState({ kind: 'fallback' }); return; }
+        if (!manifest.available || !index) { setState({ kind: 'fallback', outdated: true }); return; }
         const html = dec.decode(await loadVerified(socket, deviceId, index));
         const byName = new Map(manifest.files.map((f) => [f.name, f]));
         const css = new Map<string, string>();
@@ -299,7 +312,7 @@ export default function RemoteRenderer({ socket, deviceId, fallback }: Props) {
       } catch (e) {
         if (cancelled) return;
         if (e instanceof Error && e.name === 'HashMismatchError') setState({ kind: 'refused', file: (e as HashMismatchError).file });
-        else setState({ kind: 'fallback' });
+        else setState({ kind: 'fallback', outdated: true });
       }
     })();
     return () => { cancelled = true; };
@@ -327,7 +340,14 @@ export default function RemoteRenderer({ socket, deviceId, fallback }: Props) {
     return () => { clearWatchdog(); window.removeEventListener('message', onMessage); bridge.dispose(); };
   }, [srcDoc, socket, deviceId]);
 
-  if (state.kind === 'fallback') return <>{fallback}</>;
+  if (state.kind === 'fallback') {
+    return (
+      <>
+        {state.outdated && <OutdatedBanner deviceId={deviceId} />}
+        {fallback}
+      </>
+    );
+  }
   if (state.kind === 'refused') {
     return (
       <div role="alert" data-testid="renderer-refused" className="flex-1 flex items-center justify-center text-sm px-6 text-center">

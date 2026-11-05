@@ -3,7 +3,7 @@ import { useChat, attachTranscriptFeed, detachTranscriptFeed, type ChatTurn } fr
 import { buildEpicTimeline } from '../../lib/epicTimeline'
 import { usePromptSessions, type PromptSession, type PromptSessionEvent } from '../../state/promptSessions'
 import { useScheduleState } from '../../state/scheduleState'
-import { useEpicTerminal, type EpicTerminalMode } from '../../state/epicTerminal'
+import { useEpicTerminal, isWebRemote, WEB_TERMINAL_TOOLTIP, type EpicTerminalMode } from '../../state/epicTerminal'
 import { EpicTerminalPane } from './EpicTerminalPane'
 import { epicDisplayStatus, epicPrds, epicStats, splitTitleAndGoal, type EpicSnapshots, type EpicPrd } from '../../lib/epicDerive'
 import { EpicStatusChip, EpicKindTag, WORKTREE_TONE, InboundProposalCard } from './epic-primitives'
@@ -620,8 +620,15 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   const appendPromptSessionEvent = usePromptSessions((s) => s.appendPromptSessionEvent)
   const scheduleJobs = useScheduleState((s) => s.snapshot?.jobs) ?? EMPTY_JOBS
 
-  const mode = useEpicTerminal((s) => s.modes[epicId] ?? 'chat')
+  const webRemote = isWebRemote()
+  const mode = useEpicTerminal((s) => (webRemote ? 'chat' : (s.modes[epicId] ?? 'chat')))
   const setMode = useEpicTerminal((s) => s.setMode)
+  const lastTurn = chat?.turns?.[chat.turns.length - 1]
+  const lastErrorId = lastTurn?.role === 'error' ? lastTurn.id : null
+  useEffect(() => {
+    if (!webRemote || !lastErrorId) return
+    toast.info('This message could not be sent from the web UI. Turn on remote control on the computer itself (Settings → Phone remote) to send messages and run sessions from here.')
+  }, [webRemote, lastErrorId])
   const setAttached = useEpicTerminal((s) => s.setAttached)
 
   // captureTerminalHandoffTurns previously ran ONLY on the explicit "Return
@@ -797,7 +804,9 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
   // claudeSessionId — otherwise a headless resume and an interactive resume
   // would race on the same transcript.
   const chatBusy = running || (chat?.queuedPosition ?? 0) > 0
-  const terminalDisabledReason = chatBusy
+  const terminalDisabledReason = webRemote
+    ? WEB_TERMINAL_TOOLTIP
+    : chatBusy
     ? 'Chat is running or queued for this session — wait for it to finish before switching to Terminal.'
     : null
 
@@ -839,6 +848,7 @@ export function EpicDetail({ promptSession, onQuote }: Props) {
 
   const onModeChange = (next: EpicTerminalMode) => {
     if (next === mode) return
+    if (webRemote) return // no pty call from the browser build
     if (next === 'terminal') {
       // Re-read the LIVE chat state, not the render snapshot: a run can start
       // between the last render and this click (external send, dequeued

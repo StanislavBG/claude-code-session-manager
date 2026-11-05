@@ -107,6 +107,26 @@ describe('EpicDetail Chat <-> Terminal mode toggle (PRD 831)', () => {
     expect(el.querySelector('[data-testid="epic-mode-toggle"]')).toBeNull()
   })
 
+  it('web build: Terminal is disabled with the desktop-only tooltip and never touches pty', async () => {
+    const { api } = installWindowApiMock()
+    ;(api as unknown as { __remote: boolean }).__remote = true
+    const { usePromptSessions } = await import('../../../state/promptSessions')
+    const { useEpicTerminal } = await import('../../../state/epicTerminal')
+    const { EpicDetail } = await import('../EpicDetail')
+
+    const session = await usePromptSessions.getState().createPromptSession('/tmp/proj', 'Ship it', 'feature')
+    useEpicTerminal.getState().setMode(session.id, 'terminal')
+    const el = mount(createElement(EpicDetail, { promptSession: session }))
+
+    const terminalBtn = el.querySelector('[data-testid="epic-mode-terminal"]') as HTMLButtonElement
+    expect(terminalBtn.disabled).toBe(true)
+    expect(terminalBtn.title).toBe('Terminal is only available on the computer itself')
+    expect(el.querySelector('[data-testid="fake-epic-terminal-pane"]')).toBeNull()
+    act(() => terminalBtn.click())
+    expect(useEpicTerminal.getState().modes[session.id]).not.toBe('terminal')
+    expect(api.pty.kill).not.toHaveBeenCalled()
+  })
+
   it('shows the toggle for an active Epic with Terminal enabled when chat is idle', async () => {
     installWindowApiMock()
     const { usePromptSessions } = await import('../../../state/promptSessions')

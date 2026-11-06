@@ -6267,8 +6267,10 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
     // branch below has this run's OWN start time — the freshness check
     // (isCooldownSuppressed) needs to know whether this specific dispatch
     // started after the manual clear, not whatever startedAt this row
-    // carried from a prior run.
+    // carried from a prior run. The same stamped start (ISO form, below)
+    // also feeds verifyRun's queueEntry so artifact-only PRDs get a real window.
     let dispatchStartedAtMs = null;
+    let dispatchStartedAt = null;
     let dispatchSkippedAlreadyCompleted = false;
     await mutate((s) => {
       const idx = s.jobs.findIndex((x) => x.slug === job.slug);
@@ -6351,6 +6353,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
         s.jobs[idx].dispatchPhase = 'running-stamped';
         s.jobs[idx].dispatchPhaseAt = s.jobs[idx].startedAt;
         dispatchStartedAtMs = Date.parse(s.jobs[idx].startedAt);
+        dispatchStartedAt = s.jobs[idx].startedAt;
         if (job.quietMachine === true) {
           s.jobs[idx].quietMachine = true;
           s.jobs[idx].quietLeaseDegraded = job.quietLeaseDegraded === true;
@@ -6799,7 +6802,7 @@ async function spawnJob(job, runId, runDir, defaultCwd, resumeTarget = null, sib
       verifyResult = await verifyRun({
         runDir,
         prdPath,
-        queueEntry: job,
+        queueEntry: { ...job, startedAt: dispatchStartedAt, finishedAt: null },
         allJobs: stateForDeps.jobs,
         committedDuringRun,
         priorLandedCommit,

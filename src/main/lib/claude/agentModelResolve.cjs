@@ -28,11 +28,13 @@
  */
 
 const path = require('node:path');
+const crypto = require('node:crypto');
 const os = require('node:os');
 const { splitFrontmatter } = require('../prd/prdFrontmatter.cjs');
 const { readActiveIndex, resolvePersonaPaths } = require('../epic/epicMint.cjs');
 const { resolveMergedPersona, PERSONA_NAME_RE } = require('../persona-macro/personaMerge.cjs');
 const configMgr = require('../../config.cjs');
+const { SHIPPED_PERSONA_SEEDS } = require('../persona-macro/shippedPersonaSeeds.cjs');
 
 /** The hardcoded floor every branch of resolveEpicModel falls back to — --model must never be omitted (CLAUDE.md "Automation model pinning"). */
 const FALLBACK_MODEL = 'sonnet';
@@ -180,17 +182,31 @@ function resolveEpicModel({ cwd, claudeSessionId, fallbackModel = FALLBACK_MODEL
 /** Mirrors epicIntake.ts's AGENT_BODY_CHAR_CAP — a runaway persona file must
  *  not be able to dominate a spawned job's system prompt either. Duplicated
  *  rather than imported: epicIntake.ts is a renderer module (no ES modules
- *  in main). */
+ *  in main).
+ *
+ *  EXEMPTION: a body whose digest matches a version the app itself shipped
+ *  (SHIPPED_PERSONA_SEEDS) is passed whole — an unedited app-shipped body
+ *  cannot be a runaway file, and demo-video-builder's style and palette rules
+ *  sit past 6000 chars, so capping it silently drops them. Every other body
+ *  (edited, overlay-changed, no manifest entry) stays capped. */
 const AGENT_BODY_CHAR_CAP = 6000;
 
+/** sha256 hex of a body (newlines normalized, trimmed). MUST stay the same
+ *  digest as seedAgentPersonas.cjs's personaBodyHash (not required here: it
+ *  pulls the seeding writers); the unit test enforces the equality. */
+function shippedBodyHash(body) {
+  const normalized = String(body || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  return crypto.createHash('sha256').update(normalized.trim()).digest('hex');
+}
+
 /** Trims a persona's frontmatter-stripped body and caps it at
- *  AGENT_BODY_CHAR_CAP, appending a truncation notice naming `personaPath`
- *  — same shape as epicIntake.ts's buildPersonaBodyText. Returns null for an
- *  empty body. */
-function buildPersonaBodyText(rawBody, personaPath) {
+ *  AGENT_BODY_CHAR_CAP (unless `uncapped`), appending a truncation notice
+ *  naming `personaPath` — same shape as epicIntake.ts's buildPersonaBodyText.
+ *  Returns null for an empty body. */
+function buildPersonaBodyText(rawBody, personaPath, { uncapped = false } = {}) {
   const body = (rawBody || '').trim();
   if (!body) return null;
-  if (body.length <= AGENT_BODY_CHAR_CAP) return body;
+  if (uncapped || body.length <= AGENT_BODY_CHAR_CAP) return body;
   const truncated = body.slice(0, AGENT_BODY_CHAR_CAP);
   const pathLabel = personaPath || 'the persona file';
   return `${truncated}\n\n[Truncated — ${pathLabel} exceeds ${AGENT_BODY_CHAR_CAP} characters; see the file for the full body.]`;
@@ -229,7 +245,9 @@ async function resolvePrdPersonaForSpawn({ cwd, agentType, fallbackModel = FALLB
     // (older injected reader) is parsed here.
     const { fm, body } = persona.fm ? persona : splitFrontmatter(persona.text);
     const model = fm.model && fm.model !== 'inherit' ? fm.model : fallbackModel;
-    const systemPrompt = buildPersonaBodyText(body, persona.path);
+    const digest = shippedBodyHash(body);
+    const uncapped = (SHIPPED_PERSONA_SEEDS[agentType] || []).some((e) => e.bodySha256 === digest);
+    const systemPrompt = buildPersonaBodyText(body, persona.path, { uncapped });
     const parseTools = deps.parseTools || require('../../agentLibrary.cjs').parseTools;
     const list = parseTools(typeof fm.tools === 'string' ? fm.tools : '');
     return { model, systemPrompt, personaPath: persona.path, tools: list.length ? list : null };
@@ -241,6 +259,7 @@ async function resolvePrdPersonaForSpawn({ cwd, agentType, fallbackModel = FALLB
 module.exports = {
   FALLBACK_MODEL,
   AGENT_BODY_CHAR_CAP,
+  shippedBodyHash,
   resolveEpicModel,
   findAgentTypeByClaudeSessionId,
   findEpicByClaudeSessionId,

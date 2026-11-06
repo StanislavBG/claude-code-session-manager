@@ -240,6 +240,22 @@ describe('ProjectPagesSection', () => {
       expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video style: Animated whiteboard\nVideo length: 60\nshorter')
     })
 
+    it('kind select and target input send "Video kind" / "Video target" lines', async () => {
+      const onLaunch = vi.fn()
+      const el = await mountVideos(onLaunch)
+      const kind = el.querySelector('[data-testid="project-home-demo-kind"]') as HTMLSelectElement
+      expect(Array.from(kind.options).map((o) => o.textContent)).toEqual(['Project demo', 'Blog post', 'Feature'])
+      pick(kind, 'Blog post')
+      const input = el.querySelector('[data-testid="project-home-demo-target"]') as HTMLInputElement
+      const setValue = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
+      act(() => {
+        setValue.call(input, 'blog/post.md')
+        input.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      act(() => macroBtn(el, 'builtin-demo-video').click())
+      expect(onLaunch).toHaveBeenCalledWith(DEMO_MACRO, 'Video kind: Blog post\nVideo target: blog/post.md')
+    })
+
     it('leaves args unchanged with Auto / 30', async () => {
       const onLaunch = vi.fn()
       const el = await mountVideos(onLaunch)

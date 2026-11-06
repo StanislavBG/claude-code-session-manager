@@ -23,10 +23,12 @@ function frontmatter(doc) {
   return fm;
 }
 
-test('builtin demo-video macro is v5 with the character + styles + length prompt', () => {
+test('builtin demo-video macro is v6 with the character + styles + length prompt', () => {
   const macro = BUILTIN_MACROS.find((m) => m.id === 'builtin-demo-video');
-  expect(macro.builtinVersion).toBe(5);
-  expect(macro.priorPrompts).toHaveLength(4);
+  expect(macro.builtinVersion).toBe(6);
+  expect(macro.priorPrompts).toHaveLength(5);
+  expect(macro.builtinVersion).toBe(macro.priorPrompts.length + 1);
+  for (const t of ['project_video_write', 'Video kind:', 'Video target:', 'Entry id']) expect(macro.prompt).toContain(t);
   expect(macro.prompt).toContain('Video length: 60');
   expect(macro.prompt).not.toContain('30-second');
   expect(macro.prompt).toContain('Generate a character and cute animated JavaScript video');
@@ -34,8 +36,7 @@ test('builtin demo-video macro is v5 with the character + styles + length prompt
     expect(macro.prompt).toContain(style);
   }
   expect(macro.prompt).toContain('Video style: <name>');
-  expect(macro.prompt).toContain('project_demo_video_write');
-  expect(macro.prompt).toContain('htmlPath');
+    expect(macro.prompt).toContain('htmlPath');
   expect(macro.prompt).toContain('Kokoro');
 });
 
@@ -141,6 +142,6 @@ test('built-in macros declare a frozen background job', () => {
   expect(home.prompt).toContain('project_page_write');
   expect(home.prompt).toContain("'Page:");
   expect(home.prompt).toContain("'Entry id'");
-  expect(demo.builtinVersion).toBe(5);
-  expect(demo.priorPrompts).toHaveLength(4);
+  expect(demo.builtinVersion).toBe(6);
+  expect(demo.priorPrompts).toHaveLength(5);
 });

@@ -25,6 +25,8 @@ const DEMO_VIDEO_LENGTHS = [
   { value: '60', label: '1 minute' },
 ] as const
 
+const DEMO_VIDEO_KINDS = ['Project demo', 'Blog post', 'Feature'] as const
+
 const KNOWLEDGE_PAGE_KINDS = ['Overview', 'How it works', 'FAQ', 'Custom topic'] as const
 
 function macroButtonLabel(macro: Macro, has: boolean): string {
@@ -83,6 +85,8 @@ function MacroButton({
   const [length, setLength] = useState<string>('30')
   const [pageKind, setPageKind] = useState<string>('Overview')
   const [topic, setTopic] = useState('')
+  const [videoKind, setVideoKind] = useState<string>('Project demo')
+  const [target, setTarget] = useState('')
   const building = status?.state === 'queued' || status?.state === 'running'
   const disabled = launching !== null || building
   const showExtraInput = has
@@ -98,10 +102,14 @@ function MacroButton({
       const t = topic.trim()
       pageLine = t ? `Page: Custom topic: ${t}` : ''
     } else if (showPageKind && pageKind !== 'Overview') pageLine = `Page: ${pageKind}`
-    const combined = [pageLine, styleLine, lengthLine, trimmed].filter(Boolean).join('\n')
+    const kindLine = showStyle && videoKind !== 'Project demo' ? `Video kind: ${videoKind}` : ''
+    const targetText = target.trim()
+    const targetLine = showStyle && targetText ? `Video target: ${targetText}` : ''
+    const combined = [pageLine, kindLine, targetLine, styleLine, lengthLine, trimmed].filter(Boolean).join('\n')
     onLaunch(macro, combined || undefined)
     setExtra('')
     setTopic('')
+    setTarget('')
   }
 
   return (
@@ -131,6 +139,34 @@ function MacroButton({
           onChange={(e) => setTopic(e.target.value)}
           disabled={disabled}
           placeholder="Topic for this page"
+          className="rounded-lg border border-line bg-bg-hi px-2.5 py-2 text-xs text-fg placeholder:text-fg-faint disabled:opacity-40 disabled:cursor-not-allowed"
+        />
+      )}
+      {showStyle && (
+        <select
+          data-testid="project-home-demo-kind"
+          aria-label="Video kind"
+          value={videoKind}
+          onChange={(e) => setVideoKind(e.target.value)}
+          disabled={disabled}
+          className="rounded-lg border border-line bg-bg-hi px-2.5 py-2 text-xs text-fg disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {DEMO_VIDEO_KINDS.map((k) => (
+            <option key={k} value={k}>
+              {k}
+            </option>
+          ))}
+        </select>
+      )}
+      {showStyle && (
+        <input
+          type="text"
+          data-testid="project-home-demo-target"
+          aria-label="Video target"
+          value={target}
+          onChange={(e) => setTarget(e.target.value)}
+          disabled={disabled}
+          placeholder="Optional: post path or URL (Blog post), feature name (Feature)"
           className="rounded-lg border border-line bg-bg-hi px-2.5 py-2 text-xs text-fg placeholder:text-fg-faint disabled:opacity-40 disabled:cursor-not-allowed"
         />
       )}

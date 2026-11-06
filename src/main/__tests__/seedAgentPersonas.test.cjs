@@ -503,7 +503,6 @@ test('the bundled blender-artist.md carries no machine-specific path or project 
 // Each persona below gained its MCP save tool; the PREVIOUS shipped file is the current
 // bundled file with the new tool and seedVersion reverted (byte-identical to what shipped).
 for (const [name, tool, prevVersion] of [
-  ['demo-video-builder', 'mcp__session-manager-scheduler__project_demo_video_write', 5],
   ['project-home-builder', 'mcp__session-manager-scheduler__project_home_write', 2],
 ]) {
   const bundledText = () => fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', `${name}.md`), 'utf8');
@@ -533,3 +532,39 @@ for (const [name, tool, prevVersion] of [
     expect(fs.readFileSync(path.join(agentsDir(), `${name}.md`), 'utf8')).toBe(edited);
   });
 }
+
+// demo-video-builder: proven against the exact files users have installed (pinned fixtures),
+// not a rebuild from the current bundled file. Version-agnostic: never names the bundled seedVersion.
+const DVB_TOOL = 'mcp__session-manager-scheduler__project_demo_video_write';
+const dvbBundled = () => fs.readFileSync(path.join(__dirname, '..', '..', 'seed', 'agents', 'demo-video-builder.md'), 'utf8');
+const dvbFixture = (v) => fs.readFileSync(path.join(__dirname, 'fixtures', `demo-video-builder-seed-v${v}.txt`), 'utf8');
+
+test('demo-video-builder: each pinned shipped fixture hash is in SHIPPED_PERSONA_SEEDS', () => {
+  const { personaBodyHash } = require('../seedAgentPersonas.cjs');
+  const { SHIPPED_PERSONA_SEEDS } = require('../lib/persona-macro/shippedPersonaSeeds.cjs');
+  const known = SHIPPED_PERSONA_SEEDS['demo-video-builder'].map((e) => e.bodySha256);
+  for (const v of [5, 6]) expect(known).toContain(personaBodyHash(dvbFixture(v)));
+});
+
+for (const v of [5, 6]) {
+  test(`demo-video-builder: an unedited installed v${v} file ends up byte-identical to the bundled file`, async () => {
+    fs.mkdirSync(agentsDir(), { recursive: true });
+    fs.writeFileSync(path.join(agentsDir(), 'demo-video-builder.md'), dvbFixture(v));
+    await seedAgentPersonas({ logger: silentLogger() });
+    expect(fs.readFileSync(path.join(agentsDir(), 'demo-video-builder.md'), 'utf8')).toBe(dvbBundled());
+  });
+}
+
+test('demo-video-builder: a v5 install with an appended line is kept as a user edit', async () => {
+  fs.mkdirSync(agentsDir(), { recursive: true });
+  const edited = dvbFixture(5) + '\nmy own extra rule\n';
+  fs.writeFileSync(path.join(agentsDir(), 'demo-video-builder.md'), edited);
+  await seedAgentPersonas({ logger: silentLogger() });
+  expect(fs.readFileSync(path.join(agentsDir(), 'demo-video-builder.md'), 'utf8')).toBe(edited);
+});
+
+test('demo-video-builder: the bundled tools line carries the demo video save tool', () => {
+  const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+  const { fm } = splitFrontmatter(dvbBundled());
+  expect(fm.tools.split(',').map((t) => t.trim())).toContain(DVB_TOOL);
+});

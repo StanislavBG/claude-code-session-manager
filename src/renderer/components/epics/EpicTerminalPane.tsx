@@ -4,10 +4,11 @@ import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { mountTerminalSettings, DEFAULT_TERMINAL_SETTINGS, TERMINAL_THEMES } from '../../lib/terminalSettings'
 import { writeInChunks } from '../Terminal'
-import { shellQuote, modelFlag, effortFlag } from '../../lib/presets'
+import { buildEpicClaudeCommand } from '../../lib/epicLaunchCommand'
 import { canFit } from '../../lib/terminalFit'
 import { transcriptExists } from '../../lib/transcriptExists'
 import { useEpicTerminal } from '../../state/epicTerminal'
+import { usePromptSessions } from '../../state/promptSessions'
 import { toast } from '../../state/toast'
 
 /** Mirrors agentModelResolve.cjs's FALLBACK_MODEL — the floor this pane falls
@@ -67,6 +68,11 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
   const spawnedRef = useRef(false)
   const [exited, setExited] = useState<{ code: number | null } | null>(null)
   const setAttached = useEpicTerminal((s) => s.setAttached)
+  // Primitive selector (boolean | undefined). Read through a ref so a later
+  // store change never re-runs the spawn effect.
+  const developLoop = usePromptSessions((s) => s.sessions[epicId]?.developLoop)
+  const developLoopRef = useRef(developLoop)
+  developLoopRef.current = developLoop
 
   // Attached the instant this pane mounts (before the pty round-trip
   // resolves) so chat.ts's send() guard blocks immediately on mode switch.
@@ -133,8 +139,7 @@ export function EpicTerminalPane({ epicId, cwd, sessionId, onReturnToChat }: Pro
         const resume = await transcriptExists(cwd, sessionId).catch(() => true)
         const model = await resolveEpicModel(cwd, sessionId)
         const effort = await resolveEpicEffort(cwd, sessionId)
-        const flag = resume ? `--resume ${shellQuote(sessionId)}` : `--session-id ${shellQuote(sessionId)}`
-        const cmd = `claude --dangerously-skip-permissions ${flag}${modelFlag(model)}${effortFlag(effort)}\r`
+        const cmd = buildEpicClaudeCommand({ sessionId, resume, model, effort, developLoop: developLoopRef.current })
         setTimeout(() => writeInChunks(sessionId, cmd), 1500)
       })
       .catch((err) => {

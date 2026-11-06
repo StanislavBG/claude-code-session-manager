@@ -17,7 +17,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const chokidar = require('chokidar');
 const config = require('./config.cjs');
-const { opsPath } = require('./lib/opsOwnership.cjs');
+const { opsPath, assertOpsWrite } = require('./lib/opsOwnership.cjs');
 const { sendIfAlive } = require('./lib/sendToRenderer.cjs');
 const { listLibrary, migrateLegacy } = require('./lib/project-pages/pagesLibrary.cjs');
 
@@ -191,10 +191,69 @@ function closeAllOutputWatchers() {
   outputWatchers.clear();
 }
 
+const WRITER = 'project-home';
+
+/**
+ * Resolve one library entry folder for rename/delete. Refuses a bad id,
+ * '_character', a missing entry, and anything whose realpath is not a direct
+ * child (same name) of the kind folder — a symlink escape.
+ */
+async function resolveEntry({ cwd, kind, id }) {
+  const { schemas, ENTRY_ID_RE } = require('./ipcSchemas.cjs');
+  if (kind !== 'knowledge' && kind !== 'video') throw new Error('invalid kind');
+  if (typeof id !== 'string' || id === '_character' || !ENTRY_ID_RE.test(id)) throw new Error('invalid entry id');
+  const realCwd = config.validatePath(cwd);
+  const folder = kind === 'video' ? 'videos' : 'knowledge';
+  const kindDir = opsPath(realCwd, 'project-pages', folder);
+  const dir = path.join(kindDir, id);
+  let realDir;
+  let realKind;
+  try {
+    realDir = await fs.promises.realpath(dir);
+    realKind = await fs.promises.realpath(kindDir);
+  } catch (e) {
+    if (e.code === 'ENOENT') throw new Error('entry not found');
+    throw e;
+  }
+  if (path.dirname(realDir) !== realKind || path.basename(realDir) !== id) {
+    throw new Error('entry resolves outside its kind folder');
+  }
+  const st = await fs.promises.stat(realDir);
+  if (!st.isDirectory()) throw new Error('entry not found');
+  return { dir: realDir, schema: kind === 'video' ? schemas.projectVideoMeta : schemas.projectPageMeta };
+}
+
+/** Rewrite one entry's meta.json title (schema-validated before and after). */
+async function renameEntry(input) {
+  const { dir, schema } = await resolveEntry(input);
+  const metaFile = path.join(dir, 'meta.json');
+  let raw;
+  try {
+    raw = JSON.parse(await fs.promises.readFile(metaFile, 'utf8'));
+  } catch (e) {
+    throw new Error(`meta.json unreadable: ${e.code === 'ENOENT' ? 'missing' : e.message}`);
+  }
+  const current = schema.safeParse(raw);
+  if (!current.success) throw new Error('meta.json invalid');
+  const next = schema.parse({ ...current.data, title: input.title });
+  await config.writeTextAtomic(metaFile, JSON.stringify(next, null, 2) + '\n', { writer: WRITER });
+  return { ok: true, title: next.title };
+}
+
+/** Remove exactly one entry folder. */
+async function deleteEntry(input) {
+  const { dir } = await resolveEntry(input);
+  assertOpsWrite(dir, WRITER);
+  await fs.promises.rm(dir, { recursive: true, force: false });
+  return { ok: true };
+}
+
 function registerProjectPagesIpc() {
   const { schemas: s, validated: v } = require('./ipcSchemas.cjs');
   ipcMain.handle('project-pages:get', v(s.projectPagesCwd, get));
   ipcMain.handle('project-pages:watch', v(s.projectPagesCwd, ({ cwd }) => watchOutput(cwd)));
+  ipcMain.handle('project-pages:rename', v(s.projectPagesRename, renameEntry));
+  ipcMain.handle('project-pages:delete', v(s.projectPagesDelete, deleteEntry));
   ipcMain.handle('project-pages:unwatch', v(s.projectPagesCwd, ({ cwd }) => {
     unwatchOutput(cwd);
     return { ok: true };
@@ -205,6 +264,8 @@ module.exports = {
   attachWindow,
   registerProjectPagesIpc,
   get,
+  renameEntry,
+  deleteEntry,
   watchOutput,
   unwatchOutput,
   closeAllOutputWatchers,

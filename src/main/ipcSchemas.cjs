@@ -881,6 +881,18 @@ const projectVideoMeta = z.object({
   model: z.string().max(60),
   effort: z.string().max(60),
 }).strict();
+const projectPagesEntryKind = z.enum(['knowledge', 'video']);
+const projectPagesRename = z.object({
+  cwd: z.string().min(1).max(4096),
+  kind: projectPagesEntryKind,
+  id: entryId,
+  title: z.string().min(1).max(120),
+}).strict();
+const projectPagesDelete = z.object({
+  cwd: z.string().min(1).max(4096),
+  kind: projectPagesEntryKind,
+  id: entryId,
+}).strict();
 const projectPageMeta = z.object({
   id: entryId,
   title: z.string().min(1).max(120),
@@ -1436,6 +1448,8 @@ module.exports = {
     memoryProposeFix,
     projectBriefCwd,
     projectPagesCwd,
+    projectPagesRename,
+    projectPagesDelete,
     projectHomeAdminWriteBody,
     projectDemoVideoAdminWriteBody,
     projectVideoMeta,

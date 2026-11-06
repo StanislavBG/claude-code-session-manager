@@ -16,6 +16,8 @@ const path = require('node:path');
 const config = require('../config.cjs');
 const {
   get,
+  renameEntry,
+  deleteEntry,
   attachWindow,
   watchOutput,
   unwatchOutput,
@@ -235,3 +237,72 @@ test('watchOutput() pushes when a new videos/<id>/meta.json lands', async () => 
   expect(Array.isArray(last.payload.knowledge)).toBe(true);
   unwatchOutput(cwd);
 }, 10_000);
+
+// ─── rename / delete ──────────────────────────────────────────────────────
+
+function seedEntry(cwd, folder, id, meta) {
+  const dir = path.join(pagesDir(cwd), folder, id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'index.html'), '<html></html>');
+  fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta));
+  return dir;
+}
+const pageMeta = (id, title = 'Old') => ({ id, title, topic: '', createdAt: '2026-01-01T00:00:00.000Z', model: '' });
+
+test('renameEntry rewrites only the title in meta.json', async () => {
+  const cwd = await mkTmpCwd();
+  const dir = seedEntry(cwd, 'knowledge', 'alpha', pageMeta('alpha'));
+  const sib = seedEntry(cwd, 'knowledge', 'beta', pageMeta('beta', 'Beta'));
+  await renameEntry({ cwd, kind: 'knowledge', id: 'alpha', title: 'New title' });
+  const meta = JSON.parse(fs.readFileSync(path.join(dir, 'meta.json'), 'utf8'));
+  expect(meta).toEqual({ ...pageMeta('alpha'), title: 'New title' });
+  expect(JSON.parse(fs.readFileSync(path.join(sib, 'meta.json'), 'utf8')).title).toBe('Beta');
+});
+
+test('deleteEntry removes only that entry folder', async () => {
+  const cwd = await mkTmpCwd();
+  const dir = seedEntry(cwd, 'knowledge', 'alpha', pageMeta('alpha'));
+  const sib = seedEntry(cwd, 'knowledge', 'beta', pageMeta('beta'));
+  expect(await deleteEntry({ cwd, kind: 'knowledge', id: 'alpha' })).toEqual({ ok: true });
+  expect(fs.existsSync(dir)).toBe(false);
+  expect(fs.existsSync(path.join(sib, 'index.html'))).toBe(true);
+});
+
+test('rename/delete refuse bad ids, _character, missing entries and bad kinds', async () => {
+  const cwd = await mkTmpCwd();
+  fs.mkdirSync(path.join(pagesDir(cwd), 'videos', '_character'), { recursive: true });
+  for (const fn of [
+    (id) => renameEntry({ cwd, kind: 'video', id, title: 'x' }),
+    (id) => deleteEntry({ cwd, kind: 'video', id }),
+  ]) {
+    for (const id of ['../x', 'A', '_character', '', 'a/b']) await expect(fn(id)).rejects.toThrow();
+    await expect(fn('missing')).rejects.toThrow(/not found/);
+  }
+  await expect(deleteEntry({ cwd, kind: 'other', id: 'alpha' })).rejects.toThrow();
+  expect(fs.existsSync(path.join(pagesDir(cwd), 'videos', '_character'))).toBe(true);
+});
+
+test('rename/delete refuse a symlinked entry and leave its target intact', async () => {
+  const cwd = await mkTmpCwd();
+  const outside = await mkTmpCwd();
+  fs.writeFileSync(path.join(outside, 'keep.txt'), 'k');
+  fs.writeFileSync(path.join(outside, 'meta.json'), JSON.stringify(pageMeta('esc')));
+  const real = seedEntry(cwd, 'knowledge', 'real', pageMeta('real'));
+  fs.symlinkSync(outside, path.join(pagesDir(cwd), 'knowledge', 'esc'));
+  fs.symlinkSync(real, path.join(pagesDir(cwd), 'knowledge', 'alias'));
+  for (const id of ['esc', 'alias']) {
+    await expect(deleteEntry({ cwd, kind: 'knowledge', id })).rejects.toThrow(/outside/);
+    await expect(renameEntry({ cwd, kind: 'knowledge', id, title: 'z' })).rejects.toThrow(/outside/);
+  }
+  expect(fs.existsSync(path.join(outside, 'keep.txt'))).toBe(true);
+  expect(JSON.parse(fs.readFileSync(path.join(outside, 'meta.json'), 'utf8')).title).toBe('Old');
+  expect(fs.existsSync(real)).toBe(true);
+});
+
+test('renameEntry refuses an invalid title and a corrupt meta.json', async () => {
+  const cwd = await mkTmpCwd();
+  const dir = seedEntry(cwd, 'knowledge', 'alpha', pageMeta('alpha'));
+  await expect(renameEntry({ cwd, kind: 'knowledge', id: 'alpha', title: '' })).rejects.toThrow();
+  fs.writeFileSync(path.join(dir, 'meta.json'), '{"nope":1}');
+  await expect(renameEntry({ cwd, kind: 'knowledge', id: 'alpha', title: 'ok' })).rejects.toThrow(/meta/);
+});

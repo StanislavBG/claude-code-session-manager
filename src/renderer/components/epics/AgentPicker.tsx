@@ -37,6 +37,11 @@ export function groupAgentsByDepartment(agents: AgentPersona[]): Array<{ departm
   return [...known, ...unknown]
 }
 
+/** Option value for "no persona" (plain Claude); NewEpicCard maps it to agentType absent. */
+export const NO_AGENT = '__none__'
+const NONE_DOT = '#8a7a60'
+const NONE_ROLE = 'Plain Claude — no persona'
+
 function roleOf(agent: AgentPersona): string | null {
   return agent.title?.split(' — ')[1] || agent.description || null
 }
@@ -52,13 +57,30 @@ export function AgentPicker({
   agents,
   value,
   onChange,
+  allowNone = false,
 }: {
   agents: AgentPersona[]
   value: string
   onChange: (name: string) => void
+  allowNone?: boolean
 }) {
-  const selected = agents.find((a) => a.name === value) ?? agents[0] ?? null
-  const groups = groupAgentsByDepartment(agents)
+  const noneSelected = allowNone && (value === NO_AGENT || agents.length === 0)
+  const selected = noneSelected ? null : (agents.find((a) => a.name === value) ?? agents[0] ?? null)
+  const architect = agents.find((a) => a.name === 'architect') ?? null
+  const groups = groupAgentsByDepartment(agents.filter((a) => a.name !== 'architect'))
+  const renderOption = (a: AgentPersona) => {
+    const role = roleOf(a)
+    return (
+      <option
+        key={a.name}
+        value={a.name}
+        data-testid={`new-epic-agent-${a.name}`}
+        data-selected={a.name === selected?.name ? 'true' : 'false'}
+      >
+        {role ? `${a.name} — ${role}` : a.name}
+      </option>
+    )
+  }
 
   return (
     <div
@@ -66,7 +88,13 @@ export function AgentPicker({
       className="relative focus-within:ring-1 focus-within:ring-accent-muted"
     >
       <div className="flex h-[42px] min-w-0 items-center gap-2.5 rounded-[10px] border border-line bg-bg px-3.5">
-        {selected ? (
+        {noneSelected ? (
+          <>
+            <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: NONE_DOT }} />
+            <span className="font-mono text-[13px] font-semibold text-fg">None</span>
+            <span className="min-w-0 flex-1 truncate text-[12.5px] text-fg-faint">{NONE_ROLE}</span>
+          </>
+        ) : selected ? (
           <>
             <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: agentDot(selected.name) }} />
             <span className="font-mono text-[13px] font-semibold text-fg">{selected.name}</span>
@@ -81,25 +109,19 @@ export function AgentPicker({
         data-testid="new-epic-agent-select"
         aria-label="Agent"
         className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-        value={selected?.name ?? ''}
-        disabled={agents.length === 0}
+        value={noneSelected ? NO_AGENT : (selected?.name ?? '')}
+        disabled={!allowNone && agents.length === 0}
         onChange={(e) => onChange(e.target.value)}
       >
+        {architect && renderOption(architect)}
+        {allowNone && (
+          <option value={NO_AGENT} data-testid="new-epic-agent-none" data-selected={noneSelected ? 'true' : 'false'}>
+            None — plain Claude, no persona
+          </option>
+        )}
         {groups.map(({ department, agents: deptAgents }) => (
           <optgroup key={department} label={department}>
-            {deptAgents.map((a) => {
-              const role = roleOf(a)
-              return (
-                <option
-                  key={a.name}
-                  value={a.name}
-                  data-testid={`new-epic-agent-${a.name}`}
-                  data-selected={a.name === selected?.name ? 'true' : 'false'}
-                >
-                  {role ? `${a.name} — ${role}` : a.name}
-                </option>
-              )
-            })}
+            {deptAgents.map(renderOption)}
           </optgroup>
         ))}
       </select>

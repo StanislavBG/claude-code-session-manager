@@ -14,6 +14,7 @@ const { PrdWorkTypeSchema } = require('./lib/prd/workTypeLibrary.cjs');
 const { PERSONA_NAME_RE } = require('./agentLibrary.cjs');
 const { AgentPersonaSaveSchema } = require('./lib/persona-macro/agentPersonaSchema.cjs');
 const { MacroSaveSchema, MacroDeleteSchema, MacroSetProjectSchema, MacroInputSchema } = require('./lib/persona-macro/macroLibrary.cjs');
+const { MAX_SLOTS } = require('./lib/scheduler/sessionSlots.cjs');
 
 // ──────────────────────────────────────────── PTY
 const ptySpawn = z.object({
@@ -649,10 +650,10 @@ const setConfigSchema = z.object({
 
 // Machine-wide claude -p slot pool cap (sessionSlots.cjs) — deliberately its own
 // schema/channel rather than folded into setConfigSchema: it governs the shared
-// process pool, not any one project's scheduler config, and its range (0-10, 0
+// process pool, not any one project's scheduler config, and its range (0-MAX_SLOTS, 0
 // pauses new launches) is the single concurrency control.
 const setSessionSlotsSchema = z.object({
-  cap: z.number().int().min(0).max(10),
+  cap: z.number().int().min(0).max(MAX_SLOTS),
 }).strict();
 
 // ──────────────────────────────────────────── Agent Library

@@ -286,6 +286,36 @@ export interface MacroInput {
   options?: string[];
 }
 
+/** Background-build descriptor on a built-in macro. */
+export interface MacroJob {
+  estimateMinutes: number;
+  artifactPaths: string[];
+}
+
+export interface MacroJobDispatchInput {
+  cwd: string;
+  macroId: string;
+  epicId: string;
+  extraInstructions?: string;
+}
+
+export type MacroJobDispatchResult =
+  | { ok: true; slug: string; epicId: string }
+  | { ok: false; error: string; activeSlug?: string };
+
+export type MacroJobState = 'queued' | 'running' | 'done' | 'failed';
+
+export interface MacroJobStatus {
+  macroId: string;
+  epicId: string | null;
+  slug: string;
+  state: MacroJobState;
+  status: string;
+  reason: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
 /** One user-defined sidebar HOT KEYS macro (macroLibrary.cjs). `projects` = absolute cwds or `'*'` (every project). */
 export interface Macro {
   id: string;
@@ -305,6 +335,8 @@ export interface Macro {
   inputs?: MacroInput[];
   /** Projects ('*' or absolute cwds) this macro's session may start work in without approval. */
   autoStartTargets?: string[];
+  /** Set only on built-ins whose press builds in the background. */
+  job?: MacroJob;
 }
 
 /** Omit `id` to create; set it to update an existing macro. */
@@ -667,6 +699,7 @@ export interface ScheduleJobRuntime {
 }
 
 export interface ScheduleJob {
+  macroId?: string | null;
   slug: string;
   title: string;
   cwd: string | null;
@@ -1880,6 +1913,10 @@ export interface SessionManagerAPI {
     delete: (payload: { id: string }) => Promise<{ ok: boolean }>;
     /** Add/remove one project cwd. A macro shown in every project (`'*'`) cannot be narrowed: `{ ok: false, error: 'macro is shown in every project' }`. */
     setProject: (payload: { id: string; cwd: string; enabled: boolean }) => Promise<{ ok: true; macro: Macro } | { ok: false; error: string }>;
+    /** Dispatch a built-in macro's background build as a scheduler job. */
+    dispatchJob: (payload: MacroJobDispatchInput) => Promise<MacroJobDispatchResult>;
+    /** Status of this project's macro background builds. */
+    jobStatus: (payload: { cwd: string }) => Promise<MacroJobStatus[]>;
     /** Fires after any save/delete/setProject — re-fetch list(). */
     onChanged: (handler: () => void) => () => void;
   };

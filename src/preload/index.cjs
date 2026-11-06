@@ -137,6 +137,8 @@ contextBridge.exposeInMainWorld('api', {
     save: (payload) => ipcRenderer.invoke('macros:save', payload),
     delete: (payload) => ipcRenderer.invoke('macros:delete', payload),
     setProject: (payload) => ipcRenderer.invoke('macros:set-project', payload),
+    dispatchJob: (payload) => ipcRenderer.invoke('macros:dispatch-job', payload),
+    jobStatus: (payload) => ipcRenderer.invoke('macros:job-status', payload),
     // Fired after any save/delete/set-project so every subscriber re-fetches list().
     onChanged: (handler) => {
       const listener = () => handler();

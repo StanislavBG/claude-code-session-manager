@@ -442,6 +442,20 @@
  },
  {
   "ns": "macros",
+  "method": "dispatchJob",
+  "channel": "macros:dispatch-job",
+  "kind": "invoke",
+  "remote": "mutate"
+ },
+ {
+  "ns": "macros",
+  "method": "jobStatus",
+  "channel": "macros:job-status",
+  "kind": "invoke",
+  "remote": "read"
+ },
+ {
+  "ns": "macros",
   "method": "onChanged",
   "channel": "macros:changed",
   "kind": "on",

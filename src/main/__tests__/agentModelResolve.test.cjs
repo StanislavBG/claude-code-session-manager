@@ -333,3 +333,39 @@ test('an Epic-level model override beats the persona model; an Epic without the 
   expect(resolveEpicModel({ cwd, claudeSessionId: 's-old', deps })).toBe('haiku');
   expect(resolveEpicModel({ cwd, claudeSessionId: 's-inh', deps })).toBe('haiku');
 });
+
+// Shipped-seed exemption: an unedited app-shipped persona body is passed whole.
+const { AGENT_BODY_CHAR_CAP, shippedBodyHash } = require('../lib/claude/agentModelResolve.cjs');
+const { personaBodyHash } = require('../seedAgentPersonas.cjs');
+const { splitFrontmatter } = require('../lib/prd/prdFrontmatter.cjs');
+const DEMO_PATH = path.join(__dirname, '..', '..', 'seed', 'agents', 'demo-video-builder.md');
+const demoText = () => fs.readFileSync(DEMO_PATH, 'utf8');
+const demoBody = () => splitFrontmatter(demoText().replace(/\r\n/g, '\n')).body.trim();
+const spawnWith = (agentType, text) => resolvePrdPersonaForSpawn({
+  cwd: '/irrelevant',
+  agentType,
+  deps: { getPersonaBody: async () => ({ path: `/x/${agentType}.md`, text }) },
+});
+
+test('a shipped persona body (demo-video-builder) is passed whole, uncapped', async () => {
+  const result = await spawnWith('demo-video-builder', demoText());
+  expect(result.systemPrompt).toBe(demoBody());
+  expect(result.systemPrompt.length).toBeGreaterThan(AGENT_BODY_CHAR_CAP);
+  expect(result.systemPrompt).not.toContain('Truncated —');
+});
+
+test('a shipped body plus one appended line is capped with the notice', async () => {
+  const result = await spawnWith('demo-video-builder', `${demoText()}\nextra line\n`);
+  expect(result.systemPrompt.startsWith(demoBody().slice(0, AGENT_BODY_CHAR_CAP))).toBe(true);
+  expect(result.systemPrompt).toContain('Truncated —');
+  expect(result.systemPrompt.length).toBeLessThan(AGENT_BODY_CHAR_CAP + 300);
+});
+
+test('a 7000-char persona with no manifest entry stays capped', async () => {
+  const result = await spawnWith('not-shipped-persona', 'y'.repeat(7000));
+  expect(result.systemPrompt).toContain('Truncated —');
+});
+
+test('shippedBodyHash is the same digest as personaBodyHash', () => {
+  expect(shippedBodyHash(demoBody())).toBe(personaBodyHash(demoText()));
+});

@@ -146,10 +146,15 @@ describe('Epic worktree isolation UI (PRD 1035)', () => {
     root = null
   })
 
-  it('EpicDetail shows no compact meta line when the Epic has no worktree, no branch, and no agent', async () => {
+  it('EpicDetail meta line shows the "No agent" chip, no branch and no "Merge to main" when the Epic has no worktree, no branch, and no agent', async () => {
     installWindowApiMock()
     const { el } = await mountActiveEpicWithWorktree(undefined)
-    expect(el.querySelector('[data-testid="epic-detail-meta-line"]')).toBeNull()
+    const metaLine = el.querySelector('[data-testid="epic-detail-meta-line"]')
+    expect(metaLine).not.toBeNull()
+    expect(metaLine!.textContent).toContain('No agent')
+    expect(metaLine!.textContent).not.toContain('sm-epic/')
+    expect(el.querySelector('[data-testid="epic-merge-to-main"]')).toBeNull()
+    expect(el.textContent).not.toContain('Merge to main')
   })
 
   it('EpicDetail shows the branch in the compact meta line and NO "Merge to main" button when worktree.status is active', async () => {

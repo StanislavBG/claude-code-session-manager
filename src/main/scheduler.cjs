@@ -1802,6 +1802,7 @@ async function reconcilePass(state) {
         ?? resolveOriginSessionId(refreshedCwd, p.epicId ?? reconcileSourcePromptId(job, p.sourcePromptId)),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? job.agentType ?? null,
+      macroId: p.macroId ?? job.macroId ?? null,
     };
     // Adopt path: a row parked 'quarantined' (no createdVia provenance when
     // discovered) whose PRD file now carries a stamp — written via the
@@ -1925,6 +1926,7 @@ async function reconcilePass(state) {
       originSessionId: inv.row?.originSessionId ?? resolveOriginSessionId(repairedCwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? inv.row?.agentType ?? null,
+      macroId: p.macroId ?? inv.row?.macroId ?? null,
     };
     const reason = `reconcile: repaired invalid status ${JSON.stringify(oldStatus)}`;
     // A repair is not a lifecycle transition — the corrupted `status` was
@@ -2076,6 +2078,7 @@ async function reconcilePass(state) {
       originSessionId: resolveOriginSessionId(discoveredCwd, p.epicId ?? p.sourcePromptId),
       bodyPreview: p.body.split('\n').slice(0, 6).join('\n'),
       agentType: p.agentType ?? null,
+      macroId: p.macroId ?? null,
       status: 'pending',
       // Enqueue time (PRD 1086/1087): the cross-project fairness tiebreak and
       // the starvation escalation both need a provable age for a pending row;
@@ -11160,6 +11163,7 @@ async function listPrdsInternal({ cwd: rawCwd } = {}) {
           epicId: parsed.epicId ?? null,
           dependsOn: parsed.dependsOn ?? null,
           agentType: parsed.agentType ?? null,
+          macroId: parsed.macroId ?? null,
           disposition: parsed.disposition ?? null,
           planId: parsed.planId ?? null,
           mtimeMs: stat.mtimeMs,

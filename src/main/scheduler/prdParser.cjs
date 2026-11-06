@@ -131,6 +131,8 @@ async function parsePrdRaw(filePath) {
     disposition: (fm.disposition === 'append' || fm.disposition === 'new-head') ? fm.disposition : null,
     // Durable wave identity (createPrd-stamped); malformed values read as absent.
     planId: (typeof fm.planId === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(fm.planId)) ? fm.planId : null,
+    // Macro press that minted this PRD (prdFrontmatter.cjs MACRO_ID_RE); malformed reads as absent.
+    macroId: (typeof fm.macroId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(fm.macroId.trim())) ? fm.macroId.trim() : null,
     // Opt-in exclusive-lease flag (PRD 1107, quietMachineLease.cjs +
     // schedulerBatch.cjs's pickNextBatch). Only a literal `true` opts in —
     // matches prdFrontmatter.cjs's applyKey semantics for this field.

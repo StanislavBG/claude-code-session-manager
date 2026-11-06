@@ -95,6 +95,10 @@ test('aliases say so and no page text invites <script>', () => {
     expect(textOf(n)).not.toMatch(/<style>\/<script>/);
     expect(textOf(n).replace(/<script src>/g, '')).not.toContain('<script');
   }
+  expect(textOf('project_home_write')).toContain('knowledge/overview');
+  expect(textOf('project_demo_video_write')).toContain('videos/');
+  expect(textOf('project_home_write')).not.toContain('home.html');
+  for (const e of MCP_TOOL_CATALOG) expect(composeDescription(e)).not.toContain('The only write path for the demo video');
   expect(entry('project_page_write').exampleArgs).toHaveProperty('pageId');
   expect(entry('project_video_write').exampleArgs).toHaveProperty('lengthS');
 });

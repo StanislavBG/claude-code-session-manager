@@ -306,7 +306,7 @@ const MCP_TOOL_CATALOG = [
     name: 'project_home_write',
     group: 'project-home',
     purpose: "ALIAS of project_page_write for the Overview page: write this project's Project Home Overview page — ONE self-contained HTML document — to "
-      + "session-manager-operations/project-pages/home.html via the session-manager app's admin API. "
+      + "session-manager-operations/project-pages/knowledge/overview/ via the session-manager app's admin API. "
       + 'Prefer project_page_write for any new knowledge page.',
     whenToUse: 'Use when asked to generate or refresh the project home Overview page. Compose the whole page yourself '
       + '(inline <style> only — scripts never run in a page; data: URIs for assets) from what is really true about the project, then '
@@ -362,9 +362,9 @@ const MCP_TOOL_CATALOG = [
   {
     name: 'project_demo_video_write',
     group: 'project-home',
-    purpose: "ALIAS of project_video_write that adds a project-demo video: write this project's demo video (30 seconds or 1 minute) — ONE self-contained HTML/JS document — to "
-      + "session-manager-operations/project-pages/demo-video/index.html via the session-manager app's admin API. "
-      + 'The only write path for the demo video.',
+    purpose: "ALIAS of project_video_write that adds a project-demo video: write this project's demo video (30 seconds or 1 minute) — ONE self-contained HTML/JS document — as a new "
+      + "project-demo entry under session-manager-operations/project-pages/videos/<id>/ via the session-manager app's admin API. "
+      + 'project_video_write is the primary video tool; use this alias only for a quick project-demo.',
     whenToUse: 'Use when asked to generate or refresh the demo video. Compose the whole document yourself '
       + '(inline <style>/<script>, data: URIs for assets, CSS/JS-driven animation) from what is really true about '
       + 'the project, declare its length with <meta name="sm-demo-duration" content="N"> (5-60 seconds), then '

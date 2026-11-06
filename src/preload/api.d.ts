@@ -2262,7 +2262,7 @@ export interface SessionManagerAPI {
     update: (cwd: string, patch: ProjectBriefPatch) => Promise<ProjectBriefUpdateResult>;
   };
   projectPages: {
-    /** Read project-pages/home.html (`{html: null, mtimeMs: null}` if it does not exist yet). Never fires an LLM call. */
+    /** Read the project-pages library (knowledge/<id>/ pages and videos/<id>/ videos, each with its meta) as a `ProjectPagesGetResult`; empty lists if nothing exists yet. Never fires an LLM call. */
     get: (cwd: string) => Promise<ProjectPagesGetResult>;
     /** Start pushing `onChanged` events for this cwd's output dir. Refcounted per cwd; `ok:false` (reason 'ephemeral'|'invalid-cwd') means no live updates are possible, not an error. */
     watch: (cwd: string) => Promise<{ ok: boolean; reason?: 'ephemeral' | 'invalid-cwd' }>;
@@ -2272,7 +2272,7 @@ export interface SessionManagerAPI {
     rename: (cwd: string, kind: 'knowledge' | 'video', id: string, title: string) => Promise<{ ok: true; title: string }>;
     /** Remove exactly one library entry folder. Rejects on a bad id or missing entry. */
     delete: (cwd: string, kind: 'knowledge' | 'video', id: string) => Promise<{ ok: true }>;
-    /** Fires whenever a watched cwd's home.html is added/changed/removed, carrying the freshly read result. */
+    /** Fires whenever a watched cwd's knowledge/videos library is added/changed/removed, carrying the freshly read library result. */
     onChanged: (handler: (payload: { cwd: string } & ProjectPagesGetResult) => void) => () => void;
   };
   promptSessionTranscript: {

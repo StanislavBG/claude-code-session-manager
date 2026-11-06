@@ -14,18 +14,15 @@ import { useChat } from '../../state/chat'
 import { toast } from '../../state/toast'
 import { computeGroundingBoard, summarizeGroundingBoard, type GroundingGroup } from '../../lib/groundingBoard'
 import { agentTagDef } from '../../lib/agentTagDefs'
-import { tagLibraryEntry, TAG_GROUP_ORDER, type EpicTag } from '../../lib/tagLibrary'
-import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, type ContextInjectionKey } from '../../lib/contextInjections'
+import { tagLibraryEntry, NO_MISSION, type EpicTag } from '../../lib/tagLibrary'
+import { missionTagsForAgent } from '../../lib/missionTags'
+import { CONTEXT_INJECTIONS, CONTEXT_INJECTION_ORDER, resolveContextInjections, type ContextInjectionKey } from '../../lib/contextInjections'
 import { Badge } from '../ui/Badge'
 import { Tooltip } from '../ui/Tooltip'
 import type { AgentPersona, DelegationReadiness, DelegationReadinessCheck, InstallGuardResult } from '../../../preload/api'
-import { AgentPicker, agentDot } from './AgentPicker'
+import { AgentPicker, agentDot, NO_AGENT } from './AgentPicker'
 
 const SUBTITLE_DETAIL = 'One goal per Epic — fixed for the life of its session. The title and objective are sent as the first message the moment you start it, so the agent is already working when it opens.'
-
-/** Missions offered when the selected persona declares no `tags:` of its own
- *  (or the Agent Library is empty) — the three general-purpose ones. */
-const FALLBACK_MISSION_TAGS: EpicTag[] = ['feature', 'bug', 'discussion']
 
 // The readiness checks Session Manager can close itself, one press each. Keyed
 // by the check's fixAction; the two installers share one result shape and one
@@ -84,39 +81,6 @@ const GUARD_RESTART_MESSAGE =
   'This window is running an older Session Manager than the app files on disk — restart Session Manager'
 
 /**
- * Default on/off state for every Context Injection, given the currently
- * selected Mission tag. `general-behavior` is the universal floor and is
- * always on. `delegate-implementation` defaults on only for `feature`/`bug`
- * — the missions whose own Mission template already tells the agent to
- * queue work via /develop — and off otherwise (e.g. `discussion`, where no
- * implementation is expected). A human toggle always overrides this default
- * (see `injectionOverrides` below); this function only supplies the
- * fallback for keys the human hasn't touched.
- */
-function defaultContextInjectionsForTag(t: EpicTag): Record<ContextInjectionKey, boolean> {
-  return Object.fromEntries(
-    CONTEXT_INJECTION_ORDER.map((k) => [k, k === 'delegate-implementation' ? t === 'feature' || t === 'bug' : true]),
-  ) as Record<ContextInjectionKey, boolean>
-}
-
-/**
- * Which missions this Epic may be given, derived from the SELECTED persona's
- * own `tags:` frontmatter (AgentPersona.tags — the same many-to-many
- * membership TagLibrary.tsx and AgentLibrary.tsx both edit through
- * savePersona) rather than a hardcoded 3-tag list. Agent and Mission remain
- * two independent axes, but not every mission belongs to every actor:
- * `builder` carries only `build`, `project-home-builder` only
- * `project-home-builder`, `architect` feature/bug/discussion — so the pills
- * change when the agent changes. Unknown tag strings in a persona file are
- * dropped rather than crashing tagLibraryEntry(); labels and mission text
- * still come from TAG_LIBRARY / agentTagDef, never a second copy.
- */
-function missionTagsForAgent(agent: AgentPersona | null): EpicTag[] {
-  const known = (agent?.tags ?? []).filter((t): t is EpicTag => TAG_GROUP_ORDER.includes(t as EpicTag))
-  return known.length ? known : FALLBACK_MISSION_TAGS
-}
-
-/**
  * Centered New Epic creation card — replaces ProjectsLanding's "New starting
  * prompt" form, rendered in the right pane (not a modal). Two independent
  * selections ground the session: AGENT (who runs it — Agent Library, left
@@ -149,7 +113,7 @@ export function NewEpicCard({
   const [cwd, setCwd] = useState('')
   const [title, setTitle] = useState('')
   const [goal, setGoal] = useState('')
-  const [tag, setTag] = useState<NonNullable<PromptSession['tag']>>('feature')
+  const [tag, setTag] = useState<EpicTag | null>('feature')
   // '' only until the Agent Library resolves (or when it is genuinely empty) —
   // there is no "Default" pseudo-agent, the real 'architect' persona is the
   // default pick, so the pinned "who is working" tile always names a real one.
@@ -195,10 +159,8 @@ export function NewEpicCard({
   // synchronization effect fighting over it — a tag change simply changes
   // what an UNtouched key falls back to.
   const [injectionOverrides, setInjectionOverrides] = useState<Partial<Record<ContextInjectionKey, boolean>>>({})
-  const contextInjectionsOn = useMemo<Record<ContextInjectionKey, boolean>>(
-    () => ({ ...defaultContextInjectionsForTag(tag), ...injectionOverrides }),
-    [tag, injectionOverrides],
-  )
+  // null = the human has not touched the Develop loop checkbox; once set, it always wins.
+  const [developLoopOverride, setDevelopLoopOverride] = useState<boolean | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -207,6 +169,7 @@ export function NewEpicCard({
         const list = await window.api.agents.listPersonas()
         if (!cancelled) {
           setAgents(list)
+          if (!agentTouchedRef.current && list.length === 0) setAgentName(NO_AGENT)
           const preferred = list.find((a) => a.name === 'architect') ?? list[0]
           if (!agentTouchedRef.current && preferred) setAgentName(preferred.name)
         }
@@ -231,9 +194,15 @@ export function NewEpicCard({
     return () => { cancelled = true }
   }, [])
 
-  const selectedAgent = agents?.find((a) => a.name === agentName) ?? null
+  const agentless = agentName === NO_AGENT
+  const selectedAgent = agentless ? null : agents?.find((a) => a.name === agentName) ?? null
   const missionTags = missionTagsForAgent(selectedAgent)
   const missionKey = missionTags.join(',')
+  const developLoop = developLoopOverride ?? !(agentless && tag === null)
+  const contextInjectionsOn = useMemo<Record<ContextInjectionKey, boolean>>(
+    () => resolveContextInjections({ tag, agentless, developLoop, overrides: injectionOverrides }),
+    [tag, agentless, developLoop, injectionOverrides],
+  )
 
   // Missions are conditional on the Actor, so switching agent can invalidate
   // the currently-picked mission (architect's 'feature' -> builder, which
@@ -241,8 +210,13 @@ export function NewEpicCard({
   // one isn't one of theirs.
   useEffect(() => {
     const allowed = missionKey.split(',') as EpicTag[]
-    if (!allowed.includes(tag)) setTag(allowed[0])
+    if (tag !== null && !allowed.includes(tag)) setTag(allowed[0])
   }, [missionKey])
+
+  // Develop loop off: a mission that needs the loop cannot stay selected.
+  useEffect(() => {
+    if (!developLoop && tag !== null && tagLibraryEntry(tag).requiresDevelopLoop) setTag(null)
+  }, [developLoop, tag])
 
   // Epics are always created from within a tab's project context, and that
   // context is the tab's cwd ALONE — never filtered through the
@@ -355,6 +329,7 @@ export function NewEpicCard({
     setEffortOverride('')
     setBoard(null)
     setInjectionOverrides({})
+    setDevelopLoopOverride(null)
     att.clear()
   }
 
@@ -402,7 +377,7 @@ export function NewEpicCard({
       title,
       goal,
       referencePaths,
-      tag,
+      tag: tag ?? undefined,
       agentName: selectedAgent?.name,
       agentDescription: selectedAgent?.description ?? undefined,
       agentBody: personaBody?.text,
@@ -420,10 +395,10 @@ export function NewEpicCard({
     // openingPrompt/sections are persisted on the Epic (not just sent into
     // chat below) so its first turn can render as a structured AIM briefing
     // card rather than only a flat prose bubble — see EpicIntakeCard.
-    const runtime = { model: modelOverride || undefined, effort: effortOverride || undefined }
+    const runtime = { model: modelOverride || undefined, effort: effortOverride || undefined, ...(developLoop ? {} : { developLoop: false }) }
     const session = selectedAgent
-      ? await createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard', selectedAgent.name, openingPrompt, sections, runtime)
-      : await createPromptSession(effectiveCwd, goalText, tag, 'NewEpicCard', undefined, openingPrompt, sections, runtime)
+      ? await createPromptSession(effectiveCwd, goalText, tag ?? undefined, 'NewEpicCard', selectedAgent.name, openingPrompt, sections, runtime)
+      : await createPromptSession(effectiveCwd, goalText, tag ?? undefined, 'NewEpicCard', undefined, openingPrompt, sections, runtime)
     approveProposed(session.id, 'NewEpicCard')
     // Send the objective straight into the Epic's session, so it opens already
     // waiting on the agent — the user has just typed the goal, there is
@@ -449,7 +424,7 @@ export function NewEpicCard({
     onCancel()
   }
 
-  const selectedTagMission = agentTagDef(tag).description
+  const selectedTagMission = tag ? agentTagDef(tag).description : NO_MISSION.description
   const sourceCount = board ? board.reduce((n, g) => n + g.items.filter((i) => i.present).length, 0) : 0
   const tokenTotal = board ? board.reduce((n, g) => n + g.items.reduce((s, i) => s + i.tokK, 0), 0) : 0
 
@@ -581,6 +556,7 @@ export function NewEpicCard({
                 <AgentPicker
                   agents={agents ?? []}
                   value={agentName}
+                  allowNone
                   onChange={(name) => {
                     agentTouchedRef.current = true
                     setAgentName(name)
@@ -597,14 +573,17 @@ export function NewEpicCard({
                 <div className="inline-flex rounded-[10px] border border-line bg-bg p-0.5">
                   {missionTags.map((t) => {
                     const on = tag === t
+                    const needsLoop = !developLoop && tagLibraryEntry(t).requiresDevelopLoop
                     return (
                       <button
                         key={t}
                         type="button"
                         data-testid={`new-epic-kind-${t}`}
                         aria-pressed={on}
+                        disabled={needsLoop}
+                        title={needsLoop ? 'Needs the develop loop' : undefined}
                         onClick={() => setTag(t)}
-                        className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                        className={`rounded-md px-2.5 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
                           on ? 'bg-bg-hi text-fg font-semibold shadow-sm' : 'text-fg-dim'
                         }`}
                       >
@@ -612,12 +591,51 @@ export function NewEpicCard({
                       </button>
                     )
                   })}
+                  <button
+                    type="button"
+                    data-testid="new-epic-kind-none"
+                    aria-pressed={tag === null}
+                    onClick={() => setTag(null)}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium ${
+                      tag === null ? 'bg-bg-hi text-fg font-semibold shadow-sm' : 'text-fg-dim'
+                    }`}
+                  >
+                    {NO_MISSION.label}
+                  </button>
                 </div>
               </div>
             </div>
             <p className="mb-3.5 text-[12.5px] leading-[1.5] text-fg-dim" data-testid="new-epic-mission-description">
               {selectedTagMission}
             </p>
+
+            <label className="mb-1 flex cursor-pointer items-start gap-2">
+              <input
+                type="checkbox"
+                data-testid="new-epic-develop-loop"
+                checked={developLoop}
+                onChange={(e) => setDevelopLoopOverride(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="text-[12.5px] font-medium text-fg">Develop loop</span>
+                <span className="block text-[11.5px] leading-[1.4] text-fg-faint">
+                  Off = plain Claude: no /develop skill, no PRD queueing, no delegation guard.
+                </span>
+              </span>
+            </label>
+            {!developLoop && selectedAgent && (selectedAgent.tags ?? []).some((t) => t === 'feature' || t === 'bug') && (
+              <div
+                data-testid="new-epic-develop-loop-warning"
+                className="mb-2.5 rounded-md border border-honey/30 bg-honey/15 px-2.5 py-2 text-[11.5px] leading-[1.5]"
+              >
+                <Badge tone="warn">Develop loop off</Badge>
+                <span className="ml-1.5 text-fg-dim">
+                  {selectedAgent.name} plans through /develop; with the develop loop off it cannot queue PRDs.
+                </span>
+              </div>
+            )}
+            <div className="mb-2.5" />
 
             <input
               data-testid="new-epic-title"
@@ -720,7 +738,7 @@ export function NewEpicCard({
                   {selectedAgent?.name ?? 'default'}
                 </span>
                 <span className="text-fg-faint">·</span>
-                <span className="rounded-full bg-fg-faint px-2 py-0.5 font-mono text-[11px] font-semibold text-bg-hi">#{tag}</span>
+                <span className="rounded-full bg-fg-faint px-2 py-0.5 font-mono text-[11px] font-semibold text-bg-hi">#{tag ?? 'none'}</span>
                 <span className="ml-auto font-mono text-[11px] text-fg-faint">{tokenTotal.toFixed(1)}k of 200k window (estimate)</span>
               </div>
               <div className="mt-1 text-sm font-semibold text-fg">{title || 'Untitled session'}</div>
@@ -730,9 +748,18 @@ export function NewEpicCard({
                   explicitly, so it's obvious at Epic-creation time rather than only
                   discoverable in the separate Tag Library nav tab. */}
               <div className="mt-1.5 border-t border-rule pt-1.5 font-mono text-[11px] text-fg-faint">
-                /develop: <span className="text-fg-dim">{tagLibraryEntry(tag).developsVia}</span>
-                {' · '}
-                {tagLibraryEntry(tag).developEagerness}
+                /develop:{' '}
+                {!developLoop ? (
+                  <span className="text-fg-dim">off — started without the develop loop</span>
+                ) : tag === null ? (
+                  <span className="text-fg-dim">none (no mission)</span>
+                ) : (
+                  <>
+                    <span className="text-fg-dim">{tagLibraryEntry(tag).developsVia}</span>
+                    {' · '}
+                    {tagLibraryEntry(tag).developEagerness}
+                  </>
+                )}
               </div>
             </div>
 
@@ -772,6 +799,7 @@ export function NewEpicCard({
                     <input
                       type="checkbox"
                       checked={on}
+                      disabled={key === 'delegate-implementation' && !developLoop}
                       onChange={(e) => setInjectionOverrides((prev) => ({ ...prev, [key]: e.target.checked }))}
                       data-testid={`context-injection-toggle-${key}`}
                       className="mt-0.5"

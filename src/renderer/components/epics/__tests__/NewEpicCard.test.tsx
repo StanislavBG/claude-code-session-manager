@@ -1076,3 +1076,70 @@ describe('NewEpicCard per-Epic model / effort override', () => {
     expect(createPayload()).toMatchObject({ model: 'claude-opus-5', effort: 'ultra' })
   })
 })
+
+describe('NewEpicCard None agent / None mission / develop loop', () => {
+  const persona = (name: string, tags: AgentPersona['tags']): AgentPersona => ({ name, description: `${name}.`, tools: [], model: null, effort: null, color: null, tags, projects: [], action: null, actionLabel: null, path: '', body: '', overridingProjects: [] })
+  const q = (el: HTMLElement, id: string) => el.querySelector(`[data-testid="${id}"]`) as HTMLElement
+  const click = (n: Element) => act(() => n.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+  async function mountReady(personas: AgentPersona[]) {
+    listPersonasSpy.mockResolvedValue(personas)
+    const el = mount(<NewEpicCard onCreated={vi.fn()} onCancel={vi.fn()} />)
+    await act(async () => {})
+    return el
+  }
+  async function start(el: HTMLElement, title = '', goal = 'Fix it') {
+    if (title) act(() => setNativeValue(q(el, 'new-epic-title') as HTMLInputElement, title))
+    act(() => setNativeValue(q(el, 'new-epic-goal') as HTMLTextAreaElement, goal))
+    click(q(el, 'new-epic-create'))
+    await act(async () => {})
+  }
+
+  it('Agent None + Mission None + loop off starts plain: goal-only prompt, no agentType/tag, developLoop false', async () => {
+    const el = await mountReady([persona('architect', ['feature', 'bug', 'discussion'])])
+    pickAgent(el, '__none__')
+    click(q(el, 'new-epic-kind-none'))
+    expect((q(el, 'new-epic-develop-loop') as HTMLInputElement).checked).toBe(false)
+    await start(el, 'My title', 'Do the thing')
+    const args = createPromptSessionSpy.mock.calls[0]
+    expect(args[2]).toBeUndefined()
+    expect(args[4]).toBeUndefined()
+    expect(args[7]).toMatchObject({ developLoop: false })
+    expect(sendSpy.mock.calls[0][0].prompt).toBe('Goal: My title\n\nDo the thing')
+  })
+
+  it('develop loop defaults on, off for None+None, and a human toggle sticks', async () => {
+    const el = await mountReady([persona('architect', ['feature', 'bug', 'discussion'])])
+    const box = () => q(el, 'new-epic-develop-loop') as HTMLInputElement
+    expect(box().checked).toBe(true)
+    pickAgent(el, '__none__')
+    click(q(el, 'new-epic-kind-none'))
+    expect(box().checked).toBe(false)
+    click(box())
+    expect(box().checked).toBe(true)
+    pickAgent(el, 'architect')
+    pickAgent(el, '__none__')
+    expect(box().checked).toBe(true)
+  })
+
+  it('loop off disables loop-requiring missions, snaps a selected one to None, disables delegation and warns', async () => {
+    const el = await mountReady([persona('architect', ['feature', 'bug', 'discussion'])])
+    expect(q(el, 'new-epic-kind-feature').getAttribute('aria-pressed')).toBe('true')
+    click(q(el, 'new-epic-develop-loop'))
+    const feature = q(el, 'new-epic-kind-feature') as HTMLButtonElement
+    expect(feature.disabled).toBe(true)
+    expect(feature.title).toBe('Needs the develop loop')
+    expect(q(el, 'new-epic-kind-none').getAttribute('aria-pressed')).toBe('true')
+    expect(q(el, 'new-epic-develop-loop-warning').textContent).toContain('architect plans through /develop')
+    click(q(el, 'new-epic-flip-to-grounding'))
+    const deleg = q(el, 'context-injection-toggle-delegate-implementation') as HTMLInputElement
+    expect(deleg.disabled).toBe(true)
+    expect(deleg.checked).toBe(false)
+  })
+
+  it('default architect + Feature carries no developLoop key', async () => {
+    const el = await mountReady([persona('architect', ['feature', 'bug', 'discussion'])])
+    await start(el)
+    expect('developLoop' in (createPromptSessionSpy.mock.calls[0][7] as object)).toBe(false)
+    expect(createPromptSessionSpy.mock.calls[0][2]).toBe('feature')
+  })
+})
